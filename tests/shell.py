@@ -6,6 +6,7 @@ import os
 import pty
 import resource
 import select
+import shlex
 import signal
 import subprocess
 import sys
@@ -54,6 +55,31 @@ class ShellTests(unittest.TestCase):
             self.compare("exit invalid", 2)
         else:
             self.assertEqual(self.command(TONARI, "exit invalid").returncode, 2)
+
+    def test_shell_word_escapes_preserve_argv(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        source = r"""set -- '' a\ b 'a\b' 'don'\''t' "\$v" "\`" "\\x" "\q" \" $'\'\\' \
+'雪'🌱 a\
+b "c\
+d" $'x\ty\nz' $'\303\251\xC3\xA9' $'a\0discard'b
+/bin/sh -c 'printf "%s\0" "$#" "$@"' sh "$@" """
+        words = ["", "a b", "a\\b", "don't", "$v", "`", "\\x", "\\q", '"', "'\\",
+                 "雪🌱", "ab", "cd", "x\ty\nz", "éé", "ab"]
+        expected = b"\0".join(w.encode() for w in [str(len(words)), *words]) + b"\0"
+        self.compare(source, 0, expected)
+        if int(self.command(BASH, 'echo "${BASH_VERSINFO[0]}"').stdout) >= 5:
+            self.compare(r"""printf '%s\0' $'\u96EA\U0001F331'""", 0, "雪🌱\0".encode())
+
+    def test_printf_q_round_trip(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        words = ["", "a b", "\t\n", "\\", "'", '"', "`", "$x", "$(echo oops)", "a; b", "*?[", "雪🌱"]
+        source = r"""for w do printf -v encoded '%q' "$w"; eval "set -- $encoded"
+printf '%s\0' "$#" "$@"; done"""
+        expected = b"".join(b"1\0" + word.encode() + b"\0" for word in words)
+        for shell in (BASH, TONARI):
+            with self.subTest(shell=shell):
+                p = self.command(shell, source, "sh", *words)
+                self.assertEqual((p.returncode, p.stdout, p.stderr), (0, expected, b""))
 
     def test_pipelines(self):
         self.compare("printf abc | cat | cat", 0, b"abc")
@@ -410,6 +436,90 @@ class ShellTests(unittest.TestCase):
         result = self.command(TONARI, "shopt -s dotglob; printf '<%s>' item-000*.txt .*")
         self.assertEqual((result.returncode, result.stdout, result.stderr),
                          (0, "<item-000雪.txt><.hidden>".encode(), b""))
+
+    def test_glob_escaping_matches_bash_argv(self):
+        symbols = ["*", "?", "[", "]", "!", "-", "^", ":", "=", ".", "\\", "a", "b", "z",
+                   " ", "\t", "\n", "雪", "😀", "$", "'", '"', "*?", "[]", "\\*", "\\?", "x\\", "[a]", "a-b"]
+        for value in symbols:
+            for name in [value, f"x{value}y.txt", f"xx{value}zz.txt", f"{value}at.ext"]:
+                if name != ".":
+                    (self.cwd / name).touch()
+        for name in ["x*y", "xxy", "x\\y", "x\\*y", "a\\b", "ab", "x]yz", "x[yz", "x-*", "x\\-q"]:
+            (self.cwd / name).touch()
+
+        cases = []
+        for value in symbols:
+            double = '"' + "".join("\\" + c if c in '\\"$`' else c for c in value) + '"'
+            escaped = "".join("\\" + c if c != "\n" else "'\n'" for c in value)
+            for word in [shlex.quote(value), double, escaped, '"$s"', '$s']:
+                for left, right in [("", ""), ("x*", "*txt"), ("x", "*"), ("", "*.ext"), ("x[", "]*.txt")]:
+                    cases.append((value, left + word + right))
+        for value in [r"\*", r"\?", r"\[", r"\\", r"x\*y", r"x\*y*", r"*\\*", r"x\\*", r"x\?",
+                      r"x\[", r"x\y", r"x\*", r"\a", r"\\*", r"\**", r"\\\*", r"\\a", r"x\\y", r"x\$\[\]*"]:
+            for word in ['$s', '"$s"', '$s*', '"$s"*', 'x*"$s"*', '"$s""?"*']:
+                cases.append((value, word))
+
+        # Batch subprocesses and include the argument count so empty argv and
+        # one empty argument remain distinguishable. NUL cannot occur in a filename.
+        self.env.pop("LC_ALL")
+        self.env["LC_COLLATE"] = "C"
+        for ctype in ["C", "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"]:
+            self.env["LC_CTYPE"] = ctype
+            for offset in range(0, len(cases), 60):
+                batch = cases[offset:offset + 60]
+                source = "\n".join(f"s={shlex.quote(v)}; set -- {word}; " +
+                                   r"""printf '%s\0' "$#" "$@" '<end>' """ for v, word in batch)
+                records = []
+                for shell in (BASH, TONARI):
+                    proc = self.command(shell, source)
+                    self.assertEqual((proc.returncode, proc.stderr), (0, b""))
+                    rows = proc.stdout.split(b"\0<end>\0")
+                    self.assertEqual(rows.pop(), b"")
+                    self.assertEqual(len(rows), len(batch))
+                    records.append(rows)
+                for case, expected, actual in zip(batch, *records):
+                    self.assertEqual(actual, expected, (ctype, case))
+
+    def test_quoted_lists_in_case_conditionals_and_parameter_expansion(self):
+        values = ["*", "?", "[", "]", "!", "^", "-", "\\", "a", "m", "z", "2", "a]", "=]", ":]", "[]"]
+        sets = [
+            (r'["*"]', {"*"}), (r'[!"?"]', {v for v in values if len(v) == 1 and v != "?"}),
+            (r'["[]"]', {"[", "]"}), (r'["!^"]', {"!", "^"}), (r'[a"-"z]', {"a", "-", "z"}),
+            (r'[\\]', {"\\"}), (r'[[:digit:]\]]', {"2", "]"}),
+            (r'[[":"digit:]]', {":]", "[]"}), (r'[[="a"=]]', {"a]", "=]", "[]"}),
+            (r'[[."a".]]', set()),
+        ]
+        version = self.command(BASH, 'printf "%s.%s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"').stdout
+        for pattern, selected in sets:
+            source = ('for v in ' + " ".join(map(shlex.quote, values)) + '; do '
+                      f'case "$v" in {pattern}) printf 1;; *) printf 0;; esac; '
+                      f'if [[ $v == {pattern} ]]; then printf 1; else printf 0; fi; done')
+            for shell in (BASH, TONARI):
+                # Bash 5.3 accepts the quoted operand of a POSIX collating or
+                # equivalence symbol. Tonari follows Debian's 5.2 semantics here.
+                members = selected
+                if shell == BASH and tuple(map(int, version.split(b"."))) >= (5, 3) and pattern in (r'[[="a"=]]', r'[[."a".]]'):
+                    members = {"a"}
+                proc = self.command(shell, source)
+                expected = b"".join(b"11" if v in members else b"00" for v in values)
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, expected, b""), (shell, pattern))
+        self.compare(r"""p='[\*\]]'; v='*a]'; printf '%s\0' "${v#$p}" "${v%$p}" "${v//$p/X}" """,
+                     0, b"a]\0*a\0XaX\0")
+
+    def test_nullglob_with_unclosed_and_escaped_brackets(self):
+        for name in ["x[a", "x[]b", ".dot"]:
+            (self.cwd / name).touch()
+        self.compare(r"""shopt -s nullglob
+set -- missing[ missing[x missing\[ missing[] x[* x[]* ["."]dot
+printf '%s\0' "$#" "$@" """, 0,
+                     b"6\0missing[\0missing[x\0missing[\0x[]b\0x[a\0x[]b\0")
+
+        # Modern Bash recognizes a bracket pair only within one path component.
+        script = r"""shopt -s nullglob; set -- missing[x/y]; printf '%s\0' "$#" "$@" """
+        p = self.command(TONARI, script)
+        self.assertEqual((p.returncode, p.stderr, p.stdout), (0, b"", b"1\0missing[x/y]\0"))
+        if int(self.command(BASH, 'echo "${BASH_VERSINFO[0]}"').stdout) >= 5:
+            self.compare(script, 0, p.stdout)
 
     def test_glob_collation_uses_the_selected_locale(self):
         for name in ["A1", "a9", "B2", "b8", "z", "éé", "雪"]:

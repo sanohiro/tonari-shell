@@ -1,3 +1,4 @@
+mod bracket;
 mod directory;
 mod order;
 
@@ -55,6 +56,7 @@ pub(crate) enum Matcher<T> {
     Star(T, usize),
     Stars(T, usize, usize),
     Native(CString),
+    Bracket(bracket::BracketPattern),
     Invalid,
 }
 
@@ -73,10 +75,9 @@ impl<T: AsRef<str>> Matcher<T> {
                 }
             }
         }
-        #[cfg(target_env = "musl")]
-        if text.contains(r"\-") {
-            return CString::new(portable_bracket_hyphens(text))
-                .map_or(Self::Invalid, Self::Native);
+        if text.contains('[') && bracket::needs_parser(text.as_bytes()) {
+            return bracket::BracketPattern::new(text.as_bytes())
+                .map_or(Self::Invalid, Self::Bracket);
         }
         CString::new(text).map_or(Self::Invalid, Self::Native)
     }
@@ -132,55 +133,21 @@ impl<T: AsRef<str>> Matcher<T> {
                     None => CString::new(value).is_ok_and(|name| test(&name)),
                 }
             }
+            Self::Bracket(pattern) => pattern.accepts(value, period),
             Self::Invalid => false,
         }
     }
 
     pub(crate) fn matches(&self, value: &str) -> bool {
-        if matches!(self, Self::Native(_)) {
+        if value.contains('\0') {
+            return false;
+        }
+        if matches!(self, Self::Native(_) | Self::Bracket(_)) {
             localized(|| self.accepts(value.as_bytes(), false, None))
         } else {
-            !value.contains('\0') && self.accepts(value.as_bytes(), false, None)
+            self.accepts(value.as_bytes(), false, None)
         }
     }
-}
-
-// In a plain bracket list a leading hyphen is literal on both Darwin and musl.
-// musl otherwise interprets the backslash in [a\-z] as a range endpoint.
-#[cfg(target_env = "musl")]
-fn portable_bracket_hyphens(pattern: &str) -> String {
-    let mut out = String::with_capacity(pattern.len());
-    let mut rest = pattern;
-    while let Some((prefix, bracket)) = rest.split_once('[') {
-        let Some((body, after)) = bracket.split_once(']') else {
-            break;
-        };
-        let members = body.strip_prefix(['!', '^']).unwrap_or(body);
-        // For escaped opening/closing brackets, initial ']', or nested POSIX
-        // constructs, leave the entire remaining expression to the native parser.
-        if prefix.contains('\\')
-            || members.is_empty()
-            || members.contains('[')
-            || members.ends_with('\\')
-        {
-            break;
-        }
-        out.push_str(prefix);
-        out.push('[');
-        if members.contains(r"\-") && members.split(r"\-").all(|p| !p.contains(['-', '\\'])) {
-            out.push_str(&body[..body.len() - members.len()]);
-            out.push('-');
-            for part in members.split(r"\-") {
-                out.push_str(part);
-            }
-        } else {
-            out.push_str(body);
-        }
-        out.push(']');
-        rest = after;
-    }
-    out.push_str(rest);
-    out
 }
 
 pub fn matches(value: &str, pattern: &str) -> bool {
@@ -250,8 +217,13 @@ pub fn quote_into(output: &mut String, text: &str) {
     // The first literal segment cannot be inside a bracket expression.
     // Later segments can follow active syntax, for example [a"-"z].
     let may_be_in_bracket = !output.is_empty();
+    let symbol = output.rsplit_once('[').is_some_and(|(prefix, rest)| {
+        !prefix.is_empty() && rest.starts_with(['.', '=']) && !rest.contains(']')
+    });
     for c in text.chars() {
         if matches!(c, '\\' | '*' | '?' | '[')
+            || symbol
+            || (matches!(c, ':' | '.' | '=') && output.ends_with('['))
             || may_be_in_bracket && matches!(c, ']' | '-' | '!' | '^')
         {
             output.push('\\');
@@ -260,14 +232,18 @@ pub fn quote_into(output: &mut String, text: &str) {
     }
 }
 
-pub(crate) fn has_magic(text: &str) -> bool {
+pub(crate) fn has_magic(text: &str, pathname: bool) -> bool {
+    let mut bracket = false;
     let mut bytes = text.bytes();
     while let Some(c) = bytes.next() {
         match c {
             b'\\' => {
                 bytes.next();
             }
-            b'*' | b'?' | b'[' => return true,
+            b'*' | b'?' => return true,
+            b'[' => bracket = true,
+            b']' if bracket => return true,
+            b'/' if pathname => bracket = false,
             _ => {}
         }
     }
@@ -357,7 +333,7 @@ fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>, collatio
             known_existing = rest.is_empty();
             continue;
         }
-        if !has_magic(part) {
+        if !has_magic(part, true) {
             let literal = unescape(part);
             for prefix in &mut paths {
                 prefix.push_str(&literal);
@@ -476,7 +452,10 @@ impl Field {
     }
 
     pub fn finish(self, fields: &mut Vec<String>, globbing: Option<GlobOptions>) {
-        if let Some((options, pattern)) = globbing.zip(self.pattern).filter(|(_, p)| has_magic(p)) {
+        if let Some((options, pattern)) = globbing
+            .zip(self.pattern)
+            .filter(|(_, p)| has_magic(p, true))
+        {
             let count = fields.len();
             with_locale(|order| paths(&pattern, options, fields, order));
             if fields.len() > count || options.nullglob {

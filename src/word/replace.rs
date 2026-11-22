@@ -21,7 +21,7 @@ pub(super) fn substitute(
     expand_amp: bool,
 ) -> String {
     use ReplaceMode::*;
-    if !crate::pattern::has_magic(pattern) {
+    if !crate::pattern::has_magic(pattern, false) {
         let needle = crate::pattern::unescape(pattern);
         let mut replacement = String::new();
         write_replacement(&mut replacement, template, &needle, expand_amp);
