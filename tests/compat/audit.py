@@ -112,13 +112,19 @@ class Audit:
             row["observed"] = [o.brief() for o in outcomes]
         self.rows.setdefault(group, {})[name] = row
 
-    def compare(self, group, name, source=None, args=None, stdin="", interface=False, fixture=False):
+    def compare(self, group, name, source=None, args=None, stdin="", interface=False, fixture=False, text_contract=None):
         pair = [self.script(i, source, fixture) if args is None else self.call(i, args, stdin, True) for i in (0, 1)]
         a, b = pair
         if a.timeout or (group == "Invocation" and name == "--debugger" and b"bashdb-main.inc" in a.err):
             status = "control inconclusive"
         elif b.timeout:
             status = "timeout"
+        elif text_contract is not None and (b.code, b.out, b.err) != (0, text_contract[0], b""):
+            status = "contract violation"
+        elif text_contract is not None and (a.code or a.err or a.out not in text_contract):
+            status = "control inconclusive"
+        elif text_contract is not None and a.out != b.out:
+            status = "intentional difference"
         elif (a.code, a.out) != (b.code, b.out):
             status = "different"
         elif a.err != b.err:
@@ -155,7 +161,20 @@ def sections(path):
             for i, m in enumerate(matches)}
 
 
+def utf8_contract(a):
+    # The first output is required from Tonari. The remaining outputs identify
+    # the observed Bash behavior, so a new reference result remains visible.
+    locale = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+    a.compare("UTF-8 text", "multibyte IFS after whitespace",
+              f"LC_ALL={locale}; " + """IFS=' 木'; v='a 木b'; set -- $v; printf '<%s>' "$@" """,
+              text_contract=(b"<a><b>", b"<a><><><b>", b"<a><\x9c\xa8b>"))
+    a.compare("UTF-8 text", "character length and slice in C locale",
+              """LC_ALL=C; v=雪🌸; printf '%s/<%s>' "${#v}" "${v:1:1}" """,
+              text_contract=("2/<🌸>".encode(), b"7/<\x9b>"))
+
+
 def collect(a, source):
+    utf8_contract(a)
     ref_version = a.names('echo "$BASH_VERSION"')[0]
     bash = sections(source / "doc/bashref.texi")
     for group, cases in [("Shell language", LANGUAGE), ("Redirection", REDIRS),

@@ -6,7 +6,9 @@ import sys
 import tempfile
 import unittest
 
+from audit import Audit, Outcome
 from report import misses
+from unittest.mock import Mock
 
 
 class ReleaseGate(unittest.TestCase):
@@ -31,6 +33,23 @@ class ReleaseGate(unittest.TestCase):
         changed = self.result()
         changed[self.key].update(whole_n="", whole_error="changed reference observation")
         self.assertTrue(misses(changed, self.result(), False, False))
+
+    def test_verified_tonari_contract_and_reference_changes(self):
+        audit = Audit(None, None, None)
+        for reference, candidate, status in [
+            (b"old", b"ok", "intentional difference"), (b"ok", b"ok", "match"),
+            (b"old", b"old", "contract violation"), (b"new", b"ok", "control inconclusive"),
+        ]:
+            with self.subTest(reference=reference, candidate=candidate):
+                audit.script = Mock(side_effect=[Outcome(0, reference, b""), Outcome(0, candidate, b"")])
+                audit.compare("UTF-8 text", "example", "example", text_contract=(b"ok", b"old"))
+                self.assertEqual(audit.rows["UTF-8 text"]["example"]["status"], status)
+
+        verified = self.result(status="intentional difference")
+        self.assertEqual(misses(verified, {}, True, True), [])
+        self.assertEqual(misses(self.result(), verified, False, False), [])
+        self.assertTrue(misses(self.result(status="contract violation"), verified, False, False))
+        self.assertTrue(misses(self.result(status="contract violation"), {}, False, True))
 
     def test_benchmark_rejects_a_different_executable(self):
         with tempfile.TemporaryDirectory() as work:

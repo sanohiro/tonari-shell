@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 
-from report import PASS, table
+from report import observation_lost, table
 
 
 def changes(platform, current, previous):
@@ -48,7 +48,7 @@ def main():
         previous = table(args.baseline / (label + ".tsv"))
         for row in changes(label, current, previous):
             writer.writerow(row)
-            lost |= row[3] in PASS and row[4] not in PASS
+            lost |= observation_lost(row[3], row[4])
         # GNU golden groups are only present when --upstream was supplied.
         for group, name in previous:
             if (group != "GNU regression group" or group in current["rows"]) and (group, name) not in inventory[label]:

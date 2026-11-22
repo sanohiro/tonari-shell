@@ -483,6 +483,32 @@ printf '%s\0' "$#" "$@"; done"""
                      '[[ ok == ok || $(touch unexpected) == yes ]]', 0, b"literal")
         self.assertFalse((self.cwd / "unexpected").exists())
 
+    def test_utf8_command_input_and_binary_streams(self):
+        invalid = b"printf '<%s>' '\xff'\n"
+        (self.cwd / "invalid.sh").write_bytes(invalid)
+        for argv, stdin in ((["-c", invalid], b""), (["invalid.sh"], b""), ([], invalid)):
+            with self.subTest(argv=argv):
+                result = subprocess.run([TONARI, "--noprofile", "--norc", *argv],
+                                        input=stdin, cwd=self.cwd, env=self.env,
+                                        capture_output=True, timeout=5)
+                self.assertEqual((result.returncode, result.stdout), (2, b""))
+                self.assertIn(b"UTF-8", result.stderr)
+        payload = bytes(range(256))
+        (self.cwd / "input.bin").write_bytes(payload)
+        for shell in (BASH, TONARI):
+            with self.subTest(shell=shell):
+                result = self.command(shell, "cat <input.bin | cat >output.bin")
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"", b""))
+                self.assertEqual((self.cwd / "output.bin").read_bytes(), payload)
+                (self.cwd / "output.bin").unlink()
+
+    def test_utf8_length_and_slicing_in_the_c_locale(self):
+        self.env["LC_ALL"] = "C"
+        source = 'v=雪🌸; printf "%s/<%s>" "${#v}" "${v:1:1}"'
+        result = self.command(TONARI, source)
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (0, "2/<🌸>".encode(), b""))
+
     def test_utf8_expansions_and_regex_captures(self):
         self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
         for val, count in [("😀", 1), ("👍🏽", 2), ("🇯🇵", 2), ("👩‍💻", 3)]:

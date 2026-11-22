@@ -8,7 +8,7 @@ import sys
 import tempfile
 
 PASS = {"match", "golden match"}
-CODES = {"match":"✓", "golden match":"G", "different":"Δ", "stderr differs":"E",
+CODES = {"intentional difference":"◎", "contract violation":"!", "match":"✓", "golden match":"G", "different":"Δ", "stderr differs":"E",
          "missing interface":"M", "missing default":"V", "interface only":"I", "index":"§",
          "mode unavailable":"P", "control inconclusive":"?", "fixture unavailable":"F",
          "not in reference":"N", "separate export-function probe":"↗", "timeout":"T",
@@ -27,6 +27,12 @@ def acceptable(row, mode, limit):
     return int(row[mode + "_tonari_p50_ns"]) * limit[1] <= int(row[mode + "_bash_p50_ns"]) * limit[0]
 
 
+def observation_lost(before, after):
+    if before == "intentional difference":
+        return after != before and after not in PASS
+    return before in PASS and after not in PASS
+
+
 def misses(rows, previous, require_target, require_complete):
     errors = []
     for key, before in previous.items():
@@ -34,8 +40,8 @@ def misses(rows, previous, require_target, require_complete):
         if after is None:
             errors.append((*key, "dropped from inventory"))
             continue
-        if before["status"] in PASS and after["status"] not in PASS:
-            errors.append((*key, "previously matching observation lost"))
+        if observation_lost(before["status"], after["status"]):
+            errors.append((*key, "previously verified observation lost"))
         for mode in METRICS:
             if before["status"] in PASS and before[mode + "_n"] and not after[mode + "_n"]:
                 errors.append((*key, mode + " measurement lost"))
@@ -46,7 +52,7 @@ def misses(rows, previous, require_target, require_complete):
             for mode in METRICS:
                 if require_target and (row[mode + "_error"] or mode == "whole" or row[mode + "_n"]) and not acceptable(row, mode, (2,3)):
                     errors.append((*key, mode + " exceeds 2/3 or lacks verified samples"))
-        elif require_complete and row["status"] not in ("index", "not in reference", "separate export-function probe"):
+        elif require_complete and row["status"] not in ("index", "not in reference", "separate export-function probe", "intentional difference"):
             errors.append((*key, row["status"]))
     return errors
 
@@ -94,10 +100,10 @@ def markdown(data):
     keys = sorted(set().union(*(d.keys() for d in data.values())))
     lines = ["# Bash feature matrix / Bash 機能別の結果", "",
              "[Method, scope and reproduction / 検証方法と対象範囲](../compatibility.md)", "",
-             "For the direct checks and timings following the November 22 baseline, see the dated comparison. 11月22日の全件計測以降の修正と実測を追記しました。[Current results / 現在の全件判定](current.tsv) · [Changed observations / 修正差分](changes.tsv) · [Measurements after fixes / 修正後の実測](../benchmarks.md#2026-11-23-runtime)", "",
+             " · ".join(f"[{label} TSV]({label}.tsv)" for label in data) + " · [Environment](environment.json)", "",
              "Each cell gives the compatibility result and the median elapsed-time ratio (Tonari/Bash), whole run followed by already-started where applicable. Exact nanoseconds, p95, sample counts and witnesses are in each platform TSV. Bold ratios exceed 2/3 before rounding. An upward arrow marks Bash time or slower. Shared witnesses appear under each public name. Manual sections are index entries.",
              "", "各セルは互換判定と所要時間の中央値の比（Tonari/Bash）です。左が起動込み、右が起動後です。数値が一つなら起動込みのみです。太字は上限 2/3 を超えた値、↑ は Bash と同じか遅い値です。TSV にナノ秒単位の中央値・p95、サンプル数、検証内容を収録しました。同じ処理を参照する項目があり、マニュアルの節は索引として数えています。", "",
-             "✓ match / 一致 · G GNU golden match · Δ difference / 動作差 · E stderr difference · M missing interface · V missing default · I interface only · P POSIX mode unavailable · F fixture unavailable · ? inconclusive · N absent from reference · T timeout · ↗ separate function-export probe · § manual index · × observation changed during timing · — outside this lane.", ""]
+             "✓ match / 一致 · ◎ verified Tonari contract / 意図した差 · ! Tonari contract violation / 仕様違反 · G GNU golden match · Δ difference / 動作差 · E stderr difference · M missing interface · V missing default · I interface only · P POSIX mode unavailable · F fixture unavailable · ? inconclusive · N absent from reference · T timeout · ↗ separate function-export probe · § manual index · × observation changed during timing · — outside this lane.", ""]
     for group in sorted({g for g, _ in keys}):
         lines.extend([f"## {group}", "", "| Feature / 項目 | " + " | ".join(data) + " |",
                       "| --- | " + " | ".join("---" for _ in data) + " |"])
