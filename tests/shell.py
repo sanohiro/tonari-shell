@@ -69,6 +69,35 @@ class ShellTests(unittest.TestCase):
         self.compare("./not-executable", 126)
         self.compare("cat < absent", 1)
 
+    def test_merged_external_pipeline(self):
+        # 2>&1 | also exercises the lowering of |& on older reference shells.
+        for join in ["2>&1 |", "|&"]:
+            shells = [BASH, TONARI]
+            if join == "|&" and int(self.command(BASH, 'echo "${BASH_VERSINFO[0]}"').stdout) < 4:
+                shells = [TONARI]
+            for shell in shells:
+                with self.subTest(shell=shell, join=join):
+                    source = ("""set -o pipefail; printf input | /bin/sh -c """
+                              """'cat; printf err >&2; exit 23' """ + join + " /bin/cat")
+                    proc = self.command(shell, source)
+                    self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (23, b"inputerr", b""))
+                    proc = self.command(shell, "set -o pipefail; ./missing-tonari-exe " + join + " /bin/cat")
+                    self.assertEqual((proc.returncode, proc.stderr), (127, b""))
+                    self.assertIn(b"missing-tonari-exe", proc.stdout)
+
+    def test_ifs_separators_and_escaped_read_fields(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        self.compare('IFS=" :"; v=" :α::β: "; set -- $v; printf "<%s>" "$@"; '
+                     'IFS=😀; v="左😀😀右😀"; set -- $v; printf "<%s>" "$@"; '
+                     'read -r a b <<< "😀左😀😀右😀"; printf "<%s>" "$a" "$b"; '
+                     r'IFS=: read a b <<< "a\:b:c:d:"; printf "<%s>" "$a" "$b"; '
+                     'IFS=; v=" a:b "; set -- $v; printf "<%s>" "$@"',
+                     0, "<><α><><β><左><><右><><左😀😀右😀><a:b><c:d:>< a:b >".encode())
+        # Reference builds disagree on whitespace followed by a multibyte IFS
+        # delimiter. Keep each UTF-8 scalar intact when consuming the delimiter.
+        proc = self.command(TONARI, 'IFS=" 木"; v="a 木b"; set -- $v; printf "<%s>" "$@"')
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"<a><b>", b""))
+
     def test_count_pipeline(self):
         for name in ["alpha", "beta", "count"]:
             (self.cwd / name).touch()
@@ -341,6 +370,10 @@ class ShellTests(unittest.TestCase):
             self.assertEqual((actual.returncode, actual.stdout, actual.stderr), (0, expected, b""))
 
     def test_substitution_printf_isolation(self):
+        self.compare("""v=parent; old=$PWD
+x=$(v=child; cd /; printf '%s' "$v"; exit 23); status=$?
+[[ $old == "$PWD" ]] && printf '%s/%s/%s' "$x" "$v" "$status" """,
+                     0, b"child/parent/23")
         self.compare(r'''n=parent; x=$(printf 'a%n%b\n' n 'b\n'); s=$?
 printf '<%s>' "$x" "$n" "$s"
 y=$(printf -v n inner); printf '<%s>' "$y" "$n"

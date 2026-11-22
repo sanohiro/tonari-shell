@@ -275,32 +275,32 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
 // separators between the remaining fields (e.g. "a  b  c").
 fn field_ranges(line: &str, escaped: &[usize], ifs: &str) -> (Vec<(usize, usize)>, usize) {
     let mut spans = Vec::new();
-    let mut start = None;
+    let mut start = 0;
     let mut end = 0;
     let mut after_space = false;
-    for (offset, c) in line.char_indices() {
-        let separator = ifs.contains(c) && escaped.binary_search(&offset).is_err();
-        if !separator {
-            start.get_or_insert(offset);
-            after_space = false;
-        } else if matches!(c, ' ' | '\t' | '\n') {
-            if let Some(s) = start.take() {
-                spans.push((s, offset));
-                after_space = true;
-            }
-            continue;
-        } else {
-            if let Some(s) = start.take() {
-                spans.push((s, offset));
-            } else if !after_space {
+    crate::word::separators(line, ifs, |offset, sep| {
+        if escaped.binary_search(&offset).is_ok() {
+            return;
+        }
+        let space = matches!(sep, " " | "\t" | "\n");
+        if start < offset {
+            spans.push((start, offset));
+            end = offset;
+            after_space = space;
+        } else if !space {
+            if !after_space {
                 spans.push((offset, offset));
             }
             after_space = false;
         }
-        end = offset + c.len_utf8();
-    }
-    if let Some(s) = start {
-        spans.push((s, line.len()));
+        start = offset + sep.len();
+        if !space {
+            end = start;
+        }
+    });
+    if start < line.len() {
+        spans.push((start, line.len()));
+        end = line.len();
     }
     (spans, end)
 }

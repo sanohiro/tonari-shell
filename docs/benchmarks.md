@@ -16,6 +16,50 @@ The default run includes a session workload covering assignment, export, paramet
 
 既定の計測には、代入・export・変数展開・`cd`・`pwd`・`&&`・リダイレクト・`unset` を同じシェルで実行する項目が含まれます。算術ループ1,000回と、一つのシェルから外部プログラム16個を順に起動する項目もあります。後者では同じプログラム16個を Python 親プロセスから直接 `posix_spawn` し、その都度終了を待つ条件も交互に計測します。標準入出力は計時前に用意し、各子プロセスに継承させます。セッション機能の実装前との比較には `--case core` を使います。プロンプト表示の主指標は疑似端末での起動全体です。子プロセスの exec 直前にも時刻を記録し、同じ測定サンプルのうち、端末の準備と fork の後に経過した時間も表示します。
 
+<a id="align-experiments"></a>
+
+## Parent memory, pipes and delimiter search / 親シェルのメモリ・パイプ・区切り検索
+
+On 2026-11-22, on an Apple M1 with macOS 27.2.1 and a Debian 13 arm64 VM, we compared Tonari `0e091ca`, the updated native release and GNU Bash 5.2.37. Each case used five warm-ups followed by 30 samples per shell in rotating order. The fixtures and binaries were local to each OS. The timer starts after the ready marker from a fresh, noninteractive shell and includes sourcing the script and collecting the child and its output. The driver checks stdout, stderr and exit status every time. Values are **median / p95 in milliseconds**. The Unicode IFS row uses `en_US.UTF-8` on macOS and `C.UTF-8` on Debian. Other rows use `LC_ALL=C`. [Script driver](../tools/bench_scripts.py)
+
+同じ M1 上の macOS と Debian 13 arm64 VM で、旧 Tonari、新 Tonari、Bash 5.2.37 を順番に入れ替えながら各30回測定した。各条件の最初の5回を除き、起動済みのシェルにスクリプトを読ませて完了するまでを計時している。毎回、標準出力・標準エラー・終了値を照合した。表は中央値 / p95（ms）。絵文字の区切りだけ各 OS の UTF-8 ロケールで測った。
+
+### Fresh shell / 通常の起動状態
+
+| Workload / 処理 | Mac previous | Mac Tonari | Mac Bash | Debian previous | Debian Tonari | Debian Bash |
+|---|---:|---:|---:|---:|---:|---:|
+| 16 sequential `/usr/bin/true` | 16.540 / 16.975 | 16.449 / 17.043 | 25.659 / 26.740 | 3.172 / 3.977 | 3.179 / 3.502 | 4.380 / 4.732 |
+| 16 × `$(/usr/bin/printf …)` | 18.206 / 19.130 | 18.258 / 19.060 | 28.772 / 32.272 | 4.256 / 4.630 | 3.557 / 3.918 | 5.314 / 5.796 |
+| 16 × `/usr/bin/printf … |& /bin/cat` | 29.434 / 32.600 | 21.667 / 23.309 | 33.463 / 37.443 | 5.096 / 5.351 | 5.154 / 5.570 | 6.289 / 6.829 |
+| 16 × `/usr/bin/printf … | /bin/cat` | 23.364 / 34.105 | 22.066 / 34.865 | 34.326 / 42.694 | 5.006 / 5.611 | 4.992 / 5.435 | 6.117 / 6.798 |
+| 400 splits, 32 fields, `IFS=:` | 4.816 / 5.100 | 3.224 / 3.266 | 16.505 / 16.803 | 5.907 / 6.375 | 4.428 / 4.790 | 18.204 / 19.136 |
+| 400 splits, 32 fields, `IFS=😀` | 7.524 / 7.880 | 3.192 / 3.381 | 18.707 / 18.946 | 8.457 / 8.802 | 4.283 / 4.508 | 21.912 / 22.381 |
+| 2,000 short path trims (basename and extension) | 5.136 / 5.291 | 4.954 / 5.271 | 10.750 / 10.865 | 4.567 / 4.829 | 4.472 / 4.784 | 13.756 / 14.542 |
+| 400 basename trims, 2,048-byte final component | 4.863 / 4.929 | 1.529 / 1.631 | 615.173 / 688.967 | 3.519 / 3.677 | 1.445 / 1.510 | 821.893 / 827.673 |
+| 2,000 lines via `IFS= read -r` | 6.067 / 6.161 | 5.993 / 6.102 | 9.528 / 9.765 | 4.955 / 5.247 | 4.924 / 5.175 | 10.033 / 10.368 |
+
+### Shell holding a 16 MiB variable / 16 MiB の変数を保持した状態
+
+The driver fills a private, unexported shell variable before the ready marker. Its contents stay out of the child process environment. This deliberately increases parent memory to distinguish process creation and session copying from the work done by the launched program. The pipe workloads start 32 real external processes per sample. [Subshell implementation](../src/subshell.rs)
+
+開始合図の前に未エクスポートのシェル変数を16 MiBのデータで埋める。変数を用意する時間は計測外で、起動する外部コマンドの環境にも含めない。親のメモリ量に依存するコストを見るための条件である。パイプの項目では1サンプルにつき外部プロセスを32個起動する。
+
+| Workload / 処理 | Mac previous | Mac Tonari | Mac Bash | Debian previous | Debian Tonari | Debian Bash |
+|---|---:|---:|---:|---:|---:|---:|
+| 16 × `$(/usr/bin/printf …)` | 29.121 / 31.489 | 19.100 / 20.138 | 29.923 / 35.012 | 32.208 / 33.367 | 3.903 / 4.349 | 5.899 / 6.490 |
+| 16 × `/usr/bin/printf … |& /bin/cat` | 30.251 / 31.605 | 22.500 / 24.389 | 34.495 / 37.449 | 5.647 / 5.903 | 5.404 / 6.223 | 6.855 / 7.652 |
+| 64 × `$(printf …)` | 31.379 / 38.031 | 0.954 / 0.991 | 45.333 / 47.300 | 73.942 / 80.318 | 0.422 / 0.547 | 14.949 / 15.185 |
+| 16 × `$(printf v; printf …)` | 60.884 / 64.197 | 9.622 / 11.125 | 12.303 / 12.623 | 28.288 / 29.697 | 2.693 / 2.765 | 4.162 / 4.370 |
+
+The ordinary Debian launch and plain pipe controls changed little. For `|&` with a fresh Debian shell, the new median was 5.154 ms versus 5.096 ms previously and 6.289 ms for Bash. With the larger variable the median improved, but its p95 rose from 5.903 to 6.223 ms. On macOS the fresh-shell median for `|&` fell from 29.434 to 21.667 ms. The binaries measured 836,336 bytes on macOS and 987,496 bytes on Linux (static musl with packed relative relocations). [Design and syscall counts](engineering-notes.md)
+
+Debian の通常の連続起動と `|` の差は小さい。変数を追加しない場合の `|&` は旧版 5.096 ms、新版 5.154 ms、Bash 6.289 ms で、2/3 目標に届いていない。大きな変数がある場合は中央値が改善したものの p95 は 5.903 ms から 6.223 ms になった。Mac の通常状態の `|&` は 29.434 ms から 21.667 ms に短縮した。単一実行ファイルは macOS が 836,336 バイト、Linux が 987,496 バイト。
+
+```sh
+python3 tools/bench_scripts.py /path/to/tonari --previous /path/to/previous --bash /path/to/bash --timing started --runs 30 --case external --case external-substitutions --case merged-pipeline --case pipeline --case field-split --case field-split-unicode --case strings --case long-trim --case read-lines
+python3 tools/bench_scripts.py /path/to/tonari --previous /path/to/previous --bash /path/to/bash --timing started --runs 30 --state-mib 16 --case external-substitutions --case merged-pipeline --case substitutions --case compound-substitutions
+```
+
 <a id="capture-and-spawn"></a>
 
 ## Command substitution, process launch and patterns / コマンド置換・プロセス起動・パターン

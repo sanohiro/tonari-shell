@@ -5,6 +5,29 @@ use super::Session;
 use crate::builtins::escapes::{self, Mode};
 use crate::parser::is_identifier;
 
+// Reads during a capture share the shell state. A captured %n or -v gets a
+// private session on its first assignment, visible to the rest of that printf.
+struct Variables<'a> {
+    shell: &'a mut Session,
+    capture: bool,
+    private: Option<Box<Session>>,
+}
+
+impl Variables<'_> {
+    fn read(&self) -> &Session {
+        self.private.as_deref().unwrap_or(self.shell)
+    }
+
+    fn write(&mut self) -> &mut Session {
+        if self.capture {
+            self.private
+                .get_or_insert_with(|| Box::new(self.shell.clone()))
+        } else {
+            self.shell
+        }
+    }
+}
+
 pub(crate) fn run(
     session: &mut Session,
     mut words: &[String],
@@ -36,11 +59,16 @@ pub(crate) fn run(
         eprintln!("tonari: printf: format required");
         return 2;
     };
+    let mut variables = Variables {
+        shell: session,
+        capture: capture.is_some(),
+        private: None,
+    };
     let mut args = Arguments { values, status: 0 };
     let mut output = Vec::new();
     loop {
         let count = args.values.len();
-        match render(format.as_bytes(), &mut args, &mut output, session) {
+        match render(format.as_bytes(), &mut args, &mut output, &mut variables) {
             Ok(true) if !args.values.is_empty() && count != args.values.len() => continue,
             Err(message) => {
                 eprintln!("tonari: printf: {message}");
@@ -56,7 +84,7 @@ pub(crate) fn run(
             eprintln!("tonari: printf: expected UTF-8 variable value");
             return 1;
         };
-        if let Err(e) = session.assign_target(name, value) {
+        if let Err(e) = variables.write().assign_target(name, value) {
             eprintln!("tonari: printf: {e}");
             return 1;
         }
@@ -288,7 +316,7 @@ fn render(
     mut input: &[u8],
     args: &mut Arguments<'_>,
     out: &mut Vec<u8>,
-    session: &mut Session,
+    variables: &mut Variables,
 ) -> Result<bool, &'static str> {
     while let Some((&byte, rest)) = input.split_first() {
         input = rest;
@@ -325,7 +353,7 @@ fn render(
                                 data = &data[..data.len().min(p as usize)];
                             }
                         }
-                        spec.bytes(&quote(data, session), out)?;
+                        spec.bytes(&quote(data, variables.read()), out)?;
                     }
                     b'n' => {
                         let name = args.next();
@@ -333,7 +361,7 @@ fn render(
                             if !is_identifier(name) {
                                 return Err("invalid identifier for %n");
                             }
-                            session.assign(name, &out.len().to_string());
+                            variables.write().assign(name, &out.len().to_string());
                         }
                     }
                     k if b"diouxXaAeEfFgG".contains(&k) => spec.numeric(k, args, out)?,

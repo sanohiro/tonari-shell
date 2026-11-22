@@ -141,14 +141,14 @@ impl<'a> Expansion<'a> {
     }
 
     pub fn capture(&mut self, body: Vec<Statement>) -> Result<String, &'static str> {
-        let overridden;
+        let mut overridden;
         let session = if self.assignments.is_empty() {
-            &*self.session
+            &mut *self.session
         } else {
             let mut copy = self.session.clone();
             copy.bind(self.assignments);
             overridden = copy;
-            &overridden
+            &mut overridden
         };
         let (value, status) = crate::capture_substitution(
             session,

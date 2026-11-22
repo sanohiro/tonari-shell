@@ -956,8 +956,11 @@ fn start(
     let custom_search = cached.is_none()
         && !cmd.words.first().is_some_and(|s| s.contains('/'))
         && (cmd.default_path || session.overrides_search_path(&cmd.assignments));
+    let merged_pipe = output.as_ref().filter(|_| {
+        matches!(cmd.redirects.as_slice(), [r] if r.fd == 2 && r.target == Target::Duplicate && r.word == "1")
+    });
     if builtin.is_none()
-        && cmd.redirects.is_empty()
+        && (cmd.redirects.is_empty() || merged_pipe.is_some())
         && !custom_search
         && launch.group.is_none()
         && !launch.background
@@ -993,16 +996,32 @@ fn start(
                 external.env_remove(key);
             }
         }
-        if let Some(input) = input {
-            external.stdin(Stdio::from(input));
+        if let Some(writer) = merged_pipe {
+            // Retain the original pipe ends until spawn succeeds. On failure
+            // the ordinary child must send its diagnostic through the same pipe.
+            let mut spawn = || -> io::Result<_> {
+                if let Some(reader) = &input {
+                    external.stdin(Stdio::from(reader.try_clone()?));
+                }
+                external.stdout(Stdio::from(writer.try_clone()?));
+                external.stderr(Stdio::from(writer.try_clone()?));
+                external.spawn()
+            };
+            if let Ok(child) = spawn() {
+                return Ok(Stage::Child(child.id() as libc::pid_t));
+            }
+        } else {
+            if let Some(input) = input {
+                external.stdin(Stdio::from(input));
+            }
+            if let Some(output) = output {
+                external.stdout(Stdio::from(output));
+            }
+            return match external.spawn() {
+                Ok(child) => Ok(Stage::Child(child.id() as libc::pid_t)),
+                Err(e) => spawn_failure(&cmd.words[0], e),
+            };
         }
-        if let Some(output) = output {
-            external.stdout(Stdio::from(output));
-        }
-        return match external.spawn() {
-            Ok(child) => Ok(Stage::Child(child.id() as libc::pid_t)),
-            Err(e) => spawn_failure(&cmd.words[0], e),
-        };
     }
 
     // Opening a FIFO can block until a later pipeline stage starts. Do those
@@ -1036,10 +1055,9 @@ fn start(
     Ok(Stage::Child(pid))
 }
 
-// Darwin can connect an external command directly to the capture pipe through
-// posix_spawn. A single real child supplies both the bytes and the exit status.
+// A single external process supplies both the captured bytes and the exit status.
 pub(super) fn can_capture_external(name: &str) -> bool {
-    cfg!(target_os = "macos") && !name.is_empty() && named_builtin(name, &[], 0).is_none()
+    !name.is_empty() && named_builtin(name, &[], 0).is_none()
 }
 
 pub(super) fn capture_external(

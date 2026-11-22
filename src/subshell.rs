@@ -6,7 +6,7 @@ use crate::{Flow, Session, execute_program, parser};
 // The interpreter has one thread. A substitution inherits its variables and
 // functions, changes its own cwd, and writes only stdout into the capture pipe.
 pub fn capture_substitution(
-    session: &Session,
+    session: &mut Session,
     body: Vec<parser::Statement>,
     last: u8,
 ) -> Result<(String, u8), &'static str> {
@@ -31,15 +31,15 @@ pub fn capture_substitution(
             }
             drop(write);
         }
-        let mut child = session.clone();
-        child.jobs.detached();
-        child.interactive = false;
-        child.command_string = false;
-        child.errexit = false;
+        // fork already isolated the complete session, including shell variables.
+        session.jobs.detached();
+        session.interactive = false;
+        session.command_string = false;
+        session.errexit = false;
         if let Some(path) = input_only(&body) {
             let code = (|| {
                 let captured = std::cell::Cell::new(None);
-                let fields = crate::expansion::Expansion::new(&mut child, last, &captured)
+                let fields = crate::expansion::Expansion::new(session, last, &captured)
                     .fields(path)
                     .map_err(std::io::Error::other)?;
                 let [filename] = fields.as_slice() else {
@@ -59,7 +59,7 @@ pub fn capture_substitution(
             }
             unsafe { libc::_exit(i32::from(code.is_err())) }
         }
-        let code = match execute_program(&mut child, body, last, true) {
+        let code = match execute_program(session, body, last, true) {
             Flow::Continue(code) | Flow::Exit(code) | Flow::Return(code) => code,
             Flow::Break(_) | Flow::LoopContinue(_) => 1,
         };
@@ -99,7 +99,7 @@ fn captured_output(mut output: Vec<u8>, code: u8) -> Result<(String, u8), &'stat
 // Functions, redirects, nested substitutions and effectful expansions use the
 // ordinary subshell. printf still has a private variable scope for %n and -v.
 fn capture_simple(
-    session: &Session,
+    session: &mut Session,
     body: &[parser::Statement],
     last: u8,
 ) -> Option<Result<(String, u8), &'static str>> {
@@ -140,25 +140,20 @@ fn capture_simple(
     }) {
         return None;
     }
-    let mut child = session.clone();
-    child.interactive = false;
-    child.command_string = false;
-    child.errexit = false;
     if program != "printf" {
-        return Some(crate::execute::capture_external(
-            cmd.clone(),
-            &mut child,
-            last,
-        ));
+        // Only ordinary reads reached this point. The external process supplies
+        // isolation itself. nounset errors still need the subshell's option context.
+        return (!session.nounset)
+            .then(|| crate::execute::capture_external(cmd.clone(), session, last));
     }
     let status = std::cell::Cell::new(None);
-    let mut expansion = crate::expansion::Expansion::new(&mut child, last, &status);
+    let mut expansion = crate::expansion::Expansion::new(session, last, &status);
     let mut fields = Vec::with_capacity(args.len());
     for arg in args {
         fields.extend(expansion.fields(arg.clone()).ok()?);
     }
     let mut output = Vec::new();
-    let code = crate::session::printf::run(&mut child, &fields, Some(&mut output));
+    let code = crate::session::printf::run(session, &fields, Some(&mut output));
     Some(captured_output(output, code))
 }
 

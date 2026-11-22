@@ -55,7 +55,19 @@ fn trim_boundary(value: &str, pattern: &str, prefix: bool, longest: bool) -> Opt
         .bytes()
         .any(|c| matches!(c, b'*' | b'?' | b'[' | b'\\' | 0))
         && !value.contains('\0');
-    if plain && star.is_none() {
+    if plain {
+        if star.is_some() {
+            let offset = if prefix == longest {
+                value.rfind(literal)
+            } else {
+                value.find(literal)
+            }?;
+            return Some(if prefix {
+                offset + literal.len()
+            } else {
+                offset
+            });
+        }
         return if prefix {
             value.starts_with(literal).then_some(literal.len())
         } else {
@@ -69,15 +81,7 @@ fn trim_boundary(value: &str, pattern: &str, prefix: bool, longest: bool) -> Opt
         .chain(std::iter::once(value.len()));
     let matches_at = |&i: &usize| {
         let candidate = if prefix { &value[..i] } else { &value[i..] };
-        if plain {
-            if prefix {
-                candidate.ends_with(literal)
-            } else {
-                candidate.starts_with(literal)
-            }
-        } else {
-            matches(candidate, pattern)
-        }
+        matches(candidate, pattern)
     };
     if prefix == longest {
         cuts.rfind(matches_at)

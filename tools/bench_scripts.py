@@ -3,11 +3,19 @@
 import argparse
 from pathlib import Path
 import select
+import sys
 import subprocess
 import tempfile
 import time
 
 from bench import report
+
+
+def split_case(separator):
+    row = separator.join(["x" * 128] * 32)
+    source = (f"IFS='{separator}'; row='{row}'\n"
+              'for ((i=0; i<400; i++)); do set -- $row; done\necho "$# ${#1} ${#32}"')
+    return source, "32 128 128"
 
 
 # The last command prints a result that the driver checks on every run.
@@ -54,10 +62,29 @@ echo "$count $last"
 for ((i=0; i<64; i++)); do value=$(printf 'v%s' "$i"); done
 echo "$value"
 """, "v63"),
+    "compound-substitutions": ("""\
+for ((i=0; i<16; i++)); do value=$(printf v; printf '%s' "$i"); done
+echo "$value"
+""", "v15"),
     "external-substitutions": ("""\
 for ((i=0; i<16; i++)); do value=$(/usr/bin/printf 'v%s' "$i"); done
 echo "$value"
 """, "v15"),
+    "pipeline": (
+        "for ((i=0; i<16; i++)); do /usr/bin/printf '%s\\n' \"$i\" | /bin/cat || exit 1; done",
+        "\n".join(map(str, range(16))),
+    ),
+    "merged-pipeline": (
+        "for ((i=0; i<16; i++)); do /usr/bin/printf '%s\\n' \"$i\" |& /bin/cat || exit 1; done",
+        "\n".join(map(str, range(16))),
+    ),
+    "field-split": split_case(":"),
+    "field-split-unicode": split_case("😀"),
+    "long-trim": (
+        "path='dir/" + "x" * 2048 + "'\n"
+        'for ((i=0; i<400; i++)); do base=${path##*/}; done\necho "${#base}"',
+        "2048",
+    ),
     "external-env": (
         "export " + " ".join(f"BENCH_KEY_{i}=value{i}" for i in range(32)) + "\n"
         "for ((i=0; i<16; i++)); do /usr/bin/printenv BENCH_KEY_31 || exit 1; done\n",
@@ -70,10 +97,12 @@ echo "$i"
 }
 
 
-def sample(binary, script, expected, env, started):
+def sample(binary, script, expected, env, started, setup=""):
     argv = [binary, "--noprofile", "--norc"]
     if started:
-        argv.extend(["-c", 'printf "ready\\n"; IFS= read -r gate && . "$1"', "bench", script])
+        argv.extend(["-c", setup + 'printf "ready\\n"; IFS= read -r gate && . "$1"', "bench", script])
+    elif setup:
+        argv.extend(["-c", setup + '. "$1"', "bench", script])
     else:
         argv.append(script)
     start = time.perf_counter_ns()
@@ -100,9 +129,16 @@ def main():
     cli.add_argument("--bash", type=Path, default=Path("/bin/bash"))
     cli.add_argument("--previous", type=Path, help="include a previous Tonari build")
     cli.add_argument("--spawn-control", type=Path, help="compiled tools/bench_spawn.c for the external case")
+    cli.add_argument("--timing", choices=["whole", "started", "both"], default="both")
     cli.add_argument("--runs", type=int, default=30)
     cli.add_argument("--case", choices=CASES, action="append")
+    cli.add_argument("--state-mib", type=int, default=0,
+                     help="fill an unexported shell variable before the ready marker")
     args = cli.parse_args()
+    if args.state_mib < 0 or args.state_mib and args.spawn_control:
+        cli.error("--state-mib requires a nonnegative size and a shell-only comparison")
+    size = args.state_mib * 1024 * 1024
+    setup = f"printf -v bench_resident '%*s' {size} x || exit 1; " if size else ""
     if args.runs < 1:
         cli.error("runs must be positive")
     shells = [("Tonari", args.tonari.resolve()), ("Bash", args.bash.resolve())]
@@ -118,18 +154,22 @@ def main():
             for i in range(512):
                 (fixtures / f"item-{i:03}.txt").touch()
         for case in args.case or CASES:
+            case_env = env
+            if case == "field-split-unicode":
+                case_env = dict(env, LC_ALL="en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8")
             source, expected = CASES[case]
             script = home / f"{case}.sh"
             script.write_text(source)
             participants = shells
             if case == "external" and args.spawn_control:
                 participants = [*shells, ("Direct C", args.spawn_control.resolve())]
-            for started in (False, True):
+            modes = (False, True) if args.timing == "both" else (args.timing == "started",)
+            for started in modes:
                 samples = {name: [] for name, _ in participants}
                 for i in range(5 + args.runs):
                     offset = i % len(participants)
                     for name, binary in participants[offset:] + participants[:offset]:
-                        elapsed = sample(binary, script, (expected + "\n").encode(), env, started)
+                        elapsed = sample(binary, script, (expected + "\n").encode(), case_env, started, setup)
                         if i >= 5:
                             samples[name].append(elapsed)
                 print(f"{case} ({'already started' if started else 'whole script'})", flush=True)

@@ -569,6 +569,26 @@ fn ifs_separator(lookup: &impl Fn(&str) -> Option<String>) -> String {
     )
 }
 
+// Visit separator spans in the original UTF-8 text. A single delimiter can
+// use str's character search even when the delimiter is a multibyte scalar.
+pub(crate) fn separators(text: &str, ifs: &str, mut visit: impl FnMut(usize, &str)) {
+    let mut chars = ifs.chars();
+    let Some(first) = chars.next() else { return };
+    if chars.next().is_none() {
+        for (i, sep) in text.match_indices(first) {
+            visit(i, sep);
+        }
+    } else if ifs == " \t\n" {
+        for (i, sep) in text.match_indices([' ', '\t', '\n']) {
+            visit(i, sep);
+        }
+    } else {
+        for (i, sep) in text.match_indices(|c| ifs.contains(c)) {
+            visit(i, sep);
+        }
+    }
+}
+
 #[derive(Default)]
 struct Fields {
     words: Vec<String>,
@@ -601,19 +621,19 @@ impl Fields {
             return;
         }
         let mut start = 0;
-        for (i, c) in text.char_indices().filter(|(_, c)| ifs.contains(*c)) {
+        separators(text, ifs, |i, sep| {
             if start < i {
                 self.literal(&text[start..i], true);
             }
-            if matches!(c, ' ' | '\t' | '\n') {
+            if matches!(sep, " " | "\t" | "\n") {
                 self.whitespace = true;
             } else {
                 std::mem::take(&mut self.current).finish(&mut self.words, self.globbing);
                 self.present = false;
                 self.whitespace = false;
             }
-            start = i + c.len_utf8();
-        }
+            start = i + sep.len();
+        });
         if start < text.len() {
             self.literal(&text[start..], true);
         }
