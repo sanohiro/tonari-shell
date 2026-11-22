@@ -8,8 +8,10 @@ publish = false
 
 [dependencies]
 libc = "0.2"
+unicode-width = { version = "0.2", default-features = false }
 
 [profile.release]
+opt-level = "s"
 lto = "fat"
 codegen-units = 1
 strip = true

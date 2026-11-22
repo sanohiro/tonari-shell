@@ -2,41 +2,52 @@
 
 [日本語](README.ja.md)
 
-Tonari is a shell written in Rust for modern macOS and Linux, including WSL2. Its goal is to replace Bash as a user's everyday shell. Existing tools should be able to use their Bash integration, and an interactive user should get built-in history suggestions, completion and multiline editing on the first launch, with no plugins to install. Fast startup, fast command execution and a small executable are design requirements.
+Tonari is a Rust shell for modern macOS and Linux, including WSL2. It aims to replace Bash as an everyday login shell. Bash-style commands, startup files and tool integrations run on Tonari’s own interpreter. Interactive editing, history suggestions and completion are built in.
 
-**The first prototype runs foreground commands and pipelines.** It is ready to try in a terminal. Login-shell use, Bash startup files and tool integration are future milestones.
+**Tonari is a working prototype.** Try it in a nested terminal before using it for your login session. Compatibility with complete Bash configurations and third-party tools is still being tested.
 
 ## Try it
 
-Build with Rust 1.87 or later. This build tunes the executable for the machine running the compiler.
+Build with Rust 1.87 or later. This example tunes the binary for the CPU of the build machine. The startup flags let you try the editor before loading your Bash configuration.
 
 ```sh
 RUSTFLAGS='-C target-cpu=native' cargo build --release --locked
-./target/release/tonari -c "printf '%s\n' one two three | wc -l"
-./target/release/tonari
+./target/release/tonari --noprofile --norc
 ```
 
-The first command after the build prints `3`. At the `tonari$ ` prompt, try `ls -1 | wc -l > count`, then `cat count`. This writes a file named `count` in the current directory. Ctrl-C interrupts a foreground pipeline and returns to the prompt. `exit` or Ctrl-D at an empty prompt ends the session.
+At the prompt, try a pipeline or a shell function. Use ↑ for this session’s history, Ctrl-R to search across sessions, and → at the end of the line to accept a suggestion. Tab completes paths with spaces. Bracketed paste keeps multiline commands editable until you press Enter.
 
-## What works today
+```bash
+count_lines() { wc -l < "$1"; }
+for file in README*.md; do printf '%s ' "$file"; count_lines "$file"; done
+```
 
-- The terminal and `-c` share a parser and executor. Both accept UTF-8 command text, literal words, single and double quotes, backslash escapes, comments, and commands separated by semicolons or newlines.
-- External commands use `PATH` or an explicit path. Pipeline stages run concurrently. Pipes and redirected files carry arbitrary bytes.
-- File redirections support `<`, `>` and `>>`. Standard descriptors 0, 1 and 2 can be duplicated or closed. Tonari connects the pipe first, then applies the command's redirections from left to right.
-- A pipeline returns the last stage's status. The builtins are `:`, `true`, `false` and `exit`. A final standalone external command in `-c` can replace the Tonari process directly.
-- Interactive input uses the terminal's line discipline. An open quote or trailing pipe continues on the next line.
+To stage the Bash-compatible entry point under a temporary prefix, run these commands. Both names start the same executable. A nested session inherits `SHELL`.
 
-Variables and expansions, shell functions, `cd`, `source`, `&&` and `||`, file or stdin scripts, background jobs, suspend/resume, history and completion are still ahead. The current CLI has no login mode or Bash-named entry point.
+```sh
+prefix=$(mktemp -d)
+tools/stage.sh target/release/tonari "$prefix"
+"$prefix/libexec/tonari/bash" --noprofile --norc -c 'printf "%s\n" one two | wc -l'
+"$prefix/bin/tonari" --noprofile --norc
+```
 
-## Compatibility and performance targets
+## Current capabilities
 
-The reference shells for development are GNU Bash 5.2.37 from Debian 13 and 5.3.9 from Ubuntu 26.04. The shared Bash syntax, startup-file rules, shell variables and observable process behaviour form the compatibility target. Tonari implements its own interpreter and process control.
+- **Input and state.** Interactive terminals, `-c`, script files, stdin, `source`, and `eval` share the evaluator. Variables, exported environment values, function-local scope, positional parameters, and `cd` persist within their Bash scopes.
+- **Language.** Conditional lists, groups, subshells, functions, loops, `case`, `[[ ]]`, arithmetic, command substitution, globs, quoted words, and indexed arrays are implemented. Alias definitions affect subsequently read commands. The parser accepts UTF-8 shell text.
+- **Processes.** External commands and concurrent pipelines support ordered redirections, here-documents and here-strings. Streams can carry arbitrary bytes. Foreground job control, Ctrl-C, Ctrl-Z, `jobs`, `bg`, `fg`, background pipelines, and `wait` are exercised with real processes.
+- **Startup.** Login sessions read the system profile and the first readable Bash user profile. Interactive non-login sessions read the user’s Bash rc. Noninteractive sessions support `BASH_ENV`. The editor honors `PS1`, `PS2`, and a scalar `PROMPT_COMMAND`.
+- **History and completion.** Tonari keeps its own journal under `$XDG_STATE_HOME/tonari` or `~/.local/state/tonari`. History supports common Bash exclusion and persistence settings. Tab can use Bash word lists and shell completion functions registered with `complete`.
 
-Tonari will ship one executable per OS and CPU architecture. Linux arm64 releases will use a static musl binary. The macOS binary uses libraries supplied by the OS. The planned installation puts the executable at `libexec/tonari/bash` and creates the relative symlink `bin/tonari -> ../libexec/tonari/bash`. Either name starts the same program directly.
+We sourced nvm 0.40.5 in Tonari, switched between Node 24.1.0 and 18.13.0 in the same session, and verified each switch with `node --version`. The script from `gh completion -s bash` (GitHub CLI 2.96.0) registers successfully. Completing `gh iss` to `gh issue` currently needs a bash-completion helper. Loading the full Debian bash-completion library is still pending.
 
-A nested Tonari session will inherit `SHELL`. Once login mode is available, choosing the dedicated Bash path as a login shell will let tools select it through `SHELL`. Integration tests with real tools are still pending.
+Compatibility work includes more shell options and expansions, associative arrays, signal traps, persistent startup parsing caches, and end-to-end coverage of real tool integrations. WSL2 and x86-64 still need native validation.
 
-Tonari aims to start faster, run commands faster and ship a smaller executable than GNU Bash on the same machine. In a warm-cache Debian 13 arm64 run, median time to the prompt was **0.60 ms** for the static musl build, **0.73 ms** for the glibc comparison build and **1.03 ms** for Bash. The static executable was **397,560 bytes**, compared with **1,412,096 bytes** for Bash. The glibc build was faster on repeated builtin redirections. [Full results, p95 and methodology](docs/benchmarks.md)
+## Speed and size
+
+The feature reference is GNU Bash 5.2.37 on Debian 13 and 5.3.9 on Ubuntu 26.04. Our speed target is half the elapsed time of Bash on the same workload, with two-thirds as the upper target. The benchmark records startup, external commands, pipelines, and repeated operations separately. The macOS system Bash 3.2 is an additional comparison. [Measurements, binary sizes and build conditions](docs/benchmarks.md)
+
+Tonari ships as one executable per OS and CPU architecture. Linux arm64 uses static musl. The macOS executable links to OS libraries.
 
 ## Development
 
@@ -47,8 +58,6 @@ python3 tests/shell.py target/debug/tonari
 python3 tools/bench.py target/release/tonari --bash /bin/bash
 ```
 
-The end-to-end suite compares output, file contents and exit status with Bash, and exercises Ctrl-C on a pseudo-terminal. To select a Bash binary, set `REFERENCE_BASH` for the tests or pass `--bash` to the benchmark. Use `--compare-tonari Previous /path/to/older/tonari` to time two builds in the same run.
+The end-to-end tests compare output, files, and exit status with Bash. They also exercise the editor and job control through pseudo-terminals. Use `REFERENCE_BASH` to select a test reference, or `--bash` for benchmarks. Use `--compare-tonari Previous /path/to/previous` to interleave builds in the same run.
 
-Keep the English and Japanese documentation in sync. Write commit messages, PR titles and PR descriptions in English.
-
-Record reusable findings and the tests behind them in the [engineering notes](docs/engineering-notes.md).
+Keep English and Japanese documentation in sync. Write commit messages and PR titles and descriptions in English. Record findings and their verification steps in the [engineering notes](docs/engineering-notes.md).

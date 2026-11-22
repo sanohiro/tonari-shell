@@ -1,26 +1,48 @@
+mod alias;
+mod arithmetic;
+mod builtins;
+mod cli;
+mod complete;
+mod completion_spec;
+mod editor;
+mod eval;
 mod execute;
+mod expansion;
+mod history;
+mod input;
+mod jobs;
 mod parser;
+mod pattern;
+mod prompt;
+mod session;
+mod startup;
+mod subshell;
+mod test_expression;
+use subshell::capture_substitution;
+mod word;
 
+use session::Session;
+pub(crate) use startup::source_file;
 use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 
 use execute::Flow;
 
-fn evaluate(program: &[parser::Pipeline], mut status: u8, replace_last: bool) -> Flow {
-    for (index, pipeline) in program.iter().enumerate() {
-        match execute::run(pipeline, status, replace_last && index + 1 == program.len()) {
-            Ok(Flow::Continue(code)) => status = code,
-            Ok(exit @ Flow::Exit(_)) => return exit,
-            Err(e) => {
-                eprintln!("tonari: {e}");
-                status = 1;
-            }
-        }
-    }
-    Flow::Continue(status)
+use eval::{call_function, execute_program};
+
+fn eval_text(session: &mut Session, source: &str, status: u8) -> Flow {
+    input::text(session, source, status, false, false)
 }
 
-extern "C" fn interrupt(_: libc::c_int) {}
+static INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn interrupted() -> bool {
+    INTERRUPTED.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+extern "C" fn interrupt(signal: libc::c_int) {
+    if signal == libc::SIGINT {
+        INTERRUPTED.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
 
 fn listen_for_interrupts() -> io::Result<()> {
     // A caught signal interrupts the terminal read and resets to its default
@@ -53,35 +75,76 @@ fn read_terminal_line(source: &mut Vec<u8>) -> io::Result<bool> {
     }
 }
 
-fn interactive() -> io::Result<u8> {
+fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Result<u8> {
     listen_for_interrupts()?;
-    let mut status = 0;
+    session.jobs.init();
     let mut source = Vec::new();
+    let mut history = history::History::default();
     loop {
-        let prompt = if source.is_empty() { "tonari$ " } else { "> " };
-        let mut stderr = io::stderr().lock();
-        stderr.write_all(prompt.as_bytes())?;
-        stderr.flush()?;
-        drop(stderr);
-        let more = match read_terminal_line(&mut source) {
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                eprintln!();
-                status = 130;
+        interrupted();
+        session.jobs.poll();
+        session.refresh_terminal_size();
+        if source.is_empty() {
+            if let Some(hook) = session.get("PROMPT_COMMAND").filter(|s| !s.is_empty()) {
+                if let Flow::Exit(code) = eval_text(session, &hook, status) {
+                    return Ok(code);
+                }
+            }
+        }
+        let prompt = prompt::render(session, !source.is_empty(), status);
+        let result = if editing {
+            editor::line(&prompt, &mut history, session).map(|input| match input {
+                editor::Input::Line(line) => {
+                    source.extend_from_slice(line.as_bytes());
+                    Some(true)
+                }
+                editor::Input::End => Some(false),
+                editor::Input::Cancel => None,
+            })
+        } else {
+            let mut stderr = io::stderr().lock();
+            stderr.write_all(prompt.as_bytes())?;
+            stderr.flush()?;
+            drop(stderr);
+            read_terminal_line(&mut source).map(Some)
+        };
+        let more = match result {
+            Ok(Some(more)) => more,
+            Ok(None) => {
                 source.clear();
+                status = 130;
                 continue;
             }
-            result => result?,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                eprintln!();
+                source.clear();
+                status = 130;
+                continue;
+            }
+            Err(e) => return Err(e),
         };
         if !more && source.is_empty() {
             return Ok(status);
         }
         match std::str::from_utf8(&source) {
-            Ok(text) => match parser::parse(text) {
-                Ok(program) => match evaluate(&program, status, false) {
-                    Flow::Continue(code) => status = code,
-                    Flow::Exit(code) => return Ok(code),
-                },
-                Err(parser::Error::Incomplete(_)) if more => continue,
+            Ok(text) => match parser::session_source(text, !more, session) {
+                Ok(program) if program.is_empty() => {}
+                Ok(program) => {
+                    let record = history.accepts(session, text);
+                    let cwd = session.get("PWD");
+                    let flow = execute_program(session, program, status, false);
+                    status = match flow {
+                        Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
+                        _ => 1,
+                    };
+                    if record && history.accepts(session, text) {
+                        history.record(session, text, cwd.as_deref(), status);
+                    }
+                    if matches!(flow, Flow::Exit(_) | Flow::Return(_)) {
+                        return Ok(status);
+                    }
+                }
+                Err(e) if more && e.incomplete() => continue,
                 Err(e) => {
                     eprintln!("tonari: {}", e.message());
                     status = 2;
@@ -100,42 +163,88 @@ fn interactive() -> io::Result<u8> {
 }
 
 fn main() -> ExitCode {
-    let mut args = std::env::args_os().skip(1);
-    let arg = args.next();
-    let code = match arg.as_deref().and_then(|s| s.to_str()) {
-        Some("-c") => {
-            let source = args.next();
-            let Some(source) = source.as_deref().and_then(|s| s.to_str()) else {
-                eprintln!("tonari: -c requires a UTF-8 command string");
-                return ExitCode::from(2);
-            };
-            // Positional arguments to -c are reserved for parameter expansion.
-            match parser::parse(source) {
-                Ok(program) => match evaluate(&program, 0, true) {
-                    Flow::Continue(code) | Flow::Exit(code) => code,
-                },
-                Err(e) => {
-                    eprintln!("tonari: {}", e.message());
-                    2
-                }
-            }
-        }
-        Some("--version") => {
+    use cli::{Action, Input};
+    let args = std::env::args_os();
+    let terminal = || io::stdin().is_terminal() && io::stderr().is_terminal();
+    let invocation = match cli::parse(args, terminal) {
+        Ok(Action::Run(invocation)) => invocation,
+        Ok(Action::Version) => {
             println!("tonari {}", env!("CARGO_PKG_VERSION"));
-            0
+            return ExitCode::SUCCESS;
         }
-        Some("--help") => {
-            println!("Usage: tonari [-c COMMAND | --version | --help]");
-            0
+        Ok(Action::Help) => {
+            println!(
+                "Usage: tonari [--noprofile] [--norc | --rcfile FILE] [-efilnsu] [-o pipefail] [-c COMMAND [NAME [ARG...]] | -s [ARG...] | FILE [ARG...]]"
+            );
+            return ExitCode::SUCCESS;
         }
-        None if arg.is_none() && io::stdin().is_terminal() => interactive().unwrap_or_else(|e| {
+        Err(e) => {
             eprintln!("tonari: {e}");
-            1
-        }),
-        _ => {
-            eprintln!("tonari: use -c COMMAND or start Tonari in a terminal");
-            2
+            return ExitCode::from(2);
         }
     };
-    ExitCode::from(code)
+    let mut invocation = invocation;
+    let mut session = Session::default();
+    session.arg0 = std::mem::take(&mut invocation.arg0);
+    session.positional = std::mem::take(&mut invocation.positional);
+    session.errexit = invocation.errexit;
+    session.noglob = invocation.noglob;
+    session.nounset = invocation.nounset;
+    session.pipefail = invocation.pipefail;
+    session.interactive = invocation.interactive;
+    session.command_string = matches!(invocation.input, Input::Command(_));
+    session.shopt.expand_aliases = session.interactive;
+    if session.interactive {
+        if session.get("PS1").is_none() {
+            session.assign("PS1", "tonari$ ");
+        }
+        if session.get("HISTFILE").is_none() {
+            if let Some(home) = session.get("HOME") {
+                session.assign("HISTFILE", &format!("{home}/.bash_history"));
+            }
+        }
+    }
+    let initial = match startup::initialize(&mut session, &invocation) {
+        Flow::Continue(status) => status,
+        Flow::Return(status) | Flow::Exit(status) => return ExitCode::from(status),
+        Flow::Break(_) | Flow::LoopContinue(_) => return ExitCode::from(1),
+    };
+    let flow = match invocation.input {
+        Input::Command(text) => input::text(&mut session, &text, initial, true, invocation.check),
+        Input::File(path) => match std::fs::File::open(&path) {
+            Ok(file) => {
+                session
+                    .source_names
+                    .push(path.to_string_lossy().into_owned());
+                session.function_names.push("main".into());
+                input::file_script(&mut session, file, initial, invocation.check)
+            }
+            Err(e) => {
+                eprintln!("tonari: {}: {e}", path.display());
+                Flow::Continue(if e.kind() == io::ErrorKind::NotFound {
+                    127
+                } else {
+                    126
+                })
+            }
+        },
+        Input::Stdin if invocation.interactive => match interactive(
+            &mut session,
+            initial,
+            !invocation.noediting
+                && terminal()
+                && std::env::var_os("TERM").is_some_and(|v| v != "dumb"),
+        ) {
+            Ok(code) => Flow::Continue(code),
+            Err(e) => {
+                eprintln!("tonari: {e}");
+                Flow::Continue(1)
+            }
+        },
+        Input::Stdin => input::stdin_script(&mut session, invocation.check),
+    };
+    ExitCode::from(match flow {
+        Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s) => s,
+        Flow::Break(_) | Flow::LoopContinue(_) => 1,
+    })
 }

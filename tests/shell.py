@@ -26,9 +26,9 @@ class ShellTests(unittest.TestCase):
         self.cwd = Path(directory.name)
         self.env = {"HOME": directory.name, "PATH": "/usr/bin:/bin", "LC_ALL": "C"}
 
-    def command(self, shell, source):
+    def command(self, shell, source, *args):
         return subprocess.run(
-            [shell, "-c", source], cwd=self.cwd, env=self.env,
+            [shell, "-c", source, *args], cwd=self.cwd, env=self.env,
             capture_output=True, timeout=5,
         )
 
@@ -162,11 +162,309 @@ class ShellTests(unittest.TestCase):
 
     def test_parse_errors_precede_execution(self):
         for source in ["touch side-effect; printf '", "touch side-effect | | cat",
-                       "touch side-effect; echo $HOME", "if true; then touch side-effect; fi"]:
+                       "touch side-effect; echo ${", "if ; then touch side-effect; fi"]:
             proc = self.command(TONARI, source)
             self.assertEqual(proc.returncode, 2)
             self.assertTrue(proc.stderr)
             self.assertFalse((self.cwd / "side-effect").exists())
+
+    def test_conditionals_and_last_status(self):
+        self.compare("false && exit 23 || true && printf ok", 0, b"ok")
+        self.compare("true || false && printf ok", 0, b"ok")
+        self.compare("false ||\n# continued\nprintf '%s' \"$?\"", 0, b"1")
+        self.compare("false && printf x > side-effect; exit", 1)
+        self.assertFalse((self.cwd / "side-effect").exists())
+
+    def test_variables_and_argument_boundaries(self):
+        self.compare("a='a  b'; empty=''; printf '<%s>' $a \"$a\" $empty \"$empty\"", 0,
+                     b"<a><b><a  b><>")
+        self.compare("a=foo; unset a; printf '%s,%s' \"${a:-default}\" \"${a+set}\"", 0,
+                     b"default,")
+        self.compare("x=old; x=new /bin/sh -c 'printf %s \"$x\"'; printf ':%s' \"$x\"", 0,
+                     b"new:old")
+        self.compare("v=private; /bin/sh -c 'printf %s \"${v-unset}\"'; export v; "
+                     "/bin/sh -c 'printf :%s \"$v\"'; unset v; "
+                     "/bin/sh -c 'printf :%s \"${v-unset}\"'", 0, b"unset:private:unset")
+        self.compare("s='a b'; export V=$s; /bin/sh -c 'printf %s \"$V\"'", 0, b"a b")
+        self.compare("x=parent; x=child | cat; printf %s \"$x\"", 0, b"parent")
+        for shell in [BASH, TONARI]:
+            proc = self.command(shell, 'printf "<%s>" "$0" "$#" "$@"', "job", "a b", "", "雪")
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                             (0, "<job><3><a b><><雪>".encode(), b""))
+
+    def test_directory_and_child_environment(self):
+        physical = self.cwd.resolve()
+        (self.cwd / "real").mkdir()
+        (self.cwd / "link").symlink_to("real", target_is_directory=True)
+        self.compare("cd link && pwd -L && pwd -P && cd .. && pwd", 0,
+                     f"{physical}/link\n{physical}/real\n{physical}\n".encode())
+        self.compare("cd real | cat; pwd", 0, f"{physical}\n".encode())
+        self.compare("cd real && /bin/sh -c 'printf %s \"$PWD\"'", 0,
+                     f"{physical}/real".encode())
+
+    def test_script_source_eval_and_stdin(self):
+        lib = self.cwd / "lib"
+        lib.write_text('export G="from $1"\nreturn 7\nprintf unreachable\n')
+        script = self.cwd / "main"
+        script.write_text('. ./lib inner\nprintf "%s:%s:%s" "$?" "$G" "$1"\n')
+        for shell in [BASH, TONARI]:
+            cmd = [shell, str(script), "outer"]
+            proc = subprocess.run(cmd, cwd=self.cwd, env=self.env, capture_output=True, timeout=5)
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"7:from inner:outer", b""))
+            proc = subprocess.run([shell, "-s", "--", "hello world"], input=b'printf "%s" "$1"\ncat\nrest\n',
+                                  cwd=self.cwd, env=self.env, capture_output=True, timeout=5)
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"hello worldrest\n", b""))
+            stream = self.cwd / "stream"
+            stream.write_text("cat\nremaining file bytes\n")
+            with stream.open() as src:
+                proc = subprocess.run([shell], stdin=src, cwd=self.cwd, env=self.env,
+                                      capture_output=True, timeout=5)
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"remaining file bytes\n", b""))
+        self.compare("eval 'v=hello'; printf %s \"$v\"", 0, b"hello")
+        self.compare("exit 12\nprintf 'unterminated", 12)
+        self.compare("printf first\nprintf 'unterminated", 2, b"first")
+        proc = subprocess.run([TONARI, "-n", "-c", "touch unexpected"], cwd=self.cwd,
+                              env=self.env, capture_output=True, timeout=5)
+        self.assertEqual(proc.returncode, 0)
+        self.assertFalse((self.cwd / "unexpected").exists())
+
+    def test_bash_env(self):
+        startup = self.cwd / "startup"
+        startup.write_text('export MARK=from_bash_env\n')
+        self.env["BASH_ENV"] = str(startup)
+        self.compare("printf %s \"$MARK\"", 0, b"from_bash_env")
+        # Bash reads BASH_ENV even with profile and interactive rc disabled.
+        for shell in [BASH, TONARI]:
+            p = subprocess.run([shell, "--noprofile", "--norc", "-c", 'printf %s "$MARK"'],
+                               cwd=self.cwd, env=self.env, capture_output=True, timeout=5)
+            self.assertEqual((p.returncode, p.stdout), (0, b"from_bash_env"))
+
+    def test_compounds_and_functions(self):
+        cases = [
+            ("if false; then echo X; elif true; then echo yes; else echo X; fi", b"yes\n"),
+            ("if false; then false; fi; printf %s \"$?\"", b"0"),
+            ("for v in 'a b' c; do echo \"<$v>\"; done", b"<a b>\n<c>\n"),
+            ("v=y; while [ -n \"$v\" ]; do echo loop; unset v; done", b"loop\n"),
+            ("for a in 1 2; do for b in 3 4; do echo \"$a$b\"; break 2; done; done", b"13\n"),
+            ("f() { local x=inner; for i; do printf '<%s>' \"$i\"; done; return 7; }; "
+             "x=outer; f a 'b c'; printf ':%s:%s' \"$?\" \"$x\"", b"<a><b c>:7:outer"),
+            ("f() { cd /; x=changed; }; x=outer; f | cat; printf %s \"$x\"", b"outer"),
+        ]
+        for source, expected in cases:
+            self.compare(source, 0, expected)
+
+    def test_substitution_and_shell_options(self):
+        self.compare("x=outer; v=$(x=inner; printf '%s\\n\\n' \"$x\"); echo \"$x:$v\"", 0, b"outer:inner\n")
+        self.compare("x=$(false); printf %s \"$?\"", 0, b"1")
+        self.compare("n=no; echo \"${n:-$(touch unexpected)}\"", 0, b"no\n")
+        self.assertFalse((self.cwd / "unexpected").exists())
+        for shell in [BASH, TONARI]:
+            # Use an assignment so the captured value can exceed the kernel's argv limit.
+            proc = self.command(shell, "v=$(yes x | head -c 262144); echo ok")
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"ok\n", b""))
+            proc = subprocess.run([shell, "-eu", "-o", "pipefail", "-c",
+                                   "false && echo skipped; false | true; echo unreachable"],
+                                  cwd=self.cwd, env=self.env, capture_output=True, timeout=5)
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (1, b"", b""))
+            proc = self.command(shell, "set -u; printf '%s' \"$MISSING\"; echo unreachable")
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertEqual(proc.stdout, b"")
+            self.assertTrue(proc.stderr)
+        self.compare('set -- a "b c"; shift; echo "$#:$1"', 0, b"1:b c\n")
+        self.compare("set -e; f() { false; echo recovered; }; if f; then echo yes; fi",
+                     0, b"recovered\nyes\n")
+
+    def test_arithmetic_patterns_and_globs(self):
+        (self.cwd / "a.x").touch()
+        (self.cwd / "b.x").touch()
+        (self.cwd / ".hidden.x").touch()
+        self.compare('p="*.x"; printf "<%s>" $p "$p" missing*.x; set -f; '
+                     'for i in *.x; do printf "<%s>" "$i"; done',
+                     0, b"<a.x><b.x><*.x><missing*.x><*.x>")
+        self.compare('v=abc12; if [[ $v == a* && $v =~ ^(ab|c).*([0-9]+)$ ]]; '
+                     'then case $v in abc*) printf match;; esac; fi; '
+                     'for ((i=0; i<3; i++)); do printf :%s "$((2*i))"; done',
+                     0, b"match:0:2:4")
+        self.compare('v=no; [[ $v == "n*" ]] || printf literal; '
+                     '[[ ok == ok || $(touch unexpected) == yes ]]', 0, b"literal")
+        self.assertFalse((self.cwd / "unexpected").exists())
+
+    def test_heredoc_and_file_substitution(self):
+        self.compare("v='two words'; cat <<EOF\n$v $(printf three)\nEOF\n"
+                     "cat <<-'END'\n\t$v and `false`\n\tEND\n"
+                     'cat <<< "$v" | cat', 0, b"two words three\n$v and `false`\ntwo words\n")
+        self.compare("cat <<ONE <<'TWO'\nfirst\nONE\nsecond\nTWO\n", 0, b"second\n")
+        self.compare('p="space name"; printf "data\\n\\n" > "$p"; x=$(<"$p"); '
+                     'printf "<%s>:%s" "$x" "$?"', 0, b"<data>:0")
+        for shell in [TONARI, BASH]:
+            proc = self.command(shell, "x=$(<absent); printf '<%s>:%s' \"$x\" \"$?\"")
+            self.assertEqual((proc.returncode, proc.stdout), (0, b"<>:1"))
+            self.assertTrue(proc.stderr)
+            document = b"xx\n" * 40000
+            proc = subprocess.run([shell], input=b"cat <<'EOF'\n" + document + b"EOF\n",
+                                  capture_output=True, cwd=self.cwd, env=self.env, timeout=8)
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, document, b""))
+
+    def test_shell_read_printf_and_lookup(self):
+        self.compare("IFS=: read -r a b <<< 'x:y:z'; printf -v out '<%s><%s>' \"$a\" \"$b\"; "
+                     "printf '%s\\n%b' \"$out\" 'a\\0101'",
+                     0, b"<x><y:z>\naA")
+        self.compare("printf x | echo \"$(cat)\"", 0, b"x\n")
+        self.compare("f() { echo fn; }; type -t f; command -v f; "
+                     "type -t printf; builtin printf '%s' ok",
+                     0, b"function\nf\nbuiltin\nok")
+
+    def test_async_and_wait(self):
+        self.compare("/bin/sh -c 'exit 17' & p=$!; wait \"$p\"; printf %s \"$?\"", 0, b"17")
+        self.compare("false && touch unexpected & wait; printf ok", 0, b"ok")
+        self.assertFalse((self.cwd / "unexpected").exists())
+        self.compare("x=parent; (x=child; cd /; printf %s \"$x\"); printf :%s \"$x\"",
+                     0, b"child:parent")
+        self.compare("true | /bin/sh -c 'exit 9' & wait $!; printf %s \"$?\"", 0, b"9")
+
+    def test_indexed_arrays_patterns_and_scope(self):
+        self.compare('a=(one "two words" ""); a[5]=five; a+=("six"); '
+                     'f() { local -a a=(inner); printf "<%s>" "${a[@]}"; }; '
+                     'f; printf "|%s" "${!a[@]}"; printf "<%s>" "${a[@]}"',
+                     0, b"<inner>|0|1|2|5|6<one><two words><><five><six>")
+        self.compare('[[ "file42" =~ ^(file)([0-9]+)(x)?$ ]]; '
+                     'printf "<%s>" "${BASH_REMATCH[@]}"', 0, b"<file42><file><42><>")
+        self.compare('x=/a/b/x.txt; printf "<%s>" "${x##*/}" "${x%.*}" "${x#*/}" "${x%%/*}"',
+                     0, b"<x.txt></a/b/x><a/b/x.txt><>")
+        self.compare('n=2; printf "<%s>" "$((n++))" "$n" "$((++n))"', 0, b"<2><3><4>")
+
+    def test_aliases_are_applied_when_commands_are_read(self):
+        self.compare("shopt -s expand_aliases\nalias a='printf yes | cat'\n"
+                     "say() { a; }; unalias a; say; echo .", 0, b"yes.\n")
+        self.compare("shopt -s expand_aliases\nalias headword='echo '; alias arg=expanded\n"
+                     "headword arg; headword 'arg'", 0, b"expanded\narg\n")
+        self.compare("shopt -s expand_aliases\nalias f='printf nested'\necho \"$(f)\"",
+                     0, b"nested\n")
+
+    def test_numbered_descriptors_and_exec(self):
+        self.compare("exec 3>file; echo first >&3; f() { echo second >&3; }; f >unused; "
+                     "exec 3>&-; cat file; test ! -s unused", 0, b"first\nsecond\n")
+        self.compare('v=ok; export v; p=$$; export p; exec /bin/sh -c '
+                     """'test "$p" = "$$" && printf %s "$v"'""", 0, b"ok")
+        path = self.cwd / "redirect-script"
+        path.write_text("exec 10>out\n" + "#padding\n" * 1800 + "printf end >&10\n")
+        for shell in (TONARI, BASH):
+            proc = subprocess.run([shell, path], cwd=self.cwd, env=self.env,
+                                  capture_output=True, timeout=5)
+            self.assertEqual((proc.returncode, proc.stderr), (0, b""))
+            self.assertEqual((self.cwd / "out").read_text(), "end")
+
+    def test_profile_source_names_and_environment_path(self):
+        (self.cwd / "env file").write_text("export LOADED=env\n")
+        self.env["BASH_ENV"] = "$HOME/env file"
+        self.compare('printf %s "$LOADED"', 0, b"env")
+        (self.cwd / "fn").write_text('f() { printf "<%s>" "${BASH_SOURCE[0]}" "${FUNCNAME[0]}"; }\n')
+        self.compare('. ./fn; f', 0, b"<./fn><f>")
+        self.env["SHELL"] = "/some/other/shell"
+        self.compare('printf %s "$SHELL"', 0, b"/some/other/shell")
+
+    def terminal_session(self, editing=False):
+        pid, fd = pty.fork()
+        if pid == 0:
+            try:
+                os.chdir(self.cwd)
+                env = dict(self.env, TERM="xterm-256color" if editing else "dumb")
+                os.execve(TONARI, [str(TONARI), "--norc"], env)
+            finally:
+                os._exit(125)
+        def close():
+            try:
+                foreground = os.tcgetpgrp(fd)
+                if foreground > 0 and foreground != pid and foreground != os.getpgrp():
+                    os.killpg(foreground, signal.SIGKILL)
+            except OSError:
+                pass
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                os.waitpid(pid, 0)
+            except ChildProcessError:
+                pass
+            os.close(fd)
+        self.addCleanup(close)
+        self.read_until(fd, PROMPT)
+        return fd
+
+    def test_stop_and_resume_foreground_pipeline(self):
+        fd = self.terminal_session()
+        os.write(fd, b"/bin/sh -c 'printf R%sY EAD; exec sleep 20' | cat\n")
+        self.read_until(fd, b"READY")
+        os.write(fd, b"\x1a")
+        self.assertIn(b"Stopped", self.read_until(fd, PROMPT))
+        os.write(fd, b"jobs\n")
+        self.assertIn(b"Stopped", self.read_until(fd, PROMPT))
+        os.write(fd, b"bg\n")
+        self.read_until(fd, PROMPT)
+        os.write(fd, b"jobs\n")
+        self.assertIn(b"Running", self.read_until(fd, PROMPT))
+        shell_group = os.tcgetpgrp(fd)
+        os.write(fd, b"fg\n")
+        end = time.monotonic() + 3
+        while os.tcgetpgrp(fd) == shell_group and time.monotonic() < end:
+            time.sleep(0.005)
+        self.assertNotEqual(os.tcgetpgrp(fd), shell_group)
+        os.write(fd, b"\x03")
+        self.read_until(fd, PROMPT)
+        os.write(fd, b"printf 'STATUS=%s\\n' $?\n")
+        self.assertIn(b"STATUS=130\r\n", self.read_until(fd, PROMPT))
+
+    def test_completion_command_callbacks(self):
+        source = r"""marker=parent
+callback() {
+    marker=child
+    printf '%s\n' "$2"
+}
+compgen -C callback -- '$(touch should-not-exist)' 2>/dev/null
+printf '%s\n' "$marker"
+"""
+        self.compare(source, 0, b"$(touch should-not-exist)\nparent\n")
+        self.assertFalse((self.cwd / "should-not-exist").exists())
+
+        terminal = self.terminal_session(editing=True)
+        os.write(terminal, b'reply() { COMPREPLY=("$2-$COMP_CWORD-${COMP_WORDS[0]}"); }; complete -F reply echo\r')
+        self.read_until(terminal, b"\x1b[?2004h")
+        os.write(terminal, b"echo target\t> completion-result\r")
+        self.read_until(terminal, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "completion-result").read_text(), "target-1-echo\n")
+
+    def test_editor_paste_suggestions_completion_and_shared_history(self):
+        self.env["HISTCONTROL"] = "ignoreboth"
+        fd = self.terminal_session(editing=True)
+        other = self.terminal_session(editing=True)
+        editing = b"\x1b[?2004h"
+
+        def enter(terminal, text):
+            os.write(terminal, text + b"\r")
+            return self.read_until(terminal, editing)
+
+        # Paste is one edit, including its final newline. A separate Enter runs it.
+        os.write(fd, b"\x1b[200~printf 'A\\n' >> pasted\nprintf 'B\\n' >> pasted\n\x1b[201~")
+        self.read_until(fd, b"pasted")
+        self.assertFalse((self.cwd / "pasted").exists())
+        enter(fd, b"")
+        self.assertEqual((self.cwd / "pasted").read_bytes(), b"A\nB\n")
+        (self.cwd / "a path").write_text("worked\n")
+        self.assertIn(b"worked\r\n", enter(fd, b"cat a\\ p\t"))
+        enter(fd, b"complete -W 'alpha beta' printf")
+        self.assertIn(b"alpha", enter(fd, b"printf alp\t"))
+        enter(fd, b"echo violet >> recalled")
+        enter(fd, b"echo viol\x1b[C")
+        enter(other, b"\x12violet")
+        self.assertEqual((self.cwd / "recalled").read_text().splitlines(), ["violet"] * 3)
+        enter(other, b" echo omit-secret > /dev/null")
+        journal = self.cwd / ".local/state/tonari/history"
+        self.assertNotIn("omit-secret", journal.read_text())
+        self.assertFalse((self.cwd / ".bash_history").exists())
+        # Remove a complete UTF-8 character and insert a replacement at the caret.
+        enter(fd, 'echo 猫雪'.encode() + b'\x1b[D\x7f' + '犬'.encode() + b'\x1b[F > unicode')
+        self.assertEqual((self.cwd / "unicode").read_text(), "犬雪\n")
 
     def test_terminal(self):
         # Precreate count so ls has the same input regardless of stage launch order.
@@ -176,7 +474,7 @@ class ShellTests(unittest.TestCase):
         if pid == 0:
             try:
                 os.chdir(self.cwd)
-                os.execve(TONARI, [str(TONARI)], self.env)
+                os.execve(TONARI, [str(TONARI), "--norc"], self.env)
             finally:
                 os._exit(125)
         try:
