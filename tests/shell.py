@@ -825,6 +825,36 @@ v[1]=changed; unset 'v[0]'; v[20]=tail; printf '[%s]' "${!v[@]}" "${v[-1]}" """
                 self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
                                  (0, b"4/8191/8193//last/[1][2][3][20][tail]", b""))
 
+    def test_resource_limits_and_child_inheritance(self):
+        src = """ulimit -Sn64; ulimit -Sn; ulimit -Sn 48 -n
+python3 -c 'import resource; print(resource.getrlimit(resource.RLIMIT_NOFILE)[0])'
+(ulimit -Sn 24; ulimit -n); ulimit -n
+ulimit -Sn invalid 2>/dev/null; echo "invalid:$?"
+ulimit -p 1 2>/dev/null; echo "pipe:$?" """
+        self.compare(src, 0, b"64\nopen files                          (-n) 48\n48\n24\n48\ninvalid:1\npipe:1\n", minimum=5)
+        # Resource values depend on the host and the Python test runner's limits.
+        for mode in ("-a", "-Ha", "-Sn -Hn", "-p", "-v"):
+            cmd = f"ulimit {mode}"
+            ref = self.command(BASH, cmd)
+            proc = self.command(TONARI, cmd)
+            if BASH in self.shells_for(5):
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                                 (ref.returncode, ref.stdout, ref.stderr), mode)
+
+    def test_times_includes_reaped_children(self):
+        src = """python3 -c 'import time; start=time.process_time()
+while time.process_time() - start < 0.035: pass'
+times --"""
+        for shell in (BASH, TONARI):
+            proc = self.command(shell, src)
+            self.assertEqual((proc.returncode, proc.stderr), (0, b""))
+            rows = proc.stdout.splitlines()
+            self.assertEqual(len(rows), 2)
+            for row in rows:
+                self.assertRegex(row, rb"^\d+m\d+\.\d{3}s \d+m\d+\.\d{3}s$")
+            self.assertNotEqual(rows[1], b"0m0.000s 0m0.000s")
+            self.assertEqual(self.command(shell, "times -z").returncode, 2)
+
     def test_umask_and_job_filters(self):
         self.compare("""umask 022; (umask 077; umask); umask -p
 umask u=rwx,g=r,o=; umask -pS; : > formed; ls -l formed | cut -c 1-10""",

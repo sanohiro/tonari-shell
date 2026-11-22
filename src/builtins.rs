@@ -1,4 +1,5 @@
 pub(crate) mod escapes;
+pub(crate) mod limits;
 pub(crate) mod umask;
 
 use std::ffi::CString;
@@ -250,4 +251,37 @@ pub(crate) fn unary(op: &str, arg: &str, session: &Session) -> Result<bool, &'st
         "-g" => meta.mode() & 0o2000 != 0,
         _ => meta.mode() & 0o1000 != 0,
     })
+}
+
+pub fn times(args: &[String]) -> u8 {
+    if let Some(flag) = args
+        .first()
+        .filter(|s| s.starts_with('-') && s.len() > 1 && *s != "--")
+    {
+        eprintln!("tonari: times: {flag}: invalid option");
+        return 2;
+    }
+    let mut out = io::stdout().lock();
+    for who in [libc::RUSAGE_SELF, libc::RUSAGE_CHILDREN] {
+        let mut usage = std::mem::MaybeUninit::uninit();
+        if unsafe { libc::getrusage(who, usage.as_mut_ptr()) } == -1 {
+            return 1;
+        }
+        let usage = unsafe { usage.assume_init() };
+        for (time, end) in [(usage.ru_utime, ' '), (usage.ru_stime, '\n')] {
+            let millis = i128::from(time.tv_sec) * 1000 + (i128::from(time.tv_usec) + 500) / 1000;
+            if write!(
+                out,
+                "{}m{}.{:03}s{end}",
+                millis / 60_000,
+                millis / 1000 % 60,
+                millis % 1000
+            )
+            .is_err()
+            {
+                return 1;
+            }
+        }
+    }
+    u8::from(out.flush().is_err())
 }

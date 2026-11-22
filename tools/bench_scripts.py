@@ -122,6 +122,10 @@ for ((i=0; i<1000; i++)); do
 done
 echo "$v"
 """, "23"),
+    "resource-limits": ("""
+for ((i=0; i<256; i++)); do ulimit -Sn 64; ulimit -Sn > /dev/null; done
+ulimit -Sn
+""", "64"),
     "directory-stack": ("""
 for ((i=0; i<200; i++)); do pushd -n dir >/dev/null; popd -n >/dev/null; done
 echo "${#DIRSTACK[@]}"
