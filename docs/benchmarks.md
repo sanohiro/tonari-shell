@@ -147,6 +147,25 @@ M1 の macOS 27.2.1 と、その上の Linux VM で動く Debian 13 arm64 で計
 python3 tools/bench_completion.py /path/to/previous/tonari target/release/tonari --bash /path/to/bash
 ```
 
+<a id="completion-listing"></a>
+
+### Second Tab and full candidate list / 2回目の Tab と候補一覧
+
+In a fresh PTY, the driver typed the full common prefix and pressed Tab once. After the shell acknowledged it, the driver sent a second Tab and `@` together. It timed the interval to the echoed `@`, then verified that every expected filename had arrived and that the editable line still ended in `@`. For full output at 10,000 entries, Bash ran with Readline's `completion-query-items` set to zero and `page-completions` off. Tonari used its default listing. Each shell ran three warm-ups and 30 measured sessions with warm local filesystems, alternating shell order. These are PTY timings, in milliseconds, for Tonari `130ecd8` and GNU Bash 5.2.37.
+
+共通部分をすべて入力して最初の Tab を押し、その応答後に2回目の Tab と `@` を一緒に送った。全候補の後に `@` が返るまでを計り、ファイル名の集合と入力行を検証した。1万件を最後まで出力できるよう、Bash は件数確認とページ送りを無効にし、Tonari は既定設定で測った。各条件は3回のウォームアップ後に各30回。端末アプリの描画時間は含まない。
+
+| Host / ホスト | Files / 件数 | Tonari median / p95 | Bash median / p95 |
+|---|---:|---:|---:|
+| macOS M1 | 10 | 0.068 / 0.108 | 0.097 / 0.127 |
+| macOS M1 | 10,000 | 7.954 / 8.559 | 34.246 / 36.265 |
+| Debian 13 arm64 | 10 | 0.088 / 0.101 | 0.101 / 0.141 |
+| Debian 13 arm64 | 10,000 | 5.938 / 6.576 | 27.616 / 31.348 |
+
+```sh
+python3 tools/bench_completion.py target/release/tonari --bash /path/to/bash --listing
+```
+
 ## Interactive shell milestone / 対話シェル統合版
 
 Source tree `119e729ae01cef7d8d0883fdd92bb5fbd0bf447f`, measured on 2026-11-22. The harness is Git blob `1f7f36916222e276727e0cdd8802381c9e15fdf1`. Both arm64 release builds use Rust 1.96.1, native CPU tuning, `opt-level=s`, fat LTO, stripped symbols and one codegen unit. The Linux distribution build statically links musl 1.2.6; its host was Debian 13 userspace on a Linux 6.11.11 VM on Apple M1. The macOS run used the same M1 with macOS 27.2.1. All shells received `--noprofile --norc`, a temporary home, a fixed prompt, and used their normal interactive editor. Cases had five warm-ups and 300 measured samples per shell in rotating order, except nvm (100). Each time cell is **median / p95 in milliseconds**. Each ratio cell is **median / p95**, divided by the corresponding Bash statistic.
