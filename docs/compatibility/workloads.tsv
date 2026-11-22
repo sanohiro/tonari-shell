@@ -1,0 +1,250 @@
+platform	suite	workload	bash_n	bash_median_ms	bash_p95_ms	tonari_n	tonari_median_ms	tonari_p95_ms	direct_n	direct_median_ms	direct_p95_ms	median_ratio
+Debian	core	first prompt	65	0.941	0.972	65	0.621	0.654	NA	NA	NA	0.659
+Debian	core	exec to first prompt (same samples)	65	0.669	0.696	65	0.349	0.370	NA	NA	NA	0.522
+Debian	core	-c :	65	0.435	0.459	65	0.228	0.254	NA	NA	NA	0.525
+Debian	core	external true	65	0.548	0.585	65	0.339	0.365	NA	NA	NA	0.619
+Debian	core	two-stage pipeline	65	0.831	0.887	65	0.556	0.619	NA	NA	NA	0.668
+Debian	core	boolean builtins	65	0.438	0.474	65	0.231	0.248	NA	NA	NA	0.528
+Debian	core	100 builtin redirections	65	0.890	0.964	65	0.474	0.514	NA	NA	NA	0.533
+Debian	core	direct /usr/bin/true	NA	NA	NA	NA	NA	NA	65	0.254	0.269	NA
+Debian	core	session builtins	65	0.461	0.480	65	0.261	0.279	NA	NA	NA	0.567
+Debian	core	16 external commands in one shell	65	4.513	4.640	65	3.091	3.241	65	4.087	4.293	0.685
+Debian	core	1000 iterations of a builtin loop	65	2.248	2.647	65	0.840	0.973	NA	NA	NA	0.374
+Debian	scripts	arithmetic (whole script)	15	22.332	23.212	15	9.570	10.293	NA	NA	NA	0.429
+Debian	scripts	arithmetic (already started)	15	22.284	23.550	15	8.944	9.791	NA	NA	NA	0.401
+Debian	scripts	functions (whole script)	15	23.374	23.720	15	11.422	11.618	NA	NA	NA	0.489
+Debian	scripts	functions (already started)	15	22.971	23.315	15	9.704	9.975	NA	NA	NA	0.422
+Debian	scripts	strings (whole script)	15	13.763	14.020	15	4.763	4.916	NA	NA	NA	0.346
+Debian	scripts	strings (already started)	15	13.481	14.372	15	4.394	4.606	NA	NA	NA	0.326
+Debian	scripts	regex (whole script)	15	11.845	11.925	15	1.930	1.985	NA	NA	NA	0.163
+Debian	scripts	regex (already started)	15	11.393	11.687	15	1.732	1.772	NA	NA	NA	0.152
+Debian	scripts	case-edges (whole script)	15	9.374	10.089	15	4.610	5.072	NA	NA	NA	0.492
+Debian	scripts	case-edges (already started)	15	9.079	9.317	15	3.641	3.880	NA	NA	NA	0.401
+Debian	scripts	case-classes (whole script)	15	8.594	8.805	15	4.126	4.169	NA	NA	NA	0.480
+Debian	scripts	case-classes (already started)	15	8.338	8.521	15	4.594	4.699	NA	NA	NA	0.551
+Debian	scripts	glob (whole script)	15	6.484	6.695	15	2.917	3.061	NA	NA	NA	0.450
+Debian	scripts	glob (already started)	15	6.192	6.573	15	2.895	3.471	NA	NA	NA	0.467
+Debian	scripts	glob-sparse (whole script)	15	1.936	1.958	15	1.111	1.141	NA	NA	NA	0.574
+Debian	scripts	glob-sparse (already started)	15	1.630	1.724	15	0.974	1.008	NA	NA	NA	0.598
+Debian	scripts	glob-all (whole script)	15	6.094	6.201	15	2.944	3.088	NA	NA	NA	0.483
+Debian	scripts	glob-all (already started)	15	5.757	5.841	15	2.881	2.927	NA	NA	NA	0.500
+Debian	scripts	glob-multi-star (whole script)	15	2.418	2.517	15	1.144	1.186	NA	NA	NA	0.473
+Debian	scripts	glob-multi-star (already started)	15	2.162	2.271	15	1.024	1.078	NA	NA	NA	0.474
+Debian	scripts	glob-subdirs (whole script)	15	9.162	9.766	15	1.458	1.494	NA	NA	NA	0.159
+Debian	scripts	glob-subdirs (already started)	15	8.829	9.241	15	1.402	1.416	NA	NA	NA	0.159
+Debian	scripts	glob-utf8-sort (whole script)	15	12.716	12.965	15	3.077	3.199	NA	NA	NA	0.242
+Debian	scripts	glob-utf8-sort (already started)	15	10.274	10.437	15	2.988	3.136	NA	NA	NA	0.291
+Debian	scripts	glob-utf8-once (whole script)	15	3.297	3.818	15	0.478	0.602	NA	NA	NA	0.145
+Debian	scripts	glob-utf8-once (already started)	15	0.913	1.031	15	0.327	0.371	NA	NA	NA	0.358
+Debian	scripts	glob-utf8-large (whole script)	15	6.051	7.324	15	1.526	1.887	NA	NA	NA	0.252
+Debian	scripts	glob-utf8-large (already started)	15	3.499	3.745	15	1.346	1.376	NA	NA	NA	0.385
+Debian	scripts	glob-recursive (whole script)	15	17.389	17.602	15	4.477	4.725	NA	NA	NA	0.257
+Debian	scripts	glob-recursive (already started)	15	16.919	17.475	15	4.314	4.394	NA	NA	NA	0.255
+Debian	scripts	read-lines (whole script)	15	9.987	10.201	15	4.925	5.001	NA	NA	NA	0.493
+Debian	scripts	read-lines (already started)	15	9.650	9.980	15	4.725	4.857	NA	NA	NA	0.490
+Debian	scripts	substitutions (whole script)	15	13.478	13.654	15	0.385	0.522	NA	NA	NA	0.029
+Debian	scripts	substitutions (already started)	15	13.106	13.540	15	0.215	0.302	NA	NA	NA	0.016
+Debian	scripts	compound-substitutions (whole script)	15	3.903	3.996	15	2.281	2.412	NA	NA	NA	0.584
+Debian	scripts	compound-substitutions (already started)	15	3.578	4.182	15	2.356	2.660	NA	NA	NA	0.658
+Debian	scripts	external-substitutions (whole script)	15	5.612	5.856	15	3.566	3.872	NA	NA	NA	0.635
+Debian	scripts	external-substitutions (already started)	15	5.302	5.880	15	3.565	3.999	NA	NA	NA	0.672
+Debian	scripts	pipeline (whole script)	15	6.309	7.960	15	5.256	6.002	NA	NA	NA	0.833
+Debian	scripts	pipeline (already started)	15	5.964	6.178	15	4.993	5.160	NA	NA	NA	0.837
+Debian	scripts	merged-pipeline (whole script)	15	6.296	6.462	15	5.220	5.523	NA	NA	NA	0.829
+Debian	scripts	merged-pipeline (already started)	15	5.958	6.267	15	5.096	5.188	NA	NA	NA	0.855
+Debian	scripts	redirect-stderr (whole script)	15	5.109	5.537	15	3.710	3.881	NA	NA	NA	0.726
+Debian	scripts	redirect-stderr (already started)	15	4.739	4.898	15	3.702	3.846	NA	NA	NA	0.781
+Debian	scripts	merged-pipeline-redirect (whole script)	15	6.364	6.874	15	5.216	5.324	NA	NA	NA	0.820
+Debian	scripts	merged-pipeline-redirect (already started)	15	5.981	6.286	15	5.029	5.130	NA	NA	NA	0.841
+Debian	scripts	builtin-merged-pipeline (whole script)	15	6.278	6.477	15	4.349	4.547	NA	NA	NA	0.693
+Debian	scripts	builtin-merged-pipeline (already started)	15	5.895	6.122	15	4.231	4.379	NA	NA	NA	0.718
+Debian	scripts	builtin-output (whole script)	15	0.532	0.557	15	0.298	0.319	NA	NA	NA	0.560
+Debian	scripts	builtin-output (already started)	15	0.213	0.232	15	0.160	0.168	NA	NA	NA	0.750
+Debian	scripts	field-split (whole script)	15	18.105	18.497	15	3.883	4.028	NA	NA	NA	0.214
+Debian	scripts	field-split (already started)	15	17.712	18.699	15	4.331	4.726	NA	NA	NA	0.245
+Debian	scripts	field-split-unicode (whole script)	15	24.183	24.404	15	3.877	3.985	NA	NA	NA	0.160
+Debian	scripts	field-split-unicode (already started)	15	23.418	33.752	15	4.493	5.472	NA	NA	NA	0.192
+Debian	scripts	long-trim (whole script)	15	819.872	871.626	15	1.795	2.030	NA	NA	NA	0.002
+Debian	scripts	long-trim (already started)	15	810.257	854.879	15	1.460	1.507	NA	NA	NA	0.002
+Debian	scripts	external-env (whole script)	15	5.195	5.503	15	3.848	3.917	NA	NA	NA	0.741
+Debian	scripts	external-env (already started)	15	4.869	5.306	15	3.701	3.911	NA	NA	NA	0.760
+Debian	scripts	external (whole script)	15	4.694	5.004	15	3.288	3.406	NA	NA	NA	0.700
+Debian	scripts	external (already started)	15	4.340	4.424	15	3.179	3.258	NA	NA	NA	0.732
+Debian	editor	recent hint	NA	NA	NA	156	0.057	0.064	NA	NA	NA	NA
+Debian	editor	no hint	NA	NA	NA	132	0.064	0.082	NA	NA	NA	NA
+Debian	editor	oldest hint: typed key	NA	NA	NA	12	0.068	0.219	NA	NA	NA	NA
+Debian	editor	oldest hint: visible suggestion	NA	NA	NA	12	0.245	0.272	NA	NA	NA	NA
+Debian	editor	files	12	2.779	3.041	12	2.279	2.314	NA	NA	NA	0.820
+Debian	editor	complete -f	12	4.021	4.132	12	1.708	1.796	NA	NA	NA	0.425
+Debian	editor	PATH	12	55.509	56.490	12	1.493	1.589	NA	NA	NA	0.027
+Debian	editor	static, all	12	256.748	264.079	12	0.354	0.365	NA	NA	NA	0.001
+Debian	editor	static, unique	12	255.446	258.538	12	0.294	0.307	NA	NA	NA	0.001
+Debian	editor	dynamic, unique	12	3.454	3.603	12	1.133	1.168	NA	NA	NA	0.328
+Debian	editor	list 10	12	0.088	0.102	12	0.080	0.087	NA	NA	NA	0.909
+Debian	editor	list 10000	12	22.201	24.703	12	4.112	4.601	NA	NA	NA	0.185
+Ubuntu	core	first prompt	65	0.915	0.988	65	0.614	0.657	NA	NA	NA	0.670
+Ubuntu	core	exec to first prompt (same samples)	65	0.641	0.696	65	0.340	0.364	NA	NA	NA	0.531
+Ubuntu	core	-c :	65	0.433	0.462	65	0.226	0.242	NA	NA	NA	0.522
+Ubuntu	core	external true	65	0.544	0.578	65	0.340	0.360	NA	NA	NA	0.625
+Ubuntu	core	two-stage pipeline	65	1.712	1.866	65	1.352	1.463	NA	NA	NA	0.790
+Ubuntu	core	boolean builtins	65	0.436	0.474	65	0.232	0.251	NA	NA	NA	0.532
+Ubuntu	core	100 builtin redirections	65	0.866	0.906	65	0.476	0.496	NA	NA	NA	0.550
+Ubuntu	core	direct /usr/bin/true	NA	NA	NA	NA	NA	NA	65	0.254	0.279	NA
+Ubuntu	core	session builtins	65	0.463	0.513	65	0.261	0.284	NA	NA	NA	0.563
+Ubuntu	core	16 external commands in one shell	65	4.466	4.674	65	3.113	3.302	65	4.080	4.192	0.697
+Ubuntu	core	1000 iterations of a builtin loop	65	2.048	2.300	65	0.829	0.907	NA	NA	NA	0.405
+Ubuntu	scripts	arithmetic (whole script)	15	20.232	21.056	15	9.579	9.900	NA	NA	NA	0.473
+Ubuntu	scripts	arithmetic (already started)	15	19.805	19.971	15	8.927	9.246	NA	NA	NA	0.451
+Ubuntu	scripts	functions (whole script)	15	21.169	22.348	15	11.485	12.472	NA	NA	NA	0.543
+Ubuntu	scripts	functions (already started)	15	21.059	21.576	15	9.763	9.959	NA	NA	NA	0.464
+Ubuntu	scripts	strings (whole script)	15	11.943	13.381	15	4.884	5.294	NA	NA	NA	0.409
+Ubuntu	scripts	strings (already started)	15	11.566	11.670	15	4.401	4.461	NA	NA	NA	0.381
+Ubuntu	scripts	regex (whole script)	15	12.468	13.032	15	1.974	2.119	NA	NA	NA	0.158
+Ubuntu	scripts	regex (already started)	15	11.998	12.257	15	1.737	1.912	NA	NA	NA	0.145
+Ubuntu	scripts	case-edges (whole script)	15	7.863	8.038	15	4.621	4.758	NA	NA	NA	0.588
+Ubuntu	scripts	case-edges (already started)	15	7.661	7.971	15	3.651	3.924	NA	NA	NA	0.477
+Ubuntu	scripts	case-classes (whole script)	15	7.521	8.180	15	4.186	4.641	NA	NA	NA	0.557
+Ubuntu	scripts	case-classes (already started)	15	7.157	8.004	15	4.562	4.821	NA	NA	NA	0.637
+Ubuntu	scripts	glob (whole script)	15	6.641	6.838	15	2.978	3.037	NA	NA	NA	0.448
+Ubuntu	scripts	glob (already started)	15	6.302	6.500	15	2.906	2.938	NA	NA	NA	0.461
+Ubuntu	scripts	glob-sparse (whole script)	15	1.954	2.096	15	1.154	1.237	NA	NA	NA	0.591
+Ubuntu	scripts	glob-sparse (already started)	15	1.608	1.759	15	0.971	1.058	NA	NA	NA	0.604
+Ubuntu	scripts	glob-all (whole script)	15	6.263	6.416	15	2.958	3.037	NA	NA	NA	0.472
+Ubuntu	scripts	glob-all (already started)	15	5.904	6.046	15	2.881	2.966	NA	NA	NA	0.488
+Ubuntu	scripts	glob-multi-star (whole script)	15	2.406	2.490	15	1.181	1.207	NA	NA	NA	0.491
+Ubuntu	scripts	glob-multi-star (already started)	15	2.052	2.136	15	1.008	1.076	NA	NA	NA	0.491
+Ubuntu	scripts	glob-subdirs (whole script)	15	9.042	9.480	15	1.491	1.568	NA	NA	NA	0.165
+Ubuntu	scripts	glob-subdirs (already started)	15	8.709	9.123	15	1.413	1.470	NA	NA	NA	0.162
+Ubuntu	scripts	glob-utf8-sort (whole script)	15	12.275	12.576	15	3.115	3.317	NA	NA	NA	0.254
+Ubuntu	scripts	glob-utf8-sort (already started)	15	9.930	10.653	15	3.024	3.431	NA	NA	NA	0.305
+Ubuntu	scripts	glob-utf8-once (whole script)	15	3.220	3.270	15	0.484	0.512	NA	NA	NA	0.150
+Ubuntu	scripts	glob-utf8-once (already started)	15	0.892	0.944	15	0.321	0.350	NA	NA	NA	0.360
+Ubuntu	scripts	glob-utf8-large (whole script)	15	5.794	5.933	15	1.554	1.622	NA	NA	NA	0.268
+Ubuntu	scripts	glob-utf8-large (already started)	15	3.358	3.821	15	1.358	1.379	NA	NA	NA	0.404
+Ubuntu	scripts	glob-recursive (whole script)	15	17.470	18.766	15	4.581	5.153	NA	NA	NA	0.262
+Ubuntu	scripts	glob-recursive (already started)	15	16.799	17.172	15	4.319	4.645	NA	NA	NA	0.257
+Ubuntu	scripts	read-lines (whole script)	15	9.840	10.814	15	4.955	5.198	NA	NA	NA	0.504
+Ubuntu	scripts	read-lines (already started)	15	9.465	10.400	15	4.732	4.862	NA	NA	NA	0.500
+Ubuntu	scripts	substitutions (whole script)	15	13.470	13.741	15	0.433	0.489	NA	NA	NA	0.032
+Ubuntu	scripts	substitutions (already started)	15	13.155	13.985	15	0.220	0.243	NA	NA	NA	0.017
+Ubuntu	scripts	compound-substitutions (whole script)	15	3.937	4.195	15	2.338	2.421	NA	NA	NA	0.594
+Ubuntu	scripts	compound-substitutions (already started)	15	3.602	3.677	15	2.348	2.465	NA	NA	NA	0.652
+Ubuntu	scripts	external-substitutions (whole script)	15	16.758	16.963	15	14.710	15.756	NA	NA	NA	0.878
+Ubuntu	scripts	external-substitutions (already started)	15	16.393	19.470	15	14.414	17.248	NA	NA	NA	0.879
+Ubuntu	scripts	pipeline (whole script)	15	19.780	20.313	15	17.361	17.933	NA	NA	NA	0.878
+Ubuntu	scripts	pipeline (already started)	15	19.196	22.354	15	17.139	18.025	NA	NA	NA	0.893
+Ubuntu	scripts	merged-pipeline (whole script)	15	19.726	20.200	15	17.368	19.520	NA	NA	NA	0.880
+Ubuntu	scripts	merged-pipeline (already started)	15	19.357	22.709	15	17.284	20.491	NA	NA	NA	0.893
+Ubuntu	scripts	redirect-stderr (whole script)	15	15.954	16.387	15	14.416	14.844	NA	NA	NA	0.904
+Ubuntu	scripts	redirect-stderr (already started)	15	15.410	18.042	15	14.328	14.611	NA	NA	NA	0.930
+Ubuntu	scripts	merged-pipeline-redirect (whole script)	15	29.289	58.068	15	28.953	41.122	NA	NA	NA	0.989
+Ubuntu	scripts	merged-pipeline-redirect (already started)	15	19.394	39.450	15	17.422	33.794	NA	NA	NA	0.898
+Ubuntu	scripts	builtin-merged-pipeline (whole script)	15	17.076	17.519	15	14.937	15.119	NA	NA	NA	0.875
+Ubuntu	scripts	builtin-merged-pipeline (already started)	15	16.538	19.371	15	14.669	15.549	NA	NA	NA	0.887
+Ubuntu	scripts	builtin-output (whole script)	15	0.567	0.649	15	0.330	0.348	NA	NA	NA	0.582
+Ubuntu	scripts	builtin-output (already started)	15	0.203	0.222	15	0.160	0.171	NA	NA	NA	0.786
+Ubuntu	scripts	field-split (whole script)	15	20.160	21.111	15	3.947	4.108	NA	NA	NA	0.196
+Ubuntu	scripts	field-split (already started)	15	19.881	21.185	15	4.329	5.168	NA	NA	NA	0.218
+Ubuntu	scripts	field-split-unicode (whole script)	15	24.594	25.832	15	3.939	4.358	NA	NA	NA	0.160
+Ubuntu	scripts	field-split-unicode (already started)	15	21.990	22.523	15	4.203	4.486	NA	NA	NA	0.191
+Ubuntu	scripts	long-trim (whole script)	15	680.797	686.063	15	1.826	1.963	NA	NA	NA	0.003
+Ubuntu	scripts	long-trim (already started)	15	675.757	687.037	15	1.456	1.517	NA	NA	NA	0.002
+Ubuntu	scripts	external-env (whole script)	15	15.543	18.141	15	13.895	14.654	NA	NA	NA	0.894
+Ubuntu	scripts	external-env (already started)	15	14.896	15.351	15	13.627	13.768	NA	NA	NA	0.915
+Ubuntu	scripts	external (whole script)	15	4.739	5.072	15	3.402	4.047	NA	NA	NA	0.718
+Ubuntu	scripts	external (already started)	15	4.312	4.578	15	3.185	3.371	NA	NA	NA	0.739
+Ubuntu	editor	recent hint	NA	NA	NA	156	0.058	0.062	NA	NA	NA	NA
+Ubuntu	editor	no hint	NA	NA	NA	132	0.065	0.083	NA	NA	NA	NA
+Ubuntu	editor	oldest hint: typed key	NA	NA	NA	12	0.069	0.095	NA	NA	NA	NA
+Ubuntu	editor	oldest hint: visible suggestion	NA	NA	NA	12	0.248	0.257	NA	NA	NA	NA
+Ubuntu	editor	files	12	3.059	3.303	12	2.320	2.433	NA	NA	NA	0.758
+Ubuntu	editor	complete -f	12	4.320	4.753	12	1.832	2.125	NA	NA	NA	0.424
+Ubuntu	editor	PATH	12	55.730	56.272	12	1.542	1.641	NA	NA	NA	0.028
+Ubuntu	editor	static, all	12	255.355	258.595	12	0.354	0.361	NA	NA	NA	0.001
+Ubuntu	editor	static, unique	12	253.566	257.048	12	0.289	0.302	NA	NA	NA	0.001
+Ubuntu	editor	dynamic, unique	12	3.365	3.423	12	1.145	1.167	NA	NA	NA	0.340
+Ubuntu	editor	list 10	12	0.088	0.097	12	0.081	0.087	NA	NA	NA	0.920
+Ubuntu	editor	list 10000	12	21.524	22.148	12	4.243	4.470	NA	NA	NA	0.197
+macOS	core	first prompt	65	6.415	6.614	65	3.760	4.051	NA	NA	NA	0.586
+macOS	core	exec to first prompt (same samples)	65	5.299	5.501	65	2.635	2.786	NA	NA	NA	0.497
+macOS	core	-c :	65	4.620	4.823	65	2.222	2.393	NA	NA	NA	0.481
+macOS	core	external true	65	5.893	6.198	65	3.246	3.446	NA	NA	NA	0.551
+macOS	core	two-stage pipeline	65	7.231	7.720	65	3.621	3.931	NA	NA	NA	0.501
+macOS	core	boolean builtins	65	4.642	4.888	65	2.262	2.401	NA	NA	NA	0.487
+macOS	core	100 builtin redirections	65	5.926	6.331	65	3.263	3.493	NA	NA	NA	0.551
+macOS	core	direct /usr/bin/true	NA	NA	NA	NA	NA	NA	65	1.002	1.043	NA
+macOS	core	session builtins	65	4.722	5.079	65	2.334	2.488	NA	NA	NA	0.494
+macOS	core	16 external commands in one shell	65	29.916	32.213	65	18.511	19.302	65	16.021	16.394	0.619
+macOS	core	1000 iterations of a builtin loop	65	5.985	6.247	65	2.998	3.137	NA	NA	NA	0.501
+macOS	scripts	arithmetic (whole script)	15	19.669	20.585	15	12.328	12.845	NA	NA	NA	0.627
+macOS	scripts	arithmetic (already started)	15	14.050	14.465	15	9.580	9.683	NA	NA	NA	0.682
+macOS	scripts	functions (whole script)	15	21.633	23.891	15	12.050	13.638	NA	NA	NA	0.557
+macOS	scripts	functions (already started)	15	15.989	16.152	15	9.044	9.210	NA	NA	NA	0.566
+macOS	scripts	strings (whole script)	15	16.240	16.418	15	7.755	7.955	NA	NA	NA	0.478
+macOS	scripts	strings (already started)	15	10.553	11.174	15	4.771	5.093	NA	NA	NA	0.452
+macOS	scripts	regex (whole script)	15	12.770	12.972	15	5.248	5.591	NA	NA	NA	0.411
+macOS	scripts	regex (already started)	15	7.188	7.334	15	2.192	2.218	NA	NA	NA	0.305
+macOS	scripts	case-edges (whole script)	15	12.618	12.806	15	7.177	7.423	NA	NA	NA	0.569
+macOS	scripts	case-edges (already started)	15	7.075	7.244	15	4.241	4.313	NA	NA	NA	0.599
+macOS	scripts	case-classes (whole script)	15	11.887	12.284	15	7.565	7.822	NA	NA	NA	0.636
+macOS	scripts	case-classes (already started)	15	6.336	6.439	15	4.670	4.711	NA	NA	NA	0.737
+macOS	scripts	glob (whole script)	15	1036.867	1101.636	15	10.526	12.820	NA	NA	NA	0.010
+macOS	scripts	glob (already started)	15	1024.826	1040.275	15	7.285	7.481	NA	NA	NA	0.007
+macOS	scripts	glob-sparse (whole script)	15	1029.962	1051.692	15	9.488	9.654	NA	NA	NA	0.009
+macOS	scripts	glob-sparse (already started)	15	1019.043	1023.529	15	6.212	6.687	NA	NA	NA	0.006
+macOS	scripts	glob-all (whole script)	15	1031.341	1038.979	15	10.661	11.056	NA	NA	NA	0.010
+macOS	scripts	glob-all (already started)	15	1029.152	1038.089	15	7.367	7.530	NA	NA	NA	0.007
+macOS	scripts	glob-multi-star (whole script)	15	1034.576	1051.998	15	9.566	9.850	NA	NA	NA	0.009
+macOS	scripts	glob-multi-star (already started)	15	1027.447	1034.330	15	6.260	6.651	NA	NA	NA	0.006
+macOS	scripts	glob-subdirs (whole script)	15	1077.409	1094.268	15	13.004	13.628	NA	NA	NA	0.012
+macOS	scripts	glob-subdirs (already started)	15	1071.358	1078.191	15	9.744	10.036	NA	NA	NA	0.009
+macOS	scripts	glob-utf8-sort (whole script)	15	59.192	60.756	15	11.791	12.710	NA	NA	NA	0.199
+macOS	scripts	glob-utf8-sort (already started)	15	53.110	56.011	15	8.571	8.775	NA	NA	NA	0.161
+macOS	scripts	glob-utf8-once (whole script)	15	8.570	8.920	15	4.512	4.841	NA	NA	NA	0.527
+macOS	scripts	glob-utf8-once (already started)	15	2.838	2.893	15	1.548	1.642	NA	NA	NA	0.545
+macOS	scripts	glob-utf8-large (whole script)	15	23.019	23.753	15	12.463	12.768	NA	NA	NA	0.541
+macOS	scripts	glob-utf8-large (already started)	15	16.937	17.744	15	9.291	9.790	NA	NA	NA	0.549
+macOS	scripts	glob-recursive (whole script)	15	985.727	994.881	15	41.735	43.710	NA	NA	NA	0.042
+macOS	scripts	glob-recursive (already started)	15	981.296	1004.487	15	38.417	38.631	NA	NA	NA	0.039
+macOS	scripts	read-lines (whole script)	15	15.104	15.700	15	9.006	9.323	NA	NA	NA	0.596
+macOS	scripts	read-lines (already started)	15	9.478	9.650	15	5.934	6.233	NA	NA	NA	0.626
+macOS	scripts	substitutions (whole script)	15	50.437	58.232	15	3.819	3.942	NA	NA	NA	0.076
+macOS	scripts	substitutions (already started)	15	44.630	46.255	15	0.518	0.543	NA	NA	NA	0.012
+macOS	scripts	compound-substitutions (whole script)	15	17.480	17.923	15	12.418	12.628	NA	NA	NA	0.710
+macOS	scripts	compound-substitutions (already started)	15	12.071	17.006	15	9.275	12.599	NA	NA	NA	0.768
+macOS	scripts	external-substitutions (whole script)	15	34.820	36.556	15	21.372	21.945	NA	NA	NA	0.614
+macOS	scripts	external-substitutions (already started)	15	29.046	29.544	15	18.564	18.811	NA	NA	NA	0.639
+macOS	scripts	pipeline (whole script)	15	39.825	46.704	15	24.911	33.611	NA	NA	NA	0.626
+macOS	scripts	pipeline (already started)	15	33.672	36.901	15	21.702	22.034	NA	NA	NA	0.645
+macOS	scripts	merged-pipeline (whole script)	15	39.428	43.588	15	24.902	27.563	NA	NA	NA	0.632
+macOS	scripts	merged-pipeline (already started)	15	33.703	34.516	15	21.650	22.664	NA	NA	NA	0.642
+macOS	scripts	redirect-stderr (whole script)	15	33.768	34.081	15	21.348	21.819	NA	NA	NA	0.632
+macOS	scripts	redirect-stderr (already started)	15	27.908	33.662	15	18.307	20.078	NA	NA	NA	0.656
+macOS	scripts	merged-pipeline-redirect (whole script)	15	39.331	40.618	15	24.886	25.630	NA	NA	NA	0.633
+macOS	scripts	merged-pipeline-redirect (already started)	15	33.700	40.042	15	21.804	23.351	NA	NA	NA	0.647
+macOS	scripts	builtin-merged-pipeline (whole script)	15	38.919	40.606	15	26.295	26.818	NA	NA	NA	0.676
+macOS	scripts	builtin-merged-pipeline (already started)	15	33.259	34.947	15	23.542	25.940	NA	NA	NA	0.708
+macOS	scripts	builtin-output (whole script)	15	5.929	6.138	15	3.318	3.736	NA	NA	NA	0.560
+macOS	scripts	builtin-output (already started)	15	0.608	0.689	15	0.429	0.502	NA	NA	NA	0.705
+macOS	scripts	field-split (whole script)	15	21.059	21.596	15	6.014	6.300	NA	NA	NA	0.286
+macOS	scripts	field-split (already started)	15	15.504	15.837	15	2.912	2.994	NA	NA	NA	0.188
+macOS	scripts	field-split-unicode (whole script)	15	23.439	24.119	15	5.987	6.151	NA	NA	NA	0.255
+macOS	scripts	field-split-unicode (already started)	15	17.474	17.775	15	2.884	2.978	NA	NA	NA	0.165
+macOS	scripts	long-trim (whole script)	15	620.163	623.196	15	5.117	5.834	NA	NA	NA	0.008
+macOS	scripts	long-trim (already started)	15	613.297	618.643	15	1.509	1.560	NA	NA	NA	0.002
+macOS	scripts	external-env (whole script)	15	33.587	34.654	15	21.336	24.007	NA	NA	NA	0.635
+macOS	scripts	external-env (already started)	15	27.461	27.855	15	18.243	18.918	NA	NA	NA	0.664
+macOS	scripts	external (whole script)	15	31.638	32.651	15	19.695	21.537	NA	NA	NA	0.623
+macOS	scripts	external (already started)	15	25.992	31.004	15	16.920	18.700	NA	NA	NA	0.651
+macOS	editor	recent hint	NA	NA	NA	156	0.012	0.017	NA	NA	NA	NA
+macOS	editor	no hint	NA	NA	NA	132	0.013	0.023	NA	NA	NA	NA
+macOS	editor	oldest hint: typed key	NA	NA	NA	12	0.014	0.025	NA	NA	NA	NA
+macOS	editor	oldest hint: visible suggestion	NA	NA	NA	12	0.616	0.657	NA	NA	NA	NA
+macOS	editor	files	12	10.113	10.259	12	5.137	5.381	NA	NA	NA	0.508
+macOS	editor	complete -f	12	10.776	10.888	12	5.061	5.396	NA	NA	NA	0.470
+macOS	editor	PATH	12	153.325	155.195	12	4.871	5.257	NA	NA	NA	0.032
+macOS	editor	static, all	12	24.092	24.445	12	0.304	0.320	NA	NA	NA	0.013
+macOS	editor	static, unique	12	23.486	24.459	12	0.217	0.221	NA	NA	NA	0.009
+macOS	editor	dynamic, unique	12	2.332	2.468	12	0.912	0.917	NA	NA	NA	0.391
+macOS	editor	list 10	12	0.088	0.095	12	0.059	0.091	NA	NA	NA	0.670
+macOS	editor	list 10000	12	33.346	36.618	12	7.457	9.516	NA	NA	NA	0.224

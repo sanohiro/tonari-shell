@@ -4,7 +4,9 @@
 
 Tonari is a Rust shell for modern macOS and Linux, including WSL2. It aims to replace Bash as an everyday login shell. Bash-style commands, startup files and tool integrations run on Tonari’s own interpreter. Interactive editing, history suggestions and completion are built in.
 
-**Tonari is a working prototype.** Try it in a nested terminal before using it for your login session. Compatibility with complete Bash configurations and third-party tools is still being tested.
+**Tonari is a working prototype.** Try it in a nested terminal before using it for your login session. The Ubuntu reference audit found 20 missing Bash builtins, including `getopts`, `mapfile` and `readonly`. Existing Bash startup files can depend on them.
+
+See the [Bash feature matrix](docs/compatibility/matrix.md) for the behavior and timing of each audited interface on Debian, Ubuntu and macOS. The [audit guide](docs/compatibility.md) explains how to reproduce the results and check a new release.
 
 ## Try it
 

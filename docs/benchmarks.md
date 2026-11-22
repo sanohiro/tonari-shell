@@ -730,3 +730,31 @@ On macOS 27.2.1 arm64 (Apple M1), the same Tonari release executable ran 40 comm
 | 17 | 94.143 ms | 49.873 ms |
 
 macOS 27.2.1 arm64（Apple M1）で、同じリリース版を使い、`helper` を40回呼び出して最後に `:` を実行しました。親から渡す PATH の末尾に `/usr/bin/true` へのリンクを置き、それより前のディレクトリは空にしています。シェル起動から終了までを計り、キャッシュ有効・無効の実行順を毎回交互に入れ替えました。最初の1組を除いた24組の中央値です。1ディレクトリでは差は約0.9 ms、17ディレクトリではキャッシュにより約44.3 ms 短縮しました。
+
+<a id="feature-audit"></a>
+
+## 2026-11-22 — Timings across the Bash feature inventory / Bash 機能一覧の速度
+
+The shell code was `39b0e6e`. We used native ARM64 release binaries on an Apple M1 with macOS 27.2.1 and a Docker Desktop Linux 6.11.11 VM. Debian 13 used GNU Bash 5.2.37, Ubuntu 26.04 used 5.3.9 and macOS used 5.2.37. The Linux Tonari was a 1,053,592-byte static musl executable. The macOS executable was 886,400 bytes. Bash was 1,412,096, 1,609,176 and 1,208,904 bytes respectively. This is a warm-cache run. The two shell executables were staged on the same filesystem, and shell order alternated between samples. [Environment and binary hashes, Bash then Tonari](compatibility/environment.json)
+
+Each row below counts names with a verified behavioral match, including shared witnesses and GNU golden matches. The denominators for the two timings differ because only canonical command strings support the readiness handshake. Interface-only checks are available in the detailed matrix. The comparison uses the median per executable, with two warmups and 15 measured samples per executable (seven for a GNU driver). The TSVs retain absolute medians and p95 values for every measured feature. [Full matrix](compatibility/matrix.md) · [Method and release gates](compatibility.md)
+
+各セルは「達成した名前の数 / 計測できた名前の数」です。左側は起動込み、右側は起動済みシェルに処理を渡してから終了までです。名前には同じテストを参照する予約語等が含まれます。シェル起動後に再度同期できる形式だけが右側の母数に入ります。中央値で 1/2 が目標、2/3 が上限です。
+
+| Platform | Whole ≤ 1/2 | Whole ≤ 2/3 | Whole ≤ Bash | Started ≤ 1/2 | Started ≤ 2/3 | Started ≤ Bash |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Debian 13 | 7/481 | 324/481 | 471/481 | 6/429 | 23/429 | 360/429 |
+| Ubuntu 26.04 | 6/481 | 312/481 | 473/481 | 6/429 | 14/429 | 358/429 |
+| macOS | 4/473 | 434/473 | 471/473 | 9/432 | 62/432 | 424/432 |
+
+The checked command substitution `v=$(printf 'a\n\n')` took 0.34× Bash's started time on both Linux systems. The three-stage `printf | tr | wc` pipeline took 0.85× on Debian, 0.88× on Ubuntu and 0.72× on macOS. Waiting for a background subshell’s exit status took 1.05×, 1.07× and 1.17× respectively. These are elapsed times for small, complete programs, so the scheduler, external commands and shell exit contribute to each result. A script that repeats work inside one shell answers a different performance question.
+
+起動済みの Bash と比べると、末尾改行を除去するコマンド置換は両 Linux で 0.34 倍でした。3段のパイプは Debian で 0.85 倍、Ubuntu で 0.88 倍、macOS で 0.72 倍です。バックグラウンドのサブシェルの終了値を `wait` で取得する例はそれぞれ 1.05、1.07、1.17 倍でした。この単発計測には、OS による起床や終了処理も含まれます。
+
+The companion workload run covers repeated scripts (15 samples per shell), startup and command execution (65), and completion, candidate listing and keyboard latency (12 sessions; individual keystroke counts are recorded). The shared editor cases verify the completed text or the set of displayed candidates. Tonari-only history suggestions have absolute latency measurements. [All script, startup and editor measurements](compatibility/workloads.tsv)
+
+反復スクリプト、起動と外部実行、入力・補完・候補一覧の数値も別表に収録しました。キーボード操作では入力が画面に返るまで測り、補完結果の文字列または候補集合を照合しました。履歴からの入力候補については Tonari 自身の遅延を記録しています。
+
+All 30 repeated scripts finished faster than Bash after startup on each platform. At the 2/3 target, Debian and Ubuntu passed 21 of 30 and macOS passed 25 of 30. For an interactive example, listing 10,000 candidates took a median of 4.24 ms in Tonari and 21.52 ms in Bash on Ubuntu. Ordinary filename Tab completion in the 10,000-file fixture took 2.32 ms versus 3.06 ms. The first operation clears the upper target and the second exceeds it.
+
+起動済みシェルで繰り返し処理を行うスクリプト30本は、3環境ともすべて Bash より速く完了しました。上限の 2/3 まで達したのは Debian と Ubuntu で各21本、macOS で25本です。Ubuntu での候補1万件の一覧表示は Tonari が中央値 4.24 ms、Bash が 21.52 ms でした。同じ規模のディレクトリで通常のファイル名補完を行うと 2.32 ms と 3.06 ms で、こちらは上限に届いていません。
