@@ -62,6 +62,15 @@ class ShellTests(unittest.TestCase):
                      'exec {keep}>out; test -e /dev/fd/$keep; echo "$?"; exec {keep}>&-', 0,
                      b"1\n0\n", minimum=5)
 
+    def test_invalid_expansion_in_unselected_shell_branch(self):
+        self.compare('if false; then echo ${(M)${(k)parameters[@]}:#git_*}; fi; echo ready',
+                     0, b"ready\n")
+        for shell in self.shells_for():
+            result = self.command(shell, 'echo ${(M)name}; echo unreachable')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, b"")
+            self.assertIn(b"bad substitution", result.stderr)
+
     def test_buffered_profile_preserves_parse_boundaries(self):
         self.env["BASH_ENV"] = str(self.cwd / "startup")
         (self.cwd / "startup").write_text(

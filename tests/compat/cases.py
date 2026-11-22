@@ -87,6 +87,7 @@ LANGUAGE = {
     "arithmetic for": "for ((i=0;i<3;++i)); do echo \"$i\"; done",
     "while": "i=0; while ((i<2)); do echo $((++i)); done",
     "until": "i=0; until ((i==2)); do echo $((++i)); done",
+    "deferred bad substitution": "if false; then echo ${(M)${(k)parameters[@]}:#git_*}; fi; printf ok",
     "select": "select x in a b; do echo \"$x:$REPLY\"; break; done <<< 2 2>/dev/null",
     "function and return": "function f { printf '%s' \"$1\"; return 19; }; f 'a b'",
     "brace group": "v=outside; { v=inside; }; echo \"$v\"",

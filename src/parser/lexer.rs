@@ -67,6 +67,21 @@ fn redirect(chars: &mut Chars<'_>, op: char, fd: i32) -> Result<Token, Error> {
     Ok(Token::Redirect(fd, target))
 }
 
+fn bad_substitution<'a>(
+    content: &'a str,
+    chars: &mut Chars<'a>,
+    word: &mut WordBuilder,
+    quoted: bool,
+) -> Result<(), Error> {
+    *chars = content.chars();
+    // Scan through the matching brace, including nested expansions and quotes.
+    // Bash diagnoses the substitution only when this word is actually expanded.
+    alternative_word(chars, quoted)?;
+    let end = content.len() - chars.as_str().len();
+    word.part(Part::BadSubstitution(format!("${{{}", &content[..end])));
+    Ok(())
+}
+
 pub(super) fn dollar(
     chars: &mut Chars<'_>,
     word: &mut WordBuilder,
@@ -85,7 +100,7 @@ pub(super) fn dollar(
                 Some(b'0'..=b'9') => content.bytes().take_while(|b| b.is_ascii_digit()).count(),
                 Some(b'@' | b'*' | b'?' | b'$' | b'#' | b'!' | b'-') => 1,
                 None => return Err(Error::Incomplete("unterminated parameter expansion")),
-                _ => return Err(Error::Invalid("unsupported parameter expansion")),
+                _ => return bad_substitution(content, chars, word, quoted),
             };
             let prefixed = content.starts_with(['#', '!'])
                 && content
@@ -237,7 +252,7 @@ pub(super) fn dollar(
                     Some('=') => crate::word::Alternative::Assign,
                     Some('?') => crate::word::Alternative::Error,
                     None => return Err(Error::Incomplete("unterminated parameter expansion")),
-                    _ => return Err(Error::Invalid("unsupported parameter expansion operator")),
+                    _ => return bad_substitution(content, chars, word, quoted),
                 };
                 let alternative = alternative_word(chars, quoted)?;
                 word.part(Part::Alternative {

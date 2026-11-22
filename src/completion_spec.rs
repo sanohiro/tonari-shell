@@ -780,9 +780,9 @@ pub fn for_tab(
     if words.is_empty() && allows_default {
         return None;
     }
-    if spec.options.contains("filenames")
-        || spec.actions.iter().any(|a| a == "directory" || a == "file")
-    {
+    let filenames = spec.options.contains("filenames")
+        || spec.actions.iter().any(|a| a == "directory" || a == "file");
+    if filenames {
         for word in &mut words {
             if !word.ends_with('/') && Path::new(word).is_dir() {
                 word.push('/');
@@ -799,7 +799,9 @@ pub fn for_tab(
     Some(Generated {
         source: complete::Source::Words(words),
         fallback: false,
-        noquote: spec.options.contains("noquote"),
+        // Bash callbacks may supply shell syntax, including their own trailing separator.
+        noquote: spec.options.contains("noquote")
+            || (!filenames && (spec.function.is_some() || spec.command.is_some())),
         nospace: spec.options.contains("nospace"),
     })
 }

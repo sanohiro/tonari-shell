@@ -22,6 +22,7 @@ pub enum Alternative {
 
 #[derive(Clone, Debug)]
 pub enum Part {
+    BadSubstitution(String),
     Brace(&'static str),
     BraceParameter(String),
     BraceTilde(&'static str),
@@ -125,6 +126,12 @@ impl Word {
             }
         };
         for part in parts {
+            if let Part::BadSubstitution(text) = part {
+                return Err(crate::expansion::Error::fatal(
+                    format!("{text}: bad substitution"),
+                    1,
+                ));
+            }
             if let Part::BraceParameter(name) = part {
                 *part = Part::Parameter {
                     name: std::mem::take(name),
@@ -403,7 +410,8 @@ impl Word {
                         output.append(&values.join(&ifs_separator(lookup)), quoted, ifs);
                     }
                 }
-                Part::Substitution { .. }
+                Part::BadSubstitution(_)
+                | Part::Substitution { .. }
                 | Part::Process { .. }
                 | Part::Arithmetic { .. }
                 | Part::Trim { .. } => {
