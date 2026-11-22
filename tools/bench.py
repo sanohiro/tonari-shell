@@ -7,7 +7,6 @@ import pty
 import select
 import signal
 import statistics
-import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -18,6 +17,8 @@ COMMANDS = {
     "-c :": ":",
     "external true": "/usr/bin/true",
     "two-stage pipeline": "/usr/bin/printf x | /usr/bin/wc -c",
+    "boolean builtins": "true; false; true",
+    "100 builtin redirections": ": >/dev/null;" * 100,
 }
 
 
@@ -56,12 +57,12 @@ def first_prompt(argv, env):
         os.waitpid(pid, 0)
 
 
-def round_trip(binary, flags, command, env):
+def round_trip(argv, env, file_actions):
     start = time.perf_counter_ns()
-    subprocess.run(
-        [binary, *flags, "-c", command], env=env, stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
-    )
+    pid = os.posix_spawn(argv[0], argv, env, file_actions=file_actions)
+    _, status = os.waitpid(pid, 0)
+    if status:
+        raise RuntimeError(f"{argv!r} exited with {os.waitstatus_to_exitcode(status)}")
     return (time.perf_counter_ns() - start) / 1e6
 
 
@@ -69,6 +70,8 @@ def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("tonari", type=Path)
     cli.add_argument("--bash", type=Path, default=Path("/bin/bash"))
+    cli.add_argument("--compare-tonari", action="append", nargs=2, default=[],
+                     metavar=("LABEL", "PATH"), help="include another Tonari build (repeatable)")
     cli.add_argument("--runs", type=int, default=100)
     args = cli.parse_args()
     if args.runs < 1:
@@ -77,23 +80,32 @@ def main():
         ("Tonari", args.tonari.resolve(), []),
         ("Bash", args.bash.resolve(), ["--noprofile", "--norc"]),
     ]
+    for label, path in args.compare_tonari:
+        if any(name == label for name, _, _ in shells):
+            cli.error(f"duplicate build label: {label}")
+        shells.append((label, Path(path).resolve(), []))
 
-    with tempfile.TemporaryDirectory() as temp:
+    with tempfile.TemporaryDirectory() as temp, open(os.devnull, "r+b") as devnull:
+        file_actions = [(os.POSIX_SPAWN_DUP2, devnull.fileno(), fd) for fd in range(3)]
         env = {
             "PATH": "/usr/bin:/bin", "HOME": temp, "HISTFILE": "/dev/null",
             "TERM": "xterm-256color", "PS1": PROMPT.decode(), "LC_ALL": "C",
             "BASH_SILENCE_DEPRECATION_WARNING": "1",
         }
-        for label in ["first prompt", *COMMANDS]:
+        for label in ["first prompt", *COMMANDS, "direct /usr/bin/true"]:
             print(label, flush=True)
-            samples = {name: [] for name, _, _ in shells}
+            subjects = [("Direct", "/usr/bin/true", [])] if label == "direct /usr/bin/true" else shells
+            samples = {name: [] for name, _, _ in subjects}
             for i in range(5 + args.runs):
-                offset = i % len(shells)
-                for name, binary, flags in shells[offset:] + shells[:offset]:
+                offset = i % len(subjects)
+                for name, binary, flags in subjects[offset:] + subjects[:offset]:
                     if label == "first prompt":
                         value = first_prompt([binary, *flags], env)
                     else:
-                        value = round_trip(binary, flags, COMMANDS[label], env)
+                        argv = [binary, *flags]
+                        if label in COMMANDS:
+                            argv.extend(["-c", COMMANDS[label]])
+                        value = round_trip(argv, env, file_actions)
                     if i >= 5:
                         samples[name].append(value)
             for name, times in samples.items():

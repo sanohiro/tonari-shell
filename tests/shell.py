@@ -3,6 +3,7 @@
 import errno
 import os
 import pty
+import resource
 import select
 import signal
 import subprocess
@@ -77,6 +78,19 @@ class ShellTests(unittest.TestCase):
                 self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"", b""))
                 self.assertEqual(int((self.cwd / "count").read_text()), 3)
 
+    def test_boolean_builtins(self):
+        for name, code in [("true", 0), ("false", 1)]:
+            tool = self.cwd / name
+            tool.write_text("#!/bin/sh\nexit 23\n")
+            tool.chmod(0o755)
+            self.env["PATH"] = f"{self.cwd}:/usr/bin:/bin"
+            self.compare(name, code)
+            self.compare(f"{name} --help ignored", code)
+            self.compare(f"./{name}", 23)
+        self.compare("true | false", 1)
+        self.compare("false | true", 0)
+        self.compare("false; exit", 1)
+
     def test_file_and_descriptor_order(self):
         fixture = "/bin/sh -c 'printf out; printf err >&2'"
         for shell in [BASH, TONARI]:
@@ -92,9 +106,59 @@ class ShellTests(unittest.TestCase):
                 self.assertEqual((self.cwd / "first").read_bytes(), b"")
                 self.assertEqual(self.command(shell, ": >&-; printf restored").stdout, b"restored")
 
+                proc = self.command(shell, "true > first < absent; printf restored")
+                self.assertEqual((proc.returncode, proc.stdout), (0, b"restored"))
+                self.assertTrue(proc.stderr)
+                self.assertEqual((self.cwd / "first").read_bytes(), b"")
+                proc = self.command(shell, "false > first > data")
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (1, b"", b""))
+                self.assertEqual((self.cwd / "data").read_bytes(), b"")
+
     def test_blocking_fifo_opens_do_not_serialize_a_pipeline(self):
         os.mkfifo(self.cwd / "feed")
         self.compare("cat < feed > data | printf x > feed; cat data", 0, b"x")
+
+    def test_silent_builtin_file_redirections(self):
+        file = self.cwd / "data"
+        for shell in [BASH, TONARI]:
+            with self.subTest(shell=shell):
+                file.write_bytes(b"keep")
+                proc = self.command(shell, "false >> data")
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (1, b"", b""))
+                self.assertEqual(file.read_bytes(), b"keep")
+                proc = self.command(shell, "true 2>data; printf kept")
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"kept", b""))
+                self.assertEqual(file.read_bytes(), b"")
+        # A backup temporarily allocated by the shell must not become a valid input.
+        self.compare("true < /dev/fd/3", 1)
+
+    def test_silent_builtin_fifo_open(self):
+        fifo = self.cwd / "feed"
+        os.mkfifo(fifo)
+        with subprocess.Popen([sys.executable, "-c",
+                               "import os, sys; os.close(os.open(sys.argv[1], os.O_WRONLY))",
+                               str(fifo)]) as writer:
+            try:
+                proc = self.command(TONARI, "true < feed; printf ready")
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"ready", b""))
+                self.assertEqual(writer.wait(timeout=5), 0)
+            finally:
+                writer.kill()
+
+    def test_silent_builtin_at_descriptor_limit(self):
+        # With one spare fd, Bash 5 opens and truncates the file before its
+        # attempt to save stdout fails. A second spare fd allows the redirection.
+        for limit, status in [(4, 1), (5, 0)]:
+            with self.subTest(limit=limit):
+                file = self.cwd / "data"
+                file.write_bytes(b"old")
+                proc = subprocess.run(
+                    [TONARI, "-c", "true >data; exit"], cwd=self.cwd, env=self.env,
+                    preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_NOFILE, (limit, limit)),
+                    capture_output=True, timeout=5,
+                )
+                self.assertEqual(proc.returncode, status, proc.stderr)
+                self.assertEqual(file.read_bytes(), b"")
 
     def test_parse_errors_precede_execution(self):
         for source in ["touch side-effect; printf '", "touch side-effect | | cat",

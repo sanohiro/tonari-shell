@@ -1,4 +1,3 @@
-use std::iter::Peekable;
 use std::str::Chars;
 
 #[derive(Debug, PartialEq)]
@@ -57,8 +56,8 @@ fn descriptor(s: &str) -> Result<i32, Error> {
     }
 }
 
-fn redirect(chars: &mut Peekable<Chars<'_>>, op: char, fd: i32) -> Result<Token, Error> {
-    let target = match (op, chars.peek()) {
+fn redirect(chars: &mut Chars<'_>, op: char, fd: i32) -> Result<Token, Error> {
+    let target = match (op, chars.clone().next()) {
         ('<', Some('<' | '>')) | ('>', Some('|')) => {
             return Err(Error::Invalid("unsupported redirection"));
         }
@@ -76,23 +75,30 @@ fn redirect(chars: &mut Peekable<Chars<'_>>, op: char, fd: i32) -> Result<Token,
     Ok(Token::Redirect(fd, target))
 }
 
-fn quoted(chars: &mut Peekable<Chars<'_>>, quote: char, word: &mut String) -> Result<(), Error> {
+fn quoted(chars: &mut Chars<'_>, quote: char, word: &mut String) -> Result<(), Error> {
+    if quote == '\'' {
+        let (literal, rest) = chars
+            .as_str()
+            .split_once(quote)
+            .ok_or(Error::Incomplete("unterminated quote"))?;
+        word.push_str(literal);
+        *chars = rest.chars();
+        return Ok(());
+    }
     while let Some(c) = chars.next() {
         if c == quote {
             return Ok(());
         }
-        if quote == '"' {
-            match c {
-                '\\' if matches!(chars.peek(), Some('"' | '$' | '`' | '\\' | '\n')) => {
-                    let escaped = chars.next().unwrap();
-                    if escaped != '\n' {
-                        word.push(escaped);
-                    }
-                    continue;
+        match c {
+            '\\' if matches!(chars.clone().next(), Some('"' | '$' | '`' | '\\' | '\n')) => {
+                let escaped = chars.next().unwrap();
+                if escaped != '\n' {
+                    word.push(escaped);
                 }
-                '$' | '`' => return Err(Error::Invalid("shell expansion is not implemented yet")),
-                _ => {}
+                continue;
             }
+            '$' | '`' => return Err(Error::Invalid("shell expansion is not implemented yet")),
+            _ => {}
         }
         word.push(c);
     }
@@ -103,15 +109,16 @@ fn lex(source: &str) -> Result<Vec<Token>, Error> {
     if source.contains('\0') {
         return Err(Error::Invalid("NUL in command text"));
     }
-    let mut chars = source.chars().peekable();
+    let mut chars = source.chars();
     let mut tokens = Vec::new();
-    while let Some(&c) = chars.peek() {
+    while let Some(c) = chars.clone().next() {
         if matches!(c, ' ' | '\t') {
             chars.next();
             continue;
         }
         if c == '#' {
-            while chars.next_if(|&v| v != '\n').is_some() {}
+            let rest = chars.as_str();
+            chars = rest[rest.find('\n').unwrap_or(rest.len())..].chars();
             continue;
         }
         if matches!(c, '\n' | ';' | '|' | '<' | '>') {
@@ -127,7 +134,7 @@ fn lex(source: &str) -> Result<Vec<Token>, Error> {
         let mut word = String::new();
         let mut protected = false;
         let mut started = false;
-        while let Some(&c) = chars.peek() {
+        while let Some(c) = chars.clone().next() {
             if matches!(c, ' ' | '\t' | '\n' | ';' | '|' | '<' | '>') {
                 break;
             }
@@ -142,7 +149,7 @@ fn lex(source: &str) -> Result<Vec<Token>, Error> {
                         .next()
                         .ok_or(Error::Incomplete("trailing backslash"))?;
                     if escaped == '\n' {
-                        if chars.peek().is_none() {
+                        if chars.as_str().is_empty() {
                             return Err(Error::Incomplete("line continuation"));
                         }
                         continue;
@@ -166,7 +173,7 @@ fn lex(source: &str) -> Result<Vec<Token>, Error> {
         }
         if !protected
             && word.bytes().all(|b| b.is_ascii_digit())
-            && matches!(chars.peek(), Some('<' | '>'))
+            && matches!(chars.clone().next(), Some('<' | '>'))
         {
             let op = chars.next().unwrap();
             tokens.push(redirect(&mut chars, op, descriptor(&word)?)?);
@@ -263,6 +270,14 @@ mod tests {
     fn carries_quotes_empty_arguments_and_utf8_through_lexing() {
         let parsed = parse(r#"printf '' "こ"'ん'\ にちは "#).unwrap();
         assert_eq!(parsed[0][0].words, ["printf", "", "こん にちは"]);
+    }
+
+    #[test]
+    fn single_quoted_spans_keep_metacharacters_and_newlines_literal() {
+        let source = "run pre'世界\n# $HOME \\` *'post # ignored\nnext";
+        let parsed = parse(source).unwrap();
+        assert_eq!(parsed[0][0].words, ["run", "pre世界\n# $HOME \\` *post"]);
+        assert_eq!(parsed[1][0].words, ["next"]);
     }
 
     #[test]
