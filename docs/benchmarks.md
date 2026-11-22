@@ -32,12 +32,7 @@ Apple M1 で OS 同梱の Bash 3.2.57 と brush 0.4.0 を使用しました。ma
 | `-c '/usr/bin/printf x \| /usr/bin/wc -c'` | 5.609 / 6.594 | 7.144 / 8.168 | 10.915 / 13.067 |
 | Executable bytes / 実行ファイルのバイト数 | 370,736 | 1,961,872 | 5,621,680 |
 
-## Reproduce / 再計測
-
-```sh
-RUSTFLAGS='-C target-cpu=native' cargo build --release --locked
-python3 tools/bench.py target/release/tonari --bash /bin/bash --brush /path/to/brush
-```
+## Initial measurement conditions / 初回の計測条件
 
 - Tonari was built with Rust 1.96.1, fat LTO, one codegen unit and symbol stripping. The reference shells were the OS-provided Bash and the upstream brush release binary. File sizes exclude shared libraries. [brush 0.4.0 binaries](https://github.com/reubeno/brush/releases/tag/brush-shell-v0.4.0)
 - The harness uses five warm-ups and 100 measured launches per shell per case, rotating shell order. All shells receive the same minimal environment, temporary home, prompt and `PATH`. Bash and brush skip profile and rc files. brush also skips its own config. Interactive editors retain their defaults.
@@ -48,3 +43,14 @@ Tonari は Rust 1.96.1 で CPU ネイティブ向けにビルドし、fat LTO、
 計測項目ごとに各シェルを5回ウォームアップし、起動順を入れ替えながら各100回計測しました。最小限の環境変数、一時ホーム、プロンプト、`PATH` は共通です。Bash と brush は profile と rc の読み込みを無効にし、brush 固有の設定も無効にしました。対話エディタはそれぞれの既定値です。
 
 時間には Python の親プロセスが起動要求を出すコストも含みます。プロンプト表示の計時は疑似端末の fork 直前に始まり、カーソル位置の問い合わせにはハーネスが応答し、プロンプトを受信した時点で終了します。今回は arm64 の1台で、キャッシュが温まりホームが空の条件です。実際の rc、履歴、補完、連続実行、エージェント全体の待ち時間は別途計測する対象です。
+
+## Benchmark against GNU Bash / GNU Bash との比較
+
+GNU Bash is the ongoing reference for speed and executable size. The initial three-shell run used the benchmark script at commit `33204d5`.
+
+今後は速度と実行ファイルのサイズを GNU Bash と比較します。初回に3種類のシェルを計測したスクリプトはコミット `33204d5` にあります。
+
+```sh
+RUSTFLAGS='-C target-cpu=native' cargo build --release --locked
+python3 tools/bench.py target/release/tonari --bash /bin/bash
+```

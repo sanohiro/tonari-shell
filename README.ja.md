@@ -34,7 +34,7 @@ RUSTFLAGS='-C target-cpu=native' cargo build --release --locked
 
 配布時には、ツールが直接起動できる `libexec/tonari/bash` を実体とし、利用者向けの `tonari` はその実行ファイルへのリンクにする予定です。別のシェルから起動した Tonari は `SHELL` を継承し、専用の Bash パスをログインシェルに選んだ場合は、ツールも `SHELL` 経由でそのパスを選べる設計です。実際のツールとの結合テストはこれからです。
 
-速さと小ささの比較対象は GNU Bash と brush です。Debian arm64 での最初の計測では、キャッシュが温まった状態でプロンプトが表示されるまでの中央値は **Tonari 0.90 ms、Bash 1.15 ms、brush 1.76 ms** でした。Tonari のリリース実行ファイルは **397,968 バイト**です。組み込みコマンドが二つ、プロンプトが最小構成の時点での基準値です。[全計測値・p95・計測条件](docs/benchmarks.md)
+同じマシン上の GNU Bash より起動とコマンド実行が速く、実行ファイルが小さいことを目指します。Debian arm64 での最初の計測では、キャッシュが温まった状態でプロンプトが表示されるまでの中央値は **Tonari 0.90 ms、Bash 1.15 ms** でした。実行ファイルのサイズは **Tonari 397,968 バイト、Bash 1,412,096 バイト**です。組み込みコマンドが二つ、プロンプトが最小構成の時点での基準値です。[全計測値・p95・計測条件](docs/benchmarks.md)
 
 ## 開発
 
@@ -45,6 +45,6 @@ python3 tests/shell.py target/debug/tonari
 python3 tools/bench.py target/release/tonari --bash /bin/bash
 ```
 
-結合テストでは、出力・ファイルの内容・終了ステータスを Bash と比較し、疑似端末で Ctrl-C の動作を確認します。`REFERENCE_BASH` で比較用の Bash を指定できます。ベンチマークに brush を加えるには `--brush /path/to/brush` を渡してください。
+結合テストでは、出力・ファイルの内容・終了ステータスを Bash と比較し、疑似端末で Ctrl-C の動作を確認します。比較用の Bash は、テストでは `REFERENCE_BASH`、ベンチマークでは `--bash` で指定できます。
 
 英語と日本語のドキュメントは一緒に更新します。コミットメッセージ、PR のタイトルと本文は英語で書きます。

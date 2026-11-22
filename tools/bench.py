@@ -1,4 +1,4 @@
-"""Warm-cache shell benchmarks. Requires Python 3 on a Unix host."""
+"""Benchmark Tonari against GNU Bash with warm caches on a Unix host."""
 
 import argparse
 import math
@@ -41,7 +41,7 @@ def first_prompt(argv, env):
             if not chunk:
                 raise RuntimeError(f"{argv[0]} exited before its prompt")
             data += chunk
-            # reedline queries cursor position before rendering its first prompt.
+            # Answer terminal cursor-position queries during prompt rendering.
             queries = data.count(b"\x1b[6n")
             for _ in range(queries - answered):
                 os.write(fd, b"\x1b[1;1R")
@@ -69,7 +69,6 @@ def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("tonari", type=Path)
     cli.add_argument("--bash", type=Path, default=Path("/bin/bash"))
-    cli.add_argument("--brush", type=Path)
     cli.add_argument("--runs", type=int, default=100)
     args = cli.parse_args()
     if args.runs < 1:
@@ -78,8 +77,6 @@ def main():
         ("Tonari", args.tonari.resolve(), []),
         ("Bash", args.bash.resolve(), ["--noprofile", "--norc"]),
     ]
-    if args.brush:
-        shells.append(("brush", args.brush.resolve(), ["--no-config", "--noprofile", "--norc"]))
 
     with tempfile.TemporaryDirectory() as temp:
         env = {

@@ -34,7 +34,7 @@ The reference shells for development are GNU Bash 5.2.37 from Debian 13 and 5.3.
 
 The planned install layout gives tools a runnable path ending in `libexec/tonari/bash`. The user-facing `tonari` command will link to that executable. A nested Tonari session will inherit `SHELL`. Choosing the dedicated Bash path as a login shell will let tools select it through `SHELL`. Integration tests with real tools are still pending.
 
-The speed and size targets are GNU Bash and brush. In the first warm-cache Debian arm64 run, median time to the prompt was **0.90 ms** for Tonari, **1.15 ms** for Bash and **1.76 ms** for brush. Tonari's release executable was **397,968 bytes**. This baseline covers a shell with two builtins and a minimal prompt. [Full results, p95 and methodology](docs/benchmarks.md)
+Tonari aims to start faster, run commands faster and ship a smaller executable than GNU Bash on the same machine. In the first warm-cache Debian arm64 run, median time to the prompt was **0.90 ms** for Tonari and **1.15 ms** for Bash. The executables were **397,968 bytes** and **1,412,096 bytes**, respectively. This baseline covers a shell with two builtins and a minimal prompt. [Full results, p95 and methodology](docs/benchmarks.md)
 
 ## Development
 
@@ -45,6 +45,6 @@ python3 tests/shell.py target/debug/tonari
 python3 tools/bench.py target/release/tonari --bash /bin/bash
 ```
 
-The end-to-end suite compares output, file contents and exit status with Bash, and exercises Ctrl-C on a pseudo-terminal. Set `REFERENCE_BASH` to test against another Bash binary. Pass `--brush /path/to/brush` to include brush in the benchmarks.
+The end-to-end suite compares output, file contents and exit status with Bash, and exercises Ctrl-C on a pseudo-terminal. To select a Bash binary, set `REFERENCE_BASH` for the tests or pass `--bash` to the benchmark.
 
 Keep the English and Japanese documentation in sync. Write commit messages, PR titles and PR descriptions in English.
