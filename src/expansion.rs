@@ -181,7 +181,11 @@ impl<'a> Expansion<'a> {
 
     pub fn fields_with_glob(&mut self, mut word: Word, glob: bool) -> Result<Vec<String>, Error> {
         word.resolve(self)?;
-        Ok(word.fields_with_glob(&|name| self.lookup(name), &self.session.positional, glob))
+        Ok(word.fields_with_glob(
+            &|name| self.lookup(name),
+            &self.session.positional,
+            glob.then_some(self.session.shopt.glob),
+        ))
     }
 
     pub fn scalar(&mut self, mut word: Word) -> Result<String, Error> {

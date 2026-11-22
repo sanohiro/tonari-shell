@@ -81,11 +81,11 @@ pub(super) fn dollar(
                     .as_bytes()
                     .get(1)
                     .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_');
-            let len = if content.starts_with('#')
+            let len = if content.starts_with(['#', '!'])
                 && content.as_bytes().get(1).is_some_and(u8::is_ascii_digit)
             {
                 1 + content[1..].bytes().take_while(u8::is_ascii_digit).count()
-            } else if content.starts_with('#')
+            } else if content.starts_with(['#', '!'])
                 && content.as_bytes().get(2) == Some(&b'}')
                 && matches!(
                     content.as_bytes().get(1),

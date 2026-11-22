@@ -109,9 +109,16 @@ pub(crate) fn has_magic(text: &str) -> bool {
     false
 }
 
-pub(crate) fn pathnames(pattern: &str) -> Vec<String> {
+#[derive(Clone, Copy, Default)]
+pub struct GlobOptions {
+    pub dotglob: bool,
+    pub nullglob: bool,
+    pub globstar: bool,
+}
+
+pub(crate) fn pathnames(pattern: &str, options: GlobOptions) -> Vec<String> {
     let mut names = Vec::new();
-    localized(|| paths(pattern, &mut names));
+    localized(|| paths(pattern, options, &mut names));
     names
 }
 
@@ -130,10 +137,13 @@ pub(crate) fn unescape(component: &str) -> String {
 
 // Walk by component so POSIX character classes have the same fnmatch
 // semantics in argv and in case patterns, including on Darwin.
-fn paths(pattern: &str, fields: &mut Vec<String>) {
+fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>) {
     let mut paths = vec![String::new()];
     let mut rest = pattern;
+    let mut known_existing = false;
+    let mut expanded = false;
     while !rest.is_empty() {
+        known_existing = false;
         let slash_count = rest.bytes().take_while(|&b| b == b'/').count();
         if slash_count > 0 {
             for prefix in &mut paths {
@@ -145,6 +155,43 @@ fn paths(pattern: &str, fields: &mut Vec<String>) {
         let end = rest.find('/').unwrap_or(rest.len());
         let part = &rest[..end];
         rest = &rest[end..];
+        if options.globstar && part == "**" {
+            while let Some(after) = rest.trim_start_matches('/').strip_prefix("**") {
+                if !(after.is_empty() || after.starts_with('/')) {
+                    break;
+                }
+                expanded = true;
+                rest = after;
+            }
+            let trailing = !rest.is_empty() && rest.trim_start_matches('/').is_empty();
+            rest = rest.trim_start_matches('/');
+            let mut found = Vec::new();
+            for prefix in paths {
+                if std::path::Path::new(if prefix.is_empty() { "." } else { &prefix }).is_dir() {
+                    if !rest.is_empty() || !prefix.is_empty() {
+                        let root = if rest.is_empty() && !trailing && expanded && prefix != "/" {
+                            prefix.trim_end_matches('/')
+                        } else {
+                            &prefix
+                        };
+                        found.push(root.to_owned());
+                    }
+                    descendants(
+                        prefix,
+                        rest.is_empty(),
+                        trailing,
+                        options.dotglob,
+                        &mut found,
+                    );
+                }
+            }
+            expanded = true;
+            found.sort_unstable();
+            found.dedup();
+            paths = found;
+            known_existing = rest.is_empty();
+            continue;
+        }
         if !has_magic(part) {
             let literal = unescape(part);
             for prefix in &mut paths {
@@ -166,7 +213,14 @@ fn paths(pattern: &str, fields: &mut Vec<String>) {
                 let Ok(name) = CString::new(name) else {
                     continue;
                 };
-                if unsafe { libc::fnmatch(part.as_ptr(), name.as_ptr(), libc::FNM_PERIOD) } == 0 {
+                if unsafe {
+                    libc::fnmatch(
+                        part.as_ptr(),
+                        name.as_ptr(),
+                        if options.dotglob { 0 } else { libc::FNM_PERIOD },
+                    )
+                } == 0
+                {
                     // read_dir omits "." and "..", matching Bash 5.2+ globskipdots.
                     let mut path = String::with_capacity(prefix.len() + name.as_bytes().len());
                     path.push_str(&prefix);
@@ -178,12 +232,14 @@ fn paths(pattern: &str, fields: &mut Vec<String>) {
         if matched.is_empty() {
             return;
         }
+        expanded = true;
         paths = matched;
+        known_existing = true;
     }
     // A literal suffix must exist. A trailing slash asks the OS for a directory.
     let mut ordered: Vec<_> = paths
         .into_iter()
-        .filter(|path| fs::symlink_metadata(path).is_ok())
+        .filter(|path| known_existing || fs::symlink_metadata(path).is_ok())
         .filter_map(|path| CString::new(path).ok())
         .collect();
     ordered.sort_unstable_by(|a, b| {
@@ -191,6 +247,50 @@ fn paths(pattern: &str, fields: &mut Vec<String>) {
         order.cmp(&0).then_with(|| CStr::cmp(a, b))
     });
     fields.extend(ordered.into_iter().map(|s| s.into_string().unwrap()));
+}
+
+// The recursive component consumes zero or more directories. A symlink to a
+// directory can appear in a terminal **/ listing, but is never traversed here.
+fn descendants(
+    prefix: String,
+    terminal: bool,
+    trailing: bool,
+    dotglob: bool,
+    found: &mut Vec<String>,
+) {
+    let prefixed = !prefix.is_empty();
+    let mut pending = vec![prefix];
+    while let Some(dir) = pending.pop() {
+        let base = if dir.is_empty() { "." } else { &dir };
+        let Ok(entries) = fs::read_dir(base) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            if !dotglob && name.starts_with('.') {
+                continue;
+            }
+            let path = format!("{dir}{name}");
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                let subdir = format!("{path}/");
+                found.push(if terminal && !trailing {
+                    path
+                } else {
+                    subdir.clone()
+                });
+                pending.push(subdir);
+            } else if terminal && !trailing {
+                found.push(path);
+            } else if (terminal || prefixed) && kind.is_symlink() && entry.path().is_dir() {
+                found.push(format!("{path}/"));
+            }
+        }
+    }
 }
 
 // Keep a matching expression alongside the actual argument only once active
@@ -223,14 +323,11 @@ impl Field {
         self.text.push_str(text);
     }
 
-    pub fn finish(self, fields: &mut Vec<String>, globbing: bool) {
-        if let Some(pattern) = self
-            .pattern
-            .filter(|pattern| globbing && has_magic(pattern))
-        {
+    pub fn finish(self, fields: &mut Vec<String>, globbing: Option<GlobOptions>) {
+        if let Some((options, pattern)) = globbing.zip(self.pattern).filter(|(_, p)| has_magic(p)) {
             let count = fields.len();
-            localized(|| paths(&pattern, fields));
-            if fields.len() > count {
+            localized(|| paths(&pattern, options, fields));
+            if fields.len() > count || options.nullglob {
                 return;
             }
         }
@@ -290,14 +387,14 @@ mod tests {
         field.push(root, false);
         field.push("[[:alpha:]]ord.rs", true);
         let mut words = Vec::new();
-        field.finish(&mut words, true);
+        field.finish(&mut words, Some(GlobOptions::default()));
         assert_eq!(words, [format!("{root}word.rs")]);
 
         let mut field = Field::default();
         field.push(root, false);
         field.push("*", false);
         field.push("-missing-?", true);
-        field.finish(&mut words, true);
+        field.finish(&mut words, Some(GlobOptions::default()));
         assert_eq!(words[1], format!("{root}*-missing-?"));
     }
 }

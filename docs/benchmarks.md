@@ -16,6 +16,53 @@ The default run includes a session workload covering assignment, export, paramet
 
 既定の計測には、代入・export・変数展開・`cd`・`pwd`・`&&`・リダイレクト・`unset` を同じシェルで実行する項目が含まれます。算術ループ1,000回と、一つのシェルから外部プログラム16個を順に起動する項目もあります。後者では同じプログラム16個を Python 親プロセスから直接 `posix_spawn` し、その都度終了を待つ条件も交互に計測します。標準入出力は計時前に用意し、各子プロセスに継承させます。セッション機能の実装前との比較には `--case core` を使います。プロンプト表示の主指標は疑似端末での起動全体です。子プロセスの exec 直前にも時刻を記録し、同じ測定サンプルのうち、端末の準備と fork の後に経過した時間も表示します。
 
+<a id="capture-and-spawn"></a>
+
+## Command substitution, process launch and patterns / コマンド置換・プロセス起動・パターン
+
+On 2026-11-22 an Apple M1 ran macOS 27.2.1 natively and Debian 13 arm64 in a VM. We rotated the previous release (`dbde5fe`), the updated release and GNU Bash 5.2.37. Each condition used five warm-ups, then 30 measured runs on macOS or 250 on Debian. The temporary home, scripts, fixtures and executables were on each OS's local filesystem. All shells used `LC_ALL=C`, warm caches and disabled startup files. Every run checked stdout, stderr and exit status. Tables show **median / p95 in milliseconds**. Whole spans launch through exit. Started begins after the ready marker and includes sourcing the script and collecting the result. [Script driver](../tools/bench_scripts.py)
+
+2026-11-22、M1 のネイティブ macOS と同じマシン上の Debian 13 arm64 VM で、旧版・新版・Bash 5.2.37 を交互に実行した。各条件で5回ウォームアップした後、Mac は30回、Debian は250回測定した。各 OS のローカルディスクと温まったキャッシュを使い、出力・標準エラー・終了値を毎回確認している。表は中央値 / p95（ms）。Whole は起動から終了まで、Started は起動済みシェルへ実行許可を送ってからスクリプトを読み込み、終了結果を受け取るまで。
+
+### macOS arm64
+
+| Workload / 処理 | Timing / 区間 | Previous | Tonari | Bash |
+|---|---|---:|---:|---:|
+| 64 × `$(printf …)` | Whole | 45.225 / 57.215 | 4.391 / 6.480 | 59.866 / 74.905 |
+| 64 × `$(printf …)` | Started | 44.217 / 56.791 | 0.695 / 1.542 | 52.581 / 65.089 |
+| 16 × `$(/usr/bin/printf …)` | Whole | 35.486 / 51.407 | 25.173 / 34.495 | 43.085 / 53.650 |
+| 16 × `$(/usr/bin/printf …)` | Started | 32.277 / 46.950 | 21.006 / 28.854 | 35.450 / 48.887 |
+| 1,000 × `[[ =~ ]]` | Whole | 12.054 / 14.025 | 6.570 / 8.419 | 15.664 / 19.997 |
+| 1,000 × `[[ =~ ]]` | Started | 7.819 / 9.031 | 2.611 / 3.720 | 8.310 / 9.527 |
+| 30 × `set -- fixtures/*.txt` (512 files) | Whole | 31.911 / 48.623 | 17.759 / 21.911 | 1148.808 / 1662.967 |
+| 30 × `set -- fixtures/*.txt` (512 files) | Started | 28.573 / 40.128 | 14.095 / 18.297 | 1162.199 / 1529.108 |
+| 2,000 basename / extension trims | Whole | 8.890 / 9.811 | 9.094 / 10.132 | 18.058 / 19.634 |
+| 2,000 basename / extension trims | Started | 5.227 / 5.812 | 5.436 / 5.821 | 11.286 / 13.308 |
+
+### Debian arm64
+
+| Workload / 処理 | Timing / 区間 | Previous | Tonari | Bash | Direct C |
+|---|---|---:|---:|---:|---:|
+| 16 × `/usr/bin/true` | Whole | 3.774 / 5.269 | 3.749 / 5.221 | 5.391 / 7.330 | 3.438 / 4.471 |
+| 16 × `/usr/bin/true` | Started | 3.659 / 6.302 | 3.621 / 5.071 | 5.031 / 7.347 | 3.503 / 5.106 |
+| 32 exports, 16 × `/usr/bin/printenv` | Whole | 5.095 / 7.201 | 4.733 / 8.043 | 6.573 / 11.040 | — |
+| 32 exports, 16 × `/usr/bin/printenv` | Started | 4.448 / 7.569 | 4.191 / 7.561 | 5.538 / 8.930 | — |
+
+The native C control was built with Alpine musl and used the same pipes, environment and ready protocol as Tonari. It directly launches `/usr/bin/true` 16 times and waits for each. In the started-shell run the C control also exceeded two-thirds of Bash's median. A loop with a fixed executable bounds what we can save in the shell on this machine. With 32 exports, the started-shell median fell from 4.448 to 4.191 ms. The whole-script p95 rose from 7.201 to 8.043 ms. [Native control](../tools/bench_spawn.c)
+
+C の対照は Alpine の musl でビルドし、同じパイプ・環境・開始合図を使った。起動後の計測では C で直接起動して毎回終了を待っても Bash の中央値の 2/3 を超えた。ここでは実行ファイルと待ち方が同じなので、シェル内部で短縮できる時間は限られる。32変数を export し、子が値を受け取るケースでは起動後の中央値が 4.448 ms から 4.191 ms に短縮した。起動込みの p95 は 7.201 ms から 8.043 ms に増えた。
+
+The macOS release was 836,336 bytes, up from 819,776. The Linux static PIE was 987,496 bytes with packed relative relocations. The ordinary link of the same source was 1,053,032 bytes. Packing produced an ELF `.relr.dyn` section, avoided the extra file padding and retained the single-executable layout. Debian and Ubuntu both ran the packed binary through the shell test suite. [Linux release recipe](#linux-arm64-static-pie)
+
+macOS 版は 819,776 バイトから 836,336 バイトになった。Linux arm64 静的 PIE は相対再配置情報を圧縮して 987,496 バイト。同じソースの通常リンクで観測した 1,053,032 バイトには、セグメント境界のパディングも含まれていた。圧縮後の単一バイナリは Debian と Ubuntu でテストした。
+
+```sh
+# Build the native control with the Alpine musl compiler for the Linux run.
+cc -Os -static-pie tools/bench_spawn.c -o /tmp/bench-spawn
+python3 tools/bench_scripts.py /path/to/tonari --previous /path/to/previous --bash /bin/bash --spawn-control /tmp/bench-spawn --case external --case external-env --runs 250
+python3 tools/bench_scripts.py /path/to/tonari --previous /path/to/previous --bash /path/to/bash-5.2.37 --case substitutions --case external-substitutions --case regex --case glob --case strings --runs 30
+```
+
 <a id="script-execution"></a>
 
 ## Running shell scripts / シェルスクリプトの実行
@@ -373,7 +420,7 @@ The static build links musl into a position-independent executable. It runs on t
 ```sh
 CARGO_PROFILE_RELEASE_OPT_LEVEL=s \
 RUSTFLAGS='-C target-cpu=native -C target-feature=+crt-static' \
-cargo build --locked --release --target aarch64-alpine-linux-musl
+cargo rustc --locked --release --target aarch64-alpine-linux-musl -- -C link-arg=-Wl,-z,pack-relative-relocs
 ```
 
 ## First prototype / 初回試作

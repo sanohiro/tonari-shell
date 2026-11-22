@@ -1,7 +1,7 @@
 pub(crate) mod array;
 mod declare;
 mod options;
-mod printf;
+pub(crate) mod printf;
 mod read;
 
 use std::collections::BTreeMap;
@@ -47,6 +47,8 @@ pub struct Session {
     pub pipefail: bool,
     pub noglob: bool,
     pub shopt: options::ShellOptions,
+    pub(crate) external_env: std::cell::RefCell<Option<Rc<crate::execute::Environment>>>,
+    pub regex: Option<Rc<crate::test_expression::Compiled>>,
     pub substitutions: crate::execute::process_substitution::Substitutions,
     pub jobs: crate::jobs::Jobs,
     pub hashes: crate::execute::hash::Table,
@@ -110,7 +112,7 @@ impl Session {
     }
 
     pub fn printf(&mut self, args: &[String]) -> u8 {
-        printf::run(self, args)
+        printf::run(self, args, None)
     }
 
     pub fn read(&mut self, args: &[String]) -> u8 {

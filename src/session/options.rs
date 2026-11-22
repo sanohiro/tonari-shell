@@ -8,6 +8,7 @@ pub struct ShellOptions {
     pub sourcepath: bool,
     pub expand_aliases: bool,
     pub progcomp: bool,
+    pub glob: crate::pattern::GlobOptions,
     pub patsub_replacement: bool,
     last_size: Option<(u16, u16)>,
 }
@@ -19,6 +20,7 @@ impl Default for ShellOptions {
             sourcepath: true,
             expand_aliases: false,
             progcomp: true,
+            glob: Default::default(),
             patsub_replacement: true,
             last_size: None,
         }
@@ -26,7 +28,16 @@ impl Default for ShellOptions {
 }
 
 const SET_OPTIONS: &[&str] = &["errexit", "hashall", "noglob", "nounset", "pipefail"];
-const SHOPT_OPTIONS: &[&str] = &["checkwinsize", "expand_aliases", "progcomp", "sourcepath"];
+const SHOPT_OPTIONS: &[&str] = &[
+    "checkwinsize",
+    "dotglob",
+    "expand_aliases",
+    "globstar",
+    "nullglob",
+    "patsub_replacement",
+    "progcomp",
+    "sourcepath",
+];
 
 impl Session {
     pub fn refresh_terminal_size(&mut self) {
@@ -56,6 +67,9 @@ impl Session {
             (true, "noglob") => Some(&mut self.noglob),
             (true, "nounset") => Some(&mut self.nounset),
             (true, "pipefail") => Some(&mut self.pipefail),
+            (false, "dotglob") => Some(&mut self.shopt.glob.dotglob),
+            (false, "globstar") => Some(&mut self.shopt.glob.globstar),
+            (false, "nullglob") => Some(&mut self.shopt.glob.nullglob),
             (false, "checkwinsize") => Some(&mut self.shopt.checkwinsize),
             (false, "patsub_replacement") => Some(&mut self.shopt.patsub_replacement),
             (false, "progcomp") => Some(&mut self.shopt.progcomp),

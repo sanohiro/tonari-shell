@@ -34,20 +34,20 @@ tools/stage.sh target/release/tonari "$prefix"
 ## Current capabilities
 
 - **Input and state.** Interactive terminals, `-c`, script files, stdin, `source`, and `eval` share the evaluator. Variables, exported environment values, function-local scope, positional parameters, and `cd` persist within their Bash scopes.
-- **Language.** Conditional lists, groups, subshells, functions, loops, `case`, `[[ ]]`, arithmetic, command substitution, globs, quoted words, and indexed arrays are implemented. Alias definitions affect subsequently read commands. The parser accepts UTF-8 shell text.
+- **Language.** Conditional lists, groups, subshells, functions, loops, `case`, `[[ ]]`, arithmetic, command substitution, globs, quoted words, and indexed arrays are implemented. Pathname expansion supports `dotglob`, `nullglob`, and recursive `globstar`. Parameter expansion supports indirection such as `${!name}` and `${!#}`. Alias definitions affect subsequently read commands. The parser accepts UTF-8 shell text.
 - **Processes.** External commands and concurrent pipelines support ordered redirections, here-documents and here-strings. Streams can carry arbitrary bytes. Foreground job control, Ctrl-C, Ctrl-Z, `jobs`, `bg`, `fg`, background pipelines, and `wait` are exercised with real processes.
 - **Startup.** Login sessions read the system profile and the first readable Bash user profile. Interactive non-login sessions read the user’s Bash rc. Noninteractive sessions support `BASH_ENV`. The editor honors `PS1`, `PS2`, and a scalar `PROMPT_COMMAND`.
 - **History and completion.** Tonari keeps its own journal under `$XDG_STATE_HOME/tonari` or `~/.local/state/tonari`. History supports common Bash exclusion and persistence settings. Tab can use Bash word lists and shell completion functions registered with `complete`.
 
 We sourced nvm 0.40.5 in Tonari, switched between Node 24.1.0 and 18.13.0 in the same session, and verified each switch with `node --version`. The script from `gh completion -s bash` (GitHub CLI 2.96.0) registers successfully. Completing `gh iss` to `gh issue` currently needs a bash-completion helper. Loading the full Debian bash-completion library is still pending.
 
-Compatibility work includes more shell options and expansions, associative arrays, signal traps, persistent startup parsing caches, and end-to-end coverage of real tool integrations. WSL2 and x86-64 still need native validation.
+Compatibility work includes brace expansion, extended globs, additional parameter transformations, associative arrays, signal traps, persistent startup parsing caches, and end-to-end coverage of real tool integrations. WSL2 and x86-64 still need native validation.
 
 ## Speed and size
 
 The feature reference is GNU Bash 5.2.37 on Debian 13 and 5.3.9 on Ubuntu 26.04. Our speed target is half the elapsed time of Bash on the same workload, with two-thirds as the upper target. The benchmark records startup, external commands, pipelines, and repeated operations separately. The macOS system Bash 3.2 is an additional comparison. [Measurements, binary sizes and build conditions](docs/benchmarks.md)
 
-Tonari ships as one executable per OS and CPU architecture. Linux arm64 uses static musl. The macOS executable links to OS libraries.
+Tonari ships as one executable per OS and CPU architecture. The macOS executable links to OS libraries. The Linux arm64 release links musl statically and packs ELF relative relocations. [Linux release build](docs/benchmarks.md#linux-arm64-static-pie)
 
 ## Development
 

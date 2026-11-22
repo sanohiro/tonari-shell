@@ -12,6 +12,7 @@ use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::process::{Command, Stdio};
+use std::rc::Rc;
 
 use crate::expansion::Expansion;
 use crate::parser::{Assignment, Pipeline, Redirect, SimpleCommand, Target, Word};
@@ -202,19 +203,29 @@ fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     Ok((private_fd(read.into())?, private_fd(write.into())?))
 }
 
-struct Environment {
+pub(crate) struct Environment {
     // Commands without environment changes use execv and inherit environ.
     _strings: Vec<CString>,
     pointers: Vec<*const libc::c_char>,
+    changes: Vec<(String, Option<String>)>,
 }
 
 impl Environment {
-    fn prepare(session: &Session, assignments: &[(String, String)]) -> Option<Self> {
+    fn prepare(session: &Session, assignments: &[(String, String)]) -> Option<Rc<Self>> {
+        session.environment_changes(assignments).next()?;
+        if assignments.is_empty() {
+            if let Some(cached) = &*session.external_env.borrow() {
+                if session.environment_changes(&[]).eq(cached
+                    .changes
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v.as_deref())))
+                {
+                    return Some(cached.clone());
+                }
+            }
+        }
         let changes: std::collections::BTreeMap<_, _> =
             session.environment_changes(assignments).collect();
-        if changes.is_empty() {
-            return None;
-        }
         let mut strings = Vec::new();
         let mut push = |key: &[u8], value: &[u8]| {
             let mut entry = Vec::with_capacity(key.len() + value.len() + 2);
@@ -228,17 +239,30 @@ impl Environment {
                 push(key.as_bytes(), val.as_bytes());
             }
         }
-        for (key, val) in changes {
+        for (key, val) in &changes {
             if let Some(val) = val {
                 push(key.as_bytes(), val.as_bytes());
             }
         }
         let mut pointers: Vec<_> = strings.iter().map(|v| v.as_ptr()).collect();
         pointers.push(std::ptr::null());
-        Some(Self {
+        let cached_changes = if assignments.is_empty() {
+            changes
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v.map(str::to_owned)))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let env = Rc::new(Self {
             _strings: strings,
             pointers,
-        })
+            changes: cached_changes,
+        });
+        if assignments.is_empty() {
+            *session.external_env.borrow_mut() = Some(env.clone());
+        }
+        Some(env)
     }
 }
 
@@ -248,7 +272,7 @@ struct External {
     words: Vec<CString>,
     argv: Vec<*const libc::c_char>,
     search_paths: Option<Vec<CString>>,
-    env: Option<Environment>,
+    env: Option<Rc<Environment>>,
 }
 
 impl External {
@@ -292,14 +316,61 @@ impl External {
             original_name: original,
             search_paths,
             env: if clear_env {
-                Some(Environment {
+                Some(Rc::new(Environment {
+                    changes: Vec::new(),
                     _strings: Vec::new(),
                     pointers: vec![std::ptr::null()],
-                })
+                }))
             } else {
                 Environment::prepare(session, &cmd.assignments)
             },
         }
+    }
+
+    // The foreground process inherits all descriptors here. With the executable
+    // already resolved, Linux needs only argv, environ and SIGPIPE's exec default.
+    #[cfg(target_os = "linux")]
+    fn spawn_resolved(&self) -> io::Result<libc::pid_t> {
+        unsafe extern "C" {
+            static environ: *mut *mut libc::c_char;
+        }
+        let path = self
+            .search_paths
+            .as_ref()
+            .and_then(|paths| paths.first())
+            .unwrap_or(&self.words[0]);
+        let mut attr = std::mem::MaybeUninit::uninit();
+        let mut pid = 0;
+        unsafe {
+            let err = libc::posix_spawnattr_init(attr.as_mut_ptr());
+            if err != 0 {
+                return Err(io::Error::from_raw_os_error(err));
+            }
+            let mut signals = std::mem::zeroed();
+            libc::sigemptyset(&mut signals);
+            libc::sigaddset(&mut signals, libc::SIGPIPE);
+            libc::posix_spawnattr_setsigdefault(attr.as_mut_ptr(), &signals);
+            libc::posix_spawnattr_setflags(attr.as_mut_ptr(), libc::POSIX_SPAWN_SETSIGDEF as _);
+            let env = self
+                .env
+                .as_ref()
+                .map_or(environ as *const *mut libc::c_char, |e| {
+                    e.pointers.as_ptr().cast()
+                });
+            let err = libc::posix_spawn(
+                &mut pid,
+                path.as_ptr(),
+                std::ptr::null(),
+                attr.as_ptr(),
+                self.argv.as_ptr().cast(),
+                env,
+            );
+            libc::posix_spawnattr_destroy(attr.as_mut_ptr());
+            if err != 0 {
+                return Err(io::Error::from_raw_os_error(err));
+            }
+        }
+        Ok(pid)
     }
 
     fn exec(&self) -> u8 {
@@ -891,6 +962,15 @@ fn start(
         && launch.group.is_none()
         && !launch.background
     {
+        #[cfg(target_os = "linux")]
+        if input.is_none() && output.is_none() && (cached.is_some() || cmd.words[0].contains('/')) {
+            match External::new(cmd, session).spawn_resolved() {
+                Ok(pid) => return Ok(Stage::Child(pid)),
+                // Keep the existing shell-script fallback and error diagnostics.
+                Err(e) if e.raw_os_error() == Some(libc::ENOEXEC) => (),
+                Err(e) => return spawn_failure(&cmd.words[0], e),
+            }
+        }
         // Let the standard library select the platform's process-spawn path.
         let explicit;
         let program = if let Some(path) = cached {
@@ -921,17 +1001,7 @@ fn start(
         }
         return match external.spawn() {
             Ok(child) => Ok(Stage::Child(child.id() as libc::pid_t)),
-            Err(e) => {
-                let code = e.raw_os_error().unwrap_or(libc::EIO);
-                if matches!(
-                    code,
-                    libc::EAGAIN | libc::ENOMEM | libc::EMFILE | libc::ENFILE
-                ) {
-                    return Err(e);
-                }
-                eprintln!("tonari: {}: {e}", cmd.words[0]);
-                Ok(Stage::Failed(exec_status(code)))
-            }
+            Err(e) => spawn_failure(&cmd.words[0], e),
         };
     }
 
@@ -966,7 +1036,55 @@ fn start(
     Ok(Stage::Child(pid))
 }
 
-fn wait(pid: libc::pid_t) -> io::Result<u8> {
+// Darwin can connect an external command directly to the capture pipe through
+// posix_spawn. A single real child supplies both the bytes and the exit status.
+pub(super) fn can_capture_external(name: &str) -> bool {
+    cfg!(target_os = "macos") && !name.is_empty() && named_builtin(name, &[], 0).is_none()
+}
+
+pub(super) fn capture_external(
+    raw: SimpleCommand<Word>,
+    session: &mut Session,
+    last: u8,
+) -> Result<(String, u8), &'static str> {
+    let cmd = match prepare(raw, session, last, true) {
+        Ok(cmd) => cmd,
+        Err(error) => {
+            eprintln!("tonari: {error}");
+            return Ok((String::new(), error.status));
+        }
+    };
+    let (reader, writer) = pipe().map_err(|_| "cannot open command substitution pipe")?;
+    let stage = start(
+        &cmd,
+        None,
+        Some(writer),
+        None,
+        last,
+        session,
+        Default::default(),
+    )
+    .map_err(|_| "cannot launch command substitution")?;
+    let pid = match stage {
+        Stage::Child(pid) => pid,
+        Stage::Failed(code) => return Ok((String::new(), code)),
+    };
+    crate::subshell::read_output(std::fs::File::from(reader), pid)
+}
+
+fn spawn_failure(name: &str, error: io::Error) -> io::Result<Stage> {
+    let code = error.raw_os_error().unwrap_or(libc::EIO);
+    if matches!(
+        code,
+        libc::EAGAIN | libc::ENOMEM | libc::EMFILE | libc::ENFILE
+    ) {
+        return Err(error);
+    }
+    eprintln!("tonari: {name}: {error}");
+    Ok(Stage::Failed(exec_status(code)))
+}
+
+pub(super) fn wait(pid: libc::pid_t) -> io::Result<u8> {
     let mut status = 0;
     loop {
         if unsafe { libc::waitpid(pid, &mut status, 0) } >= 0 {

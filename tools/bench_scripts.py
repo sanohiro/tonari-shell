@@ -31,6 +31,17 @@ for ((i=0; i<2000; i++)); do
 done
 echo "$stem"
 """, "worker-1999"),
+    "regex": ("""\
+re='^([^/]+)/([[:digit:]]+)[.]txt$'
+for ((i=0; i<1000; i++)); do
+    [[ dir/$i.txt =~ $re ]] || exit 1
+done
+echo "${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+""", "dir/999"),
+    "glob": ("""\
+for ((i=0; i<30; i++)); do set -- fixtures/*.txt; done
+echo "$# $1"
+""", "512 fixtures/item-000.txt"),
     "read-lines": ("""\
 count=0
 while IFS= read -r row; do
@@ -43,6 +54,15 @@ echo "$count $last"
 for ((i=0; i<64; i++)); do value=$(printf 'v%s' "$i"); done
 echo "$value"
 """, "v63"),
+    "external-substitutions": ("""\
+for ((i=0; i<16; i++)); do value=$(/usr/bin/printf 'v%s' "$i"); done
+echo "$value"
+""", "v15"),
+    "external-env": (
+        "export " + " ".join(f"BENCH_KEY_{i}=value{i}" for i in range(32)) + "\n"
+        "for ((i=0; i<16; i++)); do /usr/bin/printenv BENCH_KEY_31 || exit 1; done\n",
+        "\n".join(["value31"] * 16),
+    ),
     "external": ("""\
 for ((i=0; i<16; i++)); do /usr/bin/true || exit 1; done
 echo "$i"
@@ -79,6 +99,7 @@ def main():
     cli.add_argument("tonari", type=Path)
     cli.add_argument("--bash", type=Path, default=Path("/bin/bash"))
     cli.add_argument("--previous", type=Path, help="include a previous Tonari build")
+    cli.add_argument("--spawn-control", type=Path, help="compiled tools/bench_spawn.c for the external case")
     cli.add_argument("--runs", type=int, default=30)
     cli.add_argument("--case", choices=CASES, action="append")
     args = cli.parse_args()
@@ -91,15 +112,23 @@ def main():
         home = Path(temp)
         env = {"HOME": temp, "PATH": "/usr/bin:/bin", "LC_ALL": "C"}
         (home / "rows").write_text("".join(f"record {i}\n" for i in range(2000)))
+        if not args.case or "glob" in args.case:
+            fixtures = home / "fixtures"
+            fixtures.mkdir()
+            for i in range(512):
+                (fixtures / f"item-{i:03}.txt").touch()
         for case in args.case or CASES:
             source, expected = CASES[case]
             script = home / f"{case}.sh"
             script.write_text(source)
+            participants = shells
+            if case == "external" and args.spawn_control:
+                participants = [*shells, ("Direct C", args.spawn_control.resolve())]
             for started in (False, True):
-                samples = {name: [] for name, _ in shells}
+                samples = {name: [] for name, _ in participants}
                 for i in range(5 + args.runs):
-                    offset = i % len(shells)
-                    for name, binary in shells[offset:] + shells[:offset]:
+                    offset = i % len(participants)
+                    for name, binary in participants[offset:] + participants[:offset]:
                         elapsed = sample(binary, script, (expected + "\n").encode(), env, started)
                         if i >= 5:
                             samples[name].append(elapsed)

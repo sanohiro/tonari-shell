@@ -120,6 +120,35 @@ impl Word {
             }
         };
         for part in parts {
+            if let Part::Parameter { name, .. }
+            | Part::Alternative { name, .. }
+            | Part::Trim { name, .. }
+            | Part::Modify { name, .. } = part
+            {
+                if let Some(reference) = name
+                    .strip_prefix('!')
+                    .filter(|s| !s.is_empty() && array_elements_name(name).is_none())
+                {
+                    let target = modifier::value(reference, env)?.ok_or_else(|| {
+                        crate::expansion::Error::fatal(
+                            format!("{reference}: invalid indirect expansion"),
+                            1,
+                        )
+                    })?;
+                    if !(is_identifier(&target)
+                        || array_elements_name(&target).is_some()
+                        || (!target.is_empty() && target.bytes().all(|b| b.is_ascii_digit()))
+                        || matches!(target.as_str(), "@" | "*" | "#" | "?" | "-" | "$" | "!")
+                        || env.session.valid_target(&target))
+                    {
+                        return Err(crate::expansion::Error::fatal(
+                            format!("{target}: invalid variable name"),
+                            1,
+                        ));
+                    }
+                    *name = target;
+                }
+            }
             match part {
                 Part::Modify {
                     name,
@@ -238,14 +267,14 @@ impl Word {
         lookup: &impl Fn(&str) -> Option<String>,
         positional: &[String],
     ) -> Vec<String> {
-        self.fields_with_glob(lookup, positional, true)
+        self.fields_with_glob(lookup, positional, Some(Default::default()))
     }
 
     pub fn fields_with_glob(
         self,
         lookup: &impl Fn(&str) -> Option<String>,
         positional: &[String],
-        globbing: bool,
+        globbing: Option<crate::pattern::GlobOptions>,
     ) -> Vec<String> {
         if let Self::Literal(s) = self {
             return vec![s];
@@ -544,7 +573,7 @@ fn ifs_separator(lookup: &impl Fn(&str) -> Option<String>) -> String {
 struct Fields {
     words: Vec<String>,
     current: Field,
-    globbing: bool,
+    globbing: Option<crate::pattern::GlobOptions>,
     present: bool,
     whitespace: bool,
 }

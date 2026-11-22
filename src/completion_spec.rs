@@ -330,7 +330,7 @@ impl Spec {
             }
         }
         if let Some(glob) = &self.glob {
-            words.extend(pattern::pathnames(glob));
+            words.extend(pattern::pathnames(glob, session.shopt.glob));
         }
         if let Some(list) = &self.words {
             let ifs = session.get("IFS").unwrap_or_else(|| " \t\n".into());

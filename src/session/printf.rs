@@ -5,7 +5,11 @@ use super::Session;
 use crate::builtins::escapes::{self, Mode};
 use crate::parser::is_identifier;
 
-pub(super) fn run(session: &mut Session, mut words: &[String]) -> u8 {
+pub(crate) fn run(
+    session: &mut Session,
+    mut words: &[String],
+    capture: Option<&mut Vec<u8>>,
+) -> u8 {
     let mut target = None;
     if words.first().is_some_and(|arg| arg == "-v") {
         let Some(name) = words.get(1) else {
@@ -56,6 +60,8 @@ pub(super) fn run(session: &mut Session, mut words: &[String]) -> u8 {
             eprintln!("tonari: printf: {e}");
             return 1;
         }
+    } else if let Some(capture) = capture {
+        *capture = output;
     } else {
         let mut stdout = io::stdout().lock();
         if stdout
@@ -410,7 +416,7 @@ mod tests {
             .chain(args.iter().copied())
             .map(str::to_owned)
             .collect::<Vec<_>>();
-        let status = run(&mut session, &words);
+        let status = run(&mut session, &words, None);
         (session.get("result").unwrap(), status)
     }
 

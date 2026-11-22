@@ -46,7 +46,17 @@ fn condition(expr: Expr, session: &mut Session, status: u8) -> Result<bool, Flow
                             eprintln!("tonari: [[: {e}");
                             e.flow(session)
                         })?;
-                    let result = regex(&left, &expression).map_err(error)?;
+                    let result = pattern::localized(|| {
+                        if session
+                            .regex
+                            .as_ref()
+                            .is_none_or(|r| r.pattern != expression)
+                        {
+                            session.regex = Some(std::rc::Rc::new(Compiled::new(expression)?));
+                        }
+                        session.regex.as_ref().unwrap().search(&left)
+                    })
+                    .map_err(|()| Flow::Continue(2))?;
                     let matched = result.is_some();
                     session.replace_array("BASH_REMATCH", result.unwrap_or_default());
                     Ok(matched)
@@ -70,42 +80,64 @@ fn condition(expr: Expr, session: &mut Session, status: u8) -> Result<bool, Flow
     }
 }
 
-fn regex(text: &str, expression: &str) -> Result<Option<Vec<String>>, &'static str> {
-    crate::pattern::localized(|| regex_local(text, expression))
+pub struct Compiled {
+    pattern: String,
+    regex: Box<libc::regex_t>,
+    captures: usize,
 }
 
-fn regex_local(text: &str, expression: &str) -> Result<Option<Vec<String>>, &'static str> {
-    let captures = capture_count(expression) + 1;
-    let expression = CString::new(expression).map_err(|_| "NUL in regular expression")?;
-    let encoded = CString::new(text).map_err(|_| "NUL in regular expression input")?;
-    let mut regex = std::mem::MaybeUninit::uninit();
-    if unsafe { libc::regcomp(regex.as_mut_ptr(), expression.as_ptr(), libc::REG_EXTENDED) } != 0 {
-        return Err("invalid regular expression");
+impl Compiled {
+    fn new(pattern: String) -> Result<Self, ()> {
+        let encoded = CString::new(pattern.as_str()).map_err(|_| ())?;
+        let mut regex = Box::<libc::regex_t>::new_uninit();
+        if unsafe { libc::regcomp(regex.as_mut_ptr(), encoded.as_ptr(), libc::REG_EXTENDED) } != 0 {
+            return Err(());
+        }
+        let captures = capture_count(&pattern) + 1;
+        Ok(Self {
+            pattern,
+            regex: unsafe { regex.assume_init() },
+            captures,
+        })
     }
-    let mut regex = unsafe { regex.assume_init() };
-    let mut matched = vec![
-        libc::regmatch_t {
-            rm_so: -1,
-            rm_eo: -1
-        };
-        captures
-    ];
-    let result =
-        unsafe { libc::regexec(&regex, encoded.as_ptr(), captures, matched.as_mut_ptr(), 0) };
-    unsafe { libc::regfree(&mut regex) };
-    match result {
-        0 => Ok(Some(
-            matched
-                .iter()
-                .map(|m| {
-                    text.get(m.rm_so as usize..m.rm_eo as usize)
-                        .unwrap_or_default()
-                        .to_string()
-                })
-                .collect(),
-        )),
-        libc::REG_NOMATCH => Ok(None),
-        _ => Err("regular expression match failed"),
+
+    fn search(&self, text: &str) -> Result<Option<Vec<String>>, ()> {
+        let encoded = CString::new(text).map_err(|_| ())?;
+        let mut matched = vec![
+            libc::regmatch_t {
+                rm_so: -1,
+                rm_eo: -1
+            };
+            self.captures
+        ];
+        match unsafe {
+            libc::regexec(
+                &*self.regex,
+                encoded.as_ptr(),
+                matched.len(),
+                matched.as_mut_ptr(),
+                0,
+            )
+        } {
+            0 => Ok(Some(
+                matched
+                    .iter()
+                    .map(|m| {
+                        text.get(m.rm_so as usize..m.rm_eo as usize)
+                            .unwrap_or_default()
+                            .to_owned()
+                    })
+                    .collect(),
+            )),
+            libc::REG_NOMATCH => Ok(None),
+            _ => Err(()),
+        }
+    }
+}
+
+impl Drop for Compiled {
+    fn drop(&mut self) {
+        unsafe { libc::regfree(&mut *self.regex) };
     }
 }
 

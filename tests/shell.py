@@ -290,6 +290,82 @@ class ShellTests(unittest.TestCase):
                      '[[ ok == ok || $(touch unexpected) == yes ]]', 0, b"literal")
         self.assertFalse((self.cwd / "unexpected").exists())
 
+    def test_utf8_expansions_and_regex_captures(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        for val, count in [("😀", 1), ("👍🏽", 2), ("🇯🇵", 2), ("👩‍💻", 3)]:
+            (self.cwd / (val + ".txt")).touch()
+            self.compare(f'v={val}; key=v; re="^(.)(.*)$"; [[ $v =~ $re ]] || exit 1; '
+                         'printf "<%s>" "${#v}" "${!key}" "${v:1}" "${v//?/_}" '
+                         '"${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"',
+                         0, f"<{count}><{val}><{val[1:]}><{'_' * count}><{val[0]}><{val[1:]}>".encode())
+        self.compare('set -- ?.txt; printf "<%s>" "$#" "$1"; set -- ???.txt; printf "<%s>" "$#" "$1"',
+                     0, "<1><😀.txt><1><👩‍💻.txt>".encode())
+        indirect = ('k=real; unset real; printf "<%s>" "${!k:=🌱}" "$real"; '
+                    'real=""; printf "<%s>" "${!k-default}" "${!k:-default}"')
+        expected = "<🌱><🌱><><default>".encode()
+        if int(self.command(BASH, 'echo "${BASH_VERSINFO[0]}"').stdout) >= 5:
+            self.compare(indirect, 0, expected)
+        else:
+            # Bash 3.2 assigns to the reference itself for this operator.
+            proc = self.command(TONARI, indirect)
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, expected, b""))
+        self.compare('set -- v 👩‍💻; v=👍🏽; printf "<%s>" "${!1}" "${!#}"',
+                     0, "<👍🏽><👩‍💻>".encode())
+        # Both reference releases preserve captures and return 2. Bash 5.3
+        # also prints a diagnostic for the invalid expression.
+        source = '[[ abc =~ (a) ]]; r="("; [[ abc =~ $r ]]; echo "$?:${BASH_REMATCH[1]}"'
+        for shell in [BASH, TONARI]:
+            proc = self.command(shell, source)
+            self.assertEqual((proc.returncode, proc.stdout), (0, b"2:a\n"))
+            if shell == TONARI:
+                self.assertEqual(proc.stderr, b"")
+
+    def test_glob_options_and_recursive_symlinks(self):
+        for path in ["a/top.txt", "a/.hidden/inner.txt", "a/sub/leaf.txt", ".root.txt", "name.txt"]:
+            dest = self.cwd / path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.touch()
+        (self.cwd / "alias").symlink_to("a")
+        (self.cwd / "a/sub/back").symlink_to("..")
+        self.compare('shopt -s nullglob; set -- missing*.txt "missing*.txt"; echo "$#:$1"; '
+                     'shopt -s dotglob; printf "<%s>" *.txt; set -f; printf "<%s>" *.txt',
+                     0, b"1:missing*.txt\n<.root.txt><name.txt><*.txt>")
+        script = ('shopt -s globstar; printf "<%s>" **/**/leaf.txt alias/**/*.txt; '
+                  'shopt -s dotglob; printf "<%s>" **/inner.txt; '
+                  'shopt -u globstar; printf "<%s>" **/top.txt')
+        expected = b"<a/sub/leaf.txt><alias/sub/back/top.txt><alias/sub/leaf.txt><alias/top.txt><a/.hidden/inner.txt><a/top.txt><alias/top.txt>"
+        if self.command(BASH, 'shopt -s globstar').returncode == 0:
+            self.compare(script, 0, expected)
+        else:
+            actual = self.command(TONARI, script)
+            self.assertEqual((actual.returncode, actual.stdout, actual.stderr), (0, expected, b""))
+
+    def test_substitution_printf_isolation(self):
+        self.compare(r'''n=parent; x=$(printf 'a%n%b\n' n 'b\n'); s=$?
+printf '<%s>' "$x" "$n" "$s"
+y=$(printf -v n inner); printf '<%s>' "$y" "$n"
+printf() { echo overridden; }; z=$(printf '%s' hi); echo "$z"''',
+                     0, b"<ab><parent><0><><parent>overridden\n")
+        if self.command(BASH, '[[ -n $BASHPID ]]').returncode == 0:
+            self.compare('x=$(printf "%s" "$BASHPID"); [[ -n $BASHPID ]] && [[ $x != "$BASHPID" ]]', 0)
+
+    def test_external_capture_and_environment(self):
+        self.env["INHERITED"] = "old"
+        self.compare("""export V=outer; unset INHERITED
+/bin/sh -c 'echo "$V:${INHERITED-absent}"'
+V=temp /bin/sh -c 'echo "$V"'
+f() { local V=inside; /bin/sh -c 'echo "$V"'; }; f
+export V=changed; /bin/sh -c 'echo "$V"'
+unset V; /bin/sh -c 'echo "${V-unset}"'""", 0, b"outer:absent\ntemp\ninside\nchanged\nunset\n")
+        source = """x=$(/bin/sh -c 'cat; printf err >&2; exit 23'); s=$?
+printf '%s:%s' "$s" "$x" """
+        data = b"output" * 22000
+        for shell in [BASH, TONARI]:
+            with self.subTest(shell=shell):
+                proc = subprocess.run([shell, "-c", source], input=data + b"\n\n",
+                                      cwd=self.cwd, env=self.env, capture_output=True, timeout=5)
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"23:" + data, b"err"))
+
     def test_heredoc_and_file_substitution(self):
         self.compare("v='two words'; cat <<EOF\n$v $(printf three)\nEOF\n"
                      "cat <<-'END'\n\t$v and `false`\n\tEND\n"

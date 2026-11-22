@@ -10,7 +10,10 @@ pub fn capture_substitution(
     body: Vec<parser::Statement>,
     last: u8,
 ) -> Result<(String, u8), &'static str> {
-    let (mut read, write) = std::io::pipe().map_err(|_| "cannot open command substitution pipe")?;
+    if let Some(result) = capture_simple(session, &body, last) {
+        return result;
+    }
+    let (read, write) = std::io::pipe().map_err(|_| "cannot open command substitution pipe")?;
     let pid = unsafe { libc::fork() };
     if pid < 0 {
         return Err("cannot fork command substitution");
@@ -67,11 +70,22 @@ pub fn capture_substitution(
     // A writer can fill the pipe before it exits. Drain first, then reap even
     // when reading fails. The parent must drop its own writer to observe EOF.
     drop(write);
+    read_output(read, pid)
+}
+
+pub(super) fn read_output(
+    mut read: impl Read,
+    pid: libc::pid_t,
+) -> Result<(String, u8), &'static str> {
     let mut output = Vec::new();
     let result = read.read_to_end(&mut output);
     drop(read);
-    let code = wait(pid)?;
+    let code = crate::execute::wait(pid).map_err(|_| "cannot wait for command substitution")?;
     result.map_err(|_| "cannot read command substitution")?;
+    captured_output(output, code)
+}
+
+fn captured_output(mut output: Vec<u8>, code: u8) -> Result<(String, u8), &'static str> {
     output.retain(|&b| b != 0);
     while output.last() == Some(&b'\n') {
         output.pop();
@@ -79,6 +93,73 @@ pub fn capture_substitution(
     let value =
         String::from_utf8(output).map_err(|_| "command substitution produced invalid UTF-8")?;
     Ok((value, code))
+}
+
+// Only expand words whose value is independent of a new process identity.
+// Functions, redirects, nested substitutions and effectful expansions use the
+// ordinary subshell. printf still has a private variable scope for %n and -v.
+fn capture_simple(
+    session: &Session,
+    body: &[parser::Statement],
+    last: u8,
+) -> Option<Result<(String, u8), &'static str>> {
+    use crate::word::{Part, Word, is_identifier};
+    let [statement] = body else { return None };
+    let parser::Command::Pipeline(stages) = &statement.command else {
+        return None;
+    };
+    let [cmd] = stages.as_slice() else {
+        return None;
+    };
+    let (program, args) = cmd.words.split_first()?;
+    let program = program.as_literal()?;
+    if statement.negated
+        || statement.condition != parser::Condition::Always
+        || cmd.compound.is_some()
+        || !cmd.redirects.is_empty()
+        || !cmd.assignments.is_empty()
+        || session.functions.contains_key(program)
+        || (program != "printf" && !crate::execute::can_capture_external(program))
+    {
+        return None;
+    }
+    if !args.iter().all(|word| match word {
+        Word::Literal(_) => true,
+        Word::Expanded(parts) => parts.iter().all(|part| match part {
+            Part::Text(_) => true,
+            Part::Parameter { name, .. } => {
+                is_identifier(name)
+                    && !matches!(
+                        name.as_str(),
+                        "BASHPID" | "BASH_SUBSHELL" | "RANDOM" | "SRANDOM"
+                    )
+            }
+            _ => false,
+        }),
+        Word::Declaration(_) => false,
+    }) {
+        return None;
+    }
+    let mut child = session.clone();
+    child.interactive = false;
+    child.command_string = false;
+    child.errexit = false;
+    if program != "printf" {
+        return Some(crate::execute::capture_external(
+            cmd.clone(),
+            &mut child,
+            last,
+        ));
+    }
+    let status = std::cell::Cell::new(None);
+    let mut expansion = crate::expansion::Expansion::new(&mut child, last, &status);
+    let mut fields = Vec::with_capacity(args.len());
+    for arg in args {
+        fields.extend(expansion.fields(arg.clone()).ok()?);
+    }
+    let mut output = Vec::new();
+    let code = crate::session::printf::run(&mut child, &fields, Some(&mut output));
+    Some(captured_output(output, code))
 }
 
 fn input_only(body: &[parser::Statement]) -> Option<parser::Word> {
@@ -98,24 +179,6 @@ fn input_only(body: &[parser::Statement]) -> Option<parser::Word> {
         && cmd.assignments.is_empty()
         && !statement.negated)
         .then(|| redirect.word.clone())
-}
-
-fn wait(pid: libc::pid_t) -> Result<u8, &'static str> {
-    let mut status = 0;
-    loop {
-        if unsafe { libc::waitpid(pid, &mut status, 0) } == pid {
-            break;
-        }
-        if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
-            return Err("cannot wait for command substitution");
-        }
-    }
-    let code = if libc::WIFSIGNALED(status) {
-        128 + libc::WTERMSIG(status)
-    } else {
-        libc::WEXITSTATUS(status)
-    };
-    Ok(code as u8)
 }
 
 pub fn launch_group(
@@ -154,7 +217,7 @@ pub fn launch_group(
     }
     launch.parent(pid);
     if launch.group.is_none() && !background {
-        return Flow::Continue(wait(pid).unwrap_or(1));
+        return Flow::Continue(crate::execute::wait(pid).unwrap_or(1));
     }
     match session
         .jobs
