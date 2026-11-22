@@ -1,0 +1,434 @@
+platform	group	feature	previous	current	witness	observed
+Debian	Builtin	compopt	different	match	"complete -W one app; compopt -o nospace app; complete -p app"	{"code": 0, "out": "complete -o nospace -W 'one' app\n", "err": "", "timeout": false}
+Debian	Builtin	declare	different	match	"declare -i v=3; v+=4; declare -p v"	{"code": 0, "out": "declare -i v=\"7\"\n", "err": "", "timeout": false}
+Debian	Builtin	dirs	missing interface	match	"mkdir d; pushd d >/dev/null; dirs -p | wc -l"	{"code": 0, "out": "2\n", "err": "", "timeout": false}
+Debian	Builtin	getopts	missing interface	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
+Debian	Builtin	jobs	different	match	"sleep .1 & p=$!; test \"$(jobs -p)\" = \"$p\" && echo running; wait \"$p\""	{"code": 0, "out": "running\n", "err": "", "timeout": false}
+Debian	Builtin	let	missing interface	match	"x=3; let 'x*=4'; echo \"$x\""	{"code": 0, "out": "12\n", "err": "", "timeout": false}
+Debian	Builtin	mapfile	missing interface	match	"mapfile -t a <<< $'one\\ntwo'; printf '<%s>' \"${a[@]}\""	{"code": 0, "out": "<one><two>", "err": "", "timeout": false}
+Debian	Builtin	popd	missing interface	match	"mkdir d; pushd d >/dev/null; popd >/dev/null; test -d d"	{"code": 0, "out": "", "err": "", "timeout": false}
+Debian	Builtin	pushd	missing interface	match	"mkdir d; pushd d >/dev/null; echo \"${PWD##*/}\""	{"code": 0, "out": "d\n", "err": "", "timeout": false}
+Debian	Builtin	readarray	missing interface	match	"readarray -t a <<< $'one\\ntwo'; printf '<%s>' \"${a[@]}\""	{"code": 0, "out": "<one><two>", "err": "", "timeout": false}
+Debian	Builtin	times	missing interface	match	"t=$(times); [[ $t == *m*s* ]] && echo timings"	{"code": 0, "out": "timings\n", "err": "", "timeout": false}
+Debian	Builtin	ulimit	missing interface	match	"n=$(ulimit -n); [[ $n == +([0-9]) || $n == unlimited ]] && printf limit"	{"code": 0, "out": "limit", "err": "", "timeout": false}
+Debian	Builtin	umask	missing interface	match	"umask 077; : > f; ls -ld f | cut -c1-10"	{"code": 0, "out": "-rw-------\n", "err": "", "timeout": false}
+Debian	Builtin option	complete -A	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -A keyword auditname; complete -p auditname"	{"code": 0, "out": "complete -k auditname\n", "err": "", "timeout": false}
+Debian	Builtin option	complete -D	different	match	"complete -D -W val; complete -p -D"	{"code": 0, "out": "complete -W 'val' -D\n", "err": "", "timeout": false}
+Debian	Builtin option	complete -E	different	match	"complete -E -W val; complete -p -E"	{"code": 0, "out": "complete -W 'val' -E\n", "err": "", "timeout": false}
+Debian	Builtin option	complete -I	different	match	"complete -I -W val; complete -p -I"	{"code": 0, "out": "complete -W 'val' -I\n", "err": "", "timeout": false}
+Debian	Builtin option	complete -P	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -W apple -P pre auditname; complete -p auditname"	{"code": 0, "out": "complete -W 'apple' -P 'pre' auditname\n", "err": "", "timeout": false}
+Debian	Builtin option	complete -S	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -W apple -S end auditname; complete -p auditname"	{"code": 0, "out": "complete -W 'apple' -S 'end' auditname\n", "err": "", "timeout": false}
+Debian	Builtin option	complete -a	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -a auditname; complete -p auditname"	{"code": 0, "out": "complete -a auditname\n", "err": "", "timeout": false}
+Debian	Builtin option	complete -b	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -b auditname; complete -p auditname"	{"code": 0, "out": "complete -b auditname\n", "err": "", "timeout": false}
+Debian	Builtin option	complete -c	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -c auditname; complete -p auditname"	{"code": 0, "out": "complete -c auditname\n", "err": "", "timeout": false}
+Debian	Builtin option	complete -d	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -d auditname; complete -p auditname"	{"code": 0, "out": "complete -d auditname\n", "err": "", "timeout": false}
+Debian	Builtin option	complete -e	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -e auditname; complete -p auditname"	{"code": 0, "out": "complete -e auditname\n", "err": "", "timeout": false}
+Debian	Builtin option	complete -f	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -f auditname; complete -p auditname"	{"code": 0, "out": "complete -f auditname\n", "err": "", "timeout": false}
+Debian	Builtin option	complete -k	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -k auditname; complete -p auditname"	{"code": 0, "out": "complete -k auditname\n", "err": "", "timeout": false}
+Debian	Builtin option	complete -o	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -o nospace -W 'test' auditname; complete -p auditname"	{"code": 0, "out": "complete -o nospace -W 'test' auditname\n", "err": "", "timeout": false}
+Debian	Builtin option	complete -v	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -v auditname; complete -p auditname"	{"code": 0, "out": "complete -v auditname\n", "err": "", "timeout": false}
+Debian	Builtin option	compopt -D	different	match	"complete -D -W yes; compopt -D -o nospace; complete -p -D"	{"code": 0, "out": "complete -o nospace -W 'yes' -D\n", "err": "", "timeout": false}
+Debian	Builtin option	compopt -E	different	match	"complete -E -W yes; compopt -E -o nospace; complete -p -E"	{"code": 0, "out": "complete -o nospace -W 'yes' -E\n", "err": "", "timeout": false}
+Debian	Builtin option	compopt -I	different	match	"complete -I -W yes; compopt -I -o nospace; complete -p -I"	{"code": 0, "out": "complete -o nospace -W 'yes' -I\n", "err": "", "timeout": false}
+Debian	Builtin option	compopt -o	different	match	"complete -W one app; compopt -o nospace app; complete -p app"	{"code": 0, "out": "complete -o nospace -W 'one' app\n", "err": "", "timeout": false}
+Debian	Builtin option	declare -I	stderr differs	match	"x=outer; f() { declare -I x; echo \"$x\"; }; f"	{"code": 0, "out": "outer\n", "err": "", "timeout": false}
+Debian	Builtin option	declare -i	different	match	"declare -i x=3; x=4+7; echo \"$x\""	{"code": 0, "out": "11\n", "err": "", "timeout": false}
+Debian	Builtin option	dirs -N	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -0"	{"code": 0, "out": "~\n", "err": "", "timeout": false}
+Debian	Builtin option	dirs -c	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -c; dirs -p"	{"code": 0, "out": "~/b\n", "err": "", "timeout": false}
+Debian	Builtin option	dirs -l	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -l +1"	{"code": 0, "out": "$WORK/a\n", "err": "", "timeout": false}
+Debian	Builtin option	dirs -p	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -p"	{"code": 0, "out": "~/b\n~/a\n~\n", "err": "", "timeout": false}
+Debian	Builtin option	dirs -v	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -v"	{"code": 0, "out": " 0  ~/b\n 1  ~/a\n 2  ~\n", "err": "", "timeout": false}
+Debian	Builtin option	jobs -l	different	match	"sleep .04 & p=$!; jobs -l | grep -q \"$p\"; echo $?; wait"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+Debian	Builtin option	jobs -n	different	match	"sleep .03 & jobs -n; wait"	{"code": 0, "out": "[1]+  Running                 sleep .03 &\n", "err": "", "timeout": false}
+Debian	Builtin option	jobs -p	different	match	"sleep .1 & p=$!; test \"$(jobs -p)\" = \"$p\" && echo running; wait \"$p\""	{"code": 0, "out": "running\n", "err": "", "timeout": false}
+Debian	Builtin option	jobs -r	different	match	"sleep .04 & jobs -r | grep -q Running; echo $?; wait"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+Debian	Builtin option	jobs -s	different	match	"sleep .04 & jobs -s; wait"	{"code": 0, "out": "", "err": "", "timeout": false}
+Debian	Builtin option	mapfile -C	missing interface	match	"cb() { echo \"$1:$2\"; }; printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -t -C cb -c 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "0:first\n1:second\n2:third\n[first][second][third]", "err": "", "timeout": false}
+Debian	Builtin option	mapfile -O	missing interface	match	"a=(keep); printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -tO 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[keep][first][second][third]", "err": "", "timeout": false}
+Debian	Builtin option	mapfile -c	missing interface	match	"cb() { echo \"$1:$2\"; }; printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -t -C cb -c 2 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "1:second\n[first][second][third]", "err": "", "timeout": false}
+Debian	Builtin option	mapfile -d	missing interface	match	"printf 'first:second:' > input; exec 3<input; mapfile -td : a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second]", "err": "", "timeout": false}
+Debian	Builtin option	mapfile -n	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -tn 2 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second]", "err": "", "timeout": false}
+Debian	Builtin option	mapfile -s	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -ts 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[second][third]", "err": "", "timeout": false}
+Debian	Builtin option	mapfile -t	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -t a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
+Debian	Builtin option	mapfile -u	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -t -u 3 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
+Debian	Builtin option	popd -N	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; popd -0; dirs -p"	{"code": 0, "out": "~/b ~/a\n~/b\n~/a\n", "err": "", "timeout": false}
+Debian	Builtin option	popd -n	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; popd -n; dirs -p"	{"code": 0, "out": "~/b ~\n~/b\n~\n", "err": "", "timeout": false}
+Debian	Builtin option	pushd -N	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; pushd -0; dirs -p"	{"code": 0, "out": "~ ~/b ~/a\n~\n~/b\n~/a\n", "err": "", "timeout": false}
+Debian	Builtin option	pushd -n	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; pushd -n relative; dirs -p"	{"code": 0, "out": "~/b relative ~/a ~\n~/b\nrelative\n~/a\n~\n", "err": "", "timeout": false}
+Debian	Builtin option	read -s	different	match	"PTY dialogue / read -s"	null
+Debian	Builtin option	readarray -C	missing interface	match	"cb() { echo \"$1:$2\"; }; printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t -C cb -c 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "0:first\n1:second\n2:third\n[first][second][third]", "err": "", "timeout": false}
+Debian	Builtin option	readarray -O	missing interface	match	"a=(keep); printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -tO 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[keep][first][second][third]", "err": "", "timeout": false}
+Debian	Builtin option	readarray -c	missing interface	match	"cb() { echo \"$1:$2\"; }; printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t -C cb -c 2 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "1:second\n[first][second][third]", "err": "", "timeout": false}
+Debian	Builtin option	readarray -d	missing interface	match	"printf 'first:second:' > input; exec 3<input; readarray -td : a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second]", "err": "", "timeout": false}
+Debian	Builtin option	readarray -n	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -tn 2 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second]", "err": "", "timeout": false}
+Debian	Builtin option	readarray -s	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -ts 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[second][third]", "err": "", "timeout": false}
+Debian	Builtin option	readarray -t	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
+Debian	Builtin option	readarray -u	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t -u 3 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
+Debian	Builtin option	set -B	different	interface only	"set -B; case $- in *B*) printf on;; esac; set +B; case $- in *B*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+Debian	Builtin option	set -C	different	interface only	"set -C; case $- in *C*) printf on;; esac; set +C; case $- in *C*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+Debian	Builtin option	set -m	different	interface only	"set -m; case $- in *m*) printf on;; esac; set +m; case $- in *m*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+Debian	Builtin option	typeset -I	stderr differs	match	"x=outer; f() { typeset -I x; echo \"$x\"; }; f"	{"code": 0, "out": "outer\n", "err": "", "timeout": false}
+Debian	Builtin option	typeset -i	different	match	"typeset -i x=3; x=4+7; echo \"$x\""	{"code": 0, "out": "11\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -H	missing interface	match	"ulimit -Sn 32 && ulimit -Hn 64 && ulimit -Sn && ulimit -Hn"	{"code": 0, "out": "32\n64\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -P	missing interface	not in reference	"ulimit -a"	null
+Debian	Builtin option	ulimit -R	missing interface	match	"ulimit -R"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -S	missing interface	match	"ulimit -Sn 64 && ulimit -Sn"	{"code": 0, "out": "64\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -T	missing interface	not in reference	"ulimit -a"	null
+Debian	Builtin option	ulimit -a	missing interface	match	"ulimit -a"	{"code": 0, "out": "real-time non-blocking time  (microseconds, -R) unlimited\ncore file size              (blocks, -c) 0\ndata seg size               (kbytes, -d", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -b	missing interface	not in reference	"ulimit -a"	null
+Debian	Builtin option	ulimit -c	missing interface	match	"ulimit -c"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -d	missing interface	match	"ulimit -d"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -e	missing interface	match	"ulimit -e"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -f	missing interface	match	"ulimit -f"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -i	missing interface	match	"ulimit -i"	{"code": 0, "out": "31724\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -k	missing interface	not in reference	"ulimit -a"	null
+Debian	Builtin option	ulimit -l	missing interface	match	"ulimit -l"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -m	missing interface	match	"ulimit -m"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -n	missing interface	match	"ulimit -n"	{"code": 0, "out": "1048576\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -p	missing interface	match	"ulimit -p"	{"code": 0, "out": "8\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -q	missing interface	match	"ulimit -q"	{"code": 0, "out": "819200\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -r	missing interface	match	"ulimit -r"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -s	missing interface	match	"ulimit -s"	{"code": 0, "out": "8192\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -t	missing interface	match	"ulimit -t"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -u	missing interface	match	"ulimit -u"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -v	missing interface	match	"ulimit -v"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Debian	Builtin option	ulimit -x	missing interface	match	"ulimit -x"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Debian	Builtin option	umask -S	missing interface	match	"umask u=rwx,g=rx,o=; umask -S"	{"code": 0, "out": "u=rwx,g=rx,o=\n", "err": "", "timeout": false}
+Debian	Builtin option	umask -p	missing interface	match	"umask 027; umask -p"	{"code": 0, "out": "umask 0027\n", "err": "", "timeout": false}
+Debian	Builtin option	wait -f	stderr differs	match	"(exit 19) & wait -f $!; echo $?"	{"code": 0, "out": "19\n", "err": "", "timeout": false}
+Debian	Builtin option	wait -n	different	match	"(sleep .02; exit 13) & wait -n; printf %s \"$?\""	{"code": 0, "out": "13", "err": "", "timeout": false}
+Debian	Builtin option	wait -p	different	match	"(sleep .02; exit 13) & p=$!; wait -n -p ended; [ \"$ended\" = \"$p\" ] && echo yes"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+Debian	Completion option	bashdefault	different	interface only	"complete -o bashdefault -W item app && complete -p app"	{"code": 0, "out": "complete -o bashdefault -W 'item' app\n", "err": "", "timeout": false}
+Debian	Completion option	default	different	interface only	"complete -o default -W item app && complete -p app"	{"code": 0, "out": "complete -o default -W 'item' app\n", "err": "", "timeout": false}
+Debian	Completion option	dirnames	different	interface only	"complete -o dirnames -W item app && complete -p app"	{"code": 0, "out": "complete -o dirnames -W 'item' app\n", "err": "", "timeout": false}
+Debian	Completion option	filenames	different	interface only	"complete -o filenames -W item app && complete -p app"	{"code": 0, "out": "complete -o filenames -W 'item' app\n", "err": "", "timeout": false}
+Debian	Completion option	noquote	different	interface only	"complete -o noquote -W item app && complete -p app"	{"code": 0, "out": "complete -o noquote -W 'item' app\n", "err": "", "timeout": false}
+Debian	Completion option	nosort	different	interface only	"complete -o nosort -W item app && complete -p app"	{"code": 0, "out": "complete -o nosort -W 'item' app\n", "err": "", "timeout": false}
+Debian	Completion option	nospace	different	interface only	"complete -o nospace -W item app && complete -p app"	{"code": 0, "out": "complete -o nospace -W 'item' app\n", "err": "", "timeout": false}
+Debian	Completion option	plusdirs	different	interface only	"complete -o plusdirs -W item app && complete -p app"	{"code": 0, "out": "complete -o plusdirs -W 'item' app\n", "err": "", "timeout": false}
+Debian	GNU regression group	run-braces	different	golden match	"run-braces"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
+Debian	GNU regression group	run-extglob	different	golden match	"run-extglob"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
+Debian	GNU regression group	run-extglob2	different	golden match	"run-extglob2"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
+Debian	GNU regression group	run-extglob3	different	golden match	"run-extglob3"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
+Debian	GNU regression group	run-procsub	different	golden match	"run-procsub"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
+Debian	Invocation	+O	different	match	"[\"+O\", \"nullglob\", \"-c\", \"set -- absent*; echo \\\"$1\\\"\"]"	{"code": 0, "out": "absent*\n", "err": "", "timeout": false}
+Debian	Invocation	-B	different	match	"[\"-B\", \"-c\", \"case $- in *B*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
+Debian	Invocation	-C	different	match	"[\"-C\", \"-c\", \"case $- in *C*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
+Debian	Invocation	-O	different	match	"[\"-O\", \"nullglob\", \"-c\", \"set -- missing*; echo \\\"$#\\\"\"]"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+Debian	Redirection	<>	different	match	"printf data >f; exec 3<>f; printf X >&3; cat f"	{"code": 0, "out": "Xata", "err": "", "timeout": false}
+Debian	Redirection	>|	different	match	"set -C; printf a >f; printf b >|f; cat f"	{"code": 0, "out": "b", "err": "", "timeout": false}
+Debian	Redirection	n<&m-	different	match	"printf data >f; exec 3<f; cat 4<&3- <&4"	{"code": 0, "out": "data", "err": "", "timeout": false}
+Debian	Redirection	n>&m-	different	match	"exec 3>f; printf hi 4>&3- >&4; cat f"	{"code": 0, "out": "hi", "err": "", "timeout": false}
+Debian	Shell language	brace alternation	different	match	"printf '<%s>' pre{one,two}post"	{"code": 0, "out": "<preonepost><pretwopost>", "err": "", "timeout": false}
+Debian	Shell language	brace sequence	different	match	"printf '<%s>' {03..09..3}"	{"code": 0, "out": "<03><06><09>", "err": "", "timeout": false}
+Debian	Shell language	case ;& fallthrough	different	match	"case x in x) printf a ;& y) printf b;; esac"	{"code": 0, "out": "ab", "err": "", "timeout": false}
+Debian	Shell language	case ;;& retest	different	match	"case x in x) printf a ;;& y) printf b;; x) printf c;; esac"	{"code": 0, "out": "ac", "err": "", "timeout": false}
+Debian	Shell language	directory stack rotation	different	match	"mkdir a b; pushd a >/dev/null; pushd ../b >/dev/null; pushd +1 >/dev/null; basename \"$PWD\""	{"code": 0, "out": "a\n", "err": "", "timeout": false}
+Debian	Shell language	extended globs	different	match	"shopt -s extglob\ncase b in @(a|b)) echo yes;; esac"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+Debian	Shell language	extglob !(...)	different	match	"shopt -s extglob\nfor v in '' a ab aa z; do case $v in !(a|b)) printf '<%s>' \"$v\";; esac; done"	{"code": 0, "out": "<><ab><aa><z>", "err": "", "timeout": false}
+Debian	Shell language	extglob *(...)	different	match	"shopt -s extglob\nfor v in '' a ab aa z; do case $v in *(a|b)) printf '<%s>' \"$v\";; esac; done"	{"code": 0, "out": "<><a><ab><aa>", "err": "", "timeout": false}
+Debian	Shell language	extglob +(...)	different	match	"shopt -s extglob\nfor v in '' a ab aa z; do case $v in +(a|b)) printf '<%s>' \"$v\";; esac; done"	{"code": 0, "out": "<a><ab><aa>", "err": "", "timeout": false}
+Debian	Shell language	extglob ?(...)	different	match	"shopt -s extglob\nfor v in '' a ab aa z; do case $v in ?(a|b)) printf '<%s>' \"$v\";; esac; done"	{"code": 0, "out": "<><a>", "err": "", "timeout": false}
+Debian	Shell language	extglob @(...)	different	match	"shopt -s extglob\nfor v in '' a ab aa z; do case $v in @(a|b)) printf '<%s>' \"$v\";; esac; done"	{"code": 0, "out": "<a>", "err": "", "timeout": false}
+Debian	Shell language	local variable inheritance	different	match	"v=parent; shopt -s localvar_inherit; f(){ local v; echo \"$v\"; }; f"	{"code": 0, "out": "parent\n", "err": "", "timeout": false}
+Debian	Shell language	wait -n	different	match	"(sleep .02; exit 13) & wait -n; printf %s \"$?\""	{"code": 0, "out": "13", "err": "", "timeout": false}
+Debian	Shell language	wait -p	different	match	"(sleep .02; exit 13) & p=$!; wait -n -p ended; [ \"$ended\" = \"$p\" ] && echo yes"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+Debian	Variable	DIRSTACK	different	match	"mkdir d; pushd d >/dev/null; printf \"%s\" \"${#DIRSTACK[@]}\""	{"code": 0, "out": "2", "err": "", "timeout": false}
+Debian	Variable	GLOBIGNORE	different	match	"touch one.x two.x; GLOBIGNORE=one.x; printf '<%s>' *.x"	{"code": 0, "out": "<two.x>", "err": "", "timeout": false}
+Debian	Variable	MAPFILE	different	match	"mapfile -t <<< text; echo \"${MAPFILE[0]}\""	{"code": 0, "out": "text\n", "err": "", "timeout": false}
+Debian	Variable	OPTARG	different	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
+Debian	Variable	OPTERR	different	match	"OPTERR=0; set -- -z; getopts a opt; echo \"$opt\""	{"code": 0, "out": "?\n", "err": "", "timeout": false}
+Debian	Variable	OPTIND	different	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
+Debian	set -o	braceexpand	different	match	"set +B; echo {a,b}; set -B; echo {a,b}"	{"code": 0, "out": "{a,b}\na b\n", "err": "", "timeout": false}
+Debian	set -o	monitor	stderr differs	match	"mkfifo gate; set -m; reader() { IFS= read -r line <gate; }; reader & p=$!\ng=$(python3 -c 'import os,sys; print(os.getpgid(int(sys.argv[1])))' \"$p\"); test \"$g\" = \"$p\" && echo group\necho go >gate; wait \"$p\" "	{"code": 0, "out": "group\n", "err": "", "timeout": false}
+Debian	set -o	noclobber	different	match	"set -C; echo kept >f; (echo wrong >f) 2>/dev/null; cat f"	{"code": 0, "out": "kept\n", "err": "", "timeout": false}
+Debian	shopt	extglob	missing interface	match	"shopt -s extglob\ncase b in @(a|b)) echo yes;; esac"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+Debian	shopt	globskipdots	missing interface	match	"shopt -s globskipdots; touch .x; printf '<%s>' .*"	{"code": 0, "out": "<.x>", "err": "", "timeout": false}
+Debian	shopt	localvar_inherit	missing interface	match	"v=parent; shopt -s localvar_inherit; f(){ local v; echo \"$v\"; }; f"	{"code": 0, "out": "parent\n", "err": "", "timeout": false}
+Ubuntu	Builtin	compopt	different	match	"complete -W one app; compopt -o nospace app; complete -p app"	{"code": 0, "out": "complete -o nospace -W 'one' app\n", "err": "", "timeout": false}
+Ubuntu	Builtin	declare	different	match	"declare -i v=3; v+=4; declare -p v"	{"code": 0, "out": "declare -i v=\"7\"\n", "err": "", "timeout": false}
+Ubuntu	Builtin	dirs	missing interface	match	"mkdir d; pushd d >/dev/null; dirs -p | wc -l"	{"code": 0, "out": "2\n", "err": "", "timeout": false}
+Ubuntu	Builtin	getopts	missing interface	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
+Ubuntu	Builtin	jobs	different	match	"sleep .1 & p=$!; test \"$(jobs -p)\" = \"$p\" && echo running; wait \"$p\""	{"code": 0, "out": "running\n", "err": "", "timeout": false}
+Ubuntu	Builtin	let	missing interface	match	"x=3; let 'x*=4'; echo \"$x\""	{"code": 0, "out": "12\n", "err": "", "timeout": false}
+Ubuntu	Builtin	mapfile	missing interface	match	"mapfile -t a <<< $'one\\ntwo'; printf '<%s>' \"${a[@]}\""	{"code": 0, "out": "<one><two>", "err": "", "timeout": false}
+Ubuntu	Builtin	popd	missing interface	match	"mkdir d; pushd d >/dev/null; popd >/dev/null; test -d d"	{"code": 0, "out": "", "err": "", "timeout": false}
+Ubuntu	Builtin	pushd	missing interface	match	"mkdir d; pushd d >/dev/null; echo \"${PWD##*/}\""	{"code": 0, "out": "d\n", "err": "", "timeout": false}
+Ubuntu	Builtin	readarray	missing interface	match	"readarray -t a <<< $'one\\ntwo'; printf '<%s>' \"${a[@]}\""	{"code": 0, "out": "<one><two>", "err": "", "timeout": false}
+Ubuntu	Builtin	times	missing interface	match	"t=$(times); [[ $t == *m*s* ]] && echo timings"	{"code": 0, "out": "timings\n", "err": "", "timeout": false}
+Ubuntu	Builtin	ulimit	missing interface	match	"n=$(ulimit -n); [[ $n == +([0-9]) || $n == unlimited ]] && printf limit"	{"code": 0, "out": "limit", "err": "", "timeout": false}
+Ubuntu	Builtin	umask	missing interface	match	"umask 077; : > f; ls -ld f | cut -c1-10"	{"code": 0, "out": "-rw-------\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	complete -A	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -A keyword auditname; complete -p auditname"	{"code": 0, "out": "complete -k auditname\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	complete -D	different	match	"complete -D -W val; complete -p -D"	{"code": 0, "out": "complete -W 'val' -D\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	complete -E	different	match	"complete -E -W val; complete -p -E"	{"code": 0, "out": "complete -W 'val' -E\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	complete -I	different	match	"complete -I -W val; complete -p -I"	{"code": 0, "out": "complete -W 'val' -I\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	complete -P	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -W apple -P pre auditname; complete -p auditname"	{"code": 0, "out": "complete -W 'apple' -P 'pre' auditname\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	complete -S	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -W apple -S end auditname; complete -p auditname"	{"code": 0, "out": "complete -W 'apple' -S 'end' auditname\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	complete -a	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -a auditname; complete -p auditname"	{"code": 0, "out": "complete -a auditname\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	complete -b	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -b auditname; complete -p auditname"	{"code": 0, "out": "complete -b auditname\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	complete -c	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -c auditname; complete -p auditname"	{"code": 0, "out": "complete -c auditname\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	complete -d	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -d auditname; complete -p auditname"	{"code": 0, "out": "complete -d auditname\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	complete -e	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -e auditname; complete -p auditname"	{"code": 0, "out": "complete -e auditname\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	complete -f	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -f auditname; complete -p auditname"	{"code": 0, "out": "complete -f auditname\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	complete -k	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -k auditname; complete -p auditname"	{"code": 0, "out": "complete -k auditname\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	complete -o	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -o nospace -W 'test' auditname; complete -p auditname"	{"code": 0, "out": "complete -o nospace -W 'test' auditname\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	complete -v	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -v auditname; complete -p auditname"	{"code": 0, "out": "complete -v auditname\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	compopt -D	different	match	"complete -D -W yes; compopt -D -o nospace; complete -p -D"	{"code": 0, "out": "complete -o nospace -W 'yes' -D\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	compopt -E	different	match	"complete -E -W yes; compopt -E -o nospace; complete -p -E"	{"code": 0, "out": "complete -o nospace -W 'yes' -E\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	compopt -I	different	match	"complete -I -W yes; compopt -I -o nospace; complete -p -I"	{"code": 0, "out": "complete -o nospace -W 'yes' -I\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	compopt -o	different	match	"complete -W one app; compopt -o nospace app; complete -p app"	{"code": 0, "out": "complete -o nospace -W 'one' app\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	declare -I	stderr differs	match	"x=outer; f() { declare -I x; echo \"$x\"; }; f"	{"code": 0, "out": "outer\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	declare -i	different	match	"declare -i x=3; x=4+7; echo \"$x\""	{"code": 0, "out": "11\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	dirs -N	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -0"	{"code": 0, "out": "~\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	dirs -c	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -c; dirs -p"	{"code": 0, "out": "~/b\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	dirs -l	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -l +1"	{"code": 0, "out": "$WORK/a\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	dirs -p	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -p"	{"code": 0, "out": "~/b\n~/a\n~\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	dirs -v	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -v"	{"code": 0, "out": " 0  ~/b\n 1  ~/a\n 2  ~\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	jobs -l	different	match	"sleep .04 & p=$!; jobs -l | grep -q \"$p\"; echo $?; wait"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	jobs -p	different	match	"sleep .1 & p=$!; test \"$(jobs -p)\" = \"$p\" && echo running; wait \"$p\""	{"code": 0, "out": "running\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	jobs -r	different	match	"sleep .04 & jobs -r | grep -q Running; echo $?; wait"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	jobs -s	different	match	"sleep .04 & jobs -s; wait"	{"code": 0, "out": "", "err": "", "timeout": false}
+Ubuntu	Builtin option	mapfile -C	missing interface	match	"cb() { echo \"$1:$2\"; }; printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -t -C cb -c 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "0:first\n1:second\n2:third\n[first][second][third]", "err": "", "timeout": false}
+Ubuntu	Builtin option	mapfile -O	missing interface	match	"a=(keep); printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -tO 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[keep][first][second][third]", "err": "", "timeout": false}
+Ubuntu	Builtin option	mapfile -c	missing interface	match	"cb() { echo \"$1:$2\"; }; printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -t -C cb -c 2 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "1:second\n[first][second][third]", "err": "", "timeout": false}
+Ubuntu	Builtin option	mapfile -d	missing interface	match	"printf 'first:second:' > input; exec 3<input; mapfile -td : a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second]", "err": "", "timeout": false}
+Ubuntu	Builtin option	mapfile -n	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -tn 2 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second]", "err": "", "timeout": false}
+Ubuntu	Builtin option	mapfile -s	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -ts 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[second][third]", "err": "", "timeout": false}
+Ubuntu	Builtin option	mapfile -t	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -t a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
+Ubuntu	Builtin option	mapfile -u	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -t -u 3 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
+Ubuntu	Builtin option	popd -N	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; popd -0; dirs -p"	{"code": 0, "out": "~/b ~/a\n~/b\n~/a\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	popd -n	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; popd -n; dirs -p"	{"code": 0, "out": "~/b ~\n~/b\n~\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	pushd -N	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; pushd -0; dirs -p"	{"code": 0, "out": "~ ~/b ~/a\n~\n~/b\n~/a\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	pushd -n	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; pushd -n relative; dirs -p"	{"code": 0, "out": "~/b relative ~/a ~\n~/b\nrelative\n~/a\n~\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	read -s	different	match	"PTY dialogue / read -s"	null
+Ubuntu	Builtin option	readarray -C	missing interface	match	"cb() { echo \"$1:$2\"; }; printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t -C cb -c 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "0:first\n1:second\n2:third\n[first][second][third]", "err": "", "timeout": false}
+Ubuntu	Builtin option	readarray -O	missing interface	match	"a=(keep); printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -tO 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[keep][first][second][third]", "err": "", "timeout": false}
+Ubuntu	Builtin option	readarray -c	missing interface	match	"cb() { echo \"$1:$2\"; }; printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t -C cb -c 2 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "1:second\n[first][second][third]", "err": "", "timeout": false}
+Ubuntu	Builtin option	readarray -d	missing interface	match	"printf 'first:second:' > input; exec 3<input; readarray -td : a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second]", "err": "", "timeout": false}
+Ubuntu	Builtin option	readarray -n	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -tn 2 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second]", "err": "", "timeout": false}
+Ubuntu	Builtin option	readarray -s	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -ts 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[second][third]", "err": "", "timeout": false}
+Ubuntu	Builtin option	readarray -t	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
+Ubuntu	Builtin option	readarray -u	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t -u 3 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
+Ubuntu	Builtin option	set -B	different	interface only	"set -B; case $- in *B*) printf on;; esac; set +B; case $- in *B*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+Ubuntu	Builtin option	set -C	different	interface only	"set -C; case $- in *C*) printf on;; esac; set +C; case $- in *C*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+Ubuntu	Builtin option	set -m	different	interface only	"set -m; case $- in *m*) printf on;; esac; set +m; case $- in *m*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+Ubuntu	Builtin option	typeset -I	stderr differs	match	"x=outer; f() { typeset -I x; echo \"$x\"; }; f"	{"code": 0, "out": "outer\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	typeset -i	different	match	"typeset -i x=3; x=4+7; echo \"$x\""	{"code": 0, "out": "11\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -H	missing interface	match	"ulimit -Sn 32 && ulimit -Hn 64 && ulimit -Sn && ulimit -Hn"	{"code": 0, "out": "32\n64\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -P	missing interface	not in reference	"ulimit -a"	null
+Ubuntu	Builtin option	ulimit -R	missing interface	match	"ulimit -R"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -S	missing interface	match	"ulimit -Sn 64 && ulimit -Sn"	{"code": 0, "out": "64\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -T	missing interface	not in reference	"ulimit -a"	null
+Ubuntu	Builtin option	ulimit -a	missing interface	match	"ulimit -a"	{"code": 0, "out": "real-time non-blocking time  (microseconds, -R) unlimited\ncore file size              (blocks, -c) 0\ndata seg size               (kbytes, -d", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -b	missing interface	not in reference	"ulimit -a"	null
+Ubuntu	Builtin option	ulimit -c	missing interface	match	"ulimit -c"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -d	missing interface	match	"ulimit -d"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -e	missing interface	match	"ulimit -e"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -f	missing interface	match	"ulimit -f"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -i	missing interface	match	"ulimit -i"	{"code": 0, "out": "31724\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -k	missing interface	not in reference	"ulimit -a"	null
+Ubuntu	Builtin option	ulimit -l	missing interface	match	"ulimit -l"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -m	missing interface	match	"ulimit -m"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -n	missing interface	match	"ulimit -n"	{"code": 0, "out": "1048576\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -p	missing interface	match	"ulimit -p"	{"code": 0, "out": "8\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -q	missing interface	match	"ulimit -q"	{"code": 0, "out": "819200\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -r	missing interface	match	"ulimit -r"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -s	missing interface	match	"ulimit -s"	{"code": 0, "out": "8192\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -t	missing interface	match	"ulimit -t"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -u	missing interface	match	"ulimit -u"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -v	missing interface	match	"ulimit -v"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	ulimit -x	missing interface	match	"ulimit -x"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	umask -S	missing interface	match	"umask u=rwx,g=rx,o=; umask -S"	{"code": 0, "out": "u=rwx,g=rx,o=\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	umask -p	missing interface	match	"umask 027; umask -p"	{"code": 0, "out": "umask 0027\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	wait -f	stderr differs	match	"(exit 19) & wait -f $!; echo $?"	{"code": 0, "out": "19\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	wait -n	different	match	"(sleep .02; exit 13) & wait -n; printf %s \"$?\""	{"code": 0, "out": "13", "err": "", "timeout": false}
+Ubuntu	Builtin option	wait -p	different	match	"(sleep .02; exit 13) & p=$!; wait -n -p ended; [ \"$ended\" = \"$p\" ] && echo yes"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+Ubuntu	Completion action	service	stderr differs	different	"alias audit_alias=:; audit_arr=(one); audit_func(){ :; }; export AUDIT_VALUE=x; mkdir audit_dir; touch audit_file; compgen -A service http | LC_ALL=C sort -u"	[{"code": 0, "out": "http\nhttp-alt\nhttps\n", "err": "", "timeout": false}, {"code": 0, "out": "", "err": "tonari: compgen: unsupported completion action: service\n", "timeout": false}]
+Ubuntu	Completion option	bashdefault	different	interface only	"complete -o bashdefault -W item app && complete -p app"	{"code": 0, "out": "complete -o bashdefault -W 'item' app\n", "err": "", "timeout": false}
+Ubuntu	Completion option	default	different	interface only	"complete -o default -W item app && complete -p app"	{"code": 0, "out": "complete -o default -W 'item' app\n", "err": "", "timeout": false}
+Ubuntu	Completion option	dirnames	different	interface only	"complete -o dirnames -W item app && complete -p app"	{"code": 0, "out": "complete -o dirnames -W 'item' app\n", "err": "", "timeout": false}
+Ubuntu	Completion option	filenames	different	interface only	"complete -o filenames -W item app && complete -p app"	{"code": 0, "out": "complete -o filenames -W 'item' app\n", "err": "", "timeout": false}
+Ubuntu	Completion option	fullquote	different	interface only	"complete -o fullquote -W item app && complete -p app"	{"code": 0, "out": "complete -o fullquote -W 'item' app\n", "err": "", "timeout": false}
+Ubuntu	Completion option	noquote	different	interface only	"complete -o noquote -W item app && complete -p app"	{"code": 0, "out": "complete -o noquote -W 'item' app\n", "err": "", "timeout": false}
+Ubuntu	Completion option	nosort	different	interface only	"complete -o nosort -W item app && complete -p app"	{"code": 0, "out": "complete -o nosort -W 'item' app\n", "err": "", "timeout": false}
+Ubuntu	Completion option	nospace	different	interface only	"complete -o nospace -W item app && complete -p app"	{"code": 0, "out": "complete -o nospace -W 'item' app\n", "err": "", "timeout": false}
+Ubuntu	Completion option	plusdirs	different	interface only	"complete -o plusdirs -W item app && complete -p app"	{"code": 0, "out": "complete -o plusdirs -W 'item' app\n", "err": "", "timeout": false}
+Ubuntu	GNU regression group	run-extglob2	different	golden match	"run-extglob2"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
+Ubuntu	GNU regression group	run-extglob3	different	golden match	"run-extglob3"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
+Ubuntu	GNU regression group	run-jobs	timeout	different	"run-jobs"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 1, "diffs": [1], "skip": [], "timeout": false, "example": "< tonari: fg: job 1 started without job control"}]
+Ubuntu	GNU regression group	run-procsub	different	golden match	"run-procsub"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
+Ubuntu	Invocation	+O	different	match	"[\"+O\", \"nullglob\", \"-c\", \"set -- absent*; echo \\\"$1\\\"\"]"	{"code": 0, "out": "absent*\n", "err": "", "timeout": false}
+Ubuntu	Invocation	-B	different	match	"[\"-B\", \"-c\", \"case $- in *B*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
+Ubuntu	Invocation	-C	different	match	"[\"-C\", \"-c\", \"case $- in *C*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
+Ubuntu	Invocation	-O	different	match	"[\"-O\", \"nullglob\", \"-c\", \"set -- missing*; echo \\\"$#\\\"\"]"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+Ubuntu	Redirection	<>	different	match	"printf data >f; exec 3<>f; printf X >&3; cat f"	{"code": 0, "out": "Xata", "err": "", "timeout": false}
+Ubuntu	Redirection	>|	different	match	"set -C; printf a >f; printf b >|f; cat f"	{"code": 0, "out": "b", "err": "", "timeout": false}
+Ubuntu	Redirection	n<&m-	different	match	"printf data >f; exec 3<f; cat 4<&3- <&4"	{"code": 0, "out": "data", "err": "", "timeout": false}
+Ubuntu	Redirection	n>&m-	different	match	"exec 3>f; printf hi 4>&3- >&4; cat f"	{"code": 0, "out": "hi", "err": "", "timeout": false}
+Ubuntu	Shell language	brace alternation	different	match	"printf '<%s>' pre{one,two}post"	{"code": 0, "out": "<preonepost><pretwopost>", "err": "", "timeout": false}
+Ubuntu	Shell language	brace sequence	different	match	"printf '<%s>' {03..09..3}"	{"code": 0, "out": "<03><06><09>", "err": "", "timeout": false}
+Ubuntu	Shell language	case ;& fallthrough	different	match	"case x in x) printf a ;& y) printf b;; esac"	{"code": 0, "out": "ab", "err": "", "timeout": false}
+Ubuntu	Shell language	case ;;& retest	different	match	"case x in x) printf a ;;& y) printf b;; x) printf c;; esac"	{"code": 0, "out": "ac", "err": "", "timeout": false}
+Ubuntu	Shell language	directory stack rotation	different	match	"mkdir a b; pushd a >/dev/null; pushd ../b >/dev/null; pushd +1 >/dev/null; basename \"$PWD\""	{"code": 0, "out": "a\n", "err": "", "timeout": false}
+Ubuntu	Shell language	extended globs	different	match	"shopt -s extglob\ncase b in @(a|b)) echo yes;; esac"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+Ubuntu	Shell language	extglob !(...)	different	match	"shopt -s extglob\nfor v in '' a ab aa z; do case $v in !(a|b)) printf '<%s>' \"$v\";; esac; done"	{"code": 0, "out": "<><ab><aa><z>", "err": "", "timeout": false}
+Ubuntu	Shell language	extglob *(...)	different	match	"shopt -s extglob\nfor v in '' a ab aa z; do case $v in *(a|b)) printf '<%s>' \"$v\";; esac; done"	{"code": 0, "out": "<><a><ab><aa>", "err": "", "timeout": false}
+Ubuntu	Shell language	extglob +(...)	different	match	"shopt -s extglob\nfor v in '' a ab aa z; do case $v in +(a|b)) printf '<%s>' \"$v\";; esac; done"	{"code": 0, "out": "<a><ab><aa>", "err": "", "timeout": false}
+Ubuntu	Shell language	extglob ?(...)	different	match	"shopt -s extglob\nfor v in '' a ab aa z; do case $v in ?(a|b)) printf '<%s>' \"$v\";; esac; done"	{"code": 0, "out": "<><a>", "err": "", "timeout": false}
+Ubuntu	Shell language	extglob @(...)	different	match	"shopt -s extglob\nfor v in '' a ab aa z; do case $v in @(a|b)) printf '<%s>' \"$v\";; esac; done"	{"code": 0, "out": "<a>", "err": "", "timeout": false}
+Ubuntu	Shell language	local variable inheritance	different	match	"v=parent; shopt -s localvar_inherit; f(){ local v; echo \"$v\"; }; f"	{"code": 0, "out": "parent\n", "err": "", "timeout": false}
+Ubuntu	Shell language	wait -n	different	match	"(sleep .02; exit 13) & wait -n; printf %s \"$?\""	{"code": 0, "out": "13", "err": "", "timeout": false}
+Ubuntu	Shell language	wait -p	different	match	"(sleep .02; exit 13) & p=$!; wait -n -p ended; [ \"$ended\" = \"$p\" ] && echo yes"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+Ubuntu	Variable	DIRSTACK	different	match	"mkdir d; pushd d >/dev/null; printf \"%s\" \"${#DIRSTACK[@]}\""	{"code": 0, "out": "2", "err": "", "timeout": false}
+Ubuntu	Variable	GLOBIGNORE	different	match	"touch one.x two.x; GLOBIGNORE=one.x; printf '<%s>' *.x"	{"code": 0, "out": "<two.x>", "err": "", "timeout": false}
+Ubuntu	Variable	MAPFILE	different	match	"mapfile -t <<< text; echo \"${MAPFILE[0]}\""	{"code": 0, "out": "text\n", "err": "", "timeout": false}
+Ubuntu	Variable	OPTARG	different	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
+Ubuntu	Variable	OPTERR	different	match	"OPTERR=0; set -- -z; getopts a opt; echo \"$opt\""	{"code": 0, "out": "?\n", "err": "", "timeout": false}
+Ubuntu	Variable	OPTIND	different	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
+Ubuntu	set -o	braceexpand	different	match	"set +B; echo {a,b}; set -B; echo {a,b}"	{"code": 0, "out": "{a,b}\na b\n", "err": "", "timeout": false}
+Ubuntu	set -o	monitor	different	match	"mkfifo gate; set -m; reader() { IFS= read -r line <gate; }; reader & p=$!\ng=$(python3 -c 'import os,sys; print(os.getpgid(int(sys.argv[1])))' \"$p\"); test \"$g\" = \"$p\" && echo group\necho go >gate; wait \"$p\" "	{"code": 0, "out": "group\n", "err": "", "timeout": false}
+Ubuntu	set -o	noclobber	different	match	"set -C; echo kept >f; (echo wrong >f) 2>/dev/null; cat f"	{"code": 0, "out": "kept\n", "err": "", "timeout": false}
+Ubuntu	shopt	extglob	missing interface	match	"shopt -s extglob\ncase b in @(a|b)) echo yes;; esac"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+Ubuntu	shopt	globskipdots	missing interface	match	"shopt -s globskipdots; touch .x; printf '<%s>' .*"	{"code": 0, "out": "<.x>", "err": "", "timeout": false}
+Ubuntu	shopt	localvar_inherit	missing interface	match	"v=parent; shopt -s localvar_inherit; f(){ local v; echo \"$v\"; }; f"	{"code": 0, "out": "parent\n", "err": "", "timeout": false}
+macOS	Builtin	compopt	different	match	"complete -W one app; compopt -o nospace app; complete -p app"	{"code": 0, "out": "complete -o nospace -W 'one' app\n", "err": "", "timeout": false}
+macOS	Builtin	declare	different	match	"declare -i v=3; v+=4; declare -p v"	{"code": 0, "out": "declare -i v=\"7\"\n", "err": "", "timeout": false}
+macOS	Builtin	dirs	missing interface	match	"mkdir d; pushd d >/dev/null; dirs -p | wc -l"	{"code": 0, "out": "       2\n", "err": "", "timeout": false}
+macOS	Builtin	getopts	missing interface	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
+macOS	Builtin	jobs	different	match	"sleep .1 & p=$!; test \"$(jobs -p)\" = \"$p\" && echo running; wait \"$p\""	{"code": 0, "out": "running\n", "err": "", "timeout": false}
+macOS	Builtin	let	missing interface	match	"x=3; let 'x*=4'; echo \"$x\""	{"code": 0, "out": "12\n", "err": "", "timeout": false}
+macOS	Builtin	mapfile	missing interface	match	"mapfile -t a <<< $'one\\ntwo'; printf '<%s>' \"${a[@]}\""	{"code": 0, "out": "<one><two>", "err": "", "timeout": false}
+macOS	Builtin	popd	missing interface	match	"mkdir d; pushd d >/dev/null; popd >/dev/null; test -d d"	{"code": 0, "out": "", "err": "", "timeout": false}
+macOS	Builtin	pushd	missing interface	match	"mkdir d; pushd d >/dev/null; echo \"${PWD##*/}\""	{"code": 0, "out": "d\n", "err": "", "timeout": false}
+macOS	Builtin	readarray	missing interface	match	"readarray -t a <<< $'one\\ntwo'; printf '<%s>' \"${a[@]}\""	{"code": 0, "out": "<one><two>", "err": "", "timeout": false}
+macOS	Builtin	times	missing interface	match	"t=$(times); [[ $t == *m*s* ]] && echo timings"	{"code": 0, "out": "timings\n", "err": "", "timeout": false}
+macOS	Builtin	ulimit	missing interface	match	"n=$(ulimit -n); [[ $n == +([0-9]) || $n == unlimited ]] && printf limit"	{"code": 0, "out": "limit", "err": "", "timeout": false}
+macOS	Builtin	umask	missing interface	match	"umask 077; : > f; ls -ld f | cut -c1-10"	{"code": 0, "out": "-rw-------\n", "err": "", "timeout": false}
+macOS	Builtin option	complete -A	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -A keyword auditname; complete -p auditname"	{"code": 0, "out": "complete -k auditname\n", "err": "", "timeout": false}
+macOS	Builtin option	complete -D	different	match	"complete -D -W val; complete -p -D"	{"code": 0, "out": "complete -W 'val' -D\n", "err": "", "timeout": false}
+macOS	Builtin option	complete -E	different	match	"complete -E -W val; complete -p -E"	{"code": 0, "out": "complete -W 'val' -E\n", "err": "", "timeout": false}
+macOS	Builtin option	complete -I	different	match	"complete -I -W val; complete -p -I"	{"code": 0, "out": "complete -W 'val' -I\n", "err": "", "timeout": false}
+macOS	Builtin option	complete -P	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -W apple -P pre auditname; complete -p auditname"	{"code": 0, "out": "complete -W 'apple' -P 'pre' auditname\n", "err": "", "timeout": false}
+macOS	Builtin option	complete -S	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -W apple -S end auditname; complete -p auditname"	{"code": 0, "out": "complete -W 'apple' -S 'end' auditname\n", "err": "", "timeout": false}
+macOS	Builtin option	complete -a	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -a auditname; complete -p auditname"	{"code": 0, "out": "complete -a auditname\n", "err": "", "timeout": false}
+macOS	Builtin option	complete -b	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -b auditname; complete -p auditname"	{"code": 0, "out": "complete -b auditname\n", "err": "", "timeout": false}
+macOS	Builtin option	complete -c	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -c auditname; complete -p auditname"	{"code": 0, "out": "complete -c auditname\n", "err": "", "timeout": false}
+macOS	Builtin option	complete -d	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -d auditname; complete -p auditname"	{"code": 0, "out": "complete -d auditname\n", "err": "", "timeout": false}
+macOS	Builtin option	complete -e	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -e auditname; complete -p auditname"	{"code": 0, "out": "complete -e auditname\n", "err": "", "timeout": false}
+macOS	Builtin option	complete -f	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -f auditname; complete -p auditname"	{"code": 0, "out": "complete -f auditname\n", "err": "", "timeout": false}
+macOS	Builtin option	complete -k	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -k auditname; complete -p auditname"	{"code": 0, "out": "complete -k auditname\n", "err": "", "timeout": false}
+macOS	Builtin option	complete -o	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -o nospace -W 'test' auditname; complete -p auditname"	{"code": 0, "out": "complete -o nospace -W 'test' auditname\n", "err": "", "timeout": false}
+macOS	Builtin option	complete -v	different	match	"alias auditname=:; f(){ COMPREPLY=(apple); }; touch apple; mkdir apricot; complete -v auditname; complete -p auditname"	{"code": 0, "out": "complete -v auditname\n", "err": "", "timeout": false}
+macOS	Builtin option	compopt -D	different	match	"complete -D -W yes; compopt -D -o nospace; complete -p -D"	{"code": 0, "out": "complete -o nospace -W 'yes' -D\n", "err": "", "timeout": false}
+macOS	Builtin option	compopt -E	different	match	"complete -E -W yes; compopt -E -o nospace; complete -p -E"	{"code": 0, "out": "complete -o nospace -W 'yes' -E\n", "err": "", "timeout": false}
+macOS	Builtin option	compopt -I	different	match	"complete -I -W yes; compopt -I -o nospace; complete -p -I"	{"code": 0, "out": "complete -o nospace -W 'yes' -I\n", "err": "", "timeout": false}
+macOS	Builtin option	compopt -o	different	match	"complete -W one app; compopt -o nospace app; complete -p app"	{"code": 0, "out": "complete -o nospace -W 'one' app\n", "err": "", "timeout": false}
+macOS	Builtin option	declare -I	stderr differs	match	"x=outer; f() { declare -I x; echo \"$x\"; }; f"	{"code": 0, "out": "outer\n", "err": "", "timeout": false}
+macOS	Builtin option	declare -i	different	match	"declare -i x=3; x=4+7; echo \"$x\""	{"code": 0, "out": "11\n", "err": "", "timeout": false}
+macOS	Builtin option	dirs -N	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -0"	{"code": 0, "out": "~\n", "err": "", "timeout": false}
+macOS	Builtin option	dirs -c	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -c; dirs -p"	{"code": 0, "out": "~/b\n", "err": "", "timeout": false}
+macOS	Builtin option	dirs -l	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -l +1"	{"code": 0, "out": "/private$WORK/a\n", "err": "", "timeout": false}
+macOS	Builtin option	dirs -p	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -p"	{"code": 0, "out": "~/b\n~/a\n~\n", "err": "", "timeout": false}
+macOS	Builtin option	dirs -v	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -v"	{"code": 0, "out": " 0  ~/b\n 1  ~/a\n 2  ~\n", "err": "", "timeout": false}
+macOS	Builtin option	jobs -l	different	match	"sleep .04 & p=$!; jobs -l | grep -q \"$p\"; echo $?; wait"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+macOS	Builtin option	jobs -n	different	match	"sleep .03 & jobs -n; wait"	{"code": 0, "out": "[1]+  Running                 sleep .03 &\n", "err": "", "timeout": false}
+macOS	Builtin option	jobs -p	different	match	"sleep .1 & p=$!; test \"$(jobs -p)\" = \"$p\" && echo running; wait \"$p\""	{"code": 0, "out": "running\n", "err": "", "timeout": false}
+macOS	Builtin option	jobs -r	different	match	"sleep .04 & jobs -r | grep -q Running; echo $?; wait"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+macOS	Builtin option	jobs -s	different	match	"sleep .04 & jobs -s; wait"	{"code": 0, "out": "", "err": "", "timeout": false}
+macOS	Builtin option	mapfile -C	missing interface	match	"cb() { echo \"$1:$2\"; }; printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -t -C cb -c 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "0:first\n1:second\n2:third\n[first][second][third]", "err": "", "timeout": false}
+macOS	Builtin option	mapfile -O	missing interface	match	"a=(keep); printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -tO 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[keep][first][second][third]", "err": "", "timeout": false}
+macOS	Builtin option	mapfile -c	missing interface	match	"cb() { echo \"$1:$2\"; }; printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -t -C cb -c 2 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "1:second\n[first][second][third]", "err": "", "timeout": false}
+macOS	Builtin option	mapfile -d	missing interface	match	"printf 'first:second:' > input; exec 3<input; mapfile -td : a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second]", "err": "", "timeout": false}
+macOS	Builtin option	mapfile -n	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -tn 2 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second]", "err": "", "timeout": false}
+macOS	Builtin option	mapfile -s	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -ts 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[second][third]", "err": "", "timeout": false}
+macOS	Builtin option	mapfile -t	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -t a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
+macOS	Builtin option	mapfile -u	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; mapfile -t -u 3 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
+macOS	Builtin option	popd -N	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; popd -0; dirs -p"	{"code": 0, "out": "~/b ~/a\n~/b\n~/a\n", "err": "", "timeout": false}
+macOS	Builtin option	popd -n	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; popd -n; dirs -p"	{"code": 0, "out": "~/b ~\n~/b\n~\n", "err": "", "timeout": false}
+macOS	Builtin option	pushd -N	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; pushd -0; dirs -p"	{"code": 0, "out": "~ ~/b ~/a\n~\n~/b\n~/a\n", "err": "", "timeout": false}
+macOS	Builtin option	pushd -n	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; pushd -n relative; dirs -p"	{"code": 0, "out": "~/b relative ~/a ~\n~/b\nrelative\n~/a\n~\n", "err": "", "timeout": false}
+macOS	Builtin option	read -s	different	match	"PTY dialogue / read -s"	null
+macOS	Builtin option	readarray -C	missing interface	match	"cb() { echo \"$1:$2\"; }; printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t -C cb -c 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "0:first\n1:second\n2:third\n[first][second][third]", "err": "", "timeout": false}
+macOS	Builtin option	readarray -O	missing interface	match	"a=(keep); printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -tO 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[keep][first][second][third]", "err": "", "timeout": false}
+macOS	Builtin option	readarray -c	missing interface	match	"cb() { echo \"$1:$2\"; }; printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t -C cb -c 2 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "1:second\n[first][second][third]", "err": "", "timeout": false}
+macOS	Builtin option	readarray -d	missing interface	match	"printf 'first:second:' > input; exec 3<input; readarray -td : a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second]", "err": "", "timeout": false}
+macOS	Builtin option	readarray -n	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -tn 2 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second]", "err": "", "timeout": false}
+macOS	Builtin option	readarray -s	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -ts 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[second][third]", "err": "", "timeout": false}
+macOS	Builtin option	readarray -t	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
+macOS	Builtin option	readarray -u	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t -u 3 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
+macOS	Builtin option	set -B	different	interface only	"set -B; case $- in *B*) printf on;; esac; set +B; case $- in *B*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+macOS	Builtin option	set -C	different	interface only	"set -C; case $- in *C*) printf on;; esac; set +C; case $- in *C*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+macOS	Builtin option	set -m	different	interface only	"set -m; case $- in *m*) printf on;; esac; set +m; case $- in *m*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+macOS	Builtin option	typeset -I	stderr differs	match	"x=outer; f() { typeset -I x; echo \"$x\"; }; f"	{"code": 0, "out": "outer\n", "err": "", "timeout": false}
+macOS	Builtin option	typeset -i	different	match	"typeset -i x=3; x=4+7; echo \"$x\""	{"code": 0, "out": "11\n", "err": "", "timeout": false}
+macOS	Builtin option	ulimit -H	missing interface	match	"ulimit -Sn 32 && ulimit -Hn 64 && ulimit -Sn && ulimit -Hn"	{"code": 0, "out": "32\n64\n", "err": "", "timeout": false}
+macOS	Builtin option	ulimit -P	missing interface	not in reference	"ulimit -a"	null
+macOS	Builtin option	ulimit -R	missing interface	not in reference	"ulimit -a"	null
+macOS	Builtin option	ulimit -S	missing interface	match	"ulimit -Sn 64 && ulimit -Sn"	{"code": 0, "out": "64\n", "err": "", "timeout": false}
+macOS	Builtin option	ulimit -T	missing interface	not in reference	"ulimit -a"	null
+macOS	Builtin option	ulimit -a	missing interface	match	"ulimit -a"	{"code": 0, "out": "core file size              (blocks, -c) 0\ndata seg size               (kbytes, -d) unlimited\nfile size                   (blocks, -f) unlim", "err": "", "timeout": false}
+macOS	Builtin option	ulimit -b	missing interface	not in reference	"ulimit -a"	null
+macOS	Builtin option	ulimit -c	missing interface	match	"ulimit -c"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+macOS	Builtin option	ulimit -d	missing interface	match	"ulimit -d"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+macOS	Builtin option	ulimit -e	missing interface	not in reference	"ulimit -a"	null
+macOS	Builtin option	ulimit -f	missing interface	match	"ulimit -f"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+macOS	Builtin option	ulimit -i	missing interface	not in reference	"ulimit -a"	null
+macOS	Builtin option	ulimit -k	missing interface	not in reference	"ulimit -a"	null
+macOS	Builtin option	ulimit -l	missing interface	match	"ulimit -l"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+macOS	Builtin option	ulimit -m	missing interface	match	"ulimit -m"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+macOS	Builtin option	ulimit -n	missing interface	match	"ulimit -n"	{"code": 0, "out": "1048575\n", "err": "", "timeout": false}
+macOS	Builtin option	ulimit -p	missing interface	match	"ulimit -p"	{"code": 0, "out": "1\n", "err": "", "timeout": false}
+macOS	Builtin option	ulimit -q	missing interface	not in reference	"ulimit -a"	null
+macOS	Builtin option	ulimit -r	missing interface	not in reference	"ulimit -a"	null
+macOS	Builtin option	ulimit -s	missing interface	match	"ulimit -s"	{"code": 0, "out": "8176\n", "err": "", "timeout": false}
+macOS	Builtin option	ulimit -t	missing interface	match	"ulimit -t"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+macOS	Builtin option	ulimit -u	missing interface	match	"ulimit -u"	{"code": 0, "out": "2666\n", "err": "", "timeout": false}
+macOS	Builtin option	ulimit -v	missing interface	match	"ulimit -v"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
+macOS	Builtin option	ulimit -x	missing interface	not in reference	"ulimit -a"	null
+macOS	Builtin option	umask -S	missing interface	match	"umask u=rwx,g=rx,o=; umask -S"	{"code": 0, "out": "u=rwx,g=rx,o=\n", "err": "", "timeout": false}
+macOS	Builtin option	umask -p	missing interface	match	"umask 027; umask -p"	{"code": 0, "out": "umask 0027\n", "err": "", "timeout": false}
+macOS	Builtin option	wait -f	stderr differs	match	"(exit 19) & wait -f $!; echo $?"	{"code": 0, "out": "19\n", "err": "", "timeout": false}
+macOS	Builtin option	wait -n	different	match	"(sleep .02; exit 13) & wait -n; printf %s \"$?\""	{"code": 0, "out": "13", "err": "", "timeout": false}
+macOS	Builtin option	wait -p	different	match	"(sleep .02; exit 13) & p=$!; wait -n -p ended; [ \"$ended\" = \"$p\" ] && echo yes"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+macOS	Completion option	bashdefault	different	interface only	"complete -o bashdefault -W item app && complete -p app"	{"code": 0, "out": "complete -o bashdefault -W 'item' app\n", "err": "", "timeout": false}
+macOS	Completion option	default	different	interface only	"complete -o default -W item app && complete -p app"	{"code": 0, "out": "complete -o default -W 'item' app\n", "err": "", "timeout": false}
+macOS	Completion option	dirnames	different	interface only	"complete -o dirnames -W item app && complete -p app"	{"code": 0, "out": "complete -o dirnames -W 'item' app\n", "err": "", "timeout": false}
+macOS	Completion option	filenames	different	interface only	"complete -o filenames -W item app && complete -p app"	{"code": 0, "out": "complete -o filenames -W 'item' app\n", "err": "", "timeout": false}
+macOS	Completion option	noquote	different	interface only	"complete -o noquote -W item app && complete -p app"	{"code": 0, "out": "complete -o noquote -W 'item' app\n", "err": "", "timeout": false}
+macOS	Completion option	nosort	different	interface only	"complete -o nosort -W item app && complete -p app"	{"code": 0, "out": "complete -o nosort -W 'item' app\n", "err": "", "timeout": false}
+macOS	Completion option	nospace	different	interface only	"complete -o nospace -W item app && complete -p app"	{"code": 0, "out": "complete -o nospace -W 'item' app\n", "err": "", "timeout": false}
+macOS	Completion option	plusdirs	different	interface only	"complete -o plusdirs -W item app && complete -p app"	{"code": 0, "out": "complete -o plusdirs -W 'item' app\n", "err": "", "timeout": false}
+macOS	Invocation	+O	different	match	"[\"+O\", \"nullglob\", \"-c\", \"set -- absent*; echo \\\"$1\\\"\"]"	{"code": 0, "out": "absent*\n", "err": "", "timeout": false}
+macOS	Invocation	-B	different	match	"[\"-B\", \"-c\", \"case $- in *B*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
+macOS	Invocation	-C	different	match	"[\"-C\", \"-c\", \"case $- in *C*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
+macOS	Invocation	-O	different	match	"[\"-O\", \"nullglob\", \"-c\", \"set -- missing*; echo \\\"$#\\\"\"]"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+macOS	Redirection	<>	different	match	"printf data >f; exec 3<>f; printf X >&3; cat f"	{"code": 0, "out": "Xata", "err": "", "timeout": false}
+macOS	Redirection	>|	different	match	"set -C; printf a >f; printf b >|f; cat f"	{"code": 0, "out": "b", "err": "", "timeout": false}
+macOS	Redirection	n<&m-	different	match	"printf data >f; exec 3<f; cat 4<&3- <&4"	{"code": 0, "out": "data", "err": "", "timeout": false}
+macOS	Redirection	n>&m-	different	match	"exec 3>f; printf hi 4>&3- >&4; cat f"	{"code": 0, "out": "hi", "err": "", "timeout": false}
+macOS	Shell language	brace alternation	different	match	"printf '<%s>' pre{one,two}post"	{"code": 0, "out": "<preonepost><pretwopost>", "err": "", "timeout": false}
+macOS	Shell language	brace sequence	different	match	"printf '<%s>' {03..09..3}"	{"code": 0, "out": "<03><06><09>", "err": "", "timeout": false}
+macOS	Shell language	case ;& fallthrough	different	match	"case x in x) printf a ;& y) printf b;; esac"	{"code": 0, "out": "ab", "err": "", "timeout": false}
+macOS	Shell language	case ;;& retest	different	match	"case x in x) printf a ;;& y) printf b;; x) printf c;; esac"	{"code": 0, "out": "ac", "err": "", "timeout": false}
+macOS	Shell language	directory stack rotation	different	match	"mkdir a b; pushd a >/dev/null; pushd ../b >/dev/null; pushd +1 >/dev/null; basename \"$PWD\""	{"code": 0, "out": "a\n", "err": "", "timeout": false}
+macOS	Shell language	extended globs	different	match	"shopt -s extglob\ncase b in @(a|b)) echo yes;; esac"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+macOS	Shell language	extglob !(...)	different	match	"shopt -s extglob\nfor v in '' a ab aa z; do case $v in !(a|b)) printf '<%s>' \"$v\";; esac; done"	{"code": 0, "out": "<><ab><aa><z>", "err": "", "timeout": false}
+macOS	Shell language	extglob *(...)	different	match	"shopt -s extglob\nfor v in '' a ab aa z; do case $v in *(a|b)) printf '<%s>' \"$v\";; esac; done"	{"code": 0, "out": "<><a><ab><aa>", "err": "", "timeout": false}
+macOS	Shell language	extglob +(...)	different	match	"shopt -s extglob\nfor v in '' a ab aa z; do case $v in +(a|b)) printf '<%s>' \"$v\";; esac; done"	{"code": 0, "out": "<a><ab><aa>", "err": "", "timeout": false}
+macOS	Shell language	extglob ?(...)	different	match	"shopt -s extglob\nfor v in '' a ab aa z; do case $v in ?(a|b)) printf '<%s>' \"$v\";; esac; done"	{"code": 0, "out": "<><a>", "err": "", "timeout": false}
+macOS	Shell language	extglob @(...)	different	match	"shopt -s extglob\nfor v in '' a ab aa z; do case $v in @(a|b)) printf '<%s>' \"$v\";; esac; done"	{"code": 0, "out": "<a>", "err": "", "timeout": false}
+macOS	Shell language	local variable inheritance	different	match	"v=parent; shopt -s localvar_inherit; f(){ local v; echo \"$v\"; }; f"	{"code": 0, "out": "parent\n", "err": "", "timeout": false}
+macOS	Shell language	wait -n	different	match	"(sleep .02; exit 13) & wait -n; printf %s \"$?\""	{"code": 0, "out": "13", "err": "", "timeout": false}
+macOS	Shell language	wait -p	different	match	"(sleep .02; exit 13) & p=$!; wait -n -p ended; [ \"$ended\" = \"$p\" ] && echo yes"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+macOS	Variable	DIRSTACK	different	match	"mkdir d; pushd d >/dev/null; printf \"%s\" \"${#DIRSTACK[@]}\""	{"code": 0, "out": "2", "err": "", "timeout": false}
+macOS	Variable	GLOBIGNORE	different	match	"touch one.x two.x; GLOBIGNORE=one.x; printf '<%s>' *.x"	{"code": 0, "out": "<two.x>", "err": "", "timeout": false}
+macOS	Variable	MAPFILE	different	match	"mapfile -t <<< text; echo \"${MAPFILE[0]}\""	{"code": 0, "out": "text\n", "err": "", "timeout": false}
+macOS	Variable	OPTARG	different	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
+macOS	Variable	OPTERR	different	match	"OPTERR=0; set -- -z; getopts a opt; echo \"$opt\""	{"code": 0, "out": "?\n", "err": "", "timeout": false}
+macOS	Variable	OPTIND	different	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
+macOS	set -o	braceexpand	different	match	"set +B; echo {a,b}; set -B; echo {a,b}"	{"code": 0, "out": "{a,b}\na b\n", "err": "", "timeout": false}
+macOS	set -o	monitor	different	match	"mkfifo gate; set -m; reader() { IFS= read -r line <gate; }; reader & p=$!\ng=$(python3 -c 'import os,sys; print(os.getpgid(int(sys.argv[1])))' \"$p\"); test \"$g\" = \"$p\" && echo group\necho go >gate; wait \"$p\" "	{"code": 0, "out": "group\n", "err": "", "timeout": false}
+macOS	set -o	noclobber	different	match	"set -C; echo kept >f; (echo wrong >f) 2>/dev/null; cat f"	{"code": 0, "out": "kept\n", "err": "", "timeout": false}
+macOS	shopt	extglob	missing interface	match	"shopt -s extglob\ncase b in @(a|b)) echo yes;; esac"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+macOS	shopt	globskipdots	missing interface	match	"shopt -s globskipdots; touch .x; printf '<%s>' .*"	{"code": 0, "out": "<.x>", "err": "", "timeout": false}
+macOS	shopt	localvar_inherit	missing interface	match	"v=parent; shopt -s localvar_inherit; f(){ local v; echo \"$v\"; }; f"	{"code": 0, "out": "parent\n", "err": "", "timeout": false}

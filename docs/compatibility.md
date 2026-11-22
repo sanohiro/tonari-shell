@@ -1,18 +1,27 @@
 # Bash compatibility audit / Bash 互換性の検証
 
-Tonari remains a prototype for use from an existing shell. The inventory starts with the reference Bash installations and the GNU manual. You can look up a feature, see the exact observation that differed, and find its timing when that observation matched. [Feature matrix](compatibility/matrix.md) · [Debian evidence](compatibility/Debian.tsv) · [Ubuntu evidence](compatibility/Ubuntu.tsv) · [macOS evidence](compatibility/macOS.tsv)
+Tonari remains a prototype for use from an existing shell. The inventory starts with the reference Bash installations and the GNU manual. You can look up a feature, see the exact observation that differed, and find its timing when that observation matched. [Current feature inventory](compatibility/current.tsv) · [Previous timing matrix](compatibility/matrix.md) · [Debian evidence](compatibility/Debian.tsv) · [Ubuntu evidence](compatibility/Ubuntu.tsv) · [macOS evidence](compatibility/macOS.tsv)
 
-Tonari は現在、既存のシェルから起動して試せる段階です。参照先の Bash と GNU マニュアルを起点に項目を列挙しました。一覧には機能名ごとの判定と速度を載せ、環境別 TSV には実際のテスト内容と差が出た出力例を残しています。[機能別一覧](compatibility/matrix.md) · [速度の集計](benchmarks.md#feature-audit)
+Tonari は現在、既存のシェルから起動して試せる段階です。参照先の Bash と GNU マニュアルを起点に項目を列挙しました。一覧には機能名ごとの判定と速度を載せ、環境別 TSV には実際のテスト内容と差が出た出力例を残しています。[現在の機能別一覧](compatibility/current.tsv) · [速度の集計](benchmarks.md#feature-audit)
 
-## Current gaps / 確認できた差分
+## Direct checks on 2026-11-23 / 直接比較の更新
 
-On Ubuntu, Bash exposes 61 builtins. Tonari matches the primary witness for 38. Three produce different results (`compopt`, `declare`, `jobs`). The other 20 have no same-name builtin, including `bind`, `getopts`, `mapfile`, `readonly` and `umask`. Of the 59 `shopt` names, six match their behavior probe, two pass an interface-only check and 51 lack the interface. Brace alternation and ranges, extended globs, associative arrays, the `ERR`, `DEBUG` and `RETURN` traps and `wait -n/-p` all have concrete counterexamples. [Ubuntu witnesses and observed output](compatibility/Ubuntu.tsv)
+The Ubuntu 26.04 control exposes 61 builtins. The primary behavior witnesses now match for 51. The remaining 10 have no builtin entry, including `bind`, `history` and `readonly`. The three previously differing builtin witnesses now match (`jobs`, `declare`, `compopt`). The 59 shopt names still include 48 missing interfaces. Associative arrays and the `ERR`, `DEBUG` and `RETURN` traps have failing witnesses. The changes file compares each row with the previous snapshot and gives its witness. The current inventory lists unchanged rows as well. [Changed observations by platform](compatibility/changes.tsv) · [Timing after the fixes](benchmarks.md#2026-11-23-runtime)
 
-Ubuntu の組み込み61個を引くと、代表ケースが一致したのは38個、動作差が3個、同名の組み込みがないものが20個でした。単純な関数定義・戻り値、EXIT・USR1 のトラップ、前景と背景の切り替えは実際に通っています。一方で関数のエクスポート、拡張グロブ、連想配列、特殊トラップ、複数の子のうち先に終わったものを待つ操作などに差があります。[再現例を含む一覧](compatibility/matrix.md)
+Ubuntu の組み込み61個のうち51個は代表ケースで標準出力・標準エラー・終了値が Bash と一致しました。未実装は10個です。新たに通ったケースには、整数変数への加算、波括弧の列挙と連番、先に終わった子の取得、行の配列への一括読み込み、ディレクトリスタックの回転、ファイル記述子の移動、リソース上限の変更、拡張パターン照合があります。各組み込みの全オプションや組み合わせには、引き続き個別の確認が必要です。従来の全件の計測値は変更前の記録です。[更新された検証例](compatibility/changes.tsv) · [修正後の速度](benchmarks.md#2026-11-23-runtime)
 
-The GNU test groups on Debian produced 10 golden matches, 69 differences and three inconclusive Bash controls. On Ubuntu there were 10 golden matches, 67 differences, seven inconclusive controls and one Tonari timeout. The exported-function group is recorded separately in both totals of 83 and 86 respectively. For the Ubuntu job-control group, Bash completed the control while Tonari exceeded the 110-second watchdog. The TSV includes the first golden-file difference or skip for each affected control.
+Against the November 22 snapshot, 126 direct checks on Debian, 125 on Ubuntu and 120 on macOS newly matched. Every previously matching direct observation remained a match. A feature and its option can refer to the same workload. The combined inventory has 1,552 distinct names. [Current inventory](compatibility/current.tsv) · [Changed witnesses with outputs](compatibility/changes.tsv)
 
-GNU のグループ回帰試験では Debian・Ubuntu ともに10グループが正解ファイルと一致しました。違いが確認できたのは Debian で69、Ubuntu で67グループです。配布版 Bash 自身で正解ファイルを再現できなかったグループも残り、Ubuntu のジョブ制御では Tonari が110秒でタイムアウトしました。関数エクスポートは両環境とも専用の直接テストで判定しています。
+## GNU regression results on 2026-11-23 / 修正後の GNU 回帰試験
+
+| Platform | Groups | Golden match | Different | Bash control inconclusive | Tonari timeout | Separate exported-function probe |
+|---|---:|---:|---:|---:|---:|---:|
+| Debian 13 | 83 | 15 | 64 | 3 | 0 | 1 |
+| Ubuntu 26.04 | 86 | 13 | 65 | 7 | 0 | 1 |
+
+Both shells now finish the job-control driver. Tonari took 72.1 s on Debian and 74.2 s on Ubuntu, including the driver's explicit waits. The two Bash controls took 62.2 s and 64.3 s respectively. The named job group still differs from its golden output. All three GNU extended-glob groups pass on Debian. On Ubuntu, the remaining output difference in `run-extglob` is the column width in `shopt extglob`. Bash 5.2 uses a 15-character name field and Bash 5.3 uses 20. Tonari currently follows 5.2. [GNU driver results and first differences](compatibility/gnu.tsv)
+
+前回は Ubuntu のジョブ制御が110秒で打ち切られました。今回のバイナリは両環境で最後まで実行し、残った出力差も記録しています。拡張パターンの GNU 3グループは Debian ですべて一致し、Ubuntu では2グループが一致しました。残り1グループには `shopt` の表示幅の差があります。表の判定不能は、参照先の Bash 自身で正解出力を確認できなかったグループです。意図的な待機を含む動作確認の所要時間は速度目標の達成件数には含めていません。
 
 ## How to read the evidence / 判定の読み方
 
@@ -22,7 +31,7 @@ GNU のグループ回帰試験では Debian・Ubuntu ともに10グループが
 - Each GNU driver runs once against the distribution shell and once against Tonari using the same executable pathname, fixtures, locale and controlling terminal. A golden match requires a successful driver, a nonempty sequence of successful direct golden-file comparisons, and no reported skips on either side. A failing, skipped or unobservable control remains inconclusive. The ordinary exported-function behavior has its own direct probe. The aggregate, profiling and exported-function drivers are outside the golden totals.
 - A matching observation applies to the named case. A working `trap EXIT` can coexist with a failing `trap ERR`. An absent `bind` marks every Readline binding interface as missing. A rejected `--posix` leaves the manual’s numbered POSIX rules blocked at entry. A counted name can share a witness with other names. The 132 manual sections form an index. These dependencies make a single percentage a poor measure of how much of Bash works. Unicode tests cover the project's UTF-8 contract. Combinations of features, external plugins, other CPUs and WSL2 require their own evidence.
 - 直接の比較では標準出力、標準エラー、終了値を照合します。対話機能は疑似端末から実際にキーを送り、補完コールバックの値や前景プロセスグループも調べます。GNU の回帰テストは配布版 Bash 自身でも実行します。正解ファイルと照合できなかったグループには「判定不能」と明記しました。
-- 組み込みやオプションの一致はその検証例が通ったという意味です。たとえば `fg` で前景に戻せても、`jobs -p` をコマンド置換の中から呼ぶと結果が異なります。Readline の多数の行が一つの `bind` の欠落に結び付きます。件数には別名や同じ操作を参照する項目も含まれ、全組み合わせを網羅するものではありません。
+- 組み込みやオプションの一致はその検証例が通ったという意味です。たとえば `trap EXIT` が通っても `trap ERR` には動作差があります。Readline の多数の行が一つの `bind` の欠落に結び付きます。件数には別名や同じ操作を参照する項目も含まれ、全組み合わせを網羅するものではありません。
 
 ## What the timing measures / 速度の測り方
 
@@ -46,7 +55,7 @@ run_lane() {
     docker build -f tests/compat/Dockerfile --build-arg BASE="$base" \
         --build-arg GNU_SHA256="$digest" -t "tonari-audit-$label" "$fixture" &&
     docker run --rm --network none --pids-limit 128 --tmpfs /tmp:exec,mode=1777,size=384m \
-        -v "$PWD:/repo:ro" -v "$linux_binary:/tonari:ro" "tonari-audit-$label" > "$label.json"
+        -v "$PWD:/repo:ro" -v "$linux_binary:/tonari:ro" "tonari-audit-$label" --correctness-only > "$label.audit.json"
 }
 run_lane debian debian:trixie-slim 5.2.37 9599b22ecd1d5787ad7d3b7bf0c59f312b3396d1e281175dd1f8a4014da621ff
 run_lane ubuntu ubuntu:26.04 5.3 0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba
@@ -61,9 +70,22 @@ python3 tests/compat/bench.py --bash "$reference_bash" --tonari target/release/t
     --audit audit-mac.json > mac.json
 ```
 
+To time a verified build, mount its saved JSON into the same fixture and pass `--reuse-audit`. The benchmark compares the SHA-256 of both staged executables with the audit and checks each sample against its recorded result.
+
+修正中は上の `--correctness-only` で機能を再確認します。速度を計測する段階で同じ実行ファイルと結果ファイルを指定します。計測器がどちらかの実行ファイルの変更を検出すると、速度の集計を始める前に終了します。
+
+```sh
+label=debian
+docker run --rm --network none --pids-limit 128 --tmpfs /tmp:exec,mode=1777,size=384m \
+    -v "$PWD:/repo:ro" -v "$linux_binary:/tonari:ro" -v "$PWD/$label.audit.json:/checked.json:ro" \
+    "tonari-audit-$label" --reuse-audit /checked.json > "$label.json"
+```
+
 ## Check a release / リリース時の検証
 
 ```sh
+python3 tests/compat/changes.py --baseline docs/compatibility --inventory current.tsv --gnu gnu.tsv \
+    Debian=debian.audit.json Ubuntu=ubuntu.audit.json macOS=audit-mac.json > changes.tsv
 python3 tests/compat/report.py --compare docs/compatibility \
     Debian=debian.json Ubuntu=ubuntu.json macOS=mac.json
 python3 tests/compat/report.py --require-target --require-complete \

@@ -758,3 +758,100 @@ The companion workload run covers repeated scripts (15 samples per shell), start
 All 30 repeated scripts finished faster than Bash after startup on each platform. At the 2/3 target, Debian and Ubuntu passed 21 of 30 and macOS passed 25 of 30. For an interactive example, listing 10,000 candidates took a median of 4.24 ms in Tonari and 21.52 ms in Bash on Ubuntu. Ordinary filename Tab completion in the 10,000-file fixture took 2.32 ms versus 3.06 ms. The first operation clears the upper target and the second exceeds it.
 
 起動済みシェルで繰り返し処理を行うスクリプト30本は、3環境ともすべて Bash より速く完了しました。上限の 2/3 まで達したのは Debian と Ubuntu で各21本、macOS で25本です。Ubuntu での候補1万件の一覧表示は Tonari が中央値 4.24 ms、Bash が 21.52 ms でした。同じ規模のディレクトリで通常のファイル名補完を行うと 2.32 ms と 3.06 ms で、こちらは上限に届いていません。
+
+<a id="2026-11-23-runtime"></a>
+
+## 2026-11-23 · Corrected operations / 修正した経路
+
+Each cell reports median / p95 in milliseconds. Each script runs inside an already-started shell. Five warmups preceded 25 measured runs per executable, with rotating execution order and verified stdout and status. The previous release is the executable used for the November 22 inventory. All three binaries in each comparison were copied to the same local filesystem. macOS arm64 uses Bash 5.2.37. The arm64 Linux guests use Debian 13 Bash 5.2.37 and Ubuntu 26.04 Bash 5.3.9. Tonari uses the native release configuration on macOS and the static size-optimized musl release on Linux.
+
+修正した経路を、起動済みシェルで同じスクリプトを実行して比較しました。表の値は中央値 / p95（ms）、比は Tonari の中央値を Bash の中央値で割った値です。以前の実装では結果が一致しない新機能の欄は空欄です。パイプには外部の `/usr/bin/printf` と `/bin/cat` の起動・実行・終了待ちが含まれます。
+
+| Platform | Workload | Bash | Previous Tonari | Current Tonari | Current / Bash |
+|---|---|---:|---:|---:|---:|
+| macOS | `echo-substitutions` | 43.824 / 45.487 | 35.080 / 35.719 | 0.507 / 0.525 | 0.012 |
+| macOS | `compound-substitutions` | 11.418 / 11.691 | 9.150 / 9.989 | 0.452 / 0.501 | 0.040 |
+| macOS | `pipeline` | 33.457 / 36.377 | 21.711 / 22.222 | 21.605 / 22.175 | 0.646 |
+| macOS | `merged-pipeline` | 33.558 / 34.964 | 21.693 / 23.210 | 21.731 / 22.781 | 0.648 |
+| macOS | `external-substitutions` | 28.928 / 29.421 | 18.358 / 18.622 | 18.335 / 19.232 | 0.634 |
+| macOS | `extended-patterns` | 1.659 / 1.719 | — | 1.021 / 1.065 | 0.615 |
+| macOS | `resource-limits` | 4.636 / 4.664 | — | 3.730 / 3.940 | 0.805 |
+| macOS | `brace-range` | 4.743 / 5.055 | — | 1.481 / 1.607 | 0.312 |
+| macOS | `getopts-clusters` | 1.762 / 1.803 | — | 1.016 / 1.048 | 0.576 |
+| macOS | `mapfile-lines` | 3.154 / 3.252 | — | 1.877 / 1.911 | 0.595 |
+| macOS | `case-fallthrough` | 2.992 / 3.033 | — | 1.864 / 1.903 | 0.623 |
+| macOS | `directory-stack` | 6.154 / 6.302 | — | 5.219 / 5.348 | 0.848 |
+| macOS | `descriptor-moves` | 3.628 / 3.677 | — | 3.139 / 3.187 | 0.865 |
+| macOS | `integer-assignments` | 3.274 / 3.308 | — | 2.191 / 2.221 | 0.669 |
+| Debian | `echo-substitutions` | 14.606 / 24.716 | 8.652 / 9.760 | 0.253 / 0.330 | 0.017 |
+| Debian | `compound-substitutions` | 3.865 / 4.856 | 2.540 / 3.350 | 0.230 / 0.365 | 0.060 |
+| Debian | `pipeline` | 6.815 / 8.640 | 5.666 / 8.273 | 5.892 / 7.541 | 0.865 |
+| Debian | `merged-pipeline` | 6.362 / 7.511 | 5.300 / 6.132 | 5.142 / 6.074 | 0.808 |
+| Debian | `external-substitutions` | 5.462 / 6.322 | 3.655 / 4.341 | 3.606 / 4.799 | 0.660 |
+| Debian | `extended-patterns` | 1.705 / 1.782 | — | 0.732 / 0.798 | 0.429 |
+| Debian | `resource-limits` | 2.090 / 2.185 | — | 1.097 / 1.204 | 0.525 |
+| Debian | `brace-range` | 6.336 / 7.006 | — | 1.457 / 1.581 | 0.230 |
+| Debian | `getopts-clusters` | 1.757 / 1.781 | — | 0.762 / 0.784 | 0.433 |
+| Debian | `mapfile-lines` | 4.261 / 4.472 | — | 1.858 / 1.948 | 0.436 |
+| Debian | `case-fallthrough` | 3.564 / 3.947 | — | 1.572 / 1.727 | 0.441 |
+| Debian | `directory-stack` | 2.210 / 2.260 | — | 1.216 / 1.248 | 0.550 |
+| Debian | `descriptor-moves` | 1.140 / 1.186 | — | 0.987 / 1.002 | 0.865 |
+| Debian | `integer-assignments` | 4.259 / 4.758 | — | 1.819 / 2.074 | 0.427 |
+| Ubuntu | `echo-substitutions` | 12.487 / 13.228 | 7.732 / 8.187 | 0.220 / 0.260 | 0.018 |
+| Ubuntu | `compound-substitutions` | 3.591 / 3.702 | 2.381 / 2.489 | 0.203 / 0.236 | 0.057 |
+| Ubuntu | `pipeline` | 18.821 / 19.333 | 16.795 / 17.235 | 16.869 / 19.291 | 0.896 |
+| Ubuntu | `merged-pipeline` | 18.879 / 19.387 | 16.895 / 17.295 | 16.833 / 17.307 | 0.892 |
+| Ubuntu | `external-substitutions` | 16.051 / 16.495 | 14.347 / 14.595 | 14.265 / 14.604 | 0.889 |
+| Ubuntu | `extended-patterns` | 1.442 / 1.466 | — | 0.701 / 0.734 | 0.486 |
+| Ubuntu | `resource-limits` | 1.956 / 2.119 | — | 1.078 / 1.236 | 0.551 |
+| Ubuntu | `brace-range` | 6.607 / 6.775 | — | 1.399 / 1.424 | 0.212 |
+| Ubuntu | `getopts-clusters` | 1.506 / 1.548 | — | 0.758 / 0.795 | 0.503 |
+| Ubuntu | `mapfile-lines` | 4.853 / 4.909 | — | 1.835 / 1.891 | 0.378 |
+| Ubuntu | `case-fallthrough` | 2.963 / 3.000 | — | 1.559 / 1.608 | 0.526 |
+| Ubuntu | `directory-stack` | 2.095 / 2.162 | — | 1.210 / 1.239 | 0.577 |
+| Ubuntu | `descriptor-moves` | 1.073 / 1.121 | — | 0.988 / 1.001 | 0.921 |
+| Ubuntu | `integer-assignments` | 3.730 / 3.832 | — | 1.820 / 1.944 | 0.488 |
+
+The two builtin substitutions run 16 compound or 64 single-echo captures. The pipeline and external substitution scripts run 16 times each. The range workload expands 1,000 zero-padded numbers 16 times. The option workload parses a cluster and a value across 128 loops. The array workload reads 2,000 lines into an indexed array 16 times. The extended-pattern workload tests 500 case arms containing a repeated character class and a choice of suffixes. The resource-limit workload performs 256 soft-limit updates and queries. The full inventory’s earlier ratios remain attached to its original binary. [Workload definitions](../tools/bench_scripts.py) · [Compatibility changes](compatibility/changes.tsv)
+### Startup and executable sizes / 起動時間とサイズ
+
+The tested shell is commit `7144562`, source tree `d3eb7e7529fb8cc293923cc281408bacb2208a2f`. The macOS executable SHA-256 is `1079993cd86465306eacf1b69dcb62f45ec99e15fa4558ffb41a49624606bf35` and the static Linux executable SHA-256 is `03882e6c7cfceff66607382451a02d540b8c6abab3e2ceb99000a622c4e4e52e`. The host was an Apple M1 running macOS 27.2.1. The Linux guests ran native arm64 code. The empty-command and PTY benchmarks rotated each binary through five warmups and 51 measured launches. The Linux PTY fixture provided an empty system bashrc so the prompt marker was stable. The Bash column below is the executable size. Dynamic system libraries are outside that figure.
+
+起動は各実行ファイルを51回測定しました。表は中央値 / p95（ms）です。最初のプロンプトには PTY 子プロセスの起動を含みます。同じ試行から exec の直前から表示までの区間も計測しました。
+
+| Platform | Interval | Bash | Previous Tonari | Current Tonari | Current / Bash |
+|---|---|---:|---:|---:|---:|
+| macOS | empty command | 4.781 / 5.220 | 2.327 / 2.613 | 2.234 / 2.544 | 0.467 |
+| macOS | first prompt | 6.356 / 6.772 | 3.791 / 4.057 | 3.571 / 3.969 | 0.562 |
+| macOS | exec to first prompt | 5.268 / 5.615 | 2.571 / 2.727 | 2.470 / 2.692 | 0.469 |
+| Debian | empty command | 0.420 / 0.635 | 0.195 / 0.277 | 0.196 / 0.279 | 0.468 |
+| Debian | first prompt | 0.903 / 1.181 | 0.548 / 0.685 | 0.524 / 0.760 | 0.580 |
+| Debian | exec to first prompt | 0.647 / 0.833 | 0.277 / 0.335 | 0.264 / 0.418 | 0.408 |
+| Ubuntu | empty command | 0.414 / 0.488 | 0.190 / 0.232 | 0.194 / 0.226 | 0.468 |
+| Ubuntu | first prompt | 0.924 / 1.298 | 0.567 / 0.839 | 0.553 / 1.151 | 0.598 |
+| Ubuntu | exec to first prompt | 0.652 / 0.835 | 0.284 / 0.401 | 0.280 / 0.673 | 0.429 |
+
+| Platform | Bash bytes | Previous Tonari bytes | Current Tonari bytes |
+|---|---:|---:|---:|
+| macOS | 1,208,904 | 886,400 | 969,360 |
+| Debian | 1,412,096 | 1,053,592 | 1,146,920 |
+| Ubuntu | 1,609,176 | 1,053,592 | 1,146,920 |
+
+Across the 42 script and platform pairs, 17 reached half of Bash's elapsed time and 31 met the two-thirds upper target. These counts apply to these 14 checked workloads on three platforms. The following medians exceeded the upper target.
+
+- macOS — `resource-limits` (0.805), `directory-stack` (0.848), `descriptor-moves` (0.865), `integer-assignments` (0.669).
+- Debian — `pipeline` (0.865), `merged-pipeline` (0.808), `descriptor-moves` (0.865).
+- Ubuntu — `pipeline` (0.896), `merged-pipeline` (0.892), `external-substitutions` (0.889), `descriptor-moves` (0.921).
+
+The intermediate macOS directory-stack run took 10.902 ms (1.687× Bash) before caching the logical directory. The first implementation of the extended-pattern workload took 1.669 ms (1.008× Bash). An additional 41-run comparison of the compiled matcher measured 1.157 ms against 1.853 ms for Bash. The tables use a fresh 25-run series on each platform. Each external-pipeline workload includes the child programs, their startup and the final wait.
+
+macOS のディレクトリスタックは論理パスをキャッシュする前は Bash の1.687倍、拡張パターンの反復は構文と照合結果を再利用する前は1.008倍かかっていました。上の表には修正後の同じ実行ファイルで計測した結果を掲載しています。全1,552項目の速度表は11月22日のバイナリの記録です。
+
+```sh
+python3 tools/bench_scripts.py "$tonari" --bash "$bash" --timing started --runs 25 \
+  --case echo-substitutions --case compound-substitutions --case pipeline --case merged-pipeline \
+  --case external-substitutions --case extended-patterns --case resource-limits --case brace-range \
+  --case getopts-clusters --case mapfile-lines --case case-fallthrough --case directory-stack \
+  --case descriptor-moves --case integer-assignments
+python3 tools/bench.py "$tonari" --bash "$bash" --runs 51 --case startup --case prompt
+```

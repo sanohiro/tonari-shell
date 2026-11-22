@@ -4,9 +4,9 @@
 
 Tonari is a Rust shell for modern macOS and Linux, including WSL2. It aims to replace Bash as an everyday login shell. Bash-style commands, startup files and tool integrations run on Tonari’s own interpreter. Interactive editing, history suggestions and completion are built in.
 
-**Tonari is a working prototype.** Try it in a nested terminal before using it for your login session. The Ubuntu reference audit found 20 missing Bash builtins, including `getopts`, `mapfile` and `readonly`. Existing Bash startup files can depend on them.
+**Tonari is a working prototype.** Try it in a nested terminal before using it for your login session. The Ubuntu reference audit still finds 10 missing Bash builtins, including `bind`, `history` and `readonly`. Existing Bash startup files can depend on them.
 
-See the [Bash feature matrix](docs/compatibility/matrix.md) for the behavior and timing of each audited interface on Debian, Ubuntu and macOS. The [audit guide](docs/compatibility.md) explains how to reproduce the results and check a new release.
+The current inventory gives the outcome for every named check on Debian, Ubuntu and macOS. The audit guide links the commands, observed differences and measured timings. [Current inventory](docs/compatibility/current.tsv) · [Audit guide](docs/compatibility.md)
 
 ## Try it
 
@@ -36,14 +36,14 @@ tools/stage.sh target/release/tonari "$prefix"
 ## Current capabilities
 
 - **Input and state.** Interactive terminals, `-c`, script files, stdin, `source`, and `eval` share the evaluator. Variables, exported environment values, function-local scope, positional parameters, and `cd` persist within their Bash scopes.
-- **Language.** Conditional lists, groups, subshells, functions, loops, `case`, `[[ ]]`, arithmetic, command substitution, globs, quoted words, and indexed arrays are implemented. Pathname expansion supports `dotglob`, `nullglob`, and recursive `globstar`. Parameter expansion supports indirection such as `${!name}` and `${!#}`. Alias definitions affect subsequently read commands. The parser accepts UTF-8 shell text.
+- **Language.** Conditional lists, groups, subshells, functions, loops, `case`, `[[ ]]`, arithmetic, command substitution, globs, quoted words, and indexed arrays are implemented. Extended patterns work in conditionals, case arms, filename expansion and parameter operations. Pathname expansion supports `dotglob`, `nullglob`, and recursive `globstar`. Parameter expansion supports indirection such as `${!name}` and `${!#}`. Alias definitions affect subsequently read commands. The parser accepts UTF-8 shell text.
 - **Processes.** External commands and concurrent pipelines support ordered redirections, here-documents and here-strings. Streams can carry arbitrary bytes. Foreground job control, Ctrl-C, Ctrl-Z, `jobs`, `bg`, `fg`, background pipelines, and `wait` are exercised with real processes. Scripts can inspect `PIPESTATUS`, signal jobs with `kill`, and register signal and `EXIT` handlers with `trap`.
 - **Startup.** Login sessions read the system profile and the first readable Bash user profile. Interactive non-login sessions read the user’s Bash rc. Noninteractive sessions support `BASH_ENV`. The editor honors `PS1`, `PS2`, and a scalar `PROMPT_COMMAND`.
 - **History and completion.** Tonari keeps its own journal under `$XDG_STATE_HOME/tonari` or `~/.local/state/tonari`. History supports common Bash exclusion and persistence settings. Tab can use Bash word lists and shell completion functions registered with `complete`.
 
 We sourced nvm 0.40.5 in Tonari, switched between Node 24.1.0 and 18.13.0 in the same session, and verified each switch with `node --version`. The script from `gh completion -s bash` (GitHub CLI 2.96.0) registers successfully. Completing `gh iss` to `gh issue` currently needs a bash-completion helper. Loading the full Debian bash-completion library is still pending.
 
-Compatibility work includes brace expansion, extended globs, additional parameter transformations, associative arrays, Bash’s `DEBUG`, `ERR` and `RETURN` traps, persistent startup parsing caches, and end-to-end coverage of real tool integrations. WSL2 and x86-64 still need native validation.
+Compatibility work includes additional parameter transformations, associative arrays, Bash’s `DEBUG`, `ERR` and `RETURN` traps, persistent startup parsing caches, and end-to-end coverage of real tool integrations. WSL2 and x86-64 still need native validation.
 
 ## Speed and size
 
