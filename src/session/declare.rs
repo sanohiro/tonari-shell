@@ -9,6 +9,7 @@ struct Options {
     array: bool,
     functions: bool,
     global: bool,
+    integer: Option<bool>,
     exported: Option<bool>,
 }
 
@@ -33,6 +34,7 @@ pub(super) fn run(session: &mut Session, command: &str, mut operands: &[String])
                 'a' if on => flags.array = true,
                 'F' => flags.functions = true,
                 'g' => flags.global = on,
+                'i' => flags.integer = Some(on),
                 'p' => flags.print = true,
                 'x' => flags.exported = Some(on),
                 _ => {
@@ -123,6 +125,7 @@ pub(super) fn run(session: &mut Session, command: &str, mut operands: &[String])
         let mut var = session
             .declared_variable(name, flags.global)
             .unwrap_or(Variable {
+                integer: false,
                 array_assigned: false,
                 elements: None,
                 declared: true,
@@ -133,25 +136,57 @@ pub(super) fn run(session: &mut Session, command: &str, mut operands: &[String])
         if !flags.global {
             if let Some(scope) = session.locals.last_mut() {
                 if !scope.0.contains_key(name) {
+                    if name == "OPTIND" {
+                        scope.1 = Some(session.opt_offset);
+                        session.opt_offset = 0;
+                    }
                     scope
                         .0
                         .insert(name.into(), session.variables.get(name).cloned());
                     // A fresh function-local declaration inherits only the
                     // export attribute of the shadowed variable.
+                    var.integer = false;
                     var.value = None;
                     var.elements = None;
                     var.array_assigned = false;
                 }
             }
         }
+        if let Some(integer) = flags.integer {
+            var.integer = integer;
+        }
         if flags.array {
             var.make_array();
         }
         if let Some(text) = value {
+            let number;
+            let (text, append) = if var.integer {
+                let old = var
+                    .elements
+                    .as_ref()
+                    .and_then(|a| a.get(&0))
+                    .or(var.value.as_ref());
+                match session.integer_value(old.map(String::as_str), text, append) {
+                    Ok(v) => {
+                        number = v;
+                        (number.as_str(), false)
+                    }
+                    Err(e) => {
+                        eprintln!("tonari: {command}: {e}");
+                        status = 1;
+                        continue;
+                    }
+                }
+            } else {
+                (text, append)
+            };
+            if name == "OPTIND" {
+                session.opt_offset = 0;
+            }
             if let Some(array) = var.elements.as_mut().map(Rc::make_mut) {
                 var.array_assigned = true;
                 if append {
-                    array.entry(0).or_default().push_str(text)
+                    array.append_first(text)
                 } else {
                     array.insert(0, text.into());
                 }
@@ -197,6 +232,7 @@ impl Session {
         entry.cloned().or_else(|| {
             let value = self.inherited_value(name);
             (value.is_some() || name == "OLDPWD").then(|| Variable {
+                integer: false,
                 array_assigned: false,
                 elements: None,
                 declared: true,

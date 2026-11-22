@@ -33,6 +33,7 @@ enum Action<'a> {
     HereInput(RawFd, &'a [u8]),
     Dup(RawFd, RawFd),
     Close(RawFd),
+    CloseMoved(RawFd),
 }
 
 fn errno() -> i32 {
@@ -58,15 +59,21 @@ fn exec_status(error: i32) -> u8 {
 
 fn action(r: &Redirect) -> Action<'_> {
     match r.target {
+        Target::CloseMoved => Action::CloseMoved(r.fd),
         Target::Duplicate if r.word == "-" => Action::Close(r.fd),
         Target::Duplicate => Action::Dup(r.word.parse().unwrap(), r.fd),
         Target::HereDoc { .. } | Target::HereString => Action::HereInput(r.fd, r.word.as_bytes()),
         _ => {
             let flags = match r.target {
                 Target::Read => libc::O_RDONLY,
-                Target::Write => libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
+                Target::ReadWrite => libc::O_RDWR | libc::O_CREAT,
+                Target::NoClobber => libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
+                Target::Clobber | Target::Write => libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
                 Target::Append => libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND,
-                Target::Duplicate | Target::HereDoc { .. } | Target::HereString => unreachable!(),
+                Target::CloseMoved
+                | Target::Duplicate
+                | Target::HereDoc { .. }
+                | Target::HereString => unreachable!(),
             };
             Action::Open(r.fd, CString::new(r.word.as_bytes()).unwrap(), flags)
         }
@@ -90,7 +97,20 @@ fn duplicate(src: RawFd, dest: RawFd) -> io::Result<()> {
 }
 
 fn open_redirect(path: &CStr, flags: i32) -> Option<OwnedFd> {
-    let fd = unsafe { libc::open(path.as_ptr(), flags, 0o666 as libc::c_int) };
+    let mut fd = unsafe { libc::open(path.as_ptr(), flags, 0o666 as libc::c_int) };
+    if fd < 0 && flags & libc::O_EXCL != 0 && errno() == libc::EEXIST {
+        // Open without truncation and inspect the opened object. A path swap
+        // cannot turn a permitted device write into truncation of a regular file.
+        fd = unsafe { libc::open(path.as_ptr(), libc::O_WRONLY) };
+        if fd >= 0 {
+            let file = unsafe { std::fs::File::from_raw_fd(fd) };
+            if file.metadata().is_ok_and(|m| !m.is_file()) {
+                return Some(file.into());
+            }
+            write_error(path.to_bytes(), b": cannot overwrite existing file");
+            return None;
+        }
+    }
     if fd < 0 {
         write_error(path.to_bytes(), b": cannot open redirection");
         return None;
@@ -101,7 +121,11 @@ fn open_redirect(path: &CStr, flags: i32) -> Option<OwnedFd> {
 impl Action<'_> {
     fn destination(&self) -> RawFd {
         match *self {
-            Self::Open(fd, ..) | Self::HereInput(fd, _) | Self::Dup(_, fd) | Self::Close(fd) => fd,
+            Self::Open(fd, ..)
+            | Self::HereInput(fd, _)
+            | Self::Dup(_, fd)
+            | Self::Close(fd)
+            | Self::CloseMoved(fd) => fd,
         }
     }
 
@@ -179,7 +203,7 @@ fn apply(actions: &[Action<'_>]) -> bool {
                     return false;
                 }
             }
-            Action::Close(fd) => {
+            Action::Close(fd) | Action::CloseMoved(fd) => {
                 unsafe { libc::close(*fd) };
             }
         }
@@ -402,6 +426,10 @@ enum Builtin {
     Shopt,
     Hash,
     Shift,
+    Getopts,
+    Umask,
+    Mapfile,
+    Let,
     LoopControl,
     Echo,
     Test,
@@ -431,10 +459,52 @@ fn builtin(cmd: &PreparedCommand, last_status: u8, session: &Session) -> Option<
 
 pub(crate) fn builtin_names() -> &'static [&'static str] {
     &[
-        ":", "[", ".", "break", "builtin", "cd", "command", "compgen", "complete", "compopt",
-        "continue", "echo", "eval", "exit", "exec", "export", "false", "local", "printf", "pwd",
-        "read", "return", "set", "shift", "source", "test", "true", "type", "unset", "jobs", "fg",
-        "bg", "kill", "wait", "shopt", "declare", "typeset", "alias", "unalias", "trap",
+        ":",
+        "[",
+        ".",
+        "break",
+        "builtin",
+        "cd",
+        "command",
+        "compgen",
+        "complete",
+        "compopt",
+        "continue",
+        "echo",
+        "eval",
+        "exit",
+        "exec",
+        "export",
+        "false",
+        "local",
+        "printf",
+        "pwd",
+        "read",
+        "return",
+        "set",
+        "shift",
+        "source",
+        "test",
+        "true",
+        "type",
+        "unset",
+        "jobs",
+        "fg",
+        "bg",
+        "kill",
+        "wait",
+        "shopt",
+        "declare",
+        "typeset",
+        "alias",
+        "unalias",
+        "trap",
+        "getopts",
+        "let",
+        "hash",
+        "umask",
+        "mapfile",
+        "readarray",
     ]
 }
 
@@ -454,6 +524,10 @@ fn named_builtin(name: &str, args: &[String], last_status: u8) -> Option<Builtin
         "hash" => Some(Builtin::Hash),
         "shopt" => Some(Builtin::Shopt),
         "shift" => Some(Builtin::Shift),
+        "mapfile" | "readarray" => Some(Builtin::Mapfile),
+        "umask" => Some(Builtin::Umask),
+        "getopts" => Some(Builtin::Getopts),
+        "let" => Some(Builtin::Let),
         "local" | "declare" | "typeset" => Some(Builtin::Declare),
         "echo" => Some(Builtin::Echo),
         "test" | "[" => Some(Builtin::Test),
@@ -517,11 +591,15 @@ fn eval_builtin(
             Flow::Continue(1)
         }
         Builtin::Printf => Flow::Continue(session.printf(args)),
-        Builtin::Jobs => Flow::Continue(crate::jobs::builtin(&cmd.words, session)),
+        Builtin::Jobs => crate::jobs::dispatch(&cmd.words, session, last_status),
+        Builtin::Umask => Flow::Continue(crate::builtins::umask::run(args)),
+        Builtin::Mapfile => crate::session::mapfile::run(session, &cmd.words[0], args, last_status),
         Builtin::Read => Flow::Continue(session.read(args)),
         Builtin::Set => Flow::Continue(session.set(args)),
         Builtin::Hash => Flow::Continue(hash::run(session, args)),
         Builtin::Shopt => Flow::Continue(session.shopt(args)),
+        Builtin::Getopts => Flow::Continue(session.getopts(args)),
+        Builtin::Let => Flow::Continue(crate::arithmetic::let_builtin(args, session)),
         Builtin::Shift => Flow::Continue(session.shift(args)),
         Builtin::Declare => {
             let status = session.declare(&cmd.words[0], args);
@@ -745,6 +823,9 @@ fn run_builtin(
     let mut extra = Vec::new();
     if !final_command {
         for action in actions {
+            if matches!(action, Action::CloseMoved(_)) {
+                continue;
+            }
             let fd = action.destination();
             if let Some(slot) = saved.get_mut(fd as usize) {
                 if matches!(slot, SavedFd::Unchanged) {
@@ -897,7 +978,7 @@ fn start_raw(
         session.traps.after_fork();
         reset_child_signals();
         launch.child();
-        session.jobs.detached();
+        session.jobs.forked(!launch.background);
         session.stdin_redirected |= input.is_some();
         let code = if apply(&setup) {
             match run(vec![raw], last_status, true, session) {
@@ -941,8 +1022,8 @@ fn start(
     if builtin.is_none()
         && launch.group.is_none()
         && !launch.background
-        && !cmd.redirects.is_empty()
-        && merged_pipe.is_none()
+        && ((!cmd.redirects.is_empty() && merged_pipe.is_none())
+            || (cfg!(target_os = "linux") && (input.is_some() || output.is_some())))
         && (cached.is_some() || cmd.words[0].contains('/'))
         && cmd.redirects.iter().all(spawn::standard_dup)
     {
@@ -1035,7 +1116,7 @@ fn start(
         session.traps.after_fork();
         reset_child_signals();
         launch.child();
-        session.jobs.detached();
+        session.jobs.forked(!launch.background);
         session.stdin_redirected |= cmd.redirects.iter().any(|r| r.fd == 0);
         session.stdin_redirected |= input.is_some();
         let code = if !apply(&setup) {
@@ -1222,7 +1303,17 @@ fn prepare(
             }
             Assignment::Scalar(word) => {
                 let value = exp.scalar(word)?;
-                let value = if append {
+                let base =
+                    crate::session::array::subscript(&key).map_or(key.as_str(), |(base, _)| base);
+                let value = if exp.session.integer(base) {
+                    let old = if append {
+                        let old = exp.lookup(&key).unwrap_or_default();
+                        exp.arithmetic(&old)?
+                    } else {
+                        0
+                    };
+                    old.wrapping_add(exp.arithmetic(&value)?).to_string()
+                } else if append {
                     exp.lookup(&key).unwrap_or_default() + &value
                 } else {
                     value
@@ -1324,19 +1415,37 @@ fn prepare_redirects(
                 word
             }
         };
-        if r.target == Target::Duplicate
-            && word != "-"
-            && (word.is_empty()
-                || !word.bytes().all(|b| b.is_ascii_digit())
-                || word.parse::<RawFd>().is_err())
-        {
-            return Err("invalid file descriptor".into());
+        let mut word = word;
+        let mut moved = None;
+        if r.target == Target::Duplicate && word != "-" {
+            let source = word.strip_suffix('-').unwrap_or(&word);
+            let fd = source
+                .parse::<RawFd>()
+                .ok()
+                .filter(|_| source.bytes().all(|b| b.is_ascii_digit()))
+                .ok_or("invalid file descriptor")?;
+            if source.len() != word.len() {
+                moved = Some(fd);
+                word.pop();
+            }
         }
+        let target = if r.target == Target::Write && exp.session.noclobber {
+            Target::NoClobber
+        } else {
+            r.target
+        };
         redirects.push(Redirect {
             fd: r.fd,
-            target: r.target,
+            target,
             word,
         });
+        if let Some(fd) = moved {
+            redirects.push(Redirect {
+                fd,
+                target: Target::CloseMoved,
+                word: String::new(),
+            });
+        }
     }
     Ok(redirects)
 }
@@ -1364,9 +1473,10 @@ pub fn run_pipeline(
             .iter()
             .map(|c| {
                 c.words
-                    .first()
-                    .and_then(Word::as_literal)
-                    .unwrap_or("command")
+                    .iter()
+                    .map(|word| word.as_literal().unwrap_or("command"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
             })
             .collect::<Vec<_>>()
             .join(" | ")

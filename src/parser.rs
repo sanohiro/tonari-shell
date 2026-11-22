@@ -37,6 +37,10 @@ pub(crate) fn prompt_word(
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Target {
+    ReadWrite,
+    Clobber,
+    NoClobber,
+    CloseMoved,
     Read,
     Write,
     Append,
@@ -129,7 +133,14 @@ impl CasePattern {
     }
 }
 
-pub type CaseArm = (Vec<CasePattern>, Vec<Statement>);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaseEnd {
+    Stop,
+    FallThrough,
+    Retest,
+}
+
+pub type CaseArm = (Vec<CasePattern>, Vec<Statement>, CaseEnd);
 
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -300,7 +311,7 @@ impl Reader {
     fn at_stop(&self, stops: &[&str]) -> bool {
         match self.peek() {
             Some(Token::RightParen) => stops.contains(&")"),
-            Some(Token::EndArm) => stops.contains(&";;"),
+            Some(Token::EndArm(_)) => stops.contains(&";;"),
             _ => self.keyword().is_some_and(|s| stops.contains(&s)),
         }
     }
@@ -353,7 +364,7 @@ impl Reader {
             });
             condition = match self.peek() {
                 None => return Ok(statements),
-                Some(Token::EndArm | Token::RightParen) if self.at_stop(stops) => {
+                Some(Token::EndArm(_) | Token::RightParen) if self.at_stop(stops) => {
                     return Ok(statements);
                 }
                 Some(Token::End | Token::Newline) => {
@@ -603,10 +614,14 @@ impl Reader {
                 }
             }
             let body = self.list(&[";;", "esac"])?;
-            arms.push((patterns, body));
-            if matches!(self.peek(), Some(Token::EndArm)) {
+            let end = if let Some(Token::EndArm(end)) = self.peek() {
+                let end = *end;
                 self.tokens.next();
-            }
+                end
+            } else {
+                CaseEnd::Stop
+            };
+            arms.push((patterns, body, end));
             self.newlines();
         }
         self.expect("esac")?;
@@ -788,7 +803,7 @@ impl Reader {
                 };
                 if target == Target::Duplicate {
                     if let Some(value) = word.as_literal().filter(|s| *s != "-") {
-                        descriptor(value)?;
+                        descriptor(value.strip_suffix('-').unwrap_or(value))?;
                     }
                 }
                 redirects.push(Redirect { fd, target, word });

@@ -22,6 +22,8 @@ pub struct Invocation {
     pub errexit: bool,
     pub nounset: bool,
     pub noglob: bool,
+    pub noclobber: bool,
+    pub braceexpand: bool,
     pub pipefail: bool,
 }
 
@@ -55,6 +57,8 @@ pub fn parse(
     let mut errexit = false;
     let mut nounset = false;
     let mut noglob = false;
+    let mut noclobber = false;
+    let mut braceexpand = true;
     let mut pipefail = false;
     while args
         .peek()
@@ -86,16 +90,20 @@ pub fn parse(
                         's' => stdin = enabled,
                         'n' => check = enabled,
                         'e' => errexit = enabled,
+                        'C' => noclobber = enabled,
+                        'B' => braceexpand = enabled,
                         'f' => noglob = enabled,
                         'u' => nounset = enabled,
                         'o' => match args.next().as_deref().and_then(|a| a.to_str()) {
+                            Some("braceexpand") => braceexpand = enabled,
                             Some("pipefail") => pipefail = enabled,
                             Some("errexit") => errexit = enabled,
                             Some("nounset") => nounset = enabled,
+                            Some("noclobber") => noclobber = enabled,
                             Some("noglob") => noglob = enabled,
                             _ => {
                                 return Err(
-                                    "expected pipefail, errexit, noglob or nounset after -o".into(),
+                                    "expected braceexpand, pipefail, errexit, noglob or nounset after -o".into(),
                                 );
                             }
                         },
@@ -135,6 +143,8 @@ pub fn parse(
         errexit,
         nounset,
         noglob,
+        noclobber,
+        braceexpand,
         pipefail,
     }))
 }

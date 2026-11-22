@@ -34,8 +34,15 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
-    def compare(self, source, code, stdout=b""):
-        for shell in [BASH, TONARI]:
+    def shells_for(self, minimum=0):
+        if minimum:
+            version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}"')
+            if int(version.stdout) < minimum:
+                return (TONARI,)
+        return (BASH, TONARI)
+
+    def compare(self, source, code, stdout=b"", minimum=0):
+        for shell in self.shells_for(minimum):
             with self.subTest(shell=shell, source=source):
                 proc = self.command(shell, source)
                 self.assertEqual(proc.returncode, code, proc.stderr)
@@ -699,6 +706,138 @@ wait "$child"; printf "done:%s" "$?" """
             proc = self.command(shell, """/bin/sh -c 'kill -TERM $$'; printf %s "$?" """)
             self.assertEqual((proc.returncode, proc.stdout), (0, b"143"))
 
+    def test_braces_keep_quoting_order_and_side_effects(self):
+        self.compare(r"""printf '[%s]\n' pre{a,{b,c}}{1,2} {,} end '{x,y}' z\{a,b\}
+printf '<%s>\n' {03..-1..2} {d..a..2} {1.."3"} {word}
+i=0; printf '(%s)' {x,y}$((++i)); echo ":$i"
+x='{a,b}'; printf '%s/' "$x" $x
+set +B; echo {q,r}; set -o braceexpand; echo {q,r}""", 0,
+                     b"[prea1]\n[prea2]\n[preb1]\n[preb2]\n[prec1]\n[prec2]\n[end]\n"
+                     b"[{x,y}]\n[z{a,b}]\n<03>\n<01>\n<-1>\n<d>\n<b>\n<{1..3}>\n<{word}>\n"
+                     b"(x1)(y2):2\n{a,b}/{a,b}/{q,r}\nq r\n", minimum=4)
+        self.compare("""touch a.rs b.rs c.txt; printf '[%s]' {a*,*.txt}; echo
+a=pre{x,y}; echo "$a"; arr=(foo{1,2} {04..06}); printf '%s/' "${arr[@]}" """,
+                     0, b"[a.rs][c.txt]\npre{x,y}\nfoo1/foo2/04/05/06/", minimum=4)
+
+    def test_case_fallthrough_and_retest(self):
+        version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}"')
+        if int(version.stdout) < 4:
+            self.skipTest("case fallthrough requires Bash 4")
+        self.compare("""case x in
+x) printf first ;& "$(echo bad >&2)") printf ':next'; false ;;&
+y) printf wrong ;; x) printf ':retest:%s' "$?";; esac
+case z in z) false ;;& a) :;; esac; printf '/%s' "$?" """,
+                     0, b"first:next:retest:1/1")
+
+    def test_clobber_readwrite_and_descriptor_moves(self):
+        self.compare("""echo first >file; set -C
+echo lost 2>/dev/null >file; echo "blocked:$?"; cat file
+echo allowed >|file; cat file; : >/dev/null; echo "device:$?"
+exec 3<>file; IFS= read -ru3 line; echo "read:$line"; printf 'more' >&3; exec 3>&-
+exec 6<file; exec 7<&6-; read -ru7 line; printf 'moved:%s' "$line"
+exec 8>|output; printf out 9>&8- >&9; { printf ok >&8; } 2>/dev/null; echo "/$?"; cat output""",
+                     0, b"blocked:1\nfirst\nallowed\ndevice:0\nread:allowed\nmoved:allowed/1\nout")
+
+    def test_integer_declarations_and_local_scope(self):
+        self.compare("""base=5; declare -i n='base*2'; n+=3; declare -p n
+export n+=2; n='n*2'; echo "$n"
+f() { local -i n=7; let n++; echo "$n"; }; f; echo "$n"
+printf -v n '%s' 'base+4'; echo "$n"; read -r n <<< '9+1'; echo "$n"
+declare +i n; n+=a; echo "$n"; declare -ai a=('3+1' '5*2'); a[0]+=2; declare -p a""",
+                     0, b'declare -i n="13"\n30\n8\n30\n9\n10\n10a\ndeclare -ai a=([0]="6" [1]="10")\n', minimum=4)
+
+    def test_mapfile_and_readarray(self):
+        version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"')
+        if tuple(map(int, version.stdout.split(b"."))) < (4, 4):
+            self.skipTest("mapfile -d requires Bash 4.4")
+        self.compare("""arr=(old keep)
+cb() { printf 'cb:%s:<%s>:%s/' "$1" "$2" "${#arr[@]}"; }
+readarray -ts1 -O1 -n2 -C cb -c2 arr < <(printf 'skip\nfirst\na b\nunused')
+printf '[%s]' "${arr[@]}"; echo
+printf 'aa\\0x y\\0tail' > records; exec 3<records
+mapfile -u3 -d '' -n2; printf '<%s>' "${MAPFILE[@]}"
+mapfile -u 3 -t; printf '<%s>' "${MAPFILE[@]}" """,
+                     0, b"cb:2:<a b>:2/[old][first][a b]\n<aa><x y><tail>")
+        self.compare("""exec 3< <(printf 'first\nsecond\nlast'); mapfile -u3 -tn1 a
+IFS= read -ru3 line; echo "${a[0]}:$line"; mapfile -tu3 a; echo "${a[0]}"
+printf 'a\\0b\nc\n' > input; mapfile -t a <input; printf '[%s]' "${a[@]}" """,
+                     0, b"first:second\nlast\n[a][c]")
+
+    def test_mapfile_chunk_boundaries_and_sparse_edits(self):
+        self.env["LC_ALL"] = "en_US.UTF-8"
+        (self.cwd / "chunked").write_bytes(b"a" * 8191 + b"\n" + b"b" * 8192 + "雪\n".encode()
+                                           + b"\nlast\0discarded")
+        if not self.command(BASH, 'type -t mapfile').stdout:
+            shells = (TONARI,)
+        else:
+            shells = (BASH, TONARI)
+        script = """mapfile -t v <chunked; printf '%s/' "${#v[@]}" "${#v[0]}" "${#v[1]}" "${v[2]}" "${v[3]}"
+v[1]=changed; unset 'v[0]'; v[20]=tail; printf '[%s]' "${!v[@]}" "${v[-1]}" """
+        for shell in shells:
+            with self.subTest(shell=shell):
+                proc = self.command(shell, script)
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                                 (0, b"4/8191/8193//last/[1][2][3][20][tail]", b""))
+
+    def test_umask_and_job_filters(self):
+        self.compare("""umask 022; (umask 077; umask); umask -p
+umask u=rwx,g=r,o=; umask -pS; : > formed; ls -l formed | cut -c 1-10""",
+                     0, b"0077\numask 0022\numask -S u=rwx,g=r,o=\n-rw-r-----\n")
+        self.compare("""sleep 0.12 & p=$!; jobs -s; jobs -r %1 >listing; awk '{$1=$1; print}' listing
+test "$(jobs -p %1)" = "$p" && echo selected
+jobs -l | grep -q "$p" && echo long; jobs -n; wait "$p" """,
+                     0, b"[1]+ Running sleep 0.12 &\nselected\nlong\n")
+
+    def test_command_substitution_capture_boundaries(self):
+        self.compare("""x=outside; v=$(printf 'a'; echo -ne 'b\\nc'; printf ':'); echo "$v"
+v=$(printf '%s' "$x"; false); echo "$?:$v"
+v=$(printf -v x changed; echo "$x"); echo "$x:$v"
+echo() { printf 'function:%s' "$1"; }; v=$(echo shadow); printf '%s' "$v" """,
+                     0, b"ab\nc:\n1:outside\noutside:changed\nfunction:shadow")
+        self.compare("""n=8; v=$(printf 'xy%n' n; printf '%s' "$n"); echo "$v:$n"
+v=$(false; printf '%s' "$?"); echo "$v" """, 0, b"xy2:8\n1\n")
+
+    def test_parent_job_visibility_without_job_ownership(self):
+        self.compare("""sleep 0.15 & p=$!
+f() { jobs -p; }
+test "$(jobs -p)" = "$p" && echo direct
+test "$(true; f)" = "$p" && echo nested
+test "$(jobs -p | cat)" = "$p" && echo pipe
+(jobs -p); wait "$p"; echo "$?" """, 0, b"direct\nnested\npipe\n0\n")
+
+    def test_wait_next_selected_ids_and_signals(self):
+        version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"')
+        if tuple(map(int, version.stdout.split(b"."))) < (5, 1):
+            self.skipTest("wait -p requires Bash 5.1")
+        self.compare("""sleep 0.18 & slow=$!
+(sleep 0.04; exit 13) & fast=$!
+wait -np id "$fast"; rc=$?; test "$fast" = "$id" && echo "first:$rc"
+wait "$fast"; echo "again:$?"
+wait -n -p id "$slow"; rc=$?; test "$slow" = "$id" && echo "last:$rc"
+wait -np id; echo "empty:$?:${id-unset}" """,
+                     0, b"first:13\nagain:13\nlast:0\nempty:127:unset\n")
+        self.compare("""trap 'echo signal' USR1; me=$$
+(sleep 0.05; kill -USR1 "$me") & sender=$!
+sleep 0.18 & slow=$!; result=old; wait -np result "$slow"; rc=$?
+test "$rc" -gt 128 && echo "interrupted:${result-unset}"
+wait "$slow"; echo "$?" """, 0, b"signal\ninterrupted:unset\n0\n")
+
+    def test_getopts_clusters_scope_and_reset(self):
+        self.compare("""set -- -abvalue -c -- tail; OPTIND=1
+while getopts ':ab:c' op; do echo "$op:${OPTARG--}:$OPTIND"; done
+echo "$op:${OPTARG--}:$OPTIND"
+f() { local OPTIND=1; getopts xy o -xy; echo "$o:$OPTIND"; }
+OPTIND=1; getopts xy o -xy; f; getopts xy o -xy; echo "$o:$OPTIND"
+OPTIND=1; getopts ':b:' op -b; echo "$op:$OPTARG"
+OPTIND=1; getopts ':a' op -z; echo "$op:$OPTARG" """,
+                     0, b"a:-:1\nb:value:2\nc:-:3\n?:-:4\nx:1\ny:2\n::b\n?:z\n", minimum=5)
+
+    def test_let_and_completion_definition(self):
+        self.compare("""let 'x=2' 'x*=3'; echo "$?:$x"; let 'x-=6'; echo "$?:$x" """,
+                     0, b"0:6\n1:0\n")
+        self.compare("""complete -v -d -A directory -W one -P pre -o nospace name
+complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
+
     def test_async_and_wait(self):
         self.compare("/bin/sh -c 'exit 17' & p=$!; wait \"$p\"; printf %s \"$?\"", 0, b"17")
         self.compare("false && touch unexpected & wait; printf ok", 0, b"ok")
@@ -777,6 +916,20 @@ wait "$child"; printf "done:%s" "$?" """
         self.addCleanup(close)
         self.read_until(fd, PROMPT)
         return fd
+
+    def test_silent_terminal_read_restores_echo(self):
+        for shell in self.shells_for(4):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(shell=shell)
+                os.write(fd, b"read -rs -p 'Value? ' x; echo length=${#x}\n")
+                # Wait for the real prompt after the echoed command line.
+                self.read_until(fd, b"\r\nValue? ")
+                os.write(fd, b"example\n")
+                output = self.read_until(fd, PROMPT)
+                self.assertIn(b"length=7", output)
+                self.assertNotIn(b"example", output)
+                os.write(fd, b"echo restored\n")
+                self.assertIn(b"echo restored", self.read_until(fd, PROMPT))
 
     def test_interactive_alias_and_interrupt_trap(self):
         for shell in (BASH, TONARI):

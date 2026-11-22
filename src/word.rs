@@ -1,3 +1,4 @@
+pub mod brace;
 mod modifier;
 mod replace;
 use crate::parser::Statement;
@@ -21,6 +22,9 @@ pub enum Alternative {
 
 #[derive(Clone, Debug)]
 pub enum Part {
+    Brace(&'static str),
+    BraceTilde(&'static str),
+    Range(Box<brace::Range>),
     Text(String),
     Pattern(String),
     Nested(Word),
@@ -364,6 +368,8 @@ impl Word {
                         "command and arithmetic substitutions are resolved before field splitting"
                     )
                 }
+                Part::Brace(text) | Part::BraceTilde(text) => output.append(text, true, ifs),
+                Part::Range(range) => output.append(&range.spelling, true, ifs),
                 Part::Text(s) => output.append(&s, true, ifs),
                 Part::Pattern(s) => match output {
                     Output::Scalar(text) | Output::Pattern(text, _) => text.push_str(&s),

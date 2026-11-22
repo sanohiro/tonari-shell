@@ -6,6 +6,7 @@ use crate::parser::is_identifier;
 
 struct Options<'a> {
     raw: bool,
+    silent: bool,
     delimiter: u8,
     max_chars: Option<usize>,
     exact: bool,
@@ -19,6 +20,7 @@ struct Options<'a> {
 fn options(args: &[String]) -> Result<Options<'_>, &'static str> {
     let mut opts = Options {
         raw: false,
+        silent: false,
         delimiter: b'\n',
         max_chars: None,
         exact: false,
@@ -40,6 +42,10 @@ fn options(args: &[String]) -> Result<Options<'_>, &'static str> {
         i += 1;
         let mut flags = arg[1..].chars();
         while let Some(flag) = flags.next() {
+            if flag == 's' {
+                opts.silent = true;
+                continue;
+            }
             if flag == 'r' {
                 opts.raw = true;
                 continue;
@@ -105,7 +111,8 @@ fn ready(fd: i32, timeout: Duration) -> io::Result<bool> {
     }
 }
 
-struct Input {
+pub(super) struct Input {
+    pub(super) consume_all: bool,
     fd: i32,
     seekable: bool,
     data: [u8; 4096],
@@ -114,9 +121,10 @@ struct Input {
 }
 
 impl Input {
-    fn new(fd: i32) -> Self {
+    pub(super) fn new(fd: i32) -> Self {
         Self {
             fd,
+            consume_all: false,
             seekable: unsafe { libc::lseek(fd, 0, libc::SEEK_CUR) } >= 0,
             data: [0; 4096],
             position: 0,
@@ -124,11 +132,15 @@ impl Input {
         }
     }
 
-    fn next(&mut self) -> io::Result<Option<u8>> {
+    pub(super) fn next(&mut self) -> io::Result<Option<u8>> {
         if self.position == self.end {
             // Reading beyond a delimiter on a pipe would take input from the
             // following shell command, since the kernel cannot rewind its fd.
-            let capacity = if self.seekable { self.data.len() } else { 1 };
+            let capacity = if self.seekable || self.consume_all {
+                self.data.len()
+            } else {
+                1
+            };
             let n = unsafe { libc::read(self.fd, self.data.as_mut_ptr().cast(), capacity) };
             if n < 0 {
                 return Err(io::Error::last_os_error());
@@ -159,6 +171,29 @@ impl Drop for Input {
     }
 }
 
+struct EchoGuard(i32, libc::termios);
+
+impl EchoGuard {
+    fn disable(fd: i32) -> Option<Self> {
+        let mut original = std::mem::MaybeUninit::uninit();
+        if unsafe { libc::tcgetattr(fd, original.as_mut_ptr()) } != 0 {
+            return None;
+        }
+        let original = unsafe { original.assume_init() };
+        let mut modes = original;
+        modes.c_lflag &= !(libc::ECHO | libc::ECHONL);
+        (unsafe { libc::tcsetattr(fd, libc::TCSANOW, &modes) } == 0).then_some(Self(fd, original))
+    }
+}
+
+impl Drop for EchoGuard {
+    fn drop(&mut self) {
+        unsafe {
+            libc::tcsetattr(self.0, libc::TCSANOW, &self.1);
+        }
+    }
+}
+
 pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
     let opts = match options(args) {
         Ok(opts) => opts,
@@ -182,6 +217,11 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
     if opts.timeout == Some(Duration::ZERO) {
         return u8::from(!ready(opts.fd, Duration::ZERO).unwrap_or(false));
     }
+    let _echo = if opts.silent {
+        EchoGuard::disable(opts.fd)
+    } else {
+        None
+    };
     if let Some(prompt) = opts.prompt {
         if unsafe { libc::isatty(opts.fd) } == 1 {
             eprint!("{prompt}");

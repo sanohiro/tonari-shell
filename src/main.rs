@@ -199,6 +199,8 @@ fn main() -> ExitCode {
     session.positional = std::mem::take(&mut invocation.positional);
     session.errexit = invocation.errexit;
     session.noglob = invocation.noglob;
+    session.noclobber = invocation.noclobber;
+    session.shopt.braceexpand = invocation.braceexpand;
     session.nounset = invocation.nounset;
     session.pipefail = invocation.pipefail;
     session.interactive = invocation.interactive;

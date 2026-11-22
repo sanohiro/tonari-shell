@@ -33,7 +33,7 @@ pub fn capture_substitution(
             drop(write);
         }
         // fork already isolated the complete session, including shell variables.
-        session.jobs.detached();
+        session.jobs.forked(true);
         session.interactive = false;
         session.command_string = false;
         session.errexit = false;
@@ -97,65 +97,97 @@ fn captured_output(mut output: Vec<u8>, code: u8) -> Result<(String, u8), &'stat
     Ok((value, code))
 }
 
-// Only expand words whose value is independent of a new process identity.
-// Functions, redirects, nested substitutions and effectful expansions use the
-// ordinary subshell. printf still has a private variable scope for %n and -v.
+// Validate the whole list before executing any builtin. A later function,
+// redirect or effectful word must send the complete substitution through fork.
 fn capture_simple(
     session: &mut Session,
     body: &[parser::Statement],
     last: u8,
 ) -> Option<Result<(String, u8), &'static str>> {
     use crate::word::{Part, Word, is_identifier};
-    let [statement] = body else { return None };
-    let parser::Command::Pipeline(stages) = &statement.command else {
-        return None;
-    };
-    let [cmd] = stages.as_slice() else {
-        return None;
-    };
-    let (program, args) = cmd.words.split_first()?;
-    let program = program.as_literal()?;
-    if statement.negated
-        || statement.condition != parser::Condition::Always
-        || cmd.compound.is_some()
-        || !cmd.redirects.is_empty()
-        || !cmd.assignments.is_empty()
-        || session.functions.contains_key(program)
-        || (program != "printf" && !crate::execute::can_capture_external(program))
-    {
+    if body.is_empty() || session.nounset {
         return None;
     }
-    if !args.iter().all(|word| match word {
-        Word::Literal(_) => true,
-        Word::Expanded(parts) => parts.iter().all(|part| match part {
-            Part::Text(_) => true,
-            Part::Parameter { name, .. } => {
-                is_identifier(name)
-                    && !matches!(
-                        name.as_str(),
-                        "BASHPID" | "BASH_SUBSHELL" | "RANDOM" | "SRANDOM"
-                    )
+    let command = |statement: &parser::Statement| {
+        let parser::Command::Pipeline(stages) = &statement.command else {
+            return None;
+        };
+        let [cmd] = stages.as_slice() else {
+            return None;
+        };
+        let (program, args) = cmd.words.split_first()?;
+        let program = program.as_literal()?;
+        if statement.negated
+            || statement.condition != parser::Condition::Always
+            || cmd.compound.is_some()
+            || !cmd.redirects.is_empty()
+            || !cmd.assignments.is_empty()
+            || session.functions.contains_key(program)
+        {
+            return None;
+        }
+        match program {
+            "printf" if body.len() > 1 => {
+                // A dynamic format, -v or a %n conversion can assign a variable
+                // used by the next command. Keep such lists in a real subshell.
+                let fmt = args.first()?.as_literal()?;
+                if fmt.starts_with('-') || (fmt.contains('%') && fmt.contains('n')) {
+                    return None;
+                }
             }
-            _ => false,
-        }),
-        Word::Declaration(_) => false,
-    }) {
+            "printf" | "echo" | ":" | "true" | "false" => {}
+            _ if body.len() == 1 && crate::execute::can_capture_external(program) => {}
+            _ => return None,
+        }
+        let safe = args.iter().all(|word| match word {
+            Word::Literal(_) => true,
+            Word::Expanded(parts) => parts.iter().all(|part| match part {
+                Part::Text(_) => true,
+                Part::Parameter { name, .. } => {
+                    is_identifier(name)
+                        && !matches!(
+                            name.as_str(),
+                            "BASHPID" | "BASH_SUBSHELL" | "RANDOM" | "SRANDOM" | "_" | "PIPESTATUS"
+                        )
+                }
+                _ => false,
+            }),
+            Word::Declaration(_) => false,
+        });
+        safe.then_some(())
+    };
+    if !body.iter().all(|s| command(s).is_some()) {
         return None;
-    }
-    if program != "printf" {
-        // Only ordinary reads reached this point. The external process supplies
-        // isolation itself. nounset errors still need the subshell's option context.
-        return (!session.nounset)
-            .then(|| crate::execute::capture_external(cmd.clone(), session, last));
-    }
-    let status = std::cell::Cell::new(None);
-    let mut expansion = crate::expansion::Expansion::new(session, last, &status);
-    let mut fields = Vec::with_capacity(args.len());
-    for arg in args {
-        fields.extend(expansion.fields(arg.clone()).ok()?);
     }
     let mut output = Vec::new();
-    let code = crate::session::printf::run(session, &fields, Some(&mut output));
+    let mut code = last;
+    let mut fields = Vec::new();
+    for statement in body {
+        let parser::Command::Pipeline(stages) = &statement.command else {
+            unreachable!()
+        };
+        let cmd = &stages[0];
+        let name = cmd.words[0].as_literal().unwrap();
+        if !matches!(name, "echo" | "printf" | ":" | "true" | "false") {
+            return Some(crate::execute::capture_external(cmd.clone(), session, last));
+        }
+        let captured = std::cell::Cell::new(None);
+        let mut env = crate::expansion::Expansion::new(session, code, &captured);
+        fields.clear();
+        for arg in &cmd.words[1..] {
+            fields.extend(env.fields(arg.clone()).ok()?);
+        }
+        code = match name {
+            "echo" => {
+                crate::builtins::echo_into(&fields, &mut output);
+                0
+            }
+            "printf" => crate::session::printf::run(session, &fields, Some(&mut output)),
+            "true" | ":" => 0,
+            "false" => 1,
+            _ => unreachable!(),
+        };
+    }
     Some(captured_output(output, code))
 }
 
@@ -204,7 +236,7 @@ pub fn launch_group(
                 }
             }
         }
-        session.jobs.detached();
+        session.jobs.forked(false);
         session.command_string = false;
         let flow = execute_program(session, body, status, true);
         let code = match flow {

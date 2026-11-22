@@ -74,6 +74,15 @@ FLAG_SCRIPTS = {
     ".": {"p":"mkdir d; echo 'printf found' >d/file; . -p d file"},
     "source": {"p":"mkdir d; echo 'printf found' >d/file; source -p d file"},
 }
+FLAG_SCRIPTS['umask'] = {'p':'umask 027; umask -p', 'S':'umask u=rwx,g=rx,o=; umask -S'}
+for name in ('mapfile', 'readarray'):
+    def records(flags, data="first\\nsecond\\nthird", init=""):
+        return init + f"printf '{data}' > input; exec 3<input; {name} {flags} a <&3; " + """printf '[%s]' "${a[@]}" """
+    FLAG_SCRIPTS[name] = {'t':records('-t'), 'u':records('-t -u 3'), 'n':records('-tn 2'),
+                          's':records('-ts 1'), 'O':records('-tO 1', init="a=(keep); "),
+                          'd':records('-td :', "first:second:"),
+                          'C':records('-t -C cb -c 1', init="cb() { echo \"$1:$2\"; }; "),
+                          'c':records('-t -C cb -c 2', init="cb() { echo \"$1:$2\"; }; ")}
 for name in ("declare", "typeset"):
     FLAG_SCRIPTS[name] = {
         "a":f'{name} -a x=(one two); echo "${{x[1]}}"',

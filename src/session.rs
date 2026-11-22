@@ -1,5 +1,7 @@
 pub(crate) mod array;
 mod declare;
+mod getopts;
+pub(crate) mod mapfile;
 mod options;
 pub(crate) mod printf;
 mod read;
@@ -14,10 +16,11 @@ use std::rc::Rc;
 
 use crate::parser::{Statement, is_identifier};
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct Variable {
+    integer: bool,
     array_assigned: bool,
-    elements: Option<Rc<BTreeMap<i64, String>>>,
+    elements: Option<Rc<array::Elements>>,
     declared: bool,
     value: Option<String>,
     exported: bool,
@@ -63,6 +66,7 @@ pub struct Session {
     // Only changed variables are stored here. Simple commands inherit the
     // original process environment without building a copy on startup.
     variables: BTreeMap<String, Variable>,
+    opt_offset: usize,
     logical_cwd: Option<PathBuf>,
     shell_pid: ShellPid,
     pub interactive: bool,
@@ -74,6 +78,7 @@ pub struct Session {
     pub pipe_status: PipelineStatus,
     pub stdin_redirected: bool,
     pub noglob: bool,
+    pub noclobber: bool,
     pub shopt: options::ShellOptions,
     pub(crate) external_env: std::cell::RefCell<Option<Rc<crate::execute::Environment>>>,
     pub regex: Option<Rc<crate::test_expression::Compiled>>,
@@ -97,7 +102,7 @@ pub struct Session {
 }
 
 #[derive(Clone, Default)]
-pub struct Bindings(BTreeMap<String, Option<Variable>>);
+pub struct Bindings(BTreeMap<String, Option<Variable>>, Option<usize>);
 
 impl Session {
     pub fn variable_names(&self) -> Vec<String> {
@@ -105,7 +110,11 @@ impl Session {
             .filter_map(|(k, _)| k.into_string().ok())
             .filter(|k| is_identifier(k))
             .collect();
-        names.extend(["PWD", "IFS", "PATH"].into_iter().map(str::to_owned));
+        names.extend(
+            ["PWD", "IFS", "PATH", "OPTIND", "OPTERR"]
+                .into_iter()
+                .map(str::to_owned),
+        );
         for (key, var) in &self.variables {
             if var.declared {
                 names.insert(key.clone());
@@ -136,6 +145,15 @@ impl Session {
         }
         if self.nounset {
             flags.push('u');
+        }
+        if self.shopt.braceexpand {
+            flags.push('B');
+        }
+        if self.noclobber {
+            flags.push('C');
+        }
+        if self.command_string {
+            flags.push('c');
         }
         flags
     }
@@ -214,6 +232,8 @@ impl Session {
             for flag in opt[1..].chars() {
                 match flag {
                     'e' => self.errexit = enable,
+                    'C' => self.noclobber = enable,
+                    'B' => self.shopt.braceexpand = enable,
                     'f' => self.noglob = enable,
                     'h' => self.hashes.enabled = enable,
                     'u' => self.nounset = enable,
@@ -221,8 +241,10 @@ impl Session {
                         let Some(name) = args.get(i) else {
                             let mut out = io::stdout().lock();
                             for (name, on) in [
+                                ("braceexpand", self.shopt.braceexpand),
                                 ("errexit", self.errexit),
                                 ("hashall", self.hashes.enabled),
+                                ("noclobber", self.noclobber),
                                 ("noglob", self.noglob),
                                 ("nounset", self.nounset),
                                 ("pipefail", self.pipefail),
@@ -301,6 +323,7 @@ impl Session {
                 .into_os_string()
                 .into_string()
                 .ok(),
+            "OPTIND" | "OPTERR" => Some("1".into()),
             "IFS" => Some(" \t\n".into()),
             "PATH" => Some(std::env::var(name).unwrap_or_else(|_| {
                 "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".into()
@@ -310,6 +333,14 @@ impl Session {
     }
 
     pub fn assign(&mut self, name: &str, value: &str) {
+        let normalized;
+        let value = if name == "OPTIND" {
+            self.opt_offset = 0;
+            normalized = value.trim().parse::<i64>().unwrap_or(0).to_string();
+            normalized.as_str()
+        } else {
+            value
+        };
         if name == "PATH" {
             self.hashes.clear();
         }
@@ -317,13 +348,20 @@ impl Session {
             if let Some(elements) = var.elements.as_mut().map(Rc::make_mut) {
                 elements.insert(0, value.into());
                 var.array_assigned = true;
-                return;
+            } else if let Some(current) = &mut var.value {
+                current.clear();
+                current.push_str(value);
+            } else {
+                var.value = Some(value.into());
             }
+            var.declared = true;
+            return;
         }
         let exported = self.is_exported(name);
         self.variables.insert(
             name.into(),
             Variable {
+                integer: false,
                 array_assigned: false,
                 elements: None,
                 declared: true,
@@ -331,6 +369,26 @@ impl Session {
                 exported,
             },
         );
+    }
+
+    pub fn integer(&self, name: &str) -> bool {
+        self.variables.get(name).is_some_and(|v| v.integer)
+    }
+
+    fn integer_value(
+        &mut self,
+        old: Option<&str>,
+        expression: &str,
+        append: bool,
+    ) -> Result<String, &'static str> {
+        let old = if append {
+            crate::arithmetic::run(old.unwrap_or("0"), self)?
+        } else {
+            0
+        };
+        Ok(old
+            .wrapping_add(crate::arithmetic::run(expression, self)?)
+            .to_string())
     }
 
     fn is_exported(&self, name: &str) -> bool {
@@ -346,12 +404,17 @@ impl Session {
                 .iter()
                 .map(|&name| (name.into(), self.variables.get(name).cloned()))
                 .collect(),
+            names.contains(&"OPTIND").then_some(self.opt_offset),
         )
     }
 
     pub fn bind(&mut self, assignments: &[(String, String)]) -> Bindings {
         let mut saved = Bindings::default();
         for (name, value) in assignments {
+            if name == "OPTIND" {
+                saved.1.get_or_insert(self.opt_offset);
+                self.opt_offset = 0;
+            }
             if name == "PATH" {
                 self.hashes.clear();
             }
@@ -362,6 +425,7 @@ impl Session {
             self.variables.insert(
                 name.clone(),
                 Variable {
+                    integer: false,
                     array_assigned: false,
                     elements: None,
                     declared: true,
@@ -374,6 +438,9 @@ impl Session {
     }
 
     pub fn restore(&mut self, bindings: Bindings) {
+        if let Some(offset) = bindings.1 {
+            self.opt_offset = offset;
+        }
         for (name, original) in bindings.0 {
             if name == "PATH" {
                 self.hashes.clear();
@@ -479,11 +546,28 @@ impl Session {
             if name == "PATH" && value.is_some() {
                 self.hashes.clear();
             }
+            let integer = self.integer(name);
+            let normalized;
+            let (value, append) = if integer && let Some(value) = value {
+                match self.integer_value(self.get(name).as_deref(), value, append) {
+                    Ok(v) => {
+                        normalized = v;
+                        (Some(normalized.as_str()), false)
+                    }
+                    Err(e) => {
+                        eprintln!("tonari: export: {e}");
+                        status = 1;
+                        continue;
+                    }
+                }
+            } else {
+                (value, append)
+            };
             if let Some(var) = self.variables.get_mut(name) {
                 if let Some(array) = var.elements.as_mut().map(Rc::make_mut) {
                     if let Some(v) = value {
                         if append {
-                            array.entry(0).or_default().push_str(v);
+                            array.append_first(v);
                         } else {
                             array.insert(0, v.into());
                         }
@@ -504,6 +588,7 @@ impl Session {
             self.variables.insert(
                 name.into(),
                 Variable {
+                    integer,
                     array_assigned: false,
                     elements: None,
                     declared: true,
@@ -547,6 +632,7 @@ impl Session {
                 &mut out,
                 &name,
                 &Variable {
+                    integer: false,
                     array_assigned: false,
                     elements: None,
                     declared: true,
@@ -556,6 +642,29 @@ impl Session {
             )?;
         }
         out.flush()
+    }
+
+    fn unset_variable(&mut self, name: &str) {
+        if name == "OPTIND" {
+            self.opt_offset = 0;
+        }
+        if name == "PATH" {
+            self.hashes.clear();
+        }
+        self.variables.insert(
+            name.into(),
+            Variable {
+                integer: false,
+                array_assigned: false,
+                elements: None,
+                declared: self
+                    .locals
+                    .last()
+                    .is_some_and(|scope| scope.0.contains_key(name)),
+                value: None,
+                exported: false,
+            },
+        );
     }
 
     pub fn unset(&mut self, args: &[String]) -> u8 {
@@ -604,25 +713,10 @@ impl Session {
                 continue;
             }
             if is_identifier(name) {
-                if name == "PATH" {
-                    self.hashes.clear();
-                }
                 if !variables_only && self.get(name).is_none() {
                     self.functions.remove(name);
                 }
-                self.variables.insert(
-                    name.clone(),
-                    Variable {
-                        array_assigned: false,
-                        elements: None,
-                        declared: self
-                            .locals
-                            .last()
-                            .is_some_and(|scope| scope.0.contains_key(name)),
-                        value: None,
-                        exported: false,
-                    },
-                );
+                self.unset_variable(name);
             }
         }
         0
@@ -759,6 +853,7 @@ impl Session {
             self.variables.insert(
                 "OLDPWD".into(),
                 Variable {
+                    integer: false,
                     array_assigned: false,
                     elements: None,
                     declared: true,
@@ -785,11 +880,15 @@ impl Session {
 }
 
 fn print_declaration(out: &mut impl Write, name: &str, var: &Variable) -> io::Result<()> {
-    let flags = match (var.elements.is_some(), var.exported) {
-        (true, true) => "-ax",
-        (true, false) => "-a",
-        (false, true) => "-x",
-        (false, false) => "--",
+    let flags = match (var.integer, var.elements.is_some(), var.exported) {
+        (true, true, true) => "-aix",
+        (true, true, false) => "-ai",
+        (true, false, true) => "-ix",
+        (true, false, false) => "-i",
+        (false, true, true) => "-ax",
+        (false, true, false) => "-a",
+        (false, false, true) => "-x",
+        (false, false, false) => "--",
     };
     write!(out, "declare {flags} {name}")?;
     if let Some(array) = &var.elements {

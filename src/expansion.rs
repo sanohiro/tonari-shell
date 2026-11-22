@@ -179,7 +179,27 @@ impl<'a> Expansion<'a> {
         self.fields_with_glob(word, !self.session.noglob)
     }
 
-    pub fn fields_with_glob(&mut self, mut word: Word, glob: bool) -> Result<Vec<String>, Error> {
+    pub fn fields_with_glob(&mut self, word: Word, glob: bool) -> Result<Vec<String>, Error> {
+        if self.session.shopt.braceexpand
+            && let Word::Expanded(parts) = &word
+            && parts.iter().any(|p| {
+                matches!(
+                    p,
+                    crate::word::Part::Brace("{") | crate::word::Part::Range(_)
+                )
+            })
+            && let Word::Expanded(parts) = word
+        {
+            return crate::word::brace::fields(parts, self, glob);
+        }
+        self.resolved_fields(word, glob)
+    }
+
+    pub(crate) fn resolved_fields(
+        &mut self,
+        mut word: Word,
+        glob: bool,
+    ) -> Result<Vec<String>, Error> {
         word.resolve(self)?;
         Ok(word.fields_with_glob(
             &|name| self.lookup(name),

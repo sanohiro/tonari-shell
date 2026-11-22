@@ -127,7 +127,7 @@ impl Target {
     }
 }
 
-fn single_quote(text: &str) -> String {
+pub(crate) fn single_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
@@ -287,24 +287,40 @@ impl Spec {
         for option in &self.options {
             line.push_str(&format!(" -o {option}"));
         }
-        for action in &self.actions {
-            line.push_str(&format!(" -A {action}"));
+        for (action, flag) in [
+            ("alias", "-a"),
+            ("builtin", "-b"),
+            ("command", "-c"),
+            ("directory", "-d"),
+            ("export", "-e"),
+            ("file", "-f"),
+            ("keyword", "-k"),
+            ("variable", "-v"),
+            ("arrayvar", "-A arrayvar"),
+            ("function", "-A function"),
+        ] {
+            if self.actions.iter().any(|value| value == action) {
+                line.push(' ');
+                line.push_str(flag);
+            }
         }
         for (flag, arg) in [
             ('G', self.glob.as_deref()),
             ('W', self.words.as_ref().map(|list| list.source.as_str())),
-            ('F', self.function.as_deref()),
-            ('C', self.command.as_deref()),
             ('P', self.prefix.as_deref()),
             ('S', self.suffix.as_deref()),
             ('X', self.filter.as_deref()),
+            ('C', self.command.as_deref()),
+            ('F', self.function.as_deref()),
         ] {
             if let Some(arg) = arg {
-                line.push_str(&format!(" -{flag} {}", shell_quote(arg)));
+                let quoted = if flag == 'F' {
+                    shell_quote(arg)
+                } else {
+                    single_quote(arg)
+                };
+                line.push_str(&format!(" -{flag} {quoted}"));
             }
-        }
-        if matches!(target, Target::Command(name) if name.starts_with('-')) {
-            line.push_str(" --");
         }
         line.push(' ');
         line.push_str(&target.argument());

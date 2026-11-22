@@ -135,7 +135,7 @@ pub(crate) fn launch(
             unsafe { libc::_exit(1) }
         }
         drop(child);
-        session.jobs.detached();
+        session.jobs.forked(false);
         session.interactive = false;
         session.substitutions.pending.clear();
         session.substitutions.finished.clear();

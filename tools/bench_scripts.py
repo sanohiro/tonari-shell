@@ -108,6 +108,25 @@ echo "$count $last"
 for ((i=0; i<64; i++)); do value=$(printf 'v%s' "$i"); done
 echo "$value"
 """, "v63"),
+    "echo-substitutions": ("""
+for ((i=0; i<64; i++)); do value=$(echo "v$i"); done
+echo "$value"
+""", "v63"),
+    "mapfile-lines": ("""
+for ((i=0; i<16; i++)); do mapfile -t table <rows; done
+echo "${#table[@]}:${table[1999]}"
+""", "2000:record 1999"),
+    "brace-range": ("""
+for ((i=0; i<16; i++)); do set -- {0001..1000}; done
+echo "$# $1 ${1000}"
+""", "1000 0001 1000"),
+    "getopts-clusters": ("""
+for ((i=0; i<128; i++)); do
+    OPTIND=1
+    while getopts 'ab:c' opt -abvalue -c; do last=$opt; done
+done
+echo "$OPTIND:$last"
+""", "3:c"),
     "compound-substitutions": ("""\
 for ((i=0; i<16; i++)); do value=$(printf v; printf '%s' "$i"); done
 echo "$value"

@@ -186,27 +186,45 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 Ok(v) => v,
                 Err(f) => return f,
             };
-            for (patterns, body) in arms.iter() {
-                for pattern in patterns {
-                    let matched = match pattern {
-                        CasePattern::Fixed(matcher) => matcher.matches(&value),
-                        CasePattern::Dynamic(word) => {
-                            match expand_case(session, word.clone(), status, true) {
-                                Ok(glob) => crate::pattern::matches(&value, &glob),
-                                Err(f) => return f,
+            let mut fall_through = false;
+            let mut result = 0;
+            let mut last = status;
+            for (patterns, body, end) in arms.iter() {
+                let mut matched = fall_through;
+                if !matched {
+                    for pattern in patterns {
+                        matched = match pattern {
+                            CasePattern::Fixed(matcher) => matcher.matches(&value),
+                            CasePattern::Dynamic(word) => {
+                                match expand_case(session, word.clone(), last, true) {
+                                    Ok(glob) => crate::pattern::matches(&value, &glob),
+                                    Err(f) => return f,
+                                }
                             }
-                        }
-                    };
-                    if matched {
-                        return if body.is_empty() {
-                            Flow::Continue(0)
-                        } else {
-                            execute_program(session, body.clone(), status, tail)
                         };
+                        if matched {
+                            break;
+                        }
                     }
                 }
+                if matched {
+                    let stop = *end == crate::parser::CaseEnd::Stop;
+                    if !body.is_empty() {
+                        match execute_program(session, body.clone(), last, tail && stop) {
+                            Flow::Continue(code) => {
+                                result = code;
+                                last = code;
+                            }
+                            other => return other,
+                        }
+                    }
+                    if stop {
+                        break;
+                    }
+                    fall_through = *end == crate::parser::CaseEnd::FallThrough;
+                }
             }
-            Flow::Continue(0)
+            Flow::Continue(result)
         }
         Command::Function { name, body } => {
             session.function_sources.insert(

@@ -4,6 +4,7 @@ use super::Session;
 
 #[derive(Clone)]
 pub struct ShellOptions {
+    pub braceexpand: bool,
     pub checkwinsize: bool,
     pub sourcepath: bool,
     pub expand_aliases: bool,
@@ -16,6 +17,7 @@ pub struct ShellOptions {
 impl Default for ShellOptions {
     fn default() -> Self {
         Self {
+            braceexpand: true,
             checkwinsize: true,
             sourcepath: true,
             expand_aliases: false,
@@ -27,7 +29,15 @@ impl Default for ShellOptions {
     }
 }
 
-const SET_OPTIONS: &[&str] = &["errexit", "hashall", "noglob", "nounset", "pipefail"];
+const SET_OPTIONS: &[&str] = &[
+    "braceexpand",
+    "errexit",
+    "hashall",
+    "noclobber",
+    "noglob",
+    "nounset",
+    "pipefail",
+];
 const SHOPT_OPTIONS: &[&str] = &[
     "checkwinsize",
     "dotglob",
@@ -62,8 +72,10 @@ impl Session {
 
     pub(super) fn option_value(&mut self, name: &str, set: bool) -> Option<&mut bool> {
         match (set, name) {
+            (true, "braceexpand") => Some(&mut self.shopt.braceexpand),
             (true, "hashall") => Some(&mut self.hashes.enabled),
             (true, "errexit") => Some(&mut self.errexit),
+            (true, "noclobber") => Some(&mut self.noclobber),
             (true, "noglob") => Some(&mut self.noglob),
             (true, "nounset") => Some(&mut self.nounset),
             (true, "pipefail") => Some(&mut self.pipefail),

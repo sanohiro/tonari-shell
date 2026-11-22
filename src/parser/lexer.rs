@@ -1,4 +1,4 @@
-use super::{Error, Reader, Target, ansi, here_doc, parse};
+use super::{CaseEnd, Error, Reader, Target, ansi, here_doc, parse};
 use crate::word::{Part, Word, WordBuilder, is_identifier};
 use std::str::Chars;
 
@@ -24,7 +24,7 @@ pub(super) enum Token {
     And,
     Or,
     End,
-    EndArm,
+    EndArm(CaseEnd),
     Newline,
 }
 
@@ -39,8 +39,14 @@ pub(super) fn descriptor(s: &str) -> Result<i32, Error> {
 
 fn redirect(chars: &mut Chars<'_>, op: char, fd: i32) -> Result<Token, Error> {
     let target = match (op, chars.clone().next()) {
-        ('<', Some('<' | '>')) | ('>', Some('|')) => {
-            return Err(Error::Invalid("unsupported redirection"));
+        ('<', Some('<')) => return Err(Error::Invalid("unsupported redirection")),
+        ('<', Some('>')) => {
+            chars.next();
+            Target::ReadWrite
+        }
+        ('>', Some('|')) => {
+            chars.next();
+            Target::Clobber
         }
         (_, Some('&')) => {
             chars.next();
@@ -472,7 +478,7 @@ fn pattern_chunk(chars: &mut Chars<'_>, word: &mut WordBuilder, start: &str) {
     // expansion. Quoted and escaped pieces take a separate, literal path.
     let rest = chars.as_str();
     let end = rest
-        .find(|c| separator(c) || matches!(c, '\'' | '"' | '\\' | '$' | '`' | '{'))
+        .find(|c| separator(c) || matches!(c, '\'' | '"' | '\\' | '$' | '`' | '{' | ',' | '}'))
         .unwrap_or(rest.len());
     let len = start.len() - rest.len() + end;
     word.part(Part::Pattern(start[..len].into()));
@@ -561,7 +567,16 @@ pub(super) fn lex(
                 }
                 ';' if chars.as_str().starts_with(';') => {
                     chars.next();
-                    Token::EndArm
+                    if chars.as_str().starts_with('&') {
+                        chars.next();
+                        Token::EndArm(CaseEnd::Retest)
+                    } else {
+                        Token::EndArm(CaseEnd::Stop)
+                    }
+                }
+                ';' if chars.as_str().starts_with('&') => {
+                    chars.next();
+                    Token::EndArm(CaseEnd::FallThrough)
                 }
                 ';' => Token::End,
                 '(' if chars.as_str().starts_with('(') && !in_test => {
@@ -608,6 +623,7 @@ pub(super) fn lex(
         let mut protected = false;
         let mut started = false;
         let mut pattern_context = false;
+        let mut braces = 0usize;
         let mut assignment = None;
         let start = chars.as_str();
         if let Some(prefix) = super::array::indexed_prefix(start) {
@@ -667,7 +683,23 @@ pub(super) fn lex(
                     word.literal("[[");
                     chars.next();
                 }
-                '{' => return Err(Error::Invalid("brace expansion is not implemented yet")),
+                '{' => {
+                    let tail = chars.as_str();
+                    if let Some((inner, after)) = tail.split_once('}')
+                        && let Some(range) = crate::word::brace::Range::parse(inner)
+                    {
+                        word.part(Part::Range(Box::new(range)));
+                        chars = after.chars();
+                    } else {
+                        word.part(Part::Brace("{"));
+                        braces += 1;
+                    }
+                }
+                '}' if braces > 0 => {
+                    word.part(Part::Brace("}"));
+                    braces -= 1;
+                }
+                ',' if braces > 0 => word.part(Part::Brace(",")),
                 '*' | '?' | '[' => {
                     pattern_context = true;
                     pattern_chunk(&mut chars, &mut word, rest);
@@ -678,6 +710,18 @@ pub(super) fn lex(
                         assignment = Some(prefix.to_owned());
                     }
                     word.push(c);
+                }
+                '~' if braces != 0 || chars.as_str().starts_with('{') => {
+                    let tilde = if chars.as_str().starts_with('+') {
+                        chars.next();
+                        "~+"
+                    } else if chars.as_str().starts_with('-') {
+                        chars.next();
+                        "~-"
+                    } else {
+                        "~"
+                    };
+                    word.part(Part::BraceTilde(tilde));
                 }
                 '~' if !started
                     || assignment

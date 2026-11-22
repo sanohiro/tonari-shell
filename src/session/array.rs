@@ -7,13 +7,102 @@ pub(crate) fn subscript(name: &str) -> Option<(&str, &str)> {
     Some((base, expr.strip_suffix(']')?))
 }
 
+#[derive(Clone)]
+pub(crate) enum Elements {
+    Dense(Vec<String>),
+    Sparse(BTreeMap<i64, String>),
+}
+
+impl Elements {
+    pub(super) fn get(&self, index: &i64) -> Option<&String> {
+        match self {
+            Self::Dense(values) => values.get(usize::try_from(*index).ok()?),
+            Self::Sparse(values) => values.get(index),
+        }
+    }
+
+    fn last_index(&self) -> Option<i64> {
+        match self {
+            Self::Dense(values) => values.len().checked_sub(1).map(|i| i as i64),
+            Self::Sparse(values) => values.last_key_value().map(|(&i, _)| i),
+        }
+    }
+
+    fn indices(&self) -> Vec<i64> {
+        match self {
+            Self::Dense(values) => (0..values.len() as i64).collect(),
+            Self::Sparse(values) => values.keys().copied().collect(),
+        }
+    }
+
+    pub(super) fn iter(&self) -> Box<dyn Iterator<Item = (i64, &String)> + '_> {
+        match self {
+            Self::Dense(values) => Box::new((0..).zip(values)),
+            Self::Sparse(values) => Box::new(values.iter().map(|(&i, v)| (i, v))),
+        }
+    }
+
+    fn into_map(self) -> BTreeMap<i64, String> {
+        match self {
+            Self::Dense(values) => (0..).zip(values).collect(),
+            Self::Sparse(values) => values,
+        }
+    }
+
+    fn sparse(&mut self) -> &mut BTreeMap<i64, String> {
+        if let Self::Dense(values) = self {
+            *self = Self::Sparse((0..).zip(std::mem::take(values)).collect());
+        }
+        let Self::Sparse(values) = self else {
+            unreachable!()
+        };
+        values
+    }
+
+    pub(super) fn insert(&mut self, index: i64, value: String) {
+        if let Self::Dense(values) = self
+            && let Ok(i) = usize::try_from(index)
+        {
+            if let Some(slot) = values.get_mut(i) {
+                *slot = value;
+                return;
+            }
+            if i == values.len() {
+                values.push(value);
+                return;
+            }
+        }
+        self.sparse().insert(index, value);
+    }
+
+    pub(super) fn append_first(&mut self, text: &str) {
+        match self {
+            Self::Dense(values) if values.is_empty() => values.push(text.into()),
+            Self::Dense(values) => values[0].push_str(text),
+            Self::Sparse(values) => values.entry(0).or_default().push_str(text),
+        }
+    }
+    fn remove(&mut self, index: i64) {
+        if let Self::Dense(values) = self {
+            if index < 0 || index as usize >= values.len() {
+                return;
+            }
+            if index as usize + 1 == values.len() {
+                values.pop();
+                return;
+            }
+        }
+        self.sparse().remove(&index);
+    }
+}
+
 impl Variable {
-    pub(super) fn make_array(&mut self) -> &mut BTreeMap<i64, String> {
+    pub(super) fn make_array(&mut self) -> &mut Elements {
         let initial = self.value.take();
         self.array_assigned |= initial.is_some();
         Rc::make_mut(
             self.elements
-                .get_or_insert_with(|| Rc::new(initial.into_iter().map(|v| (0, v)).collect())),
+                .get_or_insert_with(|| Rc::new(Elements::Dense(initial.into_iter().collect()))),
         )
     }
 }
@@ -28,6 +117,14 @@ impl Session {
     }
 
     pub fn assign_target(&mut self, target: &str, value: &str) -> Result<(), &'static str> {
+        let base = subscript(target).map_or(target, |(base, _)| base);
+        let number;
+        let value = if self.integer(base) {
+            number = crate::arithmetic::run(value, self)?.to_string();
+            number.as_str()
+        } else {
+            value
+        };
         if let Some((base, expr)) = subscript(target) {
             if !super::is_identifier(base) {
                 return Err("invalid variable name");
@@ -51,7 +148,7 @@ impl Session {
         if let Some(v) = self.variables.get(name) {
             return v.elements.as_ref().map_or_else(
                 || (v.value.is_some()).then_some(0).into_iter().collect(),
-                |elements| elements.keys().copied().collect(),
+                |elements| elements.indices(),
             );
         }
         match name {
@@ -120,8 +217,7 @@ impl Session {
     }
 
     pub fn replace_array(&mut self, name: &str, values: Vec<String>) {
-        let values = (0i64..).zip(values).collect();
-        self.store_array(name, values, false);
+        self.store_elements(name, Elements::Dense(values), false);
     }
 
     pub fn assign_array(
@@ -136,7 +232,7 @@ impl Session {
                 .map_or_else(BTreeMap::new, |v| {
                     v.elements.map_or_else(
                         || v.value.into_iter().map(|s| (0, s)).collect(),
-                        Rc::unwrap_or_clone,
+                        |items| Rc::unwrap_or_clone(items).into_map(),
                     )
                 })
         } else {
@@ -145,6 +241,9 @@ impl Session {
         let mut next = map
             .last_key_value()
             .map_or(Some(0), |(&i, _)| i.checked_add(1));
+        let integer = self
+            .declared_variable(name, global)
+            .is_some_and(|v| v.integer);
         for (index, value) in items {
             let i = match index {
                 Some(n) if *n < 0 => map
@@ -155,7 +254,12 @@ impl Session {
                 None => next,
             }
             .ok_or("array subscript out of range")?;
-            map.insert(i, value.clone());
+            let value = if integer {
+                crate::arithmetic::run(value, self)?.to_string()
+            } else {
+                value.clone()
+            };
+            map.insert(i, value);
             next = i.checked_add(1);
         }
         self.store_array(name, map, global);
@@ -163,7 +267,11 @@ impl Session {
     }
 
     pub(crate) fn store_array(&mut self, name: &str, values: BTreeMap<i64, String>, global: bool) {
+        self.store_elements(name, Elements::Sparse(values), global);
+    }
+    fn store_elements(&mut self, name: &str, values: Elements, global: bool) {
         let mut variable = self.declared_variable(name, global).unwrap_or(Variable {
+            integer: false,
             array_assigned: false,
             elements: None,
             declared: true,
@@ -205,7 +313,7 @@ impl Session {
     pub fn last_index(&self, name: &str) -> Option<i64> {
         if let Some(v) = self.variables.get(name) {
             return match &v.elements {
-                Some(map) => map.last_key_value().map(|(&k, _)| k),
+                Some(map) => map.last_index(),
                 None => v.value.as_ref().map(|_| 0),
             };
         }
@@ -219,6 +327,7 @@ impl Session {
             self.variables.insert(
                 name.into(),
                 Variable {
+                    integer: false,
                     declared: true,
                     value: inherited,
                     array_assigned: false,
@@ -236,7 +345,7 @@ impl Session {
     pub(super) fn unset_element(&mut self, name: &str, index: i64) {
         if let Some(var) = self.variables.get_mut(name) {
             if let Some(array) = var.elements.as_mut().map(Rc::make_mut) {
-                array.remove(&index);
+                array.remove(index);
             } else if index == 0 {
                 var.value = None;
                 var.declared = false;
@@ -245,6 +354,7 @@ impl Session {
             self.variables.insert(
                 name.into(),
                 Variable {
+                    integer: false,
                     declared: false,
                     value: None,
                     array_assigned: false,

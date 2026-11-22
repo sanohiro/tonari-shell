@@ -55,6 +55,29 @@ pub fn expanded(source: &str, session: &mut Session, status: u8) -> Result<i64> 
         .map_err(|_| "invalid arithmetic expansion")
 }
 
+pub fn let_builtin(args: &[String], session: &mut Session) -> u8 {
+    let args = if args.first().is_some_and(|arg| arg == "--") {
+        &args[1..]
+    } else {
+        args
+    };
+    if args.is_empty() {
+        eprintln!("tonari: let: expression expected");
+        return 1;
+    }
+    let mut last = 0;
+    for expr in args {
+        match run(expr, session) {
+            Ok(value) => last = value,
+            Err(message) => {
+                eprintln!("tonari: let: {message}");
+                return 1;
+            }
+        }
+    }
+    u8::from(last == 0)
+}
+
 pub fn command(source: &str, session: &mut Session, status: u8) -> Flow {
     match expanded(source, session, status) {
         Ok(n) => Flow::Continue(u8::from(n == 0)),

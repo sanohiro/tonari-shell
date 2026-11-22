@@ -1,4 +1,5 @@
 pub(crate) mod escapes;
+pub(crate) mod umask;
 
 use std::ffi::CString;
 use std::fs;
@@ -11,6 +12,18 @@ use crate::Session;
 // Builtins may run in a child which exits with _exit. Flush explicitly before
 // descriptors are restored in the parent or closed in the child.
 pub fn echo(args: &[String]) -> u8 {
+    let mut out = Vec::new();
+    echo_into(args, &mut out);
+    let mut stdout = io::stdout().lock();
+    u8::from(
+        stdout
+            .write_all(&out)
+            .and_then(|()| stdout.flush())
+            .is_err(),
+    )
+}
+
+pub(crate) fn echo_into(args: &[String], out: &mut Vec<u8>) {
     let mut newline = true;
     let mut escapes = false;
     let mut args = args.iter().peekable();
@@ -30,13 +43,12 @@ pub fn echo(args: &[String]) -> u8 {
         }
         args.next();
     }
-    let mut out = Vec::new();
     for (i, arg) in args.enumerate() {
         if i != 0 {
             out.push(b' ');
         }
         if escapes {
-            if !escapes::decode(arg.as_bytes(), &mut out, escapes::Mode::Echo) {
+            if !escapes::decode(arg.as_bytes(), out, escapes::Mode::Echo) {
                 newline = false;
                 break;
             }
@@ -47,13 +59,6 @@ pub fn echo(args: &[String]) -> u8 {
     if newline {
         out.push(b'\n');
     }
-    let mut stdout = io::stdout().lock();
-    u8::from(
-        stdout
-            .write_all(&out)
-            .and_then(|()| stdout.flush())
-            .is_err(),
-    )
 }
 
 pub fn test(words: &[String], session: &Session) -> u8 {

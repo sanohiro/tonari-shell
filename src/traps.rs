@@ -377,6 +377,10 @@ impl WaitMask {
         {
             return Ok(None);
         }
+        Self::watch_children(traps).map(Some)
+    }
+
+    pub fn watch_children(traps: &Traps) -> io::Result<Self> {
         unsafe {
             let mut mask = std::mem::zeroed();
             let mut previous = std::mem::zeroed();
@@ -398,11 +402,11 @@ impl WaitMask {
                 libc::sigprocmask(libc::SIG_SETMASK, &previous, std::ptr::null_mut());
                 return Err(error);
             }
-            Ok(Some(Self {
+            Ok(Self {
                 previous,
                 child,
                 running: traps.running,
-            }))
+            })
         }
     }
 

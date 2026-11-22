@@ -89,7 +89,11 @@ pub(crate) fn run(
             return 1;
         }
     } else if let Some(capture) = capture {
-        *capture = output;
+        if capture.is_empty() {
+            *capture = output;
+        } else {
+            capture.extend_from_slice(&output);
+        }
     } else {
         let mut stdout = io::stdout().lock();
         if stdout
