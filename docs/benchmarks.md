@@ -16,6 +16,59 @@ The default run includes a session workload covering assignment, export, paramet
 
 既定の計測には、代入・export・変数展開・`cd`・`pwd`・`&&`・リダイレクト・`unset` を同じシェルで実行する項目が含まれます。算術ループ1,000回と、一つのシェルから外部プログラム16個を順に起動する項目もあります。後者では同じプログラム16個を Python 親プロセスから直接 `posix_spawn` し、その都度終了を待つ条件も交互に計測します。標準入出力は計時前に用意し、各子プロセスに継承させます。セッション機能の実装前との比較には `--case core` を使います。プロンプト表示の主指標は疑似端末での起動全体です。子プロセスの exec 直前にも時刻を記録し、同じ測定サンプルのうち、端末の準備と fork の後に経過した時間も表示します。
 
+<a id="script-execution"></a>
+
+## Running shell scripts / シェルスクリプトの実行
+
+Each named script ran in two modes. Whole-script timing spans the Python launch request through child exit. In the started-shell mode, the driver first waits for a ready marker from a fresh noninteractive shell. It then starts the clock, releases the shell from a builtin read, and sources the same file. That interval includes opening, parsing, executing the script and collecting its result. Both modes verify stdout, stderr and exit status every time. [Reproducible scripts and driver](../tools/bench_scripts.py)
+
+同じスクリプトを、ファイル名を渡して起動する場合と、起動済みのシェルで source する場合で測った。後者は準備完了を受け取ってから計時を始め、ファイルの読み込み・解析・実行・終了の確認までを含む。各回で出力と終了値を照合した。
+
+The Apple M1 ran native macOS and a Debian 13 arm64 VM. Each host ran locally stored release binaries and fixtures, GNU Bash 5.2.37, a temporary home, `LC_ALL=C` and warm filesystem caches. The driver rotated the updated Tonari, Bash and Tonari `903f975` for five warm-ups and 30 measured runs per case and mode. Cells report median / nearest-rank p95 in milliseconds.
+
+M1 のネイティブ macOS と Debian 13 arm64 の VM で、各 OS のローカルファイルシステムにバイナリと入力を置いた。各条件で旧版・新版・Bash 5.2.37 の起動順を入れ替え、5回のウォームアップ後に各30回計測した。表は中央値 / 95 パーセンタイル（ms）。
+
+### Script timings on macOS 27.2.1 arm64
+
+| Script / 処理 | Whole Tonari | Whole Bash | Started Tonari | Started Bash |
+|---|---:|---:|---:|---:|
+| 10,000 integer additions | 13.838 / 19.157 | 21.354 / 23.313 | 10.122 / 11.643 | 14.787 / 15.288 |
+| 4,000 function calls with local variables | 13.034 / 14.418 | 23.487 / 25.129 | 9.593 / 10.248 | 16.820 / 17.338 |
+| 2,000 basename and extension trims | 8.996 / 9.423 | 17.680 / 19.701 | 5.137 / 5.654 | 11.168 / 12.381 |
+| 2,000 lines via `IFS= read -r` | 10.315 / 15.211 | 17.618 / 34.060 | 6.679 / 9.624 | 10.713 / 13.918 |
+| 64 builtin command substitutions | 44.078 / 45.762 | 58.038 / 63.804 | 40.756 / 44.604 | 52.720 / 57.455 |
+| 16 sequential `/usr/bin/true` calls | 23.576 / 25.424 | 39.243 / 41.398 | 20.342 / 23.535 | 33.466 / 40.545 |
+
+### Script timings on Debian 13 arm64
+
+| Script / 処理 | Whole Tonari | Whole Bash | Started Tonari | Started Bash |
+|---|---:|---:|---:|---:|
+| 10,000 integer additions | 10.233 / 11.905 | 23.842 / 24.354 | 9.408 / 10.483 | 23.417 / 25.234 |
+| 4,000 function calls with local variables | 12.116 / 13.933 | 24.925 / 25.676 | 10.228 / 12.063 | 24.232 / 27.205 |
+| 2,000 basename and extension trims | 5.232 / 6.933 | 14.748 / 15.521 | 4.929 / 5.559 | 14.299 / 15.117 |
+| 2,000 lines via `IFS= read -r` | 5.360 / 6.003 | 11.053 / 12.477 | 5.249 / 6.129 | 10.609 / 11.415 |
+| 64 builtin command substitutions | 8.562 / 9.853 | 14.691 / 15.467 | 8.228 / 9.209 | 14.096 / 16.344 |
+| 16 sequential `/usr/bin/true` calls | 3.628 / 3.966 | 5.176 / 5.939 | 3.302 / 4.151 | 4.604 / 5.069 |
+
+The previous M1 build took 13.837 ms median on the started-shell string workload. The updated build took 5.137 ms, versus 11.168 ms for Bash. The 64 command substitutions on that host still took over two-thirds of Bash's time in both timing modes. The selected fast path kept the release binaries at 819,776 bytes on macOS and 987,496 bytes for static arm64 musl. [Engineering notes](engineering-notes.md)
+
+M1 で起動後にパスを加工する処理は、変更前 13.837 ms、変更後 5.137 ms、Bash 11.168 ms だった。M1 のコマンド置換64回は起動込み・起動後ともに Bash の所要時間の 2/3 を超えている。
+
+A separate 50-run check loaded the real nvm 0.40.5 with `--no-use` from an empty `NVM_DIR` and verified the resulting function definition. Time includes shell startup.
+
+実際の nvm 0.40.5 を空の `NVM_DIR` から読み込み、関数が定義されたことを確認した。起動を含む各50回の値。
+
+| Host | Tonari | Bash |
+|---|---:|---:|
+| macOS 27.2.1 arm64 | 6.013 / 6.953 | 12.385 / 12.997 |
+| Debian 13 arm64 | 4.502 / 5.065 | 7.620 / 8.755 |
+
+```sh
+python3 tools/bench_scripts.py target/release/tonari --bash /path/to/bash --runs 30
+python3 tools/bench_scripts.py target/release/tonari --bash /path/to/bash --previous /path/to/old/tonari --case strings
+python3 tools/bench.py target/release/tonari --bash /path/to/bash --case nvm --nvm-script /path/to/nvm.sh --runs 50
+```
+
 ## Integrated release build / 統合リリースビルド
 
 Measured on 2026-11-22, after process substitution, shell command hashing, parameter modifiers, and parser allocation changes. The source subtree is `527055de2275e45b0ef7c5a83bcb72d826a96e94`. From a checkout, run `git rev-parse HEAD:src` to compare. The harness is blob `1f7f36916222e276727e0cdd8802381c9e15fdf1`. Build flags, hardware, reference binaries and workloads match the interactive-shell milestone below. Each workload had five warm-ups and 300 rotated samples per shell, with 100 measured for nvm. Time cells are **median / p95 in milliseconds**, ratio cells are the two corresponding Tonari/Bash ratios.

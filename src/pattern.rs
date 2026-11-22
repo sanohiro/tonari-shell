@@ -32,25 +32,58 @@ pub fn matches(value: &str, pattern: &str) -> bool {
 }
 
 pub fn trim(mut value: String, pattern: &str, prefix: bool, longest: bool) -> String {
+    if let Some(cut) = trim_boundary(&value, pattern, prefix, longest) {
+        if prefix {
+            value.drain(..cut);
+        } else {
+            value.truncate(cut);
+        }
+    }
+    value
+}
+
+fn trim_boundary(value: &str, pattern: &str, prefix: bool, longest: bool) -> Option<usize> {
+    // A star at the end being removed can absorb everything up to a literal
+    // delimiter. The nearest or farthest occurrence gives the exact cut.
+    let star = if prefix {
+        pattern.strip_prefix('*')
+    } else {
+        pattern.strip_suffix('*')
+    };
+    let literal = star.unwrap_or(pattern);
+    let plain = !literal
+        .bytes()
+        .any(|c| matches!(c, b'*' | b'?' | b'[' | b'\\' | 0))
+        && !value.contains('\0');
+    if plain && star.is_none() {
+        return if prefix {
+            value.starts_with(literal).then_some(literal.len())
+        } else {
+            value.strip_suffix(literal).map(str::len)
+        };
+    }
     // Try only UTF-8 boundaries, including the empty prefix or suffix.
     let mut cuts = value
         .char_indices()
         .map(|(i, _)| i)
         .chain(std::iter::once(value.len()));
-    let matches_at = |&i: &usize| matches(if prefix { &value[..i] } else { &value[i..] }, pattern);
-    let cut = if prefix == longest {
+    let matches_at = |&i: &usize| {
+        let candidate = if prefix { &value[..i] } else { &value[i..] };
+        if plain {
+            if prefix {
+                candidate.ends_with(literal)
+            } else {
+                candidate.starts_with(literal)
+            }
+        } else {
+            matches(candidate, pattern)
+        }
+    };
+    if prefix == longest {
         cuts.rfind(matches_at)
     } else {
         cuts.find(matches_at)
-    };
-    if let Some(i) = cut {
-        if prefix {
-            value.drain(..i);
-        } else {
-            value.truncate(i);
-        }
     }
-    value
 }
 
 pub fn quote_into(output: &mut String, text: &str) {
@@ -208,6 +241,37 @@ impl Field {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trim_boundaries_agree_with_glob_matching() {
+        for text in ["", "aaaa", "/a/雪/雪", ".log", "a.log.log", "a*b"] {
+            for pattern in [
+                "", "*", ".log", "*aa", "aa*", "*/", "/*", "*雪", "雪*", "a*z", "*?", "[a]*",
+                r"\*", "a\\*b",
+            ] {
+                for prefix in [true, false] {
+                    let cuts: Vec<_> = text
+                        .char_indices()
+                        .map(|(i, _)| i)
+                        .chain(std::iter::once(text.len()))
+                        .filter(|&i| matches(if prefix { &text[..i] } else { &text[i..] }, pattern))
+                        .collect();
+                    for longest in [true, false] {
+                        let expected = if prefix == longest {
+                            cuts.last()
+                        } else {
+                            cuts.first()
+                        };
+                        assert_eq!(
+                            trim_boundary(text, pattern, prefix, longest),
+                            expected.copied(),
+                            "{text:?} {pattern:?} prefix={prefix} longest={longest}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn quoted_wildcards_remain_literal_in_case_patterns() {
