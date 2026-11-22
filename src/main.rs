@@ -184,7 +184,7 @@ fn main() -> ExitCode {
         }
         Ok(Action::Help) => {
             println!(
-                "Usage: tonari [--noprofile] [--norc | --rcfile FILE] [-efilnsu] [-o pipefail] [-c COMMAND [NAME [ARG...]] | -s [ARG...] | FILE [ARG...]]"
+                "Usage: tonari [--noprofile] [--norc | --rcfile FILE] [-efilnsu] [-o OPTION] [-O SHOPT] [-c COMMAND [NAME [ARG...]] | -s [ARG...] | FILE [ARG...]]"
             );
             return ExitCode::SUCCESS;
         }
@@ -207,6 +207,16 @@ fn main() -> ExitCode {
     session.jobs.monitor = invocation.monitor.unwrap_or(session.interactive);
     session.command_string = matches!(invocation.input, Input::Command(_));
     session.shopt.expand_aliases = session.interactive;
+    for (enable, name) in std::mem::take(&mut invocation.shopts) {
+        let options = match name {
+            Some(name) => vec![if enable { "-s" } else { "-u" }.into(), name],
+            None if enable => Vec::new(),
+            None => vec!["-p".into()],
+        };
+        if session.shopt(&options) != 0 {
+            return ExitCode::from(2);
+        }
+    }
     if session.interactive {
         if session.get("PS1").is_none() {
             session.assign("PS1", "tonari$ ");

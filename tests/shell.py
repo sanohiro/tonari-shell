@@ -771,6 +771,37 @@ fg %1 >/dev/null; echo "fg:$?"; wait "$sender"; set +m; shopt -qo monitor; echo 
 a=$(pwd -L); b=$(pwd -P); echo "${a##*/}/${b##*/}"; cd .. && mv renamed outer""",
                      0, b"outer/renamed\n")
 
+    def test_extended_patterns_in_conditionals_files_and_parameters(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        for name in ("lib.rs", "lib.c", "lib.txt", ".hidden"):
+            (self.cwd / name).touch()
+        source = r"""shopt -u extglob
+[[ 123 == +([[:digit:]]) ]] && echo digits
+shopt -s extglob
+for s in '' a aa ab b abb x; do case "$s" in +(a|b)) printf '<%s>' "$s";; esac; done; echo
+printf '%s\n' lib.@(rs|c) @(.hidden|lib.txt)
+s=abc123xyz; echo "${s##+(a|b|c)}" "${s//+([[:digit:]])/_}"
+for s in a 'b|c' xyxx b 🍃; do [[ $s == @(a|"b|c"|+(x|y)|🍃) ]]; echo "$s:$?"; done
+for s in '' a aa aab x; do [[ $s == !(a|aa)a ]]; echo "<$s:$?>"; done
+p='!(lib.c)'; printf '<%s>' $p; echo; shopt -u extglob; printf '<%s>\n' $p"""
+        self.compare(source, 0, ("digits\n<a><aa><ab><b><abb>\nlib.c\nlib.rs\n.hidden\nlib.txt\n"
+                                 "123xyz abc_xyz\na:0\nb|c:0\nxyxx:0\nb:1\n🍃:0\n"
+                                 "<:1>\n<a:0>\n<aa:1>\n<aab:1>\n<x:1>\n"
+                                 "<lib.rs><lib.txt>\n<!(lib.c)>\n").encode(), minimum=5)
+
+    def test_plain_star_followed_by_nullable_extended_group(self):
+        self.compare(r"""for p in '*!(a)' '*!(*)b' '*@(a|)' '?*@([ab]|*)'; do
+for v in '' a b x aa; do [[ $v == $p ]] && printf 1 || printf 0; done; echo; done""",
+                     0, b"10111\n10000\n01001\n00001\n", minimum=5)
+
+    def test_extglob_at_parse_time_and_invocation(self):
+        for shell in (BASH, TONARI):
+            proc = subprocess.run([shell, "-O", "extglob", "-c", "case b in @(a|b)) echo yes;; esac"],
+                                  cwd=self.cwd, env=self.env, capture_output=True, timeout=5)
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"yes\n", b""))
+            self.assertEqual(self.command(shell, 'shopt -s extglob; case b in @(b)) :;; esac').returncode, 2)
+            self.assertEqual(self.command(shell, 'shopt -s extglob\n( case b in @(a|b)) :;; esac )').returncode, 0)
+
     def test_directory_stack_rotation_and_no_cd(self):
         self.compare("""HOME=$PWD; mkdir -p a b; pushd a; pushd ../b; dirs -v
 pushd +1; popd -0; popd; dirs -c; pushd -n c; echo "${DIRSTACK[1]}:${#DIRSTACK[@]}"

@@ -122,6 +122,11 @@ for ((i=0; i<1000; i++)); do
 done
 echo "$v"
 """, "23"),
+    "extended-patterns": ("""
+shopt -s extglob
+for ((i=0; i<500; i++)); do case pkg-${i}.rs in pkg-+([0-9]).@(c|rs)) last=$i;; esac; done
+echo "$last"
+""", "499"),
     "resource-limits": ("""
 for ((i=0; i<256; i++)); do ulimit -Sn 64; ulimit -Sn > /dev/null; done
 ulimit -Sn

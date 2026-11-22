@@ -1,5 +1,6 @@
 mod bracket;
 mod directory;
+pub(crate) mod extended;
 mod order;
 
 use directory::visit_names;
@@ -150,12 +151,22 @@ impl<T: AsRef<str>> Matcher<T> {
     }
 }
 
+pub(crate) fn bracket_end(after_open: &str) -> Option<usize> {
+    bracket::class_end(after_open.as_bytes())
+}
+
 pub fn matches(value: &str, pattern: &str) -> bool {
     Matcher::new(pattern).matches(value)
 }
 
-pub fn trim(mut value: String, pattern: &str, prefix: bool, longest: bool) -> String {
-    if let Some(cut) = trim_boundary(&value, pattern, prefix, longest) {
+pub fn trim(
+    mut value: String,
+    pattern: &str,
+    prefix: bool,
+    longest: bool,
+    extglob: bool,
+) -> String {
+    if let Some(cut) = trim_boundary(&value, pattern, prefix, longest, extglob) {
         if prefix {
             value.drain(..cut);
         } else {
@@ -165,7 +176,13 @@ pub fn trim(mut value: String, pattern: &str, prefix: bool, longest: bool) -> St
     value
 }
 
-fn trim_boundary(value: &str, pattern: &str, prefix: bool, longest: bool) -> Option<usize> {
+fn trim_boundary(
+    value: &str,
+    pattern: &str,
+    prefix: bool,
+    longest: bool,
+    extglob: bool,
+) -> Option<usize> {
     // A star at the end being removed can absorb everything up to a literal
     // delimiter. The nearest or farthest occurrence gives the exact cut.
     let star = if prefix {
@@ -174,9 +191,11 @@ fn trim_boundary(value: &str, pattern: &str, prefix: bool, longest: bool) -> Opt
         pattern.strip_suffix('*')
     };
     let literal = star.unwrap_or(pattern);
-    let plain = !literal
-        .bytes()
-        .any(|c| matches!(c, b'*' | b'?' | b'[' | b'\\' | 0))
+    let group = extglob.then(|| extended::Pattern::new(pattern)).flatten();
+    let plain = group.is_none()
+        && !literal
+            .bytes()
+            .any(|c| matches!(c, b'*' | b'?' | b'[' | b'\\' | 0))
         && !value.contains('\0');
     if plain {
         if star.is_some() {
@@ -204,7 +223,10 @@ fn trim_boundary(value: &str, pattern: &str, prefix: bool, longest: bool) -> Opt
         .chain(std::iter::once(value.len()));
     let matches_at = |&i: &usize| {
         let candidate = if prefix { &value[..i] } else { &value[i..] };
-        matches(candidate, pattern)
+        group.as_ref().map_or_else(
+            || matches(candidate, pattern),
+            |g| g.accepts(candidate, false),
+        )
     };
     if prefix == longest {
         cuts.rfind(matches_at)
@@ -214,6 +236,10 @@ fn trim_boundary(value: &str, pattern: &str, prefix: bool, longest: bool) -> Opt
 }
 
 pub fn quote_into(output: &mut String, text: &str) {
+    quote_pattern(output, text, false);
+}
+
+pub(crate) fn quote_pattern(output: &mut String, text: &str, extended: bool) {
     // The first literal segment cannot be inside a bracket expression.
     // Later segments can follow active syntax, for example [a"-"z].
     let may_be_in_bracket = !output.is_empty();
@@ -222,6 +248,7 @@ pub fn quote_into(output: &mut String, text: &str) {
     });
     for c in text.chars() {
         if matches!(c, '\\' | '*' | '?' | '[')
+            || extended && matches!(c, '@' | '+' | '!' | '(' | ')' | '|')
             || symbol
             || (matches!(c, ':' | '.' | '=') && output.ends_with('['))
             || may_be_in_bracket && matches!(c, ']' | '-' | '!' | '^')
@@ -255,6 +282,7 @@ pub struct GlobOptions {
     pub dotglob: bool,
     pub nullglob: bool,
     pub globstar: bool,
+    pub extglob: bool,
 }
 
 pub(crate) fn pathnames(pattern: &str, options: GlobOptions) -> Vec<String> {
@@ -333,7 +361,11 @@ fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>, collatio
             known_existing = rest.is_empty();
             continue;
         }
-        if !has_magic(part, true) {
+        let extended = options
+            .extglob
+            .then(|| extended::Pattern::new(part))
+            .flatten();
+        if extended.is_none() && !has_magic(part, true) {
             let literal = unescape(part);
             for prefix in &mut paths {
                 prefix.push_str(&literal);
@@ -345,7 +377,13 @@ fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>, collatio
         for prefix in paths {
             let dir = if prefix.is_empty() { "." } else { &prefix };
             visit_names(dir, !rest.is_empty(), |raw, _| {
-                if !matcher.accepts(raw.to_bytes(), !options.dotglob, Some(raw)) {
+                let matches = match &extended {
+                    Some(group) => raw
+                        .to_str()
+                        .is_ok_and(|s| group.accepts(s, !options.dotglob)),
+                    None => matcher.accepts(raw.to_bytes(), !options.dotglob, Some(raw)),
+                };
+                if !matches {
                     return;
                 }
                 let Ok(name) = raw.to_str() else { return };
@@ -435,17 +473,17 @@ impl Field {
             && self.pattern.is_none()
             && text
                 .bytes()
-                .any(|b| matches!(b, b'*' | b'?' | b'[' | b'\\'))
+                .any(|b| matches!(b, b'*' | b'?' | b'[' | b'\\' | b'('))
         {
             let mut pattern = String::new();
-            quote_into(&mut pattern, &self.text);
+            quote_pattern(&mut pattern, &self.text, true);
             self.pattern = Some(pattern);
         }
         if let Some(pattern) = &mut self.pattern {
             if active {
                 pattern.push_str(text);
             } else {
-                quote_into(pattern, text);
+                quote_pattern(pattern, text, true);
             }
         }
         self.text.push_str(text);
@@ -454,7 +492,7 @@ impl Field {
     pub fn finish(self, fields: &mut Vec<String>, globbing: Option<GlobOptions>) {
         if let Some((options, pattern)) = globbing
             .zip(self.pattern)
-            .filter(|(_, p)| has_magic(p, true))
+            .filter(|(options, p)| has_magic(p, true) || options.extglob && extended::has_group(p))
         {
             let count = fields.len();
             with_locale(|order| paths(&pattern, options, fields, order));
@@ -552,7 +590,7 @@ mod tests {
                             cuts.first()
                         };
                         assert_eq!(
-                            trim_boundary(text, pattern, prefix, longest),
+                            trim_boundary(text, pattern, prefix, longest, false),
                             expected.copied(),
                             "{text:?} {pattern:?} prefix={prefix} longest={longest}"
                         );

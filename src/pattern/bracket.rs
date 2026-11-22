@@ -15,7 +15,7 @@ fn posix_item_len(input: &[u8]) -> Option<usize> {
 }
 
 // Input starts immediately after '['. The initial ']' is a literal member.
-fn class_end(body: &[u8]) -> Option<usize> {
+pub(super) fn class_end(body: &[u8]) -> Option<usize> {
     let mut i = usize::from(matches!(body.first(), Some(b'!' | b'^')));
     i += usize::from(body.get(i) == Some(&b']'));
     while i < body.len() {

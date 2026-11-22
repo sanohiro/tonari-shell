@@ -181,7 +181,13 @@ impl Word {
                         Word::Literal(String::new()),
                     ))?;
                     *part = values.map(*quoted, |v| {
-                        crate::pattern::trim(v, &pattern, *prefix, *longest)
+                        crate::pattern::trim(
+                            v,
+                            &pattern,
+                            *prefix,
+                            *longest,
+                            env.session.shopt.glob.extglob,
+                        )
                     });
                 }
                 Part::Arithmetic { expression, quoted } => {
@@ -309,6 +315,19 @@ impl Word {
         positional: &[String],
     ) -> String {
         let mut output = Output::Pattern(String::new(), PatternKind::Glob);
+        self.expand_into(&mut output, lookup, positional, "");
+        let Output::Pattern(text, _) = output else {
+            unreachable!()
+        };
+        text
+    }
+
+    pub fn extended_pattern(
+        self,
+        lookup: &impl Fn(&str) -> Option<String>,
+        positional: &[String],
+    ) -> String {
+        let mut output = Output::Pattern(String::new(), PatternKind::Extended);
         self.expand_into(&mut output, lookup, positional, "");
         let Output::Pattern(text, _) = output else {
             unreachable!()
@@ -445,6 +464,7 @@ impl Word {
 enum PatternKind {
     Replacement,
     Glob,
+    Extended,
     Regex,
 }
 
@@ -479,6 +499,9 @@ impl Output {
                 }
             }
             Self::Pattern(buffer, _) if !quoted => buffer.push_str(text),
+            Self::Pattern(buffer, PatternKind::Extended) => {
+                crate::pattern::quote_pattern(buffer, text, true)
+            }
             Self::Pattern(buffer, PatternKind::Glob) => quote_into(buffer, text),
             Self::Pattern(buffer, PatternKind::Regex) => {
                 for c in text.chars() {

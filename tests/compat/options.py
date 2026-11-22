@@ -84,6 +84,11 @@ FLAG_SCRIPTS["dirs"] = {
 }
 FLAG_SCRIPTS["pushd"] = {"n": stack + "pushd -n relative; dirs -p", "N": stack + "pushd -0; dirs -p"}
 FLAG_SCRIPTS["popd"] = {"n": stack + "popd -n; dirs -p", "N": stack + "popd -0; dirs -p"}
+FLAG_SCRIPTS["ulimit"] = {flag: f"ulimit -{flag}" for flag in "RabcdefiklmnpqrstuvxPT"}
+FLAG_SCRIPTS["ulimit"].update({
+    "S": "ulimit -Sn 64 && ulimit -Sn",
+    "H": "ulimit -Sn 32 && ulimit -Hn 64 && ulimit -Sn && ulimit -Hn",
+})
 FLAG_SCRIPTS['umask'] = {'p':'umask 027; umask -p', 'S':'umask u=rwx,g=rx,o=; umask -S'}
 for name in ('mapfile', 'readarray'):
     def records(flags, data="first\\nsecond\\nthird", init=""):

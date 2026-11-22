@@ -197,6 +197,9 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                             CasePattern::Fixed(matcher) => matcher.matches(&value),
                             CasePattern::Dynamic(word) => {
                                 match expand_case(session, word.clone(), last, true) {
+                                    Ok(glob) if session.shopt.glob.extglob => {
+                                        crate::pattern::extended::matches(&value, &glob)
+                                    }
                                     Ok(glob) => crate::pattern::matches(&value, &glob),
                                     Err(f) => return f,
                                 }

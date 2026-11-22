@@ -35,8 +35,16 @@ fn condition(expr: Expr, session: &mut Session, status: u8) -> Result<bool, Flow
             let left = operand(session, left)?;
             match op.as_str() {
                 "=" | "==" | "!=" => {
-                    let right = crate::eval::expand_case(session, right, status, true)?;
-                    Ok(pattern::matches(&left, &right) != (op == "!="))
+                    let captured = std::cell::Cell::new(None);
+                    let mut env = crate::expansion::Expansion::new(session, status, &captured);
+                    let mut right = right;
+                    right.resolve(&mut env).map_err(|e| {
+                        eprintln!("tonari: [[: {e}");
+                        e.flow(env.session)
+                    })?;
+                    let right =
+                        right.extended_pattern(&|name| env.lookup(name), &env.session.positional);
+                    Ok(pattern::extended::matches(&left, &right) != (op == "!="))
                 }
                 "=~" => {
                     let captured = std::cell::Cell::new(None);

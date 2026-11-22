@@ -69,11 +69,16 @@ def audit_dialogues(a):
 
 def extra(a, base, source, sections):
     audit_prompts(a)
+    # Bash ships a common help string across kernels. Its -a output lists
+    # the resource switches actually implemented in this reference build.
+    limits = set(re.findall(r"-([A-Za-z])\)", a.script(0, "ulimit -a").out.decode())) | set("aSH")
     for name, row in a.rows["Builtin"].items():
         for flag in flags(row["synopsis"]):
             feature = f"{name} -{flag}"
             test = FLAG_SCRIPTS.get(name, {}).get(flag)
-            if row["status"] == "missing interface":
+            if name == "ulimit" and flag not in limits:
+                a.add("Builtin option", feature, "not in reference", "ulimit -a")
+            elif row["status"] == "missing interface":
                 a.add("Builtin option", feature, "missing interface", "parent builtin missing: " + name)
             elif name == "set" and flag in SET_FLAGS:
                 # Short and long forms can have separate parser paths.

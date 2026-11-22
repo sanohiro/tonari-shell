@@ -478,12 +478,15 @@ fn arithmetic_source(chars: &mut Chars<'_>) -> Result<String, Error> {
     Err(Error::Incomplete("unterminated arithmetic expression"))
 }
 
-fn regex_word(chars: &mut Chars<'_>) -> Result<LexWord, Error> {
-    let mut word = WordBuilder::default();
-    let mut raw = String::new();
+fn pattern_parts(
+    chars: &mut Chars<'_>,
+    word: &mut WordBuilder,
+    group: Option<char>,
+) -> Result<(), Error> {
+    let mut raw = group.map_or_else(String::new, |op| op.to_string());
     let mut depth = 0usize;
     while let Some(c) = chars.clone().next() {
-        if matches!(c, ' ' | '\t' | '\n' | ';') && depth == 0 {
+        if group.is_none() && depth == 0 && matches!(c, ' ' | '\t' | '\n' | ';') {
             break;
         }
         chars.next();
@@ -491,7 +494,7 @@ fn regex_word(chars: &mut Chars<'_>) -> Result<LexWord, Error> {
             word.part(Part::Pattern(std::mem::take(&mut raw)));
         }
         match c {
-            '\'' | '"' => quoted(chars, c, &mut word)?,
+            '\'' | '"' => quoted(chars, c, word)?,
             '\\' => {
                 let escaped = chars
                     .next()
@@ -508,9 +511,17 @@ fn regex_word(chars: &mut Chars<'_>) -> Result<LexWord, Error> {
                     )
             }) =>
             {
-                dollar(chars, &mut word, false)?
+                dollar(chars, word, false)?
             }
-            '`' => backquote(chars, &mut word, false)?,
+            '`' => backquote(chars, word, false)?,
+            '[' if group.is_some()
+                && let Some(end) = crate::pattern::bracket_end(chars.as_str())
+                && !chars.as_str()[..=end].contains(['$', '\u{60}', '\u{27}', '"', '\\']) =>
+            {
+                raw.push('[');
+                raw.push_str(&chars.as_str()[..=end]);
+                *chars = chars.as_str()[end + 1..].chars();
+            }
             '(' => {
                 depth += 1;
                 raw.push(c);
@@ -518,6 +529,9 @@ fn regex_word(chars: &mut Chars<'_>) -> Result<LexWord, Error> {
             ')' => {
                 depth = depth.saturating_sub(1);
                 raw.push(c);
+                if group.is_some() && depth == 0 {
+                    break;
+                }
             }
             _ => raw.push(c),
         }
@@ -525,20 +539,28 @@ fn regex_word(chars: &mut Chars<'_>) -> Result<LexWord, Error> {
     if !raw.is_empty() {
         word.part(Part::Pattern(raw));
     }
-    Ok(LexWord {
-        word: word.finish(),
-        protected: false,
-        assignment: None,
-    })
+    if group.is_some() && depth != 0 {
+        return Err(Error::Incomplete("unterminated extended pattern"));
+    }
+    Ok(())
 }
 
-fn pattern_chunk(chars: &mut Chars<'_>, word: &mut WordBuilder, start: &str) {
+fn pattern_chunk(chars: &mut Chars<'_>, word: &mut WordBuilder, start: &str, extended: bool) {
     // Keep the spelling of ranges and classes after the first wildcard or
     // expansion. Quoted and escaped pieces take a separate, literal path.
     let rest = chars.as_str();
     let end = rest
         .find(|c| separator(c) || matches!(c, '\'' | '"' | '\\' | '$' | '`' | '{' | ',' | '}'))
         .unwrap_or(rest.len());
+    // Leave the operator before the next opening parenthesis for the group reader.
+    let end = if extended
+        && rest[end..].starts_with('(')
+        && rest[..end].ends_with(['?', '*', '+', '@', '!'])
+    {
+        end - 1
+    } else {
+        end
+    };
     let len = start.len() - rest.len() + end;
     word.part(Part::Pattern(start[..len].into()));
     *chars = rest[end..].chars();
@@ -577,7 +599,7 @@ pub(super) fn lex(
     let mut parentheses = 0usize;
     let mut saw_case = false;
     let mut in_test = false;
-    let mut regex_next = false;
+    let mut pattern_next: Option<bool> = None;
     let mut pending_docs = Vec::new();
     let mut tokens = Vec::new();
     while let Some(c) = chars.clone().next() {
@@ -585,17 +607,24 @@ pub(super) fn lex(
             chars.next();
             continue;
         }
-        if regex_next && c != '\n' && c != ';' {
-            regex_next = false;
-            if chars
+        let pattern = pattern_next.take();
+        if pattern == Some(false)
+            && !matches!(c, '\n' | ';')
+            && chars
                 .as_str()
                 .strip_prefix("]]")
                 .is_none_or(|rest| !rest.chars().next().is_none_or(separator))
-            {
-                tokens.push(Token::Word(regex_word(&mut chars)?));
-                continue;
-            }
+        {
+            let mut word = WordBuilder::default();
+            pattern_parts(&mut chars, &mut word, None)?;
+            tokens.push(Token::Word(LexWord {
+                word: word.finish(),
+                protected: false,
+                assignment: None,
+            }));
+            continue;
         }
+        let extended = pattern == Some(true) || super::EXTGLOB.get();
         if c == '#' {
             let rest = chars.as_str();
             chars = rest[rest.find('\n').unwrap_or(rest.len())..].chars();
@@ -771,9 +800,13 @@ pub(super) fn lex(
                     braces -= 1;
                 }
                 ',' if braces > 0 => word.part(Part::Brace(",")),
+                '@' | '?' | '*' | '+' | '!' if extended && chars.as_str().starts_with('(') => {
+                    pattern_parts(&mut chars, &mut word, Some(c))?;
+                    pattern_context = true;
+                }
                 '*' | '?' | '[' => {
                     pattern_context = true;
-                    pattern_chunk(&mut chars, &mut word, rest);
+                    pattern_chunk(&mut chars, &mut word, rest, extended);
                 }
                 '=' if assignment.is_none() && !protected => {
                     let prefix = &start[..start.len() - rest.len()];
@@ -811,7 +844,7 @@ pub(super) fn lex(
                         word.push(c);
                     }
                 }
-                _ if pattern_context => pattern_chunk(&mut chars, &mut word, rest),
+                _ if pattern_context => pattern_chunk(&mut chars, &mut word, rest, extended),
                 _ => word.push(c),
             }
             started = true;
@@ -839,7 +872,8 @@ pub(super) fn lex(
             match word.as_literal() {
                 Some("[[") if command_position(&tokens) => in_test = true,
                 Some("]]") => in_test = false,
-                Some("=~") if in_test => regex_next = true,
+                Some("=~") if in_test => pattern_next = Some(false),
+                Some("=" | "==" | "!=") if in_test => pattern_next = Some(true),
                 _ => {}
             }
         }

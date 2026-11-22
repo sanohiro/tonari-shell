@@ -26,6 +26,7 @@ pub struct Invocation {
     pub monitor: Option<bool>,
     pub braceexpand: bool,
     pub pipefail: bool,
+    pub shopts: Vec<(bool, Option<String>)>,
 }
 
 pub enum Action {
@@ -62,6 +63,7 @@ pub fn parse(
     let mut monitor = None;
     let mut braceexpand = true;
     let mut pipefail = false;
+    let mut shopts = Vec::new();
     while args
         .peek()
         .and_then(|a| a.to_str())
@@ -97,6 +99,7 @@ pub fn parse(
                         'B' => braceexpand = enabled,
                         'f' => noglob = enabled,
                         'u' => nounset = enabled,
+                        'O' => shopts.push((enabled, args.next().map(utf8).transpose()?)),
                         'o' => match args.next().as_deref().and_then(|a| a.to_str()) {
                             Some("braceexpand") => braceexpand = enabled,
                             Some("pipefail") => pipefail = enabled,
@@ -151,5 +154,6 @@ pub fn parse(
         monitor,
         braceexpand,
         pipefail,
+        shopts,
     }))
 }

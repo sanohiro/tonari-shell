@@ -127,6 +127,9 @@ impl CasePattern {
                     .iter()
                     .all(|p| matches!(p, Part::Text(_) | Part::Pattern(_))) =>
             {
+                if EXTGLOB.get() && parts.iter().any(|part| matches!(part, Part::Pattern(s) if crate::pattern::extended::has_group(s))) {
+                    return Self::Dynamic(word);
+                }
                 Self::Fixed(Matcher::new(word.pattern(&|_| None, &[])))
             }
             word => Self::Dynamic(word),
@@ -235,17 +238,25 @@ pub fn parse_final(source: &str) -> Result<Vec<Statement>, Error> {
     parse_source(source, true)
 }
 
+thread_local! {
+    // Lexers invoked recursively by a substitution inherit the outer read's options.
+    static EXTGLOB: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 pub fn session_source(
     source: &str,
     eof: bool,
     session: &crate::Session,
 ) -> Result<Vec<Statement>, Error> {
     let read = || {
-        if eof {
+        let before = EXTGLOB.replace(session.shopt.glob.extglob);
+        let parsed = if eof {
             parse_final(source)
         } else {
             parse(source)
-        }
+        };
+        EXTGLOB.set(before);
+        parsed
     };
     if session.shopt.expand_aliases && session.aliases.0.is_some() {
         aliases::with(session.aliases.clone(), read)

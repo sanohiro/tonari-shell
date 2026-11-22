@@ -116,6 +116,7 @@ impl Modification {
                         &replacement,
                         *mode,
                         env.session.shopt.patsub_replacement,
+                        env.session.shopt.glob.extglob,
                     )
                 }))
             }

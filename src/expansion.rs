@@ -215,7 +215,11 @@ impl<'a> Expansion<'a> {
 
     pub fn pattern(&mut self, mut word: Word) -> Result<String, Error> {
         word.resolve(self)?;
-        Ok(word.pattern(&|name| self.lookup(name), &self.session.positional))
+        Ok(if self.session.shopt.glob.extglob {
+            word.extended_pattern(&|name| self.lookup(name), &self.session.positional)
+        } else {
+            word.pattern(&|name| self.lookup(name), &self.session.positional)
+        })
     }
 
     pub fn regex(&mut self, mut word: Word) -> Result<String, Error> {

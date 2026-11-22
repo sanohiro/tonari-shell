@@ -19,9 +19,13 @@ pub(super) fn substitute(
     template: &str,
     mode: ReplaceMode,
     expand_amp: bool,
+    extglob: bool,
 ) -> String {
     use ReplaceMode::*;
-    if !crate::pattern::has_magic(pattern, false) {
+    let group = extglob
+        .then(|| crate::pattern::extended::Pattern::new(pattern))
+        .flatten();
+    if group.is_none() && !crate::pattern::has_magic(pattern, false) {
         let needle = crate::pattern::unescape(pattern);
         let mut replacement = String::new();
         write_replacement(&mut replacement, template, &needle, expand_amp);
@@ -56,16 +60,22 @@ pub(super) fn substitute(
     let mut copied = 0;
     let mut i = 0;
     let starts = format!("{pattern}*");
+    let accepts = |candidate| {
+        group.as_ref().map_or_else(
+            || crate::pattern::matches(candidate, pattern),
+            |g| g.accepts(candidate, false),
+        )
+    };
     while i + 1 < bounds.len() {
         let start = bounds[i];
         let end = if pattern == "?" {
             (mode != Suffix || i + 2 == bounds.len()).then_some(i + 1)
         } else if mode == Suffix {
-            crate::pattern::matches(&text[start..], pattern).then_some(bounds.len() - 1)
-        } else if crate::pattern::matches(&text[start..], &starts) {
+            accepts(&text[start..]).then_some(bounds.len() - 1)
+        } else if group.is_some() || crate::pattern::matches(&text[start..], &starts) {
             (i + 1..bounds.len())
                 .rev()
-                .find(|&j| crate::pattern::matches(&text[start..bounds[j]], pattern))
+                .find(|&j| accepts(&text[start..bounds[j]]))
         } else {
             None
         };
