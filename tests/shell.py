@@ -642,6 +642,63 @@ printf '%s:%s' "$s" "$x" """
                      "type -t printf; builtin printf '%s' ok",
                      0, b"function\nf\nbuiltin\nok")
 
+    def test_alias_and_nested_function_status(self):
+        self.compare("""shopt -s expand_aliases
+alias say='printf "%s"'
+function outer { local x=inner; inner() { say "$x:$1"; return 17; }; inner "$1"; }
+unalias say
+set -- before; x=outer; outer "two words"; printf ':%s:%s:%s' "$?" "$1" "$x" """,
+                     0, b"inner:two words:17:before:outer")
+        self.compare("shopt -s expand_aliases\nalias a='b'; alias b='printf ok'\na", 0, b"ok")
+
+    def test_exit_and_signal_traps(self):
+        self.compare("""trap 'printf "exit:%s" "$?"' EXIT; /bin/sh -c 'exit 17'""", 17, b"exit:17")
+        self.compare("trap 'exit 42' EXIT; exit 17", 42)
+        self.compare("trap 'false; exit' EXIT; exit 17", 17)
+        for shell in (BASH, TONARI):
+            proc = self.command(shell, "trap 'printf cleanup' EXIT; kill -TERM $$; echo unreachable")
+            self.assertEqual((proc.returncode, proc.stdout), (-signal.SIGTERM, b"cleanup"))
+        self.compare("""trap 'printf "outer:%s" "$?"' EXIT
+(trap 'printf "inner:%s/" "$?"' EXIT; exit 7); exit 2""", 2, b"inner:7/outer:2")
+        self.compare("""f() { printf 'trap:%s:%s/' "$?" "$x"; seen=yes; }
+trap f USR1; trap '' USR2; kill -USR2 "$$"
+g() { local x=local; kill -USR1 "$$"; }; g
+trap - USR1; printf '%s' "$seen" """, 0, b"trap:0:local/yes")
+        self.compare("""trap '' PIPE; /bin/sh -c 'kill -PIPE $$; printf ok'; trap - PIPE""", 0, b"ok")
+        self.compare("""trap 'printf done' EXIT; exec /bin/sh -c 'printf replaced; exit 9'""", 9, b"replaced")
+        for shell in (BASH, TONARI):
+            proc = self.command(shell, "trap : USR1; trap - USR1; kill -USR1 $$; echo unreachable")
+            self.assertEqual((proc.returncode, proc.stdout), (-signal.SIGUSR1, b""))
+
+    def test_interrupted_wait_keeps_child_status(self):
+        source = """trap 'printf "trap:%s/" "$?"' USR1
+p=$$; (sleep 0.05; kill -USR1 "$p"; sleep 0.05; exit 23) & child=$!
+wait "$child"; printf "wait:%s/" "$?"
+wait "$child"; printf "done:%s" "$?" """
+        code = 128 + signal.SIGUSR1
+        self.compare(source, 0, f"trap:{code}/wait:{code}/done:23".encode())
+
+    def test_pipeline_and_background_status(self):
+        self.compare("""set -o pipefail
+/bin/sh -c 'exit 7' | /bin/sh -c 'exit 19' | true; printf '<%s>' "$?" "${PIPESTATUS[@]}"
+! false | true; printf '<%s>' "$?" "${PIPESTATUS[@]}"
+/bin/sh -c 'exit 4' | true & p=$!; printf '<%s>' "$?"; wait "$p"; printf '<%s>' "$?" """,
+                     0, b"<19><7><19><0><0><1><0><0><4>")
+        # Bash 5.x carries the enclosing pipe into this background command.
+        source = 'printf foo | { cat & wait; printf ok; }'
+        self.assertEqual(self.command(TONARI, source).stdout, b"foook")
+        if int(self.command(BASH, 'echo "${BASH_VERSINFO[0]}"').stdout) >= 5:
+            self.compare(source, 0, b"foook")
+        self.compare('sleep 3 & p=$!; kill -TERM %1; wait "$p" 2>/dev/null; printf %s "$?"', 0, b"143")
+        self.compare('(exit 23) & p=$!; sleep 0.02; jobs >/dev/null; wait "$p"; printf %s "$?"',
+                     0, b"23")
+        # Bash 3.2 consumes the saved status on a second wait by PID.
+        if int(self.command(BASH, 'echo "${BASH_VERSINFO[0]}"').stdout) >= 5:
+            self.compare('(exit 23) & p=$!; wait "$p"; wait "$p"; printf %s "$?"', 0, b"23")
+        for shell in (BASH, TONARI):
+            proc = self.command(shell, """/bin/sh -c 'kill -TERM $$'; printf %s "$?" """)
+            self.assertEqual((proc.returncode, proc.stdout), (0, b"143"))
+
     def test_async_and_wait(self):
         self.compare("/bin/sh -c 'exit 17' & p=$!; wait \"$p\"; printf %s \"$?\"", 0, b"17")
         self.compare("false && touch unexpected & wait; printf ok", 0, b"ok")
@@ -691,13 +748,14 @@ printf '%s:%s' "$s" "$x" """
         self.env["SHELL"] = "/some/other/shell"
         self.compare('printf %s "$SHELL"', 0, b"/some/other/shell")
 
-    def terminal_session(self, editing=False):
+    def terminal_session(self, editing=False, shell=TONARI):
         pid, fd = pty.fork()
         if pid == 0:
             try:
                 os.chdir(self.cwd)
-                env = dict(self.env, TERM="xterm-256color" if editing else "dumb")
-                os.execve(TONARI, [str(TONARI), "--norc"], env)
+                env = dict(self.env, PS1=PROMPT.decode(), TERM="xterm-256color" if editing else "dumb")
+                options = [] if editing else ["--noediting"]
+                os.execve(shell, [str(shell), "--norc", *options], env)
             finally:
                 os._exit(125)
         def close():
@@ -711,21 +769,41 @@ printf '%s:%s' "$s" "$x" """
                 os.killpg(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+            os.close(fd)
             try:
                 os.waitpid(pid, 0)
             except ChildProcessError:
                 pass
-            os.close(fd)
         self.addCleanup(close)
         self.read_until(fd, PROMPT)
         return fd
 
+    def test_interactive_alias_and_interrupt_trap(self):
+        for shell in (BASH, TONARI):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(shell=shell)
+                os.write(fd, b"alias marker='printf A%sZ lias'\n")
+                self.read_until(fd, PROMPT)
+                os.write(fd, b"marker\n")
+                self.assertIn(b"AliasZ", self.read_until(fd, PROMPT))
+                os.write(fd, b"trap 'printf TRAP=%s! \"$?\"' INT; false\n")
+                self.read_until(fd, PROMPT)
+                os.write(fd, b"\x03")
+                legacy = shell == BASH and int(self.command(BASH, 'echo "${BASH_VERSINFO[0]}"').stdout) < 4
+                self.read_until(fd, b"TRAP=129!" if legacy else b"TRAP=1!")
+
     def test_stop_and_resume_foreground_pipeline(self):
-        fd = self.terminal_session()
+        for shell in (BASH, TONARI):
+            with self.subTest(shell=shell):
+                self.check_foreground_pipeline(self.terminal_session(shell=shell))
+
+    def check_foreground_pipeline(self, fd):
         os.write(fd, b"/bin/sh -c 'printf R%sY EAD; exec sleep 20' | cat\n")
         self.read_until(fd, b"READY")
         os.write(fd, b"\x1a")
         self.assertIn(b"Stopped", self.read_until(fd, PROMPT))
+        os.write(fd, b"printf 'STOP=%s\\n' $?\n")
+        self.assertIn(f"STOP={128 + signal.SIGTSTP}\r\n".encode(), self.read_until(fd, PROMPT))
         os.write(fd, b"jobs\n")
         self.assertIn(b"Stopped", self.read_until(fd, PROMPT))
         os.write(fd, b"bg\n")

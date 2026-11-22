@@ -269,6 +269,7 @@ impl Environment {
 }
 
 struct External {
+    ignore_pipe: bool,
     // Owns the argument strings referenced by argv.
     original_name: Option<CString>,
     words: Vec<CString>,
@@ -316,6 +317,7 @@ impl External {
             words,
             argv,
             original_name: original,
+            ignore_pipe: session.traps.ignores(libc::SIGPIPE),
             search_paths,
             env: if clear_env {
                 Some(Rc::new(Environment {
@@ -337,7 +339,11 @@ impl External {
             write_error(b"", b": command not found");
             return 127;
         }
-        let old_pipe = unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
+        let old_pipe = if self.ignore_pipe {
+            libc::SIG_ERR
+        } else {
+            unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) }
+        };
         let mut error = libc::ENOENT;
         let paths = self
             .search_paths
@@ -404,6 +410,7 @@ enum Builtin {
     Jobs,
     Describe,
     Alias,
+    Trap,
     Completion,
     Unknown,
 }
@@ -427,12 +434,13 @@ pub(crate) fn builtin_names() -> &'static [&'static str] {
         ":", "[", ".", "break", "builtin", "cd", "command", "compgen", "complete", "compopt",
         "continue", "echo", "eval", "exit", "exec", "export", "false", "local", "printf", "pwd",
         "read", "return", "set", "shift", "source", "test", "true", "type", "unset", "jobs", "fg",
-        "bg", "wait", "shopt", "declare", "typeset", "alias", "unalias",
+        "bg", "kill", "wait", "shopt", "declare", "typeset", "alias", "unalias", "trap",
     ]
 }
 
 fn named_builtin(name: &str, args: &[String], last_status: u8) -> Option<Builtin> {
     match name {
+        "trap" => Some(Builtin::Trap),
         "alias" | "unalias" => Some(Builtin::Alias),
         "builtin" => Some(Builtin::Status(0)),
         "complete" | "compgen" | "compopt" => Some(Builtin::Completion),
@@ -440,7 +448,7 @@ fn named_builtin(name: &str, args: &[String], last_status: u8) -> Option<Builtin
         ":" | "true" => Some(Builtin::Status(0)),
         "false" => Some(Builtin::Status(1)),
         "printf" => Some(Builtin::Printf),
-        "jobs" | "fg" | "bg" | "wait" => Some(Builtin::Jobs),
+        "jobs" | "fg" | "bg" | "kill" | "wait" => Some(Builtin::Jobs),
         "read" => Some(Builtin::Read),
         "set" => Some(Builtin::Set),
         "hash" => Some(Builtin::Hash),
@@ -495,6 +503,7 @@ fn eval_builtin(
         ),
         Builtin::Exec => exec_builtin(cmd, session, args),
         Builtin::Function => crate::call_function(session, &cmd.words[0], &cmd.words, last_status),
+        Builtin::Trap => Flow::Continue(session.traps.builtin(args, session.interactive)),
         Builtin::Alias => Flow::Continue(crate::alias::builtin(&cmd.words[0], args, session)),
         Builtin::Completion => Flow::Continue(crate::completion_spec::run(
             &cmd.words[0],
@@ -573,6 +582,9 @@ fn eval_builtin(
             }
         }
         Builtin::Status(code) => Flow::Continue(code),
+        Builtin::Exit(code) if args.is_empty() => {
+            Flow::Exit(session.traps.exit_status.unwrap_or(code))
+        }
         Builtin::Exit(code) => Flow::Exit(code),
         Builtin::InvalidExit => {
             write_error(b"exit", b": numeric argument required");
@@ -744,11 +756,18 @@ fn run_builtin(
         }
     }
     let applied = apply(actions);
+    let old_input = session.stdin_redirected;
+    if applied && actions.iter().any(|a| a.destination() == 0) {
+        session.stdin_redirected = true;
+    }
     let flow = if applied {
         eval_builtin(builtin, cmd, session, last_status)
     } else {
         Flow::Continue(1)
     };
+    if !matches!(builtin, Builtin::Exec) || !matches!(flow, Flow::Continue(0)) {
+        session.stdin_redirected = old_input;
+    }
     if applied && matches!(builtin, Builtin::Exec) && matches!(flow, Flow::Continue(0)) {
         for a in actions {
             session.substitutions.replaced(a.destination());
@@ -875,9 +894,11 @@ fn start_raw(
         return Err(io::Error::last_os_error());
     }
     if pid == 0 {
+        session.traps.after_fork();
         reset_child_signals();
         launch.child();
         session.jobs.detached();
+        session.stdin_redirected |= input.is_some();
         let code = if apply(&setup) {
             match run(vec![raw], last_status, true, session) {
                 Ok(Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s)) => s,
@@ -890,6 +911,7 @@ fn start_raw(
         } else {
             1
         };
+        let code = crate::traps::finish(session, code);
         unsafe { libc::_exit(i32::from(code)) }
     }
     Ok(Stage::Child(pid))
@@ -932,6 +954,7 @@ fn start(
         }
     }
     if builtin.is_none()
+        && !session.traps.ignores(libc::SIGPIPE)
         && (cmd.redirects.is_empty() || merged_pipe.is_some())
         && !custom_search
         && launch.group.is_none()
@@ -1009,9 +1032,12 @@ fn start(
         // External argv and environment are prepared before fork. A shell builtin
         // runs in a child copy of the single-threaded interpreter and may reenter it.
         // Restore signals caught by the interactive shell before blocking on a file.
+        session.traps.after_fork();
         reset_child_signals();
         launch.child();
         session.jobs.detached();
+        session.stdin_redirected |= cmd.redirects.iter().any(|r| r.fd == 0);
+        session.stdin_redirected |= input.is_some();
         let code = if !apply(&setup) {
             1
         } else if let Some(external) = external.as_ref() {
@@ -1022,6 +1048,7 @@ fn start(
                 Flow::Break(_) | Flow::LoopContinue(_) => 0,
             }
         };
+        let code = crate::traps::finish(session, code);
         unsafe { libc::_exit(code.into()) }
     }
     Ok(Stage::Child(pid))
@@ -1377,7 +1404,13 @@ pub fn run_pipeline(
                 launch.parent(pid);
                 session
                     .jobs
-                    .finish(launch, vec![Ok(pid)], name, session.pipefail)?
+                    .finish(
+                        launch,
+                        vec![Ok(pid)],
+                        name,
+                        session.pipefail,
+                        &mut session.pipe_status,
+                    )?
                     .0
             }
             Stage::Child(pid) => wait(pid)?,
@@ -1385,7 +1418,7 @@ pub fn run_pipeline(
         };
         return Ok(Flow::Continue(status));
     }
-    let mut input = if background && launch.group.is_none() {
+    let mut input = if background && launch.group.is_none() && !session.stdin_redirected {
         Some(private_fd(std::fs::File::open("/dev/null")?.into())?)
     } else {
         None
@@ -1444,9 +1477,13 @@ pub fn run_pipeline(
                 Stage::Failed(c) => Err(c),
             })
             .collect();
-        let (code, pid) = session
-            .jobs
-            .finish(launch, processes, name, session.pipefail)?;
+        let (code, pid) = session.jobs.finish(
+            launch,
+            processes,
+            name,
+            session.pipefail,
+            &mut session.pipe_status,
+        )?;
         if background {
             session.last_background = pid;
         }
@@ -1454,11 +1491,13 @@ pub fn run_pipeline(
     }
     let mut status = 0;
     let mut wait_error = None;
+    session.pipe_status.clear();
     for stage in stages {
         let result = match stage {
             Stage::Child(pid) => wait(pid),
             Stage::Failed(code) => Ok(code),
         };
+        session.pipe_status.push(*result.as_ref().unwrap_or(&1));
         match result {
             Ok(code) if !session.pipefail || code != 0 => status = code,
             Ok(_) => {}

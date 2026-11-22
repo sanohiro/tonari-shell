@@ -19,6 +19,7 @@ pub fn capture_substitution(
         return Err("cannot fork command substitution");
     }
     if pid == 0 {
+        session.traps.after_fork();
         drop(read);
         if write.as_raw_fd() == 1 {
             let fd = write.into_raw_fd();
@@ -63,6 +64,7 @@ pub fn capture_substitution(
             Flow::Continue(code) | Flow::Exit(code) | Flow::Return(code) => code,
             Flow::Break(_) | Flow::LoopContinue(_) => 1,
         };
+        let code = crate::traps::finish(session, code);
         unsafe {
             libc::_exit(code as libc::c_int);
         }
@@ -189,8 +191,9 @@ pub fn launch_group(
         return Flow::Continue(1);
     }
     if pid == 0 {
+        session.traps.after_fork();
         launch.child();
-        if background && launch.group.is_none() {
+        if background && launch.group.is_none() && !session.stdin_redirected {
             let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
             if fd < 0 || unsafe { libc::dup2(fd, 0) } < 0 {
                 unsafe { libc::_exit(1) }
@@ -208,16 +211,20 @@ pub fn launch_group(
             Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
             _ => 0,
         };
+        let code = crate::traps::finish(session, code);
         unsafe { libc::_exit(code as libc::c_int) }
     }
     launch.parent(pid);
     if launch.group.is_none() && !background {
         return Flow::Continue(crate::execute::wait(pid).unwrap_or(1));
     }
-    match session
-        .jobs
-        .finish(launch, vec![Ok(pid)], "command list".into(), false)
-    {
+    match session.jobs.finish(
+        launch,
+        vec![Ok(pid)],
+        "command list".into(),
+        false,
+        &mut session.pipe_status,
+    ) {
         Ok((code, pid)) => {
             if background {
                 session.last_background = pid;

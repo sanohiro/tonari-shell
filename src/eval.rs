@@ -10,6 +10,12 @@ pub fn execute_program(
 ) -> Flow {
     let mut statements = program.into_iter().peekable();
     while let Some(statement) = statements.next() {
+        if session.traps.active() {
+            match crate::traps::dispatch(session, status) {
+                Flow::Continue(_) => {}
+                flow => return flow,
+            }
+        }
         if !statement.condition.allows(status) {
             continue;
         }
@@ -23,7 +29,7 @@ pub fn execute_program(
             session,
             statement.command,
             status,
-            replace_last && statements.peek().is_none() && !negated,
+            replace_last && statements.peek().is_none() && !negated && !session.traps.active(),
         );
         session.tested_depth -= u32::from(tested);
         match flow {
@@ -36,7 +42,11 @@ pub fn execute_program(
             other => return other,
         }
     }
-    Flow::Continue(status)
+    if session.traps.active() {
+        crate::traps::dispatch(session, status)
+    } else {
+        Flow::Continue(status)
+    }
 }
 
 fn condition_program(session: &mut Session, condition: Vec<Statement>, status: u8) -> Flow {
@@ -48,7 +58,17 @@ fn condition_program(session: &mut Session, condition: Vec<Statement>, status: u
 
 pub(crate) fn command(session: &mut Session, command: Command, status: u8, tail: bool) -> Flow {
     let scope = session.substitutions.scope();
+    let single = match &command {
+        Command::Pipeline(stages) => stages.len() == 1,
+        Command::Subshell(_) | Command::Test(_) | Command::Arithmetic(_) => true,
+        _ => false,
+    };
     let result = run_command(session, command, status, tail);
+    if single {
+        if let Flow::Continue(code) | Flow::Exit(code) | Flow::Return(code) = result {
+            session.pipe_status.single(code);
+        }
+    }
     session.substitutions.finish(scope);
     result
 }

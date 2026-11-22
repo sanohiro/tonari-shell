@@ -235,3 +235,9 @@ Linux の musl 版では、`x["*"]*.txt` が `x` の直後にバックスラッ�
 For a quoted operand in a POSIX collating or equivalence symbol, the references differ. In the C locale `case a in [[."a".]])` matches on Ubuntu Bash 5.3.9. Tonari follows Debian Bash 5.2.37 for this case.
 
 POSIX の照合要素や等価クラスの中身を引用した場合は参照版同士で結果が異なる。C ロケールで `case a in [[."a".]])` は Ubuntu の Bash 5.3.9 で一致する。Tonari はこの場合には Debian の Bash 5.2.37 に合わせている。
+
+## 2026-11-22 · Signals and job exit status / シグナルとジョブの終了値
+
+A foreground program keeps the terminal until it stops or exits. An explicit `wait "$!"` can return early with 128 plus the trapped signal number. The child remains waitable. Tonari records signals atomically and runs the action in shell context, where functions and local variables are available. For interruptible waits it checks child status with signals blocked and releases the mask atomically while sleeping. The PTY test stops a pipeline, resumes it in the background, brings it forward, and interrupts it. It checks the stopped and interrupted statuses and terminal ownership. The script tests also check every pipeline stage, `pipefail`, and cleanup on normal and signaled exit. Run `python3 tests/shell.py target/release/tonari`. [Tests](../tests/shell.py)
+
+`wait` の中で登録済みのシグナルを受けると、その場で 128＋シグナル番号を返し、あとで元の子の終了値も回収できる。ハンドラ内ではシェルコードを実行せず、シグナル到着だけを記録する。実際の処理はコマンドの区切りで行うため、関数のローカル変数も参照できる。疑似端末ではパイプを Ctrl-Z で停止し、`bg`、`fg`、Ctrl-C と操作して前景プロセスグループと終了値を照合する。終了トラップでは通常の終了と TERM による終了を別々に検査する。

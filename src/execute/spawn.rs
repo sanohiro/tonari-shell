@@ -72,7 +72,9 @@ impl External {
             let result = (|| {
                 let mut signals = std::mem::zeroed();
                 libc::sigemptyset(&mut signals);
-                libc::sigaddset(&mut signals, libc::SIGPIPE);
+                if !self.ignore_pipe {
+                    libc::sigaddset(&mut signals, libc::SIGPIPE);
+                }
                 check(libc::posix_spawnattr_setsigdefault(
                     attr.as_mut_ptr(),
                     &signals,

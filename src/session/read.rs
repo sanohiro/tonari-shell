@@ -208,7 +208,9 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
         let b = match input.next() {
             Ok(Some(b)) => b,
             Ok(None) => break 1,
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => break 130,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                break 128 + crate::traps::pending().unwrap_or(libc::SIGINT) as u8;
+            }
             Err(e) => {
                 eprintln!("tonari: read: {e}");
                 return 1;

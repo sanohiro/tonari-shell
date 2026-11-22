@@ -18,6 +18,7 @@ mod session;
 mod startup;
 mod subshell;
 mod test_expression;
+mod traps;
 use subshell::capture_substitution;
 mod word;
 
@@ -76,12 +77,14 @@ fn read_terminal_line(source: &mut Vec<u8>) -> io::Result<bool> {
 }
 
 fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Result<u8> {
-    listen_for_interrupts()?;
     session.jobs.init();
     let mut source = Vec::new();
     let mut history = history::History::default();
     loop {
         interrupted();
+        if let Flow::Exit(code) = traps::dispatch(session, status) {
+            return Ok(code);
+        }
         session.jobs.poll();
         session.refresh_terminal_size();
         if source.is_empty() {
@@ -112,13 +115,20 @@ fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Resu
             Ok(Some(more)) => more,
             Ok(None) => {
                 source.clear();
-                status = 130;
+                if traps::pending().is_none() && session.traps.catches(libc::SIGINT) {
+                    unsafe { libc::raise(libc::SIGINT) };
+                }
+                if traps::pending().is_none() {
+                    status = 130;
+                }
                 continue;
             }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {
                 eprintln!();
                 source.clear();
-                status = 130;
+                if traps::pending().is_none() {
+                    status = 130;
+                }
                 continue;
             }
             Err(e) => return Err(e),
@@ -204,9 +214,14 @@ fn main() -> ExitCode {
             }
         }
     }
+    if session.interactive && listen_for_interrupts().is_err() {
+        return ExitCode::FAILURE;
+    }
     let initial = match startup::initialize(&mut session, &invocation) {
         Flow::Continue(status) => status,
-        Flow::Return(status) | Flow::Exit(status) => return ExitCode::from(status),
+        Flow::Return(status) | Flow::Exit(status) => {
+            return ExitCode::from(traps::finish(&mut session, status));
+        }
         Flow::Break(_) | Flow::LoopContinue(_) => return ExitCode::from(1),
     };
     let flow = match invocation.input {
@@ -243,8 +258,9 @@ fn main() -> ExitCode {
         },
         Input::Stdin => input::stdin_script(&mut session, invocation.check),
     };
-    ExitCode::from(match flow {
+    let code = match flow {
         Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s) => s,
         Flow::Break(_) | Flow::LoopContinue(_) => 1,
-    })
+    };
+    ExitCode::from(traps::finish(&mut session, code))
 }

@@ -67,11 +67,27 @@ impl Substitutions {
         });
     }
 
-    pub(crate) fn wait(&mut self, pid: libc::pid_t) -> Option<u8> {
+    pub(crate) fn wait(
+        &mut self,
+        pid: libc::pid_t,
+        mask: Option<&crate::traps::WaitMask>,
+    ) -> Option<u8> {
         if let Some(code) = self.finished.remove(&pid) {
             return Some(code);
         }
         let i = self.pending.iter().position(|&child| child == pid)?;
+        if let Some(mask) = mask {
+            loop {
+                if let Some(code) = mask.interrupt_status() {
+                    return Some(code);
+                }
+                if let Some(code) = status(pid, libc::WNOHANG) {
+                    self.pending.swap_remove(i);
+                    return Some(code);
+                }
+                mask.suspend();
+            }
+        }
         self.pending.swap_remove(i);
         status(pid, 0)
     }
@@ -112,6 +128,7 @@ pub(crate) fn launch(
         return Err("cannot fork process substitution");
     }
     if pid == 0 {
+        session.traps.after_fork();
         drop(keep);
         super::reset_child_signals();
         if super::duplicate(child.as_raw_fd(), target).is_err() {
@@ -127,6 +144,7 @@ pub(crate) fn launch(
             Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
             Flow::Break(_) | Flow::LoopContinue(_) => 0,
         };
+        let status = crate::traps::finish(session, status);
         unsafe { libc::_exit(i32::from(status)) }
     }
     drop(child);

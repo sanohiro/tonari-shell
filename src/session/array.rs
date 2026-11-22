@@ -44,6 +44,10 @@ impl Session {
     }
 
     pub(super) fn indices(&self, name: &str) -> Vec<i64> {
+        if name == "PIPESTATUS" {
+            let len = usize::from(self.pipe_status.first.is_some()) + self.pipe_status.rest.len();
+            return (0..len as i64).collect();
+        }
         if let Some(v) = self.variables.get(name) {
             return v.elements.as_ref().map_or_else(
                 || (v.value.is_some()).then_some(0).into_iter().collect(),
@@ -59,6 +63,15 @@ impl Session {
     }
 
     pub(super) fn element(&self, name: &str, index: i64) -> Option<String> {
+        if name == "PIPESTATUS" {
+            return self
+                .pipe_status
+                .first
+                .iter()
+                .chain(&self.pipe_status.rest)
+                .nth(index as usize)
+                .map(u8::to_string);
+        }
         if let Some(v) = self.variables.get(name) {
             return match v.elements.as_ref() {
                 Some(a) => a.get(&index).cloned(),
@@ -88,6 +101,9 @@ impl Session {
             .map(|(key, _)| key.clone())
             .collect();
         names.push("BASH_SOURCE".into());
+        if self.pipe_status.first.is_some() {
+            names.push("PIPESTATUS".into());
+        }
         if self.function_depth > 0 {
             names.push("FUNCNAME".into());
         }

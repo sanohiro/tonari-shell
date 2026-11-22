@@ -32,6 +32,32 @@ impl Default for ShellPid {
     }
 }
 
+// Single commands update PIPESTATUS without allocating. Pipelines reuse the
+// storage for stages beyond the first.
+#[derive(Clone, Default)]
+pub struct PipelineStatus {
+    first: Option<u8>,
+    rest: Vec<u8>,
+}
+
+impl PipelineStatus {
+    pub fn single(&mut self, code: u8) {
+        self.first = Some(code);
+        self.rest.clear();
+    }
+    pub fn push(&mut self, code: u8) {
+        if self.first.is_none() {
+            self.first = Some(code);
+        } else {
+            self.rest.push(code);
+        }
+    }
+    pub fn clear(&mut self) {
+        self.first = None;
+        self.rest.clear();
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct Session {
     // Only changed variables are stored here. Simple commands inherit the
@@ -45,12 +71,15 @@ pub struct Session {
     pub errexit: bool,
     pub nounset: bool,
     pub pipefail: bool,
+    pub pipe_status: PipelineStatus,
+    pub stdin_redirected: bool,
     pub noglob: bool,
     pub shopt: options::ShellOptions,
     pub(crate) external_env: std::cell::RefCell<Option<Rc<crate::execute::Environment>>>,
     pub regex: Option<Rc<crate::test_expression::Compiled>>,
     pub substitutions: crate::execute::process_substitution::Substitutions,
     pub jobs: crate::jobs::Jobs,
+    pub traps: crate::traps::Traps,
     pub hashes: crate::execute::hash::Table,
     pub last_background: Option<libc::pid_t>,
     pub arg0: String,
@@ -243,6 +272,9 @@ impl Session {
         if let Some((base, index)) = array::subscript(name) {
             let i = self.resolve_index(base, index).ok()?;
             return self.element(base, i);
+        }
+        if name == "PIPESTATUS" {
+            return self.element(name, 0);
         }
         if let Some(var) = self.variables.get(name) {
             return var

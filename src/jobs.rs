@@ -136,8 +136,11 @@ impl Job {
             };
         }
     }
-    fn wait(&mut self) -> io::Result<()> {
+    fn wait(&mut self, mask: Option<&crate::traps::WaitMask>) -> io::Result<Option<u8>> {
         while self.active() {
+            if let Some(code) = mask.and_then(crate::traps::WaitMask::interrupt_status) {
+                return Ok(Some(code));
+            }
             let pid = self.group.map(|g| -g).unwrap_or_else(|| {
                 self.children
                     .iter()
@@ -146,8 +149,13 @@ impl Job {
                     .pid
             });
             let mut status = 0;
-            let got =
-                unsafe { libc::waitpid(pid, &mut status, libc::WUNTRACED | libc::WCONTINUED) };
+            let flags =
+                libc::WUNTRACED | libc::WCONTINUED | if mask.is_some() { libc::WNOHANG } else { 0 };
+            let got = unsafe { libc::waitpid(pid, &mut status, flags) };
+            if got == 0 {
+                mask.unwrap().suspend();
+                continue;
+            }
             if got < 0 {
                 let e = io::Error::last_os_error();
                 if e.kind() == io::ErrorKind::Interrupted {
@@ -157,7 +165,7 @@ impl Job {
             }
             self.update(got, status);
         }
-        Ok(())
+        Ok(None)
     }
     fn resume(&mut self) -> io::Result<()> {
         if let Some(group) = self.group {
@@ -179,6 +187,8 @@ pub struct Jobs {
     tty: Option<Terminal>,
     table: Vec<Job>,
     serial: u32,
+    // Bash keeps completed background statuses available to wait by PID.
+    finished: std::collections::VecDeque<(pid_t, u8)>,
 }
 
 impl Jobs {
@@ -225,6 +235,7 @@ impl Jobs {
         self.tty = None;
         self.table.clear();
         self.serial = 0;
+        self.finished.clear();
     }
     pub fn restore(&self) {
         if let Some(t) = self.terminal() {
@@ -238,6 +249,7 @@ impl Jobs {
         stages: Vec<Result<pid_t, u8>>,
         name: String,
         pipefail: bool,
+        statuses: &mut crate::session::PipelineStatus,
     ) -> io::Result<(u8, Option<pid_t>)> {
         let children = stages
             .into_iter()
@@ -275,6 +287,12 @@ impl Jobs {
             Ok((0, last))
         } else {
             let code = self.foreground(&mut job, false, launch.shell_modes)?;
+            statuses.clear();
+            for child in &job.children {
+                if let State::Stopped(code) | State::Done(code) = child.state {
+                    statuses.push(code);
+                }
+            }
             if job.stopped() {
                 self.store(job);
                 eprintln!("[{}]+ Stopped", self.serial);
@@ -282,6 +300,15 @@ impl Jobs {
             Ok((code, None))
         }
     }
+    fn remember(&mut self, job: &Job) {
+        if let Some(pid) = job.children.last().map(|p| p.pid).filter(|&p| p > 0) {
+            if self.finished.len() == 4096 {
+                self.finished.pop_front();
+            }
+            self.finished.push_back((pid, job.status()));
+        }
+    }
+
     fn store(&mut self, mut job: Job) {
         self.serial = self.table.iter().map(|j| j.id).max().unwrap_or(0) + 1;
         job.id = self.serial;
@@ -306,7 +333,7 @@ impl Jobs {
             if resume {
                 job.resume()?;
             }
-            job.wait()
+            job.wait(None)
         })();
         if let Some(t) = tty {
             self.restore();
@@ -323,7 +350,7 @@ impl Jobs {
                 }
             }
         }
-        result.map(|()| job.status())
+        result.map(|_| job.status())
     }
     pub fn poll(&mut self) {
         for job in &mut self.table {
@@ -364,10 +391,92 @@ impl Jobs {
     }
 }
 
+fn kill(jobs: &Jobs, mut args: &[String]) -> u8 {
+    if args.first().is_some_and(|s| s == "-l" || s == "-L") {
+        let mut out = io::stdout().lock();
+        if args.len() == 1 {
+            for &(name, n) in crate::traps::SIGNALS.iter().filter(|s| s.1 != 0) {
+                if writeln!(out, "{n:2}) SIG{name}").is_err() {
+                    return 1;
+                }
+            }
+        } else {
+            for arg in &args[1..] {
+                let result = if let Ok(n) = arg.parse::<i32>() {
+                    let Some((name, _)) = crate::traps::SIGNALS.iter().find(|s| s.1 == n % 128)
+                    else {
+                        return 1;
+                    };
+                    writeln!(out, "{name}")
+                } else if let Some(n) = crate::traps::number(arg) {
+                    writeln!(out, "{n}")
+                } else {
+                    return 1;
+                };
+                if result.is_err() {
+                    return 1;
+                }
+            }
+        }
+        return 0;
+    }
+    let sig = match args.first().map(String::as_str) {
+        Some("-s" | "-n") if args.len() >= 2 => {
+            let sig = crate::traps::number(&args[1]);
+            args = &args[2..];
+            sig
+        }
+        Some(s) if s.starts_with('-') && s != "--" => {
+            args = &args[1..];
+            crate::traps::number(&s[1..])
+        }
+        _ => Some(libc::SIGTERM),
+    };
+    let Some(sig) = sig else {
+        eprintln!("tonari: kill: invalid signal");
+        return 1;
+    };
+    if args.first().is_some_and(|s| s == "--") {
+        args = &args[1..];
+    }
+    if args.is_empty() {
+        eprintln!("tonari: kill: expected PID or job");
+        return 2;
+    }
+    let mut status = 0;
+    for spec in args {
+        let send = |pid| unsafe { libc::kill(pid, sig) == 0 };
+        let ok = if spec.starts_with('%') {
+            jobs.select(spec).is_some_and(|i| {
+                let job = &jobs.table[i];
+                if let Some(group) = job.group {
+                    send(-group)
+                } else {
+                    let mut delivered = false;
+                    for p in &job.children {
+                        if p.pid > 0 && !matches!(p.state, State::Done(_)) {
+                            delivered |= send(p.pid);
+                        }
+                    }
+                    delivered
+                }
+            })
+        } else {
+            spec.parse::<pid_t>().is_ok_and(send)
+        };
+        if !ok {
+            eprintln!("tonari: kill: {spec}: could not signal target");
+            status = 1;
+        }
+    }
+    status
+}
+
 pub fn builtin(words: &[String], session: &mut Session) -> u8 {
     let jobs = &mut session.jobs;
     jobs.poll();
     match words[0].as_str() {
+        "kill" => kill(jobs, &words[1..]),
         "jobs" => {
             let pid_only = words.get(1).is_some_and(|s| s == "-p");
             let mut out = io::stdout().lock();
@@ -393,17 +502,34 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                     return 1;
                 }
             }
-            jobs.table.retain(|j| j.active() || j.stopped());
+            for i in (0..jobs.table.len()).rev() {
+                if !jobs.table[i].active() && !jobs.table[i].stopped() {
+                    let job = jobs.table.remove(i);
+                    jobs.remember(&job);
+                }
+            }
             u8::from(out.flush().is_err())
         }
         "wait" => {
+            let Ok(mask) = crate::traps::WaitMask::new(&session.traps) else {
+                return 1;
+            };
             if words.len() == 1 {
                 for j in &mut jobs.table {
-                    let _ = j.wait();
+                    if let Ok(Some(code)) = j.wait(mask.as_ref()) {
+                        return code;
+                    }
                 }
                 jobs.table.retain(Job::stopped);
+                jobs.finished.clear();
                 if let Some(pid) = session.last_background {
-                    session.substitutions.wait(pid);
+                    let _ = session.substitutions.wait(pid, mask.as_ref());
+                    if let Some(code) = mask
+                        .as_ref()
+                        .and_then(crate::traps::WaitMask::interrupt_status)
+                    {
+                        return code;
+                    }
                 }
                 return 0;
             }
@@ -411,14 +537,25 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
             for spec in &words[1..] {
                 if let Some(index) = jobs.select(spec) {
                     let j = &mut jobs.table[index];
-                    code = j.wait().map(|()| j.status()).unwrap_or(127);
+                    code = match j.wait(mask.as_ref()) {
+                        Ok(Some(interrupt)) => return interrupt,
+                        Ok(None) => j.status(),
+                        Err(_) => 127,
+                    };
                     if !j.stopped() {
-                        jobs.table.remove(index);
+                        let job = jobs.table.remove(index);
+                        jobs.remember(&job);
                     }
+                } else if let Some((_, saved)) = spec
+                    .parse::<pid_t>()
+                    .ok()
+                    .and_then(|pid| jobs.finished.iter().rev().find(|(p, _)| *p == pid))
+                {
+                    code = *saved;
                 } else if let Some(s) = spec
                     .parse()
                     .ok()
-                    .and_then(|pid| session.substitutions.wait(pid))
+                    .and_then(|pid| session.substitutions.wait(pid, mask.as_ref()))
                 {
                     code = s;
                 } else {
