@@ -192,6 +192,41 @@ impl Request {
 }
 
 impl Spec {
+    fn native_generator(&self) -> Option<Generated> {
+        // Shell code, filters and affixes can change the words or their order.
+        let [action] = self.actions.as_slice() else {
+            return None;
+        };
+        if self.words.is_some()
+            || self.glob.is_some()
+            || self.function.is_some()
+            || self.command.is_some()
+            || self.prefix.is_some()
+            || self.suffix.is_some()
+            || self.filter.is_some()
+        {
+            return None;
+        }
+        let source = match action.as_str() {
+            "file" => complete::Source::Files,
+            "directory" => complete::Source::Directories,
+            "command"
+                if !["filenames", "dirnames", "plusdirs"]
+                    .iter()
+                    .any(|o| self.options.contains(*o)) =>
+            {
+                complete::Source::Commands
+            }
+            _ => return None,
+        };
+        Some(Generated {
+            source,
+            noquote: self.options.contains("noquote"),
+            nospace: self.options.contains("nospace"),
+            fallback: self.options.contains("default") || self.options.contains("bashdefault"),
+        })
+    }
+
     fn definition(&self, target: &Target) -> String {
         let mut line = "complete".to_owned();
         for option in &self.options {
@@ -564,7 +599,8 @@ pub fn run(name: &str, args: &[String], last: u8, session: &mut Session) -> u8 {
 }
 
 pub struct Generated {
-    pub words: Vec<String>,
+    pub source: complete::Source,
+    pub fallback: bool,
     pub noquote: bool,
     pub nospace: bool,
 }
@@ -597,7 +633,11 @@ pub fn for_tab(
     if !session.shopt.progcomp || session.completions.specs.is_empty() {
         return None;
     }
-    let mut original = session.completions.lookup(command, prefix)?.clone();
+    let initial = session.completions.lookup(command, prefix)?;
+    if let Some(generated) = initial.native_generator() {
+        return Some(generated);
+    }
+    let mut original = initial.clone();
     let mut seen = Vec::new();
     let (spec, mut words) = loop {
         let mut spec = original.clone();
@@ -646,7 +686,8 @@ pub fn for_tab(
         words.dedup();
     }
     Some(Generated {
-        words,
+        source: complete::Source::Words(words),
+        fallback: false,
         noquote: spec.options.contains("noquote"),
         nospace: spec.options.contains("nospace"),
     })
@@ -676,12 +717,12 @@ mod tests {
             &["-W", "'two words' test", "demo"],
         );
         let line = "printf x | demo tw";
-        let c = complete::at(line, line.len(), &mut session).unwrap();
+        let c = complete::at(line, line.len(), &mut session, false).unwrap();
         assert_eq!(&line[c.start..], "tw");
         assert_eq!(c.replacement, "two\\ words ");
         invoke(&mut session, "compopt", &["-o", "nospace", "demo"]);
         assert_eq!(
-            complete::at(line, line.len(), &mut session)
+            complete::at(line, line.len(), &mut session, false)
                 .unwrap()
                 .replacement,
             "two\\ words"
@@ -709,7 +750,7 @@ mod tests {
         invoke(&mut session, "complete", &["-F", "choose", "demo"]);
         let line = "demo α be later";
         let cursor = line.find(" later").unwrap();
-        let result = complete::at(line, cursor, &mut session).unwrap();
+        let result = complete::at(line, cursor, &mut session, true).unwrap();
         assert_eq!(result.choices, ["demo:α:be:α:later:2:9"]);
         assert!(!result.replacement.ends_with(' '));
         assert_eq!(session.get("COMP_LINE").as_deref(), Some("saved"));
@@ -728,7 +769,7 @@ mod tests {
         );
         invoke(&mut session, "complete", &["-D", "-F", "load"]);
         let line = "demo sta";
-        let completion = complete::at(line, line.len(), &mut session).unwrap();
+        let completion = complete::at(line, line.len(), &mut session, false).unwrap();
         assert_eq!(completion.replacement, "start ");
         session.shopt.progcomp = false;
         assert!(for_tab(&mut session, Some("demo"), "sta", None).is_none());
@@ -743,13 +784,16 @@ mod tests {
             &["-W", "\"$items\" $items ab;cd #hi /x*", "demo"],
         );
         session.assign("items", "two words");
-        let known = for_tab(&mut session, Some("demo"), "", None).unwrap().words;
+        let complete::Source::Words(known) = for_tab(&mut session, Some("demo"), "", None)
+            .unwrap()
+            .source
+        else {
+            panic!("expected a word list")
+        };
         assert_eq!(known, ["#hi", "/x*", "ab;cd", "two", "two words", "words"]);
         assert!(
-            for_tab(&mut session, Some("demo"), "$(echo two)", None)
-                .unwrap()
-                .words
-                .is_empty()
+            matches!(for_tab(&mut session, Some("demo"), "$(echo two)", None).unwrap().source,
+                         complete::Source::Words(words) if words.is_empty())
         );
         assert_eq!(
             invoke(

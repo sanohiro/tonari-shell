@@ -1,5 +1,5 @@
-use std::collections::BTreeSet;
 use std::fs;
+use std::ops::ControlFlow;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -94,33 +94,115 @@ impl<'a> Context<'a> {
     }
 }
 
-pub fn at(line: &str, cursor: usize, session: &mut Session) -> Option<Completion> {
+struct Common {
+    text: String,
+    unique: bool,
+}
+
+impl Common {
+    fn new(text: String) -> Self {
+        Self { text, unique: true }
+    }
+
+    fn could_change(&self, name: &str) -> bool {
+        if self.unique {
+            name != self.text
+        } else {
+            !name.starts_with(&self.text)
+        }
+    }
+
+    // Called for a distinct, validated candidate. Stop as soon as further
+    // candidates cannot change the common prefix or make it unique again.
+    fn narrow(&mut self, name: &str, lower_bound: &str) -> ControlFlow<()> {
+        self.unique = false;
+        let mut end = self
+            .text
+            .bytes()
+            .zip(name.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        while !self.text.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.text.truncate(end);
+        if self.text == lower_bound {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+
+    fn of(words: &[String]) -> Option<Self> {
+        let (first, rest) = words.split_first()?;
+        let mut common = Self::new(first.clone());
+        for name in rest {
+            if common.could_change(name) && common.narrow(name, "").is_break() {
+                break;
+            }
+        }
+        Some(common)
+    }
+}
+
+pub enum Source {
+    Words(Vec<String>),
+    Files,
+    Directories,
+    Commands,
+}
+
+impl Source {
+    fn matches(self, prefix: &str, session: &Session, list: bool) -> Option<(Common, Vec<String>)> {
+        let words = match self {
+            Self::Words(words) => return Some((Common::of(&words)?, words)),
+            Self::Commands if list => command_names(prefix, session),
+            Self::Commands => {
+                return Some((common_command(prefix, session)?, Vec::new()));
+            }
+            Self::Files | Self::Directories => {
+                let directories_only = matches!(self, Self::Directories);
+                if !list {
+                    return Some((common_file(prefix, directories_only, session)?, Vec::new()));
+                }
+                file_names(prefix, directories_only, true, session)
+            }
+        };
+        Some((Common::of(&words)?, words))
+    }
+}
+
+pub fn at(line: &str, cursor: usize, session: &mut Session, list: bool) -> Option<Completion> {
     let context = Context::scan(line, cursor)?;
     let first = context.current == 0;
     let start = context.start;
     let prefix = context.words.get(context.current)?;
     let command = (!first).then(|| context.words[0].as_str());
-    let generated = crate::completion_spec::for_tab(session, command, prefix, Some(&context));
-    let (choices, noquote, nospace) = if let Some(generated) = generated {
-        (generated.words, generated.noquote, generated.nospace)
+    let default_source = if first && !prefix.contains('/') {
+        Source::Commands
     } else {
-        let choices = if first && !prefix.contains('/') {
-            command_names(prefix, session)
-        } else {
-            file_names(prefix, false, true, session)
-        };
-        (choices, false, false)
+        Source::Files
     };
-    let mut common = choices.first()?.as_str();
-    for choice in &choices[1..] {
-        let len: usize = common
-            .chars()
-            .zip(choice.chars())
-            .take_while(|(a, b)| a == b)
-            .map(|(a, _)| a.len_utf8())
-            .sum();
-        common = &common[..len];
-    }
+    // First Tab inserts a common prefix. Only a listing needs every candidate.
+    let mut options = (false, false);
+    let matches = if let Some(generated) =
+        crate::completion_spec::for_tab(session, command, prefix, Some(&context))
+    {
+        options = (generated.noquote, generated.nospace);
+        let result = generated.source.matches(prefix, session, list);
+        if result.is_none() && generated.fallback {
+            options = (false, false);
+            default_source.matches(prefix, session, list)
+        } else {
+            result
+        }
+    } else {
+        default_source.matches(prefix, session, list)
+    };
+    let (common, choices) = matches?;
+    let (noquote, nospace) = options;
+    let unique = common.unique;
+    let common = common.text;
     // Re-quote the complete word. A unique file followed by Enter must remain
     // a single literal argument even when it contains shell metacharacters.
     let mut replacement = String::new();
@@ -139,7 +221,7 @@ pub fn at(line: &str, cursor: usize, session: &mut Session) -> Option<Completion
         }
         replacement.push(c);
     }
-    if !nospace && choices.len() == 1 && !common.ends_with('/') && cursor == line.len() {
+    if !nospace && unique && !common.ends_with('/') && cursor == line.len() {
         replacement.push(' ');
     }
     Some(Completion {
@@ -149,39 +231,132 @@ pub fn at(line: &str, cursor: usize, session: &mut Session) -> Option<Completion
     })
 }
 
-pub fn command_names(prefix: &str, session: &Session) -> Vec<String> {
-    let mut choices = BTreeSet::new();
+fn visit_commands(
+    prefix: &str,
+    session: &Session,
+    visit: &mut dyn FnMut(&str, Option<&fs::DirEntry>) -> ControlFlow<()>,
+) -> ControlFlow<()> {
+    for name in crate::execute::builtin_names()
+        .iter()
+        .copied()
+        .chain(session.functions.keys().map(String::as_str))
+        .chain(session.aliases.names().map(String::as_str))
+    {
+        if name.starts_with(prefix) {
+            visit(name, None)?;
+        }
+    }
     for dir in std::env::split_paths(&session.search_path(&[])) {
-        if let Ok(entries) = fs::read_dir(if dir.as_os_str().is_empty() {
+        let path = if dir.as_os_str().is_empty() {
             Path::new(".")
         } else {
             &dir
-        }) {
+        };
+        if let Ok(entries) = fs::read_dir(path) {
             for entry in entries.flatten() {
-                let Ok(name) = entry.file_name().into_string() else {
-                    continue;
-                };
-                if name.starts_with(prefix)
-                    && entry
-                        .metadata()
-                        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-                {
-                    choices.insert(name);
+                if let Some(name) = entry.file_name().to_str().filter(|n| n.starts_with(prefix)) {
+                    visit(name, Some(&entry))?;
                 }
             }
         }
     }
-    for name in session.functions.keys().chain(session.aliases.names()) {
-        if name.starts_with(prefix) {
-            choices.insert(name.clone());
+    ControlFlow::Continue(())
+}
+
+fn executable(entry: Option<&fs::DirEntry>) -> bool {
+    entry.is_none_or(|e| {
+        fs::metadata(e.path()).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    })
+}
+
+fn common_command(prefix: &str, session: &Session) -> Option<Common> {
+    let mut common: Option<Common> = None;
+    let _ = visit_commands(prefix, session, &mut |name, entry| {
+        if let Some(known) = &mut common {
+            // Only a name that could shorten the prefix or change uniqueness
+            // needs a filesystem permission check.
+            if known.could_change(name) && executable(entry) {
+                return known.narrow(name, prefix);
+            }
+        } else if executable(entry) {
+            common = Some(Common::new(name.to_owned()));
+        }
+        ControlFlow::Continue(())
+    });
+    common
+}
+
+pub fn command_names(prefix: &str, session: &Session) -> Vec<String> {
+    let mut names = Vec::new();
+    let _ = visit_commands(prefix, session, &mut |name, entry| {
+        if executable(entry) {
+            names.push(name.to_owned());
+        }
+        ControlFlow::Continue(())
+    });
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+struct Directory<'a> {
+    dir: &'a str,
+    base: &'a str,
+    entries: fs::ReadDir,
+}
+
+impl<'a> Directory<'a> {
+    fn open(prefix: &'a str, session: &Session) -> Option<Self> {
+        let (dir, base) = prefix
+            .rfind('/')
+            .map_or(("", prefix), |i| prefix.split_at(i + 1));
+        let path = match dir.strip_prefix("~/") {
+            Some(rest) => Path::new(&session.get("HOME")?).join(rest),
+            None => Path::new(if dir.is_empty() { "." } else { dir }).to_owned(),
+        };
+        Some(Self {
+            dir,
+            base,
+            entries: fs::read_dir(path).ok()?,
+        })
+    }
+
+    fn matches(self) -> impl Iterator<Item = (String, fs::DirEntry)> + 'a {
+        self.entries.flatten().filter_map(move |entry| {
+            let name = entry.file_name().into_string().ok()?;
+            (name.starts_with(self.base) && (!name.starts_with('.') || self.base.starts_with('.')))
+                .then_some((name, entry))
+        })
+    }
+}
+
+fn is_directory(entry: &fs::DirEntry) -> bool {
+    match entry.file_type() {
+        Ok(kind) if !kind.is_symlink() => kind.is_dir(),
+        _ => entry.path().is_dir(),
+    }
+}
+
+fn common_file(prefix: &str, directories_only: bool, session: &Session) -> Option<Common> {
+    let directory = Directory::open(prefix, session)?;
+    let (dir, base) = (directory.dir, directory.base);
+    let mut matches = directory.matches();
+    let (name, first) = matches.find(|(_, e)| !directories_only || is_directory(e))?;
+    let mut common = Common::new(name);
+    for (name, entry) in matches {
+        if common.could_change(&name)
+            && (!directories_only || is_directory(&entry))
+            && common.narrow(&name, base).is_break()
+        {
+            break;
         }
     }
-    for &name in crate::execute::builtin_names() {
-        if name.starts_with(prefix) {
-            choices.insert(name.to_string());
-        }
+    // A slash can extend the common prefix only when this is the sole match.
+    if common.unique && (directories_only || is_directory(&first)) {
+        common.text.push('/');
     }
-    choices.into_iter().collect()
+    common.text.insert_str(0, dir);
+    Some(common)
 }
 
 pub fn file_names(
@@ -190,33 +365,39 @@ pub fn file_names(
     mark_directories: bool,
     session: &Session,
 ) -> Vec<String> {
-    let mut choices = BTreeSet::new();
-    let (dir, base) = prefix
-        .rfind('/')
-        .map_or(("", prefix), |i| prefix.split_at(i + 1));
-    let path = match dir.strip_prefix("~/") {
-        Some(rest) => match session.get("HOME") {
-            Some(home) => Path::new(&home).join(rest),
-            None => return Vec::new(),
-        },
-        None => Path::new(if dir.is_empty() { "." } else { dir }).to_path_buf(),
-    };
-    let Ok(entries) = fs::read_dir(path) else {
+    let Some(directory) = Directory::open(prefix, session) else {
         return Vec::new();
     };
-    for entry in entries.flatten() {
-        let Ok(name) = entry.file_name().into_string() else {
-            continue;
-        };
-        if !name.starts_with(base) || (name.starts_with('.') && !base.starts_with('.')) {
-            continue;
-        }
-        let is_dir = entry.path().is_dir();
+    let dir = directory.dir;
+    let mut choices = Vec::new();
+    for (name, entry) in directory.matches() {
+        let is_dir = (directories_only || mark_directories) && is_directory(&entry);
         if directories_only && !is_dir {
             continue;
         }
-        let suffix = if mark_directories && is_dir { "/" } else { "" };
-        choices.insert(format!("{dir}{name}{suffix}"));
+        let mut path = String::with_capacity(dir.len() + name.len() + 1);
+        path.push_str(dir);
+        path.push_str(&name);
+        if mark_directories && is_dir {
+            path.push('/');
+        }
+        choices.push(path);
     }
-    choices.into_iter().collect()
+    choices.sort_unstable();
+    choices.dedup();
+    choices
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn common_prefix_respects_utf8_and_duplicate_names() {
+        let same = Common::of(&["雪".into(), "雪".into()]).unwrap();
+        assert!(same.unique);
+        let split = Common::of(&["x雪".into(), "x雲".into()]).unwrap();
+        assert!(!split.unique);
+        assert_eq!(split.text, "x");
+    }
 }

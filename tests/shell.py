@@ -435,6 +435,32 @@ printf '%s\n' "$marker"
         self.read_until(terminal, b"\x1b[?2004h")
         self.assertEqual((self.cwd / "completion-result").read_text(), "target-1-echo\n")
 
+    def test_native_completion_insertion_listing_and_typeahead(self):
+        self.env["PATH"] = f"{self.cwd}:{self.cwd}"
+        (self.cwd / "safe path").mkdir()
+        (self.cwd / "x-link").symlink_to("safe path")
+        (self.cwd / "item-as").touch()
+        (self.cwd / "item-at").touch()
+        (self.cwd / ".item-hidden").touch()
+        (self.cwd / "tool-allowed").symlink_to("/bin/sh")
+        (self.cwd / "tool-denied").touch()
+        fd = self.terminal_session(editing=True)
+
+        def send(keys, marker):
+            os.write(fd, keys)
+            return self.read_until(fd, marker)
+
+        clear = b"\x15"
+        send(b": it\tX", PROMPT + b": item-aX")
+        send(clear + b": it\t", PROMPT + b": item-a")
+        (self.cwd / "item-au").touch()
+        send(b"\t", b"item-as  item-at  item-au")
+        send(clear + b": x-l\tmore", PROMPT + b": x-link/more")
+        send(clear + b"tool-\targ", PROMPT + b"tool-allowed arg")
+        send(clear + b"complete -d -o nospace -o default demo\r", b"\x1b[?2004h")
+        send(b"demo safe\tmore", PROMPT + b"demo safe\\ path/more")
+        send(clear + b"demo item-at\targ", PROMPT + b"demo item-at arg")
+
     def test_editor_paste_suggestions_completion_and_shared_history(self):
         self.env["HISTCONTROL"] = "ignoreboth"
         fd = self.terminal_session(editing=True)

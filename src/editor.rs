@@ -233,9 +233,10 @@ pub fn line(prompt: &str, history: &mut History, session: &mut Session) -> io::R
     let mut last_tab = false;
     let mut loaded_history = false;
     loop {
-        let hint = if search.is_none() && cursor == text.len() {
+        let show_hint = search.is_none() && cursor == text.len() && !text.is_empty();
+        let hint = if show_hint {
             history
-                .suggestion(&text, loaded_history)
+                .suggestion(&text, loaded_history, || false)
                 .unwrap_or_default()
         } else {
             ""
@@ -248,13 +249,15 @@ pub fn line(prompt: &str, history: &mut History, session: &mut Session) -> io::R
             prompt
         };
         screen.draw(visible_prompt, &text, cursor, hint)?;
-        if !loaded_history && !text.is_empty() && search.is_none() && cursor == text.len() {
-            let had_local_hint = !hint.is_empty();
-            loaded_history = history.refresh_unless(session, || {
-                ready(0, 0) || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
-            });
-            if loaded_history && !had_local_hint {
-                if let Some(hint) = history.suggestion(&text, true) {
+        if show_hint {
+            let needs_hint = hint.is_empty();
+            let input_ready =
+                || ready(0, 0) || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed);
+            if !loaded_history {
+                loaded_history = history.refresh_unless(session, input_ready);
+            }
+            if loaded_history && needs_hint {
+                if let Some(hint) = history.suggestion(&text, true, || !input_ready()) {
                     screen.draw(visible_prompt, &text, cursor, hint)?;
                 }
             }
@@ -358,26 +361,23 @@ pub fn line(prompt: &str, history: &mut History, session: &mut Session) -> io::R
                 screen.row = 0;
             }
             9 => {
-                if let Some(result) = complete::at(&text, cursor, session) {
+                if let Some(result) = complete::at(&text, cursor, session, was_tab) {
                     if was_tab && result.choices.len() > 1 {
                         screen.draw(prompt, &text, text.len(), "")?;
                         io::stderr().write_all(b"\r\n")?;
-                        let display = result
-                            .choices
-                            .iter()
-                            .map(|s| {
-                                s.chars()
-                                    .map(|c| {
-                                        if c.is_control() {
-                                            c.escape_default().to_string()
-                                        } else {
-                                            c.to_string()
-                                        }
-                                    })
-                                    .collect::<String>()
-                            })
-                            .collect::<Vec<_>>()
-                            .join("  ");
+                        let mut display = String::new();
+                        for (i, choice) in result.choices.iter().enumerate() {
+                            if i > 0 {
+                                display.push_str("  ");
+                            }
+                            for c in choice.chars() {
+                                if c.is_control() {
+                                    display.extend(c.escape_default());
+                                } else {
+                                    display.push(c);
+                                }
+                            }
+                        }
                         io::stderr().write_all(display.as_bytes())?;
                         io::stderr().write_all(b"\r\n")?;
                         screen.row = 0;
@@ -412,12 +412,12 @@ pub fn line(prompt: &str, history: &mut History, session: &mut Session) -> io::R
                         if cursor == text.len() {
                             if !text.is_empty()
                                 && !loaded_history
-                                && history.suggestion(&text, false).is_none()
+                                && history.suggestion(&text, false, || false).is_none()
                             {
                                 // Right can arrive in the same batch as the prefix.
                                 loaded_history = history.refresh_unless(session, || false);
                             }
-                            if let Some(s) = history.suggestion(&text, loaded_history) {
+                            if let Some(s) = history.suggestion(&text, loaded_history, || true) {
                                 text.push_str(s);
                                 cursor = text.len();
                             }

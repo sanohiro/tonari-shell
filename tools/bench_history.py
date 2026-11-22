@@ -9,6 +9,7 @@ import signal
 import statistics
 import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -16,8 +17,8 @@ PROMPT = b"tonari$ "
 NEW_PROMPT = b"\x1b[?2004h\r\x1b[J" + PROMPT
 
 
-def read_until(fd, marker):
-    output = bytearray()
+def read_until(fd, marker, initial=b""):
+    output = bytearray(initial)
     deadline = time.monotonic() + 10
     while marker not in output:
         if not select.select([fd], [], [], max(0, deadline - time.monotonic()))[0]:
@@ -26,20 +27,32 @@ def read_until(fd, marker):
         if not data:
             raise EOFError(marker)
         output.extend(data)
+    return output
 
 
-def sample(shell, home, bindir, action, count):
+@contextmanager
+def terminal(shell, home, bindir, rc=None, prompt=NEW_PROMPT):
     pid, fd = pty.fork()
     if pid == 0:
         try:
             os.chdir(home)
-            os.execve(shell, [shell, "--noprofile", "--norc"],
+            args = ["--rcfile", str(rc)] if rc else ["--norc"]
+            os.execve(shell, [shell, "--noprofile", *args],
                       {"HOME": str(home), "TERM": "xterm-256color",
-                       "PATH": str(bindir), "PS1": PROMPT.decode()})
+                       "PATH": str(bindir), "PS1": PROMPT.decode(), "INPUTRC": "/dev/null"})
         finally:
             os._exit(125)
     try:
-        read_until(fd, NEW_PROMPT)
+        read_until(fd, prompt)
+        yield fd
+    finally:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        os.close(fd)
+
+
+def sample(shell, home, bindir, action, count):
+    with terminal(shell, home, bindir) as fd:
         if action == "Hint":
             start = time.perf_counter_ns()
             os.write(fd, b"p")
@@ -55,10 +68,6 @@ def sample(shell, home, bindir, action, count):
         read_until(fd, PROMPT + b"zcomplete " if tab else NEW_PROMPT)
         end = time.perf_counter_ns()
         return [(second - start) / 1e6, (end - second) / 1e6, (end - start) / 1e6]
-    finally:
-        os.kill(pid, signal.SIGKILL)
-        os.waitpid(pid, 0)
-        os.close(fd)
 
 
 def main():

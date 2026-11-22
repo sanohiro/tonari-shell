@@ -107,6 +107,46 @@ We reran the preceding warm-cache M1 test with the old and updated releases and 
 
 Repeat with `python3 tools/bench_history.py /path/to/previous/tonari target/release/tonari`. Both macOS arm64 executables were 819,760 bytes.
 
+<a id="completion-latency"></a>
+
+## Tab followed by typing / Tab 直後の打鍵
+
+Each fresh PTY received a prefix, then Tab and `@` in a single write. The timer stopped when the PTY delivered `@`. A full redraw outside the timed interval verified the line ended in `item-0@`. One directory contained 10,000 executable files named `item-00000.dat` through `item-09999.dat` and was the only directory on PATH. The completion cases used an empty history and an rc file registering `complete -f demo`. Caches were warm. The builds rotated through three warm-ups and 30 measured sessions per case. All times are **median / p95 milliseconds**, with nearest-rank p95. [Benchmark driver](../tools/bench_completion.py)
+
+各回新しい疑似端末を開き、入力済みの文字列に続けて Tab と `@` を同時に送った。`@` が端末に返るまでを測り、計測後に行を再表示して、補完した文字列の後ろに `@` が入ったことを確認した。一つのディレクトリに実行可能ファイル1万個を用意し、PATH にもそのディレクトリだけを指定した。各条件3回のウォームアップ後、順番を入れ替えながら各30回計測した。表示値は中央値 / 95 パーセンタイル（ms）。
+
+| Host / ホスト | Tab case / 対象 | Tonari `c23b986` | Updated / 変更後 | GNU Bash 5.2.37 |
+|---|---|---:|---:|---:|
+| macOS M1 | File | 23.541 / 24.566 | 5.306 / 5.775 | 10.466 / 11.204 |
+| macOS M1 | Registered `complete -f` | 36.043 / 37.955 | 5.316 / 5.622 | 11.241 / 11.681 |
+| macOS M1 | Command on PATH | 22.024 / 23.707 | 5.160 / 5.539 | 159.168 / 162.314 |
+| Debian 13 arm64 | File | 15.485 / 17.599 | 2.165 / 2.345 | 4.603 / 4.907 |
+| Debian 13 arm64 | Registered `complete -f` | 22.118 / 23.763 | 2.125 / 2.287 | 5.932 / 6.718 |
+| Debian 13 arm64 | Command on PATH | 14.892 / 16.178 | 1.919 / 2.115 | 66.534 / 70.168 |
+
+A separate Tonari-only run started after loading 100,000 journal entries. The PTY sent one character per redraw for a prefix matching the newest entry (390 keystrokes) and a prefix with no match (330 keystrokes including UTF-8). The oldest-entry case measured the same keystroke twice, first to the appearance of the typed character and then to its suggestion. These timings end at the PTY and exclude terminal-emulator rendering and display refresh.
+
+履歴候補の計測では10万件の読み込みを終えてから、一文字が再描画されるたびに次の文字を送った。最新履歴に一致する390打鍵と、日本語を含み候補がない330打鍵を集計した。最古の履歴だけに一致する試行は、同じ打鍵から入力文字と履歴候補がそれぞれ返るまでを測定した。計測の終点は疑似端末の出力で、端末アプリの描画やディスプレイの更新時間は含まない。
+
+| Host / ホスト | Interval / 計測区間 | Tonari `c23b986` | Updated / 変更後 |
+|---|---|---:|---:|
+| macOS M1 | Keystroke, newest match | 0.013 / 0.027 | 0.012 / 0.023 |
+| macOS M1 | Keystroke, no match | 0.269 / 0.384 | 0.013 / 0.026 |
+| macOS M1 | Oldest match, typed character | 0.378 / 0.410 | 0.015 / 0.047 |
+| macOS M1 | Oldest match, visible hint | 0.381 / 0.424 | 0.682 / 0.852 |
+| Debian 13 arm64 | Keystroke, newest match | 0.061 / 0.094 | 0.060 / 0.086 |
+| Debian 13 arm64 | Keystroke, no match | 0.269 / 0.335 | 0.060 / 0.258 |
+| Debian 13 arm64 | Oldest match, typed character | 0.269 / 0.331 | 0.231 / 0.273 |
+| Debian 13 arm64 | Oldest match, visible hint | 0.276 / 0.338 | 0.263 / 0.305 |
+
+The M1 ran macOS 27.2.1 natively and Debian 13 arm64 in a Linux VM with the fixture on the VM filesystem. The updated release executables were 819,776 bytes on macOS (16 additional bytes) and 987,496 bytes on Debian (static musl). [Implementation notes](engineering-notes.md)
+
+M1 の macOS 27.2.1 と、その上の Linux VM で動く Debian 13 arm64 で計測した。Debian のテストデータは VM 内に作成した。変更後の実行ファイルは macOS が 819,776 バイト（16 バイト増）、Debian の静的 musl 版が 987,496 バイト（同サイズ）。
+
+```sh
+python3 tools/bench_completion.py /path/to/previous/tonari target/release/tonari --bash /path/to/bash
+```
+
 ## Interactive shell milestone / 対話シェル統合版
 
 Source tree `119e729ae01cef7d8d0883fdd92bb5fbd0bf447f`, measured on 2026-11-22. The harness is Git blob `1f7f36916222e276727e0cdd8802381c9e15fdf1`. Both arm64 release builds use Rust 1.96.1, native CPU tuning, `opt-level=s`, fat LTO, stripped symbols and one codegen unit. The Linux distribution build statically links musl 1.2.6; its host was Debian 13 userspace on a Linux 6.11.11 VM on Apple M1. The macOS run used the same M1 with macOS 27.2.1. All shells received `--noprofile --norc`, a temporary home, a fixed prompt, and used their normal interactive editor. Cases had five warm-ups and 300 measured samples per shell in rotating order, except nvm (100). Each time cell is **median / p95 in milliseconds**. Each ratio cell is **median / p95**, divided by the corresponding Bash statistic.

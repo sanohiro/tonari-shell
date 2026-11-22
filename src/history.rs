@@ -10,6 +10,8 @@ use crate::Session;
 pub struct History {
     pub local: Vec<String>,
     shared: Vec<String>,
+    shared_query: String,
+    shared_match: Option<usize>,
     journal: Option<(u64, u64)>,
     offset: u64,
 }
@@ -197,6 +199,7 @@ impl History {
         mut reader: impl BufRead,
         mut input_ready: impl FnMut() -> bool,
     ) -> bool {
+        self.shared_query.clear();
         let mut partial = Vec::new();
         loop {
             if input_ready() {
@@ -250,22 +253,90 @@ impl History {
             .map(String::as_str)
     }
 
-    pub fn suggestion(&self, prefix: &str, shared: bool) -> Option<&str> {
+    pub fn suggestion(
+        &mut self,
+        prefix: &str,
+        shared: bool,
+        mut may_scan: impl FnMut() -> bool,
+    ) -> Option<&str> {
         if prefix.is_empty() {
             return None;
         }
-        let journal = if shared { self.shared.as_slice() } else { &[] };
-        self.local
-            .iter()
-            .rev()
-            .chain(journal.iter().rev())
-            .find_map(|s| s.strip_prefix(prefix).filter(|s| !s.is_empty()))
+        let suffix = |s: &'_ String| s.len() > prefix.len() && s.starts_with(prefix);
+        if let Some(command) = self.local.iter().rev().find(|s| suffix(s)) {
+            return Some(&command[prefix.len()..]);
+        }
+        if !shared || self.shared.is_empty() {
+            return None;
+        }
+        if let Some(command) = self.shared.last().filter(|s| suffix(s)) {
+            return Some(&command[prefix.len()..]);
+        }
+        let mut end = self.shared.len();
+        if !self.shared_query.is_empty() && prefix.starts_with(&self.shared_query) {
+            // A longer query can only match at or before the previous match.
+            let index = self.shared_match?;
+            if suffix(&self.shared[index]) {
+                return Some(&self.shared[index][prefix.len()..]);
+            }
+            end = index;
+        }
+        let mut found = None;
+        while end > 0 {
+            if !may_scan() {
+                return None;
+            }
+            let start = end.saturating_sub(4096);
+            if let Some(offset) = self.shared[start..end].iter().rposition(suffix) {
+                found = Some(start + offset);
+                break;
+            }
+            end = start;
+        }
+        self.shared_query.clear();
+        self.shared_query.push_str(prefix);
+        self.shared_match = found;
+        found.map(|i| &self.shared[i][prefix.len()..])
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interrupted_hints_and_journal_appends_preserve_the_newest_match() {
+        let mut history = History::default();
+        history.read_records(
+            b"1\t1\t0\t/tmp\tword one\n1\t1\t0\t/tmp\tword two\n".as_slice(),
+            || false,
+        );
+        history
+            .shared
+            .extend((0..5000).map(|n| format!("padding {n}")));
+        let mut polls = 0;
+        assert_eq!(
+            history.suggestion("word", true, || {
+                polls += 1;
+                polls == 1
+            }),
+            None
+        );
+        assert_eq!(polls, 2);
+        assert_eq!(history.suggestion("word", true, || true), Some(" two"));
+        assert_eq!(history.suggestion("word t", true, || false), Some("wo"));
+        assert_eq!(history.suggestion("word o", true, || true), Some("ne"));
+        assert_eq!(history.suggestion("word z", true, || true), None);
+        assert_eq!(
+            history.suggestion("word zz", true, || panic!("known miss")),
+            None
+        );
+        history.read_records(
+            b"1\t2\t0\t/tmp\tword zzz\n1\t2\t0\t/tmp\tother\n".as_slice(),
+            || false,
+        );
+        assert_eq!(history.suggestion("word zz", true, || true), Some("z"));
+    }
 
     #[test]
     fn interrupted_read_restarts_at_the_first_unfinished_row() {
