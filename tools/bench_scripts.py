@@ -101,6 +101,22 @@ echo "$value"
         "for ((i=0; i<16; i++)); do /usr/bin/printf '%s\\n' \"$i\" |& /bin/cat || exit 1; done",
         "\n".join(map(str, range(16))),
     ),
+    "redirect-stderr": (
+        "for ((i=0; i<16; i++)); do /usr/bin/printf '%s\\n' \"$i\" 2>&1 || exit 1; done",
+        "\n".join(map(str, range(16))),
+    ),
+    "merged-pipeline-redirect": (
+        "for ((i=0; i<16; i++)); do /usr/bin/printf '%s\\n' \"$i\" |& /bin/cat 2>&1 || exit 1; done",
+        "\n".join(map(str, range(16))),
+    ),
+    "builtin-merged-pipeline": (
+        "for ((i=0; i<16; i++)); do printf '%s\\n' \"$i\" |& /bin/cat || exit 1; done",
+        "\n".join(map(str, range(16))),
+    ),
+    "builtin-output": (
+        "for ((i=0; i<16; i++)); do printf '%s\\n' \"$i\" || exit 1; done",
+        "\n".join(map(str, range(16))),
+    ),
     "field-split": split_case(":"),
     "field-split-unicode": split_case("😀"),
     "long-trim": (

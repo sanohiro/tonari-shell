@@ -16,6 +16,35 @@ The default run includes a session workload covering assignment, export, paramet
 
 既定の計測には、代入・export・変数展開・`cd`・`pwd`・`&&`・リダイレクト・`unset` を同じシェルで実行する項目が含まれます。算術ループ1,000回と、一つのシェルから外部プログラム16個を順に起動する項目もあります。後者では同じプログラム16個を Python 親プロセスから直接 `posix_spawn` し、その都度終了を待つ条件も交互に計測します。標準入出力は計時前に用意し、各子プロセスに継承させます。セッション機能の実装前との比較には `--case core` を使います。プロンプト表示の主指標は疑似端末での起動全体です。子プロセスの exec 直前にも時刻を記録し、同じ測定サンプルのうち、端末の準備と fork の後に経過した時間も表示します。
 
+<a id="external-descriptor-copies"></a>
+
+## External commands with standard-stream redirection / 標準入出力をつなぎ替える外部コマンド
+
+On 2026-11-22 an M1 ran macOS 27.2.1 natively and Debian 13 arm64 in a VM. We rotated the new release, Tonari `d471f0f` and GNU Bash 5.2.37. Each script ran a foreground command or pipeline 16 times after shell startup with job control off. The driver checked all 38 output bytes, stderr and exit status, with five warm-ups then 65 samples on Mac and 85 on Debian. Times are **median / p95 in ms per 16 iterations**. Both external commands use absolute paths. [Scripts and harness](../tools/bench_scripts.py)
+
+M1 上の macOS と Debian 13 arm64 VM で、新旧 Tonari と Bash 5.2.37 を交互に実行した。起動済みの非対話シェルで各コマンドを16回実行し、毎回スクリプト全体の出力38バイト・標準エラー・終了値を照合した。最初の5回を除き、Mac は65回、Debian は85回の中央値 / p95 を示す。外部の `printf` と `cat` はどちらも絶対パスで起動した。
+
+| Workload / 処理 | Mac previous | Mac Tonari | Mac Bash | Debian previous | Debian Tonari | Debian Bash |
+|---|---:|---:|---:|---:|---:|---:|
+| External `printf … 2>&1` | 34.714 / 42.517 | 22.760 / 29.488 | 35.731 / 44.748 | 4.451 / 4.919 | 3.917 / 4.544 | 5.141 / 5.771 |
+| External `printf … \|& cat 2>&1` | 35.461 / 45.837 | 25.781 / 34.749 | 39.645 / 53.063 | 5.965 / 6.673 | 5.356 / 6.019 | 6.652 / 7.729 |
+| External `printf … \|& cat` | 27.142 / 33.982 | 26.974 / 33.238 | 43.303 / 52.806 | 5.446 / 6.217 | 5.512 / 6.220 | 6.729 / 7.549 |
+| Builtin `printf … \|& /bin/cat` | 31.430 / 43.813 | 30.712 / 49.884 | 45.136 / 80.124 | — | — | — |
+| Builtin `printf …`, direct output | 0.555 / 0.868 | 0.544 / 0.710 | 0.765 / 1.072 | — | — | — |
+
+The Mac median fell 34% for standalone stderr duplication and 27% with the same duplication on the receiving command. The plain merged pipe already used a spawn path. In a separate 24-sample trial, passing its descriptor copies directly to libc gave 26.700 ms versus 27.231 ms using Rust's existing spawn path. For the built-in producer, Tonari still forks to run it as a pipeline stage. Writing the same 16 lines directly from the builtin took 0.544 ms in the final build. [Direct launches](#pipe-process-timing) · [Loader traces](#macos-child-loader)
+
+標準エラーを標準出力にまとめる単体コマンドで旧版比34%、パイプの受信側でもまとめる場合は27%短縮した。通常の `|&` はすでに spawn で起動していた。別の24回の試作比較でも、パイプの複製操作を libc に直接渡すと 26.700 ms、既存経路が 27.231 ms だった。組み込みの `printf` もパイプの一段として実行する場合は fork する。同じ16行を端末や呼び出し側に直接出す用途ではパイプを省ける。
+
+We also rotated 200 Mac launches per shell. From launch through exit, `-c ':'` took 2.735 / 3.211 ms (previous 2.756 / 3.225, Bash 5.866 / 6.669). PTY launch to first prompt took 4.515 / 5.181 ms (previous 4.596 / 5.160, Bash 7.817 / 8.427). The Mac binary grew from 836,416 to 852,992 bytes. Its machine-code section grew by 1,116 bytes, and the Mach-O `__TEXT` segment crossed a 16 KiB boundary. The Linux static PIE grew from 1,008,248 to 1,009,640 bytes.
+
+Mac の起動も各200回測った。新版の `-c ':'` は中央値 2.735 ms、疑似端末の起動からプロンプトまでは 4.515 ms だった。Mac の機械語部分は1,116バイト増え、セグメントの16 KiB境界をまたいだためファイル全体は16,576バイト増えた。Linux の静的リンク版は1,392バイト増えた。
+
+```sh
+python3 tools/bench_scripts.py /path/to/tonari --previous /path/to/previous --bash /path/to/bash --timing started --case redirect-stderr --case merged-pipeline-redirect --case merged-pipeline --case builtin-merged-pipeline --case builtin-output --runs 65
+python3 tools/bench.py /path/to/tonari --compare-shell Previous /path/to/previous --bash /path/to/bash --case startup --case prompt --runs 200
+```
+
 <a id="borrowed-glob-names"></a>
 
 ## Hyphenated path prefixes and directory scans / ハイフン付きファイル名とディレクトリ走査

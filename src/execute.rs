@@ -5,6 +5,8 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 mod here_input;
 mod lookup;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod spawn;
 
 use std::cell::Cell;
 use std::ffi::{CStr, CString};
@@ -325,52 +327,6 @@ impl External {
                 Environment::prepare(session, &cmd.assignments)
             },
         }
-    }
-
-    // The foreground process inherits all descriptors here. With the executable
-    // already resolved, Linux needs only argv, environ and SIGPIPE's exec default.
-    #[cfg(target_os = "linux")]
-    fn spawn_resolved(&self) -> io::Result<libc::pid_t> {
-        unsafe extern "C" {
-            static environ: *mut *mut libc::c_char;
-        }
-        let path = self
-            .search_paths
-            .as_ref()
-            .and_then(|paths| paths.first())
-            .unwrap_or(&self.words[0]);
-        let mut attr = std::mem::MaybeUninit::uninit();
-        let mut pid = 0;
-        unsafe {
-            let err = libc::posix_spawnattr_init(attr.as_mut_ptr());
-            if err != 0 {
-                return Err(io::Error::from_raw_os_error(err));
-            }
-            let mut signals = std::mem::zeroed();
-            libc::sigemptyset(&mut signals);
-            libc::sigaddset(&mut signals, libc::SIGPIPE);
-            libc::posix_spawnattr_setsigdefault(attr.as_mut_ptr(), &signals);
-            libc::posix_spawnattr_setflags(attr.as_mut_ptr(), libc::POSIX_SPAWN_SETSIGDEF as _);
-            let env = self
-                .env
-                .as_ref()
-                .map_or(environ as *const *mut libc::c_char, |e| {
-                    e.pointers.as_ptr().cast()
-                });
-            let err = libc::posix_spawn(
-                &mut pid,
-                path.as_ptr(),
-                std::ptr::null(),
-                attr.as_ptr(),
-                self.argv.as_ptr().cast(),
-                env,
-            );
-            libc::posix_spawnattr_destroy(attr.as_mut_ptr());
-            if err != 0 {
-                return Err(io::Error::from_raw_os_error(err));
-            }
-        }
-        Ok(pid)
     }
 
     fn exec(&self) -> u8 {
@@ -959,6 +915,22 @@ fn start(
     let merged_pipe = output.as_ref().filter(|_| {
         matches!(cmd.redirects.as_slice(), [r] if r.fd == 2 && r.target == Target::Duplicate && r.word == "1")
     });
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    if builtin.is_none()
+        && launch.group.is_none()
+        && !launch.background
+        && !cmd.redirects.is_empty()
+        && merged_pipe.is_none()
+        && (cached.is_some() || cmd.words[0].contains('/'))
+        && cmd.redirects.iter().all(spawn::standard_dup)
+    {
+        // Only descriptor copies can be retried without repeating visible effects.
+        // Let the ordinary child apply them to its diagnostic if launch fails.
+        let external = External::new(cmd, session);
+        if let Ok(pid) = external.spawn_with_dups(&cmd.redirects, input.as_ref(), output.as_ref()) {
+            return Ok(Stage::Child(pid));
+        }
+    }
     if builtin.is_none()
         && (cmd.redirects.is_empty() || merged_pipe.is_some())
         && !custom_search
@@ -967,7 +939,7 @@ fn start(
     {
         #[cfg(target_os = "linux")]
         if input.is_none() && output.is_none() && (cached.is_some() || cmd.words[0].contains('/')) {
-            match External::new(cmd, session).spawn_resolved() {
+            match External::new(cmd, session).spawn_resolved(None) {
                 Ok(pid) => return Ok(Stage::Child(pid)),
                 // Keep the existing shell-script fallback and error diagnostics.
                 Err(e) if e.raw_os_error() == Some(libc::ENOEXEC) => (),

@@ -85,6 +85,27 @@ class ShellTests(unittest.TestCase):
                     self.assertEqual((proc.returncode, proc.stderr), (127, b""))
                     self.assertIn(b"missing-tonari-exe", proc.stdout)
 
+    def test_external_standard_descriptor_copies(self):
+        cmd = """VALUE=tag /bin/sh -c 'printf "$VALUE"; printf err >&2; exit 23' """
+        denied = self.cwd / "no-exec"
+        denied.write_text("exit 0")
+        for shell in [BASH, TONARI]:
+            for redirects, stdout, stderr in [("2>&1 1>&2", b"tagerr", b""),
+                                              ("1>&2 2>&1", b"", b"tagerr")]:
+                with self.subTest(shell=shell, redirects=redirects):
+                    proc = self.command(shell, cmd + redirects + '; exit $?')
+                    self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (23, stdout, stderr))
+            with self.subTest(shell=shell):
+                proc = self.command(shell, """printf x | /bin/sh -c 'cat; printf e >&2; exit 23' 2>&1; exit $?""")
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (23, b"xe", b""))
+                proc = self.command(shell, "exec 1>&-; /usr/bin/true 2>&1; exit $?")
+                self.assertEqual((proc.returncode, proc.stdout), (1, b""))
+                self.assertTrue(proc.stderr)
+                for name, status in [("./no-exec", 126), ("./no-file", 127)]:
+                    proc = self.command(shell, name + " 2>&1; exit $?")
+                    self.assertEqual((proc.returncode, proc.stderr), (status, b""))
+                    self.assertIn(name.encode(), proc.stdout)
+
     def test_ifs_separators_and_escaped_read_fields(self):
         self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
         self.compare('IFS=" :"; v=" :α::β: "; set -- $v; printf "<%s>" "$@"; '
