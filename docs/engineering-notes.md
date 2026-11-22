@@ -7,6 +7,8 @@
 - Tonari exposes `BASH_VERSION=5.2.0(1)-tonari` and a read-only six-element `BASH_VERSINFO` for script feature gates. `--version` reports the Tonari version. Debian bash-completion 2.16.0 uses arithmetic on those array elements, global name references and dynamic function scope. With the package's compatibility wrappers and `gh completion -s bash` from GitHub CLI 2.96.0, Tab after `gh iss` inserts `gh issue ` in a native macOS arm64 PTY. Calling the completion function outside the editor also invokes `compopt` outside an active completion on Bash.
 - Bash 用スクリプトの版判定には上記の互換値を返し、製品のバージョンは `--version` で表示します。補完ライブラリが別関数で呼び出し元のローカル変数を `unset -v` すると、既定では外側の束縛が再び見えます。`localvar_unset` を有効にした場合も Bash と比較しました。コールバック単体と端末で Tab を押す試験では `compopt` の実行条件が異なります。[起動ファイルの仕様](https://www.gnu.org/software/bash/manual/html_node/Bash-Startup-Files.html)
 
+- On the tested macOS host, `/etc/profile` sources `/etc/bashrc`, which can source `/etc/bashrc_Apple_Terminal`. An isolated `--login -ic` run with `TERM_PROGRAM=Apple_Terminal`, a test `TERM_SESSION_ID` and an explicit `exit` set `SHELL_SESSION_DID_INIT=1` and created the per-session state files on both shells. The Apple script can explicitly write `~/.bash_history` alongside Tonari's native XDG journal.
+- テストした macOS の Apple Terminal 用設定でも、専用の一時ホームでセッション初期化と終了処理を実行し、両シェルで `.bash_sessions` 以下のファイルが作られることを確認しました。OS の設定が明示的に書き出す履歴は、Tonari 自身の履歴ファイルとは別に存在します。
 
 ## 2026-11-22 · Measuring startup / 起動時間の測り方
 

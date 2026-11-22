@@ -950,3 +950,21 @@ In a macOS arm64 PTY, the completion harness separately timed the typed key, its
 | files | 6.411 / 8.457 | 6.720 / 8.742 | 12.899 / 15.840 |
 | complete -f | 6.286 / 10.557 | 6.222 / 6.892 | 14.077 / 15.662 |
 | PATH | 6.121 / 11.437 | 6.390 / 8.192 | 200.342 / 207.434 |
+
+### Full timing matrix for the login changes / ログイン対応後の全件計測
+
+The candidate is `c9f74e5`. The check compared its full matrix with the previous release snapshot before publication. Each cell counts named observations, including shared workloads. The three counts are **half or better / two-thirds or better / parity or better**. The denominator counts cases with valid timing. The raw comparisons apply no short-operation allowance. [Current matrix and paired observations](compatibility-2026-11-23-login/matrix.md) · [Previous matrix](compatibility-2026-11-23/matrix.md)
+
+| Platform | Whole command | Measured | Already started | Measured | Previously within two-thirds, now above (whole / started) |
+|---|---:|---:|---:|---:|---:|
+| Debian | 27 / 419 / 682 | 692 | 8 / 50 / 531 | 623 | 86 / 7 |
+| Ubuntu | 41 / 413 / 674 | 689 | 5 / 40 / 531 | 622 | 60 / 9 |
+| macOS | 1 / 580 / 672 | 672 | 5 / 38 / 602 | 620 | 29 / 45 |
+
+The first macOS started sample set for `set -o monitor` stopped when the Bash reference observation changed. A separate run with the same executable hashes, warmups and 15 samples passed the output checks. The published started interval uses that run. All previously measured matching names retained a validated interval. The complete benchmark passes correctness for those timed cases. The raw two-thirds target still has misses on every platform.
+
+全環境で照合できた処理について、起動込みと起動後の測定を更新しました。macOS の `set -o monitor` は最初の実行で参照 Bash の結果が途中で変わったため、同一バイナリでの独立した再計測を採用しました。表の右端は前版で 2/3 以内だった項目のうち今回上回った件数です。短い処理を含むので、各件の絶対時間とばらつきは TSV に記録しています。
+
+The three full timing runs overlapped on one arm64 host and its Linux VM. A subsequent serial Linux check ran 51 samples for 12 selected workloads. On Debian, the started `${v##a*}` probe took 0.736 ms against 0.735 ms previously and 0.982 ms on Bash. The complete interactive `COMP_TYPE` callback probe took 3.177 ms against 2.955 ms previously and 2.920 ms on Bash. On Ubuntu those callback medians were 2.880, 2.806 and 2.394 ms. The latter includes PTY startup and command dispatch. The key-to-display measurements above exercise a running editor.
+
+Linux の再計測では、短い変数展開や記述子操作の一部で並列計測時と異なる比率が出ました。入力への応答と、シェル起動を含む補完コールバックは別々に測定しており、コールバックの起動込み所要時間には改善余地が残ります。

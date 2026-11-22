@@ -1,14 +1,14 @@
 # Bash compatibility audit / Bash 互換性の検証
 
-Tonari remains a prototype for use from an existing shell. The inventory starts with the reference Bash installations and the GNU manual. The matrix gives the observed behavior and the elapsed time for each matching workload. [Current feature inventory](compatibility/current.tsv) · [Current timing matrix](compatibility-2026-11-23/matrix.md) · [Debian evidence](compatibility-2026-11-23/Debian.tsv) · [Ubuntu evidence](compatibility-2026-11-23/Ubuntu.tsv) · [macOS evidence](compatibility-2026-11-23/macOS.tsv)
+Tonari remains a prototype for use from an existing shell. The inventory starts with the reference Bash installations and the GNU manual. The matrix gives the observed behavior and the elapsed time for each matching workload. [Current feature inventory](compatibility/current.tsv) · [Current timing matrix](compatibility-2026-11-23-login/matrix.md) · [Debian evidence](compatibility-2026-11-23-login/Debian.tsv) · [Ubuntu evidence](compatibility-2026-11-23-login/Ubuntu.tsv) · [macOS evidence](compatibility-2026-11-23-login/macOS.tsv)
 
-Tonari は現在、既存のシェルから起動して試せる段階です。参照先の Bash と GNU マニュアルを起点に項目を列挙しました。一覧には機能名ごとの判定と速度を載せ、環境別 TSV には実際のテスト内容と差が出た出力例を残しています。[現在の機能別一覧](compatibility/current.tsv) · [各項目の最新計測](compatibility-2026-11-23/matrix.md)
+Tonari は現在、既存のシェルから起動して試せる段階です。参照先の Bash と GNU マニュアルを起点に項目を列挙しました。一覧には機能名ごとの判定と速度を載せ、環境別 TSV には実際のテスト内容と差が出た出力例を残しています。[現在の機能別一覧](compatibility/current.tsv) · [各項目の最新計測](compatibility-2026-11-23-login/matrix.md)
 
 ## Login sessions on 2026-11-23 / ログインシェルの検証
 
 The primary witnesses for `logout`, `history` and `fc` now match on Debian 13, Ubuntu 26.04 and native macOS arm64. Of Ubuntu's 61 builtins, 56 match their primary check. The remaining five absent interfaces are `bind`, `caller`, `enable`, `help` and `suspend`. Direct comparisons cover the distro login path, local variable restoration during completion, arithmetic array subscripts, and shell nesting. The history journal stays under the XDG state directory. The `history` and `fc` checks cover selected file operations, listing and replay. Interactive history event expansion and all Readline bindings still lack full compatibility. [Integration tests](../tests/shell.py) · [Login timings](benchmarks.md#login-profiles)
 
-ログイン時の `/etc/profile` とユーザープロファイルの順序、通常の `-c` での `BASH_ENV`、Ctrl-D による終了処理を検証しました。Debian と Ubuntu は各103件の統合テストを通過し、macOS はディストリビューション固有の1件を除く102件を通過しました。macOS での初回の並列実行では、参照 Bash の Ctrl-C テストがタイムアウトしました。全体を再実行して通過した結果を記録しています。`history` と `fc` の代表ケースは一致し、`bind` など五つの組み込み、`DEBUG` トラップや関数のエクスポートには差が残ります。[互換性一覧](compatibility/current.tsv)
+ログイン時の `/etc/profile` とユーザープロファイルの順序、通常の `-c` での `BASH_ENV`、Ctrl-D による終了処理を検証しました。Debian と Ubuntu は各103件の統合テストを通過し、macOS はディストリビューション固有の1件を除く102件を通過しました。macOS での初回の並列実行では、参照 Bash の Ctrl-C トラップと、前景パイプラインの再開後に Ctrl-C を送る二つのテストがタイムアウトしました。全体を再実行して通過した結果を記録しています。`history` と `fc` の代表ケースは一致し、`bind` など五つの組み込み、`DEBUG` トラップや関数のエクスポートには差が残ります。[互換性一覧](compatibility/current.tsv)
 
 The current direct audit adds 43 matching names on each platform against `f3f5539`. Every previously matching direct check still passes. GNU golden matches remain 16 of 83 groups on Debian and 14 of 86 on Ubuntu. Both `run-jobs` drivers finished. [Current inventory](compatibility/current.tsv) · [GNU observations](compatibility/gnu.tsv)
 
