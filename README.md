@@ -47,7 +47,7 @@ Compatibility work includes further parameter transformations, Bash’s `DEBUG` 
 
 ## Speed and size
 
-The feature reference is GNU Bash 5.2.37 on Debian 13 and 5.3.9 on Ubuntu 26.04. Our speed target is half the elapsed time of Bash on the same workload, with two-thirds as the upper target. The benchmark records startup, external commands, pipelines, and repeated operations separately. The macOS system Bash 3.2 is an additional comparison. [Measurements, binary sizes and build conditions](docs/benchmarks.md)
+The feature reference is GNU Bash 5.2.37 on Debian 13 and 5.3.9 on Ubuntu 26.04. For work done by the shell we aim for half of Bash’s elapsed time, with two-thirds as the upper target. Bash-equivalent time is acceptable for very short operations and workloads dominated by the same OS work. The benchmark records startup, external commands, pipelines, and repeated operations separately. The macOS system Bash 3.2 is an additional comparison. [Measurements, binary sizes and build conditions](docs/benchmarks.md)
 
 Tonari ships as one executable per OS and CPU architecture. The macOS executable links to OS libraries. The Linux arm64 release links musl statically and packs ELF relative relocations. [Linux release build](docs/benchmarks.md#linux-arm64-static-pie)
 

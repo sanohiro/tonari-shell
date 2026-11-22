@@ -1,10 +1,12 @@
 # Startup and execution / 起動と実行性能
 
+<a id="performance-target"></a>
+
 ## Performance target / 性能目標
 
-For each workload, divide Tonari's elapsed time by GNU Bash's elapsed time on the same machine and in the same run. A ratio of **0.50** is the goal and **2/3** is the upper target. Ratios between 2/3 and 1.00 identify work that is faster than Bash but still above target. The harness reports both median and p95 ratios, and labels the median result. Direct executable launch time and binary size are reported separately.
+For each workload, divide Tonari's elapsed time by GNU Bash's elapsed time on the same machine and in the same run. A ratio of **0.50** is the goal and **2/3** is the upper target. For very short operations and workloads dominated by the same OS call or wait, parity with Bash is acceptable. Use the absolute time difference and observed variation to judge parity. A loop in an already-started shell can show whether a small per-operation difference accumulates. The harness reports both median and p95 ratios, and labels the median result. Direct executable launch time and binary size are reported separately.
 
-各処理で、同じマシン・同じ計測での Tonari の所要時間を GNU Bash の所要時間で割ります。目標は **0.50**、許容する上限は **2/3** です。比が 2/3 より大きく 1.00 未満なら、Bash より速くても目標には未達です。計測器は中央値と p95 の比を表示し、中央値に対する達成状況を示します。実行ファイルの直接起動とバイナリサイズは別項目です。
+各処理で、同じマシン・同じ計測での Tonari の所要時間を GNU Bash の所要時間で割ります。目標は **0.50**、許容する上限は **2/3** です。ごく短い単発処理や、共通の OS 呼び出し・待ち時間が支配的な場合は Bash と同程度なら許容します。同等かどうかは絶対時間差と測定のばらつきから判断し、頻繁に繰り返す操作は起動済みシェルでの反復時間も見ます。計測器は中央値と p95 の比を表示し、中央値に対する達成状況を示します。実行ファイルの直接起動とバイナリサイズは別項目です。
 
 ```sh
 python3 tools/bench.py target/release/tonari --bash /bin/bash --runs 300
