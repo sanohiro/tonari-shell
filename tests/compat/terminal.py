@@ -24,6 +24,7 @@ def stop(proc, master):
 
 def prompt(shell, cwd, text):
     master, slave = pty.openpty()
+    tty_name = os.fsencode(os.path.basename(os.ttyname(slave)))
     def attach():
         os.setsid()
         fcntl.ioctl(0, termios.TIOCSCTTY, 0)
@@ -43,7 +44,8 @@ def prompt(shell, cwd, text):
                 data += os.read(master, 8192)
             except OSError:
                 return None
-        return data.split(b"PROMPTBEGIN", 1)[1].split(b"PROMPTEND", 1)[0]
+        value = data.split(b"PROMPTBEGIN", 1)[1].split(b"PROMPTEND", 1)[0]
+        return b"<tty>" if text == r"\l" and value == tty_name else value
     finally:
         stop(p, master)
 
@@ -145,7 +147,7 @@ def dialogue(shell, root, name):
             t.send(b":\n")
             return b"active" if b"EXEC-START" in t.read(b"READY>") else b"missing"
         elif name == "PROMPT_DIRTRIM":
-            t.send(b"mkdir -p a/b/c; cd a/b/c; PROMPT_DIRTRIM=1; PS1='\\w>'\n")
+            t.send(b"mkdir -p alphadir/betadir/c; cd alphadir/betadir/c; PROMPT_DIRTRIM=1; PS1='\\w>'\n")
             return b"trimmed" if b".../c>" in t.read(b"/c>") else b"missing"
         elif name in ("MAIL", "MAILPATH", "MAILCHECK"):
             with mail.open("ab") as f: f.write(b"new mail\n")

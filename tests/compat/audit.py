@@ -210,6 +210,9 @@ def collect(a, source):
             a.add("Builtin", name, "missing interface", f"type -t '{name}'", [a.script(0, 'type -t ' + repr(name)), found])
         elif name in ("bg", "fg"):
             a.add("Builtin", name, a.rows["Terminal"]["foreground pipeline"]["status"], "Terminal / foreground pipeline")
+        elif name == "suspend":
+            a.tty("suspend and resume", "test_builtin_control_and_suspension")
+            a.add("Builtin", name, a.rows["Terminal"]["suspend and resume"]["status"], "Terminal / suspend and resume")
         elif name == "logout":
             a.add("Builtin", name, a.rows["Invocation"]["login logout"]["status"], "Invocation / login logout")
         elif BUILTINS.get(name):
@@ -247,14 +250,16 @@ def collect(a, source):
         a.add("Variable", name, status, check, pair)
     for group, source_list in (("Readline command", "bind -l"), ("Readline variable", "bind -v")):
         items = a.names(source_list + " 2>/dev/null")
-        found = a.script(1, "type -t bind").out == b"builtin\n"
+        candidate = set(a.script(1, source_list + " 2>/dev/null").out.decode().splitlines())
+        if group.endswith("variable"):
+            candidate = {line.split()[1] for line in candidate if len(line.split()) >= 2}
         for item in items:
             name = item.split()[1] if group.endswith("variable") else item
             check = f"bind -q {name}" if group.endswith("command") else f"bind -v | grep -F 'set {name} '"
-            if found:
+            if name in candidate:
                 a.compare(group, name, check, interface=True)
             else:
-                a.add(group, name, "missing interface", "builtin bind unavailable; " + check)
+                a.add(group, name, "missing interface", check)
     for protocol in ("tcp", "udp"):
         replies = []
         for i in (0,1):

@@ -91,6 +91,64 @@ fn error(message: impl std::fmt::Display, status: u8) -> Flow {
     Flow::Continue(status)
 }
 
+fn history_input<'a>(
+    session: &mut Session,
+    text: &'a str,
+) -> Result<std::borrow::Cow<'a, str>, Flow> {
+    let event = crate::history::expand::expand(session, text).map_err(|e| error(e, 1))?;
+    if matches!(event.text, std::borrow::Cow::Owned(_)) {
+        eprint!("{}", event.text);
+        if !event.text.ends_with('\n') {
+            eprintln!();
+        }
+    }
+    if event.print {
+        session.begin_history_line(&event.text);
+        session.finish_history_line();
+        return Ok("".into());
+    }
+    Ok(event.text)
+}
+
+// A sourced profile often has a long compound command. Try whole units already
+// in the file buffer, leaving following commands for the current alias/options state.
+fn buffered_compound(
+    session: &Session,
+    first: &str,
+    buffered: &[u8],
+    line: usize,
+) -> Option<(Vec<parser::Statement>, usize, usize)> {
+    let header = first.trim_ascii_start();
+    let key = header
+        .split(|c: char| c.is_ascii_whitespace() || c == ';')
+        .next()?;
+    let close: &[u8] = match key {
+        "if" => b"fi",
+        "case" => b"esac",
+        "while" | "until" | "for" | "select" => b"done",
+        "function" | "{" => b"}",
+        _ if header.lines().next()?.contains("()") => b"}",
+        _ => return None,
+    };
+    let mut size = 0;
+    for (i, next) in buffered.split_inclusive(|&c| c == b'\n').enumerate() {
+        size += next.len();
+        // The last available slice may end in the middle of a physical line.
+        if !next.ends_with(b"\n") || !next.trim_ascii_start().starts_with(close) {
+            continue;
+        }
+        let mut text = String::with_capacity(first.len() + size);
+        text.push_str(first);
+        text.push_str(std::str::from_utf8(&buffered[..size]).ok()?);
+        match parser::session_source_at(&text, false, session, line) {
+            Ok(program) if program.len() == 1 => return Some((program, size, i + 1)),
+            Err(parser::Error::Incomplete(_)) => continue,
+            _ => return None,
+        }
+    }
+    None
+}
+
 fn run(
     session: &mut Session,
     mut reader: BufReader<PrivateFile>,
@@ -98,6 +156,7 @@ fn run(
     mut status: u8,
     check: bool,
 ) -> Flow {
+    let mut base_line = 1;
     let mut input = Vec::new();
     let mut here_doc: Option<parser::HereDocHint> = None;
     let mut ran = false;
@@ -127,7 +186,29 @@ fn run(
         let Ok(text) = std::str::from_utf8(&input) else {
             return error("expected UTF-8 command text", 2);
         };
-        let result = parser::session_source(text, n == 0, session);
+        let expanded;
+        let text = if session.histexpand && session.history_enabled && session.source_depth == 0 {
+            expanded = match history_input(session, text) {
+                Ok(s) => s,
+                Err(flow) => return flow,
+            };
+            expanded.as_ref()
+        } else {
+            text
+        };
+        let mut result = parser::session_source_at(text, n == 0, session, base_line);
+        if line_start == 0
+            && !shared_offset
+            && !session.verbose
+            && session.source_depth > 0
+            && matches!(result, Err(parser::Error::Incomplete(_)))
+            && let Some((program, consumed, lines)) =
+                buffered_compound(session, text, reader.buffer(), base_line)
+        {
+            reader.consume(consumed);
+            base_line += lines;
+            result = Ok(program);
+        }
         match result {
             Err(parser::Error::HereDoc(hint)) if n != 0 => {
                 here_doc = Some(hint);
@@ -151,6 +232,9 @@ fn run(
                 if remember {
                     session.finish_history_line();
                 }
+                if session.onecmd && session.source_depth == 0 && session.function_depth == 0 {
+                    return flow;
+                }
                 match flow {
                     Flow::Discard(code) | Flow::Continue(code) => status = code,
                     other => return other,
@@ -158,6 +242,7 @@ fn run(
             }
             Ok(_) => {}
         }
+        base_line += text.bytes().filter(|&b| b == b'\n').count();
         input.clear();
         if n == 0 {
             break;
@@ -185,7 +270,8 @@ pub fn text(session: &mut Session, source: &str, mut status: u8, tail: bool, che
     let mut end = 0;
     let mut here_doc: Option<parser::HereDocHint> = None;
     let mut ran = false;
-    for line in source.split_inclusive('\n') {
+    let mut base_line = 1;
+    for (line_index, line) in source.split_inclusive('\n').enumerate() {
         if session.verbose {
             eprint!("{line}");
         }
@@ -196,7 +282,17 @@ pub fn text(session: &mut Session, source: &str, mut status: u8, tail: bool, che
         }
         here_doc = None;
         let text = &source[start..end];
-        let result = parser::session_source(text, last, session);
+        let expanded;
+        let text = if tail && session.histexpand && session.history_enabled {
+            expanded = match history_input(session, text) {
+                Ok(s) => s,
+                Err(flow) => return flow,
+            };
+            expanded.as_ref()
+        } else {
+            text
+        };
+        let result = parser::session_source_at(text, last, session, base_line);
         match result {
             Err(parser::Error::HereDoc(hint)) if !last => {
                 here_doc = Some(hint);
@@ -211,6 +307,9 @@ pub fn text(session: &mut Session, source: &str, mut status: u8, tail: bool, che
                 if remember {
                     session.finish_history_line();
                 }
+                if session.onecmd && session.source_depth == 0 && session.function_depth == 0 {
+                    return flow;
+                }
                 match flow {
                     Flow::Discard(code) | Flow::Continue(code) => status = code,
                     other => return other,
@@ -218,6 +317,7 @@ pub fn text(session: &mut Session, source: &str, mut status: u8, tail: bool, che
             }
             Ok(_) => {}
         }
+        base_line = line_index + 2;
         start = end;
     }
     Flow::Continue(if ran { status } else { 0 })

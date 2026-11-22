@@ -93,7 +93,7 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<()> {
             session.history_mut().discard_current();
             let mut out = io::stdout().lock();
             for arg in args {
-                writeln!(out, "{}", event_text(session, arg)?)?;
+                writeln!(out, "{}", super::expand::expand(session, arg)?.text)?;
             }
         }
         Some(op) => history_file(session, op, args)?,
@@ -108,6 +108,7 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<()> {
                 .map_err(|_| error("numeric argument required"))?
                 .unwrap_or(usize::MAX);
             if let Some(h) = session.history.as_deref() {
+                let format = session.get("HISTTIMEFORMAT").filter(|s| !s.is_empty());
                 let mut out = io::stdout().lock();
                 for (i, line) in h
                     .lines
@@ -115,7 +116,11 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<()> {
                     .enumerate()
                     .skip(h.lines.len().saturating_sub(count))
                 {
-                    writeln!(out, "{:5}  {line}", h.base + i + 1)?;
+                    let stamp = format
+                        .as_ref()
+                        .map(|f| crate::prompt::format_time(f, h.timestamps[i]))
+                        .unwrap_or_default();
+                    writeln!(out, "{:5}  {stamp}{line}", h.base + i + 1)?;
                 }
             }
         }
@@ -136,54 +141,6 @@ fn position(h: &Entries, arg: &str, end: usize) -> io::Result<usize> {
         .ok()
         .filter(|i| *i < end)
         .ok_or_else(|| error("history position out of range"))
-}
-
-fn event_text(session: &Session, text: &str) -> io::Result<String> {
-    let event = session
-        .get("histchars")
-        .and_then(|s| s.chars().next())
-        .unwrap_or('!');
-    let Some(spec) = text.strip_prefix(event) else {
-        return Ok(text.to_owned());
-    };
-    let h = session
-        .history
-        .as_deref()
-        .ok_or_else(|| error("event not found"))?;
-    let (name, rest) = spec.split_once(':').unwrap_or((spec, ""));
-    let found = if name == event.to_string() {
-        h.lines.last()
-    } else if let Some(search) = name.strip_prefix('?') {
-        h.lines
-            .iter()
-            .rev()
-            .find(|s| s.contains(search.trim_end_matches('?')))
-    } else if name.parse::<i64>().is_ok() {
-        h.lines.get(position(h, name, h.lines.len())?)
-    } else {
-        h.lines.iter().rev().find(|s| s.starts_with(name))
-    };
-    let mut value = found.ok_or_else(|| error("event not found"))?.clone();
-    for modifier in rest.split(':').filter(|s| !s.is_empty()) {
-        value = match modifier {
-            "$" => value.split_whitespace().next_back().unwrap_or("").into(),
-            "^" => value.split_whitespace().nth(1).unwrap_or("").into(),
-            "*" => value
-                .split_whitespace()
-                .skip(1)
-                .collect::<Vec<_>>()
-                .join(" "),
-            "t" => value.rsplit('/').next().unwrap_or("").into(),
-            "h" => value.rsplit_once('/').map_or(".", |(h, _)| h).into(),
-            "r" => value
-                .rsplit_once('.')
-                .map_or(value.as_str(), |(h, _)| h)
-                .into(),
-            "e" => value.rsplit_once('.').map_or("", |(_, e)| e).into(),
-            _ => return Err(error("unsupported history modifier")),
-        };
-    }
-    Ok(value)
 }
 
 fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<()> {

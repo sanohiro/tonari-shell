@@ -70,10 +70,12 @@ fn decode(value: &str) -> Option<String> {
 }
 
 pub(crate) mod commands;
+pub(crate) mod expand;
 
 #[derive(Clone, Default)]
 pub(crate) struct Entries {
     pub lines: Vec<String>,
+    timestamps: Vec<libc::time_t>,
     base: usize,
     current: Option<usize>,
     written: usize,
@@ -81,6 +83,11 @@ pub(crate) struct Entries {
 }
 
 impl Session {
+    pub(crate) fn history_number(&self) -> usize {
+        self.history
+            .as_ref()
+            .map_or(1, |h| h.base + h.lines.len() + 1)
+    }
     pub(crate) fn history_lines(&self) -> &[String] {
         self.history.as_deref().map_or(&[], |h| h.lines.as_slice())
     }
@@ -116,9 +123,12 @@ impl Session {
             }
         }
         h.lines.push(text.into());
+        h.timestamps
+            .push(unsafe { libc::time(std::ptr::null_mut()) });
         if h.lines.len() > limit {
             let count = h.lines.len() - limit;
             h.lines.drain(..count);
+            h.timestamps.drain(..count);
             h.base += count;
             h.written = h.written.saturating_sub(count);
         }
@@ -183,6 +193,7 @@ impl Session {
 impl Entries {
     fn remove(&mut self, index: usize) {
         self.lines.remove(index);
+        self.timestamps.remove(index);
         if index < self.written {
             self.written -= 1;
         }

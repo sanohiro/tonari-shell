@@ -52,7 +52,7 @@ def audit_dialogues(a):
                 left,right = part(left),part(right)
             expected = {"read -p": b"asked", "read -s": b"secret", "read -e": b"Xtail",
                         "read -E": b"Xtail", "read -i": b"Xinitialtail", "FIGNORE": b"audit-a.txt",
-                        "PS0": b"active", "PS2": b"MORE>", "TMOUT": b"expired",
+                        "PROMPT_DIRTRIM": b"trimmed", "PS0": b"active", "PS2": b"MORE>", "TMOUT": b"expired",
                         "IGNOREEOF": b"continues", "tty predicate": b"ttyother"}
             if left in (b"no capture", b"no field", b"no initial prompt", b"no mail notification") or (key in expected and left != expected[key]):
                 status = "control inconclusive"

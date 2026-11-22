@@ -26,6 +26,11 @@ pub struct Invocation {
     pub nounset: bool,
     pub noglob: bool,
     pub noclobber: bool,
+    pub hashall: bool,
+    pub allexport: bool,
+    pub onecmd: bool,
+    pub xtrace: bool,
+    pub histexpand: Option<bool>,
     pub monitor: Option<bool>,
     pub braceexpand: bool,
     pub pipefail: bool,
@@ -66,6 +71,9 @@ pub fn parse(
     let mut nounset = false;
     let mut noglob = false;
     let mut noclobber = false;
+    let mut hashall = true;
+    let (mut allexport, mut onecmd, mut xtrace) = (false, false, false);
+    let mut histexpand = None;
     let mut monitor = None;
     let mut braceexpand = true;
     let mut pipefail = false;
@@ -104,7 +112,12 @@ pub fn parse(
                         'E' => errtrace = enabled,
                         'T' => functrace = enabled,
                         'C' => noclobber = enabled,
+                        'a' => allexport = enabled,
+                        't' => onecmd = enabled,
+                        'x' => xtrace = enabled,
+                        'H' => histexpand = Some(enabled),
                         'm' => monitor = Some(enabled),
+                        'h' => hashall = enabled,
                         'B' => braceexpand = enabled,
                         'f' => noglob = enabled,
                         'u' => nounset = enabled,
@@ -117,7 +130,12 @@ pub fn parse(
                             Some("errtrace") => errtrace = enabled,
                             Some("functrace") => functrace = enabled,
                             Some("nounset") => nounset = enabled,
+                            Some("allexport") => allexport = enabled,
+                            Some("onecmd") => onecmd = enabled,
+                            Some("xtrace") => xtrace = enabled,
+                            Some("histexpand") => histexpand = Some(enabled),
                             Some("monitor") => monitor = Some(enabled),
+                            Some("hashall") => hashall = enabled,
                             Some("noclobber") => noclobber = enabled,
                             Some("noglob") => noglob = enabled,
                             _ => {
@@ -166,6 +184,11 @@ pub fn parse(
         nounset,
         noglob,
         noclobber,
+        hashall,
+        allexport,
+        onecmd,
+        xtrace,
+        histexpand,
         monitor,
         braceexpand,
         pipefail,

@@ -1,3 +1,6 @@
+mod select;
+mod timing;
+
 use crate::Session;
 use crate::execute::{self, Flow};
 use crate::parser::{CasePattern, Command, Statement};
@@ -10,6 +13,9 @@ pub fn execute_program(
 ) -> Flow {
     let mut statements = program.into_iter().peekable();
     while let Some(statement) = statements.next() {
+        if !session.coprocesses.is_empty() {
+            crate::execute::coprocess::refresh(session);
+        }
         if session.traps.active() {
             match crate::traps::dispatch(session, status) {
                 Flow::Continue(_) => {}
@@ -19,6 +25,9 @@ pub fn execute_program(
         if !statement.condition.allows(status) {
             continue;
         }
+        if !session.traps.in_action() {
+            session.current_command = Some(statement.location);
+        }
         let negated = statement.negated;
         let tested = negated
             || statements
@@ -27,7 +36,11 @@ pub fn execute_program(
         session.tested_depth += u32::from(tested);
         // Compound lists test each command in their body. A failed condition
         // such as { false && :; } must not fire ERR again at the closing brace.
-        let reports_failure = match &statement.command {
+        let subject = match &statement.command {
+            Command::Timed { command, .. } => command.as_ref(),
+            command => command,
+        };
+        let reports_failure = match subject {
             Command::Pipeline(stages) => stages.len() != 1 || stages[0].compound.is_none(),
             Command::Subshell(_) | Command::Test(_) | Command::Arithmetic(_) => true,
             _ => false,
@@ -75,6 +88,11 @@ fn condition_program(session: &mut Session, condition: Vec<Statement>, status: u
 }
 
 pub(crate) fn command(session: &mut Session, command: Command, status: u8, tail: bool) -> Flow {
+    if matches!(command, Command::Arithmetic(_) | Command::Test(_))
+        && let Some(flow) = crate::traps::debug(session, status)
+    {
+        return flow;
+    }
     let scope = session.substitutions.scope();
     let single = match &command {
         Command::Pipeline(stages) => stages.len() == 1,
@@ -95,6 +113,15 @@ pub(crate) fn command(session: &mut Session, command: Command, status: u8, tail:
 
 fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) -> Flow {
     match command {
+        Command::Timed {
+            posix,
+            command: inner,
+        } => {
+            let timer = timing::Timer::start();
+            let flow = self::command(session, *inner, status, false);
+            timer.report(session, posix);
+            flow
+        }
         Command::Pipeline(stages) => {
             execute::run(stages, status, tail, session).unwrap_or_else(|e| {
                 eprintln!("tonari: {e}");
@@ -129,7 +156,13 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 other => Err(other),
             }
         }),
-        Command::For { name, words, body } => {
+        Command::For {
+            select,
+            header,
+            name,
+            words,
+            body,
+        } => {
             let items = match words {
                 None => session.positional.clone(),
                 Some(words) => {
@@ -148,11 +181,26 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                     fields
                 }
             };
+            if select {
+                if session.traps.debug_handler() {
+                    session.current_command = Some(header);
+                    if let Some(flow) = crate::traps::debug(session, status) {
+                        return flow;
+                    }
+                }
+                return select::run(session, &name, &items, &body, status);
+            }
             let mut items = items.into_iter();
             repeat(session, &body, status, |s, last| {
                 let Some(value) = items.next() else {
                     return Ok(None);
                 };
+                if s.traps.debug_handler() {
+                    s.current_command = Some(header.clone());
+                    if let Some(flow) = crate::traps::debug(s, last) {
+                        return Err(flow);
+                    }
+                }
                 if s.readonly(&name) {
                     eprintln!("tonari: {name}: readonly variable");
                     return Err(Flow::Continue(1));
@@ -169,23 +217,43 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             step,
             body,
         } => {
+            let line = session.line();
             let mut first = true;
-            if let Err(e) = crate::arithmetic::expanded(&init, session, status) {
-                eprintln!("tonari: {e}");
-                return Flow::Continue(1);
+            let arithmetic = |s: &mut Session, expr: &str, last: u8| -> Result<i64, Flow> {
+                if s.traps.debug_handler() {
+                    s.current_command = Some(crate::parser::Location::label(
+                        format!("(({}))", expr.trim()),
+                        line,
+                    ));
+                    if let Some(flow) = crate::traps::debug(s, last) {
+                        return Err(flow);
+                    }
+                }
+                crate::arithmetic::expanded(expr, s, last).map_err(|e| {
+                    eprintln!("tonari: {e}");
+                    Flow::Continue(1)
+                })
+            };
+            if !init.trim().is_empty()
+                && let Err(flow) = arithmetic(session, &init, status)
+            {
+                return flow;
             }
             repeat(session, &body, status, |s, last| {
-                let mut arithmetic = |expr: &str| {
-                    crate::arithmetic::expanded(expr, s, last).map_err(|e| {
-                        eprintln!("tonari: {e}");
-                        Flow::Continue(1)
-                    })
-                };
                 if !first && !step.is_empty() {
-                    arithmetic(&step)?;
+                    arithmetic(s, &step, last)?;
                 }
                 first = false;
-                Ok((condition.trim().is_empty() || arithmetic(&condition)? != 0).then_some(last))
+                Ok(
+                    (condition.trim().is_empty() || arithmetic(s, &condition, last)? != 0)
+                        .then_some(last),
+                )
+            })
+        }
+        Command::Coprocess { name, body } => {
+            crate::execute::coprocess::launch(session, name, *body, status).unwrap_or_else(|e| {
+                eprintln!("tonari: coproc: {e}");
+                Flow::Continue(1)
             })
         }
         Command::Background(mut body) => {
@@ -206,7 +274,16 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
         }
         Command::Group(body) => execute_program(session, body, status, tail),
         Command::Subshell(body) => crate::subshell::launch_group(session, body, status, false),
-        Command::Case { word, arms } => {
+        Command::Case { header, word, arms } => {
+            if session.traps.debug_handler() {
+                session.current_command = Some(crate::parser::Location::label(
+                    format!("{} ", header.text()),
+                    header.line,
+                ));
+                if let Some(flow) = crate::traps::debug(session, status) {
+                    return flow;
+                }
+            }
             let value = match expand_case(session, word, status, false) {
                 Ok(v) => v,
                 Err(f) => return f,
@@ -261,11 +338,18 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             }
             Flow::Continue(result)
         }
-        Command::Function { name, body } => {
+        Command::Function {
+            name,
+            body,
+            definition,
+        } => {
             if session.readonly_functions.contains(&name) {
                 eprintln!("tonari: {name}: readonly function");
                 return Flow::Continue(1);
             }
+            session
+                .function_definitions
+                .insert(name.clone(), definition);
             session.function_sources.insert(
                 name.clone(),
                 session
@@ -274,6 +358,9 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                     .cloned()
                     .unwrap_or_else(|| "environment".into()),
             );
+            if session.allexport || session.function_exported(&name) {
+                let _ = session.export_function(&name, true);
+            }
             session.functions.insert(name, std::rc::Rc::new(body));
             Flow::Continue(0)
         }
@@ -347,18 +434,37 @@ pub fn call_function(session: &mut Session, name: &str, args: &[String], status:
         .get(name)
         .cloned()
         .unwrap_or_default();
+    let callsite = session.current_command.clone();
+    session.call_lines.push(session.line());
     session.source_names.push(source);
     session.function_names.push(name.to_owned());
     session.enter_function();
+    let tracked = session.shopt.extdebug;
+    if tracked {
+        if session.debug_args.is_empty() {
+            session.debug_args.push(session.positional.clone());
+        }
+        session.debug_args.push(args[1..].to_vec());
+    }
     let old = std::mem::replace(&mut session.positional, args[1..].to_vec());
-    let hidden = session
-        .traps
-        .enter_function(session.errtrace, session.functrace);
-    let flow = execute_program(session, body.as_ref().clone(), status, false);
+    let hidden = session.traps.enter_function(
+        session.errtrace,
+        session.functrace || session.traced_functions.contains(name),
+    );
+    let flow = crate::traps::debug(session, status)
+        .unwrap_or_else(|| execute_program(session, body.as_ref().clone(), status, false));
     let flow = crate::traps::returning(session, flow);
     session.traps.leave_function(hidden);
     session.positional = old;
+    if tracked {
+        session.debug_args.pop();
+        if session.debug_args.len() == 1 {
+            session.debug_args.clear();
+        }
+    }
     session.leave_function();
+    session.current_command = callsite;
+    session.call_lines.pop();
     session.function_names.pop();
     session.source_names.pop();
     match flow {

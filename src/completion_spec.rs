@@ -22,8 +22,12 @@ const KEYWORDS: &[&str] = &[
 ];
 const ACTIONS: &[&str] = &[
     "alias",
+    "binding",
     "arrayvar",
     "builtin",
+    "enabled",
+    "disabled",
+    "helptopic",
     "command",
     "directory",
     "export",
@@ -386,6 +390,25 @@ impl Spec {
                     false,
                     session,
                 )),
+                "enabled" | "disabled" | "helptopic" => {
+                    words.extend(
+                        execute::builtin_names()
+                            .iter()
+                            .copied()
+                            .filter(|n| {
+                                n.starts_with(prefix)
+                                    && (action == "helptopic"
+                                        || (action == "disabled")
+                                            == session.disabled_builtins.contains(*n))
+                            })
+                            .map(str::to_owned),
+                    );
+                }
+                "binding" => words.extend(
+                    crate::editor::bindings::names()
+                        .filter(|n| n.starts_with(prefix))
+                        .map(str::to_owned),
+                ),
                 "builtin" | "keyword" => {
                     let names = if action == "builtin" {
                         execute::builtin_names()
@@ -803,23 +826,23 @@ mod tests {
         invoke(&mut session, "complete", &["-W", words, "demo"]);
         session.assign("IFS", "😀");
         let line = "demo se";
-        let first = complete::at(line, line.len(), &mut session, false).unwrap();
+        let first = complete::at(line, line.len(), &mut session, false, false).unwrap();
         assert_eq!(first.replacement, "sea");
         assert!(first.choices.is_empty());
-        let list = complete::at(line, line.len(), &mut session, true).unwrap();
+        let list = complete::at(line, line.len(), &mut session, true, false).unwrap();
         assert_eq!(list.choices, ["sea", "seat"]);
         invoke(&mut session, "compopt", &["-o", "nosort", "demo"]);
-        let list = complete::at(line, line.len(), &mut session, true).unwrap();
+        let list = complete::at(line, line.len(), &mut session, true, false).unwrap();
         assert_eq!(list.choices, ["seat", "sea"]);
         invoke(&mut session, "compopt", &["+o", "nosort", "demo"]);
         session.assign("IFS", "");
-        let list = complete::at(line, line.len(), &mut session, true).unwrap();
+        let list = complete::at(line, line.len(), &mut session, true, false).unwrap();
         assert_eq!(list.choices, [words]);
         session.assign("IFS", " ");
         invoke(&mut session, "complete", &["-W", "same same", "demo"]);
         let line = "demo sa";
         assert_eq!(
-            complete::at(line, line.len(), &mut session, false)
+            complete::at(line, line.len(), &mut session, false, false)
                 .unwrap()
                 .replacement,
             "same "
@@ -839,12 +862,12 @@ mod tests {
             &["-W", "'two words' test", "demo"],
         );
         let line = "printf x | demo tw";
-        let c = complete::at(line, line.len(), &mut session, false).unwrap();
+        let c = complete::at(line, line.len(), &mut session, false, false).unwrap();
         assert_eq!(&line[c.start..], "tw");
         assert_eq!(c.replacement, "two\\ words ");
         invoke(&mut session, "compopt", &["-o", "nospace", "demo"]);
         assert_eq!(
-            complete::at(line, line.len(), &mut session, false)
+            complete::at(line, line.len(), &mut session, false, false)
                 .unwrap()
                 .replacement,
             "two\\ words"
@@ -872,7 +895,7 @@ mod tests {
         invoke(&mut session, "complete", &["-F", "choose", "demo"]);
         let line = "demo α be later";
         let cursor = line.find(" later").unwrap();
-        let result = complete::at(line, cursor, &mut session, true).unwrap();
+        let result = complete::at(line, cursor, &mut session, true, false).unwrap();
         assert_eq!(result.choices, ["demo:α:be:α:later:2:9"]);
         assert!(!result.replacement.ends_with(' '));
         assert_eq!(session.get("COMP_LINE").as_deref(), Some("saved"));
@@ -891,7 +914,7 @@ mod tests {
         );
         invoke(&mut session, "complete", &["-D", "-F", "load"]);
         let line = "demo sta";
-        let completion = complete::at(line, line.len(), &mut session, false).unwrap();
+        let completion = complete::at(line, line.len(), &mut session, false, false).unwrap();
         assert_eq!(completion.replacement, "start ");
         session.shopt.progcomp = false;
         assert!(for_tab(&mut session, Some("demo"), "sta", None).is_none());

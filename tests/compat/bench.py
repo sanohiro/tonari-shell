@@ -92,6 +92,8 @@ def sample(a, work, index, mode, cli, test_class):
             try:
                 if work["pty_test"] == "foreground pipeline":
                     test.check_foreground_pipeline(test.terminal_session(shell=shell))
+                elif work["pty_test"] == "suspend and resume":
+                    test.check_suspension(shell)
                 else:
                     test.check_interactive_alias_and_interrupt_trap(shell)
                 valid = True
@@ -107,6 +109,13 @@ def benchmark(a, work, mode, cli, test_class):
         return {"error": "GNU fixture unavailable"}
     if "driver" in work and (os.getuid() == 0 or not Path("/.dockerenv").exists()):
         raise ValueError("Run GNU drivers in a disposable non-root container")
+    if mode == "started":
+        # The readiness command occupies one physical line. Capture Bash's result
+        # with that same prelude so LINENO and line-numbered diagnostics remain comparable.
+        control = a.call(0, work["argv"], work["stdin"], work["fixture"], timing=mode)
+        if control.timeout:
+            return {"error": "reference startup handshake timed out"}
+        work = dict(work, expected=control.digest())
     samples = [[], []]
     count = cli.suite_runs if "driver" in work else cli.runs
     for i in range(cli.warmups + count):

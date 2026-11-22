@@ -34,7 +34,9 @@ pub(super) fn path(cmd: &PreparedCommand, session: &Session) -> OsString {
 pub(super) fn command_prefix(cmd: &mut PreparedCommand, session: &Session) {
     let mut passed = 0;
     while let Some(name) = cmd.words.get(passed) {
-        if cmd.search == Search::Normal && session.functions.contains_key(name) {
+        if session.disabled_builtins.contains(name)
+            || cmd.search == Search::Normal && session.functions.contains_key(name)
+        {
             break;
         }
         match name.as_str() {
@@ -181,7 +183,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                 "a function",
             ),
             (
-                named_builtin(name, &[], 0).is_some(),
+                !session.disabled_builtins.contains(name) && named_builtin(name, &[], 0).is_some(),
                 "builtin",
                 "a shell builtin",
             ),

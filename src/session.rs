@@ -2,6 +2,7 @@ pub(crate) mod array;
 mod assoc;
 mod declare;
 mod directories;
+mod functions;
 mod getopts;
 pub(crate) mod mapfile;
 mod options;
@@ -99,9 +100,17 @@ pub struct Session {
     pub interactive: bool,
     pub login: bool,
     pub logout_started: bool,
+    pub allexport: bool,
+    pub xtrace: bool,
+    pub onecmd: bool,
+    pub subshell_depth: u32,
+    pub histexpand: bool,
+    pub emacs: bool,
+    pub vi: bool,
     pub history_enabled: bool,
     pub verbose: bool,
     pub(crate) history: Option<Rc<crate::history::Entries>>,
+    pub command_number: usize,
     pub command_string: bool,
     pub tested_depth: u32,
     pub errexit: bool,
@@ -116,6 +125,7 @@ pub struct Session {
     pub shopt: options::ShellOptions,
     pub(crate) external_env: std::cell::RefCell<Option<Rc<crate::execute::Environment>>>,
     pub regex: Option<Rc<crate::test_expression::Compiled>>,
+    pub(crate) coprocesses: Vec<Rc<crate::execute::coprocess::Coprocess>>,
     pub substitutions: crate::execute::process_substitution::Substitutions,
     pub jobs: crate::jobs::Jobs,
     pub traps: crate::traps::Traps,
@@ -127,8 +137,18 @@ pub struct Session {
     pub function_depth: u32,
     pub function_names: Vec<String>,
     pub source_names: Vec<String>,
+    pub current_command: Option<crate::parser::Location>,
+    pub debug_args: Vec<Vec<String>>,
+    pub traced_functions: std::collections::BTreeSet<String>,
+    pub call_lines: Vec<usize>,
+    pub function_environment: BTreeMap<String, Option<String>>,
+    pub function_definitions: BTreeMap<String, crate::parser::Location>,
     pub function_sources: BTreeMap<String, String>,
     pub loop_depth: u32,
+    pub editor_kill: String,
+    pub editor_queue: std::collections::VecDeque<u8>,
+    pub bindings: crate::editor::bindings::Bindings,
+    pub disabled_builtins: std::collections::BTreeSet<String>,
     pub aliases: crate::alias::Aliases,
     pub completions: crate::completion_spec::Registry,
     pub readonly_functions: std::collections::BTreeSet<String>,
@@ -200,6 +220,9 @@ impl Session {
 
     pub fn option_flags(&self) -> String {
         let mut flags = String::new();
+        if self.allexport {
+            flags.push('a');
+        }
         if self.errexit {
             flags.push('e');
         }
@@ -215,11 +238,17 @@ impl Session {
         if self.jobs.monitor {
             flags.push('m');
         }
+        if self.onecmd {
+            flags.push('t');
+        }
         if self.nounset {
             flags.push('u');
         }
         if self.verbose {
             flags.push('v');
+        }
+        if self.xtrace {
+            flags.push('x');
         }
         if self.shopt.braceexpand {
             flags.push('B');
@@ -229,6 +258,9 @@ impl Session {
         }
         if self.errtrace {
             flags.push('E');
+        }
+        if self.histexpand {
+            flags.push('H');
         }
         if self.functrace {
             flags.push('T');
@@ -314,6 +346,10 @@ impl Session {
                 match flag {
                     'e' => self.errexit = enable,
                     'E' => self.errtrace = enable,
+                    'a' => self.allexport = enable,
+                    't' => self.onecmd = enable,
+                    'x' => self.xtrace = enable,
+                    'H' => self.histexpand = enable,
                     'T' => self.functrace = enable,
                     'C' => self.noclobber = enable,
                     'B' => self.shopt.braceexpand = enable,
@@ -340,6 +376,7 @@ impl Session {
                         i += 1;
                         if let Some(value) = self.option_value(name, true) {
                             *value = enable;
+                            self.editing_option(name, enable);
                         } else {
                             eprintln!("tonari: set: {name}: unsupported option");
                             return 2;
@@ -436,7 +473,10 @@ impl Session {
                 .as_ref()
                 .map_or_else(|| var.value.clone(), |a| a.get(&0).cloned());
         }
-        if matches!(name, "BASH_SOURCE" | "FUNCNAME" | "DIRSTACK") {
+        if matches!(
+            name,
+            "BASH_SOURCE" | "BASH_LINENO" | "BASH_ARGC" | "BASH_ARGV" | "FUNCNAME" | "DIRSTACK"
+        ) {
             return self.element(name, 0);
         }
         self.inherited_value(name)
@@ -444,6 +484,20 @@ impl Session {
 
     fn inherited_value(&self, name: &str) -> Option<String> {
         match name {
+            "BASH_SUBSHELL" => Some(self.subshell_depth.to_string()),
+            "BASH_ARGV0" => Some(self.arg0.clone()),
+            "EPOCHSECONDS" | "EPOCHREALTIME" => {
+                let dt = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .ok()?;
+                Some(if name == "EPOCHSECONDS" {
+                    dt.as_secs().to_string()
+                } else {
+                    format!("{}.{:06}", dt.as_secs(), dt.subsec_micros())
+                })
+            }
+            "LINENO" => Some(self.line().to_string()),
+            "BASH_COMMAND" => self.current_command.as_ref().map(|c| c.text().to_owned()),
             "EUID" => Some(unsafe { libc::geteuid() }.to_string()),
             "UID" => Some(unsafe { libc::getuid() }.to_string()),
             "PPID" => Some(self.shell_pid.1.to_string()),
@@ -547,6 +601,9 @@ impl Session {
         if self.readonly(name) {
             return;
         }
+        if name == "BASH_ARGV0" {
+            self.arg0 = value.to_owned();
+        }
         if name == "GLOBIGNORE" {
             self.shopt.glob.set_ignore(Some(value));
         }
@@ -572,9 +629,10 @@ impl Session {
                 var.value = Some(value.into());
             }
             var.declared = true;
+            var.exported |= self.allexport;
             return;
         }
-        let exported = self.is_exported(name);
+        let exported = self.allexport || self.is_exported(name);
         self.variables.insert(
             name.into(),
             Variable {
@@ -588,6 +646,24 @@ impl Session {
                 exported,
             },
         );
+    }
+
+    pub(crate) fn scalar_decimal(&self, name: &str) -> Option<i64> {
+        let var = self.variables.get(name)?;
+        if var.nameref || var.elements.is_some() {
+            return None;
+        }
+        let value = var.value.as_deref()?;
+        if value == "0" {
+            return Some(0);
+        }
+        if !matches!(
+            value.trim_start_matches('-').as_bytes().first(),
+            Some(b'1'..=b'9')
+        ) {
+            return None;
+        }
+        value.parse().ok()
     }
 
     pub fn integer(&self, name: &str) -> bool {
@@ -709,6 +785,11 @@ impl Session {
                 }
             })
             .chain(
+                self.function_environment
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v.as_deref().map(Cow::Borrowed))),
+            )
+            .chain(
                 assignments
                     .iter()
                     .map(|(k, v)| (k.as_str(), Some(Cow::Borrowed(v.as_str())))),
@@ -729,6 +810,10 @@ impl Session {
         self.variables.contains_key("PATH") || assignments.iter().any(|(k, _)| k == "PATH")
     }
 
+    pub fn line(&self) -> usize {
+        self.current_command.as_ref().map_or(1, |c| c.line)
+    }
+
     pub fn enter_function(&mut self) {
         self.locals.push(Bindings::default());
         self.function_depth += 1;
@@ -741,6 +826,7 @@ impl Session {
     }
 
     pub fn export(&mut self, args: &[String], bindings: &mut Bindings) -> u8 {
+        let mut functions = false;
         let mut remove = false;
         let mut i = 0;
         while let Some(opt) = args.get(i) {
@@ -754,6 +840,7 @@ impl Session {
             for flag in opt[1..].chars() {
                 match flag {
                     'n' => remove = true,
+                    'f' => functions = true,
                     'p' => {}
                     _ => {
                         eprintln!("tonari: export: unsupported option {opt}");
@@ -762,6 +849,25 @@ impl Session {
                 }
             }
             i += 1;
+        }
+        if functions {
+            let mut status = 0;
+            if i == args.len() {
+                let mut out = io::stdout().lock();
+                for name in self.functions.keys().filter(|n| self.function_exported(n)) {
+                    if self.print_function(&mut out, name).is_err() {
+                        return 1;
+                    }
+                }
+            } else {
+                for name in &args[i..] {
+                    if let Err(e) = self.export_function(name, !remove) {
+                        eprintln!("tonari: export: {name}: {e}");
+                        status = 1;
+                    }
+                }
+            }
+            return status;
         }
         if i == args.len() {
             return self.list_exported().map_or(1, |()| 0);
@@ -900,7 +1006,7 @@ impl Session {
         out.flush()
     }
 
-    fn unset_variable(&mut self, name: &str) {
+    pub(crate) fn unset_variable(&mut self, name: &str) {
         if self.readonly(name) {
             return;
         }
@@ -1049,12 +1155,12 @@ impl Session {
                 }
             }
             if functions_only {
-                self.functions.remove(name);
+                self.forget_function(name);
                 continue;
             }
             if is_identifier(name) {
                 if resolve_function {
-                    self.functions.remove(name);
+                    self.forget_function(name);
                 }
                 self.unset_variable(name);
             }

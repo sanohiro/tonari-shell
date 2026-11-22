@@ -1,0 +1,61 @@
+. filename [arguments]|Read commands from a file in this shell.
+: [arguments]|Return success.
+[ expression ]|Evaluate a conditional expression.
+alias [-p] [name[=value] ...]|List or define command aliases.
+bg [jobspec ...]|Continue jobs in the background.
+bind [-m keymap] [options] [binding ...]|Inspect or change editor key bindings.
+break [n]|Leave one or more enclosing loops.
+builtin [shell-builtin [arg ...]]|Invoke a shell builtin directly.
+caller [expr]|Print the source location of a call frame.
+cd [-LP] [dir]|Change the current directory.
+command [-pVv] command [arg ...]|Look up a command or run it without function lookup.
+compgen [option ...] [word]|Generate matching completion candidates.
+complete [option ...] [name ...]|Register, list or remove completion definitions.
+compopt [option ...] [name ...]|Change options on a completion definition.
+continue [n]|Start the next iteration of an enclosing loop.
+declare [options] [name[=value] ...]|Inspect variables and set their attributes.
+dirs [-clpv] [+N or -N]|Inspect the directory stack.
+disown [-h] [-ar] [jobspec ...]|Remove a job or protect it from hangup.
+echo [-neE] [arg ...]|Write arguments separated by spaces.
+enable [-anps] [name ...]|Enable, disable or list shell builtins.
+eval [arg ...]|Read and execute the arguments as shell input.
+exec [-cla] [command [arg ...]]|Replace this shell or apply redirections to it.
+exit [n]|Exit with the specified status.
+export [-fn] [name[=value] ...] or export -p|Pass variables or functions to child processes.
+false|Return an unsuccessful status.
+fc [-lnr] [first [last]] or fc -s [old=new] [command]|List, edit or replay history entries.
+fg [jobspec]|Continue a job in the foreground.
+getopts optstring name [arg ...]|Read the next option from an argument list.
+hash [-lr] [-p pathname] [name ...]|Inspect and change remembered command paths.
+help [-dms] [pattern ...]|Display help for shell commands.
+history [options] [arguments]|Inspect and change session history.
+jobs [-lnprs] [jobspec ...]|Display active jobs.
+kill [-s signal] pid|Send a signal to a process or job.
+let arg [arg ...]|Evaluate arithmetic expressions.
+local [option] name[=value] ...|Declare variables in the current function.
+logout [n]|Exit the login shell.
+mapfile [options] [array]|Read records from an input descriptor into an array.
+popd [-n] [+N or -N]|Remove an entry from the directory stack.
+printf [-v var] format [arguments]|Format arguments as text or assign the result to a variable.
+pushd [-n] [dir]|Push or rotate a directory stack entry.
+pwd [-LP]|Print the current directory.
+read [options] [name ...]|Read a record into shell variables.
+readarray [options] [array]|Read records into an indexed array.
+readonly [-aAf] [name[=value] ...] or readonly -p|Protect variables or functions from modification.
+return [n]|Return from a function or sourced file.
+set [options] [--] [arg ...]|Change shell options and positional parameters.
+shift [n]|Remove leading positional parameters.
+shopt [-pqsu] [-o] [optname ...]|Inspect or change shell options.
+source filename [arguments]|Execute commands from a file in the current environment.
+suspend [-f]|Stop the shell until a supervisor continues it.
+test [expr]|Evaluate a conditional expression.
+times|Print process accounting times for this shell and its children.
+trap [-lp] [arg] [sigspec ...]|Register or inspect signal and shell-event handlers.
+true|Return a successful status.
+type [-afptP] name [name ...]|Describe how command names resolve.
+typeset [options] [name[=value] ...]|Inspect variables and set their attributes.
+ulimit [options] [limit]|Inspect or set process resource limits.
+umask [-p] [-S] [mode]|Inspect or set the process file creation mask.
+unalias [-a] name [name ...]|Remove command aliases.
+unset [-fnv] [name ...]|Remove a function, variable or name reference.
+wait [options] [id ...]|Wait for child processes or jobs.

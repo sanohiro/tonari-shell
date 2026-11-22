@@ -222,6 +222,9 @@ pub struct Jobs {
 }
 
 impl Jobs {
+    pub(crate) fn count(&self) -> usize {
+        self.table.len()
+    }
     pub fn init(&mut self) {
         let Ok(fd) = io::stderr().as_fd().try_clone_to_owned() else {
             return;
@@ -486,6 +489,15 @@ impl Jobs {
                 .filter(|p| p.pid > 0 && !matches!(p.state, State::Done(_)))
                 .map(|p| p.pid),
         );
+    }
+
+    pub(crate) fn has_live_pid(&self, pid: pid_t) -> bool {
+        self.detached.contains(&pid)
+            || self.table.iter().any(|job| {
+                job.children
+                    .iter()
+                    .any(|child| child.pid == pid && !matches!(child.state, State::Done(_)))
+            })
     }
 
     pub fn poll(&mut self) {

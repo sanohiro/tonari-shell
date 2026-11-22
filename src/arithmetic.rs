@@ -4,6 +4,9 @@ type Result<T> = std::result::Result<T, &'static str>;
 
 pub(crate) trait Variables {
     fn get(&self, name: &str) -> Option<String>;
+    fn decimal(&self, _name: &str) -> Option<i64> {
+        None
+    }
     fn set(&mut self, name: &str, value: i64) -> Result<()>;
     fn associative_key(&mut self, _name: &str, _source: &str) -> Option<Result<String>> {
         None
@@ -14,6 +17,9 @@ pub(crate) trait Variables {
 }
 
 impl Variables for Session {
+    fn decimal(&self, name: &str) -> Option<i64> {
+        self.scalar_decimal(name)
+    }
     fn get(&self, name: &str) -> Option<String> {
         self.get(name)
     }
@@ -154,17 +160,15 @@ impl<'a> Parser<'a> {
                 (Token::Name(&rest[..n]), n + if braced { 3 } else { 1 })
             }
             _ => {
-                let op = [
-                    "<<=", ">>=", "++", "--", "**", "&&", "||", "<<", ">>", "<=", ">=", "==", "!=",
-                    "+=", "-=", "*=", "/=", "%=", "&=", "^=", "|=",
-                ]
-                .into_iter()
-                .find(|op| source.starts_with(op))
-                .map_or_else(
-                    || source.get(..1).filter(|s| "+-*/%()!:~&|^<>=?,".contains(s)),
-                    Some,
-                )
-                .ok_or("invalid arithmetic token")?;
+                let bytes = source.as_bytes();
+                let len = match bytes {
+                    [b'<', b'<', b'=', ..] | [b'>', b'>', b'=', ..] => 3,
+                    [first, second, ..] if first == second && b"+-*&|<>".contains(first) => 2,
+                    [first, b'=', ..] if b"+-*/%&^|<>=!".contains(first) => 2,
+                    [first, ..] if b"+-*/%()!:~&|^<>=?,".contains(first) => 1,
+                    _ => return Err("invalid arithmetic token"),
+                };
+                let op = &source[..len];
                 (Token::Op(op), op.len())
             }
         };
@@ -323,11 +327,16 @@ impl Value<'_> {
         }
         match self {
             Self::Number(n) => Ok(*n),
-            Self::Variable(name) => match variables.get(name) {
-                Some(s) => calculate(&s, variables, depth + 1),
-                None if variables.nounset() => Err("unbound arithmetic variable"),
-                None => Ok(0),
-            },
+            Self::Variable(name) => {
+                if let Some(n) = variables.decimal(name) {
+                    return Ok(n);
+                }
+                match variables.get(name) {
+                    Some(s) => calculate(&s, variables, depth + 1),
+                    None if variables.nounset() => Err("unbound arithmetic variable"),
+                    None => Ok(0),
+                }
+            }
         }
     }
 }

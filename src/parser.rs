@@ -11,6 +11,13 @@ pub(crate) use lexer::{arithmetic_word, subscript_word};
 mod lexer;
 mod modifier;
 pub use crate::word::{Word, is_identifier};
+
+pub(crate) fn is_function_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || "_-.+:@".contains(c))
+}
 pub(crate) use here_doc::{HereDocHint, expansion_string};
 use lexer::{LexWord, Token, lex};
 pub(crate) use modifier::index_end;
@@ -20,16 +27,17 @@ use std::rc::Rc;
 // literal word segments. It must never be parsed as shell code.
 pub(crate) fn prompt_word(
     source: &str,
-    mut escape: impl FnMut(char) -> String,
+    expand: bool,
+    mut escape: impl FnMut(char, &mut std::str::Chars) -> String,
 ) -> Result<Word, Error> {
     let mut builder = crate::word::WordBuilder::default();
     let mut chars = source.chars();
     while let Some(c) = chars.next() {
         match c {
-            '$' => lexer::dollar(&mut chars, &mut builder, true)?,
-            '`' => lexer::backquote(&mut chars, &mut builder, true)?,
+            '$' if expand => lexer::dollar(&mut chars, &mut builder, true)?,
+            '`' if expand => lexer::backquote(&mut chars, &mut builder, true)?,
             '\\' => match chars.next() {
-                Some(code) => builder.literal(&escape(code)),
+                Some(code) => builder.literal(&escape(code, &mut chars)),
                 None => builder.push('\\'),
             },
             c => builder.push(c),
@@ -55,6 +63,7 @@ pub enum Target {
 
 #[derive(Debug, Clone)]
 pub struct Redirect<W = String> {
+    pub variable: Option<Box<str>>,
     pub fd: i32,
     pub target: Target,
     pub word: W,
@@ -62,6 +71,7 @@ pub struct Redirect<W = String> {
 
 #[derive(Debug, Clone)]
 pub struct SimpleCommand<W = String> {
+    pub location: Option<Location>,
     pub compound: Option<Box<Command>>,
     pub words: Vec<W>,
     pub redirects: Vec<Redirect<W>>,
@@ -71,6 +81,7 @@ pub struct SimpleCommand<W = String> {
 impl<W> Default for SimpleCommand<W> {
     fn default() -> Self {
         Self {
+            location: None,
             compound: None,
             words: Vec::new(),
             redirects: Vec::new(),
@@ -108,7 +119,29 @@ impl Condition {
 }
 
 #[derive(Debug, Clone)]
+pub struct Location {
+    source: Rc<str>,
+    start: usize,
+    end: usize,
+    pub line: usize,
+}
+impl Location {
+    pub(crate) fn label(source: String, line: usize) -> Self {
+        Self {
+            start: 0,
+            end: source.len(),
+            source: source.into(),
+            line,
+        }
+    }
+    pub fn text(&self) -> &str {
+        &self.source[self.start..self.end]
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Statement {
+    pub location: Location,
     pub condition: Condition,
     pub negated: bool,
     pub command: Command,
@@ -160,6 +193,10 @@ pub type CaseArm = (Vec<CasePattern>, Vec<Statement>, CaseEnd);
 pub enum Command {
     Pipeline(Pipeline<Word>),
     Group(Vec<Statement>),
+    Timed {
+        posix: bool,
+        command: Box<Command>,
+    },
     Test(Expr),
     Arithmetic(String),
     ForArithmetic {
@@ -169,8 +206,13 @@ pub enum Command {
         body: Vec<Statement>,
     },
     Subshell(Vec<Statement>),
+    Coprocess {
+        name: String,
+        body: Box<Command>,
+    },
     Background(Vec<Statement>),
     Case {
+        header: Location,
         word: Word,
         arms: Rc<Vec<CaseArm>>,
     },
@@ -184,11 +226,14 @@ pub enum Command {
         body: Vec<Statement>,
     },
     For {
+        select: bool,
+        header: Location,
         name: String,
         words: Option<Vec<Word>>,
         body: Vec<Statement>,
     },
     Function {
+        definition: Location,
         name: String,
         body: Vec<Statement>,
     },
@@ -250,6 +295,7 @@ pub fn parse_final(source: &str) -> Result<Vec<Statement>, Error> {
 
 thread_local! {
     // Lexers invoked recursively by a substitution inherit the outer read's options.
+    static FIRST_LINE: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
     static EXTGLOB: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -258,7 +304,17 @@ pub fn session_source(
     eof: bool,
     session: &crate::Session,
 ) -> Result<Vec<Statement>, Error> {
+    session_source_at(source, eof, session, 1)
+}
+
+pub fn session_source_at(
+    source: &str,
+    eof: bool,
+    session: &crate::Session,
+    line: usize,
+) -> Result<Vec<Statement>, Error> {
     let read = || {
+        let old_line = FIRST_LINE.replace(line);
         let before = EXTGLOB.replace(session.shopt.glob.extglob);
         let parsed = if eof {
             parse_final(source)
@@ -266,6 +322,7 @@ pub fn session_source(
             parse(source)
         };
         EXTGLOB.set(before);
+        FIRST_LINE.set(old_line);
         parsed
     };
     if session.shopt.expand_aliases && session.aliases.0.is_some() {
@@ -279,22 +336,49 @@ fn parse_source(source: &str, final_input: bool) -> Result<Vec<Statement>, Error
     if source.contains('\0') {
         return Err(Error::Invalid("NUL in command text"));
     }
-    let (tokens, _) = lex(source, false, final_input)?;
-    Reader::new(tokens).list(&[])
+    let (tokens, spans, _) = lex(source, false, final_input)?;
+    Reader::new(tokens, spans, source).list(&[])
 }
 
 struct Reader {
+    source: Rc<str>,
+    spans: Vec<(usize, usize)>,
+    newlines: Vec<usize>,
     aliases: crate::alias::Aliases,
     alias_frames: Vec<aliases::Frame>,
     tokens: std::vec::IntoIter<Token>,
 }
 
 impl Reader {
-    fn new(tokens: Vec<Token>) -> Self {
+    fn new(tokens: Vec<Token>, spans: Vec<(usize, usize)>, source: &str) -> Self {
         Self {
+            spans,
+            newlines: source
+                .match_indices('\n')
+                .map(|(offset, _)| offset)
+                .collect(),
+            source: source.into(),
             tokens: tokens.into_iter(),
             aliases: aliases::current(),
             alias_frames: Vec::new(),
+        }
+    }
+
+    fn position(&self) -> usize {
+        self.spans.len() - self.tokens.len()
+    }
+    fn location(&self, from: usize) -> Location {
+        let start = self.spans.get(from).map_or(self.source.len(), |s| s.0);
+        let end = if self.position() > from {
+            self.spans[self.position() - 1].1
+        } else {
+            start
+        };
+        Location {
+            source: self.source.clone(),
+            start,
+            end,
+            line: FIRST_LINE.get() + self.newlines.partition_point(|&n| n < start),
         }
     }
 
@@ -363,23 +447,46 @@ impl Reader {
                 return Ok(statements);
             }
             let mut inverted = None;
-            while self.keyword() == Some("!") {
-                self.tokens.next();
-                inverted = Some(!inverted.unwrap_or(false));
+            let mut timing = None;
+            while matches!(self.keyword(), Some("!" | "time")) {
+                if self.keyword() == Some("time") {
+                    self.tokens.next();
+                    let posix = matches!(self.keyword(), Some("-p" | "--"));
+                    if self.keyword() == Some("-p") {
+                        self.tokens.next();
+                    }
+                    if self.keyword() == Some("--") {
+                        self.tokens.next();
+                    }
+                    timing = Some(posix);
+                } else {
+                    self.tokens.next();
+                    inverted = Some(!inverted.unwrap_or(false));
+                }
                 self.expand_alias(true)?;
             }
-            let command = if inverted.is_some()
+            let start = self.position();
+            let command = if (inverted.is_some() || timing.is_some())
                 && matches!(self.peek(), None | Some(Token::End | Token::Newline))
             {
                 Command::Pipeline(vec![SimpleCommand::default()])
             } else {
                 self.command()?
             };
+            let command = if let Some(posix) = timing {
+                Command::Timed {
+                    posix,
+                    command: Box::new(command),
+                }
+            } else {
+                command
+            };
             // Nested lists often contain one statement. Its enum is large.
             if statements.is_empty() {
                 statements.reserve_exact(1);
             }
             statements.push(Statement {
+                location: self.location(start),
                 condition,
                 negated: inverted.unwrap_or(false),
                 command,
@@ -396,6 +503,7 @@ impl Reader {
                 Some(Token::Background) => {
                     let group = statements.split_off(and_or_start);
                     statements.push(Statement {
+                        location: group[0].location.clone(),
                         condition: Condition::Always,
                         negated: false,
                         command: Command::Background(group),
@@ -412,15 +520,20 @@ impl Reader {
     }
 
     fn command(&mut self) -> Result<Command, Error> {
-        let first = match self.compound()? {
+        let start = self.position();
+        let mut first = match self.compound()? {
             Some(compound) if !self.has_redirect() && !self.has_pipe() => return Ok(compound),
             Some(compound) => self.compound_stage(compound)?,
             None => self.simple()?,
         };
+        if self.has_pipe() {
+            first.location = Some(self.location(start));
+        }
         let mut pipeline = vec![first];
         while self.has_pipe() {
             if matches!(self.tokens.next(), Some(Token::PipeBoth)) {
                 pipeline.last_mut().unwrap().redirects.push(Redirect {
+                    variable: None,
                     fd: 2,
                     target: Target::Duplicate,
                     word: Word::Literal("1".into()),
@@ -431,10 +544,12 @@ impl Reader {
                 return Err(Error::Incomplete("expected a command after pipe"));
             }
             self.expand_alias(true)?;
-            let stage = match self.compound()? {
+            let start = self.position();
+            let mut stage = match self.compound()? {
                 Some(compound) => self.compound_stage(compound)?,
                 None => self.simple()?,
             };
+            stage.location = Some(self.location(start));
             pipeline.push(stage);
         }
         Ok(Command::Pipeline(pipeline))
@@ -443,7 +558,7 @@ impl Reader {
     fn has_redirect(&self) -> bool {
         matches!(
             self.peek(),
-            Some(Token::Redirect(..) | Token::BothRedirect(_))
+            Some(Token::DescriptorName(_) | Token::Redirect(..) | Token::BothRedirect(_))
         )
     }
 
@@ -492,20 +607,54 @@ impl Reader {
                 self.expect("]]")?;
                 Ok(Command::Test(expr))
             }
+            Some("coproc") => self.coproc(),
             Some("case") => self.case_clause(),
             Some("if") => self.if_clause(),
             Some("while" | "until") => self.while_clause(),
-            Some("for") => self.for_clause(),
+            Some("for" | "select") => self.for_clause(),
             Some("function") => self.function(true),
             Some(name)
-                if is_identifier(name)
-                    && matches!(self.tokens.as_slice().get(1), Some(Token::LeftParen)) =>
+                if matches!(self.tokens.as_slice().get(1), Some(Token::LeftParen))
+                    && is_function_name(name) =>
             {
                 self.function(false)
             }
             _ => return Ok(None),
         }
         .map(Some)
+    }
+
+    fn coproc(&mut self) -> Result<Command, Error> {
+        self.tokens.next();
+        let named = match self.tokens.as_slice().get(1) {
+            Some(Token::LeftParen | Token::Arithmetic(_)) => true,
+            Some(Token::Word(w)) if !w.protected => matches!(
+                w.word.as_literal(),
+                Some("{" | "[[" | "if" | "case" | "while" | "until" | "for" | "select")
+            ),
+            _ => false,
+        };
+        let name = if named && self.keyword().is_some_and(is_identifier) {
+            self.name()?
+        } else {
+            String::from("COPROC")
+        };
+        if self.peek().is_none() {
+            return Err(Error::Incomplete("expected a coprocess command"));
+        }
+        let command = if let Some(compound) = self.compound()? {
+            if self.has_redirect() {
+                Command::Pipeline(vec![self.compound_stage(compound)?])
+            } else {
+                compound
+            }
+        } else {
+            Command::Pipeline(vec![self.simple()?])
+        };
+        Ok(Command::Coprocess {
+            name,
+            body: Box::new(command),
+        })
     }
 
     fn test_or(&mut self) -> Result<Expr, Error> {
@@ -607,6 +756,7 @@ impl Reader {
     }
 
     fn case_clause(&mut self) -> Result<Command, Error> {
+        let start = self.position();
         self.tokens.next();
         let word = match self.tokens.next() {
             Some(Token::Word(word)) => word.word,
@@ -615,6 +765,7 @@ impl Reader {
         };
         self.newlines();
         self.expect("in")?;
+        let header = self.location(start);
         self.newlines();
         let mut arms = Vec::new();
         while self.keyword() != Some("esac") {
@@ -648,6 +799,7 @@ impl Reader {
         }
         self.expect("esac")?;
         Ok(Command::Case {
+            header,
             word,
             arms: Rc::new(arms),
         })
@@ -706,8 +858,10 @@ impl Reader {
     }
 
     fn for_clause(&mut self) -> Result<Command, Error> {
+        let select = self.keyword() == Some("select");
+        let start = self.position();
         self.tokens.next();
-        if matches!(self.peek(), Some(Token::Arithmetic(_))) {
+        if !select && matches!(self.peek(), Some(Token::Arithmetic(_))) {
             let Some(Token::Arithmetic(header)) = self.tokens.next() else {
                 unreachable!()
             };
@@ -740,6 +894,7 @@ impl Reader {
         } else {
             None
         };
+        let header = self.location(start);
         if matches!(self.peek(), Some(Token::End)) {
             self.tokens.next();
         }
@@ -747,14 +902,28 @@ impl Reader {
         self.expect("do")?;
         let body = self.list(&["done"])?;
         self.expect("done")?;
-        Ok(Command::For { name, words, body })
+        Ok(Command::For {
+            select,
+            header,
+            name,
+            words,
+            body,
+        })
     }
 
     fn function(&mut self, keyword: bool) -> Result<Command, Error> {
         if keyword {
             self.tokens.next();
         }
-        let name = self.name()?;
+        let name = match self.tokens.next() {
+            Some(Token::Word(LexWord {
+                word: Word::Literal(name),
+                protected: false,
+                ..
+            })) if is_function_name(&name) => name,
+            None => return Err(Error::Incomplete("expected a function name")),
+            _ => return Err(Error::Invalid("invalid function name")),
+        };
         if matches!(self.peek(), Some(Token::LeftParen)) {
             self.tokens.next();
             match self.tokens.next() {
@@ -764,6 +933,7 @@ impl Reader {
             }
         }
         self.newlines();
+        let start = self.position();
         let compound = self.compound()?.ok_or_else(|| {
             if self.peek().is_none() {
                 Error::Incomplete("expected a function body")
@@ -774,6 +944,7 @@ impl Reader {
         let body = if self.has_redirect() {
             // Function redirections are applied when the function is invoked.
             vec![Statement {
+                location: self.location(start),
                 condition: Condition::Always,
                 negated: false,
                 command: Command::Pipeline(vec![self.compound_stage(compound)?]),
@@ -782,12 +953,17 @@ impl Reader {
             body
         } else {
             vec![Statement {
+                location: self.location(start),
                 condition: Condition::Always,
                 negated: false,
                 command: compound,
             }]
         };
-        Ok(Command::Function { name, body })
+        Ok(Command::Function {
+            name,
+            body,
+            definition: self.location(start),
+        })
     }
 
     fn redirection(
@@ -796,16 +972,27 @@ impl Reader {
         redirects: &mut Vec<Redirect<Word>>,
     ) -> Result<(), Error> {
         match token {
+            Token::DescriptorName(name) => {
+                let first = redirects.len();
+                let token = self
+                    .tokens
+                    .next()
+                    .ok_or(Error::Invalid("expected a redirection"))?;
+                self.redirection(token, redirects)?;
+                redirects[first].variable = Some(name.into());
+            }
             Token::BothRedirect(target) => {
                 let Some(Token::Word(LexWord { word, .. })) = self.tokens.next() else {
                     return Err(Error::Invalid("expected a redirection target"));
                 };
                 redirects.push(Redirect {
+                    variable: None,
                     fd: 1,
                     target,
                     word,
                 });
                 redirects.push(Redirect {
+                    variable: None,
                     fd: 2,
                     target: Target::Duplicate,
                     word: Word::Literal("1".into()),
@@ -823,7 +1010,12 @@ impl Reader {
                 } else {
                     target
                 };
-                redirects.push(Redirect { fd, target, word });
+                redirects.push(Redirect {
+                    variable: None,
+                    fd,
+                    target,
+                    word,
+                });
             }
             _ => unreachable!(),
         }
@@ -836,7 +1028,12 @@ impl Reader {
             self.expand_alias(cmd.words.is_empty())?;
             if !matches!(
                 self.peek(),
-                Some(Token::Word(_) | Token::Redirect(_, _) | Token::BothRedirect(_))
+                Some(
+                    Token::Word(_)
+                        | Token::DescriptorName(_)
+                        | Token::Redirect(_, _)
+                        | Token::BothRedirect(_)
+                )
             ) {
                 break;
             }
@@ -1088,7 +1285,7 @@ mod tests {
     fn compounds_nest_and_preserve_commands_that_look_like_keywords() {
         let source = "f() { for x in a 'do'; do if false; then echo else; elif true; then echo \"$x\"; else :; fi; done; }; function g { while true; do :; done; }";
         let program = parse(source).unwrap();
-        let Command::Function { name, body } = &program[0].command else {
+        let Command::Function { name, body, .. } = &program[0].command else {
             panic!()
         };
         assert_eq!(name, "f");
@@ -1109,7 +1306,7 @@ mod tests {
             panic!()
         };
         assert_eq!((branches.len(), otherwise.len()), (2, 1));
-        let Command::Function { name, body } = &program[1].command else {
+        let Command::Function { name, body, .. } = &program[1].command else {
             panic!()
         };
         assert_eq!(name, "g");

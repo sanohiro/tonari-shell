@@ -105,12 +105,12 @@ impl External {
 }
 
 #[cfg(target_os = "macos")]
-fn inherited_env() -> *const *mut libc::c_char {
+pub(crate) fn inherited_env() -> *const *mut libc::c_char {
     unsafe { *libc::_NSGetEnviron() }
 }
 
 #[cfg(target_os = "linux")]
-fn inherited_env() -> *const *mut libc::c_char {
+pub(crate) fn inherited_env() -> *const *mut libc::c_char {
     unsafe extern "C" {
         static environ: *mut *mut libc::c_char;
     }

@@ -7,6 +7,8 @@ use crate::parser::is_identifier;
 struct Options<'a> {
     raw: bool,
     silent: bool,
+    edit: Option<bool>,
+    initial: Option<&'a str>,
     delimiter: u8,
     max_chars: Option<usize>,
     exact: bool,
@@ -21,6 +23,8 @@ fn options(args: &[String]) -> Result<Options<'_>, &'static str> {
     let mut opts = Options {
         raw: false,
         silent: false,
+        edit: None,
+        initial: None,
         delimiter: b'\n',
         max_chars: None,
         exact: false,
@@ -42,6 +46,10 @@ fn options(args: &[String]) -> Result<Options<'_>, &'static str> {
         i += 1;
         let mut flags = arg[1..].chars();
         while let Some(flag) = flags.next() {
+            if flag == 'e' || flag == 'E' {
+                opts.edit = Some(flag == 'e');
+                continue;
+            }
             if flag == 's' {
                 opts.silent = true;
                 continue;
@@ -50,7 +58,7 @@ fn options(args: &[String]) -> Result<Options<'_>, &'static str> {
                 opts.raw = true;
                 continue;
             }
-            if !matches!(flag, 'a' | 'd' | 'u' | 'n' | 'N' | 'p' | 't') {
+            if !matches!(flag, 'a' | 'd' | 'u' | 'n' | 'N' | 'p' | 't' | 'i') {
                 return Err("unsupported option");
             }
             let value = if flags.as_str().is_empty() {
@@ -78,6 +86,7 @@ fn options(args: &[String]) -> Result<Options<'_>, &'static str> {
                         return Err("invalid file descriptor");
                     }
                 }
+                'i' => opts.initial = Some(value),
                 'p' => opts.prompt = Some(value),
                 't' => {
                     opts.timeout = Some(
@@ -222,7 +231,41 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
     } else {
         None
     };
-    if let Some(prompt) = opts.prompt {
+    let mut edited = None;
+    let edit = opts.edit.filter(|_| {
+        opts.fd == 0
+            && !opts.silent
+            && opts.max_chars.is_none()
+            && opts.delimiter == b'\n'
+            && unsafe { libc::isatty(0) } == 1
+    });
+    if let Some(files_only) = edit {
+        let mut history = crate::history::History::default();
+        let prior =
+            crate::INPUT_DEADLINE.replace(opts.timeout.and_then(|t| Instant::now().checked_add(t)));
+        let result = crate::editor::line(
+            opts.prompt.unwrap_or(""),
+            &mut history,
+            session,
+            0,
+            Some((opts.initial.unwrap_or(""), files_only)),
+        );
+        crate::INPUT_DEADLINE.set(prior);
+        match result {
+            Ok(crate::editor::Input::Line(text)) => edited = Some(text.into_bytes().into_iter()),
+            Ok(crate::editor::Input::End) => edited = Some(Vec::new().into_iter()),
+            Ok(crate::editor::Input::Cancel) => return 130,
+            Ok(crate::editor::Input::Exit(code)) => return code,
+            Err(e) if e.kind() == io::ErrorKind::TimedOut => return 128 + libc::SIGALRM as u8,
+            Err(e) => {
+                eprintln!("tonari: read: {e}");
+                return 1;
+            }
+        }
+    }
+    if edit.is_none()
+        && let Some(prompt) = opts.prompt
+    {
         if unsafe { libc::isatty(opts.fd) } == 1 {
             eprint!("{prompt}");
         }
@@ -237,7 +280,9 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
         if opts.max_chars.is_some_and(|max| chars >= max) && std::str::from_utf8(&line).is_ok() {
             break 0;
         }
-        if let Some(timeout) = opts.timeout {
+        if edited.is_none()
+            && let Some(timeout) = opts.timeout
+        {
             let remaining = timeout.saturating_sub(started.elapsed());
             if remaining.is_zero()
                 || input.position == input.end && !ready(opts.fd, remaining).unwrap_or(false)
@@ -245,7 +290,12 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
                 break 128 + libc::SIGALRM as u8;
             }
         }
-        let b = match input.next() {
+        let input_byte = if let Some(bytes) = &mut edited {
+            Ok(bytes.next())
+        } else {
+            input.next()
+        };
+        let b = match input_byte {
             Ok(Some(b)) => b,
             Ok(None) => break 1,
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {

@@ -4,6 +4,9 @@ use super::Session;
 
 #[derive(Clone)]
 pub struct ShellOptions {
+    pub checkhash: bool,
+    pub extdebug: bool,
+    pub promptvars: bool,
     pub braceexpand: bool,
     pub localvar_inherit: bool,
     pub localvar_unset: bool,
@@ -13,6 +16,7 @@ pub struct ShellOptions {
     pub hostcomplete: bool,
     pub checkwinsize: bool,
     pub sourcepath: bool,
+    pub varredir_close: bool,
     pub expand_aliases: bool,
     pub progcomp: bool,
     pub glob: crate::pattern::GlobOptions,
@@ -23,6 +27,9 @@ pub struct ShellOptions {
 impl Default for ShellOptions {
     fn default() -> Self {
         Self {
+            checkhash: false,
+            extdebug: false,
+            promptvars: true,
             braceexpand: true,
             localvar_inherit: false,
             localvar_unset: false,
@@ -32,6 +39,7 @@ impl Default for ShellOptions {
             hostcomplete: true,
             checkwinsize: true,
             sourcepath: true,
+            varredir_close: false,
             expand_aliases: false,
             progcomp: true,
             glob: Default::default(),
@@ -54,23 +62,31 @@ macro_rules! option_entry {
 }
 
 const SET_OPTIONS: &[OptionEntry] = &[
+    option_entry!("allexport", allexport),
     option_entry!("braceexpand", shopt.braceexpand),
+    option_entry!("emacs", emacs),
     option_entry!("errexit", errexit),
     option_entry!("errtrace", errtrace),
     option_entry!("functrace", functrace),
     option_entry!("hashall", hashes.enabled),
+    option_entry!("histexpand", histexpand),
     option_entry!("history", history_enabled),
     option_entry!("monitor", jobs.monitor),
     option_entry!("noclobber", noclobber),
     option_entry!("noglob", noglob),
     option_entry!("nounset", nounset),
+    option_entry!("onecmd", onecmd),
     option_entry!("pipefail", pipefail),
     option_entry!("verbose", verbose),
+    option_entry!("vi", vi),
+    option_entry!("xtrace", xtrace),
 ];
 const SHOPT_OPTIONS: &[OptionEntry] = &[
+    option_entry!("checkhash", shopt.checkhash),
     option_entry!("checkwinsize", shopt.checkwinsize),
     option_entry!("dotglob", shopt.glob.dotglob),
     option_entry!("expand_aliases", shopt.expand_aliases),
+    option_entry!("extdebug", shopt.extdebug),
     option_entry!("extglob", shopt.glob.extglob),
     option_entry!("failglob", shopt.glob.failglob),
     option_entry!("globskipdots", shopt.glob.globskipdots),
@@ -89,9 +105,22 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("nullglob", shopt.glob.nullglob),
     option_entry!("patsub_replacement", shopt.patsub_replacement),
     option_entry!("progcomp", shopt.progcomp),
+    option_entry!("promptvars", shopt.promptvars),
     option_entry!("sourcepath", shopt.sourcepath),
+    option_entry!("varredir_close", shopt.varredir_close),
 ];
 impl Session {
+    pub(super) fn editing_option(&mut self, name: &str, enabled: bool) {
+        use crate::editor::bindings::Keymap;
+        if enabled && name == "emacs" {
+            self.vi = false;
+            self.bindings.map = Keymap::Emacs;
+        }
+        if enabled && name == "vi" {
+            self.emacs = false;
+            self.bindings.map = Keymap::Insert;
+        }
+    }
     pub fn refresh_terminal_size(&mut self) {
         if !self.interactive || !self.shopt.checkwinsize {
             return;
@@ -212,6 +241,13 @@ impl Session {
             if !all && (enable || disable) {
                 if let Some(write) = entry.write {
                     *write(self) = enable;
+                    if set {
+                        self.editing_option(name, enable);
+                    }
+                    if name == "extdebug" && !set {
+                        self.errtrace = enable;
+                        self.functrace = enable;
+                    }
                 }
                 continue;
             }

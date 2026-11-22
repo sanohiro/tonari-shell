@@ -7,7 +7,7 @@ BUILTINS = {
     "[": "[ 'two words' = 'two words' ] && [ 3 -gt 2 ] && ! [ -e missing ]",
     "alias": "shopt -s expand_aliases\nalias a='printf yes'\na",
     "bg": None, "fg": None,  # job control is exercised with a controlling terminal
-    "bind": "bind -m emacs-standard -q beginning-of-line",
+    "bind": r"""bind -m emacs-standard -u beginning-of-line; bind '"\C-a":beginning-of-line'; bind -q beginning-of-line""",
     "break": "for i in a b; do echo \"$i\"; for j in x; do break 2; done; done",
     "builtin": "echo() { printf overridden; }; builtin echo original",
     "caller": "f() { caller 0; }; f",

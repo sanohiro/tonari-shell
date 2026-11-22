@@ -20,16 +20,22 @@ fn sourced(session: &mut Session, file: File, path: &Path, args: &[String], stat
         return Flow::Continue(1);
     }
     let old = (!args.is_empty()).then(|| std::mem::replace(&mut session.positional, args.to_vec()));
+    let callsite = session.current_command.clone();
+    session.call_lines.push(session.line());
     session.source_depth += 1;
     session
         .source_names
         .push(path.to_string_lossy().into_owned());
     session.function_names.push("source".into());
+    let saved_debug = session.traps.enter_source(session.functrace);
     let result = input::file_script(session, file, status, false);
     let result = crate::traps::returning(session, result);
+    session.traps.leave_source(saved_debug);
     session.function_names.pop();
     session.source_names.pop();
     session.source_depth -= 1;
+    session.call_lines.pop();
+    session.current_command = callsite;
     if let Some(old) = old {
         session.positional = old;
     }

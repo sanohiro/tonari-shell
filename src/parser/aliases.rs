@@ -78,7 +78,21 @@ impl Reader {
                     disabled.remove(&frame.name);
                 }
             }
-            let (mut replacement, _) = with(nested, || lex(value, false, true))?;
+            let (mut replacement, spans, _) = with(nested, || lex(value, false, true))?;
+            let index = self.position();
+            let (start, end) = self.spans[index];
+            let mut source = self.source.to_string();
+            source.replace_range(start..end, value);
+            self.newlines = source.match_indices('\n').map(|(n, _)| n).collect();
+            self.source = source.into();
+            for (a, b) in &mut self.spans[index + 1..] {
+                *a = *a - (end - start) + value.len();
+                *b = *b - (end - start) + value.len();
+            }
+            self.spans.splice(
+                index..=index,
+                spans.into_iter().map(|(a, b)| (start + a, start + b)),
+            );
             self.tokens.next();
             self.alias_frames.push(Frame {
                 name,

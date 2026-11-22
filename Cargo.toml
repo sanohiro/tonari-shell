@@ -2,7 +2,7 @@
 name = "tonari"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.88"
 description = "An experimental Bash-compatible interactive shell for macOS and Linux"
 publish = false
 

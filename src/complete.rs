@@ -194,13 +194,21 @@ impl Source {
     }
 }
 
-pub fn at(line: &str, cursor: usize, session: &mut Session, list: bool) -> Option<Completion> {
+pub fn at(
+    line: &str,
+    cursor: usize,
+    session: &mut Session,
+    list: bool,
+    files_only: bool,
+) -> Option<Completion> {
     let context = Context::scan(line, cursor)?;
     let first = context.current == 0;
     let start = context.start;
     let prefix = context.words.get(context.current)?;
     let command = (!first).then(|| context.words[0].as_str());
-    let default_source = if session.shopt.hostcomplete
+    let default_source = if files_only {
+        Source::Files
+    } else if session.shopt.hostcomplete
         && let Some(host) = prefix.strip_prefix('@')
     {
         let mut names: Vec<_> = host_names(host, session)
@@ -221,8 +229,9 @@ pub fn at(line: &str, cursor: usize, session: &mut Session, list: bool) -> Optio
     };
     // First Tab inserts a common prefix. Only a listing needs every candidate.
     let mut options = (false, false);
-    let matches = if let Some(generated) =
-        crate::completion_spec::for_tab(session, command, prefix, Some(&context))
+    let matches = if !files_only
+        && let Some(generated) =
+            crate::completion_spec::for_tab(session, command, prefix, Some(&context))
     {
         options = (generated.noquote, generated.nospace);
         let result = generated.source.matches(prefix, session, list);
@@ -275,6 +284,7 @@ fn visit_commands(
     for name in crate::execute::builtin_names()
         .iter()
         .copied()
+        .filter(|n| !session.disabled_builtins.contains(*n))
         .chain(session.functions.keys().map(String::as_str))
         .chain(session.aliases.names().map(String::as_str))
     {

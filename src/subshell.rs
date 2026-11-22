@@ -35,6 +35,8 @@ pub fn capture_substitution(
             drop(write);
         }
         // fork already isolated the complete session, including shell variables.
+        session.subshell_depth += 1;
+        crate::execute::coprocess::after_fork(session);
         session.jobs.forked(true);
         session.interactive = false;
         session.command_string = false;
@@ -110,6 +112,8 @@ fn capture_simple(
 ) -> Option<Result<(String, u8), &'static str>> {
     use crate::word::{Part, Word, is_identifier};
     if body.is_empty()
+        || session.xtrace
+        || session.functrace && session.traps.debug_handler()
         || session.nounset
         || session.errexit && session.shopt.inherit_errexit
         || session.errtrace && session.traps.error_handler()
@@ -131,6 +135,7 @@ fn capture_simple(
             || !cmd.redirects.is_empty()
             || !cmd.assignments.is_empty()
             || session.functions.contains_key(program)
+            || session.disabled_builtins.contains(program)
         {
             return None;
         }
@@ -246,6 +251,8 @@ pub fn launch_group(
                 }
             }
         }
+        session.subshell_depth += 1;
+        crate::execute::coprocess::after_fork(session);
         session.jobs.forked(false);
         session.command_string = false;
         let flow = execute_program(session, body, status, true);

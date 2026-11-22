@@ -18,14 +18,35 @@ pub fn render_text(session: &mut Session, prompt: String, status: u8) -> String 
     if !prompt.contains(['\\', '$', '`']) {
         return prompt;
     }
-    let parsed = crate::parser::prompt_word(&prompt, |c| escape(session, c));
+    let parsed = crate::parser::prompt_word(&prompt, session.shopt.promptvars, |c, chars| {
+        escape(session, c, chars)
+    });
     parsed
         .ok()
         .and_then(|word| crate::eval::expand_case(session, word, status, false).ok())
         .unwrap_or(prompt)
 }
 
-fn escape(session: &Session, c: char) -> String {
+pub(crate) fn format_time(format: &str, seconds: libc::time_t) -> String {
+    let Ok(fmt) = std::ffi::CString::new(format) else {
+        return String::new();
+    };
+    let mut tm = std::mem::MaybeUninit::uninit();
+    if unsafe { libc::localtime_r(&seconds, tm.as_mut_ptr()) }.is_null() {
+        return String::new();
+    }
+    for size in [128, 512, 4096, 16384] {
+        let mut bytes = vec![0u8; size];
+        let n =
+            unsafe { libc::strftime(bytes.as_mut_ptr().cast(), size, fmt.as_ptr(), tm.as_ptr()) };
+        if n > 0 {
+            bytes.truncate(n);
+            return String::from_utf8_lossy(&bytes).into_owned();
+        }
+    }
+    String::new()
+}
+fn escape(session: &Session, c: char, chars: &mut std::str::Chars) -> String {
     let mut output = String::new();
     match c {
         '[' | ']' => {}
@@ -39,7 +60,62 @@ fn escape(session: &Session, c: char) -> String {
         } else {
             '$'
         }),
-        's' => output.push_str("tonari"),
+        's' => output.push_str(
+            session
+                .arg0
+                .rsplit('/')
+                .next()
+                .unwrap_or("tonari")
+                .trim_start_matches('-'),
+        ),
+        'v' => output.push_str("5.2"),
+        'V' => output.push_str("5.2.0"),
+        '!' => output.push_str(&session.history_number().to_string()),
+        '#' => output.push_str(&(session.command_number + 1).to_string()),
+        'j' => output.push_str(&session.jobs.count().to_string()),
+        'l' => {
+            let mut buf = [0u8; 256];
+            if unsafe { libc::ttyname_r(0, buf.as_mut_ptr().cast(), buf.len()) } == 0 {
+                let tty = unsafe { CStr::from_ptr(buf.as_ptr().cast()) }.to_string_lossy();
+                output.push_str(tty.rsplit('/').next().unwrap_or(""));
+            }
+        }
+        'd' | 't' | 'T' | '@' | 'A' | 'D' => {
+            let fmt = match c {
+                'd' => "%a %b %d",
+                't' => "%H:%M:%S",
+                'T' => "%I:%M:%S",
+                '@' => "%I:%M %p",
+                'A' => "%H:%M",
+                _ => {
+                    if let Some(rest) = chars.as_str().strip_prefix('{')
+                        && let Some((fmt, tail)) = rest.split_once('}')
+                    {
+                        *chars = tail.chars();
+                        if fmt.is_empty() { "%X" } else { fmt }
+                    } else {
+                        return "\\D".into();
+                    }
+                }
+            };
+            output.push_str(&format_time(fmt, unsafe {
+                libc::time(std::ptr::null_mut())
+            }));
+        }
+        '0'..='7' => {
+            let mut n = c.to_digit(8).unwrap();
+            for _ in 0..2 {
+                if let Some(d) = chars.clone().next().and_then(|c| c.to_digit(8)) {
+                    chars.next();
+                    n = n * 8 + d;
+                } else {
+                    break;
+                }
+            }
+            if let Some(ch) = char::from_u32(n) {
+                output.push(ch);
+            }
+        }
         'u' => {
             let user = unsafe { libc::getpwuid(libc::geteuid()) };
             if !user.is_null() {
@@ -80,6 +156,20 @@ fn escape(session: &Session, c: char) -> String {
                 output.push_str(rest);
             } else {
                 output.push_str(&path);
+            }
+            if c == 'w'
+                && let Some(limit) = session
+                    .get("PROMPT_DIRTRIM")
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .filter(|n| *n > 0)
+            {
+                let prefix = if output.starts_with("~/") { "~/" } else { "" };
+                let path = output.trim_start_matches("~/").trim_start_matches('/');
+                if let Some((i, _)) = path.rmatch_indices('/').nth(limit - 1)
+                    && i > 3
+                {
+                    output = format!("{prefix}.../{}", &path[i + 1..]);
+                }
             }
         }
         c => {

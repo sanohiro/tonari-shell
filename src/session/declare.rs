@@ -10,6 +10,7 @@ struct Options {
     array: bool,
     associative: bool,
     functions: bool,
+    traced: Option<bool>,
     function_names: bool,
     readonly: Option<bool>,
     global: bool,
@@ -59,7 +60,8 @@ pub(super) fn run(
                     flags.functions = true;
                     flags.function_names = true;
                 }
-                'f' if readonly || option.contains('r') => flags.functions = true,
+                't' => flags.traced = Some(on),
+                'f' => flags.functions = true,
                 'r' => flags.readonly = Some(on),
                 'g' => flags.global = on,
                 'i' => flags.integer = Some(on),
@@ -80,13 +82,16 @@ pub(super) fn run(
         let mut status = 0;
         if operands.is_empty() {
             for name in session.functions.keys() {
-                let attr = if session.readonly_functions.contains(name) {
-                    "fr"
-                } else if flags.readonly == Some(true) {
+                if !flags.function_names && !readonly {
+                    if session.print_function(&mut out, name).is_err() {
+                        return crate::Flow::Continue(1);
+                    }
                     continue;
-                } else {
-                    "f"
-                };
+                }
+                if flags.readonly == Some(true) && !session.readonly_functions.contains(name) {
+                    continue;
+                }
+                let attr = session.function_attributes(name);
                 if writeln!(out, "declare -{attr} {name}").is_err() {
                     return crate::execute::Flow::Continue(1);
                 }
@@ -100,6 +105,22 @@ pub(super) fn run(
                     status = 1;
                     continue;
                 }
+                if let Some(on) = flags.traced {
+                    if on {
+                        session.traced_functions.insert(name.clone());
+                    } else {
+                        session.traced_functions.remove(name);
+                    }
+                    if flags.exported.is_none() && flags.readonly.is_none() {
+                        continue;
+                    }
+                }
+                if let Some(on) = flags.exported {
+                    if session.export_function(name, on).is_err() {
+                        status = 1;
+                    }
+                    continue;
+                }
                 if let Some(on) = flags.readonly {
                     if on {
                         session.readonly_functions.insert(name.clone());
@@ -109,13 +130,32 @@ pub(super) fn run(
                     }
                     continue;
                 }
-                let line = if flags.print && session.readonly_functions.contains(name) {
-                    "declare -fr "
-                } else if flags.print {
-                    "declare -f "
+                if flags.function_names && !flags.print && session.shopt.extdebug {
+                    let source = session
+                        .function_sources
+                        .get(name)
+                        .map(String::as_str)
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("environment");
+                    if writeln!(
+                        out,
+                        "{name} {} {source}",
+                        session.function_definitions[name].line
+                    )
+                    .is_err()
+                    {
+                        return crate::Flow::Continue(1);
+                    }
+                    continue;
+                }
+                let line = if flags.print {
+                    format!("declare -{} ", session.function_attributes(name))
                 } else {
-                    ""
+                    String::new()
                 };
+                if !flags.function_names && session.print_function(&mut out, name).is_err() {
+                    return crate::Flow::Continue(1);
+                }
                 if flags.function_names && writeln!(out, "{line}{name}").is_err() {
                     return crate::execute::Flow::Continue(1);
                 }

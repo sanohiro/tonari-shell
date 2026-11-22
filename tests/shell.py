@@ -51,6 +51,166 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_named_descriptors_and_ordered_expansion(self):
+        self.compare('exec {out}>file 5>&$out; printf "雪" >&5; exec {out}>&-; '
+                     'test -e /dev/fd/$out; printf "%d\\n" "$?"; cat file; '
+                     'f(){ read -r -u "$input" value; printf "<%s>" "$value"; }; '
+                     'f {input}<<<"🌸 x"; exec {input}<&-; '
+                     '/usr/bin/true {child}>file; echo "${child-unset}"', 0,
+                     "1\n雪<🌸 x>unset\n".encode(), minimum=4)
+        self.compare('shopt -s varredir_close; : {tmp}>out; test -e /dev/fd/$tmp; echo "$?"; '
+                     'exec {keep}>out; test -e /dev/fd/$keep; echo "$?"; exec {keep}>&-', 0,
+                     b"1\n0\n", minimum=5)
+
+    def test_buffered_profile_preserves_parse_boundaries(self):
+        self.env["BASH_ENV"] = str(self.cwd / "startup")
+        (self.cwd / "startup").write_text(
+            "shopt -s expand_aliases\nif true; then\n  if true; then alias greet='echo ok'; fi\nfi\n"
+            'greet\nf(){\n echo "$LINENO"\n}\nf\n')
+        self.compare(":", 0, b"ok\n7\n")
+
+    def test_select_menu_reply_and_eof(self):
+        source = """PS3='> '; set -- first '雪 x'; select item; do
+printf '<%s:%s>\\n' "$item" "$REPLY"; done"""
+        for shell in self.shells_for():
+            p = subprocess.run([shell, "-c", source], cwd=self.cwd, env=self.env,
+                               input=b"\n 02 \ninvalid\n", capture_output=True, timeout=2)
+            menu = "1) first\n2) 雪 x\n> ".encode()
+            self.assertEqual((p.returncode, p.stdout, p.stderr),
+                             (1, "<雪 x: 02 >\n<:invalid>\n\n".encode(), menu + menu + b"> > "))
+
+    def test_timed_pipelines_and_coprocess_descriptors(self):
+        self.compare('TIMEFORMAT="timed %%"; { time false | true; time ! true; } 2>clock; '
+                     'echo "$?"; cat clock', 0, b"1\ntimed %\ntimed %\n")
+        self.compare('coproc WORK { read -r x; printf "<%s>\\n" "$x"; exit 7; }; '
+                     'p=$WORK_PID; exec 7<&"${WORK[0]}"; '
+                     '( [[ -e /dev/fd/${WORK[0]} ]]; echo "inherited=$?" ); '
+                     'printf "雪 x\\n" >&"${WORK[1]}"; wait "$p"; echo "$?"; '
+                     'cat <&7; exec 7<&-; echo "${WORK[0]-gone}"', 0,
+                     "inherited=1\n7\n<雪 x>\ngone\n".encode(), minimum=4)
+
+    def test_arithmetic_scalars_keep_bash_number_syntax(self):
+        self.compare('a=017; b=16#ff; c="a + b"; n=-31; array=(12); declare -n ref=n; '
+                     'printf "%s\\n" "$((a))" "$((b))" "$((c))" "$((ref))" "$((array))"; '
+                     'x=8; ((x <<= 2)); ((x >>= 1)); ((x ^= 3)); echo "$x"', 0,
+                     b"15\n255\n270\n-31\n12\n19\n", minimum=4)
+
+    def test_function_exports_across_shells(self):
+        source = r'''
+f(){ printf '%s\n' "a:$1"; }
+export -f f
+"$1" -c 'f "雪 x"'
+f(){ printf '%s\n' "b:$1"; }
+"$1" -c 'f "🌸 y"'
+export -fn f
+"$1" -c 'type -t f || echo absent'
+export -f f; unset -f f
+"$1" -c 'type -t f || echo gone'
+'''
+        for parent in self.shells_for(4):
+            for child in self.shells_for(4):
+                result = self.command(parent, source, "shell", str(child))
+                self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                 (0, "a:雪 x\nb:🌸 y\nabsent\ngone\n".encode(), b""), (parent, child))
+
+    def test_caller_lines_and_debug_inheritance(self):
+        script = self.cwd / "calls.sh"
+        script.write_text('inner(){\n  caller; caller 0; caller 1; echo "${BASH_LINENO[*]}:$LINENO"\n}\n'
+                          'outer(){\n  inner\n}\nouter\n')
+        expected = f"5 {script}\n5 outer {script}\n7 main {script}\n5 7 0:2\n".encode()
+        for shell in self.shells_for(4):
+            result = subprocess.run([shell, script], env=self.env, capture_output=True, timeout=2)
+            self.assertEqual((result.stdout, result.stderr, result.returncode), (expected, b"", 0))
+        self.compare('f(){ : inner; }; trap \'echo "$BASH_COMMAND:$?"\' DEBUG; '
+                     'false; f; set -T; f; trap - DEBUG', 0,
+                     b'false:0\nf:1\nset -T:0\nf:0\nf:0\n: inner:0\ntrap - DEBUG:0\n', minimum=4)
+
+    def test_builtin_control_and_suspension(self):
+        self.compare('enable -n echo; type -t echo; builtin echo no 2>/dev/null; printf "%d\\n" "$?"; '
+                     'enable echo; type -t echo; help -s printf', 0,
+                     b'file\n1\nbuiltin\nprintf: printf [-v var] format [arguments]\n', minimum=4)
+        for shell in self.shells_for(4):
+            self.check_suspension(shell)
+
+    def check_suspension(self, shell):
+        # A separate session lets both implementations suspend their entire group safely.
+        with subprocess.Popen([shell, "-c", "suspend -f; printf resumed"], start_new_session=True,
+                              cwd=self.cwd, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+            try:
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    pid, status = os.waitpid(proc.pid, os.WUNTRACED | os.WNOHANG)
+                    if pid:
+                        self.assertTrue(os.WIFSTOPPED(status), (shell, status))
+                        break
+                    time.sleep(.005)
+                else:
+                    self.fail(f"{shell} did not stop")
+                os.kill(proc.pid, signal.SIGCONT)
+                self.assertEqual(proc.communicate(timeout=2), (b"resumed", b""))
+                self.assertEqual(proc.returncode, 0)
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+
+    def test_editor_inputrc_macro_and_shell_binding(self):
+        self.env.update(LC_ALL="en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8",
+                        INPUTRC=str(self.cwd / "inputrc"))
+        (self.cwd / "inputrc").write_text('$if Bash\n"\\C-xm": "ZZ"\n$endif\n')
+        for shell in self.shells_for(5):
+            capture = self.cwd / "capture"
+            result = self.cwd / "result"
+            capture.unlink(missing_ok=True)
+            result.unlink(missing_ok=True)
+            fd = self.terminal_session(editing=True, shell=shell)
+            os.write(fd, b"""f(){ printf '%s\\n' "$READLINE_LINE" "$READLINE_POINT" "$READLINE_MARK" >capture; READLINE_LINE='echo ready >result'; READLINE_POINT=4; }; bind -x '"\\C-xr":f'\r""")
+            os.write(fd, '猫🌸'.encode() + b'\x18m\x02\x18r\r')
+            deadline = time.monotonic()+3
+            while not result.exists() and time.monotonic()<deadline:
+                if select.select([fd], [], [], .025)[0]:
+                    os.read(fd, 8192)
+            self.assertTrue(result.exists(), (shell, capture.read_bytes() if capture.exists() else None))
+            self.assertEqual(result.read_text(), "ready\n")
+            self.assertEqual(capture.read_text().splitlines(), ["猫🌸ZZ", "3", "0"])
+
+    def test_executable_text_without_shebang(self):
+        script = self.cwd / "plain"
+        script.write_text('args=("two words" "$1"); printf "<%s><%s>\\n" "$0" "${args[*]}"; exit 7\n')
+        script.chmod(0o700)
+        code = 'PATH=.:$PATH; plain "x y" | cat; echo "${PIPESTATUS[*]}"; ./plain z'
+        self.compare(code, 7, b"<./plain><two words x y>\n7 0\n<./plain><two words z>\n")
+        self.compare('value=$(./plain z); echo "$?:$value"', 0, b"7:<./plain><two words z>\n")
+
+    def test_history_expansion_in_script_and_at_prompt(self):
+        source = """set -o history
+set -H
+history -s 'echo "two words" tail'
+printf '<%s>\\n' !!:^ !$
+"""
+        for shell in self.shells_for(4):
+            proc = self.command(shell, source)
+            self.assertEqual((proc.returncode, proc.stdout), (0, b"<two words>\n<tail>\n"), proc.stderr)
+            self.assertIn(b'"two words" tail', proc.stderr)
+            fd = self.terminal_session(shell=shell)
+            os.write(fd, b"echo 'original text' >first\n")
+            self.read_until(fd, PROMPT)
+            os.write(fd, b"!!:s/first/second/\n")
+            self.read_until(fd, PROMPT)
+            self.assertEqual((self.cwd / "second").read_bytes(), b"original text\n")
+            (self.cwd / "second").unlink()
+            os.write(fd, b"!!:p\n")
+            self.read_until(fd, PROMPT)
+            self.assertFalse((self.cwd / "second").exists())
+
+    def test_debug_for_headers_and_trace_fd(self):
+        self.compare("trap 'echo \"$BASH_COMMAND\"' DEBUG; for x in a b; do :; done; "
+                     "case x in x) :;; esac; for ((i=0; i<1; i++)); do :; done; trap - DEBUG",
+                     0, b"for x in a b\n:\nfor x in a b\n:\ncase x in \n:\n"
+                     b"((i=0))\n((i<1))\n:\n((i++))\n((i<1))\ntrap - DEBUG\n", minimum=4)
+        self.compare("exec 7>trace; BASH_XTRACEFD=7; PS4='TRACE '; set -ax; v='two words'; "
+                     "echo \"$v\"; set +x; /bin/sh -c 'test \"$v\" = \"two words\"' && cat trace", 0,
+                     b"two words\nTRACE v='two words'\nTRACE echo 'two words'\nTRACE set +x\n", minimum=4)
+
     def test_readonly_scopes_attributes_and_write_paths(self):
         self.compare("""exec 2>/dev/null
 readonly g=outer

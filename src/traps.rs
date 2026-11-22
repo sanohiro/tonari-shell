@@ -49,10 +49,13 @@ extern "C" fn record(sig: i32) {
 }
 
 // Pseudo-traps never enter the OS signal API or the pending signal bitset.
+const DEBUG: i32 = i32::MAX - 2;
 const ERR: i32 = i32::MAX - 1;
 const RETURN: i32 = i32::MAX;
 fn trap_number(name: &str) -> Option<i32> {
-    if name.eq_ignore_ascii_case("ERR") {
+    if name.eq_ignore_ascii_case("DEBUG") {
+        Some(DEBUG)
+    } else if name.eq_ignore_ascii_case("ERR") {
         Some(ERR)
     } else if name.eq_ignore_ascii_case("RETURN") {
         Some(RETURN)
@@ -71,6 +74,7 @@ pub(crate) struct Entry {
 pub struct Traps {
     entries: BTreeMap<i32, Entry>,
     running: u64,
+    handling_debug: bool,
     handling_error: bool,
     handling_return: bool,
     interactive_hup: bool,
@@ -99,6 +103,14 @@ fn action(handler: usize) -> libc::sigaction {
 }
 
 impl Traps {
+    pub fn in_action(&self) -> bool {
+        self.handling_debug
+            || self.running != 0
+            || self.handling_error
+            || self.handling_return
+            || self.exit_status.is_some()
+    }
+
     pub fn active(&self) -> bool {
         !self.entries.is_empty() || self.interactive_hup
     }
@@ -190,7 +202,7 @@ impl Traps {
         if sig == 0 {
             self.watch_exit(command != "-" && !command.is_empty())?;
         }
-        let real = sig < ERR && sig > 0 && sig != libc::SIGSTOP && sig != libc::SIGKILL;
+        let real = sig < DEBUG && sig > 0 && sig != libc::SIGSTOP && sig != libc::SIGKILL;
         let mut original = action(libc::SIG_DFL);
         if let Some(old) = self.entries.get(&sig) {
             original = old.original;
@@ -253,20 +265,35 @@ impl Traps {
         }
     }
 
+    pub fn enter_source(&mut self, traced: bool) -> Option<Entry> {
+        self.hide(DEBUG, traced)
+    }
+    pub fn leave_source(&mut self, saved: Option<Entry>) {
+        self.restore(DEBUG, saved);
+    }
+    pub fn debug_handler(&self) -> bool {
+        !self.handling_debug && self.catches(DEBUG)
+    }
+
     pub fn enter_function(
         &mut self,
         errtrace: bool,
         functrace: bool,
-    ) -> (Option<Entry>, Option<Entry>) {
+    ) -> (Option<Entry>, Option<Entry>, Option<Entry>) {
         if self.entries.is_empty() {
-            return (None, None);
+            return (None, None, None);
         }
-        (self.hide(ERR, errtrace), self.hide(RETURN, functrace))
+        (
+            self.hide(ERR, errtrace),
+            self.hide(RETURN, functrace),
+            self.hide(DEBUG, functrace),
+        )
     }
 
-    pub fn leave_function(&mut self, hidden: (Option<Entry>, Option<Entry>)) {
+    pub fn leave_function(&mut self, hidden: (Option<Entry>, Option<Entry>, Option<Entry>)) {
         self.restore(ERR, hidden.0);
         self.restore(RETURN, hidden.1);
+        self.restore(DEBUG, hidden.2);
     }
 
     pub fn error_handler(&self) -> bool {
@@ -293,7 +320,7 @@ impl Traps {
             if sig == ERR {
                 return errtrace;
             }
-            if sig == RETURN {
+            if matches!(sig, RETURN | DEBUG) {
                 return functrace;
             }
             if sig > 0 && e.command.is_empty() {
@@ -328,7 +355,9 @@ impl Traps {
             let mut out = io::stdout().lock();
             let mut show = |sig| {
                 if let Some(e) = self.entries.get(&sig) {
-                    let name = if sig == RETURN {
+                    let name = if sig == DEBUG {
+                        "DEBUG"
+                    } else if sig == RETURN {
                         "RETURN"
                     } else if sig == ERR {
                         "ERR"
@@ -339,7 +368,7 @@ impl Traps {
                         out,
                         "trap -- '{}' {}{name}",
                         e.command.replace('\'', "'\\''"),
-                        if sig == 0 || sig >= ERR { "" } else { "SIG" }
+                        if sig == 0 || sig >= DEBUG { "" } else { "SIG" }
                     )?;
                 }
                 Ok::<_, io::Error>(())
@@ -402,6 +431,23 @@ pub(crate) fn input_interrupted() -> bool {
 pub fn pending() -> Option<i32> {
     let mask = PENDING.load(Relaxed);
     (mask != 0).then(|| mask.trailing_zeros() as i32)
+}
+
+pub fn debug(session: &mut Session, status: u8) -> Option<Flow> {
+    if !session.traps.debug_handler() {
+        return None;
+    }
+    session.traps.handling_debug = true;
+    let result = action_text(session, DEBUG, status);
+    session.traps.handling_debug = false;
+    match result {
+        Flow::Continue(2) if session.shopt.extdebug && session.function_depth > 0 => {
+            Some(Flow::Return(2))
+        }
+        Flow::Continue(n) if session.shopt.extdebug && n != 0 => Some(Flow::Continue(n)),
+        Flow::Continue(_) => None,
+        other => Some(other),
+    }
 }
 
 pub fn returning(session: &mut Session, flow: Flow) -> Flow {

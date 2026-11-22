@@ -77,7 +77,10 @@ pub(super) fn resolve(session: &mut Session, name: &str, remember: bool) -> Opti
         return None;
     }
     if let Some(path) = session.hashes.hit(name) {
-        return Some(path.into());
+        if !session.shopt.checkhash || super::lookup::executable(path) {
+            return Some(path.into());
+        }
+        session.hashes.entries.remove(name);
     }
     if !remember {
         return None;

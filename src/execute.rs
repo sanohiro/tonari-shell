@@ -1,5 +1,7 @@
+pub(crate) mod coprocess;
 pub(crate) mod fd;
 pub(crate) mod hash;
+mod named_fd;
 pub(crate) mod process_substitution;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -7,6 +9,7 @@ mod here_input;
 mod lookup;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod spawn;
+pub(crate) use spawn::inherited_env;
 
 use std::cell::Cell;
 use std::ffi::{CStr, CString};
@@ -255,29 +258,37 @@ impl Environment {
         }
         let changes: std::collections::BTreeMap<_, _> =
             session.environment_changes(assignments).collect();
-        let mut strings = Vec::new();
-        let mut push = |key: &[u8], value: &[u8]| {
-            let mut entry = Vec::with_capacity(key.len() + value.len() + 2);
-            entry.extend_from_slice(key);
-            entry.push(b'=');
-            entry.extend_from_slice(value);
-            strings.push(CString::new(entry).unwrap());
-        };
-        for (key, val) in std::env::vars_os() {
-            if !key.to_str().is_some_and(|name| changes.contains_key(name)) {
-                push(key.as_bytes(), val.as_bytes());
+        // Tonari keeps its variable changes in Session. The original process environment
+        // remains allocated and immutable for the lifetime of these borrowed C strings.
+        let mut pointers = Vec::new();
+        let mut inherited = inherited_env();
+        unsafe {
+            while !(*inherited).is_null() {
+                let entry = *inherited;
+                let bytes = CStr::from_ptr(entry).to_bytes();
+                let key = bytes.split(|&b| b == b'=').next().unwrap_or_default();
+                if !std::str::from_utf8(key).is_ok_and(|name| changes.contains_key(name)) {
+                    pointers.push(entry.cast_const());
+                }
+                inherited = inherited.add(1);
             }
         }
-        for (key, val) in &changes {
-            if let Some(val) = val {
-                push(key.as_bytes(), val.as_bytes());
+        let mut strings = Vec::with_capacity(changes.len());
+        for (name, value) in &changes {
+            if let Some(value) = value {
+                let mut entry = Vec::with_capacity(name.len() + value.len() + 2);
+                entry.extend_from_slice(name.as_bytes());
+                entry.push(b'=');
+                entry.extend_from_slice(value.as_bytes());
+                let entry = CString::new(entry).expect("validated environment value");
+                pointers.push(entry.as_ptr());
+                strings.push(entry);
             }
         }
-        let mut pointers: Vec<_> = strings.iter().map(|v| v.as_ptr()).collect();
         pointers.push(std::ptr::null());
         let cached_changes = if assignments.is_empty() {
-            changes
-                .into_iter()
+            session
+                .environment_changes(&[])
                 .map(|(k, v)| (k.to_owned(), v.map(std::borrow::Cow::into_owned)))
                 .collect()
         } else {
@@ -358,6 +369,36 @@ impl External {
         }
     }
 
+    fn script_fallback(&self, path: &CStr) -> i32 {
+        use std::io::Read;
+        let path_os = std::ffi::OsStr::from_bytes(path.to_bytes());
+        let Ok(mut file) = std::fs::File::open(path_os) else {
+            return errno();
+        };
+        let mut sample = [0u8; 128];
+        match file.read(&mut sample) {
+            Ok(n) if !sample[..n].contains(&0) => {}
+            _ => return libc::ENOEXEC,
+        }
+        let Ok(shell) = std::env::current_exe() else {
+            return errno();
+        };
+        let Ok(shell) = CString::new(shell.as_os_str().as_bytes()) else {
+            return libc::ENOEXEC;
+        };
+        let mut args = Vec::with_capacity(self.argv.len() + 2);
+        args.extend([shell.as_ptr(), c"--".as_ptr(), path.as_ptr()]);
+        args.extend_from_slice(&self.argv[1..]);
+        let env = self.env.as_ref().map_or_else(
+            || inherited_env().cast::<*const libc::c_char>(),
+            |e| e.pointers.as_ptr(),
+        );
+        unsafe {
+            libc::execve(shell.as_ptr(), args.as_ptr(), env);
+        }
+        errno()
+    }
+
     fn exec(&self) -> u8 {
         // Rust ignores SIGPIPE in its own runtime. External commands need the
         // normal Unix disposition, including on the direct exec path.
@@ -386,6 +427,10 @@ impl External {
             }
             match errno() {
                 libc::ENOENT | libc::ENOTDIR => continue,
+                libc::ENOEXEC => {
+                    error = self.script_fallback(path);
+                    break;
+                }
                 libc::EACCES => error = libc::EACCES,
                 e => {
                     error = e;
@@ -414,6 +459,7 @@ enum Builtin {
     Status(u8),
     Exit(u8),
     InvalidExit,
+    Control,
     NotLogin,
     History,
     ExtraExitArgs,
@@ -461,6 +507,9 @@ fn builtin(cmd: &PreparedCommand, last_status: u8, session: &Session) -> Option<
     if cmd.search == lookup::Search::Normal && session.functions.contains_key(name) {
         return Some(Builtin::Function);
     }
+    if session.disabled_builtins.contains(name) {
+        return (cmd.search == lookup::Search::BuiltinsOnly).then_some(Builtin::Unknown);
+    }
     if name == "logout" && !session.login {
         return Some(Builtin::NotLogin);
     }
@@ -474,6 +523,11 @@ pub(crate) fn builtin_names() -> &'static [&'static str] {
         "[",
         ".",
         "break",
+        "bind",
+        "caller",
+        "enable",
+        "help",
+        "suspend",
         "builtin",
         "cd",
         "command",
@@ -531,6 +585,7 @@ pub(crate) fn builtin_names() -> &'static [&'static str] {
 
 fn named_builtin(name: &str, args: &[String], last_status: u8) -> Option<Builtin> {
     match name {
+        "bind" | "caller" | "enable" | "help" | "suspend" => Some(Builtin::Control),
         "history" | "fc" => Some(Builtin::History),
         "trap" => Some(Builtin::Trap),
         "alias" | "unalias" => Some(Builtin::Alias),
@@ -595,6 +650,13 @@ fn eval_builtin(
     let args = cmd.words.get(1..).unwrap_or_default();
     let result = match builtin {
         Builtin::History => crate::history::commands::run(session, &cmd.words, last_status),
+        Builtin::Control => Flow::Continue(match cmd.words[0].as_str() {
+            "bind" => crate::editor::bindings::builtin(session, args),
+            "caller" => crate::builtins::control::caller(session, args),
+            "enable" => crate::builtins::control::enable(session, args),
+            "help" => crate::builtins::control::help(args),
+            _ => crate::builtins::control::suspend(session, args),
+        }),
         Builtin::NotLogin => {
             write_error(b"logout", b": not login shell: use `exit'");
             Flow::Continue(1)
@@ -902,6 +964,7 @@ fn run_builtin(
     if applied && matches!(builtin, Builtin::Exec) && matches!(flow, Flow::Continue(0)) {
         for a in actions {
             session.substitutions.replaced(a.destination());
+            coprocess::replaced(session, a.destination());
         }
         return Ok(flow);
     }
@@ -974,6 +1037,9 @@ fn stage_expansion(word: &Word) -> bool {
 }
 
 fn redirection_observable(r: &Redirect<Word>) -> bool {
+    if r.variable.is_some() {
+        return true;
+    }
     stage_expansion(&r.word)
         || matches!(r.target, Target::HereDoc { expand: true })
             && r.word
@@ -1030,6 +1096,7 @@ fn start_raw(
             .after_fork(session.errtrace, session.functrace);
         reset_child_signals();
         launch.child();
+        session.subshell_depth += 1;
         session.jobs.forked(!launch.background);
         session.stdin_redirected |= input.is_some();
         let code = if apply(&setup) {
@@ -1075,7 +1142,8 @@ fn start(
         && launch.group.is_none()
         && !launch.background
         && ((!cmd.redirects.is_empty() && merged_pipe.is_none())
-            || (cfg!(target_os = "linux") && (input.is_some() || output.is_some())))
+            || input.is_some()
+            || output.is_some())
         && (cached.is_some() || cmd.words[0].contains('/'))
         && cmd.redirects.iter().all(spawn::standard_dup)
     {
@@ -1086,35 +1154,31 @@ fn start(
             return Ok(Stage::Child(pid));
         }
     }
+    let resolved = cached.is_some() || cmd.words.first().is_some_and(|name| name.contains('/'));
     if builtin.is_none()
+        && launch.group.is_none()
+        && !launch.background
+        && resolved
+        && input.is_none()
+        && output.is_none()
+        && cmd.redirects.is_empty()
+    {
+        match External::new(cmd, session).spawn_resolved(None) {
+            Ok(pid) => return Ok(Stage::Child(pid)),
+            Err(e) if e.raw_os_error() == Some(libc::ENOEXEC) => {}
+            Err(e) => return spawn_failure(&cmd.words[0], e),
+        }
+    }
+    if builtin.is_none()
+        && !resolved
         && !session.traps.ignores(libc::SIGPIPE)
         && (cmd.redirects.is_empty() || merged_pipe.is_some())
         && !custom_search
         && launch.group.is_none()
         && !launch.background
     {
-        #[cfg(target_os = "linux")]
-        if input.is_none() && output.is_none() && (cached.is_some() || cmd.words[0].contains('/')) {
-            match External::new(cmd, session).spawn_resolved(None) {
-                Ok(pid) => return Ok(Stage::Child(pid)),
-                // Keep the existing shell-script fallback and error diagnostics.
-                Err(e) if e.raw_os_error() == Some(libc::ENOEXEC) => (),
-                Err(e) => return spawn_failure(&cmd.words[0], e),
-            }
-        }
         // Let the standard library select the platform's process-spawn path.
-        let explicit;
-        let program = if let Some(path) = cached {
-            if path.components().count() == 1 && !path.is_absolute() {
-                explicit = Path::new(".").join(path);
-                explicit.as_path()
-            } else {
-                path
-            }
-        } else {
-            Path::new(&cmd.words[0])
-        };
-        let mut external = Command::new(program);
+        let mut external = Command::new(&cmd.words[0]);
         external.arg0(&cmd.words[0]);
         external.args(&cmd.words[1..]);
         for (key, val) in session.environment_changes(&cmd.assignments) {
@@ -1170,6 +1234,7 @@ fn start(
             .after_fork(session.errtrace, session.functrace);
         reset_child_signals();
         launch.child();
+        session.subshell_depth += 1;
         session.jobs.forked(!launch.background);
         session.stdin_redirected |= cmd.redirects.iter().any(|r| r.fd == 0);
         session.stdin_redirected |= input.is_some();
@@ -1178,6 +1243,7 @@ fn start(
         } else if let Some(external) = external.as_ref() {
             external.exec()
         } else {
+            coprocess::after_fork(session);
             match eval_builtin(builtin.unwrap(), cmd, session, last_status) {
                 Flow::Discard(s) | Flow::Exit(s) | Flow::Return(s) | Flow::Continue(s) => s,
                 Flow::Break(_) | Flow::LoopContinue(_) => 0,
@@ -1271,6 +1337,7 @@ pub(crate) struct ArrayDeclaration {
 }
 
 struct PreparedCommand {
+    named_redirects: Vec<Redirect<Word>>,
     resolved: Option<PathBuf>,
     array_declarations: Vec<ArrayDeclaration>,
     compound: Option<Box<crate::parser::Command>>,
@@ -1289,10 +1356,24 @@ impl PreparedCommand {
         if !self.cacheable() || name.contains('/') {
             return None;
         }
-        self.resolved
-            .as_deref()
-            .or_else(|| session.hashes.get(name))
+        self.resolved.as_deref().or_else(|| {
+            session
+                .hashes
+                .get(name)
+                .filter(|path| !session.shopt.checkhash || lookup::executable(path))
+        })
     }
+}
+
+fn trace_word(word: &str) -> std::borrow::Cow<'_, str> {
+    if !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_alphanumeric() || "_+-/:.,=@%".contains(c))
+    {
+        return word.into();
+    }
+    format!("'{}'", word.replace('\'', "'\\''")).into()
 }
 
 fn prepare(
@@ -1434,6 +1515,7 @@ fn prepare(
     }
     let assignment_only = words.is_empty() && raw.compound.is_none();
     let mut cmd = PreparedCommand {
+        named_redirects: Vec::new(),
         resolved: None,
         array_declarations,
         compound: raw.compound,
@@ -1444,8 +1526,42 @@ fn prepare(
         assignments,
         empty_status: captured.get().unwrap_or(0),
     };
+    if session.xtrace && (!cmd.words.is_empty() || !cmd.assignments.is_empty()) {
+        use std::io::Write;
+        let prefix = session.get("PS4").unwrap_or_else(|| "+ ".into());
+        session.xtrace = false;
+        let mut trace = crate::prompt::render_text(session, prefix, last_status);
+        session.xtrace = true;
+        let fd = session
+            .get("BASH_XTRACEFD")
+            .and_then(|s| s.parse::<i32>().ok())
+            .unwrap_or(2);
+        let mut first = true;
+        for (name, value) in &cmd.assignments {
+            if !first {
+                trace.push(' ');
+            }
+            first = false;
+            trace.push_str(name);
+            trace.push('=');
+            trace.push_str(&trace_word(value));
+        }
+        for word in &cmd.words {
+            if !first {
+                trace.push(' ');
+            }
+            first = false;
+            trace.push_str(&trace_word(word));
+        }
+        trace.push('\n');
+        if let Ok(mut file) = fd::duplicate_except(fd, 3, |_| false) {
+            let _ = file.write_all(trace.as_bytes());
+        }
+    }
     lookup::command_prefix(&mut cmd, session);
-    if !raw.redirects.is_empty() {
+    if raw.redirects.iter().any(|r| r.variable.is_some()) {
+        cmd.named_redirects = raw.redirects;
+    } else if !raw.redirects.is_empty() {
         // Bash expands external/redirect-only redirections in a child context.
         // Clone only if an expansion can change a variable in that context.
         let child = assignment_only || builtin(&cmd, last_status, session).is_none();
@@ -1538,12 +1654,14 @@ fn prepare_redirects(
             target = Target::NoClobber;
         }
         redirects.push(Redirect {
+            variable: None,
             fd: r.fd,
             target,
             word,
         });
         if both {
             redirects.push(Redirect {
+                variable: None,
                 fd: 2,
                 target: Target::Duplicate,
                 word: "1".into(),
@@ -1551,6 +1669,7 @@ fn prepare_redirects(
         }
         if let Some(fd) = moved {
             redirects.push(Redirect {
+                variable: None,
                 fd,
                 target: Target::CloseMoved,
                 word: String::new(),
@@ -1594,13 +1713,22 @@ pub fn run_pipeline(
         String::new()
     };
     if pipeline.len() == 1 && !background {
-        let mut cmd = match prepare(pipeline.pop().unwrap(), session, last_status, true) {
+        let raw = pipeline.pop().unwrap();
+        if raw.compound.is_none()
+            && let Some(flow) = crate::traps::debug(session, last_status)
+        {
+            return Ok(flow);
+        }
+        let mut cmd = match prepare(raw, session, last_status, true) {
             Ok(cmd) => cmd,
             Err(e) => {
                 eprintln!("tonari: {e}");
                 return Ok(e.flow(session));
             }
         };
+        if !cmd.named_redirects.is_empty() {
+            return named_fd::run(cmd, session, last_status, replace, launch);
+        }
         if let Some(builtin) = builtin(&cmd, last_status, session) {
             return run_builtin(builtin, &cmd, session, last_status, replace);
         }
@@ -1645,7 +1773,23 @@ pub fn run_pipeline(
     };
     let length = pipeline.len();
     let mut stages = Vec::with_capacity(length);
-    for (i, raw) in pipeline.into_iter().enumerate() {
+    for (i, mut raw) in pipeline.into_iter().enumerate() {
+        if !session.traps.in_action()
+            && let Some(loc) = raw.location.take()
+        {
+            session.current_command = Some(loc);
+        }
+        if raw.compound.is_none()
+            && let Some(flow) = crate::traps::debug(session, last_status)
+        {
+            drop(input);
+            for stage in stages {
+                if let Stage::Child(pid) = stage {
+                    let _ = wait(pid);
+                }
+            }
+            return Ok(flow);
+        }
         let stage = (|| {
             let incoming = input.take();
             let output = if i + 1 < length {

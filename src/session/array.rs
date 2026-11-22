@@ -186,10 +186,15 @@ impl Session {
             );
         }
         match name {
+            "BASH_ARGV" => {
+                (0..self.debug_args.iter().map(Vec::len).sum::<usize>() as i64).collect()
+            }
+            "BASH_ARGC" => (0..self.debug_args.len() as i64).collect(),
             "BASH_VERSINFO" => (0..6).collect(),
             "DIRSTACK" => (0..=self.dir_stack.len() as i64).collect(),
             "FUNCNAME" if self.function_depth == 0 => Vec::new(),
             "FUNCNAME" => (0..self.function_names.len() as i64).collect(),
+            "BASH_LINENO" => (0..self.call_lines.len() as i64).collect(),
             "BASH_SOURCE" => (0..self.source_names.len() as i64).collect(),
             _ => self.inherited_value(name).map(|_| 0).into_iter().collect(),
         }
@@ -213,6 +218,19 @@ impl Session {
             };
         }
         match name {
+            "BASH_ARGV" => self
+                .debug_args
+                .iter()
+                .rev()
+                .flat_map(|args| args.iter().rev())
+                .nth(index as usize)
+                .cloned(),
+            "BASH_ARGC" => self
+                .debug_args
+                .iter()
+                .rev()
+                .nth(index as usize)
+                .map(|v| v.len().to_string()),
             "BASH_VERSINFO" => match index {
                 5 => Some(Self::machine_type()),
                 i => ["5", "2", "0", "1", "tonari"]
@@ -227,6 +245,12 @@ impl Session {
                 .rev()
                 .nth(index as usize)
                 .cloned(),
+            "BASH_LINENO" => self
+                .call_lines
+                .iter()
+                .rev()
+                .nth(index as usize)
+                .map(usize::to_string),
             "BASH_SOURCE" => self.source_names.iter().rev().nth(index as usize).cloned(),
             _ if index == 0 => self.inherited_value(name),
             _ => None,
@@ -244,6 +268,7 @@ impl Session {
             names.push("DIRSTACK".into());
         }
         names.push("BASH_SOURCE".into());
+        names.push("BASH_LINENO".into());
         names.push("BASH_VERSINFO".into());
         if self.pipe_status.first.is_some() {
             names.push("PIPESTATUS".into());

@@ -16,6 +16,7 @@ pub(super) enum Token {
     LeftParen,
     RightParen,
     Arithmetic(String),
+    DescriptorName(String),
     Redirect(i32, Target),
     BothRedirect(Target),
     Background,
@@ -268,8 +269,10 @@ pub(super) fn dollar(
                 word.part(Part::Arithmetic { expression, quoted });
                 return Ok(());
             }
-            let (tokens, after) = lex(&rest[1..], true, false)?;
-            let body = Reader::new(tokens).list(&[])?;
+            let nested = &rest[1..];
+            let (tokens, spans, after) = lex(nested, true, false)?;
+            let body =
+                Reader::new(tokens, spans, &nested[..nested.len() - after.len() - 1]).list(&[])?;
             *chars = after.chars();
             word.part(Part::Substitution { body, quoted });
             return Ok(());
@@ -630,6 +633,7 @@ fn command_position(tokens: &[Token]) -> bool {
             }
             Token::Word(_)
             | Token::Arithmetic(_)
+            | Token::DescriptorName(_)
             | Token::Redirect(..)
             | Token::BothRedirect(_) => return false,
             _ => return true,
@@ -642,7 +646,7 @@ pub(super) fn lex(
     source: &str,
     substitution: bool,
     final_input: bool,
-) -> Result<(Vec<Token>, &str), Error> {
+) -> Result<(Vec<Token>, Vec<(usize, usize)>, &str), Error> {
     let mut chars = source.chars();
     let mut parentheses = 0usize;
     let mut saw_case = false;
@@ -650,7 +654,12 @@ pub(super) fn lex(
     let mut pattern_next: Option<bool> = None;
     let mut pending_docs = Vec::new();
     let mut tokens = Vec::new();
+    let mut spans = Vec::new();
+    let mut token_start = 0;
     while let Some(c) = chars.clone().next() {
+        let offset = source.len() - chars.as_str().len();
+        spans.resize(tokens.len(), (token_start, offset));
+        token_start = offset;
         if matches!(c, ' ' | '\t') {
             chars.next();
             continue;
@@ -685,11 +694,11 @@ pub(super) fn lex(
                 // Ask the grammar only for substitutions containing a case word.
                 let ends_pattern = saw_case
                     && matches!(
-                        Reader::new(tokens.clone()).list(&[]),
+                        Reader::new(tokens.clone(), spans.clone(), &source[..offset]).list(&[]),
                         Err(Error::Incomplete("expected ')' after case pattern"))
                     );
                 if !ends_pattern {
-                    return Ok((tokens, chars.as_str()));
+                    return Ok((tokens, spans, chars.as_str()));
                 }
             }
             if c == '<' && chars.as_str().starts_with('<') {
@@ -777,8 +786,11 @@ pub(super) fn lex(
             match c {
                 '<' | '>' => {
                     chars.next();
-                    let (tokens, after) = lex(chars.as_str(), true, false)?;
-                    let body = Reader::new(tokens).list(&[])?;
+                    let nested = chars.as_str();
+                    let (tokens, spans, after) = lex(nested, true, false)?;
+                    let body =
+                        Reader::new(tokens, spans, &nested[..nested.len() - after.len() - 1])
+                            .list(&[])?;
                     chars = after.chars();
                     word.part(Part::Process {
                         body,
@@ -902,6 +914,21 @@ pub(super) fn lex(
         }
         let word = word.finish();
         if !protected && matches!(chars.clone().next(), Some('<' | '>')) {
+            let literal = &start[..start.len() - chars.as_str().len()];
+            if let Some(name) = literal
+                .strip_prefix('{')
+                .and_then(|s| s.strip_suffix('}'))
+                .filter(|s| is_identifier(s))
+            {
+                tokens.push(Token::DescriptorName(name.into()));
+                let op = chars.next().unwrap();
+                if op == '<' && chars.as_str().starts_with('<') {
+                    here_doc::redirect(&mut chars, 0, &mut tokens, &mut pending_docs)?;
+                } else {
+                    tokens.push(redirect(&mut chars, op, 0)?);
+                }
+                continue;
+            }
             if let Some(text) = word
                 .as_literal()
                 .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
@@ -946,5 +973,6 @@ pub(super) fn lex(
     if substitution {
         return Err(Error::Incomplete("unterminated command substitution"));
     }
-    Ok((tokens, ""))
+    spans.resize(tokens.len(), (token_start, source.len()));
+    Ok((tokens, spans, ""))
 }
