@@ -34,7 +34,7 @@ pub(super) fn quoted(chars: &mut Chars<'_>) -> Result<String, Error> {
     ))
 }
 
-fn decode(source: &str) -> Result<String, Error> {
+pub(crate) fn decode(source: &str) -> Result<String, Error> {
     let mut bytes = Vec::with_capacity(source.len());
     let mut chars = source.chars();
     let mut buffer = [0u8; 4];
@@ -43,7 +43,10 @@ fn decode(source: &str) -> Result<String, Error> {
             bytes.extend_from_slice(c.encode_utf8(&mut buffer).as_bytes());
             continue;
         }
-        let escape = chars.next().ok_or(Error::Incomplete("trailing escape"))?;
+        let Some(escape) = chars.next() else {
+            bytes.push(b'\\');
+            break;
+        };
         let byte = match escape {
             'a' => 7,
             'b' => 8,

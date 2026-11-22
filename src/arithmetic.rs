@@ -15,6 +15,9 @@ impl Variables for Session {
         self.get(name)
     }
     fn set(&mut self, name: &str, value: i64) -> Result<()> {
+        if self.readonly(name) {
+            return Err("readonly variable");
+        }
         self.assign(name, &value.to_string());
         Ok(())
     }

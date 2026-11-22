@@ -102,9 +102,23 @@ struct Job {
     modes: Option<libc::termios>,
     signaled: bool,
     listed: bool,
+    nohup: bool,
 }
 
 impl Job {
+    fn hangup(&self) {
+        if !self.nohup
+            && (self.active() || self.stopped())
+            && let Some(group) = self.group
+        {
+            unsafe {
+                libc::kill(-group, libc::SIGHUP);
+                if self.stopped() {
+                    libc::kill(-group, libc::SIGCONT);
+                }
+            }
+        }
+    }
     fn active(&self) -> bool {
         self.children.iter().any(|p| p.state == State::Running)
     }
@@ -142,8 +156,13 @@ impl Job {
         &mut self,
         mask: Option<&crate::traps::WaitMask>,
         force: bool,
+        foreground_tty: bool,
     ) -> io::Result<Option<u8>> {
         while self.active() || (force && self.stopped()) {
+            if foreground_tty && crate::traps::hanging_up() {
+                self.hangup();
+                return Ok(Some(128 + libc::SIGHUP as u8));
+            }
             if let Some(code) = mask.and_then(crate::traps::WaitMask::interrupt_status) {
                 return Ok(Some(code));
             }
@@ -195,6 +214,7 @@ pub struct Jobs {
     pub monitor: bool,
     tty: Option<Terminal>,
     table: Vec<Job>,
+    detached: Vec<pid_t>,
     inherited: Vec<Job>,
     serial: u32,
     // Bash keeps completed background statuses available to wait by PID.
@@ -252,6 +272,7 @@ impl Jobs {
         self.tty = None;
         self.monitor = false;
         self.table.clear();
+        self.detached.clear();
         self.serial = 0;
         self.finished.clear();
     }
@@ -291,6 +312,7 @@ impl Jobs {
             modes: None,
             signaled: false,
             listed: false,
+            nohup: false,
         };
         let last = job
             .children
@@ -359,7 +381,7 @@ impl Jobs {
             if resume {
                 job.resume()?;
             }
-            job.wait(None, false)
+            job.wait(None, false, tty.is_some())
         })();
         if let Some(t) = tty {
             self.restore();
@@ -376,9 +398,86 @@ impl Jobs {
                 }
             }
         }
-        result.map(|_| job.status())
+        result.map(|interrupt| interrupt.unwrap_or_else(|| job.status()))
     }
+    pub fn hangup(&self) {
+        for job in &self.table {
+            job.hangup();
+        }
+    }
+
+    fn disown(&mut self, args: &[String]) -> u8 {
+        let (mut all, mut running, mut nohup) = (false, false, false);
+        let mut specs = args;
+        while let Some((option, rest)) = specs.split_first() {
+            if option == "--" {
+                specs = rest;
+                break;
+            }
+            if !option.starts_with('-') || option == "-" {
+                break;
+            }
+            for flag in option[1..].chars() {
+                match flag {
+                    'a' => all = true,
+                    'r' => running = true,
+                    'h' => nohup = true,
+                    _ => {
+                        eprintln!("tonari: disown: invalid option {option}");
+                        return 2;
+                    }
+                }
+            }
+            specs = rest;
+        }
+        if specs.is_empty() && (all || running) {
+            for i in (0..self.table.len()).rev() {
+                if !running || self.table[i].active() {
+                    self.detach(i, nohup, false);
+                }
+            }
+            return 0;
+        }
+        let mut status = 0;
+        for spec in specs
+            .iter()
+            .map(String::as_str)
+            .chain(specs.is_empty().then_some("%+"))
+        {
+            if let Some(i) = self.select(spec) {
+                self.detach(i, nohup, true);
+            } else {
+                eprintln!("tonari: disown: {spec}: no such job");
+                status = 1;
+            }
+        }
+        status
+    }
+
+    fn detach(&mut self, index: usize, nohup: bool, keep_status: bool) {
+        if nohup {
+            self.table[index].nohup = true;
+            return;
+        }
+        let job = self.table.remove(index);
+        // A targeted disown retains the last known pipeline status for wait PID.
+        if keep_status {
+            self.remember(&job);
+        }
+        self.detached.extend(
+            job.children
+                .into_iter()
+                .filter(|p| p.pid > 0 && !matches!(p.state, State::Done(_)))
+                .map(|p| p.pid),
+        );
+    }
+
     pub fn poll(&mut self) {
+        self.detached.retain(|pid| {
+            let result = unsafe { libc::waitpid(*pid, std::ptr::null_mut(), libc::WNOHANG) };
+            result == 0
+                || result < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted
+        });
         for job in &mut self.table {
             for i in 0..job.children.len() {
                 let p = &job.children[i];
@@ -404,8 +503,20 @@ impl Jobs {
             "" | "%" | "%+" | "%%" => self.table.len().checked_sub(1),
             "%-" => self.table.len().checked_sub(2),
             s if s.starts_with('%') => {
-                let id = s[1..].parse::<u32>().ok()?;
-                self.table.iter().position(|j| j.id == id)
+                let name = &s[1..];
+                if let Ok(id) = name.parse::<u32>() {
+                    return self.table.iter().position(|j| j.id == id);
+                }
+                let mut hits =
+                    self.table
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, job)| match name.strip_prefix('?') {
+                            Some(part) => job.name.contains(part),
+                            None => job.name.starts_with(name),
+                        });
+                let (i, _) = hits.next()?;
+                hits.next().is_none().then_some(i)
             }
             s => {
                 let pid = s.parse::<pid_t>().ok()?;
@@ -554,7 +665,9 @@ fn wait_builtin(args: &[String], session: &mut Session) -> u8 {
             eprintln!("tonari: wait: {name}: not a valid identifier");
             return 1;
         }
-        session.unset(&["-v".into(), name.into()]);
+        if session.unset(&["-v".into(), name.into()]) != 0 {
+            return 1;
+        }
     }
     let (code, pid) = if options.next {
         wait_next(session, ids, options.force)
@@ -616,7 +729,7 @@ fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Opti
     let jobs = &mut session.jobs;
     if ids.is_empty() {
         for job in &mut jobs.table {
-            if let Ok(Some(code)) = job.wait(mask.as_ref(), force) {
+            if let Ok(Some(code)) = job.wait(mask.as_ref(), force, false) {
                 return (code, None);
             }
         }
@@ -638,7 +751,7 @@ fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Opti
         let number = spec.parse::<pid_t>().ok().filter(|&pid| pid > 0);
         if let Some(i) = jobs.select(spec) {
             let job = &mut jobs.table[i];
-            result = match job.wait(mask.as_ref(), force) {
+            result = match job.wait(mask.as_ref(), force, false) {
                 Ok(Some(code)) => return (code, None),
                 Ok(None) => (
                     job.status(),
@@ -867,6 +980,7 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
     match words[0].as_str() {
         "kill" => kill(jobs, &words[1..]),
         "jobs" => list(jobs, &words[1..]),
+        "disown" => jobs.disown(&words[1..]),
         name => {
             if !jobs.monitor {
                 eprintln!("tonari: {name}: no job control");

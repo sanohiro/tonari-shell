@@ -25,6 +25,13 @@ pub fn execute_program(
                 .peek()
                 .is_some_and(|s| s.condition != crate::parser::Condition::Always);
         session.tested_depth += u32::from(tested);
+        // Compound lists test each command in their body. A failed condition
+        // such as { false && :; } must not fire ERR again at the closing brace.
+        let reports_failure = match &statement.command {
+            Command::Pipeline(stages) => stages.len() != 1 || stages[0].compound.is_none(),
+            Command::Subshell(_) | Command::Test(_) | Command::Arithmetic(_) => true,
+            _ => false,
+        };
         let flow = command(
             session,
             statement.command,
@@ -33,12 +40,23 @@ pub fn execute_program(
         );
         session.tested_depth -= u32::from(tested);
         match flow {
-            Flow::Continue(code)
-                if code != 0 && session.errexit && !tested && session.tested_depth == 0 =>
-            {
+            Flow::Discard(code) if session.errexit && !tested && session.tested_depth == 0 => {
                 return Flow::Exit(code);
             }
-            Flow::Continue(code) => status = if negated { u8::from(code == 0) } else { code },
+            Flow::Continue(code) => {
+                if code != 0 && reports_failure && !tested && session.tested_depth == 0 {
+                    if session.traps.active() {
+                        let flow = crate::traps::error(session, code);
+                        if !matches!(flow, Flow::Continue(_)) {
+                            return flow;
+                        }
+                    }
+                    if session.errexit {
+                        return Flow::Exit(code);
+                    }
+                }
+                status = if negated { u8::from(code == 0) } else { code };
+            }
             other => return other,
         }
     }
@@ -65,7 +83,9 @@ pub(crate) fn command(session: &mut Session, command: Command, status: u8, tail:
     };
     let result = run_command(session, command, status, tail);
     if single {
-        if let Flow::Continue(code) | Flow::Exit(code) | Flow::Return(code) = result {
+        if let Flow::Discard(code) | Flow::Continue(code) | Flow::Exit(code) | Flow::Return(code) =
+            result
+        {
             session.pipe_status.single(code);
         }
     }
@@ -130,10 +150,15 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             };
             let mut items = items.into_iter();
             repeat(session, &body, status, |s, last| {
-                Ok(items.next().map(|value| {
-                    s.assign(&name, &value);
-                    last
-                }))
+                let Some(value) = items.next() else {
+                    return Ok(None);
+                };
+                if s.readonly(&name) {
+                    eprintln!("tonari: {name}: readonly variable");
+                    return Err(Flow::Continue(1));
+                }
+                s.assign(&name, &value);
+                Ok(Some(last))
             })
         }
         Command::Test(expr) => crate::test_expression::evaluate(expr, session, status),
@@ -237,6 +262,10 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             Flow::Continue(result)
         }
         Command::Function { name, body } => {
+            if session.readonly_functions.contains(&name) {
+                eprintln!("tonari: {name}: readonly function");
+                return Flow::Continue(1);
+            }
             session.function_sources.insert(
                 name.clone(),
                 session
@@ -322,7 +351,12 @@ pub fn call_function(session: &mut Session, name: &str, args: &[String], status:
     session.function_names.push(name.to_owned());
     session.enter_function();
     let old = std::mem::replace(&mut session.positional, args[1..].to_vec());
+    let hidden = session
+        .traps
+        .enter_function(session.errtrace, session.functrace);
     let flow = execute_program(session, body.as_ref().clone(), status, false);
+    let flow = crate::traps::returning(session, flow);
+    session.traps.leave_function(hidden);
     session.positional = old;
     session.leave_function();
     session.function_names.pop();

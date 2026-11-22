@@ -1,4 +1,5 @@
 pub(crate) mod array;
+mod assoc;
 mod declare;
 mod directories;
 mod getopts;
@@ -7,6 +8,7 @@ mod options;
 pub(crate) mod printf;
 mod read;
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::{self, Write};
@@ -17,8 +19,28 @@ use std::rc::Rc;
 
 use crate::parser::{Statement, is_identifier};
 
+#[derive(Clone, Copy)]
+pub(crate) enum CharacterLocale {
+    Ascii,
+    Utf8,
+    Turkic,
+}
+
+impl CharacterLocale {
+    fn from_name(name: &str) -> Self {
+        match name {
+            "" | "C" | "POSIX" => Self::Ascii,
+            _ if matches!(name.split(['_', '.', '@', '-']).next(), Some("tr" | "az")) => {
+                Self::Turkic
+            }
+            _ => Self::Utf8,
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct Variable {
+    readonly: bool,
     integer: bool,
     array_assigned: bool,
     elements: Option<Rc<array::Elements>>,
@@ -28,11 +50,11 @@ struct Variable {
 }
 
 #[derive(Clone)]
-struct ShellPid(u32);
+struct ShellPid(u32, libc::pid_t);
 
 impl Default for ShellPid {
     fn default() -> Self {
-        Self(std::process::id())
+        Self(std::process::id(), unsafe { libc::getppid() })
     }
 }
 
@@ -72,9 +94,12 @@ pub struct Session {
     dir_stack: Vec<String>,
     shell_pid: ShellPid,
     pub interactive: bool,
+    pub login: bool,
     pub command_string: bool,
     pub tested_depth: u32,
     pub errexit: bool,
+    pub errtrace: bool,
+    pub functrace: bool,
     pub nounset: bool,
     pub pipefail: bool,
     pub pipe_status: PipelineStatus,
@@ -99,6 +124,7 @@ pub struct Session {
     pub loop_depth: u32,
     pub aliases: crate::alias::Aliases,
     pub completions: crate::completion_spec::Registry,
+    pub readonly_functions: std::collections::BTreeSet<String>,
     pub functions: BTreeMap<String, Rc<Vec<Statement>>>,
     locals: Vec<Bindings>,
 }
@@ -107,15 +133,43 @@ pub struct Session {
 pub struct Bindings(BTreeMap<String, Option<Variable>>, Option<usize>);
 
 impl Session {
+    pub(crate) fn character_locale(&self) -> CharacterLocale {
+        const NAMES: [&str; 3] = ["LC_ALL", "LC_CTYPE", "LANG"];
+        static INHERITED: std::sync::OnceLock<CharacterLocale> = std::sync::OnceLock::new();
+        if !NAMES.iter().any(|name| self.variables.contains_key(*name)) {
+            return *INHERITED.get_or_init(|| {
+                let name = NAMES
+                    .iter()
+                    .find_map(|k| std::env::var(k).ok().filter(|s| !s.is_empty()));
+                CharacterLocale::from_name(name.as_deref().unwrap_or(""))
+            });
+        }
+        let name = NAMES
+            .iter()
+            .find_map(|name| self.get(name).filter(|s| !s.is_empty()));
+        CharacterLocale::from_name(name.as_deref().unwrap_or(""))
+    }
+
     pub fn variable_names(&self) -> Vec<String> {
         let mut names: std::collections::BTreeSet<_> = std::env::vars_os()
             .filter_map(|(k, _)| k.into_string().ok())
             .filter(|k| is_identifier(k))
             .collect();
         names.extend(
-            ["PWD", "IFS", "PATH", "OPTIND", "OPTERR"]
-                .into_iter()
-                .map(str::to_owned),
+            [
+                "PWD",
+                "IFS",
+                "PATH",
+                "OPTIND",
+                "OPTERR",
+                "UID",
+                "EUID",
+                "PPID",
+                "BASHOPTS",
+                "SHELLOPTS",
+            ]
+            .into_iter()
+            .map(str::to_owned),
         );
         for (key, var) in &self.variables {
             if var.declared {
@@ -156,6 +210,12 @@ impl Session {
         }
         if self.noclobber {
             flags.push('C');
+        }
+        if self.errtrace {
+            flags.push('E');
+        }
+        if self.functrace {
+            flags.push('T');
         }
         if self.command_string {
             flags.push('c');
@@ -237,6 +297,8 @@ impl Session {
             for flag in opt[1..].chars() {
                 match flag {
                     'e' => self.errexit = enable,
+                    'E' => self.errtrace = enable,
+                    'T' => self.functrace = enable,
                     'C' => self.noclobber = enable,
                     'B' => self.shopt.braceexpand = enable,
                     'f' => self.noglob = enable,
@@ -246,16 +308,7 @@ impl Session {
                     'o' => {
                         let Some(name) = args.get(i) else {
                             let mut out = io::stdout().lock();
-                            for (name, on) in [
-                                ("braceexpand", self.shopt.braceexpand),
-                                ("errexit", self.errexit),
-                                ("hashall", self.hashes.enabled),
-                                ("monitor", self.jobs.monitor),
-                                ("noclobber", self.noclobber),
-                                ("noglob", self.noglob),
-                                ("nounset", self.nounset),
-                                ("pipefail", self.pipefail),
-                            ] {
+                            for (name, on) in self.options(true) {
                                 let result = if enable {
                                     writeln!(out, "{name:16}{}", if on { "on" } else { "off" })
                                 } else {
@@ -290,17 +343,32 @@ impl Session {
 
     pub fn get(&self, name: &str) -> Option<String> {
         if let Some(base) = name.strip_prefix('\u{1}') {
+            if let Some(map) = self.variables.get(base).and_then(Variable::associative) {
+                return Some(
+                    map.ordered()
+                        .into_iter()
+                        .map(|(key, _)| key)
+                        .collect::<Vec<_>>()
+                        .join("\0"),
+                );
+            }
             return Some(
                 self.indices(base)
-                    .iter()
-                    .map(i64::to_string)
+                    .into_iter()
+                    .map(|i| i.to_string())
                     .collect::<Vec<_>>()
-                    .join(" "),
+                    .join("\0"),
             );
         }
         if let Some((base, index)) = array::subscript(name) {
+            if self.is_associative(base) {
+                return self.assoc_value(base, index).map(str::to_owned);
+            }
             let i = self.resolve_index(base, index).ok()?;
             return self.element(base, i);
+        }
+        if matches!(name, "BASHOPTS" | "SHELLOPTS") {
+            return Some(self.option_list(name == "SHELLOPTS"));
         }
         if name == "PIPESTATUS" {
             return self.element(name, 0);
@@ -319,6 +387,10 @@ impl Session {
 
     fn inherited_value(&self, name: &str) -> Option<String> {
         match name {
+            "EUID" => Some(unsafe { libc::geteuid() }.to_string()),
+            "UID" => Some(unsafe { libc::getuid() }.to_string()),
+            "PPID" => Some(self.shell_pid.1.to_string()),
+            "BASHOPTS" | "SHELLOPTS" => Some(self.option_list(name == "SHELLOPTS")),
             "PWD" => self
                 .logical_directory()
                 .ok()?
@@ -339,7 +411,18 @@ impl Session {
         }
     }
 
+    pub fn readonly(&self, name: &str) -> bool {
+        Self::builtin_readonly(name) || self.variables.get(name).is_some_and(|var| var.readonly)
+    }
+
+    fn builtin_readonly(name: &str) -> bool {
+        matches!(name, "UID" | "EUID" | "PPID" | "BASHOPTS" | "SHELLOPTS")
+    }
+
     pub fn assign(&mut self, name: &str, value: &str) {
+        if self.readonly(name) {
+            return;
+        }
         if name == "GLOBIGNORE" {
             self.shopt.glob.set_ignore(Some(value));
         }
@@ -371,6 +454,7 @@ impl Session {
         self.variables.insert(
             name.into(),
             Variable {
+                readonly: false,
                 integer: false,
                 array_assigned: false,
                 elements: None,
@@ -385,7 +469,7 @@ impl Session {
         self.variables.get(name).is_some_and(|v| v.integer)
     }
 
-    fn integer_value(
+    pub(crate) fn integer_value(
         &mut self,
         old: Option<&str>,
         expression: &str,
@@ -421,6 +505,9 @@ impl Session {
     pub fn bind(&mut self, assignments: &[(String, String)]) -> Bindings {
         let mut saved = Bindings::default();
         for (name, value) in assignments {
+            if self.readonly(name) {
+                continue;
+            }
             if name == "GLOBIGNORE" {
                 self.shopt.glob.set_ignore(Some(value));
             }
@@ -438,6 +525,7 @@ impl Session {
             self.variables.insert(
                 name.clone(),
                 Variable {
+                    readonly: false,
                     integer: false,
                     array_assigned: false,
                     elements: None,
@@ -476,12 +564,18 @@ impl Session {
     pub fn environment_changes<'a>(
         &'a self,
         assignments: &'a [(String, String)],
-    ) -> impl Iterator<Item = (&'a str, Option<&'a str>)> {
+    ) -> impl Iterator<Item = (&'a str, Option<Cow<'a, str>>)> {
         self.variables
             .iter()
             .filter_map(|(name, var)| {
                 if var.exported && var.elements.is_none() && var.value.is_some() {
-                    Some((name.as_str(), var.value.as_deref()))
+                    let value = match name.as_str() {
+                        "BASHOPTS" | "SHELLOPTS" => {
+                            Some(Cow::Owned(self.option_list(name == "SHELLOPTS")))
+                        }
+                        _ => var.value.as_deref().map(Cow::Borrowed),
+                    };
+                    Some((name.as_str(), value))
                 } else if std::env::var_os(name).is_some() {
                     Some((name.as_str(), None))
                 } else {
@@ -491,7 +585,7 @@ impl Session {
             .chain(
                 assignments
                     .iter()
-                    .map(|(k, v)| (k.as_str(), Some(v.as_str()))),
+                    .map(|(k, v)| (k.as_str(), Some(Cow::Borrowed(v.as_str())))),
             )
     }
 
@@ -561,6 +655,12 @@ impl Session {
                 status = 1;
                 continue;
             }
+            let readonly = self.readonly(name);
+            if readonly && value.is_some() {
+                eprintln!("tonari: export: {name}: readonly variable");
+                status = 1;
+                continue;
+            }
             if name == "PATH" && value.is_some() {
                 self.hashes.clear();
             }
@@ -609,6 +709,7 @@ impl Session {
             self.variables.insert(
                 name.into(),
                 Variable {
+                    readonly,
                     integer,
                     array_assigned: false,
                     elements: None,
@@ -646,13 +747,19 @@ impl Session {
         let mut out = io::stdout().lock();
         for (name, value) in vars {
             if let Some(var) = self.variables.get(&name) {
-                print_declaration(&mut out, &name, var)?;
+                if matches!(name.as_str(), "BASHOPTS" | "SHELLOPTS") {
+                    let current = self.declared_variable(&name, false).unwrap();
+                    print_declaration(&mut out, &name, &current)?;
+                } else {
+                    print_declaration(&mut out, &name, var)?;
+                }
                 continue;
             }
             print_declaration(
                 &mut out,
                 &name,
                 &Variable {
+                    readonly: false,
                     integer: false,
                     array_assigned: false,
                     elements: None,
@@ -666,6 +773,9 @@ impl Session {
     }
 
     fn unset_variable(&mut self, name: &str) {
+        if self.readonly(name) {
+            return;
+        }
         if name == "GLOBIGNORE" {
             self.shopt.glob.set_ignore(None);
         }
@@ -678,6 +788,7 @@ impl Session {
         self.variables.insert(
             name.into(),
             Variable {
+                readonly: false,
                 integer: false,
                 array_assigned: false,
                 elements: None,
@@ -719,9 +830,36 @@ impl Session {
             eprintln!("tonari: unset: cannot combine -f and -v");
             return 1;
         }
+        let mut status = 0;
         for name in &args[index..] {
+            let base = array::subscript(name).map_or(name.as_str(), |(base, _)| base);
+            if !functions_only && self.readonly(base) {
+                eprintln!("tonari: unset: {base}: readonly variable");
+                status = 1;
+                continue;
+            }
+            let resolve_function = functions_only
+                || !variables_only
+                    && self
+                        .declared_variable(name, false)
+                        .is_none_or(|v| !v.declared);
+            if resolve_function && self.readonly_functions.contains(name) {
+                eprintln!("tonari: unset: {name}: readonly function");
+                status = 1;
+                continue;
+            }
             if !functions_only {
                 if let Some((base, index)) = array::subscript(name) {
+                    if self.is_associative(base) {
+                        match self.subscript_key(index) {
+                            Ok(key) => self.remove_key(base, &key),
+                            Err(e) => {
+                                eprintln!("tonari: unset: {e}");
+                                status = 1;
+                            }
+                        }
+                        continue;
+                    }
                     match self.resolve_index(base, index) {
                         Ok(i) => self.unset_element(base, i),
                         Err(e) => {
@@ -737,13 +875,13 @@ impl Session {
                 continue;
             }
             if is_identifier(name) {
-                if !variables_only && self.get(name).is_none() {
+                if resolve_function {
                     self.functions.remove(name);
                 }
                 self.unset_variable(name);
             }
         }
-        0
+        status
     }
 
     pub fn logical_directory(&self) -> io::Result<PathBuf> {
@@ -875,18 +1013,23 @@ impl Session {
                 None => std::env::current_dir()?,
             };
             let _ = self.logical_cwd.set(cwd.clone());
-            let old_export = self.is_exported("OLDPWD");
-            self.variables.insert(
-                "OLDPWD".into(),
-                Variable {
-                    integer: false,
-                    array_assigned: false,
-                    elements: None,
-                    declared: true,
-                    value: old_pwd,
-                    exported: old_export,
-                },
-            );
+            let old_readonly = self.readonly("OLDPWD");
+            if !old_readonly {
+                let old_export = self.is_exported("OLDPWD");
+                self.variables.insert(
+                    "OLDPWD".into(),
+                    Variable {
+                        readonly: false,
+                        integer: false,
+                        array_assigned: false,
+                        elements: None,
+                        declared: true,
+                        value: old_pwd,
+                        exported: old_export,
+                    },
+                );
+            }
+            let pwd_readonly = self.readonly("PWD");
             self.assign(
                 "PWD",
                 cwd.to_str().ok_or_else(|| {
@@ -895,6 +1038,13 @@ impl Session {
             );
             if print {
                 print_path(&cwd)?;
+            }
+            if old_readonly || pwd_readonly {
+                return Err(io::Error::other(if old_readonly {
+                    "OLDPWD: readonly variable"
+                } else {
+                    "PWD: readonly variable"
+                }));
             }
             return Ok(());
         }
@@ -906,18 +1056,44 @@ impl Session {
 }
 
 fn print_declaration(out: &mut impl Write, name: &str, var: &Variable) -> io::Result<()> {
-    let flags = match (var.integer, var.elements.is_some(), var.exported) {
-        (true, true, true) => "-aix",
-        (true, true, false) => "-ai",
-        (true, false, true) => "-ix",
-        (true, false, false) => "-i",
-        (false, true, true) => "-ax",
-        (false, true, false) => "-a",
-        (false, false, true) => "-x",
-        (false, false, false) => "--",
-    };
-    write!(out, "declare {flags} {name}")?;
-    if let Some(array) = &var.elements {
+    write!(out, "declare -")?;
+    let mut has_flags = false;
+    for (on, flag) in [
+        (var.associative().is_some(), b'A'),
+        (var.elements.is_some() && var.associative().is_none(), b'a'),
+        (var.integer, b'i'),
+        (var.readonly, b'r'),
+        (var.exported, b'x'),
+    ] {
+        if on {
+            out.write_all(&[flag])?;
+            has_flags = true;
+        }
+    }
+    if !has_flags {
+        out.write_all(b"-")?;
+    }
+    write!(out, " {name}")?;
+    if let Some(map) = var.associative() {
+        if var.array_assigned {
+            write!(out, "=(")?;
+            for (key, value) in map.ordered() {
+                write!(out, "[")?;
+                if key
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || "_-./".contains(c))
+                {
+                    write!(out, "{key}")?;
+                } else {
+                    print_value(out, key)?;
+                }
+                write!(out, "]=")?;
+                print_value(out, value)?;
+                write!(out, " ")?;
+            }
+            write!(out, ")")?;
+        }
+    } else if let Some(array) = &var.elements {
         if var.array_assigned {
             write!(out, "=(")?;
             for (position, (index, value)) in array.iter().enumerate() {
@@ -989,7 +1165,10 @@ mod tests {
         let mut session = Session::default();
         session.assign(key, "global");
         session.enter_function();
-        assert_eq!(session.declare("local", &[format!("{key}=local")]), 0);
+        assert_eq!(
+            session.declare("local", &[format!("{key}=local")], &[]),
+            crate::Flow::Continue(0)
+        );
         let prefix = session.bind(&[(key.into(), "temporary".into())]);
         assert_eq!(session.get(key).as_deref(), Some("temporary"));
         assert!(session.is_exported(key));

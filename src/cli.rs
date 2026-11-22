@@ -20,6 +20,8 @@ pub struct Invocation {
     pub rcfile: Option<PathBuf>,
     pub check: bool,
     pub errexit: bool,
+    pub errtrace: bool,
+    pub functrace: bool,
     pub nounset: bool,
     pub noglob: bool,
     pub noclobber: bool,
@@ -57,6 +59,8 @@ pub fn parse(
     let mut rcfile = None;
     let mut check = false;
     let mut errexit = false;
+    let mut errtrace = false;
+    let mut functrace = false;
     let mut nounset = false;
     let mut noglob = false;
     let mut noclobber = false;
@@ -94,6 +98,8 @@ pub fn parse(
                         's' => stdin = enabled,
                         'n' => check = enabled,
                         'e' => errexit = enabled,
+                        'E' => errtrace = enabled,
+                        'T' => functrace = enabled,
                         'C' => noclobber = enabled,
                         'm' => monitor = Some(enabled),
                         'B' => braceexpand = enabled,
@@ -104,6 +110,8 @@ pub fn parse(
                             Some("braceexpand") => braceexpand = enabled,
                             Some("pipefail") => pipefail = enabled,
                             Some("errexit") => errexit = enabled,
+                            Some("errtrace") => errtrace = enabled,
+                            Some("functrace") => functrace = enabled,
                             Some("nounset") => nounset = enabled,
                             Some("monitor") => monitor = Some(enabled),
                             Some("noclobber") => noclobber = enabled,
@@ -148,6 +156,8 @@ pub fn parse(
         rcfile,
         check: check && !interactive,
         errexit,
+        errtrace,
+        functrace,
         nounset,
         noglob,
         noclobber,

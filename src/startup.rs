@@ -26,6 +26,7 @@ fn sourced(session: &mut Session, file: File, path: &Path, args: &[String], stat
         .push(path.to_string_lossy().into_owned());
     session.function_names.push("source".into());
     let result = input::file_script(session, file, status, false);
+    let result = crate::traps::returning(session, result);
     session.function_names.pop();
     session.source_names.pop();
     session.source_depth -= 1;

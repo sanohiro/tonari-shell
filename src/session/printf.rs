@@ -365,7 +365,11 @@ fn render(
                             if !is_identifier(name) {
                                 return Err("invalid identifier for %n");
                             }
-                            variables.write().assign(name, &out.len().to_string());
+                            if variables.read().readonly(name) {
+                                eprintln!("tonari: printf: {name}: readonly variable");
+                            } else {
+                                variables.write().assign(name, &out.len().to_string());
+                            }
                         }
                     }
                     k if b"diouxXaAeEfFgG".contains(&k) => spec.numeric(k, args, out)?,
@@ -378,14 +382,30 @@ fn render(
     Ok(true)
 }
 
+fn ascii_locale(session: &Session) -> bool {
+    ["LC_ALL", "LC_CTYPE", "LANG"]
+        .iter()
+        .find_map(|name| session.get(name).filter(|s| !s.is_empty()))
+        .is_some_and(|name| matches!(name.as_str(), "C" | "POSIX"))
+}
+
+pub(crate) fn parameter_quote(text: &str, session: &Session) -> String {
+    let ascii = ascii_locale(session);
+    if text
+        .bytes()
+        .any(|c| c.is_ascii_control() || ascii && !c.is_ascii())
+    {
+        String::from_utf8(ansi_quote(text.as_bytes(), ascii)).expect("quoted UTF-8")
+    } else {
+        crate::completion_spec::single_quote(text)
+    }
+}
+
 fn quote(data: &[u8], session: &Session) -> Vec<u8> {
     if data.is_empty() {
         return b"''".to_vec();
     }
-    let ascii_locale = ["LC_ALL", "LC_CTYPE", "LANG"]
-        .iter()
-        .find_map(|name| session.get(name).filter(|s| !s.is_empty()))
-        .is_some_and(|name| matches!(name.as_str(), "C" | "POSIX"));
+    let ascii_locale = ascii_locale(session);
     let ansi = data
         .iter()
         .any(|b| b.is_ascii_control() || (ascii_locale && !b.is_ascii()));

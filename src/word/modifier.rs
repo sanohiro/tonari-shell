@@ -13,6 +13,13 @@ pub enum Modification {
         length: Option<Word>,
     },
     Prompt,
+    Quote,
+    Escapes,
+    Case {
+        upper: bool,
+        all: bool,
+        pattern: Word,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,6 +72,15 @@ impl Values {
 pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String>, Error> {
     let expanded;
     let name = if let Some((base, index)) = crate::session::array::subscript(name) {
+        if !matches!(index, "@" | "*") && env.session.is_associative(base.trim_start_matches('#')) {
+            let key = env.key(index)?;
+            let value = env.session.assoc_value(base.trim_start_matches('#'), &key);
+            return Ok(if base.starts_with('#') {
+                Some(value.map_or(0, |s| s.chars().count()).to_string())
+            } else {
+                value.map(str::to_owned)
+            });
+        }
         if !matches!(index, "@" | "*") && index.contains(['$', '`']) {
             let i = env.arithmetic(index)?;
             expanded = format!("{base}[{i}]");
@@ -120,6 +136,59 @@ impl Modification {
                     )
                 }))
             }
+            Self::Case {
+                upper,
+                all,
+                pattern,
+            } => {
+                let values = Values::read(name, env)?;
+                let pattern = match std::mem::replace(pattern, Word::Literal(String::new())) {
+                    Word::Literal(text) if text.is_empty() => text,
+                    word => env.pattern(word)?,
+                };
+                let filter = if pattern.is_empty() || pattern == "?" {
+                    None
+                } else {
+                    Some(crate::pattern::Matcher::new(pattern.as_str()))
+                };
+                let locale = env.session.character_locale();
+                let upper = *upper;
+                let all = *all;
+                // Bash applies the locale's single-character case conversion.
+                // In particular an uppercase expansion never grows into two letters.
+                Ok(values.map(quoted, |text| {
+                    crate::pattern::case_chars(text, upper, all, filter.as_ref(), locale)
+                }))
+            }
+            Self::Quote | Self::Escapes => {
+                let values = if array_elements_name(name).is_some() || matches!(name, "@" | "*") {
+                    Values::read(name, env)?
+                } else if let Some(text) = value(name, env)? {
+                    Values::Scalar(text)
+                } else if env.session.nounset {
+                    return Err(env.missing(name, "unbound variable"));
+                } else {
+                    return Ok(scalar(String::new()));
+                };
+                let transform = |text: String| -> Result<String, Error> {
+                    if matches!(self, Self::Quote) {
+                        Ok(crate::session::printf::parameter_quote(&text, env.session))
+                    } else {
+                        crate::parser::ansi_string(&text).map_err(|e| Error::from(e.message()))
+                    }
+                };
+                match values {
+                    Values::Scalar(text) => Ok(scalar(transform(text)?)),
+                    Values::Elements(values, at) => Ok(Part::Elements {
+                        values: values
+                            .into_iter()
+                            .map(transform)
+                            .collect::<Result<_, _>>()?,
+                        at,
+                        quoted,
+                    }),
+                }
+            }
             Self::Prompt => {
                 let prompt = value(name, env)?.unwrap_or_default();
                 let status = env.status();
@@ -138,10 +207,29 @@ impl Modification {
                     }
                     let count = len.map_or(usize::MAX, |n| n as usize);
                     let (values, at) = if let Some((base, at, keys)) = array_elements_name(name) {
+                        if env.session.is_associative(base) {
+                            let values = super::array_elements(base, keys, &|k| env.lookup(k))
+                                .unwrap_or_default();
+                            let offset = if start < 0 {
+                                (values.len() as i64).saturating_add(start)
+                            } else {
+                                start.saturating_sub(1).max(0)
+                            };
+                            let values = if offset < 0 {
+                                Vec::new()
+                            } else {
+                                values
+                                    .into_iter()
+                                    .skip(offset as usize)
+                                    .take(count)
+                                    .collect()
+                            };
+                            return Ok(Part::Elements { values, at, quoted });
+                        }
                         let indexes = env.lookup(&format!("\u{1}{base}")).unwrap_or_default();
                         let last = indexes
-                            .split_ascii_whitespace()
-                            .next_back()
+                            .split('\0')
+                            .rfind(|i| !i.is_empty())
                             .and_then(|i| i.parse::<i64>().ok())
                             .unwrap_or(-1);
                         let start = if start < 0 {
@@ -153,7 +241,8 @@ impl Modification {
                             Vec::new()
                         } else {
                             indexes
-                                .split_ascii_whitespace()
+                                .split('\0')
+                                .filter(|i| !i.is_empty())
                                 .filter(|i| i.parse::<i64>().is_ok_and(|i| i >= start))
                                 .take(count)
                                 .filter_map(|i| {

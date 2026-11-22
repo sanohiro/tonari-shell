@@ -72,7 +72,10 @@ pub fn file_script(session: &mut Session, file: File, status: u8, check: bool) -
         return if check {
             Flow::Continue(0)
         } else {
-            execute_program(session, program, status, false)
+            match execute_program(session, program, status, false) {
+                Flow::Discard(code) => Flow::Continue(code),
+                flow => flow,
+            }
         };
     }
     match PrivateFile::new(file) {
@@ -136,7 +139,7 @@ fn run(
                 }
                 ran = true;
                 match execute_program(session, program, status, false) {
-                    Flow::Continue(code) => status = code,
+                    Flow::Discard(code) | Flow::Continue(code) => status = code,
                     other => return other,
                 }
             }
@@ -158,7 +161,10 @@ pub fn text(session: &mut Session, source: &str, mut status: u8, tail: bool, che
             return if check {
                 Flow::Continue(0)
             } else {
-                execute_program(session, program, status, tail)
+                match execute_program(session, program, status, tail) {
+                    Flow::Discard(code) => Flow::Continue(code),
+                    flow => flow,
+                }
             };
         }
     }
@@ -185,7 +191,7 @@ pub fn text(session: &mut Session, source: &str, mut status: u8, tail: bool, che
             Ok(program) if !program.is_empty() && !check => {
                 ran = true;
                 match execute_program(session, program, status, tail && last) {
-                    Flow::Continue(code) => status = code,
+                    Flow::Discard(code) | Flow::Continue(code) => status = code,
                     other => return other,
                 }
             }

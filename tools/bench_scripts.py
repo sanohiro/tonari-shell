@@ -139,6 +139,25 @@ echo "${#DIRSTACK[@]}"
 for ((i=0; i<128; i++)); do exec 7<>rows; exec 6<&7-; exec 6<&-; done
 test -s rows && echo moved
 """, "moved"),
+    "associative-lookup": ("""
+declare -A values=([left]=1 ["right hand"]=2)
+for ((i=0; i<1200; i++)); do k="right hand"; values[left]=${values[$k]}; done
+echo "${values[left]}:${#values[@]}"
+""", "2:2"),
+    "readonly-locals": ("""
+check(){ local -r item="$1"; result=$item; }
+for ((i=0; i<1000; i++)); do check "$i"; done
+echo "$result"
+""", "999"),
+    "error-trap": ("""
+n=0; trap '((n+=1))' ERR
+for ((i=0; i<600; i++)); do false; done
+echo "$n"
+""", "600"),
+    "case-conversion": ("""
+v='two WORDS plus 42'; for ((i=0; i<1200; i++)); do upper=${v^^}; lower=${upper,,}; done
+echo "$lower"
+""", "two words plus 42"),
     "integer-assignments": ("""
 declare -i n=1
 for ((i=0; i<2000; i++)); do n+=3; done

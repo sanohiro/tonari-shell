@@ -159,6 +159,84 @@ pub fn matches(value: &str, pattern: &str) -> bool {
     Matcher::new(pattern).matches(value)
 }
 
+pub(crate) fn case_chars(
+    mut text: String,
+    upper: bool,
+    all: bool,
+    pattern: Option<&Matcher<&str>>,
+    locale: crate::session::CharacterLocale,
+) -> String {
+    use crate::session::CharacterLocale;
+    if pattern.is_none()
+        && (matches!(locale, CharacterLocale::Ascii)
+            || text.is_ascii() && !matches!(locale, CharacterLocale::Turkic))
+    {
+        let end = if all {
+            text.len()
+        } else {
+            text.chars().next().map_or(0, char::len_utf8)
+        };
+        if upper {
+            text[..end].make_ascii_uppercase();
+        } else {
+            text[..end].make_ascii_lowercase();
+        }
+        return text;
+    }
+    unsafe extern "C" {
+        fn towupper_l(c: u32, locale: libc::locale_t) -> u32;
+        fn towlower_l(c: u32, locale: libc::locale_t) -> u32;
+    }
+    // The shell may start in C and switch to UTF-8. Select a UTF-8 ctype
+    // explicitly without changing the process locale or loading Unicode tables.
+    static UTF8: OnceLock<usize> = OnceLock::new();
+    let utf8 = *UTF8.get_or_init(|| {
+        for name in [c"C.UTF-8", c"en_US.UTF-8", c"UTF-8"] {
+            let locale = unsafe {
+                libc::newlocale(libc::LC_CTYPE_MASK, name.as_ptr(), std::ptr::null_mut())
+            };
+            if !locale.is_null() {
+                return locale as usize;
+            }
+        }
+        0
+    }) as libc::locale_t;
+    localized(|| {
+        let mut out = String::with_capacity(text.len());
+        let mut chars = text.chars();
+        for c in chars.by_ref() {
+            let mut buf = [0; 4];
+            let eligible = pattern.is_none_or(|p| p.matches(c.encode_utf8(&mut buf)));
+            let mapped = match (eligible, locale, upper, c) {
+                (false, ..) => c,
+                (_, CharacterLocale::Ascii, true, _) => c.to_ascii_uppercase(),
+                (_, CharacterLocale::Ascii, false, _) => c.to_ascii_lowercase(),
+                (_, CharacterLocale::Turkic, true, 'i') => 'İ',
+                (_, CharacterLocale::Turkic, false, 'I') => 'ı',
+                // Bash uses the single-code-point mapping. musl's uppercase
+                // sharp S differs from both of the reference distributions.
+                (_, _, true, 'ß') => c,
+                (_, _, false, 'İ') => 'i',
+                _ if utf8.is_null() => c,
+                _ => char::from_u32(unsafe {
+                    if upper {
+                        towupper_l(c as u32, utf8)
+                    } else {
+                        towlower_l(c as u32, utf8)
+                    }
+                })
+                .unwrap_or(c),
+            };
+            out.push(mapped);
+            if !all {
+                break;
+            }
+        }
+        out.push_str(chars.as_str());
+        out
+    })
+}
+
 pub fn trim(
     mut value: String,
     pattern: &str,
@@ -281,6 +359,7 @@ pub(crate) fn has_magic(text: &str, pathname: bool) -> bool {
 pub struct GlobOptions {
     pub dotglob: bool,
     pub nullglob: bool,
+    pub failglob: bool,
     pub globstar: bool,
     pub extglob: bool,
     pub globskipdots: bool,
@@ -292,6 +371,7 @@ impl Default for GlobOptions {
         Self {
             dotglob: false,
             nullglob: false,
+            failglob: false,
             globstar: false,
             extglob: false,
             globskipdots: true,
@@ -473,31 +553,10 @@ fn paths(pattern: &str, options: &GlobOptions, fields: &mut Vec<String>, collati
     }
     if let Some(patterns) = &options.ignore {
         for pattern in patterns.iter() {
-            let parts: Vec<_> = pattern
-                .split('/')
-                .map(|part| {
-                    let group = options
-                        .extglob
-                        .then(|| extended::Pattern::new(part))
-                        .flatten();
-                    (Matcher::new(part), group)
-                })
-                .collect();
-            paths.retain(|path| {
-                let mut names = path.split('/');
-                for (basic, group) in &parts {
-                    let Some(name) = names.next() else {
-                        return true;
-                    };
-                    if !group
-                        .as_ref()
-                        .map_or_else(|| basic.matches(name), |p| p.accepts(name, false))
-                    {
-                        return true;
-                    }
-                }
-                names.next().is_some()
-            });
+            // GLOBIGNORE tests the entire displayed pathname. An extended
+            // alternative may contain a slash or match one with a bracket class.
+            let matcher = extended::Pattern::parse(pattern, options.extglob);
+            paths.retain(|path| !matcher.pathname(path));
         }
     }
     order::append(paths, fields, collation);
@@ -581,18 +640,32 @@ impl Field {
         self.text.push_str(text);
     }
 
-    pub fn finish(self, fields: &mut Vec<String>, globbing: Option<&GlobOptions>) {
+    pub fn finish(
+        self,
+        fields: &mut Vec<String>,
+        globbing: Option<&GlobOptions>,
+    ) -> Result<(), crate::expansion::Error> {
         if let Some((options, pattern)) = globbing
             .zip(self.pattern)
             .filter(|(options, p)| has_magic(p, true) || options.extglob && extended::has_group(p))
         {
             let count = fields.len();
             with_locale(|order| paths(&pattern, options, fields, order));
-            if fields.len() > count || options.nullglob {
-                return;
+            if fields.len() > count {
+                return Ok(());
+            }
+            if options.failglob {
+                return Err(crate::expansion::Error::discard(format!(
+                    "no match: {}",
+                    self.text
+                )));
+            }
+            if options.nullglob {
+                return Ok(());
             }
         }
         fields.push(self.text);
+        Ok(())
     }
 }
 
@@ -728,14 +801,18 @@ mod tests {
         field.push(root, false);
         field.push("[[:alpha:]]ord.rs", true);
         let mut words = Vec::new();
-        field.finish(&mut words, Some(&GlobOptions::default()));
+        field
+            .finish(&mut words, Some(&GlobOptions::default()))
+            .unwrap();
         assert_eq!(words, [format!("{root}word.rs")]);
 
         let mut field = Field::default();
         field.push(root, false);
         field.push("*", false);
         field.push("-missing-?", true);
-        field.finish(&mut words, Some(&GlobOptions::default()));
+        field
+            .finish(&mut words, Some(&GlobOptions::default()))
+            .unwrap();
         assert_eq!(words[1], format!("{root}*-missing-?"));
     }
 }

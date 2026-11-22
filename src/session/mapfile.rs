@@ -146,6 +146,14 @@ pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u
             return Flow::Continue(code);
         }
     };
+    if session.readonly(options.name) {
+        eprintln!("tonari: {command}: {}: readonly variable", options.name);
+        return Flow::Continue(1);
+    }
+    if session.is_associative(options.name) {
+        eprintln!("tonari: {command}: {}: not an indexed array", options.name);
+        return Flow::Continue(1);
+    }
     let fd = options.fd;
     if crate::execute::fd::is_private(fd) || unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
         eprintln!("tonari: {command}: {fd}: invalid file descriptor");
@@ -232,6 +240,10 @@ pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u
             match crate::eval_text(session, &command, last) {
                 Flow::Continue(_) => {}
                 flow => return flow,
+            }
+            if session.readonly(options.name) {
+                eprintln!("tonari: {command}: {}: readonly variable", options.name);
+                return Flow::Continue(1);
             }
             input = Input::new(fd);
         }

@@ -146,6 +146,27 @@ pub(super) fn dollar(
                     });
                     return Ok(());
                 }
+                if let [b'@', op @ (b'U' | b'u' | b'L' | b'Q' | b'E'), b'}', ..] =
+                    chars.as_str().as_bytes()
+                {
+                    let op = *op;
+                    *chars = chars.as_str()[3..].chars();
+                    let operation = match op {
+                        b'Q' => crate::word::Modification::Quote,
+                        b'E' => crate::word::Modification::Escapes,
+                        _ => crate::word::Modification::Case {
+                            upper: op != b'L',
+                            all: op != b'u',
+                            pattern: crate::word::Word::Literal(String::new()),
+                        },
+                    };
+                    word.part(Part::Modify {
+                        name: name.into(),
+                        operation: Box::new(operation),
+                        quoted,
+                    });
+                    return Ok(());
+                }
                 if chars.as_str().starts_with("@P}") {
                     *chars = chars.as_str()[3..].chars();
                     word.part(Part::Modify {
@@ -163,6 +184,24 @@ pub(super) fn dollar(
                     word.part(Part::Modify {
                         name: name.into(),
                         operation: Box::new(crate::word::Modification::Slice { offset, length }),
+                        quoted,
+                    });
+                    return Ok(());
+                }
+                if let Some(op @ ('^' | ',')) = chars.clone().next() {
+                    chars.next();
+                    let all = chars.as_str().starts_with(op);
+                    if all {
+                        chars.next();
+                    }
+                    let pattern = alternative_word(chars, false)?;
+                    word.part(Part::Modify {
+                        name: name.into(),
+                        operation: Box::new(crate::word::Modification::Case {
+                            upper: op == '^',
+                            all,
+                            pattern,
+                        }),
                         quoted,
                     });
                     return Ok(());
@@ -434,11 +473,16 @@ pub(super) fn arithmetic_clauses(source: &str) -> Result<[&str; 3], Error> {
 }
 
 pub(crate) fn arithmetic_word(source: &str) -> Result<crate::word::Word, Error> {
+    subscript_word(source, false)
+}
+
+pub(crate) fn subscript_word(source: &str, associative: bool) -> Result<crate::word::Word, Error> {
     let mut chars = source.chars();
     let mut word = WordBuilder::default();
     while let Some(c) = chars.next() {
         match c {
             '"' => quoted(&mut chars, c, &mut word)?,
+            '\'' if associative => quoted(&mut chars, c, &mut word)?,
             '$' => dollar(&mut chars, &mut word, true)?,
             '`' => backquote(&mut chars, &mut word, true)?,
             '\\' => {

@@ -15,7 +15,7 @@ enum Atom {
     Group(u8, Vec<Vec<Atom>>),
 }
 
-fn sequence(source: &mut &str, grouped: bool) -> Option<Vec<Atom>> {
+fn sequence(source: &mut &str, grouped: bool, extended: bool) -> Option<Vec<Atom>> {
     let mut atoms = Vec::new();
     while !source.is_empty() {
         let rest = *source;
@@ -23,11 +23,14 @@ fn sequence(source: &mut &str, grouped: bool) -> Option<Vec<Atom>> {
         if grouped && matches!(bytes[0], b'|' | b')') {
             break;
         }
-        if matches!(bytes[0], b'@' | b'!' | b'?' | b'*' | b'+') && bytes.get(1) == Some(&b'(') {
+        if extended
+            && matches!(bytes[0], b'@' | b'!' | b'?' | b'*' | b'+')
+            && bytes.get(1) == Some(&b'(')
+        {
             *source = &rest[2..];
             let mut alternatives = Vec::new();
             loop {
-                alternatives.push(sequence(source, true)?);
+                alternatives.push(sequence(source, true, extended)?);
                 let sep = source.as_bytes().first()?;
                 *source = &source[1..];
                 if *sep == b')' {
@@ -88,8 +91,11 @@ fn sequence(source: &mut &str, grouped: bool) -> Option<Vec<Atom>> {
     Some(atoms)
 }
 
-fn one_character(atom: &Atom, value: &str, pos: usize) -> Option<usize> {
+fn one_character<const PATHNAME: bool>(atom: &Atom, value: &str, pos: usize) -> Option<usize> {
     let c = value[pos..].chars().next()?;
+    if PATHNAME && c == '/' && matches!(atom, Atom::Any) {
+        return None;
+    }
     let end = pos + c.len_utf8();
     if let Atom::Class(class, cache) = atom {
         let (known, matched) = cache.get();
@@ -112,7 +118,12 @@ fn one_character(atom: &Atom, value: &str, pos: usize) -> Option<usize> {
     Some(end)
 }
 
-fn endings(atoms: &[Atom], value: &str, start: usize, period: bool) -> Vec<usize> {
+fn endings<const PATHNAME: bool>(
+    atoms: &[Atom],
+    value: &str,
+    start: usize,
+    period: bool,
+) -> Vec<usize> {
     let mut points = vec![start];
     let mut matched_end = false;
     let mut next = Vec::new();
@@ -141,11 +152,19 @@ fn endings(atoms: &[Atom], value: &str, start: usize, period: bool) -> Vec<usize
                     }
                 }
                 Atom::Any | Atom::Class(..) => {
-                    if let Some(end) = one_character(atom, value, pos) {
+                    if let Some(end) = one_character::<PATHNAME>(atom, value, pos) {
                         next.push(end);
                     }
                 }
                 Atom::Star => {
+                    if PATHNAME
+                        && atoms.get(i + 1).is_some()
+                        && let Some(slash) = value[pos..].find('/')
+                    {
+                        next.extend(value[pos..pos + slash].char_indices().map(|(i, _)| pos + i));
+                        next.push(pos + slash);
+                        continue;
+                    }
                     next.extend(value[pos..].char_indices().map(|(i, _)| pos + i));
                     // A plain star searches for the start of these groups
                     // only at existing characters. GNU Bash gives a trailing
@@ -170,7 +189,7 @@ fn endings(atoms: &[Atom], value: &str, start: usize, period: bool) -> Vec<usize
                         }
                         if !period || pos != 0 {
                             let mut previous = pos;
-                            while let Some(end) = one_character(unit, value, previous) {
+                            while let Some(end) = one_character::<PATHNAME>(unit, value, previous) {
                                 next.push(end);
                                 previous = end;
                             }
@@ -180,7 +199,7 @@ fn endings(atoms: &[Atom], value: &str, start: usize, period: bool) -> Vec<usize
                     let options = |from| {
                         alternatives
                             .iter()
-                            .flat_map(move |seq| endings(seq, value, from, period))
+                            .flat_map(move |seq| endings::<PATHNAME>(seq, value, from, period))
                     };
                     if *op == b'!' {
                         let mut excluded = options(pos).collect::<Vec<_>>();
@@ -274,12 +293,17 @@ pub(crate) struct Pattern {
 }
 
 impl Pattern {
-    pub(crate) fn new(mut text: &str) -> Option<Self> {
+    pub(crate) fn new(text: &str) -> Option<Self> {
         if !has_group(text) {
             return None;
         }
+        Some(Self::parse(text, true))
+    }
+
+    pub(crate) fn parse(mut text: &str, extended: bool) -> Self {
         let original = text;
-        let atoms = sequence(&mut text, false).unwrap_or_else(|| vec![Atom::Text(original.into())]);
+        let atoms = sequence(&mut text, false, extended)
+            .unwrap_or_else(|| vec![Atom::Text(original.into())]);
         let mut variable = atoms
             .iter()
             .enumerate()
@@ -288,10 +312,10 @@ impl Pattern {
             .next()
             .and_then(|(i, atom)| unit_run(atom).map(|_| i))
             .filter(|_| variable.next().is_none());
-        Some(Self { atoms, single_run })
+        Self { atoms, single_run }
     }
 
-    fn match_run(&self, value: &str, i: usize, period: bool) -> Option<bool> {
+    fn match_run<const PATHNAME: bool>(&self, value: &str, i: usize, period: bool) -> Option<bool> {
         let mut rest = value;
         for atom in &self.atoms[..i] {
             let Some(next) = literal_edge(atom, rest, true).ok()? else {
@@ -315,7 +339,7 @@ impl Pattern {
         }
         let mut pos = 0;
         while pos < rest.len() {
-            let Some(end) = one_character(unit, rest, pos) else {
+            let Some(end) = one_character::<PATHNAME>(unit, rest, pos) else {
                 return Some(false);
             };
             pos = end;
@@ -324,14 +348,22 @@ impl Pattern {
     }
 
     pub(crate) fn accepts(&self, value: &str, period: bool) -> bool {
+        self.matches::<false>(value, period)
+    }
+
+    pub(crate) fn pathname(&self, value: &str) -> bool {
+        self.matches::<true>(value, false)
+    }
+
+    fn matches<const PATHNAME: bool>(&self, value: &str, period: bool) -> bool {
         let period = period && value.starts_with('.');
         super::localized(|| {
             if let Some(i) = self.single_run
-                && let Some(result) = self.match_run(value, i, period)
+                && let Some(result) = self.match_run::<PATHNAME>(value, i, period)
             {
                 return result;
             }
-            endings(&self.atoms, value, 0, period)
+            endings::<PATHNAME>(&self.atoms, value, 0, period)
                 .binary_search(&value.len())
                 .is_ok()
         })

@@ -6,6 +6,8 @@ use super::Session;
 pub struct ShellOptions {
     pub braceexpand: bool,
     pub localvar_inherit: bool,
+    pub inherit_errexit: bool,
+    pub huponexit: bool,
     pub checkwinsize: bool,
     pub sourcepath: bool,
     pub expand_aliases: bool,
@@ -20,6 +22,8 @@ impl Default for ShellOptions {
         Self {
             braceexpand: true,
             localvar_inherit: false,
+            inherit_errexit: false,
+            huponexit: false,
             checkwinsize: true,
             sourcepath: true,
             expand_aliases: false,
@@ -31,30 +35,46 @@ impl Default for ShellOptions {
     }
 }
 
-const SET_OPTIONS: &[&str] = &[
-    "braceexpand",
-    "errexit",
-    "hashall",
-    "monitor",
-    "noclobber",
-    "noglob",
-    "nounset",
-    "pipefail",
-];
-const SHOPT_OPTIONS: &[&str] = &[
-    "checkwinsize",
-    "dotglob",
-    "expand_aliases",
-    "extglob",
-    "globskipdots",
-    "globstar",
-    "localvar_inherit",
-    "nullglob",
-    "patsub_replacement",
-    "progcomp",
-    "sourcepath",
-];
+pub(super) struct OptionEntry {
+    pub name: &'static str,
+    read: fn(&Session) -> bool,
+    write: fn(&mut Session) -> &mut bool,
+}
 
+macro_rules! option_entry {
+    ($name:literal, $($field:ident).+) => {
+        OptionEntry { name: $name, read: |s| s.$($field).+, write: |s| &mut s.$($field).+ }
+    };
+}
+
+const SET_OPTIONS: &[OptionEntry] = &[
+    option_entry!("braceexpand", shopt.braceexpand),
+    option_entry!("errexit", errexit),
+    option_entry!("errtrace", errtrace),
+    option_entry!("functrace", functrace),
+    option_entry!("hashall", hashes.enabled),
+    option_entry!("monitor", jobs.monitor),
+    option_entry!("noclobber", noclobber),
+    option_entry!("noglob", noglob),
+    option_entry!("nounset", nounset),
+    option_entry!("pipefail", pipefail),
+];
+const SHOPT_OPTIONS: &[OptionEntry] = &[
+    option_entry!("checkwinsize", shopt.checkwinsize),
+    option_entry!("dotglob", shopt.glob.dotglob),
+    option_entry!("expand_aliases", shopt.expand_aliases),
+    option_entry!("extglob", shopt.glob.extglob),
+    option_entry!("failglob", shopt.glob.failglob),
+    option_entry!("globskipdots", shopt.glob.globskipdots),
+    option_entry!("globstar", shopt.glob.globstar),
+    option_entry!("huponexit", shopt.huponexit),
+    option_entry!("inherit_errexit", shopt.inherit_errexit),
+    option_entry!("localvar_inherit", shopt.localvar_inherit),
+    option_entry!("nullglob", shopt.glob.nullglob),
+    option_entry!("patsub_replacement", shopt.patsub_replacement),
+    option_entry!("progcomp", shopt.progcomp),
+    option_entry!("sourcepath", shopt.sourcepath),
+];
 impl Session {
     pub fn refresh_terminal_size(&mut self) {
         if !self.interactive || !self.shopt.checkwinsize {
@@ -76,29 +96,51 @@ impl Session {
         }
     }
 
-    pub(super) fn option_value(&mut self, name: &str, set: bool) -> Option<&mut bool> {
-        match (set, name) {
-            (true, "braceexpand") => Some(&mut self.shopt.braceexpand),
-            (true, "hashall") => Some(&mut self.hashes.enabled),
-            (true, "errexit") => Some(&mut self.errexit),
-            (true, "monitor") => Some(&mut self.jobs.monitor),
-            (true, "noclobber") => Some(&mut self.noclobber),
-            (true, "noglob") => Some(&mut self.noglob),
-            (true, "nounset") => Some(&mut self.nounset),
-            (true, "pipefail") => Some(&mut self.pipefail),
-            (false, "dotglob") => Some(&mut self.shopt.glob.dotglob),
-            (false, "extglob") => Some(&mut self.shopt.glob.extglob),
-            (false, "globskipdots") => Some(&mut self.shopt.glob.globskipdots),
-            (false, "globstar") => Some(&mut self.shopt.glob.globstar),
-            (false, "localvar_inherit") => Some(&mut self.shopt.localvar_inherit),
-            (false, "nullglob") => Some(&mut self.shopt.glob.nullglob),
-            (false, "checkwinsize") => Some(&mut self.shopt.checkwinsize),
-            (false, "patsub_replacement") => Some(&mut self.shopt.patsub_replacement),
-            (false, "progcomp") => Some(&mut self.shopt.progcomp),
-            (false, "expand_aliases") => Some(&mut self.shopt.expand_aliases),
-            (false, "sourcepath") => Some(&mut self.shopt.sourcepath),
-            _ => None,
+    fn option_entries(set: bool) -> &'static [OptionEntry] {
+        if set { SET_OPTIONS } else { SHOPT_OPTIONS }
+    }
+
+    pub(super) fn options(&self, set: bool) -> impl Iterator<Item = (&'static str, bool)> {
+        Self::option_entries(set)
+            .iter()
+            .map(move |entry| (entry.name, (entry.read)(self)))
+    }
+
+    pub(super) fn option_list(&self, set: bool) -> String {
+        let mut result = String::new();
+        for (name, enabled) in self.options(set) {
+            if enabled {
+                if !result.is_empty() {
+                    result.push(':');
+                }
+                result.push_str(name);
+            }
         }
+        result
+    }
+
+    pub fn inherit_options(&mut self) {
+        if unsafe { libc::getuid() != libc::geteuid() || libc::getgid() != libc::getegid() } {
+            return;
+        }
+        for (variable, set) in [("SHELLOPTS", true), ("BASHOPTS", false)] {
+            if let Ok(list) = std::env::var(variable) {
+                for name in list.split(':') {
+                    if let Some(value) = self.option_value(name, set) {
+                        *value = true;
+                    }
+                }
+                let var = self.declared_variable(variable, false).unwrap();
+                self.variables.insert(variable.into(), var);
+            }
+        }
+    }
+
+    pub(super) fn option_value(&mut self, name: &str, set: bool) -> Option<&mut bool> {
+        Self::option_entries(set)
+            .iter()
+            .find(|entry| entry.name == name)
+            .map(|entry| (entry.write)(self))
     }
 
     pub fn shopt(&mut self, args: &[String]) -> u8 {
@@ -138,7 +180,7 @@ impl Session {
         let known = if set { SET_OPTIONS } else { SHOPT_OPTIONS };
         let names = known
             .iter()
-            .copied()
+            .map(|entry| entry.name)
             .filter(|_| all)
             .chain(names.iter().map(String::as_str));
         for name in names {

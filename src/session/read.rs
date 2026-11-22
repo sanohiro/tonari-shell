@@ -279,6 +279,10 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
         return 1;
     };
     if opts.names.is_empty() && opts.array.is_none() {
+        if session.readonly("REPLY") {
+            eprintln!("tonari: read: REPLY: readonly variable");
+            return 1;
+        }
         session.assign("REPLY", &line);
         return status;
     }
@@ -289,6 +293,14 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
     };
     let (spans, end) = field_ranges(&line, &escaped, &ifs);
     if let Some(target) = opts.array {
+        if session.is_associative(target) {
+            eprintln!("tonari: read: {target}: not an indexed array");
+            return 1;
+        }
+        if session.readonly(target) {
+            eprintln!("tonari: read: {target}: readonly variable");
+            return 1;
+        }
         session.replace_array(
             target,
             spans.into_iter().map(|(s, e)| line[s..e].into()).collect(),

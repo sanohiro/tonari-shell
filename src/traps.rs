@@ -48,8 +48,21 @@ extern "C" fn record(sig: i32) {
     PENDING.fetch_or(1 << sig, Relaxed);
 }
 
+// Pseudo-traps never enter the OS signal API or the pending signal bitset.
+const ERR: i32 = i32::MAX - 1;
+const RETURN: i32 = i32::MAX;
+fn trap_number(name: &str) -> Option<i32> {
+    if name.eq_ignore_ascii_case("ERR") {
+        Some(ERR)
+    } else if name.eq_ignore_ascii_case("RETURN") {
+        Some(RETURN)
+    } else {
+        number(name)
+    }
+}
+
 #[derive(Clone)]
-struct Entry {
+pub(crate) struct Entry {
     command: String,
     original: libc::sigaction,
 }
@@ -58,6 +71,10 @@ struct Entry {
 pub struct Traps {
     entries: BTreeMap<i32, Entry>,
     running: u64,
+    handling_error: bool,
+    handling_return: bool,
+    interactive_hup: bool,
+    pub before_return: u8,
     implicit: BTreeMap<i32, libc::sigaction>,
     pub exit_status: Option<u8>,
 }
@@ -83,7 +100,28 @@ fn action(handler: usize) -> libc::sigaction {
 
 impl Traps {
     pub fn active(&self) -> bool {
-        !self.entries.is_empty()
+        !self.entries.is_empty() || self.interactive_hup
+    }
+
+    pub fn init_hangup(&mut self) -> io::Result<()> {
+        let mut old = action(libc::SIG_DFL);
+        if unsafe { libc::sigaction(libc::SIGHUP, std::ptr::null(), &mut old) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if old.sa_sigaction == libc::SIG_DFL {
+            if unsafe {
+                libc::sigaction(
+                    libc::SIGHUP,
+                    &action(terminate as *const () as usize),
+                    std::ptr::null_mut(),
+                )
+            } < 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            self.interactive_hup = true;
+        }
+        Ok(())
     }
 
     pub fn ignores(&self, signal: i32) -> bool {
@@ -152,7 +190,7 @@ impl Traps {
         if sig == 0 {
             self.watch_exit(command != "-" && !command.is_empty())?;
         }
-        let real = sig > 0 && sig != libc::SIGSTOP && sig != libc::SIGKILL;
+        let real = sig < ERR && sig > 0 && sig != libc::SIGSTOP && sig != libc::SIGKILL;
         let mut original = action(libc::SIG_DFL);
         if let Some(old) = self.entries.get(&sig) {
             original = old.original;
@@ -173,7 +211,11 @@ impl Traps {
         }
         if real {
             let new = match command {
-                "-" if self.implicit.contains_key(&sig) => action(terminate as *const () as usize),
+                "-" if self.implicit.contains_key(&sig)
+                    || sig == libc::SIGHUP && self.interactive_hup =>
+                {
+                    action(terminate as *const () as usize)
+                }
                 "-" => original,
                 "" if sig == libc::SIGCHLD => action(libc::SIG_DFL), // keep children waitable
                 "" => action(libc::SIG_IGN),
@@ -197,7 +239,50 @@ impl Traps {
         Ok(())
     }
 
-    pub fn after_fork(&mut self) {
+    fn hide(&mut self, sig: i32, inherit: bool) -> Option<Entry> {
+        if inherit {
+            None
+        } else {
+            self.entries.remove(&sig)
+        }
+    }
+
+    fn restore(&mut self, sig: i32, hidden: Option<Entry>) {
+        if let Some(saved) = hidden {
+            self.entries.entry(sig).or_insert(saved);
+        }
+    }
+
+    pub fn enter_function(
+        &mut self,
+        errtrace: bool,
+        functrace: bool,
+    ) -> (Option<Entry>, Option<Entry>) {
+        if self.entries.is_empty() {
+            return (None, None);
+        }
+        (self.hide(ERR, errtrace), self.hide(RETURN, functrace))
+    }
+
+    pub fn leave_function(&mut self, hidden: (Option<Entry>, Option<Entry>)) {
+        self.restore(ERR, hidden.0);
+        self.restore(RETURN, hidden.1);
+    }
+
+    pub fn error_handler(&self) -> bool {
+        self.catches(ERR) && !self.handling_error
+    }
+
+    pub fn after_fork(&mut self, errtrace: bool, functrace: bool) {
+        if self.interactive_hup {
+            self.interactive_hup = false;
+            if !self.ignores(libc::SIGHUP) {
+                unsafe {
+                    libc::signal(libc::SIGHUP, libc::SIG_DFL);
+                }
+            }
+            TERMINATING.store(0, Relaxed);
+        }
         if self.entries.is_empty() {
             return;
         }
@@ -205,6 +290,12 @@ impl Traps {
         self.exit_status = None;
         TERMINATING.store(0, Relaxed);
         self.entries.retain(|&sig, e| {
+            if sig == ERR {
+                return errtrace;
+            }
+            if sig == RETURN {
+                return functrace;
+            }
             if sig > 0 && e.command.is_empty() {
                 return true;
             }
@@ -237,12 +328,18 @@ impl Traps {
             let mut out = io::stdout().lock();
             let mut show = |sig| {
                 if let Some(e) = self.entries.get(&sig) {
-                    let name = SIGNALS.iter().find(|s| s.1 == sig).unwrap().0;
+                    let name = if sig == RETURN {
+                        "RETURN"
+                    } else if sig == ERR {
+                        "ERR"
+                    } else {
+                        SIGNALS.iter().find(|s| s.1 == sig).unwrap().0
+                    };
                     writeln!(
                         out,
                         "trap -- '{}' {}{name}",
                         e.command.replace('\'', "'\\''"),
-                        if sig == 0 { "" } else { "SIG" }
+                        if sig == 0 || sig >= ERR { "" } else { "SIG" }
                     )?;
                 }
                 Ok::<_, io::Error>(())
@@ -255,7 +352,7 @@ impl Traps {
                 }
             } else {
                 for s in &args[1..] {
-                    let Some(sig) = number(s) else {
+                    let Some(sig) = trap_number(s) else {
                         return invalid(s);
                     };
                     if show(sig).is_err() {
@@ -276,7 +373,7 @@ impl Traps {
         }
         let mut status = 0;
         for s in signals {
-            if let Some(sig) = number(s) {
+            if let Some(sig) = trap_number(s) {
                 if let Err(e) = self.set(sig, command, interactive) {
                     eprintln!("tonari: trap: {s}: {e}");
                     status = 1;
@@ -294,9 +391,52 @@ fn invalid(s: &str) -> u8 {
     1
 }
 
+pub fn hanging_up() -> bool {
+    TERMINATING.load(Relaxed) == libc::SIGHUP
+}
+
 pub fn pending() -> Option<i32> {
     let mask = PENDING.load(Relaxed);
     (mask != 0).then(|| mask.trailing_zeros() as i32)
+}
+
+pub fn returning(session: &mut Session, flow: Flow) -> Flow {
+    let status = match flow {
+        Flow::Continue(code) => code,
+        Flow::Return(_) => session.traps.before_return,
+        _ => return flow,
+    };
+    if session.traps.handling_return || !session.traps.catches(RETURN) {
+        return flow;
+    }
+    session.traps.handling_return = true;
+    let result = action_text(session, RETURN, status);
+    session.traps.handling_return = false;
+    match result {
+        Flow::Continue(_) => flow,
+        other => other,
+    }
+}
+
+pub fn error(session: &mut Session, status: u8) -> Flow {
+    if !session.traps.error_handler() {
+        return Flow::Continue(status);
+    }
+    session.traps.handling_error = true;
+    let flow = action_text(session, ERR, status);
+    session.traps.handling_error = false;
+    match flow {
+        Flow::Continue(_) => Flow::Continue(status),
+        other => other,
+    }
+}
+
+fn action_text(session: &mut Session, sig: i32, status: u8) -> Flow {
+    let command = session.traps.entries[&sig].command.clone();
+    let previous = session.pipe_status.clone();
+    let flow = crate::eval_text(session, &command, status);
+    session.pipe_status = previous;
+    flow
 }
 
 pub fn dispatch(session: &mut Session, status: u8) -> Flow {
@@ -330,6 +470,11 @@ pub fn dispatch(session: &mut Session, status: u8) -> Flow {
 }
 
 pub fn finish(session: &mut Session, code: u8) -> u8 {
+    if session.interactive
+        && (TERMINATING.load(Relaxed) == libc::SIGHUP || session.login && session.shopt.huponexit)
+    {
+        session.jobs.hangup();
+    }
     if !session.traps.active() {
         return code;
     }
@@ -369,11 +514,12 @@ extern "C" fn wake(_: i32) {}
 
 impl WaitMask {
     pub fn new(traps: &Traps) -> io::Result<Option<Self>> {
-        if traps.implicit.is_empty()
+        if !traps.interactive_hup
+            && traps.implicit.is_empty()
             && !traps
                 .entries
                 .iter()
-                .any(|(&s, e)| s != 0 && s != libc::SIGCHLD && !e.command.is_empty())
+                .any(|(&s, e)| s < ERR && s != 0 && s != libc::SIGCHLD && !e.command.is_empty())
         {
             return Ok(None);
         }

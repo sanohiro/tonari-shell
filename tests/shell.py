@@ -51,6 +51,115 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_readonly_scopes_attributes_and_write_paths(self):
+        self.compare("""exec 2>/dev/null
+readonly g=outer
+f(){ local g=inner; echo "$?:$g"; local -ar a=(one 'two words'); nested; declare -p a; }
+nested(){ local a=inner; echo "$?:$a"; }
+f
+export g; export g=changed; echo "$?:$g"; declare -p g
+unset g; echo "$?:$g"; read g <<<new; echo "$?:$g"; printf -v g new; echo "$?:$g"
+readonly -a data=(one two); mapfile -t data <<<new; echo "$?:${data[*]}"
+readonly -f f; unset -f f; echo $?; f(){ :; }; echo $?; declare -pF f
+""", 0, b'1:outer\n0:inner\ndeclare -ar a=([0]="one" [1]="two words")\n'
+             b'1:outer\ndeclare -rx g="outer"\n1:outer\n1:outer\n1:outer\n1:one two\n1\n1\ndeclare -fr f\n', minimum=5)
+
+    def test_readonly_recovery_in_command_file_and_stdin(self):
+        script = """exec 2>/dev/null
+readonly x=1; x=2; echo wrong
+echo after:$?:$x; ((x++)); echo arithmetic:$?
+echo "$((x++))"; echo wrong
+echo expanded:$?; x=2 y=ok /bin/sh -c 'echo prefix:$y'
+f(){ x=9; echo wrong; }; f; echo wrong
+echo function:$?; eval 'x=8; echo wrong'; echo eval:$?
+readonly a=(one two); readonly a+=(bad); echo wrong
+declare -p a; (x=3); echo subshell:$?
+"""
+        expected = b'after:1:1\narithmetic:1\nexpanded:1\nprefix:ok\nfunction:1\neval:1\ndeclare -ar a=([0]="one" [1]="two")\nsubshell:1\n'
+        (self.cwd / "script").write_text(script)
+        for shell in self.shells_for(5):
+            for args, stdin in [(["-c", script], None), (["script"], None), ([], script.encode())]:
+                with self.subTest(shell=shell, args=args[:1]):
+                    result = subprocess.run([shell, *args], cwd=self.cwd, env=self.env,
+                                            input=stdin, capture_output=True, timeout=5)
+                    self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, b""))
+
+    def test_err_trap_inheritance_and_tested_commands(self):
+        self.compare("""trap 'echo err:$?' ERR
+false || :; ! true; if false; then :; fi; { false && :; }; echo group:$?
+f(){ false; }; f; echo outer:$?
+set -E; f; echo inherited:$?
+v=$(false; echo done); printf '<%s>\n' "$v"; (false); echo sub:$?
+trap - ERR; false; echo last:$?
+""", 0, b'group:1\nerr:1\nouter:1\nerr:1\nerr:1\ninherited:1\n<err:1\ndone>\nerr:1\nerr:1\nsub:1\nlast:1\n', minimum=5)
+        self.compare("set -e; { false && :; }; echo survived", 0, b"survived\n")
+        self.compare("set -e; trap 'echo err:$?' ERR; false; echo wrong", 1, b"err:1\n")
+        self.compare("set -e; shopt -s inherit_errexit; v=$(false; echo wrong); echo wrong", 1, minimum=5)
+
+    def test_return_trap_function_and_source_boundary(self):
+        (self.cwd / "ret.sh").write_text("false; return 6\n")
+        self.compare("""trap 'echo leaving:$?' RETURN
+f(){ false; return 7; }; f; echo untraced:$?
+. ./ret.sh; echo sourced:$?
+set -T; f; echo traced:$?
+g(){ :; }; g; trap - RETURN; g; echo done
+""", 0, b"untraced:7\nleaving:1\nsourced:6\nleaving:1\ntraced:7\nleaving:0\ndone\n", minimum=5)
+
+    def test_readonly_shell_variables_and_exported_options(self):
+        self.compare("""exec 2>/dev/null
+[[ $EUID == "$(id -u)" && $UID == "$(id -ru)" && $PPID -gt 0 ]] && echo ids
+parent=$PPID; (test "$parent" = "$PPID" && echo inherited)
+unset PPID; echo readonly:$?; declare -p UID | cut -d= -f1
+export SHELLOPTS BASHOPTS; set -o pipefail; shopt -s nullglob
+"$BASH" -c '[[ :$SHELLOPTS: == *:pipefail:* && :$BASHOPTS: == *:nullglob:* ]] && echo child; printf "<%s>" missing-*.absent'
+shopt -u nullglob; set +o pipefail
+"$BASH" -c '[[ :$SHELLOPTS: != *:pipefail:* && :$BASHOPTS: != *:nullglob:* ]] && echo reset'
+""", 0, b"ids\ninherited\nreadonly:1\ndeclare -ir UID\nchild\n<>reset\n", minimum=5)
+
+    def test_failglob_and_full_path_globignore(self):
+        script = """exec 2>/dev/null
+shopt -s nullglob failglob; echo no-match-*; echo wrong
+echo recovered:$?; /bin/echo no >missing-*.file; echo redirected:$?
+shopt -u failglob nullglob; shopt -s extglob
+mkdir sub; touch '++' ';' keep sub/file
+GLOBIGNORE='+([^[:alnum:]])'; printf '<%s>' ./*; echo
+GLOBIGNORE='@(sub/file|./keep)'; printf '<%s>' ./* sub/*; echo
+"""
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"')
+                newer = tuple(map(int, version.stdout.strip().split(b"."))) >= (5, 3)
+                prefix = b"<./++><./;>" if shell == BASH and newer else b""
+                expected = b"recovered:1\nredirected:1\n" + prefix + b"<./keep><./sub>\n<./++><./;><./sub><sub/*>\n"
+                result = self.command(shell, script)
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, b""))
+
+    def test_associative_keys_scope_and_expansion(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        self.compare(r"""declare -A a=([foo]=one ["x ] 雪🌸"]="two words" ["*"]=literal)
+k='x ] 雪🌸'; a["$k"]+='!'
+printf '<%s>/<%s>/%s\n' "${a[$k]}" "${a["*"]}" "${#a[@]}"
+for k in "${!a[@]}"; do printf '[%s]=%s\n' "$k" "${a[$k]}"; done | LC_ALL=C sort
+f(){ local -A a=(red first blue second spare); printf '%s:%s:%s\n' "${a[red]}" "${a[blue]}" "${#a[@]}"; }; f
+k='x ] 雪🌸'; printf -v 'a[$k]' '%s' updated; [[ -v 'a[$k]' ]] && echo "${a[$k]}"
+unset 'a[$k]'; echo "${#a[@]}"; readonly -A a; (a[foo]=no) 2>/dev/null; echo "$?:${a[foo]}"
+declare -Ai count=([ok]=1+2); count[ok]+=4; declare count[ok]+=2; declare -p count
+""", 0, ("<two words!>/<literal>/3\n[*]=literal\n[foo]=one\n"
+             "[x ] 雪🌸]=two words!\nfirst:second:3\nupdated\n2\n1:one\n"
+             'declare -Ai count=([ok]="9" )\n').encode(), minimum=5)
+
+    def test_parameter_transformations_preserve_fields(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        self.compare(r"""v="héLLo🌸"; printf '<%s>\n' "${v^^}" "${v,,}" "${v^}" "${v,,[L]}"
+unset v; printf '<%s>' "${v@Q}"; v=''; printf '<%s>' "${v@Q}"; echo
+a=('one two' "can't" $'a\nb'); printf '[%s]\n' "${a[@]@Q}"
+v='one\ntwo'; printf '<%s>\n' "${v@E}"
+v=aBc; echo "${v@U} ${v@u} ${v@L}"
+v=résumé; echo "${v^^[a-z]}"
+v=éßa; LC_ALL=C; echo "${v^^}"; LC_ALL=C.UTF-8; echo "${v^^}"
+""", 0, ("<HÉLLO🌸>\n<héllo🌸>\n<HéLLo🌸>\n<héllo🌸>\n<><''>\n"
+             "['one two']\n['can'\\''t']\n[$'a\\nb']\n<one\ntwo>\nABC ABc abc\nRéSUMé\néßA\nÉßA\n").encode(), minimum=5)
+
     def test_arguments_and_lists(self):
         self.compare(r"""printf '<%s>\n' '' "こん"'にちは' a\ b""", 0,
                      "<>\n<こんにちは>\n<a b>\n".encode())
@@ -1051,6 +1160,13 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                 os._exit(125)
         def close():
             try:
+                finished = os.waitpid(pid, os.WNOHANG)[0] == pid
+            except ChildProcessError:
+                finished = True
+            if finished:
+                os.close(fd)
+                return
+            try:
                 foreground = os.tcgetpgrp(fd)
                 if foreground > 0 and foreground != pid and foreground != os.getpgrp():
                     os.killpg(foreground, signal.SIGKILL)
@@ -1082,6 +1198,62 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                 self.assertNotIn(b"example", output)
                 os.write(fd, b"echo restored\n")
                 self.assertIn(b"echo restored", self.read_until(fd, PROMPT))
+
+    def test_disown_and_hangup_on_a_controlling_terminal(self):
+        helper = self.cwd / "worker.py"
+        helper.write_text("""import pathlib, signal, sys, time
+name = sys.argv[1]
+def hung_up(*_):
+    pathlib.Path(name + '.hup').touch()
+    sys.exit(0)
+signal.signal(signal.SIGHUP, hung_up)
+pathlib.Path(name + '.ready').touch()
+for _ in range(500):
+    if pathlib.Path(name + '.release').exists():
+        pathlib.Path(name + '.alive').touch()
+        break
+    time.sleep(.01)
+""")
+        def await_files(paths):
+            end = time.monotonic() + 4
+            while time.monotonic() < end and not all(path.exists() for path in paths):
+                time.sleep(.01)
+            self.assertTrue(all(path.exists() for path in paths), paths)
+
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(shell=shell)
+                pid = os.tcgetpgrp(fd)
+                names = [f"{pid}-{kind}" for kind in ("owned", "marked", "removed")]
+                for name in names:
+                    os.write(fd, f"{shlex.quote(sys.executable)} worker.py {name} &\n".encode())
+                    self.read_until(fd, PROMPT)
+                await_files([self.cwd / (name + ".ready") for name in names])
+                os.write(fd, b"disown -h %2; disown %3; jobs -p >listed\n")
+                self.read_until(fd, PROMPT)
+                self.assertEqual(len((self.cwd / "listed").read_bytes().splitlines()), 2)
+                os.kill(pid, signal.SIGHUP)
+                await_files([self.cwd / (names[0] + ".hup")])
+                for name in names[1:]:
+                    (self.cwd / (name + ".release")).touch()
+                await_files([self.cwd / (name + ".alive") for name in names[1:]])
+                deadline = time.monotonic() + 4
+                while time.monotonic() < deadline:
+                    reaped, status = os.waitpid(pid, os.WNOHANG)
+                    if reaped:
+                        self.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGHUP)
+                        break
+                    time.sleep(.01)
+                else:
+                    self.fail("interactive shell did not exit after SIGHUP")
+
+    def test_disown_job_id_pid_and_running_filter(self):
+        self.compare("""exec 2>/dev/null
+sleep .1 & p=$!; disown "$p"; jobs -p; wait "$p"; echo pid:$?
+sleep .1 & sleep .1 & disown -r; jobs -p; echo all:$?
+sleep .1 & p=$!; disown -h; test "$(jobs -p)" = "$p"; echo kept:$?; wait
+disown %404; echo missing:$?
+""", 0, b"pid:0\nall:0\nkept:0\nmissing:1\n", minimum=5)
 
     def test_interactive_alias_and_interrupt_trap(self):
         for shell in (BASH, TONARI):

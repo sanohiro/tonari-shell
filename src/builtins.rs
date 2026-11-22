@@ -62,7 +62,7 @@ pub(crate) fn echo_into(args: &[String], out: &mut Vec<u8>) {
     }
 }
 
-pub fn test(words: &[String], session: &Session) -> u8 {
+pub fn test(words: &[String], session: &mut Session) -> u8 {
     let mut args = &words[1..];
     if words[0] == "[" {
         if args.last().map(String::as_str) != Some("]") {
@@ -80,7 +80,7 @@ pub fn test(words: &[String], session: &Session) -> u8 {
     }
 }
 
-fn test_args(args: &[String], session: &Session) -> Result<bool, &'static str> {
+fn test_args(args: &[String], session: &mut Session) -> Result<bool, &'static str> {
     match args {
         [] => return Ok(false),
         [s] => return Ok(!s.is_empty()),
@@ -103,7 +103,7 @@ fn test_args(args: &[String], session: &Session) -> Result<bool, &'static str> {
     }
 }
 
-fn disjunction(tokens: &mut &[String], session: &Session) -> Result<bool, &'static str> {
+fn disjunction(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'static str> {
     let mut result = conjunction(tokens, session)?;
     while tokens.first().is_some_and(|s| s == "-o") {
         *tokens = &tokens[1..];
@@ -112,7 +112,7 @@ fn disjunction(tokens: &mut &[String], session: &Session) -> Result<bool, &'stat
     Ok(result)
 }
 
-fn conjunction(tokens: &mut &[String], session: &Session) -> Result<bool, &'static str> {
+fn conjunction(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'static str> {
     let mut result = primary(tokens, session)?;
     while tokens.first().is_some_and(|s| s == "-a") {
         *tokens = &tokens[1..];
@@ -121,7 +121,7 @@ fn conjunction(tokens: &mut &[String], session: &Session) -> Result<bool, &'stat
     Ok(result)
 }
 
-fn primary(tokens: &mut &[String], session: &Session) -> Result<bool, &'static str> {
+fn primary(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'static str> {
     let (first, rest) = tokens.split_first().ok_or("argument expected")?;
     *tokens = rest;
     if let [op, right, tail @ ..] = rest {
@@ -207,11 +207,19 @@ pub(crate) fn binary(left: &str, op: &str, right: &str) -> Result<bool, &'static
     })
 }
 
-pub(crate) fn unary(op: &str, arg: &str, session: &Session) -> Result<bool, &'static str> {
+pub(crate) fn unary(op: &str, arg: &str, session: &mut Session) -> Result<bool, &'static str> {
     match op {
         "-n" => return Ok(!arg.is_empty()),
         "-z" => return Ok(arg.is_empty()),
-        "-v" => return Ok(session.get(arg).is_some()),
+        "-v" => {
+            if let Some((name, expr)) = crate::session::array::subscript(arg)
+                && session.is_associative(name)
+            {
+                let key = session.subscript_key(expr)?;
+                return Ok(session.assoc_value(name, &key).is_some());
+            }
+            return Ok(session.get(arg).is_some());
+        }
         "-t" => {
             return Ok(arg
                 .parse::<i32>()

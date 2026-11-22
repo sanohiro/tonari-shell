@@ -19,7 +19,9 @@ pub fn capture_substitution(
         return Err("cannot fork command substitution");
     }
     if pid == 0 {
-        session.traps.after_fork();
+        session
+            .traps
+            .after_fork(session.errtrace, session.functrace);
         drop(read);
         if write.as_raw_fd() == 1 {
             let fd = write.into_raw_fd();
@@ -36,7 +38,7 @@ pub fn capture_substitution(
         session.jobs.forked(true);
         session.interactive = false;
         session.command_string = false;
-        session.errexit = false;
+        session.errexit &= session.shopt.inherit_errexit;
         if let Some(path) = input_only(&body) {
             let code = (|| {
                 let captured = std::cell::Cell::new(None);
@@ -61,7 +63,9 @@ pub fn capture_substitution(
             unsafe { libc::_exit(i32::from(code.is_err())) }
         }
         let code = match execute_program(session, body, last, true) {
-            Flow::Continue(code) | Flow::Exit(code) | Flow::Return(code) => code,
+            Flow::Discard(code) | Flow::Continue(code) | Flow::Exit(code) | Flow::Return(code) => {
+                code
+            }
             Flow::Break(_) | Flow::LoopContinue(_) => 1,
         };
         let code = crate::traps::finish(session, code);
@@ -105,7 +109,11 @@ fn capture_simple(
     last: u8,
 ) -> Option<Result<(String, u8), &'static str>> {
     use crate::word::{Part, Word, is_identifier};
-    if body.is_empty() || session.nounset {
+    if body.is_empty()
+        || session.nounset
+        || session.errexit && session.shopt.inherit_errexit
+        || session.errtrace && session.traps.error_handler()
+    {
         return None;
     }
     let command = |statement: &parser::Statement| {
@@ -223,7 +231,9 @@ pub fn launch_group(
         return Flow::Continue(1);
     }
     if pid == 0 {
-        session.traps.after_fork();
+        session
+            .traps
+            .after_fork(session.errtrace, session.functrace);
         launch.child();
         if background && launch.group.is_none() && !session.stdin_redirected {
             let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
@@ -240,7 +250,7 @@ pub fn launch_group(
         session.command_string = false;
         let flow = execute_program(session, body, status, true);
         let code = match flow {
-            Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
+            Flow::Discard(s) | Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
             _ => 0,
         };
         let code = crate::traps::finish(session, code);

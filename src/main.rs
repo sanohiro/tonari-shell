@@ -144,7 +144,7 @@ fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Resu
                     let cwd = session.get("PWD");
                     let flow = execute_program(session, program, status, false);
                     status = match flow {
-                        Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
+                        Flow::Discard(s) | Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
                         _ => 1,
                     };
                     if record && history.accepts(session, text) {
@@ -198,15 +198,25 @@ fn main() -> ExitCode {
     session.arg0 = std::mem::take(&mut invocation.arg0);
     session.positional = std::mem::take(&mut invocation.positional);
     session.errexit = invocation.errexit;
+    session.errtrace = invocation.errtrace;
+    session.functrace = invocation.functrace;
     session.noglob = invocation.noglob;
     session.noclobber = invocation.noclobber;
     session.shopt.braceexpand = invocation.braceexpand;
     session.nounset = invocation.nounset;
     session.pipefail = invocation.pipefail;
     session.interactive = invocation.interactive;
+    session.login = invocation.login;
+    if session.interactive
+        && let Err(e) = session.traps.init_hangup()
+    {
+        eprintln!("tonari: SIGHUP: {e}");
+        return ExitCode::from(1);
+    }
     session.jobs.monitor = invocation.monitor.unwrap_or(session.interactive);
     session.command_string = matches!(invocation.input, Input::Command(_));
     session.shopt.expand_aliases = session.interactive;
+    session.inherit_options();
     for (enable, name) in std::mem::take(&mut invocation.shopts) {
         let options = match name {
             Some(name) => vec![if enable { "-s" } else { "-u" }.into(), name],
@@ -231,7 +241,7 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     let initial = match startup::initialize(&mut session, &invocation) {
-        Flow::Continue(status) => status,
+        Flow::Discard(status) | Flow::Continue(status) => status,
         Flow::Return(status) | Flow::Exit(status) => {
             return ExitCode::from(traps::finish(&mut session, status));
         }
@@ -272,7 +282,7 @@ fn main() -> ExitCode {
         Input::Stdin => input::stdin_script(&mut session, invocation.check),
     };
     let code = match flow {
-        Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s) => s,
+        Flow::Discard(s) | Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s) => s,
         Flow::Break(_) | Flow::LoopContinue(_) => 1,
     };
     ExitCode::from(traps::finish(&mut session, code))

@@ -4,9 +4,10 @@ use crate::pattern::Matcher;
 use crate::test_expression::Expr;
 pub use array::Assignment;
 mod ansi;
+pub(crate) use ansi::decode as ansi_string;
 pub(crate) mod completion_words;
 mod here_doc;
-pub(crate) use lexer::arithmetic_word;
+pub(crate) use lexer::{arithmetic_word, subscript_word};
 mod lexer;
 mod modifier;
 pub use crate::word::{Word, is_identifier};
@@ -842,7 +843,7 @@ impl Reader {
                 }) => {
                     let declaration = matches!(
                         cmd.words.first().and_then(Word::as_literal),
-                        Some("export" | "local" | "declare" | "typeset")
+                        Some("export" | "local" | "declare" | "typeset" | "readonly")
                     );
                     if matches!(self.peek(), Some(Token::ArrayStart)) {
                         let name = assignment.ok_or(Error::Invalid("invalid array assignment"))?;
@@ -852,11 +853,13 @@ impl Reader {
                             return Err(Error::Invalid("invalid array assignment"));
                         }
                         let items = self.array_items()?;
+                        let operand = declaration.then_some(cmd.words.len());
                         if declaration {
                             cmd.words
                                 .push(Word::Literal(name.trim_end_matches('+').into()));
                         }
-                        cmd.assignments.push((name, Assignment::Array(items)));
+                        cmd.assignments
+                            .push((name, Assignment::Array(operand, items)));
                         continue;
                     }
                     if cmd.words.is_empty() {
@@ -873,7 +876,7 @@ impl Reader {
                     } else if assignment.is_some()
                         && matches!(
                             cmd.words[0].as_literal(),
-                            Some("export" | "local" | "declare" | "typeset")
+                            Some("export" | "local" | "declare" | "typeset" | "readonly")
                         )
                     {
                         word = word.declaration();

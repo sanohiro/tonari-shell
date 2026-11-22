@@ -95,6 +95,10 @@ impl Session {
         } else {
             self.unset_variable("OPTARG");
         }
+        if self.readonly(name) {
+            eprintln!("tonari: getopts: {name}: readonly variable");
+            return 2;
+        }
         self.assign(name, &result.to_string());
         u8::from(option.is_none())
     }

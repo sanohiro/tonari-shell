@@ -4,9 +4,16 @@ use crate::{Session, execute};
 use std::cell::Cell;
 
 #[derive(Debug)]
+enum Recovery {
+    Command,
+    Input,
+    Exit,
+}
+
+#[derive(Debug)]
 pub struct Error {
     message: std::borrow::Cow<'static, str>,
-    pub fatal: bool,
+    recovery: Recovery,
     pub status: u8,
 }
 
@@ -14,16 +21,32 @@ impl Error {
     pub fn fatal(message: impl Into<std::borrow::Cow<'static, str>>, status: u8) -> Self {
         Self {
             message: message.into(),
-            fatal: true,
+            recovery: Recovery::Exit,
             status,
         }
     }
 
+    pub fn discard(message: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+        Self {
+            message: message.into(),
+            recovery: Recovery::Input,
+            status: 1,
+        }
+    }
+
+    pub fn readonly(name: &str) -> Self {
+        Self::discard(format!("{name}: readonly variable"))
+    }
+
+    pub fn child_failure(&mut self) {
+        self.recovery = Recovery::Command;
+    }
+
     pub fn flow(&self, session: &Session) -> crate::Flow {
-        if self.fatal && !session.interactive {
-            crate::Flow::Exit(self.status)
-        } else {
-            crate::Flow::Continue(self.status)
+        match self.recovery {
+            Recovery::Input => crate::Flow::Discard(self.status),
+            Recovery::Exit if !session.interactive => crate::Flow::Exit(self.status),
+            _ => crate::Flow::Continue(self.status),
         }
     }
 }
@@ -32,7 +55,7 @@ impl From<&'static str> for Error {
     fn from(message: &'static str) -> Self {
         Self {
             message: message.into(),
-            fatal: false,
+            recovery: Recovery::Command,
             status: 1,
         }
     }
@@ -113,12 +136,21 @@ impl<'a> Expansion<'a> {
     }
 
     pub fn assign_parameter(&mut self, name: &str, text: &str) -> Result<(), Error> {
+        let base = crate::session::array::subscript(name).map_or(name, |(base, _)| base);
+        if self.session.readonly(base) {
+            return Err(Error::readonly(base));
+        }
         if crate::parser::is_identifier(name) {
             self.assign(name, text);
             return Ok(());
         }
         if let Some((base, index)) = crate::session::array::subscript(name) {
             if !matches!(index, "@" | "*") {
+                if self.session.is_associative(base) {
+                    let key = self.key(index)?;
+                    self.session.assign_key(base, key, text.into())?;
+                    return Ok(());
+                }
                 let i = self.session.resolve_index(base, index)?;
                 self.session.assign_element(base, i, text.to_owned());
                 return Ok(());
@@ -163,6 +195,59 @@ impl<'a> Expansion<'a> {
         self.captured.get().unwrap_or(self.initial)
     }
 
+    pub fn array_items(
+        &mut self,
+        parts: Vec<(Option<String>, Word)>,
+        associative: bool,
+    ) -> Result<crate::session::array::ArrayItems, Error> {
+        use crate::session::array::ArrayItems;
+        if associative {
+            let pairs = parts.first().is_some_and(|(index, _)| index.is_none());
+            let mut items = Vec::new();
+            let mut parts = parts.into_iter();
+            while let Some((index, word)) = parts.next() {
+                let (key, value) = if pairs {
+                    let key = self.scalar(word)?;
+                    let value = match parts.next() {
+                        Some((_, word)) => self.scalar(word)?,
+                        None => String::new(),
+                    };
+                    (key, value)
+                } else {
+                    let key = self.key(&index.ok_or("missing associative array subscript")?)?;
+                    (key, self.scalar(word)?)
+                };
+                if key.is_empty() {
+                    return Err("bad array subscript".into());
+                }
+                items.push((key, value));
+            }
+            return Ok(ArrayItems::Associative(items));
+        }
+        let mut items = Vec::with_capacity(parts.len());
+        for (index, word) in parts {
+            if let Some(index) = index {
+                let index = self.arithmetic(&index)?;
+                items.push((Some(index), self.scalar(word)?));
+            } else {
+                items.extend(self.fields(word)?.into_iter().map(|s| (None, s)));
+            }
+        }
+        Ok(ArrayItems::Indexed(items))
+    }
+
+    pub fn key(&mut self, source: &str) -> Result<String, Error> {
+        let key = if source.contains(['$', '`', '"', '\'', '\\']) {
+            self.scalar(crate::parser::subscript_word(source, true).map_err(|e| e.message())?)?
+        } else {
+            source.to_owned()
+        };
+        if key.is_empty() {
+            return Err("bad array subscript".into());
+        }
+        Ok(key)
+    }
+
     pub fn arithmetic(&mut self, expression: &str) -> Result<i64, Error> {
         let expanded;
         let expression = if expression.contains(['$', '`', '"', '\\']) {
@@ -172,7 +257,13 @@ impl<'a> Expansion<'a> {
         } else {
             expression
         };
-        arithmetic::with_variables(expression, self).map_err(|e| Error::fatal(e, 1))
+        arithmetic::with_variables(expression, self).map_err(|message| {
+            if message == "readonly variable" {
+                Error::discard(message)
+            } else {
+                Error::fatal(message, 1)
+            }
+        })
     }
 
     pub fn fields(&mut self, word: Word) -> Result<Vec<String>, Error> {
@@ -201,11 +292,11 @@ impl<'a> Expansion<'a> {
         glob: bool,
     ) -> Result<Vec<String>, Error> {
         word.resolve(self)?;
-        Ok(word.fields_with_glob(
+        word.fields_with_glob(
             &|name| self.lookup(name),
             &self.session.positional,
             glob.then_some(&self.session.shopt.glob),
-        ))
+        )
     }
 
     pub fn scalar(&mut self, mut word: Word) -> Result<String, Error> {
@@ -233,6 +324,9 @@ impl Variables for Expansion<'_> {
         self.lookup(name)
     }
     fn set(&mut self, name: &str, value: i64) -> Result<(), &'static str> {
+        if self.session.readonly(name) {
+            return Err("readonly variable");
+        }
         self.assign(name, &value.to_string());
         Ok(())
     }

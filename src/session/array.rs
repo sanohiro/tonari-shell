@@ -7,9 +7,15 @@ pub(crate) fn subscript(name: &str) -> Option<(&str, &str)> {
     Some((base, expr.strip_suffix(']')?))
 }
 
+pub(crate) enum ArrayItems {
+    Indexed(Vec<(Option<i64>, String)>),
+    Associative(Vec<(String, String)>),
+}
+
 #[derive(Clone)]
 pub(crate) enum Elements {
     Dense(Vec<String>),
+    Associative(super::assoc::Associative),
     Sparse(BTreeMap<i64, String>),
 }
 
@@ -18,11 +24,13 @@ impl Elements {
         match self {
             Self::Dense(values) => values.get(usize::try_from(*index).ok()?),
             Self::Sparse(values) => values.get(index),
+            Self::Associative(map) => map.get(&index.to_string()),
         }
     }
 
     fn last_index(&self) -> Option<i64> {
         match self {
+            Self::Associative(_) => None,
             Self::Dense(values) => values.len().checked_sub(1).map(|i| i as i64),
             Self::Sparse(values) => values.last_key_value().map(|(&i, _)| i),
         }
@@ -30,6 +38,7 @@ impl Elements {
 
     fn indices(&self) -> Vec<i64> {
         match self {
+            Self::Associative(_) => Vec::new(),
             Self::Dense(values) => (0..values.len() as i64).collect(),
             Self::Sparse(values) => values.keys().copied().collect(),
         }
@@ -37,6 +46,7 @@ impl Elements {
 
     pub(super) fn iter(&self) -> Box<dyn Iterator<Item = (i64, &String)> + '_> {
         match self {
+            Self::Associative(_) => unreachable!("indexed iterator on associative array"),
             Self::Dense(values) => Box::new((0..).zip(values)),
             Self::Sparse(values) => Box::new(values.iter().map(|(&i, v)| (i, v))),
         }
@@ -44,6 +54,7 @@ impl Elements {
 
     fn into_map(self) -> BTreeMap<i64, String> {
         match self {
+            Self::Associative(_) => unreachable!("cannot convert associative to indexed array"),
             Self::Dense(values) => (0..).zip(values).collect(),
             Self::Sparse(values) => values,
         }
@@ -60,6 +71,10 @@ impl Elements {
     }
 
     pub(super) fn insert(&mut self, index: i64, value: String) {
+        if let Self::Associative(map) = self {
+            map.insert(index.to_string(), value);
+            return;
+        }
         if let Self::Dense(values) = self
             && let Ok(i) = usize::try_from(index)
         {
@@ -77,6 +92,11 @@ impl Elements {
 
     pub(super) fn append_first(&mut self, text: &str) {
         match self {
+            Self::Associative(map) => {
+                let mut v = map.get("0").cloned().unwrap_or_default();
+                v.push_str(text);
+                map.insert("0".into(), v);
+            }
             Self::Dense(values) if values.is_empty() => values.push(text.into()),
             Self::Dense(values) => values[0].push_str(text),
             Self::Sparse(values) => values.entry(0).or_default().push_str(text),
@@ -110,7 +130,12 @@ impl Variable {
 impl Session {
     pub fn valid_target(&self, target: &str) -> bool {
         if let Some((base, expr)) = subscript(target) {
-            super::is_identifier(base) && self.resolve_index(base, expr).is_ok()
+            super::is_identifier(base)
+                && if self.is_associative(base) {
+                    !expr.is_empty()
+                } else {
+                    self.resolve_index(base, expr).is_ok()
+                }
         } else {
             super::is_identifier(target)
         }
@@ -118,6 +143,9 @@ impl Session {
 
     pub fn assign_target(&mut self, target: &str, value: &str) -> Result<(), &'static str> {
         let base = subscript(target).map_or(target, |(base, _)| base);
+        if self.readonly(base) {
+            return Err("readonly variable");
+        }
         let number;
         let value = if self.integer(base) {
             number = crate::arithmetic::run(value, self)?.to_string();
@@ -128,6 +156,10 @@ impl Session {
         if let Some((base, expr)) = subscript(target) {
             if !super::is_identifier(base) {
                 return Err("invalid variable name");
+            }
+            if self.is_associative(base) {
+                let key = self.subscript_key(expr)?;
+                return self.assign_key(base, key, value.into());
             }
             let index = self.resolve_index(base, expr)?;
             self.assign_element(base, index, value.into());
@@ -215,6 +247,13 @@ impl Session {
     }
 
     pub fn array_values(&self, name: &str) -> Vec<String> {
+        if let Some(map) = self.variables.get(name).and_then(Variable::associative) {
+            return map
+                .ordered()
+                .into_iter()
+                .map(|(_, v)| v.to_owned())
+                .collect();
+        }
         self.indices(name)
             .into_iter()
             .filter_map(|index| self.element(name, index))
@@ -229,26 +268,57 @@ impl Session {
         &mut self,
         name: &str,
         append: bool,
-        items: &[(Option<i64>, String)],
+        items: &ArrayItems,
         global: bool,
     ) -> Result<(), &'static str> {
+        let mut var = self.declared_variable(name, global).unwrap_or_default();
+        if var.readonly {
+            return Err("readonly variable");
+        }
+        self.array_items(&mut var, append, items)?;
+        self.store_variable(name, var, global);
+        Ok(())
+    }
+
+    pub(super) fn array_items(
+        &mut self,
+        var: &mut Variable,
+        append: bool,
+        items: &ArrayItems,
+    ) -> Result<(), &'static str> {
+        let items = match items {
+            ArrayItems::Associative(items) => {
+                let integer = var.integer;
+                let map = var.make_associative()?;
+                if !append {
+                    *map = Default::default();
+                }
+                for (key, value) in items {
+                    let value = if integer {
+                        crate::arithmetic::run(value, self)?.to_string()
+                    } else {
+                        value.clone()
+                    };
+                    map.insert(key.clone(), value);
+                }
+                var.array_assigned = true;
+                var.declared = true;
+                return Ok(());
+            }
+            ArrayItems::Indexed(items) if var.associative().is_none() => items,
+            _ => return Err("cannot convert associative to indexed array"),
+        };
         let mut map = if append {
-            self.declared_variable(name, global)
-                .map_or_else(BTreeMap::new, |v| {
-                    v.elements.map_or_else(
-                        || v.value.into_iter().map(|s| (0, s)).collect(),
-                        |items| Rc::unwrap_or_clone(items).into_map(),
-                    )
-                })
+            var.elements.take().map_or_else(
+                || var.value.take().into_iter().map(|s| (0, s)).collect(),
+                |items| Rc::unwrap_or_clone(items).into_map(),
+            )
         } else {
             BTreeMap::new()
         };
         let mut next = map
             .last_key_value()
             .map_or(Some(0), |(&i, _)| i.checked_add(1));
-        let integer = self
-            .declared_variable(name, global)
-            .is_some_and(|v| v.integer);
         for (index, value) in items {
             let i = match index {
                 Some(n) if *n < 0 => map
@@ -259,7 +329,7 @@ impl Session {
                 None => next,
             }
             .ok_or("array subscript out of range")?;
-            let value = if integer {
+            let value = if var.integer {
                 crate::arithmetic::run(value, self)?.to_string()
             } else {
                 value.clone()
@@ -267,37 +337,23 @@ impl Session {
             map.insert(i, value);
             next = i.checked_add(1);
         }
-        self.store_array(name, map, global);
+        var.elements = Some(Rc::new(Elements::Sparse(map)));
+        var.value = None;
+        var.declared = true;
+        var.array_assigned = true;
         Ok(())
     }
 
-    pub(crate) fn store_array(&mut self, name: &str, values: BTreeMap<i64, String>, global: bool) {
-        self.store_elements(name, Elements::Sparse(values), global);
-    }
     fn store_elements(&mut self, name: &str, values: Elements, global: bool) {
-        let mut variable = self.declared_variable(name, global).unwrap_or(Variable {
-            integer: false,
-            array_assigned: false,
-            elements: None,
-            declared: true,
-            value: None,
-            exported: false,
-        });
+        let mut variable = self.declared_variable(name, global).unwrap_or_default();
+        if variable.readonly {
+            return;
+        }
         variable.declared = true;
         variable.value = None;
         variable.array_assigned = true;
         variable.elements = Some(Rc::new(values));
-        if global {
-            if let Some(entry) = self
-                .locals
-                .iter_mut()
-                .find_map(|scope| scope.0.get_mut(name))
-            {
-                *entry = Some(variable);
-                return;
-            }
-        }
-        self.variables.insert(name.into(), variable);
+        self.store_variable(name, variable, global);
     }
 
     pub fn resolve_index(&self, name: &str, expr: &str) -> Result<i64, &'static str> {
@@ -326,6 +382,9 @@ impl Session {
     }
 
     pub fn assign_element(&mut self, name: &str, index: i64, value: String) {
+        if self.readonly(name) {
+            return;
+        }
         if name == "DIRSTACK" && !self.variables.contains_key(name) {
             if index > 0
                 && let Some(i) = self.dir_stack.len().checked_sub(index as usize)
@@ -340,6 +399,7 @@ impl Session {
             self.variables.insert(
                 name.into(),
                 Variable {
+                    readonly: false,
                     integer: false,
                     declared: true,
                     value: inherited,
@@ -367,6 +427,7 @@ impl Session {
             self.variables.insert(
                 name.into(),
                 Variable {
+                    readonly: false,
                     integer: false,
                     declared: false,
                     value: None,
@@ -388,18 +449,21 @@ mod tests {
         let mut shell = Session::default();
         shell.assign("a", "outer");
         shell.enter_function();
-        assert_eq!(shell.declare("local", &["-a".into(), "a".into()]), 0);
+        assert_eq!(
+            shell.declare("local", &["-a".into(), "a".into()], &[]),
+            crate::Flow::Continue(0)
+        );
         shell
             .assign_array(
                 "a",
                 false,
-                &[(Some(3), "third".into()), (None, "fourth".into())],
+                &ArrayItems::Indexed(vec![(Some(3), "third".into()), (None, "fourth".into())]),
                 false,
             )
             .unwrap();
         shell.assign_target("a[-1]", "last").unwrap();
         assert_eq!(shell.get("a[4]").as_deref(), Some("last"));
-        assert_eq!(shell.get("\u{1}a").as_deref(), Some("3 4"));
+        assert_eq!(shell.get("\u{1}a").as_deref(), Some("3\x004"));
         assert_eq!(shell.get("a"), None);
         let saved = shell.save_variables(&["a"]);
         shell.assign_element("a", 3, "changed".into());

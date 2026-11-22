@@ -39,7 +39,9 @@ pub(super) fn needs_parser(source: &[u8]) -> bool {
                 let Some(end) = class_end(body) else {
                     return true;
                 };
-                if body[..end].contains(&b'\\') {
+                // The reference shells default to globasciiranges. Native
+                // fnmatch may put accented letters between ASCII endpoints.
+                if body[..end].iter().any(|b| matches!(b, b'\\' | b'-')) {
                     return true;
                 }
                 i += end + 2;

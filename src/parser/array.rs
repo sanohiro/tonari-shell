@@ -4,7 +4,7 @@ use super::{Error, Reader, Word, is_identifier};
 #[derive(Debug, Clone)]
 pub enum Assignment<W> {
     Scalar(W),
-    Array(Vec<(Option<String>, W)>),
+    Array(Option<usize>, Vec<(Option<String>, W)>),
 }
 
 // Keep subscripts intact while lexing the assignment name. They are arithmetic
@@ -17,7 +17,7 @@ pub(super) fn indexed_prefix(source: &str) -> Option<&str> {
     if !source[n..].starts_with('[') || n != 0 && !is_identifier(&source[..n]) {
         return None;
     }
-    let end = source[n + 1..].find(']')? + n + 2;
+    let end = n + super::modifier::index_end(&source[n..]).ok()?;
     let plus = usize::from(source[end..].starts_with('+'));
     source[end + plus..]
         .starts_with('=')

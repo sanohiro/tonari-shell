@@ -128,7 +128,9 @@ pub(crate) fn launch(
         return Err("cannot fork process substitution");
     }
     if pid == 0 {
-        session.traps.after_fork();
+        session
+            .traps
+            .after_fork(session.errtrace, session.functrace);
         drop(keep);
         super::reset_child_signals();
         if super::duplicate(child.as_raw_fd(), target).is_err() {
@@ -141,7 +143,7 @@ pub(crate) fn launch(
         session.substitutions.finished.clear();
         session.bind(assignments);
         let status = match crate::execute_program(session, body, prior, true) {
-            Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
+            Flow::Discard(s) | Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
             Flow::Break(_) | Flow::LoopContinue(_) => 0,
         };
         let status = crate::traps::finish(session, status);

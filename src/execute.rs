@@ -20,8 +20,10 @@ use crate::expansion::Expansion;
 use crate::parser::{Assignment, Pipeline, Redirect, SimpleCommand, Target, Word};
 use crate::session::Session;
 
+#[derive(Debug, PartialEq)]
 pub enum Flow {
     Continue(u8),
+    Discard(u8),
     Exit(u8),
     Return(u8),
     Break(u32),
@@ -244,7 +246,7 @@ impl Environment {
                 if session.environment_changes(&[]).eq(cached
                     .changes
                     .iter()
-                    .map(|(k, v)| (k.as_str(), v.as_deref())))
+                    .map(|(k, v)| (k.as_str(), v.as_deref().map(std::borrow::Cow::Borrowed))))
                 {
                     return Some(cached.clone());
                 }
@@ -275,7 +277,7 @@ impl Environment {
         let cached_changes = if assignments.is_empty() {
             changes
                 .into_iter()
-                .map(|(k, v)| (k.to_owned(), v.map(str::to_owned)))
+                .map(|(k, v)| (k.to_owned(), v.map(std::borrow::Cow::into_owned)))
                 .collect()
         } else {
             Vec::new()
@@ -492,12 +494,14 @@ pub(crate) fn builtin_names() -> &'static [&'static str] {
         "type",
         "unset",
         "jobs",
+        "disown",
         "fg",
         "bg",
         "kill",
         "wait",
         "shopt",
         "declare",
+        "readonly",
         "typeset",
         "alias",
         "unalias",
@@ -526,7 +530,7 @@ fn named_builtin(name: &str, args: &[String], last_status: u8) -> Option<Builtin
         ":" | "true" => Some(Builtin::Status(0)),
         "false" => Some(Builtin::Status(1)),
         "printf" => Some(Builtin::Printf),
-        "jobs" | "fg" | "bg" | "kill" | "wait" => Some(Builtin::Jobs),
+        "jobs" | "fg" | "bg" | "kill" | "wait" | "disown" => Some(Builtin::Jobs),
         "read" => Some(Builtin::Read),
         "set" => Some(Builtin::Set),
         "hash" => Some(Builtin::Hash),
@@ -538,7 +542,7 @@ fn named_builtin(name: &str, args: &[String], last_status: u8) -> Option<Builtin
         "times" => Some(Builtin::Times),
         "getopts" => Some(Builtin::Getopts),
         "let" => Some(Builtin::Let),
-        "local" | "declare" | "typeset" => Some(Builtin::Declare),
+        "local" | "declare" | "typeset" | "readonly" => Some(Builtin::Declare),
         "echo" => Some(Builtin::Echo),
         "test" | "[" => Some(Builtin::Test),
         "break" | "continue" => Some(Builtin::LoopControl),
@@ -614,10 +618,7 @@ fn eval_builtin(
         Builtin::Getopts => Flow::Continue(session.getopts(args)),
         Builtin::Let => Flow::Continue(crate::arithmetic::let_builtin(args, session)),
         Builtin::Shift => Flow::Continue(session.shift(args)),
-        Builtin::Declare => {
-            let status = session.declare(&cmd.words[0], args);
-            Flow::Continue(apply_array_declarations(cmd, status, session))
-        }
+        Builtin::Declare => session.declare(&cmd.words[0], args, &cmd.array_declarations),
         Builtin::Echo => Flow::Continue(crate::builtins::echo(args)),
         Builtin::Test => Flow::Continue(crate::builtins::test(&cmd.words, session)),
         Builtin::LoopControl => {
@@ -666,6 +667,7 @@ fn eval_builtin(
                     write_error(b"return", b": too many arguments");
                     Flow::Continue(1)
                 } else {
+                    session.traps.before_return = last_status;
                     Flow::Return(code)
                 }
             } else {
@@ -972,7 +974,7 @@ fn start_raw(
             .any(stage_expansion)
         || raw.assignments.iter().any(|(_, value)| match value {
             Assignment::Scalar(word) => stage_expansion(word),
-            Assignment::Array(items) => items.iter().any(|(_, word)| stage_expansion(word)),
+            Assignment::Array(_, items) => items.iter().any(|(_, word)| stage_expansion(word)),
         });
     if !observable {
         return match prepare(raw, session, last_status, false) {
@@ -997,14 +999,16 @@ fn start_raw(
         return Err(io::Error::last_os_error());
     }
     if pid == 0 {
-        session.traps.after_fork();
+        session
+            .traps
+            .after_fork(session.errtrace, session.functrace);
         reset_child_signals();
         launch.child();
         session.jobs.forked(!launch.background);
         session.stdin_redirected |= input.is_some();
         let code = if apply(&setup) {
             match run(vec![raw], last_status, true, session) {
-                Ok(Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s)) => s,
+                Ok(Flow::Discard(s) | Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s)) => s,
                 Ok(Flow::Break(_) | Flow::LoopContinue(_)) => 0,
                 Err(e) => {
                     eprintln!("tonari: {e}");
@@ -1089,7 +1093,7 @@ fn start(
         external.args(&cmd.words[1..]);
         for (key, val) in session.environment_changes(&cmd.assignments) {
             if let Some(val) = val {
-                external.env(key, val);
+                external.env(key, val.as_ref());
             } else {
                 external.env_remove(key);
             }
@@ -1135,7 +1139,9 @@ fn start(
         // External argv and environment are prepared before fork. A shell builtin
         // runs in a child copy of the single-threaded interpreter and may reenter it.
         // Restore signals caught by the interactive shell before blocking on a file.
-        session.traps.after_fork();
+        session
+            .traps
+            .after_fork(session.errtrace, session.functrace);
         reset_child_signals();
         launch.child();
         session.jobs.forked(!launch.background);
@@ -1147,7 +1153,7 @@ fn start(
             external.exec()
         } else {
             match eval_builtin(builtin.unwrap(), cmd, session, last_status) {
-                Flow::Exit(s) | Flow::Return(s) | Flow::Continue(s) => s,
+                Flow::Discard(s) | Flow::Exit(s) | Flow::Return(s) | Flow::Continue(s) => s,
                 Flow::Break(_) | Flow::LoopContinue(_) => 0,
             }
         };
@@ -1231,10 +1237,11 @@ pub(crate) fn parameter(session: &Session, last_status: u8, name: &str) -> Optio
     }
 }
 
-struct ArrayDeclaration {
-    name: String,
-    append: bool,
-    items: Vec<(Option<i64>, String)>,
+pub(crate) struct ArrayDeclaration {
+    pub operand: usize,
+    pub name: String,
+    pub append: bool,
+    pub items: crate::session::array::ArrayItems,
 }
 
 struct PreparedCommand {
@@ -1263,7 +1270,7 @@ impl PreparedCommand {
 }
 
 fn prepare(
-    raw: SimpleCommand<Word>,
+    mut raw: SimpleCommand<Word>,
     session: &mut Session,
     last_status: u8,
     standalone: bool,
@@ -1271,7 +1278,18 @@ fn prepare(
     let captured = Cell::new(None);
     let mut words = Vec::with_capacity(raw.words.len());
     let mut original = Expansion::new(session, last_status, &captured);
-    for word in raw.words {
+    let mut positions = raw
+        .assignments
+        .iter_mut()
+        .filter_map(|(_, assignment)| match assignment {
+            Assignment::Array(Some(position), _) => Some(position),
+            _ => None,
+        })
+        .peekable();
+    for (index, word) in raw.words.into_iter().enumerate() {
+        if positions.peek().is_some_and(|p| **p == index) {
+            *positions.next().unwrap() = words.len();
+        }
         match word {
             Word::Literal(word) => words.push(word),
             word => words.extend(original.fields(word)?),
@@ -1294,25 +1312,25 @@ fn prepare(
             key.pop();
         }
         match word {
-            Assignment::Array(parts) => {
-                let mut items = Vec::with_capacity(parts.len());
-                for (index, word) in parts {
-                    if let Some(index) = index {
-                        let index = exp.arithmetic(&index)?;
-                        items.push((Some(index), exp.scalar(word)?));
-                    } else {
-                        items.extend(exp.fields(word)?.into_iter().map(|s| (None, s)));
-                    }
+            Assignment::Array(operand, parts) => {
+                if operand.is_none() && exp.session.readonly(&key) {
+                    return Err(crate::expansion::Error::readonly(&key));
                 }
+                let declared_assoc = operand.is_some()
+                    && words
+                        .iter()
+                        .skip(1)
+                        .take_while(|arg| arg.starts_with('-') && *arg != "--")
+                        .any(|arg| arg.contains('A'));
+                let items =
+                    exp.array_items(parts, declared_assoc || exp.session.is_associative(&key))?;
                 if words.is_empty() {
                     if standalone {
                         session.assign_array(&key, append, &items, false)?;
                     }
-                } else if matches!(
-                    words[0].as_str(),
-                    "declare" | "local" | "typeset" | "export"
-                ) {
+                } else if let Some(operand) = operand {
                     array_declarations.push(ArrayDeclaration {
+                        operand,
                         name: key,
                         append,
                         items,
@@ -1327,6 +1345,34 @@ fn prepare(
                 let value = exp.scalar(word)?;
                 let base =
                     crate::session::array::subscript(&key).map_or(key.as_str(), |(base, _)| base);
+                if exp.session.readonly(base) {
+                    let error = crate::expansion::Error::readonly(base);
+                    if words.is_empty() {
+                        return Err(error);
+                    }
+                    eprintln!("tonari: {error}");
+                    continue;
+                }
+                if let Some((base, subscript)) = crate::session::array::subscript(&key)
+                    && exp.session.is_associative(base)
+                {
+                    if !words.is_empty() {
+                        return Err("invalid indexed environment assignment".into());
+                    }
+                    if standalone {
+                        let key = exp.key(subscript)?;
+                        let old = exp.session.assoc_value(base, &key).map(str::to_owned);
+                        let value = if exp.session.integer(base) {
+                            exp.session.integer_value(old.as_deref(), &value, append)?
+                        } else if append {
+                            old.unwrap_or_default() + &value
+                        } else {
+                            value
+                        };
+                        exp.session.assign_key(base, key, value)?;
+                    }
+                    continue;
+                }
                 let value = if exp.session.integer(base) {
                     let old = if append {
                         let old = exp.lookup(&key).unwrap_or_default();
@@ -1396,7 +1442,7 @@ fn prepare(
         }
         cmd.redirects = result.map_err(|mut e| {
             if child {
-                e.fatal = false;
+                e.child_failure();
             }
             e
         })?;

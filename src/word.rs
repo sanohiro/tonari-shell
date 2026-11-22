@@ -285,6 +285,7 @@ impl Word {
         positional: &[String],
     ) -> Vec<String> {
         self.fields_with_glob(lookup, positional, Some(&Default::default()))
+            .unwrap()
     }
 
     pub fn fields_with_glob(
@@ -292,9 +293,9 @@ impl Word {
         lookup: &impl Fn(&str) -> Option<String>,
         positional: &[String],
         globbing: Option<&crate::pattern::GlobOptions>,
-    ) -> Vec<String> {
+    ) -> Result<Vec<String>, crate::expansion::Error> {
         if let Self::Literal(s) = self {
-            return vec![s];
+            return Ok(vec![s]);
         }
         let ifs = lookup("IFS").unwrap_or_else(|| " \t\n".into());
         let mut output = Output::Fields(Fields {
@@ -306,7 +307,7 @@ impl Word {
             unreachable!()
         };
         fields.finish_field();
-        fields.words
+        fields.error.map_or(Ok(fields.words), Err)
     }
 
     pub fn pattern(
@@ -549,7 +550,8 @@ fn array_elements(
     let indexes = lookup(&format!("\u{1}{base}"))?;
     Some(
         indexes
-            .split_ascii_whitespace()
+            .split('\0')
+            .filter(|i| !i.is_empty())
             .filter_map(|i| {
                 if keys {
                     Some(i.to_owned())
@@ -577,7 +579,8 @@ fn parameter(
             positional.len()
         } else if let Some((base, _, _)) = array_elements_name(name) {
             lookup(&format!("\u{1}{base}"))?
-                .split_ascii_whitespace()
+                .split('\0')
+                .filter(|i| !i.is_empty())
                 .count()
         } else {
             parameter(name, lookup, positional)?.chars().count()
@@ -638,14 +641,22 @@ struct Fields<'a> {
     words: Vec<String>,
     current: Field,
     globbing: Option<&'a crate::pattern::GlobOptions>,
+    error: Option<crate::expansion::Error>,
     present: bool,
     whitespace: bool,
 }
 
 impl Fields<'_> {
+    fn emit(&mut self) {
+        let current = std::mem::take(&mut self.current);
+        if self.error.is_none() {
+            self.error = current.finish(&mut self.words, self.globbing).err();
+        }
+    }
+
     fn finish_field(&mut self) {
         if self.present {
-            std::mem::take(&mut self.current).finish(&mut self.words, self.globbing);
+            self.emit();
             self.present = false;
         }
         self.whitespace = false;
@@ -672,7 +683,7 @@ impl Fields<'_> {
             if matches!(sep, " " | "\t" | "\n") {
                 self.whitespace = true;
             } else {
-                std::mem::take(&mut self.current).finish(&mut self.words, self.globbing);
+                self.emit();
                 self.present = false;
                 self.whitespace = false;
             }
