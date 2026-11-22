@@ -275,6 +275,7 @@ fn repeat(
         let step = match next(session, last) {
             Ok(None) => break Flow::Continue(result),
             Ok(Some(status)) => execute_program(session, body.to_vec(), status, false),
+            Err(Flow::Continue(code)) => break Flow::Continue(code),
             Err(flow) => flow,
         };
         match step {

@@ -452,6 +452,11 @@ fn kill(jobs: &Jobs, mut args: &[String]) -> u8 {
             args = &args[2..];
             sig
         }
+        Some(s) if s.len() > 2 && (s.starts_with("-n") || s.starts_with("-s")) => {
+            let signal = crate::traps::number(&s[2..]);
+            args = &args[1..];
+            signal
+        }
         Some(s) if s.starts_with('-') && s != "--" => {
             args = &args[1..];
             crate::traps::number(&s[1..])
@@ -871,6 +876,13 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                 eprintln!("tonari: {name}: no such job");
                 return 1;
             };
+            if jobs.table[i].group.is_none() {
+                eprintln!(
+                    "tonari: {name}: job {} started without job control",
+                    jobs.table[i].id
+                );
+                return 1;
+            }
             if name == "bg" {
                 if !jobs.table[i].stopped() {
                     eprintln!("tonari: bg: job {} already in background", jobs.table[i].id);

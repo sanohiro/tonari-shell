@@ -745,13 +745,31 @@ exec 6<file; exec 7<&6-; read -ru7 line; printf 'moved:%s' "$line"
 exec 8>|output; printf out 9>&8- >&9; { printf ok >&8; } 2>/dev/null; echo "/$?"; cat output""",
                      0, b"blocked:1\nfirst\nallowed\ndevice:0\nread:allowed\nmoved:allowed/1\nout")
 
+    def test_arithmetic_for_quotes_nested_separators_and_errors(self):
+        self.compare("""for ((i=0; "i < 3"; i++)); do printf %s "$i"; done; echo
+for ((i=$(printf 'a;' >/dev/null; echo 2); i>0; i--)); do printf %s "$i"; done; echo
+{ for ((i=1; i < 4; 7++)); do echo "body:$i"; done; } 2>/dev/null; echo "step:$?"
+{ for ((i=1; 4/0; i++)); do echo unexpected; done; } 2>/dev/null; echo "test:$?" """,
+                     0, b"012\n21\nbody:1\nstep:1\ntest:1\n", minimum=5)
+
+    def test_attached_kill_signal_and_monitor_switch(self):
+        self.compare("""sleep 1 & p=$!; set -m; fg %1 2>/dev/null; echo "fg:$?"
+kill -n9 "$p"; wait "$p" 2>/dev/null; echo "killed:$?"
+set +m; sleep 1 & p=$!; kill -sHUP "$p"; wait "$p" 2>/dev/null; echo "hup:$?" """,
+                     0, b"fg:1\nkilled:137\nhup:129\n", minimum=5)
+
     def test_monitor_mode_in_scripts(self):
         self.compare("""rm -f gate; mkfifo gate; set -m
 reader() { IFS= read -r line <gate; }; reader & p=$!
 g=$(python3 -c 'import os,sys; print(os.getpgid(int(sys.argv[1])))' "$p"); test "$g" = "$p" && echo group
 (sleep .12; echo go >gate) & sender=$!
 fg %1 >/dev/null; echo "fg:$?"; wait "$sender"; set +m; shopt -qo monitor; echo "disabled:$?" """,
-                     0, b"group\nfg:0\ndisabled:1\n")
+                     0, b"group\nfg:0\ndisabled:1\n", minimum=5)
+
+    def test_logical_directory_after_external_rename(self):
+        self.compare("""mkdir -p outer; cd outer; pwd -L >/dev/null; mv ../outer ../renamed
+a=$(pwd -L); b=$(pwd -P); echo "${a##*/}/${b##*/}"; cd .. && mv renamed outer""",
+                     0, b"outer/renamed\n")
 
     def test_directory_stack_rotation_and_no_cd(self):
         self.compare("""HOME=$PWD; mkdir -p a b; pushd a; pushd ../b; dirs -v

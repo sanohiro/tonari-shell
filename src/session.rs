@@ -68,7 +68,7 @@ pub struct Session {
     // original process environment without building a copy on startup.
     variables: BTreeMap<String, Variable>,
     opt_offset: usize,
-    logical_cwd: Option<PathBuf>,
+    logical_cwd: std::cell::OnceCell<PathBuf>,
     dir_stack: Vec<String>,
     shell_pid: ShellPid,
     pub interactive: bool,
@@ -730,7 +730,7 @@ impl Session {
     }
 
     pub fn logical_directory(&self) -> io::Result<PathBuf> {
-        if let Some(cwd) = &self.logical_cwd {
+        if let Some(cwd) = self.logical_cwd.get() {
             return Ok(cwd.clone());
         }
         if let Some(pwd) = std::env::var_os("PWD") {
@@ -739,10 +739,11 @@ impl Session {
                 && !path.components().any(|c| c == Component::ParentDir)
                 && same_directory(path, Path::new("."))
             {
-                return Ok(path.into());
+                return Ok(self.logical_cwd.get_or_init(|| path.into()).clone());
             }
         }
-        std::env::current_dir()
+        let cwd = std::env::current_dir()?;
+        Ok(self.logical_cwd.get_or_init(|| cwd).clone())
     }
 
     pub fn directory_builtin(&mut self, name: &str, args: &[String]) -> u8 {
@@ -837,25 +838,26 @@ impl Session {
                 } else {
                     base.as_ref().ok().map(|base| base.join(&candidate))
                 };
-                match joined.as_deref().map(normalize_directory).transpose() {
-                    Ok(p) => p,
-                    Err(e) => {
-                        error = e;
-                        continue;
-                    }
-                }
+                joined
+                    .as_deref()
+                    .and_then(|path| normalize_directory(path).ok())
             };
-            let destination = logical.as_deref().unwrap_or(&candidate);
-            if let Err(e) = std::env::set_current_dir(destination) {
+            // A renamed ancestor can invalidate the logical path while the
+            // process still has a valid current directory for a relative chdir.
+            let logical = logical.filter(|path| std::env::set_current_dir(path).is_ok());
+            if logical.is_none()
+                && let Err(e) = std::env::set_current_dir(&candidate)
+            {
                 error = e;
                 continue;
             }
             self.hashes.directory_changed();
-            self.logical_cwd = logical;
-            if self.logical_cwd.is_none() {
-                self.logical_cwd = Some(std::env::current_dir()?);
-            }
-            let cwd = self.logical_cwd.as_ref().unwrap().clone();
+            self.logical_cwd.take();
+            let cwd = match logical {
+                Some(cwd) => cwd,
+                None => std::env::current_dir()?,
+            };
+            let _ = self.logical_cwd.set(cwd.clone());
             let old_export = self.is_exported("OLDPWD");
             self.variables.insert(
                 "OLDPWD".into(),

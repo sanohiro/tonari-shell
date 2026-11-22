@@ -6,6 +6,7 @@ pub use array::Assignment;
 mod ansi;
 pub(crate) mod completion_words;
 mod here_doc;
+pub(crate) use lexer::arithmetic_word;
 mod lexer;
 mod modifier;
 pub use crate::word::{Word, is_identifier};
@@ -689,15 +690,7 @@ impl Reader {
             let Some(Token::Arithmetic(header)) = self.tokens.next() else {
                 unreachable!()
             };
-            let mut expressions = header.split(';');
-            let (Some(init), Some(condition), Some(step), None) = (
-                expressions.next(),
-                expressions.next(),
-                expressions.next(),
-                expressions.next(),
-            ) else {
-                return Err(Error::Invalid("arithmetic for requires three expressions"));
-            };
+            let [init, condition, step] = lexer::arithmetic_clauses(&header)?;
             if matches!(self.peek(), Some(Token::End)) {
                 self.tokens.next();
             }

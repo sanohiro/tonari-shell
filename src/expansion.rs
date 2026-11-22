@@ -165,8 +165,8 @@ impl<'a> Expansion<'a> {
 
     pub fn arithmetic(&mut self, expression: &str) -> Result<i64, Error> {
         let expanded;
-        let expression = if expression.contains(['$', '`']) {
-            let word = crate::parser::expansion_string(expression).map_err(|e| e.message())?;
+        let expression = if expression.contains(['$', '`', '"', '\\']) {
+            let word = crate::parser::arithmetic_word(expression).map_err(|e| e.message())?;
             expanded = self.scalar(word)?;
             expanded.as_str()
         } else {

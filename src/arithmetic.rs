@@ -46,7 +46,7 @@ pub fn run(source: &str, session: &mut Session) -> Result<i64> {
 }
 
 pub fn expanded(source: &str, session: &mut Session, status: u8) -> Result<i64> {
-    if !source.contains(['$', '`']) {
+    if !source.contains(['$', '`', '"', '\\']) {
         return run(source, session);
     }
     let captured = std::cell::Cell::new(None);

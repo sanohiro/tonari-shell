@@ -396,6 +396,65 @@ pub(super) fn separator(c: char) -> bool {
     )
 }
 
+pub(super) fn arithmetic_clauses(source: &str) -> Result<[&str; 3], Error> {
+    let mut chars = source.chars();
+    let mut fields = [""; 3];
+    let mut index = 0;
+    let mut start = 0;
+    let mut depth = 0usize;
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                chars.next();
+            }
+            '"' | '\'' => quoted(&mut chars, c, &mut WordBuilder::default())?,
+            '`' => backquote(&mut chars, &mut WordBuilder::default(), true)?,
+            '$' if chars.as_str().starts_with(['(', '{']) => {
+                dollar(&mut chars, &mut WordBuilder::default(), true)?
+            }
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            ';' if depth == 0 => {
+                if index >= 2 {
+                    return Err(Error::Invalid("arithmetic for requires three expressions"));
+                }
+                let end = source.len() - chars.as_str().len();
+                fields[index] = &source[start..end - 1];
+                start = end;
+                index += 1;
+            }
+            _ => {}
+        }
+    }
+    if index != 2 {
+        return Err(Error::Invalid("arithmetic for requires three expressions"));
+    }
+    fields[2] = &source[start..];
+    Ok(fields)
+}
+
+pub(crate) fn arithmetic_word(source: &str) -> Result<crate::word::Word, Error> {
+    let mut chars = source.chars();
+    let mut word = WordBuilder::default();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => quoted(&mut chars, c, &mut word)?,
+            '$' => dollar(&mut chars, &mut word, true)?,
+            '`' => backquote(&mut chars, &mut word, true)?,
+            '\\' => {
+                let next = chars
+                    .next()
+                    .ok_or(Error::Incomplete("trailing arithmetic escape"))?;
+                if next != '\n' {
+                    word.push(next);
+                }
+            }
+            _ => word.push(c),
+        }
+    }
+    Ok(word.finish())
+}
+
 fn arithmetic_source(chars: &mut Chars<'_>) -> Result<String, Error> {
     let source = chars.as_str();
     let mut depth = 0usize;
