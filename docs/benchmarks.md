@@ -16,6 +16,44 @@ The default run includes a session workload covering assignment, export, paramet
 
 既定の計測には、代入・export・変数展開・`cd`・`pwd`・`&&`・リダイレクト・`unset` を同じシェルで実行する項目が含まれます。算術ループ1,000回と、一つのシェルから外部プログラム16個を順に起動する項目もあります。後者では同じプログラム16個を Python 親プロセスから直接 `posix_spawn` し、その都度終了を待つ条件も交互に計測します。標準入出力は計時前に用意し、各子プロセスに継承させます。セッション機能の実装前との比較には `--case core` を使います。プロンプト表示の主指標は疑似端末での起動全体です。子プロセスの exec 直前にも時刻を記録し、同じ測定サンプルのうち、端末の準備と fork の後に経過した時間も表示します。
 
+<a id="path-expansion-order"></a>
+
+## Wildcard expansion and collation / ワイルドカード展開と並べ替え
+
+On 2026-11-22 we rotated Tonari `c2bd297`, the updated native release and GNU Bash 5.2.37 on an M1 running macOS 27.2.1 and a Debian 13 arm64 VM on the same computer. Each fresh noninteractive shell signaled readiness before sourcing a script using `set -- pattern`. Times include expansion, setting the positional arguments, printing the checked result, and shell exit. The local filesystem cache was warm. Five warm-ups preceded each set of samples. Mac used 45 samples per multilingual workload and 15 otherwise. Debian used 65 per workload. Values are **median / p95 ms per script**. [Script definitions](../tools/bench_scripts.py)
+
+M1 の Mac と同じマシンの Debian VM で、新版・旧版・GNU Bash の実行順を交替した。起動済みの新しい非対話シェルで展開し、結果を位置パラメーターに設定して件数を確認した。ファイルシステムのキャッシュは温めた。各条件5回のウォームアップ後、Mac の多言語名は45回、他は15回、Debian は各65回を集計。表の回数は1スクリプト内での展開回数で、初回の行は毎回新しいシェルで1回だけ展開した。値はスクリプト全体の中央値 / p95（ms）。
+
+| Expansion / 展開 | Mac previous | Mac Tonari | Mac Bash | Debian previous | Debian Tonari | Debian Bash |
+|---|---:|---:|---:|---:|---:|---:|
+| `*`, 512 names × 30 | 8.198 / 9.586 | 7.873 / 8.850 | 1096.298 / 1149.446 | 5.581 / 6.116 | 4.076 / 4.544 | 8.335 / 9.003 |
+| `*.txt`, 512 matches × 30 | 8.126 / 8.871 | 7.872 / 8.205 | 1096.822 / 1325.614 | 5.585 / 6.389 | 4.125 / 4.595 | 8.754 / 9.155 |
+| `item-000*.txt`, one match × 30 | 6.592 / 7.195 | 6.545 / 7.255 | 1085.448 / 1163.648 | 2.172 / 2.453 | 2.002 / 2.204 | 2.704 / 2.986 |
+| `*em*07.txt`, six matches × 30 | 8.702 / 9.166 | 6.521 / 7.101 | 1077.425 / 1085.483 | 2.799 / 3.164 | 2.021 / 2.277 | 3.219 / 3.686 |
+| `*/*.rs`, eight matches × 30 | 26.757 / 31.335 | 10.387 / 11.076 | 1144.234 / 1296.926 | 11.520 / 12.257 | 2.583 / 3.042 | 11.051 / 11.642 |
+| `**/*.rs`, 80 matches × 10 | 44.780 / 46.499 | 41.330 / 44.253 | 1061.469 / 1101.253 | 8.495 / 9.537 | 6.787 / 7.434 | 23.588 / 25.369 |
+| UTF-8 collation, 512 matches × 1 | 2.237 / 2.413 | 1.681 / 1.880 | 3.044 / 3.475 | 0.366 / 0.441 | 0.374 / 0.460 | 0.587 / 0.651 |
+| UTF-8 collation, 512 matches × 30 | 46.986 / 48.267 | 8.949 / 9.419 | 55.039 / 57.364 | 6.250 / 7.349 | 4.335 / 4.701 | 12.181 / 13.614 |
+| UTF-8 collation, 4,096 matches × 1 | 15.104 / 15.733 | 9.806 / 10.958 | 17.664 / 18.478 | 1.789 / 2.195 | 1.703 / 1.899 | 3.846 / 4.211 |
+
+On Mac, the first UTF-8 expansion took 55% of Bash's median at both 512 and 4,096 names. On Debian, dense `*.txt` took 47% of Bash's median, while the one-match prefix still took 74%. In 150 separate Mac startup samples, startup through exit for `-c ':'` took 2.549 / 3.103 ms (previous 2.634 / 3.077). PTY launch through first prompt took 4.350 / 5.000 ms (previous 4.381 / 4.968). [Startup harness](../tools/bench.py)
+
+Mac の UTF-8 名の初回展開は512件・4,096件の両方で Bash の中央値の約55%。Debian の `*.txt` 全件一致は約47%、固定の接頭辞で1件に絞る場合は約74%だった。Mac の起動を別に150回計測し、最初のプロンプトまでの中央値は旧版 4.381 ms、新版 4.350 ms だった。
+
+Flat ASCII fixtures contain 512 files. The two-component case contains 512 ordinary files alongside eight directories, each with a `lib.rs`. The recursive case enables `globstar` and visits a tree with 16 parents and 80 leaf directories, each containing one Rust source and 15 other files. These rows use `LC_ALL=C`. Multilingual names mix case, accents, Japanese text and emoji in `en_US.UTF-8` on Mac or `C.UTF-8` on Debian. The 4,096-name workload exceeds Tonari's retained-order limit. The separate compatibility test checks the complete sorted output after renaming, adding or removing a name. A 4,096-name check compared all 55,478 bytes of NUL-delimited output against GNU Bash on both systems. [Tests](../tests/shell.py)
+
+通常の条件は `LC_ALL=C`。2階層の条件は通常ファイル512件とディレクトリ8件を混在させ、再帰条件は親16個・末端80個の各末端に Rust ファイル1件と他のファイル15件を置いた。多言語名は大小のラテン文字・アクセント付き文字・日本語・絵文字を混在させ、Mac は `en_US.UTF-8`、Debian は `C.UTF-8`。4,096件はソート順を保持する上限を超える。別の4,096件の検証では NUL 区切りの出力55,478バイトが両 OS で GNU Bash と一致した。
+
+A separate Linux `strace -qq -c -e trace=openat,getdents64` run expanded one pattern in a directory of 512 files and one subdirectory holding a Rust source. For `item*.txt` the number of directory-read syscalls fell from 10 to 2 including EOF. For `*/*.rs` the previous build attempted 514 opens, with 512 errors. The new build opened the two directories successfully and read them in four calls including EOF. The Mac binary measured 869,632 bytes, previously 852,992. The Linux static executable measured 1,020,616 bytes, previously 1,009,640. [Design and comparison with Apple's libc](engineering-notes.md)
+
+Linux のシステムコールを別に数えると、512ファイルと1ディレクトリでの `item*.txt` はディレクトリ読み取りが EOF 込みで10回から2回になった。`*/*.rs` は旧版で open が514回、うち512回は通常ファイルへの失敗だった。新版はディレクトリ2件を開き、各2回の読み取りで完了した。単一バイナリの増分は Mac が16,640バイト、Linux が10,976バイト。
+
+```sh
+python3 tools/bench_scripts.py /path/to/tonari --previous /path/to/previous --bash /path/to/bash --timing started --case glob --case glob-all --case glob-sparse --case glob-multi-star --case glob-subdirs --case glob-recursive --runs 15
+python3 tools/bench_scripts.py /path/to/tonari --previous /path/to/previous --bash /path/to/bash --timing started --case glob-utf8-once --case glob-utf8-sort --case glob-utf8-large --runs 45
+```
+
+
 <a id="external-descriptor-copies"></a>
 
 ## External commands with standard-stream redirection / 標準入出力をつなぎ替える外部コマンド

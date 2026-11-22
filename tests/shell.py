@@ -423,6 +423,40 @@ class ShellTests(unittest.TestCase):
                 expected = self.command(BASH, source).stdout
                 self.compare(source, 0, expected)
 
+    def test_glob_sort_order_after_directory_changes(self):
+        for i in range(96):
+            (self.cwd / f"{['A', 'é', '雪', '🌱'][i % 4]}-{i:03}.txt").touch()
+        (self.cwd / "a b\nc.txt").touch()
+        commands = r"""printf '%s\0' *.txt; printf '%s\0' *.txt
+mv A-000.txt Z-000.txt
+printf '%s\0' *.txt
+mv Z-000.txt A-000.txt
+: > another.txt
+printf '%s\0' *.txt
+rm another.txt
+printf '%s\0' *.txt"""
+        for locale in ["C", "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"]:
+            self.env["LC_ALL"] = locale
+            expected = self.command(BASH, commands)
+            actual = self.command(TONARI, commands)
+            self.assertEqual((expected.returncode, expected.stderr), (0, b""))
+            self.assertEqual((actual.stdout, actual.stderr, actual.returncode), (expected.stdout, b"", 0))
+
+    def test_glob_multiple_directory_batches_and_symlink_types(self):
+        group = self.cwd / "group"
+        group.mkdir()
+        stem = "x" * 165
+        for i in range(260):
+            (group / f"{stem}-{i:03}.txt").touch()
+        (group / "sub").mkdir()
+        (group / "sub" / "file.rs").touch()
+        (group / "alias").symlink_to("sub")
+        (group / "broken").symlink_to("gone")
+        os.mkfifo(group / "fifo")
+        self.compare('set -- group/*x*2*.txt; printf "%s\n" "$#"; '
+                     'printf "<%s>" group/*/*.rs group/*/', 0,
+                     b"98\n<group/alias/file.rs><group/sub/file.rs><group/alias/><group/sub/>")
+
     def test_glob_options_and_recursive_symlinks(self):
         for path in ["a/top.txt", "a/.hidden/inner.txt", "a/sub/leaf.txt", ".root.txt", "name.txt"]:
             dest = self.cwd / path

@@ -73,6 +73,29 @@ echo "$# $1"
 for ((i=0; i<30; i++)); do set -- fixtures/item-000*.txt; done
 echo "$# $1"
 """, "1 fixtures/item-000.txt"),
+    "glob-all": ("""\
+for ((i=0; i<30; i++)); do set -- fixtures/*; done
+echo "$# $1"
+""", "512 fixtures/item-000.txt"),
+    "glob-multi-star": ("""\
+for ((i=0; i<30; i++)); do set -- fixtures/*em*07.txt; done
+echo "$# $1"
+""", "6 fixtures/item-007.txt"),
+    "glob-subdirs": ("""\
+for ((i=0; i<30; i++)); do set -- mixed/*/*.rs; done
+echo "$# $1"
+""", "8 mixed/pkg-0/lib.rs"),
+    "glob-utf8-sort": ("""\
+for ((i=0; i<30; i++)); do set -- localized/*.txt; done
+echo "$#"
+""", "512"),
+    "glob-utf8-once": ('set -- localized/*.txt; echo "$#"', "512"),
+    "glob-utf8-large": ('set -- large/*.txt; echo "$#"', "4096"),
+    "glob-recursive": ("""\
+shopt -s globstar
+for ((i=0; i<10; i++)); do set -- tree/**/*.rs; done
+echo "$# $1"
+""", "80 tree/d00/s0/lib.rs"),
     "read-lines": ("""\
 count=0
 while IFS= read -r row; do
@@ -187,14 +210,40 @@ def main():
         home = Path(temp)
         env = {"HOME": temp, "PATH": "/usr/bin:/bin", "LC_ALL": "C"}
         (home / "rows").write_text("".join(f"record {i}\n" for i in range(2000)))
-        if not args.case or any(case in ("glob", "glob-sparse") for case in args.case):
+        if not args.case or any(case in ("glob", "glob-all", "glob-sparse", "glob-multi-star") for case in args.case):
             fixtures = home / "fixtures"
             fixtures.mkdir()
             for i in range(512):
                 (fixtures / f"item-{i:03}.txt").touch()
+        if not args.case or "glob-subdirs" in args.case:
+            mixed = home / "mixed"
+            mixed.mkdir()
+            for i in range(512):
+                (mixed / f"item-{i:03}.txt").touch()
+            for i in range(8):
+                package = mixed / f"pkg-{i}"
+                package.mkdir()
+                (package / "lib.rs").touch()
+        for directory, count, cases in [("localized", 512, ("glob-utf8-sort", "glob-utf8-once")),
+                                        ("large", 4096, ("glob-utf8-large",))]:
+            if args.case and not any(case in args.case for case in cases):
+                continue
+            localized = home / directory
+            localized.mkdir()
+            prefixes = ["a", "B", "é", "雪", "🌱", "Z", "Å", "c"]
+            for i in range(count):
+                (localized / f"{prefixes[i % 8]}-{i:03}.txt").touch()
+        if not args.case or "glob-recursive" in args.case:
+            for i in range(16):
+                for j in range(5):
+                    leaf = home / "tree" / f"d{i:02}" / f"s{j}"
+                    leaf.mkdir(parents=True)
+                    (leaf / "lib.rs").touch()
+                    for k in range(15):
+                        (leaf / f"item-{k:02}.txt").touch()
         for case in args.case or CASES:
             case_env = env
-            if case == "field-split-unicode":
+            if case in ("field-split-unicode", "glob-utf8-sort", "glob-utf8-once", "glob-utf8-large"):
                 case_env = dict(env, LC_ALL="en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8")
             source, expected = CASES[case]
             script = home / f"{case}.sh"

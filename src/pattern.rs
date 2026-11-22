@@ -1,6 +1,10 @@
+mod directory;
+mod order;
+
+use directory::visit_names;
+use order::Collation;
 use std::ffi::{CStr, CString};
 use std::fs;
-use std::ptr::NonNull;
 use std::sync::OnceLock;
 
 // libc starts in the C locale. Load the caller's character and collation
@@ -9,7 +13,7 @@ pub(crate) fn localized<T>(work: impl FnOnce() -> T) -> T {
     with_locale(|_| work())
 }
 
-fn with_locale<T>(work: impl FnOnce(bool) -> T) -> T {
+fn with_locale<T>(work: impl FnOnce(Collation) -> T) -> T {
     static LOCALE: OnceLock<(usize, bool)> = OnceLock::new();
     let &(locale, byte_order) = LOCALE.get_or_init(|| {
         let locale = unsafe {
@@ -27,22 +31,29 @@ fn with_locale<T>(work: impl FnOnce(bool) -> T) -> T {
     });
     let locale = locale as libc::locale_t;
     if locale.is_null() {
-        return work(false);
+        return work(Collation::Current);
     }
     let previous = unsafe { libc::uselocale(locale) };
-    let result = work(!previous.is_null() && byte_order);
+    let result = work(if previous.is_null() {
+        Collation::Current
+    } else if byte_order {
+        Collation::Bytes
+    } else {
+        Collation::FixedLocale
+    });
     if !previous.is_null() {
         unsafe { libc::uselocale(previous) };
     }
     result
 }
 
-// A single unescaped star can consume precisely the gap between two literal
-// edges. Keep all other shell pattern syntax with the locale-aware matcher.
+// A star consumes the gap between literal pieces. Bracket expressions,
+// question marks and quoting use the locale-aware matcher.
 #[derive(Debug)]
 pub(crate) enum Matcher<T> {
     Literal(T),
     Star(T, usize),
+    Stars(T, usize, usize),
     Native(CString),
     Invalid,
 }
@@ -53,11 +64,13 @@ impl<T: AsRef<str>> Matcher<T> {
         if !text.bytes().any(|b| matches!(b, b'?' | b'[' | b'\\' | 0)) {
             match text.split_once('*') {
                 None => return Self::Literal(pattern),
-                Some((left, right)) if !right.contains('*') => {
+                Some((left, right)) => {
                     let star = left.len();
+                    if let Some(last) = right.rfind('*') {
+                        return Self::Stars(pattern, star, star + 1 + last);
+                    }
                     return Self::Star(pattern, star);
                 }
-                _ => {}
             }
         }
         #[cfg(target_env = "musl")]
@@ -79,6 +92,32 @@ impl<T: AsRef<str>> Matcher<T> {
                     && value
                         .strip_prefix(left)
                         .is_some_and(|rest| rest.ends_with(&tail[1..]))
+            }
+            Self::Stars(text, first, last) => {
+                let pattern = text.as_ref();
+                let head = &pattern[..*first];
+                if period && head.is_empty() && value.first() == Some(&b'.') {
+                    return false;
+                }
+                let Some(gap) = value
+                    .strip_prefix(head.as_bytes())
+                    .and_then(|rest| rest.strip_suffix(&pattern.as_bytes()[last + 1..]))
+                else {
+                    return false;
+                };
+                let Ok(mut gap) = std::str::from_utf8(gap) else {
+                    return false;
+                };
+                for part in pattern[first + 1..*last]
+                    .split('*')
+                    .filter(|p| !p.is_empty())
+                {
+                    let Some((_, after)) = gap.split_once(part) else {
+                        return false;
+                    };
+                    gap = after;
+                }
+                true
             }
             Self::Native(pattern) => {
                 let test = |name: &CStr| unsafe {
@@ -244,7 +283,7 @@ pub struct GlobOptions {
 
 pub(crate) fn pathnames(pattern: &str, options: GlobOptions) -> Vec<String> {
     let mut names = Vec::new();
-    with_locale(|byte_order| paths(pattern, options, &mut names, byte_order));
+    with_locale(|order| paths(pattern, options, &mut names, order));
     names
 }
 
@@ -261,37 +300,9 @@ pub(crate) fn unescape(component: &str) -> String {
     literal
 }
 
-struct DirectoryStream(NonNull<libc::DIR>);
-
-impl Drop for DirectoryStream {
-    fn drop(&mut self) {
-        unsafe { libc::closedir(self.0.as_ptr()) };
-    }
-}
-
-fn visit_names(dir: &str, mut visit: impl FnMut(&CStr)) {
-    let Ok(path) = CString::new(dir) else { return };
-    let Some(stream) = NonNull::new(unsafe { libc::opendir(path.as_ptr()) }) else {
-        return;
-    };
-    let stream = DirectoryStream(stream);
-    loop {
-        let entry = unsafe { libc::readdir(stream.0.as_ptr()) };
-        if entry.is_null() {
-            break;
-        }
-        // readdir owns this NUL-terminated name until the next call on this
-        // stream. The callback can borrow it only for this iteration.
-        let name = unsafe { CStr::from_ptr(std::ptr::addr_of!((*entry).d_name).cast()) };
-        if !matches!(name.to_bytes(), b"." | b"..") {
-            visit(name);
-        }
-    }
-}
-
 // Walk by component so POSIX character classes have the same fnmatch
 // semantics in argv and in case patterns, including on Darwin.
-fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>, byte_order: bool) {
+fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>, collation: Collation) {
     let mut paths = vec![String::new()];
     let mut rest = pattern;
     let mut known_existing = false;
@@ -357,12 +368,16 @@ fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>, byte_ord
         let mut matched = Vec::new();
         for prefix in paths {
             let dir = if prefix.is_empty() { "." } else { &prefix };
-            visit_names(dir, |raw| {
+            visit_names(dir, !rest.is_empty(), |raw, _| {
                 if !matcher.accepts(raw.to_bytes(), !options.dotglob, Some(raw)) {
                     return;
                 }
                 let Ok(name) = raw.to_str() else { return };
-                let mut path = String::with_capacity(prefix.len() + name.len());
+                let mut path = String::with_capacity(
+                    prefix.len()
+                        + name.len()
+                        + usize::from(collation != Collation::Bytes || !rest.is_empty()),
+                );
                 path.push_str(&prefix);
                 path.push_str(name);
                 matched.push(path);
@@ -379,20 +394,7 @@ fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>, byte_ord
     if !known_existing {
         paths.retain(|path| fs::symlink_metadata(path).is_ok());
     }
-    if byte_order {
-        paths.sort_unstable();
-        fields.append(&mut paths);
-        return;
-    }
-    let mut ordered: Vec<_> = paths
-        .into_iter()
-        .filter_map(|path| CString::new(path).ok())
-        .collect();
-    ordered.sort_unstable_by(|a, b| {
-        let order = unsafe { libc::strcoll(a.as_ptr(), b.as_ptr()) };
-        order.cmp(&0).then_with(|| CStr::cmp(a, b))
-    });
-    fields.extend(ordered.into_iter().map(|s| s.into_string().unwrap()));
+    order::append(paths, fields, collation);
 }
 
 // The recursive component consumes zero or more directories. A symlink to a
@@ -408,34 +410,38 @@ fn descendants(
     let mut pending = vec![prefix];
     while let Some(dir) = pending.pop() {
         let base = if dir.is_empty() { "." } else { &dir };
-        let Ok(entries) = fs::read_dir(base) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let Ok(name) = entry.file_name().into_string() else {
-                continue;
-            };
-            if !dotglob && name.starts_with('.') {
-                continue;
+        visit_names(base, !terminal || trailing, |raw, kind| {
+            if !dotglob && raw.to_bytes().first() == Some(&b'.') {
+                return;
             }
-            let path = format!("{dir}{name}");
-            let Ok(kind) = entry.file_type() else {
-                continue;
+            let Ok(name) = raw.to_str() else { return };
+            let mut path = String::with_capacity(dir.len() + name.len() + 1);
+            path.push_str(&dir);
+            path.push_str(name);
+            let (is_dir, is_link) = if kind == libc::DT_UNKNOWN {
+                let Ok(info) = fs::symlink_metadata(&path) else {
+                    return;
+                };
+                (info.is_dir(), info.is_symlink())
+            } else {
+                (kind == libc::DT_DIR, kind == libc::DT_LNK)
             };
-            if kind.is_dir() {
-                let subdir = format!("{path}/");
-                found.push(if terminal && !trailing {
-                    path
+            if is_dir {
+                if terminal && !trailing {
+                    found.push(path.clone());
+                    path.push('/');
                 } else {
-                    subdir.clone()
-                });
-                pending.push(subdir);
+                    path.push('/');
+                    found.push(path.clone());
+                }
+                pending.push(path);
             } else if terminal && !trailing {
                 found.push(path);
-            } else if (terminal || prefixed) && kind.is_symlink() && entry.path().is_dir() {
-                found.push(format!("{path}/"));
+            } else if (terminal || prefixed) && is_link && std::path::Path::new(&path).is_dir() {
+                path.push('/');
+                found.push(path);
             }
-        }
+        });
     }
 }
 
@@ -472,7 +478,7 @@ impl Field {
     pub fn finish(self, fields: &mut Vec<String>, globbing: Option<GlobOptions>) {
         if let Some((options, pattern)) = globbing.zip(self.pattern).filter(|(_, p)| has_magic(p)) {
             let count = fields.len();
-            with_locale(|byte_order| paths(&pattern, options, fields, byte_order));
+            with_locale(|order| paths(&pattern, options, fields, order));
             if fields.len() > count || options.nullglob {
                 return;
             }
@@ -486,7 +492,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn literal_and_single_star_agree_with_native_matching() {
+    fn literal_and_star_patterns_agree_with_native_matching() {
         let values = [
             "",
             "a",
@@ -514,6 +520,15 @@ mod tests {
                 "雪*e\u{301}",
                 "?*",
                 "a**b",
+                "***",
+                "ab**ba",
+                "*aba*ba",
+                "*a*a*a*",
+                "*b***a*b*",
+                "*雪*é",
+                "雪*🌱*",
+                "*.*",
+                ".**v",
                 r"a\*b",
                 "[!a]*",
                 ".??*",
