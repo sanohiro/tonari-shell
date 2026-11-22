@@ -10,6 +10,7 @@ COPY bash-src.tar.gz /tmp/bash-src.tar.gz
 RUN echo "${GNU_SHA256}  /tmp/bash-src.tar.gz" | sha256sum -c - && mkdir /gnu /helpers \
     && tar -xzf /tmp/bash-src.tar.gz --strip-components=1 -C /gnu && rm /tmp/bash-src.tar.gz \
     && cd /helpers && /gnu/configure --without-bash-malloc > /dev/null \
+    && make version.h > /dev/null \
     && for helper in recho zecho printenv xcase; do \
         gcc -std=gnu17 -include string.h -DHAVE_CONFIG_H -I. -I/gnu -I/gnu/include \
             -o "$helper" "/gnu/support/$helper.c" || exit 1; \

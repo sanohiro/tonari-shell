@@ -18,7 +18,13 @@ def run(driver, shell, root, source, helpers, timeout):
     # Drivers use relative paths and create files under both HOME and TMPDIR.
     shutil.copytree(source / "tests", root / "tests")
     shutil.copy2(source / "y.tab.c", root / "y.tab.c")
-    shutil.copy2(helpers / "config.h", root / "config.h")
+    if driver == "run-heredoc":
+        for name in ("config.h", "version.h"):
+            shutil.copy2(helpers / name, root / name)
+    if driver == "run-glob-bracket":
+        makefile = Path("examples/loadables/Makefile")
+        (root / makefile.parent).mkdir(parents=True)
+        shutil.copy2(helpers / makefile, root / makefile)
     for name in ("recho", "zecho", "printenv", "xcase"):
         shutil.copy2(helpers / name, root / "tests" / name)
     for name in ("bin", "home", "tmp"):
