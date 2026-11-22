@@ -373,6 +373,23 @@ class ShellTests(unittest.TestCase):
         pattern='*.rs'; classify '*.rs'; classify main.rs
         pattern='*.py'; classify main.py""", 0, b"literal\nmixed\nexact\nglob\nglob\n")
 
+    def test_glob_reads_literal_prefixes_and_quoted_class_members(self):
+        for name in ["item-000雪.txt", "item-999.txt", "item^.txt", "a", "-", "m", "z", ".hidden"]:
+            (self.cwd / name).touch()
+        self.compare("printf '<%s>' item-000*.txt item'^'*.txt; "
+                     """printf '<%s>' [a"-"z]; shopt -s dotglob; printf '<%s>' .h*""",
+                     0, "<item-000雪.txt><item^.txt><-><a><z><.hidden>".encode())
+        # Tonari's UTF-8 pathname policy also applies to borrowed directory entries.
+        try:
+            with open(os.fsencode(self.cwd) + b"/item-000\xff.txt", "wb"):
+                pass
+        except OSError as error:
+            if error.errno != errno.EILSEQ:
+                raise
+        result = self.command(TONARI, "shopt -s dotglob; printf '<%s>' item-000*.txt .*")
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (0, "<item-000雪.txt><.hidden>".encode(), b""))
+
     def test_glob_collation_uses_the_selected_locale(self):
         for name in ["A1", "a9", "B2", "b8", "z", "éé", "雪"]:
             (self.cwd / name).touch()

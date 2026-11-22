@@ -16,6 +16,28 @@ The default run includes a session workload covering assignment, export, paramet
 
 既定の計測には、代入・export・変数展開・`cd`・`pwd`・`&&`・リダイレクト・`unset` を同じシェルで実行する項目が含まれます。算術ループ1,000回と、一つのシェルから外部プログラム16個を順に起動する項目もあります。後者では同じプログラム16個を Python 親プロセスから直接 `posix_spawn` し、その都度終了を待つ条件も交互に計測します。標準入出力は計時前に用意し、各子プロセスに継承させます。セッション機能の実装前との比較には `--case core` を使います。プロンプト表示の主指標は疑似端末での起動全体です。子プロセスの exec 直前にも時刻を記録し、同じ測定サンプルのうち、端末の準備と fork の後に経過した時間も表示します。
 
+<a id="borrowed-glob-names"></a>
+
+## Hyphenated path prefixes and directory scans / ハイフン付きファイル名とディレクトリ走査
+
+On 2026-11-22 we compared revision `3c03267`, the updated release and GNU Bash 5.2.37 on the M1 with macOS 27.2.1 and its Debian 13 arm64 VM. Each shell signaled readiness before sourcing the script. The driver rotated shell order, checked output, stderr and exit status, and ran five warm-ups followed by 35 samples on Mac or 85 on Debian. Each glob script expands its pattern 30 times in a directory with 512 files on the local filesystem. The character-class `case` control runs 3,000 iterations without reading that directory. Values are **median / p95 ms**. The single executables grew by 48 bytes on Mac (836,416 bytes) and 2,160 bytes on Linux (1,008,248 bytes). [Script definitions](../tools/bench_scripts.py)
+
+同じ M1 の macOS と Debian 13 arm64 VM で旧版、新版、Bash 5.2.37 の順番を入れ替えながら測定した。起動済みのシェルにスクリプトを読ませ、出力・標準エラー・終了値を毎回確認した。各5回のウォームアップ後、Mac は35回、Debian は85回を集計。ファイル名展開は512ファイルがあるディレクトリで30回繰り返し、対照の文字クラス付き `case` はディレクトリを読まずに3,000回繰り返す。単位は中央値 / p95（ms）。
+
+| Workload / 処理 | Mac previous | Mac Tonari | Mac Bash | Debian previous | Debian Tonari | Debian Bash |
+|---|---:|---:|---:|---:|---:|---:|
+| `item-000*.txt`, one match | 10.289 / 13.354 | 6.927 / 8.412 | 1119.627 / 1175.226 | 3.447 / 3.783 | 2.237 / 2.439 | 2.733 / 3.029 |
+| `*.txt`, 512 matches | 10.665 / 13.329 | 8.373 / 9.758 | 1128.396 / 1186.428 | 6.310 / 6.829 | 5.721 / 6.300 | 8.865 / 9.568 |
+| `case` with `[0-9]` | 5.356 / 6.313 | 5.351 / 7.506 | 7.223 / 9.050 | 4.949 / 5.740 | 4.939 / 5.495 | 8.891 / 9.498 |
+
+The Debian one-match workload fell from 126.1% to 81.8% of Bash's median. All 512 matches took 64.5% of Bash's median and 65.8% of its p95. In a separate Debian ablation, changing only the internal quoting of the initial literal reduced the one-match median from 3.468 to 2.904 ms (65 samples, Bash 2.802). The final build also borrows the names during matching.
+
+Debian で1件だけ一致する条件は Bash の中央値比 126.1% から 81.8% に短縮した。全512件が一致する条件は中央値で 64.5%、p95 で 65.8% だった。別に先頭の固定文字のエスケープだけ直した中間版を65回測ると、1件一致は旧版 3.468 ms、中間版 2.904 ms、Bash 2.802 ms だった。最終版ではディレクトリ内の名前のコピーも省いた。
+
+```sh
+python3 tools/bench_scripts.py /path/to/tonari --previous /path/to/old-tonari --bash /path/to/bash --timing started --case glob-sparse --case glob --case case-classes --runs 85
+```
+
 <a id="completion-and-case"></a>
 
 ## Registered completion, case and globs / 登録した補完・case・ファイル名展開
@@ -96,6 +118,27 @@ Debian の同じ計測で、同じ入力・分岐数の `case` を用意し、�
 A follow-up used two directories of 512 files, changing the separator in every name and its pattern together. Each glob returned index 000. Each script made 30 expansions; the eight shell/script combinations rotated through five warm-ups and 45 measurements. For literal source spelling, Tonari took 3.853 / 5.434 ms for `item-000*.txt` and 3.134 / 4.430 for `item_000*.txt` (Bash 3.091 / 4.413 and 3.008 / 5.984). With the same patterns supplied via an unquoted variable, Tonari took 3.264 / 7.106 and 3.052 / 5.601 ms. Tonari escapes a hyphen in the accumulated literal prefix when it first encounters the star; the resulting backslash selects the generic matcher for each directory entry. The lower median with an underscore or a variable is consistent with that code path.
 
 追加計測では512個すべてのファイル名と対応するパターンで、区切りを一緒にハイフンまたはアンダースコアに替えた。各スクリプトで30回展開し、どれも番号000の1件に一致する。各条件45回の計測で、直接書いた場合の Tonari の中央値はハイフンで 3.853 ms、アンダースコアで 3.134 ms、同じパターンを非引用の変数に入れた場合は 3.264 ms と 3.052 ms だった。ソースに直接書いたハイフンは最初の星印に達した段階でエスケープされ、各候補の照合が汎用経路に入る。
+
+The later build avoids escaping the initial hyphen and copying every candidate. 更新後は先頭のハイフンをそのまま照合し、一致した候補だけをコピーする。[Updated glob measurements / 更新後の計測](#borrowed-glob-names)
+
+<a id="macos-child-loader"></a>
+
+### Loader activity inside the two external commands / 外部2コマンドのローダー内訳
+
+On the same M1 (macOS 27.2.1 build 26B131), Xcode 27.2 Instruments recorded three separate launches each of `/bin/cat /dev/null` and `/usr/bin/printf x`. The App Launch template reports a dyld interval named *Launch Executable*, with nested *Static Initializer* and *Apply Fixups* events. The initializer row below selects the event for `libSystem.B.dylib`. Values are **median [min–max] milliseconds** from the three traces. These are instrumented standalone launches; the earlier pipeline stopwatch includes overlap between the two children. Both executables list libSystem as their only direct dylib dependency in `otool -L`.
+
+同じ M1 上で Xcode 27.2 の Instruments を使い、実際にパイプにつなぐ2本のコマンドを個別に各3回記録した。表は中央値［最小–最大］、単位は ms。dyld の起動区間の内側に、システムライブラリの初期化やアドレスの修正が含まれる。プロファイラを付けた単独起動と、子プロセスが並行して動くパイプ全体では測定区間が異なる。
+
+| Instruments event / 区間 | `/bin/cat` | `/usr/bin/printf` |
+|---|---:|---:|
+| dyld Launch Executable | 1.089 [1.080–1.183] | 0.949 [0.923–2.849] |
+| Run static initializer, libSystem | 0.572 [0.563–0.668] | 0.492 [0.487–0.533] |
+| Apply Fixups | 0.128 [0.113–0.134] | 0.122 [0.115–0.619] |
+
+```sh
+xcrun xctrace record --template 'App Launch' --no-prompt --output cat.trace --launch -- /bin/cat /dev/null
+xcrun xctrace export --input cat.trace --xpath '/trace-toc/run[@number="1"]/data/table[@schema="dyld-activity-interval"]'
+```
 
 <a id="align-experiments"></a>
 

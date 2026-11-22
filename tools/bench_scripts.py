@@ -69,6 +69,10 @@ echo "$last"
 for ((i=0; i<30; i++)); do set -- fixtures/*.txt; done
 echo "$# $1"
 """, "512 fixtures/item-000.txt"),
+    "glob-sparse": ("""\
+for ((i=0; i<30; i++)); do set -- fixtures/item-000*.txt; done
+echo "$# $1"
+""", "1 fixtures/item-000.txt"),
     "read-lines": ("""\
 count=0
 while IFS= read -r row; do
@@ -167,7 +171,7 @@ def main():
         home = Path(temp)
         env = {"HOME": temp, "PATH": "/usr/bin:/bin", "LC_ALL": "C"}
         (home / "rows").write_text("".join(f"record {i}\n" for i in range(2000)))
-        if not args.case or "glob" in args.case:
+        if not args.case or any(case in ("glob", "glob-sparse") for case in args.case):
             fixtures = home / "fixtures"
             fixtures.mkdir()
             for i in range(512):

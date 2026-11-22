@@ -1,5 +1,6 @@
 use std::ffi::{CStr, CString};
 use std::fs;
+use std::ptr::NonNull;
 use std::sync::OnceLock;
 
 // libc starts in the C locale. Load the caller's character and collation
@@ -59,38 +60,88 @@ impl<T: AsRef<str>> Matcher<T> {
                 _ => {}
             }
         }
+        #[cfg(target_env = "musl")]
+        if text.contains(r"\-") {
+            return CString::new(portable_bracket_hyphens(text))
+                .map_or(Self::Invalid, Self::Native);
+        }
         CString::new(text).map_or(Self::Invalid, Self::Native)
     }
 
-    // Call with the matching locale active when the pattern is Native.
-    fn accepts(&self, value: &str, period: bool) -> bool {
+    // Call with the matching locale active for Native. Directory entries also
+    // supply the NUL-terminated view of the same bytes for fnmatch.
+    fn accepts(&self, value: &[u8], period: bool, c_name: Option<&CStr>) -> bool {
         match self {
-            Self::Literal(literal) => value == literal.as_ref(),
+            Self::Literal(literal) => value == literal.as_ref().as_bytes(),
             Self::Star(text, star) => {
-                let (left, tail) = text.as_ref().split_at(*star);
-                !(period && left.is_empty() && value.starts_with('.'))
+                let (left, tail) = text.as_ref().as_bytes().split_at(*star);
+                !(period && left.is_empty() && value.first() == Some(&b'.'))
                     && value
                         .strip_prefix(left)
                         .is_some_and(|rest| rest.ends_with(&tail[1..]))
             }
-            Self::Native(pattern) => CString::new(value).is_ok_and(|name| unsafe {
-                libc::fnmatch(
-                    pattern.as_ptr(),
-                    name.as_ptr(),
-                    if period { libc::FNM_PERIOD } else { 0 },
-                ) == 0
-            }),
+            Self::Native(pattern) => {
+                let test = |name: &CStr| unsafe {
+                    libc::fnmatch(
+                        pattern.as_ptr(),
+                        name.as_ptr(),
+                        if period { libc::FNM_PERIOD } else { 0 },
+                    ) == 0
+                };
+                match c_name {
+                    Some(name) => test(name),
+                    None => CString::new(value).is_ok_and(|name| test(&name)),
+                }
+            }
             Self::Invalid => false,
         }
     }
 
     pub(crate) fn matches(&self, value: &str) -> bool {
         if matches!(self, Self::Native(_)) {
-            localized(|| self.accepts(value, false))
+            localized(|| self.accepts(value.as_bytes(), false, None))
         } else {
-            !value.contains('\0') && self.accepts(value, false)
+            !value.contains('\0') && self.accepts(value.as_bytes(), false, None)
         }
     }
+}
+
+// In a plain bracket list a leading hyphen is literal on both Darwin and musl.
+// musl otherwise interprets the backslash in [a\-z] as a range endpoint.
+#[cfg(target_env = "musl")]
+fn portable_bracket_hyphens(pattern: &str) -> String {
+    let mut out = String::with_capacity(pattern.len());
+    let mut rest = pattern;
+    while let Some((prefix, bracket)) = rest.split_once('[') {
+        let Some((body, after)) = bracket.split_once(']') else {
+            break;
+        };
+        let members = body.strip_prefix(['!', '^']).unwrap_or(body);
+        // For escaped opening/closing brackets, initial ']', or nested POSIX
+        // constructs, leave the entire remaining expression to the native parser.
+        if prefix.contains('\\')
+            || members.is_empty()
+            || members.contains('[')
+            || members.ends_with('\\')
+        {
+            break;
+        }
+        out.push_str(prefix);
+        out.push('[');
+        if members.contains(r"\-") && members.split(r"\-").all(|p| !p.contains(['-', '\\'])) {
+            out.push_str(&body[..body.len() - members.len()]);
+            out.push('-');
+            for part in members.split(r"\-") {
+                out.push_str(part);
+            }
+        } else {
+            out.push_str(body);
+        }
+        out.push(']');
+        rest = after;
+    }
+    out.push_str(rest);
+    out
 }
 
 pub fn matches(value: &str, pattern: &str) -> bool {
@@ -157,8 +208,13 @@ fn trim_boundary(value: &str, pattern: &str, prefix: bool, longest: bool) -> Opt
 }
 
 pub fn quote_into(output: &mut String, text: &str) {
+    // The first literal segment cannot be inside a bracket expression.
+    // Later segments can follow active syntax, for example [a"-"z].
+    let may_be_in_bracket = !output.is_empty();
     for c in text.chars() {
-        if matches!(c, '\\' | '*' | '?' | '[' | ']' | '-' | '!' | '^') {
+        if matches!(c, '\\' | '*' | '?' | '[')
+            || may_be_in_bracket && matches!(c, ']' | '-' | '!' | '^')
+        {
             output.push('\\');
         }
         output.push(c);
@@ -203,6 +259,34 @@ pub(crate) fn unescape(component: &str) -> String {
         });
     }
     literal
+}
+
+struct DirectoryStream(NonNull<libc::DIR>);
+
+impl Drop for DirectoryStream {
+    fn drop(&mut self) {
+        unsafe { libc::closedir(self.0.as_ptr()) };
+    }
+}
+
+fn visit_names(dir: &str, mut visit: impl FnMut(&CStr)) {
+    let Ok(path) = CString::new(dir) else { return };
+    let Some(stream) = NonNull::new(unsafe { libc::opendir(path.as_ptr()) }) else {
+        return;
+    };
+    let stream = DirectoryStream(stream);
+    loop {
+        let entry = unsafe { libc::readdir(stream.0.as_ptr()) };
+        if entry.is_null() {
+            break;
+        }
+        // readdir owns this NUL-terminated name until the next call on this
+        // stream. The callback can borrow it only for this iteration.
+        let name = unsafe { CStr::from_ptr(std::ptr::addr_of!((*entry).d_name).cast()) };
+        if !matches!(name.to_bytes(), b"." | b"..") {
+            visit(name);
+        }
+    }
 }
 
 // Walk by component so POSIX character classes have the same fnmatch
@@ -273,26 +357,16 @@ fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>, byte_ord
         let mut matched = Vec::new();
         for prefix in paths {
             let dir = if prefix.is_empty() { "." } else { &prefix };
-            let Ok(entries) = fs::read_dir(dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let Ok(name) = entry.file_name().into_string() else {
-                    continue;
-                };
-                if matcher.accepts(&name, !options.dotglob) {
-                    // read_dir omits "." and "..", matching Bash 5.2+ globskipdots.
-                    let path = if prefix.is_empty() {
-                        name
-                    } else {
-                        let mut path = String::with_capacity(prefix.len() + name.len());
-                        path.push_str(&prefix);
-                        path.push_str(&name);
-                        path
-                    };
-                    matched.push(path);
+            visit_names(dir, |raw| {
+                if !matcher.accepts(raw.to_bytes(), !options.dotglob, Some(raw)) {
+                    return;
                 }
-            }
+                let Ok(name) = raw.to_str() else { return };
+                let mut path = String::with_capacity(prefix.len() + name.len());
+                path.push_str(&prefix);
+                path.push_str(name);
+                matched.push(path);
+            });
         }
         if matched.is_empty() {
             return;
@@ -453,7 +527,7 @@ mod tests {
                         let expected =
                             unsafe { libc::fnmatch(native.as_ptr(), name.as_ptr(), flags) == 0 };
                         assert_eq!(
-                            matcher.accepts(value, period),
+                            matcher.accepts(value.as_bytes(), period, None),
                             expected,
                             "{source:?} {value:?} {flags}"
                         );
@@ -492,6 +566,25 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn literal_prefix_keeps_single_star_matcher_with_punctuation() {
+        let mut pattern = String::new();
+        quote_into(&mut pattern, "item-!^]雪");
+        pattern.push_str("*.txt");
+        let matcher = Matcher::new(&pattern);
+        assert!(matches!(matcher, Matcher::Star(..)));
+        assert!(matcher.matches("item-!^]雪001.txt"));
+        let mut range = String::from("[a");
+        quote_into(&mut range, "-");
+        range.push_str("z]");
+        assert!(matches("-", &range));
+        assert!(!matches("m", &range));
+        assert!(matches("q--", r"[!a\-z][\-!][b\-]"));
+        assert!(!matches("a--", r"[!a\-z][\-!][b\-]"));
+        assert!(matches("m", "[a-z]"));
+        assert!(matches("[a-z]", r"\[a\-z]"));
     }
 
     #[test]
