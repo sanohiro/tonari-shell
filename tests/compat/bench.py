@@ -151,9 +151,12 @@ def main():
             directory = Path(temp) / label
             directory.mkdir()
             path = directory / "bash"
-            shutil.copy2(binary.resolve(), path)
+            shutil.copy(binary.resolve(), path)
             shells.append(path)
             hashes.append(hashlib.sha256(path.read_bytes()).hexdigest())
+        audited = data.get("executable_sha256", data.get("benchmark", {}).get("executable_sha256"))
+        if audited is not None and hashes != audited:
+            parser.error("executable changed since the compatibility check; regenerate the audit before timing")
         a = Audit(*shells, Path(temp))
         for n, (key, items) in enumerate(grouped.items(), 1):
             work = json.loads(key)

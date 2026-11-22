@@ -128,6 +128,7 @@ class Audit:
         self.add(group, name, status, source if args is None else json.dumps(args) + (" stdin=" + repr(stdin) if stdin else ""), pair)
 
         if status in ("match", "interface only"):
+            self.rows[group][name]["reference_result"] = a.brief()
             self.rows[group][name]["workload"] = dict(argv=["--noprofile","--norc","-c",source] if args is None else args,
                                                       stdin=stdin, fixture=fixture if args is None else True,
                                                       expected=a.digest())
@@ -277,7 +278,8 @@ def main():
             for name, res in json.loads(args.upstream.read_text()).items():
                 a.add("GNU regression group", name, res["status"], name)
                 a.rows["GNU regression group"][name]["driver"] = res
-        print(json.dumps(dict(reference=version, rows=a.rows), ensure_ascii=True, indent=2))
+        hashes = [hashlib.sha256(shell.read_bytes()).hexdigest() for shell in a.shells]
+        print(json.dumps(dict(reference=version, executable_sha256=hashes, rows=a.rows), ensure_ascii=True, indent=2))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,9 @@
 """The speed and coverage gates must fail when a previously verified result is lost."""
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
 
 from report import misses
@@ -26,6 +31,17 @@ class ReleaseGate(unittest.TestCase):
         changed = self.result()
         changed[self.key].update(whole_n="", whole_error="changed reference observation")
         self.assertTrue(misses(changed, self.result(), False, False))
+
+    def test_benchmark_rejects_a_different_executable(self):
+        with tempfile.TemporaryDirectory() as work:
+            audit = Path(work) / "checked.json"
+            audit.write_text(json.dumps({"rows": {}, "executable_sha256": ["older", "older"]}))
+            result = subprocess.run([sys.executable, str(Path(__file__).with_name("bench.py")),
+                                     "--audit", audit, "--bash", sys.executable, "--tonari", sys.executable],
+                                    capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(b"executable changed", result.stderr)
+        self.assertEqual(result.stdout, b"")
 
     def test_interface_only_does_not_count_as_complete(self):
         self.assertTrue(misses(self.result(status="interface only"), {}, False, True))
