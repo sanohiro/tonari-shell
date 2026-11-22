@@ -855,3 +855,55 @@ python3 tools/bench_scripts.py "$tonari" --bash "$bash" --timing started --runs 
   --case descriptor-moves --case integer-assignments
 python3 tools/bench.py "$tonari" --bash "$bash" --runs 51 --case startup --case prompt
 ```
+
+<a id="2026-11-23-compatibility"></a>
+
+## 2026-11-23 · Associative arrays, read-only locals and traps / 連想配列・読み取り専用変数・トラップ
+
+Source commit `2af2f21` was measured on Apple M1 arm64. The macOS 27.2.1 and Debian 13 controls used Bash 5.2.37. Ubuntu 26.04 used Bash 5.3.9. For the first four workloads the driver alternates shells, discards five warmups and measures 30 checked scripts after startup. For the remaining three intervals it measures 150 launches per shell. The two prompt intervals use the same PTY samples. Each cell is **Tonari median / Bash median in milliseconds (elapsed-time ratio)**. [Workloads and expected output](../tools/bench_scripts.py) · [Startup harness](../tools/bench.py)
+
+Apple M1 で同じバイナリを使い、先頭の4項目は起動済みのシェルから30回ずつ、起動とプロンプトは150回ずつ測定しました。表は「Tonari の中央値 / Bash の中央値（比）」です。最初のプロンプトまでの全体と、そのうち exec の直前から表示までの区間を同じ試行で記録しています。
+
+| Workload | macOS | Debian | Ubuntu |
+|---|---:|---:|---:|
+| Associative assignments and lookups | 2.422 / 3.918 (0.618) | 2.500 / 4.972 (0.503) | 2.456 / 4.388 (0.560) |
+| Read-only function locals | 2.965 / 5.544 (0.535) | 2.752 / 6.811 (0.404) | 2.779 / 6.066 (0.458) |
+| ASCII upper/lower expansions | 2.701 / 4.252 (0.635) | 2.112 / 6.054 (0.349) | 2.068 / 5.589 (0.370) |
+| Handling 600 failures with `ERR` | 1.278 / 3.133 (0.408) | 0.944 / 3.220 (0.293) | 0.961 / 3.233 (0.297) |
+| Empty command `-c :` | 2.927 / 5.970 (0.490) | 0.225 / 0.495 (0.455) | 0.233 / 0.494 (0.472) |
+| First interactive prompt | 4.613 / 8.008 (0.576) | 0.577 / 0.987 (0.585) | 0.613 / 1.000 (0.613) |
+| Exec to first interactive prompt | 3.196 / 6.516 (0.490) | 0.285 / 0.702 (0.406) | 0.312 / 0.694 (0.450) |
+
+The four script medians range from 0.293 to 0.635 of Bash time. ASCII conversion on macOS measured 0.693 before the in-place change in a seven-sample trial and 0.635 in the release run. The elapsed interval includes parsing and running the loop. UTF-8 mapping and the C locale have separate correctness tests. The widest first-prompt tail in the Linux runs was Ubuntu at 1.246 ms for Tonari and 1.357 ms for Bash (p95). [Unicode and locale checks](../tests/shell.py)
+
+反復した4処理の中央値は各環境とも Bash の3分の2以内でした。macOS の大小文字変換は予備計測で0.693倍でした。ASCII の文字列をその場で変換するようにした版では0.635倍です。Ubuntu での対話起動の p95 は Tonari が1.246 ms、Bash が1.357 ms でした。
+
+| Executable bytes | Previous Tonari | Current Tonari | Reference Bash |
+|---|---:|---:|---:|
+| macOS | 969,360 | 1,019,504 | 1,208,904 |
+| Debian | 1,146,920 | 1,202,144 | 1,412,096 |
+| Ubuntu | 1,146,920 | 1,202,144 | 1,609,176 |
+
+Adding this behavior grew the macOS executable by 50,144 bytes and the static Linux executable by 55,224 bytes. The macOS release SHA-256 is `2c1a1e4cadbda45058988cc014b9641d637712b4a7bc5f28eb23eadd633c3c55`. Both Linux guests ran `1135d98a18a792f9be7a0f6fd3042a4ea7f2e4bfd613b2be4c5f297cd6ea4897`. The same releases ran the direct checks and the full feature timing matrix. [Current results for individual features](compatibility-2026-11-23/matrix.md)
+
+機能追加による増分は macOS で50,144バイト、Linux の静的バイナリで55,224バイトです。両方とも配布版 Bash の実行ファイルより小さく収まっています。[全機能の判定と計測値](compatibility-2026-11-23/matrix.md)
+
+```sh
+python3 tools/bench_scripts.py "$tonari" --bash "$bash" --timing started --runs 30 \
+  --case associative-lookup --case readonly-locals --case case-conversion --case error-trap
+python3 tools/bench.py "$tonari" --bash "$bash" --runs 150 --case startup --case prompt
+```
+
+### Timings across the current inventory / 現行版の機能別計測
+
+The inventory contains 1,554 distinct names across all three platforms. Each denominator below counts matching names with checked timing samples. Several names can use one script. The two verified UTF-8 differences are listed with their observed bytes. A complete run uses 15 samples per shell for each direct case and seven for a matching GNU group. Each sample must reproduce the earlier observation. [Full per-feature results, median and p95](compatibility-2026-11-23/matrix.md) · [Release fingerprints](compatibility-2026-11-23/environment.json)
+
+| Platform | Whole ≤ 1/2 | Whole ≤ 2/3 | Whole ≤ Bash | Started ≤ 1/2 | Started ≤ 2/3 | Started ≤ Bash |
+|---|---:|---:|---:|---:|---:|---:|
+| Debian | 13/649 | 450/649 | 639/649 | 7/584 | 26/584 | 558/584 |
+| Ubuntu | 16/646 | 441/646 | 638/646 | 7/583 | 20/583 | 561/583 |
+| macOS | 2/629 | 562/629 | 629/629 | 8/581 | 70/581 | 567/581 |
+
+All matching names received a verified whole-run timing. Compared with the November 22 measurements, four Debian and four Ubuntu whole-run medians crossed above 2/3. On macOS, 12 whole-run and 33 already-started medians crossed above it. The snapshot comparison found no lost matching observations or missing earlier measurements. These counts can include multiple names for one script. The absolute target remains unmet for a number of existing workloads, particularly one-shot commands measured from a ready shell through exit.
+
+機能が一致した全項目で起動込みの計測ができました。起動済みの計測では、短い処理に同期・出力の回収・シェルの終了待ちまで含まれます。新たに一致した36項目のうち起動込みの中央値が Bash の3分の2以内だったのは Debian 25件、Ubuntu 30件、macOS 28件です。この36項目と反復スクリプトの4処理は別の測定条件です。11月22日の計測で達成していた上限を今回超えたのは、Debian と Ubuntu の起動込みが各4件、macOS の起動込みが12件・起動済みが33件です。[現行版の各項目](compatibility-2026-11-23/matrix.md) · [11月22日の比較元](compatibility/matrix.md)

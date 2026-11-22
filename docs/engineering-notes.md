@@ -277,6 +277,34 @@ In a repeated case arm such as `pkg-+([0-9]).@(c|rs)`, the syntax and literal al
 固定の `case` パターンはコマンドの読み取り時に解析し、各反復で再利用します。可変長部分が一つで、前後のリテラルで境界が決まるときは候補位置を列挙せずに照合できます。回帰試験では決定的に生成した400パターンを10入力ずつ Bash と比較します。GNU の試験では `GLOBIGNORE` の文字クラス内のコロン、`globskipdots` を無効にした場合の `.` と `..`、不正な括弧を含むグループを確認しました。ファイル記述子が満杯のときは、`exec 6>&-` が失敗を返しても記述子6は閉じられます。次の `exec 6>&7` の成否までテストします。
 
 
-One path-filter difference still reproduces with filenames containing only punctuation. With `extglob` enabled and files `++` and `x`, running `GLOBIGNORE='+([^[:alnum:]])'; printf '<%s>' ./*` gives `<./x>` in the Bash 5.2.37 control. Tonari also lists `<./++>`. Tonari matches the ignore list one pathname component at a time. The mixed case involves an extended group spanning the slash in `./`. The GNU golden matches above cover their own fixtures.
+Before commit `2af2f21`, a path-filter difference reproduced with filenames containing only punctuation. With `extglob` enabled and files `++` and `x`, running `GLOBIGNORE='+([^[:alnum:]])'; printf '<%s>' ./*` gives `<./x>` in the Bash 5.2.37 control. That version of Tonari also listed `<./++>` because it matched the ignore list one pathname component at a time. The mixed case involves an extended group spanning the slash in `./`. The GNU golden matches above cover their own fixtures.
 
-`GLOBIGNORE` に拡張パターンを指定し、句読記号だけのファイル名を `./*` で列挙する組み合わせには差が残ります。上の2ファイルだけの例で確認できます。
+`GLOBIGNORE` に拡張パターンを指定し、句読記号だけのファイル名を `./*` で列挙する組み合わせでは、当時の版に差がありました。修正後の結果を次節に記録しました。
+
+## 2026-11-23 · Variables, glob errors and job ownership / 変数・展開エラー・ジョブ制御
+
+In Bash 5.2 and 5.3, a failed assignment to a read-only variable skips the rest of the current parsed input unit. The following complete command can inspect status 1. With a command prefix such as `x=bad y=ok /bin/sh -c 'echo "$y"'`, the command can still run with the valid binding. The `readonly` attribute belongs to the variable in its dynamic scope. An inner function can create a fresh local over an outer function’s read-only local. A read-only global prevents a local declaration of that name. The tests exercise all three script entry points, compound array initializers, arithmetic writes, `read`, `printf -v`, and function redefinition. [End-to-end witnesses](../tests/shell.py)
+
+Bash の読み取り専用変数への単独代入が失敗すると、同じ行の後続コマンドを飛ばし、次の完全な入力単位で終了値 1 を参照できます。外部コマンドに付けた一時代入では、保護された値を維持し、有効な他の代入を渡して起動します。関数では外側のローカル変数とグローバル変数で同名の `local` を宣言できる条件が異なります。`-c`、ファイル、標準入力でこの差を比較しています。
+
+A subscript can represent an integer expression or an associative key. Expanding the latter once preserves spaces, literal wildcard characters, brackets and UTF-8 text inside the key. The end-to-end test iterates the keys, looks each value up again, writes through `printf -v` and removes a key through `unset`. The declaration and lookup tests also cover integer and read-only associative arrays. The C library’s case mapping can differ between platforms. Both Linux Bash controls preserve lowercase sharp S when uppercasing. With the default ASCII range option, `[a-z]` excludes accented letters even when the host system’s UTF-8 `fnmatch` treats them as members. The pattern matcher handles these ranges explicitly. The UTF-8 test checks this along with a switch to the C locale inside the same script.
+
+連想配列のキーは文字列として展開します。空白や絵文字、`]`、`*` を含むキーを列挙し、そのキーで再度同じ値を引けることを検証しました。英字の変換では `LC_ALL=C` と UTF-8 を同一スクリプト内で切り替え、アクセント付き文字と `ß` を Bash と比較しています。既定の `[a-z]` の範囲はシステムの `fnmatch` と結果が分かれる場合があるので、Tonari のパターン照合で範囲を判定します。
+
+Two files, `++` and `x`, reproduce a difference between the Bash releases. With `extglob` enabled and `GLOBIGNORE='+([^[:alnum:]])'`, `./*` expands to `./x` on Debian 13 and also includes `./++` on Ubuntu 26.04. Tonari follows Bash 5.2 for this bracket-class path filter. Alternatives containing a literal slash, such as `@(sub/file|./keep)`, are tested against the entire pathname on both distributions.
+
+`GLOBIGNORE` が句読点だけを除く設定では、`./++` を残すかどうかが Debian と Ubuntu の Bash で異なりました。この場合は Debian の Bash 5.2 に合わせ、両方の参照結果を回帰テストに残しました。
+
+An `ERR` handler sees the failing status and is skipped in tested conditions. A `RETURN` handler sees the status just before an explicit `return N`, while the caller receives `N`. A PTY test starts three jobs and sends SIGHUP to the interactive shell. It observes receipt in the owned job, then signals the marked and removed jobs through a file so that each can confirm survival. This also checks that `disown -h` keeps a job visible to `jobs`. [Terminal and trap tests](../tests/shell.py)
+
+`ERR` は条件判定中の失敗では発火しません。`return 6` の直前の終了値が 1 なら、`RETURN` ハンドラーで見る値は 1、呼び出し元に返る値は 6 です。端末テストでは SIGHUP を受けたジョブと生存したジョブを子プロセス自身に記録させ、`disown -h` 後も `jobs` から参照できることを確認します。
+
+The four repeated workloads take 0.293–0.635 of Bash time at the median. ASCII-only case conversion can update the original buffer. Single-character locale mappings still apply to non-ASCII input. [Release timings and sizes](benchmarks.md#2026-11-23-compatibility)
+
+修正した4処理の反復計測では、Tonari の中央値は Bash の0.293〜0.635倍でした。ASCII の大文字・小文字は既存バッファ内で変換し、UTF-8 の文字はロケールの1文字単位の規則で変換します。[実測値とサイズ](benchmarks.md#2026-11-23-compatibility)
+
+## 2026-11-23 · UTF-8 contract in release checks / 意図した UTF-8 の差を検証する
+
+The release audit runs both the UTF-8 IFS example and a C-locale slice on each reference and Tonari. With `v=雪🌸`, all three C-locale Bash controls return 7 for `${#v}` and a lone byte `9b` for `${v:1:1}`. Tonari returns 2 and the complete flower character. The end-to-end suite also feeds byte `ff` directly into command text at three entry points and sends every byte from `00` to `ff` unmodified through external commands, pipes and file redirection. These results distinguish a shell text guarantee from byte transport and can be checked independently of the reference's behavior. [Inputs, results and rationale](compatibility.md#intentional-differences)
+
+UTF-8 の IFS と C ロケールでの切り出しを検証器に登録しました。参照先の Bash が将来 Tonari と同じ結果を返せば通常の互換動作として計測できます。Tonari の期待値を破れば、たとえ両者が同じ結果になっても仕様違反として検出します。別のテストでは `-c`・ファイル・標準入力に生の不正な UTF-8 を渡し、パイプとリダイレクトでは256通りのバイトがそのまま通ることを確認します。[比較例と採用理由](compatibility.md#intentional-differences)

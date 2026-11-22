@@ -2,6 +2,7 @@ platform	group	feature	previous	current	witness	observed
 Debian	Builtin	compopt	different	match	"complete -W one app; compopt -o nospace app; complete -p app"	{"code": 0, "out": "complete -o nospace -W 'one' app\n", "err": "", "timeout": false}
 Debian	Builtin	declare	different	match	"declare -i v=3; v+=4; declare -p v"	{"code": 0, "out": "declare -i v=\"7\"\n", "err": "", "timeout": false}
 Debian	Builtin	dirs	missing interface	match	"mkdir d; pushd d >/dev/null; dirs -p | wc -l"	{"code": 0, "out": "2\n", "err": "", "timeout": false}
+Debian	Builtin	disown	missing interface	match	"sleep .05 & disown %+; jobs -p"	{"code": 0, "out": "", "err": "", "timeout": false}
 Debian	Builtin	getopts	missing interface	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
 Debian	Builtin	jobs	different	match	"sleep .1 & p=$!; test \"$(jobs -p)\" = \"$p\" && echo running; wait \"$p\""	{"code": 0, "out": "running\n", "err": "", "timeout": false}
 Debian	Builtin	let	missing interface	match	"x=3; let 'x*=4'; echo \"$x\""	{"code": 0, "out": "12\n", "err": "", "timeout": false}
@@ -9,6 +10,7 @@ Debian	Builtin	mapfile	missing interface	match	"mapfile -t a <<< $'one\\ntwo'; p
 Debian	Builtin	popd	missing interface	match	"mkdir d; pushd d >/dev/null; popd >/dev/null; test -d d"	{"code": 0, "out": "", "err": "", "timeout": false}
 Debian	Builtin	pushd	missing interface	match	"mkdir d; pushd d >/dev/null; echo \"${PWD##*/}\""	{"code": 0, "out": "d\n", "err": "", "timeout": false}
 Debian	Builtin	readarray	missing interface	match	"readarray -t a <<< $'one\\ntwo'; printf '<%s>' \"${a[@]}\""	{"code": 0, "out": "<one><two>", "err": "", "timeout": false}
+Debian	Builtin	readonly	missing interface	match	"readonly x=old; (x=new) 2>/dev/null; printf '%s/%s' \"$?\" \"$x\""	{"code": 0, "out": "1/old", "err": "", "timeout": false}
 Debian	Builtin	times	missing interface	match	"t=$(times); [[ $t == *m*s* ]] && echo timings"	{"code": 0, "out": "timings\n", "err": "", "timeout": false}
 Debian	Builtin	ulimit	missing interface	match	"n=$(ulimit -n); [[ $n == +([0-9]) || $n == unlimited ]] && printf limit"	{"code": 0, "out": "limit", "err": "", "timeout": false}
 Debian	Builtin	umask	missing interface	match	"umask 077; : > f; ls -ld f | cut -c1-10"	{"code": 0, "out": "-rw-------\n", "err": "", "timeout": false}
@@ -31,13 +33,18 @@ Debian	Builtin option	compopt -D	different	match	"complete -D -W yes; compopt -D
 Debian	Builtin option	compopt -E	different	match	"complete -E -W yes; compopt -E -o nospace; complete -p -E"	{"code": 0, "out": "complete -o nospace -W 'yes' -E\n", "err": "", "timeout": false}
 Debian	Builtin option	compopt -I	different	match	"complete -I -W yes; compopt -I -o nospace; complete -p -I"	{"code": 0, "out": "complete -o nospace -W 'yes' -I\n", "err": "", "timeout": false}
 Debian	Builtin option	compopt -o	different	match	"complete -W one app; compopt -o nospace app; complete -p app"	{"code": 0, "out": "complete -o nospace -W 'one' app\n", "err": "", "timeout": false}
+Debian	Builtin option	declare -A	different	match	"declare -A x; x[foo]=a; x[bar]=b; echo \"${x[foo]}:${x[bar]}\""	{"code": 0, "out": "a:b\n", "err": "", "timeout": false}
 Debian	Builtin option	declare -I	stderr differs	match	"x=outer; f() { declare -I x; echo \"$x\"; }; f"	{"code": 0, "out": "outer\n", "err": "", "timeout": false}
 Debian	Builtin option	declare -i	different	match	"declare -i x=3; x=4+7; echo \"$x\""	{"code": 0, "out": "11\n", "err": "", "timeout": false}
+Debian	Builtin option	declare -r	different	match	"declare -r x=one; (x=two) 2>/dev/null; echo \"$?:$x\""	{"code": 0, "out": "1:one\n", "err": "", "timeout": false}
 Debian	Builtin option	dirs -N	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -0"	{"code": 0, "out": "~\n", "err": "", "timeout": false}
 Debian	Builtin option	dirs -c	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -c; dirs -p"	{"code": 0, "out": "~/b\n", "err": "", "timeout": false}
 Debian	Builtin option	dirs -l	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -l +1"	{"code": 0, "out": "$WORK/a\n", "err": "", "timeout": false}
 Debian	Builtin option	dirs -p	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -p"	{"code": 0, "out": "~/b\n~/a\n~\n", "err": "", "timeout": false}
 Debian	Builtin option	dirs -v	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -v"	{"code": 0, "out": " 0  ~/b\n 1  ~/a\n 2  ~\n", "err": "", "timeout": false}
+Debian	Builtin option	disown -a	missing interface	match	"sleep .04 & sleep .04 & disown -a; jobs -p"	{"code": 0, "out": "", "err": "", "timeout": false}
+Debian	Builtin option	disown -h	missing interface	match	"sleep .04 & p=$!; disown -h; test \"$(jobs -p)\" = \"$p\" && echo retained; wait"	{"code": 0, "out": "retained\n", "err": "", "timeout": false}
+Debian	Builtin option	disown -r	missing interface	match	"sleep .04 & disown -r; jobs -p"	{"code": 0, "out": "", "err": "", "timeout": false}
 Debian	Builtin option	jobs -l	different	match	"sleep .04 & p=$!; jobs -l | grep -q \"$p\"; echo $?; wait"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
 Debian	Builtin option	jobs -n	different	match	"sleep .03 & jobs -n; wait"	{"code": 0, "out": "[1]+  Running                 sleep .03 &\n", "err": "", "timeout": false}
 Debian	Builtin option	jobs -p	different	match	"sleep .1 & p=$!; test \"$(jobs -p)\" = \"$p\" && echo running; wait \"$p\""	{"code": 0, "out": "running\n", "err": "", "timeout": false}
@@ -64,11 +71,19 @@ Debian	Builtin option	readarray -n	missing interface	match	"printf 'first\\nseco
 Debian	Builtin option	readarray -s	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -ts 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[second][third]", "err": "", "timeout": false}
 Debian	Builtin option	readarray -t	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
 Debian	Builtin option	readarray -u	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t -u 3 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
+Debian	Builtin option	readonly -A	missing interface	match	"readonly -A v=([foo]=one [bar]=two); (v[foo]=bad) 2>/dev/null; printf '%s/<%s>' \"$?\" \"${v[foo]}\" "	{"code": 0, "out": "1/<one>", "err": "", "timeout": false}
+Debian	Builtin option	readonly -a	missing interface	match	"readonly -a v=(one 'two words'); (v[0]=bad) 2>/dev/null; printf '%s/<%s>' \"$?\" \"${v[1]}\" "	{"code": 0, "out": "1/<two words>", "err": "", "timeout": false}
+Debian	Builtin option	readonly -f	missing interface	match	"f(){ printf kept; }; readonly -f f; unset -f f 2>/dev/null; printf '%s/' \"$?\"; f"	{"code": 0, "out": "1/kept", "err": "", "timeout": false}
+Debian	Builtin option	readonly -p	missing interface	match	"readonly audit_val='two words'; readonly -p | grep ' audit_val='"	{"code": 0, "out": "declare -r audit_val=\"two words\"\n", "err": "", "timeout": false}
 Debian	Builtin option	set -B	different	interface only	"set -B; case $- in *B*) printf on;; esac; set +B; case $- in *B*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
 Debian	Builtin option	set -C	different	interface only	"set -C; case $- in *C*) printf on;; esac; set +C; case $- in *C*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+Debian	Builtin option	set -E	different	interface only	"set -E; case $- in *E*) printf on;; esac; set +E; case $- in *E*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+Debian	Builtin option	set -T	different	interface only	"set -T; case $- in *T*) printf on;; esac; set +T; case $- in *T*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
 Debian	Builtin option	set -m	different	interface only	"set -m; case $- in *m*) printf on;; esac; set +m; case $- in *m*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+Debian	Builtin option	typeset -A	different	match	"typeset -A x; x[foo]=a; x[bar]=b; echo \"${x[foo]}:${x[bar]}\""	{"code": 0, "out": "a:b\n", "err": "", "timeout": false}
 Debian	Builtin option	typeset -I	stderr differs	match	"x=outer; f() { typeset -I x; echo \"$x\"; }; f"	{"code": 0, "out": "outer\n", "err": "", "timeout": false}
 Debian	Builtin option	typeset -i	different	match	"typeset -i x=3; x=4+7; echo \"$x\""	{"code": 0, "out": "11\n", "err": "", "timeout": false}
+Debian	Builtin option	typeset -r	different	match	"typeset -r x=one; (x=two) 2>/dev/null; echo \"$?:$x\""	{"code": 0, "out": "1:one\n", "err": "", "timeout": false}
 Debian	Builtin option	ulimit -H	missing interface	match	"ulimit -Sn 32 && ulimit -Hn 64 && ulimit -Sn && ulimit -Hn"	{"code": 0, "out": "32\n64\n", "err": "", "timeout": false}
 Debian	Builtin option	ulimit -P	missing interface	not in reference	"ulimit -a"	null
 Debian	Builtin option	ulimit -R	missing interface	match	"ulimit -R"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
@@ -110,15 +125,30 @@ Debian	GNU regression group	run-braces	different	golden match	"run-braces"	[{"ex
 Debian	GNU regression group	run-extglob	different	golden match	"run-extglob"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
 Debian	GNU regression group	run-extglob2	different	golden match	"run-extglob2"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
 Debian	GNU regression group	run-extglob3	different	golden match	"run-extglob3"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
+Debian	GNU regression group	run-nquote1	different	golden match	"run-nquote1"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
 Debian	GNU regression group	run-procsub	different	golden match	"run-procsub"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
 Debian	Invocation	+O	different	match	"[\"+O\", \"nullglob\", \"-c\", \"set -- absent*; echo \\\"$1\\\"\"]"	{"code": 0, "out": "absent*\n", "err": "", "timeout": false}
 Debian	Invocation	-B	different	match	"[\"-B\", \"-c\", \"case $- in *B*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
 Debian	Invocation	-C	different	match	"[\"-C\", \"-c\", \"case $- in *C*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
+Debian	Invocation	-E	different	match	"[\"-E\", \"-c\", \"case $- in *E*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
 Debian	Invocation	-O	different	match	"[\"-O\", \"nullglob\", \"-c\", \"set -- missing*; echo \\\"$#\\\"\"]"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+Debian	Invocation	-T	different	match	"[\"-T\", \"-c\", \"case $- in *T*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
+Debian	Parameter	${v,,}	different	match	"unset v; (printf '<%s>' \"${v,,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v,,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v,,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<abcaa>[abCAa]:0/", "err": "", "timeout": false}
+Debian	Parameter	${v,}	different	match	"unset v; (printf '<%s>' \"${v,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<abCAa>[abCAa]:0/", "err": "", "timeout": false}
+Debian	Parameter	${v@E}	different	match	"unset v; (printf '<%s>' \"${v@E}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v@E}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v@E}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<abCAa>[abCAa]:0/", "err": "", "timeout": false}
+Debian	Parameter	${v@L}	different	match	"unset v; (printf '<%s>' \"${v@L}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v@L}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v@L}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<abcaa>[abCAa]:0/", "err": "", "timeout": false}
+Debian	Parameter	${v@Q}	different	match	"unset v; (printf '<%s>' \"${v@Q}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v@Q}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v@Q}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<''>[]:0/<'abCAa'>[abCAa]:0/", "err": "", "timeout": false}
+Debian	Parameter	${v@U}	different	match	"unset v; (printf '<%s>' \"${v@U}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v@U}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v@U}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<ABCAA>[abCAa]:0/", "err": "", "timeout": false}
+Debian	Parameter	${v@u}	different	match	"unset v; (printf '<%s>' \"${v@u}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v@u}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v@u}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<AbCAa>[abCAa]:0/", "err": "", "timeout": false}
+Debian	Parameter	${v^^}	different	match	"unset v; (printf '<%s>' \"${v^^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v^^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v^^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<ABCAA>[abCAa]:0/", "err": "", "timeout": false}
+Debian	Parameter	${v^}	different	match	"unset v; (printf '<%s>' \"${v^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<AbCAa>[abCAa]:0/", "err": "", "timeout": false}
 Debian	Redirection	<>	different	match	"printf data >f; exec 3<>f; printf X >&3; cat f"	{"code": 0, "out": "Xata", "err": "", "timeout": false}
 Debian	Redirection	>|	different	match	"set -C; printf a >f; printf b >|f; cat f"	{"code": 0, "out": "b", "err": "", "timeout": false}
 Debian	Redirection	n<&m-	different	match	"printf data >f; exec 3<f; cat 4<&3- <&4"	{"code": 0, "out": "data", "err": "", "timeout": false}
 Debian	Redirection	n>&m-	different	match	"exec 3>f; printf hi 4>&3- >&4; cat f"	{"code": 0, "out": "hi", "err": "", "timeout": false}
+Debian	Shell language	ERR trap	different	match	"trap 'echo err:$?' ERR; false; echo continued"	{"code": 0, "out": "err:1\ncontinued\n", "err": "", "timeout": false}
+Debian	Shell language	RETURN trap	different	match	"f() { trap 'echo returned' RETURN; :; }; f"	{"code": 0, "out": "returned\n", "err": "", "timeout": false}
+Debian	Shell language	associative arrays	different	match	"declare -A a; a[foo]=one; a[bar]=two; printf '%s:%s' \"${a[foo]}\" \"${a[bar]}\" "	{"code": 0, "out": "one:two", "err": "", "timeout": false}
 Debian	Shell language	brace alternation	different	match	"printf '<%s>' pre{one,two}post"	{"code": 0, "out": "<preonepost><pretwopost>", "err": "", "timeout": false}
 Debian	Shell language	brace sequence	different	match	"printf '<%s>' {03..09..3}"	{"code": 0, "out": "<03><06><09>", "err": "", "timeout": false}
 Debian	Shell language	case ;& fallthrough	different	match	"case x in x) printf a ;& y) printf b;; esac"	{"code": 0, "out": "ab", "err": "", "timeout": false}
@@ -133,21 +163,34 @@ Debian	Shell language	extglob @(...)	different	match	"shopt -s extglob\nfor v in
 Debian	Shell language	local variable inheritance	different	match	"v=parent; shopt -s localvar_inherit; f(){ local v; echo \"$v\"; }; f"	{"code": 0, "out": "parent\n", "err": "", "timeout": false}
 Debian	Shell language	wait -n	different	match	"(sleep .02; exit 13) & wait -n; printf %s \"$?\""	{"code": 0, "out": "13", "err": "", "timeout": false}
 Debian	Shell language	wait -p	different	match	"(sleep .02; exit 13) & p=$!; wait -n -p ended; [ \"$ended\" = \"$p\" ] && echo yes"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+Debian	UTF-8 text	character length and slice in C locale	new	intentional difference	"LC_ALL=C; v=雪🌸; printf '%s/<%s>' \"${#v}\" \"${v:1:1}\" "	[{"code": 0, "out": "7/<\\x9b>", "err": "", "timeout": false}, {"code": 0, "out": "2/<🌸>", "err": "", "timeout": false}]
+Debian	UTF-8 text	multibyte IFS after whitespace	new	intentional difference	"LC_ALL=C.UTF-8; IFS=' 木'; v='a 木b'; set -- $v; printf '<%s>' \"$@\" "	[{"code": 0, "out": "<a><\\x9c\\xa8b>", "err": "", "timeout": false}, {"code": 0, "out": "<a><b>", "err": "", "timeout": false}]
+Debian	Variable	BASHOPTS	different	match	"shopt -s nullglob; [[ :$BASHOPTS: == *:nullglob:* ]] && printf present"	{"code": 0, "out": "present", "err": "", "timeout": false}
 Debian	Variable	DIRSTACK	different	match	"mkdir d; pushd d >/dev/null; printf \"%s\" \"${#DIRSTACK[@]}\""	{"code": 0, "out": "2", "err": "", "timeout": false}
+Debian	Variable	EUID	different	match	"[[ $EUID == \"$(id -u)\" ]] && printf uid"	{"code": 0, "out": "uid", "err": "", "timeout": false}
 Debian	Variable	GLOBIGNORE	different	match	"touch one.x two.x; GLOBIGNORE=one.x; printf '<%s>' *.x"	{"code": 0, "out": "<two.x>", "err": "", "timeout": false}
 Debian	Variable	MAPFILE	different	match	"mapfile -t <<< text; echo \"${MAPFILE[0]}\""	{"code": 0, "out": "text\n", "err": "", "timeout": false}
 Debian	Variable	OPTARG	different	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
 Debian	Variable	OPTERR	different	match	"OPTERR=0; set -- -z; getopts a opt; echo \"$opt\""	{"code": 0, "out": "?\n", "err": "", "timeout": false}
 Debian	Variable	OPTIND	different	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
+Debian	Variable	PPID	different	match	"test \"$PPID\" -gt 0 && echo parent"	{"code": 0, "out": "parent\n", "err": "", "timeout": false}
+Debian	Variable	SHELLOPTS	different	match	"set -o pipefail; [[ :$SHELLOPTS: == *:pipefail:* ]] && printf present"	{"code": 0, "out": "present", "err": "", "timeout": false}
+Debian	Variable	UID	different	match	"[[ $UID == \"$(id -ru)\" ]] && printf uid"	{"code": 0, "out": "uid", "err": "", "timeout": false}
 Debian	set -o	braceexpand	different	match	"set +B; echo {a,b}; set -B; echo {a,b}"	{"code": 0, "out": "{a,b}\na b\n", "err": "", "timeout": false}
+Debian	set -o	errtrace	different	match	"set -E; trap 'echo err' ERR; f(){ false; }; f"	{"code": 1, "out": "err\nerr\n", "err": "", "timeout": false}
+Debian	set -o	functrace	different	match	"set -T; trap 'echo returning' RETURN; f(){ :; }; f"	{"code": 0, "out": "returning\n", "err": "", "timeout": false}
 Debian	set -o	monitor	stderr differs	match	"mkfifo gate; set -m; reader() { IFS= read -r line <gate; }; reader & p=$!\ng=$(python3 -c 'import os,sys; print(os.getpgid(int(sys.argv[1])))' \"$p\"); test \"$g\" = \"$p\" && echo group\necho go >gate; wait \"$p\" "	{"code": 0, "out": "group\n", "err": "", "timeout": false}
 Debian	set -o	noclobber	different	match	"set -C; echo kept >f; (echo wrong >f) 2>/dev/null; cat f"	{"code": 0, "out": "kept\n", "err": "", "timeout": false}
 Debian	shopt	extglob	missing interface	match	"shopt -s extglob\ncase b in @(a|b)) echo yes;; esac"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+Debian	shopt	failglob	missing interface	match	"shopt -s failglob; (echo missing-*) 2>/dev/null; echo \"$?\""	{"code": 0, "out": "1\n", "err": "", "timeout": false}
 Debian	shopt	globskipdots	missing interface	match	"shopt -s globskipdots; touch .x; printf '<%s>' .*"	{"code": 0, "out": "<.x>", "err": "", "timeout": false}
+Debian	shopt	huponexit	missing interface	interface only	"shopt -s huponexit; shopt -p huponexit; shopt -u huponexit; shopt -p huponexit"	{"code": 1, "out": "shopt -s huponexit\nshopt -u huponexit\n", "err": "", "timeout": false}
+Debian	shopt	inherit_errexit	missing interface	match	"shopt -s inherit_errexit; set -e; x=$(false; echo wrong); echo \"$x\""	{"code": 1, "out": "", "err": "", "timeout": false}
 Debian	shopt	localvar_inherit	missing interface	match	"v=parent; shopt -s localvar_inherit; f(){ local v; echo \"$v\"; }; f"	{"code": 0, "out": "parent\n", "err": "", "timeout": false}
 Ubuntu	Builtin	compopt	different	match	"complete -W one app; compopt -o nospace app; complete -p app"	{"code": 0, "out": "complete -o nospace -W 'one' app\n", "err": "", "timeout": false}
 Ubuntu	Builtin	declare	different	match	"declare -i v=3; v+=4; declare -p v"	{"code": 0, "out": "declare -i v=\"7\"\n", "err": "", "timeout": false}
 Ubuntu	Builtin	dirs	missing interface	match	"mkdir d; pushd d >/dev/null; dirs -p | wc -l"	{"code": 0, "out": "2\n", "err": "", "timeout": false}
+Ubuntu	Builtin	disown	missing interface	match	"sleep .05 & disown %+; jobs -p"	{"code": 0, "out": "", "err": "", "timeout": false}
 Ubuntu	Builtin	getopts	missing interface	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
 Ubuntu	Builtin	jobs	different	match	"sleep .1 & p=$!; test \"$(jobs -p)\" = \"$p\" && echo running; wait \"$p\""	{"code": 0, "out": "running\n", "err": "", "timeout": false}
 Ubuntu	Builtin	let	missing interface	match	"x=3; let 'x*=4'; echo \"$x\""	{"code": 0, "out": "12\n", "err": "", "timeout": false}
@@ -155,6 +198,7 @@ Ubuntu	Builtin	mapfile	missing interface	match	"mapfile -t a <<< $'one\\ntwo'; p
 Ubuntu	Builtin	popd	missing interface	match	"mkdir d; pushd d >/dev/null; popd >/dev/null; test -d d"	{"code": 0, "out": "", "err": "", "timeout": false}
 Ubuntu	Builtin	pushd	missing interface	match	"mkdir d; pushd d >/dev/null; echo \"${PWD##*/}\""	{"code": 0, "out": "d\n", "err": "", "timeout": false}
 Ubuntu	Builtin	readarray	missing interface	match	"readarray -t a <<< $'one\\ntwo'; printf '<%s>' \"${a[@]}\""	{"code": 0, "out": "<one><two>", "err": "", "timeout": false}
+Ubuntu	Builtin	readonly	missing interface	match	"readonly x=old; (x=new) 2>/dev/null; printf '%s/%s' \"$?\" \"$x\""	{"code": 0, "out": "1/old", "err": "", "timeout": false}
 Ubuntu	Builtin	times	missing interface	match	"t=$(times); [[ $t == *m*s* ]] && echo timings"	{"code": 0, "out": "timings\n", "err": "", "timeout": false}
 Ubuntu	Builtin	ulimit	missing interface	match	"n=$(ulimit -n); [[ $n == +([0-9]) || $n == unlimited ]] && printf limit"	{"code": 0, "out": "limit", "err": "", "timeout": false}
 Ubuntu	Builtin	umask	missing interface	match	"umask 077; : > f; ls -ld f | cut -c1-10"	{"code": 0, "out": "-rw-------\n", "err": "", "timeout": false}
@@ -177,13 +221,18 @@ Ubuntu	Builtin option	compopt -D	different	match	"complete -D -W yes; compopt -D
 Ubuntu	Builtin option	compopt -E	different	match	"complete -E -W yes; compopt -E -o nospace; complete -p -E"	{"code": 0, "out": "complete -o nospace -W 'yes' -E\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	compopt -I	different	match	"complete -I -W yes; compopt -I -o nospace; complete -p -I"	{"code": 0, "out": "complete -o nospace -W 'yes' -I\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	compopt -o	different	match	"complete -W one app; compopt -o nospace app; complete -p app"	{"code": 0, "out": "complete -o nospace -W 'one' app\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	declare -A	different	match	"declare -A x; x[foo]=a; x[bar]=b; echo \"${x[foo]}:${x[bar]}\""	{"code": 0, "out": "a:b\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	declare -I	stderr differs	match	"x=outer; f() { declare -I x; echo \"$x\"; }; f"	{"code": 0, "out": "outer\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	declare -i	different	match	"declare -i x=3; x=4+7; echo \"$x\""	{"code": 0, "out": "11\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	declare -r	different	match	"declare -r x=one; (x=two) 2>/dev/null; echo \"$?:$x\""	{"code": 0, "out": "1:one\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	dirs -N	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -0"	{"code": 0, "out": "~\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	dirs -c	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -c; dirs -p"	{"code": 0, "out": "~/b\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	dirs -l	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -l +1"	{"code": 0, "out": "$WORK/a\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	dirs -p	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -p"	{"code": 0, "out": "~/b\n~/a\n~\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	dirs -v	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -v"	{"code": 0, "out": " 0  ~/b\n 1  ~/a\n 2  ~\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	disown -a	missing interface	match	"sleep .04 & sleep .04 & disown -a; jobs -p"	{"code": 0, "out": "", "err": "", "timeout": false}
+Ubuntu	Builtin option	disown -h	missing interface	match	"sleep .04 & p=$!; disown -h; test \"$(jobs -p)\" = \"$p\" && echo retained; wait"	{"code": 0, "out": "retained\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	disown -r	missing interface	match	"sleep .04 & disown -r; jobs -p"	{"code": 0, "out": "", "err": "", "timeout": false}
 Ubuntu	Builtin option	jobs -l	different	match	"sleep .04 & p=$!; jobs -l | grep -q \"$p\"; echo $?; wait"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	jobs -p	different	match	"sleep .1 & p=$!; test \"$(jobs -p)\" = \"$p\" && echo running; wait \"$p\""	{"code": 0, "out": "running\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	jobs -r	different	match	"sleep .04 & jobs -r | grep -q Running; echo $?; wait"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
@@ -209,11 +258,19 @@ Ubuntu	Builtin option	readarray -n	missing interface	match	"printf 'first\\nseco
 Ubuntu	Builtin option	readarray -s	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -ts 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[second][third]", "err": "", "timeout": false}
 Ubuntu	Builtin option	readarray -t	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
 Ubuntu	Builtin option	readarray -u	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t -u 3 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
+Ubuntu	Builtin option	readonly -A	missing interface	match	"readonly -A v=([foo]=one [bar]=two); (v[foo]=bad) 2>/dev/null; printf '%s/<%s>' \"$?\" \"${v[foo]}\" "	{"code": 0, "out": "1/<one>", "err": "", "timeout": false}
+Ubuntu	Builtin option	readonly -a	missing interface	match	"readonly -a v=(one 'two words'); (v[0]=bad) 2>/dev/null; printf '%s/<%s>' \"$?\" \"${v[1]}\" "	{"code": 0, "out": "1/<two words>", "err": "", "timeout": false}
+Ubuntu	Builtin option	readonly -f	missing interface	match	"f(){ printf kept; }; readonly -f f; unset -f f 2>/dev/null; printf '%s/' \"$?\"; f"	{"code": 0, "out": "1/kept", "err": "", "timeout": false}
+Ubuntu	Builtin option	readonly -p	missing interface	match	"readonly audit_val='two words'; readonly -p | grep ' audit_val='"	{"code": 0, "out": "declare -r audit_val=\"two words\"\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	set -B	different	interface only	"set -B; case $- in *B*) printf on;; esac; set +B; case $- in *B*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
 Ubuntu	Builtin option	set -C	different	interface only	"set -C; case $- in *C*) printf on;; esac; set +C; case $- in *C*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+Ubuntu	Builtin option	set -E	different	interface only	"set -E; case $- in *E*) printf on;; esac; set +E; case $- in *E*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+Ubuntu	Builtin option	set -T	different	interface only	"set -T; case $- in *T*) printf on;; esac; set +T; case $- in *T*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
 Ubuntu	Builtin option	set -m	different	interface only	"set -m; case $- in *m*) printf on;; esac; set +m; case $- in *m*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+Ubuntu	Builtin option	typeset -A	different	match	"typeset -A x; x[foo]=a; x[bar]=b; echo \"${x[foo]}:${x[bar]}\""	{"code": 0, "out": "a:b\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	typeset -I	stderr differs	match	"x=outer; f() { typeset -I x; echo \"$x\"; }; f"	{"code": 0, "out": "outer\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	typeset -i	different	match	"typeset -i x=3; x=4+7; echo \"$x\""	{"code": 0, "out": "11\n", "err": "", "timeout": false}
+Ubuntu	Builtin option	typeset -r	different	match	"typeset -r x=one; (x=two) 2>/dev/null; echo \"$?:$x\""	{"code": 0, "out": "1:one\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	ulimit -H	missing interface	match	"ulimit -Sn 32 && ulimit -Hn 64 && ulimit -Sn && ulimit -Hn"	{"code": 0, "out": "32\n64\n", "err": "", "timeout": false}
 Ubuntu	Builtin option	ulimit -P	missing interface	not in reference	"ulimit -a"	null
 Ubuntu	Builtin option	ulimit -R	missing interface	match	"ulimit -R"	{"code": 0, "out": "unlimited\n", "err": "", "timeout": false}
@@ -256,15 +313,30 @@ Ubuntu	Completion option	plusdirs	different	interface only	"complete -o plusdirs
 Ubuntu	GNU regression group	run-extglob2	different	golden match	"run-extglob2"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
 Ubuntu	GNU regression group	run-extglob3	different	golden match	"run-extglob3"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
 Ubuntu	GNU regression group	run-jobs	timeout	different	"run-jobs"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 1, "diffs": [1], "skip": [], "timeout": false, "example": "< tonari: fg: job 1 started without job control"}]
+Ubuntu	GNU regression group	run-nquote1	different	golden match	"run-nquote1"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
 Ubuntu	GNU regression group	run-procsub	different	golden match	"run-procsub"	[{"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}, {"exit": 0, "diffs": [0], "skip": [], "timeout": false, "example": ""}]
 Ubuntu	Invocation	+O	different	match	"[\"+O\", \"nullglob\", \"-c\", \"set -- absent*; echo \\\"$1\\\"\"]"	{"code": 0, "out": "absent*\n", "err": "", "timeout": false}
 Ubuntu	Invocation	-B	different	match	"[\"-B\", \"-c\", \"case $- in *B*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
 Ubuntu	Invocation	-C	different	match	"[\"-C\", \"-c\", \"case $- in *C*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
+Ubuntu	Invocation	-E	different	match	"[\"-E\", \"-c\", \"case $- in *E*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
 Ubuntu	Invocation	-O	different	match	"[\"-O\", \"nullglob\", \"-c\", \"set -- missing*; echo \\\"$#\\\"\"]"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+Ubuntu	Invocation	-T	different	match	"[\"-T\", \"-c\", \"case $- in *T*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
+Ubuntu	Parameter	${v,,}	different	match	"unset v; (printf '<%s>' \"${v,,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v,,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v,,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<abcaa>[abCAa]:0/", "err": "", "timeout": false}
+Ubuntu	Parameter	${v,}	different	match	"unset v; (printf '<%s>' \"${v,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<abCAa>[abCAa]:0/", "err": "", "timeout": false}
+Ubuntu	Parameter	${v@E}	different	match	"unset v; (printf '<%s>' \"${v@E}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v@E}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v@E}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<abCAa>[abCAa]:0/", "err": "", "timeout": false}
+Ubuntu	Parameter	${v@L}	different	match	"unset v; (printf '<%s>' \"${v@L}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v@L}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v@L}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<abcaa>[abCAa]:0/", "err": "", "timeout": false}
+Ubuntu	Parameter	${v@Q}	different	match	"unset v; (printf '<%s>' \"${v@Q}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v@Q}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v@Q}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<''>[]:0/<'abCAa'>[abCAa]:0/", "err": "", "timeout": false}
+Ubuntu	Parameter	${v@U}	different	match	"unset v; (printf '<%s>' \"${v@U}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v@U}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v@U}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<ABCAA>[abCAa]:0/", "err": "", "timeout": false}
+Ubuntu	Parameter	${v@u}	different	match	"unset v; (printf '<%s>' \"${v@u}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v@u}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v@u}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<AbCAa>[abCAa]:0/", "err": "", "timeout": false}
+Ubuntu	Parameter	${v^^}	different	match	"unset v; (printf '<%s>' \"${v^^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v^^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v^^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<ABCAA>[abCAa]:0/", "err": "", "timeout": false}
+Ubuntu	Parameter	${v^}	different	match	"unset v; (printf '<%s>' \"${v^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<AbCAa>[abCAa]:0/", "err": "", "timeout": false}
 Ubuntu	Redirection	<>	different	match	"printf data >f; exec 3<>f; printf X >&3; cat f"	{"code": 0, "out": "Xata", "err": "", "timeout": false}
 Ubuntu	Redirection	>|	different	match	"set -C; printf a >f; printf b >|f; cat f"	{"code": 0, "out": "b", "err": "", "timeout": false}
 Ubuntu	Redirection	n<&m-	different	match	"printf data >f; exec 3<f; cat 4<&3- <&4"	{"code": 0, "out": "data", "err": "", "timeout": false}
 Ubuntu	Redirection	n>&m-	different	match	"exec 3>f; printf hi 4>&3- >&4; cat f"	{"code": 0, "out": "hi", "err": "", "timeout": false}
+Ubuntu	Shell language	ERR trap	different	match	"trap 'echo err:$?' ERR; false; echo continued"	{"code": 0, "out": "err:1\ncontinued\n", "err": "", "timeout": false}
+Ubuntu	Shell language	RETURN trap	different	match	"f() { trap 'echo returned' RETURN; :; }; f"	{"code": 0, "out": "returned\n", "err": "", "timeout": false}
+Ubuntu	Shell language	associative arrays	different	match	"declare -A a; a[foo]=one; a[bar]=two; printf '%s:%s' \"${a[foo]}\" \"${a[bar]}\" "	{"code": 0, "out": "one:two", "err": "", "timeout": false}
 Ubuntu	Shell language	brace alternation	different	match	"printf '<%s>' pre{one,two}post"	{"code": 0, "out": "<preonepost><pretwopost>", "err": "", "timeout": false}
 Ubuntu	Shell language	brace sequence	different	match	"printf '<%s>' {03..09..3}"	{"code": 0, "out": "<03><06><09>", "err": "", "timeout": false}
 Ubuntu	Shell language	case ;& fallthrough	different	match	"case x in x) printf a ;& y) printf b;; esac"	{"code": 0, "out": "ab", "err": "", "timeout": false}
@@ -279,21 +351,34 @@ Ubuntu	Shell language	extglob @(...)	different	match	"shopt -s extglob\nfor v in
 Ubuntu	Shell language	local variable inheritance	different	match	"v=parent; shopt -s localvar_inherit; f(){ local v; echo \"$v\"; }; f"	{"code": 0, "out": "parent\n", "err": "", "timeout": false}
 Ubuntu	Shell language	wait -n	different	match	"(sleep .02; exit 13) & wait -n; printf %s \"$?\""	{"code": 0, "out": "13", "err": "", "timeout": false}
 Ubuntu	Shell language	wait -p	different	match	"(sleep .02; exit 13) & p=$!; wait -n -p ended; [ \"$ended\" = \"$p\" ] && echo yes"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+Ubuntu	UTF-8 text	character length and slice in C locale	new	intentional difference	"LC_ALL=C; v=雪🌸; printf '%s/<%s>' \"${#v}\" \"${v:1:1}\" "	[{"code": 0, "out": "7/<\\x9b>", "err": "", "timeout": false}, {"code": 0, "out": "2/<🌸>", "err": "", "timeout": false}]
+Ubuntu	UTF-8 text	multibyte IFS after whitespace	new	intentional difference	"LC_ALL=C.UTF-8; IFS=' 木'; v='a 木b'; set -- $v; printf '<%s>' \"$@\" "	[{"code": 0, "out": "<a><\\x9c\\xa8b>", "err": "", "timeout": false}, {"code": 0, "out": "<a><b>", "err": "", "timeout": false}]
+Ubuntu	Variable	BASHOPTS	different	match	"shopt -s nullglob; [[ :$BASHOPTS: == *:nullglob:* ]] && printf present"	{"code": 0, "out": "present", "err": "", "timeout": false}
 Ubuntu	Variable	DIRSTACK	different	match	"mkdir d; pushd d >/dev/null; printf \"%s\" \"${#DIRSTACK[@]}\""	{"code": 0, "out": "2", "err": "", "timeout": false}
+Ubuntu	Variable	EUID	different	match	"[[ $EUID == \"$(id -u)\" ]] && printf uid"	{"code": 0, "out": "uid", "err": "", "timeout": false}
 Ubuntu	Variable	GLOBIGNORE	different	match	"touch one.x two.x; GLOBIGNORE=one.x; printf '<%s>' *.x"	{"code": 0, "out": "<two.x>", "err": "", "timeout": false}
 Ubuntu	Variable	MAPFILE	different	match	"mapfile -t <<< text; echo \"${MAPFILE[0]}\""	{"code": 0, "out": "text\n", "err": "", "timeout": false}
 Ubuntu	Variable	OPTARG	different	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
 Ubuntu	Variable	OPTERR	different	match	"OPTERR=0; set -- -z; getopts a opt; echo \"$opt\""	{"code": 0, "out": "?\n", "err": "", "timeout": false}
 Ubuntu	Variable	OPTIND	different	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
+Ubuntu	Variable	PPID	different	match	"test \"$PPID\" -gt 0 && echo parent"	{"code": 0, "out": "parent\n", "err": "", "timeout": false}
+Ubuntu	Variable	SHELLOPTS	different	match	"set -o pipefail; [[ :$SHELLOPTS: == *:pipefail:* ]] && printf present"	{"code": 0, "out": "present", "err": "", "timeout": false}
+Ubuntu	Variable	UID	different	match	"[[ $UID == \"$(id -ru)\" ]] && printf uid"	{"code": 0, "out": "uid", "err": "", "timeout": false}
 Ubuntu	set -o	braceexpand	different	match	"set +B; echo {a,b}; set -B; echo {a,b}"	{"code": 0, "out": "{a,b}\na b\n", "err": "", "timeout": false}
+Ubuntu	set -o	errtrace	different	match	"set -E; trap 'echo err' ERR; f(){ false; }; f"	{"code": 1, "out": "err\nerr\n", "err": "", "timeout": false}
+Ubuntu	set -o	functrace	different	match	"set -T; trap 'echo returning' RETURN; f(){ :; }; f"	{"code": 0, "out": "returning\n", "err": "", "timeout": false}
 Ubuntu	set -o	monitor	different	match	"mkfifo gate; set -m; reader() { IFS= read -r line <gate; }; reader & p=$!\ng=$(python3 -c 'import os,sys; print(os.getpgid(int(sys.argv[1])))' \"$p\"); test \"$g\" = \"$p\" && echo group\necho go >gate; wait \"$p\" "	{"code": 0, "out": "group\n", "err": "", "timeout": false}
 Ubuntu	set -o	noclobber	different	match	"set -C; echo kept >f; (echo wrong >f) 2>/dev/null; cat f"	{"code": 0, "out": "kept\n", "err": "", "timeout": false}
 Ubuntu	shopt	extglob	missing interface	match	"shopt -s extglob\ncase b in @(a|b)) echo yes;; esac"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+Ubuntu	shopt	failglob	missing interface	match	"shopt -s failglob; (echo missing-*) 2>/dev/null; echo \"$?\""	{"code": 0, "out": "1\n", "err": "", "timeout": false}
 Ubuntu	shopt	globskipdots	missing interface	match	"shopt -s globskipdots; touch .x; printf '<%s>' .*"	{"code": 0, "out": "<.x>", "err": "", "timeout": false}
+Ubuntu	shopt	huponexit	missing interface	interface only	"shopt -s huponexit; shopt -p huponexit; shopt -u huponexit; shopt -p huponexit"	{"code": 1, "out": "shopt -s huponexit\nshopt -u huponexit\n", "err": "", "timeout": false}
+Ubuntu	shopt	inherit_errexit	missing interface	match	"shopt -s inherit_errexit; set -e; x=$(false; echo wrong); echo \"$x\""	{"code": 1, "out": "", "err": "", "timeout": false}
 Ubuntu	shopt	localvar_inherit	missing interface	match	"v=parent; shopt -s localvar_inherit; f(){ local v; echo \"$v\"; }; f"	{"code": 0, "out": "parent\n", "err": "", "timeout": false}
 macOS	Builtin	compopt	different	match	"complete -W one app; compopt -o nospace app; complete -p app"	{"code": 0, "out": "complete -o nospace -W 'one' app\n", "err": "", "timeout": false}
 macOS	Builtin	declare	different	match	"declare -i v=3; v+=4; declare -p v"	{"code": 0, "out": "declare -i v=\"7\"\n", "err": "", "timeout": false}
 macOS	Builtin	dirs	missing interface	match	"mkdir d; pushd d >/dev/null; dirs -p | wc -l"	{"code": 0, "out": "       2\n", "err": "", "timeout": false}
+macOS	Builtin	disown	missing interface	match	"sleep .05 & disown %+; jobs -p"	{"code": 0, "out": "", "err": "", "timeout": false}
 macOS	Builtin	getopts	missing interface	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
 macOS	Builtin	jobs	different	match	"sleep .1 & p=$!; test \"$(jobs -p)\" = \"$p\" && echo running; wait \"$p\""	{"code": 0, "out": "running\n", "err": "", "timeout": false}
 macOS	Builtin	let	missing interface	match	"x=3; let 'x*=4'; echo \"$x\""	{"code": 0, "out": "12\n", "err": "", "timeout": false}
@@ -301,6 +386,7 @@ macOS	Builtin	mapfile	missing interface	match	"mapfile -t a <<< $'one\\ntwo'; pr
 macOS	Builtin	popd	missing interface	match	"mkdir d; pushd d >/dev/null; popd >/dev/null; test -d d"	{"code": 0, "out": "", "err": "", "timeout": false}
 macOS	Builtin	pushd	missing interface	match	"mkdir d; pushd d >/dev/null; echo \"${PWD##*/}\""	{"code": 0, "out": "d\n", "err": "", "timeout": false}
 macOS	Builtin	readarray	missing interface	match	"readarray -t a <<< $'one\\ntwo'; printf '<%s>' \"${a[@]}\""	{"code": 0, "out": "<one><two>", "err": "", "timeout": false}
+macOS	Builtin	readonly	missing interface	match	"readonly x=old; (x=new) 2>/dev/null; printf '%s/%s' \"$?\" \"$x\""	{"code": 0, "out": "1/old", "err": "", "timeout": false}
 macOS	Builtin	times	missing interface	match	"t=$(times); [[ $t == *m*s* ]] && echo timings"	{"code": 0, "out": "timings\n", "err": "", "timeout": false}
 macOS	Builtin	ulimit	missing interface	match	"n=$(ulimit -n); [[ $n == +([0-9]) || $n == unlimited ]] && printf limit"	{"code": 0, "out": "limit", "err": "", "timeout": false}
 macOS	Builtin	umask	missing interface	match	"umask 077; : > f; ls -ld f | cut -c1-10"	{"code": 0, "out": "-rw-------\n", "err": "", "timeout": false}
@@ -323,13 +409,18 @@ macOS	Builtin option	compopt -D	different	match	"complete -D -W yes; compopt -D 
 macOS	Builtin option	compopt -E	different	match	"complete -E -W yes; compopt -E -o nospace; complete -p -E"	{"code": 0, "out": "complete -o nospace -W 'yes' -E\n", "err": "", "timeout": false}
 macOS	Builtin option	compopt -I	different	match	"complete -I -W yes; compopt -I -o nospace; complete -p -I"	{"code": 0, "out": "complete -o nospace -W 'yes' -I\n", "err": "", "timeout": false}
 macOS	Builtin option	compopt -o	different	match	"complete -W one app; compopt -o nospace app; complete -p app"	{"code": 0, "out": "complete -o nospace -W 'one' app\n", "err": "", "timeout": false}
+macOS	Builtin option	declare -A	different	match	"declare -A x; x[foo]=a; x[bar]=b; echo \"${x[foo]}:${x[bar]}\""	{"code": 0, "out": "a:b\n", "err": "", "timeout": false}
 macOS	Builtin option	declare -I	stderr differs	match	"x=outer; f() { declare -I x; echo \"$x\"; }; f"	{"code": 0, "out": "outer\n", "err": "", "timeout": false}
 macOS	Builtin option	declare -i	different	match	"declare -i x=3; x=4+7; echo \"$x\""	{"code": 0, "out": "11\n", "err": "", "timeout": false}
+macOS	Builtin option	declare -r	different	match	"declare -r x=one; (x=two) 2>/dev/null; echo \"$?:$x\""	{"code": 0, "out": "1:one\n", "err": "", "timeout": false}
 macOS	Builtin option	dirs -N	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -0"	{"code": 0, "out": "~\n", "err": "", "timeout": false}
 macOS	Builtin option	dirs -c	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -c; dirs -p"	{"code": 0, "out": "~/b\n", "err": "", "timeout": false}
 macOS	Builtin option	dirs -l	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -l +1"	{"code": 0, "out": "/private$WORK/a\n", "err": "", "timeout": false}
 macOS	Builtin option	dirs -p	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -p"	{"code": 0, "out": "~/b\n~/a\n~\n", "err": "", "timeout": false}
 macOS	Builtin option	dirs -v	missing interface	match	"HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; dirs -v"	{"code": 0, "out": " 0  ~/b\n 1  ~/a\n 2  ~\n", "err": "", "timeout": false}
+macOS	Builtin option	disown -a	missing interface	match	"sleep .04 & sleep .04 & disown -a; jobs -p"	{"code": 0, "out": "", "err": "", "timeout": false}
+macOS	Builtin option	disown -h	missing interface	match	"sleep .04 & p=$!; disown -h; test \"$(jobs -p)\" = \"$p\" && echo retained; wait"	{"code": 0, "out": "retained\n", "err": "", "timeout": false}
+macOS	Builtin option	disown -r	missing interface	match	"sleep .04 & disown -r; jobs -p"	{"code": 0, "out": "", "err": "", "timeout": false}
 macOS	Builtin option	jobs -l	different	match	"sleep .04 & p=$!; jobs -l | grep -q \"$p\"; echo $?; wait"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
 macOS	Builtin option	jobs -n	different	match	"sleep .03 & jobs -n; wait"	{"code": 0, "out": "[1]+  Running                 sleep .03 &\n", "err": "", "timeout": false}
 macOS	Builtin option	jobs -p	different	match	"sleep .1 & p=$!; test \"$(jobs -p)\" = \"$p\" && echo running; wait \"$p\""	{"code": 0, "out": "running\n", "err": "", "timeout": false}
@@ -356,11 +447,19 @@ macOS	Builtin option	readarray -n	missing interface	match	"printf 'first\\nsecon
 macOS	Builtin option	readarray -s	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -ts 1 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[second][third]", "err": "", "timeout": false}
 macOS	Builtin option	readarray -t	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
 macOS	Builtin option	readarray -u	missing interface	match	"printf 'first\\nsecond\\nthird' > input; exec 3<input; readarray -t -u 3 a <&3; printf '[%s]' \"${a[@]}\" "	{"code": 0, "out": "[first][second][third]", "err": "", "timeout": false}
+macOS	Builtin option	readonly -A	missing interface	match	"readonly -A v=([foo]=one [bar]=two); (v[foo]=bad) 2>/dev/null; printf '%s/<%s>' \"$?\" \"${v[foo]}\" "	{"code": 0, "out": "1/<one>", "err": "", "timeout": false}
+macOS	Builtin option	readonly -a	missing interface	match	"readonly -a v=(one 'two words'); (v[0]=bad) 2>/dev/null; printf '%s/<%s>' \"$?\" \"${v[1]}\" "	{"code": 0, "out": "1/<two words>", "err": "", "timeout": false}
+macOS	Builtin option	readonly -f	missing interface	match	"f(){ printf kept; }; readonly -f f; unset -f f 2>/dev/null; printf '%s/' \"$?\"; f"	{"code": 0, "out": "1/kept", "err": "", "timeout": false}
+macOS	Builtin option	readonly -p	missing interface	match	"readonly audit_val='two words'; readonly -p | grep ' audit_val='"	{"code": 0, "out": "declare -r audit_val=\"two words\"\n", "err": "", "timeout": false}
 macOS	Builtin option	set -B	different	interface only	"set -B; case $- in *B*) printf on;; esac; set +B; case $- in *B*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
 macOS	Builtin option	set -C	different	interface only	"set -C; case $- in *C*) printf on;; esac; set +C; case $- in *C*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+macOS	Builtin option	set -E	different	interface only	"set -E; case $- in *E*) printf on;; esac; set +E; case $- in *E*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+macOS	Builtin option	set -T	different	interface only	"set -T; case $- in *T*) printf on;; esac; set +T; case $- in *T*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
 macOS	Builtin option	set -m	different	interface only	"set -m; case $- in *m*) printf on;; esac; set +m; case $- in *m*) printf wrong;; *) printf off;; esac"	{"code": 0, "out": "onoff", "err": "", "timeout": false}
+macOS	Builtin option	typeset -A	different	match	"typeset -A x; x[foo]=a; x[bar]=b; echo \"${x[foo]}:${x[bar]}\""	{"code": 0, "out": "a:b\n", "err": "", "timeout": false}
 macOS	Builtin option	typeset -I	stderr differs	match	"x=outer; f() { typeset -I x; echo \"$x\"; }; f"	{"code": 0, "out": "outer\n", "err": "", "timeout": false}
 macOS	Builtin option	typeset -i	different	match	"typeset -i x=3; x=4+7; echo \"$x\""	{"code": 0, "out": "11\n", "err": "", "timeout": false}
+macOS	Builtin option	typeset -r	different	match	"typeset -r x=one; (x=two) 2>/dev/null; echo \"$?:$x\""	{"code": 0, "out": "1:one\n", "err": "", "timeout": false}
 macOS	Builtin option	ulimit -H	missing interface	match	"ulimit -Sn 32 && ulimit -Hn 64 && ulimit -Sn && ulimit -Hn"	{"code": 0, "out": "32\n64\n", "err": "", "timeout": false}
 macOS	Builtin option	ulimit -P	missing interface	not in reference	"ulimit -a"	null
 macOS	Builtin option	ulimit -R	missing interface	not in reference	"ulimit -a"	null
@@ -401,11 +500,25 @@ macOS	Completion option	plusdirs	different	interface only	"complete -o plusdirs 
 macOS	Invocation	+O	different	match	"[\"+O\", \"nullglob\", \"-c\", \"set -- absent*; echo \\\"$1\\\"\"]"	{"code": 0, "out": "absent*\n", "err": "", "timeout": false}
 macOS	Invocation	-B	different	match	"[\"-B\", \"-c\", \"case $- in *B*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
 macOS	Invocation	-C	different	match	"[\"-C\", \"-c\", \"case $- in *C*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
+macOS	Invocation	-E	different	match	"[\"-E\", \"-c\", \"case $- in *E*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
 macOS	Invocation	-O	different	match	"[\"-O\", \"nullglob\", \"-c\", \"set -- missing*; echo \\\"$#\\\"\"]"	{"code": 0, "out": "0\n", "err": "", "timeout": false}
+macOS	Invocation	-T	different	match	"[\"-T\", \"-c\", \"case $- in *T*) printf enabled;; *) printf disabled;; esac\"]"	{"code": 0, "out": "enabled", "err": "", "timeout": false}
+macOS	Parameter	${v,,}	different	match	"unset v; (printf '<%s>' \"${v,,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v,,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v,,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<abcaa>[abCAa]:0/", "err": "", "timeout": false}
+macOS	Parameter	${v,}	different	match	"unset v; (printf '<%s>' \"${v,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v,}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<abCAa>[abCAa]:0/", "err": "", "timeout": false}
+macOS	Parameter	${v@E}	different	match	"unset v; (printf '<%s>' \"${v@E}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v@E}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v@E}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<abCAa>[abCAa]:0/", "err": "", "timeout": false}
+macOS	Parameter	${v@L}	different	match	"unset v; (printf '<%s>' \"${v@L}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v@L}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v@L}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<abcaa>[abCAa]:0/", "err": "", "timeout": false}
+macOS	Parameter	${v@Q}	different	match	"unset v; (printf '<%s>' \"${v@Q}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v@Q}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v@Q}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<''>[]:0/<'abCAa'>[abCAa]:0/", "err": "", "timeout": false}
+macOS	Parameter	${v@U}	different	match	"unset v; (printf '<%s>' \"${v@U}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v@U}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v@U}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<ABCAA>[abCAa]:0/", "err": "", "timeout": false}
+macOS	Parameter	${v@u}	different	match	"unset v; (printf '<%s>' \"${v@u}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v@u}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v@u}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<AbCAa>[abCAa]:0/", "err": "", "timeout": false}
+macOS	Parameter	${v^^}	different	match	"unset v; (printf '<%s>' \"${v^^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v^^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v^^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<ABCAA>[abCAa]:0/", "err": "", "timeout": false}
+macOS	Parameter	${v^}	different	match	"unset v; (printf '<%s>' \"${v^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=; (printf '<%s>' \"${v^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\"; v=abCAa; (printf '<%s>' \"${v^}\"; printf '[%s]' \"$v\") 2>/dev/null; printf ':%s/' \"$?\""	{"code": 0, "out": "<>[]:0/<>[]:0/<AbCAa>[abCAa]:0/", "err": "", "timeout": false}
 macOS	Redirection	<>	different	match	"printf data >f; exec 3<>f; printf X >&3; cat f"	{"code": 0, "out": "Xata", "err": "", "timeout": false}
 macOS	Redirection	>|	different	match	"set -C; printf a >f; printf b >|f; cat f"	{"code": 0, "out": "b", "err": "", "timeout": false}
 macOS	Redirection	n<&m-	different	match	"printf data >f; exec 3<f; cat 4<&3- <&4"	{"code": 0, "out": "data", "err": "", "timeout": false}
 macOS	Redirection	n>&m-	different	match	"exec 3>f; printf hi 4>&3- >&4; cat f"	{"code": 0, "out": "hi", "err": "", "timeout": false}
+macOS	Shell language	ERR trap	different	match	"trap 'echo err:$?' ERR; false; echo continued"	{"code": 0, "out": "err:1\ncontinued\n", "err": "", "timeout": false}
+macOS	Shell language	RETURN trap	different	match	"f() { trap 'echo returned' RETURN; :; }; f"	{"code": 0, "out": "returned\n", "err": "", "timeout": false}
+macOS	Shell language	associative arrays	different	match	"declare -A a; a[foo]=one; a[bar]=two; printf '%s:%s' \"${a[foo]}\" \"${a[bar]}\" "	{"code": 0, "out": "one:two", "err": "", "timeout": false}
 macOS	Shell language	brace alternation	different	match	"printf '<%s>' pre{one,two}post"	{"code": 0, "out": "<preonepost><pretwopost>", "err": "", "timeout": false}
 macOS	Shell language	brace sequence	different	match	"printf '<%s>' {03..09..3}"	{"code": 0, "out": "<03><06><09>", "err": "", "timeout": false}
 macOS	Shell language	case ;& fallthrough	different	match	"case x in x) printf a ;& y) printf b;; esac"	{"code": 0, "out": "ab", "err": "", "timeout": false}
@@ -420,15 +533,27 @@ macOS	Shell language	extglob @(...)	different	match	"shopt -s extglob\nfor v in 
 macOS	Shell language	local variable inheritance	different	match	"v=parent; shopt -s localvar_inherit; f(){ local v; echo \"$v\"; }; f"	{"code": 0, "out": "parent\n", "err": "", "timeout": false}
 macOS	Shell language	wait -n	different	match	"(sleep .02; exit 13) & wait -n; printf %s \"$?\""	{"code": 0, "out": "13", "err": "", "timeout": false}
 macOS	Shell language	wait -p	different	match	"(sleep .02; exit 13) & p=$!; wait -n -p ended; [ \"$ended\" = \"$p\" ] && echo yes"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+macOS	UTF-8 text	character length and slice in C locale	new	intentional difference	"LC_ALL=C; v=雪🌸; printf '%s/<%s>' \"${#v}\" \"${v:1:1}\" "	[{"code": 0, "out": "7/<\\x9b>", "err": "", "timeout": false}, {"code": 0, "out": "2/<🌸>", "err": "", "timeout": false}]
+macOS	UTF-8 text	multibyte IFS after whitespace	new	intentional difference	"LC_ALL=en_US.UTF-8; IFS=' 木'; v='a 木b'; set -- $v; printf '<%s>' \"$@\" "	[{"code": 0, "out": "<a><><><b>", "err": "", "timeout": false}, {"code": 0, "out": "<a><b>", "err": "", "timeout": false}]
+macOS	Variable	BASHOPTS	different	match	"shopt -s nullglob; [[ :$BASHOPTS: == *:nullglob:* ]] && printf present"	{"code": 0, "out": "present", "err": "", "timeout": false}
 macOS	Variable	DIRSTACK	different	match	"mkdir d; pushd d >/dev/null; printf \"%s\" \"${#DIRSTACK[@]}\""	{"code": 0, "out": "2", "err": "", "timeout": false}
+macOS	Variable	EUID	different	match	"[[ $EUID == \"$(id -u)\" ]] && printf uid"	{"code": 0, "out": "uid", "err": "", "timeout": false}
 macOS	Variable	GLOBIGNORE	different	match	"touch one.x two.x; GLOBIGNORE=one.x; printf '<%s>' *.x"	{"code": 0, "out": "<two.x>", "err": "", "timeout": false}
 macOS	Variable	MAPFILE	different	match	"mapfile -t <<< text; echo \"${MAPFILE[0]}\""	{"code": 0, "out": "text\n", "err": "", "timeout": false}
 macOS	Variable	OPTARG	different	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
 macOS	Variable	OPTERR	different	match	"OPTERR=0; set -- -z; getopts a opt; echo \"$opt\""	{"code": 0, "out": "?\n", "err": "", "timeout": false}
 macOS	Variable	OPTIND	different	match	"set -- -a arg; getopts a: opt; printf '%s:%s:%s' \"$opt\" \"$OPTARG\" \"$OPTIND\""	{"code": 0, "out": "a:arg:3", "err": "", "timeout": false}
+macOS	Variable	PPID	different	match	"test \"$PPID\" -gt 0 && echo parent"	{"code": 0, "out": "parent\n", "err": "", "timeout": false}
+macOS	Variable	SHELLOPTS	different	match	"set -o pipefail; [[ :$SHELLOPTS: == *:pipefail:* ]] && printf present"	{"code": 0, "out": "present", "err": "", "timeout": false}
+macOS	Variable	UID	different	match	"[[ $UID == \"$(id -ru)\" ]] && printf uid"	{"code": 0, "out": "uid", "err": "", "timeout": false}
 macOS	set -o	braceexpand	different	match	"set +B; echo {a,b}; set -B; echo {a,b}"	{"code": 0, "out": "{a,b}\na b\n", "err": "", "timeout": false}
+macOS	set -o	errtrace	different	match	"set -E; trap 'echo err' ERR; f(){ false; }; f"	{"code": 1, "out": "err\nerr\n", "err": "", "timeout": false}
+macOS	set -o	functrace	different	match	"set -T; trap 'echo returning' RETURN; f(){ :; }; f"	{"code": 0, "out": "returning\n", "err": "", "timeout": false}
 macOS	set -o	monitor	different	match	"mkfifo gate; set -m; reader() { IFS= read -r line <gate; }; reader & p=$!\ng=$(python3 -c 'import os,sys; print(os.getpgid(int(sys.argv[1])))' \"$p\"); test \"$g\" = \"$p\" && echo group\necho go >gate; wait \"$p\" "	{"code": 0, "out": "group\n", "err": "", "timeout": false}
 macOS	set -o	noclobber	different	match	"set -C; echo kept >f; (echo wrong >f) 2>/dev/null; cat f"	{"code": 0, "out": "kept\n", "err": "", "timeout": false}
 macOS	shopt	extglob	missing interface	match	"shopt -s extglob\ncase b in @(a|b)) echo yes;; esac"	{"code": 0, "out": "yes\n", "err": "", "timeout": false}
+macOS	shopt	failglob	missing interface	match	"shopt -s failglob; (echo missing-*) 2>/dev/null; echo \"$?\""	{"code": 0, "out": "1\n", "err": "", "timeout": false}
 macOS	shopt	globskipdots	missing interface	match	"shopt -s globskipdots; touch .x; printf '<%s>' .*"	{"code": 0, "out": "<.x>", "err": "", "timeout": false}
+macOS	shopt	huponexit	missing interface	interface only	"shopt -s huponexit; shopt -p huponexit; shopt -u huponexit; shopt -p huponexit"	{"code": 1, "out": "shopt -s huponexit\nshopt -u huponexit\n", "err": "", "timeout": false}
+macOS	shopt	inherit_errexit	missing interface	match	"shopt -s inherit_errexit; set -e; x=$(false; echo wrong); echo \"$x\""	{"code": 1, "out": "", "err": "", "timeout": false}
 macOS	shopt	localvar_inherit	missing interface	match	"v=parent; shopt -s localvar_inherit; f(){ local v; echo \"$v\"; }; f"	{"code": 0, "out": "parent\n", "err": "", "timeout": false}

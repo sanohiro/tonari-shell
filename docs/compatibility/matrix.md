@@ -2,7 +2,7 @@
 
 [Method, scope and reproduction / 検証方法と対象範囲](../compatibility.md)
 
-This table records the pre-fix timing baseline. The current direct checks and corrected-workload timings are available separately. この表は修正前の全件計測です。[Current results / 現在の全件判定](current.tsv) · [Changed observations / 修正差分](changes.tsv) · [Measurements after fixes / 修正後の実測](../benchmarks.md#2026-11-23-runtime)
+This table records the pre-fix timing baseline. The current direct checks and corrected-workload timings are available separately. この表は修正前の全件計測です。[Current results / 現在の全件判定](current.tsv) · [Changed observations / 修正差分](changes.tsv) · [Full matrix after fixes / 修正後の全件計測](../compatibility-2026-11-23/matrix.md)
 
 Each cell gives the compatibility result and the median elapsed-time ratio (Tonari/Bash), whole run followed by already-started where applicable. Exact nanoseconds, p95, sample counts and witnesses are in each platform TSV. Bold ratios exceed 2/3 before rounding. An upward arrow marks Bash time or slower. Shared witnesses appear under each public name. Manual sections are index entries.
 
