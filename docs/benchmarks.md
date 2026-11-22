@@ -88,6 +88,25 @@ On an Apple M1 running macOS 27.2.1, each sample launched the native release bui
 
 macOS 27.2.1 の M1 で、各回新しい疑似端末と一時ホームを使いました。起動済みのプロンプトに最初の `z` を送ってから、その文字が再描画されるまでを測っています。初回の履歴読み込みと、一致する候補がない場合の検索を含みます。履歴件数を入れ替え、各条件3回のウォームアップ後に30回計測しました。
 
+### Input-priority history refresh / 履歴読み込み中のキー応答
+
+We reran the preceding warm-cache M1 test with the old and updated releases and the same journals. Three warm-ups and 30 measured runs rotated through the builds, entry counts and actions. Immediately after observing the first character, the PTY driver sent Tab to complete the sole command `zcomplete`, or Enter to run `:` and return to the next prompt. A separate run sent `p` and waited for the newest matching history suggestion to become visible. Each cell is **median / p95 in milliseconds**. [Reproducible harness](../tools/bench_history.py)
+
+同じ M1 と履歴で旧版・新版を交互に起動しました。各条件3回のウォームアップ後に30回計測しています。最初の一文字を読み取った直後に Tab でコマンド名を補完するか、Enter で `:` を実行して次のプロンプトを待ちました。別の試行で `p` を入力してから履歴候補そのものが表示されるまでも測りました。
+
+| Entries / 件数 | Interval / 計測区間 | Previous | Updated |
+|---:|---|---:|---:|
+| 0 | First `z` → redraw | 0.067 / 0.086 | 0.029 / 0.041 |
+| 1,000 | First `z` → redraw | 0.300 / 0.345 | 0.024 / 0.038 |
+| 100,000 | First `z` → redraw | 20.499 / 21.161 | 0.036 / 0.050 |
+| 100,000 | Tab → completed word | 0.355 / 0.399 | 0.090 / 0.167 |
+| 100,000 | First `z` → completed word after Tab | 20.858 / 21.512 | 0.132 / 0.207 |
+| 100,000 | Enter → next prompt | 0.299 / 0.352 | 0.191 / 0.236 |
+| 100,000 | First `:` → next prompt after Enter | 20.953 / 21.982 | 0.218 / 0.271 |
+| 100,000 | First `p` → visible history suggestion | 20.270 / 21.711 | 12.448 / 13.258 |
+
+Repeat with `python3 tools/bench_history.py /path/to/previous/tonari target/release/tonari`. Both macOS arm64 executables were 819,760 bytes.
+
 ## Interactive shell milestone / 対話シェル統合版
 
 Source tree `119e729ae01cef7d8d0883fdd92bb5fbd0bf447f`, measured on 2026-11-22. The harness is Git blob `1f7f36916222e276727e0cdd8802381c9e15fdf1`. Both arm64 release builds use Rust 1.96.1, native CPU tuning, `opt-level=s`, fat LTO, stripped symbols and one codegen unit. The Linux distribution build statically links musl 1.2.6; its host was Debian 13 userspace on a Linux 6.11.11 VM on Apple M1. The macOS run used the same M1 with macOS 27.2.1. All shells received `--noprofile --norc`, a temporary home, a fixed prompt, and used their normal interactive editor. Cases had five warm-ups and 300 measured samples per shell in rotating order, except nvm (100). Each time cell is **median / p95 in milliseconds**. Each ratio cell is **median / p95**, divided by the corresponding Bash statistic.

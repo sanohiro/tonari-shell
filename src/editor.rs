@@ -234,7 +234,9 @@ pub fn line(prompt: &str, history: &mut History, session: &mut Session) -> io::R
     let mut loaded_history = false;
     loop {
         let hint = if search.is_none() && cursor == text.len() {
-            history.suggestion(&text).unwrap_or_default()
+            history
+                .suggestion(&text, loaded_history)
+                .unwrap_or_default()
         } else {
             ""
         };
@@ -246,6 +248,21 @@ pub fn line(prompt: &str, history: &mut History, session: &mut Session) -> io::R
             prompt
         };
         screen.draw(visible_prompt, &text, cursor, hint)?;
+        if !loaded_history && !text.is_empty() && search.is_none() && cursor == text.len() {
+            let had_local_hint = !hint.is_empty();
+            loaded_history = history.refresh_unless(session, || {
+                ready(0, 0) || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+            });
+            if loaded_history && !had_local_hint {
+                if let Some(hint) = history.suggestion(&text, true) {
+                    screen.draw(visible_prompt, &text, cursor, hint)?;
+                }
+            }
+        }
+        if crate::interrupted() {
+            io::stderr().write_all(b"\r\n")?;
+            return Ok(Input::Cancel);
+        }
         let key = match byte() {
             Ok(Some(c)) => c,
             Ok(None) => return Ok(Input::End),
@@ -255,13 +272,9 @@ pub fn line(prompt: &str, history: &mut History, session: &mut Session) -> io::R
             }
             Err(e) => return Err(e),
         };
-        if !loaded_history && key >= 32 {
-            history.refresh(session);
-            loaded_history = true;
-        }
         let entering_search = key == 18 && search.is_none();
         if entering_search {
-            history.refresh(session);
+            loaded_history = history.refresh_unless(session, || false);
             search = Some((String::new(), 0, text.clone()));
         }
         if let Some((query, index, original)) = search.as_mut() {
@@ -397,7 +410,14 @@ pub fn line(prompt: &str, history: &mut History, session: &mut Session) -> io::R
                     b"[D" | b"OD" => cursor = previous(&text, cursor),
                     b"[C" | b"OC" => {
                         if cursor == text.len() {
-                            if let Some(s) = history.suggestion(&text) {
+                            if !text.is_empty()
+                                && !loaded_history
+                                && history.suggestion(&text, false).is_none()
+                            {
+                                // Right can arrive in the same batch as the prefix.
+                                loaded_history = history.refresh_unless(session, || false);
+                            }
+                            if let Some(s) = history.suggestion(&text, loaded_history) {
                                 text.push_str(s);
                                 cursor = text.len();
                             }

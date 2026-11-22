@@ -1,0 +1,112 @@
+"""Measure editor redraw and history suggestions, Tab, or Enter in fresh pseudo-terminals."""
+
+import argparse
+import math
+import os
+import pty
+import select
+import signal
+import statistics
+import tempfile
+import time
+from pathlib import Path
+
+
+PROMPT = b"tonari$ "
+NEW_PROMPT = b"\x1b[?2004h\r\x1b[J" + PROMPT
+
+
+def read_until(fd, marker):
+    output = bytearray()
+    deadline = time.monotonic() + 10
+    while marker not in output:
+        if not select.select([fd], [], [], max(0, deadline - time.monotonic()))[0]:
+            raise TimeoutError(f"waiting for {marker!r}: {output[-120:]!r}")
+        data = os.read(fd, 4096)
+        if not data:
+            raise EOFError(marker)
+        output.extend(data)
+
+
+def sample(shell, home, bindir, action, count):
+    pid, fd = pty.fork()
+    if pid == 0:
+        try:
+            os.chdir(home)
+            os.execve(shell, [shell, "--noprofile", "--norc"],
+                      {"HOME": str(home), "TERM": "xterm-256color",
+                       "PATH": str(bindir), "PS1": PROMPT.decode()})
+        finally:
+            os._exit(125)
+    try:
+        read_until(fd, NEW_PROMPT)
+        if action == "Hint":
+            start = time.perf_counter_ns()
+            os.write(fd, b"p")
+            read_until(fd, f"\x1b[2mrintf entry-{count - 1:06d}\x1b[0m".encode())
+            return [(time.perf_counter_ns() - start) / 1e6]
+        tab = action == "Tab"
+        first = b"z" if tab else b":"
+        start = time.perf_counter_ns()
+        os.write(fd, first)
+        read_until(fd, PROMPT + first)
+        second = time.perf_counter_ns()
+        os.write(fd, b"\t" if tab else b"\r")
+        read_until(fd, PROMPT + b"zcomplete " if tab else NEW_PROMPT)
+        end = time.perf_counter_ns()
+        return [(second - start) / 1e6, (end - second) / 1e6, (end - start) / 1e6]
+    finally:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        os.close(fd)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("shell", type=Path, nargs="+")
+    parser.add_argument("--runs", type=int, default=30)
+    parser.add_argument("--entries", type=int, nargs="+", default=[0, 1000, 100000])
+    args = parser.parse_args()
+    if args.runs < 1 or min(args.entries) < 0:
+        parser.error("expected positive runs and nonnegative entry counts")
+    shells = [str(p.resolve()) for p in args.shell]
+    with tempfile.TemporaryDirectory() as scratch:
+        root = Path(scratch)
+        bindir = root / "bin"
+        bindir.mkdir()
+        tool = bindir / "zcomplete"
+        tool.touch(mode=0o755)
+        jobs = []
+        for count in args.entries:
+            home = root / str(count)
+            journal = home / ".local/state/tonari/history"
+            journal.parent.mkdir(parents=True)
+            with journal.open("wb") as output:
+                for i in range(count):
+                    output.write(f"1\t1\t0\t/tmp\tprintf entry-{i:06d}\n".encode())
+            size = journal.stat().st_size
+            for action in (["Tab", "Enter", "Hint"] if count else ["Tab", "Enter"]):
+                for shell in shells:
+                    jobs.append((shell, count, action, home, journal, size))
+        samples = {job: [] for job in jobs}
+        for i in range(3 + args.runs):
+            shift = i % len(jobs)
+            for job in jobs[shift:] + jobs[:shift]:
+                shell, count, action, home, journal, size = job
+                elapsed = sample(shell, home, bindir, action, count)
+                if action == "Enter":
+                    os.truncate(journal, size)
+                if i >= 3:
+                    samples[job].append(elapsed)
+        print("entries action shell | first key | next key | both (median/p95 ms)")
+        print("Hint rows show the complete first key to visible suggestion interval.")
+        for (shell, count, action, *_), values in samples.items():
+            metrics = []
+            for times in zip(*values):
+                p95 = sorted(times)[math.ceil(0.95 * len(times)) - 1]
+                metrics.append(f"{statistics.median(times):.3f}/{p95:.3f}")
+            print(count, action, shell, "|", " | ".join(metrics))
+
+
+if __name__ == "__main__":
+    main()

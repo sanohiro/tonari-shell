@@ -1,5 +1,5 @@
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::PathBuf;
@@ -47,6 +47,9 @@ fn encode(value: &str, out: &mut String) {
 }
 
 fn decode(value: &str) -> Option<String> {
+    if !value.as_bytes().contains(&b'\\') {
+        return Some(value.to_owned());
+    }
     let mut chars = value.chars();
     let mut text = String::new();
     while let Some(c) = chars.next() {
@@ -147,24 +150,30 @@ impl History {
         let _ = journal.write_all(entry.as_bytes());
     }
 
-    pub fn refresh(&mut self, session: &Session) {
-        let Some(path) = file(session) else {
-            self.shared.clear();
-            self.journal = None;
-            self.offset = 0;
-            return;
-        };
-        let Ok(mut journal) = fs::File::open(path) else {
-            self.shared.clear();
-            self.journal = None;
-            self.offset = 0;
-            return;
-        };
-        if unsafe { libc::flock(journal.as_raw_fd(), libc::LOCK_SH) } != 0 {
-            return;
+    // Return false when input is waiting. The offset always points to the end
+    // of the last complete record, so the next idle interval can resume there.
+    pub fn refresh_unless(
+        &mut self,
+        session: &Session,
+        mut input_ready: impl FnMut() -> bool,
+    ) -> bool {
+        if input_ready() {
+            return false;
         }
-        let Ok(metadata) = journal.metadata() else {
-            return;
+        let journal = file(session).and_then(|path| {
+            let file = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(path)
+                .ok()?;
+            let metadata = file.metadata().ok()?;
+            metadata.is_file().then_some((file, metadata))
+        });
+        let Some((mut journal, metadata)) = journal else {
+            self.shared.clear();
+            self.journal = None;
+            self.offset = 0;
+            return true;
         };
         let identity = (metadata.dev(), metadata.ino());
         if self.journal != Some(identity) || metadata.len() < self.offset {
@@ -173,25 +182,57 @@ impl History {
             self.offset = 0;
         }
         if metadata.len() == self.offset || journal.seek(SeekFrom::Start(self.offset)).is_err() {
-            return;
+            return true;
         }
-        let mut reader = BufReader::new(journal);
-        let mut bytes = Vec::new();
+        // Writers append under an exclusive lock. Reading up to this snapshot
+        // and accepting only newline-terminated rows also works mid-append.
+        self.read_records(
+            BufReader::new(journal.take(metadata.len() - self.offset)),
+            input_ready,
+        )
+    }
+
+    fn read_records(
+        &mut self,
+        mut reader: impl BufRead,
+        mut input_ready: impl FnMut() -> bool,
+    ) -> bool {
+        let mut partial = Vec::new();
         loop {
-            bytes.clear();
-            if reader.read_until(b'\n', &mut bytes).is_err() || !bytes.ends_with(b"\n") {
-                return;
+            if input_ready() {
+                return false;
             }
-            self.offset += bytes.len() as u64;
-            let Ok(line) = std::str::from_utf8(&bytes[..bytes.len() - 1]) else {
-                continue;
+            let Ok(chunk) = reader.fill_buf() else {
+                return true;
             };
-            let mut fields = line.splitn(5, '\t');
-            if fields.next() == Some("1") {
-                if let Some(command) = fields.nth(3).and_then(decode) {
-                    self.shared.push(command);
-                }
+            if chunk.is_empty() {
+                return true;
             }
+            for piece in chunk.split_inclusive(|&b| b == b'\n') {
+                let Some(line) = piece.strip_suffix(b"\n") else {
+                    partial.extend_from_slice(piece);
+                    continue;
+                };
+                self.offset += (partial.len() + piece.len()) as u64;
+                let row = if partial.is_empty() {
+                    line
+                } else {
+                    partial.extend_from_slice(line);
+                    &partial
+                };
+                if let Ok(row) = std::str::from_utf8(row) {
+                    if let Some(command) = row
+                        .strip_prefix("1\t")
+                        .and_then(|fields| fields.splitn(4, '\t').nth(3))
+                        .and_then(decode)
+                    {
+                        self.shared.push(command);
+                    }
+                }
+                partial.clear();
+            }
+            let length = chunk.len();
+            reader.consume(length);
         }
     }
 
@@ -209,14 +250,43 @@ impl History {
             .map(String::as_str)
     }
 
-    pub fn suggestion(&self, prefix: &str) -> Option<&str> {
+    pub fn suggestion(&self, prefix: &str, shared: bool) -> Option<&str> {
         if prefix.is_empty() {
             return None;
         }
+        let journal = if shared { self.shared.as_slice() } else { &[] };
         self.local
             .iter()
             .rev()
-            .chain(self.shared.iter().rev())
+            .chain(journal.iter().rev())
             .find_map(|s| s.strip_prefix(prefix).filter(|s| !s.is_empty()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interrupted_read_restarts_at_the_first_unfinished_row() {
+        let data = b"1\t1\t0\t/a\tfirst\n1\t2\t0\t/b\tsecond\\nline\n1\t3\t0\t/c\tlast\n";
+        let mut history = History::default();
+        // Stop after two short buffers, in the middle of the second record.
+        let mut polls = 0;
+        let input = BufReader::with_capacity(10, data.as_slice());
+        assert!(!history.read_records(input, || {
+            polls += 1;
+            polls == 3
+        }));
+        assert_eq!(history.shared, ["first"]);
+        let offset = history.offset as usize;
+        // The writer has yet to append the final newline.
+        let partial = &data[offset..data.len() - 1];
+        assert!(history.read_records(BufReader::with_capacity(3, partial), || false));
+        assert_eq!(history.shared, ["first", "second\nline"]);
+        let rest = &data[history.offset as usize..];
+        assert!(history.read_records(rest, || false));
+        assert_eq!(history.shared, ["first", "second\nline", "last"]);
+        assert_eq!(history.offset, data.len() as u64);
     }
 }

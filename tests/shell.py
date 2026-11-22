@@ -1,6 +1,7 @@
 """End-to-end tests for Tonari's -c and terminal entry points."""
 
 import errno
+import fcntl
 import os
 import pty
 import resource
@@ -465,6 +466,28 @@ printf '%s\n' "$marker"
         # Remove a complete UTF-8 character and insert a replacement at the caret.
         enter(fd, 'echo 猫雪'.encode() + b'\x1b[D\x7f' + '犬'.encode() + b'\x1b[F > unicode')
         self.assertEqual((self.cwd / "unicode").read_text(), "犬雪\n")
+
+    def test_editor_reads_complete_history_rows_while_a_writer_appends(self):
+        journal = self.cwd / ".local/state/tonari/history"
+        journal.parent.mkdir(parents=True)
+        row = b"1\t1\t0\t/tmp\t"
+        journal.write_bytes((row + b"printf padding\n") * 700
+                            + row + b"echo shared > restored\n")
+        fd = self.terminal_session(editing=True)
+        with journal.open("ab", buffering=0) as writer:
+            fcntl.flock(writer, fcntl.LOCK_EX)
+            writer.write(row + b"echo shell > partial")
+            os.write(fd, b"echo sh")
+            # The newest complete row supplies the suffix while the next row is in flight.
+            self.read_until(fd, b"\x1b[2mared > restored")
+            writer.write(b"\n")
+        os.write(fd, b"\x1b[C\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "restored").read_text(), "shared\n")
+        # A fresh prompt picks up the completed append, even with Right already queued.
+        os.write(fd, b"echo she\x1b[C\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "partial").read_text(), "shell\n")
 
     def test_terminal(self):
         # Precreate count so ls has the same input regardless of stage launch order.
