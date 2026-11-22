@@ -133,11 +133,10 @@ impl Common {
         }
     }
 
-    fn of(words: &[String]) -> Option<Self> {
-        let (first, rest) = words.split_first()?;
-        let mut common = Self::new(first.clone());
-        for name in rest {
-            if common.could_change(name) && common.narrow(name, "").is_break() {
+    fn from_names<'a>(mut names: impl Iterator<Item = &'a str>, lower_bound: &str) -> Option<Self> {
+        let mut common = Self::new(names.next()?.to_owned());
+        for name in names {
+            if common.could_change(name) && common.narrow(name, lower_bound).is_break() {
                 break;
             }
         }
@@ -147,6 +146,7 @@ impl Common {
 
 pub enum Source {
     Words(Vec<String>),
+    LiteralWords(std::rc::Rc<crate::completion_spec::WordList>),
     Files,
     Directories,
     Commands,
@@ -155,7 +155,23 @@ pub enum Source {
 impl Source {
     fn matches(self, prefix: &str, session: &Session, list: bool) -> Option<(Common, Vec<String>)> {
         let words = match self {
-            Self::Words(words) => return Some((Common::of(&words)?, words)),
+            Self::Words(words) => {
+                return Some((
+                    Common::from_names(words.iter().map(String::as_str), "")?,
+                    words,
+                ));
+            }
+            Self::LiteralWords(source) => {
+                let ifs = session.get("IFS").unwrap_or_else(|| " \t\n".into());
+                let names = source.literal_matches(prefix, &ifs);
+                if !list {
+                    return Some((Common::from_names(names, prefix)?, Vec::new()));
+                }
+                let mut choices: Vec<_> = names.map(str::to_owned).collect();
+                choices.sort_unstable();
+                choices.dedup();
+                choices
+            }
             Self::Commands if list => command_names(prefix, session),
             Self::Commands => {
                 return Some((common_command(prefix, session)?, Vec::new()));
@@ -168,7 +184,13 @@ impl Source {
                 file_names(prefix, directories_only, true, session)
             }
         };
-        Some((Common::of(&words)?, words))
+        // These generators return sorted choices. The first and last determine
+        // the common prefix of the whole list, including multibyte boundaries.
+        let mut common = Common::new(words.first()?.clone());
+        if words.len() > 1 {
+            let _ = common.narrow(words.last()?, prefix);
+        }
+        Some((common, words))
     }
 }
 
@@ -394,9 +416,9 @@ mod tests {
 
     #[test]
     fn common_prefix_respects_utf8_and_duplicate_names() {
-        let same = Common::of(&["雪".into(), "雪".into()]).unwrap();
+        let same = Common::from_names(["雪", "雪"].into_iter(), "").unwrap();
         assert!(same.unique);
-        let split = Common::of(&["x雪".into(), "x雲".into()]).unwrap();
+        let split = Common::from_names(["x雪", "x雲"].into_iter(), "").unwrap();
         assert!(!split.unique);
         assert_eq!(split.text, "x");
     }

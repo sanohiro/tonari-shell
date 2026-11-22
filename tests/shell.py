@@ -349,6 +349,42 @@ class ShellTests(unittest.TestCase):
             if shell == TONARI:
                 self.assertEqual(proc.stderr, b"")
 
+    def test_single_star_literal_edges(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        for name in ["aba", "ababa", "ab🌱ba", ".log", "雪🌱.log", "a*b"]:
+            (self.cwd / name).touch()
+        self.compare('for v in aba ababa ab🌱ba; do [[ $v == ab*ba ]]; echo "$?"; done; '
+                     'case 雪🌱.log in 雪*.log) echo yes ;; esac; '
+                     r'[[ "a*b" == a\*b ]] || exit 1; set -- ab*ba; echo "$#"; '
+                     'set -- *.log; echo "$#:$1"; shopt -s dotglob; set -- *.log; echo "$#"',
+                     0, "1\n0\n0\nyes\n2\n1:雪🌱.log\n2\n".encode())
+
+    def test_case_patterns_are_expanded_only_when_reached(self):
+        self.compare("""classify() {
+            case "$1" in
+                'a*b') echo literal ;;
+                'a*'*) echo mixed ;;
+                "$pattern") echo exact ;;
+                $pattern) echo glob ;;
+                "$(echo visited >&2; echo unreachable)") exit 9 ;;
+            esac
+        }
+        classify 'a*b'; classify 'a*tail'
+        pattern='*.rs'; classify '*.rs'; classify main.rs
+        pattern='*.py'; classify main.py""", 0, b"literal\nmixed\nexact\nglob\nglob\n")
+
+    def test_glob_collation_uses_the_selected_locale(self):
+        for name in ["A1", "a9", "B2", "b8", "z", "éé", "雪"]:
+            (self.cwd / name).touch()
+        utf8 = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        source = 'printf "<%s>" *'
+        for all_, collate, lang in [("C", utf8, utf8), ("", "POSIX", utf8),
+                                    ("", "", "C"), (utf8, "C", "C")]:
+            with self.subTest(all_=all_, collate=collate, lang=lang):
+                self.env.update(LC_ALL=all_, LC_COLLATE=collate, LANG=lang)
+                expected = self.command(BASH, source).stdout
+                self.compare(source, 0, expected)
+
     def test_glob_options_and_recursive_symlinks(self):
         for path in ["a/top.txt", "a/.hidden/inner.txt", "a/sub/leaf.txt", ".root.txt", "name.txt"]:
             dest = self.cwd / path
@@ -569,6 +605,9 @@ printf '%s\n' "$marker"
         send(clear + b"complete -d -o nospace -o default demo\r", b"\x1b[?2004h")
         send(b"demo safe\tmore", PROMPT + b"demo safe\\ path/more")
         send(clear + b"demo item-at\targ", PROMPT + b"demo item-at arg")
+        send(clear + b"complete -W 'start stop start' demo\r", b"\x1b[?2004h")
+        send(b"demo s\t", PROMPT + b"demo st")
+        send(b"\t", b"start  stop")
 
     def test_editor_paste_suggestions_completion_and_shared_history(self):
         self.env["HISTCONTROL"] = "ignoreboth"

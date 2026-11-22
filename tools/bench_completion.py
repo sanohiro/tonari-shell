@@ -20,7 +20,7 @@ def timed_keys(fd, keys, marker):
     return (time.perf_counter_ns() - start) / 1e6
 
 
-def completion(shell, home, bindir, rc, line):
+def completion(shell, home, bindir, rc, line, suffix=b"-0"):
     with terminal(shell, home, bindir, rc, prompt=PROMPT) as fd:
         os.write(fd, line)
         read_until(fd, line)
@@ -28,7 +28,7 @@ def completion(shell, home, bindir, rc, line):
         # Readline and Tonari use different incremental redraws. Force a full
         # redraw outside the timed interval to verify that Tab preceded '@'.
         os.write(fd, b"\x0c")
-        read_until(fd, PROMPT + line + b"-0@")
+        read_until(fd, PROMPT + line + suffix + b"@")
         return elapsed
 
 
@@ -81,7 +81,9 @@ def main():
     parser.add_argument("shell", nargs="+", type=Path, help="Tonari executable(s)")
     parser.add_argument("--bash", type=Path, help="Bash reference for the Tab cases")
     parser.add_argument("--runs", type=int, default=30)
-    parser.add_argument("--listing", action="store_true", help="measure the second Tab and full listing")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--word-list", action="store_true", help="measure a registered 10,000-word completion")
+    mode.add_argument("--listing", action="store_true", help="measure the second Tab and full listing")
     args = parser.parse_args()
     if args.runs < 1:
         parser.error("runs must be positive")
@@ -93,9 +95,15 @@ def main():
         home = Path(scratch)
         bindir = home / "files"
         bindir.mkdir()
-        for i in range(10_000):
-            (bindir / f"item-{i:05d}.dat").touch(mode=0o755)
-        if args.listing:
+        if not args.word_list:
+            for i in range(10_000):
+                (bindir / f"item-{i:05d}.dat").touch(mode=0o755)
+        if args.word_list:
+            words = " ".join(f"option-{i:05d}-flag" for i in range(10_000))
+            rc = home / "rc"
+            rc.write_text(f"PS1='{PROMPT.decode()}'\nchoices='{words}'\n"
+                          'complete -W "$choices" fixed\ncomplete -W \'$choices\' dynamic\n')
+        elif args.listing:
             expected = {p.name.encode() for p in bindir.iterdir()}
             few = home / "few"
             few.mkdir()
@@ -123,6 +131,14 @@ def main():
             shift = i % len(shells)
             for shell in shells[shift:] + shells[:shift]:
                 metrics = results[shell] if i >= 3 else defaultdict(list)
+                if args.word_list:
+                    for label, line, suffix in [
+                        ("static, all", b"fixed option", b"-0"),
+                        ("static, unique", b"fixed option-09876", b"-flag "),
+                        ("dynamic, unique", b"dynamic option-09876", b"-flag "),
+                    ]:
+                        metrics[label].append(completion(shell, home, bindir, rc, line, suffix))
+                    continue
                 if args.listing:
                     for folder, names, prefix in cases:
                         elapsed = listing(shell, folder, bash, names, prefix)

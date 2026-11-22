@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
 use std::path::Path;
+use std::rc::Rc;
 
 use crate::{Session, complete, execute, parser, pattern};
 
@@ -42,13 +43,69 @@ pub struct Registry {
 struct Spec {
     actions: Vec<String>,
     options: BTreeSet<String>,
-    words: Option<String>,
+    words: Option<Rc<WordList>>,
     glob: Option<String>,
     function: Option<String>,
     command: Option<String>,
     prefix: Option<String>,
     suffix: Option<String>,
     filter: Option<String>,
+}
+
+#[derive(PartialEq, Eq)]
+pub(crate) struct WordList {
+    source: String,
+    literal: bool,
+}
+
+impl WordList {
+    fn new(source: String) -> Self {
+        let literal = !source.contains(['\'', '"', '\\', '$', '`', '~', '{', '}']);
+        Self { source, literal }
+    }
+
+    pub(crate) fn literal_matches<'a>(
+        &'a self,
+        prefix: &'a str,
+        ifs: &'a str,
+    ) -> impl Iterator<Item = &'a str> {
+        let default_ifs = ifs == " \t\n";
+        self.source
+            .split(move |c| {
+                if default_ifs {
+                    matches!(c, ' ' | '\t' | '\n')
+                } else {
+                    ifs.contains(c)
+                }
+            })
+            .filter(move |word| !word.is_empty() && word.starts_with(prefix))
+    }
+
+    fn append_matches(
+        &self,
+        out: &mut Vec<String>,
+        prefix: &str,
+        last: u8,
+        session: &mut Session,
+    ) -> Result<(), crate::expansion::Error> {
+        let ifs = session.get("IFS").unwrap_or_else(|| " \t\n".into());
+        if self.literal {
+            out.extend(self.literal_matches(prefix, &ifs).map(str::to_owned));
+        } else {
+            let items = parser::completion_words::parse(&self.source, &ifs)
+                .map_err(|_| "invalid completion word list")?;
+            let captured = std::cell::Cell::new(None);
+            let mut env = crate::expansion::Expansion::new(session, last, &captured);
+            for word in items {
+                out.extend(
+                    env.fields_with_glob(word, false)?
+                        .into_iter()
+                        .filter(|w| w.starts_with(prefix)),
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -169,7 +226,7 @@ impl Request {
                         };
                         result.spec.actions.push(action.to_owned());
                     }
-                    'W' => result.spec.words = Some(value()?),
+                    'W' => result.spec.words = Some(Rc::new(WordList::new(value()?))),
                     'G' => result.spec.glob = Some(value()?),
                     'P' => result.spec.prefix = Some(value()?),
                     'S' => result.spec.suffix = Some(value()?),
@@ -194,11 +251,7 @@ impl Request {
 impl Spec {
     fn native_generator(&self) -> Option<Generated> {
         // Shell code, filters and affixes can change the words or their order.
-        let [action] = self.actions.as_slice() else {
-            return None;
-        };
-        if self.words.is_some()
-            || self.glob.is_some()
+        if self.glob.is_some()
             || self.function.is_some()
             || self.command.is_some()
             || self.prefix.is_some()
@@ -207,16 +260,18 @@ impl Spec {
         {
             return None;
         }
-        let source = match action.as_str() {
-            "file" => complete::Source::Files,
-            "directory" => complete::Source::Directories,
-            "command"
-                if !["filenames", "dirnames", "plusdirs"]
-                    .iter()
-                    .any(|o| self.options.contains(*o)) =>
+        let file_options = ["filenames", "dirnames", "plusdirs"]
+            .iter()
+            .any(|o| self.options.contains(*o));
+        let source = match (self.actions.as_slice(), self.words.as_ref()) {
+            ([], Some(list))
+                if list.literal && !file_options && !self.options.contains("nosort") =>
             {
-                complete::Source::Commands
+                complete::Source::LiteralWords(Rc::clone(list))
             }
+            ([action], None) if action == "file" => complete::Source::Files,
+            ([action], None) if action == "directory" => complete::Source::Directories,
+            ([action], None) if action == "command" && !file_options => complete::Source::Commands,
             _ => return None,
         };
         Some(Generated {
@@ -236,13 +291,13 @@ impl Spec {
             line.push_str(&format!(" -A {action}"));
         }
         for (flag, arg) in [
-            ('G', &self.glob),
-            ('W', &self.words),
-            ('F', &self.function),
-            ('C', &self.command),
-            ('P', &self.prefix),
-            ('S', &self.suffix),
-            ('X', &self.filter),
+            ('G', self.glob.as_deref()),
+            ('W', self.words.as_ref().map(|list| list.source.as_str())),
+            ('F', self.function.as_deref()),
+            ('C', self.command.as_deref()),
+            ('P', self.prefix.as_deref()),
+            ('S', self.suffix.as_deref()),
+            ('X', self.filter.as_deref()),
         ] {
             if let Some(arg) = arg {
                 line.push_str(&format!(" -{flag} {}", shell_quote(arg)));
@@ -333,18 +388,7 @@ impl Spec {
             words.extend(pattern::pathnames(glob, session.shopt.glob));
         }
         if let Some(list) = &self.words {
-            let ifs = session.get("IFS").unwrap_or_else(|| " \t\n".into());
-            let items = parser::completion_words::parse(list, &ifs)
-                .map_err(|_| "invalid completion word list")?;
-            let captured = std::cell::Cell::new(None);
-            let mut env = crate::expansion::Expansion::new(session, last, &captured);
-            for word in items {
-                words.extend(
-                    env.fields_with_glob(word, false)?
-                        .into_iter()
-                        .filter(|w| w.starts_with(prefix)),
-                );
-            }
+            list.append_matches(&mut words, prefix, last, session)?;
         }
         if let Some(func) = &self.function {
             if !session.functions.contains_key(func) {
@@ -706,6 +750,40 @@ mod tests {
         let mut out = Vec::new();
         let status = apply(request, name, session, 0, &mut out).unwrap();
         (status, String::from_utf8(out).unwrap())
+    }
+
+    #[test]
+    fn fixed_word_lists_read_current_ifs_and_keep_listing_order() {
+        let mut session = Session::default();
+        let words = "seat😀sea😀seat😀雪";
+        invoke(&mut session, "complete", &["-W", words, "demo"]);
+        session.assign("IFS", "😀");
+        let line = "demo se";
+        let first = complete::at(line, line.len(), &mut session, false).unwrap();
+        assert_eq!(first.replacement, "sea");
+        assert!(first.choices.is_empty());
+        let list = complete::at(line, line.len(), &mut session, true).unwrap();
+        assert_eq!(list.choices, ["sea", "seat"]);
+        invoke(&mut session, "compopt", &["-o", "nosort", "demo"]);
+        let list = complete::at(line, line.len(), &mut session, true).unwrap();
+        assert_eq!(list.choices, ["seat", "sea"]);
+        invoke(&mut session, "compopt", &["+o", "nosort", "demo"]);
+        session.assign("IFS", "");
+        let list = complete::at(line, line.len(), &mut session, true).unwrap();
+        assert_eq!(list.choices, [words]);
+        session.assign("IFS", " ");
+        invoke(&mut session, "complete", &["-W", "same same", "demo"]);
+        let line = "demo sa";
+        assert_eq!(
+            complete::at(line, line.len(), &mut session, false)
+                .unwrap()
+                .replacement,
+            "same "
+        );
+        assert_eq!(
+            invoke(&mut session, "compgen", &["-W", "a a ab", "a"]).1,
+            "a\na\nab\n"
+        );
     }
 
     #[test]

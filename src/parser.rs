@@ -1,5 +1,6 @@
 mod aliases;
 mod array;
+use crate::pattern::Matcher;
 use crate::test_expression::Expr;
 pub use array::Assignment;
 mod ansi;
@@ -10,6 +11,7 @@ mod modifier;
 pub use crate::word::{Word, is_identifier};
 pub(crate) use here_doc::{HereDocHint, expansion_string};
 use lexer::{LexWord, Token, descriptor, lex};
+use std::rc::Rc;
 
 // Keep text supplied by prompt escapes (including the working directory) in
 // literal word segments. It must never be parsed as shell code.
@@ -104,6 +106,31 @@ pub struct Statement {
     pub command: Command,
 }
 
+#[derive(Debug)]
+pub enum CasePattern {
+    Fixed(Matcher<String>),
+    Dynamic(Word),
+}
+
+impl CasePattern {
+    fn new(word: Word) -> Self {
+        use crate::word::Part;
+        match word {
+            Word::Literal(text) => Self::Fixed(Matcher::Literal(text)),
+            Word::Expanded(ref parts)
+                if parts
+                    .iter()
+                    .all(|p| matches!(p, Part::Text(_) | Part::Pattern(_))) =>
+            {
+                Self::Fixed(Matcher::new(word.pattern(&|_| None, &[])))
+            }
+            word => Self::Dynamic(word),
+        }
+    }
+}
+
+pub type CaseArm = (Vec<CasePattern>, Vec<Statement>);
+
 #[derive(Debug, Clone)]
 pub enum Command {
     Pipeline(Pipeline<Word>),
@@ -120,7 +147,7 @@ pub enum Command {
     Background(Vec<Statement>),
     Case {
         word: Word,
-        arms: Vec<(Vec<Word>, Vec<Statement>)>,
+        arms: Rc<Vec<CaseArm>>,
     },
     If {
         branches: Vec<(Vec<Statement>, Vec<Statement>)>,
@@ -564,7 +591,7 @@ impl Reader {
             let mut patterns = Vec::new();
             loop {
                 match self.tokens.next() {
-                    Some(Token::Word(word)) => patterns.push(word.word),
+                    Some(Token::Word(word)) => patterns.push(CasePattern::new(word.word)),
                     None => return Err(Error::Incomplete("unfinished case command")),
                     _ => return Err(Error::Invalid("expected a case pattern")),
                 }
@@ -583,7 +610,10 @@ impl Reader {
             self.newlines();
         }
         self.expect("esac")?;
-        Ok(Command::Case { word, arms })
+        Ok(Command::Case {
+            word,
+            arms: Rc::new(arms),
+        })
     }
 
     fn if_clause(&mut self) -> Result<Command, Error> {

@@ -16,6 +16,43 @@ The default run includes a session workload covering assignment, export, paramet
 
 既定の計測には、代入・export・変数展開・`cd`・`pwd`・`&&`・リダイレクト・`unset` を同じシェルで実行する項目が含まれます。算術ループ1,000回と、一つのシェルから外部プログラム16個を順に起動する項目もあります。後者では同じプログラム16個を Python 親プロセスから直接 `posix_spawn` し、その都度終了を待つ条件も交互に計測します。標準入出力は計時前に用意し、各子プロセスに継承させます。セッション機能の実装前との比較には `--case core` を使います。プロンプト表示の主指標は疑似端末での起動全体です。子プロセスの exec 直前にも時刻を記録し、同じ測定サンプルのうち、端末の準備と fork の後に経過した時間も表示します。
 
+<a id="completion-and-case"></a>
+
+## Registered completion, case and globs / 登録した補完・case・ファイル名展開
+
+On 2026-11-22 we compared `0a3a293`, the updated native release, and GNU Bash 5.2.37 on an M1 Mac (macOS 27.2.1) and Debian 13 arm64 in a Linux VM on the same machine. Each OS used local binaries and fixtures, warm caches, and rotating shell order. All times below are **median / p95 in milliseconds**. The Mac binary grew from 836,336 to 836,368 bytes. The Linux static PIE grew from 987,496 to 1,006,088 bytes. The Bash binaries measured 1,208,904 and 1,412,096 bytes respectively.
+
+同じ M1 の macOS と Debian 13 arm64 VM で、旧 Tonari・新 Tonari・Bash 5.2.37 を交互に測定した。実行ファイルと入力ファイルは各 OS のローカルディスクに置き、キャッシュを温めた。表は中央値 / p95（ms）。旧版とのサイズ差は Mac が +32 バイト、静的リンクの Linux 版が +18,592 バイト。
+
+| Workload / 処理 | Mac previous | Mac Tonari | Mac Bash | Debian previous | Debian Tonari | Debian Bash |
+|---|---:|---:|---:|---:|---:|---:|
+| Tab, 10,000 fixed words, all match | 2.370 / 3.378 | 0.321 / 0.592 | 26.589 / 30.556 | 2.692 / 4.407 | 0.373 / 0.421 | 270.014 / 280.553 |
+| Tab, 10,000 fixed words, one match | 2.229 / 2.551 | 0.231 / 0.271 | 26.214 / 28.864 | 2.279 / 3.540 | 0.319 / 0.403 | 268.520 / 279.456 |
+| Tab, 10,000 words in a variable, one match | 0.964 / 1.259 | 1.005 / 1.490 | 2.563 / 2.859 | 1.235 / 1.726 | 1.237 / 1.588 | 3.779 / 4.911 |
+| 3,000 `case` decisions, literal prefix and suffix | 8.599 / 10.305 | 4.673 / 6.365 | 7.821 / 9.563 | 6.853 / 8.746 | 4.243 / 5.434 | 10.350 / 13.731 |
+| 3,000 `case` decisions, `[0-9]` and wildcard | 7.029 / 9.938 | 5.167 / 7.492 | 7.240 / 10.112 | 6.985 / 9.759 | 5.302 / 7.684 | 9.548 / 11.058 |
+| 30 × `set -- fixtures/*.txt`, 512 files | 14.455 / 18.523 | 11.115 / 12.950 | 1206.226 / 1517.805 | 8.577 / 11.883 | 6.882 / 8.913 | 9.590 / 11.384 |
+| Shell launch through exit, `-c ':'` | 2.854 / 4.030 | 2.832 / 5.511 | 6.058 / 10.257 | 0.208 / 0.422 | 0.207 / 0.334 | 0.469 / 1.039 |
+| PTY launch through first prompt | 4.581 / 5.362 | 4.505 / 5.189 | 7.714 / 8.688 | 0.608 / 0.990 | 0.585 / 1.771 | 1.034 / 2.245 |
+
+The three Tab rows use a fresh interactive shell and a list named `option-00000-flag` through `option-09999-flag`. After the rc file registers the list, the driver sends the prefix and waits for its echo. It then times Tab plus a following `@` until that character comes back through the PTY. A separate redraw verifies the entire completed line. Each case has three warm-ups and 40 timed samples per shell. The variable control registers the literal expression `$choices`, expanded on Tab. Its median was within 0.05 ms of the previous build on both systems. [Completion driver](../tools/bench_completion.py)
+
+補完は各回、新しい対話シェルの設定ファイルで1万件を登録してから入力した。接頭辞が表示されたところで Tab と続く `@` を送り、PTY に `@` が戻るまでを測った。計時後に行全体を再描画して、補完結果と後続の入力を照合した。ウォームアップ3回、計測40回。変数を使う対照では `$choices` という式を登録して Tab ごとに展開する。この対照の中央値は両 OS とも旧版との差が 0.05 ms 未満だった。
+
+The script rows use `LC_ALL=C`, five warm-ups and 35 timed samples. The driver sources each script after the shell signals readiness and checks stdout, stderr and exit status. The literal-edge `case` workload tries two nonmatching patterns before the matching `src/*.rs`. Its Tonari/Bash median ratio was 0.597 on Mac and 0.410 on Debian. The Mac character-class case (0.714) and Debian pathname expansion (0.718) exceeded the two-thirds target. Startup rows use five warm-ups, 200 runs and `--noprofile --norc` for every participant. The Debian run also timed the same revision linked with GNU ld; its startup and first-prompt times were 0.207 / 0.320 and 0.578 / 1.088 ms respectively. [Script driver](../tools/bench_scripts.py) · [Startup driver](../tools/bench.py)
+
+スクリプトは `LC_ALL=C`、ウォームアップ5回、計測35回。起動済みのシェルにスクリプトを読ませ、毎回出力・診断・終了値を検証した。固定の前後を持つ `case` は、先に2個の不一致を判定してから `src/*.rs` に一致する。Bash に対する中央値の比は Mac で 0.597、Debian で 0.410。Mac の文字クラス付き `case`（0.714）と Debian のファイル名展開（0.718）には 2/3 の目標まで差がある。起動の2項目は全シェルに `--noprofile --norc` を渡し、ウォームアップ5回、計測200回。Debian では同じソースを GNU ld でもリンクし、起動が 0.207 / 0.320 ms、最初のプロンプトまでが 0.578 / 1.088 ms だった。
+
+In a second batch of 300 samples the Mac `-c ':'` p95 was 3.161 ms (previous 3.206), and the Debian first-prompt p95 was 0.815 ms (previous 0.880, same-source GNU ld 0.809). Neither higher p95 from the first batch repeated. The Debian first-prompt medians were 0.588, 0.585 and 0.596 ms respectively.
+
+起動をさらに300回測ると、Mac の `-c ':'` の p95 は 3.161 ms（旧版 3.206）、Debian の最初のプロンプトの p95 は 0.815 ms（旧版 0.880、同じソースの GNU ld 版 0.809）だった。最初の計測で見られた両項目の p95 の増加は再現しなかった。Debian のプロンプトまでの中央値は順に 0.588、0.585、0.596 ms。
+
+```sh
+python3 tools/bench_completion.py /path/to/tonari /path/to/previous --bash /path/to/bash --word-list --runs 40
+python3 tools/bench_scripts.py /path/to/tonari --previous /path/to/previous --bash /path/to/bash --timing started --case case-edges --case case-classes --case glob --runs 35
+python3 tools/bench.py /path/to/tonari --compare-shell Previous /path/to/previous --bash /path/to/bash --case startup --case prompt --runs 200
+```
+
 <a id="align-experiments"></a>
 
 ## Parent memory, pipes and delimiter search / 親シェルのメモリ・パイプ・区切り検索
@@ -457,14 +494,15 @@ The shell now executes `true` and `false` internally. File redirections on built
 
 ## Linux arm64 static PIE
 
-The static build links musl into a position-independent executable. It runs on the Debian and Ubuntu arm64 test systems without a separate musl installation. The tested compiler is the native Alpine Rust 1.96.1 package (`aarch64-alpine-linux-musl`) with musl development files and a C linker installed. Build on the target CPU when using `target-cpu=native`.
+The static build links musl into a position-independent executable. It runs on the Debian and Ubuntu arm64 test systems without a separate musl installation. The tested build uses Alpine's native Rust 1.96.1 package (`aarch64-alpine-linux-musl`), musl development files, a C compiler driver and LLD 22.1.3. Build on the target CPU when using `target-cpu=native`. LLD packs the segments with 64 KiB load alignment. [File sizes and startup timings](#completion-and-case)
 
-静的リンク版は musl を実行ファイルに組み込んだ PIE（位置独立実行形式）です。検証した Debian と Ubuntu の arm64 環境では musl の追加インストールなしで動きます。下記は Alpine のネイティブ Rust パッケージ 1.96.1（`aarch64-alpine-linux-musl`）、musl の開発ファイル、C リンカーを使ったビルド手順です。`target-cpu=native` はビルドした CPU 向けの設定です。
+静的リンク版は musl を実行ファイルに組み込んだ PIE（位置独立実行形式）です。検証した Debian と Ubuntu の arm64 環境では musl の追加インストールなしで動きます。下記は Alpine のネイティブ Rust パッケージ 1.96.1（`aarch64-alpine-linux-musl`）、musl の開発ファイル、C コンパイラドライバ、LLD 22.1.3 を使ったビルド手順です。`target-cpu=native` はビルドした CPU 向けの設定です。LLD はロード時に 64 KiB 境界で整列できるよう、ファイル内に各セグメントを配置します。
 
 ```sh
 CARGO_PROFILE_RELEASE_OPT_LEVEL=s \
 RUSTFLAGS='-C target-cpu=native -C target-feature=+crt-static' \
-cargo rustc --locked --release --target aarch64-alpine-linux-musl -- -C link-arg=-Wl,-z,pack-relative-relocs
+cargo rustc --locked --release --target aarch64-alpine-linux-musl -- \
+  -C link-arg=-fuse-ld=lld -C link-arg=-Wl,-z,pack-relative-relocs,-z,max-page-size=65536
 ```
 
 ## First prototype / 初回試作

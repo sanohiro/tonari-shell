@@ -5,30 +5,96 @@ use std::sync::OnceLock;
 // libc starts in the C locale. Load the caller's character and collation
 // settings only when a pattern needs them, and restore the thread afterwards.
 pub(crate) fn localized<T>(work: impl FnOnce() -> T) -> T {
-    static LOCALE: OnceLock<usize> = OnceLock::new();
-    let locale = *LOCALE.get_or_init(|| unsafe {
-        libc::newlocale(
-            libc::LC_CTYPE_MASK | libc::LC_COLLATE_MASK,
-            c"".as_ptr(),
-            std::ptr::null_mut(),
-        ) as usize
-    }) as libc::locale_t;
+    with_locale(|_| work())
+}
+
+fn with_locale<T>(work: impl FnOnce(bool) -> T) -> T {
+    static LOCALE: OnceLock<(usize, bool)> = OnceLock::new();
+    let &(locale, byte_order) = LOCALE.get_or_init(|| {
+        let locale = unsafe {
+            libc::newlocale(
+                libc::LC_CTYPE_MASK | libc::LC_COLLATE_MASK,
+                c"".as_ptr(),
+                std::ptr::null_mut(),
+            )
+        };
+        let byte_order = ["LC_ALL", "LC_COLLATE", "LANG"]
+            .iter()
+            .find_map(|name| std::env::var_os(name).filter(|s| !s.is_empty()))
+            .is_some_and(|name| name == "C" || name == "POSIX");
+        (locale as usize, byte_order)
+    });
+    let locale = locale as libc::locale_t;
     if locale.is_null() {
-        return work();
+        return work(false);
     }
     let previous = unsafe { libc::uselocale(locale) };
-    let result = work();
+    let result = work(!previous.is_null() && byte_order);
     if !previous.is_null() {
         unsafe { libc::uselocale(previous) };
     }
     result
 }
 
+// A single unescaped star can consume precisely the gap between two literal
+// edges. Keep all other shell pattern syntax with the locale-aware matcher.
+#[derive(Debug)]
+pub(crate) enum Matcher<T> {
+    Literal(T),
+    Star(T, usize),
+    Native(CString),
+    Invalid,
+}
+
+impl<T: AsRef<str>> Matcher<T> {
+    pub(crate) fn new(pattern: T) -> Self {
+        let text = pattern.as_ref();
+        if !text.bytes().any(|b| matches!(b, b'?' | b'[' | b'\\' | 0)) {
+            match text.split_once('*') {
+                None => return Self::Literal(pattern),
+                Some((left, right)) if !right.contains('*') => {
+                    let star = left.len();
+                    return Self::Star(pattern, star);
+                }
+                _ => {}
+            }
+        }
+        CString::new(text).map_or(Self::Invalid, Self::Native)
+    }
+
+    // Call with the matching locale active when the pattern is Native.
+    fn accepts(&self, value: &str, period: bool) -> bool {
+        match self {
+            Self::Literal(literal) => value == literal.as_ref(),
+            Self::Star(text, star) => {
+                let (left, tail) = text.as_ref().split_at(*star);
+                !(period && left.is_empty() && value.starts_with('.'))
+                    && value
+                        .strip_prefix(left)
+                        .is_some_and(|rest| rest.ends_with(&tail[1..]))
+            }
+            Self::Native(pattern) => CString::new(value).is_ok_and(|name| unsafe {
+                libc::fnmatch(
+                    pattern.as_ptr(),
+                    name.as_ptr(),
+                    if period { libc::FNM_PERIOD } else { 0 },
+                ) == 0
+            }),
+            Self::Invalid => false,
+        }
+    }
+
+    pub(crate) fn matches(&self, value: &str) -> bool {
+        if matches!(self, Self::Native(_)) {
+            localized(|| self.accepts(value, false))
+        } else {
+            !value.contains('\0') && self.accepts(value, false)
+        }
+    }
+}
+
 pub fn matches(value: &str, pattern: &str) -> bool {
-    let (Ok(value), Ok(pattern)) = (CString::new(value), CString::new(pattern)) else {
-        return false;
-    };
-    localized(|| unsafe { libc::fnmatch(pattern.as_ptr(), value.as_ptr(), 0) == 0 })
+    Matcher::new(pattern).matches(value)
 }
 
 pub fn trim(mut value: String, pattern: &str, prefix: bool, longest: bool) -> String {
@@ -122,7 +188,7 @@ pub struct GlobOptions {
 
 pub(crate) fn pathnames(pattern: &str, options: GlobOptions) -> Vec<String> {
     let mut names = Vec::new();
-    localized(|| paths(pattern, options, &mut names));
+    with_locale(|byte_order| paths(pattern, options, &mut names, byte_order));
     names
 }
 
@@ -141,7 +207,7 @@ pub(crate) fn unescape(component: &str) -> String {
 
 // Walk by component so POSIX character classes have the same fnmatch
 // semantics in argv and in case patterns, including on Darwin.
-fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>) {
+fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>, byte_order: bool) {
     let mut paths = vec![String::new()];
     let mut rest = pattern;
     let mut known_existing = false;
@@ -203,7 +269,7 @@ fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>) {
             }
             continue;
         }
-        let Ok(part) = CString::new(part) else { return };
+        let matcher = Matcher::new(part);
         let mut matched = Vec::new();
         for prefix in paths {
             let dir = if prefix.is_empty() { "." } else { &prefix };
@@ -214,21 +280,16 @@ fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>) {
                 let Ok(name) = entry.file_name().into_string() else {
                     continue;
                 };
-                let Ok(name) = CString::new(name) else {
-                    continue;
-                };
-                if unsafe {
-                    libc::fnmatch(
-                        part.as_ptr(),
-                        name.as_ptr(),
-                        if options.dotglob { 0 } else { libc::FNM_PERIOD },
-                    )
-                } == 0
-                {
+                if matcher.accepts(&name, !options.dotglob) {
                     // read_dir omits "." and "..", matching Bash 5.2+ globskipdots.
-                    let mut path = String::with_capacity(prefix.len() + name.as_bytes().len());
-                    path.push_str(&prefix);
-                    path.push_str(name.to_str().unwrap());
+                    let path = if prefix.is_empty() {
+                        name
+                    } else {
+                        let mut path = String::with_capacity(prefix.len() + name.len());
+                        path.push_str(&prefix);
+                        path.push_str(&name);
+                        path
+                    };
                     matched.push(path);
                 }
             }
@@ -241,9 +302,16 @@ fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>) {
         known_existing = true;
     }
     // A literal suffix must exist. A trailing slash asks the OS for a directory.
+    if !known_existing {
+        paths.retain(|path| fs::symlink_metadata(path).is_ok());
+    }
+    if byte_order {
+        paths.sort_unstable();
+        fields.append(&mut paths);
+        return;
+    }
     let mut ordered: Vec<_> = paths
         .into_iter()
-        .filter(|path| known_existing || fs::symlink_metadata(path).is_ok())
         .filter_map(|path| CString::new(path).ok())
         .collect();
     ordered.sort_unstable_by(|a, b| {
@@ -330,7 +398,7 @@ impl Field {
     pub fn finish(self, fields: &mut Vec<String>, globbing: Option<GlobOptions>) {
         if let Some((options, pattern)) = globbing.zip(self.pattern).filter(|(_, p)| has_magic(p)) {
             let count = fields.len();
-            localized(|| paths(&pattern, options, fields));
+            with_locale(|byte_order| paths(&pattern, options, fields, byte_order));
             if fields.len() > count || options.nullglob {
                 return;
             }
@@ -342,6 +410,58 @@ impl Field {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn literal_and_single_star_agree_with_native_matching() {
+        let values = [
+            "",
+            "a",
+            "aba",
+            "ababa",
+            ".env",
+            "a.b",
+            "雪🌱é",
+            "雪🌱e\u{301}",
+            "a/b",
+            "a*b",
+        ];
+        localized(|| {
+            for source in [
+                "",
+                "*",
+                "aba",
+                "ab*ba",
+                "a*",
+                "*a",
+                "*env",
+                ".*",
+                "a*b",
+                "雪*é",
+                "雪*e\u{301}",
+                "?*",
+                "a**b",
+                r"a\*b",
+                "[!a]*",
+                ".??*",
+            ] {
+                let matcher = Matcher::new(source);
+                let native = CString::new(source).unwrap();
+                for value in values {
+                    let name = CString::new(value).unwrap();
+                    for period in [false, true] {
+                        let flags = if period { libc::FNM_PERIOD } else { 0 };
+                        let expected =
+                            unsafe { libc::fnmatch(native.as_ptr(), name.as_ptr(), flags) == 0 };
+                        assert_eq!(
+                            matcher.accepts(value, period),
+                            expected,
+                            "{source:?} {value:?} {flags}"
+                        );
+                    }
+                }
+            }
+        });
+    }
 
     #[test]
     fn trim_boundaries_agree_with_glob_matching() {

@@ -46,6 +46,25 @@ for ((i=0; i<1000; i++)); do
 done
 echo "${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
 """, "dir/999"),
+    "case-edges": ("""\
+for ((i=0; i<3000; i++)); do
+    case src/unit-$i.rs in
+        docs/*.md|tests/*.py) exit 1 ;;
+        src/*.rs) last=$i ;;
+        *) exit 1 ;;
+    esac
+done
+echo "$last"
+""", "2999"),
+    "case-classes": ("""\
+for ((i=0; i<3000; i++)); do
+    case src/unit-$i.rs in
+        src/unit-[0-9]*.rs) last=$i ;;
+        *) exit 1 ;;
+    esac
+done
+echo "$last"
+""", "2999"),
     "glob": ("""\
 for ((i=0; i<30; i++)); do set -- fixtures/*.txt; done
 echo "$# $1"

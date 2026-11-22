@@ -1,6 +1,6 @@
 use crate::Session;
 use crate::execute::{self, Flow};
-use crate::parser::{Command, Statement};
+use crate::parser::{CasePattern, Command, Statement};
 
 pub fn execute_program(
     session: &mut Session,
@@ -166,17 +166,22 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 Ok(v) => v,
                 Err(f) => return f,
             };
-            for (patterns, body) in arms {
+            for (patterns, body) in arms.iter() {
                 for pattern in patterns {
-                    let pattern = match expand_case(session, pattern, status, true) {
-                        Ok(v) => v,
-                        Err(f) => return f,
+                    let matched = match pattern {
+                        CasePattern::Fixed(matcher) => matcher.matches(&value),
+                        CasePattern::Dynamic(word) => {
+                            match expand_case(session, word.clone(), status, true) {
+                                Ok(glob) => crate::pattern::matches(&value, &glob),
+                                Err(f) => return f,
+                            }
+                        }
                     };
-                    if crate::pattern::matches(&value, &pattern) {
+                    if matched {
                         return if body.is_empty() {
                             Flow::Continue(0)
                         } else {
-                            execute_program(session, body, status, tail)
+                            execute_program(session, body.clone(), status, tail)
                         };
                     }
                 }
