@@ -53,6 +53,50 @@ python3 tools/bench_scripts.py /path/to/tonari --previous /path/to/previous --ba
 python3 tools/bench.py /path/to/tonari --compare-shell Previous /path/to/previous --bash /path/to/bash --case startup --case prompt --runs 200
 ```
 
+<a id="pipe-process-timing"></a>
+
+### Where merged-pipe time is spent / 標準エラーをつなぐパイプの時間内訳
+
+Tonari `98e1614`, GNU Bash 5.2.37, macOS 27.2.1 and Debian 13 arm64 on the same M1, 2026-11-22. The workload prints the numbers 0–15 with 16 separate `/usr/bin/printf` and `/bin/cat` pairs. All 38 output bytes and the exit statuses were checked. Shell timings begin after startup. An already running Python parent also made the pipe, wired stdout and stderr with `POSIX_SPAWN_DUP2`, called `os.posix_spawn` twice, and waited for both children before the next pair. The parent captured the same output. Five warm-ups and 35 measured samples per condition in rotating order. Values are **median / p95 ms**. Each statistic is computed independently.
+
+同じ M1 の2環境で外部の `printf` と `cat` を16組起動し、38バイトの出力と終了値を確認した。シェルの起動は計時外。対照では起動済みの Python 親プロセスから同じパイプを作り、2プロセスを直接起動して両方の終了を待った。各条件を交互に実行し、最初の5回を除く35回の中央値 / p95（ms）を示す。区間ごとに計算しているため、中央値の和は全体の中央値と一致する必要がない。
+
+| 16 pairs / 16組 | macOS | Debian |
+|---|---:|---:|
+| Tonari, ordinary pipe | 27.498 / 42.688 | 5.302 / 6.289 |
+| Tonari, merged pipe | 28.827 / 37.007 | 5.457 / 6.548 |
+| Tonari, explicit stderr duplication then pipe | 29.147 / 39.010 | 5.483 / 6.596 |
+| Bash, merged pipe | 46.001 / 81.871 | 6.465 / 8.963 |
+| Direct merged pipe, total | 27.712 / 35.754 | 5.894 / 7.086 |
+| Direct, inside the 32 spawn calls | 5.665 / 7.761 | 3.478 / 4.241 |
+| Direct, close pipe ends and wait after launching each pair | 22.160 / 27.790 | 2.429 / 2.782 |
+
+In a separate control, a small native C parent launched the same executable as its child. The first statement of `main` read `CLOCK_MONOTONIC`; the child wrote that timestamp to a pipe and returned. The parent recorded time immediately before and after `posix_spawn` and after `waitpid`. Each OS used its local C compiler with `-O2`, normal dynamic linking, 15 warm-ups, then 200 launches. Most of the cross-host difference in this control accumulated before entry to `main`. Each system runs different executable and loader formats. These measurements do not give separate costs for loading, kernel work or scheduling.
+
+別の対照では、それぞれの OS で同じ小さな C ソースを `-O2` で動的リンクした。親が自分自身を起動し、子は `main` の先頭で時刻を取り、パイプにその値を書いて終了した。親は `posix_spawn` の直前・直後と `waitpid` 完了後に時刻を取った。すべて `CLOCK_MONOTONIC` を使い、最初の15回を除く200回を計測した。この対照の OS 間の差は大部分が子の `main` に入るまでに生じた。ローダー・カーネル・スケジューラごとの寄与は未計測。
+
+| Single native child / 子プロセス1個 | macOS | Debian |
+|---|---:|---:|
+| Launch request to child entering `main` | 1.470 / 1.920 | 0.158 / 0.206 |
+| Entry to parent observing exit | 0.255 / 0.330 | 0.038 / 0.064 |
+| Entire launch and wait | 1.728 / 2.242 | 0.197 / 0.274 |
+| Inside the parent's spawn call | 0.136 / 0.233 | 0.102 / 0.128 |
+
+The same Debian run compared equivalent `case` patterns on the same input. Replace the case arms in `case-edges` with `src/u*.rs) last=$i ;; *) exit 1 ;;`, then change only `u` to `[u]`. A separate pathname control changed `fixtures/*.txt` to `fixtures/item-000*.txt` in the 512-file fixture and checked the resulting count and first name. In both pathname cases the shell still scans the directory 30 times. [Script and fixture definitions](../tools/bench_scripts.py)
+
+Debian の同じ計測で、同じ入力・分岐数の `case` を用意し、固定の `u` を同じ文字だけに一致する `[u]` に替えた。ファイル名展開では512ファイルを置いたまま、全件に一致する `*.txt` と1件だけ一致する `item-000*.txt` を比較した。どちらもディレクトリを30回走査する。
+
+| Debian workload / 処理 | Tonari | Bash |
+|---|---:|---:|
+| 3,000 × `case`, `src/u*.rs` | 4.435 / 5.793 | 8.733 / 9.983 |
+| 3,000 × `case`, `src/[u]*.rs` | 4.614 / 5.323 | 8.751 / 10.006 |
+| 30 globs, 1 of 512 names returned | 3.477 / 4.125 | 2.771 / 3.241 |
+| 30 globs, all 512 names returned | 6.427 / 7.478 | 8.764 / 9.932 |
+
+A follow-up used two directories of 512 files, changing the separator in every name and its pattern together. Each glob returned index 000. Each script made 30 expansions; the eight shell/script combinations rotated through five warm-ups and 45 measurements. For literal source spelling, Tonari took 3.853 / 5.434 ms for `item-000*.txt` and 3.134 / 4.430 for `item_000*.txt` (Bash 3.091 / 4.413 and 3.008 / 5.984). With the same patterns supplied via an unquoted variable, Tonari took 3.264 / 7.106 and 3.052 / 5.601 ms. Tonari escapes a hyphen in the accumulated literal prefix when it first encounters the star; the resulting backslash selects the generic matcher for each directory entry. The lower median with an underscore or a variable is consistent with that code path.
+
+追加計測では512個すべてのファイル名と対応するパターンで、区切りを一緒にハイフンまたはアンダースコアに替えた。各スクリプトで30回展開し、どれも番号000の1件に一致する。各条件45回の計測で、直接書いた場合の Tonari の中央値はハイフンで 3.853 ms、アンダースコアで 3.134 ms、同じパターンを非引用の変数に入れた場合は 3.264 ms と 3.052 ms だった。ソースに直接書いたハイフンは最初の星印に達した段階でエスケープされ、各候補の照合が汎用経路に入る。
+
 <a id="align-experiments"></a>
 
 ## Parent memory, pipes and delimiter search / 親シェルのメモリ・パイプ・区切り検索
