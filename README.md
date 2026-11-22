@@ -32,9 +32,11 @@ Variables and expansions, shell functions, `cd`, `source`, `&&` and `||`, file o
 
 The reference shells for development are GNU Bash 5.2.37 from Debian 13 and 5.3.9 from Ubuntu 26.04. The shared Bash syntax, startup-file rules, shell variables and observable process behaviour form the compatibility target. Tonari implements its own interpreter and process control.
 
-The planned install layout gives tools a runnable path ending in `libexec/tonari/bash`. The user-facing `tonari` command will link to that executable. A nested Tonari session will inherit `SHELL`. Choosing the dedicated Bash path as a login shell will let tools select it through `SHELL`. Integration tests with real tools are still pending.
+Tonari will ship one executable per OS and CPU architecture. Linux arm64 releases will use a static musl binary. The macOS binary uses libraries supplied by the OS. The planned installation puts the executable at `libexec/tonari/bash` and creates the relative symlink `bin/tonari -> ../libexec/tonari/bash`. Either name starts the same program directly.
 
-Tonari aims to start faster, run commands faster and ship a smaller executable than GNU Bash on the same machine. In a warm-cache Debian 13 arm64 run, median time to the prompt was **0.73 ms** for the standard GNU build, **0.60 ms** for the static musl build and **1.03 ms** for Bash. The static executable was **397,560 bytes**, compared with **1,412,096 bytes** for Bash. The GNU build was faster on repeated builtin redirections. [Full results, p95 and methodology](docs/benchmarks.md)
+A nested Tonari session will inherit `SHELL`. Once login mode is available, choosing the dedicated Bash path as a login shell will let tools select it through `SHELL`. Integration tests with real tools are still pending.
+
+Tonari aims to start faster, run commands faster and ship a smaller executable than GNU Bash on the same machine. In a warm-cache Debian 13 arm64 run, median time to the prompt was **0.60 ms** for the static musl build, **0.73 ms** for the glibc comparison build and **1.03 ms** for Bash. The static executable was **397,560 bytes**, compared with **1,412,096 bytes** for Bash. The glibc build was faster on repeated builtin redirections. [Full results, p95 and methodology](docs/benchmarks.md)
 
 ## Development
 
