@@ -50,3 +50,5 @@ python3 tools/bench.py target/release/tonari --bash /bin/bash
 結合テストでは、出力・ファイルの内容・終了ステータスを Bash と比較し、疑似端末で Ctrl-C の動作を確認します。比較用の Bash は、テストでは `REFERENCE_BASH`、ベンチマークでは `--bash` で指定できます。旧版との比較には `--compare-tonari Previous /path/to/older/tonari` を追加すると、同じ計測で交互に起動できます。
 
 英語と日本語のドキュメントは一緒に更新します。コミットメッセージ、PR のタイトルと本文は英語で書きます。
+
+開発中に得た知見は、判断の理由や再確認に使えるテストと一緒に[開発知見](docs/engineering-notes.md)に記録します。

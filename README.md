@@ -50,3 +50,5 @@ python3 tools/bench.py target/release/tonari --bash /bin/bash
 The end-to-end suite compares output, file contents and exit status with Bash, and exercises Ctrl-C on a pseudo-terminal. To select a Bash binary, set `REFERENCE_BASH` for the tests or pass `--bash` to the benchmark. Use `--compare-tonari Previous /path/to/older/tonari` to time two builds in the same run.
 
 Keep the English and Japanese documentation in sync. Write commit messages, PR titles and PR descriptions in English.
+
+Record reusable findings and the tests behind them in the [engineering notes](docs/engineering-notes.md).
