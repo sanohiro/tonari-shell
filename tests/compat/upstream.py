@@ -18,6 +18,7 @@ def run(driver, shell, root, source, helpers, timeout):
     # Drivers use relative paths and create files under both HOME and TMPDIR.
     shutil.copytree(source / "tests", root / "tests")
     shutil.copy2(source / "y.tab.c", root / "y.tab.c")
+    shutil.copy2(helpers / "config.h", root / "config.h")
     for name in ("recho", "zecho", "printenv", "xcase"):
         shutil.copy2(helpers / name, root / "tests" / name)
     for name in ("bin", "home", "tmp"):

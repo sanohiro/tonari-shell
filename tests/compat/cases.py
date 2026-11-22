@@ -58,7 +58,7 @@ BUILTINS = {
     "type": "f() { :; }; type -t f; type -t printf; type -t /bin/sh",
     "typeset": "typeset -a v=(zero one); printf '%s' \"${v[1]}\"",
     "ulimit": "n=$(ulimit -n); [[ $n == +([0-9]) || $n == unlimited ]] && printf limit",
-    "umask": "umask 077; : > f; stat -c '%a' f",
+    "umask": "umask 077; : > f; ls -ld f | cut -c1-10",
     "unalias": "shopt -s expand_aliases\nalias a='printf ok'\na; unalias a; type -t a || echo gone",
     "unset": "x=1; f() { :; }; unset x; unset -f f; echo \"${x-unset}\"; type -t f || :",
     "wait": "(exit 23) & p=$!; wait \"$p\"; echo \"$?\"",
