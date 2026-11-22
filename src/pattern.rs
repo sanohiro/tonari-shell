@@ -277,15 +277,74 @@ pub(crate) fn has_magic(text: &str, pathname: bool) -> bool {
     false
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone)]
 pub struct GlobOptions {
     pub dotglob: bool,
     pub nullglob: bool,
     pub globstar: bool,
     pub extglob: bool,
+    pub globskipdots: bool,
+    ignore: Option<std::rc::Rc<[String]>>,
 }
 
-pub(crate) fn pathnames(pattern: &str, options: GlobOptions) -> Vec<String> {
+impl Default for GlobOptions {
+    fn default() -> Self {
+        Self {
+            dotglob: false,
+            nullglob: false,
+            globstar: false,
+            extglob: false,
+            globskipdots: true,
+            ignore: None,
+        }
+    }
+}
+
+impl GlobOptions {
+    pub(crate) fn set_ignore(&mut self, value: Option<&str>) {
+        self.ignore = None;
+        let Some(value) = value else {
+            self.dotglob = false;
+            return;
+        };
+        if value.is_empty() {
+            return;
+        }
+        self.dotglob = true;
+        let mut patterns = Vec::new();
+        let mut begin = 0;
+        let mut depth = 0usize;
+        let mut chars = value.char_indices();
+        while let Some((i, c)) = chars.next() {
+            match c {
+                '\\' => {
+                    chars.next();
+                }
+                '[' if let Some(end) = bracket_end(&value[i + 1..]) => {
+                    let after = i + 2 + end;
+                    while chars.clone().next().is_some_and(|(j, _)| j < after) {
+                        chars.next();
+                    }
+                }
+                '(' => depth += 1,
+                ')' => depth = depth.saturating_sub(1),
+                ':' if depth == 0 => {
+                    if begin != i {
+                        patterns.push(value[begin..i].to_owned());
+                    }
+                    begin = i + 1;
+                }
+                _ => {}
+            }
+        }
+        if begin != value.len() {
+            patterns.push(value[begin..].to_owned());
+        }
+        self.ignore = Some(patterns.into());
+    }
+}
+
+pub(crate) fn pathnames(pattern: &str, options: &GlobOptions) -> Vec<String> {
     let mut names = Vec::new();
     with_locale(|order| paths(pattern, options, &mut names, order));
     names
@@ -306,7 +365,7 @@ pub(crate) fn unescape(component: &str) -> String {
 
 // Walk by component so POSIX character classes have the same fnmatch
 // semantics in argv and in case patterns, including on Darwin.
-fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>, collation: Collation) {
+fn paths(pattern: &str, options: &GlobOptions, fields: &mut Vec<String>, collation: Collation) {
     let mut paths = vec![String::new()];
     let mut rest = pattern;
     let mut known_existing = false;
@@ -376,26 +435,30 @@ fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>, collatio
         let mut matched = Vec::new();
         for prefix in paths {
             let dir = if prefix.is_empty() { "." } else { &prefix };
-            visit_names(dir, !rest.is_empty(), |raw, _| {
-                let matches = match &extended {
-                    Some(group) => raw
-                        .to_str()
-                        .is_ok_and(|s| group.accepts(s, !options.dotglob)),
-                    None => matcher.accepts(raw.to_bytes(), !options.dotglob, Some(raw)),
-                };
-                if !matches {
-                    return;
-                }
-                let Ok(name) = raw.to_str() else { return };
-                let mut path = String::with_capacity(
-                    prefix.len()
-                        + name.len()
-                        + usize::from(collation != Collation::Bytes || !rest.is_empty()),
-                );
-                path.push_str(&prefix);
-                path.push_str(name);
-                matched.push(path);
-            });
+            visit_names(
+                dir,
+                !rest.is_empty(),
+                options.globskipdots || options.ignore.is_some(),
+                |raw, _| {
+                    let period = !options.dotglob || matches!(raw.to_bytes(), b"." | b"..");
+                    let matches = match &extended {
+                        Some(group) => raw.to_str().is_ok_and(|s| group.accepts(s, period)),
+                        None => matcher.accepts(raw.to_bytes(), period, Some(raw)),
+                    };
+                    if !matches {
+                        return;
+                    }
+                    let Ok(name) = raw.to_str() else { return };
+                    let mut path = String::with_capacity(
+                        prefix.len()
+                            + name.len()
+                            + usize::from(collation != Collation::Bytes || !rest.is_empty()),
+                    );
+                    path.push_str(&prefix);
+                    path.push_str(name);
+                    matched.push(path);
+                },
+            );
         }
         if matched.is_empty() {
             return;
@@ -407,6 +470,35 @@ fn paths(pattern: &str, options: GlobOptions, fields: &mut Vec<String>, collatio
     // A literal suffix must exist. A trailing slash asks the OS for a directory.
     if !known_existing {
         paths.retain(|path| fs::symlink_metadata(path).is_ok());
+    }
+    if let Some(patterns) = &options.ignore {
+        for pattern in patterns.iter() {
+            let parts: Vec<_> = pattern
+                .split('/')
+                .map(|part| {
+                    let group = options
+                        .extglob
+                        .then(|| extended::Pattern::new(part))
+                        .flatten();
+                    (Matcher::new(part), group)
+                })
+                .collect();
+            paths.retain(|path| {
+                let mut names = path.split('/');
+                for (basic, group) in &parts {
+                    let Some(name) = names.next() else {
+                        return true;
+                    };
+                    if !group
+                        .as_ref()
+                        .map_or_else(|| basic.matches(name), |p| p.accepts(name, false))
+                    {
+                        return true;
+                    }
+                }
+                names.next().is_some()
+            });
+        }
     }
     order::append(paths, fields, collation);
 }
@@ -424,7 +516,7 @@ fn descendants(
     let mut pending = vec![prefix];
     while let Some(dir) = pending.pop() {
         let base = if dir.is_empty() { "." } else { &dir };
-        visit_names(base, !terminal || trailing, |raw, kind| {
+        visit_names(base, !terminal || trailing, true, |raw, kind| {
             if !dotglob && raw.to_bytes().first() == Some(&b'.') {
                 return;
             }
@@ -489,7 +581,7 @@ impl Field {
         self.text.push_str(text);
     }
 
-    pub fn finish(self, fields: &mut Vec<String>, globbing: Option<GlobOptions>) {
+    pub fn finish(self, fields: &mut Vec<String>, globbing: Option<&GlobOptions>) {
         if let Some((options, pattern)) = globbing
             .zip(self.pattern)
             .filter(|(options, p)| has_magic(p, true) || options.extglob && extended::has_group(p))
@@ -636,14 +728,14 @@ mod tests {
         field.push(root, false);
         field.push("[[:alpha:]]ord.rs", true);
         let mut words = Vec::new();
-        field.finish(&mut words, Some(GlobOptions::default()));
+        field.finish(&mut words, Some(&GlobOptions::default()));
         assert_eq!(words, [format!("{root}word.rs")]);
 
         let mut field = Field::default();
         field.push(root, false);
         field.push("*", false);
         field.push("-missing-?", true);
-        field.finish(&mut words, Some(GlobOptions::default()));
+        field.finish(&mut words, Some(&GlobOptions::default()));
         assert_eq!(words[1], format!("{root}*-missing-?"));
     }
 }

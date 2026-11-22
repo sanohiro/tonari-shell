@@ -5,6 +5,7 @@ import fcntl
 import os
 import pty
 import resource
+import random
 import select
 import shlex
 import signal
@@ -789,10 +790,49 @@ p='!(lib.c)'; printf '<%s>' $p; echo; shopt -u extglob; printf '<%s>\n' $p"""
                                  "<:1>\n<a:0>\n<aa:1>\n<aab:1>\n<x:1>\n"
                                  "<lib.rs><lib.txt>\n<!(lib.c)>\n").encode(), minimum=5)
 
+    def test_globignore_and_explicit_dot_entries(self):
+        for name in ("one.tmp", "two", ".hidden", "a:b", "++"):
+            (self.cwd / name).touch()
+        (self.cwd / "dir").mkdir()
+        (self.cwd / "dir" / "one.tmp").touch()
+        self.compare(r"""shopt -u globskipdots
+printf '[%s]' .*; echo
+GLOBIGNORE='*.tmp:a\:b'; printf '[%s]' *; echo; printf '[%s]' dir/*; echo
+GLOBIGNORE=; shopt -p dotglob; unset GLOBIGNORE; shopt -p dotglob
+shopt -s extglob
+GLOBIGNORE='+([^[:alnum:]])'; printf '[%s]' *; echo
+shopt -u dotglob; list() { local GLOBIGNORE=two; printf '[%s]' *; echo; }; list; echo "$GLOBIGNORE"
+printf '[%s]' !([*)* +(a|b[)*; echo
+case '*(a|b[)' in *(a|b[)) echo literal;; esac""", 0,
+                     b"[.][..][.hidden]\n[++][.hidden][dir][two]\n[dir/one.tmp]\n"
+                     b"shopt -s dotglob\nshopt -u dotglob\n[.hidden][a:b][dir][one.tmp][two]\n"
+                     b"[++][.hidden][a:b][dir][one.tmp]\n+([^[:alnum:]])\n"
+                     b"[!([*)*][+(a|b[)*]\nliteral\n", minimum=5)
+
     def test_plain_star_followed_by_nullable_extended_group(self):
         self.compare(r"""for p in '*!(a)' '*!(*)b' '*@(a|)' '?*@([ab]|*)'; do
 for v in '' a b x aa; do [[ $v == $p ]] && printf 1 || printf 0; done; echo; done""",
                      0, b"10111\n10000\n01001\n00001\n", minimum=5)
+
+    def test_generated_extended_patterns_against_bash(self):
+        if BASH not in self.shells_for(5):
+            self.skipTest("uses the Bash 5.x pattern matcher")
+        rng = random.Random(42)
+        def pattern(depth):
+            def atom():
+                if depth and rng.random() < .33:
+                    return rng.choice("@!?+*") + "(" + "|".join(
+                        pattern(depth - 1) for _ in range(rng.randint(1, 3))) + ")"
+                return rng.choice(("a", "b", "?", "*", "[ab]", "[[:digit:]]"))
+            return "".join(atom() for _ in range(rng.randrange(4)))
+        patterns = ["x" + pattern(2) for _ in range(150)] + [pattern(2) for _ in range(250)]
+        script = ("for p in " + shlex.join(patterns) + "; do "
+                  "for v in '' a b aa ab abc abb 12 xa x1; do [[ $v == $p ]] && printf 1 || printf 0; done; echo; done")
+        ref, proc = (self.command(shell, script) for shell in (BASH, TONARI))
+        self.assertEqual((proc.returncode, proc.stderr, ref.returncode, ref.stderr), (0, b"", 0, b""))
+        self.assertEqual(len(proc.stdout.splitlines()), len(patterns))
+        for p, expected, actual in zip(patterns, ref.stdout.splitlines(), proc.stdout.splitlines(), strict=True):
+            self.assertEqual(actual, expected, p)
 
     def test_extglob_at_parse_time_and_invocation(self):
         for shell in (BASH, TONARI):
@@ -855,6 +895,11 @@ v[1]=changed; unset 'v[0]'; v[20]=tail; printf '[%s]' "${!v[@]}" "${v[-1]}" """
                 proc = self.command(shell, script)
                 self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
                                  (0, b"4/8191/8193//last/[1][2][3][20][tail]", b""))
+
+    def test_close_with_no_spare_file_descriptor(self):
+        self.compare("""(ulimit -n 16; for fd in {3..15}; do eval "exec $fd>/dev/null" || exit 9; done
+exec 6>&-; echo "close:$?"; exec 6>&7; echo "dup:$?"; exec 6>&7-; echo "move:$?") 2>/dev/null""",
+                     0, b"close:1\ndup:0\nmove:1\n", minimum=5)
 
     def test_resource_limits_and_child_inheritance(self):
         src = """ulimit -Sn64; ulimit -Sn; ulimit -Sn 48 -n

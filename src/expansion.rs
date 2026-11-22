@@ -204,7 +204,7 @@ impl<'a> Expansion<'a> {
         Ok(word.fields_with_glob(
             &|name| self.lookup(name),
             &self.session.positional,
-            glob.then_some(self.session.shopt.glob),
+            glob.then_some(&self.session.shopt.glob),
         ))
     }
 

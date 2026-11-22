@@ -195,6 +195,13 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                     for pattern in patterns {
                         matched = match pattern {
                             CasePattern::Fixed(matcher) => matcher.matches(&value),
+                            CasePattern::Extended(group, basic) => {
+                                if session.shopt.glob.extglob {
+                                    group.accepts(&value, false)
+                                } else {
+                                    basic.matches(&value)
+                                }
+                            }
                             CasePattern::Dynamic(word) => {
                                 match expand_case(session, word.clone(), last, true) {
                                     Ok(glob) if session.shopt.glob.extglob => {

@@ -6,15 +6,16 @@
 use super::{Matcher, bracket};
 
 #[derive(Debug)]
-enum Atom<'a> {
-    Text(&'a str),
+enum Atom {
+    Text(Box<str>),
     Any,
     Star,
-    Class(Matcher<&'a str>),
-    Group(u8, Vec<Vec<Atom<'a>>>),
+    Class(Matcher<Box<str>>, std::cell::Cell<(u128, u128)>),
+    Choice(Vec<Box<str>>),
+    Group(u8, Vec<Vec<Atom>>),
 }
 
-fn sequence<'a>(source: &mut &'a str, grouped: bool) -> Option<Vec<Atom<'a>>> {
+fn sequence(source: &mut &str, grouped: bool) -> Option<Vec<Atom>> {
     let mut atoms = Vec::new();
     while !source.is_empty() {
         let rest = *source;
@@ -33,7 +34,24 @@ fn sequence<'a>(source: &mut &'a str, grouped: bool) -> Option<Vec<Atom<'a>>> {
                     break;
                 }
             }
-            atoms.push(Atom::Group(bytes[0], alternatives));
+            if bytes[0] == b'@'
+                && alternatives
+                    .iter()
+                    .all(|seq| matches!(seq.as_slice(), [Atom::Text(_)]))
+            {
+                let choices = alternatives
+                    .into_iter()
+                    .map(|mut seq| {
+                        let Atom::Text(text) = seq.pop().unwrap() else {
+                            unreachable!()
+                        };
+                        text
+                    })
+                    .collect();
+                atoms.push(Atom::Choice(choices));
+            } else {
+                atoms.push(Atom::Group(bytes[0], alternatives));
+            }
             continue;
         }
         let (atom, count) = match bytes[0] {
@@ -41,11 +59,15 @@ fn sequence<'a>(source: &mut &'a str, grouped: bool) -> Option<Vec<Atom<'a>>> {
             b'*' => (Atom::Star, 1),
             b'[' if let Some(end) = bracket::class_end(&bytes[1..]) => {
                 let len = end + 2;
-                (Atom::Class(Matcher::new(&rest[..len])), len)
+                (
+                    Atom::Class(Matcher::new(rest[..len].into()), Default::default()),
+                    len,
+                )
             }
+            b'[' if grouped => return None,
             b'\\' if bytes.len() > 1 => {
                 let end = 1 + rest[1..].chars().next()?.len_utf8();
-                (Atom::Text(&rest[1..end]), end)
+                (Atom::Text(rest[1..end].into()), end)
             }
             _ => {
                 let end = rest
@@ -57,7 +79,7 @@ fn sequence<'a>(source: &mut &'a str, grouped: bool) -> Option<Vec<Atom<'a>>> {
                             || matches!(c, '@' | '+' | '!') && rest[i + 1..].starts_with('(')
                     })
                     .map_or(rest.len(), |(i, _)| i);
-                (Atom::Text(&rest[..end]), end)
+                (Atom::Text(rest[..end].into()), end)
             }
         };
         atoms.push(atom);
@@ -66,32 +88,61 @@ fn sequence<'a>(source: &mut &'a str, grouped: bool) -> Option<Vec<Atom<'a>>> {
     Some(atoms)
 }
 
-fn endings(atoms: &[Atom<'_>], value: &str, start: usize, period: bool) -> Vec<usize> {
+fn one_character(atom: &Atom, value: &str, pos: usize) -> Option<usize> {
+    let c = value[pos..].chars().next()?;
+    let end = pos + c.len_utf8();
+    if let Atom::Class(class, cache) = atom {
+        let (known, matched) = cache.get();
+        let bit = if c.is_ascii() { 1u128 << (c as u32) } else { 0 };
+        if known & bit != 0 {
+            return (matched & bit != 0).then_some(end);
+        }
+        let mut buffer = [0u8; 5];
+        let bytes = c.encode_utf8(&mut buffer[..4]).as_bytes();
+        let length = bytes.len();
+        let name = std::ffi::CStr::from_bytes_with_nul(&buffer[..=length]).ok()?;
+        let accepted = class.accepts(name.to_bytes(), false, Some(name));
+        if bit != 0 {
+            cache.set((known | bit, if accepted { matched | bit } else { matched }));
+        }
+        if !accepted {
+            return None;
+        }
+    }
+    Some(end)
+}
+
+fn endings(atoms: &[Atom], value: &str, start: usize, period: bool) -> Vec<usize> {
     let mut points = vec![start];
     let mut matched_end = false;
+    let mut next = Vec::new();
     for (i, atom) in atoms.iter().enumerate() {
-        let mut next = Vec::new();
+        next.clear();
         for &pos in &points {
             if period
                 && pos == 0
                 && matches!(
                     atom,
-                    Atom::Any | Atom::Class(_) | Atom::Star | Atom::Group(b'!', _)
+                    Atom::Any | Atom::Class(..) | Atom::Star | Atom::Group(b'!', _)
                 )
             {
                 continue;
             }
             match atom {
-                Atom::Text(text) if value[pos..].starts_with(text) => next.push(pos + text.len()),
+                Atom::Text(text) if value[pos..].starts_with(text.as_ref()) => {
+                    next.push(pos + text.len())
+                }
                 Atom::Text(_) => {}
-                Atom::Any | Atom::Class(_) => {
-                    if let Some(c) = value[pos..].chars().next() {
-                        let end = pos + c.len_utf8();
-                        if matches!(atom, Atom::Any)
-                            || matches!(atom, Atom::Class(m) if m.matches(&value[pos..end]))
-                        {
-                            next.push(end);
+                Atom::Choice(choices) => {
+                    for text in choices {
+                        if value[pos..].starts_with(text.as_ref()) {
+                            next.push(pos + text.len());
                         }
+                    }
+                }
+                Atom::Any | Atom::Class(..) => {
+                    if let Some(end) = one_character(atom, value, pos) {
+                        next.push(end);
                     }
                 }
                 Atom::Star => {
@@ -100,7 +151,7 @@ fn endings(atoms: &[Atom<'_>], value: &str, start: usize, period: bool) -> Vec<u
                     // only at existing characters. GNU Bash gives a trailing
                     // empty input its own result for a following negation.
                     match atoms.get(i + 1) {
-                        Some(Atom::Group(b'!' | b'+' | b'@', _)) => {
+                        Some(Atom::Group(b'!' | b'+' | b'@', _) | Atom::Choice(_)) => {
                             matched_end |= matches!(atoms.get(i + 1), Some(Atom::Group(b'!', _)))
                                 && points.last() == Some(&value.len());
                         }
@@ -110,6 +161,22 @@ fn endings(atoms: &[Atom<'_>], value: &str, start: usize, period: bool) -> Vec<u
                     break;
                 }
                 Atom::Group(op, alternatives) => {
+                    if let [sequence] = alternatives.as_slice()
+                        && let [unit @ (Atom::Any | Atom::Class(..))] = sequence.as_slice()
+                        && matches!(op, b'+' | b'*')
+                    {
+                        if *op == b'*' {
+                            next.push(pos);
+                        }
+                        if !period || pos != 0 {
+                            let mut previous = pos;
+                            while let Some(end) = one_character(unit, value, previous) {
+                                next.push(end);
+                                previous = end;
+                            }
+                        }
+                        continue;
+                    }
                     let options = |from| {
                         alternatives
                             .iter()
@@ -150,9 +217,11 @@ fn endings(atoms: &[Atom<'_>], value: &str, start: usize, period: bool) -> Vec<u
         if next.is_empty() {
             return if matched_end { vec![value.len()] } else { next };
         }
-        next.sort_unstable();
-        next.dedup();
-        points = next;
+        if next.len() > 1 {
+            next.sort_unstable();
+            next.dedup();
+        }
+        std::mem::swap(&mut points, &mut next);
     }
     if matched_end && points.last() != Some(&value.len()) {
         points.push(value.len());
@@ -160,20 +229,112 @@ fn endings(atoms: &[Atom<'_>], value: &str, start: usize, period: bool) -> Vec<u
     points
 }
 
-pub(crate) struct Pattern<'a>(Vec<Atom<'a>>);
+// If there is only one variable-width run, the literals on either side can
+// determine its boundaries without constructing a list of alternatives.
+fn unit_run(atom: &Atom) -> Option<(&Atom, bool)> {
+    let Atom::Group(op @ (b'+' | b'*'), alternatives) = atom else {
+        return None;
+    };
+    let [sequence] = alternatives.as_slice() else {
+        return None;
+    };
+    let [unit @ (Atom::Any | Atom::Class(..))] = sequence.as_slice() else {
+        return None;
+    };
+    Some((unit, *op == b'*'))
+}
 
-impl<'a> Pattern<'a> {
-    pub(crate) fn new(mut text: &'a str) -> Option<Self> {
+fn literal_edge<'v>(atom: &Atom, value: &'v str, prefix: bool) -> Result<Option<&'v str>, ()> {
+    let strip = |text: &str| {
+        if prefix {
+            value.strip_prefix(text)
+        } else {
+            value.strip_suffix(text)
+        }
+    };
+    match atom {
+        Atom::Text(text) => Ok(strip(text)),
+        Atom::Choice(options) => {
+            let mut matches = options.iter().filter_map(|s| strip(s));
+            let first = matches.next();
+            if matches.next().is_some() {
+                Err(())
+            } else {
+                Ok(first)
+            }
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Pattern {
+    atoms: Vec<Atom>,
+    single_run: Option<usize>,
+}
+
+impl Pattern {
+    pub(crate) fn new(mut text: &str) -> Option<Self> {
         if !has_group(text) {
             return None;
         }
-        sequence(&mut text, false).map(Self)
+        let original = text;
+        let atoms = sequence(&mut text, false).unwrap_or_else(|| vec![Atom::Text(original.into())]);
+        let mut variable = atoms
+            .iter()
+            .enumerate()
+            .filter(|(_, atom)| !matches!(atom, Atom::Text(_) | Atom::Choice(_)));
+        let single_run = variable
+            .next()
+            .and_then(|(i, atom)| unit_run(atom).map(|_| i))
+            .filter(|_| variable.next().is_none());
+        Some(Self { atoms, single_run })
+    }
+
+    fn match_run(&self, value: &str, i: usize, period: bool) -> Option<bool> {
+        let mut rest = value;
+        for atom in &self.atoms[..i] {
+            let Some(next) = literal_edge(atom, rest, true).ok()? else {
+                return Some(false);
+            };
+            rest = next;
+        }
+        let at_start = rest.len() == value.len();
+        for atom in self.atoms[i + 1..].iter().rev() {
+            let Some(next) = literal_edge(atom, rest, false).ok()? else {
+                return Some(false);
+            };
+            rest = next;
+        }
+        let (unit, empty) = unit_run(&self.atoms[i])?;
+        if rest.is_empty() {
+            return Some(empty);
+        }
+        if at_start && period {
+            return Some(false);
+        }
+        let mut pos = 0;
+        while pos < rest.len() {
+            let Some(end) = one_character(unit, rest, pos) else {
+                return Some(false);
+            };
+            pos = end;
+        }
+        Some(true)
     }
 
     pub(crate) fn accepts(&self, value: &str, period: bool) -> bool {
-        endings(&self.0, value, 0, period && value.starts_with('.'))
-            .binary_search(&value.len())
-            .is_ok()
+        let period = period && value.starts_with('.');
+        super::localized(|| {
+            if let Some(i) = self.single_run
+                && let Some(result) = self.match_run(value, i, period)
+            {
+                return result;
+            }
+            endings(&self.atoms, value, 0, period)
+                .binary_search(&value.len())
+                .is_ok()
+        })
     }
 }
 

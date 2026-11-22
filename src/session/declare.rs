@@ -211,6 +211,9 @@ pub(super) fn run(session: &mut Session, command: &str, mut operands: &[String])
                 continue;
             }
         }
+        if name == "GLOBIGNORE" && value.is_some() {
+            session.shopt.glob.set_ignore(var.value.as_deref());
+        }
         session.variables.insert(name.into(), var);
     }
     status

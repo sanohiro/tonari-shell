@@ -1,11 +1,16 @@
 use std::ffi::{CStr, CString};
 
-pub(super) fn visit_names(dir: &str, directories_only: bool, mut visit: impl FnMut(&CStr, u8)) {
+pub(super) fn visit_names(
+    dir: &str,
+    directories_only: bool,
+    skip_dots: bool,
+    mut visit: impl FnMut(&CStr, u8),
+) {
     let Ok(path) = CString::new(dir) else { return };
     read_names(&path, |name, kind| {
         // A symlink or an unknown entry type still needs a pathname lookup.
         if (!directories_only || matches!(kind, libc::DT_DIR | libc::DT_LNK | libc::DT_UNKNOWN))
-            && !matches!(name.to_bytes(), b"." | b"..")
+            && (!skip_dots || !matches!(name.to_bytes(), b"." | b".."))
         {
             visit(name, kind);
         }

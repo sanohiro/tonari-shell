@@ -340,6 +340,9 @@ impl Session {
     }
 
     pub fn assign(&mut self, name: &str, value: &str) {
+        if name == "GLOBIGNORE" {
+            self.shopt.glob.set_ignore(Some(value));
+        }
         let normalized;
         let value = if name == "OPTIND" {
             self.opt_offset = 0;
@@ -418,6 +421,9 @@ impl Session {
     pub fn bind(&mut self, assignments: &[(String, String)]) -> Bindings {
         let mut saved = Bindings::default();
         for (name, value) in assignments {
+            if name == "GLOBIGNORE" {
+                self.shopt.glob.set_ignore(Some(value));
+            }
             if name == "OPTIND" {
                 saved.1.get_or_insert(self.opt_offset);
                 self.opt_offset = 0;
@@ -449,6 +455,11 @@ impl Session {
             self.opt_offset = offset;
         }
         for (name, original) in bindings.0 {
+            if name == "GLOBIGNORE" {
+                self.shopt
+                    .glob
+                    .set_ignore(original.as_ref().and_then(|v| v.value.as_deref()));
+            }
             if name == "PATH" {
                 self.hashes.clear();
             }
@@ -592,6 +603,9 @@ impl Session {
                 Some(v) => Some(v.to_owned()),
                 None => self.get(name),
             };
+            if name == "GLOBIGNORE" && arg.contains('=') {
+                self.shopt.glob.set_ignore(value.as_deref());
+            }
             self.variables.insert(
                 name.into(),
                 Variable {
@@ -652,6 +666,9 @@ impl Session {
     }
 
     fn unset_variable(&mut self, name: &str) {
+        if name == "GLOBIGNORE" {
+            self.shopt.glob.set_ignore(None);
+        }
         if name == "OPTIND" {
             self.opt_offset = 0;
         }

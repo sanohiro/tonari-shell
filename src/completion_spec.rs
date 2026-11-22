@@ -401,7 +401,7 @@ impl Spec {
             }
         }
         if let Some(glob) = &self.glob {
-            words.extend(pattern::pathnames(glob, session.shopt.glob));
+            words.extend(pattern::pathnames(glob, &session.shopt.glob));
         }
         if let Some(list) = &self.words {
             list.append_matches(&mut words, prefix, last, session)?;

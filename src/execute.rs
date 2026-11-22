@@ -771,11 +771,19 @@ enum SavedFd {
 }
 
 impl SavedFd {
-    fn capture(fd: RawFd, actions: &[Action<'_>]) -> io::Result<Self> {
+    fn capture(action: &Action<'_>, actions: &[Action<'_>]) -> io::Result<Self> {
+        let fd = action.destination();
         match fd::duplicate_except(fd, 3, |n| actions.iter().any(|a| a.references(n))) {
             Ok(file) => Ok(Self::Open(fd::PrivateFile::track(file))),
             Err(e) if e.raw_os_error() == Some(libc::EBADF) => Ok(Self::Closed),
-            Err(e) => Err(e),
+            Err(e) => {
+                // GNU Bash closes the target of n>&- even when reserving its
+                // undo descriptor fails. A failed duplicate keeps both ends.
+                if matches!(action, Action::Close(_)) {
+                    unsafe { libc::close(fd) };
+                }
+                Err(e)
+            }
         }
     }
 
@@ -843,10 +851,10 @@ fn run_builtin(
             let fd = action.destination();
             if let Some(slot) = saved.get_mut(fd as usize) {
                 if matches!(slot, SavedFd::Unchanged) {
-                    *slot = SavedFd::capture(fd, actions)?;
+                    *slot = SavedFd::capture(action, actions)?;
                 }
             } else if !extra.iter().any(|(n, _)| *n == fd) {
-                extra.push((fd, SavedFd::capture(fd, actions)?));
+                extra.push((fd, SavedFd::capture(action, actions)?));
             }
         }
     }

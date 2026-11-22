@@ -284,14 +284,14 @@ impl Word {
         lookup: &impl Fn(&str) -> Option<String>,
         positional: &[String],
     ) -> Vec<String> {
-        self.fields_with_glob(lookup, positional, Some(Default::default()))
+        self.fields_with_glob(lookup, positional, Some(&Default::default()))
     }
 
     pub fn fields_with_glob(
         self,
         lookup: &impl Fn(&str) -> Option<String>,
         positional: &[String],
-        globbing: Option<crate::pattern::GlobOptions>,
+        globbing: Option<&crate::pattern::GlobOptions>,
     ) -> Vec<String> {
         if let Self::Literal(s) = self {
             return vec![s];
@@ -468,13 +468,13 @@ enum PatternKind {
     Regex,
 }
 
-enum Output {
+enum Output<'a> {
     Scalar(String),
     Pattern(String, PatternKind),
-    Fields(Fields),
+    Fields(Fields<'a>),
 }
 
-impl Output {
+impl Output<'_> {
     fn elements(&mut self, values: &[String], quoted: bool, ifs: &str) {
         for (i, value) in values.iter().enumerate() {
             if i != 0 {
@@ -634,15 +634,15 @@ pub(crate) fn separators(text: &str, ifs: &str, mut visit: impl FnMut(usize, &st
 }
 
 #[derive(Default)]
-struct Fields {
+struct Fields<'a> {
     words: Vec<String>,
     current: Field,
-    globbing: Option<crate::pattern::GlobOptions>,
+    globbing: Option<&'a crate::pattern::GlobOptions>,
     present: bool,
     whitespace: bool,
 }
 
-impl Fields {
+impl Fields<'_> {
     fn finish_field(&mut self) {
         if self.present {
             std::mem::take(&mut self.current).finish(&mut self.words, self.globbing);
