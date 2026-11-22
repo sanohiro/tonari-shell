@@ -50,7 +50,11 @@ fn redirect(chars: &mut Chars<'_>, op: char, fd: i32) -> Result<Token, Error> {
         }
         (_, Some('&')) => {
             chars.next();
-            Target::Duplicate
+            if op == '>' && fd == 1 {
+                Target::OutputWord
+            } else {
+                Target::Duplicate
+            }
         }
         ('>', Some('>')) => {
             chars.next();

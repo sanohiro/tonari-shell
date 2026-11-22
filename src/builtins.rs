@@ -211,6 +211,7 @@ pub(crate) fn unary(op: &str, arg: &str, session: &mut Session) -> Result<bool, 
     match op {
         "-n" => return Ok(!arg.is_empty()),
         "-z" => return Ok(arg.is_empty()),
+        "-R" => return Ok(session.is_nameref(arg)),
         "-v" => {
             if let Some((name, expr)) = crate::session::array::subscript(arg)
                 && session.is_associative(name)

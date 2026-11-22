@@ -142,6 +142,8 @@ impl Session {
     }
 
     pub fn assign_target(&mut self, target: &str, value: &str) -> Result<(), &'static str> {
+        let resolved = self.reference_name(target)?;
+        let target = resolved.as_ref();
         let base = subscript(target).map_or(target, |(base, _)| base);
         if self.readonly(base) {
             return Err("readonly variable");
@@ -184,6 +186,7 @@ impl Session {
             );
         }
         match name {
+            "BASH_VERSINFO" => (0..6).collect(),
             "DIRSTACK" => (0..=self.dir_stack.len() as i64).collect(),
             "FUNCNAME" if self.function_depth == 0 => Vec::new(),
             "FUNCNAME" => (0..self.function_names.len() as i64).collect(),
@@ -210,6 +213,12 @@ impl Session {
             };
         }
         match name {
+            "BASH_VERSINFO" => match index {
+                5 => Some(Self::machine_type()),
+                i => ["5", "2", "0", "1", "tonari"]
+                    .get(usize::try_from(i).ok()?)
+                    .map(|s| (*s).into()),
+            },
             "DIRSTACK" => self.stack_entry(index.try_into().ok()?),
             "FUNCNAME" if self.function_depth == 0 => None,
             "FUNCNAME" => self
@@ -235,6 +244,7 @@ impl Session {
             names.push("DIRSTACK".into());
         }
         names.push("BASH_SOURCE".into());
+        names.push("BASH_VERSINFO".into());
         if self.pipe_status.first.is_some() {
             names.push("PIPESTATUS".into());
         }
@@ -247,6 +257,10 @@ impl Session {
     }
 
     pub fn array_values(&self, name: &str) -> Vec<String> {
+        let Ok(resolved) = self.reference_name(name) else {
+            return Vec::new();
+        };
+        let name = resolved.as_ref();
         if let Some(map) = self.variables.get(name).and_then(Variable::associative) {
             return map
                 .ordered()
@@ -271,6 +285,11 @@ impl Session {
         items: &ArrayItems,
         global: bool,
     ) -> Result<(), &'static str> {
+        let resolved = self.reference_name(name)?;
+        let name = resolved.as_ref();
+        if subscript(name).is_some() {
+            return Err("cannot assign an array to an array element");
+        }
         let mut var = self.declared_variable(name, global).unwrap_or_default();
         if var.readonly {
             return Err("readonly variable");
@@ -400,6 +419,7 @@ impl Session {
                 name.into(),
                 Variable {
                     readonly: false,
+                    nameref: false,
                     integer: false,
                     declared: true,
                     value: inherited,
@@ -428,6 +448,7 @@ impl Session {
                 name.into(),
                 Variable {
                     readonly: false,
+                    nameref: false,
                     integer: false,
                     declared: false,
                     value: None,

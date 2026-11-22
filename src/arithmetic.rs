@@ -5,6 +5,9 @@ type Result<T> = std::result::Result<T, &'static str>;
 pub(crate) trait Variables {
     fn get(&self, name: &str) -> Option<String>;
     fn set(&mut self, name: &str, value: i64) -> Result<()>;
+    fn associative_key(&mut self, _name: &str, _source: &str) -> Option<Result<String>> {
+        None
+    }
     fn nounset(&self) -> bool {
         false
     }
@@ -15,11 +18,22 @@ impl Variables for Session {
         self.get(name)
     }
     fn set(&mut self, name: &str, value: i64) -> Result<()> {
+        if let Some((base, index)) = crate::session::array::subscript(name) {
+            return if self.is_associative(base) {
+                self.assign_key(base, index.into(), value.to_string())
+            } else {
+                self.assign_target(name, &value.to_string())
+            };
+        }
         if self.readonly(name) {
             return Err("readonly variable");
         }
         self.assign(name, &value.to_string());
         Ok(())
+    }
+    fn associative_key(&mut self, name: &str, source: &str) -> Option<Result<String>> {
+        self.is_associative(name)
+            .then(|| self.subscript_key(source))
     }
     fn nounset(&self) -> bool {
         self.nounset
@@ -123,7 +137,11 @@ impl<'a> Parser<'a> {
                 (Token::Number(&source[..n]), n)
             }
             Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => {
-                let n = length(source);
+                let mut n = length(source);
+                if source[n..].starts_with('[') {
+                    n += crate::parser::index_end(&source[n..])
+                        .map_err(|_| "missing array subscript")?;
+                }
                 (Token::Name(&source[..n]), n)
             }
             Some(b'$') => {
@@ -212,7 +230,7 @@ impl<'a> Parser<'a> {
                     binary(&op[..op.len() - 1], a, b)?
                 };
                 if active {
-                    variables.set(name, result)?;
+                    variables.set(&name, result)?;
                 }
                 left = Value::Number(result);
             } else {
@@ -233,7 +251,22 @@ impl<'a> Parser<'a> {
         }
         let mut value = match self.advance()? {
             Token::Number(s) => Value::Number(number(s)?),
-            Token::Name(n) => Value::Variable(n),
+            Token::Name(n) => {
+                let name =
+                    if active && let Some((base, index)) = crate::session::array::subscript(n) {
+                        if index.is_empty() {
+                            return Err("empty array subscript");
+                        }
+                        let index = match variables.associative_key(base, index) {
+                            Some(key) => key?,
+                            None => calculate(index, variables, depth + 1)?.to_string(),
+                        };
+                        std::borrow::Cow::Owned(format!("{base}[{index}]"))
+                    } else {
+                        std::borrow::Cow::Borrowed(n)
+                    };
+                Value::Variable(name)
+            }
             Token::Op("(") => {
                 let v = self.expression(variables, 1, active, depth + 1)?;
                 if self.advance()? != Token::Op(")") {
@@ -255,7 +288,7 @@ impl<'a> Parser<'a> {
                         };
                         let next = n.wrapping_add(if op == "++" { 1 } else { -1 });
                         if active {
-                            variables.set(name, next)?;
+                            variables.set(&name, next)?;
                         }
                         next
                     }
@@ -266,7 +299,7 @@ impl<'a> Parser<'a> {
         };
         if let Token::Op(op @ ("++" | "--")) = self.token {
             self.advance()?;
-            let Value::Variable(name) = value else {
+            let Value::Variable(ref name) = value else {
                 return Err("arithmetic increment requires a variable");
             };
             let old = value.read(variables, active, depth + 1)?;
@@ -279,18 +312,17 @@ impl<'a> Parser<'a> {
     }
 }
 
-#[derive(Clone, Copy)]
 enum Value<'a> {
     Number(i64),
-    Variable(&'a str),
+    Variable(std::borrow::Cow<'a, str>),
 }
 impl Value<'_> {
-    fn read(self, variables: &mut dyn Variables, active: bool, depth: u8) -> Result<i64> {
+    fn read(&self, variables: &mut dyn Variables, active: bool, depth: u8) -> Result<i64> {
         if !active {
             return Ok(0);
         }
         match self {
-            Self::Number(n) => Ok(n),
+            Self::Number(n) => Ok(*n),
             Self::Variable(name) => match variables.get(name) {
                 Some(s) => calculate(&s, variables, depth + 1),
                 None if variables.nounset() => Err("unbound arithmetic variable"),

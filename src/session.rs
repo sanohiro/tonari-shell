@@ -40,6 +40,7 @@ impl CharacterLocale {
 
 #[derive(Clone, Default)]
 struct Variable {
+    nameref: bool,
     readonly: bool,
     integer: bool,
     array_assigned: bool,
@@ -89,12 +90,18 @@ pub struct Session {
     // Only changed variables are stored here. Simple commands inherit the
     // original process environment without building a copy on startup.
     variables: BTreeMap<String, Variable>,
+    has_namerefs: bool,
+    reference_depth: std::cell::Cell<u8>,
     opt_offset: usize,
     logical_cwd: std::cell::OnceCell<PathBuf>,
     dir_stack: Vec<String>,
     shell_pid: ShellPid,
     pub interactive: bool,
     pub login: bool,
+    pub logout_started: bool,
+    pub history_enabled: bool,
+    pub verbose: bool,
+    pub(crate) history: Option<Rc<crate::history::Entries>>,
     pub command_string: bool,
     pub tested_depth: u32,
     pub errexit: bool,
@@ -167,6 +174,12 @@ impl Session {
                 "PPID",
                 "BASHOPTS",
                 "SHELLOPTS",
+                "BASH",
+                "BASH_VERSION",
+                "BASH_VERSINFO",
+                "HOSTTYPE",
+                "OSTYPE",
+                "MACHTYPE",
             ]
             .into_iter()
             .map(str::to_owned),
@@ -204,6 +217,9 @@ impl Session {
         }
         if self.nounset {
             flags.push('u');
+        }
+        if self.verbose {
+            flags.push('v');
         }
         if self.shopt.braceexpand {
             flags.push('B');
@@ -305,6 +321,7 @@ impl Session {
                     'h' => self.hashes.enabled = enable,
                     'm' => self.jobs.monitor = enable,
                     'u' => self.nounset = enable,
+                    'v' => self.verbose = enable,
                     'o' => {
                         let Some(name) = args.get(i) else {
                             let mut out = io::stdout().lock();
@@ -341,8 +358,38 @@ impl Session {
         0
     }
 
+    pub fn is_nameref(&self, name: &str) -> bool {
+        self.has_namerefs && self.variables.get(name).is_some_and(|v| v.nameref)
+    }
+
+    pub fn reference_name<'a>(&self, name: &'a str) -> Result<Cow<'a, str>, &'static str> {
+        if !self.has_namerefs {
+            return Ok(Cow::Borrowed(name));
+        }
+        let mut result = Cow::Borrowed(name);
+        for _ in 0..32 {
+            let (base, suffix) = array::subscript(&result)
+                .map_or((result.as_ref(), ""), |(base, _)| {
+                    (base, &result[base.len()..])
+                });
+            let Some(v) = self.variables.get(base).filter(|v| v.nameref) else {
+                return Ok(result);
+            };
+            let Some(target) = v.value.as_deref().filter(|t| !t.is_empty()) else {
+                return Ok(result);
+            };
+            if !suffix.is_empty() && array::subscript(target).is_some() {
+                return Err("invalid indexed name reference");
+            }
+            result = Cow::Owned(format!("{target}{suffix}"));
+        }
+        Err("circular name reference")
+    }
+
     pub fn get(&self, name: &str) -> Option<String> {
         if let Some(base) = name.strip_prefix('\u{1}') {
+            let resolved = self.reference_name(base).ok()?;
+            let base = resolved.as_ref();
             if let Some(map) = self.variables.get(base).and_then(Variable::associative) {
                 return Some(
                     map.ordered()
@@ -359,6 +406,16 @@ impl Session {
                     .collect::<Vec<_>>()
                     .join("\0"),
             );
+        }
+        if let Cow::Owned(target) = self.reference_name(name).ok()? {
+            let depth = self.reference_depth.get();
+            if depth >= 32 {
+                return None;
+            }
+            self.reference_depth.set(depth + 1);
+            let value = self.get(&target);
+            self.reference_depth.set(depth);
+            return value;
         }
         if let Some((base, index)) = array::subscript(name) {
             if self.is_associative(base) {
@@ -397,6 +454,11 @@ impl Session {
                 .into_os_string()
                 .into_string()
                 .ok(),
+            "BASH_VERSION" => Some("5.2.0(1)-tonari".into()),
+            "BASH_VERSINFO" => self.element(name, 0),
+            "HOSTTYPE" => Some(std::env::consts::ARCH.into()),
+            "OSTYPE" => Some(Self::os_type().into()),
+            "MACHTYPE" => Some(Self::machine_type()),
             "BASH" => std::env::current_exe()
                 .ok()?
                 .into_os_string()
@@ -411,15 +473,77 @@ impl Session {
         }
     }
 
+    fn os_type() -> &'static str {
+        if cfg!(target_os = "macos") {
+            "darwin"
+        } else {
+            "linux-gnu"
+        }
+    }
+
+    fn machine_type() -> String {
+        let system = if cfg!(target_os = "macos") {
+            "apple-darwin"
+        } else if cfg!(target_env = "musl") {
+            "unknown-linux-musl"
+        } else {
+            "unknown-linux-gnu"
+        };
+        format!("{}-{system}", std::env::consts::ARCH)
+    }
+
     pub fn readonly(&self, name: &str) -> bool {
-        Self::builtin_readonly(name) || self.variables.get(name).is_some_and(|var| var.readonly)
+        let Ok(target) = self.reference_name(name) else {
+            return true;
+        };
+        let base = array::subscript(&target).map_or(target.as_ref(), |(base, _)| base);
+        Self::builtin_readonly(base) || self.variables.get(base).is_some_and(|var| var.readonly)
     }
 
     fn builtin_readonly(name: &str) -> bool {
-        matches!(name, "UID" | "EUID" | "PPID" | "BASHOPTS" | "SHELLOPTS")
+        matches!(
+            name,
+            "UID" | "EUID" | "PPID" | "BASHOPTS" | "SHELLOPTS" | "BASH_VERSINFO"
+        )
+    }
+
+    pub fn initialize_shell_level(&mut self) {
+        let inherited = std::env::var("SHLVL")
+            .ok()
+            .and_then(|v| v.trim().parse::<i64>().ok())
+            .unwrap_or(0);
+        let level = inherited.saturating_add(1);
+        let level = if level >= 1000 {
+            eprintln!("tonari: warning: shell level ({level}) too high, resetting to 1");
+            1
+        } else {
+            level.max(0)
+        };
+        self.variables.insert(
+            "SHLVL".into(),
+            Variable {
+                value: Some(level.to_string()),
+                declared: true,
+                exported: true,
+                ..Variable::default()
+            },
+        );
     }
 
     pub fn assign(&mut self, name: &str, value: &str) {
+        match self.reference_name(name) {
+            Ok(Cow::Owned(target)) => {
+                if let Err(e) = self.assign_target(&target, value) {
+                    eprintln!("tonari: {name}: {e}");
+                }
+                return;
+            }
+            Err(e) => {
+                eprintln!("tonari: {name}: {e}");
+                return;
+            }
+            _ => {}
+        }
         if self.readonly(name) {
             return;
         }
@@ -455,6 +579,7 @@ impl Session {
             name.into(),
             Variable {
                 readonly: false,
+                nameref: false,
                 integer: false,
                 array_assigned: false,
                 elements: None,
@@ -526,6 +651,7 @@ impl Session {
                 name.clone(),
                 Variable {
                     readonly: false,
+                    nameref: false,
                     integer: false,
                     array_assigned: false,
                     elements: None,
@@ -709,6 +835,7 @@ impl Session {
             self.variables.insert(
                 name.into(),
                 Variable {
+                    nameref: false,
                     readonly,
                     integer,
                     array_assigned: false,
@@ -760,6 +887,7 @@ impl Session {
                 &name,
                 &Variable {
                     readonly: false,
+                    nameref: false,
                     integer: false,
                     array_assigned: false,
                     elements: None,
@@ -785,10 +913,35 @@ impl Session {
         if name == "PATH" {
             self.hashes.clear();
         }
+        if !self.shopt.localvar_unset
+            && let Some(index) = self
+                .locals
+                .iter()
+                .rposition(|scope| scope.0.contains_key(name))
+            && index + 1 < self.locals.len()
+        {
+            // Unsetting a caller's local exposes the binding it was shadowing.
+            let scope = &mut self.locals[index];
+            if let Some(original) = scope.0.remove(name).flatten() {
+                self.variables.insert(name.into(), original);
+            } else {
+                self.variables.remove(name);
+            }
+            if name == "OPTIND"
+                && let Some(offset) = scope.1.take()
+            {
+                self.opt_offset = offset;
+            }
+            if name == "GLOBIGNORE" {
+                self.shopt.glob.set_ignore(self.get(name).as_deref());
+            }
+            return;
+        }
         self.variables.insert(
             name.into(),
             Variable {
                 readonly: false,
+                nameref: false,
                 integer: false,
                 array_assigned: false,
                 elements: None,
@@ -804,6 +957,7 @@ impl Session {
 
     pub fn unset(&mut self, args: &[String]) -> u8 {
         let mut index = 0;
+        let mut literal_ref = false;
         let mut functions_only = false;
         let mut variables_only = false;
         while let Some(opt) = args.get(index) {
@@ -816,6 +970,7 @@ impl Session {
             }
             for flag in opt[1..].chars() {
                 match flag {
+                    'n' => literal_ref = true,
                     'v' => variables_only = true,
                     'f' => functions_only = true,
                     _ => {
@@ -831,9 +986,32 @@ impl Session {
             return 1;
         }
         let mut status = 0;
-        for name in &args[index..] {
+        for original in &args[index..] {
+            if literal_ref && !self.is_nameref(original) {
+                continue;
+            }
+            let resolved;
+            let name = if literal_ref || functions_only {
+                original
+            } else {
+                match self.reference_name(original) {
+                    Ok(Cow::Owned(n)) => {
+                        resolved = n;
+                        &resolved
+                    }
+                    Ok(_) => original,
+                    Err(e) => {
+                        eprintln!("tonari: unset: {original}: {e}");
+                        status = 1;
+                        continue;
+                    }
+                }
+            };
             let base = array::subscript(name).map_or(name.as_str(), |(base, _)| base);
-            if !functions_only && self.readonly(base) {
+            if !functions_only
+                && (Self::builtin_readonly(base)
+                    || self.variables.get(base).is_some_and(|v| v.readonly))
+            {
                 eprintln!("tonari: unset: {base}: readonly variable");
                 status = 1;
                 continue;
@@ -1020,6 +1198,7 @@ impl Session {
                     "OLDPWD".into(),
                     Variable {
                         readonly: false,
+                        nameref: false,
                         integer: false,
                         array_assigned: false,
                         elements: None,
@@ -1062,6 +1241,7 @@ fn print_declaration(out: &mut impl Write, name: &str, var: &Variable) -> io::Re
         (var.associative().is_some(), b'A'),
         (var.elements.is_some() && var.associative().is_none(), b'a'),
         (var.integer, b'i'),
+        (var.nameref, b'n'),
         (var.readonly, b'r'),
         (var.exported, b'x'),
     ] {

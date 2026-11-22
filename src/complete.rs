@@ -200,7 +200,21 @@ pub fn at(line: &str, cursor: usize, session: &mut Session, list: bool) -> Optio
     let start = context.start;
     let prefix = context.words.get(context.current)?;
     let command = (!first).then(|| context.words[0].as_str());
-    let default_source = if first && !prefix.contains('/') {
+    let default_source = if session.shopt.hostcomplete
+        && let Some(host) = prefix.strip_prefix('@')
+    {
+        let mut names: Vec<_> = host_names(host, session)
+            .into_iter()
+            .map(|s| format!("@{s}"))
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        if names.is_empty() {
+            Source::Files
+        } else {
+            Source::Words(names)
+        }
+    } else if first && !prefix.contains('/') {
         Source::Commands
     } else {
         Source::Files
@@ -306,6 +320,46 @@ fn common_command(prefix: &str, session: &Session) -> Option<Common> {
         ControlFlow::Continue(())
     });
     common
+}
+
+pub(crate) fn user_names(prefix: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    // Consume each libc-owned entry before requesting the next one.
+    unsafe {
+        libc::setpwent();
+        loop {
+            let entry = libc::getpwent();
+            if entry.is_null() {
+                break;
+            }
+            if let Ok(name) = std::ffi::CStr::from_ptr((*entry).pw_name).to_str()
+                && name.starts_with(prefix)
+            {
+                names.push(name.to_owned());
+            }
+        }
+        libc::endpwent();
+    }
+    names
+}
+
+pub(crate) fn host_names(prefix: &str, session: &Session) -> Vec<String> {
+    let path = session
+        .get("HOSTFILE")
+        .unwrap_or_else(|| "/etc/hosts".into());
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .flat_map(|line| {
+            line.split('#')
+                .next()
+                .unwrap_or("")
+                .split_whitespace()
+                .skip(1)
+        })
+        .filter(|s| s.starts_with(prefix))
+        .map(str::to_owned)
+        .collect()
 }
 
 pub fn command_names(prefix: &str, session: &Session) -> Vec<String> {

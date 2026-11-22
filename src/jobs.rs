@@ -400,6 +400,22 @@ impl Jobs {
         }
         result.map(|interrupt| interrupt.unwrap_or_else(|| job.status()))
     }
+    pub fn completion_names(&mut self, action: &str, prefix: &str) -> Vec<String> {
+        self.poll();
+        self.inherited
+            .iter()
+            .chain(&self.table)
+            .filter(|job| match action {
+                "running" => job.active() && !job.stopped(),
+                "stopped" => job.stopped(),
+                _ => true,
+            })
+            .filter_map(|job| job.name.split_whitespace().next())
+            .filter(|name| name.starts_with(prefix))
+            .map(str::to_owned)
+            .collect()
+    }
+
     pub fn hangup(&self) {
         for job in &self.table {
             job.hangup();

@@ -6,6 +6,7 @@ use super::{Session, Variable, is_identifier, print_declaration};
 #[derive(Default)]
 struct Options {
     print: bool,
+    nameref: Option<bool>,
     array: bool,
     associative: bool,
     functions: bool,
@@ -62,6 +63,7 @@ pub(super) fn run(
                 'r' => flags.readonly = Some(on),
                 'g' => flags.global = on,
                 'i' => flags.integer = Some(on),
+                'n' => flags.nameref = Some(on),
                 'I' => flags.inherit = on,
                 'p' => flags.print = true,
                 'x' => flags.exported = Some(on),
@@ -129,6 +131,7 @@ pub(super) fn run(
             && flags.readonly.is_none()
             && !flags.array
             && !flags.associative
+            && flags.nameref.is_none()
             && flags.integer.is_none()
         {
             return crate::execute::Flow::Continue(session.set(&[]));
@@ -156,7 +159,8 @@ pub(super) fn run(
                     && (flags.readonly == Some(true) && !var.readonly
                         || flags.array && (var.elements.is_none() || var.associative().is_some())
                         || flags.associative && var.associative().is_none()
-                        || flags.integer == Some(true) && !var.integer)
+                        || flags.integer == Some(true) && !var.integer
+                        || flags.nameref == Some(true) && !var.nameref)
                 {
                     continue;
                 }
@@ -183,6 +187,29 @@ pub(super) fn run(
         let append = value.is_some() && name.ends_with('+');
         let name = if append {
             &name[..name.len() - 1]
+        } else {
+            name
+        };
+        let base = super::array::subscript(name).map_or(name, |(base, _)| base);
+        let creates_local = !readonly
+            && !flags.global
+            && session
+                .locals
+                .last()
+                .is_some_and(|scope| !scope.0.contains_key(base));
+        let resolved;
+        let name = if !creates_local && flags.nameref.is_none() && session.is_nameref(base) {
+            match session.reference_name(name) {
+                Ok(target) => {
+                    resolved = target;
+                    resolved.as_ref()
+                }
+                Err(e) => {
+                    eprintln!("tonari: {command}: {name}: {e}");
+                    status = 1;
+                    continue;
+                }
+            }
         } else {
             name
         };
@@ -235,6 +262,7 @@ pub(super) fn run(
             scope
                 .0
                 .insert(name.into(), session.variables.get(name).cloned());
+            var.nameref = false;
             if !flags.inherit && !session.shopt.localvar_inherit {
                 var.readonly = false;
                 var.integer = false;
@@ -242,6 +270,28 @@ pub(super) fn run(
                 var.elements = None;
                 var.array_assigned = false;
             }
+        }
+        if let Some(on) = flags.nameref {
+            let dest = value.or(var.value.as_deref()).unwrap_or("");
+            if on
+                && (target.is_some()
+                    || var.elements.is_some()
+                    || flags.array
+                    || flags.associative
+                    || array.is_some()
+                    || !dest.is_empty()
+                        && !(is_identifier(dest)
+                            || super::array::subscript(dest).is_some_and(|(base, expr)| {
+                                is_identifier(base) && !expr.is_empty()
+                            }))
+                    || dest == name)
+            {
+                eprintln!("tonari: {command}: {name}: invalid name reference");
+                status = 1;
+                continue;
+            }
+            var.nameref = on;
+            session.has_namerefs |= on;
         }
         if let Some(integer) = flags.integer {
             var.integer = integer;
@@ -392,9 +442,21 @@ impl Session {
             return Some(var);
         }
         {
+            if name == "BASH_VERSINFO" {
+                return Some(Variable {
+                    declared: true,
+                    readonly: true,
+                    array_assigned: true,
+                    elements: Some(std::rc::Rc::new(super::array::Elements::Dense(
+                        self.array_values(name),
+                    ))),
+                    ..Variable::default()
+                });
+            }
             let value = self.inherited_value(name);
             (value.is_some() || name == "OLDPWD").then(|| Variable {
                 readonly: Self::builtin_readonly(name),
+                nameref: false,
                 integer: matches!(name, "PPID" | "EUID" | "UID"),
                 array_assigned: false,
                 elements: None,

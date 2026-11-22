@@ -68,17 +68,17 @@ Builtin	exec	match	match	match
 Builtin	exit	match	match	match
 Builtin	export	match	match	match
 Builtin	false	match	match	match
-Builtin	fc	missing interface	missing interface	missing interface
+Builtin	fc	match	match	match
 Builtin	fg	match	match	match
 Builtin	getopts	match	match	match
 Builtin	hash	match	match	match
 Builtin	help	missing interface	missing interface	missing interface
-Builtin	history	missing interface	missing interface	missing interface
+Builtin	history	match	match	match
 Builtin	jobs	match	match	match
 Builtin	kill	match	match	match
 Builtin	let	match	match	match
 Builtin	local	match	match	match
-Builtin	logout	missing interface	missing interface	missing interface
+Builtin	logout	match	match	match
 Builtin	mapfile	match	match	match
 Builtin	popd	match	match	match
 Builtin	printf	match	match	match
@@ -147,7 +147,7 @@ Builtin option	compgen -j	match	match	match
 Builtin option	compgen -k	match	match	match
 Builtin option	compgen -o	match	match	match
 Builtin option	compgen -s	match	match	match
-Builtin option	compgen -u	different	different	different
+Builtin option	compgen -u	match	match	match
 Builtin option	compgen -v	match	match	match
 Builtin option	complete -A	match	match	match
 Builtin option	complete -C	match	match	match
@@ -167,13 +167,13 @@ Builtin option	complete -d	match	match	match
 Builtin option	complete -e	match	match	match
 Builtin option	complete -f	match	match	match
 Builtin option	complete -g	different	different	different
-Builtin option	complete -j	different	different	different
+Builtin option	complete -j	match	match	match
 Builtin option	complete -k	match	match	match
 Builtin option	complete -o	match	match	match
 Builtin option	complete -p	match	match	match
 Builtin option	complete -r	match	match	match
 Builtin option	complete -s	different	different	different
-Builtin option	complete -u	different	different	different
+Builtin option	complete -u	match	match	match
 Builtin option	complete -v	match	match	match
 Builtin option	compopt -D	match	match	match
 Builtin option	compopt -E	match	match	match
@@ -187,7 +187,7 @@ Builtin option	declare -f	different	different	different
 Builtin option	declare -g	match	match	match
 Builtin option	declare -i	match	match	match
 Builtin option	declare -l	different	different	different
-Builtin option	declare -n	different	different	different
+Builtin option	declare -n	match	match	match
 Builtin option	declare -p	match	match	match
 Builtin option	declare -r	match	match	match
 Builtin option	declare -t	different	different	different
@@ -216,11 +216,11 @@ Builtin option	exec -l	match	match	match
 Builtin option	export -f	different	different	different
 Builtin option	export -n	match	match	match
 Builtin option	export -p	match	match	match
-Builtin option	fc -e	missing interface	missing interface	missing interface
-Builtin option	fc -l	missing interface	missing interface	missing interface
-Builtin option	fc -n	missing interface	missing interface	missing interface
-Builtin option	fc -r	missing interface	missing interface	missing interface
-Builtin option	fc -s	missing interface	missing interface	missing interface
+Builtin option	fc -e	context unprobed	context unprobed	context unprobed
+Builtin option	fc -l	context unprobed	context unprobed	context unprobed
+Builtin option	fc -n	context unprobed	context unprobed	context unprobed
+Builtin option	fc -r	context unprobed	context unprobed	context unprobed
+Builtin option	fc -s	context unprobed	context unprobed	context unprobed
 Builtin option	hash -d	match	match	match
 Builtin option	hash -l	match	match	match
 Builtin option	hash -p	match	match	match
@@ -229,14 +229,14 @@ Builtin option	hash -t	match	match	match
 Builtin option	help -d	missing interface	missing interface	missing interface
 Builtin option	help -m	missing interface	missing interface	missing interface
 Builtin option	help -s	missing interface	missing interface	missing interface
-Builtin option	history -a	missing interface	missing interface	missing interface
-Builtin option	history -c	missing interface	missing interface	missing interface
-Builtin option	history -d	missing interface	missing interface	missing interface
-Builtin option	history -n	missing interface	missing interface	missing interface
-Builtin option	history -p	missing interface	missing interface	missing interface
-Builtin option	history -r	missing interface	missing interface	missing interface
-Builtin option	history -s	missing interface	missing interface	missing interface
-Builtin option	history -w	missing interface	missing interface	missing interface
+Builtin option	history -a	context unprobed	context unprobed	context unprobed
+Builtin option	history -c	context unprobed	context unprobed	context unprobed
+Builtin option	history -d	context unprobed	context unprobed	context unprobed
+Builtin option	history -n	context unprobed	context unprobed	context unprobed
+Builtin option	history -p	context unprobed	context unprobed	context unprobed
+Builtin option	history -r	context unprobed	context unprobed	context unprobed
+Builtin option	history -s	context unprobed	context unprobed	context unprobed
+Builtin option	history -w	context unprobed	context unprobed	context unprobed
 Builtin option	jobs -l	match	match	match
 Builtin option	jobs -n	match	different	match
 Builtin option	jobs -p	match	match	match
@@ -303,7 +303,7 @@ Builtin option	set -o	match	match	match
 Builtin option	set -p	different	different	different
 Builtin option	set -t	different	different	different
 Builtin option	set -u	interface only	interface only	interface only
-Builtin option	set -v	different	different	different
+Builtin option	set -v	interface only	interface only	interface only
 Builtin option	set -x	different	different	different
 Builtin option	shopt -o	match	match	match
 Builtin option	shopt -p	match	match	match
@@ -328,7 +328,7 @@ Builtin option	typeset -f	different	different	different
 Builtin option	typeset -g	match	match	match
 Builtin option	typeset -i	match	match	match
 Builtin option	typeset -l	different	different	different
-Builtin option	typeset -n	different	different	different
+Builtin option	typeset -n	match	match	match
 Builtin option	typeset -p	match	match	match
 Builtin option	typeset -r	match	match	match
 Builtin option	typeset -t	different	different	different
@@ -362,7 +362,7 @@ Builtin option	umask -S	match	match	match
 Builtin option	umask -p	match	match	match
 Builtin option	unalias -a	match	match	match
 Builtin option	unset -f	match	match	match
-Builtin option	unset -n	stderr differs	stderr differs	stderr differs
+Builtin option	unset -n	match	match	match
 Builtin option	unset -v	match	match	match
 Builtin option	wait -f	match	match	match
 Builtin option	wait -n	match	match	match
@@ -390,16 +390,16 @@ Completion action	file	match	match	match
 Completion action	function	match	match	match
 Completion action	group	different	different	stderr differs
 Completion action	helptopic	different	different	different
-Completion action	hostname	stderr differs	stderr differs	stderr differs
-Completion action	job	different	different	different
+Completion action	hostname	interface only	interface only	interface only
+Completion action	job	match	match	match
 Completion action	keyword	match	match	match
-Completion action	running	different	different	different
+Completion action	running	match	match	match
 Completion action	service	different	different	different
-Completion action	setopt	different	different	different
-Completion action	shopt	different	different	different
+Completion action	setopt	match	match	match
+Completion action	shopt	match	match	match
 Completion action	signal	stderr differs	stderr differs	stderr differs
-Completion action	stopped	stderr differs	stderr differs	stderr differs
-Completion action	user	different	different	different
+Completion action	stopped	interface only	interface only	interface only
+Completion action	user	match	match	match
 Completion action	variable	match	match	match
 Completion option	bashdefault	interface only	interface only	interface only
 Completion option	default	interface only	interface only	interface only
@@ -415,7 +415,7 @@ Conditional	-G	match	match	match
 Conditional	-L	match	match	match
 Conditional	-N	different	different	different
 Conditional	-O	match	match	match
-Conditional	-R	different	different	different
+Conditional	-R	match	match	match
 Conditional	-S	match	match	match
 Conditional	-a	match	match	match
 Conditional	-b	fixture unavailable	fixture unavailable	match
@@ -537,25 +537,25 @@ GNU regression group	run-trap	different	different	—
 GNU regression group	run-type	different	different	—
 GNU regression group	run-varenv	different	different	—
 GNU regression group	run-vredir	different	different	—
-History expansion	!!	different	different	different
-History expansion	!!:$	different	different	different
+History expansion	!!	match	match	match
+History expansion	!!:$	match	match	match
 History expansion	!!:$:e	different	different	different
-History expansion	!!:$:h	different	different	different
-History expansion	!!:$:r	different	different	different
-History expansion	!!:$:t	different	different	different
-History expansion	!!:*	different	different	different
+History expansion	!!:$:h	match	match	match
+History expansion	!!:$:r	match	match	match
+History expansion	!!:$:t	match	match	match
+History expansion	!!:*	match	match	match
 History expansion	!!:0	different	different	different
 History expansion	!!:1-2	different	different	different
 History expansion	!!:2*	different	different	different
-History expansion	!!:^	different	different	different
+History expansion	!!:^	match	match	match
 History expansion	!!:p	different	different	different
 History expansion	!!:q	different	different	different
 History expansion	!!:s/file/name/	different	different	different
 History expansion	!!:x	different	different	different
-History expansion	!-1	different	different	different
-History expansion	!1	different	different	different
-History expansion	!?file?	different	different	different
-History expansion	!echo	different	different	different
+History expansion	!-1	match	match	match
+History expansion	!1	match	match	match
+History expansion	!?file?	match	match	match
+History expansion	!echo	match	match	match
 Invocation	+O	match	match	match
 Invocation	+o	match	match	match
 Invocation	--	match	match	match
@@ -564,7 +564,7 @@ Invocation	--dump-po-strings	different	different	different
 Invocation	--dump-strings	different	different	different
 Invocation	--help	different	different	different
 Invocation	--init-file	stderr differs	stderr differs	stderr differs
-Invocation	--login	different	different	different
+Invocation	--login	match	match	match
 Invocation	--noediting	interface only	interface only	interface only
 Invocation	--noprofile	match	match	match
 Invocation	--norc	interface only	interface only	interface only
@@ -590,7 +590,7 @@ Invocation	-f	match	match	match
 Invocation	-h	different	different	different
 Invocation	-i	stderr differs	stderr differs	stderr differs
 Invocation	-k	different	different	different
-Invocation	-l	different	different	different
+Invocation	-l	match	match	match
 Invocation	-m	different	different	different
 Invocation	-n	match	match	match
 Invocation	-o	match	match	match
@@ -599,9 +599,9 @@ Invocation	-r	different	different	different
 Invocation	-s	match	match	match
 Invocation	-t	different	different	different
 Invocation	-u	stderr differs	stderr differs	stderr differs
-Invocation	-v	different	different	different
+Invocation	-v	stderr differs	stderr differs	stderr differs
 Invocation	-x	different	different	different
-Invocation	login logout	different	different	different
+Invocation	login logout	match	match	match
 Invocation	read script file	match	match	match
 Invocation	stdin script	match	match	match
 Manual section	A Programmable Completion Example	index	index	index
@@ -1241,10 +1241,10 @@ Shell language	function definition redirections	match	match	match
 Shell language	function export	different	different	different
 Shell language	group redirections	match	match	match
 Shell language	grouped pipeline status	match	match	match
-Shell language	history event expansion	different	different	different
-Shell language	history modifiers	different	different	different
-Shell language	history search	different	different	different
-Shell language	history word designator	different	different	different
+Shell language	history event expansion	stderr differs	stderr differs	stderr differs
+Shell language	history modifiers	match	match	match
+Shell language	history search	match	match	match
+Shell language	history word designator	match	match	match
 Shell language	if then elif else fi	match	match	match
 Shell language	indexed arrays	match	match	match
 Shell language	line continuation	match	match	match
@@ -1252,7 +1252,7 @@ Shell language	lists and short-circuit	match	match	match
 Shell language	local variable inheritance	match	match	match
 Shell language	locale translation syntax	match	match	match
 Shell language	merged stderr pipeline	match	match	match
-Shell language	nameref	different	different	different
+Shell language	nameref	match	match	match
 Shell language	negation	match	match	match
 Shell language	pathname expansion of leading dots	match	match	match
 Shell language	pipeline	match	match	match
@@ -1375,8 +1375,8 @@ Variable	BASH_REMATCH	match	match	match
 Variable	BASH_SOURCE	match	match	match
 Variable	BASH_SUBSHELL	different	different	different
 Variable	BASH_TRAPSIG	—	different	—
-Variable	BASH_VERSINFO	different	different	different
-Variable	BASH_VERSION	different	different	different
+Variable	BASH_VERSINFO	match	match	match
+Variable	BASH_VERSION	match	match	match
 Variable	BASH_XTRACEFD	different	different	different
 Variable	CDPATH	match	match	match
 Variable	CHILD_MAX	match	match	match
@@ -1397,7 +1397,7 @@ Variable	EPOCHREALTIME	different	different	different
 Variable	EPOCHSECONDS	different	different	different
 Variable	EUID	match	match	match
 Variable	EXECIGNORE	different	different	different
-Variable	FCEDIT	different	different	different
+Variable	FCEDIT	match	match	match
 Variable	FIGNORE	different	different	different
 Variable	FUNCNAME	match	match	match
 Variable	FUNCNEST	different	different	different
@@ -1405,16 +1405,16 @@ Variable	GLOBIGNORE	match	match	match
 Variable	GLOBSORT	—	different	—
 Variable	GROUPS	different	different	different
 Variable	HISTCMD	missing default	missing default	missing default
-Variable	HISTCONTROL	different	different	different
-Variable	HISTFILE	different	different	different
-Variable	HISTFILESIZE	different	different	different
-Variable	HISTIGNORE	different	different	different
-Variable	HISTSIZE	different	different	different
+Variable	HISTCONTROL	match	match	match
+Variable	HISTFILE	match	match	match
+Variable	HISTFILESIZE	match	match	match
+Variable	HISTIGNORE	match	match	match
+Variable	HISTSIZE	match	match	match
 Variable	HISTTIMEFORMAT	different	different	different
 Variable	HOME	match	match	match
-Variable	HOSTFILE	different	different	different
+Variable	HOSTFILE	match	match	match
 Variable	HOSTNAME	missing default	missing default	missing default
-Variable	HOSTTYPE	missing default	missing default	missing default
+Variable	HOSTTYPE	interface only	interface only	interface only
 Variable	IFS	match	match	match
 Variable	IGNOREEOF	different	different	different
 Variable	INPUTRC	interface only	interface only	interface only
@@ -1428,7 +1428,7 @@ Variable	LC_NUMERIC	different	different	different
 Variable	LC_TIME	different	different	different
 Variable	LINENO	different	different	different
 Variable	LINES	match	match	match
-Variable	MACHTYPE	missing default	missing default	missing default
+Variable	MACHTYPE	interface only	interface only	interface only
 Variable	MAIL	different	different	different
 Variable	MAILCHECK	different	different	different
 Variable	MAILPATH	different	different	different
@@ -1437,7 +1437,7 @@ Variable	OLDPWD	match	match	match
 Variable	OPTARG	match	match	match
 Variable	OPTERR	match	match	match
 Variable	OPTIND	match	match	match
-Variable	OSTYPE	missing default	missing default	missing default
+Variable	OSTYPE	interface only	interface only	interface only
 Variable	PATH	match	match	match
 Variable	PIPESTATUS	match	match	match
 Variable	POSIXLY_CORRECT	different	different	different
@@ -1459,7 +1459,7 @@ Variable	REPLY	match	match	match
 Variable	SECONDS	match	match	match
 Variable	SHELL	match	match	match
 Variable	SHELLOPTS	match	match	match
-Variable	SHLVL	different	different	different
+Variable	SHLVL	match	match	match
 Variable	SRANDOM	different	different	different
 Variable	TIMEFORMAT	different	different	different
 Variable	TMOUT	different	different	control inconclusive
@@ -1475,7 +1475,7 @@ set -o	errtrace	match	match	match
 set -o	functrace	match	match	match
 set -o	hashall	interface only	interface only	interface only
 set -o	histexpand	different	different	different
-set -o	history	different	different	different
+set -o	history	interface only	interface only	interface only
 set -o	ignoreeof	different	different	different
 set -o	interactive-comments	different	different	different
 set -o	keyword	different	different	different
@@ -1491,7 +1491,7 @@ set -o	physical	different	different	different
 set -o	pipefail	match	match	match
 set -o	posix	different	different	different
 set -o	privileged	different	different	different
-set -o	verbose	different	different	different
+set -o	verbose	stderr differs	stderr differs	stderr differs
 set -o	vi	different	different	different
 set -o	xtrace	different	different	different
 shopt	array_expand_once	—	missing interface	—
@@ -1526,18 +1526,18 @@ shopt	globasciiranges	missing interface	missing interface	missing interface
 shopt	globskipdots	match	match	match
 shopt	globstar	match	match	match
 shopt	gnu_errfmt	missing interface	missing interface	missing interface
-shopt	histappend	missing interface	missing interface	missing interface
+shopt	histappend	interface only	interface only	interface only
 shopt	histreedit	missing interface	missing interface	missing interface
 shopt	histverify	missing interface	missing interface	missing interface
-shopt	hostcomplete	missing interface	missing interface	missing interface
+shopt	hostcomplete	interface only	interface only	interface only
 shopt	huponexit	interface only	interface only	interface only
 shopt	inherit_errexit	match	match	match
 shopt	interactive_comments	missing interface	missing interface	missing interface
 shopt	lastpipe	missing interface	missing interface	missing interface
 shopt	lithist	missing interface	missing interface	missing interface
 shopt	localvar_inherit	match	match	match
-shopt	localvar_unset	missing interface	missing interface	missing interface
-shopt	login_shell	missing interface	missing interface	missing interface
+shopt	localvar_unset	interface only	interface only	interface only
+shopt	login_shell	interface only	interface only	interface only
 shopt	mailwarn	missing interface	missing interface	missing interface
 shopt	no_empty_cmd_completion	missing interface	missing interface	missing interface
 shopt	nocaseglob	missing interface	missing interface	missing interface

@@ -8,7 +8,6 @@ use crate::Session;
 
 #[derive(Default)]
 pub struct History {
-    pub local: Vec<String>,
     shared: Vec<String>,
     shared_query: String,
     shared_match: Option<usize>,
@@ -70,8 +69,83 @@ fn decode(value: &str) -> Option<String> {
     Some(text)
 }
 
-impl History {
-    pub fn accepts(&self, session: &Session, source: &str) -> bool {
+pub(crate) mod commands;
+
+#[derive(Clone, Default)]
+pub(crate) struct Entries {
+    pub lines: Vec<String>,
+    base: usize,
+    current: Option<usize>,
+    written: usize,
+    imported: Option<(PathBuf, usize)>,
+}
+
+impl Session {
+    pub(crate) fn history_lines(&self) -> &[String] {
+        self.history.as_deref().map_or(&[], |h| h.lines.as_slice())
+    }
+    fn history_mut(&mut self) -> &mut Entries {
+        std::rc::Rc::make_mut(self.history.get_or_insert_with(Default::default))
+    }
+    fn history_limit(&self, key: &str, default: usize) -> usize {
+        self.get(key)
+            .and_then(|s| s.parse::<i64>().ok())
+            .map_or(default, |n| usize::try_from(n).unwrap_or(usize::MAX))
+    }
+    pub(crate) fn begin_history_line(&mut self, text: &str) -> bool {
+        if !self.history_enabled || !self.accept_history(text, self.history_lines().last()) {
+            return false;
+        }
+        self.push_history(text.strip_suffix('\n').unwrap_or(text), true);
+        true
+    }
+    fn push_history(&mut self, text: &str, current: bool) {
+        let limit = self.history_limit("HISTSIZE", 500);
+        if limit == 0 {
+            return;
+        }
+        let erase = self
+            .get("HISTCONTROL")
+            .is_some_and(|v| v.split(':').any(|w| w == "erasedups"));
+        let h = self.history_mut();
+        if erase {
+            for i in (0..h.lines.len()).rev() {
+                if h.lines[i] == text {
+                    h.remove(i);
+                }
+            }
+        }
+        h.lines.push(text.into());
+        if h.lines.len() > limit {
+            let count = h.lines.len() - limit;
+            h.lines.drain(..count);
+            h.base += count;
+            h.written = h.written.saturating_sub(count);
+        }
+        h.current = current.then(|| h.lines.len() - 1);
+    }
+    pub(crate) fn finish_history_line(&mut self) {
+        if let Some(data) = &mut self.history {
+            std::rc::Rc::make_mut(data).current = None;
+        }
+    }
+
+    pub(crate) fn persist_current_history(&mut self, cwd: Option<&str>, status: u8) {
+        let Some(h) = self.history.as_deref() else {
+            return;
+        };
+        let Some(index) = h.current else { return };
+        let line = &h.lines[index];
+        if self.history_enabled && self.accept_history(line, h.lines[..index].last()) {
+            History::persist(self, line, cwd, status);
+        } else {
+            self.history_mut().discard_current();
+        }
+    }
+
+    fn accept_history(&self, source: &str, previous: Option<&String>) -> bool {
+        let session = self;
+
         let text = source.strip_suffix('\n').unwrap_or(source);
         let limit = session
             .get("HISTSIZE")
@@ -80,7 +154,7 @@ impl History {
         if limit == 0 || text.trim().is_empty() {
             return false;
         }
-        let previous = self.local.last().map(String::as_str);
+        let previous = previous.map(String::as_str);
         let control = session.get("HISTCONTROL").unwrap_or_default();
         for rule in control.split(':') {
             if matches!(rule, "ignorespace" | "ignoreboth") && text.starts_with(' ') {
@@ -104,21 +178,32 @@ impl History {
         }
         true
     }
+}
 
-    pub fn record(&mut self, session: &Session, source: &str, cwd: Option<&str>, status: u8) {
+impl Entries {
+    fn remove(&mut self, index: usize) {
+        self.lines.remove(index);
+        if index < self.written {
+            self.written -= 1;
+        }
+        self.current = self.current.and_then(|j| {
+            if j == index {
+                None
+            } else {
+                Some(j - usize::from(index < j))
+            }
+        });
+    }
+    fn discard_current(&mut self) {
+        if let Some(i) = self.current {
+            self.remove(i);
+        }
+    }
+}
+
+impl History {
+    pub fn persist(session: &Session, source: &str, cwd: Option<&str>, status: u8) {
         let text = source.strip_suffix('\n').unwrap_or(source);
-        let control = session.get("HISTCONTROL").unwrap_or_default();
-        let limit = session
-            .get("HISTSIZE")
-            .and_then(|s| s.parse::<i64>().ok())
-            .unwrap_or(500);
-        if control.split(':').any(|v| v == "erasedups") {
-            self.local.retain(|v| v != text);
-        }
-        self.local.push(text.to_owned());
-        if limit > 0 && self.local.len() > limit as usize {
-            self.local.drain(..self.local.len() - limit as usize);
-        }
         let Some(path) = file(session) else {
             return;
         };
@@ -239,9 +324,9 @@ impl History {
         }
     }
 
-    pub fn search(&self, query: &str, skip: usize) -> Option<&str> {
+    pub fn search<'a>(&'a self, local: &'a [String], query: &str, skip: usize) -> Option<&'a str> {
         let entries = if self.shared.is_empty() {
-            &self.local
+            local
         } else {
             &self.shared
         };
@@ -253,17 +338,18 @@ impl History {
             .map(String::as_str)
     }
 
-    pub fn suggestion(
-        &mut self,
+    pub fn suggestion<'a>(
+        &'a mut self,
+        local: &'a [String],
         prefix: &str,
         shared: bool,
         mut may_scan: impl FnMut() -> bool,
-    ) -> Option<&str> {
+    ) -> Option<&'a str> {
         if prefix.is_empty() {
             return None;
         }
         let suffix = |s: &'_ String| s.len() > prefix.len() && s.starts_with(prefix);
-        if let Some(command) = self.local.iter().rev().find(|s| suffix(s)) {
+        if let Some(command) = local.iter().rev().find(|s| suffix(s)) {
             return Some(&command[prefix.len()..]);
         }
         if !shared || self.shared.is_empty() {
@@ -316,26 +402,29 @@ mod tests {
             .extend((0..5000).map(|n| format!("padding {n}")));
         let mut polls = 0;
         assert_eq!(
-            history.suggestion("word", true, || {
+            history.suggestion(&[], "word", true, || {
                 polls += 1;
                 polls == 1
             }),
             None
         );
         assert_eq!(polls, 2);
-        assert_eq!(history.suggestion("word", true, || true), Some(" two"));
-        assert_eq!(history.suggestion("word t", true, || false), Some("wo"));
-        assert_eq!(history.suggestion("word o", true, || true), Some("ne"));
-        assert_eq!(history.suggestion("word z", true, || true), None);
+        assert_eq!(history.suggestion(&[], "word", true, || true), Some(" two"));
         assert_eq!(
-            history.suggestion("word zz", true, || panic!("known miss")),
+            history.suggestion(&[], "word t", true, || false),
+            Some("wo")
+        );
+        assert_eq!(history.suggestion(&[], "word o", true, || true), Some("ne"));
+        assert_eq!(history.suggestion(&[], "word z", true, || true), None);
+        assert_eq!(
+            history.suggestion(&[], "word zz", true, || panic!("known miss")),
             None
         );
         history.read_records(
             b"1\t2\t0\t/tmp\tword zzz\n1\t2\t0\t/tmp\tother\n".as_slice(),
             || false,
         );
-        assert_eq!(history.suggestion("word zz", true, || true), Some("z"));
+        assert_eq!(history.suggestion(&[], "word zz", true, || true), Some("z"));
     }
 
     #[test]

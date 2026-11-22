@@ -142,6 +142,21 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
     let mut all = true;
     for name in &cmd.words[index..] {
         let mut found = false;
+        if !force_path
+            && session.shopt.expand_aliases
+            && let Some(value) = session.aliases.get(name)
+        {
+            let result = match format {
+                Format::Verbose => writeln!(out, "{name} is aliased to `{value}'"),
+                Format::Kind => writeln!(out, "alias"),
+                Format::Name => writeln!(out, "{}", crate::alias::declaration(name, value)),
+                Format::Path => Ok(()),
+            };
+            if result.is_err() {
+                return 1;
+            }
+            found = true;
+        }
         let keyword = matches!(
             name.as_str(),
             "if" | "then"
@@ -171,7 +186,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                 "a shell builtin",
             ),
         ] {
-            if !force_path && present {
+            if !force_path && present && (!found || search_all) {
                 let result = match format {
                     Format::Verbose => writeln!(out, "{name} is {label}"),
                     Format::Kind => writeln!(out, "{kind}"),

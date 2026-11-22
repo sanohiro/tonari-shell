@@ -395,6 +395,10 @@ pub fn hanging_up() -> bool {
     TERMINATING.load(Relaxed) == libc::SIGHUP
 }
 
+pub(crate) fn input_interrupted() -> bool {
+    TERMINATING.load(Relaxed) != 0 || PENDING.load(Relaxed) != 0
+}
+
 pub fn pending() -> Option<i32> {
     let mask = PENDING.load(Relaxed);
     (mask != 0).then(|| mask.trailing_zeros() as i32)

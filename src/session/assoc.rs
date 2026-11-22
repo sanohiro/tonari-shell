@@ -72,6 +72,10 @@ impl Variable {
 
 impl Session {
     pub fn is_associative(&self, name: &str) -> bool {
+        let Ok(resolved) = self.reference_name(name) else {
+            return false;
+        };
+        let name = resolved.as_ref();
         self.variables
             .get(name)
             .and_then(Variable::associative)
@@ -79,6 +83,8 @@ impl Session {
     }
 
     pub fn assoc_value(&self, name: &str, key: &str) -> Option<&str> {
+        let resolved = self.reference_name(name).ok()?;
+        let name = resolved.as_ref();
         self.variables
             .get(name)?
             .associative()?
@@ -92,6 +98,8 @@ impl Session {
         key: String,
         value: String,
     ) -> Result<(), &'static str> {
+        let resolved = self.reference_name(name)?;
+        let name = resolved.as_ref();
         if self.readonly(name) {
             return Err("readonly variable");
         }

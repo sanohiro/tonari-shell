@@ -39,12 +39,13 @@ impl Drop for Terminal {
 }
 
 fn byte() -> io::Result<Option<u8>> {
-    let mut key = 0;
-    let n = unsafe { libc::read(0, (&mut key as *mut u8).cast(), 1) };
-    if n < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok((n == 1).then_some(key))
+    let mut key = [0u8];
+    loop {
+        match crate::terminal_read(&mut key) {
+            Ok(n) => return Ok((n == 1).then_some(key[0])),
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+            Err(e) => return Err(e),
+        }
     }
 }
 
@@ -227,7 +228,7 @@ pub fn line(prompt: &str, history: &mut History, session: &mut Session) -> io::R
     let mut screen = Screen::new();
     let mut text = String::new();
     let mut cursor = 0;
-    let mut hist = history.local.len();
+    let mut hist = session.history_lines().len();
     let mut draft = String::new();
     let mut search: Option<(String, usize, String)> = None;
     let mut last_tab = false;
@@ -236,7 +237,7 @@ pub fn line(prompt: &str, history: &mut History, session: &mut Session) -> io::R
         let show_hint = search.is_none() && cursor == text.len() && !text.is_empty();
         let hint = if show_hint {
             history
-                .suggestion(&text, loaded_history, || false)
+                .suggestion(session.history_lines(), &text, loaded_history, || false)
                 .unwrap_or_default()
         } else {
             ""
@@ -257,7 +258,9 @@ pub fn line(prompt: &str, history: &mut History, session: &mut Session) -> io::R
                 loaded_history = history.refresh_unless(session, input_ready);
             }
             if loaded_history && needs_hint {
-                if let Some(hint) = history.suggestion(&text, true, || !input_ready()) {
+                if let Some(hint) =
+                    history.suggestion(session.history_lines(), &text, true, || !input_ready())
+                {
                     screen.draw(visible_prompt, &text, cursor, hint)?;
                 }
             }
@@ -306,7 +309,7 @@ pub fn line(prompt: &str, history: &mut History, session: &mut Session) -> io::R
                             *index = 0;
                         }
                     }
-                    if let Some(found) = history.search(query, *index) {
+                    if let Some(found) = history.search(session.history_lines(), query, *index) {
                         text = found.to_string();
                     }
                     cursor = text.len();
@@ -391,19 +394,19 @@ pub fn line(prompt: &str, history: &mut History, session: &mut Session) -> io::R
                 let seq = sequence()?;
                 match seq.as_slice() {
                     b"[A" | b"OA" => {
-                        if hist == history.local.len() {
+                        if hist == session.history_lines().len() {
                             draft = text.clone();
                         }
                         if hist > 0 {
                             hist -= 1;
-                            text = history.local[hist].clone();
+                            text = session.history_lines()[hist].clone();
                             cursor = text.len();
                         }
                     }
                     b"[B" | b"OB" => {
-                        if hist < history.local.len() {
+                        if hist < session.history_lines().len() {
                             hist += 1;
-                            text = history.local.get(hist).unwrap_or(&draft).clone();
+                            text = session.history_lines().get(hist).unwrap_or(&draft).clone();
                             cursor = text.len();
                         }
                     }
@@ -412,12 +415,19 @@ pub fn line(prompt: &str, history: &mut History, session: &mut Session) -> io::R
                         if cursor == text.len() {
                             if !text.is_empty()
                                 && !loaded_history
-                                && history.suggestion(&text, false, || false).is_none()
+                                && history
+                                    .suggestion(session.history_lines(), &text, false, || false)
+                                    .is_none()
                             {
                                 // Right can arrive in the same batch as the prefix.
                                 loaded_history = history.refresh_unless(session, || false);
                             }
-                            if let Some(s) = history.suggestion(&text, loaded_history, || true) {
+                            if let Some(s) = history.suggestion(
+                                session.history_lines(),
+                                &text,
+                                loaded_history,
+                                || true,
+                            ) {
                                 text.push_str(s);
                                 cursor = text.len();
                             }

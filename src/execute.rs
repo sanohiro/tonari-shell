@@ -74,6 +74,7 @@ fn action(r: &Redirect) -> Action<'_> {
                 Target::Append => libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND,
                 Target::CloseMoved
                 | Target::Duplicate
+                | Target::OutputWord
                 | Target::HereDoc { .. }
                 | Target::HereString => unreachable!(),
             };
@@ -413,6 +414,8 @@ enum Builtin {
     Status(u8),
     Exit(u8),
     InvalidExit,
+    NotLogin,
+    History,
     ExtraExitArgs,
     Return(Option<u8>),
     Export,
@@ -458,6 +461,9 @@ fn builtin(cmd: &PreparedCommand, last_status: u8, session: &Session) -> Option<
     if cmd.search == lookup::Search::Normal && session.functions.contains_key(name) {
         return Some(Builtin::Function);
     }
+    if name == "logout" && !session.login {
+        return Some(Builtin::NotLogin);
+    }
     named_builtin(name, &cmd.words[1..], last_status)
         .or_else(|| (cmd.search == lookup::Search::BuiltinsOnly).then_some(Builtin::Unknown))
 }
@@ -478,6 +484,9 @@ pub(crate) fn builtin_names() -> &'static [&'static str] {
         "echo",
         "eval",
         "exit",
+        "logout",
+        "history",
+        "fc",
         "exec",
         "export",
         "false",
@@ -522,6 +531,7 @@ pub(crate) fn builtin_names() -> &'static [&'static str] {
 
 fn named_builtin(name: &str, args: &[String], last_status: u8) -> Option<Builtin> {
     match name {
+        "history" | "fc" => Some(Builtin::History),
         "trap" => Some(Builtin::Trap),
         "alias" | "unalias" => Some(Builtin::Alias),
         "builtin" => Some(Builtin::Status(0)),
@@ -557,7 +567,7 @@ fn named_builtin(name: &str, args: &[String], last_status: u8) -> Option<Builtin
             None => Some(last_status),
             Some(s) => s.trim().parse::<i64>().ok().map(|n| n as u8),
         })),
-        "exit" => {
+        "exit" | "logout" => {
             let status = match args.first() {
                 None => last_status,
                 Some(s) => match s.trim().parse::<i64>() {
@@ -584,6 +594,11 @@ fn eval_builtin(
     let mut bindings = session.bind(&cmd.assignments);
     let args = cmd.words.get(1..).unwrap_or_default();
     let result = match builtin {
+        Builtin::History => crate::history::commands::run(session, &cmd.words, last_status),
+        Builtin::NotLogin => {
+            write_error(b"logout", b": not login shell: use `exit'");
+            Flow::Continue(1)
+        }
         Builtin::Compound => crate::eval::command(
             session,
             cmd.compound.as_deref().unwrap().clone(),
@@ -654,7 +669,16 @@ fn eval_builtin(
         Builtin::DirectoryStack => Flow::Continue(session.directory_stack(&cmd.words[0], args)),
         Builtin::Directory => Flow::Continue(session.directory_builtin(&cmd.words[0], args)),
         Builtin::Source => crate::source_file(session, &cmd.words, last_status),
-        Builtin::Eval => crate::eval_text(session, &args.join(" "), last_status),
+        Builtin::Eval => crate::eval_text(
+            session,
+            &(if args.first().is_some_and(|s| s == "--") {
+                &args[1..]
+            } else {
+                args
+            })
+            .join(" "),
+            last_status,
+        ),
         Builtin::Return(status) => {
             if session.source_depth == 0 && session.function_depth == 0 {
                 write_error(
@@ -676,10 +700,12 @@ fn eval_builtin(
             }
         }
         Builtin::Status(code) => Flow::Continue(code),
-        Builtin::Exit(code) if args.is_empty() => {
-            Flow::Exit(session.traps.exit_status.unwrap_or(code))
-        }
-        Builtin::Exit(code) => Flow::Exit(code),
+        Builtin::Exit(code) if args.is_empty() => Flow::Exit(crate::startup::logout(
+            session,
+            session.traps.exit_status.unwrap_or(code),
+            last_status,
+        )),
+        Builtin::Exit(code) => Flow::Exit(crate::startup::logout(session, code, last_status)),
         Builtin::InvalidExit => {
             write_error(b"exit", b": numeric argument required");
             Flow::Exit(2)
@@ -1343,6 +1369,9 @@ fn prepare(
             }
             Assignment::Scalar(word) => {
                 let value = exp.scalar(word)?;
+                if let std::borrow::Cow::Owned(resolved) = exp.session.reference_name(&key)? {
+                    key = resolved;
+                }
                 let base =
                     crate::session::array::subscript(&key).map_or(key.as_str(), |(base, _)| base);
                 if exp.session.readonly(base) {
@@ -1485,7 +1514,15 @@ fn prepare_redirects(
         };
         let mut word = word;
         let mut moved = None;
-        if r.target == Target::Duplicate && word != "-" {
+        let both = r.target == Target::OutputWord
+            && !word.ends_with('-')
+            && !word.bytes().all(|b| b.is_ascii_digit());
+        let mut target = match r.target {
+            Target::OutputWord if both => Target::Write,
+            Target::OutputWord => Target::Duplicate,
+            target => target,
+        };
+        if target == Target::Duplicate && word != "-" {
             let source = word.strip_suffix('-').unwrap_or(&word);
             let fd = source
                 .parse::<RawFd>()
@@ -1497,16 +1534,21 @@ fn prepare_redirects(
                 word.pop();
             }
         }
-        let target = if r.target == Target::Write && exp.session.noclobber {
-            Target::NoClobber
-        } else {
-            r.target
-        };
+        if target == Target::Write && exp.session.noclobber {
+            target = Target::NoClobber;
+        }
         redirects.push(Redirect {
             fd: r.fd,
             target,
             word,
         });
+        if both {
+            redirects.push(Redirect {
+                fd: 2,
+                target: Target::Duplicate,
+                word: "1".into(),
+            });
+        }
         if let Some(fd) = moved {
             redirects.push(Redirect {
                 fd,

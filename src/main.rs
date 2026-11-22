@@ -59,17 +59,67 @@ fn listen_for_interrupts() -> io::Result<()> {
     Ok(())
 }
 
+// A foreground interrupt may arrive after the prompt is drawn but before read(2).
+// pselect atomically restores the signal mask while waiting for input.
+fn terminal_read(buf: &mut [u8]) -> io::Result<usize> {
+    unsafe {
+        let mut blocked = std::mem::zeroed();
+        let mut original = std::mem::zeroed();
+        libc::sigfillset(&mut blocked);
+        if libc::sigprocmask(libc::SIG_BLOCK, &blocked, &mut original) < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let result = (|| {
+            if INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) || traps::input_interrupted()
+            {
+                return Err(io::ErrorKind::Interrupted.into());
+            }
+            let mut read_set = std::mem::zeroed();
+            libc::FD_ZERO(&mut read_set);
+            libc::FD_SET(0, &mut read_set);
+            if libc::pselect(
+                1,
+                &mut read_set,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                &original,
+            ) < 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            // A terminal interrupt can flush even bytes already reported readable.
+            let flags = libc::fcntl(0, libc::F_GETFL);
+            if flags < 0 || libc::fcntl(0, libc::F_SETFL, flags | libc::O_NONBLOCK) < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let n = libc::read(0, buf.as_mut_ptr().cast(), buf.len());
+            let read = if n >= 0 {
+                Ok(n as usize)
+            } else {
+                Err(io::Error::last_os_error())
+            };
+            if libc::fcntl(0, libc::F_SETFL, flags) < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            read
+        })();
+        libc::sigprocmask(libc::SIG_SETMASK, &original, std::ptr::null_mut());
+        result
+    }
+}
+
 fn read_terminal_line(source: &mut Vec<u8>) -> io::Result<bool> {
     let mut buf = [0u8; 4096];
     loop {
-        let n = unsafe { libc::read(0, buf.as_mut_ptr().cast(), buf.len()) };
-        if n < 0 {
-            return Err(io::Error::last_os_error());
-        }
+        let n = match terminal_read(&mut buf) {
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+            result => result?,
+        };
         if n == 0 {
             return Ok(false);
         }
-        source.extend_from_slice(&buf[..n as usize]);
+        source.extend_from_slice(&buf[..n]);
         if source.ends_with(b"\n") {
             return Ok(true);
         }
@@ -134,21 +184,22 @@ fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Resu
             Err(e) => return Err(e),
         };
         if !more && source.is_empty() {
-            return Ok(status);
+            return Ok(startup::logout(session, status, status));
         }
         match std::str::from_utf8(&source) {
             Ok(text) => match parser::session_source(text, !more, session) {
                 Ok(program) if program.is_empty() => {}
                 Ok(program) => {
-                    let record = history.accepts(session, text);
+                    let record = session.begin_history_line(text);
                     let cwd = session.get("PWD");
                     let flow = execute_program(session, program, status, false);
                     status = match flow {
                         Flow::Discard(s) | Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
                         _ => 1,
                     };
-                    if record && history.accepts(session, text) {
-                        history.record(session, text, cwd.as_deref(), status);
+                    if record {
+                        session.persist_current_history(cwd.as_deref(), status);
+                        session.finish_history_line();
                     }
                     if matches!(flow, Flow::Exit(_) | Flow::Return(_)) {
                         return Ok(status);
@@ -195,9 +246,11 @@ fn main() -> ExitCode {
     };
     let mut invocation = invocation;
     let mut session = Session::default();
+    session.initialize_shell_level();
     session.arg0 = std::mem::take(&mut invocation.arg0);
     session.positional = std::mem::take(&mut invocation.positional);
     session.errexit = invocation.errexit;
+    session.verbose = invocation.verbose;
     session.errtrace = invocation.errtrace;
     session.functrace = invocation.functrace;
     session.noglob = invocation.noglob;
@@ -207,6 +260,7 @@ fn main() -> ExitCode {
     session.pipefail = invocation.pipefail;
     session.interactive = invocation.interactive;
     session.login = invocation.login;
+    session.history_enabled = invocation.interactive;
     if session.interactive
         && let Err(e) = session.traps.init_hangup()
     {

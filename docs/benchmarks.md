@@ -909,3 +909,44 @@ The inventory contains 1,554 distinct names across all three platforms. Each den
 All matching names received a verified whole-run timing. Compared with the November 22 measurements, four Debian and four Ubuntu whole-run medians crossed above 2/3. On macOS, 12 whole-run and 33 already-started medians crossed above it. The snapshot comparison found no lost matching observations or missing earlier measurements. These counts can include multiple names for one script. The absolute target remains unmet for a number of existing workloads, particularly one-shot commands measured from a ready shell through exit.
 
 機能が一致した全項目で起動込みの計測ができました。起動済みの計測では、短い処理に同期・出力の回収・シェルの終了待ちまで含まれます。新たに一致した36項目のうち起動込みの中央値が Bash の3分の2以内だったのは Debian 25件、Ubuntu 30件、macOS 28件です。この36項目と反復スクリプトの4処理は別の測定条件です。11月22日の計測で達成していた上限を今回超えたのは、Debian と Ubuntu の起動込みが各4件、macOS の起動込みが12件・起動済みが33件です。[現行版の各項目](compatibility-2026-11-23/matrix.md) · [11月22日の比較元](compatibility/matrix.md)
+
+
+<a id="login-profiles"></a>
+
+## 2026-11-23 — Login profiles / ログイン設定
+
+Median and p95 in milliseconds from parent launch to shell exit. Each environment ran 101 samples after five warmups per executable, rotating Bash, the previous Tonari release (`f3f5539`) and the new release. All three executables were named `bash` in separate directories on the same filesystem. The Python parent used a temporary working directory and home, `TERM=dumb`, `LC_ALL=C`, `PATH=/usr/bin:/bin` and standard descriptors connected to `/dev/null`. Linux used the distribution's `/etc/profile` and copies of its skeleton `.profile` and `.bashrc`. macOS used its system profile and an empty user home. These figures include Python's subprocess setup. On Linux the earlier binary skipped the Bash-gated rc body, so its interactive login did less work. Two GNU correctness runs were active in the Linux VM during sampling.
+
+各セルは起動から終了までの中央値 / p95（ms）です。通常の `-c :`、`-lc :`、対話フラグを付けた `-lic :`、同一シェルからの外部コマンド16回を比較しました。対話フラグを付けた行では端末描画を測定していません。Linux の旧版では標準設定の一部を読み飛ばしていたため、この行の新旧では実行した仕事が異なります。
+
+| Platform | Workload | Bash | Previous Tonari | Tonari |
+|---|---|---:|---:|---:|
+| macOS arm64 | `-c :` | 6.942/7.762 | 3.999/4.572 | 3.867/4.694 |
+| macOS arm64 | `-lc :` | 9.827/11.107 | 5.888/7.299 | 5.865/6.923 |
+| macOS arm64 | `-lic :` | 9.691/10.668 | 5.685/6.507 | 5.686/6.677 |
+| macOS arm64 | 16 × `/usr/bin/true` | 37.743/46.777 | 23.853/29.467 | 23.527/26.695 |
+| Debian 13 arm64 | `-c :` | 0.513/0.953 | 0.246/0.784 | 0.244/0.478 |
+| Debian 13 arm64 | `-lc :` | 1.509/1.881 | 1.409/1.861 | 1.445/1.753 |
+| Debian 13 arm64 | `-lic :` | 2.216/2.800 | 1.675/2.125 | 2.325/2.777 |
+| Debian 13 arm64 | 16 × `/usr/bin/true` | 5.011/6.761 | 3.547/4.021 | 3.505/4.307 |
+| Ubuntu 26.04 arm64 | `-c :` | 0.535/1.276 | 0.262/0.606 | 0.260/0.656 |
+| Ubuntu 26.04 arm64 | `-lc :` | 1.528/2.484 | 1.337/1.837 | 1.282/2.471 |
+| Ubuntu 26.04 arm64 | `-lic :` | 3.642/4.560 | 1.954/3.257 | 3.795/5.168 |
+| Ubuntu 26.04 arm64 | 16 × `/usr/bin/true` | 4.989/6.258 | 3.542/4.308 | 3.589/4.115 |
+
+The macOS executable is 1,052,928 bytes (+33,424), compared with 1,208,904 for the native reference Bash. The static arm64 Linux executable is 1,243,040 bytes (+40,896), compared with 1,412,096 for Debian Bash and 1,609,176 for Ubuntu Bash. Plain command startup meets the two-thirds target in all three environments here. Both Linux interactive logins with stock profiles take about as long as Bash. The 16-process Linux timings are also above two-thirds. [Session checks](../tests/shell.py)
+
+macOS 版は 1,052,928 バイト、静的 Linux 版は 1,243,040 バイトで、各参照 Bash の実行ファイルより小さいサイズです。通常のコマンド起動はいずれの環境でも目標内でした。Linux の標準設定を読む対話ログインは Bash とほぼ同じ所要時間で、16プロセスの連続起動も両ディストリビューションで 2/3 を超えました。
+
+
+In a macOS arm64 PTY, the completion harness separately timed the typed key, its grey history suggestion and Tab completion over 10,000 names. Values are median / p95 in milliseconds, 15 samples per executable. The Bash measurements cover Tab. macOS でキー入力から表示までと Tab 補完を分けて測定しました。[PTY benchmark](../tools/bench_completion.py)
+
+| Operation | Previous Tonari | Tonari | Bash 5.2.37 |
+|---|---:|---:|---:|
+| recent hint | 0.021 / 0.070 | 0.027 / 0.092 | — |
+| no hint | 0.038 / 0.117 | 0.036 / 0.117 | — |
+| oldest hint: typed key | 0.027 / 0.100 | 0.031 / 0.138 | — |
+| oldest hint: visible suggestion | 1.238 / 1.685 | 1.230 / 2.329 | — |
+| files | 6.411 / 8.457 | 6.720 / 8.742 | 12.899 / 15.840 |
+| complete -f | 6.286 / 10.557 | 6.222 / 6.892 | 14.077 / 15.662 |
+| PATH | 6.121 / 11.437 | 6.390 / 8.192 | 200.342 / 207.434 |

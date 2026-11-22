@@ -30,6 +30,13 @@ const ACTIONS: &[&str] = &[
     "file",
     "function",
     "keyword",
+    "job",
+    "running",
+    "stopped",
+    "shopt",
+    "setopt",
+    "user",
+    "hostname",
     "variable",
 ];
 
@@ -213,7 +220,7 @@ impl Request {
                         }
                         result.spec.actions.push(action);
                     }
-                    'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'k' | 'v' => {
+                    'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'k' | 'v' | 'j' | 'u' => {
                         let action = match flag {
                             'a' => "alias",
                             'b' => "builtin",
@@ -222,6 +229,8 @@ impl Request {
                             'e' => "export",
                             'f' => "file",
                             'k' => "keyword",
+                            'j' => "job",
+                            'u' => "user",
                             _ => "variable",
                         };
                         result.spec.actions.push(action.to_owned());
@@ -294,10 +303,17 @@ impl Spec {
             ("directory", "-d"),
             ("export", "-e"),
             ("file", "-f"),
+            ("job", "-j"),
             ("keyword", "-k"),
+            ("user", "-u"),
             ("variable", "-v"),
             ("arrayvar", "-A arrayvar"),
             ("function", "-A function"),
+            ("hostname", "-A hostname"),
+            ("running", "-A running"),
+            ("setopt", "-A setopt"),
+            ("shopt", "-A shopt"),
+            ("stopped", "-A stopped"),
         ] {
             if self.actions.iter().any(|value| value == action) {
                 line.push(' ');
@@ -351,6 +367,18 @@ impl Spec {
                         .into_iter()
                         .filter(|n| n.starts_with(prefix)),
                 ),
+                "shopt" | "setopt" => words.extend(
+                    session
+                        .options(action == "setopt")
+                        .map(|(k, _)| k)
+                        .filter(|k| k.starts_with(prefix))
+                        .map(str::to_owned),
+                ),
+                "job" | "running" | "stopped" => {
+                    words.extend(session.jobs.completion_names(action, prefix))
+                }
+                "user" => words.extend(complete::user_names(prefix)),
+                "hostname" => words.extend(complete::host_names(prefix, session)),
                 "command" => words.extend(complete::command_names(prefix, session)),
                 "directory" | "file" => words.extend(complete::file_names(
                     prefix,

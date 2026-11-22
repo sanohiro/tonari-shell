@@ -12,7 +12,8 @@ mod lexer;
 mod modifier;
 pub use crate::word::{Word, is_identifier};
 pub(crate) use here_doc::{HereDocHint, expansion_string};
-use lexer::{LexWord, Token, descriptor, lex};
+use lexer::{LexWord, Token, lex};
+pub(crate) use modifier::index_end;
 use std::rc::Rc;
 
 // Keep text supplied by prompt escapes (including the working directory) in
@@ -47,6 +48,7 @@ pub enum Target {
     Write,
     Append,
     Duplicate,
+    OutputWord,
     HereDoc { expand: bool },
     HereString,
 }
@@ -813,11 +815,14 @@ impl Reader {
                 let Some(Token::Word(LexWord { word, .. })) = self.tokens.next() else {
                     return Err(Error::Invalid("expected a redirection target"));
                 };
-                if target == Target::Duplicate {
-                    if let Some(value) = word.as_literal().filter(|s| *s != "-") {
-                        descriptor(value.strip_suffix('-').unwrap_or(value))?;
-                    }
-                }
+                let target = if target == Target::OutputWord
+                    && word.as_literal().is_some_and(|v| {
+                        v == "-" || lexer::descriptor(v.strip_suffix('-').unwrap_or(v)).is_ok()
+                    }) {
+                    Target::Duplicate
+                } else {
+                    target
+                };
                 redirects.push(Redirect { fd, target, word });
             }
             _ => unreachable!(),

@@ -324,11 +324,23 @@ impl Variables for Expansion<'_> {
         self.lookup(name)
     }
     fn set(&mut self, name: &str, value: i64) -> Result<(), &'static str> {
+        if crate::session::array::subscript(name).is_some() {
+            return Variables::set(self.session, name, value);
+        }
         if self.session.readonly(name) {
             return Err("readonly variable");
         }
         self.assign(name, &value.to_string());
         Ok(())
+    }
+    fn associative_key(
+        &mut self,
+        name: &str,
+        source: &str,
+    ) -> Option<Result<String, &'static str>> {
+        self.session
+            .is_associative(name)
+            .then(|| self.key(source).map_err(|_| "bad array subscript"))
     }
     fn nounset(&self) -> bool {
         self.session.nounset

@@ -1,5 +1,13 @@
 # Engineering notes / 開発知見
 
+## 2026-11-23 — Login profiles and completion / ログイン設定と補完
+
+- Debian 13 and Ubuntu 26.04 source `~/.bashrc` from their skeleton `.profile` when `BASH_VERSION` is set. Both set `HISTCONTROL=ignoreboth` there. Ubuntu also defines `ll`. A skipped rc can look like a fast startup. The distribution test copies both files to a temporary home and checks the same history settings and alias lookup as the packaged Bash. A separate PTY test executes the binary with `argv[0]=-bash`, then sends Ctrl-D and checks `.bash_logout`. [Integration tests](../tests/shell.py)
+- Debian 13 と Ubuntu 26.04 の標準 `.profile` は `BASH_VERSION` が設定されていると `.bashrc` を読みます。双方で `HISTCONTROL=ignoreboth`、Ubuntu では `ll` の定義まで比較しました。Ubuntu の色判定にある `>&/dev/null` は、無効な分岐に書かれていてもパーサーが受理する必要があります。両ストリームのファイルへの転送と数値の記述子複製をテストしています。[回帰テスト](../tests/shell.py)
+- Tonari exposes `BASH_VERSION=5.2.0(1)-tonari` and a read-only six-element `BASH_VERSINFO` for script feature gates. `--version` reports the Tonari version. Debian bash-completion 2.16.0 uses arithmetic on those array elements, global name references and dynamic function scope. With the package's compatibility wrappers and `gh completion -s bash` from GitHub CLI 2.96.0, Tab after `gh iss` inserts `gh issue ` in a native macOS arm64 PTY. Calling the completion function outside the editor also invokes `compopt` outside an active completion on Bash.
+- Bash 用スクリプトの版判定には上記の互換値を返し、製品のバージョンは `--version` で表示します。補完ライブラリが別関数で呼び出し元のローカル変数を `unset -v` すると、既定では外側の束縛が再び見えます。`localvar_unset` を有効にした場合も Bash と比較しました。コールバック単体と端末で Tab を押す試験では `compopt` の実行条件が異なります。[起動ファイルの仕様](https://www.gnu.org/software/bash/manual/html_node/Bash-Startup-Files.html)
+
+
 ## 2026-11-22 · Measuring startup / 起動時間の測り方
 
 A first prompt, a fresh shell running `-c ':'`, and a shell running an external command answer three different questions. The prompt timer includes allocating a pseudo-terminal and reading the prompt. The current `-c` timer starts at `posix_spawn` and ends at `waitpid`. When we changed the launcher, we reran the previous binary alongside the new one, rotating launch order. Use the direct `/usr/bin/true` run to see how much even a small external executable costs on that machine. [Harness](../tools/bench.py) · [Results and timing boundaries](benchmarks.md)

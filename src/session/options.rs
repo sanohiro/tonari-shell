@@ -6,8 +6,11 @@ use super::Session;
 pub struct ShellOptions {
     pub braceexpand: bool,
     pub localvar_inherit: bool,
+    pub localvar_unset: bool,
     pub inherit_errexit: bool,
     pub huponexit: bool,
+    pub histappend: bool,
+    pub hostcomplete: bool,
     pub checkwinsize: bool,
     pub sourcepath: bool,
     pub expand_aliases: bool,
@@ -22,8 +25,11 @@ impl Default for ShellOptions {
         Self {
             braceexpand: true,
             localvar_inherit: false,
+            localvar_unset: false,
             inherit_errexit: false,
             huponexit: false,
+            histappend: false,
+            hostcomplete: true,
             checkwinsize: true,
             sourcepath: true,
             expand_aliases: false,
@@ -38,12 +44,12 @@ impl Default for ShellOptions {
 pub(super) struct OptionEntry {
     pub name: &'static str,
     read: fn(&Session) -> bool,
-    write: fn(&mut Session) -> &mut bool,
+    write: Option<fn(&mut Session) -> &mut bool>,
 }
 
 macro_rules! option_entry {
     ($name:literal, $($field:ident).+) => {
-        OptionEntry { name: $name, read: |s| s.$($field).+, write: |s| &mut s.$($field).+ }
+        OptionEntry { name: $name, read: |s| s.$($field).+, write: Some(|s| &mut s.$($field).+) }
     };
 }
 
@@ -53,11 +59,13 @@ const SET_OPTIONS: &[OptionEntry] = &[
     option_entry!("errtrace", errtrace),
     option_entry!("functrace", functrace),
     option_entry!("hashall", hashes.enabled),
+    option_entry!("history", history_enabled),
     option_entry!("monitor", jobs.monitor),
     option_entry!("noclobber", noclobber),
     option_entry!("noglob", noglob),
     option_entry!("nounset", nounset),
     option_entry!("pipefail", pipefail),
+    option_entry!("verbose", verbose),
 ];
 const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("checkwinsize", shopt.checkwinsize),
@@ -67,9 +75,17 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("failglob", shopt.glob.failglob),
     option_entry!("globskipdots", shopt.glob.globskipdots),
     option_entry!("globstar", shopt.glob.globstar),
+    option_entry!("histappend", shopt.histappend),
+    option_entry!("hostcomplete", shopt.hostcomplete),
     option_entry!("huponexit", shopt.huponexit),
     option_entry!("inherit_errexit", shopt.inherit_errexit),
     option_entry!("localvar_inherit", shopt.localvar_inherit),
+    option_entry!("localvar_unset", shopt.localvar_unset),
+    OptionEntry {
+        name: "login_shell",
+        read: |s| s.login,
+        write: None,
+    },
     option_entry!("nullglob", shopt.glob.nullglob),
     option_entry!("patsub_replacement", shopt.patsub_replacement),
     option_entry!("progcomp", shopt.progcomp),
@@ -100,7 +116,7 @@ impl Session {
         if set { SET_OPTIONS } else { SHOPT_OPTIONS }
     }
 
-    pub(super) fn options(&self, set: bool) -> impl Iterator<Item = (&'static str, bool)> {
+    pub(crate) fn options(&self, set: bool) -> impl Iterator<Item = (&'static str, bool)> {
         Self::option_entries(set)
             .iter()
             .map(move |entry| (entry.name, (entry.read)(self)))
@@ -140,7 +156,7 @@ impl Session {
         Self::option_entries(set)
             .iter()
             .find(|entry| entry.name == name)
-            .map(|entry| (entry.write)(self))
+            .and_then(|entry| entry.write.map(|write| write(self)))
     }
 
     pub fn shopt(&mut self, args: &[String]) -> u8 {
@@ -184,27 +200,34 @@ impl Session {
             .filter(|_| all)
             .chain(names.iter().map(String::as_str));
         for name in names {
-            let Some(value) = self.option_value(name, set) else {
+            if set && name == "posix" && quiet && !enable && !disable {
+                status = 1;
+                continue;
+            }
+            let Some(entry) = known.iter().find(|entry| entry.name == name) else {
                 eprintln!("tonari: shopt: {name}: unsupported option");
                 status = 1;
                 continue;
             };
             if !all && (enable || disable) {
-                *value = enable;
+                if let Some(write) = entry.write {
+                    *write(self) = enable;
+                }
                 continue;
             }
-            if !all && !*value {
+            let value = (entry.read)(self);
+            if !all && !value {
                 status = 1;
             }
-            if quiet || (enable && !*value) || (disable && *value) {
+            if quiet || (enable && !value) || (disable && value) {
                 continue;
             }
             let result = if reusable && set {
-                writeln!(out, "set {}o {name}", if *value { '-' } else { '+' })
+                writeln!(out, "set {}o {name}", if value { '-' } else { '+' })
             } else if reusable {
-                writeln!(out, "shopt -{} {name}", if *value { 's' } else { 'u' })
+                writeln!(out, "shopt -{} {name}", if value { 's' } else { 'u' })
             } else {
-                writeln!(out, "{name:15}\t{}", if *value { "on" } else { "off" })
+                writeln!(out, "{name:15}\t{}", if value { "on" } else { "off" })
             };
             if result.is_err() {
                 return 1;

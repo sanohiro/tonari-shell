@@ -39,7 +39,7 @@ pub(super) fn slice(chars: &mut Chars<'_>) -> Result<(Word, Option<Word>), Error
     Err(Error::Incomplete("unterminated parameter slice"))
 }
 
-pub(super) fn index_end(s: &str) -> Result<usize, Error> {
+pub(crate) fn index_end(s: &str) -> Result<usize, Error> {
     let mut brackets = 0usize;
     let mut quote = None;
     let mut chars = s.char_indices();

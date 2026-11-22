@@ -75,6 +75,25 @@ fn optional(session: &mut Session, path: &Path) -> Option<Flow> {
     Some(sourced(session, file, path, &[], 0))
 }
 
+pub fn logout(session: &mut Session, code: u8, previous: u8) -> u8 {
+    if !session.login || session.shell_pid() != std::process::id() || session.logout_started {
+        return code;
+    }
+    session.logout_started = true;
+    let home = session
+        .get("HOME")
+        .map(|h| Path::new(&h).join(".bash_logout"));
+    let system = cfg!(target_os = "linux").then(|| PathBuf::from("/etc/bash.bash_logout"));
+    for path in home.into_iter().chain(system) {
+        if let Ok(file) = open_script(&path)
+            && let Flow::Exit(n) = sourced(session, file, &path, &[], previous)
+        {
+            return n;
+        }
+    }
+    code
+}
+
 pub fn initialize(session: &mut Session, invocation: &Invocation) -> Flow {
     if invocation.check {
         return Flow::Continue(0);

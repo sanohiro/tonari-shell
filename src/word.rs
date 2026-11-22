@@ -131,6 +131,14 @@ impl Word {
                     quoted: false,
                 };
             }
+            if let Part::Parameter { name, quoted } = part
+                && let Some(reference) = name.strip_prefix('!')
+                && env.session.is_nameref(reference)
+            {
+                let target = env.session.reference_name(reference)?.into_owned();
+                *part = literal(target, *quoted);
+                continue;
+            }
             if let Part::Parameter { name, .. }
             | Part::Alternative { name, .. }
             | Part::Trim { name, .. }

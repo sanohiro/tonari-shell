@@ -1145,12 +1145,21 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
         self.compare('n=2; printf "<%s>" "$((n++))" "$n" "$((++n))"', 0, b"<2><3><4>")
 
     def test_aliases_are_applied_when_commands_are_read(self):
+        self.compare("alias ll='ls -alF'; type -t ll; shopt -s expand_aliases; "
+                     "type -t ll; command -v ll; command -V ll", 0,
+                     b"alias\nalias ll='ls -alF'\nll is aliased to `ls -alF'\n")
         self.compare("shopt -s expand_aliases\nalias a='printf yes | cat'\n"
                      "say() { a; }; unalias a; say; echo .", 0, b"yes.\n")
         self.compare("shopt -s expand_aliases\nalias headword='echo '; alias arg=expanded\n"
                      "headword arg; headword 'arg'", 0, b"expanded\narg\n")
         self.compare("shopt -s expand_aliases\nalias f='printf nested'\necho \"$(f)\"",
                      0, b"nested\n")
+
+    def test_bash_combined_output_redirection_in_profiles(self):
+        self.compare('f() { echo out; echo err >&2; }; if false; then true >&/dev/null; fi; '
+                     'p="log file"; f >&"$p"; cat "$p"; f 1>&file; cat file; '
+                     'f >log 2>&1; cat log', 0, b"out\nerr\n" * 3)
+        self.compare('if false; then : 7>&not-a-number; fi; printf ok', 0, b"ok")
 
     def test_numbered_descriptors_and_exec(self):
         self.compare("exec 3>file; echo first >&3; f() { echo second >&3; }; f >unused; "
@@ -1174,14 +1183,140 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
         self.env["SHELL"] = "/some/other/shell"
         self.compare('printf %s "$SHELL"', 0, b"/some/other/shell")
 
-    def terminal_session(self, editing=False, shell=TONARI):
+    def test_login_profile_precedence_and_logout(self):
+        # The user's selected profile may source .bashrc itself.
+        (self.cwd / ".bashrc").write_text("echo rc >> starts\n")
+        (self.cwd / ".bash_logout").write_text("echo logout-$? >> ends\nfalse\n")
+        for name in (".bash_profile", ".bash_login", ".profile"):
+            (self.cwd / name).write_text(f'echo {name} >> starts\n'
+                                         'if [ -n "$BASH_VERSION" ]; then . "$HOME/.bashrc"; fi\n')
+        ends = self.cwd / "ends"
+        starts = self.cwd / "starts"
+        cmd = 'shopt -q login_shell || exit 8; trap \'echo trap-$? >> ends\' EXIT; false; logout 23'
+        for name in (".bash_profile", ".bash_login", ".profile"):
+            for shell in (BASH, TONARI):
+                proc = subprocess.run([shell, "--login", "-c", cmd], cwd=self.cwd,
+                                      env=self.env, capture_output=True, timeout=5)
+                self.assertEqual(proc.returncode, 23, proc.stderr)
+                self.assertEqual(starts.read_text().splitlines(), [name, "rc"])
+                self.assertEqual(ends.read_text().splitlines(), ["logout-1", "trap-23"])
+                starts.unlink()
+                ends.unlink()
+            (self.cwd / name).unlink()
+        for shell in (BASH, TONARI):
+            proc = self.command(shell, 'logout 2>/dev/null; echo $?')
+            self.assertEqual((proc.stdout, proc.returncode), (b"1\n", 0))
+            self.assertFalse(ends.exists())
+
+    def test_distribution_login_profile(self):
+        skel = Path("/etc/skel")
+        if not Path("/etc/debian_version").exists() or not all(
+                (skel / name).is_file() for name in (".bashrc", ".profile")):
+            self.skipTest("Debian or Ubuntu distribution profiles required")
+        for name in (".bashrc", ".profile"):
+            (self.cwd / name).write_bytes((skel / name).read_bytes())
+        profiles = []
+        for shell in (BASH, TONARI):
+            proc = subprocess.run([shell, "--login", "-ic",
+                                   'echo "$SHLVL/$HISTCONTROL/$HISTSIZE"; type -t ll; :'],
+                                  cwd=self.cwd, env=dict(self.env, TERM="dumb"),
+                                  capture_output=True, timeout=5)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            if shell == TONARI:
+                self.assertEqual(proc.stderr, b"")
+            profiles.append(proc.stdout)
+        self.assertEqual(profiles[0], profiles[1])
+        self.assertIn(b"ignoreboth", profiles[0])
+
+    def test_login_flags_and_plain_command_startup(self):
+        (self.cwd / ".bash_profile").write_text("profile=on\n")
+        (self.cwd / ".bashrc").write_text("rc=on\n")
+        envfile = self.cwd / "envfile"
+        envfile.write_text("envfile=on\n")
+        env = dict(self.env, BASH_ENV=str(envfile))
+        cmd = 'printf "%s/%s/%s:" "${profile-off}" "${rc-off}" "${envfile-off}"; shopt -q login_shell'
+        for args, expected, code in ((["-c"], b"off/off/on:", 1),
+                                     (["--login", "-c"], b"on/off/on:", 0),
+                                     (["--noprofile", "--login", "-c"], b"off/off/on:", 0),
+                                     (["-ic"], b"off/on/off:", 1)):
+            for shell in (BASH, TONARI):
+                with self.subTest(args=args, shell=shell):
+                    p = subprocess.run([shell, *args, cmd], cwd=self.cwd, env=env,
+                                       capture_output=True, timeout=5)
+                    self.assertEqual((p.stdout, p.returncode), (expected, code), p.stderr)
+
+    def test_terminal_login_argv0_and_control_d(self):
+        (self.cwd / ".bash_profile").write_text(
+            'shopt -q login_shell && echo "$0 $SHLVL" >> login-seen\nPS1="tonari$ "\n')
+        (self.cwd / ".bash_logout").write_text("echo end >> logged-out\n")
+        for shell in (BASH, TONARI):
+            fd = self.terminal_session(shell=shell, login=True)
+            os.write(fd, b"\x04")
+            ready, _, _ = select.select([fd], [], [], 5)
+            self.assertTrue(ready, "shell did not finish")
+            while select.select([fd], [], [], 5)[0]:
+                try:
+                    if not os.read(fd, 4096):
+                        break
+                except OSError as error:
+                    if error.errno != errno.EIO:
+                        raise
+                    break
+            else:
+                self.fail("login shell did not close its terminal")
+        self.assertEqual((self.cwd / "login-seen").read_text().splitlines(), ["-bash 1"] * 2)
+        self.assertEqual((self.cwd / "logged-out").read_text().splitlines(), ["end"] * 2)
+
+    def test_profile_version_gate_and_nested_shell_level(self):
+        self.compare('test -n "$BASH_VERSION" && (( BASH_VERSINFO[0] >= 3 )) && '
+                     'test "${#BASH_VERSINFO[@]}" = 6 && '
+                     'test "${BASH_VERSINFO[5]}" = "$MACHTYPE" && printf available',
+                     0, b"available")
+        self.env["SHLVL"] = "4"
+        self.compare('printf "%s " "$SHLVL"; "$BASH" --noprofile -c \'printf %s "$SHLVL"\'; :',
+                     0, b"5 6")
+
+    def test_completion_helper_scope_and_indexed_arithmetic(self):
+        self.compare('g() { unset -v x; x=written; }; f() { local x=inside; g; echo "$x"; }; '
+                     'x=outside; f; echo "$x"; x=outside; shopt -s localvar_unset; f; echo "$x"',
+                     0, b"written\nwritten\nwritten\noutside\n", minimum=5)
+        self.compare('eval -- "a=(4 8)"; i=0; ((a[i++] += 3)); ((0 && a[i++])); '
+                     'echo "${a[*]}/$i/$((a[i-1]))"', 0, b"7 8/1/7\n")
+        for shell in (BASH, TONARI):
+            p = self.command(shell, "set -v\necho seen\nset +v\necho quiet")
+            self.assertEqual((p.returncode, p.stdout, p.stderr),
+                             (0, b"seen\nquiet\n", b"echo seen\nset +v\n"))
+        self.compare('compgen -A shopt histapp; compgen -A setopt verb; '
+                     'shopt -uq hostcomplete; shopt -q hostcomplete; echo $?',
+                     0, b"histappend\nverbose\n1\n")
+
+
+    def test_completion_name_references(self):
+        self.compare('''v=old
+        f() { local -n dest=$1; dest+=!; printf '<%s:%s>' "${!dest}" "$dest"; }
+        f v; declare -gn ref=v; declare ref=new; g() { local ref=inner; echo "$ref/$v"; }; g
+        echo "$ref/$v"; declare -n list=items; list=(first second); list[4]=last
+        declare -n slot='items[1]'; printf -v slot %s changed; unset -n slot
+        [[ -R list ]] && printf '<%s>' "${list[@]}" "${!list[@]}"
+        unset ref; printf '|%s' "${v-gone}"''', 0,
+                     b"<v:old!>inner/new\nnew/new\n<first><changed><last><0><1><4>|gone", minimum=5)
+
+    def test_history_fc_and_explicit_file_roundtrip(self):
+        self.compare('history -c; history -s echo first; history -s echo second; '
+                     'history -p "!!:$"; fc -ln -2 -1; fc -s second=changed -1 2>/dev/null; '
+                     'history -w hist; history -c; history -r hist; '
+                     'history 1 | sed "s/^ *[0-9]* *//"', 0,
+                     b"second\n\t echo first\n\t echo second\nchanged\necho changed\n")
+
+    def terminal_session(self, editing=False, shell=TONARI, login=False):
         pid, fd = pty.fork()
         if pid == 0:
             try:
                 os.chdir(self.cwd)
                 env = dict(self.env, PS1=PROMPT.decode(), TERM="xterm-256color" if editing else "dumb")
                 options = [] if editing else ["--noediting"]
-                os.execve(shell, [str(shell), "--norc", *options], env)
+                argv = ["-bash", *options] if login else [str(shell), "--norc", *options]
+                os.execve(shell, argv, env)
             finally:
                 os._exit(125)
         def close():
@@ -1400,7 +1535,9 @@ printf '%s\n' "$marker"
         enter(other, b"\x12violet")
         self.assertEqual((self.cwd / "recalled").read_text().splitlines(), ["violet"] * 3)
         enter(other, b" echo omit-secret > /dev/null")
+        enter(other, b"HISTIGNORE='*ignore-this-command*'; echo ignore-this-command > /dev/null")
         journal = self.cwd / ".local/state/tonari/history"
+        self.assertNotIn("ignore-this-command", journal.read_text())
         self.assertNotIn("omit-secret", journal.read_text())
         self.assertFalse((self.cwd / ".bash_history").exists())
         # Remove a complete UTF-8 character and insert a replacement at the caret.

@@ -67,7 +67,9 @@ fn file_group(session: &Session, file: &File) -> Option<Vec<parser::Statement>> 
 }
 
 pub fn file_script(session: &mut Session, file: File, status: u8, check: bool) -> Flow {
-    if let Some(program) = file_group(session, &file) {
+    if !session.verbose
+        && let Some(program) = file_group(session, &file)
+    {
         drop(file);
         return if check {
             Flow::Continue(0)
@@ -106,6 +108,10 @@ fn run(
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => return error(e, 1),
         };
+        if session.verbose && n != 0 {
+            use std::io::Write;
+            let _ = io::stderr().write_all(&input[line_start..]);
+        }
         if n == 0 && input.is_empty() {
             break;
         }
@@ -138,7 +144,14 @@ fn run(
                     }
                 }
                 ran = true;
-                match execute_program(session, program, status, false) {
+                let remember = session.source_depth == 0
+                    && !session.interactive
+                    && session.begin_history_line(text);
+                let flow = execute_program(session, program, status, false);
+                if remember {
+                    session.finish_history_line();
+                }
+                match flow {
                     Flow::Discard(code) | Flow::Continue(code) => status = code,
                     other => return other,
                 }
@@ -156,7 +169,7 @@ fn run(
 // A syntax error on a later physical line must not undo an already executed
 // complete command. Keep borrowed slices on the -c path.
 pub fn text(session: &mut Session, source: &str, mut status: u8, tail: bool, check: bool) -> Flow {
-    if source.len() >= 32 * 1024 {
+    if !session.verbose && source.len() >= 32 * 1024 {
         if let Some(program) = whole_group(session, source) {
             return if check {
                 Flow::Continue(0)
@@ -173,6 +186,9 @@ pub fn text(session: &mut Session, source: &str, mut status: u8, tail: bool, che
     let mut here_doc: Option<parser::HereDocHint> = None;
     let mut ran = false;
     for line in source.split_inclusive('\n') {
+        if session.verbose {
+            eprint!("{line}");
+        }
         end += line.len();
         let last = end == source.len();
         if !last && here_doc.as_mut().is_some_and(|hint| !hint.may_finish(line)) {
@@ -190,7 +206,12 @@ pub fn text(session: &mut Session, source: &str, mut status: u8, tail: bool, che
             Err(e) => return error(e.message(), 2),
             Ok(program) if !program.is_empty() && !check => {
                 ran = true;
-                match execute_program(session, program, status, tail && last) {
+                let remember = tail && !session.interactive && session.begin_history_line(text);
+                let flow = execute_program(session, program, status, tail && last);
+                if remember {
+                    session.finish_history_line();
+                }
+                match flow {
                     Flow::Discard(code) | Flow::Continue(code) => status = code,
                     other => return other,
                 }
