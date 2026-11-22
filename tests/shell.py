@@ -781,16 +781,19 @@ wait "$child"; printf "done:%s" "$?" """
     def test_interactive_alias_and_interrupt_trap(self):
         for shell in (BASH, TONARI):
             with self.subTest(shell=shell):
-                fd = self.terminal_session(shell=shell)
-                os.write(fd, b"alias marker='printf A%sZ lias'\n")
-                self.read_until(fd, PROMPT)
-                os.write(fd, b"marker\n")
-                self.assertIn(b"AliasZ", self.read_until(fd, PROMPT))
-                os.write(fd, b"trap 'printf TRAP=%s! \"$?\"' INT; false\n")
-                self.read_until(fd, PROMPT)
-                os.write(fd, b"\x03")
                 legacy = shell == BASH and int(self.command(BASH, 'echo "${BASH_VERSINFO[0]}"').stdout) < 4
-                self.read_until(fd, b"TRAP=129!" if legacy else b"TRAP=1!")
+                self.check_interactive_alias_and_interrupt_trap(shell, legacy)
+
+    def check_interactive_alias_and_interrupt_trap(self, shell, legacy=False):
+        fd = self.terminal_session(shell=shell)
+        os.write(fd, b"alias marker='printf A%sZ lias'\n")
+        self.read_until(fd, PROMPT)
+        os.write(fd, b"marker\n")
+        self.assertIn(b"AliasZ", self.read_until(fd, PROMPT))
+        os.write(fd, b"trap 'printf TRAP=%s! \"$?\"' INT; false\n")
+        self.read_until(fd, PROMPT)
+        os.write(fd, b"\x03")
+        self.read_until(fd, b"TRAP=129!" if legacy else b"TRAP=1!")
 
     def test_stop_and_resume_foreground_pipeline(self):
         for shell in (BASH, TONARI):

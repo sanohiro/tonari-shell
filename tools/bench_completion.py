@@ -84,7 +84,10 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--word-list", action="store_true", help="measure a registered 10,000-word completion")
     mode.add_argument("--listing", action="store_true", help="measure the second Tab and full listing")
+    parser.add_argument("--require-target", action="store_true", help="check the 2/3 median target for cases shared with Bash")
     args = parser.parse_args()
+    if args.require_target and not args.bash:
+        parser.error("--require-target requires --bash")
     if args.runs < 1:
         parser.error("runs must be positive")
     shells = [p.resolve() for p in args.shell]
@@ -154,6 +157,14 @@ def main():
             for case, values in metrics.items():
                 p95 = sorted(values)[math.ceil(.95 * len(values)) - 1]
                 print(f"{shell} | {case} | {len(values)} | {statistics.median(values):.3f} / {p95:.3f}")
+
+        if args.require_target:
+            for shell in shells:
+                if shell != bash and any(
+                    statistics.median(results[shell][case]) * 3 > statistics.median(baseline) * 2
+                    for case, baseline in results[bash].items()
+                ):
+                    raise SystemExit(1)
 
 
 if __name__ == "__main__":

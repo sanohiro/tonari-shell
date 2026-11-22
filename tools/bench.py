@@ -122,6 +122,9 @@ def report(samples):
                 outcome = "at or above Bash time"
             result += f"  Bash ratio {ratio:.3f} (p95 {p95 / baseline_p95:.3f})  {outcome}"
         print(result)
+    if "Tonari" in summaries and "Bash" in summaries:
+        return summaries["Tonari"][0] * 3 <= summaries["Bash"][0] * 2
+    return True
 
 
 def main():
@@ -137,7 +140,9 @@ def main():
     cli.add_argument("--nvm-script", type=Path,
                      help="also measure sourcing this nvm.sh --no-use in an empty NVM_DIR")
     cli.add_argument("--runs", type=int, default=100)
+    cli.add_argument("--require-target", action="store_true", help="exit nonzero if any Tonari median exceeds two thirds of Bash")
     args = cli.parse_args()
+    within_target = True
     if args.runs < 1:
         cli.error("--runs must be positive")
     if args.nvm_script:
@@ -204,12 +209,15 @@ def main():
                             value = round_trip(argv, env, repeats)
                         if i >= 5:
                             samples[name].append(value)
-            report(samples)
+            within_target = report(samples) and within_target
             if case == "prompt":
                 print("  exec to first prompt (same samples)")
-                report(exec_samples)
+                within_target = report(exec_samples) and within_target
     for name, binary, _ in shells:
         print(f"{name:8} {binary.stat().st_size:>9} bytes")
+
+    if args.require_target and not within_target:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

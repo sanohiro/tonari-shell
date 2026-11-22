@@ -196,7 +196,9 @@ def main():
     cli.add_argument("--case", choices=CASES, action="append")
     cli.add_argument("--state-mib", type=int, default=0,
                      help="fill an unexported shell variable before the ready marker")
+    cli.add_argument("--require-target", action="store_true", help="exit nonzero if any Tonari median exceeds two thirds of Bash")
     args = cli.parse_args()
+    within_target = True
     if args.state_mib < 0 or args.state_mib and args.spawn_control:
         cli.error("--state-mib requires a nonnegative size and a shell-only comparison")
     size = args.state_mib * 1024 * 1024
@@ -261,7 +263,10 @@ def main():
                         if i >= 5:
                             samples[name].append(elapsed)
                 print(f"{case} ({'already started' if started else 'whole script'})", flush=True)
-                report(samples)
+                within_target = report(samples) and within_target
+
+    if args.require_target and not within_target:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
