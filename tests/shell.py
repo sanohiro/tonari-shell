@@ -719,6 +719,13 @@ set +B; echo {q,r}; set -o braceexpand; echo {q,r}""", 0,
 a=pre{x,y}; echo "$a"; arr=(foo{1,2} {04..06}); printf '%s/' "${arr[@]}" """,
                      0, b"[a.rs][c.txt]\npre{x,y}\nfoo1/foo2/04/05/06/", minimum=4)
 
+    def test_braces_can_extend_an_unquoted_parameter_name(self):
+        self.compare(r"""v=base; vx=X; vy=Y; vxz=XZ; v1=one; v2=two
+printf '<%s>' $v{x,y} "${v}"{x,y} ${v}{x,y} $v{x,'y'} $v{1..2}; echo
+printf '[%s]' {$v,q}x $v{x,y}z; echo
+set +B; echo $v{x,y}""", 0, b"<X><Y><basex><basey><basex><basey><X><basey><one><two>\n"
+                     b"[X][qx][XZ]\nbase{x,y}\n")
+
     def test_case_fallthrough_and_retest(self):
         version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}"')
         if int(version.stdout) < 4:
@@ -737,6 +744,27 @@ exec 3<>file; IFS= read -ru3 line; echo "read:$line"; printf 'more' >&3; exec 3>
 exec 6<file; exec 7<&6-; read -ru7 line; printf 'moved:%s' "$line"
 exec 8>|output; printf out 9>&8- >&9; { printf ok >&8; } 2>/dev/null; echo "/$?"; cat output""",
                      0, b"blocked:1\nfirst\nallowed\ndevice:0\nread:allowed\nmoved:allowed/1\nout")
+
+    def test_monitor_mode_in_scripts(self):
+        self.compare("""rm -f gate; mkfifo gate; set -m
+reader() { IFS= read -r line <gate; }; reader & p=$!
+g=$(python3 -c 'import os,sys; print(os.getpgid(int(sys.argv[1])))' "$p"); test "$g" = "$p" && echo group
+(sleep .12; echo go >gate) & sender=$!
+fg %1 >/dev/null; echo "fg:$?"; wait "$sender"; set +m; shopt -qo monitor; echo "disabled:$?" """,
+                     0, b"group\nfg:0\ndisabled:1\n")
+
+    def test_directory_stack_rotation_and_no_cd(self):
+        self.compare("""HOME=$PWD; mkdir -p a b; pushd a; pushd ../b; dirs -v
+pushd +1; popd -0; popd; dirs -c; pushd -n c; echo "${DIRSTACK[1]}:${#DIRSTACK[@]}"
+DIRSTACK[1]=changed; dirs +1; pushd no-such-path 2>/dev/null; echo "$?"; dirs
+popd -n; dirs -p""", 0, b"~/a ~\n~/b ~/a ~\n 0  ~/b\n 1  ~/a\n 2  ~\n~/a ~ ~/b\n~/a ~\n~\n~ c\nc:2\nchanged\n1\n~ changed\n~\n~\n")
+
+    def test_local_inheritance_copies_attributes_and_sparse_indices(self):
+        self.compare("""declare -i count=9; array=([2]=two [7]=seven)
+f() { local -I count; local -I array; count+=2; unset 'array[2]'; echo "$count:${!array[*]}"; }
+f; echo "$count:${!array[*]}"
+shopt -s localvar_inherit; g() { local array; array[0]=zero; echo "${!array[*]}"; }
+g; echo "${!array[*]}" """, 0, b"11:7\n9:2 7\n0 2 7\n2 7\n", minimum=5)
 
     def test_integer_declarations_and_local_scope(self):
         self.compare("""base=5; declare -i n='base*2'; n+=3; declare -p n

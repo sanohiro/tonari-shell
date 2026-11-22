@@ -23,6 +23,7 @@ pub enum Alternative {
 #[derive(Clone, Debug)]
 pub enum Part {
     Brace(&'static str),
+    BraceParameter(String),
     BraceTilde(&'static str),
     Range(Box<brace::Range>),
     Text(String),
@@ -124,6 +125,12 @@ impl Word {
             }
         };
         for part in parts {
+            if let Part::BraceParameter(name) = part {
+                *part = Part::Parameter {
+                    name: std::mem::take(name),
+                    quoted: false,
+                };
+            }
             if let Part::Parameter { name, .. }
             | Part::Alternative { name, .. }
             | Part::Trim { name, .. }
@@ -349,7 +356,15 @@ impl Word {
             Self::Expanded(parts) | Self::Declaration(parts) => parts,
         };
         for part in parts {
+            let part = match part {
+                Part::BraceParameter(name) => Part::Parameter {
+                    name,
+                    quoted: false,
+                },
+                other => other,
+            };
             match part {
+                Part::BraceParameter(_) => unreachable!(),
                 Part::Modify { .. } => {
                     unreachable!("parameter modifiers resolve before field splitting")
                 }
@@ -671,6 +686,14 @@ impl WordBuilder {
         }
         self.flush();
         self.parts.push(part);
+    }
+
+    pub fn brace_parameter(&mut self) {
+        if let Some(part @ Part::Parameter { .. }) = self.parts.last_mut()
+            && let Part::Parameter { name, .. } = part
+        {
+            *part = Part::BraceParameter(std::mem::take(name));
+        }
     }
 
     fn flush(&mut self) {

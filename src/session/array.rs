@@ -152,6 +152,7 @@ impl Session {
             );
         }
         match name {
+            "DIRSTACK" => (0..=self.dir_stack.len() as i64).collect(),
             "FUNCNAME" if self.function_depth == 0 => Vec::new(),
             "FUNCNAME" => (0..self.function_names.len() as i64).collect(),
             "BASH_SOURCE" => (0..self.source_names.len() as i64).collect(),
@@ -177,6 +178,7 @@ impl Session {
             };
         }
         match name {
+            "DIRSTACK" => self.stack_entry(index.try_into().ok()?),
             "FUNCNAME" if self.function_depth == 0 => None,
             "FUNCNAME" => self
                 .function_names
@@ -197,6 +199,9 @@ impl Session {
             .filter(|(_, v)| v.elements.is_some() && v.array_assigned)
             .map(|(key, _)| key.clone())
             .collect();
+        if !self.variables.contains_key("DIRSTACK") {
+            names.push("DIRSTACK".into());
+        }
         names.push("BASH_SOURCE".into());
         if self.pipe_status.first.is_some() {
             names.push("PIPESTATUS".into());
@@ -321,6 +326,14 @@ impl Session {
     }
 
     pub fn assign_element(&mut self, name: &str, index: i64, value: String) {
+        if name == "DIRSTACK" && !self.variables.contains_key(name) {
+            if index > 0
+                && let Some(i) = self.dir_stack.len().checked_sub(index as usize)
+            {
+                self.dir_stack[i] = value;
+            }
+            return;
+        }
         if !self.variables.contains_key(name) {
             let inherited = self.inherited_value(name);
             let exported = self.is_exported(name);

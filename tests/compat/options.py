@@ -74,6 +74,16 @@ FLAG_SCRIPTS = {
     ".": {"p":"mkdir d; echo 'printf found' >d/file; . -p d file"},
     "source": {"p":"mkdir d; echo 'printf found' >d/file; source -p d file"},
 }
+stack = "HOME=$PWD; mkdir -p a b; pushd a >/dev/null; pushd ../b >/dev/null; "
+FLAG_SCRIPTS["dirs"] = {
+    "c": stack + "dirs -c; dirs -p",
+    "l": stack + "dirs -l +1",
+    "p": stack + "dirs -p",
+    "v": stack + "dirs -v",
+    "N": stack + "dirs -0",
+}
+FLAG_SCRIPTS["pushd"] = {"n": stack + "pushd -n relative; dirs -p", "N": stack + "pushd -0; dirs -p"}
+FLAG_SCRIPTS["popd"] = {"n": stack + "popd -n; dirs -p", "N": stack + "popd -0; dirs -p"}
 FLAG_SCRIPTS['umask'] = {'p':'umask 027; umask -p', 'S':'umask u=rwx,g=rx,o=; umask -S'}
 for name in ('mapfile', 'readarray'):
     def records(flags, data="first\\nsecond\\nthird", init=""):

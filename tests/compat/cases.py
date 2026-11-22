@@ -191,7 +191,9 @@ SETOPT = {
     "errtrace": "set -E; trap 'echo err' ERR; f(){ false; }; f",
     "noexec": "set -n; printf unreachable", "onecmd": "set -t; printf one\nprintf two",
     "notify": "set -b; [[ $- == *b* ]] && echo enabled",
-    "monitor": "set -m; sleep .03 & p=$!; g=$(ps -o pgid= -p \"$p\" | tr -d ' '); test \"$g\" = \"$p\" && echo group; wait",
+    "monitor": """mkfifo gate; set -m; reader() { IFS= read -r line <gate; }; reader & p=$!
+g=$(python3 -c 'import os,sys; print(os.getpgid(int(sys.argv[1])))' "$p"); test "$g" = "$p" && echo group
+echo go >gate; wait "$p" """,
     "interactive-comments": "set -o interactive-comments; shopt -q interactive_comments; echo \"$?\"",
     "privileged": "set -p; [[ $- == *p* ]] && echo privileged",
     "verbose": "set -v\nprintf visible\nset +v",

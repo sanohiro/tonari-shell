@@ -1,5 +1,6 @@
 pub(crate) mod array;
 mod declare;
+mod directories;
 mod getopts;
 pub(crate) mod mapfile;
 mod options;
@@ -68,6 +69,7 @@ pub struct Session {
     variables: BTreeMap<String, Variable>,
     opt_offset: usize,
     logical_cwd: Option<PathBuf>,
+    dir_stack: Vec<String>,
     shell_pid: ShellPid,
     pub interactive: bool,
     pub command_string: bool,
@@ -142,6 +144,9 @@ impl Session {
         }
         if self.interactive {
             flags.push('i');
+        }
+        if self.jobs.monitor {
+            flags.push('m');
         }
         if self.nounset {
             flags.push('u');
@@ -236,6 +241,7 @@ impl Session {
                     'B' => self.shopt.braceexpand = enable,
                     'f' => self.noglob = enable,
                     'h' => self.hashes.enabled = enable,
+                    'm' => self.jobs.monitor = enable,
                     'u' => self.nounset = enable,
                     'o' => {
                         let Some(name) = args.get(i) else {
@@ -244,6 +250,7 @@ impl Session {
                                 ("braceexpand", self.shopt.braceexpand),
                                 ("errexit", self.errexit),
                                 ("hashall", self.hashes.enabled),
+                                ("monitor", self.jobs.monitor),
                                 ("noclobber", self.noclobber),
                                 ("noglob", self.noglob),
                                 ("nounset", self.nounset),
@@ -304,7 +311,7 @@ impl Session {
                 .as_ref()
                 .map_or_else(|| var.value.clone(), |a| a.get(&0).cloned());
         }
-        if matches!(name, "BASH_SOURCE" | "FUNCNAME") {
+        if matches!(name, "BASH_SOURCE" | "FUNCNAME" | "DIRSTACK") {
             return self.element(name, 0);
         }
         self.inherited_value(name)

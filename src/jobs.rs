@@ -192,6 +192,7 @@ impl Job {
 
 #[derive(Clone, Default)]
 pub struct Jobs {
+    pub monitor: bool,
     tty: Option<Terminal>,
     table: Vec<Job>,
     inherited: Vec<Job>,
@@ -231,10 +232,10 @@ impl Jobs {
             .filter(|t| t.owner == unsafe { libc::getpid() })
     }
     pub fn launch(&self, background: bool) -> Launch {
-        let tty = self.terminal();
+        let tty = self.terminal().filter(|_| self.monitor);
         let foreground_fd = tty.filter(|_| !background).map(|t| t.fd.as_raw_fd());
         Launch {
-            group: tty.map(|_| 0),
+            group: self.monitor.then_some(0),
             tty: foreground_fd,
             shell_modes: foreground_fd.and_then(terminal_modes),
             background,
@@ -249,6 +250,7 @@ impl Jobs {
             self.inherited.clear();
         }
         self.tty = None;
+        self.monitor = false;
         self.table.clear();
         self.serial = 0;
         self.finished.clear();
@@ -861,7 +863,7 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
         "kill" => kill(jobs, &words[1..]),
         "jobs" => list(jobs, &words[1..]),
         name => {
-            if jobs.terminal().is_none() {
+            if !jobs.monitor {
                 eprintln!("tonari: {name}: no job control");
                 return 1;
             }
@@ -870,9 +872,33 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                 return 1;
             };
             if name == "bg" {
-                return u8::from(jobs.table[i].resume().is_err());
+                if !jobs.table[i].stopped() {
+                    eprintln!("tonari: bg: job {} already in background", jobs.table[i].id);
+                    return 0;
+                }
+                let marker = if i + 1 == jobs.table.len() {
+                    '+'
+                } else if i + 2 == jobs.table.len() {
+                    '-'
+                } else {
+                    ' '
+                };
+                let job = &mut jobs.table[i];
+                if job.resume().is_err() {
+                    return 1;
+                }
+                let mut out = io::stdout().lock();
+                return u8::from(
+                    writeln!(out, "[{}]{marker} {} &", job.id, job.name)
+                        .and_then(|_| out.flush())
+                        .is_err(),
+                );
             }
             let mut job = jobs.table.remove(i);
+            {
+                let mut out = io::stdout().lock();
+                let _ = writeln!(out, "{}", job.name).and_then(|_| out.flush());
+            }
             let modes = jobs
                 .terminal()
                 .and_then(|t| terminal_modes(t.fd.as_raw_fd()));

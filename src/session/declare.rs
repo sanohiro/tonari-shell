@@ -10,6 +10,7 @@ struct Options {
     functions: bool,
     global: bool,
     integer: Option<bool>,
+    inherit: bool,
     exported: Option<bool>,
 }
 
@@ -35,6 +36,7 @@ pub(super) fn run(session: &mut Session, command: &str, mut operands: &[String])
                 'F' => flags.functions = true,
                 'g' => flags.global = on,
                 'i' => flags.integer = Some(on),
+                'I' => flags.inherit = on,
                 'p' => flags.print = true,
                 'x' => flags.exported = Some(on),
                 _ => {
@@ -143,12 +145,12 @@ pub(super) fn run(session: &mut Session, command: &str, mut operands: &[String])
                     scope
                         .0
                         .insert(name.into(), session.variables.get(name).cloned());
-                    // A fresh function-local declaration inherits only the
-                    // export attribute of the shadowed variable.
-                    var.integer = false;
-                    var.value = None;
-                    var.elements = None;
-                    var.array_assigned = false;
+                    if !flags.inherit && !session.shopt.localvar_inherit {
+                        var.integer = false;
+                        var.value = None;
+                        var.elements = None;
+                        var.array_assigned = false;
+                    }
                 }
             }
         }

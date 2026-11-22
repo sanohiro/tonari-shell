@@ -23,6 +23,7 @@ pub struct Invocation {
     pub nounset: bool,
     pub noglob: bool,
     pub noclobber: bool,
+    pub monitor: Option<bool>,
     pub braceexpand: bool,
     pub pipefail: bool,
 }
@@ -58,6 +59,7 @@ pub fn parse(
     let mut nounset = false;
     let mut noglob = false;
     let mut noclobber = false;
+    let mut monitor = None;
     let mut braceexpand = true;
     let mut pipefail = false;
     while args
@@ -91,6 +93,7 @@ pub fn parse(
                         'n' => check = enabled,
                         'e' => errexit = enabled,
                         'C' => noclobber = enabled,
+                        'm' => monitor = Some(enabled),
                         'B' => braceexpand = enabled,
                         'f' => noglob = enabled,
                         'u' => nounset = enabled,
@@ -99,6 +102,7 @@ pub fn parse(
                             Some("pipefail") => pipefail = enabled,
                             Some("errexit") => errexit = enabled,
                             Some("nounset") => nounset = enabled,
+                            Some("monitor") => monitor = Some(enabled),
                             Some("noclobber") => noclobber = enabled,
                             Some("noglob") => noglob = enabled,
                             _ => {
@@ -144,6 +148,7 @@ pub fn parse(
         nounset,
         noglob,
         noclobber,
+        monitor,
         braceexpand,
         pipefail,
     }))

@@ -668,7 +668,18 @@ pub(super) fn lex(
                 }
                 '$' => {
                     protected |= chars.as_str().starts_with(['\'', '"']);
+                    let named = chars
+                        .as_str()
+                        .as_bytes()
+                        .first()
+                        .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_');
                     dollar(&mut chars, &mut word, false)?;
+                    if named
+                        && (chars.as_str().starts_with('{')
+                            || braces > 0 && chars.as_str().starts_with([',', '}']))
+                    {
+                        word.brace_parameter();
+                    }
                     pattern_context = true;
                 }
                 '[' | '{' if !started && chars.clone().next().is_none_or(separator) => word.push(c),
@@ -684,6 +695,7 @@ pub(super) fn lex(
                     chars.next();
                 }
                 '{' => {
+                    pattern_context = true;
                     let tail = chars.as_str();
                     if let Some((inner, after)) = tail.split_once('}')
                         && let Some(range) = crate::word::brace::Range::parse(inner)

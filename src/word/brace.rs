@@ -125,6 +125,42 @@ fn choice(parts: &[Part]) -> Option<Choice> {
     None
 }
 
+// Unquoted $name{x,y} spells $namex and $namey after brace expansion.
+// Explicit ${name}, quoted letters and escaped characters keep their boundaries.
+fn parameter_names(parts: Vec<Part>) -> Vec<Part> {
+    if !parts.iter().any(|p| matches!(p, Part::BraceParameter(_))) {
+        return parts;
+    }
+    let mut result = Vec::with_capacity(parts.len());
+    let mut parts = parts.into_iter().peekable();
+    while let Some(part) = parts.next() {
+        if let Part::BraceParameter(mut name) = part {
+            while let Some(Part::Pattern(raw)) = parts.peek_mut() {
+                let len = raw
+                    .bytes()
+                    .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+                    .count();
+                if len == 0 {
+                    break;
+                }
+                name.push_str(&raw[..len]);
+                if len != raw.len() {
+                    raw.drain(..len);
+                    break;
+                }
+                parts.next();
+            }
+            result.push(Part::Parameter {
+                name,
+                quoted: false,
+            });
+        } else {
+            result.push(part);
+        }
+    }
+    result
+}
+
 pub fn fields(parts: Vec<Part>, env: &mut Expansion<'_>, glob: bool) -> Result<Vec<String>, Error> {
     if let [Part::Range(range)] = &parts[..] {
         return Ok(range.values().collect());
@@ -139,7 +175,11 @@ pub fn fields(parts: Vec<Part>, env: &mut Expansion<'_>, glob: bool) -> Result<V
                 };
                 for value in range.values().rev() {
                     let mut word = parts[..i].to_vec();
-                    word.push(Part::Text(value));
+                    word.push(if value.is_empty() {
+                        Part::Text(value)
+                    } else {
+                        Part::Pattern(value)
+                    });
                     word.extend_from_slice(&parts[i + 1..]);
                     pending.push(word);
                 }
@@ -167,7 +207,7 @@ pub fn fields(parts: Vec<Part>, env: &mut Expansion<'_>, glob: bool) -> Result<V
                 {
                     parts[0] = Part::Tilde((*prefix).into());
                 }
-                result.extend(env.resolved_fields(Word::Expanded(parts), glob)?);
+                result.extend(env.resolved_fields(Word::Expanded(parameter_names(parts)), glob)?);
             }
         }
     }

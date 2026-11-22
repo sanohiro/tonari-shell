@@ -427,6 +427,7 @@ enum Builtin {
     Hash,
     Shift,
     Getopts,
+    DirectoryStack,
     Umask,
     Mapfile,
     Let,
@@ -503,6 +504,9 @@ pub(crate) fn builtin_names() -> &'static [&'static str] {
         "let",
         "hash",
         "umask",
+        "dirs",
+        "pushd",
+        "popd",
         "mapfile",
         "readarray",
     ]
@@ -534,6 +538,7 @@ fn named_builtin(name: &str, args: &[String], last_status: u8) -> Option<Builtin
         "break" | "continue" => Some(Builtin::LoopControl),
         "export" => Some(Builtin::Export),
         "unset" => Some(Builtin::Unset),
+        "dirs" | "pushd" | "popd" => Some(Builtin::DirectoryStack),
         "cd" | "pwd" => Some(Builtin::Directory),
         "source" | "." => Some(Builtin::Source),
         "eval" => Some(Builtin::Eval),
@@ -637,6 +642,7 @@ fn eval_builtin(
             Flow::Continue(apply_array_declarations(cmd, status, session))
         }
         Builtin::Unset => Flow::Continue(session.unset(args)),
+        Builtin::DirectoryStack => Flow::Continue(session.directory_stack(&cmd.words[0], args)),
         Builtin::Directory => Flow::Continue(session.directory_builtin(&cmd.words[0], args)),
         Builtin::Source => crate::source_file(session, &cmd.words, last_status),
         Builtin::Eval => crate::eval_text(session, &args.join(" "), last_status),

@@ -5,6 +5,7 @@ use super::Session;
 #[derive(Clone)]
 pub struct ShellOptions {
     pub braceexpand: bool,
+    pub localvar_inherit: bool,
     pub checkwinsize: bool,
     pub sourcepath: bool,
     pub expand_aliases: bool,
@@ -18,6 +19,7 @@ impl Default for ShellOptions {
     fn default() -> Self {
         Self {
             braceexpand: true,
+            localvar_inherit: false,
             checkwinsize: true,
             sourcepath: true,
             expand_aliases: false,
@@ -33,6 +35,7 @@ const SET_OPTIONS: &[&str] = &[
     "braceexpand",
     "errexit",
     "hashall",
+    "monitor",
     "noclobber",
     "noglob",
     "nounset",
@@ -43,6 +46,7 @@ const SHOPT_OPTIONS: &[&str] = &[
     "dotglob",
     "expand_aliases",
     "globstar",
+    "localvar_inherit",
     "nullglob",
     "patsub_replacement",
     "progcomp",
@@ -75,12 +79,14 @@ impl Session {
             (true, "braceexpand") => Some(&mut self.shopt.braceexpand),
             (true, "hashall") => Some(&mut self.hashes.enabled),
             (true, "errexit") => Some(&mut self.errexit),
+            (true, "monitor") => Some(&mut self.jobs.monitor),
             (true, "noclobber") => Some(&mut self.noclobber),
             (true, "noglob") => Some(&mut self.noglob),
             (true, "nounset") => Some(&mut self.nounset),
             (true, "pipefail") => Some(&mut self.pipefail),
             (false, "dotglob") => Some(&mut self.shopt.glob.dotglob),
             (false, "globstar") => Some(&mut self.shopt.glob.globstar),
+            (false, "localvar_inherit") => Some(&mut self.shopt.localvar_inherit),
             (false, "nullglob") => Some(&mut self.shopt.glob.nullglob),
             (false, "checkwinsize") => Some(&mut self.shopt.checkwinsize),
             (false, "patsub_replacement") => Some(&mut self.shopt.patsub_replacement),

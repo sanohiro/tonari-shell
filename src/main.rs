@@ -204,6 +204,7 @@ fn main() -> ExitCode {
     session.nounset = invocation.nounset;
     session.pipefail = invocation.pipefail;
     session.interactive = invocation.interactive;
+    session.jobs.monitor = invocation.monitor.unwrap_or(session.interactive);
     session.command_string = matches!(invocation.input, Input::Command(_));
     session.shopt.expand_aliases = session.interactive;
     if session.interactive {

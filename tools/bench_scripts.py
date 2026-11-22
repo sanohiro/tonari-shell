@@ -116,6 +116,25 @@ echo "$value"
 for ((i=0; i<16; i++)); do mapfile -t table <rows; done
 echo "${#table[@]}:${table[1999]}"
 """, "2000:record 1999"),
+    "case-fallthrough": ("""
+for ((i=0; i<1000; i++)); do
+    case x in x) v=1 ;& y) v=2 ;;& y) v=bad ;; x) v+=3 ;; esac
+done
+echo "$v"
+""", "23"),
+    "directory-stack": ("""
+for ((i=0; i<200; i++)); do pushd -n dir >/dev/null; popd -n >/dev/null; done
+echo "${#DIRSTACK[@]}"
+""", "1"),
+    "descriptor-moves": ("""
+for ((i=0; i<128; i++)); do exec 7<>rows; exec 6<&7-; exec 6<&-; done
+test -s rows && echo moved
+""", "moved"),
+    "integer-assignments": ("""
+declare -i n=1
+for ((i=0; i<2000; i++)); do n+=3; done
+echo "$n"
+""", "6001"),
     "brace-range": ("""
 for ((i=0; i<16; i++)); do set -- {0001..1000}; done
 echo "$# $1 ${1000}"
