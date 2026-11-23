@@ -21,11 +21,14 @@ if sys.platform == "darwin":
     bash = Path("/opt/homebrew/bin/bash")
     if not bash.exists():
         subprocess.run(["brew", "install", "bash"], check=True)
-env = dict(os.environ, CARGO_TARGET_DIR=str(TEMP / "build"))
+env = dict(os.environ, CARGO_TARGET_DIR=str(TEMP / "build"), CARGO_PROFILE_RELEASE_PANIC="abort")
 records = []
 failures = []
 outcome = OUT / "revisions.json"
+selected = os.environ.get("REVISIONS", "").split()
 for commit in revisions[shard::6]:
+    if selected and not any(commit.startswith(prefix) for prefix in selected):
+        continue
     tree = TEMP / commit[:10]
     subprocess.run(["git", "worktree", "add", "-q", "--detach", tree, commit], check=True)
     folder = OUT / commit[:10]

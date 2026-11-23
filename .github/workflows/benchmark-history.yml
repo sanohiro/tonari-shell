@@ -1,5 +1,14 @@
 name: Historical native benchmarks
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      matrix:
+        description: Native runners and history shards
+        type: string
+        default: '{"runner":["ubuntu-24.04","ubuntu-24.04-arm","macos-15"],"shard":[0,1,2,3,4,5]}'
+      revisions:
+        description: Space-separated commit prefixes (empty replays the whole shard)
+        type: string
 
 permissions:
   contents: read
@@ -8,14 +17,13 @@ jobs:
   replay:
     strategy:
       fail-fast: false
-      matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
-        shard: [0, 1, 2, 3, 4, 5]
+      matrix: ${{ fromJSON(inputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     env:
       NATIVE_RUNNER: ${{ matrix.runner }}
       SHARD: ${{ matrix.shard }}
+      REVISIONS: ${{ inputs.revisions }}
       SUITE: historical
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
