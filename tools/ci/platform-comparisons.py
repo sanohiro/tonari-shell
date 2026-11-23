@@ -31,12 +31,12 @@ def replace(file, old, new):
     p.write_text(text.replace(old, new))
 
 
-def build(label, change=lambda: None):
+def build(label, change=lambda: None, **flags):
     subprocess.run(["git", "restore", "."], cwd=TREE, check=True)
     shutil.copy2(ROOT / "tools/build-release.sh", TREE / "tools/build-release.sh")
     change()
     path = subprocess.check_output(["sh", "tools/build-release.sh"], cwd=TREE, text=True,
-                                   env=dict(os.environ, CARGO_TARGET_DIR=str(TEMP / "build"))).strip()
+                                   env=dict(os.environ, CARGO_TARGET_DIR=str(TEMP / "build"), **flags)).strip()
     result = BIN / label
     shutil.copy2(TREE / path, result)
     with (OUT / "variants.txt").open("a") as f:
@@ -171,4 +171,48 @@ def codegen():
     run("search", "bench_history.py", base, other, "--entries", 1000000, "--escaped", "--runs", 21)
 
 
-{"directory": directory, "pipes": pipes, "heap": heap, "codegen": codegen}[os.environ["EXPERIMENT"]]()
+def linking():
+    base = build("default")
+    if MAC:
+        # Apple's linker controls folding through deduplication.
+        def no_fold():
+            replace("tools/build-release.sh", "-Wl,-dead_strip_dylibs", "-Wl,-dead_strip_dylibs,-no_deduplicate")
+        alternatives = [build("no-fold", no_fold)]
+    else:
+        def no_fold():
+            replace("tools/build-release.sh", "-C link-arg=--icf=all", "-C link-arg=--icf=none")
+        def no_pack():
+            replace("tools/build-release.sh", 'if supports_relr "$crt/libc.a"; then', "if false; then")
+        alternatives = [build("no-fold", no_fold), build("no-relr", no_pack)]
+    for other in alternatives:
+        run("startup-" + other.name, "bench.py", base, "--compare-tonari", "Variant", other, "--bash", REF, "--runs", 101)
+        run("startedscripts-" + other.name, "bench_scripts.py", base, "--previous", other, "--bash", REF,
+            "--case", "arithmetic", "--case", "functions", "--case", "substitutions", "--timing", "started", "--runs", 21)
+
+
+def pgo():
+    toolchain = next(s.split("=")[1] for s in (ROOT / "tools/build-release.sh").read_text().splitlines()
+                     if s.strip().startswith("toolchain="))
+    subprocess.run(["rustup", "component", "add", "--toolchain", toolchain, "llvm-tools-preview"], check=True)
+    sysroot = Path(subprocess.check_output(["rustc", "+" + toolchain, "--print", "sysroot"], text=True).strip())
+    merge, = sysroot.glob("lib/rustlib/*/bin/llvm-profdata")
+    base = build("default")
+    profiles = TEMP / "training-data"
+    profiles.mkdir()
+    trained = build("instrumented", RUSTFLAGS="-Cprofile-generate=" + str(profiles))
+    # Training covers the interactive and scripting paths used in the original experiment.
+    run("training-history", "bench_history.py", trained, "--entries", 100000, "--bursts", "--runs", 1)
+    run("training-scripts", "bench_scripts.py", trained, "--bash", REF, "--timing", "started", "--runs", 1,
+        "--case", "arithmetic", "--case", "functions", "--case", "strings", "--case", "glob-utf8-large",
+        "--case", "pipeline", "--case", "substitutions")
+    merged = TEMP / "training.profdata"
+    subprocess.run([merge, "merge", "-o", merged, profiles], check=True)
+    other = build("pgo", RUSTFLAGS="-Cprofile-use=" + str(merged))
+    run("dispatch", "bench.py", base, "--compare-tonari", "PGO", other, "--bash", REF, "--runs", 101)
+    run("scripts", "bench_scripts.py", base, "--previous", other, "--bash", REF, "--timing", "started", "--runs", 15)
+    run("editing", "bench_editing.py", base, other, "--size", 65536, "--runs", 15)
+    run("history", "bench_history.py", base, other, "--entries", 1000000, "--escaped", "--runs", 21)
+    run("files", "bench_completion.py", base, other, "--files", 100000, "--runs", 21)
+
+
+{"directory": directory, "pipes": pipes, "heap": heap, "codegen": codegen, "linking": linking, "pgo": pgo}[os.environ["EXPERIMENT"]]()
