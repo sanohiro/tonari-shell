@@ -1,0 +1,40 @@
+name: Native benchmarks
+on: workflow_dispatch
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: ${{ matrix.runner }} / ${{ matrix.suite }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+        suite: [editing, completion, execution, profiles, inventory]
+        include:
+          - runner: ubuntu-24.04
+            suite: inventory-ubuntu
+          - runner: ubuntu-24.04-arm
+            suite: inventory-ubuntu
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    env:
+      SUITE: ${{ matrix.suite }}
+      NATIVE_RUNNER: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Record machine and build release
+        run: bash tools/ci/native-build.sh
+      - name: Measure on the native host
+        run: bash tools/ci/native-bench.sh
+      - name: Preserve measurements and host details
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ matrix.runner }}-${{ matrix.suite }}
+          path: results/
+          if-no-files-found: error

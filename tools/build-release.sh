@@ -54,12 +54,6 @@ case "$host" in
         ;;
     x86_64-*-linux-gnu|x86_64-*-linux-musl)
         tuning='-C target-cpu=x86-64-v3'
-        level=z
-        if [ "$distribution" = yes ]; then
-            # Smaller std routines let the shell use the faster -Os profile.
-            tuning="-Cforce-frame-pointers=yes $tuning"
-            level=s
-        fi
         ;;
     *)
         printf '%s\n' "No measured release profile for $host" >&2
@@ -71,10 +65,7 @@ if [ "$distribution" = yes ]; then
     # Shipped binaries are stripped. Keep panic locations and frame capture
     # without embedding an object-file reader and DWARF symbolizer.
     std_features=backtrace,backtrace-trace-only
-    case "$host" in
-        x86_64-*-linux-*) std_features=optimize_for_size,$std_features ;;
-        aarch64-*) level=2 ;;
-    esac
+    level=2
     set -- -Zbuild-std=std,panic_abort "-Zbuild-std-features=$std_features" "$@"
 fi
 export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }$tuning"
