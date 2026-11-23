@@ -93,6 +93,10 @@ def directory():
             replace(p, '#[cfg(not(target_os = "linux"))]', "")
             replace(p, '#[cfg(target_os = "linux")]', "#[cfg(any())]")
         other = build("readdir", standard)
+    if not MAC:
+        run("all-branches", "bench_completion.py", base, other, "--branches", "--runs", 41)
+        run("one-branch-cpu", "bench_completion.py", base, other, "--branches", "--runs", 41, affinity=True)
+        run("scan-typeahead", "bench_completion.py", base, other, "--scan-key", "--files", 100000, "--runs", 31)
     large_globs([base, other, REF])
     run("globs", "bench_scripts.py", base, "--previous", other, "--bash", REF, "--runs", 31,
         "--case", "glob-sparse", "--case", "glob-all", "--case", "glob-subdirs", "--case", "glob-recursive",
@@ -199,7 +203,13 @@ def pgo():
     base = build("default")
     profiles = TEMP / "training-data"
     profiles.mkdir()
-    trained = build("instrumented", RUSTFLAGS="-Cprofile-generate=" + str(profiles))
+    instrument = "-Cprofile-generate=" + str(profiles)
+    if not MAC:
+        # The bundled profiling runtime calls compiler builtins such as __popcountdi2.
+        # The standalone musl linker does not add the native compiler's builtins implicitly.
+        runtime = subprocess.check_output(["cc", "-print-libgcc-file-name"], text=True).strip()
+        instrument += " -Clink-arg=" + runtime
+    trained = build("instrumented", RUSTFLAGS=instrument)
     # Training covers the interactive and scripting paths used in the original experiment.
     run("training-history", "bench_history.py", trained, "--entries", 100000, "--bursts", "--runs", 1)
     run("training-scripts", "bench_scripts.py", trained, "--bash", REF, "--timing", "started", "--runs", 1,
