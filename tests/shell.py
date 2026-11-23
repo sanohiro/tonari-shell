@@ -51,6 +51,40 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_nocasematch_across_shell_contexts(self):
+        self.env["LC_ALL"] = "en_US.UTF-8"
+        script = r"""shopt -s extglob
+f() {
+  case "$1" in
+    "Ab*" ) printf 'literal ' ;;
+    @(GiT|SVN)-[A-F] ) printf 'group ' ;;
+    $pat ) printf 'variable ' ;;
+    * ) printf 'no ' ;;
+  esac
+}
+pat='abc*'
+shopt -s nocasematch
+f 'aB*'; f 'git-f'; f 'ABCz'
+v='aB雪Ab'; printf '<%s> <%s> <%s> ' "${v//ab/[&]}" "${v/#AB/X}" "${v/%aB/X}"
+[[ 'ab' == [[:upper:]]* ]] || printf 'lower '
+[[ 'Ab' == [[:upper:]]* ]] && printf 'upper '
+[[ 'aB' =~ ^(A)(b)$ ]] && printf '%s,%s ' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+printf '<%s> ' "${v#A}"
+compgen -W 'git Git tag' -X 'G*' | tr '\n' ' '
+shopt -u nocasematch
+f 'git-f'; [[ 'aB' =~ ^(A)(b)$ ]] || printf 'strict'
+"""
+        self.compare(script, 0, "literal group variable <[aB]雪[Ab]> <X雪Ab> <aB雪X> "
+                     "lower upper a,B <aB雪Ab> tag no strict".encode(), minimum=5)
+        self.compare(r"""shopt -s extglob nocasematch
+v=aB; p='?(q)'; printf '<%s>' "${v//$p/x}" "${v/%$p/x}"
+v=a; p='!(A|B)'; printf '<%s>' "${v//$p/x}" "${v/%$p/x}"
+v=''; printf '<%s>' "${v//$p/x}" "${v/%$p/x}" """,
+                     0, b"<xaxB><aBx><xa><a><><x>", minimum=5)
+        self.compare('shopt -s nocasematch; touch FILE; printf "%s " fi*; '
+                     '[[ "É😃" == é? ]] && [[ "Σ" == σ ]] && [ A != a ] && printf yes',
+                     0, b"fi* yes", minimum=5)
+
     def test_named_descriptors_and_ordered_expansion(self):
         self.compare('exec {out}>file 5>&$out; printf "雪" >&5; exec {out}>&-; '
                      'test -e /dev/fd/$out; printf "%d\\n" "$?"; cat file; '

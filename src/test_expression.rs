@@ -44,7 +44,17 @@ fn condition(expr: Expr, session: &mut Session, status: u8) -> Result<bool, Flow
                     })?;
                     let right =
                         right.extended_pattern(&|name| env.lookup(name), &env.session.positional);
-                    Ok(pattern::extended::matches(&left, &right) != (op == "!="))
+                    let matched = if env.session.shopt.nocasematch {
+                        pattern::extended::insensitive_match(
+                            &left,
+                            &right,
+                            true,
+                            env.session.character_locale(),
+                        )
+                    } else {
+                        pattern::extended::matches(&left, &right)
+                    };
+                    Ok(matched != (op == "!="))
                 }
                 "=~" => {
                     let captured = std::cell::Cell::new(None);
@@ -55,12 +65,13 @@ fn condition(expr: Expr, session: &mut Session, status: u8) -> Result<bool, Flow
                             e.flow(session)
                         })?;
                     let result = pattern::localized(|| {
-                        if session
-                            .regex
-                            .as_ref()
-                            .is_none_or(|r| r.pattern != expression)
-                        {
-                            session.regex = Some(std::rc::Rc::new(Compiled::new(expression)?));
+                        if session.regex.as_ref().is_none_or(|r| {
+                            r.pattern != expression || r.ignore_case != session.shopt.nocasematch
+                        }) {
+                            session.regex = Some(std::rc::Rc::new(Compiled::new(
+                                expression,
+                                session.shopt.nocasematch,
+                            )?));
                         }
                         session.regex.as_ref().unwrap().search(&left)
                     })
@@ -90,20 +101,27 @@ fn condition(expr: Expr, session: &mut Session, status: u8) -> Result<bool, Flow
 
 pub struct Compiled {
     pattern: String,
+    ignore_case: bool,
     regex: Box<libc::regex_t>,
     captures: usize,
 }
 
 impl Compiled {
-    fn new(pattern: String) -> Result<Self, ()> {
+    fn new(pattern: String, ignore_case: bool) -> Result<Self, ()> {
         let encoded = CString::new(pattern.as_str()).map_err(|_| ())?;
         let mut regex = Box::<libc::regex_t>::new_uninit();
-        if unsafe { libc::regcomp(regex.as_mut_ptr(), encoded.as_ptr(), libc::REG_EXTENDED) } != 0 {
+        let flags = if ignore_case {
+            libc::REG_EXTENDED | libc::REG_ICASE
+        } else {
+            libc::REG_EXTENDED
+        };
+        if unsafe { libc::regcomp(regex.as_mut_ptr(), encoded.as_ptr(), flags) } != 0 {
             return Err(());
         }
         let captures = capture_count(&pattern) + 1;
         Ok(Self {
             pattern,
+            ignore_case,
             regex: unsafe { regex.assume_init() },
             captures,
         })

@@ -20,7 +20,7 @@ use std::rc::Rc;
 
 use crate::parser::{Statement, is_identifier};
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum CharacterLocale {
     Ascii,
     Utf8,

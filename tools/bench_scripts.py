@@ -56,6 +56,15 @@ for ((i=0; i<3000; i++)); do
 done
 echo "$last"
 """, "2999"),
+    "nocasematch": ("""
+shopt -s nocasematch
+for ((i=0; i<1500; i++)); do
+    name=Src/Node-$i.RS
+    case $name in src/*.rs) last=${name/#src/lib};; *) exit 1;; esac
+    [[ $last == LIB/* ]] || exit 1
+done
+echo "$last"
+""", "lib/Node-1499.RS"),
     "case-classes": ("""\
 for ((i=0; i<3000; i++)); do
     case src/unit-$i.rs in

@@ -5,6 +5,7 @@ use super::Session;
 #[derive(Clone)]
 pub struct ShellOptions {
     pub checkhash: bool,
+    pub nocasematch: bool,
     pub extdebug: bool,
     pub promptvars: bool,
     pub braceexpand: bool,
@@ -28,6 +29,7 @@ impl Default for ShellOptions {
     fn default() -> Self {
         Self {
             checkhash: false,
+            nocasematch: false,
             extdebug: false,
             promptvars: true,
             braceexpand: true,
@@ -102,6 +104,7 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
         read: |s| s.login,
         write: None,
     },
+    option_entry!("nocasematch", shopt.nocasematch),
     option_entry!("nullglob", shopt.glob.nullglob),
     option_entry!("patsub_replacement", shopt.patsub_replacement),
     option_entry!("progcomp", shopt.progcomp),

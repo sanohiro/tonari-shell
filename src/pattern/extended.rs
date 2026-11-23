@@ -8,6 +8,8 @@ use super::{Matcher, bracket};
 #[derive(Debug)]
 enum Atom {
     Text(Box<str>),
+    FoldedText(Box<str>, super::CharacterLocale),
+    FoldedClass(bracket::FoldedClass),
     Any,
     Star,
     Class(Matcher<Box<str>>, std::cell::Cell<(u128, u128)>),
@@ -91,12 +93,39 @@ fn sequence(source: &mut &str, grouped: bool, extended: bool) -> Option<Vec<Atom
     Some(atoms)
 }
 
+fn fold_atoms(atoms: &mut [Atom], locale: super::CharacterLocale) {
+    for atom in atoms {
+        match atom {
+            Atom::Text(text) => *atom = Atom::FoldedText(std::mem::take(text), locale),
+            Atom::Choice(choices) => {
+                let alternatives = std::mem::take(choices)
+                    .into_iter()
+                    .map(|s| vec![Atom::FoldedText(s, locale)])
+                    .collect();
+                *atom = Atom::Group(b'@', alternatives);
+            }
+            Atom::Group(_, alternatives) => {
+                for branch in alternatives {
+                    fold_atoms(branch, locale);
+                }
+            }
+            Atom::Class(class, _) if !class.source().is_empty() => {
+                *atom = Atom::FoldedClass(bracket::FoldedClass::new(class.source(), locale))
+            }
+            _ => {}
+        }
+    }
+}
+
 fn one_character<const PATHNAME: bool>(atom: &Atom, value: &str, pos: usize) -> Option<usize> {
     let c = value[pos..].chars().next()?;
     if PATHNAME && c == '/' && matches!(atom, Atom::Any) {
         return None;
     }
     let end = pos + c.len_utf8();
+    if let Atom::FoldedClass(class) = atom {
+        return class.accepts(c).then_some(end);
+    }
     if let Atom::Class(class, cache) = atom {
         let (known, matched) = cache.get();
         let bit = if c.is_ascii() { 1u128 << (c as u32) } else { 0 };
@@ -134,7 +163,11 @@ fn endings<const PATHNAME: bool>(
                 && pos == 0
                 && matches!(
                     atom,
-                    Atom::Any | Atom::Class(..) | Atom::Star | Atom::Group(b'!', _)
+                    Atom::Any
+                        | Atom::Class(..)
+                        | Atom::FoldedClass(_)
+                        | Atom::Star
+                        | Atom::Group(b'!', _)
                 )
             {
                 continue;
@@ -144,6 +177,11 @@ fn endings<const PATHNAME: bool>(
                     next.push(pos + text.len())
                 }
                 Atom::Text(_) => {}
+                Atom::FoldedText(text, locale) => {
+                    if let Some(length) = super::folded_prefix(&value[pos..], text, *locale) {
+                        next.push(pos + length);
+                    }
+                }
                 Atom::Choice(choices) => {
                     for text in choices {
                         if value[pos..].starts_with(text.as_ref()) {
@@ -151,7 +189,7 @@ fn endings<const PATHNAME: bool>(
                         }
                     }
                 }
-                Atom::Any | Atom::Class(..) => {
+                Atom::Any | Atom::Class(..) | Atom::FoldedClass(_) => {
                     if let Some(end) = one_character::<PATHNAME>(atom, value, pos) {
                         next.push(end);
                     }
@@ -300,6 +338,13 @@ impl Pattern {
         Some(Self::parse(text, true))
     }
 
+    pub(crate) fn insensitive(text: &str, extended: bool, locale: super::CharacterLocale) -> Self {
+        let mut pattern = Self::parse(text, extended);
+        fold_atoms(&mut pattern.atoms, locale);
+        pattern.single_run = None;
+        pattern
+    }
+
     pub(crate) fn parse(mut text: &str, extended: bool) -> Self {
         let original = text;
         let atoms = sequence(&mut text, false, extended)
@@ -384,4 +429,33 @@ pub(crate) fn matches(value: &str, pattern: &str) -> bool {
         || super::matches(value, pattern),
         |p| p.accepts(value, false),
     )
+}
+
+pub(crate) fn insensitive_match(
+    value: &str,
+    pattern: &str,
+    extended: bool,
+    locale: super::CharacterLocale,
+) -> bool {
+    if !pattern
+        .bytes()
+        .any(|b| matches!(b, b'?' | b'[' | b'\\' | 0))
+        && !(extended && has_group(pattern))
+    {
+        match pattern.split_once('*') {
+            None => return super::folded_prefix(value, pattern, locale) == Some(value.len()),
+            Some((head, tail)) if !tail.contains('*') => {
+                let Some(offset) = super::folded_prefix(value, head, locale) else {
+                    return false;
+                };
+                let mut rest = value[offset..].chars().rev();
+                return tail.chars().rev().all(|c| {
+                    rest.next()
+                        .is_some_and(|v| super::same_letter(v, c, locale))
+                });
+            }
+            _ => {}
+        }
+    }
+    Pattern::insensitive(pattern, extended, locale).accepts(value, false)
 }

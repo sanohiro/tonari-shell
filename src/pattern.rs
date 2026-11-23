@@ -3,6 +3,7 @@ mod directory;
 pub(crate) mod extended;
 mod order;
 
+use crate::session::CharacterLocale;
 use directory::visit_names;
 use order::Collation;
 use std::ffi::{CStr, CString};
@@ -57,7 +58,7 @@ pub(crate) enum Matcher<T> {
     Star(T, usize),
     Stars(T, usize, usize),
     Native(CString),
-    Bracket(bracket::BracketPattern),
+    Bracket(bracket::BracketPattern, T),
     Invalid,
 }
 
@@ -78,7 +79,7 @@ impl<T: AsRef<str>> Matcher<T> {
         }
         if text.contains('[') && bracket::needs_parser(text.as_bytes()) {
             return bracket::BracketPattern::new(text.as_bytes())
-                .map_or(Self::Invalid, Self::Bracket);
+                .map_or(Self::Invalid, |compiled| Self::Bracket(compiled, pattern));
         }
         CString::new(text).map_or(Self::Invalid, Self::Native)
     }
@@ -134,16 +135,36 @@ impl<T: AsRef<str>> Matcher<T> {
                     None => CString::new(value).is_ok_and(|name| test(&name)),
                 }
             }
-            Self::Bracket(pattern) => pattern.accepts(value, period),
+            Self::Bracket(pattern, _) => pattern.accepts(value, period),
             Self::Invalid => false,
         }
+    }
+
+    pub(crate) fn source(&self) -> &str {
+        match self {
+            Self::Literal(s) | Self::Star(s, _) | Self::Stars(s, ..) | Self::Bracket(_, s) => {
+                s.as_ref()
+            }
+            Self::Native(s) => s.to_str().unwrap(),
+            Self::Invalid => "",
+        }
+    }
+
+    pub(crate) fn insensitive(&self, value: &str, extended: bool, locale: CharacterLocale) -> bool {
+        if matches!(self, Self::Invalid) {
+            return false;
+        }
+        if !extended && let Self::Literal(text) = self {
+            return folded_prefix(value, text.as_ref(), locale) == Some(value.len());
+        }
+        extended::insensitive_match(value, self.source(), extended, locale)
     }
 
     pub(crate) fn matches(&self, value: &str) -> bool {
         if value.contains('\0') {
             return false;
         }
-        if matches!(self, Self::Native(_) | Self::Bracket(_)) {
+        if matches!(self, Self::Native(_) | Self::Bracket(..)) {
             localized(|| self.accepts(value.as_bytes(), false, None))
         } else {
             self.accepts(value.as_bytes(), false, None)
@@ -157,6 +178,74 @@ pub(crate) fn bracket_end(after_open: &str) -> Option<usize> {
 
 pub fn matches(value: &str, pattern: &str) -> bool {
     Matcher::new(pattern).matches(value)
+}
+
+fn mapped_char(c: char, upper: bool, locale: CharacterLocale) -> char {
+    if c.is_ascii() && !matches!(locale, CharacterLocale::Turkic) {
+        return if upper {
+            c.to_ascii_uppercase()
+        } else {
+            c.to_ascii_lowercase()
+        };
+    }
+    unsafe extern "C" {
+        fn towupper_l(c: u32, locale: libc::locale_t) -> u32;
+        fn towlower_l(c: u32, locale: libc::locale_t) -> u32;
+    }
+    // The shell may start in C and switch to UTF-8. Select a UTF-8 ctype
+    // explicitly without changing the process locale or loading Unicode tables.
+    static UTF8: OnceLock<usize> = OnceLock::new();
+    let utf8 = *UTF8.get_or_init(|| {
+        for name in [c"C.UTF-8", c"en_US.UTF-8", c"UTF-8"] {
+            let locale = unsafe {
+                libc::newlocale(libc::LC_CTYPE_MASK, name.as_ptr(), std::ptr::null_mut())
+            };
+            if !locale.is_null() {
+                return locale as usize;
+            }
+        }
+        0
+    }) as libc::locale_t;
+    match (locale, upper, c) {
+        (CharacterLocale::Ascii, true, _) => c.to_ascii_uppercase(),
+        (CharacterLocale::Ascii, false, _) => c.to_ascii_lowercase(),
+        (CharacterLocale::Turkic, true, 'i') => 'İ',
+        (CharacterLocale::Turkic, false, 'I') => 'ı',
+        // Bash uses the single-code-point mapping. musl's uppercase
+        // sharp S differs from both of the reference distributions.
+        (_, true, 'ß') => c,
+        (_, false, 'İ') => 'i',
+        _ if utf8.is_null() => c,
+        _ => char::from_u32(unsafe {
+            if upper {
+                towupper_l(c as u32, utf8)
+            } else {
+                towlower_l(c as u32, utf8)
+            }
+        })
+        .unwrap_or(c),
+    }
+}
+
+fn same_letter(left: char, right: char, locale: CharacterLocale) -> bool {
+    if left == right {
+        return true;
+    }
+    if left.is_ascii() && right.is_ascii() && !matches!(locale, CharacterLocale::Turkic) {
+        return left.eq_ignore_ascii_case(&right);
+    }
+    mapped_char(left, false, locale) == mapped_char(right, false, locale)
+}
+
+pub(super) fn folded_prefix(value: &str, prefix: &str, locale: CharacterLocale) -> Option<usize> {
+    let mut chars = value.chars();
+    for expected in prefix.chars() {
+        let current = chars.next()?;
+        if !same_letter(current, expected, locale) {
+            return None;
+        }
+    }
+    Some(value.len() - chars.as_str().len())
 }
 
 pub(crate) fn case_chars(
@@ -183,51 +272,17 @@ pub(crate) fn case_chars(
         }
         return text;
     }
-    unsafe extern "C" {
-        fn towupper_l(c: u32, locale: libc::locale_t) -> u32;
-        fn towlower_l(c: u32, locale: libc::locale_t) -> u32;
-    }
-    // The shell may start in C and switch to UTF-8. Select a UTF-8 ctype
-    // explicitly without changing the process locale or loading Unicode tables.
-    static UTF8: OnceLock<usize> = OnceLock::new();
-    let utf8 = *UTF8.get_or_init(|| {
-        for name in [c"C.UTF-8", c"en_US.UTF-8", c"UTF-8"] {
-            let locale = unsafe {
-                libc::newlocale(libc::LC_CTYPE_MASK, name.as_ptr(), std::ptr::null_mut())
-            };
-            if !locale.is_null() {
-                return locale as usize;
-            }
-        }
-        0
-    }) as libc::locale_t;
     localized(|| {
         let mut out = String::with_capacity(text.len());
         let mut chars = text.chars();
         for c in chars.by_ref() {
             let mut buf = [0; 4];
             let eligible = pattern.is_none_or(|p| p.matches(c.encode_utf8(&mut buf)));
-            let mapped = match (eligible, locale, upper, c) {
-                (false, ..) => c,
-                (_, CharacterLocale::Ascii, true, _) => c.to_ascii_uppercase(),
-                (_, CharacterLocale::Ascii, false, _) => c.to_ascii_lowercase(),
-                (_, CharacterLocale::Turkic, true, 'i') => 'İ',
-                (_, CharacterLocale::Turkic, false, 'I') => 'ı',
-                // Bash uses the single-code-point mapping. musl's uppercase
-                // sharp S differs from both of the reference distributions.
-                (_, _, true, 'ß') => c,
-                (_, _, false, 'İ') => 'i',
-                _ if utf8.is_null() => c,
-                _ => char::from_u32(unsafe {
-                    if upper {
-                        towupper_l(c as u32, utf8)
-                    } else {
-                        towlower_l(c as u32, utf8)
-                    }
-                })
-                .unwrap_or(c),
-            };
-            out.push(mapped);
+            out.push(if eligible {
+                mapped_char(c, upper, locale)
+            } else {
+                c
+            });
             if !all {
                 break;
             }

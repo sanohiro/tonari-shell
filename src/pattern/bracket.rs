@@ -145,6 +145,61 @@ impl Token {
     }
 }
 
+// POSIX named classes test the original character, even when literal
+// members and range endpoints use case-insensitive comparison.
+#[derive(Debug)]
+pub(super) struct FoldedClass {
+    negated: bool,
+    members: Vec<Member>,
+    locale: super::CharacterLocale,
+}
+
+impl FoldedClass {
+    pub(super) fn new(pattern: &str, locale: super::CharacterLocale) -> Self {
+        let Token::List { negated, members } =
+            Token::list(&pattern.as_bytes()[1..pattern.len() - 1], true)
+        else {
+            unreachable!()
+        };
+        Self {
+            negated,
+            members,
+            locale,
+        }
+    }
+
+    fn compare(&self, a: char, b: char) -> std::cmp::Ordering {
+        let order = a.cmp(&b);
+        if a == b
+            || (a as u32 <= 255 && b as u32 <= 255)
+            || matches!(self.locale, super::CharacterLocale::Ascii)
+        {
+            return order;
+        }
+        let (mut left, mut right) = ([0u8; 5], [0u8; 5]);
+        a.encode_utf8(&mut left);
+        b.encode_utf8(&mut right);
+        unsafe { libc::strcoll(left.as_ptr().cast(), right.as_ptr().cast()) }
+            .cmp(&0)
+            .then(order)
+    }
+
+    pub(super) fn accepts(&self, c: char) -> bool {
+        let lower = |c| super::mapped_char(c, false, self.locale);
+        let scalar = |bytes: &[u8; 4]| std::str::from_utf8(bytes).ok()?.chars().next();
+        let mut buffer = [0; 4];
+        let original = packed(c.encode_utf8(&mut buffer).as_bytes());
+        let folded = lower(c);
+        self.members.iter().any(|m| match m {
+            Member::Literal(bytes) => scalar(bytes).is_some_and(|v| lower(v) == folded),
+            Member::Range(lo, hi) => scalar(lo).zip(scalar(hi)).is_some_and(|(lo, hi)| {
+                !self.compare(lower(lo), folded).is_gt() && !self.compare(folded, lower(hi)).is_gt()
+            }),
+            other => other.accepts(&original),
+        }) != self.negated
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct BracketPattern {
     tokens: Vec<Token>,

@@ -133,6 +133,10 @@ impl Modification {
                         *mode,
                         env.session.shopt.patsub_replacement,
                         env.session.shopt.glob.extglob,
+                        env.session
+                            .shopt
+                            .nocasematch
+                            .then(|| env.session.character_locale()),
                     )
                 }))
             }

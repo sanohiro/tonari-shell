@@ -164,7 +164,13 @@ SHOPT = {
     "failglob": "shopt -s failglob; (echo missing-*) 2>/dev/null; echo \"$?\"",
     "globstar": "mkdir -p a/b; touch a/b/file; shopt -s globstar; printf '<%s>' **/file",
     "nocaseglob": "touch UPPER; shopt -s nocaseglob; printf '<%s>' upp*",
-    "nocasematch": "shopt -s nocasematch; [[ UPPER == upper ]] && printf yes",
+    "nocasematch": r"""shopt -s nocasematch
+v=AbABC
+case $v in aB*) printf '%s ' "${v//ab/[&]}";; esac
+[[ $v =~ ^(ab) ]] && printf '%s ' "${BASH_REMATCH[1]}"
+[[ a != [[:upper:]] ]] && [[ A == @(a|z) ]] && printf pass
+shopt -u nocasematch
+[[ $v =~ ^(ab) ]] || printf ' strict'""",
     "globskipdots": "shopt -s globskipdots; touch .x; printf '<%s>' .*",
     "globasciiranges": "shopt -s globasciiranges && [[ b == [a-z] ]] && ! [[ B == [a-z] ]]",
     "expand_aliases": LANGUAGE["alias parse time"],

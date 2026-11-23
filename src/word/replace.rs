@@ -20,11 +20,48 @@ pub(super) fn substitute(
     mode: ReplaceMode,
     expand_amp: bool,
     extglob: bool,
+    fold: Option<crate::session::CharacterLocale>,
 ) -> String {
     use ReplaceMode::*;
-    let group = extglob
-        .then(|| crate::pattern::extended::Pattern::new(pattern))
-        .flatten();
+    if let Some(locale) = fold
+        && !pattern.is_empty()
+        && !crate::pattern::has_magic(pattern, false)
+        && !(extglob && crate::pattern::extended::has_group(pattern))
+    {
+        let needle = crate::pattern::unescape(pattern);
+        let mut out = String::new();
+        let mut copied = 0;
+        for (start, _) in text.char_indices() {
+            if start < copied {
+                continue;
+            }
+            if mode == Prefix && start != 0 {
+                break;
+            }
+            if let Some(n) = crate::pattern::folded_prefix(&text[start..], &needle, locale)
+                && (mode != Suffix || start + n == text.len())
+            {
+                out.push_str(&text[copied..start]);
+                copied = start + n;
+                write_replacement(&mut out, template, &text[start..copied], expand_amp);
+                if mode != All {
+                    break;
+                }
+            }
+        }
+        if copied == 0 {
+            return text;
+        }
+        out.push_str(&text[copied..]);
+        return out;
+    }
+    let group = match fold {
+        Some(locale) if !pattern.is_empty() => Some(
+            crate::pattern::extended::Pattern::insensitive(pattern, extglob, locale),
+        ),
+        _ if extglob => crate::pattern::extended::Pattern::new(pattern),
+        _ => None,
+    };
     if group.is_none() && !crate::pattern::has_magic(pattern, false) {
         let needle = crate::pattern::unescape(pattern);
         let mut replacement = String::new();
@@ -73,7 +110,7 @@ pub(super) fn substitute(
         } else if mode == Suffix {
             accepts(&text[start..]).then_some(bounds.len() - 1)
         } else if group.is_some() || crate::pattern::matches(&text[start..], &starts) {
-            (i + 1..bounds.len())
+            (i..bounds.len())
                 .rev()
                 .find(|&j| accepts(&text[start..bounds[j]]))
         } else {
@@ -83,7 +120,7 @@ pub(super) fn substitute(
             out.push_str(&text[copied..start]);
             write_replacement(&mut out, template, &text[start..bounds[j]], expand_amp);
             copied = bounds[j];
-            i = j;
+            i = if i == j { i + 1 } else { j };
             if mode != All {
                 break;
             }
@@ -94,7 +131,22 @@ pub(super) fn substitute(
             i += 1;
         }
     }
-    if copied == 0 {
+    if copied == 0 && out.is_empty() {
+        let insert_at_end = if mode == Suffix && accepts("") {
+            let anchored = format!("*{pattern}");
+            match fold {
+                Some(locale) => {
+                    crate::pattern::extended::insensitive_match(&text, &anchored, extglob, locale)
+                }
+                None if extglob => crate::pattern::extended::matches(&text, &anchored),
+                None => crate::pattern::matches(&text, &anchored),
+            }
+        } else {
+            text.is_empty() && pattern.starts_with('*') && accepts("")
+        };
+        if insert_at_end {
+            write_replacement(&mut text, template, "", expand_amp);
+        }
         return text;
     }
     out.push_str(&text[copied..]);

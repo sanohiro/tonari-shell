@@ -488,7 +488,23 @@ impl Spec {
                     _ => expanded.push(c),
                 }
             }
-            words.retain(|w| pattern::matches(w, &expanded) == invert);
+            let extended = session.shopt.glob.extglob;
+            if session.shopt.nocasematch {
+                let matcher = pattern::extended::Pattern::insensitive(
+                    &expanded,
+                    extended,
+                    session.character_locale(),
+                );
+                words.retain(|w| matcher.accepts(w, false) == invert);
+            } else if let Some(matcher) = extended
+                .then(|| pattern::extended::Pattern::new(&expanded))
+                .flatten()
+            {
+                words.retain(|w| matcher.accepts(w, false) == invert);
+            } else {
+                let matcher = pattern::Matcher::new(expanded);
+                words.retain(|w| matcher.matches(w) == invert);
+            }
         }
         if self.prefix.is_some() || self.suffix.is_some() {
             for w in &mut words {
