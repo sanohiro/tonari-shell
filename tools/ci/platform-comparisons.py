@@ -193,6 +193,16 @@ def codegen():
     else:
         other = build("frame-pointers", lambda: replace("tools/build-release.sh", 'export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }$tuning"',
                       'export RUSTFLAGS="-Cforce-frame-pointers=yes ${RUSTFLAGS:+$RUSTFLAGS }$tuning"'))
+    compare_codegen(base, other)
+
+
+def outliner():
+    base = build("default")
+    options = "-Cllvm-args=--enable-machine-outliner=always -Cllvm-args=--outliner-benefit-threshold=384"
+    compare_codegen(base, build("outliner", RUSTFLAGS=options))
+
+
+def compare_codegen(base, other):
     run("dispatch", "bench.py", base, "--compare-tonari", "Variant", other, "--bash", REF, "--runs", 101)
     run("scripts", "bench_scripts.py", base, "--previous", other, "--bash", REF, "--runs", 21)
     run("editing", "bench_editing.py", base, other, REF, "--size", 65536, "--runs", 15)
@@ -249,4 +259,4 @@ def pgo():
     run("files", "bench_completion.py", base, other, "--files", 100000, "--runs", 21)
 
 
-{"directory": directory, "pipes": pipes, "heap": heap, "codegen": codegen, "linking": linking, "pgo": pgo, "initial-batch": initial_batch, "workers": workers}[os.environ["EXPERIMENT"]]()
+{"directory": directory, "pipes": pipes, "heap": heap, "codegen": codegen, "linking": linking, "pgo": pgo, "initial-batch": initial_batch, "workers": workers, "outliner": outliner}[os.environ["EXPERIMENT"]]()
