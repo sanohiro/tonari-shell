@@ -4,6 +4,10 @@ When an investigation produces a reusable finding or changes a design decision, 
 
 Keep benchmark tables and run conditions in [the benchmark record](docs/benchmarks.md). Link to the relevant evidence from the notes. When new evidence changes a conclusion, date the update and explain what changed.
 
+# Runtime dependencies
+
+Implement editing, history, completion and expansion in Rust. Ship one executable per target and aim for zero additional shared libraries when adding features. A Rust crate can be linked into that executable and can itself pull in native libraries. Evaluate a new crate against the required behavior, latency on the affected path and release binary size. Inspect the resulting binary with `otool -L` or `readelf -d` when changing dependencies or linker settings. The project's UTF-8 contract permits byte-ordered filename expansion. Exact collation in a named locale is a target-specific capability.
+
 # Checking Bash compatibility and speed
 
 Use the reference-derived [feature audit](docs/compatibility.md) when changing shell behavior. Add a direct Bash witness for new functionality, including its observable result. Compare release timing on the same machine and filesystem after the behavior matches. Aim for 1/2 of Bash time, with 2/3 as the upper target for shell work. Accept parity for very short operations and workloads whose elapsed time is dominated by the same OS operation or wait. Use absolute times and run-to-run variation to judge close results. Where a short operation repeats in a script, also measure its throughput in a running shell. Record outstanding differences and target misses in the matrix. Before updating the performance baseline, run the previous-snapshot comparison and inspect newly failing names and modes.

@@ -1,5 +1,13 @@
 # Startup and execution / 起動と実行性能
 
+<a id="macos-runtime-dependencies"></a>
+
+## macOS release linkage / macOS 配布版のリンク
+
+On 2026-11-23 we rebuilt the release from `52e2148` on an Apple M1 running macOS 27.2.1 with Rust 1.96.1 and added `-dead_strip_dylibs` to the release profile. Both builds were 1,202,848 bytes. For `-c :`, 201 interleaved samples per executable gave median / p95 times of 2.660 / 3.165 ms with the flag, 2.702 / 3.198 ms for the previous release and 5.567 / 6.324 ms for Bash 5.2.37. The new executable's SHA-256 is `270d22e641edbfabefc6fe73c432c98e7f5116f38b6608e25981517573d60241`. The feature matrix below identifies the earlier binary by its own digest. [Startup benchmark](../tools/bench.py) · [Release profile](../tools/build-release.sh)
+
+同一のシェル実装で未使用の共有ライブラリを除く設定を比較しました。macOS の統合テストは123件通過、Linux 専用の1件はスキップでした。起動時間の差は小さく、採用理由は直接リンクするライブラリが1本減ったことです。[依存方針と検証方法](engineering-notes.md#runtime-dependencies)
+
 <a id="interactive-response"></a>
 
 ## Interactive response and sustained work / 対話応答と連続実行

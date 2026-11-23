@@ -6,7 +6,7 @@ host=$(rustc -vV | sed -n 's/^host: //p')
 level=s
 case "$host" in
     aarch64-apple-darwin)
-        tuning='-C target-cpu=native -C llvm-args=--enable-machine-outliner=always -C llvm-args=--outliner-benefit-threshold=384'
+        tuning='-C link-arg=-Wl,-dead_strip_dylibs -C target-cpu=native -C llvm-args=--enable-machine-outliner=always -C llvm-args=--outliner-benefit-threshold=384'
         ;;
     aarch64-*-linux-gnu)
         tuning='-C target-cpu=native -C force-unwind-tables=no'

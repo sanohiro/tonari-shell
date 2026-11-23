@@ -53,6 +53,8 @@ Git では起動後に別プロセスが作ったブランチを補完して切�
 
 ## 開発
 
+入力編集・履歴・補完・展開は Rust で実装し、機能の追加で実行時の共有ライブラリを増やさないことを原則とします。Rust クレートは、必要な動作、その処理にかかる時間、配布バイナリのサイズを確認して採用します。ファイル名展開では UTF-8 のバイト順を許容します。名前付きロケールでその OS の Bash と同じ順に並ぶのは、macOS 版と glibc 版の機能です。[実行時依存とファイル名の順序](docs/engineering-notes.md#runtime-dependencies)
+
 ```sh
 cargo test --locked
 cargo build --locked

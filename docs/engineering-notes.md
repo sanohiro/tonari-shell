@@ -1,5 +1,15 @@
 # Engineering notes / 開発知見
 
+<a id="runtime-dependencies"></a>
+
+## 2026-11-23 · Runtime dependencies and filename order / 実行時依存とファイル名の順序
+
+Tonari ships one executable per target. Its two direct Cargo dependencies are `unicode-width` for terminal cell widths and `libc` for native API declarations. The macOS release now uses `-dead_strip_dylibs`. This removes the unused `libiconv` load command and leaves only `libSystem`. The earlier speed experiment found little difference. We adopted the flag to keep the runtime dependency list small. Inspect Rust dependencies with `cargo tree --locked --edges normal` and direct shared libraries with `otool -L` on Mach-O or `readelf -d` on ELF. [Release measurements](benchmarks.md#macos-runtime-dependencies)
+
+UTF-8 byte order is an acceptable order for pathname expansion. On Debian 13 and Ubuntu 26.04 arm64, Bash and both Tonari builds expanded the same eight `*.txt` names. With `LC_ALL=C.UTF-8` all three put `B.txt` first. With `LC_ALL=ja_JP.UTF-8` Bash and the glibc build put `😺.txt` first and the static musl build put `B.txt` first. This affects arguments by position and loops whose side effects depend on iteration order. Of the named checks in the November 23 Linux inventory, only the `LC_COLLATE` result differed between these builds. [glibc observations](compatibility-2026-11-23-response/matrix.md) · [musl observations](compatibility-2026-11-23-response/musl/matrix.md)
+
+ファイル名展開の順序は UTF-8 のバイト順を許容します。Debian・Ubuntu の8ファイルの比較では、どの版でも同じ名前が展開されました。`ja_JP.UTF-8` で `set -- *.txt` を実行すると、Bash と glibc 版の `$1` は `😺.txt`、静的 musl 版は `B.txt` です。`C.UTF-8` では3者の全件の順序が一致しました。この照合順序だけを理由に、新たな共有ライブラリを追加する必要はありません。macOS 版では未使用の `libiconv` への直接リンクを外し、配布バイナリが直接参照する共有ライブラリは `libSystem` だけになりました。[配布設定](../tools/build-release.sh) · [サイズと起動時間](benchmarks.md#macos-runtime-dependencies)
+
 ## 2026-11-23 · Input latency, directory order and byte streams / 入力応答・照合順序・ストリーム
 
 - A fresh session can answer a recent history query from the last 16 KiB of complete journal rows. For an older literal match, scan complete blocks backwards and check new input between blocks. An oversized row or an escaped query still has a decoded streaming path. A key queued behind Ctrl-R can cancel the search before the first full scan. The million-row PTY fixture measures a recent and an old match, cancellation, a 512-byte burst and a 16 KiB paste. [PTY benchmark](../tools/bench_history.py)
