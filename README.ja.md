@@ -10,14 +10,19 @@ Debian・Ubuntu・macOS で各項目がどこまで動作するかを一覧に�
 
 ## 試す
 
-ビルドには Rust 1.88 以降を使用します。配布用は 1.96.1 でビルドし、最小対応版の 1.88.0 でも macOS と Linux の両アーキテクチャで動作を確認しました。起動引数を付けると、自分の Bash 設定を読み込む前に標準のエディターを試せます。
-
-arm64 版はビルド機の CPU、x86-64 版は x86-64-v3 向けです。GNU/Linux の rustup 環境では先に `rustup target add "$(uname -m)-unknown-linux-musl"` を実行してください。配布スクリプトは binutils で Linux バイナリのリンク結果を検査します。開発用の `cargo build` はホストのターゲットを使い、ホストの libc にリンクする場合があります。
+開発用ビルドは Rust 1.88 以降に対応します。配布版は rustup の版を固定し、標準ライブラリもシェルと一緒に最適化します。arm64 はビルド機の CPU、Linux x86-64 は x86-64-v3 向けです。対象と同じ OS・アーキテクチャでビルドしてください。Linux のリンク結果の検査には binutils も使用します。
 
 ```sh
+case "$(uname -s)" in
+  Darwin) target=aarch64-apple-darwin ;;
+  Linux) target="$(uname -m)-unknown-linux-musl" ;;
+esac
+rustup toolchain install nightly-2026-11-20 --profile minimal --component rust-src --target "$target"
 binary=$(tools/build-release.sh)
 "$binary" --noprofile --norc
 ```
+
+インストール済みのコンパイラと標準ライブラリを使うには `--host-toolchain` を指定します。GNU/Linux では先にそのコンパイラの musl ターゲットを追加してください。開発用の `cargo build` はホストのターゲットを使います。
 
 プロンプトではパイプや関数を試せます。↑ で現在の端末の履歴をたどり、Ctrl-R で他のセッションを含めて検索します。行末で → を押すと薄く表示された候補を採用します。Tab は空白を含むパスも補完します。ブラケットペースト対応端末では、複数行を貼り付けた後に編集でき、Enter で実行します。
 
@@ -51,11 +56,11 @@ Git では起動後に別プロセスが作ったブランチを補完して切�
 
 機能互換の基準は Debian 13 の GNU Bash 5.2.37 と Ubuntu 26.04 の 5.3.9 です。シェル自身の処理は Bash の所要時間の半分、遅くても 3 分の 2 を目指します。ごく短い単発処理や、共通の OS 処理・待ち時間が大半を占める処理は、Bash と同程度なら許容します。起動・外部コマンド・パイプ・反復実行を個別に計測し、macOS 標準の Bash 3.2 とも比較します。[計測結果・バイナリサイズ・ビルド条件](docs/benchmarks.md)
 
-Linux の arm64 版と x86-64-v3 版は、ともに musl を静的リンクした実行ファイル1本で配布します。実行環境に glibc、動的ローダー、musl パッケージは不要です。macOS arm64 版が直接リンクする共有ライブラリは libSystem だけです。[配布サイズと起動の実測](docs/benchmarks.md#static-linux)
+Linux の arm64 版と x86-64-v3 版は、ともに musl を静的リンクした実行ファイル1本で配布します。実行環境に glibc、動的ローダー、musl パッケージは不要です。macOS arm64 版が直接リンクする共有ライブラリは libSystem だけです。[配布サイズと起動の実測](docs/benchmarks.md#release-latency)
 
 ## 開発
 
-個別の処理には Rust 標準ライブラリか pure Rust クレートを優先します。たとえば端末での文字幅には `unicode-width`、ファイル記述子・端末・プロセス制御には `libc` クレート経由で OS の API を使います。ネイティブライブラリを追加するときは、必要な機能、その処理の遅延、配布サイズで判断します。ファイル名展開の順序は Linux では常に UTF-8 のバイト順、macOS では現在のロケール順です。[実行時依存とファイル名の順序](docs/engineering-notes.md#runtime-dependencies)
+個別の処理には Rust 標準ライブラリか pure Rust クレートを優先します。端末の文字幅は `unicode-width`、履歴の検索は `memchr`、Linux musl 版での小さいメモリ確保は `dlmalloc` が担います。大きなバッファは静的 musl のアロケータに渡します。ファイル記述子・端末・プロセス制御には `libc` クレート経由で OS の API を使います。ネイティブライブラリを追加するときは、必要な機能、その処理の遅延、配布サイズで判断します。ファイル名展開の順序は Linux では常に UTF-8 のバイト順、macOS では現在のロケール順です。[実行時依存とファイル名の順序](docs/engineering-notes.md#runtime-dependencies)
 
 ```sh
 cargo test --locked

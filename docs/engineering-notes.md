@@ -1,5 +1,23 @@
 # Engineering notes / 開発知見
 
+## 2026-11-23 · Login allocation and history search / ログイン時のメモリ確保と履歴検索
+
+The static Linux runtime increased login latency in the first build. Tracing the shell process on Debian arm64 showed 101 `mmap` and 97 `munmap` calls for `--login -ic :`. Using the pure Rust `dlmalloc` crate for Rust allocations reduced this to five and one in the isolated allocator trial. The final distribution binary made five mappings and zero unmaps in a repeat on each distribution. With the previous release compiler and prebuilt standard library on arm64, this isolated change cost 10,648 bytes. Registration of the crate's fork handlers happens once, before the first allocation on its heap. The release routes blocks of 256 KiB or more to Rust’s System allocator backed by static musl. A resize crossing that boundary copies only the shared prefix and leaves the old allocation intact on failure. This released the 16 MiB variable's pages immediately on unset. A stress run forked 128 children that each allocated memory while four parent threads continuously allocated and freed it. The Linux executable still has zero shared library dependencies. Run `cargo test --locked --test allocator_fork` on a musl host. [Fork regression test](../tests/allocator_fork.rs) · [Allocator fork contract](https://docs.rs/dlmalloc/0.2.14/dlmalloc/fn.enable_alloc_after_fork.html) · [Measurements](benchmarks.md#release-latency)
+
+Debian arm64 のログインで、親プロセスによるメモリのマップ・解除が以前の静的版では101回・97回ありました。メモリ管理だけを切り替えた試作では5回・1回、最終配布版の再検査では Debian・Ubuntu とも5回・0回でした。arm64 でコンパイラと事前ビルド済みの標準ライブラリをそろえた場合、この変更単体のサイズ増は 10,648 バイトでした。小さい割り当てを受けるヒープの初回使用前に fork ハンドラを登録します。256 KiB 以上は静的 musl に渡し、解放した大きなバッファを OS が回収できるようにしました。親の4スレッドがメモリを使い続ける間に128回 fork して、各子プロセスでも確保できることを確認しました。[計測記録](benchmarks.md#release-latency)
+
+For old journal entries, reuse one byte-substring finder over the reverse scan. A block with no matching bytes needs no UTF-8 validation. Matching records still go through decoding, and a pending key can interrupt between reads. A regression test places a malformed record containing the search term between the reader and the valid match. [Byte search](https://docs.rs/memchr/latest/memchr/memmem/struct.Finder.html) · [PTY tests](../tests/shell.py)
+
+古い履歴の検索では、各ブロックで同じバイト列検索器を使い回します。一致するバイト列がないブロックは読み飛ばし、一致の可能性がある行だけ UTF-8 と履歴形式を検証します。検索語を含む壊れた行が先に見つかっても、その前の正しい候補を返すことをテストしています。
+
+Compiling the standard library with the application's LTO profile reduces the shipped size on all three targets. On x86-64-v3, enabling the standard library's smaller algorithms and frame pointers freed enough space to use `opt-level="s"` for the interpreter. The standard library is built with Cargo's `backtrace` feature. Cargo requires nightly for this distribution build, so we pin its date and retain a stable development build. [Cargo build-std](https://doc.rust-lang.org/cargo/reference/unstable.html#build-std) · [Profile comparisons](benchmarks.md#release-latency)
+
+標準ライブラリまで同じ設定でビルドし、3ターゲットとも実行ファイルを縮小しました。x86-64-v3 では標準ライブラリにサイズ重視の実装を使い、フレームポインタを有効にすると、標準ライブラリの `backtrace` 機能をビルドしつつ、シェル本体により速い最適化設定を使えます。配布版用に nightly の日付を固定しています。[配布設定](../tools/build-release.sh)
+
+A raw counted read without a timeout can consume up to the number of characters still requested in **bytes** from a pipe. Append a NUL-free ASCII span directly into the result. For other bytes, skip NULs and count UTF-8 leading bytes across input blocks. Finish the last character before returning the descriptor to its next reader. Tests exercise a regular file and a pipe, including NULs, emoji split across buffers and a zero-length read. [Integration test](../tests/shell.py) · [Byte-checked stream timings](benchmarks.md#release-latency)
+
+タイムアウトを指定しない `read -r -N` では、残りの文字数と同じバイト数まではまとめて読めます。NUL を含まない ASCII は一括コピーし、それ以外はブロックをまたぐ UTF-8 の文字と NUL を区別します。実ファイルとパイプの両方で、後続のコマンドが読み取るバイトまで照合しています。
+
 <a id="runtime-dependencies"></a>
 
 ## 2026-11-23 · Runtime dependencies and filename order / 実行時依存とファイル名の順序
@@ -12,7 +30,7 @@ On the rustup aarch64 musl target, the default static entry point yields a fixed
 
 arm64 の rustup ターゲットでは同梱の `rcrt1.o` で静的 PIE を作れます。Rust 1.88 の musl は圧縮再配置を指定すると、リンクに成功しても起動時に失敗します。配布スクリプトは使用するアーカイブの版を調べ、対応版だけで圧縮します。Rust 1.88 と 1.96.1 の両方で、arm64・x86-64-v3 の ELF ヘッダーと起動後の算術演算を確認しました。
 
-Tonari ships one executable per target. Its two direct Cargo dependencies are `unicode-width` for terminal cell widths and `libc` for native API declarations. The macOS release now uses `-dead_strip_dylibs`. This removes the unused `libiconv` load command and leaves only `libSystem`. The earlier speed experiment found little difference. We adopted the flag to keep the runtime dependency list small. Inspect Rust dependencies with `cargo tree --locked --edges normal` and direct shared libraries with `otool -L` on Mach-O or `readelf -d` on ELF. [Release measurements](benchmarks.md#macos-runtime-dependencies)
+Tonari ships one executable per target. Direct dependencies include `unicode-width` for terminal cell widths, `memchr` for byte search, `libc` for native API declarations and, on Linux musl, `dlmalloc` for Rust allocations. The macOS release now uses `-dead_strip_dylibs`. This removes the unused `libiconv` load command and leaves only `libSystem`. The earlier speed experiment found little difference. We adopted the flag to keep the runtime dependency list small. Inspect Rust dependencies with `cargo tree --locked --edges normal` and direct shared libraries with `otool -L` on Mach-O or `readelf -d` on ELF. [Release measurements](benchmarks.md#macos-runtime-dependencies)
 
 POSIX specifies the active locale’s collation for pathname expansion. Bash 5.3 documents the same default when `GLOBSORT` is unset or empty. A script can observe the result directly through positional parameters. The implementation may choose its sorting algorithm. [POSIX.1-2024 §2.14.3](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_14_03) · [GNU Bash variables](https://www.gnu.org/software/bash/manual/html_node/Bash-Variables.html#index-GLOBSORT)
 

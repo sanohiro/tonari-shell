@@ -1,4 +1,6 @@
 mod alias;
+#[cfg(all(target_os = "linux", target_env = "musl"))]
+mod allocator;
 mod arithmetic;
 mod builtins;
 mod cli;

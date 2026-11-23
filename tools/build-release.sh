@@ -1,5 +1,6 @@
 #!/bin/sh
-# Build the single executable for this host. Extra arguments go to Cargo.
+# Build the distribution executable. --host-toolchain uses the installed Rust std.
+# Remaining arguments go to Cargo.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -14,7 +15,35 @@ supports_relr() {
         END { exit !ok }'
 }
 
+distribution=yes
+if [ "${1-}" = --host-toolchain ]; then
+    distribution=no
+    shift
+fi
 host=$(rustc -vV | sed -n 's/^host: //p')
+case "$host:$distribution" in
+    aarch64-apple-darwin:yes|aarch64-*-linux-*:yes|x86_64-*-linux-*:yes)
+        # Cargo requires nightly to compile std with the application's release profile.
+        toolchain=nightly-2026-11-20
+        case "$host" in
+            *-apple-darwin) target=$host ;;
+            *) target=${host%%-*}-unknown-linux-musl ;;
+        esac
+        install="rustup toolchain install $toolchain --profile minimal --component rust-src --target $target"
+        compiler=$(rustup which --toolchain "$toolchain" rustc 2>/dev/null) || {
+            echo "For a distribution build, run: $install" >&2
+            echo "To use the installed compiler and prebuilt std, pass --host-toolchain." >&2
+            exit 1
+        }
+        export PATH="${compiler%/*}:$PATH" RUSTUP_TOOLCHAIN="$toolchain"
+        host=$(rustc -vV | sed -n 's/^host: //p')
+        if [ ! -f "$(rustc --print sysroot)/lib/rustlib/src/rust/library/std/Cargo.toml" ] ||
+            [ ! -d "$(rustc --print target-libdir --target "$target")" ]; then
+            echo "Install the distribution build components: $install" >&2
+            exit 1
+        fi
+        ;;
+esac
 level=s
 case "$host" in
     aarch64-apple-darwin)
@@ -26,6 +55,11 @@ case "$host" in
     x86_64-*-linux-gnu|x86_64-*-linux-musl)
         tuning='-C target-cpu=x86-64-v3'
         level=z
+        if [ "$distribution" = yes ]; then
+            # Smaller std routines let the shell use the faster -Os profile.
+            tuning="-Cforce-frame-pointers=yes $tuning"
+            level=s
+        fi
         ;;
     *)
         printf '%s\n' "No measured release profile for $host" >&2
@@ -33,12 +67,27 @@ case "$host" in
         ;;
 esac
 
+if [ "$distribution" = yes ]; then
+    std_features=backtrace
+    case "$host" in x86_64-*-linux-*) std_features=optimize_for_size,backtrace ;; esac
+    set -- -Zbuild-std=std,panic_abort "-Zbuild-std-features=$std_features" "$@"
+fi
 export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }$tuning"
 export CARGO_PROFILE_RELEASE_OPT_LEVEL="${CARGO_PROFILE_RELEASE_OPT_LEVEL:-$level}"
 case "$host" in
     *-apple-darwin)
-        cargo build --release --locked "$@"
         binary="${CARGO_TARGET_DIR:-target}/release/tonari"
+        if [ "$distribution" = yes ]; then
+            set -- --target "$host" "$@"
+            binary="${CARGO_TARGET_DIR:-target}/$host/release/tonari"
+        fi
+        cargo build --release --locked "$@"
+        if [ "$(lipo -archs "$binary")" != arm64 ] ||
+            [ "$(otool -L "$binary" | awk 'NR > 1 {print $1}')" != /usr/lib/libSystem.B.dylib ]; then
+            echo "Expected a macOS arm64 executable linked only to libSystem: $binary" >&2
+            exit 1
+        fi
+        codesign --verify --strict "$binary"
         ;;
     *-linux-*)
         target=$host
@@ -88,10 +137,15 @@ case "$host" in
         if command -v objcopy >/dev/null 2>&1; then
             objcopy --remove-section=.comment "$binary"
         fi
-        headers=$(LC_ALL=C readelf -lWd "$binary")
-        if ! printf '%s\n' "$headers" | grep -Eq 'FLAGS_1.*PIE' ||
+        case "$target" in
+            x86_64-*) machine='Advanced Micro Devices X86-64' ;;
+            aarch64-*) machine='AArch64' ;;
+        esac
+        headers=$(LC_ALL=C readelf -hlWd "$binary")
+        if ! printf '%s\n' "$headers" | grep -Eq "Machine: +$machine$" ||
+            ! printf '%s\n' "$headers" | grep -Eq 'FLAGS_1.*PIE' ||
             printf '%s\n' "$headers" | grep -Eq 'INTERP|\(NEEDED\)'; then
-            echo "Expected a static PIE with no shared libraries: $binary" >&2
+            echo "Expected a $machine static PIE with no shared libraries: $binary" >&2
             exit 1
         fi
         ;;

@@ -1,8 +1,72 @@
 # Startup and execution / 起動と実行性能
 
+<a id="release-latency"></a>
+
+## 2026-11-23 · Distribution binaries and interactive latency / 配布バイナリと入力応答
+
+| Target / 対象 | Previous Tonari (bytes) | Tonari (bytes) | Reference Bash (bytes) | Tonari SHA-256 |
+| --- | ---: | ---: | ---: | --- |
+| macOS arm64 | 1,202,848 | 1,103,088 | 1,208,904 | `73892b708dc1da885a258b938bde9e85d17661dc1527c89855ffcea8e1798193` |
+| Debian x86-64-v3 | 1,420,928 | 1,297,424 | 1,298,416 | `e14a5dec6002a5aa0a049381794b1b019cf66149163c539afaf1bd7aa2679509` |
+| Debian arm64 | 1,369,056 | 1,218,640 | 1,412,096 | `4d732a9e9a064c4273440441a8b04fbe582a2f1f4c5870051ba371b9f1e76550` |
+
+On x86-64, switching from the former glibc binary to the first static musl release grew the file by 141,744 bytes. Its `.text` grew by 123,502 bytes and `.rodata` by 29,464, while `.eh_frame` grew by 212. The static executable contains runtime code and data that would otherwise be provided partly by shared libraries. These section deltas measure the complete Rust target change. Bash sizes in the table exclude shared libraries. The final standalone x86-64 executable is 18,240 bytes larger than the former Tonari binary which required glibc. For the new release, rebuilding the Rust standard library and changing compiler settings reduced unwind metadata enough to spend more bytes on faster interpreter code. The final x86-64 `.eh_frame` and `.eh_frame_hdr` total 2,476 bytes, down from 163,124. Its `.text` is 1,148,345 bytes, up from 1,100,867. The x86-64 disassembly includes AVX2 byte comparisons and BMI2 shifts. On macOS, Mach-O `__text` fell from 1,006,052 to 945,256 bytes and the arm64 disassembly contains NEON vector operations. The smaller `-Oz` trial was 1,173,296 bytes. In an interleaved translated Linux run, arithmetic took 26.99 ms with that profile and 15.65 ms with the selected profile, and functions took 34.67 and 23.73 ms respectively. On arm64, full standard-library sorting with `-Os` fit both targets. macOS `-O2` improved arithmetic in the trial but produced 1,317,328 bytes. [Release profile](../tools/build-release.sh)
+
+x86-64 の旧 glibc 版から初回の静的版への増加は、主に機械語の 123,502 バイトと読み取り専用データの 29,464 バイトでした。今回の配布版では標準ライブラリも同じ設定でビルドし、x86-64 のフレームポインタと最適化設定を比較しました。速度を優先した設定でも、実行ファイルは Debian の Bash より 992 バイト小さくなりました。x86-64 のアンワインド情報は合計 163,124 バイトから 2,476 バイトに減り、逆アセンブルでも AVX2 と BMI2 の命令を確認しました。macOS は署名・arm64・libSystem への直接リンク、Linux は ELF の機種・PIE・動的ローダーと共有ライブラリ依存がゼロであることを検査します。両方の Linux バイナリで空のルートから二つの起動名を使い、計算結果をパイプで受け取れました。
+
+On Debian arm64, the first allocator trial retained 35,484 KiB of RSS after a 16 MiB variable was unset. The final build uses the reusable Rust heap for allocations below 256 KiB and the statically linked musl allocator for larger blocks. This lets the OS reclaim the large buffers on free. The median RSS of seven sessions is shown below. The 10,000 glob results were held as positional parameters, then cleared before creating the variable. [RSS checkpoints](../tools/bench_heap.py)
+
+| RSS (KiB) | Ready | 10k glob matches | Cleared | 16 MiB variable | Unset |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Previous Tonari | 1,172 | 2,200 | 1,664 | 18,024 | 1,636 |
+| Rust heap for every size (trial) | 1,240 | 2,644 | 2,648 | 35,484 | 35,484 |
+| Tonari | 1,228 | 2,636 | 2,640 | 19,028 | 2,640 |
+| Bash | 2,952 | 4,924 | 4,924 | 21,312 | 4,924 |
+
+最終版は16 MiBの変数を解放すると、作成前の 2,640 KiB まで常駐メモリが戻りました。1万件のファイル名展開後に再利用用として保持するメモリは前の配布版より約1 MiB多く、同じ処理後の Bash より約2.2 MiB少なくなっています。大きな割り当てに使う musl は実行ファイルに含まれます。x86-64 の Debian でも同じ手順を5回実行し、変換実行下の `unset` 後の RSS は試作の 38,636 KiB から 5,800 KiB に低下しました。
+
+The M1 ran macOS 27.2.1 and an arm64 Linux VM. The Debian x86-64 timings use translated amd64 userspace on this machine. The separate QEMU system guest checks real x86-64 Linux process and terminal semantics. The results below give medians in milliseconds. The detailed table includes p95 when collected and uses `NA` for unavailable measurements. Previous refers to the distribution binaries from `5b47da7`. Bash is 5.2.37 on macOS and Debian. [All priority measurements](compatibility-2026-11-23-release/priority.tsv)
+
+| Workload / 操作 | macOS arm64 (previous / Tonari / Bash) | Debian x86-64 translated (previous / Tonari / Bash) |
+| --- | ---: | ---: |
+| Keystroke echo, recent prefix (100k history) | 0.013 / 0.015 / — | 0.069 / 0.068 / — |
+| Oldest suggestion (1M history) | 9.463 / 7.165 / — | 15.120 / 11.053 / — |
+| Oldest Ctrl-R match (1M history) | 9.538 / 6.939 / — | 14.374 / 11.632 / — |
+| Cancel search (1M history) | 0.048 / 0.043 / — | 0.921 / 1.147 / — |
+| File completion (100k files) | 39.317 / 39.584 / 110.349 | 17.703 / 17.362 / 65.435 |
+| Command completion (100k PATH entries) | 39.249 / 39.423 / 1620.146 | 17.851 / 18.885 / 850.326 |
+| Login, exec to first prompt | 4.836 / 4.671 / 8.778 | 71.318 / 74.330 / 94.763 |
+| 16 external commands | 23.281 / 23.262 / 37.712 | 162.369 / 163.581 / 189.239 |
+| 4,096 UTF-8 filenames | 7.109 / 6.970 / 17.851 | 11.107 / 10.640 / 11.102 |
+| Functions | 8.965 / 8.874 / 16.939 | 33.995 / 24.435 / 34.144 |
+| 4 MiB through three external processes | 8.950 / 9.663 / 12.503 | 39.465 / 42.155 / 51.731 |
+| 4 MiB through counted read | 30.367 / 12.805 / 85.864 | 95.617 / 54.753 / 162.292 |
+
+100万件の履歴は PTY でキー入力から表示までを21回、10万件のファイル・PATH 補完は9回計測しました。スクリプト47件は起動後の実行時間を取り、すべての出力と終了値を検査します。ストリームは0バイトから4 MiBまで、次の読み手に渡る内容も含めて確認しました。機能ごとの目標は Bash の所要時間の 2/3 以下です。x86-64 の変換実行の値には、実行ファイルの起動やシステムコールにかかる変換コストが含まれます。
+
+- macOS arm64 had 37/47 script workloads at or below two-thirds of Bash time, 47/47 faster than Bash.
+- Translated Debian x86-64 had 12/47 script workloads at or below two-thirds of Bash time, 35/47 faster than Bash. The full feature audit also times the individual matching witnesses. [Feature matrix](compatibility-2026-11-23-release/matrix.md) · [Changes against the preceding timing snapshots](compatibility-2026-11-23-release/target-crossings.tsv)
+
+On the M1, an interleaved comparison of otherwise identical builds before and after bulk copying in `read -r -N` measured 33.753 / 12.575 ms at 4 MiB (Bash 86.612 ms), 9.212 / 7.660 ms at 256 KiB, and 7.212 / 7.220 ms at 4 KiB. Each binary ran 31 times per size after warmup.
+
+| Native arm64 Linux VM / 操作 | Former glibc | Previous static | Tonari | Bash |
+| --- | ---: | ---: | ---: | ---: |
+| Debian start and exit | 0.377 | 0.250 | 0.245 | 0.492 |
+| Debian interactive login and exit | 1.763 | 1.943 | 1.573 | 2.213 |
+| Debian exec to first login prompt | 1.825 | — | 1.650 | 2.485 |
+| Ubuntu start and exit | 0.371 | 0.247 | 0.245 | 0.485 |
+| Ubuntu interactive login and exit | 2.603 | 2.792 | 2.426 | 3.335 |
+| Ubuntu exec to first login prompt | 2.703 | — | 2.599 | 3.668 |
+
+Under x86-64 translation, 31 rotating samples gave 10.51 ms for plain start/exit with the selected build and 10.70 ms with the smaller `-Oz` trial. Interactive login through exit took 73.43 and 69.83 ms respectively. The `-Oz` trial predates the bulk counted-read and large-allocation changes. The selected profile favored arithmetic and function throughput. Native x86-64 performance remains unmeasured.
+
+x86-64 の変換実行では、サイズをさらに削った試作にログイン時間で優位がありました。通常起動と繰り返し実行する算術・関数は採用した設定の方が速く、実機での判断は今後の課題です。両ターゲットとも、2/3 を超えた項目や、Bash・前の Tonari が速かった項目を実測表に残しています。
+
+The arm64 Linux login comparison used 201 alternating runs, with a private HOME copied from each distribution’s skeleton. The PTY measurement (101 runs) ends when the prompt set by the last profile line appears. The interactive-login row times `--login -ic :` through exit. [Login harness](../tools/bench_login.py) · [History](../tools/bench_history.py) · [Completion](../tools/bench_completion.py) · [Scripts](../tools/bench_scripts.py) · [Byte streams](../tools/bench_streams.py)
+
 <a id="static-linux"></a>
 
-## Static Linux releases / Linux 標準配布版の静的リンク
+## First static Linux releases / 初回の Linux 静的配布版
 
 The release script produced static PIEs on both GNU/Linux rustup hosts using Rust 1.96.1. Each ELF had zero `PT_INTERP` and `DT_NEEDED` entries. We copied just the executable into an empty root, then ran arithmetic, a function and a builtin pipeline under `chroot`. Each architecture printed `static 42`. Linux pathname expansion now sorts in Rust by UTF-8 bytes in every locale. [Build](../tools/build-release.sh) · [Behavioral comparison](compatibility.md#intentional-differences)
 

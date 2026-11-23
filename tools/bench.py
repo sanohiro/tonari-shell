@@ -28,7 +28,7 @@ COMMANDS = {
 CORE = ["prompt", "startup", "external", "pipeline", "builtins", "redirects", "direct"]
 
 
-def first_prompt(argv, env):
+def first_prompt(argv, env, prompt=PROMPT):
     # Keep a controlling PTY for job-control initialization in every shell.
     # The child timestamps the exec separately from the parent's full launch.
     read_stamp, write_stamp = os.pipe()
@@ -50,7 +50,7 @@ def first_prompt(argv, env):
         data = b""
         answered = 0
         deadline = time.monotonic() + 4
-        while PROMPT not in data:
+        while prompt not in data:
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not select.select([fd], [], [], remaining)[0]:
                 raise RuntimeError(f"prompt timed out for {argv[0]}: {data!r}")

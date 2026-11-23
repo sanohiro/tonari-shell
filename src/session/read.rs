@@ -142,31 +142,28 @@ impl Input {
     }
 
     pub(super) fn next(&mut self) -> io::Result<Option<u8>> {
-        self.next_up_to(1)
+        Ok(self.chunk(1, 1)?.first().copied())
     }
 
-    fn next_up_to(&mut self, limit: usize) -> io::Result<Option<u8>> {
+    fn chunk(&mut self, read_ahead: usize, take: usize) -> io::Result<&[u8]> {
         if self.position == self.end {
             // Reading beyond a delimiter on a pipe would take input from the
             // following shell command, since the kernel cannot rewind its fd.
             let capacity = if self.seekable || self.consume_all {
                 self.data.len()
             } else {
-                limit.min(self.data.len())
+                read_ahead.min(self.data.len())
             };
             let n = unsafe { libc::read(self.fd, self.data.as_mut_ptr().cast(), capacity) };
             if n < 0 {
                 return Err(io::Error::last_os_error());
             }
-            if n == 0 {
-                return Ok(None);
-            }
             self.position = 0;
             self.end = n as usize;
         }
-        let c = self.data[self.position];
-        self.position += 1;
-        Ok(Some(c))
+        let start = self.position;
+        self.position += take.min(self.end - start);
+        Ok(&self.data[start..self.position])
     }
 }
 
@@ -300,7 +297,26 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
             // A character consumes at least one byte. This much buffered input
             // is ours even on a pipe with another command waiting after read.
             let remaining = opts.max_chars.unwrap().saturating_sub(chars).max(1);
-            input.next_up_to(remaining)
+            let take = if opts.raw { remaining } else { 1 };
+            match input.chunk(remaining, take) {
+                Ok([]) => Ok(None),
+                Ok(bytes) if opts.raw => {
+                    if bytes.is_ascii() && memchr::memchr(0, bytes).is_none() {
+                        line.extend_from_slice(bytes);
+                        chars += bytes.len();
+                    } else {
+                        for &b in bytes {
+                            if b != 0 {
+                                line.push(b);
+                                chars += usize::from(b & 0xc0 != 0x80);
+                            }
+                        }
+                    }
+                    continue;
+                }
+                Ok(bytes) => Ok(Some(bytes[0])),
+                Err(e) => Err(e),
+            }
         } else {
             input.next()
         };

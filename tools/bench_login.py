@@ -7,7 +7,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from bench import COMMANDS, report
+from bench import COMMANDS, first_prompt, report
 
 
 def main():
@@ -16,6 +16,7 @@ def main():
     parser.add_argument("--bash", type=Path, default=Path("/bin/bash"))
     parser.add_argument("--previous", type=Path, help="previous Tonari release for comparison")
     parser.add_argument("--runs", type=int, default=101)
+    parser.add_argument("--prompt", action="store_true", help="also time exec to the first login PTY prompt")
     args = parser.parse_args()
     if args.runs < 1:
         parser.error("--runs must be positive")
@@ -52,6 +53,22 @@ def main():
                     if run >= 5:
                         samples[name].append((end - start) / 1_000_000)
             print(label)
+            report(samples)
+
+        if args.prompt:
+            # The marker is installed after the distro and user profile have run.
+            prompt = b"tonari-login-ready$ "
+            with (home / ".profile").open("a") as profile:
+                profile.write("\nPS1='tonari-login-ready$ '\n")
+            samples = {name: [] for name, _ in shells}
+            tty_env = dict(env, TERM="xterm-256color")
+            for run in range(5 + args.runs):
+                for offset in range(len(shells)):
+                    name, path = shells[(run + offset) % len(shells)]
+                    _, elapsed = first_prompt([str(path), "--login", "-i"], tty_env, prompt)
+                    if run >= 5:
+                        samples[name].append(elapsed)
+            print("exec to first login prompt")
             report(samples)
 
 

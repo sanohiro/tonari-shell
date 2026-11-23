@@ -1,0 +1,73 @@
+platform	group	feature	change
+Debian	Builtin	eval	started crossed 2/3
+Debian	Builtin option	compgen -X	whole crossed 2/3
+Debian	Builtin option	compgen -a	whole crossed 2/3
+Debian	Builtin option	readonly -p	started crossed 2/3
+Debian	Conditional	-R	whole crossed 2/3
+Debian	Redirection	>|	whole crossed 2/3
+Debian	Variable	READLINE_POINT	whole crossed 2/3
+Ubuntu	Builtin	exec	whole crossed 2/3
+Ubuntu	Conditional	<	whole crossed 2/3
+Ubuntu	Invocation	-B	whole crossed 2/3
+Ubuntu	Parameter	${v##a*}	whole crossed 2/3
+Ubuntu	Parameter	${v##a*}	started crossed 2/3
+Ubuntu	Parameter	${v%%*a}	whole crossed 2/3
+Ubuntu	Parameter	${v%*a}	whole crossed 2/3
+Ubuntu	Parameter	${v+a}	whole crossed 2/3
+Ubuntu	Variable	HISTSIZE	whole crossed 2/3
+macOS	Arithmetic	+	started crossed 2/3
+macOS	Builtin	:	started crossed 2/3
+macOS	Builtin	builtin	started crossed 2/3
+macOS	Builtin	dirs	started crossed 2/3
+macOS	Builtin option	compgen -G	whole crossed 2/3
+macOS	Builtin option	compgen -W	started crossed 2/3
+macOS	Builtin option	compgen -d	whole crossed 2/3
+macOS	Builtin option	compgen -e	whole crossed 2/3
+macOS	Builtin option	compgen -k	started crossed 2/3
+macOS	Builtin option	complete -A	started crossed 2/3
+macOS	Builtin option	hash -r	whole crossed 2/3
+macOS	Builtin option	typeset -i	whole crossed 2/3
+macOS	Completion action	builtin	whole crossed 2/3
+macOS	Completion action	disabled	whole crossed 2/3
+macOS	Completion action	enabled	whole crossed 2/3
+macOS	Conditional	-L	started crossed 2/3
+macOS	Conditional	-ef	started crossed 2/3
+macOS	Conditional	-k	whole crossed 2/3
+macOS	Parameter	${v+a}	whole crossed 2/3
+macOS	Parameter	${v,}	whole crossed 2/3
+macOS	Parameter	${v/%a/X}	whole crossed 2/3
+macOS	Parameter	${v: -2:1}	whole crossed 2/3
+macOS	Prompt escape	\$	whole crossed 2/3
+macOS	Prompt escape	\j	whole crossed 2/3
+macOS	Prompt escape	\r	whole crossed 2/3
+macOS	Redirection	<<-	started crossed 2/3
+macOS	Redirection	here-document	started crossed 2/3
+macOS	Redirection	n<&m-	started crossed 2/3
+macOS	Reserved word	case	started crossed 2/3
+macOS	Reserved word	coproc	whole crossed 2/3
+macOS	Reserved word	esac	started crossed 2/3
+macOS	Reserved word	function	started crossed 2/3
+macOS	Shell language	arithmetic command status	started crossed 2/3
+macOS	Shell language	case ;& fallthrough	started crossed 2/3
+macOS	Shell language	case in esac	started crossed 2/3
+macOS	Shell language	coproc	whole crossed 2/3
+macOS	Shell language	coprocess input/output descriptors	whole crossed 2/3
+macOS	Shell language	extglob +(...)	started crossed 2/3
+macOS	Shell language	function and return	started crossed 2/3
+macOS	Shell language	line continuation	started crossed 2/3
+macOS	Shell language	single quotes	started crossed 2/3
+macOS	Shell language	subshell exit isolation	started crossed 2/3
+macOS	Terminal	interactive alias and signal	whole crossed 2/3
+macOS	Variable	COMP_CWORD	whole crossed 2/3
+macOS	Variable	COPROC	whole crossed 2/3
+macOS	Variable	EPOCHREALTIME	started crossed 2/3
+macOS	Variable	HISTFILE	whole crossed 2/3
+macOS	Variable	HISTIGNORE	whole crossed 2/3
+macOS	Variable	HISTSIZE	whole crossed 2/3
+macOS	Variable	PS2	whole crossed 2/3
+macOS	Variable	PS4	started crossed 2/3
+macOS	Variable	READLINE_ARGUMENT	whole crossed 2/3
+macOS	Variable	READLINE_POINT	whole crossed 2/3
+macOS	set -o	noglob	started crossed 2/3
+macOS	shopt	dotglob	started crossed 2/3
+macOS	shopt	sourcepath	started crossed 2/3

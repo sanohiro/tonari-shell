@@ -993,9 +993,13 @@ printf '%s:%s' "$s" "$x" """
     def test_counted_read_preserves_pipe_input_for_the_next_reader(self):
         self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
         text = "a" * 8191 + "雪🍵" + "b" * 917
-        (self.cwd / "data").write_bytes(text.encode() + b"\nrest\x00tail")
-        code = f'/bin/cat data | {{ IFS= read -r -N {len(text)} value; printf "%s|%s" "$?" "$value"; /bin/cat; }}'
-        self.compare(code, 0, b"0|" + text.encode() + b"\nrest\x00tail")
+        tail = b"\nrest\x00tail"
+        for value, raw in [(text, text.encode()), ("🍵雪", b"\x00" + "🍵".encode() + b"\x00" + "雪".encode()),
+                           ("", b"")]:
+            (self.cwd / "data").write_bytes(raw + tail)
+            group = f'{{ IFS= read -r -N {len(value)} value; printf "%s|%s" "$?" "$value"; /bin/cat; }}'
+            for code in (f"/bin/cat data | {group}", f"{group} <data"):
+                self.compare(code, 0, b"0|" + value.encode() + tail)
 
     def test_literal_file_capture_and_compound_redirect(self):
         (self.cwd / "data").write_bytes("雪\n🍵\n\n".encode())
@@ -1826,7 +1830,8 @@ f; printf 'END\0'; printf '%s\0' names/*'''
         row = b"1\t1\t0\t/tmp\t"
         oldest = b"echo oldest > found-old"
         newest = b"echo newest > found-new"
-        journal.write_bytes(row + oldest + b"\n" + (row + "echo padding 雪\n".encode()) * 8000
+        journal.write_bytes(row + oldest + b"\n" + row + b"echo oldest\xff > wrong\n"
+                            + (row + "echo padding 雪\n".encode()) * 8000
                             + row + newest + b"\n" + row + b"unfinished")
         fd = self.terminal_session(editing=True)
         os.write(fd, b"echo new")

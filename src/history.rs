@@ -453,6 +453,7 @@ impl History {
         if Some((m.dev(), m.ino())) != self.journal || m.len() < self.offset {
             return Err(());
         }
+        let finder = memchr::memmem::Finder::new(needle.as_bytes());
         let mut end = self.tail_start;
         let mut block = vec![0; BLOCK.min(end as usize)];
         while end != 0 {
@@ -465,15 +466,14 @@ impl History {
             let boundary = if start == 0 {
                 0
             } else {
-                buf.iter().position(|&b| b == b'\n').ok_or(())? + 1
+                memchr::memchr(b'\n', buf).ok_or(())? + 1
             };
             if boundary == buf.len() {
                 return Err(());
             } // An oversized record needs the streaming reader.
             let rows = &buf[boundary..];
-            // Whole-block UTF-8 search uses the standard library's substring
-            // prefilter. Invalid input still goes through per-record validation.
-            if std::str::from_utf8(rows).map_or(true, |text| text.contains(needle)) {
+            // Only candidate blocks need record parsing and UTF-8 validation.
+            if finder.find(rows).is_some() {
                 for line in rows.rsplit(|&b| b == b'\n') {
                     if let Ok(line) = std::str::from_utf8(line)
                         && let Some(word) = command_field(line)

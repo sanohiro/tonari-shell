@@ -10,12 +10,19 @@ The current inventory gives the outcome for every named check on Debian, Ubuntu 
 
 ## Try it
 
-Build with Rust 1.88 or later. We built the releases with Rust 1.96.1 and checked Rust 1.88.0 on macOS and both Linux architectures. The arm64 release is tuned for the build CPU. On x86-64 the release targets x86-64-v3. On a GNU/Linux rustup host, first run `rustup target add "$(uname -m)-unknown-linux-musl"`. The release script uses binutils to inspect the resulting Linux executable. A plain `cargo build` targets the development host and can link its libc. The startup flags let you try the editor before loading your Bash configuration.
+Development builds require Rust 1.88 or later. Distribution builds use a pinned rustup toolchain to optimize the standard library with the shell. The arm64 release targets the build CPU. Linux x86-64 targets x86-64-v3. Build on the target OS and architecture. Linux also requires binutils for the linker checks.
 
 ```sh
+case "$(uname -s)" in
+  Darwin) target=aarch64-apple-darwin ;;
+  Linux) target="$(uname -m)-unknown-linux-musl" ;;
+esac
+rustup toolchain install nightly-2026-11-20 --profile minimal --component rust-src --target "$target"
 binary=$(tools/build-release.sh)
 "$binary" --noprofile --norc
 ```
+
+To build with the installed compiler and its prebuilt standard library, pass `--host-toolchain`. On GNU/Linux install the matching musl target for that compiler first. A plain `cargo build` targets the development host.
 
 At the prompt, try a pipeline or a shell function. Use ↑ for this session’s history, Ctrl-R to search across sessions, and → at the end of the line to accept a suggestion. Tab completes paths with spaces. Bracketed paste keeps multiline commands editable until you press Enter.
 
@@ -49,11 +56,11 @@ Git also completed a branch created by another process after startup, and direnv
 
 The feature reference is GNU Bash 5.2.37 on Debian 13 and 5.3.9 on Ubuntu 26.04. For work done by the shell we aim for half of Bash’s elapsed time, with two-thirds as the upper target. Bash-equivalent time is acceptable for very short operations and workloads dominated by the same OS work. The benchmark records startup, external commands, pipelines, and repeated operations separately. The macOS system Bash 3.2 is an additional comparison. [Measurements, binary sizes and build conditions](docs/benchmarks.md)
 
-Linux releases for arm64 and x86-64-v3 are single, static musl executables. They run without glibc, a dynamic loader or an installed musl package. The macOS arm64 executable links to libSystem. [Release sizes and startup measurements](docs/benchmarks.md#static-linux)
+Linux releases for arm64 and x86-64-v3 are single, static musl executables. They run without glibc, a dynamic loader or an installed musl package. The macOS arm64 executable links to libSystem. [Release sizes and startup measurements](docs/benchmarks.md#release-latency)
 
 ## Development
 
-Prefer the Rust standard library or a pure Rust crate for a self-contained operation. Terminal cell width uses `unicode-width`. File descriptors, terminals and process control use native APIs through the `libc` crate. Evaluate additional native libraries against the required behavior, latency and shipped size. Linux orders pathname expansions by UTF-8 bytes in every locale. macOS follows the active locale. [Dependency policy and filename order](docs/engineering-notes.md#runtime-dependencies)
+Prefer the Rust standard library or a pure Rust crate for a self-contained operation. Terminal cell width uses `unicode-width`, history searches use `memchr`, and the Linux musl build uses `dlmalloc` for small allocations and its static system allocator for large buffers. File descriptors, terminals and process control use native APIs through the `libc` crate. Evaluate additional native libraries against the required behavior, latency and shipped size. Linux orders pathname expansions by UTF-8 bytes in every locale. macOS follows the active locale. [Dependency policy and filename order](docs/engineering-notes.md#runtime-dependencies)
 
 ```sh
 cargo test --locked

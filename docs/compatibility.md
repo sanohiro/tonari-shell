@@ -1,8 +1,18 @@
 # Bash compatibility audit / Bash 互換性の検証
 
-Tonari remains a prototype for use from an existing shell. The inventory starts with the reference Bash installations and the GNU manual. The matrix gives the observed behavior and the elapsed time for each matching workload. [Current feature inventory](compatibility/current.tsv) · [Linux timing matrix](compatibility-2026-11-23-static/matrix.md) · [Debian evidence](compatibility-2026-11-23-static/Debian.tsv) · [Ubuntu evidence](compatibility-2026-11-23-static/Ubuntu.tsv) · [macOS evidence](compatibility-2026-11-23-response/macOS.tsv)
+Tonari remains a prototype for use from an existing shell. The inventory starts with the reference Bash installations and the GNU manual. The matrix gives the observed behavior and the elapsed time for each matching workload. [Current feature inventory](compatibility/current.tsv) · [Timing matrix](compatibility-2026-11-23-release/matrix.md) · [Debian evidence](compatibility-2026-11-23-release/Debian.tsv) · [Ubuntu evidence](compatibility-2026-11-23-release/Ubuntu.tsv) · [macOS evidence](compatibility-2026-11-23-release/macOS.tsv)
 
-Tonari は現在、既存のシェルから起動して試せる段階です。参照先の Bash と GNU マニュアルを起点に項目を列挙しました。一覧には機能名ごとの判定と速度を載せ、環境別 TSV には実際のテスト内容と差が出た出力例を残しています。[現在の機能別一覧](compatibility/current.tsv) · [Linux 機能別の実測](compatibility-2026-11-23-static/matrix.md)
+Tonari は現在、既存のシェルから起動して試せる段階です。参照先の Bash と GNU マニュアルを起点に項目を列挙しました。一覧には機能名ごとの判定と速度を載せ、環境別 TSV には実際のテスト内容と差が出た出力例を残しています。[現在の機能別一覧](compatibility/current.tsv) · [環境別の実測](compatibility-2026-11-23-release/matrix.md)
+
+## Distribution release checks / 配布バイナリの検証
+
+The new macOS arm64, Debian arm64 and Ubuntu arm64 builds retained every named verdict from the preceding audit, across 1,408, 1,522 and 1,553 inventory rows respectively. This includes known differences, unverified options and intentional UTF-8 behavior. The macOS integration suite passed 123 tests with one distribution-specific skip. Debian and Ubuntu arm64 and the Debian x86-64 QEMU guest each passed all 124. Both arm64 distributions also passed account login and logout through the private `bash` entry point. During the first timed macOS pass the `PROMPT_DIRTRIM` terminal probe missed its expected output once. With the same binaries, a focused run of two warmups and nine measured samples per shell returned the expected trimmed prompt each time. [Release measurements](benchmarks.md#release-latency)
+
+今回の配布版を前回の監査と照合し、macOS・Debian・Ubuntu の全項目で機能判定が維持されていることを確認しました。以前からある未実装や動作差も一覧に含みます。Linux の統合試験は3環境とも124件が成功し、macOS はディストリビューション固有の1件を除く123件が成功しました。[優先項目の実測](compatibility-2026-11-23-release/priority.tsv)
+
+All matching witnesses have fresh whole-run measurements: 777 on Debian, 773 on Ubuntu and 757 on macOS. The harness also times already-running shells where a witness can use the readiness handshake. Each regular workload had two warmups and nine measured runs per shell. GNU drivers had three measured runs. Relative to the previous platform snapshots, 5 Debian, 8 Ubuntu and 28 macOS names crossed the two-thirds target upward for whole runs. The corresponding counts for already-running shells were 2, 1 and 28. Correctness outcomes and previously measured names were retained. [Feature timings](compatibility-2026-11-23-release/matrix.md) · [Threshold crossings by name](compatibility-2026-11-23-release/target-crossings.tsv) · [Executable fingerprints](compatibility-2026-11-23-release/environment.json)
+
+参照結果に一致した項目はすべて配布バイナリで再計測しました。短い例を含む機能別データと、処理を繰り返す47件のスクリプトでは所要時間の内訳が異なります。上限を新たに超えた項目には Debian の `compgen -X` や Ubuntu の `exec` があり、操作名と計測区間を比較表に残しています。[機能別データ](compatibility-2026-11-23-release/matrix.md) · [スクリプトと対話入力](compatibility-2026-11-23-release/priority.tsv)
 
 ## Static Linux release / 静的 Linux 配布版
 
