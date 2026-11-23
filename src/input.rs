@@ -10,7 +10,7 @@ use crate::{Flow, Session, execute_program, parser};
 // still be available to a child which reads stdin (for example, "cat\n...").
 pub fn stdin_script(session: &mut Session, check: bool) -> Flow {
     let setup = (|| {
-        let mut file = PrivateFile::new(File::from(io::stdin().as_fd().try_clone_to_owned()?))?;
+        let mut file = PrivateFile::duplicate(io::stdin().as_fd())?;
         let seekable = file.stream_position().is_ok();
         let reader = if seekable {
             BufReader::new(file)
@@ -51,9 +51,8 @@ fn whole_group(session: &Session, text: &str) -> Option<Vec<parser::Statement>> 
 fn file_group(
     session: &Session,
     file: &File,
-    metadata: Option<std::fs::Metadata>,
+    meta: &std::fs::Metadata,
 ) -> Option<Vec<parser::Statement>> {
-    let meta = metadata.or_else(|| file.metadata().ok())?;
     if !meta.is_file() || !(32 * 1024..=8 * 1024 * 1024).contains(&meta.len()) {
         return None;
     }
@@ -77,8 +76,13 @@ pub fn file_script(
     status: u8,
     check: bool,
 ) -> Flow {
-    if !session.verbose
-        && let Some(program) = file_group(session, &file, metadata)
+    let metadata = if session.verbose {
+        None
+    } else {
+        metadata.or_else(|| file.metadata().ok())
+    };
+    if let Some(meta) = &metadata
+        && let Some(program) = file_group(session, &file, meta)
     {
         drop(file);
         return if check {
@@ -90,8 +94,19 @@ pub fn file_script(
             }
         };
     }
+    // Keep complete profile functions in view across the usual 8 KiB buffer
+    // boundary. Verbose mode must still report each line as it is read.
+    let capacity = metadata
+        .filter(|m| session.source_depth > 0 && m.is_file())
+        .map_or(8192, |m| m.len().clamp(8192, 128 * 1024) as usize);
     match PrivateFile::new(file) {
-        Ok(file) => run(session, BufReader::new(file), false, status, check),
+        Ok(file) => run(
+            session,
+            BufReader::with_capacity(capacity, file),
+            false,
+            status,
+            check,
+        ),
         Err(e) => error(e, 1),
     }
 }
@@ -154,7 +169,7 @@ fn buffered_compound(
             Ok(program) if matches!(program.as_slice(), [s] if s.location.end > first.len()) => {
                 return Some((program, size, i + 1));
             }
-            Err(parser::Error::Incomplete(_)) => continue,
+            Err(parser::Error::Incomplete(_) | parser::Error::HereDoc(_)) => continue,
             _ => return None,
         }
     }

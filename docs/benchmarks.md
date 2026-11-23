@@ -1,5 +1,35 @@
 # Startup and execution / 起動と実行性能
 
+<a id="profile-startup"></a>
+
+## 2026-11-23 · Startup with Bash profiles / 設定を含むシェルの起動
+
+Each cell lists previous Tonari (`8ec0b7d`), current Tonari and GNU Bash 5.2.37, in that order. Each pair is median/p95 milliseconds. The reference executables ran in rotating order on the same M1 with warm filesystem caches. Linux ran in a Debian VM. The amd64 userspace used translation. PTY measurements start immediately before exec and end when the launcher reads the prompt. For the three rc cases, the last line sets the marker after loading the configuration.
+
+| Workload | macOS arm64 | Debian x86-64 (translated) | Debian arm64 |
+| --- | ---: | ---: | ---: |
+| Fresh shell through exit, `-c ':'` | 2.677/3.165 · 2.615/3.217 · 5.505/6.260 | 9.504/10.066 · 9.204/9.828 · 24.057/25.246 | 0.223/0.408 · 0.217/0.350 · 0.475/0.860 |
+| Exec to first prompt, no rc | 3.129/3.528 · 3.078/3.687 · 6.163/6.859 | 9.374/10.093 · 9.223/9.935 · 29.406/30.732 | 0.285/0.385 · 0.284/0.387 · 0.642/0.832 |
+| Aliases, PATH and a lazy nvm function | 3.394/3.808 · 3.363/3.938 · 6.406/7.090 | 27.550/28.584 · 27.927/29.416 · 44.643/46.566 | 0.554/0.869 · 0.581/0.785 · 1.102/1.456 |
+| Apple Git completion in the rc | 14.468/19.434 · 6.364/8.008 · 11.030/15.638 | 54.547/56.020 · 39.304/40.849 · 57.810/59.153 | 10.482/10.835 · 2.718/3.010 · 4.499/4.903 |
+| One 760-line function in the rc | 108.282/109.464 · 3.542/4.088 · 7.233/7.815 | 237.314/240.306 · 21.809/22.584 · 42.389/43.400 | 106.080/109.749 · 0.803/0.964 · 2.253/2.696 |
+| System and user login profiles | 4.878/5.331 · 4.723/5.422 · 8.999/9.744 | 74.219/77.098 · 74.728/75.802 · 94.412/96.891 | 1.590/1.952 · 1.582/1.955 · 2.410/2.748 |
+
+Mac の軽量 rc は前版とほぼ同じで、Git 補完を読む場合は中央値が56%短縮しました。変換実行の Debian x86-64 では Git 補完が Bash の68%、ログインが79%で、2/3 の目標を超えています。前版と比べると、この環境の軽量 rc は0.377 ms、ログインは0.509 ms遅くなりました。互換性監査の判定は macOS の1,408項目、Debian の1,522項目、Ubuntu の1,553項目すべてで前版と一致しました。
+
+設定なしは各201回、rc の3条件は各41回、ログインは各31回の測定で、それぞれ最初の5回を除きました。軽量な rc は2,052バイトの設定を一時ホームにコピーし、`ll` と `nvm` の定義を確認しました。Git の rc は Apple Command Line Tools の `git-completion.bash`（94,826バイト）を読み込み、`__git_complete` の定義を確認しました。大きな関数の rc は760行の組み込みコマンドを含む定義を読み、関数の先頭で return します。ログインでは実際の `/etc/profile` と、Debian では配布版のスケルトン設定を使いました。[プロンプトの計測](../tools/bench_login.py) · [設定なしの計測](../tools/bench.py)
+
+A separate link-format trial used identical interpreter sources, equal-length executable paths and 241 warm samples per binary on macOS arm64. With the existing dyld encoding, `-c ':'` and exec to the no-rc prompt took 2.516 and 2.956 ms. Forcing `-Wl,-fixup_chains` gave 2.656 and 3.054 ms. Both binaries targeted macOS 11.0. In a separate 301-run control, a local minimal C executable took 1.805 ms, Tonari's version command took 2.558 ms and `-c ':'` took 2.556 ms from spawn to exit, with stdout redirected to the null device. [Link-format investigation](engineering-notes.md)
+
+The distribution binaries are 1,184,496 bytes on macOS arm64, 1,157,840 bytes on Linux x86-64-v3 and 1,357,936 bytes on Linux arm64. The Mac binary links directly to libSystem. Both Linux binaries passed the static PIE check and executed in an otherwise empty root filesystem.
+
+```sh
+printf '%s\n' '. /Library/Developer/CommandLineTools/usr/share/git-core/git-completion.bash' \
+  'declare -F __git_complete >/dev/null || exit 1' > git-profile.bash
+python3 tools/bench_login.py /path/to/tonari --previous /path/to/previous \
+  --bash /path/to/bash --rcfile git-profile.bash --runs 41
+```
+
 <a id="escaped-history"></a>
 
 ## 2026-11-23 · History queries containing backslashes / バックスラッシュを含む履歴検索

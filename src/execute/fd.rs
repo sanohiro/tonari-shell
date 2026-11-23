@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
-use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, RawFd};
 use std::rc::{Rc, Weak};
 
 thread_local! {
@@ -14,6 +14,13 @@ thread_local! {
 pub(crate) struct PrivateFile(Rc<RefCell<File>>);
 
 impl PrivateFile {
+    pub(crate) fn duplicate(fd: BorrowedFd<'_>) -> io::Result<Self> {
+        let raw = fd.as_raw_fd();
+        let copy = duplicate_except(raw, 10, |_| false)
+            .or_else(|_| duplicate_except(raw, 3, |_| false))?;
+        Ok(Self::track(copy))
+    }
+
     pub(crate) fn new(file: File) -> io::Result<Self> {
         let fd = file.as_raw_fd();
         let file = if fd < 10 {

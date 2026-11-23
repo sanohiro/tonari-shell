@@ -1,5 +1,17 @@
 # Engineering notes / 開発知見
 
+## 2026-11-23 · Time to the first prompt / 最初のプロンプトまでの時間
+
+A large function in a sourced profile could outgrow the 8 KiB reader before the parser saw its closing brace. After that, each new line triggered another parse of the growing definition. For a regular sourced file, use its size to choose a read buffer between 8 and 128 KiB. Look ahead for the end of the current compound command, then execute it before parsing the next one with the current aliases and shell options. A possible closing brace inside an unfinished here-document still needs the delimiter. The PTY fixture sources Apple's Git completion script and a separate integration test completes and checks out a newly created branch. [Startup measurements](benchmarks.md#profile-startup) · [Parsing regression](../tests/shell.py) · [Git integration](../tests/compat/tool_hooks.py)
+
+設定を読む前の端末判定を再利用し、シェルが保持する端末のファイル記述子を直接確保します。設定を読んだあとには、設定内のリダイレクトを反映するため、実際の端末を確認します。環境からシェルオプションを継承する場合は実 UID・GID と実効 UID・GID を照合します。Debian arm64 の設定なしの疑似端末で、最初のプロンプトを出すまでの `ioctl` は12回から10回、`fcntl` は5回から3回でした。大きな補完関数を持つ設定では、途中までの定義を繰り返し解析するコストのほうが目立ちました。[起動処理](../src/main.rs) · [設定ファイルの読み込み](../src/input.rs)
+
+The read buffer is released when the source returns. After Git completion loaded and the first prompt appeared, median RSS over seven fresh sessions changed from 4,656 to 4,736 KiB on macOS arm64, and stayed at 2,780 KiB on Debian arm64. プロンプトが出た時点の常駐メモリも確認し、Mac では中央値で80 KiB増えました。
+
+The Mach-O linker trial revisits the November 22 deployment-target experiment at the current release size. Forcing chained fixups while keeping the 11.0 minimum saved 1,104 bytes on the M1 trial binary. Its median launch-to-exit and exec-to-prompt times both increased. The distribution retains its existing fixup encoding. Apple describes the potential for page-in linking with chained fixups. [Paired timings](benchmarks.md#profile-startup) · [Apple on chained fixups](https://developer.apple.com/videos/play/wwdc2022/110362/?time=916)
+
+同一ソースの macOS 版でアドレス解決方式だけを変え、`otool -l` で実行ファイルの形式を検査しました。各241回の比較では通常起動、プロンプト表示とも従来のリンク設定のほうが速く、配布設定を維持しました。
+
 ## 2026-11-23 · Escaped text in shared history / エスケープを含む履歴の検索
 
 Typing `foo\ bar` exposed a full journal decode in both autosuggestions and Ctrl-R. The history writer doubles backslashes and represents a newline as `\n`, so the reader can encode the search term once and skip blocks that cannot contain it. Tabs and carriage returns can also occur literally in existing command fields. When the query contains either, the reader filters on the longest part between them. It checks the decoded command before counting a hit. A raw match can start halfway through an escape or occur in the working directory field. [Implementation](../src/history.rs) · [Latency and reproduction](benchmarks.md#escaped-history)

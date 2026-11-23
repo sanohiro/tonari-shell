@@ -112,6 +112,15 @@ v=''; printf '<%s>' "${v//$p/x}" "${v/%$p/x}" """,
             'greet\nf(){\n echo "$LINENO"\n}\nf\n')
         self.compare(":", 0, b"ok\n7\n")
 
+    def test_large_startup_function_preserves_alias_and_heredoc_boundaries(self):
+        profile = self.cwd / "startup"
+        self.env["BASH_ENV"] = str(profile)
+        body = ("shopt -s expand_aliases\ninstall_alias() {\n"
+                ": <<'END'\n}\nfi\nEND\n" + "  : padding-in-function-body\n" * 600
+                + "  alias greet='echo ready'\n}\ninstall_alias\ngreet\n")
+        profile.write_text(body + 'echo "$LINENO"\nreturn 0\n)\n')
+        self.compare("echo running", 0, f"ready\n{len(body.splitlines()) + 1}\nrunning\n".encode())
+
     def test_select_menu_reply_and_eof(self):
         source = """PS3='> '; set -- first '雪 x'; select item; do
 printf '<%s:%s>\\n' "$item" "$REPLY"; done"""

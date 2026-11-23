@@ -169,11 +169,14 @@ impl Session {
     }
 
     pub fn inherit_options(&mut self) {
-        if unsafe { libc::getuid() != libc::geteuid() || libc::getgid() != libc::getegid() } {
-            return;
-        }
+        let allowed = std::cell::LazyCell::new(|| unsafe {
+            libc::getuid() == libc::geteuid() && libc::getgid() == libc::getegid()
+        });
         for (variable, set) in [("SHELLOPTS", true), ("BASHOPTS", false)] {
             if let Ok(list) = std::env::var(variable) {
+                if !*allowed {
+                    return;
+                }
                 for name in list.split(':') {
                     if let Some(value) = self.option_value(name, set) {
                         *value = true;

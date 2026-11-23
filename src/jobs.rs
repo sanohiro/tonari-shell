@@ -7,8 +7,8 @@ use std::os::fd::{AsFd, AsRawFd, RawFd};
 #[derive(Clone)]
 struct Terminal {
     fd: PrivateFile,
+    // The interactive shell leads its own foreground process group.
     owner: pid_t,
-    group: pid_t,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -226,28 +226,24 @@ impl Jobs {
         self.table.len()
     }
     pub fn init(&mut self) {
-        let Ok(fd) = io::stderr().as_fd().try_clone_to_owned() else {
+        let old = unsafe { libc::getpgrp() };
+        if unsafe { libc::tcgetpgrp(libc::STDERR_FILENO) } != old {
+            return;
+        }
+        let Ok(fd) = PrivateFile::duplicate(io::stderr().as_fd()) else {
             return;
         };
-        let old = unsafe { libc::getpgrp() };
         let owner = unsafe { libc::getpid() };
-        if unsafe { libc::tcgetpgrp(fd.as_raw_fd()) } != old {
-            return;
-        }
-        if old != owner && unsafe { libc::setpgid(0, 0) } < 0 {
-            return;
-        }
-        let group = unsafe { libc::getpgrp() };
-        if old != group {
-            give_terminal(fd.as_raw_fd(), group);
+        if old != owner {
+            if unsafe { libc::setpgid(0, 0) } < 0 {
+                return;
+            }
+            give_terminal(fd.as_raw_fd(), owner);
         }
         unsafe {
             libc::signal(libc::SIGTSTP, libc::SIG_IGN);
         }
-        let Ok(fd) = PrivateFile::new(fd.into()) else {
-            return;
-        };
-        self.tty = Some(Terminal { fd, owner, group });
+        self.tty = Some(Terminal { fd, owner });
     }
     fn terminal(&self) -> Option<&Terminal> {
         self.tty
@@ -281,7 +277,7 @@ impl Jobs {
     }
     pub fn restore(&self) {
         if let Some(t) = self.terminal() {
-            give_terminal(t.fd.as_raw_fd(), t.group);
+            give_terminal(t.fd.as_raw_fd(), t.owner);
         }
     }
 

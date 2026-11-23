@@ -328,7 +328,8 @@ fn main() -> ExitCode {
     use cli::{Action, Input};
     let args = std::env::args_os();
     let terminal = || io::stdin().is_terminal() && io::stderr().is_terminal();
-    let invocation = match cli::parse(args, terminal) {
+    let initial_terminal = std::cell::LazyCell::new(terminal);
+    let invocation = match cli::parse(args, || *initial_terminal) {
         Ok(Action::Run(invocation)) => invocation,
         Ok(Action::Version) => {
             println!("tonari {}", env!("CARGO_PKG_VERSION"));
@@ -370,7 +371,7 @@ fn main() -> ExitCode {
     session.histexpand = invocation.histexpand.unwrap_or(session.interactive);
     session.emacs = session.interactive
         && !invocation.noediting
-        && terminal()
+        && *initial_terminal
         && !session.get("TERM").is_some_and(|s| s == "dumb");
     if session.interactive
         && let Err(e) = session.traps.init_hangup()
