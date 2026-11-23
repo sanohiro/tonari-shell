@@ -1,14 +1,15 @@
 # Startup and execution / 起動と実行性能
 
 <a id="native-x86-completion"></a>
+<a id="native-ci"></a>
 
-## 2026-11-24 · Native x86-64 completion remains unmeasured / x86-64 実機の補完性能
+## 2026-11-24 · Native CPU measurements / ネイティブ CPU での再計測
 
-The editing and completion tables below record build `0f9ce86`. Its x86-64 executable always scanned abbreviated paths sequentially. That exception was based on translated timings on Apple silicon and has been removed. The current build uses the same workload threshold and CPU limit on both architectures. Its stripped x86-64 static PIE is 1,240,664 bytes, an increase of 38,632 bytes over the serial-only binary. The Rosetta results describe that M1 environment. The ordering on Intel and AMD remains open. [Apple’s description of Intel binary translation in Linux VMs](https://developer.apple.com/documentation/virtualization/running-intel-binaries-in-linux-vms)
+The x86-64 jobs have run on AMD EPYC 7763 and 9V74, Intel Xeon 6975P-C, and Intel Xeon Platinum 8573C. The Linux arm64 runner reports Arm Neoverse-N2, and the macOS arm64 runner reports Apple M1. Linux exposed four vCPUs and macOS three. Historical Rosetta timings below describe the Apple silicon translation environment. Use the native data for algorithm and compiler decisions. [Native results and full feature matrix](native-2026-11-24/matrix.md) · [Workflow](../.github/workflows/native-benchmarks.yml)
 
-On a native x86-64 Linux host, compare the release from `0f9ce86` with the current release using `python3 tools/bench_completion.py /path/to/serial /path/to/current --branches --runs 31`. Run once pinned to one allowed CPU and again with several available CPUs, on the same filesystem. Record the host CPU model, affinity, CPU quota, filesystem and median/p95 for each binary. The driver rotates the order and checks the completed path. [Completion benchmark](../tools/bench_completion.py)
+With 12 independent directory branches on AMD, the shared completion implementation reduced median/p95 to 3.523/3.612 ms, from 8.687/8.778 ms in the former serial-only implementation. With affinity restricted to one CPU, the shared policy ran serially at 8.727/8.827 ms versus 8.643/8.696 ms. The benchmark interleaved 41 samples per binary and verified the inserted path. [Native completion job](https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515521)
 
-下の表は旧版の記録です。Rosetta では M1 上の変換実行とスレッド起動、ディレクトリ走査を含む時間を測りました。Intel・AMD での直列と並列の優劣は、ネイティブ Linux ホストで同じファイル群を用いて比較するまで保留します。
+x86-64 専用の直列化を撤回しました。AMD の4 vCPU では12ディレクトリの補完が約2.47倍速くなり、1 CPU では両方が直列で中央値の差は0.084 msでした。以下の旧表に含まれる Rosetta の値は、当時の測定条件を追跡するために残しています。
 
 <a id="editing-operations"></a>
 

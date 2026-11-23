@@ -1,5 +1,9 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+The native CI matrix for release settings at `e48a0e5` covers 7,558 platform/feature rows across macOS arm64, Debian 13 x86-64 and arm64, and Ubuntu 26.04 x86-64 and arm64. It records the Bash and Tonari median and p95 for each matching probe. GNU Bash on Linux x86-64 prints the hexadecimal float 1.5 as `0xcp-3`. Tonari and arm64 Bash print `0x1.8p+0`. The two strings represent the same value. Both x86-64 format-letter differences remain visible in the inventory. [Native matrix](native-2026-11-24/matrix.md) · [Changed observations](native-2026-11-24/previous.tsv)
+
+5環境の合計7,558行を再確認しました。既存の arm64 版の機能一覧と照合すると、ネイティブ x86-64 の Debian・Ubuntu では `printf %a` と `%A` の表記に差があります。全フィーチャーの互換判定と実測値を環境別に確認できます。[ネイティブ CI の機能別結果](native-2026-11-24/matrix.md)
+
 Tonari remains a prototype for use from an existing shell. The inventory starts with the reference Bash installations and the GNU manual. The matrix gives the observed behavior and the elapsed time for each matching workload. [Current feature inventory](compatibility/current.tsv) · [Timing matrix](compatibility-2026-11-23-release/matrix.md) · [Debian evidence](compatibility-2026-11-23-release/Debian.tsv) · [Ubuntu evidence](compatibility-2026-11-23-release/Ubuntu.tsv) · [macOS evidence](compatibility-2026-11-23-release/macOS.tsv)
 
 Tonari は現在、既存のシェルから起動して試せる段階です。参照先の Bash と GNU マニュアルを起点に項目を列挙しました。一覧には機能名ごとの判定と速度を載せ、環境別 TSV には実際のテスト内容と差が出た出力例を残しています。[現在の機能別一覧](compatibility/current.tsv) · [環境別の実測](compatibility-2026-11-23-release/matrix.md)

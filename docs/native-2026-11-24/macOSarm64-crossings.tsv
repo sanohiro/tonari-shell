@@ -1,0 +1,171 @@
+group	feature	change
+Arithmetic	%=	started crossed 2/3
+Arithmetic	&=	started crossed 2/3
+Arithmetic	**	started crossed 2/3
+Arithmetic	017	started crossed 2/3
+Arithmetic	<=	whole crossed 2/3
+Arithmetic	>=	whole crossed 2/3
+Arithmetic	a++	started crossed 2/3
+Builtin	[	whole crossed 2/3
+Builtin	cd	started crossed 2/3
+Builtin	declare	started crossed 2/3
+Builtin	history	whole crossed 2/3
+Builtin	kill	whole crossed 2/3
+Builtin	local	whole crossed 2/3
+Builtin	mapfile	started crossed 2/3
+Builtin	popd	whole crossed 2/3
+Builtin	printf	whole crossed 2/3
+Builtin	pushd	started crossed 2/3
+Builtin	pwd	started crossed 2/3
+Builtin	readarray	whole crossed 2/3
+Builtin	shopt	whole crossed 2/3
+Builtin	test	whole crossed 2/3
+Builtin	test	started crossed 2/3
+Builtin	times	whole crossed 2/3
+Builtin	unalias	started crossed 2/3
+Builtin	unset	whole crossed 2/3
+Builtin option	cd -L	whole crossed 2/3
+Builtin option	cd -P	whole crossed 2/3
+Builtin option	compgen -A	whole crossed 2/3
+Builtin option	compgen -C	whole crossed 2/3
+Builtin option	compgen -F	whole crossed 2/3
+Builtin option	compgen -F	started crossed 2/3
+Builtin option	compgen -S	whole crossed 2/3
+Builtin option	compgen -W	whole crossed 2/3
+Builtin option	compgen -X	whole crossed 2/3
+Builtin option	compgen -a	whole crossed 2/3
+Builtin option	compgen -b	whole crossed 2/3
+Builtin option	compgen -c	whole crossed 2/3
+Builtin option	compgen -c	started crossed 2/3
+Builtin option	compgen -d	started crossed 2/3
+Builtin option	compgen -f	whole crossed 2/3
+Builtin option	compgen -j	whole crossed 2/3
+Builtin option	compgen -j	started crossed 2/3
+Builtin option	compgen -k	whole crossed 2/3
+Builtin option	compgen -o	whole crossed 2/3
+Builtin option	compgen -o	started crossed 2/3
+Builtin option	compgen -v	whole crossed 2/3
+Builtin option	compgen -v	started crossed 2/3
+Builtin option	complete -C	whole crossed 2/3
+Builtin option	complete -F	started crossed 2/3
+Builtin option	complete -S	started crossed 2/3
+Builtin option	complete -X	started crossed 2/3
+Builtin option	complete -a	started crossed 2/3
+Builtin option	complete -c	started crossed 2/3
+Builtin option	complete -d	started crossed 2/3
+Builtin option	complete -e	started crossed 2/3
+Builtin option	complete -f	started crossed 2/3
+Builtin option	complete -j	started crossed 2/3
+Builtin option	complete -o	started crossed 2/3
+Builtin option	complete -v	started crossed 2/3
+Builtin option	compopt -E	started crossed 2/3
+Builtin option	dirs -c	started crossed 2/3
+Builtin option	dirs -l	started crossed 2/3
+Builtin option	export -p	started crossed 2/3
+Builtin option	hash -l	started crossed 2/3
+Builtin option	printf -v	whole crossed 2/3
+Builtin option	read -a	started crossed 2/3
+Builtin option	readonly -f	started crossed 2/3
+Builtin option	shopt -s	whole crossed 2/3
+Builtin option	shopt -u	whole crossed 2/3
+Builtin option	type -f	started crossed 2/3
+Builtin option	type -p	started crossed 2/3
+Builtin option	unset -f	whole crossed 2/3
+Builtin option	unset -v	started crossed 2/3
+Completion action	alias	whole crossed 2/3
+Completion action	alias	started crossed 2/3
+Completion action	arrayvar	whole crossed 2/3
+Completion action	command	whole crossed 2/3
+Completion action	disabled	started crossed 2/3
+Completion action	export	whole crossed 2/3
+Completion action	export	started crossed 2/3
+Completion action	file	whole crossed 2/3
+Completion action	file	started crossed 2/3
+Completion action	function	whole crossed 2/3
+Completion action	function	started crossed 2/3
+Completion action	keyword	whole crossed 2/3
+Completion action	shopt	whole crossed 2/3
+Completion action	variable	whole crossed 2/3
+Conditional	-d	started crossed 2/3
+Conditional	-ge	whole crossed 2/3
+Conditional	-gt	whole crossed 2/3
+Conditional	-h	started crossed 2/3
+Conditional	-ne	whole crossed 2/3
+Conditional	-ot	whole crossed 2/3
+Conditional	-ot	started crossed 2/3
+Conditional	-u	started crossed 2/3
+Conditional	-x	started crossed 2/3
+History expansion	!!:$	started crossed 2/3
+Parameter	${!name}	started crossed 2/3
+Parameter	${v%*a}	whole crossed 2/3
+Parameter	${v-a}	whole crossed 2/3
+Parameter	${v/a/X}	whole crossed 2/3
+Parameter	${v:-a}	whole crossed 2/3
+Parameter	${v@u}	whole crossed 2/3
+Parameter	${v^}	whole crossed 2/3
+Printf format	A	whole crossed 2/3
+Printf format	E	whole crossed 2/3
+Printf format	E	started crossed 2/3
+Printf format	b	whole crossed 2/3
+Printf format	e	whole crossed 2/3
+Printf format	f	whole crossed 2/3
+Printf format	reuse format	started crossed 2/3
+Printf format	x	whole crossed 2/3
+Prompt escape	\H	whole crossed 2/3
+Prompt escape	\T	whole crossed 2/3
+Prompt escape	\v	whole crossed 2/3
+Redirection	>	whole crossed 2/3
+Redirection	>>	whole crossed 2/3
+Redirection	>|	whole crossed 2/3
+Redirection	n<&m	started crossed 2/3
+Reserved word	!	whole crossed 2/3
+Reserved word	do	whole crossed 2/3
+Reserved word	do	started crossed 2/3
+Reserved word	done	whole crossed 2/3
+Reserved word	done	started crossed 2/3
+Reserved word	for	whole crossed 2/3
+Reserved word	for	started crossed 2/3
+Reserved word	in	whole crossed 2/3
+Reserved word	in	started crossed 2/3
+Reserved word	select	whole crossed 2/3
+Shell language	ERR trap	whole crossed 2/3
+Shell language	ERR trap	started crossed 2/3
+Shell language	arithmetic for	whole crossed 2/3
+Shell language	arithmetic for	started crossed 2/3
+Shell language	deferred bad substitution	whole crossed 2/3
+Shell language	directory cd -	started crossed 2/3
+Shell language	dynamic function scope	started crossed 2/3
+Shell language	escape sequences in printf %b	started crossed 2/3
+Shell language	exit status 126	started crossed 2/3
+Shell language	extglob ?(...)	started crossed 2/3
+Shell language	filename wildcards	started crossed 2/3
+Shell language	for do done	whole crossed 2/3
+Shell language	for do done	started crossed 2/3
+Shell language	function definition redirections	whole crossed 2/3
+Shell language	grouped pipeline status	started crossed 2/3
+Shell language	history word designator	started crossed 2/3
+Shell language	merged stderr pipeline	whole crossed 2/3
+Shell language	negation	whole crossed 2/3
+Shell language	pathname expansion of leading dots	whole crossed 2/3
+Shell language	select	whole crossed 2/3
+Shell language	signal trap	whole crossed 2/3
+Shell language	terminal signal ignore and reset	whole crossed 2/3
+Shell language	tilde expansion	whole crossed 2/3
+Shell language	time -p	started crossed 2/3
+Signal	QUIT	started crossed 2/3
+Signal	TERM	started crossed 2/3
+Variable	BASHPID	whole crossed 2/3
+Variable	BASH_VERSINFO	started crossed 2/3
+Variable	CDPATH	whole crossed 2/3
+Variable	COMP_KEY	whole crossed 2/3
+Variable	GLOBIGNORE	whole crossed 2/3
+Variable	HOME	whole crossed 2/3
+Variable	LINENO	started crossed 2/3
+Variable	MAPFILE	started crossed 2/3
+Variable	OPTERR	whole crossed 2/3
+Variable	PS1	whole crossed 2/3
+set -o	errtrace	started crossed 2/3
+shopt	failglob	whole crossed 2/3
+shopt	globskipdots	started crossed 2/3
+shopt	globstar	started crossed 2/3
+shopt	nullglob	whole crossed 2/3

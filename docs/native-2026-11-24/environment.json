@@ -1,0 +1,67 @@
+{
+  "macOSarm64": {
+    "reference": "5.2.37(1)-release",
+    "host": "macOS-15.8.2-arm64-arm-64bit-Mach-O",
+    "runs": 15,
+    "suite_runs": 7,
+    "warmups": 2,
+    "distinct_workloads": 785,
+    "unit": "ns",
+    "executable_sha256": [
+      "4b65d7ba349bd669fca38307e4ebcbb42f11099e4ae03584279a6b6d005f9938",
+      "19ef1469983126b395f2040e20a1f5b5495bf2c18c083de9fdb62f4718f71d63"
+    ]
+  },
+  "Debianx64": {
+    "reference": "5.2.37(1)-release",
+    "host": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.41",
+    "runs": 15,
+    "suite_runs": 7,
+    "warmups": 2,
+    "distinct_workloads": 803,
+    "unit": "ns",
+    "executable_sha256": [
+      "223fe8564b60636bc738b6178d3ba9a50ef7d791266b0efae6363bb716e4c47f",
+      "d3306e3859897ffb85877a0ac136491200013e35ead2caf86b0bbfc9914461b4"
+    ]
+  },
+  "Debianarm64": {
+    "reference": "5.2.37(1)-release",
+    "host": "Linux-7.0.0-1017-azure-aarch64-with-glibc2.41",
+    "runs": 15,
+    "suite_runs": 7,
+    "warmups": 2,
+    "distinct_workloads": 805,
+    "unit": "ns",
+    "executable_sha256": [
+      "ccbd5106945d1095474e5ee47317266f5918aa37fc671829192a007918b1413a",
+      "3a2621163602965a6cf20966a605e079553b6101417879561b01bb75ecc49bab"
+    ]
+  },
+  "Ubuntux64": {
+    "reference": "5.3.9(1)-release",
+    "host": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.43",
+    "runs": 15,
+    "suite_runs": 7,
+    "warmups": 2,
+    "distinct_workloads": 784,
+    "unit": "ns",
+    "executable_sha256": [
+      "3efccc187bafa75ff1e37d246270ab3e7aa559f242c7a52bf3ec2a1b5450bdbd",
+      "d3306e3859897ffb85877a0ac136491200013e35ead2caf86b0bbfc9914461b4"
+    ]
+  },
+  "Ubuntuarm64": {
+    "reference": "5.3.9(1)-release",
+    "host": "Linux-7.0.0-1017-azure-aarch64-with-glibc2.43",
+    "runs": 15,
+    "suite_runs": 7,
+    "warmups": 2,
+    "distinct_workloads": 786,
+    "unit": "ns",
+    "executable_sha256": [
+      "01c006568543d6b6ab9f0a57dd44b9d779d1edc437a5f5d2db0215887c19dbeb",
+      "3a2621163602965a6cf20966a605e079553b6101417879561b01bb75ecc49bab"
+    ]
+  }
+}
