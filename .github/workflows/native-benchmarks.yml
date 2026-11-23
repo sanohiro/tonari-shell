@@ -5,7 +5,7 @@ on:
       matrix:
         description: Native runners and suites to measure
         type: string
-        default: '{"runner":["ubuntu-24.04","ubuntu-24.04-arm","macos-15"],"suite":["editing","completion","execution","profiles","inventory"],"include":[{"runner":"ubuntu-24.04","suite":"inventory-ubuntu"},{"runner":"ubuntu-24.04-arm","suite":"inventory-ubuntu"}]}'
+        default: '{"runner":["ubuntu-24.04","ubuntu-24.04-arm","macos-15"],"suite":["editing","completion","execution","rcfiles","profiles","inventory"],"include":[{"runner":"ubuntu-24.04","suite":"inventory-ubuntu"},{"runner":"ubuntu-24.04-arm","suite":"inventory-ubuntu"}]}'
 
 permissions:
   contents: read

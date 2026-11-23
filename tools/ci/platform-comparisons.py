@@ -132,9 +132,10 @@ def pipes():
                 print(b.name, n.strip(), file=f)
     for single in ([False] if MAC else [False, True]):
         suffix = "-one" if single else ""
+        run("endpoints" + suffix, "bench_pipe_controls.py", *shells, "--runs", 31, affinity=single)
         run("pipe" + suffix, "bench_streams.py", *shells, "--case", "pipe", "--sizes", 64, 262144, 4194304,
             16777216, 268435456, "--runs", 21, affinity=single)
-        for b in shells[1:-1]:
+        for b in (s for s in shells[:-1] if s != base):
             run("tiny-" + b.name + suffix, "bench_scripts.py", base, "--previous", b, "--bash", REF,
                 "--timing", "both", "--case", "pipeline", "--case", "merged-pipeline", "--runs", 21, affinity=single)
     run("capture-64MiB", "bench_file_capture.py", base, REF, "--case", 67108864, 1, "--runs", 9)

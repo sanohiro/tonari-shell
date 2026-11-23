@@ -97,6 +97,30 @@ case "$SUITE" in
     run external-io python3 tools/bench_streams.py "$current" "$ref" --case redirect --case pipe --sizes 64 16777216 268435456 --runs 21
     run capture python3 tools/bench_file_capture.py "$current" "$ref" --runs 21
     if [[ $RUNNER_OS == Linux ]]; then run heap python3 tools/bench_heap.py "$current" "$ref" --runs 7; fi ;;
+  rcfiles)
+    rc="$RUNNER_TEMP/rc"
+    mkdir -p "$rc"
+    # Same 94,826-byte Git completion source used in the original macOS measurement.
+    curl --retry 3 -fsSL -H 'Accept: application/vnd.github.raw+json' \
+      https://api.github.com/repos/git/git/git/blobs/a8e7c6ddbfb2b13659587ba7ab4adb7cf4c63127 -o "$rc/git.bash"
+    echo "56264a168d862c2a51305fe2a3450edf04590d8bafa42c2d061e6f992985fc0f  $rc/git.bash" | shasum -a 256 -c -
+    printf '. "%s"\ndeclare -F __git_complete >/dev/null || exit 1\n' "$rc/git.bash" > "$rc/git"
+    cat > "$rc/light" <<'RC'
+alias ll='ls -l'
+export PATH="$HOME/.local/bin:$PATH"
+nvm() { unset -f nvm; . "$HOME/.nvm/nvm.sh" && nvm "$@"; }
+alias ll >/dev/null && declare -F nvm >/dev/null || exit 1
+RC
+    python3 - "$rc/large" <<'PYRC'
+import sys
+from pathlib import Path
+Path(sys.argv[1]).write_text("large_fn() {\n return 0\n" +
+    "".join(f"  : line-{i:04d}-padding-abcdef\n" for i in range(760)) +
+    "}\nlarge_fn || exit 1\n")
+PYRC
+    for name in light git large; do
+      run "rc-$name" python3 tools/bench_login.py "$current" --bash "$ref" --rcfile "$rc/$name" --runs 41
+    done ;;
   profiles)
     run levels python3 tools/bench.py "$current" --bash "$ref" --compare-tonari Old "$bin/previous-profile" --compare-tonari Os "$bin/opt-s" --compare-tonari Oz "$bin/opt-z" --compare-tonari O3 "$bin/opt-3" --runs 101
     for level in s z 3 previous-profile; do
