@@ -53,7 +53,7 @@ Each installation uses one executable. The macOS arm64 and Linux glibc builds us
 
 ## Development
 
-Editing, history, completion and expansion are implemented in Rust. New features should normally add zero runtime shared libraries. We evaluate Rust crates by the behavior they provide, their effect on latency and the size of the release executable. Filename expansion can use UTF-8 byte order. Matching the host Bash sort order in a named locale is a capability of the macOS and glibc builds. [Runtime dependencies and filename order](docs/engineering-notes.md#runtime-dependencies)
+Editing, history, completion and expansion are implemented in Rust. New features should normally add zero runtime shared libraries. We evaluate Rust crates by the behavior they provide, their effect on latency and the size of the release executable. Filename expansion passes an ordered argument list to commands. The standard macOS and glibc builds use the active locale’s collation. The optional static musl build uses byte order and can differ from Bash in named locales. [Runtime dependencies and filename order](docs/engineering-notes.md#runtime-dependencies)
 
 ```sh
 cargo test --locked

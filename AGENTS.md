@@ -6,7 +6,7 @@ Keep benchmark tables and run conditions in [the benchmark record](docs/benchmar
 
 # Runtime dependencies
 
-Implement editing, history, completion and expansion in Rust. Ship one executable per target and aim for zero additional shared libraries when adding features. A Rust crate can be linked into that executable and can itself pull in native libraries. Evaluate a new crate against the required behavior, latency on the affected path and release binary size. Inspect the resulting binary with `otool -L` or `readelf -d` when changing dependencies or linker settings. The project's UTF-8 contract permits byte-ordered filename expansion. Exact collation in a named locale is a target-specific capability.
+Implement editing, history, completion and expansion in Rust. Ship one executable per target and aim for zero additional shared libraries when adding features. A Rust crate can be linked into that executable and can itself pull in native libraries. Evaluate a new crate against the required behavior, latency on the affected path and release binary size. Inspect the resulting binary with `otool -L` or `readelf -d` when changing dependencies or linker settings. For pathname expansion, preserve the active locale’s collation on the standard builds. The static musl build uses byte order and can differ from the distribution’s Bash in named locales. Preserve an explicitly requested completion order, such as `complete -o nosort`, when optimizing candidate display.
 
 # Checking Bash compatibility and speed
 
