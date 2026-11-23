@@ -59,16 +59,20 @@ fn sequence(source: &mut &str, grouped: bool, extended: bool) -> Option<Vec<Atom
             }
             continue;
         }
+        if bytes[0] == b'['
+            && let Some(end) = bracket::class_end(&bytes[1..])
+        {
+            let len = end + 2;
+            atoms.push(Atom::Class(
+                Matcher::new(rest[..len].into()),
+                Default::default(),
+            ));
+            *source = &rest[len..];
+            continue;
+        }
         let (atom, count) = match bytes[0] {
             b'?' => (Atom::Any, 1),
             b'*' => (Atom::Star, 1),
-            b'[' if let Some(end) = bracket::class_end(&bytes[1..]) => {
-                let len = end + 2;
-                (
-                    Atom::Class(Matcher::new(rest[..len].into()), Default::default()),
-                    len,
-                )
-            }
             b'[' if grouped => return None,
             b'\\' if bytes.len() > 1 => {
                 let end = 1 + rest[1..].chars().next()?.len_utf8();

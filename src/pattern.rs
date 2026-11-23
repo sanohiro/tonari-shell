@@ -455,10 +455,12 @@ impl GlobOptions {
                 '\\' => {
                     chars.next();
                 }
-                '[' if let Some(end) = bracket_end(&value[i + 1..]) => {
-                    let after = i + 2 + end;
-                    while chars.clone().next().is_some_and(|(j, _)| j < after) {
-                        chars.next();
+                '[' => {
+                    if let Some(end) = bracket_end(&value[i + 1..]) {
+                        let after = i + 2 + end;
+                        while chars.clone().next().is_some_and(|(j, _)| j < after) {
+                            chars.next();
+                        }
                     }
                 }
                 '(' => depth += 1,

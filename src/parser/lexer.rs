@@ -580,13 +580,14 @@ fn pattern_parts(
                 dollar(chars, word, false)?
             }
             '`' => backquote(chars, word, false)?,
-            '[' if group.is_some()
-                && let Some(end) = crate::pattern::bracket_end(chars.as_str())
-                && !chars.as_str()[..=end].contains(['$', '\u{60}', '\u{27}', '"', '\\']) =>
-            {
-                raw.push('[');
-                raw.push_str(&chars.as_str()[..=end]);
-                *chars = chars.as_str()[end + 1..].chars();
+            '[' if group.is_some() => {
+                raw.push(c);
+                if let Some(end) = crate::pattern::bracket_end(chars.as_str())
+                    && !chars.as_str()[..=end].contains(['$', '\u{60}', '\u{27}', '"', '\\'])
+                {
+                    raw.push_str(&chars.as_str()[..=end]);
+                    *chars = chars.as_str()[end + 1..].chars();
+                }
             }
             '(' => {
                 depth += 1;
