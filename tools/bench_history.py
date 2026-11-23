@@ -92,13 +92,13 @@ def sample(shell, home, bindir, action, count):
             return [(time.perf_counter_ns() - start) / 1e6]
         if action in ("Burst", "Paste"):
             count = 512 if action == "Burst" else 16384
-            value = b"a" * count + b"TAILMARK"
+            value = b"a" * (count + 7) + b"@"
             line = b"v=" + value
             packet = line if action == "Burst" else b"\x1b[200~" + line + b"\x1b[201~"
             start = time.perf_counter_ns()
             while packet:
                 packet = packet[os.write(fd, packet):]
-            read_until(fd, b"TAILMARK")
+            read_until(fd, b"@")
             end = time.perf_counter_ns()
             os.write(fd, b"\r")
             read_until(fd, NEW_PROMPT)

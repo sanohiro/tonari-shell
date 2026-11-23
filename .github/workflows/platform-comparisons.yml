@@ -1,0 +1,31 @@
+name: Native platform comparisons
+on: workflow_dispatch
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+        experiment: [directory, pipes, heap, codegen]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      NATIVE_RUNNER: ${{ matrix.runner }}
+      EXPERIMENT: ${{ matrix.experiment }}
+      SUITE: platform
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: bash tools/ci/native-build.sh
+      - run: python3 tools/ci/platform-comparisons.py
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: platform-${{ matrix.runner }}-${{ matrix.experiment }}
+          path: results/
