@@ -48,6 +48,27 @@ In a separate control, one native arm64 Python parent launched both release bina
 python3 tools/bench_streams.py ./previous ./current /path/to/bash --case redirect --case pipe --sizes 64 16777216 --runs 31
 ```
 
+<a id="macos-pipe-capacity"></a>
+
+## 2026-11-23 · Native macOS pipe capacity / macOS のパイプ自動拡張
+
+Apple M1, macOS 27.2.1, Darwin 27.2.0, all three executables native arm64. The release at `9d879ac` lets XNU size each pipe. An isolated build used the same distribution profile and primed each new pipeline connection before starting the children. It temporarily enabled nonblocking writes, wrote up to 16 KiB of zeros, restored blocking mode and drained exactly the bytes written. A downstream child running after an empty producer observed `fstat(0).st_blksize` of 16 KiB in the release and 64 KiB in the trial. A separate nonblocking 128 KiB write to a fresh empty pipe accepted 64 KiB with the reader idle. Both Tonari binaries occupied 1,184,592 bytes.
+
+Median milliseconds from shell launch to exit, warm cache, no startup files. Three warm-ups preceded the measured samples for each binary. The launcher shuffled all six execution orders in blocks. Both external `dd` processes used a 64-byte block for 64 B and 64 KiB blocks for the larger transfers. The test verified the byte count reported by the receiving `dd`, all bytes of the three-stage file output and the one-byte loops, and the exit statuses of the early-close pipeline (141 and 0).
+
+| Workload | Samples per binary | Tonari, automatic | Tonari, pre-expanded | GNU Bash 5.2.37 |
+| --- | ---: | ---: | ---: | ---: |
+| 32 one-byte external pipelines in one shell | 25 | 51.207 | 53.320 | 83.388 |
+| 64 B, two external `dd` processes | 49 | 5.741 | 5.763 | 9.296 |
+| 4 MiB, two `dd` processes | 31 | 6.649 | 6.854 | 10.180 |
+| 256 MiB, two `dd` processes | 25 | 54.393 | 53.408 | 58.222 |
+| 16 MiB file through three `cat` processes | 31 | 13.628 | 13.466 | 16.877 |
+| `yes` piped to `head -n 1` | 31 | 5.370 | 5.521 | 9.283 |
+
+A second workload with `wc -c` as the consumer took 45.945 / 46.182 / 49.442 ms for 256 MiB in the same column order. In that session the repeated one-byte pipelines took 55.866 / 57.655 / 89.492 ms. The trial slowed down this short-command workload in both sessions. The automatic release missed the two-thirds-of-Bash target on the 256 MiB transfer and the three-stage file copy.
+
+Mac では OS の自動拡張を採用。子プロセスの起動前に毎回 64 KiB まで拡張すると、短いパイプ32回が両方の計測で約3〜4%遅くなりました。256 MiB 転送は受け手が `dd` のときに約1 ms 短縮し、`wc -c` のときは差が 0.3 ms 未満でした。[Apple XNU の書き込み時の拡張処理](https://github.com/apple-oss-distributions/xnu/blob/f6217f891ac0bb64f3d375211650a4c1ff8ca1ea/bsd/kern/sys_pipe.c#L948-L971)
+
 <a id="balanced-linux-pipes"></a>
 
 ## 2026-11-23 · Choosing a Linux pipeline capacity / Linux のパイプ容量の選定
