@@ -1543,7 +1543,7 @@ shopt	login_shell	interface only	interface only	interface only
 shopt	mailwarn	missing interface	missing interface	missing interface
 shopt	no_empty_cmd_completion	missing interface	missing interface	missing interface
 shopt	nocaseglob	missing interface	missing interface	missing interface
-shopt	nocasematch	missing interface	missing interface	missing interface
+shopt	nocasematch	match	match	match
 shopt	noexpand_translation	missing interface	missing interface	missing interface
 shopt	nullglob	match	match	match
 shopt	patsub_replacement	match	match	match

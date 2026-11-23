@@ -18,6 +18,57 @@ The default run includes a session workload covering assignment, export, paramet
 
 既定の計測には、代入・export・変数展開・`cd`・`pwd`・`&&`・リダイレクト・`unset` を同じシェルで実行する項目が含まれます。算術ループ1,000回と、一つのシェルから外部プログラム16個を順に起動する項目もあります。後者では同じプログラム16個を Python 親プロセスから直接 `posix_spawn` し、その都度終了を待つ条件も交互に計測します。標準入出力は計時前に用意し、各子プロセスに継承させます。セッション機能の実装前との比較には `--case core` を使います。プロンプト表示の主指標は疑似端末での起動全体です。子プロセスの exec 直前にも時刻を記録し、同じ測定サンプルのうち、端末の準備と fork の後に経過した時間も表示します。
 
+<a id="nocasematch"></a>
+
+## Case-insensitive matching and login / 大文字小文字の照合とログイン
+
+We tested release `fc25e76` against Bash on the same Apple M1 and its Linux guests. Each login and prompt row used 101 samples. The running-shell scripts used 51 samples and verified their output on every run. After the full feature audit and its timings finished, we reran these focused benchmarks one platform and one workload at a time. The full feature matrices used parallel Linux guests. The Bash and Tonari binaries were on the same local filesystem. [Login harness](../tools/bench_login.py) · [PTY harness](../tools/bench.py) · [Script workloads](../tools/bench_scripts.py)
+
+各セルは中央値 / p95（ms）です。`--login -ic :` はシステムとユーザーの起動設定を読んで終了するまで、PTY は設定を無効にした実際の端末で最初のプロンプトが見えるまでを計ります。照合スクリプトは1,500回、通常の `case` は3,000回繰り返しました。
+
+| Platform | Operation | Tonari | Bash | Median ratio |
+|---|---|---:|---:|---:|
+| Debian | `-c :` | 0.252 / 0.369 | 0.476 / 0.686 | 0.529 |
+| Debian | `--login -ic :` | 1.847 / 2.173 | 2.118 / 2.391 | 0.872 |
+| Debian | first prompt (PTY) | 0.659 / 1.023 | 1.045 / 1.664 | 0.631 |
+| Debian | `nocasematch` | 3.918 / 4.361 | 9.093 / 10.316 | 0.431 |
+| Debian | case-edges | 3.485 / 3.884 | 9.591 / 10.241 | 0.363 |
+| Ubuntu | `-c :` | 0.254 / 0.550 | 0.469 / 1.281 | 0.541 |
+| Ubuntu | `--login -ic :` | 2.659 / 3.482 | 3.179 / 3.912 | 0.836 |
+| Ubuntu | first prompt (PTY) | 0.724 / 1.306 | 1.129 / 2.007 | 0.642 |
+| Ubuntu | `nocasematch` | 3.893 / 4.208 | 7.715 / 8.146 | 0.505 |
+| Ubuntu | case-edges | 3.524 / 3.878 | 8.039 / 8.316 | 0.438 |
+| macOS | `-c :` | 3.778 / 4.594 | 6.572 / 7.360 | 0.575 |
+| macOS | `--login -ic :` | 5.652 / 6.756 | 9.355 / 10.278 | 0.604 |
+| macOS | first prompt (PTY) | 4.457 / 5.074 | 7.326 / 8.120 | 0.608 |
+| macOS | `nocasematch` | 4.871 / 6.320 | 7.617 / 9.245 | 0.640 |
+| macOS | case-edges | 4.083 / 4.490 | 7.529 / 8.108 | 0.542 |
+
+On macOS the earlier run, alongside the audit, recorded 7.234 ms for the 1,500-iteration script, 8.762 ms before the single-star optimization and 10.945 ms for Bash. After that change, whole-string comparison for common prefix/suffix patterns avoids constructing candidate endpoints. The serial sample above uses the same executables. 起動設定を含む対話ログインは、並列検証中の中央値でも Debian 0.922、Ubuntu 0.792、macOS 0.600（Bash 比）でした。
+
+In a running macOS PTY with 100,000 history entries, typing a key with no matching suggestion took 0.021 ms median and 0.113 ms p95. Tab with 10,000 PATH executables took 5.744 / 7.253 ms for Tonari and 181.275 / 223.520 ms for Bash over 41 samples. [Input and completion benchmark](../tools/bench_completion.py)
+
+Upper-target crossings compare to the preceding session-controls release. The table counts named checks. More than one name may use the same workload. Exact timings include any waits, process launches and terminal I/O in that check. [Before/after timings for crossings](compatibility-2026-11-23-nocasematch/target-crossings.tsv) · [Complete matrix](compatibility-2026-11-23-nocasematch/matrix.md)
+
+| Platform | Mode | Measured | ≤ 1/2 | ≤ 2/3 | ≤ Bash | Crossed 2/3 |
+|---|---|---:|---:|---:|---:|---:|
+| Debian | whole | 777 | 14 | 457 | 766 | 80 |
+| Debian | started | 677 | 6 | 42 | 570 | 20 |
+| Ubuntu | whole | 773 | 16 | 430 | 758 | 63 |
+| Ubuntu | started | 675 | 7 | 25 | 579 | 22 |
+| macOS | whole | 757 | 2 | 629 | 756 | 38 |
+| macOS | started | 674 | 8 | 76 | 655 | 25 |
+
+前の版で一致した項目の再判定と再計測に成功しました。すべての処理が目標の2/3以内に達したわけではありません。特に Linux の起動設定を含む対話ログインでは上限を超えています。
+
+| Executable | Tonari bytes | Reference Bash bytes | SHA-256 |
+|---|---:|---:|---|
+| macOS arm64 | 1,202,336 | 1,208,904 | `272154ae6c75fa1a7dfffdb6a393380d0d4d83d2df613aa6d9824f9c876eba42` |
+| Debian / Ubuntu arm64 | 1,411,976 | 1,412,096 / 1,609,176 | `864a1e2d32aef82cea7609cb7f89334c25ca850780b7ed92d405572894bb414c` |
+| Debian x86-64-v3 | 1,296,328 | 1,298,416 | `4d03b17446eff610f1d7e414b878fd3b8ba48ed40a06fbf1d04ec9b2948a1ca4` |
+
+Linux arm64 shares one static musl executable. On Debian its on-disk size is 120 bytes below Bash. The x86-64-v3 binary uses the system glibc and libgcc. x86-64 functional tests ran under QEMU. 実機 x86-64 と WSL2 の性能は未検証です。
+
 <a id="session-controls"></a>
 
 ## 2026-11-23 · Session controls and process descriptors / 対話操作とプロセスの計測
@@ -770,7 +821,10 @@ CARGO_PROFILE_RELEASE_OPT_LEVEL=s \
 RUSTFLAGS='-C target-cpu=native -C target-feature=+crt-static' \
 cargo rustc --locked --release --target aarch64-alpine-linux-musl -- \
   -C link-arg=-fuse-ld=lld -C link-arg=-Wl,-z,pack-relative-relocs,-z,max-page-size=65536
+objcopy --remove-section=.comment target/aarch64-alpine-linux-musl/release/tonari tonari-linux-arm64
 ```
+
+For the case-insensitive matching release we used GNU objcopy from Debian 13 for arm64. Removing the compiler comment saved 200 bytes. The executable code segment and writable load segments had the same sizes and byte contents. コンパイラの識別文字列を外した配布ファイルで動作と速度を再検証しました。
 
 ## First prototype / 初回試作
 

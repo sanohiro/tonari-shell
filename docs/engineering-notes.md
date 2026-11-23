@@ -1,5 +1,15 @@
 # Engineering notes / 開発知見
 
+## 2026-11-23 · Case-insensitive matches and the minimum compiler / 大文字小文字の照合とビルド条件
+
+With `nocasematch`, Bash compares literal characters ignoring case. A POSIX class such as `[[:upper:]]` tests the original character. Captured groups and `&` in a replacement keep the matched spelling. A cached regular expression must include the case flag in its key since `shopt` can change between calls. The integration suite runs the same expression with the option enabled and disabled. [Regression test](../tests/shell.py) · [572-case comparison](../tests/compat/nocasematch.bash) · [Throughput measurements](benchmarks.md#nocasematch)
+
+照合用に文字列全体を小文字にすると、POSIX 文字クラスや置換時の日本語を含む位置が壊れます。元の入力の文字境界をたどり、比較するときだけ大文字・小文字を対応づけます。ワイルドカードが一つのときは接頭辞と接尾辞を直接照合します。空文字にも一致する拡張パターンでの全置換では、次の文字を残して一文字ぶん進みます。
+
+The first Rust 1.88 check selected the newer `rustc` on PATH. An explicitly paired Cargo and rustc 1.88.0 diagnosed three match guards in the bracket parser. Moving their conditions into the match arms or the enclosing lexer loop kept the declared compiler minimum. All 49 unit tests then passed with 1.88.0. [Rust language release notes](https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/)
+
+最小対応版を検証するときは Cargo と rustc の両方を同じツールチェーンに固定します。rustup を使う場合は `rustup run 1.88.0 cargo test --locked` で再現できます。
+
 ## 2026-11-23 · Key bindings, inherited functions and arithmetic / キー操作・関数の継承・算術
 
 - A shell command registered by `bind -x` must run with the terminal restored. An external picker reads from the terminal even when its stdout is captured. fzf 0.74.0 installs a hyphenated function and binds Ctrl-T in both Emacs and vi-insert maps. We loaded `fzf --bash` into a staged shell and selected `unique-cat 雪.txt` in each map. The surrounding command received one argument. The regression suite also changes `READLINE_LINE` and `READLINE_POINT` around multibyte text. [Editor tests](../tests/shell.py)

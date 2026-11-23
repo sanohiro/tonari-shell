@@ -1,8 +1,14 @@
 # Bash compatibility audit / Bash 互換性の検証
 
-Tonari remains a prototype for use from an existing shell. The inventory starts with the reference Bash installations and the GNU manual. The matrix gives the observed behavior and the elapsed time for each matching workload. [Current feature inventory](compatibility/current.tsv) · [Current timing matrix](compatibility-2026-11-23-shell/matrix.md) · [Debian evidence](compatibility-2026-11-23-shell/Debian.tsv) · [Ubuntu evidence](compatibility-2026-11-23-shell/Ubuntu.tsv) · [macOS evidence](compatibility-2026-11-23-shell/macOS.tsv)
+Tonari remains a prototype for use from an existing shell. The inventory starts with the reference Bash installations and the GNU manual. The matrix gives the observed behavior and the elapsed time for each matching workload. [Current feature inventory](compatibility/current.tsv) · [Current timing matrix](compatibility-2026-11-23-nocasematch/matrix.md) · [Debian evidence](compatibility-2026-11-23-nocasematch/Debian.tsv) · [Ubuntu evidence](compatibility-2026-11-23-nocasematch/Ubuntu.tsv) · [macOS evidence](compatibility-2026-11-23-nocasematch/macOS.tsv)
 
-Tonari は現在、既存のシェルから起動して試せる段階です。参照先の Bash と GNU マニュアルを起点に項目を列挙しました。一覧には機能名ごとの判定と速度を載せ、環境別 TSV には実際のテスト内容と差が出た出力例を残しています。[現在の機能別一覧](compatibility/current.tsv) · [各項目の最新計測](compatibility-2026-11-23-shell/matrix.md)
+Tonari は現在、既存のシェルから起動して試せる段階です。参照先の Bash と GNU マニュアルを起点に項目を列挙しました。一覧には機能名ごとの判定と速度を載せ、環境別 TSV には実際のテスト内容と差が出た出力例を残しています。[現在の機能別一覧](compatibility/current.tsv) · [各項目の最新計測](compatibility-2026-11-23-nocasematch/matrix.md)
+
+## Case-insensitive matching / 大文字小文字を区別しない照合
+
+On `fc25e76` we compared `nocasematch` in `case`, `[[ == ]]`, `[[ =~ ]]`, parameter replacement and programmable completion filters. The 19 strings and 28 patterns exercise quoting, extended globs, UTF-8, negative classes and POSIX classes. Forty further combinations exercise zero-length replacement with four different anchors. All 572 stdout lines were identical on each of the three platforms. The strict test operator `[ ]`, ordinary filename expansion and prefix/suffix removal retain their case sensitivity. [Reproducible shell script](../tests/compat/nocasematch.bash) · [Shell integration tests](../tests/shell.py)
+
+直接の動作照合は Debian 761件、Ubuntu 759件、macOS 757件が一致しました。Debian と Ubuntu の arm64、および QEMU の Debian x86-64-v3 は統合テスト117件を通過し、macOS は116件通過と Linux 専用の1件スキップでした。Linux の一時アカウントでは最終配布ファイルをログインシェルに登録し、ログアウト後の終了値まで確認しました。GNU の試験群の完全一致は Debian 16/83、Ubuntu 14/86 です。[現在の機能別判定](compatibility/current.tsv) · [GNU グループごとの出力差](compatibility/gnu.tsv) · [全項目の速度](compatibility-2026-11-23-nocasematch/matrix.md)
 
 ## Session controls and script execution / 対話操作とスクリプト
 
