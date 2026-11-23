@@ -7,7 +7,6 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 mod here_input;
 mod lookup;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod spawn;
 pub(crate) use spawn::inherited_env;
 
@@ -1163,7 +1162,6 @@ fn start(
     let merged_pipe = output.as_ref().filter(|_| {
         matches!(cmd.redirects.as_slice(), [r] if r.fd == 2 && r.target == Target::Duplicate && r.word == "1")
     });
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     if builtin.is_none()
         && launch.group.is_none()
         && !launch.background

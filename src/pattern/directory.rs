@@ -72,6 +72,9 @@ fn read_names(path: &CStr, visit: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>) 
     }
     let dir = unsafe { OwnedFd::from_raw_fd(fd) };
     let mut bytes = [0u8; 32768];
+    // A queued key can finish completion after a few entries. Fetch the first
+    // 2 KiB promptly, then amortize syscalls over 32 KiB for a full traversal.
+    let mut request = 2048;
     const RECLEN: usize = offset_of!(libc::dirent64, d_reclen);
     const TYPE: usize = offset_of!(libc::dirent64, d_type);
     const NAME: usize = offset_of!(libc::dirent64, d_name);
@@ -81,7 +84,7 @@ fn read_names(path: &CStr, visit: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>) 
                 libc::SYS_getdents64,
                 dir.as_raw_fd(),
                 bytes.as_mut_ptr(),
-                bytes.len(),
+                request,
             )
         };
         if count <= 0 {
@@ -92,6 +95,7 @@ fn read_names(path: &CStr, visit: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>) 
             }
             return ControlFlow::Continue(());
         }
+        request = bytes.len();
         let mut batch = &bytes[..count as usize];
         while batch.len() > NAME {
             let len = usize::from(u16::from_ne_bytes([batch[RECLEN], batch[RECLEN + 1]]));
