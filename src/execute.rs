@@ -645,6 +645,7 @@ fn eval_builtin(
     cmd: &PreparedCommand,
     session: &mut Session,
     last_status: u8,
+    in_stage_child: bool,
 ) -> Flow {
     let mut bindings = session.bind(&cmd.assignments);
     let args = cmd.words.get(1..).unwrap_or_default();
@@ -661,12 +662,12 @@ fn eval_builtin(
             write_error(b"logout", b": not login shell: use `exit'");
             Flow::Continue(1)
         }
-        Builtin::Compound => crate::eval::command(
-            session,
-            cmd.compound.as_deref().unwrap().clone(),
-            last_status,
-            false,
-        ),
+        Builtin::Compound => match cmd.compound.as_deref().unwrap().clone() {
+            crate::parser::Command::Subshell(body) if in_stage_child => {
+                crate::execute_program(session, body, last_status, true)
+            }
+            command => crate::eval::command(session, command, last_status, false),
+        },
         Builtin::Exec => exec_builtin(cmd, session, args),
         Builtin::Function => crate::call_function(session, &cmd.words[0], &cmd.words, last_status),
         Builtin::Trap => Flow::Continue(session.traps.builtin(args, session.interactive)),
@@ -897,7 +898,7 @@ fn run_builtin(
     final_command: bool,
 ) -> io::Result<Flow> {
     if cmd.redirects.is_empty() {
-        return Ok(eval_builtin(builtin, cmd, session, last_status));
+        return Ok(eval_builtin(builtin, cmd, session, last_status, false));
     }
     let multiple;
     let one;
@@ -954,7 +955,7 @@ fn run_builtin(
         session.stdin_redirected = true;
     }
     let flow = if applied {
-        eval_builtin(builtin, cmd, session, last_status)
+        eval_builtin(builtin, cmd, session, last_status, false)
     } else {
         Flow::Continue(1)
     };
@@ -1047,10 +1048,20 @@ fn redirection_observable(r: &Redirect<Word>) -> bool {
                 .is_some_and(|text| text.contains(['$', '`']))
 }
 
+// A parenthesized pipeline stage is already the subshell Bash exposes.
+fn enter_stage(session: &mut Session, compound: Option<&crate::parser::Command>, background: bool) {
+    let explicit = matches!(compound, Some(crate::parser::Command::Subshell(_)));
+    session.subshell_depth += 1;
+    session.jobs.forked(!explicit && !background);
+    if explicit {
+        session.command_string = false;
+    }
+}
+
 // Expansions that can read stdin or observe the stage PID must run after pipe
 // installation. In particular, `printf x | echo "$(cat)"` consumes that pipe.
 fn start_raw(
-    raw: SimpleCommand<Word>,
+    mut raw: SimpleCommand<Word>,
     input: Option<OwnedFd>,
     output: Option<OwnedFd>,
     next_reader: Option<&OwnedFd>,
@@ -1096,8 +1107,13 @@ fn start_raw(
             .after_fork(session.errtrace, session.functrace);
         reset_child_signals();
         launch.child();
-        session.subshell_depth += 1;
-        session.jobs.forked(!launch.background);
+        enter_stage(session, raw.compound.as_deref(), launch.background);
+        if let Some(command) = raw.compound.as_deref_mut()
+            && let crate::parser::Command::Subshell(body) = command
+        {
+            coprocess::after_fork(session);
+            *command = crate::parser::Command::Group(std::mem::take(body));
+        }
         session.stdin_redirected |= input.is_some();
         let code = if apply(&setup) {
             match run(vec![raw], last_status, true, session) {
@@ -1234,8 +1250,7 @@ fn start(
             .after_fork(session.errtrace, session.functrace);
         reset_child_signals();
         launch.child();
-        session.subshell_depth += 1;
-        session.jobs.forked(!launch.background);
+        enter_stage(session, cmd.compound.as_deref(), launch.background);
         session.stdin_redirected |= cmd.redirects.iter().any(|r| r.fd == 0);
         session.stdin_redirected |= input.is_some();
         let code = if !apply(&setup) {
@@ -1244,7 +1259,7 @@ fn start(
             external.exec()
         } else {
             coprocess::after_fork(session);
-            match eval_builtin(builtin.unwrap(), cmd, session, last_status) {
+            match eval_builtin(builtin.unwrap(), cmd, session, last_status, true) {
                 Flow::Discard(s) | Flow::Exit(s) | Flow::Return(s) | Flow::Continue(s) => s,
                 Flow::Break(_) | Flow::LoopContinue(_) => 0,
             }

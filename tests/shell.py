@@ -415,6 +415,17 @@ printf '%s\0' "$#" "$@"; done"""
         self.compare("./not-executable", 126)
         self.compare("cat < absent", 1)
 
+    def test_parenthesized_pipeline_stage_is_one_subshell(self):
+        self.compare(r"""parent=$BASHPID
+printf 'data\n' | ( read -r line; [[ $BASHPID != "$parent" ]] || exit 40
+  printf '%s:%s ' "$BASH_SUBSHELL" "$line"; (printf 'nested=%s ' "$BASH_SUBSHELL")
+  trap 'printf exit' EXIT; exit 7 )
+printf ':%s\n' "${PIPESTATUS[*]}"
+printf x | ( printf 'redirect=%s' "$BASH_SUBSHELL" ) >"$(printf dest)"
+cat dest; (printf ' standalone=%s' "$BASH_SUBSHELL"); echo
+v=$(printf 'z\n' | ( read -r x; printf '%s:%s' "$BASH_SUBSHELL" "$x" )); echo "$v"
+""", 0, b"1:data nested=2 exit:0 7\nredirect=1 standalone=1\n2:z\n", minimum=4)
+
     def test_merged_external_pipeline(self):
         # 2>&1 | also exercises the lowering of |& on older reference shells.
         for join in ["2>&1 |", "|&"]:
