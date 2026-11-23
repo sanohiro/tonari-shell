@@ -104,6 +104,22 @@ def directory():
     run("directory-completion", "bench_completion.py", base, other, "--files", 100000, "--runs", 31)
 
 
+def initial_batch():
+    base = build("default")
+    def small_first():
+        p = "src/pattern/directory.rs"
+        replace(p, "    const RECLEN:", "    let mut request = 2048;\n    const RECLEN:")
+        replace(p, "                bytes.len(),", "                request,")
+        replace(p, "        let mut batch =", "        request = bytes.len();\n        let mut batch =")
+    trial = build("small-first", small_first)
+    run("files", "bench_completion.py", base, trial, "--files", 100000, "--runs", 41)
+    run("typeahead", "bench_completion.py", base, trial, "--scan-key", "--files", 100000, "--runs", 41)
+    run("branches", "bench_completion.py", base, trial, "--branches", "--runs", 41)
+    run("globs", "bench_scripts.py", base, "--previous", trial, "--bash", REF, "--runs", 31,
+        "--case", "glob-subdirs", "--case", "glob-all", "--case", "glob-recursive")
+    large_globs([base, trial, REF])
+
+
 def pipes():
     base = build("default")
     if MAC:
@@ -225,4 +241,4 @@ def pgo():
     run("files", "bench_completion.py", base, other, "--files", 100000, "--runs", 21)
 
 
-{"directory": directory, "pipes": pipes, "heap": heap, "codegen": codegen, "linking": linking, "pgo": pgo}[os.environ["EXPERIMENT"]]()
+{"directory": directory, "pipes": pipes, "heap": heap, "codegen": codegen, "linking": linking, "pgo": pgo, "initial-batch": initial_batch}[os.environ["EXPERIMENT"]]()
