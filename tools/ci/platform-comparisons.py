@@ -104,6 +104,14 @@ def directory():
     run("directory-completion", "bench_completion.py", base, other, "--files", 100000, "--runs", 31)
 
 
+def workers():
+    base = build("shared")
+    serial = build("serial", lambda: replace("src/complete.rs", "let workers = if large {", "let workers = if false && large {"))
+    run("branches", "bench_completion.py", base, serial, "--branches", "--runs", 51)
+    if not MAC:
+        run("branches-one", "bench_completion.py", base, serial, "--branches", "--runs", 51, affinity=True)
+
+
 def initial_batch():
     base = build("default")
     def small_first():
@@ -241,4 +249,4 @@ def pgo():
     run("files", "bench_completion.py", base, other, "--files", 100000, "--runs", 21)
 
 
-{"directory": directory, "pipes": pipes, "heap": heap, "codegen": codegen, "linking": linking, "pgo": pgo, "initial-batch": initial_batch}[os.environ["EXPERIMENT"]]()
+{"directory": directory, "pipes": pipes, "heap": heap, "codegen": codegen, "linking": linking, "pgo": pgo, "initial-batch": initial_batch, "workers": workers}[os.environ["EXPERIMENT"]]()

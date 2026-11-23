@@ -5,7 +5,7 @@ on:
       matrix:
         description: Native runners and experiments
         type: string
-        default: '{"runner":["ubuntu-24.04","ubuntu-24.04-arm","macos-15"],"experiment":["directory","pipes","heap","codegen","linking","pgo"],"include":[{"runner":"ubuntu-24.04","experiment":"initial-batch"},{"runner":"ubuntu-24.04-arm","experiment":"initial-batch"}]}'
+        default: '{"runner":["ubuntu-24.04","ubuntu-24.04-arm","macos-15"],"experiment":["directory","pipes","heap","codegen","linking","pgo","workers"],"include":[{"runner":"ubuntu-24.04","experiment":"initial-batch"},{"runner":"ubuntu-24.04-arm","experiment":"initial-batch"}]}'
 
 permissions:
   contents: read
@@ -31,5 +31,5 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: platform-${{ matrix.runner }}-${{ matrix.experiment }}
+          name: platform-${{ matrix.runner }}-${{ matrix.experiment }}${{ matrix.suffix }}
           path: results/
