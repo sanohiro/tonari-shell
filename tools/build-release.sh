@@ -42,7 +42,17 @@ case "$host" in
                 binary="${CARGO_TARGET_DIR:-target}/$host/release/tonari"
                 ;;
         esac
-        cargo rustc --release --locked "$@" -- -C link-arg=-fuse-ld=lld -C "link-arg=$linker"
+        set -- "$@" --
+        case "$host" in
+            aarch64-*-linux-gnu)
+                # Satisfy libstd's unwinding symbols without loading libgcc_s at startup.
+                archive=$(cc -print-file-name=libgcc_eh.a)
+                if [ -f "$archive" ]; then
+                    set -- "$@" -L "native=$(dirname "$archive")" -l static=gcc_eh
+                fi
+                ;;
+        esac
+        cargo rustc --release --locked "$@" -C link-arg=-fuse-ld=lld -C "link-arg=$linker"
         if command -v objcopy >/dev/null 2>&1; then
             objcopy --remove-section=.comment "$binary"
         fi
