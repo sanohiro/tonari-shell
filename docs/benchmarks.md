@@ -1,5 +1,79 @@
 # Startup and execution / 起動と実行性能
 
+<a id="interactive-response"></a>
+
+## Interactive response and sustained work / 対話応答と連続実行
+
+We timed the staged binaries from `8e9963e` on an Apple M1 and on Debian 13 and Ubuntu 26.04 arm64 in a Linux VM on the same machine. The table gives elapsed milliseconds. Parentheses give the 95th percentile. In the TSV, `NA` means the benchmark reported only a median. The Previous column uses the release preceding this series, including its static musl build on Linux arm64. Each history measurement opens a fresh PTY with a million journal entries. Keystroke and completion times end when the expected bytes arrive at the PTY. The whole-prompt measurement starts in the launching parent. [Measurements including sample counts](compatibility-2026-11-23-response/priority.tsv) · [Benchmark programs](../tools)
+
+| macOS workload / 操作 | Previous Tonari | Tonari | GNU Bash 5.2.37 |
+| --- | ---: | ---: | ---: |
+| First visible recent suggestion, 1M entries / 最近の履歴候補 | 107.444 (117.439) | 0.176 (0.187) | — |
+| First visible oldest suggestion, 1M entries / 最古の履歴候補 | 112.680 (119.178) | 8.657 (9.073) | — |
+| Ctrl-R, oldest match / 最古の履歴検索 | 213.210 (224.823) | 8.395 (9.332) | — |
+| Cancel Ctrl-R / 検索の取り消し | 71.979 (72.738) | 0.037 (0.050) | — |
+| 512 bytes of typeahead / 連続入力 | 6.709 (7.063) | 0.284 (0.301) | — |
+| 16 KiB bracketed paste / 貼り付け | 22.995 (49.680) | 2.523 (3.751) | — |
+| Filename Tab among 10,000 / ファイル補完1万件 | 5.168 (5.410) | 3.639 (3.857) | 10.023 (10.478) |
+| Filename Tab among 100,000 / ファイル補完10万件 | 51.489 (53.491) | 37.635 (38.493) | 105.384 (105.838) |
+| List 10,000 candidates / 候補1万件の一覧 | 11.162 (15.082) | 8.760 (11.586) | 39.522 (49.462) |
+| Reused 10,000-word completion / 固定候補の反復 | 0.237 (0.475) | 0.023 (0.067) | 24.357 (26.204) |
+| Start and show first prompt / 初回プロンプト | — | 4.189 (4.446) | 6.740 (6.967) |
+| Expand 4,096 mixed UTF-8 names once / ファイル名展開 | 11.217 (18.195) | 9.408 (12.850) | 19.524 (26.742) |
+| Same expansion eight times / 同じ展開を8回 | 83.482 (125.611) | 25.829 (38.246) | 145.854 (211.414) |
+| Read 4 MiB from a pipe with `read -N` | 2403.384 | 35.275 | 94.657 |
+| Capture a 4 MiB file with `$(<file)` | 15.628 | 9.273 | 62.941 |
+| String expansion workload / 文字列展開 | 5.114 (5.290) | 5.296 (5.556) | 11.598 (11.711) |
+| Function workload / 関数呼び出し | 8.917 (9.211) | 9.011 (9.156) | 17.485 (17.899) |
+
+普段の1打鍵も別に測りました。macOS では最近の候補がある場合、入力から再描画まで中央値0.013 ms、p95 は0.018 ms でした。初めて古い履歴を探す場合と、既に表示中の行を編集する場合とでは仕事量が違います。短い履歴の最古候補を表示する別の試験では、旧版0.651 ms、今回0.909 msでした。10万ファイルの初回補完は38.493 ms（p95）かかり、利用者が登録した補完関数が100 ms待つ例では、Tab の直後の文字が見えるまで中央値113.459 msでした。端末エミュレーターが描画を終えるまでの時間は含みません。[入力と補完の全結果](compatibility-2026-11-23-response/priority.tsv)
+
+| Debian arm64 workload / 操作 | Tonari (glibc) | GNU Bash 5.2.37 | Tonari / Bash |
+| --- | ---: | ---: | ---: |
+| First prompt / 初回プロンプト | 0.759 | 0.968 | 0.78 |
+| Filename Tab among 100,000 / ファイル補完10万件 | 15.365 | 54.303 | 0.28 |
+| Expand 4,096 mixed UTF-8 names / ファイル名展開 | 1.882 | 4.031 | 0.47 |
+| Launch and wait for 16 external commands / 外部コマンド16連続 | 3.488 | 4.785 | 0.73 |
+| 4 MiB redirected through three external commands / 3段パイプ | 5.279 | 5.584 | 0.95 |
+| Read 4 MiB with `read -N` / パイプ入力 | 28.003 | 95.637 | 0.29 |
+| 4 MiB input redirect / 入力と出力のリダイレクト | 2.869 | 3.037 | 0.94 |
+| 4 MiB `$(<file)` / ファイルのコマンド置換 | 9.599 | 71.233 | 0.13 |
+| Function workload / 関数呼び出し | 9.803 | 24.320 | 0.40 |
+| Unicode field splitting / 絵文字を区切りにした単語分割 | 3.616 | 23.544 | 0.15 |
+
+The direct C launch/wait control took 3.500 ms for those same 16 children. All 47 longer scripts had lower median times than Bash on each of the three platforms. The counts at or below two-thirds were 39, 35 and 31 respectively. The per-feature audit also times short invocations, external helpers, sleeps, and tests shared by several names. Its raw ratios differ substantially from the longer scripts. OS caches were warm. Separate audit lanes used the same host. After the audits finished, we repeated macOS history and first Tab and repeated startup and first prompt on all three platforms. A second TSV retains the measurements during the concurrent run. The seven-run 100,000-file p95 is the slowest measured sample. The byte-stream benchmark checks every byte and reports medians at 0 bytes, 1 byte, 4 KiB, 256 KiB and 4 MiB. [Whole and already-started feature matrix](compatibility-2026-11-23-response/matrix.md) · [Measurements during concurrent audits](compatibility-2026-11-23-response/priority-concurrent.tsv) · [Per-feature threshold crossings](compatibility-2026-11-23-response/target-crossings.tsv)
+
+機能別の短い呼び出しも起動込みで再計測しました。中央値が Bash の2/3以下になったのは、macOS 620/757件、Debian 46/778件、Ubuntu 28/774件です。[判定した全項目の実測](compatibility-2026-11-23-response/matrix.md)
+
+CPUを1個に制限した Debian でも、100万件中の最古側の検索は10.906 ms、UTF-8 ファイル4,096件の展開は1.906 ms（Bash 4.500 ms）でした。外部プロセスの起動や大容量パイプでは OS の時間も含めて測っています。同じホスト上で監査を並行実行した計測もあります。実機の x86-64、WSL2、低速ストレージ上のコールドスタートは今回の計測対象外です。[CPU 1個と各環境の実測](compatibility-2026-11-23-response/priority.tsv)
+
+GNU’s `ifs-posix.tests` performs 6,856 assertions and repeatedly uses a parenthesized pipeline stage inside command substitution. Running that stage in the child already created for the pipe also fixes the observable subshell depth. On Ubuntu the seven-run median was 2031.257 ms, compared with 2995.191 ms before this fix and 2465.075 ms with Bash. Every run matched the upstream output. [Pipeline and subshell regression](../tests/shell.py)
+
+### Release binaries / 配布バイナリ
+
+| Target | Bytes | Reference Bash bytes | SHA-256 |
+| --- | ---: | ---: | --- |
+| macOS arm64 | 1,202,848 | 1,208,904 | `c6f84927cc5352311cc74315e01393126aa43e08de93227799cdd952b0f49ac2` |
+| Linux arm64 glibc | 1,257,592 | 1,412,096 Debian · 1,609,176 Ubuntu | `52116bd709de110790d9f2b20a3ae91daebdaf6418be14de69268ab63e600ca0` |
+| Linux arm64 static musl | 1,359,104 | 1,412,096 Debian · 1,609,176 Ubuntu | `67b9facb2bc45a40e9515826f9ed1bfc93414ea7d082b5c05c4125b3575960ec` |
+| Linux x86-64-v3 glibc | 1,279,184 | 1,298,416 Debian | `0964bc2cdc5d38cbf9897adb0524771dd22fcaeeaa9030e4ed09a0f45eaa7957` |
+
+The Linux glibc build uses the installed locale data for filename order. In the same Debian startup run, `-c :` took 0.341 ms with glibc, 0.241 ms with static musl and 0.447 ms with Bash. The previous release used musl on arm64. The glibc build is staged under `linux-arm64`, and `linux-arm64-musl` contains the independently usable static build. A fully static glibc trial started in 0.370 ms compared with 0.467 ms for dynamic glibc in that run, and grew to 2,169,008 bytes. In a separate 301-sample build comparison, linking GCC’s unwind support into the executable reduced the glibc startup median from 0.352 to 0.325 ms and p95 from 0.439 to 0.391 ms. The release script records the compiler and linker options used for each target. [Build recipe](../tools/build-release.sh) · [Static musl measurements](compatibility-2026-11-23-response/musl/matrix.md)
+
+Linux arm64 では日本語を含む名前付きロケールのファイル順を扱える glibc 版を標準としました。起動の速さを優先してバイト順でよい環境には、静的 musl 版があります。どちらもインストールする実行ファイルは1本です。検証した4本はそれぞれの比較用 Bash より小さく、アカウントでのログイン試験には配布用の実体を使いました。[互換性と適用条件](compatibility.md) · [採用・見送りの根拠](engineering-notes.md)
+
+On macOS set `REFERENCE_BASH` to a modern GNU Bash for the full script suite. On the two Linux reference systems the packaged interpreter is `/bin/bash`. macOS では全スクリプト計測に使う GNU Bash 5.2 以降のパスを `REFERENCE_BASH` に設定します。
+
+```sh
+binary=$(tools/build-release.sh)
+reference_bash=${REFERENCE_BASH:-/bin/bash}
+python3 tools/bench_history.py "$binary" --entries 1000000 --bursts --runs 17
+python3 tools/bench_completion.py "$binary" --bash "$reference_bash" --files 100000 --runs 7
+python3 tools/bench_completion.py "$binary" --bash "$reference_bash" --reuse-words --runs 15
+python3 tools/bench_scripts.py "$binary" --bash "$reference_bash" --timing started --runs 17
+python3 tools/bench_streams.py "$binary" "$reference_bash" --case 'read -N' --sizes 4096 262144 4194304 --runs 7
+```
+
 <a id="performance-target"></a>
 
 ## Performance target / 性能目標

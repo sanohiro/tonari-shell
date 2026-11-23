@@ -1,0 +1,133 @@
+platform	workload	shell	samples	median_ms	p95_ms
+macOS	history / 1M / Tab / first key	Previous	17	0.068	0.108
+macOS	history / 1M / Tab / next key	Previous	17	0.207	0.436
+macOS	history / 1M / Tab / both	Previous	17	0.262	0.517
+macOS	history / 1M / Tab / first key	Tonari	17	0.064	0.973
+macOS	history / 1M / Tab / next key	Tonari	17	0.208	0.561
+macOS	history / 1M / Tab / both	Tonari	17	0.268	1.534
+macOS	history / 1M / Enter / first key	Previous	17	0.065	0.101
+macOS	history / 1M / Enter / next key	Previous	17	0.335	0.772
+macOS	history / 1M / Enter / both	Previous	17	0.392	0.873
+macOS	history / 1M / Enter / first key	Tonari	17	0.073	0.148
+macOS	history / 1M / Enter / next key	Tonari	17	0.587	0.946
+macOS	history / 1M / Enter / both	Tonari	17	0.663	1.061
+macOS	history / 1M / Hint	Previous	17	273.755	446.301
+macOS	history / 1M / Hint	Tonari	17	0.439	3.332
+macOS	history / 1M / Cancel search	Previous	17	80.412	92.685
+macOS	history / 1M / Cancel search	Tonari	17	0.080	0.133
+macOS	history / 1M / Burst	Previous	17	8.651	11.510
+macOS	history / 1M / Burst	Tonari	17	0.399	0.742
+macOS	history / 1M / Paste	Previous	17	32.239	43.279
+macOS	history / 1M / Paste	Tonari	17	6.672	7.042
+macOS	history / 1M / Old hint	Previous	17	283.852	313.871
+macOS	history / 1M / Old hint	Tonari	17	19.490	23.989
+macOS	history / 1M / Recent search	Previous	17	84.851	93.423
+macOS	history / 1M / Recent search	Tonari	17	0.472	0.970
+macOS	history / 1M / Old search	Previous	17	244.136	275.468
+macOS	history / 1M / Old search	Tonari	17	18.869	23.428
+macOS	completion / recent hint	Previous	325	0.030	0.063
+macOS	completion / no hint	Previous	275	0.027	0.068
+macOS	completion / oldest hint: typed key	Previous	25	0.026	0.077
+macOS	completion / oldest hint: visible suggestion	Previous	25	0.903	1.449
+macOS	completion / files	Previous	25	5.809	7.028
+macOS	completion / complete -f	Previous	25	5.802	9.350
+macOS	completion / PATH	Previous	25	5.532	7.215
+macOS	completion / recent hint	Tonari	325	0.027	0.056
+macOS	completion / no hint	Tonari	275	0.019	0.130
+macOS	completion / oldest hint: typed key	Tonari	25	0.028	0.050
+macOS	completion / oldest hint: visible suggestion	Tonari	25	1.155	2.202
+macOS	completion / files	Tonari	25	4.185	4.933
+macOS	completion / complete -f	Tonari	25	4.208	7.997
+macOS	completion / PATH	Tonari	25	4.214	5.598
+macOS	completion / files	Bash	25	11.173	12.329
+macOS	completion / complete -f	Bash	25	11.957	15.316
+macOS	completion / PATH	Bash	25	169.937	200.427
+macOS	100k / recent hint	Previous	91	0.032	0.070
+macOS	100k / no hint	Previous	77	0.037	0.069
+macOS	100k / oldest hint: typed key	Previous	7	0.029	0.059
+macOS	100k / oldest hint: visible suggestion	Previous	7	1.047	1.659
+macOS	100k / files	Previous	7	58.419	66.688
+macOS	100k / complete -f	Previous	7	58.166	66.411
+macOS	100k / PATH	Previous	7	53.963	58.291
+macOS	100k / recent hint	Tonari	91	0.036	0.070
+macOS	100k / no hint	Tonari	77	0.040	0.157
+macOS	100k / oldest hint: typed key	Tonari	7	0.035	0.075
+macOS	100k / oldest hint: visible suggestion	Tonari	7	1.598	2.522
+macOS	100k / files	Tonari	7	42.793	46.025
+macOS	100k / complete -f	Tonari	7	43.475	46.627
+macOS	100k / PATH	Tonari	7	43.019	48.310
+macOS	100k / files	Bash	7	118.838	122.066
+macOS	100k / complete -f	Bash	7	125.077	143.455
+macOS	100k / PATH	Bash	7	1751.018	1880.730
+macOS	login / plain	Bash	81	7.564	8.114
+macOS	login / plain	Previous	81	4.531	4.796
+macOS	login / plain	Tonari	81	4.584	5.034
+macOS	login / login	Bash	81	10.728	11.587
+macOS	login / login	Previous	81	6.638	7.119
+macOS	login / login	Tonari	81	6.792	7.294
+macOS	login / interactive login	Bash	81	10.746	11.358
+macOS	login / interactive login	Previous	81	6.678	7.083
+macOS	login / interactive login	Tonari	81	6.767	7.097
+macOS	login / spawn series	Bash	81	44.622	47.699
+macOS	login / spawn series	Previous	81	27.465	29.875
+macOS	login / spawn series	Tonari	81	27.412	28.971
+macOS	prompt / first prompt	Tonari	61	5.396	5.874
+macOS	prompt / first prompt	Bash	61	8.716	9.546
+macOS	prompt / exec to first prompt (same samples)	Tonari	61	3.534	3.845
+macOS	prompt / exec to first prompt (same samples)	Bash	61	6.812	7.186
+Debian	login / plain	Bash	101	0.790	1.619
+Debian	login / plain	Previous	101	0.478	0.966
+Debian	login / plain	Tonari	101	0.658	1.240
+Debian	login / login	Bash	101	1.980	2.397
+Debian	login / login	Previous	101	1.630	2.147
+Debian	login / login	Tonari	101	1.690	2.106
+Debian	login / interactive login	Bash	101	2.861	3.296
+Debian	login / interactive login	Previous	101	2.583	3.056
+Debian	login / interactive login	Tonari	101	2.405	2.912
+Debian	login / spawn series	Bash	101	6.419	7.510
+Debian	login / spawn series	Previous	101	4.739	5.646
+Debian	login / spawn series	Tonari	101	5.197	6.055
+Debian	libc / plain	Bash	71	0.647	0.807
+Debian	libc / plain	Tonari musl	71	0.413	0.675
+Debian	libc / plain	Tonari	71	0.554	0.821
+Debian	libc / login	Bash	71	1.997	2.513
+Debian	libc / login	Tonari musl	71	1.635	2.041
+Debian	libc / login	Tonari	71	1.695	2.158
+Debian	libc / interactive login	Bash	71	2.869	3.740
+Debian	libc / interactive login	Tonari musl	71	2.571	3.047
+Debian	libc / interactive login	Tonari	71	2.390	3.103
+Debian	libc / spawn series	Bash	71	6.514	7.850
+Debian	libc / spawn series	Tonari musl	71	5.103	6.162
+Debian	libc / spawn series	Tonari	71	5.324	6.426
+Debian	prompt / first prompt	Tonari	81	1.280	1.675
+Debian	prompt / first prompt	Bash	81	1.564	1.960
+Debian	prompt / exec to first prompt (same samples)	Tonari	81	0.726	0.932
+Debian	prompt / exec to first prompt (same samples)	Bash	81	1.026	1.310
+Ubuntu	login / plain	Bash	101	1.153	2.982
+Ubuntu	login / plain	Previous	101	0.798	1.615
+Ubuntu	login / plain	Tonari	101	0.963	2.168
+Ubuntu	login / login	Bash	101	2.809	4.032
+Ubuntu	login / login	Previous	101	2.230	3.199
+Ubuntu	login / login	Tonari	101	2.232	3.409
+Ubuntu	login / interactive login	Bash	101	4.748	7.651
+Ubuntu	login / interactive login	Previous	101	4.227	8.450
+Ubuntu	login / interactive login	Tonari	101	4.080	6.690
+Ubuntu	login / spawn series	Bash	101	9.048	15.055
+Ubuntu	login / spawn series	Previous	101	6.670	11.661
+Ubuntu	login / spawn series	Tonari	101	7.337	12.461
+Ubuntu	libc / plain	Bash	71	0.873	1.837
+Ubuntu	libc / plain	Tonari musl	71	0.601	1.064
+Ubuntu	libc / plain	Tonari	71	0.791	1.470
+Ubuntu	libc / login	Bash	71	2.591	3.644
+Ubuntu	libc / login	Tonari musl	71	2.170	3.099
+Ubuntu	libc / login	Tonari	71	2.101	3.429
+Ubuntu	libc / interactive login	Bash	71	4.901	6.219
+Ubuntu	libc / interactive login	Tonari musl	71	3.940	5.420
+Ubuntu	libc / interactive login	Tonari	71	3.865	5.141
+Ubuntu	libc / spawn series	Bash	71	8.126	9.902
+Ubuntu	libc / spawn series	Tonari musl	71	5.998	7.369
+Ubuntu	libc / spawn series	Tonari	71	6.487	7.607
+Ubuntu	prompt / first prompt	Tonari	81	1.688	2.674
+Ubuntu	prompt / first prompt	Bash	81	2.112	2.993
+Ubuntu	prompt / exec to first prompt (same samples)	Tonari	81	0.931	1.593
+Ubuntu	prompt / exec to first prompt (same samples)	Bash	81	1.289	2.043

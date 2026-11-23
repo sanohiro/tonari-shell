@@ -13,8 +13,8 @@ The current inventory gives the outcome for every named check on Debian, Ubuntu 
 Build with Rust 1.88 or later. On macOS the unit suite passed with Rust 1.88.0 and the release was built with 1.96.1. This example tunes the binary for the CPU of the build machine. The startup flags let you try the editor before loading your Bash configuration.
 
 ```sh
-RUSTFLAGS='-C target-cpu=native' cargo build --release --locked
-./target/release/tonari --noprofile --norc
+binary=$(tools/build-release.sh)
+"$binary" --noprofile --norc
 ```
 
 At the prompt, try a pipeline or a shell function. Use ↑ for this session’s history, Ctrl-R to search across sessions, and → at the end of the line to accept a suggestion. Tab completes paths with spaces. Bracketed paste keeps multiline commands editable until you press Enter.
@@ -28,7 +28,7 @@ To stage the Bash-compatible entry point under a temporary prefix, run these com
 
 ```sh
 prefix=$(mktemp -d)
-tools/stage.sh target/release/tonari "$prefix"
+tools/stage.sh "$binary" "$prefix"
 "$prefix/libexec/tonari/bash" --noprofile --norc -c 'printf "%s\n" one two | wc -l'
 "$prefix/bin/tonari" --noprofile --norc
 ```
@@ -43,13 +43,13 @@ tools/stage.sh target/release/tonari "$prefix"
 
 We sourced nvm 0.40.3 and 0.40.5 in Tonari, switched between Node 24.1.0 and 18.13.0 in the same session, and verified each switch with `node --version`. On macOS arm64, a staged login session loaded Debian bash-completion 2.16.0 and the script from GitHub CLI 2.96.0. Pressing Tab after `gh iss` inserted `gh issue `.
 
-Git also completed a branch created by another process after startup, and direnv 2.32.1 applied and removed a directory environment on Debian. An fzf 0.74.0 integration test selected a filename containing a space and Japanese text with Ctrl-T in both Emacs and vi editing modes. The editor supports `bind -x`, key macros, `INPUTRC` and editable `read -e -i` input. Scripts can use `select`, `time` and `coproc`. Named redirections such as `exec {log}>file` allocate a descriptor that the caller can use and close. The `nocasematch` option works in `case`, `[[ ]]`, parameter replacement and completion filters. Advanced Readline commands, filename matching with `nocaseglob` and Bash 5.3 expansion forms still have differences. A Debian x86-64-v3 guest passed all 117 integration tests under QEMU. Native x86-64 performance, WSL2 and a persistent startup parsing cache remain open. Debian and Ubuntu arm64 also passed actual account login and logout using Tonari’s private `bash` path. [Per-feature results](docs/compatibility-2026-11-23-nocasematch/matrix.md)
+Git also completed a branch created by another process after startup, and direnv 2.32.1 applied and removed a directory environment on Debian. An fzf 0.74.0 integration test selected a filename containing a space and Japanese text with Ctrl-T in both Emacs and vi editing modes. The editor supports `bind -x`, key macros, `INPUTRC` and editable `read -e -i` input. Scripts can use `select`, `time` and `coproc`. Named redirections such as `exec {log}>file` allocate a descriptor that the caller can use and close. The `nocasematch` option works in `case`, `[[ ]]`, parameter replacement and completion filters. Advanced Readline commands, filename matching with `nocaseglob` and Bash 5.3 expansion forms still have differences. A Debian x86-64-v3 guest passed all 124 integration tests under QEMU. Native x86-64 performance, WSL2 and a persistent startup parsing cache remain open. Debian and Ubuntu arm64 also passed actual account login and logout using Tonari’s private `bash` path. [Per-feature results](docs/compatibility-2026-11-23-response/matrix.md)
 
 ## Speed and size
 
 The feature reference is GNU Bash 5.2.37 on Debian 13 and 5.3.9 on Ubuntu 26.04. For work done by the shell we aim for half of Bash’s elapsed time, with two-thirds as the upper target. Bash-equivalent time is acceptable for very short operations and workloads dominated by the same OS work. The benchmark records startup, external commands, pipelines, and repeated operations separately. The macOS system Bash 3.2 is an additional comparison. [Measurements, binary sizes and build conditions](docs/benchmarks.md)
 
-Tonari ships as one executable per OS and CPU architecture. The macOS executable links to OS libraries. The staged x86-64-v3 Linux build uses system glibc and libgcc. It passed the integration suite in a Debian x86-64 guest. The Linux arm64 release links musl statically and packs ELF relative relocations. [Linux release build](docs/benchmarks.md#linux-arm64-static-pie)
+Each installation uses one executable. The macOS arm64 and Linux glibc builds use the system’s collation tables, including changes to the shell’s locale variables. Linux builds target arm64 or x86-64-v3. An additional static arm64 musl build starts faster on our Debian fixture and sorts names by byte value. The build script selects the profile for its host toolchain. [Builds and measured tradeoffs](docs/benchmarks.md#interactive-response)
 
 ## Development
 
@@ -57,7 +57,8 @@ Tonari ships as one executable per OS and CPU architecture. The macOS executable
 cargo test --locked
 cargo build --locked
 python3 tests/shell.py target/debug/tonari
-python3 tools/bench.py target/release/tonari --bash /bin/bash
+binary=$(tools/build-release.sh)
+python3 tools/bench.py "$binary" --bash /bin/bash
 ```
 
 The end-to-end tests compare output, files, and exit status with Bash. They also exercise the editor and job control through pseudo-terminals. Use `REFERENCE_BASH` to select a test reference, or `--bash` for benchmarks. Use `--compare-tonari Previous /path/to/previous` to interleave builds in the same run.

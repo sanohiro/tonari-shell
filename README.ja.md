@@ -13,8 +13,8 @@ Debian・Ubuntu・macOS で各項目がどこまで動作するかを一覧に�
 ビルドには Rust 1.88 以降を使用します。macOS で最小対応版の 1.88.0 でも単体テストを通し、配布用バイナリは 1.96.1 でビルドしました。この例ではビルドするマシンの CPU 向けに最適化します。起動引数を付けると、自分の Bash 設定を読み込む前に標準のエディターを試せます。
 
 ```sh
-RUSTFLAGS='-C target-cpu=native' cargo build --release --locked
-./target/release/tonari --noprofile --norc
+binary=$(tools/build-release.sh)
+"$binary" --noprofile --norc
 ```
 
 プロンプトではパイプや関数を試せます。↑ で現在の端末の履歴をたどり、Ctrl-R で他のセッションを含めて検索します。行末で → を押すと薄く表示された候補を採用します。Tab は空白を含むパスも補完します。ブラケットペースト対応端末では、複数行を貼り付けた後に編集でき、Enter で実行します。
@@ -28,7 +28,7 @@ for file in README*.md; do printf '%s ' "$file"; count_lines "$file"; done
 
 ```sh
 prefix=$(mktemp -d)
-tools/stage.sh target/release/tonari "$prefix"
+tools/stage.sh "$binary" "$prefix"
 "$prefix/libexec/tonari/bash" --noprofile --norc -c 'printf "%s\n" one two | wc -l'
 "$prefix/bin/tonari" --noprofile --norc
 ```
@@ -43,13 +43,13 @@ tools/stage.sh target/release/tonari "$prefix"
 
 nvm 0.40.3 と 0.40.5 をそれぞれ Tonari で読み込み、同じセッションで Node 24.1.0 と 18.13.0 を切り替え、それぞれ `node --version` で確認しました。macOS arm64 のログイン端末で Debian の bash-completion 2.16.0 と GitHub CLI 2.96.0 の補完スクリプトを読み込み、`gh iss` に Tab を押すと `gh issue ` が入力されることを確認しました。
 
-Git では起動後に別プロセスが作ったブランチを補完して切り替え、Debian の direnv 2.32.1 ではディレクトリ移動時の環境変数の設定と解除を確認しました。fzf 0.74.0 の設定を読み込み、Emacs・vi の両モードで Ctrl-T から空白と日本語を含むファイル名を選択できました。エディターでは `bind -x`、キーマクロ、`INPUTRC`、初期値を編集できる `read -e -i` が使えます。スクリプトでは `select`、`time`、`coproc` に対応しました。`exec {log}>file` で確保した記述子は変数を介して使用・解放できます。`shopt -s nocasematch` は `case`、`[[ ]]`、変数の文字列置換、補完フィルターに適用されます。複雑な Readline 操作、ファイル名展開の `nocaseglob`、Bash 5.3 の展開構文には差が残ります。Debian の x86-64-v3 版は QEMU 上で統合テスト117件を通過しました。x86-64 実機での性能、WSL2 での検証、起動設定の解析結果を永続化するキャッシュが残っています。Debian・Ubuntu の arm64 では、一時アカウントに登録した Tonari でログインからログアウトまで確認しました。[機能ごとの結果](docs/compatibility-2026-11-23-nocasematch/matrix.md)
+Git では起動後に別プロセスが作ったブランチを補完して切り替え、Debian の direnv 2.32.1 ではディレクトリ移動時の環境変数の設定と解除を確認しました。fzf 0.74.0 の設定を読み込み、Emacs・vi の両モードで Ctrl-T から空白と日本語を含むファイル名を選択できました。エディターでは `bind -x`、キーマクロ、`INPUTRC`、初期値を編集できる `read -e -i` が使えます。スクリプトでは `select`、`time`、`coproc` に対応しました。`exec {log}>file` で確保した記述子は変数を介して使用・解放できます。`shopt -s nocasematch` は `case`、`[[ ]]`、変数の文字列置換、補完フィルターに適用されます。複雑な Readline 操作、ファイル名展開の `nocaseglob`、Bash 5.3 の展開構文には差が残ります。Debian の x86-64-v3 版は QEMU 上で統合テスト124件を通過しました。x86-64 実機での性能、WSL2 での検証、起動設定の解析結果を永続化するキャッシュが残っています。Debian・Ubuntu の arm64 では、一時アカウントに登録した Tonari でログインからログアウトまで確認しました。[機能ごとの結果](docs/compatibility-2026-11-23-response/matrix.md)
 
 ## 速度とサイズ
 
 機能互換の基準は Debian 13 の GNU Bash 5.2.37 と Ubuntu 26.04 の 5.3.9 です。シェル自身の処理は Bash の所要時間の半分、遅くても 3 分の 2 を目指します。ごく短い単発処理や、共通の OS 処理・待ち時間が大半を占める処理は、Bash と同程度なら許容します。起動・外部コマンド・パイプ・反復実行を個別に計測し、macOS 標準の Bash 3.2 とも比較します。[計測結果・バイナリサイズ・ビルド条件](docs/benchmarks.md)
 
-OS・CPU アーキテクチャごとに実行ファイルを1本配布する設計です。macOS 版は OS 標準のライブラリを使います。Linux arm64 版は musl を静的リンクし、ELF の相対再配置情報を圧縮します。x86-64-v3 版は OS の glibc と libgcc にリンクします。[Linux 配布版のビルド方法](docs/benchmarks.md#linux-arm64-static-pie)
+どのビルドも、インストールする実行ファイルは1本です。macOS arm64 版と Linux glibc 版は OS の照合順序を使い、シェル内のロケール変更にも従います。Linux は arm64 と x86-64-v3 を対象とします。arm64 の静的 musl 版も用意しました。Debian の実測ではこちらの起動が速く、ファイル名はバイト順になります。ビルドスクリプトはホストのツールチェーンに合う設定を選びます。[配布版の比較と実測](docs/benchmarks.md#interactive-response)
 
 ## 開発
 
@@ -57,7 +57,8 @@ OS・CPU アーキテクチャごとに実行ファイルを1本配布する設�
 cargo test --locked
 cargo build --locked
 python3 tests/shell.py target/debug/tonari
-python3 tools/bench.py target/release/tonari --bash /bin/bash
+binary=$(tools/build-release.sh)
+python3 tools/bench.py "$binary" --bash /bin/bash
 ```
 
 結合テストでは、出力、ファイル、終了ステータスを Bash と比較します。エディターとジョブ制御は疑似端末で検証します。テストの比較対象は `REFERENCE_BASH`、ベンチの比較対象は `--bash` で指定できます。`--compare-tonari Previous /path/to/previous` を付けると、旧版と新版を同じ計測内で交互に起動します。

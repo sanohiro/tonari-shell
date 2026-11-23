@@ -1,0 +1,968 @@
+platform	workload	shell	samples	median_ms	p95_ms
+macOS	history / 1M / Tab / first key	Previous	17	0.024	0.025
+macOS	history / 1M / Tab / next key	Previous	17	0.084	0.088
+macOS	history / 1M / Tab / both	Previous	17	0.107	0.112
+macOS	history / 1M / Tab / first key	Tonari	17	0.023	0.034
+macOS	history / 1M / Tab / next key	Tonari	17	0.073	0.085
+macOS	history / 1M / Tab / both	Tonari	17	0.099	0.118
+macOS	history / 1M / Enter / first key	Previous	17	0.021	0.024
+macOS	history / 1M / Enter / next key	Previous	17	0.199	0.216
+macOS	history / 1M / Enter / both	Previous	17	0.220	0.239
+macOS	history / 1M / Enter / first key	Tonari	17	0.019	0.030
+macOS	history / 1M / Enter / next key	Tonari	17	0.158	0.197
+macOS	history / 1M / Enter / both	Tonari	17	0.176	0.227
+macOS	history / 1M / Hint	Previous	17	107.444	117.439
+macOS	history / 1M / Hint	Tonari	17	0.176	0.187
+macOS	history / 1M / Cancel search	Previous	17	71.979	72.738
+macOS	history / 1M / Cancel search	Tonari	17	0.037	0.050
+macOS	history / 1M / Burst	Previous	17	6.709	7.063
+macOS	history / 1M / Burst	Tonari	17	0.284	0.301
+macOS	history / 1M / Paste	Previous	17	22.995	49.680
+macOS	history / 1M / Paste	Tonari	17	2.523	3.751
+macOS	history / 1M / Old hint	Previous	17	112.680	119.178
+macOS	history / 1M / Old hint	Tonari	17	8.657	9.073
+macOS	history / 1M / Recent search	Previous	17	72.233	73.097
+macOS	history / 1M / Recent search	Tonari	17	0.231	0.242
+macOS	history / 1M / Old search	Previous	17	213.210	224.823
+macOS	history / 1M / Old search	Tonari	17	8.395	9.332
+macOS	completion / recent hint	Previous	325	0.013	0.020
+macOS	completion / no hint	Previous	275	0.013	0.022
+macOS	completion / oldest hint: typed key	Previous	25	0.012	0.017
+macOS	completion / oldest hint: visible suggestion	Previous	25	0.651	0.722
+macOS	completion / files	Previous	25	5.168	5.410
+macOS	completion / complete -f	Previous	25	5.048	5.251
+macOS	completion / PATH	Previous	25	4.805	5.074
+macOS	completion / recent hint	Tonari	325	0.013	0.018
+macOS	completion / no hint	Tonari	275	0.014	0.022
+macOS	completion / oldest hint: typed key	Tonari	25	0.013	0.018
+macOS	completion / oldest hint: visible suggestion	Tonari	25	0.909	1.003
+macOS	completion / files	Tonari	25	3.639	3.857
+macOS	completion / complete -f	Tonari	25	3.583	3.866
+macOS	completion / PATH	Tonari	25	3.637	3.860
+macOS	completion / files	Bash	25	10.023	10.478
+macOS	completion / complete -f	Bash	25	10.736	10.869
+macOS	completion / PATH	Bash	25	153.145	154.837
+macOS	callback / Tab then key, 100 ms callback	Previous	11	114.038	115.290
+macOS	callback / Tab then key, 100 ms callback	Tonari	11	113.459	120.342
+macOS	callback / Tab then key, 100 ms callback	Bash	11	112.833	117.198
+macOS	100k / recent hint	Previous	91	0.014	0.025
+macOS	100k / no hint	Previous	77	0.013	0.024
+macOS	100k / oldest hint: typed key	Previous	7	0.012	0.016
+macOS	100k / oldest hint: visible suggestion	Previous	7	0.649	0.669
+macOS	100k / files	Previous	7	51.489	53.491
+macOS	100k / complete -f	Previous	7	51.439	54.106
+macOS	100k / PATH	Previous	7	48.685	50.571
+macOS	100k / recent hint	Tonari	91	0.014	0.021
+macOS	100k / no hint	Tonari	77	0.014	0.020
+macOS	100k / oldest hint: typed key	Tonari	7	0.013	0.016
+macOS	100k / oldest hint: visible suggestion	Tonari	7	0.928	0.979
+macOS	100k / files	Tonari	7	37.635	38.493
+macOS	100k / complete -f	Tonari	7	37.879	38.230
+macOS	100k / PATH	Tonari	7	38.110	39.442
+macOS	100k / files	Bash	7	105.384	105.838
+macOS	100k / complete -f	Bash	7	111.557	111.841
+macOS	100k / PATH	Bash	7	1560.903	1673.412
+macOS	words / static reused, first	Previous	15	0.248	0.293
+macOS	words / static reused, second	Previous	15	0.007	0.023
+macOS	words / static reused, warm	Previous	150	0.237	0.475
+macOS	words / static reused, first	Tonari	15	0.250	0.555
+macOS	words / static reused, second	Tonari	15	0.008	0.617
+macOS	words / static reused, warm	Tonari	150	0.023	0.067
+macOS	words / static reused, first	Bash	15	25.222	34.633
+macOS	words / static reused, second	Bash	15	24.428	29.041
+macOS	words / static reused, warm	Bash	150	24.357	26.204
+macOS	list / list 10	Previous	11	0.192	0.314
+macOS	list / list 10000	Previous	11	11.162	15.082
+macOS	list / list 10	Tonari	11	0.233	0.360
+macOS	list / list 10000	Tonari	11	8.760	11.586
+macOS	list / list 10	Bash	11	0.389	0.481
+macOS	list / list 10000	Bash	11	39.522	49.462
+macOS	login / plain	Bash	81	5.746	6.453
+macOS	login / plain	Previous	81	3.392	3.702
+macOS	login / plain	Tonari	81	3.250	3.651
+macOS	login / login	Bash	81	8.249	9.241
+macOS	login / login	Previous	81	4.924	5.476
+macOS	login / login	Tonari	81	4.842	5.440
+macOS	login / interactive login	Bash	81	8.340	9.799
+macOS	login / interactive login	Previous	81	4.946	6.209
+macOS	login / interactive login	Tonari	81	4.925	6.050
+macOS	login / spawn series	Bash	81	31.327	35.747
+macOS	login / spawn series	Previous	81	20.074	22.508
+macOS	login / spawn series	Tonari	81	20.061	21.447
+macOS	prompt / first prompt	Tonari	61	4.189	4.446
+macOS	prompt / first prompt	Bash	61	6.740	6.967
+macOS	prompt / exec to first prompt (same samples)	Tonari	61	2.760	2.960
+macOS	prompt / exec to first prompt (same samples)	Bash	61	5.348	5.551
+macOS	scripts / arithmetic (already started)	Tonari	17	7.258	17.066
+macOS	scripts / arithmetic (already started)	Bash	17	15.524	18.968
+macOS	scripts / arithmetic (already started)	Previous	17	7.011	8.373
+macOS	scripts / functions (already started)	Tonari	17	9.011	9.156
+macOS	scripts / functions (already started)	Bash	17	17.485	17.899
+macOS	scripts / functions (already started)	Previous	17	8.917	9.211
+macOS	scripts / strings (already started)	Tonari	17	5.296	5.556
+macOS	scripts / strings (already started)	Bash	17	11.598	11.711
+macOS	scripts / strings (already started)	Previous	17	5.114	5.290
+macOS	scripts / regex (already started)	Tonari	17	2.190	2.403
+macOS	scripts / regex (already started)	Bash	17	7.906	8.051
+macOS	scripts / regex (already started)	Previous	17	2.187	2.240
+macOS	scripts / case-edges (already started)	Tonari	17	4.352	4.614
+macOS	scripts / case-edges (already started)	Bash	17	7.755	8.100
+macOS	scripts / case-edges (already started)	Previous	17	4.292	4.604
+macOS	scripts / nocasematch (already started)	Tonari	17	4.700	4.851
+macOS	scripts / nocasematch (already started)	Bash	17	7.239	7.356
+macOS	scripts / nocasematch (already started)	Previous	17	4.585	4.790
+macOS	scripts / case-classes (already started)	Tonari	17	4.553	4.628
+macOS	scripts / case-classes (already started)	Bash	17	6.978	7.123
+macOS	scripts / case-classes (already started)	Previous	17	4.516	4.868
+macOS	scripts / glob (already started)	Tonari	17	8.222	8.613
+macOS	scripts / glob (already started)	Bash	17	1138.410	1199.405
+macOS	scripts / glob (already started)	Previous	17	8.256	8.965
+macOS	scripts / glob-sparse (already started)	Tonari	17	6.964	7.115
+macOS	scripts / glob-sparse (already started)	Bash	17	1139.938	1212.232
+macOS	scripts / glob-sparse (already started)	Previous	17	6.972	8.179
+macOS	scripts / glob-all (already started)	Tonari	17	8.109	8.712
+macOS	scripts / glob-all (already started)	Bash	17	1137.454	1162.127
+macOS	scripts / glob-all (already started)	Previous	17	8.100	9.421
+macOS	scripts / glob-multi-star (already started)	Tonari	17	7.212	8.586
+macOS	scripts / glob-multi-star (already started)	Bash	17	1176.318	1282.892
+macOS	scripts / glob-multi-star (already started)	Previous	17	7.336	9.338
+macOS	scripts / glob-subdirs (already started)	Tonari	17	11.664	20.273
+macOS	scripts / glob-subdirs (already started)	Bash	17	1276.025	1456.603
+macOS	scripts / glob-subdirs (already started)	Previous	17	12.028	16.714
+macOS	scripts / glob-utf8-sort (already started)	Tonari	17	10.218	11.675
+macOS	scripts / glob-utf8-sort (already started)	Bash	17	61.065	67.647
+macOS	scripts / glob-utf8-sort (already started)	Previous	17	10.248	13.304
+macOS	scripts / glob-utf8-once (already started)	Tonari	17	2.197	3.649
+macOS	scripts / glob-utf8-once (already started)	Bash	17	3.951	9.149
+macOS	scripts / glob-utf8-once (already started)	Previous	17	2.167	4.079
+macOS	scripts / glob-utf8-large-repeat (already started)	Tonari	17	25.829	38.246
+macOS	scripts / glob-utf8-large-repeat (already started)	Bash	17	145.854	211.414
+macOS	scripts / glob-utf8-large-repeat (already started)	Previous	17	83.482	125.611
+macOS	scripts / glob-utf8-large (already started)	Tonari	17	9.408	12.850
+macOS	scripts / glob-utf8-large (already started)	Bash	17	19.524	26.742
+macOS	scripts / glob-utf8-large (already started)	Previous	17	11.217	18.195
+macOS	scripts / glob-recursive (already started)	Tonari	17	56.759	74.995
+macOS	scripts / glob-recursive (already started)	Bash	17	1198.980	1466.530
+macOS	scripts / glob-recursive (already started)	Previous	17	56.208	81.647
+macOS	scripts / read-lines (already started)	Tonari	17	7.263	9.146
+macOS	scripts / read-lines (already started)	Bash	17	10.905	12.294
+macOS	scripts / read-lines (already started)	Previous	17	7.124	10.706
+macOS	scripts / substitutions (already started)	Tonari	17	0.758	1.058
+macOS	scripts / substitutions (already started)	Bash	17	72.644	80.221
+macOS	scripts / substitutions (already started)	Previous	17	0.783	1.635
+macOS	scripts / echo-substitutions (already started)	Tonari	17	0.721	1.133
+macOS	scripts / echo-substitutions (already started)	Bash	17	67.686	81.038
+macOS	scripts / echo-substitutions (already started)	Previous	17	0.759	0.925
+macOS	scripts / mapfile-lines (already started)	Tonari	17	2.373	4.770
+macOS	scripts / mapfile-lines (already started)	Bash	17	3.710	5.406
+macOS	scripts / mapfile-lines (already started)	Previous	17	2.378	3.855
+macOS	scripts / case-fallthrough (already started)	Tonari	17	2.294	2.997
+macOS	scripts / case-fallthrough (already started)	Bash	17	3.423	4.069
+macOS	scripts / case-fallthrough (already started)	Previous	17	2.200	2.911
+macOS	scripts / extended-patterns (already started)	Tonari	17	1.165	1.264
+macOS	scripts / extended-patterns (already started)	Bash	17	1.892	5.484
+macOS	scripts / extended-patterns (already started)	Previous	17	1.184	2.566
+macOS	scripts / resource-limits (already started)	Tonari	17	4.410	6.036
+macOS	scripts / resource-limits (already started)	Bash	17	5.298	5.576
+macOS	scripts / resource-limits (already started)	Previous	17	4.333	5.295
+macOS	scripts / directory-stack (already started)	Tonari	17	6.089	8.134
+macOS	scripts / directory-stack (already started)	Bash	17	7.043	8.528
+macOS	scripts / directory-stack (already started)	Previous	17	6.127	8.312
+macOS	scripts / descriptor-moves (already started)	Tonari	17	3.645	4.356
+macOS	scripts / descriptor-moves (already started)	Bash	17	4.135	4.916
+macOS	scripts / descriptor-moves (already started)	Previous	17	3.646	3.950
+macOS	scripts / associative-lookup (already started)	Tonari	17	2.657	3.582
+macOS	scripts / associative-lookup (already started)	Bash	17	4.215	4.348
+macOS	scripts / associative-lookup (already started)	Previous	17	2.623	3.266
+macOS	scripts / readonly-locals (already started)	Tonari	17	3.265	4.885
+macOS	scripts / readonly-locals (already started)	Bash	17	5.906	7.333
+macOS	scripts / readonly-locals (already started)	Previous	17	3.172	3.940
+macOS	scripts / error-trap (already started)	Tonari	17	1.315	1.923
+macOS	scripts / error-trap (already started)	Bash	17	3.300	3.922
+macOS	scripts / error-trap (already started)	Previous	17	1.342	2.332
+macOS	scripts / case-conversion (already started)	Tonari	17	2.889	3.347
+macOS	scripts / case-conversion (already started)	Bash	17	4.531	5.197
+macOS	scripts / case-conversion (already started)	Previous	17	2.753	3.268
+macOS	scripts / integer-assignments (already started)	Tonari	17	2.597	2.891
+macOS	scripts / integer-assignments (already started)	Bash	17	3.949	4.765
+macOS	scripts / integer-assignments (already started)	Previous	17	2.556	5.623
+macOS	scripts / brace-range (already started)	Tonari	17	1.898	4.678
+macOS	scripts / brace-range (already started)	Bash	17	5.496	6.459
+macOS	scripts / brace-range (already started)	Previous	17	1.854	4.070
+macOS	scripts / getopts-clusters (already started)	Tonari	17	1.477	1.879
+macOS	scripts / getopts-clusters (already started)	Bash	17	2.226	3.368
+macOS	scripts / getopts-clusters (already started)	Previous	17	1.490	2.026
+macOS	scripts / compound-substitutions (already started)	Tonari	17	0.706	1.398
+macOS	scripts / compound-substitutions (already started)	Bash	17	22.096	24.165
+macOS	scripts / compound-substitutions (already started)	Previous	17	0.700	1.402
+macOS	scripts / external-substitutions (already started)	Tonari	17	33.128	38.789
+macOS	scripts / external-substitutions (already started)	Bash	17	49.803	54.703
+macOS	scripts / external-substitutions (already started)	Previous	17	32.497	37.415
+macOS	scripts / parenthesized-pipeline (already started)	Tonari	17	40.926	51.371
+macOS	scripts / parenthesized-pipeline (already started)	Bash	17	47.118	65.634
+macOS	scripts / parenthesized-pipeline (already started)	Previous	17	62.296	80.742
+macOS	scripts / pipeline (already started)	Tonari	17	35.799	58.960
+macOS	scripts / pipeline (already started)	Bash	17	55.743	62.854
+macOS	scripts / pipeline (already started)	Previous	17	36.304	40.739
+macOS	scripts / merged-pipeline (already started)	Tonari	17	34.573	37.246
+macOS	scripts / merged-pipeline (already started)	Bash	17	53.141	58.172
+macOS	scripts / merged-pipeline (already started)	Previous	17	34.873	40.530
+macOS	scripts / redirect-stderr (already started)	Tonari	17	23.277	28.591
+macOS	scripts / redirect-stderr (already started)	Bash	17	36.524	43.640
+macOS	scripts / redirect-stderr (already started)	Previous	17	23.496	28.397
+macOS	scripts / merged-pipeline-redirect (already started)	Tonari	17	36.142	39.365
+macOS	scripts / merged-pipeline-redirect (already started)	Bash	17	55.318	68.125
+macOS	scripts / merged-pipeline-redirect (already started)	Previous	17	36.802	42.001
+macOS	scripts / builtin-merged-pipeline (already started)	Tonari	17	36.703	39.665
+macOS	scripts / builtin-merged-pipeline (already started)	Bash	17	49.598	57.463
+macOS	scripts / builtin-merged-pipeline (already started)	Previous	17	36.018	42.617
+macOS	scripts / builtin-output (already started)	Tonari	17	0.609	0.938
+macOS	scripts / builtin-output (already started)	Bash	17	0.846	1.161
+macOS	scripts / builtin-output (already started)	Previous	17	0.639	0.810
+macOS	scripts / field-split (already started)	Tonari	17	3.455	5.075
+macOS	scripts / field-split (already started)	Bash	17	17.234	19.437
+macOS	scripts / field-split (already started)	Previous	17	3.450	4.329
+macOS	scripts / field-split-unicode (already started)	Tonari	17	3.320	3.629
+macOS	scripts / field-split-unicode (already started)	Bash	17	19.306	20.188
+macOS	scripts / field-split-unicode (already started)	Previous	17	3.365	3.862
+macOS	scripts / long-trim (already started)	Tonari	17	1.862	2.835
+macOS	scripts / long-trim (already started)	Bash	17	671.609	692.341
+macOS	scripts / long-trim (already started)	Previous	17	1.804	2.546
+macOS	scripts / external-env (already started)	Tonari	17	36.812	43.810
+macOS	scripts / external-env (already started)	Bash	17	51.871	57.607
+macOS	scripts / external-env (already started)	Previous	17	36.869	43.974
+macOS	scripts / external (already started)	Tonari	17	32.780	38.334
+macOS	scripts / external (already started)	Bash	17	49.768	63.300
+macOS	scripts / external (already started)	Previous	17	33.944	36.982
+macOS	redirect / 0 bytes	Previous	11	7.202	NA
+macOS	redirect / 0 bytes	Tonari	11	7.301	NA
+macOS	redirect / 0 bytes	Bash	11	10.682	NA
+macOS	pipe / 0 bytes	Previous	11	7.446	NA
+macOS	pipe / 0 bytes	Tonari	11	7.628	NA
+macOS	pipe / 0 bytes	Bash	11	11.142	NA
+macOS	capture / 0 bytes	Previous	11	5.375	NA
+macOS	capture / 0 bytes	Tonari	11	4.785	NA
+macOS	capture / 0 bytes	Bash	11	7.889	NA
+macOS	external capture / 0 bytes	Previous	11	6.329	NA
+macOS	external capture / 0 bytes	Tonari	11	6.355	NA
+macOS	external capture / 0 bytes	Bash	11	10.573	NA
+macOS	quoted heredoc / 0 bytes	Previous	11	7.067	NA
+macOS	quoted heredoc / 0 bytes	Tonari	11	7.182	NA
+macOS	quoted heredoc / 0 bytes	Bash	11	10.478	NA
+macOS	redirect / 1 bytes	Previous	11	7.250	NA
+macOS	redirect / 1 bytes	Tonari	11	7.477	NA
+macOS	redirect / 1 bytes	Bash	11	10.810	NA
+macOS	pipe / 1 bytes	Previous	11	7.808	NA
+macOS	pipe / 1 bytes	Tonari	11	7.853	NA
+macOS	pipe / 1 bytes	Bash	11	11.174	NA
+macOS	capture / 1 bytes	Previous	11	5.533	NA
+macOS	capture / 1 bytes	Tonari	11	4.702	NA
+macOS	capture / 1 bytes	Bash	11	7.793	NA
+macOS	external capture / 1 bytes	Previous	11	6.411	NA
+macOS	external capture / 1 bytes	Tonari	11	6.417	NA
+macOS	external capture / 1 bytes	Bash	11	10.595	NA
+macOS	quoted heredoc / 1 bytes	Previous	11	7.123	NA
+macOS	quoted heredoc / 1 bytes	Tonari	11	7.131	NA
+macOS	quoted heredoc / 1 bytes	Bash	11	10.515	NA
+macOS	redirect / 4096 bytes	Previous	11	7.263	NA
+macOS	redirect / 4096 bytes	Tonari	11	7.461	NA
+macOS	redirect / 4096 bytes	Bash	11	10.643	NA
+macOS	pipe / 4096 bytes	Previous	11	7.679	NA
+macOS	pipe / 4096 bytes	Tonari	11	8.058	NA
+macOS	pipe / 4096 bytes	Bash	11	11.650	NA
+macOS	capture / 4096 bytes	Previous	11	5.453	NA
+macOS	capture / 4096 bytes	Tonari	11	4.726	NA
+macOS	capture / 4096 bytes	Bash	11	7.719	NA
+macOS	external capture / 4096 bytes	Previous	11	6.498	NA
+macOS	external capture / 4096 bytes	Tonari	11	6.497	NA
+macOS	external capture / 4096 bytes	Bash	11	10.611	NA
+macOS	quoted heredoc / 4096 bytes	Previous	11	8.957	NA
+macOS	quoted heredoc / 4096 bytes	Tonari	11	8.667	NA
+macOS	quoted heredoc / 4096 bytes	Bash	11	10.529	NA
+macOS	redirect / 262144 bytes	Previous	11	7.323	NA
+macOS	redirect / 262144 bytes	Tonari	11	7.332	NA
+macOS	redirect / 262144 bytes	Bash	11	10.591	NA
+macOS	pipe / 262144 bytes	Previous	11	7.866	NA
+macOS	pipe / 262144 bytes	Tonari	11	8.076	NA
+macOS	pipe / 262144 bytes	Bash	11	11.513	NA
+macOS	capture / 262144 bytes	Previous	11	5.963	NA
+macOS	capture / 262144 bytes	Tonari	11	4.982	NA
+macOS	capture / 262144 bytes	Bash	11	11.032	NA
+macOS	external capture / 262144 bytes	Previous	11	7.303	NA
+macOS	external capture / 262144 bytes	Tonari	11	6.819	NA
+macOS	external capture / 262144 bytes	Bash	11	13.767	NA
+macOS	quoted heredoc / 262144 bytes	Previous	11	9.422	NA
+macOS	quoted heredoc / 262144 bytes	Tonari	11	9.643	NA
+macOS	quoted heredoc / 262144 bytes	Bash	11	13.019	NA
+macOS	redirect / 4194304 bytes	Previous	11	8.677	NA
+macOS	redirect / 4194304 bytes	Tonari	11	8.709	NA
+macOS	redirect / 4194304 bytes	Bash	11	11.920	NA
+macOS	pipe / 4194304 bytes	Previous	11	11.238	NA
+macOS	pipe / 4194304 bytes	Tonari	11	11.034	NA
+macOS	pipe / 4194304 bytes	Bash	11	14.697	NA
+macOS	capture / 4194304 bytes	Previous	11	15.628	NA
+macOS	capture / 4194304 bytes	Tonari	11	9.273	NA
+macOS	capture / 4194304 bytes	Bash	11	62.941	NA
+macOS	external capture / 4194304 bytes	Previous	11	15.011	NA
+macOS	external capture / 4194304 bytes	Tonari	11	13.819	NA
+macOS	external capture / 4194304 bytes	Bash	11	66.286	NA
+macOS	quoted heredoc / 4194304 bytes	Previous	11	17.902	NA
+macOS	quoted heredoc / 4194304 bytes	Tonari	11	17.739	NA
+macOS	quoted heredoc / 4194304 bytes	Bash	11	42.209	NA
+macOS	read -N / 4096 bytes	Previous	7	10.031	NA
+macOS	read -N / 4096 bytes	Tonari	7	8.890	NA
+macOS	read -N / 4096 bytes	Bash	7	14.061	NA
+macOS	read -N / 262144 bytes	Previous	7	129.866	NA
+macOS	read -N / 262144 bytes	Tonari	7	10.372	NA
+macOS	read -N / 262144 bytes	Bash	7	19.311	NA
+macOS	read -N / 4194304 bytes	Previous	7	2403.384	NA
+macOS	read -N / 4194304 bytes	Tonari	7	35.275	NA
+macOS	read -N / 4194304 bytes	Bash	7	94.657	NA
+Debian	history / 1M / Tab / first key	Previous	15	0.188	1.965
+Debian	history / 1M / Tab / next key	Previous	15	0.172	1.000
+Debian	history / 1M / Tab / both	Previous	15	0.354	2.964
+Debian	history / 1M / Tab / first key	Tonari	15	0.163	1.473
+Debian	history / 1M / Tab / next key	Tonari	15	0.165	3.873
+Debian	history / 1M / Tab / both	Tonari	15	0.367	4.962
+Debian	history / 1M / Enter / first key	Previous	15	0.134	3.275
+Debian	history / 1M / Enter / next key	Previous	15	0.191	0.329
+Debian	history / 1M / Enter / both	Previous	15	0.345	3.463
+Debian	history / 1M / Enter / first key	Tonari	15	0.145	0.338
+Debian	history / 1M / Enter / next key	Tonari	15	0.153	0.284
+Debian	history / 1M / Enter / both	Tonari	15	0.330	0.479
+Debian	history / 1M / Hint	Previous	15	86.684	92.524
+Debian	history / 1M / Hint	Tonari	15	0.227	0.336
+Debian	history / 1M / Cancel search	Previous	15	85.324	94.985
+Debian	history / 1M / Cancel search	Tonari	15	0.174	0.405
+Debian	history / 1M / Burst	Previous	15	5.097	6.104
+Debian	history / 1M / Burst	Tonari	15	0.312	0.856
+Debian	history / 1M / Paste	Previous	15	26.749	29.852
+Debian	history / 1M / Paste	Tonari	15	2.303	4.314
+Debian	history / 1M / Old hint	Previous	15	94.371	103.030
+Debian	history / 1M / Old hint	Tonari	15	10.931	12.027
+Debian	history / 1M / Recent search	Previous	15	85.919	95.520
+Debian	history / 1M / Recent search	Tonari	15	0.256	0.474
+Debian	history / 1M / Old search	Previous	15	257.676	265.451
+Debian	history / 1M / Old search	Tonari	15	10.004	10.878
+Debian	completion / recent hint	Previous	221	0.060	0.100
+Debian	completion / no hint	Previous	187	0.069	0.125
+Debian	completion / oldest hint: typed key	Previous	17	0.068	0.155
+Debian	completion / oldest hint: visible suggestion	Previous	17	0.320	0.366
+Debian	completion / files	Previous	17	2.312	2.375
+Debian	completion / complete -f	Previous	17	2.306	2.392
+Debian	completion / PATH	Previous	17	2.053	2.409
+Debian	completion / recent hint	Tonari	221	0.064	0.129
+Debian	completion / no hint	Tonari	187	0.079	0.148
+Debian	completion / oldest hint: typed key	Tonari	17	0.068	0.154
+Debian	completion / oldest hint: visible suggestion	Tonari	17	1.081	2.277
+Debian	completion / files	Tonari	17	1.621	4.677
+Debian	completion / complete -f	Tonari	17	1.622	1.899
+Debian	completion / PATH	Tonari	17	1.635	1.714
+Debian	completion / files	Bash	17	4.843	4.934
+Debian	completion / complete -f	Bash	17	6.243	6.408
+Debian	completion / PATH	Bash	17	73.880	74.808
+Debian	100k / recent hint	Previous	91	0.065	0.136
+Debian	100k / no hint	Previous	77	0.091	0.157
+Debian	100k / oldest hint: typed key	Previous	7	0.104	0.161
+Debian	100k / oldest hint: visible suggestion	Previous	7	0.325	0.619
+Debian	100k / files	Previous	7	22.205	22.243
+Debian	100k / complete -f	Previous	7	22.246	25.099
+Debian	100k / PATH	Previous	7	19.969	20.332
+Debian	100k / recent hint	Tonari	91	0.068	0.129
+Debian	100k / no hint	Tonari	77	0.094	0.160
+Debian	100k / oldest hint: typed key	Tonari	7	0.083	0.152
+Debian	100k / oldest hint: visible suggestion	Tonari	7	1.102	2.123
+Debian	100k / files	Tonari	7	15.365	15.636
+Debian	100k / complete -f	Tonari	7	15.389	18.472
+Debian	100k / PATH	Tonari	7	15.345	16.500
+Debian	100k / files	Bash	7	54.303	57.009
+Debian	100k / complete -f	Bash	7	67.770	70.159
+Debian	100k / PATH	Bash	7	766.992	787.704
+Debian	words / static reused, first	Previous	11	0.481	0.898
+Debian	words / static reused, second	Previous	11	0.412	0.838
+Debian	words / static reused, warm	Previous	110	0.386	0.819
+Debian	words / static reused, first	Tonari	11	0.406	1.041
+Debian	words / static reused, second	Tonari	11	0.537	0.916
+Debian	words / static reused, warm	Tonari	110	0.121	0.289
+Debian	words / static reused, first	Bash	11	209.319	272.802
+Debian	words / static reused, second	Bash	11	204.660	274.782
+Debian	words / static reused, warm	Bash	110	211.455	270.787
+Debian	list / list 10	Previous	11	0.176	0.525
+Debian	list / list 10000	Previous	11	6.700	7.846
+Debian	list / list 10	Tonari	11	0.170	0.280
+Debian	list / list 10000	Tonari	11	5.438	6.647
+Debian	list / list 10	Bash	11	0.178	0.693
+Debian	list / list 10000	Bash	11	41.119	46.562
+Debian	login / plain	Bash	101	0.415	0.438
+Debian	login / plain	Previous	101	0.222	0.240
+Debian	login / plain	Tonari	101	0.320	0.343
+Debian	login / login	Bash	101	1.322	1.443
+Debian	login / login	Previous	101	1.106	1.199
+Debian	login / login	Tonari	101	1.085	1.161
+Debian	login / interactive login	Bash	101	1.945	2.069
+Debian	login / interactive login	Previous	101	1.732	1.834
+Debian	login / interactive login	Tonari	101	1.581	1.658
+Debian	login / spawn series	Bash	101	4.486	4.599
+Debian	login / spawn series	Previous	101	3.136	3.263
+Debian	login / spawn series	Tonari	101	3.516	3.635
+Debian	libc / plain	Bash	71	0.447	0.554
+Debian	libc / plain	Tonari musl	71	0.241	0.307
+Debian	libc / plain	Tonari	71	0.341	0.484
+Debian	libc / login	Bash	71	1.345	1.544
+Debian	libc / login	Tonari musl	71	1.090	1.308
+Debian	libc / login	Tonari	71	1.108	1.240
+Debian	libc / interactive login	Bash	71	1.950	2.136
+Debian	libc / interactive login	Tonari musl	71	1.662	1.806
+Debian	libc / interactive login	Tonari	71	1.577	1.673
+Debian	libc / spawn series	Bash	71	4.503	4.868
+Debian	libc / spawn series	Tonari musl	71	3.147	3.479
+Debian	libc / spawn series	Tonari	71	3.538	3.740
+Debian	prompt / first prompt	Tonari	81	0.759	0.819
+Debian	prompt / first prompt	Bash	81	0.968	1.030
+Debian	prompt / exec to first prompt (same samples)	Tonari	81	0.389	0.432
+Debian	prompt / exec to first prompt (same samples)	Bash	81	0.595	0.640
+Debian	scripts / arithmetic (already started)	Tonari	17	7.644	10.335
+Debian	scripts / arithmetic (already started)	Bash	17	24.703	25.067
+Debian	scripts / arithmetic (already started)	Previous	17	6.378	7.130
+Debian	scripts / functions (already started)	Tonari	17	9.803	11.124
+Debian	scripts / functions (already started)	Bash	17	24.320	25.378
+Debian	scripts / functions (already started)	Previous	17	8.444	9.069
+Debian	scripts / strings (already started)	Tonari	17	5.630	5.924
+Debian	scripts / strings (already started)	Bash	17	14.203	14.757
+Debian	scripts / strings (already started)	Previous	17	4.404	4.914
+Debian	scripts / regex (already started)	Tonari	17	2.327	2.417
+Debian	scripts / regex (already started)	Bash	17	11.860	12.332
+Debian	scripts / regex (already started)	Previous	17	1.830	1.969
+Debian	scripts / case-edges (already started)	Tonari	17	4.651	4.878
+Debian	scripts / case-edges (already started)	Bash	17	9.579	10.238
+Debian	scripts / case-edges (already started)	Previous	17	3.602	3.812
+Debian	scripts / nocasematch (already started)	Tonari	17	5.202	5.431
+Debian	scripts / nocasematch (already started)	Bash	17	9.503	10.298
+Debian	scripts / nocasematch (already started)	Previous	17	4.220	5.321
+Debian	scripts / case-classes (already started)	Tonari	17	5.045	5.205
+Debian	scripts / case-classes (already started)	Bash	17	9.258	9.414
+Debian	scripts / case-classes (already started)	Previous	17	4.045	4.228
+Debian	scripts / glob (already started)	Tonari	17	3.976	4.101
+Debian	scripts / glob (already started)	Bash	17	9.037	9.234
+Debian	scripts / glob (already started)	Previous	17	4.380	4.575
+Debian	scripts / glob-sparse (already started)	Tonari	17	2.176	2.325
+Debian	scripts / glob-sparse (already started)	Bash	17	2.898	3.016
+Debian	scripts / glob-sparse (already started)	Previous	17	2.209	2.317
+Debian	scripts / glob-all (already started)	Tonari	17	4.167	4.558
+Debian	scripts / glob-all (already started)	Bash	17	8.711	9.157
+Debian	scripts / glob-all (already started)	Previous	17	4.448	5.050
+Debian	scripts / glob-multi-star (already started)	Tonari	17	2.341	2.482
+Debian	scripts / glob-multi-star (already started)	Bash	17	3.538	3.832
+Debian	scripts / glob-multi-star (already started)	Previous	17	2.328	2.655
+Debian	scripts / glob-subdirs (already started)	Tonari	17	2.986	5.355
+Debian	scripts / glob-subdirs (already started)	Bash	17	12.429	16.728
+Debian	scripts / glob-subdirs (already started)	Previous	17	2.896	6.658
+Debian	scripts / glob-utf8-sort (already started)	Tonari	17	4.265	5.110
+Debian	scripts / glob-utf8-sort (already started)	Bash	17	12.775	13.703
+Debian	scripts / glob-utf8-sort (already started)	Previous	17	4.626	5.161
+Debian	scripts / glob-utf8-once (already started)	Tonari	17	0.470	0.641
+Debian	scripts / glob-utf8-once (already started)	Bash	17	0.687	1.124
+Debian	scripts / glob-utf8-once (already started)	Previous	17	0.481	0.747
+Debian	scripts / glob-utf8-large-repeat (already started)	Tonari	17	10.149	10.741
+Debian	scripts / glob-utf8-large-repeat (already started)	Bash	17	30.872	32.830
+Debian	scripts / glob-utf8-large-repeat (already started)	Previous	17	13.072	13.883
+Debian	scripts / glob-utf8-large (already started)	Tonari	17	1.882	2.109
+Debian	scripts / glob-utf8-large (already started)	Bash	17	4.031	4.247
+Debian	scripts / glob-utf8-large (already started)	Previous	17	1.844	2.016
+Debian	scripts / glob-recursive (already started)	Tonari	17	7.462	7.624
+Debian	scripts / glob-recursive (already started)	Bash	17	30.012	31.266
+Debian	scripts / glob-recursive (already started)	Previous	17	7.771	8.561
+Debian	scripts / read-lines (already started)	Tonari	17	6.878	7.074
+Debian	scripts / read-lines (already started)	Bash	17	11.021	11.585
+Debian	scripts / read-lines (already started)	Previous	17	7.036	9.112
+Debian	scripts / substitutions (already started)	Tonari	17	0.275	0.850
+Debian	scripts / substitutions (already started)	Bash	17	17.307	27.493
+Debian	scripts / substitutions (already started)	Previous	17	0.287	0.539
+Debian	scripts / echo-substitutions (already started)	Tonari	17	0.280	1.143
+Debian	scripts / echo-substitutions (already started)	Bash	17	15.108	18.609
+Debian	scripts / echo-substitutions (already started)	Previous	17	0.276	0.308
+Debian	scripts / mapfile-lines (already started)	Tonari	17	1.763	1.862
+Debian	scripts / mapfile-lines (already started)	Bash	17	4.364	4.524
+Debian	scripts / mapfile-lines (already started)	Previous	17	1.834	2.005
+Debian	scripts / case-fallthrough (already started)	Tonari	17	2.352	2.712
+Debian	scripts / case-fallthrough (already started)	Bash	17	3.695	4.372
+Debian	scripts / case-fallthrough (already started)	Previous	17	1.867	2.100
+Debian	scripts / extended-patterns (already started)	Tonari	17	0.899	0.938
+Debian	scripts / extended-patterns (already started)	Bash	17	1.708	1.778
+Debian	scripts / extended-patterns (already started)	Previous	17	0.773	0.796
+Debian	scripts / resource-limits (already started)	Tonari	17	1.225	1.291
+Debian	scripts / resource-limits (already started)	Bash	17	2.236	2.804
+Debian	scripts / resource-limits (already started)	Previous	17	1.161	1.260
+Debian	scripts / directory-stack (already started)	Tonari	17	1.351	1.444
+Debian	scripts / directory-stack (already started)	Bash	17	2.312	2.448
+Debian	scripts / directory-stack (already started)	Previous	17	1.290	1.363
+Debian	scripts / descriptor-moves (already started)	Tonari	17	0.761	0.804
+Debian	scripts / descriptor-moves (already started)	Bash	17	1.212	1.320
+Debian	scripts / descriptor-moves (already started)	Previous	17	0.708	0.763
+Debian	scripts / associative-lookup (already started)	Tonari	17	2.365	2.493
+Debian	scripts / associative-lookup (already started)	Bash	17	4.738	4.970
+Debian	scripts / associative-lookup (already started)	Previous	17	1.806	1.894
+Debian	scripts / readonly-locals (already started)	Tonari	17	2.886	3.179
+Debian	scripts / readonly-locals (already started)	Bash	17	6.590	7.203
+Debian	scripts / readonly-locals (already started)	Previous	17	2.746	3.209
+Debian	scripts / error-trap (already started)	Tonari	17	0.956	1.043
+Debian	scripts / error-trap (already started)	Bash	17	3.280	3.395
+Debian	scripts / error-trap (already started)	Previous	17	0.788	1.040
+Debian	scripts / case-conversion (already started)	Tonari	17	2.507	2.619
+Debian	scripts / case-conversion (already started)	Bash	17	5.914	6.329
+Debian	scripts / case-conversion (already started)	Previous	17	2.128	2.290
+Debian	scripts / integer-assignments (already started)	Tonari	17	2.052	2.206
+Debian	scripts / integer-assignments (already started)	Bash	17	4.430	4.657
+Debian	scripts / integer-assignments (already started)	Previous	17	1.615	1.760
+Debian	scripts / brace-range (already started)	Tonari	17	1.644	1.901
+Debian	scripts / brace-range (already started)	Bash	17	6.765	7.077
+Debian	scripts / brace-range (already started)	Previous	17	1.587	1.743
+Debian	scripts / getopts-clusters (already started)	Tonari	17	1.149	1.551
+Debian	scripts / getopts-clusters (already started)	Bash	17	1.943	2.111
+Debian	scripts / getopts-clusters (already started)	Previous	17	1.244	1.557
+Debian	scripts / compound-substitutions (already started)	Tonari	17	0.195	0.274
+Debian	scripts / compound-substitutions (already started)	Bash	17	3.849	4.531
+Debian	scripts / compound-substitutions (already started)	Previous	17	0.244	0.356
+Debian	scripts / external-substitutions (already started)	Tonari	17	3.873	5.476
+Debian	scripts / external-substitutions (already started)	Bash	17	5.804	7.923
+Debian	scripts / external-substitutions (already started)	Previous	17	3.733	5.216
+Debian	scripts / parenthesized-pipeline (already started)	Tonari	17	7.771	10.509
+Debian	scripts / parenthesized-pipeline (already started)	Bash	17	9.339	10.871
+Debian	scripts / parenthesized-pipeline (already started)	Previous	17	10.282	16.034
+Debian	scripts / pipeline (already started)	Tonari	17	7.674	10.358
+Debian	scripts / pipeline (already started)	Bash	17	10.129	12.841
+Debian	scripts / pipeline (already started)	Previous	17	7.935	9.202
+Debian	scripts / merged-pipeline (already started)	Tonari	17	9.490	11.093
+Debian	scripts / merged-pipeline (already started)	Bash	17	12.200	15.255
+Debian	scripts / merged-pipeline (already started)	Previous	17	8.814	21.220
+Debian	scripts / redirect-stderr (already started)	Tonari	17	6.704	10.208
+Debian	scripts / redirect-stderr (already started)	Bash	17	8.492	10.602
+Debian	scripts / redirect-stderr (already started)	Previous	17	6.556	12.354
+Debian	scripts / merged-pipeline-redirect (already started)	Tonari	17	11.504	25.820
+Debian	scripts / merged-pipeline-redirect (already started)	Bash	17	13.464	18.133
+Debian	scripts / merged-pipeline-redirect (already started)	Previous	17	9.724	16.173
+Debian	scripts / builtin-merged-pipeline (already started)	Tonari	17	4.782	6.616
+Debian	scripts / builtin-merged-pipeline (already started)	Bash	17	6.381	8.900
+Debian	scripts / builtin-merged-pipeline (already started)	Previous	17	4.564	6.028
+Debian	scripts / builtin-output (already started)	Tonari	17	0.184	0.214
+Debian	scripts / builtin-output (already started)	Bash	17	0.234	0.274
+Debian	scripts / builtin-output (already started)	Previous	17	0.182	0.250
+Debian	scripts / field-split (already started)	Tonari	17	3.482	3.639
+Debian	scripts / field-split (already started)	Bash	17	18.687	19.493
+Debian	scripts / field-split (already started)	Previous	17	4.316	4.696
+Debian	scripts / field-split-unicode (already started)	Tonari	17	3.616	3.756
+Debian	scripts / field-split-unicode (already started)	Bash	17	23.544	23.920
+Debian	scripts / field-split-unicode (already started)	Previous	17	4.604	4.767
+Debian	scripts / long-trim (already started)	Tonari	17	2.000	2.143
+Debian	scripts / long-trim (already started)	Bash	17	873.216	894.748
+Debian	scripts / long-trim (already started)	Previous	17	1.633	1.870
+Debian	scripts / external-env (already started)	Tonari	17	5.046	7.394
+Debian	scripts / external-env (already started)	Bash	17	6.654	11.483
+Debian	scripts / external-env (already started)	Previous	17	4.706	8.842
+Debian	scripts / external (already started)	Tonari	17	3.488	6.522
+Debian	scripts / external (already started)	Bash	17	4.785	11.170
+Debian	scripts / external (already started)	Previous	17	3.914	6.405
+Debian	scripts / external (already started)	Direct C	17	3.500	6.753
+Debian	redirect / 0 bytes	Previous	15	0.713	NA
+Debian	redirect / 0 bytes	Tonari	15	0.871	NA
+Debian	redirect / 0 bytes	Bash	15	1.096	NA
+Debian	pipe / 0 bytes	Previous	15	1.087	NA
+Debian	pipe / 0 bytes	Tonari	15	1.237	NA
+Debian	pipe / 0 bytes	Bash	15	1.395	NA
+Debian	capture / 0 bytes	Previous	15	0.618	NA
+Debian	capture / 0 bytes	Tonari	15	0.547	NA
+Debian	capture / 0 bytes	Bash	15	0.665	NA
+Debian	external capture / 0 bytes	Previous	15	0.730	NA
+Debian	external capture / 0 bytes	Tonari	15	0.877	NA
+Debian	external capture / 0 bytes	Bash	15	1.104	NA
+Debian	quoted heredoc / 0 bytes	Previous	15	0.748	NA
+Debian	quoted heredoc / 0 bytes	Tonari	15	0.832	NA
+Debian	quoted heredoc / 0 bytes	Bash	15	1.018	NA
+Debian	redirect / 1 bytes	Previous	15	0.744	NA
+Debian	redirect / 1 bytes	Tonari	15	0.827	NA
+Debian	redirect / 1 bytes	Bash	15	1.030	NA
+Debian	pipe / 1 bytes	Previous	15	1.117	NA
+Debian	pipe / 1 bytes	Tonari	15	1.208	NA
+Debian	pipe / 1 bytes	Bash	15	1.406	NA
+Debian	capture / 1 bytes	Previous	15	0.639	NA
+Debian	capture / 1 bytes	Tonari	15	0.551	NA
+Debian	capture / 1 bytes	Bash	15	0.692	NA
+Debian	external capture / 1 bytes	Previous	15	0.762	NA
+Debian	external capture / 1 bytes	Tonari	15	0.902	NA
+Debian	external capture / 1 bytes	Bash	15	1.185	NA
+Debian	quoted heredoc / 1 bytes	Previous	15	0.726	NA
+Debian	quoted heredoc / 1 bytes	Tonari	15	0.859	NA
+Debian	quoted heredoc / 1 bytes	Bash	15	1.050	NA
+Debian	redirect / 4096 bytes	Previous	15	0.752	NA
+Debian	redirect / 4096 bytes	Tonari	15	0.816	NA
+Debian	redirect / 4096 bytes	Bash	15	0.977	NA
+Debian	pipe / 4096 bytes	Previous	15	1.062	NA
+Debian	pipe / 4096 bytes	Tonari	15	1.219	NA
+Debian	pipe / 4096 bytes	Bash	15	1.448	NA
+Debian	capture / 4096 bytes	Previous	15	0.599	NA
+Debian	capture / 4096 bytes	Tonari	15	0.608	NA
+Debian	capture / 4096 bytes	Bash	15	0.740	NA
+Debian	external capture / 4096 bytes	Previous	15	0.749	NA
+Debian	external capture / 4096 bytes	Tonari	15	0.873	NA
+Debian	external capture / 4096 bytes	Bash	15	1.260	NA
+Debian	quoted heredoc / 4096 bytes	Previous	15	0.803	NA
+Debian	quoted heredoc / 4096 bytes	Tonari	15	0.888	NA
+Debian	quoted heredoc / 4096 bytes	Bash	15	1.088	NA
+Debian	redirect / 262144 bytes	Previous	15	0.808	NA
+Debian	redirect / 262144 bytes	Tonari	15	0.966	NA
+Debian	redirect / 262144 bytes	Bash	15	1.146	NA
+Debian	pipe / 262144 bytes	Previous	15	1.417	NA
+Debian	pipe / 262144 bytes	Tonari	15	1.487	NA
+Debian	pipe / 262144 bytes	Bash	15	1.838	NA
+Debian	capture / 262144 bytes	Previous	15	1.457	NA
+Debian	capture / 262144 bytes	Tonari	15	1.337	NA
+Debian	capture / 262144 bytes	Bash	15	5.705	NA
+Debian	external capture / 262144 bytes	Previous	15	1.782	NA
+Debian	external capture / 262144 bytes	Tonari	15	1.945	NA
+Debian	external capture / 262144 bytes	Bash	15	6.371	NA
+Debian	quoted heredoc / 262144 bytes	Previous	15	1.541	NA
+Debian	quoted heredoc / 262144 bytes	Tonari	15	1.896	NA
+Debian	quoted heredoc / 262144 bytes	Bash	15	3.952	NA
+Debian	redirect / 4194304 bytes	Previous	15	2.680	NA
+Debian	redirect / 4194304 bytes	Tonari	15	2.869	NA
+Debian	redirect / 4194304 bytes	Bash	15	3.037	NA
+Debian	pipe / 4194304 bytes	Previous	15	5.101	NA
+Debian	pipe / 4194304 bytes	Tonari	15	5.279	NA
+Debian	pipe / 4194304 bytes	Bash	15	5.584	NA
+Debian	capture / 4194304 bytes	Previous	15	8.825	NA
+Debian	capture / 4194304 bytes	Tonari	15	9.599	NA
+Debian	capture / 4194304 bytes	Bash	15	71.233	NA
+Debian	external capture / 4194304 bytes	Previous	15	10.505	NA
+Debian	external capture / 4194304 bytes	Tonari	15	12.382	NA
+Debian	external capture / 4194304 bytes	Bash	15	73.791	NA
+Debian	quoted heredoc / 4194304 bytes	Previous	15	10.846	NA
+Debian	quoted heredoc / 4194304 bytes	Tonari	15	13.228	NA
+Debian	quoted heredoc / 4194304 bytes	Bash	15	38.284	NA
+Debian	read -N / 4096 bytes	Previous	7	2.051	NA
+Debian	read -N / 4096 bytes	Tonari	7	1.228	NA
+Debian	read -N / 4096 bytes	Bash	7	1.568	NA
+Debian	read -N / 262144 bytes	Previous	7	145.749	NA
+Debian	read -N / 262144 bytes	Tonari	7	3.078	NA
+Debian	read -N / 262144 bytes	Bash	7	8.048	NA
+Debian	read -N / 4194304 bytes	Previous	7	2667.329	NA
+Debian	read -N / 4194304 bytes	Tonari	7	28.003	NA
+Debian	read -N / 4194304 bytes	Bash	7	95.637	NA
+Debian	onecpu / 1M / Tab / first key	Tonari	11	2.901	3.925
+Debian	onecpu / 1M / Tab / next key	Tonari	11	0.183	1.429
+Debian	onecpu / 1M / Tab / both	Tonari	11	3.038	4.054
+Debian	onecpu / 1M / Enter / first key	Tonari	11	3.309	4.247
+Debian	onecpu / 1M / Enter / next key	Tonari	11	0.255	0.458
+Debian	onecpu / 1M / Enter / both	Tonari	11	3.506	4.471
+Debian	onecpu / 1M / Hint	Tonari	11	0.268	0.807
+Debian	onecpu / 1M / Cancel search	Tonari	11	0.189	0.764
+Debian	onecpu / 1M / Burst	Tonari	11	3.672	4.128
+Debian	onecpu / 1M / Paste	Tonari	11	4.537	6.351
+Debian	onecpu / 1M / Old hint	Tonari	11	13.459	16.855
+Debian	onecpu / 1M / Recent search	Tonari	11	0.341	0.970
+Debian	onecpu / 1M / Old search	Tonari	11	10.906	11.925
+Debian	onecpu / glob-utf8-large (already started)	Tonari	15	1.906	3.864
+Debian	onecpu / glob-utf8-large (already started)	Bash	15	4.500	6.863
+Debian	onecpu / functions (already started)	Tonari	15	15.519	37.294
+Debian	onecpu / functions (already started)	Bash	15	34.276	56.563
+Debian	onecpu / pipeline (already started)	Tonari	15	8.934	20.492
+Debian	onecpu / pipeline (already started)	Bash	15	12.678	20.057
+Ubuntu	history / 1M / Tab / first key	Previous	15	0.139	0.332
+Ubuntu	history / 1M / Tab / next key	Previous	15	0.209	2.043
+Ubuntu	history / 1M / Tab / both	Previous	15	0.334	2.327
+Ubuntu	history / 1M / Tab / first key	Tonari	15	0.182	3.800
+Ubuntu	history / 1M / Tab / next key	Tonari	15	0.197	0.519
+Ubuntu	history / 1M / Tab / both	Tonari	15	0.425	3.928
+Ubuntu	history / 1M / Enter / first key	Previous	15	0.152	1.338
+Ubuntu	history / 1M / Enter / next key	Previous	15	0.175	0.428
+Ubuntu	history / 1M / Enter / both	Previous	15	0.331	1.611
+Ubuntu	history / 1M / Enter / first key	Tonari	15	0.141	3.365
+Ubuntu	history / 1M / Enter / next key	Tonari	15	0.276	1.786
+Ubuntu	history / 1M / Enter / both	Tonari	15	0.389	3.696
+Ubuntu	history / 1M / Hint	Previous	15	89.093	107.411
+Ubuntu	history / 1M / Hint	Tonari	15	0.220	1.944
+Ubuntu	history / 1M / Cancel search	Previous	15	85.194	96.838
+Ubuntu	history / 1M / Cancel search	Tonari	15	0.186	0.560
+Ubuntu	history / 1M / Burst	Previous	15	6.113	7.433
+Ubuntu	history / 1M / Burst	Tonari	15	0.387	3.579
+Ubuntu	history / 1M / Paste	Previous	15	29.883	33.330
+Ubuntu	history / 1M / Paste	Tonari	15	2.716	6.535
+Ubuntu	history / 1M / Old hint	Previous	15	95.297	153.327
+Ubuntu	history / 1M / Old hint	Tonari	15	10.311	18.672
+Ubuntu	history / 1M / Recent search	Previous	15	87.224	98.050
+Ubuntu	history / 1M / Recent search	Tonari	15	0.427	1.417
+Ubuntu	history / 1M / Old search	Previous	15	264.051	434.679
+Ubuntu	history / 1M / Old search	Tonari	15	9.433	19.459
+Ubuntu	completion / recent hint	Previous	221	0.121	0.240
+Ubuntu	completion / no hint	Previous	187	0.123	0.511
+Ubuntu	completion / oldest hint: typed key	Previous	17	0.132	0.369
+Ubuntu	completion / oldest hint: visible suggestion	Previous	17	0.430	1.278
+Ubuntu	completion / files	Previous	17	2.434	5.386
+Ubuntu	completion / complete -f	Previous	17	2.529	5.540
+Ubuntu	completion / PATH	Previous	17	2.490	5.456
+Ubuntu	completion / recent hint	Tonari	221	0.117	0.263
+Ubuntu	completion / no hint	Tonari	187	0.121	0.528
+Ubuntu	completion / oldest hint: typed key	Tonari	17	0.130	0.276
+Ubuntu	completion / oldest hint: visible suggestion	Tonari	17	1.298	2.333
+Ubuntu	completion / files	Tonari	17	1.733	3.934
+Ubuntu	completion / complete -f	Tonari	17	1.823	4.652
+Ubuntu	completion / PATH	Tonari	17	1.918	3.877
+Ubuntu	completion / files	Bash	17	5.298	10.462
+Ubuntu	completion / complete -f	Bash	17	6.603	9.839
+Ubuntu	completion / PATH	Bash	17	79.279	83.888
+Ubuntu	login / plain	Bash	101	0.409	0.430
+Ubuntu	login / plain	Previous	101	0.225	0.241
+Ubuntu	login / plain	Tonari	101	0.319	0.336
+Ubuntu	login / login	Bash	101	1.254	1.358
+Ubuntu	login / login	Previous	101	0.985	1.079
+Ubuntu	login / login	Tonari	101	0.964	1.055
+Ubuntu	login / interactive login	Bash	101	2.805	2.927
+Ubuntu	login / interactive login	Previous	101	2.328	2.444
+Ubuntu	login / interactive login	Tonari	101	2.188	2.307
+Ubuntu	login / spawn series	Bash	101	4.459	4.582
+Ubuntu	login / spawn series	Previous	101	3.152	3.299
+Ubuntu	login / spawn series	Tonari	101	3.528	3.729
+Ubuntu	libc / plain	Bash	71	0.460	0.895
+Ubuntu	libc / plain	Tonari musl	71	0.246	0.505
+Ubuntu	libc / plain	Tonari	71	0.363	0.594
+Ubuntu	libc / login	Bash	71	1.281	1.768
+Ubuntu	libc / login	Tonari musl	71	1.010	1.256
+Ubuntu	libc / login	Tonari	71	0.992	1.173
+Ubuntu	libc / interactive login	Bash	71	2.797	2.963
+Ubuntu	libc / interactive login	Tonari musl	71	2.315	2.434
+Ubuntu	libc / interactive login	Tonari	71	2.195	2.300
+Ubuntu	libc / spawn series	Bash	71	4.449	4.573
+Ubuntu	libc / spawn series	Tonari musl	71	3.144	3.332
+Ubuntu	libc / spawn series	Tonari	71	3.531	3.615
+Ubuntu	prompt / first prompt	Tonari	81	0.778	0.824
+Ubuntu	prompt / first prompt	Bash	81	0.969	1.015
+Ubuntu	prompt / exec to first prompt (same samples)	Tonari	81	0.403	0.424
+Ubuntu	prompt / exec to first prompt (same samples)	Bash	81	0.596	0.622
+Ubuntu	scripts / arithmetic (already started)	Tonari	17	7.392	7.850
+Ubuntu	scripts / arithmetic (already started)	Bash	17	22.103	23.138
+Ubuntu	scripts / arithmetic (already started)	Previous	17	6.365	7.746
+Ubuntu	scripts / functions (already started)	Tonari	17	10.177	12.735
+Ubuntu	scripts / functions (already started)	Bash	17	23.490	23.824
+Ubuntu	scripts / functions (already started)	Previous	17	9.333	10.104
+Ubuntu	scripts / strings (already started)	Tonari	17	5.852	6.024
+Ubuntu	scripts / strings (already started)	Bash	17	12.828	13.219
+Ubuntu	scripts / strings (already started)	Previous	17	4.757	4.870
+Ubuntu	scripts / regex (already started)	Tonari	17	2.497	2.649
+Ubuntu	scripts / regex (already started)	Bash	17	13.394	13.766
+Ubuntu	scripts / regex (already started)	Previous	17	2.051	2.211
+Ubuntu	scripts / case-edges (already started)	Tonari	17	4.823	4.964
+Ubuntu	scripts / case-edges (already started)	Bash	17	8.497	8.692
+Ubuntu	scripts / case-edges (already started)	Previous	17	3.857	4.018
+Ubuntu	scripts / nocasematch (already started)	Tonari	17	5.057	5.217
+Ubuntu	scripts / nocasematch (already started)	Bash	17	8.184	9.395
+Ubuntu	scripts / nocasematch (already started)	Previous	17	4.237	4.427
+Ubuntu	scripts / case-classes (already started)	Tonari	17	4.995	6.027
+Ubuntu	scripts / case-classes (already started)	Bash	17	8.034	9.008
+Ubuntu	scripts / case-classes (already started)	Previous	17	4.218	4.467
+Ubuntu	scripts / glob (already started)	Tonari	17	4.334	4.987
+Ubuntu	scripts / glob (already started)	Bash	17	9.613	11.176
+Ubuntu	scripts / glob (already started)	Previous	17	4.624	5.028
+Ubuntu	scripts / glob-sparse (already started)	Tonari	17	2.391	4.075
+Ubuntu	scripts / glob-sparse (already started)	Bash	17	3.135	3.332
+Ubuntu	scripts / glob-sparse (already started)	Previous	17	2.478	2.891
+Ubuntu	scripts / glob-all (already started)	Tonari	17	4.455	4.936
+Ubuntu	scripts / glob-all (already started)	Bash	17	9.107	10.748
+Ubuntu	scripts / glob-all (already started)	Previous	17	4.649	6.981
+Ubuntu	scripts / glob-multi-star (already started)	Tonari	17	2.587	3.052
+Ubuntu	scripts / glob-multi-star (already started)	Bash	17	3.613	4.402
+Ubuntu	scripts / glob-multi-star (already started)	Previous	17	2.472	2.732
+Ubuntu	scripts / glob-subdirs (already started)	Tonari	17	2.996	3.260
+Ubuntu	scripts / glob-subdirs (already started)	Bash	17	12.439	14.161
+Ubuntu	scripts / glob-subdirs (already started)	Previous	17	2.947	3.257
+Ubuntu	scripts / glob-utf8-sort (already started)	Tonari	17	4.607	5.244
+Ubuntu	scripts / glob-utf8-sort (already started)	Bash	17	12.824	14.324
+Ubuntu	scripts / glob-utf8-sort (already started)	Previous	17	4.846	5.813
+Ubuntu	scripts / glob-utf8-once (already started)	Tonari	17	0.574	1.171
+Ubuntu	scripts / glob-utf8-once (already started)	Bash	17	0.796	1.615
+Ubuntu	scripts / glob-utf8-once (already started)	Previous	17	0.560	0.932
+Ubuntu	scripts / glob-utf8-large-repeat (already started)	Tonari	17	10.158	11.241
+Ubuntu	scripts / glob-utf8-large-repeat (already started)	Bash	17	31.233	32.911
+Ubuntu	scripts / glob-utf8-large-repeat (already started)	Previous	17	13.487	15.696
+Ubuntu	scripts / glob-utf8-large (already started)	Tonari	17	2.139	3.369
+Ubuntu	scripts / glob-utf8-large (already started)	Bash	17	4.181	4.649
+Ubuntu	scripts / glob-utf8-large (already started)	Previous	17	2.056	2.210
+Ubuntu	scripts / glob-recursive (already started)	Tonari	17	7.639	8.538
+Ubuntu	scripts / glob-recursive (already started)	Bash	17	33.583	36.970
+Ubuntu	scripts / glob-recursive (already started)	Previous	17	8.195	11.567
+Ubuntu	scripts / read-lines (already started)	Tonari	17	6.629	6.848
+Ubuntu	scripts / read-lines (already started)	Bash	17	10.839	11.483
+Ubuntu	scripts / read-lines (already started)	Previous	17	6.930	7.433
+Ubuntu	scripts / substitutions (already started)	Tonari	17	0.351	0.699
+Ubuntu	scripts / substitutions (already started)	Bash	17	20.598	22.600
+Ubuntu	scripts / substitutions (already started)	Previous	17	0.380	0.742
+Ubuntu	scripts / echo-substitutions (already started)	Tonari	17	0.354	0.718
+Ubuntu	scripts / echo-substitutions (already started)	Bash	17	18.900	22.811
+Ubuntu	scripts / echo-substitutions (already started)	Previous	17	0.374	0.593
+Ubuntu	scripts / mapfile-lines (already started)	Tonari	17	2.091	2.605
+Ubuntu	scripts / mapfile-lines (already started)	Bash	17	5.724	6.752
+Ubuntu	scripts / mapfile-lines (already started)	Previous	17	2.186	2.686
+Ubuntu	scripts / case-fallthrough (already started)	Tonari	17	2.654	3.880
+Ubuntu	scripts / case-fallthrough (already started)	Bash	17	3.503	3.998
+Ubuntu	scripts / case-fallthrough (already started)	Previous	17	2.131	2.531
+Ubuntu	scripts / extended-patterns (already started)	Tonari	17	1.202	2.106
+Ubuntu	scripts / extended-patterns (already started)	Bash	17	1.901	2.759
+Ubuntu	scripts / extended-patterns (already started)	Previous	17	1.073	1.543
+Ubuntu	scripts / resource-limits (already started)	Tonari	17	1.448	2.563
+Ubuntu	scripts / resource-limits (already started)	Bash	17	2.361	2.810
+Ubuntu	scripts / resource-limits (already started)	Previous	17	1.545	2.509
+Ubuntu	scripts / directory-stack (already started)	Tonari	17	1.555	2.249
+Ubuntu	scripts / directory-stack (already started)	Bash	17	2.599	3.487
+Ubuntu	scripts / directory-stack (already started)	Previous	17	1.514	2.207
+Ubuntu	scripts / descriptor-moves (already started)	Tonari	17	0.936	1.160
+Ubuntu	scripts / descriptor-moves (already started)	Bash	17	1.289	1.446
+Ubuntu	scripts / descriptor-moves (already started)	Previous	17	0.832	0.997
+Ubuntu	scripts / associative-lookup (already started)	Tonari	17	2.568	2.812
+Ubuntu	scripts / associative-lookup (already started)	Bash	17	4.460	4.751
+Ubuntu	scripts / associative-lookup (already started)	Previous	17	2.056	2.156
+Ubuntu	scripts / readonly-locals (already started)	Tonari	17	3.049	5.284
+Ubuntu	scripts / readonly-locals (already started)	Bash	17	6.410	6.994
+Ubuntu	scripts / readonly-locals (already started)	Previous	17	3.026	4.212
+Ubuntu	scripts / error-trap (already started)	Tonari	17	1.131	2.402
+Ubuntu	scripts / error-trap (already started)	Bash	17	3.491	6.647
+Ubuntu	scripts / error-trap (already started)	Previous	17	1.005	2.911
+Ubuntu	scripts / case-conversion (already started)	Tonari	17	2.704	3.771
+Ubuntu	scripts / case-conversion (already started)	Bash	17	5.933	6.755
+Ubuntu	scripts / case-conversion (already started)	Previous	17	2.420	4.077
+Ubuntu	scripts / integer-assignments (already started)	Tonari	17	2.304	2.672
+Ubuntu	scripts / integer-assignments (already started)	Bash	17	4.320	6.675
+Ubuntu	scripts / integer-assignments (already started)	Previous	17	1.859	2.464
+Ubuntu	scripts / brace-range (already started)	Tonari	17	1.807	3.689
+Ubuntu	scripts / brace-range (already started)	Bash	17	7.446	8.771
+Ubuntu	scripts / brace-range (already started)	Previous	17	1.712	2.036
+Ubuntu	scripts / getopts-clusters (already started)	Tonari	17	1.182	1.452
+Ubuntu	scripts / getopts-clusters (already started)	Bash	17	1.765	3.695
+Ubuntu	scripts / getopts-clusters (already started)	Previous	17	1.407	2.864
+Ubuntu	scripts / compound-substitutions (already started)	Tonari	17	0.311	0.614
+Ubuntu	scripts / compound-substitutions (already started)	Bash	17	6.764	7.210
+Ubuntu	scripts / compound-substitutions (already started)	Previous	17	0.348	0.762
+Ubuntu	scripts / external-substitutions (already started)	Tonari	17	24.624	32.613
+Ubuntu	scripts / external-substitutions (already started)	Bash	17	27.532	34.215
+Ubuntu	scripts / external-substitutions (already started)	Previous	17	24.254	30.391
+Ubuntu	scripts / parenthesized-pipeline (already started)	Tonari	17	13.559	15.824
+Ubuntu	scripts / parenthesized-pipeline (already started)	Bash	17	17.961	19.548
+Ubuntu	scripts / parenthesized-pipeline (already started)	Previous	17	18.776	22.905
+Ubuntu	scripts / pipeline (already started)	Tonari	17	29.136	38.452
+Ubuntu	scripts / pipeline (already started)	Bash	17	35.097	41.365
+Ubuntu	scripts / pipeline (already started)	Previous	17	30.276	38.408
+Ubuntu	scripts / merged-pipeline (already started)	Tonari	17	28.743	33.671
+Ubuntu	scripts / merged-pipeline (already started)	Bash	17	33.360	38.054
+Ubuntu	scripts / merged-pipeline (already started)	Previous	17	27.808	30.877
+Ubuntu	scripts / redirect-stderr (already started)	Tonari	17	20.427	31.893
+Ubuntu	scripts / redirect-stderr (already started)	Bash	17	22.405	23.358
+Ubuntu	scripts / redirect-stderr (already started)	Previous	17	20.720	50.564
+Ubuntu	scripts / merged-pipeline-redirect (already started)	Tonari	17	27.963	53.506
+Ubuntu	scripts / merged-pipeline-redirect (already started)	Bash	17	33.407	44.378
+Ubuntu	scripts / merged-pipeline-redirect (already started)	Previous	17	28.073	32.320
+Ubuntu	scripts / builtin-merged-pipeline (already started)	Tonari	17	26.100	30.629
+Ubuntu	scripts / builtin-merged-pipeline (already started)	Bash	17	28.307	33.181
+Ubuntu	scripts / builtin-merged-pipeline (already started)	Previous	17	24.339	29.314
+Ubuntu	scripts / builtin-output (already started)	Tonari	17	0.412	1.293
+Ubuntu	scripts / builtin-output (already started)	Bash	17	0.567	1.236
+Ubuntu	scripts / builtin-output (already started)	Previous	17	0.416	0.855
+Ubuntu	scripts / field-split (already started)	Tonari	17	3.922	7.034
+Ubuntu	scripts / field-split (already started)	Bash	17	23.331	28.114
+Ubuntu	scripts / field-split (already started)	Previous	17	5.178	7.733
+Ubuntu	scripts / field-split-unicode (already started)	Tonari	17	3.957	8.198
+Ubuntu	scripts / field-split-unicode (already started)	Bash	17	25.550	28.582
+Ubuntu	scripts / field-split-unicode (already started)	Previous	17	5.009	12.350
+Ubuntu	scripts / long-trim (already started)	Tonari	17	2.104	2.770
+Ubuntu	scripts / long-trim (already started)	Bash	17	746.502	769.425
+Ubuntu	scripts / long-trim (already started)	Previous	17	1.735	2.248
+Ubuntu	scripts / external-env (already started)	Tonari	17	18.003	20.434
+Ubuntu	scripts / external-env (already started)	Bash	17	19.676	21.051
+Ubuntu	scripts / external-env (already started)	Previous	17	17.798	18.526
+Ubuntu	scripts / external (already started)	Tonari	17	4.254	4.699
+Ubuntu	scripts / external (already started)	Bash	17	5.264	5.846
+Ubuntu	scripts / external (already started)	Previous	17	3.974	4.317
+Ubuntu	scripts / external (already started)	Direct C	17	4.069	5.264
+Ubuntu	redirect / 0 bytes	Previous	15	2.629	NA
+Ubuntu	redirect / 0 bytes	Tonari	15	2.683	NA
+Ubuntu	redirect / 0 bytes	Bash	15	2.897	NA
+Ubuntu	pipe / 0 bytes	Previous	15	3.760	NA
+Ubuntu	pipe / 0 bytes	Tonari	15	4.416	NA
+Ubuntu	pipe / 0 bytes	Bash	15	4.227	NA
+Ubuntu	capture / 0 bytes	Previous	15	1.054	NA
+Ubuntu	capture / 0 bytes	Tonari	15	1.004	NA
+Ubuntu	capture / 0 bytes	Bash	15	1.232	NA
+Ubuntu	external capture / 0 bytes	Previous	15	2.392	NA
+Ubuntu	external capture / 0 bytes	Tonari	15	2.557	NA
+Ubuntu	external capture / 0 bytes	Bash	15	3.024	NA
+Ubuntu	quoted heredoc / 0 bytes	Previous	15	2.127	NA
+Ubuntu	quoted heredoc / 0 bytes	Tonari	15	2.248	NA
+Ubuntu	quoted heredoc / 0 bytes	Bash	15	2.746	NA
+Ubuntu	redirect / 1 bytes	Previous	15	1.780	NA
+Ubuntu	redirect / 1 bytes	Tonari	15	1.899	NA
+Ubuntu	redirect / 1 bytes	Bash	15	2.217	NA
+Ubuntu	pipe / 1 bytes	Previous	15	2.704	NA
+Ubuntu	pipe / 1 bytes	Tonari	15	2.913	NA
+Ubuntu	pipe / 1 bytes	Bash	15	3.144	NA
+Ubuntu	capture / 1 bytes	Previous	15	0.687	NA
+Ubuntu	capture / 1 bytes	Tonari	15	0.623	NA
+Ubuntu	capture / 1 bytes	Bash	15	0.869	NA
+Ubuntu	external capture / 1 bytes	Previous	15	2.060	NA
+Ubuntu	external capture / 1 bytes	Tonari	15	2.293	NA
+Ubuntu	external capture / 1 bytes	Bash	15	2.829	NA
+Ubuntu	quoted heredoc / 1 bytes	Previous	15	1.942	NA
+Ubuntu	quoted heredoc / 1 bytes	Tonari	15	2.019	NA
+Ubuntu	quoted heredoc / 1 bytes	Bash	15	2.215	NA
+Ubuntu	redirect / 4096 bytes	Previous	15	2.018	NA
+Ubuntu	redirect / 4096 bytes	Tonari	15	2.172	NA
+Ubuntu	redirect / 4096 bytes	Bash	15	2.460	NA
+Ubuntu	pipe / 4096 bytes	Previous	15	2.783	NA
+Ubuntu	pipe / 4096 bytes	Tonari	15	3.171	NA
+Ubuntu	pipe / 4096 bytes	Bash	15	3.422	NA
+Ubuntu	capture / 4096 bytes	Previous	15	0.763	NA
+Ubuntu	capture / 4096 bytes	Tonari	15	0.652	NA
+Ubuntu	capture / 4096 bytes	Bash	15	0.837	NA
+Ubuntu	external capture / 4096 bytes	Previous	15	1.961	NA
+Ubuntu	external capture / 4096 bytes	Tonari	15	2.079	NA
+Ubuntu	external capture / 4096 bytes	Bash	15	2.491	NA
+Ubuntu	quoted heredoc / 4096 bytes	Previous	15	1.946	NA
+Ubuntu	quoted heredoc / 4096 bytes	Tonari	15	1.972	NA
+Ubuntu	quoted heredoc / 4096 bytes	Bash	15	2.439	NA
+Ubuntu	redirect / 262144 bytes	Previous	15	2.016	NA
+Ubuntu	redirect / 262144 bytes	Tonari	15	2.091	NA
+Ubuntu	redirect / 262144 bytes	Bash	15	2.339	NA
+Ubuntu	pipe / 262144 bytes	Previous	15	2.749	NA
+Ubuntu	pipe / 262144 bytes	Tonari	15	3.120	NA
+Ubuntu	pipe / 262144 bytes	Bash	15	3.483	NA
+Ubuntu	capture / 262144 bytes	Previous	15	1.487	NA
+Ubuntu	capture / 262144 bytes	Tonari	15	1.360	NA
+Ubuntu	capture / 262144 bytes	Bash	15	6.028	NA
+Ubuntu	external capture / 262144 bytes	Previous	15	2.653	NA
+Ubuntu	external capture / 262144 bytes	Tonari	15	2.683	NA
+Ubuntu	external capture / 262144 bytes	Bash	15	7.470	NA
+Ubuntu	quoted heredoc / 262144 bytes	Previous	15	2.715	NA
+Ubuntu	quoted heredoc / 262144 bytes	Tonari	15	2.912	NA
+Ubuntu	quoted heredoc / 262144 bytes	Bash	15	5.317	NA
+Ubuntu	redirect / 4194304 bytes	Previous	15	3.677	NA
+Ubuntu	redirect / 4194304 bytes	Tonari	15	3.933	NA
+Ubuntu	redirect / 4194304 bytes	Bash	15	4.053	NA
+Ubuntu	pipe / 4194304 bytes	Previous	15	4.259	NA
+Ubuntu	pipe / 4194304 bytes	Tonari	15	4.619	NA
+Ubuntu	pipe / 4194304 bytes	Bash	15	4.892	NA
+Ubuntu	capture / 4194304 bytes	Previous	15	10.186	NA
+Ubuntu	capture / 4194304 bytes	Tonari	15	8.790	NA
+Ubuntu	capture / 4194304 bytes	Bash	15	79.162	NA
+Ubuntu	external capture / 4194304 bytes	Previous	15	11.561	NA
+Ubuntu	external capture / 4194304 bytes	Tonari	15	11.709	NA
+Ubuntu	external capture / 4194304 bytes	Bash	15	84.906	NA
+Ubuntu	quoted heredoc / 4194304 bytes	Previous	15	13.682	NA
+Ubuntu	quoted heredoc / 4194304 bytes	Tonari	15	16.007	NA
+Ubuntu	quoted heredoc / 4194304 bytes	Bash	15	45.086	NA
+Ubuntu	read -N / 4096 bytes	Previous	7	5.069	NA
+Ubuntu	read -N / 4096 bytes	Tonari	7	3.655	NA
+Ubuntu	read -N / 4096 bytes	Bash	7	4.173	NA
+Ubuntu	read -N / 262144 bytes	Previous	7	69.585	NA
+Ubuntu	read -N / 262144 bytes	Tonari	7	6.020	NA
+Ubuntu	read -N / 262144 bytes	Bash	7	12.551	NA
+Ubuntu	read -N / 4194304 bytes	Previous	7	2373.638	NA
+Ubuntu	read -N / 4194304 bytes	Tonari	7	32.604	NA
+Ubuntu	read -N / 4194304 bytes	Bash	7	122.287	NA
+Ubuntu	GNU ifs-posix / 6856 checks	Tonari	7	2031.257	2759.68
+Ubuntu	GNU ifs-posix / 6856 checks	Tonari before pipeline fix	7	2995.191	3503.112
+Ubuntu	GNU ifs-posix / 6856 checks	Bash	7	2465.075	3310.379

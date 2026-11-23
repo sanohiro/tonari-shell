@@ -1,0 +1,292 @@
+platform	group	feature	mode	previous_bash_p50_ns	previous_tonari_p50_ns	bash_p50_ns	tonari_p50_ns
+Debian	Arithmetic	%=	whole	1338584	816625	755250	615209
+Debian	Arithmetic	&&	started	538000	295791	216292	214792
+Debian	Arithmetic	&=	whole	715416	412625	671583	447875
+Debian	Arithmetic	(a+1)*2	whole	661667	385041	830625	565708
+Debian	Arithmetic	*	whole	704833	433125	679375	487792
+Debian	Arithmetic	**	started	363417	241041	220625	179333
+Debian	Arithmetic	/=	started	844708	521167	370791	294250
+Debian	Arithmetic	017	whole	696542	420833	795208	578916
+Debian	Arithmetic	<<	started	481667	272458	232667	203084
+Debian	Arithmetic	<=	whole	941875	612875	953625	704375
+Debian	Arithmetic	a++	whole	740709	429541	712416	521792
+Debian	Arithmetic	a?3:4	whole	639333	387042	692583	534875
+Debian	Builtin	bind	started	393500	219292	669875	449958
+Debian	Builtin	break	whole	692750	448250	1318250	963875
+Debian	Builtin	builtin	whole	640542	385042	1551875	1345875
+Debian	Builtin	command	whole	813375	416625	995541	710708
+Debian	Builtin	compopt	whole	688250	379416	1300375	968292
+Debian	Builtin	declare	whole	707416	403750	752500	541417
+Debian	Builtin	dirs	whole	2089291	1380875	2711000	2054708
+Debian	Builtin	false	whole	659667	360417	684292	469250
+Debian	Builtin	getopts	whole	899416	515416	879500	625834
+Debian	Builtin	kill	whole	717917	476292	1040000	757292
+Debian	Builtin	local	whole	567500	360375	670292	564791
+Debian	Builtin	readonly	whole	783500	508250	1151792	862333
+Debian	Builtin	return	whole	520833	326250	768833	715250
+Debian	Builtin	shopt	whole	587375	363791	795709	596500
+Debian	Builtin	source	whole	548542	348708	757666	513167
+Debian	Builtin	trap	whole	535250	332958	682958	462042
+Debian	Builtin	type	whole	532834	317667	752584	547042
+Debian	Builtin	unset	whole	579542	329792	788792	727833
+Debian	Builtin option	compgen -s	started	2248625	1451375	2265125	1659541
+Debian	Builtin option	complete -A	whole	4012875	2179833	2122458	1494959
+Debian	Builtin option	complete -E	whole	1146292	638417	561917	405000
+Debian	Builtin option	complete -F	whole	3294958	2009292	1907042	1582083
+Debian	Builtin option	complete -G	whole	2788375	1785292	1875000	1368125
+Debian	Builtin option	complete -P	whole	3843958	1800458	2053500	1536667
+Debian	Builtin option	complete -k	whole	2405500	1582917	2129458	1516958
+Debian	Builtin option	compopt -E	whole	877875	518500	640042	459083
+Debian	Builtin option	compopt -o	whole	688250	379416	1300375	968292
+Debian	Builtin option	declare -A	whole	934792	436500	738709	496292
+Debian	Builtin option	declare -I	whole	746125	469083	701291	546292
+Debian	Builtin option	declare -f	started	1326667	851208	1149084	925959
+Debian	Builtin option	declare -g	whole	882833	504958	685125	512333
+Debian	Builtin option	echo -e	whole	629334	394584	869750	704583
+Debian	Builtin option	exec -c	whole	1096291	729458	771750	663125
+Debian	Builtin option	hash -d	whole	728042	439250	1087167	827708
+Debian	Builtin option	kill -s	whole	489833	289166	592791	424542
+Debian	Builtin option	mapfile -C	whole	558667	361958	776084	519500
+Debian	Builtin option	mapfile -t	whole	522709	332459	920334	647416
+Debian	Builtin option	mapfile -u	whole	526584	315167	633541	442834
+Debian	Builtin option	read -d	whole	500458	309750	604875	404917
+Debian	Builtin option	shopt -q	whole	496667	316208	548375	367791
+Debian	Builtin option	shopt -s	whole	587375	363791	795709	596500
+Debian	Builtin option	shopt -u	whole	587375	363791	795709	596500
+Debian	Builtin option	trap -l	whole	1117708	731333	1140291	785042
+Debian	Builtin option	unset -f	whole	579542	329792	788792	727833
+Debian	Completion action	keyword	whole	2634375	1728000	1655375	1210833
+Debian	Conditional	-c	whole	671333	443209	663125	556208
+Debian	Conditional	-ge	whole	616000	351875	820625	684666
+Debian	Conditional	-n	whole	749417	390125	866500	584458
+Debian	Conditional	-r	whole	623292	409375	789792	579583
+Debian	Conditional	-s	whole	761500	469958	867833	807917
+Debian	Conditional	-w	whole	687458	454417	794667	536791
+Debian	Conditional	-z	whole	662167	392208	758750	580208
+Debian	History expansion	!!:1-2	whole	746375	454791	600209	417458
+Debian	History expansion	!!:q	whole	588208	372875	659542	444958
+Debian	Invocation	--	whole	673875	405333	814750	683708
+Debian	Invocation	-E	whole	642042	386459	631917	464000
+Debian	Invocation	-o	whole	1058542	662458	2219875	2148541
+Debian	Parameter	$#	whole	780375	448666	690125	508625
+Debian	Parameter	$0	whole	770625	427625	886791	645500
+Debian	Parameter	$@	whole	700667	436666	719208	538542
+Debian	Parameter	${!a[@]}	whole	980875	638958	879833	628250
+Debian	Parameter	${#v}	whole	2208916	1462250	2004625	1597833
+Debian	Parameter	${v-a}	whole	1980625	1293083	2560375	2025458
+Debian	Parameter	${v:1}	whole	2129500	1371792	2005833	1475125
+Debian	Parameter	${v:?a}	started	1626416	1009875	1633000	1189083
+Debian	Parameter	${v@Q}	whole	2617750	1657625	2521334	1713125
+Debian	Parameter	${v}	whole	2007708	1320625	3500750	2384833
+Debian	Printf format	%	whole	813584	467708	936708	807084
+Debian	Printf format	A	whole	715500	453042	636084	591417
+Debian	Printf format	c	whole	709875	400291	718042	540958
+Debian	Printf format	e	whole	732084	427583	793250	550167
+Debian	Printf format	n	whole	765458	476167	940541	807917
+Debian	Printf format	q	started	372083	215584	194000	262125
+Debian	Printf format	u	whole	812250	507291	779292	607917
+Debian	Printf format	x	whole	876584	436791	720292	678834
+Debian	Redirection	/dev/fd/N	whole	1037625	681500	900000	645959
+Debian	Redirection	<<<	started	856125	396667	1000375	821083
+Debian	Redirection	n<&-	started	398500	250750	250959	371416
+Debian	Redirection	{varname} descriptor	whole	1075750	665042	988958	668791
+Debian	Reserved word	!	whole	664292	410833	596834	409792
+Debian	Reserved word	select	whole	791625	446042	764500	589417
+Debian	Reserved word	time	whole	935542	608292	1065292	757625
+Debian	Reserved word	{	whole	691792	423917	787958	639042
+Debian	Reserved word	}	whole	691792	423917	787958	639042
+Debian	Shell language	ANSI-C quoting	whole	606541	370166	755708	602458
+Debian	Shell language	Bash startup via BASH_ENV	started	645542	412208	709958	520125
+Debian	Shell language	Bash startup via BASH_ENV	whole	1024958	610792	1137625	984125
+Debian	Shell language	ERR trap	whole	678542	428583	635333	429208
+Debian	Shell language	EXIT trap	whole	640208	381083	619209	466667
+Debian	Shell language	IFS word splitting	whole	870417	564875	623625	497916
+Debian	Shell language	arithmetic expansion	whole	644083	366625	679333	503542
+Debian	Shell language	arithmetic for	whole	740042	392708	776208	693083
+Debian	Shell language	arithmetic integer division and remainder	whole	664250	439916	653833	465250
+Debian	Shell language	arithmetic short circuit	whole	757166	432458	621333	505041
+Debian	Shell language	brace group	whole	691792	423917	787958	639042
+Debian	Shell language	deferred bad substitution	whole	706458	420167	596334	556459
+Debian	Shell language	dynamic function scope	whole	655917	430500	720125	570083
+Debian	Shell language	escaped backslash filenames	started	1024041	667583	810125	750875
+Debian	Shell language	extglob *(...)	whole	826625	450500	680375	706500
+Debian	Shell language	extglob +(...)	whole	726958	471458	696875	495667
+Debian	Shell language	function argument restoration	whole	714167	421083	769583	573417
+Debian	Shell language	history event expansion	whole	546042	319708	769542	528667
+Debian	Shell language	history word designator	whole	744000	474500	591042	470625
+Debian	Shell language	indexed arrays	whole	681958	435208	750959	547209
+Debian	Shell language	lists and short-circuit	whole	728583	415791	805667	677125
+Debian	Shell language	merged stderr pipeline	started	1138167	704458	1534208	1452250
+Debian	Shell language	negation	whole	664292	410833	596834	409792
+Debian	Shell language	pipeline	started	1327917	818625	1686084	1353166
+Debian	Shell language	priorities of lookup	whole	825375	458833	841209	749667
+Debian	Shell language	process substitution input	whole	1086959	686458	1285750	1034417
+Debian	Shell language	quote removal	whole	581750	334250	644042	547833
+Debian	Shell language	select	whole	791625	446042	764500	589417
+Debian	Shell language	shell script source	whole	548542	348708	757666	513167
+Debian	Shell language	signal trap	whole	741792	405334	575750	399375
+Debian	Shell language	time -p	whole	1649541	1098291	1587584	1358250
+Debian	Shell language	time keyword	whole	935542	608292	1065292	757625
+Debian	Variable	BASH	started	496417	281917	715834	497042
+Debian	Variable	BASH_ARGC	whole	572542	348500	689416	579417
+Debian	Variable	BASH_ARGV	whole	608125	372000	794375	545125
+Debian	Variable	BASH_COMMAND	whole	579208	333041	891292	609417
+Debian	Variable	BASH_ENV	started	645542	412208	709958	520125
+Debian	Variable	BASH_ENV	whole	1024958	610792	1137625	984125
+Debian	Variable	BASH_VERSINFO	whole	642291	330584	793792	637041
+Debian	Variable	IFS	whole	870417	564875	623625	497916
+Debian	Variable	LANG	whole	1198500	564792	1239542	914625
+Debian	Variable	OPTARG	whole	899416	515416	879500	625834
+Debian	Variable	OPTIND	whole	899416	515416	879500	625834
+Debian	Variable	TIMEFORMAT	whole	935542	608292	1065292	757625
+Debian	set -o	errtrace	whole	557917	316291	652084	449209
+Debian	set -o	noglob	whole	944750	624833	1110708	1208917
+Debian	shopt	dotglob	whole	1015334	658625	1367458	1056125
+Debian	shopt	extdebug	whole	539625	325583	657333	438458
+Debian	shopt	failglob	whole	766875	483083	1048250	851292
+Debian	shopt	nullglob	whole	587375	363791	795709	596500
+Ubuntu	Arithmetic	/	whole	624167	361750	767541	540875
+Ubuntu	Arithmetic	017	whole	610750	365250	751500	527291
+Ubuntu	Arithmetic	<	whole	781958	383375	645875	468833
+Ubuntu	Arithmetic	<=	whole	655375	395875	705083	533459
+Ubuntu	Arithmetic	>=	started	273584	176834	259416	281875
+Ubuntu	Builtin	[	whole	519583	319750	595875	399958
+Ubuntu	Builtin	bind	started	306167	162125	540584	403750
+Ubuntu	Builtin	break	whole	543625	314250	787750	689916
+Ubuntu	Builtin	caller	whole	550750	331458	632292	522041
+Ubuntu	Builtin	command	whole	552334	319750	707541	534000
+Ubuntu	Builtin	continue	whole	654709	405250	903542	706792
+Ubuntu	Builtin	declare	whole	613125	364875	824167	624250
+Ubuntu	Builtin	echo	whole	550250	319000	683208	675250
+Ubuntu	Builtin	enable	whole	535542	327083	723792	558250
+Ubuntu	Builtin	eval	whole	520375	300750	695458	540083
+Ubuntu	Builtin	fc	whole	534209	330458	661208	469209
+Ubuntu	Builtin	getopts	whole	541209	333542	655542	536125
+Ubuntu	Builtin	let	whole	734083	483667	707417	545917
+Ubuntu	Builtin	printf	whole	653500	359125	675250	467958
+Ubuntu	Builtin	return	whole	505417	335042	676792	473000
+Ubuntu	Builtin	set	whole	974708	619292	1592208	1102041
+Ubuntu	Builtin	shopt	whole	593042	378708	737583	544292
+Ubuntu	Builtin	source	whole	640375	405625	969416	916625
+Ubuntu	Builtin	ulimit	started	501500	317666	737875	631750
+Ubuntu	Builtin	unalias	whole	634958	421250	718459	499500
+Ubuntu	Builtin option	command -v	whole	572042	337625	738042	616916
+Ubuntu	Builtin option	kill -n	whole	561167	335292	669292	477500
+Ubuntu	Builtin option	kill -s	whole	499875	304916	729583	494667
+Ubuntu	Builtin option	mapfile -C	whole	565708	356625	756875	634041
+Ubuntu	Builtin option	mapfile -s	whole	507375	314583	678167	534834
+Ubuntu	Builtin option	mapfile -t	whole	498250	309166	699708	522917
+Ubuntu	Builtin option	printf -v	whole	653500	359125	675250	467958
+Ubuntu	Builtin option	read -N	whole	468125	279583	670084	477291
+Ubuntu	Builtin option	read -a	whole	515375	325333	665833	462709
+Ubuntu	Builtin option	read -d	whole	466917	290500	669792	458083
+Ubuntu	Builtin option	readarray -C	whole	608584	403333	730208	496417
+Ubuntu	Builtin option	readarray -c	whole	540500	331709	683042	470959
+Ubuntu	Builtin option	readarray -d	whole	481500	306834	644541	456666
+Ubuntu	Builtin option	readarray -t	whole	543166	346000	655083	518792
+Ubuntu	Builtin option	readonly -A	whole	731875	451250	938625	647917
+Ubuntu	Builtin option	readonly -a	whole	722333	458708	952542	678667
+Ubuntu	Builtin option	set -o	whole	974708	619292	1592208	1102041
+Ubuntu	Builtin option	shopt -s	whole	593042	378708	737583	544292
+Ubuntu	Builtin option	shopt -u	whole	593042	378708	737583	544292
+Ubuntu	Builtin option	unalias -a	whole	497958	295375	499125	338000
+Ubuntu	Conditional	-G	whole	865542	502792	804500	671375
+Ubuntu	Conditional	-O	whole	570708	357500	771125	581875
+Ubuntu	Conditional	-d	whole	679917	452208	798042	604875
+Ubuntu	Conditional	-le	whole	605792	375333	639291	471333
+Ubuntu	Conditional	-lt	whole	550875	333625	768459	517833
+Ubuntu	Conditional	-w	whole	656875	398834	713458	502875
+Ubuntu	Conditional	-z	whole	554042	356750	622959	495792
+Ubuntu	Conditional	=~	whole	610542	380958	740584	503625
+Ubuntu	History expansion	!!	whole	494792	327417	698958	575541
+Ubuntu	History expansion	!!:$	whole	522875	318750	661292	443833
+Ubuntu	History expansion	!!:$:r	whole	499000	284750	678000	454333
+Ubuntu	History expansion	!!:^	whole	508125	306833	756375	583875
+Ubuntu	History expansion	!echo	whole	503542	304542	706834	498375
+Ubuntu	Invocation	+o	whole	857292	494833	1186416	844667
+Ubuntu	Invocation	-H	whole	559583	360500	837708	682375
+Ubuntu	Invocation	-T	whole	541875	322625	880459	813458
+Ubuntu	Invocation	-a (export assignments)	whole	726458	472375	888750	849750
+Ubuntu	Invocation	-h	whole	577208	320291	684209	485708
+Ubuntu	Invocation	-l	whole	535334	321459	636708	428500
+Ubuntu	Invocation	-n	whole	521042	288167	692750	648125
+Ubuntu	Invocation	-s	whole	530375	304959	751208	539083
+Ubuntu	Invocation	-t	whole	540750	320708	796291	570667
+Ubuntu	Invocation	stdin script	whole	507791	302333	719375	501959
+Ubuntu	Parameter	$$	whole	1341125	765125	1100791	898542
+Ubuntu	Parameter	$*	started	372833	214625	279250	375208
+Ubuntu	Parameter	$*	whole	1037334	518750	729042	495916
+Ubuntu	Parameter	$0	whole	838042	490833	753959	514583
+Ubuntu	Parameter	$@	whole	828125	476042	669958	590792
+Ubuntu	Parameter	${!a[@]}	whole	770500	426458	699334	471334
+Ubuntu	Parameter	${!name}	whole	794750	460458	707125	528458
+Ubuntu	Parameter	${#v}	whole	2550125	1583833	1821833	1481458
+Ubuntu	Parameter	${v%%*a}	whole	2371208	1521834	1884209	1313250
+Ubuntu	Parameter	${v/#a/X}	whole	3367208	2068000	2106791	1490542
+Ubuntu	Parameter	${v/a/X}	whole	2686875	1592916	1927542	1447417
+Ubuntu	Parameter	${v: -2:1}	whole	2718167	1739958	1886625	1365667
+Ubuntu	Parameter	${v:+a}	started	1840458	1197333	1873417	1353708
+Ubuntu	Parameter	${v:-a}	whole	2516875	1656959	2211083	1485125
+Ubuntu	Parameter	${v?a}	started	1604292	1033625	1820417	1270750
+Ubuntu	Parameter	${v^}	whole	1783791	1115917	2090541	1427125
+Ubuntu	Printf format	A	started	357041	168292	277959	231709
+Ubuntu	Printf format	b	started	345084	224333	210166	254416
+Ubuntu	Printf format	b	whole	734208	432500	620333	439083
+Ubuntu	Printf format	d	whole	784792	437875	671167	563542
+Ubuntu	Printf format	g	whole	938792	471292	720542	482667
+Ubuntu	Printf format	reuse format	started	393167	254958	227041	219833
+Ubuntu	Printf format	s	whole	929959	522000	564250	378584
+Ubuntu	Printf format	u	whole	683375	419458	692416	552875
+Ubuntu	Printf format	width / precision	whole	1221917	620250	587625	474958
+Ubuntu	Redirection	<	whole	2880667	1908667	3724667	3088041
+Ubuntu	Redirection	n<&-	started	417292	260125	332333	265084
+Ubuntu	Redirection	n>&-	whole	788167	461875	673333	593833
+Ubuntu	Reserved word	function	whole	707416	402333	579583	448917
+Ubuntu	Reserved word	while	whole	655250	400875	788250	550208
+Ubuntu	Reserved word	{	started	269416	160125	275916	233791
+Ubuntu	Reserved word	}	started	269416	160125	275916	233791
+Ubuntu	Shell language	Bash startup via BASH_ENV	whole	1146209	679041	1276917	951792
+Ubuntu	Shell language	IFS word splitting	whole	591958	338666	813000	573500
+Ubuntu	Shell language	arithmetic base notation	whole	663959	396958	627250	597208
+Ubuntu	Shell language	arithmetic command status	whole	808875	452625	666958	504458
+Ubuntu	Shell language	arithmetic for	whole	679500	401959	588458	405292
+Ubuntu	Shell language	array append	whole	720459	459834	949333	645375
+Ubuntu	Shell language	brace alternation	whole	573291	356625	613250	416875
+Ubuntu	Shell language	brace group	started	269416	160125	275916	233791
+Ubuntu	Shell language	completion filters	whole	809417	476417	717709	607459
+Ubuntu	Shell language	double quotes	whole	641750	382958	709000	512166
+Ubuntu	Shell language	extglob +(...)	whole	768625	441708	1443000	1168208
+Ubuntu	Shell language	function and return	whole	707416	402333	579583	448917
+Ubuntu	Shell language	history event expansion	whole	749625	440458	693583	478459
+Ubuntu	Shell language	history word designator	whole	839917	467500	614042	481250
+Ubuntu	Shell language	line continuation	whole	693625	440333	684292	528542
+Ubuntu	Shell language	locale translation syntax	whole	876459	477125	685375	461250
+Ubuntu	Shell language	priorities of lookup	whole	1080125	592458	710083	673166
+Ubuntu	Shell language	shell script source	whole	640375	405625	969416	916625
+Ubuntu	Shell language	single quotes	whole	592500	340583	781708	623125
+Ubuntu	Shell language	subshell exit isolation	whole	1165500	758833	2111375	1469000
+Ubuntu	Shell language	terminal signal ignore and reset	whole	714208	467625	775083	730250
+Ubuntu	Shell language	tilde expansion	whole	590041	359167	704208	543125
+Ubuntu	Shell language	time -p	whole	1782250	1061417	1498625	1364334
+Ubuntu	Shell language	while	whole	655250	400875	788250	550208
+Ubuntu	Signal	BUS	whole	529417	338667	558958	384208
+Ubuntu	Signal	TTOU	whole	488292	300750	527042	351458
+Ubuntu	Signal	URG	whole	493167	298792	557042	393500
+Ubuntu	Variable	BASH_ENV	whole	1146209	679041	1276917	951792
+Ubuntu	Variable	BASH_REMATCH	whole	610542	380958	740584	503625
+Ubuntu	Variable	EPOCHREALTIME	whole	540500	330625	640084	461000
+Ubuntu	Variable	EPOCHSECONDS	whole	568042	347833	694083	484291
+Ubuntu	Variable	HISTTIMEFORMAT	whole	1176209	781958	1373084	986334
+Ubuntu	Variable	IFS	whole	591958	338666	813000	573500
+Ubuntu	Variable	OPTARG	whole	541209	333542	655542	536125
+Ubuntu	Variable	OPTERR	whole	554000	328250	659792	456667
+Ubuntu	Variable	OPTIND	whole	541209	333542	655542	536125
+Ubuntu	Variable	PS3	whole	564000	353417	714291	549000
+Ubuntu	Variable	PS4	whole	609041	343250	696458	491292
+Ubuntu	Variable	SECONDS	whole	529292	308250	682958	493667
+Ubuntu	set -o	braceexpand	whole	674709	360708	683166	514209
+Ubuntu	set -o	errexit	whole	665917	397667	728583	488083
+Ubuntu	set -o	errtrace	whole	612000	401625	751208	563000
+Ubuntu	shopt	nocasematch	whole	1009042	522583	803709	649083
+Ubuntu	shopt	nullglob	whole	593042	378708	737583	544292
+Ubuntu	shopt	patsub_replacement	whole	726334	415166	676834	465250
