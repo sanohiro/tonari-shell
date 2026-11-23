@@ -1,5 +1,59 @@
 # Startup and execution / 起動と実行性能
 
+<a id="literal-file-capture"></a>
+
+## 2026-11-23 · File command substitution / ファイルを読むコマンド置換
+
+**Previous Tonari / adopted Tonari / Bash 5.2.37**, median milliseconds. Each sample starts in a fresh shell that has signalled readiness. It assigns the complete file to the same variable the indicated number of times. The timer stops at a second marker before writing the final value to disk. Every sample checks the output bytes and shell status. ASCII input at least two bytes long ends in two newlines. The zero-byte input is genuinely empty.
+
+| Input | Captures | macOS arm64 | Debian x86-64 (translated) | Debian arm64 |
+| --- | ---: | ---: | ---: | ---: |
+| 0 B | 24 | 13.074 / 0.484 / 0.508 | 30.811 / 7.040 / 6.451 | 3.540 / 0.174 / 0.245 |
+| 5 B | 256 | 3.872 / 3.682 / 4.267 | 8.537 / 7.848 / 8.515 | 0.946 / 0.842 / 1.665 |
+| 4 KiB | 128 | 2.089 / 1.985 / 3.883 | 8.018 / 7.391 / 9.224 | 0.576 / 0.519 / 3.369 |
+| 256 KiB | 16 | 1.007 / 0.913 / 13.211 | 9.159 / 8.364 / 19.610 | 1.371 / 1.254 / 21.972 |
+| 4 MiB | 4 | 4.421 / 3.405 / 54.818 | 16.098 / 14.718 / 59.818 | 7.741 / 7.355 / 82.839 |
+| 16 MiB | 1 | 5.834 / 5.187 / 64.062 | 16.023 / 13.970 / 63.196 | 7.272 / 6.151 / 81.042 |
+| 64 MiB | 1 | 23.421 / 20.381 / 430.420 | 35.779 / 30.878 / 226.443 | 26.910 / 23.155 / 324.253 |
+
+Warm filesystem cache, Apple M1, macOS 27.2.1 and Debian 13 on Linux 6.11.11-linuxkit. The Linux binaries and fixtures ran on the guest filesystem. The previous build was `36a580f`. The binaries ran in rotating order, with three warm-ups per binary followed by 19 samples (nine for 64 MiB). The timer includes the gate, script loop and marker. Close timings for short commands on translated x86-64 also include scheduler variation.
+
+The two-thirds-of-Bash target was missed at 0 and 5 B on macOS, at 0 B on Debian arm64, and at 0 B, 5 B and 4 KiB on translated x86-64. In a longer 21-sample check on translated x86-64, 2,048 five-byte captures took 16.781 / 14.992 / 19.904 ms. For 1,024 four-KiB captures the times were 12.873 / 11.574 / 25.326 ms. The previous-snapshot correctness comparison kept all 1,408 macOS, 1,522 Debian and 1,553 Ubuntu statuses.
+
+5 バイトと 16 MiB のファイルで、開いた FD に対する `fstat` は2回から1回、`lseek` は1回から0回になりました。空ファイルでは通常のストレージかを追加確認してから読みます。サイズ0を返す仮想ファイルでは実際の EOF まで読みます。初期確保の上限は 64 MiB で、それ以上の入力も最後まで取り込みます。配布バイナリのサイズは macOS arm64 が 1,184,592 バイト（+96）、Linux x86-64-v3 が 1,160,240 バイト（+2,400）、Linux arm64 が 1,359,752 バイト（+1,816）でした。実機 x86-64 と WSL2 は未計測です。[開発知見](engineering-notes.md#literal-file-capture)
+
+```sh
+python3 tools/bench_file_capture.py ./previous ./tonari /path/to/bash --runs 19
+python3 tools/bench_file_capture.py ./previous ./tonari /path/to/bash --case 67108864 1 --runs 9
+```
+
+<a id="linux-pipe-capacity"></a>
+
+## 2026-11-23 · Linux pipeline capacity / Linux のパイプ容量
+
+Tonari at `36a580f` and a distribution build from the same source were run on an M1 in a Debian 13 VM with Linux 6.11.11-linuxkit and 4 KiB pages. The trial added one `fcntl(reader, F_SETPIPE_SZ, 256 * 1024)` immediately after Tonari created each pipeline connection. A child queried its stdin with `F_GETPIPE_SZ` and observed 65,536 bytes in the release and in Bash 5.2.37, and 262,144 in the trial. The x86-64 binaries and external tools ran under translation on the same arm64 kernel.
+
+Each cell gives **release / trial / Bash** median milliseconds from shell launch through exit. Executables ran in rotating order with three warm-ups for the two-stage workloads. The byte-checked three-stage workload used two warm-ups. Each architecture ran separately.
+
+| Workload | Samples per binary | arm64, 8 CPUs available | arm64, pinned to 1 CPU | x86-64 translated, 8 CPUs available |
+| --- | ---: | ---: | ---: | ---: |
+| `dd \| dd`, 64 B | 61 | 0.849 / 0.815 / 1.260 | 2.995 / 2.993 / 3.991 | 31.884 / 31.855 / 46.475 |
+| `dd \| dd`, 4 MiB | 25 | 2.802 / 2.224 / 3.770 | 3.986 / 3.995 / 4.975 | 32.250 / 32.211 / 46.828 |
+| `dd \| dd`, 256 MiB | 13 | 116.865 / 51.826 / 131.376 | 47.793 / 44.519 / 49.932 | 75.395 / 75.162 / 91.826 |
+| `yes \| head -c 64` | 41 | 0.725 / 0.718 / 1.188 | 2.893 / 2.988 / 3.983 | 33.641 / 34.007 / 51.398 |
+| 32 one-byte external pipelines in one shell | 23 | 12.742 / 13.353 / 15.806 | 11.608 / 11.818 / 18.651 | 533.204 / 547.302 / 591.060 |
+| Three `cat` stages, 16 MiB file to file | 13 | 12.322 / 5.667 / 12.064 | — | 50.283 / 42.001 / 62.272 |
+
+The 256 MiB command used `set -o pipefail` and two external `dd` processes. The early-close case checked the 64 output bytes and both stage statuses (141 and 0). The three-stage case checked every output byte after timing. The one-byte case ran `/usr/bin/printf x | /bin/cat` 32 times and checked the resulting 32 bytes. The native arm64 256 MiB samples had wide tails with eight CPUs available (release/trial p95 about 217/190 ms). A second run on the same VM gave release/trial medians of 124.827/45.514 ms for 256 MiB, 13.403/6.827 ms for the 16 MiB file, and 10.373/10.520 ms for 32 one-byte pipes. CPU affinity and host scheduling matter when interpreting these numbers.
+
+```sh
+set -o pipefail
+/bin/dd if=/dev/zero bs=65536 count=4096 status=none | /bin/dd of=/dev/null bs=65536 status=none
+python3 tools/bench_streams.py ./base ./trial /bin/bash --case pipe --sizes 64 4096 262144 4194304 16777216 --runs 13
+```
+
+256 KiB は Debian arm64 の連続転送で効果が大きく、16 MiB のファイルを3段の `cat` で渡すケースでも短縮しました。1 CPU に固定すると 256 MiB 転送での差は約 3 ms でした。短いパイプを32回起動するケースでは、どの条件でも試作版の中央値が少し長くなりました。実機 x86-64 と WSL2 は未計測です。[設計上の判断](engineering-notes.md#pipeline-capacity-and-input)
+
 <a id="profile-startup"></a>
 
 ## 2026-11-23 · Startup with Bash profiles / 設定を含むシェルの起動

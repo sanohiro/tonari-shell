@@ -1076,6 +1076,25 @@ printf '%s:%s' "$s" "$x" """
             result = self.command(shell, 'v=$(<nul); printf "<%s>:%s" "$v" "$?"')
             self.assertEqual((result.returncode, result.stdout), (0, b"<abcdef>:0"))
 
+    def test_literal_file_capture_reads_to_eof(self):
+        # Preserve multibyte text after a long ASCII prefix and trim trailing newlines.
+        value = b'x' * (8 * 1024 * 1024 - 1) + "🍵\nlast".encode()
+        (self.cwd / "input").write_bytes(value + b"\n\n")
+        for shell in (BASH, TONARI):
+            with self.subTest(shell=shell):
+                result = subprocess.run([shell, "-c", 'v=$(<input) && printf %s "$v" >out'],
+                                        cwd=self.cwd, env=self.env, capture_output=True, timeout=30)
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"", b""))
+                self.assertEqual((self.cwd / "out").read_bytes(), value)
+                (self.cwd / "out").unlink()
+        os.mkfifo(self.cwd / "feed")
+        self.compare('printf "from fifo\\n" >feed & v=$(<feed); rc=$?; wait; printf "%s:%s" "$v" "$rc"',
+                     0, b"from fifo:0")
+        if sys.platform.startswith("linux"):
+            self.compare('v=$(</proc/sys/kernel/ostype); printf "%s:%s" "$v" "$?"', 0, b"Linux:0")
+            (self.cwd / "self-stat").symlink_to("/proc/self/stat")
+            self.compare('v=$(<self-stat); test "${v%% *}" = "$$"', 0)
+
     def test_shell_read_printf_and_lookup(self):
         self.compare("IFS=: read -r a b <<< 'x:y:z'; printf -v out '<%s><%s>' \"$a\" \"$b\"; "
                      "printf '%s\\n%b' \"$out\" 'a\\0101'",

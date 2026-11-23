@@ -1,5 +1,29 @@
 # Engineering notes / 開発知見
 
+<a id="literal-file-capture"></a>
+
+## 2026-11-23 · Reading a file into a shell variable / ファイルのコマンド置換
+
+For a literal `v=$(<file)`, Tonari already has the opened file's metadata. Use its size for a bounded initial allocation and read directly into the result until the kernel returns EOF. A spare byte lets an unchanged file reach EOF without reallocating its buffer. Reads retry after interruption and keep any prefix obtained before an I/O error. A single standalone assignment can take ownership of the resulting string. Multiple assignments, redirections and tracing can still observe assignment values and use the existing path. Trimming a large capture down to a few bytes releases the oversized allocation. [Implementation](../src/subshell.rs) · [Assignment handling](../src/execute.rs) · [Measurements](benchmarks.md#literal-file-capture)
+
+空ファイルで以前は毎回 fork していました。サイズ 0 のときだけファイルシステムを確認し、APFS、HFS、ext4、XFS、Btrfs、F2FS、tmpfs、OverlayFS 上の通常ファイルを親で実際の EOF まで読みます。open 前には名前付きパイプを避け、open 後は実際に受け取った FD の種別を再確認します。仮想ファイルや未知のファイルシステムではサイズ 0 でも子で読み取ります。Linux では名前を親のプロセスで解決して `O_PATH` で保持するので、`/proc/self/stat` をシンボリックリンク経由で読んでも Bash と同じ PID が得られます。FIFO、末尾の改行、NUL、絵文字、見積もりより短い入力と長い入力を検証しました。[Bash との比較テスト](../tests/shell.py) · [サイズ別の計測](benchmarks.md#literal-file-capture)
+
+<a id="pipeline-capacity-and-input"></a>
+
+## 2026-11-23 · Pipeline capacity and input ownership / パイプ容量と入力の読み方
+
+The Linux release connects external stages directly. A trace of `/bin/true | /bin/true` shows `pipe2(O_CLOEXEC)`. Increasing that pipe to 256 KiB helped a sustained transfer on native arm64. Results depended on the workload and CPU affinity. Keep the kernel default for general pipelines pending measurements on native x86-64 and WSL2. A shell cannot infer how many bytes a filter will emit from the size of its input. Linux also accounts pipe capacity per user and can reject an increase. [Release comparison](benchmarks.md#linux-pipe-capacity) · [Linux pipe capacity limits](https://man7.org/linux/man-pages/man7/pipe.7.html)
+
+Align (`0984346c`) precomputes its launch arguments and descriptors. On macOS it uses `posix_spawn` file actions. Its `io_copy_window` lends an existing reader buffer to a synchronous writer. This applies where the runtime owns the transfer. In Tonari, unbounded `mapfile` without a callback or explicit origin already processes records in a borrowed buffer. A bounded `read` or `mapfile -n 1` on a pipe must leave the remaining bytes available to the next command. The Bash comparison covers these cases and a FIFO that opens only after the other pipeline stage starts. [Mapfile](../src/session/mapfile.rs) · [Pipe reader](../src/session/read.rs) · [Direct Bash witnesses](../tests/shell.py)
+
+通常の `cmd <in >out` では子プロセスがファイルを直接読み書きします。入力のサイズ確認が役に立つのは、たとえば Tonari 自身がファイルを文字列として取り込む `v=$(<file)` です。Debian arm64 で5バイトの通常ファイルを追跡すると、パスの属性確認、open、同じ FD への `fstat` 2回、`lseek(SEEK_CUR)`、読み取りの順でした。開いたファイルの種別確認と Rust の `File::read_to_end` がサイズ取得を重ねています。この観測をもとに、確認済みのサイズを容量の目安として再利用し、実際の EOF まで読む実装を同日採用しました。[採用後の計測](benchmarks.md#literal-file-capture) · [ファイルのコマンド置換](../src/subshell.rs) · [パイプ容量の実測](benchmarks.md#linux-pipe-capacity)
+
+```sh
+printf 'abc\n\n' > data.txt
+strace -f -yy -e trace=%stat,%fstat,openat,lseek,read ./tonari -c 'v=$(<data.txt); printf "%s" "$v"'
+printf 'first\nsecond\n' | { IFS= read -r first; printf '<%s>' "$first"; cat; }
+```
+
 ## 2026-11-23 · Time to the first prompt / 最初のプロンプトまでの時間
 
 A large function in a sourced profile could outgrow the 8 KiB reader before the parser saw its closing brace. After that, each new line triggered another parse of the growing definition. For a regular sourced file, use its size to choose a read buffer between 8 and 128 KiB. Look ahead for the end of the current compound command, then execute it before parsing the next one with the current aliases and shell options. A possible closing brace inside an unfinished here-document still needs the delimiter. The PTY fixture sources Apple's Git completion script and a separate integration test completes and checks out a newly created branch. [Startup measurements](benchmarks.md#profile-startup) · [Parsing regression](../tests/shell.py) · [Git integration](../tests/compat/tool_hooks.py)

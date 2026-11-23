@@ -589,9 +589,13 @@ impl Session {
     }
 
     pub fn assign(&mut self, name: &str, value: &str) {
+        self.assign_value(name, Cow::Borrowed(value));
+    }
+
+    pub(crate) fn assign_value(&mut self, name: &str, mut value: Cow<'_, str>) {
         match self.reference_name(name) {
             Ok(Cow::Owned(target)) => {
-                if let Err(e) = self.assign_target(&target, value) {
+                if let Err(e) = self.assign_target(&target, &value) {
                     eprintln!("tonari: {name}: {e}");
                 }
                 return;
@@ -606,31 +610,26 @@ impl Session {
             return;
         }
         if name == "BASH_ARGV0" {
-            self.arg0 = value.to_owned();
+            self.arg0 = value.to_string();
         }
         if name == "GLOBIGNORE" {
-            self.shopt.glob.set_ignore(Some(value));
+            self.shopt.glob.set_ignore(Some(&value));
         }
-        let normalized;
-        let value = if name == "OPTIND" {
+        if name == "OPTIND" {
             self.opt_offset = 0;
-            normalized = value.trim().parse::<i64>().unwrap_or(0).to_string();
-            normalized.as_str()
-        } else {
-            value
-        };
+            value = Cow::Owned(value.trim().parse::<i64>().unwrap_or(0).to_string());
+        }
         if name == "PATH" {
             self.hashes.clear();
         }
         if let Some(var) = self.variables.get_mut(name) {
             if let Some(elements) = var.elements.as_mut().map(Rc::make_mut) {
-                elements.insert(0, value.into());
+                elements.insert(0, value.into_owned());
                 var.array_assigned = true;
-            } else if let Some(current) = &mut var.value {
-                current.clear();
-                current.push_str(value);
+            } else if let (Some(current), Cow::Borrowed(text)) = (&mut var.value, &value) {
+                (*text).clone_into(current);
             } else {
-                var.value = Some(value.into());
+                var.value = Some(value.into_owned());
             }
             var.declared = true;
             var.exported |= self.allexport;
@@ -646,7 +645,7 @@ impl Session {
                 array_assigned: false,
                 elements: None,
                 declared: true,
-                value: Some(value.into()),
+                value: Some(value.into_owned()),
                 exported,
             },
         );

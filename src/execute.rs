@@ -219,7 +219,7 @@ fn apply(actions: &[Action<'_>]) -> bool {
 
 // Pipe setup uses standard streams as destinations. Reserve distinct source
 // numbers even when Tonari starts with a standard stream already closed.
-fn private_fd(fd: OwnedFd) -> io::Result<OwnedFd> {
+pub(crate) fn private_fd(fd: OwnedFd) -> io::Result<OwnedFd> {
     if fd.as_raw_fd() > 2 {
         return Ok(fd);
     }
@@ -1417,7 +1417,18 @@ fn prepare(
             word => words.extend(original.fields(word)?),
         }
     }
-    let mut assignments = Vec::with_capacity(raw.assignments.len());
+    // A lone assignment has no following word, redirect or trace that needs a copy.
+    let direct_assignment = standalone
+        && words.is_empty()
+        && raw.assignments.len() == 1
+        && raw.compound.is_none()
+        && raw.redirects.is_empty()
+        && !session.xtrace;
+    let mut assignments = if direct_assignment {
+        Vec::new()
+    } else {
+        Vec::with_capacity(raw.assignments.len())
+    };
     let mut array_declarations = Vec::new();
     // Each assignment sees its predecessors, while command arguments saw the
     // outer environment. Standalone assignments persist even on redirect failure.
@@ -1519,6 +1530,10 @@ fn prepare(
                         let i = session.resolve_index(base, index)?;
                         session.assign_element(base, i, value);
                     }
+                    continue;
+                }
+                if direct_assignment {
+                    session.assign_value(&key, value.into());
                     continue;
                 }
                 if standalone && words.is_empty() {
