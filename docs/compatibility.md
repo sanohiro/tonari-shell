@@ -6,6 +6,12 @@ Tonari は現在、既存のシェルから起動して試せる段階です。�
 
 ## Distribution release checks / 配布バイナリの検証
 
+The arm64 -O2 and x86-64-v3 -Os distribution binaries retained all 1,408 macOS, 1,522 Debian and 1,553 Ubuntu feature verdicts from `9a095b8`. The added regression compares `BASH_SOURCE` with GNU Bash as a running function is redefined and then removed by a nested call. All 125 integration tests passed on Debian and Ubuntu arm64 and in the Debian x86-64 QEMU guest. On macOS arm64, 124 passed and the Linux-only test was skipped. Debian and Ubuntu also passed account login and logout. [Release measurements and executable fingerprints](benchmarks.md#release-footprint)
+
+速度とサイズを比較して選んだ配布版で互換性を再検査しました。関数の再定義・削除をまたぐ `BASH_SOURCE` も参照先の Bash と同じ値になり、既存の機能判定に変化はありませんでした。今回の速度測定は起動・関数などを対象にしています。下記の機能別タイミング行列は一つ前の配布版の記録です。
+
+### Previous release with the new allocator / アロケータ変更時の配布版
+
 The new macOS arm64, Debian arm64 and Ubuntu arm64 builds retained every named verdict from the preceding audit, across 1,408, 1,522 and 1,553 inventory rows respectively. This includes known differences, unverified options and intentional UTF-8 behavior. The macOS integration suite passed 123 tests with one distribution-specific skip. Debian and Ubuntu arm64 and the Debian x86-64 QEMU guest each passed all 124. Both arm64 distributions also passed account login and logout through the private `bash` entry point. During the first timed macOS pass the `PROMPT_DIRTRIM` terminal probe missed its expected output once. With the same binaries, a focused run of two warmups and nine measured samples per shell returned the expected trimmed prompt each time. [Release measurements](benchmarks.md#release-latency)
 
 今回の配布版を前回の監査と照合し、macOS・Debian・Ubuntu の全項目で機能判定が維持されていることを確認しました。以前からある未実装や動作差も一覧に含みます。Linux の統合試験は3環境とも124件が成功し、macOS はディストリビューション固有の1件を除く123件が成功しました。[優先項目の実測](compatibility-2026-11-23-release/priority.tsv)

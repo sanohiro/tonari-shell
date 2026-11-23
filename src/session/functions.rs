@@ -1,12 +1,46 @@
-use super::Session;
-use crate::parser::{Command, is_function_name, parse_final};
+use super::{Function, Session};
+use crate::parser::{Command, Location, Statement, is_function_name, parse_final};
 use std::{
     ffi::CStr,
     io::{self, Write},
     rc::Rc,
 };
 
+impl Function {
+    fn export_value(&self) -> String {
+        let body = self.definition.text();
+        if body.starts_with('{') && body.ends_with('}') {
+            format!("() {body}")
+        } else {
+            format!("() {{\n{body}\n}}")
+        }
+    }
+}
+
 impl Session {
+    pub(crate) fn define_function(
+        &mut self,
+        name: String,
+        body: Vec<Statement>,
+        definition: Location,
+    ) {
+        let source = self
+            .source_names
+            .last()
+            .cloned()
+            .unwrap_or_else(|| "environment".into());
+        let function = Rc::new(Function {
+            body,
+            definition,
+            source,
+        });
+        if self.allexport || self.function_exported(&name) {
+            self.function_environment
+                .insert(format!("BASH_FUNC_{name}%%"), Some(function.export_value()));
+        }
+        self.functions.insert(name, function);
+    }
+
     pub fn import_functions(&mut self) {
         // Startup is single-threaded. Leave the ordinary inherited environment in place.
         let mut env = crate::execute::inherited_env();
@@ -54,10 +88,14 @@ impl Session {
                 } = statement.command
                     && actual == name
                 {
-                    self.functions.insert(actual.clone(), Rc::new(body));
-                    self.function_sources
-                        .insert(actual.clone(), "environment".into());
-                    self.function_definitions.insert(actual, definition);
+                    self.functions.insert(
+                        actual,
+                        Rc::new(Function {
+                            body,
+                            definition,
+                            source: "environment".into(),
+                        }),
+                    );
                     self.function_environment
                         .insert(key, Some(value.to_owned()));
                 }
@@ -66,18 +104,8 @@ impl Session {
     }
 
     pub fn export_function(&mut self, name: &str, on: bool) -> Result<(), &'static str> {
-        let body = self
-            .function_definitions
-            .get(name)
-            .ok_or("not a function")?
-            .text();
-        let value = on.then(|| {
-            if body.starts_with('{') && body.ends_with('}') {
-                format!("() {body}")
-            } else {
-                format!("() {{\n{body}\n}}")
-            }
-        });
+        let function = self.functions.get(name).ok_or("not a function")?;
+        let value = on.then(|| function.export_value());
         self.function_environment
             .insert(format!("BASH_FUNC_{name}%%"), value);
         Ok(())
@@ -97,8 +125,6 @@ impl Session {
         }
         self.traced_functions.remove(name);
         self.functions.remove(name);
-        self.function_sources.remove(name);
-        self.function_definitions.remove(name);
     }
 
     pub fn function_attributes(&self, name: &str) -> String {
@@ -116,7 +142,7 @@ impl Session {
     }
 
     pub fn print_function(&self, out: &mut impl Write, name: &str) -> io::Result<()> {
-        let body = self.function_definitions[name].text();
+        let body = self.functions[name].definition.text();
         writeln!(out, "{name} () \n{body}")?;
         let flags = self.function_attributes(name);
         if flags.len() > 1 {

@@ -131,19 +131,13 @@ pub(super) fn run(
                     continue;
                 }
                 if flags.function_names && !flags.print && session.shopt.extdebug {
-                    let source = session
-                        .function_sources
-                        .get(name)
-                        .map(String::as_str)
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or("environment");
-                    if writeln!(
-                        out,
-                        "{name} {} {source}",
-                        session.function_definitions[name].line
-                    )
-                    .is_err()
-                    {
+                    let function = &session.functions[name];
+                    let source = if function.source.is_empty() {
+                        "environment"
+                    } else {
+                        &function.source
+                    };
+                    if writeln!(out, "{name} {} {source}", function.definition.line).is_err() {
                         return crate::Flow::Continue(1);
                     }
                     continue;

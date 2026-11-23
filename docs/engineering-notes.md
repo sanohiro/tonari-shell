@@ -1,5 +1,25 @@
 # Engineering notes / 開発知見
 
+## 2026-11-23 · What survives stripping / strip 後に残るもの
+
+Cargo's release profile already strips symbols. Inspect the shipped ELF with `llvm-readelf -SW` and the Mach-O with `otool -l`. The Linux binary has no `.symtab` or `.debug_*` sections. The Mac binary has no `__DWARF` segment. To attribute machine code, produce a separate link map using the same compiler and release settings, with symbols retained in the inspection build. On x86-64, 95,770 of the previous 1,148,345 bytes of `.text` came from named input sections in musl's `libc.a`. The largest remaining contributions included Tonari's builtin implementations, parser and execution code. [Cargo strip](https://doc.rust-lang.org/cargo/reference/profiles.html#strip) · [Measured sizes](benchmarks.md#release-footprint)
+
+旧 Linux x86-64 配布版の機械語のうち、静的リンクした musl に由来するのは約8.3%でした。strip 後にも、Rust のパニック時にアドレスから関数名や行番号を復元するための機械語が残ります。配布用の標準ライブラリでは `backtrace-trace-only` を指定してこの処理を外しました。発生場所を出すためのファイル名や行番号は、診断メッセージの一部として残ります。開発用の通常の Cargo ビルドでは従来どおりの標準ライブラリを使います。[配布ビルド設定](../tools/build-release.sh)
+
+The distribution build retains panic locations and frame capture and omits in-process resolution of addresses to names and lines. To check the actual diagnostic, ignore SIGPIPE, close the reader on stdout before executing `--version` and set `RUST_BACKTRACE=full`. Both the previous and new macOS arm64 and Linux x86-64 releases printed the Rust source location and the broken-pipe error. Neither emitted stack frames on that path. Shell introspection such as `BASH_SOURCE` reports shell script locations independently. [Regression tests](../tests/shell.py)
+
+Store the parsed function body, definition range and source filename in one reference-counted record. An active call holds its record even if a sourced script redefines and then removes the same name. The regression test checks the source reported by each call after these mutations.
+
+関数の本体、定義範囲、定義元を1個のレコードにまとめると、定義時と呼び出し時の検索回数が減ります。呼び出し中はそのレコードを保持するので、同名の関数が別のファイルで再定義され、さらに削除されても、元の呼び出しの `BASH_SOURCE[0]` は正しいファイルを指します。環境に export する表は、親から渡された表現と削除状態を保存するため別途保持します。
+
+For repeated definitions in sourced files, parse the current line before scanning buffered lines for a closing delimiter. Complete one-line definitions can execute immediately. An incomplete header can still use the buffered compound-command parser. Verify the cost with the `function-definitions` and `function-redefinitions` cases of `tools/bench_scripts.py --timing started`. Both cases source 2,000 definitions and check the value from the last definition. [Script benchmarks](../tools/bench_scripts.py)
+
+source したファイルの1行が構文として完結していれば、次の閉じ括弧を探す先読みも省けます。複数行の構文だけが後続行の一括解析を使います。2,000個の異なる関数を定義する場合と、同名の関数を2,000回再定義する場合を個別に測りました。[実測値](benchmarks.md#release-footprint)
+
+The arm64 distributions now use `opt-level=2`. Removing the symbolizer made the faster interpreter smaller than each reference Bash executable. The native-arm64 arithmetic workload justified the extra machine code, while typed-key and completion measurements were similar. On translated amd64, `opt-level=s` gave faster startup and history search. arm64 はサイズ増を許容してスクリプト処理を高速化し、x86-64 は入力と起動の実測で優れた設定を選びました。[Profile comparison](benchmarks.md#release-footprint)
+
+When comparing signed Mach-O binaries, stage each revision under a fresh inode. Overwriting an executed test copy in place produced SIGKILL on launch despite a successful `codesign --verify --strict`. Atomically replacing it with an identical fresh copy restored execution. macOS の計測用コピーを更新するときも、配布処理と同じ一時ファイル作成と rename を使うと、この問題を避けられます。[Staging script](../tools/stage.sh)
+
 ## 2026-11-23 · Login allocation and history search / ログイン時のメモリ確保と履歴検索
 
 The static Linux runtime increased login latency in the first build. Tracing the shell process on Debian arm64 showed 101 `mmap` and 97 `munmap` calls for `--login -ic :`. Using the pure Rust `dlmalloc` crate for Rust allocations reduced this to five and one in the isolated allocator trial. The final distribution binary made five mappings and zero unmaps in a repeat on each distribution. With the previous release compiler and prebuilt standard library on arm64, this isolated change cost 10,648 bytes. Registration of the crate's fork handlers happens once, before the first allocation on its heap. The release routes blocks of 256 KiB or more to Rust’s System allocator backed by static musl. A resize crossing that boundary copies only the shared prefix and leaves the old allocation intact on failure. This released the 16 MiB variable's pages immediately on unset. A stress run forked 128 children that each allocated memory while four parent threads continuously allocated and freed it. The Linux executable still has zero shared library dependencies. Run `cargo test --locked --test allocator_fork` on a musl host. [Fork regression test](../tests/allocator_fork.rs) · [Allocator fork contract](https://docs.rs/dlmalloc/0.2.14/dlmalloc/fn.enable_alloc_after_fork.html) · [Measurements](benchmarks.md#release-latency)

@@ -374,21 +374,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 eprintln!("tonari: {name}: readonly function");
                 return Flow::Continue(1);
             }
-            session
-                .function_definitions
-                .insert(name.clone(), definition);
-            session.function_sources.insert(
-                name.clone(),
-                session
-                    .source_names
-                    .last()
-                    .cloned()
-                    .unwrap_or_else(|| "environment".into()),
-            );
-            if session.allexport || session.function_exported(&name) {
-                let _ = session.export_function(&name, true);
-            }
-            session.functions.insert(name, std::rc::Rc::new(body));
+            session.define_function(name, body, definition);
             Flow::Continue(0)
         }
     }
@@ -455,15 +441,10 @@ pub fn call_function(session: &mut Session, name: &str, args: &[String], status:
         eprintln!("tonari: {name}: function nesting limit exceeded");
         return Flow::Continue(1);
     }
-    let body = session.functions[name].clone();
-    let source = session
-        .function_sources
-        .get(name)
-        .cloned()
-        .unwrap_or_default();
+    let function = session.functions[name].clone();
     let callsite = session.current_command.clone();
     session.call_lines.push(session.line());
-    session.source_names.push(source);
+    session.source_names.push(function.source.clone());
     session.function_names.push(name.to_owned());
     session.enter_function();
     let tracked = session.shopt.extdebug;
@@ -478,8 +459,9 @@ pub fn call_function(session: &mut Session, name: &str, args: &[String], status:
         session.errtrace,
         session.functrace || session.traced_functions.contains(name),
     );
-    let flow = crate::traps::debug(session, status)
-        .unwrap_or_else(|| run_statements(session, &mut body.iter().cloned(), status, false));
+    let flow = crate::traps::debug(session, status).unwrap_or_else(|| {
+        run_statements(session, &mut function.body.iter().cloned(), status, false)
+    });
     let flow = crate::traps::returning(session, flow);
     session.traps.leave_function(hidden);
     session.positional = old;

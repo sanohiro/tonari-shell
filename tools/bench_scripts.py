@@ -31,6 +31,12 @@ sum=0
 for ((i=1; i<=4000; i++)); do add "$i"; done
 echo "$sum"
 """, "8002000"),
+    "function-definitions": (
+        "".join(f"f{i}() {{ echo {i}; }}\n" for i in range(2000)) + "f1999", "1999",
+    ),
+    "function-redefinitions": (
+        "".join(f"f() {{ echo {i}; }}\n" for i in range(2000)) + "f", "1999",
+    ),
     "strings": ("""\
 for ((i=0; i<2000; i++)); do
     path="/var/log/worker-${i}.log"

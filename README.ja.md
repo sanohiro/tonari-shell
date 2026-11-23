@@ -50,13 +50,13 @@ tools/stage.sh "$binary" "$prefix"
 
 nvm 0.40.3 と 0.40.5 をそれぞれ Tonari で読み込み、同じセッションで Node 24.1.0 と 18.13.0 を切り替え、それぞれ `node --version` で確認しました。macOS arm64 のログイン端末で Debian の bash-completion 2.16.0 と GitHub CLI 2.96.0 の補完スクリプトを読み込み、`gh iss` に Tab を押すと `gh issue ` が入力されることを確認しました。
 
-Git では起動後に別プロセスが作ったブランチを補完して切り替え、Debian の direnv 2.32.1 ではディレクトリ移動時の環境変数の設定と解除を確認しました。fzf 0.74.0 の設定を読み込み、Emacs・vi の両モードで Ctrl-T から空白と日本語を含むファイル名を選択できました。エディターでは `bind -x`、キーマクロ、`INPUTRC`、初期値を編集できる `read -e -i` が使えます。スクリプトでは `select`、`time`、`coproc` に対応しました。`exec {log}>file` で確保した記述子は変数を介して使用・解放できます。`shopt -s nocasematch` は `case`、`[[ ]]`、変数の文字列置換、補完フィルターに適用されます。複雑な Readline 操作、ファイル名展開の `nocaseglob`、Bash 5.3 の展開構文には差が残ります。Debian の x86-64-v3 版は QEMU 上で統合テスト124件を通過しました。x86-64 実機での性能、WSL2 での検証、起動設定の解析結果を永続化するキャッシュが残っています。Debian・Ubuntu の arm64 では、一時アカウントに登録した Tonari でログインからログアウトまで確認しました。[機能ごとの結果](docs/compatibility.md)
+Git では起動後に別プロセスが作ったブランチを補完して切り替え、Debian の direnv 2.32.1 ではディレクトリ移動時の環境変数の設定と解除を確認しました。fzf 0.74.0 の設定を読み込み、Emacs・vi の両モードで Ctrl-T から空白と日本語を含むファイル名を選択できました。エディターでは `bind -x`、キーマクロ、`INPUTRC`、初期値を編集できる `read -e -i` が使えます。スクリプトでは `select`、`time`、`coproc` に対応しました。`exec {log}>file` で確保した記述子は変数を介して使用・解放できます。`shopt -s nocasematch` は `case`、`[[ ]]`、変数の文字列置換、補完フィルターに適用されます。複雑な Readline 操作、ファイル名展開の `nocaseglob`、Bash 5.3 の展開構文には差が残ります。Debian の x86-64-v3 版は QEMU 上で統合テスト125件を通過しました。x86-64 実機での性能、WSL2 での検証、起動設定の解析結果を永続化するキャッシュが残っています。Debian・Ubuntu の arm64 では、一時アカウントに登録した Tonari でログインからログアウトまで確認しました。[機能ごとの結果](docs/compatibility.md)
 
 ## 速度とサイズ
 
 機能互換の基準は Debian 13 の GNU Bash 5.2.37 と Ubuntu 26.04 の 5.3.9 です。シェル自身の処理は Bash の所要時間の半分、遅くても 3 分の 2 を目指します。ごく短い単発処理や、共通の OS 処理・待ち時間が大半を占める処理は、Bash と同程度なら許容します。起動・外部コマンド・パイプ・反復実行を個別に計測し、macOS 標準の Bash 3.2 とも比較します。[計測結果・バイナリサイズ・ビルド条件](docs/benchmarks.md)
 
-Linux の arm64 版と x86-64-v3 版は、ともに musl を静的リンクした実行ファイル1本で配布します。実行環境に glibc、動的ローダー、musl パッケージは不要です。macOS arm64 版が直接リンクする共有ライブラリは libSystem だけです。[配布サイズと起動の実測](docs/benchmarks.md#release-latency)
+Linux の arm64 版と x86-64-v3 版は、ともに musl を静的リンクした実行ファイル1本で配布します。実行環境に glibc、動的ローダー、musl パッケージは不要です。macOS arm64 版が直接リンクする共有ライブラリは libSystem だけです。[配布サイズと起動の実測](docs/benchmarks.md#release-footprint)
 
 ## 開発
 

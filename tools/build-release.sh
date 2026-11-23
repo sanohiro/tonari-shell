@@ -68,8 +68,13 @@ case "$host" in
 esac
 
 if [ "$distribution" = yes ]; then
-    std_features=backtrace
-    case "$host" in x86_64-*-linux-*) std_features=optimize_for_size,backtrace ;; esac
+    # Shipped binaries are stripped. Keep panic locations and frame capture
+    # without embedding an object-file reader and DWARF symbolizer.
+    std_features=backtrace,backtrace-trace-only
+    case "$host" in
+        x86_64-*-linux-*) std_features=optimize_for_size,$std_features ;;
+        aarch64-*) level=2 ;;
+    esac
     set -- -Zbuild-std=std,panic_abort "-Zbuild-std-features=$std_features" "$@"
 fi
 export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }$tuning"
@@ -85,6 +90,10 @@ case "$host" in
         if [ "$(lipo -archs "$binary")" != arm64 ] ||
             [ "$(otool -L "$binary" | awk 'NR > 1 {print $1}')" != /usr/lib/libSystem.B.dylib ]; then
             echo "Expected a macOS arm64 executable linked only to libSystem: $binary" >&2
+            exit 1
+        fi
+        if [ "$distribution" = yes ] && otool -l "$binary" | grep -Eq 'segname +__DWARF$'; then
+            echo "Distribution executable contains DWARF debug information: $binary" >&2
             exit 1
         fi
         codesign --verify --strict "$binary"
@@ -141,11 +150,16 @@ case "$host" in
             x86_64-*) machine='Advanced Micro Devices X86-64' ;;
             aarch64-*) machine='AArch64' ;;
         esac
-        headers=$(LC_ALL=C readelf -hlWd "$binary")
+        headers=$(LC_ALL=C readelf -hSlWd "$binary")
         if ! printf '%s\n' "$headers" | grep -Eq "Machine: +$machine$" ||
             ! printf '%s\n' "$headers" | grep -Eq 'FLAGS_1.*PIE' ||
             printf '%s\n' "$headers" | grep -Eq 'INTERP|\(NEEDED\)'; then
             echo "Expected a $machine static PIE with no shared libraries: $binary" >&2
+            exit 1
+        fi
+        if [ "$distribution" = yes ] &&
+            printf '%s\n' "$headers" | grep -Eq '\] +(\.symtab |\.z?debug_)'; then
+            echo "Distribution executable contains symbols or debug sections: $binary" >&2
             exit 1
         fi
         ;;

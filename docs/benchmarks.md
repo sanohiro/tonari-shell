@@ -1,5 +1,48 @@
 # Startup and execution / 起動と実行性能
 
+<a id="release-footprint"></a>
+
+## 2026-11-23 · Stripped executable size and sourced functions / 配布サイズと関数定義の読み込み
+
+The distribution builds already stripped symbols. Rebuilding the Rust standard library without in-process backtrace symbolization released space for faster arm64 code. Compare the trial sizes at equal optimization levels, then the two candidate profiles on the same source. Sizes cover the executable alone. The reference is GNU Bash 5.2.37 on the Mac and the distribution package on Debian. [Build settings](../tools/build-release.sh) · [Link-map analysis](engineering-notes.md)
+
+| Target / 対象 | Previous Tonari (`9a095b8`) | Trace-only change at `-Os` | Full changes at `-Os` | Full changes at `-O2` | Shipped (bytes) | Bash (bytes) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| macOS arm64 | 1,103,088 | 986,768 | 986,720 | 1,184,480 | **1,184,480** | 1,208,904 |
+| Debian x86-64-v3 | 1,297,424 | 1,158,736 | 1,153,872 | 1,553,424 | **1,153,872** | 1,298,416 |
+| Debian arm64 | 1,218,640 | 1,089,160 | 1,085,232 | 1,353,392 | **1,353,392** | 1,412,096 |
+
+全配布版で strip を確認しました。旧 x86-64 版の機械語 1,148,345 バイトのうち musl 由来は 95,770 バイトでした。Rust のバックトレース・DWARF 解析関連のシンボルには約 102 KB ありました。後者は LTO 後の関数名に基づく概算です。配布版の機械語は x86-64 で 1,017,404 バイト、macOS で 1,018,792 バイトです。Debian の Bash の機械語は 819,477 バイトで、libc と libtinfo は共有ライブラリから読み込みます。
+
+Both Linux releases executed a builtin pipeline through each entry point in a chroot containing only the staged distribution. ELF inspection confirmed static PIE with no interpreter or shared library requirements. The Mac executable passed signature verification and directly links only to libSystem. The release SHA-256 fingerprints are `77291dd9800aaad38f45a46080855990aae42249bd53b2e406c3f8c900409c30` (Mac), `2014c336f28b0bc4cbb011fa92be904f5d6465a44c356ae2d018defa923af74d` (x86-64), and `f5aced640afff70fea714499b8e151d9f9907350ca0633c569c95a7aa8d977c1` (Linux arm64).
+
+Each cell gives **`-Os` / `-O2` / Bash** in milliseconds. Each executable ran 31 times in rotating order after four warmups on an M1. Debian arm64 ran in a native-arm64 VM. Debian amd64 used translation. All Linux executables were on the guest filesystem. The first prompt used a controlling PTY without startup files. Script timings start after the readiness handshake and check stdout, stderr and exit status. The Mac glob used `en_US.UTF-8` and Linux used `C.UTF-8`.
+
+| Workload / 操作 | macOS arm64 | Debian arm64 | Debian x86-64 (translated) |
+| --- | ---: | ---: | ---: |
+| Start and exit | 4.173 / 4.026 / 7.687 | 0.294 / 0.299 / 0.716 | 11.597 / 13.585 / 32.959 |
+| Exec to first prompt | 3.249 / 3.224 / 6.711 | 0.302 / 0.304 / 0.828 | 7.548 / 8.645 / 32.695 |
+| Source 2,000 distinct definitions | 3.254 / 2.971 / 3.845 | 3.022 / 3.036 / 4.013 | 12.723 / 13.552 / 10.226 |
+| Source 2,000 redefinitions | 2.744 / 2.568 / 3.360 | 2.413 / 2.348 / 2.792 | 10.907 / 12.122 / 8.851 |
+| Call a function 4,000 times | 8.858 / 7.877 / 17.843 | 7.723 / 7.555 / 26.044 | 23.453 / 24.035 / 35.074 |
+| Arithmetic loop | 7.418 / 5.672 / 15.361 | 5.610 / 4.439 / 23.489 | 15.892 / 15.540 / 30.134 |
+| Glob 4,096 UTF-8 filenames | 7.188 / 7.024 / 17.440 | 1.800 / 1.705 / 3.814 | 10.331 / 12.224 / 10.539 |
+| Echo command substitutions | 0.659 / 0.617 / 55.430 | 0.229 / 0.219 / 15.176 | 9.430 / 10.664 / 151.313 |
+| 16 external commands | 21.508 / 21.134 / 35.268 | 3.554 / 3.560 / 4.894 | 162.503 / 165.127 / 173.851 |
+
+At equal `-Os` settings, eliminating lookahead on complete source lines reduced the 2,000 distinct definitions from 7.506 to 3.036 ms on the Mac, 6.816 to 3.019 ms on Debian arm64 and 21.410 to 13.293 ms under amd64 translation. The original binaries took 8.077, 7.262 and 19.525 ms respectively in that series. On both arm64 targets the selected profile beats Bash on this case while still exceeding two-thirds of Bash time. Under translation it takes longer than Bash. Native x86-64 timings remain open.
+
+| Interactive workload (median / p95 ms) | macOS `-Os` | macOS `-O2` | Debian x86-64 `-Os` | Debian x86-64 `-O2` |
+| --- | ---: | ---: | ---: | ---: |
+| Typed key, recent prefix | 0.015 / 0.028 | 0.014 / 0.025 | 0.069 / 0.106 | 0.069 / 0.358 |
+| Oldest Ctrl-R match, 1M entries | 7.404 / 8.751 | 6.974 / 9.602 | 9.986 / 10.649 | 11.288 / 12.774 |
+| File completion, 100k files | 40.147 / 49.304 | 40.763 / 50.709 | 17.467 / 28.860 | 17.206 / 24.345 |
+| PATH completion, 100k commands | 41.001 / 57.704 | 40.776 / 50.892 | 18.255 / 22.137 | 17.981 / 19.753 |
+
+The first 21-run Mac comparison gave file-completion p95 of 49 / 155 ms. Reversing binary order and taking 61 samples gave the values above. The Debian arm64 61-run repeat gave file-completion median / p95 of 16.272 / 20.747 ms at `-Os` and 15.863 / 23.515 ms at `-O2`. Oldest Ctrl-R search used 17 sessions per Mac build and 13 on each Linux platform. Translated x86-64 completion used 15 sessions per build. [History harness](../tools/bench_history.py) · [Completion harness](../tools/bench_completion.py)
+
+arm64 はスクリプトが速くなる `-O2` を採用しました。入力や10万件の補完では、中央値はほぼ同じでした。x86-64 の変換実行では `-Os` の方が起動・履歴検索・ファイル名展開で速いため、こちらを採用しました。サイズの上限は設けず、キー入力・補完の遅延と実行速度を優先しています。
+
 <a id="release-latency"></a>
 
 ## 2026-11-23 · Distribution binaries and interactive latency / 配布バイナリと入力応答

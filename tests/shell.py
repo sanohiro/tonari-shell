@@ -156,6 +156,14 @@ export -f f; unset -f f
                 self.assertEqual((result.returncode, result.stdout, result.stderr),
                                  (0, "a:雪 x\nb:🌸 y\nabsent\ngone\n".encode(), b""), (parent, child))
 
+    def test_active_function_keeps_its_source_across_redefinition(self):
+        (self.cwd / "first").write_text(
+            'f() { source ./second; f; printf "original %s\\n" "${BASH_SOURCE[0]}"; }\n')
+        (self.cwd / "second").write_text(
+            '\nf() { printf "new %s\\n" "${BASH_SOURCE[0]}"; unset -f f; }\n')
+        self.compare('source ./first; f; type -t f || echo gone', 0,
+                     b"new ./second\noriginal ./first\ngone\n")
+
     def test_caller_lines_and_debug_inheritance(self):
         script = self.cwd / "calls.sh"
         script.write_text('inner(){\n  caller; caller 0; caller 1; echo "${BASH_LINENO[*]}:$LINENO"\n}\n'

@@ -10,6 +10,8 @@ Use the Rust standard library or a pure Rust crate for individual algorithms, in
 
 # Checking Bash compatibility and speed
 
+Prefer responsive typing, history and completion, fast startup and lower execution times when selecting a release profile. Record the executable size alongside those measurements. A modest size increase is acceptable for a meaningful speed improvement. At comparable performance, choose the smaller binary.
+
 Use the reference-derived [feature audit](docs/compatibility.md) when changing shell behavior. Add a direct Bash witness for new functionality, including its observable result. Compare release timing on the same machine and filesystem after the behavior matches. Aim for 1/2 of Bash time, with 2/3 as the upper target for shell work. Accept parity for very short operations and workloads whose elapsed time is dominated by the same OS operation or wait. Use absolute times and run-to-run variation to judge close results. Where a short operation repeats in a script, also measure its throughput in a running shell. Record outstanding differences and target misses in the matrix. Before updating the performance baseline, run the previous-snapshot comparison and inspect newly failing names and modes.
 
 # Intentional differences from Bash

@@ -220,7 +220,9 @@ fn run(
             input.clear();
             continue;
         }
-        let result = if line_start == 0
+        let mut result = parser::session_source_at(text, n == 0, session, base_line);
+        if matches!(result, Err(parser::Error::Incomplete(_)))
+            && line_start == 0
             && !shared_offset
             && !session.verbose
             && session.source_depth > 0
@@ -229,10 +231,8 @@ fn run(
         {
             reader.consume(consumed);
             base_line += lines;
-            Ok(program)
-        } else {
-            parser::session_source_at(text, n == 0, session, base_line)
-        };
+            result = Ok(program);
+        }
         match result {
             Err(parser::Error::HereDoc(hint)) if n != 0 => {
                 here_doc = Some(hint);
