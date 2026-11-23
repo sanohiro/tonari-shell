@@ -6,6 +6,13 @@ use std::path::PathBuf;
 
 use crate::Session;
 
+pub(crate) struct SearchQuery {
+    pub text: String,
+    pub skip: usize,
+    // Earliest prefix produced by this edit, at a UTF-8 boundary.
+    pub shortest: usize,
+}
+
 #[derive(Default)]
 pub struct History {
     shared: JournalEntries,
@@ -547,21 +554,25 @@ impl History {
         &mut self,
         session: &Session,
         view: &mut View,
-        queries: &[(String, usize)],
+        queries: &[SearchQuery],
         waiting: &dyn Fn() -> bool,
     ) -> Result<Option<String>, ()> {
         if !self.ensure(session, view, false, waiting) {
             return Err(());
         }
         if *view == View::Recent {
-            let (query, skip) = queries.last().unwrap();
-            let mut remaining = *skip;
+            let last = queries.last().unwrap();
+            let query = &last.text;
+            let mut remaining = last.skip;
             if let Some(found) = self.search_query(&[], query, &mut remaining, waiting)? {
                 return Ok(Some(found.to_owned()));
             }
             if !waiting()
                 && let Ok(found) = self.older_match(session, query, false, remaining, waiting)
-                && (found.is_some() || queries.len() == 1 && !self.shared.ends.is_empty())
+                && (found.is_some()
+                    || queries.len() == 1
+                        && last.shortest == query.len()
+                        && !self.shared.ends.is_empty())
             {
                 return Ok(found);
             }
@@ -571,12 +582,40 @@ impl History {
         }
         // A failed refinement keeps the last successful result, even if keys
         // arrived before the previous query had completed.
-        for (query, skip) in queries.iter().rev() {
-            let mut remaining = *skip;
-            if let Some(found) =
-                self.search_query(session.history_lines(), query, &mut remaining, waiting)?
-            {
+        for query in queries.iter().rev() {
+            let find = |end| {
+                let mut remaining = query.skip;
+                self.search_query(
+                    session.history_lines(),
+                    &query.text[..end],
+                    &mut remaining,
+                    waiting,
+                )
+            };
+            if let Some(found) = find(query.text.len())? {
                 return Ok(Some(found.to_owned()));
+            }
+            if query.shortest < query.text.len() {
+                // A hit for a prefix implies a hit for every shorter prefix with
+                // the same skip count. Find the longest one without copying prefixes.
+                let lengths: Vec<_> = query.text[query.shortest..]
+                    .char_indices()
+                    .map(|(offset, _)| query.shortest + offset)
+                    .collect();
+                let (mut lo, mut hi) = (0, lengths.len());
+                let mut best = None;
+                while lo < hi {
+                    let mid = lo + (hi - lo) / 2;
+                    if let Some(found) = find(lengths[mid])? {
+                        best = Some(found);
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                if let Some(found) = best {
+                    return Ok(Some(found.to_owned()));
+                }
             }
         }
         Ok(None)

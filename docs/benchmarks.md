@@ -1,5 +1,36 @@
 # Startup and execution / 起動と実行性能
 
+<a id="editor-bulk-input"></a>
+
+## 2026-11-23 · Committed UTF-8 text, paste and history / 日本語入力・貼り付け・履歴・補完
+
+The PTY sends committed UTF-8 in a burst or encloses a paste in `CSI 200~` and `CSI 201~`. The timer starts before the first write to a ready shell and stops when the PTY produces the final marker. The driver drains output while writing large packets. After timing, it accepts the line and compares the entire resulting variable byte for byte. The interval excludes IME composition and terminal-emulator painting. [Benchmark driver](../tools/bench_editor_input.py) · [xterm bracketed paste](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Bracketed-Paste-Mode)
+
+Each shell starts with the same 100,000 history commands and 10,000 filename candidates. Before timing Up twice, the driver executes two lines in the active session. The second Up recalls the first of those lines. Ctrl-R searches for the oldest command, with a recent decoy matching all but the final scalar of the query. Tab receives the whole UTF-8 prefix immediately before the Tab key. Timing includes reading each fresh shell's history or directory as needed. The paste sizes exclude the assignment prefix, final four-byte scalar and protocol markers.
+
+Each cell gives previous Tonari / adopted Tonari / Bash 5.2.37 median milliseconds. Three warmups preceded 23 samples per binary on native M1 macOS, 21 in the native Debian arm64 VM and 11 on Debian x86-64 under Rosetta. Shell order rotated after each sample. The translated lane omitted the 1 MiB paste.
+
+| Workload | macOS arm64 | Debian arm64 | Debian x86-64 (translated) |
+| --- | ---: | ---: | ---: |
+| One emoji | 0.064 / 0.065 / 0.087 | 0.096 / 0.104 / 0.101 | 0.704 / 0.437 / 1.559 |
+| 17 Unicode scalars | 0.122 / 0.070 / 0.146 | 0.145 / 0.118 / 0.153 | 0.759 / 0.457 / 1.594 |
+| 257 Unicode scalars | 2.152 / 0.465 / 1.338 | 2.318 / 0.328 / 0.945 | 3.221 / 0.675 / 2.823 |
+| 16 KiB paste | 2.365 / 2.238 / 17.417 | 2.250 / 1.985 / 20.232 | 3.633 / 2.821 / 21.174 |
+| 1 MiB paste | 154.822 / 139.979 / 1144.632 | 162.580 / 136.785 / 1464.821 | — |
+| Up twice, 100k history entries | 0.048 / 0.046 / 0.064 | 0.094 / 0.100 / 0.110 | 0.174 / 0.245 / 0.490 |
+| Ctrl-R, 100k entries | 0.945 / 0.935 / 0.705 | 0.997 / 0.910 / 1.075 | 4.256 / 4.074 / 3.519 |
+| Tab, 10k files | 3.875 / 3.849 / 7.375 | 1.450 / 1.425 / 1.517 | 3.497 / 3.838 / 5.979 |
+
+On macOS, p95 for the 257-scalar commit, 1 MiB paste, Ctrl-R and Tab, in the same binary order, was 2.355 / 0.494 / 1.389 ms, 166.298 / 156.583 / 1196.291 ms, 1.229 / 1.132 / 0.831 ms, 3.998 / 4.078 / 7.565 ms. In a separate empty-history check, all 21 one-write sessions on the M1 produced 258 full redraws in the previous build and one in the adopted build for the 257-scalar commit. For 17 scalars the counts were 18 and one. The assignment prefix is included in these counts.
+
+The cold oldest-entry Ctrl-R exceeded two-thirds of Bash time on all three lanes. Bash loads its history before the first prompt and Tonari reads the journal on demand. Other misses on native arm64 were the single emoji and session recall on both operating systems, and the 17-scalar commit and Tab on Debian. All 1,408 macOS, 1,522 Debian and 1,553 Ubuntu compatibility verdicts matched the previous snapshot. Distribution sizes were 1,184,608 bytes on macOS arm64 (+16), 1,363,832 on Linux arm64 (+4,032) and 1,163,728 on Linux x86-64-v3 (+3,456).
+
+確定済みの日本語を受け取った時点から、編集後の表示が疑似端末に届くまでを計測します。通常入力ではすでに届いた範囲をまとめて処理します。ブラケットペーストでは末尾の改行も文字列に含め、終端を受け取ってから1回で挿入します。終端直後の1バイトが Enter の可能性があるため、端末からの読み取りは最大7バイトに制限します。これにより、同じ書き込みで届いた後続データを外部コマンドが自分で読めます。[実装](../src/editor.rs) · [疑似端末テスト](../tests/shell.py)
+
+~~~sh
+python3 tools/bench_editor_input.py ./previous ./current /path/to/bash --large --runs 23
+~~~
+
 <a id="literal-file-capture"></a>
 
 ## 2026-11-23 · File command substitution / ファイルを読むコマンド置換

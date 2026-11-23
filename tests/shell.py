@@ -2011,12 +2011,101 @@ f; printf 'END\0'; printf '%s\0' names/*'''
                 os.write(fd, b"\x12foo\\ bar\r")
                 self.read_until(fd, b"selected=second-foo bar\r\n")
 
+    def test_utf8_burst_at_cursor_and_split_character(self):
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"v='!'" + b"\x02\x02")
+        self.read_until(fd, b"\x1b[11C")
+        word = "東京🌱e\u0301" * 20
+        # Leave the next scalar deliberately incomplete. The valid prefix must
+        # be visible before we write the rest.
+        os.write(fd, word.encode() + b"END\xf0\x9f")
+        emitted = self.read_until(fd, b"END!'")
+        self.assertLess(emitted.count(b"\x1b[J"), 10)
+        os.write(fd, b"\x98\xba\x05; printf %s \"$v\" > result\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "result").read_text(), word + "END😺!")
+
+    def test_bulk_history_completion_and_foreground_input(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                def enter(source):
+                    os.write(fd, source.encode() + b"\r")
+                    self.read_until(fd, b"\x1b[?2004h")
+                enter("f() { printf %s \"$1$2\" > result; }; pick() { echo x >> calls; COMPREPLY=(\"$2完了\"); }; complete -F pick f")
+                os.write(fd, "f 日本語".encode() + b"\t" + "🌱".encode() + b"\r")
+                self.read_until(fd, b"\x1b[?2004h")
+                self.assertEqual((self.cwd / "result").read_text(), "日本語完了🌱")
+                self.assertEqual((self.cwd / "calls").read_text(), "x\n")
+                (self.cwd / "calls").unlink()
+                enter("printf %s 候補 > selected")
+                enter("printf %s 候 > selected")
+                os.write(fd, b"\x12" + "候補無🌱".encode() + b"\r")
+                self.read_until(fd, b"\x1b[?2004h")
+                self.assertEqual((self.cwd / "selected").read_text(), "候補")
+                (self.cwd / "external").unlink(missing_ok=True)
+                enter("printf %s 別 > selected")
+                os.write(fd, b"\x12\x1b[200~" + "候補".encode() + b"\x1b[201~\r")
+                self.read_until(fd, b"\x1b[?2004h")
+                self.assertEqual((self.cwd / "selected").read_text(), "候補")
+                packet = b"\x1b[200~" + "v=日本; /bin/sh -c 'IFS= read -r x; printf %s \"$x\" > external'".encode()
+                os.write(fd, packet + b"\x1b[201~\r" + "子の入力🌱\n".encode())
+                self.read_until(fd, b"\x1b[?2004h")
+                self.assertEqual((self.cwd / "external").read_text(), "子の入力🌱")
+
+    def test_utf8_burst_respects_custom_keys_and_paste_bypasses_them(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        (self.cwd / "inputrc").write_text('"@@": "置換"\n')
+        self.env["INPUTRC"] = str(self.cwd / "inputrc")
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                path = self.cwd / "result"
+                path.unlink(missing_ok=True)
+                packet = "v='前@@後".encode() + b"\x1b[200~" + "@@\t雪".encode() + b"\x1b[201~"
+                os.write(fd, packet + b"'\x05; printf %s \"$v\" > result\r")
+                self.read_until(fd, b"\x1b[?2004h")
+                self.assertEqual(path.read_text(), "前置換後@@\t雪")
+
+    def test_accepts_full_utf8_history_suggestion_and_recalls_line(self):
+        fd = self.terminal_session(editing=True)
+        command = "printf '%s' '一括" + "日本🌱" * 21 + "終' > recalled"
+        os.write(fd, command.encode() + b"\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        expected = ("一括" + "日本🌱" * 21 + "終").encode()
+        for keys in (b"\x1b[A", "printf '%s' '一括".encode() + b"\x1b[C"):
+            with self.subTest(keys=keys):
+                (self.cwd / "recalled").unlink()
+                os.write(fd, keys + b"\r")
+                self.read_until(fd, b"\x1b[?2004h")
+                self.assertEqual((self.cwd / "recalled").read_bytes(), expected)
+
+    def test_search_paste_is_literal(self):
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"\x12\x1b[200~" + "雪\t🌱".encode() + b"\r\ntouch should-not-exist\r\x1b[A\x1b[201~")
+        display = self.read_until(fd, b"should-not-exist\\n\\u{1b}[A': ")
+        self.assertIn("雪\\t🌱\\ntouch".encode(), display)
+        os.write(fd, b"\x07")
+        self.read_until(fd, PROMPT)
+        self.assertFalse((self.cwd / "should-not-exist").exists())
+
     def test_paste_boundary_and_input_for_foreground_read(self):
         fd = self.terminal_session(editing=True)
         os.write(fd, b"\x1b[200~v=" + b"x" * 512 + b"\x1b[20")
         os.write(fd, b"1~; IFS= read -r reply; echo \"$reply:${#v}\" > pasted-result\rpayload\n")
         self.read_until(fd, b"\x1b[?2004h")
         self.assertEqual((self.cwd / "pasted-result").read_text(), "payload:512\n")
+
+        # Exercise every end-marker offset within the seven-byte read. The first
+        # key after it accepts the command. The external reader owns the next byte.
+        for padding in range(7):
+            with self.subTest(padding=padding):
+                child = b"/bin/sh -c 'IFS= read -r v; printf %s \"$v\" > child'"
+                value = f"payload-{padding}".encode()
+                os.write(fd, b"\x1b[200~" + b" " * padding + child + b"\x1b[201~\r" + value + b"\n")
+                self.read_until(fd, b"\x1b[?2004h")
+                self.assertEqual((self.cwd / "child").read_bytes(), value)
 
     def test_editor_reads_complete_history_rows_while_a_writer_appends(self):
         journal = self.cwd / ".local/state/tonari/history"

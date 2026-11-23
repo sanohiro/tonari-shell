@@ -7,7 +7,7 @@ use unicode_width::UnicodeWidthChar;
 
 use crate::{
     Session, complete,
-    history::{History, View},
+    history::{History, SearchQuery, View},
 };
 
 pub enum Input {
@@ -87,25 +87,94 @@ impl Keys {
         byte()
     }
 
-    // A burst of ordinary keys needs one redraw. Stop at the first binding
-    // or multibyte character and leave all later bytes on the terminal.
-    fn append_burst(&mut self, text: &mut String, session: &Session) {
-        if !self.queued.is_empty() || session.bindings.map == Keymap::Command {
-            return;
+    // VMIN and VTIME are zero. Only consume bytes belonging to this edit:
+    // a foreground child can read the terminal immediately after accept-line.
+    fn immediate(&mut self) -> Option<u8> {
+        if let Some(b) = self.queued.pop_front() {
+            return Some(b);
         }
-        for _ in 0..128 {
-            let mut b = 0u8;
-            // The editor's VMIN and VTIME are both zero.
-            if unsafe { libc::read(0, std::ptr::addr_of_mut!(b).cast(), 1) } != 1 {
-                break;
-            }
+        let mut b = 0u8;
+        if unsafe { libc::read(0, std::ptr::addr_of_mut!(b).cast(), 1) } == 1 {
             self.expansions = 0;
-            if !(b' '..=b'~').contains(&b) || session.bindings.custom_prefix(&[b]) {
-                self.queued.push_back(b);
+            Some(b)
+        } else {
+            None
+        }
+    }
+
+    fn character(&mut self, first: u8) -> io::Result<Option<char>> {
+        let width = match first {
+            0..=127 => return Ok(Some(char::from(first))),
+            0xc2..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf4 => 4,
+            _ => return Ok(None),
+        };
+        let mut bytes = [first; 4];
+        for slot in &mut bytes[1..width] {
+            let b = if let Some(b) = self.immediate() {
+                b
+            } else if let Some(b) = self.get()? {
+                b
+            } else {
+                return Ok(None);
+            };
+            if b & 0xc0 != 0x80 {
+                self.queued.push_front(b);
+                return Ok(None);
+            }
+            *slot = b;
+        }
+        Ok(std::str::from_utf8(&bytes[..width])
+            .ok()
+            .and_then(|s| s.chars().next()))
+    }
+
+    fn insert_burst(&mut self, first: u8, session: &Session, out: &mut String) -> io::Result<()> {
+        out.clear();
+        let Some(c) = self.character(first)? else {
+            return Ok(());
+        };
+        out.push(c);
+        if session.bindings.map == Keymap::Command {
+            return Ok(());
+        }
+        // Gather an immediately available run without waiting for more keys.
+        // A bound keeps long streams responsive to signals and screen updates.
+        let mut bytes = [0; 4096];
+        let mut n = 0;
+        while n < bytes.len() {
+            let Some(b) = self.immediate() else { break };
+            if b < 32 || b == 127 || session.bindings.custom_prefix(&[b]) {
+                self.queued.push_front(b);
                 break;
             }
-            text.push(char::from(b));
+            bytes[n] = b;
+            n += 1;
         }
+        let mut rest = &bytes[..n];
+        loop {
+            match std::str::from_utf8(rest) {
+                Ok(text) => {
+                    out.push_str(text);
+                    break;
+                }
+                Err(e) => {
+                    let (valid, tail) = rest.split_at(e.valid_up_to());
+                    out.push_str(std::str::from_utf8(valid).unwrap());
+                    if let Some(invalid) = e.error_len() {
+                        rest = &tail[invalid..];
+                    } else {
+                        // Display the valid prefix before waiting for a split scalar.
+                        for &b in tail.iter().rev() {
+                            self.queued.push_front(b);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn binding(&mut self, first: u8, session: &Session) -> io::Result<(Binding, bool)> {
@@ -147,20 +216,20 @@ impl Keys {
         ))
     }
 
-    // Read only as far as the next possible end marker. Bytes following a
-    // pasted command may belong to an external program reading the same tty.
+    // After the end marker one byte still belongs to the editor. It could be
+    // Enter, so leave everything after that byte on the tty for the next reader.
     fn paste(&mut self) -> io::Result<String> {
         const END: &[u8; 6] = b"\x1b[201~";
         let mut data = Vec::new();
         let mut matched = 0;
-        let mut chunk = [0; END.len()];
-        loop {
+        let mut chunk = [0; END.len() + 1];
+        'paste: loop {
             if crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
                 || crate::traps::input_interrupted()
             {
                 return Err(io::ErrorKind::Interrupted.into());
             }
-            let limit = END.len() - matched;
+            let limit = chunk.len() - matched;
             let n = if self.queued.is_empty() {
                 let immediate = unsafe { libc::read(0, chunk.as_mut_ptr().cast(), limit) };
                 if immediate > 0 {
@@ -181,21 +250,38 @@ impl Keys {
                 n
             };
             data.extend_from_slice(&chunk[..n]);
-            for &b in &chunk[..n] {
+            if matched == 0 && !chunk[..n].contains(&END[0]) {
+                continue;
+            }
+            for (i, &b) in chunk[..n].iter().enumerate() {
                 matched = if b == END[matched] {
                     matched + 1
                 } else {
                     usize::from(b == END[0])
                 };
-            }
-            if matched == END.len() {
-                data.truncate(data.len() - END.len());
-                break;
+                if matched == END.len() {
+                    let following = &chunk[i + 1..n];
+                    if let Some(&key) = following.first() {
+                        self.queued.push_front(key);
+                    }
+                    data.truncate(data.len() - END.len() - following.len());
+                    break 'paste;
+                }
             }
         }
-        Ok(String::from_utf8_lossy(&data)
-            .replace("\r\n", "\n")
-            .replace('\r', "\n"))
+        if memchr::memchr(b'\r', &data).is_some() {
+            let mut after_cr = false;
+            data.retain_mut(|b| {
+                let keep = !(after_cr && *b == b'\n');
+                after_cr = *b == b'\r';
+                if after_cr {
+                    *b = b'\n';
+                }
+                keep
+            });
+        }
+        Ok(String::from_utf8(data)
+            .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
     }
 }
 fn previous(s: &str, i: usize) -> usize {
@@ -407,6 +493,7 @@ pub fn line(
     let mut draft = String::new();
     let mut search: Option<(String, usize, String)> = None;
     let mut pending_queries = Vec::new();
+    let mut inserted = String::new();
     let mut last_tab = false;
     let mut view = View::Unread;
     loop {
@@ -426,7 +513,16 @@ pub fn line(
         };
         let search_prompt;
         let visible_prompt = if let Some((query, _, _)) = &search {
-            search_prompt = format!("(reverse-i-search) `{query}': ");
+            let mut display = String::from("(reverse-i-search) `");
+            for c in query.chars() {
+                if c.is_control() {
+                    display.extend(c.escape_default());
+                } else {
+                    display.push(c);
+                }
+            }
+            display.push_str("': ");
+            search_prompt = display;
             &search_prompt
         } else {
             prompt
@@ -557,6 +653,7 @@ pub fn line(
                     cursor = text.len();
                 }
                 _ => {
+                    let mut shortest = None;
                     if action == Action::Search {
                         if !entering_search {
                             *index += 1;
@@ -565,12 +662,21 @@ pub fn line(
                         query.pop();
                         *index = 0;
                     } else if action == Action::Insert {
-                        if let Some(c) = character(&mut keys, first)? {
-                            query.push(c);
+                        keys.insert_burst(first, session, &mut inserted)?;
+                        if let Some(c) = inserted.chars().next() {
+                            shortest = Some(query.len() + c.len_utf8());
+                            query.push_str(&inserted);
                             *index = 0;
                         }
+                    } else if action == Action::Paste {
+                        query.push_str(&keys.paste()?);
+                        *index = 0;
                     }
-                    pending_queries.push((query.clone(), *index));
+                    pending_queries.push(SearchQuery {
+                        text: query.clone(),
+                        skip: *index,
+                        shortest: shortest.unwrap_or(query.len()),
+                    });
                     cursor = text.len();
                     continue;
                 }
@@ -691,7 +797,7 @@ pub fn line(
             }
             Action::Quote => {
                 if let Some(key) = keys.get()?
-                    && let Some(c) = character(&mut keys, key)?
+                    && let Some(c) = keys.character(key)?
                 {
                     text.insert(cursor, c);
                     cursor += c.len_utf8();
@@ -776,41 +882,21 @@ pub fn line(
                 }
             }
             Action::Paste => {
-                let inserted = keys.paste()?;
-                text.insert_str(cursor, &inserted);
-                cursor += inserted.len();
+                let pasted = keys.paste()?;
+                let end = cursor + pasted.len();
+                if text.is_empty() {
+                    text = pasted;
+                } else {
+                    text.insert_str(cursor, &pasted);
+                }
+                cursor = end;
             }
             Action::Insert => {
-                if let Some(c) = character(&mut keys, first)? {
-                    text.insert(cursor, c);
-                    cursor += c.len_utf8();
-                    if cursor == text.len() {
-                        keys.append_burst(&mut text, session);
-                        cursor = text.len();
-                    }
-                }
+                keys.insert_burst(first, session, &mut inserted)?;
+                text.insert_str(cursor, &inserted);
+                cursor += inserted.len();
             }
             _ => {}
         }
     }
-}
-
-fn character(keys: &mut Keys, first: u8) -> io::Result<Option<char>> {
-    let width = match first {
-        0..=127 => 1,
-        0xc2..=0xdf => 2,
-        0xe0..=0xef => 3,
-        0xf0..=0xf4 => 4,
-        _ => return Ok(None),
-    };
-    let mut bytes = [first; 4];
-    for item in &mut bytes[1..width] {
-        let Some(c) = keys.get()? else {
-            return Ok(None);
-        };
-        *item = c;
-    }
-    Ok(std::str::from_utf8(&bytes[..width])
-        .ok()
-        .and_then(|s| s.chars().next()))
 }
