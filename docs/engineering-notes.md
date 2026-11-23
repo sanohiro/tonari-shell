@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## 2026-11-23 · Matching filenames and GLOBIGNORE / ファイル名と除外条件の照合
+
+Compile each pattern component once and reuse the active shell character locale while visiting entries. A pattern with literal edges and a single star can test the prefix and suffix directly. The matched gap must fit within one pathname component when a suffix follows. A trailing star in Bash's `GLOBIGNORE` can consume a slash. For the file `Sub/K.TXT`, `GLOBIGNORE='S*'` removes it from `Sub/*`, while `GLOBIGNORE='*.TXT'` keeps it. Apply the same rule when case folding is enabled. [Implementation](../src/pattern/extended.rs) · [Measurements](benchmarks.md#nocaseglob)
+
+ディレクトリを列挙する前にパターンを準備し、各ファイルには照合だけを行います。`LC_CTYPE=C` で複雑なパターンを使う場合は、UTF-8 名をバイト単位で照合してから元の綴りを返します。大文字小文字の変換、角括弧の範囲、POSIX 文字クラス、先頭のドット、リテラル部分、複数ディレクトリ、除外条件を Bash と比較しました。macOS の同順位の名前については `strcoll("a🌱", "🌱a")` が 0 になる一例を確認し、Tonari の UTF-8 バイト順をテストに残しました。[動作例](compatibility.md#intentional-differences) · [回帰試験](../tests/shell.py)
+
 ## 2026-11-23 · What survives stripping / strip 後に残るもの
 
 Cargo's release profile already strips symbols. Inspect the shipped ELF with `llvm-readelf -SW` and the Mach-O with `otool -l`. The Linux binary has no `.symtab` or `.debug_*` sections. The Mac binary has no `__DWARF` segment. To attribute machine code, produce a separate link map using the same compiler and release settings, with symbols retained in the inspection build. On x86-64, 95,770 of the previous 1,148,345 bytes of `.text` came from named input sections in musl's `libc.a`. The largest remaining contributions included Tonari's builtin implementations, parser and execution code. [Cargo strip](https://doc.rust-lang.org/cargo/reference/profiles.html#strip) · [Measured sizes](benchmarks.md#release-footprint)

@@ -1542,7 +1542,7 @@ shopt	localvar_unset	interface only	interface only	interface only
 shopt	login_shell	interface only	interface only	interface only
 shopt	mailwarn	missing interface	missing interface	missing interface
 shopt	no_empty_cmd_completion	missing interface	missing interface	missing interface
-shopt	nocaseglob	missing interface	missing interface	missing interface
+shopt	nocaseglob	match	match	match
 shopt	nocasematch	match	match	match
 shopt	noexpand_translation	missing interface	missing interface	missing interface
 shopt	nullglob	match	match	match

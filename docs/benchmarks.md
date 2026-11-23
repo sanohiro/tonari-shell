@@ -1,5 +1,29 @@
 # Startup and execution / 起動と実行性能
 
+<a id="nocaseglob"></a>
+
+## 2026-11-23 · Pathname filters and case-insensitive globs / ファイル名の除外と大小文字の照合
+
+Previous Tonari / current Tonari / reference Bash, median milliseconds in a running shell. Measurements alternate executables after warmup. Each script checks the result count, stderr and exit status. The previous release comes from `ed056ca`. The Bash reference is 5.2.37. The Debian arm64 VM runs on the M1. Debian x86-64 is translated userspace on that machine. All Linux timings use the guest filesystem. The Mac uses `en_US.UTF-8` and Linux uses `C.UTF-8`.
+
+| Workload | macOS arm64 | Debian arm64 | Debian x86-64 (translated) |
+| --- | ---: | ---: | ---: |
+| 4,096 files, one expansion | 6.940 / 6.969 / 17.892 | 1.718 / 1.728 / 3.879 | 10.244 / 10.550 / 11.430 |
+| 4,096 files, eight expansions | 21.329 / 21.474 / 133.378 | 8.218 / 8.195 / 29.055 | 21.030 / 21.738 / 41.164 |
+| 4,096 files, eight expansions with GLOBIGNORE | 25.150 / 23.284 / 123.046 | 9.417 / 8.435 / 33.357 | 24.758 / 23.020 / 45.591 |
+| 4,096 files, eight case-insensitive expansions | — / 20.882 / 132.556 | — / 8.645 / 31.030 | — / 23.753 / 44.670 |
+| 100,000 files, one expansion | 231.836 / 233.632 / 590.653 | 43.094 / 43.355 / 115.585 | 94.546 / 95.327 / 130.466 |
+| 100,000 files, one expansion with GLOBIGNORE | 199.181 / 190.166 / 490.969 | 42.380 / 38.051 / 117.358 | 93.268 / 82.088 / 134.973 |
+| 100,000 files, one case-insensitive expansion | — / 233.796 / 595.698 | — / 43.429 / 119.248 | — / 115.922 / 157.150 |
+
+4,096件は21回、10万件は9回の中央値です。10万件は `large/` 配下に `a-`、`B-`、`雪-`、`🌱-` で始まる番号付きの `.txt` を同数作りました。`GLOBIGNORE=large/B-*.txt` の結果は75,000件、通常の展開と `shopt -s nocaseglob` を使った `large/*.TXT` は100,000件です。大小文字を無視する設定に未対応だった旧版は、その行では計測対象から外しています。[再現用の4,096件ベンチマーク](../tools/bench_scripts.py)
+
+The feature harness re-timed 15 matching witnesses per reference platform, including all five extended glob operators and `GLOBIGNORE`. It interleaved 15 measured samples per shell after two warmups. For the one-file `nocaseglob` witness, starting after shell readiness, Tonari / Bash took 2.675 / 4.307 ms on the Mac, 0.385 / 0.508 ms on Debian arm64, and 1.465 / 1.777 ms on Ubuntu arm64. The witness also launches `touch`. Compared with the earlier published snapshot, four short witnesses moved above the two-thirds time target. These were Debian’s already-started `failglob`, the Mac’s already-started `?(...)` and `GLOBIGNORE`, and the Mac’s whole-run `failglob`. Each still completed faster than Bash. The TSV includes absolute times for both snapshots. [Per-feature medians and p95](compatibility/pathname-timings.tsv)
+
+10万件を除外条件なしで展開する中央値は、3環境とも前版の約1%以内でした。除外条件を使うと3環境とも短縮しました。大小文字を無視する10万件の展開は macOS と Debian arm64 で Bash の半分以下、変換実行の Debian x86-64 では Bash の約74%で、2/3 の目標を上回っています。
+
+The shipped executable sizes in bytes are macOS arm64 1,184,496, Debian arm64 1,357,024, Debian x86-64-v3 1,156,560. [Compatibility witnesses](compatibility.md) · [Matching algorithm](engineering-notes.md)
+
 <a id="release-footprint"></a>
 
 ## 2026-11-23 · Stripped executable size and sourced functions / 配布サイズと関数定義の読み込み

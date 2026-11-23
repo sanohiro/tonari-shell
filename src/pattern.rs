@@ -401,6 +401,7 @@ pub struct GlobOptions {
     pub nullglob: bool,
     pub failglob: bool,
     pub globstar: bool,
+    pub nocaseglob: bool,
     pub extglob: bool,
     pub globskipdots: bool,
     ignore: Option<std::rc::Rc<[String]>>,
@@ -413,6 +414,7 @@ impl Default for GlobOptions {
             nullglob: false,
             failglob: false,
             globstar: false,
+            nocaseglob: false,
             extglob: false,
             globskipdots: true,
             ignore: None,
@@ -472,7 +474,9 @@ pub(crate) fn pathnames(
     lookup: &dyn Fn(&str) -> Option<String>,
 ) -> Vec<String> {
     let mut names = Vec::new();
-    glob_locale::run(lookup, |order| paths(pattern, options, &mut names, order));
+    glob_locale::run(lookup, |order, locale| {
+        paths(pattern, options, &mut names, order, locale)
+    });
     names
 }
 
@@ -491,7 +495,13 @@ pub(crate) fn unescape(component: &str) -> String {
 
 // Walk by component so POSIX character classes have the same fnmatch
 // semantics in argv and in case patterns, including on Darwin.
-fn paths(pattern: &str, options: &GlobOptions, fields: &mut Vec<String>, collation: Collation) {
+fn paths(
+    pattern: &str,
+    options: &GlobOptions,
+    fields: &mut Vec<String>,
+    collation: Collation,
+    locale: CharacterLocale,
+) {
     // Linux pathname order is the UTF-8 byte order even when matching uses a named locale.
     let collation = if cfg!(target_os = "linux") {
         Collation::Bytes
@@ -552,17 +562,16 @@ fn paths(pattern: &str, options: &GlobOptions, fields: &mut Vec<String>, collati
             known_existing = rest.is_empty();
             continue;
         }
-        let extended = options
-            .extglob
-            .then(|| extended::Pattern::new(part))
-            .flatten();
-        if extended.is_none() && !has_magic(part, true) {
+        let grouped = options.extglob && extended::has_group(part);
+        if !grouped && !has_magic(part, true) {
             let literal = unescape(part);
             for prefix in &mut paths {
                 prefix.push_str(&literal);
             }
             continue;
         }
+        let extended = (grouped || options.nocaseglob)
+            .then(|| extended::Pattern::for_path(part, grouped, options.nocaseglob, locale));
         let matcher = Matcher::new(part);
         let mut matched = Vec::new();
         for prefix in paths {
@@ -574,7 +583,9 @@ fn paths(pattern: &str, options: &GlobOptions, fields: &mut Vec<String>, collati
                 |raw, _| {
                     let period = !options.dotglob || matches!(raw.to_bytes(), b"." | b"..");
                     let matches = match &extended {
-                        Some(group) => raw.to_str().is_ok_and(|s| group.accepts(s, period)),
+                        Some(group) => raw
+                            .to_str()
+                            .is_ok_and(|s| group.matches_in_locale::<false>(s, period)),
                         None => matcher.accepts(raw.to_bytes(), period, Some(raw)),
                     };
                     if !matches {
@@ -607,8 +618,9 @@ fn paths(pattern: &str, options: &GlobOptions, fields: &mut Vec<String>, collati
         for pattern in patterns.iter() {
             // GLOBIGNORE tests the entire displayed pathname. An extended
             // alternative may contain a slash or match one with a bracket class.
-            let matcher = extended::Pattern::parse(pattern, options.extglob);
-            paths.retain(|path| !matcher.pathname(path));
+            let matcher =
+                extended::Pattern::for_path(pattern, options.extglob, options.nocaseglob, locale);
+            paths.retain(|path| !matcher.matches_in_locale::<true>(path, false));
         }
     }
     order::append(paths, fields, collation);
@@ -703,7 +715,9 @@ impl Field {
             .filter(|(options, p)| has_magic(p, true) || options.extglob && extended::has_group(p))
         {
             let count = fields.len();
-            glob_locale::run(lookup, |order| paths(&pattern, options, fields, order));
+            glob_locale::run(lookup, |order, locale| {
+                paths(&pattern, options, fields, order, locale)
+            });
             if fields.len() > count {
                 return Ok(());
             }

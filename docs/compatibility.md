@@ -4,6 +4,16 @@ Tonari remains a prototype for use from an existing shell. The inventory starts 
 
 Tonari は現在、既存のシェルから起動して試せる段階です。参照先の Bash と GNU マニュアルを起点に項目を列挙しました。一覧には機能名ごとの判定と速度を載せ、環境別 TSV には実際のテスト内容と差が出た出力例を残しています。[現在の機能別一覧](compatibility/current.tsv) · [環境別の実測](compatibility-2026-11-23-release/matrix.md)
 
+## Case-insensitive pathname expansion / 大小文字を区別しないファイル名展開
+
+`shopt -s nocaseglob` applies to pattern components and to `GLOBIGNORE`. A literal component still uses the filesystem's lookup rules. With a file named `Sub/K.TXT`, `s*/k*.txt` returns its actual spelling. On a case-sensitive filesystem `s*/k.txt` has no match. `nocasematch` controls separate shell operations. [Integration test](../tests/shell.py) · [Timings](benchmarks.md#nocaseglob)
+
+既定値と `shopt -u nocaseglob` はどちらも大小文字を区別します。`LC_CTYPE` が UTF-8 のとき `?` は1文字、`C` のときは1バイトに一致します。どちらも引数として渡すのはファイル名全体です。大文字・小文字を無視しても、`[[:upper:]]` は元の文字が大文字かどうかで判定します。
+
+Compared with `ed056ca`, the full audits changed one verdict on each of macOS (1,408 rows), Debian (1,522) and Ubuntu (1,553). The `shopt nocaseglob` witness now returns `<UPPER>` for `upp*` on all three. Linux passed all 126 integration tests on Debian arm64, Ubuntu arm64 and the Debian x86-64 QEMU guest. macOS passed 125 with one Linux-only skip. [Current inventory](compatibility/current.tsv)
+
+macOS では325パターンを、大小文字を区別する展開、区別しない展開、およびそれぞれの除外条件に使いました。UTF-8 と C の各文字ロケールで照合順序を C に固定すると、2,600件すべてで Bash 5.2.37 と同じ引数列になりました。名前付き照合順序で同順位になる例は下の意図的な差に記録しています。
+
 ## Distribution release checks / 配布バイナリの検証
 
 The arm64 -O2 and x86-64-v3 -Os distribution binaries retained all 1,408 macOS, 1,522 Debian and 1,553 Ubuntu feature verdicts from `9a095b8`. The added regression compares `BASH_SOURCE` with GNU Bash as a running function is redefined and then removed by a nested call. All 125 integration tests passed on Debian and Ubuntu arm64 and in the Debian x86-64 QEMU guest. On macOS arm64, 124 passed and the Linux-only test was skipped. Debian and Ubuntu also passed account login and logout. [Release measurements and executable fingerprints](benchmarks.md#release-footprint)
@@ -107,6 +117,7 @@ Bash 互換の基準は、対応するスクリプトとツールが期待する
 
 | Input / 入力 | Reference Bash / 参照結果 | Tonari / 採用する動作 |
 |---|---|---|
+| macOS `LC_ALL=en_US.UTF-8`, only `a🌱` and `🌱a`, expand `*` | Bash 5.2.37 yields `🌱a`, then `a🌱`. Darwin collates them equally. | `a🌱`, then `🌱a`. Equal collation weights fall back to unsigned UTF-8 byte order. |
 | `IFS=' 木'; v='a 木b'; set -- $v` in UTF-8 | macOS 5.2.37 yields `a`, two empty arguments, then `b`. Debian 5.2.37 and Ubuntu 5.3.9 prefix `b` with bytes `9c a8`. | Two arguments, `a` and `b`. Consume the entire UTF-8 separator. 区切り文字を途中で分断しません。 |
 | Linux, `touch z A é` in an empty directory, then `LC_ALL=en_US.UTF-8` and `printf '<%s>' *` | Debian and Ubuntu Bash print `<A><é><z>`. | `<A><z><é>`. Linux passes UTF-8 names in byte order in every locale. Scripts using the first match or iterating over all arguments observe this ordering. macOS retains locale collation. Linux の引数順は配布元の照合表に依存しません。 |
 | `v=雪🌸` under `LC_ALL=C` | `${#v}` is 7 bytes. `${v:1:1}` yields byte `9b`. | Length 2 and substring `🌸`. Positions in shell text count Unicode scalar values across these locales. 文字単位の長さと切り出しを維持します。 |

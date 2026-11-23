@@ -1,9 +1,11 @@
+use super::CharacterLocale;
 use super::order::{self, Collation};
 use std::cell::RefCell;
 use std::ffi::CString;
 
 struct Cached {
     ctype: String,
+    characters: CharacterLocale,
     collate: String,
     handle: libc::locale_t,
 }
@@ -34,6 +36,7 @@ impl Cached {
             return None;
         }
         Some(Self {
+            characters: CharacterLocale::from_name(&ctype),
             ctype,
             collate,
             handle,
@@ -45,7 +48,7 @@ impl Cached {
 // Construct a locale only on the first actual pathname pattern for a setting.
 pub(super) fn run<T>(
     lookup: &dyn Fn(&str) -> Option<String>,
-    work: impl FnOnce(Collation) -> T,
+    work: impl FnOnce(Collation, CharacterLocale) -> T,
 ) -> T {
     thread_local! { static LAST: RefCell<Option<Cached>> = const { RefCell::new(None) }; }
     let nonempty = |key| lookup(key).filter(|s| !s.is_empty());
@@ -71,11 +74,11 @@ pub(super) fn run<T>(
             }
         }
         let Some(locale) = slot else {
-            return work(Collation::Current);
+            return work(Collation::Current, CharacterLocale::Ascii);
         };
         let previous = unsafe { libc::uselocale(locale.handle) };
         if previous.is_null() {
-            return work(Collation::Current);
+            return work(Collation::Current, locale.characters);
         }
         let order = if matches!(locale.collate.as_str(), "C" | "POSIX") {
             Collation::Bytes
@@ -91,6 +94,6 @@ pub(super) fn run<T>(
             }
         }
         let _restore = Restore(previous);
-        work(order)
+        work(order, locale.characters)
     })
 }

@@ -28,7 +28,7 @@ pub(crate) enum CharacterLocale {
 }
 
 impl CharacterLocale {
-    fn from_name(name: &str) -> Self {
+    pub(crate) fn from_name(name: &str) -> Self {
         match name {
             "" | "C" | "POSIX" => Self::Ascii,
             _ if matches!(name.split(['_', '.', '@', '-']).next(), Some("tr" | "az")) => {

@@ -148,14 +148,14 @@ impl Token {
 // POSIX named classes test the original character, even when literal
 // members and range endpoints use case-insensitive comparison.
 #[derive(Debug)]
-pub(super) struct FoldedClass {
+pub(super) struct CharacterClass {
     negated: bool,
     members: Vec<Member>,
-    locale: super::CharacterLocale,
+    fold: Option<super::CharacterLocale>,
 }
 
-impl FoldedClass {
-    pub(super) fn new(pattern: &str, locale: super::CharacterLocale) -> Self {
+impl CharacterClass {
+    pub(super) fn new(pattern: &str, fold: Option<super::CharacterLocale>) -> Self {
         let Token::List { negated, members } =
             Token::list(&pattern.as_bytes()[1..pattern.len() - 1], true)
         else {
@@ -164,7 +164,7 @@ impl FoldedClass {
         Self {
             negated,
             members,
-            locale,
+            fold,
         }
     }
 
@@ -172,7 +172,7 @@ impl FoldedClass {
         let order = a.cmp(&b);
         if a == b
             || (a as u32 <= 255 && b as u32 <= 255)
-            || matches!(self.locale, super::CharacterLocale::Ascii)
+            || matches!(self.fold, Some(super::CharacterLocale::Ascii))
         {
             return order;
         }
@@ -185,10 +185,13 @@ impl FoldedClass {
     }
 
     pub(super) fn accepts(&self, c: char) -> bool {
-        let lower = |c| super::mapped_char(c, false, self.locale);
         let scalar = |bytes: &[u8; 4]| std::str::from_utf8(bytes).ok()?.chars().next();
         let mut buffer = [0; 4];
         let original = packed(c.encode_utf8(&mut buffer).as_bytes());
+        let Some(locale) = self.fold else {
+            return self.members.iter().any(|m| m.accepts(&original)) != self.negated;
+        };
+        let lower = |c| super::mapped_char(c, false, locale);
         let folded = lower(c);
         self.members.iter().any(|m| match m {
             Member::Literal(bytes) => scalar(bytes).is_some_and(|v| lower(v) == folded),

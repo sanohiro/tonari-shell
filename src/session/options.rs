@@ -104,6 +104,7 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
         read: |s| s.login,
         write: None,
     },
+    option_entry!("nocaseglob", shopt.glob.nocaseglob),
     option_entry!("nocasematch", shopt.nocasematch),
     option_entry!("nullglob", shopt.glob.nullglob),
     option_entry!("patsub_replacement", shopt.patsub_replacement),

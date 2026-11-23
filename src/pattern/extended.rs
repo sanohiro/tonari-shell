@@ -9,7 +9,7 @@ use super::{Matcher, bracket};
 enum Atom {
     Text(Box<str>),
     FoldedText(Box<str>, super::CharacterLocale),
-    FoldedClass(bracket::FoldedClass),
+    CharacterClass(bracket::CharacterClass),
     Any,
     Star,
     Class(Matcher<Box<str>>, std::cell::Cell<(u128, u128)>),
@@ -97,11 +97,13 @@ fn sequence(source: &mut &str, grouped: bool, extended: bool) -> Option<Vec<Atom
     Some(atoms)
 }
 
-fn fold_atoms(atoms: &mut [Atom], locale: super::CharacterLocale) {
+fn prepare_classes_and_case(atoms: &mut [Atom], fold: Option<super::CharacterLocale>) {
     for atom in atoms {
         match atom {
-            Atom::Text(text) => *atom = Atom::FoldedText(std::mem::take(text), locale),
-            Atom::Choice(choices) => {
+            Atom::Text(text) if let Some(locale) = fold => {
+                *atom = Atom::FoldedText(std::mem::take(text), locale)
+            }
+            Atom::Choice(choices) if let Some(locale) = fold => {
                 let alternatives = std::mem::take(choices)
                     .into_iter()
                     .map(|s| vec![Atom::FoldedText(s, locale)])
@@ -110,11 +112,11 @@ fn fold_atoms(atoms: &mut [Atom], locale: super::CharacterLocale) {
             }
             Atom::Group(_, alternatives) => {
                 for branch in alternatives {
-                    fold_atoms(branch, locale);
+                    prepare_classes_and_case(branch, fold);
                 }
             }
             Atom::Class(class, _) if !class.source().is_empty() => {
-                *atom = Atom::FoldedClass(bracket::FoldedClass::new(class.source(), locale))
+                *atom = Atom::CharacterClass(bracket::CharacterClass::new(class.source(), fold))
             }
             _ => {}
         }
@@ -127,7 +129,7 @@ fn one_character<const PATHNAME: bool>(atom: &Atom, value: &str, pos: usize) -> 
         return None;
     }
     let end = pos + c.len_utf8();
-    if let Atom::FoldedClass(class) = atom {
+    if let Atom::CharacterClass(class) = atom {
         return class.accepts(c).then_some(end);
     }
     if let Atom::Class(class, cache) = atom {
@@ -169,7 +171,7 @@ fn endings<const PATHNAME: bool>(
                     atom,
                     Atom::Any
                         | Atom::Class(..)
-                        | Atom::FoldedClass(_)
+                        | Atom::CharacterClass(_)
                         | Atom::Star
                         | Atom::Group(b'!', _)
                 )
@@ -193,7 +195,7 @@ fn endings<const PATHNAME: bool>(
                         }
                     }
                 }
-                Atom::Any | Atom::Class(..) | Atom::FoldedClass(_) => {
+                Atom::Any | Atom::Class(..) | Atom::CharacterClass(_) => {
                     if let Some(end) = one_character::<PATHNAME>(atom, value, pos) {
                         next.push(end);
                     }
@@ -315,6 +317,42 @@ fn literal_edge<'v>(atom: &Atom, value: &'v str, prefix: bool) -> Result<Option<
     };
     match atom {
         Atom::Text(text) => Ok(strip(text)),
+        Atom::FoldedText(text, locale) => {
+            let edge = if prefix {
+                value.get(..text.len())
+            } else {
+                value
+                    .len()
+                    .checked_sub(text.len())
+                    .and_then(|n| value.get(n..))
+            };
+            if !matches!(locale, super::CharacterLocale::Turkic)
+                && let Some(edge) = edge
+                && edge.is_ascii()
+                && text.is_ascii()
+            {
+                return Ok(edge.eq_ignore_ascii_case(text).then(|| {
+                    if prefix {
+                        &value[text.len()..]
+                    } else {
+                        &value[..value.len() - text.len()]
+                    }
+                }));
+            }
+            if prefix {
+                return Ok(super::folded_prefix(value, text, *locale).map(|n| &value[n..]));
+            }
+            let mut chars = value.chars();
+            for c in text.chars().rev() {
+                if !chars
+                    .next_back()
+                    .is_some_and(|v| super::same_letter(v, c, *locale))
+                {
+                    return Ok(None);
+                }
+            }
+            Ok(Some(chars.as_str()))
+        }
         Atom::Choice(options) => {
             let mut matches = options.iter().filter_map(|s| strip(s));
             let first = matches.next();
@@ -324,7 +362,7 @@ fn literal_edge<'v>(atom: &Atom, value: &'v str, prefix: bool) -> Result<Option<
                 Ok(first)
             }
         }
-        _ => unreachable!(),
+        _ => Err(()),
     }
 }
 
@@ -332,6 +370,15 @@ fn literal_edge<'v>(atom: &Atom, value: &'v str, prefix: bool) -> Result<Option<
 pub(crate) struct Pattern {
     atoms: Vec<Atom>,
     single_run: Option<usize>,
+    bytewise_path: bool,
+}
+
+fn pathname_units(text: &str, bytewise: bool) -> std::borrow::Cow<'_, str> {
+    if bytewise && !text.is_ascii() {
+        std::borrow::Cow::Owned(text.bytes().map(char::from).collect())
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
 }
 
 impl Pattern {
@@ -344,8 +391,28 @@ impl Pattern {
 
     pub(crate) fn insensitive(text: &str, extended: bool, locale: super::CharacterLocale) -> Self {
         let mut pattern = Self::parse(text, extended);
-        fold_atoms(&mut pattern.atoms, locale);
+        prepare_classes_and_case(&mut pattern.atoms, Some(locale));
         pattern.single_run = None;
+        pattern
+    }
+
+    pub(super) fn for_path(
+        text: &str,
+        extended: bool,
+        nocase: bool,
+        locale: super::CharacterLocale,
+    ) -> Self {
+        // In the C locale each byte is a matching unit for ?, brackets and
+        // extended patterns. Literal edges around a star can use the original UTF-8.
+        let bytewise = matches!(locale, super::CharacterLocale::Ascii)
+            && (text.contains(['?', '[']) || extended && has_group(text));
+        let text = pathname_units(text, bytewise);
+        let mut pattern = Self::parse(&text, extended);
+        if nocase || bytewise {
+            prepare_classes_and_case(&mut pattern.atoms, nocase.then_some(locale));
+            pattern.single_run = None;
+        }
+        pattern.bytewise_path = bytewise;
         pattern
     }
 
@@ -361,7 +428,11 @@ impl Pattern {
             .next()
             .and_then(|(i, atom)| unit_run(atom).map(|_| i))
             .filter(|_| variable.next().is_none());
-        Self { atoms, single_run }
+        Self {
+            atoms,
+            single_run,
+            bytewise_path: false,
+        }
     }
 
     fn match_run<const PATHNAME: bool>(&self, value: &str, i: usize, period: bool) -> Option<bool> {
@@ -397,25 +468,58 @@ impl Pattern {
     }
 
     pub(crate) fn accepts(&self, value: &str, period: bool) -> bool {
-        self.matches::<false>(value, period)
+        super::localized(|| self.matches_in_locale::<false>(value, period))
     }
 
-    pub(crate) fn pathname(&self, value: &str) -> bool {
-        self.matches::<true>(value, false)
+    // The star consumes the gap between literal edges. Bash also lets a final
+    // star consume slashes when it tests the whole pathname against GLOBIGNORE.
+    fn match_star<const PATHNAME: bool>(&self, value: &str, period: bool) -> Option<bool> {
+        use Atom::Star;
+        let (head, tail) = match self.atoms.as_slice() {
+            [Star] => return Some(!period),
+            [head, Star] => (Some(head), None),
+            [Star, tail] => (None, Some(tail)),
+            [head, Star, tail] => (Some(head), Some(tail)),
+            _ => return None,
+        };
+        let mut gap = value;
+        if let Some(head) = head {
+            let Some(rest) = literal_edge(head, gap, true).ok()? else {
+                return Some(false);
+            };
+            gap = rest;
+        }
+        if period && gap.len() == value.len() {
+            return Some(false);
+        }
+        if let Some(tail) = tail {
+            let Some(rest) = literal_edge(tail, gap, false).ok()? else {
+                return Some(false);
+            };
+            return Some(!PATHNAME || !rest.contains('/'));
+        }
+        Some(true)
     }
 
-    fn matches<const PATHNAME: bool>(&self, value: &str, period: bool) -> bool {
+    pub(super) fn matches_in_locale<const PATHNAME: bool>(
+        &self,
+        value: &str,
+        period: bool,
+    ) -> bool {
+        let units = pathname_units(value, self.bytewise_path);
+        let value = units.as_ref();
         let period = period && value.starts_with('.');
-        super::localized(|| {
-            if let Some(i) = self.single_run
-                && let Some(result) = self.match_run::<PATHNAME>(value, i, period)
-            {
-                return result;
-            }
-            endings::<PATHNAME>(&self.atoms, value, 0, period)
-                .binary_search(&value.len())
-                .is_ok()
-        })
+        if let Some(result) = self.match_star::<PATHNAME>(value, period) {
+            return result;
+        }
+        if let Some(i) = self.single_run
+            && let Some(result) = self.match_run::<PATHNAME>(value, i, period)
+        {
+            return result;
+        }
+        endings::<PATHNAME>(&self.atoms, value, 0, period)
+            .binary_search(&value.len())
+            .is_ok()
     }
 }
 

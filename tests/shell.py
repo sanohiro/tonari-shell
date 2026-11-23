@@ -917,6 +917,53 @@ printf '%s\0' *.txt"""
             self.assertEqual((expected.returncode, expected.stderr), (0, b""))
             self.assertEqual((actual.stdout, actual.stderr, actual.returncode), (expected.stdout, b"", 0))
 
+        if sys.platform == "darwin":
+            # Darwin collates these names equally. The tie-break compares unsigned bytes.
+            sub = self.cwd / "ties"
+            sub.mkdir()
+            for name in ("🌱a", "a🌱"):
+                (sub / name).touch()
+            self.env["LC_ALL"] = "en_US.UTF-8"
+            result = self.command(TONARI, "cd ties && printf '<%s>' *")
+            self.assertEqual((result.returncode, result.stdout, result.stderr),
+                             (0, "<a🌱><🌱a>".encode(), b""))
+
+    def test_nocaseglob_path_components_and_ignore(self):
+        (self.cwd / "Sub").mkdir()
+        (self.cwd / "bytes").mkdir()
+        for name in ("A.ONE", "b.TWO", ".Hidden.ONE", "Ä.TXT", "雪.ONE", "🌱.ONE",
+                     "Sub/K.TXT", "Sub/L*.TXT", "Sub/z.txt", "bytes/a🌱"):
+            (self.cwd / name).touch()
+        self.env.pop("LC_ALL")
+        self.env.update(LC_COLLATE="C", LC_CTYPE="en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8")
+        script = r"""shopt -s extglob nocaseglob
+printf '<%s>\n' a.one *.one .h*.one ä.* s*/k*.txt s*/l\**.txt s*/[k-l].txt
+printf '<%s>\n' @([a-b]|no).@(one|two) [[:upper:]].one [[:lower:]].one
+printf '<%s>\n' s*/K.TXT s*/k.txt
+GLOBIGNORE='s*/k.txt:*.txt'
+printf '<%s>\n' s*/*.txt
+GLOBIGNORE='s*'
+set -- s*/*.txt; printf '<%s>\n' "$@"
+unset GLOBIGNORE
+shopt -u nocaseglob
+shopt -s nocasematch
+printf '<%s>\n' *.one
+shopt -s nocaseglob
+printf '<%s>\n' ?.one
+LC_ALL=C
+printf '<%s>\n' ä.* ?.one ???.one ????.one
+shopt -u nocaseglob
+shopt -s nullglob
+set -- bytes/@(a|xy)*[!a]; printf '<%s>\n' "$#"
+GLOBIGNORE='bytes/*[!a]'; set -- bytes/*; printf '<%s>\n' "$#"
+"""
+        literal = "Sub/k.txt" if (self.cwd / "Sub/k.txt").exists() else "s*/k.txt"
+        names = ("a.one", "A.ONE", "雪.ONE", "🌱.ONE", ".Hidden.ONE", "Ä.TXT", "Sub/K.TXT",
+                 "Sub/L*.TXT", "Sub/K.TXT", "A.ONE", "b.TWO", "A.ONE", "[[:lower:]].one",
+                 "Sub/K.TXT", literal, "Sub/L*.TXT", "Sub/z.txt", "s*/*.txt", "*.one",
+                 "A.ONE", "雪.ONE", "🌱.ONE", "ä.*", "A.ONE", "雪.ONE", "🌱.ONE", "1", "0")
+        self.compare(script, 0, "".join(f"<{name}>\n" for name in names).encode(), minimum=5)
+
     def test_glob_multiple_directory_batches_and_symlink_types(self):
         group = self.cwd / "group"
         group.mkdir()
