@@ -8,6 +8,7 @@ import pty
 import select
 import signal
 import statistics
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -155,7 +156,16 @@ def main():
         ("Tonari", args.tonari.resolve(), ["--noprofile", "--norc"]),
         ("Bash", args.bash.resolve(), ["--noprofile", "--norc"]),
     ]
-    additional = [(label, path, []) for label, path in args.compare_tonari]
+    additional = []
+    for label, path in args.compare_tonari:
+        # Early prototypes predate these flags. Modern builds should see the
+        # same startup files and prompt as the Tonari and Bash controls.
+        flags = ["--noprofile", "--norc"]
+        probe = subprocess.run([Path(path).resolve(), *flags, "-c", ":"],
+                               env={"PATH": os.defpath, "LC_ALL": "C"},
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+        additional.append((label, path, flags if probe.returncode == 0 else []))
     additional.extend((label, path, ["--noprofile", "--norc"]) for label, path in args.compare_shell)
     for label, path, flags in additional:
         if any(name == label for name, _, _ in shells):

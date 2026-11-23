@@ -192,6 +192,12 @@ echo "$value"
 for ((i=0; i<16; i++)); do value=$(/usr/bin/printf 'v%s' "$i"); done
 echo "$value"
 """, "v15"),
+    "parenthesized-pipeline": ("""\
+for ((i=0; i<32; i++)); do
+    printf '%s\\n' "$i" | ( read -r value && [[ $value == "$i" ]] ) || exit 1
+done
+echo "$i"
+""", "32"),
     "pipeline": (
         "for ((i=0; i<16; i++)); do /usr/bin/printf '%s\\n' \"$i\" | /bin/cat || exit 1; done",
         "\n".join(map(str, range(16))),
