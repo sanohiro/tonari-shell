@@ -453,7 +453,18 @@ impl History {
         if Some((m.dev(), m.ino())) != self.journal || m.len() < self.offset {
             return Err(());
         }
-        let finder = memchr::memmem::Finder::new(needle.as_bytes());
+        // A tab or CR can also occur literally in the command field of an
+        // existing journal. Either spelling still contains this encoded part.
+        let part = needle.split(['\t', '\r']).max_by_key(|s| s.len()).unwrap();
+        let at_start = prefix && part.len() == needle.len();
+        let mut encoded = String::new();
+        let raw = if part.contains(['\\', '\n']) {
+            encode(part, &mut encoded);
+            encoded.as_str()
+        } else {
+            part
+        };
+        let finder = memchr::memmem::Finder::new(raw.as_bytes());
         let mut end = self.tail_start;
         let mut block = vec![0; BLOCK.min(end as usize)];
         while end != 0 {
@@ -477,14 +488,14 @@ impl History {
                 for line in rows.rsplit(|&b| b == b'\n') {
                     if let Ok(line) = std::str::from_utf8(line)
                         && let Some(word) = command_field(line)
-                        && if prefix {
-                            word.starts_with(needle)
+                        && if at_start {
+                            word.starts_with(raw)
                         } else {
-                            word.contains(needle)
+                            word.contains(raw)
                         }
                         && let Some(command) = decode(word)
                         && if prefix {
-                            command.len() > needle.len()
+                            command.len() > needle.len() && command.starts_with(needle)
                         } else {
                             command.contains(needle)
                         }
@@ -518,11 +529,7 @@ impl History {
                 .as_ref()
                 .is_none_or(|s| s.starts_with(prefix) && s.len() > prefix.len());
         if !reusable {
-            // These bytes can be escaped in the journal. The decoded search
-            // also handles a single command larger than the raw search block.
-            if !prefix.contains(['\\', '\n', '\r', '\t'])
-                && let Ok(result) = self.older_match(session, prefix, true, 0, waiting)
-            {
+            if let Ok(result) = self.older_match(session, prefix, true, 0, waiting) {
                 self.older_match = result;
                 self.older_prefix.clear();
                 self.older_prefix.push_str(prefix);
@@ -552,8 +559,7 @@ impl History {
             if let Some(found) = self.search_query(&[], query, &mut remaining, waiting)? {
                 return Ok(Some(found.to_owned()));
             }
-            if !query.contains(['\\', '\n', '\r', '\t'])
-                && !waiting()
+            if !waiting()
                 && let Ok(found) = self.older_match(session, query, false, remaining, waiting)
                 && (found.is_some() || queries.len() == 1 && !self.shared.ends.is_empty())
             {

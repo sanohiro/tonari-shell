@@ -1,5 +1,35 @@
 # Startup and execution / 起動と実行性能
 
+<a id="escaped-history"></a>
+
+## 2026-11-23 · History queries containing backslashes / バックスラッシュを含む履歴検索
+
+One million history entries, one matching command at the beginning of the journal. A fresh PTY received `foo\ bar` for Ctrl-R or the command prefix for autosuggestion. Each cell gives median / p95 milliseconds from input to the verified PTY output. The table compares the `dc96c84` distribution with the updated build. Each workload ran three warmups and 21 measured sessions per executable, with warm filesystem caches. Debian x86-64 uses translated userspace on the Apple M1. [Benchmark driver](../tools/bench_history.py)
+
+| Workload | macOS arm64 previous → current | Debian x86-64 previous → current | Debian arm64 previous → current |
+| --- | ---: | ---: | ---: |
+| Escaped prefix visible | 0.054/0.073 → 0.052/0.071 | 0.559/0.702 → 0.584/0.803 | 1.078/2.337 → 1.048/1.660 |
+| Escaped prefix to visible suggestion | 110.822/119.850 → 6.289/7.237 | 95.495/105.934 → 8.178/9.158 | 62.733/67.004 → 5.962/7.281 |
+| Escaped Ctrl-R to oldest match | 144.470/154.036 → 6.496/7.771 | 132.426/141.818 → 8.717/9.881 | 86.506/90.499 → 6.083/7.339 |
+| Plain Ctrl-R to oldest match | 6.423/7.716 → 6.587/8.125 | 8.576/9.493 → 8.736/9.515 | 6.343/7.271 → 6.423/7.503 |
+| Plain Ctrl-R to newest match | 0.246/0.322 → 0.249/0.321 | 2.062/2.196 → 2.239/2.597 | 0.185/0.231 → 0.189/0.223 |
+
+入力文字の表示と、その後の履歴候補の表示を別々に確認しました。改善幅が大きいのは、最近の履歴に一致がなく、古いコマンドのエスケープを検索する場合です。通常の検索は旧版に近く、変換実行の Debian x86-64 では直近の検索が中央値で 0.177 ms 遅くなりました。配布サイズは macOS arm64 が 1,184,496 バイト、Linux x86-64 が 1,157,360 バイト（+800）、Linux arm64 が 1,357,360 バイト（+336）です。
+
+```sh
+python3 tools/bench_history.py /path/to/previous /path/to/current --escaped --entries 1000000 --runs 21
+```
+
+A separate PTY trial sent Ctrl-R, `foo\ bar` and Enter in one write after the first prompt. The oldest of one million commands was `printf 'found:%s\n' foo\ bar`. The timer stopped when the PTY received the output line `found:foo bar`. Each fresh shell used its native history format. Bash 5.2.37 had `HISTSIZE=1000001` and loaded its history before the measured interval. Each shell ran three warmups and 21 measured sessions in rotating order. The release comparison found the same named compatibility outcomes as `dc96c84` for all 1,408 macOS, 1,522 Debian and 1,553 Ubuntu observations. [Shared Ctrl-R regression](../tests/shell.py)
+
+| Ctrl-R and Enter to command output, median / p95 ms | Previous Tonari | Tonari | Bash |
+| --- | ---: | ---: | ---: |
+| macOS arm64 | 91.250/93.475 | 3.858/4.476 | 22.859/24.576 |
+| Debian x86-64 (translated) | 140.618/143.755 | 17.153/18.466 | 49.773/53.061 |
+| Debian arm64 | 84.335/85.569 | 7.342/9.076 | 49.639/53.582 |
+
+こちらは起動済みシェルに検索語と Enter をまとめて送り、選択したコマンドの出力まで測った値です。上の表で測った候補表示とは操作の終点も、履歴の最古のコマンドも異なります。
+
 <a id="nocaseglob"></a>
 
 ## 2026-11-23 · Pathname filters and case-insensitive globs / ファイル名の除外と大小文字の照合

@@ -1907,6 +1907,58 @@ f; printf 'END\0'; printf '%s\0' names/*'''
         self.read_until(fd, b"\x1b[?2004h")
         self.assertEqual((self.cwd / "latest").read_text(), "雪\n")
 
+    def test_escaped_journal_search_and_suggestions(self):
+        journal = self.cwd / ".local/state/tonari/history"
+        journal.parent.mkdir(parents=True)
+        row = b"1\t1\t0\t/tmp\t"
+        target = rb"\n" + "雪".encode()
+        stored = b"\\" + target
+        journal.write_bytes(
+            row + b"echo first " + stored + b"\n"
+            + row + b"echo second " + stored + b"\n"
+            # Backslash followed by a newline has the same raw suffix.
+            + row + b"echo wrong " + b"\\" + stored + b"\n"
+            + row + b"invalid\\q " + stored + b"\n"
+            + b"1\t1\t0\t/" + stored + b"\techo wrong directory\n"
+            + row + rb"multi\nline-END" + b"\n"
+            + row + b"literal\ttab-END\n" + row + rb"escaped\ttab-END" + b"\n"
+            + row + b"literal\rcr-END\n" + row + rb"escaped\rcr-END" + b"\n"
+            + (row + b"padding\n") * 9000)
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"\x12" + target)
+        self.read_until(fd, b"': echo second " + target)
+        os.write(fd, b"\x12")
+        self.read_until(fd, b"': echo first " + target)
+        for keys in (b"multi\x16\nline", b"literal\x16\ttab", b"escaped\x16\ttab",
+                     b"literal\x16\rcr", b"escaped\x16\rcr"):
+            with self.subTest(keys=keys):
+                fd = self.terminal_session(editing=True)
+                os.write(fd, keys)
+                self.read_until(fd, b"\x1b[2m-END\x1b[0m")
+        # One record exceeds a reverse-scan block. The streaming fallback
+        # must still select the same older escaped command.
+        with journal.open("ab") as output:
+            output.write(row + b"x" * (160 * 1024) + b"\n" + (row + b"pad\n") * 2000)
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"\x12" + target)
+        self.read_until(fd, b"': echo second " + target)
+
+    def test_reverse_search_accepts_same_escaped_command_as_bash(self):
+        commands = [rb"printf '%s\n' selected=first-foo\ bar",
+                    rb"printf '%s\n' selected=second-foo\ bar"]
+        commands += [b": padding"] * 8000
+        (self.cwd / ".bash_history").write_bytes(b"\n".join(commands) + b"\n")
+        self.env["HISTSIZE"] = str(len(commands))
+        journal = self.cwd / ".local/state/tonari/history"
+        journal.parent.mkdir(parents=True)
+        journal.write_bytes(b"".join(b"1\t1\t0\t/tmp\t" + cmd.replace(b"\\", b"\\\\") + b"\n"
+                                     for cmd in commands))
+        for shell in self.shells_for():
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                os.write(fd, b"\x12foo\\ bar\r")
+                self.read_until(fd, b"selected=second-foo bar\r\n")
+
     def test_paste_boundary_and_input_for_foreground_read(self):
         fd = self.terminal_session(editing=True)
         os.write(fd, b"\x1b[200~v=" + b"x" * 512 + b"\x1b[20")

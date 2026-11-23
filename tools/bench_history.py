@@ -47,8 +47,8 @@ def terminal(shell, home, bindir, rc=None, prompt=NEW_PROMPT):
         yield fd
     finally:
         os.kill(pid, signal.SIGKILL)
-        os.waitpid(pid, 0)
         os.close(fd)
+        os.waitpid(pid, 0)
 
 
 def sample(shell, home, bindir, action, count):
@@ -62,6 +62,20 @@ def sample(shell, home, bindir, action, count):
             start = time.perf_counter_ns()
             os.write(fd, b"printf entry-00000")
             read_until(fd, b"\x1b[2m9\x1b[0m")
+            return [(time.perf_counter_ns() - start) / 1e6]
+        if action in ("Escaped hint", "Escaped search"):
+            prefix = rb"printf entry-000000 foo\ bar"
+            if action == "Escaped hint":
+                start = time.perf_counter_ns()
+                os.write(fd, prefix)
+                output = read_until(fd, PROMPT + prefix)
+                echo = time.perf_counter_ns()
+                read_until(fd, b"\x1b[2m-END\x1b[0m", initial=output)
+                return [(echo - start) / 1e6, (time.perf_counter_ns() - start) / 1e6]
+            query = rb"foo\ bar"
+            start = time.perf_counter_ns()
+            os.write(fd, b"\x12" + query)
+            read_until(fd, b"(reverse-i-search) `" + query + b"': " + prefix + b"-END")
             return [(time.perf_counter_ns() - start) / 1e6]
         if action in ("Recent search", "Old search"):
             number = count - 1 if action == "Recent search" else 0
@@ -106,7 +120,9 @@ def sample(shell, home, bindir, action, count):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("shell", type=Path, nargs="+")
-    parser.add_argument("--bursts", action="store_true", help="include typeahead, paste and search cancellation")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--bursts", action="store_true", help="include typeahead, paste and search cancellation")
+    mode.add_argument("--escaped", action="store_true", help="measure escaped queries and plain Ctrl-R controls")
     parser.add_argument("--runs", type=int, default=30)
     parser.add_argument("--entries", type=int, nargs="+", default=[0, 1000, 100000])
     args = parser.parse_args()
@@ -126,13 +142,16 @@ def main():
             journal.parent.mkdir(parents=True)
             with journal.open("wb") as output:
                 for i in range(count):
-                    output.write(f"1\t1\t0\t/tmp\tprintf entry-{i:06d}\n".encode())
+                    suffix = r" foo\\ bar-END" if args.escaped and i == 0 else ""
+                    output.write(f"1\t1\t0\t/tmp\tprintf entry-{i:06d}{suffix}\n".encode())
             size = journal.stat().st_size
             actions = ["Tab", "Enter", "Hint"] if count else ["Tab", "Enter"]
             if args.bursts:
                 actions += ["Cancel search", "Burst", "Paste"]
                 if count >= 10:
                     actions += ["Old hint", "Recent search", "Old search"]
+            if args.escaped and count:
+                actions = ["Escaped hint", "Escaped search", "Old search", "Recent search"]
             for action in actions:
                 for shell in shells:
                     jobs.append((shell, count, action, home, journal, size))
@@ -148,6 +167,8 @@ def main():
                     samples[job].append(elapsed)
         print("entries action shell | first key | next key | both (median/p95 ms)")
         print("Hint rows show the complete first key to visible suggestion interval.")
+        if args.escaped:
+            print("Escaped hint reports prefix echo and visible suggestion, both from input.")
         for (shell, count, action, *_), values in samples.items():
             metrics = []
             for times in zip(*values):

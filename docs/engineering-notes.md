@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## 2026-11-23 · Escaped text in shared history / エスケープを含む履歴の検索
+
+Typing `foo\ bar` exposed a full journal decode in both autosuggestions and Ctrl-R. The history writer doubles backslashes and represents a newline as `\n`, so the reader can encode the search term once and skip blocks that cannot contain it. Tabs and carriage returns can also occur literally in existing command fields. When the query contains either, the reader filters on the longest part between them. It checks the decoded command before counting a hit. A raw match can start halfway through an escape or occur in the working directory field. [Implementation](../src/history.rs) · [Latency and reproduction](benchmarks.md#escaped-history)
+
+100万件の履歴で、スペースをバックスラッシュでエスケープしたコマンドの検索を計測しました。ブロック単位で候補を絞ったあと、コマンド欄を復元して一致を確かめます。回帰試験では、文字として入力した `\n` と実際の改行を区別し、同じ文字列が作業ディレクトリ欄や壊れた行にあっても、Ctrl-R を押した回数に応じて正しいコマンドを選びます。[端末での回帰試験](../tests/shell.py)
+
 ## 2026-11-23 · Matching filenames and GLOBIGNORE / ファイル名と除外条件の照合
 
 Compile each pattern component once and reuse the active shell character locale while visiting entries. A pattern with literal edges and a single star can test the prefix and suffix directly. The matched gap must fit within one pathname component when a suffix follows. A trailing star in Bash's `GLOBIGNORE` can consume a slash. For the file `Sub/K.TXT`, `GLOBIGNORE='S*'` removes it from `Sub/*`, while `GLOBIGNORE='*.TXT'` keeps it. Apply the same rule when case folding is enabled. [Implementation](../src/pattern/extended.rs) · [Measurements](benchmarks.md#nocaseglob)
