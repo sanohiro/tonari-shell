@@ -1,0 +1,41 @@
+{
+  "Debian": {
+    "reference": "5.2.37(1)-release",
+    "host": "Linux-6.11.11-linuxkit-aarch64-with-glibc2.41",
+    "runs": 15,
+    "suite_runs": 7,
+    "warmups": 2,
+    "distinct_workloads": 805,
+    "unit": "ns",
+    "executable_sha256": [
+      "ccbd5106945d1095474e5ee47317266f5918aa37fc671829192a007918b1413a",
+      "e1e8cdf6d2ee24d3ae3ffbbb8ba48c6298f42b8038daadd8e7f44d78d8d98b4d"
+    ]
+  },
+  "Ubuntu": {
+    "reference": "5.3.9(1)-release",
+    "host": "Linux-6.11.11-linuxkit-aarch64-with-glibc2.43",
+    "runs": 15,
+    "suite_runs": 7,
+    "warmups": 2,
+    "distinct_workloads": 784,
+    "unit": "ns",
+    "executable_sha256": [
+      "01c006568543d6b6ab9f0a57dd44b9d779d1edc437a5f5d2db0215887c19dbeb",
+      "e1e8cdf6d2ee24d3ae3ffbbb8ba48c6298f42b8038daadd8e7f44d78d8d98b4d"
+    ]
+  },
+  "macOS": {
+    "reference": "5.2.37(1)-release",
+    "host": "macOS-27.2.1-arm64-arm-64bit-Mach-O",
+    "runs": 15,
+    "suite_runs": 7,
+    "warmups": 2,
+    "distinct_workloads": 785,
+    "unit": "ns",
+    "executable_sha256": [
+      "8341e896c2ef7b407117fb16f38a357488acd810a5b654ff1af5565bf00cc08f",
+      "dd8320501d987fa8cdba537b6b59b8677638dcbf7385113c4127b46caa604df3"
+    ]
+  }
+}

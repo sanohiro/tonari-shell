@@ -18,6 +18,117 @@ The default run includes a session workload covering assignment, export, paramet
 
 既定の計測には、代入・export・変数展開・`cd`・`pwd`・`&&`・リダイレクト・`unset` を同じシェルで実行する項目が含まれます。算術ループ1,000回と、一つのシェルから外部プログラム16個を順に起動する項目もあります。後者では同じプログラム16個を Python 親プロセスから直接 `posix_spawn` し、その都度終了を待つ条件も交互に計測します。標準入出力は計時前に用意し、各子プロセスに継承させます。セッション機能の実装前との比較には `--case core` を使います。プロンプト表示の主指標は疑似端末での起動全体です。子プロセスの exec 直前にも時刻を記録し、同じ測定サンプルのうち、端末の準備と fork の後に経過した時間も表示します。
 
+<a id="session-controls"></a>
+
+## 2026-11-23 · Session controls and process descriptors / 対話操作とプロセスの計測
+
+We tested `67c48d6` on Apple M1 arm64 with macOS and two Linux guests. The macOS reference was GNU Bash 5.2.37, Debian 13 used its Bash 5.2.37 and Ubuntu 26.04 used 5.3.9. Every core timing below used the same Tonari binary as its compatibility audit. [Per-feature matrix](compatibility-2026-11-23-shell/matrix.md) · [Fingerprints and run settings](compatibility-2026-11-23-shell/environment.json)
+
+For startup we copied the three executables to the same filesystem under the name `bash`, rotated launch order, used five warm-ups and kept 101 samples per shell. The previous Tonari was `1507031`. Login cases read the real system profile and a temporary home with the distribution skeleton. The parent measured process launch through exit with stdin disconnected. Values are **median / p95 in milliseconds**. [Login benchmark](../tools/bench_login.py)
+
+起動試験では同じファイルシステム上に各実行ファイルを配置し、実行順序を交替しました。ログイン試験にはシステムとユーザーの設定を読む時間も含まれます。Linux の対話ログインは `--login -ic :` の起動から終了までで、端末の最初の画面を描く時間は別の指標です。3環境は同じ物理マシンを共有し、検証作業の一部は並行して実行しました。
+
+```sh
+python3 tools/bench_login.py target/release/tonari --bash "$reference_bash" --previous "$previous_tonari" --runs 101
+```
+
+| Platform | Workload | Bash | Previous | Tonari | Tonari / Bash median |
+|---|---|---:|---:|---:|---:|
+| Debian | `-c :` | 0.850/1.911 | 0.428/0.947 | 0.451/1.100 | 0.531 |
+| Debian | `-lc :` | 2.558/5.023 | 2.505/3.729 | 2.157/3.311 | 0.843 |
+| Debian | `-lic :` | 4.383/7.984 | 4.331/7.632 | 3.653/6.837 | 0.833 |
+| Debian | 16 × `/usr/bin/true` | 11.345/25.519 | 8.177/17.520 | 8.329/16.659 | 0.734 |
+| Ubuntu | `-c :` | 0.708/1.937 | 0.368/1.385 | 0.388/1.713 | 0.548 |
+| Ubuntu | `-lc :` | 1.804/3.115 | 1.487/2.753 | 1.336/2.218 | 0.741 |
+| Ubuntu | `-lic :` | 3.759/4.994 | 4.111/5.920 | 3.252/4.212 | 0.865 |
+| Ubuntu | 16 × `/usr/bin/true` | 5.438/7.382 | 3.841/6.000 | 3.858/5.047 | 0.709 |
+| macOS | `-c :` | 7.503/8.675 | 4.356/4.970 | 4.326/5.194 | 0.577 |
+| macOS | `-lc :` | 10.562/11.922 | 6.536/7.488 | 6.525/7.590 | 0.618 |
+| macOS | `-lic :` | 10.887/11.928 | 6.654/7.840 | 6.763/7.883 | 0.621 |
+| macOS | 16 × `/usr/bin/true` | 44.142/49.372 | 26.470/30.191 | 26.712/32.969 | 0.605 |
+
+The time from creating a controlling terminal to seeing the first prompt was measured separately with 101 fresh sessions, with user profiles and rc files disabled. Times are median / p95 in milliseconds. 実際の疑似端末を開いてから最初のプロンプトが届くまでの時間です。 [Prompt benchmark](../tools/bench.py)
+
+| Platform | Tonari | Bash | Median ratio |
+|---|---:|---:|---:|
+| Debian | 0.970 / 2.170 | 1.527 / 2.926 | 0.635 |
+| Ubuntu | 1.009 / 1.757 | 1.515 / 3.634 | 0.666 |
+| macOS | 4.948 / 6.126 | 8.178 / 10.450 | 0.605 |
+
+We also measured 16 consecutive external commands inside an already-running shell against a C program issuing the same `posix_spawn` and `waitpid` calls, with 51 samples. On Debian the median was 3.866 ms for Tonari, 3.894 ms for C and 5.374 ms for Bash. On Ubuntu it was 3.950 ms, 3.868 ms and 5.229 ms respectively. The Linux launch series exceeded the two-thirds ratio on both guests and ran within 0.09 ms of the direct C control. [Native control](../tools/bench_spawn.c)
+
+外部プロセスを16回直列に起動した場合、Tonari の中央値は Debian で Bash 比0.719、Ubuntu で0.755でした。各起動を待つ C の対照と照合すると、16回全体での差は Debian で −0.028 ms、Ubuntu で +0.082 ms でした。
+
+The script harness measured 21 checked samples in a running shell. Cells show **Tonari median / Bash median in milliseconds**, followed by the ratio in parentheses. The source specifies the loop counts and checks the output after every launch. [Workload definitions](../tools/bench_scripts.py)
+
+スクリプトの反復処理では起動済みシェルを使い、実行結果も毎回確認しました。各セルは Tonari と Bash の中央値とその比率です。
+
+| Workload | Debian | Ubuntu | macOS |
+|---|---:|---:|---:|
+| arithmetic | 7.526 / 27.217 (0.277) | 6.599 / 22.438 (0.294) | 9.188 / 20.148 (0.456) |
+| functions | 10.252 / 26.760 (0.383) | 10.459 / 25.285 (0.414) | 15.796 / 27.364 (0.577) |
+| case-edges | 4.288 / 10.645 (0.403) | 3.875 / 8.642 (0.448) | 5.235 / 11.428 (0.458) |
+| substitutions | 0.523 / 18.459 (0.028) | 0.481 / 15.607 (0.031) | 0.812 / 72.677 (0.011) |
+| read-lines | 7.625 / 11.642 (0.655) | 7.274 / 10.743 (0.677) | 7.186 / 11.154 (0.644) |
+
+For input latency we measured from a key sent to a running macOS PTY to the visible result. The history journal contained 100,000 entries. The directory contained 10,000 executable files and the completion trials ran 41 times. [Completion benchmark](../tools/bench_completion.py)
+
+キーを送ってから画面に反映されるまでを測りました。古い履歴候補の検索中でも入力できるため、入力文字と候補の描画時間を個別に記録しています。単位は中央値 / p95 のミリ秒です。
+
+| Keystroke or result | Tonari | Bash |
+|---|---:|---:|
+| recent hint | 0.016 / 0.051 | — |
+| no hint | 0.017 / 0.049 | — |
+| oldest hint: typed key | 0.018 / 0.039 | — |
+| oldest hint: visible suggestion | 0.766 / 1.287 | — |
+| files | 5.857 / 7.848 | 11.839 / 13.314 |
+| complete -f | 5.902 / 8.300 | 12.366 / 15.062 |
+| PATH | 5.655 / 6.688 | 179.967 / 236.761 |
+
+For programmable completion and the second-Tab listing we used 31 samples per shell. Times are median / p95 in milliseconds. 登録済み候補と2回目の Tab による一覧を、起動済み端末で測っています。
+
+| Operation | Tonari | Bash |
+|---|---:|---:|
+| static, all | 0.348 / 0.920 | 26.904 / 48.136 |
+| static, unique | 0.243 / 0.512 | 26.040 / 34.223 |
+| dynamic, unique | 1.170 / 2.019 | 2.692 / 4.675 |
+| list 10 | 0.085 / 0.118 | 0.122 / 0.187 |
+| list 10000 | 8.146 / 9.193 | 38.336 / 40.772 |
+
+| Executable bytes | Tonari | Reference Bash |
+|---|---:|---:|
+| macOS arm64 | 1,202,304 | 1,208,904 |
+| Debian arm64 | 1,403,584 | 1,412,096 |
+| Ubuntu arm64 | 1,403,584 | 1,609,176 |
+| Debian x86-64-v3 | 1,289,112 | 1,298,416 |
+
+The arm64 Linux guests share one static musl executable. The x86-64-v3 build links to the distro’s `libc.so.6` and `libgcc_s.so.1`. macOS links to system libraries. The table measures executable bytes on disk. Debian x86-64 passed all 116 integration tests under its own kernel in QEMU. Native x86-64 and WSL2 performance measurements are pending.
+
+Linux arm64 は静的 musl、x86-64-v3 は OS の共有ライブラリにリンクして、各ターゲットに実行ファイルを1本配置しました。x86-64 の機能試験では QEMU 上の Debian カーネル 6.12.117 と Bash 5.2.37 を使用しました。最終版の x86-64 実行ファイルの SHA-256 は `1235d91e038cac44e9f1813eff8f0ba8cfd96d1f8e8752082da842168b9ee4d1` です。
+
+Build the x86-64 artifact on Debian 13 with Rust 1.96.1 and the system linker. The executable requires an x86-64-v3 CPU and a runtime that supports packed relative relocations. x86-64-v3 版の再ビルド条件は次のとおりです。
+
+```sh
+CARGO_PROFILE_RELEASE_OPT_LEVEL=z \
+  RUSTFLAGS='-C target-cpu=x86-64-v3 -C link-arg=-Wl,-z,pack-relative-relocs' \
+  cargo build --release --locked
+```
+
+### Per-feature timings / 機能別の計測
+
+Each count is a named compatibility check with verified timing samples. Some names exercise the same operation. The thresholds use raw median times, including waits and external processes. Every previously matched and timed case still matched and produced samples. [All measurements](compatibility-2026-11-23-shell/matrix.md) · [Cases that crossed the upper target since the login snapshot](compatibility-2026-11-23-shell/target-crossings.tsv)
+
+| Platform | Mode | Measured | ≤ 1/2 | ≤ 2/3 | ≤ Bash |
+|---|---|---:|---:|---:|---:|
+| Debian | whole | 776 | 16 | 456 | 763 |
+| Debian | started | 676 | 11 | 42 | 594 |
+| Ubuntu | whole | 772 | 19 | 448 | 757 |
+| Ubuntu | started | 674 | 6 | 37 | 594 |
+| macOS | whole | 756 | 1 | 631 | 756 |
+| macOS | started | 673 | 10 | 59 | 655 |
+
+以前の測定で 2/3 以内だった項目のうち、今回上限を超えた件数は、起動込み／起動後の順で Debian 75／30、Ubuntu 50／26、macOS 22／14 です。各機能の正しい出力を確認してから同じ処理を計時しました。個別テストには子プロセスや端末、固定の待ち時間を含むものがあります。Bash を超えた時間や計測回ごとの揺れも比較できるように、環境別 TSV に中央値と p95 を掲載しました。[前回と今回の中央値](compatibility-2026-11-23-shell/target-crossings.tsv)
+
 <a id="path-expansion-order"></a>
 
 ## Wildcard expansion and collation / ワイルドカード展開と並べ替え

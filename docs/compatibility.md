@@ -1,10 +1,36 @@
 # Bash compatibility audit / Bash 互換性の検証
 
-Tonari remains a prototype for use from an existing shell. The inventory starts with the reference Bash installations and the GNU manual. The matrix gives the observed behavior and the elapsed time for each matching workload. [Current feature inventory](compatibility/current.tsv) · [Current timing matrix](compatibility-2026-11-23-login/matrix.md) · [Debian evidence](compatibility-2026-11-23-login/Debian.tsv) · [Ubuntu evidence](compatibility-2026-11-23-login/Ubuntu.tsv) · [macOS evidence](compatibility-2026-11-23-login/macOS.tsv)
+Tonari remains a prototype for use from an existing shell. The inventory starts with the reference Bash installations and the GNU manual. The matrix gives the observed behavior and the elapsed time for each matching workload. [Current feature inventory](compatibility/current.tsv) · [Current timing matrix](compatibility-2026-11-23-shell/matrix.md) · [Debian evidence](compatibility-2026-11-23-shell/Debian.tsv) · [Ubuntu evidence](compatibility-2026-11-23-shell/Ubuntu.tsv) · [macOS evidence](compatibility-2026-11-23-shell/macOS.tsv)
 
-Tonari は現在、既存のシェルから起動して試せる段階です。参照先の Bash と GNU マニュアルを起点に項目を列挙しました。一覧には機能名ごとの判定と速度を載せ、環境別 TSV には実際のテスト内容と差が出た出力例を残しています。[現在の機能別一覧](compatibility/current.tsv) · [各項目の最新計測](compatibility-2026-11-23-login/matrix.md)
+Tonari は現在、既存のシェルから起動して試せる段階です。参照先の Bash と GNU マニュアルを起点に項目を列挙しました。一覧には機能名ごとの判定と速度を載せ、環境別 TSV には実際のテスト内容と差が出た出力例を残しています。[現在の機能別一覧](compatibility/current.tsv) · [各項目の最新計測](compatibility-2026-11-23-shell/matrix.md)
 
-## Login sessions on 2026-11-23 / ログインシェルの検証
+## Session controls and script execution / 対話操作とスクリプト
+
+The primary checks for all 61 builtins match on Debian, Ubuntu and macOS. The new checks exercise `bind` with a key assignment and a query, `caller` in nested functions, `enable` through command lookup, `help` through a synopsis and `suspend` through an actual stop and resume. Bash and Tonari also inherited exported functions in all four parent/child combinations. Further cases cover `DEBUG` and function tracing, history expansion, `select` with invalid input and EOF, `time` on pipelines, and bidirectional `coproc` communication followed by `wait`. [Integration suite](../tests/shell.py) · [Feature timings](compatibility-2026-11-23-shell/matrix.md)
+
+ログイン時は `/etc/profile` を先に読み、続いて `~/.bash_profile`、`~/.bash_login`、`~/.profile` の順で最初に読める一つを実行します。引数 `--noprofile` でこれを省略できます。通常の非ログイン対話端末では Bash の rc を読み、非対話の `-c` では設定済みの `BASH_ENV` を読みます。実際の Debian・Ubuntu の標準設定と macOS のログイン設定を一時ホームで比較しました。61件は組み込みごとの代表テスト数です。Readline の個々の操作や Bash の各オプションは別の行で検証しています。[最新の機能別判定](compatibility/current.tsv) · [GNU 試験の差分](compatibility/gnu.tsv)
+
+Compared with `1507031`, 84 more direct checks match on Debian, 83 on Ubuntu and 84 on macOS. All previously matching direct checks still pass. Both the 61 builtin and 22 reserved-word primary cases match on each platform. The 116-case integration suite passed on Debian and Ubuntu arm64, and on a Debian x86-64 QEMU guest. On macOS 115 passed and the Linux distribution-profile case was skipped. The GNU driver totals are 16 golden matches of 83 on Debian and 14 of 86 on Ubuntu. Both job-control drivers ran to completion and still show differences. [GNU observations with examples](compatibility/gnu.tsv)
+
+名前付きリダイレクトの `exec {log}>file` と解放、`varredir_close` の動作、消えた実行ファイルを `checkhash` で再探索するケースも実行しました。Ubuntu の `shopt` は59項目中12件が動作まで一致し、8件はインターフェースを確認、2件は差があり、37件は未実装です。GNU のまとまった試験には出力差が残り、全機能互換は未達です。[機能別判定](compatibility/current.tsv)
+
+In disposable Debian and Ubuntu accounts we registered Tonari’s private `bash` entry point as the login shell and entered using `su --pty --login`. The session saw the registered `SHELL`, `$0=-bash`, the user profile and the distro’s `HISTCONTROL=ignoreboth`. An explicit `exit 19` ran `.bash_logout` and returned status 19. [Disposable account test](../tests/compat/login_account.sh)
+
+実ツールでは、macOS の Git でシェル起動後に別プロセスが作ったブランチを Tab 補完して切り替え、Debian の direnv 2.32.1 で移動時の環境変数の適用と解除を確認しました。fzf 0.74.0 はフィルターで選択を固定し、実際の Ctrl-T バインドから空白・日本語入りの一引数が渡ることを Emacs と vi の両モードで照合しました。[Git・direnv の端末テスト](../tests/compat/tool_hooks.py) · [fzf の端末テスト](../tests/compat/fzf_keys.py)
+
+The same macOS release and reference also loaded nvm 0.40.3 and 0.40.5. For each version both shells switched from Node 24.1.0 to 18.13.0 and reported the expected version with `node --version`. We used a temporary home and nvm directory with links to the installed Node versions.
+
+nvm の2バージョンとも一時ホームで読み込み、同じセッションで Node を2回切り替えて確認しました。ログインやツールの端末テストは次のように再実行できます。Git の例ではインストール済みの Bash 補完スクリプトのパスを指定します。
+
+```sh
+sh tests/compat/login_account.sh target/dist/linux-arm64/libexec/tonari/bash debian:13
+sh tests/compat/login_account.sh target/dist/linux-arm64/libexec/tonari/bash ubuntu:26.04
+python3 tests/compat/tool_hooks.py target/release/tonari --git-completion "$git_completion"
+python3 tests/compat/tool_hooks.py target/release/tonari --direnv
+python3 tests/compat/fzf_keys.py target/release/tonari --fzf fzf
+```
+
+## Earlier login checks on 2026-11-23 / ログインシェルの検証
 
 The primary witnesses for `logout`, `history` and `fc` now match on Debian 13, Ubuntu 26.04 and native macOS arm64. Of Ubuntu's 61 builtins, 56 match their primary check. The remaining five absent interfaces are `bind`, `caller`, `enable`, `help` and `suspend`. Direct comparisons cover the distro login path, local variable restoration during completion, arithmetic array subscripts, and shell nesting. The history journal stays under the XDG state directory. The `history` and `fc` checks cover selected file operations, listing and replay. Interactive history event expansion and all Readline bindings still lack full compatibility. [Integration tests](../tests/shell.py) · [Login timings](benchmarks.md#login-profiles)
 
@@ -48,6 +74,8 @@ Bash 互換の基準は、対応するスクリプトとツールが期待する
 | A `printf` command with raw byte `ff` inside single quotes, supplied through `-c`, a file or stdin in the C locale | The command runs and writes `ff`. | Reject the invalid command text with status 2 and a UTF-8 diagnostic. 不正な入力単位を実行しません。 |
 | `cat <input.bin \| cat >output.bin` with all 256 byte values | The output file equals the input. | The output file equals the input. UTF-8 validation applies to shell text. パイプやリダイレクトでバイナリをそのまま転送できます。 |
 
+Tonari ships a single native executable with built-in editing. `enable -n echo` and `enable echo` change builtin lookup in a running shell. Loading or unloading native GNU Bash builtin modules through `enable -f/-d` is outside Tonari’s design. `help` prints Tonari’s own descriptions and supports builtin synopses. `enable -f/-d` で GNU Bash の共有ライブラリを読み込む機能は対象外です。組み込みの切り替えと実装済みのキー設定はシェル単体で使えます。
+
 The C locale byte result is expected Bash behavior. The UTF-8 `IFS` example exhibits different outcomes even among the reference builds. Tonari keeps valid text intact in both cases. [Encoding observations](engineering-notes.md)
 
 `LC_ALL=C` でバイトを数えるのは Bash の仕様です。一方、UTF-8 の `IFS` の例では参照実装同士でも結果が分かれます。どちらも Tonari では文字の境界を守る理由があり、その期待値を回帰テストにしています。[開発知見](engineering-notes.md)
@@ -58,9 +86,9 @@ The C locale byte result is expected Bash behavior. The UTF-8 `IFS` example exhi
 - Builtins, their short-option usage, reserved words, shell options, signal names, Readline commands and Readline variables come from the reference executable. Manual sections, documented variables, compatibility levels and numbered POSIX-mode rules come from the matching GNU sources. The other rows name concrete language operations, invocation forms, prompt escapes, and terminal workflows. [GNU Bash manual](https://www.gnu.org/software/bash/manual/bash.html) · [GNU Bash releases](https://ftp.gnu.org/gnu/bash/)
 - A direct script match requires equal stdout bytes, stderr bytes and exit status after replacing the test directory and executable path with fixed labels. PTY tests check the displayed prompt, captured input/completion fields, terminal process group or returned status. Date and time prompts use the documented display format. Network redirection probes check received bytes over loopback.
 - Each GNU driver runs once against the distribution shell and once against Tonari using the same executable pathname, fixtures, locale and controlling terminal. A golden match requires a successful driver, a nonempty sequence of successful direct golden-file comparisons, and no reported skips on either side. A failing, skipped or unobservable control remains inconclusive. The ordinary exported-function behavior has its own direct probe. The aggregate, profiling and exported-function drivers are outside the golden totals.
-- A matching observation applies to the named case. A working `trap EXIT` can coexist with a failing `trap DEBUG`. An absent `bind` marks every Readline binding interface as missing. A rejected `--posix` leaves the manual’s numbered POSIX rules blocked at entry. A counted name can share a witness with other names. The 132 manual sections form an index. These dependencies make a single percentage a poor measure of how much of Bash works. Unicode tests cover the project's UTF-8 contract. Combinations of features, external plugins, other CPUs and WSL2 require their own evidence.
+- A matching observation applies to the named case. A working `trap EXIT` can coexist with a failing `trap DEBUG`. Each named Readline command is queried independently. Some names share a command-list or key-lookup witness. A rejected `--posix` leaves the manual’s numbered POSIX rules blocked at entry. A counted name can share a witness with other names. The 132 manual sections form an index. These dependencies make a single percentage a poor measure of how much of Bash works. Unicode tests cover the project's UTF-8 contract. Combinations of features, external plugins, other CPUs and WSL2 require their own evidence.
 - 直接の比較では標準出力、標準エラー、終了値を照合します。対話機能は疑似端末から実際にキーを送り、補完コールバックの値や前景プロセスグループも調べます。GNU の回帰テストは配布版 Bash 自身でも実行します。正解ファイルと照合できなかったグループには「判定不能」と明記しました。
-- 組み込みやオプションの一致はその検証例が通ったという意味です。たとえば `trap EXIT` が通っても `trap DEBUG` には動作差があります。Readline の多数の行が一つの `bind` の欠落に結び付きます。件数には別名や同じ操作を参照する項目も含まれ、全組み合わせを網羅するものではありません。
+- 組み込みやオプションの一致はその検証例が通ったという意味です。たとえば `trap EXIT` が通っても `trap DEBUG` には動作差があります。Readline の各キー操作で、割り当ての照会と実行時の編集動作を区別します。件数には別名や同じ操作を参照する項目も含まれ、全組み合わせを網羅するものではありません。
 
 ## What the timing measures / 速度の測り方
 

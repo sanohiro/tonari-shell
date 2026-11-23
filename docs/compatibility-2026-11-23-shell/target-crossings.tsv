@@ -1,0 +1,218 @@
+platform	group	feature	mode	previous_bash_p50_ns	previous_tonari_p50_ns	bash_p50_ns	tonari_p50_ns
+Debian	Arithmetic	%=	whole	749417	401417	512208	393709
+Debian	Arithmetic	%=	started	329542	211166	159000	154166
+Debian	Arithmetic	/=	started	300458	181250	176083	166250
+Debian	Arithmetic	017	started	352042	229500	172583	144208
+Debian	Arithmetic	<<	started	339000	223291	159042	157875
+Debian	Arithmetic	=	started	365208	230875	186834	171917
+Debian	Arithmetic	>=	whole	716000	430875	514334	359584
+Debian	Arithmetic	>>=	started	334959	221334	175500	205709
+Debian	Arithmetic	a--	whole	890334	536542	807417	551291
+Debian	Builtin	continue	whole	721208	436292	881375	591834
+Debian	Builtin	eval	started	254250	163458	189083	229042
+Debian	Builtin	history	whole	1822625	1201708	1630917	1212333
+Debian	Builtin	local	whole	622417	350917	602667	423417
+Debian	Builtin	logout	whole	843084	407959	601875	408458
+Debian	Builtin	test	whole	581542	311208	694209	476750
+Debian	Builtin	ulimit	started	440542	289250	467625	328666
+Debian	Builtin	unalias	whole	534417	316500	586792	413750
+Debian	Builtin option	command -p	whole	710417	460584	776750	537958
+Debian	Builtin option	compgen -C	whole	2503917	1559125	2072500	1483500
+Debian	Builtin option	compgen -G	whole	2522625	1667208	1981208	1541041
+Debian	Builtin option	compgen -X	whole	2288583	1480042	2001584	1614125
+Debian	Builtin option	compgen -b	started	2411750	1598042	4033125	3320167
+Debian	Builtin option	compgen -s	whole	2707792	1724959	2633166	1851084
+Debian	Builtin option	complete -D	whole	866250	489416	711791	475042
+Debian	Builtin option	declare -r	started	680417	437625	597208	437625
+Debian	Builtin option	dirs -p	whole	1193000	790292	1452584	1036791
+Debian	Builtin option	hash -l	whole	748500	398583	1006625	744083
+Debian	Builtin option	mapfile -d	whole	706458	380833	625709	423875
+Debian	Builtin option	read -r	whole	614000	382916	631459	441167
+Debian	Builtin option	readarray -s	whole	559541	356000	562750	379834
+Debian	Builtin option	unset -v	whole	472000	265791	572834	398875
+Debian	Completion action	export	whole	2357792	1570375	2165125	1487042
+Debian	Completion action	variable	started	2074375	1381833	1837125	1471709
+Debian	Conditional	-R	whole	967083	581000	516084	360042
+Debian	Conditional	-c	whole	821292	434042	595750	426250
+Debian	Conditional	-g	whole	2072334	1223292	1421542	994709
+Debian	Conditional	-nt	started	1649958	1099791	910916	714959
+Debian	Conditional	-u	whole	2039417	1355291	1362000	985417
+Debian	Conditional	<	started	386250	212291	191458	176458
+Debian	Conditional	=	started	488833	290250	186375	170167
+Debian	Conditional	>	whole	1142167	540750	550167	391166
+Debian	History expansion	!!:*	started	335708	203083	206666	172208
+Debian	Invocation	--noprofile	whole	749958	474709	527084	365833
+Debian	Invocation	-C	whole	720167	400625	540541	378667
+Debian	Invocation	-T	whole	749458	455708	1180583	1004917
+Debian	Invocation	login logout	whole	843084	407959	601875	408458
+Debian	Invocation	read script file	whole	714667	410917	783666	535042
+Debian	Parameter	$?	whole	663542	350208	629167	476125
+Debian	Parameter	${!name}	started	314375	202166	159458	143875
+Debian	Parameter	${#v}	started	1230000	773917	1060250	798250
+Debian	Parameter	${v%*a}	whole	1993083	1118917	1318167	908708
+Debian	Parameter	${v,,}	whole	1973500	1036584	1310708	874083
+Debian	Parameter	${v/%a/X}	started	1224000	779208	882083	728125
+Debian	Parameter	${v//a/X}	started	1772875	1162000	963416	735292
+Debian	Parameter	${v/a/X}	whole	2373500	1290208	1445834	1007917
+Debian	Parameter	${v:1}	whole	1685458	992875	1356958	942750
+Debian	Parameter	${v=a}	whole	1829000	1160083	1381875	949708
+Debian	Parameter	${v@E}	started	1774834	1103459	905333	791125
+Debian	Parameter	${v@L}	started	1511375	979250	890333	666458
+Debian	Parameter	${v}	started	1404333	889708	929416	682792
+Debian	Printf format	A	started	235916	143917	175166	137583
+Debian	Printf format	X	started	250458	162666	154708	149625
+Debian	Printf format	o	started	247333	157417	149875	137875
+Debian	Prompt escape	\n	whole	1916167	1249208	2209708	1599416
+Debian	Redirection	&>	whole	1598833	951167	1113041	818208
+Debian	Redirection	>|	whole	1087250	723666	860667	635167
+Debian	Redirection	n<&-	whole	686541	347166	623667	428750
+Debian	Reserved word	case	whole	631334	354209	789708	542459
+Debian	Reserved word	esac	whole	631334	354209	789708	542459
+Debian	Reserved word	until	whole	758750	417584	1106458	795000
+Debian	Reserved word	while	whole	769584	439916	816083	576167
+Debian	Shell language	ANSI-C quoting	whole	791916	450250	1161459	792166
+Debian	Shell language	EXIT trap	whole	733125	399542	1087625	762792
+Debian	Shell language	arithmetic expansion	whole	715750	382667	674167	453750
+Debian	Shell language	array slice and negative index	whole	680792	395958	628333	447458
+Debian	Shell language	associative arrays	whole	777000	421875	953416	697334
+Debian	Shell language	brace alternation	whole	781083	467042	723542	628292
+Debian	Shell language	bracket expressions and classes	whole	1201917	778417	1155167	809083
+Debian	Shell language	case in esac	whole	631334	354209	789708	542459
+Debian	Shell language	double quotes	started	349208	217000	369584	268667
+Debian	Shell language	extglob !(...)	whole	761667	442625	630000	448583
+Debian	Shell language	indexed arrays	started	276417	171708	294750	239292
+Debian	Shell language	pathname expansion of leading dots	whole	1097458	714042	899750	663125
+Debian	Shell language	programmable completion callback	whole	608416	370083	555000	393583
+Debian	Shell language	shell environment isolation	whole	1016834	627458	898708	681667
+Debian	Shell language	single quotes	whole	655000	417583	732417	495083
+Debian	Shell language	subshell exit isolation	started	556125	355250	403083	305417
+Debian	Shell language	subshell scope	started	681375	437458	639250	517208
+Debian	Shell language	until	whole	758750	417584	1106458	795000
+Debian	Shell language	while	whole	769584	439916	816083	576167
+Debian	Signal	XFSZ	whole	706250	369459	565042	383125
+Debian	Variable	BASH_VERSINFO	whole	594958	348958	589667	403375
+Debian	Variable	COMPREPLY	whole	608416	370083	555000	393583
+Debian	Variable	EUID	whole	1189083	764292	1761041	1293917
+Debian	Variable	GLOBIGNORE	whole	1043833	675375	1189375	854750
+Debian	Variable	HISTFILESIZE	whole	985125	552542	1115125	748209
+Debian	Variable	HISTSIZE	whole	1349542	879333	1575000	1100334
+Debian	Variable	HOSTFILE	whole	594875	351625	964500	681750
+Debian	Variable	OLDPWD	whole	1101500	733250	1173750	845792
+Debian	Variable	REPLY	whole	593333	358250	776292	576958
+Debian	Variable	SHELLOPTS	whole	606250	353791	594625	404542
+Debian	Variable	SHELLOPTS	started	213833	138083	208084	199125
+Debian	shopt	failglob	whole	958750	560083	949417	723958
+Debian	shopt	globskipdots	whole	1096042	709709	1007000	784958
+Debian	shopt	globstar	whole	1613791	1058458	1624041	1176250
+Ubuntu	Arithmetic	&=	started	371292	216000	201334	152209
+Ubuntu	Arithmetic	+	whole	703667	394542	507000	383917
+Ubuntu	Arithmetic	-=	started	374000	220167	169125	155625
+Ubuntu	Arithmetic	-a	whole	847500	448459	603625	571125
+Ubuntu	Arithmetic	017	whole	958083	447875	544250	369083
+Ubuntu	Arithmetic	16#ff	whole	1026042	591042	704167	472125
+Ubuntu	Arithmetic	==	whole	749542	458583	533958	373042
+Ubuntu	Arithmetic	a--	whole	905125	443375	564417	387167
+Ubuntu	Arithmetic	|=	started	450208	280333	155792	145708
+Ubuntu	Arithmetic	~a	started	386792	237417	168791	141666
+Ubuntu	Builtin	builtin	whole	544875	318792	681834	501292
+Ubuntu	Builtin	let	started	223250	148041	173458	170750
+Ubuntu	Builtin	readonly	whole	776125	473208	899417	747500
+Ubuntu	Builtin	ulimit	started	420000	277500	382459	289750
+Ubuntu	Builtin option	declare -n	whole	653209	303667	553416	376917
+Ubuntu	Builtin option	mapfile -C	whole	762333	449667	938750	639708
+Ubuntu	Builtin option	read -a	whole	639292	352875	587042	427250
+Ubuntu	Builtin option	readarray -s	started	302833	190084	244666	195041
+Ubuntu	Builtin option	shopt -p	started	176291	111750	164250	137833
+Ubuntu	Builtin option	trap -l	whole	1248125	792750	1246500	842708
+Ubuntu	Builtin option	type -P	whole	1238583	772584	1373542	958625
+Ubuntu	Builtin option	typeset -p	started	238875	156708	188583	185167
+Ubuntu	Builtin option	typeset -x	whole	962417	612458	801750	564583
+Ubuntu	Conditional	-d	whole	869416	432333	1285167	969083
+Ubuntu	Conditional	-f	whole	856833	557500	880833	706208
+Ubuntu	History expansion	!!	started	267542	162125	213750	186583
+Ubuntu	Invocation	+o	whole	884084	456709	1175000	849250
+Ubuntu	Invocation	--login	whole	602292	295000	639042	431083
+Ubuntu	Parameter	${#a[@]}	started	329084	208292	159334	155667
+Ubuntu	Parameter	${#v}	whole	2049042	1174250	1337333	899208
+Ubuntu	Parameter	${v#a*}	whole	2158541	1298042	1485791	1238750
+Ubuntu	Parameter	${v%*a}	started	1631667	928083	1020750	835250
+Ubuntu	Parameter	${v,}	started	1415917	903042	937208	742000
+Ubuntu	Parameter	${v/#a/X}	started	1400209	914666	1364417	980542
+Ubuntu	Parameter	${v/%a/X}	whole	1866000	1141750	1909125	1321583
+Ubuntu	Parameter	${v//a/X}	whole	2146250	1260875	1367666	917917
+Ubuntu	Parameter	${v//a/X}	started	1658542	948042	958500	722500
+Ubuntu	Parameter	${v: -2:1}	started	1562458	943166	1061292	754125
+Ubuntu	Parameter	${v:+a}	whole	2234709	1292792	1308250	883333
+Ubuntu	Parameter	${v?a}	started	1492291	989209	929667	740291
+Ubuntu	Parameter	${v@E}	whole	1863625	1196833	1342250	936417
+Ubuntu	Parameter	${v@P}	whole	2037375	1285708	1480250	1184875
+Ubuntu	Parameter	${v@u}	whole	2409625	1537459	1377792	963584
+Ubuntu	Printf format	%	started	385083	250083	161584	148916
+Ubuntu	Printf format	a	whole	748084	488542	520959	375459
+Ubuntu	Printf format	e	started	386375	251667	165291	143667
+Ubuntu	Printf format	i	whole	656792	392792	475417	318041
+Ubuntu	Printf format	x	started	362875	202458	172750	156000
+Ubuntu	Redirection	n<&-	started	306584	203125	199917	172625
+Ubuntu	Reserved word	case	whole	717125	406667	1255208	866666
+Ubuntu	Reserved word	esac	whole	717125	406667	1255208	866666
+Ubuntu	Reserved word	{	whole	695250	400584	907167	654958
+Ubuntu	Reserved word	}	whole	695250	400584	907167	654958
+Ubuntu	Shell language	ANSI-C quoting	whole	803750	464166	1196167	808166
+Ubuntu	Shell language	arithmetic expansion	whole	754417	431500	747625	633833
+Ubuntu	Shell language	arithmetic short circuit	whole	779791	457417	537958	359167
+Ubuntu	Shell language	brace alternation	whole	650125	370417	616000	457541
+Ubuntu	Shell language	brace group	whole	695250	400584	907167	654958
+Ubuntu	Shell language	case ;& fallthrough	whole	653291	415084	800666	632209
+Ubuntu	Shell language	case in esac	whole	717125	406667	1255208	866666
+Ubuntu	Shell language	comments	whole	682417	425709	748750	575750
+Ubuntu	Shell language	completion filters	started	249375	165083	166000	156666
+Ubuntu	Shell language	escape sequences in printf %b	whole	743708	399167	558500	395208
+Ubuntu	Shell language	function argument restoration	whole	739625	368792	504417	355416
+Ubuntu	Shell language	indexed arrays	whole	718250	440625	682000	521209
+Ubuntu	Shell language	lists and short-circuit	whole	856958	465333	786750	571583
+Ubuntu	Shell language	local variable inheritance	whole	676958	375834	659375	447458
+Ubuntu	Shell language	local variable inheritance	started	282584	179292	211625	172416
+Ubuntu	Shell language	simple commands and assignments	whole	1003416	663000	1452333	1103667
+Ubuntu	Shell language	subshell scope	whole	964667	583209	1208834	909250
+Ubuntu	Signal	URG	whole	574125	358458	686666	457916
+Ubuntu	Variable	MAPFILE	started	320333	178500	189833	177417
+Ubuntu	Variable	RANDOM	whole	884042	570708	649417	453500
+Ubuntu	shopt	failglob	started	667333	388000	690000	501083
+Ubuntu	shopt	localvar_inherit	whole	676958	375834	659375	447458
+Ubuntu	shopt	localvar_inherit	started	282584	179292	211625	172416
+macOS	Builtin	times	whole	10007833	6014375	11554584	8175334
+macOS	Builtin option	compgen -c	whole	19548125	13004208	19304500	13769458
+macOS	Builtin option	compgen -d	whole	20657625	13330708	20047291	13995542
+macOS	Builtin option	compgen -k	whole	19762334	12541375	18073459	12371792
+macOS	Builtin option	compgen -v	whole	19039709	12654334	17616166	11798042
+macOS	Builtin option	complete -X	whole	16935416	10647333	17078083	11404292
+macOS	Builtin option	complete -X	started	6997459	4223667	7418791	5397666
+macOS	Builtin option	complete -a	started	6971000	4465250	7390792	5098250
+macOS	Builtin option	complete -d	whole	15825167	9876750	16134917	10875459
+macOS	Builtin option	complete -e	started	7002875	4636917	7795083	5310959
+macOS	Builtin option	dirs -l	started	3586416	2350334	4655708	3414000
+macOS	Builtin option	export -p	whole	10819750	6788125	12021125	8155458
+macOS	Builtin option	kill -n	whole	7578375	4408208	8794875	5866708
+macOS	Builtin option	popd -N	started	3514625	2277042	3508917	2533750
+macOS	Builtin option	readonly -p	whole	10332875	6098083	11001833	7340708
+macOS	Completion action	arrayvar	started	8651667	5481958	8378292	5653083
+macOS	Completion action	export	started	8555625	5658917	7904417	5924791
+macOS	Completion action	shopt	started	8787667	5793291	9215208	6214458
+macOS	Parameter	${v#a*}	whole	10335084	6739917	10103958	6857834
+macOS	Parameter	${v%%*a}	whole	9943208	6598834	10150333	6801916
+macOS	Parameter	${v%*a}	whole	10479000	6539333	9991792	6727875
+macOS	Parameter	${v=a}	whole	10402500	6724000	9849833	6816833
+macOS	Parameter	${v}	whole	10305417	6579542	9761375	6608791
+macOS	Prompt escape	\$	whole	11002125	7083083	10775291	7284833
+macOS	Prompt escape	\W	whole	11734458	7410000	11538667	7955125
+macOS	Prompt escape	\a	whole	10362375	6782375	9373167	6408917
+macOS	Prompt escape	\n	whole	10959459	6662125	10790875	7515750
+macOS	Prompt escape	\w	whole	11152916	7329917	11582458	7875500
+macOS	Redirection	n<&m	started	3363167	2084416	3227458	2168208
+macOS	Redirection	n>&m	whole	9192250	6045708	8907958	6430167
+macOS	Shell language	directory stack rotation	whole	11596750	7503625	12373334	8271375
+macOS	Shell language	filename wildcards	started	3838000	2197250	8449209	6854000
+macOS	Shell language	function argument restoration	started	752000	490167	806333	590917
+macOS	Shell language	grouped pipeline status	started	3616250	2306375	3551125	2485208
+macOS	Shell language	tilde current and previous directories	started	3241958	2111375	3086542	2133167
+macOS	shopt	globskipdots	started	3720500	2100584	4423875	3072000

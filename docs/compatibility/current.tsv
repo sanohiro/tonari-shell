@@ -48,10 +48,10 @@ Builtin	:	match	match	match
 Builtin	[	match	match	match
 Builtin	alias	match	match	match
 Builtin	bg	match	match	match
-Builtin	bind	missing interface	missing interface	missing interface
+Builtin	bind	match	match	match
 Builtin	break	match	match	match
 Builtin	builtin	match	match	match
-Builtin	caller	missing interface	missing interface	missing interface
+Builtin	caller	match	match	match
 Builtin	cd	match	match	match
 Builtin	command	match	match	match
 Builtin	compgen	match	match	match
@@ -62,7 +62,7 @@ Builtin	declare	match	match	match
 Builtin	dirs	match	match	match
 Builtin	disown	match	match	match
 Builtin	echo	match	match	match
-Builtin	enable	missing interface	missing interface	missing interface
+Builtin	enable	match	match	match
 Builtin	eval	match	match	match
 Builtin	exec	match	match	match
 Builtin	exit	match	match	match
@@ -72,7 +72,7 @@ Builtin	fc	match	match	match
 Builtin	fg	match	match	match
 Builtin	getopts	match	match	match
 Builtin	hash	match	match	match
-Builtin	help	missing interface	missing interface	missing interface
+Builtin	help	match	match	match
 Builtin	history	match	match	match
 Builtin	jobs	match	match	match
 Builtin	kill	match	match	match
@@ -92,7 +92,7 @@ Builtin	set	match	match	match
 Builtin	shift	match	match	match
 Builtin	shopt	match	match	match
 Builtin	source	match	match	match
-Builtin	suspend	missing interface	missing interface	missing interface
+Builtin	suspend	match	match	match
 Builtin	test	match	match	match
 Builtin	times	match	match	match
 Builtin	trap	match	match	match
@@ -106,20 +106,20 @@ Builtin	unset	match	match	match
 Builtin	wait	match	match	match
 Builtin option	. -p	—	different	—
 Builtin option	alias -p	match	match	match
-Builtin option	bind -P	missing interface	missing interface	missing interface
-Builtin option	bind -S	missing interface	missing interface	missing interface
-Builtin option	bind -V	missing interface	missing interface	missing interface
-Builtin option	bind -X	missing interface	missing interface	missing interface
-Builtin option	bind -f	missing interface	missing interface	missing interface
-Builtin option	bind -l	missing interface	missing interface	missing interface
-Builtin option	bind -m	missing interface	missing interface	missing interface
-Builtin option	bind -p	missing interface	missing interface	missing interface
-Builtin option	bind -q	missing interface	missing interface	missing interface
-Builtin option	bind -r	missing interface	missing interface	missing interface
-Builtin option	bind -s	missing interface	missing interface	missing interface
-Builtin option	bind -u	missing interface	missing interface	missing interface
-Builtin option	bind -v	missing interface	missing interface	missing interface
-Builtin option	bind -x	missing interface	missing interface	missing interface
+Builtin option	bind -P	context unprobed	context unprobed	context unprobed
+Builtin option	bind -S	context unprobed	context unprobed	context unprobed
+Builtin option	bind -V	context unprobed	context unprobed	context unprobed
+Builtin option	bind -X	context unprobed	context unprobed	context unprobed
+Builtin option	bind -f	context unprobed	context unprobed	context unprobed
+Builtin option	bind -l	context unprobed	context unprobed	context unprobed
+Builtin option	bind -m	context unprobed	context unprobed	context unprobed
+Builtin option	bind -p	context unprobed	context unprobed	context unprobed
+Builtin option	bind -q	context unprobed	context unprobed	context unprobed
+Builtin option	bind -r	context unprobed	context unprobed	context unprobed
+Builtin option	bind -s	context unprobed	context unprobed	context unprobed
+Builtin option	bind -u	context unprobed	context unprobed	context unprobed
+Builtin option	bind -v	context unprobed	context unprobed	context unprobed
+Builtin option	bind -x	context unprobed	context unprobed	context unprobed
 Builtin option	cd -@	not in reference	not in reference	not in reference
 Builtin option	cd -L	match	match	match
 Builtin option	cd -P	match	match	match
@@ -183,14 +183,14 @@ Builtin option	declare -A	match	match	match
 Builtin option	declare -F	match	match	match
 Builtin option	declare -I	match	match	match
 Builtin option	declare -a	match	match	match
-Builtin option	declare -f	different	different	different
+Builtin option	declare -f	match	match	match
 Builtin option	declare -g	match	match	match
 Builtin option	declare -i	match	match	match
 Builtin option	declare -l	different	different	different
 Builtin option	declare -n	match	match	match
 Builtin option	declare -p	match	match	match
 Builtin option	declare -r	match	match	match
-Builtin option	declare -t	different	different	different
+Builtin option	declare -t	match	match	match
 Builtin option	declare -u	different	different	different
 Builtin option	declare -x	match	match	match
 Builtin option	dirs -N	match	match	match
@@ -204,16 +204,16 @@ Builtin option	disown -r	match	match	match
 Builtin option	echo -E	match	match	match
 Builtin option	echo -e	match	match	match
 Builtin option	echo -n	match	match	match
-Builtin option	enable -a	missing interface	missing interface	missing interface
-Builtin option	enable -d	missing interface	missing interface	missing interface
-Builtin option	enable -f	missing interface	missing interface	missing interface
-Builtin option	enable -n	missing interface	missing interface	missing interface
-Builtin option	enable -p	missing interface	missing interface	missing interface
-Builtin option	enable -s	missing interface	missing interface	missing interface
+Builtin option	enable -a	context unprobed	context unprobed	context unprobed
+Builtin option	enable -d	context unprobed	context unprobed	context unprobed
+Builtin option	enable -f	context unprobed	context unprobed	context unprobed
+Builtin option	enable -n	context unprobed	context unprobed	context unprobed
+Builtin option	enable -p	context unprobed	context unprobed	context unprobed
+Builtin option	enable -s	context unprobed	context unprobed	context unprobed
 Builtin option	exec -a	match	match	match
 Builtin option	exec -c	match	match	match
 Builtin option	exec -l	match	match	match
-Builtin option	export -f	different	different	different
+Builtin option	export -f	match	match	match
 Builtin option	export -n	match	match	match
 Builtin option	export -p	match	match	match
 Builtin option	fc -e	context unprobed	context unprobed	context unprobed
@@ -226,9 +226,9 @@ Builtin option	hash -l	match	match	match
 Builtin option	hash -p	match	match	match
 Builtin option	hash -r	match	match	match
 Builtin option	hash -t	match	match	match
-Builtin option	help -d	missing interface	missing interface	missing interface
-Builtin option	help -m	missing interface	missing interface	missing interface
-Builtin option	help -s	missing interface	missing interface	missing interface
+Builtin option	help -d	context unprobed	context unprobed	context unprobed
+Builtin option	help -m	context unprobed	context unprobed	context unprobed
+Builtin option	help -s	context unprobed	context unprobed	context unprobed
 Builtin option	history -a	context unprobed	context unprobed	context unprobed
 Builtin option	history -c	context unprobed	context unprobed	context unprobed
 Builtin option	history -d	context unprobed	context unprobed	context unprobed
@@ -261,12 +261,12 @@ Builtin option	pushd -N	match	match	match
 Builtin option	pushd -n	match	match	match
 Builtin option	pwd -L	match	match	match
 Builtin option	pwd -P	match	match	match
-Builtin option	read -E	not in reference	different	not in reference
+Builtin option	read -E	not in reference	match	not in reference
 Builtin option	read -N	match	match	match
 Builtin option	read -a	match	match	match
 Builtin option	read -d	match	match	match
-Builtin option	read -e	different	different	different
-Builtin option	read -i	different	different	different
+Builtin option	read -e	match	match	match
+Builtin option	read -i	match	match	match
 Builtin option	read -n	match	match	match
 Builtin option	read -p	match	match	match
 Builtin option	read -r	match	match	match
@@ -288,10 +288,10 @@ Builtin option	readonly -p	match	match	match
 Builtin option	set -B	interface only	interface only	interface only
 Builtin option	set -C	interface only	interface only	interface only
 Builtin option	set -E	interface only	interface only	interface only
-Builtin option	set -H	different	different	different
+Builtin option	set -H	interface only	interface only	interface only
 Builtin option	set -P	different	different	different
 Builtin option	set -T	interface only	interface only	interface only
-Builtin option	set -a	different	different	different
+Builtin option	set -a	interface only	interface only	interface only
 Builtin option	set -b	different	different	different
 Builtin option	set -e	interface only	interface only	interface only
 Builtin option	set -f	interface only	interface only	interface only
@@ -301,17 +301,17 @@ Builtin option	set -m	interface only	interface only	interface only
 Builtin option	set -n	different	different	different
 Builtin option	set -o	match	match	match
 Builtin option	set -p	different	different	different
-Builtin option	set -t	different	different	different
+Builtin option	set -t	interface only	interface only	interface only
 Builtin option	set -u	interface only	interface only	interface only
 Builtin option	set -v	interface only	interface only	interface only
-Builtin option	set -x	different	different	different
+Builtin option	set -x	stderr differs	stderr differs	stderr differs
 Builtin option	shopt -o	match	match	match
 Builtin option	shopt -p	match	match	match
 Builtin option	shopt -q	match	match	match
 Builtin option	shopt -s	match	match	match
 Builtin option	shopt -u	match	match	match
 Builtin option	source -p	—	different	—
-Builtin option	suspend -f	missing interface	missing interface	missing interface
+Builtin option	suspend -f	context unprobed	context unprobed	context unprobed
 Builtin option	trap -P	—	different	—
 Builtin option	trap -l	match	match	match
 Builtin option	trap -p	match	match	match
@@ -324,14 +324,14 @@ Builtin option	typeset -A	match	match	match
 Builtin option	typeset -F	match	match	match
 Builtin option	typeset -I	match	match	match
 Builtin option	typeset -a	match	match	match
-Builtin option	typeset -f	different	different	different
+Builtin option	typeset -f	match	match	match
 Builtin option	typeset -g	match	match	match
 Builtin option	typeset -i	match	match	match
 Builtin option	typeset -l	different	different	different
 Builtin option	typeset -n	match	match	match
 Builtin option	typeset -p	match	match	match
 Builtin option	typeset -r	match	match	match
-Builtin option	typeset -t	different	different	different
+Builtin option	typeset -t	match	match	match
 Builtin option	typeset -u	different	different	different
 Builtin option	typeset -x	match	match	match
 Builtin option	ulimit -H	match	match	match
@@ -379,17 +379,17 @@ Compatibility level	51	match	match	match
 Compatibility level	52	—	different	—
 Completion action	alias	match	match	match
 Completion action	arrayvar	match	match	match
-Completion action	binding	different	different	different
+Completion action	binding	match	match	match
 Completion action	builtin	match	match	match
 Completion action	command	match	match	match
 Completion action	directory	match	match	match
-Completion action	disabled	different	different	different
-Completion action	enabled	different	different	different
+Completion action	disabled	match	match	match
+Completion action	enabled	match	match	match
 Completion action	export	match	match	match
 Completion action	file	match	match	match
 Completion action	function	match	match	match
 Completion action	group	different	different	stderr differs
-Completion action	helptopic	different	different	different
+Completion action	helptopic	match	match	match
 Completion action	hostname	interface only	interface only	interface only
 Completion action	job	match	match	match
 Completion action	keyword	match	match	match
@@ -544,14 +544,14 @@ History expansion	!!:$:h	match	match	match
 History expansion	!!:$:r	match	match	match
 History expansion	!!:$:t	match	match	match
 History expansion	!!:*	match	match	match
-History expansion	!!:0	different	different	different
-History expansion	!!:1-2	different	different	different
-History expansion	!!:2*	different	different	different
+History expansion	!!:0	match	match	match
+History expansion	!!:1-2	match	match	match
+History expansion	!!:2*	match	match	match
 History expansion	!!:^	match	match	match
-History expansion	!!:p	different	different	different
-History expansion	!!:q	different	different	different
-History expansion	!!:s/file/name/	different	different	different
-History expansion	!!:x	different	different	different
+History expansion	!!:p	match	match	match
+History expansion	!!:q	match	match	match
+History expansion	!!:s/file/name/	match	match	match
+History expansion	!!:x	match	match	match
 History expansion	!-1	match	match	match
 History expansion	!1	match	match	match
 History expansion	!?file?	match	match	match
@@ -578,16 +578,16 @@ Invocation	-B	match	match	match
 Invocation	-C	match	match	match
 Invocation	-D	different	different	different
 Invocation	-E	match	match	match
-Invocation	-H	different	different	different
+Invocation	-H	match	match	match
 Invocation	-O	match	match	match
 Invocation	-P	different	different	different
 Invocation	-T	match	match	match
-Invocation	-a (export assignments)	different	different	different
+Invocation	-a (export assignments)	match	match	match
 Invocation	-b	different	different	different
 Invocation	-c	match	match	match
 Invocation	-e	match	match	match
 Invocation	-f	match	match	match
-Invocation	-h	different	different	different
+Invocation	-h	match	match	match
 Invocation	-i	stderr differs	stderr differs	stderr differs
 Invocation	-k	different	different	different
 Invocation	-l	match	match	match
@@ -597,10 +597,10 @@ Invocation	-o	match	match	match
 Invocation	-p	different	different	different
 Invocation	-r	different	different	different
 Invocation	-s	match	match	match
-Invocation	-t	different	different	different
+Invocation	-t	match	match	match
 Invocation	-u	stderr differs	stderr differs	stderr differs
 Invocation	-v	stderr differs	stderr differs	stderr differs
-Invocation	-x	different	different	different
+Invocation	-x	match	match	match
 Invocation	login logout	match	match	match
 Invocation	read script file	match	match	match
 Invocation	stdin script	match	match	match
@@ -886,54 +886,54 @@ Printf format	s	match	match	match
 Printf format	u	match	match	match
 Printf format	width / precision	match	match	match
 Printf format	x	match	match	match
-Prompt escape	\!	different	different	different
-Prompt escape	\#	different	different	different
+Prompt escape	\!	match	match	match
+Prompt escape	\#	match	match	match
 Prompt escape	\$	match	match	match
-Prompt escape	\101	different	different	different
-Prompt escape	\@	different	different	different
-Prompt escape	\A	different	different	different
-Prompt escape	\D{%Y}	different	different	different
+Prompt escape	\101	match	match	match
+Prompt escape	\@	match	match	match
+Prompt escape	\A	match	match	match
+Prompt escape	\D{%Y}	match	match	match
 Prompt escape	\H	match	match	match
-Prompt escape	\T	different	different	different
+Prompt escape	\T	match	match	match
 Prompt escape	\V	different	different	different
 Prompt escape	\W	match	match	match
 Prompt escape	\[	match	match	match
 Prompt escape	\\	match	match	match
 Prompt escape	\]	match	match	match
 Prompt escape	\a	match	match	match
-Prompt escape	\d	different	different	different
+Prompt escape	\d	match	match	match
 Prompt escape	\e	match	match	match
 Prompt escape	\h	match	match	match
-Prompt escape	\j	different	different	different
-Prompt escape	\l	different	different	different
+Prompt escape	\j	match	match	match
+Prompt escape	\l	match	match	match
 Prompt escape	\n	match	match	match
 Prompt escape	\r	match	match	match
-Prompt escape	\s	different	different	different
-Prompt escape	\t	different	different	different
+Prompt escape	\s	match	match	match
+Prompt escape	\t	match	match	match
 Prompt escape	\u	match	match	match
-Prompt escape	\v	different	different	different
+Prompt escape	\v	match	different	match
 Prompt escape	\w	match	match	match
-Readline command	abort	missing interface	missing interface	missing interface
-Readline command	accept-line	missing interface	missing interface	missing interface
+Readline command	abort	interface only	different	interface only
+Readline command	accept-line	interface only	interface only	interface only
 Readline command	alias-expand-line	missing interface	missing interface	missing interface
 Readline command	arrow-key-prefix	missing interface	missing interface	missing interface
 Readline command	backward-byte	missing interface	missing interface	missing interface
-Readline command	backward-char	missing interface	missing interface	missing interface
-Readline command	backward-delete-char	missing interface	missing interface	missing interface
-Readline command	backward-kill-line	missing interface	missing interface	missing interface
-Readline command	backward-kill-word	missing interface	missing interface	missing interface
-Readline command	backward-word	missing interface	missing interface	missing interface
+Readline command	backward-char	interface only	different	interface only
+Readline command	backward-delete-char	interface only	interface only	interface only
+Readline command	backward-kill-line	interface only	interface only	interface only
+Readline command	backward-kill-word	interface only	different	interface only
+Readline command	backward-word	interface only	different	interface only
 Readline command	bash-vi-complete	—	missing interface	—
-Readline command	beginning-of-history	missing interface	missing interface	missing interface
-Readline command	beginning-of-line	missing interface	missing interface	missing interface
-Readline command	bracketed-paste-begin	missing interface	missing interface	missing interface
+Readline command	beginning-of-history	interface only	different	interface only
+Readline command	beginning-of-line	interface only	different	interface only
+Readline command	bracketed-paste-begin	interface only	different	interface only
 Readline command	call-last-kbd-macro	missing interface	missing interface	missing interface
 Readline command	capitalize-word	missing interface	missing interface	missing interface
 Readline command	character-search	missing interface	missing interface	missing interface
 Readline command	character-search-backward	missing interface	missing interface	missing interface
 Readline command	clear-display	missing interface	missing interface	missing interface
-Readline command	clear-screen	missing interface	missing interface	missing interface
-Readline command	complete	missing interface	missing interface	missing interface
+Readline command	clear-screen	interface only	interface only	interface only
+Readline command	complete	interface only	different	interface only
 Readline command	complete-command	missing interface	missing interface	missing interface
 Readline command	complete-filename	missing interface	missing interface	missing interface
 Readline command	complete-hostname	missing interface	missing interface	missing interface
@@ -942,9 +942,9 @@ Readline command	complete-username	missing interface	missing interface	missing i
 Readline command	complete-variable	missing interface	missing interface	missing interface
 Readline command	copy-backward-word	missing interface	missing interface	missing interface
 Readline command	copy-forward-word	missing interface	missing interface	missing interface
-Readline command	copy-region-as-kill	missing interface	missing interface	missing interface
+Readline command	copy-region-as-kill	interface only	interface only	interface only
 Readline command	dabbrev-expand	missing interface	missing interface	missing interface
-Readline command	delete-char	missing interface	missing interface	missing interface
+Readline command	delete-char	interface only	interface only	interface only
 Readline command	delete-char-or-list	missing interface	missing interface	missing interface
 Readline command	delete-horizontal-space	missing interface	missing interface	missing interface
 Readline command	digit-argument	missing interface	missing interface	missing interface
@@ -956,19 +956,19 @@ Readline command	dump-macros	missing interface	missing interface	missing interfa
 Readline command	dump-variables	missing interface	missing interface	missing interface
 Readline command	dynamic-complete-history	missing interface	missing interface	missing interface
 Readline command	edit-and-execute-command	missing interface	missing interface	missing interface
-Readline command	emacs-editing-mode	missing interface	missing interface	missing interface
+Readline command	emacs-editing-mode	interface only	interface only	interface only
 Readline command	end-kbd-macro	missing interface	missing interface	missing interface
-Readline command	end-of-history	missing interface	missing interface	missing interface
-Readline command	end-of-line	missing interface	missing interface	missing interface
-Readline command	exchange-point-and-mark	missing interface	missing interface	missing interface
+Readline command	end-of-history	interface only	different	interface only
+Readline command	end-of-line	interface only	different	interface only
+Readline command	exchange-point-and-mark	interface only	interface only	interface only
 Readline command	execute-named-command	—	missing interface	—
 Readline command	export-completions	—	missing interface	—
 Readline command	fetch-history	missing interface	missing interface	missing interface
 Readline command	forward-backward-delete-char	missing interface	missing interface	missing interface
 Readline command	forward-byte	missing interface	missing interface	missing interface
-Readline command	forward-char	missing interface	missing interface	missing interface
+Readline command	forward-char	interface only	different	interface only
 Readline command	forward-search-history	missing interface	missing interface	missing interface
-Readline command	forward-word	missing interface	missing interface	missing interface
+Readline command	forward-word	interface only	different	interface only
 Readline command	glob-complete-word	missing interface	missing interface	missing interface
 Readline command	glob-expand-word	missing interface	missing interface	missing interface
 Readline command	glob-list-expansions	missing interface	missing interface	missing interface
@@ -978,17 +978,17 @@ Readline command	history-search-backward	missing interface	missing interface	mis
 Readline command	history-search-forward	missing interface	missing interface	missing interface
 Readline command	history-substring-search-backward	missing interface	missing interface	missing interface
 Readline command	history-substring-search-forward	missing interface	missing interface	missing interface
-Readline command	insert-comment	missing interface	missing interface	missing interface
+Readline command	insert-comment	interface only	different	interface only
 Readline command	insert-completions	missing interface	missing interface	missing interface
 Readline command	insert-last-argument	missing interface	missing interface	missing interface
-Readline command	kill-line	missing interface	missing interface	missing interface
-Readline command	kill-region	missing interface	missing interface	missing interface
+Readline command	kill-line	interface only	interface only	interface only
+Readline command	kill-region	interface only	interface only	interface only
 Readline command	kill-whole-line	missing interface	missing interface	missing interface
-Readline command	kill-word	missing interface	missing interface	missing interface
+Readline command	kill-word	interface only	different	interface only
 Readline command	magic-space	missing interface	missing interface	missing interface
 Readline command	menu-complete	missing interface	missing interface	missing interface
 Readline command	menu-complete-backward	missing interface	missing interface	missing interface
-Readline command	next-history	missing interface	missing interface	missing interface
+Readline command	next-history	interface only	different	interface only
 Readline command	next-screen-line	missing interface	missing interface	missing interface
 Readline command	non-incremental-forward-search-history	missing interface	missing interface	missing interface
 Readline command	non-incremental-forward-search-history-again	missing interface	missing interface	missing interface
@@ -998,21 +998,21 @@ Readline command	old-menu-complete	missing interface	missing interface	missing i
 Readline command	operate-and-get-next	missing interface	missing interface	missing interface
 Readline command	overwrite-mode	missing interface	missing interface	missing interface
 Readline command	possible-command-completions	missing interface	missing interface	missing interface
-Readline command	possible-completions	missing interface	missing interface	missing interface
+Readline command	possible-completions	interface only	different	interface only
 Readline command	possible-filename-completions	missing interface	missing interface	missing interface
 Readline command	possible-hostname-completions	missing interface	missing interface	missing interface
 Readline command	possible-username-completions	missing interface	missing interface	missing interface
 Readline command	possible-variable-completions	missing interface	missing interface	missing interface
-Readline command	previous-history	missing interface	missing interface	missing interface
+Readline command	previous-history	interface only	different	interface only
 Readline command	previous-screen-line	missing interface	missing interface	missing interface
 Readline command	print-last-kbd-macro	missing interface	missing interface	missing interface
-Readline command	quoted-insert	missing interface	missing interface	missing interface
+Readline command	quoted-insert	interface only	interface only	interface only
 Readline command	re-read-init-file	missing interface	missing interface	missing interface
-Readline command	redraw-current-line	missing interface	missing interface	missing interface
-Readline command	reverse-search-history	missing interface	missing interface	missing interface
+Readline command	redraw-current-line	interface only	interface only	interface only
+Readline command	reverse-search-history	interface only	interface only	interface only
 Readline command	revert-line	missing interface	missing interface	missing interface
-Readline command	self-insert	missing interface	missing interface	missing interface
-Readline command	set-mark	missing interface	missing interface	missing interface
+Readline command	self-insert	interface only	interface only	interface only
+Readline command	set-mark	interface only	different	interface only
 Readline command	shell-backward-kill-word	missing interface	missing interface	missing interface
 Readline command	shell-backward-word	missing interface	missing interface	missing interface
 Readline command	shell-expand-line	missing interface	missing interface	missing interface
@@ -1024,17 +1024,17 @@ Readline command	spell-correct-word	missing interface	missing interface	missing 
 Readline command	start-kbd-macro	missing interface	missing interface	missing interface
 Readline command	tab-insert	missing interface	missing interface	missing interface
 Readline command	tilde-expand	missing interface	missing interface	missing interface
-Readline command	transpose-chars	missing interface	missing interface	missing interface
+Readline command	transpose-chars	interface only	interface only	interface only
 Readline command	transpose-words	missing interface	missing interface	missing interface
 Readline command	tty-status	missing interface	missing interface	missing interface
 Readline command	undo	missing interface	missing interface	missing interface
 Readline command	universal-argument	missing interface	missing interface	missing interface
 Readline command	unix-filename-rubout	missing interface	missing interface	missing interface
-Readline command	unix-line-discard	missing interface	missing interface	missing interface
-Readline command	unix-word-rubout	missing interface	missing interface	missing interface
+Readline command	unix-line-discard	interface only	interface only	interface only
+Readline command	unix-word-rubout	interface only	interface only	interface only
 Readline command	upcase-word	missing interface	missing interface	missing interface
-Readline command	vi-append-eol	missing interface	missing interface	missing interface
-Readline command	vi-append-mode	missing interface	missing interface	missing interface
+Readline command	vi-append-eol	interface only	interface only	interface only
+Readline command	vi-append-mode	interface only	interface only	interface only
 Readline command	vi-arg-digit	missing interface	missing interface	missing interface
 Readline command	vi-bWord	missing interface	missing interface	missing interface
 Readline command	vi-back-to-indent	missing interface	missing interface	missing interface
@@ -1051,7 +1051,7 @@ Readline command	vi-delete	missing interface	missing interface	missing interface
 Readline command	vi-delete-to	missing interface	missing interface	missing interface
 Readline command	vi-eWord	missing interface	missing interface	missing interface
 Readline command	vi-edit-and-execute-command	missing interface	missing interface	missing interface
-Readline command	vi-editing-mode	missing interface	missing interface	missing interface
+Readline command	vi-editing-mode	interface only	interface only	interface only
 Readline command	vi-end-bigword	missing interface	missing interface	missing interface
 Readline command	vi-end-word	missing interface	missing interface	missing interface
 Readline command	vi-eof-maybe	missing interface	missing interface	missing interface
@@ -1063,10 +1063,10 @@ Readline command	vi-forward-bigword	missing interface	missing interface	missing 
 Readline command	vi-forward-word	missing interface	missing interface	missing interface
 Readline command	vi-fword	missing interface	missing interface	missing interface
 Readline command	vi-goto-mark	missing interface	missing interface	missing interface
-Readline command	vi-insert-beg	missing interface	missing interface	missing interface
-Readline command	vi-insertion-mode	missing interface	missing interface	missing interface
+Readline command	vi-insert-beg	interface only	interface only	interface only
+Readline command	vi-insertion-mode	interface only	interface only	interface only
 Readline command	vi-match	missing interface	missing interface	missing interface
-Readline command	vi-movement-mode	missing interface	missing interface	missing interface
+Readline command	vi-movement-mode	interface only	interface only	interface only
 Readline command	vi-next-word	missing interface	missing interface	missing interface
 Readline command	vi-overstrike	missing interface	missing interface	missing interface
 Readline command	vi-overstrike-delete	missing interface	missing interface	missing interface
@@ -1085,7 +1085,7 @@ Readline command	vi-unix-word-rubout	missing interface	missing interface	missing
 Readline command	vi-yank-arg	missing interface	missing interface	missing interface
 Readline command	vi-yank-pop	missing interface	missing interface	missing interface
 Readline command	vi-yank-to	missing interface	missing interface	missing interface
-Readline command	yank	missing interface	missing interface	missing interface
+Readline command	yank	interface only	interface only	interface only
 Readline command	yank-last-arg	missing interface	missing interface	missing interface
 Readline command	yank-nth-arg	missing interface	missing interface	missing interface
 Readline command	yank-pop	missing interface	missing interface	missing interface
@@ -1102,12 +1102,12 @@ Readline variable	completion-map-case	missing interface	missing interface	missin
 Readline variable	completion-prefix-display-length	missing interface	missing interface	missing interface
 Readline variable	completion-query-items	missing interface	missing interface	missing interface
 Readline variable	convert-meta	missing interface	missing interface	missing interface
-Readline variable	disable-completion	missing interface	missing interface	missing interface
+Readline variable	disable-completion	interface only	interface only	interface only
 Readline variable	echo-control-characters	missing interface	missing interface	missing interface
-Readline variable	editing-mode	missing interface	missing interface	missing interface
+Readline variable	editing-mode	interface only	interface only	interface only
 Readline variable	emacs-mode-string	missing interface	missing interface	missing interface
 Readline variable	enable-active-region	missing interface	missing interface	missing interface
-Readline variable	enable-bracketed-paste	missing interface	missing interface	missing interface
+Readline variable	enable-bracketed-paste	interface only	interface only	interface only
 Readline variable	enable-keypad	missing interface	missing interface	missing interface
 Readline variable	enable-meta-key	missing interface	missing interface	missing interface
 Readline variable	expand-tilde	missing interface	missing interface	missing interface
@@ -1116,8 +1116,8 @@ Readline variable	history-preserve-point	missing interface	missing interface	mis
 Readline variable	history-size	missing interface	missing interface	missing interface
 Readline variable	horizontal-scroll-mode	missing interface	missing interface	missing interface
 Readline variable	input-meta	missing interface	missing interface	missing interface
-Readline variable	keymap	missing interface	missing interface	missing interface
-Readline variable	keyseq-timeout	missing interface	missing interface	missing interface
+Readline variable	keymap	interface only	interface only	interface only
+Readline variable	keyseq-timeout	interface only	interface only	interface only
 Readline variable	mark-directories	missing interface	missing interface	missing interface
 Readline variable	mark-modified-lines	missing interface	missing interface	missing interface
 Readline variable	mark-symlinked-directories	missing interface	missing interface	missing interface
@@ -1157,12 +1157,12 @@ Redirection	n>&-	match	match	match
 Redirection	n>&m	match	match	match
 Redirection	n>&m-	match	match	match
 Redirection	quoted here-document	match	match	match
-Redirection	{varname} descriptor	different	different	different
+Redirection	{varname} descriptor	match	match	match
 Reserved word	!	match	match	match
 Reserved word	[[	match	match	match
 Reserved word	]]	match	match	match
 Reserved word	case	match	match	match
-Reserved word	coproc	different	different	different
+Reserved word	coproc	match	match	match
 Reserved word	do	match	match	match
 Reserved word	done	match	match	match
 Reserved word	elif	match	match	match
@@ -1173,16 +1173,16 @@ Reserved word	for	match	match	match
 Reserved word	function	match	match	match
 Reserved word	if	match	match	match
 Reserved word	in	match	match	match
-Reserved word	select	different	different	different
+Reserved word	select	match	match	match
 Reserved word	then	match	match	match
-Reserved word	time	different	different	different
+Reserved word	time	match	match	match
 Reserved word	until	match	match	match
 Reserved word	while	match	match	match
 Reserved word	{	match	match	match
 Reserved word	}	match	match	match
 Shell language	ANSI-C quoting	match	match	match
 Shell language	Bash startup via BASH_ENV	match	match	match
-Shell language	DEBUG trap	different	different	different
+Shell language	DEBUG trap	match	match	match
 Shell language	ERR trap	match	match	match
 Shell language	EXIT trap	match	match	match
 Shell language	IFS word splitting	match	match	match
@@ -1215,9 +1215,10 @@ Shell language	command substitution	match	match	match
 Shell language	comments	match	match	match
 Shell language	completion filters	match	match	match
 Shell language	conditional command	match	match	match
-Shell language	coproc	different	different	different
-Shell language	coprocess input/output descriptors	different	different	different
+Shell language	coproc	match	match	match
+Shell language	coprocess input/output descriptors	match	match	match
 Shell language	current environment substitution (5.3)	not in reference	different	not in reference
+Shell language	deferred bad substitution	match	match	match
 Shell language	directory cd -	match	match	match
 Shell language	directory stack rotation	match	match	match
 Shell language	double quotes	match	match	match
@@ -1238,10 +1239,10 @@ Shell language	for do done	match	match	match
 Shell language	function and return	match	match	match
 Shell language	function argument restoration	match	match	match
 Shell language	function definition redirections	match	match	match
-Shell language	function export	different	different	different
+Shell language	function export	match	match	match
 Shell language	group redirections	match	match	match
 Shell language	grouped pipeline status	match	match	match
-Shell language	history event expansion	stderr differs	stderr differs	stderr differs
+Shell language	history event expansion	match	match	match
 Shell language	history modifiers	match	match	match
 Shell language	history search	match	match	match
 Shell language	history word designator	match	match	match
@@ -1268,8 +1269,8 @@ Shell language	programmable completion callback	match	match	match
 Shell language	quote removal	match	match	match
 Shell language	quoted and unquoted here-documents	match	match	match
 Shell language	restricted shell	stderr differs	stderr differs	stderr differs
-Shell language	script fallback without shebang	different	different	different
-Shell language	select	different	different	different
+Shell language	script fallback without shebang	match	match	match
+Shell language	select	match	match	match
 Shell language	shell environment isolation	match	match	match
 Shell language	shell script source	match	match	match
 Shell language	signal exit status	stderr differs	stderr differs	stderr differs
@@ -1282,8 +1283,8 @@ Shell language	terminal signal ignore and reset	match	match	match
 Shell language	tilde current and previous directories	match	match	match
 Shell language	tilde expansion	match	match	match
 Shell language	tilde named user	different	different	different
-Shell language	time -p	different	different	different
-Shell language	time keyword	different	different	different
+Shell language	time -p	match	match	match
+Shell language	time keyword	match	match	match
 Shell language	until	match	match	match
 Shell language	wait -n	match	match	match
 Shell language	wait -p	match	match	match
@@ -1354,30 +1355,31 @@ Signal	XCPU	match	match	match
 Signal	XFSZ	match	match	match
 Terminal	foreground pipeline	match	match	match
 Terminal	interactive alias and signal	match	match	match
+Terminal	suspend and resume	match	match	match
 UTF-8 text	character length and slice in C locale	intentional difference	intentional difference	intentional difference
 UTF-8 text	multibyte IFS after whitespace	intentional difference	intentional difference	intentional difference
 Variable	BASH	match	match	match
 Variable	BASHOPTS	match	match	match
 Variable	BASHPID	match	match	match
 Variable	BASH_ALIASES	different	different	different
-Variable	BASH_ARGC	different	different	different
-Variable	BASH_ARGV	different	different	different
-Variable	BASH_ARGV0	different	different	different
+Variable	BASH_ARGC	match	match	match
+Variable	BASH_ARGV	match	match	match
+Variable	BASH_ARGV0	match	match	match
 Variable	BASH_CMDS	different	different	different
-Variable	BASH_COMMAND	different	different	different
+Variable	BASH_COMMAND	match	match	match
 Variable	BASH_COMPAT	different	different	different
 Variable	BASH_ENV	match	match	match
 Variable	BASH_EXECUTION_STRING	different	different	different
-Variable	BASH_LINENO	different	different	different
+Variable	BASH_LINENO	match	match	match
 Variable	BASH_LOADABLES_PATH	missing default	missing default	missing default
 Variable	BASH_MONOSECONDS	—	different	—
 Variable	BASH_REMATCH	match	match	match
 Variable	BASH_SOURCE	match	match	match
-Variable	BASH_SUBSHELL	different	different	different
+Variable	BASH_SUBSHELL	match	match	match
 Variable	BASH_TRAPSIG	—	different	—
 Variable	BASH_VERSINFO	match	match	match
 Variable	BASH_VERSION	match	match	match
-Variable	BASH_XTRACEFD	different	different	different
+Variable	BASH_XTRACEFD	match	match	match
 Variable	CDPATH	match	match	match
 Variable	CHILD_MAX	match	match	match
 Variable	COLUMNS	match	match	match
@@ -1389,12 +1391,12 @@ Variable	COMP_POINT	match	match	match
 Variable	COMP_TYPE	match	match	match
 Variable	COMP_WORDBREAKS	missing default	missing default	missing default
 Variable	COMP_WORDS	match	match	match
-Variable	COPROC	different	different	different
+Variable	COPROC	match	match	match
 Variable	DIRSTACK	match	match	match
-Variable	EMACS	different	different	different
+Variable	EMACS	match	match	match
 Variable	ENV	different	different	different
-Variable	EPOCHREALTIME	different	different	different
-Variable	EPOCHSECONDS	different	different	different
+Variable	EPOCHREALTIME	match	match	match
+Variable	EPOCHSECONDS	match	match	match
 Variable	EUID	match	match	match
 Variable	EXECIGNORE	different	different	different
 Variable	FCEDIT	match	match	match
@@ -1410,15 +1412,15 @@ Variable	HISTFILE	match	match	match
 Variable	HISTFILESIZE	match	match	match
 Variable	HISTIGNORE	match	match	match
 Variable	HISTSIZE	match	match	match
-Variable	HISTTIMEFORMAT	different	different	different
+Variable	HISTTIMEFORMAT	match	match	match
 Variable	HOME	match	match	match
 Variable	HOSTFILE	match	match	match
 Variable	HOSTNAME	missing default	missing default	missing default
 Variable	HOSTTYPE	interface only	interface only	interface only
 Variable	IFS	match	match	match
-Variable	IGNOREEOF	different	different	different
+Variable	IGNOREEOF	match	match	match
 Variable	INPUTRC	interface only	interface only	interface only
-Variable	INSIDE_EMACS	different	different	different
+Variable	INSIDE_EMACS	match	match	match
 Variable	LANG	match	match	match
 Variable	LC_ALL	match	match	match
 Variable	LC_COLLATE	different	different	match
@@ -1426,7 +1428,7 @@ Variable	LC_CTYPE	match	match	match
 Variable	LC_MESSAGES	different	different	different
 Variable	LC_NUMERIC	different	different	different
 Variable	LC_TIME	different	different	different
-Variable	LINENO	different	different	different
+Variable	LINENO	match	match	match
 Variable	LINES	match	match	match
 Variable	MACHTYPE	interface only	interface only	interface only
 Variable	MAIL	different	different	different
@@ -1443,38 +1445,38 @@ Variable	PIPESTATUS	match	match	match
 Variable	POSIXLY_CORRECT	different	different	different
 Variable	PPID	match	match	match
 Variable	PROMPT_COMMAND	match	match	match
-Variable	PROMPT_DIRTRIM	match	match	different
-Variable	PS0	different	different	different
+Variable	PROMPT_DIRTRIM	match	match	match
+Variable	PS0	match	match	match
 Variable	PS1	match	match	match
 Variable	PS2	match	match	match
-Variable	PS3	different	different	different
-Variable	PS4	different	different	different
+Variable	PS3	match	match	match
+Variable	PS4	match	match	match
 Variable	PWD	match	match	match
 Variable	RANDOM	match	match	match
-Variable	READLINE_ARGUMENT	different	different	different
-Variable	READLINE_LINE	different	different	different
-Variable	READLINE_MARK	different	different	different
-Variable	READLINE_POINT	different	different	different
+Variable	READLINE_ARGUMENT	match	match	match
+Variable	READLINE_LINE	match	match	match
+Variable	READLINE_MARK	match	match	match
+Variable	READLINE_POINT	match	match	match
 Variable	REPLY	match	match	match
 Variable	SECONDS	match	match	match
 Variable	SHELL	match	match	match
 Variable	SHELLOPTS	match	match	match
 Variable	SHLVL	match	match	match
 Variable	SRANDOM	different	different	different
-Variable	TIMEFORMAT	different	different	different
-Variable	TMOUT	different	different	control inconclusive
+Variable	TIMEFORMAT	match	match	match
+Variable	TMOUT	match	match	control inconclusive
 Variable	TMPDIR	interface only	interface only	interface only
 Variable	UID	match	match	match
 Variable	_	missing default	missing default	missing default
 Variable	histchars	different	different	different
-set -o	allexport	different	different	different
+set -o	allexport	match	match	match
 set -o	braceexpand	match	match	match
-set -o	emacs	different	different	different
+set -o	emacs	interface only	interface only	interface only
 set -o	errexit	match	match	match
 set -o	errtrace	match	match	match
 set -o	functrace	match	match	match
 set -o	hashall	interface only	interface only	interface only
-set -o	histexpand	different	different	different
+set -o	histexpand	interface only	interface only	interface only
 set -o	history	interface only	interface only	interface only
 set -o	ignoreeof	different	different	different
 set -o	interactive-comments	different	different	different
@@ -1486,21 +1488,21 @@ set -o	noglob	match	match	match
 set -o	nolog	different	different	different
 set -o	notify	different	different	different
 set -o	nounset	stderr differs	stderr differs	stderr differs
-set -o	onecmd	stderr differs	stderr differs	stderr differs
+set -o	onecmd	different	different	different
 set -o	physical	different	different	different
 set -o	pipefail	match	match	match
 set -o	posix	different	different	different
 set -o	privileged	different	different	different
 set -o	verbose	stderr differs	stderr differs	stderr differs
-set -o	vi	different	different	different
-set -o	xtrace	different	different	different
+set -o	vi	interface only	interface only	interface only
+set -o	xtrace	match	match	match
 shopt	array_expand_once	—	missing interface	—
 shopt	assoc_expand_once	missing interface	missing interface	missing interface
 shopt	autocd	missing interface	missing interface	missing interface
 shopt	bash_source_fullpath	—	missing interface	—
 shopt	cdable_vars	missing interface	missing interface	missing interface
 shopt	cdspell	missing interface	missing interface	missing interface
-shopt	checkhash	missing interface	missing interface	missing interface
+shopt	checkhash	match	match	match
 shopt	checkjobs	missing interface	missing interface	missing interface
 shopt	checkwinsize	interface only	interface only	interface only
 shopt	cmdhist	missing interface	missing interface	missing interface
@@ -1517,7 +1519,7 @@ shopt	dirspell	missing interface	missing interface	missing interface
 shopt	dotglob	match	match	match
 shopt	execfail	missing interface	missing interface	missing interface
 shopt	expand_aliases	match	match	match
-shopt	extdebug	missing interface	missing interface	missing interface
+shopt	extdebug	match	different	match
 shopt	extglob	match	match	match
 shopt	extquote	missing interface	missing interface	missing interface
 shopt	failglob	match	match	match
@@ -1547,9 +1549,9 @@ shopt	nullglob	match	match	match
 shopt	patsub_replacement	match	match	match
 shopt	progcomp	interface only	interface only	interface only
 shopt	progcomp_alias	missing interface	missing interface	missing interface
-shopt	promptvars	missing interface	missing interface	missing interface
+shopt	promptvars	interface only	interface only	interface only
 shopt	restricted_shell	missing interface	missing interface	missing interface
 shopt	shift_verbose	missing interface	missing interface	missing interface
 shopt	sourcepath	match	match	match
-shopt	varredir_close	missing interface	missing interface	missing interface
+shopt	varredir_close	stderr differs	stderr differs	stderr differs
 shopt	xpg_echo	missing interface	missing interface	missing interface
