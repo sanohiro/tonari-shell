@@ -1,18 +1,24 @@
 # Bash compatibility audit / Bash 互換性の検証
 
-Tonari remains a prototype for use from an existing shell. The inventory starts with the reference Bash installations and the GNU manual. The matrix gives the observed behavior and the elapsed time for each matching workload. [Current feature inventory](compatibility/current.tsv) · [Current timing matrix](compatibility-2026-11-23-response/matrix.md) · [Debian evidence](compatibility-2026-11-23-response/Debian.tsv) · [Ubuntu evidence](compatibility-2026-11-23-response/Ubuntu.tsv) · [macOS evidence](compatibility-2026-11-23-response/macOS.tsv)
+Tonari remains a prototype for use from an existing shell. The inventory starts with the reference Bash installations and the GNU manual. The matrix gives the observed behavior and the elapsed time for each matching workload. [Current feature inventory](compatibility/current.tsv) · [Linux timing matrix](compatibility-2026-11-23-static/matrix.md) · [Debian evidence](compatibility-2026-11-23-static/Debian.tsv) · [Ubuntu evidence](compatibility-2026-11-23-static/Ubuntu.tsv) · [macOS evidence](compatibility-2026-11-23-response/macOS.tsv)
 
-Tonari は現在、既存のシェルから起動して試せる段階です。参照先の Bash と GNU マニュアルを起点に項目を列挙しました。一覧には機能名ごとの判定と速度を載せ、環境別 TSV には実際のテスト内容と差が出た出力例を残しています。[現在の機能別一覧](compatibility/current.tsv) · [各項目の最新計測](compatibility-2026-11-23-response/matrix.md)
+Tonari は現在、既存のシェルから起動して試せる段階です。参照先の Bash と GNU マニュアルを起点に項目を列挙しました。一覧には機能名ごとの判定と速度を載せ、環境別 TSV には実際のテスト内容と差が出た出力例を残しています。[現在の機能別一覧](compatibility/current.tsv) · [Linux 機能別の実測](compatibility-2026-11-23-static/matrix.md)
 
-## Interactive release / 対話処理更新後の検証
+## Static Linux release / 静的 Linux 配布版
+
+We compared the static arm64 executable with the Bash in Debian and Ubuntu, and reran the macOS inventory. The only change in the named verdicts from the preceding snapshot is Linux `LC_COLLATE`, now a tested intentional difference. Debian 13 and Ubuntu 26.04 arm64 passed all 124 integration tests and the account login/logout test. Debian x86-64-v3 passed the 124 tests under QEMU. macOS arm64 passed 123 with one Linux-only skip. [Observed changes](compatibility/changes.tsv) · [Linux feature timings](compatibility-2026-11-23-static/matrix.md)
+
+Linux はロケールを変えたときも、ファイル名展開の引数を UTF-8 のバイト順で渡します。GNU の回帰グループも含め、直前の glibc 配布版から判定が変わったのは、両ディストリビューションの `LC_COLLATE` だけでした。[互換差の具体例](#intentional-differences) · [ビルド条件と速度](benchmarks.md#static-linux)
+
+## Earlier interactive release / 対話処理更新時の記録
 
 The binaries built from `8e9963e` matched 762 direct checks on Debian 13, 760 on Ubuntu 26.04 and 757 on macOS. Compared with the preceding snapshot, the Debian and Ubuntu builds now match the `LC_COLLATE` witness. All previously verified observations were retained. All 61 builtins match their primary witness. The GNU upstream regression groups matched completely in 16 of 83 cases on Debian and 14 of 86 on Ubuntu. A passing primary witness covers that invocation and its recorded output. [Current inventory](compatibility/current.tsv) · [Changes](compatibility/changes.tsv) · [GNU regression groups](compatibility/gnu.tsv)
 
 今回の実行ファイルで統合テスト124件を再実行しました。Debian・Ubuntu の arm64 と QEMU の Debian x86-64-v3 は全件通過し、macOS は123件通過、Linux 専用の1件をスキップしました。Linux の一時アカウントで、実際のログイン、プロファイルと rc の読み込み、ログアウト、終了値も確認しました。名前付きロケールでのファイル順は OS の照合テーブルを使うビルドで検証しています。arm64 の静的 musl 版には別の機能別実測表があります。Readline の一部や Bash 5.3 の構文などの差は、一覧から個別の検証内容とともに確認できます。[全項目の判定と時間](compatibility-2026-11-23-response/matrix.md) · [静的 musl 版](compatibility-2026-11-23-response/musl/matrix.md) · [操作別の実測](benchmarks.md#interactive-response)
 
-One timed Debian `run-procsub` attempt produced output that differed from the recorded reference when running GNU Bash itself. We repeated just this driver with the same two executable digests, two warm-ups and seven measured samples per shell. Every repeated sample matched the recorded output. The portable build's integration suite uses `TONARI_TEST_LIBC=musl` to check the documented byte-order contract. [Debian measurements](compatibility-2026-11-23-response/Debian.tsv) · [Static build measurements](compatibility-2026-11-23-response/musl/Debian.tsv)
+One timed Debian `run-procsub` attempt produced output that differed from the recorded reference when running GNU Bash itself. We repeated just this driver with the same two executable digests, two warm-ups and seven measured samples per shell. Every repeated sample matched the recorded output. That snapshot's portable integration suite used `TONARI_TEST_LIBC=musl` to check the documented byte-order contract. [Debian measurements](compatibility-2026-11-23-response/Debian.tsv) · [Static build measurements](compatibility-2026-11-23-response/musl/Debian.tsv)
 
-Debian の `run-procsub` 初回計測では参照用 Bash 自身の出力が揺れたため、同じバイナリでこの項目を再計測しました。公開した7回分は両シェルとも記録済みの出力に一致しています。静的版の統合試験では `TONARI_TEST_LIBC=musl` を指定してバイト順を確認しています。[検証データ](compatibility-2026-11-23-response/matrix.md)
+Debian の `run-procsub` 初回計測では参照用 Bash 自身の出力が揺れたため、同じバイナリでこの項目を再計測しました。公開した7回分は両シェルとも記録済みの出力に一致しています。この時点の静的版の統合試験では `TONARI_TEST_LIBC=musl` を指定してバイト順を確認しました。[検証データ](compatibility-2026-11-23-response/matrix.md)
 
 ## Case-insensitive matching / 大文字小文字を区別しない照合
 
@@ -86,6 +92,7 @@ Bash 互換の基準は、対応するスクリプトとツールが期待する
 | Input / 入力 | Reference Bash / 参照結果 | Tonari / 採用する動作 |
 |---|---|---|
 | `IFS=' 木'; v='a 木b'; set -- $v` in UTF-8 | macOS 5.2.37 yields `a`, two empty arguments, then `b`. Debian 5.2.37 and Ubuntu 5.3.9 prefix `b` with bytes `9c a8`. | Two arguments, `a` and `b`. Consume the entire UTF-8 separator. 区切り文字を途中で分断しません。 |
+| Linux, `touch z A é` in an empty directory, then `LC_ALL=en_US.UTF-8` and `printf '<%s>' *` | Debian and Ubuntu Bash print `<A><é><z>`. | `<A><z><é>`. Linux passes UTF-8 names in byte order in every locale. Scripts using the first match or iterating over all arguments observe this ordering. macOS retains locale collation. Linux の引数順は配布元の照合表に依存しません。 |
 | `v=雪🌸` under `LC_ALL=C` | `${#v}` is 7 bytes. `${v:1:1}` yields byte `9b`. | Length 2 and substring `🌸`. Positions in shell text count Unicode scalar values across these locales. 文字単位の長さと切り出しを維持します。 |
 | A `printf` command with raw byte `ff` inside single quotes, supplied through `-c`, a file or stdin in the C locale | The command runs and writes `ff`. | Reject the invalid command text with status 2 and a UTF-8 diagnostic. 不正な入力単位を実行しません。 |
 | `cat <input.bin \| cat >output.bin` with all 256 byte values | The output file equals the input. | The output file equals the input. UTF-8 validation applies to shell text. パイプやリダイレクトでバイナリをそのまま転送できます。 |

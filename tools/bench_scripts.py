@@ -274,6 +274,8 @@ def main():
     cli.add_argument("--previous", type=Path, help="include a previous Tonari build")
     cli.add_argument("--spawn-control", type=Path, help="compiled tools/bench_spawn.c for the external case")
     cli.add_argument("--timing", choices=["whole", "started", "both"], default="both")
+    cli.add_argument("--utf8-locale", default="en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8",
+                     help="LC_ALL for Unicode field-splitting and pathname workloads")
     cli.add_argument("--runs", type=int, default=30)
     cli.add_argument("--case", choices=CASES, action="append")
     cli.add_argument("--state-mib", type=int, default=0,
@@ -328,7 +330,7 @@ def main():
         for case in args.case or CASES:
             case_env = env
             if case in ("field-split-unicode", "glob-utf8-sort", "glob-utf8-once", "glob-utf8-large", "glob-utf8-large-repeat"):
-                case_env = dict(env, LC_ALL="en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8")
+                case_env = dict(env, LC_ALL=args.utf8_locale)
             source, expected = CASES[case]
             script = home / f"{case}.sh"
             script.write_text(source)

@@ -1793,13 +1793,15 @@ f; printf 'END\0'; printf '%s\0' names/*'''
         self.assertEqual(ref.returncode, 0, ref.stderr)
         a, b, c = ref.stdout.split(b"END\0")
         self.assertEqual(a, c)
-        self.assertNotEqual(a, b)
         result = self.command(TONARI, code)
         self.assertEqual((result.returncode, result.stderr), (0, b""))
-        # The optional static musl build supplies byte collation for all locales.
-        # The distribution Bash and the native glibc / Darwin builds use locale tables.
-        portable = os.environ.get("TONARI_TEST_LIBC") == "musl"
-        self.assertEqual(result.stdout, b"END\0".join((a, a, a)) if portable else ref.stdout)
+        if sys.platform.startswith("linux"):
+            byte_order = b"".join(name + b"\0" for name in sorted(
+                os.fsencode(p.relative_to(self.cwd)) for p in files.iterdir()))
+            self.assertEqual(result.stdout, b"END\0".join([byte_order] * 3))
+        else:
+            self.assertNotEqual(a, b)
+            self.assertEqual(result.stdout, ref.stdout)
 
     def test_large_globs_match_reference_order_after_directory_changes(self):
         directory = self.cwd / "files"

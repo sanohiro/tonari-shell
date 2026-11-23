@@ -492,6 +492,12 @@ pub(crate) fn unescape(component: &str) -> String {
 // Walk by component so POSIX character classes have the same fnmatch
 // semantics in argv and in case patterns, including on Darwin.
 fn paths(pattern: &str, options: &GlobOptions, fields: &mut Vec<String>, collation: Collation) {
+    // Linux pathname order is the UTF-8 byte order even when matching uses a named locale.
+    let collation = if cfg!(target_os = "linux") {
+        Collation::Bytes
+    } else {
+        collation
+    };
     let mut paths = vec![String::new()];
     let mut rest = pattern;
     let mut known_existing = false;

@@ -1423,7 +1423,7 @@ Variable	INPUTRC	interface only	interface only	interface only
 Variable	INSIDE_EMACS	match	match	match
 Variable	LANG	match	match	match
 Variable	LC_ALL	match	match	match
-Variable	LC_COLLATE	match	match	match
+Variable	LC_COLLATE	intentional difference	intentional difference	match
 Variable	LC_CTYPE	match	match	match
 Variable	LC_MESSAGES	different	different	different
 Variable	LC_NUMERIC	different	different	different

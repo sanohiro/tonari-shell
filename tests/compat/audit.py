@@ -235,7 +235,10 @@ def collect(a, source):
                                       bash["Bash Variables"] + bash["Bourne Shell Variables"], re.M)))
     for name in var_names:
         if VARIABLES.get(name):
-            a.compare("Variable", name, VARIABLES[name])
+            contract = None
+            if name == "LC_COLLATE" and sys.platform.startswith("linux"):
+                contract = ("<A><z><é>".encode(), "<A><é><z>".encode())
+            a.compare("Variable", name, VARIABLES[name], text_contract=contract)
             continue
         check = f'printf %s "${{{name}+set}}"'
         pair = [a.script(i, check) for i in (0, 1)]

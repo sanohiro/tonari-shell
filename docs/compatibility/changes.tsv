@@ -1,3 +1,3 @@
 platform	group	feature	previous	current	witness	observed
-Debian	Variable	LC_COLLATE	different	match	"touch z A é; unset LC_ALL; export LC_COLLATE=en_US.UTF-8; \"$SHELL\" -c 'printf \"<%s>\" *'"	{"code": 0, "out": "<A><é><z>", "err": "", "timeout": false}
-Ubuntu	Variable	LC_COLLATE	different	match	"touch z A é; unset LC_ALL; export LC_COLLATE=en_US.UTF-8; \"$SHELL\" -c 'printf \"<%s>\" *'"	{"code": 0, "out": "<A><é><z>", "err": "", "timeout": false}
+Debian	Variable	LC_COLLATE	match	intentional difference	"touch z A é; unset LC_ALL; export LC_COLLATE=en_US.UTF-8; \"$SHELL\" -c 'printf \"<%s>\" *'"	[{"code": 0, "out": "<A><é><z>", "err": "", "timeout": false}, {"code": 0, "out": "<A><z><é>", "err": "", "timeout": false}]
+Ubuntu	Variable	LC_COLLATE	match	intentional difference	"touch z A é; unset LC_ALL; export LC_COLLATE=en_US.UTF-8; \"$SHELL\" -c 'printf \"<%s>\" *'"	[{"code": 0, "out": "<A><é><z>", "err": "", "timeout": false}, {"code": 0, "out": "<A><z><é>", "err": "", "timeout": false}]

@@ -1,0 +1,28 @@
+{
+  "Debian": {
+    "reference": "5.2.37(1)-release",
+    "host": "Linux-6.11.11-linuxkit-aarch64-with-glibc2.41",
+    "runs": 15,
+    "suite_runs": 7,
+    "warmups": 2,
+    "distinct_workloads": 806,
+    "unit": "ns",
+    "executable_sha256": [
+      "ccbd5106945d1095474e5ee47317266f5918aa37fc671829192a007918b1413a",
+      "1a783c0b803c1abfa1fe37d71ccd9de808e8d245c332ec8d1da261f7555c4055"
+    ]
+  },
+  "Ubuntu": {
+    "reference": "5.3.9(1)-release",
+    "host": "Linux-6.11.11-linuxkit-aarch64-with-glibc2.43",
+    "runs": 15,
+    "suite_runs": 7,
+    "warmups": 2,
+    "distinct_workloads": 785,
+    "unit": "ns",
+    "executable_sha256": [
+      "01c006568543d6b6ab9f0a57dd44b9d779d1edc437a5f5d2db0215887c19dbeb",
+      "1a783c0b803c1abfa1fe37d71ccd9de808e8d245c332ec8d1da261f7555c4055"
+    ]
+  }
+}

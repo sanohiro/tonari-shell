@@ -10,7 +10,7 @@ The current inventory gives the outcome for every named check on Debian, Ubuntu 
 
 ## Try it
 
-Build with Rust 1.88 or later. On macOS the unit suite passed with Rust 1.88.0 and the release was built with 1.96.1. This example tunes the binary for the CPU of the build machine. The startup flags let you try the editor before loading your Bash configuration.
+Build with Rust 1.88 or later. We built the releases with Rust 1.96.1 and checked Rust 1.88.0 on macOS and both Linux architectures. The arm64 release is tuned for the build CPU. On x86-64 the release targets x86-64-v3. On a GNU/Linux rustup host, first run `rustup target add "$(uname -m)-unknown-linux-musl"`. The release script uses binutils to inspect the resulting Linux executable. A plain `cargo build` targets the development host and can link its libc. The startup flags let you try the editor before loading your Bash configuration.
 
 ```sh
 binary=$(tools/build-release.sh)
@@ -43,17 +43,17 @@ tools/stage.sh "$binary" "$prefix"
 
 We sourced nvm 0.40.3 and 0.40.5 in Tonari, switched between Node 24.1.0 and 18.13.0 in the same session, and verified each switch with `node --version`. On macOS arm64, a staged login session loaded Debian bash-completion 2.16.0 and the script from GitHub CLI 2.96.0. Pressing Tab after `gh iss` inserted `gh issue `.
 
-Git also completed a branch created by another process after startup, and direnv 2.32.1 applied and removed a directory environment on Debian. An fzf 0.74.0 integration test selected a filename containing a space and Japanese text with Ctrl-T in both Emacs and vi editing modes. The editor supports `bind -x`, key macros, `INPUTRC` and editable `read -e -i` input. Scripts can use `select`, `time` and `coproc`. Named redirections such as `exec {log}>file` allocate a descriptor that the caller can use and close. The `nocasematch` option works in `case`, `[[ ]]`, parameter replacement and completion filters. Advanced Readline commands, filename matching with `nocaseglob` and Bash 5.3 expansion forms still have differences. A Debian x86-64-v3 guest passed all 124 integration tests under QEMU. Native x86-64 performance, WSL2 and a persistent startup parsing cache remain open. Debian and Ubuntu arm64 also passed actual account login and logout using Tonari’s private `bash` path. [Per-feature results](docs/compatibility-2026-11-23-response/matrix.md)
+Git also completed a branch created by another process after startup, and direnv 2.32.1 applied and removed a directory environment on Debian. An fzf 0.74.0 integration test selected a filename containing a space and Japanese text with Ctrl-T in both Emacs and vi editing modes. The editor supports `bind -x`, key macros, `INPUTRC` and editable `read -e -i` input. Scripts can use `select`, `time` and `coproc`. Named redirections such as `exec {log}>file` allocate a descriptor that the caller can use and close. The `nocasematch` option works in `case`, `[[ ]]`, parameter replacement and completion filters. Advanced Readline commands, filename matching with `nocaseglob` and Bash 5.3 expansion forms still have differences. A Debian x86-64-v3 guest passed all 124 integration tests under QEMU. Native x86-64 performance, WSL2 and a persistent startup parsing cache remain open. Debian and Ubuntu arm64 also passed actual account login and logout using Tonari’s private `bash` path. [Per-feature results](docs/compatibility.md)
 
 ## Speed and size
 
 The feature reference is GNU Bash 5.2.37 on Debian 13 and 5.3.9 on Ubuntu 26.04. For work done by the shell we aim for half of Bash’s elapsed time, with two-thirds as the upper target. Bash-equivalent time is acceptable for very short operations and workloads dominated by the same OS work. The benchmark records startup, external commands, pipelines, and repeated operations separately. The macOS system Bash 3.2 is an additional comparison. [Measurements, binary sizes and build conditions](docs/benchmarks.md)
 
-Each installation uses one executable. The macOS arm64 and Linux glibc builds use the system’s collation tables, including changes to the shell’s locale variables. Linux builds target arm64 or x86-64-v3. An additional static arm64 musl build starts faster on our Debian fixture and sorts names by byte value. The build script selects the profile for its host toolchain. [Builds and measured tradeoffs](docs/benchmarks.md#interactive-response)
+Linux releases for arm64 and x86-64-v3 are single, static musl executables. They run without glibc, a dynamic loader or an installed musl package. The macOS arm64 executable links to libSystem. [Release sizes and startup measurements](docs/benchmarks.md#static-linux)
 
 ## Development
 
-Editing, history, completion and expansion are implemented in Rust. New features should normally add zero runtime shared libraries. We evaluate Rust crates by the behavior they provide, their effect on latency and the size of the release executable. Filename expansion passes an ordered argument list to commands. The standard macOS and glibc builds use the active locale’s collation. The optional static musl build uses byte order and can differ from Bash in named locales. [Runtime dependencies and filename order](docs/engineering-notes.md#runtime-dependencies)
+Prefer the Rust standard library or a pure Rust crate for a self-contained operation. Terminal cell width uses `unicode-width`. File descriptors, terminals and process control use native APIs through the `libc` crate. Evaluate additional native libraries against the required behavior, latency and shipped size. Linux orders pathname expansions by UTF-8 bytes in every locale. macOS follows the active locale. [Dependency policy and filename order](docs/engineering-notes.md#runtime-dependencies)
 
 ```sh
 cargo test --locked

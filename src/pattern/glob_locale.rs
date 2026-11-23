@@ -65,7 +65,9 @@ pub(super) fn run<T>(
         {
             if let Some(next) = Cached::new(ctype, collate) {
                 *slot = Some(next);
-                order::invalidate();
+                if !cfg!(target_os = "linux") {
+                    order::invalidate();
+                }
             }
         }
         let Some(locale) = slot else {

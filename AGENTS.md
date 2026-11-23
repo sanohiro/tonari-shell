@@ -6,7 +6,7 @@ Keep benchmark tables and run conditions in [the benchmark record](docs/benchmar
 
 # Runtime dependencies
 
-Implement editing, history, completion and expansion in Rust. Ship one executable per target and aim for zero additional shared libraries when adding features. A Rust crate can be linked into that executable and can itself pull in native libraries. Evaluate a new crate against the required behavior, latency on the affected path and release binary size. Inspect the resulting binary with `otool -L` or `readelf -d` when changing dependencies or linker settings. For pathname expansion, preserve the active locale’s collation on the standard builds. The static musl build uses byte order and can differ from the distribution’s Bash in named locales. Preserve an explicitly requested completion order, such as `complete -o nosort`, when optimizing candidate display.
+Use the Rust standard library or a pure Rust crate for individual algorithms, including editing, Unicode processing, history, completion and expansion. Use native APIs for OS facilities such as process control and terminal I/O. Additional native dependencies need a concrete functional or measured performance reason. Check behavior, latency, binary size and transitive native dependencies when adding a crate. Ship one executable per target. The Linux releases use static musl and must pass the build script’s static PIE and shared dependency checks. Inspect macOS linkage with `otool -L`. Sort Linux pathname expansions by UTF-8 byte order in all locales. Preserve macOS locale collation and explicit completion order such as `complete -o nosort`.
 
 # Checking Bash compatibility and speed
 

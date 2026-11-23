@@ -1,5 +1,50 @@
 # Startup and execution / 起動と実行性能
 
+<a id="static-linux"></a>
+
+## Static Linux releases / Linux 標準配布版の静的リンク
+
+The release script produced static PIEs on both GNU/Linux rustup hosts using Rust 1.96.1. Each ELF had zero `PT_INTERP` and `DT_NEEDED` entries. We copied just the executable into an empty root, then ran arithmetic, a function and a builtin pipeline under `chroot`. Each architecture printed `static 42`. Linux pathname expansion now sorts in Rust by UTF-8 bytes in every locale. [Build](../tools/build-release.sh) · [Behavioral comparison](compatibility.md#intentional-differences)
+
+| Build / ビルド | Tonari bytes | Previous glibc bytes | Debian Bash bytes | Tonari SHA-256 |
+| --- | ---: | ---: | ---: | --- |
+| Linux arm64 | 1,369,056 | 1,257,592 | 1,412,096 | `1a783c0b803c1abfa1fe37d71ccd9de808e8d245c332ec8d1da261f7555c4055` |
+| Linux x86-64-v3 | 1,420,928 | 1,279,184 | 1,298,416 | `71a43c60a2c3d57eea8a63ee4528d9c228d8f270c571ef59ef0db1263df9b2c5` |
+
+On x86-64-v3 the standalone executable exceeds Debian Bash by 122,512 bytes. An otherwise identical build forcing LLVM machine outlining grew to 1,439,104 bytes. The native Alpine arm64 toolchain produced a 1,348,816-byte static PIE and passed the Debian integration suite. The timings below use the rustup arm64 release on the same Apple M1 Linux VM. Bash is 5.2.37 on Debian 13 and 5.3.9 on Ubuntu 26.04. The tables give median / p95 in milliseconds. Five warmups preceded 151 rotating process-launch samples or 45 already-started glob samples per shell. The glob fixtures use `LC_ALL=C.UTF-8`. [Launch benchmark](../tools/bench_login.py) · [Glob benchmark](../tools/bench_scripts.py)
+
+| OS | Workload / 操作 | Previous glibc | Static Tonari | Bash |
+| --- | --- | ---: | ---: | ---: |
+| Debian | Start and exit | 0.361 / 0.585 | 0.240 / 0.409 | 0.465 / 0.704 |
+| Debian | Login and exit | 1.163 / 1.389 | 1.162 / 1.453 | 1.422 / 1.739 |
+| Debian | Interactive login and exit | 1.684 / 2.051 | 1.804 / 2.169 | 2.100 / 2.480 |
+| Debian | 16 external launches | 3.758 / 4.301 | 3.403 / 3.986 | 4.816 / 5.577 |
+| Debian | 4,096 UTF-8 filenames | 1.946 / 2.127 | 1.962 / 2.284 | 3.743 / 4.139 |
+| Debian | Same glob, eight times | 9.421 / 10.306 | 9.034 / 9.870 | 28.645 / 29.433 |
+| Ubuntu | Start and exit | 0.373 / 0.726 | 0.246 / 0.460 | 0.475 / 0.898 |
+| Ubuntu | Login and exit | 1.014 / 1.278 | 1.036 / 1.242 | 1.322 / 1.590 |
+| Ubuntu | Interactive login and exit | 2.427 / 3.010 | 2.544 / 3.136 | 3.060 / 3.726 |
+| Ubuntu | 16 external launches | 3.742 / 4.309 | 3.373 / 4.010 | 4.734 / 5.230 |
+| Ubuntu | 4,096 UTF-8 filenames | 1.950 / 2.361 | 2.015 / 2.280 | 3.721 / 4.097 |
+| Ubuntu | Same glob, eight times | 9.396 / 9.725 | 8.997 / 9.697 | 27.747 / 29.499 |
+
+空のルートで実行できることを両アーキテクチャで確認しました。arm64 の通常起動は両環境で旧 glibc 版より約34%短くなりました。プロファイルを読む対話ログインは旧版より遅く、外部コマンド16回の連続起動は Bash の約71%です。x86-64-v3 のサイズは Debian Bash を約120 KiB 上回っています。x86-64 の機能試験には QEMU を使い、実機や WSL2 の速度は測定していません。[Linux 機能別の計測](compatibility-2026-11-23-static/matrix.md)
+
+With the same 4,096 filenames and `--utf8-locale ja_JP.UTF-8`, the chosen ordering changes the amount of work. In a separate byte-for-byte check all three shells returned the same set, Tonari in byte order and the other two in the Japanese locale's collation order. The timings use 45 samples in already-started shells. [Glob workload and locale option](../tools/bench_scripts.py)
+
+| OS | ja_JP.UTF-8 | Previous glibc | Static Tonari | Bash |
+| --- | --- | ---: | ---: | ---: |
+| Debian | One glob | 21.976 / 22.552 | 1.963 / 2.248 | 20.864 / 21.521 |
+| Debian | Eight globs | 29.225 / 32.163 | 9.161 / 10.461 | 164.699 / 168.002 |
+| Ubuntu | One glob | 21.983 / 23.066 | 2.015 / 2.273 | 20.905 / 21.544 |
+| Ubuntu | Eight globs | 29.330 / 31.247 | 9.025 / 10.316 | 165.078 / 170.049 |
+
+日本語ロケールの4,096件では、各ファイル名が1回ずつ含まれることと、Tonari の全引数がバイト順であることも確認しました。Debian の単発展開は旧版 21.976 ms から 1.963 ms に短縮しました。旧版と Bash はロケールの照合順序を計算しています。
+
+The complete Linux feature run verified every timed observation. With shell startup included, 510 of 777 matching Debian checks and 495 of 773 matching Ubuntu checks ran in at most two-thirds of Bash time. The comparison with the preceding static arm64 snapshot found 133 feature/mode pairs moving above the two-thirds threshold. These include short process and synchronization measurements. The TSV gives both shells’ medians in each run. [Full matrix](compatibility-2026-11-23-static/matrix.md) · [Threshold crossings](compatibility-2026-11-23-static/target-crossings.tsv)
+
+Linux の全項目計測で起動時間を含めた中央値が Bash の 2/3 以下だったのは Debian 510/777件、Ubuntu 495/773件です。前回の静的版より閾値を超えた133組についても、両者の絶対時間を記録しました。
+
 <a id="macos-runtime-dependencies"></a>
 
 ## macOS release linkage / macOS 配布版のリンク
@@ -66,7 +111,7 @@ GNU’s `ifs-posix.tests` performs 6,856 assertions and repeatedly uses a parent
 | Linux arm64 static musl | 1,359,104 | 1,412,096 Debian · 1,609,176 Ubuntu | `67b9facb2bc45a40e9515826f9ed1bfc93414ea7d082b5c05c4125b3575960ec` |
 | Linux x86-64-v3 glibc | 1,279,184 | 1,298,416 Debian | `0964bc2cdc5d38cbf9897adb0524771dd22fcaeeaa9030e4ed09a0f45eaa7957` |
 
-The Linux glibc build uses the installed locale data for filename order. In the same Debian startup run, `-c :` took 0.341 ms with glibc, 0.241 ms with static musl and 0.447 ms with Bash. The previous release used musl on arm64. The glibc build is staged under `linux-arm64`, and `linux-arm64-musl` contains the independently usable static build. A fully static glibc trial started in 0.370 ms compared with 0.467 ms for dynamic glibc in that run, and grew to 2,169,008 bytes. In a separate 301-sample build comparison, linking GCC’s unwind support into the executable reduced the glibc startup median from 0.352 to 0.325 ms and p95 from 0.439 to 0.391 ms. The release script records the compiler and linker options used for each target. [Build recipe](../tools/build-release.sh) · [Static musl measurements](compatibility-2026-11-23-response/musl/matrix.md)
+The Linux glibc build uses the installed locale data for filename order. In the same Debian startup run, `-c :` took 0.341 ms with glibc, 0.241 ms with static musl and 0.447 ms with Bash. The previous release used musl on arm64. At the time of this comparison, `linux-arm64` contained the glibc build and `linux-arm64-musl` contained the static build. A fully static glibc trial started in 0.370 ms compared with 0.467 ms for dynamic glibc in that run, and grew to 2,169,008 bytes. In a separate 301-sample build comparison, linking GCC’s unwind support into the executable reduced the glibc startup median from 0.352 to 0.325 ms and p95 from 0.439 to 0.391 ms. The release script records the compiler and linker options used for each target. [Build recipe](../tools/build-release.sh) · [Static musl measurements](compatibility-2026-11-23-response/musl/matrix.md)
 
 Linux arm64 では日本語を含む名前付きロケールのファイル順を扱える glibc 版を標準としました。起動の速さを優先してバイト順でよい環境には、静的 musl 版があります。どちらもインストールする実行ファイルは1本です。検証した4本はそれぞれの比較用 Bash より小さく、アカウントでのログイン試験には配布用の実体を使いました。[互換性と適用条件](compatibility.md) · [採用・見送りの根拠](engineering-notes.md)
 

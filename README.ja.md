@@ -10,7 +10,9 @@ Debian・Ubuntu・macOS で各項目がどこまで動作するかを一覧に�
 
 ## 試す
 
-ビルドには Rust 1.88 以降を使用します。macOS で最小対応版の 1.88.0 でも単体テストを通し、配布用バイナリは 1.96.1 でビルドしました。この例ではビルドするマシンの CPU 向けに最適化します。起動引数を付けると、自分の Bash 設定を読み込む前に標準のエディターを試せます。
+ビルドには Rust 1.88 以降を使用します。配布用は 1.96.1 でビルドし、最小対応版の 1.88.0 でも macOS と Linux の両アーキテクチャで動作を確認しました。起動引数を付けると、自分の Bash 設定を読み込む前に標準のエディターを試せます。
+
+arm64 版はビルド機の CPU、x86-64 版は x86-64-v3 向けです。GNU/Linux の rustup 環境では先に `rustup target add "$(uname -m)-unknown-linux-musl"` を実行してください。配布スクリプトは binutils で Linux バイナリのリンク結果を検査します。開発用の `cargo build` はホストのターゲットを使い、ホストの libc にリンクする場合があります。
 
 ```sh
 binary=$(tools/build-release.sh)
@@ -43,17 +45,17 @@ tools/stage.sh "$binary" "$prefix"
 
 nvm 0.40.3 と 0.40.5 をそれぞれ Tonari で読み込み、同じセッションで Node 24.1.0 と 18.13.0 を切り替え、それぞれ `node --version` で確認しました。macOS arm64 のログイン端末で Debian の bash-completion 2.16.0 と GitHub CLI 2.96.0 の補完スクリプトを読み込み、`gh iss` に Tab を押すと `gh issue ` が入力されることを確認しました。
 
-Git では起動後に別プロセスが作ったブランチを補完して切り替え、Debian の direnv 2.32.1 ではディレクトリ移動時の環境変数の設定と解除を確認しました。fzf 0.74.0 の設定を読み込み、Emacs・vi の両モードで Ctrl-T から空白と日本語を含むファイル名を選択できました。エディターでは `bind -x`、キーマクロ、`INPUTRC`、初期値を編集できる `read -e -i` が使えます。スクリプトでは `select`、`time`、`coproc` に対応しました。`exec {log}>file` で確保した記述子は変数を介して使用・解放できます。`shopt -s nocasematch` は `case`、`[[ ]]`、変数の文字列置換、補完フィルターに適用されます。複雑な Readline 操作、ファイル名展開の `nocaseglob`、Bash 5.3 の展開構文には差が残ります。Debian の x86-64-v3 版は QEMU 上で統合テスト124件を通過しました。x86-64 実機での性能、WSL2 での検証、起動設定の解析結果を永続化するキャッシュが残っています。Debian・Ubuntu の arm64 では、一時アカウントに登録した Tonari でログインからログアウトまで確認しました。[機能ごとの結果](docs/compatibility-2026-11-23-response/matrix.md)
+Git では起動後に別プロセスが作ったブランチを補完して切り替え、Debian の direnv 2.32.1 ではディレクトリ移動時の環境変数の設定と解除を確認しました。fzf 0.74.0 の設定を読み込み、Emacs・vi の両モードで Ctrl-T から空白と日本語を含むファイル名を選択できました。エディターでは `bind -x`、キーマクロ、`INPUTRC`、初期値を編集できる `read -e -i` が使えます。スクリプトでは `select`、`time`、`coproc` に対応しました。`exec {log}>file` で確保した記述子は変数を介して使用・解放できます。`shopt -s nocasematch` は `case`、`[[ ]]`、変数の文字列置換、補完フィルターに適用されます。複雑な Readline 操作、ファイル名展開の `nocaseglob`、Bash 5.3 の展開構文には差が残ります。Debian の x86-64-v3 版は QEMU 上で統合テスト124件を通過しました。x86-64 実機での性能、WSL2 での検証、起動設定の解析結果を永続化するキャッシュが残っています。Debian・Ubuntu の arm64 では、一時アカウントに登録した Tonari でログインからログアウトまで確認しました。[機能ごとの結果](docs/compatibility.md)
 
 ## 速度とサイズ
 
 機能互換の基準は Debian 13 の GNU Bash 5.2.37 と Ubuntu 26.04 の 5.3.9 です。シェル自身の処理は Bash の所要時間の半分、遅くても 3 分の 2 を目指します。ごく短い単発処理や、共通の OS 処理・待ち時間が大半を占める処理は、Bash と同程度なら許容します。起動・外部コマンド・パイプ・反復実行を個別に計測し、macOS 標準の Bash 3.2 とも比較します。[計測結果・バイナリサイズ・ビルド条件](docs/benchmarks.md)
 
-どのビルドも、インストールする実行ファイルは1本です。macOS arm64 版と Linux glibc 版は OS の照合順序を使い、シェル内のロケール変更にも従います。Linux は arm64 と x86-64-v3 を対象とします。arm64 の静的 musl 版も用意しました。Debian の実測ではこちらの起動が速く、ファイル名はバイト順になります。ビルドスクリプトはホストのツールチェーンに合う設定を選びます。[配布版の比較と実測](docs/benchmarks.md#interactive-response)
+Linux の arm64 版と x86-64-v3 版は、ともに musl を静的リンクした実行ファイル1本で配布します。実行環境に glibc、動的ローダー、musl パッケージは不要です。macOS arm64 版が直接リンクする共有ライブラリは libSystem だけです。[配布サイズと起動の実測](docs/benchmarks.md#static-linux)
 
 ## 開発
 
-入力編集・履歴・補完・展開は Rust で実装し、機能の追加で実行時の共有ライブラリを増やさないことを原則とします。Rust クレートは、必要な動作、その処理にかかる時間、配布バイナリのサイズを確認して採用します。ファイル名展開でコマンドに渡す引数の順序は、標準の macOS 版と glibc 版では現在のロケールの照合順序に従います。オプションの静的 musl 版はバイト順を使うため、名前付きロケールでは配布元の Bash と順序が異なる場合があります。[実行時依存とファイル名の順序](docs/engineering-notes.md#runtime-dependencies)
+個別の処理には Rust 標準ライブラリか pure Rust クレートを優先します。たとえば端末での文字幅には `unicode-width`、ファイル記述子・端末・プロセス制御には `libc` クレート経由で OS の API を使います。ネイティブライブラリを追加するときは、必要な機能、その処理の遅延、配布サイズで判断します。ファイル名展開の順序は Linux では常に UTF-8 のバイト順、macOS では現在のロケール順です。[実行時依存とファイル名の順序](docs/engineering-notes.md#runtime-dependencies)
 
 ```sh
 cargo test --locked
