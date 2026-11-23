@@ -1,5 +1,11 @@
 name: Native benchmarks
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      matrix:
+        description: Native runners and suites to measure
+        type: string
+        default: '{"runner":["ubuntu-24.04","ubuntu-24.04-arm","macos-15"],"suite":["editing","completion","execution","profiles","inventory"],"include":[{"runner":"ubuntu-24.04","suite":"inventory-ubuntu"},{"runner":"ubuntu-24.04-arm","suite":"inventory-ubuntu"}]}'
 
 permissions:
   contents: read
@@ -9,14 +15,7 @@ jobs:
     name: ${{ matrix.runner }} / ${{ matrix.suite }}
     strategy:
       fail-fast: false
-      matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
-        suite: [editing, completion, execution, profiles, inventory]
-        include:
-          - runner: ubuntu-24.04
-            suite: inventory-ubuntu
-          - runner: ubuntu-24.04-arm
-            suite: inventory-ubuntu
+      matrix: ${{ fromJSON(inputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     env:
