@@ -32,6 +32,55 @@ def completion(shell, home, bindir, rc, line, suffix=b"-0"):
         return elapsed
 
 
+def delayed_callback(shell, home, bindir, rc, metrics):
+    with terminal(shell, home, bindir, rc, prompt=PROMPT) as fd:
+        os.write(fd, b"declared ma\t")
+        read_until(fd, b"helper<wake>")
+        start = time.perf_counter_ns()
+        os.write(fd, "雪".encode())
+        read_until(fd, "雪".encode())
+        metrics["IME during helper"].append((time.perf_counter_ns() - start) / 1e6)
+        elapsed = timed_keys(fd, b"\x7f@", b"@")
+        metrics["Backspace then @"].append(elapsed)
+        os.write(fd, b"\x0c")
+        read_until(fd, PROMPT + b"declared match @")
+
+
+def scan_keys(shell, home, bindir, rc, metrics):
+    line = b": files/needle"
+    for delayed in (False, True):
+        with terminal(shell, home, bindir, rc, prompt=PROMPT) as fd:
+            os.write(fd, line)
+            read_until(fd, line)
+            if delayed:
+                os.write(fd, b"\t")
+                time.sleep(.001)
+                metrics["key sent 1 ms after Tab"].append(timed_keys(fd, b"@", b"@"))
+                os.write(fd, b"\x0c")
+                read_until(fd, PROMPT + line + b"-target @")
+            else:
+                metrics["Tab to completed filename"].append(timed_keys(fd, b"\t", b"-target "))
+
+
+def long_line(shell, home, bindir, rc, metrics):
+    from bench_editor_input import FLAG, visible
+
+    with terminal(shell, home, bindir, rc, prompt=PROMPT) as fd:
+        value = b"x" * 65536 + FLAG
+        visible(fd, b"\x1b[200~v=" + value + b"\x1b[201~")
+        start = time.perf_counter_ns()
+        os.write(fd, b"@")
+        output = read_until(fd, b"@")
+        metrics["append after 64 KiB (ms)"].append((time.perf_counter_ns() - start) / 1e6)
+        metrics["append PTY output (bytes)"].append(len(output))
+        os.write(fd, b"\r")
+        read_until(fd, b"\x1b[?2004h")
+        os.write(fd, b'printf %s "$v" > value\r')
+        read_until(fd, b"\x1b[?2004h")
+        if (home / "value").read_bytes() != value + b"@":
+            raise ValueError(f"{shell}: incorrect long-line edit")
+
+
 def reused_words(shell, home, bindir, rc, metrics):
     with terminal(shell, home, bindir, rc, prompt=PROMPT) as fd:
         for i in range(12):
@@ -58,7 +107,9 @@ def listing(shell, home, bash, expected, prefix):
         read_until(fd, b"\a" if shell == bash else PROMPT + line)
         start = time.perf_counter_ns()
         os.write(fd, b"\t@")
-        output = read_until(fd, b"@")
+        output = read_until(fd, max(expected))
+        end = output.index(max(expected)) + len(max(expected))
+        output = output[:end] + read_until(fd, b"@", initial=output[end:])
         elapsed = (time.perf_counter_ns() - start) / 1e6
         if set(re.findall(rb"item-\d+\.dat", output)) != expected:
             raise ValueError(f"incomplete listing from {shell}")
@@ -100,6 +151,10 @@ def main():
     parser.add_argument("--runs", type=int, default=30)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--word-list", action="store_true", help="measure a registered 10,000-word completion")
+    mode.add_argument("--branches", action="store_true", help="complete one filename across 12 independent directories")
+    mode.add_argument("--scan-key", action="store_true", help="distinguish scan completion from a key arriving 1 ms into it")
+    mode.add_argument("--project", action="store_true", help="time completed abbreviated paths and project history arguments")
+    mode.add_argument("--long-line", action="store_true", help="append to a 64 KiB paste and verify its value")
     mode.add_argument("--callback", action="store_true", help="queue a key behind a callback that waits 100 ms")
     mode.add_argument("--reuse-words", action="store_true", help="repeated queries to one registered literal list")
     mode.add_argument("--listing", action="store_true", help="measure the second Tab and full listing")
@@ -117,14 +172,53 @@ def main():
         home = Path(scratch)
         bindir = home / "files"
         bindir.mkdir()
-        if not (args.word_list or args.reuse_words or args.callback):
+        if not (args.word_list or args.reuse_words or args.callback or args.long_line or args.branches):
             digits = len(str(args.files))
             for i in range(args.files):
                 (bindir / f"item-{i:0{digits}d}.dat").touch(mode=0o755)
-        if args.callback:
+        if args.branches:
+            if bash: parser.error("--branches uses Tonari abbreviated paths")
+            basedir = home / "src"
+            for i in range(12):
+                directory = basedir / f"module-{i:02}" / "kernels"
+                directory.mkdir(parents=True)
+                for j in range(2048):
+                    (directory / f"padding-{j:04}").touch()
+            (directory / "needle-target").touch()
+            rc = home / "rc"
+            rc.write_text(f"PS1='{PROMPT.decode()}'\nHISTFILE=/dev/null\n")
+        elif args.scan_key:
+            (bindir / "needle-target").touch()
+            rc = home / "rc"
+            rc.write_text(f"PS1='{PROMPT.decode()}'\nHISTFILE=/dev/null\n")
+        elif args.project:
+            if bash:
+                parser.error("--project measures Tonari extensions")
+            (home / ".git").mkdir()
+            branch = home / "source/backend/kernels"
+            branch.parent.mkdir(parents=True)
+            bindir.rename(branch)
+            bindir = branch
+            (branch / "fir-filter").touch()
+            (home / "build/device-release").mkdir(parents=True)
+            journal = home / ".local/state/tonari/history"
+            journal.parent.mkdir(parents=True)
+            with journal.open("w") as f:
+                for i in range(100000):
+                    f.write(f"1\t1\t0\t{home}\t: padding-{i:06d}\n")
+                f.write(f"1\t1\t0\t{home}\tcmake --build build/device-release\n")
+                f.write(f"1\t1\t0\t{home}\trun --model mistral-large\n")
+            rc = home / "rc"
+            rc.write_text(f"PS1='{PROMPT.decode()}'\n")
+        elif args.long_line:
+            rc = home / "rc"
+            rc.write_text(f"PS1='{PROMPT.decode()}'\nHISTSIZE=0\nHISTFILE=/dev/null\n")
+        elif args.callback:
             rc = home / "rc"
             rc.write_text(f"PS1='{PROMPT.decode()}'\n"
-                          "_slow() { /bin/sleep 0.1; COMPREPLY=(match); }\ncomplete -F _slow demo\n")
+                          "_slow() { printf 'helper<%s>' wake >&2; /bin/sleep 0.1; COMPREPLY=(match); }\n"
+                          "complete -F _slow demo\n"
+                          "complete -o typeahead -F _slow declared 2>/dev/null || complete -F _slow declared\n")
         elif args.word_list or args.reuse_words:
             words = " ".join(f"option-{i:05d}-flag" for i in range(10_000))
             rc = home / "rc"
@@ -153,13 +247,45 @@ def main():
                     f.write(f"1\t1\t0\t/tmp\tprintf entry-{i:06d}\n")
             rc = home / "rc"
             rc.write_text(f"PS1='{PROMPT.decode()}'\ncomplete -f demo\n")
+        if args.callback or args.long_line:
+            with rc.open("a") as settings:
+                locale = "en_US.UTF-8" if os.uname().sysname == "Darwin" else "C.UTF-8"
+                settings.write(f"export LC_ALL={locale}\n")
         results = {s: defaultdict(list) for s in shells}
         for i in range(3 + args.runs):
             shift = i % len(shells)
             for shell in shells[shift:] + shells[:shift]:
                 metrics = results[shell] if i >= 3 else defaultdict(list)
+                if args.branches:
+                    with terminal(shell, home, bindir, rc, prompt=PROMPT) as fd:
+                        line = b": s/mod/k/needle"
+                        os.write(fd, line)
+                        read_until(fd, line)
+                        metrics["12 directories, one match"].append(timed_keys(fd, b"\t", b"module-11/kernels/needle-target "))
+                    continue
+                if args.scan_key:
+                    scan_keys(shell, home, bindir, rc, metrics)
+                    continue
+                if args.project:
+                    with terminal(shell, home, bindir, rc, prompt=PROMPT) as fd:
+                        for label, line, result in [
+                            ("abbreviated path", b": s/b/k/fir", b": source/backend/kernels/fir-filter "),
+                            ("cross-command path", b"ctest --test-dir dev", b"ctest --test-dir build/device-release/"),
+                            ("empty option value", b"run --model ", b"run --model mistral-large "),
+                        ]:
+                            os.write(fd, line)
+                            read_until(fd, PROMPT + line)
+                            metrics[label].append(timed_keys(fd, b"\t", PROMPT + result))
+                            os.write(fd, b"\x15")
+                            read_until(fd, b"\r\x1b[J" + PROMPT)
+                    continue
+                if args.long_line:
+                    long_line(shell, home, bindir, rc, metrics)
+                    continue
                 if args.callback:
                     metrics["Tab then key, 100 ms callback"].append(completion(shell, home, bindir, rc, b"demo ma", b"tch "))
+                    metrics["Tab then key, declared helper"].append(completion(shell, home, bindir, rc, b"declared ma", b"tch "))
+                    delayed_callback(shell, home, bindir, rc, metrics)
                     continue
                 if args.reuse_words:
                     reused_words(shell, home, bindir, rc, metrics)
@@ -182,7 +308,7 @@ def main():
                 for case, line in [("files", b": files/item"), ("complete -f", b"demo files/item"),
                                    ("PATH", b"item")]:
                     metrics[case].append(completion(shell, home, bindir, rc, line))
-        print("shell | case | samples | median / p95 (ms)")
+        print("shell | case | samples | median / p95 (ms unless labeled bytes)")
         for shell, metrics in results.items():
             for case, values in metrics.items():
                 p95 = sorted(values)[math.ceil(.95 * len(values)) - 1]

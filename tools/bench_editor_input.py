@@ -50,6 +50,12 @@ def sample(shell, home, name, packet, expected):
             for line in (b"v=" + expected, b"v=most-recent"):
                 os.write(fd, line + b"\r")
                 read_until(fd, b"\x1b[?2004h")
+        if name.startswith("Down to draft"):
+            os.write(fd, b"v=DOWNREF\r")
+            read_until(fd, b"\x1b[?2004h")
+            visible(fd, b"v=" + expected)
+            os.write(fd, b"\x1b[A")
+            read_until(fd, b"DOWNREF")
         elapsed = visible(fd, packet)
         os.write(fd, b"\r")
         read_until(fd, b"\x1b[?2004h")
@@ -67,7 +73,7 @@ def main():
     parser.add_argument("shell", nargs="+", type=Path)
     parser.add_argument("--runs", type=int, default=21)
     parser.add_argument("--large", action="store_true", help="also measure a 1 MiB paste")
-    parser.add_argument("--case", action="append", choices=["commit", "paste", "Up", "Ctrl-R", "Tab"])
+    parser.add_argument("--case", action="append", choices=["commit", "paste", "Up", "Down", "Ctrl-R", "Tab"])
     args = parser.parse_args()
     if args.runs < 1:
         parser.error("runs must be positive")
@@ -102,6 +108,7 @@ def main():
             value = (WORD * (size // len(WORD)) + b"a" * (size % len(WORD))) + FLAG
             cases.append((f"paste {size} B + marker", b"\x1b[200~v=" + value + b"\x1b[201~", value))
         cases.append(("Up twice (100k entries)", b"\x1b[A\x1b[A", recalled))
+        cases.append(("Down to draft (100k entries)", b"\x1b[B", recalled))
         cases.append(("Ctrl-R (100k entries)", b"\x12" + query, query + FLAG))
         cases.append(("Tab (10k files)", b"f candidates/" + query + b"\t", b"candidates/" + query + FLAG))
         for case in cases:

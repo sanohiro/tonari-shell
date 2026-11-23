@@ -18,11 +18,12 @@ pub struct Context<'a> {
     pub words: Vec<String>,
     pub current: usize,
     pub start: usize,
+    pub command_start: usize,
 }
 
 impl<'a> Context<'a> {
     /// Tokenize the current simple command for completion without evaluating it.
-    fn scan(line: &'a str, cursor: usize) -> Option<Self> {
+    pub(crate) fn scan(line: &'a str, cursor: usize) -> Option<Self> {
         if line[cursor..]
             .chars()
             .next()
@@ -36,6 +37,7 @@ impl<'a> Context<'a> {
         let mut escaped = false;
         let mut in_word = false;
         let mut start = 0;
+        let mut command_start = 0;
         let mut current = None;
         for (i, c) in line.char_indices() {
             if i == cursor {
@@ -71,6 +73,9 @@ impl<'a> Context<'a> {
                 }
                 in_word = false;
             } else {
+                if !in_word && words.is_empty() && i < cursor {
+                    command_start = i;
+                }
                 in_word = true;
                 match c {
                     '\\' => escaped = true,
@@ -91,6 +96,7 @@ impl<'a> Context<'a> {
             words,
             current: current?,
             start,
+            command_start,
         })
     }
 }
@@ -240,22 +246,70 @@ pub fn at(
     } else {
         Source::Files
     };
-    // First Tab inserts a common prefix. Only a listing needs every candidate.
+    // Registered definitions own the candidate list, including an explicitly
+    // empty result. Only the shell's default completion offers learned arguments.
     let mut options = (false, false);
-    let matches = if !files_only
-        && let Some(generated) =
-            crate::completion_spec::for_tab(session, command, prefix, Some(&context))
-    {
+    let generated = (!files_only)
+        .then(|| crate::completion_spec::for_tab(session, command, prefix, Some(&context)))
+        .flatten();
+    let ordinary = || {
+        let dirs = matches!(command, Some("cd" | "pushd")) && !files_only;
+        if prefix.is_empty()
+            && !files_only
+            && context.current > 1
+            && context.words[context.current - 1].starts_with('-')
+        {
+            let names = crate::history::arguments::candidates(
+                session,
+                &context.words,
+                context.current,
+                dirs,
+            );
+            if !names.is_empty() {
+                return alternatives(names, prefix);
+            }
+        }
+        let files = matches!(default_source, Source::Files | Source::Directories);
+        let source = if dirs && files {
+            Source::Directories
+        } else {
+            default_source
+        };
+        source
+            .matches(prefix, session, list)
+            .or_else(|| files.then(|| abbreviated(prefix, dirs, session)).flatten())
+            .or_else(|| {
+                if files_only || first || prefix.is_empty() {
+                    return None;
+                }
+                alternatives(
+                    crate::history::arguments::candidates(
+                        session,
+                        &context.words,
+                        context.current,
+                        dirs,
+                    ),
+                    prefix,
+                )
+            })
+    };
+    let matches = if let Some(generated) = generated {
         options = (generated.noquote, generated.nospace);
-        let result = generated.source.matches(prefix, session, list);
+        let directory = matches!(generated.source, Source::Directories);
+        let paths = directory || matches!(generated.source, Source::Files);
+        let result = generated.source.matches(prefix, session, list).or_else(|| {
+            paths
+                .then(|| abbreviated(prefix, directory, session))
+                .flatten()
+        });
         if result.is_none() && generated.fallback {
             options = (false, false);
-            default_source.matches(prefix, session, list)
+            ordinary()
         } else {
             result
         }
     } else {
-        default_source.matches(prefix, session, list)
+        ordinary()
     };
     let (common, choices) = matches?;
     let (noquote, nospace) = options;
@@ -274,7 +328,10 @@ pub fn at(
             continue;
         }
         let leading_tilde = i == 0 && common.starts_with("~/");
-        if !leading_tilde && !c.is_alphanumeric() && !"/._-".contains(c) {
+        let ordinary = c.is_alphanumeric()
+            || "/._-".contains(c)
+            || !c.is_ascii() && !c.is_whitespace() && !c.is_control();
+        if !leading_tilde && !ordinary {
             replacement.push('\\');
         }
         replacement.push(c);
@@ -305,6 +362,8 @@ fn visit_commands(
             visit(name, None)?;
         }
     }
+    let editing = crate::editor::preview::active();
+    let mut entries = 0usize;
     for dir in std::env::split_paths(&session.search_path(&[])) {
         let path = if dir.as_os_str().is_empty() {
             Path::new(".")
@@ -312,6 +371,10 @@ fn visit_commands(
             &dir
         };
         scan(path, &mut |raw, kind| {
+            if editing && entries % 256 == 0 {
+                crate::editor::preview::scan_input();
+            }
+            entries += 1;
             if !matches!(raw.to_bytes(), b"." | b"..")
                 && raw.to_bytes().starts_with(prefix.as_bytes())
                 && let Ok(name) = raw.to_str()
@@ -421,7 +484,13 @@ impl<'a> Directory<'a> {
     }
 
     fn visit(&self, mut visitor: impl FnMut(&str, u8) -> ControlFlow<()>) {
+        let mut entries = 0usize;
+        let editing = crate::editor::preview::active();
         let _ = scan(&self.path, &mut |raw, kind| {
+            if editing && entries % 256 == 0 {
+                crate::editor::preview::scan_input();
+            }
+            entries += 1;
             let bytes = raw.to_bytes();
             if bytes.starts_with(self.base.as_bytes())
                 && !matches!(bytes, b"." | b"..")
@@ -434,10 +503,152 @@ impl<'a> Directory<'a> {
         });
     }
 
+    fn collect(&self, directories_only: bool, mark_directories: bool, choices: &mut Vec<String>) {
+        let dir = self.dir;
+        self.visit(|name, kind| {
+            let is_dir = (directories_only || mark_directories) && self.is_directory(name, kind);
+            if directories_only && !is_dir {
+                return ControlFlow::Continue(());
+            }
+            let mut path = String::with_capacity(dir.len() + name.len() + 1);
+            path.push_str(dir);
+            path.push_str(name);
+            if mark_directories && is_dir {
+                path.push('/');
+            }
+            choices.push(path);
+            ControlFlow::Continue(())
+        });
+    }
+
     fn is_directory(&self, name: &str, kind: u8) -> bool {
         kind == libc::DT_DIR
             || matches!(kind, libc::DT_LNK | libc::DT_UNKNOWN) && self.path.join(name).is_dir()
     }
+}
+
+fn alternatives(names: Vec<String>, prefix: &str) -> Option<(Common, Vec<String>)> {
+    let mut common = Common::from_names(names.iter().map(String::as_str), "")?;
+    if !common.unique && !common.text.starts_with(prefix) {
+        common.text = prefix.to_owned();
+    }
+    Some((common, names))
+}
+
+fn abbreviated(prefix: &str, dirs: bool, session: &Session) -> Option<(Common, Vec<String>)> {
+    let (base, rest) = if let Some(rest) = prefix.strip_prefix("~/") {
+        ("~/", rest)
+    } else if let Some(rest) = prefix.strip_prefix('/') {
+        ("/", rest)
+    } else {
+        ("", prefix)
+    };
+    let (parents, leaf) = rest.rsplit_once('/')?;
+    let mut paths = vec![base.to_owned()];
+    for part in parents.split('/').filter(|s| !s.is_empty()) {
+        let mut next = Vec::new();
+        for mut path in paths {
+            path.push_str(part);
+            let directory = Directory::open(&path, session)?;
+            if directory.path.join(part).is_dir() {
+                path.push('/');
+                next.push(path);
+            } else if !matches!(part, "." | "..") {
+                directory.visit(|name, kind| {
+                    if directory.is_directory(name, kind) {
+                        next.push(format!("{}{name}/", directory.dir));
+                    }
+                    if next.len() > 128 {
+                        ControlFlow::Break(())
+                    } else {
+                        ControlFlow::Continue(())
+                    }
+                });
+            }
+            if next.len() > 128 {
+                return None;
+            }
+        }
+        if next.is_empty() {
+            return None;
+        }
+        paths = next;
+    }
+    for path in &mut paths {
+        path.push_str(leaf);
+    }
+    let branches: Vec<_> = paths
+        .iter()
+        .filter_map(|p| Directory::open(p, session))
+        .collect();
+    let mut matches = branch_matches(&branches, dirs);
+    matches.sort_unstable();
+    matches.dedup();
+    alternatives(matches, prefix)
+}
+
+// Arm64 benefits from parallel directory scans. Workers finish before Tab can run shell code.
+fn branch_matches(branches: &[Directory<'_>], dirs: bool) -> Vec<String> {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    };
+    use std::{thread, time::Duration};
+    let large = cfg!(target_arch = "aarch64")
+        && branches.len() >= 4
+        && branches
+            .iter()
+            .map(|d| fs::metadata(&d.path).map_or(0, |m| m.len()))
+            .sum::<u64>()
+            >= 128 * 1024;
+    let workers = if large {
+        thread::available_parallelism()
+            .map_or(1, |n| n.get())
+            .min(4)
+            .min(branches.len())
+    } else {
+        1
+    };
+    if workers == 1 {
+        let mut choices = Vec::new();
+        for d in branches {
+            d.collect(dirs, true, &mut choices);
+        }
+        return choices;
+    }
+    let next = AtomicUsize::new(0);
+    let scan = || {
+        let mut choices = Vec::new();
+        while let Some(d) = branches.get(next.fetch_add(1, Ordering::Relaxed)) {
+            d.collect(dirs, true, &mut choices);
+        }
+        choices
+    };
+    thread::scope(|scope| {
+        let (sender, receiver) = mpsc::channel();
+        for _ in 1..workers {
+            let sender = sender.clone();
+            let scan = &scan;
+            if thread::Builder::new()
+                .spawn_scoped(scope, move || {
+                    let _ = sender.send(scan());
+                })
+                .is_err()
+            {
+                break;
+            }
+        }
+        drop(sender);
+        let mut matches = scan();
+        loop {
+            match receiver.recv_timeout(Duration::from_millis(1)) {
+                Ok(part) => matches.extend(part),
+                Err(mpsc::RecvTimeoutError::Timeout) => crate::editor::preview::poll(),
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        matches
+    })
 }
 
 fn common_file(prefix: &str, directories_only: bool, session: &Session) -> Option<Common> {
@@ -473,22 +684,8 @@ pub fn file_names(
     let Some(directory) = Directory::open(prefix, session) else {
         return Vec::new();
     };
-    let dir = directory.dir;
     let mut choices = Vec::new();
-    directory.visit(|name, kind| {
-        let is_dir = (directories_only || mark_directories) && directory.is_directory(name, kind);
-        if directories_only && !is_dir {
-            return ControlFlow::Continue(());
-        }
-        let mut path = String::with_capacity(dir.len() + name.len() + 1);
-        path.push_str(dir);
-        path.push_str(name);
-        if mark_directories && is_dir {
-            path.push('/');
-        }
-        choices.push(path);
-        ControlFlow::Continue(())
-    });
+    directory.collect(directories_only, mark_directories, &mut choices);
     choices.sort_unstable();
     choices.dedup();
     choices

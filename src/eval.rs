@@ -22,6 +22,9 @@ fn run_statements(
 ) -> Flow {
     let mut statements = iter.peekable();
     while let Some(statement) = statements.next() {
+        if session.interactive && session.completions.in_callback() {
+            crate::editor::preview::statement();
+        }
         if !session.coprocesses.is_empty() {
             crate::execute::coprocess::refresh(session);
         }

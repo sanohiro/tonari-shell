@@ -188,11 +188,15 @@ pub fn capture_substitution(
 }
 
 pub(super) fn read_output(
-    mut read: impl Read,
+    mut read: impl Read + std::os::fd::AsRawFd,
     pid: libc::pid_t,
 ) -> Result<(String, u8), &'static str> {
     let mut output = Vec::new();
-    let result = read.read_to_end(&mut output);
+    let result = if crate::editor::preview::can_wait() {
+        crate::editor::preview::read_capture(&mut read, &mut output)
+    } else {
+        read.read_to_end(&mut output).map(|_| ())
+    };
     drop(read);
     let code = crate::execute::wait(pid).map_err(|_| "cannot wait for command substitution")?;
     result.map_err(|_| "cannot read command substitution")?;
@@ -343,7 +347,7 @@ pub fn launch_group(
     status: u8,
     background: bool,
 ) -> Flow {
-    let mut launch = session.jobs.launch(background);
+    let mut launch = session.jobs.launch(background, false);
     let pid = unsafe { libc::fork() };
     if pid < 0 {
         eprintln!("tonari: fork: {}", std::io::Error::last_os_error());

@@ -382,6 +382,7 @@ fn main() -> ExitCode {
     session.jobs.monitor = invocation.monitor.unwrap_or(session.interactive);
     session.command_string = matches!(invocation.input, Input::Command(_));
     session.shopt.expand_aliases = session.interactive;
+    session.shopt.progcomp_alias = session.interactive;
     session.inherit_options();
     for (enable, name) in std::mem::take(&mut invocation.shopts) {
         let options = match name {

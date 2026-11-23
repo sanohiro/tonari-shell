@@ -1857,6 +1857,178 @@ printf '%s\n' "$marker"
         send(b"demo s\t", PROMPT + b"demo st")
         send(b"\t", b"start  stop")
 
+    def test_completion_keeps_terminal_input_with_its_owner(self):
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                os.write(fd, b"""pick() { /bin/sh -c 'printf "owner-%s>" ready >&2; IFS= read -r answer; printf %s "$answer" > owned'; COMPREPLY=(match); }; complete -F pick demo\r""")
+                self.read_until(fd, b"\x1b[?2004h")
+                os.write(fd, b"demo ma\t")
+                self.read_until(fd, b"owner-ready>")
+                os.write(fd, b"reply\n")
+                self.read_until(fd, b"tch ")
+                self.assertEqual((self.cwd / "owned").read_bytes(), b"reply")
+
+    def test_completion_echoes_edits_before_a_helper_finishes(self):
+        fd = self.terminal_session(editing=True)
+        for mode in ("foreground", "capture", "shell loop"):
+            with self.subTest(mode=mode):
+                # The helper cannot exit until the test has observed both the IME
+                # commit and a separate Backspace. No wall-clock threshold.
+                gate = self.cwd / "release"
+                gate.unlink(missing_ok=True)
+                wait = """/bin/sh -c 'printf "waiting-%s>" ready >&2; while [ ! -f release ]; do /bin/sleep 0.01; done'"""
+                if mode == "capture":
+                    wait = f"ignored=$({wait})"
+                elif mode == "shell loop":
+                    wait = """printf 'waiting-%s>' ready >&2; while [[ ! -e release ]]; do :; done"""
+                cmd = f'calls=0; pick() {{ ((calls++)); {wait}; COMPREPLY=(match); }}; demo() {{ printf "%s|%s|%s" "$1" "$2" "$calls" > completed; }}; complete -o typeahead -F pick demo'
+                os.write(fd, cmd.encode() + b"\r")
+                self.read_until(fd, b"\x1b[?2004h")
+                os.write(fd, b"demo ma\t")
+                self.read_until(fd, b"waiting-ready>")
+                os.write(fd, "日本🌱".encode())
+                self.read_until(fd, PROMPT + "demo ma日本🌱".encode())
+                os.write(fd, b"\x7f!")
+                self.read_until(fd, PROMPT + "demo ma日本!".encode())
+                gate.touch()
+                os.write(fd, b"\r")
+                self.read_until(fd, b"\x1b[?2004h")
+                self.assertEqual((self.cwd / "completed").read_text(), "match|日本!|1")
+
+    def test_abbreviated_paths_and_project_arguments(self):
+        kernel = self.cwd / "src/backend/cuda/kernel file🌱"
+        kernel.parent.mkdir(parents=True)
+        kernel.touch()
+        (self.cwd / ".git").mkdir()
+        (self.cwd / "build/4070ti-release").mkdir(parents=True)
+        (self.cwd / "other").mkdir()
+        journal = self.cwd / ".local/state/tonari/history"
+        journal.parent.mkdir(parents=True)
+        journal.write_text(f"1\t1\t0\t{self.cwd}\tcmake --build build/4070ti-release\n"
+                           f"1\t2\t0\t{self.cwd}/other\trun --model mistral-large\n"
+                           f"1\t3\t1\t{self.cwd}\trun --model mistral-failed\n"
+                           f"1\t4\t0\t{self.cwd.parent}\trun --model mistral-unrelated\n"
+                           f"1\t5\t0\t{self.cwd}\trun --model $(touch EVALUATED)\n")
+        fd = self.terminal_session(editing=True)
+        def edit(line, expected):
+            os.write(fd, b"\x15" + line + b"\t")
+            self.read_until(fd, PROMPT + expected)
+        edit(b": s/b/c/ker", ": src/backend/cuda/kernel\\ file🌱 ".encode())
+        edit(b"cd s/b/cu", b"cd src/backend/cuda/")
+        (self.cwd / "src/build/core").mkdir(parents=True)
+        (self.cwd / "src/build/core/kernel-b").touch()
+        os.write(fd, b"\x15: s/b/c/ker\t\t")
+        self.read_until(fd, b"src/build/core/kernel-b")
+        edit(b": ~/s/build/co/ke", b": ~/src/build/core/kernel-b ")
+        (self.cwd / "src/build/.hidden").mkdir()
+        (self.cwd / "src/build/.hidden/private").touch()
+        edit(b": s/build/.h/pr", b": src/build/.hidden/private ")
+        (self.cwd / "src/link").symlink_to("backend")
+        edit(b": s/l/c/ker", ": src/link/cuda/kernel\\ file🌱 ".encode())
+        edit(b"ctest --test-dir 4070", b"ctest --test-dir build/4070ti-release/")
+        edit(b"run --model ", b"run --model mistral-large ")
+        (self.cwd / "mistral-local").touch()
+        edit(b"run --model mist", b"run --model mistral-local ")
+        os.write(fd, b"\x15complete -W unrelated run\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        os.write(fd, b"run --model mist\t@")
+        self.read_until(fd, PROMPT + b"run --model mist@")
+        self.assertFalse((self.cwd / "EVALUATED").exists())
+
+    def test_alias_completion_context_and_reverse_search_caret(self):
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                os.write(fd, b"""shopt -s progcomp_alias; alias g='real sub'; cb(){ printf '%s|%s|%s|%s|%s' "$1" "$3" "$COMP_LINE" "$COMP_CWORD" "$COMP_POINT" > ctx; COMPREPLY=(match); }; complete -F cb real\r""")
+                self.read_until(fd, b"\x1b[?2004h")
+                os.write(fd, b"g ma\t")
+                self.read_until(fd, b"tch ")
+                self.assertEqual((self.cwd / "ctx").read_text(), "real|sub|real sub ma|2|11")
+                os.write(fd, b"\x15v=AC\x02\x12missing\x07B\x05; printf %s \"$v\" > caret\r")
+                self.read_until(fd, b"\x1b[?2004h")
+                self.assertEqual((self.cwd / "caret").read_text(), "ABC")
+
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"alias g=real; complete -W original real\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        os.write(fd, b"g or\t")
+        self.read_until(fd, PROMPT + b"g original ")
+        os.write(fd, b"\x15complete -W override g\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        os.write(fd, b"g ov\t")
+        self.read_until(fd, PROMPT + b"g override ")
+        os.write(fd, b"\x15complete -r g; shopt -u progcomp_alias\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        os.write(fd, b"g or\t@")
+        self.read_until(fd, PROMPT + b"g or@")
+
+    def test_long_line_appends_without_reprinting_the_paste(self):
+        fd = self.terminal_session(editing=True)
+        payload = b"x" * 4080
+        os.write(fd, b"\x1b[200~v=" + payload + b"Z\x1b[201~")
+        self.read_until(fd, b"Z")
+        os.write(fd, "日本🌱!".encode())
+        display = self.read_until(fd, b"!")
+        self.assertLess(len(display), 64)
+        os.write(fd, b"\x7f@")
+        self.read_until(fd, b"@")
+        os.write(fd, b"\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        os.write(fd, b'printf %s "$v" > value\r')
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "value").read_bytes(), payload + "Z日本🌱@".encode())
+
+    def test_stalled_paste_is_visible_before_the_closing_marker(self):
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"v='!'\x02\x02\x1b[200~" + "日本".encode() + b"\xf0\x9f")
+        partial = self.read_until(fd, PROMPT + "v='日本!'".encode())
+        self.assertNotIn("�".encode(), partial)
+        os.write(fd, b"\x8c\xb1\x1b[201~\x05; printf %s \"$v\" > result\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "result").read_text(), "日本🌱!")
+
+    def test_large_multiline_viewport_and_cursor_edits(self):
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"""save(){ printf %s "$READLINE_LINE" > snapshot; printf 'saved<%s>' yes >&2; }; bind -x '"\\C-x!":save'\r""")
+        self.read_until(fd, b"\x1b[?2004h")
+        # Write in pieces as a real terminal would. The editor only paints the
+        # visible neighbourhood even when there are thousands of hard breaks.
+        text = "BEGIN " + ("日本🌱 xyz\n" * 3000) + "last Ω"
+        packet = b"\x1b[200~" + text.encode() + b"\x1b[201~"
+        while packet:
+            packet = packet[os.write(fd, packet[:2048]):]
+        drawn = self.read_until(fd, "Ω".encode())
+        self.assertLess(max(map(len, drawn.split(b"\x1b[J"))), 4096)
+        os.write(fd, b"\x01")
+        head = self.read_until(fd, b"BEGIN ")
+        self.assertLess(len(head), 4096)
+        os.write(fd, b"\x06")
+        moved = self.read_until(fd, b"\x1b[1C")
+        self.assertLess(len(moved), 32)
+        os.write(fd, b"\x1b[3~" + "雪".encode() + b"\x05\x7f@\x18!")
+        self.read_until(fd, b"saved<yes>")
+        self.assertEqual((self.cwd / "snapshot").read_text(), "B雪" + text[2:-1] + "@")
+
+    def test_overwrite_copy_and_yank_against_readline(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                os.write(fd, b"""bind '"\\e[2~": overwrite-mode'; bind '"\\ew": copy-region-as-kill'\r""")
+                self.read_until(fd, b"\x1b[?2004h")
+                for edit, expected in [
+                    ("東京".encode(), "A東京D"), (b"X\x7f", "A CD"),
+                    (b"\x1b[200~xy\x1b[201~", "AxyBCD"),
+                ]:
+                    os.write(fd, b"v='ABCD'" + b"\x02" * 4 + b"\x1b[2~" + edit
+                             + b'\x05; printf %s "$v" > result\r')
+                    self.read_until(fd, b"\x1b[?2004h")
+                    self.assertEqual((self.cwd / "result").read_text(), expected)
+                os.write(fd, b"v='abc'" + b"\x02\0\x02\x02\x1bw\x19\x05; printf %s \"$v\" > result\r")
+                self.read_until(fd, b"\x1b[?2004h")
+                self.assertEqual((self.cwd / "result").read_text(), "abcbc")
+
     def test_editor_paste_suggestions_completion_and_shared_history(self):
         self.env["HISTCONTROL"] = "ignoreboth"
         fd = self.terminal_session(editing=True)

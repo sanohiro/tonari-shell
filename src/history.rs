@@ -123,6 +123,7 @@ fn decode_into(value: &str, out: &mut String) -> bool {
     true
 }
 
+pub(crate) mod arguments;
 pub(crate) mod commands;
 pub(crate) mod expand;
 

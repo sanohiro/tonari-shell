@@ -16,6 +16,7 @@ pub struct Launch {
     pub group: Option<pid_t>,
     tty: Option<RawFd>,
     pub background: bool,
+    defer_tty: bool,
     shell_modes: Option<libc::termios>,
 }
 
@@ -25,7 +26,7 @@ impl Launch {
             if unsafe { libc::setpgid(0, group) } < 0 {
                 unsafe { libc::_exit(1) }
             }
-            if let Some(tty) = self.tty {
+            if let Some(tty) = self.tty.filter(|_| !self.defer_tty) {
                 give_terminal(tty, unsafe { libc::getpgrp() });
             }
             for sig in [
@@ -250,12 +251,13 @@ impl Jobs {
             .as_ref()
             .filter(|t| t.owner == unsafe { libc::getpid() })
     }
-    pub fn launch(&self, background: bool) -> Launch {
+    pub fn launch(&self, background: bool, single: bool) -> Launch {
         let tty = self.terminal().filter(|_| self.monitor);
         let foreground_fd = tty.filter(|_| !background).map(|t| t.fd.as_raw_fd());
         Launch {
             group: self.monitor.then_some(0),
             tty: foreground_fd,
+            defer_tty: single && foreground_fd.is_some() && crate::editor::preview::can_wait(),
             shell_modes: foreground_fd.and_then(terminal_modes),
             background,
         }
@@ -326,7 +328,30 @@ impl Jobs {
             }
             Ok((0, last))
         } else {
-            let code = self.foreground(&mut job, false, launch.shell_modes)?;
+            if launch.defer_tty
+                && job.children.len() == 1
+                && job.active()
+                && let Some(pid) = job.group
+                && let Ok(status) = crate::editor::preview::wait_child(pid)
+            {
+                if libc::WIFSTOPPED(status)
+                    && matches!(libc::WSTOPSIG(status), libc::SIGTTIN | libc::SIGTTOU)
+                {
+                    if let Some(t) = self.terminal() {
+                        give_terminal(t.fd.as_raw_fd(), pid);
+                    }
+                    unsafe {
+                        libc::kill(-pid, libc::SIGCONT);
+                    }
+                } else {
+                    job.update(pid, status);
+                }
+            }
+            let code = if job.active() || job.stopped() || !launch.defer_tty {
+                self.foreground(&mut job, false, launch.shell_modes)?
+            } else {
+                job.status()
+            };
             statuses.clear();
             for child in &job.children {
                 if let State::Stopped(code) | State::Done(code) = child.state {

@@ -1,5 +1,116 @@
 # Startup and execution / 起動と実行性能
 
+<a id="editing-operations"></a>
+
+## 2026-11-24 · Editing latency and CPU budget / 編集遅延と CPU 数
+
+The first table measures a key sequence and its final visible marker on an approximately 64 KiB command. For example the Delete sample sends Home, Forward, Delete and `@`. After every sample the driver reads the actual editor buffer with `bind -x` and compares every byte with the expected result. Tonari and Bash use the same Insert and Alt-W bindings. The previous release had no overwrite mode. Each cell gives the previous Tonari median → current Tonari median / p95, followed by the Bash median in parentheses, all in milliseconds. [Editing benchmark](../tools/bench_editing.py)
+
+Linux measurements in this section used one available CPU with both affinity and cgroup quota, except where the directory table lists a different count. macOS ran on an Apple M1. For the large and short commands, macOS used 9 and 13 samples per shell and operation, Debian arm64 used 9 and Debian x86-64 used 7. The driver discarded two warmups and rotated the shell order. With these sample counts p95 is the largest observed sample. These are PTY measurements on a ready shell. They exclude graphical rendering and IME preedit.
+
+| Edit at ~64 KiB | macOS arm64 | Debian arm64, 1 CPU | Debian x86-64, 1 CPU (Rosetta) |
+| --- | ---: | ---: | ---: |
+| append | 0.519 → 0.027/0.029 (0.613) | 0.878 → 0.063/0.067 (0.620) | 1.176 → 0.398/0.424 (1.417) |
+| insert near head | 1.852 → 0.068/0.074 (2.595) | 2.296 → 0.122/0.137 (5.646) | 2.843 → 0.474/0.477 (5.008) |
+| Delete near head | 1.898 → 0.091/0.105 (10.104) | 2.345 → 0.160/0.166 (82.231) | 2.800 → 0.553/0.563 (12.632) |
+| Backspace near head | 2.700 → 0.088/0.092 (10.622) | 3.246 → 0.164/0.179 (82.767) | 3.762 → 0.608/0.619 (13.678) |
+| character left/right | 3.615 → 0.052/0.058 (2.754) | 3.860 → 0.088/0.103 (2.754) | 4.319 → 0.453/0.456 (5.496) |
+| word left | 1.095 → 0.037/0.057 (1.158) | 1.438 → 0.078/0.086 (1.287) | 1.993 → 0.514/0.519 (2.634) |
+| word right | 1.133 → 0.065/0.072 (2.106) | 1.690 → 0.126/0.131 (5.638) | 2.155 → 0.551/0.649 (4.118) |
+| Home | 0.565 → 0.055/0.063 (1.501) | 0.893 → 0.122/0.161 (4.326) | 1.097 → 0.432/0.445 (3.826) |
+| End | 1.783 → 0.068/0.080 (1.755) | 2.304 → 0.091/0.106 (1.691) | 2.581 → 0.502/0.512 (3.593) |
+| overwrite | — → 0.102/0.112 (3.421) | — → 0.156/0.170 (9.596) | — → 0.644/0.670 (6.562) |
+| copy and yank | 5.712 → 0.118/0.121 (11.352) | 5.554 → 0.231/0.240 (80.320) | 6.377 → 0.768/0.780 (15.465) |
+| kill and yank | 1.821 → 0.074/0.085 (3.537) | 2.204 → 0.089/0.136 (2.880) | 2.714 → 0.601/0.624 (5.248) |
+| IME at head | 0.552 → 0.063/0.069 (1.607) | 0.912 → 0.125/0.138 (4.432) | 1.184 → 0.435/0.452 (3.433) |
+| multiline paste at head | 1.192 → 0.090/0.097 (9.516) | 1.553 → 0.161/0.186 (80.300) | 2.097 → 0.533/0.541 (11.292) |
+
+On the short fixture (about 96 bytes plus the sentinel text) the ranges below give the smallest and largest per-operation medians across the same 14 operations. The last column identifies the largest per-operation p95.
+
+| Platform | Current median range (ms) | Highest current p95 (ms) |
+| --- | ---: | ---: |
+| macOS arm64 | 0.016–0.059 | 0.065 (copy and yank) |
+| Debian arm64 | 0.060–0.091 | 0.103 (overwrite) |
+| Debian x86-64 (Rosetta) | 0.316–0.610 | 0.646 (Backspace near head) |
+
+To measure occasional stalls, the steady-state run sent 512 individually acknowledged UTF-8 edits in each of three sessions, after 16 warmup edits per session. Each acknowledgement is a distinct visible character. The near-head sequence moves left one character before each insertion. After each session the driver checks the entire 64 KiB command including all insertions. Cells give previous Tonari / current Tonari / Bash p99, followed by the maximum observed for current Tonari in parentheses, all in milliseconds. Run with `--size 65536 --steady 512 --runs 3`. [Steady-state driver](../tools/bench_editing.py)
+
+| Repeated edit (1,536 samples each) | macOS arm64 | Debian arm64, 1 CPU | Debian x86-64, 1 CPU (Rosetta) |
+| --- | ---: | ---: | ---: |
+| Append | 3.996 / 0.020 / 0.579 (0.051) | 1.044 / 0.070 / 0.622 (0.102) | 1.093 / 0.073 / 1.155 (0.105) |
+| Left and insert near the head | 14.821 / 0.049 / 9.754 (0.054) | 3.108 / 0.222 / 119.217 (0.771) | 2.831 / 0.138 / 17.687 (0.169) |
+
+キーを連続入力した試験では、1 操作ごとにその文字が表示されたことを確認して次を送っています。3 セッション計 1,536 操作の p99 と最大値を記録しました。
+
+The following fixture contains 100,000 history records. Up recalls active-session history, Down restores a draft and Ctrl-R searches for the oldest matching saved command. The paste clock starts with the first write and stops when the last scalar is visible. The driver checks the entire value after Enter. The table uses the same previous median → current median / p95 (Bash median) format. [History and paste benchmark](../tools/bench_editor_input.py)
+
+| History or paste | macOS arm64 | Debian arm64, 1 CPU | Debian x86-64, 1 CPU (Rosetta) |
+| --- | ---: | ---: | ---: |
+| paste 16384 B + marker | 2.473 → 2.333/2.341 (16.940) | 2.837 → 2.655/3.114 (21.947) | 5.133 → 4.797/5.364 (23.620) |
+| paste 1048576 B + marker | 154.766 → 143.454/149.800 (1094.225) | 157.768 → 148.396/162.197 (1881.410) | 155.886 → 135.123/138.411 (1827.504) |
+| Up twice (100k entries) | 0.042 → 0.041/0.044 (0.056) | 0.724 → 0.432/0.752 (0.088) | 2.487 → 2.297/2.374 (0.424) |
+| Down to draft (100k entries) | 0.022 → 0.022/0.053 (0.044) | 0.302 → 0.302/0.311 (0.080) | 0.413 → 0.416/0.433 (0.131) |
+| Ctrl-R (100k entries) | 0.825 → 0.831/0.878 (0.573) | 0.837 → 0.544/0.942 (0.811) | 3.773 → 3.336/3.962 (3.058) |
+
+The branching fixture resolves one abbreviated path across 12 directories with 2,048 unrelated files per directory. The sequential build already supports this path syntax. Both builds return the same unique result. Cells give median / p95 in milliseconds. [Completion benchmark](../tools/bench_completion.py)
+
+| Host and available CPUs | Sequential implementation | Current implementation | Samples |
+| --- | ---: | ---: | ---: |
+| macOS arm64 · host | 8.956 / 9.438 | 4.731 / 5.144 | 21 |
+| Debian arm64 · 8 CPUs | 2.951 / 3.003 | 1.018 / 1.354 | 19 |
+| Debian arm64 · 1 CPU | 2.911 / 2.971 | 2.928 / 2.968 | 17 |
+| Debian x86-64 (Rosetta) · 8 CPUs | 5.302 / 5.438 | 5.100 / 5.587 | 19 |
+| Debian x86-64 (Rosetta) · 1 CPU | 5.229 / 5.731 | 5.070 / 5.206 | 17 |
+
+The arm64 release selects up to four participants. At eight available CPUs, the translated x86-64 prototype took 9.039 ms against 5.325 ms for the sequential comparison on this fixture. The x86-64 release omits the worker code and is 38,632 bytes smaller than that prototype.
+
+During a separate 10,001-file scan, the driver injects a key 1 ms after Tab. The first pair of measurements covers the entire scan on an uninterrupted invocation. The next pair covers key arrival to visible echo on a separate invocation. The final column is a committed IME string after a declared terminal-independent callback has started its 100 ms helper. Values are current Tonari median / p95 in milliseconds. macOS used 31 scan and 21 callback samples. The single-CPU Linux runs used 13 and 9.
+
+| Host | Tab to filename | Key during scan | IME during helper |
+| --- | ---: | ---: | ---: |
+| macOS arm64 | 3.475 / 3.721 | 0.080 / 0.110 | 1.197 / 1.543 |
+| Debian arm64, 1 CPU | 1.363 / 1.409 | 0.062 / 0.074 | 1.116 / 1.390 |
+| Debian x86-64 (Rosetta), 1 CPU | 2.987 / 3.390 | 0.106 / 0.760 | 3.157 / 3.224 |
+
+64 KiB の編集表は操作列を送ってから最後の文字が疑似端末に届くまでを測り、毎回、画面外を含む全文を検証しました。Linux の 1 CPU 条件では CPU 割り当てと使用時間の上限をどちらも 1 に固定しています。大容量ペーストは最後の文字までの転送時間を含み、途中の描画更新とは別の指標です。日本語は IME が確定した UTF-8 文字列を測っています。
+
+<a id="completion-typeahead"></a>
+
+## 2026-11-24 · Typeahead, project arguments and long lines / 補完中の入力・引数履歴・長い行
+
+Each cell below is previous Tonari / current Tonari / Bash 5.2.37, in median milliseconds. The PTY measures delivery of visible text. The callback waits 100 ms in an external helper. The driver verifies that Tab took effect before the following key. For the IME row it sends committed UTF-8 only after receiving the callback’s readiness marker. For the long line it times a single `@` after the paste is visible and checks all 65,536 payload bytes plus the suffix after Enter. All three current binaries emitted one byte for this edit, compared with 68,048 for their predecessors. [Completion driver](../tools/bench_completion.py) · [Unicode input driver](../tools/bench_editor_input.py) · [Startup and loop driver](../tools/bench.py)
+
+The M1 runs macOS natively and hosts a Debian arm64 VM. Debian x86-64 timings use Rosetta. Callback, long-line and project cases rotated binaries after three warmups and used 21 / 19 / 13 samples on macOS / Debian arm64 / Debian x86-64. The Unicode and filename rows used 17 / 19 / 13. Startup and loop rows used 51 samples per binary. The project fixture has 100,000 history padding records and 10,001 files in the final directory. These PTY measurements exclude the terminal emulator’s painting and IME composition time.
+
+| Workload | macOS arm64 | Debian arm64 | Debian x86-64 (Rosetta) |
+| --- | ---: | ---: | ---: |
+| Tab + key, ordinary Bash callback | 117.665 / 116.735 / 117.116 | 107.829 / 110.237 / 112.590 | 140.210 / 135.310 / 134.382 |
+| Tab + key, terminal-independent callback | 117.669 / 1.294 / 116.993 | 109.774 / 0.483 / 110.499 | 133.555 / 7.430 / 130.726 |
+| IME commit after callback starts | 117.362 / 1.197 / 116.976 | 110.684 / 0.273 / 111.432 | 133.821 / 3.164 / 129.715 |
+| Append one ASCII character after a 64 KiB paste | 0.456 / 0.022 / 0.597 | 0.613 / 0.065 / 0.620 | 1.098 / 0.389 / 1.415 |
+| Single emoji | 0.035 / 0.034 / 0.051 | 0.083 / 0.076 / 0.087 | 1.141 / 1.477 / 1.472 |
+| 17 Unicode scalars | 0.060 / 0.058 / 0.135 | 0.097 / 0.089 / 0.137 | 1.074 / 1.112 / 1.324 |
+| 257 Unicode scalars | 0.429 / 0.422 / 1.255 | 0.311 / 0.312 / 0.877 | 0.644 / 0.720 / 2.493 |
+| Tab with 10,000 filenames | 3.457 / 3.429 / 6.753 | 1.321 / 1.325 / 1.408 | 4.406 / 4.208 / 5.369 |
+| Exec to first interactive prompt | 2.730 / 2.678 / 5.422 | 0.339 / 0.336 / 0.700 | 8.738 / 9.348 / 27.838 |
+| Startup through exit, `-c :` | 2.328 / 2.251 / 4.697 | 0.197 / 0.203 / 0.411 | 8.754 / 9.170 / 22.354 |
+| 1,000 builtin loop iterations | 2.775 / 2.693 / 6.013 | 0.703 / 0.705 / 2.201 | 12.323 / 12.658 / 27.116 |
+
+Current Tonari median / p95, in milliseconds. The Backspace row measures the erase and the immediately following marker after the first edit has appeared. The project rows wait for the actual candidate to appear.
+
+| Workload | macOS arm64 | Debian arm64 | Debian x86-64 (Rosetta) |
+| --- | ---: | ---: | ---: |
+| IME commit after callback starts | 1.197 / 1.543 | 0.273 / 0.371 | 3.164 / 3.330 |
+| Backspace and a marker following the IME commit | 0.108 / 0.143 | 0.236 / 0.272 | 0.251 / 0.275 |
+| Append after a 64 KiB paste | 0.022 / 0.029 | 0.065 / 0.073 | 0.389 / 0.484 |
+| Abbreviated multi-level path to one of 10,001 files | 3.528 / 3.625 | 1.364 / 1.414 | 3.442 / 5.503 |
+| Previous path argument from another command | 1.180 / 1.339 | 0.946 / 0.988 | 3.493 / 4.708 |
+| Previous value for the same tool and option | 1.014 / 1.078 | 0.882 / 0.940 | 1.665 / 2.229 |
+
+The 10,000-file Tab medians were 51% of Bash on macOS, 94% on Debian arm64 and 78% on translated x86-64. In a separate run of 31 fresh sessions per binary, the first committed character on translated x86-64 took 0.767 ms (previous 0.648 ms), with the next ten ASCII keys at a pooled median of 0.067 ms (previous 0.067 ms). On native Debian arm64 the first and subsequent medians were 0.067 and 0.059 ms in both builds. The ordinary callback keeps terminal ownership throughout its wait. For an explicitly terminal-independent callback the editor can display edits during that wait. [Completion option and scope](compatibility.md#interactive-tab)
+
+11 月 24 日の配布物は macOS arm64 が 1,251,104 バイト（前回比 +66,496）、Linux arm64 が 1,462,632 バイト（+98,800）、Linux x86-64-v3 が 1,202,032 バイト（+38,304）です。macOS の動的リンクは libSystem のみで、Linux 版は共有ライブラリなしの static PIE です。Linux x86-64 の速度は Rosetta 上の計測です。QEMU 上の Debian x86-64 では 144 件の統合テストを別途実行しました。 [互換性の検証](compatibility.md)
+
 <a id="editor-bulk-input"></a>
 
 ## 2026-11-23 · Committed UTF-8 text, paste and history / 日本語入力・貼り付け・履歴・補完

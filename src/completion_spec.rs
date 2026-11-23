@@ -246,7 +246,7 @@ impl Request {
                     'r' if builtin == "complete" => result.remove = true,
                     'o' => {
                         let option = value()?;
-                        if !OPTIONS.contains(&option.as_str()) {
+                        if !OPTIONS.contains(&option.as_str()) && option != "typeahead" {
                             return Err(format!("unknown completion option: {option}"));
                         }
                         if !plus {
@@ -668,7 +668,10 @@ fn set_options(
 ) -> io::Result<()> {
     if changes.is_empty() {
         write!(out, "compopt")?;
-        for &opt in OPTIONS {
+        for &opt in OPTIONS
+            .iter()
+            .chain(options.contains("typeahead").then_some(&"typeahead"))
+        {
             write!(
                 out,
                 " {}o {opt}",
@@ -723,6 +726,14 @@ fn apply(
     }
     if name == "compopt" && targets.is_empty() {
         if let Some(options) = session.completions.active.as_mut() {
+            if request
+                .options
+                .iter()
+                .any(|(_, option)| option == "typeahead")
+            {
+                eprintln!("tonari: compopt: register typeahead before the callback starts");
+                return Ok(1);
+            }
             set_options(options, &request.options, "", out)?;
             return Ok(0);
         }
@@ -773,6 +784,10 @@ pub struct Generated {
 }
 
 impl Registry {
+    pub(crate) fn in_callback(&self) -> bool {
+        self.active.is_some()
+    }
+
     fn lookup(&self, command: Option<&str>, prefix: &str) -> Option<&Spec> {
         let registry = &self.specs;
         match command {
@@ -800,6 +815,41 @@ pub fn for_tab(
     if !session.shopt.progcomp || session.completions.specs.is_empty() {
         return None;
     }
+    if session.completions.lookup(command, prefix).is_none()
+        && session.shopt.progcomp_alias
+        && let (Some(command), Some(ctx)) = (command, context)
+        && session.aliases.get(command).is_some()
+    {
+        let mut line = ctx.line.to_owned();
+        let mut cursor = ctx.cursor;
+        let mut name = command.to_owned();
+        let mut at = ctx.command_start;
+        let mut visited = BTreeSet::new();
+        while visited.insert(name.clone()) && visited.len() <= 32 {
+            let alias = session.aliases.get(&name)?;
+            if !line[at..].starts_with(&name) {
+                return None;
+            }
+            line.replace_range(at..at + name.len(), alias);
+            cursor = cursor - name.len() + alias.len();
+            let expanded = complete::Context::scan(&line, cursor)?;
+            name = expanded.words.first()?.clone();
+            at = expanded.command_start;
+            if session.completions.lookup(Some(&name), prefix).is_some() {
+                return generate_for_tab(session, Some(&name), prefix, Some(&expanded));
+            }
+        }
+        return None;
+    }
+    generate_for_tab(session, command, prefix, context)
+}
+
+fn generate_for_tab(
+    session: &mut Session,
+    command: Option<&str>,
+    prefix: &str,
+    context: Option<&complete::Context<'_>>,
+) -> Option<Generated> {
     let initial = session.completions.lookup(command, prefix)?;
     if let Some(generated) = initial.native_generator() {
         return Some(generated);
@@ -808,12 +858,17 @@ pub fn for_tab(
     let mut seen = Vec::new();
     let (spec, mut words) = loop {
         let mut spec = original.clone();
-        let (words, reload) =
-            spec.candidates(session, prefix, 0, context)
-                .unwrap_or_else(|error| {
-                    eprintln!("tonari: completion: {error}");
-                    (Vec::new(), false)
-                });
+        let scripted = spec.function.is_some()
+            || spec.command.is_some()
+            || spec.words.as_ref().is_some_and(|w| !w.literal);
+        let (words, reload) = crate::editor::preview::with_input(
+            !scripted || spec.options.contains("typeahead"),
+            || spec.candidates(session, prefix, 0, context),
+        )
+        .unwrap_or_else(|error| {
+            eprintln!("tonari: completion: {error}");
+            (Vec::new(), false)
+        });
         if !reload {
             break (spec, words);
         }

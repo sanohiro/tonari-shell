@@ -577,6 +577,10 @@ impl WaitMask {
     }
 
     pub fn watch_children(traps: &Traps) -> io::Result<Self> {
+        Self::for_children(traps.running)
+    }
+
+    pub(crate) fn for_children(running: u64) -> io::Result<Self> {
         unsafe {
             let mut mask = std::mem::zeroed();
             let mut previous = std::mem::zeroed();
@@ -601,7 +605,7 @@ impl WaitMask {
             Ok(Self {
                 previous,
                 child,
-                running: traps.running,
+                running,
             })
         }
     }
@@ -613,6 +617,31 @@ impl WaitMask {
         }
         let bits = PENDING.load(Relaxed) & !(self.running | (1 << libc::SIGCHLD));
         (bits != 0).then(|| 128 + bits.trailing_zeros() as u8)
+    }
+
+    pub(crate) fn input_or_child(&self) -> io::Result<bool> {
+        let mut fds = unsafe { std::mem::zeroed() };
+        unsafe {
+            libc::FD_ZERO(&mut fds);
+            libc::FD_SET(0, &mut fds);
+            if libc::pselect(
+                1,
+                &mut fds,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                &self.previous,
+            ) >= 0
+            {
+                return Ok(true);
+            }
+        }
+        let err = io::Error::last_os_error();
+        if err.kind() == io::ErrorKind::Interrupted {
+            Ok(false)
+        } else {
+            Err(err)
+        }
     }
 
     pub fn suspend(&self) {

@@ -1,5 +1,27 @@
 # Engineering notes / 開発知見
 
+## 2026-11-24 · Visible text and independent directory scans / 表示範囲と並列走査
+
+A stalled bracketed paste paints its available UTF-8 prefix after an idle interval of 8 ms. Sustained large pastes repaint at most once every 16 ms at 16 KiB checkpoints. Closing the paste inserts the full normalized payload once. The scanner preserves terminal input after the next Enter for foreground commands. A long edit keeps its full UTF-8 buffer and renders a bounded neighbourhood of the caret. Character width, control characters, hard newlines and the terminal dimensions set the display budget. An unchanged image needs only cursor positioning. If the entire buffer is killed, the editor exchanges its storage with the kill buffer. Refining a Ctrl-R search can reuse its newest hit when the longer query still matches it. A newer match would also have matched the earlier query. Repeated Ctrl-R, deletion and failed refinements retain their ordinary search paths. [Renderer](../src/editor/viewport.rs) · [Editing benchmark](../tools/bench_editing.py)
+
+On arm64, independent branches of abbreviated path completion can use scoped workers. Four or more branches and a combined directory-size hint of at least 128 KiB can select up to four participants, counting the editor. Workers own directory I/O and candidate strings. The editor handles terminal input, joins the workers, then sorts and deduplicates their results. Thread creation failure leaves the remaining directories with the other participants. A one-CPU limit selects serial traversal. On Linux x86-64 the release uses the serial scan. The threaded prototype took 9.039 ms on translated x86-64 against 5.325 ms for the sequential comparison at eight available CPUs. Native x86-64 timings are still needed to justify enabling workers there. Ordinary keys, single directory scans and shell startup run on the calling thread. [Completion implementation](../src/complete.rs) · [Measurements](benchmarks.md#editing-operations)
+
+貼り付けの途中で受信が 8 ms 以上途切れた場合も、確定した UTF-8 部分を表示します。大きな貼り付けの途中は 16 KiB ごとに時刻を確認し、約 16 ms 以上経過したときだけ表示を更新します。長い行は UTF-8 の編集バッファ全体を保持し、端末へ送るのはカーソル周辺の表示だけです。行頭・行末へ飛ぶときも見えていない全行を走査する必要はありません。Ctrl-R の検索語を延ばしても直前の最新候補が一致する場合は、その候補を再利用します。arm64 では、階層を略したパスの補完で大きな独立ディレクトリが複数ある場合だけ最大 4 者で走査します。Linux x86-64 は直列走査を採用しました。Rosetta 上ではスレッドを使うと遅くなり、ネイティブ x86-64 での利得は未検証です。1 CPU では直列になり、通常のキー入力・単一ディレクトリの走査・シェル起動は呼び出し元のスレッドで処理します。
+
+## 2026-11-24 · Typeahead during completion / 補完中の入力
+
+In a 31-sample macOS arm64 trial scanning 10,001 filenames, polling for input every 256 entries gave a median 4.301 ms to the completed path and 0.115 ms to display a key arriving 1 ms into the scan. Checking the queued byte count with `FIONREAD` at the same interval gave 3.670 ms and 0.100 ms. The previous uninterrupted scan gave 3.800 ms and 2.521 ms. This preserved frequent opportunities to handle input without requesting a terminal read on an empty queue. [Scan and delayed-key benchmark](../tools/bench_completion.py)
+
+macOS arm64 で 1 万件のファイルを走査するときは、256 件ごとに `FIONREAD` で端末の待機バイト数を調べます。同じ頻度の `poll` と比較した試作では、候補の表示までの中央値が 4.301 ms から 3.670 ms に短縮され、走査中に届いたキーも 0.100 ms で表示できました。
+
+A foreground completion function may read from its terminal. With the editor’s `VMIN=0`, an ordinary child read can return zero before a person has time to type. Temporarily setting `VMIN=1` for an opaque callback preserves the behavior of a direct Bash witness. The editor retains input during native scans and explicitly terminal-independent callbacks. A foreground helper wait uses `pselect` with SIGCHLD, and command substitutions drain the output pipe while watching for edits. A gated PTY test releases a helper only after the Japanese input and the subsequent Backspace have appeared. It also covers a shell loop, the final arguments and the number of callback invocations. [PTY tests](../tests/shell.py) · [Measurements](benchmarks.md#completion-typeahead)
+
+補完関数が端末から読む場合、エディタ用の `VMIN=0` を継承すると、人が入力する前に read が 0 を返し得ます。通常の Bash 補完を実行する間は `VMIN=1` に戻します。端末を使わないと明示した補完では、子の終了または入力を待ち、コマンド置換中もパイプを排出しながらキーを表示します。疑似端末の試験では、日本語の確定入力と Backspace の表示を確認してから補完を終了させ、実行順・最終引数・呼び出し回数も確認します。
+
+An append to a long undecorated line can continue at its existing terminal cell position. This avoids sending the entire pasted line again. The editor retains its wrapping, wide-character and control-character rules. A history suggestion, a cursor edit within the line or a deletion at a wrap boundary can still require repainting. [Renderer](../src/editor.rs) · [Long-line benchmark](../tools/bench_completion.py)
+
+長い行の末尾で候補を表示していないときは、既存の表示位置から続きを描けます。大きな貼り付けの直後でも、一文字の追加に必要な出力はその文字と必要な折り返しだけです。履歴候補の表示や行の途中の編集、折り返し位置での削除では表示範囲を再描画します。
+
 <a id="literal-file-capture"></a>
 
 ## 2026-11-23 · Reading a file into a shell variable / ファイルのコマンド置換

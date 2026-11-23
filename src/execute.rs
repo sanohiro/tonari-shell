@@ -1735,7 +1735,7 @@ pub fn run_pipeline(
     session: &mut Session,
     background: bool,
 ) -> io::Result<Flow> {
-    let mut launch = session.jobs.launch(background);
+    let mut launch = session.jobs.launch(background, pipeline.len() == 1);
     let managed = background || launch.group.is_some();
     let name = if managed {
         pipeline

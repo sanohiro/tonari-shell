@@ -1,4 +1,6 @@
 pub(crate) mod bindings;
+pub(crate) mod preview;
+mod viewport;
 use bindings::{Action, Binding, Keymap};
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -177,12 +179,29 @@ impl Keys {
         Ok(())
     }
 
+    fn insert(
+        &mut self,
+        first: u8,
+        session: &Session,
+        text: &mut String,
+        cursor: &mut usize,
+        inserted: &mut String,
+        overwrite: bool,
+    ) -> io::Result<Option<usize>> {
+        self.insert_burst(first, session, inserted)?;
+        let append = (*cursor == text.len() && *cursor >= 1024).then_some(*cursor);
+        if overwrite && *cursor < text.len() {
+            let end = *cursor + char_offset(&text[*cursor..], inserted.chars().count());
+            text.replace_range(*cursor..end, inserted);
+        } else {
+            text.insert_str(*cursor, inserted);
+        }
+        *cursor += inserted.len();
+        Ok(append)
+    }
+
     fn binding(&mut self, first: u8, session: &Session) -> io::Result<(Binding, bool)> {
-        if session.bindings.map != Keymap::Command
-            && first >= 32
-            && first != 127
-            && !session.bindings.custom_prefix(&[first])
-        {
+        if unbound_text(first, session) {
             return Ok((Binding::Edit(Action::Insert), false));
         }
         let mut seq = vec![first];
@@ -218,16 +237,28 @@ impl Keys {
 
     // After the end marker one byte still belongs to the editor. It could be
     // Enter, so leave everything after that byte on the tty for the next reader.
-    fn paste(&mut self) -> io::Result<String> {
+    fn paste(&mut self, mut paint: impl FnMut(&[u8]) -> io::Result<()>) -> io::Result<String> {
         const END: &[u8; 6] = b"\x1b[201~";
         let mut data = Vec::new();
         let mut matched = 0;
         let mut chunk = [0; END.len() + 1];
+        let mut displayed = 0;
+        let mut checkpoint = 16 * 1024;
+        let mut painted_at = std::time::Instant::now();
         'paste: loop {
             if crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
                 || crate::traps::input_interrupted()
             {
                 return Err(io::ErrorKind::Interrupted.into());
+            }
+            let available = data.len() - matched;
+            if available >= checkpoint {
+                checkpoint = available + 16 * 1024;
+                if painted_at.elapsed() >= std::time::Duration::from_millis(16) {
+                    paint(&data[..available])?;
+                    displayed = available;
+                    painted_at = std::time::Instant::now();
+                }
             }
             let limit = chunk.len() - matched;
             let n = if self.queued.is_empty() {
@@ -235,6 +266,13 @@ impl Keys {
                 if immediate > 0 {
                     immediate as usize
                 } else {
+                    // A split packet may pause for an arbitrary time. Give a
+                    // contiguous paste one short frame interval to resume.
+                    if available > displayed && !ready(0, 8) {
+                        paint(&data[..available])?;
+                        displayed = available;
+                        painted_at = std::time::Instant::now();
+                    }
                     match crate::terminal_read(&mut chunk[..limit], true) {
                         Ok(0) => break,
                         Ok(n) => n,
@@ -284,9 +322,36 @@ impl Keys {
             .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
     }
 }
+fn unbound_text(first: u8, session: &Session) -> bool {
+    session.bindings.map != Keymap::Command
+        && first >= 32
+        && first != 127
+        && !session.bindings.custom_prefix(&[first])
+}
+
 fn previous(s: &str, i: usize) -> usize {
     s[..i].char_indices().next_back().map_or(0, |(i, _)| i)
 }
+fn rubout(text: &mut String, cursor: usize, overwrite: bool) -> usize {
+    let start = previous(text, cursor);
+    let blank = if overwrite && cursor < text.len() && start < cursor {
+        let c = text[start..cursor].chars().next().unwrap();
+        if c.is_control() {
+            "  "
+        } else {
+            match c.width().unwrap_or(0) {
+                0 => "",
+                1 => " ",
+                _ => "  ",
+            }
+        }
+    } else {
+        ""
+    };
+    text.replace_range(start..cursor, blank);
+    start
+}
+
 fn next(s: &str, i: usize) -> usize {
     i + s[i..].chars().next().map_or(0, char::len_utf8)
 }
@@ -301,6 +366,12 @@ struct Screen {
     output: String,
     row: usize,
     width: usize,
+    // A visible, undecorated end-of-line can accept a suffix directly.
+    tail: Option<Position>,
+    height: usize,
+    column: usize,
+    had_hint: bool,
+    view: viewport::Viewport,
 }
 
 impl Screen {
@@ -312,12 +383,59 @@ impl Screen {
         Self {
             output: String::new(),
             row: 0,
+            tail: None,
+            height: if size.ws_row == 0 {
+                24
+            } else {
+                usize::from(size.ws_row)
+            },
+            view: Default::default(),
+            column: 0,
+            had_hint: false,
             width: if size.ws_col < 4 {
                 79
             } else {
                 usize::from(size.ws_col) - 1
             },
         }
+    }
+
+    fn can_append(&self, suffix: &str) -> bool {
+        suffix.len() <= self.width && !suffix.contains('\n') && self.row + 2 < self.height
+    }
+
+    fn move_short(&mut self, prompt: &str, text: &str, cursor: usize) -> io::Result<()> {
+        use std::fmt::Write as _;
+        self.output.clear();
+        let mut pos = Position::default();
+        draw_prompt(prompt, self.width, &mut self.output, &mut pos);
+        draw_text(&text[..cursor], self.width, &mut self.output, &mut pos);
+        self.output.clear();
+        if pos.row < self.row {
+            let _ = write!(self.output, "\x1b[{}A", self.row - pos.row);
+        }
+        if pos.row > self.row {
+            let _ = write!(self.output, "\x1b[{}B", pos.row - self.row);
+        }
+        self.output.push('\r');
+        if pos.col > 0 {
+            let _ = write!(self.output, "\x1b[{}C", pos.col);
+        }
+        self.row = pos.row;
+        self.column = pos.col;
+        self.tail = (cursor == text.len()).then_some(pos);
+        io::stderr().write_all(self.output.as_bytes())
+    }
+
+    fn append(&mut self, suffix: &str, mut pos: Position) -> io::Result<()> {
+        self.view.invalidate();
+        self.output.clear();
+        draw_text(suffix, self.width, &mut self.output, &mut pos);
+        self.row = pos.row;
+        self.column = pos.col;
+        self.had_hint = false;
+        self.tail = Some(pos);
+        io::stderr().write_all(self.output.as_bytes())
     }
 
     fn draw(
@@ -327,6 +445,19 @@ impl Screen {
         cursor: usize,
         suggestion: &str,
     ) -> io::Result<()> {
+        if text.len().saturating_add(suggestion.len()) >= 1024
+            || text.len() >= self.height
+                && memchr::memchr_iter(b'\n', text.as_bytes())
+                    .nth(self.height.saturating_sub(3))
+                    .is_some()
+            || suggestion.len() >= self.height
+                && memchr::memchr_iter(b'\n', suggestion.as_bytes())
+                    .nth(self.height.saturating_sub(3))
+                    .is_some()
+        {
+            return self.draw_window(prompt, text, cursor, suggestion);
+        }
+        self.view.invalidate();
         let out = &mut self.output;
         out.clear();
         out.push('\r');
@@ -335,24 +466,7 @@ impl Screen {
         }
         out.push_str("\x1b[J");
         let mut pos = Position::default();
-        let mut escape = 0;
-        for c in prompt.chars() {
-            if escape != 0 || c == '\x1b' {
-                out.push(c);
-                escape = match (escape, c) {
-                    (0, _) => 1,
-                    (1, '[') => 2,
-                    (1, ']') => 3,
-                    (2, '@'..='~') | (3, '\x07') | (4, '\\') => 0,
-                    (3, '\x1b') => 4,
-                    (2, _) => 2,
-                    (3 | 4, _) => 3,
-                    _ => 0,
-                };
-            } else {
-                draw_char(c, self.width, out, &mut pos, true);
-            }
-        }
+        draw_prompt(prompt, self.width, out, &mut pos);
         draw_text(&text[..cursor], self.width, out, &mut pos);
         let caret = pos;
         draw_text(&text[cursor..], self.width, out, &mut pos);
@@ -370,8 +484,32 @@ impl Screen {
                 out.push_str(&format!("\x1b[{}C", caret.col));
             }
         }
+        self.tail = (cursor == text.len() && suggestion.is_empty()).then_some(caret);
         self.row = caret.row;
+        self.column = caret.col;
+        self.had_hint = !suggestion.is_empty();
         io::stderr().write_all(out.as_bytes())
+    }
+}
+
+fn draw_prompt(prompt: &str, width: usize, out: &mut String, pos: &mut Position) {
+    let mut escape = 0;
+    for c in prompt.chars() {
+        if escape != 0 || c == '\x1b' {
+            out.push(c);
+            escape = match (escape, c) {
+                (0, _) => 1,
+                (1, '[') => 2,
+                (1, ']') => 3,
+                (2, '@'..='~') | (3, '\x07') | (4, '\\') => 0,
+                (3, '\x1b') => 4,
+                (2, _) => 2,
+                (3 | 4, _) => 3,
+                _ => 0,
+            };
+        } else {
+            draw_char(c, width, out, pos, true);
+        }
     }
 }
 
@@ -443,6 +581,19 @@ fn draw_char(c: char, width: usize, out: &mut String, pos: &mut Position, truste
 }
 
 fn char_offset(s: &str, n: usize) -> usize {
+    if n >= s.len() {
+        return s.len();
+    }
+    if s.as_bytes()[..n].is_ascii() {
+        return n;
+    }
+    if n > s.len() / 2 {
+        let distance = s.chars().count().saturating_sub(n);
+        return distance
+            .checked_sub(1)
+            .and_then(|back| s.char_indices().rev().nth(back))
+            .map_or(s.len(), |(i, _)| i);
+    }
     s.char_indices().nth(n).map_or(s.len(), |(i, _)| i)
 }
 fn word_start(s: &str, mut i: usize) -> usize {
@@ -491,17 +642,39 @@ pub fn line(
     let mut cursor = text.len();
     let mut hist = session.history_lines().len();
     let mut draft = String::new();
-    let mut search: Option<(String, usize, String)> = None;
-    let mut pending_queries = Vec::new();
+    let mut search: Option<(String, usize, String, usize)> = None;
+    let mut pending_queries: Vec<SearchQuery> = Vec::new();
+    let mut matched_query: Option<String> = None;
     let mut inserted = String::new();
     let mut last_tab = false;
+    let mut appended = None;
+    let mut erased = None;
+    let mut replaying = false;
+    let mut motion = false;
+    let mut overwrite = false;
     let mut view = View::Unread;
     loop {
         if session.bindings.map == Keymap::Command && !text.is_empty() {
             cursor = cursor.min(previous(&text, text.len()));
         }
-        let show_hint =
-            read.is_none() && search.is_none() && cursor == text.len() && !text.is_empty();
+        // Apply already visible typeahead to the completion before repainting.
+        // A custom binding or control key must see the settled line first.
+        replaying = replaying
+            && keys.queued.front().is_some_and(|&b| {
+                let width = match b {
+                    8 | 32..=127 => 1,
+                    0xc2..=0xdf => 2,
+                    0xe0..=0xef => 3,
+                    0xf0..=0xf4 => 4,
+                    _ => return false,
+                };
+                keys.queued.len() >= width && !session.bindings.custom_prefix(&[b])
+            });
+        let show_hint = !replaying
+            && read.is_none()
+            && search.is_none()
+            && cursor == text.len()
+            && !text.is_empty();
         let hint = if show_hint {
             history
                 .suggestion(session.history_lines(), &text, view != View::Unread, || {
@@ -512,9 +685,19 @@ pub fn line(
             ""
         };
         let search_prompt;
-        let visible_prompt = if let Some((query, _, _)) = &search {
+        let visible_prompt = if let Some((query, _, _, _)) = &search {
             let mut display = String::from("(reverse-i-search) `");
-            for c in query.chars() {
+            let visible = if query.len() > 1024 {
+                display.push('…');
+                let mut start = query.len().saturating_sub(screen.width * 2);
+                while !query.is_char_boundary(start) {
+                    start += 1;
+                }
+                &query[start..]
+            } else {
+                query
+            };
+            for c in visible.chars() {
                 if c.is_control() {
                     display.extend(c.escape_default());
                 } else {
@@ -528,16 +711,64 @@ pub fn line(
             prompt
         };
         let needs_hint = hint.is_empty();
-        screen.draw(visible_prompt, &text, cursor, hint)?;
-        if !pending_queries.is_empty() {
+        let moving = std::mem::take(&mut motion);
+        if replaying {
+            appended = None;
+            erased = None;
+        } else if moving
+            && !screen.had_hint
+            && hint.is_empty()
+            && search.is_none()
+            && text.len() < 1024
+            && !text.contains('\n')
+        {
+            screen.move_short(visible_prompt, &text, cursor)?;
+        } else if let Some(start) = appended.take()
+            && let Some(pos) = screen.tail
+            && screen.can_append(&text[start..])
+            && cursor == text.len()
+            && hint.is_empty()
+            && search.is_none()
+        {
+            screen.append(&text[start..], pos)?;
+        } else if let Some(cells) = erased.take()
+            && let Some(mut pos) = screen.tail
+            && cells < pos.col
+            && cursor == text.len()
+            && hint.is_empty()
+            && search.is_none()
+        {
+            pos.col -= cells;
+            screen.tail = Some(pos);
+            screen.column = pos.col;
+            screen.view.invalidate();
+            write!(io::stderr(), "\x1b[{cells}D\x1b[K")?;
+        } else {
+            screen.draw(visible_prompt, &text, cursor, hint)?;
+        }
+        if let Some(last) = pending_queries.last() {
+            let cached = last.skip == 0
+                && matched_query
+                    .as_ref()
+                    .is_some_and(|prior| last.text.starts_with(prior) && text.contains(&last.text));
             let input_ready = || {
                 !keys.queued.is_empty()
                     || ready(0, 0)
                     || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
             };
-            if let Ok(result) =
+            // Any newer match for a longer query was also a match for its
+            // prefix. If the newest hit still fits, it remains the newest.
+            if cached {
+                matched_query = pending_queries.pop().map(|q| q.text);
+                pending_queries.clear();
+            } else if let Ok(result) =
                 history.find_command(session, &mut view, &pending_queries, &input_ready)
             {
+                let last = pending_queries.pop().unwrap();
+                matched_query = result
+                    .as_ref()
+                    .filter(|hit| last.skip == 0 && hit.contains(&last.text))
+                    .map(|_| last.text);
                 pending_queries.clear();
                 if let Some(found) = result
                     && found != text
@@ -579,6 +810,19 @@ pub fn line(
             }
             Err(e) => return Err(e),
         };
+        // Ordinary committed text can bypass key-sequence and editing-action dispatch.
+        if search.is_none() && unbound_text(first, session) {
+            appended = keys.insert(
+                first,
+                session,
+                &mut text,
+                &mut cursor,
+                &mut inserted,
+                overwrite,
+            )?;
+            last_tab = false;
+            continue;
+        }
         let (binding, right_arrow) = keys.binding(first, session)?;
         let action = match binding {
             Binding::Removed => continue,
@@ -624,21 +868,23 @@ pub fn line(
                 }
                 term = Terminal::enter(session.bindings.paste())?;
                 screen.row = 0;
+                screen.view.invalidate();
                 continue;
             }
             Binding::Edit(a) => a,
         };
         let entering_search = action == Action::Search && search.is_none();
         if entering_search {
-            search = Some((String::new(), 0, text.clone()));
+            matched_query = None;
+            search = Some((String::new(), 0, text.clone(), cursor));
         }
-        if let Some((query, index, original)) = search.as_mut() {
+        if let Some((query, index, original, original_cursor)) = search.as_mut() {
             match action {
                 Action::Abort => {
                     pending_queries.clear();
                     text = std::mem::take(original);
+                    cursor = *original_cursor;
                     search = None;
-                    cursor = text.len();
                     continue;
                 }
                 Action::Accept => {
@@ -669,7 +915,10 @@ pub fn line(
                             *index = 0;
                         }
                     } else if action == Action::Paste {
-                        query.push_str(&keys.paste()?);
+                        query.push_str(
+                            &keys
+                                .paste(|bytes| screen.paste_frame(visible_prompt, "", 0, bytes))?,
+                        );
                         *index = 0;
                     }
                     pending_queries.push(SearchQuery {
@@ -682,10 +931,22 @@ pub fn line(
                 }
             }
         }
+        motion = matches!(
+            action,
+            Action::Back
+                | Action::BackWord
+                | Action::ForwardWord
+                | Action::Home
+                | Action::End
+                | Action::SwapMark
+        ) || action == Action::Forward && (cursor < text.len() || !right_arrow);
         let was_tab = last_tab;
         last_tab = action == Action::Complete;
         match action {
-            Action::Redraw => {}
+            Action::Redraw => {
+                screen.view.invalidate();
+            }
+            Action::Overwrite => overwrite = !overwrite,
             Action::Vi
             | Action::ViInsert
             | Action::ViAppend
@@ -721,7 +982,13 @@ pub fn line(
                 if action == Action::Comment {
                     text.insert(0, '#');
                 }
-                screen.draw(prompt, &text, text.len(), "")?;
+                if action == Action::Comment
+                    || visible_prompt != prompt
+                    || text.len() < 1024
+                    || screen.tail.is_none()
+                {
+                    screen.draw(prompt, &text, text.len(), "")?;
+                }
                 io::stderr().write_all(b"\r\n")?;
                 text.push('\n');
                 session.editor_queue = std::mem::take(&mut keys.queued);
@@ -736,8 +1003,13 @@ pub fn line(
             }
             Action::Rubout => {
                 let start = previous(&text, cursor);
-                text.replace_range(start..cursor, "");
-                cursor = start;
+                if cursor == text.len()
+                    && start >= 1024
+                    && text.as_bytes()[start].is_ascii_graphic()
+                {
+                    erased = Some(1usize);
+                }
+                cursor = rubout(&mut text, cursor, overwrite);
             }
             Action::Kill
             | Action::Discard
@@ -747,7 +1019,6 @@ pub fn line(
             | Action::KillWord
             | Action::Cut
             | Action::Copy => {
-                let point = char_offset(&text, mark);
                 let (lo, hi) = match action {
                     Action::Kill => (cursor, text.len()),
                     Action::KillWord => (cursor, word_end(&text, cursor)),
@@ -759,10 +1030,17 @@ pub fn line(
                         cursor,
                     ),
                     Action::KillBackWord => (word_start(&text, cursor), cursor),
-                    Action::Cut | Action::Copy => (point.min(cursor), point.max(cursor)),
+                    Action::Cut | Action::Copy => {
+                        let point = char_offset(&text, mark);
+                        (point.min(cursor), point.max(cursor))
+                    }
                     _ => (0, cursor),
                 };
-                if lo != hi {
+                if lo == 0 && hi == text.len() && hi > 0 && action != Action::Copy {
+                    std::mem::swap(&mut session.editor_kill, &mut text);
+                    text.clear();
+                    cursor = 0;
+                } else if lo != hi {
                     session.editor_kill.clear();
                     session.editor_kill.push_str(&text[lo..hi]);
                     if action != Action::Copy {
@@ -806,12 +1084,25 @@ pub fn line(
             Action::Clear => {
                 io::stderr().write_all(b"\x1b[2J\x1b[H")?;
                 screen.row = 0;
+                screen.view.invalidate();
             }
             Action::Complete | Action::List if !session.bindings.disable_completion => {
                 let was_tab = was_tab || action == Action::List;
-                if let Some(result) =
-                    complete::at(&text, cursor, session, was_tab, read.is_some_and(|r| r.1))
-                {
+                let bindings = session.bindings.clone();
+                let result = preview::during(
+                    prompt,
+                    &text,
+                    cursor,
+                    &mut screen,
+                    &mut keys,
+                    bindings,
+                    overwrite,
+                    || complete::at(&text, cursor, session, was_tab, read.is_some_and(|r| r.1)),
+                );
+                replaying = !keys.queued.is_empty();
+                screen.tail = None;
+                screen.view.invalidate();
+                if let Some(result) = result {
                     if was_tab && result.choices.len() > 1 {
                         screen.draw(prompt, &text, text.len(), "")?;
                         io::stderr().write_all(b"\r\n")?;
@@ -831,6 +1122,7 @@ pub fn line(
                         io::stderr().write_all(display.as_bytes())?;
                         io::stderr().write_all(b"\r\n")?;
                         screen.row = 0;
+                        screen.view.invalidate();
                     } else {
                         text.replace_range(result.start..cursor, &result.replacement);
                         cursor = result.start + result.replacement.len();
@@ -847,7 +1139,7 @@ pub fn line(
                     } else {
                         hist - 1
                     };
-                    text = session.history_lines()[hist].clone();
+                    text.clone_from(&session.history_lines()[hist]);
                     cursor = text.len();
                 }
             }
@@ -858,7 +1150,7 @@ pub fn line(
                     } else {
                         hist + 1
                     };
-                    text = session.history_lines().get(hist).unwrap_or(&draft).clone();
+                    text.clone_from(session.history_lines().get(hist).unwrap_or(&draft));
                     cursor = text.len();
                 }
             }
@@ -882,7 +1174,11 @@ pub fn line(
                 }
             }
             Action::Paste => {
-                let pasted = keys.paste()?;
+                if cursor == text.len() && cursor >= 1024 {
+                    appended = Some(cursor);
+                }
+                let pasted =
+                    keys.paste(|bytes| screen.paste_frame(prompt, &text, cursor, bytes))?;
                 let end = cursor + pasted.len();
                 if text.is_empty() {
                     text = pasted;
@@ -892,9 +1188,14 @@ pub fn line(
                 cursor = end;
             }
             Action::Insert => {
-                keys.insert_burst(first, session, &mut inserted)?;
-                text.insert_str(cursor, &inserted);
-                cursor += inserted.len();
+                appended = keys.insert(
+                    first,
+                    session,
+                    &mut text,
+                    &mut cursor,
+                    &mut inserted,
+                    overwrite,
+                )?;
             }
             _ => {}
         }

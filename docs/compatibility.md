@@ -4,6 +4,32 @@ Tonari remains a prototype for use from an existing shell. The inventory starts 
 
 Tonari は現在、既存のシェルから起動して試せる段階です。参照先の Bash と GNU マニュアルを起点に項目を列挙しました。一覧には機能名ごとの判定と速度を載せ、環境別 TSV には実際のテスト内容と差が出た出力例を残しています。[現在の機能別一覧](compatibility/current.tsv) · [環境別の実測](compatibility-2026-11-23-release/matrix.md)
 
+On November 24 the reference audit covered 1,408 macOS, 1,522 Debian and 1,553 Ubuntu rows. The updated interactive defaults and their direct Bash witnesses are listed below. The end-to-end suite passed on Debian and Ubuntu arm64, Debian x86-64 under QEMU, and macOS arm64 (142 passed, two platform skips). Debian arm64 also passed all 144 tests with a one-CPU quota and affinity. [PTY witnesses](../tests/shell.py)
+
+Compared with `7fdf66e`, the inventory changed five names on macOS and Debian and three on Ubuntu. `copy-region-as-kill` and `overwrite-mode` report different default bindings on all three platforms. `beginning-of-line` and `end-of-line` also changed on macOS and Debian. Ubuntu already reported a difference. The `progcomp_alias` option now passes its interface check on all three. The PTY tests below exercise the actual edits and alias lookup. [Updated inventory](compatibility/current.tsv)
+
+11 月 24 日の配布版で macOS・Debian・Ubuntu の計 4,483 行を再確認しました。前回から判定が変わったのは macOS と Debian で各 5 項目、Ubuntu で 3 項目です。変更は編集キーの既定割り当てと補完用のシェルオプションに限られます。
+
+## Editing keys and long commands / 編集キーと長いコマンド
+
+Tonari’s default Emacs keymap binds Insert to `overwrite-mode` and Alt-W to `copy-region-as-kill`. Home and End also accept the terminal sequences `CSI 1~`, `7~`, `4~` and `8~`, respectively. Bash’s default bindings differ, which is visible in `bind -q`. With the same bindings, Bash and Tonari both turn `ABCD` into `A東京D` when typing those two characters over `BC`. Bracketed paste at that position inserts text. The PTY tests also verify overwrite-mode Backspace and copying and yanking a marked region.
+
+Insert は通常入力と上書きの切り替え、Alt-W は選択範囲のコピーに割り当てています。Bash と同じ割り当てにした比較では、上書き・Backspace・範囲コピーと貼り付けの結果が一致します。端末の貼り付けは上書きモード中でも挿入として扱います。長い編集行の `…` は表示範囲外のテキストを示し、コマンド本体・履歴・補完に渡す文字列はすべて保持します。
+
+<a id="interactive-tab"></a>
+
+## Interactive Tab and terminal ownership / 対話補完と端末入力
+
+Tonari enables Bash’s `progcomp_alias` in interactive shells. With `alias g='real sub'`, the completion for `real` sees `COMP_LINE='real sub ma'` when the user types `g ma<Tab>`. The editor keeps `g` on screen. A definition for `g` wins. Use `shopt -u progcomp_alias` to disable alias lookup. Bash 5.2 produces the same callback arguments with the option enabled.
+
+File and command completion can echo newly typed text and Backspace while scanning. The editor applies Tab first and then the queued edits. A Bash completion function can itself read stdin or launch an interactive selector. Tonari gives those callbacks their usual terminal input. To let the editor receive typeahead during a callback that never reads or manages the terminal, register it with `complete -o typeahead -F _pick demo`. For a shared Bash rc, use `complete -o typeahead -F _pick demo 2>/dev/null || complete -F _pick demo`. A slow helper still has to finish before the command line can be accepted. [PTY witnesses](../tests/shell.py)
+
+対話時の `progcomp_alias` は `shopt -u progcomp_alias` で解除できます。エイリアス自身の補完定義があればそちらを優先します。ファイルやコマンドを探している間も文字入力と Backspace を先行表示し、確定時には Tab → 後続キーの順に反映します。外部の選択 UI や `read` を使う Bash 補完には端末を渡します。端末を使わない補完に限り、登録時の `-o typeahead` で待機中の入力表示を有効にできます。
+
+The default argument completer tries exact paths, then abbreviated directory components, then recent arguments. After an option followed by an empty word, a value previously used for that option takes priority. History candidates come from complete, successful journal records in the last 256 KiB for the current directory or Git worktree. A path from another command must still exist. Explicit completion definitions keep their own results, including empty results, unless they request the default fallback. The abbreviated path search stops if a level would retain more than 128 directories. Shell expansions in saved commands are never evaluated.
+
+引数の既定の補完は通常のパス、階層ごとの前方一致、最近の引数の順に探します。オプション直後の空欄ではそのオプションの過去の値を先に出します。対象は履歴末尾 256 KiB にある終了コード 0 の完全な行のうち、現在のディレクトリか同じ Git ワークツリーに属するものです。別コマンドから拾うパスは実在を確認します。保存したコマンド内の式は実行しません。
+
 ## Case-insensitive pathname expansion / 大小文字を区別しないファイル名展開
 
 `shopt -s nocaseglob` applies to pattern components and to `GLOBIGNORE`. A literal component still uses the filesystem's lookup rules. With a file named `Sub/K.TXT`, `s*/k*.txt` returns its actual spelling. On a case-sensitive filesystem `s*/k.txt` has no match. `nocasematch` controls separate shell operations. [Integration test](../tests/shell.py) · [Timings](benchmarks.md#nocaseglob)

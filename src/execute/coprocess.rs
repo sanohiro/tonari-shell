@@ -80,7 +80,7 @@ pub(crate) fn launch(
     };
     let reader = high(reader)?;
     let writer = high(writer)?;
-    let mut launch = session.jobs.launch(true);
+    let mut launch = session.jobs.launch(true, false);
     let pid = unsafe { libc::fork() };
     if pid < 0 {
         return Err(io::Error::last_os_error());

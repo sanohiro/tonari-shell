@@ -925,7 +925,7 @@ Readline command	backward-kill-word	interface only	different	interface only
 Readline command	backward-word	interface only	different	interface only
 Readline command	bash-vi-complete	—	missing interface	—
 Readline command	beginning-of-history	interface only	different	interface only
-Readline command	beginning-of-line	interface only	different	interface only
+Readline command	beginning-of-line	different	different	different
 Readline command	bracketed-paste-begin	interface only	different	interface only
 Readline command	call-last-kbd-macro	missing interface	missing interface	missing interface
 Readline command	capitalize-word	missing interface	missing interface	missing interface
@@ -942,7 +942,7 @@ Readline command	complete-username	missing interface	missing interface	missing i
 Readline command	complete-variable	missing interface	missing interface	missing interface
 Readline command	copy-backward-word	missing interface	missing interface	missing interface
 Readline command	copy-forward-word	missing interface	missing interface	missing interface
-Readline command	copy-region-as-kill	interface only	interface only	interface only
+Readline command	copy-region-as-kill	different	different	different
 Readline command	dabbrev-expand	missing interface	missing interface	missing interface
 Readline command	delete-char	interface only	interface only	interface only
 Readline command	delete-char-or-list	missing interface	missing interface	missing interface
@@ -959,7 +959,7 @@ Readline command	edit-and-execute-command	missing interface	missing interface	mi
 Readline command	emacs-editing-mode	interface only	interface only	interface only
 Readline command	end-kbd-macro	missing interface	missing interface	missing interface
 Readline command	end-of-history	interface only	different	interface only
-Readline command	end-of-line	interface only	different	interface only
+Readline command	end-of-line	different	different	different
 Readline command	exchange-point-and-mark	interface only	interface only	interface only
 Readline command	execute-named-command	—	missing interface	—
 Readline command	export-completions	—	missing interface	—
@@ -996,7 +996,7 @@ Readline command	non-incremental-reverse-search-history	missing interface	missin
 Readline command	non-incremental-reverse-search-history-again	missing interface	missing interface	missing interface
 Readline command	old-menu-complete	missing interface	missing interface	missing interface
 Readline command	operate-and-get-next	missing interface	missing interface	missing interface
-Readline command	overwrite-mode	missing interface	missing interface	missing interface
+Readline command	overwrite-mode	different	different	different
 Readline command	possible-command-completions	missing interface	missing interface	missing interface
 Readline command	possible-completions	interface only	different	interface only
 Readline command	possible-filename-completions	missing interface	missing interface	missing interface
@@ -1548,7 +1548,7 @@ shopt	noexpand_translation	missing interface	missing interface	missing interface
 shopt	nullglob	match	match	match
 shopt	patsub_replacement	match	match	match
 shopt	progcomp	interface only	interface only	interface only
-shopt	progcomp_alias	missing interface	missing interface	missing interface
+shopt	progcomp_alias	interface only	interface only	interface only
 shopt	promptvars	interface only	interface only	interface only
 shopt	restricted_shell	missing interface	missing interface	missing interface
 shopt	shift_verbose	missing interface	missing interface	missing interface
