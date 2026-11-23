@@ -122,7 +122,7 @@ impl Condition {
 pub struct Location {
     source: Rc<str>,
     start: usize,
-    end: usize,
+    pub(crate) end: usize,
     pub line: usize,
 }
 impl Location {

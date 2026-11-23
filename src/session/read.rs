@@ -142,13 +142,17 @@ impl Input {
     }
 
     pub(super) fn next(&mut self) -> io::Result<Option<u8>> {
+        self.next_up_to(1)
+    }
+
+    fn next_up_to(&mut self, limit: usize) -> io::Result<Option<u8>> {
         if self.position == self.end {
             // Reading beyond a delimiter on a pipe would take input from the
             // following shell command, since the kernel cannot rewind its fd.
             let capacity = if self.seekable || self.consume_all {
                 self.data.len()
             } else {
-                1
+                limit.min(self.data.len())
             };
             let n = unsafe { libc::read(self.fd, self.data.as_mut_ptr().cast(), capacity) };
             if n < 0 {
@@ -292,6 +296,11 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
         }
         let input_byte = if let Some(bytes) = &mut edited {
             Ok(bytes.next())
+        } else if opts.exact && opts.timeout.is_none() {
+            // A character consumes at least one byte. This much buffered input
+            // is ours even on a pipe with another command waiting after read.
+            let remaining = opts.max_chars.unwrap().saturating_sub(chars).max(1);
+            input.next_up_to(remaining)
         } else {
             input.next()
         };

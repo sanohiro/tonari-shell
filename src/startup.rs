@@ -5,15 +5,27 @@ use std::path::{Path, PathBuf};
 use crate::cli::Invocation;
 use crate::{Flow, Session, input};
 
-fn open_script(path: &Path) -> io::Result<File> {
-    let file = File::open(path)?;
-    if file.metadata()?.is_dir() {
-        return Err(io::Error::from_raw_os_error(libc::EISDIR));
-    }
-    Ok(file)
+struct Script {
+    file: File,
+    metadata: std::fs::Metadata,
 }
 
-fn sourced(session: &mut Session, file: File, path: &Path, args: &[String], status: u8) -> Flow {
+fn open_script(path: &Path) -> io::Result<Script> {
+    let file = File::open(path)?;
+    let metadata = file.metadata()?;
+    if metadata.is_dir() {
+        return Err(io::Error::from_raw_os_error(libc::EISDIR));
+    }
+    Ok(Script { file, metadata })
+}
+
+fn sourced(
+    session: &mut Session,
+    script: Script,
+    path: &Path,
+    args: &[String],
+    status: u8,
+) -> Flow {
     // Guard the interpreter stack if startup files source one another recursively.
     if session.source_depth >= 128 {
         eprintln!("tonari: source nesting limit exceeded");
@@ -28,7 +40,7 @@ fn sourced(session: &mut Session, file: File, path: &Path, args: &[String], stat
         .push(path.to_string_lossy().into_owned());
     session.function_names.push("source".into());
     let saved_debug = session.traps.enter_source(session.functrace);
-    let result = input::file_script(session, file, status, false);
+    let result = input::file_script(session, script.file, Some(script.metadata), status, false);
     let result = crate::traps::returning(session, result);
     session.traps.leave_source(saved_debug);
     session.function_names.pop();

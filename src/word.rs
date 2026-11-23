@@ -125,7 +125,7 @@ impl Word {
                 Part::Unquoted(text)
             }
         };
-        for part in parts {
+        for part in parts.iter_mut() {
             if let Part::BadSubstitution(text) = part {
                 return Err(crate::expansion::Error::fatal(
                     format!("{text}: bad substitution"),
@@ -278,12 +278,25 @@ impl Word {
                 _ => {}
             }
         }
+        if let [Part::Text(value)] = parts.as_mut_slice() {
+            // A resolved quoted scalar already owns the complete field.
+            *self = Self::Literal(std::mem::take(value));
+        }
         Ok(())
     }
 
-    pub fn scalar(self, lookup: &impl Fn(&str) -> Option<String>, positional: &[String]) -> String {
+    pub fn scalar(
+        mut self,
+        lookup: &dyn Fn(&str) -> Option<String>,
+        positional: &[String],
+    ) -> String {
         if let Self::Literal(s) = self {
             return s;
+        }
+        if let Self::Expanded(parts) | Self::Declaration(parts) = &mut self
+            && let [Part::Unquoted(value) | Part::Text(value)] = parts.as_mut_slice()
+        {
+            return std::mem::take(value);
         }
         let mut output = Output::Scalar(String::new());
         self.expand_into(&mut output, lookup, positional, "");
@@ -296,7 +309,7 @@ impl Word {
     #[cfg(test)]
     pub fn fields(
         self,
-        lookup: &impl Fn(&str) -> Option<String>,
+        lookup: &dyn Fn(&str) -> Option<String>,
         positional: &[String],
     ) -> Vec<String> {
         self.fields_with_glob(lookup, positional, Some(&Default::default()))
@@ -305,7 +318,7 @@ impl Word {
 
     pub fn fields_with_glob(
         self,
-        lookup: &impl Fn(&str) -> Option<String>,
+        lookup: &dyn Fn(&str) -> Option<String>,
         positional: &[String],
         globbing: Option<&crate::pattern::GlobOptions>,
     ) -> Result<Vec<String>, crate::expansion::Error> {
@@ -314,8 +327,13 @@ impl Word {
         }
         let ifs = lookup("IFS").unwrap_or_else(|| " \t\n".into());
         let mut output = Output::Fields(Fields {
+            lookup,
             globbing,
-            ..Fields::default()
+            words: Vec::new(),
+            current: Field::default(),
+            error: None,
+            present: false,
+            whitespace: false,
         });
         self.expand_into(&mut output, lookup, positional, &ifs);
         let Output::Fields(mut fields) = output else {
@@ -325,11 +343,7 @@ impl Word {
         fields.error.map_or(Ok(fields.words), Err)
     }
 
-    pub fn pattern(
-        self,
-        lookup: &impl Fn(&str) -> Option<String>,
-        positional: &[String],
-    ) -> String {
+    pub fn pattern(self, lookup: &dyn Fn(&str) -> Option<String>, positional: &[String]) -> String {
         let mut output = Output::Pattern(String::new(), PatternKind::Glob);
         self.expand_into(&mut output, lookup, positional, "");
         let Output::Pattern(text, _) = output else {
@@ -340,7 +354,7 @@ impl Word {
 
     pub fn extended_pattern(
         self,
-        lookup: &impl Fn(&str) -> Option<String>,
+        lookup: &dyn Fn(&str) -> Option<String>,
         positional: &[String],
     ) -> String {
         let mut output = Output::Pattern(String::new(), PatternKind::Extended);
@@ -351,11 +365,7 @@ impl Word {
         text
     }
 
-    fn replacement(
-        self,
-        lookup: &impl Fn(&str) -> Option<String>,
-        positional: &[String],
-    ) -> String {
+    fn replacement(self, lookup: &dyn Fn(&str) -> Option<String>, positional: &[String]) -> String {
         let mut output = Output::Pattern(String::new(), PatternKind::Replacement);
         self.expand_into(&mut output, lookup, positional, "");
         let Output::Pattern(text, _) = output else {
@@ -363,7 +373,7 @@ impl Word {
         };
         text
     }
-    pub fn regex(self, lookup: &impl Fn(&str) -> Option<String>, positional: &[String]) -> String {
+    pub fn regex(self, lookup: &dyn Fn(&str) -> Option<String>, positional: &[String]) -> String {
         let mut output = Output::Pattern(String::new(), PatternKind::Regex);
         self.expand_into(&mut output, lookup, positional, "");
         let Output::Pattern(text, _) = output else {
@@ -375,7 +385,7 @@ impl Word {
     fn expand_into(
         self,
         output: &mut Output,
-        lookup: &impl Fn(&str) -> Option<String>,
+        lookup: &dyn Fn(&str) -> Option<String>,
         positional: &[String],
         ifs: &str,
     ) {
@@ -561,7 +571,7 @@ fn array_elements_name(name: &str) -> Option<(&str, bool, bool)> {
 fn array_elements(
     base: &str,
     keys: bool,
-    lookup: &impl Fn(&str) -> Option<String>,
+    lookup: &dyn Fn(&str) -> Option<String>,
 ) -> Option<Vec<String>> {
     let indexes = lookup(&format!("\u{1}{base}"))?;
     Some(
@@ -581,7 +591,7 @@ fn array_elements(
 
 fn parameter(
     name: &str,
-    lookup: &impl Fn(&str) -> Option<String>,
+    lookup: &dyn Fn(&str) -> Option<String>,
     positional: &[String],
 ) -> Option<String> {
     if name == "*" || name == "@" {
@@ -615,7 +625,7 @@ fn parameter(
     lookup(name)
 }
 
-fn tilde(s: &str, lookup: &impl Fn(&str) -> Option<String>) -> String {
+fn tilde(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
     let key = match s {
         "~" => "HOME",
         "~+" => "PWD",
@@ -625,7 +635,7 @@ fn tilde(s: &str, lookup: &impl Fn(&str) -> Option<String>) -> String {
     lookup(key).unwrap_or_else(|| s.to_owned())
 }
 
-fn ifs_separator(lookup: &impl Fn(&str) -> Option<String>) -> String {
+fn ifs_separator(lookup: &dyn Fn(&str) -> Option<String>) -> String {
     lookup("IFS").map_or_else(
         || " ".into(),
         |s| s.chars().next().map(String::from).unwrap_or_default(),
@@ -652,11 +662,11 @@ pub(crate) fn separators(text: &str, ifs: &str, mut visit: impl FnMut(usize, &st
     }
 }
 
-#[derive(Default)]
 struct Fields<'a> {
     words: Vec<String>,
     current: Field,
     globbing: Option<&'a crate::pattern::GlobOptions>,
+    lookup: &'a dyn Fn(&str) -> Option<String>,
     error: Option<crate::expansion::Error>,
     present: bool,
     whitespace: bool,
@@ -666,7 +676,9 @@ impl Fields<'_> {
     fn emit(&mut self) {
         let current = std::mem::take(&mut self.current);
         if self.error.is_none() {
-            self.error = current.finish(&mut self.words, self.globbing).err();
+            self.error = current
+                .finish(&mut self.words, self.globbing, self.lookup)
+                .err();
         }
     }
 

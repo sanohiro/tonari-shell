@@ -63,16 +63,29 @@ struct Spec {
     filter: Option<String>,
 }
 
-#[derive(PartialEq, Eq)]
 pub(crate) struct WordList {
     source: String,
     literal: bool,
+    queried: std::cell::Cell<bool>,
+    offsets: std::cell::OnceCell<Vec<(usize, usize)>>,
 }
+
+impl PartialEq for WordList {
+    fn eq(&self, other: &Self) -> bool {
+        self.source == other.source
+    }
+}
+impl Eq for WordList {}
 
 impl WordList {
     fn new(source: String) -> Self {
         let literal = !source.contains(['\'', '"', '\\', '$', '`', '~', '{', '}']);
-        Self { source, literal }
+        Self {
+            source,
+            literal,
+            queried: Default::default(),
+            offsets: Default::default(),
+        }
     }
 
     pub(crate) fn literal_matches<'a>(
@@ -90,6 +103,31 @@ impl WordList {
                 }
             })
             .filter(move |word| !word.is_empty() && word.starts_with(prefix))
+    }
+
+    // Delay indexing until a large immutable list is reused. compgen still
+    // traverses the original words in declaration order and observes live IFS.
+    pub(crate) fn indexed(&self, prefix: &str, ifs: &str) -> Option<&[(usize, usize)]> {
+        if ifs != " \t\n" || self.source.len() < 8192 || !self.queried.replace(true) {
+            return None;
+        }
+        let index = self.offsets.get_or_init(|| {
+            let base = self.source.as_ptr() as usize;
+            let mut words: Vec<_> = self
+                .literal_matches("", ifs)
+                .map(|w| (w.as_ptr() as usize - base, w.len()))
+                .collect();
+            words.sort_unstable_by_key(|&r| self.word(r));
+            words.dedup_by_key(|&mut r| self.word(r));
+            words
+        });
+        let start = index.partition_point(|&r| self.word(r) < prefix);
+        let matches = &index[start..];
+        Some(&matches[..matches.partition_point(|&r| self.word(r).starts_with(prefix))])
+    }
+
+    pub(crate) fn word(&self, (start, len): (usize, usize)) -> &str {
+        &self.source[start..start + len]
     }
 
     fn append_matches(
@@ -452,7 +490,9 @@ impl Spec {
             }
         }
         if let Some(glob) = &self.glob {
-            words.extend(pattern::pathnames(glob, &session.shopt.glob));
+            words.extend(pattern::pathnames(glob, &session.shopt.glob, &|k| {
+                session.get(k)
+            }));
         }
         if let Some(list) = &self.words {
             list.append_matches(&mut words, prefix, last, session)?;

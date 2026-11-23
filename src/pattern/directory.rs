@@ -1,4 +1,7 @@
 use std::ffi::{CStr, CString};
+use std::ops::ControlFlow;
+use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
 
 pub(super) fn visit_names(
     dir: &str,
@@ -6,19 +9,29 @@ pub(super) fn visit_names(
     skip_dots: bool,
     mut visit: impl FnMut(&CStr, u8),
 ) {
-    let Ok(path) = CString::new(dir) else { return };
-    read_names(&path, |name, kind| {
+    let _ = scan(Path::new(dir), &mut |name, kind| {
         // A symlink or an unknown entry type still needs a pathname lookup.
         if (!directories_only || matches!(kind, libc::DT_DIR | libc::DT_LNK | libc::DT_UNKNOWN))
             && (!skip_dots || !matches!(name.to_bytes(), b"." | b".."))
         {
             visit(name, kind);
         }
+        ControlFlow::Continue(())
     });
 }
 
+pub(crate) fn scan(
+    path: &Path,
+    visitor: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>,
+) -> ControlFlow<()> {
+    let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
+        return ControlFlow::Continue(());
+    };
+    read_names(&path, visitor)
+}
+
 #[cfg(not(target_os = "linux"))]
-fn read_names(path: &CStr, mut visit: impl FnMut(&CStr, u8)) {
+fn read_names(path: &CStr, visit: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>) -> ControlFlow<()> {
     use std::ptr::NonNull;
 
     struct DirectoryStream(NonNull<libc::DIR>);
@@ -29,22 +42,22 @@ fn read_names(path: &CStr, mut visit: impl FnMut(&CStr, u8)) {
     }
 
     let Some(stream) = NonNull::new(unsafe { libc::opendir(path.as_ptr()) }) else {
-        return;
+        return ControlFlow::Continue(());
     };
     let stream = DirectoryStream(stream);
     loop {
         let entry = unsafe { libc::readdir(stream.0.as_ptr()) };
         if entry.is_null() {
-            break;
+            return ControlFlow::Continue(());
         }
         // readdir owns the name until the next call on this stream.
         let name = unsafe { CStr::from_ptr(std::ptr::addr_of!((*entry).d_name).cast()) };
-        visit(name, unsafe { (*entry).d_type });
+        visit(name, unsafe { (*entry).d_type })?;
     }
 }
 
 #[cfg(target_os = "linux")]
-fn read_names(path: &CStr, mut visit: impl FnMut(&CStr, u8)) {
+fn read_names(path: &CStr, visit: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>) -> ControlFlow<()> {
     use std::mem::offset_of;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
@@ -55,7 +68,7 @@ fn read_names(path: &CStr, mut visit: impl FnMut(&CStr, u8)) {
         )
     };
     if fd < 0 {
-        return;
+        return ControlFlow::Continue(());
     }
     let dir = unsafe { OwnedFd::from_raw_fd(fd) };
     let mut bytes = [0u8; 32768];
@@ -77,19 +90,19 @@ fn read_names(path: &CStr, mut visit: impl FnMut(&CStr, u8)) {
             {
                 continue;
             }
-            return;
+            return ControlFlow::Continue(());
         }
         let mut batch = &bytes[..count as usize];
         while batch.len() > NAME {
             let len = usize::from(u16::from_ne_bytes([batch[RECLEN], batch[RECLEN + 1]]));
             if len <= NAME || len > batch.len() {
-                return;
+                return ControlFlow::Continue(());
             }
             let (record, rest) = batch.split_at(len);
             let Ok(name) = CStr::from_bytes_until_nul(&record[NAME..]) else {
-                return;
+                return ControlFlow::Continue(());
             };
-            visit(name, record[TYPE]);
+            visit(name, record[TYPE])?;
             batch = rest;
         }
     }

@@ -48,8 +48,12 @@ fn whole_group(session: &Session, text: &str) -> Option<Vec<parser::Statement>> 
     }
 }
 
-fn file_group(session: &Session, file: &File) -> Option<Vec<parser::Statement>> {
-    let meta = file.metadata().ok()?;
+fn file_group(
+    session: &Session,
+    file: &File,
+    metadata: Option<std::fs::Metadata>,
+) -> Option<Vec<parser::Statement>> {
+    let meta = metadata.or_else(|| file.metadata().ok())?;
     if !meta.is_file() || !(32 * 1024..=8 * 1024 * 1024).contains(&meta.len()) {
         return None;
     }
@@ -66,9 +70,15 @@ fn file_group(session: &Session, file: &File) -> Option<Vec<parser::Statement>> 
     whole_group(session, std::str::from_utf8(&bytes).ok()?)
 }
 
-pub fn file_script(session: &mut Session, file: File, status: u8, check: bool) -> Flow {
+pub fn file_script(
+    session: &mut Session,
+    file: File,
+    metadata: Option<std::fs::Metadata>,
+    status: u8,
+    check: bool,
+) -> Flow {
     if !session.verbose
-        && let Some(program) = file_group(session, &file)
+        && let Some(program) = file_group(session, &file, metadata)
     {
         drop(file);
         return if check {
@@ -141,7 +151,9 @@ fn buffered_compound(
         text.push_str(first);
         text.push_str(std::str::from_utf8(&buffered[..size]).ok()?);
         match parser::session_source_at(&text, false, session, line) {
-            Ok(program) if program.len() == 1 => return Some((program, size, i + 1)),
+            Ok(program) if matches!(program.as_slice(), [s] if s.location.end > first.len()) => {
+                return Some((program, size, i + 1));
+            }
             Err(parser::Error::Incomplete(_)) => continue,
             _ => return None,
         }
@@ -196,19 +208,31 @@ fn run(
         } else {
             text
         };
-        let mut result = parser::session_source_at(text, n == 0, session, base_line);
-        if line_start == 0
+        // At a new physical line these tokens cannot open a command. Keep
+        // accumulated compound commands, history expansion and NUL diagnostics.
+        if line_start == 0 && n != 0 && {
+            let first = text.trim_start_matches([' ', '\t']);
+            first.is_empty()
+                || first == "\n"
+                || first.starts_with('#') && !first.trim_end_matches('\n').contains(['\n', '\0'])
+        } {
+            base_line += text.bytes().filter(|&b| b == b'\n').count();
+            input.clear();
+            continue;
+        }
+        let result = if line_start == 0
             && !shared_offset
             && !session.verbose
             && session.source_depth > 0
-            && matches!(result, Err(parser::Error::Incomplete(_)))
             && let Some((program, consumed, lines)) =
                 buffered_compound(session, text, reader.buffer(), base_line)
         {
             reader.consume(consumed);
             base_line += lines;
-            result = Ok(program);
-        }
+            Ok(program)
+        } else {
+            parser::session_source_at(text, n == 0, session, base_line)
+        };
         match result {
             Err(parser::Error::HereDoc(hint)) if n != 0 => {
                 here_doc = Some(hint);

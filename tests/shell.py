@@ -979,6 +979,24 @@ printf '%s:%s' "$s" "$x" """
                                   capture_output=True, cwd=self.cwd, env=self.env, timeout=8)
             self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, document, b""))
 
+    def test_counted_read_preserves_pipe_input_for_the_next_reader(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        text = "a" * 8191 + "雪🍵" + "b" * 917
+        (self.cwd / "data").write_bytes(text.encode() + b"\nrest\x00tail")
+        code = f'/bin/cat data | {{ IFS= read -r -N {len(text)} value; printf "%s|%s" "$?" "$value"; /bin/cat; }}'
+        self.compare(code, 0, b"0|" + text.encode() + b"\nrest\x00tail")
+
+    def test_literal_file_capture_and_compound_redirect(self):
+        (self.cwd / "data").write_bytes("雪\n🍵\n\n".encode())
+        self.compare('v=$(<data); printf "<%s>:%s" "$v" "$?"', 0, "<雪\n🍵>:0".encode())
+        self.compare('v=$({ printf group; } < data); printf "%s:%s" "$v" "$?"', 0, b"group:0")
+        (self.cwd / "empty").touch()
+        self.compare('v=$(<empty); echo "[$v]:$?"', 0, b"[]:0\n")
+        (self.cwd / "nul").write_bytes(b"abc\0def\n\n")
+        for shell in (BASH, TONARI):
+            result = self.command(shell, 'v=$(<nul); printf "<%s>:%s" "$v" "$?"')
+            self.assertEqual((result.returncode, result.stdout), (0, b"<abcdef>:0"))
+
     def test_shell_read_printf_and_lookup(self):
         self.compare("IFS=: read -r a b <<< 'x:y:z'; printf -v out '<%s><%s>' \"$a\" \"$b\"; "
                      "printf '%s\\n%b' \"$out\" 'a\\0101'",
@@ -1515,6 +1533,10 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
         pid, fd = pty.fork()
         if pid == 0:
             try:
+                # A driver itself launched as an asynchronous shell command can
+                # inherit SIG_IGN. Model a terminal emulator starting a new shell.
+                signal.signal(signal.SIGINT, signal.SIG_DFL)
+                signal.signal(signal.SIGQUIT, signal.SIG_DFL)
                 os.chdir(self.cwd)
                 env = dict(self.env, PS1=PROMPT.decode(), TERM="xterm-256color" if editing else "dumb")
                 options = [] if editing else ["--noediting"]
@@ -1746,6 +1768,78 @@ printf '%s\n' "$marker"
         # Remove a complete UTF-8 character and insert a replacement at the caret.
         enter(fd, 'echo 猫雪'.encode() + b'\x1b[D\x7f' + '犬'.encode() + b'\x1b[F > unicode')
         self.assertEqual((self.cwd / "unicode").read_text(), "犬雪\n")
+
+    def test_glob_uses_current_shell_locale_and_invalidates_sort_order(self):
+        files = self.cwd / "names"
+        files.mkdir()
+        for i in range(512):
+            (files / f"{['a', 'Z', 'Å', 'é', '雪', '🌱'][i % 6]}{i:03}").touch()
+        code = r'''LC_ALL=C
+printf '%s\0' names/*; printf 'END\0'
+f() { local LC_ALL=en_US.UTF-8; printf '%s\0' names/*; }
+f; printf 'END\0'; printf '%s\0' names/*'''
+        ref = self.command(BASH, code)
+        self.assertEqual(ref.returncode, 0, ref.stderr)
+        a, b, c = ref.stdout.split(b"END\0")
+        self.assertEqual(a, c)
+        self.assertNotEqual(a, b)
+        result = self.command(TONARI, code)
+        self.assertEqual((result.returncode, result.stderr), (0, b""))
+        # The optional static musl build supplies byte collation for all locales.
+        # The distribution Bash and the native glibc / Darwin builds use locale tables.
+        portable = os.environ.get("TONARI_TEST_LIBC") == "musl"
+        self.assertEqual(result.stdout, b"END\0".join((a, a, a)) if portable else ref.stdout)
+
+    def test_large_globs_match_reference_order_after_directory_changes(self):
+        directory = self.cwd / "files"
+        directory.mkdir()
+        names = [f"{['Z', 'å', '雪', 'é', 'a', '🌱'][i % 6]}-{i:05}.txt" for i in range(4241)]
+        random.Random(971).shuffle(names)
+        for name in names:
+            (directory / name).touch()
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        source = r'printf "%s\0" files/*.txt; : > files/new.txt; printf "%s\0" files/*.txt'
+        reference = self.command(BASH, source)
+        self.assertEqual(reference.returncode, 0, reference.stderr)
+        self.assertEqual(reference.stdout.count(b"\0"), len(names) * 2 + 1)
+        (directory / "new.txt").unlink()
+        result = self.command(TONARI, source)
+        self.assertEqual((result.returncode, result.stderr), (0, b""))
+        self.assertEqual(result.stdout, reference.stdout)
+
+    def test_large_journal_tail_and_deferred_search(self):
+        journal = self.cwd / ".local/state/tonari/history"
+        journal.parent.mkdir(parents=True)
+        row = b"1\t1\t0\t/tmp\t"
+        oldest = b"echo oldest > found-old"
+        newest = b"echo newest > found-new"
+        journal.write_bytes(row + oldest + b"\n" + (row + "echo padding 雪\n".encode()) * 8000
+                            + row + newest + b"\n" + row + b"unfinished")
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"echo new")
+        self.read_until(fd, b"\x1b[2mest > found-new")
+        os.write(fd, b"\x1b[C\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "found-new").read_bytes(), b"newest\n")
+        # Fall back across the tail boundary, retaining the last successful
+        # search when a subsequent refinement in the same packet fails.
+        os.write(fd, b"\x12oldestX\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "found-old").read_bytes(), b"oldest\n")
+        # A replacement file has a different inode and its prefix may be UTF-8.
+        replacement = journal.with_suffix(".new")
+        replacement.write_bytes((row + b"padding\n") * 8000 + row + "echo 雪 > latest\n".encode())
+        replacement.replace(journal)
+        os.write(fd, "echo 雪".encode() + b"\x1b[C\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "latest").read_text(), "雪\n")
+
+    def test_paste_boundary_and_input_for_foreground_read(self):
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"\x1b[200~v=" + b"x" * 512 + b"\x1b[20")
+        os.write(fd, b"1~; IFS= read -r reply; echo \"$reply:${#v}\" > pasted-result\rpayload\n")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "pasted-result").read_text(), "payload:512\n")
 
     def test_editor_reads_complete_history_rows_while_a_writer_appends(self):
         journal = self.cwd / ".local/state/tonari/history"

@@ -1,6 +1,7 @@
 mod bracket;
-mod directory;
+pub(crate) mod directory;
 pub(crate) mod extended;
+mod glob_locale;
 mod order;
 
 use crate::session::CharacterLocale;
@@ -13,39 +14,23 @@ use std::sync::OnceLock;
 // libc starts in the C locale. Load the caller's character and collation
 // settings only when a pattern needs them, and restore the thread afterwards.
 pub(crate) fn localized<T>(work: impl FnOnce() -> T) -> T {
-    with_locale(|_| work())
-}
-
-fn with_locale<T>(work: impl FnOnce(Collation) -> T) -> T {
-    static LOCALE: OnceLock<(usize, bool)> = OnceLock::new();
-    let &(locale, byte_order) = LOCALE.get_or_init(|| {
-        let locale = unsafe {
-            libc::newlocale(
-                libc::LC_CTYPE_MASK | libc::LC_COLLATE_MASK,
-                c"".as_ptr(),
-                std::ptr::null_mut(),
-            )
-        };
-        let byte_order = ["LC_ALL", "LC_COLLATE", "LANG"]
-            .iter()
-            .find_map(|name| std::env::var_os(name).filter(|s| !s.is_empty()))
-            .is_some_and(|name| name == "C" || name == "POSIX");
-        (locale as usize, byte_order)
-    });
-    let locale = locale as libc::locale_t;
+    static LOCALE: OnceLock<usize> = OnceLock::new();
+    let locale = *LOCALE.get_or_init(|| unsafe {
+        libc::newlocale(
+            libc::LC_CTYPE_MASK | libc::LC_COLLATE_MASK,
+            c"".as_ptr(),
+            std::ptr::null_mut(),
+        ) as usize
+    }) as libc::locale_t;
     if locale.is_null() {
-        return work(Collation::Current);
+        return work();
     }
-    let previous = unsafe { libc::uselocale(locale) };
-    let result = work(if previous.is_null() {
-        Collation::Current
-    } else if byte_order {
-        Collation::Bytes
-    } else {
-        Collation::FixedLocale
-    });
-    if !previous.is_null() {
-        unsafe { libc::uselocale(previous) };
+    let before = unsafe { libc::uselocale(locale) };
+    let result = work();
+    if !before.is_null() {
+        unsafe {
+            libc::uselocale(before);
+        }
     }
     result
 }
@@ -481,9 +466,13 @@ impl GlobOptions {
     }
 }
 
-pub(crate) fn pathnames(pattern: &str, options: &GlobOptions) -> Vec<String> {
+pub(crate) fn pathnames(
+    pattern: &str,
+    options: &GlobOptions,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Vec<String> {
     let mut names = Vec::new();
-    with_locale(|order| paths(pattern, options, &mut names, order));
+    glob_locale::run(lookup, |order| paths(pattern, options, &mut names, order));
     names
 }
 
@@ -701,13 +690,14 @@ impl Field {
         self,
         fields: &mut Vec<String>,
         globbing: Option<&GlobOptions>,
+        lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Result<(), crate::expansion::Error> {
         if let Some((options, pattern)) = globbing
             .zip(self.pattern)
             .filter(|(options, p)| has_magic(p, true) || options.extglob && extended::has_group(p))
         {
             let count = fields.len();
-            with_locale(|order| paths(&pattern, options, fields, order));
+            glob_locale::run(lookup, |order| paths(&pattern, options, fields, order));
             if fields.len() > count {
                 return Ok(());
             }
@@ -859,7 +849,7 @@ mod tests {
         field.push("[[:alpha:]]ord.rs", true);
         let mut words = Vec::new();
         field
-            .finish(&mut words, Some(&GlobOptions::default()))
+            .finish(&mut words, Some(&GlobOptions::default()), &|_| None)
             .unwrap();
         assert_eq!(words, [format!("{root}word.rs")]);
 
@@ -868,7 +858,7 @@ mod tests {
         field.push("*", false);
         field.push("-missing-?", true);
         field
-            .finish(&mut words, Some(&GlobOptions::default()))
+            .finish(&mut words, Some(&GlobOptions::default()), &|_| None)
             .unwrap();
         assert_eq!(words[1], format!("{root}*-missing-?"));
     }

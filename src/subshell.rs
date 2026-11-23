@@ -10,6 +10,28 @@ pub fn capture_substitution(
     body: Vec<parser::Statement>,
     last: u8,
 ) -> Result<(String, u8), &'static str> {
+    // A literal read of an ordinary file has no substitutions to isolate.
+    // Keep streams, virtual files, error reporting and trap execution in the child.
+    if !session.traps.active()
+        && !session.xtrace
+        && let Some(path) = input_only(&body).and_then(parser::Word::as_literal)
+        && std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() > 0)
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path)
+            && file.metadata().is_ok_and(|m| m.is_file() && m.len() > 0)
+        {
+            let mut output = Vec::new();
+            if let Err(e) = file.read_to_end(&mut output) {
+                eprintln!("tonari: {e}");
+                return captured_output(output, 1);
+            }
+            return captured_output(output, 0);
+        }
+    }
     if let Some(result) = capture_simple(session, &body, last) {
         return result;
     }
@@ -45,7 +67,7 @@ pub fn capture_substitution(
             let code = (|| {
                 let captured = std::cell::Cell::new(None);
                 let fields = crate::expansion::Expansion::new(session, last, &captured)
-                    .fields(path)
+                    .fields(path.clone())
                     .map_err(std::io::Error::other)?;
                 let [filename] = fields.as_slice() else {
                     return Err(std::io::Error::other("ambiguous redirect"));
@@ -94,7 +116,9 @@ pub(super) fn read_output(
 }
 
 fn captured_output(mut output: Vec<u8>, code: u8) -> Result<(String, u8), &'static str> {
-    output.retain(|&b| b != 0);
+    if output.contains(&0) {
+        output.retain(|&b| b != 0);
+    }
     while output.last() == Some(&b'\n') {
         output.pop();
     }
@@ -204,7 +228,7 @@ fn capture_simple(
     Some(captured_output(output, code))
 }
 
-fn input_only(body: &[parser::Statement]) -> Option<parser::Word> {
+fn input_only(body: &[parser::Statement]) -> Option<&parser::Word> {
     let [statement] = body else { return None };
     let parser::Command::Pipeline(stages) = &statement.command else {
         return None;
@@ -217,10 +241,11 @@ fn input_only(body: &[parser::Statement]) -> Option<parser::Word> {
     };
     (redirect.fd == 0
         && redirect.target == parser::Target::Read
+        && cmd.compound.is_none()
         && cmd.words.is_empty()
         && cmd.assignments.is_empty()
         && !statement.negated)
-        .then(|| redirect.word.clone())
+        .then_some(&redirect.word)
 }
 
 pub fn launch_group(

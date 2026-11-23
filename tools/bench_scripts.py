@@ -99,6 +99,7 @@ for ((i=0; i<30; i++)); do set -- localized/*.txt; done
 echo "$#"
 """, "512"),
     "glob-utf8-once": ('set -- localized/*.txt; echo "$#"', "512"),
+    "glob-utf8-large-repeat": ('for ((i=0; i<8; i++)); do set -- large/*.txt; done; echo "$#"', "4096"),
     "glob-utf8-large": ('set -- large/*.txt; echo "$#"', "4096"),
     "glob-recursive": ("""\
 shopt -s globstar
@@ -302,7 +303,7 @@ def main():
                 package.mkdir()
                 (package / "lib.rs").touch()
         for directory, count, cases in [("localized", 512, ("glob-utf8-sort", "glob-utf8-once")),
-                                        ("large", 4096, ("glob-utf8-large",))]:
+                                        ("large", 4096, ("glob-utf8-large", "glob-utf8-large-repeat"))]:
             if args.case and not any(case in args.case for case in cases):
                 continue
             localized = home / directory
@@ -320,7 +321,7 @@ def main():
                         (leaf / f"item-{k:02}.txt").touch()
         for case in args.case or CASES:
             case_env = env
-            if case in ("field-split-unicode", "glob-utf8-sort", "glob-utf8-once", "glob-utf8-large"):
+            if case in ("field-split-unicode", "glob-utf8-sort", "glob-utf8-once", "glob-utf8-large", "glob-utf8-large-repeat"):
                 case_env = dict(env, LC_ALL="en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8")
             source, expected = CASES[case]
             script = home / f"{case}.sh"

@@ -32,6 +32,22 @@ def completion(shell, home, bindir, rc, line, suffix=b"-0"):
         return elapsed
 
 
+def reused_words(shell, home, bindir, rc, metrics):
+    with terminal(shell, home, bindir, rc, prompt=PROMPT) as fd:
+        for i in range(12):
+            line = f"fixed option-{(871 + i * 719) % 10000:05d}".encode()
+            os.write(fd, line)
+            read_until(fd, line)
+            marker = f"@{i:02d}X".encode()
+            elapsed = timed_keys(fd, b"\t" + marker, marker)
+            os.write(fd, b"\x0c")
+            read_until(fd, PROMPT + line + b"-flag " + marker)
+            os.write(fd, b"\r")
+            read_until(fd, PROMPT)
+            stage = "first" if i == 0 else "second" if i == 1 else "warm"
+            metrics[f"static reused, {stage}"].append(elapsed)
+
+
 def listing(shell, home, bash, expected, prefix):
     rc = home / ("bashrc" if shell == bash else "rc")
     line = b": " + prefix
@@ -44,7 +60,7 @@ def listing(shell, home, bash, expected, prefix):
         os.write(fd, b"\t@")
         output = read_until(fd, b"@")
         elapsed = (time.perf_counter_ns() - start) / 1e6
-        if set(re.findall(rb"item-\d{5}\.dat", output)) != expected:
+        if set(re.findall(rb"item-\d+\.dat", output)) != expected:
             raise ValueError(f"incomplete listing from {shell}")
         os.write(fd, b"\x0c")
         read_until(fd, PROMPT + line + b"@")
@@ -80,9 +96,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("shell", nargs="+", type=Path, help="Tonari executable(s)")
     parser.add_argument("--bash", type=Path, help="Bash reference for the Tab cases")
+    parser.add_argument("--files", type=int, default=10000, choices=[10000, 100000], help="executable files in the directory and PATH fixture")
     parser.add_argument("--runs", type=int, default=30)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--word-list", action="store_true", help="measure a registered 10,000-word completion")
+    mode.add_argument("--callback", action="store_true", help="queue a key behind a callback that waits 100 ms")
+    mode.add_argument("--reuse-words", action="store_true", help="repeated queries to one registered literal list")
     mode.add_argument("--listing", action="store_true", help="measure the second Tab and full listing")
     parser.add_argument("--require-target", action="store_true", help="check the 2/3 median target for cases shared with Bash")
     args = parser.parse_args()
@@ -98,14 +117,19 @@ def main():
         home = Path(scratch)
         bindir = home / "files"
         bindir.mkdir()
-        if not args.word_list:
-            for i in range(10_000):
-                (bindir / f"item-{i:05d}.dat").touch(mode=0o755)
-        if args.word_list:
+        if not (args.word_list or args.reuse_words or args.callback):
+            digits = len(str(args.files))
+            for i in range(args.files):
+                (bindir / f"item-{i:0{digits}d}.dat").touch(mode=0o755)
+        if args.callback:
+            rc = home / "rc"
+            rc.write_text(f"PS1='{PROMPT.decode()}'\n"
+                          "_slow() { /bin/sleep 0.1; COMPREPLY=(match); }\ncomplete -F _slow demo\n")
+        elif args.word_list or args.reuse_words:
             words = " ".join(f"option-{i:05d}-flag" for i in range(10_000))
             rc = home / "rc"
-            rc.write_text(f"PS1='{PROMPT.decode()}'\nchoices='{words}'\n"
-                          'complete -W "$choices" fixed\ncomplete -W \'$choices\' dynamic\n')
+            rc.write_text(f"PS1='{PROMPT.decode()}'\nHISTSIZE=0\nHISTFILE=/dev/null\nchoices='{words}'\n"
+                          'fixed() { :; }\ncomplete -W "$choices" fixed\ncomplete -W \'$choices\' dynamic\n')
         elif args.listing:
             expected = {p.name.encode() for p in bindir.iterdir()}
             few = home / "few"
@@ -134,6 +158,12 @@ def main():
             shift = i % len(shells)
             for shell in shells[shift:] + shells[:shift]:
                 metrics = results[shell] if i >= 3 else defaultdict(list)
+                if args.callback:
+                    metrics["Tab then key, 100 ms callback"].append(completion(shell, home, bindir, rc, b"demo ma", b"tch "))
+                    continue
+                if args.reuse_words:
+                    reused_words(shell, home, bindir, rc, metrics)
+                    continue
                 if args.word_list:
                     for label, line, suffix in [
                         ("static, all", b"fixed option", b"-0"),

@@ -419,7 +419,7 @@ fn main() -> ExitCode {
                     .push(path.to_string_lossy().into_owned());
                 session.function_names.push("main".into());
                 session.call_lines.push(0);
-                input::file_script(&mut session, file, initial, invocation.check)
+                input::file_script(&mut session, file, None, initial, invocation.check)
             }
             Err(e) => {
                 eprintln!("tonari: {}: {e}", path.display());

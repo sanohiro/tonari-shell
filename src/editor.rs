@@ -5,7 +5,10 @@ use std::io::{self, Write};
 use std::os::fd::RawFd;
 use unicode_width::UnicodeWidthChar;
 
-use crate::{Session, complete, history::History};
+use crate::{
+    Session, complete,
+    history::{History, View},
+};
 
 pub enum Input {
     Line(String),
@@ -84,6 +87,27 @@ impl Keys {
         byte()
     }
 
+    // A burst of ordinary keys needs one redraw. Stop at the first binding
+    // or multibyte character and leave all later bytes on the terminal.
+    fn append_burst(&mut self, text: &mut String, session: &Session) {
+        if !self.queued.is_empty() || session.bindings.map == Keymap::Command {
+            return;
+        }
+        for _ in 0..128 {
+            let mut b = 0u8;
+            // The editor's VMIN and VTIME are both zero.
+            if unsafe { libc::read(0, std::ptr::addr_of_mut!(b).cast(), 1) } != 1 {
+                break;
+            }
+            self.expansions = 0;
+            if !(b' '..=b'~').contains(&b) || session.bindings.custom_prefix(&[b]) {
+                self.queued.push_back(b);
+                break;
+            }
+            text.push(char::from(b));
+        }
+    }
+
     fn binding(&mut self, first: u8, session: &Session) -> io::Result<(Binding, bool)> {
         if session.bindings.map != Keymap::Command
             && first >= 32
@@ -123,12 +147,48 @@ impl Keys {
         ))
     }
 
+    // Read only as far as the next possible end marker. Bytes following a
+    // pasted command may belong to an external program reading the same tty.
     fn paste(&mut self) -> io::Result<String> {
+        const END: &[u8; 6] = b"\x1b[201~";
         let mut data = Vec::new();
-        const END: &[u8] = b"\x1b[201~";
-        while let Some(c) = self.get()? {
-            data.push(c);
-            if data.ends_with(END) {
+        let mut matched = 0;
+        let mut chunk = [0; END.len()];
+        loop {
+            if crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+                || crate::traps::input_interrupted()
+            {
+                return Err(io::ErrorKind::Interrupted.into());
+            }
+            let limit = END.len() - matched;
+            let n = if self.queued.is_empty() {
+                let immediate = unsafe { libc::read(0, chunk.as_mut_ptr().cast(), limit) };
+                if immediate > 0 {
+                    immediate as usize
+                } else {
+                    match crate::terminal_read(&mut chunk[..limit], true) {
+                        Ok(0) => break,
+                        Ok(n) => n,
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+                        Err(e) => return Err(e),
+                    }
+                }
+            } else {
+                let n = limit.min(self.queued.len());
+                for slot in &mut chunk[..n] {
+                    *slot = self.queued.pop_front().unwrap();
+                }
+                n
+            };
+            data.extend_from_slice(&chunk[..n]);
+            for &b in &chunk[..n] {
+                matched = if b == END[matched] {
+                    matched + 1
+                } else {
+                    usize::from(b == END[0])
+                };
+            }
+            if matched == END.len() {
                 data.truncate(data.len() - END.len());
                 break;
             }
@@ -152,6 +212,7 @@ struct Position {
 }
 
 struct Screen {
+    output: String,
     row: usize,
     width: usize,
 }
@@ -163,6 +224,7 @@ impl Screen {
             libc::ioctl(2, libc::TIOCGWINSZ, &mut size);
         }
         Self {
+            output: String::new(),
             row: 0,
             width: if size.ws_col < 4 {
                 79
@@ -179,7 +241,9 @@ impl Screen {
         cursor: usize,
         suggestion: &str,
     ) -> io::Result<()> {
-        let mut out = String::from("\r");
+        let out = &mut self.output;
+        out.clear();
+        out.push('\r');
         if self.row > 0 {
             out.push_str(&format!("\x1b[{}A", self.row));
         }
@@ -200,21 +264,15 @@ impl Screen {
                     _ => 0,
                 };
             } else {
-                draw_char(c, self.width, &mut out, &mut pos, true);
+                draw_char(c, self.width, out, &mut pos, true);
             }
         }
-        for c in text[..cursor].chars() {
-            draw_char(c, self.width, &mut out, &mut pos, false);
-        }
+        draw_text(&text[..cursor], self.width, out, &mut pos);
         let caret = pos;
-        for c in text[cursor..].chars() {
-            draw_char(c, self.width, &mut out, &mut pos, false);
-        }
+        draw_text(&text[cursor..], self.width, out, &mut pos);
         if !suggestion.is_empty() {
             out.push_str("\x1b[2m");
-            for c in suggestion.chars() {
-                draw_char(c, self.width, &mut out, &mut pos, false);
-            }
+            draw_text(suggestion, self.width, out, &mut pos);
             out.push_str("\x1b[0m");
         }
         if pos.row != caret.row || pos.col != caret.col {
@@ -228,6 +286,34 @@ impl Screen {
         }
         self.row = caret.row;
         io::stderr().write_all(out.as_bytes())
+    }
+}
+
+fn draw_text(mut text: &str, width: usize, out: &mut String, pos: &mut Position) {
+    while !text.is_empty() {
+        let n = text
+            .bytes()
+            .take_while(|b| (b' '..=b'~').contains(b))
+            .count();
+        if n == 0 {
+            let c = text.chars().next().unwrap();
+            draw_char(c, width, out, pos, false);
+            text = &text[c.len_utf8()..];
+        } else {
+            let (mut ascii, rest) = text.split_at(n);
+            while !ascii.is_empty() {
+                if pos.col == width {
+                    out.push_str("\r\n");
+                    pos.row += 1;
+                    pos.col = 0;
+                }
+                let take = ascii.len().min(width - pos.col);
+                out.push_str(&ascii[..take]);
+                pos.col += take;
+                ascii = &ascii[take..];
+            }
+            text = rest;
+        }
     }
 }
 
@@ -320,8 +406,9 @@ pub fn line(
     let mut hist = session.history_lines().len();
     let mut draft = String::new();
     let mut search: Option<(String, usize, String)> = None;
+    let mut pending_queries = Vec::new();
     let mut last_tab = false;
-    let mut loaded_history = false;
+    let mut view = View::Unread;
     loop {
         if session.bindings.map == Keymap::Command && !text.is_empty() {
             cursor = cursor.min(previous(&text, text.len()));
@@ -330,7 +417,9 @@ pub fn line(
             read.is_none() && search.is_none() && cursor == text.len() && !text.is_empty();
         let hint = if show_hint {
             history
-                .suggestion(session.history_lines(), &text, loaded_history, || false)
+                .suggestion(session.history_lines(), &text, view != View::Unread, || {
+                    false
+                })
                 .unwrap_or_default()
         } else {
             ""
@@ -342,17 +431,40 @@ pub fn line(
         } else {
             prompt
         };
+        let needs_hint = hint.is_empty();
         screen.draw(visible_prompt, &text, cursor, hint)?;
-        if show_hint {
-            let needs_hint = hint.is_empty();
-            let input_ready =
-                || ready(0, 0) || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed);
-            if !loaded_history {
-                loaded_history = history.refresh_unless(session, input_ready);
+        if !pending_queries.is_empty() {
+            let input_ready = || {
+                !keys.queued.is_empty()
+                    || ready(0, 0)
+                    || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+            };
+            if let Ok(result) =
+                history.find_command(session, &mut view, &pending_queries, &input_ready)
+            {
+                pending_queries.clear();
+                if let Some(found) = result
+                    && found != text
+                {
+                    text = found;
+                    cursor = text.len();
+                    screen.draw(visible_prompt, &text, cursor, "")?;
+                }
             }
-            if loaded_history && needs_hint {
+        }
+        if show_hint {
+            let input_ready = || {
+                !keys.queued.is_empty()
+                    || ready(0, 0)
+                    || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+            };
+            if needs_hint && history.ensure(session, &mut view, false, &input_ready) {
                 if let Some(hint) =
                     history.suggestion(session.history_lines(), &text, true, || !input_ready())
+                {
+                    screen.draw(visible_prompt, &text, cursor, hint)?;
+                } else if let Some(hint) =
+                    history.older_suggestion(session, &mut view, &text, &input_ready)
                 {
                     screen.draw(visible_prompt, &text, cursor, hint)?;
                 }
@@ -422,18 +534,25 @@ pub fn line(
         };
         let entering_search = action == Action::Search && search.is_none();
         if entering_search {
-            loaded_history = history.refresh_unless(session, || false);
             search = Some((String::new(), 0, text.clone()));
         }
         if let Some((query, index, original)) = search.as_mut() {
             match action {
                 Action::Abort => {
+                    pending_queries.clear();
                     text = std::mem::take(original);
                     search = None;
                     cursor = text.len();
                     continue;
                 }
                 Action::Accept => {
+                    if !pending_queries.is_empty()
+                        && let Ok(Some(found)) =
+                            history.find_command(session, &mut view, &pending_queries, &|| false)
+                    {
+                        text = found;
+                    }
+                    pending_queries.clear();
                     search = None;
                     cursor = text.len();
                 }
@@ -451,9 +570,7 @@ pub fn line(
                             *index = 0;
                         }
                     }
-                    if let Some(found) = history.search(session.history_lines(), query, *index) {
-                        text = found.to_string();
-                    }
+                    pending_queries.push((query.clone(), *index));
                     cursor = text.len();
                     continue;
                 }
@@ -615,9 +732,6 @@ pub fn line(
                 }
             }
             Action::Up | Action::FirstHistory => {
-                if !loaded_history {
-                    loaded_history = history.refresh_unless(session, || false);
-                }
                 if hist == session.history_lines().len() {
                     draft = text.clone();
                 }
@@ -644,19 +758,17 @@ pub fn line(
             }
             Action::Forward => {
                 if cursor == text.len() {
-                    if !text.is_empty()
-                        && !loaded_history
-                        && history
-                            .suggestion(session.history_lines(), &text, false, || false)
-                            .is_none()
-                    {
-                        // Right can arrive in the same batch as the prefix.
-                        loaded_history = history.refresh_unless(session, || false);
-                    }
-                    if let Some(s) =
-                        history.suggestion(session.history_lines(), &text, loaded_history, || true)
-                    {
-                        text.push_str(s);
+                    if !text.is_empty() {
+                        history.ensure(session, &mut view, false, &|| false);
+                        if let Some(s) =
+                            history.suggestion(session.history_lines(), &text, true, || true)
+                        {
+                            text.push_str(s);
+                        } else if let Some(s) =
+                            history.older_suggestion(session, &mut view, &text, &|| false)
+                        {
+                            text.push_str(s);
+                        }
                         cursor = text.len();
                     }
                 } else {
@@ -672,6 +784,10 @@ pub fn line(
                 if let Some(c) = character(&mut keys, first)? {
                     text.insert(cursor, c);
                     cursor += c.len_utf8();
+                    if cursor == text.len() {
+                        keys.append_burst(&mut text, session);
+                        cursor = text.len();
+                    }
                 }
             }
             _ => {}

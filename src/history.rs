@@ -1,18 +1,29 @@
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileExt, MetadataExt, OpenOptionsExt};
 use std::path::PathBuf;
 
 use crate::Session;
 
 #[derive(Default)]
 pub struct History {
-    shared: Vec<String>,
+    shared: JournalEntries,
     shared_query: String,
     shared_match: Option<usize>,
     journal: Option<(u64, u64)>,
+    snapshot: (u64, i64, i64),
     offset: u64,
+    tail_start: u64,
+    older_prefix: String,
+    older_match: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum View {
+    Unread,
+    Recent,
+    All,
 }
 
 fn file(session: &Session) -> Option<PathBuf> {
@@ -47,26 +58,62 @@ fn encode(value: &str, out: &mut String) {
     }
 }
 
+// Commands share one allocation, so loading or discarding a million journal
+// records does not require a million separate heap operations.
+#[derive(Default)]
+struct JournalEntries {
+    text: String,
+    ends: Vec<usize>,
+}
+
+impl JournalEntries {
+    fn clear(&mut self) {
+        self.text.clear();
+        self.ends.clear();
+    }
+
+    fn get(&self, index: usize) -> &str {
+        let start = index.checked_sub(1).map_or(0, |i| self.ends[i]);
+        &self.text[start..self.ends[index]]
+    }
+
+    fn push(&mut self, value: &str) {
+        let start = self.text.len();
+        if !decode_into(value, &mut self.text) {
+            self.text.truncate(start);
+            return;
+        }
+        self.ends.push(self.text.len());
+    }
+}
+
+fn command_field(row: &str) -> Option<&str> {
+    row.strip_prefix("1\t")?.splitn(4, '\t').nth(3)
+}
+
 fn decode(value: &str) -> Option<String> {
-    if !value.as_bytes().contains(&b'\\') {
-        return Some(value.to_owned());
-    }
-    let mut chars = value.chars();
-    let mut text = String::new();
-    while let Some(c) = chars.next() {
-        text.push(if c == '\\' {
-            match chars.next()? {
-                'n' => '\n',
-                'r' => '\r',
-                't' => '\t',
-                '\\' => '\\',
-                _ => return None,
+    let mut out = String::with_capacity(value.len());
+    decode_into(value, &mut out).then_some(out)
+}
+
+fn decode_into(value: &str, out: &mut String) -> bool {
+    let mut rest = value;
+    while let Some((literal, escaped)) = rest.split_once('\\') {
+        out.push_str(literal);
+        let byte = match escaped.as_bytes().first() {
+            Some(b'n') => '\n',
+            Some(b'r') => '\r',
+            Some(b't') => '\t',
+            Some(b'\\') => '\\',
+            _ => {
+                return false;
             }
-        } else {
-            c
-        });
+        };
+        out.push(byte);
+        rest = &escaped[1..];
     }
-    Some(text)
+    out.push_str(rest);
+    true
 }
 
 pub(crate) mod commands;
@@ -250,10 +297,33 @@ impl History {
 
     // Return false when input is waiting. The offset always points to the end
     // of the last complete record, so the next idle interval can resume there.
-    pub fn refresh_unless(
+    pub fn ensure(
         &mut self,
         session: &Session,
-        mut input_ready: impl FnMut() -> bool,
+        view: &mut View,
+        all: bool,
+        waiting: &dyn Fn() -> bool,
+    ) -> bool {
+        if *view == View::All || *view == View::Recent && !all {
+            return true;
+        }
+        *view = View::Unread;
+        if !self.refresh_unless(session, !all, waiting) {
+            return false;
+        }
+        *view = if self.tail_start != 0 {
+            View::Recent
+        } else {
+            View::All
+        };
+        true
+    }
+
+    fn refresh_unless(
+        &mut self,
+        session: &Session,
+        recent_first: bool,
+        input_ready: &dyn Fn() -> bool,
     ) -> bool {
         if input_ready() {
             return false;
@@ -270,14 +340,45 @@ impl History {
         let Some((mut journal, metadata)) = journal else {
             self.shared.clear();
             self.journal = None;
+            self.tail_start = 0;
+            self.older_prefix.clear();
+            self.older_match = None;
             self.offset = 0;
             return true;
         };
         let identity = (metadata.dev(), metadata.ino());
-        if self.journal != Some(identity) || metadata.len() < self.offset {
+        let snapshot = (metadata.len(), metadata.mtime(), metadata.mtime_nsec());
+        let rewritten = snapshot.0 < self.snapshot.0
+            || snapshot.0 == self.snapshot.0 && snapshot != self.snapshot;
+        self.snapshot = snapshot;
+        if self.journal != Some(identity)
+            || rewritten
+            || metadata.len() < self.offset
+            || self.tail_start != 0 && !recent_first
+        {
             self.shared.clear();
             self.journal = Some(identity);
             self.offset = 0;
+            self.tail_start = 0;
+            self.older_prefix.clear();
+            self.older_match = None;
+            // Recent matches are authoritative even before reading the older prefix.
+            // Skip the first possibly split UTF-8 record, including its newline.
+            const WINDOW: u64 = 16 * 1024;
+            let end = metadata.len();
+            if recent_first
+                && end > 2 * WINDOW
+                && journal.seek(SeekFrom::Start(end - WINDOW)).is_ok()
+            {
+                let mut tail = BufReader::new((&mut journal).take(WINDOW));
+                if let Ok(n) = tail.skip_until(b'\n')
+                    && (n as u64) < WINDOW
+                    && n > 0
+                {
+                    self.offset = end - WINDOW + n as u64;
+                    self.tail_start = self.offset;
+                }
+            }
         }
         if metadata.len() == self.offset || journal.seek(SeekFrom::Start(self.offset)).is_err() {
             return true;
@@ -320,11 +421,7 @@ impl History {
                     &partial
                 };
                 if let Ok(row) = std::str::from_utf8(row) {
-                    if let Some(command) = row
-                        .strip_prefix("1\t")
-                        .and_then(|fields| fields.splitn(4, '\t').nth(3))
-                        .and_then(decode)
-                    {
+                    if let Some(command) = command_field(row) {
                         self.shared.push(command);
                     }
                 }
@@ -335,18 +432,184 @@ impl History {
         }
     }
 
-    pub fn search<'a>(&'a self, local: &'a [String], query: &str, skip: usize) -> Option<&'a str> {
-        let entries = if self.shared.is_empty() {
-            local
+    // Search complete blocks backwards. Most blocks can be ruled out with
+    // one byte substring search, without decoding or allocating any commands.
+    fn older_match(
+        &self,
+        session: &Session,
+        needle: &str,
+        prefix: bool,
+        mut skip: usize,
+        waiting: &dyn Fn() -> bool,
+    ) -> Result<Option<String>, ()> {
+        const BLOCK: usize = 128 * 1024;
+        let path = file(session).ok_or(())?;
+        let journal = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path)
+            .map_err(|_| ())?;
+        let m = journal.metadata().map_err(|_| ())?;
+        if Some((m.dev(), m.ino())) != self.journal || m.len() < self.offset {
+            return Err(());
+        }
+        let mut end = self.tail_start;
+        let mut block = vec![0; BLOCK.min(end as usize)];
+        while end != 0 {
+            if waiting() {
+                return Err(());
+            }
+            let start = end.saturating_sub(BLOCK as u64);
+            let buf = &mut block[..(end - start) as usize];
+            journal.read_exact_at(buf, start).map_err(|_| ())?;
+            let boundary = if start == 0 {
+                0
+            } else {
+                buf.iter().position(|&b| b == b'\n').ok_or(())? + 1
+            };
+            if boundary == buf.len() {
+                return Err(());
+            } // An oversized record needs the streaming reader.
+            let rows = &buf[boundary..];
+            // Whole-block UTF-8 search uses the standard library's substring
+            // prefilter. Invalid input still goes through per-record validation.
+            if std::str::from_utf8(rows).map_or(true, |text| text.contains(needle)) {
+                for line in rows.rsplit(|&b| b == b'\n') {
+                    if let Ok(line) = std::str::from_utf8(line)
+                        && let Some(word) = command_field(line)
+                        && if prefix {
+                            word.starts_with(needle)
+                        } else {
+                            word.contains(needle)
+                        }
+                        && let Some(command) = decode(word)
+                        && if prefix {
+                            command.len() > needle.len()
+                        } else {
+                            command.contains(needle)
+                        }
+                    {
+                        if skip == 0 {
+                            return Ok(Some(command));
+                        }
+                        skip -= 1;
+                    }
+                }
+            }
+            end = start + boundary as u64;
+        }
+        Ok(None)
+    }
+
+    pub fn older_suggestion<'a>(
+        &'a mut self,
+        session: &Session,
+        view: &mut View,
+        prefix: &str,
+        waiting: &dyn Fn() -> bool,
+    ) -> Option<&'a str> {
+        if waiting() || *view != View::Recent {
+            return None;
+        }
+        let reusable = !self.older_prefix.is_empty()
+            && prefix.starts_with(&self.older_prefix)
+            && self
+                .older_match
+                .as_ref()
+                .is_none_or(|s| s.starts_with(prefix) && s.len() > prefix.len());
+        if !reusable {
+            // These bytes can be escaped in the journal. The decoded search
+            // also handles a single command larger than the raw search block.
+            if !prefix.contains(['\\', '\n', '\r', '\t'])
+                && let Ok(result) = self.older_match(session, prefix, true, 0, waiting)
+            {
+                self.older_match = result;
+                self.older_prefix.clear();
+                self.older_prefix.push_str(prefix);
+            } else {
+                if !self.ensure(session, view, true, waiting) {
+                    return None;
+                }
+                return self.suggestion(&[], prefix, true, || !waiting());
+            }
+        }
+        self.older_match.as_deref().map(|s| &s[prefix.len()..])
+    }
+
+    pub fn find_command(
+        &mut self,
+        session: &Session,
+        view: &mut View,
+        queries: &[(String, usize)],
+        waiting: &dyn Fn() -> bool,
+    ) -> Result<Option<String>, ()> {
+        if !self.ensure(session, view, false, waiting) {
+            return Err(());
+        }
+        if *view == View::Recent {
+            let (query, skip) = queries.last().unwrap();
+            let mut remaining = *skip;
+            if let Some(found) = self.search_query(&[], query, &mut remaining, waiting)? {
+                return Ok(Some(found.to_owned()));
+            }
+            if !query.contains(['\\', '\n', '\r', '\t'])
+                && !waiting()
+                && let Ok(found) = self.older_match(session, query, false, remaining, waiting)
+                && (found.is_some() || queries.len() == 1 && !self.shared.ends.is_empty())
+            {
+                return Ok(found);
+            }
+            if !self.ensure(session, view, true, waiting) {
+                return Err(());
+            }
+        }
+        // A failed refinement keeps the last successful result, even if keys
+        // arrived before the previous query had completed.
+        for (query, skip) in queries.iter().rev() {
+            let mut remaining = *skip;
+            if let Some(found) =
+                self.search_query(session.history_lines(), query, &mut remaining, waiting)?
+            {
+                return Ok(Some(found.to_owned()));
+            }
+        }
+        Ok(None)
+    }
+
+    fn search_query<'a>(
+        &'a self,
+        local: &'a [String],
+        query: &str,
+        remaining: &mut usize,
+        waiting: &dyn Fn() -> bool,
+    ) -> Result<Option<&'a str>, ()> {
+        let use_local = self.shared.ends.is_empty();
+        let mut end = if use_local {
+            local.len()
         } else {
-            &self.shared
+            self.shared.ends.len()
         };
-        entries
-            .iter()
-            .rev()
-            .filter(|v| v.contains(query))
-            .nth(skip)
-            .map(String::as_str)
+        while end > 0 {
+            if waiting() {
+                return Err(());
+            }
+            let start = end.saturating_sub(1024);
+            for index in (start..end).rev() {
+                let value = if use_local {
+                    local[index].as_str()
+                } else {
+                    self.shared.get(index)
+                };
+                if value.contains(query) {
+                    if *remaining == 0 {
+                        return Ok(Some(value));
+                    }
+                    *remaining -= 1;
+                }
+            }
+            end = start;
+        }
+        Ok(None)
     }
 
     pub fn suggestion<'a>(
@@ -359,22 +622,33 @@ impl History {
         if prefix.is_empty() {
             return None;
         }
-        let suffix = |s: &'_ String| s.len() > prefix.len() && s.starts_with(prefix);
-        if let Some(command) = local.iter().rev().find(|s| suffix(s)) {
-            return Some(&command[prefix.len()..]);
+        let suffix = |s: &str| s.len() > prefix.len() && s.starts_with(prefix);
+        if let Some((last, earlier)) = local.split_last() {
+            if suffix(last) {
+                return Some(&last[prefix.len()..]);
+            }
+            for chunk in earlier.rchunks(1024) {
+                if !may_scan() {
+                    return None;
+                }
+                if let Some(command) = chunk.iter().rev().find(|s| suffix(s.as_str())) {
+                    return Some(&command[prefix.len()..]);
+                }
+            }
         }
-        if !shared || self.shared.is_empty() {
+        if !shared || self.shared.ends.is_empty() {
             return None;
         }
-        if let Some(command) = self.shared.last().filter(|s| suffix(s)) {
+        let command = self.shared.get(self.shared.ends.len() - 1);
+        if suffix(command) {
             return Some(&command[prefix.len()..]);
         }
-        let mut end = self.shared.len();
+        let mut end = self.shared.ends.len();
         if !self.shared_query.is_empty() && prefix.starts_with(&self.shared_query) {
             // A longer query can only match at or before the previous match.
             let index = self.shared_match?;
-            if suffix(&self.shared[index]) {
-                return Some(&self.shared[index][prefix.len()..]);
+            if suffix(self.shared.get(index)) {
+                return Some(&self.shared.get(index)[prefix.len()..]);
             }
             end = index;
         }
@@ -384,8 +658,8 @@ impl History {
                 return None;
             }
             let start = end.saturating_sub(4096);
-            if let Some(offset) = self.shared[start..end].iter().rposition(suffix) {
-                found = Some(start + offset);
+            if let Some(i) = (start..end).rev().find(|&i| suffix(self.shared.get(i))) {
+                found = Some(i);
                 break;
             }
             end = start;
@@ -393,7 +667,7 @@ impl History {
         self.shared_query.clear();
         self.shared_query.push_str(prefix);
         self.shared_match = found;
-        found.map(|i| &self.shared[i][prefix.len()..])
+        found.map(|i| &self.shared.get(i)[prefix.len()..])
     }
 }
 
@@ -408,9 +682,9 @@ mod tests {
             b"1\t1\t0\t/tmp\tword one\n1\t1\t0\t/tmp\tword two\n".as_slice(),
             || false,
         );
-        history
-            .shared
-            .extend((0..5000).map(|n| format!("padding {n}")));
+        for i in 0..5000 {
+            history.shared.push(&format!("padding {i}"));
+        }
         let mut polls = 0;
         assert_eq!(
             history.suggestion(&[], "word", true, || {
@@ -449,15 +723,30 @@ mod tests {
             polls += 1;
             polls == 3
         }));
-        assert_eq!(history.shared, ["first"]);
+        assert_eq!(
+            (0..history.shared.ends.len())
+                .map(|i| history.shared.get(i))
+                .collect::<Vec<_>>(),
+            ["first"]
+        );
         let offset = history.offset as usize;
         // The writer has yet to append the final newline.
         let partial = &data[offset..data.len() - 1];
         assert!(history.read_records(BufReader::with_capacity(3, partial), || false));
-        assert_eq!(history.shared, ["first", "second\nline"]);
+        assert_eq!(
+            (0..history.shared.ends.len())
+                .map(|i| history.shared.get(i))
+                .collect::<Vec<_>>(),
+            ["first", "second\nline"]
+        );
         let rest = &data[history.offset as usize..];
         assert!(history.read_records(rest, || false));
-        assert_eq!(history.shared, ["first", "second\nline", "last"]);
+        assert_eq!(
+            (0..history.shared.ends.len())
+                .map(|i| history.shared.get(i))
+                .collect::<Vec<_>>(),
+            ["first", "second\nline", "last"]
+        );
         assert_eq!(history.offset, data.len() as u64);
     }
 }

@@ -1,7 +1,8 @@
+use crate::pattern::directory::scan;
 use std::fs;
 use std::ops::ControlFlow;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::Session;
 
@@ -163,6 +164,18 @@ impl Source {
             }
             Self::LiteralWords(source) => {
                 let ifs = session.get("IFS").unwrap_or_else(|| " \t\n".into());
+                if let Some(matches) = source.indexed(prefix, &ifs) {
+                    let mut common = Common::new(source.word(*matches.first()?).to_owned());
+                    if matches.len() > 1 {
+                        let _ = common.narrow(source.word(*matches.last()?), prefix);
+                    }
+                    let choices = if list {
+                        matches.iter().map(|&r| source.word(r).to_owned()).collect()
+                    } else {
+                        Vec::new()
+                    };
+                    return Some((common, choices));
+                }
                 let names = source.literal_matches(prefix, &ifs);
                 if !list {
                     return Some((Common::from_names(names, prefix)?, Vec::new()));
@@ -279,7 +292,7 @@ pub fn at(
 fn visit_commands(
     prefix: &str,
     session: &Session,
-    visit: &mut dyn FnMut(&str, Option<&fs::DirEntry>) -> ControlFlow<()>,
+    visit: &mut dyn FnMut(&str, Option<(&Path, u8)>) -> ControlFlow<()>,
 ) -> ControlFlow<()> {
     for name in crate::execute::builtin_names()
         .iter()
@@ -298,20 +311,24 @@ fn visit_commands(
         } else {
             &dir
         };
-        if let Ok(entries) = fs::read_dir(path) {
-            for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str().filter(|n| n.starts_with(prefix)) {
-                    visit(name, Some(&entry))?;
-                }
+        scan(path, &mut |raw, kind| {
+            if !matches!(raw.to_bytes(), b"." | b"..")
+                && raw.to_bytes().starts_with(prefix.as_bytes())
+                && let Ok(name) = raw.to_str()
+            {
+                return visit(name, Some((path, kind)));
             }
-        }
+            ControlFlow::Continue(())
+        })?;
     }
     ControlFlow::Continue(())
 }
 
-fn executable(entry: Option<&fs::DirEntry>) -> bool {
-    entry.is_none_or(|e| {
-        fs::metadata(e.path()).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+fn executable(name: &str, entry: Option<(&Path, u8)>) -> bool {
+    entry.is_none_or(|(path, kind)| {
+        matches!(kind, libc::DT_REG | libc::DT_LNK | libc::DT_UNKNOWN)
+            && fs::metadata(path.join(name))
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
     })
 }
 
@@ -321,10 +338,10 @@ fn common_command(prefix: &str, session: &Session) -> Option<Common> {
         if let Some(known) = &mut common {
             // Only a name that could shorten the prefix or change uniqueness
             // needs a filesystem permission check.
-            if known.could_change(name) && executable(entry) {
+            if known.could_change(name) && executable(name, entry) {
                 return known.narrow(name, prefix);
             }
-        } else if executable(entry) {
+        } else if executable(name, entry) {
             common = Some(Common::new(name.to_owned()));
         }
         ControlFlow::Continue(())
@@ -375,7 +392,7 @@ pub(crate) fn host_names(prefix: &str, session: &Session) -> Vec<String> {
 pub fn command_names(prefix: &str, session: &Session) -> Vec<String> {
     let mut names = Vec::new();
     let _ = visit_commands(prefix, session, &mut |name, entry| {
-        if executable(entry) {
+        if executable(name, entry) {
             names.push(name.to_owned());
         }
         ControlFlow::Continue(())
@@ -388,7 +405,7 @@ pub fn command_names(prefix: &str, session: &Session) -> Vec<String> {
 struct Directory<'a> {
     dir: &'a str,
     base: &'a str,
-    entries: fs::ReadDir,
+    path: PathBuf,
 }
 
 impl<'a> Directory<'a> {
@@ -400,48 +417,50 @@ impl<'a> Directory<'a> {
             Some(rest) => Path::new(&session.get("HOME")?).join(rest),
             None => Path::new(if dir.is_empty() { "." } else { dir }).to_owned(),
         };
-        Some(Self {
-            dir,
-            base,
-            entries: fs::read_dir(path).ok()?,
-        })
+        Some(Self { dir, base, path })
     }
 
-    fn matches(self) -> impl Iterator<Item = (String, fs::DirEntry)> + 'a {
-        self.entries.flatten().filter_map(move |entry| {
-            let name = entry.file_name().into_string().ok()?;
-            (name.starts_with(self.base) && (!name.starts_with('.') || self.base.starts_with('.')))
-                .then_some((name, entry))
-        })
+    fn visit(&self, mut visitor: impl FnMut(&str, u8) -> ControlFlow<()>) {
+        let _ = scan(&self.path, &mut |raw, kind| {
+            let bytes = raw.to_bytes();
+            if bytes.starts_with(self.base.as_bytes())
+                && !matches!(bytes, b"." | b"..")
+                && (!bytes.starts_with(b".") || self.base.starts_with('.'))
+                && let Ok(name) = raw.to_str()
+            {
+                return visitor(name, kind);
+            }
+            ControlFlow::Continue(())
+        });
     }
-}
 
-fn is_directory(entry: &fs::DirEntry) -> bool {
-    match entry.file_type() {
-        Ok(kind) if !kind.is_symlink() => kind.is_dir(),
-        _ => entry.path().is_dir(),
+    fn is_directory(&self, name: &str, kind: u8) -> bool {
+        kind == libc::DT_DIR
+            || matches!(kind, libc::DT_LNK | libc::DT_UNKNOWN) && self.path.join(name).is_dir()
     }
 }
 
 fn common_file(prefix: &str, directories_only: bool, session: &Session) -> Option<Common> {
     let directory = Directory::open(prefix, session)?;
-    let (dir, base) = (directory.dir, directory.base);
-    let mut matches = directory.matches();
-    let (name, first) = matches.find(|(_, e)| !directories_only || is_directory(e))?;
-    let mut common = Common::new(name);
-    for (name, entry) in matches {
-        if common.could_change(&name)
-            && (!directories_only || is_directory(&entry))
-            && common.narrow(&name, base).is_break()
-        {
-            break;
+    let mut first_kind = libc::DT_UNKNOWN;
+    let mut common: Option<Common> = None;
+    directory.visit(|name, kind| {
+        if let Some(known) = &mut common {
+            if known.could_change(name) && (!directories_only || directory.is_directory(name, kind))
+            {
+                return known.narrow(name, directory.base);
+            }
+        } else if !directories_only || directory.is_directory(name, kind) {
+            first_kind = kind;
+            common = Some(Common::new(name.to_owned()));
         }
-    }
-    // A slash can extend the common prefix only when this is the sole match.
-    if common.unique && (directories_only || is_directory(&first)) {
+        ControlFlow::Continue(())
+    });
+    let mut common = common?;
+    if common.unique && (directories_only || directory.is_directory(&common.text, first_kind)) {
         common.text.push('/');
     }
-    common.text.insert_str(0, dir);
+    common.text.insert_str(0, directory.dir);
     Some(common)
 }
 
@@ -456,19 +475,20 @@ pub fn file_names(
     };
     let dir = directory.dir;
     let mut choices = Vec::new();
-    for (name, entry) in directory.matches() {
-        let is_dir = (directories_only || mark_directories) && is_directory(&entry);
+    directory.visit(|name, kind| {
+        let is_dir = (directories_only || mark_directories) && directory.is_directory(name, kind);
         if directories_only && !is_dir {
-            continue;
+            return ControlFlow::Continue(());
         }
         let mut path = String::with_capacity(dir.len() + name.len() + 1);
         path.push_str(dir);
-        path.push_str(&name);
+        path.push_str(name);
         if mark_directories && is_dir {
             path.push('/');
         }
         choices.push(path);
-    }
+        ControlFlow::Continue(())
+    });
     choices.sort_unstable();
     choices.dedup();
     choices

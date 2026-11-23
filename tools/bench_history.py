@@ -58,6 +58,39 @@ def sample(shell, home, bindir, action, count):
             os.write(fd, b"p")
             read_until(fd, f"\x1b[2mrintf entry-{count - 1:06d}\x1b[0m".encode())
             return [(time.perf_counter_ns() - start) / 1e6]
+        if action == "Old hint":
+            start = time.perf_counter_ns()
+            os.write(fd, b"printf entry-00000")
+            read_until(fd, b"\x1b[2m9\x1b[0m")
+            return [(time.perf_counter_ns() - start) / 1e6]
+        if action in ("Recent search", "Old search"):
+            number = count - 1 if action == "Recent search" else 0
+            query = f"entry-{number:06d}".encode()
+            start = time.perf_counter_ns()
+            os.write(fd, b"\x12" + query)
+            read_until(fd, b"(reverse-i-search) `" + query + b"': printf " + query)
+            return [(time.perf_counter_ns() - start) / 1e6]
+        if action == "Cancel search":
+            start = time.perf_counter_ns()
+            os.write(fd, b"\x12\x07")
+            data = read_until(fd, b"(reverse-i-search)")
+            read_until(fd, PROMPT, initial=data[data.index(b"(reverse-i-search)"):])
+            return [(time.perf_counter_ns() - start) / 1e6]
+        if action in ("Burst", "Paste"):
+            count = 512 if action == "Burst" else 16384
+            value = b"a" * count + b"TAILMARK"
+            line = b"v=" + value
+            packet = line if action == "Burst" else b"\x1b[200~" + line + b"\x1b[201~"
+            start = time.perf_counter_ns()
+            while packet:
+                packet = packet[os.write(fd, packet):]
+            read_until(fd, b"TAILMARK")
+            end = time.perf_counter_ns()
+            os.write(fd, b"\r")
+            read_until(fd, NEW_PROMPT)
+            os.write(fd, b'echo "${#v}"\r')
+            read_until(fd, f"\x1b[?2004l{len(value)}\r\n".encode())
+            return [(end - start) / 1e6]
         tab = action == "Tab"
         first = b"z" if tab else b":"
         start = time.perf_counter_ns()
@@ -73,6 +106,7 @@ def sample(shell, home, bindir, action, count):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("shell", type=Path, nargs="+")
+    parser.add_argument("--bursts", action="store_true", help="include typeahead, paste and search cancellation")
     parser.add_argument("--runs", type=int, default=30)
     parser.add_argument("--entries", type=int, nargs="+", default=[0, 1000, 100000])
     args = parser.parse_args()
@@ -94,7 +128,12 @@ def main():
                 for i in range(count):
                     output.write(f"1\t1\t0\t/tmp\tprintf entry-{i:06d}\n".encode())
             size = journal.stat().st_size
-            for action in (["Tab", "Enter", "Hint"] if count else ["Tab", "Enter"]):
+            actions = ["Tab", "Enter", "Hint"] if count else ["Tab", "Enter"]
+            if args.bursts:
+                actions += ["Cancel search", "Burst", "Paste"]
+                if count >= 10:
+                    actions += ["Old hint", "Recent search", "Old search"]
+            for action in actions:
                 for shell in shells:
                     jobs.append((shell, count, action, home, journal, size))
         samples = {job: [] for job in jobs}
@@ -103,7 +142,7 @@ def main():
             for job in jobs[shift:] + jobs[:shift]:
                 shell, count, action, home, journal, size = job
                 elapsed = sample(shell, home, bindir, action, count)
-                if action == "Enter":
+                if action in ("Enter", "Burst", "Paste"):
                     os.truncate(journal, size)
                 if i >= 3:
                     samples[job].append(elapsed)

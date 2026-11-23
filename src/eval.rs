@@ -8,10 +8,19 @@ use crate::parser::{CasePattern, Command, Statement};
 pub fn execute_program(
     session: &mut Session,
     program: Vec<Statement>,
+    status: u8,
+    replace_last: bool,
+) -> Flow {
+    run_statements(session, &mut program.into_iter(), status, replace_last)
+}
+
+fn run_statements(
+    session: &mut Session,
+    iter: &mut dyn Iterator<Item = Statement>,
     mut status: u8,
     replace_last: bool,
 ) -> Flow {
-    let mut statements = program.into_iter().peekable();
+    let mut statements = iter.peekable();
     while let Some(statement) = statements.next() {
         if !session.coprocesses.is_empty() {
             crate::execute::coprocess::refresh(session);
@@ -418,7 +427,7 @@ fn repeat(
         }
         let step = match next(session, last) {
             Ok(None) => break Flow::Continue(result),
-            Ok(Some(status)) => execute_program(session, body.to_vec(), status, false),
+            Ok(Some(status)) => run_statements(session, &mut body.iter().cloned(), status, false),
             Err(Flow::Continue(code)) => break Flow::Continue(code),
             Err(flow) => flow,
         };
@@ -470,7 +479,7 @@ pub fn call_function(session: &mut Session, name: &str, args: &[String], status:
         session.functrace || session.traced_functions.contains(name),
     );
     let flow = crate::traps::debug(session, status)
-        .unwrap_or_else(|| execute_program(session, body.as_ref().clone(), status, false));
+        .unwrap_or_else(|| run_statements(session, &mut body.iter().cloned(), status, false));
     let flow = crate::traps::returning(session, flow);
     session.traps.leave_function(hidden);
     session.positional = old;

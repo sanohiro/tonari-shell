@@ -22,6 +22,10 @@ thread_local! {
     }) };
 }
 
+pub(super) fn invalidate() {
+    PREVIOUS.with_borrow_mut(|order| order.indices.clear());
+}
+
 impl PreviousOrder {
     fn matches(&self, paths: &[String], collation: Collation) -> bool {
         if self.collation != collation || self.indices.len() != paths.len() {
@@ -79,6 +83,51 @@ fn sort_indices(
 }
 
 #[cfg(target_os = "macos")]
+fn sort_large(indices: &mut [usize], compare: impl Fn(&usize, &usize) -> Ordering + Sync) {
+    if indices.len() < 4096 || std::thread::available_parallelism().map_or(true, |n| n.get() < 2) {
+        indices.sort_unstable_by(compare);
+        return;
+    }
+    let (left, right) = indices.split_at_mut(indices.len() / 2);
+    // The enclosing glob keeps this locale alive until the worker joins.
+    let locale = unsafe { libc::uselocale(std::ptr::null_mut()) } as usize;
+    let joined = std::thread::scope(|scope| {
+        let worker = std::thread::Builder::new().spawn_scoped(scope, || {
+            // POSIX thread locales do not propagate to newly created threads.
+            let before = unsafe { libc::uselocale(locale as libc::locale_t) };
+            left.sort_unstable_by(&compare);
+            unsafe {
+                libc::uselocale(before);
+            }
+        });
+        right.sort_unstable_by(&compare);
+        if let Ok(handle) = worker {
+            handle.join().unwrap();
+            true
+        } else {
+            false
+        }
+    });
+    if !joined {
+        left.sort_unstable_by(&compare);
+    }
+    let mut result = Vec::with_capacity(left.len() + right.len());
+    let (mut a, mut b) = (&left[..], &right[..]);
+    while !a.is_empty() && !b.is_empty() {
+        if compare(&a[0], &b[0]) != Ordering::Greater {
+            result.push(a[0]);
+            a = &a[1..];
+        } else {
+            result.push(b[0]);
+            b = &b[1..];
+        }
+    }
+    result.extend_from_slice(a);
+    result.extend_from_slice(b);
+    indices.copy_from_slice(&result);
+}
+
+#[cfg(target_os = "macos")]
 fn sort_utf8(paths: &[String], bytes: usize, indices: &mut [usize]) -> bool {
     use std::ffi::CStr;
     unsafe extern "C" {
@@ -100,7 +149,7 @@ fn sort_utf8(paths: &[String], bytes: usize, indices: &mut [usize]) -> bool {
         wide.extend(path.chars().map(|c| c as libc::wchar_t));
         wide.push(0);
     }
-    indices.sort_unstable_by(|&i, &j| {
+    sort_large(indices, |&i, &j| {
         let order = unsafe { wcscoll(wide[offsets[i]..].as_ptr(), wide[offsets[j]..].as_ptr()) };
         order.cmp(&0).then_with(|| paths[i].cmp(&paths[j]))
     });
@@ -114,9 +163,9 @@ unsafe fn compare_terminated(a: &str, b: &str) -> Ordering {
 }
 
 pub(super) fn append(mut paths: Vec<String>, fields: &mut Vec<String>, collation: Collation) {
-    if collation != Collation::Current && (32..=2048).contains(&paths.len()) {
+    if collation != Collation::Current && (32..=16384).contains(&paths.len()) {
         let bytes = paths.iter().map(|p| p.len() + 1).sum::<usize>();
-        if bytes <= 64 * 1024 {
+        if bytes <= 512 * 1024 {
             PREVIOUS.with_borrow_mut(|previous| {
                 if !previous.matches(&paths, collation) {
                     previous.update(&mut paths, collation, bytes);
