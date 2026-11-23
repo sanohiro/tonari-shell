@@ -27,6 +27,59 @@ python3 tools/bench_file_capture.py ./previous ./tonari /path/to/bash --runs 19
 python3 tools/bench_file_capture.py ./previous ./tonari /path/to/bash --case 67108864 1 --runs 9
 ```
 
+<a id="external-stream-controls"></a>
+
+## 2026-11-23 · External redirections and pipes after the capture change / 通常のリダイレクトとパイプ
+
+**Previous Tonari (`36a580f`) / current Tonari (`e7cd570`) / Bash 5.2.37**, median milliseconds from shell launch to exit. Each shell read the same script and each output file was compared byte for byte. The redirect runs `/bin/cat <input >out`. The pipeline adds two more `/bin/cat` stages. The kernel supplied the default pipe capacity throughout. The binaries ran in rotating order with two warm-ups and 31 measured samples per configuration on the M1. The Linux executables and data ran on the Debian 13 guest filesystem.
+
+| Input and operation | macOS arm64 | Debian arm64 | Debian x86-64 under Rosetta |
+| --- | ---: | ---: | ---: |
+| 64 B, redirect | 6.023 / 6.107 / 9.562 | 0.593 / 0.562 / 0.978 | 26.769 / 26.936 / 42.030 |
+| 64 B, pipeline | 6.818 / 6.905 / 9.682 | 0.744 / 0.703 / 1.147 | 31.296 / 31.240 / 45.652 |
+| 16 MiB, redirect | 14.896 / 15.039 / 18.328 | 3.789 / 3.772 / 3.978 | 32.067 / 31.927 / 47.155 |
+| 16 MiB, pipeline | 15.477 / 15.050 / 18.864 | 11.818 / 11.210 / 11.831 | 47.720 / 47.709 / 62.950 |
+
+In a separate control, one native arm64 Python parent launched both release binaries inside the same Linux VM. The median elapsed time over 81 alternating warm samples for `--noprofile --norc -c ':'` through exit was 0.355 ms on arm64 and 8.543 ms under Rosetta. A pipe handshake in a ready shell (send newline to `read`, receive the marker after `:`) took 0.048 and 2.808 ms. Adding 256 five-byte captures inside the handshake gave 0.853 and 7.817 ms. The ready-shell measurements exclude process launch and exit. Inspection of `/proc/PID/maps` from the native parent found `/run/rosetta/rosetta` in the x86-64 Tonari process. These figures characterize the M1 VM and its translator. Native Intel and AMD hardware remains unmeasured.
+
+外部コマンドはシェルが接続した FD を直接読み書きします。今回の計測でも、ファイルをシェル変数に取り込む最適化による一貫した差は確認できませんでした。小さいパイプでは接続と起動の時間が効きます。Linux で大きなストリームを流す場合は、別の試作でパイプ容量を広げる効果が出ています。[計測スクリプト](../tools/bench_streams.py) · [パイプ容量の比較](#linux-pipe-capacity)
+
+```sh
+python3 tools/bench_streams.py ./previous ./current /path/to/bash --case redirect --case pipe --sizes 64 16777216 --runs 31
+```
+
+<a id="balanced-linux-pipes"></a>
+
+## 2026-11-23 · Choosing a Linux pipeline capacity / Linux のパイプ容量の選定
+
+Each timing cell gives **kernel default (64 KiB) / 128 KiB / 256 KiB** median milliseconds from shell launch to exit. All three used Tonari `e7cd570` with the same distribution build profile. The two candidates queried each new pipeline's capacity and requested an increase for capacities from 64 KiB up to the target. A downstream process verified all three capacities. This kernel rounded a 96 KiB request to 128 KiB and a 192 KiB request to 256 KiB. Single-stage file redirections use a separate execution path.
+
+| Workload | Debian arm64, 8 CPUs available | Debian arm64, pinned to 1 CPU | Debian x86-64 under Rosetta |
+| --- | ---: | ---: | ---: |
+| 64 B, two external `dd` processes | 0.672 / 0.662 / 0.661 | 2.975 / 2.983 / 2.975 | 30.847 / 30.783 / 30.891 |
+| 256 KiB, two `dd` processes | 0.764 / 0.732 / 0.634 | 2.999 / 2.990 / 3.028 | 30.052 / 29.888 / 29.701 |
+| 4 MiB, two `dd` processes | 3.084 / 1.600 / 1.470 | 3.672 / 3.895 / 3.812 | 31.352 / 31.171 / 30.771 |
+| 256 MiB, two `dd` processes | 121.520 / 51.726 / 43.699 | 45.100 / 43.204 / 41.856 | 73.810 / 72.818 / 71.778 |
+| 16 MiB file through three `cat` processes | 12.692 / 9.209 / 7.404 | 11.652 / 11.059 / 10.626 | 44.585 / 40.343 / 38.851 |
+| `yes` piped to `head -c 64` | 0.640 / 0.645 / 0.632 | 2.926 / 2.963 / 2.986 | 32.697 / 32.242 / 32.668 |
+| 32 one-byte external pipelines in one shell | 10.975 / 10.857 / 11.050 | 10.909 / 10.737 / 10.719 | 479.772 / 478.165 / 478.405 |
+
+The M1 ran a Debian 13 VM with Linux 6.11.11-linuxkit, 4 KiB pages and warm caches. Each workload cycled through all six execution orders in shuffled blocks. After three warm-ups, the seven rows used 61, 31, 25, 17, 21, 41 and 19 samples per binary per session (13 for the last row under Rosetta). Each arm64 column pools two sessions. The translated column has one. The one-CPU restriction applied to the launcher, shell and both ends of each pipe. The 64 B transfer used one 64-byte block. The larger `dd` transfers used 64 KiB blocks from `/dev/zero` to `/dev/null` with `pipefail`. The three-stage test verified every file byte. The early-close test verified the 64 output bytes and stage statuses 141 and 0.
+
+128 KiB は、8 CPU を使える arm64 で 256 MiB 転送の短縮分の約 90% を得つつ、256 KiB 案の半分の容量で済みました。32本の短いパイプでは差が小さく、同じ条件の p95 は 12.643 / 13.014 / 12.387 ms でした。1 CPU での 4 MiB 転送は 128 KiB の方が中央値で 0.223 ms 長くなりました。Linux の主対象であるネイティブ x86-64 と WSL2 は未計測です。[採用した実装](../src/execute.rs) · [バイト単位の検証](../tools/bench_streams.py)
+
+A separate session added Debian Bash 5.2.37 to the rotation. Each cell gives **128 KiB Tonari / Bash** median milliseconds. Bold cells took more than two-thirds of Bash time. Each case ran 27 times per binary, or 61 for the translated 256 MiB transfer.
+
+| Transfer | arm64, 8 CPUs available | arm64, pinned to 1 CPU | x86-64 under Rosetta |
+| --- | ---: | ---: | ---: |
+| 64 B | **0.627 / 0.928** | **2.010 / 2.998** | 26.648 / 41.250 |
+| 4 MiB | 1.426 / 3.377 | **3.999 / 4.756** | **28.248 / 41.900** |
+| 256 MiB | 43.794 / 108.020 | **42.035 / 44.969** | **68.568 / 83.730** |
+
+Under translation the 128 KiB build's 256 MiB p95 changed from 176.685 ms in the first 17 samples to 72.851 ms in the separate 61-sample run. The kernel-default build's p95 went from 75.577 to 154.967 ms across those sessions. The tail timings varied across sessions for both builds.
+
+On arm64, a separate test ran as a private UID and held empty pipes near the kernel's per-user soft limit. Both trial binaries completed a pipeline with the original 64 KiB when an increase was denied. After crossing the limit, the child observed the kernel's reduced 8 KiB capacity and the test still transferred all bytes. [Linux pipe capacity accounting](https://man7.org/linux/man-pages/man7/pipe.7.html)
+
 <a id="linux-pipe-capacity"></a>
 
 ## 2026-11-23 · Linux pipeline capacity / Linux のパイプ容量

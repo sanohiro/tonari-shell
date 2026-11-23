@@ -422,6 +422,8 @@ printf '%s\0' "$#" "$@"; done"""
         self.compare("printf abc | cat | cat", 0, b"abc")
         self.compare(r"printf '\377\000' | cat", 0, b"\xff\x00")
         self.compare("yes | head -n 1", 0, b"y\n")
+        self.compare('set -o pipefail; yes | head -n 1; printf "%s:%s" "$?" "${PIPESTATUS[*]}"',
+                     0, b"y\n141:141 0")
         self.compare("exit 42 | cat; printf ok", 0, b"ok")
         self.compare("missing-tonari-command | cat", 0)
         self.compare("printf abc | missing-tonari-command", 127)
@@ -431,6 +433,28 @@ printf '%s\0' "$#" "$@"; done"""
         tool.write_text("plain file")
         self.compare("./not-executable", 126)
         self.compare("cat < absent", 1)
+
+    @unittest.skipUnless(sys.platform.startswith("linux") and hasattr(fcntl, "F_GETPIPE_SZ"),
+                         "Linux pipe capacity")
+    def test_pipeline_capacity_respects_kernel_limits(self):
+        reader, writer = os.pipe()
+        try:
+            default = fcntl.fcntl(reader, fcntl.F_GETPIPE_SZ)
+            expected = default
+            if 65536 <= default < 131072:
+                try:
+                    expected = fcntl.fcntl(reader, fcntl.F_SETPIPE_SZ, 131072)
+                except OSError:
+                    pass  # The kernel can deny an increase for this user.
+        finally:
+            os.close(reader)
+            os.close(writer)
+        command = (f"/bin/true | {shlex.quote(sys.executable)} -c "
+                   "'import fcntl; print(fcntl.fcntl(0, fcntl.F_GETPIPE_SZ))'")
+        for shell, size in ((BASH, default), (TONARI, expected)):
+            with self.subTest(shell=shell):
+                p = self.command(shell, command)
+                self.assertEqual((p.returncode, p.stdout, p.stderr), (0, f"{size}\n".encode(), b""))
 
     def test_parenthesized_pipeline_stage_is_one_subshell(self):
         self.compare(r"""parent=$BASHPID

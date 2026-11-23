@@ -232,6 +232,16 @@ pub(crate) fn private_fd(fd: OwnedFd) -> io::Result<OwnedFd> {
 
 fn pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     let (read, write) = io::pipe()?;
+    #[cfg(target_os = "linux")]
+    {
+        const TARGET: libc::c_int = 128 * 1024;
+        let fd = read.as_raw_fd();
+        let capacity = unsafe { libc::fcntl(fd, libc::F_GETPIPE_SZ) };
+        // Preserve larger defaults and the reduced capacity used under quota pressure.
+        if (64 * 1024..TARGET).contains(&capacity) {
+            unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, TARGET) };
+        }
+    }
     Ok((private_fd(read.into())?, private_fd(write.into())?))
 }
 
