@@ -587,15 +587,15 @@ fn abbreviated(prefix: &str, dirs: bool, session: &Session) -> Option<(Common, V
     alternatives(matches, prefix)
 }
 
-// Arm64 benefits from parallel directory scans. Workers finish before Tab can run shell code.
+// Only independent, sufficiently large directories share workers. The editor
+// retains the interpreter and the tty; workers finish before Tab can run code.
 fn branch_matches(branches: &[Directory<'_>], dirs: bool) -> Vec<String> {
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         mpsc,
     };
     use std::{thread, time::Duration};
-    let large = cfg!(target_arch = "aarch64")
-        && branches.len() >= 4
+    let large = branches.len() >= 4
         && branches
             .iter()
             .map(|d| fs::metadata(&d.path).map_or(0, |m| m.len()))

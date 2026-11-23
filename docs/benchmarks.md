@@ -1,5 +1,15 @@
 # Startup and execution / 起動と実行性能
 
+<a id="native-x86-completion"></a>
+
+## 2026-11-24 · Native x86-64 completion remains unmeasured / x86-64 実機の補完性能
+
+The editing and completion tables below record build `0f9ce86`. Its x86-64 executable always scanned abbreviated paths sequentially. That exception was based on translated timings on Apple silicon and has been removed. The current build uses the same workload threshold and CPU limit on both architectures. Its stripped x86-64 static PIE is 1,240,664 bytes, an increase of 38,632 bytes over the serial-only binary. The Rosetta results describe that M1 environment. The ordering on Intel and AMD remains open. [Apple’s description of Intel binary translation in Linux VMs](https://developer.apple.com/documentation/virtualization/running-intel-binaries-in-linux-vms)
+
+On a native x86-64 Linux host, compare the release from `0f9ce86` with the current release using `python3 tools/bench_completion.py /path/to/serial /path/to/current --branches --runs 31`. Run once pinned to one allowed CPU and again with several available CPUs, on the same filesystem. Record the host CPU model, affinity, CPU quota, filesystem and median/p95 for each binary. The driver rotates the order and checks the completed path. [Completion benchmark](../tools/bench_completion.py)
+
+下の表は旧版の記録です。Rosetta では M1 上の変換実行とスレッド起動、ディレクトリ走査を含む時間を測りました。Intel・AMD での直列と並列の優劣は、ネイティブ Linux ホストで同じファイル群を用いて比較するまで保留します。
+
 <a id="editing-operations"></a>
 
 ## 2026-11-24 · Editing latency and CPU budget / 編集遅延と CPU 数
@@ -62,7 +72,7 @@ The branching fixture resolves one abbreviated path across 12 directories with 2
 | Debian x86-64 (Rosetta) · 8 CPUs | 5.302 / 5.438 | 5.100 / 5.587 | 19 |
 | Debian x86-64 (Rosetta) · 1 CPU | 5.229 / 5.731 | 5.070 / 5.206 | 17 |
 
-The arm64 release selects up to four participants. At eight available CPUs, the translated x86-64 prototype took 9.039 ms against 5.325 ms for the sequential comparison on this fixture. The x86-64 release omits the worker code and is 38,632 bytes smaller than that prototype.
+The arm64 release selects up to four participants. At eight available CPUs, the translated x86-64 prototype took 9.039 ms against 5.325 ms for the sequential comparison on this fixture. The serial-only x86-64 binary in this table was 38,632 bytes smaller than that prototype. The correction above restores the shared scan policy.
 
 During a separate 10,001-file scan, the driver injects a key 1 ms after Tab. The first pair of measurements covers the entire scan on an uninterrupted invocation. The next pair covers key arrival to visible echo on a separate invocation. The final column is a committed IME string after a declared terminal-independent callback has started its 100 ms helper. Values are current Tonari median / p95 in milliseconds. macOS used 31 scan and 21 callback samples. The single-CPU Linux runs used 13 and 9.
 
