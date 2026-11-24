@@ -830,6 +830,39 @@ eval -- -z 2>/dev/null; printf '%s ' "$?"
 eval --help >/dev/null; echo "$?"
 """, 0, b"0:outer 0:outer 2:outer 127 2\n")
 
+    def test_eval_patterns_after_a_continued_line(self):
+        test = r"""[[ x17 =~ \
+            ^(x|y)([0-9]+)$ ]] && echo "${BASH_REMATCH[2]}"
+[[ xyz == \
+           @(xyz|no) ]] && echo glob"""
+        self.compare("code=" + shlex.quote(test) + '\nfor i in 1 2 3; do eval "$code"; done',
+                     0, b"17\nglob\n" * 3, minimum=5)
+        for ending in (chr(92), chr(92) + "\n"):
+            for prefix in ("echo a", "echo a "):
+                source = prefix + ending
+                literal = (prefix[5:] + chr(92) + "\n").encode() if ending == chr(92) else b"a\n"
+                self.compare("eval " + shlex.quote(source), 0, literal)
+                path = self.cwd / "tail"
+                path.write_text(source)
+                self.compare(". ./tail", 0, literal)
+                for shell in self.shells_for():
+                    for argv, data in (([shell, path], None), ([shell], source.encode())):
+                        p = subprocess.run(argv, input=data, capture_output=True, env=self.env, cwd=self.cwd)
+                        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, b"a\n", b""))
+
+    def test_cdable_vars_uses_a_variable_after_directory_search(self):
+        self.compare(r"""mkdir -p search/mark real both
+DEST='real'; mark=real; both=real
+shopt -q cdable_vars; echo "off:$?"
+cd DEST 2>/dev/null; echo "missing:$?"
+shopt -s cdable_vars; CDPATH=search
+cd mark >result; echo "path:${PWD##*/}"; cd "$HOME"
+cd both; echo "direct:${PWD##*/}"; cd "$HOME"
+cd DEST; echo "var:${PWD##*/}"; cd "$HOME"
+cd -P DEST; echo "physical:${PWD##*/}"; cd "$HOME"
+shopt -u cdable_vars; cd DEST 2>/dev/null; echo "off:$?"
+""", 0, b"off:1\nmissing:1\npath:mark\ndirect:both\nreal\nvar:real\nreal\nphysical:real\noff:1\n")
+
     def test_bash_env(self):
         startup = self.cwd / "startup"
         startup.write_text('export MARK=from_bash_env\n')
@@ -1449,11 +1482,12 @@ set +m; sleep 1 & p=$!; kill -sHUP "$p"; wait "$p" 2>/dev/null; echo "hup:$?" ""
                      0, b"fg:1\nkilled:137\nhup:129\n", minimum=5)
 
     def test_monitor_mode_in_scripts(self):
-        self.compare("""rm -f gate; mkfifo gate; set -m
+        self.compare("""rm -f gate ack; mkfifo gate ack; set -m
 reader() { IFS= read -r line <gate; }; reader & p=$!
 g=$(python3 -c 'import os,sys; print(os.getpgid(int(sys.argv[1])))' "$p"); test "$g" = "$p" && echo group
-(sleep .12; echo go >gate) & sender=$!
-fg %1 >/dev/null; echo "fg:$?"; wait "$sender"; set +m; shopt -qo monitor; echo "disabled:$?" """,
+(sleep .12; echo go >gate; IFS= read -r line <ack) & sender=$!
+fg %1 >/dev/null; echo "fg:$?"; set +m; echo done >ack; wait "$sender"
+shopt -qo monitor; echo "disabled:$?" """,
                      0, b"group\nfg:0\ndisabled:1\n", minimum=5)
 
     def test_logical_directory_after_external_rename(self):

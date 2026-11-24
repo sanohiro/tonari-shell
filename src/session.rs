@@ -1397,19 +1397,34 @@ impl Session {
     ) -> io::Result<()> {
         let old_pwd = self.get("PWD");
         let base = self.logical_directory();
-        let mut paths = Vec::new();
-        if explicit && !previous && matches!(target.components().next(), Some(Component::Normal(_)))
+        let cdpath = if explicit
+            && !previous
+            && matches!(target.components().next(), Some(Component::Normal(_)))
         {
-            if let Some(cdpath) = self.get("CDPATH") {
-                paths.extend(std::env::split_paths(&cdpath).map(|dir| {
-                    let print = !dir.as_os_str().is_empty();
-                    (dir.join(target), print)
-                }));
-            }
-        }
-        paths.push((target.into(), previous));
+            self.get("CDPATH")
+        } else {
+            None
+        };
+        let mut paths = cdpath
+            .iter()
+            .flat_map(std::env::split_paths)
+            .map(|dir| {
+                let print = !dir.as_os_str().is_empty();
+                (dir.join(target), print)
+            })
+            .chain(std::iter::once_with(|| (target.to_owned(), previous)));
+        let mut variable = target
+            .to_str()
+            .filter(|_| explicit && !previous && self.shopt.cdable_vars);
         let mut error = io::Error::from(io::ErrorKind::NotFound);
-        for (candidate, print) in paths {
+        loop {
+            let (candidate, print, via_variable) = if let Some((path, print)) = paths.next() {
+                (path, print, false)
+            } else if let Some(value) = variable.take().and_then(|name| self.get(name)) {
+                (PathBuf::from(value), false, true)
+            } else {
+                break;
+            };
             if candidate.as_os_str().is_empty() {
                 continue;
             }
@@ -1442,6 +1457,9 @@ impl Session {
             };
             if self.interactive && base.as_deref().ok() != Some(cwd.as_path()) {
                 Rc::make_mut(self.visits.get_or_insert_with(Rc::default)).record(base.ok(), &cwd);
+            }
+            if via_variable {
+                print_path(&candidate)?;
             }
             return self.finish_directory_change(cwd, old_pwd, print);
         }

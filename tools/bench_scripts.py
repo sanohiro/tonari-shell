@@ -36,6 +36,17 @@ CASES = {
                                "fn='f() {\n  ((sum += i))\n}'"),
     "eval-alias": eval_loop("""alias act='((sum+=i))'; eval act; alias act='((sum++))'; eval act""",
                             'echo "$sum"', "2001000", "shopt -s expand_aliases"),
+    "cdable-vars": ("""\
+mkdir -p dirs/actual
+shopt -s cdable_vars || exit 1
+CDPATH=dirs:unused:more:paths:to:search
+printf -v actual '%32768s' x
+dest=dirs/actual
+for ((i=0; i<400; i++)); do
+    cd actual >/dev/null && cd "$HOME" && cd dest >/dev/null && cd "$HOME" || exit 1
+done
+echo "$i"
+""", "400"),
     "arithmetic": ("""\
 sum=0
 for ((i=1; i<=10000; i++)); do ((sum += i)); done
@@ -441,6 +452,12 @@ def main():
             script = home / f"{case}.sh"
             script.write_text(source)
             participants = shells
+            if case == "cdable-vars" and args.previous and subprocess.run(
+                [args.previous.resolve(), "--noprofile", "--norc", "-c", "shopt -s cdable_vars"],
+                env=env, capture_output=True,
+            ).returncode:
+                print("cdable-vars: previous shell lacks the option", flush=True)
+                participants = [(name, shell) for name, shell in shells if name != "Previous"]
             if args.spawn_control and case in (
                 "external", "external-env", "redirect-stderr", "pipeline", "merged-pipeline",
                 "merged-pipeline-redirect", "builtin-merged-pipeline",

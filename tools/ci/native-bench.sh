@@ -306,9 +306,14 @@ PYRC
     for name in empty light git large eval-large eval-nested eval-quoted builtins; do
       run "rc-$name" python3 tools/bench_login.py "$current" --previous "$bin/baseline" --bash "$ref" --rcfile "$rc/$name" --runs 41
     done
+    if [[ -r /usr/share/bash-completion/bash_completion ]]; then
+      printf '%s\n' '. /usr/share/bash-completion/bash_completion' \
+        'declare -F _parse_help _parse_usage _completion_loader >/dev/null || exit 1' > "$rc/bash-completion"
+      run rc-bash-completion python3 tools/bench_login.py "$current" --bash "$ref" --rcfile "$rc/bash-completion" --runs 41
+    fi
     run eval python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 25 \
       --case eval-fixed --case eval-changing --case eval-arguments --case eval-alternating \
-      --case eval-nested --case eval-multiline --case eval-function --case eval-alias ;;
+      --case eval-nested --case eval-multiline --case eval-function --case eval-alias --case cdable-vars ;;
   profiles)
     run levels python3 tools/bench.py "$current" --bash "$ref" --compare-tonari Old "$bin/previous-profile" --compare-tonari Os "$bin/opt-s" --compare-tonari Oz "$bin/opt-z" --compare-tonari O3 "$bin/opt-3" --runs 101
     for level in s z 3 previous-profile; do

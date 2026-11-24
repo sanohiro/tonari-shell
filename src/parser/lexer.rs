@@ -713,6 +713,17 @@ pub(super) fn lex(
             chars.next();
             continue;
         }
+        // A continued physical line does not start a word or consume the
+        // pending pattern operand of [[ ... =~ ... ]] or [[ ... == ... ]].
+        if c == '\\'
+            && let Some(rest) = chars.as_str().strip_prefix("\\\n")
+        {
+            if rest.is_empty() && !final_input {
+                return Err(Error::Incomplete("line continuation"));
+            }
+            chars = rest.chars();
+            continue;
+        }
         let pattern = pattern_next.take();
         if pattern == Some(false)
             && !matches!(c, '\n' | ';')
@@ -873,11 +884,13 @@ pub(super) fn lex(
                     quoted(&mut chars, c, &mut word)?;
                 }
                 '\\' => {
-                    let escaped = chars
-                        .next()
-                        .ok_or(Error::Incomplete("trailing backslash"))?;
+                    let escaped = match chars.next() {
+                        Some(c) => c,
+                        None if final_input => '\\',
+                        None => return Err(Error::Incomplete("trailing backslash")),
+                    };
                     if escaped == '\n' {
-                        if chars.as_str().is_empty() {
+                        if chars.as_str().is_empty() && !final_input {
                             return Err(Error::Incomplete("line continuation"));
                         }
                         continue;

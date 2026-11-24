@@ -144,6 +144,21 @@ fn error(message: impl std::fmt::Display, status: u8) -> Flow {
     Flow::Continue(status)
 }
 
+fn syntax_error(session: &Session, problem: parser::Error, first_line: usize) -> Flow {
+    if session.source_depth > 0
+        && let Some(path) = session.source_names.last()
+    {
+        return error(
+            format_args!(
+                "{path}: command starting at line {first_line}: {}",
+                problem.message()
+            ),
+            2,
+        );
+    }
+    error(problem.message(), 2)
+}
+
 fn blank_or_comment(line: &str) -> bool {
     let first = line.trim_start_matches([' ', '\t']);
     first.is_empty()
@@ -289,6 +304,11 @@ fn run(
         if n == 0 && input.is_empty() {
             break;
         }
+        // Bash's file/stdin reader supplies a final physical newline. Sourced
+        // files and eval use string input and preserve a bare final backslash.
+        if n == 0 && session.source_depth == 0 && input.ends_with(b"\\") {
+            input.push(b'\n');
+        }
         if let Some(hint) = &mut here_doc {
             let Ok(line) = std::str::from_utf8(&input[line_start..]) else {
                 return error("expected UTF-8 command text", 2);
@@ -351,7 +371,7 @@ fn run(
                 continue;
             }
             Err(parser::Error::Incomplete(_)) if n != 0 => continue,
-            Err(e) => return error(e.message(), 2),
+            Err(e) => return syntax_error(session, e, base_line),
             Ok(program) if !program.is_empty() && !check => {
                 if shared_offset && !reader.buffer().is_empty() {
                     // Unlike stream_position(), this discards the read-ahead buffer.
@@ -495,7 +515,7 @@ pub fn text(
                 continue;
             }
             Err(parser::Error::Incomplete(_)) if !last => continue,
-            Err(e) => return error(e.message(), 2),
+            Err(e) => return syntax_error(session, e, base_line),
             Ok(program) if !program.as_ref().is_empty() && !check => {
                 ran = true;
                 let remember = tail && !session.interactive && session.begin_history_line(text);

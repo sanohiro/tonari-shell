@@ -4,6 +4,7 @@ use super::Session;
 
 #[derive(Clone)]
 pub struct ShellOptions {
+    pub cdable_vars: bool,
     pub checkhash: bool,
     pub nocasematch: bool,
     pub extdebug: bool,
@@ -29,6 +30,7 @@ pub struct ShellOptions {
 impl Default for ShellOptions {
     fn default() -> Self {
         Self {
+            cdable_vars: false,
             checkhash: false,
             nocasematch: false,
             extdebug: false,
@@ -86,6 +88,7 @@ const SET_OPTIONS: &[OptionEntry] = &[
     option_entry!("xtrace", xtrace),
 ];
 const SHOPT_OPTIONS: &[OptionEntry] = &[
+    option_entry!("cdable_vars", shopt.cdable_vars),
     option_entry!("checkhash", shopt.checkhash),
     option_entry!("checkwinsize", shopt.checkwinsize),
     option_entry!("dotglob", shopt.glob.dotglob),
