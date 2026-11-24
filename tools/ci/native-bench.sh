@@ -56,13 +56,19 @@ run() {
 }
 case "$SUITE" in
   functions)
-    REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k function
-    run functions python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" \
-      --case function-redefinitions --case function-definitions --case function-wrapper-redefinitions \
-      --case function-compound-redefinitions --case function-loop-redefinitions --case functions \
-      --case function-redefine-and-call --case function-literal-calls --runs 61
-    run startup python3 tools/bench.py "$current" --bash "$ref" --compare-tonari Previous "$bin/baseline" \
-      --case prompt --case startup --case loop --runs 101 ;;
+    mkdir "$RUNNER_TEMP/check-home"
+    cp /etc/skel/.bashrc /etc/skel/.profile "$RUNNER_TEMP/check-home/"
+    for build in baseline current; do
+      for where in /etc/profile /etc/profile.d/*.sh; do
+        if ! "$bin/$build" --noprofile --norc -n "$where" >/dev/null 2>&1; then echo "$where"; fi
+      done > "$out/$build.syntax"
+      (cd "$RUNNER_TEMP/check-home"
+       env -i HOME="$PWD" TERM=dumb LC_ALL=C PATH=/usr/bin:/bin "$bin/$build" --login -ic          'echo "$SHLVL/$HISTCONTROL/$HISTSIZE"; type -t ll; :' </dev/null) > "$out/$build.stdout" 2>"$out/$build.stderr"
+    done
+    for stream in stdout stderr syntax; do
+      diff -u "$out/baseline.$stream" "$out/current.$stream"
+      cat "$out/current.$stream"
+    done ;;
   editing)
     for size in 96 65536; do
       run "editing-$size" python3 tools/bench_editing.py "$current" "$ref" --size "$size" --runs 11
