@@ -2034,7 +2034,10 @@ printf '%s\n' "$marker"
         drawn = self.read_until(fd, "Ω".encode())
         self.assertLess(max(map(len, drawn.split(b"\x1b[J"))), 4096)
         os.write(fd, b"\x01")
-        head = self.read_until(fd, b"BEGIN ")
+        # Home finishes its redraw by positioning the caret after the ASCII
+        # prompt. A PTY read may end anywhere within the preceding viewport.
+        head = self.read_until(fd, b"\r\x1b[%dC" % len(PROMPT))
+        self.assertIn(b"BEGIN ", head)
         self.assertLess(len(head), 4096)
         os.write(fd, b"\x06")
         moved = self.read_until(fd, b"\x1b[1C")
