@@ -1582,11 +1582,32 @@ wait "$fast"; echo "again:$?"
 wait -n -p id "$slow"; rc=$?; test "$slow" = "$id" && echo "last:$rc"
 wait -np id; echo "empty:$?:${id-unset}" """,
                      0, b"first:13\nagain:13\nlast:0\nempty:127:unset\n")
-        self.compare("""trap 'echo signal' USR1; me=$$
-(sleep 0.05; kill -USR1 "$me") & sender=$!
-sleep 0.18 & slow=$!; result=old; wait -np result "$slow"; rc=$?
-test "$rc" -gt 128 && echo "interrupted:${result-unset}"
-wait "$slow"; echo "$?" """, 0, b"signal\ninterrupted:unset\n0\n")
+        gate = self.cwd / "release-wait-child"
+        os.mkfifo(gate)
+        source = """trap 'seen=yes' USR1
+read -r line <release-wait-child & slow=$!; result=old; echo ready
+wait -np result "$slow"; rc=$?
+test "$seen" = yes && test "$rc" -gt 128 && echo "interrupted:${result-unset}"
+wait "$slow"; echo "$?" """
+        for shell in (BASH, TONARI):
+            with self.subTest(shell=shell), gate.open("r+b", buffering=0) as release:
+                with subprocess.Popen([shell, "-c", source], cwd=self.cwd, env=self.env,
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+                    try:
+                        self.assertTrue(select.select([proc.stdout], [], [], 5)[0])
+                        self.assertEqual(proc.stdout.readline(), b"ready\n")
+                        # Keep the selected child blocked until wait has actually returned.
+                        # A signal arriving between echo and wait may run its trap early.
+                        deadline = time.monotonic() + 5
+                        while time.monotonic() < deadline and proc.poll() is None:
+                            proc.send_signal(signal.SIGUSR1)
+                            if select.select([proc.stdout], [], [], 0.05)[0]:
+                                break
+                    finally:
+                        release.write(b"go\n")
+                    out, err = proc.communicate(timeout=5)
+                    self.assertEqual((proc.returncode, out, err), (0, b"interrupted:unset\n0\n", b""))
+
 
     def test_getopts_clusters_scope_and_reset(self):
         self.compare("""set -- -abvalue -c -- tail; OPTIND=1

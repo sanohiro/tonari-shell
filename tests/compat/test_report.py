@@ -35,6 +35,7 @@ class ReleaseGate(unittest.TestCase):
         self.assertEqual(classify(batch(100, 120, direct=97), {}), "matched OS control")
         self.assertEqual(classify(batch(100, 120, direct=75), {}), "tried, above target")
         self.assertEqual(classify(batch(100, 120, direct=135), {}), "tried, above target")
+        self.assertEqual(classify(batch(130, 100, direct=129), {}), "tried, above target")
 
     def test_upper_target_uses_exact_fraction(self):
         self.assertEqual(misses(self.result(60), self.result(), True, True), [])

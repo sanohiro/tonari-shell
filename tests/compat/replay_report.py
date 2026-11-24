@@ -6,11 +6,15 @@ import math
 from pathlib import Path
 from statistics import median
 
-from replay_budget import MANIFEST
+from replay_budget import MANIFEST, workloads
 
 
 def within(time, bash):
     return time * 3 <= bash * 2
+
+
+def at_most_parity(samples):
+    return median(samples["current"]) <= 1.10 * median(samples["bash"])
 
 
 def classify(fixed, extended):
@@ -28,7 +32,7 @@ def classify(fixed, extended):
             return "short at parity"
     if "direct" in samples:
         direct = median(samples["direct"])
-        if not within(direct, bash) and 0.90 * current <= direct <= 1.10 * current:
+        if at_most_parity(samples) and not within(direct, bash) and 0.90 * current <= direct <= 1.10 * current:
             return "matched OS control"
     return "tried, above target"
 
@@ -46,13 +50,46 @@ def component_results(path):
     return found
 
 
-def records(root, parts=None):
+def replay_files(root, recovery):
+    yield from sorted(root.glob("*/replay.jsonl"))
+    replacements = {}
+    for directory in recovery:
+        for file in directory.glob("*/replay.jsonl"):
+            with file.open() as stream:
+                lane = json.loads(next(stream))["lane"]
+            if lane in replacements:
+                raise ValueError(f"{lane}: multiple replacement replays")
+            replacements[lane] = file
+
+    for timings in sorted(root.glob("*/timings.json")):
+        original = timings.with_name("additional.jsonl")
+        with original.open() as stream:
+            lane = json.loads(next(stream))["lane"]
+        file = replacements.pop(lane, original)
+        inventory = json.loads(timings.read_text())
+        expected = {row["id"]: row for row in workloads(lane, timings)}
+        with file.open() as stream:
+            hashes = json.loads(next(stream))["sha256"]
+            if [hashes["bash"], hashes["current"]] != inventory["benchmark"]["executable_sha256"]:
+                raise ValueError(f"{lane}: additional replay differs from the audited executables")
+            for line in stream:
+                row = json.loads(line)
+                if expected.pop(row["id"], None) != row["workload"]:
+                    raise ValueError(f"{lane}: additional workload differs from the inventory")
+        if expected:
+            raise ValueError(f"{lane}: {len(expected)} newly over-budget workloads missing")
+        yield file
+    if replacements:
+        raise ValueError(f"no inventory for replacement lanes: {sorted(replacements)}")
+
+
+def records(root, parts=None, recovery=()):
     frozen = {row["id"]: row for row in map(json.loads, MANIFEST.read_text().splitlines())}
     expected = {(lane, group, name) for row in frozen.values() for lane, config in row["lanes"].items()
                 for group, name in config["features"]}
     seen = set()
     components = component_results(parts)
-    for file in sorted([*root.glob("*/replay.jsonl"), *root.glob("*/additional.jsonl")]):
+    for file in replay_files(root, recovery):
         with file.open() as stream:
             header = json.loads(next(stream))
             lane = header["lane"]
@@ -71,7 +108,8 @@ def records(root, parts=None):
                 component = part.get("component", {})
                 control = part.get("fixed", {})
                 verdict = classify(fixed, extra)
-                if verdict == "tried, above target" and control and classify(control, {}) == "matched OS control":
+                if (verdict == "tried, above target" and control and at_most_parity(fixed["samples_ns"])
+                        and classify(control, {}) == "matched OS control"):
                     verdict = "matched OS control"
                 for group, name in config["features"]:
                     key = (lane, group, name)
@@ -102,8 +140,9 @@ def main():
     cli.add_argument("artifacts", type=Path)
     cli.add_argument("ledger", type=Path)
     cli.add_argument("--components", type=Path)
+    cli.add_argument("--recovery", type=Path, nargs="*", default=[])
     args = cli.parse_args()
-    rows = sorted(records(args.artifacts, args.components), key=lambda r: (r["lane"], r["group"], r["feature"]))
+    rows = sorted(records(args.artifacts, args.components, args.recovery), key=lambda r: (r["lane"], r["group"], r["feature"]))
     with args.ledger.open("w") as out:
         writer = csv.DictWriter(out, fieldnames=list(rows[0]), delimiter="\t", lineterminator="\n")
         writer.writeheader()
