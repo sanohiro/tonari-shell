@@ -30,6 +30,10 @@ Ctrl-R searches across sessions. At the end of the line, → accepts a suggestio
 
 In Ctrl-R, type two fragments such as `ssh 15432` to list commands containing both in either order. Tab opens the same list for a single fragment or an empty search. Use ↑/↓ to select and Enter to return the command to the editor. Esc or Ctrl-G restores your draft and cursor. A single-fragment inline search keeps Bash’s Enter-to-execute behavior.
 
+Alt-. inserts the last argument of the previous command at the cursor, with its quoting intact. Press it again to use the argument from the next older command. For example, after `less 'research notes.txt'`, type `rg ERROR ` and press Alt-. to reuse that filename.
+
+Ctrl-_ undoes one edit on the current line. A completion, an accepted suggestion, and a multiline paste each undo in one step. Ctrl-X Ctrl-U also works in the default Emacs keymap.
+
 Insert toggles overwrite mode. Ctrl-Space sets a mark, Alt-W copies the region and Ctrl-Y pastes it. Bracketed paste keeps multiline commands editable until you press Enter. Long commands show a moving window around the cursor.
 
 ```bash

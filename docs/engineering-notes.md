@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## 2026-11-24 · Undoing edits and recalling the last argument / 一手戻す操作と引数の再利用
+
+Appending to a long line requires only the offset and length of the inserted text to undo it. Store removed bytes for deletes and overwrites. For completion and `bind -x`, discard the common prefix and suffix at UTF-8 character boundaries before recording the inverse edit. Consecutive typing extends one entry. Completions, suggestion acceptance and pastes start their own entries. The editor keeps at most 128 entries and a 4 MiB budget for removed text, allowing one larger deletion as the newest undoable edit. Submitting or abandoning the line drops the entire stack.
+
+前のコマンドに数千個の引数があると、最後の一つのために全トークンを構築するコストが見えてきます。通常の単語列と単純な単一引用符付き末尾は元の文字列を直接切り出し、展開やリダイレクトを含む行はシェルの字句解析器で境界を調べます。履歴から挿入する段階では展開を実行しません。取り消しでは挿入範囲と消えた文字だけを記録します。上限は128手・削除データ4 MiBで、単独でそれを超える削除も直後の一手は取り消せます。編集を終えると破棄します。[Native measurements and reproduction](benchmarks.md#edit-actions)
+
 ## 2026-11-24 · Prefix recall and directory navigation / 前方一致履歴とディレクトリ移動
 
 Keep the initial draft and cursor for one run of arrow presses. Remember the indices visited during a nonempty prefix search and where the scan exhausted the history. A change of direction can then pick the previous hit directly. Empty-prefix navigation uses the adjacent index. Editing the line discards the filter. The editor builds the cache only while browsing. After painting a recalled command, it waits up to 1 ms for another key before scanning for a longer suggestion. This lets a terminal on the same CPU display the recalled line promptly. Directory visits store resolved absolute paths and reuse the ordinary `cd` bookkeeping after `chdir`.

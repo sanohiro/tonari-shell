@@ -1,5 +1,42 @@
 # Startup and execution / 起動と実行性能
 
+<a id="edit-actions"></a>
+
+## 2026-11-24 · Per-line undo and last-argument recall / 取り消しと末尾引数の再利用
+
+Median time from input to a visible response in a real PTY, in milliseconds. Each cell gives the first implementation (`5216862`), optimized release (`c8dc765`), and Bash. The long history entry has 4,096 ordinary arguments before a single-quoted final token. The long draft is a recalled variable assignment with 1 MiB of padding. The driver pastes a short suffix into that line, sends Ctrl-_ followed by a marker, waits for the marker, and checks the length and final value in the shell. Each shell starts in a fresh PTY per trial. The executable order rotates and the first two trials are discarded. Local M1 used 31 runs, native CI used 21. Ubuntu used Bash 5.2.21 and macOS used Bash 5.2.37.
+
+| Operation | Local M1 | Linux x86-64 | Linux arm64 | macOS CI arm64 |
+| --- | ---: | ---: | ---: | ---: |
+| Alt-. short | 0.025 / 0.026 / 0.022 | 0.036 / 0.036 / 0.036 | 0.037 / 0.037 / 0.037 | 0.037 / 0.036 / 0.032 |
+| Alt-. many | 0.287 / 0.055 / 0.363 | 0.636 / 0.057 / 0.365 | 0.661 / 0.062 / 0.415 | 0.306 / 0.068 / 0.323 |
+| Paste into short line | 0.037 / 0.038 / 0.060 | 0.041 / 0.042 / 0.062 | 0.046 / 0.046 / 0.078 | 0.056 / 0.059 / 0.088 |
+| Undo + type into short line | 0.029 / 0.027 / 0.021 | 0.035 / 0.036 / 0.036 | 0.033 / 0.033 / 0.035 | 0.028 / 0.030 / 0.028 |
+| Paste into 1 MiB line | 0.233 / 0.144 / 7.605 | 0.428 / 0.059 / 4.717 | 0.402 / 0.079 / 6.422 | 0.449 / 0.074 / 8.088 |
+| Undo + type into 1 MiB line | 0.097 / 0.036 / 14.974 | 0.415 / 0.042 / 9.280 | 0.441 / 0.054 / 12.502 | 0.318 / 0.060 / 14.956 |
+
+When the driver and shell share one Linux CPU, the optimized median/p95 and Bash median/p95 over 15 measured trials were as follows.
+
+| Operation | Linux x86-64, 1 CPU | Linux arm64, 1 CPU |
+| --- | ---: | ---: |
+| Alt-. short | 0.023/0.438 · 0.021/0.318 | 0.051/0.052 · 0.050/0.060 |
+| Alt-. many | 0.086/0.467 · 0.371/0.717 | 0.077/0.094 · 0.457/0.497 |
+| Paste into short line | 0.032/0.062 · 0.057/0.269 | 0.051/0.067 · 0.097/0.154 |
+| Undo + type into short line | 0.026/0.069 · 0.025/0.069 | 0.044/0.060 · 0.053/0.075 |
+| Paste into 1 MiB line | 0.091/0.640 · 4.753/4.836 | 0.081/0.109 · 6.418/6.460 |
+| Undo + type into 1 MiB line | 0.065/0.550 · 9.319/9.415 | 0.081/0.107 · 12.508/12.579 |
+
+Undo now stores only the range inserted and the bytes removed. This avoids copying a megabyte to make a short edit undoable. Bare history words and a simple single-quoted tail can be sliced from the original command. Complex syntax still goes through the lexer. Short-line recall and undo are generally in the same tens-of-microseconds range as Bash. The large cases all meet the two-thirds target.
+
+With approximately 64 KiB of existing UTF-8 input, ordinary append on the M1 measured 0.027 ms before and after the feature. In five sessions with 128 individually acknowledged edits after warm-up, repeated append p99 was 0.026 ms before and 0.021 ms after, and near-head insertion p99 was 0.051 and 0.046 ms. Insert near the head went from 0.073 to 0.075 ms, a Japanese text commit near the head from 0.066 to 0.069 ms, and a multiline paste near the head from 0.089 to 0.098 ms (15-run medians). The shipping executable is 1,400,304 bytes on macOS arm64, 1,900,504 on Linux x86-64, and 1,641,848 on Linux arm64. The Mac executable grew by 16,528 bytes. It links libSystem. Both Linux builds passed the stripped static PIE checks. [Native run and p95 measurements](https://github.com/sanohiro/tonari-shell/actions/runs/45417604845)
+
+表の数値は初回実装・差分を保存する採用版・Bash の順です。1 MiB の行を計測前に履歴から呼び出し、短い文字列の貼り付け、取り消し直後の一文字が見えるまでを個別に測りました。実行した結果で行の長さと末尾も検証しています。
+
+```sh
+python3 tools/bench_edit_actions.py /path/to/first /path/to/final /path/to/bash --runs 21
+python3 tools/bench_editing.py /path/to/prior /path/to/final /path/to/bash --size 65536 --runs 15 --case append --case 'insert near head' --case 'IME at head'
+```
+
 <a id="navigation"></a>
 
 ## 2026-11-24 · Prefix history arrows and directory navigation / 前方一致履歴とディレクトリ移動

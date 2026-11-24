@@ -1,5 +1,11 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## Last argument and undo / 末尾引数と取り消し
+
+In the default Emacs keymap `Alt-.` and `Alt-_` invoke Readline’s `yank-last-arg`. `insert-last-argument` is an alias. Repeated presses replace the inserted token with the one from the preceding entry of the active session history. Quoting, escaped spaces, comments, redirections and here-document delimiters have direct PTY witnesses against Bash. Tonari preserves the complete arithmetic substitution in `cmd $((1 + 3))`. Bash 5.2.37 inserts only the final `)` for that example. Keeping the full expression preserves the shell word the user typed. Against the previous macOS audit, the three Readline function names moved from missing to available, both new PTY witnesses passed, and all other verdicts were unchanged.
+
+`Ctrl-_` と `Ctrl-X Ctrl-U` は Emacs モードの `undo` です。vi コマンドモードでは `u` でも戻せます。入力が連続している間は一つにまとめ、カーソル操作や補完で区切ります。別の履歴行への移動・コマンドの実行・行の中断で、その行の取り消し記録を破棄します。編集操作は対話シェルと `read -e` の両方で検証しています。[PTY tests](../tests/shell.py) · [Native benchmarks](benchmarks.md#edit-actions)
+
 ## Session history and directory keys / 履歴とディレクトリの移動
 
 ↑/↓ bind to `history-search-backward` and `history-search-forward`. Ctrl-P/N retain chronological navigation. Tonari saves the original line and the byte boundary of the cursor, including when a UTF-8 suffix follows it. Bash 5.2 binds the arrows to chronological navigation by default. The PTY comparison explicitly binds Bash’s arrows to the prefix-search commands and checks the executed result. Against the previous macOS snapshot, six of 1,408 existing audit verdicts changed, all for the advertised default bindings in `bind -q`. The added PTY witness passes on both shells. Tonari also tests restoring the draft and caret, accepting typeahead, and overriding the defaults with `bind`.
