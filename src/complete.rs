@@ -10,6 +10,8 @@ pub struct Completion {
     pub start: usize,
     pub replacement: String,
     pub choices: Vec<String>,
+    noquote: bool,
+    append_space: bool,
 }
 
 pub struct Context<'a> {
@@ -313,8 +315,23 @@ pub fn at(
     };
     let (common, choices) = matches?;
     let (noquote, nospace) = options;
-    let unique = common.unique;
-    let common = common.text;
+    let append_space = !nospace && cursor == line.len();
+    Some(Completion {
+        start,
+        replacement: quote_choice(&common.text, noquote, append_space && common.unique),
+        choices,
+        noquote,
+        append_space,
+    })
+}
+
+impl Completion {
+    pub fn select(&self, index: usize) -> String {
+        quote_choice(&self.choices[index], self.noquote, self.append_space)
+    }
+}
+
+fn quote_choice(common: &str, noquote: bool, append_space: bool) -> String {
     // Re-quote the complete word. A unique file followed by Enter must remain
     // a single literal argument even when it contains shell metacharacters.
     let mut replacement = String::new();
@@ -336,14 +353,10 @@ pub fn at(
         }
         replacement.push(c);
     }
-    if !nospace && unique && !common.ends_with('/') && cursor == line.len() {
+    if append_space && !common.ends_with('/') {
         replacement.push(' ');
     }
-    Some(Completion {
-        start,
-        replacement,
-        choices,
-    })
+    replacement
 }
 
 fn visit_commands(

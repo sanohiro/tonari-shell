@@ -2,7 +2,7 @@
 // journal; never source a history line or expand one of its words.
 use super::{decode, file};
 use crate::{Session, parser};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::fs::OpenOptionsExt;
@@ -71,8 +71,7 @@ pub(crate) fn candidates(
     let root = project(&cwd);
     let mut directories = HashMap::new();
     let mut best = 0;
-    let mut seen = BTreeSet::new();
-    let mut result = Vec::new();
+    let mut scores = HashMap::new();
     for (i, row) in bytes.rsplit(|&b| b == b'\n').enumerate() {
         if i % 64 == 0 {
             crate::editor::preview::poll();
@@ -172,8 +171,7 @@ pub(crate) fn candidates(
                         continue;
                     }
                     if rank > best {
-                        result.clear();
-                        seen.clear();
+                        scores.clear();
                         best = rank;
                     }
                     let value = value.to_str().filter(|s| !s.is_empty()).unwrap_or(arg);
@@ -181,12 +179,18 @@ pub(crate) fn candidates(
                     if absolute.is_dir() && !value.ends_with('/') {
                         value.push('/');
                     }
-                    if seen.insert(value.clone()) {
-                        result.push(value);
+                    let order = scores.len();
+                    let (count, _, last_row) =
+                        scores.entry(value).or_insert((0usize, order, usize::MAX));
+                    if *last_row != i {
+                        *count += 1;
+                        *last_row = i;
                     }
                 }
             }
         }
     }
-    result
+    let mut ranked: Vec<_> = scores.into_iter().collect();
+    ranked.sort_unstable_by_key(|(_, (count, order, _))| (std::cmp::Reverse(*count), *order));
+    ranked.into_iter().map(|(word, _)| word).collect()
 }

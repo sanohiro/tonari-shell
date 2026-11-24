@@ -1,4 +1,5 @@
 pub(crate) mod bindings;
+mod picker;
 pub(crate) mod preview;
 mod viewport;
 use bindings::{Action, Binding, Keymap};
@@ -1108,7 +1109,25 @@ pub fn line(
                 screen.tail = None;
                 screen.view.invalidate();
                 if let Some(result) = result {
-                    if was_tab && result.choices.len() > 1 {
+                    if was_tab && result.choices.len() > 1 && action == Action::Complete {
+                        last_tab = false;
+                        let selected =
+                            picker::choose(&result.choices, &mut keys, &mut screen, session);
+                        screen.draw(prompt, &text, cursor, "")?;
+                        match selected {
+                            Ok(Some(index)) => {
+                                let word = result.select(index);
+                                text.replace_range(result.start..cursor, &word);
+                                cursor = result.start + word.len();
+                            }
+                            Ok(None) => {}
+                            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                                io::stderr().write_all(b"\r\n")?;
+                                return Ok(Input::Cancel);
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    } else if was_tab && result.choices.len() > 1 {
                         screen.draw(prompt, &text, text.len(), "")?;
                         io::stderr().write_all(b"\r\n")?;
                         let mut display = String::new();

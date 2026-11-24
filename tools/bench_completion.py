@@ -106,7 +106,7 @@ def listing(shell, home, bash, expected, prefix):
         os.write(fd, b"\t")
         read_until(fd, b"\a" if shell == bash else PROMPT + line)
         start = time.perf_counter_ns()
-        os.write(fd, b"\t@")
+        os.write(fd, b"\t@" if shell == bash else b"\x1b?@")
         output = read_until(fd, max(expected))
         end = output.index(max(expected)) + len(max(expected))
         output = output[:end] + read_until(fd, b"@", initial=output[end:])
@@ -157,7 +157,7 @@ def main():
     mode.add_argument("--long-line", action="store_true", help="append to a 64 KiB paste and verify its value")
     mode.add_argument("--callback", action="store_true", help="queue a key behind a callback that waits 100 ms")
     mode.add_argument("--reuse-words", action="store_true", help="repeated queries to one registered literal list")
-    mode.add_argument("--listing", action="store_true", help="measure the second Tab and full listing")
+    mode.add_argument("--listing", action="store_true", help="measure the complete candidate listing")
     parser.add_argument("--require-target", action="store_true", help="check the 2/3 median target for cases shared with Bash")
     args = parser.parse_args()
     if args.require_target and not args.bash:

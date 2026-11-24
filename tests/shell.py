@@ -2153,7 +2153,7 @@ printf '%s\n' "$marker"
         send(b": it\tX", PROMPT + b": item-aX")
         send(clear + b": it\t", PROMPT + b": item-a")
         (self.cwd / "item-au").touch()
-        send(b"\t", b"item-as  item-at  item-au")
+        send(b"\x1b?", b"item-as  item-at  item-au")
         send(clear + b": x-l\tmore", PROMPT + b": x-link/more")
         send(clear + b"tool-\targ", PROMPT + b"tool-allowed arg")
         send(clear + b"complete -d -o nospace -o default demo\r", b"\x1b[?2004h")
@@ -2161,7 +2161,52 @@ printf '%s\n' "$marker"
         send(clear + b"demo item-at\targ", PROMPT + b"demo item-at arg")
         send(clear + b"complete -W 'start stop start' demo\r", b"\x1b[?2004h")
         send(b"demo s\t", PROMPT + b"demo st")
-        send(b"\t", b"start  stop")
+        listing = send(b"\t", b"  stop")
+        self.assertIn(b"> start\n  stop", listing.replace(b"\r", b""))
+
+    def test_picker_filters_selects_and_preserves_the_draft(self):
+        for name in ["pick-apple", "pick-red apple🐟", "pick-red pear🐟", "pick-dollar$(bad)"]:
+            (self.cwd / name).touch()
+        fd = self.terminal_session(editing=True)
+        def send(keys, marker):
+            os.write(fd, keys)
+            return self.read_until(fd, marker)
+        send(b"printf '%s' pick-\t\t", b"> pick-apple")
+        send(b"ZZZ", b"(no matches)")
+        send(b"\r", b"(no matches)")
+        send(b"\x7f\x7f\x7f" + "🐟".encode(), "> pick-red apple🐟".encode())
+        send(b"\x1b[B", "> pick-red pear🐟".encode())
+        send(b"\r", "pick-red\\ pear🐟 ".encode())
+        self.assertFalse((self.cwd / "chosen").exists())
+        send(b">chosen\r", b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "chosen").read_text(), "pick-red pear🐟")
+        send(b"v=original; : pick-\t\t", b"> pick-apple")
+        send(b"\x1b[200~red pear\x1b[201~", "> pick-red pear🐟".encode())
+        send(b"\x07", b"v=original; : pick-")
+        send(b"apple; printf %s \"$v\" > restored\r", b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "restored").read_text(), "original")
+        send(b"printf '%s' pick-\t\t", b"> pick-apple")
+        send(b"dollar\r", b"pick-dollar\\$\\(bad\\) ")
+        send(b">literal\r", b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "literal").read_text(), "pick-dollar$(bad)")
+
+    def test_picker_ranks_history_within_the_same_context(self):
+        journal = self.cwd / ".local/state/tonari/history"
+        journal.parent.mkdir(parents=True)
+        rows = [(0, "tool --model cedar")] * 4 + [(0, "tool --model birch")] * 2
+        rows += [(0, "tool --model alder"), (0, "tool --model birch-2"), (1, "tool --model failed")]
+        journal.write_text("".join(f"1\t1\t{code}\t{self.cwd}\t{cmd}\n" for code, cmd in rows))
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"tool --model \t\t")
+        out = self.read_until(fd, b"  alder").replace(b"\r", b"")
+        self.assertIn(b"> cedar\n  birch\n  birch-2\n  alder", out)
+        os.write(fd, b"bir\x1b[B\r")
+        self.read_until(fd, PROMPT + b"tool --model birch-2 ")
+        os.write(fd, b"\x15complete -o nosort -W 'zeta alpha' tool\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        os.write(fd, b"tool \t\t")
+        out = self.read_until(fd, b"  alpha").replace(b"\r", b"")
+        self.assertIn(b"> zeta\n  alpha", out)
 
     def test_completion_keeps_terminal_input_with_its_owner(self):
         for shell in self.shells_for(5):
