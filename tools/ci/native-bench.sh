@@ -110,6 +110,8 @@ case "$SUITE" in
       run "rank-$rank" python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --history-rank "$rank" --prompt-time --runs 41
     done
     run bursts python3 tools/bench_history.py "$current" "$bin/baseline" --entries 1000000 --bursts --runs 21 ;;
+  parity-jobs)
+    run jobs python3 tests/compat/job_latency.py "$current" "$bin/baseline" "$ref" --runs 41 ;;
   parity-commands)
     [[ $RUNNER_OS == macOS ]]
     python3 tests/compat/replay_budget.py --release-only --bin "$bin" --bash "$ref" --lane macOSarm64 --runs 31 \
