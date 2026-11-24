@@ -257,6 +257,26 @@ impl Spec {
         args: &mut Arguments<'_>,
         output: &mut Vec<u8>,
     ) -> Result<(), &'static str> {
+        if self.flags.is_empty() && self.width == 0 && self.precision.is_none() {
+            // The default integer conversions have no padding, grouping or
+            // alternate prefixes. Write directly into the existing byte buffer.
+            match conversion {
+                b'd' | b'i' => write!(output, "{}", args.signed()),
+                b'u' => write!(output, "{}", args.unsigned()),
+                b'x' => write!(output, "{:x}", args.unsigned()),
+                b'X' => write!(output, "{:X}", args.unsigned()),
+                b'o' => write!(output, "{:o}", args.unsigned()),
+                _ => {
+                    let fmt = [b'%', conversion, 0];
+                    let n = args.float();
+                    return append_number(output, |dst, cap| unsafe {
+                        libc::snprintf(dst, cap, fmt.as_ptr().cast(), n)
+                    });
+                }
+            }
+            .expect("writing to Vec cannot fail");
+            return Ok(());
+        }
         // Only a validated numeric conversion reaches libc. Build its exact
         // argument type explicitly; user-provided C length modifiers are discarded.
         let mut fmt = vec![b'%'];

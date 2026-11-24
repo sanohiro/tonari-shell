@@ -771,6 +771,49 @@ mod tests {
     }
 
     #[test]
+    fn older_matches_skip_metadata_and_count_each_record_once() {
+        let state =
+            std::env::temp_dir().join(format!("tonari-history-test-{}", std::process::id()));
+        fs::create_dir_all(state.join("tonari")).unwrap();
+        let mut session = Session::default();
+        session.assign("XDG_STATE_HOME", state.to_str().unwrap());
+        session.assign("HISTFILE", "history");
+        session.assign("HISTFILESIZE", "100000");
+        let path = file(&session).unwrap();
+        let mut rows = String::from("1\t1\t0\t/hit\thit oldest\n");
+        for _ in 0..9000 {
+            rows.push_str("1\t1\t0\t/hit\tpadding\n");
+        }
+        rows.push_str("1\t1\t0\t/hit\tcmd hit hit\\n雪\n1\t1\t0\t/hit\tfinal\\tword\n");
+        fs::write(&path, &rows).unwrap();
+        let m = fs::metadata(&path).unwrap();
+        let history = History {
+            journal: Some((m.dev(), m.ino())),
+            offset: m.len(),
+            tail_start: m.len(),
+            ..History::default()
+        };
+        let search = |query, prefix, skip| {
+            history
+                .older_match(&session, query, prefix, skip, &|| false)
+                .unwrap()
+        };
+        assert_eq!(search("hit", false, 0).as_deref(), Some("cmd hit hit\n雪"));
+        assert_eq!(search("hit", false, 1).as_deref(), Some("hit oldest"));
+        assert_eq!(search("hit", false, 2), None);
+        assert_eq!(search("hit", true, 0).as_deref(), Some("hit oldest"));
+        assert_eq!(
+            search("hit\n雪", false, 0).as_deref(),
+            Some("cmd hit hit\n雪")
+        );
+        assert_eq!(search("\t", false, 0).as_deref(), Some("final\tword"));
+        assert_eq!(search("", false, 0).as_deref(), Some("final\tword"));
+        fs::remove_file(path).unwrap();
+        fs::remove_dir(state.join("tonari")).unwrap();
+        fs::remove_dir(state).unwrap();
+    }
+
+    #[test]
     fn interrupted_read_restarts_at_the_first_unfinished_row() {
         let data = b"1\t1\t0\t/a\tfirst\n1\t2\t0\t/b\tsecond\\nline\n1\t3\t0\t/c\tlast\n";
         let mut history = History::default();

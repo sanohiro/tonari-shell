@@ -65,15 +65,12 @@ fn condition(expr: Expr, session: &mut Session, status: u8) -> Result<bool, Flow
                             e.flow(session)
                         })?;
                     let result = pattern::localized(|| {
-                        if session.regex.as_ref().is_none_or(|r| {
-                            r.pattern != expression || r.ignore_case != session.shopt.nocasematch
-                        }) {
-                            session.regex = Some(std::rc::Rc::new(Compiled::new(
-                                expression,
-                                session.shopt.nocasematch,
-                            )?));
+                        let ignore_case = session.shopt.nocasematch;
+                        let slot = &mut session.regex[usize::from(ignore_case)];
+                        if slot.as_ref().is_none_or(|r| r.pattern != expression) {
+                            *slot = Some(std::rc::Rc::new(Compiled::new(expression, ignore_case)?));
                         }
-                        session.regex.as_ref().unwrap().search(&left)
+                        slot.as_ref().unwrap().search(&left)
                     })
                     .map_err(|()| Flow::Continue(2))?;
                     let matched = result.is_some();
@@ -101,7 +98,6 @@ fn condition(expr: Expr, session: &mut Session, status: u8) -> Result<bool, Flow
 
 pub struct Compiled {
     pattern: String,
-    ignore_case: bool,
     regex: Box<libc::regex_t>,
     captures: usize,
 }
@@ -121,7 +117,6 @@ impl Compiled {
         let captures = capture_count(&pattern) + 1;
         Ok(Self {
             pattern,
-            ignore_case,
             regex: unsafe { regex.assume_init() },
             captures,
         })

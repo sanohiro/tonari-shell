@@ -130,7 +130,7 @@ pub struct Session {
     pub noclobber: bool,
     pub shopt: options::ShellOptions,
     pub(crate) external_env: std::cell::RefCell<Option<Rc<crate::execute::Environment>>>,
-    pub regex: Option<Rc<crate::test_expression::Compiled>>,
+    pub regex: [Option<Rc<crate::test_expression::Compiled>>; 2],
     pub(crate) coprocesses: Vec<Rc<crate::execute::coprocess::Coprocess>>,
     pub substitutions: crate::execute::process_substitution::Substitutions,
     pub jobs: crate::jobs::Jobs,
