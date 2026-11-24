@@ -54,6 +54,14 @@ The function test suite covers redefining or unsetting a function while it is ru
 
 関数の実行中に同名の定義を置き換える場合や、エイリアスを定義後に変更した場合も Bash と照合します。GitHub の Ubuntu 24.04 ホスト固有の対話ログインでは、旧版と候補版の両方で複合コマンドの診断が2件出ました。両者の標準出力・標準エラーとプロファイルの構文チェック結果は一致しています。
 
+On 2026-11-25 we reproduced the two hosted Ubuntu login diagnostics with the distribution's bash-completion 2.11-8. Its `_parse_help` definition continues the line after `=~` before a grouped regular expression. The completion script also queries `cdable_vars`. Both native Ubuntu runner architectures now load the complete script and pass the distribution login witness. The macOS Bash 5.2.37 audit moved `cdable_vars` from missing to a behavior match using a real directory change. Its other 1,410 verdicts remained the same. [Native verification and timings](benchmarks.md#eval-rc)
+
+2026-11-25 に Ubuntu の bash-completion 2.11-8 でログイン時の診断を再現し、正規表現の直前にある行継続と `cdable_vars` に対応しました。Ubuntu の x86-64・arm64 とも、配布版のログイン設定を読み込んで診断が出ないことと、補完関数の登録を確認しました。[Bash との照合](../tests/shell.py)
+
+Two input rules differ between our Bash references. In a literal five-line `eval` starting at line 1, the two `$LINENO` expansions on lines 3 and 5 print 7 and 9 in Bash 5.2.37, and 3 and 5 in Bash 5.3.9. A file or standard input ending in the bytes `echo a` followed by a single backslash and no newline prints `a` in 5.2 and `a\` in 5.3. Both versions keep the backslash with `-c`, `eval` and `source`. Tonari follows 5.3 for both cases on all platforms. An actual backslash-newline pair remains a continuation.
+
+複数行の引数を持つ `eval` の `$LINENO` は、呼び出し行を起点に数えます。改行なしのファイル・標準入力の末尾に単独で残ったバックスラッシュも文字として扱います。この2点は Debian 13 の Bash 5.2.37 と Ubuntu 26.04 の Bash 5.3.9 に差があり、Tonari は全プラットフォームで 5.3 の動作を採用しました。[入力ごとのテスト](../tests/shell.py)
+
 The native CI matrix for the shell at `dfd9b77` covers 7,558 platform/feature rows across macOS arm64, Debian 13 x86-64 and arm64, and Ubuntu 26.04 x86-64 and arm64. The correctness status of every row is unchanged from the first native run at `e48a0e5`. The final measurements record the Bash and Tonari median and p95 for each matching probe. GNU Bash on Linux x86-64 prints the hexadecimal float 1.5 as `0xcp-3`. Tonari and arm64 Bash print `0x1.8p+0`. The two strings represent the same value. Both x86-64 format-letter differences remain visible in the inventory. [Native matrix](native-2026-11-24/matrix.md) · [Changed observations](native-2026-11-24/previous.tsv)
 
 5環境の合計7,558行を再確認しました。既存の arm64 版の機能一覧と照合すると、ネイティブ x86-64 の Debian・Ubuntu では `printf %a` と `%A` の表記に差があります。全フィーチャーの互換判定と実測値を環境別に確認できます。[ネイティブ CI の機能別結果](native-2026-11-24/matrix.md)

@@ -1,5 +1,51 @@
 # Startup and execution / 起動と実行性能
 
+<a id="eval-rc"></a>
+
+## 2026-11-25 · Generated startup scripts and eval / 初期化スクリプトと eval
+
+Each cell gives **previous Tonari / current Tonari / Bash** in median milliseconds. Previous is `3713253`. Startup measures exec through the first visible interactive prompt with an isolated home and five warmups, rotating shells for 41 measured launches each. The second table times verified scripts in an already running shell, with 31 repetitions on Apple M1 and 25 in CI. All executables ran natively. The local M1 used macOS 27.2.1 and Bash 5.2.37. The Ubuntu 24.04 runners used the static musl release and Bash 5.2.21. [Linux job logs, p95 and binary inspection](https://github.com/sanohiro/tonari-shell/actions/runs/45495710662)
+
+| .bashrc workload | Apple M1 | Linux x86-64 | Linux arm64 |
+|---|---:|---:|---:|
+| Empty | 3.699 / 3.664 / 7.493 | 1.126 / 1.106 / 1.865 | 1.559 / 1.544 / 2.401 |
+| Light configuration | 3.415 / 3.413 / 6.639 | 1.143 / 1.121 / 1.896 | 1.610 / 1.620 / 2.535 |
+| Git completion, 94,826 bytes | 6.187 / 6.236 / 11.035 | 3.762 / 3.535 / 5.398 | 4.444 / 4.301 / 6.741 |
+| 760-line function, directly in file | 3.793 / 3.567 / 8.085 | 1.536 / 1.506 / 3.025 | 2.142 / 2.101 / 4.172 |
+| Same function through `eval` | 78.909 / 4.225 / 7.777 | 104.048 / 1.938 / 3.418 | 136.790 / 2.510 / 4.388 |
+| 300 nested conditionals through `eval` | 107.941 / 4.232 / 7.295 | 154.110 / 2.210 / 2.993 | 206.250 / 2.723 / 3.675 |
+| Nested conditionals plus a literal `if` in a here-document | 115.643 / 4.501 / 8.145 | 154.030 / 2.292 / 3.021 | 206.949 / 2.732 / 3.712 |
+| 4,000 foreground builtins | 4.826 / 4.433 / 12.910 | 2.847 / 2.302 / 7.364 | 2.887 / 2.684 / 9.644 |
+
+| Running-shell workload (2,000 loop iterations) | Apple M1 | Linux x86-64 | Linux arm64 |
+|---|---:|---:|---:|
+| Fixed expression | 1.454 / 1.060 / 7.692 | 1.123 / 0.865 / 5.750 | 1.243 / 0.912 / 7.775 |
+| Generated literal assignment | 2.337 / 2.004 / 7.017 | 1.996 / 1.664 / 5.329 | 1.864 / 1.394 / 7.214 |
+| Multiple arguments with `--` | 1.615 / 1.272 / 9.082 | 1.364 / 1.092 / 6.602 | 1.289 / 0.951 / 8.824 |
+| Alternating expressions | 3.303 / 2.444 / 14.429 | 2.611 / 1.957 / 10.074 | 2.807 / 2.026 / 13.654 |
+| Nested `eval` | 3.011 / 2.074 / 13.622 | 2.210 / 1.553 / 9.314 | 2.452 / 1.585 / 12.535 |
+| Multiline text | 4.030 / 3.154 / 10.594 | 3.172 / 2.416 / 7.980 | 3.178 / 2.440 / 10.663 |
+| Function definition and invocation | 4.095 / 2.565 / 12.200 | 3.548 / 2.132 / 9.872 | 3.651 / 2.174 / 13.257 |
+| Changing aliases | 4.111 / 4.191 / 15.945 | 3.536 / 3.532 / 12.620 | 3.413 / 3.514 / 16.975 |
+
+The long startup function contains 760 padding statements following an early return. Sourcing and invoking the function checks the registration. Reading the same file with `eval "$(<file)"` also measures capture and parsing. The 300-condition fixture executes the body of each inner `if`. The quoted variant puts an extra literal `if` in a here-document before the outer terminator. All three shells also load the same Git completion source. The light local fixture defines a directory helper and the CI fixture defines a lazy version-manager wrapper.
+
+On the M1 an 8 KiB lookahead alone took 78.989 ms for the large generated function. Looking through the full command took 4.257 ms in the same 41-sample experiment. This change alone still spent 31.538 ms on 300 inner conditionals. Skipping inner terminators reduced that cost. A prototype that failed to reconsider the last deferred terminator took 88.482 ms with the literal here-document versus 4.201 ms after validation. In Git completion, treating every line ending in an opening brace as another shell block pushed startup to 90.951 ms on M1. Restricting recognition to shell headers restored the timing in the table.
+
+Borrowing a cached syntax tree instead of cloning it reduced fixed-expression throughput from 1.161 to 1.025 ms and nested eval from 2.001 to 1.782 ms in an interleaved M1 comparison. Distinct literal assignments measured 1.915 and 1.925 ms. Preserving parse diagnostics and active alias changes requires reparsing those inputs. For foreground builtins, delaying construction of literal job labels reduced the 4,000-call M1 profile from 4.804 to 4.408 ms against the build that already deferred terminal-state capture.
+
+Previously Ubuntu’s 76,898-byte bash-completion 2.11-8 script stopped while defining `_parse_help`. The release handles the continued regex operand and registers `_parse_help`, `_parse_usage` and `_completion_loader`. The startup fixture requires all three. Searching CDPATH lazily and looking up a directory variable after ordinary directory candidates reduced a mixed 400-iteration `cdable_vars` workload from 21.746 to 20.818 ms on M1, versus Bash at 66.707 ms.
+
+On M1 the real Starship 1.27.0 Git prompt took 64.910 / 68.171 / 78.981 ms to first paint (previous / current / Bash). Enter took 39.005 / 38.241 / 42.884 ms and key echo took 0.033 / 0.032 / 0.033 ms. Evaluating its actual precmd function definition 100 times took 10.999 / 6.481 / 20.069 ms. Sourcing pregenerated Starship code and painting the real Git prompt took 50.960 / 49.937 / 58.717 ms, with p95 at 54.111 / 55.591 / 66.622 ms. A dedicated 101-session first-prompt repeat gave 67.357 / 66.551 / 78.058 ms, with p95 of 73.310 / 75.017 / 86.798 ms. The old and new Tonari medians changed order between the two series. The complete Starship launch shows no consistent improvement over the previous release.
+
+The nested first prompt took 73.8% of Bash time on Linux x86-64 and 74.1% on Linux arm64. The upper shell-work target is 66.7%. Eight evaluations in an already running shell took 3.830 ms on x86-64 and 5.584 ms on arm64, versus Bash at 5.980 and 8.164 ms (64.0% and 68.4%). We also tried storing the first arm of an `if` inline. Eight evaluations of the 300-condition block took 3.574 → 3.576 ms on M1, 4.543 → 4.540 ms on Linux x86-64 and 5.653 → 5.494 ms on Linux arm64. We retained the existing representation. The Ubuntu bash-completion first prompt took 5.429 ms on M1, 4.466 ms on Linux x86-64 and 4.891 ms on Linux arm64. [Native conditional-storage experiment](https://github.com/sanohiro/tonari-shell/actions/runs/45494566940)
+
+The shipped runtime is `0d774f0`. Executable sizes changed from 1,416,832 to 1,433,360 bytes on macOS arm64, 1,907,128 to 1,917,304 bytes on Linux x86-64 and 1,650,000 to 1,658,088 bytes on Linux arm64. The signed Mach-O links only libSystem. Both ELF files are stripped static PIE. The macOS Bash 5.2.37 comparison covers 1,411 audit entries. The directory-variable option moved from missing to a behavior match and every other verdict was unchanged. The 203-test integration suite passed on the Mac and both Ubuntu 24.04 CI architectures, and in arm64 Debian 13 (Bash 5.2.37) and Ubuntu 26.04 (Bash 5.3.9) containers. Platform-specific tests were skipped on other operating systems. The shell suite covers temporary bindings, aliases, line numbers, EOF, heredocs, continued regex patterns, declarations, control flow, job labels and terminal handoff. A separate 38-case comparison checked exit status, stdout, diagnostic presence and warning count. [Native release verification](https://github.com/sanohiro/tonari-shell/actions/runs/45495710662)
+
+Reproduce interactive timings with `python3 tools/bench_login.py CURRENT --previous OLD --bash BASH --rcfile FILE --runs 41`. Use `python3 tools/bench_scripts.py CURRENT --previous OLD --bash BASH --timing started --runs 31 --case eval-fixed --case eval-changing --case eval-nested` for throughput. The native workflow’s `rcfiles` suite defines the remaining fixture files, runs each case and records release linkage and size. For the upstream hook use `python3 tools/bench_starship.py OLD CURRENT BASH --starship /path/to/starship --runs 21`. [Fixtures and CI commands](../tools/ci/native-bench.sh)
+
+表は旧 Tonari、新 Tonari、Bash の順の中央値（ms）です。上段は端末の初回表示まで、下段は起動済みシェルでの反復を測定しました。大きな関数を直接読む場合と、同じ関数を文字列として評価する場合を分けています。実際の Git 補完と Ubuntu の bash-completion は、関数が登録されたことまで確かめています。[開発知見](engineering-notes.md)
+
 <a id="starship-phases"></a>
 
 ## 2026-11-25 · Where the official Starship hook spends time / 公式フックの所要時間の内訳
