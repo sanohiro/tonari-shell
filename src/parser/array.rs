@@ -29,7 +29,7 @@ impl Reader {
         self.tokens.pop_front();
         let mut items = Vec::new();
         loop {
-            match self.tokens.pop_front() {
+            match self.operand() {
                 Some(Token::RightParen) => return Ok(items),
                 Some(Token::Newline) => {}
                 Some(Token::Word(LexWord {
