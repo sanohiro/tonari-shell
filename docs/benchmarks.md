@@ -1,5 +1,39 @@
 # Startup and execution / 起動と実行性能
 
+<a id="history-fields"></a>
+
+## 2026-11-24 · Alt-F and multi-fragment Ctrl-R / 履歴候補の部分採用と複数語検索
+
+Each cell gives median/p95 milliseconds from a keystroke to visible PTY output on a local Mac M1 and two native Linux CI runners, first working implementation (`03f6714`) → final release (`d643c88`). For each binary the benchmark uses three warm-ups and 21 measured fresh shells with a million command records. It alternates binaries, verifies the accepted argument, and times echo separately from the first matching row. The long Alt-F case has 4,096 trailing words. The old match is the first row of the journal. The typeahead case replaces a Japanese search term after the first hit appears for a query with only one matching row. [Native results and host details](https://github.com/sanohiro/tonari-shell/actions/runs/45406685611) · [Benchmark driver](../tools/bench_history_fields.py)
+
+| Workload | Local M1 | Linux x86-64 | Linux arm64 |
+| --- | ---: | ---: | ---: |
+| Alt-F, short | 0.049/0.058 → 0.035/0.046 | 0.087/0.457 → 0.091/0.406 | 0.072/0.081 → 0.067/0.072 |
+| Alt-F, long | 0.295/0.334 → 0.050/0.061 | 0.796/1.017 → 0.298/0.417 | 0.633/0.738 → 0.073/0.088 |
+| recent, query echo | 0.031/0.039 → 0.033/0.076 | 0.043/0.051 → 0.047/0.087 | 0.047/0.060 → 0.047/0.053 |
+| recent, selected row visible | 133.019/144.445 → 0.120/0.162 | 105.708/106.816 → 0.058/0.094 | 83.232/84.097 → 0.078/0.085 |
+| old, query echo | 0.027/0.059 → 0.031/0.075 | 0.047/0.074 → 0.046/0.050 | 0.046/0.048 → 0.045/0.047 |
+| old, selected row visible | 194.702/205.510 → 7.354/9.721 | 120.494/121.369 → 6.104/6.256 | 102.745/103.560 → 9.575/10.003 |
+| typeahead, query echo | 0.065/0.098 → 0.052/0.078 | 0.092/0.393 → 0.059/0.089 | 0.089/0.097 → 0.072/0.075 |
+| typeahead, selected row visible | 0.179/0.202 → 0.073/0.106 | 0.142/0.409 → 0.065/0.092 | 0.130/0.139 → 0.080/0.085 |
+
+Linux also ran the PTY driver and the shell together under the same single-CPU affinity mask. The following cells are final-build median/p95 milliseconds over 15 trials.
+
+| One CPU | Linux x86-64 | Linux arm64 |
+| --- | ---: | ---: |
+| old, query echo | 2.410/3.293 | 0.059/0.061 |
+| old, selected row visible | 6.365/6.811 | 9.412/10.012 |
+| typeahead, query echo | 0.074/0.210 | 0.152/0.182 |
+| typeahead, selected row visible | 0.117/0.217 | 0.191/0.226 |
+
+手元の M1 では100万件の最古の候補を表示する時間が初回 194.702/205.510 ms、最終版 7.354/9.721 ms（中央値/p95）でした。候補を探している間に打ち直した日本語の表示は 0.052/0.078 ms でした。このため全件を読み込む実装から、先に検索語を描いて必要な候補数だけ履歴を逆向きに読む実装へ切り替えました。今回の配布バイナリは手元の M1 で 1,383,744 バイト（前版 1,367,216）、ネイティブ CI の Linux x86-64・Linux arm64 でそれぞれ 1,884,888, 1,628,832 バイトです。
+
+A literal single-term Ctrl-R lookup through 100,000 rows also ran alongside GNU Bash (31 trials on the local M1 and 21 on Linux). Tonari/Bash median milliseconds were 0.215/0.537 on the local M1, 0.113/1.183 on Linux x86-64, and 0.145/1.015 on Linux arm64. The feature comparison uses Tonari's first implementation for the multi-fragment list and partial autosuggestion. The Mac audit retained all 1,408 previous verdicts. The PTY suite also compares ordinary Alt-F word motion with Bash.
+
+Ordinary UTF-8 commit medians on the local M1 were 0.039 ms for one scalar and 0.430 ms for 257, compared with 0.042 and 0.431 ms in the release before these features. In the same 31-trial run Bash took 0.052 and 1.254 ms. On a single logical CPU the Python PTY reader shares its scheduling time with the shell. The query-echo column includes that scheduling delay.
+
+Reproduce the feature timings with `python3 tools/bench_history_fields.py FIRST CURRENT --entries 1000000 --runs 21` and the Bash control with `python3 tools/bench_editor_input.py CURRENT BASH --case Ctrl-R --runs 21`.
+
 <a id="completion-picker"></a>
 
 ## 2026-11-24 · Filtering Tab completions and ranking learned arguments / 補完候補の絞り込みと使用頻度
