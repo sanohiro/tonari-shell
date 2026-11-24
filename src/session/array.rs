@@ -310,6 +310,14 @@ impl Session {
         }
     }
 
+    pub(crate) fn stored_array(&self, name: &str) -> bool {
+        name != "PIPESTATUS"
+            && self
+                .variables
+                .get(name)
+                .is_some_and(|v| !v.nameref && v.elements.is_some())
+    }
+
     pub fn array_names(&self) -> Vec<String> {
         let mut names: Vec<_> = self
             .variables

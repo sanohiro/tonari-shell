@@ -1659,6 +1659,32 @@ echo() { printf 'function:%s' "$1"; }; v=$(echo shadow); printf '%s' "$v" """,
         self.compare("""n=8; v=$(printf 'xy%n' n; printf '%s' "$n"); echo "$v:$n"
 v=$(false; printf '%s' "$?"); echo "$v" """, 0, b"xy2:8\n1\n")
 
+    def test_capturing_job_list_and_external_array_arguments(self):
+        self.compare(r"""v=$(jobs -p); printf 'empty:%s:<%s>\n' "$?" "$v"
+a=([2]="a b" [4]='' [9]='*.rs')
+v=$(/usr/bin/printf '<%s>' "${a[@]}"); echo "$v"
+declare -n ref=a; v=$(/usr/bin/printf '[%s]' "${ref[@]}"); echo "$v"
+jobs() { printf '%s' "shadow:$1"; }; v=$(jobs -p); echo "$v" """,
+                     0, b"empty:0:<>\n<a b><><*.rs>\n[a b][][*.rs]\nshadow:-p\n", minimum=5)
+
+    def test_prompt_width_markers_and_literal_backslashes(self):
+        self.compare(r"""p='日\[x\]\[y\]本'; printf '<%s>\n' "${p@P}"
+p='\\[literal]$((3+4))'; printf '<%s>\n' "${p@P}" """,
+                     0, "<日xy本>\n<\\[literal]7>\n".encode(), minimum=5)
+
+    def test_styled_prompt_echo_and_midline_edit(self):
+        for shell in (BASH, TONARI):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                os.write(fd, br"PS1='top\n\[\e[32m\]ready> \[\e[0m\]'" + b"\r")
+                end = b"ready> \x1b[0m"
+                self.read_until(fd, end)
+                os.write(fd, b"echo ZX")
+                echoed = self.read_until(fd, b"X")
+                self.assertNotIn(end, echoed)
+                os.write(fd, b"\x02Y\r")
+                self.read_until(fd, b"ZYX\r\n")
+
     def test_parent_job_visibility_without_job_ownership(self):
         self.compare("""sleep 0.15 & p=$!
 f() { jobs -p; }

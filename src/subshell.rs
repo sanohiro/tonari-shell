@@ -256,7 +256,17 @@ fn capture_simple(
         {
             return None;
         }
-        match program {
+        let external = match program {
+            "jobs"
+                if body.len() == 1
+                    && session.jobs.is_empty()
+                    && !session.traps.has_explicit_traps()
+                    && (args.is_empty()
+                        || matches!(args, [flag] if flag.as_literal() == Some("-p"))) =>
+            {
+                false
+            }
+            "jobs" => return None,
             "printf" if body.len() > 1 => {
                 // A dynamic format, -v or a %n conversion can assign a variable
                 // used by the next command. Keep such lists in a real subshell.
@@ -264,16 +274,23 @@ fn capture_simple(
                 if fmt.starts_with('-') || (fmt.contains('%') && fmt.contains('n')) {
                     return None;
                 }
+                false
             }
-            "printf" | "echo" | ":" | "true" | "false" => {}
-            _ if body.len() == 1 && crate::execute::can_capture_external(program) => {}
+            "printf" | "echo" | ":" | "true" | "false" => false,
+            _ if body.len() == 1 && crate::execute::can_capture_external(program) => true,
             _ => return None,
-        }
+        };
         let safe = args.iter().all(|word| match word {
             Word::Literal(_) => true,
             Word::Expanded(parts) => parts.iter().all(|part| match part {
                 Part::Text(_) => true,
-                Part::Parameter { name, .. } => {
+                Part::Parameter { name, quoted } => {
+                    if let Some(base) = name.strip_suffix("[@]") {
+                        return external
+                            && *quoted
+                            && is_identifier(base)
+                            && session.stored_array(base);
+                    }
                     is_identifier(name)
                         && !matches!(
                             name.as_str(),
@@ -298,6 +315,9 @@ fn capture_simple(
         };
         let cmd = &stages[0];
         let name = cmd.words[0].as_literal().unwrap();
+        if name == "jobs" {
+            return Some(Ok((String::new(), 0)));
+        }
         if !matches!(name, "echo" | "printf" | ":" | "true" | "false") {
             return Some(crate::execute::capture_external(cmd.clone(), session, last));
         }

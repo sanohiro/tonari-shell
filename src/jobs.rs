@@ -283,6 +283,10 @@ impl Jobs {
     pub(crate) fn count(&self) -> usize {
         self.table.len()
     }
+    pub(crate) fn is_empty(&self) -> bool {
+        self.table.is_empty() && self.inherited.is_empty()
+    }
+
     pub fn init(&mut self) {
         let old = unsafe { libc::getpgrp() };
         if unsafe { libc::tcgetpgrp(libc::STDERR_FILENO) } != old {

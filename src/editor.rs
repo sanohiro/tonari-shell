@@ -195,7 +195,7 @@ impl Keys {
         undo: &mut Undo,
     ) -> io::Result<Option<usize>> {
         self.insert_burst(first, session, inserted)?;
-        let append = (*cursor == text.len() && *cursor >= 1024).then_some(*cursor);
+        let append = (*cursor == text.len()).then_some(*cursor);
         let end = if overwrite && *cursor < text.len() {
             *cursor + char_offset(&text[*cursor..], inserted.chars().count())
         } else {
@@ -668,6 +668,7 @@ pub fn line(
     let mut matched_query: Option<String> = None;
     let mut inserted = String::new();
     let mut last_tab = false;
+    let styled_or_multiline = prompt.contains(['\x1b', '\n']);
     let mut appended = None;
     let mut erased = None;
     let mut replaying = false;
@@ -748,6 +749,7 @@ pub fn line(
         {
             screen.move_short(visible_prompt, &text, cursor)?;
         } else if let Some(start) = appended.take()
+            && (styled_or_multiline || start >= 1024)
             && let Some(pos) = screen.tail
             && screen.can_append(&text[start..])
             && cursor == text.len()
@@ -1097,7 +1099,8 @@ pub fn line(
                 }
                 if action == Action::Comment
                     || visible_prompt != prompt
-                    || text.len() < 1024
+                    || (!styled_or_multiline && text.len() < 1024)
+                    || replaying
                     || screen.tail.is_none()
                 {
                     screen.draw(prompt, &text, text.len(), "")?;
@@ -1119,7 +1122,8 @@ pub fn line(
             Action::Rubout => {
                 let start = previous(&text, cursor);
                 if cursor == text.len()
-                    && start >= 1024
+                    && start < cursor
+                    && (styled_or_multiline || start >= 1024)
                     && text.as_bytes()[start].is_ascii_graphic()
                 {
                     erased = Some(1usize);
@@ -1340,7 +1344,7 @@ pub fn line(
                 }
             }
             Action::Paste => {
-                if cursor == text.len() && cursor >= 1024 {
+                if cursor == text.len() {
                     appended = Some(cursor);
                 }
                 let pasted =

@@ -61,7 +61,7 @@ if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; t
   exit
 fi
 if [[ $RUNNER_OS == macOS ]]; then
-  if [[ $SUITE == inventory || $SUITE == parity-commands || $SUITE == parity-invocation || $SUITE == foreground || $SUITE == navigation || $SUITE == edit-actions || $SUITE == budget* ]]; then
+  if [[ $SUITE == inventory || $SUITE == parity-commands || $SUITE == parity-invocation || $SUITE == foreground || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == budget* ]]; then
     gnu="$RUNNER_TEMP/gnu"
     mkdir -p "$gnu"
     download_bash "$version" "$digest" "$RUNNER_TEMP/bash.tar.gz"
@@ -124,6 +124,17 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
+  starship)
+    case "$NATIVE_RUNNER" in
+      ubuntu-24.04) platform=x86_64-unknown-linux-musl; sha=10c8eb4cb3b761d9bf59ea828444c2dab36c900b7d69a69e08814b286969df89 ;;
+      ubuntu-24.04-arm) platform=aarch64-unknown-linux-musl; sha=341f5cbf24699fa0b27ec88965ad25f862ea09e15d35a543fd6ffdff1d2aa00d ;;
+      macos-15) platform=aarch64-apple-darwin; sha=5362da8cb2928f98f3ce0ffda697cf0f8de70081db000dae316d6d3a404f6cf0 ;;
+    esac
+    archive="$RUNNER_TEMP/starship.tar.gz"
+    curl --retry 3 -fsSL "https://github.com/starship/starship/releases/download/v1.27.0/starship-$platform.tar.gz" -o "$archive"
+    echo "$sha  $archive" | shasum -a 256 -c -
+    tar -xzf "$archive" -C "$RUNNER_TEMP" starship
+    run starship python3 tools/bench_starship.py "$bin/baseline" "$current" "$ref" --starship "$RUNNER_TEMP/starship" --runs 25 ;;
   edit-actions)
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k last_arg -k test_undo
     run actions python3 tools/bench_edit_actions.py "$bin/baseline" "$current" "$ref" --runs 21

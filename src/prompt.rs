@@ -14,8 +14,26 @@ pub fn render(session: &mut Session, secondary: bool, status: u8) -> String {
     render_text(session, prompt, status)
 }
 
-pub fn render_text(session: &mut Session, prompt: String, status: u8) -> String {
-    if !prompt.contains(['\\', '$', '`']) {
+pub fn render_text(session: &mut Session, mut prompt: String, status: u8) -> String {
+    let bytes = prompt.as_bytes();
+    let mut escapes = memchr::memchr3_iter(b'\\', b'$', b'`', bytes);
+    let Some(first) = escapes.next() else {
+        return prompt;
+    };
+    // An already-rendered ANSI prompt often contains only Readline width markers.
+    // Strip those literal pairs without allocating shell words or expanding anything.
+    let marker = |i: usize| bytes[i] == b'\\' && matches!(bytes.get(i + 1), Some(b'[' | b']'));
+    if marker(first) && escapes.all(marker) {
+        let mut bracket = false;
+        prompt.retain(|c| {
+            if bracket {
+                bracket = false;
+                false
+            } else {
+                bracket = c == '\\';
+                !bracket
+            }
+        });
         return prompt;
     }
     let parsed = crate::parser::prompt_word(&prompt, session.shopt.promptvars, |c, chars| {
