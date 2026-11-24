@@ -60,12 +60,7 @@ pub(super) fn parse(source: &str) -> Option<Statement> {
             rest = chars.as_str();
             word.finish()
         } else {
-            let end = rest
-                .bytes()
-                .take_while(|b| {
-                    b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'/' | b'.' | b':')
-                })
-                .count();
+            let end = lexer::plain_prefix(rest);
             let (word, tail) = rest.split_at(end);
             if word.is_empty() || words.is_empty() && reserved(word) {
                 return None;

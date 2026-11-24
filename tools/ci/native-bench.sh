@@ -59,7 +59,9 @@ case "$SUITE" in
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k function
     run functions python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" \
       --case function-redefinitions --case function-definitions --case function-wrapper-redefinitions \
-      --case function-compound-redefinitions --case function-loop-redefinitions --case functions --runs 61 ;;
+      --case function-compound-redefinitions --case function-loop-redefinitions --case functions --runs 61
+    run startup python3 tools/bench.py "$current" --bash "$ref" --compare-tonari Previous "$bin/baseline" \
+      --case prompt --case startup --case loop --runs 101 ;;
   editing)
     for size in 96 65536; do
       run "editing-$size" python3 tools/bench_editing.py "$current" "$ref" --size "$size" --runs 11

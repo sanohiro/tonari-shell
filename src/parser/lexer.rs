@@ -450,6 +450,14 @@ fn process_start(source: &str) -> bool {
     source.starts_with("<(") || source.starts_with(">(")
 }
 
+// These bytes never introduce quoting, expansion, assignment or a shell operator.
+pub(super) fn plain_prefix(source: &str) -> usize {
+    source
+        .bytes()
+        .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'/' | b'.' | b':'))
+        .count()
+}
+
 pub(super) fn separator(c: char) -> bool {
     matches!(
         c,
@@ -669,8 +677,11 @@ pub(super) fn lex(
     let mut in_test = false;
     let mut pattern_next: Option<bool> = None;
     let mut pending_docs = Vec::new();
-    let mut tokens = Vec::new();
-    let mut spans = Vec::new();
+    // Short function bodies typically fit in one allocation. Cap the estimate
+    // because the source can also be one very long quoted word.
+    let capacity = (source.len() / 3).min(32);
+    let mut tokens = Vec::with_capacity(capacity);
+    let mut spans = Vec::with_capacity(capacity);
     let mut token_start = 0;
     while let Some(c) = chars.clone().next() {
         let offset = source.len() - chars.as_str().len();
@@ -787,7 +798,18 @@ pub(super) fn lex(
         let mut braces = 0usize;
         let mut assignment = None;
         let start = chars.as_str();
-        if let Some(prefix) = super::array::indexed_prefix(start) {
+        // Copy an ordinary word in one piece. Keep indexed assignments and
+        // expansion syntax on the full word reader.
+        let plain = plain_prefix(start);
+        if plain > 0
+            && start.as_bytes().get(plain).is_none_or(|b| {
+                matches!(b, b' ' | b'\t' | b'\n' | b';' | b'|' | b'&' | b'(' | b')')
+            })
+        {
+            word.literal(&start[..plain]);
+            chars = start[plain..].chars();
+            started = true;
+        } else if let Some(prefix) = super::array::indexed_prefix(start) {
             word.literal(&start[..prefix.len() + 1]);
             assignment = Some(prefix.to_owned());
             chars = start[prefix.len() + 1..].chars();
