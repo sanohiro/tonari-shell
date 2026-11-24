@@ -781,16 +781,26 @@ fn eval_builtin(
         }
         Builtin::Directory => Flow::Continue(session.directory_builtin(&cmd.words[0], args)),
         Builtin::Source => crate::source_file(session, &cmd.words, last_status),
-        Builtin::Eval => crate::eval_text(
-            session,
-            &(if args.first().is_some_and(|s| s == "--") {
+        Builtin::Eval => {
+            let args = if args.first().is_some_and(|s| s == "--") {
                 &args[1..]
             } else {
                 args
-            })
-            .join(" "),
-            last_status,
-        ),
+            };
+            let joined;
+            let source = match args {
+                [] => return Flow::Continue(0),
+                [one] => one.as_str(),
+                many => {
+                    joined = many.join(" ");
+                    &joined
+                }
+            };
+            let first_line = session.current_command.as_ref().map_or(1, |location| {
+                location.line + memchr::memchr_iter(b'\n', location.text().as_bytes()).count()
+            });
+            crate::input::text(session, source, last_status, false, false, first_line)
+        }
         Builtin::Return(status) => {
             if session.source_depth == 0 && session.function_depth == 0 {
                 write_error(

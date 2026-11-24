@@ -36,11 +36,11 @@ fn starts_group(bytes: &[u8]) -> bool {
         .is_some_and(|line| line[0] == b'{' && line.get(1).is_none_or(u8::is_ascii_whitespace))
 }
 
-fn whole_group(session: &Session, text: &str) -> Option<Vec<parser::Statement>> {
+fn whole_group(session: &Session, text: &str, first_line: usize) -> Option<Vec<parser::Statement>> {
     if !starts_group(text.as_bytes()) {
         return None;
     }
-    let program = parser::session_source(text, false, session).ok()?;
+    let program = parser::session_source_at(text, false, session, first_line).ok()?;
     if matches!(program.as_slice(), [s] if matches!(s.command, parser::Command::Group(_))) {
         Some(program)
     } else {
@@ -66,7 +66,7 @@ fn file_group(
     file.read_exact_at(&mut bytes[prefix.len()..], prefix.len() as u64)
         .ok()?;
     // pread preserves the offset for the ordinary incremental fallback.
-    whole_group(session, std::str::from_utf8(&bytes).ok()?)
+    whole_group(session, std::str::from_utf8(&bytes).ok()?, 1)
 }
 
 pub fn file_script(
@@ -96,7 +96,7 @@ pub fn file_script(
             && let Ok(source) = std::str::from_utf8(&bytes[..n])
         {
             drop(file);
-            return text(session, source, status, false, check);
+            return text(session, source, status, false, check, 1);
         }
     }
     if let Some(meta) = &metadata
@@ -134,6 +134,13 @@ fn error(message: impl std::fmt::Display, status: u8) -> Flow {
     Flow::Continue(status)
 }
 
+fn blank_or_comment(line: &str) -> bool {
+    let first = line.trim_start_matches([' ', '\t']);
+    first.is_empty()
+        || first == "\n"
+        || first.starts_with('#') && !first.trim_end_matches('\n').contains(['\n', '\0'])
+}
+
 fn history_input<'a>(
     session: &mut Session,
     text: &'a str,
@@ -160,6 +167,7 @@ fn buffered_compound(
     first: &str,
     buffered: &[u8],
     line: usize,
+    at_eof: bool,
 ) -> Option<(Vec<parser::Statement>, usize, usize)> {
     let header = first.trim_ascii_start();
     let key = header
@@ -174,17 +182,19 @@ fn buffered_compound(
         _ => return None,
     };
     let mut start = 0;
-    for (i, end) in memchr::memchr_iter(b'\n', buffered).enumerate() {
-        let size = end + 1;
+    let final_line = at_eof && !buffered.is_empty() && !buffered.ends_with(b"\n");
+    let ends = memchr::memchr_iter(b'\n', buffered).chain(final_line.then_some(buffered.len()));
+    for (i, end) in ends.enumerate() {
+        let size = (end + 1).min(buffered.len());
         let next = &buffered[start..end];
         start = size;
-        if !next.trim_ascii_start().starts_with(close) {
+        if !next.trim_ascii_start().starts_with(close) && !next.trim_ascii_end().ends_with(close) {
             continue;
         }
         let mut text = String::with_capacity(first.len() + size);
         text.push_str(first);
         text.push_str(std::str::from_utf8(&buffered[..size]).ok()?);
-        match parser::session_source_at(&text, false, session, line) {
+        match parser::session_source_at(&text, at_eof && size == buffered.len(), session, line) {
             Ok(program) if matches!(program.as_slice(), [s] if s.location.end > first.len()) => {
                 return Some((program, size, i + 1));
             }
@@ -244,12 +254,7 @@ fn run(
         };
         // At a new physical line these tokens cannot open a command. Keep
         // accumulated compound commands, history expansion and NUL diagnostics.
-        if line_start == 0 && n != 0 && {
-            let first = text.trim_start_matches([' ', '\t']);
-            first.is_empty()
-                || first == "\n"
-                || first.starts_with('#') && !first.trim_end_matches('\n').contains(['\n', '\0'])
-        } {
+        if line_start == 0 && n != 0 && blank_or_comment(text) {
             base_line += text.bytes().filter(|&b| b == b'\n').count();
             input.clear();
             continue;
@@ -268,7 +273,7 @@ fn run(
             && (session.source_depth > 0 || open_function && !session.history_enabled)
             && matches!(result, Err(parser::Error::Incomplete(_)))
             && let Some((program, consumed, lines)) =
-                buffered_compound(session, text, reader.buffer(), base_line)
+                buffered_compound(session, text, reader.buffer(), base_line, false)
         {
             reader.consume(consumed);
             base_line += lines;
@@ -318,9 +323,16 @@ fn run(
 
 // A syntax error on a later physical line must not undo an already executed
 // complete command. Keep borrowed slices on the -c path.
-pub fn text(session: &mut Session, source: &str, mut status: u8, tail: bool, check: bool) -> Flow {
+pub fn text(
+    session: &mut Session,
+    source: &str,
+    mut status: u8,
+    tail: bool,
+    check: bool,
+    first_line: usize,
+) -> Flow {
     if !session.verbose && source.len() >= 32 * 1024 {
-        if let Some(program) = whole_group(session, source) {
+        if let Some(program) = whole_group(session, source, first_line) {
             return if check {
                 Flow::Continue(0)
             } else {
@@ -335,20 +347,25 @@ pub fn text(session: &mut Session, source: &str, mut status: u8, tail: bool, che
     let mut end = 0;
     let mut here_doc: Option<parser::HereDocHint> = None;
     let mut ran = false;
-    let mut base_line = 1;
-    for (line_index, line) in source.split_inclusive('\n').enumerate() {
+    let mut base_line = first_line;
+    let mut line_number = first_line - 1;
+    let mut lines = source.split_inclusive('\n');
+    while let Some(line) = lines.next() {
+        line_number += 1;
         if session.verbose {
             eprint!("{line}");
         }
+        let new_command = start == end;
         end += line.len();
-        let last = end == source.len();
+        let mut last = end == source.len();
         if !last && here_doc.as_mut().is_some_and(|hint| !hint.may_finish(line)) {
             continue;
         }
         here_doc = None;
         let text = &source[start..end];
         let expanded;
-        let text = if tail && session.histexpand && session.history_enabled {
+        let expand_history = tail && session.histexpand && session.history_enabled;
+        let mut text = if expand_history {
             expanded = match history_input(session, text) {
                 Ok(s) => s,
                 Err(flow) => return flow,
@@ -357,7 +374,35 @@ pub fn text(session: &mut Session, source: &str, mut status: u8, tail: bool, che
         } else {
             text
         };
-        let result = parser::session_source_at(text, last, session, base_line);
+        if new_command && blank_or_comment(text) {
+            base_line = line_number + 1;
+            start = end;
+            continue;
+        }
+        let limit = source.len().min(end.saturating_add(8192));
+        let mut result = parser::session_source_at(text, last, session, base_line);
+        if new_command
+            && !last
+            && !session.verbose
+            && !expand_history
+            && matches!(result, Err(parser::Error::Incomplete(_)))
+            && let Some((program, consumed, extra_lines)) = buffered_compound(
+                session,
+                text,
+                &source.as_bytes()[end..limit],
+                base_line,
+                limit == source.len(),
+            )
+        {
+            // Only the verified compound belongs to this parse. Execute it before
+            // interpreting later lines with their current aliases and shell options.
+            end += consumed;
+            line_number += extra_lines;
+            lines = source[end..].split_inclusive('\n');
+            text = &source[start..end];
+            last = end == source.len();
+            result = Ok(program);
+        }
         match result {
             Err(parser::Error::HereDoc(hint)) if !last => {
                 here_doc = Some(hint);
@@ -379,7 +424,7 @@ pub fn text(session: &mut Session, source: &str, mut status: u8, tail: bool, che
             }
             Ok(_) => {}
         }
-        base_line = line_index + 2;
+        base_line = line_number + 1;
         start = end;
     }
     Flow::Continue(if ran { status } else { 0 })

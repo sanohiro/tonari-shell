@@ -6,6 +6,7 @@ import math
 import os
 from pathlib import Path
 import pty
+import shlex
 import signal
 import statistics
 import struct
@@ -106,6 +107,55 @@ def compare(shells, runs, sample):
         print(key, *row, sep=" | ", flush=True)
 
 
+def replay_starship(root, starship, shell, cwd, rc, env):
+    """Keep the normal hook and process boundaries, replaying a successful prompt."""
+    directory = root / "replay"
+    directory.mkdir()
+    exe = directory / "starship"
+    env_replay = {**env, "PATH": f"{directory}:/usr/bin:/bin"}
+    # Starship resolves its embedded executable via PATH. Generate the hook for
+    # the final replay path with the genuine binary before installing the stub.
+    exe.symlink_to(starship)
+    fixture = {}
+    for name, args in (("stub", []), ("hook", ["--print-full-init"])):
+        fixture[name] = subprocess.check_output([exe, "init", "bash", *args], env=env_replay)
+        if os.fsencode(exe) not in fixture[name]:
+            raise ValueError("replay hook did not use the test executable")
+    exe.unlink()
+
+    # Capture the literal PS1/PS2 after the real Bash hook has run in a PTY.
+    capture_rc = root / "capture-rc"
+    capture_rc.write_text(rc.read_text() + """PROMPT_COMMAND='starship_precmd
+printf %s "$PS1" > "$HOME/ps1"
+printf %s "$PS2" > "$HOME/ps2"'\n""")
+    trial(shell, cwd, capture_rc, env, False)
+    for name in ("ps1", "ps2"):
+        fixture[name] = (Path(env["HOME"]) / name).read_bytes()
+    data = "".join(f"static const char {k}[] = {{{','.join(map(str, v))},0}};\n"
+                   for k, v in fixture.items())
+    src = directory / "replay.c"
+    src.write_text("#include <stdio.h>\n#include <string.h>\n#include <time.h>\n" + data + """
+int main(int argc, char **argv) {
+    if (argc < 2) return 2;
+    if (strcmp(argv[1], "init") == 0) return fputs(argc > 3 ? hook : stub, stdout) < 0;
+    if (strcmp(argv[1], "time") == 0) {
+        struct timespec ts;
+        if (clock_gettime(CLOCK_REALTIME, &ts) < 0) return 1;
+        printf("%lld\\n", (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+        return 0;
+    }
+    if (strcmp(argv[1], "prompt") != 0) return 2;
+    return fputs(argc > 2 && strcmp(argv[2], "--continuation") == 0 ? ps2 : ps1, stdout) < 0;
+}
+""")
+    subprocess.run(["cc", "-O2", src, "-o", exe], check=True)
+    trial(shell, cwd, capture_rc, env_replay, False)
+    for name in ("ps1", "ps2"):
+        if (Path(env["HOME"]) / name).read_bytes() != fixture[name]:
+            raise ValueError(f"replayed {name} differs from Starship")
+    return env_replay
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("shells", type=Path, nargs="+")
@@ -148,6 +198,10 @@ def main():
             print(cwd.name, flush=True)
             compare(shells, args.runs, lambda sh, verify: trial(sh, cwd, rc, env, verify))
 
+        replay_env = replay_starship(root, starship, shells[-1], project, rc, env)
+        print("project, external output replay (successful colon commands)", flush=True)
+        compare(shells, args.runs, lambda sh, _: trial(sh, project, rc, replay_env, False))
+
         # Compare startup using the same upstream code generated ahead of time.
         init = home / "starship-init.bash"
         init.write_bytes(subprocess.check_output([starship, "init", "bash", "--print-full-init"], env=env))
@@ -157,7 +211,15 @@ def main():
 
         # Isolate shell work which is otherwise hidden by the renderer and Git.
         marker_prompt = (r"\[" + "\x1b[1;36m" + r"\]" + "開発 🌸 " + r"\[" + "\x1b[0m" + r"\]") * 4 + "\n❯ "
+        # Take the full multiline precmd definition verbatim from the installed hook.
+        # The final top-level brace is unindented in the pinned upstream script.
+        hook = init.read_text()
+        start = hook.index("starship_precmd() {\n")
+        end = hook.index("\n}\n", start) + len("\n}")
+        setup = 'hook=' + shlex.quote(hook[start:end])
         cases = [
+            ("100 evals of the upstream precmd definition", setup,
+             'eval "$hook" || exit; declare -F starship_precmd >/dev/null || exit 1', 100, ""),
             ("200 empty jobs captures", "", "s=$(jobs -p)", 200, ""),
             ("200 external array captures", 'args=("a b" "" "*")', 's=$(/usr/bin/printf %s "${args[@]}")', 200, "a b*"),
             ("100 captures of a wrapper function", "f() { /usr/bin/printf ok; }", "s=$(f)", 100, "ok"),

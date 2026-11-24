@@ -735,6 +735,32 @@ v=$(printf 'z\n' | ( read -r x; printf '%s:%s' "$BASH_SUBSHELL" "$x" )); echo "$
         self.assertEqual(proc.returncode, 0)
         self.assertFalse((self.cwd / "unexpected").exists())
 
+    def test_eval_multiline_compounds_execute_in_order(self):
+        # Closing words inside quotes and here-documents must stay in the body.
+        hook = """# setup
+shopt -s expand_aliases
+if true; then
+    alias say='printf %s'
+fi
+show() {
+    say 'inside
+}
+quote'
+    cat <<'END'
+}
+fi
+雪
+END
+}
+show
+"""
+        self.compare("eval " + shlex.quote(hook), 0, "inside\n}\nquote}\nfi\n雪\n".encode())
+        for ending in ("", "\n"):
+            self.compare("eval " + shlex.quote("if true; then\n  false; fi" + ending), 1)
+        self.compare("eval " + shlex.quote("f() {\n echo seen\n}\nf\nif )"), 2, b"seen\n")
+        self.compare("eval " + shlex.quote("# comment\n{\n echo $LINENO\n}\necho $LINENO"),
+                     0, b"7\n9\n")
+
     def test_bash_env(self):
         startup = self.cwd / "startup"
         startup.write_text('export MARK=from_bash_env\n')
