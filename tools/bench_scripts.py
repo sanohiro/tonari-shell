@@ -417,8 +417,10 @@ def main():
                         (leaf / f"item-{k:02}.txt").touch()
         for case in args.case or CASES:
             case_env = env
-            if case in ("field-split-unicode", "glob-utf8-sort", "glob-utf8-once", "glob-utf8-large", "glob-utf8-large-repeat",
-                        "glob-ignore-large", "glob-nocase-large", "glob-utf8-100k", "glob-utf8-mixed-40k") or case.startswith("glob-extension-"):
+            if case.startswith("glob-extension-") or case in (
+                "field-split-unicode", "glob-utf8-sort", "glob-utf8-once", "glob-utf8-large", "glob-utf8-large-repeat",
+                "glob-ignore-large", "glob-nocase-large", "glob-utf8-100k", "glob-utf8-mixed-40k",
+            ):
                 case_env = dict(env, LC_ALL=args.utf8_locale)
             source, expected = CASES[case]
             script = home / f"{case}.sh"

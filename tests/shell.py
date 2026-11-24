@@ -1473,6 +1473,8 @@ mapfile -u 3 -t; printf '<%s>' "${MAPFILE[@]}" """,
 IFS= read -ru3 line; echo "${a[0]}:$line"; mapfile -tu3 a; echo "${a[0]}"
 printf 'a\\0b\nc\n' > input; mapfile -t a <input; printf '[%s]' "${a[@]}" """,
                      0, b"first:second\nlast\n[a][c]")
+        self.compare(r"""mapfile -d '' -t names < <(printf '%s\0' '日 報' $'line\nbreak' $'tab\t🐟' | cat)
+printf '%s\0' "${names[@]}" """, 0, "日 報\0line\nbreak\0tab\t🐟\0".encode())
 
     def test_background_subshell_pid_and_stage_depth(self):
         self.compare("""(printf '%s:%s\\n' "$BASH_SUBSHELL" "$BASHPID" >result; exit 13) &
