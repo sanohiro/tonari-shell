@@ -1439,6 +1439,16 @@ grep -q 'echo -n X' trace && printf '/traced/'
 for i in 1 2 3 4; do false; echo -n "$?"; done
 """, 0, b"XXfnXXX/traced/1111")
 
+    def test_repeated_redirects_follow_shell_state(self):
+        self.compare("""rm -f out
+for i in 1 2 3 4 5; do
+    case $i in 4) set -C;; 5) set +C;; esac
+    { printf data >out; } 2>/dev/null
+    printf %s "$?"
+    exec 7<out; exec 6<&7-; IFS= read -r line <&6; exec 6<&-
+    printf '<%s>' "$line"
+done""", 0, b"0<data>0<data>0<data>1<data>0<data>")
+
     def test_positional_storage_and_live_loop_operands(self):
         self.compare("""set -- before 'two words'
 f(){ set -- "$2" "$1" ""; printf '<%s>' "$@"; }; f a b; printf '<%s>' "$@"

@@ -82,6 +82,18 @@ static int pipeline(char *value, int merged, int builtin, int redirect_cat) {
 }
 
 int main(int argc, char **argv) {
+    if (argc == 4 && !strcmp(argv[1], "--complete")) {
+        char gate;
+        if (write(1, "ready\n", 6) != 6 || read(0, &gate, 1) != 1) return 1;
+        DIR *dir = opendir(argv[2]);
+        if (!dir) return 1;
+        size_t length = strlen(argv[3]);
+        struct dirent *entry;
+        while ((entry = readdir(dir))) {
+            if (!strncmp(entry->d_name, argv[3], length)) puts(entry->d_name);
+        }
+        return closedir(dir) != 0;
+    }
     if (argc < 4) return 1;
     if (strcmp(argv[3], "-c") == 0) {
         char gate;

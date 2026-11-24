@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import select
 import statistics
+import subprocess
 import tempfile
 import time
 
@@ -72,6 +73,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("shell", nargs="+", type=Path)
     parser.add_argument("--runs", type=int, default=21)
+    parser.add_argument("--scan-control", type=Path, help="also measure a direct unique-name directory scan")
     parser.add_argument("--large", action="store_true", help="also measure a 1 MiB paste")
     parser.add_argument("--case", action="append", choices=["commit", "paste", "Up", "Down", "Ctrl-R", "Tab"])
     args = parser.parse_args()
@@ -111,6 +113,21 @@ def main():
         cases.append(("Down to draft (100k entries)", b"\x1b[B", recalled))
         cases.append(("Ctrl-R (100k entries)", b"\x12" + query, query + FLAG))
         cases.append(("Tab (10k files)", b"f candidates/" + query + b"\t", b"candidates/" + query + FLAG))
+        if args.scan_control:
+            elapsed = []
+            for i in range(args.runs + 3):
+                with subprocess.Popen([args.scan_control, "--complete", folder, query.decode()],
+                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE) as control:
+                    if control.stdout.readline() != b"ready\n":
+                        raise ValueError("scan control failed to start")
+                    start = time.perf_counter_ns()
+                    out = control.communicate(b"\n")[0]
+                    spent = (time.perf_counter_ns() - start) / 1e6
+                    if out != query + FLAG + b"\n" or control.returncode:
+                        raise ValueError("scan control found different candidates")
+                    if i >= 3:
+                        elapsed.append(spent)
+            print(f"Direct scan (10k files) | {statistics.median(elapsed):.3f}/{sorted(elapsed)[math.ceil(.95 * len(elapsed)) - 1]:.3f}", flush=True)
         for case in cases:
             if args.case and case[0].split()[0] not in args.case:
                 continue

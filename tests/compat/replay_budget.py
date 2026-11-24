@@ -80,6 +80,35 @@ def compare(audits, row, count, runs, floor):
     return {"count": count, "samples_ns": samples, "control": native}
 
 
+def workloads(lane, inventory):
+    fixed = [json.loads(line) for line in MANIFEST.read_text().splitlines()]
+    if inventory is None:
+        yield from (row for row in fixed if lane in row["lanes"])
+        return
+    # The broad audit selects batches again on the new host. Also try every newly
+    # above-budget observation, even when its workload was absent from the frozen set.
+    rows = json.loads(inventory.read_text())["rows"]
+    old = {(group, feature) for row in fixed for group, feature
+           in row["lanes"].get(lane, {}).get("features", [])}
+    extra = {}
+    for group, entries in rows.items():
+        for name, item in entries.items():
+            perf = item.get("batch_timing", {})
+            if ((group, name) in old or "bash" not in perf or
+                    perf["tonari"][0] * 3 <= perf["bash"][0] * 2):
+                continue
+            work = item["workload"]
+            argv, fixture, stdin = (work[k] for k in ("argv", "fixture", "stdin"))
+            key = (tuple(argv), fixture, stdin, perf["iterations"])
+            if key not in extra:
+                digest = hashlib.sha256(json.dumps(key).encode()).hexdigest()[:12]
+                extra[key] = {"id": digest, "argv": argv, "fixture": fixture, "stdin": stdin,
+                              "lanes": {lane: {"iterations": perf["iterations"], "features": [],
+                                               "old_ns": [perf["tonari"][0], perf["bash"][0]]}}}
+            extra[key]["lanes"][lane]["features"].append([group, name])
+    yield from extra.values()
+
+
 def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--lane", required=True)
@@ -87,6 +116,7 @@ def main():
     cli.add_argument("--bin", type=Path, required=True)
     cli.add_argument("--runs", type=int, default=9)
     cli.add_argument("--only", nargs="*")
+    cli.add_argument("--inventory", type=Path)
     args = cli.parse_args()
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -102,13 +132,14 @@ def main():
         floor = root / "control"
         subprocess.run(["cc", "-O2", str(Path(__file__).with_name("budget_floor.c")), "-o", str(floor)], check=True)
         print(json.dumps({"lane": args.lane, "sha256": hashes}), flush=True)
-        for line in MANIFEST.read_text().splitlines():
-            row = json.loads(line)
+        for row in workloads(args.lane, args.inventory):
             config = row["lanes"].get(args.lane)
             if not config or (args.only is not None and row["id"] not in args.only):
                 continue
             n = config["iterations"]
             result = {"id": row["id"]}
+            if args.inventory:
+                result["workload"] = row
             for name, count, runs in [("fixed", n, args.runs), ("extended", 1024, 5)]:
                 if name == "extended" and (n != 128 or max(config["old_ns"]) > 4_000_000):
                     continue

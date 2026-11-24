@@ -25,9 +25,9 @@ if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; t
   docker build -t tonari-audit -f tests/compat/Dockerfile --build-arg BASE="$base" --build-arg GNU_SHA256="$digest" "$fixture"
   run=(docker run --rm --init --network none --tmpfs /tmp:exec,mode=1777,size=1g -v "$PWD:/repo:ro" -v "$current:/tonari:ro")
   "${run[@]}" --entrypoint sh tonari-audit -ec 'uname -m; /bin/bash --version; cat /etc/os-release' >> "$out/host.txt"
+  distro=Debian; [[ $SUITE == *-ubuntu ]] && distro=Ubuntu
+  arch=x64; [[ $RUNNER_ARCH == ARM64 ]] && arch=arm64
   if [[ $SUITE == budget* ]]; then
-    distro=Debian; [[ $SUITE == *-ubuntu ]] && distro=Ubuntu
-    arch=x64; [[ $RUNNER_ARCH == ARM64 ]] && arch=arm64
     "${run[@]}" -v "$bin:/candidates:ro" --entrypoint python3 tonari-audit tests/compat/replay_budget.py \
       --lane "$distro$arch" --bash /bin/bash --bin /candidates > "$out/replay.jsonl"
     exit
@@ -35,6 +35,8 @@ if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; t
   "${run[@]}" --entrypoint python3 tonari-audit tests/shell.py /tonari -q
   "${run[@]}" tonari-audit --correctness-only > "$out/audit.json"
   "${run[@]}" -v "$out/audit.json:/audit:ro" tonari-audit --reuse-audit /audit > "$out/timings.json"
+  "${run[@]}" -v "$bin:/candidates:ro" -v "$out/timings.json:/timings.json:ro" --entrypoint python3 tonari-audit tests/compat/replay_budget.py \
+    --lane "$distro$arch" --bash /bin/bash --bin /candidates --inventory /timings.json > "$out/additional.jsonl"
   exit
 fi
 if [[ $RUNNER_OS == macOS ]]; then
@@ -57,6 +59,7 @@ if [[ $RUNNER_OS == macOS ]]; then
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q
     python3 tests/compat/audit.py --source "$gnu" --bash "$ref" --tonari "$current" > "$out/audit.json"
     python3 tests/compat/bench.py --source "$gnu" --bash "$ref" --tonari "$current" --audit "$out/audit.json" > "$out/timings.json"
+    python3 tests/compat/replay_budget.py --lane macOSarm64 --bash "$ref" --bin "$bin" --inventory "$out/timings.json" > "$out/additional.jsonl"
     exit
   fi
 fi
@@ -92,6 +95,8 @@ case "$SUITE" in
   foreground)
     run foreground python3 tests/compat/foreground.py "$current" "$ref" ;;
   history)
+    cc -O2 tools/bench_spawn.c -o "$bin/scan-control"
+    run tab python3 tools/bench_editor_input.py "$current" "$bin/baseline" "$ref" --case Tab --scan-control "$bin/scan-control" --runs 41
     run reverse-search python3 tools/bench_editor_input.py "$current" "$bin/baseline" "$ref" --case Ctrl-R --runs 41
     run bursts python3 tools/bench_history.py "$current" "$bin/baseline" --bursts --entries 100000 1000000 --runs 21
     run escaped python3 tools/bench_history.py "$current" "$bin/baseline" --escaped --entries 1000000 --runs 21 ;;

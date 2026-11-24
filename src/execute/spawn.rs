@@ -87,16 +87,26 @@ impl External {
                     .env
                     .as_ref()
                     .map_or_else(inherited_env, |e| e.pointers.as_ptr().cast());
-                let mut pid = 0;
-                check(libc::posix_spawn(
-                    &mut pid,
-                    path.as_ptr(),
-                    actions.map_or(std::ptr::null(), MaybeUninit::as_ptr),
-                    attr.as_ptr(),
-                    self.argv.as_ptr().cast(),
-                    env,
-                ))?;
-                Ok(pid)
+                let spawn = |path: &std::ffi::CStr,
+                             argv: &[*const libc::c_char]|
+                 -> io::Result<libc::pid_t> {
+                    let mut pid = 0;
+                    check(libc::posix_spawn(
+                        &mut pid,
+                        path.as_ptr(),
+                        actions.map_or(std::ptr::null(), MaybeUninit::as_ptr),
+                        attr.as_ptr(),
+                        argv.as_ptr().cast(),
+                        env,
+                    ))?;
+                    Ok(pid)
+                };
+                match spawn(path, &self.argv) {
+                    Err(e) if e.raw_os_error() == Some(libc::ENOEXEC) => {
+                        self.with_script(path, spawn)
+                    }
+                    result => result,
+                }
             })();
             libc::posix_spawnattr_destroy(attr.as_mut_ptr());
             result

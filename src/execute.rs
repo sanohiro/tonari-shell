@@ -382,34 +382,43 @@ impl External {
         }
     }
 
-    fn script_fallback(&self, path: &CStr) -> i32 {
+    fn with_script<T>(
+        &self,
+        path: &CStr,
+        launch: impl FnOnce(&CStr, &[*const libc::c_char]) -> io::Result<T>,
+    ) -> io::Result<T> {
         use std::io::Read;
+        use std::os::unix::fs::OpenOptionsExt;
         let path_os = std::ffi::OsStr::from_bytes(path.to_bytes());
-        let Ok(mut file) = std::fs::File::open(path_os) else {
-            return errno();
-        };
+        // The executable can be replaced between ENOEXEC and this open.
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path_os)?;
         let mut sample = [0u8; 128];
-        match file.read(&mut sample) {
-            Ok(n) if !sample[..n].contains(&0) => {}
-            _ => return libc::ENOEXEC,
+        let length = file.read(&mut sample)?;
+        if !file.metadata()?.is_file() || sample[..length].contains(&0) {
+            return Err(io::Error::from_raw_os_error(libc::ENOEXEC));
         }
-        let Ok(shell) = std::env::current_exe() else {
-            return errno();
-        };
-        let Ok(shell) = CString::new(shell.as_os_str().as_bytes()) else {
-            return libc::ENOEXEC;
-        };
+        let shell = CString::new(std::env::current_exe()?.as_os_str().as_bytes())?;
         let mut args = Vec::with_capacity(self.argv.len() + 2);
         args.extend([shell.as_ptr(), c"--".as_ptr(), path.as_ptr()]);
         args.extend_from_slice(&self.argv[1..]);
-        let env = self.env.as_ref().map_or_else(
-            || inherited_env().cast::<*const libc::c_char>(),
-            |e| e.pointers.as_ptr(),
-        );
-        unsafe {
-            libc::execve(shell.as_ptr(), args.as_ptr(), env);
-        }
-        errno()
+        launch(&shell, &args)
+    }
+
+    fn script_fallback(&self, path: &CStr) -> i32 {
+        self.with_script(path, |shell, args| {
+            let env = self.env.as_ref().map_or_else(
+                || inherited_env().cast::<*const libc::c_char>(),
+                |e| e.pointers.as_ptr(),
+            );
+            unsafe { libc::execve(shell.as_ptr(), args.as_ptr(), env) };
+            Err::<(), _>(io::Error::last_os_error())
+        })
+        .unwrap_err()
+        .raw_os_error()
+        .unwrap_or(libc::ENOEXEC)
     }
 
     fn exec(&self) -> u8 {
