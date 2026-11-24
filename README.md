@@ -50,7 +50,7 @@ tools/stage.sh "$binary" "$prefix"
 "$prefix/bin/tonari" --noprofile --norc
 ```
 
-To use an installed Starship prompt, add `eval "$(starship init bash)"` to your interactive `~/.bashrc`. Tonari runs Starship’s Bash integration. [Startup, typing and prompt timings](docs/benchmarks.md#starship)
+To use an installed Starship prompt, add `eval "$(starship init bash)"` to your interactive `~/.bashrc`. Tonari runs Starship’s Bash integration. With Starship 1.27.0, `eval "$(starship init bash --print-full-init)"` loads the same Bash hook with one fewer Starship launch. [Startup, typing and prompt timings](docs/benchmarks.md#starship-filter)
 
 ## Current capabilities
 

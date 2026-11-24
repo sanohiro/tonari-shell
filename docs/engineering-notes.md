@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## 2026-11-25 · Cost of filtering a rendered prompt / 描画後の改行抽出
+
+The upstream Bash hook uses `${PS1//[!$'\n']}` to preserve just the newlines for integrations that position a right prompt. A single bracket expression normally consumes one character. During global deletion, use the compiled matcher on each UTF-8 character and retain the remainder in place. The previous longest-substring search repeatedly tested longer spans that the pattern could never match. Expressions with explicit collating symbols, equivalence classes or case folding follow the general matcher. Inside an isolated subshell a final function call can pass the opportunity to exec through its body. Keep function scope and check traps at each statement, so a wrapper around an external time command can release its intermediate shell process. [Upstream hook](https://github.com/starship/starship/blob/v1.27.0/src/init/starship.bash)
+
+公式フックは、プロンプトを描いた後で改行だけを取り出します。右プロンプトを表示しない場合にもこの式が通ります。角括弧が1文字にしか一致しない場合に最長の部分文字列を探していたため、長いプロンプトほど Tonari の負担が増えていました。対象文字を1回ずつ判定して削除するように変更しました。また、コマンド置換の最後にシェル関数を呼び、その末尾で外部コマンドを実行する場合、条件がそろえばサブシェル自身をそのコマンドに置き換えます。終了状態、関数のローカル変数、トラップを確認し、公式フックが時刻取得に使う関数にも適用できました。[実測と再現方法](benchmarks.md#starship-filter)
+
 ## 2026-11-25 · Running Starship's Bash integration / Starship の Bash 初期化と再描画
 
 Starship 1.27.0's Bash hook counts jobs with `$(jobs -p)` and captures an external renderer with `"${ARGS[@]}"`. When the visible job table is empty, its PID list is already known. A literal executable with quoted stored array arguments can write into the capture pipe directly. Use the subshell when a name reference, command location, exported shell options or other expansion can observe the child context. A ready-made ANSI prompt with only `\[` and `\]` width markers takes a literal rendering path. Once the editor has painted the prompt and has an unobstructed cursor at the end, typing extends the visible line. Mid-line edits and history suggestions can still request a redraw. [Upstream Bash hook](https://github.com/starship/starship/blob/v1.27.0/src/init/starship.bash)

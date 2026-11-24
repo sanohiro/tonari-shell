@@ -50,7 +50,7 @@ tools/stage.sh "$binary" "$prefix"
 "$prefix/bin/tonari" --noprofile --norc
 ```
 
-Starship をインストール済みなら、対話用の `~/.bashrc` に `eval "$(starship init bash)"` を追加すると、Tonari で公式の Bash 用プロンプトを使えます。[初回表示・入力・再表示の実測](docs/benchmarks.md#starship)
+Starship をインストール済みなら、対話用の `~/.bashrc` に `eval "$(starship init bash)"` を追加すると、Tonari で公式の Bash 用プロンプトを使えます。Starship 1.27.0 では `eval "$(starship init bash --print-full-init)"` と書くと、同じ公式フックを読み込む際の Starship 起動を1回省けます。[初回表示・入力・再表示の実測](docs/benchmarks.md#starship-filter)
 
 ## いま使える機能
 

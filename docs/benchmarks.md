@@ -1,5 +1,71 @@
 # Startup and execution / 起動と実行性能
 
+<a id="starship-filter"></a>
+
+## 2026-11-25 · Remaining Starship prompt latency / Starship の再表示待ち時間
+
+The same upstream Starship 1.27.0 binary ran for previous Tonari (`65d6acf`), current Tonari (`2f61716`) and Bash. All used the same rcfile, a 120 × 32 PTY and a clean Git repository with 200 tracked files. The main comparison used the default theme. An additional test used the upstream directory, branch and character modules plus 256 or 1,024 literal ASCII characters to vary the work performed on the full prompt string. Compare shells within each row. Medians/p95 are milliseconds. Shell order rotated on each iteration, with two warmups, 31 local or 25 hosted runs for the standard theme and three submissions per session. The longer prompts used 21 local or 15 hosted runs. macOS used Bash 5.2.37 and Linux used Bash 5.2.21. [Standard native runs](https://github.com/sanohiro/tonari-shell/actions/runs/45475684304) · [Long prompts on native Linux](https://github.com/sanohiro/tonari-shell/actions/runs/45476695004)
+
+| Host | Measurement | Previous Tonari | Current Tonari | Bash |
+|---|---|---:|---:|---:|
+| Local Apple M1 | Default, first prompt | 61.504/67.183 | 61.414/66.975 | 68.789/74.914 |
+| Local Apple M1 | Default, typed character | 0.030/0.062 | 0.030/0.052 | 0.027/0.068 |
+| Local Apple M1 | Default, next prompt | 36.526/40.809 | 35.977/40.370 | 38.731/44.314 |
+| Local Apple M1 | Saved init, first prompt | 45.694/51.228 | 45.464/48.327 | 53.740/59.319 |
+| Local Apple M1 | +256 characters, next prompt | 31.934/37.920 | 23.355/27.211 | 27.511/34.374 |
+| Local Apple M1 | +1024 characters, next prompt | 116.164/123.294 | 20.550/23.785 | 31.643/35.414 |
+| Linux x86-64 | Default, first prompt | 12.481/12.789 | 12.005/12.328 | 13.534/13.884 |
+| Linux x86-64 | Default, typed character | 0.042/0.071 | 0.042/0.068 | 0.042/0.061 |
+| Linux x86-64 | Default, next prompt | 7.363/7.738 | 6.738/7.303 | 7.869/8.329 |
+| Linux x86-64 | Saved init, first prompt | 9.521/9.876 | 9.041/9.520 | 11.168/11.581 |
+| Linux x86-64 | +256 characters, next prompt | 12.135/12.313 | 3.678/3.832 | 5.667/5.825 |
+| Linux x86-64 | +1024 characters, next prompt | 118.069/118.992 | 3.827/4.036 | 14.221/14.531 |
+| Linux arm64 | Default, first prompt | 17.888/19.013 | 17.598/18.200 | 20.490/21.167 |
+| Linux arm64 | Default, typed character | 0.056/0.066 | 0.056/0.070 | 0.059/0.081 |
+| Linux arm64 | Default, next prompt | 10.466/11.173 | 10.043/10.700 | 11.817/12.463 |
+| Linux arm64 | Saved init, first prompt | 14.112/14.704 | 13.650/14.402 | 16.982/17.425 |
+| Linux arm64 | +256 characters, next prompt | 11.922/12.264 | 6.183/6.477 | 9.322/9.668 |
+| Linux arm64 | +1024 characters, next prompt | 97.601/99.494 | 6.113/7.431 | 20.318/22.249 |
+| macOS arm64 CI | Default, first prompt | 75.614/125.325 | 77.376/130.042 | 91.263/140.823 |
+| macOS arm64 CI | Default, typed character | 0.053/0.098 | 0.047/0.127 | 0.046/0.116 |
+| macOS arm64 CI | Default, next prompt | 46.398/106.407 | 45.803/91.946 | 50.282/99.968 |
+| macOS arm64 CI | Saved init, first prompt | 52.343/126.691 | 50.595/103.823 | 60.638/125.833 |
+
+The standard-theme first prompt was effectively flat on the local M1. On the hosted Mac its median rose from 75.61 to 77.38 ms with wide p95 variation. The function capture batch improved on both Linux architectures and was close to Bash on the hosted Mac.
+
+The shell batches below include starting the shell. The filter handles a 256-byte UTF-8 string followed by a newline, repeated 24 times. The wrapper returns the result of `/usr/bin/printf ok` through command substitution 100 times. Both batches check output.
+
+| Host | Batch | Previous Tonari | Current Tonari | Bash |
+|---|---|---:|---:|---:|
+| Local Apple M1 | Bracket deletion ×24 | 46.239/50.053 | 4.828/5.821 | 12.292/14.114 |
+| Local Apple M1 | Function captures ×100 | 245.040/268.599 | 241.343/304.066 | 257.408/286.589 |
+| Linux x86-64 | Bracket deletion ×24 | 40.869/41.005 | 0.524/0.555 | 5.862/5.934 |
+| Linux x86-64 | Function captures ×100 | 49.859/50.331 | 41.932/42.695 | 53.379/53.896 |
+| Linux arm64 | Bracket deletion ×24 | 28.446/28.653 | 0.874/0.921 | 8.498/8.678 |
+| Linux arm64 | Function captures ×100 | 84.773/88.088 | 73.540/76.055 | 92.123/95.043 |
+| macOS arm64 CI | Bracket deletion ×24 | 63.361/71.658 | 7.129/10.026 | 15.062/22.077 |
+| macOS arm64 CI | Function captures ×100 | 361.172/519.692 | 371.800/574.469 | 371.705/451.631 |
+
+On an Apple M1 an instrumented release timed each top-level command substitution from entry to return and marked each primary editor prompt. This includes the launch, capture, wait and any function dispatch inside that substitution. The external time helper ran twice and the renderer once per submission. For 21 warm Git sessions with three submissions each, the median time outside those three calls was 0.397 ms. Their median share of the full PTY interval was 98.788%. These measurements describe that machine and theme. The release benchmark above uses the uninstrumented binary.
+
+With the same current shell, a separate 25-run local startup comparison rotated all three configurations across both shells. The default `eval "$(starship init bash)"` measured 61.19 ms on Tonari and 68.97 ms on Bash. Requesting the full hook directly with `eval "$(starship init bash --print-full-init)"` took 53.75 ms and 62.00 ms respectively. Sourcing the exact upstream code generated in advance took 44.43 ms and 54.33 ms. Regenerate a saved script after upgrading or moving the executable. Each configuration also passed the status, duration and job-count checks.
+
+標準設定では、Enter 後の大半は時刻取得2回とプロンプト描画1回の呼び出しに費やされます。長いプロンプトでは、描画後に Tonari が行う改行抽出にも大きな費用がありました。長さを変えた実験では同じ Starship 設定を3つのシェルに渡しています。初回表示では `--print-full-init` を付けるだけでも起動を1回省けます。この効果は Bash にもあります。
+
+Release sizes in bytes, previous → current.
+
+- Local Apple M1 · 1,400,320 → 1,400,320
+- Linux x86-64 · 1,902,648 → 1,903,800
+- Linux arm64 · 1,644,344 → 1,645,496
+- macOS arm64 CI · 1,400,272 → 1,400,272
+
+Reproduce both terminal comparisons with native release executables.
+
+```sh
+python3 tools/bench_starship.py /path/to/previous /path/to/current /path/to/bash --starship /path/to/starship --runs 25
+python3 tools/bench_starship.py /path/to/previous /path/to/current /path/to/bash --starship /path/to/starship --runs 15 --long-prompts-only
+```
+
 <a id="starship"></a>
 
 ## 2026-11-25 · Interactive Starship prompts / Starship 利用時の対話性能
