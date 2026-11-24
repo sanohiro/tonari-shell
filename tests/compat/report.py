@@ -42,6 +42,12 @@ def misses(rows, previous, require_target, require_complete):
             continue
         if observation_lost(before["status"], after["status"]):
             errors.append((*key, "previously verified observation lost"))
+        # The batching policy follows single-command timings, so a feature can
+        # legitimately leave the repeated subset or change iteration count.
+        if (before.get("batch_n") and after["batch_n"]
+                and int(before["batch_iterations"]) == after["batch_iterations"]
+                and acceptable(before, "batch", (2, 3)) and not acceptable(after, "batch", (2, 3))):
+            errors.append((*key, "repeated command crossed 2/3"))
         for mode in METRICS:
             if before["status"] in PASS and before[mode + "_n"] and not after[mode + "_n"]:
                 errors.append((*key, mode + " measurement lost"))
@@ -49,6 +55,8 @@ def misses(rows, previous, require_target, require_complete):
                 errors.append((*key, mode + " crossed 2/3"))
     for key, row in rows.items():
         if row["status"] in PASS:
+            if require_target and row["batch_n"] and not acceptable(row, "batch", (2, 3)):
+                errors.append((*key, "repeated command exceeds 2/3"))
             for mode in METRICS:
                 if require_target and (row[mode + "_error"] or mode == "whole" or row[mode + "_n"]) and not acceptable(row, mode, (2,3)):
                     errors.append((*key, mode + " exceeds 2/3 or lacks verified samples"))
@@ -62,8 +70,11 @@ def records(data):
     for group, names in data["rows"].items():
         for name, item in names.items():
             row = {"group": group, "feature": name, "status": item["status"]}
-            for mode in METRICS:
-                measurement = item.get("timing", {}).get(mode, {})
+            batch = item.get("batch_timing", {})
+            row["batch_iterations"] = batch.get("iterations", "")
+            row["batch_reason"] = batch.get("reason", "")
+            for mode in (*METRICS, "batch"):
+                measurement = batch if mode == "batch" else item.get("timing", {}).get(mode, {})
                 row[mode + "_n"] = measurement.get("n", "")
                 for shell in ("bash", "tonari"):
                     for i, quantile in enumerate(("p50", "p95")):
@@ -142,7 +153,7 @@ def main():
             for group, name, reason in problems:
                 print(f"{label}\t{group}\t{name}\t{reason}", file=sys.stderr)
         print(f"{label}: {len(rows)} rows; {sum(r['status'] in PASS for r in rows.values())} matching witnesses")
-        for mode in METRICS:
+        for mode in (*METRICS, "batch"):
             eligible = [r for r in rows.values() if r["status"] in PASS and r[mode + "_n"]]
             counts = [sum(acceptable(r, mode, bound) for r in eligible) for bound in ((1,2),(2,3),(1,1))]
             print(f"  {mode}: {len(eligible)} measured, {counts[0]} at half, {counts[1]} at 2/3, {counts[2]} at parity or better")

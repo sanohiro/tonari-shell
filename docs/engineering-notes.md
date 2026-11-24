@@ -1,5 +1,17 @@
 # Engineering notes / 開発知見
 
+## 2026-11-24 · Repeated shell work, process ownership and history / 反復処理・子プロセス・履歴
+
+A single `-c` timing includes the cost of reaching and leaving the interpreter. For each eligible inventory probe above the two-thirds target, the driver now tries 4, 16 or 128 iterations inside one ready shell. A preflight compares stdout, stderr and the status of **each** iteration with the original Bash observation. A probe that changes its own state and fails this check keeps its single-command timings and an explicit reason. A no-op loop of the same length measures the harness floor. For resource-heavy scripts, the native C controls read the same directories, launch the same utilities or connect the same pipe endpoints. The directory counting control omits sorting and argument storage. [Inventory driver](../tests/compat/bench.py) · [C controls](../tools/bench_spawn.c) · [Native measurements](benchmarks.md#shell-workloads)
+
+A foreground pipeline can write a small, bounded `echo` or `printf` result to a fresh pipe in the parent before launching the consumer. The 512-byte limit fits the minimum POSIX pipe capacity. Launch the ordinary stage when redirections, expansion side effects, traps or job control require it. A background `(list) &` already has its own child. Executing the list in that child both removes a fork and makes its `BASHPID` agree with the parent's `$!`. [Execution](../src/execute.rs) · [PID, status and pipe tests](../tests/shell.py)
+
+Large histories benefit from searching bytes before decoding records. The reverse search skips blocks without the encoded needle, finds each candidate's newline boundaries, decodes only the command field, and checks the requested prefix or substring. Metadata hits and repeated hits inside one record do not advance the history selection. The test spans multiple blocks and covers escaped characters and an empty query. Shell execution also benefits from bounded reuse. Linux's static allocator reuses up to 16 small blocks per size class on each thread. The interpreter can reuse literal builtin arguments in loops while checking the current function table and options. Plain scalar writes reuse their string capacity and check variable attributes on every write. [History search](../src/history.rs) · [Allocator tests](../tests/allocator_fork.rs) · [Bash comparisons](../tests/shell.py)
+
+短い機能の実行時間にはシェルを終了するまでの固定費も含まれます。目標を超えた項目は、反復に適したものを起動済みシェルで4・16・128回実行し、毎回の出力・エラー・終了値が元の Bash の観測と一致することを先に確認します。変数の変更や入力の消費で同じ処理を繰り返せない項目には理由が残ります。外部コマンド、パイプ、ディレクトリ列挙には同じ処理を直接行う C 版を用意しました。C 版と同じ時間になるかは処理ごとに確かめます。
+
+短い組み込み出力だけのパイプでは空のパイプに安全に書ける上限を設け、バックグラウンドの括弧では既に作った子プロセスを使います。履歴検索は一致の可能性がある行だけを復号します。ループ内で使い回すのは変化しない引数で、関数の再定義や変数の属性変更は次の実行に反映します。 [計測条件と結果](benchmarks.md#shell-workloads)
+
 ## 2026-11-24 · Reading and replacing function definitions / 関数再定義のコスト
 
 On an Apple M1, sampling the previous release while it sourced a million one-command definitions put 1,066 of 1,293 samples under the file reader in the parser. The lexer grew strings for ordinary words, allocated token buffers per read and built a full command tree for every definition, including bodies replaced before their first call. A loop that repeatedly executed an already parsed definition also cloned its body. These are two different costs. The benchmark covers both, as well as a script that calls every new definition and checks all 2,000 outputs. [Benchmark and native measurements](benchmarks.md#function-redefinitions)
