@@ -27,6 +27,10 @@ if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; t
   "${run[@]}" --entrypoint sh tonari-audit -ec 'uname -m; /bin/bash --version; cat /etc/os-release' >> "$out/host.txt"
   distro=Debian; [[ $SUITE == *-ubuntu ]] && distro=Ubuntu
   arch=x64; [[ $RUNNER_ARCH == ARM64 ]] && arch=arm64
+  if [[ $SUITE == inventory-correctness* ]]; then
+    "${run[@]}" tonari-audit --correctness-only > "$out/audit.json"
+    exit
+  fi
   if [[ $SUITE == inventory-trap* ]]; then
     for attempt in 1 2 3; do
       "${run[@]}" --entrypoint python3 tonari-audit tests/compat/upstream.py --source /gnu --helpers /helpers \
@@ -169,7 +173,7 @@ case "$SUITE" in
     run bursts python3 tools/bench_history.py "$current" "$bin/baseline" --bursts --entries 100000 1000000 --runs 21
     run escaped python3 tools/bench_history.py "$current" "$bin/baseline" --escaped --entries 1000000 --runs 21 ;;
   throughput)
-    REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k foreground_executable
+    REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k foreground
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k large_glob
     run foreground-external python3 tools/bench_foreground.py "$current" "$bin/baseline" "$ref" --runs 31
     cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"

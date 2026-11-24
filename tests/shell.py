@@ -1854,7 +1854,7 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                      'history 1 | sed "s/^ *[0-9]* *//"', 0,
                      b"second\n\t echo first\n\t echo second\nchanged\necho changed\n")
 
-    def terminal_session(self, editing=False, shell=TONARI, login=False):
+    def terminal_session(self, editing=False, shell=TONARI, login=False, blocked=()):
         pid, fd = pty.fork()
         if pid == 0:
             try:
@@ -1862,6 +1862,8 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                 # inherit SIG_IGN. Model a terminal emulator starting a new shell.
                 signal.signal(signal.SIGINT, signal.SIG_DFL)
                 signal.signal(signal.SIGQUIT, signal.SIG_DFL)
+                if blocked:
+                    signal.pthread_sigmask(signal.SIG_BLOCK, blocked)
                 os.chdir(self.cwd)
                 env = dict(self.env, PS1=PROMPT.decode(), TERM="xterm-256color" if editing else "dumb")
                 options = [] if editing else ["--noediting"]
@@ -1998,6 +2000,41 @@ print("read=" + input(), flush=True)
                 self.read_until(fd, b"reader-ready\r\n")
                 os.write(fd, b"hello\n")
                 self.assertIn(b"read=hello\r\n", self.read_until(fd, PROMPT))
+
+    def test_single_foreground_job_stops_and_resumes(self):
+        helper = self.cwd / "stop-once"
+        helper.write_text(f"#!{sys.executable}\n" + """import os, signal
+os.kill(os.getpid(), signal.SIGSTOP)
+assert os.tcgetpgrp(0) == os.getpgrp()
+print("resumed-once")
+raise SystemExit(23)
+""")
+        helper.chmod(0o755)
+        for shell in (TONARI, BASH):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(shell=shell)
+                os.write(fd, b"./stop-once\n")
+                self.read_until(fd, PROMPT)
+                os.write(fd, b"jobs\n")
+                self.assertIn(b"Stopped", self.read_until(fd, PROMPT))
+                os.write(fd, b"fg\n")
+                self.assertIn(b"resumed-once\r\n", self.read_until(fd, PROMPT))
+                os.write(fd, b"echo status=$?\n")
+                self.assertIn(b"status=23\r\n", self.read_until(fd, PROMPT))
+
+    @unittest.skipUnless(sys.platform == "darwin", "Darwin suspended-spawn signal mask")
+    def test_foreground_does_not_inject_blocked_sigcont(self):
+        helper = self.cwd / "pending"
+        helper.write_text(f"#!{sys.executable}\n" + """import signal
+assert signal.SIGCONT in signal.pthread_sigmask(signal.SIG_BLOCK, [])
+print("pending=" + str(signal.SIGCONT in signal.sigpending()))
+""")
+        helper.chmod(0o755)
+        for shell in (TONARI, BASH):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(shell=shell, blocked=[signal.SIGCONT])
+                os.write(fd, b"./pending\n")
+                self.assertIn(b"pending=False\r\n", self.read_until(fd, PROMPT))
 
     def test_stop_and_resume_foreground_pipeline(self):
         for shell in (BASH, TONARI):
