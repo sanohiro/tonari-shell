@@ -36,8 +36,10 @@ def build(label, change=lambda: None, **flags):
     subprocess.run(["git", "restore", "."], cwd=TREE, check=True)
     shutil.copy2(ROOT / "tools/build-release.sh", TREE / "tools/build-release.sh")
     change()
-    path = subprocess.check_output(["sh", "tools/build-release.sh"], cwd=TREE, text=True,
-                                   env=dict(os.environ, CARGO_TARGET_DIR=str(TEMP / "build"), **flags)).strip()
+    # The historical manifest has its own release level. Hold it at the O2 control.
+    env = dict(os.environ, CARGO_TARGET_DIR=str(TEMP / "build"), CARGO_PROFILE_RELEASE_OPT_LEVEL="2")
+    env.update(flags)
+    path = subprocess.check_output(["sh", "tools/build-release.sh"], cwd=TREE, text=True, env=env).strip()
     result = BIN / label
     shutil.copy2(TREE / path, result)
     with (OUT / "variants.txt").open("a") as f:

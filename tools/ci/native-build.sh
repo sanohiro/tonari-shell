@@ -35,7 +35,7 @@ fi
 if [[ $SUITE == completion && $RUNNER_ARCH == X64 ]]; then
   git worktree add -q --detach "$RUNNER_TEMP/serial" 0f9ce86
   cp tools/build-release.sh "$RUNNER_TEMP/serial/tools/build-release.sh"
-  (cd "$RUNNER_TEMP/serial"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/serial")
+  (cd "$RUNNER_TEMP/serial"; cp "$(CARGO_PROFILE_RELEASE_OPT_LEVEL=2 tools/build-release.sh)" "$RUNNER_TEMP/bin/serial")
 fi
 for binary in "$RUNNER_TEMP"/bin/*; do
   file "$binary"

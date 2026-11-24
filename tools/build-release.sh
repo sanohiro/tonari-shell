@@ -44,7 +44,6 @@ case "$host:$distribution" in
         fi
         ;;
 esac
-level=s
 case "$host" in
     aarch64-apple-darwin)
         tuning='-C link-arg=-Wl,-dead_strip_dylibs -C target-cpu=native -C llvm-args=--enable-machine-outliner=always -C llvm-args=--outliner-benefit-threshold=384'
@@ -65,11 +64,9 @@ if [ "$distribution" = yes ]; then
     # Shipped binaries are stripped. Keep panic locations and frame capture
     # without embedding an object-file reader and DWARF symbolizer.
     std_features=backtrace,backtrace-trace-only
-    level=2
     set -- -Zbuild-std=std,panic_abort "-Zbuild-std-features=$std_features" "$@"
 fi
 export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }$tuning"
-export CARGO_PROFILE_RELEASE_OPT_LEVEL="${CARGO_PROFILE_RELEASE_OPT_LEVEL:-$level}"
 case "$host" in
     *-apple-darwin)
         binary="${CARGO_TARGET_DIR:-target}/release/tonari"

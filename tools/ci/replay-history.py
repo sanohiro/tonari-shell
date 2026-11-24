@@ -21,7 +21,8 @@ if sys.platform == "darwin":
     bash = Path("/opt/homebrew/bin/bash")
     if not bash.exists():
         subprocess.run(["brew", "install", "bash"], check=True)
-env = dict(os.environ, CARGO_TARGET_DIR=str(TEMP / "build"), CARGO_PROFILE_RELEASE_PANIC="abort")
+env = dict(os.environ, CARGO_TARGET_DIR=str(TEMP / "build"),
+           CARGO_PROFILE_RELEASE_PANIC="abort", CARGO_PROFILE_RELEASE_OPT_LEVEL="2")
 records = []
 failures = []
 outcome = OUT / "revisions.json"
