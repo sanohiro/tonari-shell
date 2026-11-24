@@ -178,6 +178,9 @@ shopt -s extglob
 for ((i=0; i<500; i++)); do case pkg-${i}.rs in pkg-+([0-9]).@(c|rs)) last=$i;; esac; done
 echo "$last"
 """, "499"),
+    "resource-limit-list": (
+        'for ((i=0; i<128; i++)); do ulimit -a || exit 1; done >/dev/null; echo "$i"', "128",
+    ),
     "resource-limits": ("""
 for ((i=0; i<256; i++)); do ulimit -Sn 64; ulimit -Sn > /dev/null; done
 ulimit -Sn

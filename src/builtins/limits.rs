@@ -101,13 +101,23 @@ impl Limit {
         label: bool,
     ) -> io::Result<()> {
         if label {
-            let flag = self.flag;
-            let suffix = if self.units.is_empty() {
-                format!("(-{flag}) ")
+            // Bash left-aligns the name and right-aligns the unit/flag field.
+            let blanks = b"                    ";
+            out.write_all(self.name.as_bytes())?;
+            out.write_all(&blanks[..20usize.saturating_sub(self.name.len())])?;
+            let suffix_len = if self.units.is_empty() {
+                5
             } else {
-                format!("({}, -{flag}) ", self.units)
+                7 + self.units.len()
             };
-            write!(out, "{:<20} {suffix:>20}", self.name)?;
+            out.write_all(b" ")?;
+            out.write_all(&blanks[..20usize.saturating_sub(suffix_len)])?;
+            out.write_all(b"(")?;
+            if !self.units.is_empty() {
+                out.write_all(self.units.as_bytes())?;
+                out.write_all(b", ")?;
+            }
+            out.write_all(&[b'-', self.flag as u8, b')', b' '])?;
         }
         let n = if hard {
             values.rlim_max
