@@ -1,6 +1,7 @@
 pub(crate) mod bindings;
 mod picker;
 pub(crate) mod preview;
+mod recall;
 mod viewport;
 use bindings::{Action, Binding, Keymap};
 use std::collections::VecDeque;
@@ -643,10 +644,7 @@ pub fn line(
     let mut screen = Screen::new();
     let mut text = read.map_or("", |r| r.0).to_owned();
     let mut cursor = text.len();
-    let mut hist = session.history_lines().len();
-    let mut draft = String::new();
-    let mut draft_cursor = 0;
-    let mut prefix_browse = false;
+    let mut recall = recall::Recall::new(session.history_lines().len());
     let mut search: Option<(String, usize, String, usize)> = None;
     let mut pending_queries: Vec<SearchQuery> = Vec::new();
     let mut matched_query: Option<String> = None;
@@ -820,10 +818,7 @@ pub fn line(
         };
         // Ordinary committed text can bypass key-sequence and editing-action dispatch.
         if search.is_none() && unbound_text(first, session) {
-            if prefix_browse {
-                hist = session.history_lines().len();
-                prefix_browse = false;
-            }
+            recall.edited(session.history_lines().len());
             appended = keys.insert(
                 first,
                 session,
@@ -851,8 +846,6 @@ pub fn line(
                 continue;
             }
             Binding::Shell(command) => {
-                hist = session.history_lines().len();
-                prefix_browse = false;
                 drop(term);
                 io::stderr().write_all(b"\r\n")?;
                 let vars = session.bind(&[
@@ -877,6 +870,7 @@ pub fn line(
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0);
                 session.restore(vars);
+                recall = recall::Recall::new(session.history_lines().len());
                 if let crate::Flow::Exit(code) = flow {
                     return Ok(Input::Exit(code));
                 }
@@ -887,14 +881,16 @@ pub fn line(
             }
             Binding::Edit(a) => a,
         };
-        if prefix_browse && !matches!(action, Action::PrefixUp | Action::PrefixDown) {
-            if !matches!(
-                action,
-                Action::Up | Action::Down | Action::FirstHistory | Action::LastHistory
-            ) {
-                hist = session.history_lines().len();
-            }
-            prefix_browse = false;
+        if !matches!(
+            action,
+            Action::Up
+                | Action::Down
+                | Action::FirstHistory
+                | Action::LastHistory
+                | Action::PrefixUp
+                | Action::PrefixDown
+        ) {
+            recall.edited(session.history_lines().len());
         }
         let action = match action {
             Action::PreviousDirectory | Action::NextDirectory
@@ -1236,56 +1232,13 @@ pub fn line(
                     }
                 }
             }
-            Action::PrefixUp | Action::Up | Action::FirstHistory => {
-                let lines = session.history_lines();
-                if hist == lines.len() && !prefix_browse {
-                    draft.clone_from(&text);
-                    draft_cursor = cursor;
-                    prefix_browse = action == Action::PrefixUp;
-                }
-                let prefix = if prefix_browse {
-                    &draft[..draft_cursor]
-                } else {
-                    ""
-                };
-                let older = if action == Action::FirstHistory {
-                    (!lines.is_empty()).then_some(0)
-                } else {
-                    lines[..hist]
-                        .iter()
-                        .rposition(|line| line.starts_with(prefix))
-                };
-                if let Some(i) = older {
-                    hist = i;
-                    text.clone_from(&lines[i]);
-                    cursor = text.len();
-                }
-            }
-            Action::PrefixDown | Action::Down | Action::LastHistory => {
-                let lines = session.history_lines();
-                if hist < lines.len() {
-                    let prefix = if prefix_browse {
-                        &draft[..draft_cursor]
-                    } else {
-                        ""
-                    };
-                    hist = if action == Action::LastHistory {
-                        lines.len()
-                    } else {
-                        lines[hist + 1..]
-                            .iter()
-                            .position(|line| line.starts_with(prefix))
-                            .map_or(lines.len(), |offset| hist + 1 + offset)
-                    };
-                    if hist == lines.len() {
-                        text.clone_from(&draft);
-                        cursor = draft_cursor;
-                        prefix_browse = false;
-                    } else {
-                        text.clone_from(&lines[hist]);
-                        cursor = text.len();
-                    }
-                }
+            Action::PrefixUp
+            | Action::PrefixDown
+            | Action::Up
+            | Action::Down
+            | Action::FirstHistory
+            | Action::LastHistory => {
+                recall.navigate(action, session.history_lines(), &mut text, &mut cursor)
             }
             Action::PreviousDirectory | Action::NextDirectory => unreachable!(),
             Action::Forward => {

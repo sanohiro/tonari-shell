@@ -61,7 +61,7 @@ if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; t
   exit
 fi
 if [[ $RUNNER_OS == macOS ]]; then
-  if [[ $SUITE == inventory || $SUITE == parity-commands || $SUITE == parity-invocation || $SUITE == foreground || $SUITE == budget* ]]; then
+  if [[ $SUITE == inventory || $SUITE == parity-commands || $SUITE == parity-invocation || $SUITE == foreground || $SUITE == navigation || $SUITE == budget* ]]; then
     gnu="$RUNNER_TEMP/gnu"
     mkdir -p "$gnu"
     download_bash "$version" "$digest" "$RUNNER_TEMP/bash.tar.gz"
@@ -124,6 +124,13 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
+  navigation)
+    REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k navigation
+    run navigation python3 tools/bench_navigation.py "$bin/baseline" "$current" --bash "$ref" --runs 21
+    if [[ $RUNNER_OS == Linux ]]; then
+      cpu=$(python3 -c 'import os;print(min(os.sched_getaffinity(0)))')
+      run navigation-one-cpu taskset -c "$cpu" python3 tools/bench_navigation.py "$bin/baseline" "$current" --bash "$ref" --runs 15
+    fi ;;
   history-fields)
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k history_word -k history_fragment -k reverse_search -k escaped_journal -k search_paste
     run fields python3 tools/bench_history_fields.py "$bin/baseline" "$current" --runs 21

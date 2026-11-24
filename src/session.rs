@@ -100,9 +100,6 @@ struct DirectoryVisits {
 
 impl DirectoryVisits {
     fn record(&mut self, from: Option<PathBuf>, to: &Path) {
-        if from.as_deref() == Some(to) {
-            return;
-        }
         self.paths.truncate(self.current + 1);
         if let Some(from) = from
             && self.paths.last() != Some(&from)
@@ -1357,40 +1354,23 @@ impl Session {
         )
     }
 
-    fn change_directory(
-        &mut self,
-        target: &Path,
-        physical: bool,
-        previous: bool,
-        explicit: bool,
-    ) -> io::Result<()> {
-        self.change_directory_inner(target, physical, previous, explicit, self.interactive)
-    }
-
     pub(crate) fn revisit_directory(&mut self, forward: bool) -> io::Result<bool> {
-        let Some(visits) = &self.visits else {
+        let Some(visits) = &mut self.visits else {
             return Ok(false);
         };
         let mut index = visits.current;
-        loop {
-            let Some(next) = (if forward {
-                index.checked_add(1)
-            } else {
-                index.checked_sub(1)
-            }) else {
-                return Ok(false);
+        while let Some(next) = index.checked_add_signed(if forward { 1 } else { -1 }) {
+            let Some(path) = visits.paths.get(next) else {
+                break;
             };
-            let Some(target) = self
-                .visits
-                .as_ref()
-                .and_then(|v| v.paths.get(next))
-                .cloned()
-            else {
-                return Ok(false);
-            };
-            match self.change_directory_inner(&target, false, false, false, false) {
+            // Visits already contain normalized absolute paths. Resolve them once in the kernel.
+            match std::env::set_current_dir(path) {
                 Ok(()) => {
-                    Rc::make_mut(self.visits.as_mut().unwrap()).current = next;
+                    let cwd = path.clone();
+                    Rc::make_mut(visits).current = next;
+                    let old_pwd = self.get("PWD");
+                    self.hashes.directory_changed();
+                    self.finish_directory_change(cwd, old_pwd, false)?;
                     return Ok(true);
                 }
                 Err(e)
@@ -1401,18 +1381,18 @@ impl Session {
                 {
                     index = next
                 }
-                Err(e) => return Err(e),
+                Err(e) => return Err(io::Error::new(e.kind(), format!("{}: {e}", path.display()))),
             }
         }
+        Ok(false)
     }
 
-    fn change_directory_inner(
+    fn change_directory(
         &mut self,
         target: &Path,
         physical: bool,
         previous: bool,
         explicit: bool,
-        record: bool,
     ) -> io::Result<()> {
         let old_pwd = self.get("PWD");
         let base = self.logical_directory();
@@ -1459,50 +1439,58 @@ impl Session {
                 Some(cwd) => cwd,
                 None => std::env::current_dir()?,
             };
-            let _ = self.logical_cwd.set(cwd.clone());
-            let old_readonly = self.readonly("OLDPWD");
-            if !old_readonly {
-                let old_export = self.is_exported("OLDPWD");
-                self.variables.insert(
-                    "OLDPWD".into(),
-                    Variable {
-                        readonly: false,
-                        nameref: false,
-                        integer: false,
-                        array_assigned: false,
-                        elements: None,
-                        declared: true,
-                        value: old_pwd,
-                        exported: old_export,
-                    },
-                );
-            }
-            let pwd_readonly = self.readonly("PWD");
-            self.assign(
-                "PWD",
-                cwd.to_str().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidData, "non-UTF-8 directory")
-                })?,
-            );
-            if print {
-                print_path(&cwd)?;
-            }
-            if old_readonly || pwd_readonly {
-                return Err(io::Error::other(if old_readonly {
-                    "OLDPWD: readonly variable"
-                } else {
-                    "PWD: readonly variable"
-                }));
-            }
-            if record && base.as_deref().ok() != Some(cwd.as_path()) {
+            if self.interactive && base.as_deref().ok() != Some(cwd.as_path()) {
                 Rc::make_mut(self.visits.get_or_insert_with(Rc::default)).record(base.ok(), &cwd);
             }
-            return Ok(());
+            return self.finish_directory_change(cwd, old_pwd, print);
         }
         Err(io::Error::new(
             error.kind(),
             format!("{}: {error}", target.display()),
         ))
+    }
+
+    fn finish_directory_change(
+        &mut self,
+        cwd: PathBuf,
+        old_pwd: Option<String>,
+        print: bool,
+    ) -> io::Result<()> {
+        self.logical_cwd = std::cell::OnceCell::from(cwd.clone());
+        let old_readonly = self.readonly("OLDPWD");
+        if !old_readonly {
+            let old_export = self.is_exported("OLDPWD");
+            self.variables.insert(
+                "OLDPWD".into(),
+                Variable {
+                    readonly: false,
+                    nameref: false,
+                    integer: false,
+                    array_assigned: false,
+                    elements: None,
+                    declared: true,
+                    value: old_pwd,
+                    exported: old_export,
+                },
+            );
+        }
+        let pwd_readonly = self.readonly("PWD");
+        self.assign(
+            "PWD",
+            cwd.to_str()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "non-UTF-8 directory"))?,
+        );
+        if print {
+            print_path(&cwd)?;
+        }
+        if old_readonly || pwd_readonly {
+            return Err(io::Error::other(if old_readonly {
+                "OLDPWD: readonly variable"
+            } else {
+                "PWD: readonly variable"
+            }));
+        }
+        Ok(())
     }
 }
 
