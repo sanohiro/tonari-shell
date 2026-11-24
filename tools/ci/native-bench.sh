@@ -54,6 +54,26 @@ run() {
   "$@" | tee "$out/$label.txt"
   echo "::endgroup::"
 }
+# Compare the runner's real login files as well as our isolated profile fixtures.
+if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]]; then
+  check_home="$RUNNER_TEMP/check-home"
+  mkdir -p "$check_home"
+  cp /etc/skel/.bashrc /etc/skel/.profile "$check_home/"
+  for build in baseline current; do
+    for profile in /etc/profile /etc/profile.d/*.sh; do
+      if ! "$bin/$build" --noprofile --norc -n "$profile" >/dev/null 2>&1; then
+        echo "$profile"
+      fi
+    done > "$out/$build.syntax"
+    (cd "$check_home"
+     env -i HOME="$PWD" TERM=dumb LC_ALL=C PATH=/usr/bin:/bin "$bin/$build" --login -ic \
+       'echo "$SHLVL/$HISTCONTROL/$HISTSIZE"; type -t ll; :' </dev/null
+    ) > "$out/$build.stdout" 2> "$out/$build.stderr"
+  done
+  for stream in stdout stderr syntax; do
+    diff -u "$out/baseline.$stream" "$out/current.$stream"
+  done
+fi
 case "$SUITE" in
   throughput)
     cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
