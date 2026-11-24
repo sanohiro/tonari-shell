@@ -9,37 +9,8 @@ fn error(s: &str) -> io::Error {
     io::Error::other(s)
 }
 
-fn word_spans(s: &str) -> Vec<(usize, usize)> {
-    let mut words = Vec::new();
-    let mut start = None;
-    let mut quote = None;
-    let mut escaped = false;
-    for (i, c) in s.char_indices() {
-        if !escaped && quote.is_none() && c.is_whitespace() {
-            if let Some(a) = start.take() {
-                words.push((a, i));
-            }
-            continue;
-        }
-        start.get_or_insert(i);
-        if escaped {
-            escaped = false;
-        } else if c == '\\' && quote != Some('\'') {
-            escaped = true;
-        } else if quote == Some(c) {
-            quote = None;
-        } else if quote.is_none() && matches!(c, '\'' | '"') {
-            quote = Some(c);
-        }
-    }
-    if let Some(a) = start {
-        words.push((a, s.len()));
-    }
-    words
-}
-
 fn select(s: &str, designator: &str, matched: Option<&str>) -> io::Result<String> {
-    let words = word_spans(s);
+    let words = crate::parser::history_word_spans(s);
     if designator == "%" {
         return matched
             .and_then(|m| words.iter().map(|&(a, b)| &s[a..b]).find(|w| w.contains(m)))

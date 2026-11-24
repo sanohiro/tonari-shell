@@ -2593,7 +2593,7 @@ f; printf 'END\0'; printf '%s\0' names/*'''
         journal = self.cwd / ".local/state/tonari/history"
         journal.parent.mkdir(parents=True)
         lines = ["take '東京 の🌱' second", r"take path\ with\ spaces later",
-                 "take $(printf 'x y') suffix", "take alpha|cat"]
+                 "take $(printf 'x y') suffix", "take alpha|cat", "take 'two words' unfinished\""]
         journal.write_text("".join("1\t1\t0\t/tmp\t" + line.replace("\\", "\\\\") + "\n"
                                    for line in lines))
         fd = self.terminal_session(editing=True)
@@ -2604,6 +2604,7 @@ f; printf 'END\0'; printf '%s\0' names/*'''
             ("take pa", r"th\ with\ spaces", r"take path\ with\ spaces", "path with spaces"),
             ("take $", "(printf 'x y')", "take $(printf 'x y')", "x"),
             ("take al", "pha|cat", "take alpha", "alpha"),
+            ("take 'tw", "o words'", "take 'two words'", "two words"),
         ]:
             os.write(fd, prefix.encode())
             self.read_until(fd, b"\x1b[2m" + rest.encode())

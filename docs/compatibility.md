@@ -1,5 +1,11 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## Editing history suggestions and selecting history / 履歴候補の編集と選択
+
+At the end of the input line, `forward-word` (Alt-F in the default Emacs keymap) accepts the next token of the visible suggestion. Shell quotes, escapes, and substitutions retain their original spelling. Inside the draft the binding follows ordinary word motion. Literal Ctrl-R reverse search retains its Bash behavior, including Enter on a failed refinement and searches for a backslash followed by a space. A second unescaped space-separated fragment switches to Tonari’s history list. Tab or an arrow also opens it from an empty or single-fragment search. In the list, Enter inserts, Esc or Ctrl-G cancels, and Ctrl-R or ↓ selects the next match. Queries match decoded command text, including both successful and failed commands. Recent local commands appear first, followed by the journal from newest to oldest. Duplicate commands appear once.
+
+行末の薄い候補を Alt-F で1引数ずつ採用できます。Ctrl-R の通常表示では従来どおり Enter で実行し、複数語で開く `history>` の一覧では Enter で入力行に戻します。日本語の全角スペースでも検索語を区切れます。語順は自由で、大文字と小文字を区別します。Tab なら1語でも一覧に移れます。改行やタブを含む貼り付けは通常の逆検索でそのまま扱います。[端末でのテスト](../tests/shell.py) · [実機計測](benchmarks.md#history-fields)
+
 ## 2026-11-24 · History search and executable text / 履歴検索と実行ファイル
 
 A failed initial Ctrl-R search preserves the draft on Enter. The interactive test verifies the command that actually runs. The shell tests now also cover sparse array indices with `mapfile -O` and a shebang-less child script's arguments, exported environment, identity and file descriptors. Of 7,558 inventory verdicts, 7,557 immediately matched the preceding release. In the remaining GNU trap test, the Ubuntu arm64 Bash control itself produced an extra CHLD line. Three reruns reproduced the known DEBUG-trap difference. The inventory includes known differences and unprobed interfaces. [Tests](../tests/shell.py) · [Timing and feature evidence](native-2026-11-24/history-parity.md)

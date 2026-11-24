@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## 2026-11-24 · Partial suggestions and multi-fragment history / 履歴候補の部分採用と複数語検索
+
+Keep a reference to the record that produced the visible suggestion. Alt-F can then copy a token from that exact command without a second history lookup. Plain arguments have a short path to the next blank. Quoted arguments and substitutions use the shell lexer's source spans without evaluating the command. A history pager can paint the query before I/O, show its first hit immediately, then fill the visible page. It tracks a file offset across pages, checks for pending input between reads, and reuses the validated journal window when available. [Editor implementation](../src/editor/picker.rs) · [Benchmark](benchmarks.md#history-fields)
+
+100万件を先にすべて復号する試作では、入力自体がすぐ見えても候補の表示が遅れました。採用版はジャーナルを末尾から読み、検索語を含み得るブロックだけでコマンド欄とエスケープを照合します。PID やディレクトリ名の一致、未完の末尾行を候補から除きます。1ページ分がそろえば読み取りを止め、さらに古い候補への移動時に再開します。通常のブロックをまたぐ長い記録も端末テストで確認しています。[履歴の実装](../src/history/filter.rs) · [実機計測](benchmarks.md#history-fields)
+
 ## 2026-11-24 · Filtering completion candidates and ranking history / 補完候補の絞り込みと履歴の頻度
 
 The second Tab builds a snapshot of candidate names. A filter edit scans only far enough to fill the visible page. Moving down resumes that search, and pasting a query uses the existing bracketed-paste reader. At 1,024 file matches the initial list switches to the same packed byte-prefix sort used by pathname expansion. Ties compare the full UTF-8 names. The editor escapes the chosen word using the same completion options as ordinary Tab. Cancellation restores the original buffer and cursor. PTY tests check the argument the command actually receives, including spaces, emoji, and shell metacharacters. [Picker and tests](../tests/shell.py) · [Release timings](benchmarks.md#completion-picker)

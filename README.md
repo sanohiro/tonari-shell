@@ -24,7 +24,9 @@ binary=$(tools/build-release.sh)
 
 To build with the installed compiler and its prebuilt standard library, pass `--host-toolchain`. On GNU/Linux install the matching musl target for that compiler first. A plain `cargo build` targets the development host. All release entry points use O2, fat LTO and symbol stripping.
 
-At the prompt, try a pipeline or a shell function. Use ↑ for this session’s history, Ctrl-R to search across sessions, and → at the end of the line to accept a suggestion. Tab completes paths with spaces. If the exact directory is missing, you can abbreviate each level, for example `s/b/c/ker<Tab>` for `src/backend/cuda/kernel.cu`. When several candidates match, press Tab again. Type part of a name, move with ↑ or ↓, and press Enter to insert the selection. Esc or Ctrl-G returns to your draft. Alt-? prints the full list.
+At the prompt, try a pipeline or a shell function. Use ↑ for this session’s history, Ctrl-R to search across sessions, and → at the end of the line to accept a suggestion. Alt-F accepts just the next shell argument, including its quoting. Inside the line, Alt-F moves forward a word. Tab completes paths with spaces. If the exact directory is missing, you can abbreviate each level, for example `s/b/c/ker<Tab>` for `src/backend/cuda/kernel.cu`. When several candidates match, press Tab again. Type part of a name, move with ↑ or ↓, and press Enter to insert the selection. Esc or Ctrl-G returns to your draft. Alt-? prints the full list.
+
+In Ctrl-R, type two fragments such as `ssh 15432` to list commands containing both in either order. Tab opens the same list for a single fragment or an empty search. Use ↑/↓ to select and Enter to return the command to the editor. Esc or Ctrl-G restores your draft and cursor. A single-fragment inline search keeps Bash’s Enter-to-execute behavior.
 
 Insert toggles overwrite mode. Ctrl-Space sets a mark, Alt-W copies the region and Ctrl-Y pastes it. Bracketed paste keeps multiline commands editable until you press Enter. Long commands show a moving window around the cursor.
 

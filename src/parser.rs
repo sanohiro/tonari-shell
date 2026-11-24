@@ -14,6 +14,35 @@ mod wrapper;
 pub use crate::word::{Word, is_identifier};
 pub(crate) use wrapper::opens_function;
 
+pub(crate) fn history_word_spans(s: &str) -> Vec<(usize, usize)> {
+    let mut words = Vec::new();
+    let mut start = None;
+    let mut quote = None;
+    let mut escaped = false;
+    for (i, c) in s.char_indices() {
+        if !escaped && quote.is_none() && c.is_whitespace() {
+            if let Some(a) = start.take() {
+                words.push((a, i));
+            }
+            continue;
+        }
+        start.get_or_insert(i);
+        if escaped {
+            escaped = false;
+        } else if c == '\\' && quote != Some('\'') {
+            escaped = true;
+        } else if quote == Some(c) {
+            quote = None;
+        } else if quote.is_none() && matches!(c, '\'' | '"') {
+            quote = Some(c);
+        }
+    }
+    if let Some(a) = start {
+        words.push((a, s.len()));
+    }
+    words
+}
+
 /// Byte end of the next shell token in the displayed command, including any
 /// whitespace before it. Lexing identifies quotes and substitutions without running them.
 pub(crate) fn suggestion_end(line: &str, cursor: usize) -> usize {
@@ -33,17 +62,24 @@ pub(crate) fn suggestion_end(line: &str, cursor: usize) -> usize {
     {
         return line.len() - tail.len() + word;
     }
-    lex(line, false, true)
-        .ok()
-        .and_then(|(_, spans, _)| spans.into_iter().find(|&(_, end)| end > cursor))
-        .map_or_else(
-            || {
-                let tail = &line[cursor..];
-                let word = tail.trim_start_matches([' ', '\t']);
-                line.len() - word.len() + word.find([' ', '\t', '\n']).unwrap_or(word.len())
-            },
-            |(_, end)| end,
-        )
+    let next_end = |source| {
+        lex(source, false, true)
+            .ok()?
+            .1
+            .into_iter()
+            .find(|&(_, end)| end > cursor)
+            .map(|(_, end)| end)
+    };
+    next_end(line)
+        .or_else(|| {
+            // History can contain syntax errors beyond this argument. Confirm a
+            // shorter prefix with the lexer before copying any of it into the draft.
+            let (_, end) = history_word_spans(line)
+                .into_iter()
+                .find(|&(_, end)| end > cursor)?;
+            next_end(&line[..end])
+        })
+        .unwrap_or(cursor)
 }
 
 pub(crate) fn is_function_name(name: &str) -> bool {
