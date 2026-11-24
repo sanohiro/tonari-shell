@@ -11,6 +11,7 @@ pub(super) struct LexWord {
 
 #[derive(Clone)]
 pub(super) enum Token {
+    Reserved(&'static str),
     Word(LexWord),
     ArrayStart,
     LeftParen,
@@ -27,6 +28,28 @@ pub(super) enum Token {
     End,
     EndArm(CaseEnd),
     Newline,
+}
+
+impl Token {
+    pub(super) fn keyword(&self) -> Option<&str> {
+        match self {
+            Self::Reserved(s) => Some(s),
+            Self::Word(w) if !w.protected => w.word.as_literal(),
+            _ => None,
+        }
+    }
+
+    // The grammar may use the same spelling as an argument or a word operand.
+    pub(super) fn into_operand(self) -> Self {
+        match self {
+            Self::Reserved(s) => Self::Word(LexWord {
+                word: Word::Literal(s.to_owned()),
+                protected: false,
+                assignment: None,
+            }),
+            other => other,
+        }
+    }
 }
 
 pub(super) fn descriptor(s: &str) -> Result<i32, Error> {
@@ -644,18 +667,15 @@ fn pattern_chunk(chars: &mut Chars<'_>, word: &mut WordBuilder, start: &str, ext
 fn command_position(tokens: &[Token]) -> bool {
     for token in tokens.iter().rev() {
         match token {
-            Token::Word(word)
-                if !word.protected
-                    && matches!(
-                        word.word.as_literal(),
-                        Some(
-                            "if" | "while" | "until" | "elif" | "then" | "else" | "do" | "!" | "{"
-                        )
-                    ) =>
+            word if matches!(
+                word.keyword(),
+                Some("if" | "while" | "until" | "elif" | "then" | "else" | "do" | "!" | "{")
+            ) =>
             {
                 continue;
             }
-            Token::Word(_)
+            Token::Reserved(_)
+            | Token::Word(_)
             | Token::Arithmetic(_)
             | Token::DescriptorName(_)
             | Token::Redirect(..)
@@ -801,13 +821,44 @@ pub(super) fn lex(
         let start = chars.as_str();
         // Copy an ordinary word in one piece. Keep indexed assignments and
         // expansion syntax on the full word reader.
-        let plain = plain_prefix(start);
+        let plain = if matches!(c, '{' | '}') {
+            1
+        } else {
+            plain_prefix(start)
+        };
         if plain > 0
             && start.as_bytes().get(plain).is_none_or(|b| {
                 matches!(b, b' ' | b'\t' | b'\n' | b';' | b'|' | b'&' | b'(' | b')')
             })
         {
-            word.literal(&start[..plain]);
+            let literal = &start[..plain];
+            let fixed = match literal {
+                "{" => Some("{"),
+                "}" => Some("}"),
+                "if" => Some("if"),
+                "then" => Some("then"),
+                "else" => Some("else"),
+                "elif" => Some("elif"),
+                "fi" => Some("fi"),
+                "for" => Some("for"),
+                "do" => Some("do"),
+                "done" => Some("done"),
+                "in" => Some("in"),
+                "while" => Some("while"),
+                "until" => Some("until"),
+                "esac" => Some("esac"),
+                "select" => Some("select"),
+                "function" => Some("function"),
+                "coproc" => Some("coproc"),
+                "time" => Some("time"),
+                _ => None,
+            };
+            if let Some(fixed) = fixed {
+                tokens.push(Token::Reserved(fixed));
+                chars = start[plain..].chars();
+                continue;
+            }
+            word.literal(literal);
             chars = start[plain..].chars();
             started = true;
         } else if let Some(prefix) = super::array::indexed_prefix(start) {

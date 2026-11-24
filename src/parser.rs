@@ -419,14 +419,11 @@ impl Reader {
     }
 
     fn keyword(&self) -> Option<&str> {
-        match self.peek()? {
-            Token::Word(LexWord {
-                word,
-                protected: false,
-                ..
-            }) => word.as_literal(),
-            _ => None,
-        }
+        self.peek()?.keyword()
+    }
+
+    fn operand(&mut self) -> Option<Token> {
+        self.tokens.pop_front().map(Token::into_operand)
     }
 
     fn expect(&mut self, keyword: &str) -> Result<(), Error> {
@@ -660,8 +657,8 @@ impl Reader {
         self.tokens.pop_front();
         let named = match self.tokens.get(1) {
             Some(Token::LeftParen | Token::Arithmetic(_)) => true,
-            Some(Token::Word(w)) if !w.protected => matches!(
-                w.word.as_literal(),
+            Some(w) => matches!(
+                w.keyword(),
                 Some("{" | "[[" | "if" | "case" | "while" | "until" | "for" | "select")
             ),
             _ => false,
@@ -713,7 +710,7 @@ impl Reader {
         if self.keyword() == Some("]]") {
             return Err(Error::Invalid("missing conditional operand"));
         }
-        match self.tokens.pop_front() {
+        match self.operand() {
             Some(Token::Word(word)) => Ok(word.word),
             None => Err(Error::Incomplete("unfinished conditional expression")),
             _ => Err(Error::Invalid("expected a conditional operand")),
@@ -790,7 +787,7 @@ impl Reader {
     fn case_clause(&mut self) -> Result<Command, Error> {
         let start = self.position();
         self.tokens.pop_front();
-        let word = match self.tokens.pop_front() {
+        let word = match self.operand() {
             Some(Token::Word(word)) => word.word,
             None => return Err(Error::Incomplete("expected a case word")),
             _ => return Err(Error::Invalid("expected a case word")),
@@ -806,7 +803,7 @@ impl Reader {
             }
             let mut patterns = Vec::new();
             loop {
-                match self.tokens.pop_front() {
+                match self.operand() {
                     Some(Token::Word(word)) => patterns.push(CasePattern::new(word.word)),
                     None => return Err(Error::Incomplete("unfinished case command")),
                     _ => return Err(Error::Invalid("expected a case pattern")),
@@ -878,7 +875,7 @@ impl Reader {
     }
 
     fn name(&mut self) -> Result<String, Error> {
-        match self.tokens.pop_front() {
+        match self.operand() {
             Some(Token::Word(LexWord {
                 word: Word::Literal(name),
                 protected: false,
@@ -917,8 +914,8 @@ impl Reader {
         let words = if self.keyword() == Some("in") {
             self.tokens.pop_front();
             let mut words = Vec::new();
-            while matches!(self.peek(), Some(Token::Word(_))) {
-                if let Some(Token::Word(word)) = self.tokens.pop_front() {
+            while matches!(self.peek(), Some(Token::Word(_) | Token::Reserved(_))) {
+                if let Some(Token::Word(word)) = self.operand() {
                     words.push(word.word);
                 }
             }
@@ -947,7 +944,7 @@ impl Reader {
         if keyword {
             self.tokens.pop_front();
         }
-        let name = match self.tokens.pop_front() {
+        let name = match self.operand() {
             Some(Token::Word(LexWord {
                 word: Word::Literal(name),
                 protected: false,
@@ -1016,7 +1013,7 @@ impl Reader {
                 redirects[first].variable = Some(name.into());
             }
             Token::BothRedirect(target) => {
-                let Some(Token::Word(LexWord { word, .. })) = self.tokens.pop_front() else {
+                let Some(Token::Word(LexWord { word, .. })) = self.operand() else {
                     return Err(Error::Invalid("expected a redirection target"));
                 };
                 redirects.push(Redirect {
@@ -1033,7 +1030,7 @@ impl Reader {
                 });
             }
             Token::Redirect(fd, target) => {
-                let Some(Token::Word(LexWord { word, .. })) = self.tokens.pop_front() else {
+                let Some(Token::Word(LexWord { word, .. })) = self.operand() else {
                     return Err(Error::Invalid("expected a redirection target"));
                 };
                 let target = if target == Target::OutputWord
@@ -1064,6 +1061,7 @@ impl Reader {
                 self.peek(),
                 Some(
                     Token::Word(_)
+                        | Token::Reserved(_)
                         | Token::DescriptorName(_)
                         | Token::Redirect(_, _)
                         | Token::BothRedirect(_)
@@ -1071,7 +1069,7 @@ impl Reader {
             ) {
                 break;
             }
-            match self.tokens.pop_front().unwrap() {
+            match self.operand().unwrap() {
                 Token::Word(LexWord {
                     mut word,
                     protected,
