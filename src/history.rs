@@ -25,6 +25,7 @@ pub struct History {
     older_prefix: String,
     older_match: Option<String>,
     search_buffer: Vec<u8>,
+    window: window::Window,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -127,6 +128,7 @@ fn decode_into(value: &str, out: &mut String) -> bool {
 pub(crate) mod arguments;
 pub(crate) mod commands;
 pub(crate) mod expand;
+mod window;
 
 #[derive(Clone, Default)]
 pub(crate) struct Entries {
@@ -196,14 +198,19 @@ impl Session {
         }
     }
 
-    pub(crate) fn persist_current_history(&mut self, cwd: Option<&str>, status: u8) {
+    pub(crate) fn persist_current_history(
+        &mut self,
+        cwd: Option<&str>,
+        status: u8,
+        history: &mut History,
+    ) {
         let Some(h) = self.history.as_deref() else {
             return;
         };
         let Some(index) = h.current else { return };
         let line = &h.lines[index];
         if self.history_enabled && self.accept_history(line, h.lines[..index].last()) {
-            History::persist(self, line, cwd, status);
+            History::append(self, line, cwd, status, Some(&mut history.window));
         } else {
             self.history_mut().discard_current();
         }
@@ -270,6 +277,20 @@ impl Entries {
 
 impl History {
     pub fn persist(session: &Session, source: &str, cwd: Option<&str>, status: u8) {
+        Self::append(session, source, cwd, status, None);
+    }
+
+    pub fn prepare_search(&mut self, session: &Session, waiting: &dyn Fn() -> bool) {
+        self.window.prepare(session, waiting);
+    }
+
+    fn append(
+        session: &Session,
+        source: &str,
+        cwd: Option<&str>,
+        status: u8,
+        window: Option<&mut window::Window>,
+    ) {
         let text = source.strip_suffix('\n').unwrap_or(source);
         let Some(path) = file(session) else {
             return;
@@ -301,7 +322,12 @@ impl History {
         entry.push('\t');
         encode(text, &mut entry);
         entry.push('\n');
-        let _ = journal.write_all(entry.as_bytes());
+        let tracked = window.filter(|cache| cache.tracks(&journal));
+        if journal.write_all(entry.as_bytes()).is_ok()
+            && let Some(cache) = tracked
+        {
+            cache.appended(&journal, entry.len());
+        }
     }
 
     // Return false when input is waiting. The offset always points to the end
@@ -477,15 +503,24 @@ impl History {
         let finder = memchr::memmem::Finder::new(raw.as_bytes());
         let reverse = memchr::memmem::FinderRev::new(raw.as_bytes());
         let mut end = self.tail_start;
+        let cached = self.window.bytes(&m);
         let block = &mut self.search_buffer;
-        block.resize(BLOCK.min(end as usize), 0);
         while end != 0 {
             if waiting() {
                 return Err(());
             }
             let start = end.saturating_sub(BLOCK as u64);
-            let buf = &mut block[..(end - start) as usize];
-            journal.read_exact_at(buf, start).map_err(|_| ())?;
+            let size = (end - start) as usize;
+            let buf = if let Some((base, data)) = cached
+                && let Some(offset) = start.checked_sub(base)
+                && let Some(bytes) = data.get(offset as usize..offset as usize + size)
+            {
+                bytes
+            } else {
+                block.resize(size, 0);
+                journal.read_exact_at(block, start).map_err(|_| ())?;
+                &block[..]
+            };
             let boundary = if start == 0 {
                 0
             } else {
@@ -579,43 +614,41 @@ impl History {
             return Err(());
         }
         if *view == View::Recent {
-            let last = queries.last().unwrap();
-            let query = &last.text;
-            let mut remaining = last.skip;
-            if let Some(found) = self.search_query(&[], query, &mut remaining, waiting)? {
-                return Ok(Some(found.to_owned()));
-            }
-            if !waiting()
-                && let Ok(found) = self.older_match(session, query, false, remaining, waiting)
-                && (found.is_some()
-                    || queries.len() == 1
-                        && last.shortest == query.len()
-                        && !self.shared.ends.is_empty())
-            {
-                return Ok(found);
+            if !self.shared.ends.is_empty() {
+                // Refinements can all miss. Keep the raw reverse search available
+                // for their shorter prefixes instead of decoding the entire journal.
+                let result = Self::best_match(queries, |query, mut skip| {
+                    if let Some(hit) = self.search_query(&[], query, &mut skip, waiting)? {
+                        return Ok(Some(hit.to_owned()));
+                    }
+                    self.older_match(session, query, false, skip, waiting)
+                });
+                if result.is_ok() || waiting() {
+                    return result;
+                }
             }
             if !self.ensure(session, view, true, waiting) {
                 return Err(());
             }
         }
-        // A failed refinement keeps the last successful result, even if keys
-        // arrived before the previous query had completed.
+        Self::best_match(queries, |query, mut skip| {
+            Ok(self
+                .search_query(session.history_lines(), query, &mut skip, waiting)?
+                .map(str::to_owned))
+        })
+    }
+
+    // A failed refinement keeps the newest match for the longest successful
+    // prefix. Prefixes with the same skip count form a monotonic predicate.
+    fn best_match(
+        queries: &[SearchQuery],
+        mut find: impl FnMut(&str, usize) -> Result<Option<String>, ()>,
+    ) -> Result<Option<String>, ()> {
         for query in queries.iter().rev() {
-            let find = |end| {
-                let mut remaining = query.skip;
-                self.search_query(
-                    session.history_lines(),
-                    &query.text[..end],
-                    &mut remaining,
-                    waiting,
-                )
-            };
-            if let Some(found) = find(query.text.len())? {
-                return Ok(Some(found.to_owned()));
+            if let Some(found) = find(&query.text, query.skip)? {
+                return Ok(Some(found));
             }
             if query.shortest < query.text.len() {
-                // A hit for a prefix implies a hit for every shorter prefix with
-                // the same skip count. Find the longest one without copying prefixes.
                 let lengths: Vec<_> = query.text[query.shortest..]
                     .char_indices()
                     .map(|(offset, _)| query.shortest + offset)
@@ -624,15 +657,15 @@ impl History {
                 let mut best = None;
                 while lo < hi {
                     let mid = lo + (hi - lo) / 2;
-                    if let Some(found) = find(lengths[mid])? {
+                    if let Some(found) = find(&query.text[..lengths[mid]], query.skip)? {
                         best = Some(found);
                         lo = mid + 1;
                     } else {
                         hi = mid;
                     }
                 }
-                if let Some(found) = best {
-                    return Ok(Some(found.to_owned()));
+                if best.is_some() {
+                    return Ok(best);
                 }
             }
         }

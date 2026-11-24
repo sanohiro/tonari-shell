@@ -653,6 +653,9 @@ pub fn line(
     let mut motion = false;
     let mut overwrite = false;
     let mut view = View::Unread;
+    if read.is_none() && keys.queued.is_empty() {
+        history.prepare_search(session, &|| ready(0, 0));
+    }
     loop {
         if session.bindings.map == Keymap::Command && !text.is_empty() {
             cursor = cursor.min(previous(&text, text.len()));

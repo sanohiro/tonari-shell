@@ -1,0 +1,98 @@
+// Bounded raw copy of the newest journal pages. External truncation or replacement
+// cannot fault the editor while it is reading the copy.
+use std::fs::{File, Metadata, OpenOptions};
+use std::io::{Read, Seek, SeekFrom};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+#[derive(Clone, Copy, PartialEq)]
+struct Stamp {
+    identity: (u64, u64),
+    len: u64,
+    modified: (i64, i64),
+    changed: (i64, i64),
+}
+
+impl From<&Metadata> for Stamp {
+    fn from(m: &Metadata) -> Self {
+        Self {
+            identity: (m.dev(), m.ino()),
+            len: m.len(),
+            modified: (m.mtime(), m.mtime_nsec()),
+            changed: (m.ctime(), m.ctime_nsec()),
+        }
+    }
+}
+
+#[derive(Default)]
+pub(super) struct Window {
+    stamp: Option<Stamp>,
+    start: u64,
+    bytes: Vec<u8>,
+}
+
+impl Window {
+    pub(super) fn prepare(&mut self, session: &crate::Session, waiting: &dyn Fn() -> bool) {
+        let Some(path) = super::file(session) else {
+            return;
+        };
+        let Ok(mut file) = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path)
+        else {
+            return;
+        };
+        let Ok(meta) = file.metadata() else { return };
+        let stamp = Stamp::from(&meta);
+        if self.stamp == Some(stamp) {
+            return;
+        }
+        self.stamp = None;
+        self.bytes.clear();
+        if !meta.is_file() || stamp.len < 32 * 1024 || waiting() {
+            return;
+        }
+        const CAPACITY: u64 = 4 * 1024 * 1024;
+        let count = stamp.len.min(CAPACITY);
+        self.start = stamp.len - count;
+        if file.seek(SeekFrom::Start(self.start)).is_err() {
+            return;
+        }
+        self.bytes.reserve_exact(count as usize);
+        while self.bytes.len() < count as usize {
+            if waiting() {
+                break;
+            }
+            let segment = (count - self.bytes.len() as u64).min(256 * 1024);
+            if (&mut file).take(segment).read_to_end(&mut self.bytes).ok() != Some(segment as usize)
+            {
+                return;
+            }
+        }
+        if !self.bytes.is_empty() {
+            self.stamp = Some(stamp);
+        }
+    }
+
+    pub(super) fn bytes(&self, meta: &Metadata) -> Option<(u64, &[u8])> {
+        (self.stamp == Some(Stamp::from(meta))).then_some((self.start, &self.bytes))
+    }
+
+    // A cooperating append under the journal lock leaves all copied bytes intact.
+    pub(super) fn tracks(&self, file: &File) -> bool {
+        self.stamp.is_some()
+            && file
+                .metadata()
+                .is_ok_and(|m| self.stamp == Some(Stamp::from(&m)))
+    }
+
+    pub(super) fn appended(&mut self, file: &File, length: usize) {
+        let old = self.stamp.take().unwrap();
+        if let Ok(m) = file.metadata() {
+            let new = Stamp::from(&m);
+            if new.identity == old.identity && old.len.checked_add(length as u64) == Some(new.len) {
+                self.stamp = Some(new);
+            }
+        }
+    }
+}

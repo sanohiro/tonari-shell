@@ -164,12 +164,13 @@ def main():
     cli.add_argument("--only", nargs="*")
     cli.add_argument("--inventory", type=Path)
     cli.add_argument("--components", action="store_true")
+    cli.add_argument("--release-only", action="store_true", help="compare just the two release binaries and Bash")
     args = cli.parse_args()
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         audits = {}
         hashes = {}
-        for name in (("bash", "baseline", "current") if args.components else ("bash", "baseline", "current", "opt-3", "opt-s")):
+        for name in (("bash", "baseline", "current") if args.components or args.release_only else ("bash", "baseline", "current", "opt-3", "opt-s")):
             original = args.bash if name == "bash" else args.bin / name
             staged = root / name / "bash"
             staged.parent.mkdir()

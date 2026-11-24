@@ -45,7 +45,7 @@ if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; t
   exit
 fi
 if [[ $RUNNER_OS == macOS ]]; then
-  if [[ $SUITE == inventory || $SUITE == foreground || $SUITE == budget* ]]; then
+  if [[ $SUITE == inventory || $SUITE == parity-commands || $SUITE == foreground || $SUITE == budget* ]]; then
     gnu="$RUNNER_TEMP/gnu"
     mkdir -p "$gnu"
     download_bash "$version" "$digest" "$RUNNER_TEMP/bash.tar.gz"
@@ -99,6 +99,18 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
+  parity-history)
+    shells=("$current" "$bin/baseline" "$ref")
+    run oldest python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --case Miss --prompt-time --runs 61
+    for rank in 20 900; do
+      run "rank-$rank" python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --history-rank "$rank" --prompt-time --runs 41
+    done
+    run bursts python3 tools/bench_history.py "$current" "$bin/baseline" --entries 1000000 --bursts --runs 21 ;;
+  parity-commands)
+    [[ $RUNNER_OS == macOS ]]
+    python3 tests/compat/replay_budget.py --release-only --bin "$bin" --bash "$ref" --lane macOSarm64 --runs 31 \
+      --only 1073fad1c5f9 27e15ee9fb24 2d8b87809a57 486d0a5c94f0 48f0f68f324f 4dbd86b7239c \
+             ac121d4b6180 b231f00edd90 d2003b0a862e e4c5cb7b4108 e75fc215bb04 > "$out/replay.jsonl" ;;
   probe)
     cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
     run probes python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" --timing started --runs 41 \

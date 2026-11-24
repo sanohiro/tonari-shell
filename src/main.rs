@@ -299,7 +299,7 @@ fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Resu
                         _ => 1,
                     };
                     if record {
-                        session.persist_current_history(cwd.as_deref(), status);
+                        session.persist_current_history(cwd.as_deref(), status, &mut history);
                         session.finish_history_line();
                     }
                     if session.onecmd || matches!(flow, Flow::Exit(_) | Flow::Return(_)) {

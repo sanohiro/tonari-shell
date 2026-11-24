@@ -45,7 +45,9 @@ def visible(fd, packet):
 
 
 def sample(shell, home, name, packet, expected):
+    started = time.perf_counter_ns()
     with terminal(shell, home, home, home / "rc", prompt=PROMPT) as fd:
+        prompt_time = (time.perf_counter_ns() - started) / 1e6
         if name.startswith("Up twice"):
             # Up navigates the active session. Seed its two lines before timing.
             for line in (b"v=" + expected, b"v=most-recent"):
@@ -57,16 +59,22 @@ def sample(shell, home, name, packet, expected):
             visible(fd, b"v=" + expected)
             os.write(fd, b"\x1b[A")
             read_until(fd, b"DOWNREF")
-        elapsed = visible(fd, packet)
-        os.write(fd, b"\r")
-        read_until(fd, b"\x1b[?2004h")
+        if name.startswith("Miss"):
+            start = time.perf_counter_ns()
+            os.write(fd, packet + b"\r")
+            read_until(fd, b"\x1b[?2004h")
+            elapsed = (time.perf_counter_ns() - start) / 1e6
+        else:
+            elapsed = visible(fd, packet)
+            os.write(fd, b"\r")
+            read_until(fd, b"\x1b[?2004h")
         os.write(fd, b'printf %s "$v" > result\r')
         read_until(fd, b"\x1b[?2004h")
         path = home / "result"
         if path.read_bytes() != expected:
             raise ValueError(f"{shell} {name}: incorrect value")
         path.unlink()
-    return elapsed
+    return elapsed, prompt_time
 
 
 def scan_sample(binary, folder, query):
@@ -86,10 +94,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("shell", nargs="+", type=Path)
     parser.add_argument("--runs", type=int, default=21)
+    parser.add_argument("--prompt-time", action="store_true", help="also report PTY launch to prompt and launch through search")
     parser.add_argument("--history-rank", type=int, help="place the reverse-search target this many rows before the end")
     parser.add_argument("--scan-control", type=Path, help="also measure a direct unique-name directory scan")
     parser.add_argument("--large", action="store_true", help="also measure a 1 MiB paste")
-    parser.add_argument("--case", action="append", choices=["commit", "paste", "Up", "Down", "Ctrl-R", "Tab"])
+    parser.add_argument("--case", action="append", choices=["commit", "paste", "Up", "Down", "Ctrl-R", "Miss", "Tab"])
     args = parser.parse_args()
     if args.runs < 1:
         parser.error("runs must be positive")
@@ -113,7 +122,7 @@ def main():
         bash_history.write_bytes(b"\n".join(commands) + b"\n")
         journal.write_bytes(b"".join(b"1\t1\t0\t/tmp\t" + c + b"\n" for c in commands))
         with (home / "rc").open("a") as rc:
-            rc.write("HISTSIZE=100000\n")
+            rc.write("HISTSIZE=100000\nv=unchanged\n")
         folder = home / "candidates"
         folder.mkdir()
         for i in range(9999):
@@ -130,19 +139,26 @@ def main():
         cases.append(("Up twice (100k entries)", b"\x1b[A\x1b[A", recalled))
         cases.append(("Down to draft (100k entries)", b"\x1b[B", recalled))
         cases.append(("Ctrl-R (100k entries)", b"\x12" + query, query + FLAG))
+        if args.case and "Miss" in args.case:
+            cases.append(("Miss (100k entries, through Enter)", b"\x12" + "☃履歴に存在しない".encode(), b"unchanged"))
         cases.append(("Tab (10k files)", b"f candidates/" + query + b"\t", b"candidates/" + query + FLAG))
         for case in cases:
             if args.case and case[0].split()[0] not in args.case:
                 continue
             participants = [*shells, None] if args.scan_control and case[0].startswith("Tab ") else shells
             timings = {shell: [] for shell in participants}
+            startup = {shell: [] for shell in shells}
+            total = {shell: [] for shell in shells}
             for i in range(args.runs + 3):
                 shift = i % len(participants)
                 for shell in participants[shift:] + participants[:shift]:
                     if shell is None:
                         ms = scan_sample(args.scan_control, folder, query)
                     else:
-                        ms = sample(shell, home, *case)
+                        ms, launch = sample(shell, home, *case)
+                        if i >= 3:
+                            startup[shell].append(launch)
+                            total[shell].append(launch + ms)
                         for path, length in sizes.items():
                             os.truncate(path, length)
                     if i >= 3:
@@ -152,6 +168,9 @@ def main():
                 p95 = sorted(values)[math.ceil(.95 * len(values)) - 1]
                 cells.append(f"{statistics.median(values):.3f}/{p95:.3f}")
             print(case[0], *cells[:len(shells)], sep=" | ", flush=True)
+            if args.prompt_time:
+                for name, values in (("PTY to prompt", startup), ("PTY through search", total)):
+                    print(name, *(f"{statistics.median(v):.3f}/{sorted(v)[math.ceil(.95 * len(v))-1]:.3f}" for v in values.values()), sep=" | ")
             if None in timings:
                 print("Direct scan (10k files)", cells[-1], sep=" | ", flush=True)
 
