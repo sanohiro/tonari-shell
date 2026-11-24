@@ -36,8 +36,16 @@ def sample(shell, home, mode):
             os.write(fd, b"\x12")
             read_until(fd, b"(reverse-i-search)")
             query = b"15432 " + fragment
+            if mode == "typeahead":
+                # The first hit is visible while the picker continues searching
+                # older rows for the rest of its page.
+                os.write(fd, "15432 限定".encode())
+                read_until(fd, ">  save 限定 --port=15432".encode())
+                packet = b"\x7f\x7f" + fragment
+            else:
+                packet = query
             start = time.perf_counter_ns()
-            os.write(fd, query)
+            os.write(fd, packet)
             data = read_until(fd, b"history> " + query)
             echo = time.perf_counter_ns()
             read_until(fd, b"> " + cmd, initial=data)
@@ -72,13 +80,14 @@ def main():
         head = b"1\t9\t0\t/tmp\t"
         with journal.open("wb") as out:
             out.write(head + " save 桜🌱 --port=15432\n".encode())
-            for i in range(args.entries - 11):
+            for i in range(args.entries - 12):
                 out.write(head + f": log --port=15432 --task {i}\n".encode())
             for i in range(8):
                 out.write(head + f" save 東京🌱 --port=15432 {i}\n".encode())
+            out.write(head + " save 限定 --port=15432\n".encode())
             for mode, extra in [(b"short", 1), (b"long", 4096)]:
                 out.write(head + b" save " + mode + b"-accepted" + b" tail" * extra + b"\n")
-        for mode in ("short", "long", "recent", "old"):
+        for mode in ("short", "long", "recent", "old", "typeahead"):
             values = defaultdict(lambda: defaultdict(list))
             for trial in range(args.runs + 3):
                 offset = trial % len(shells)
