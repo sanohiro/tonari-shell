@@ -800,6 +800,10 @@ eval -- 'printf' '%s' '":雪"'
         self.compare('. ./config; echo "$?"', 0, b"script /pattern/{\n}\n23\n")
         self.compare('f() { eval "$(<config)"; echo skipped; }; f; echo "$?"',
                      0, b"script /pattern/{\n}\n23\n")
+        (self.cwd / "config").write_text("echo before\nif )\n")
+        self.compare(". ./config", 2, b"before\n")
+        self.assertIn(b"./config: command starting at line 2:",
+                      self.command(TONARI, ". ./config").stderr)
 
     def test_eval_rechecks_parser_options_aliases_and_lines(self):
         self.compare(r"""run() { eval "$code"; }
@@ -849,6 +853,15 @@ eval --help >/dev/null; echo "$?"
                     for argv, data in (([shell, path], None), ([shell], source.encode())):
                         p = subprocess.run(argv, input=data, capture_output=True, env=self.env, cwd=self.cwd)
                         self.assertEqual((p.returncode, p.stdout, p.stderr), (0, b"a\n", b""))
+
+    def test_eval_reads_complete_compounds_with_quoted_terminators(self):
+        bodies = ["printf '%s\\n' 'fi\ndone\nesac\n}'", "cat <<'END'\nfi\ndone\nesac\n}\nEND"]
+        wrappers = [("if true; then", "fi"), ("for i in 1; do", "done"),
+                    ("case ok in\nok)", ";;\nesac"), ("{", "}"),
+                    ("run ()\n{", "}\nrun"), ("if true; then\nwhile :; do", "break\ndone\nfi")]
+        commands = ["eval " + shlex.quote(f"{header}\n{body}\n{end}\necho next")
+                    for header, end in wrappers for body in bodies]
+        self.compare("\n".join(commands), 0, b"fi\ndone\nesac\n}\nnext\n" * len(commands))
 
     def test_cdable_vars_uses_a_variable_after_directory_search(self):
         self.compare(r"""mkdir -p search/mark real both
