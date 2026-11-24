@@ -1,5 +1,25 @@
 # Startup and execution / 起動と実行性能
 
+<a id="ripgrep-16-trials"></a>
+
+## 2026-11-24 · ripgrep 16 transfer experiments / ripgrep 16 の手法を使った試作
+
+On a native Apple M1, build both the control at `7342e88` and each separate experimental change with `tools/build-release.sh --host-toolchain` (Homebrew rustc 1.96.1, arm64). These timings compare experimental builds. They are separate from the distribution-build timings below. For the glob experiment, create 20,000 files named `entry-{i:05}-{mark}.{ext}`, cycling through `a`, `雪` and `🐟`. Use `log` every 20th entry and `txt` elsewhere. Run `shopt -s nullglob; set -- fixture/PATTERN; echo "$#"` after the ready marker under `en_US.UTF-8`. Rotate the two Tonari builds and Bash 5.2.37 for three warm-ups and 15 samples each. Repeat with the Tonari order reversed. Check the complete NUL-separated path list against Bash before timing each workload. [Script timer](../tools/bench_scripts.py) · [Upstream GlobSet strategies](https://github.com/BurntSushi/ripgrep/blob/16.0.0/crates/globset/src/glob.rs#L51-L70)
+
+| Pattern | Matches | Current / prototype / Bash, median ms | Repeat, current / prototype ms |
+| --- | ---: | ---: | ---: |
+| `entry-?????-?.log` | 1,000 | 11.450 / 9.341 / 25.912 | 11.542 / 9.302 |
+| `entry-?????-?.txt` | 19,000 | 18.830 / 18.757 / 118.761 | 18.663 / 18.404 |
+| `entry-?????-?.zip` | 0 | 11.171 / 8.780 / 22.196 | 11.106 / 8.692 |
+| `*.log` | 1,000 | 9.311 / 9.197 / 25.309 | 9.304 / 9.205 |
+| `entry-?????-?.*` | 20,000 | 18.696 / 18.286 / 124.250 | 18.527 / 18.920 |
+
+試作では、大文字・小文字を区別する一般の照合器に渡す前に、パターンが要求する英数字の拡張子を一度取り出し、末尾が違う候補を除外しました。一致が5%以下の2条件で短縮が再現しました。通常の `*.log` はすでに末尾を直接比較します。ドットファイル、引用、文字クラス、拡張パターンなどを組み合わせた別の37条件でも、試作・現行・Bash の出力を照合しました。2つの Tonari 実験ビルドはともに1,566,800バイトでした。Linux 実機での速度は今回の計測範囲外です。
+
+A separate Ctrl-R experiment accepted a plain substring hit directly when it lay in the unescaped command field of a valid history record. On 100,000 mixed entries, the oldest Japanese match took 1.368 → 1.374 ms (p95 1.624 → 1.587 ms). Swapping execution order gave 1.386 → 1.332 ms (p95 1.565 → 1.522 ms). For a missing query through Enter, medians were 1.187 → 1.141 ms and 1.134 → 1.157 ms. Each run rotated 41 fresh PTYs per variant and checked the executed command after recall. These comparisons did not establish a repeatable latency reduction. [PTY workload](../tools/bench_editor_input.py) · [Engineering notes](engineering-notes.md)
+
+Ctrl-R の試作では、履歴の一致箇所がコマンド欄内で、エスケープを含まない場合に再照合を省きました。入力から表示までの時間を測ると、10万件の日本語検索では初回と再計測で中央値の差の符号が変わりました。
+
 <a id="native-glob-launch-io"></a>
 
 ## 2026-11-24 · Large globs, short-lived processes and bulk input / 大量展開・外部起動・一括読み込み
