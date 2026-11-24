@@ -44,8 +44,8 @@ def misses(rows, previous, require_target, require_complete):
             errors.append((*key, "previously verified observation lost"))
         # The batching policy follows single-command timings, so a feature can
         # legitimately leave the repeated subset or change iteration count.
-        if (before.get("batch_n") and after["batch_n"]
-                and int(before["batch_iterations"]) == after["batch_iterations"]
+        if (before.get("batch_n") and after.get("batch_n")
+                and int(before["batch_iterations"]) == int(after["batch_iterations"])
                 and acceptable(before, "batch", (2, 3)) and not acceptable(after, "batch", (2, 3))):
             errors.append((*key, "repeated command crossed 2/3"))
         for mode in METRICS:
@@ -55,7 +55,7 @@ def misses(rows, previous, require_target, require_complete):
                 errors.append((*key, mode + " crossed 2/3"))
     for key, row in rows.items():
         if row["status"] in PASS:
-            if require_target and row["batch_n"] and not acceptable(row, "batch", (2, 3)):
+            if require_target and row.get("batch_n") and not acceptable(row, "batch", (2, 3)):
                 errors.append((*key, "repeated command exceeds 2/3"))
             for mode in METRICS:
                 if require_target and (row[mode + "_error"] or mode == "whole" or row[mode + "_n"]) and not acceptable(row, mode, (2,3)):
