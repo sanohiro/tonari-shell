@@ -793,6 +793,14 @@ eval -- 'printf' '%s' '":雪"'
         (self.cwd / "config").write_text(source)
         self.compare('eval "$(<config)"', 0, b"if true; then\nok\n")
 
+    def test_sourced_and_generated_functions_with_separate_braces(self):
+        source = ("setup ()\n{\n" + " : padding\n" * 500
+                  + """ printf '%s\\n' 'script /pattern/{' '}'\n}\nsetup\nreturn 23\n""")
+        (self.cwd / "config").write_text(source)
+        self.compare('. ./config; echo "$?"', 0, b"script /pattern/{\n}\n23\n")
+        self.compare('f() { eval "$(<config)"; echo skipped; }; f; echo "$?"',
+                     0, b"script /pattern/{\n}\n23\n")
+
     def test_eval_rechecks_parser_options_aliases_and_lines(self):
         self.compare(r"""run() { eval "$code"; }
 code='echo "$n"'
@@ -2211,10 +2219,12 @@ raise SystemExit(23)
         for shell in (TONARI, BASH):
             with self.subTest(shell=shell):
                 fd = self.terminal_session(shell=shell)
-                os.write(fd, b"./stop-once\n")
+                os.write(fd, b"./stop-once marker\n")
                 self.read_until(fd, PROMPT)
                 os.write(fd, b"jobs\n")
-                self.assertIn(b"Stopped", self.read_until(fd, PROMPT))
+                jobs = self.read_until(fd, PROMPT)
+                self.assertIn(b"Stopped", jobs)
+                self.assertIn(b"./stop-once marker", jobs)
                 os.write(fd, b"fg\n")
                 self.assertIn(b"resumed-once\r\n", self.read_until(fd, PROMPT))
                 os.write(fd, b"echo status=$?\n")

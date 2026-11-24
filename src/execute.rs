@@ -1990,6 +1990,38 @@ pub fn run(
     run_pipeline(pipeline, last_status, replace, session, false)
 }
 
+fn job_label(pipeline: &[SimpleCommand<Word>], background: bool, monitor: bool) -> Option<String> {
+    // Literal arguments survive preparation, except for lookup prefixes.
+    // Build their job label only if a foreground child is actually launched.
+    if !background && !monitor {
+        return None;
+    }
+    if !background
+        && let [cmd] = pipeline
+        && cmd.assignments.is_empty()
+        && !matches!(
+            cmd.words.first().and_then(Word::as_literal),
+            Some("command" | "builtin")
+        )
+        && cmd.words.iter().all(|w| w.as_literal().is_some())
+    {
+        return None;
+    }
+    let mut label = String::new();
+    for (stage, cmd) in pipeline.iter().enumerate() {
+        if stage != 0 {
+            label.push_str(" | ");
+        }
+        for (i, word) in cmd.words.iter().enumerate() {
+            if i != 0 {
+                label.push(' ');
+            }
+            label.push_str(word.as_literal().unwrap_or("command"));
+        }
+    }
+    Some(label)
+}
+
 pub fn run_pipeline(
     mut pipeline: Pipeline<Word>,
     last_status: u8,
@@ -1997,23 +2029,6 @@ pub fn run_pipeline(
     session: &mut Session,
     background: bool,
 ) -> io::Result<Flow> {
-    let mut launch = session.jobs.launch(background, pipeline.len() == 1);
-    let managed = background || launch.group.is_some();
-    let name = if managed {
-        pipeline
-            .iter()
-            .map(|c| {
-                c.words
-                    .iter()
-                    .map(|word| word.as_literal().unwrap_or("command"))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            })
-            .collect::<Vec<_>>()
-            .join(" | ")
-    } else {
-        String::new()
-    };
     if pipeline.len() == 1 && !background {
         let raw = pipeline.pop().unwrap();
         if raw.compound.is_none()
@@ -2030,6 +2045,7 @@ pub fn run_pipeline(
         {
             return Ok(Flow::Continue(0));
         }
+        let name = job_label(std::slice::from_ref(&raw), false, session.jobs.monitor);
         let mut cmd = match prepare(raw, session, last_status, true) {
             Ok(cmd) => cmd,
             Err(e) => {
@@ -2038,11 +2054,15 @@ pub fn run_pipeline(
             }
         };
         if !cmd.named_redirects.is_empty() {
+            let launch = session.jobs.launch(false, true);
             return named_fd::run(cmd, session, last_status, replace, launch);
         }
         if let Some(builtin) = builtin(&cmd, last_status, session) {
             return run_builtin(builtin, &mut cmd, session, last_status, replace);
         }
+        // A foreground builtin runs in this shell. Snapshot terminal modes
+        // only when preparing to hand the terminal to a child process.
+        let mut launch = session.jobs.launch(false, true);
         if !cmd.cacheable() {
             if cmd.assignments.iter().any(|(k, _)| k == "PATH") {
                 session.hashes.clear();
@@ -2061,14 +2081,14 @@ pub fn run_pipeline(
             }));
         }
         let status = match start(&mut cmd, None, None, None, last_status, session, launch)? {
-            Stage::Child(pid) if managed => {
+            Stage::Child(pid) if launch.group.is_some() => {
                 launch.parent(pid);
                 session
                     .jobs
                     .finish(
                         launch,
                         vec![Ok(pid)],
-                        name,
+                        name.unwrap_or_else(|| cmd.words.join(" ")),
                         session.pipefail,
                         &mut session.pipe_status,
                     )?
@@ -2079,6 +2099,9 @@ pub fn run_pipeline(
         };
         return Ok(Flow::Continue(status));
     }
+    let mut launch = session.jobs.launch(background, pipeline.len() == 1);
+    let managed = background || launch.group.is_some();
+    let name = job_label(&pipeline, background, session.jobs.monitor);
     let mut input = if background && launch.group.is_none() && !session.stdin_redirected {
         Some(private_fd(std::fs::File::open("/dev/null")?.into())?)
     } else {
@@ -2157,7 +2180,7 @@ pub fn run_pipeline(
         let (code, pid) = session.jobs.finish(
             launch,
             processes,
-            name,
+            name.unwrap_or_default(),
             session.pipefail,
             &mut session.pipe_status,
         )?;

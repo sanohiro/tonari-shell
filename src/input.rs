@@ -87,13 +87,20 @@ pub fn file_script(
     if session.source_depth > 0
         && let Some(meta) = &metadata
         && meta.is_file()
-        && meta.len() < 4096
+        && meta.len() < 128 * 1024
     {
         // A sourced regular file starts at offset zero. Read one byte beyond
         // the advertised length so a changed file still takes the stream path.
-        let mut bytes = [0; 4096];
         let len = meta.len() as usize;
-        if let Ok(n) = file.read_at(&mut bytes[..=len], 0)
+        let mut small = [0; 4096];
+        let mut large;
+        let bytes = if len < small.len() {
+            &mut small[..=len]
+        } else {
+            large = vec![0; len + 1];
+            &mut large[..]
+        };
+        if let Ok(n) = file.read_at(bytes, 0)
             && n == len
             && len != 0
             && let Ok(source) = std::str::from_utf8(&bytes[..n])
@@ -170,7 +177,7 @@ fn buffered_compound<P: AsRef<[parser::Statement]>>(
     first: &str,
     buffered: &[u8],
     at_eof: bool,
-    mut parse: impl FnMut(&str) -> Result<P, parser::Error>,
+    mut parse: impl FnMut(usize) -> Result<P, parser::Error>,
 ) -> Result<(P, usize, usize), usize> {
     let header = first.lines().next().ok_or(0usize)?.trim_ascii_start();
     let key = header
@@ -187,13 +194,11 @@ fn buffered_compound<P: AsRef<[parser::Statement]>>(
     };
     let mut start = 0;
     let mut nested = 0usize;
+    let mut needs_open_brace = close == b"}" && !header.contains('{');
     let mut deferred = None;
     let mut probe = |size, lines| {
-        let mut text = String::with_capacity(first.len() + size);
-        text.push_str(first);
-        text.push_str(std::str::from_utf8(&buffered[..size]).map_err(|_| size)?);
         // Only the final ordinary read may emit an unterminated here-doc warning.
-        match parse(&text) {
+        match parse(size) {
             Ok(program) if matches!(program.as_ref(), [s] if s.location.end > first.len()) => {
                 Ok(Some((program, size, lines)))
             }
@@ -220,7 +225,15 @@ fn buffered_compound<P: AsRef<[parser::Statement]>>(
             b"fi" => word == Some(b"if"),
             b"esac" => word == Some(b"case"),
             b"done" => matches!(word, Some(b"for" | b"while" | b"until" | b"select")),
-            _ => next.ends_with(b"{"),
+            _ if needs_open_brace && next.starts_with(b"{") => {
+                needs_open_brace = false;
+                false
+            }
+            _ => {
+                next == b"{"
+                    || next.ends_with(b"{")
+                        && std::str::from_utf8(next).is_ok_and(parser::opens_function)
+            }
         };
         nested += usize::from(opens);
         let begins = next
@@ -319,8 +332,13 @@ fn run(
             && (session.source_depth > 0 || open_function && !session.history_enabled)
             && matches!(result, Err(parser::Error::Incomplete(_)))
             && let Ok((program, consumed, lines)) =
-                buffered_compound(text, reader.buffer(), false, |unit| {
-                    parser::session_source_at(unit, false, session, base_line)
+                buffered_compound(text, reader.buffer(), false, |size| {
+                    let rest = std::str::from_utf8(&reader.buffer()[..size])
+                        .map_err(|_| parser::Error::Invalid("expected UTF-8 command text"))?;
+                    let mut unit = String::with_capacity(text.len() + size);
+                    unit.push_str(text);
+                    unit.push_str(rest);
+                    parser::session_source_at(&unit, false, session, base_line)
                 })
         {
             reader.consume(consumed);
@@ -433,6 +451,9 @@ pub fn text(
             continue;
         }
         let probe = new_command && !last && !session.verbose && !expand_history;
+        let open_function = probe
+            && parser::opens_function(text)
+            && !(session.shopt.expand_aliases && session.aliases.0.is_some());
         let mut parse = |unit: &str, eof| {
             if eval_line.is_some() {
                 eval::parse(session, unit, eof, base_line)
@@ -440,7 +461,11 @@ pub fn text(
                 parser::session_source_at(unit, eof, session, base_line).map(eval::Program::Fresh)
             }
         };
-        let mut result = parse(text, last);
+        let mut result = if open_function {
+            Err(parser::Error::Incomplete("unfinished function definition"))
+        } else {
+            parse(text, last)
+        };
         if probe && matches!(result, Err(parser::Error::Incomplete(_))) {
             let limit = source
                 .len()
@@ -449,7 +474,7 @@ pub fn text(
                 text,
                 &source.as_bytes()[end..limit],
                 limit == source.len(),
-                |unit| parse(unit, false),
+                |size| parse(&source[start..end + size], false),
             ) {
                 Ok((program, consumed, extra_lines)) => {
                     end += consumed;

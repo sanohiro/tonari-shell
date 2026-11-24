@@ -275,11 +275,13 @@ case "$SUITE" in
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k test_eval
     rc="$RUNNER_TEMP/rc"
     mkdir -p "$rc"
+    : > "$rc/empty"
     # Same 94,826-byte Git completion source used in the original macOS measurement.
     curl --retry 3 -fsSL \
       https://raw.githubusercontent.com/git/git/v2.54.0/contrib/completion/git-completion.bash -o "$rc/git.bash"
     echo "56264a168d862c2a51305fe2a3450edf04590d8bafa42c2d061e6f992985fc0f  $rc/git.bash" | shasum -a 256 -c -
     printf '. "%s"\ndeclare -F __git_complete >/dev/null || exit 1\n' "$rc/git.bash" > "$rc/git"
+    printf '%s\n' 'for ((i=0; i<4000; i++)); do : ready; done' '[[ $i == 4000 ]] || exit 1' > "$rc/builtins"
     cat > "$rc/light" <<'RC'
 alias ll='ls -l'
 export PATH="$HOME/.local/bin:$PATH"
@@ -301,7 +303,7 @@ PYRC
     for name in nested quoted; do
       printf 'eval "$(<"%s")" || exit 1\n[[ $verified == loaded ]] || exit 1\n' "$rc/$name" > "$rc/eval-$name"
     done
-    for name in light git large eval-large eval-nested eval-quoted; do
+    for name in empty light git large eval-large eval-nested eval-quoted builtins; do
       run "rc-$name" python3 tools/bench_login.py "$current" --previous "$bin/baseline" --bash "$ref" --rcfile "$rc/$name" --runs 41
     done
     run eval python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 25 \
