@@ -4,6 +4,8 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shlex
+import socket
 import shutil
 import subprocess
 import tempfile
@@ -25,32 +27,58 @@ def floor_args(source, count):
     if delay and re.search(r"(?:^|[;&] *)wait(?: |$)", source):
         # Each of these scripts waits for its one sleep before starting the next iteration.
         return ["wait", str(count), delay.group(1)]
+    if delay and "disown" in source and "wait" not in source:
+        return ["overlap", str(count), delay.group(1), str(source.count("sleep "))]
+    if source.startswith("touch ") and "; touch " not in source:
+        setup = source.partition(";")[0]
+        return ["tool", str(count), *shlex.split(setup)]
+    exported = {
+        "declare -x x=one": ("x", "one"), "typeset -x x=one": ("x", "one"),
+        "set -a; x=value": ("x", "value"), "v='two words'; export v": ("v", "two words"),
+        "export v=yes; export -n v": ("v", ""), "v=outer; v=inner": ("v", "inner"),
+    }
+    script = re.fullmatch(r"(.+?)[; ]+(/bin/sh -c '[^']+')(?:; echo .+)?", source)
+    if script and script[1] in exported:
+        return ["exported", str(count), *exported[script[1]], *shlex.split(script[2])]
     cond = re.fullmatch(r'printf data >file; :; \[\[ (-[a-zA-Z]) ([^ ;]+) \]\]; printf %s "\$\?"; \[\[ \1 absent \]\]; printf %s "\$\?"', source)
     if cond:
         return ["file", str(count), *cond.groups()]
 
 
-def sample_floor(binary, args, cwd):
-    with subprocess.Popen([binary, *args], cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
+def sample_floor(binary, args, root, fixture):
+    cwd = root / "control-work"
+    if cwd.exists():
+        shutil.rmtree(cwd)
+    cwd.mkdir()
+    if fixture == "socket":
+        with socket.socket(socket.AF_UNIX) as sock:
+            sock.bind(str(cwd / "socket"))
+    expected = b""
+    if args[0] == "exported":
+        value = (args[3] or "unset").encode()
+        expected = (value + (b"\n" if args[-1].startswith("echo") else b"")) * int(args[1])
+    env = dict(PATH="/usr/bin:/bin", HOME=str(cwd), TMPDIR=str(cwd), LC_ALL="C", TERM="dumb")
+    with subprocess.Popen([binary, *args], cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
         if proc.stdout.readline() != b"__READY__\n":
             raise ValueError("control failed to start")
         start = time.perf_counter_ns()
         out = proc.communicate(b"\n")[0]
         elapsed = time.perf_counter_ns() - start
-        if proc.returncode or out:
+        if proc.returncode or out != expected:
             raise ValueError("control failed")
         return elapsed
 
 
-def compare(audits, row, count, runs, floor):
+def compare(audits, row, count, runs, floor, *, setup="", body=None):
     argv = row["argv"]
-    def run(shell, source):
-        return audits[shell].call(1, [*argv[:-1], source], fixture=row["fixture"], timing="started")
-    original = run("bash", argv[-1])
+    def run(shell, source, before=setup):
+        return audits[shell].call(1, [*argv[:-1], source], fixture=row["fixture"], timing="started", before_ready=before)
+    original = run("bash", argv[-1], "")
     if original.timeout or row["stdin"]:
         raise ValueError("missing reference")
     status = f"__TONARI_BENCH_STATUS_{original.code}__".encode()
-    head = f"for __tonari_bench_i in {{1..{count}}}; do\n:\n{argv[-1]}\n"
+    script = argv[-1] if body is None else body
+    head = f"for __tonari_bench_i in {{1..{count}}}; do\n:\n{script}\n"
     tail = "\ndone\nbuiltin printf __TONARI_BENCH_COMPLETE__"
     checked = head + """builtin printf '__TONARI_BENCH_STATUS_%d__' "$?" >&2""" + tail
     expected = original.out * count + END
@@ -69,7 +97,7 @@ def compare(audits, row, count, runs, floor):
     for i in range(runs + 1):
         for name in names[i % len(names):] + names[:i % len(names)]:
             if name == "direct":
-                ns = sample_floor(floor, native, audits["bash"].root / "work")
+                ns = sample_floor(floor, native, audits["bash"].root, row["fixture"])
             else:
                 o = run(name, head + tail)
                 if not verify(o, b""):
@@ -109,6 +137,21 @@ def workloads(lane, inventory):
     yield from extra.values()
 
 
+def isolate(source):
+    if source.startswith("unset v; (printf ") and source.count("(printf ") == 3 and "?" not in re.sub(r'\$\?', "", source):
+        # Each stage sets v anew. Verify even the grouped variant against the
+        # original Bash witness before timing its expansions.
+        body = re.sub(r"\(printf ([^()]+)\)", r"{ printf \1; }", source)
+        if body.count("{ printf ") == 3:
+            return "", body
+    if source.startswith("touch ") or source.startswith("printf data >file;") or re.match(r"^printf '[^']+' > input; exec ", source):
+        setup, _, body = source.partition(";")
+        while body.lstrip().startswith(("touch ", "chmod ")):
+            cmd, _, body = body.partition(";")
+            setup += ";" + cmd
+        return setup, body
+
+
 def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--lane", required=True)
@@ -117,12 +160,13 @@ def main():
     cli.add_argument("--runs", type=int, default=9)
     cli.add_argument("--only", nargs="*")
     cli.add_argument("--inventory", type=Path)
+    cli.add_argument("--components", action="store_true")
     args = cli.parse_args()
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         audits = {}
         hashes = {}
-        for name in ("bash", "baseline", "current", "opt-3", "opt-s"):
+        for name in (("bash", "baseline", "current") if args.components else ("bash", "baseline", "current", "opt-3", "opt-s")):
             original = args.bash if name == "bash" else args.bin / name
             staged = root / name / "bash"
             staged.parent.mkdir()
@@ -138,6 +182,22 @@ def main():
                 continue
             n = config["iterations"]
             result = {"id": row["id"]}
+            if args.components:
+                source = row["argv"][-1]
+                native = floor_args(source, n)
+                part = isolate(source)
+                if native and native[0] in ("overlap", "tool", "exported", "file", "groups"):
+                    result["fixed"] = compare(audits, row, n, args.runs, floor)
+                if part:
+                    setup, body = part
+                    try:
+                        result["component"] = compare(audits, row, 128, 9, None, setup=setup, body=body)
+                        result.update(setup=setup, body=body)
+                    except ValueError as error:
+                        result["component"] = {"error": str(error)}
+                if len(result) > 1:
+                    print(json.dumps(result), flush=True)
+                continue
             if args.inventory:
                 result["workload"] = row
             for name, count, runs in [("fixed", n, args.runs), ("extended", 1024, 5)]:

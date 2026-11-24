@@ -28,8 +28,9 @@ if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; t
   distro=Debian; [[ $SUITE == *-ubuntu ]] && distro=Ubuntu
   arch=x64; [[ $RUNNER_ARCH == ARM64 ]] && arch=arm64
   if [[ $SUITE == budget* ]]; then
+    extra=(--runs 9); [[ $SUITE == budget-parts* ]] && extra+=(--components)
     "${run[@]}" -v "$bin:/candidates:ro" --entrypoint python3 tonari-audit tests/compat/replay_budget.py \
-      --lane "$distro$arch" --bash /bin/bash --bin /candidates > "$out/replay.jsonl"
+      --lane "$distro$arch" --bash /bin/bash --bin /candidates "${extra[@]}" > "$out/replay.jsonl"
     exit
   fi
   "${run[@]}" --entrypoint python3 tonari-audit tests/shell.py /tonari -q
@@ -40,7 +41,7 @@ if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; t
   exit
 fi
 if [[ $RUNNER_OS == macOS ]]; then
-  if [[ $SUITE == inventory || $SUITE == foreground || $SUITE == budget ]]; then
+  if [[ $SUITE == inventory || $SUITE == foreground || $SUITE == budget* ]]; then
     gnu="$RUNNER_TEMP/gnu"
     mkdir -p "$gnu"
     download_bash "$version" "$digest" "$RUNNER_TEMP/bash.tar.gz"
@@ -51,8 +52,9 @@ if [[ $RUNNER_OS == macOS ]]; then
     if [[ ! -x /opt/homebrew/bin/bash ]]; then brew install bash; fi
     ref=/opt/homebrew/bin/bash
   fi
-  if [[ $SUITE == budget ]]; then
-    python3 tests/compat/replay_budget.py --lane macOSarm64 --bash "$ref" --bin "$bin" > "$out/replay.jsonl"
+  if [[ $SUITE == budget* ]]; then
+    extra=(--runs 9); [[ $SUITE == budget-parts* ]] && extra+=(--components)
+    python3 tests/compat/replay_budget.py --lane macOSarm64 --bash "$ref" --bin "$bin" "${extra[@]}" > "$out/replay.jsonl"
     exit
   fi
   if [[ $SUITE == inventory ]]; then

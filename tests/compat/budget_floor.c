@@ -16,6 +16,10 @@ int main(int argc, char **argv) {
     int count = atoi(argv[2]);
     if (count < 1) return 2;
     if (puts("__READY__") < 0 || fflush(stdout) != 0 || getchar() == EOF) return 1;
+    int overlapping = 0;
+    if (!strcmp(argv[1], "exported") && argc > 5) {
+        if (argv[4][0] ? setenv(argv[3], argv[4], 1) : unsetenv(argv[3])) return 1;
+    }
     for (int i = 0; i < count; ++i) {
         if (!strcmp(argv[1], "groups")) {
             for (int j = 0; j < 3; ++j) {
@@ -47,7 +51,26 @@ int main(int argc, char **argv) {
             if (posix_spawnp(&child, "sleep", NULL, NULL, args, environ)) return 1;
             int status;
             if (waitpid(child, &status, 0) != child || status != 0) return 1;
+        } else if (!strcmp(argv[1], "overlap") && argc == 5) {
+            int children = atoi(argv[4]);
+            for (int j = 0; j < children; ++j) {
+                pid_t child;
+                char *const args[] = {"sleep", argv[3], NULL};
+                if (posix_spawnp(&child, "sleep", NULL, NULL, args, environ)) return 1;
+                ++overlapping;
+            }
+        } else if ((!strcmp(argv[1], "tool") && argc >= 4) ||
+                   (!strcmp(argv[1], "exported") && argc >= 6)) {
+            char **args = argv + (!strcmp(argv[1], "tool") ? 3 : 5);
+            pid_t child;
+            int status;
+            if (posix_spawnp(&child, args[0], NULL, NULL, args, environ) ||
+                waitpid(child, &status, 0) != child || status != 0) return 1;
         } else return 2;
+    }
+    while (overlapping-- > 0) {
+        int status;
+        if (wait(&status) < 0 || status != 0) return 1;
     }
     return 0;
 }

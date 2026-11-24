@@ -44,7 +44,7 @@ class Audit:
         self.root = root
         self.rows = {}
 
-    def call(self, index, args, stdin="", fixture=False, timing=None):
+    def call(self, index, args, stdin="", fixture=False, timing=None, before_ready=""):
         cwd = self.root / "work"
         if cwd.exists():
             shutil.rmtree(cwd)
@@ -62,7 +62,8 @@ class Audit:
         # Use a fresh process group. A timed-out pipeline must not keep the
         # harness's output pipes open via a descendant.
         if timing == "started":
-            args = [*args[:-1], "printf '__READY__\\n'; IFS= read -r _tonari_gate\n" + args[-1]]
+            prefix = before_ready + "\n" if before_ready else ""
+            args = [*args[:-1], prefix + "printf '__READY__\\n'; IFS= read -r _tonari_gate\n" + args[-1]]
             stdin = "\n" + stdin
         started = time.perf_counter_ns()
         proc = subprocess.Popen(["bash", *args], executable=path, cwd=cwd, env=env,
