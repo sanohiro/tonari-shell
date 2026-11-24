@@ -58,15 +58,19 @@ Insert は通常入力と上書きの切り替え、Alt-W は選択範囲のコ�
 
 ## Interactive Tab and terminal ownership / 対話補完と端末入力
 
+The first Tab inserts the common prefix. A second Tab with multiple candidates opens a case-sensitive substring filter. Typing or pasting edits the filter. ↑/↓ and Shift-Tab/Tab move through its results, Enter inserts the selected word using the completion's quoting and spacing rules, and Esc or Ctrl-G restores the draft and cursor. Alt-? still prints all possible completions. The picker keeps the order supplied by an explicit Bash completion, including `complete -o nosort`.
+
+最初の Tab は共通部分を補います。候補が複数あれば次の Tab で一覧を開き、日本語入力や貼り付けでも部分一致で絞れます。↑↓ または Shift-Tab と Tab で移動し、Enter で候補を入力行に挿入します。Esc・Ctrl-G で編集中の行とカーソルに戻り、Alt-? で全候補を出力できます。
+
 Tonari enables Bash’s `progcomp_alias` in interactive shells. With `alias g='real sub'`, the completion for `real` sees `COMP_LINE='real sub ma'` when the user types `g ma<Tab>`. The editor keeps `g` on screen. A definition for `g` wins. Use `shopt -u progcomp_alias` to disable alias lookup. Bash 5.2 produces the same callback arguments with the option enabled.
 
 File and command completion can echo newly typed text and Backspace while scanning. The editor applies Tab first and then the queued edits. A Bash completion function can itself read stdin or launch an interactive selector. Tonari gives those callbacks their usual terminal input. To let the editor receive typeahead during a callback that never reads or manages the terminal, register it with `complete -o typeahead -F _pick demo`. For a shared Bash rc, use `complete -o typeahead -F _pick demo 2>/dev/null || complete -F _pick demo`. A slow helper still has to finish before the command line can be accepted. [PTY witnesses](../tests/shell.py)
 
 対話時の `progcomp_alias` は `shopt -u progcomp_alias` で解除できます。エイリアス自身の補完定義があればそちらを優先します。ファイルやコマンドを探している間も文字入力と Backspace を先行表示し、確定時には Tab → 後続キーの順に反映します。外部の選択 UI や `read` を使う Bash 補完には端末を渡します。端末を使わない補完に限り、登録時の `-o typeahead` で待機中の入力表示を有効にできます。
 
-The default argument completer tries exact paths, then abbreviated directory components, then recent arguments. After an option followed by an empty word, a value previously used for that option takes priority. History candidates come from complete, successful journal records in the last 256 KiB for the current directory or Git worktree. A path from another command must still exist. Explicit completion definitions keep their own results, including empty results, unless they request the default fallback. The abbreviated path search stops if a level would retain more than 128 directories. Shell expansions in saved commands are never evaluated.
+The default argument completer tries exact paths, then abbreviated directory components, then recent arguments. After an option followed by an empty word, a value previously used for that option takes priority. History candidates come from complete, successful journal records in the last 256 KiB for the current directory or Git worktree. Among candidates at the highest matching context, one successful record counts as one use per argument. Counts sort descending, and ties follow most recent use. A path from another command must still exist. Explicit completion definitions keep their own results, including empty results, unless they request the default fallback. The abbreviated path search stops if a level would retain more than 128 directories. Shell expansions in saved commands are never evaluated.
 
-引数の既定の補完は通常のパス、階層ごとの前方一致、最近の引数の順に探します。オプション直後の空欄ではそのオプションの過去の値を先に出します。対象は履歴末尾 256 KiB にある終了コード 0 の完全な行のうち、現在のディレクトリか同じ Git ワークツリーに属するものです。別コマンドから拾うパスは実在を確認します。保存したコマンド内の式は実行しません。
+引数の既定の補完は通常のパス、階層ごとの前方一致、最近の引数の順に探します。オプション直後の空欄ではそのオプションの過去の値を先に出します。対象は履歴末尾 256 KiB にある終了コード 0 の完全な行のうち、現在のディレクトリか同じ Git ワークツリーに属するものです。最もよく一致した文脈の候補を、引数が登場した成功行の数が多い順に並べ、同数なら最近のものを優先します。別コマンドから拾うパスは実在を確認します。保存したコマンド内の式は実行しません。
 
 ## Case-insensitive pathname expansion / 大小文字を区別しないファイル名展開
 

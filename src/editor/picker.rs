@@ -28,8 +28,14 @@ fn label(out: &mut String, text: &str, mut cells: usize) -> usize {
     start - cells
 }
 
-fn draw(screen: &mut Screen, choices: &[String], hits: &[usize], selected: usize, query: &str) {
-    let rows = screen.height.saturating_sub(1).clamp(1, 8);
+fn draw(
+    screen: &mut Screen,
+    choices: &[String],
+    hits: &[usize],
+    selected: usize,
+    query: &str,
+    rows: usize,
+) {
     let offset = selected / rows * rows;
     let out = &mut screen.output;
     out.clear();
@@ -88,6 +94,7 @@ enum Key {
     Accept,
     Erase,
     Cancel,
+    Ignore,
 }
 
 fn read_key(first: u8, keys: &mut Keys, session: &Session) -> io::Result<Key> {
@@ -99,28 +106,47 @@ fn read_key(first: u8, keys: &mut Keys, session: &Session) -> io::Result<Key> {
         8 | 127 => Key::Erase,
         27 => {
             // Disambiguate a lone Escape from an arrow or bracketed paste.
-            let mut sequence = Vec::new();
+            let timeout = session.bindings.timeout();
+            if keys.queued.is_empty() && !ready(0, timeout.min(50)) {
+                return Ok(Key::Cancel);
+            }
+            let Some(introducer) = keys.get()? else {
+                return Ok(Key::Cancel);
+            };
+            if !matches!(introducer, b'[' | b'O') {
+                keys.queued.push_front(introducer);
+                return Ok(Key::Cancel);
+            }
+            let mut params = [0u8; 3];
+            let mut len = 0;
             loop {
-                if keys.queued.is_empty() && !ready(0, session.bindings.timeout().min(50)) {
-                    break;
+                if keys.queued.is_empty() && !ready(0, timeout) {
+                    return Ok(Key::Ignore);
                 }
-                let Some(b) = keys.get()? else { break };
-                sequence.push(b);
-                match sequence.as_slice() {
-                    b"[A" | b"OA" | b"[Z" => return Ok(Key::Up),
-                    b"[B" | b"OB" => return Ok(Key::Down),
-                    b"[200~" => return Ok(Key::Paste),
-                    b"O" | b"[" | b"[2" | b"[20" | b"[200" => {}
-                    _ => break,
+                let Some(b) = keys.get()? else {
+                    return Ok(Key::Cancel);
+                };
+                match b {
+                    0x20..=0x3f => {
+                        if let Some(slot) = params.get_mut(len) {
+                            *slot = b;
+                        }
+                        len += 1;
+                    }
+                    0x40..=0x7e => {
+                        return Ok(match (b, len) {
+                            (b'A' | b'Z', 0) => Key::Up,
+                            (b'B', 0) => Key::Down,
+                            (b'~', 3) if introducer == b'[' && &params == b"200" => Key::Paste,
+                            _ => Key::Ignore,
+                        });
+                    }
+                    _ => {
+                        keys.queued.push_front(b);
+                        return Ok(Key::Ignore);
+                    }
                 }
             }
-            // Esc followed immediately by ordinary text cancels, then types it.
-            if !sequence.starts_with(b"[") && !sequence.starts_with(b"O") {
-                for b in sequence.into_iter().rev() {
-                    keys.queued.push_front(b);
-                }
-            }
-            Key::Cancel
         }
         32.. => Key::Text,
         _ => {
@@ -138,43 +164,66 @@ pub(super) fn choose(
 ) -> io::Result<Option<usize>> {
     let mut query = String::new();
     let mut inserted = String::new();
-    let mut hits: Vec<usize> = (0..choices.len()).collect();
-    let mut selected = 0;
+    let mut hits = Vec::new();
+    let mut scanned = 0;
+    let mut selected: usize = 0;
+    let rows = screen.height.saturating_sub(1).clamp(1, 8);
     loop {
-        draw(screen, choices, &hits, selected, &query);
+        // Preserve source order, and resume scanning only when the user
+        // navigates past the matches already found for this query.
+        let wanted = (selected / rows + 1) * rows;
+        if hits.len() < wanted && scanned < choices.len() {
+            if query.is_empty() {
+                let end = wanted.min(choices.len());
+                hits.extend(scanned..end);
+                scanned = end;
+            } else {
+                let finder = memchr::memmem::Finder::new(query.as_bytes());
+                while scanned < choices.len() && hits.len() < wanted {
+                    let index = scanned;
+                    scanned += 1;
+                    if finder.find(choices[index].as_bytes()).is_some() {
+                        hits.push(index);
+                    }
+                }
+            }
+        }
+        selected = selected.min(hits.len().saturating_sub(1));
+        draw(screen, choices, &hits, selected, &query, rows);
         io::stderr().write_all(screen.output.as_bytes())?;
         let Some(first) = keys.get()? else {
             return Ok(None);
         };
         match read_key(first, keys, session)? {
+            Key::Text => {
+                keys.insert_burst(first, session, &mut inserted)?;
+                query.push_str(&inserted);
+            }
+            Key::Paste => query.push_str(&keys.paste(|_| Ok(()))?),
+            Key::Erase => {
+                query.pop();
+            }
             Key::Cancel => return Ok(None),
             Key::Accept => {
                 if let Some(&index) = hits.get(selected) {
                     return Ok(Some(index));
                 }
+                continue;
             }
             Key::Down => {
-                selected = (selected + 1).min(hits.len().saturating_sub(1));
+                if selected + 1 < hits.len() || scanned < choices.len() {
+                    selected += 1;
+                }
+                continue;
             }
             Key::Up => {
                 selected = selected.saturating_sub(1);
+                continue;
             }
-            key => {
-                match key {
-                    Key::Text => {
-                        keys.insert_burst(first, session, &mut inserted)?;
-                        query.push_str(&inserted);
-                    }
-                    Key::Paste => query.push_str(&keys.paste(|_| Ok(()))?),
-                    Key::Erase => {
-                        query.pop();
-                    }
-                    _ => unreachable!(),
-                }
-                selected = 0;
-                hits.clear();
-                hits.extend((0..choices.len()).filter(|&i| choices[i].contains(&query)));
-            }
+            Key::Ignore => continue,
         }
+        selected = 0;
+        scanned = 0;
+        hits.clear();
     }
 }

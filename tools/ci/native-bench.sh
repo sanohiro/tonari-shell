@@ -124,6 +124,10 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
+  picker)
+    REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k picker -k completion -k abbreviated_paths
+    run picker python3 tools/bench_picker.py "$bin/baseline" "$current" --runs 31
+    run listing python3 tools/bench_completion.py "$current" --bash "$ref" --listing --runs 21 ;;
   parity-mixed)
     shells=("$current" "$bin/baseline" "$ref")
     history_case oldest "${shells[@]}" --mixed-history --case Ctrl-R --prompt-time --runs 41

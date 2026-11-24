@@ -2190,11 +2190,41 @@ printf '%s\n' "$marker"
         send(b">literal\r", b"\x1b[?2004h")
         self.assertEqual((self.cwd / "literal").read_text(), "pick-dollar$(bad)")
 
+    def test_picker_pages_and_restores_midline_cursor(self):
+        for i in range(24):
+            (self.cwd / f"paper-{i:02d}").touch()
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"printf '%s' paper- >chosen" + b"\x02" * 8 + b"\t\t")
+        self.read_until(fd, b"> paper-00")
+        os.write(fd, b"paper-1" + b"\t" * 8)
+        self.read_until(fd, b"> paper-18")
+        os.write(fd, b"\x1b[Z")
+        self.read_until(fd, b"> paper-17")
+        # Split the down arrow between reads and send an unbound CSI sequence.
+        os.write(fd, b"\x1b[")
+        time.sleep(0.02)
+        os.write(fd, b"B\x1b[3~\r")
+        self.read_until(fd, b"paper-18 >chosen")
+        self.assertFalse((self.cwd / "chosen").exists())
+        os.write(fd, b"X\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "chosen").read_text(), "paper-18X")
+        os.write(fd, b"printf '%s' paper- >cancelled" + b"\x02" * 11 + b"\t\t")
+        self.read_until(fd, b"> paper-00")
+        os.write(fd, b"19")
+        self.read_until(fd, b"> paper-19")
+        # Escape alone restores the draft; a later key goes at its original cursor.
+        os.write(fd, b"\x1b")
+        self.read_until(fd, b"paper- >cancelled")
+        os.write(fd, b"end\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "cancelled").read_text(), "paper-end")
+
     def test_picker_ranks_history_within_the_same_context(self):
         journal = self.cwd / ".local/state/tonari/history"
         journal.parent.mkdir(parents=True)
         rows = [(0, "tool --model cedar")] * 4 + [(0, "tool --model birch")] * 2
-        rows += [(0, "tool --model alder"), (0, "tool --model birch-2"), (1, "tool --model failed")]
+        rows += [(0, "tool --model alder --model alder --model alder"), (0, "tool --model birch-2"), (1, "tool --model failed")]
         journal.write_text("".join(f"1\t1\t{code}\t{self.cwd}\t{cmd}\n" for code, cmd in rows))
         fd = self.terminal_session(editing=True)
         os.write(fd, b"tool --model \t\t")

@@ -1113,7 +1113,7 @@ pub fn line(
                         last_tab = false;
                         let selected =
                             picker::choose(&result.choices, &mut keys, &mut screen, session);
-                        screen.draw(prompt, &text, cursor, "")?;
+                        replaying = false;
                         match selected {
                             Ok(Some(index)) => {
                                 let word = result.select(index);
@@ -1122,6 +1122,7 @@ pub fn line(
                             }
                             Ok(None) => {}
                             Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                                screen.draw(prompt, &text, cursor, "")?;
                                 io::stderr().write_all(b"\r\n")?;
                                 return Ok(Input::Cancel);
                             }

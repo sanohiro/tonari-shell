@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 fn project(dir: &Path) -> Option<&Path> {
     dir.ancestors().find(|p| p.join(".git").exists())
@@ -69,9 +69,15 @@ pub(crate) fn candidates(
     };
     let logical = session.get("PWD").unwrap_or_default();
     let root = project(&cwd);
-    let mut directories = HashMap::new();
-    let mut best = 0;
-    let mut scores = HashMap::new();
+    // Group identical journal commands before parsing words and probing paths.
+    // The first occurrence in the reverse scan sets the recency tie-break.
+    let mut groups = Vec::new();
+    let mut positions = HashMap::new();
+    let needle = if prefix.is_empty() {
+        option.unwrap_or("")
+    } else {
+        prefix
+    };
     for (i, row) in bytes.rsplit(|&b| b == b'\n').enumerate() {
         if i % 64 == 0 {
             crate::editor::preview::poll();
@@ -88,13 +94,22 @@ pub(crate) fn candidates(
         };
         // An ordinary literal can be rejected before allocation, path lookups
         // and parsing. Quotes or escapes can join pieces of a matching word.
-        let needle = if prefix.is_empty() {
-            option.unwrap_or("")
-        } else {
-            prefix
-        };
         if !raw_line.contains(needle) && !raw_line.contains(['\\', '\'', '"']) {
             continue;
+        }
+        let index = *positions.entry((raw_dir, raw_line)).or_insert_with(|| {
+            groups.push((raw_dir, raw_line, 0usize));
+            groups.len() - 1
+        });
+        groups[index].2 += 1;
+    }
+    let mut directories = HashMap::new();
+    let mut path_kinds = HashMap::new();
+    let mut best = 0;
+    let mut scores = HashMap::new();
+    for (i, (raw_dir, raw_line, occurrences)) in groups.into_iter().enumerate() {
+        if i % 64 == 0 {
+            crate::editor::preview::poll();
         }
         let Some(dir) = decode(raw_dir) else { continue };
         let dir = Path::new(&dir);
@@ -144,46 +159,53 @@ pub(crate) fn candidates(
                         continue;
                     }
                     let path = Path::new(arg);
-                    let absolute = dir.join(path);
-                    if dirs && !absolute.is_dir() {
-                        continue;
-                    }
-                    let mut value = PathBuf::new();
                     let rank =
                         if same_option && (same_dir || !arg.contains('/') || path.is_absolute()) {
                             4
+                        } else if program == command && same_dir {
+                            3
+                        } else if same_dir {
+                            2
                         } else {
-                            if !absolute.exists() {
-                                continue;
-                            }
-                            if !same_dir && !path.is_absolute() {
-                                value = absolute.strip_prefix(&cwd).unwrap_or(&absolute).to_owned();
-                            }
-                            if program == command && same_dir {
-                                3
-                            } else if same_dir {
-                                2
-                            } else {
-                                1
-                            }
+                            1
                         };
                     if rank < best {
+                        continue;
+                    }
+                    let absolute = dir.join(path);
+                    let is_dir = if let Some(kind) = path_kinds.get(&absolute) {
+                        *kind
+                    } else {
+                        let kind = absolute.metadata().ok().map(|m| m.is_dir());
+                        path_kinds.insert(absolute.clone(), kind);
+                        kind
+                    };
+                    if (dirs && is_dir != Some(true)) || (rank < 4 && is_dir.is_none()) {
                         continue;
                     }
                     if rank > best {
                         scores.clear();
                         best = rank;
                     }
-                    let value = value.to_str().filter(|s| !s.is_empty()).unwrap_or(arg);
-                    let mut value = value.to_owned();
-                    if absolute.is_dir() && !value.ends_with('/') {
+                    let mut value = if rank < 4 && !same_dir && !path.is_absolute() {
+                        absolute
+                            .strip_prefix(&cwd)
+                            .unwrap_or(&absolute)
+                            .to_str()
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or(arg)
+                            .to_owned()
+                    } else {
+                        arg.to_owned()
+                    };
+                    if is_dir == Some(true) && !value.ends_with('/') {
                         value.push('/');
                     }
                     let order = scores.len();
                     let (count, _, last_row) =
                         scores.entry(value).or_insert((0usize, order, usize::MAX));
                     if *last_row != i {
-                        *count += 1;
+                        *count += occurrences;
                         *last_row = i;
                     }
                 }

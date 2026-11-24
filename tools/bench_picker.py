@@ -35,9 +35,12 @@ def sample(shell, home, kind, filename, matched):
         else:
             line = b"save --model "
             os.write(fd, line)
-            read_until(fd, PROMPT + line)
-            timings["History option, first Tab"] = timed(fd, b"\t", PROMPT + line)
-            timings["History option, open choices"] = timed(fd, b"\t", b"  amber")
+            # The editor may append a history hint after the first echo.
+            # Wait for that settled frame before timing the next key.
+            ready = PROMPT + line + b"\x1b[2mamber"
+            read_until(fd, ready)
+            timings[kind + ", first Tab"] = timed(fd, b"\t", ready)
+            timings[kind + ", open choices"] = timed(fd, b"\t", b"  amber")
             expected = b"violet"
         os.write(fd, b"\r\r")
         read_until(fd, b"\x1b[?2004h")
@@ -67,16 +70,21 @@ def main():
         journal = home / ".local/state/tonari/history"
         journal.parent.mkdir(parents=True)
         # Rebuild between trials because accepting the measured command appends a record.
-        records = "".join(f"1\t1\t0\t{home}\tsave --model {value}\n" for value in
-                          (["violet", "amber", "violet", "green"] * 500 + ["amber"]))
+        values = ["violet", "amber", "violet", "green"] * 500 + ["amber"]
+        rows = [f"1\t1\t0\t{home}\tsave --model {value}" for value in values]
+        journals = {
+            "files": "",
+            "Repeated history": "".join(row + "\n" for row in rows),
+            "Distinct history": "".join(f"{row} --tag={i}\n" for i, row in enumerate(rows)),
+        }
         filename = f"{args.files - 1:05}".encode()
         matched = b"files/item-" + filename + b"-report"
-        for kind in ("files", "history"):
+        for kind, contents in journals.items():
             times = defaultdict(lambda: defaultdict(list))
             for i in range(args.runs + 3):
                 rotated = shells[i % len(shells):] + shells[:i % len(shells)]
                 for shell in rotated:
-                    journal.write_text(records if kind == "history" else "")
+                    journal.write_text(contents)
                     observed = sample(shell, home, kind, filename, matched)
                     if i >= 3:
                         for key, value in observed.items():
