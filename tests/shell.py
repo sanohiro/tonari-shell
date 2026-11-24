@@ -42,6 +42,10 @@ class ShellTests(unittest.TestCase):
                 return (TONARI,)
         return (BASH, TONARI)
 
+    def bash_before_53(self):
+        version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"').stdout
+        return tuple(map(int, version.split(b"."))) < (5, 3)
+
     def compare(self, source, code, stdout=b"", minimum=0):
         for shell in self.shells_for(minimum):
             with self.subTest(shell=shell, source=source):
@@ -758,8 +762,13 @@ show
         for ending in ("", "\n"):
             self.compare("eval " + shlex.quote("if true; then\n  false; fi" + ending), 1)
         self.compare("eval " + shlex.quote("f() {\n echo seen\n}\nf\nif )"), 2, b"seen\n")
-        self.compare("eval " + shlex.quote("# comment\n{\n echo $LINENO\n}\necho $LINENO"),
-                     0, b"7\n9\n")
+        source = "eval " + shlex.quote("# comment\n{\n echo $LINENO\n}\necho $LINENO")
+        for shell in self.shells_for():
+            # Bash 5.2 counts newlines in the quoted argument twice. Tonari
+            # and Bash 5.3 start at the line containing the eval invocation.
+            expected = b"7\n9\n" if shell == BASH and self.bash_before_53() else b"3\n5\n"
+            p = self.command(shell, source)
+            self.assertEqual((p.returncode, p.stdout, p.stderr), (0, expected, b""))
 
     def test_eval_large_profile_preserves_command_boundaries(self):
         # Read the text as an rcfile generator would. The actual function close
@@ -850,9 +859,10 @@ eval --help >/dev/null; echo "$?"
                 path.write_text(source)
                 self.compare(". ./tail", 0, literal)
                 for shell in self.shells_for():
+                    expected = b"a\n" if shell == BASH and self.bash_before_53() else literal
                     for argv, data in (([shell, path], None), ([shell], source.encode())):
                         p = subprocess.run(argv, input=data, capture_output=True, env=self.env, cwd=self.cwd)
-                        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, b"a\n", b""))
+                        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, expected, b""))
 
     def test_eval_reads_complete_compounds_with_quoted_terminators(self):
         bodies = ["printf '%s\\n' 'fi\ndone\nesac\n}'", "cat <<'END'\nfi\ndone\nesac\n}\nEND"]

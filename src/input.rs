@@ -304,11 +304,6 @@ fn run(
         if n == 0 && input.is_empty() {
             break;
         }
-        // Bash's file/stdin reader supplies a final physical newline. Sourced
-        // files and eval use string input and preserve a bare final backslash.
-        if n == 0 && session.source_depth == 0 && input.ends_with(b"\\") {
-            input.push(b'\n');
-        }
         if let Some(hint) = &mut here_doc {
             let Ok(line) = std::str::from_utf8(&input[line_start..]) else {
                 return error("expected UTF-8 command text", 2);

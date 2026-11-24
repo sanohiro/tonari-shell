@@ -26,9 +26,11 @@ pub(crate) fn builtin(session: &mut Session, args: &[String], status: u8) -> Flo
             &joined
         }
     };
-    let line = session.current_command.as_ref().map_or(1, |location| {
-        location.line + memchr::memchr_iter(b'\n', location.text().as_bytes()).count()
-    });
+    // Bash 5.3 uses the calling line even when a quoted argument spans lines.
+    let line = session
+        .current_command
+        .as_ref()
+        .map_or(1, |location| location.line);
     super::text(session, source, status, false, false, Some(line))
 }
 
