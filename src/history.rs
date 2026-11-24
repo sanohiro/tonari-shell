@@ -450,7 +450,7 @@ impl History {
         mut skip: usize,
         waiting: &dyn Fn() -> bool,
     ) -> Result<Option<String>, ()> {
-        const BLOCK: usize = 128 * 1024;
+        const BLOCK: usize = 512 * 1024;
         let path = file(session).ok_or(())?;
         let journal = OpenOptions::new()
             .read(true)
@@ -781,7 +781,7 @@ mod tests {
         session.assign("HISTFILESIZE", "100000");
         let path = file(&session).unwrap();
         let mut rows = String::from("1\t1\t0\t/hit\thit oldest\n");
-        for _ in 0..9000 {
+        for _ in 0..42000 {
             rows.push_str("1\t1\t0\t/hit\tpadding\n");
         }
         rows.push_str("1\t1\t0\t/hit\tcmd hit hit\\n雪\n1\t1\t0\t/hit\tfinal\\tword\n");
