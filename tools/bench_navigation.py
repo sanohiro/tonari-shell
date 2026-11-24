@@ -27,14 +27,8 @@ def history(shell, home, bash):
         read_until(fd, b"!")
         times = [key(fd, UP, b"LAST"), key(fd, UP, b"FIR"),
                  key(fd, DOWN, b"LA"), key(fd, UP, b"FIR")]
-        os.write(fd, b'\r')
-        read_until(fd, PROMPT)
-        os.write(fd, b'printf %s "$v" > result\r')
-        read_until(fd, b"\x1b[?2004h")
-        result = home / "result"
-        if result.read_bytes() != b"tokenFIRST":
-            raise ValueError(f"{shell}: wrong recalled command")
-        result.unlink()
+        os.write(fd, b'\rprintf "<result:%s>\\n" "$v"\r')
+        read_until(fd, b"<result:tokenFIRST>\r\n")
         return dict(zip(("Recent match", "Distant match", "Forward revisit", "Backward revisit"), times))
 
 

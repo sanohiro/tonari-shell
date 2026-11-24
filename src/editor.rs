@@ -214,7 +214,16 @@ impl Keys {
             if let Some(action) = exact {
                 best = Some((seq.len(), action));
             }
-            if !longer || self.queued.is_empty() && !ready(0, session.bindings.timeout()) {
+            if !longer {
+                break;
+            }
+            // Most terminals send a complete escape sequence in one write.
+            // Consume only its next byte, preserving typeahead for foreground jobs.
+            if let Some(key) = self.immediate() {
+                seq.push(key);
+                continue;
+            }
+            if !ready(0, session.bindings.timeout()) {
                 break;
             }
             let Some(key) = self.get()? else { break };

@@ -2634,7 +2634,7 @@ f; printf 'END\0'; printf '%s\0' names/*'''
         self.read_until(fd, b"[three]> ")
         os.write(fd, left)
         self.read_until(fd, b"[logical]> ")
-        os.write(fd, left)
+        os.write(fd, b"\x1bb")
         self.read_until(fd, ("[" + first + "]> ").encode())
         os.write(fd, right)
         self.read_until(fd, b"[logical]> ")
@@ -2655,7 +2655,7 @@ f; printf 'END\0'; printf '%s\0' names/*'''
         self.read_until(fd, b"[four]> ")
         os.write(fd, right + b'printf "<%s>\\n" "${PWD##*/}"\r')
         self.read_until(fd, b"<four>\r\n")
-        self.assertFalse((self.cwd / "BAD").exists())
+        self.assertFalse(list(self.cwd.rglob("BAD")))
         hooks = [Path(s).name for s in (self.cwd / "hooks").read_text().splitlines()]
         self.assertEqual(hooks[:8], ["three", "logical", first, "logical", "logical", "logical", "three", first])
 
