@@ -2589,6 +2589,71 @@ f; printf 'END\0'; printf '%s\0' names/*'''
         os.write(fd, b"\x12" + target)
         self.read_until(fd, b"': echo second " + target)
 
+    def edited_prompt_after(self, fd, output):
+        data = self.read_until(fd, output)
+        if b"\x1b[?2004h" not in data.partition(output)[2]:
+            self.read_until(fd, b"\x1b[?2004h")
+
+    def test_last_arg_repeats_and_preserves_quoting(self):
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                seed = ["cmd escaped\\ space", "cmd '東京 の🌱.txt'", "cmd $(printf nested)"]
+                setup = "show(){ printf '<%s>\\n' \"$@\"; }; " + "; ".join(
+                    "history -s " + shlex.quote(line) for line in seed)
+                os.write(fd, (setup + "; echo rea''dy\r").encode())
+                self.edited_prompt_after(fd, b"ready\r\n")
+                os.write(fd, b"show zz\x02\x02\x1b.\x1b.zz\r")
+                self.edited_prompt_after(fd, "<東京 の🌱.txtzzzz>\r\n".encode())
+                os.write(fd, b"history -s 'cmd escaped\\ space'; echo rea''dy\r")
+                self.edited_prompt_after(fd, b"ready\r\n")
+                os.write(fd, b"show \x1b_\r")
+                self.edited_prompt_after(fd, b"<escaped space>\r\n")
+                os.write(fd, b"history -s 'cmd $(printf nested)'; echo rea''dy\r")
+                self.edited_prompt_after(fd, b"ready\r\n")
+                os.write(fd, b"show \x1b.\r")
+                self.edited_prompt_after(fd, b"<nested>\r\n")
+
+    def test_undo_paste_delete_and_last_arg_against_bash(self):
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                os.write(fd, b"show(){ printf '<%s>\\n' \"$1\"; }; history -s 'cmd alpha'; echo rea''dy\r")
+                self.edited_prompt_after(fd, b"ready\r\n")
+                os.write(fd, b"show \x1b.\x1fplain\r")
+                self.edited_prompt_after(fd, b"<plain>\r\n")
+                os.write(fd, b"show AB\x02\x1b[200~" + "日本🌱\nline".encode() + b"\x1b[201~\x1fX\r")
+                self.edited_prompt_after(fd, b"<AXB>\r\n")
+                os.write(fd, b"show final\x7f\x18\x15\r")
+                self.edited_prompt_after(fd, b"<final>\r\n")
+
+    def test_undo_suggestion_and_completion(self):
+        (self.cwd / "only-file").touch()
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"show(){ printf '<%s>\\n' \"$1\"; }; history -s 'show historical'; echo rea''dy\r")
+        self.edited_prompt_after(fd, b"ready\r\n")
+        for accept in (b"\x1b[C", b"\x1bf"):
+            os.write(fd, b"show hist")
+            self.read_until(fd, b"\x1b[2morical")
+            os.write(fd, accept + b"\x1fX\r")
+            self.edited_prompt_after(fd, b"<histX>\r\n")
+            os.write(fd, b"history -s 'show historical'; echo rea''dy\r")
+            self.edited_prompt_after(fd, b"ready\r\n")
+        os.write(fd, b"show ./only-\t\x1fX\r")
+        self.edited_prompt_after(fd, b"<./only-X>\r\n")
+
+    def test_undo_key_binding_and_line_scope(self):
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"""bind '"\\C-]":undo'; bind '"\\C-o":insert-last-argument'; history -s 'cmd bound'; echo rea''dy\r""")
+        self.edited_prompt_after(fd, b"ready\r\n")
+        os.write(fd, b"v=\x0f\x1dOK\r")
+        os.write(fd, b'\x1fprintf "<%s>\\n" "$v"\r')
+        self.edited_prompt_after(fd, b"<OK>\r\n")
+        os.write(fd, b"read -e -i seed -p 'VALUE> ' v; printf '<%s>\\n' \"$v\"\r")
+        self.read_until(fd, b"VALUE> seed")
+        os.write(fd, b"abc\x1f\r")
+        self.edited_prompt_after(fd, b"<seed>\r\n")
+
     def test_navigation_prefix_arrows_and_bash_bindings(self):
         for shell in self.shells_for():
             with self.subTest(shell=shell):

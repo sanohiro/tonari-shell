@@ -25,6 +25,10 @@ impl Recall {
         }
     }
 
+    pub(super) fn position(&self) -> usize {
+        self.index
+    }
+
     pub(super) fn on_match(&self, end: usize) -> bool {
         self.filter.is_some() && self.index < end
     }

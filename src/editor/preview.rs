@@ -230,7 +230,7 @@ impl Preview {
                     self.insert_text(&text);
                     text.clear();
                     erased = true;
-                    self.cursor = rubout(&mut self.line, self.cursor, self.overwrite);
+                    self.cursor = rubout(&mut self.line, self.cursor, self.overwrite, None);
                     edited = true;
                     continue;
                 }

@@ -2,6 +2,8 @@ pub(crate) mod bindings;
 mod picker;
 pub(crate) mod preview;
 mod recall;
+mod undo;
+use undo::Undo;
 mod viewport;
 use bindings::{Action, Binding, Keymap};
 use std::collections::VecDeque;
@@ -190,15 +192,17 @@ impl Keys {
         cursor: &mut usize,
         inserted: &mut String,
         overwrite: bool,
+        undo: &mut Undo,
     ) -> io::Result<Option<usize>> {
         self.insert_burst(first, session, inserted)?;
         let append = (*cursor == text.len() && *cursor >= 1024).then_some(*cursor);
-        if overwrite && *cursor < text.len() {
-            let end = *cursor + char_offset(&text[*cursor..], inserted.chars().count());
-            text.replace_range(*cursor..end, inserted);
+        let end = if overwrite && *cursor < text.len() {
+            *cursor + char_offset(&text[*cursor..], inserted.chars().count())
         } else {
-            text.insert_str(*cursor, inserted);
-        }
+            *cursor
+        };
+        undo.record(text, *cursor..end, inserted.len(), *cursor, true);
+        text.replace_range(*cursor..end, inserted);
         *cursor += inserted.len();
         Ok(append)
     }
@@ -344,7 +348,7 @@ fn unbound_text(first: u8, session: &Session) -> bool {
 fn previous(s: &str, i: usize) -> usize {
     s[..i].char_indices().next_back().map_or(0, |(i, _)| i)
 }
-fn rubout(text: &mut String, cursor: usize, overwrite: bool) -> usize {
+fn rubout(text: &mut String, cursor: usize, overwrite: bool, undo: Option<&mut Undo>) -> usize {
     let start = previous(text, cursor);
     let blank = if overwrite && cursor < text.len() && start < cursor {
         let c = text[start..cursor].chars().next().unwrap();
@@ -360,6 +364,9 @@ fn rubout(text: &mut String, cursor: usize, overwrite: bool) -> usize {
     } else {
         ""
     };
+    if let Some(undo) = undo {
+        undo.record(text, start..cursor, blank.len(), cursor, false);
+    }
     text.replace_range(start..cursor, blank);
     start
 }
@@ -653,6 +660,8 @@ pub fn line(
     let mut screen = Screen::new();
     let mut text = read.map_or("", |r| r.0).to_owned();
     let mut cursor = text.len();
+    let mut undo = Undo::default();
+    let mut last_arg: Option<(usize, bool)> = None;
     let mut recall = recall::Recall::new(session.history_lines().len());
     let mut search: Option<(String, usize, String, usize)> = None;
     let mut pending_queries: Vec<SearchQuery> = Vec::new();
@@ -833,6 +842,7 @@ pub fn line(
         };
         // Ordinary committed text can bypass key-sequence and editing-action dispatch.
         if search.is_none() && unbound_text(first, session) {
+            last_arg = None;
             recall.edited(session.history_lines().len());
             appended = keys.insert(
                 first,
@@ -841,6 +851,7 @@ pub fn line(
                 &mut cursor,
                 &mut inserted,
                 overwrite,
+                &mut undo,
             )?;
             last_tab = false;
             continue;
@@ -872,7 +883,13 @@ pub fn line(
                     ("READLINE_MARK".into(), mark.to_string()),
                 ]);
                 let flow = crate::eval_text(session, &command, status);
-                text = session.get("READLINE_LINE").unwrap_or_default();
+                let updated = session.get("READLINE_LINE").unwrap_or_default();
+                undo.boundary();
+                last_arg = None;
+                if updated != text {
+                    undo.record(&text, 0..text.len(), updated.len(), cursor, false);
+                    text = updated;
+                }
                 cursor = char_offset(
                     &text,
                     session
@@ -896,6 +913,13 @@ pub fn line(
             }
             Binding::Edit(a) => a,
         };
+        if action != Action::LastArg {
+            last_arg = None;
+        }
+        if action != Action::Insert {
+            undo.boundary();
+        }
+        let history_position = recall.position();
         if !matches!(
             action,
             Action::Up
@@ -993,6 +1017,7 @@ pub fn line(
                         pending_queries.clear();
                         match selected {
                             Ok(Some(command)) => {
+                                undo = Undo::default();
                                 text = command;
                                 cursor = text.len();
                             }
@@ -1089,7 +1114,9 @@ pub fn line(
             Action::Back => cursor = previous(&text, cursor),
             Action::Forward if !right_arrow => cursor = next(&text, cursor),
             Action::Delete => {
-                text.replace_range(cursor..next(&text, cursor), "");
+                let end = next(&text, cursor);
+                undo.record(&text, cursor..end, 0, cursor, false);
+                text.replace_range(cursor..end, "");
             }
             Action::Rubout => {
                 let start = previous(&text, cursor);
@@ -1099,7 +1126,7 @@ pub fn line(
                 {
                     erased = Some(1usize);
                 }
-                cursor = rubout(&mut text, cursor, overwrite);
+                cursor = rubout(&mut text, cursor, overwrite, Some(&mut undo));
             }
             Action::Kill
             | Action::Discard
@@ -1126,6 +1153,9 @@ pub fn line(
                     }
                     _ => (0, cursor),
                 };
+                if action != Action::Copy {
+                    undo.record(&text, lo..hi, 0, cursor, false);
+                }
                 if lo == 0 && hi == text.len() && hi > 0 && action != Action::Copy {
                     std::mem::swap(&mut session.editor_kill, &mut text);
                     text.clear();
@@ -1139,7 +1169,34 @@ pub fn line(
                     }
                 }
             }
+            Action::Undo => {
+                undo.apply(&mut text, &mut cursor);
+                screen.view.invalidate();
+            }
+            Action::LastArg => {
+                let (end, replace) = last_arg.unwrap_or((history_position, false));
+                if replace {
+                    undo.apply(&mut text, &mut cursor);
+                }
+                let next = end.checked_sub(1);
+                let arg = next
+                    .and_then(|i| session.history_lines().get(i))
+                    .and_then(|line| crate::parser::last_history_argument(line));
+                if let Some(arg) = arg {
+                    undo.record(&text, cursor..cursor, arg.len(), cursor, false);
+                    text.insert_str(cursor, arg);
+                    cursor += arg.len();
+                }
+                last_arg = Some((next.unwrap_or(0), arg.is_some()));
+            }
             Action::Yank => {
+                undo.record(
+                    &text,
+                    cursor..cursor,
+                    session.editor_kill.len(),
+                    cursor,
+                    false,
+                );
                 text.insert_str(cursor, &session.editor_kill);
                 cursor += session.editor_kill.len();
             }
@@ -1155,6 +1212,7 @@ pub fn line(
                     && line.starts_with(&text)
                 {
                     let end = crate::parser::suggestion_end(line, cursor);
+                    undo.record(&text, cursor..cursor, end - cursor, cursor, false);
                     text.push_str(&line[cursor..end]);
                     cursor = text.len();
                 }
@@ -1169,6 +1227,7 @@ pub fn line(
                 let mid = previous(&text, end);
                 let start = previous(&text, mid);
                 let replacement = format!("{}{}", &text[mid..end], &text[start..mid]);
+                undo.record(&text, start..end, replacement.len(), cursor, false);
                 text.replace_range(start..end, &replacement);
                 cursor = end;
             }
@@ -1176,6 +1235,7 @@ pub fn line(
                 if let Some(key) = keys.get()?
                     && let Some(c) = keys.character(key)?
                 {
+                    undo.record(&text, cursor..cursor, c.len_utf8(), cursor, false);
                     text.insert(cursor, c);
                     cursor += c.len_utf8();
                 }
@@ -1210,6 +1270,15 @@ pub fn line(
                         match selected {
                             Ok(Some(index)) => {
                                 let word = result.select(index);
+                                if text[result.start..cursor] != word {
+                                    undo.record(
+                                        &text,
+                                        result.start..cursor,
+                                        word.len(),
+                                        cursor,
+                                        false,
+                                    );
+                                }
                                 text.replace_range(result.start..cursor, &word);
                                 cursor = result.start + word.len();
                             }
@@ -1242,6 +1311,15 @@ pub fn line(
                         screen.row = 0;
                         screen.view.invalidate();
                     } else {
+                        if text[result.start..cursor] != result.replacement {
+                            undo.record(
+                                &text,
+                                result.start..cursor,
+                                result.replacement.len(),
+                                cursor,
+                                false,
+                            );
+                        }
                         text.replace_range(result.start..cursor, &result.replacement);
                         cursor = result.start + result.replacement.len();
                     }
@@ -1253,7 +1331,10 @@ pub fn line(
             | Action::Down
             | Action::FirstHistory
             | Action::LastHistory => {
-                recall.navigate(action, session.history_lines(), &mut text, &mut cursor)
+                recall.navigate(action, session.history_lines(), &mut text, &mut cursor);
+                if recall.position() != history_position {
+                    undo = Undo::default();
+                }
             }
             Action::PreviousDirectory | Action::NextDirectory => unreachable!(),
             Action::Forward => {
@@ -1263,10 +1344,12 @@ pub fn line(
                         if let Some(s) =
                             history.suggestion(session.history_lines(), &text, true, || true)
                         {
+                            undo.record(&text, cursor..cursor, s.len(), cursor, false);
                             text.push_str(s);
                         } else if let Some(s) =
                             history.older_suggestion(session, &mut view, &text, &|| false)
                         {
+                            undo.record(&text, cursor..cursor, s.len(), cursor, false);
                             text.push_str(s);
                         }
                         cursor = text.len();
@@ -1281,6 +1364,7 @@ pub fn line(
                 }
                 let pasted =
                     keys.paste(|bytes| screen.paste_frame(prompt, &text, cursor, bytes))?;
+                undo.record(&text, cursor..cursor, pasted.len(), cursor, false);
                 let end = cursor + pasted.len();
                 if text.is_empty() {
                     text = pasted;
@@ -1297,6 +1381,7 @@ pub fn line(
                     &mut cursor,
                     &mut inserted,
                     overwrite,
+                    &mut undo,
                 )?;
             }
             _ => {}

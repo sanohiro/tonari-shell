@@ -43,6 +43,16 @@ pub(crate) fn history_word_spans(s: &str) -> Vec<(usize, usize)> {
     words
 }
 
+/// Keep the original shell spelling, including quotes and substitutions.
+pub(crate) fn last_history_argument(line: &str) -> Option<&str> {
+    let source = line.trim_end_matches([' ', '\t', '\n']);
+    let (start, end) = match lex(source, false, true) {
+        Ok((_, spans, _)) => spans.last().copied()?,
+        Err(_) => history_word_spans(source).last().copied()?,
+    };
+    Some(&source[start..end])
+}
+
 /// Byte end of the next shell token in the displayed command, including any
 /// whitespace before it. Lexing identifies quotes and substitutions without running them.
 pub(crate) fn suggestion_end(line: &str, cursor: usize) -> usize {

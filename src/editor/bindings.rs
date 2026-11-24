@@ -59,11 +59,26 @@ actions! {
     Transpose => "transpose-chars" [b"\x14"],
     Discard => "unix-line-discard" [b"\x15"],
     RubWord => "unix-word-rubout" [b"\x17"],
+    Undo => "undo" [b"\x18\x15", b"\x1f"],
+    LastArg => "yank-last-arg" [b"\x1b.", b"\x1b_"],
     Yank => "yank" [b"\x19"],
 }
 
+fn named_actions() -> impl Iterator<Item = (Action, &'static str, &'static [&'static [u8]])> {
+    ACTIONS
+        .iter()
+        .copied()
+        .flat_map(|entry @ (action, _, keys)| {
+            std::iter::once(entry).chain((action == Action::LastArg).then_some((
+                action,
+                "insert-last-argument",
+                keys,
+            )))
+        })
+}
+
 pub(crate) fn names() -> impl Iterator<Item = &'static str> {
-    ACTIONS.iter().map(|(_, name, _)| *name)
+    named_actions().map(|(_, name, _)| name)
 }
 
 #[derive(Clone)]
@@ -96,7 +111,7 @@ impl Keymap {
             Self::Insert => match action {
                 ViCommand => &[b"\x1b"],
                 Accept | Rubout | Delete | Complete | Clear | Paste | Quote | RubWord | Discard
-                | Yank | Overwrite => emacs,
+                | Yank | Overwrite | Undo => emacs,
                 Home => &[b"\x1bOH", b"\x1b[H"],
                 End => &[b"\x1bOF", b"\x1b[F"],
                 Back => &[b"\x1bOD", b"\x1b[D"],
@@ -107,6 +122,7 @@ impl Keymap {
                 _ => &[],
             },
             Self::Command => match action {
+                Undo => &[b"u", b"\x1f"],
                 ViInsert => &[b"i"],
                 ViAppend => &[b"a"],
                 ViAppendEnd => &[b"A"],
@@ -379,8 +395,7 @@ fn configure(bindings: &mut Bindings, spec: &str, shell: bool) -> Result<(), Str
     } else {
         let name = value.split_whitespace().next().unwrap_or("");
         Binding::Edit(
-            ACTIONS
-                .iter()
+            named_actions()
                 .find(|(_, n, _)| *n == name)
                 .ok_or_else(|| format!("unknown readline function: {name}"))?
                 .0,
@@ -521,7 +536,7 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
                 {
                     return Err(format!("\u{60}{name}': unknown function name"));
                 }
-                for &(action, name, defaults) in ACTIONS {
+                for (action, name, defaults) in named_actions() {
                     if target.is_some_and(|s| s != name) {
                         continue;
                     }
