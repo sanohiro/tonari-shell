@@ -1,5 +1,75 @@
 # Startup and execution / 起動と実行性能
 
+<a id="starship"></a>
+
+## 2026-11-25 · Interactive Starship prompts / Starship 利用時の対話性能
+
+Starship 1.27.0, upstream executable and default configuration. Each shell reads `eval "$(starship init bash)"` from the same isolated rcfile. Previous Tonari is `6756278`, current is `37e275b`. The local Apple M1 ran macOS 27.2.1. The native macOS hosts used GNU Bash 5.2.37 and the Ubuntu 24.04 hosts used GNU Bash 5.2.21. The PTY is 120 columns by 32 rows, with a temporary home, disabled history file and a PATH containing only the fixture tools and `/usr/bin:/bin`. The clean Git fixture contains 200 tracked files on branch `prompt-bench`. Timings include warm filesystem caches, a fresh shell for every first prompt and three submissions of `:` per session. The benchmark rotates shell order, discards two warmups and takes 31 samples locally or 25 on each CI runner. [Native run and host manifests](https://github.com/sanohiro/tonari-shell/actions/runs/45422420218)
+
+The first-prompt clock starts immediately before exec and stops at the visible prompt character. The next-prompt clock starts at Enter and waits for a fresh character after the terminal leaves input mode. All timing cells give median/p95 in milliseconds.
+
+| Native host | Directory | Operation | Previous Tonari | Current Tonari | Bash |
+|---|---|---|---:|---:|---:|
+| Apple M1, local | Empty | first prompt | 48.188/51.798 | 46.280/50.557 | 55.215/59.016 |
+| Apple M1, local | Empty | next prompt | 24.533/26.025 | 22.685/24.521 | 25.588/27.621 |
+| Apple M1, local | Git | first prompt | 61.612/98.481 | 60.047/74.092 | 68.962/91.062 |
+| Apple M1, local | Git | next prompt | 37.412/50.560 | 36.225/47.444 | 38.302/52.495 |
+| macOS arm64, CI | Empty | first prompt | 76.418/94.251 | 65.196/110.472 | 77.106/108.219 |
+| macOS arm64, CI | Empty | next prompt | 38.658/67.424 | 30.679/59.039 | 33.836/65.341 |
+| macOS arm64, CI | Git | first prompt | 90.753/161.214 | 82.284/149.559 | 82.579/146.793 |
+| macOS arm64, CI | Git | next prompt | 51.007/95.887 | 48.541/104.365 | 52.696/114.336 |
+| Linux x86-64, CI | Empty | first prompt | 10.316/10.591 | 9.946/10.264 | 11.215/11.471 |
+| Linux x86-64, CI | Empty | next prompt | 4.992/5.178 | 4.684/4.827 | 5.425/5.595 |
+| Linux x86-64, CI | Git | first prompt | 13.339/13.799 | 12.963/13.277 | 13.918/14.271 |
+| Linux x86-64, CI | Git | next prompt | 7.895/8.485 | 7.510/7.911 | 8.115/8.576 |
+| Linux arm64, CI | Empty | first prompt | 13.211/13.750 | 12.659/13.273 | 14.547/15.166 |
+| Linux arm64, CI | Empty | next prompt | 6.408/6.713 | 5.926/6.141 | 7.187/7.586 |
+| Linux arm64, CI | Git | first prompt | 17.017/17.625 | 16.537/17.010 | 18.425/18.864 |
+| Linux arm64, CI | Git | next prompt | 10.166/10.725 | 9.756/10.372 | 10.873/11.600 |
+
+With the Git prompt visible, one typed ASCII character at the end of an empty line produced the following response. The byte counts include the terminal control sequences.
+
+| Native host | Previous ms | Current ms | Bash ms | Bytes before → after / Bash |
+|---|---:|---:|---:|---:|
+| Apple M1, local | 0.031/0.054 | 0.031/0.046 | 0.030/0.059 | 80 → 1 / 1 |
+| macOS arm64, CI | 0.049/0.109 | 0.049/0.138 | 0.046/0.143 | 80 → 1 / 1 |
+| Linux x86-64, CI | 0.043/0.072 | 0.042/0.068 | 0.042/0.064 | 80 → 1 / 1 |
+| Linux arm64, CI | 0.056/0.078 | 0.053/0.068 | 0.057/0.072 | 80 → 1 / 1 |
+
+Each batch starts one shell and repeatedly executes ordinary shell syntax. The first repeats an empty `$(jobs -p)`. The second captures `/usr/bin/printf` with a quoted array containing a space, an empty argument and a literal wildcard. The third expands a UTF-8 prompt with repeated ANSI width markers through `${p@P}`. Each measured batch checks its final output.
+
+| Native host | Batch | Previous Tonari | Current Tonari | Bash |
+|---|---|---:|---:|---:|
+| Apple M1, local | 200 empty jobs captures | 120.910/134.922 | 4.409/5.226 | 157.249/169.613 |
+| Apple M1, local | 200 external array captures | 462.346/489.224 | 316.673/383.075 | 487.308/539.707 |
+| Apple M1, local | 2000 styled prompt expansions | 6.258/6.866 | 5.912/6.535 | 16.210/16.901 |
+| macOS arm64, CI | 200 empty jobs captures | 174.844/391.690 | 6.232/8.880 | 213.083/478.146 |
+| macOS arm64, CI | 200 external array captures | 792.074/1090.149 | 672.941/871.365 | 799.466/1243.355 |
+| macOS arm64, CI | 2000 styled prompt expansions | 7.448/12.506 | 7.334/11.064 | 22.804/32.323 |
+| Linux x86-64, CI | 200 empty jobs captures | 25.306/25.863 | 0.463/0.542 | 47.874/48.553 |
+| Linux x86-64, CI | 200 external array captures | 89.227/90.242 | 69.594/70.624 | 111.478/113.716 |
+| Linux x86-64, CI | 2000 styled prompt expansions | 1.920/1.967 | 1.609/1.665 | 9.278/9.365 |
+| Linux arm64, CI | 200 empty jobs captures | 33.712/34.705 | 0.723/0.791 | 73.461/75.297 |
+| Linux arm64, CI | 200 external array captures | 134.881/137.808 | 107.757/111.463 | 164.744/168.134 |
+| Linux arm64, CI | 2000 styled prompt expansions | 2.462/2.536 | 2.022/2.051 | 11.315/11.431 |
+
+Standalone Apple M1 medians (31 warm samples, Python subprocess launch through exit) were 7.5 ms for `starship time`, 9.1 ms for `starship prompt` in an empty directory and 19.9 ms for the renderer in the Git fixture. The official hook calls the time helper and runs the renderer on each submission. The complete prompt still takes more than two thirds of Bash time. The editor emits one byte for a plain append to the Git prompt. An active suggestion or a mid-line edit can require a redraw. On the hosted Mac the Git first-prompt medians were within 0.3 ms of one another, with p95 around 150 ms. The 200 external captures also exceeded the two-thirds target there. Without Starship, a separate 51-run local control measured exec to first prompt at 3.074 → 3.085 ms (Bash 6.090 ms).
+
+単位はミリ秒で、各セルは中央値/p95 です。Starship は公式配布版の標準設定で測りました。起動から初回表示までと Enter 後の再表示には、時刻取得や Git 状態を調べる外部処理の待ち時間も含みます。入力は端末に文字が届いたところまでを測定しました。成功・失敗の色、パイプ各段の終了状態、実行時間、バックグラウンドジョブ数も、同じ疑似端末で確認します。Mac の CI では Git での初回表示は Bash とほぼ同じで、p95 のばらつきも大きくなりました。
+
+Release sizes in bytes (previous → current).
+
+- Apple M1, local · 1,400,304 → 1,400,320
+- macOS arm64, CI · 1,400,272 → 1,400,272
+- Linux x86-64, CI · 1,900,504 → 1,902,648
+- Linux arm64, CI · 1,641,848 → 1,644,344
+
+Reproduce with release binaries and the Starship 1.27.0 executable for the native architecture.
+
+```sh
+python3 tools/bench_starship.py /path/to/previous /path/to/current /path/to/bash --starship /path/to/starship --runs 25
+```
+
 <a id="edit-actions"></a>
 
 ## 2026-11-24 · Per-line undo and last-argument recall / 取り消しと末尾引数の再利用

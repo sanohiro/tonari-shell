@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## 2026-11-25 · Running Starship's Bash integration / Starship の Bash 初期化と再描画
+
+Starship 1.27.0's Bash hook counts jobs with `$(jobs -p)` and captures an external renderer with `"${ARGS[@]}"`. When the visible job table is empty, its PID list is already known. A literal executable with quoted stored array arguments can write into the capture pipe directly. Use the subshell when a name reference, command location, exported shell options or other expansion can observe the child context. A ready-made ANSI prompt with only `\[` and `\]` width markers takes a literal rendering path. Once the editor has painted the prompt and has an unobstructed cursor at the end, typing extends the visible line. Mid-line edits and history suggestions can still request a redraw. [Upstream Bash hook](https://github.com/starship/starship/blob/v1.27.0/src/init/starship.bash)
+
+公式の初期化を使った状態で、プロンプトの初回表示、1文字が見えるまで、Enter 後に次のプロンプトが見えるまでを別々に測りました。ジョブがなければ PID 一覧は空と確定します。通常の配列を引数として外部コマンドの出力を受け取る場合も、中間のシェルを省けます。サブシェルの深さを参照する名前参照や、子の設定が外部から見える場合は従来のサブシェルを使います。入力中は色と改行を含むプロンプトを再送せず、候補のない行末なら追加した文字だけを端末に送ります。Git 状態、終了コード、パイプ各段の結果は公式フックが毎回受け取ります。[実機の比較と再現方法](benchmarks.md#starship)
+
 ## 2026-11-24 · Undoing edits and recalling the last argument / 一手戻す操作と引数の再利用
 
 Appending to a long line requires only the offset and length of the inserted text to undo it. Store removed bytes for deletes and overwrites. For completion and `bind -x`, discard the common prefix and suffix at UTF-8 character boundaries before recording the inverse edit. Consecutive typing extends one entry. Completions, suggestion acceptance and pastes start their own entries. The editor keeps at most 128 entries and a 4 MiB budget for removed text, allowing one larger deletion as the newest undoable edit. Submitting or abandoning the line drops the entire stack.

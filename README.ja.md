@@ -50,6 +50,8 @@ tools/stage.sh "$binary" "$prefix"
 "$prefix/bin/tonari" --noprofile --norc
 ```
 
+Starship をインストール済みなら、対話用の `~/.bashrc` に `eval "$(starship init bash)"` を追加すると、Tonari で公式の Bash 用プロンプトを使えます。[初回表示・入力・再表示の実測](docs/benchmarks.md#starship)
+
 ## いま使える機能
 
 - **入力と状態。** 対話端末、`-c`、ファイル、標準入力、`source`、`eval` が共通の実行系を使います。読み取り専用変数、エクスポートした環境、関数のローカル変数、位置引数、`cd` の結果が Bash のスコープに従って引き継がれます。

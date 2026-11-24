@@ -50,6 +50,8 @@ tools/stage.sh "$binary" "$prefix"
 "$prefix/bin/tonari" --noprofile --norc
 ```
 
+To use an installed Starship prompt, add `eval "$(starship init bash)"` to your interactive `~/.bashrc`. Tonari runs Starship’s Bash integration. [Startup, typing and prompt timings](docs/benchmarks.md#starship)
+
 ## Current capabilities
 
 - **Input and state.** Interactive terminals, `-c`, script files, stdin, `source`, and `eval` share the evaluator. Read-only variables, exported environment values, function-local scope, positional parameters, and `cd` persist within their Bash scopes.
