@@ -175,7 +175,7 @@ case "$SUITE" in
   throughput)
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k foreground
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k large_glob
-    run foreground-external python3 tools/bench_foreground.py "$current" "$bin/baseline" "$ref" --runs 31
+    run foreground-external python3 tools/bench_foreground.py "$current" "$ref" --previous "$bin/baseline" --runs 31
     cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
     run scripts python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" \
       --spawn-control "$bin/spawn-control" --timing started --runs 31
