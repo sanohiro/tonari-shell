@@ -24,7 +24,8 @@ def key(fd, packet, marker):
 def history(shell, home, bash):
     with terminal(shell, home, "/usr/bin:/bin", home / ("bashrc" if bash else "rc"), PROMPT) as fd:
         os.write(fd, b"v=token!\x02")
-        read_until(fd, b"!")
+        # Wait until the cursor has actually moved left of the suffix.
+        read_until(fd, b"\x08" if bash else b"\r\x1b[15C")
         times = [key(fd, UP, b"LAST"), key(fd, UP, b"FIR"),
                  key(fd, DOWN, b"LA"), key(fd, UP, b"FIR")]
         os.write(fd, b'\rprintf "<result:%s>\\n" "$v"\r')

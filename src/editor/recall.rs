@@ -25,6 +25,10 @@ impl Recall {
         }
     }
 
+    pub(super) fn on_match(&self, end: usize) -> bool {
+        self.filter.is_some() && self.index < end
+    }
+
     pub(super) fn edited(&mut self, end: usize) {
         if self.filter.take().is_some() {
             self.index = end;

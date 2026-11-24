@@ -2622,6 +2622,32 @@ f; printf 'END\0'; printf '%s\0' names/*'''
         os.write(fd, b'printf "<%s>\\n" "$v"\r')
         self.read_until(fd, b"<chronological>\r\n")
 
+    def test_navigation_vi_and_split_escape_sequences(self):
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"set -o vi; history -s v=VIold; history -s v=unrelated; echo rea''dy\r")
+        self.read_until(fd, b"ready\r\n")
+        os.write(fd, b"v=VI\x1b[")
+        time.sleep(.01)
+        os.write(fd, b"A\r")
+        os.write(fd, b'printf "<%s>\\n" "$v"\r')
+        self.read_until(fd, b"<VIold>\r\n")
+        # A suffix on a custom binding must get a chance to resolve after the arrow.
+        os.write(fd, b"""set -o emacs; bind '"\\e[Af":"v=longer"'; echo key''map\r""")
+        self.read_until(fd, b"keymap\r\n")
+        os.write(fd, b"\x1b[Af\r")
+        os.write(fd, b'printf "<%s>\\n" "$v"\r')
+        self.read_until(fd, b"<longer>\r\n")
+
+    def test_navigation_shows_longer_suggestion_after_recall(self):
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"history -s 'echo navfirst second third'; history -s 'echo navfirst'; "
+                     b"history -s 'echo unrelated'; echo rea''dy\r")
+        self.read_until(fd, b"ready\r\n")
+        os.write(fd, b"echo nav\x1b[A")
+        self.read_until(fd, b"echo navfirst\x1b[2m second third")
+        os.write(fd, b"\x1bf\r")
+        self.read_until(fd, b"navfirst second\r\n")
+
     def test_navigation_directory_history(self):
         first = "東京 $(touch BAD)"
         for name in (first, "two", "three", "four"):

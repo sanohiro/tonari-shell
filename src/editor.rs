@@ -800,7 +800,13 @@ pub fn line(
                     || ready(0, 0)
                     || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
             };
-            if needs_hint && history.ensure(session, &mut view, false, &input_ready) {
+            // After showing a recalled command, let the terminal paint it or send
+            // the next arrow before searching older rows for a longer suggestion.
+            if needs_hint
+                && !(recall.on_match(session.history_lines().len())
+                    && (!keys.queued.is_empty() || ready(0, 1)))
+                && history.ensure(session, &mut view, false, &input_ready)
+            {
                 if let Some(hint) =
                     history.suggestion(session.history_lines(), &text, true, || !input_ready())
                 {
