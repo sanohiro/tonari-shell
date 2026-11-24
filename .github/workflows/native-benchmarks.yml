@@ -47,6 +47,17 @@ jobs:
           source=inventory
           if [[ $SUITE == *-ubuntu ]]; then source=inventory-ubuntu; fi
           gh run download "$TIMING_RUN" -n "$NATIVE_RUNNER-$source" -D "$RUNNER_TEMP/reuse"
+      - name: Retrieve original samples for workloads above Bash time
+        if: startsWith(matrix.suite, 'budget-parity')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ $TIMING_RUN =~ ^[0-9]+$ ]]
+          suffix=
+          if [[ $SUITE == *-ubuntu ]]; then suffix=-ubuntu; fi
+          for suite in budget inventory; do
+            gh run download "$TIMING_RUN" -n "$NATIVE_RUNNER-$suite$suffix" -D "$RUNNER_TEMP/reuse/$suite"
+          done
       - name: Measure on the native host
         run: bash tools/ci/native-bench.sh
       - name: Preserve measurements and host details

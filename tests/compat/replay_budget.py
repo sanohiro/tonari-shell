@@ -7,6 +7,7 @@ import re
 import shlex
 import socket
 import shutil
+from statistics import median
 import subprocess
 import tempfile
 import time
@@ -155,6 +156,22 @@ def isolate(source):
         return setup, body
 
 
+def slower_workloads(lane, paths):
+    frozen = {row["id"]: row for row in workloads(lane, None)}
+    selected = {}
+    for path in paths:
+        with path.open() as stream:
+            if json.loads(next(stream))["lane"] != lane:
+                raise ValueError(f"wrong platform in {path}")
+            for line in stream:
+                observation = json.loads(line)
+                samples = observation["fixed"].get("samples_ns")
+                if samples and median(samples["current"]) > median(samples["bash"]):
+                    key = observation["id"]
+                    selected[key] = observation.get("workload") or frozen[key]
+    return selected.values()
+
+
 def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--lane", required=True)
@@ -163,6 +180,8 @@ def main():
     cli.add_argument("--runs", type=int, default=9)
     cli.add_argument("--only", nargs="*")
     cli.add_argument("--inventory", type=Path)
+    cli.add_argument("--above-bash", type=Path, nargs="+",
+                     help="repeat exact workloads whose saved median exceeded Bash and measure available components")
     cli.add_argument("--components", action="store_true")
     cli.add_argument("--release-only", action="store_true", help="compare just the two release binaries and Bash")
     cli.add_argument("--self-invocation", action="store_true",
@@ -189,7 +208,8 @@ def main():
         floor = root / "control"
         subprocess.run(["cc", "-O2", str(Path(__file__).with_name("budget_floor.c")), "-o", str(floor)], check=True)
         print(json.dumps({"lane": args.lane, "sha256": hashes, "argv0": "absolute" if args.self_invocation else "bash"}), flush=True)
-        for row in workloads(args.lane, args.inventory):
+        batch = slower_workloads(args.lane, args.above_bash) if args.above_bash else workloads(args.lane, args.inventory)
+        for row in batch:
             config = row["lanes"].get(args.lane)
             if not config or (args.only is not None and row["id"] not in args.only):
                 continue
@@ -211,7 +231,7 @@ def main():
                 if len(result) > 1:
                     print(json.dumps(result), flush=True)
                 continue
-            if args.inventory:
+            if args.inventory or args.above_bash:
                 result["workload"] = row
             for name, count, runs in [("fixed", n, args.runs), ("extended", 1024, 5)]:
                 if name == "extended" and (n != 128 or max(config["old_ns"]) > 4_000_000):
@@ -220,6 +240,13 @@ def main():
                     result[name] = compare(audits, row, count, runs, floor)
                 except ValueError as err:
                     result[name] = {"error": str(err)}
+            if args.above_bash and (part := isolate(row["argv"][-1])):
+                setup, body = part
+                try:
+                    result["component"] = compare(audits, row, 128, args.runs, None, setup=setup, body=body)
+                    result.update(setup=setup, body=body)
+                except ValueError as err:
+                    result["component"] = {"error": str(err)}
             print(json.dumps(result), flush=True)
 
 
