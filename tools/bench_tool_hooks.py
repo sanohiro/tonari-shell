@@ -74,6 +74,12 @@ def sample(shell, root, rc, env, tool, versions, saved):
                         raise ValueError(f"missing {field!r}: {frame!r}")
             command(b'printf "<injected-%s>\\n" "$HOOK_BENCH_VSCODE"', b"<injected-1>\r\n")
             if tool == "combined":
+                for _ in range(3):
+                    start = time.monotonic_ns()
+                    os.write(fd, b":")
+                    read_until(fd, b":")
+                    record("key to echo", start)
+                    command(b"")
                 timed("enter with both hooks", b"cd project")
                 command(b'printf "<%s|%s|%s|%s>\\n" "$CHECK_DIRENV" "$CHECK_MISE" '
                         b'"$COMBINED_LOADED" "$(node --version)"',
