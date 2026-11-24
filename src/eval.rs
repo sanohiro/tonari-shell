@@ -193,12 +193,11 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             })
         }
         Command::If {
-            first,
-            elifs,
+            branches,
             otherwise,
         } => {
             let mut last = status;
-            for (condition, body) in std::iter::once(first).chain(elifs) {
+            for (condition, body) in branches {
                 session.tested_depth += 1;
                 let flow = execute_program(session, condition, last, false);
                 session.tested_depth -= 1;

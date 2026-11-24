@@ -355,8 +355,7 @@ pub enum Command {
         arms: Rc<Vec<CaseArm>>,
     },
     If {
-        first: (Vec<Statement>, Vec<Statement>),
-        elifs: Vec<(Vec<Statement>, Vec<Statement>)>,
+        branches: Vec<(Vec<Statement>, Vec<Statement>)>,
         otherwise: Vec<Statement>,
     },
     While {
@@ -997,11 +996,16 @@ impl Reader {
 
     fn if_clause(&mut self) -> Result<Command, Error> {
         self.tokens.pop_front();
-        let first = self.if_branch()?;
-        let mut elifs = Vec::new();
-        while self.keyword() == Some("elif") {
+        let mut branches = Vec::new();
+        loop {
+            let condition = self.list(&["then"])?;
+            self.expect("then")?;
+            let body = self.list(&["else", "elif", "fi"])?;
+            branches.push((condition, body));
+            if self.keyword() != Some("elif") {
+                break;
+            }
             self.tokens.pop_front();
-            elifs.push(self.if_branch()?);
         }
         let otherwise = if self.keyword() == Some("else") {
             self.tokens.pop_front();
@@ -1011,16 +1015,9 @@ impl Reader {
         };
         self.expect("fi")?;
         Ok(Command::If {
-            first,
-            elifs,
+            branches,
             otherwise,
         })
-    }
-
-    fn if_branch(&mut self) -> Result<(Vec<Statement>, Vec<Statement>), Error> {
-        let condition = self.list(&["then"])?;
-        self.expect("then")?;
-        Ok((condition, self.list(&["else", "elif", "fi"])?))
     }
 
     fn while_clause(&mut self) -> Result<Command, Error> {
@@ -1494,15 +1491,13 @@ mod tests {
         };
         assert_eq!(words[1].as_literal(), Some("do"));
         let Command::If {
-            first,
-            elifs,
+            branches,
             otherwise,
         } = &body[0].command
         else {
             panic!()
         };
-        assert!(!first.0.is_empty() && !first.1.is_empty());
-        assert_eq!((elifs.len(), otherwise.len()), (1, 1));
+        assert_eq!((branches.len(), otherwise.len()), (2, 1));
         let Command::Function { name, definition } = &program[1].command else {
             panic!()
         };
