@@ -792,7 +792,7 @@ impl Session {
             .to_string())
     }
 
-    fn is_exported(&self, name: &str) -> bool {
+    pub(crate) fn is_exported(&self, name: &str) -> bool {
         self.variables.get(name).map_or_else(
             || matches!(name, "PWD" | "OLDPWD") || std::env::var_os(name).is_some(),
             |var| var.exported,

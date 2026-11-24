@@ -1667,6 +1667,14 @@ declare -n ref=a; v=$(/usr/bin/printf '[%s]' "${ref[@]}"); echo "$v"
 jobs() { printf '%s' "shadow:$1"; }; v=$(jobs -p); echo "$v" """,
                      0, b"empty:0:<>\n<a b><><*.rs>\n[a b][][*.rs]\nshadow:-p\n", minimum=5)
 
+    def test_external_capture_observes_subshell_state(self):
+        self.compare(r"""args=(value); declare -n depth=BASH_SUBSHELL; set -e
+v=$(/usr/bin/printf '<%s>' "$depth" "${args[@]}"); echo "$v"
+v=$(/usr/bin/printf '%s' "$BASH_COMMAND" "${args[@]}"); case "$v" in /usr/bin/printf*) echo command;; esac
+export SHELLOPTS; args=(SHELLOPTS); v=$(/usr/bin/printenv "${args[@]}")
+case ":$v:" in *:errexit:*) echo leaked;; *) echo cleared;; esac""",
+                     0, b"<1><value>\ncommand\ncleared\n", minimum=5)
+
     def test_prompt_width_markers_and_literal_backslashes(self):
         self.compare(r"""p='日\[x\]\[y\]本'; printf '<%s>\n' "${p@P}"
 p='\\[literal]$((3+4))'; printf '<%s>\n' "${p@P}" """,

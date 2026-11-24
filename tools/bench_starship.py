@@ -68,6 +68,16 @@ def trial(shell, cwd, rc, env, verify):
             os.write(fd, b"""printf '<status=%s pipe=%s>\\n' "$STARSHIP_CMD_STATUS" "${STARSHIP_PIPE_STATUS[*]}"\r""")
             if b"<status=0 pipe=1 0>\r\n" not in next_prompt(fd):
                 raise ValueError("Starship did not receive pipeline status")
+            os.write(fd, b"/bin/sleep 0.1\r")
+            next_prompt(fd)
+            os.write(fd, b"((STARSHIP_DURATION >= 80)) && printf '<duration-%s>\\n' ok\r")
+            if b"<duration-ok>\r\n" not in next_prompt(fd):
+                raise ValueError("missing elapsed command time")
+            os.write(fd, b"sample_jobs() { seen_jobs=$NUM_JOBS; }; starship_precmd_user_func=sample_jobs; /bin/sleep 3 & p=$!\r")
+            next_prompt(fd)
+            os.write(fd, b"""printf '<jobs=%s>\\n' "$seen_jobs"; kill "$p"; wait "$p"; :\r""")
+            if b"<jobs=1>\r\n" not in next_prompt(fd):
+                raise ValueError("live background job missing from prompt hook")
         return result
     finally:
         try:
@@ -127,14 +137,24 @@ def main():
             compare(shells, args.runs, lambda sh, verify: trial(sh, cwd, rc, env, verify))
 
         # Isolate shell work which is otherwise hidden by the renderer and Git.
-        cases = [("200 empty jobs captures", 's=$(jobs -p)'),
-                 ("200 external array captures", 's=$(/usr/bin/printf %s "${args[@]}")')]
-        for label, body in cases:
-            script = 'args=("a b" "" "*"); for ((i=0; i<200; i++)); do ' + body + '; done'
+        marker_prompt = (r"\[" + "\x1b[1;36m" + r"\]" + "開発 🌸 " + r"\[" + "\x1b[0m" + r"\]") * 4 + "\n❯ "
+        cases = [
+            ("200 empty jobs captures", "", "s=$(jobs -p)", 200, ""),
+            ("200 external array captures", 'args=("a b" "" "*")', 's=$(/usr/bin/printf %s "${args[@]}")', 200, "a b*"),
+            ("2000 styled prompt expansions", f"p='{marker_prompt}'", 's=${p@P}', 2000,
+             marker_prompt.replace(r"\[", "").replace(r"\]", "")),
+        ]
+        for label, setup, body, count, expected in cases:
+            script = f'{setup}\nfor ((i=0; i<{count}; i++)); do {body}; done\nprintf %s "$s"'
+
             def batch(sh, verify):
                 start = time.monotonic_ns()
-                subprocess.run([sh, "--noprofile", "--norc", "-c", script], env=env, cwd=plain, check=True)
-                return {label + " (ms)": [(time.monotonic_ns() - start) / 1e6]}
+                result = subprocess.check_output([sh, "--noprofile", "--norc", "-c", script], env=env, cwd=plain)
+                elapsed = (time.monotonic_ns() - start) / 1e6
+                if result != expected.encode():
+                    raise ValueError(f"{label}: unexpected result {result!r}")
+                return {label + " (ms)": [elapsed]}
+
             compare(shells, args.runs, batch)
 
 

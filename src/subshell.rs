@@ -277,7 +277,15 @@ fn capture_simple(
                 false
             }
             "printf" | "echo" | ":" | "true" | "false" => false,
-            _ if body.len() == 1 && crate::execute::can_capture_external(program) => true,
+            // A child drops monitor mode and normally clears errexit. An exported
+            // SHELLOPTS lets even a literal external command observe those changes.
+            _ if body.len() == 1
+                && crate::execute::can_capture_external(program)
+                && !((session.errexit || session.jobs.monitor)
+                    && session.is_exported("SHELLOPTS")) =>
+            {
+                true
+            }
             _ => return None,
         };
         let safe = args.iter().all(|word| match word {
@@ -292,9 +300,18 @@ fn capture_simple(
                             && session.stored_array(base);
                     }
                     is_identifier(name)
+                        && !session.is_nameref(name)
                         && !matches!(
                             name.as_str(),
-                            "BASHPID" | "BASH_SUBSHELL" | "RANDOM" | "SRANDOM" | "_" | "PIPESTATUS"
+                            "BASHPID"
+                                | "BASH_SUBSHELL"
+                                | "BASH_COMMAND"
+                                | "LINENO"
+                                | "SHELLOPTS"
+                                | "RANDOM"
+                                | "SRANDOM"
+                                | "_"
+                                | "PIPESTATUS"
                         )
                 }
                 _ => false,
