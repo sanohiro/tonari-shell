@@ -20,10 +20,15 @@ impl Session {
         } else {
             explicit
         };
-        let index = self
+        let ordinary = self
+            .variables
             .get("OPTIND")
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(1);
+            .filter(|v| !v.nameref && v.elements.is_none());
+        let index = match ordinary {
+            Some(v) => v.value.as_deref().and_then(|s| s.parse::<usize>().ok()),
+            None => self.get("OPTIND").and_then(|s| s.parse::<usize>().ok()),
+        }
+        .unwrap_or(1);
         let mut pos = index.saturating_sub(1).min(inputs.len());
         let mut offset = self.opt_offset.max(1);
         let mut option = None;
@@ -65,7 +70,15 @@ impl Session {
                 }
             }
         }
-        self.assign("OPTIND", &(pos + 1).to_string());
+        if ordinary.is_some_and(|v| !v.readonly) {
+            let var = self.variables.get_mut("OPTIND").unwrap();
+            var.value = Some((pos + 1).to_string());
+            var.declared = true;
+            var.exported |= self.allexport;
+            self.opt_offset = 0;
+        } else {
+            self.assign("OPTIND", &(pos + 1).to_string());
+        }
         if option.is_some() {
             self.opt_offset = offset;
         }

@@ -319,7 +319,7 @@ impl Word {
     }
 
     pub fn append_fields(
-        self,
+        mut self,
         lookup: &dyn Fn(&str) -> Option<String>,
         positional: &[String],
         globbing: Option<&crate::pattern::GlobOptions>,
@@ -327,6 +327,13 @@ impl Word {
     ) -> Result<(), crate::expansion::Error> {
         if let Self::Literal(s) = self {
             words.push(s);
+            return Ok(());
+        }
+        // A resolved quoted scalar, including the empty string, is exactly one field.
+        if let Self::Expanded(parts) | Self::Declaration(parts) = &mut self
+            && let [Part::Text(text)] = parts.as_mut_slice()
+        {
+            words.push(std::mem::take(text));
             return Ok(());
         }
         let ifs = lookup("IFS");

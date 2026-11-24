@@ -1,5 +1,6 @@
 // Native controls for the corresponding workloads in bench_scripts.py.
 #include <dirent.h>
+#include <fcntl.h>
 #include <errno.h>
 #include <spawn.h>
 #include <stdio.h>
@@ -89,6 +90,57 @@ int main(int argc, char **argv) {
     }
     const char *path = strrchr(argv[argc-1], '/');
     const char *name = path ? path + 1 : argv[argc-1];
+    if (!strcmp(name, "background-subshell-wait.sh")) {
+        for (int i = 0; i < 32; ++i) {
+            pid_t child = fork();
+            if (child == 0) _exit(13);
+            int status;
+            if (child < 0 || waitpid(child, &status, 0) != child ||
+                !WIFEXITED(status) || WEXITSTATUS(status) != 13) return 1;
+        }
+        puts("13");
+        return 0;
+    }
+    if (!strcmp(name, "descriptor-moves.sh")) {
+        for (int i = 0; i < 128; ++i) {
+            int fd = open("rows", O_RDWR | O_CREAT, 0666);
+            if (fd < 0 || dup2(fd, 7) < 0) return 1;
+            if (fd != 7 && close(fd)) return 1;
+            if (dup2(7, 6) < 0 || close(7) || close(6)) return 1;
+        }
+        puts("moved");
+        return 0;
+    }
+    if (!strcmp(name, "external-substitutions.sh")) {
+        char captured[64] = "";
+        for (int i = 0; i < 16; ++i) {
+            char value[16];
+            snprintf(value, sizeof(value), "%d", i);
+            int fds[2];
+            if (pipe(fds)) return 1;
+            char *const args[] = {"/usr/bin/printf", "v%s", value, NULL};
+            posix_spawn_file_actions_t actions;
+            pid_t child;
+            if (posix_spawn_file_actions_init(&actions) ||
+                posix_spawn_file_actions_adddup2(&actions, fds[1], STDOUT_FILENO) ||
+                posix_spawn_file_actions_addclose(&actions, fds[0]) ||
+                posix_spawn_file_actions_addclose(&actions, fds[1]) ||
+                posix_spawn(&child, args[0], &actions, NULL, args, environ)) return 1;
+            posix_spawn_file_actions_destroy(&actions);
+            close(fds[1]);
+            size_t n = 0;
+            while (n < sizeof(captured) - 1) {
+                ssize_t got = read(fds[0], captured + n, sizeof(captured) - 1 - n);
+                if (got < 0) return 1;
+                if (!got) break;
+                n += (size_t)got;
+            }
+            captured[n] = 0;
+            if (close(fds[0]) || !waited(child)) return 1;
+        }
+        puts(captured);
+        return 0;
+    }
     if (strncmp(name, "glob-", 5) == 0) return directory(name);
     int env = strcmp(name, "external-env.sh") == 0;
     int redirect = strcmp(name, "redirect-stderr.sh") == 0;

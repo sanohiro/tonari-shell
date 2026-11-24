@@ -124,7 +124,7 @@ pub(super) struct Input {
     pub(super) consume_all: bool,
     fd: i32,
     seekable: bool,
-    data: [u8; 4096],
+    data: [std::mem::MaybeUninit<u8>; 4096],
     position: usize,
     end: usize,
 }
@@ -135,7 +135,7 @@ impl Input {
             fd,
             consume_all: false,
             seekable: unsafe { libc::lseek(fd, 0, libc::SEEK_CUR) } >= 0,
-            data: [0; 4096],
+            data: [std::mem::MaybeUninit::uninit(); 4096],
             position: 0,
             end: 0,
         }
@@ -163,7 +163,10 @@ impl Input {
         }
         let start = self.position;
         self.position += take.min(self.end - start);
-        Ok(&self.data[start..self.position])
+        // read initialized the prefix ending at self.end.
+        Ok(unsafe {
+            std::slice::from_raw_parts(self.data.as_ptr().add(start).cast(), self.position - start)
+        })
     }
 }
 

@@ -21,6 +21,10 @@ def floor_args(source, count):
             return ["groups", str(count), "redirect"]
         if ">/dev/null" not in source:
             return ["groups", str(count)]
+    delay = re.match(r"^\(?sleep (\.[0-9]+)[ ;]", source)
+    if delay and re.search(r"(?:^|[;&] *)wait(?: |$)", source):
+        # Each of these scripts waits for its one sleep before starting the next iteration.
+        return ["wait", str(count), delay.group(1)]
     cond = re.fullmatch(r'printf data >file; :; \[\[ (-[a-zA-Z]) ([^ ;]+) \]\]; printf %s "\$\?"; \[\[ \1 absent \]\]; printf %s "\$\?"', source)
     if cond:
         return ["file", str(count), *cond.groups()]

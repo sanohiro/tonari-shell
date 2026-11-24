@@ -384,6 +384,7 @@ def main():
             if args.spawn_control and case in (
                 "external", "external-env", "redirect-stderr", "pipeline", "merged-pipeline",
                 "merged-pipeline-redirect", "builtin-merged-pipeline",
+                "background-subshell-wait", "descriptor-moves", "external-substitutions",
                 "glob-sparse", "glob-multi-star", "glob-utf8-once", "glob-utf8-large",
             ):
                 participants = [*shells, ("Direct C", args.spawn_control.resolve())]

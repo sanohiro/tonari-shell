@@ -496,7 +496,7 @@ fn repeat(
                     // Shell lookup stays live. Only immutable argument strings are reused.
                     literals = body
                         .iter()
-                        .map(execute::PreparedCommand::literal_builtin)
+                        .map(|stmt| execute::PreparedCommand::literal_builtin(stmt, session))
                         .collect();
                 }
                 iterations = iterations.saturating_add(1);

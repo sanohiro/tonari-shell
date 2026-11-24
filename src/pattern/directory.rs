@@ -10,7 +10,10 @@ pub(super) fn visit_names(
     mut visit: impl FnMut(&CStr, u8),
 ) {
     let Ok(path) = CString::new(dir) else { return };
-    let _ = read_names(&path, false, &mut |name, kind| {
+    let _ = read_names(&path, false, b"", &mut |name, kind| {
+        let Some(name) = name else {
+            return ControlFlow::Continue(());
+        };
         // A symlink or an unknown entry type still needs a pathname lookup.
         if (!directories_only || matches!(kind, libc::DT_DIR | libc::DT_LNK | libc::DT_UNKNOWN))
             && (!skip_dots || !matches!(name.to_bytes(), b"." | b".."))
@@ -23,19 +26,21 @@ pub(super) fn visit_names(
 
 pub(crate) fn scan(
     path: &Path,
-    visitor: &mut impl FnMut(&CStr, u8) -> ControlFlow<()>,
+    prefix: &[u8],
+    visitor: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
 ) -> ControlFlow<()> {
     let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
         return ControlFlow::Continue(());
     };
-    read_names(&path, true, visitor)
+    read_names(&path, true, prefix, visitor)
 }
 
 #[cfg(not(target_os = "linux"))]
 fn read_names(
     path: &CStr,
     _interruptible: bool,
-    visit: &mut impl FnMut(&CStr, u8) -> ControlFlow<()>,
+    prefix: &[u8],
+    visit: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
 ) -> ControlFlow<()> {
     use std::ptr::NonNull;
 
@@ -64,7 +69,10 @@ fn read_names(
             );
             CStr::from_bytes_with_nul_unchecked(bytes)
         };
-        visit(name, unsafe { (*entry).d_type })?;
+        visit(
+            name.to_bytes().starts_with(prefix).then_some(name),
+            unsafe { (*entry).d_type },
+        )?;
     }
 }
 
@@ -72,7 +80,8 @@ fn read_names(
 fn read_names(
     path: &CStr,
     interruptible: bool,
-    visit: &mut impl FnMut(&CStr, u8) -> ControlFlow<()>,
+    prefix: &[u8],
+    visit: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
 ) -> ControlFlow<()> {
     use std::mem::offset_of;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -122,8 +131,11 @@ fn read_names(
                 return ControlFlow::Continue(());
             }
             let (record, rest) = batch.split_at(len);
-            let Ok(name) = CStr::from_bytes_until_nul(&record[NAME..]) else {
-                return ControlFlow::Continue(());
+            let raw = &record[NAME..];
+            let name = if raw.starts_with(prefix) {
+                CStr::from_bytes_until_nul(raw).ok()
+            } else {
+                None
             };
             visit(name, record[TYPE])?;
             batch = rest;

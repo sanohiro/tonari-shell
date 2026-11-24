@@ -2,11 +2,14 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <spawn.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+extern char **environ;
 
 int main(int argc, char **argv) {
     if (argc < 3) return 2;
@@ -38,6 +41,12 @@ int main(int argc, char **argv) {
                 else if (!strcmp(argv[3], "-w")) (void)access(path, W_OK);
                 else (void)stat(path, &info);
             }
+        } else if (!strcmp(argv[1], "wait") && argc == 4) {
+            pid_t child;
+            char *const args[] = {"sleep", argv[3], NULL};
+            if (posix_spawnp(&child, "sleep", NULL, NULL, args, environ)) return 1;
+            int status;
+            if (waitpid(child, &status, 0) != child || status != 0) return 1;
         } else return 2;
     }
     return 0;

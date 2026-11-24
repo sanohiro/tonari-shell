@@ -370,13 +370,13 @@ fn visit_commands(
         } else {
             &dir
         };
-        scan(path, &mut |raw, kind| {
+        scan(path, prefix.as_bytes(), &mut |raw, kind| {
             if editing && entries % 256 == 0 {
                 crate::editor::preview::scan_input();
             }
             entries += 1;
-            if !matches!(raw.to_bytes(), b"." | b"..")
-                && raw.to_bytes().starts_with(prefix.as_bytes())
+            if let Some(raw) = raw
+                && !matches!(raw.to_bytes(), b"." | b"..")
                 && let Ok(name) = raw.to_str()
             {
                 return visit(name, Some((path, kind)));
@@ -486,14 +486,16 @@ impl<'a> Directory<'a> {
     fn visit(&self, mut visitor: impl FnMut(&str, u8) -> ControlFlow<()>) {
         let mut entries = 0usize;
         let editing = crate::editor::preview::active();
-        let _ = scan(&self.path, &mut |raw, kind| {
+        let _ = scan(&self.path, self.base.as_bytes(), &mut |raw, kind| {
             if editing && entries % 256 == 0 {
                 crate::editor::preview::scan_input();
             }
             entries += 1;
+            let Some(raw) = raw else {
+                return ControlFlow::Continue(());
+            };
             let bytes = raw.to_bytes();
-            if bytes.starts_with(self.base.as_bytes())
-                && !matches!(bytes, b"." | b"..")
+            if !matches!(bytes, b"." | b"..")
                 && (!bytes.starts_with(b".") || self.base.starts_with('.'))
                 && let Ok(name) = raw.to_str()
             {

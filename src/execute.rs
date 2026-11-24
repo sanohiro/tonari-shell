@@ -173,6 +173,10 @@ fn apply(actions: &[Action<'_>]) -> bool {
         eprintln!("tonari: redirection: {e}");
         return false;
     }
+    apply_protected(actions)
+}
+
+fn apply_protected(actions: &[Action<'_>]) -> bool {
     for a in actions {
         match a {
             Action::HereInput(dest, body) => {
@@ -1070,7 +1074,7 @@ fn run_builtin(
             }
         }
     }
-    let applied = apply(actions);
+    let applied = apply_protected(actions);
     let old_input = session.stdin_redirected;
     if applied && actions.iter().any(|a| a.destination() == 0) {
         session.stdin_redirected = true;
@@ -1503,7 +1507,10 @@ pub(crate) struct PreparedCommand {
     empty_status: u8,
 }
 impl PreparedCommand {
-    pub(crate) fn literal_builtin(statement: &crate::parser::Statement) -> Option<Box<Self>> {
+    pub(crate) fn literal_builtin(
+        statement: &crate::parser::Statement,
+        session: &mut Session,
+    ) -> Option<Box<Self>> {
         let crate::parser::Command::Pipeline(stages) = &statement.command else {
             return None;
         };
@@ -1514,9 +1521,7 @@ impl PreparedCommand {
             return None;
         }
         let name = cmd.words.first()?.as_literal()?;
-        if matches!(name, "builtin" | "command" | "set" | "exec")
-            || !builtin_names().contains(&name)
-        {
+        if matches!(name, "builtin" | "command" | "set") || !builtin_names().contains(&name) {
             return None;
         }
         let words = cmd
@@ -1524,35 +1529,27 @@ impl PreparedCommand {
             .iter()
             .map(|word| word.as_literal().map(str::to_owned))
             .collect::<Option<Vec<_>>>()?;
-        let redirects = cmd
-            .redirects
-            .iter()
-            .map(|r| {
-                if r.variable.is_some()
-                    || !matches!(
-                        r.target,
-                        Target::Read
-                            | Target::Write
-                            | Target::Append
-                            | Target::Clobber
-                            | Target::ReadWrite
-                            | Target::HereString
-                    )
-                {
-                    return None;
-                }
-                let mut word = r.word.as_literal()?.to_owned();
-                if r.target == Target::HereString {
-                    word.push('\n');
-                }
-                Some(Redirect {
-                    variable: None,
-                    target: r.target,
-                    fd: r.fd,
-                    word,
+        let redirects = if cmd.redirects.is_empty() {
+            Vec::new()
+        } else {
+            // A literal redirect can reuse its parsed path or fd, but its open,
+            // duplicate, move or close must still happen on every iteration.
+            if session.noclobber
+                || cmd.redirects.iter().any(|r| {
+                    r.variable.is_some()
+                        || r.word.as_literal().is_none()
+                        || matches!(r.target, Target::HereDoc { expand: true })
                 })
-            })
-            .collect::<Option<Vec<_>>>()?;
+            {
+                return None;
+            }
+            let captured = std::cell::Cell::new(None);
+            prepare_redirects(
+                cmd.redirects.clone(),
+                &mut Expansion::new(session, 0, &captured),
+            )
+            .ok()?
+        };
         Some(Box::new(Self {
             words,
             redirects,

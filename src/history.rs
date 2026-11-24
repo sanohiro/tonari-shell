@@ -473,6 +473,7 @@ impl History {
         } else {
             part
         };
+        let non_ascii = raw.bytes().find(|b| !b.is_ascii());
         let finder = memchr::memmem::Finder::new(raw.as_bytes());
         let reverse = memchr::memmem::FinderRev::new(raw.as_bytes());
         let mut end = self.tail_start;
@@ -495,7 +496,9 @@ impl History {
             } // An oversized record needs the streaming reader.
             let rows = &buf[boundary..];
             // Only candidate blocks need record parsing and UTF-8 validation.
-            if finder.find(rows).is_some() {
+            if non_ascii.is_none_or(|b| memchr::memchr(b, rows).is_some())
+                && finder.find(rows).is_some()
+            {
                 let mut remaining = rows;
                 while !remaining.is_empty() {
                     let Some(hit) = reverse.rfind(remaining) else {

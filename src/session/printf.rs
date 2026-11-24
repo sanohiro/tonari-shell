@@ -84,17 +84,27 @@ pub(crate) fn run(
     };
     let mut args = Arguments { values, status: 0 };
     let mut output = Vec::new();
-    loop {
-        let count = args.values.len();
-        match render(format.as_bytes(), &mut args, &mut output, &mut variables) {
-            Ok(true) if !args.values.is_empty() && count != args.values.len() => continue,
-            Err(message) => {
-                eprintln!("tonari: printf: {message}");
-                args.status = 1;
-            }
-            _ => {}
+    if matches!(format.as_str(), "%s\\n" | "%s\n") {
+        if values.is_empty() {
+            output.push(b'\n');
         }
-        break;
+        for value in values {
+            output.extend_from_slice(value.as_bytes());
+            output.push(b'\n');
+        }
+    } else {
+        loop {
+            let count = args.values.len();
+            match render(format.as_bytes(), &mut args, &mut output, &mut variables) {
+                Ok(true) if !args.values.is_empty() && count != args.values.len() => continue,
+                Err(message) => {
+                    eprintln!("tonari: printf: {message}");
+                    args.status = 1;
+                }
+                _ => {}
+            }
+            break;
+        }
     }
     if let Some(name) = target {
         let bytes = output.split(|&v| v == 0).next().unwrap_or_default();
