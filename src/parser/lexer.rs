@@ -833,28 +833,8 @@ pub(super) fn lex(
             })
         {
             let literal = &start[..plain];
-            let fixed = match literal {
-                "{" => Some("{"),
-                "}" => Some("}"),
-                "if" => Some("if"),
-                "then" => Some("then"),
-                "else" => Some("else"),
-                "elif" => Some("elif"),
-                "fi" => Some("fi"),
-                "for" => Some("for"),
-                "do" => Some("do"),
-                "done" => Some("done"),
-                "in" => Some("in"),
-                "while" => Some("while"),
-                "until" => Some("until"),
-                "esac" => Some("esac"),
-                "select" => Some("select"),
-                "function" => Some("function"),
-                "coproc" => Some("coproc"),
-                "time" => Some("time"),
-                _ => None,
-            };
-            if let Some(fixed) = fixed {
+            if let Some(fixed) = super::reserved_spelling(literal) {
+                saw_case |= substitution && fixed == "case";
                 tokens.push(Token::Reserved(fixed));
                 chars = start[plain..].chars();
                 continue;

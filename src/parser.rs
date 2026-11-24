@@ -267,29 +267,34 @@ impl Error {
 }
 
 fn reserved(word: &str) -> bool {
-    matches!(
-        word,
-        "if" | "then"
-            | "else"
-            | "elif"
-            | "fi"
-            | "case"
-            | "esac"
-            | "while"
-            | "until"
-            | "for"
-            | "do"
-            | "done"
-            | "in"
-            | "select"
-            | "function"
-            | "coproc"
-            | "time"
-            | "!"
-            | "{"
-            | "[["
-            | "}"
-    )
+    reserved_spelling(word).is_some()
+}
+
+fn reserved_spelling(word: &str) -> Option<&'static str> {
+    Some(match word {
+        "if" => "if",
+        "then" => "then",
+        "else" => "else",
+        "elif" => "elif",
+        "fi" => "fi",
+        "case" => "case",
+        "esac" => "esac",
+        "while" => "while",
+        "until" => "until",
+        "for" => "for",
+        "do" => "do",
+        "done" => "done",
+        "in" => "in",
+        "select" => "select",
+        "function" => "function",
+        "coproc" => "coproc",
+        "time" => "time",
+        "!" => "!",
+        "{" => "{",
+        "[[" => "[[",
+        "}" => "}",
+        _ => return None,
+    })
 }
 
 pub fn parse(source: &str) -> Result<Vec<Statement>, Error> {

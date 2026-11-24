@@ -195,6 +195,17 @@ f done
 """
         self.compare(source, 0, "old:雪 x\nnew:two words\na\nb\n14:done\n".encode(), minimum=4)
 
+    def test_reserved_words_as_function_arguments_patterns_and_operands(self):
+        source = r"""f() {
+  local -a data=(if then else fi)
+  printf '%s|' "${data[@]}"
+  for x in for do done; do printf '%s|' "$x"; done
+  [[ if = if ]] && printf 'ok|'
+  case then in then) printf '%s\n' "$(case x in x) echo done;; esac)";; esac
+}
+f"""
+        self.compare(source, 0, b"if|then|else|fi|for|do|done|ok|done\n", minimum=4)
+
     def test_caller_lines_and_debug_inheritance(self):
         script = self.cwd / "calls.sh"
         script.write_text('inner(){\n  caller; caller 0; caller 1; echo "${BASH_LINENO[*]}:$LINENO"\n}\n'
