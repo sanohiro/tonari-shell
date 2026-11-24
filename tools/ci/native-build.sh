@@ -35,6 +35,19 @@ if [[ $SUITE == budget* || $SUITE == inventory* ]]; then
     cp "$(CARGO_PROFILE_RELEASE_OPT_LEVEL=$level tools/build-release.sh)" "$RUNNER_TEMP/bin/opt-$level"
   done
 fi
+if [[ $SUITE == history-windows ]]; then
+  previous=$(git rev-parse --verify --end-of-options "${PREVIOUS_REVISION}^{commit}")
+  git worktree add -q --detach "$RUNNER_TEMP/window" "$previous"
+  (
+    cd "$RUNNER_TEMP/window"
+    cp src/history.rs "$RUNNER_TEMP/history.rs"
+    for size in 4 16 32; do
+      sed "s/const WINDOW: u64 = 16 \* 1024/const WINDOW: u64 = $size * 1024/" "$RUNNER_TEMP/history.rs" > src/history.rs
+      grep -Fq "const WINDOW: u64 = $size * 1024;" src/history.rs
+      cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/window-$size"
+    done
+  )
+fi
 if [[ $SUITE == profiles ]]; then
   git worktree add -q --detach "$RUNNER_TEMP/old" 3999b0e
   (cd "$RUNNER_TEMP/old"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/previous-profile")

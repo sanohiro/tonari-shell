@@ -86,6 +86,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("shell", nargs="+", type=Path)
     parser.add_argument("--runs", type=int, default=21)
+    parser.add_argument("--history-rank", type=int, help="place the reverse-search target this many rows before the end")
     parser.add_argument("--scan-control", type=Path, help="also measure a direct unique-name directory scan")
     parser.add_argument("--large", action="store_true", help="also measure a 1 MiB paste")
     parser.add_argument("--case", action="append", choices=["commit", "paste", "Up", "Down", "Ctrl-R", "Tab"])
@@ -104,6 +105,10 @@ def main():
         decoy = b"v=" + "東京駅前の日本語確定結別候補".encode()
         recalled = "前の行🌱".encode() * 32 + FLAG
         commands = [target] + [f": padding-{i}".encode() for i in range(99997)] + [b"v=" + recalled, decoy]
+        if args.history_rank is not None:
+            if not 2 <= args.history_rank < len(commands) - 1:
+                parser.error("history rank must leave the final two rows in place")
+            commands.insert(-args.history_rank, commands.pop(0))
         bash_history = home / ".bash_history"
         bash_history.write_bytes(b"\n".join(commands) + b"\n")
         journal.write_bytes(b"".join(b"1\t1\t0\t/tmp\t" + c + b"\n" for c in commands))

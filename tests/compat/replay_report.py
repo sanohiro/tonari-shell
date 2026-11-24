@@ -33,11 +33,24 @@ def classify(fixed, extended):
     return "tried, above target"
 
 
-def records(root):
+def component_results(path):
+    found = {}
+    if path:
+        for file in path.glob("*/replay.jsonl"):
+            with file.open() as stream:
+                lane = json.loads(next(stream))["lane"]
+                for line in stream:
+                    row = json.loads(line)
+                    found[lane, row["id"]] = row
+    return found
+
+
+def records(root, parts=None):
     frozen = {row["id"]: row for row in map(json.loads, MANIFEST.read_text().splitlines())}
     expected = {(lane, group, name) for row in frozen.values() for lane, config in row["lanes"].items()
                 for group, name in config["features"]}
     seen = set()
+    components = component_results(parts)
     for file in sorted([*root.glob("*/replay.jsonl"), *root.glob("*/additional.jsonl")]):
         with file.open() as stream:
             header = json.loads(next(stream))
@@ -50,7 +63,12 @@ def records(root):
                 config = row["lanes"][lane]
                 if "error" in fixed or "error" in extra:
                     raise ValueError((lane, result["id"], fixed.get("error"), extra.get("error")))
-                times = fixed["samples_ns"]
+                part = components.get((lane, result["id"]), {})
+                component = part.get("component", {})
+                control = part.get("fixed", {})
+                verdict = classify(fixed, extra)
+                if verdict == "tried, above target" and control and classify(control, {}) == "matched OS control":
+                    verdict = "matched OS control"
                 for group, name in config["features"]:
                     key = (lane, group, name)
                     if key in seen:
@@ -58,15 +76,17 @@ def records(root):
                     seen.add(key)
                     data = dict(lane=lane, group=group, feature=name, id=result["id"],
                                 cohort="previous misses" if key in expected else "new misses",
-                                verdict=classify(fixed, extra), iterations=fixed["count"])
-                    for label, stage in (("fixed", fixed), ("long", extra)):
+                                verdict=verdict, iterations=fixed["count"])
+                    for label, stage in (("fixed", fixed), ("long", extra), ("control_replay", control), ("component", component)):
                         for build in ("bash", "baseline", "current", "opt-3", "opt-s", "direct"):
                             values = stage.get("samples_ns", {}).get(build, [])
                             data[f"{label}_{build}_p50_ns"] = round(median(values)) if values else ""
                             data[f"{label}_{build}_p95_ns"] = sorted(values)[math.ceil(.95*len(values))-1] if values else ""
                     data.update(long_iterations=extra.get("count", ""), old_tonari_ns=config["old_ns"][0],
                                 old_bash_ns=config["old_ns"][1], control=json.dumps(fixed.get("control")),
-                                argv=json.dumps(row["argv"], ensure_ascii=False))
+                                control_replay=json.dumps(control.get("control")), component_iterations=component.get("count", ""),
+                                component_error=component.get("error", ""), component_setup=part.get("setup", ""),
+                                component_body=part.get("body", ""), argv=json.dumps(row["argv"], ensure_ascii=False))
                     yield data
     missing = expected - seen
     if missing:
@@ -77,8 +97,9 @@ def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("artifacts", type=Path)
     cli.add_argument("ledger", type=Path)
+    cli.add_argument("--components", type=Path)
     args = cli.parse_args()
-    rows = sorted(records(args.artifacts), key=lambda r: (r["lane"], r["group"], r["feature"]))
+    rows = sorted(records(args.artifacts, args.components), key=lambda r: (r["lane"], r["group"], r["feature"]))
     with args.ledger.open("w") as out:
         writer = csv.DictWriter(out, fieldnames=list(rows[0]), delimiter="\t", lineterminator="\n")
         writer.writeheader()

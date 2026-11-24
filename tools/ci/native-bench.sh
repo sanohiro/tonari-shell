@@ -102,6 +102,13 @@ case "$SUITE" in
       --case merged-pipeline --case merged-pipeline-redirect --case redirect-stderr --case background-subshell-wait ;;
   foreground)
     run foreground python3 tests/compat/foreground.py "$current" "$ref" ;;
+  history-windows)
+    shells=("$bin/window-4" "$bin/window-16" "$bin/window-32" "$ref")
+    run oldest python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --runs 61
+    for rank in 20 300 900; do
+      run "rank-$rank" python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --runs 41 --history-rank "$rank"
+    done
+    run history-bursts python3 tools/bench_history.py "$bin/window-4" "$bin/window-16" "$bin/window-32" --bursts --entries 100000 1000000 --runs 21 ;;
   history)
     cc -O2 tools/bench_spawn.c -o "$bin/scan-control"
     run tab python3 tools/bench_editor_input.py "$current" "$bin/baseline" "$ref" --case Tab --scan-control "$bin/scan-control" --runs 41
