@@ -473,6 +473,7 @@ impl History {
             part
         };
         let finder = memchr::memmem::Finder::new(raw.as_bytes());
+        let reverse = memchr::memmem::FinderRev::new(raw.as_bytes());
         let mut end = self.tail_start;
         let mut block = vec![0; BLOCK.min(end as usize)];
         while end != 0 {
@@ -493,7 +494,18 @@ impl History {
             let rows = &buf[boundary..];
             // Only candidate blocks need record parsing and UTF-8 validation.
             if finder.find(rows).is_some() {
-                for line in rows.rsplit(|&b| b == b'\n') {
+                let mut remaining = rows;
+                while !remaining.is_empty() {
+                    let Some(hit) = reverse.rfind(remaining) else {
+                        break;
+                    };
+                    let start = memchr::memrchr(b'\n', &remaining[..hit]).map_or(0, |i| i + 1);
+                    let end = memchr::memchr(b'\n', &remaining[hit..])
+                        .map_or(remaining.len(), |i| hit + i);
+                    let line = &remaining[start..end];
+                    // Skip the entire record, including further hits in its
+                    // metadata or the same command, before looking for an older hit.
+                    remaining = &remaining[..start.saturating_sub(1)];
                     if let Ok(line) = std::str::from_utf8(line)
                         && let Some(word) = command_field(line)
                         && if at_start {

@@ -75,6 +75,10 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
+  history)
+    run reverse-search python3 tools/bench_editor_input.py "$current" "$bin/baseline" "$ref" --case Ctrl-R --runs 41
+    run bursts python3 tools/bench_history.py "$current" "$bin/baseline" --bursts --entries 100000 1000000 --runs 21
+    run escaped python3 tools/bench_history.py "$current" "$bin/baseline" --escaped --entries 1000000 --runs 21 ;;
   throughput)
     cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
     run scripts python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" \
