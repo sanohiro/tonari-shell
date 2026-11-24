@@ -99,6 +99,11 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
+  parity-mixed)
+    shells=("$current" "$bin/baseline" "$ref")
+    run oldest python3 tools/bench_editor_input.py "${shells[@]}" --mixed-history --case Ctrl-R --prompt-time --runs 41
+    run oldest-ascii python3 tools/bench_editor_input.py "${shells[@]}" --mixed-history --case Ctrl-R --ascii-query --prompt-time --runs 41
+    run missing python3 tools/bench_editor_input.py "$current" "$ref" --mixed-history --case Miss --prompt-time --runs 21 ;;
   parity-history)
     shells=("$current" "$bin/baseline" "$ref")
     run oldest python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --prompt-time --runs 61

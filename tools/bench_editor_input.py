@@ -96,6 +96,8 @@ def main():
     parser.add_argument("--runs", type=int, default=21)
     parser.add_argument("--entries", type=int, default=100000)
     parser.add_argument("--ascii-query", action="store_true", help="search for an ASCII substring")
+    parser.add_argument("--mixed-history", action="store_true",
+                        help="fill half the journal with Japanese commands sharing part of the query")
     parser.add_argument("--prompt-time", action="store_true", help="also report PTY launch to prompt and launch through search")
     parser.add_argument("--history-rank", type=int, help="place the reverse-search target this many rows before the end")
     parser.add_argument("--scan-control", type=Path, help="also measure a direct unique-name directory scan")
@@ -121,7 +123,14 @@ def main():
         if args.ascii_query:
             decoy = b"v=deployment-region-winter"
         recalled = "前の行🌱".encode() * 32 + FLAG
-        commands = [target] + [f": padding-{i}".encode() for i in range(args.entries - 3)] + [b"v=" + recalled, decoy]
+        def history_line(i):
+            if not args.mixed_history:
+                return f": padding-{i}".encode()
+            if i % 2:
+                return f": git log --oneline branch-{i}".encode()
+            return f": 調査/東京駅前の日本語-{i} deployment-region-east".encode()
+
+        commands = [target, *(history_line(i) for i in range(args.entries - 3)), b"v=" + recalled, decoy]
         if args.history_rank is not None:
             if not 2 <= args.history_rank < len(commands) - 1:
                 parser.error("history rank must leave the final two rows in place")
