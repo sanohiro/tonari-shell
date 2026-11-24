@@ -38,10 +38,11 @@ def component_results(path):
     if path:
         for file in path.glob("*/replay.jsonl"):
             with file.open() as stream:
-                lane = json.loads(next(stream))["lane"]
+                header = json.loads(next(stream))
+                lane = header["lane"]
                 for line in stream:
                     row = json.loads(line)
-                    found[lane, row["id"]] = row
+                    found[lane, row["id"]] = (header["sha256"]["current"], row)
     return found
 
 
@@ -63,7 +64,10 @@ def records(root, parts=None):
                 config = row["lanes"][lane]
                 if "error" in fixed or "error" in extra:
                     raise ValueError((lane, result["id"], fixed.get("error"), extra.get("error")))
-                part = components.get((lane, result["id"]), {})
+                current_hash = header["sha256"]["current"]
+                part_hash, part = components.get((lane, result["id"]), (current_hash, {}))
+                if part_hash != current_hash:
+                    raise ValueError(f"{lane}: component replay measured a different executable")
                 component = part.get("component", {})
                 control = part.get("fixed", {})
                 verdict = classify(fixed, extra)

@@ -6,6 +6,9 @@ on:
         description: Previous revision for the functions and throughput suites
         type: string
         default: HEAD^
+      timing_run:
+        description: Workflow run whose saved inventory timings should be replayed by budget-extra
+        type: string
       matrix:
         description: Native runners and suites to measure
         type: string
@@ -13,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   measure:
@@ -26,6 +30,7 @@ jobs:
       SUITE: ${{ matrix.suite }}
       PREVIOUS_REVISION: ${{ inputs.previous }}
       NATIVE_RUNNER: ${{ matrix.runner }}
+      TIMING_RUN: ${{ inputs.timing_run }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -33,6 +38,15 @@ jobs:
           persist-credentials: false
       - name: Record machine and build release
         run: bash tools/ci/native-build.sh
+      - name: Retrieve saved timings for an additional replay
+        if: startsWith(matrix.suite, 'budget-extra')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ $TIMING_RUN =~ ^[0-9]+$ ]]
+          source=inventory
+          if [[ $SUITE == *-ubuntu ]]; then source=inventory-ubuntu; fi
+          gh run download "$TIMING_RUN" -n "$NATIVE_RUNNER-$source" -D "$RUNNER_TEMP/reuse"
       - name: Measure on the native host
         run: bash tools/ci/native-bench.sh
       - name: Preserve measurements and host details

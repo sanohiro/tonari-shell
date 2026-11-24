@@ -29,6 +29,10 @@ if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; t
   arch=x64; [[ $RUNNER_ARCH == ARM64 ]] && arch=arm64
   if [[ $SUITE == budget* ]]; then
     extra=(--runs 9); [[ $SUITE == budget-parts* ]] && extra+=(--components)
+    if [[ $SUITE == budget-extra* ]]; then
+      run+=(-v "$RUNNER_TEMP/reuse/timings.json:/timings.json:ro")
+      extra+=(--inventory /timings.json)
+    fi
     "${run[@]}" -v "$bin:/candidates:ro" --entrypoint python3 tonari-audit tests/compat/replay_budget.py \
       --lane "$distro$arch" --bash /bin/bash --bin /candidates "${extra[@]}" > "$out/replay.jsonl"
     exit
@@ -54,6 +58,7 @@ if [[ $RUNNER_OS == macOS ]]; then
   fi
   if [[ $SUITE == budget* ]]; then
     extra=(--runs 9); [[ $SUITE == budget-parts* ]] && extra+=(--components)
+    if [[ $SUITE == budget-extra* ]]; then extra+=(--inventory "$RUNNER_TEMP/reuse/timings.json"); fi
     python3 tests/compat/replay_budget.py --lane macOSarm64 --bash "$ref" --bin "$bin" "${extra[@]}" > "$out/replay.jsonl"
     exit
   fi

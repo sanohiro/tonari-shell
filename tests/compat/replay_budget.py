@@ -12,6 +12,7 @@ import tempfile
 import time
 
 from audit import Audit
+from bench import as_workload
 
 MANIFEST = Path(__file__).with_name("budget-2026-11-24.jsonl")
 END = b"__TONARI_BENCH_COMPLETE__"
@@ -125,7 +126,9 @@ def workloads(lane, inventory):
             if ((group, name) in old or "bash" not in perf or
                     perf["tonari"][0] * 3 <= perf["bash"][0] * 2):
                 continue
-            work = item["workload"]
+            work = as_workload(rows, group, name)
+            if not work or "argv" not in work:
+                raise ValueError(f"{group} / {name}: repeated timing has no shell witness")
             argv, fixture, stdin = (work[k] for k in ("argv", "fixture", "stdin"))
             key = (tuple(argv), fixture, stdin, perf["iterations"])
             if key not in extra:
