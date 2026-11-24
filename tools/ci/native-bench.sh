@@ -27,6 +27,13 @@ if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; t
   "${run[@]}" --entrypoint sh tonari-audit -ec 'uname -m; /bin/bash --version; cat /etc/os-release' >> "$out/host.txt"
   distro=Debian; [[ $SUITE == *-ubuntu ]] && distro=Ubuntu
   arch=x64; [[ $RUNNER_ARCH == ARM64 ]] && arch=arm64
+  if [[ $SUITE == inventory-trap* ]]; then
+    for attempt in 1 2 3; do
+      "${run[@]}" --entrypoint python3 tonari-audit tests/compat/upstream.py --source /gnu --helpers /helpers \
+        --bash /bin/bash --tonari /tonari --only run-trap > "$out/trap-$attempt.json"
+    done
+    exit
+  fi
   if [[ $SUITE == budget* ]]; then
     extra=(--runs 9); [[ $SUITE == *-parts* ]] && extra+=(--components)
     [[ $SUITE == budget-extra-parts* ]] && extra+=(--runs 31)
