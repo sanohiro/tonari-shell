@@ -26,7 +26,7 @@ def next_prompt(fd):
     return read_until(fd, PROMPT, accepted.partition(ACCEPTED)[2])
 
 
-def trial(shell, cwd, rc, env, verify):
+def trial(shell, cwd, rc, env, verify, first_only=False):
     clock_in, clock_out = os.pipe()
     argv = [str(shell), "--noprofile", "--rcfile", str(rc), "-i"]
     pid, fd = pty.fork()
@@ -48,6 +48,8 @@ def trial(shell, cwd, rc, env, verify):
         result["first prompt (ms)"].append((time.monotonic_ns() - start) / 1e6)
         if cwd.name == "project" and b"prompt-bench" not in first:
             raise ValueError(f"missing Git branch in prompt: {first!r}")
+        if first_only:
+            return result
         for _ in range(3):
             start = time.monotonic_ns()
             os.write(fd, b":")
@@ -136,11 +138,20 @@ def main():
             print(cwd.name, flush=True)
             compare(shells, args.runs, lambda sh, verify: trial(sh, cwd, rc, env, verify))
 
+        # Compare startup using the same upstream code generated ahead of time.
+        init = home / "starship-init.bash"
+        init.write_bytes(subprocess.check_output([starship, "init", "bash", "--print-full-init"], env=env))
+        rc.write_text('. "$HOME/starship-init.bash"\n')
+        print("project, saved init", flush=True)
+        compare(shells, args.runs, lambda sh, verify: trial(sh, project, rc, env, verify, first_only=not verify))
+
         # Isolate shell work which is otherwise hidden by the renderer and Git.
         marker_prompt = (r"\[" + "\x1b[1;36m" + r"\]" + "開発 🌸 " + r"\[" + "\x1b[0m" + r"\]") * 4 + "\n❯ "
         cases = [
             ("200 empty jobs captures", "", "s=$(jobs -p)", 200, ""),
             ("200 external array captures", 'args=("a b" "" "*")', 's=$(/usr/bin/printf %s "${args[@]}")', 200, "a b*"),
+            ("100 captures of a wrapper function", "f() { /usr/bin/printf ok; }", "s=$(f)", 100, "ok"),
+            ("24 newlines-only expansions, 256 bytes", "p=$'" + "abc🌸x" * 32 + "\\n'", r"s=${p//[!$'\n']}", 24, "\n"),
             ("2000 styled prompt expansions", f"p='{marker_prompt}'", 's=${p@P}', 2000,
              marker_prompt.replace(r"\[", "").replace(r"\]", "")),
         ]

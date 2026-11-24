@@ -1675,6 +1675,22 @@ export SHELLOPTS; args=(SHELLOPTS); v=$(/usr/bin/printenv "${args[@]}")
 case ":$v:" in *:errexit:*) echo leaked;; *) echo cleared;; esac""",
                      0, b"<1><value>\ncommand\ncleared\n", minimum=5)
 
+    def test_newline_filter_and_bracket_substitutions(self):
+        self.env["LC_ALL"] = "en_US.UTF-8"
+        self.compare(r"""v=$'🌸abc\na-71a\n雪'; printf '<%s>\n' "${v//[!$'\n']}"
+v='a-71Bc]'; printf '<%s>\n' "${v//[a-c]}" "${v//[[:digit:]]}" "${v//[]-]}"
+v=aba; printf '<%s>\n' "${v//[a]b}" "${v/#[a]}" "${v//[a]/x}" """,
+                     0, b"<\n\n>\n<-71B]>\n<a-Bc]>\n<a71Bc>\n<a>\n<ba>\n<xbx>\n")
+
+    def test_external_at_end_of_captured_function(self):
+        self.compare(r"""f() { /bin/sh -c 'echo "$PPID"'; }
+p=$(f); test "$p" = "$$" && echo direct
+f() { local -x name="$1"; /bin/sh -c 'printf %s "$name"; exit 19'; }
+name=outer; v=$(f 'two words'); echo "$?:$v:$name"
+f() { /bin/echo before; echo after; }; v=$(f); echo "$v"
+f() { trap 'echo leaving' RETURN; /bin/echo body; :; }; v=$(f); echo "$v" """,
+                     0, b"direct\n19:two words:outer\nbefore\nafter\nbody\nleaving\n", minimum=5)
+
     def test_prompt_width_markers_and_literal_backslashes(self):
         self.compare(r"""p='日\[x\]\[y\]本'; printf '<%s>\n' "${p@P}"
 p='\\[literal]$((3+4))'; printf '<%s>\n' "${p@P}" """,

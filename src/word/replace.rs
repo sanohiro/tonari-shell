@@ -23,6 +23,22 @@ pub(super) fn substitute(
     fold: Option<crate::session::CharacterLocale>,
 ) -> String {
     use ReplaceMode::*;
+    // A single bracket expression consumes one character. Avoid trying every
+    // possible suffix when deleting matching characters from a string.
+    if mode == All
+        && template.is_empty()
+        && fold.is_none()
+        && let Some(body) = pattern.strip_prefix('[')
+        && body.ends_with(']')
+        && crate::pattern::bracket_end(body) == Some(body.len() - 1)
+        && !body.contains("[.")
+        && !body.contains("[=")
+    {
+        let matcher = crate::pattern::Matcher::new(pattern);
+        let mut bytes = [0; 4];
+        text.retain(|c| !matcher.matches(c.encode_utf8(&mut bytes)));
+        return text;
+    }
     if let Some(locale) = fold
         && !pattern.is_empty()
         && !crate::pattern::has_magic(pattern, false)

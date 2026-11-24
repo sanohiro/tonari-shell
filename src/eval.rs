@@ -530,7 +530,12 @@ fn repeat(
     flow
 }
 
-pub fn call_function(session: &mut Session, mut argv: Vec<String>, status: u8) -> Flow {
+pub fn call_function(
+    session: &mut Session,
+    mut argv: Vec<String>,
+    status: u8,
+    replace_last: bool,
+) -> Flow {
     let name = argv.remove(0);
     if session.function_depth >= 128 {
         eprintln!("tonari: {name}: function nesting limit exceeded");
@@ -564,7 +569,7 @@ pub fn call_function(session: &mut Session, mut argv: Vec<String>, status: u8) -
                 .iter()
                 .map(Cow::Borrowed),
             status,
-            false,
+            replace_last,
             &mut [],
         )
     });

@@ -703,7 +703,7 @@ fn eval_builtin(
         },
         Builtin::Exec => exec_builtin(cmd, session, args),
         Builtin::Function => {
-            crate::call_function(session, std::mem::take(&mut cmd.words), last_status)
+            crate::call_function(session, std::mem::take(&mut cmd.words), last_status, false)
         }
         Builtin::Trap => Flow::Continue(session.traps.builtin(args, session.interactive)),
         Builtin::Alias => Flow::Continue(crate::alias::builtin(&cmd.words[0], args, session)),
@@ -1036,6 +1036,22 @@ fn run_builtin(
     last_status: u8,
     final_command: bool,
 ) -> io::Result<Flow> {
+    // The substitution child can become the function's last external command.
+    // Keep the normal function scope and let each statement recheck active traps.
+    if final_command
+        && matches!(builtin, Builtin::Function)
+        && session.subshell_depth > 0
+        && cmd.redirects.is_empty()
+        && cmd.assignments.is_empty()
+        && session.substitutions.scope() == 0
+    {
+        return Ok(crate::call_function(
+            session,
+            std::mem::take(&mut cmd.words),
+            last_status,
+            true,
+        ));
+    }
     if cmd.redirects.is_empty() {
         return Ok(eval_builtin(builtin, cmd, session, last_status, false));
     }
