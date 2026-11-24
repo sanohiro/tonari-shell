@@ -880,6 +880,8 @@ pub fn line(
         if entering_search {
             matched_query = None;
             search = Some((String::new(), 0, text.clone(), cursor));
+            // Readline keeps the current draft until a nonempty query matches.
+            continue;
         }
         if let Some((query, index, original, original_cursor)) = search.as_mut() {
             match action {

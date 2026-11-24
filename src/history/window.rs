@@ -23,11 +23,15 @@ impl From<&Metadata> for Stamp {
     }
 }
 
+pub(super) const PAGE: usize = 16 * 1024;
+const CAPACITY: usize = 4 * 1024 * 1024;
+
 #[derive(Default)]
 pub(super) struct Window {
     stamp: Option<Stamp>,
     start: u64,
     bytes: Vec<u8>,
+    unicode_pages: Vec<bool>,
 }
 
 impl Window {
@@ -52,8 +56,7 @@ impl Window {
         if !meta.is_file() || stamp.len < 32 * 1024 || waiting() {
             return;
         }
-        const CAPACITY: u64 = 4 * 1024 * 1024;
-        let count = stamp.len.min(CAPACITY);
+        let count = stamp.len.min(CAPACITY as u64);
         self.start = stamp.len - count;
         if file.seek(SeekFrom::Start(self.start)).is_err() {
             return;
@@ -70,8 +73,24 @@ impl Window {
             }
         }
         if !self.bytes.is_empty() {
+            self.unicode_pages.clear();
+            self.unicode_pages
+                .extend(self.bytes.chunks(PAGE).map(|page| !page.is_ascii()));
             self.stamp = Some(stamp);
         }
+    }
+
+    pub(super) fn complete(&self, session: &crate::Session) -> Option<(&[u8], &[bool])> {
+        let stamp = self.stamp?;
+        if self.start != 0 || self.bytes.len() as u64 != stamp.len {
+            return None;
+        }
+        let meta = std::fs::metadata(super::file(session)?).ok()?;
+        if stamp != Stamp::from(&meta) {
+            return None;
+        }
+        let end = memchr::memrchr(b'\n', &self.bytes).map_or(0, |i| i + 1);
+        Some((&self.bytes[..end], &self.unicode_pages))
     }
 
     pub(super) fn bytes(&self, meta: &Metadata) -> Option<(u64, &[u8])> {
@@ -86,11 +105,25 @@ impl Window {
                 .is_ok_and(|m| self.stamp == Some(Stamp::from(&m)))
     }
 
-    pub(super) fn appended(&mut self, file: &File, length: usize) {
+    pub(super) fn appended(&mut self, file: &File, entry: &[u8]) {
         let old = self.stamp.take().unwrap();
         if let Ok(m) = file.metadata() {
             let new = Stamp::from(&m);
-            if new.identity == old.identity && old.len.checked_add(length as u64) == Some(new.len) {
+            if new.identity == old.identity
+                && old.len.checked_add(entry.len() as u64) == Some(new.len)
+            {
+                if self.start + self.bytes.len() as u64 == old.len
+                    && entry.len() <= CAPACITY - self.bytes.len()
+                {
+                    let first_page = self.bytes.len() / PAGE;
+                    self.bytes.extend_from_slice(entry);
+                    self.unicode_pages.truncate(first_page);
+                    self.unicode_pages.extend(
+                        self.bytes[first_page * PAGE..]
+                            .chunks(PAGE)
+                            .map(|p| !p.is_ascii()),
+                    );
+                }
                 self.stamp = Some(new);
             }
         }

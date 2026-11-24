@@ -101,7 +101,8 @@ fi
 case "$SUITE" in
   parity-history)
     shells=("$current" "$bin/baseline" "$ref")
-    run oldest python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --case Miss --prompt-time --runs 61
+    run oldest python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --prompt-time --runs 61
+    run missing python3 tools/bench_editor_input.py "$current" "$ref" --case Miss --prompt-time --runs 41
     for rank in 20 900; do
       run "rank-$rank" python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --history-rank "$rank" --prompt-time --runs 41
     done

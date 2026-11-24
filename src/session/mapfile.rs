@@ -85,10 +85,9 @@ impl<'a> Options<'a> {
 
 // A full replacement has no callback or later reader that can observe a
 // partially filled array. Build dense indices in order with one bulk load.
-fn read_all(options: &Options<'_>) -> io::Result<Records> {
+fn read_all(options: &Options<'_>, mut store: impl FnMut(&str)) -> io::Result<()> {
     let fd = unsafe { BorrowedFd::borrow_raw(options.fd) }.try_clone_to_owned()?;
     let mut reader = io::BufReader::new(std::fs::File::from(fd));
-    let mut lines = Records::default();
     let mut pending = Vec::new();
     let mut skip = options.skip;
     let delim = options.delimiter;
@@ -102,7 +101,7 @@ fn read_all(options: &Options<'_>) -> io::Result<Records> {
         } else {
             bytes
         };
-        lines.push(std::str::from_utf8(bytes).map_err(io::Error::other)?);
+        store(std::str::from_utf8(bytes).map_err(io::Error::other)?);
         Ok(())
     };
     loop {
@@ -132,7 +131,7 @@ fn read_all(options: &Options<'_>) -> io::Result<Records> {
         }
         reader.consume(n);
     }
-    Ok(lines)
+    Ok(())
 }
 
 pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u8) -> Flow {
@@ -156,12 +155,30 @@ pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u
         eprintln!("tonari: {command}: {fd}: invalid file descriptor");
         return Flow::Continue(1);
     }
-    if options.limit == 0 && options.callback.is_none() && options.origin.is_none() {
-        return match read_all(&options) {
-            Ok(lines) => {
+    let origin = i64::from(options.origin.unwrap_or(0));
+    if options.limit == 0 && options.callback.is_none() {
+        let result = if options.origin.is_some() {
+            let mut var = session
+                .declared_variable(options.name, false)
+                .unwrap_or_default();
+            var.declared = true;
+            var.array_assigned = true;
+            let elements = var.make_array();
+            let mut index = origin;
+            let result = read_all(&options, |line| {
+                elements.insert(index, line.to_owned());
+                index += 1;
+            });
+            session.variables.insert(options.name.into(), var);
+            result
+        } else {
+            let mut lines = Records::default();
+            read_all(&options, |line| lines.push(line)).map(|()| {
                 session.store_elements(options.name, Elements::Records(lines), false);
-                Flow::Continue(0)
-            }
+            })
+        };
+        return match result {
+            Ok(()) => Flow::Continue(0),
             Err(e) => {
                 eprintln!("tonari: {command}: {e}");
                 Flow::Continue(1)
@@ -169,7 +186,6 @@ pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u
         };
     }
     let mut input = Input::new(fd);
-    input.consume_all = options.callback.is_none() && options.limit == 0;
     if options.origin.is_none() {
         session.replace_array(options.name, Vec::new());
     } else {
@@ -183,7 +199,6 @@ pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u
     }
     let mut skip = options.skip;
     let mut count = 0u64;
-    let origin = i64::from(options.origin.unwrap_or(0));
     let mut bytes = Vec::new();
     while options.limit == 0 || count < u64::from(options.limit) {
         bytes.clear();

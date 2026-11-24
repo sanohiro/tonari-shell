@@ -275,6 +275,73 @@ impl Entries {
     }
 }
 
+// Only complete records are passed to this matcher. A hit in the PID or
+// directory, or two hits in one command, never consume a second history entry.
+fn encoded_fragment(needle: &str) -> std::borrow::Cow<'_, str> {
+    // A tab or CR can also occur literally in the command field of an
+    // existing journal. Either spelling still contains this encoded part.
+    let part = needle.split(['\t', '\r']).max_by_key(|s| s.len()).unwrap();
+    if part.contains(['\\', '\n']) {
+        let mut encoded = String::new();
+        encode(part, &mut encoded);
+        std::borrow::Cow::Owned(encoded)
+    } else {
+        std::borrow::Cow::Borrowed(part)
+    }
+}
+
+fn journal_matcher<'a>(
+    needle: &'a str,
+    prefix: bool,
+    raw: &'a str,
+) -> impl Fn(&[u8], &mut usize) -> Option<String> + 'a {
+    let at_start = prefix && !needle.contains(['\t', '\r']);
+    let non_ascii = raw.bytes().find(|b| !b.is_ascii());
+    let finder = memchr::memmem::Finder::new(raw.as_bytes());
+    let reverse = memchr::memmem::FinderRev::new(raw.as_bytes());
+    move |rows: &[u8], skip: &mut usize| {
+        let raw = finder.needle();
+        // Only candidate blocks need record parsing and UTF-8 validation.
+        if non_ascii.is_none_or(|b| memchr::memchr(b, rows).is_some())
+            && finder.find(rows).is_some()
+        {
+            let mut remaining = rows;
+            while !remaining.is_empty() {
+                let Some(hit) = reverse.rfind(remaining) else {
+                    break;
+                };
+                let start = memchr::memrchr(b'\n', &remaining[..hit]).map_or(0, |i| i + 1);
+                let end =
+                    memchr::memchr(b'\n', &remaining[hit..]).map_or(remaining.len(), |i| hit + i);
+                let line = &remaining[start..end];
+                // Skip the entire record, including further hits in its
+                // metadata or the same command, before looking for an older hit.
+                remaining = &remaining[..start.saturating_sub(1)];
+                if let Ok(line) = std::str::from_utf8(line)
+                    && let Some(word) = command_field(line)
+                    && if at_start {
+                        word.as_bytes().starts_with(raw)
+                    } else {
+                        finder.find(word.as_bytes()).is_some()
+                    }
+                    && let Some(command) = decode(word)
+                    && if prefix {
+                        command.len() > needle.len() && command.starts_with(needle)
+                    } else {
+                        command.contains(needle)
+                    }
+                {
+                    if *skip == 0 {
+                        return Some(command);
+                    }
+                    *skip -= 1;
+                }
+            }
+        }
+        None
+    }
+}
+
 impl History {
     pub fn persist(session: &Session, source: &str, cwd: Option<&str>, status: u8) {
         Self::append(session, source, cwd, status, None);
@@ -326,7 +393,7 @@ impl History {
         if journal.write_all(entry.as_bytes()).is_ok()
             && let Some(cache) = tracked
         {
-            cache.appended(&journal, entry.len());
+            cache.appended(&journal, entry.as_bytes());
         }
     }
 
@@ -488,20 +555,8 @@ impl History {
         if Some((m.dev(), m.ino())) != self.journal || m.len() < self.offset {
             return Err(());
         }
-        // A tab or CR can also occur literally in the command field of an
-        // existing journal. Either spelling still contains this encoded part.
-        let part = needle.split(['\t', '\r']).max_by_key(|s| s.len()).unwrap();
-        let at_start = prefix && part.len() == needle.len();
-        let mut encoded = String::new();
-        let raw = if part.contains(['\\', '\n']) {
-            encode(part, &mut encoded);
-            encoded.as_str()
-        } else {
-            part
-        };
-        let non_ascii = raw.bytes().find(|b| !b.is_ascii());
-        let finder = memchr::memmem::Finder::new(raw.as_bytes());
-        let reverse = memchr::memmem::FinderRev::new(raw.as_bytes());
+        let encoded = encoded_fragment(needle);
+        let matches = journal_matcher(needle, prefix, &encoded);
         let mut end = self.tail_start;
         let cached = self.window.bytes(&m);
         let block = &mut self.search_buffer;
@@ -530,42 +585,8 @@ impl History {
                 return Err(());
             } // An oversized record needs the streaming reader.
             let rows = &buf[boundary..];
-            // Only candidate blocks need record parsing and UTF-8 validation.
-            if non_ascii.is_none_or(|b| memchr::memchr(b, rows).is_some())
-                && finder.find(rows).is_some()
-            {
-                let mut remaining = rows;
-                while !remaining.is_empty() {
-                    let Some(hit) = reverse.rfind(remaining) else {
-                        break;
-                    };
-                    let start = memchr::memrchr(b'\n', &remaining[..hit]).map_or(0, |i| i + 1);
-                    let end = memchr::memchr(b'\n', &remaining[hit..])
-                        .map_or(remaining.len(), |i| hit + i);
-                    let line = &remaining[start..end];
-                    // Skip the entire record, including further hits in its
-                    // metadata or the same command, before looking for an older hit.
-                    remaining = &remaining[..start.saturating_sub(1)];
-                    if let Ok(line) = std::str::from_utf8(line)
-                        && let Some(word) = command_field(line)
-                        && if at_start {
-                            word.starts_with(raw)
-                        } else {
-                            word.contains(raw)
-                        }
-                        && let Some(command) = decode(word)
-                        && if prefix {
-                            command.len() > needle.len() && command.starts_with(needle)
-                        } else {
-                            command.contains(needle)
-                        }
-                    {
-                        if skip == 0 {
-                            return Ok(Some(command));
-                        }
-                        skip -= 1;
-                    }
-                }
+            if let Some(hit) = matches(rows, &mut skip) {
+                return Ok(Some(hit));
             }
             end = start + boundary as u64;
         }
@@ -610,6 +631,36 @@ impl History {
         queries: &[SearchQuery],
         waiting: &dyn Fn() -> bool,
     ) -> Result<Option<String>, ()> {
+        if let Some((bytes, pages)) = self.window.complete(session) {
+            let result = Self::best_match(queries, |needle, mut skip| {
+                let encoded = encoded_fragment(needle);
+                let matches = journal_matcher(needle, false, &encoded);
+                let unicode = !encoded.is_ascii();
+                let mut end = bytes.len();
+                while end != 0 {
+                    if waiting() {
+                        return Err(());
+                    }
+                    let split = end.saturating_sub(240 * 1024);
+                    let start = if split == 0 {
+                        0
+                    } else {
+                        memchr::memrchr(b'\n', &bytes[..split]).map_or(0, |i| i + 1)
+                    };
+                    if (!unicode
+                        || pages[start / window::PAGE..=(end - 1) / window::PAGE].contains(&true))
+                        && let Some(hit) = matches(&bytes[start..end], &mut skip)
+                    {
+                        return Ok(Some(hit));
+                    }
+                    end = start;
+                }
+                Ok(None)
+            })?;
+            if result.is_some() || session.history_lines().is_empty() {
+                return Ok(result);
+            }
+        }
         if !self.ensure(session, view, false, waiting) {
             return Err(());
         }
