@@ -1,5 +1,19 @@
 # Engineering notes / 開発知見
 
+## 2026-11-25 · Comparing both sides of a Starship prompt / Starship の待ち時間を両シェルで測る
+
+Starship runs two nested evaluations at startup. Tonari's file reader could recognize a complete multiline function, but the string reader used by `eval` kept parsing each growing prefix. The string reader now tests a bounded lookahead and accepts it only when the parser returns a single complete command. Top-level aliases and options therefore take effect before reading the next command. A one-argument `eval` borrows that argument and retains the calling line number. The Bash witnesses include a quoted closing brace, a here-document with closing tokens, an alias declared in a previous compound command and a later syntax error. On the local Apple M1 the four real function registrations together took about 1 µs. Parsing fell from 1.379 to 0.290 ms, compared with 0.265 ms in Bash. [Implementation and witnesses](../tests/shell.py)
+
+Starship の初期化では `eval` の中からさらに `eval` を実行します。Tonari にはファイル読み込みで関数全体を先読みする処理がありましたが、文字列を評価する際には、物理行が増えるたびに定義の先頭からパースしていました。関数を登録する瞬間と、登録までに関数本体を読み取る時間を別々に測ったことで、この差が分かりました。先読みを採用する条件はパーサーが複合コマンド 1 個の完結を確認できることで、後続のコマンドは、先行するエイリアス定義やオプション変更の実行後に解釈します。[実装と検証](../src/input.rs)
+
+The upstream Bash hook gets the start time through a shell function whose body consists of an external command with literal arguments. A command substitution can launch that executable directly when both the call and its body are plain commands and function scope has no observable effect. The normal interpreter handles traps, argument expansion, assignments and redirections. Measuring the actual executable and then replaying the same init and prompt output with lightweight external processes keeps the cost of argument preparation, process creation, pipes, waiting and terminal output visible in both runs. The executable used for replay exists only in the benchmark's temporary directory. [Official Bash hook](https://github.com/starship/starship/blob/v1.27.0/src/init/starship.bash) · [Release results and phase timings](benchmarks.md#starship-phases)
+
+Enter のたびに、公式フックは開始時刻・終了時刻・プロンプトの 3 回、外部プログラムを起動します。最初の呼び出しは引数のないシェル関数を経由するため、以前の Tonari では直接呼ぶ 2 回目よりも時間がかかりました。関数がリテラル引数の外部コマンド 1 個だけを実行し、スコープやトラップに影響しない場合は、パイプに直接出力する子を起動できます。起動から終了待ちまでの合計にはシェルの仕事も含まれます。同じ表示を返す軽い子に差し替えた対照を設けると、シェルが実際に何 ms 短縮したかを検証できます。[実測と再現手順](benchmarks.md#starship-phases)
+
+The published macOS Starship executable links AppKit even when running its time command. On this M1, linking AppKit into a program that only prints the wall clock increased its median launch-to-output-and-exit time by 2.85 ms. Both shells pay for the dependencies of the executable they launch. Tonari's own release links only libSystem. [Matched executable comparison](benchmarks.md#starship-phases)
+
+macOS 版では、時刻を返すだけの小さな C プログラムに AppKit をリンクすると、同じ処理が 2.90 ms から 5.74 ms になりました。公開版 Starship は時刻取得でも AppKit をロードする実行ファイルを起動します。シェル側の起動準備とは別に、起動対象のリンク構成にも実測できるコストがあります。[条件と数値](benchmarks.md#starship-phases)
+
 ## 2026-11-25 · Cost of filtering a rendered prompt / 描画後の改行抽出
 
 The upstream Bash hook uses `${PS1//[!$'\n']}` to preserve just the newlines for integrations that position a right prompt. A single bracket expression normally consumes one character. During global deletion, use the compiled matcher on each UTF-8 character and retain the remainder in place. The previous longest-substring search repeatedly tested longer spans that the pattern could never match. Expressions with explicit collating symbols, equivalence classes or case folding follow the general matcher. Inside an isolated subshell a final function call can pass the opportunity to exec through its body. Keep function scope and check traps at each statement, so a wrapper around an external time command can release its intermediate shell process. [Upstream hook](https://github.com/starship/starship/blob/v1.27.0/src/init/starship.bash)

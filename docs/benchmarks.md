@@ -1,5 +1,88 @@
 # Startup and execution / 起動と実行性能
 
+<a id="starship-phases"></a>
+
+## 2026-11-25 · Where the official Starship hook spends time / 公式フックの所要時間の内訳
+
+Previous Tonari is `4ff9ac3`, current Tonari is `86bead7`. All shells ran the upstream Starship 1.27.0 Bash integration with a clean home, a clean repository of 200 tracked files, a 120 × 32 PTY, and the default theme. The full integration checks success and failure prompts, pipeline status, job count and command duration. The replay fixture runs the same initialization and prompt hooks and launches the same number of subprocesses. A small compiled executable returns the official initialization text, samples the actual clock for each timestamp and returns captured PS1/PS2 bytes for a successful colon command. The harness verifies the replayed prompt values. The difference between genuine and replay timings includes executable loading, Starship initialization, rendering and Git work. Replay still includes process launch, the clock call, pipes and terminal I/O. Run `python3 tools/bench_starship.py OLD CURRENT BASH --starship /path/to/starship --runs 25`. [Native comparisons and artifacts](https://github.com/sanohiro/tonari-shell/actions/runs/45482196177)
+
+### Release builds through the terminal
+
+Each cell reports the median/p95 in milliseconds. Shell order rotated over 21 measured sessions on the local M1 and 25 on each native CI host, with three Enter samples per session and two warmups. macOS used Bash 5.2.37, Linux Bash 5.2.21. Compare releases within one host and run.
+
+| Native host | Workload | Previous Tonari | Current Tonari | Bash |
+|---|---|---:|---:|---:|
+| Apple M1 (local) | Genuine, first | 57.308/60.653 | 55.651/66.794 | 64.964/69.837 |
+| Apple M1 (local) | Replay, first | 14.707/16.467 | 13.614/15.315 | 22.812/25.102 |
+| Apple M1 (local) | Genuine, Enter | 33.800/36.558 | 32.640/37.764 | 36.853/39.348 |
+| Apple M1 (local) | Replay, Enter | 5.880/7.140 | 5.087/6.062 | 8.687/10.154 |
+| Linux x86-64 | Genuine, first | 14.584/15.771 | 13.038/15.294 | 16.192/16.936 |
+| Linux x86-64 | Replay, first | 4.969/5.509 | 3.446/3.597 | 6.444/6.688 |
+| Linux x86-64 | Genuine, Enter | 8.613/9.329 | 8.511/9.476 | 9.799/10.770 |
+| Linux x86-64 | Replay, Enter | 1.262/1.477 | 1.222/1.298 | 2.443/2.676 |
+| Linux arm64 | Genuine, first | 16.076/16.546 | 14.876/15.577 | 18.253/18.888 |
+| Linux arm64 | Replay, first | 6.159/6.356 | 4.738/4.962 | 8.308/8.771 |
+| Linux arm64 | Genuine, Enter | 9.195/10.010 | 9.080/9.739 | 10.730/11.379 |
+| Linux arm64 | Replay, Enter | 1.801/1.884 | 1.547/1.648 | 3.304/3.431 |
+| macOS arm64 (CI) | Genuine, first | 86.374/183.232 | 95.112/149.061 | 115.194/260.850 |
+| macOS arm64 (CI) | Replay, first | 24.173/42.161 | 21.379/32.723 | 35.831/58.541 |
+| macOS arm64 (CI) | Genuine, Enter | 57.772/105.948 | 55.818/114.244 | 64.325/138.191 |
+| macOS arm64 (CI) | Replay, Enter | 11.706/37.983 | 8.508/14.745 | 13.633/25.593 |
+
+The first M1 series had a higher startup and redisplay p95 in current Tonari than in the previous build despite lower medians. A dedicated repeat rotated the two releases and Bash over 101 fresh sessions each (303 Enter submissions). First-prompt median/p95 was 63.155/79.172 ms previously, 61.822/71.041 ms currently and 72.197/81.502 ms in Bash. Enter measured 37.138/43.989, 36.202/43.970 and 40.334/47.573 ms respectively. The median gain repeated and the previous and current Enter p95 were within 0.02 ms in this larger sample. The hosted macOS arm64 runner showed wider variation. Genuine startup took 86.374 ms previously and 95.112 ms currently, with p95 falling from 183.232 to 149.061 ms. Its genuine startup median therefore did not reproduce the local improvement. Its replay startup and genuine Enter medians improved.
+
+The following elapsed times include shell startup. The first workload repeatedly evaluates the exact multiline upstream precmd definition and checks its presence. The second captures a shell function whose body is a single external printf. Both check the result. The raw artifacts also contain individual keystroke echo, saved initialization, long-prompt and array-expansion timings.
+
+| Native host | Workload | Previous Tonari | Current Tonari | Bash |
+|---|---|---:|---:|---:|
+| Apple M1 (local) | 100 precmd definitions | 56.606/58.239 | 9.989/10.772 | 18.687/19.345 |
+| Apple M1 (local) | 100 wrapper captures | 230.407/264.564 | 154.601/225.389 | 246.571/296.936 |
+| Linux x86-64 | 100 precmd definitions | 63.601/65.651 | 5.963/6.074 | 12.493/13.068 |
+| Linux x86-64 | 100 wrapper captures | 44.363/46.291 | 34.400/37.022 | 57.479/58.840 |
+| Linux arm64 | 100 precmd definitions | 61.126/61.383 | 6.057/6.249 | 12.255/12.435 |
+| Linux arm64 | 100 wrapper captures | 65.568/68.224 | 52.037/54.602 | 79.927/83.613 |
+| macOS arm64 (CI) | 100 precmd definitions | 79.505/98.110 | 12.726/23.409 | 23.022/29.449 |
+| macOS arm64 (CI) | 100 wrapper captures | 441.562/742.840 | 397.543/612.595 | 490.429/766.340 |
+
+A second M1 run rotated four combinations of shell and child implementation in one series (31 measured startup sessions and 93 Enter submissions per combination). With the genuine binary, Enter took 32.022 ms in Tonari and 36.048 ms in Bash. With replay it took 5.026 and 8.660 ms. Switching to the genuine binary added 27.0 and 27.4 ms respectively. Initial display took 54.545 vs 64.514 ms with Starship and 13.522 vs 23.112 ms with replay. Both experiments include child launch and wait. In a reference check with the same release executable, standalone `starship time` took 7.812 ms from Python including launch and output collection, `prompt` took 20.599 ms, and Starship’s own `timings` reported 11 ms in `git_status` on the clean fixture. The executable initializes its logger and Rayon pool before dispatching the time command. A separate 61-sample check gave 7.44 ms at the upstream default and 7.32 ms with one worker. Changing the thread count explained little of the standalone latency on this machine. [Starship startup](https://github.com/starship/starship/blob/v1.27.0/src/main.rs#L161-L175) · [Time command](https://github.com/starship/starship/blob/v1.27.0/src/main.rs#L270-L277)
+
+The release executables had the following sizes in bytes. Apple M1 1,400,320 → 1,416,832, Linux x86-64 1,903,800 → 1,907,128, Linux arm64 1,645,496 → 1,650,000, macOS arm64 (CI) 1,400,272 → 1,433,312. The local Mach-O gained one 16 KiB page in the `__DATA_CONST` segment and 128 bytes in `__LINKEDIT`. Its `__text` section grew by 4,032 bytes within an unchanged `__TEXT` segment size. The only linked library was libSystem. The Linux binaries passed the stripped static PIE checks.
+
+M1 の配布版で Enter から表示完了までを測ると、実際の Starship は Tonari 32.64 ms、Bash 36.85 ms、同じ表示と起動回数の対照は 5.09 ms と 8.69 ms でした。実際の Starship に戻すと、それぞれに約 28 ms が加わります。Linux x86-64 の対照は 1.22 ms と 2.44 ms、実際の表示は 8.51 ms と 9.80 ms です。シェルが稼ぐ時間は実際のフックにも現れます。初回パース、関数実行、引数展開のそれぞれが Bash の 2/3 に達したかは、下の個別計測で判定できます。
+
+### Time inside the two shells on an Apple M1
+
+Separate diagnostic builds of GNU Bash 5.2.37 and Tonari on macOS 27.2.1 recorded parent-side monotonic times at the same two visible boundaries. Shell order rotated over 31 fresh sessions per shell after two warmups. Each session submitted three colon commands. Rows are medians in milliseconds. Timed functions subtract nested instrumented intervals. Parser entry counts refer to each implementation's own parser. Bash's timed parser handles string input and excludes the blocking Readline call. The launch row measures time in the parent handing work to the OS. Bash returns from fork before its child execs. Tonari's direct path uses `posix_spawn`. Pipe drain and child wait can therefore include different amounts of child setup. Each median is taken independently.
+
+| Phase | Previous Tonari | Current Tonari | Bash |
+|---|---:|---:|---:|
+| First prompt, open and read rcfile (µs, open + read) | 21 + 2 | 21 + 3 | 17 + 1 |
+| First prompt, parser (entries) | 1.379 (159) | 0.290 (22) | 0.265 (55) |
+| First prompt, register four functions | 0.001 | 0.001 | 0.011 |
+| First prompt, prepare command arguments | 0.449 | 0.441 | 0.552 |
+| First prompt, function execution excluding measured nested work | 0.107 | 0.110 | 0.125 |
+| First prompt, parent launch | 1.659 | 1.598 | 2.253 |
+| First prompt, pipe drain and child wait | 53.293 | 52.561 | 58.560 |
+| Enter, parser | 0.010 | 0.008 | 0.026 |
+| Enter, prepare command arguments | 0.113 | 0.113 | 0.245 |
+| Enter, function execution excluding measured nested work | 0.124 | 0.108 | 0.136 |
+| Enter, pipe drain and child wait | 33.984 | 33.391 | 36.361 |
+| Enter, time outside the three external substitutions | 0.479 | 0.442 | 1.553 |
+
+With only the string-reader change in place, a separate four-way M1 comparison measured the additional wrapper optimization. Enter went from 35.412 to 34.639 ms with the genuine executable and from 6.498 to 5.590 ms with the lightweight control. At initial display the time calls already dispatched directly. [Native run with the parser change alone](https://github.com/sanohiro/tonari-shell/actions/runs/45481626738)
+
+Initial display executes two `init` commands (13.558 ms combined in current Tonari, 15.405 in Bash), two `time` commands (13.346 vs 15.211 ms), and the continuation and main prompts (27.437 vs 29.718 ms). Enter has three external calls. The following wall times start on entry to the outer substitution and end when the shell has its output and status. They overlap the phases above. On Enter, previous Tonari handed off two direct launches and one fork, current Tonari three direct launches (0.803 ms combined), and Bash four forks (1.410 ms, including its jobs substitution).
+
+| Enter, external substitution | Previous Tonari | Current Tonari | Bash |
+|---|---:|---:|---:|
+| Start time via the PS0 function | 7.641 | 6.862 | 7.703 |
+| End time | 6.746 | 6.695 | 7.658 |
+| Render prompt | 20.352 | 20.444 | 21.504 |
+
+A separate M1 control tested executable startup for the two timestamp calls. The same tiny C program called `clock_gettime(CLOCK_REALTIME)` and printed milliseconds. Compiled with `cc -O2`, its median/p95 was 2.898/3.213 ms for launch, output and wait from Python. Adding only `-Wl,-needed_framework,AppKit` gave 5.744/6.471 ms. Linking every direct system dependency listed by `otool -L` on the published Starship executable gave 5.849/6.571 ms. The real `starship time` measured 7.221/7.792 ms in the same rotation (81 samples each after three warmups). The clock code and printed data were identical across the three control builds. This isolates nearly 3 ms of extra launch latency in the control with the matching framework set. The remaining difference includes Starship's code, its executable layout and its startup environment.
+
+前回の 98.8% は Tonari が外部コマンド置換に入ってから戻るまでの割合でした。両シェルの内訳を見ると、起動時には Tonari のパースに余分な時間があり、Enter 後には開始時刻を返す関数の起動にも差がありました。時刻を取る前後で同じ実行ファイルを 2 回起動し、さらに Git を含むプロンプトを描画します。ホスト型 macOS CI の初回表示中央値は旧版 86.37 ms、修正版 95.11 ms、Bash 115.19 ms で、ローカル M1 で見られた旧版からの短縮は再現しませんでした。各コマンドの計測値には親の準備、OS による起動、子の処理、出力回収と待機が含まれます。対照実験ではフックと起動回数を保ち、外部プログラムの処理を軽くしたときの応答時間も実際に比較します。[公式フック](https://github.com/starship/starship/blob/v1.27.0/src/init/starship.bash)
+
 <a id="starship-filter"></a>
 
 ## 2026-11-25 · Remaining Starship prompt latency / Starship の再表示待ち時間
