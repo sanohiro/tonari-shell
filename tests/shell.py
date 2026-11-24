@@ -761,6 +761,67 @@ show
         self.compare("eval " + shlex.quote("# comment\n{\n echo $LINENO\n}\necho $LINENO"),
                      0, b"7\n9\n")
 
+    def test_eval_large_profile_preserves_command_boundaries(self):
+        # Read the text as an rcfile generator would. The actual function close
+        # is beyond 8 KiB, with plausible terminators inside its body.
+        common = "# settings\n" + "  : ${padding}\n" * 620
+        hook = ("shopt -s expand_aliases\nsetup() {\n" + common
+                + "  cat <<'END'\n}\nEND\n  alias configured='printf ready'\n}\n"
+                + "setup\nconfigured\nprintf ':%s' \"$LINENO\"")
+        (self.cwd / "config").write_text(hook)
+        self.compare('eval "$(<config)"', 0, f"}}\nready:{len(hook.splitlines())}".encode())
+        (self.cwd / "config").write_text(hook + "\nif )")
+        self.compare('eval "$(<config)"', 2, f"}}\nready:{len(hook.splitlines())}".encode())
+
+    def test_eval_repeated_code_keeps_runtime_state(self):
+        self.compare(r"""set -- 'two words'
+for n in 1 2 3 4; do false; eval 'printf "<%s|%s|%s>" "$?" "$n" "$1"'; done
+for n in 1 2 3; do eval "i=$n"; done
+declare -i j; eval 'j=07'; readonly keep=yes; eval 'keep=no' 2>/dev/null
+printf ':%s:%s:%s:%s' "$i" "$j" "$?" "$keep"
+f() { eval 'return 19'; echo missed; }; f; printf ':%s' "$?"
+for n in a b; do eval 'break'; echo missed; done
+eval -- 'printf' '%s' '":雪"'
+""", 0, ("".join(f"<1|{i}|two words>" for i in range(1, 5)) + ":3:7:1:yes:19:雪").encode())
+        self.compare("eval 'exit 17'; echo missed", 17)
+
+    def test_eval_nested_boundaries_are_validated_by_the_parser(self):
+        source = ("shopt -s expand_aliases\nif true; then\n"
+                  + "if true; then\n :\n  fi\n" * 300
+                  + "cat <<'END'\nif true; then\nEND\n"
+                  + "alias loaded='echo ok'\n  fi\nloaded\n")
+        (self.cwd / "config").write_text(source)
+        self.compare('eval "$(<config)"', 0, b"if true; then\nok\n")
+
+    def test_eval_rechecks_parser_options_aliases_and_lines(self):
+        self.compare(r"""run() { eval "$code"; }
+code='echo "$n"'
+for n in one two three; do run; done
+code='case b in @(a|b)) echo match;; esac'
+shopt -s extglob; run; run; run
+shopt -u extglob; run 2>/dev/null; echo "off:$?"
+shopt -s expand_aliases
+code='say'; alias say='echo first'; run; run; run
+alias say='echo second'; run
+unalias say
+say() { echo function; }; run
+for n in one two three; do eval 'echo "$LINENO"'; done
+eval 'echo "$LINENO"'
+""", 0, b"one\ntwo\nthree\nmatch\nmatch\nmatch\noff:2\nfirst\nfirst\nfirst\nsecond\nfunction\n12\n12\n12\n13\n")
+        for shell in self.shells_for():
+            probe = self.command(shell, """for i in 1 2 3; do eval ': <<END'; done""")
+            self.assertEqual(probe.returncode, 0)
+            self.assertEqual(probe.stderr.count(b"warning:"), 3, probe.stderr)
+
+    def test_eval_options_and_temporary_bindings(self):
+        self.compare(r"""value=outer
+value=inner eval; printf '%s:%s ' "$?" "$value"
+value=inner eval --; printf '%s:%s ' "$?" "$value"
+value=inner eval -z 2>/dev/null; printf '%s:%s ' "$?" "$value"
+eval -- -z 2>/dev/null; printf '%s ' "$?"
+eval --help >/dev/null; echo "$?"
+""", 0, b"0:outer 0:outer 2:outer 127 2\n")
+
     def test_bash_env(self):
         startup = self.cwd / "startup"
         startup.write_text('export MARK=from_bash_env\n')

@@ -61,7 +61,7 @@ if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; t
   exit
 fi
 if [[ $RUNNER_OS == macOS ]]; then
-  if [[ $SUITE == inventory || $SUITE == parity-commands || $SUITE == parity-invocation || $SUITE == foreground || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == budget* ]]; then
+  if [[ $SUITE == inventory || $SUITE == parity-commands || $SUITE == parity-invocation || $SUITE == foreground || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == rcfiles || $SUITE == budget* ]]; then
     gnu="$RUNNER_TEMP/gnu"
     mkdir -p "$gnu"
     download_bash "$version" "$digest" "$RUNNER_TEMP/bash.tar.gz"
@@ -272,6 +272,7 @@ case "$SUITE" in
     run capture python3 tools/bench_file_capture.py "$current" "$ref" --runs 21
     if [[ $RUNNER_OS == Linux ]]; then run heap python3 tools/bench_heap.py "$current" "$ref" --runs 7; fi ;;
   rcfiles)
+    REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k test_eval
     rc="$RUNNER_TEMP/rc"
     mkdir -p "$rc"
     # Same 94,826-byte Git completion source used in the original macOS measurement.
@@ -285,16 +286,24 @@ export PATH="$HOME/.local/bin:$PATH"
 nvm() { unset -f nvm; . "$HOME/.nvm/nvm.sh" && nvm "$@"; }
 alias ll >/dev/null && declare -F nvm >/dev/null || exit 1
 RC
-    python3 - "$rc/large" <<'PYRC'
+    python3 - "$rc" <<'PYRC'
 import sys
 from pathlib import Path
-Path(sys.argv[1]).write_text("large_fn() {\n return 0\n" +
+rc = Path(sys.argv[1])
+(rc / "large").write_text("large_fn() {\n return 0\n" +
     "".join(f"  : line-{i:04d}-padding-abcdef\n" for i in range(760)) +
     "}\nlarge_fn || exit 1\n")
+(rc / "nested").write_text("if true; then\n" +
+    "  if true; then\n    : nested\n  fi\n" * 300 + "  verified=loaded\nfi\n")
 PYRC
-    for name in light git large; do
-      run "rc-$name" python3 tools/bench_login.py "$current" --bash "$ref" --rcfile "$rc/$name" --runs 41
-    done ;;
+    printf 'eval "$(<"%s")" || exit 1\ndeclare -F large_fn >/dev/null || exit 1\n' "$rc/large" > "$rc/eval-large"
+    printf 'eval "$(<"%s")" || exit 1\n[[ $verified == loaded ]] || exit 1\n' "$rc/nested" > "$rc/eval-nested"
+    for name in light git large eval-large eval-nested; do
+      run "rc-$name" python3 tools/bench_login.py "$current" --previous "$bin/baseline" --bash "$ref" --rcfile "$rc/$name" --runs 41
+    done
+    run eval python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 25 \
+      --case eval-fixed --case eval-changing --case eval-arguments --case eval-alternating \
+      --case eval-nested --case eval-multiline --case eval-function --case eval-alias ;;
   profiles)
     run levels python3 tools/bench.py "$current" --bash "$ref" --compare-tonari Old "$bin/previous-profile" --compare-tonari Os "$bin/opt-s" --compare-tonari Oz "$bin/opt-z" --compare-tonari O3 "$bin/opt-3" --runs 101
     for level in s z 3 previous-profile; do

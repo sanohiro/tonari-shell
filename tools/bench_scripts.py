@@ -19,8 +19,23 @@ def split_case(separator):
     return source, "32 128 128"
 
 
+def eval_loop(body, check, expected, setup="", count=2000):
+    return (f'{setup}\nfor ((i=0; i<{count}; i++)); do {body}; done\n{check}', expected)
+
+
 # The last command prints a result that the driver checks on every run.
 CASES = {
+    "eval-fixed": eval_loop("""eval '((sum += i))'""", 'echo "$sum"', "1999000"),
+    "eval-changing": eval_loop('eval "n=$i"', 'echo "$n"', "1999"),
+    "eval-arguments": eval_loop("""eval -- '((sum' += 'i))'""", 'echo "$sum"', "1999000"),
+    "eval-alternating": eval_loop("""eval '((sum += i))'; eval 'last=$sum'""", 'echo "$last"', "1999000"),
+    "eval-nested": eval_loop("""eval 'eval "$op"'""", 'echo "$sum"', "1999000", "op='((sum += i))'"),
+    "eval-multiline": eval_loop('eval "$hook"', 'echo "$sum:$last"', "1999000:1999000",
+                                "hook='((sum += i))\nlast=$sum'"),
+    "eval-function": eval_loop('eval "$fn"; f', 'echo "$sum"', "1999000",
+                               "fn='f() {\n  ((sum += i))\n}'"),
+    "eval-alias": eval_loop("""alias act='((sum+=i))'; eval act; alias act='((sum++))'; eval act""",
+                            'echo "$sum"', "2001000", "shopt -s expand_aliases"),
     "arithmetic": ("""\
 sum=0
 for ((i=1; i<=10000; i++)); do ((sum += i)); done

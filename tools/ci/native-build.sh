@@ -25,7 +25,7 @@ rustup toolchain install "$toolchain" --profile minimal --component rust-src --t
 rustc +"$toolchain" -vV >> results/host.txt
 export CARGO_TARGET_DIR="$RUNNER_TEMP/build"
 cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/current"
-if [[ $SUITE == parity* || $SUITE == probe || $SUITE == functions || $SUITE == throughput || $SUITE == history || $SUITE == history-fields || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == picker || $SUITE == budget* || $SUITE == inventory* ]]; then
+if [[ $SUITE == parity* || $SUITE == probe || $SUITE == functions || $SUITE == throughput || $SUITE == history || $SUITE == history-fields || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == rcfiles || $SUITE == picker || $SUITE == budget* || $SUITE == inventory* ]]; then
   previous=$(git rev-parse --verify --end-of-options "${PREVIOUS_REVISION:-HEAD^}^{commit}")
   git worktree add -q --detach "$RUNNER_TEMP/base" "$previous"
   (cd "$RUNNER_TEMP/base"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/baseline")

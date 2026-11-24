@@ -263,6 +263,9 @@ impl Location {
             line,
         }
     }
+    pub(crate) fn full_source(&self) -> &Rc<str> {
+        &self.source
+    }
     pub fn text(&self) -> &str {
         &self.source[self.start..self.end]
     }
@@ -469,6 +472,34 @@ pub fn session_source_at(
     } else {
         read()
     }
+}
+
+// Generated eval assignments often change just the value. Construct the same
+// simple-command AST; assignment attributes, traps and exit status stay live.
+pub(crate) fn literal_assignment(source: &str, line: usize) -> Option<Statement> {
+    let command = source.strip_suffix('\n').unwrap_or(source);
+    let (name, value) = command.split_once('=')?;
+    if !crate::word::is_identifier(name) || !value.bytes().all(lexer::plain_byte) {
+        return None;
+    }
+    let location = Location {
+        source: source.into(),
+        start: 0,
+        end: command.len(),
+        line,
+    };
+    Some(Statement {
+        location,
+        condition: Condition::Always,
+        negated: false,
+        command: Command::Pipeline(vec![SimpleCommand {
+            assignments: vec![(
+                name.to_owned(),
+                Assignment::Scalar(Word::Literal(value.to_owned())),
+            )],
+            ..Default::default()
+        }]),
+    })
 }
 
 fn parse_source(source: &str, final_input: bool) -> Result<Vec<Statement>, Error> {

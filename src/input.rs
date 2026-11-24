@@ -1,3 +1,6 @@
+mod eval;
+pub(crate) use eval::{EvalCache, builtin as eval_builtin};
+
 use crate::execute::fd::PrivateFile;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Seek};
@@ -96,7 +99,7 @@ pub fn file_script(
             && let Ok(source) = std::str::from_utf8(&bytes[..n])
         {
             drop(file);
-            return text(session, source, status, false, check, 1);
+            return text(session, source, status, false, check, None);
         }
     }
     if let Some(meta) = &metadata
@@ -161,48 +164,77 @@ fn history_input<'a>(
 }
 
 // A sourced profile often has a long compound command. Try whole units already
-// in the file buffer, leaving following commands for the current alias/options state.
-fn buffered_compound(
-    session: &Session,
+// in the buffer, leaving following commands for the current alias/options state.
+// On a miss report the distance inspected, so string input can bound repeated scans.
+fn buffered_compound<P: AsRef<[parser::Statement]>>(
     first: &str,
     buffered: &[u8],
-    line: usize,
     at_eof: bool,
-) -> Option<(Vec<parser::Statement>, usize, usize)> {
-    let header = first.trim_ascii_start();
+    mut parse: impl FnMut(&str) -> Result<P, parser::Error>,
+) -> Result<(P, usize, usize), usize> {
+    let header = first.lines().next().ok_or(0usize)?.trim_ascii_start();
     let key = header
         .split(|c: char| c.is_ascii_whitespace() || c == ';')
-        .next()?;
+        .next()
+        .unwrap_or_default();
     let close: &[u8] = match key {
         "if" => b"fi",
         "case" => b"esac",
         "while" | "until" | "for" | "select" => b"done",
         "function" | "{" => b"}",
-        _ if header.lines().next()?.contains("()") => b"}",
-        _ => return None,
+        _ if header.contains("()") => b"}",
+        _ => return Err(0),
     };
     let mut start = 0;
+    let mut nested = 0usize;
     let final_line = at_eof && !buffered.is_empty() && !buffered.ends_with(b"\n");
     let ends = memchr::memchr_iter(b'\n', buffered).chain(final_line.then_some(buffered.len()));
     for (i, end) in ends.enumerate() {
         let size = (end + 1).min(buffered.len());
         let next = &buffered[start..end];
         start = size;
-        if !next.trim_ascii_start().starts_with(close) && !next.trim_ascii_end().ends_with(close) {
+        // A closing reserved word is a token. Suffixes such as `${value}`
+        // and `config_done` cannot complete the compound.
+        let separator = |b: &u8| b.is_ascii_whitespace() || b";&|()<>".contains(b);
+        let next = next.trim_ascii();
+        // Inner terminators otherwise cause a full reparse of a growing prefix
+        // at every fi/done/brace. Count common nested headers as a hint only.
+        // Quotes and here-documents can resemble shell code. The parser still
+        // validates the entire unit, and a missed boundary uses the line reader.
+        let word = next.split(|b| b.is_ascii_whitespace() || *b == b';').next();
+        let opens = match close {
+            b"fi" => word == Some(b"if"),
+            b"esac" => word == Some(b"case"),
+            b"done" => matches!(word, Some(b"for" | b"while" | b"until" | b"select")),
+            _ => next.ends_with(b"{"),
+        };
+        nested += usize::from(opens);
+        let begins = next
+            .strip_prefix(close)
+            .is_some_and(|rest| rest.first().is_none_or(separator));
+        let ends = next
+            .strip_suffix(close)
+            .is_some_and(|rest| rest.last().is_none_or(separator));
+        if !begins && !ends {
+            continue;
+        }
+        if nested > 0 {
+            nested -= 1;
             continue;
         }
         let mut text = String::with_capacity(first.len() + size);
         text.push_str(first);
-        text.push_str(std::str::from_utf8(&buffered[..size]).ok()?);
-        match parser::session_source_at(&text, at_eof && size == buffered.len(), session, line) {
-            Ok(program) if matches!(program.as_slice(), [s] if s.location.end > first.len()) => {
-                return Some((program, size, i + 1));
+        text.push_str(std::str::from_utf8(&buffered[..size]).map_err(|_| size)?);
+        // Only the final ordinary read may emit an unterminated here-doc warning.
+        match parse(&text) {
+            Ok(program) if matches!(program.as_ref(), [s] if s.location.end > first.len()) => {
+                return Ok((program, size, i + 1));
             }
             Err(parser::Error::Incomplete(_) | parser::Error::HereDoc(_)) => continue,
-            _ => return None,
+            _ => return Err(size),
         }
     }
-    None
+    Err(buffered.len())
 }
 
 fn run(
@@ -272,8 +304,10 @@ fn run(
         if buffered
             && (session.source_depth > 0 || open_function && !session.history_enabled)
             && matches!(result, Err(parser::Error::Incomplete(_)))
-            && let Some((program, consumed, lines)) =
-                buffered_compound(session, text, reader.buffer(), base_line, false)
+            && let Ok((program, consumed, lines)) =
+                buffered_compound(text, reader.buffer(), false, |unit| {
+                    parser::session_source_at(unit, false, session, base_line)
+                })
         {
             reader.consume(consumed);
             base_line += lines;
@@ -329,8 +363,9 @@ pub fn text(
     mut status: u8,
     tail: bool,
     check: bool,
-    first_line: usize,
+    eval_line: Option<usize>,
 ) -> Flow {
+    let first_line = eval_line.unwrap_or(1);
     if !session.verbose && source.len() >= 32 * 1024 {
         if let Some(program) = whole_group(session, source, first_line) {
             return if check {
@@ -349,6 +384,10 @@ pub fn text(
     let mut ran = false;
     let mut base_line = first_line;
     let mut line_number = first_line - 1;
+    // Successful lookahead consumes a command. Across misses, allow one
+    // additional traversal of the source beyond the ordinary per-command window.
+    const WINDOW: usize = 8192;
+    let mut scan_budget = source.len();
     let mut lines = source.split_inclusive('\n');
     while let Some(line) = lines.next() {
         line_number += 1;
@@ -379,29 +418,37 @@ pub fn text(
             start = end;
             continue;
         }
-        let limit = source.len().min(end.saturating_add(8192));
-        let mut result = parser::session_source_at(text, last, session, base_line);
-        if new_command
-            && !last
-            && !session.verbose
-            && !expand_history
-            && matches!(result, Err(parser::Error::Incomplete(_)))
-            && let Some((program, consumed, extra_lines)) = buffered_compound(
-                session,
+        let probe = new_command && !last && !session.verbose && !expand_history;
+        let mut parse = |unit: &str, eof| {
+            if eval_line.is_some() {
+                eval::parse(session, unit, eof, base_line)
+            } else {
+                parser::session_source_at(unit, eof, session, base_line).map(eval::Program::Fresh)
+            }
+        };
+        let mut result = parse(text, last);
+        if probe && matches!(result, Err(parser::Error::Incomplete(_))) {
+            let limit = source
+                .len()
+                .min(end.saturating_add(WINDOW).saturating_add(scan_budget));
+            match buffered_compound(
                 text,
                 &source.as_bytes()[end..limit],
-                base_line,
                 limit == source.len(),
-            )
-        {
-            // Only the verified compound belongs to this parse. Execute it before
-            // interpreting later lines with their current aliases and shell options.
-            end += consumed;
-            line_number += extra_lines;
-            lines = source[end..].split_inclusive('\n');
-            text = &source[start..end];
-            last = end == source.len();
-            result = Ok(program);
+                |unit| parse(unit, false),
+            ) {
+                Ok((program, consumed, extra_lines)) => {
+                    end += consumed;
+                    line_number += extra_lines;
+                    lines = source[end..].split_inclusive('\n');
+                    text = &source[start..end];
+                    last = end == source.len();
+                    result = Ok(program);
+                }
+                Err(inspected) => {
+                    scan_budget = scan_budget.saturating_sub(inspected.saturating_sub(WINDOW))
+                }
+            }
         }
         match result {
             Err(parser::Error::HereDoc(hint)) if !last => {
@@ -410,10 +457,10 @@ pub fn text(
             }
             Err(parser::Error::Incomplete(_)) if !last => continue,
             Err(e) => return error(e.message(), 2),
-            Ok(program) if !program.is_empty() && !check => {
+            Ok(program) if !program.as_ref().is_empty() && !check => {
                 ran = true;
                 let remember = tail && !session.interactive && session.begin_history_line(text);
-                let flow = execute_program(session, program, status, tail && last);
+                let flow = program.run(session, status, tail && last);
                 if remember {
                     session.finish_history_line();
                 }

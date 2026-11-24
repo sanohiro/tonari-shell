@@ -34,7 +34,7 @@ use execute::Flow;
 use eval::{call_function, execute_program};
 
 fn eval_text(session: &mut Session, source: &str, status: u8) -> Flow {
-    input::text(session, source, status, false, false, 1)
+    input::text(session, source, status, false, false, None)
 }
 
 static INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -447,7 +447,7 @@ fn run_invocation(
     };
     let flow = match invocation.input {
         Input::Command(text) => {
-            input::text(&mut session, &text, initial, true, invocation.check, 1)
+            input::text(&mut session, &text, initial, true, invocation.check, None)
         }
         Input::File(path) => match std::fs::File::open(&path) {
             Ok(file) => {
