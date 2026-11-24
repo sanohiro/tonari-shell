@@ -64,6 +64,8 @@ nvm 0.40.3 と 0.40.5 をそれぞれ Tonari で読み込み、同じセッシ�
 
 Git では起動後に別プロセスが作ったブランチを補完して切り替え、Debian の direnv 2.32.1 ではディレクトリ移動時の環境変数の設定と解除を確認しました。fzf 0.74.0 の設定を読み込み、Emacs・vi の両モードで Ctrl-T から空白と日本語を含むファイル名を選択できました。エディターでは `bind -x`、キーマクロ、`INPUTRC`、初期値を編集できる `read -e -i` が使えます。スクリプトでは `select`、`time`、`coproc` に対応しました。`exec {log}>file` で確保した記述子は変数を介して使用・解放できます。`shopt -s nocasematch` は `case`、`[[ ]]`、変数の文字列置換、補完フィルターに適用されます。`shopt -s nocaseglob` で、ファイル名展開と `GLOBIGNORE` の除外条件が大小文字を区別しなくなります。複雑な Readline 操作と Bash 5.3 の展開構文には差が残ります。Intel・AMD の Linux x86-64 と Linux・macOS の arm64 でネイティブ CI 計測を行っています。WSL2 での検証と、起動設定の解析結果を永続化するキャッシュが残っています。Debian・Ubuntu の arm64 では、一時アカウントに登録した Tonari でログインからログアウトまで確認しました。[機能ごとの結果](docs/compatibility.md)
 
+VS Code でシェル統合を自動で有効にするには、ターミナルプロファイルの実行ファイルに配布先の `libexec/tonari/bash` を指定します。nvm、direnv、Git・GitHub CLI の補完、fzf の履歴・ファイル選択、mise、VS Code のそれぞれと、7 つを一緒に読み込んだ場合を端末で測定しています。[実測値と検証条件](docs/benchmarks.md#tool-hooks)
+
 ## 速度とサイズ
 
 機能互換の基準は Debian 13 の GNU Bash 5.2.37 と Ubuntu 26.04 の 5.3.9 です。シェル自身の処理は Bash の所要時間の半分、遅くても 3 分の 2 を目指します。ごく短い単発処理や、共通の OS 処理・待ち時間が大半を占める処理は、Bash と同程度なら許容します。起動・外部コマンド・パイプ・反復実行を個別に計測し、macOS 標準の Bash 3.2 とも比較します。[計測結果・バイナリサイズ・ビルド条件](docs/benchmarks.md)

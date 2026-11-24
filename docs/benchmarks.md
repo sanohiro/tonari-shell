@@ -1,5 +1,63 @@
 # Startup and execution / 起動と実行性能
 
+<a id="tool-hooks"></a>
+
+## 2026-11-25 · Interactive tool latency / 日常の開発操作
+
+Each cell gives **previous Tonari / current Tonari / Bash**, in median milliseconds. Previous is `ef5a286`. Two warmups preceded the rotating trials, with each shell staged under its own `bash` basename and a disposable home. Measurements end at visible terminal output. Node versions, the applied and removed directory environment, the fzf selection after editing and VS Code's command and exit-status messages were also verified. The combined rc activates nvm, bash-completion, Git, gh, fzf, direnv and mise, then VS Code wraps the prompt. [Benchmark](../tools/bench_tool_hooks.py) · [Native Linux results and p95](https://github.com/sanohiro/tonari-shell/actions/runs/45500490573)
+
+| Operation | Apple M1 | Linux x86-64 | Linux arm64 |
+|---|---:|---:|---:|
+| All integrations, exec to first prompt | 372.384 / 366.542 / 457.426 | 144.401 / 141.328 / 207.749 | 185.504 / 180.651 / 264.302 |
+| All integrations, key to echo | 0.031 / 0.033 / 0.033 | 0.052 / 0.050 / 0.048 | 0.058 / 0.061 / 0.057 |
+| All integrations, `false` to next prompt | 33.599 / 32.791 / 35.677 | 12.670 / 12.314 / 15.220 | 16.806 / 16.165 / 19.419 |
+| All integrations, enter project | 92.793 / 86.061 / 91.982 | 33.611 / 33.110 / 36.261 | 38.900 / 37.957 / 42.153 |
+| All integrations, leave project | 34.376 / 32.596 / 37.298 | 13.767 / 13.474 / 16.538 | 17.860 / 17.481 / 20.873 |
+| nvm, activate installed default Node | 252.543 / 234.779 / 308.192 | 101.313 / 101.218 / 154.282 | 131.047 / 130.560 / 194.596 |
+| nvm, switch installed Node | 162.725 / 161.452 / 185.429 | 63.751 / 64.698 / 89.319 | 84.539 / 82.808 / 116.906 |
+| Git, source completion to first prompt | 6.800 / 6.632 / 12.298 | 4.809 / 4.764 / 7.122 | 4.548 / 4.538 / 7.144 |
+| Git, first branch Tab with 1,000 distractor branches | 56.804 / 57.521 / 60.446 | 10.401 / 10.228 / 13.791 | 11.509 / 11.666 / 15.654 |
+| Git, repeat branch Tab | 57.384 / 57.290 / 61.091 | 10.271 / 10.206 / 13.715 | 11.835 / 11.699 / 16.207 |
+| GitHub CLI and bash-completion, first prompt | 7.665 / 7.133 / 12.325 | 6.125 / 6.181 / 9.627 | 5.912 / 5.924 / 10.064 |
+| GitHub CLI, first `gh iss<Tab>` | 34.975 / 34.383 / 35.950 | 33.768 / 34.018 / 35.231 | 32.460 / 32.675 / 34.227 |
+| GitHub CLI, repeat Tab | 33.454 / 34.086 / 35.860 | 33.859 / 33.842 / 35.804 | 32.704 / 32.705 / 34.640 |
+| direnv, enter and load .envrc | 59.729 / 58.231 / 59.891 | 22.153 / 21.796 / 23.079 | 22.442 / 22.141 / 23.232 |
+| direnv, leave project | 9.536 / 8.639 / 10.835 | 2.822 / 2.695 / 3.416 | 2.944 / 2.632 / 3.630 |
+| direnv, unchanged directory | 9.237 / 8.495 / 10.433 | 2.457 / 2.244 / 3.114 | 2.568 / 2.319 / 3.284 |
+| mise, activate to first prompt | 30.758 / 29.286 / 34.858 | 12.187 / 12.422 / 15.227 | 16.709 / 16.472 / 19.192 |
+| mise, enter project | 13.780 / 14.435 / 14.329 | 6.351 / 6.463 / 6.918 | 9.640 / 9.580 / 9.996 |
+| mise, leave project | 13.644 / 14.081 / 13.908 | 6.061 / 6.058 / 6.308 | 8.988 / 8.840 / 9.470 |
+| mise, unchanged directory | 13.496 / 13.466 / 13.529 | 5.370 / 5.310 / 5.667 | 7.951 / 7.958 / 8.271 |
+| VS Code integration, first prompt | 16.166 / 13.550 / 22.414 | 5.952 / 5.213 / 9.345 | 6.842 / 5.923 / 10.963 |
+| VS Code, `false` to next prompt with exit status | 5.941 / 5.871 / 7.443 | 2.087 / 2.094 / 3.150 | 2.514 / 2.503 / 3.986 |
+| fzf Ctrl-T, display selected file among 1,025 | 28.242 / 27.248 / 30.602 | 19.955 / 19.808 / 20.874 | 20.653 / 20.561 / 21.964 |
+| fzf Ctrl-T, return quoted file to editor | 1.778 / 1.862 / 2.408 | 1.078 / 1.079 / 1.432 | 1.238 / 1.271 / 1.529 |
+| Explicit import of 100,001 history entries | — / 5.069 / 12.661 | — / 8.784 / 15.926 | — / 9.767 / 18.071 |
+| fzf installed, first prompt with saved history | — / 19.164 / 40.626 | — / 10.204 / 29.592 | — / 10.380 / 34.371 |
+| fzf Ctrl-R, first candidate from saved history | — / 42.589 / 44.038 | — / 32.311 / 35.760 | — / 32.745 / 37.898 |
+| fzf Ctrl-R, return selected command to editor | — / 30.714 / 60.649 | — / 25.975 / 92.611 | — / 27.348 / 73.992 |
+
+The macOS 27.2.1 run used Bash 5.2.37, Apple Git 2.54.0, gh 2.96.0, nvm 0.40.3, Node 24.1.0 and 18.13.0, direnv 2.38.2, mise 2026.11.14, fzf 0.74.0 and VS Code 1.144.0. Linux used Ubuntu 24.04's Bash 5.2.21, and the same completion source and VS Code integration script. The harness applies a project-local variable through mise and direnv. Node installs, remote gh completions and graphical rendering time fall outside these timings. macOS used 15 trials per shell for each individual tool, 17 for the combined rc, 9 for Ctrl-T and 41 for Ctrl-R against saved history. Linux used 15. Both Linux builds passed the stripped static PIE checks. The Mac executable links only to libSystem.
+
+The macOS binary grew from 1,433,360 to 1,433,392 bytes. Linux x86-64 grew from 1,917,304 to 1,927,384 and Linux arm64 from 1,658,088 to 1,667,104. No new runtime dependencies were added. The M1 Bash differential audit retained all 1,411 previous verdicts. The release passed the 204-case shell suite with two platform skips on macOS and one on each Linux runner.
+
+With all integrations loaded, p95 key echo for current Tonari / Bash was 0.087 / 0.178 ms on M1, 0.067 / 0.064 ms on Linux x86-64, 0.089 / 0.068 ms on Linux arm64. The old Ctrl-R widget could not produce a valid editable selection. In the first working M1 implementation importing 100,001 entries took 25.678 ms, compared with 5.069 ms after batching. A separate 41-trial M1 run measured p95 45.887 ms from Ctrl-R to a candidate and 34.219 ms from selection to the editable line.
+
+A diagnostic trace of four M1 Git Tabs saw four Git processes per Tab, including two overlapping remote-reference queries. Each gh Tab launched one `gh __complete iss`. Those four subprocesses took 29–33 ms apiece in the instrumented run. The shell calls the installed helpers on each Tab so another process can change branches and configuration. A separate control that launched the upstream executables directly took 34 ms for gh, 15 ms for mise hook-env and 11 ms for direnv export on this Mac. These controls used independent runs and include process launch. Their times cannot be subtracted from the PTY medians. Several full interactions remain above two thirds of Bash time.
+
+The Linux x86-64 mise directory-entry sample had a 6.46 ms median and 108.50 ms p95 for Tonari, and a 6.92 ms median and 119.12 ms p95 for Bash. A separate native run gave 4.87 / 5.19 ms for Tonari and 5.02 / 5.43 ms for Bash. The long tail did not reproduce in both runs. [Independent run](https://github.com/sanohiro/tonari-shell/actions/runs/45500299066)
+
+7 ツールを同時に読み込む条件でも、キーを押して表示されるまでと、Enter を押して次のプロンプトに戻るまでを別々に計測しました。Git と gh は実際の Tab、fzf は候補が描画された時点と選択後に編集へ戻った時点を測っています。履歴の検証では選んだ行に追記して実行し、前のセッションの履歴も対象にしました。VS Code はインストール済みの統合スクリプトでコマンドと終了値を照合し、Mac の実アプリでも自動認識を確認しました。
+
+On macOS, resolve the integration script using `code --locate-shell-integration-path bash`. Supply paths to an installed bash-completion, Git's Bash completion and two installed Node prefixes. The Linux runner downloads the pinned inputs and verifies their digests. [Fixture setup](../tools/ci/tool-hooks.sh)
+
+```sh
+python3 tools/bench_tool_hooks.py "$tonari" "$previous" "$bash" --case combined \
+  --vscode-script "$(code --locate-shell-integration-path bash)" --nvm-script "$NVM_DIR/nvm.sh" \
+  --nodes "$node24" "$node18" --git-completion "$git_completion" --bash-completion "$bash_completion"
+python3 tools/bench_tool_hooks.py "$tonari" "$bash" --case fzf --entries 100000 --saved-history
+```
+
 <a id="eval-rc"></a>
 
 ## 2026-11-25 · Generated startup scripts and eval / 初期化スクリプトと eval
