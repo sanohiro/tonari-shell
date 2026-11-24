@@ -236,29 +236,62 @@ fn sole_plain_command(body: &[parser::Statement]) -> Option<&parser::SimpleComma
     .then_some(cmd)
 }
 
-// A nullary wrapper around one literal external command has no scope-dependent
-// expansion. Its stdout and status can come directly from the external process.
-fn wrapped_external(
-    session: &Session,
+// Literal nullary functions do not require a positional or local scope when
+// their only operation has no shell-visible effects.
+fn wrapped_capture(
+    session: &mut Session,
     body: &[parser::Statement],
-) -> Option<parser::SimpleCommand<parser::Word>> {
+    last: u8,
+) -> Option<Result<(String, u8), &'static str>> {
     let [name] = sole_plain_command(body)?.words.as_slice() else {
         return None;
     };
-    let function = session.functions.get(name.as_literal()?)?;
+    let name = name.as_literal()?;
+    let function = session.functions.get(name)?;
     if session.function_depth >= 128
-        || session.traps.has_explicit_traps()
         || session.shopt.extdebug
-        || session.is_exported("SHELLOPTS")
+        || session.traced_functions.contains(name)
     {
         return None;
     }
     let cmd = sole_plain_command(function.definition.body.statements())?;
     let path = cmd.words.first()?.as_literal()?;
-    (path.starts_with('/')
+    if path.starts_with('/')
+        && !session.traps.has_explicit_traps()
+        && !session.is_exported("SHELLOPTS")
         && !session.functions.contains_key(path)
-        && cmd.words[1..].iter().all(|arg| arg.as_literal().is_some()))
-    .then(|| cmd.clone())
+        && cmd.words[1..].iter().all(|arg| arg.as_literal().is_some())
+    {
+        return Some(crate::execute::capture_external(cmd.clone(), session, last));
+    }
+
+    let words = match path {
+        "builtin"
+            if !session.functions.contains_key("builtin")
+                && !session.disabled_builtins.contains("builtin") =>
+        {
+            &cmd.words[1..]
+        }
+        "printf" if !session.functions.contains_key("printf") => &cmd.words[..],
+        _ => return None,
+    };
+    let [program, format] = words else {
+        return None;
+    };
+    let format = format.as_literal()?;
+    if program.as_literal() != Some("printf")
+        || session.disabled_builtins.contains("printf")
+        || session.functrace
+        || session.errtrace
+        || format.starts_with('-')
+        || format.contains('%')
+    {
+        return None;
+    }
+    let args = [format.to_owned()];
+    let mut out = Vec::new();
+    let status = crate::session::printf::run(session, &args, Some(&mut out));
+    Some(captured_output(out, status))
 }
 
 // Validate the whole list before executing any builtin. A later function,
@@ -300,15 +333,27 @@ fn capture_simple(
         let [cmd] = stages.as_slice() else {
             return None;
         };
-        let (program, args) = cmd.words.split_first()?;
-        let program = program.as_literal()?;
+        let (first, args) = cmd.words.split_first()?;
+        let first = first.as_literal()?;
+        let (program, args) = if matches!(first, "command" | "builtin") {
+            let (target, args) = args.split_first()?;
+            let target = target.as_literal()?;
+            if target.starts_with('-')
+                || session.disabled_builtins.contains(target)
+                || first == "builtin" && crate::execute::can_capture_external(target)
+            {
+                return None;
+            }
+            (target, args)
+        } else {
+            (first, args)
+        };
         if statement.negated
             || statement.condition != parser::Condition::Always
             || cmd.compound.is_some()
-            || !cmd.redirects.is_empty()
             || !cmd.assignments.is_empty()
-            || session.functions.contains_key(program)
-            || session.disabled_builtins.contains(program)
+            || session.functions.contains_key(first)
+            || session.disabled_builtins.contains(first)
         {
             return None;
         }
@@ -344,6 +389,14 @@ fn capture_simple(
             }
             _ => return None,
         };
+        if !cmd.redirects.is_empty()
+            && !(external
+                && matches!(cmd.redirects.as_slice(),
+            [r] if r.fd == 2 && r.variable.is_none() && r.target == parser::Target::Write
+                && r.word.as_literal() == Some("/dev/null")))
+        {
+            return None;
+        }
         let safe = args.iter().all(|word| match word {
             Word::Literal(_) => true,
             Word::Expanded(parts) => parts.iter().all(|part| match part {
@@ -377,8 +430,7 @@ fn capture_simple(
         safe.then_some(())
     };
     if !body.iter().all(|s| command(s).is_some()) {
-        let cmd = wrapped_external(session, body)?;
-        return Some(crate::execute::capture_external(cmd, session, last));
+        return wrapped_capture(session, body, last);
     }
     let mut output = Vec::new();
     let mut code = last;
@@ -388,7 +440,12 @@ fn capture_simple(
             unreachable!()
         };
         let cmd = &stages[0];
-        let name = cmd.words[0].as_literal().unwrap();
+        let words = if matches!(cmd.words[0].as_literal(), Some("command" | "builtin")) {
+            &cmd.words[1..]
+        } else {
+            &cmd.words[..]
+        };
+        let name = words[0].as_literal().unwrap();
         if name == "jobs" {
             return Some(Ok((String::new(), 0)));
         }
@@ -398,7 +455,7 @@ fn capture_simple(
         let captured = std::cell::Cell::new(None);
         let mut env = crate::expansion::Expansion::new(session, code, &captured);
         fields.clear();
-        for arg in &cmd.words[1..] {
+        for arg in &words[1..] {
             fields.extend(env.fields(arg.clone()).ok()?);
         }
         code = match name {

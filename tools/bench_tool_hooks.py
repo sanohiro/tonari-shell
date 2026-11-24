@@ -71,6 +71,7 @@ def sample(shell, root, rc, env, tool, versions, saved):
                 for field in (b"633;E;false;", b"633;C\x07", b"633;A\x07"):
                     if field not in frame:
                         raise ValueError(f"missing {field!r}: {frame!r}")
+            command(b'printf "<injected-%s>\\n" "$HOOK_BENCH_VSCODE"', b"<injected-1>\r\n")
         elif tool in ("direnv", "mise"):
             for directory, value in ((b"project", b"active"), (b"..", b"unset")):
                 timed("enter" if directory == b"project" else "leave", b"cd " + directory)
@@ -102,7 +103,8 @@ def sample(shell, root, rc, env, tool, versions, saved):
             record("Ctrl-R to visible match", start)
             start = time.monotonic_ns()
             os.write(fd, b"\r")
-            read_until(fd, b"printf HISTORY_PICK")
+            closed = read_until(fd, b"\x1b[?1049l")
+            read_until(fd, b"printf HISTORY_PICK", closed.partition(b"\x1b[?1049l")[2])
             record("select to editable line", start)
             command(b"-ok", b"HISTORY_PICK-ok")
         return result
@@ -175,6 +177,8 @@ def fixture(tool, root, args):
         (project / ".envrc").write_text('export HOOK_BENCH_ENV=active\n')
         subprocess.run(["direnv", "allow", str(project)], env=env, cwd=root, check=True)
         rc.write_text('eval "$(direnv hook bash)"\n')
+    bashrc = root / ".bashrc"
+    bashrc.write_text("PS1=" + shlex.quote(PROMPT.decode()) + "\n" + bashrc.read_text())
     return rc, env, versions
 
 

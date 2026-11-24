@@ -1321,6 +1321,14 @@ trap - USR1; eval "$save"; trap -p USR1""", 0,
                      b"trap -- '' SIGTERM\ntrap -- 'echo caught' SIGUSR1\n", minimum=5)
 
     def test_external_capture_and_environment(self):
+        self.compare(r"""printf() { echo hidden; }; command() { echo shadow; }
+echo "$(builtin printf '%s' real):$(command printf '%s' other)"
+unset -f command
+v=$(command /bin/sh -c 'echo out; echo silent >&2; exit 17' 2>/dev/null)
+echo "$v:$?"
+f() { builtin printf '\033x'; }; v=$(f); builtin printf '%s' "$v"
+f() { builtin printf 'changed'; }; echo "$(f)"
+""", 0, b"real:shadow\nout:17\n\x1bxchanged\n")
         self.env["INHERITED"] = "old"
         self.compare("""export V=outer; unset INHERITED
 /bin/sh -c 'echo "$V:${INHERITED-absent}"'
