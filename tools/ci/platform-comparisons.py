@@ -7,6 +7,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = Path.cwd()
 TEMP = Path(os.environ["RUNNER_TEMP"])
@@ -102,6 +103,54 @@ def directory():
         "--case", "glob-sparse", "--case", "glob-all", "--case", "glob-subdirs", "--case", "glob-recursive",
         "--case", "glob-utf8-large-repeat", "--case", "glob-ignore-large", "--case", "glob-nocase-large")
     run("directory-completion", "bench_completion.py", base, other, "--files", 100000, "--runs", 31)
+
+
+def earlier_controls():
+    def old_source():
+        subprocess.run(["git", "restore", "--source=benchmark-data/parser-119e729", "--worktree", "--",
+                        "src", "Cargo.toml", "Cargo.lock"], cwd=TREE, check=True)
+
+    def reserved():
+        old_source()
+        replace("src/parser.rs", "let mut statements = Vec::new();", "let mut statements = Vec::with_capacity(1);")
+        replace("src/parser.rs", "words: Vec::new(),", "words: Vec::with_capacity(2),")
+        replace("src/word.rs", "#[derive(Default)]\npub struct WordBuilder", "pub struct WordBuilder")
+        replace("src/word.rs", "impl WordBuilder {", """impl Default for WordBuilder {
+    fn default() -> Self {
+        Self { parts: Vec::with_capacity(2), text: String::new(), literal: false }
+    }
+}
+
+impl WordBuilder {""")
+    base = build("parser-original", old_source)
+    trial = build("parser-reserved", reserved)
+    nvm = TEMP / "nvm.sh"
+    subprocess.run(["curl", "--retry", "3", "-fsSL", "https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/nvm.sh",
+                    "-o", nvm], check=True)
+    run("parser", "bench.py", base, "--compare-tonari", "Reserved", trial, "--bash", REF, "--nvm-script", nvm,
+        "--case", "nvm", "--case", "startup", "--case", "loop", "--runs", 250)
+    current = BIN / "current"
+    with tempfile.TemporaryDirectory() as tmp, (OUT / "path-search.txt").open("w") as out:
+        folders = [Path(tmp) / str(i) for i in range(17)]
+        for folder in folders:
+            folder.mkdir()
+        (folders[-1] / "helper").symlink_to("/usr/bin/true")
+        for n in (1, 17):
+            env = dict(PATH=os.pathsep.join(map(str, folders[-n:])), LC_ALL="C", HOME=tmp)
+            group = [(b, cache) for b in (current, REF) for cache in ("-h", "+h")]
+            times = {c: [] for c in group}
+            for turn in range(26):
+                offset = turn % len(group)
+                for b, cache in group[offset:] + group[:offset]:
+                    command = f"set {cache}; " + "helper || exit 1; " * 40 + ":"
+                    start = time.monotonic_ns()
+                    subprocess.run([b, "--noprofile", "--norc", "-c", command], env=env, cwd=tmp,
+                                   stdin=subprocess.DEVNULL, check=True, timeout=30)
+                    if turn >= 2:
+                        times[b, cache].append((time.monotonic_ns()-start)/1e6)
+            for (b, cache), values in times.items():
+                print(n, b.name, cache, len(values), statistics.median(values),
+                      sorted(values)[math.ceil(.95*len(values))-1], file=out)
 
 
 def workers():
@@ -259,4 +308,4 @@ def pgo():
     run("files", "bench_completion.py", base, other, "--files", 100000, "--runs", 21)
 
 
-{"directory": directory, "pipes": pipes, "heap": heap, "codegen": codegen, "linking": linking, "pgo": pgo, "initial-batch": initial_batch, "workers": workers, "outliner": outliner}[os.environ["EXPERIMENT"]]()
+{"directory": directory, "pipes": pipes, "heap": heap, "codegen": codegen, "linking": linking, "pgo": pgo, "initial-batch": initial_batch, "workers": workers, "outliner": outliner, "earlier-controls": earlier_controls}[os.environ["EXPERIMENT"]]()
