@@ -1,0 +1,918 @@
+cohort	platform	group	feature	witness	iterations	previous_ms	tonari_ms	bash_ms	ratio	round_1_ratio	round_2_ratio	round_3_ratio	opt-3_ratio	opt-s_ratio	fixed_direct_ratio	control_replay_direct_ratio	component_current_ratio	long_current_ratio	outcome
+previous misses	Debianarm64	Builtin	disown	d2003b0a862e	4	51.259	51.347	51.673	0.9937	0.9917	0.9924	0.9924	0.9929	0.9923		0.9969			matched OS control
+previous misses	Debianarm64	Builtin	export	c7aaaf064221	128	63.705	63.772	90.643	0.7036	0.7050	0.7152	0.7096	0.7024	0.7003		1.0252			matched OS control
+previous misses	Debianarm64	Builtin	hash	ce80acc44da2	128	59.683	60.208	85.482	0.7043	0.6937	0.7007	0.6878	0.6928	0.6969					tried, above target
+previous misses	Debianarm64	Builtin	history	1402ac52475d	128	110.268	110.898	148.158	0.7485	0.7427	0.7354	0.7407	0.7380	0.7335					tried, above target
+previous misses	Debianarm64	Builtin	jobs	24c6ee0d7a12	4	405.086	405.019	405.802	0.9981	0.9980	0.9978	0.9974	0.9979	0.9981	0.9986				matched OS control
+previous misses	Debianarm64	Builtin	mapfile	3ea25138c850	128	1.703	1.662	2.546	0.6529	0.6489	0.6586	0.6562	0.6601	0.6709				0.6323	fixed median ≤ 2/3
+previous misses	Debianarm64	Builtin	read	02b137a1a92b	128	1.753	1.563	2.612	0.5984	0.6765	0.6821	0.6750	0.5989	0.6146				0.5649	fixed median ≤ 2/3
+previous misses	Debianarm64	Builtin	source	fb5e0f832d89	128	1.945	1.924	2.954	0.6514	0.6543	0.6520	0.6567	0.6569	0.6588				0.6169	fixed median ≤ 2/3
+previous misses	Debianarm64	Builtin	umask	330c6cece069	128	114.334	112.844	150.946	0.7476	0.7348	0.7583	0.7469	0.7445	0.7402					tried, above target
+previous misses	Debianarm64	Builtin option	cd -L	86f95ff2dd2c	16	25.289	25.089	34.909	0.7187	0.7064	0.7373	0.7145	0.7160	0.7174					tried, above target
+previous misses	Debianarm64	Builtin option	cd -P	3fda9e144559	16	25.053	25.126	34.765	0.7227	0.7195	0.7209	0.7254	0.7289	0.7223					tried, above target
+previous misses	Debianarm64	Builtin option	command -p	71dec6cfd837	128	80.762	82.490	98.772	0.8352	0.8195	0.8197	0.8263	0.8185	0.8139					tried, above target
+previous misses	Debianarm64	Builtin option	declare -f	01e27ed43a72	128	96.622	98.814	136.272	0.7251	0.7039	0.6980	0.7039	0.7222	0.7124					tried, above target
+previous misses	Debianarm64	Builtin option	declare -x	26408a3c84fe	128	64.121	64.229	90.420	0.7103	0.6970	0.6946	0.6949	0.7049	0.7087		1.0163			matched OS control
+previous misses	Debianarm64	Builtin option	disown -a	cee893ef723a	4	42.063	42.122	42.289	0.9961	0.9953	0.9942	0.9964	0.9927	0.9928		0.9894			matched OS control
+previous misses	Debianarm64	Builtin option	disown -h	fbec48c6f803	4	163.371	163.433	164.687	0.9924	0.9904	0.9921	0.9908	0.9921	0.9918	0.9975				matched OS control
+previous misses	Debianarm64	Builtin option	disown -r	4dbd86b7239c	4	41.270	41.302	41.569	0.9936	0.9921	0.9930	0.9925	0.9928	0.9921		0.9983			matched OS control
+previous misses	Debianarm64	Builtin option	export -n	aa3f391c2a50	128	64.375	64.924	90.475	0.7176	0.7081	0.7023	0.7091	0.7196	0.7141		1.0185			matched OS control
+previous misses	Debianarm64	Builtin option	export -p	c5972c1e3d25	128	114.261	115.374	151.837	0.7599	0.7605	0.7410	0.7620	0.7670	0.7612					tried, above target
+previous misses	Debianarm64	Builtin option	hash -p	ce80acc44da2	128	59.683	60.208	85.482	0.7043	0.6937	0.7007	0.6878	0.6928	0.6969					tried, above target
+previous misses	Debianarm64	Builtin option	hash -t	ce80acc44da2	128	59.683	60.208	85.482	0.7043	0.6937	0.7007	0.6878	0.6928	0.6969					tried, above target
+previous misses	Debianarm64	Builtin option	jobs -l	48f0f68f324f	4	163.445	163.459	164.722	0.9923	0.9899	0.9904	0.9907	0.9920	0.9919	0.9975				matched OS control
+previous misses	Debianarm64	Builtin option	jobs -n	1073fad1c5f9	4	123.428	123.553	124.783	0.9901	0.9878	0.9874	0.9890	0.9898	0.9894	0.9974				matched OS control
+previous misses	Debianarm64	Builtin option	jobs -p	24c6ee0d7a12	4	405.086	405.019	405.802	0.9981	0.9980	0.9978	0.9974	0.9979	0.9981	0.9986				matched OS control
+previous misses	Debianarm64	Builtin option	jobs -r	ac121d4b6180	4	163.590	163.661	164.984	0.9920	0.9901	0.9923	0.9909	0.9918	0.9915	0.9978				matched OS control
+previous misses	Debianarm64	Builtin option	jobs -s	97a70b4647de	4	163.677	163.714	165.131	0.9914	0.9904	0.9922	0.9909	0.9915	0.9906	0.9979				matched OS control
+previous misses	Debianarm64	Builtin option	jobs -x	27e15ee9fb24	4	163.610	163.606	165.131	0.9908	0.9896	0.9900	0.9902	0.9907	0.9905	0.9975				matched OS control
+previous misses	Debianarm64	Builtin option	read -N	528a60bca515	128	1.469	1.439	2.219	0.6487	0.6421	0.6539	0.6492	0.6411	0.6438				0.6219	fixed median ≤ 2/3
+previous misses	Debianarm64	Builtin option	read -a	19da744b7aca	128	1.874	1.631	2.633	0.6195	0.6724	0.6908	0.6744	0.6366	0.6272				0.5963	fixed median ≤ 2/3
+previous misses	Debianarm64	Builtin option	read -d	54186fde2fb2	128	1.588	1.400	2.269	0.6173	0.6655	0.6790	0.6780	0.6162	0.6223				0.5855	fixed median ≤ 2/3
+previous misses	Debianarm64	Builtin option	read -n	5896b7d1c17a	128	1.468	1.431	2.198	0.6512	0.6618	0.6712	0.6638	0.6495	0.6543				0.6423	fixed median ≤ 2/3
+previous misses	Debianarm64	Builtin option	read -r	b14a3c41f497	128	1.566	1.415	2.326	0.6085	0.6654	0.6691	0.6681	0.6097	0.6123				0.5822	fixed median ≤ 2/3
+previous misses	Debianarm64	Builtin option	read -t	01044dfe8678	4	141.943	141.922	142.262	0.9976	0.9970	0.9970	0.9976	0.9975	0.9975					tried, above target
+previous misses	Debianarm64	Builtin option	trap -l	bc60cd40ae2f	128	96.282	96.088	134.811	0.7128	0.7235	0.7175	0.7049	0.7040	0.7046					tried, above target
+previous misses	Debianarm64	Builtin option	type -P	d471161485d8	128	107.854	110.121	145.818	0.7552	0.7470	0.7349	0.7523	0.7455	0.7450					tried, above target
+previous misses	Debianarm64	Builtin option	type -a	c87f865b80ac	128	84.273	85.052	124.961	0.6806	0.6706	0.6884	0.6868	0.6838	0.6808					tried, above target
+previous misses	Debianarm64	Builtin option	typeset -f	20a42f211e41	128	96.815	95.056	134.134	0.7087	0.7074	0.6886	0.6979	0.7080	0.7080					tried, above target
+previous misses	Debianarm64	Builtin option	typeset -x	51b712b12c9f	128	63.548	63.559	90.210	0.7046	0.7185	0.7101	0.6932	0.7095	0.7119		1.0239			matched OS control
+previous misses	Debianarm64	Builtin option	wait -n	2d8b87809a57	4	84.125	84.092	85.842	0.9796	0.9771	0.9785	0.9794	0.9804	0.9783	0.9858				matched OS control
+previous misses	Debianarm64	Builtin option	wait -p	7bd725556617	4	84.113	84.282	85.911	0.9810	0.9787	0.9809	0.9789	0.9796	0.9782	0.9839				matched OS control
+previous misses	Debianarm64	Conditional	-G	af5edd672589	128	1.854	1.827	2.797	0.6534	0.6525	0.6468	0.6497	0.6461	0.6524	0.4946	0.5048	0.5494	0.6219	fixed median ≤ 2/3
+previous misses	Debianarm64	Conditional	-O	83d5b3a48d84	128	1.971	1.888	2.932	0.6438	0.6566	0.6540	0.6558	0.6482	0.6516	0.4952	0.5073	0.5568	0.6168	fixed median ≤ 2/3
+previous misses	Debianarm64	Conditional	-g	d95e3aa8df09	128	120.138	119.209	170.080	0.7009	0.6918	0.6774	0.6878	0.7013	0.6943			0.4986		tried, above target
+previous misses	Debianarm64	Conditional	-nt	fb30c7f4f0ce	128	121.153	120.790	169.828	0.7112	0.7170	0.7066	0.7070	0.7086	0.7046			0.6803		tried, above target
+previous misses	Debianarm64	Conditional	-ot	94a5a188a913	128	126.259	123.982	177.986	0.6966	0.7129	0.7148	0.7043	0.6927	0.6976			0.6759		tried, above target
+previous misses	Debianarm64	Conditional	-u	7a27caf51da5	16	15.598	15.266	22.053	0.6923	0.7086	0.7053	0.7010	0.7083	0.7052			0.4970		tried, above target
+previous misses	Debianarm64	Conditional	-x	2e9e1ff54238	128	119.876	117.847	175.265	0.6724	0.6856	0.6881	0.6840	0.6771	0.6878			0.4914		tried, above target
+new misses	Debianarm64	Parameter	${v##a*}	12b82a5f4461	128	128.671	127.013	192.670	0.6592				0.6878	0.6111	0.6256				fixed median ≤ 2/3
+new misses	Debianarm64	Parameter	${v#a*}	9c19deea27ff	128	128.951	129.551	193.277	0.6703				0.6909	0.6117	0.6157				tried, above target
+new misses	Debianarm64	Parameter	${v%%*a}	a0849bc56f87	128	125.225	127.404	195.308	0.6523				0.6813	0.6069	0.6306				fixed median ≤ 2/3
+new misses	Debianarm64	Parameter	${v%*a}	a8bbaf48e648	128	125.245	127.893	194.791	0.6566				0.6872	0.6021	0.6184				fixed median ≤ 2/3
+previous misses	Debianarm64	Parameter	${v,,}	038c19e276ac	128	114.539	116.501	171.682	0.6786	0.6479	0.6664	0.6591	0.6753	0.6252	0.6035	0.6077	0.6149		tried, above target
+previous misses	Debianarm64	Parameter	${v,}	af35bd1e969a	128	115.358	111.740	165.321	0.6759	0.6598	0.6571	0.6579	0.6851	0.6210	0.6048	0.6146	0.6209		tried, above target
+new misses	Debianarm64	Parameter	${v-a}	86b53bc16947	128	123.114	129.072	194.112	0.6649				0.6733	0.6106	0.6184				fixed median ≤ 2/3
+new misses	Debianarm64	Parameter	${v/#a/X}	c142972db618	128	128.531	127.952	191.738	0.6673				0.6816	0.6307	0.6116				tried, above target
+previous misses	Debianarm64	Parameter	${v/%a/X}	ade1300fe9ed	128	111.138	110.754	166.114	0.6667	0.6381	0.6663	0.6656	0.6870	0.6268	0.6322	0.6287	0.6068		tried, above target
+new misses	Debianarm64	Parameter	${v//a/X}	e33000447321	128	127.808	128.579	195.039	0.6592				0.6808	0.6191	0.6212				fixed median ≤ 2/3
+new misses	Debianarm64	Parameter	${v/a/X}	930b75623aa8	128	128.710	128.116	193.485	0.6621				0.6872	0.6123	0.6205				fixed median ≤ 2/3
+previous misses	Debianarm64	Parameter	${v: -2:1}	7173f1b93cf8	128	114.504	115.257	174.020	0.6623	0.6384	0.6460	0.6527	0.6680	0.6139	0.6268	0.6203	0.6083		fixed median ≤ 2/3
+new misses	Debianarm64	Parameter	${v:+a}	b70d54d2d07f	128	125.543	127.700	195.874	0.6519				0.6744	0.6060	0.6369				fixed median ≤ 2/3
+new misses	Debianarm64	Parameter	${v:-a}	b2ad803d8ce8	128	127.971	130.639	200.118	0.6528				0.6810	0.6049	0.6204				fixed median ≤ 2/3
+new misses	Debianarm64	Parameter	${v:1}	90f3759df7d7	128	127.047	128.412	194.049	0.6618				0.6791	0.6053	0.6141				fixed median ≤ 2/3
+new misses	Debianarm64	Parameter	${v:=a}	b2d0f9707bcf	128	125.326	126.978	198.025	0.6412				0.6659	0.5992	0.6230				fixed median ≤ 2/3
+new misses	Debianarm64	Parameter	${v@E}	a3d44b4b02ad	128	125.254	125.526	190.168	0.6601				0.6805	0.6175	0.6244				fixed median ≤ 2/3
+new misses	Debianarm64	Parameter	${v@L}	d1231d17a54a	128	129.199	128.469	194.264	0.6613				0.6809	0.6384	0.6220				fixed median ≤ 2/3
+new misses	Debianarm64	Parameter	${v@P}	eaab900ebc4b	128	121.834	125.060	190.491	0.6565				0.6800	0.5977	0.6177				fixed median ≤ 2/3
+new misses	Debianarm64	Parameter	${v@Q}	7e81a11eea91	128	128.072	125.698	191.837	0.6552				0.6818	0.6085	0.6248				fixed median ≤ 2/3
+previous misses	Debianarm64	Parameter	${v@U}	c0e20e993c8a	128	111.869	112.017	168.379	0.6653	0.6607	0.6692	0.6621	0.6900	0.6207	0.6223	0.6116	0.6094		fixed median ≤ 2/3
+previous misses	Debianarm64	Parameter	${v@u}	4c37fe0760f3	128	111.219	111.781	165.711	0.6746	0.6658	0.6528	0.6687	0.6750	0.6254	0.6132	0.6199	0.6009		tried, above target
+previous misses	Debianarm64	Parameter	${v^^}	b1a9e410c325	128	117.136	113.707	169.703	0.6700	0.6795	0.6575	0.6541	0.6774	0.6238	0.6156	0.6167	0.6094		tried, above target
+previous misses	Debianarm64	Parameter	${v^}	7372ef5e2b93	128	114.330	112.017	164.695	0.6801	0.6683	0.6700	0.6635	0.6930	0.6328	0.6170	0.6199	0.6172		tried, above target
+previous misses	Debianarm64	Redirection	&>	1036f196c42a	128	145.454	143.091	183.930	0.7780	0.7914	0.7764	0.7888	0.7752	0.7840					tried, above target
+previous misses	Debianarm64	Redirection	&>>	d492279205a2	128	143.223	143.750	183.294	0.7843	0.7731	0.7715	0.7797	0.7767	0.7753					tried, above target
+previous misses	Debianarm64	Redirection	/dev/fd/N	15c6dbc29d08	128	70.798	70.108	98.792	0.7097	0.7089	0.7107	0.6844	0.7218	0.7085					tried, above target
+previous misses	Debianarm64	Redirection	<>	1c9961fb96ee	128	66.981	66.834	93.683	0.7134	0.6948	0.7192	0.7127	0.7280	0.7117					tried, above target
+previous misses	Debianarm64	Redirection	>	64480a7d0419	128	67.080	66.899	95.902	0.6976	0.7183	0.7046	0.7095	0.7057	0.6866					tried, above target
+previous misses	Debianarm64	Redirection	>>	a3c1c9edeb4e	128	65.290	66.144	93.061	0.7108	0.7168	0.6973	0.6954	0.7182	0.6957					tried, above target
+previous misses	Debianarm64	Redirection	n<&-	9b1bda303ace	128	1.591	1.550	2.308	0.6713	0.6931	0.6858	0.6797	0.6809	0.6755				0.6573	1,024 iterations ≤ 2/3
+previous misses	Debianarm64	Redirection	n>&-	813721653d7c	128	1.794	1.763	2.208	0.7983	0.8084	0.8156	0.8007	0.8078	0.8076				0.7798	tried, above target
+previous misses	Debianarm64	Redirection	n>&m	7540752f59db	128	66.501	65.792	92.952	0.7078	0.7067	0.7102	0.7169	0.6993	0.6946					tried, above target
+previous misses	Debianarm64	Redirection	n>&m-	2b0867cd62f3	128	67.439	65.767	93.740	0.7016	0.7092	0.7028	0.7068	0.7005	0.6941					tried, above target
+previous misses	Debianarm64	Redirection	{varname} descriptor	267c6fc61a8c	128	65.612	66.820	92.771	0.7203	0.7119	0.7052	0.6940	0.6933	0.7037					tried, above target
+new misses	Debianarm64	Reserved word	coproc	876987d6ca20	128	122.573	123.259	156.407	0.7881				0.8027	0.7655					tried, above target
+previous misses	Debianarm64	Reserved word	select	e45d7d626f01	128	2.228	2.165	3.088	0.7010	0.7082	0.7033	0.6966	0.6959	0.7097				0.6805	tried, above target
+previous misses	Debianarm64	Reserved word	time	95303f71ee3a	128	67.085	65.633	94.578	0.6940	0.7106	0.7086	0.7093	0.7071	0.6851					tried, above target
+previous misses	Debianarm64	Shell language	bracket expressions and classes	fb5250b18748	128	59.558	59.409	85.650	0.6936	0.6836	0.6977	0.6801	0.6965	0.6999		0.9895	0.7585		matched OS control
+new misses	Debianarm64	Shell language	coproc	876987d6ca20	128	122.573	123.259	156.407	0.7881				0.8027	0.7655					tried, above target
+new misses	Debianarm64	Shell language	coprocess input/output descriptors	876987d6ca20	128	122.573	123.259	156.407	0.7881				0.8027	0.7655					tried, above target
+previous misses	Debianarm64	Shell language	escaped backslash filenames	ca58e21566ca	128	60.885	59.750	87.425	0.6834	0.6905	0.6893	0.6926	0.6986	0.6877		1.0047	0.7365		matched OS control
+previous misses	Debianarm64	Shell language	filename wildcards	63902335aa30	128	60.446	59.595	85.835	0.6943	0.6917	0.7072	0.6910	0.6955	0.6916		0.9957	0.7166		matched OS control
+previous misses	Debianarm64	Shell language	group redirections	9d64362ba9b1	128	65.943	65.273	93.760	0.6962	0.6929	0.7400	0.6991	0.7116	0.7028					tried, above target
+previous misses	Debianarm64	Shell language	grouped pipeline status	eb0e89e75b3f	128	74.333	74.890	115.079	0.6508	0.6601	0.6517	0.6541	0.6493	0.6465					fixed median ≤ 2/3
+previous misses	Debianarm64	Shell language	merged stderr pipeline	f4038837eccb	128	76.309	75.992	113.350	0.6704	0.6919	0.6798	0.6635	0.6703	0.6687					tried, above target
+previous misses	Debianarm64	Shell language	pathname expansion of leading dots	ca2139ab8b2e	128	60.664	60.873	88.146	0.6906	0.7035	0.6942	0.6831	0.6840	0.6984		0.9945	0.7611		matched OS control
+previous misses	Debianarm64	Shell language	process substitution input	25706da2d50d	128	78.396	76.870	115.016	0.6683	0.6758	0.6849	0.6771	0.6919	0.6793					tried, above target
+previous misses	Debianarm64	Shell language	process substitution output	664c5a83e2af	128	154.996	154.764	214.539	0.7214	0.7190	0.7112	0.7159	0.7238	0.7171					tried, above target
+previous misses	Debianarm64	Shell language	script fallback without shebang	486d0a5c94f0	128	149.663	127.287	161.861	0.7864	0.9171	0.8944	0.7603	0.7686	0.7549					tried, above target
+previous misses	Debianarm64	Shell language	select	e45d7d626f01	128	2.228	2.165	3.088	0.7010	0.7082	0.7033	0.6966	0.6959	0.7097				0.6805	tried, above target
+previous misses	Debianarm64	Shell language	shell environment isolation	0e0485303f08	128	36.041	37.932	53.383	0.7106	0.6643	0.6863	0.6811	0.6967	0.6312					tried, above target
+previous misses	Debianarm64	Shell language	shell script source	fb5e0f832d89	128	1.945	1.924	2.954	0.6514	0.6543	0.6520	0.6567	0.6569	0.6588				0.6169	fixed median ≤ 2/3
+previous misses	Debianarm64	Shell language	simple commands and assignments	d0cb82a50426	128	64.336	63.882	90.185	0.7083	0.6950	0.6999	0.7008	0.7066	0.7028		1.0220			matched OS control
+new misses	Debianarm64	Shell language	subshell scope	55420268ce63	128	38.844	40.641	60.457	0.6722				0.6776	0.6105					tried, above target
+previous misses	Debianarm64	Shell language	time -p	39c17ca07c03	128	84.775	84.544	112.633	0.7506	0.7575	0.7551	0.7612	0.7530	0.7498					tried, above target
+previous misses	Debianarm64	Shell language	time keyword	95303f71ee3a	128	67.085	65.633	94.578	0.6940	0.7106	0.7086	0.7093	0.7071	0.6851					tried, above target
+previous misses	Debianarm64	Shell language	wait -n	2d8b87809a57	4	84.125	84.092	85.842	0.9796	0.9771	0.9785	0.9794	0.9804	0.9783	0.9858				matched OS control
+previous misses	Debianarm64	Shell language	wait -p	7bd725556617	4	84.113	84.282	85.911	0.9810	0.9787	0.9809	0.9789	0.9796	0.9782	0.9839				matched OS control
+new misses	Debianarm64	Variable	BASH_SUBSHELL	03548d1b00be	128	36.498	37.787	55.915	0.6758				0.6791	0.6021					tried, above target
+previous misses	Debianarm64	Variable	BASH_XTRACEFD	f87578106552	128	66.512	64.820	97.362	0.6658	0.6860	0.7023	0.6704	0.6727	0.6638					fixed median ≤ 2/3
+previous misses	Debianarm64	Variable	CHILD_MAX	4e11eae31e2f	4	165.639	164.658	197.797	0.8325	0.8023	0.8415	0.8199	0.8398	0.8308					tried, above target
+new misses	Debianarm64	Variable	COPROC	876987d6ca20	128	122.573	123.259	156.407	0.7881				0.8027	0.7655					tried, above target
+previous misses	Debianarm64	Variable	FCEDIT	b0e7038cae0f	16	25.941	25.599	36.532	0.7007	0.6929	0.7009	0.7074	0.6936	0.7014					tried, above target
+previous misses	Debianarm64	Variable	GLOBIGNORE	900c6025ee60	128	60.804	59.821	88.098	0.6790	0.6906	0.6929	0.6875	0.6988	0.6930		0.9986	0.6118		matched OS control
+previous misses	Debianarm64	Variable	HISTSIZE	14264e502388	128	114.004	112.935	152.766	0.7393	0.7294	0.7271	0.7439	0.7301	0.7303					tried, above target
+previous misses	Debianarm64	Variable	HISTTIMEFORMAT	7310c20ca02c	128	102.118	101.844	139.292	0.7312	0.6992	0.7590	0.7427	0.7215	0.7322					tried, above target
+previous misses	Debianarm64	Variable	MAPFILE	8f981524555f	128	1.605	1.589	2.346	0.6774	0.6907	0.6743	0.6837	0.6695	0.6800				0.6595	1,024 iterations ≤ 2/3
+previous misses	Debianarm64	Variable	PS3	d3803d679772	128	1.806	1.766	2.584	0.6832	0.6833	0.6801	0.6781	0.6800	0.6927				0.6586	1,024 iterations ≤ 2/3
+previous misses	Debianarm64	Variable	REPLY	281739a3ac4f	128	1.802	1.407	2.544	0.5531	0.7050	0.6800	0.6831	0.5527	0.5481				0.5166	fixed median ≤ 2/3
+previous misses	Debianarm64	Variable	TIMEFORMAT	95303f71ee3a	128	67.085	65.633	94.578	0.6940	0.7106	0.7086	0.7093	0.7071	0.6851					tried, above target
+previous misses	Debianarm64	set -o	allexport	b723d5214598	128	66.121	65.943	93.093	0.7084	0.7041	0.7170	0.6961	0.7118	0.6989		1.0263			matched OS control
+previous misses	Debianarm64	set -o	noglob	09fe856ae8ae	128	60.785	60.531	87.474	0.6920	0.6891	0.7017	0.6861	0.6829	0.6967		1.0506	0.4427		matched OS control
+previous misses	Debianarm64	shopt	dotglob	239dd6e3e430	128	60.489	60.567	88.227	0.6865	0.6859	0.6976	0.6793	0.6835	0.6734		0.9989	0.5570		matched OS control
+previous misses	Debianarm64	shopt	globskipdots	e699df44d05a	128	58.540	58.280	84.409	0.6904	0.6969	0.6820	0.6903	0.7051	0.6833					tried, above target
+previous misses	Debianarm64	shopt	globstar	c0034550b8f9	16	17.988	17.845	24.625	0.7247	0.7267	0.7237	0.7106	0.7214	0.7285					tried, above target
+previous misses	Debianarm64	shopt	nocaseglob	e975ccd42235	128	58.475	58.913	84.573	0.6966	0.6875	0.6995	0.6927	0.6972	0.7028		0.9891	0.5807		matched OS control
+previous misses	Debianx64	Builtin	break	1ffe429f2b16	128	0.422	0.395	0.559	0.7072	0.7129	0.6992	0.8087	0.7305	0.8143				0.6503	1,024 iterations ≤ 2/3
+previous misses	Debianx64	Builtin	disown	d2003b0a862e	4	50.779	50.768	51.186	0.9918	0.9913	0.9948	0.9938	0.9923	0.9920		0.9998			matched OS control
+previous misses	Debianx64	Builtin	export	c7aaaf064221	128	35.341	35.524	51.992	0.6833	0.7133	0.6700	0.7350	0.6794	0.6831		1.0295			matched OS control
+previous misses	Debianx64	Builtin	hash	ce80acc44da2	128	32.920	32.578	50.095	0.6503	0.7388	0.6612	0.7458	0.6558	0.6567					fixed median ≤ 2/3
+previous misses	Debianx64	Builtin	history	1402ac52475d	128	70.131	69.858	94.787	0.7370	0.7960	0.7362	0.8011	0.7431	0.7334					tried, above target
+previous misses	Debianx64	Builtin	jobs	24c6ee0d7a12	4	403.901	404.278	404.675	0.9990	0.9973	0.9980	0.9983	0.9986	0.9990	0.9989				matched OS control
+previous misses	Debianx64	Builtin	mapfile	3ea25138c850	128	1.016	0.963	1.457	0.6612	0.6366	0.6611	0.7390	0.6680	0.6891				0.6504	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin	read	02b137a1a92b	128	1.013	0.878	1.493	0.5882	0.6381	0.6786	0.8006	0.5888	0.6273				0.5930	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin	readarray	b2a1b1c0a4a3	128	0.999	0.986	1.437	0.6863	0.6269	0.6523	0.7409	0.6711	0.6962				0.6510	1,024 iterations ≤ 2/3
+previous misses	Debianx64	Builtin	umask	330c6cece069	128	69.369	69.258	92.009	0.7527	0.7581	0.7580	0.7840	0.7490	0.7458					tried, above target
+previous misses	Debianx64	Builtin option	command -V	7951c138e16a	128	0.260	0.253	0.392	0.6447	0.6196	0.6780	0.6835	0.6455	0.6884				0.5889	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	command -p	71dec6cfd837	128	44.715	45.490	54.387	0.8364	0.8447	0.8305	0.8496	0.8235	0.8283					tried, above target
+previous misses	Debianx64	Builtin option	complete -r	ba763eb4cea5	128	0.771	0.737	1.123	0.6558	0.5631	0.6469	0.7988	0.6511	0.7002				0.6469	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	declare -f	01e27ed43a72	128	56.577	57.054	82.221	0.6939	0.7616	0.6860	0.7439	0.6921	0.6942					tried, above target
+previous misses	Debianx64	Builtin option	declare -x	26408a3c84fe	128	35.186	34.935	52.223	0.6690	0.7217	0.6725	0.7450	0.6714	0.6732		1.0204			matched OS control
+previous misses	Debianx64	Builtin option	disown -a	cee893ef723a	4	41.250	41.294	41.693	0.9904	0.9955	0.9956	0.9977	0.9926	0.9921		0.9952			matched OS control
+previous misses	Debianx64	Builtin option	disown -h	fbec48c6f803	4	162.957	162.854	163.930	0.9934	0.9927	0.9928	0.9941	0.9939	0.9931	0.9985				matched OS control
+previous misses	Debianx64	Builtin option	disown -r	4dbd86b7239c	4	40.846	40.853	41.050	0.9952	0.9927	0.9949	0.9937	0.9957	0.9950		1.0003			matched OS control
+previous misses	Debianx64	Builtin option	export -n	aa3f391c2a50	128	35.285	35.062	52.186	0.6719	0.7283	0.6813	0.7351	0.6764	0.6745		1.0269			matched OS control
+previous misses	Debianx64	Builtin option	export -p	c5972c1e3d25	128	71.625	71.493	94.970	0.7528	0.7421	0.7582	0.7483	0.7585	0.7535					tried, above target
+previous misses	Debianx64	Builtin option	hash -p	ce80acc44da2	128	32.920	32.578	50.095	0.6503	0.7388	0.6612	0.7458	0.6558	0.6567					fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	hash -t	ce80acc44da2	128	32.920	32.578	50.095	0.6503	0.7388	0.6612	0.7458	0.6558	0.6567					fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	jobs -l	48f0f68f324f	4	163.280	163.348	164.481	0.9931	0.9917	0.9936	0.9938	0.9929	0.9933	0.9976				matched OS control
+previous misses	Debianx64	Builtin option	jobs -n	1073fad1c5f9	4	122.928	122.879	124.141	0.9898	0.9890	0.9917	0.9918	0.9904	0.9908	0.9980				matched OS control
+previous misses	Debianx64	Builtin option	jobs -p	24c6ee0d7a12	4	403.901	404.278	404.675	0.9990	0.9973	0.9980	0.9983	0.9986	0.9990	0.9989				matched OS control
+previous misses	Debianx64	Builtin option	jobs -r	ac121d4b6180	4	163.030	163.105	164.233	0.9931	0.9910	0.9926	0.9932	0.9933	0.9929	0.9968				matched OS control
+previous misses	Debianx64	Builtin option	jobs -s	97a70b4647de	4	162.868	162.853	163.924	0.9935	0.9913	0.9924	0.9934	0.9934	0.9934	0.9986				matched OS control
+previous misses	Debianx64	Builtin option	jobs -x	27e15ee9fb24	4	163.188	163.166	164.135	0.9941	0.9904	0.9931	0.9930	0.9945	0.9944	0.9972				matched OS control
+previous misses	Debianx64	Builtin option	mapfile -C	3ec206ca8c1d	128	2.784	2.638	4.055	0.6505	0.6580	0.6485	0.7392	0.6470	0.7120					fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	mapfile -O	e75fc215bb04	128	1.641	1.545	2.295	0.6732	0.6635	0.6688	0.7308	0.6649	0.7177				0.6491	1,024 iterations ≤ 2/3
+previous misses	Debianx64	Builtin option	mapfile -c	6f9d9b266d72	128	2.028	1.886	2.911	0.6479	0.5983	0.6529	0.7154	0.6483	0.6901				0.6379	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	mapfile -d	50e713e92929	128	1.421	1.323	2.053	0.6443	0.6524	0.6393	0.7311	0.6425	0.6643			0.6782	0.6239	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	mapfile -n	06d05e1602ec	128	1.414	1.295	2.053	0.6309	0.6570	0.6310	0.7267	0.6335	0.6623			0.6732	0.6094	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	mapfile -s	d4f36f4ce1c1	128	1.451	1.340	2.117	0.6330	0.6602	0.6387	0.7228	0.6343	0.6678			0.6878	0.6246	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	mapfile -t	ffa3c1e4291d	128	1.530	1.420	2.132	0.6660	0.6773	0.6681	0.7341	0.6589	0.6954			0.7192	0.6517	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	mapfile -u	a5557ddc375e	128	1.519	1.433	2.179	0.6576	0.6628	0.6569	0.7188	0.6481	0.6909			0.7040	0.6368	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	read -a	19da744b7aca	128	1.021	0.911	1.402	0.6496	0.6506	0.6984	0.7903	0.6433	0.6737				0.6237	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	read -d	54186fde2fb2	128	0.842	0.720	1.206	0.5969	0.5953	0.6467	0.7745	0.6007	0.6169				0.5736	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	read -n	5896b7d1c17a	128	0.788	0.744	1.152	0.6459	0.5631	0.6325	0.7585	0.6487	0.6702				0.6328	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	read -r	b14a3c41f497	128	0.826	0.724	1.232	0.5875	0.5750	0.6376	0.7684	0.5887	0.6051				0.5609	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	read -t	01044dfe8678	4	141.347	141.352	141.545	0.9986	0.9980	0.9981	0.9986	0.9985	0.9981					tried, above target
+previous misses	Debianx64	Builtin option	readarray -C	98a5af1da502	128	2.778	2.622	4.029	0.6509	0.6397	0.6523	0.7335	0.6490	0.7169					fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	readarray -O	522a6c2a9e45	128	1.647	1.535	2.285	0.6717	0.6562	0.6673	0.7314	0.6735	0.7147				0.6503	1,024 iterations ≤ 2/3
+previous misses	Debianx64	Builtin option	readarray -c	2ad89d387488	128	2.009	1.889	2.899	0.6519	0.6012	0.6518	0.7226	0.6510	0.6874				0.6399	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	readarray -d	dc385084f0db	128	1.447	1.320	2.042	0.6464	0.6500	0.6447	0.7303	0.6432	0.6691			0.6696	0.6233	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	readarray -n	98f98839a829	128	1.402	1.287	2.050	0.6279	0.6620	0.6395	0.7223	0.6317	0.6549			0.6727	0.6111	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	readarray -s	87eb349d3117	128	1.450	1.348	2.106	0.6400	0.6449	0.6373	0.7268	0.6387	0.6730			0.6996	0.6209	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	readarray -t	62078004b66f	128	1.513	1.420	2.124	0.6685	0.6717	0.6645	0.7313	0.6663	0.6991			0.7369	0.6509	1,024 iterations ≤ 2/3
+previous misses	Debianx64	Builtin option	readarray -u	93ed8c79967f	128	1.534	1.412	2.184	0.6466	0.6587	0.6548	0.7313	0.6534	0.6931			0.7109	0.6387	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	trap -l	bc60cd40ae2f	128	56.393	56.487	80.580	0.7010	0.7669	0.6993	0.7641	0.7035	0.6996					tried, above target
+previous misses	Debianx64	Builtin option	type -P	d471161485d8	128	67.592	67.082	91.323	0.7346	0.8094	0.7319	0.7789	0.7377	0.7387					tried, above target
+new misses	Debianx64	Builtin option	type -a	3651a919f2f2	128	49.000	49.120	74.074	0.6631				0.6627	0.6641					fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	typeset -f	20a42f211e41	128	57.158	57.022	82.122	0.6944	0.7589	0.6867	0.7641	0.6958	0.6981					tried, above target
+new misses	Debianx64	Builtin option	typeset -p	076cf9a61399	128	0.322	0.323	0.500	0.6473				0.6801	0.6855				0.6070	fixed median ≤ 2/3
+previous misses	Debianx64	Builtin option	typeset -x	51b712b12c9f	128	35.565	35.527	51.905	0.6845	0.7119	0.6762	0.7422	0.6788	0.6762		1.0230			matched OS control
+previous misses	Debianx64	Builtin option	wait -n	2d8b87809a57	4	82.758	82.753	83.918	0.9861	0.9853	0.9857	0.9870	0.9863	0.9856	0.9938				matched OS control
+previous misses	Debianx64	Builtin option	wait -p	7bd725556617	4	82.410	82.450	83.732	0.9847	0.9844	0.9870	0.9863	0.9849	0.9862	0.9955				matched OS control
+new misses	Debianx64	Completion option	nosort	b74e8619b607	128	0.386	0.400	0.587	0.6820				0.6633	0.7053				0.6115	1,024 iterations ≤ 2/3
+new misses	Debianx64	Completion option	nospace	d4f217fd6549	128	0.381	0.397	0.602	0.6607				0.6400	0.6969				0.6049	fixed median ≤ 2/3
+previous misses	Debianx64	Conditional	-G	af5edd672589	128	1.043	0.989	1.557	0.6351	0.6399	0.6535	0.7875	0.6327	0.6515	0.4989	0.5196	0.6482	0.6273	fixed median ≤ 2/3
+previous misses	Debianx64	Conditional	-d	d150f0bbe6ea	128	1.010	0.955	1.520	0.6284	0.6116	0.6207	0.7623	0.6257	0.6413	0.5115	0.5117	0.6196	0.6115	fixed median ≤ 2/3
+previous misses	Debianx64	Conditional	-g	d95e3aa8df09	128	68.894	68.598	98.699	0.6950	0.7134	0.6927	0.7357	0.6912	0.6792			0.6278		tried, above target
+previous misses	Debianx64	Conditional	-n	4ddac3b45d82	128	0.496	0.493	0.720	0.6847	0.6189	0.6731	0.6986	0.6925	0.7632				0.6530	1,024 iterations ≤ 2/3
+previous misses	Debianx64	Conditional	-nt	fb30c7f4f0ce	128	66.900	67.119	100.033	0.6710	0.7126	0.6728	0.7371	0.6699	0.6711			0.6756		tried, above target
+previous misses	Debianx64	Conditional	-ot	94a5a188a913	128	66.608	67.043	99.631	0.6729	0.7050	0.6709	0.7415	0.6719	0.6731			0.7070		tried, above target
+previous misses	Debianx64	Conditional	-u	7a27caf51da5	128	68.851	68.259	100.052	0.6822	0.7038	0.6882	0.7306	0.6884	0.6818			0.6372		tried, above target
+previous misses	Debianx64	Conditional	-x	2e9e1ff54238	128	69.958	68.856	101.178	0.6805	0.6931	0.6863	0.7239	0.6883	0.6836			0.6048		tried, above target
+new misses	Debianx64	Conditional	-z	77e49a8cd841	128	0.491	0.479	0.699	0.6853				0.7069	0.7874				0.6513	1,024 iterations ≤ 2/3
+previous misses	Debianx64	Parameter	${#v}	a6c78c219f27	128	60.399	59.592	87.629	0.6800	0.6774	0.6846	0.7266	0.6937	0.6612	0.8072	0.8072	0.6088		tried, above target
+previous misses	Debianx64	Parameter	${a[*]}	9809c3d9fb31	128	0.505	0.499	0.741	0.6736	0.6150	0.6888	0.7667	0.6716	0.7406				0.6410	1,024 iterations ≤ 2/3
+previous misses	Debianx64	Parameter	${v##a*}	e8708d9a1ee0	128	61.195	59.494	85.543	0.6955	0.6907	0.6845	0.7439	0.7116	0.6825	0.7989	0.7913	0.6116		tried, above target
+previous misses	Debianx64	Parameter	${v#a*}	673e8aa8166a	128	62.566	60.272	89.874	0.6706	0.6846	0.6723	0.7436	0.6862	0.6565	0.8090	0.8036	0.6056		tried, above target
+previous misses	Debianx64	Parameter	${v%%*a}	726a63f9154d	128	62.835	61.022	89.950	0.6784	0.6854	0.6859	0.7337	0.6866	0.6612	0.8081	0.8025	0.6043		tried, above target
+previous misses	Debianx64	Parameter	${v%*a}	4f5d1deb772d	128	62.095	61.090	89.613	0.6817	0.6766	0.6938	0.7347	0.6840	0.6589	0.7989	0.8016	0.6057		tried, above target
+previous misses	Debianx64	Parameter	${v+a}	3f37304c058c	128	61.381	60.401	88.404	0.6832	0.6694	0.6820	0.7204	0.6990	0.6703	0.8054	0.7949	0.6068		tried, above target
+previous misses	Debianx64	Parameter	${v,,}	038c19e276ac	128	61.930	60.753	89.883	0.6759	0.6850	0.6845	0.7304	0.6925	0.6560	0.8039	0.7989	0.5986		tried, above target
+previous misses	Debianx64	Parameter	${v,}	af35bd1e969a	128	61.479	60.832	87.074	0.6986	0.6590	0.6869	0.7402	0.7071	0.6767	0.7882	0.7894	0.5954		tried, above target
+previous misses	Debianx64	Parameter	${v-a}	8828b96faddc	128	61.172	60.822	87.854	0.6923	0.6705	0.6813	0.7319	0.6966	0.6718	0.7935	0.7986	0.6028		tried, above target
+previous misses	Debianx64	Parameter	${v/#a/X}	e4ce65cbd0ee	128	62.195	60.256	87.657	0.6874	0.6720	0.6938	0.7673	0.6933	0.6668	0.8028	0.7943	0.6102		tried, above target
+previous misses	Debianx64	Parameter	${v/%a/X}	ade1300fe9ed	128	62.115	59.541	87.557	0.6800	0.6756	0.6723	0.7350	0.6962	0.6608	0.8011	0.8088	0.6094		tried, above target
+previous misses	Debianx64	Parameter	${v//a/X}	f3c16e886e58	128	62.210	60.770	88.395	0.6875	0.6518	0.7000	0.7418	0.6952	0.6624	0.7912	0.7818	0.6058		tried, above target
+previous misses	Debianx64	Parameter	${v/a/X}	e62ea0802e35	128	62.419	60.657	87.314	0.6947	0.6802	0.6937	0.7435	0.7045	0.6708	0.7889	0.7936	0.6118		tried, above target
+previous misses	Debianx64	Parameter	${v: -2:1}	7173f1b93cf8	128	62.806	61.408	90.261	0.6803	0.6620	0.6853	0.7225	0.6865	0.6543	0.8061	0.7951	0.6043		tried, above target
+previous misses	Debianx64	Parameter	${v:+a}	cdee11d6e6ba	128	60.977	59.849	87.267	0.6858	0.6711	0.6803	0.7383	0.6877	0.6673	0.7977	0.8063	0.6053		tried, above target
+previous misses	Debianx64	Parameter	${v:-a}	f967cb056c5a	128	61.146	60.476	88.079	0.6866	0.6882	0.6781	0.7292	0.6846	0.6642	0.7905	0.8056	0.6053		tried, above target
+previous misses	Debianx64	Parameter	${v:1}	3c79982eaefc	128	61.645	60.318	87.865	0.6865	0.6722	0.6716	0.7294	0.6951	0.6642	0.8035	0.8026	0.5950		tried, above target
+previous misses	Debianx64	Parameter	${v:=a}	96dd79aa9f3b	128	60.733	60.731	88.711	0.6846	0.6721	0.6813	0.7222	0.6915	0.6644	0.7876	0.7931	0.5928		tried, above target
+previous misses	Debianx64	Parameter	${v=a}	359bb492444c	128	61.054	60.284	86.928	0.6935	0.6711	0.6877	0.7158	0.6998	0.6769	0.8015	0.8019	0.5901		tried, above target
+previous misses	Debianx64	Parameter	${v?a}	d389fddedac1	128	60.059	58.863	88.913	0.6620	0.6288	0.6587	0.6990	0.6761	0.6500	0.8095	0.8236			fixed median ≤ 2/3
+previous misses	Debianx64	Parameter	${v@E}	270436aab876	128	61.161	59.996	87.482	0.6858	0.6610	0.6746	0.7276	0.6982	0.6681	0.8069	0.8132	0.6036		tried, above target
+previous misses	Debianx64	Parameter	${v@L}	4d7582518b43	128	62.153	61.059	88.426	0.6905	0.6863	0.6781	0.7321	0.6985	0.6700	0.7961	0.7969	0.6001		tried, above target
+previous misses	Debianx64	Parameter	${v@P}	e8ff153a7abe	128	60.569	59.842	87.587	0.6832	0.6500	0.6737	0.7131	0.6851	0.6609	0.8063	0.8084	0.5957		tried, above target
+previous misses	Debianx64	Parameter	${v@Q}	a8ae2df526e8	128	61.724	60.494	88.109	0.6866	0.6577	0.6765	0.7141	0.6977	0.6646	0.8006	0.7919	0.6193		tried, above target
+previous misses	Debianx64	Parameter	${v@U}	c0e20e993c8a	128	61.470	60.426	88.807	0.6804	0.6851	0.6763	0.7380	0.6930	0.6654	0.7982	0.7997	0.5986		tried, above target
+previous misses	Debianx64	Parameter	${v@u}	4c37fe0760f3	128	62.339	60.369	88.691	0.6807	0.6713	0.6903	0.7306	0.6974	0.6697	0.8090	0.7879	0.5960		tried, above target
+previous misses	Debianx64	Parameter	${v^^}	b1a9e410c325	128	62.066	60.276	87.689	0.6874	0.6678	0.6845	0.7093	0.7077	0.6740	0.7966	0.7847	0.6075		tried, above target
+previous misses	Debianx64	Parameter	${v^}	7372ef5e2b93	128	62.535	61.907	87.987	0.7036	0.6833	0.6931	0.7192	0.7208	0.6847	0.7934	0.7906	0.6050		tried, above target
+previous misses	Debianx64	Parameter	${v}	854adad3e2e9	128	60.504	59.235	88.236	0.6713	0.6475	0.6666	0.7240	0.6743	0.6540	0.8191	0.7990	0.5938		tried, above target
+previous misses	Debianx64	Printf format	E	fdfba3859c8e	128	0.302	0.298	0.427	0.6980	0.6257	0.7074	0.7344	0.6917	0.7302				0.6989	short at or below Bash
+new misses	Debianx64	Printf format	G	9d1491d786ad	128	0.286	0.285	0.432	0.6590				0.6492	0.6846				0.6620	fixed median ≤ 2/3
+previous misses	Debianx64	Printf format	e	6e29789c4198	128	0.310	0.294	0.402	0.7315	0.6159	0.6863	0.7519	0.7489	0.7728				0.6951	short at or below Bash
+previous misses	Debianx64	Printf format	f	1234e23f3d40	128	0.288	0.283	0.421	0.6709	0.5821	0.6732	0.6961	0.6692	0.6950				0.6345	1,024 iterations ≤ 2/3
+previous misses	Debianx64	Printf format	g	1d754cd8e38e	128	0.282	0.279	0.424	0.6572	0.5610	0.6984	0.7156	0.6589	0.6861				0.6402	fixed median ≤ 2/3
+previous misses	Debianx64	Redirection	&>	1036f196c42a	128	82.932	82.438	107.661	0.7657	0.8032	0.7683	0.8133	0.7674	0.7644					tried, above target
+previous misses	Debianx64	Redirection	&>>	d492279205a2	128	81.726	81.894	106.448	0.7693	0.8035	0.7754	0.8028	0.7719	0.7703					tried, above target
+previous misses	Debianx64	Redirection	/dev/fd/N	15c6dbc29d08	128	36.461	36.301	53.584	0.6775	0.7227	0.6781	0.7676	0.6819	0.6789					tried, above target
+previous misses	Debianx64	Redirection	<>	1c9961fb96ee	128	35.756	35.061	53.050	0.6609	0.6911	0.6775	0.7482	0.6668	0.6694					fixed median ≤ 2/3
+previous misses	Debianx64	Redirection	>	64480a7d0419	128	35.243	35.250	52.594	0.6702	0.7071	0.6703	0.7357	0.6716	0.6702					tried, above target
+previous misses	Debianx64	Redirection	>>	a3c1c9edeb4e	128	34.464	34.389	51.012	0.6741	0.6985	0.6684	0.7355	0.6782	0.6763					tried, above target
+previous misses	Debianx64	Redirection	n<&-	9b1bda303ace	128	0.843	0.803	1.199	0.6703	0.6279	0.6687	0.7925	0.6755	0.6953				0.6623	1,024 iterations ≤ 2/3
+previous misses	Debianx64	Redirection	n>&-	813721653d7c	128	0.967	0.934	1.128	0.8277	0.7564	0.8114	0.9214	0.8237	0.8708				0.8129	tried, above target
+previous misses	Debianx64	Redirection	n>&m	7540752f59db	128	36.739	36.158	52.660	0.6866	0.7393	0.6961	0.7627	0.6952	0.7008					tried, above target
+previous misses	Debianx64	Redirection	n>&m-	2b0867cd62f3	128	34.860	34.884	51.926	0.6718	0.7316	0.6802	0.7253	0.6730	0.6720					tried, above target
+previous misses	Debianx64	Redirection	{varname} descriptor	267c6fc61a8c	128	35.068	34.880	51.206	0.6812	0.7223	0.6771	0.7395	0.6819	0.6828					tried, above target
+previous misses	Debianx64	Reserved word	elif	6d5ea4cc21bb	128	0.330	0.333	0.509	0.6531	0.5493	0.6568	0.6686	0.6302	0.7239				0.6294	fixed median ≤ 2/3
+previous misses	Debianx64	Reserved word	else	6d5ea4cc21bb	128	0.330	0.333	0.509	0.6531	0.5493	0.6568	0.6686	0.6302	0.7239				0.6294	fixed median ≤ 2/3
+previous misses	Debianx64	Reserved word	fi	6d5ea4cc21bb	128	0.330	0.333	0.509	0.6531	0.5493	0.6568	0.6686	0.6302	0.7239				0.6294	fixed median ≤ 2/3
+previous misses	Debianx64	Reserved word	if	6d5ea4cc21bb	128	0.330	0.333	0.509	0.6531	0.5493	0.6568	0.6686	0.6302	0.7239				0.6294	fixed median ≤ 2/3
+previous misses	Debianx64	Reserved word	select	e45d7d626f01	128	1.352	1.235	1.689	0.7310	0.7042	0.7573	0.7854	0.7368	0.7859				0.7501	tried, above target
+previous misses	Debianx64	Reserved word	then	6d5ea4cc21bb	128	0.330	0.333	0.509	0.6531	0.5493	0.6568	0.6686	0.6302	0.7239				0.6294	fixed median ≤ 2/3
+previous misses	Debianx64	Reserved word	time	95303f71ee3a	128	35.030	34.926	51.304	0.6808	0.7158	0.6771	0.7457	0.6761	0.6773					tried, above target
+previous misses	Debianx64	Reserved word	until	df67f0fcd11d	128	0.605	0.561	0.859	0.6532	0.5606	0.6238	0.6180	0.6308	0.7427				0.6254	fixed median ≤ 2/3
+previous misses	Debianx64	Reserved word	while	72d528971e3a	128	0.584	0.541	0.850	0.6367	0.5700	0.6399	0.6110	0.6118	0.7332				0.6260	fixed median ≤ 2/3
+new misses	Debianx64	Shell language	array append	47c0f6453fa3	128	0.617	0.608	0.920	0.6611				0.6538	0.7336				0.6588	fixed median ≤ 2/3
+previous misses	Debianx64	Shell language	brace alternation	ed429c45e0ed	128	0.396	0.405	0.489	0.8290	0.8019	0.8204	0.8215	0.8681	0.9402				0.7725	short at or below Bash
+previous misses	Debianx64	Shell language	bracket expressions and classes	fb5250b18748	128	34.514	34.692	50.106	0.6924	0.7509	0.6900	0.7751	0.6928	0.6964		0.9465	0.9024		tried, above target
+previous misses	Debianx64	Shell language	case ;& fallthrough	43a24f5ea779	128	0.345	0.328	0.508	0.6448	0.5021	0.6488	0.6308	0.6565	0.6604				0.5737	fixed median ≤ 2/3
+previous misses	Debianx64	Shell language	escaped backslash filenames	ca58e21566ca	128	33.628	33.184	50.060	0.6629	0.7480	0.6788	0.7704	0.6629	0.6710		0.9659	0.7996		fixed median ≤ 2/3
+previous misses	Debianx64	Shell language	filename wildcards	63902335aa30	128	35.078	34.698	50.669	0.6848	0.7459	0.6896	0.7749	0.6776	0.6780		0.9721	0.7672		tried, above target
+previous misses	Debianx64	Shell language	group redirections	9d64362ba9b1	128	34.795	34.654	51.182	0.6771	0.7185	0.6759	0.7478	0.6693	0.6784					tried, above target
+previous misses	Debianx64	Shell language	if then elif else fi	6d5ea4cc21bb	128	0.330	0.333	0.509	0.6531	0.5493	0.6568	0.6686	0.6302	0.7239				0.6294	fixed median ≤ 2/3
+previous misses	Debianx64	Shell language	indexed arrays	43d28e050caa	128	0.734	0.723	1.051	0.6880	0.6054	0.6772	0.6929	0.6846	0.7705				0.6917	tried, above target
+previous misses	Debianx64	Shell language	merged stderr pipeline	f4038837eccb	128	43.769	43.490	64.126	0.6782	0.6889	0.6869	0.6754	0.6821	0.6821					tried, above target
+previous misses	Debianx64	Shell language	pathname expansion of leading dots	ca2139ab8b2e	128	33.457	33.307	50.190	0.6636	0.7568	0.6884	0.7712	0.6622	0.6718		0.9779	0.8071		fixed median ≤ 2/3
+previous misses	Debianx64	Shell language	programmable completion callback	b4ea38c68203	128	1.224	1.160	1.428	0.8124	0.6979	0.8014	0.8224	0.8077	0.8780				0.8040	tried, above target
+previous misses	Debianx64	Shell language	script fallback without shebang	486d0a5c94f0	128	85.834	68.684	95.929	0.7160	0.8878	0.8995	0.7907	0.7144	0.7032					tried, above target
+previous misses	Debianx64	Shell language	select	e45d7d626f01	128	1.352	1.235	1.689	0.7310	0.7042	0.7573	0.7854	0.7368	0.7859				0.7501	tried, above target
+previous misses	Debianx64	Shell language	shell environment isolation	0e0485303f08	128	20.449	20.654	28.505	0.7246	0.6983	0.7293	0.7759	0.7404	0.6881					tried, above target
+previous misses	Debianx64	Shell language	simple commands and assignments	d0cb82a50426	128	35.933	36.477	52.648	0.6928	0.7537	0.6735	0.7437	0.6725	0.6800		0.9935			matched OS control
+previous misses	Debianx64	Shell language	subshell exit isolation	d63db8f1e039	128	17.528	18.364	26.866	0.6835	0.6442	0.6855	0.6975	0.6824	0.6721					tried, above target
+previous misses	Debianx64	Shell language	subshell scope	2a8b9516d795	128	19.514	19.517	27.485	0.7101	0.6917	0.7014	0.7462	0.7235	0.6779					tried, above target
+previous misses	Debianx64	Shell language	time -p	39c17ca07c03	128	53.149	52.865	66.546	0.7944	0.7932	0.7868	0.7931	0.7888	0.7940					tried, above target
+previous misses	Debianx64	Shell language	time keyword	95303f71ee3a	128	35.030	34.926	51.304	0.6808	0.7158	0.6771	0.7457	0.6761	0.6773					tried, above target
+previous misses	Debianx64	Shell language	until	df67f0fcd11d	128	0.605	0.561	0.859	0.6532	0.5606	0.6238	0.6180	0.6308	0.7427				0.6254	fixed median ≤ 2/3
+previous misses	Debianx64	Shell language	wait -n	2d8b87809a57	4	82.758	82.753	83.918	0.9861	0.9853	0.9857	0.9870	0.9863	0.9856	0.9938				matched OS control
+previous misses	Debianx64	Shell language	wait -p	7bd725556617	4	82.410	82.450	83.732	0.9847	0.9844	0.9870	0.9863	0.9849	0.9862	0.9955				matched OS control
+previous misses	Debianx64	Shell language	while	72d528971e3a	128	0.584	0.541	0.850	0.6367	0.5700	0.6399	0.6110	0.6118	0.7332				0.6260	fixed median ≤ 2/3
+previous misses	Debianx64	Variable	BASHPID	cae2dfeedc67	128	19.381	19.251	28.199	0.6827	0.6733	0.6778	0.7332	0.6957	0.6520					tried, above target
+previous misses	Debianx64	Variable	BASH_SUBSHELL	a48fbc6b2ae0	128	19.128	19.200	28.350	0.6773	0.6524	0.6802	0.6839	0.6983	0.6502					tried, above target
+previous misses	Debianx64	Variable	BASH_VERSINFO	9b00b1acdd1f	128	0.364	0.359	0.527	0.6801	0.6278	0.7025	0.6512	0.6677	0.7607				0.6567	1,024 iterations ≤ 2/3
+previous misses	Debianx64	Variable	CHILD_MAX	4e11eae31e2f	4	146.599	146.379	164.746	0.8885	0.8728	0.8891	0.9012	0.8933	0.8891					tried, above target
+previous misses	Debianx64	Variable	COMPREPLY	b4ea38c68203	128	1.224	1.160	1.428	0.8124	0.6979	0.8014	0.8224	0.8077	0.8780				0.8040	tried, above target
+previous misses	Debianx64	Variable	EUID	135dcc885cee	128	48.928	48.937	71.671	0.6828	0.7184	0.6817	0.7104	0.6688	0.6890					tried, above target
+previous misses	Debianx64	Variable	GLOBIGNORE	900c6025ee60	128	34.408	33.921	50.729	0.6687	0.7700	0.6823	0.7733	0.6653	0.6748		0.9808	0.7310		tried, above target
+previous misses	Debianx64	Variable	HISTSIZE	14264e502388	128	70.796	70.211	95.538	0.7349	0.7958	0.7373	0.7875	0.7452	0.7398					tried, above target
+previous misses	Debianx64	Variable	HISTTIMEFORMAT	7310c20ca02c	128	62.047	62.267	86.297	0.7215	0.7881	0.7182	0.7753	0.7218	0.7253					tried, above target
+previous misses	Debianx64	Variable	MAPFILE	8f981524555f	128	0.844	0.808	1.259	0.6417	0.5786	0.6379	0.7769	0.6413	0.6667				0.6390	fixed median ≤ 2/3
+previous misses	Debianx64	Variable	PS3	d3803d679772	128	1.093	1.034	1.425	0.7255	0.6971	0.7335	0.7539	0.7249	0.7709				0.7269	tried, above target
+previous misses	Debianx64	Variable	PS4	b64e49e55f1f	128	0.563	0.549	0.810	0.6773	0.6122	0.6904	0.8943	0.6725	0.7701				0.6712	tried, above target
+previous misses	Debianx64	Variable	REPLY	281739a3ac4f	128	0.977	0.716	1.403	0.5106	0.6291	0.6498	0.7926	0.5173	0.5286				0.4861	fixed median ≤ 2/3
+previous misses	Debianx64	Variable	TIMEFORMAT	95303f71ee3a	128	35.030	34.926	51.304	0.6808	0.7158	0.6771	0.7457	0.6761	0.6773					tried, above target
+previous misses	Debianx64	Variable	UID	74b97b495f5c	128	49.849	49.498	72.039	0.6871	0.7107	0.6841	0.7216	0.6830	0.6853					tried, above target
+previous misses	Debianx64	set -o	allexport	b723d5214598	128	35.525	35.005	51.655	0.6777	0.7175	0.6788	0.7467	0.6931	0.6903		1.0144			matched OS control
+previous misses	Debianx64	set -o	braceexpand	6d9ee176cb77	128	0.531	0.527	0.777	0.6784	0.5815	0.6641	0.6551	0.6776	0.7145				0.6833	tried, above target
+previous misses	Debianx64	set -o	noglob	09fe856ae8ae	128	32.428	32.696	48.897	0.6687	0.7731	0.6702	0.7585	0.6633	0.6595		1.0029	0.5300		matched OS control
+previous misses	Debianx64	set -o	xtrace	d596a1cdcd5d	128	0.554	0.552	0.814	0.6785	0.6282	0.6883	0.8576	0.6611	0.7404				0.6606	1,024 iterations ≤ 2/3
+previous misses	Debianx64	shopt	dotglob	239dd6e3e430	128	34.414	34.371	50.868	0.6757	0.7479	0.6816	0.7589	0.6751	0.6691		0.9864	0.6352		matched OS control
+previous misses	Debianx64	shopt	failglob	f6861299edd1	128	21.049	20.777	30.801	0.6745	0.6587	0.6820	0.7172	0.6845	0.6529					tried, above target
+previous misses	Debianx64	shopt	globskipdots	e699df44d05a	128	33.371	33.371	49.183	0.6785	0.7493	0.6814	0.7687	0.6731	0.6786					tried, above target
+previous misses	Debianx64	shopt	globstar	c0034550b8f9	128	82.962	81.881	115.172	0.7109	0.7566	0.7160	0.7724	0.7125	0.7150					tried, above target
+previous misses	Debianx64	shopt	nocaseglob	e975ccd42235	128	33.065	32.897	49.576	0.6636	0.7587	0.6765	0.7719	0.6592	0.6575		0.9698	0.6721		fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin	disown	d2003b0a862e	4	52.911	52.969	53.660	0.9871	0.9891	0.9890	0.9876	0.9869	0.9857		0.9983			matched OS control
+previous misses	Ubuntuarm64	Builtin	export	c7aaaf064221	128	69.393	68.536	93.942	0.7296	0.7219	0.7172	0.7253	0.7401	0.7272		1.0325			matched OS control
+previous misses	Ubuntuarm64	Builtin	hash	ce80acc44da2	16	32.166	32.200	35.172	0.9155	0.8959	0.9077	0.9072	0.9121	0.9141					tried, above target
+previous misses	Ubuntuarm64	Builtin	history	1402ac52475d	128	116.559	116.556	153.979	0.7570	0.7319	0.7466	0.7476	0.7545	0.7539					tried, above target
+previous misses	Ubuntuarm64	Builtin	jobs	24c6ee0d7a12	4	412.832	413.192	413.666	0.9989	0.9987	0.9972	0.9972	0.9983	0.9978	0.9976				matched OS control
+previous misses	Ubuntuarm64	Builtin	mapfile	3ea25138c850	128	1.812	1.763	2.629	0.6707	0.6641	0.6624	0.6732	0.6641	0.6741				0.6475	1,024 iterations ≤ 2/3
+previous misses	Ubuntuarm64	Builtin	pushd	69aa5855c584	16	32.067	31.780	35.897	0.8853	0.8982	0.9145	0.9061	0.8991	0.9036					tried, above target
+previous misses	Ubuntuarm64	Builtin	read	02b137a1a92b	128	1.805	1.608	2.661	0.6043	0.6964	0.6906	0.6841	0.6088	0.6244				0.5851	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin	readarray	b2a1b1c0a4a3	128	1.789	1.739	2.595	0.6701	0.6633	0.6761	0.6799	0.6734	0.6803				0.6511	1,024 iterations ≤ 2/3
+previous misses	Ubuntuarm64	Builtin	source	fb5e0f832d89	128	2.074	2.020	3.061	0.6597	0.6640	0.6541	0.6534	0.6556	0.6748				0.6323	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin	umask	330c6cece069	16	55.431	55.097	60.121	0.9164	0.9242	0.9227	0.9124	0.9162	0.9167					tried, above target
+previous misses	Ubuntuarm64	Builtin option	cd -L	86f95ff2dd2c	16	95.348	95.377	106.053	0.8993	0.9003	0.9159	0.9177	0.8985	0.9105					tried, above target
+previous misses	Ubuntuarm64	Builtin option	cd -P	3fda9e144559	16	96.131	96.200	106.146	0.9063	0.9064	0.9048	0.9074	0.9182	0.8960					tried, above target
+previous misses	Ubuntuarm64	Builtin option	command -p	71dec6cfd837	128	84.973	86.591	102.635	0.8437	0.8279	0.8341	0.8604	0.8359	0.8376					tried, above target
+previous misses	Ubuntuarm64	Builtin option	complete -r	ba763eb4cea5	128	1.406	1.356	2.079	0.6523	0.6505	0.6651	0.6515	0.6636	0.6782				0.6256	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	declare -f	01e27ed43a72	128	99.984	102.967	138.513	0.7434	0.7093	0.7172	0.7146	0.7327	0.7203					tried, above target
+previous misses	Ubuntuarm64	Builtin option	declare -x	26408a3c84fe	128	67.395	67.445	91.788	0.7348	0.7154	0.7114	0.7099	0.7304	0.7265		1.0243			matched OS control
+previous misses	Ubuntuarm64	Builtin option	dirs -c	aabb4ccb2a1e	16	31.713	32.027	36.027	0.8890	0.8949	0.9074	0.8996	0.8819	0.8836					tried, above target
+previous misses	Ubuntuarm64	Builtin option	disown -a	cee893ef723a	4	45.519	45.729	45.739	0.9998	0.9874	0.9902	0.9903	0.9903	0.9871		1.0176			matched OS control
+previous misses	Ubuntuarm64	Builtin option	disown -h	fbec48c6f803	4	171.117	171.197	172.589	0.9919	0.9917	0.9923	0.9931	0.9920	0.9911	0.9968				matched OS control
+previous misses	Ubuntuarm64	Builtin option	disown -r	4dbd86b7239c	4	43.035	43.024	43.447	0.9903	0.9922	0.9928	0.9922	0.9913	0.9900		0.9978			matched OS control
+previous misses	Ubuntuarm64	Builtin option	export -n	aa3f391c2a50	128	66.872	67.441	94.619	0.7128	0.7224	0.7189	0.7243	0.7158	0.7100		1.0068			matched OS control
+previous misses	Ubuntuarm64	Builtin option	export -p	c5972c1e3d25	128	124.636	123.757	159.574	0.7755	0.7802	0.7777	0.7861	0.7838	0.7735					tried, above target
+previous misses	Ubuntuarm64	Builtin option	hash -d	4994502746fb	128	1.730	1.731	2.464	0.7028	0.6862	0.6879	0.6569	0.6907	0.6972				0.6721	tried, above target
+previous misses	Ubuntuarm64	Builtin option	hash -p	ce80acc44da2	16	32.166	32.200	35.172	0.9155	0.8959	0.9077	0.9072	0.9121	0.9141					tried, above target
+previous misses	Ubuntuarm64	Builtin option	hash -r	9258a9c1f1b3	128	1.756	1.705	2.446	0.6968	0.6863	0.6849	0.6822	0.6980	0.7004				0.6640	1,024 iterations ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	hash -t	ce80acc44da2	16	32.166	32.200	35.172	0.9155	0.8959	0.9077	0.9072	0.9121	0.9141					tried, above target
+previous misses	Ubuntuarm64	Builtin option	jobs -l	48f0f68f324f	4	170.799	170.742	172.089	0.9922	0.9900	0.9915	0.9917	0.9926	0.9929	0.9991				matched OS control
+previous misses	Ubuntuarm64	Builtin option	jobs -p	24c6ee0d7a12	4	412.832	413.192	413.666	0.9989	0.9987	0.9972	0.9972	0.9983	0.9978	0.9976				matched OS control
+previous misses	Ubuntuarm64	Builtin option	jobs -r	ac121d4b6180	4	170.807	170.741	172.510	0.9897	0.9918	0.9909	0.9905	0.9889	0.9885	0.9980				matched OS control
+previous misses	Ubuntuarm64	Builtin option	jobs -s	97a70b4647de	4	170.706	170.794	171.929	0.9934	0.9914	0.9913	0.9911	0.9933	0.9930	0.9963				matched OS control
+previous misses	Ubuntuarm64	Builtin option	jobs -x	27e15ee9fb24	4	170.938	171.000	172.626	0.9906	0.9905	0.9907	0.9930	0.9901	0.9907	0.9963				matched OS control
+previous misses	Ubuntuarm64	Builtin option	mapfile -O	e75fc215bb04	128	2.709	2.577	3.996	0.6450	0.6522	0.6565	0.6395	0.6508	0.6691				0.6242	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	mapfile -d	50e713e92929	128	2.507	2.385	3.628	0.6573	0.6702	0.6577	0.6507	0.6598	0.6700			0.6677	0.6394	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	mapfile -n	06d05e1602ec	128	2.476	2.352	3.657	0.6431	0.6562	0.6512	0.6383	0.6463	0.6553			0.6629	0.6185	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	mapfile -s	d4f36f4ce1c1	128	2.552	2.445	3.740	0.6538	0.6666	0.6437	0.6512	0.6525	0.6588			0.6725	0.6288	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	mapfile -t	ffa3c1e4291d	128	2.541	2.433	3.721	0.6540	0.6696	0.6557	0.6505	0.6621	0.6645			0.6746	0.6356	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	mapfile -u	a5557ddc375e	128	2.550	2.427	3.773	0.6432	0.6559	0.6455	0.6459	0.6501	0.6535			0.6611	0.6194	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	read -N	528a60bca515	128	1.559	1.512	2.296	0.6583	0.6563	0.6624	0.6570	0.6617	0.6641				0.6332	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	read -a	19da744b7aca	128	1.790	1.612	2.546	0.6330	0.6741	0.6826	0.6839	0.6315	0.6477				0.6105	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	read -d	54186fde2fb2	128	1.633	1.460	2.314	0.6307	0.6656	0.6896	0.6811	0.6431	0.6385				0.6139	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	read -n	5896b7d1c17a	128	1.525	1.512	2.220	0.6809	0.6711	0.6862	0.6629	0.6830	0.6799				0.6531	1,024 iterations ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	read -r	b14a3c41f497	128	1.637	1.508	2.377	0.6342	0.6781	0.6734	0.6630	0.6146	0.6275				0.5954	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	read -t	01044dfe8678	4	143.812	143.803	144.147	0.9976	0.9975	0.9987	0.9964	0.9978	0.9976					tried, above target
+previous misses	Ubuntuarm64	Builtin option	read -u	6c627157cafc	128	1.615	1.573	2.394	0.6568	0.6683	0.6685	0.6490	0.6571	0.6597				0.6330	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	readarray -O	522a6c2a9e45	128	2.724	2.592	3.971	0.6527	0.6560	0.6504	0.6484	0.6484	0.6633					fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	readarray -d	dc385084f0db	128	2.515	2.397	3.656	0.6556	0.6734	0.6604	0.6588	0.6591	0.6657			0.6651	0.6340	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	readarray -n	98f98839a829	128	2.449	2.343	3.648	0.6421	0.6602	0.6574	0.6407	0.6445	0.6523			0.6701	0.6177	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	readarray -s	87eb349d3117	128	2.539	2.397	3.693	0.6492	0.6647	0.6429	0.6411	0.6500	0.6587			0.6684	0.6283	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	readarray -t	62078004b66f	128	2.574	2.461	3.719	0.6617	0.6732	0.6519	0.6492	0.6644	0.6706			0.6759	0.6286	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	readarray -u	93ed8c79967f	128	2.545	2.447	3.818	0.6410	0.6532	0.6450	0.6428	0.6416	0.6521			0.6610	0.6211	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Builtin option	trap -l	bc60cd40ae2f	128	103.025	101.926	142.610	0.7147	0.7281	0.7185	0.7281	0.7215	0.7218					tried, above target
+previous misses	Ubuntuarm64	Builtin option	type -P	d471161485d8	128	118.731	115.023	150.986	0.7618	0.7453	0.7547	0.7822	0.7639	0.7611					tried, above target
+previous misses	Ubuntuarm64	Builtin option	type -a	c87f865b80ac	16	54.183	54.402	59.344	0.9167	0.9126	0.9084	0.9138	0.9194	0.9146					tried, above target
+previous misses	Ubuntuarm64	Builtin option	typeset -f	20a42f211e41	128	101.322	102.017	138.904	0.7344	0.7203	0.7151	0.7223	0.7305	0.7256					tried, above target
+previous misses	Ubuntuarm64	Builtin option	typeset -x	51b712b12c9f	128	67.800	68.216	93.450	0.7300	0.7247	0.7225	0.7186	0.7255	0.7267		1.0316			matched OS control
+previous misses	Ubuntuarm64	Builtin option	wait -n	2d8b87809a57	4	91.286	91.031	92.900	0.9799	0.9815	0.9828	0.9835	0.9814	0.9812	0.9859				matched OS control
+previous misses	Ubuntuarm64	Builtin option	wait -p	7bd725556617	4	91.457	90.827	93.328	0.9732	0.9820	0.9797	0.9819	0.9757	0.9737	0.9892				matched OS control
+previous misses	Ubuntuarm64	Conditional	-G	af5edd672589	128	1.933	1.914	2.777	0.6890	0.6715	0.6790	0.6739	0.6882	0.6921	0.4860	0.5120	0.5771	0.6512	1,024 iterations ≤ 2/3
+previous misses	Ubuntuarm64	Conditional	-O	83d5b3a48d84	128	1.902	1.868	2.737	0.6825	0.6690	0.6782	0.6659	0.6840	0.6883	0.5031	0.5081	0.5865	0.6534	1,024 iterations ≤ 2/3
+previous misses	Ubuntuarm64	Conditional	-S	968372b0b12c	128	1.870	1.835	2.746	0.6684	0.6617	0.6591	0.6650	0.6727	0.6746	0.5026	0.5306	0.5344	0.6393	1,024 iterations ≤ 2/3
+previous misses	Ubuntuarm64	Conditional	-a	aea6b4ba850b	128	1.870	1.872	2.749	0.6809	0.6602	0.6749	0.6691	0.6676	0.6868	0.5030	0.5323	0.5273	0.6461	1,024 iterations ≤ 2/3
+previous misses	Ubuntuarm64	Conditional	-c	e4c5cb7b4108	128	1.911	1.882	2.796	0.6729	0.6635	0.6666	0.6507	0.6740	0.6737	0.4972	0.5318	0.5423	0.6465	1,024 iterations ≤ 2/3
+previous misses	Ubuntuarm64	Conditional	-d	d150f0bbe6ea	128	1.855	1.841	2.727	0.6752	0.6621	0.6832	0.6587	0.6656	0.6746	0.5014	0.5326	0.5226	0.6427	1,024 iterations ≤ 2/3
+previous misses	Ubuntuarm64	Conditional	-e	9114dc6ade6a	128	1.894	1.856	2.812	0.6600	0.6571	0.6619	0.6643	0.6589	0.6660	0.5107	0.5385	0.5382	0.6401	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Conditional	-f	dde920b9b788	128	1.892	1.878	2.820	0.6660	0.6581	0.6558	0.6573	0.6675	0.6658	0.5107	0.5349	0.5347	0.6382	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Conditional	-g	d95e3aa8df09	16	65.594	65.235	72.716	0.8971	0.9093	0.9129	0.9168	0.8966	0.9003			0.5361		tried, above target
+previous misses	Ubuntuarm64	Conditional	-nt	fb30c7f4f0ce	16	85.472	84.517	91.667	0.9220	0.9206	0.9260	0.9440	0.9160	0.9317			0.6828		tried, above target
+previous misses	Ubuntuarm64	Conditional	-ot	94a5a188a913	16	84.709	84.768	91.757	0.9238	0.9327	0.9218	0.9378	0.9220	0.9455			0.6804		tried, above target
+previous misses	Ubuntuarm64	Conditional	-r	f2f449437403	128	1.844	1.759	2.680	0.6566	0.6478	0.6470	0.6428	0.6709	0.6622	0.4880	0.5076	0.5343	0.6290	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Conditional	-s	cfd797932ad3	128	1.922	1.908	2.781	0.6860	0.6648	0.6680	0.6536	0.6794	0.6853	0.4994	0.5328	0.5319	0.6449	1,024 iterations ≤ 2/3
+previous misses	Ubuntuarm64	Conditional	-u	7a27caf51da5	16	64.422	65.097	70.247	0.9267	0.9143	0.9076	0.8904	0.9177	0.9144			0.5234		tried, above target
+previous misses	Ubuntuarm64	Conditional	-w	8d3c831b1c54	128	1.787	1.745	2.657	0.6566	0.6424	0.6456	0.6459	0.6609	0.6759	0.4950	0.5024	0.5333	0.6334	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Conditional	-x	2e9e1ff54238	16	64.867	64.451	70.335	0.9163	0.9255	0.9104	0.9102	0.9118	0.9211			0.5348		tried, above target
+new misses	Ubuntuarm64	Parameter	${v##a*}	12b82a5f4461	128	123.108	122.675	186.382	0.6582				0.6894	0.6119	0.5431				fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Parameter	${v,}	af35bd1e969a	128	117.527	117.151	181.493	0.6455	0.6430	0.6269	0.6739	0.6467	0.6251	0.5788	0.5644	0.6139		fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Parameter	${v^}	7372ef5e2b93	128	118.668	115.779	180.292	0.6422	0.6631	0.6370	0.6482	0.6719	0.6054	0.5758	0.5708	0.6164		fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Redirection	&>	1036f196c42a	16	43.356	43.879	48.205	0.9103	0.8872	0.8912	0.8984	0.9066	0.8978					tried, above target
+previous misses	Ubuntuarm64	Redirection	&>>	d492279205a2	16	44.566	44.833	49.616	0.9036	0.8907	0.8851	0.8975	0.8961	0.8912					tried, above target
+previous misses	Ubuntuarm64	Redirection	/dev/fd/N	15c6dbc29d08	16	33.414	33.763	37.631	0.8972	0.9092	0.9080	0.9098	0.8925	0.8943					tried, above target
+previous misses	Ubuntuarm64	Redirection	<	fe37f6479d3b	16	35.029	35.208	36.942	0.9531	0.9388	0.9560	0.9558	0.9515	0.9484					tried, above target
+previous misses	Ubuntuarm64	Redirection	<<-	3d9d41076adb	16	34.750	32.424	35.998	0.9007	0.9436	0.9435	0.9560	0.9217	0.9085					tried, above target
+previous misses	Ubuntuarm64	Redirection	<<<	6356fa08ad2b	16	34.795	32.457	36.743	0.8834	0.9538	0.9367	0.9431	0.8885	0.8890					tried, above target
+previous misses	Ubuntuarm64	Redirection	<>	1c9961fb96ee	16	32.866	33.129	36.450	0.9089	0.9031	0.9087	0.8987	0.8917	0.9006					tried, above target
+previous misses	Ubuntuarm64	Redirection	>	64480a7d0419	16	33.691	33.503	37.380	0.8963	0.9125	0.9024	0.9160	0.8897	0.8958					tried, above target
+previous misses	Ubuntuarm64	Redirection	>>	a3c1c9edeb4e	16	32.672	32.976	35.707	0.9235	0.9162	0.9001	0.9226	0.9074	0.9132					tried, above target
+previous misses	Ubuntuarm64	Redirection	here-document	fbb8d10b2e02	16	35.887	33.735	37.505	0.8995	0.9574	0.9676	0.9413	0.8959	0.9145					tried, above target
+previous misses	Ubuntuarm64	Redirection	n<&-	9b1bda303ace	128	1.659	1.627	2.344	0.6941	0.6957	0.6838	0.6856	0.6991	0.6971				0.6684	tried, above target
+previous misses	Ubuntuarm64	Redirection	n<&m	b2ed1210f948	16	34.513	34.531	36.046	0.9580	0.9430	0.9639	0.9665	0.9573	0.9508					tried, above target
+previous misses	Ubuntuarm64	Redirection	n<&m-	095ea2529837	16	35.058	35.080	36.568	0.9593	0.9590	0.9546	0.9487	0.9634	0.9559					tried, above target
+previous misses	Ubuntuarm64	Redirection	n>&-	813721653d7c	128	1.835	1.835	2.190	0.8378	0.8275	0.8257	0.7987	0.8399	0.8392				0.8129	tried, above target
+previous misses	Ubuntuarm64	Redirection	n>&m	7540752f59db	16	33.341	33.469	36.881	0.9075	0.9059	0.9062	0.9074	0.9136	0.9027					tried, above target
+previous misses	Ubuntuarm64	Redirection	n>&m-	2b0867cd62f3	16	34.104	33.590	37.145	0.9043	0.9129	0.9270	0.9077	0.8933	0.9093					tried, above target
+previous misses	Ubuntuarm64	Redirection	quoted here-document	d1688c22c970	16	33.871	31.882	34.788	0.9165	0.9633	0.9407	0.9508	0.9111	0.9181					tried, above target
+previous misses	Ubuntuarm64	Redirection	{varname} descriptor	267c6fc61a8c	16	32.788	32.566	36.207	0.8994	0.8991	0.9058	0.9055	0.8974	0.9015					tried, above target
+previous misses	Ubuntuarm64	Reserved word	coproc	411ed4712937	16	37.354	36.994	40.526	0.9128	0.9279	0.9200	0.9264	0.9073	0.9034					tried, above target
+previous misses	Ubuntuarm64	Reserved word	select	e45d7d626f01	128	2.329	2.261	3.190	0.7086	0.7062	0.7041	0.6946	0.7076	0.7210				0.6884	tried, above target
+previous misses	Ubuntuarm64	Reserved word	time	95303f71ee3a	16	32.740	32.670	35.834	0.9117	0.8926	0.9243	0.9123	0.9075	0.9117					tried, above target
+previous misses	Ubuntuarm64	Shell language	bracket expressions and classes	fb5250b18748	16	33.098	33.117	36.227	0.9141	0.9132	0.9096	0.9119	0.9119	0.9107		1.0033	0.7696		matched OS control
+previous misses	Ubuntuarm64	Shell language	coproc	411ed4712937	16	37.354	36.994	40.526	0.9128	0.9279	0.9200	0.9264	0.9073	0.9034					tried, above target
+previous misses	Ubuntuarm64	Shell language	coprocess input/output descriptors	411ed4712937	16	37.354	36.994	40.526	0.9128	0.9279	0.9200	0.9264	0.9073	0.9034					tried, above target
+previous misses	Ubuntuarm64	Shell language	directory stack rotation	cd77daf77162	16	66.432	66.546	74.436	0.8940	0.8962	0.9029	0.8966	0.8866	0.8933					tried, above target
+previous misses	Ubuntuarm64	Shell language	escaped backslash filenames	ca58e21566ca	16	32.905	32.587	35.921	0.9072	0.9005	0.8996	0.9093	0.9223	0.9075		1.0086	0.7434		matched OS control
+previous misses	Ubuntuarm64	Shell language	exit status 126	314e32924876	16	35.959	35.920	42.426	0.8466	0.8310	0.8456	0.8559	0.8468	0.8433					tried, above target
+previous misses	Ubuntuarm64	Shell language	filename wildcards	63902335aa30	16	32.661	32.803	36.328	0.9030	0.9042	0.9047	0.9222	0.8980	0.8975		0.9990	0.7423		matched OS control
+previous misses	Ubuntuarm64	Shell language	group redirections	9d64362ba9b1	16	32.195	32.132	35.483	0.9056	0.8944	0.9213	0.9093	0.9109	0.9070					tried, above target
+previous misses	Ubuntuarm64	Shell language	grouped pipeline status	eb0e89e75b3f	16	36.330	35.504	40.545	0.8757	0.8737	0.8894	0.8652	0.8860	0.8849					tried, above target
+previous misses	Ubuntuarm64	Shell language	merged stderr pipeline	f4038837eccb	16	36.128	35.799	40.297	0.8884	0.8719	0.8742	0.9050	0.8891	0.8834					tried, above target
+previous misses	Ubuntuarm64	Shell language	pathname expansion of leading dots	ca2139ab8b2e	16	32.054	32.346	35.534	0.9103	0.9149	0.9098	0.9176	0.9143	0.9192		0.9994	0.7433		matched OS control
+previous misses	Ubuntuarm64	Shell language	pipeline	14d78e0eda01	16	39.586	39.445	45.545	0.8661	0.8494	0.8499	0.8711	0.8653	0.8751					tried, above target
+previous misses	Ubuntuarm64	Shell language	process substitution input	25706da2d50d	16	34.333	34.570	38.205	0.9049	0.8897	0.9079	0.8921	0.9028	0.8990					tried, above target
+previous misses	Ubuntuarm64	Shell language	process substitution output	664c5a83e2af	16	68.356	68.376	75.261	0.9085	0.9005	0.8917	0.8989	0.9023	0.9007					tried, above target
+previous misses	Ubuntuarm64	Shell language	quoted and unquoted here-documents	d1688c22c970	16	33.871	31.882	34.788	0.9165	0.9633	0.9407	0.9508	0.9111	0.9181					tried, above target
+previous misses	Ubuntuarm64	Shell language	script fallback without shebang	486d0a5c94f0	16	44.737	41.894	46.458	0.9018	0.9569	0.9736	0.8929	0.9059	0.9001					tried, above target
+previous misses	Ubuntuarm64	Shell language	select	e45d7d626f01	128	2.329	2.261	3.190	0.7086	0.7062	0.7041	0.6946	0.7076	0.7210				0.6884	tried, above target
+new misses	Ubuntuarm64	Shell language	shell environment isolation	ab51a8096a17	128	40.071	40.838	58.433	0.6989				0.7229	0.6353					tried, above target
+previous misses	Ubuntuarm64	Shell language	shell script source	fb5e0f832d89	128	2.074	2.020	3.061	0.6597	0.6640	0.6541	0.6534	0.6556	0.6748				0.6323	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Shell language	simple commands and assignments	d0cb82a50426	128	68.330	68.534	94.803	0.7229	0.7068	0.7128	0.7239	0.7227	0.7162		1.0214			matched OS control
+previous misses	Ubuntuarm64	Shell language	tilde current and previous directories	cce16f02d769	16	32.881	33.167	36.402	0.9111	0.9044	0.9000	0.9074	0.9051	0.8879					tried, above target
+previous misses	Ubuntuarm64	Shell language	time -p	39c17ca07c03	128	92.127	92.458	120.043	0.7702	0.7689	0.7749	0.7749	0.7600	0.7648					tried, above target
+previous misses	Ubuntuarm64	Shell language	time keyword	95303f71ee3a	16	32.740	32.670	35.834	0.9117	0.8926	0.9243	0.9123	0.9075	0.9117					tried, above target
+previous misses	Ubuntuarm64	Shell language	wait -n	2d8b87809a57	4	91.286	91.031	92.900	0.9799	0.9815	0.9828	0.9835	0.9814	0.9812	0.9859				matched OS control
+previous misses	Ubuntuarm64	Shell language	wait -p	7bd725556617	4	91.457	90.827	93.328	0.9732	0.9820	0.9797	0.9819	0.9757	0.9737	0.9892				matched OS control
+new misses	Ubuntuarm64	Variable	BASH_SUBSHELL	03548d1b00be	128	35.865	37.205	56.709	0.6561				0.6717	0.5884					fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Variable	BASH_XTRACEFD	f87578106552	16	34.246	33.597	37.240	0.9022	0.9055	0.9029	0.9068	0.9039	0.9052					tried, above target
+previous misses	Ubuntuarm64	Variable	CDPATH	9ce875130c76	16	63.861	63.075	69.558	0.9068	0.9044	0.9039	0.9078	0.9049	0.9125					tried, above target
+previous misses	Ubuntuarm64	Variable	CHILD_MAX	4e11eae31e2f	4	174.363	172.783	206.648	0.8361	0.8251	0.8216	0.8338	0.8402	0.8352					tried, above target
+previous misses	Ubuntuarm64	Variable	COPROC	411ed4712937	16	37.354	36.994	40.526	0.9128	0.9279	0.9200	0.9264	0.9073	0.9034					tried, above target
+previous misses	Ubuntuarm64	Variable	EUID	135dcc885cee	16	32.246	32.117	37.644	0.8532	0.8545	0.8396	0.8673	0.8669	0.8696					tried, above target
+previous misses	Ubuntuarm64	Variable	FCEDIT	b0e7038cae0f	16	75.995	76.670	85.724	0.8944	0.8752	0.8773	0.8777	0.8880	0.8870					tried, above target
+previous misses	Ubuntuarm64	Variable	GLOBIGNORE	900c6025ee60	16	32.079	32.262	35.341	0.9129	0.9086	0.9172	0.9199	0.9152	0.9117		0.9893	0.6465		matched OS control
+previous misses	Ubuntuarm64	Variable	HISTSIZE	14264e502388	128	116.858	118.297	155.547	0.7605	0.7579	0.7335	0.7525	0.7515	0.7382					tried, above target
+previous misses	Ubuntuarm64	Variable	HISTTIMEFORMAT	7310c20ca02c	128	106.099	109.229	146.141	0.7474	0.7332	0.7299	0.7612	0.7459	0.7511					tried, above target
+previous misses	Ubuntuarm64	Variable	HOME	9e7227102901	16	62.008	62.179	69.337	0.8968	0.9091	0.9029	0.9125	0.9058	0.9002					tried, above target
+previous misses	Ubuntuarm64	Variable	MAPFILE	8f981524555f	128	1.669	1.641	2.343	0.7004	0.6910	0.6953	0.6895	0.7045	0.7087				0.6823	tried, above target
+previous misses	Ubuntuarm64	Variable	OLDPWD	396a666c96ea	16	31.987	32.271	34.797	0.9274	0.8961	0.9007	0.9136	0.9135	0.9128					tried, above target
+previous misses	Ubuntuarm64	Variable	PS3	d3803d679772	128	1.874	1.827	2.661	0.6868	0.6889	0.7069	0.6910	0.6948	0.7068				0.6769	tried, above target
+previous misses	Ubuntuarm64	Variable	PS4	b64e49e55f1f	128	0.840	0.851	1.256	0.6775	0.6597	0.6926	0.6459	0.6766	0.6546				0.6201	1,024 iterations ≤ 2/3
+previous misses	Ubuntuarm64	Variable	PWD	ca8a3e6431d7	16	32.820	32.608	36.320	0.8978	0.8967	0.9047	0.8938	0.8960	0.9008					tried, above target
+previous misses	Ubuntuarm64	Variable	REPLY	281739a3ac4f	128	1.865	1.430	2.610	0.5477	0.6969	0.6978	0.6947	0.5588	0.5620				0.5292	fixed median ≤ 2/3
+previous misses	Ubuntuarm64	Variable	TIMEFORMAT	95303f71ee3a	16	32.740	32.670	35.834	0.9117	0.8926	0.9243	0.9123	0.9075	0.9117					tried, above target
+previous misses	Ubuntuarm64	Variable	UID	74b97b495f5c	16	33.272	32.875	38.372	0.8568	0.8523	0.8625	0.8511	0.8635	0.8588					tried, above target
+previous misses	Ubuntuarm64	set -o	allexport	b723d5214598	128	69.385	69.131	96.621	0.7155	0.7163	0.7319	0.7226	0.7170	0.7141		1.0258			matched OS control
+previous misses	Ubuntuarm64	set -o	noglob	09fe856ae8ae	16	32.037	32.266	35.571	0.9071	0.9133	0.9108	0.9228	0.9075	0.9030		1.0185	0.4651		matched OS control
+new misses	Ubuntuarm64	set -o	xtrace	2b987c219287	128	0.828	0.847	1.249	0.6776				0.6561	0.6598				0.6303	1,024 iterations ≤ 2/3
+previous misses	Ubuntuarm64	shopt	dotglob	239dd6e3e430	16	32.956	32.730	36.044	0.9080	0.9151	0.9067	0.9185	0.9071	0.9197		1.0023	0.5878		matched OS control
+new misses	Ubuntuarm64	shopt	failglob	b929efdac981	128	40.819	40.922	61.247	0.6682				0.6936	0.6333					tried, above target
+previous misses	Ubuntuarm64	shopt	globskipdots	e699df44d05a	16	33.647	33.552	36.374	0.9224	0.9211	0.9024	0.9019	0.9125	0.9165					tried, above target
+previous misses	Ubuntuarm64	shopt	globstar	c0034550b8f9	16	65.127	65.019	71.427	0.9103	0.9104	0.8982	0.9184	0.9005	0.8962					tried, above target
+previous misses	Ubuntuarm64	shopt	nocaseglob	e975ccd42235	16	32.522	32.447	35.644	0.9103	0.8950	0.9178	0.9153	0.9141	0.9155		1.0064	0.5871		matched OS control
+previous misses	Ubuntux64	Builtin	break	1ffe429f2b16	128	0.667	0.631	1.086	0.5813	0.6171	0.7881	0.6422	0.5791	0.7053				0.4870	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin	command	e41b7a11bed6	128	0.632	0.610	1.128	0.5407	0.5580	0.6096	0.5474	0.5410	0.6015				0.4696	fixed median ≤ 2/3
+new misses	Ubuntux64	Builtin	compopt	aa41a04c393d	128	0.424	0.430	0.654	0.6572				0.6629	0.7052				0.6507	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin	disown	d2003b0a862e	4	54.294	54.246	54.862	0.9888	0.9889	0.9948	0.9916	0.9899	0.9890		0.9988			matched OS control
+previous misses	Ubuntux64	Builtin	export	c7aaaf064221	128	71.309	70.759	93.589	0.7561	0.7563	0.7130	0.7444	0.7489	0.7531		1.0132			matched OS control
+previous misses	Ubuntux64	Builtin	hash	ce80acc44da2	128	310.714	310.679	336.294	0.9238	0.9306	0.9215	0.9368	0.9171	0.9220					tried, above target
+previous misses	Ubuntux64	Builtin	history	1402ac52475d	128	132.082	132.198	165.593	0.7983	0.8026	0.7416	0.7984	0.8015	0.8025					tried, above target
+previous misses	Ubuntux64	Builtin	jobs	24c6ee0d7a12	4	414.373	414.276	415.488	0.9971	0.9977	0.9981	0.9974	0.9970	0.9971	0.9980				matched OS control
+previous misses	Ubuntux64	Builtin	mapfile	3ea25138c850	128	2.670	2.568	3.826	0.6714	0.6778	0.6817	0.6769	0.6738	0.6931				0.6613	1,024 iterations ≤ 2/3
+previous misses	Ubuntux64	Builtin	pushd	69aa5855c584	128	308.672	311.960	407.464	0.7656	0.7626	0.8424	0.7719	0.7583	0.7611					tried, above target
+previous misses	Ubuntux64	Builtin	read	02b137a1a92b	128	2.750	2.362	3.800	0.6215	0.7184	0.7043	0.7229	0.6332	0.6441				0.6076	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin	readarray	b2a1b1c0a4a3	128	2.640	2.577	3.787	0.6806	0.6840	0.6941	0.6698	0.6792	0.6983				0.6567	1,024 iterations ≤ 2/3
+previous misses	Ubuntux64	Builtin	shopt	0eea32452067	128	2.588	2.571	4.180	0.6151	0.6138	0.6625	0.5999	0.6104	0.6548				0.5896	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin	umask	330c6cece069	16	67.442	67.158	72.769	0.9229	0.9350	0.9337	0.9378	0.9283	0.9199					tried, above target
+previous misses	Ubuntux64	Builtin option	cd -L	86f95ff2dd2c	16	117.072	116.772	127.631	0.9149	0.9241	0.9080	0.9310	0.9278	0.9375					tried, above target
+previous misses	Ubuntux64	Builtin option	cd -P	3fda9e144559	16	118.792	119.149	127.807	0.9323	0.9221	0.9071	0.9154	0.9141	0.9101					tried, above target
+previous misses	Ubuntux64	Builtin option	command -V	7951c138e16a	128	0.474	0.455	0.783	0.5814	0.6074	0.6801	0.6241	0.6016	0.6131				0.4967	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	command -p	71dec6cfd837	128	82.692	83.087	98.636	0.8424	0.8464	0.8528	0.8544	0.8399	0.8497					tried, above target
+previous misses	Ubuntux64	Builtin option	command -v	81971e363c05	128	0.469	0.443	0.757	0.5855	0.6377	0.6818	0.6183	0.5968	0.6205				0.4929	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	complete -r	ba763eb4cea5	128	2.034	1.964	2.781	0.7060	0.7145	0.6741	0.7341	0.7076	0.7462				0.6913	tried, above target
+new misses	Ubuntux64	Builtin option	compopt -o	aa41a04c393d	128	0.424	0.430	0.654	0.6572				0.6629	0.7052				0.6507	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	declare -f	01e27ed43a72	128	113.393	113.823	145.463	0.7825	0.7868	0.7039	0.7495	0.7833	0.7762					tried, above target
+previous misses	Ubuntux64	Builtin option	declare -p	22c7358230da	128	0.478	0.484	1.005	0.4816	0.4764	0.6752	0.4707	0.4807	0.4800				0.3927	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	declare -x	26408a3c84fe	128	70.847	71.878	94.768	0.7585	0.7595	0.7117	0.7495	0.7576	0.7509		1.0021			matched OS control
+previous misses	Ubuntux64	Builtin option	dirs -c	aabb4ccb2a1e	128	318.825	314.325	486.359	0.6463	0.6457	0.7805	0.6490	0.6444	0.6485					fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	disown -a	cee893ef723a	4	48.328	48.059	48.081	0.9996	0.9942	0.9948	0.9878	0.9916	0.9926		0.9976			matched OS control
+previous misses	Ubuntux64	Builtin option	disown -h	fbec48c6f803	4	174.017	173.874	175.553	0.9904	0.9912	0.9943	0.9913	0.9902	0.9907	0.9954				matched OS control
+previous misses	Ubuntux64	Builtin option	disown -r	4dbd86b7239c	4	44.273	44.392	44.637	0.9945	0.9933	0.9974	0.9916	0.9928	0.9933		1.0006			matched OS control
+previous misses	Ubuntux64	Builtin option	export -n	aa3f391c2a50	128	71.206	70.826	95.084	0.7449	0.7624	0.7087	0.7322	0.7452	0.7489		1.0177			matched OS control
+previous misses	Ubuntux64	Builtin option	export -p	c5972c1e3d25	128	135.165	135.516	173.032	0.7832	0.7763	0.7678	0.7547	0.7847	0.7818					tried, above target
+previous misses	Ubuntux64	Builtin option	hash -d	4994502746fb	128	2.892	2.857	3.819	0.7481	0.7361	0.6483	0.7370	0.7400	0.7650				0.7226	tried, above target
+new misses	Ubuntux64	Builtin option	hash -l	05066d3adfa5	128	0.510	0.523	0.784	0.6670				0.6557	0.6726				0.6462	1,024 iterations ≤ 2/3
+previous misses	Ubuntux64	Builtin option	hash -p	ce80acc44da2	128	310.714	310.679	336.294	0.9238	0.9306	0.9215	0.9368	0.9171	0.9220					tried, above target
+previous misses	Ubuntux64	Builtin option	hash -r	9258a9c1f1b3	128	2.879	2.862	3.860	0.7413	0.7321	0.6403	0.7153	0.7417	0.7524				0.7306	tried, above target
+previous misses	Ubuntux64	Builtin option	hash -t	ce80acc44da2	128	310.714	310.679	336.294	0.9238	0.9306	0.9215	0.9368	0.9171	0.9220					tried, above target
+previous misses	Ubuntux64	Builtin option	jobs -l	48f0f68f324f	4	174.902	174.851	176.488	0.9907	0.9925	0.9943	0.9936	0.9897	0.9892	0.9915				matched OS control
+previous misses	Ubuntux64	Builtin option	jobs -p	24c6ee0d7a12	4	414.373	414.276	415.488	0.9971	0.9977	0.9981	0.9974	0.9970	0.9971	0.9980				matched OS control
+previous misses	Ubuntux64	Builtin option	jobs -r	ac121d4b6180	4	174.383	174.044	176.200	0.9878	0.9921	0.9938	0.9926	0.9880	0.9876	0.9932				matched OS control
+previous misses	Ubuntux64	Builtin option	jobs -s	97a70b4647de	4	172.622	172.480	174.386	0.9891	0.9898	0.9922	0.9898	0.9907	0.9914	1.0005				matched OS control
+previous misses	Ubuntux64	Builtin option	jobs -x	27e15ee9fb24	4	174.780	174.929	176.836	0.9892	0.9907	0.9931	0.9899	0.9886	0.9893	0.9911				matched OS control
+previous misses	Ubuntux64	Builtin option	mapfile -C	3ec206ca8c1d	128	6.764	6.594	11.379	0.5794	0.5822	0.6302	0.5649	0.5765	0.6072					fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	mapfile -O	e75fc215bb04	128	4.514	4.254	6.525	0.6520	0.6741	0.6804	0.6511	0.6585	0.6757				0.6522	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	mapfile -c	6f9d9b266d72	128	5.314	5.034	8.536	0.5897	0.6166	0.6362	0.5959	0.6018	0.6252				0.5746	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	mapfile -d	50e713e92929	128	4.183	3.973	5.933	0.6696	0.6901	0.6593	0.6578	0.6699	0.6914			0.6994	0.6664	1,024 iterations ≤ 2/3
+previous misses	Ubuntux64	Builtin option	mapfile -n	06d05e1602ec	128	4.098	3.929	5.899	0.6661	0.6929	0.6514	0.6864	0.6723	0.6767			0.7009	0.6526	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	mapfile -s	d4f36f4ce1c1	128	4.294	4.074	6.175	0.6597	0.6794	0.6678	0.6331	0.6530	0.6817			0.7093	0.6439	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	mapfile -t	ffa3c1e4291d	128	4.223	4.051	6.061	0.6684	0.6858	0.6823	0.6685	0.6657	0.6848			0.7657	0.6495	1,024 iterations ≤ 2/3
+previous misses	Ubuntux64	Builtin option	mapfile -u	a5557ddc375e	128	4.144	3.990	6.100	0.6541	0.6707	0.6795	0.6411	0.6550	0.6768			0.7347	0.6406	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	read -a	19da744b7aca	128	2.656	2.374	3.697	0.6421	0.7076	0.7086	0.6925	0.6477	0.6550				0.5887	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	read -d	54186fde2fb2	128	2.445	2.137	3.354	0.6371	0.7191	0.6529	0.7043	0.6428	0.6655				0.6229	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	read -n	5896b7d1c17a	128	2.300	2.223	3.233	0.6876	0.7012	0.6439	0.7079	0.6858	0.7067				0.6783	tried, above target
+previous misses	Ubuntux64	Builtin option	read -r	b14a3c41f497	128	2.428	2.190	3.421	0.6403	0.7113	0.6523	0.7016	0.6365	0.6506				0.6140	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	read -t	01044dfe8678	4	143.972	144.099	144.300	0.9986	0.9978	0.9982	0.9974	0.9980	0.9982					tried, above target
+previous misses	Ubuntux64	Builtin option	readarray -C	98a5af1da502	128	6.929	6.580	11.374	0.5785	0.5891	0.6390	0.5716	0.5774	0.6029					fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	readarray -O	522a6c2a9e45	128	4.493	4.317	6.514	0.6628	0.6819	0.6855	0.6615	0.6623	0.6795				0.6636	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	readarray -c	2ad89d387488	128	5.354	5.048	8.484	0.5951	0.6106	0.6360	0.5925	0.5937	0.6164				0.5701	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	readarray -d	dc385084f0db	128	4.166	4.001	5.974	0.6698	0.6881	0.6662	0.6676	0.6622	0.6836			0.6890	0.5957	1,024 iterations ≤ 2/3
+previous misses	Ubuntux64	Builtin option	readarray -n	98f98839a829	128	4.148	3.891	5.924	0.6569	0.6890	0.6483	0.6611	0.6636	0.6753			0.6938	0.6556	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	readarray -s	87eb349d3117	128	4.183	3.944	6.003	0.6570	0.6806	0.6558	0.6532	0.6598	0.6819			0.7178	0.6451	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	readarray -t	62078004b66f	128	4.267	4.090	6.087	0.6719	0.6896	0.6856	0.6683	0.6779	0.6986			0.7555	0.6061	1,024 iterations ≤ 2/3
+previous misses	Ubuntux64	Builtin option	readarray -u	93ed8c79967f	128	4.288	4.020	6.110	0.6580	0.6677	0.6777	0.6589	0.6615	0.6804			0.7355	0.6579	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	shopt -s	0eea32452067	128	2.588	2.571	4.180	0.6151	0.6138	0.6625	0.5999	0.6104	0.6548				0.5896	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	shopt -u	0eea32452067	128	2.588	2.571	4.180	0.6151	0.6138	0.6625	0.5999	0.6104	0.6548				0.5896	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	trap -l	bc60cd40ae2f	128	115.286	113.120	151.187	0.7482	0.7696	0.7072	0.8003	0.7585	0.7623					tried, above target
+previous misses	Ubuntux64	Builtin option	type -P	d471161485d8	128	132.669	134.060	168.901	0.7937	0.7934	0.7467	0.7918	0.7926	0.7925					tried, above target
+previous misses	Ubuntux64	Builtin option	type -a	c87f865b80ac	16	55.170	54.790	59.305	0.9239	0.9193	0.9098	0.9312	0.9351	0.9211					tried, above target
+previous misses	Ubuntux64	Builtin option	typeset -f	20a42f211e41	128	115.512	114.743	149.643	0.7668	0.7925	0.7116	0.7718	0.7652	0.7743					tried, above target
+new misses	Ubuntux64	Builtin option	typeset -p	076cf9a61399	128	0.332	0.330	0.497	0.6637				0.6762	0.6900				0.6118	fixed median ≤ 2/3
+previous misses	Ubuntux64	Builtin option	typeset -x	51b712b12c9f	128	71.020	69.947	94.379	0.7411	0.7564	0.7111	0.7603	0.7440	0.7440		1.0219			matched OS control
+previous misses	Ubuntux64	Builtin option	wait -n	2d8b87809a57	4	94.059	94.211	96.054	0.9808	0.9836	0.9871	0.9808	0.9808	0.9792	0.9864				matched OS control
+previous misses	Ubuntux64	Builtin option	wait -p	7bd725556617	4	92.455	93.052	94.724	0.9824	0.9850	0.9844	0.9873	0.9798	0.9780	0.9820				matched OS control
+previous misses	Ubuntux64	Completion option	bashdefault	0bf23d0b740c	128	0.603	0.614	1.090	0.5635	0.5545	0.6760	0.5688	0.5522	0.5676				0.4824	fixed median ≤ 2/3
+previous misses	Ubuntux64	Completion option	default	b2381ca44f73	128	0.611	0.617	1.066	0.5786	0.5602	0.7286	0.5515	0.5782	0.5764				0.5048	fixed median ≤ 2/3
+previous misses	Ubuntux64	Completion option	dirnames	246d19e7f9ef	128	0.625	0.627	1.083	0.5790	0.5583	0.6549	0.5592	0.5836	0.5619				0.4860	fixed median ≤ 2/3
+previous misses	Ubuntux64	Completion option	filenames	a416d181e513	128	0.618	0.588	1.077	0.5458	0.5729	0.6796	0.5652	0.5602	0.5778				0.4902	fixed median ≤ 2/3
+previous misses	Ubuntux64	Completion option	fullquote	af4ee7e7c33e	128	0.622	0.632	1.095	0.5773	0.5697	0.6656	0.5711	0.5711	0.5759				0.4808	fixed median ≤ 2/3
+previous misses	Ubuntux64	Completion option	noquote	7757581896fc	128	0.605	0.615	1.090	0.5642	0.5710	0.6700	0.5559	0.5669	0.5493				0.5076	fixed median ≤ 2/3
+previous misses	Ubuntux64	Completion option	nosort	1603f6717c4f	128	0.626	0.630	1.093	0.5765	0.5628	0.6966	0.5686	0.5614	0.5614				0.4844	fixed median ≤ 2/3
+previous misses	Ubuntux64	Completion option	nospace	812b08def969	128	0.641	0.611	1.090	0.5606	0.5586	0.6946	0.5716	0.5691	0.5580				0.4916	fixed median ≤ 2/3
+previous misses	Ubuntux64	Completion option	plusdirs	50a774173dfa	128	0.635	0.610	1.114	0.5481	0.5360	0.6764	0.5783	0.5449	0.5453				0.4966	fixed median ≤ 2/3
+previous misses	Ubuntux64	Conditional	-G	af5edd672589	128	3.278	3.204	4.566	0.7016	0.7060	0.6610	0.6958	0.6873	0.7083	0.5749	0.5229	0.6637	0.6599	1,024 iterations ≤ 2/3
+previous misses	Ubuntux64	Conditional	-O	83d5b3a48d84	128	3.186	3.048	4.484	0.6796	0.7022	0.6527	0.6982	0.6931	0.7081	0.5897	0.5177	0.6969	0.6862	tried, above target
+previous misses	Ubuntux64	Conditional	-S	968372b0b12c	128	3.152	3.089	4.495	0.6872	0.6926	0.6524	0.6804	0.6847	0.6973	0.5807	0.5250	0.6362	0.6629	1,024 iterations ≤ 2/3
+previous misses	Ubuntux64	Conditional	-a	aea6b4ba850b	128	3.222	3.166	4.570	0.6928	0.6884	0.6500	0.6837	0.6897	0.7013	0.5865	0.5317	0.6366	0.6692	tried, above target
+previous misses	Ubuntux64	Conditional	-c	e4c5cb7b4108	128	3.264	3.135	4.633	0.6767	0.6804	0.6528	0.6860	0.6839	0.6997	0.5877	0.5363	0.6239	0.6818	tried, above target
+previous misses	Ubuntux64	Conditional	-d	d150f0bbe6ea	128	3.123	3.002	4.489	0.6687	0.6862	0.6324	0.6825	0.6781	0.6856	0.5730	0.5131	0.6176	0.5479	1,024 iterations ≤ 2/3
+previous misses	Ubuntux64	Conditional	-e	9114dc6ade6a	128	3.195	3.143	4.548	0.6911	0.6915	0.6533	0.6863	0.6822	0.7071	0.5869	0.5876	0.6348	0.6802	tried, above target
+previous misses	Ubuntux64	Conditional	-f	dde920b9b788	128	3.180	3.085	4.531	0.6808	0.6863	0.6509	0.6884	0.6842	0.7016	0.5883	0.5266	0.6334	0.6750	tried, above target
+previous misses	Ubuntux64	Conditional	-g	d95e3aa8df09	16	80.260	79.757	86.392	0.9232	0.9333	0.9457	0.9370	0.9253	0.9320			0.6405		tried, above target
+previous misses	Ubuntux64	Conditional	-n	4ddac3b45d82	128	0.968	0.907	1.434	0.6324	0.6704	0.7002	0.6496	0.6416	0.6765				0.6085	fixed median ≤ 2/3
+previous misses	Ubuntux64	Conditional	-nt	fb30c7f4f0ce	16	104.681	105.082	110.326	0.9525	0.9470	0.9238	0.9806	0.9542	0.9402			0.6949		tried, above target
+previous misses	Ubuntux64	Conditional	-ot	94a5a188a913	16	102.482	102.425	111.209	0.9210	0.9516	0.9276	0.9541	0.9219	0.9294			0.6832		tried, above target
+previous misses	Ubuntux64	Conditional	-s	cfd797932ad3	128	3.185	3.110	4.546	0.6842	0.6913	0.6282	0.6975	0.6848	0.7016	0.5907	0.5365	0.6302	0.6621	1,024 iterations ≤ 2/3
+previous misses	Ubuntux64	Conditional	-u	7a27caf51da5	16	77.927	77.823	84.174	0.9246	0.9340	0.9424	0.9492	0.9185	0.9321			0.6494		tried, above target
+previous misses	Ubuntux64	Conditional	-x	2e9e1ff54238	16	78.038	79.399	87.090	0.9117	0.9396	0.9429	0.9318	0.9130	0.9251			0.6239		tried, above target
+previous misses	Ubuntux64	Conditional	-z	3405a365772a	128	0.969	0.945	1.459	0.6478	0.6710	0.7111	0.6691	0.6348	0.6889				0.6125	fixed median ≤ 2/3
+new misses	Ubuntux64	Parameter	${#a[@]}	5920862cb22b	128	0.389	0.381	0.567	0.6721				0.6797	0.7622				0.6587	1,024 iterations ≤ 2/3
+previous misses	Ubuntux64	Parameter	${#v}	a6c78c219f27	128	105.437	103.498	151.451	0.6834	0.6960	0.6467	0.6748	0.6797	0.6609	0.5620	0.7431	0.6266		tried, above target
+previous misses	Ubuntux64	Parameter	${a[*]}	9809c3d9fb31	128	0.819	0.787	1.359	0.5790	0.5888	0.6989	0.5865	0.5735	0.6508				0.5264	fixed median ≤ 2/3
+previous misses	Ubuntux64	Parameter	${a[@]}	5b95faa61526	128	0.730	0.753	1.317	0.5717	0.5613	0.6558	0.5250	0.5520	0.6232				0.4879	fixed median ≤ 2/3
+previous misses	Ubuntux64	Parameter	${v##a*}	e8708d9a1ee0	128	104.524	105.272	151.441	0.6951	0.6974	0.6605	0.7031	0.7184	0.6512	0.5525	0.7277	0.6242		tried, above target
+previous misses	Ubuntux64	Parameter	${v#a*}	673e8aa8166a	128	106.094	106.096	151.696	0.6994	0.6983	0.6627	0.6899	0.7030	0.6567	0.5481	0.7333	0.6290		tried, above target
+previous misses	Ubuntux64	Parameter	${v%%*a}	726a63f9154d	128	105.431	105.359	151.305	0.6963	0.6893	0.6622	0.6878	0.7014	0.6615	0.5436	0.7307	0.6269		tried, above target
+previous misses	Ubuntux64	Parameter	${v%*a}	4f5d1deb772d	128	106.704	106.716	148.790	0.7172	0.6981	0.6620	0.6761	0.7243	0.6843	0.5571	0.7454	0.6225		tried, above target
+previous misses	Ubuntux64	Parameter	${v+a}	3f37304c058c	128	105.949	105.159	152.749	0.6884	0.7218	0.6666	0.6969	0.7035	0.6461	0.5551	0.7296	0.6317		tried, above target
+previous misses	Ubuntux64	Parameter	${v,,}	038c19e276ac	128	108.121	104.232	149.469	0.6973	0.6912	0.6699	0.6737	0.7146	0.6773	0.5545	0.7286	0.6064		tried, above target
+previous misses	Ubuntux64	Parameter	${v,}	af35bd1e969a	128	106.304	107.060	154.306	0.6938	0.6959	0.6580	0.6934	0.6973	0.6520	0.5319	0.7224	0.6072		tried, above target
+previous misses	Ubuntux64	Parameter	${v-a}	8828b96faddc	128	103.464	103.053	150.719	0.6837	0.6891	0.6610	0.6862	0.6944	0.6654	0.5591	0.7342	0.6155		tried, above target
+previous misses	Ubuntux64	Parameter	${v/#a/X}	e4ce65cbd0ee	128	108.167	106.419	152.551	0.6976	0.6933	0.6476	0.6937	0.7091	0.6633	0.5456	0.7251	0.6208		tried, above target
+previous misses	Ubuntux64	Parameter	${v/%a/X}	ade1300fe9ed	128	105.739	105.365	150.978	0.6979	0.6926	0.6546	0.6757	0.7117	0.6528	0.5493	0.7407	0.6127		tried, above target
+previous misses	Ubuntux64	Parameter	${v//a/X}	f3c16e886e58	128	107.059	107.716	154.053	0.6992	0.7009	0.6797	0.6754	0.7238	0.6506	0.5391	0.7247	0.6194		tried, above target
+previous misses	Ubuntux64	Parameter	${v/a/X}	e62ea0802e35	128	109.252	107.774	150.824	0.7146	0.6919	0.6673	0.7079	0.7348	0.6559	0.5386	0.7340	0.6229		tried, above target
+previous misses	Ubuntux64	Parameter	${v: -2:1}	7173f1b93cf8	128	107.794	103.749	153.177	0.6773	0.6864	0.6512	0.6704	0.7025	0.6474	0.5751	0.7399	0.6157		tried, above target
+new misses	Ubuntux64	Parameter	${v:+a}	b70d54d2d07f	128	60.642	59.289	91.781	0.6460				0.6630	0.6367	0.7488				fixed median ≤ 2/3
+previous misses	Ubuntux64	Parameter	${v:-a}	f967cb056c5a	128	106.679	105.805	151.595	0.6979	0.6859	0.6635	0.6937	0.6926	0.6533	0.5457	0.7337	0.6149		tried, above target
+new misses	Ubuntux64	Parameter	${v:=a}	b2d0f9707bcf	128	61.484	59.710	89.613	0.6663				0.6817	0.6521	0.7358				fixed median ≤ 2/3
+previous misses	Ubuntux64	Parameter	${v=a}	359bb492444c	128	106.624	105.070	152.548	0.6888	0.6739	0.6573	0.6539	0.6934	0.6498	0.5430	0.7364	0.6059		tried, above target
+previous misses	Ubuntux64	Parameter	${v@E}	270436aab876	128	106.108	104.675	153.965	0.6799	0.6834	0.6611	0.6986	0.6834	0.6450	0.5678	0.7414	0.6186		tried, above target
+previous misses	Ubuntux64	Parameter	${v@L}	4d7582518b43	128	106.975	107.523	152.142	0.7067	0.6856	0.6598	0.6641	0.7030	0.6606	0.5455	0.7295	0.6104		tried, above target
+previous misses	Ubuntux64	Parameter	${v@P}	e8ff153a7abe	128	105.069	103.332	151.052	0.6841	0.6806	0.6535	0.6765	0.7013	0.6652	0.5679	0.7480	0.5885		tried, above target
+previous misses	Ubuntux64	Parameter	${v@Q}	a8ae2df526e8	128	104.300	105.366	151.603	0.6950	0.6924	0.6608	0.6899	0.7017	0.6650	0.5496	0.7382	0.6301		tried, above target
+previous misses	Ubuntux64	Parameter	${v@U}	c0e20e993c8a	128	106.630	104.790	149.372	0.7015	0.7208	0.6663	0.6930	0.7051	0.6605	0.5359	0.7341	0.6139		tried, above target
+previous misses	Ubuntux64	Parameter	${v@u}	4c37fe0760f3	128	109.292	106.656	154.524	0.6902	0.6947	0.6627	0.7031	0.6924	0.6617	0.5550	0.7190	0.6183		tried, above target
+previous misses	Ubuntux64	Parameter	${v^^}	b1a9e410c325	128	108.808	104.916	151.288	0.6935	0.7119	0.6601	0.6818	0.6996	0.6604	0.5436	0.7154	0.6033		tried, above target
+previous misses	Ubuntux64	Parameter	${v^}	7372ef5e2b93	128	104.713	106.360	152.904	0.6956	0.7032	0.6579	0.6689	0.7133	0.6496	0.5465	0.7236	0.6108		tried, above target
+previous misses	Ubuntux64	Parameter	${v}	854adad3e2e9	128	103.584	101.999	150.532	0.6776	0.6815	0.6396	0.6701	0.6921	0.6497	0.5592	0.7528	0.6125		tried, above target
+previous misses	Ubuntux64	Printf format	E	fdfba3859c8e	128	0.539	0.531	0.864	0.6150	0.5983	0.7259	0.6066	0.6072	0.6248				0.5020	fixed median ≤ 2/3
+new misses	Ubuntux64	Printf format	G	9d1491d786ad	128	0.283	0.288	0.421	0.6842				0.6842	0.6969				0.6772	short at or below Bash
+previous misses	Ubuntux64	Printf format	e	6e29789c4198	128	0.496	0.492	0.872	0.5637	0.6117	0.7374	0.6069	0.5683	0.5922				0.5133	fixed median ≤ 2/3
+new misses	Ubuntux64	Printf format	f	fb13504b757d	128	0.293	0.283	0.410	0.6902				0.7069	0.7062				0.6582	1,024 iterations ≤ 2/3
+previous misses	Ubuntux64	Printf format	g	1d754cd8e38e	128	0.505	0.530	0.867	0.6112	0.5851	0.6712	0.5749	0.5901	0.6026				0.4776	fixed median ≤ 2/3
+previous misses	Ubuntux64	Redirection	&>	1036f196c42a	16	48.532	49.106	53.204	0.9230	0.9236	0.8981	0.9198	0.9234	0.9170					tried, above target
+previous misses	Ubuntux64	Redirection	&>>	d492279205a2	16	51.985	53.597	57.151	0.9378	0.9180	0.9030	0.9308	0.9244	0.9214					tried, above target
+previous misses	Ubuntux64	Redirection	/dev/fd/N	15c6dbc29d08	128	308.562	309.163	333.398	0.9273	0.9245	0.9081	0.9403	0.9127	0.9162					tried, above target
+previous misses	Ubuntux64	Redirection	<	fe37f6479d3b	128	321.997	320.946	337.288	0.9515	0.9610	0.9466	0.9473	0.9620	0.9524					tried, above target
+previous misses	Ubuntux64	Redirection	<<-	3d9d41076adb	128	322.884	306.523	338.069	0.9067	0.9664	0.9483	0.9416	0.9150	0.9049					tried, above target
+previous misses	Ubuntux64	Redirection	<<<	6356fa08ad2b	128	329.822	316.383	347.504	0.9104	0.9522	0.9468	0.9700	0.9115	0.9084					tried, above target
+previous misses	Ubuntux64	Redirection	<>	1c9961fb96ee	128	308.468	309.875	333.795	0.9283	0.9299	0.9118	0.9254	0.9244	0.9249					tried, above target
+previous misses	Ubuntux64	Redirection	>	64480a7d0419	128	314.278	312.941	343.829	0.9102	0.9308	0.9087	0.9286	0.9047	0.9062					tried, above target
+previous misses	Ubuntux64	Redirection	>>	a3c1c9edeb4e	128	310.691	311.806	332.417	0.9380	0.9246	0.9027	0.9168	0.9435	0.9373					tried, above target
+previous misses	Ubuntux64	Redirection	here-document	fbb8d10b2e02	128	327.802	312.012	345.466	0.9032	0.9620	0.9463	0.9760	0.9133	0.9136					tried, above target
+previous misses	Ubuntux64	Redirection	n<&-	9b1bda303ace	128	2.266	2.238	3.130	0.7149	0.7412	0.6657	0.7177	0.7004	0.7330				0.6995	tried, above target
+previous misses	Ubuntux64	Redirection	n<&m	b2ed1210f948	128	320.431	319.759	334.699	0.9554	0.9696	0.9495	0.9783	0.9570	0.9498					tried, above target
+previous misses	Ubuntux64	Redirection	n<&m-	095ea2529837	128	320.233	324.755	334.174	0.9718	0.9716	0.9538	0.9668	0.9753	0.9593					tried, above target
+previous misses	Ubuntux64	Redirection	n>&-	813721653d7c	128	2.622	2.581	3.011	0.8574	0.8662	0.8382	0.8474	0.8610	0.8894				0.8389	tried, above target
+previous misses	Ubuntux64	Redirection	n>&m	7540752f59db	128	314.658	315.020	339.811	0.9270	0.9310	0.9204	0.9340	0.9216	0.9249					tried, above target
+previous misses	Ubuntux64	Redirection	n>&m-	2b0867cd62f3	128	316.387	318.326	346.241	0.9194	0.9266	0.9123	0.9365	0.9136	0.9125					tried, above target
+previous misses	Ubuntux64	Redirection	quoted here-document	d1688c22c970	128	333.366	312.249	338.757	0.9217	0.9854	0.9598	0.9612	0.9294	0.9561					tried, above target
+previous misses	Ubuntux64	Redirection	{varname} descriptor	267c6fc61a8c	128	319.765	325.391	351.332	0.9262	0.9345	0.9084	0.9140	0.9139	0.9143					tried, above target
+previous misses	Ubuntux64	Reserved word	coproc	411ed4712937	128	359.382	354.950	377.693	0.9398	0.9249	0.9082	0.9209	0.9240	0.9227					tried, above target
+previous misses	Ubuntux64	Reserved word	elif	6d5ea4cc21bb	128	0.593	0.589	0.966	0.6091	0.6203	0.6735	0.5862	0.5958	0.6353				0.5470	fixed median ≤ 2/3
+previous misses	Ubuntux64	Reserved word	else	6d5ea4cc21bb	128	0.593	0.589	0.966	0.6091	0.6203	0.6735	0.5862	0.5958	0.6353				0.5470	fixed median ≤ 2/3
+previous misses	Ubuntux64	Reserved word	fi	6d5ea4cc21bb	128	0.593	0.589	0.966	0.6091	0.6203	0.6735	0.5862	0.5958	0.6353				0.5470	fixed median ≤ 2/3
+previous misses	Ubuntux64	Reserved word	if	6d5ea4cc21bb	128	0.593	0.589	0.966	0.6091	0.6203	0.6735	0.5862	0.5958	0.6353				0.5470	fixed median ≤ 2/3
+previous misses	Ubuntux64	Reserved word	select	e45d7d626f01	128	3.734	3.627	5.007	0.7244	0.7353	0.7582	0.7084	0.7225	0.7433				0.7198	tried, above target
+previous misses	Ubuntux64	Reserved word	then	6d5ea4cc21bb	128	0.593	0.589	0.966	0.6091	0.6203	0.6735	0.5862	0.5958	0.6353				0.5470	fixed median ≤ 2/3
+previous misses	Ubuntux64	Reserved word	time	95303f71ee3a	128	305.395	304.232	329.731	0.9227	0.9338	0.9090	0.9247	0.9220	0.9259					tried, above target
+previous misses	Ubuntux64	Reserved word	until	df67f0fcd11d	128	0.989	0.995	1.759	0.5656	0.5363	0.6823	0.5535	0.5517	0.5968				0.4993	fixed median ≤ 2/3
+previous misses	Ubuntux64	Reserved word	while	72d528971e3a	128	0.989	0.949	1.684	0.5633	0.5444	0.6796	0.5709	0.5774	0.5908				0.4862	fixed median ≤ 2/3
+previous misses	Ubuntux64	Shell language	array append	072e4602243e	128	0.909	0.916	1.752	0.5227	0.5475	0.6835	0.5440	0.5235	0.5607				0.4686	fixed median ≤ 2/3
+previous misses	Ubuntux64	Shell language	brace alternation	ed429c45e0ed	128	0.656	0.646	0.992	0.6509	0.6448	0.8560	0.6306	0.6572	0.7233				0.5528	fixed median ≤ 2/3
+previous misses	Ubuntux64	Shell language	bracket expressions and classes	fb5250b18748	128	317.063	314.727	335.784	0.9373	0.9349	0.9191	0.9236	0.9445	0.9453		0.9514	0.9139		matched OS control
+previous misses	Ubuntux64	Shell language	case ;& fallthrough	43a24f5ea779	128	0.608	0.580	1.038	0.5587	0.5731	0.6394	0.5613	0.5492	0.6049				0.4806	fixed median ≤ 2/3
+previous misses	Ubuntux64	Shell language	coproc	411ed4712937	128	359.382	354.950	377.693	0.9398	0.9249	0.9082	0.9209	0.9240	0.9227					tried, above target
+previous misses	Ubuntux64	Shell language	coprocess input/output descriptors	411ed4712937	128	359.382	354.950	377.693	0.9398	0.9249	0.9082	0.9209	0.9240	0.9227					tried, above target
+previous misses	Ubuntux64	Shell language	directory stack rotation	cd77daf77162	16	78.199	78.250	87.093	0.8985	0.9159	0.8958	0.9295	0.8957	0.9018					tried, above target
+previous misses	Ubuntux64	Shell language	escaped backslash filenames	ca58e21566ca	128	312.153	311.721	330.290	0.9438	0.9318	0.9255	0.9317	0.9387	0.9482		0.9601	0.8289		matched OS control
+previous misses	Ubuntux64	Shell language	exit status 126	314e32924876	16	44.472	44.092	50.588	0.8716	0.8838	0.8636	0.8747	0.8988	0.8769					tried, above target
+previous misses	Ubuntux64	Shell language	filename wildcards	63902335aa30	128	317.597	314.348	339.679	0.9254	0.9413	0.9206	0.9319	0.9185	0.9264		0.9556	0.8200		matched OS control
+previous misses	Ubuntux64	Shell language	group redirections	9d64362ba9b1	128	308.141	309.005	331.378	0.9325	0.9329	0.9019	0.9277	0.9277	0.9338					tried, above target
+previous misses	Ubuntux64	Shell language	grouped pipeline status	eb0e89e75b3f	128	343.008	334.156	387.361	0.8626	0.9034	0.8745	0.8986	0.8556	0.8880					tried, above target
+previous misses	Ubuntux64	Shell language	if then elif else fi	6d5ea4cc21bb	128	0.593	0.589	0.966	0.6091	0.6203	0.6735	0.5862	0.5958	0.6353				0.5470	fixed median ≤ 2/3
+previous misses	Ubuntux64	Shell language	indexed arrays	43d28e050caa	128	1.016	1.014	1.951	0.5199	0.5181	0.7254	0.5152	0.5140	0.5667				0.4749	fixed median ≤ 2/3
+previous misses	Ubuntux64	Shell language	merged stderr pipeline	f4038837eccb	128	331.910	337.152	361.625	0.9323	0.8944	0.8969	0.8838	0.9312	0.9201					tried, above target
+previous misses	Ubuntux64	Shell language	pathname expansion of leading dots	ca2139ab8b2e	128	308.218	310.966	331.362	0.9385	0.9337	0.9223	0.9170	0.9338	0.9300		0.9582	0.8227		matched OS control
+previous misses	Ubuntux64	Shell language	pipeline	14d78e0eda01	128	347.506	347.421	411.153	0.8450	0.8379	0.8634	0.8301	0.8432	0.8450					tried, above target
+previous misses	Ubuntux64	Shell language	process substitution input	25706da2d50d	128	337.773	335.093	380.075	0.8816	0.9112	0.8910	0.9204	0.8839	0.8837					tried, above target
+previous misses	Ubuntux64	Shell language	process substitution output	664c5a83e2af	16	80.605	79.401	88.267	0.8995	0.9161	0.8905	0.9087	0.8996	0.9068					tried, above target
+previous misses	Ubuntux64	Shell language	programmable completion callback	b4ea38c68203	128	2.428	2.303	3.526	0.6531	0.6549	0.7640	0.6720	0.6551	0.6918				0.6428	fixed median ≤ 2/3
+previous misses	Ubuntux64	Shell language	quoted and unquoted here-documents	d1688c22c970	128	333.366	312.249	338.757	0.9217	0.9854	0.9598	0.9612	0.9294	0.9561					tried, above target
+previous misses	Ubuntux64	Shell language	script fallback without shebang	486d0a5c94f0	128	409.291	388.296	420.284	0.9239	0.9823	0.9492	0.9256	0.9225	0.9258					tried, above target
+previous misses	Ubuntux64	Shell language	select	e45d7d626f01	128	3.734	3.627	5.007	0.7244	0.7353	0.7582	0.7084	0.7225	0.7433				0.7198	tried, above target
+previous misses	Ubuntux64	Shell language	shell environment isolation	0e0485303f08	128	33.849	33.620	47.509	0.7076	0.7282	0.7013	0.6944	0.7214	0.6580					tried, above target
+previous misses	Ubuntux64	Shell language	simple commands and assignments	d0cb82a50426	128	73.048	73.208	97.087	0.7540	0.7647	0.7240	0.7664	0.7580	0.7564		0.9759			matched OS control
+new misses	Ubuntux64	Shell language	subshell exit isolation	a24bd3cd7290	128	17.625	17.907	27.396	0.6537				0.6715	0.6482					fixed median ≤ 2/3
+previous misses	Ubuntux64	Shell language	subshell scope	2a8b9516d795	128	31.995	32.120	46.207	0.6951	0.6953	0.6961	0.6953	0.7006	0.6584					tried, above target
+previous misses	Ubuntux64	Shell language	tilde current and previous directories	cce16f02d769	128	316.667	315.502	423.466	0.7450	0.7500	0.8201	0.7456	0.7473	0.7471					tried, above target
+previous misses	Ubuntux64	Shell language	time -p	39c17ca07c03	128	99.836	99.031	122.660	0.8074	0.8083	0.8102	0.8226	0.8013	0.8110					tried, above target
+previous misses	Ubuntux64	Shell language	time keyword	95303f71ee3a	128	305.395	304.232	329.731	0.9227	0.9338	0.9090	0.9247	0.9220	0.9259					tried, above target
+previous misses	Ubuntux64	Shell language	until	df67f0fcd11d	128	0.989	0.995	1.759	0.5656	0.5363	0.6823	0.5535	0.5517	0.5968				0.4993	fixed median ≤ 2/3
+previous misses	Ubuntux64	Shell language	wait -n	2d8b87809a57	4	94.059	94.211	96.054	0.9808	0.9836	0.9871	0.9808	0.9808	0.9792	0.9864				matched OS control
+previous misses	Ubuntux64	Shell language	wait -p	7bd725556617	4	92.455	93.052	94.724	0.9824	0.9850	0.9844	0.9873	0.9798	0.9780	0.9820				matched OS control
+previous misses	Ubuntux64	Shell language	while	72d528971e3a	128	0.989	0.949	1.684	0.5633	0.5444	0.6796	0.5709	0.5774	0.5908				0.4862	fixed median ≤ 2/3
+previous misses	Ubuntux64	Variable	BASHPID	cae2dfeedc67	128	31.115	31.316	45.443	0.6891	0.6898	0.6599	0.6870	0.7003	0.6297					tried, above target
+previous misses	Ubuntux64	Variable	BASH_SUBSHELL	a48fbc6b2ae0	128	30.635	30.840	46.327	0.6657	0.6860	0.6797	0.6729	0.7157	0.6348					fixed median ≤ 2/3
+previous misses	Ubuntux64	Variable	BASH_VERSINFO	9b00b1acdd1f	128	0.610	0.606	1.008	0.6012	0.5870	0.7231	0.5755	0.6170	0.6117				0.5241	fixed median ≤ 2/3
+previous misses	Ubuntux64	Variable	BASH_XTRACEFD	f87578106552	128	319.879	317.474	349.700	0.9078	0.9184	0.9014	0.9073	0.9023	0.9062					tried, above target
+previous misses	Ubuntux64	Variable	CDPATH	9ce875130c76	16	74.824	74.743	83.091	0.8995	0.9320	0.8996	0.8937	0.9135	0.8982					tried, above target
+previous misses	Ubuntux64	Variable	CHILD_MAX	4e11eae31e2f	4	190.856	189.688	221.247	0.8574	0.8557	0.8946	0.8567	0.8636	0.8595					tried, above target
+previous misses	Ubuntux64	Variable	COMPREPLY	b4ea38c68203	128	2.428	2.303	3.526	0.6531	0.6549	0.7640	0.6720	0.6551	0.6918				0.6428	fixed median ≤ 2/3
+previous misses	Ubuntux64	Variable	COPROC	411ed4712937	128	359.382	354.950	377.693	0.9398	0.9249	0.9082	0.9209	0.9240	0.9227					tried, above target
+previous misses	Ubuntux64	Variable	EUID	135dcc885cee	128	310.443	307.569	357.273	0.8609	0.8846	0.8923	0.8979	0.8649	0.8567					tried, above target
+previous misses	Ubuntux64	Variable	FCEDIT	b0e7038cae0f	16	89.461	88.398	98.980	0.8931	0.9013	0.8726	0.8722	0.8940	0.8961					tried, above target
+previous misses	Ubuntux64	Variable	GLOBIGNORE	900c6025ee60	128	310.139	306.343	329.467	0.9298	0.9364	0.9253	0.9323	0.9355	0.9300		0.9601	0.7690		matched OS control
+previous misses	Ubuntux64	Variable	HISTSIZE	14264e502388	128	133.341	132.491	169.777	0.7804	0.7913	0.7477	0.7949	0.7876	0.7842					tried, above target
+previous misses	Ubuntux64	Variable	HISTTIMEFORMAT	7310c20ca02c	128	122.136	122.513	155.993	0.7854	0.7719	0.7281	0.7648	0.7882	0.7745					tried, above target
+previous misses	Ubuntux64	Variable	HOME	9e7227102901	16	74.837	74.258	81.227	0.9142	0.9279	0.9050	0.9579	0.9309	0.9202					tried, above target
+previous misses	Ubuntux64	Variable	MAPFILE	8f981524555f	128	2.457	2.426	3.475	0.6982	0.6869	0.6468	0.6897	0.6877	0.7038				0.6864	tried, above target
+previous misses	Ubuntux64	Variable	OLDPWD	396a666c96ea	128	310.257	312.701	417.265	0.7494	0.7575	0.8433	0.7570	0.7406	0.7568					tried, above target
+previous misses	Ubuntux64	Variable	PS3	d3803d679772	128	2.805	2.721	3.930	0.6925	0.7017	0.7390	0.6990	0.6966	0.7391				0.6875	tried, above target
+previous misses	Ubuntux64	Variable	PS4	b64e49e55f1f	128	1.052	1.058	1.550	0.6824	0.6459	0.6823	0.7188	0.6983	0.7718				0.6316	1,024 iterations ≤ 2/3
+previous misses	Ubuntux64	Variable	PWD	ca8a3e6431d7	128	314.302	315.696	407.640	0.7744	0.7622	0.8303	0.7556	0.7621	0.7631					tried, above target
+previous misses	Ubuntux64	Variable	REPLY	281739a3ac4f	128	2.852	2.180	3.859	0.5649	0.7292	0.6677	0.7490	0.5572	0.5712				0.5460	fixed median ≤ 2/3
+previous misses	Ubuntux64	Variable	TIMEFORMAT	95303f71ee3a	128	305.395	304.232	329.731	0.9227	0.9338	0.9090	0.9247	0.9220	0.9259					tried, above target
+previous misses	Ubuntux64	Variable	UID	74b97b495f5c	128	308.623	306.223	355.689	0.8609	0.8804	0.8899	0.8670	0.8756	0.8580					tried, above target
+previous misses	Ubuntux64	set -o	allexport	b723d5214598	128	71.040	70.190	95.749	0.7331	0.7665	0.7168	0.7435	0.7476	0.7453		1.0035			matched OS control
+previous misses	Ubuntux64	set -o	braceexpand	6d9ee176cb77	128	0.899	0.892	1.489	0.5988	0.5784	0.7303	0.5584	0.6054	0.6447				0.5416	fixed median ≤ 2/3
+previous misses	Ubuntux64	set -o	noglob	09fe856ae8ae	128	310.283	310.187	328.110	0.9454	0.9322	0.9262	0.9198	0.9539	0.9464		0.9586	0.5429		matched OS control
+previous misses	Ubuntux64	set -o	xtrace	d596a1cdcd5d	128	1.059	1.077	1.581	0.6814	0.6922	0.6739	0.6699	0.6843	0.7694				0.6267	1,024 iterations ≤ 2/3
+previous misses	Ubuntux64	shopt	dotglob	239dd6e3e430	128	316.345	321.598	337.693	0.9523	0.9348	0.9238	0.9376	0.9452	0.9554		0.9670	0.6656		matched OS control
+previous misses	Ubuntux64	shopt	failglob	f6861299edd1	128	37.020	35.847	49.921	0.7181	0.7394	0.6829	0.7309	0.7449	0.6968					tried, above target
+previous misses	Ubuntux64	shopt	globskipdots	e699df44d05a	128	326.143	319.943	340.925	0.9385	0.9382	0.9293	0.9247	0.9477	0.9351					tried, above target
+previous misses	Ubuntux64	shopt	globstar	c0034550b8f9	16	76.234	76.709	80.857	0.9487	0.9350	0.9336	0.9347	0.9456	0.9467					tried, above target
+previous misses	Ubuntux64	shopt	nocaseglob	e975ccd42235	128	320.596	320.172	339.819	0.9422	0.9312	0.9052	0.9290	0.9476	0.9430		0.9511	0.6974		matched OS control
+previous misses	Ubuntux64	shopt	nullglob	0eea32452067	128	2.588	2.571	4.180	0.6151	0.6138	0.6625	0.5999	0.6104	0.6548				0.5896	fixed median ≤ 2/3
+previous misses	macOSarm64	Arithmetic	!=	613d4949f6da	128	0.593	0.586	1.120	0.5237	0.4222	0.5273	0.5035	0.5000	0.5271				0.4011	fixed median ≤ 2/3
+previous misses	macOSarm64	Arithmetic	%=	a9e32cb0a767	128	0.606	0.579	1.168	0.4962	0.4534	0.6225	0.4350	0.5481	0.5258				0.3835	fixed median ≤ 2/3
+previous misses	macOSarm64	Arithmetic	<<=	55777f282765	128	0.691	0.738	1.236	0.5975	0.4816	0.5042	0.5768	0.5450	0.5092				0.4583	fixed median ≤ 2/3
+previous misses	macOSarm64	Arithmetic	<=	88db9f456691	128	0.696	0.620	1.163	0.5325	0.4543	0.4727	0.5677	0.5225	0.5219				0.4084	fixed median ≤ 2/3
+previous misses	macOSarm64	Arithmetic	==	67491612d199	128	0.513	0.492	1.100	0.4469	0.4500	0.4523	0.4381	0.4546	0.4792				0.3637	fixed median ≤ 2/3
+previous misses	macOSarm64	Arithmetic	>=	168e9e27e09c	128	0.538	0.511	1.049	0.4870	0.5298	0.4911	0.5095	0.4789	0.5353				0.2271	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin	.	19fb9af68972	128	16.699	16.020	19.857	0.8067	0.8287	0.9438	1.0306	0.8274	0.8011					tried, above target
+previous misses	macOSarm64	Builtin	:	49fa22022f64	128	2.755	2.698	3.506	0.7695	0.7170	0.6955	0.8667	0.7893	0.7575					tried, above target
+previous misses	macOSarm64	Builtin	break	1ffe429f2b16	128	0.604	0.609	1.019	0.5977	0.6292	0.6548	0.5230	0.5667	0.5997				0.3719	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin	builtin	3a4e03516179	128	0.543	0.566	0.982	0.5759	0.5206	0.5652	0.5824	0.5951	0.6388				0.4543	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin	command	e41b7a11bed6	128	0.656	0.641	1.188	0.5400	0.5270	0.6584	0.5609	0.5284	0.5361				0.4834	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin	declare	787d3005531a	128	0.565	0.594	1.220	0.4870	0.4204	0.4497	0.4569	0.4711	0.4808				0.2562	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin	disown	d2003b0a862e	4	174.786	197.629	184.254	1.0726	0.8709	1.0526	1.1595	1.0223	0.8290		0.8742			tried, above target
+new misses	macOSarm64	Builtin	enable	308e89fc8191	128	1.638	1.664	2.635	0.6315				0.6342	0.6569				0.7176	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin	export	c7aaaf064221	16	47.214	49.208	55.362	0.8888	0.8531	0.8349	0.8178	0.7502	0.7598		1.4645			tried, above target
+previous misses	macOSarm64	Builtin	false	b28669f38998	128	0.478	0.465	0.821	0.5667	0.5192	0.5950	0.5236	0.5324	0.5391				0.2327	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin	hash	ce80acc44da2	16	19.725	19.130	25.505	0.7500	0.7411	0.6781	0.7458	0.7592	0.7585					tried, above target
+previous misses	macOSarm64	Builtin	history	1402ac52475d	16	32.205	32.940	40.211	0.8192	0.8407	0.6768	0.9672	0.8284	0.8289					tried, above target
+previous misses	macOSarm64	Builtin	jobs	24c6ee0d7a12	4	736.106	612.893	633.429	0.9676	0.9358	0.9153	0.8847	1.1929	1.1189	1.0116				matched OS control
+new misses	macOSarm64	Builtin	pushd	c94c26b9e538	16	22.303	24.656	29.019	0.8496				0.7531	0.7502					tried, above target
+previous misses	macOSarm64	Builtin	read	02b137a1a92b	128	2.080	2.587	4.165	0.6213	0.6337	0.8215	0.7049	0.5549	0.3295				0.4341	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin	set	c9d68c32bd19	128	60.246	58.048	73.866	0.7859	0.7921	0.6880	0.7611	0.7211	0.8606					tried, above target
+previous misses	macOSarm64	Builtin	shopt	0eea32452067	128	3.531	4.267	4.987	0.8557	0.7107	1.0312	0.9759	0.7974	0.7594					tried, above target
+previous misses	macOSarm64	Builtin	source	fb5e0f832d89	128	16.019	16.286	17.215	0.9460	0.9305	0.8819	0.7661	0.8300	0.9290					tried, above target
+previous misses	macOSarm64	Builtin	times	84874f7bf18e	128	52.422	50.757	69.008	0.7355	0.7702	0.7269	0.7094	0.7258	0.7297					tried, above target
+new misses	macOSarm64	Builtin	type	e3f9423fab07	128	1.716	1.540	2.326	0.6621				0.7258	0.7172				0.6829	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin	ulimit	5cb6981abf3b	128	52.889	54.260	68.015	0.7978	0.7906	0.7722	0.6108	0.7577	0.7532					tried, above target
+previous misses	macOSarm64	Builtin	umask	330c6cece069	16	89.644	80.755	96.437	0.8374	0.8549	0.7877	0.8244	0.7523	0.8642					tried, above target
+new misses	macOSarm64	Builtin	wait	97c1b0e26ecd	128	39.849	39.462	55.623	0.7094				0.6964	0.7079					tried, above target
+previous misses	macOSarm64	Builtin option	cd -L	86f95ff2dd2c	16	81.151	79.135	112.564	0.7030	0.7366	0.7405	0.6688	0.7138	0.7121					tried, above target
+previous misses	macOSarm64	Builtin option	cd -P	3fda9e144559	16	82.621	78.551	111.133	0.7068	0.7391	0.7045	0.7474	0.7023	0.7289					tried, above target
+previous misses	macOSarm64	Builtin option	command -p	71dec6cfd837	16	84.843	83.774	84.437	0.9921	0.9894	1.0224	0.9890	0.9724	0.9904					tried, above target
+previous misses	macOSarm64	Builtin option	complete -r	ba763eb4cea5	128	2.349	2.226	3.024	0.7363	0.7368	0.5560	0.7519	0.7211	0.7863				0.7590	tried, above target
+previous misses	macOSarm64	Builtin option	declare -I	c0ec1ae7c7e5	128	0.754	0.742	1.500	0.4945	0.4001	0.4914	0.4091	0.4650	0.5023				0.3689	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin option	declare -f	01e27ed43a72	16	58.160	59.233	78.573	0.7539	0.7027	0.4587	0.6484	0.8371	0.7974					tried, above target
+previous misses	macOSarm64	Builtin option	declare -x	26408a3c84fe	16	54.614	61.872	65.152	0.9497	0.7851	1.0082	0.7125	0.8514	0.8418		1.4104			tried, above target
+previous misses	macOSarm64	Builtin option	dirs -c	aabb4ccb2a1e	16	30.928	30.605	42.344	0.7228	0.7224	0.6922	0.7262	0.7190	0.6932					tried, above target
+previous misses	macOSarm64	Builtin option	disown -a	cee893ef723a	4	201.416	198.307	198.736	0.9978	0.9506	0.9766	0.9498	1.0127	0.9903		0.9897			matched OS control
+previous misses	macOSarm64	Builtin option	disown -h	fbec48c6f803	4	553.120	556.812	560.140	0.9941	1.0093	1.0508	0.9642	0.9734	0.8812	0.7542				tried, above target
+previous misses	macOSarm64	Builtin option	disown -r	4dbd86b7239c	4	178.790	198.835	198.307	1.0027	1.1787	1.4050	0.7810	0.9210	0.9976		0.9477			matched OS control
+previous misses	macOSarm64	Builtin option	export -n	aa3f391c2a50	16	49.207	47.072	59.076	0.7968	0.8341	0.8099	0.7822	0.8102	0.7847		1.5854			tried, above target
+previous misses	macOSarm64	Builtin option	export -p	c5972c1e3d25	16	49.697	51.599	65.418	0.7887	0.7114	0.8228	0.7938	0.7918	0.7653					tried, above target
+previous misses	macOSarm64	Builtin option	hash -d	4994502746fb	128	2.673	2.645	3.983	0.6640	0.7022	0.7560	0.7297	0.6260	0.6701					fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin option	hash -l	6573f8abe67d	128	1.116	1.076	1.649	0.6524	0.5985	0.6215	0.7170	0.6481	0.6982				0.6086	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin option	hash -p	ce80acc44da2	16	19.725	19.130	25.505	0.7500	0.7411	0.6781	0.7458	0.7592	0.7585					tried, above target
+previous misses	macOSarm64	Builtin option	hash -r	9258a9c1f1b3	128	2.674	2.496	3.570	0.6990	0.7048	0.7659	0.7407	0.7105	0.6940					tried, above target
+previous misses	macOSarm64	Builtin option	hash -t	ce80acc44da2	16	19.725	19.130	25.505	0.7500	0.7411	0.6781	0.7458	0.7592	0.7585					tried, above target
+previous misses	macOSarm64	Builtin option	jobs -l	48f0f68f324f	4	537.427	495.762	413.497	1.1990	0.8591	0.9863	0.7834	1.1439	1.1901	0.9745				tried, above target
+previous misses	macOSarm64	Builtin option	jobs -n	1073fad1c5f9	4	442.823	415.975	360.987	1.1523	0.8917	0.8898	0.8193	1.1501	0.9605	1.1815				tried, above target
+previous misses	macOSarm64	Builtin option	jobs -p	24c6ee0d7a12	4	736.106	612.893	633.429	0.9676	0.9358	0.9153	0.8847	1.1929	1.1189	1.0116				matched OS control
+previous misses	macOSarm64	Builtin option	jobs -r	ac121d4b6180	4	559.131	438.587	412.557	1.0631	1.0854	1.0202	0.9547	1.4214	1.1742	0.9047				matched OS control
+previous misses	macOSarm64	Builtin option	jobs -s	97a70b4647de	4	613.740	488.070	519.099	0.9402	1.2037	1.1262	1.0094	1.0647	0.9973	1.0239				matched OS control
+previous misses	macOSarm64	Builtin option	jobs -x	27e15ee9fb24	4	519.646	534.830	453.930	1.1782	0.9039	1.2723	1.0417	1.2918	1.0852	0.9089				tried, above target
+previous misses	macOSarm64	Builtin option	mapfile -C	3ec206ca8c1d	128	20.417	20.710	23.391	0.8854	0.7744	0.8332	0.9670	0.8725	0.8780					tried, above target
+previous misses	macOSarm64	Builtin option	mapfile -O	e75fc215bb04	128	19.709	28.632	22.140	1.2932	0.8764	0.9681	0.8916	1.4687	1.1846					tried, above target
+previous misses	macOSarm64	Builtin option	mapfile -c	6f9d9b266d72	128	14.815	14.821	17.528	0.8455	0.9036	0.8870	0.9365	0.8862	0.8997					tried, above target
+previous misses	macOSarm64	Builtin option	mapfile -d	50e713e92929	128	18.645	18.054	20.660	0.8739	0.9110	0.6742	0.8717	0.8855	0.9222			0.6427		tried, above target
+previous misses	macOSarm64	Builtin option	mapfile -n	06d05e1602ec	128	13.948	14.553	17.733	0.8207	0.9647	0.8375	0.8072	0.7512	1.1071			0.7257		tried, above target
+previous misses	macOSarm64	Builtin option	mapfile -s	d4f36f4ce1c1	128	14.459	13.612	15.393	0.8843	0.9044	0.8721	0.9533	0.9603	0.8952			0.6976		tried, above target
+previous misses	macOSarm64	Builtin option	mapfile -t	ffa3c1e4291d	128	21.217	21.503	23.069	0.9321	0.8904	0.9505	0.9786	0.9163	0.9200			0.6971		tried, above target
+previous misses	macOSarm64	Builtin option	mapfile -u	a5557ddc375e	128	18.882	22.604	23.067	0.9799	0.8981	0.9099	0.8952	1.0143	0.8783			0.6858		tried, above target
+previous misses	macOSarm64	Builtin option	readarray -C	98a5af1da502	128	18.981	20.689	23.793	0.8695	0.8426	0.8177	0.9292	0.9096	0.8101					tried, above target
+previous misses	macOSarm64	Builtin option	readarray -O	522a6c2a9e45	128	18.611	20.264	21.970	0.9224	0.8809	0.9561	0.9510	0.8543	0.9161					tried, above target
+previous misses	macOSarm64	Builtin option	readarray -c	2ad89d387488	128	15.030	14.848	17.084	0.8691	0.8888	0.7351	0.8458	0.8624	0.8959					tried, above target
+previous misses	macOSarm64	Builtin option	readarray -d	dc385084f0db	128	13.805	14.259	16.008	0.8907	0.9400	0.8597	0.9360	0.9908	0.9604			0.6569		tried, above target
+previous misses	macOSarm64	Builtin option	readarray -n	98f98839a829	128	18.231	18.011	19.613	0.9183	0.7899	0.7482	0.9133	0.9322	0.9208			0.6614		tried, above target
+previous misses	macOSarm64	Builtin option	readarray -s	87eb349d3117	128	19.707	17.217	20.244	0.8504	0.9074	0.9014	1.0235	0.9041	0.8722			0.7219		tried, above target
+previous misses	macOSarm64	Builtin option	readarray -t	62078004b66f	128	18.637	17.458	20.890	0.8357	0.9127	0.7492	0.8865	0.8311	0.8675			0.6947		tried, above target
+previous misses	macOSarm64	Builtin option	readarray -u	93ed8c79967f	128	18.839	17.784	20.485	0.8681	0.8994	1.1848	0.9282	0.9102	0.9132			0.7275		tried, above target
+previous misses	macOSarm64	Builtin option	set -e	d30769f2f577	128	0.553	0.604	1.238	0.4879	0.4545	0.5469	0.4668	0.4386	0.4706				0.3521	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin option	set -o	c9d68c32bd19	128	60.246	58.048	73.866	0.7859	0.7921	0.6880	0.7611	0.7211	0.8606					tried, above target
+previous misses	macOSarm64	Builtin option	shopt -s	0eea32452067	128	3.531	4.267	4.987	0.8557	0.7107	1.0312	0.9759	0.7974	0.7594					tried, above target
+previous misses	macOSarm64	Builtin option	shopt -u	0eea32452067	128	3.531	4.267	4.987	0.8557	0.7107	1.0312	0.9759	0.7974	0.7594					tried, above target
+previous misses	macOSarm64	Builtin option	trap -l	bc60cd40ae2f	16	43.306	43.747	53.408	0.8191	0.8029	0.8178	0.8123	0.8215	0.8287					tried, above target
+previous misses	macOSarm64	Builtin option	type -P	d471161485d8	16	26.547	28.482	34.587	0.8235	0.8239	0.7194	0.8081	0.8875	0.7667					tried, above target
+new misses	macOSarm64	Builtin option	type -a	8b78877c53f4	16	36.786	35.151	46.485	0.7562				0.7640	0.7636					tried, above target
+previous misses	macOSarm64	Builtin option	type -p	9a5fe3a04d6a	128	1.389	1.509	1.513	0.9974	0.8091	1.1435	0.8028	0.9510	0.9007				0.8464	tried, above target
+previous misses	macOSarm64	Builtin option	type -t	fe6f5959e677	128	0.547	0.525	0.923	0.5685	0.5742	0.6331	0.5750	0.5533	0.5802				0.3472	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin option	typeset -f	20a42f211e41	16	31.668	33.006	42.816	0.7709	0.8134	0.9439	0.8089	0.8043	0.7382					tried, above target
+previous misses	macOSarm64	Builtin option	typeset -n	e9820aff2d86	128	0.663	0.657	1.169	0.5622	0.4932	0.7386	0.5420	0.5614	0.5627				0.4817	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin option	typeset -p	82a0d925a920	128	0.552	0.579	1.050	0.5509	0.5241	0.4851	0.4562	0.5492	0.6609				0.3685	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin option	typeset -x	51b712b12c9f	16	53.166	57.420	69.232	0.8294	0.8955	0.8796	0.8205	0.7578	0.8122		1.5597			tried, above target
+previous misses	macOSarm64	Builtin option	ulimit -f	e553b7e675db	128	0.488	0.548	0.871	0.6291	0.5485	0.4517	0.6344	0.5542	0.5831				0.4308	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin option	ulimit -m	0513138f471e	128	0.671	0.591	1.738	0.3402	0.6021	0.6854	1.1297	0.3583	0.3623				0.2693	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin option	ulimit -p	c4011c62c4fd	128	0.502	0.495	0.905	0.5470	0.5514	0.6253	0.5825	0.6400	0.5953				0.3551	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin option	ulimit -t	2c81755b7c9d	128	0.428	0.431	0.766	0.5631	0.5799	0.5789	0.6197	0.6228	0.5774				0.4503	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin option	ulimit -v	eb46901e85ca	128	0.515	0.486	0.880	0.5522	0.6071	0.5958	0.5878	0.6292	0.6187				0.4831	fixed median ≤ 2/3
+previous misses	macOSarm64	Builtin option	wait -f	afa84e527aa3	128	36.658	37.938	48.420	0.7835	0.7710	0.8621	0.8047	0.7653	0.7537					tried, above target
+previous misses	macOSarm64	Builtin option	wait -n	2d8b87809a57	4	454.792	457.195	430.119	1.0630	1.2894	1.0436	1.0647	1.2523	0.8259	0.9732				matched OS control
+previous misses	macOSarm64	Builtin option	wait -p	7bd725556617	4	492.426	388.736	534.650	0.7271	0.8770	0.9378	1.0593	0.9004	0.7852	1.2350				tried, above target
+previous misses	macOSarm64	Completion option	nosort	1603f6717c4f	128	0.658	0.699	1.072	0.6520	0.5044	0.5859	0.6073	0.5931	0.7378				0.3661	fixed median ≤ 2/3
+previous misses	macOSarm64	Conditional	-G	af5edd672589	128	17.746	17.910	18.915	0.9469	0.9505	1.1191	0.8700	0.9551	0.9464	0.9608	0.9951	0.6219		matched OS control
+previous misses	macOSarm64	Conditional	-O	83d5b3a48d84	128	16.534	15.987	18.390	0.8693	0.9659	0.8932	1.0154	0.9272	0.9280	0.9173	1.0164	1.0989		matched OS control
+previous misses	macOSarm64	Conditional	-S	968372b0b12c	128	16.405	16.051	16.925	0.9484	0.9669	0.9932	1.1004	0.9459	0.9479	0.9208	0.8529	0.5302		matched OS control
+previous misses	macOSarm64	Conditional	-a	aea6b4ba850b	128	16.863	16.851	17.662	0.9540	0.9660	0.9856	1.2585	0.9549	0.9662	0.9635	0.7201	0.5719		matched OS control
+previous misses	macOSarm64	Conditional	-b	a036ebdf6152	128	16.976	17.310	20.957	0.8259	1.0776	0.9398	0.9929	0.8354	0.8444	1.0362	1.0292	0.4992		matched OS control
+previous misses	macOSarm64	Conditional	-c	e4c5cb7b4108	128	12.217	12.426	12.415	1.0010	0.9368	0.9976	0.9589	0.9175	0.9961	0.8385	0.6159	0.5312		tried, above target
+previous misses	macOSarm64	Conditional	-d	d150f0bbe6ea	128	11.197	11.604	12.709	0.9130	0.9616	0.9926	0.9676	0.8481	0.8175	0.8987	0.6764	0.5216		tried, above target
+previous misses	macOSarm64	Conditional	-e	9114dc6ade6a	128	15.978	15.568	16.625	0.9365	0.9664	1.3217	1.2482	0.9223	0.9597	0.9014	0.8491	0.4931		matched OS control
+previous misses	macOSarm64	Conditional	-f	dde920b9b788	128	13.694	11.358	11.922	0.9527	0.9688	0.9610	0.9435	1.0286	0.8794	0.8743	1.0962	0.5343		tried, above target
+previous misses	macOSarm64	Conditional	-g	d95e3aa8df09	16	53.753	55.128	69.321	0.7953	0.7657	0.8494	0.7719	0.7526	0.7169			0.5263		tried, above target
+previous misses	macOSarm64	Conditional	-nt	fb30c7f4f0ce	16	56.463	56.737	78.869	0.7194	0.7935	0.8076	0.7945	0.7591	0.7220			0.7078		tried, above target
+previous misses	macOSarm64	Conditional	-ot	94a5a188a913	16	68.445	70.460	87.724	0.8032	0.8134	0.7387	0.8134	0.7777	0.7675			0.2988		tried, above target
+previous misses	macOSarm64	Conditional	-r	f2f449437403	128	16.720	16.911	17.167	0.9851	0.9481	0.9218	0.9262	0.9610	0.9326	0.8776	0.9306	0.6440		matched OS control
+previous misses	macOSarm64	Conditional	-s	cfd797932ad3	128	10.841	10.968	11.224	0.9772	0.9818	0.9351	0.9328	0.9503	0.9557	0.8854	0.8734	0.6087		tried, above target
+previous misses	macOSarm64	Conditional	-u	7a27caf51da5	16	56.175	55.046	79.384	0.6934	0.7637	0.7649	0.7630	0.7349	0.7057			0.5140		tried, above target
+previous misses	macOSarm64	Conditional	-w	8d3c831b1c54	128	16.204	16.362	16.853	0.9708	0.9726	1.2431	1.0251	0.9381	0.9307	0.9233	1.0217	0.7016		matched OS control
+previous misses	macOSarm64	Conditional	-x	2e9e1ff54238	16	55.720	54.430	77.043	0.7065	0.7564	0.7755	0.7595	0.7274	0.7339			0.5017		tried, above target
+previous misses	macOSarm64	Conditional	>	01d5c9b582c8	128	1.664	1.081	4.121	0.2623	0.4863	0.4279	0.5341	0.3692	0.2310				0.5630	fixed median ≤ 2/3
+previous misses	macOSarm64	Parameter	$!	a47ff5362196	128	62.686	63.651	78.802	0.8077	0.6902	0.7796	0.6885	0.8312	0.8117					tried, above target
+previous misses	macOSarm64	Parameter	$$	f426ec0118f9	128	50.478	48.691	69.628	0.6993	0.7549	0.8088	0.7330	0.7277	0.7941					tried, above target
+previous misses	macOSarm64	Parameter	$1 … ${10}	0ca6d960315f	128	0.621	0.604	1.211	0.4990	0.4729	0.6227	0.6544	0.5030	0.4839				0.3238	fixed median ≤ 2/3
+previous misses	macOSarm64	Parameter	$?	321e69756694	128	0.533	0.551	1.080	0.5104	0.5122	0.5439	0.5004	0.5220	0.4845				0.4106	fixed median ≤ 2/3
+previous misses	macOSarm64	Parameter	${#v}	a6c78c219f27	16	19.645	19.699	24.932	0.7901	0.8284	0.6452	0.7330	0.7896	0.7771	0.7642	0.6613	0.6528		tried, above target
+previous misses	macOSarm64	Parameter	${v##a*}	e8708d9a1ee0	16	17.366	16.968	23.306	0.7281	0.8070	0.7077	0.8208	0.7572	0.7589	0.7223	0.7185	0.6525		tried, above target
+previous misses	macOSarm64	Parameter	${v#a*}	673e8aa8166a	16	19.940	20.961	26.652	0.7865	0.8433	0.7841	0.7766	0.7852	0.7730	0.7420	0.8605	0.6925		tried, above target
+previous misses	macOSarm64	Parameter	${v%%*a}	726a63f9154d	16	21.698	21.391	26.729	0.8003	0.8357	0.8208	0.8019	0.8028	0.7948	0.7399	0.8779	0.6454		tried, above target
+previous misses	macOSarm64	Parameter	${v%*a}	4f5d1deb772d	16	25.391	22.867	37.449	0.6106	0.7774	0.7803	0.7957	0.7562	0.7841	0.8514	0.6704	0.6645		fixed median ≤ 2/3
+previous misses	macOSarm64	Parameter	${v+a}	3f37304c058c	16	20.829	22.262	27.588	0.8070	0.7362	0.9975	0.7054	0.7628	0.7618	0.7443	0.6942	0.6533		tried, above target
+new misses	macOSarm64	Parameter	${v,,}	888bec4f5ef1	128	136.535	140.088	166.342	0.8422				0.8140	0.8261	0.6925				tried, above target
+previous misses	macOSarm64	Parameter	${v,}	af35bd1e969a	16	24.472	22.057	27.831	0.7925	0.8191	0.7543	0.8510	0.7802	0.7698	0.7141	0.8534	0.6620		tried, above target
+previous misses	macOSarm64	Parameter	${v-a}	8828b96faddc	16	23.642	20.777	27.760	0.7485	0.8474	0.8386	0.6756	0.7346	0.7273	0.7615	0.6706	0.5441		tried, above target
+previous misses	macOSarm64	Parameter	${v/#a/X}	e4ce65cbd0ee	16	19.083	20.409	23.982	0.8510	0.8086	0.7877	0.8256	0.7980	0.7665	0.6621	0.7757	0.6622		tried, above target
+previous misses	macOSarm64	Parameter	${v/%a/X}	ade1300fe9ed	16	20.445	20.833	25.590	0.8141	0.8644	0.7701	0.8599	0.7980	0.8089	0.7418	0.7877	0.6693		tried, above target
+previous misses	macOSarm64	Parameter	${v//a/X}	f3c16e886e58	16	20.813	21.028	25.247	0.8329	0.8320	0.9172	0.8164	0.8042	0.8055	0.7287	0.7126	0.6467		tried, above target
+previous misses	macOSarm64	Parameter	${v/a/X}	e62ea0802e35	16	15.635	15.985	18.370	0.8701	0.8187	0.8387	0.8756	0.8401	0.8688	0.6622	0.7141	0.6658		tried, above target
+previous misses	macOSarm64	Parameter	${v: -2:1}	7173f1b93cf8	16	17.858	17.828	22.875	0.7794	0.8141	0.8012	0.7674	0.8908	0.8000	0.9065	0.6516	0.6688		matched OS control
+previous misses	macOSarm64	Parameter	${v:+a}	cdee11d6e6ba	16	15.479	15.093	18.365	0.8218	0.8338	0.7660	0.7561	0.8140	0.8324	0.7443	0.7296	0.6896		tried, above target
+new misses	macOSarm64	Parameter	${v:-a}	b2ad803d8ce8	128	135.200	136.951	161.854	0.8461				0.8205	0.8333	0.6964				tried, above target
+previous misses	macOSarm64	Parameter	${v:1}	3c79982eaefc	16	25.911	22.847	28.148	0.8117	0.8362	0.8293	0.7705	0.7799	0.7931	0.7227	0.6817	0.6364		tried, above target
+previous misses	macOSarm64	Parameter	${v:=a}	96dd79aa9f3b	16	19.827	19.930	26.111	0.7633	0.8272	0.8627	0.7815	0.7809	0.7646	0.7725	0.7644	0.5661		tried, above target
+previous misses	macOSarm64	Parameter	${v:?a}	3f37dbb37ff3	16	33.412	33.288	39.911	0.8341	0.8827	0.7474	0.7486	0.6985	0.7195	0.7479	0.5715			tried, above target
+previous misses	macOSarm64	Parameter	${v=a}	359bb492444c	16	21.073	21.289	28.241	0.7538	0.7830	0.8403	0.8180	0.7329	0.7472	0.7540	0.8038	0.7608		tried, above target
+previous misses	macOSarm64	Parameter	${v?a}	d389fddedac1	16	15.168	16.207	18.635	0.8697	0.8140	0.7347	0.8028	0.8034	0.8511	0.6945	0.7583			tried, above target
+new misses	macOSarm64	Parameter	${v@E}	a3d44b4b02ad	128	138.465	136.434	184.283	0.7403				0.7558	0.7382	0.7182				tried, above target
+previous misses	macOSarm64	Parameter	${v@L}	4d7582518b43	16	20.624	20.094	26.426	0.7604	0.8632	0.8604	0.7677	0.7612	0.7686	0.7804	0.6438	0.6399		tried, above target
+previous misses	macOSarm64	Parameter	${v@P}	e8ff153a7abe	16	21.634	23.957	27.905	0.8585	0.8218	0.7876	0.8204	0.7787	0.7692	0.6089	0.8917	0.6353		tried, above target
+previous misses	macOSarm64	Parameter	${v@Q}	a8ae2df526e8	16	21.237	20.337	26.143	0.7779	0.8364	0.9224	0.8329	0.7675	0.7767	0.7892	0.4138	1.0606		tried, above target
+previous misses	macOSarm64	Parameter	${v@U}	c0e20e993c8a	16	20.187	19.630	25.389	0.7732	0.8704	0.5651	0.7726	0.8157	0.7922	0.7701	0.7742	0.7493		tried, above target
+previous misses	macOSarm64	Parameter	${v@u}	4c37fe0760f3	16	20.499	20.745	25.899	0.8010	0.8229	0.8214	0.8710	0.7874	0.7786	0.7414	0.6441	0.5827		tried, above target
+previous misses	macOSarm64	Parameter	${v^^}	b1a9e410c325	16	22.942	22.487	30.847	0.7290	0.8510	0.8079	0.8036	0.6991	0.7202	0.6853	0.6903	0.6709		tried, above target
+previous misses	macOSarm64	Parameter	${v^}	7372ef5e2b93	16	20.395	20.884	25.530	0.8180	0.8445	0.8234	0.8795	0.8140	0.8133	0.7431	0.7437	0.7059		tried, above target
+previous misses	macOSarm64	Parameter	${v}	854adad3e2e9	16	21.097	20.597	27.698	0.7436	0.8339	0.8768	0.6040	0.7463	0.7395	0.7706	0.7304	0.4151		tried, above target
+previous misses	macOSarm64	Printf format	c	2e2d30c24f15	128	0.520	0.498	0.969	0.5137	0.5419	0.5373	0.3453	0.5332	0.5261				0.3423	fixed median ≤ 2/3
+previous misses	macOSarm64	Printf format	g	1d754cd8e38e	128	0.428	0.471	0.809	0.5831	0.5124	0.6465	0.5984	0.5743	0.5726				0.3925	fixed median ≤ 2/3
+previous misses	macOSarm64	Printf format	q	bbad274a2726	128	0.601	0.827	1.597	0.5179	0.5452	0.4972	0.5305	0.3978	0.5697				0.3395	fixed median ≤ 2/3
+previous misses	macOSarm64	Printf format	u	fdfcf7194e48	128	0.584	0.636	1.028	0.6184	0.5140	0.7218	0.3684	0.6909	0.6607				0.3044	fixed median ≤ 2/3
+previous misses	macOSarm64	Redirection	&>	1036f196c42a	16	81.066	92.178	96.991	0.9504	0.9044	0.8925	0.8406	0.9684	0.8467					tried, above target
+previous misses	macOSarm64	Redirection	&>>	d492279205a2	4	48.774	49.514	55.050	0.8994	0.9311	0.8783	0.9731	0.8863	0.9588					tried, above target
+previous misses	macOSarm64	Redirection	/dev/fd/N	15c6dbc29d08	16	32.762	27.896	45.553	0.6124	0.6950	0.7614	0.6281	0.5819	0.6165					fixed median ≤ 2/3
+previous misses	macOSarm64	Redirection	<	fe37f6479d3b	16	42.163	39.525	42.628	0.9272	0.9262	0.8987	0.9807	0.9892	1.0202					tried, above target
+previous misses	macOSarm64	Redirection	<<-	3d9d41076adb	16	35.799	26.315	38.469	0.6841	0.9342	0.9311	1.0180	0.6678	0.6795					tried, above target
+previous misses	macOSarm64	Redirection	<<<	6356fa08ad2b	16	32.581	24.504	35.292	0.6943	0.9410	0.9221	0.9003	0.6917	0.7017					tried, above target
+previous misses	macOSarm64	Redirection	<>	1c9961fb96ee	16	37.943	34.649	43.816	0.7908	0.7854	0.7395	0.6874	0.8243	0.7906					tried, above target
+previous misses	macOSarm64	Redirection	>	64480a7d0419	16	31.821	31.683	41.527	0.7630	0.7671	0.7710	0.6767	0.7805	0.7960					tried, above target
+new misses	macOSarm64	Redirection	>>	41bc295f8158	16	27.528	27.107	34.507	0.7855				0.7424	0.8074					tried, above target
+previous misses	macOSarm64	Redirection	here-document	fbb8d10b2e02	16	28.709	23.608	30.994	0.7617	0.9604	0.9161	0.9520	0.7782	0.7473					tried, above target
+new misses	macOSarm64	Redirection	n<&-	f5538b9b1de1	128	2.851	3.503	3.970	0.8825				0.7361	0.7464				0.7974	tried, above target
+previous misses	macOSarm64	Redirection	n<&m	b2ed1210f948	16	39.165	37.722	40.994	0.9202	0.9495	0.8200	0.9189	0.9903	0.9789					tried, above target
+previous misses	macOSarm64	Redirection	n<&m-	095ea2529837	16	39.585	31.305	32.180	0.9728	0.9502	0.9337	0.9337	1.1440	1.1421					tried, above target
+previous misses	macOSarm64	Redirection	n>&-	813721653d7c	128	2.373	2.431	3.014	0.8067	0.8720	0.8194	0.8340	0.7844	0.8002				0.8006	tried, above target
+previous misses	macOSarm64	Redirection	n>&m	7540752f59db	16	28.031	34.004	38.592	0.8811	0.7486	0.7357	0.6737	0.7729	0.7959					tried, above target
+previous misses	macOSarm64	Redirection	n>&m-	2b0867cd62f3	16	23.572	24.195	31.324	0.7724	0.7769	0.7126	0.6911	0.7690	0.7811					tried, above target
+previous misses	macOSarm64	Redirection	quoted here-document	d1688c22c970	16	27.189	20.757	27.448	0.7562	0.9002	0.9046	0.9547	0.8146	0.7865					tried, above target
+previous misses	macOSarm64	Redirection	{varname} descriptor	267c6fc61a8c	16	34.533	34.466	51.621	0.6677	0.7523	1.0571	0.7906	0.7427	0.5667					tried, above target
+previous misses	macOSarm64	Reserved word	[[	b8c9d86b6a1c	128	0.664	0.552	1.055	0.5230	0.5087	0.5993	0.4588	0.6175	0.6223				0.3856	fixed median ≤ 2/3
+previous misses	macOSarm64	Reserved word	]]	b8c9d86b6a1c	128	0.664	0.552	1.055	0.5230	0.5087	0.5993	0.4588	0.6175	0.6223				0.3856	fixed median ≤ 2/3
+previous misses	macOSarm64	Reserved word	case	421693688b8f	128	0.577	0.563	1.013	0.5558	0.5860	0.5784	0.7969	0.6373	0.6124				0.4600	fixed median ≤ 2/3
+previous misses	macOSarm64	Reserved word	coproc	411ed4712937	16	40.054	39.685	43.600	0.9102	0.8770	0.9299	1.1174	0.9290	0.9025					tried, above target
+previous misses	macOSarm64	Reserved word	elif	6d5ea4cc21bb	128	0.541	0.597	1.032	0.5782	0.6113	0.6821	0.6598	0.5691	0.5450				0.4510	fixed median ≤ 2/3
+previous misses	macOSarm64	Reserved word	else	6d5ea4cc21bb	128	0.541	0.597	1.032	0.5782	0.6113	0.6821	0.6598	0.5691	0.5450				0.4510	fixed median ≤ 2/3
+previous misses	macOSarm64	Reserved word	esac	421693688b8f	128	0.577	0.563	1.013	0.5558	0.5860	0.5784	0.7969	0.6373	0.6124				0.4600	fixed median ≤ 2/3
+previous misses	macOSarm64	Reserved word	fi	6d5ea4cc21bb	128	0.541	0.597	1.032	0.5782	0.6113	0.6821	0.6598	0.5691	0.5450				0.4510	fixed median ≤ 2/3
+previous misses	macOSarm64	Reserved word	if	6d5ea4cc21bb	128	0.541	0.597	1.032	0.5782	0.6113	0.6821	0.6598	0.5691	0.5450				0.4510	fixed median ≤ 2/3
+new misses	macOSarm64	Reserved word	select	fa2d81be7a6f	128	2.831	2.803	4.101	0.6835				0.7707	0.6906				0.6490	1,024 iterations ≤ 2/3
+previous misses	macOSarm64	Reserved word	then	6d5ea4cc21bb	128	0.541	0.597	1.032	0.5782	0.6113	0.6821	0.6598	0.5691	0.5450				0.4510	fixed median ≤ 2/3
+previous misses	macOSarm64	Reserved word	time	95303f71ee3a	16	25.671	25.073	34.722	0.7221	0.7560	0.6340	0.7095	0.7409	0.7169					tried, above target
+previous misses	macOSarm64	Reserved word	until	df67f0fcd11d	128	0.761	0.721	1.367	0.5277	0.5326	0.6380	0.5677	0.5431	0.5889				0.5078	fixed median ≤ 2/3
+previous misses	macOSarm64	Shell language	arithmetic short circuit	5ae9f637d33b	128	0.714	0.675	1.338	0.5049	0.4708	0.4960	0.5864	0.5168	0.7029				0.4470	fixed median ≤ 2/3
+new misses	macOSarm64	Shell language	background and wait	97c1b0e26ecd	128	39.849	39.462	55.623	0.7094				0.6964	0.7079					tried, above target
+previous misses	macOSarm64	Shell language	brace alternation	ed429c45e0ed	128	0.666	0.647	1.085	0.5958	0.5349	0.6926	0.5696	0.6100	0.6759				0.5737	fixed median ≤ 2/3
+previous misses	macOSarm64	Shell language	case ;& fallthrough	43a24f5ea779	128	0.760	0.688	1.206	0.5700	0.6462	0.6678	0.5921	0.5673	0.5579				0.5323	fixed median ≤ 2/3
+previous misses	macOSarm64	Shell language	case in esac	421693688b8f	128	0.577	0.563	1.013	0.5558	0.5860	0.5784	0.7969	0.6373	0.6124				0.4600	fixed median ≤ 2/3
+previous misses	macOSarm64	Shell language	conditional command	b8c9d86b6a1c	128	0.664	0.552	1.055	0.5230	0.5087	0.5993	0.4588	0.6175	0.6223				0.3856	fixed median ≤ 2/3
+previous misses	macOSarm64	Shell language	coproc	411ed4712937	16	40.054	39.685	43.600	0.9102	0.8770	0.9299	1.1174	0.9290	0.9025					tried, above target
+previous misses	macOSarm64	Shell language	coprocess input/output descriptors	411ed4712937	16	40.054	39.685	43.600	0.9102	0.8770	0.9299	1.1174	0.9290	0.9025					tried, above target
+previous misses	macOSarm64	Shell language	directory stack rotation	cd77daf77162	16	43.905	46.455	53.788	0.8637	0.7200	0.7417	0.7332	0.7624	0.7842					tried, above target
+previous misses	macOSarm64	Shell language	double quotes	8288dbc7591e	128	0.592	0.544	1.126	0.4833	0.4568	0.4398	0.5008	0.5132	0.5570				0.3426	fixed median ≤ 2/3
+previous misses	macOSarm64	Shell language	exit status 127	9413b6269c37	16	8.195	8.103	8.787	0.9222	0.9400	0.8706	0.8388	0.8938	0.9328					tried, above target
+previous misses	macOSarm64	Shell language	group redirections	9d64362ba9b1	16	39.786	34.269	46.115	0.7431	0.7665	0.7559	0.6403	0.8724	0.7182					tried, above target
+previous misses	macOSarm64	Shell language	grouped pipeline status	eb0e89e75b3f	16	31.716	35.627	41.005	0.8688	0.8214	0.7473	0.8035	0.8343	0.8250					tried, above target
+previous misses	macOSarm64	Shell language	history modifiers	2e7722405a95	128	0.610	0.611	1.195	0.5115	0.4773	0.4971	0.2394	0.4787	0.5358				0.3815	fixed median ≤ 2/3
+previous misses	macOSarm64	Shell language	history word designator	f804677a5047	128	0.563	0.582	1.109	0.5249	0.4355	0.5213	0.4830	0.5005	0.4933				0.3520	fixed median ≤ 2/3
+previous misses	macOSarm64	Shell language	if then elif else fi	6d5ea4cc21bb	128	0.541	0.597	1.032	0.5782	0.6113	0.6821	0.6598	0.5691	0.5450				0.4510	fixed median ≤ 2/3
+previous misses	macOSarm64	Shell language	merged stderr pipeline	f4038837eccb	16	78.261	59.837	71.680	0.8348	0.8694	0.8586	0.8127	0.7804	0.8062					tried, above target
+previous misses	macOSarm64	Shell language	nameref	0a450d051e9f	128	0.650	0.719	1.109	0.6480	0.5383	0.5198	0.6574	0.5750	0.6389				0.4296	fixed median ≤ 2/3
+new misses	macOSarm64	Shell language	pipeline	a843844badf3	16	24.920	24.937	35.505	0.7023				0.7030	0.7101					tried, above target
+previous misses	macOSarm64	Shell language	pipeline stage statuses	498a7e850a12	16	11.336	13.773	18.020	0.7643	0.7920	0.6981	0.5415	0.7266	0.6869					tried, above target
+new misses	macOSarm64	Shell language	priorities of lookup	ade2eb1b67c5	128	1.614	1.529	2.273	0.6726				0.6740	0.6994				0.6907	tried, above target
+previous misses	macOSarm64	Shell language	process substitution input	25706da2d50d	16	31.238	32.165	41.561	0.7739	0.8160	0.7188	0.7349	0.7523	0.6912					tried, above target
+previous misses	macOSarm64	Shell language	process substitution output	664c5a83e2af	16	66.561	66.313	84.114	0.7884	0.8587	0.8033	0.8447	0.7788	0.8292					tried, above target
+previous misses	macOSarm64	Shell language	quoted and unquoted here-documents	d1688c22c970	16	27.189	20.757	27.448	0.7562	0.9002	0.9046	0.9547	0.8146	0.7865					tried, above target
+previous misses	macOSarm64	Shell language	script fallback without shebang	486d0a5c94f0	16	78.936	69.984	54.640	1.2808	1.5194	1.6673	1.3377	1.2688	1.2832					tried, above target
+new misses	macOSarm64	Shell language	select	fa2d81be7a6f	128	2.831	2.803	4.101	0.6835				0.7707	0.6906				0.6490	1,024 iterations ≤ 2/3
+previous misses	macOSarm64	Shell language	shell environment isolation	0e0485303f08	128	82.889	55.849	79.629	0.7014	0.5837	0.7371	0.9113	0.7780	0.6645					tried, above target
+previous misses	macOSarm64	Shell language	shell script source	fb5e0f832d89	128	16.019	16.286	17.215	0.9460	0.9305	0.8819	0.7661	0.8300	0.9290					tried, above target
+previous misses	macOSarm64	Shell language	simple commands and assignments	d0cb82a50426	16	37.721	35.304	44.658	0.7906	0.7858	0.6756	0.8462	0.8476	0.8075		1.3801			tried, above target
+previous misses	macOSarm64	Shell language	subshell exit isolation	d63db8f1e039	16	5.366	5.450	7.306	0.7461	0.7975	0.8471	0.7602	0.7955	0.7260					tried, above target
+previous misses	macOSarm64	Shell language	subshell scope	2a8b9516d795	128	49.887	48.390	61.610	0.7854	0.7445	0.7647	0.7210	0.7593	0.8107					tried, above target
+new misses	macOSarm64	Shell language	tilde current and previous directories	fb466e31d00a	16	22.237	21.686	30.897	0.7019				0.7044	0.7126					tried, above target
+previous misses	macOSarm64	Shell language	time -p	39c17ca07c03	16	31.593	33.221	42.775	0.7766	0.7448	0.7965	0.8200	0.7510	0.7874					tried, above target
+previous misses	macOSarm64	Shell language	time keyword	95303f71ee3a	16	25.671	25.073	34.722	0.7221	0.7560	0.6340	0.7095	0.7409	0.7169					tried, above target
+previous misses	macOSarm64	Shell language	until	df67f0fcd11d	128	0.761	0.721	1.367	0.5277	0.5326	0.6380	0.5677	0.5431	0.5889				0.5078	fixed median ≤ 2/3
+previous misses	macOSarm64	Shell language	wait -n	2d8b87809a57	4	454.792	457.195	430.119	1.0630	1.2894	1.0436	1.0647	1.2523	0.8259	0.9732				matched OS control
+previous misses	macOSarm64	Shell language	wait -p	7bd725556617	4	492.426	388.736	534.650	0.7271	0.8770	0.9378	1.0593	0.9004	0.7852	1.2350				tried, above target
+previous misses	macOSarm64	Variable	BASH	b231f00edd90	16	37.661	38.990	34.689	1.1240	1.0840	0.9748	1.0689	1.1511	1.0804					tried, above target
+previous misses	macOSarm64	Variable	BASHPID	cae2dfeedc67	128	41.561	39.220	53.967	0.7267	0.8038	0.7214	0.7461	0.7594	0.7157					tried, above target
+previous misses	macOSarm64	Variable	BASH_SOURCE	64fa283819f4	128	16.965	16.654	18.846	0.8837	0.9013	0.7785	0.9905	0.8957	0.9031					tried, above target
+new misses	macOSarm64	Variable	BASH_SUBSHELL	03548d1b00be	128	41.586	40.409	50.401	0.8018				0.8407	0.8127					tried, above target
+previous misses	macOSarm64	Variable	BASH_XTRACEFD	f87578106552	16	25.448	24.613	44.623	0.5516	0.7488	0.6965	0.7691	0.5427	0.6127					fixed median ≤ 2/3
+new misses	macOSarm64	Variable	CDPATH	2d5149ff43f5	16	43.625	43.080	63.467	0.6788				0.6783	0.6952					tried, above target
+previous misses	macOSarm64	Variable	CHILD_MAX	4e11eae31e2f	4	648.593	584.089	613.699	0.9518	0.8431	0.9528	1.0069	0.9276	0.8694					tried, above target
+previous misses	macOSarm64	Variable	COPROC	411ed4712937	16	40.054	39.685	43.600	0.9102	0.8770	0.9299	1.1174	0.9290	0.9025					tried, above target
+previous misses	macOSarm64	Variable	EUID	135dcc885cee	16	29.920	30.748	51.474	0.5974	0.6602	0.7940	0.6840	0.6195	0.6346					fixed median ≤ 2/3
+previous misses	macOSarm64	Variable	FCEDIT	b0e7038cae0f	16	92.192	96.614	121.140	0.7975	0.7991	0.8045	0.7954	0.8080	0.7754					tried, above target
+new misses	macOSarm64	Variable	GLOBIGNORE	ad3f565034f1	16	24.698	24.773	36.638	0.6762				0.6292	0.6582	0.9391				tried, above target
+previous misses	macOSarm64	Variable	HISTSIZE	14264e502388	16	38.397	36.080	44.355	0.8134	0.8914	0.8487	0.7720	0.8265	0.8003					tried, above target
+previous misses	macOSarm64	Variable	HISTTIMEFORMAT	7310c20ca02c	16	36.472	36.598	46.670	0.7842	0.8356	0.8571	0.7998	0.7829	0.7722					tried, above target
+previous misses	macOSarm64	Variable	HOME	9e7227102901	16	51.431	50.700	72.370	0.7006	0.6869	0.7424	0.7314	0.7186	0.6899					tried, above target
+previous misses	macOSarm64	Variable	OLDPWD	396a666c96ea	16	26.133	25.625	36.837	0.6956	0.7342	0.7307	0.6721	0.6920	0.7097					tried, above target
+previous misses	macOSarm64	Variable	PIPESTATUS	498a7e850a12	16	11.336	13.773	18.020	0.7643	0.7920	0.6981	0.5415	0.7266	0.6869					tried, above target
+previous misses	macOSarm64	Variable	PPID	732006bc3865	128	0.538	0.543	1.161	0.4681	0.4967	0.5292	0.4997	0.4507	0.4451				0.3077	fixed median ≤ 2/3
+previous misses	macOSarm64	Variable	PS3	d3803d679772	128	1.417	1.275	2.260	0.5644	0.5989	0.6419	0.6195	0.5659	0.5738				0.5322	fixed median ≤ 2/3
+previous misses	macOSarm64	Variable	PWD	ca8a3e6431d7	16	24.646	24.805	35.332	0.7020	0.7280	0.7856	0.7002	0.6887	0.7134					tried, above target
+previous misses	macOSarm64	Variable	REPLY	281739a3ac4f	128	1.836	1.427	3.889	0.3670	0.6286	0.6582	0.4864	0.4895	0.3574				0.4277	fixed median ≤ 2/3
+previous misses	macOSarm64	Variable	TIMEFORMAT	95303f71ee3a	16	25.671	25.073	34.722	0.7221	0.7560	0.6340	0.7095	0.7409	0.7169					tried, above target
+previous misses	macOSarm64	Variable	UID	74b97b495f5c	16	28.119	27.921	39.084	0.7144	0.7494	0.7180	0.9031	0.7019	0.7185					tried, above target
+previous misses	macOSarm64	set -o	allexport	b723d5214598	16	52.265	54.941	65.588	0.8377	0.8792	0.8479	0.7983	0.8292	0.8393		1.4621			tried, above target
+previous misses	macOSarm64	set -o	noglob	09fe856ae8ae	16	38.055	35.347	53.061	0.6662	1.1458	0.7852	0.8023	0.5699	0.5998		1.0023	0.4197		fixed median ≤ 2/3
+previous misses	macOSarm64	set -o	pipefail	c9db9727f778	128	65.048	70.672	82.415	0.8575	0.7818	0.7128	0.7716	0.7896	0.7843					tried, above target
+new misses	macOSarm64	shopt	dotglob	d99467378e9a	16	25.480	26.428	38.849	0.6803				0.6681	0.6483	0.9732				tried, above target
+previous misses	macOSarm64	shopt	failglob	f6861299edd1	128	53.215	54.502	68.686	0.7935	0.7592	0.9289	0.8039	0.8122	0.7785					tried, above target
+new misses	macOSarm64	shopt	globskipdots	9a748c30d3c5	16	20.993	21.716	30.118	0.7210				0.6855	0.6963					tried, above target
+previous misses	macOSarm64	shopt	globstar	c0034550b8f9	16	52.725	53.020	77.818	0.6813	0.7485	0.7926	0.7848	0.6829	0.6771					tried, above target
+previous misses	macOSarm64	shopt	nocaseglob	e975ccd42235	16	26.010	25.963	39.994	0.6492	0.7077	0.6395	0.7125	0.6258	0.6795		1.2928	0.1969		fixed median ≤ 2/3
+previous misses	macOSarm64	shopt	nullglob	0eea32452067	128	3.531	4.267	4.987	0.8557	0.7107	1.0312	0.9759	0.7974	0.7594					tried, above target
+previous misses	macOSarm64	shopt	progcomp	a8e7b20842af	128	0.664	0.651	1.519	0.4287	0.4361	0.4835	0.4226	0.4232	0.4468				0.3430	fixed median ≤ 2/3

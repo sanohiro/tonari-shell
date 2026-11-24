@@ -1,5 +1,9 @@
 # Startup and execution / 起動と実行性能
 
+## 2026-11-24 · Matched trials for the previous misses / 速度未達の実装比較
+
+The four native implementation trials cover all 852 previous misses. The fixed batches met the two-thirds target in **214** observations, with **38** more in a 1,024-iteration batch. **472** tried observations remain above target after applying the measured allowances. 前回未達の全行について、変更前後・コンパイラ別・Bash 比と入力から表示までの実測を公開しました。 [Final results / 最終結果](native-2026-11-24/replay.md) · [Per-feature timings](native-2026-11-24/replay.tsv)
+
 <a id="shell-workloads"></a>
 
 ## 2026-11-24 · Native shell workloads / シェルの実行時間

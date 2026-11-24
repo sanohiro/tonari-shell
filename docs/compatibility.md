@@ -1,5 +1,9 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## 2026-11-24 · Release verification / 改善後の互換性検証
+
+The final comparison covers 7,558 feature observations across five native environments. 0 compatibility verdicts changed. The repeated-command ledger also tracks 65 newly over-budget observations alongside the 852 from the previous audit. 対象の Bash と各反復の標準出力・標準エラー・終了ステータスを照合しました。 [Final results / 最終結果](native-2026-11-24/replay.md) · [Per-feature timings](native-2026-11-24/replay.tsv)
+
 <a id="repeated-workloads"></a>
 
 ## 2026-11-24 · Repeated workload audit / 反復実行を含む互換性検証
