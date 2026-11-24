@@ -1,5 +1,33 @@
 # Startup and execution / 起動と実行性能
 
+<a id="function-redefinitions"></a>
+
+## 2026-11-24 · Function definitions and calls / 関数の再定義と呼び出し
+
+Each cell gives **previous Tonari → current Tonari / Bash**, in milliseconds. The driver starts the shell, waits for its ready marker, then times sourcing the script through process exit. It checks every byte of output and the exit status. Each shell ran five warmups and 61 measured samples per workload, rotating the execution order on the same native CI runner. Linux used Bash 5.2.21 and macOS used Bash 5.3.20. The two Tonari revisions are `fc45276` and `5958ee7`. [Workload definitions](../tools/bench_scripts.py) · [Native jobs and host details](https://github.com/sanohiro/tonari-shell/actions/runs/45306401686)
+
+| Workload, median ms | Linux x86-64, Xeon 6975P-C | Linux arm64, Neoverse-N2 | macOS arm64, Apple M1 |
+| --- | ---: | ---: | ---: |
+| Replace one name with 2,000 different literal bodies, then call the last | 2.654 → **0.730** / 2.104 | 3.314 → **0.975** / 2.917 | 2.189 → **0.805** / 3.108 |
+| Replace a quoted `"$@"` wrapper 2,000 times | 2.994 → 1.753 / 2.937 | 3.971 → 2.154 / 4.005 | 2.520 → 1.354 / 4.250 |
+| Define 2,000 distinct names | 3.268 → 1.405 / 3.409 | 4.226 → 1.416 / 4.724 | 2.863 → 1.259 / 3.870 |
+| Replace 2,000 multiline bodies containing `local` and `if` | 6.711 → 4.941 / 5.874 | 8.797 → 6.382 / 7.881 | 7.331 → 5.221 / 9.532 |
+| Execute one parsed compound definition 2,000 times in a loop | 3.231 → 0.816 / 3.045 | 3.906 → 1.162 / 4.072 | 2.374 → 1.053 / 3.891 |
+| Call every new literal body and verify all 2,000 results | 7.099 → 4.510 / 7.762 | 9.420 → 6.623 / 11.452 | 7.576 → 4.156 / 17.119 |
+| Call one literal function 2,000 times | 3.698 → 3.675 / 6.347 | 4.396 → 4.426 / 9.797 | 4.105 → 4.331 / 13.880 |
+
+For the original redefinition case, Tonari's p95 was 0.760, 1.007 and 1.817 ms in column order. Replacing distinct multiline compound bodies still took 84% and 81% of Bash time on Linux. On the hosted M1 the warmed literal-call median increased by 0.226 ms over 2,000 calls and its p95 changed from 7.996 to 8.011 ms. The stripped CI executables grew by 13,088, 9,192 and 16,544 bytes respectively. The TSV includes whole-script timings, the general function-call control, startup (101 samples), sizes and all p95 values. [All 60 measurements](native-2026-11-24/functions.tsv)
+
+On a separate local Apple M1 with Bash 5.2.37, exec to the first interactive prompt with Git's 94,826-byte completion script took 5.400 → 5.220 / 9.465 ms. With a 760-line function in `.bashrc` it took 3.003 → 2.807 / 6.334 ms. Both fixtures use 61 interleaved samples per shell. [PTY benchmark](../tools/bench_login.py) · [Reproducible rc files](../tools/ci/native-bench.sh)
+
+On the same M1, supplying the 2,000 literal definitions through `-c` took 5.154 → 3.682 / 8.179 ms including launch and exit. Writing the script to a pipe on standard input took 15.694 → 14.165 / 18.700 ms. For the multiline compound fixture those two entry points took 13.757 → 10.944 / 12.606 ms and 53.613 → 50.483 / 52.546 ms. Each test rotated three shells, discarded three warmups, measured 41 samples and verified the final output. 同じ台本でも入力元で差が出ます。単純な2,000回再定義の起動込み中央値は `-c` で 3.682 ms、標準入力のパイプ経由で 14.165 ms でした。
+
+On that M1, sourcing a 20,888,892-byte file which replaced the same function a million times took 0.815 → 0.203 / 1.065 seconds. Median peak resident size was 3,080,192 → 2,834,432 / 27,164,672 bytes (`/usr/bin/time -l`, one warmup and seven interleaved samples per shell). The file used the literal fixture above with its count increased to one million and printed `999999` on every run. 同じ名前を100万回再定義する試験では、Tonari の中央値が 0.815 秒から 0.203 秒に短縮し、ピーク常駐メモリの中央値も約 3.08 MB から 2.83 MB に減少しました。
+
+表はシェル起動後の中央値で、各欄は「旧 Tonari → 新 Tonari / Bash」(ms) です。単純な関数の再定義は Bash の26～35%の時間になり、定義の直後に毎回呼んで出力を検証するケースでも3環境とも短縮しました。`local` と `if` を含む異なる複数行の本体を毎回読み直す場合は、Linux では Bash より速いものの目標の 2/3 に届いていません。手元の M1 では Git 補完を読み込む対話起動も 5.400 ms から 5.220 ms に短縮しました。
+
+The full inventory preserved all 7,558 earlier feature verdicts. Against the published snapshot, 146 whole-process medians crossed above the 2/3 target and 91 crossed back within it. In the already-started measurements those counts were 79 and 83. The Debian x86-64 feature snapshot ran on an Intel Xeon 6975P-C and its rerun on an AMD EPYC 9V45. Each function comparison in the table above used one host for all three binaries. The archive contains the platform matrices, every crossing with both shells' times, host details and the raw function reports. 全機能一覧も5環境で再計測しました。以前の計測から目標の境界をまたいだ項目は、両方向とも機能名・実測値つきで収録しています。 [Full audit and native reports](native-2026-11-24/function-audit.tar.gz)
+
 <a id="native-x86-completion"></a>
 <a id="native-ci"></a>
 

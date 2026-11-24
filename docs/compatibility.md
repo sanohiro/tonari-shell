@@ -1,5 +1,11 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+The function parser at `5958ee7` preserved all 7,558 published feature verdicts across Debian 13 and Ubuntu 26.04 on x86-64 and arm64, plus macOS arm64. The five inventories also ran the 146-test integration suite. macOS skipped its two Linux-specific checks. 関数再定義の高速化後に5環境で照合し、既存の互換判定7,558件がすべて一致しました。 [Per-platform results and timing changes](native-2026-11-24/function-audit.tar.gz) · [Native CI](https://github.com/sanohiro/tonari-shell/actions/runs/45306401686)
+
+The function test suite covers redefining or unsetting a function while it is running, read-time alias expansion, invocation-time redirection, source line numbers and invalid function delimiters. The Ubuntu 24.04 GitHub runner's customized interactive login emitted two compound-command diagnostics with both the previous release and the parser candidate. Both produced the same login variables and `ll` alias, and both accepted the host's `/etc/profile` and `/etc/profile.d/*.sh` with `-n`. [Bash witnesses](../tests/shell.py) · [Comparison on the hosted runner](https://github.com/sanohiro/tonari-shell/actions/runs/45305645749)
+
+関数の実行中に同名の定義を置き換える場合や、エイリアスを定義後に変更した場合も Bash と照合します。GitHub の Ubuntu 24.04 ホスト固有の対話ログインでは、旧版と候補版の両方で複合コマンドの診断が2件出ました。両者の標準出力・標準エラーとプロファイルの構文チェック結果は一致しています。
+
 The native CI matrix for the shell at `dfd9b77` covers 7,558 platform/feature rows across macOS arm64, Debian 13 x86-64 and arm64, and Ubuntu 26.04 x86-64 and arm64. The correctness status of every row is unchanged from the first native run at `e48a0e5`. The final measurements record the Bash and Tonari median and p95 for each matching probe. GNU Bash on Linux x86-64 prints the hexadecimal float 1.5 as `0xcp-3`. Tonari and arm64 Bash print `0x1.8p+0`. The two strings represent the same value. Both x86-64 format-letter differences remain visible in the inventory. [Native matrix](native-2026-11-24/matrix.md) · [Changed observations](native-2026-11-24/previous.tsv)
 
 5環境の合計7,558行を再確認しました。既存の arm64 版の機能一覧と照合すると、ネイティブ x86-64 の Debian・Ubuntu では `printf %a` と `%A` の表記に差があります。全フィーチャーの互換判定と実測値を環境別に確認できます。[ネイティブ CI の機能別結果](native-2026-11-24/matrix.md)

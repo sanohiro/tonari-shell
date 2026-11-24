@@ -91,6 +91,8 @@ The cells show milliseconds as Tonari median/p95 · Bash median/p95 on the same 
 
 The CI distribution executables were 1,777,688 bytes for Linux x86-64, 1,538,776 for Linux arm64, and 1,251,072 for macOS arm64. The Linux targets build stripped static PIEs with musl. The macOS arm64 executable links libSystem. [Build checks](../../tools/build-release.sh) · [Size and SHA-256 per run](native-results.tar.gz)
 
+The repeated-definition row above measures the version before the function parser changes. A subsequent native run interleaved both Tonari releases and Bash on each machine. 上表の関数再定義は改善前の数値です。変更前後と Bash を同じマシンで比較した結果を別表に掲載しています。 [Function redefinitions / 関数再定義](../benchmarks.md#function-redefinitions)
+
 ## Feature coverage / 機能別の到達点
 
 Shell revision `dfd9b77` produced the same 7,558 correctness outcomes as the first native run at `e48a0e5`. The table counts public feature names. Several names share a witness. Only matching cases enter the timing counts. Some operations also have an already-started measurement to isolate their cost inside a script. [Every named feature, witness and p95](matrix.md) · [Reference Bash builds](environment.json)

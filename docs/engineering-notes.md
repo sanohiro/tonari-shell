@@ -1,5 +1,15 @@
 # Engineering notes / 開発知見
 
+## 2026-11-24 · Reading and replacing function definitions / 関数再定義のコスト
+
+On an Apple M1, sampling the previous release while it sourced a million one-command definitions put 1,066 of 1,293 samples under the file reader in the parser. The lexer grew strings for ordinary words, allocated token buffers per read and built a full command tree for every definition, including bodies replaced before their first call. A loop that repeatedly executed an already parsed definition also cloned its body. These are two different costs. The benchmark covers both, as well as a script that calls every new definition and checks all 2,000 outputs. [Benchmark and native measurements](benchmarks.md#function-redefinitions)
+
+Tonari now shares an immutable function definition and its source location between the syntax tree, the function table and an active call. A running function can replace or unset itself and still finish with its original body and source name. For a single command containing only plain literal words, the parser validates the whole definition and retains the command's source range. The first call constructs the ordinary executable words once. Quoted wrapper arguments use the shell's existing quote parser. Aliases, redirects, compound commands and ambiguous syntax go through the full grammar at definition time. The lexer reuses small token buffers, copies runs of ordinary word bytes together and keeps a static spelling for reserved words until an argument actually needs an owned string. [Parser](../src/parser/wrapper.rs) · [Shell tests](../tests/shell.py)
+
+手元の M1 で単純な関数定義を100万件読み込ませると、旧版ではファイル読み取り中の1,293サンプルのうち1,066件が構文解析でした。未使用のまま置き換えられる関数にも実行用の単語列を作っていました。ループ内では、解析済みの関数本体まで毎回コピーしていました。前者はリテラルだけの単純な本体を初回呼び出し時に一度だけ組み立て、後者は定義とソース位置を共有して削減しました。実行中に自身を再定義・削除するケース、定義時のエイリアス、呼び出し時の変数展開とリダイレクトを Bash と照合しています。
+
+Interning reserved spellings reduced the median for 2,000 multiline definitions on both native Linux CPUs in the trial. Storing a pipeline's first stage inline with `smallvec` yielded a smaller Linux gain and added 16,544 bytes to the M1 trial executable. The release uses the common keyword optimization and retains the existing pipeline representation. 予約語の表現を共有する変更を採用しました。パイプラインの先頭要素をインライン化する試作は Linux での改善が小さく、M1 の実行ファイルが16,544バイト増えたため見送りました。 [Keyword trial](https://github.com/sanohiro/tonari-shell/actions/runs/45304913519) · [Pipeline trial](https://github.com/sanohiro/tonari-shell/actions/runs/45304924360)
+
 ## 2026-11-24 · Choosing platform specializations / OS・CPU ごとの実装を選ぶ基準
 
 Use one algorithm and release optimization profile across supported CPUs when the same workload benefits. Test a proposed exception against its common implementation on native hardware, recording the native ISA, CPU model, available cores, binary size, fixture, median and tail latency. A translated binary can validate behavior. The earlier translated x86 directory benchmark ranked the implementations in the opposite order to native AMD. The Linux tests include CPU affinity restricted to one core. [Native experiments](benchmarks.md#native-ci)
