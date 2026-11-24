@@ -1,5 +1,4 @@
 group	feature	change
-Builtin	cd	whole crossed 2/3
 Builtin	exec	whole crossed 2/3
 Builtin	hash	whole crossed 2/3
 Builtin	pushd	whole crossed 2/3
@@ -28,24 +27,19 @@ Completion action	export	whole crossed 2/3
 Conditional	!=	started crossed 2/3
 Conditional	-g	whole crossed 2/3
 Conditional	-k	whole crossed 2/3
-Parameter	${v##a*}	whole crossed 2/3
+Conditional	-x	whole crossed 2/3
+Parameter	${v#a*}	whole crossed 2/3
 Parameter	${v%*a}	whole crossed 2/3
 Parameter	${v,,}	whole crossed 2/3
 Parameter	${v,}	whole crossed 2/3
 Parameter	${v/%a/X}	whole crossed 2/3
-Parameter	${v//a/X}	whole crossed 2/3
 Parameter	${v/a/X}	whole crossed 2/3
+Parameter	${v: -2:1}	whole crossed 2/3
 Parameter	${v:+a}	whole crossed 2/3
 Parameter	${v:-a}	whole crossed 2/3
-Parameter	${v:1}	whole crossed 2/3
 Parameter	${v:1}	started crossed 2/3
-Parameter	${v:=a}	whole crossed 2/3
-Parameter	${v@E}	whole crossed 2/3
 Parameter	${v@P}	whole crossed 2/3
-Parameter	${v@Q}	whole crossed 2/3
-Parameter	${v@U}	whole crossed 2/3
 Parameter	${v@u}	whole crossed 2/3
-Parameter	${v^^}	whole crossed 2/3
 Parameter	${v^}	whole crossed 2/3
 Parameter	${v}	whole crossed 2/3
 Redirection	<>	whole crossed 2/3
@@ -53,8 +47,6 @@ Redirection	>	whole crossed 2/3
 Reserved word	select	started crossed 2/3
 Shell language	bracket expressions and classes	whole crossed 2/3
 Shell language	dynamic function scope	started crossed 2/3
-Shell language	escaped backslash filenames	whole crossed 2/3
-Shell language	filename wildcards	whole crossed 2/3
 Shell language	pipeline	whole crossed 2/3
 Shell language	pipeline stage statuses	started crossed 2/3
 Shell language	select	started crossed 2/3
@@ -64,10 +56,9 @@ Variable	COMP_LINE	whole crossed 2/3
 Variable	COMP_POINT	whole crossed 2/3
 Variable	COMP_TYPE	whole crossed 2/3
 Variable	COMP_WORDS	whole crossed 2/3
+Variable	GLOBIGNORE	whole crossed 2/3
 Variable	PIPESTATUS	started crossed 2/3
 Variable	PWD	whole crossed 2/3
 set -o	allexport	whole crossed 2/3
 set -o	pipefail	started crossed 2/3
-shopt	dotglob	whole crossed 2/3
 shopt	failglob	started crossed 2/3
-shopt	globskipdots	whole crossed 2/3

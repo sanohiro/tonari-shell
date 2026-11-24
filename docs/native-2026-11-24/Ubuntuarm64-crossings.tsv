@@ -1,7 +1,6 @@
 group	feature	change
 Builtin	break	started crossed 2/3
 Builtin	export	whole crossed 2/3
-Builtin	history	whole crossed 2/3
 Builtin	readonly	started crossed 2/3
 Builtin	set	started crossed 2/3
 Builtin	source	started crossed 2/3
@@ -18,7 +17,16 @@ Conditional	-e	started crossed 2/3
 Conditional	-x	started crossed 2/3
 Conditional	=~	started crossed 2/3
 GNU regression group	run-ifs-posix	whole crossed 2/3
+Parameter	${v,,}	whole crossed 2/3
+Parameter	${v,}	whole crossed 2/3
 Parameter	${v,}	started crossed 2/3
+Parameter	${v//a/X}	whole crossed 2/3
+Parameter	${v: -2:1}	whole crossed 2/3
+Parameter	${v@E}	whole crossed 2/3
+Parameter	${v@Q}	whole crossed 2/3
+Parameter	${v@u}	whole crossed 2/3
+Parameter	${v^^}	whole crossed 2/3
+Parameter	${v^}	whole crossed 2/3
 Parameter	${v^}	started crossed 2/3
 Reserved word	coproc	whole crossed 2/3
 Shell language	coproc	whole crossed 2/3
@@ -39,6 +47,7 @@ Variable	COMP_LINE	whole crossed 2/3
 Variable	COMP_TYPE	whole crossed 2/3
 Variable	COMP_WORDS	whole crossed 2/3
 Variable	COPROC	whole crossed 2/3
+Variable	HISTTIMEFORMAT	whole crossed 2/3
 Variable	PIPESTATUS	started crossed 2/3
 Variable	READLINE_POINT	whole crossed 2/3
 Variable	REPLY	started crossed 2/3

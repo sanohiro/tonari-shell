@@ -1,6 +1,6 @@
 # Bash compatibility audit / Bash 互換性の検証
 
-The native CI matrix for release settings at `e48a0e5` covers 7,558 platform/feature rows across macOS arm64, Debian 13 x86-64 and arm64, and Ubuntu 26.04 x86-64 and arm64. It records the Bash and Tonari median and p95 for each matching probe. GNU Bash on Linux x86-64 prints the hexadecimal float 1.5 as `0xcp-3`. Tonari and arm64 Bash print `0x1.8p+0`. The two strings represent the same value. Both x86-64 format-letter differences remain visible in the inventory. [Native matrix](native-2026-11-24/matrix.md) · [Changed observations](native-2026-11-24/previous.tsv)
+The native CI matrix for the shell at `dfd9b77` covers 7,558 platform/feature rows across macOS arm64, Debian 13 x86-64 and arm64, and Ubuntu 26.04 x86-64 and arm64. The correctness status of every row is unchanged from the first native run at `e48a0e5`. The final measurements record the Bash and Tonari median and p95 for each matching probe. GNU Bash on Linux x86-64 prints the hexadecimal float 1.5 as `0xcp-3`. Tonari and arm64 Bash print `0x1.8p+0`. The two strings represent the same value. Both x86-64 format-letter differences remain visible in the inventory. [Native matrix](native-2026-11-24/matrix.md) · [Changed observations](native-2026-11-24/previous.tsv)
 
 5環境の合計7,558行を再確認しました。既存の arm64 版の機能一覧と照合すると、ネイティブ x86-64 の Debian・Ubuntu では `printf %a` と `%A` の表記に差があります。全フィーチャーの互換判定と実測値を環境別に確認できます。[ネイティブ CI の機能別結果](native-2026-11-24/matrix.md)
 

@@ -10,6 +10,12 @@ For an interruptible directory scan, the first read can determine how long a que
 
 Linux のディレクトリ走査は、最初の読み取りを 2 KiB、継続分を 32 KiB にしました。Intel と Arm の両方で、10万件あるディレクトリの共通接頭辞を補完して直後のキーを表示する時間が半分以下になりました。単一候補を確定するために全件を読む場合には大きな差はなく、開始 1 ms 後に届くキーは両機種で約 0.01〜0.02 ms 遅くなりました。通常のパイプとリダイレクトに使う POSIX spawn の経路からは OS 条件を取り除きました。
 
+The portable directory reader, pipe capacity, allocator, LLVM outlining and profile-guided builds have native A/B records. A setting can trade one priority against another on the same CPU. On a local M1 the default LLVM outliner shortened the arithmetic script but extended the first-prompt median from 2.535 to 2.647 ms. Repeated insertion near the start of a 64 KiB line took 0.035 ms either way. 1バイトのパイプを32回実行した結果や、100万件の履歴検索の p95 も保存しました。OS の例外を評価するときは、関数や I/O 全体の平均だけでなく、最初の応答と入力中断を同じ実装間で比較します。[Native comparisons and underlying data](native-2026-11-24/README.md)
+
+The same three-vCPU hosted M1 ranked parallel directory completion first in one job (7.214 versus 9.449 ms serial) and serial first in two others. The local eight-core M1 and native Linux with two, three or four CPUs benefited from workers for the same twelve-directory workload. Keep the worker decision tied to the size of the scan and the available CPU budget. [Worker counts and p95](native-2026-11-24/README.md#directory-workers-under-different-cpu-budgets--cpu-数と補完)
+
+Mac CI で直列が速い回の結果は、同じ3 vCPU の再測定で逆転しました。2・3 CPU に制限した Linux と手元の M1 でも並列が有利でした。補完の並列化はディレクトリの規模と利用可能な CPU 数で決めます。
+
 ## 2026-11-24 · Visible text and independent directory scans / 表示範囲と並列走査
 
 A stalled bracketed paste paints its available UTF-8 prefix after an idle interval of 8 ms. Sustained large pastes repaint at most once every 16 ms at 16 KiB checkpoints. Closing the paste inserts the full normalized payload once. The scanner preserves terminal input after the next Enter for foreground commands. A long edit keeps its full UTF-8 buffer and renders a bounded neighbourhood of the caret. Character width, control characters, hard newlines and the terminal dimensions set the display budget. An unchanged image needs only cursor positioning. If the entire buffer is killed, the editor exchanges its storage with the kill buffer. Refining a Ctrl-R search can reuse its newest hit when the longer query still matches it. A newer match would also have matched the earlier query. Repeated Ctrl-R, deletion and failed refinements retain their ordinary search paths. [Renderer](../src/editor/viewport.rs) · [Editing benchmark](../tools/bench_editing.py)

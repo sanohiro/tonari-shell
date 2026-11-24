@@ -1,20 +1,11 @@
 group	feature	change
-Builtin	exec	whole crossed 2/3
-Builtin	set	started crossed 2/3
-Builtin	times	started crossed 2/3
 Builtin	ulimit	started crossed 2/3
 Builtin	unset	started crossed 2/3
 Builtin option	compgen -C	whole crossed 2/3
-Builtin option	complete -C	whole crossed 2/3
-Builtin option	pwd -P	whole crossed 2/3
 Builtin option	readonly -f	started crossed 2/3
-Builtin option	set -o	started crossed 2/3
-Builtin option	type -P	whole crossed 2/3
 Builtin option	unset -f	started crossed 2/3
 Completion action	export	whole crossed 2/3
 Conditional	!=	started crossed 2/3
-Conditional	-k	whole crossed 2/3
-Conditional	-x	whole crossed 2/3
 Parameter	${v:1}	started crossed 2/3
 Printf format	A	previously verified observation lost
 Printf format	A	whole measurement lost
@@ -22,13 +13,9 @@ Printf format	A	started measurement lost
 Printf format	a	previously verified observation lost
 Printf format	a	whole measurement lost
 Printf format	a	started measurement lost
-Redirection	<>	whole crossed 2/3
-Redirection	>	whole crossed 2/3
-Redirection	n<&m	started crossed 2/3
 Reserved word	select	started crossed 2/3
 Shell language	dynamic function scope	started crossed 2/3
 Shell language	pipeline	whole crossed 2/3
-Shell language	pipeline stage statuses	started crossed 2/3
 Shell language	select	started crossed 2/3
 Signal	ILL	started crossed 2/3
 Variable	BASH_SUBSHELL	started crossed 2/3
@@ -36,8 +23,4 @@ Variable	COMP_LINE	whole crossed 2/3
 Variable	COMP_POINT	whole crossed 2/3
 Variable	COMP_TYPE	whole crossed 2/3
 Variable	COMP_WORDS	whole crossed 2/3
-Variable	HISTFILESIZE	started crossed 2/3
-Variable	PIPESTATUS	started crossed 2/3
-set -o	allexport	whole crossed 2/3
-set -o	pipefail	started crossed 2/3
 shopt	failglob	started crossed 2/3

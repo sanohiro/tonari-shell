@@ -1,8 +1,10 @@
 group	feature	change
 Builtin	break	started crossed 2/3
 Builtin	readonly	started crossed 2/3
+Builtin	set	started crossed 2/3
 Builtin	source	started crossed 2/3
 Builtin	times	started crossed 2/3
+Builtin option	set -o	started crossed 2/3
 Builtin option	trap -p	started crossed 2/3
 Conditional	!=	started crossed 2/3
 Conditional	-e	started crossed 2/3
@@ -25,8 +27,9 @@ Shell language	programmable completion callback	started crossed 2/3
 Shell language	shell script source	started crossed 2/3
 Shell language	single quotes	started crossed 2/3
 Shell language	subshell exit isolation	started crossed 2/3
+Shell language	subshell scope	whole crossed 2/3
 Shell language	terminal signal ignore and reset	started crossed 2/3
-Signal	CONT	started crossed 2/3
+Signal	CONT	whole crossed 2/3
 Signal	XCPU	started crossed 2/3
 Variable	BASH_ARGV	started crossed 2/3
 Variable	BASH_REMATCH	started crossed 2/3
@@ -39,5 +42,4 @@ Variable	COPROC	whole crossed 2/3
 Variable	PIPESTATUS	started crossed 2/3
 Variable	READLINE_POINT	whole crossed 2/3
 Variable	REPLY	started crossed 2/3
-set -o	pipefail	started crossed 2/3
 shopt	inherit_errexit	started crossed 2/3

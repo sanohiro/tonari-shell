@@ -5,7 +5,7 @@
 
 ## 2026-11-24 · Native CPU measurements / ネイティブ CPU での再計測
 
-The x86-64 jobs have run on AMD EPYC 7763 and 9V74, Intel Xeon 6975P-C, and Intel Xeon Platinum 8573C. The Linux arm64 runner reports Arm Neoverse-N2, and the macOS arm64 runner reports Apple M1. Linux exposed four vCPUs and macOS three. Historical Rosetta timings below describe the Apple silicon translation environment. Use the native data for algorithm and compiler decisions. [Native results and full feature matrix](native-2026-11-24/matrix.md) · [Workflow](../.github/workflows/native-benchmarks.yml)
+The x86-64 jobs have run on AMD EPYC 7763 and 9V74, Intel Xeon 6975P-C, and Intel Xeon Platinum 8573C. The Linux arm64 runner reports Arm Neoverse-N2, and the macOS arm64 runner reports Apple M1. Linux exposed four vCPUs and macOS three. Historical Rosetta timings below describe the Apple silicon translation environment. Use the native data for algorithm and compiler decisions. [Timings, hardware and design decisions](native-2026-11-24/README.md) · [Full feature matrix](native-2026-11-24/matrix.md) · [Workflow](../.github/workflows/native-benchmarks.yml)
 
 With 12 independent directory branches on AMD, the shared completion implementation reduced median/p95 to 3.523/3.612 ms, from 8.687/8.778 ms in the former serial-only implementation. With affinity restricted to one CPU, the shared policy ran serially at 8.727/8.827 ms versus 8.643/8.696 ms. The benchmark interleaved 41 samples per binary and verified the inserted path. [Native completion job](https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515521)
 

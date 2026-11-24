@@ -22,7 +22,7 @@ binary=$(tools/build-release.sh)
 "$binary" --noprofile --norc
 ```
 
-インストール済みのコンパイラと標準ライブラリを使うには `--host-toolchain` を指定します。GNU/Linux では先にそのコンパイラの musl ターゲットを追加してください。開発用の `cargo build` はホストのターゲットを使います。
+インストール済みのコンパイラと標準ライブラリを使うには `--host-toolchain` を指定します。GNU/Linux では先にそのコンパイラの musl ターゲットを追加してください。開発用の `cargo build` はホストのターゲットを使います。`cargo build --release`、`--host-toolchain`、配布ビルドのいずれも O2・fat LTO・strip を使います。
 
 プロンプトではパイプや関数を試せます。↑ で現在の端末の履歴をたどり、Ctrl-R で他のセッションを含めて検索します。行末で → を押すと薄く表示された候補を採用します。Tab は空白を含むパスも補完します。入力したディレクトリが見つからないときは、`s/b/c/ker<Tab>` で `src/backend/cuda/kernel.cu` のように階層ごとの前方一致で探します。Insert で上書きモードを切り替えられます。Ctrl-Space で範囲の始点を置き、カーソルを移動して Alt-W でコピー、Ctrl-Y で貼り付けます。端末から貼り付けた複数行も Enter まで編集できます。長い入力ではカーソル周辺が表示されます。
 
@@ -56,7 +56,7 @@ Git では起動後に別プロセスが作ったブランチを補完して切�
 
 機能互換の基準は Debian 13 の GNU Bash 5.2.37 と Ubuntu 26.04 の 5.3.9 です。シェル自身の処理は Bash の所要時間の半分、遅くても 3 分の 2 を目指します。ごく短い単発処理や、共通の OS 処理・待ち時間が大半を占める処理は、Bash と同程度なら許容します。起動・外部コマンド・パイプ・反復実行を個別に計測し、macOS 標準の Bash 3.2 とも比較します。[計測結果・バイナリサイズ・ビルド条件](docs/benchmarks.md)
 
-Linux の arm64 版と x86-64-v3 版は、ともに musl を静的リンクした実行ファイル1本で配布します。実行環境に glibc、動的ローダー、musl パッケージは不要です。macOS arm64 版が直接リンクする共有ライブラリは libSystem だけです。[配布サイズと起動の実測](docs/benchmarks.md#release-footprint)
+Linux の arm64 版と x86-64-v3 版は、ともに musl を静的リンクした実行ファイル1本で配布します。実行環境に glibc、動的ローダー、musl パッケージは不要です。macOS arm64 版が直接リンクする共有ライブラリは libSystem だけです。[配布サイズと起動の実測](docs/native-2026-11-24/README.md)
 
 ## 開発
 

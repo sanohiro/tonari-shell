@@ -1,0 +1,116 @@
+run	suite	artifact	workflow_commit	native_cpu	conclusion	job_url
+45286039424	initial	macos-15-completion	e48a0e5ffd239442ce911adedd59671582e71f28	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515611
+45286039424	initial	macos-15-editing	e48a0e5ffd239442ce911adedd59671582e71f28	Apple M1 (Virtual)	failure	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515591
+45286039424	initial	macos-15-execution	e48a0e5ffd239442ce911adedd59671582e71f28	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515663
+45286039424	initial	macos-15-inventory	e48a0e5ffd239442ce911adedd59671582e71f28	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515732
+45286039424	initial	macos-15-profiles	e48a0e5ffd239442ce911adedd59671582e71f28	Apple M1 (Virtual)	failure	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515409
+45286039424	initial	ubuntu-24.04-arm-completion	e48a0e5ffd239442ce911adedd59671582e71f28	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515665
+45286039424	initial	ubuntu-24.04-arm-editing	e48a0e5ffd239442ce911adedd59671582e71f28	Neoverse-N2	failure	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515639
+45286039424	initial	ubuntu-24.04-arm-execution	e48a0e5ffd239442ce911adedd59671582e71f28	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515623
+45286039424	initial	ubuntu-24.04-arm-inventory	e48a0e5ffd239442ce911adedd59671582e71f28	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515553
+45286039424	initial	ubuntu-24.04-arm-inventory-ubuntu	e48a0e5ffd239442ce911adedd59671582e71f28	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515702
+45286039424	initial	ubuntu-24.04-arm-profiles	e48a0e5ffd239442ce911adedd59671582e71f28	Neoverse-N2	failure	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515614
+45286039424	initial	ubuntu-24.04-completion	e48a0e5ffd239442ce911adedd59671582e71f28	AMD EPYC 7763 64-Core Processor	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515521
+45286039424	initial	ubuntu-24.04-editing	e48a0e5ffd239442ce911adedd59671582e71f28	Intel(R) Xeon(R) 6975P-C	failure	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515677
+45286039424	initial	ubuntu-24.04-execution	e48a0e5ffd239442ce911adedd59671582e71f28	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515461
+45286039424	initial	ubuntu-24.04-inventory	e48a0e5ffd239442ce911adedd59671582e71f28	AMD EPYC 7763 64-Core Processor	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515530
+45286039424	initial	ubuntu-24.04-inventory-ubuntu	e48a0e5ffd239442ce911adedd59671582e71f28	AMD EPYC 9V45 96-Core Processor	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515580
+45286039424	initial	ubuntu-24.04-profiles	e48a0e5ffd239442ce911adedd59671582e71f28	Intel(R) Xeon(R) 6975P-C	failure	https://github.com/sanohiro/tonari-shell/actions/runs/45286039424/job/138082515173
+45286891491	editing-and-profiles	macos-15-editing	d25ab2b929b17761aaa1c994dc34067c7c0a94d7	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286891491/job/138085453354
+45286891491	editing-and-profiles	macos-15-profiles	d25ab2b929b17761aaa1c994dc34067c7c0a94d7	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286891491/job/138085453101
+45286891491	editing-and-profiles	ubuntu-24.04-arm-editing	d25ab2b929b17761aaa1c994dc34067c7c0a94d7	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286891491/job/138085453420
+45286891491	editing-and-profiles	ubuntu-24.04-arm-profiles	d25ab2b929b17761aaa1c994dc34067c7c0a94d7	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286891491/job/138085453600
+45286891491	editing-and-profiles	ubuntu-24.04-editing	d25ab2b929b17761aaa1c994dc34067c7c0a94d7	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286891491/job/138085453438
+45286891491	editing-and-profiles	ubuntu-24.04-profiles	d25ab2b929b17761aaa1c994dc34067c7c0a94d7	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286891491/job/138085454075
+45287824147	rcfiles	ubuntu-24.04-arm-rcfiles	214048377ef4ad009b2f95f41e606636f0405b14	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45287824147/job/138088632033
+45287824147	rcfiles	ubuntu-24.04-rcfiles	214048377ef4ad009b2f95f41e606636f0405b14	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45287824147/job/138088632541
+45286422405	history	history-macos-15-0	0ac4b83d0acc3909df890272c02d20689012b96d	Apple M1 (Virtual)	failure	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083820973
+45286422405	history	history-macos-15-1	0ac4b83d0acc3909df890272c02d20689012b96d	Apple M1 (Virtual)	failure	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083820737
+45286422405	history	history-macos-15-2	0ac4b83d0acc3909df890272c02d20689012b96d	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083820988
+45286422405	history	history-macos-15-3	0ac4b83d0acc3909df890272c02d20689012b96d	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083821098
+45286422405	history	history-macos-15-4	0ac4b83d0acc3909df890272c02d20689012b96d	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083821084
+45286422405	history	history-macos-15-5	0ac4b83d0acc3909df890272c02d20689012b96d	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083820977
+45286422405	history	history-ubuntu-24.04-0	0ac4b83d0acc3909df890272c02d20689012b96d	Intel(R) Xeon(R) 6975P-C	failure	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083821181
+45286422405	history	history-ubuntu-24.04-1	0ac4b83d0acc3909df890272c02d20689012b96d	Intel(R) Xeon(R) 6975P-C	failure	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083820378
+45286422405	history	history-ubuntu-24.04-2	0ac4b83d0acc3909df890272c02d20689012b96d	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083820780
+45286422405	history	history-ubuntu-24.04-3	0ac4b83d0acc3909df890272c02d20689012b96d	AMD EPYC 9V74 80-Core Processor	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083820990
+45286422405	history	history-ubuntu-24.04-4	0ac4b83d0acc3909df890272c02d20689012b96d	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083820844
+45286422405	history	history-ubuntu-24.04-5	0ac4b83d0acc3909df890272c02d20689012b96d	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083821167
+45286422405	history	history-ubuntu-24.04-arm-0	0ac4b83d0acc3909df890272c02d20689012b96d	Neoverse-N2	failure	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083820863
+45286422405	history	history-ubuntu-24.04-arm-1	0ac4b83d0acc3909df890272c02d20689012b96d	Neoverse-N2	failure	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083820754
+45286422405	history	history-ubuntu-24.04-arm-2	0ac4b83d0acc3909df890272c02d20689012b96d	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083820922
+45286422405	history	history-ubuntu-24.04-arm-3	0ac4b83d0acc3909df890272c02d20689012b96d	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083821025
+45286422405	history	history-ubuntu-24.04-arm-4	0ac4b83d0acc3909df890272c02d20689012b96d	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083820792
+45286422405	history	history-ubuntu-24.04-arm-5	0ac4b83d0acc3909df890272c02d20689012b96d	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286422405/job/138083820944
+45287653484	history-rebuild	history-macos-15-0	49a64ea244f27c3c46f0f85294cc9590dc3a2c15	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45287653484/job/138088044271
+45287653484	history-rebuild	history-macos-15-1	49a64ea244f27c3c46f0f85294cc9590dc3a2c15	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45287653484/job/138088044470
+45287653484	history-rebuild	history-ubuntu-24.04-0	49a64ea244f27c3c46f0f85294cc9590dc3a2c15	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45287653484/job/138088044447
+45287653484	history-rebuild	history-ubuntu-24.04-1	49a64ea244f27c3c46f0f85294cc9590dc3a2c15	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45287653484/job/138088044273
+45287653484	history-rebuild	history-ubuntu-24.04-arm-0	49a64ea244f27c3c46f0f85294cc9590dc3a2c15	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45287653484/job/138088044371
+45287653484	history-rebuild	history-ubuntu-24.04-arm-1	49a64ea244f27c3c46f0f85294cc9590dc3a2c15	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45287653484/job/138088043849
+45286800106	platform	platform-macos-15-codegen	70fcfb4d55c9b934624a4ea759daf74525c82254	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286800106/job/138085134312
+45286800106	platform	platform-macos-15-directory	70fcfb4d55c9b934624a4ea759daf74525c82254	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286800106/job/138085134400
+45286800106	platform	platform-macos-15-heap	70fcfb4d55c9b934624a4ea759daf74525c82254	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286800106/job/138085134542
+45286800106	platform	platform-macos-15-pipes	70fcfb4d55c9b934624a4ea759daf74525c82254	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286800106/job/138085134444
+45286800106	platform	platform-ubuntu-24.04-arm-codegen	70fcfb4d55c9b934624a4ea759daf74525c82254	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286800106/job/138085134461
+45286800106	platform	platform-ubuntu-24.04-arm-directory	70fcfb4d55c9b934624a4ea759daf74525c82254	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286800106/job/138085134865
+45286800106	platform	platform-ubuntu-24.04-arm-heap	70fcfb4d55c9b934624a4ea759daf74525c82254	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286800106/job/138085134299
+45286800106	platform	platform-ubuntu-24.04-arm-pipes	70fcfb4d55c9b934624a4ea759daf74525c82254	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286800106/job/138085134011
+45286800106	platform	platform-ubuntu-24.04-codegen	70fcfb4d55c9b934624a4ea759daf74525c82254	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286800106/job/138085134483
+45286800106	platform	platform-ubuntu-24.04-directory	70fcfb4d55c9b934624a4ea759daf74525c82254	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286800106/job/138085134360
+45286800106	platform	platform-ubuntu-24.04-heap	70fcfb4d55c9b934624a4ea759daf74525c82254	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286800106/job/138085134342
+45286800106	platform	platform-ubuntu-24.04-pipes	70fcfb4d55c9b934624a4ea759daf74525c82254	AMD EPYC 7763 64-Core Processor	success	https://github.com/sanohiro/tonari-shell/actions/runs/45286800106/job/138085134407
+45287830778	pipe-endpoints	platform-macos-15-pipes	214048377ef4ad009b2f95f41e606636f0405b14	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45287830778/job/138088654873
+45287830778	pipe-endpoints	platform-ubuntu-24.04-arm-pipes	214048377ef4ad009b2f95f41e606636f0405b14	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45287830778/job/138088654775
+45287830778	pipe-endpoints	platform-ubuntu-24.04-pipes	214048377ef4ad009b2f95f41e606636f0405b14	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45287830778/job/138088654921
+45288255019	compiler-controls	platform-macos-15-linking	1381c931a4d3b5e972615614d11d8ca058026deb	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45288255019/job/138090094423
+45288255019	compiler-controls	platform-macos-15-pgo	1381c931a4d3b5e972615614d11d8ca058026deb	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45288255019/job/138090094853
+45288255019	compiler-controls	platform-ubuntu-24.04-arm-linking	1381c931a4d3b5e972615614d11d8ca058026deb	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45288255019/job/138090094790
+45288255019	compiler-controls	platform-ubuntu-24.04-arm-pgo	1381c931a4d3b5e972615614d11d8ca058026deb	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45288255019/job/138090094835
+45288255019	compiler-controls	platform-ubuntu-24.04-linking	1381c931a4d3b5e972615614d11d8ca058026deb	INTEL(R) XEON(R) PLATINUM 8573C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45288255019/job/138090094826
+45288255019	compiler-controls	platform-ubuntu-24.04-pgo	1381c931a4d3b5e972615614d11d8ca058026deb	Intel(R) Xeon(R) 6975P-C	failure	https://github.com/sanohiro/tonari-shell/actions/runs/45288255019/job/138090096008
+45288830220	directory-and-pgo	platform-ubuntu-24.04-arm-directory	085bffbccd665e1e52de0813f9933048bc0beb82	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45288830220/job/138092039126
+45288830220	directory-and-pgo	platform-ubuntu-24.04-directory	085bffbccd665e1e52de0813f9933048bc0beb82	AMD EPYC 7763 64-Core Processor	success	https://github.com/sanohiro/tonari-shell/actions/runs/45288830220/job/138092039468
+45288830220	directory-and-pgo	platform-ubuntu-24.04-pgo	085bffbccd665e1e52de0813f9933048bc0beb82	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45288830220/job/138092039378
+45289001999	first-read	platform-ubuntu-24.04-arm-initial-batch	6096692c1f1864bf3a28d6594f5ae6667b6e627e	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289001999/job/138092640178
+45289001999	first-read	platform-ubuntu-24.04-initial-batch	6096692c1f1864bf3a28d6594f5ae6667b6e627e	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289001999/job/138092640832
+45289569544	workers	platform-macos-15-workers	f7e7a12f7bb3e6d6258c14971b60c20be64acdba	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289569544/job/138094569911
+45289569544	workers	platform-ubuntu-24.04-arm-workers	f7e7a12f7bb3e6d6258c14971b60c20be64acdba	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289569544/job/138094569968
+45289569544	workers	platform-ubuntu-24.04-workers-1	f7e7a12f7bb3e6d6258c14971b60c20be64acdba	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289569544/job/138094569614
+45289569544	workers	platform-ubuntu-24.04-workers-2	f7e7a12f7bb3e6d6258c14971b60c20be64acdba	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289569544/job/138094569973
+45289569544	workers	platform-ubuntu-24.04-workers-3	f7e7a12f7bb3e6d6258c14971b60c20be64acdba	AMD EPYC 9V74 80-Core Processor	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289569544/job/138094570023
+45289725057	final	macos-15-completion	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091541
+45289725057	final	macos-15-editing	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091697
+45289725057	final	macos-15-execution	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091558
+45289725057	final	macos-15-inventory	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091241
+45289725057	final	macos-15-profiles	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091539
+45289725057	final	macos-15-rcfiles	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091314
+45289725057	final	ubuntu-24.04-arm-completion	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091344
+45289725057	final	ubuntu-24.04-arm-editing	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091299
+45289725057	final	ubuntu-24.04-arm-execution	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091298
+45289725057	final	ubuntu-24.04-arm-inventory	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091472
+45289725057	final	ubuntu-24.04-arm-inventory-ubuntu	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091642
+45289725057	final	ubuntu-24.04-arm-profiles	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091544
+45289725057	final	ubuntu-24.04-arm-rcfiles	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091608
+45289725057	final	ubuntu-24.04-completion	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	INTEL(R) XEON(R) PLATINUM 8573C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091438
+45289725057	final	ubuntu-24.04-editing	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	AMD EPYC 7763 64-Core Processor	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091410
+45289725057	final	ubuntu-24.04-execution	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091546
+45289725057	final	ubuntu-24.04-inventory	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091029
+45289725057	final	ubuntu-24.04-inventory-ubuntu	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	AMD EPYC 9V45 96-Core Processor	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091641
+45289725057	final	ubuntu-24.04-profiles	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091357
+45289725057	final	ubuntu-24.04-rcfiles	dfd9b7793d75cd65bb5f7a625cc48694f5287b97	Intel(R) Xeon(R) 6975P-C	failure	https://github.com/sanohiro/tonari-shell/actions/runs/45289725057/job/138095091376
+45290035440	rcfiles-final	macos-15-rcfiles	3b593a0c8e99df19582a9f9f583b1f3e70d82838	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45290035440/job/138096137971
+45290035440	rcfiles-final	ubuntu-24.04-arm-rcfiles	3b593a0c8e99df19582a9f9f583b1f3e70d82838	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45290035440/job/138096137951
+45290035440	rcfiles-final	ubuntu-24.04-rcfiles	3b593a0c8e99df19582a9f9f583b1f3e70d82838	AMD EPYC 9V74 80-Core Processor	success	https://github.com/sanohiro/tonari-shell/actions/runs/45290035440/job/138096137919
+45290125202	outliner	platform-ubuntu-24.04-arm-outliner	a7397ead852e33a949bdfb2e99041a77e05dde10	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45290125202/job/138096427590
+45290125202	outliner	platform-ubuntu-24.04-outliner	a7397ead852e33a949bdfb2e99041a77e05dde10	AMD EPYC 7763 64-Core Processor	success	https://github.com/sanohiro/tonari-shell/actions/runs/45290125202/job/138096427567
+45295429042	earlier-controls	platform-macos-15-earlier-controls	b9a447059db1c94ad40642b5040ba9dd6d0f207c	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45295429042/job/138114487709
+45295429042	earlier-controls	platform-ubuntu-24.04-arm-earlier-controls	b9a447059db1c94ad40642b5040ba9dd6d0f207c	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45295429042/job/138114488569
+45295429042	earlier-controls	platform-ubuntu-24.04-earlier-controls	b9a447059db1c94ad40642b5040ba9dd6d0f207c	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45295429042/job/138114488256
+45295673794	worker-counts	platform-macos-15-worker-counts-1	433de564c538cb39ad9d3eb8f6ed6579cc04f4b9	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45295673794/job/138115302199
+45295673794	worker-counts	platform-macos-15-worker-counts-2	433de564c538cb39ad9d3eb8f6ed6579cc04f4b9	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45295673794/job/138115303070
+45295673794	worker-counts	platform-ubuntu-24.04-arm-worker-counts	433de564c538cb39ad9d3eb8f6ed6579cc04f4b9	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45295673794/job/138115302597
+45295673794	worker-counts	platform-ubuntu-24.04-worker-counts	433de564c538cb39ad9d3eb8f6ed6579cc04f4b9	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45295673794/job/138115302636
+45298043804	unified-release-profile	macos-15-rcfiles	2bb1d33c81ea0876cb3889ea0d69554bd7055dd8	Apple M1 (Virtual)	success	https://github.com/sanohiro/tonari-shell/actions/runs/45298043804/job/138123332405
+45298043804	unified-release-profile	ubuntu-24.04-arm-rcfiles	2bb1d33c81ea0876cb3889ea0d69554bd7055dd8	Neoverse-N2	success	https://github.com/sanohiro/tonari-shell/actions/runs/45298043804/job/138123331873
+45298043804	unified-release-profile	ubuntu-24.04-rcfiles	2bb1d33c81ea0876cb3889ea0d69554bd7055dd8	Intel(R) Xeon(R) 6975P-C	success	https://github.com/sanohiro/tonari-shell/actions/runs/45298043804/job/138123332176

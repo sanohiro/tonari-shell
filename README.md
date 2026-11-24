@@ -22,7 +22,7 @@ binary=$(tools/build-release.sh)
 "$binary" --noprofile --norc
 ```
 
-To build with the installed compiler and its prebuilt standard library, pass `--host-toolchain`. On GNU/Linux install the matching musl target for that compiler first. A plain `cargo build` targets the development host.
+To build with the installed compiler and its prebuilt standard library, pass `--host-toolchain`. On GNU/Linux install the matching musl target for that compiler first. A plain `cargo build` targets the development host. All release entry points use O2, fat LTO and symbol stripping.
 
 At the prompt, try a pipeline or a shell function. Use ↑ for this session’s history, Ctrl-R to search across sessions, and → at the end of the line to accept a suggestion. Tab completes paths with spaces. If the exact directory is missing, you can abbreviate each level, for example `s/b/c/ker<Tab>` for `src/backend/cuda/kernel.cu`. Insert toggles overwrite mode. Ctrl-Space sets a mark, Alt-W copies the region and Ctrl-Y pastes it. Bracketed paste keeps multiline commands editable until you press Enter. Long commands show a moving window around the cursor.
 
@@ -56,7 +56,7 @@ Git also completed a branch created by another process after startup, and direnv
 
 The feature reference is GNU Bash 5.2.37 on Debian 13 and 5.3.9 on Ubuntu 26.04. For work done by the shell we aim for half of Bash’s elapsed time, with two-thirds as the upper target. Bash-equivalent time is acceptable for very short operations and workloads dominated by the same OS work. The benchmark records startup, external commands, pipelines, and repeated operations separately. The macOS system Bash 3.2 is an additional comparison. [Measurements, binary sizes and build conditions](docs/benchmarks.md)
 
-Linux releases for arm64 and x86-64-v3 are single, static musl executables. They run without glibc, a dynamic loader or an installed musl package. The macOS arm64 executable links to libSystem. [Release sizes and startup measurements](docs/benchmarks.md#release-footprint)
+Linux releases for arm64 and x86-64-v3 are single, static musl executables. They run without glibc, a dynamic loader or an installed musl package. The macOS arm64 executable links to libSystem. [Release sizes and startup measurements](docs/native-2026-11-24/README.md)
 
 ## Development
 
