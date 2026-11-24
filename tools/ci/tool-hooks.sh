@@ -54,6 +54,8 @@ options=(--runs 15 --git-completion "$assets/git.bash" --bash-completion /usr/sh
          --nvm-script "$assets/nvm.sh" --nodes "$assets/node-24.1.0" "$assets/node-18.13.0" --vscode-script "$assets/vscode.sh")
 python3 tools/bench_tool_hooks.py "$bin/current" "$bin/baseline" /bin/bash \
   --case git --case gh --case nvm --case mise --case direnv --case vscode "${options[@]}"
+python3 tools/bench_tool_hooks.py "$bin/current" "$bin/baseline" /bin/bash --case combined "${options[@]}"
+python3 tools/bench_tool_hooks.py "$bin/current" "$bin/baseline" /bin/bash --case fzf-files --runs 15
 for mode in live saved; do
   flags=()
   if [[ $mode == saved ]]; then flags+=(--saved-history); fi

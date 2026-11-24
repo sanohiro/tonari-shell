@@ -146,9 +146,10 @@ pub(crate) struct Entries {
     base: usize,
     current: Option<usize>,
     written: usize,
-    imported: Option<(PathBuf, u64)>,
+    imported: Option<InitialJournal>,
 }
 
+#[derive(Clone)]
 pub(crate) struct InitialJournal {
     path: PathBuf,
     identity: (u64, u64),
@@ -159,6 +160,14 @@ impl InitialJournal {
     pub(crate) fn snapshot(session: &Session) -> Option<Self> {
         let path = file(session)?;
         let m = fs::metadata(&path).ok()?;
+        if session
+            .history
+            .as_deref()
+            .and_then(|h| h.imported.as_ref())
+            .is_some_and(|seen| seen.path == path && seen.identity == (m.dev(), m.ino()))
+        {
+            return None;
+        }
         (m.is_file() && m.len() > 0).then(|| Self {
             path,
             identity: (m.dev(), m.ino()),
@@ -201,10 +210,14 @@ impl InitialJournal {
         let mut older = Vec::new();
         let mut reader = BufReader::new(journal.take(self.len - pos));
         let mut row = Vec::new();
+        let mut complete = pos;
         while reader.read_until(b'\n', &mut row)? != 0 {
-            if let Some(text) = row
-                .strip_suffix(b"\n")
-                .and_then(|s| std::str::from_utf8(s).ok())
+            let Some(record) = row.strip_suffix(b"\n") else {
+                break;
+            };
+            complete += row.len() as u64;
+            if let Some(text) = std::str::from_utf8(record)
+                .ok()
                 .and_then(command_field)
                 .and_then(decode)
             {
@@ -219,7 +232,10 @@ impl InitialJournal {
         h.current = h.current.map(|index| index + n);
         h.timestamps.splice(0..0, std::iter::repeat_n(0, n));
         h.written += n;
-        h.imported = Some((self.path.clone(), self.len));
+        h.imported = Some(Self {
+            len: complete,
+            ..self.clone()
+        });
         Ok(())
     }
 }
@@ -927,6 +943,48 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lazy_builtin_history_keeps_complete_rows_and_resumes_after_rotation() {
+        let root = std::env::temp_dir().join(format!("tonari-fc-journal-{}", std::process::id()));
+        fs::create_dir_all(root.join("tonari")).unwrap();
+        let mut session = Session::default();
+        session.assign("HOME", root.to_str().unwrap());
+        session.assign("XDG_STATE_HOME", root.to_str().unwrap());
+        session.assign("HISTFILE", root.join(".bash_history").to_str().unwrap());
+        session.assign("HISTSIZE", "3");
+        let path = file(&session).unwrap();
+        let rows = format!(
+            "1\t1\t0\t/\t{}\n1\t1\t0\t/\tbefore\\n雪\n1\t1\t0\t/\tpartial",
+            "a".repeat(17000)
+        );
+        fs::write(&path, rows).unwrap();
+        let snapshot = InitialJournal::snapshot(&session).unwrap();
+        session.push_history("local", true);
+        snapshot.load(&mut session).unwrap();
+        assert_eq!(session.history_lines()[1..], ["before\n雪", "local"]);
+        assert_eq!(session.history.as_ref().unwrap().current, Some(2));
+        OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"-done\n")
+            .unwrap();
+        let read_new = ["history".into(), "-n".into()];
+        commands::run(&mut session, &read_new, 0);
+        assert_eq!(
+            session.history_lines(),
+            ["before\n雪", "local", "partial-done"]
+        );
+        fs::rename(&path, path.with_extension("old")).unwrap();
+        fs::write(&path, b"1\t1\t0\t/\treplaced\n").unwrap();
+        commands::run(&mut session, &read_new, 0);
+        assert_eq!(
+            session.history_lines(),
+            ["local", "partial-done", "replaced"]
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn interrupted_hints_and_journal_appends_preserve_the_newest_match() {

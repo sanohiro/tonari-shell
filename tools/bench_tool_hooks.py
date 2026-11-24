@@ -19,7 +19,8 @@ from bench_starship import compare
 
 PROMPT = b"hook-ready> "
 ACCEPT = b"\x1b[?2004l"
-TOOLS = ("nvm", "direnv", "git", "gh", "fzf", "mise", "vscode")
+TOOLS = ("nvm", "direnv", "git", "gh", "fzf", "fzf-files", "mise", "vscode")
+VSCODE_ENV = dict(VSCODE_INJECTION="1", TERM_PROGRAM="vscode", VSCODE_STABLE="1")
 
 
 def sample(shell, root, rc, env, tool, versions, saved):
@@ -63,7 +64,7 @@ def sample(shell, root, rc, env, tool, versions, saved):
             start, = struct.unpack("Q", clock.read(8))
         first = read_until(fd, PROMPT)
         record("first prompt", start)
-        if tool == "vscode":
+        if tool in ("vscode", "combined"):
             if not all(k in first for k in (b"633;P;HasRichCommandDetection=True", b"633;A\x07")):
                 raise ValueError(f"missing VS Code prompt markers: {first!r}")
             for _ in range(3):
@@ -72,6 +73,13 @@ def sample(shell, root, rc, env, tool, versions, saved):
                     if field not in frame:
                         raise ValueError(f"missing {field!r}: {frame!r}")
             command(b'printf "<injected-%s>\\n" "$HOOK_BENCH_VSCODE"', b"<injected-1>\r\n")
+            if tool == "combined":
+                timed("enter with both hooks", b"cd project")
+                command(b'printf "<%s|%s|%s|%s>\\n" "$CHECK_DIRENV" "$CHECK_MISE" '
+                        b'"$COMBINED_LOADED" "$(node --version)"',
+                        b"<ok|ok|yes|" + versions[0].encode() + b">\r\n")
+                timed("leave with both hooks", b"cd ..")
+                command(b'printf "<%s|%s>\\n" "$CHECK_DIRENV" "$CHECK_MISE"', b"<|>\r\n")
         elif tool in ("direnv", "mise"):
             for directory, value in ((b"project", b"active"), (b"..", b"unset")):
                 timed("enter" if directory == b"project" else "leave", b"cd " + directory)
@@ -107,6 +115,20 @@ def sample(shell, root, rc, env, tool, versions, saved):
             read_until(fd, b"printf HISTORY_PICK", closed.partition(b"\x1b[?1049l")[2])
             record("select to editable line", start)
             command(b"-ok", b"HISTORY_PICK-ok")
+        elif tool == "fzf-files":
+            prefix = b"printf '<%s>\\n' "
+            os.write(fd, prefix)
+            read_until(fd, prefix)
+            start = time.monotonic_ns()
+            os.write(fd, b"\x14")
+            read_until(fd, b"WIDGET_FILE")
+            record("Ctrl-T to visible match", start)
+            start = time.monotonic_ns()
+            os.write(fd, b"\r")
+            closed = read_until(fd, b"\x1b[?1049l")
+            read_until(fd, b"WIDGET_FILE", closed.partition(b"\x1b[?1049l")[2])
+            record("select to editable argument", start)
+            command(b"", b"<unique WIDGET_FILE>\r\n")
         return result
     finally:
         try:
@@ -119,6 +141,21 @@ def sample(shell, root, rc, env, tool, versions, saved):
 
 def fixture(tool, root, args):
     project = root / "project"
+    if tool == "combined":
+        rc, env, versions = fixture("nvm", root, args)
+        env.update(VSCODE_ENV, MISE_OFFLINE="1", MISE_TRUSTED_CONFIG_PATHS=str(project))
+        (project / ".envrc").write_text("export CHECK_DIRENV=ok\n")
+        (project / "mise.toml").write_text('[env]\nCHECK_MISE="ok"\n')
+        subprocess.run(["direnv", "allow", str(project)], env=env, cwd=root, check=True)
+        (root / "gh.bash").write_bytes(subprocess.check_output(["gh", "completion", "--shell", "bash"], env=env))
+        with rc.open("a") as script:
+            for path in (args.bash_completion, args.git_completion, root / "gh.bash"):
+                script.write(". " + shlex.quote(str(path.resolve())) + "\n")
+            script.write('eval "$(fzf --bash)"\neval "$(direnv hook bash)"\neval "$(mise activate bash)"\n'
+                         'export HOOK_BENCH_VSCODE=1\n'
+                         'declare -F nvm __fzf_history__ __git_complete >/dev/null && '
+                         'complete -p gh >/dev/null && export COMBINED_LOADED=yes\n')
+        return args.vscode_script.resolve(), env, versions
     project.mkdir()
     env = dict(PATH=os.environ["PATH"], HOME=str(root), TERM="xterm-256color", LC_ALL="C",
                PS1=PROMPT.decode(), INPUTRC="/dev/null", HISTFILE="/dev/null",
@@ -143,6 +180,12 @@ def fixture(tool, root, args):
             git("pack-refs", "--all")
             git("branch", "topic-unique")
         rc.write_text(init + ". " + shlex.quote(str(script.resolve())) + "\n")
+    elif tool == "fzf-files":
+        for i in range(1024):
+            (project / f"file-{i:04}").touch()
+        (project / "unique WIDGET_FILE").touch()
+        env.update(FZF_CTRL_T_OPTS="--no-height --query=unique")
+        rc.write_text('cd project\neval "$(fzf --bash)"\n')
     elif tool == "fzf":
         (root / "seed").write_text("".join(f"echo entry-{i}\n" for i in range(args.entries))
                                    + "printf HISTORY_PICK\n")
@@ -168,7 +211,7 @@ def fixture(tool, root, args):
     elif tool == "vscode":
         rc.write_text("export HOOK_BENCH_VSCODE=1\n")
         rc = args.vscode_script.resolve()
-        env.update(VSCODE_INJECTION="1", TERM_PROGRAM="vscode", VSCODE_STABLE="1")
+        env.update(VSCODE_ENV)
     elif tool == "mise":
         (project / "mise.toml").write_text('[env]\nHOOK_BENCH_ENV = "active"\n')
         env.update(MISE_TRUSTED_CONFIG_PATHS=str(project), MISE_OFFLINE="1")
@@ -185,7 +228,7 @@ def fixture(tool, root, args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("shells", type=Path, nargs="+")
-    parser.add_argument("--case", action="append", choices=TOOLS)
+    parser.add_argument("--case", action="append", choices=(*TOOLS, "combined"))
     parser.add_argument("--git-completion", type=Path)
     parser.add_argument("--bash-completion", type=Path)
     parser.add_argument("--vscode-script", type=Path)

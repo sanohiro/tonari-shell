@@ -1,10 +1,10 @@
-use super::{Entries, History, Session};
+use super::{Entries, History, InitialJournal, Session};
 use crate::Flow;
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufRead, BufReader, Seek, SeekFrom, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 pub(crate) fn run(session: &mut Session, words: &[String], status: u8) -> Flow {
@@ -173,20 +173,24 @@ fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<
             Err(e) if private && e.kind() == io::ErrorKind::NotFound => return Ok(()),
             other => other?,
         };
-        let skip = if op == 'n' {
+        let meta = file.metadata()?;
+        let identity = (meta.dev(), meta.ino());
+        let skip = if op == 'n' && meta.is_file() {
             session
                 .history
                 .as_deref()
                 .and_then(|h| h.imported.as_ref())
-                .filter(|(p, _)| p == &path)
-                .map_or(0, |(_, n)| *n)
+                .filter(|seen| {
+                    seen.path == path && seen.identity == identity && seen.len <= meta.len()
+                })
+                .map_or(0, |seen| seen.len)
         } else {
             0
         };
         let mut reader = BufReader::new(file);
         let mut offset = skip;
-        if skip > 0 && reader.seek(SeekFrom::Start(skip)).is_err() {
-            io::copy(&mut reader.by_ref().take(skip), &mut io::sink())?;
+        if skip > 0 {
+            reader.seek(SeekFrom::Start(skip))?;
         }
         let mut line = String::new();
         let limit = session.history_limit("HISTSIZE", 500);
@@ -195,11 +199,14 @@ fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<
             .is_some_and(|v| v.split(':').any(|rule| rule == "erasedups"));
         let owner = session.shell_pid();
         let h = session.history_mut();
-        loop {
+        let result = loop {
             line.clear();
-            let n = reader.read_line(&mut line)?;
-            if n == 0 {
-                break;
+            let n = match reader.read_line(&mut line) {
+                Ok(n) => n,
+                Err(e) => break Err(e),
+            };
+            if n == 0 || private && !line.ends_with('\n') {
+                break Ok(());
             }
             offset += n as u64;
             let line = line.strip_suffix('\n').unwrap_or(&line);
@@ -237,10 +244,15 @@ fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<
                     h.trim_to(limit);
                 }
             }
-        }
+        };
         h.trim_to(limit);
-        h.imported = Some((path, offset));
+        h.imported = Some(InitialJournal {
+            path,
+            identity,
+            len: offset,
+        });
         h.written = h.lines.len();
+        result?;
     } else {
         let mut file = OpenOptions::new()
             .write(true)
