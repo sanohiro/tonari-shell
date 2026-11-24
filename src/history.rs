@@ -450,7 +450,7 @@ impl History {
         mut skip: usize,
         waiting: &dyn Fn() -> bool,
     ) -> Result<Option<String>, ()> {
-        const BLOCK: usize = 512 * 1024;
+        const BLOCK: usize = 240 * 1024;
         let path = file(session).ok_or(())?;
         let journal = OpenOptions::new()
             .read(true)
