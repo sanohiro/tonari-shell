@@ -1439,6 +1439,13 @@ grep -q 'echo -n X' trace && printf '/traced/'
 for i in 1 2 3 4; do false; echo -n "$?"; done
 """, 0, b"XXfnXXX/traced/1111")
 
+    def test_small_here_inputs_preserve_read_boundaries(self):
+        self.compare(r"""IFS= read -d : x <<< 'one\:two:three'; printf '<%s>' "$x"
+IFS= read -r -d : x <<< 'one\:two:three'; printf '<%s>' "$x"
+IFS= read -r -n 1 x <<< '雪猫'; printf '<%s>' "$x"
+exec 7<<<'outside'; IFS= read -r -u 7 x <<< 'inside'; printf '<%s>' "$x"
+for i in 1 2 3 4; do cat <<<'雪'; done""", 0, "<one:two><one\\><雪><outside>雪\n雪\n雪\n雪\n".encode())
+
     def test_repeated_redirects_follow_shell_state(self):
         self.compare("""rm -f out
 for i in 1 2 3 4 5; do

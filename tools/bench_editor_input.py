@@ -69,6 +69,19 @@ def sample(shell, home, name, packet, expected):
     return elapsed
 
 
+def scan_sample(binary, folder, query):
+    with subprocess.Popen([binary, "--complete", folder, query.decode()],
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE) as control:
+        if control.stdout.readline() != b"ready\n":
+            raise ValueError("scan control failed to start")
+        start = time.perf_counter_ns()
+        out = control.communicate(b"\n")[0]
+        spent = (time.perf_counter_ns() - start) / 1e6
+        if out != query + FLAG + b"\n" or control.returncode:
+            raise ValueError("scan control found different candidates")
+        return spent
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("shell", nargs="+", type=Path)
@@ -113,38 +126,29 @@ def main():
         cases.append(("Down to draft (100k entries)", b"\x1b[B", recalled))
         cases.append(("Ctrl-R (100k entries)", b"\x12" + query, query + FLAG))
         cases.append(("Tab (10k files)", b"f candidates/" + query + b"\t", b"candidates/" + query + FLAG))
-        if args.scan_control:
-            elapsed = []
-            for i in range(args.runs + 3):
-                with subprocess.Popen([args.scan_control, "--complete", folder, query.decode()],
-                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE) as control:
-                    if control.stdout.readline() != b"ready\n":
-                        raise ValueError("scan control failed to start")
-                    start = time.perf_counter_ns()
-                    out = control.communicate(b"\n")[0]
-                    spent = (time.perf_counter_ns() - start) / 1e6
-                    if out != query + FLAG + b"\n" or control.returncode:
-                        raise ValueError("scan control found different candidates")
-                    if i >= 3:
-                        elapsed.append(spent)
-            print(f"Direct scan (10k files) | {statistics.median(elapsed):.3f}/{sorted(elapsed)[math.ceil(.95 * len(elapsed)) - 1]:.3f}", flush=True)
         for case in cases:
             if args.case and case[0].split()[0] not in args.case:
                 continue
-            timings = {shell: [] for shell in shells}
+            participants = [*shells, None] if args.scan_control and case[0].startswith("Tab ") else shells
+            timings = {shell: [] for shell in participants}
             for i in range(args.runs + 3):
-                shift = i % len(shells)
-                for shell in shells[shift:] + shells[:shift]:
-                    ms = sample(shell, home, *case)
-                    for path, length in sizes.items():
-                        os.truncate(path, length)
+                shift = i % len(participants)
+                for shell in participants[shift:] + participants[:shift]:
+                    if shell is None:
+                        ms = scan_sample(args.scan_control, folder, query)
+                    else:
+                        ms = sample(shell, home, *case)
+                        for path, length in sizes.items():
+                            os.truncate(path, length)
                     if i >= 3:
                         timings[shell].append(ms)
             cells = []
             for values in timings.values():
                 p95 = sorted(values)[math.ceil(.95 * len(values)) - 1]
                 cells.append(f"{statistics.median(values):.3f}/{p95:.3f}")
-            print(case[0], *cells, sep=" | ", flush=True)
+            print(case[0], *cells[:len(shells)], sep=" | ", flush=True)
+            if None in timings:
+                print("Direct scan (10k files)", cells[-1], sep=" | ", flush=True)
 
 
 if __name__ == "__main__":

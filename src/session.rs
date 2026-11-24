@@ -279,8 +279,8 @@ impl Session {
         printf::run(self, args, None)
     }
 
-    pub fn read(&mut self, args: &[String]) -> u8 {
-        read::run(self, args)
+    pub fn read(&mut self, args: &[String], here: Option<(i32, &[u8])>) -> u8 {
+        read::run(self, args, here)
     }
 
     pub fn shift(&mut self, args: &[String]) -> u8 {

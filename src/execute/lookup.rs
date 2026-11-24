@@ -134,11 +134,13 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
         }
         index += 1;
     }
-    let search = if default_path {
-        "/bin:/usr/bin".into()
-    } else {
-        session.search_path(&[])
-    };
+    let search = std::cell::LazyCell::new(|| {
+        if default_path {
+            "/bin:/usr/bin".into()
+        } else {
+            session.search_path(&[])
+        }
+    });
     let mut out = io::stdout().lock();
     let mut any = false;
     let mut all = true;
@@ -232,7 +234,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                     return 1;
                 }
             } else {
-                for dir in std::env::split_paths(&search) {
+                for dir in std::env::split_paths(&*search) {
                     let path = if dir.as_os_str().is_empty() {
                         PathBuf::from(".").join(name)
                     } else {

@@ -61,7 +61,7 @@ pub(super) fn run(
             } else {
                 eprint!("{prompt}");
             }
-            if s.read(&[]) != 0 {
+            if s.read(&[], None) != 0 {
                 println!();
                 return Err(Flow::Continue(1));
             }

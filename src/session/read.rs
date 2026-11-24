@@ -207,7 +207,7 @@ impl Drop for EchoGuard {
     }
 }
 
-pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
+pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u8])>) -> u8 {
     let opts = match options(args) {
         Ok(opts) => opts,
         Err(e) => {
@@ -280,6 +280,20 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
     let mut chars = 0;
     let started = opts.timeout.map(|timeout| (Instant::now(), timeout));
     let mut input = Input::new(opts.fd);
+    // Even an escaped delimiter can only postpone the end of a record. Read
+    // through the first possible delimiter in one syscall and leave the rest
+    // of the pipe available to subsequent consumers.
+    let mut first_read = here
+        .filter(|(fd, _)| {
+            *fd == opts.fd
+                && opts.max_chars.is_none()
+                && opts.timeout.is_none()
+                && edited.is_none()
+                && opts.names.iter().all(|s| is_identifier(s))
+        })
+        .map_or(0, |(_, data)| {
+            memchr::memchr(opts.delimiter, data).map_or(data.len(), |n| n + 1)
+        });
     let status = loop {
         if opts.max_chars.is_some_and(|max| chars >= max) && std::str::from_utf8(&line).is_ok() {
             break 0;
@@ -296,8 +310,12 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
         }
         let input_byte = if let Some(bytes) = &mut edited {
             Ok(bytes.next())
-        } else if opts.raw && opts.max_chars.is_none() && opts.timeout.is_none() && input.seekable {
-            match input.chunk(1, usize::MAX) {
+        } else if opts.raw
+            && opts.max_chars.is_none()
+            && opts.timeout.is_none()
+            && (input.seekable || first_read != 0)
+        {
+            match input.chunk(std::mem::take(&mut first_read).max(1), usize::MAX) {
                 Ok([]) => Ok(None),
                 Ok(bytes) => {
                     let end = memchr::memchr(opts.delimiter, bytes);
@@ -341,7 +359,9 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
                 Err(e) => Err(e),
             }
         } else {
-            input.next()
+            input
+                .chunk(std::mem::take(&mut first_read).max(1), 1)
+                .map(|s| s.first().copied())
         };
         let b = match input_byte {
             Ok(Some(b)) => b,

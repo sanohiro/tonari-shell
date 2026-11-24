@@ -715,7 +715,17 @@ fn eval_builtin(
         }
         Builtin::Umask => Flow::Continue(crate::builtins::umask::run(args)),
         Builtin::Mapfile => crate::session::mapfile::run(session, &cmd.words[0], args, last_status),
-        Builtin::Read => Flow::Continue(session.read(args)),
+        Builtin::Read => {
+            let here = match cmd.redirects.as_slice() {
+                [r] if matches!(r.target, Target::HereDoc { .. } | Target::HereString)
+                    && r.word.len() <= libc::PIPE_BUF =>
+                {
+                    Some((r.fd, r.word.as_bytes()))
+                }
+                _ => None,
+            };
+            Flow::Continue(session.read(args, here))
+        }
         Builtin::Set => Flow::Continue(session.set(&mut cmd.words)),
         Builtin::Hash => Flow::Continue(hash::run(session, args)),
         Builtin::Shopt => Flow::Continue(session.shopt(args)),
@@ -1304,6 +1314,20 @@ fn start(
         debug_assert!(bytes.len() <= 512);
         let result = std::fs::File::from(output.unwrap()).write_all(&bytes);
         return Ok(Stage::Status(if result.is_err() { 1 } else { status }));
+    }
+    if builtin.is_none()
+        && launch.group.is_none()
+        && !launch.background
+        && (cached || cmd.words[0].contains('/'))
+        && let [r] = cmd.redirects.as_slice()
+        && r.fd == 0
+        && matches!(r.target, Target::HereDoc { .. } | Target::HereString)
+        && r.word.len() <= libc::PIPE_BUF
+        && let Ok(reader) = here_input::open(r.word.as_bytes()).and_then(private_fd)
+        && let Ok(pid) =
+            External::new(cmd, session).spawn_with_dups(&[], Some(&reader), output.as_ref())
+    {
+        return Ok(Stage::Child(pid));
     }
     if builtin.is_none()
         && launch.group.is_none()
