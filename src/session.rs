@@ -304,7 +304,8 @@ impl Session {
         0
     }
 
-    pub fn set(&mut self, args: &[String]) -> u8 {
+    pub fn set(&mut self, words: &mut Vec<String>) -> u8 {
+        let args = words.get(1..).unwrap_or_default();
         if args.is_empty() {
             let mut values: BTreeMap<_, _> = std::env::vars_os()
                 .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
@@ -394,7 +395,8 @@ impl Session {
             }
         }
         if i < args.len() || replace_positionals {
-            self.positional = args[i..].to_vec();
+            words.drain(..i + 1);
+            self.positional = std::mem::take(words);
         }
         0
     }
@@ -475,7 +477,7 @@ impl Session {
             return var
                 .elements
                 .as_ref()
-                .map_or_else(|| var.value.clone(), |a| a.get(&0).cloned());
+                .map_or_else(|| var.value.clone(), |a| a.get(&0).map(str::to_owned));
         }
         if matches!(
             name,
@@ -649,6 +651,34 @@ impl Session {
                 exported,
             },
         );
+    }
+
+    // An existing plain arithmetic variable can keep the decimal string's
+    // capacity. Special variables retain their ordinary assignment hooks.
+    pub(crate) fn write_scalar_decimal(
+        &mut self,
+        name: &str,
+        value: i64,
+    ) -> Option<Result<(), &'static str>> {
+        if matches!(name, "OPTIND" | "GLOBIGNORE" | "PATH" | "BASH_ARGV0")
+            || Self::builtin_readonly(name)
+        {
+            return None;
+        }
+        let var = self.variables.get_mut(name)?;
+        if var.nameref || var.elements.is_some() {
+            return None;
+        }
+        if var.readonly {
+            return Some(Err("readonly variable"));
+        }
+        let text = var.value.as_mut()?;
+        text.clear();
+        use std::fmt::Write;
+        write!(text, "{value}").unwrap();
+        var.declared = true;
+        var.exported |= self.allexport;
+        Some(Ok(()))
     }
 
     pub(crate) fn scalar_decimal(&self, name: &str) -> Option<i64> {

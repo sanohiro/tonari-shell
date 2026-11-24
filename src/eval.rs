@@ -231,7 +231,11 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
         } => {
             let line = session.line();
             let mut first = true;
-            let arithmetic = |s: &mut Session, expr: &str, last: u8| -> Result<i64, Flow> {
+            let arithmetic = |s: &mut Session,
+                              expr: &str,
+                              compiled: &crate::arithmetic::Repeated,
+                              last: u8|
+             -> Result<i64, Flow> {
                 if s.traps.debug_handler() {
                     s.current_command = Some(crate::parser::Location::label(
                         format!("(({}))", expr.trim()),
@@ -241,23 +245,30 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                         return Err(flow);
                     }
                 }
-                crate::arithmetic::expanded(expr, s, last).map_err(|e| {
+                compiled.run(s, last).map_err(|e| {
                     eprintln!("tonari: {e}");
                     Flow::Continue(1)
                 })
             };
             if !init.trim().is_empty()
-                && let Err(flow) = arithmetic(session, &init, status)
+                && let Err(flow) = arithmetic(
+                    session,
+                    &init,
+                    &crate::arithmetic::Repeated::Other(&init),
+                    status,
+                )
             {
                 return flow;
             }
+            let test = crate::arithmetic::Repeated::new(&condition);
+            let update = crate::arithmetic::Repeated::new(&step);
             repeat(session, &body, status, |s, last| {
                 if !first && !step.is_empty() {
-                    arithmetic(s, &step, last)?;
+                    arithmetic(s, &step, &update, last)?;
                 }
                 first = false;
                 Ok(
-                    (condition.trim().is_empty() || arithmetic(s, &condition, last)? != 0)
+                    (condition.trim().is_empty() || arithmetic(s, &condition, &test, last)? != 0)
                         .then_some(last),
                 )
             })
@@ -435,29 +446,30 @@ fn repeat(
     flow
 }
 
-pub fn call_function(session: &mut Session, name: &str, args: &[String], status: u8) -> Flow {
+pub fn call_function(session: &mut Session, mut argv: Vec<String>, status: u8) -> Flow {
+    let name = argv.remove(0);
     if session.function_depth >= 128 {
         eprintln!("tonari: {name}: function nesting limit exceeded");
         return Flow::Continue(1);
     }
-    let function = session.functions[name].clone();
+    let function = session.functions[&name].clone();
+    let traced = session.traced_functions.contains(&name);
     let callsite = session.current_command.clone();
     session.call_lines.push(session.line());
     session.source_names.push(function.source);
-    session.function_names.push(name.to_owned());
+    session.function_names.push(name);
     session.enter_function();
     let tracked = session.shopt.extdebug;
     if tracked {
         if session.debug_args.is_empty() {
             session.debug_args.push(session.positional.clone());
         }
-        session.debug_args.push(args[1..].to_vec());
+        session.debug_args.push(argv.clone());
     }
-    let old = std::mem::replace(&mut session.positional, args[1..].to_vec());
-    let hidden = session.traps.enter_function(
-        session.errtrace,
-        session.functrace || session.traced_functions.contains(name),
-    );
+    let old = std::mem::replace(&mut session.positional, argv);
+    let hidden = session
+        .traps
+        .enter_function(session.errtrace, session.functrace || traced);
     let flow = crate::traps::debug(session, status).unwrap_or_else(|| {
         run_statements(
             session,

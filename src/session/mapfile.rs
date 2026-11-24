@@ -1,3 +1,4 @@
+use super::array::{Elements, Records};
 use super::read::Input;
 use super::{Session, is_identifier};
 use crate::Flow;
@@ -84,10 +85,10 @@ impl<'a> Options<'a> {
 
 // A full replacement has no callback or later reader that can observe a
 // partially filled array. Build dense indices in order with one bulk load.
-fn read_all(options: &Options<'_>) -> io::Result<Vec<String>> {
+fn read_all(options: &Options<'_>) -> io::Result<Records> {
     let fd = unsafe { BorrowedFd::borrow_raw(options.fd) }.try_clone_to_owned()?;
     let mut reader = io::BufReader::new(std::fs::File::from(fd));
-    let mut lines = Vec::new();
+    let mut lines = Records::default();
     let mut pending = Vec::new();
     let mut skip = options.skip;
     let delim = options.delimiter;
@@ -101,11 +102,7 @@ fn read_all(options: &Options<'_>) -> io::Result<Vec<String>> {
         } else {
             bytes
         };
-        lines.push(
-            std::str::from_utf8(bytes)
-                .map_err(io::Error::other)?
-                .to_owned(),
-        );
+        lines.push(std::str::from_utf8(bytes).map_err(io::Error::other)?);
         Ok(())
     };
     loop {
@@ -162,7 +159,7 @@ pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u
     if options.limit == 0 && options.callback.is_none() && options.origin.is_none() {
         return match read_all(&options) {
             Ok(lines) => {
-                session.replace_array(options.name, lines);
+                session.store_elements(options.name, Elements::Records(lines), false);
                 Flow::Continue(0)
             }
             Err(e) => {

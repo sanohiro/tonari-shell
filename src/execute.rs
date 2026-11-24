@@ -651,7 +651,7 @@ fn named_builtin(name: &str, args: &[String], last_status: u8) -> Option<Builtin
 
 fn eval_builtin(
     builtin: Builtin,
-    cmd: &PreparedCommand,
+    cmd: &mut PreparedCommand,
     session: &mut Session,
     last_status: u8,
     in_stage_child: bool,
@@ -678,7 +678,9 @@ fn eval_builtin(
             command => crate::eval::command(session, command, last_status, false),
         },
         Builtin::Exec => exec_builtin(cmd, session, args),
-        Builtin::Function => crate::call_function(session, &cmd.words[0], &cmd.words, last_status),
+        Builtin::Function => {
+            crate::call_function(session, std::mem::take(&mut cmd.words), last_status)
+        }
         Builtin::Trap => Flow::Continue(session.traps.builtin(args, session.interactive)),
         Builtin::Alias => Flow::Continue(crate::alias::builtin(&cmd.words[0], args, session)),
         Builtin::Completion => Flow::Continue(crate::completion_spec::run(
@@ -699,7 +701,7 @@ fn eval_builtin(
         Builtin::Umask => Flow::Continue(crate::builtins::umask::run(args)),
         Builtin::Mapfile => crate::session::mapfile::run(session, &cmd.words[0], args, last_status),
         Builtin::Read => Flow::Continue(session.read(args)),
-        Builtin::Set => Flow::Continue(session.set(args)),
+        Builtin::Set => Flow::Continue(session.set(&mut cmd.words)),
         Builtin::Hash => Flow::Continue(hash::run(session, args)),
         Builtin::Shopt => Flow::Continue(session.shopt(args)),
         Builtin::Getopts => Flow::Continue(session.getopts(args)),
@@ -901,7 +903,7 @@ impl SavedFd {
 
 fn run_builtin(
     builtin: Builtin,
-    cmd: &PreparedCommand,
+    cmd: &mut PreparedCommand,
     session: &mut Session,
     last_status: u8,
     final_command: bool,
@@ -972,9 +974,9 @@ fn run_builtin(
         session.stdin_redirected = old_input;
     }
     if applied && matches!(builtin, Builtin::Exec) && matches!(flow, Flow::Continue(0)) {
-        for a in actions {
-            session.substitutions.replaced(a.destination());
-            coprocess::replaced(session, a.destination());
+        for r in &cmd.redirects {
+            session.substitutions.replaced(r.fd);
+            coprocess::replaced(session, r.fd);
         }
         return Ok(flow);
     }
@@ -1090,8 +1092,8 @@ fn start_raw(
         });
     if !observable {
         return match prepare(raw, session, last_status, false) {
-            Ok(cmd) => start(
-                &cmd,
+            Ok(mut cmd) => start(
+                &mut cmd,
                 input,
                 output,
                 next_reader,
@@ -1143,7 +1145,7 @@ fn start_raw(
 }
 
 fn start(
-    cmd: &PreparedCommand,
+    cmd: &mut PreparedCommand,
     input: Option<OwnedFd>,
     output: Option<OwnedFd>,
     next_reader: Option<&OwnedFd>,
@@ -1288,7 +1290,7 @@ pub(super) fn capture_external(
     session: &mut Session,
     last: u8,
 ) -> Result<(String, u8), &'static str> {
-    let cmd = match prepare(raw, session, last, true) {
+    let mut cmd = match prepare(raw, session, last, true) {
         Ok(cmd) => cmd,
         Err(error) => {
             eprintln!("tonari: {error}");
@@ -1297,7 +1299,7 @@ pub(super) fn capture_external(
     };
     let (reader, writer) = pipe().map_err(|_| "cannot open command substitution pipe")?;
     let stage = start(
-        &cmd,
+        &mut cmd,
         None,
         Some(writer),
         None,
@@ -1768,7 +1770,7 @@ pub fn run_pipeline(
             return named_fd::run(cmd, session, last_status, replace, launch);
         }
         if let Some(builtin) = builtin(&cmd, last_status, session) {
-            return run_builtin(builtin, &cmd, session, last_status, replace);
+            return run_builtin(builtin, &mut cmd, session, last_status, replace);
         }
         if !cmd.cacheable() {
             if cmd.assignments.iter().any(|(k, _)| k == "PATH") {
@@ -1785,7 +1787,7 @@ pub fn run_pipeline(
                 1
             }));
         }
-        let status = match start(&cmd, None, None, None, last_status, session, launch)? {
+        let status = match start(&mut cmd, None, None, None, last_status, session, launch)? {
             Stage::Child(pid) if managed => {
                 launch.parent(pid);
                 session

@@ -31,6 +31,9 @@ impl Variables for Session {
                 self.assign_target(name, &value.to_string())
             };
         }
+        if let Some(result) = self.write_scalar_decimal(name, value) {
+            return result;
+        }
         if self.readonly(name) {
             return Err("readonly variable");
         }
@@ -76,6 +79,80 @@ pub fn expanded(source: &str, session: &mut Session, status: u8) -> Result<i64> 
     crate::expansion::Expansion::new(session, status, &captured)
         .arithmetic(source)
         .map_err(|_| "invalid arithmetic expansion")
+}
+
+// Loop headers are immutable, but their operands can be reassigned on every
+// iteration. Decode frequent forms once and consult the live shell values.
+pub(crate) enum Repeated<'a> {
+    Other(&'a str),
+    Compare(&'a str, &'a str, i64, &'a str),
+    Step(&'a str, i64, bool, &'a str),
+}
+
+impl<'a> Repeated<'a> {
+    pub(crate) fn new(source: &'a str) -> Self {
+        let generic = Self::Other(source);
+        if source.contains(['$', '`', '"', '\\']) {
+            return generic;
+        }
+        let mut parser = Parser {
+            source,
+            token: Token::End,
+        };
+        if parser.advance().is_err() {
+            return generic;
+        }
+        let Ok(first) = parser.advance() else {
+            return generic;
+        };
+        let Ok(second) = parser.advance() else {
+            return generic;
+        };
+        match (first, second, parser.token) {
+            (Token::Name(name), Token::Op(op @ ("++" | "--")), Token::End)
+            | (Token::Op(op @ ("++" | "--")), Token::Name(name), Token::End)
+                if crate::parser::is_identifier(name) =>
+            {
+                Self::Step(
+                    name,
+                    if op == "++" { 1 } else { -1 },
+                    matches!(first, Token::Name(_)),
+                    source,
+                )
+            }
+            (
+                Token::Name(name),
+                Token::Op(op @ ("<" | "<=" | ">" | ">=" | "==" | "!=")),
+                Token::Number(value),
+            ) if crate::parser::is_identifier(name)
+                && parser
+                    .source
+                    .trim_matches([' ', '\t', '\n', '\r'])
+                    .is_empty() =>
+            {
+                number(value).map_or(generic, |n| Self::Compare(name, op, n, source))
+            }
+            _ => generic,
+        }
+    }
+
+    pub(crate) fn run(&self, session: &mut Session, status: u8) -> Result<i64> {
+        match *self {
+            Self::Other(source) => expanded(source, session, status),
+            Self::Compare(name, op, rhs, source) => match session.scalar_decimal(name) {
+                Some(n) => binary(op, n, rhs),
+                None => expanded(source, session, status),
+            },
+            Self::Step(name, delta, postfix, source) => {
+                let Some(old) = session.scalar_decimal(name) else {
+                    return expanded(source, session, status);
+                };
+                let next = old.wrapping_add(delta);
+                Variables::set(session, name, next)?;
+                Ok(if postfix { old } else { next })
+            }
+        }
+    }
 }
 
 pub fn let_builtin(args: &[String], session: &mut Session) -> u8 {

@@ -12,25 +12,60 @@ pub(crate) enum ArrayItems {
     Associative(Vec<(String, String)>),
 }
 
+// A full mapfile read produces consecutive UTF-8 records. Keep their storage
+// together until the first indexed write needs independently owned strings.
+#[derive(Clone, Default)]
+pub(super) struct Records {
+    text: String,
+    ends: Vec<usize>,
+}
+
+impl Records {
+    pub(super) fn push(&mut self, value: &str) {
+        self.text.push_str(value);
+        self.ends.push(self.text.len());
+    }
+
+    fn get(&self, index: usize) -> Option<&str> {
+        let end = *self.ends.get(index)?;
+        let start = if index == 0 { 0 } else { self.ends[index - 1] };
+        Some(&self.text[start..end])
+    }
+
+    fn values(&self) -> impl Iterator<Item = &str> {
+        let mut start = 0;
+        self.ends.iter().map(move |&end| {
+            let value = &self.text[start..end];
+            start = end;
+            value
+        })
+    }
+}
+
 #[derive(Clone)]
-pub(crate) enum Elements {
+pub(super) enum Elements {
+    Records(Records),
     Dense(Vec<String>),
     Associative(super::assoc::Associative),
     Sparse(BTreeMap<i64, String>),
 }
 
 impl Elements {
-    pub(super) fn get(&self, index: &i64) -> Option<&String> {
+    pub(super) fn get(&self, index: &i64) -> Option<&str> {
         match self {
-            Self::Dense(values) => values.get(usize::try_from(*index).ok()?),
-            Self::Sparse(values) => values.get(index),
-            Self::Associative(map) => map.get(&index.to_string()),
+            Self::Records(r) => r.get(usize::try_from(*index).ok()?),
+            Self::Dense(values) => values
+                .get(usize::try_from(*index).ok()?)
+                .map(String::as_str),
+            Self::Sparse(values) => values.get(index).map(String::as_str),
+            Self::Associative(map) => map.get(&index.to_string()).map(String::as_str),
         }
     }
 
     fn last_index(&self) -> Option<i64> {
         match self {
             Self::Associative(_) => None,
+            Self::Records(r) => r.ends.len().checked_sub(1).map(|i| i as i64),
             Self::Dense(values) => values.len().checked_sub(1).map(|i| i as i64),
             Self::Sparse(values) => values.last_key_value().map(|(&i, _)| i),
         }
@@ -39,24 +74,33 @@ impl Elements {
     fn indices(&self) -> Vec<i64> {
         match self {
             Self::Associative(_) => Vec::new(),
+            Self::Records(r) => (0..r.ends.len() as i64).collect(),
             Self::Dense(values) => (0..values.len() as i64).collect(),
             Self::Sparse(values) => values.keys().copied().collect(),
         }
     }
 
-    pub(super) fn iter(&self) -> Box<dyn Iterator<Item = (i64, &String)> + '_> {
+    pub(super) fn iter(&self) -> Box<dyn Iterator<Item = (i64, &str)> + '_> {
         match self {
             Self::Associative(_) => unreachable!("indexed iterator on associative array"),
-            Self::Dense(values) => Box::new((0..).zip(values)),
-            Self::Sparse(values) => Box::new(values.iter().map(|(&i, v)| (i, v))),
+            Self::Records(r) => Box::new((0..).zip(r.values())),
+            Self::Dense(values) => Box::new((0..).zip(values.iter().map(String::as_str))),
+            Self::Sparse(values) => Box::new(values.iter().map(|(&i, v)| (i, v.as_str()))),
         }
     }
 
     fn into_map(self) -> BTreeMap<i64, String> {
         match self {
             Self::Associative(_) => unreachable!("cannot convert associative to indexed array"),
+            Self::Records(r) => (0..).zip(r.values().map(str::to_owned)).collect(),
             Self::Dense(values) => (0..).zip(values).collect(),
             Self::Sparse(values) => values,
+        }
+    }
+
+    fn make_writable(&mut self) {
+        if let Self::Records(records) = self {
+            *self = Self::Dense(records.values().map(str::to_owned).collect());
         }
     }
 
@@ -71,6 +115,7 @@ impl Elements {
     }
 
     pub(super) fn insert(&mut self, index: i64, value: String) {
+        self.make_writable();
         if let Self::Associative(map) = self {
             map.insert(index.to_string(), value);
             return;
@@ -91,7 +136,9 @@ impl Elements {
     }
 
     pub(super) fn append_first(&mut self, text: &str) {
+        self.make_writable();
         match self {
+            Self::Records(_) => unreachable!(),
             Self::Associative(map) => {
                 let mut v = map.get("0").cloned().unwrap_or_default();
                 v.push_str(text);
@@ -103,6 +150,7 @@ impl Elements {
         }
     }
     fn remove(&mut self, index: i64) {
+        self.make_writable();
         if let Self::Dense(values) = self {
             if index < 0 || index as usize >= values.len() {
                 return;
@@ -212,7 +260,7 @@ impl Session {
         }
         if let Some(v) = self.variables.get(name) {
             return match v.elements.as_ref() {
-                Some(a) => a.get(&index).cloned(),
+                Some(a) => a.get(&index).map(str::to_owned),
                 None if index == 0 => v.value.clone(),
                 _ => None,
             };
@@ -393,7 +441,7 @@ impl Session {
         Ok(())
     }
 
-    fn store_elements(&mut self, name: &str, values: Elements, global: bool) {
+    pub(super) fn store_elements(&mut self, name: &str, values: Elements, global: bool) {
         let mut variable = self.declared_variable(name, global).unwrap_or_default();
         if variable.readonly {
             return;

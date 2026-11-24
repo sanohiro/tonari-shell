@@ -170,7 +170,7 @@ pub(super) fn run(
             && flags.nameref.is_none()
             && flags.integer.is_none()
         {
-            return crate::execute::Flow::Continue(session.set(&[]));
+            return crate::execute::Flow::Continue(session.set(&mut Vec::new()));
         }
         let names;
         let names = if operands.is_empty() {
@@ -382,15 +382,17 @@ pub(super) fn run(
                 0
             };
             let old = if let Some(key) = &assoc_key {
-                var.associative().and_then(|map| map.get(key))
+                var.associative()
+                    .and_then(|map| map.get(key))
+                    .map(String::as_str)
             } else {
                 var.elements
                     .as_ref()
                     .and_then(|a| a.get(&index))
-                    .or(var.value.as_ref())
+                    .or(var.value.as_deref())
             };
             let text = if var.integer {
-                match session.integer_value(old.map(String::as_str), text, append) {
+                match session.integer_value(old, text, append) {
                     Ok(v) => v,
                     Err(e) => {
                         eprintln!("tonari: {command}: {e}");
@@ -399,7 +401,7 @@ pub(super) fn run(
                     }
                 }
             } else if append {
-                old.cloned().unwrap_or_default() + text
+                old.unwrap_or_default().to_owned() + text
             } else {
                 text.into()
             };

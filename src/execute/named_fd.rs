@@ -116,7 +116,7 @@ fn command(mut cmd: PreparedCommand, session: &mut Session, status: u8) -> io::R
             }
         }
         if let Some(b) = builtin(&cmd, status, session) {
-            let flow = eval_builtin(b, &cmd, session, status, false);
+            let flow = eval_builtin(b, &mut cmd, session, status, false);
             committed = matches!(b, Builtin::Exec) && matches!(flow, Flow::Continue(0));
             Ok(flow)
         } else {

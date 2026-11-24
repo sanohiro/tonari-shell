@@ -654,7 +654,7 @@ fn callback(
         session.replace_array("COMP_WORDS", Vec::new());
     }
     session.replace_array("COMPREPLY", Vec::new());
-    let flow = crate::call_function(session, func, &args, last);
+    let flow = crate::call_function(session, args, last);
     let values = session.array_values("COMPREPLY");
     session.restore(old);
     (values, matches!(flow, crate::Flow::Continue(124)))
