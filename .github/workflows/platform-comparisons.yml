@@ -5,7 +5,7 @@ on:
       matrix:
         description: Native runners and experiments
         type: string
-        default: '{"runner":["ubuntu-24.04","ubuntu-24.04-arm","macos-15"],"experiment":["directory","pipes","heap","codegen","linking","pgo","workers","earlier-controls"],"include":[{"runner":"ubuntu-24.04","experiment":"initial-batch"},{"runner":"ubuntu-24.04-arm","experiment":"initial-batch"},{"runner":"ubuntu-24.04","experiment":"outliner"},{"runner":"ubuntu-24.04-arm","experiment":"outliner"}]}'
+        default: '{"runner":["ubuntu-24.04","ubuntu-24.04-arm","macos-15"],"experiment":["directory","pipes","heap","codegen","linking","pgo","workers","earlier-controls","worker-counts"],"include":[{"runner":"ubuntu-24.04","experiment":"initial-batch"},{"runner":"ubuntu-24.04-arm","experiment":"initial-batch"},{"runner":"ubuntu-24.04","experiment":"outliner"},{"runner":"ubuntu-24.04-arm","experiment":"outliner"}]}'
 
 permissions:
   contents: read

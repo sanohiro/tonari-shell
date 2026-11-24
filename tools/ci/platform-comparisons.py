@@ -48,7 +48,8 @@ def build(label, change=lambda: None, **flags):
 def run(label, driver, *args, affinity=False):
     cmd = [sys.executable, str(ROOT / "tools" / driver), *map(str, args)]
     if affinity:
-        cmd = ["taskset", "-c", str(min(os.sched_getaffinity(0))), *cmd]
+        allowed = sorted(os.sched_getaffinity(0))[:int(affinity)]
+        cmd = ["taskset", "-c", ",".join(map(str, allowed)), *cmd]
     print("::group::" + label, flush=True)
     with (OUT / (label + ".txt")).open("w") as f:
         subprocess.run(cmd, check=True, stdout=f)
@@ -159,6 +160,19 @@ def workers():
     run("branches", "bench_completion.py", base, serial, "--branches", "--runs", 51)
     if not MAC:
         run("branches-one", "bench_completion.py", base, serial, "--branches", "--runs", 51, affinity=True)
+
+
+def worker_counts():
+    base = build("shared")
+    serial = build("serial", lambda: replace("src/complete.rs", "let workers = if large {", "let workers = if false && large {"))
+    def with_limit(n):
+        return build("max-" + str(n), lambda: replace("src/complete.rs", ".min(4)\n            .min(branches.len())",
+                                                     f".min({n})\n            .min(branches.len())"))
+    shells = [base, serial, with_limit(2), with_limit(3)]
+    run("all", "bench_completion.py", *shells, "--branches", "--runs", 51)
+    if not MAC:
+        for n in (1, 2, 3):
+            run("cpus-" + str(n), "bench_completion.py", *shells, "--branches", "--runs", 51, affinity=n)
 
 
 def initial_batch():
@@ -308,4 +322,4 @@ def pgo():
     run("files", "bench_completion.py", base, other, "--files", 100000, "--runs", 21)
 
 
-{"directory": directory, "pipes": pipes, "heap": heap, "codegen": codegen, "linking": linking, "pgo": pgo, "initial-batch": initial_batch, "workers": workers, "outliner": outliner, "earlier-controls": earlier_controls}[os.environ["EXPERIMENT"]]()
+{"directory": directory, "pipes": pipes, "heap": heap, "codegen": codegen, "linking": linking, "pgo": pgo, "initial-batch": initial_batch, "workers": workers, "outliner": outliner, "earlier-controls": earlier_controls, "worker-counts": worker_counts}[os.environ["EXPERIMENT"]]()
