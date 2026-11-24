@@ -461,7 +461,7 @@ pub fn call_function(session: &mut Session, name: &str, args: &[String], status:
     let flow = crate::traps::debug(session, status).unwrap_or_else(|| {
         run_statements(
             session,
-            &mut function.definition.body.iter().cloned(),
+            &mut function.definition.body.statements().iter().cloned(),
             status,
             false,
         )

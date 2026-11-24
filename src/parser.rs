@@ -194,7 +194,7 @@ pub type CaseArm = (Vec<CasePattern>, Vec<Statement>, CaseEnd);
 #[derive(Debug)]
 pub struct FunctionDefinition {
     pub location: Location,
-    pub body: Vec<Statement>,
+    pub body: wrapper::FunctionBody,
 }
 
 #[derive(Debug, Clone)]
@@ -994,7 +994,7 @@ impl Reader {
         Ok(Command::Function {
             name,
             definition: Rc::new(FunctionDefinition {
-                body,
+                body: wrapper::FunctionBody::Parsed(body),
                 location: self.location(start),
             }),
         })
@@ -1327,7 +1327,7 @@ mod tests {
             words: Some(words),
             body,
             ..
-        } = &definition.body[0].command
+        } = &definition.body.statements()[0].command
         else {
             panic!()
         };
@@ -1345,7 +1345,7 @@ mod tests {
         };
         assert_eq!(name, "g");
         assert!(matches!(
-            definition.body[0].command,
+            definition.body.statements()[0].command,
             Command::While { until: false, .. }
         ));
         for incomplete in ["if true; then echo ok\n", "for i in a; do\n", "fn() {\n"] {

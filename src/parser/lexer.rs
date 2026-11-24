@@ -451,11 +451,12 @@ fn process_start(source: &str) -> bool {
 }
 
 // These bytes never introduce quoting, expansion, assignment or a shell operator.
+pub(super) fn plain_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'/' | b'.' | b':')
+}
+
 pub(super) fn plain_prefix(source: &str) -> usize {
-    source
-        .bytes()
-        .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'/' | b'.' | b':'))
-        .count()
+    source.bytes().take_while(|&b| plain_byte(b)).count()
 }
 
 pub(super) fn separator(c: char) -> bool {
