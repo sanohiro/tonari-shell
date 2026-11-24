@@ -1201,9 +1201,9 @@ impl Session {
         status
     }
 
-    pub fn logical_directory(&self) -> io::Result<PathBuf> {
+    fn logical_directory_ref(&self) -> io::Result<&Path> {
         if let Some(cwd) = self.logical_cwd.get() {
-            return Ok(cwd.clone());
+            return Ok(cwd);
         }
         if let Some(pwd) = std::env::var_os("PWD") {
             let path = Path::new(&pwd);
@@ -1211,11 +1211,15 @@ impl Session {
                 && !path.components().any(|c| c == Component::ParentDir)
                 && same_directory(path, Path::new("."))
             {
-                return Ok(self.logical_cwd.get_or_init(|| path.into()).clone());
+                return Ok(self.logical_cwd.get_or_init(|| path.into()));
             }
         }
         let cwd = std::env::current_dir()?;
-        Ok(self.logical_cwd.get_or_init(|| cwd).clone())
+        Ok(self.logical_cwd.get_or_init(|| cwd))
+    }
+
+    pub fn logical_directory(&self) -> io::Result<PathBuf> {
+        self.logical_directory_ref().map(Path::to_owned)
     }
 
     pub fn directory_builtin(&mut self, name: &str, args: &[String]) -> u8 {

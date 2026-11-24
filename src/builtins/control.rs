@@ -142,10 +142,19 @@ pub fn help(mut args: &[String]) -> u8 {
         args = rest;
     }
     let mut out = io::stdout().lock();
-    let topics = include_str!("help.txt");
+    static TOPICS: std::sync::OnceLock<Vec<(&str, &str, &str)>> = std::sync::OnceLock::new();
+    let topics = TOPICS.get_or_init(|| {
+        include_str!("help.txt")
+            .lines()
+            .map(|row| {
+                let (syntax, description) = row.split_once('|').unwrap();
+                (syntax.split(' ').next().unwrap(), syntax, description)
+            })
+            .collect()
+    });
     if args.is_empty() {
-        for topic in topics.lines() {
-            if writeln!(out, "{}", topic.split('|').next().unwrap()).is_err() {
+        for &(_, syntax, _) in topics {
+            if writeln!(out, "{syntax}").is_err() {
                 return 1;
             }
         }
@@ -153,6 +162,7 @@ pub fn help(mut args: &[String]) -> u8 {
     }
     let mut any = false;
     for pattern in args {
+        let literal = topics.binary_search_by_key(&pattern.as_str(), |&(name, _, _)| name);
         let extended = crate::pattern::extended::Pattern::new(pattern);
         let basic = crate::pattern::Matcher::new(pattern);
         let matches = |name: &str| {
@@ -160,13 +170,13 @@ pub fn help(mut args: &[String]) -> u8 {
                 .as_ref()
                 .map_or_else(|| basic.matches(name), |p| p.accepts(name, false))
         };
-        let exact = topics
-            .lines()
-            .any(|s| matches(s.split(' ').next().unwrap().split('|').next().unwrap()));
-        for row in topics.lines() {
-            let (syntax, description) = row.split_once('|').unwrap();
-            let name = syntax.split(' ').next().unwrap();
-            if !(matches(name) || !exact && name.starts_with(pattern)) {
+        let candidates = match literal {
+            Ok(i) => &topics[i..=i],
+            Err(_) => topics.as_slice(),
+        };
+        let exact = literal.is_ok() || candidates.iter().any(|&(name, _, _)| matches(name));
+        for &(name, syntax, description) in candidates {
+            if literal.is_err() && !(matches(name) || !exact && name.starts_with(pattern)) {
                 continue;
             }
             any = true;

@@ -173,11 +173,12 @@ fn buffered_compound(
         _ if header.lines().next()?.contains("()") => b"}",
         _ => return None,
     };
-    let mut size = 0;
-    for (i, next) in buffered.split_inclusive(|&c| c == b'\n').enumerate() {
-        size += next.len();
-        // The last available slice may end in the middle of a physical line.
-        if !next.ends_with(b"\n") || !next.trim_ascii_start().starts_with(close) {
+    let mut start = 0;
+    for (i, end) in memchr::memchr_iter(b'\n', buffered).enumerate() {
+        let size = end + 1;
+        let next = &buffered[start..end];
+        start = size;
+        if !next.trim_ascii_start().starts_with(close) {
             continue;
         }
         let mut text = String::with_capacity(first.len() + size);
@@ -258,7 +259,7 @@ fn run(
             && parser::opens_function(text)
             && !(session.shopt.expand_aliases && session.aliases.0.is_some());
         let mut result = if open_function {
-            // A bare "name() {" cannot execute before the rest of the body.
+            // A function header cannot execute before its compound body.
             Err(parser::Error::Incomplete("unfinished function definition"))
         } else {
             parser::session_source_at(text, n == 0, session, base_line)

@@ -226,6 +226,15 @@ fn same_letter(left: char, right: char, locale: CharacterLocale) -> bool {
 }
 
 pub(super) fn folded_prefix(value: &str, prefix: &str, locale: CharacterLocale) -> Option<usize> {
+    if !matches!(locale, CharacterLocale::Turkic)
+        && prefix.is_ascii()
+        && let Some(head) = value.as_bytes().get(..prefix.len())
+        && head.is_ascii()
+    {
+        return head
+            .eq_ignore_ascii_case(prefix.as_bytes())
+            .then_some(prefix.len());
+    }
     let mut chars = value.chars();
     for expected in prefix.chars() {
         let current = chars.next()?;

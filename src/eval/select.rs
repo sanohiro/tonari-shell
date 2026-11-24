@@ -47,15 +47,20 @@ pub(super) fn run(
         let mut show = first || s.get("REPLY").is_some_and(|s| s.is_empty());
         first = false;
         loop {
+            let prompt = s.get("PS3");
+            let prompt = prompt.as_deref().unwrap_or("#? ");
             if show {
                 let columns = s
                     .get("COLUMNS")
                     .and_then(|v| v.parse().ok())
                     .filter(|&n| n != 0)
                     .unwrap_or(80);
-                eprint!("{}", menu(items, columns));
+                let mut display = menu(items, columns);
+                display.push_str(prompt);
+                eprint!("{display}");
+            } else {
+                eprint!("{prompt}");
             }
-            eprint!("{}", s.get("PS3").as_deref().unwrap_or("#? "));
             if s.read(&[]) != 0 {
                 println!();
                 return Err(Flow::Continue(1));

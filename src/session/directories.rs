@@ -15,28 +15,33 @@ fn index(word: &str, len: usize) -> Option<usize> {
 }
 
 impl Session {
-    pub(super) fn stack_entry(&self, i: usize) -> Option<String> {
+    fn stack_path(&self, i: usize) -> Option<&str> {
         if i == 0 {
-            return self
-                .logical_directory()
-                .ok()?
-                .into_os_string()
-                .into_string()
-                .ok();
+            return self.logical_directory_ref().ok()?.to_str();
         }
         self.dir_stack
             .len()
             .checked_sub(i)
-            .map(|n| self.dir_stack[n].clone())
+            .map(|n| self.dir_stack[n].as_str())
     }
 
-    fn show_stack(&self, only: Option<usize>, long: bool, vertical: bool, numbered: bool) -> u8 {
+    pub(super) fn stack_entry(&self, i: usize) -> Option<String> {
+        self.stack_path(i).map(str::to_owned)
+    }
+
+    fn show_stack(
+        &self,
+        out: &mut dyn Write,
+        only: Option<usize>,
+        long: bool,
+        vertical: bool,
+        numbered: bool,
+    ) -> u8 {
         let home = (!long).then(|| self.get("HOME")).flatten();
-        let mut out = io::stdout().lock();
         let first = only.unwrap_or(0);
         let last = only.unwrap_or(self.dir_stack.len());
         for i in first..=last {
-            let Some(path) = self.stack_entry(i) else {
+            let Some(path) = self.stack_path(i) else {
                 return 1;
             };
             let name = home
@@ -66,7 +71,7 @@ impl Session {
         u8::from(out.flush().is_err())
     }
 
-    pub fn directory_stack(&mut self, command: &str, args: &[String]) -> u8 {
+    pub fn directory_stack(&mut self, command: &str, args: &[String], out: &mut dyn Write) -> u8 {
         let (mut long, mut vertical, mut numbered, mut clear, mut no_cd) =
             (false, false, false, false, false);
         let mut args = args.iter().peekable();
@@ -119,7 +124,7 @@ impl Session {
             _ => None,
         };
         if command == "dirs" {
-            return self.show_stack(slot, long, vertical, numbered);
+            return self.show_stack(out, slot, long, vertical, numbered);
         }
         let result = (|| -> io::Result<()> {
             if command == "popd" {
@@ -181,6 +186,6 @@ impl Session {
         if command == "pushd" && no_cd && (operand.is_none() || slot.is_some()) {
             return 0;
         }
-        self.show_stack(None, false, false, false)
+        self.show_stack(out, None, false, false, false)
     }
 }

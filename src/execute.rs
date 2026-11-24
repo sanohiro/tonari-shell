@@ -697,7 +697,9 @@ fn eval_builtin(
         Builtin::Printf => Flow::Continue(session.printf(args)),
         Builtin::Jobs => crate::jobs::dispatch(&cmd.words, session, last_status),
         Builtin::Times => Flow::Continue(crate::builtins::times(args)),
-        Builtin::Ulimit => Flow::Continue(crate::builtins::limits::run(args)),
+        Builtin::Ulimit => {
+            Flow::Continue(crate::builtins::limits::run(args, &mut io::stdout().lock()))
+        }
         Builtin::Umask => Flow::Continue(crate::builtins::umask::run(args)),
         Builtin::Mapfile => crate::session::mapfile::run(session, &cmd.words[0], args, last_status),
         Builtin::Read => Flow::Continue(session.read(args)),
@@ -740,7 +742,9 @@ fn eval_builtin(
             Flow::Continue(apply_array_declarations(cmd, status, session))
         }
         Builtin::Unset => Flow::Continue(session.unset(args)),
-        Builtin::DirectoryStack => Flow::Continue(session.directory_stack(&cmd.words[0], args)),
+        Builtin::DirectoryStack => {
+            Flow::Continue(session.directory_stack(&cmd.words[0], args, &mut io::stdout().lock()))
+        }
         Builtin::Directory => Flow::Continue(session.directory_builtin(&cmd.words[0], args)),
         Builtin::Source => crate::source_file(session, &cmd.words, last_status),
         Builtin::Eval => crate::eval_text(
@@ -906,6 +910,8 @@ impl SavedFd {
 enum PlainOutput<'a> {
     Echo(&'a [String]),
     Printf(&'a [String]),
+    DirectoryStack(&'a str, &'a [String]),
+    Limits(&'a [String]),
 }
 
 impl<'a> PlainOutput<'a> {
@@ -949,15 +955,43 @@ impl<'a> PlainOutput<'a> {
         }
     }
 
-    fn render(self, session: &mut Session) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        match self {
-            Self::Echo(words) => crate::builtins::echo_into(words, &mut bytes),
-            Self::Printf(words) => {
-                crate::session::printf::run(session, words, Some(&mut bytes));
-            }
+    fn for_redirect(builtin: Builtin, cmd: &'a PreparedCommand) -> Option<Self> {
+        if !cmd.assignments.is_empty() {
+            return None;
         }
-        bytes
+        let args = cmd.words.get(1..)?;
+        match builtin {
+            Builtin::DirectoryStack
+                if cmd.words[0] == "dirs" || args.first().is_some_and(|s| s == "-n") =>
+            {
+                Some(Self::DirectoryStack(&cmd.words[0], args))
+            }
+            Builtin::Ulimit
+                if args.iter().all(|arg| {
+                    arg.strip_prefix('-')
+                        .is_some_and(|flags| flags.bytes().all(|b| b.is_ascii_alphabetic()))
+                }) =>
+            {
+                Some(Self::Limits(args))
+            }
+            _ => Self::new(builtin, cmd, usize::MAX),
+        }
+    }
+
+    fn render(self, session: &mut Session) -> (Vec<u8>, u8) {
+        let mut bytes = Vec::new();
+        let status = match self {
+            Self::Echo(words) => {
+                crate::builtins::echo_into(words, &mut bytes);
+                0
+            }
+            Self::Printf(words) => crate::session::printf::run(session, words, Some(&mut bytes)),
+            Self::DirectoryStack(command, args) => {
+                session.directory_stack(command, args, &mut bytes)
+            }
+            Self::Limits(args) => crate::builtins::limits::run(args, &mut bytes),
+        };
+        (bytes, status)
     }
 }
 
@@ -983,8 +1017,7 @@ fn run_builtin(
     protect_fds(actions)?;
     if !final_command
         && let [Action::Open(1, path, flags)] = actions
-        && matches!(builtin, Builtin::Echo | Builtin::Printf)
-        && let Some(output) = PlainOutput::new(builtin, cmd, usize::MAX)
+        && let Some(output) = PlainOutput::for_redirect(builtin, cmd)
     {
         // Reserve the same descriptor as the ordinary redirect, including
         // failure at RLIMIT_NOFILE. A byte-only builtin can write to the file
@@ -994,8 +1027,9 @@ fn run_builtin(
             return Ok(Flow::Continue(1));
         };
         use std::io::Write;
-        let result = std::fs::File::from(fd).write_all(&output.render(session));
-        return Ok(Flow::Continue(u8::from(result.is_err())));
+        let (data, status) = output.render(session);
+        let result = std::fs::File::from(fd).write_all(&data);
+        return Ok(Flow::Continue(if result.is_err() { 1 } else { status }));
     }
     if let (Builtin::Status(code), [Action::Open(dest, path, flags)]) = (builtin, actions) {
         // A silent builtin needs the open's effects (including a blocking FIFO),
@@ -1253,10 +1287,10 @@ fn start(
         // pipe. We still own its reader, so this write can finish before
         // starting the consumer. Managed jobs and trapped children need a PID.
         use std::io::Write;
-        let bytes = plain.render(session);
+        let (bytes, status) = plain.render(session);
         debug_assert!(bytes.len() <= 512);
         let result = std::fs::File::from(output.unwrap()).write_all(&bytes);
-        return Ok(Stage::Status(u8::from(result.is_err())));
+        return Ok(Stage::Status(if result.is_err() { 1 } else { status }));
     }
     if builtin.is_none()
         && launch.group.is_none()
@@ -1518,7 +1552,7 @@ fn prepare(
         }
         match word {
             Word::Literal(word) => words.push(word),
-            word => words.extend(original.fields(word)?),
+            word => original.append_fields(word, &mut words)?,
         }
     }
     // A lone assignment has no following word, redirect or trace that needs a copy.

@@ -312,35 +312,44 @@ impl Word {
         lookup: &dyn Fn(&str) -> Option<String>,
         positional: &[String],
     ) -> Vec<String> {
-        self.fields_with_glob(lookup, positional, Some(&Default::default()))
-            .unwrap()
+        let mut words = Vec::new();
+        self.append_fields(lookup, positional, Some(&Default::default()), &mut words)
+            .unwrap();
+        words
     }
 
-    pub fn fields_with_glob(
+    pub fn append_fields(
         self,
         lookup: &dyn Fn(&str) -> Option<String>,
         positional: &[String],
         globbing: Option<&crate::pattern::GlobOptions>,
-    ) -> Result<Vec<String>, crate::expansion::Error> {
+        words: &mut Vec<String>,
+    ) -> Result<(), crate::expansion::Error> {
         if let Self::Literal(s) = self {
-            return Ok(vec![s]);
+            words.push(s);
+            return Ok(());
         }
-        let ifs = lookup("IFS").unwrap_or_else(|| " \t\n".into());
+        let ifs = lookup("IFS");
         let mut output = Output::Fields(Fields {
             lookup,
             globbing,
-            words: Vec::new(),
+            words,
             current: Field::default(),
             error: None,
             present: false,
             whitespace: false,
         });
-        self.expand_into(&mut output, lookup, positional, &ifs);
+        self.expand_into(
+            &mut output,
+            lookup,
+            positional,
+            ifs.as_deref().unwrap_or(" \t\n"),
+        );
         let Output::Fields(mut fields) = output else {
             unreachable!()
         };
         fields.finish_field();
-        fields.error.map_or(Ok(fields.words), Err)
+        fields.error.map_or(Ok(()), Err)
     }
 
     pub fn pattern(self, lookup: &dyn Fn(&str) -> Option<String>, positional: &[String]) -> String {
@@ -663,7 +672,7 @@ pub(crate) fn separators(text: &str, ifs: &str, mut visit: impl FnMut(usize, &st
 }
 
 struct Fields<'a> {
-    words: Vec<String>,
+    words: &'a mut Vec<String>,
     current: Field,
     globbing: Option<&'a crate::pattern::GlobOptions>,
     lookup: &'a dyn Fn(&str) -> Option<String>,
@@ -676,9 +685,7 @@ impl Fields<'_> {
     fn emit(&mut self) {
         let current = std::mem::take(&mut self.current);
         if self.error.is_none() {
-            self.error = current
-                .finish(&mut self.words, self.globbing, self.lookup)
-                .err();
+            self.error = current.finish(self.words, self.globbing, self.lookup).err();
         }
     }
 

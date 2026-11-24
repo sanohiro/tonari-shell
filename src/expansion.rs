@@ -271,6 +271,21 @@ impl<'a> Expansion<'a> {
     }
 
     pub fn fields_with_glob(&mut self, word: Word, glob: bool) -> Result<Vec<String>, Error> {
+        let mut fields = Vec::new();
+        self.append_fields_with_glob(word, glob, &mut fields)?;
+        Ok(fields)
+    }
+
+    pub fn append_fields(&mut self, word: Word, fields: &mut Vec<String>) -> Result<(), Error> {
+        self.append_fields_with_glob(word, !self.session.noglob, fields)
+    }
+
+    fn append_fields_with_glob(
+        &mut self,
+        word: Word,
+        glob: bool,
+        fields: &mut Vec<String>,
+    ) -> Result<(), Error> {
         if self.session.shopt.braceexpand
             && let Word::Expanded(parts) = &word
             && parts.iter().any(|p| {
@@ -281,21 +296,23 @@ impl<'a> Expansion<'a> {
             })
             && let Word::Expanded(parts) = word
         {
-            return crate::word::brace::fields(parts, self, glob);
+            return crate::word::brace::append_fields(parts, self, glob, fields);
         }
-        self.resolved_fields(word, glob)
+        self.append_resolved_fields(word, glob, fields)
     }
 
-    pub(crate) fn resolved_fields(
+    pub(crate) fn append_resolved_fields(
         &mut self,
         mut word: Word,
         glob: bool,
-    ) -> Result<Vec<String>, Error> {
+        fields: &mut Vec<String>,
+    ) -> Result<(), Error> {
         word.resolve(self)?;
-        word.fields_with_glob(
+        word.append_fields(
             &|name| self.lookup(name),
             &self.session.positional,
             glob.then_some(&self.session.shopt.glob),
+            fields,
         )
     }
 

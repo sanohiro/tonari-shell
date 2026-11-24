@@ -161,11 +161,16 @@ fn parameter_names(parts: Vec<Part>) -> Vec<Part> {
     result
 }
 
-pub fn fields(parts: Vec<Part>, env: &mut Expansion<'_>, glob: bool) -> Result<Vec<String>, Error> {
+pub fn append_fields(
+    parts: Vec<Part>,
+    env: &mut Expansion<'_>,
+    glob: bool,
+    result: &mut Vec<String>,
+) -> Result<(), Error> {
     if let [Part::Range(range)] = &parts[..] {
-        return Ok(range.values().collect());
+        result.extend(range.values());
+        return Ok(());
     }
-    let mut result = Vec::new();
     let mut pending = vec![parts];
     while let Some(mut parts) = pending.pop() {
         match choice(&parts) {
@@ -207,9 +212,9 @@ pub fn fields(parts: Vec<Part>, env: &mut Expansion<'_>, glob: bool) -> Result<V
                 {
                     parts[0] = Part::Tilde((*prefix).into());
                 }
-                result.extend(env.resolved_fields(Word::Expanded(parameter_names(parts)), glob)?);
+                env.append_resolved_fields(Word::Expanded(parameter_names(parts)), glob, result)?;
             }
         }
     }
-    Ok(result)
+    Ok(())
 }

@@ -390,10 +390,7 @@ impl Reader {
     fn new(tokens: Vec<Token>, spans: Vec<(usize, usize)>, source: &str) -> Self {
         Self {
             spans,
-            newlines: source
-                .match_indices('\n')
-                .map(|(offset, _)| offset)
-                .collect(),
+            newlines: memchr::memchr_iter(b'\n', source.as_bytes()).collect(),
             source: source.into(),
             tokens: tokens.into(),
             aliases: aliases::current(),

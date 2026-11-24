@@ -24,12 +24,14 @@ fn name(header: &str) -> Option<&str> {
 }
 
 pub(crate) fn opens_function(line: &str) -> bool {
-    line.strip_suffix('\n')
+    let header = line
+        .strip_suffix('\n')
         .unwrap_or(line)
-        .trim_end_matches([' ', '\t'])
-        .strip_suffix('{')
-        .and_then(name)
-        .is_some()
+        .trim_end_matches([' ', '\t']);
+    if let Some(before) = header.strip_suffix('{') {
+        return name(before).is_some();
+    }
+    header.ends_with("()") && name(header).is_some()
 }
 
 pub(super) fn parse(source: &str) -> Option<Statement> {

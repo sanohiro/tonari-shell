@@ -59,6 +59,24 @@ pub(crate) fn run(
         eprintln!("tonari: printf: format required");
         return 2;
     };
+    if target.is_none() && capture.is_none() {
+        let borrowed = if format == "%s" && values.len() <= 1 {
+            Some(values.first().map_or("", String::as_str))
+        } else if !format.contains(['%', '\\']) {
+            Some(format.as_str())
+        } else {
+            None
+        };
+        if let Some(text) = borrowed {
+            let mut stdout = io::stdout().lock();
+            return u8::from(
+                stdout
+                    .write_all(text.as_bytes())
+                    .and_then(|()| stdout.flush())
+                    .is_err(),
+            );
+        }
+    }
     let mut variables = Variables {
         shell: session,
         capture: capture.is_some(),
@@ -327,6 +345,10 @@ fn render(
         match byte {
             b'\\' => {
                 escapes::one(&mut input, out, Mode::Format);
+            }
+            b'%' if input.first() == Some(&b's') => {
+                out.extend_from_slice(args.next().as_bytes());
+                input = &input[1..];
             }
             b'%' if input.first() == Some(&b'%') => {
                 out.push(b'%');

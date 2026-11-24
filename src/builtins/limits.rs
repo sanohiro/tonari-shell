@@ -95,7 +95,7 @@ impl Limit {
 
     fn report(
         &self,
-        out: &mut impl Write,
+        out: &mut dyn Write,
         values: &libc::rlimit,
         hard: bool,
         label: bool,
@@ -155,7 +155,7 @@ impl Limit {
     }
 }
 
-pub fn run(args: &[String]) -> u8 {
+pub fn run(args: &[String], out: &mut dyn Write) -> u8 {
     let mut args = args.iter().map(String::as_str).peekable();
     let (mut soft, mut hard, mut all) = (false, false, false);
     let mut requests = Vec::new();
@@ -185,16 +185,19 @@ pub fn run(args: &[String]) -> u8 {
             }
         }
     }
-    let mut out = io::stdout().lock();
     if all {
+        let mut lines = Vec::with_capacity(LIMITS.len() * 60);
         for limit in LIMITS {
             if let Ok(values) = limit.current()
                 && limit
-                    .report(&mut out, &values, hard && !soft, true)
+                    .report(&mut lines, &values, hard && !soft, true)
                     .is_err()
             {
                 return 1;
             }
+        }
+        if out.write_all(&lines).is_err() {
+            return 1;
         }
     } else {
         if let Some((_, arg)) = requests.last_mut() {
@@ -209,7 +212,7 @@ pub fn run(args: &[String]) -> u8 {
         for (limit, arg) in requests {
             let result = limit.current().and_then(|values| match arg {
                 Some(arg) => limit.set(values, arg, soft || !hard, hard || !soft),
-                None => limit.report(&mut out, &values, hard && !soft, label),
+                None => limit.report(out, &values, hard && !soft, label),
             });
             if let Err(error) = result {
                 eprintln!("tonari: ulimit: {}: {error}", limit.name);
