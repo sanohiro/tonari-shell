@@ -1,5 +1,37 @@
 # Startup and execution / 起動と実行性能
 
+<a id="shell-workloads"></a>
+
+## 2026-11-24 · Native shell workloads / シェルの実行時間
+
+Each cell shows **Tonari p50/p95 · Bash p50/p95**, in milliseconds. The production build at `bef7103` ran natively on three CPU/OS combinations. The throughput driver rotates shells, waits for readiness, checks the output and status, then reports 31 timed samples per shell. Startup uses 71 samples and Ctrl-R uses 41. PTY latency ends when the requested result becomes visible. Both Tab cases open a fresh shell per sample. With 10,000 files the timer ends when the unique UTF-8 completion is visible. With 100,000 files it ends when the character queued after Tab is echoed. The completed line is checked on a subsequent redraw. [Native CI](https://github.com/sanohiro/tonari-shell/actions/runs/45320000020) · [All measurements](native-2026-11-24/workload-budget.tar.gz)
+
+| Workload, p50/p95 ms | Linux x86-64 | Linux arm64 | macOS arm64 |
+| --- | ---: | ---: | ---: |
+| Ctrl-R, 100,000 history entries | 0.480/0.570 · 1.083/1.630 | 0.568/0.624 · 1.014/1.113 | 1.121/1.971 · 0.924/1.685 |
+| Tab, unique UTF-8 completion in 10,000 entries | 2.757/2.848 · 2.975/3.001 | 1.857/1.891 · 2.046/2.063 | 3.943/5.860 · 7.951/10.336 |
+| Key echo after Tab, 100,000 entries | 0.119/0.142 · 76.483/77.223 | 0.099/0.107 · 57.916/60.087 | 0.226/0.906 · 659.553/902.687 |
+| Display all 10,000 completion candidates | 9.140/9.291 · 56.591/60.324 | 6.399/6.512 · 32.350/33.229 | 12.961/14.563 · 66.236/86.970 |
+| Paste 16 KiB, packet to visible marker | 3.107/3.629 · 44.824/47.732 | 1.992/2.240 · 38.735/40.332 | 4.987/9.348 · 31.452/42.610 |
+| Exec to first prompt | 0.519/0.560 · 1.074/1.128 | 0.835/0.885 · 1.480/1.562 | 2.658/4.667 · 7.085/11.342 |
+| Start and exit, `-c :` | 0.173/0.215 · 0.576/0.637 | 0.376/0.437 · 0.874/0.952 | 2.785/4.926 · 8.182/11.364 |
+| Parse 2,000 different multiline function bodies | 3.647/3.703 · 5.985/6.088 | 3.744/3.799 · 7.871/7.939 | 3.916/4.596 · 7.704/9.298 |
+| Replace one literal function 2,000 times | 0.564/0.584 · 2.130/2.237 | 0.635/0.672 · 2.896/2.931 | 0.724/0.795 · 2.786/3.052 |
+| 4,096 UTF-8 names, one expansion | 1.918/1.992 · 2.912/3.037 | 1.660/1.701 · 3.603/3.658 | 10.754/18.832 · 25.209/41.526 |
+| Read lines into an array | 2.005/2.037 · 3.105/3.200 | 0.993/1.028 · 4.228/4.314 | 1.476/3.838 · 4.651/10.622 |
+| 2,000 integer increments by assignment | 0.695/0.721 · 2.393/2.432 | 0.633/0.666 · 3.275/3.357 | 0.912/1.921 · 3.536/8.294 |
+| List all resource limits 128 times | 0.807/0.831 · 1.290/1.334 | 0.830/0.854 · 2.041/2.077 | 0.934/1.694 · 2.608/4.881 |
+| Read 2,000 lines in a shell loop | 4.198/4.285 · 6.740/6.923 | 4.873/4.928 · 9.842/9.939 | 7.026/13.709 · 16.069/28.618 |
+| 16 external two-stage pipelines | 6.972/7.898 · 9.323/9.582 | 11.821/12.104 · 14.527/14.949 | 42.702/56.151 · 49.119/64.457 |
+
+On Linux x86-64, launching and waiting for 16 external `true` processes took **4.808 / 4.819 / 6.976 ms** for Tonari, the direct C program and Bash respectively. Across the script workloads, the counts above two-thirds of Bash time were Linux x86-64 9/61 · Linux arm64 9/61 · macOS arm64 9/61. The full scripts file identifies which of these workloads have an equivalent C measurement. The feature inventory covers additional workloads. A separate native arm64 trial on Debian measured 128 full limit listings at 1.542 ms before direct label formatting, 1.170 ms after, and 3.152 ms in Bash. Each output byte was checked against the same shell’s untimed result. The C controls are provided for individual process, pipe and directory workloads. Other rows remain open when the measured shell exceeds the target. Stripped release sizes in column order were 1,790,968/1,543,168/1,300,768 bytes. [C workload definitions](../tools/bench_spawn.c) · [All measurements](native-2026-11-24/workload-budget.tar.gz)
+
+各セルは「Tonari の中央値/p95 · Bash の中央値/p95」で単位は ms です。履歴と補完は実際の疑似端末で、起動は exec から最初のプロンプトまで、関数再定義は2,000件を読み込んで最後に定義した関数の結果が返るまでを測りました。外部コマンドには同じ実行ファイルを同じ回数起動する C 版も含めました。反復可能な機能のうち Bash の2/3以内は 1,928/2,780 件でした。未達 852 件の各行には絶対時間も残しています。 [機能別結果](compatibility.md#repeated-workloads) · [All measurements](native-2026-11-24/workload-budget.tar.gz)
+
+On the local M1, reading the oldest of one million records took 6.208/7.241 ms with 128 KiB blocks, 5.074/5.527 ms with 240 KiB and 4.425/5.001 ms with 512 KiB (median/p95). The 512 KiB build increased the native x86-64 Ctrl-R median for 100,000 entries from 0.424 to 0.558 ms. At 240 KiB the same-run comparison was 0.394 to 0.417 ms, and Linux arm64 measured 0.647 to 0.641 ms. On the hosted M1, 240 KiB reduced the same cold 100,000-entry search from 1.881/3.223 to 1.361/2.454 ms. Bash took 0.878/1.878 ms. Tonari uses 240 KiB on all three targets. Starting a fresh PTY session on the local M1 and finding the oldest matching entry in a 100,000-row journal took 6.032/6.656 ms with the 240 KiB build and 22.208/23.173 ms with Bash 5.2.37. This interval includes startup and history loading. [240 KiB trial](https://github.com/sanohiro/tonari-shell/actions/runs/45316981578) · [All measurements](native-2026-11-24/workload-budget.tar.gz)
+
+履歴の読み取り単位は全 CPU 共通の 240 KiB にしました。512 KiB では手元の Mac で古い履歴の検索時間がさらに短くなる一方、Linux 実機では10万件の Ctrl-R が arm64 と x86-64 の両方で遅くなりました。表の Ctrl-R は入力から表示まで、PTY を開くところから測った値にはシェル起動と履歴の読み込みも含みます。 [All measurements](native-2026-11-24/workload-budget.tar.gz)
+
 <a id="function-redefinitions"></a>
 
 ## 2026-11-24 · Function definitions and calls / 関数の再定義と呼び出し

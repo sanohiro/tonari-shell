@@ -1,5 +1,23 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+<a id="repeated-workloads"></a>
+
+## 2026-11-24 · Repeated workload audit / 反復実行を含む互換性検証
+
+The five native inventories contain 7,558 platform/feature rows. Compared with `5958ee7`, five previously different witnesses now match Bash, all for `set -o onecmd`. The other 7,553 verdicts were unchanged. The suite also tests that the PID returned by `$!` identifies the background subshell and that its status reaches `wait`. All timed batches reproduced the original command result on each checked iteration. On the M1, one reference Bash failure during the timed foreground pipeline witness prevented publication of its whole-process timing and the two rows sharing it, `fg` and `bg`. Those three original error fields remain in the matrix. An independent M1 job rebuilt the same reference Bash 5.2.37 and verified 41 interleaved samples per shell after two warmups. Foreground pipeline stop, background resume, foreground resume and interrupt measured **27.947/41.626 · 32.562/41.736 ms** (Tonari p50/p95 · Bash p50/p95). The integration suite has 153 tests. macOS skips the two Linux-specific cases. [Native CI](https://github.com/sanohiro/tonari-shell/actions/runs/45320000020) · [Foreground replay](https://github.com/sanohiro/tonari-shell/actions/runs/45323499266) · [All measurements](native-2026-11-24/workload-budget.tar.gz)
+
+| Platform | Inventory rows | Triggered, repeatable rows | Median ≤ 2/3 of Bash | Median > 2/3 of Bash |
+| --- | ---: | ---: | ---: | ---: |
+| macOS arm64 | 1408 | 522 | 296 | 226 |
+| Debian x86-64 | 1522 | 555 | 391 | 164 |
+| Debian arm64 | 1522 | 561 | 459 | 102 |
+| Ubuntu x86-64 | 1553 | 568 | 353 | 215 |
+| Ubuntu arm64 | 1553 | 574 | 429 | 145 |
+
+The repeated subset starts with single probes that exceeded the budget in either whole-process or already-started timing. The matrix retains the reason for skips, the iteration count, sample count, and both shells’ median and p95. Several names share witnesses. Existing gaps include 1,029 missing-interface rows and 889 rows with observed behavior differences across the five environments. The archive also lists threshold crossings against the earlier one-command measurements. [Benchmark record](benchmarks.md#shell-workloads) · [All measurements](native-2026-11-24/workload-budget.tar.gz)
+
+5環境の 7,558 件で以前と互換性判定を比較しました。`set -o onecmd` は5環境で Bash と一致するようになりました。反復対象は該当する一行以上の計測で目標を超え、同じシェル内で元の観測を再現できるものです。macOS の前景パイプライン計測は最初の実行で参照 Bash が1回失敗し、同じ検証を共有する3行に記録されました。別の M1 ジョブで各シェル41回を再計測し、初回・再計測の両方を保存しました。未実装、動作差、反復対象外の理由、目標未達の時間を環境ごとに確認できます。 [All measurements](native-2026-11-24/workload-budget.tar.gz)
+
 The function parser at `5958ee7` preserved all 7,558 published feature verdicts across Debian 13 and Ubuntu 26.04 on x86-64 and arm64, plus macOS arm64. The five inventories also ran the 146-test integration suite. macOS skipped its two Linux-specific checks. 関数再定義の高速化後に5環境で照合し、既存の互換判定7,558件がすべて一致しました。 [Per-platform results and timing changes](native-2026-11-24/function-audit.tar.gz) · [Native CI](https://github.com/sanohiro/tonari-shell/actions/runs/45306401686)
 
 The function test suite covers redefining or unsetting a function while it is running, read-time alias expansion, invocation-time redirection, source line numbers and invalid function delimiters. The Ubuntu 24.04 GitHub runner's customized interactive login emitted two compound-command diagnostics with both the previous release and the parser candidate. Both produced the same login variables and `ll` alias, and both accepted the host's `/etc/profile` and `/etc/profile.d/*.sh` with `-n`. [Bash witnesses](../tests/shell.py) · [Comparison on the hosted runner](https://github.com/sanohiro/tonari-shell/actions/runs/45305645749)
