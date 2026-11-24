@@ -55,6 +55,29 @@ fn file(session: &Session) -> Option<PathBuf> {
     Some(dir.join("tonari/history"))
 }
 
+/// Spaces separate literal search fragments. An escaped space can itself
+/// occur in a saved shell word, so keep both the backslash and the space.
+pub(crate) fn fragments(mut query: &str) -> impl Iterator<Item = &str> {
+    std::iter::from_fn(move || {
+        query = query.trim_start_matches(' ');
+        if query.is_empty() {
+            return None;
+        }
+        let mut escaped = false;
+        let end = query
+            .bytes()
+            .position(|b| {
+                let separator = !escaped && b == b' ';
+                escaped = !escaped && b == b'\\';
+                separator
+            })
+            .unwrap_or(query.len());
+        let (word, rest) = query.split_at(end);
+        query = rest;
+        Some(word)
+    })
+}
+
 fn encode(value: &str, out: &mut String) {
     for c in value.chars() {
         match c {
@@ -622,6 +645,37 @@ impl History {
             }
         }
         self.older_match.as_deref().map(|s| &s[prefix.len()..])
+    }
+
+    pub(crate) fn filtered(
+        &mut self,
+        session: &Session,
+        query: &str,
+        limit: usize,
+        waiting: &dyn Fn() -> bool,
+    ) -> (Vec<String>, bool) {
+        let mut hits = Vec::new();
+        let terms: Vec<_> = fragments(query).collect();
+        let mut view = View::Unread;
+        if !self.ensure(session, &mut view, true, waiting) {
+            return (hits, false);
+        }
+        let local = session.history_lines().iter().rev().map(String::as_str);
+        let shared = (0..self.shared.ends.len())
+            .rev()
+            .map(|i| self.shared.get(i));
+        for (i, line) in local.chain(shared).enumerate() {
+            if i % 256 == 0 && waiting() {
+                return (hits, false);
+            }
+            if terms.iter().all(|term| line.contains(term)) && !hits.iter().any(|s| s == line) {
+                hits.push(line.to_owned());
+                if hits.len() == limit {
+                    break;
+                }
+            }
+        }
+        (hits, true)
     }
 
     pub fn find_command(

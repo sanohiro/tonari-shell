@@ -28,15 +28,14 @@ fn label(out: &mut String, text: &str, mut cells: usize) -> usize {
     start - cells
 }
 
-fn draw(
+fn draw<'a>(
     screen: &mut Screen,
-    choices: &[String],
-    hits: &[usize],
-    selected: usize,
+    heading: &str,
+    page: impl Iterator<Item = &'a str>,
+    selected_row: usize,
     query: &str,
-    rows: usize,
+    empty: &str,
 ) {
-    let offset = selected / rows * rows;
     let out = &mut screen.output;
     out.clear();
     out.push('\r');
@@ -44,7 +43,7 @@ fn draw(
         let _ = write!(out, "\x1b[{}A", screen.row);
     }
     out.push_str("\x1b[J");
-    let prefix = label(out, "filter> ", screen.width);
+    let prefix = label(out, heading, screen.width);
     let available = screen.width - prefix;
     let mut remaining = available;
     let mut start = query.len();
@@ -62,19 +61,19 @@ fn draw(
     }
     let caret = prefix + label(out, &query[start..], available);
     let mut shown = 0;
-    for (row, &index) in hits.iter().skip(offset).take(rows).enumerate() {
+    for (row, choice) in page.enumerate() {
         out.push_str("\r\n");
         let prefix = label(
             out,
-            if offset + row == selected { "> " } else { "  " },
+            if row == selected_row { "> " } else { "  " },
             screen.width,
         );
-        label(out, &choices[index], screen.width - prefix);
+        label(out, choice, screen.width - prefix);
         shown += 1;
     }
-    if hits.is_empty() {
+    if shown == 0 {
         out.push_str("\r\n");
-        label(out, "(no matches)", screen.width);
+        label(out, empty, screen.width);
         shown = 1;
     }
     let _ = write!(out, "\x1b[{shown}A\r");
@@ -189,7 +188,20 @@ pub(super) fn choose(
             }
         }
         selected = selected.min(hits.len().saturating_sub(1));
-        draw(screen, choices, &hits, selected, &query, rows);
+        let offset = selected / rows * rows;
+        let page = hits
+            .iter()
+            .skip(offset)
+            .take(rows)
+            .map(|&i| choices[i].as_str());
+        draw(
+            screen,
+            "filter> ",
+            page,
+            selected - offset,
+            &query,
+            "(no matches)",
+        );
         io::stderr().write_all(screen.output.as_bytes())?;
         let Some(first) = keys.get()? else {
             return Ok(None);
@@ -225,5 +237,101 @@ pub(super) fn choose(
         selected = 0;
         scanned = 0;
         hits.clear();
+    }
+}
+
+pub(super) fn history(
+    mut query: String,
+    history: &mut crate::history::History,
+    session: &Session,
+    keys: &mut Keys,
+    screen: &mut Screen,
+) -> io::Result<Option<String>> {
+    let rows = screen.height.saturating_sub(1).clamp(1, 8);
+    let mut selected: usize = 0;
+    let mut hits = Vec::<String>::new();
+    let mut inserted = String::new();
+    let mut refresh = true;
+    let mut complete = false;
+    loop {
+        let offset = selected / rows * rows;
+        let wanted = offset + rows;
+        if refresh {
+            draw(
+                screen,
+                "history> ",
+                std::iter::empty(),
+                0,
+                &query,
+                "(searching)",
+            );
+            io::stderr().write_all(screen.output.as_bytes())?;
+        }
+        if refresh || !complete || hits.len() <= selected {
+            (hits, complete) = history.filtered(session, &query, wanted, &|| {
+                !keys.queued.is_empty() || ready(0, 0)
+            });
+            if complete {
+                selected = selected.min(hits.len().saturating_sub(1));
+            }
+        }
+        let offset = selected / rows * rows;
+        let page = hits.iter().skip(offset).take(rows).map(String::as_str);
+        draw(
+            screen,
+            "history> ",
+            page,
+            selected - offset,
+            &query,
+            if complete {
+                "(no matches)"
+            } else {
+                "(searching)"
+            },
+        );
+        io::stderr().write_all(screen.output.as_bytes())?;
+        refresh = false;
+        let Some(first) = keys.get()? else {
+            return Ok(None);
+        };
+        let key = if first == 18 {
+            Key::Down
+        } else {
+            read_key(first, keys, session)?
+        };
+        match key {
+            Key::Cancel => return Ok(None),
+            Key::Accept => {
+                if !complete && hits.len() <= selected {
+                    (hits, complete) = history.filtered(session, &query, selected + 1, &|| false);
+                    selected = selected.min(hits.len().saturating_sub(1));
+                }
+                if selected < hits.len() {
+                    return Ok(Some(hits.swap_remove(selected)));
+                }
+                continue;
+            }
+            Key::Up => {
+                selected = selected.saturating_sub(1);
+                continue;
+            }
+            Key::Down => {
+                if !complete || selected + 1 < hits.len() || hits.len() == wanted {
+                    selected += 1;
+                }
+                continue;
+            }
+            Key::Ignore => continue,
+            Key::Text => {
+                keys.insert_burst(first, session, &mut inserted)?;
+                query.push_str(&inserted);
+            }
+            Key::Paste => query.push_str(&keys.paste(|_| Ok(()))?),
+            Key::Erase => {
+                query.pop();
+            }
+        }
+        refresh = true;
+        selected = 0;
     }
 }

@@ -14,6 +14,22 @@ mod wrapper;
 pub use crate::word::{Word, is_identifier};
 pub(crate) use wrapper::opens_function;
 
+/// Byte end of the next shell token in the displayed command, including any
+/// whitespace before it. Lexing identifies quotes and substitutions without running them.
+pub(crate) fn suggestion_end(line: &str, cursor: usize) -> usize {
+    lex(line, false, true)
+        .ok()
+        .and_then(|(_, spans, _)| spans.into_iter().find(|&(_, end)| end > cursor))
+        .map_or_else(
+            || {
+                let tail = &line[cursor..];
+                let word = tail.trim_start_matches([' ', '\t']);
+                line.len() - word.len() + word.find([' ', '\t', '\n']).unwrap_or(word.len())
+            },
+            |(_, end)| end,
+        )
+}
+
 pub(crate) fn is_function_name(name: &str) -> bool {
     !name.is_empty()
         && name

@@ -2589,6 +2589,65 @@ f; printf 'END\0'; printf '%s\0' names/*'''
         os.write(fd, b"\x12" + target)
         self.read_until(fd, b"': echo second " + target)
 
+    def test_history_word_accept_and_bash_word_motion(self):
+        journal = self.cwd / ".local/state/tonari/history"
+        journal.parent.mkdir(parents=True)
+        lines = ["take '東京 の🌱' second", r"take path\ with\ spaces later",
+                 "take $(printf 'x y') suffix", "take alpha|cat"]
+        journal.write_text("".join("1\t1\t0\t/tmp\t" + line.replace("\\", "\\\\") + "\n"
+                                   for line in lines))
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b'take(){ printf "%s" "$1" > result; };\r')
+        self.read_until(fd, b"\x1b[?2004h")
+        for prefix, rest, selected, value in [
+            ("take '東", "京 の🌱'", "take '東京 の🌱'", "東京 の🌱"),
+            ("take pa", r"th\ with\ spaces", r"take path\ with\ spaces", "path with spaces"),
+            ("take $", "(printf 'x y')", "take $(printf 'x y')", "x"),
+            ("take al", "pha|cat", "take alpha", "alpha"),
+        ]:
+            os.write(fd, prefix.encode())
+            self.read_until(fd, b"\x1b[2m" + rest.encode())
+            os.write(fd, b"\x1bf")
+            self.read_until(fd, PROMPT + selected.encode() + b"\x1b[2m")
+            os.write(fd, b"\r")
+            self.read_until(fd, b"\x1b[?2004h")
+            self.assertEqual((self.cwd / "result").read_text(), value)
+        for shell in self.shells_for():
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                os.write(fd, b"printf AA >motion; echo wit''nessOK\x01\x1bf\x1bfB\r")
+                self.read_until(fd, b"witnessOK\r\n")
+                self.assertEqual((self.cwd / "motion").read_bytes(), b"AAB")
+                (self.cwd / "motion").unlink()
+
+    def test_history_fragment_picker_select_cancel_and_paste(self):
+        journal = self.cwd / ".local/state/tonari/history"
+        journal.parent.mkdir(parents=True)
+        def row(c):
+            return "1\t4\t0\t/tmp\t" + c.replace("\\", "\\\\") + "\n"
+        lines = [f"printf %s '東京🌱 {n:02d}' > port15432" for n in range(13)]
+        journal.write_text("".join(map(row, lines + [lines[-1], "printf unrelated-15432"]))
+                           + "1\t4\t0\t/東京🌱/15432\tprintf metadata\n"
+                           + "1\t4\t0\t/tmp\tunfinished 東京🌱 15432")
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"\x12\x1b[200~15432 " + "東京🌱".encode() + b"\x1b[201~")
+        self.read_until(fd, ("> " + lines[-1]).encode())
+        os.write(fd, b"\x1b[B" * 8 + b"\r")
+        self.read_until(fd, PROMPT + lines[4].encode())
+        self.assertFalse((self.cwd / "port15432").exists())
+        os.write(fd, b"\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "port15432").read_text(), "東京🌱 04")
+        os.write(fd, b"v=AC\x02\x12not found\r")
+        self.read_until(fd, b"(no matches)")
+        os.write(fd, b'\x07B\x05; printf %s "$v" > restored\r')
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "restored").read_text(), "ABC")
+        os.write(fd, b"\x12port15432\t")
+        self.read_until(fd, b"history> port15432")
+        os.write(fd, b"\x1b")
+        self.read_until(fd, PROMPT)
+
     def test_unsuccessful_reverse_search_keeps_the_original_draft(self):
         self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
         for shell in self.shells_for(5):

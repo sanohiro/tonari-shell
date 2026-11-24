@@ -927,6 +927,38 @@ pub fn line(
                         );
                         *index = 0;
                     }
+                    if matches!(action, Action::Complete | Action::Up | Action::Down)
+                        || (!query.chars().any(char::is_control)
+                            && crate::history::fragments(query).nth(1).is_some())
+                    {
+                        let selected = picker::history(
+                            std::mem::take(query),
+                            history,
+                            session,
+                            &mut keys,
+                            &mut screen,
+                        );
+                        pending_queries.clear();
+                        match selected {
+                            Ok(Some(command)) => {
+                                text = command;
+                                cursor = text.len();
+                            }
+                            Ok(None) => {
+                                text = std::mem::take(original);
+                                cursor = *original_cursor;
+                            }
+                            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                                screen.draw(prompt, original, *original_cursor, "")?;
+                                io::stderr().write_all(b"\r\n")?;
+                                return Ok(Input::Cancel);
+                            }
+                            Err(e) => return Err(e),
+                        }
+                        search = None;
+                        last_tab = false;
+                        continue;
+                    }
                     pending_queries.push(SearchQuery {
                         text: query.clone(),
                         skip: *index,
@@ -1066,6 +1098,19 @@ pub fn line(
                 cursor = p;
             }
             Action::BackWord => cursor = word_start(&text, cursor),
+            Action::ForwardWord if cursor == text.len() && screen.had_hint => {
+                let local = session.history_lines();
+                let suffix = match history.suggestion(local, &text, true, || true) {
+                    Some(s) => Some(s),
+                    None => history.older_suggestion(session, &mut view, &text, &|| false),
+                };
+                if let Some(suffix) = suffix {
+                    let line = format!("{text}{suffix}");
+                    let end = crate::parser::suggestion_end(&line, cursor);
+                    text.push_str(&line[cursor..end]);
+                    cursor = text.len();
+                }
+            }
             Action::ForwardWord => cursor = word_end(&text, cursor),
             Action::Transpose if cursor > 0 => {
                 let end = if cursor == text.len() {
