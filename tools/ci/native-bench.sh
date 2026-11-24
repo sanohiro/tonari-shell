@@ -31,20 +31,23 @@ if [[ $SUITE == inventory* && $RUNNER_OS == Linux ]]; then
   exit
 fi
 if [[ $RUNNER_OS == macOS ]]; then
-  if [[ $SUITE == inventory ]]; then
+  if [[ $SUITE == inventory || $SUITE == foreground ]]; then
     gnu="$RUNNER_TEMP/gnu"
     mkdir -p "$gnu"
     download_bash "$version" "$digest" "$RUNNER_TEMP/bash.tar.gz"
     tar -xzf "$RUNNER_TEMP/bash.tar.gz" --strip-components=1 -C "$gnu"
     (cd "$gnu"; ./configure --without-bash-malloc > configure.log && make -j3 > build.log)
     ref="$gnu/bash"
+  else
+    if [[ ! -x /opt/homebrew/bin/bash ]]; then brew install bash; fi
+    ref=/opt/homebrew/bin/bash
+  fi
+  if [[ $SUITE == inventory ]]; then
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q
     python3 tests/compat/audit.py --source "$gnu" --bash "$ref" --tonari "$current" > "$out/audit.json"
     python3 tests/compat/bench.py --source "$gnu" --bash "$ref" --tonari "$current" --audit "$out/audit.json" > "$out/timings.json"
     exit
   fi
-  if [[ ! -x /opt/homebrew/bin/bash ]]; then brew install bash; fi
-  ref=/opt/homebrew/bin/bash
 fi
 "$ref" --version >> "$out/host.txt"
 run() {
@@ -75,6 +78,8 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
+  foreground)
+    run foreground python3 tests/compat/foreground.py "$current" "$ref" ;;
   history)
     run reverse-search python3 tools/bench_editor_input.py "$current" "$bin/baseline" "$ref" --case Ctrl-R --runs 41
     run bursts python3 tools/bench_history.py "$current" "$bin/baseline" --bursts --entries 100000 1000000 --runs 21
