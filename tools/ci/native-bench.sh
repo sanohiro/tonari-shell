@@ -28,7 +28,8 @@ if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; t
   distro=Debian; [[ $SUITE == *-ubuntu ]] && distro=Ubuntu
   arch=x64; [[ $RUNNER_ARCH == ARM64 ]] && arch=arm64
   if [[ $SUITE == budget* ]]; then
-    extra=(--runs 9); [[ $SUITE == budget-parts* ]] && extra+=(--components)
+    extra=(--runs 9); [[ $SUITE == *-parts* ]] && extra+=(--components)
+    [[ $SUITE == budget-extra-parts* ]] && extra+=(--runs 31)
     if [[ $SUITE == budget-extra* ]]; then
       run+=(-v "$RUNNER_TEMP/reuse/timings.json:/timings.json:ro")
       extra+=(--inventory /timings.json)
@@ -57,7 +58,8 @@ if [[ $RUNNER_OS == macOS ]]; then
     ref=/opt/homebrew/bin/bash
   fi
   if [[ $SUITE == budget* ]]; then
-    extra=(--runs 9); [[ $SUITE == budget-parts* ]] && extra+=(--components)
+    extra=(--runs 9); [[ $SUITE == *-parts* ]] && extra+=(--components)
+    [[ $SUITE == budget-extra-parts* ]] && extra+=(--runs 31)
     if [[ $SUITE == budget-extra* ]]; then extra+=(--inventory "$RUNNER_TEMP/reuse/timings.json"); fi
     python3 tests/compat/replay_budget.py --lane macOSarm64 --bash "$ref" --bin "$bin" "${extra[@]}" > "$out/replay.jsonl"
     exit

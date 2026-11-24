@@ -204,7 +204,7 @@ def main():
                 if part:
                     setup, body = part
                     try:
-                        result["component"] = compare(audits, row, 128, 9, None, setup=setup, body=body)
+                        result["component"] = compare(audits, row, 128, args.runs, None, setup=setup, body=body)
                         result.update(setup=setup, body=body)
                     except ValueError as error:
                         result["component"] = {"error": str(error)}
