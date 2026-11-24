@@ -1,0 +1,322 @@
+use std::io;
+use std::time::{Duration, Instant};
+
+use super::Session;
+use crate::parser::is_identifier;
+
+struct Options<'a> {
+    raw: bool,
+    delimiter: u8,
+    max_chars: Option<usize>,
+    exact: bool,
+    fd: i32,
+    timeout: Option<Duration>,
+    prompt: Option<&'a str>,
+    names: &'a [String],
+    array: Option<&'a str>,
+}
+
+fn options(args: &[String]) -> Result<Options<'_>, &'static str> {
+    let mut opts = Options {
+        raw: false,
+        delimiter: b'\n',
+        max_chars: None,
+        exact: false,
+        fd: 0,
+        timeout: None,
+        prompt: None,
+        names: &[],
+        array: None,
+    };
+    let mut i = 0;
+    while let Some(arg) = args.get(i) {
+        if arg == "--" {
+            i += 1;
+            break;
+        }
+        if !arg.starts_with('-') || arg == "-" {
+            break;
+        }
+        i += 1;
+        let mut flags = arg[1..].chars();
+        while let Some(flag) = flags.next() {
+            if flag == 'r' {
+                opts.raw = true;
+                continue;
+            }
+            if !matches!(flag, 'a' | 'd' | 'u' | 'n' | 'N' | 'p' | 't') {
+                return Err("unsupported option");
+            }
+            let value = if flags.as_str().is_empty() {
+                let word = args.get(i).ok_or("option requires an argument")?;
+                i += 1;
+                word.as_str()
+            } else {
+                flags.as_str()
+            };
+            match flag {
+                'a' => {
+                    if !is_identifier(value) {
+                        return Err("invalid array name");
+                    }
+                    opts.array = Some(value);
+                }
+                'd' => opts.delimiter = value.as_bytes().first().copied().unwrap_or(0),
+                'n' | 'N' => {
+                    opts.max_chars = Some(value.parse().map_err(|_| "invalid character count")?);
+                    opts.exact = flag == 'N';
+                }
+                'u' => {
+                    opts.fd = value.parse().map_err(|_| "invalid file descriptor")?;
+                    if opts.fd < 0 {
+                        return Err("invalid file descriptor");
+                    }
+                }
+                'p' => opts.prompt = Some(value),
+                't' => {
+                    opts.timeout = Some(
+                        Duration::try_from_secs_f64(value.parse().map_err(|_| "invalid timeout")?)
+                            .map_err(|_| "invalid timeout")?,
+                    );
+                }
+                _ => unreachable!(),
+            }
+            break;
+        }
+    }
+    opts.names = &args[i..];
+    Ok(opts)
+}
+
+fn ready(fd: i32, timeout: Duration) -> io::Result<bool> {
+    let mut descriptor = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let millis = timeout.as_millis().saturating_add(u128::from(
+        !timeout.subsec_nanos().is_multiple_of(1_000_000),
+    ));
+    let result = unsafe { libc::poll(&mut descriptor, 1, millis.min(i32::MAX as u128) as i32) };
+    if result < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(result > 0 && descriptor.revents & libc::POLLNVAL == 0)
+    }
+}
+
+struct Input {
+    fd: i32,
+    seekable: bool,
+    data: [u8; 4096],
+    position: usize,
+    end: usize,
+}
+
+impl Input {
+    fn new(fd: i32) -> Self {
+        Self {
+            fd,
+            seekable: unsafe { libc::lseek(fd, 0, libc::SEEK_CUR) } >= 0,
+            data: [0; 4096],
+            position: 0,
+            end: 0,
+        }
+    }
+
+    fn next(&mut self) -> io::Result<Option<u8>> {
+        if self.position == self.end {
+            // Reading beyond a delimiter on a pipe would take input from the
+            // following shell command, since the kernel cannot rewind its fd.
+            let capacity = if self.seekable { self.data.len() } else { 1 };
+            let n = unsafe { libc::read(self.fd, self.data.as_mut_ptr().cast(), capacity) };
+            if n < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if n == 0 {
+                return Ok(None);
+            }
+            self.position = 0;
+            self.end = n as usize;
+        }
+        let c = self.data[self.position];
+        self.position += 1;
+        Ok(Some(c))
+    }
+}
+
+impl Drop for Input {
+    fn drop(&mut self) {
+        if self.seekable && self.end > self.position {
+            unsafe {
+                libc::lseek(
+                    self.fd,
+                    -((self.end - self.position) as libc::off_t),
+                    libc::SEEK_CUR,
+                )
+            };
+        }
+    }
+}
+
+pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
+    let opts = match options(args) {
+        Ok(opts) => opts,
+        Err(e) => {
+            eprintln!("tonari: read: {e}");
+            return 2;
+        }
+    };
+    if crate::execute::fd::is_private(opts.fd) {
+        eprintln!("tonari: read: invalid file descriptor");
+        return 1;
+    }
+    if let Some(invalid) = opts
+        .names
+        .iter()
+        .find(|s| opts.array.is_none() && !session.valid_target(s))
+    {
+        eprintln!("tonari: read: {invalid}: invalid identifier");
+        return 1;
+    }
+    if opts.timeout == Some(Duration::ZERO) {
+        return u8::from(!ready(opts.fd, Duration::ZERO).unwrap_or(false));
+    }
+    if let Some(prompt) = opts.prompt {
+        if unsafe { libc::isatty(opts.fd) } == 1 {
+            eprint!("{prompt}");
+        }
+    }
+    let mut line = Vec::new();
+    let mut escaped = Vec::new();
+    let mut slash = false;
+    let mut chars = 0;
+    let started = Instant::now();
+    let mut input = Input::new(opts.fd);
+    let status = loop {
+        if opts.max_chars.is_some_and(|max| chars >= max) && std::str::from_utf8(&line).is_ok() {
+            break 0;
+        }
+        if let Some(timeout) = opts.timeout {
+            let remaining = timeout.saturating_sub(started.elapsed());
+            if remaining.is_zero()
+                || input.position == input.end && !ready(opts.fd, remaining).unwrap_or(false)
+            {
+                break 128 + libc::SIGALRM as u8;
+            }
+        }
+        let b = match input.next() {
+            Ok(Some(b)) => b,
+            Ok(None) => break 1,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => break 130,
+            Err(e) => {
+                eprintln!("tonari: read: {e}");
+                return 1;
+            }
+        };
+        if slash {
+            slash = false;
+            if b == b'\n' {
+                continue;
+            }
+            escaped.push(line.len());
+        } else if !opts.exact && b == opts.delimiter {
+            break 0;
+        } else if b == b'\\' && !opts.raw {
+            slash = true;
+            continue;
+        }
+        if b == 0 {
+            continue;
+        }
+        chars += usize::from(b & 0xc0 != 0x80);
+        line.push(b);
+    };
+    let Ok(line) = String::from_utf8(line) else {
+        eprintln!("tonari: read: expected UTF-8 input");
+        return 1;
+    };
+    if opts.names.is_empty() && opts.array.is_none() {
+        session.assign("REPLY", &line);
+        return status;
+    }
+    let ifs = if opts.exact {
+        String::new()
+    } else {
+        session.get("IFS").unwrap_or_else(|| " \t\n".into())
+    };
+    let (spans, end) = field_ranges(&line, &escaped, &ifs);
+    if let Some(target) = opts.array {
+        session.replace_array(
+            target,
+            spans.into_iter().map(|(s, e)| line[s..e].into()).collect(),
+        );
+        return status;
+    }
+    let count = opts.names.len();
+    for (i, name) in opts.names.iter().enumerate() {
+        let value = spans.get(i).map_or("", |&(start, finish)| {
+            let finish = if i + 1 == count && spans.len() > count {
+                end
+            } else {
+                finish
+            };
+            &line[start..finish]
+        });
+        if let Err(e) = session.assign_target(name, value) {
+            eprintln!("tonari: read: {e}");
+            return 1;
+        }
+    }
+    status
+}
+
+// Store spans into the original line so the last named variable can retain
+// separators between the remaining fields (e.g. "a  b  c").
+fn field_ranges(line: &str, escaped: &[usize], ifs: &str) -> (Vec<(usize, usize)>, usize) {
+    let mut spans = Vec::new();
+    let mut start = None;
+    let mut end = 0;
+    let mut after_space = false;
+    for (offset, c) in line.char_indices() {
+        let separator = ifs.contains(c) && escaped.binary_search(&offset).is_err();
+        if !separator {
+            start.get_or_insert(offset);
+            after_space = false;
+        } else if matches!(c, ' ' | '\t' | '\n') {
+            if let Some(s) = start.take() {
+                spans.push((s, offset));
+                after_space = true;
+            }
+            continue;
+        } else {
+            if let Some(s) = start.take() {
+                spans.push((s, offset));
+            } else if !after_space {
+                spans.push((offset, offset));
+            }
+            after_space = false;
+        }
+        end = offset + c.len_utf8();
+    }
+    if let Some(s) = start {
+        spans.push((s, line.len()));
+    }
+    (spans, end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_retains_the_last_variables_original_separators() {
+        let line = "  a   b c  ";
+        let (spans, end) = field_ranges(line, &[], " \t\n");
+        assert_eq!(&line[spans[1].0..end], "b c");
+        let line = "x:y:z:";
+        let (spans, end) = field_ranges(line, &[], ":");
+        assert_eq!(&line[spans[1].0..end], "y:z:");
+        assert_eq!(field_ranges("a b", &[1], " ").0, [(0, 3)]);
+    }
+}
