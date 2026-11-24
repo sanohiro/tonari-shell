@@ -1,5 +1,49 @@
 # Startup and execution / 起動と実行性能
 
+<a id="native-glob-launch-io"></a>
+
+## 2026-11-24 · Large globs, short-lived processes and bulk input / 大量展開・外部起動・一括読み込み
+
+On a local Apple M1, tests alternated the new build, `be82bcf` and GNU Bash 5.2.37 on the same filesystem. Values are median milliseconds. Interactive timings end at the verified output of the 16th external command. Script timings start at a readiness handshake. The glob fixture uses a literal directory prefix and six-digit Japanese filenames. The mapfile fixture contains exactly 16 MiB. Each named script ran 17 measured trials. The final foreground build ran 81 PTY trials per shell. [Script driver](../tools/bench_scripts.py) · [Foreground driver](../tools/bench_foreground.py)
+
+| Local M1 | Previous | Tonari | Bash |
+| --- | ---: | ---: | ---: |
+| `set -- numbered/*.txt`, 100,000 files | 291.689 | 87.121 | 799.336 |
+| 40,000 unstructured multilingual filenames | 115.436 | 83.240 | 479.585 |
+| 4,096 mixed filenames, one expansion | 6.379 | 4.073 | 17.192 |
+| 16 foreground launches in a terminal | 25.661 | 17.405 | 26.897 |
+| 16 MiB into `mapfile -t`, 4,096 records | 11.327 | 4.761 | 23.706 |
+
+端末内で16個の外部コマンドを実行する計測には、キー送信から結果が疑似端末に届くまでを含みます。設定なしの非対話シェルでは、別の41回の比較で外部起動16回が 16.777 ms、同じ処理を直接書いた C が 16.527 ms でした。2段パイプ16回は 21.654 / 21.431 ms、標準エラーの複製付き16回は 18.240 / 18.010 ms でした。C の対照には起動したプログラム自身の実行と終了待ちを含みます。[C の対照](../tools/bench_spawn.c)
+
+A broader fixture exposed a regression in the initial byte-presort prototype. On 40,000 randomly intermixed Latin, Greek, Cyrillic, Japanese and emoji names in the English locale, it took 99.605 ms versus 66.357 ms previously. The final sample-based choice took **52.905 ms**. In the Japanese locale the three times were 235.863, 141.439 and **100.619 ms**. A trial building full `wcsxfrm` keys took 115.803 ms (English) and 160.528 ms (Japanese) in a separate rotation. The exact filename order matched the previous build and Bash in English, Swedish and Japanese. The CI workload uses the same alphabet and seed, with a literal directory prefix.
+
+連番だけの結果で判断すると、無関係な綴りが混在するディレクトリで遅くなることがわかりました。両者を判別する処理を加え、最速だった連番の経路を維持しつつ、混在する4万件でも前版を上回りました。判別はソート方法だけを選び、最終的な順序は全件を実際のロケールで比較して決めます。
+
+A separate paired mapfile experiment varied buffer size after switching the delimiter scan to memchr. For 16 MiB of 4 KiB records, 8 KiB versus 64 KiB took 5.475 versus 4.653 ms. With 1 MiB records the medians were 5.956 and 5.059 ms. For 65,536 small records they were 3.938 and 3.871 ms. A separate 2,000-line fixture repeated 16 times took 1.208 ms with either buffer.
+
+起動では Mach-O の12シンボルを先頭にまとめるリンク配置を2回比較しました。最初の201回は `-c ':'` が 2.790 → 2.717 ms、順序を逆にした241回は 2.173 → 2.172 ms でした。チェーン形式の dyld 修正情報も試し、201回で 2.176 → 2.193 ms。10万件の履歴を予約済み領域に直接読み込む試作でも、71回のプロンプト表示は 5.191 → 5.251 ms でした。既定のリンク配置と履歴読み込みを維持しました。別の201回の起動から終了までの比較では最小 C 実行ファイルが 2.524 ms、Tonari のバージョン表示が 3.027 ms、`-c ':'` が 3.026 ms でした。これらは温まったファイルキャッシュでの観測です。
+
+On the M1, exec to a configuration-free prompt took 2.689 ms in Tonari, 2.730 ms in the previous build and 5.309 ms in Bash. Starting and exiting with `-c :` took 2.229, 2.264 and 4.522 ms. A separate 101-trial check used a temporary HOME with a copy of the user's 2,052-byte Bash rc file. Exec through its final prompt took 2.837 ms in Tonari, 2.905 ms in the previous build and 5.418 ms in Bash. The generated local arm64 distribution executable is 1,350,672 bytes (+16,640). It passes strict signature verification, contains no DWARF segment and directly links only to libSystem. [Startup driver](../tools/bench_login.py) · [Release checks](../tools/build-release.sh)
+
+通常の外部 `cat` についても、入出力リダイレクトと3段のパイプの全出力を23回ずつ照合しました。64 B のパイプは現行5.760 ms、前版5.753 ms、Bash 8.459 ms。16 MiB では順に12.610 / 12.514 / 15.687 ms。16 MiB のリダイレクトは14.085 / 13.881 / 16.341 msで、今回の読み込み改善はデータを処理する組み込みコマンドで計測されました。[転送と全バイト検証](../tools/bench_streams.py)
+
+| Native medians, ms (previous → Tonari / Bash) | macOS arm64 | Linux x86-64 | Linux arm64 |
+| --- | ---: | ---: | ---: |
+| 100,000 numbered UTF-8 filenames | 327.446 → **95.283** / 881.375 | 77.028 → **65.337** / 140.970 | 62.438 → **57.295** / 125.448 |
+| 40,000 mixed UTF-8 filenames | 136.370 → **135.839** / 551.523 | 38.796 → **33.154** / 71.488 | 28.005 → **21.678** / 60.839 |
+| 16 external commands, ready PTY | 34.195 → **29.354** / 37.358 | 9.227 → **9.210** / 11.292 | 9.776 → **9.715** / 11.870 |
+| 16 MiB via mapfile | 12.814 → **5.538** / 56.120 | 19.543 → **17.195** / 68.080 | 16.772 → **10.854** / 62.690 |
+| Exec to first prompt | 2.669 → **2.694** / 7.120 | 0.709 → **0.716** / 1.479 | 0.859 → **0.867** / 1.570 |
+
+実機 CI では各ランナーで67種類のスクリプトを各31回、シェルの起動を各71回、起動済み端末での外部コマンドを各31回測定しました。各列の前版・今回・Bash は同じランナーで交互に実行したものです。Linux x86-64 の配布形式は strip 済みの静的 PIE で 1,837,464 バイト（前版比 +416 バイト）です。 [全216件の計測結果](native-2026-11-24/glob-launch-io.tsv) · [macOS arm64](https://github.com/sanohiro/tonari-shell/actions/runs/45374234907) · [Linux x86-64](https://github.com/sanohiro/tonari-shell/actions/runs/45373366933/job/138373038689) · [Linux arm64](https://github.com/sanohiro/tonari-shell/actions/runs/45373366933/job/138373038104)
+
+All 67 script medians were faster than Bash on each native runner. The two-thirds target held for 55/67 on macOS, 58/67 on Linux x86-64 and 57/67 on Linux arm64. On the hosted Mac, the mixed 40,000-name expansion was essentially unchanged from the previous version. Interactive launching improved by 14% there, reaching 79% of Bash time, versus 65% of Bash time on the local Mac. The hosted Mac's previous release returned status 1 from `true` in an earlier trial. The benchmark now identifies the offending executable and retries an invalid historical control at most twice. A failure from the current release or Bash fails the run. All foreground samples were valid on the final hosted run. Empty measurements in the TSV are marked `NA`. [Earlier historical-control failure](https://github.com/sanohiro/tonari-shell/actions/runs/45373366933/job/138373038934)
+
+Comparing the feature inventory to the preceding release gave the same verdict for all 1,408 macOS cases, all 1,522 Debian cases on each Linux architecture and all 1,553 Ubuntu x86-64 cases. On Ubuntu arm64, one of 1,553 labels changed from an inconclusive Bash control to the known GNU `run-trap` DEBUG difference, with the same first differing line as the three preceding-release retries. The local suite passed 55 Rust tests and 162 integration tests, with the two Linux-only cases skipped on macOS. [Native Linux compatibility runs](https://github.com/sanohiro/tonari-shell/actions/runs/45374000358) · [Previous trap results](native-2026-11-24/history-parity.md)
+
+Linux 実機で前版と照合した結果、新しい互換性の差は見つかりませんでした。Ubuntu arm64 では、前回 Bash 自身の出力が安定しなかった1件で既知の DEBUG トラップの差を再確認しました。Mac の端末試験では、子が最初に端末を読めること、停止と再開、シグナルマスクの継承も確認しています。
+
 ## 2026-11-24 · Reverse-history latency against Bash / Bash との履歴検索比較
 
 In a fresh PTY with 100,000 entries on a native M1 runner, recalling the oldest Japanese match took **0.668/1.357 ms** in Tonari and **1.063/2.034 ms** in Bash (median/p95). The previous Tonari took 1.584/2.685 ms on the same host. Including startup, the medians were 7.272 ms for Tonari and 32.901 ms for Bash. The native comparisons also cover mixed-language journals, misses through Enter, and a million entries. [Results, regressions and release sizes](native-2026-11-24/history-parity.md) · [Command timings](native-2026-11-24/history-parity.tsv)
