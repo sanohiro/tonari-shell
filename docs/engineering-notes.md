@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## 2026-11-24 · Prefix recall and directory navigation / 前方一致履歴とディレクトリ移動
+
+Keep the initial draft and cursor for one run of arrow presses. Remember the indices visited during a nonempty prefix search and where the scan exhausted the history. A change of direction can then pick the previous hit directly. Empty-prefix navigation uses the adjacent index. Editing the line discards the filter. The editor builds the cache only while browsing. After painting a recalled command, it waits up to 1 ms for another key before scanning for a longer suggestion. This lets a terminal on the same CPU display the recalled line promptly. Directory visits store resolved absolute paths and reuse the ordinary `cd` bookkeeping after `chdir`.
+
+前方一致で見つけた行番号をキー操作中だけ覚えておくと、離れた2件の間を往復しても再走査は不要です。候補の表示後は最大1ミリ秒だけ次の入力を待ってから追加の候補を探すと、1 CPU でも端末が先に描画できます。ディレクトリの履歴には、実際に移動した論理絶対パスを保存します。戻る・進むときはそのパスを直接 OS に渡し、通常の `cd` と同じ処理で `PWD`・`OLDPWD` とコマンド検索のキャッシュを更新します。端末から届いたエスケープ列は、現在のキーの判別に必要なバイトだけを読みます。キー列が分割されたときは従来のタイムアウトで続きの到着を待ちます。[Optimization measurements and reproduction](benchmarks.md#navigation)
+
 ## 2026-11-24 · Partial suggestions and multi-fragment history / 履歴候補の部分採用と複数語検索
 
 Keep a reference to the record that produced the visible suggestion. Alt-F can then copy a token from that exact command without a second history lookup. Plain arguments have a short path to the next blank. Quoted arguments and substitutions use the shell lexer's source spans without evaluating the command. A history pager can paint the query before I/O, show its first hit immediately, then fill the visible page. It tracks a file offset across pages, checks for pending input between reads, and reuses the validated journal window when available. [Editor implementation](../src/editor/picker.rs) · [Benchmark](benchmarks.md#history-fields)

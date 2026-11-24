@@ -1,5 +1,13 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## Session history and directory keys / 履歴とディレクトリの移動
+
+↑/↓ bind to `history-search-backward` and `history-search-forward`. Ctrl-P/N retain chronological navigation. Tonari saves the original line and the byte boundary of the cursor, including when a UTF-8 suffix follows it. Bash 5.2 binds the arrows to chronological navigation by default. The PTY comparison explicitly binds Bash’s arrows to the prefix-search commands and checks the executed result. Against the previous macOS snapshot, six of 1,408 existing audit verdicts changed, all for the advertised default bindings in `bind -q`. The added PTY witness passes on both shells. Tonari also tests restoring the draft and caret, accepting typeahead, and overriding the defaults with `bind`.
+
+Alt-←/→ revisit up to 128 logical directory paths per interactive session. The default Emacs keymap also recognizes Esc b/f for terminals that send those sequences. On a nonempty line, during `read -e`, and at a continuation prompt, the keys retain their editing functions. A successful visit sets `$?` to 0, updates `PWD` and `OLDPWD`, and runs the ordinary prompt hooks. A new directory change after going back starts a new branch. Entries whose paths have disappeared are skipped.
+
+Tonari の既定の矢印キーは、入力中なら前方一致、空行なら時系列順です。Ctrl-P/N は常に時系列順です。Bash との互換性監査で変わる `bind -q` の表示は、履歴の4コマンドと `backward-word`・`forward-word` の既定キーです。キーは Bash と同じ `bind` で変更できます。ディレクトリ履歴はこのシェル内の直近128件までで、削除済みの移動先は飛ばします。通常のプロンプトが空のときだけ有効です。[PTY tests](../tests/shell.py) · [Native measurements](benchmarks.md#navigation)
+
 ## Editing history suggestions and selecting history / 履歴候補の編集と選択
 
 At the end of the input line, `forward-word` (Alt-F in the default Emacs keymap) accepts the next token of the visible suggestion. Shell quotes, escapes, and substitutions retain their original spelling. Inside the draft the binding follows ordinary word motion. Literal Ctrl-R reverse search retains its Bash behavior, including Enter on a failed refinement and searches for a backslash followed by a space. A second unescaped space-separated fragment switches to Tonari’s history list. Tab or an arrow also opens it from an empty or single-fragment search. In the list, Enter inserts, Esc or Ctrl-G cancels, and Ctrl-R or ↓ selects the next match. Queries match decoded command text, including both successful and failed commands. Recent local commands appear first, followed by the journal from newest to oldest. Duplicate commands appear once.

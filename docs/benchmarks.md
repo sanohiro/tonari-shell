@@ -1,5 +1,42 @@
 # Startup and execution / 起動と実行性能
 
+<a id="navigation"></a>
+
+## 2026-11-24 · Prefix history arrows and directory navigation / 前方一致履歴とディレクトリ移動
+
+Median milliseconds from a keypress to visible output in a PTY. Each cell lists the first working release (`de46191`), the optimized release (`896c2c0`), and Bash where it has an equivalent binding. The 100,000-line active history contains a matching assignment at either end. After recalling the distant match, the driver reverses direction twice and verifies the executed value. The directory case revisits two logical paths below twelve parent directories and waits for the new directory name in the prompt. The Bash comparison uses Readline’s prefix-search bindings. The directory keys are a Tonari extension.
+
+| Operation | Mac M1 | Linux x86-64 | Linux arm64 | macOS CI arm64 |
+| --- | ---: | ---: | ---: | ---: |
+| Recent match | 0.032 / 0.027 / 0.017 | 0.063 / 0.059 / 0.057 | 0.045 / 0.041 / 0.040 | 0.059 / 0.049 / 0.036 |
+| Distant match | 0.266 / 0.253 / 0.517 | 0.504 / 0.419 / 0.981 | 0.330 / 0.336 / 0.741 | 0.336 / 0.328 / 0.823 |
+| Forward revisit | 0.254 / 0.017 / 0.473 | 0.465 / 0.055 / 0.925 | 0.318 / 0.046 / 0.667 | 0.308 / 0.031 / 0.656 |
+| Backward revisit | 0.246 / 0.018 / 0.476 | 0.478 / 0.051 / 0.939 | 0.311 / 0.034 / 0.650 | 0.283 / 0.024 / 0.689 |
+| Back to directory | 0.079 / 0.064 | 0.100 / 0.084 | 0.072 / 0.065 | 0.092 / 0.089 |
+| Forward to directory | 0.054 / 0.045 | 0.085 / 0.066 | 0.048 / 0.041 | 0.066 / 0.075 |
+
+Both the shell and the PTY reader were also pinned to the same Linux CPU. Each cell gives the optimized release’s median/p95, followed by the Bash median/p95 when applicable, in milliseconds.
+
+| Operation | Linux x86-64, 1 CPU | Linux arm64, 1 CPU |
+| --- | ---: | ---: |
+| Recent match | 0.056/0.093 · 0.056/0.061 | 0.053/0.067 · 0.052/0.056 |
+| Distant match | 0.415/0.499 · 0.960/1.050 | 0.339/0.369 · 0.730/0.783 |
+| Forward revisit | 0.052/0.058 · 0.889/1.136 | 0.052/0.075 · 0.681/0.737 |
+| Backward revisit | 0.048/0.069 · 0.911/0.994 | 0.042/0.050 · 0.678/0.690 |
+| Back to directory | 0.084/0.134 | 0.064/0.083 |
+| Forward to directory | 0.064/0.098 | 0.070/0.084 |
+
+On the local M1 with **one million** entries, the first lookup of the distant match took 3.199/4.132 ms median/p95 (Bash 5.607/6.535). Moving forward then back over the same gap took 0.042/0.063 and 0.025/0.066 ms. Caching visited indices removes the repeated scan. On one CPU an earlier build could keep the terminal waiting about half a millisecond for the newest hit while it looked for an optional longer suggestion. The editor now gives the terminal up to one millisecond to paint the result or supply the next key before starting that optional scan. Reusing the resolved path and reading available escape bytes directly improved both directory directions on the M1 and the Linux runners. On macOS CI the forward direction varied from 0.066 to 0.075 ms. For the newest history match, the optimized build takes 0.001–0.013 ms longer than Bash across the unrestricted runs. The distant lookup meets the two-thirds target on all four hosts.
+
+Local M1 used 31 measured trials (11 at one million rows), CI used 21, and single-CPU CI used 15. The driver rotates executable order and discards the first two trials. macOS used GNU Bash 5.2.37, Ubuntu 24.04 used 5.2.21. The shipping sizes are 1,383,776 bytes on the local Mac, 1,892,856 on Linux x86-64, and 1,633,992 on Linux arm64. macOS links libSystem. Linux releases are stripped static PIEs. [Native run](https://github.com/sanohiro/tonari-shell/actions/runs/45413127931)
+
+10万件の表は初回実装・採用版・Bash の順に中央値を示します。離れた候補を初めて探すときだけ履歴を走査し、往復時は以前見つけた位置を再利用します。空行のディレクトリ移動は保存済みパスを直接使います。入力後の計測から、シェルの起動・履歴の読み込み・ディレクトリの準備を除きました。
+
+```sh
+python3 tools/bench_navigation.py /path/to/first /path/to/final --bash /path/to/bash --runs 21
+python3 tools/bench_navigation.py /path/to/first /path/to/final --bash /path/to/bash --entries 1000000 --runs 11
+```
+
 <a id="history-fields"></a>
 
 ## 2026-11-24 · Alt-F and multi-fragment Ctrl-R / 履歴候補の部分採用と複数語検索

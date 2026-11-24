@@ -58,7 +58,8 @@ def sample(shell, home, name, packet, expected):
             os.write(fd, b"v=DOWNREF\r")
             read_until(fd, b"\x1b[?2004h")
             visible(fd, b"v=" + expected)
-            os.write(fd, b"\x10")
+            # Both drafts share v=. Keep the full draft while selecting that prefix.
+            os.write(fd, b"\x01\x06\x06\x1b[A")
             read_until(fd, b"DOWNREF")
         if name.startswith("Miss"):
             start = time.perf_counter_ns()
@@ -166,7 +167,7 @@ def main():
             value = (WORD * (size // len(WORD)) + b"a" * (size % len(WORD))) + FLAG
             cases.append((f"paste {size} B + marker", b"\x1b[200~v=" + value + b"\x1b[201~", value))
         cases.append(("Up twice (100k entries)", b"\x1b[A\x1b[A", recalled))
-        cases.append(("Down to draft (100k entries)", b"\x0e", recalled))
+        cases.append(("Down to draft (100k entries)", b"\x1b[B", recalled))
         count = "100k" if args.entries == 100000 else str(args.entries)
         cases.append((f"Ctrl-R ({count} entries)", b"\x12" + query, query + FLAG))
         if args.case and "Miss" in args.case:
