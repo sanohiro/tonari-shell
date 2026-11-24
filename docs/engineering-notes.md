@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## 2026-11-24 · Filtering completion candidates and ranking history / 補完候補の絞り込みと履歴の頻度
+
+The second Tab builds a snapshot of candidate names. A filter edit scans only far enough to fill the visible page. Moving down resumes that search, and pasting a query uses the existing bracketed-paste reader. At 1,024 file matches the initial list switches to the same packed byte-prefix sort used by pathname expansion. Ties compare the full UTF-8 names. The editor escapes the chosen word using the same completion options as ordinary Tab. Cancellation restores the original buffer and cursor. PTY tests check the argument the command actually receives, including spaces, emoji, and shell metacharacters. [Picker and tests](../tests/shell.py) · [Release timings](benchmarks.md#completion-picker)
+
+履歴は引数補完を要求された時点で末尾 256 KiB を読みます。同じディレクトリで成功した同一のコマンド行をまとめてから構文を一度解析し、引数の使用回数には該当する履歴行の数を加えます。パスの存在と種類は、その1回の補完中だけ再利用します。頻度が同じときは最近の候補が先です。ファイルの候補が1,024件以上ある場合、既存のファイル名展開用ソートを使って、最初の一覧表示も短縮しました。候補一覧を開いてからは、文字入力や上下移動で履歴やディレクトリを読み直したり、Bash の補完関数を再実行したりする必要がありません。[履歴の実装](../src/history/arguments.rs) · [実機での比較](benchmarks.md#completion-picker)
+
 ## 2026-11-24 · Required extensions in pathname expansion / ファイル名展開の必須拡張子
 
 Tonari now extracts a trailing dot and ASCII alphanumeric extension once per pathname component when matching requires case-sensitive `fnmatch`. It rejects directory entries with a different suffix before the general match. Every surviving entry still follows the same matcher, dotfile rules and final sort. The simple `*.log` matcher already checks its suffix directly. Case folding and extended pattern groups use their own matchers. The native Linux measurements confirmed the earlier M1 experiment. [Implementation](../src/pattern.rs) · [Release measurements](benchmarks.md#required-glob-extension)

@@ -2190,6 +2190,21 @@ printf '%s\n' "$marker"
         send(b">literal\r", b"\x1b[?2004h")
         self.assertEqual((self.cwd / "literal").read_text(), "pick-dollar$(bad)")
 
+    def test_large_file_completion_keeps_names_and_byte_order(self):
+        folder = self.cwd / "files"
+        folder.mkdir()
+        names = [f"long-prefix-{i % 11:02d}-雪🐟-{i:04d}" for i in range(1150)]
+        names.extend(["long-prefix", "long-prefix-", "long-prefix-0"])
+        for name in reversed(names):
+            (folder / name).touch()
+        expected = sorted(("files/" + n).encode() for n in names)
+        for shell in (BASH, TONARI):
+            with self.subTest(shell=shell):
+                proc = self.command(shell, "compgen -f -- files/")
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                actual = proc.stdout.splitlines()
+                self.assertEqual(actual if shell == TONARI else sorted(actual), expected)
+
     def test_picker_pages_and_restores_midline_cursor(self):
         for i in range(24):
             (self.cwd / f"paper-{i:02d}").touch()

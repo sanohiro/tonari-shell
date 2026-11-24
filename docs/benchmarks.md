@@ -1,5 +1,38 @@
 # Startup and execution / 起動と実行性能
 
+<a id="completion-picker"></a>
+
+## 2026-11-24 · Filtering Tab completions and ranking learned arguments / 補完候補の絞り込みと使用頻度
+
+Each cell shows median/p95 milliseconds, first working picker (`e616cea`) → page-limited search and grouped history (`6102a03`). A fresh interactive shell receives real keys through a PTY. Trials use 20,000 files or 2,001 successful journal records, three warm-ups and 31 interleaved samples per binary. The driver verifies the selected argument after Enter returns it to the command line. “Many matches” types `item`; the next edit targets the lexicographically last filename. The distinct-history fixture adds a unique tag to every recorded command. [Native CI and raw results](https://github.com/sanohiro/tonari-shell/actions/runs/45401078101)
+
+| Operation | macOS arm64 | Linux x86-64 | Linux arm64 |
+| --- | ---: | ---: | ---: |
+| Open file choices | 11.349/17.936 → 12.192/19.525 | 9.160/9.765 → 8.527/8.636 | 8.600/8.695 → 8.535/8.612 |
+| Filter, many matches | 0.290/1.104 → 0.052/0.172 | 0.205/0.250 → 0.044/0.064 | 0.504/0.527 → 0.052/0.062 |
+| Filter, late match | 0.829/2.539 → 0.125/0.397 | 0.648/0.673 → 0.132/0.187 | 0.823/0.862 → 0.274/0.293 |
+| Repeated history, first Tab | 5.528/13.435 → 1.540/4.454 | 2.440/2.465 → 0.318/0.334 | 2.687/2.735 → 0.394/0.416 |
+| Repeated history, open choices | 5.523/12.939 → 1.595/2.982 | 2.399/2.424 → 0.279/0.300 | 2.652/2.687 → 0.351/0.391 |
+| Distinct history, first Tab | 6.171/14.566 → 5.790/14.520 | 2.694/2.712 → 2.359/2.417 | 2.959/2.989 → 2.398/2.443 |
+| Distinct history, open choices | 6.180/13.212 → 5.802/12.640 | 2.663/2.683 → 2.235/2.256 | 2.923/2.952 → 2.277/2.345 |
+
+画面に収まる候補まで探し、次のページに進んだ時点で続きを探します。候補末尾の一件だけが一致する場合も計測しました。履歴は重複コマンドが多い場合と、すべて異なる行で同じ引数を使う場合を分けています。初回版と高速化版は同じ候補を同じ順で表示し、最終的にコマンドに渡った引数まで確認しています。
+
+A second comparison isolated the cost of ordering filenames on open. The final build (`0430a2b`) uses packed prefix keys for large filename lists on all three targets. Each comparison below interleaves two binaries on one host. The 10,000-name listing uses the final build and the host's GNU Bash. [Native comparison, release sizes and Bash versions](https://github.com/sanohiro/tonari-shell/actions/runs/45401825828)
+
+| Operation, median/p95 ms | macOS arm64 | Linux x86-64 | Linux arm64 |
+| --- | ---: | ---: | ---: |
+| Open 20,000 names, before → after sorting change | 10.639/11.901 → 10.347/11.685 | 8.590/8.835 → 6.913/7.242 | 8.562/8.697 → 6.285/6.421 |
+| Filter many, final | 0.052/0.073 | 0.044/0.058 | 0.054/0.074 |
+| Filter to last name, final | 0.114/0.157 | 0.125/0.251 | 0.283/0.369 |
+| Print 10 names, Tonari / Bash medians | 0.190 / 0.223 | 0.063 / 0.070 | 0.080 / 0.089 |
+| Print 10,000 names, Tonari / Bash medians | 13.890 / 63.529 | 5.739 / 23.341 | 5.692 / 31.731 |
+| Final executable, bytes | 1,367,168 | 1,862,712 | 1,605,824 |
+
+手元の M1 でも、初回実装と最終版を31回交互に計測しました。中央値は、2万ファイルの一覧を開くまでが 9.212 → 8.678 ms、数多く一致する部分入力が 0.196 → 0.030 ms、末尾にある一件への絞り込みが 0.623 → 0.095 ms でした。成功履歴2,001件から最初の Tab が応答するまでは、重複が多い場合で 4.572 → 0.815 ms、全行が異なる場合で 4.860 → 4.141 ms でした。ローカル配布版は機能追加前の 1,350,672 バイトから 1,367,216 バイトになりました。リンク先は引き続き libSystem 一つで、Linux は両アーキテクチャとも静的 PIE です。Mac の既存の Bash 互換判定1,408件を前回と照合し、変化はありませんでした。
+
+To reproduce with two release executables, run `python3 tools/bench_picker.py FIRST CURRENT --files 20000 --runs 31`. For the full listing shared with Bash, run `python3 tools/bench_completion.py CURRENT --bash BASH --listing --runs 21`. The latter types Alt-? in Tonari and a second Tab in Bash, verifies every name, and includes the echo of the following keystroke. The filtered picker itself is a Tonari extension. [Picker benchmark](../tools/bench_picker.py) · [Listing benchmark](../tools/bench_completion.py)
+
 <a id="required-glob-extension"></a>
 
 ## 2026-11-24 · Required filename extensions in the release build / 必須拡張子による候補の絞り込み
