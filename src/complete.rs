@@ -701,7 +701,7 @@ pub fn file_names(
     };
     let mut choices = Vec::new();
     directory.collect(directories_only, mark_directories, &mut choices);
-    choices.sort_unstable();
+    let mut choices = crate::pattern::sorted_names(choices);
     choices.dedup();
     choices
 }

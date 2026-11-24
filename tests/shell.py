@@ -2220,6 +2220,29 @@ printf '%s\n' "$marker"
         self.read_until(fd, b"\x1b[?2004h")
         self.assertEqual((self.cwd / "cancelled").read_text(), "paper-end")
 
+    def test_picker_respects_programmable_completion_and_interrupt(self):
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b'pick() { printf %s "$1" >arg; }; words() { echo call >>calls; '
+                     b'COMPREPLY=(alpha beta); }; complete -o nospace -F words pick\r')
+        self.read_until(fd, b"\x1b[?2004h")
+        os.write(fd, b"pick \t\t")
+        self.read_until(fd, b"> alpha")
+        calls = (self.cwd / "calls").read_bytes()
+        os.write(fd, b"be")
+        self.read_until(fd, b"> beta")
+        os.write(fd, b"\r-more\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "arg").read_text(), "beta-more")
+        self.assertEqual((self.cwd / "calls").read_bytes(), calls)
+        os.write(fd, b"echo executed >discarded; pick \t\t")
+        self.read_until(fd, b"> alpha")
+        os.write(fd, b"\x03")
+        self.read_until(fd, b"\x1b[?2004h")
+        os.write(fd, b"echo ready >resumed\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertFalse((self.cwd / "discarded").exists())
+        self.assertEqual((self.cwd / "resumed").read_text(), "ready\n")
+
     def test_picker_ranks_history_within_the_same_context(self):
         journal = self.cwd / ".local/state/tonari/history"
         journal.parent.mkdir(parents=True)

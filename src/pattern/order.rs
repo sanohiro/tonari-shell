@@ -282,6 +282,19 @@ pub(super) fn append(mut paths: Vec<String>, fields: &mut Vec<String>, collation
     fields.append(&mut paths);
 }
 
+// Completion lists use byte order and do not retain names between Tab presses.
+pub(crate) fn sorted_names(mut names: Vec<String>) -> Vec<String> {
+    if names.len() < 1024 {
+        names.sort_unstable();
+        return names;
+    }
+    let mut indices: Vec<_> = (0..names.len()).collect();
+    sort_bytes(&names, &mut indices);
+    let mut sorted = Vec::with_capacity(names.len());
+    append_in_order(&mut names, &mut sorted, &indices);
+    sorted
+}
+
 fn append_in_order(paths: &mut [String], fields: &mut Vec<String>, indices: &[usize]) {
     fields.extend(indices.iter().map(|&i| std::mem::take(&mut paths[i])));
 }

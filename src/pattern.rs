@@ -7,6 +7,7 @@ mod order;
 use crate::session::CharacterLocale;
 use directory::visit_names;
 use order::Collation;
+pub(crate) use order::sorted_names;
 use std::ffi::{CStr, CString};
 use std::fs;
 use std::sync::OnceLock;

@@ -215,6 +215,7 @@ case "$SUITE" in
       run "$mode" python3 tools/bench_completion.py "$current" --bash "$ref" "--$mode" --runs 21
     done
     run project python3 tools/bench_completion.py "$current" --project --runs 21
+    run picker python3 tools/bench_picker.py "$current" --runs 21
     shells=("$current")
     if [[ -f $bin/serial ]]; then shells+=("$bin/serial"); fi
     run branches python3 tools/bench_completion.py "${shells[@]}" --branches --runs 41
