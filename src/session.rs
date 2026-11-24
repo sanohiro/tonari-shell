@@ -93,6 +93,31 @@ pub(crate) struct Function {
 }
 
 #[derive(Clone, Default)]
+struct DirectoryVisits {
+    paths: Vec<PathBuf>,
+    current: usize,
+}
+
+impl DirectoryVisits {
+    fn record(&mut self, from: Option<PathBuf>, to: &Path) {
+        if from.as_deref() == Some(to) {
+            return;
+        }
+        self.paths.truncate(self.current + 1);
+        if let Some(from) = from
+            && self.paths.last() != Some(&from)
+        {
+            self.paths.push(from);
+        }
+        self.paths.push(to.to_owned());
+        if self.paths.len() > 128 {
+            self.paths.drain(..self.paths.len() - 128);
+        }
+        self.current = self.paths.len() - 1;
+    }
+}
+
+#[derive(Clone, Default)]
 pub struct Session {
     // Only changed variables are stored here. Simple commands inherit the
     // original process environment without building a copy on startup.
@@ -102,6 +127,7 @@ pub struct Session {
     opt_offset: usize,
     logical_cwd: std::cell::OnceCell<PathBuf>,
     dir_stack: Vec<String>,
+    visits: Option<Rc<DirectoryVisits>>,
     shell_pid: ShellPid,
     pub interactive: bool,
     pub login: bool,
@@ -1338,6 +1364,56 @@ impl Session {
         previous: bool,
         explicit: bool,
     ) -> io::Result<()> {
+        self.change_directory_inner(target, physical, previous, explicit, self.interactive)
+    }
+
+    pub(crate) fn revisit_directory(&mut self, forward: bool) -> io::Result<bool> {
+        let Some(visits) = &self.visits else {
+            return Ok(false);
+        };
+        let mut index = visits.current;
+        loop {
+            let Some(next) = (if forward {
+                index.checked_add(1)
+            } else {
+                index.checked_sub(1)
+            }) else {
+                return Ok(false);
+            };
+            let Some(target) = self
+                .visits
+                .as_ref()
+                .and_then(|v| v.paths.get(next))
+                .cloned()
+            else {
+                return Ok(false);
+            };
+            match self.change_directory_inner(&target, false, false, false, false) {
+                Ok(()) => {
+                    Rc::make_mut(self.visits.as_mut().unwrap()).current = next;
+                    return Ok(true);
+                }
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                    ) =>
+                {
+                    index = next
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    fn change_directory_inner(
+        &mut self,
+        target: &Path,
+        physical: bool,
+        previous: bool,
+        explicit: bool,
+        record: bool,
+    ) -> io::Result<()> {
         let old_pwd = self.get("PWD");
         let base = self.logical_directory();
         let mut paths = Vec::new();
@@ -1417,6 +1493,9 @@ impl Session {
                 } else {
                     "PWD: readonly variable"
                 }));
+            }
+            if record && base.as_deref().ok() != Some(cwd.as_path()) {
+                Rc::make_mut(self.visits.get_or_insert_with(Rc::default)).record(base.ok(), &cwd);
             }
             return Ok(());
         }

@@ -194,11 +194,29 @@ fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Resu
             std::time::Instant::now().checked_add(std::time::Duration::from_secs(n))
         }));
         let result = if editing && (session.emacs || session.vi) {
-            match editor::line(&prompt, &mut history, session, status, None) {
+            match editor::line(
+                &prompt,
+                &mut history,
+                session,
+                status,
+                None,
+                source.is_empty(),
+            ) {
                 Ok(editor::Input::Exit(code)) => return Ok(code),
                 Ok(editor::Input::Line(line)) => {
                     source.extend_from_slice(line.as_bytes());
                     Ok(Some(true))
+                }
+                Ok(editor::Input::Directory(result)) => {
+                    INPUT_DEADLINE.set(None);
+                    status = match result {
+                        Ok(()) => 0,
+                        Err(error) => {
+                            eprintln!("tonari: cd: {error}");
+                            1
+                        }
+                    };
+                    continue;
                 }
                 Ok(editor::Input::End) => Ok(Some(false)),
                 Ok(editor::Input::Cancel) => Ok(None),

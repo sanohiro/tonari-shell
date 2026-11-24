@@ -251,10 +251,12 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
             session,
             0,
             Some((opts.initial.unwrap_or(""), files_only)),
+            false,
         );
         crate::INPUT_DEADLINE.set(prior);
         match result {
             Ok(crate::editor::Input::Line(text)) => edited = Some(text.into_bytes().into_iter()),
+            Ok(crate::editor::Input::Directory(_)) => unreachable!(),
             Ok(crate::editor::Input::End) => edited = Some(Vec::new().into_iter()),
             Ok(crate::editor::Input::Cancel) => return 130,
             Ok(crate::editor::Input::Exit(code)) => return code,

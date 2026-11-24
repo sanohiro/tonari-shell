@@ -2589,6 +2589,94 @@ f; printf 'END\0'; printf '%s\0' names/*'''
         os.write(fd, b"\x12" + target)
         self.read_until(fd, b"': echo second " + target)
 
+    def test_navigation_prefix_arrows_and_bash_bindings(self):
+        for shell in self.shells_for():
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                setup = (b"""bind '"\\e[A":history-search-backward'; bind '"\\e[B":history-search-forward'; """
+                         if shell == BASH else b"")
+                os.write(fd, setup + b"history -s v=pickFIRST; history -s v=other; history -s v=pickLAST; echo rea''dy\r")
+                self.read_until(fd, b"ready\r\n")
+                os.write(fd, b"v=pick\x1b[A\x1b[A\x1b[B\r")
+                os.write(fd, b'printf "<%s>\\n" "$v"\r')
+                self.read_until(fd, b"<pickLAST>\r\n")
+                os.write(fd, b"v=pick\x1b[A\x1b[A\x1b[A\r")
+                os.write(fd, b'printf "<%s>\\n" "$v"\r')
+                self.read_until(fd, b"<pickFIRST>\r\n")
+
+    def test_navigation_prefix_restores_draft_and_cursor(self):
+        fd = self.terminal_session(editing=True)
+        os.write(fd, "history -s v=東京古; history -s v=東京新; history -s v=other; echo rea''dy\r".encode())
+        self.read_until(fd, b"ready\r\n")
+        os.write(fd, "v=東京🌱".encode() + b"\x02\x1b[A\x1b[A\x1b[B\x1b[Bz\r")
+        os.write(fd, b'printf "<%s>\\n" "$v"\r')
+        self.read_until(fd, "<東京z🌱>\r\n".encode())
+        # A changed recalled line starts a new prefix; a failed lookup keeps the draft.
+        os.write(fd, "v=東京".encode() + b"\x1b[A\x05x\x1b[A\r")
+        os.write(fd, b'printf "<%s>\\n" "$v"\r')
+        self.read_until(fd, "<東京z🌱x>\r\n".encode())
+        # Rebinding the arrow to chronological navigation takes precedence.
+        os.write(fd, b"""bind '"\\e[A":previous-history'; history -s v=chronological; echo rea''dy\r""")
+        self.read_until(fd, b"ready\r\n")
+        os.write(fd, b"v=unrelated\x1b[A\r")
+        os.write(fd, b'printf "<%s>\\n" "$v"\r')
+        self.read_until(fd, b"<chronological>\r\n")
+
+    def test_navigation_directory_history(self):
+        first = "東京 $(touch BAD)"
+        for name in (first, "two", "three", "four"):
+            (self.cwd / name).mkdir()
+        (self.cwd / "logical").symlink_to(self.cwd / "two", target_is_directory=True)
+        left, right = b"\x1b[1;3D", b"\x1b[1;3C"
+        fd = self.terminal_session(editing=True)
+        os.write(fd, ("cd '" + first + "'; pushd ../logical >/dev/null; cd ../three; "
+                      "PROMPT_COMMAND='printf \"%s\\n\" \"$PWD\" >> \"$HOME/hooks\"'; PS1='[\\W]> '\r").encode())
+        self.read_until(fd, b"[three]> ")
+        os.write(fd, left)
+        self.read_until(fd, b"[logical]> ")
+        os.write(fd, left)
+        self.read_until(fd, ("[" + first + "]> ").encode())
+        os.write(fd, right)
+        self.read_until(fd, b"[logical]> ")
+        os.write(fd, b'printf "%s\\n%s" "$PWD" "$OLDPWD" > "$HOME/state"\r')
+        self.read_until(fd, b"\x1b[?2004h")
+        pwd, old = (self.cwd / "state").read_text().splitlines()
+        self.assertEqual((Path(pwd).name, Path(old).name), ("logical", first))
+        # Failed cd and a subshell cd preserve the forward branch.
+        os.write(fd, b"cd does-not-exist 2>/dev/null; (cd ../four)\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        os.write(fd, right)
+        self.read_until(fd, b"[three]> ")
+        # Skip a deleted visit and discard the old forward branch after a new cd.
+        (self.cwd / "logical").unlink()
+        os.write(fd, left)
+        self.read_until(fd, ("[" + first + "]> ").encode())
+        os.write(fd, b"cd ../four\r")
+        self.read_until(fd, b"[four]> ")
+        os.write(fd, right + b'printf "<%s>\\n" "${PWD##*/}"\r')
+        self.read_until(fd, b"<four>\r\n")
+        self.assertFalse((self.cwd / "BAD").exists())
+        hooks = [Path(s).name for s in (self.cwd / "hooks").read_text().splitlines()]
+        self.assertEqual(hooks[:8], ["three", "logical", first, "logical", "logical", "logical", "three", first])
+
+    def test_navigation_directory_keys_inside_input(self):
+        (self.cwd / "child").mkdir()
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"cd child; PS2='MORE> '; PS1='[\\W]> '\r")
+        self.read_until(fd, b"[child]> ")
+        left, right = b"\x1b[1;3D", b"\x1b[1;3C"
+        os.write(fd, b"printf aa >word" + left + b"my" + right + b"\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "child/myword").read_bytes(), b"aa")
+        os.write(fd, b"read -ep 'VALUE> ' val; printf '<%s %s>\\n' \"$val\" \"${PWD##*/}\"\r")
+        self.read_until(fd, b"VALUE> ")
+        os.write(fd, left + b"sample\r")
+        self.read_until(fd, b"<sample child>\r\n")
+        os.write(fd, b"if true; then\r")
+        self.read_until(fd, b"MORE> ")
+        os.write(fd, left + b'printf "<%s>\\n" "${PWD##*/}"; fi\r')
+        self.read_until(fd, b"<child>\r\n")
+
     def test_history_word_accept_and_bash_word_motion(self):
         journal = self.cwd / ".local/state/tonari/history"
         journal.parent.mkdir(parents=True)
