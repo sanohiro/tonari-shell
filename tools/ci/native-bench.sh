@@ -272,7 +272,7 @@ case "$SUITE" in
     run capture python3 tools/bench_file_capture.py "$current" "$ref" --runs 21
     if [[ $RUNNER_OS == Linux ]]; then run heap python3 tools/bench_heap.py "$current" "$ref" --runs 7; fi ;;
   rcfiles)
-    REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k test_eval
+    REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q
     rc="$RUNNER_TEMP/rc"
     mkdir -p "$rc"
     : > "$rc/empty"
