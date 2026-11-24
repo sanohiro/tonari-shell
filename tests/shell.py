@@ -1002,6 +1002,18 @@ printf '%s\0' "$#" "$@" """, 0,
             self.assertEqual(expected.stdout.count(b"\0"), 4200)
             self.compare(source, 0, expected.stdout)
 
+    def test_large_glob_with_unrelated_collation_and_byte_order(self):
+        rng = random.Random(42)
+        for i in range(4200):
+            stem = "".join(rng.choices("AaBbZzÊéÉöäÅßØôn.-0129ΣσЖЯあキ漢字🚀", k=12))
+            (self.cwd / f"p{stem}-{i}.txt").touch()
+        source = r'printf "%s\0" *.txt'
+        self.env["LC_ALL"] = "ja_JP.UTF-8" if sys.platform == "darwin" else "C"
+        expected = self.command(BASH, source)
+        self.assertEqual(expected.returncode, 0)
+        self.assertEqual(expected.stdout.count(b"\0"), 4200)
+        self.compare(source, 0, expected.stdout)
+
     def test_glob_sort_order_after_directory_changes(self):
         for i in range(96):
             (self.cwd / f"{['A', 'é', '雪', '🌱'][i % 4]}-{i:03}.txt").touch()

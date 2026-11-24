@@ -2,6 +2,7 @@
 
 import argparse
 from pathlib import Path
+import random
 import select
 import sys
 import subprocess
@@ -139,6 +140,7 @@ echo "$#"
 """, "512"),
     "glob-utf8-once": ('set -- localized/*.txt; echo "$#"', "512"),
     "glob-utf8-large-repeat": ('for ((i=0; i<8; i++)); do set -- large/*.txt; done; echo "$#"', "4096"),
+    "glob-utf8-mixed-40k": ('set -- unstructured/*.txt; echo "$#"', "40000"),
     "glob-utf8-100k": ('set -- numbered/*.txt; echo "$# $1 ${100000}"',
                       "100000 numbered/記録-000000.txt numbered/記録-099999.txt"),
     "mapfile-wide": ('mapfile -t records <wide; echo "${#records[@]} ${#records[4095]}"', "4096 4095"),
@@ -359,6 +361,14 @@ def main():
             fixtures.mkdir()
             for i in range(512):
                 (fixtures / f"item-{i:03}.txt").touch()
+        if not args.case or "glob-utf8-mixed-40k" in args.case:
+            unstructured = home / "unstructured"
+            unstructured.mkdir()
+            rng = random.Random(81043)
+            alphabet = "AaBbZzÊéÉöäÅßØôn.-0129ΣσЖЯあキ漢字🚀"
+            for i in range(40000):
+                stem = "".join(rng.choices(alphabet, k=14))
+                (unstructured / f"p{stem}-{i:05}.txt").touch()
         if not args.case or "glob-utf8-100k" in args.case:
             numbered = home / "numbered"
             numbered.mkdir()
@@ -396,7 +406,7 @@ def main():
         for case in args.case or CASES:
             case_env = env
             if case in ("field-split-unicode", "glob-utf8-sort", "glob-utf8-once", "glob-utf8-large", "glob-utf8-large-repeat",
-                        "glob-ignore-large", "glob-nocase-large", "glob-utf8-100k"):
+                        "glob-ignore-large", "glob-nocase-large", "glob-utf8-100k", "glob-utf8-mixed-40k"):
                 case_env = dict(env, LC_ALL=args.utf8_locale)
             source, expected = CASES[case]
             script = home / f"{case}.sh"

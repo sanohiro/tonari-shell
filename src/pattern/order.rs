@@ -137,6 +137,55 @@ fn sort_indices(
 }
 
 #[cfg(target_os = "macos")]
+fn sort_large(
+    indices: &mut [usize],
+    compare: &(impl Fn(&usize, &usize) -> Ordering + Sync),
+    workers: usize,
+) {
+    if workers <= 1 || indices.len() < 4096 {
+        indices.sort_unstable_by(compare);
+        return;
+    }
+    let (left, right) = indices.split_at_mut(indices.len() / 2);
+    // The enclosing glob keeps this locale alive until the worker joins.
+    let locale = unsafe { libc::uselocale(std::ptr::null_mut()) } as usize;
+    let joined = std::thread::scope(|scope| {
+        let worker = std::thread::Builder::new().spawn_scoped(scope, || {
+            // POSIX thread locales do not propagate to newly created threads.
+            let before = unsafe { libc::uselocale(locale as libc::locale_t) };
+            sort_large(left, compare, workers / 2);
+            unsafe {
+                libc::uselocale(before);
+            }
+        });
+        sort_large(right, compare, workers / 2);
+        if let Ok(handle) = worker {
+            handle.join().unwrap();
+            true
+        } else {
+            false
+        }
+    });
+    if !joined {
+        sort_large(left, compare, workers / 2);
+    }
+    let mut result = Vec::with_capacity(left.len() + right.len());
+    let (mut a, mut b) = (&left[..], &right[..]);
+    while !a.is_empty() && !b.is_empty() {
+        if compare(&a[0], &b[0]) != Ordering::Greater {
+            result.push(a[0]);
+            a = &a[1..];
+        } else {
+            result.push(b[0]);
+            b = &b[1..];
+        }
+    }
+    result.extend_from_slice(a);
+    result.extend_from_slice(b);
+    indices.copy_from_slice(&result);
+}
+
+#[cfg(target_os = "macos")]
 fn sort_utf8(paths: &[String], bytes: usize, indices: &mut [usize]) -> bool {
     use std::ffi::CStr;
     unsafe extern "C" {
@@ -164,12 +213,30 @@ fn sort_utf8(paths: &[String], bytes: usize, indices: &mut [usize]) -> bool {
     };
     // Locale order often has long sorted runs in byte order (e.g. numbered
     // paths). The adaptive sort compares with the real locale and merges runs.
-    if indices.len() >= 256 {
-        sort_bytes(paths, indices);
-        indices.sort_by(compare);
-    } else {
+    if indices.len() < 256 {
         indices.sort_unstable_by(compare);
+        return true;
     }
+    // A small sample distinguishes long ordered runs from unrelated byte and
+    // collation orders. It chooses an algorithm only; both use the full keys.
+    if indices.len() >= 4096 {
+        let stride = indices.len() / 128;
+        let mut sample: [usize; 128] = std::array::from_fn(|i| i * stride);
+        sample.sort_unstable_by(|&i, &j| paths[i].cmp(&paths[j]));
+        if sample
+            .windows(2)
+            .filter(|pair| compare(&pair[0], &pair[1]).is_gt())
+            .count()
+            > 16
+        {
+            let limit = if indices.len() >= 32768 { 4 } else { 2 };
+            let workers = std::thread::available_parallelism().map_or(1, |p| p.get().min(limit));
+            sort_large(indices, &compare, workers);
+            return true;
+        }
+    }
+    sort_bytes(paths, indices);
+    indices.sort_by(compare);
     true
 }
 
