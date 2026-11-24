@@ -350,13 +350,35 @@ fn parse_source(source: &str, final_input: bool) -> Result<Vec<Statement>, Error
     Reader::new(tokens, spans, source).list(&[])
 }
 
+// Most shell reads are a few lines. Reuse their token and span allocations;
+// nested parses take another pair while the outer reader owns its buffers.
+type TokenBuffers = (Vec<Token>, Vec<(usize, usize)>);
+thread_local! {
+    static TOKEN_BUFFERS: std::cell::Cell<TokenBuffers> = const {
+        std::cell::Cell::new((Vec::new(), Vec::new()))
+    };
+}
+
 struct Reader {
     source: Rc<str>,
     spans: Vec<(usize, usize)>,
     newlines: Vec<usize>,
     aliases: crate::alias::Aliases,
     alias_frames: Vec<aliases::Frame>,
-    tokens: std::vec::IntoIter<Token>,
+    tokens: std::collections::VecDeque<Token>,
+}
+
+impl Drop for Reader {
+    fn drop(&mut self) {
+        if self.tokens.capacity() <= 256 && self.spans.capacity() <= 256 {
+            self.tokens.clear();
+            self.spans.clear();
+            TOKEN_BUFFERS.set((
+                std::mem::take(&mut self.tokens).into(),
+                std::mem::take(&mut self.spans),
+            ));
+        }
+    }
 }
 
 impl Reader {
@@ -368,7 +390,7 @@ impl Reader {
                 .map(|(offset, _)| offset)
                 .collect(),
             source: source.into(),
-            tokens: tokens.into_iter(),
+            tokens: tokens.into(),
             aliases: aliases::current(),
             alias_frames: Vec::new(),
         }
@@ -393,7 +415,7 @@ impl Reader {
     }
 
     fn peek(&self) -> Option<&Token> {
-        self.tokens.as_slice().first()
+        self.tokens.front()
     }
 
     fn keyword(&self) -> Option<&str> {
@@ -409,7 +431,7 @@ impl Reader {
 
     fn expect(&mut self, keyword: &str) -> Result<(), Error> {
         if self.keyword() == Some(keyword) {
-            self.tokens.next();
+            self.tokens.pop_front();
             Ok(())
         } else if self.peek().is_none() {
             Err(Error::Incomplete("unfinished compound command"))
@@ -420,7 +442,7 @@ impl Reader {
 
     fn newlines(&mut self) {
         while matches!(self.peek(), Some(Token::Newline)) {
-            self.tokens.next();
+            self.tokens.pop_front();
         }
     }
 
@@ -460,17 +482,17 @@ impl Reader {
             let mut timing = None;
             while matches!(self.keyword(), Some("!" | "time")) {
                 if self.keyword() == Some("time") {
-                    self.tokens.next();
+                    self.tokens.pop_front();
                     let posix = matches!(self.keyword(), Some("-p" | "--"));
                     if self.keyword() == Some("-p") {
-                        self.tokens.next();
+                        self.tokens.pop_front();
                     }
                     if self.keyword() == Some("--") {
-                        self.tokens.next();
+                        self.tokens.pop_front();
                     }
                     timing = Some(posix);
                 } else {
-                    self.tokens.next();
+                    self.tokens.pop_front();
                     inverted = Some(!inverted.unwrap_or(false));
                 }
                 self.expand_alias(true)?;
@@ -525,7 +547,7 @@ impl Reader {
                 Some(Token::Or) => Condition::Failure,
                 _ => return Err(Error::Invalid("expected a command separator")),
             };
-            self.tokens.next();
+            self.tokens.pop_front();
         }
     }
 
@@ -541,7 +563,7 @@ impl Reader {
         }
         let mut pipeline = vec![first];
         while self.has_pipe() {
-            if matches!(self.tokens.next(), Some(Token::PipeBoth)) {
+            if matches!(self.tokens.pop_front(), Some(Token::PipeBoth)) {
                 pipeline.last_mut().unwrap().redirects.push(Redirect {
                     variable: None,
                     fd: 2,
@@ -582,7 +604,7 @@ impl Reader {
             ..Default::default()
         };
         while self.has_redirect() {
-            let token = self.tokens.next().unwrap();
+            let token = self.tokens.pop_front().unwrap();
             self.redirection(token, &mut stage.redirects)?;
         }
         Ok(stage)
@@ -590,28 +612,28 @@ impl Reader {
 
     fn compound(&mut self) -> Result<Option<Command>, Error> {
         if matches!(self.peek(), Some(Token::Arithmetic(_))) {
-            let Some(Token::Arithmetic(expr)) = self.tokens.next() else {
+            let Some(Token::Arithmetic(expr)) = self.tokens.pop_front() else {
                 unreachable!()
             };
             return Ok(Some(Command::Arithmetic(expr)));
         }
         if matches!(self.peek(), Some(Token::LeftParen)) {
-            self.tokens.next();
+            self.tokens.pop_front();
             let body = self.list(&[")"])?;
-            if self.tokens.next().is_none() {
+            if self.tokens.pop_front().is_none() {
                 return Err(Error::Incomplete("unfinished subshell"));
             }
             return Ok(Some(Command::Subshell(body)));
         }
         match self.keyword() {
             Some("{") => {
-                self.tokens.next();
+                self.tokens.pop_front();
                 let body = self.list(&["}"])?;
                 self.expect("}")?;
                 Ok(Command::Group(body))
             }
             Some("[[") => {
-                self.tokens.next();
+                self.tokens.pop_front();
                 let expr = self.test_or()?;
                 self.newlines();
                 self.expect("]]")?;
@@ -624,7 +646,7 @@ impl Reader {
             Some("for" | "select") => self.for_clause(),
             Some("function") => self.function(true),
             Some(name)
-                if matches!(self.tokens.as_slice().get(1), Some(Token::LeftParen))
+                if matches!(self.tokens.get(1), Some(Token::LeftParen))
                     && is_function_name(name) =>
             {
                 self.function(false)
@@ -635,8 +657,8 @@ impl Reader {
     }
 
     fn coproc(&mut self) -> Result<Command, Error> {
-        self.tokens.next();
-        let named = match self.tokens.as_slice().get(1) {
+        self.tokens.pop_front();
+        let named = match self.tokens.get(1) {
             Some(Token::LeftParen | Token::Arithmetic(_)) => true,
             Some(Token::Word(w)) if !w.protected => matches!(
                 w.word.as_literal(),
@@ -670,7 +692,7 @@ impl Reader {
     fn test_or(&mut self) -> Result<Expr, Error> {
         let mut result = self.test_and()?;
         while matches!(self.peek(), Some(Token::Or)) {
-            self.tokens.next();
+            self.tokens.pop_front();
             self.newlines();
             result = Expr::Or(Box::new(result), Box::new(self.test_and()?));
         }
@@ -680,7 +702,7 @@ impl Reader {
     fn test_and(&mut self) -> Result<Expr, Error> {
         let mut result = self.test_atom()?;
         while matches!(self.peek(), Some(Token::And)) {
-            self.tokens.next();
+            self.tokens.pop_front();
             self.newlines();
             result = Expr::And(Box::new(result), Box::new(self.test_atom()?));
         }
@@ -691,7 +713,7 @@ impl Reader {
         if self.keyword() == Some("]]") {
             return Err(Error::Invalid("missing conditional operand"));
         }
-        match self.tokens.next() {
+        match self.tokens.pop_front() {
             Some(Token::Word(word)) => Ok(word.word),
             None => Err(Error::Incomplete("unfinished conditional expression")),
             _ => Err(Error::Invalid("expected a conditional operand")),
@@ -701,13 +723,13 @@ impl Reader {
     fn test_atom(&mut self) -> Result<Expr, Error> {
         self.newlines();
         if self.keyword() == Some("!") {
-            self.tokens.next();
+            self.tokens.pop_front();
             return Ok(Expr::Not(Box::new(self.test_atom()?)));
         }
         if matches!(self.peek(), Some(Token::LeftParen)) {
-            self.tokens.next();
+            self.tokens.pop_front();
             let e = self.test_or()?;
-            match self.tokens.next() {
+            match self.tokens.pop_front() {
                 Some(Token::RightParen) => return Ok(e),
                 None => return Err(Error::Incomplete("unclosed conditional grouping")),
                 _ => return Err(Error::Invalid("expected ')' in conditional expression")),
@@ -745,7 +767,7 @@ impl Reader {
         });
         if unary {
             let op = self.keyword().unwrap().to_owned();
-            self.tokens.next();
+            self.tokens.pop_front();
             return Ok(Expr::Unary(op, self.test_word()?));
         }
         let left = self.test_word()?;
@@ -761,14 +783,14 @@ impl Reader {
             },
         }
         .to_owned();
-        self.tokens.next();
+        self.tokens.pop_front();
         Ok(Expr::Binary(left, op, self.test_word()?))
     }
 
     fn case_clause(&mut self) -> Result<Command, Error> {
         let start = self.position();
-        self.tokens.next();
-        let word = match self.tokens.next() {
+        self.tokens.pop_front();
+        let word = match self.tokens.pop_front() {
             Some(Token::Word(word)) => word.word,
             None => return Err(Error::Incomplete("expected a case word")),
             _ => return Err(Error::Invalid("expected a case word")),
@@ -780,16 +802,16 @@ impl Reader {
         let mut arms = Vec::new();
         while self.keyword() != Some("esac") {
             if matches!(self.peek(), Some(Token::LeftParen)) {
-                self.tokens.next();
+                self.tokens.pop_front();
             }
             let mut patterns = Vec::new();
             loop {
-                match self.tokens.next() {
+                match self.tokens.pop_front() {
                     Some(Token::Word(word)) => patterns.push(CasePattern::new(word.word)),
                     None => return Err(Error::Incomplete("unfinished case command")),
                     _ => return Err(Error::Invalid("expected a case pattern")),
                 }
-                match self.tokens.next() {
+                match self.tokens.pop_front() {
                     Some(Token::RightParen) => break,
                     Some(Token::Pipe) => {}
                     None => return Err(Error::Incomplete("expected ')' after case pattern")),
@@ -799,7 +821,7 @@ impl Reader {
             let body = self.list(&[";;", "esac"])?;
             let end = if let Some(Token::EndArm(end)) = self.peek() {
                 let end = *end;
-                self.tokens.next();
+                self.tokens.pop_front();
                 end
             } else {
                 CaseEnd::Stop
@@ -816,7 +838,7 @@ impl Reader {
     }
 
     fn if_clause(&mut self) -> Result<Command, Error> {
-        self.tokens.next();
+        self.tokens.pop_front();
         let mut branches = Vec::new();
         loop {
             let condition = self.list(&["then"])?;
@@ -826,10 +848,10 @@ impl Reader {
             if self.keyword() != Some("elif") {
                 break;
             }
-            self.tokens.next();
+            self.tokens.pop_front();
         }
         let otherwise = if self.keyword() == Some("else") {
-            self.tokens.next();
+            self.tokens.pop_front();
             self.list(&["fi"])?
         } else {
             Vec::new()
@@ -843,7 +865,7 @@ impl Reader {
 
     fn while_clause(&mut self) -> Result<Command, Error> {
         let until = self.keyword() == Some("until");
-        self.tokens.next();
+        self.tokens.pop_front();
         let condition = self.list(&["do"])?;
         self.expect("do")?;
         let body = self.list(&["done"])?;
@@ -856,7 +878,7 @@ impl Reader {
     }
 
     fn name(&mut self) -> Result<String, Error> {
-        match self.tokens.next() {
+        match self.tokens.pop_front() {
             Some(Token::Word(LexWord {
                 word: Word::Literal(name),
                 protected: false,
@@ -870,14 +892,14 @@ impl Reader {
     fn for_clause(&mut self) -> Result<Command, Error> {
         let select = self.keyword() == Some("select");
         let start = self.position();
-        self.tokens.next();
+        self.tokens.pop_front();
         if !select && matches!(self.peek(), Some(Token::Arithmetic(_))) {
-            let Some(Token::Arithmetic(header)) = self.tokens.next() else {
+            let Some(Token::Arithmetic(header)) = self.tokens.pop_front() else {
                 unreachable!()
             };
             let [init, condition, step] = lexer::arithmetic_clauses(&header)?;
             if matches!(self.peek(), Some(Token::End)) {
-                self.tokens.next();
+                self.tokens.pop_front();
             }
             self.newlines();
             self.expect("do")?;
@@ -893,10 +915,10 @@ impl Reader {
         let name = self.name()?;
         self.newlines();
         let words = if self.keyword() == Some("in") {
-            self.tokens.next();
+            self.tokens.pop_front();
             let mut words = Vec::new();
             while matches!(self.peek(), Some(Token::Word(_))) {
-                if let Some(Token::Word(word)) = self.tokens.next() {
+                if let Some(Token::Word(word)) = self.tokens.pop_front() {
                     words.push(word.word);
                 }
             }
@@ -906,7 +928,7 @@ impl Reader {
         };
         let header = self.location(start);
         if matches!(self.peek(), Some(Token::End)) {
-            self.tokens.next();
+            self.tokens.pop_front();
         }
         self.newlines();
         self.expect("do")?;
@@ -923,9 +945,9 @@ impl Reader {
 
     fn function(&mut self, keyword: bool) -> Result<Command, Error> {
         if keyword {
-            self.tokens.next();
+            self.tokens.pop_front();
         }
-        let name = match self.tokens.next() {
+        let name = match self.tokens.pop_front() {
             Some(Token::Word(LexWord {
                 word: Word::Literal(name),
                 protected: false,
@@ -935,8 +957,8 @@ impl Reader {
             _ => return Err(Error::Invalid("invalid function name")),
         };
         if matches!(self.peek(), Some(Token::LeftParen)) {
-            self.tokens.next();
-            match self.tokens.next() {
+            self.tokens.pop_front();
+            match self.tokens.pop_front() {
                 Some(Token::RightParen) => {}
                 None => return Err(Error::Incomplete("unfinished function definition")),
                 _ => return Err(Error::Invalid("expected empty function parentheses")),
@@ -988,13 +1010,13 @@ impl Reader {
                 let first = redirects.len();
                 let token = self
                     .tokens
-                    .next()
+                    .pop_front()
                     .ok_or(Error::Invalid("expected a redirection"))?;
                 self.redirection(token, redirects)?;
                 redirects[first].variable = Some(name.into());
             }
             Token::BothRedirect(target) => {
-                let Some(Token::Word(LexWord { word, .. })) = self.tokens.next() else {
+                let Some(Token::Word(LexWord { word, .. })) = self.tokens.pop_front() else {
                     return Err(Error::Invalid("expected a redirection target"));
                 };
                 redirects.push(Redirect {
@@ -1011,7 +1033,7 @@ impl Reader {
                 });
             }
             Token::Redirect(fd, target) => {
-                let Some(Token::Word(LexWord { word, .. })) = self.tokens.next() else {
+                let Some(Token::Word(LexWord { word, .. })) = self.tokens.pop_front() else {
                     return Err(Error::Invalid("expected a redirection target"));
                 };
                 let target = if target == Target::OutputWord
@@ -1049,7 +1071,7 @@ impl Reader {
             ) {
                 break;
             }
-            match self.tokens.next().unwrap() {
+            match self.tokens.pop_front().unwrap() {
                 Token::Word(LexWord {
                     mut word,
                     protected,

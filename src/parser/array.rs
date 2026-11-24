@@ -26,10 +26,10 @@ pub(super) fn indexed_prefix(source: &str) -> Option<&str> {
 
 impl Reader {
     pub(super) fn array_items(&mut self) -> Result<Vec<(Option<String>, Word)>, Error> {
-        self.tokens.next();
+        self.tokens.pop_front();
         let mut items = Vec::new();
         loop {
-            match self.tokens.next() {
+            match self.tokens.pop_front() {
                 Some(Token::RightParen) => return Ok(items),
                 Some(Token::Newline) => {}
                 Some(Token::Word(LexWord {

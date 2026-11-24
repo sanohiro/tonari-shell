@@ -93,14 +93,14 @@ impl Reader {
                 index..=index,
                 spans.into_iter().map(|(a, b)| (start + a, start + b)),
             );
-            self.tokens.next();
+            self.tokens.pop_front();
             self.alias_frames.push(Frame {
                 name,
                 remaining: self.tokens.len(),
                 next_word,
             });
-            replacement.extend(self.tokens.by_ref());
-            self.tokens = replacement.into_iter();
+            replacement.extend(self.tokens.drain(..));
+            self.tokens = replacement.into();
         }
     }
 }

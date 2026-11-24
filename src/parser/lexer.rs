@@ -680,8 +680,9 @@ pub(super) fn lex(
     // Short function bodies typically fit in one allocation. Cap the estimate
     // because the source can also be one very long quoted word.
     let capacity = (source.len() / 3).min(32);
-    let mut tokens = Vec::with_capacity(capacity);
-    let mut spans = Vec::with_capacity(capacity);
+    let (mut tokens, mut spans) = super::TOKEN_BUFFERS.take();
+    tokens.reserve(capacity);
+    spans.reserve(capacity);
     let mut token_start = 0;
     while let Some(c) = chars.clone().next() {
         let offset = source.len() - chars.as_str().len();
