@@ -78,6 +78,11 @@ run() {
   "$@" | tee "$out/$label.txt"
   echo "::endgroup::"
 }
+history_case() {
+  local label=$1
+  shift
+  run "$label" python3 tools/bench_editor_input.py --require-bash-parity --samples "$out/$label.samples.jsonl" "$@"
+}
 # Compare the runner's real login files as well as our isolated profile fixtures.
 if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]]; then
   check_home="$RUNNER_TEMP/check-home"
@@ -101,18 +106,18 @@ fi
 case "$SUITE" in
   parity-mixed)
     shells=("$current" "$bin/baseline" "$ref")
-    run oldest python3 tools/bench_editor_input.py "${shells[@]}" --mixed-history --case Ctrl-R --prompt-time --runs 41
-    run oldest-ascii python3 tools/bench_editor_input.py "${shells[@]}" --mixed-history --case Ctrl-R --ascii-query --prompt-time --runs 41
-    run missing python3 tools/bench_editor_input.py "$current" "$ref" --mixed-history --case Miss --prompt-time --runs 21 ;;
+    history_case oldest "${shells[@]}" --mixed-history --case Ctrl-R --prompt-time --runs 41
+    history_case oldest-ascii "${shells[@]}" --mixed-history --case Ctrl-R --ascii-query --prompt-time --runs 41
+    history_case missing "$current" "$ref" --mixed-history --case Miss --prompt-time --runs 21 ;;
   parity-history)
     shells=("$current" "$bin/baseline" "$ref")
-    run oldest python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --prompt-time --runs 61
-    run missing python3 tools/bench_editor_input.py "$current" "$ref" --case Miss --prompt-time --runs 41
-    run oldest-ascii python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --ascii-query --prompt-time --runs 41
-    run million python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --entries 1000000 --prompt-time --runs 21
-    run missing-ascii python3 tools/bench_editor_input.py "$current" "$ref" --case Miss --ascii-query --prompt-time --runs 21
+    history_case oldest "${shells[@]}" --case Ctrl-R --prompt-time --runs 61
+    history_case missing "$current" "$ref" --case Miss --prompt-time --runs 41
+    history_case oldest-ascii "${shells[@]}" --case Ctrl-R --ascii-query --prompt-time --runs 41
+    history_case million "${shells[@]}" --case Ctrl-R --entries 1000000 --prompt-time --runs 21
+    history_case missing-ascii "$current" "$ref" --case Miss --ascii-query --prompt-time --runs 21
     for rank in 20 900; do
-      run "rank-$rank" python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --history-rank "$rank" --prompt-time --runs 41
+      history_case "rank-$rank" "${shells[@]}" --case Ctrl-R --history-rank "$rank" --prompt-time --runs 41
     done
     run bursts python3 tools/bench_history.py "$current" "$bin/baseline" --entries 1000000 --bursts --runs 21 ;;
   parity-jobs)

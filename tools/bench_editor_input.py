@@ -1,5 +1,6 @@
 """Measure UTF-8 commits, bracketed paste, history and Tab in a ready PTY."""
 import argparse
+import json
 import math
 import os
 from pathlib import Path
@@ -99,6 +100,9 @@ def main():
     parser.add_argument("--mixed-history", action="store_true",
                         help="fill half the journal with Japanese commands sharing part of the query")
     parser.add_argument("--prompt-time", action="store_true", help="also report PTY launch to prompt and launch through search")
+    parser.add_argument("--samples", type=Path, help="save timings for each interleaved PTY trial as JSON lines")
+    parser.add_argument("--require-bash-parity", action="store_true",
+                        help="require the first shell's median input latency to be at most the last shell's (Bash)")
     parser.add_argument("--history-rank", type=int, help="place the reverse-search target this many rows before the end")
     parser.add_argument("--scan-control", type=Path, help="also measure a direct unique-name directory scan")
     parser.add_argument("--large", action="store_true", help="also measure a 1 MiB paste")
@@ -109,6 +113,11 @@ def main():
     if args.runs < 1:
         parser.error("runs must be positive")
     shells = [s.resolve() for s in args.shell]
+    if args.require_bash_parity and (len(shells) < 2 or len(set(shells)) != len(shells)):
+        parser.error("the parity comparison requires distinct shell paths with Bash last")
+    if args.samples:
+        args.samples.write_text("")
+    slower = []
     with tempfile.TemporaryDirectory() as scratch:
         home = Path(scratch)
         (home / "rc").write_text(f"PS1='{PROMPT.decode()}'\nexport LC_ALL=" + ("en_US.UTF-8" if os.uname().sysname == "Darwin" else "C.UTF-8")
@@ -194,6 +203,15 @@ def main():
                     print(name, *(f"{statistics.median(v):.3f}/{sorted(v)[math.ceil(.95 * len(v))-1]:.3f}" for v in values.values()), sep=" | ")
             if None in timings:
                 print("Direct scan (10k files)", cells[-1], sep=" | ", flush=True)
+            if args.samples:
+                with args.samples.open("a") as log:
+                    for shell in shells:
+                        print(json.dumps(dict(case=case[0], shell=str(shell), input_ms=timings[shell],
+                                              prompt_ms=startup[shell], combined_ms=total[shell])), file=log)
+            if args.require_bash_parity and statistics.median(timings[shells[0]]) > statistics.median(timings[shells[-1]]):
+                slower.append(case[0])
+    if slower:
+        raise SystemExit("Median input latency exceeded Bash for " + ", ".join(slower))
 
 
 if __name__ == "__main__":
