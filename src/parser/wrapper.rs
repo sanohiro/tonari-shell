@@ -91,7 +91,7 @@ pub(super) fn parse(source: &str) -> Option<Statement> {
         location: location(start, start + text.len(), command_line),
         condition: Condition::Always,
         negated: false,
-        command: Command::Pipeline(vec![SimpleCommand {
+        command: Command::Pipeline(smallvec::smallvec![SimpleCommand {
             words,
             ..Default::default()
         }]),

@@ -1125,7 +1125,7 @@ fn start_raw(
         }
         session.stdin_redirected |= input.is_some();
         let code = if apply(&setup) {
-            match run(vec![raw], last_status, true, session) {
+            match run(smallvec::smallvec![raw], last_status, true, session) {
                 Ok(Flow::Discard(s) | Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s)) => s,
                 Ok(Flow::Break(_) | Flow::LoopContinue(_)) => 0,
                 Err(e) => {

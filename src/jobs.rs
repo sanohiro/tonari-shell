@@ -1014,7 +1014,7 @@ pub fn dispatch(words: &[String], session: &mut Session, last: u8) -> crate::Flo
                 .collect(),
             ..Default::default()
         };
-        return crate::execute::run(vec![command], last, false, session)
+        return crate::execute::run(smallvec::smallvec![command], last, false, session)
             .unwrap_or(crate::Flow::Continue(1));
     }
     crate::Flow::Continue(builtin(words, session))

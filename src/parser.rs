@@ -101,7 +101,7 @@ impl<W> SimpleCommand<W> {
     }
 }
 
-pub type Pipeline<W = String> = Vec<SimpleCommand<W>>;
+pub type Pipeline<W = String> = smallvec::SmallVec<[SimpleCommand<W>; 1]>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Condition {
@@ -501,7 +501,7 @@ impl Reader {
             let command = if (inverted.is_some() || timing.is_some())
                 && matches!(self.peek(), None | Some(Token::End | Token::Newline))
             {
-                Command::Pipeline(vec![SimpleCommand::default()])
+                Command::Pipeline(smallvec::smallvec![SimpleCommand::default()])
             } else {
                 self.command()?
             };
@@ -561,7 +561,7 @@ impl Reader {
         if self.has_pipe() {
             first.location = Some(self.location(start));
         }
-        let mut pipeline = vec![first];
+        let mut pipeline: Pipeline<Word> = smallvec::smallvec![first];
         while self.has_pipe() {
             if matches!(self.tokens.pop_front(), Some(Token::PipeBoth)) {
                 pipeline.last_mut().unwrap().redirects.push(Redirect {
@@ -676,12 +676,12 @@ impl Reader {
         }
         let command = if let Some(compound) = self.compound()? {
             if self.has_redirect() {
-                Command::Pipeline(vec![self.compound_stage(compound)?])
+                Command::Pipeline(smallvec::smallvec![self.compound_stage(compound)?])
             } else {
                 compound
             }
         } else {
-            Command::Pipeline(vec![self.simple()?])
+            Command::Pipeline(smallvec::smallvec![self.simple()?])
         };
         Ok(Command::Coprocess {
             name,
@@ -979,7 +979,7 @@ impl Reader {
                 location: self.location(start),
                 condition: Condition::Always,
                 negated: false,
-                command: Command::Pipeline(vec![self.compound_stage(compound)?]),
+                command: Command::Pipeline(smallvec::smallvec![self.compound_stage(compound)?]),
             }]
         } else if let Command::Group(body) = compound {
             body
