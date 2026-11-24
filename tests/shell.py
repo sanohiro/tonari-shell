@@ -51,6 +51,29 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_literal_assignment_tracks_attributes_and_integer_syntax(self):
+        self.compare(r"""
+n=one
+n+=02
+printf '%s ' "$n"
+unset n
+declare -i n=07
+n+=010
+n+=16#f
+n+=-3
+n+=2
+printf '%s ' "$n"
+declare -n ref=n
+ref+=2
+printf '%s ' "$n"
+declare -a a=(start end)
+a+=8
+printf '%s %s ' "${a[0]}" "${a[1]}"
+set -a
+n=9
+sh -c 'printf "%s" "$n"'
+""", 0, b"one02 29 31 start8 end 9", minimum=4)
+
     def test_nocasematch_across_shell_contexts(self):
         self.env["LC_ALL"] = "en_US.UTF-8"
         script = r"""shopt -s extglob

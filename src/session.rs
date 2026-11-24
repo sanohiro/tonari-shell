@@ -681,12 +681,62 @@ impl Session {
         Some(Ok(()))
     }
 
+    // Only an existing scalar with ordinary assignment semantics can be
+    // updated in place. A changed attribute takes effect on the very next write.
+    pub(crate) fn assign_existing_literal(&mut self, key: &str, value: &str) -> bool {
+        let (name, append) = key
+            .strip_suffix('+')
+            .map_or((key, false), |name| (name, true));
+        if matches!(
+            name,
+            "OPTIND" | "GLOBIGNORE" | "PATH" | "BASH_ARGV0" | "PIPESTATUS"
+        ) || Self::builtin_readonly(name)
+        {
+            return false;
+        }
+        let Some(var) = self.variables.get_mut(name) else {
+            return false;
+        };
+        if var.readonly || var.nameref || var.elements.is_some() {
+            return false;
+        }
+        let Some(current) = var.value.as_mut() else {
+            return false;
+        };
+        if var.integer {
+            let Some(rhs) = Self::plain_decimal(value) else {
+                return false;
+            };
+            let result = if append {
+                let Some(lhs) = Self::plain_decimal(current) else {
+                    return false;
+                };
+                lhs.wrapping_add(rhs)
+            } else {
+                rhs
+            };
+            current.clear();
+            use std::fmt::Write;
+            write!(current, "{result}").unwrap();
+        } else if append {
+            current.push_str(value);
+        } else {
+            value.clone_into(current);
+        }
+        var.exported |= self.allexport;
+        var.declared = true;
+        true
+    }
+
     pub(crate) fn scalar_decimal(&self, name: &str) -> Option<i64> {
         let var = self.variables.get(name)?;
         if var.nameref || var.elements.is_some() {
             return None;
         }
-        let value = var.value.as_deref()?;
+        Self::plain_decimal(var.value.as_deref()?)
+    }
+
+    fn plain_decimal(value: &str) -> Option<i64> {
         if value == "0" {
             return Some(0);
         }

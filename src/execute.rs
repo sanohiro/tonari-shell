@@ -1929,6 +1929,15 @@ pub fn run_pipeline(
         {
             return Ok(flow);
         }
+        if raw.words.is_empty()
+            && raw.redirects.is_empty()
+            && raw.compound.is_none()
+            && !session.xtrace
+            && let [(key, Assignment::Scalar(Word::Literal(value)))] = raw.assignments.as_slice()
+            && session.assign_existing_literal(key, value)
+        {
+            return Ok(Flow::Continue(0));
+        }
         let mut cmd = match prepare(raw, session, last_status, true) {
             Ok(cmd) => cmd,
             Err(e) => {
