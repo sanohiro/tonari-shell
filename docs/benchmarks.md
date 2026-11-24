@@ -1,5 +1,11 @@
 # Startup and execution / 起動と実行性能
 
+## 2026-11-24 · Reverse-history latency against Bash / Bash との履歴検索比較
+
+In a fresh PTY with 100,000 entries on a native M1 runner, recalling the oldest Japanese match took **0.668/1.357 ms** in Tonari and **1.063/2.034 ms** in Bash (median/p95). The previous Tonari took 1.584/2.685 ms on the same host. Including startup, the medians were 7.272 ms for Tonari and 32.901 ms for Bash. The native comparisons also cover mixed-language journals, misses through Enter, and a million entries. [Results, regressions and release sizes](native-2026-11-24/history-parity.md) · [Command timings](native-2026-11-24/history-parity.tsv)
+
+Mac・Linux x86-64・Linux arm64 の履歴検索は計30条件すべてで中央値・p95 ともに Bash より速く、28条件で中央値が 2/3 以内でした。同じ試行で起動時間と入力応答を記録し、Bash より中央値が遅ければ CI の履歴検証が失敗するようにしました。シェルスクリプトと機能別ベンチの結果も掲載しています。 [実測と再現手順](native-2026-11-24/history-parity.md)
+
 ## 2026-11-24 · Matched trials for the previous misses / 速度未達の実装比較
 
 The four native implementation trials cover all 852 previous misses. The fixed batches met the two-thirds target in **214** observations, with **38** more in a 1,024-iteration batch. **472** tried observations remain above target after applying the measured allowances. 前回未達の全行について、変更前後・コンパイラ別・Bash 比と入力から表示までの実測を公開しました。 [Final results / 最終結果](native-2026-11-24/replay.md) · [Per-feature timings](native-2026-11-24/replay.tsv)

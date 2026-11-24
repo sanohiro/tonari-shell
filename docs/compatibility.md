@@ -1,5 +1,11 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## 2026-11-24 · History search and executable text / 履歴検索と実行ファイル
+
+A failed initial Ctrl-R search preserves the draft on Enter. The interactive test verifies the command that actually runs. The shell tests now also cover sparse array indices with `mapfile -O` and a shebang-less child script's arguments, exported environment, identity and file descriptors. Of 7,558 inventory verdicts, 7,557 immediately matched the preceding release. In the remaining GNU trap test, the Ubuntu arm64 Bash control itself produced an extra CHLD line. Three reruns reproduced the known DEBUG-trap difference. The inventory includes known differences and unprobed interfaces. [Tests](../tests/shell.py) · [Timing and feature evidence](native-2026-11-24/history-parity.md)
+
+最初の履歴検索が不一致のときに Enter で直前のコマンドを誤実行する問題を修正しました。Bash との比較では出力と終了値を検証し、互換性が一致しない既存の項目も監査結果に含めています。 [全環境の測定記録](native-2026-11-24/history-parity-results.tar.gz)
+
 ## 2026-11-24 · Release verification / 改善後の互換性検証
 
 The final comparison covers 7,558 feature observations across five native environments. 0 compatibility verdicts changed. The repeated-command ledger also tracks 65 newly over-budget observations alongside the 852 from the previous audit. 対象の Bash と各反復の標準出力・標準エラー・終了ステータスを照合しました。 [Final results / 最終結果](native-2026-11-24/replay.md) · [Per-feature timings](native-2026-11-24/replay.tsv)

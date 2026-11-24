@@ -1,5 +1,7 @@
 # Native benchmark results / ネイティブ実測
 
+The latest native history search measurements include launch, visible match, unsuccessful Enter and mixed Japanese/ASCII journals. 直近の Bash 比較には全候補の再実行と未達行の内訳も含まれます。 [History and shell results / 履歴検索とシェル実行](history-parity.md) · [Command ledger](history-parity.tsv)
+
 The x86-64 jobs used native Intel Xeon and AMD EPYC hosts. Linux arm64 used Neoverse-N2. The macOS arm64 machines reported Apple M1 (Virtual). GitHub assigns the machine per job. The paired release and algorithm comparisons rotate binaries on the same runner and fixture. Cross-job numbers can include a different CPU, kernel, filesystem or VM load. [Host for every job](hosts.tsv) · [Feature matrix](matrix.md) · [Raw measurements and machine details](native-results.tar.gz)
 
 各ジョブで CPU 名、OS、コンパイラ、実行ファイルのサイズとハッシュを記録しました。A/B は同じ機械・同じファイル群で順番を入れ替えながら比較しています。x86-64 の CPU はジョブごとに異なります。PTY の入力遅延はシェルが返した表示を観測するまでの時間です。IME の変換 UI と端末エミュレーターの描画時間は測定範囲外です。
