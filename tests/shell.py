@@ -1717,6 +1717,17 @@ f() { /bin/echo before; echo after; }; v=$(f); echo "$v"
 f() { trap 'echo leaving' RETURN; /bin/echo body; :; }; v=$(f); echo "$v" """,
                      0, b"direct\n19:two words:outer\nbefore\nafter\nbody\nleaving\n", minimum=5)
 
+    def test_literal_external_wrapper_capture_and_fallback(self):
+        self.compare(r"""f() { /bin/sh -c 'printf wrapped; exit 23'; }
+v=$(f); printf '<%s:%s>' "$?" "$v"
+v=$(f >/dev/null); printf '<%s:%s>' "$?" "$v"
+f() { /usr/bin/printf '%s:%s' "$#" "$BASH_SUBSHELL"; }; v=$(f a b); printf '<%s>' "$v"
+f() { /usr/bin/printf before; }; v=$(f); printf '<%s>' "$v"
+f() { /usr/bin/printf after; }; v=$(f); printf '<%s>' "$v"
+f() { /usr/bin/printenv SHELLOPTS; }; set -e; export SHELLOPTS; v=$(f)
+case ":$v:" in *:errexit:*) echo leaked;; *) echo cleared;; esac""",
+                     0, b"<23:wrapped><23:><2:1><before><after>cleared\n", minimum=5)
+
     def test_prompt_width_markers_and_literal_backslashes(self):
         self.compare(r"""p='日\[x\]\[y\]本'; printf '<%s>\n' "${p@P}"
 p='\\[literal]$((3+4))'; printf '<%s>\n' "${p@P}" """,

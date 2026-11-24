@@ -220,6 +220,47 @@ fn captured_output(mut output: Vec<u8>, code: u8) -> Result<(String, u8), &'stat
     Ok((value, code))
 }
 
+fn sole_plain_command(body: &[parser::Statement]) -> Option<&parser::SimpleCommand<parser::Word>> {
+    let [statement] = body else { return None };
+    let parser::Command::Pipeline(stages) = &statement.command else {
+        return None;
+    };
+    let [cmd] = stages.as_slice() else {
+        return None;
+    };
+    (!statement.negated
+        && statement.condition == parser::Condition::Always
+        && cmd.compound.is_none()
+        && cmd.assignments.is_empty()
+        && cmd.redirects.is_empty())
+    .then_some(cmd)
+}
+
+// A nullary wrapper around one literal external command has no scope-dependent
+// expansion. Its stdout and status can come directly from the external process.
+fn wrapped_external(
+    session: &Session,
+    body: &[parser::Statement],
+) -> Option<parser::SimpleCommand<parser::Word>> {
+    let [name] = sole_plain_command(body)?.words.as_slice() else {
+        return None;
+    };
+    let function = session.functions.get(name.as_literal()?)?;
+    if session.function_depth >= 128
+        || session.traps.has_explicit_traps()
+        || session.shopt.extdebug
+        || session.is_exported("SHELLOPTS")
+    {
+        return None;
+    }
+    let cmd = sole_plain_command(function.definition.body.statements())?;
+    let path = cmd.words.first()?.as_literal()?;
+    (path.starts_with('/')
+        && !session.functions.contains_key(path)
+        && cmd.words[1..].iter().all(|arg| arg.as_literal().is_some()))
+    .then(|| cmd.clone())
+}
+
 // Validate the whole list before executing any builtin. A later function,
 // redirect or effectful word must send the complete substitution through fork.
 fn capture_simple(
@@ -321,7 +362,8 @@ fn capture_simple(
         safe.then_some(())
     };
     if !body.iter().all(|s| command(s).is_some()) {
-        return None;
+        let cmd = wrapped_external(session, body)?;
+        return Some(crate::execute::capture_external(cmd, session, last));
     }
     let mut output = Vec::new();
     let mut code = last;
