@@ -10,6 +10,7 @@ mod here_doc;
 pub(crate) use lexer::{arithmetic_word, subscript_word};
 mod lexer;
 mod modifier;
+mod wrapper;
 pub use crate::word::{Word, is_identifier};
 
 pub(crate) fn is_function_name(name: &str) -> bool {
@@ -189,6 +190,12 @@ pub enum CaseEnd {
 
 pub type CaseArm = (Vec<CasePattern>, Vec<Statement>, CaseEnd);
 
+#[derive(Debug)]
+pub struct FunctionDefinition {
+    pub location: Location,
+    pub body: Vec<Statement>,
+}
+
 #[derive(Debug, Clone)]
 pub enum Command {
     Pipeline(Pipeline<Word>),
@@ -233,9 +240,8 @@ pub enum Command {
         body: Vec<Statement>,
     },
     Function {
-        definition: Location,
         name: String,
-        body: Vec<Statement>,
+        definition: Rc<FunctionDefinition>,
     },
 }
 
@@ -335,6 +341,9 @@ pub fn session_source_at(
 fn parse_source(source: &str, final_input: bool) -> Result<Vec<Statement>, Error> {
     if source.contains('\0') {
         return Err(Error::Invalid("NUL in command text"));
+    }
+    if let Some(function) = wrapper::parse(source) {
+        return Ok(vec![function]);
     }
     let (tokens, spans, _) = lex(source, false, final_input)?;
     Reader::new(tokens, spans, source).list(&[])
@@ -961,8 +970,10 @@ impl Reader {
         };
         Ok(Command::Function {
             name,
-            body,
-            definition: self.location(start),
+            definition: Rc::new(FunctionDefinition {
+                body,
+                location: self.location(start),
+            }),
         })
     }
 
@@ -1285,7 +1296,7 @@ mod tests {
     fn compounds_nest_and_preserve_commands_that_look_like_keywords() {
         let source = "f() { for x in a 'do'; do if false; then echo else; elif true; then echo \"$x\"; else :; fi; done; }; function g { while true; do :; done; }";
         let program = parse(source).unwrap();
-        let Command::Function { name, body, .. } = &program[0].command else {
+        let Command::Function { name, definition } = &program[0].command else {
             panic!()
         };
         assert_eq!(name, "f");
@@ -1293,7 +1304,7 @@ mod tests {
             words: Some(words),
             body,
             ..
-        } = &body[0].command
+        } = &definition.body[0].command
         else {
             panic!()
         };
@@ -1306,12 +1317,12 @@ mod tests {
             panic!()
         };
         assert_eq!((branches.len(), otherwise.len()), (2, 1));
-        let Command::Function { name, body, .. } = &program[1].command else {
+        let Command::Function { name, definition } = &program[1].command else {
             panic!()
         };
         assert_eq!(name, "g");
         assert!(matches!(
-            body[0].command,
+            definition.body[0].command,
             Command::While { until: false, .. }
         ));
         for incomplete in ["if true; then echo ok\n", "for i in a; do\n", "fn() {\n"] {

@@ -2,6 +2,10 @@ name: Native benchmarks
 on:
   workflow_dispatch:
     inputs:
+      previous:
+        description: Previous revision for the functions suite
+        type: string
+        default: HEAD^
       matrix:
         description: Native runners and suites to measure
         type: string
@@ -20,6 +24,7 @@ jobs:
     timeout-minutes: 180
     env:
       SUITE: ${{ matrix.suite }}
+      PREVIOUS_REVISION: ${{ inputs.previous }}
       NATIVE_RUNNER: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803

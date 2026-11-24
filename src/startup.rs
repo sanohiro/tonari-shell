@@ -37,7 +37,7 @@ fn sourced(
     session.source_depth += 1;
     session
         .source_names
-        .push(path.to_string_lossy().into_owned());
+        .push(path.to_string_lossy().as_ref().into());
     session.function_names.push("source".into());
     let saved_debug = session.traps.enter_source(session.functrace);
     let result = input::file_script(session, script.file, Some(script.metadata), status, false);

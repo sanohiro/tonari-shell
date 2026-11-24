@@ -251,7 +251,12 @@ impl Session {
                 .rev()
                 .nth(index as usize)
                 .map(usize::to_string),
-            "BASH_SOURCE" => self.source_names.iter().rev().nth(index as usize).cloned(),
+            "BASH_SOURCE" => self
+                .source_names
+                .iter()
+                .rev()
+                .nth(index as usize)
+                .map(ToString::to_string),
             _ if index == 0 => self.inherited_value(name),
             _ => None,
         }

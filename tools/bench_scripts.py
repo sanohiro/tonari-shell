@@ -37,6 +37,19 @@ echo "$sum"
     "function-redefinitions": (
         "".join(f"f() {{ echo {i}; }}\n" for i in range(2000)) + "f", "1999",
     ),
+    "function-wrapper-redefinitions": (
+        "".join(f"""f() {{ printf '%s:%s\\n' '{i}' "$@"; }}\n""" for i in range(2000))
+        + "f '雪 x'", "1999:雪 x",
+    ),
+    "function-compound-redefinitions": (
+        "".join(f'f() {{\n  local n=$1\n  if ((n)); then echo {i}; else echo other; fi\n}}\n'
+                for i in range(2000)) + "f 1", "1999",
+    ),
+    "function-loop-redefinitions": (
+        'for ((i=0; i<2000; i++)); do\n'
+        '  f() { local n=$1; if ((n)); then echo "$i:$n"; else echo other; fi; }\n'
+        'done\nf 7', "2000:7",
+    ),
     "strings": ("""\
 for ((i=0; i<2000; i++)); do
     path="/var/log/worker-${i}.log"

@@ -37,7 +37,7 @@ pub fn caller(session: &Session, args: &[String]) -> u8 {
         writeln!(
             out,
             "{first} {}",
-            sources.next().map_or("NULL", String::as_str)
+            sources.next().map_or("NULL", AsRef::as_ref)
         )
     };
     u8::from(line.is_err())

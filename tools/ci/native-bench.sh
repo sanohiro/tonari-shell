@@ -55,6 +55,11 @@ run() {
   echo "::endgroup::"
 }
 case "$SUITE" in
+  functions)
+    REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q
+    run functions python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" \
+      --case function-redefinitions --case function-definitions --case function-wrapper-redefinitions \
+      --case function-compound-redefinitions --case function-loop-redefinitions --case functions --runs 61 ;;
   editing)
     for size in 96 65536; do
       run "editing-$size" python3 tools/bench_editing.py "$current" "$ref" --size "$size" --runs 11

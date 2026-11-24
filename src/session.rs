@@ -18,7 +18,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
 
-use crate::parser::{Location, Statement, is_identifier};
+use crate::parser::{FunctionDefinition, is_identifier};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CharacterLocale {
@@ -86,10 +86,10 @@ impl PipelineStatus {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Function {
-    pub body: Vec<Statement>,
-    pub definition: Location,
-    pub source: String,
+    pub definition: Rc<FunctionDefinition>,
+    pub source: Rc<str>,
 }
 
 #[derive(Clone, Default)]
@@ -142,7 +142,7 @@ pub struct Session {
     pub source_depth: u32,
     pub function_depth: u32,
     pub function_names: Vec<String>,
-    pub source_names: Vec<String>,
+    pub source_names: Vec<Rc<str>>,
     pub current_command: Option<crate::parser::Location>,
     pub debug_args: Vec<Vec<String>>,
     pub traced_functions: std::collections::BTreeSet<String>,
@@ -156,7 +156,7 @@ pub struct Session {
     pub aliases: crate::alias::Aliases,
     pub completions: crate::completion_spec::Registry,
     pub readonly_functions: std::collections::BTreeSet<String>,
-    pub(crate) functions: BTreeMap<String, Rc<Function>>,
+    pub(crate) functions: BTreeMap<String, Function>,
     locals: Vec<Bindings>,
 }
 

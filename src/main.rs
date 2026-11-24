@@ -420,7 +420,7 @@ fn main() -> ExitCode {
             Ok(file) => {
                 session
                     .source_names
-                    .push(path.to_string_lossy().into_owned());
+                    .push(path.to_string_lossy().as_ref().into());
                 session.function_names.push("main".into());
                 session.call_lines.push(0);
                 input::file_script(&mut session, file, None, initial, invocation.check)

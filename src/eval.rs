@@ -368,16 +368,12 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             }
             Flow::Continue(result)
         }
-        Command::Function {
-            name,
-            body,
-            definition,
-        } => {
+        Command::Function { name, definition } => {
             if session.readonly_functions.contains(&name) {
                 eprintln!("tonari: {name}: readonly function");
                 return Flow::Continue(1);
             }
-            session.define_function(name, body, definition);
+            session.define_function(name, definition);
             Flow::Continue(0)
         }
     }
@@ -447,7 +443,7 @@ pub fn call_function(session: &mut Session, name: &str, args: &[String], status:
     let function = session.functions[name].clone();
     let callsite = session.current_command.clone();
     session.call_lines.push(session.line());
-    session.source_names.push(function.source.clone());
+    session.source_names.push(function.source);
     session.function_names.push(name.to_owned());
     session.enter_function();
     let tracked = session.shopt.extdebug;
@@ -463,7 +459,12 @@ pub fn call_function(session: &mut Session, name: &str, args: &[String], status:
         session.functrace || session.traced_functions.contains(name),
     );
     let flow = crate::traps::debug(session, status).unwrap_or_else(|| {
-        run_statements(session, &mut function.body.iter().cloned(), status, false)
+        run_statements(
+            session,
+            &mut function.definition.body.iter().cloned(),
+            status,
+            false,
+        )
     });
     let flow = crate::traps::returning(session, flow);
     session.traps.leave_function(hidden);

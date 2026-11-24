@@ -1,5 +1,5 @@
 use super::{Function, Session};
-use crate::parser::{Command, Location, Statement, is_function_name, parse_final};
+use crate::parser::{Command, FunctionDefinition, is_function_name, parse_final};
 use std::{
     ffi::CStr,
     io::{self, Write},
@@ -8,7 +8,7 @@ use std::{
 
 impl Function {
     fn export_value(&self) -> String {
-        let body = self.definition.text();
+        let body = self.definition.location.text();
         if body.starts_with('{') && body.ends_with('}') {
             format!("() {body}")
         } else {
@@ -18,22 +18,13 @@ impl Function {
 }
 
 impl Session {
-    pub(crate) fn define_function(
-        &mut self,
-        name: String,
-        body: Vec<Statement>,
-        definition: Location,
-    ) {
+    pub(crate) fn define_function(&mut self, name: String, definition: Rc<FunctionDefinition>) {
         let source = self
             .source_names
             .last()
             .cloned()
             .unwrap_or_else(|| "environment".into());
-        let function = Rc::new(Function {
-            body,
-            definition,
-            source,
-        });
+        let function = Function { definition, source };
         if self.allexport || self.function_exported(&name) {
             self.function_environment
                 .insert(format!("BASH_FUNC_{name}%%"), Some(function.export_value()));
@@ -83,18 +74,16 @@ impl Session {
                 }
                 if let Command::Function {
                     name: actual,
-                    body,
                     definition,
                 } = statement.command
                     && actual == name
                 {
                     self.functions.insert(
                         actual,
-                        Rc::new(Function {
-                            body,
+                        Function {
                             definition,
                             source: "environment".into(),
-                        }),
+                        },
                     );
                     self.function_environment
                         .insert(key, Some(value.to_owned()));
@@ -142,7 +131,7 @@ impl Session {
     }
 
     pub fn print_function(&self, out: &mut impl Write, name: &str) -> io::Result<()> {
-        let body = self.functions[name].definition.text();
+        let body = self.functions[name].definition.location.text();
         writeln!(out, "{name} () \n{body}")?;
         let flags = self.function_attributes(name);
         if flags.len() > 1 {
