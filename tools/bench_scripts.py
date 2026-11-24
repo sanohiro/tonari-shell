@@ -139,6 +139,12 @@ echo "$#"
 """, "512"),
     "glob-utf8-once": ('set -- localized/*.txt; echo "$#"', "512"),
     "glob-utf8-large-repeat": ('for ((i=0; i<8; i++)); do set -- large/*.txt; done; echo "$#"', "4096"),
+    "glob-utf8-100k": ('set -- numbered/*.txt; echo "$# $1 ${100000}"',
+                      "100000 numbered/記録-000000.txt numbered/記録-099999.txt"),
+    "mapfile-wide": ('mapfile -t records <wide; echo "${#records[@]} ${#records[4095]}"', "4096 4095"),
+    "external-monitored": (
+        'set -m; for ((i=0; i<16; i++)); do /usr/bin/true || exit 1; done; echo "$i"', "16",
+    ),
     "glob-utf8-large": ('set -- large/*.txt; echo "$#"', "4096"),
     "glob-ignore-large": ('GLOBIGNORE="large/B-*.txt"; for ((i=0; i<8; i++)); do set -- large/*.txt; done; echo "$#"', "3584"),
     "glob-nocase-large": ('shopt -s nocaseglob; for ((i=0; i<8; i++)); do set -- large/*.TXT; done; echo "$#"', "4096"),
@@ -353,6 +359,13 @@ def main():
             fixtures.mkdir()
             for i in range(512):
                 (fixtures / f"item-{i:03}.txt").touch()
+        if not args.case or "glob-utf8-100k" in args.case:
+            numbered = home / "numbered"
+            numbered.mkdir()
+            for i in range(100000):
+                (numbered / f"記録-{i:06}.txt").touch()
+        if not args.case or "mapfile-wide" in args.case:
+            (home / "wide").write_bytes((b"x" * 4095 + b"\n") * 4096)
         if not args.case or "glob-subdirs" in args.case:
             mixed = home / "mixed"
             mixed.mkdir()
@@ -383,7 +396,7 @@ def main():
         for case in args.case or CASES:
             case_env = env
             if case in ("field-split-unicode", "glob-utf8-sort", "glob-utf8-once", "glob-utf8-large", "glob-utf8-large-repeat",
-                        "glob-ignore-large", "glob-nocase-large"):
+                        "glob-ignore-large", "glob-nocase-large", "glob-utf8-100k"):
                 case_env = dict(env, LC_ALL=args.utf8_locale)
             source, expected = CASES[case]
             script = home / f"{case}.sh"

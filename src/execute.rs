@@ -1357,17 +1357,25 @@ fn start(
     }
     let resolved = cached || cmd.words.first().is_some_and(|name| name.contains('/'));
     if builtin.is_none()
-        && launch.group.is_none()
+        && (launch.group.is_none()
+            || (!session.traps.has_explicit_traps() && launch.can_spawn_group()))
         && !launch.background
         && resolved
         && input.is_none()
         && output.is_none()
         && cmd.redirects.is_empty()
     {
-        match External::new(cmd, session)
-            .spawn_resolved(None, cmd.assignments.is_empty().then_some(&*session))
-        {
-            Ok(pid) => return Ok(Stage::Child(pid)),
+        match External::new(cmd, session).spawn_resolved(
+            None,
+            (launch.group.is_none() && cmd.assignments.is_empty()).then_some(&*session),
+            launch,
+        ) {
+            Ok(pid) => {
+                #[cfg(target_os = "macos")]
+                launch.resume_spawned(pid);
+                return Ok(Stage::Child(pid));
+            }
+            Err(_) if launch.group.is_some() => {}
             Err(e) if e.raw_os_error() == Some(libc::ENOEXEC) => {}
             Err(e) => return spawn_failure(&cmd.words[0], e),
         }

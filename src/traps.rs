@@ -111,6 +111,10 @@ impl Traps {
             || self.exit_status.is_some()
     }
 
+    pub fn has_explicit_traps(&self) -> bool {
+        !self.entries.is_empty()
+    }
+
     pub fn active(&self) -> bool {
         !self.entries.is_empty() || self.interactive_hup
     }

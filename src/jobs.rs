@@ -20,7 +20,47 @@ pub struct Launch {
     shell_modes: Option<libc::termios>,
 }
 
+pub(crate) const JOB_SIGNALS: [i32; 5] = [
+    libc::SIGTSTP,
+    libc::SIGTTIN,
+    libc::SIGTTOU,
+    libc::SIGINT,
+    libc::SIGQUIT,
+];
+
 impl Launch {
+    pub fn can_spawn_group(self) -> bool {
+        if self.tty.is_none() || self.defer_tty {
+            return true;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // A blocked SIGCONT would remain pending in the new executable.
+            let mut mask = std::mem::MaybeUninit::uninit();
+            unsafe {
+                libc::sigprocmask(libc::SIG_BLOCK, std::ptr::null(), mask.as_mut_ptr()) == 0
+                    && libc::sigismember(mask.as_ptr(), libc::SIGCONT) == 0
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        false
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn spawn_terminal(self) -> Option<RawFd> {
+        self.tty.filter(|_| !self.defer_tty)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn resume_spawned(self, pid: pid_t) {
+        if let Some(fd) = self.spawn_terminal() {
+            // Darwin starts the new image suspended. Give it the terminal
+            // before its first instruction, including a read in an initializer.
+            give_terminal(fd, self.group.filter(|&g| g != 0).unwrap_or(pid));
+            unsafe { libc::kill(pid, libc::SIGCONT) };
+        }
+    }
+
     pub fn pipeline_child(self) {
         if self.group.is_none() && !self.background {
             crate::execute::reset_child_signals();
@@ -36,13 +76,7 @@ impl Launch {
             if let Some(tty) = self.tty.filter(|_| !self.defer_tty) {
                 give_terminal(tty, unsafe { libc::getpgrp() });
             }
-            for sig in [
-                libc::SIGTSTP,
-                libc::SIGTTIN,
-                libc::SIGTTOU,
-                libc::SIGINT,
-                libc::SIGQUIT,
-            ] {
+            for sig in JOB_SIGNALS {
                 unsafe {
                     libc::signal(sig, libc::SIG_DFL);
                 }

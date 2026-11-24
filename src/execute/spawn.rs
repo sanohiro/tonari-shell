@@ -55,7 +55,7 @@ impl External {
             for r in redirects {
                 dup(r.word.parse().unwrap(), r.fd)?;
             }
-            self.spawn_resolved(Some(&actions), None)
+            self.spawn_resolved(Some(&actions), None, Default::default())
         })();
         unsafe {
             libc::posix_spawn_file_actions_destroy(actions.as_mut_ptr());
@@ -67,6 +67,7 @@ impl External {
         &self,
         actions: Option<&MaybeUninit<libc::posix_spawn_file_actions_t>>,
         session: Option<&crate::Session>,
+        launch: crate::jobs::Launch,
     ) -> io::Result<libc::pid_t> {
         let path = self
             .search_paths
@@ -82,13 +83,25 @@ impl External {
                 if !self.ignore_pipe {
                     libc::sigaddset(&mut signals, libc::SIGPIPE);
                 }
+                let mut flags = libc::POSIX_SPAWN_SETSIGDEF;
+                if let Some(group) = launch.group {
+                    flags |= libc::POSIX_SPAWN_SETPGROUP;
+                    check(libc::posix_spawnattr_setpgroup(attr.as_mut_ptr(), group))?;
+                    for sig in crate::jobs::JOB_SIGNALS {
+                        libc::sigaddset(&mut signals, sig);
+                    }
+                }
+                #[cfg(target_os = "macos")]
+                if launch.spawn_terminal().is_some() {
+                    flags |= libc::POSIX_SPAWN_START_SUSPENDED;
+                }
                 check(libc::posix_spawnattr_setsigdefault(
                     attr.as_mut_ptr(),
                     &signals,
                 ))?;
                 check(libc::posix_spawnattr_setflags(
                     attr.as_mut_ptr(),
-                    libc::POSIX_SPAWN_SETSIGDEF as _,
+                    flags as _,
                 ))?;
                 let env = self
                     .env

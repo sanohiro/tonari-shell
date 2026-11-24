@@ -87,7 +87,7 @@ impl<'a> Options<'a> {
 // partially filled array. Build dense indices in order with one bulk load.
 fn read_all(options: &Options<'_>, mut store: impl FnMut(&str)) -> io::Result<()> {
     let fd = unsafe { BorrowedFd::borrow_raw(options.fd) }.try_clone_to_owned()?;
-    let mut reader = io::BufReader::new(std::fs::File::from(fd));
+    let mut reader = io::BufReader::with_capacity(64 * 1024, std::fs::File::from(fd));
     let mut pending = Vec::new();
     let mut skip = options.skip;
     let delim = options.delimiter;
@@ -97,7 +97,7 @@ fn read_all(options: &Options<'_>, mut store: impl FnMut(&str)) -> io::Result<()
             return Ok(());
         }
         let bytes = if has_nul {
-            &bytes[..bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len())]
+            &bytes[..memchr::memchr(0, bytes).unwrap_or(bytes.len())]
         } else {
             bytes
         };
@@ -113,13 +113,12 @@ fn read_all(options: &Options<'_>, mut store: impl FnMut(&str)) -> io::Result<()
             break;
         }
         let n = buf.len();
-        let has_nul = delim != 0 && buf.contains(&0);
+        let has_nul = delim != 0 && memchr::memchr(0, buf).is_some();
         // Only the unfinished record at the end of a buffer spans two reads.
-        for record in buf.split_inclusive(|&b| b == delim) {
-            if record.last() != Some(&delim) {
-                pending.extend_from_slice(record);
-                continue;
-            }
+        let mut start = 0;
+        for delimiter in memchr::memchr_iter(delim, buf) {
+            let record = &buf[start..=delimiter];
+            start = delimiter + 1;
             let end = record.len() - usize::from(options.trim || delim == 0);
             if pending.is_empty() {
                 append(&record[..end], has_nul)?;
@@ -129,6 +128,7 @@ fn read_all(options: &Options<'_>, mut store: impl FnMut(&str)) -> io::Result<()
                 pending.clear();
             }
         }
+        pending.extend_from_slice(&buf[start..]);
         reader.consume(n);
     }
     Ok(())

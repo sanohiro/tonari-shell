@@ -58,9 +58,9 @@ impl PreviousOrder {
 
 // A fixed-width prefix keeps comparisons in the sort array. File names
 // cannot contain NUL, so zero padding sorts a shorter name first. Compare
-// the complete strings only within groups that share the same six bytes.
+// the complete strings only within groups that share a prefix. Large inputs leave four bytes for the index.
 fn sort_bytes(paths: &[String], indices: &mut [usize]) {
-    if paths.len() < 256 || paths.len() > usize::from(u16::MAX) {
+    if paths.len() < 256 || paths.len() > u32::MAX as usize {
         indices.sort_unstable_by(|&i, &j| paths[i].cmp(&paths[j]));
         return;
     }
@@ -81,21 +81,27 @@ fn sort_bytes(paths: &[String], indices: &mut [usize]) {
             break;
         }
     }
+    let index_bits = if paths.len() <= usize::from(u16::MAX) {
+        16
+    } else {
+        32
+    };
+    let prefix_len = 8 - index_bits / 8;
+    let index_mask = (1u64 << index_bits) - 1;
     let mut keys = Vec::with_capacity(paths.len());
     for (index, path) in paths.iter().enumerate() {
         let mut key = [0; 8];
         let bytes = &path.as_bytes()[common..];
-        let take = bytes.len().min(6);
+        let take = bytes.len().min(prefix_len);
         key[..take].copy_from_slice(&bytes[..take]);
-        key[6..].copy_from_slice(&(index as u16).to_be_bytes());
-        keys.push(u64::from_be_bytes(key));
+        keys.push(u64::from_be_bytes(key) | index as u64);
     }
     keys.sort_unstable();
     let mut tail = indices;
-    for group in keys.chunk_by(|a, b| a >> 16 == b >> 16) {
+    for group in keys.chunk_by(|a, b| a >> index_bits == b >> index_bits) {
         let (range, rest) = tail.split_at_mut(group.len());
         for (i, key) in range.iter_mut().zip(group) {
-            *i = usize::from(*key as u16);
+            *i = (*key & index_mask) as usize;
         }
         if range.len() > 1 {
             range.sort_unstable_by(|&i, &j| paths[i].cmp(&paths[j]));
@@ -131,51 +137,6 @@ fn sort_indices(
 }
 
 #[cfg(target_os = "macos")]
-fn sort_large(indices: &mut [usize], compare: impl Fn(&usize, &usize) -> Ordering + Sync) {
-    if indices.len() < 4096 || std::thread::available_parallelism().map_or(true, |n| n.get() < 2) {
-        indices.sort_unstable_by(compare);
-        return;
-    }
-    let (left, right) = indices.split_at_mut(indices.len() / 2);
-    // The enclosing glob keeps this locale alive until the worker joins.
-    let locale = unsafe { libc::uselocale(std::ptr::null_mut()) } as usize;
-    let joined = std::thread::scope(|scope| {
-        let worker = std::thread::Builder::new().spawn_scoped(scope, || {
-            // POSIX thread locales do not propagate to newly created threads.
-            let before = unsafe { libc::uselocale(locale as libc::locale_t) };
-            left.sort_unstable_by(&compare);
-            unsafe {
-                libc::uselocale(before);
-            }
-        });
-        right.sort_unstable_by(&compare);
-        if let Ok(handle) = worker {
-            handle.join().unwrap();
-            true
-        } else {
-            false
-        }
-    });
-    if !joined {
-        left.sort_unstable_by(&compare);
-    }
-    let mut result = Vec::with_capacity(left.len() + right.len());
-    let (mut a, mut b) = (&left[..], &right[..]);
-    while !a.is_empty() && !b.is_empty() {
-        if compare(&a[0], &b[0]) != Ordering::Greater {
-            result.push(a[0]);
-            a = &a[1..];
-        } else {
-            result.push(b[0]);
-            b = &b[1..];
-        }
-    }
-    result.extend_from_slice(a);
-    result.extend_from_slice(b);
-    indices.copy_from_slice(&result);
-}
-
-#[cfg(target_os = "macos")]
 fn sort_utf8(paths: &[String], bytes: usize, indices: &mut [usize]) -> bool {
     use std::ffi::CStr;
     unsafe extern "C" {
@@ -192,15 +153,23 @@ fn sort_utf8(paths: &[String], bytes: usize, indices: &mut [usize]) -> bool {
     if wide.try_reserve_exact(bytes).is_err() || offsets.try_reserve_exact(paths.len()).is_err() {
         return false;
     }
-    for path in paths {
+    for path in paths.iter() {
         offsets.push(wide.len());
         wide.extend(path.chars().map(|c| c as libc::wchar_t));
         wide.push(0);
     }
-    sort_large(indices, |&i, &j| {
+    let compare = |&i: &usize, &j: &usize| {
         let order = unsafe { wcscoll(wide[offsets[i]..].as_ptr(), wide[offsets[j]..].as_ptr()) };
         order.cmp(&0).then_with(|| paths[i].cmp(&paths[j]))
-    });
+    };
+    // Locale order often has long sorted runs in byte order (e.g. numbered
+    // paths). The adaptive sort compares with the real locale and merges runs.
+    if indices.len() >= 256 {
+        sort_bytes(paths, indices);
+        indices.sort_by(compare);
+    } else {
+        indices.sort_unstable_by(compare);
+    }
     true
 }
 
@@ -223,8 +192,9 @@ pub(super) fn append(mut paths: Vec<String>, fields: &mut Vec<String>, collation
             return;
         }
     }
-    #[cfg(target_os = "macos")]
-    if collation == Collation::FixedLocale && paths.len() >= 32 {
+    if (collation == Collation::Bytes && paths.len() > 16384)
+        || (cfg!(target_os = "macos") && collation == Collation::FixedLocale && paths.len() >= 32)
+    {
         let bytes = paths.iter().map(|p| p.len() + 1).sum();
         let mut indices = Vec::new();
         sort_indices(&mut paths, collation, bytes, &mut indices);

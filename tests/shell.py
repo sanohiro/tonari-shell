@@ -989,6 +989,19 @@ printf '%s\0' "$#" "$@" """, 0,
                 expected = self.command(BASH, source).stdout
                 self.compare(source, 0, expected)
 
+    def test_large_glob_preserves_locale_order(self):
+        # Several byte-ordered runs change places in a named locale.
+        parts = ["A", "a", "é", "Z", "z", "あ", "雪", "B"]
+        for i in range(4200):
+            (self.cwd / f"{parts[i % len(parts)]}-{i:05}.txt").touch()
+        source = r'printf "%s\0" *.txt'
+        for locale in (["en_US.UTF-8", "sv_SE.UTF-8"] if sys.platform == "darwin" else ["C"]):
+            self.env["LC_ALL"] = locale
+            expected = self.command(BASH, source)
+            self.assertEqual(expected.returncode, 0)
+            self.assertEqual(expected.stdout.count(b"\0"), 4200)
+            self.compare(source, 0, expected.stdout)
+
     def test_glob_sort_order_after_directory_changes(self):
         for i in range(96):
             (self.cwd / f"{['A', 'é', '雪', '🌱'][i % 4]}-{i:03}.txt").touch()
@@ -1969,6 +1982,22 @@ disown %404; echo missing:$?
         self.read_until(fd, PROMPT)
         os.write(fd, b"\x03")
         self.read_until(fd, b"TRAP=129!" if legacy else b"TRAP=1!")
+
+    def test_foreground_executable_receives_terminal_before_read(self):
+        helper = self.cwd / "first-read"
+        helper.write_text(f"#!{sys.executable}\n" + """import os
+assert os.tcgetpgrp(0) == os.getpgrp() == os.getpid()
+print("reader-ready", flush=True)
+print("read=" + input(), flush=True)
+""")
+        helper.chmod(0o755)
+        for shell in (TONARI, BASH):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(shell=shell)
+                os.write(fd, b"./first-read\n")
+                self.read_until(fd, b"reader-ready\r\n")
+                os.write(fd, b"hello\n")
+                self.assertIn(b"read=hello\r\n", self.read_until(fd, PROMPT))
 
     def test_stop_and_resume_foreground_pipeline(self):
         for shell in (BASH, TONARI):
