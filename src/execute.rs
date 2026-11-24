@@ -671,7 +671,7 @@ fn eval_builtin(
             write_error(b"logout", b": not login shell: use `exit'");
             Flow::Continue(1)
         }
-        Builtin::Compound => match cmd.compound.as_deref().unwrap().clone() {
+        Builtin::Compound => match *cmd.compound.take().unwrap() {
             crate::parser::Command::Subshell(body) if in_stage_child => {
                 crate::execute_program(session, body, last_status, true)
             }
@@ -1510,7 +1510,7 @@ impl PreparedCommand {
         let [cmd] = stages.as_slice() else {
             return None;
         };
-        if cmd.compound.is_some() || !cmd.assignments.is_empty() || !cmd.redirects.is_empty() {
+        if cmd.compound.is_some() || !cmd.assignments.is_empty() {
             return None;
         }
         let name = cmd.words.first()?.as_literal()?;
@@ -1524,8 +1524,38 @@ impl PreparedCommand {
             .iter()
             .map(|word| word.as_literal().map(str::to_owned))
             .collect::<Option<Vec<_>>>()?;
+        let redirects = cmd
+            .redirects
+            .iter()
+            .map(|r| {
+                if r.variable.is_some()
+                    || !matches!(
+                        r.target,
+                        Target::Read
+                            | Target::Write
+                            | Target::Append
+                            | Target::Clobber
+                            | Target::ReadWrite
+                            | Target::HereString
+                    )
+                {
+                    return None;
+                }
+                let mut word = r.word.as_literal()?.to_owned();
+                if r.target == Target::HereString {
+                    word.push('\n');
+                }
+                Some(Redirect {
+                    variable: None,
+                    target: r.target,
+                    fd: r.fd,
+                    word,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
         Some(Box::new(Self {
             words,
+            redirects,
             ..Self::default()
         }))
     }
@@ -1534,12 +1564,18 @@ impl PreparedCommand {
         if session.xtrace || session.traps.active() || session.jobs.monitor {
             return None;
         }
+        if session.noclobber && self.redirects.iter().any(|r| r.target == Target::Write) {
+            return None;
+        }
         let selected = builtin(self, status, session)?;
         if matches!(selected, Builtin::Function | Builtin::Set) {
             return None;
         }
         let scope = session.substitutions.scope();
-        let flow = eval_builtin(selected, self, session, status, false);
+        let flow = run_builtin(selected, self, session, status, false).unwrap_or_else(|e| {
+            eprintln!("tonari: {e}");
+            Flow::Continue(1)
+        });
         session.substitutions.finish(scope);
         Some(flow)
     }

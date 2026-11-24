@@ -347,6 +347,26 @@ pub fn launch_group(
     status: u8,
     background: bool,
 ) -> Flow {
+    launch_list(session, background, |s| {
+        execute_program(s, body, status, true)
+    })
+}
+
+pub(crate) fn launch_borrowed(
+    session: &mut Session,
+    body: &[parser::Statement],
+    status: u8,
+) -> Flow {
+    launch_list(session, false, |s| {
+        crate::eval::borrowed_program(s, body, status, true)
+    })
+}
+
+fn launch_list(
+    session: &mut Session,
+    background: bool,
+    run: impl FnOnce(&mut Session) -> Flow,
+) -> Flow {
     let mut launch = session.jobs.launch(background, false);
     let pid = unsafe { libc::fork() };
     if pid < 0 {
@@ -373,7 +393,7 @@ pub fn launch_group(
         crate::execute::coprocess::after_fork(session);
         session.jobs.forked(false);
         session.command_string = false;
-        let flow = execute_program(session, body, status, true);
+        let flow = run(session);
         let code = match flow {
             Flow::Discard(s) | Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
             _ => 0,

@@ -14,7 +14,7 @@ pub fn execute_program(
 ) -> Flow {
     run_statements(
         session,
-        &mut program.into_iter().map(Cow::Owned),
+        program.into_iter().map(Cow::Owned),
         status,
         replace_last,
         &mut [],
@@ -23,7 +23,7 @@ pub fn execute_program(
 
 fn run_statements<'a>(
     session: &mut Session,
-    iter: &mut dyn Iterator<Item = Cow<'a, Statement>>,
+    iter: impl Iterator<Item = Cow<'a, Statement>>,
     mut status: u8,
     replace_last: bool,
     literals: &mut [Option<Box<execute::PreparedCommand>>],
@@ -71,9 +71,12 @@ fn run_statements<'a>(
             single_status(session, &flow);
             flow
         } else {
-            command(
+            dispatch(
                 session,
-                statement.into_owned().command,
+                match statement {
+                    Cow::Owned(stmt) => Cow::Owned(stmt.command),
+                    Cow::Borrowed(stmt) => Cow::Borrowed(&stmt.command),
+                },
                 status,
                 replace_last && statements.peek().is_none() && !negated && !session.traps.active(),
             )
@@ -107,26 +110,57 @@ fn run_statements<'a>(
     }
 }
 
-fn condition_program(session: &mut Session, condition: Vec<Statement>, status: u8) -> Flow {
+pub(crate) fn borrowed_program(
+    session: &mut Session,
+    body: &[Statement],
+    status: u8,
+    tail: bool,
+) -> Flow {
+    run_statements(
+        session,
+        body.iter().map(Cow::Borrowed),
+        status,
+        tail,
+        &mut [],
+    )
+}
+
+fn condition_program(session: &mut Session, condition: &[Statement], status: u8) -> Flow {
     session.tested_depth += 1;
-    let result = execute_program(session, condition, status, false);
+    let result = borrowed_program(session, condition, status, false);
     session.tested_depth -= 1;
     result
 }
 
 pub(crate) fn command(session: &mut Session, command: Command, status: u8, tail: bool) -> Flow {
-    if matches!(command, Command::Arithmetic(_) | Command::Test(_))
+    dispatch(session, Cow::Owned(command), status, tail)
+}
+
+fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: bool) -> Flow {
+    if matches!(command.as_ref(), Command::Arithmetic(_) | Command::Test(_))
         && let Some(flow) = crate::traps::debug(session, status)
     {
         return flow;
     }
     let scope = session.substitutions.scope();
-    let single = match &command {
+    let single = match command.as_ref() {
         Command::Pipeline(stages) => stages.len() == 1,
         Command::Subshell(_) | Command::Test(_) | Command::Arithmetic(_) => true,
         _ => false,
     };
-    let result = run_command(session, command, status, tail);
+    let result = match command {
+        Cow::Borrowed(Command::Subshell(body)) => {
+            crate::subshell::launch_borrowed(session, body, status)
+        }
+        Cow::Borrowed(Command::Group(body)) => borrowed_program(session, body, status, tail),
+        Cow::Borrowed(Command::Arithmetic(expr)) => {
+            crate::arithmetic::command(expr, session, status)
+        }
+        Cow::Borrowed(Command::Test(expr)) => {
+            crate::test_expression::evaluate(expr, session, status)
+        }
+        _ => run_command(session, command.into_owned(), status, tail),
+    };
     if single {
         single_status(session, &result);
     }
@@ -164,7 +198,10 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
         } => {
             let mut last = status;
             for (condition, body) in branches {
-                match condition_program(session, condition, last) {
+                session.tested_depth += 1;
+                let flow = execute_program(session, condition, last, false);
+                session.tested_depth -= 1;
+                match flow {
                     Flow::Continue(0) => return execute_program(session, body, 0, tail),
                     Flow::Continue(code) => last = code,
                     other => return other,
@@ -181,7 +218,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             condition,
             body,
         } => repeat(session, &body, status, |s, last| {
-            match condition_program(s, condition.clone(), last) {
+            match condition_program(s, &condition, last) {
                 Flow::Continue(code) => Ok(((code == 0) != until).then_some(code)),
                 other => Err(other),
             }
@@ -239,7 +276,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 Ok(Some(last))
             })
         }
-        Command::Test(expr) => crate::test_expression::evaluate(expr, session, status),
+        Command::Test(expr) => crate::test_expression::evaluate(&expr, session, status),
         Command::Arithmetic(expr) => crate::arithmetic::command(&expr, session, status),
         Command::ForArithmetic {
             init,
@@ -392,7 +429,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 if matched {
                     let stop = *end == crate::parser::CaseEnd::Stop;
                     if !body.is_empty() {
-                        match execute_program(session, body.clone(), last, tail && stop) {
+                        match borrowed_program(session, body, last, tail && stop) {
                             Flow::Continue(code) => {
                                 result = code;
                                 last = code;
@@ -465,7 +502,7 @@ fn repeat(
                 iterations = iterations.saturating_add(1);
                 run_statements(
                     session,
-                    &mut body.iter().map(Cow::Borrowed),
+                    body.iter().map(Cow::Borrowed),
                     status,
                     false,
                     &mut literals,
@@ -520,7 +557,7 @@ pub fn call_function(session: &mut Session, mut argv: Vec<String>, status: u8) -
     let flow = crate::traps::debug(session, status).unwrap_or_else(|| {
         run_statements(
             session,
-            &mut function
+            function
                 .definition
                 .body
                 .statements()

@@ -11,33 +11,44 @@ pub enum Expr {
     Or(Box<Expr>, Box<Expr>),
 }
 
-pub fn evaluate(expr: Expr, session: &mut Session, status: u8) -> Flow {
+pub fn evaluate(expr: &Expr, session: &mut Session, status: u8) -> Flow {
     match condition(expr, session, status) {
         Ok(value) => Flow::Continue(u8::from(!value)),
         Err(flow) => flow,
     }
 }
 
-fn condition(expr: Expr, session: &mut Session, status: u8) -> Result<bool, Flow> {
+fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flow> {
     use Expr::*;
-    let operand = |s: &mut Session, word| crate::eval::expand_case(s, word, status, false);
+    fn operand<'a>(
+        s: &mut Session,
+        word: &'a crate::word::Word,
+        status: u8,
+    ) -> Result<std::borrow::Cow<'a, str>, Flow> {
+        if let Some(text) = word.as_literal() {
+            return Ok(std::borrow::Cow::Borrowed(text));
+        }
+        crate::eval::expand_case(s, word.clone(), status, false).map(std::borrow::Cow::Owned)
+    }
     let error = |message: &'static str| {
         eprintln!("tonari: [[: {message}");
         Flow::Continue(2)
     };
     match expr {
-        Not(e) => Ok(!condition(*e, session, status)?),
-        And(a, b) => Ok(condition(*a, session, status)? && condition(*b, session, status)?),
-        Or(a, b) => Ok(condition(*a, session, status)? || condition(*b, session, status)?),
-        Word(word) => Ok(!operand(session, word)?.is_empty()),
-        Unary(op, word) => builtins::unary(&op, &operand(session, word)?, session).map_err(error),
+        Not(e) => Ok(!condition(e, session, status)?),
+        And(a, b) => Ok(condition(a, session, status)? && condition(b, session, status)?),
+        Or(a, b) => Ok(condition(a, session, status)? || condition(b, session, status)?),
+        Word(word) => Ok(!operand(session, word, status)?.is_empty()),
+        Unary(op, word) => {
+            builtins::unary(op, &operand(session, word, status)?, session).map_err(error)
+        }
         Binary(left, op, right) => {
-            let left = operand(session, left)?;
+            let left = operand(session, left, status)?;
             match op.as_str() {
                 "=" | "==" | "!=" => {
                     let captured = std::cell::Cell::new(None);
                     let mut env = crate::expansion::Expansion::new(session, status, &captured);
-                    let mut right = right;
+                    let mut right = right.clone();
                     right.resolve(&mut env).map_err(|e| {
                         eprintln!("tonari: [[: {e}");
                         e.flow(env.session)
@@ -59,7 +70,7 @@ fn condition(expr: Expr, session: &mut Session, status: u8) -> Result<bool, Flow
                 "=~" => {
                     let captured = std::cell::Cell::new(None);
                     let expression = crate::expansion::Expansion::new(session, status, &captured)
-                        .regex(right)
+                        .regex(right.clone())
                         .map_err(|e| {
                             eprintln!("tonari: [[: {e}");
                             e.flow(session)
@@ -78,7 +89,7 @@ fn condition(expr: Expr, session: &mut Session, status: u8) -> Result<bool, Flow
                     Ok(matched)
                 }
                 "-eq" | "-ne" | "-lt" | "-le" | "-gt" | "-ge" => {
-                    let right = operand(session, right)?;
+                    let right = operand(session, right, status)?;
                     let a = arithmetic::run(&left, session).map_err(error)?;
                     let b = arithmetic::run(&right, session).map_err(error)?;
                     Ok(match op.as_str() {
@@ -90,7 +101,7 @@ fn condition(expr: Expr, session: &mut Session, status: u8) -> Result<bool, Flow
                         _ => a >= b,
                     })
                 }
-                _ => builtins::binary(&left, &op, &operand(session, right)?).map_err(error),
+                _ => builtins::binary(&left, op, &operand(session, right, status)?).map_err(error),
             }
         }
     }

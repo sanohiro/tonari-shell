@@ -23,7 +23,7 @@ pub(super) fn visit_names(
 
 pub(crate) fn scan(
     path: &Path,
-    visitor: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>,
+    visitor: &mut impl FnMut(&CStr, u8) -> ControlFlow<()>,
 ) -> ControlFlow<()> {
     let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
         return ControlFlow::Continue(());
@@ -35,7 +35,7 @@ pub(crate) fn scan(
 fn read_names(
     path: &CStr,
     _interruptible: bool,
-    visit: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>,
+    visit: &mut impl FnMut(&CStr, u8) -> ControlFlow<()>,
 ) -> ControlFlow<()> {
     use std::ptr::NonNull;
 
@@ -56,7 +56,14 @@ fn read_names(
             return ControlFlow::Continue(());
         }
         // readdir owns the name until the next call on this stream.
-        let name = unsafe { CStr::from_ptr(std::ptr::addr_of!((*entry).d_name).cast()) };
+        let name = unsafe {
+            // Darwin returns the length with the directory entry, excluding its terminator.
+            let bytes = std::slice::from_raw_parts(
+                std::ptr::addr_of!((*entry).d_name).cast::<u8>(),
+                usize::from((*entry).d_namlen) + 1,
+            );
+            CStr::from_bytes_with_nul_unchecked(bytes)
+        };
         visit(name, unsafe { (*entry).d_type })?;
     }
 }
@@ -65,7 +72,7 @@ fn read_names(
 fn read_names(
     path: &CStr,
     interruptible: bool,
-    visit: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>,
+    visit: &mut impl FnMut(&CStr, u8) -> ControlFlow<()>,
 ) -> ControlFlow<()> {
     use std::mem::offset_of;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};

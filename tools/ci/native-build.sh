@@ -25,10 +25,15 @@ rustup toolchain install "$toolchain" --profile minimal --component rust-src --t
 rustc +"$toolchain" -vV >> results/host.txt
 export CARGO_TARGET_DIR="$RUNNER_TEMP/build"
 cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/current"
-if [[ $SUITE == functions || $SUITE == throughput || $SUITE == history ]]; then
+if [[ $SUITE == functions || $SUITE == throughput || $SUITE == history || $SUITE == budget* ]]; then
   previous=$(git rev-parse --verify --end-of-options "${PREVIOUS_REVISION:-HEAD^}^{commit}")
   git worktree add -q --detach "$RUNNER_TEMP/base" "$previous"
   (cd "$RUNNER_TEMP/base"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/baseline")
+fi
+if [[ $SUITE == budget* ]]; then
+  for level in s 3; do
+    cp "$(CARGO_PROFILE_RELEASE_OPT_LEVEL=$level tools/build-release.sh)" "$RUNNER_TEMP/bin/opt-$level"
+  done
 fi
 if [[ $SUITE == profiles ]]; then
   git worktree add -q --detach "$RUNNER_TEMP/old" 3999b0e

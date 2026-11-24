@@ -13,9 +13,9 @@ download_bash() {
 }
 version=5.2.37
 digest=9599b22ecd1d5787ad7d3b7bf0c59f312b3396d1e281175dd1f8a4014da621ff
-if [[ $SUITE == inventory* && $RUNNER_OS == Linux ]]; then
+if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; then
   base=debian:trixie-slim
-  if [[ $SUITE == inventory-ubuntu ]]; then
+  if [[ $SUITE == *-ubuntu ]]; then
     base=ubuntu:26.04
     version=5.3
     digest=0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba
@@ -25,13 +25,20 @@ if [[ $SUITE == inventory* && $RUNNER_OS == Linux ]]; then
   docker build -t tonari-audit -f tests/compat/Dockerfile --build-arg BASE="$base" --build-arg GNU_SHA256="$digest" "$fixture"
   run=(docker run --rm --init --network none --tmpfs /tmp:exec,mode=1777,size=1g -v "$PWD:/repo:ro" -v "$current:/tonari:ro")
   "${run[@]}" --entrypoint sh tonari-audit -ec 'uname -m; /bin/bash --version; cat /etc/os-release' >> "$out/host.txt"
+  if [[ $SUITE == budget* ]]; then
+    distro=Debian; [[ $SUITE == *-ubuntu ]] && distro=Ubuntu
+    arch=x64; [[ $RUNNER_ARCH == ARM64 ]] && arch=arm64
+    "${run[@]}" -v "$bin:/candidates:ro" --entrypoint python3 tonari-audit tests/compat/replay_budget.py \
+      --lane "$distro$arch" --bash /bin/bash --bin /candidates > "$out/replay.jsonl"
+    exit
+  fi
   "${run[@]}" --entrypoint python3 tonari-audit tests/shell.py /tonari -q
   "${run[@]}" tonari-audit --correctness-only > "$out/audit.json"
   "${run[@]}" -v "$out/audit.json:/audit:ro" tonari-audit --reuse-audit /audit > "$out/timings.json"
   exit
 fi
 if [[ $RUNNER_OS == macOS ]]; then
-  if [[ $SUITE == inventory || $SUITE == foreground ]]; then
+  if [[ $SUITE == inventory || $SUITE == foreground || $SUITE == budget ]]; then
     gnu="$RUNNER_TEMP/gnu"
     mkdir -p "$gnu"
     download_bash "$version" "$digest" "$RUNNER_TEMP/bash.tar.gz"
@@ -41,6 +48,10 @@ if [[ $RUNNER_OS == macOS ]]; then
   else
     if [[ ! -x /opt/homebrew/bin/bash ]]; then brew install bash; fi
     ref=/opt/homebrew/bin/bash
+  fi
+  if [[ $SUITE == budget ]]; then
+    python3 tests/compat/replay_budget.py --lane macOSarm64 --bash "$ref" --bin "$bin" > "$out/replay.jsonl"
+    exit
   fi
   if [[ $SUITE == inventory ]]; then
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q

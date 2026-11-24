@@ -24,6 +24,7 @@ pub struct History {
     tail_start: u64,
     older_prefix: String,
     older_match: Option<String>,
+    search_buffer: Vec<u8>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -443,7 +444,7 @@ impl History {
     // Search complete blocks backwards. Most blocks can be ruled out with
     // one byte substring search, without decoding or allocating any commands.
     fn older_match(
-        &self,
+        &mut self,
         session: &Session,
         needle: &str,
         prefix: bool,
@@ -475,7 +476,8 @@ impl History {
         let finder = memchr::memmem::Finder::new(raw.as_bytes());
         let reverse = memchr::memmem::FinderRev::new(raw.as_bytes());
         let mut end = self.tail_start;
-        let mut block = vec![0; BLOCK.min(end as usize)];
+        let block = &mut self.search_buffer;
+        block.resize(BLOCK.min(end as usize), 0);
         while end != 0 {
             if waiting() {
                 return Err(());
@@ -787,13 +789,13 @@ mod tests {
         rows.push_str("1\t1\t0\t/hit\tcmd hit hit\\n雪\n1\t1\t0\t/hit\tfinal\\tword\n");
         fs::write(&path, &rows).unwrap();
         let m = fs::metadata(&path).unwrap();
-        let history = History {
+        let mut history = History {
             journal: Some((m.dev(), m.ino())),
             offset: m.len(),
             tail_start: m.len(),
             ..History::default()
         };
-        let search = |query, prefix, skip| {
+        let mut search = |query, prefix, skip| {
             history
                 .older_match(&session, query, prefix, skip, &|| false)
                 .unwrap()
