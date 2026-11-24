@@ -9,7 +9,8 @@ pub(super) fn visit_names(
     skip_dots: bool,
     mut visit: impl FnMut(&CStr, u8),
 ) {
-    let _ = scan(Path::new(dir), &mut |name, kind| {
+    let Ok(path) = CString::new(dir) else { return };
+    let _ = read_names(&path, false, &mut |name, kind| {
         // A symlink or an unknown entry type still needs a pathname lookup.
         if (!directories_only || matches!(kind, libc::DT_DIR | libc::DT_LNK | libc::DT_UNKNOWN))
             && (!skip_dots || !matches!(name.to_bytes(), b"." | b".."))
@@ -27,11 +28,15 @@ pub(crate) fn scan(
     let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
         return ControlFlow::Continue(());
     };
-    read_names(&path, visitor)
+    read_names(&path, true, visitor)
 }
 
 #[cfg(not(target_os = "linux"))]
-fn read_names(path: &CStr, visit: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>) -> ControlFlow<()> {
+fn read_names(
+    path: &CStr,
+    _interruptible: bool,
+    visit: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>,
+) -> ControlFlow<()> {
     use std::ptr::NonNull;
 
     struct DirectoryStream(NonNull<libc::DIR>);
@@ -57,7 +62,11 @@ fn read_names(path: &CStr, visit: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>) 
 }
 
 #[cfg(target_os = "linux")]
-fn read_names(path: &CStr, visit: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>) -> ControlFlow<()> {
+fn read_names(
+    path: &CStr,
+    interruptible: bool,
+    visit: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>,
+) -> ControlFlow<()> {
     use std::mem::offset_of;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
@@ -71,10 +80,11 @@ fn read_names(path: &CStr, visit: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>) 
         return ControlFlow::Continue(());
     }
     let dir = unsafe { OwnedFd::from_raw_fd(fd) };
-    let mut bytes = [0u8; 32768];
+    let mut bytes = std::mem::MaybeUninit::<[u8; 32768]>::uninit();
     // A queued key can finish completion after a few entries. Fetch the first
     // 2 KiB promptly, then amortize syscalls over 32 KiB for a full traversal.
-    let mut request = 2048;
+    const CAPACITY: usize = 32768;
+    let mut request = if interruptible { 2048 } else { CAPACITY };
     const RECLEN: usize = offset_of!(libc::dirent64, d_reclen);
     const TYPE: usize = offset_of!(libc::dirent64, d_type);
     const NAME: usize = offset_of!(libc::dirent64, d_name);
@@ -95,8 +105,10 @@ fn read_names(path: &CStr, visit: &mut dyn FnMut(&CStr, u8) -> ControlFlow<()>) 
             }
             return ControlFlow::Continue(());
         }
-        request = bytes.len();
-        let mut batch = &bytes[..count as usize];
+        request = CAPACITY;
+        // getdents64 initialized exactly the returned prefix of the buffer.
+        let mut batch =
+            unsafe { std::slice::from_raw_parts(bytes.as_ptr().cast::<u8>(), count as usize) };
         while batch.len() > NAME {
             let len = usize::from(u16::from_ne_bytes([batch[RECLEN], batch[RECLEN + 1]]));
             if len <= NAME || len > batch.len() {

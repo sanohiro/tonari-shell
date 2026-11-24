@@ -299,7 +299,7 @@ def main():
     cli.add_argument("tonari", type=Path)
     cli.add_argument("--bash", type=Path, default=Path("/bin/bash"))
     cli.add_argument("--previous", type=Path, help="include a previous Tonari build")
-    cli.add_argument("--spawn-control", type=Path, help="compiled tools/bench_spawn.c for the external case")
+    cli.add_argument("--spawn-control", type=Path, help="compiled tools/bench_spawn.c for native process and directory controls")
     cli.add_argument("--timing", choices=["whole", "started", "both"], default="both")
     cli.add_argument("--utf8-locale", default="en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8",
                      help="LC_ALL for Unicode field-splitting and pathname workloads")
@@ -364,7 +364,11 @@ def main():
             script = home / f"{case}.sh"
             script.write_text(source)
             participants = shells
-            if case == "external" and args.spawn_control:
+            if args.spawn_control and case in (
+                "external", "external-env", "redirect-stderr", "pipeline", "merged-pipeline",
+                "merged-pipeline-redirect", "builtin-merged-pipeline",
+                "glob-sparse", "glob-multi-star", "glob-utf8-once", "glob-utf8-large",
+            ):
                 participants = [*shells, ("Direct C", args.spawn_control.resolve())]
             modes = (False, True) if args.timing == "both" else (args.timing == "started",)
             for started in modes:

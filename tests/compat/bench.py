@@ -128,6 +128,49 @@ def benchmark(a, work, mode, cli, test_class):
     return stats(samples)
 
 
+def repeated(a, work, measurements, cli):
+    """Accept a batch only when each iteration reproduces its single-command observation."""
+    started = measurements.get("started", {})
+    if "bash" not in started:
+        return {"reason": "no verified started command"}
+    if not any("bash" in result and result["tonari"][0] * 3 > result["bash"][0] * 2
+               for result in measurements.values()):
+        return {"reason": "within target in single-command samples"}
+    if work["stdin"]:
+        return {"reason": "consumes invocation stdin"}
+    argv = work["argv"]
+    def run(index, source):
+        return a.call(index, [*argv[:-1], source], fixture=work["fixture"], timing="started")
+    original = run(0, argv[-1])
+    if original.timeout:
+        return {"reason": "single command timed out"}
+    count = 128 if started["bash"][0] < 2_000_000 else 16 if started["bash"][0] < 10_000_000 else 4
+    if count * (len(original.out) + len(original.err)) > 2**20:
+        return {"reason": "batch output exceeds 1 MiB"}
+    end = b"__TONARI_BENCH_COMPLETE__"
+    status = f"__TONARI_BENCH_STATUS_{original.code}__".encode()
+    head = f"for __tonari_bench_i in {{1..{count}}}; do\n:\n{argv[-1]}\n"
+    tail = '\ndone\nbuiltin printf __TONARI_BENCH_COMPLETE__'
+    checked = head + "builtin printf '__TONARI_BENCH_STATUS_%d__' \"$?\" >&2" + tail
+    timed = head + tail
+    def valid(o, marker):
+        return (not o.timeout and o.code == 0 and o.out == original.out * count + end
+                and o.err == (original.err + marker) * count)
+    for index, name in enumerate(("Bash", "Tonari")):
+        if not valid(run(index, checked), status):
+            return {"reason": name + " does not reproduce the original result on every iteration",
+                    "iterations": count}
+    samples = [[], []]
+    for i in range(cli.batch_runs + 1):
+        for index in (i % 2, 1 - i % 2):
+            result = run(index, timed)
+            if not valid(result, b""):
+                return {"reason": "batch observation changed", "iterations": count}
+            if i:
+                samples[index].append(result.ns)
+    return dict(iterations=count, **stats(samples))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ("audit", "bash", "tonari"):
@@ -135,11 +178,12 @@ def main():
     for flag in ("source", "helpers"):
         parser.add_argument("--" + flag, type=Path)
     parser.add_argument("--runs", type=int, default=15)
+    parser.add_argument("--batch-runs", type=int, default=9)
     parser.add_argument("--suite-runs", type=int, default=7)
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--timeout", type=int, default=110)
     args = parser.parse_args()
-    if min(args.suite_runs, args.runs) < 1 or args.warmups < 0:
+    if min(args.suite_runs, args.runs, args.batch_runs) < 1 or args.warmups < 0:
         parser.error("samples must be positive and warmups nonnegative")
     data = json.loads(args.audit.read_text())
     rows = data["rows"]
@@ -167,18 +211,27 @@ def main():
         if audited is not None and hashes != audited:
             parser.error("executable changed since the compatibility check; regenerate the audit before timing")
         a = Audit(*shells, Path(temp))
+        controls = {}
+        for iterations in (4, 16, 128):
+            source = f"for __tonari_bench_i in {{1..{iterations}}}; do :; done\nbuiltin printf __TONARI_BENCH_COMPLETE__"
+            argv = ["--noprofile", "--norc", "-c", source]
+            control = a.call(0, argv, timing="started")
+            work = dict(argv=argv, stdin="", fixture=False, expected=control.digest())
+            controls[iterations] = benchmark(a, work, "started", args, test_class)
         for n, (key, items) in enumerate(grouped.items(), 1):
             work = json.loads(key)
             modes = ["whole"]
             if work.get("argv", [])[:3] == ["--noprofile", "--norc", "-c"] and len(work["argv"]) == 4:
                 modes.append("started")
             measurements = {mode: benchmark(a, work, mode, args, test_class) for mode in modes}
+            batch = repeated(a, work, measurements, args)
             for g, name in items:
+                rows[g][name]["batch_timing"] = batch
                 rows[g][name]["timing"] = measurements
             if n % 100 == 0:
                 print(f"{n}/{len(grouped)} witnesses", file=sys.stderr, flush=True)
     data["benchmark"] = dict(host=platform.platform(), runs=args.runs, suite_runs=args.suite_runs,
-                             warmups=args.warmups, distinct_workloads=len(grouped), unit="ns", executable_sha256=hashes)
+                             warmups=args.warmups, batch_controls=controls, batch_runs=args.batch_runs, distinct_workloads=len(grouped), unit="ns", executable_sha256=hashes)
     print(json.dumps(data, ensure_ascii=True, separators=(",", ":")))
 
 

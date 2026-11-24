@@ -206,6 +206,9 @@ impl CharacterClass {
 #[derive(Debug)]
 pub(crate) struct BracketPattern {
     tokens: Vec<Token>,
+    edges: Vec<u8>,
+    prefix_len: usize,
+    pub(super) needs_locale: bool,
     utf8: bool,
 }
 
@@ -243,16 +246,53 @@ impl BracketPattern {
                 _ => Token::Literal(packed(c)),
             });
         }
-        Some(Self { tokens, utf8 })
+        // Compare literal runs on both ends in bulk. A star in the middle
+        // cannot consume a byte belonging to the anchored suffix.
+        let head = tokens
+            .iter()
+            .take_while(|t| matches!(t, Token::Literal(_)))
+            .count();
+        let tail = tokens[head..]
+            .iter()
+            .rposition(|t| !matches!(t, Token::Literal(_)))
+            .map_or(head, |i| head + i + 1);
+        let mut edges = Vec::new();
+        let mut append = |tokens: &[Token]| {
+            for token in tokens {
+                if let Token::Literal(bytes) = token {
+                    edges.extend(bytes.iter().copied().take_while(|b| *b != 0));
+                }
+            }
+            edges.len()
+        };
+        let prefix_len = append(&tokens[..head]);
+        append(&tokens[tail..]);
+        tokens.truncate(tail);
+        tokens.drain(..head);
+        let needs_locale = tokens.iter().any(|t| {
+            matches!(t, Token::List { members, .. }
+            if members.iter().any(|m| matches!(m, Member::Native(_))))
+        });
+        Some(Self {
+            tokens,
+            edges,
+            prefix_len,
+            needs_locale,
+            utf8,
+        })
     }
 
-    pub(super) fn accepts(&self, mut text: &[u8], period: bool) -> bool {
-        if period
-            && text.starts_with(b".")
-            && !matches!(self.tokens.first(), Some(Token::Literal(c)) if c == &[b'.', 0, 0, 0])
-        {
+    pub(super) fn accepts(&self, text: &[u8], period: bool) -> bool {
+        let (prefix, suffix) = self.edges.split_at(self.prefix_len);
+        if period && text.starts_with(b".") && !prefix.starts_with(b".") {
             return false;
         }
+        let Some(mut text) = text
+            .strip_prefix(prefix)
+            .and_then(|s| s.strip_suffix(suffix))
+        else {
+            return false;
+        };
         if self.utf8 && std::str::from_utf8(text).is_err() {
             return false;
         }

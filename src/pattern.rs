@@ -43,7 +43,7 @@ pub(crate) enum Matcher<T> {
     Star(T, usize),
     Stars(T, usize, usize),
     Native(CString),
-    Bracket(bracket::BracketPattern, T),
+    Bracket(Box<bracket::BracketPattern>, T),
     Invalid,
 }
 
@@ -64,7 +64,9 @@ impl<T: AsRef<str>> Matcher<T> {
         }
         if text.contains('[') && bracket::needs_parser(text.as_bytes()) {
             return bracket::BracketPattern::new(text.as_bytes())
-                .map_or(Self::Invalid, |compiled| Self::Bracket(compiled, pattern));
+                .map_or(Self::Invalid, |compiled| {
+                    Self::Bracket(Box::new(compiled), pattern)
+                });
         }
         CString::new(text).map_or(Self::Invalid, Self::Native)
     }
@@ -149,7 +151,8 @@ impl<T: AsRef<str>> Matcher<T> {
         if value.contains('\0') {
             return false;
         }
-        if matches!(self, Self::Native(_) | Self::Bracket(..)) {
+        if matches!(self, Self::Native(_)) || matches!(self, Self::Bracket(p, _) if p.needs_locale)
+        {
             localized(|| self.accepts(value.as_bytes(), false, None))
         } else {
             self.accepts(value.as_bytes(), false, None)

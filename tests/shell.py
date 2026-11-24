@@ -1393,6 +1393,26 @@ IFS= read -ru3 line; echo "${a[0]}:$line"; mapfile -tu3 a; echo "${a[0]}"
 printf 'a\\0b\nc\n' > input; mapfile -t a <input; printf '[%s]' "${a[@]}" """,
                      0, b"first:second\nlast\n[a][c]")
 
+    def test_positional_storage_and_live_loop_operands(self):
+        self.compare("""set -- before 'two words'
+f(){ set -- "$2" "$1" ""; printf '<%s>' "$@"; }; f a b; printf '<%s>' "$@"
+for ((i=0; i<16#12; ++i)); do
+    case $i in 0) i=010;; 9) i='target+1'; target=14;; 16) i=17;; esac
+    printf ':%s' "$i"
+done
+echo ":$i"
+declare -a v=([0]=1); for ((;v<4;v++)); do :; done; echo "${v[*]}"
+declare -n ref=v; for ((;ref<6;ref++)); do :; done; echo "${v[*]}"; set --; echo "$#"
+""", 0, b"<b><a><><before><two words>:010:target+1:17:18\n4\n6\n0\n", minimum=5)
+
+    def test_raw_read_preserves_shared_offsets(self):
+        (self.cwd / "input").write_bytes(b"x" * 8192 + b"\0" + "雪".encode() + b"|tail\nlast")
+        self.env["LC_ALL"] = "en_US.UTF-8"
+        self.compare("""exec 3<input
+IFS= read -r -u3 -d '|' a; printf '%s/' "${#a}"
+IFS= read -ru3 a; printf '%s/' "$a"; IFS= read -ru3 a; printf '%s:%s' "$?" "$a" """,
+                     0, b"8193/tail/1:last")
+
     def test_mapfile_chunk_boundaries_and_sparse_edits(self):
         self.env["LC_ALL"] = "en_US.UTF-8"
         (self.cwd / "chunked").write_bytes(b"a" * 8191 + b"\n" + b"b" * 8192 + "雪\n".encode()

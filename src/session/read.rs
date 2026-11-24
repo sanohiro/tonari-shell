@@ -275,14 +275,14 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
     let mut escaped = Vec::new();
     let mut slash = false;
     let mut chars = 0;
-    let started = Instant::now();
+    let started = opts.timeout.map(|timeout| (Instant::now(), timeout));
     let mut input = Input::new(opts.fd);
     let status = loop {
         if opts.max_chars.is_some_and(|max| chars >= max) && std::str::from_utf8(&line).is_ok() {
             break 0;
         }
         if edited.is_none()
-            && let Some(timeout) = opts.timeout
+            && let Some((started, timeout)) = started
         {
             let remaining = timeout.saturating_sub(started.elapsed());
             if remaining.is_zero()
@@ -293,6 +293,26 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
         }
         let input_byte = if let Some(bytes) = &mut edited {
             Ok(bytes.next())
+        } else if opts.raw && opts.max_chars.is_none() && opts.timeout.is_none() && input.seekable {
+            match input.chunk(1, usize::MAX) {
+                Ok([]) => Ok(None),
+                Ok(bytes) => {
+                    let end = memchr::memchr(opts.delimiter, bytes);
+                    let data = &bytes[..end.unwrap_or(bytes.len())];
+                    let unused = bytes.len() - data.len();
+                    if memchr::memchr(0, data).is_none() {
+                        line.extend_from_slice(data);
+                    } else {
+                        line.extend(data.iter().copied().filter(|&b| b != 0));
+                    }
+                    if end.is_some() {
+                        input.position -= unused - 1;
+                        break 0;
+                    }
+                    continue;
+                }
+                Err(e) => Err(e),
+            }
         } else if opts.exact && opts.timeout.is_none() {
             // A character consumes at least one byte. This much buffered input
             // is ours even on a pipe with another command waiting after read.
@@ -366,6 +386,16 @@ pub(super) fn run(session: &mut Session, args: &[String]) -> u8 {
     } else {
         session.get("IFS").unwrap_or_else(|| " \t\n".into())
     };
+    if opts.array.is_none()
+        && ifs.is_empty()
+        && let [name] = opts.names
+    {
+        if let Err(e) = session.assign_target(name, &line) {
+            eprintln!("tonari: read: {e}");
+            return 1;
+        }
+        return status;
+    }
     let (spans, end) = field_ranges(&line, &escaped, &ifs);
     if let Some(target) = opts.array {
         if session.is_associative(target) {
