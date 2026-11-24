@@ -585,6 +585,17 @@ fn paths(
         let extended = (grouped || options.nocaseglob)
             .then(|| extended::Pattern::for_path(part, grouped, options.nocaseglob, locale));
         let matcher = Matcher::new(part);
+        // A final dot followed only by ASCII letters or digits is literal,
+        // even if earlier characters require fnmatch. Check it once per name.
+        let required_extension = if extended.is_none() && matches!(matcher, Matcher::Native(_)) {
+            part.rfind('.')
+                .map(|i| &part.as_bytes()[i..])
+                .filter(|suffix| {
+                    suffix.len() > 1 && suffix[1..].iter().all(u8::is_ascii_alphanumeric)
+                })
+        } else {
+            None
+        };
         let mut matched = Vec::new();
         for prefix in paths {
             let dir = if prefix.is_empty() { "." } else { &prefix };
@@ -593,6 +604,9 @@ fn paths(
                 !rest.is_empty(),
                 options.globskipdots || options.ignore.is_some(),
                 |raw, _| {
+                    if required_extension.is_some_and(|suffix| !raw.to_bytes().ends_with(suffix)) {
+                        return;
+                    }
                     let period = !options.dotglob || matches!(raw.to_bytes(), b"." | b"..");
                     let matches = match &extended {
                         Some(group) => raw

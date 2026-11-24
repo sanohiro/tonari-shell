@@ -989,6 +989,39 @@ printf '%s\0' "$#" "$@" """, 0,
                 expected = self.command(BASH, source).stdout
                 self.compare(source, 0, expected)
 
+    def test_large_glob_required_extension(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        for i in range(256):
+            mark = ("a", "雪", "🐟")[i % 3]
+            suffix = ("log", "LOG", "txt", "v1")[i % 4]
+            (self.cwd / f"entry-{i:03}-{mark}.{suffix}").touch()
+        for name in (".hidden.log", "x?.log", "xa.t.xt", "xb.日本語", "xq.lo[g"):
+            (self.cwd / name).touch()
+        (self.cwd / "d1.box").mkdir()
+        (self.cwd / "d1.box" / "f雪.txt").touch()
+        source = r"""
+show() { printf '%s\0' "$#" "$@"; }
+shopt -s nullglob
+show entry-???-?.log
+show entry-???-?.zip
+show entry-???-?.*
+show *?.v1
+show x\?.log x?.t.xt x?.日本語 x?.lo[g
+show entry-[[:digit:]]??-?.log d?.box/f?.txt
+shopt -s dotglob
+show *?.log
+shopt -s nocaseglob
+show entry-???-?.LOG
+shopt -u nocaseglob
+shopt -s extglob
+show @(entry-???-?.log|x?.t.xt)
+"""
+        reference = self.command(BASH, source)
+        self.assertEqual((reference.returncode, reference.stderr), (0, b""))
+        self.assertTrue(reference.stdout.startswith(b"64\0entry-000-a.log\0"))
+        result = self.command(TONARI, source)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, reference.stdout, b""))
+
     def test_large_glob_preserves_locale_order(self):
         # Several byte-ordered runs change places in a named locale.
         parts = ["A", "a", "é", "Z", "z", "あ", "雪", "B"]

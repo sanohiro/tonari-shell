@@ -139,6 +139,11 @@ for ((i=0; i<30; i++)); do set -- localized/*.txt; done
 echo "$#"
 """, "512"),
     "glob-utf8-once": ('set -- localized/*.txt; echo "$#"', "512"),
+    "glob-extension-sparse": ('set -- extensions/entry-?????-?.log; echo "$#"', "1000"),
+    "glob-extension-miss": ('shopt -s nullglob; set -- extensions/entry-?????-?.zip; echo "$#"', "0"),
+    "glob-extension-dense": ('set -- extensions/entry-?????-?.txt; echo "$#"', "19000"),
+    "glob-extension-star": ('set -- extensions/*.log; echo "$#"', "1000"),
+    "glob-extension-wild": ('set -- extensions/entry-?????-?.*; echo "$#"', "20000"),
     "glob-utf8-large-repeat": ('for ((i=0; i<8; i++)); do set -- large/*.txt; done; echo "$#"', "4096"),
     "glob-utf8-mixed-40k": ('set -- unstructured/*.txt; echo "$#"', "40000"),
     "glob-utf8-100k": ('set -- numbered/*.txt; echo "$# $1 ${100000}"',
@@ -356,6 +361,13 @@ def main():
         home = Path(temp)
         env = {"HOME": temp, "PATH": "/usr/bin:/bin", "LC_ALL": "C"}
         (home / "rows").write_text("".join(f"record {i}\n" for i in range(2000)))
+        if not args.case or any(case.startswith("glob-extension-") for case in args.case):
+            directory = home / "extensions"
+            directory.mkdir()
+            for i in range(20000):
+                mark = ("a", "雪", "🐟")[i % 3]
+                extension = "log" if i % 20 == 0 else "txt"
+                (directory / f"entry-{i:05}-{mark}.{extension}").touch()
         if not args.case or any(case in ("glob", "glob-all", "glob-sparse", "glob-multi-star") for case in args.case):
             fixtures = home / "fixtures"
             fixtures.mkdir()
@@ -406,7 +418,7 @@ def main():
         for case in args.case or CASES:
             case_env = env
             if case in ("field-split-unicode", "glob-utf8-sort", "glob-utf8-once", "glob-utf8-large", "glob-utf8-large-repeat",
-                        "glob-ignore-large", "glob-nocase-large", "glob-utf8-100k", "glob-utf8-mixed-40k"):
+                        "glob-ignore-large", "glob-nocase-large", "glob-utf8-100k", "glob-utf8-mixed-40k") or case.startswith("glob-extension-"):
                 case_env = dict(env, LC_ALL=args.utf8_locale)
             source, expected = CASES[case]
             script = home / f"{case}.sh"
