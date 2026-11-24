@@ -1,5 +1,27 @@
 # Startup and execution / 起動と実行性能
 
+<a id="required-glob-extension"></a>
+
+## 2026-11-24 · Required filename extensions in the release build / 必須拡張子による候補の絞り込み
+
+Each cell gives **previous Tonari → current Tonari / Bash**. Release binaries at `baa07c6` and `4c78f6d` ran on the same machine and filesystem. Each row used five warm-ups and 31 interleaved measurements per shell after a readiness handshake. The directory contained 20,000 names with fixed-width numbers and an ASCII, Japanese or emoji character. On the local M1, the complete NUL-delimited lists from both builds and Bash matched in all five cases. Native CI also compared Bash's full argument list for case folding, extended patterns, quoted metacharacters, directory components and hidden files. [Benchmark cases](../tools/bench_scripts.py) · [Release regression test](../tests/shell.py) · [All native timings](native-2026-11-24/required-extension.tsv)
+
+| 20,000 entries, median ms | Local M1 | macOS arm64 CI | Linux x86-64 CI | Linux arm64 CI |
+| --- | ---: | ---: | ---: | ---: |
+| `entry-?????-?.log` · 5% | 11.422 → **9.258** / 26.252 | 11.714 → **9.492** / 27.433 | 4.703 → **3.798** / 8.418 | 5.466 → **4.370** / 10.805 |
+| `entry-?????-?.zip` · 0% | 10.994 → **8.725** / 22.256 | 12.419 → **9.677** / 25.282 | 4.381 → **3.457** / 8.019 | 5.274 → **4.136** / 10.374 |
+| `entry-?????-?.txt` · 95% | 19.399 → **19.309** / 130.572 | 20.758 → **20.971** / 147.640 | 8.448 → **8.231** / 17.002 | 8.407 → **8.388** / 20.641 |
+| `*.log` · 5% | 9.268 → **9.135** / 25.617 | 9.378 → **9.380** / 26.547 | 3.861 → **3.878** / 8.051 | 4.409 → **4.406** / 10.306 |
+| `entry-?????-?.*` · 100% | 19.185 → **19.250** / 137.084 | 20.853 → **20.610** / 159.910 | 8.829 → **8.496** / 17.360 | 8.616 → **8.607** / 21.120 |
+
+2万件のうち1,000件または0件が一致するケースのほか、ほぼ全件が一致する場合、単純な星印だけの場合、固定拡張子が存在しない場合も同じ方法で測りました。各 OS の UTF-8 ロケールで比較し、Linux は x86-64 と arm64 のネイティブランナーを使用しました。 [実機 CI とバイナリ情報](https://github.com/sanohiro/tonari-shell/actions/runs/45381485844) · [Linux 互換性監査](https://github.com/sanohiro/tonari-shell/actions/runs/45381518013)
+
+Across the 72 script workloads, all three native CI runners recorded lower medians than Bash. Tonari took at most two-thirds of Bash time in 58/72 on macOS arm64, 63/72 on Linux x86-64 and 62/72 on Linux arm64. The 95%-matching pattern was 0.213 ms (1.0%) slower than the previous build on the hosted Mac.
+
+The Mac release executable measured 1,350,672 bytes locally, exactly the previous size. The native Linux x86-64 release was 1,838,008 bytes (+544) and arm64 was 1,584,808 bytes (+384), both stripped static PIE executables. The current and previous feature-inventory verdicts agreed in all 7,558 platform/case observations (macOS 1,408, Debian 1,522 and Ubuntu 1,553 on each Linux architecture). All five large fixtures also produced the same ordered NUL-delimited results as Bash in functional checks on both Linux targets.
+
+8ファイルだけのディレクトリでも、手元の M1 で256回の展開を一組として31回測定しました。全件一致する `x?.txt` は前版6.535 ms、今回6.460 ms、一致しない `x?.log` は5.676 → 5.656 ms、単純な `*.txt` は6.352 → 6.350 msでした。
+
 <a id="ripgrep-16-trials"></a>
 
 ## 2026-11-24 · ripgrep 16 transfer experiments / ripgrep 16 の手法を使った試作

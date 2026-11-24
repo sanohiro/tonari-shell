@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## 2026-11-24 · Required extensions in pathname expansion / ファイル名展開の必須拡張子
+
+Tonari now extracts a trailing dot and ASCII alphanumeric extension once per pathname component when matching requires case-sensitive `fnmatch`. It rejects directory entries with a different suffix before the general match. Every surviving entry still follows the same matcher, dotfile rules and final sort. The simple `*.log` matcher already checks its suffix directly. Case folding and extended pattern groups use their own matchers. The native Linux measurements confirmed the earlier M1 experiment. [Implementation](../src/pattern.rs) · [Release measurements](benchmarks.md#required-glob-extension)
+
+通常の `?` などを含むパターンでは、拡張子が違う名前を安価に除外できます。2万件のうち5%が一致する展開と一致なしの展開で効果を確認し、Mac と Linux に共通の実装を採用しました。Bash との自動比較には、日本語と絵文字、ドットファイル、大文字小文字、引用した `?`、拡張パターン、ディレクトリ名に適用した場合を含めました。NUL 区切りのファイル名がパイプと `mapfile` を通って空白・タブ・改行ごと復元されることも回帰テストに加えました。[Bash とのテスト](../tests/shell.py) · [試作時の履歴検索比較](benchmarks.md#ripgrep-16-trials)
+
 ## 2026-11-24 · What transfers from ripgrep 16 / ripgrep 16 の実装から
 
 At review time ripgrep 16.0.0 was the latest release. Its one subsequent commit updated the Homebrew formula. The globset implementation extracts a required extension from some patterns and checks that before applying its general matcher. A Tonari prototype did the same for the case-sensitive native matcher with a literal ASCII extension. On a local M1 it improved a 5%-matching wildcard expansion in 20,000 files. The effect depended on how many names the cheap check rejected. A simple star plus extension already has a direct matcher. [Upstream comparison](https://github.com/BurntSushi/ripgrep/compare/669cb4c755db20b26c3af3d923c042ae224c7496...4a51093f78bfbef86d89275f4916fd6b6039fe9e) · [Glob strategy selection](https://github.com/BurntSushi/ripgrep/blob/16.0.0/crates/globset/src/glob.rs#L51-L70) · [Tonari measurements](benchmarks.md#ripgrep-16-trials)
