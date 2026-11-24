@@ -187,6 +187,20 @@ fn buffered_compound<P: AsRef<[parser::Statement]>>(
     };
     let mut start = 0;
     let mut nested = 0usize;
+    let mut deferred = None;
+    let mut probe = |size, lines| {
+        let mut text = String::with_capacity(first.len() + size);
+        text.push_str(first);
+        text.push_str(std::str::from_utf8(&buffered[..size]).map_err(|_| size)?);
+        // Only the final ordinary read may emit an unterminated here-doc warning.
+        match parse(&text) {
+            Ok(program) if matches!(program.as_ref(), [s] if s.location.end > first.len()) => {
+                Ok(Some((program, size, lines)))
+            }
+            Err(parser::Error::Incomplete(_) | parser::Error::HereDoc(_)) => Ok(None),
+            _ => Err(size),
+        }
+    };
     let final_line = at_eof && !buffered.is_empty() && !buffered.ends_with(b"\n");
     let ends = memchr::memchr_iter(b'\n', buffered).chain(final_line.then_some(buffered.len()));
     for (i, end) in ends.enumerate() {
@@ -220,19 +234,19 @@ fn buffered_compound<P: AsRef<[parser::Statement]>>(
         }
         if nested > 0 {
             nested -= 1;
+            deferred = Some((size, i + 1));
             continue;
         }
-        let mut text = String::with_capacity(first.len() + size);
-        text.push_str(first);
-        text.push_str(std::str::from_utf8(&buffered[..size]).map_err(|_| size)?);
-        // Only the final ordinary read may emit an unterminated here-doc warning.
-        match parse(&text) {
-            Ok(program) if matches!(program.as_ref(), [s] if s.location.end > first.len()) => {
-                return Ok((program, size, i + 1));
-            }
-            Err(parser::Error::Incomplete(_) | parser::Error::HereDoc(_)) => continue,
-            _ => return Err(size),
+        deferred = None;
+        if let Some(unit) = probe(size, i + 1)? {
+            return Ok(unit);
         }
+    }
+    // A literal header inside a quote or here-document can hide the outer close.
+    if let Some((size, lines)) = deferred
+        && let Some(unit) = probe(size, lines)?
+    {
+        return Ok(unit);
     }
     Err(buffered.len())
 }

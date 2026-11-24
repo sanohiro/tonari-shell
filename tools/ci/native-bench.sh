@@ -293,12 +293,15 @@ rc = Path(sys.argv[1])
 (rc / "large").write_text("large_fn() {\n return 0\n" +
     "".join(f"  : line-{i:04d}-padding-abcdef\n" for i in range(760)) +
     "}\nlarge_fn || exit 1\n")
-(rc / "nested").write_text("if true; then\n" +
-    "  if true; then\n    : nested\n  fi\n" * 300 + "  verified=loaded\nfi\n")
+body = "if true; then\n" + "  if true; then\n    : nested\n  fi\n" * 300
+for name, literal in (("nested", ""), ("quoted", "  : <<'END'\nif true; then\nEND\n")):
+    (rc / name).write_text(body + literal + "  verified=loaded\nfi\n")
 PYRC
     printf 'eval "$(<"%s")" || exit 1\ndeclare -F large_fn >/dev/null || exit 1\n' "$rc/large" > "$rc/eval-large"
-    printf 'eval "$(<"%s")" || exit 1\n[[ $verified == loaded ]] || exit 1\n' "$rc/nested" > "$rc/eval-nested"
-    for name in light git large eval-large eval-nested; do
+    for name in nested quoted; do
+      printf 'eval "$(<"%s")" || exit 1\n[[ $verified == loaded ]] || exit 1\n' "$rc/$name" > "$rc/eval-$name"
+    done
+    for name in light git large eval-large eval-nested eval-quoted; do
       run "rc-$name" python3 tools/bench_login.py "$current" --previous "$bin/baseline" --bash "$ref" --rcfile "$rc/$name" --runs 41
     done
     run eval python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 25 \
