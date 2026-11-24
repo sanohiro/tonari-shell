@@ -39,8 +39,9 @@ class Outcome:
 
 
 class Audit:
-    def __init__(self, bash, tonari, root):
+    def __init__(self, bash, tonari, root, *, absolute_argv0=False):
         self.shells = (bash, tonari)
+        self.absolute_argv0 = absolute_argv0
         self.root = root
         self.rows = {}
 
@@ -66,7 +67,7 @@ class Audit:
             args = [*args[:-1], prefix + "printf '__READY__\\n'; IFS= read -r _tonari_gate\n" + args[-1]]
             stdin = "\n" + stdin
         started = time.perf_counter_ns()
-        proc = subprocess.Popen(["bash", *args], executable=path, cwd=cwd, env=env,
+        proc = subprocess.Popen([str(path) if self.absolute_argv0 else "bash", *args], executable=path, cwd=cwd, env=env,
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 start_new_session=True)
         timeout = False

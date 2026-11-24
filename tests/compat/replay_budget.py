@@ -165,6 +165,8 @@ def main():
     cli.add_argument("--inventory", type=Path)
     cli.add_argument("--components", action="store_true")
     cli.add_argument("--release-only", action="store_true", help="compare just the two release binaries and Bash")
+    cli.add_argument("--self-invocation", action="store_true",
+                     help="start each shell by absolute path and verify that $BASH runs the same build")
     args = cli.parse_args()
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -176,10 +178,17 @@ def main():
             staged.parent.mkdir()
             shutil.copy(original, staged)
             hashes[name] = hashlib.sha256(staged.read_bytes()).hexdigest()
-            audits[name] = Audit(staged, staged, root)
+            audit = Audit(staged, staged, root, absolute_argv0=args.self_invocation)
+            if args.self_invocation:
+                probe = '''[[ "$BASH" -ef "$SHELL" ]] && "$BASH" --noprofile --norc -c '[[ "$BASH" -ef "$SHELL" ]] && printf %s "$BASH_VERSION"' '''
+                identity = audit.script(1, probe)
+                version = audit.script(1, 'printf %s "$BASH_VERSION"')
+                if identity.code or identity.err or not identity.out or identity.out != version.out:
+                    raise ValueError(f"{name} self-invocation resolved a different shell: {identity.brief()}")
+            audits[name] = audit
         floor = root / "control"
         subprocess.run(["cc", "-O2", str(Path(__file__).with_name("budget_floor.c")), "-o", str(floor)], check=True)
-        print(json.dumps({"lane": args.lane, "sha256": hashes}), flush=True)
+        print(json.dumps({"lane": args.lane, "sha256": hashes, "argv0": "absolute" if args.self_invocation else "bash"}), flush=True)
         for row in workloads(args.lane, args.inventory):
             config = row["lanes"].get(args.lane)
             if not config or (args.only is not None and row["id"] not in args.only):
