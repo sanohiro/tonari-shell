@@ -159,6 +159,7 @@ REDIRS = {
 }
 
 SHOPT = {
+    "cdable_vars": 'mkdir -p target; dest=target; shopt -s cdable_vars; cd dest; echo "${PWD##*/}"',
     "dotglob": "touch .hidden shown; shopt -s dotglob; printf '<%s>' *",
     "nullglob": BUILTINS["shopt"],
     "failglob": "shopt -s failglob; (echo missing-*) 2>/dev/null; echo \"$?\"",

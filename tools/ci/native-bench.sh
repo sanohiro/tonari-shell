@@ -313,7 +313,7 @@ PYRC
     fi
     run eval python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 25 \
       --case eval-fixed --case eval-changing --case eval-arguments --case eval-alternating \
-      --case eval-nested --case eval-multiline --case eval-function --case eval-alias --case cdable-vars ;;
+      --case eval-nested --case eval-multiline --case eval-function --case eval-alias --case eval-conditionals --case cdable-vars ;;
   profiles)
     run levels python3 tools/bench.py "$current" --bash "$ref" --compare-tonari Old "$bin/previous-profile" --compare-tonari Os "$bin/opt-s" --compare-tonari Oz "$bin/opt-z" --compare-tonari O3 "$bin/opt-3" --runs 101
     for level in s z 3 previous-profile; do

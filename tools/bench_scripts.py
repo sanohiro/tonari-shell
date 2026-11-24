@@ -34,6 +34,8 @@ CASES = {
                                 "hook='((sum += i))\nlast=$sum'"),
     "eval-function": eval_loop('eval "$fn"; f', 'echo "$sum"', "1999000",
                                "fn='f() {\n  ((sum += i))\n}'"),
+    "eval-conditionals": ("code='if true; then\n" + "  if true; then\n    : nested\n  fi\n" * 300
+                          + "  ((calls++))\nfi'\nfor ((i=0; i<8; i++)); do eval \"$code\"; done\necho \"$calls\"", "8"),
     "eval-alias": eval_loop("""alias act='((sum+=i))'; eval act; alias act='((sum++))'; eval act""",
                             'echo "$sum"', "2001000", "shopt -s expand_aliases"),
     "cdable-vars": ("""\
