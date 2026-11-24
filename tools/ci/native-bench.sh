@@ -124,6 +124,14 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
+  history-fields)
+    REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k history_word -k history_fragment -k reverse_search -k escaped_journal -k search_paste
+    run fields python3 tools/bench_history_fields.py "$bin/baseline" "$current" --runs 21
+    if [[ $RUNNER_OS == Linux ]]; then
+      cpu=$(python3 -c 'import os;print(min(os.sched_getaffinity(0)))')
+      run fields-one-cpu taskset -c "$cpu" python3 tools/bench_history_fields.py "$bin/baseline" "$current" --runs 15
+    fi
+    run literal python3 tools/bench_editor_input.py "$current" "$ref" --case Ctrl-R --runs 21 ;;
   picker)
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k picker -k completion -k abbreviated_paths
     run picker python3 tools/bench_picker.py "$bin/baseline" "$current" --runs 31

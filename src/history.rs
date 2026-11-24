@@ -13,8 +13,15 @@ pub(crate) struct SearchQuery {
     pub shortest: usize,
 }
 
+enum Hint {
+    Local(usize),
+    Shared(usize),
+    Older,
+}
+
 #[derive(Default)]
 pub struct History {
+    displayed: Option<Hint>,
     shared: JournalEntries,
     shared_query: String,
     shared_match: Option<usize>,
@@ -53,29 +60,6 @@ fn file(session: &Session) -> Option<PathBuf> {
                 .map(|h| PathBuf::from(h).join(".local/state"))
         })?;
     Some(dir.join("tonari/history"))
-}
-
-/// Spaces separate literal search fragments. An escaped space can itself
-/// occur in a saved shell word, so keep both the backslash and the space.
-pub(crate) fn fragments(mut query: &str) -> impl Iterator<Item = &str> {
-    std::iter::from_fn(move || {
-        query = query.trim_start_matches(' ');
-        if query.is_empty() {
-            return None;
-        }
-        let mut escaped = false;
-        let end = query
-            .bytes()
-            .position(|b| {
-                let separator = !escaped && b == b' ';
-                escaped = !escaped && b == b'\\';
-                separator
-            })
-            .unwrap_or(query.len());
-        let (word, rest) = query.split_at(end);
-        query = rest;
-        Some(word)
-    })
 }
 
 fn encode(value: &str, out: &mut String) {
@@ -149,6 +133,8 @@ fn decode_into(value: &str, out: &mut String) -> bool {
 }
 
 pub(crate) mod arguments;
+mod filter;
+pub(crate) use filter::{Filter, fragments};
 pub(crate) mod commands;
 pub(crate) mod expand;
 mod window;
@@ -644,38 +630,8 @@ impl History {
                 return self.suggestion(&[], prefix, true, || !waiting());
             }
         }
+        self.displayed = Some(Hint::Older);
         self.older_match.as_deref().map(|s| &s[prefix.len()..])
-    }
-
-    pub(crate) fn filtered(
-        &mut self,
-        session: &Session,
-        query: &str,
-        limit: usize,
-        waiting: &dyn Fn() -> bool,
-    ) -> (Vec<String>, bool) {
-        let mut hits = Vec::new();
-        let terms: Vec<_> = fragments(query).collect();
-        let mut view = View::Unread;
-        if !self.ensure(session, &mut view, true, waiting) {
-            return (hits, false);
-        }
-        let local = session.history_lines().iter().rev().map(String::as_str);
-        let shared = (0..self.shared.ends.len())
-            .rev()
-            .map(|i| self.shared.get(i));
-        for (i, line) in local.chain(shared).enumerate() {
-            if i % 256 == 0 && waiting() {
-                return (hits, false);
-            }
-            if terms.iter().all(|term| line.contains(term)) && !hits.iter().any(|s| s == line) {
-                hits.push(line.to_owned());
-                if hits.len() == limit {
-                    break;
-                }
-            }
-        }
-        (hits, true)
     }
 
     pub fn find_command(
@@ -813,6 +769,15 @@ impl History {
         Ok(None)
     }
 
+    pub fn displayed<'a>(&'a self, local: &'a [String]) -> Option<&'a str> {
+        match self.displayed.as_ref()? {
+            Hint::Local(i) => local.get(*i).map(String::as_str),
+            Hint::Shared(i) if *i < self.shared.ends.len() => Some(self.shared.get(*i)),
+            Hint::Shared(_) => None,
+            Hint::Older => self.older_match.as_deref(),
+        }
+    }
+
     pub fn suggestion<'a>(
         &'a mut self,
         local: &'a [String],
@@ -826,14 +791,18 @@ impl History {
         let suffix = |s: &str| s.len() > prefix.len() && s.starts_with(prefix);
         if let Some((last, earlier)) = local.split_last() {
             if suffix(last) {
+                self.displayed = Some(Hint::Local(earlier.len()));
                 return Some(&last[prefix.len()..]);
             }
+            let mut end = earlier.len();
             for chunk in earlier.rchunks(1024) {
                 if !may_scan() {
                     return None;
                 }
-                if let Some(command) = chunk.iter().rev().find(|s| suffix(s.as_str())) {
-                    return Some(&command[prefix.len()..]);
+                end -= chunk.len();
+                if let Some(i) = chunk.iter().rposition(|s| suffix(s)) {
+                    self.displayed = Some(Hint::Local(end + i));
+                    return Some(&chunk[i][prefix.len()..]);
                 }
             }
         }
@@ -842,6 +811,7 @@ impl History {
         }
         let command = self.shared.get(self.shared.ends.len() - 1);
         if suffix(command) {
+            self.displayed = Some(Hint::Shared(self.shared.ends.len() - 1));
             return Some(&command[prefix.len()..]);
         }
         let mut end = self.shared.ends.len();
@@ -849,6 +819,7 @@ impl History {
             // A longer query can only match at or before the previous match.
             let index = self.shared_match?;
             if suffix(self.shared.get(index)) {
+                self.displayed = Some(Hint::Shared(index));
                 return Some(&self.shared.get(index)[prefix.len()..]);
             }
             end = index;
@@ -868,6 +839,7 @@ impl History {
         self.shared_query.clear();
         self.shared_query.push_str(prefix);
         self.shared_match = found;
+        self.displayed = found.map(Hint::Shared);
         found.map(|i| &self.shared.get(i)[prefix.len()..])
     }
 }

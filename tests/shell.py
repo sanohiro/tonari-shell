@@ -2648,6 +2648,34 @@ f; printf 'END\0'; printf '%s\0' names/*'''
         os.write(fd, b"\x1b")
         self.read_until(fd, PROMPT)
 
+    def test_history_fragment_crosses_blocks_and_ignores_unfinished_rows(self):
+        journal = self.cwd / ".local/state/tonari/history"
+        journal.parent.mkdir(parents=True)
+        row = b"1\t2\t0\t/tmp\t"
+        target = "printf '%s' '東京🌱 42' > selected".encode()
+        journal.write_bytes(row + target + b"\n" + row + b"x" * 700000 + b"\n"
+                            + row + b"invalid\\q " + target + b"\n"
+                            + row + b"invalid-utf8-\xff " + target + b"\n"
+                            + row + b"unfinished " + target)
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"\x12" + "42　東京🌱".encode())
+        self.read_until(fd, b"> " + target)
+        os.write(fd, b"\r\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        self.assertEqual((self.cwd / "selected").read_text(), "東京🌱 42")
+
+    def test_history_fragment_local_without_journal(self):
+        self.env["HISTFILE"] = "/dev/null"
+        fd = self.terminal_session(editing=True)
+        line = b"printf abc >session-only"
+        os.write(fd, line + b"\r")
+        self.read_until(fd, b"\x1b[?2004h")
+        os.write(fd, b"\x12session-only abc")
+        self.read_until(fd, b"> " + line)
+        os.write(fd, b"\x07")
+        self.read_until(fd, PROMPT)
+        self.assertFalse((self.cwd / ".local/state/tonari/history").exists())
+
     def test_unsuccessful_reverse_search_keeps_the_original_draft(self):
         self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
         for shell in self.shells_for(5):

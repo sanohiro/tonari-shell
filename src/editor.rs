@@ -1099,14 +1099,10 @@ pub fn line(
             }
             Action::BackWord => cursor = word_start(&text, cursor),
             Action::ForwardWord if cursor == text.len() && screen.had_hint => {
-                let local = session.history_lines();
-                let suffix = match history.suggestion(local, &text, true, || true) {
-                    Some(s) => Some(s),
-                    None => history.older_suggestion(session, &mut view, &text, &|| false),
-                };
-                if let Some(suffix) = suffix {
-                    let line = format!("{text}{suffix}");
-                    let end = crate::parser::suggestion_end(&line, cursor);
+                if let Some(line) = history.displayed(session.history_lines())
+                    && line.starts_with(&text)
+                {
+                    let end = crate::parser::suggestion_end(line, cursor);
                     text.push_str(&line[cursor..end]);
                     cursor = text.len();
                 }

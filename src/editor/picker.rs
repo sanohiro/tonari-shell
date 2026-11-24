@@ -242,17 +242,16 @@ pub(super) fn choose(
 
 pub(super) fn history(
     mut query: String,
-    history: &mut crate::history::History,
+    history: &crate::history::History,
     session: &Session,
     keys: &mut Keys,
     screen: &mut Screen,
 ) -> io::Result<Option<String>> {
     let rows = screen.height.saturating_sub(1).clamp(1, 8);
     let mut selected: usize = 0;
-    let mut hits = Vec::<String>::new();
+    let mut snapshot = None;
     let mut inserted = String::new();
     let mut refresh = true;
-    let mut complete = false;
     loop {
         let offset = selected / rows * rows;
         let wanted = offset + rows;
@@ -267,23 +266,45 @@ pub(super) fn history(
             );
             io::stderr().write_all(screen.output.as_bytes())?;
         }
-        if refresh || !complete || hits.len() <= selected {
-            (hits, complete) = history.filtered(session, &query, wanted, &|| {
-                !keys.queued.is_empty() || ready(0, 0)
-            });
-            if complete {
-                selected = selected.min(hits.len().saturating_sub(1));
+        let filter = snapshot.get_or_insert_with(|| crate::history::Filter::new(session, history));
+        let waiting = || {
+            !keys.queued.is_empty()
+                || ready(0, 0)
+                || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+        };
+        if refresh {
+            filter.rewind(session);
+            filter.fill(session, &query, 1, waiting);
+            if let Some(first) = filter.hits.first() {
+                draw(
+                    screen,
+                    "history> ",
+                    std::iter::once(first.as_str()),
+                    0,
+                    &query,
+                    "",
+                );
+                io::stderr().write_all(screen.output.as_bytes())?;
             }
         }
+        filter.fill(session, &query, wanted, waiting);
+        if filter.exhausted() {
+            selected = selected.min(filter.hits.len().saturating_sub(1));
+        }
         let offset = selected / rows * rows;
-        let page = hits.iter().skip(offset).take(rows).map(String::as_str);
+        let page = filter
+            .hits
+            .iter()
+            .skip(offset)
+            .take(rows)
+            .map(String::as_str);
         draw(
             screen,
             "history> ",
             page,
             selected - offset,
             &query,
-            if complete {
+            if filter.exhausted() {
                 "(no matches)"
             } else {
                 "(searching)"
@@ -302,12 +323,12 @@ pub(super) fn history(
         match key {
             Key::Cancel => return Ok(None),
             Key::Accept => {
-                if !complete && hits.len() <= selected {
-                    (hits, complete) = history.filtered(session, &query, selected + 1, &|| false);
-                    selected = selected.min(hits.len().saturating_sub(1));
-                }
-                if selected < hits.len() {
-                    return Ok(Some(hits.swap_remove(selected)));
+                filter.fill(session, &query, selected + 1, || {
+                    crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+                });
+                selected = selected.min(filter.hits.len().saturating_sub(1));
+                if selected < filter.hits.len() {
+                    return Ok(Some(filter.hits.swap_remove(selected)));
                 }
                 continue;
             }
@@ -316,7 +337,7 @@ pub(super) fn history(
                 continue;
             }
             Key::Down => {
-                if !complete || selected + 1 < hits.len() || hits.len() == wanted {
+                if !filter.exhausted() || selected + 1 < filter.hits.len() {
                     selected += 1;
                 }
                 continue;

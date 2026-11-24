@@ -17,6 +17,22 @@ pub(crate) use wrapper::opens_function;
 /// Byte end of the next shell token in the displayed command, including any
 /// whitespace before it. Lexing identifies quotes and substitutions without running them.
 pub(crate) fn suggestion_end(line: &str, cursor: usize) -> usize {
+    // A plain prefix cannot leave us inside quotes or a substitution. Stop
+    // at the next blank without lexing later arguments of a long suggestion.
+    let bare = |b: u8| b.is_ascii_alphanumeric() || b >= 128 || b"-_./:=,@%+".contains(&b);
+    let tail = line[cursor..].trim_start_matches([' ', '\t']);
+    let word = tail.bytes().take_while(|&b| bare(b)).count();
+    if word > 0
+        && tail
+            .as_bytes()
+            .get(word)
+            .is_none_or(|b| matches!(b, b' ' | b'\t' | b'\n'))
+        && line[..cursor]
+            .bytes()
+            .all(|b| bare(b) || matches!(b, b' ' | b'\t'))
+    {
+        return line.len() - tail.len() + word;
+    }
     lex(line, false, true)
         .ok()
         .and_then(|(_, spans, _)| spans.into_iter().find(|&(_, end)| end > cursor))
