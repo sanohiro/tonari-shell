@@ -194,6 +194,8 @@ function f {
 f done
 """
         self.compare(source, 0, "old:雪 x\nnew:two words\na\nb\n14:done\n".encode(), minimum=4)
+        for malformed in ("function f{ echo x; }", "f(){ echo x\n ; }"):
+            self.compare(malformed, 2)
 
     def test_reserved_words_as_function_arguments_patterns_and_operands(self):
         source = r"""f() {

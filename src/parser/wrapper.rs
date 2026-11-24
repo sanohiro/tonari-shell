@@ -8,6 +8,9 @@ use crate::word::{WordBuilder, is_identifier};
 use std::rc::Rc;
 
 fn name(header: &str) -> Option<&str> {
+    if !header.ends_with([')', ' ', '\t']) {
+        return None;
+    }
     let header = header.trim_matches([' ', '\t']);
     let name = match header
         .strip_prefix("function")
@@ -42,9 +45,15 @@ pub(super) fn parse(source: &str) -> Option<Statement> {
     // The command must end before the closing brace. A newline or a semicolon
     // terminates it; a space alone is part of the same simple command.
     let tail = body.trim_end_matches([' ', '\t', '\n']);
-    let command = tail
-        .strip_suffix(';')
-        .or_else(|| body[tail.len()..].contains('\n').then_some(tail))?;
+    let command = if let Some(command) = tail.strip_suffix(';') {
+        let command = command.trim_end_matches([' ', '\t']);
+        if command.ends_with('\n') {
+            return None;
+        }
+        command
+    } else {
+        body[tail.len()..].contains('\n').then_some(tail)?
+    };
     let text = command.trim_matches([' ', '\t', '\n']);
     if text.is_empty() || text.contains('\n') {
         return None;
@@ -215,6 +224,8 @@ mod tests {
             "f(){ echo x # a; }",
             "f(){ echo \\}; }",
             "if(){ echo x; }",
+            "function f{ echo x; }",
+            "f(){ echo x\n ; }",
         ] {
             assert!(parse(source).is_none(), "{source}");
         }
