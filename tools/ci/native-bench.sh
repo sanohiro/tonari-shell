@@ -55,6 +55,12 @@ run() {
   echo "::endgroup::"
 }
 case "$SUITE" in
+  throughput)
+    cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
+    run scripts python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" \
+      --spawn-control "$bin/spawn-control" --timing started --runs 31
+    run startup python3 tools/bench.py "$current" --bash "$ref" --compare-tonari Previous "$bin/baseline" \
+      --case prompt --case startup --case loop --runs 71 ;;
   functions)
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k function
     run functions python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" \

@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       previous:
-        description: Previous revision for the functions suite
+        description: Previous revision for the functions and throughput suites
         type: string
         default: HEAD^
       matrix:
