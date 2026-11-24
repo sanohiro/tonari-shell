@@ -116,7 +116,7 @@ impl Traps {
     }
 
     pub fn active(&self) -> bool {
-        !self.entries.is_empty() || self.interactive_hup
+        self.has_explicit_traps() || self.interactive_hup
     }
 
     pub fn init_hangup(&mut self) -> io::Result<()> {

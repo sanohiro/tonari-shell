@@ -56,6 +56,22 @@ impl Launch {
         if let Some(fd) = self.spawn_terminal() {
             // Darwin starts the new image suspended. Give it the terminal
             // before its first instruction, including a read in an initializer.
+            // Consume Darwin's synthetic stopped event before sending SIGCONT.
+            // WSTOPPED leaves a real exit available to the normal job waiter.
+            let mut info = std::mem::MaybeUninit::uninit();
+            loop {
+                let result = unsafe {
+                    libc::waitid(
+                        libc::P_PID,
+                        pid as _,
+                        info.as_mut_ptr(),
+                        libc::WSTOPPED | libc::WNOHANG,
+                    )
+                };
+                if result == 0 || io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                    break;
+                }
+            }
             give_terminal(fd, self.group.filter(|&g| g != 0).unwrap_or(pid));
             unsafe { libc::kill(pid, libc::SIGCONT) };
         }

@@ -12,8 +12,11 @@ from bench_history import PROMPT, read_until, terminal
 def sample(shell):
     with tempfile.TemporaryDirectory() as home, terminal(shell, home, "/usr/bin:/bin", prompt=PROMPT) as fd:
         start = time.perf_counter_ns()
-        os.write(fd, b'for ((i=0;i<16;i++)); do /usr/bin/true || break; done; echo count=$i\n')
-        read_until(fd, b'count=16\r\n')
+        os.write(fd, b'for ((i=0;i<16;i++)); do /usr/bin/true || { echo fail=$?; break; }; done; echo count=$i\n')
+        try:
+            read_until(fd, b'count=16\r\n')
+        except TimeoutError as error:
+            raise RuntimeError(f"{shell}: {error}") from error
         return (time.perf_counter_ns() - start) / 1e6
 
 
