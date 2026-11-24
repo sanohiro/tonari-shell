@@ -103,6 +103,9 @@ case "$SUITE" in
     shells=("$current" "$bin/baseline" "$ref")
     run oldest python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --prompt-time --runs 61
     run missing python3 tools/bench_editor_input.py "$current" "$ref" --case Miss --prompt-time --runs 41
+    run oldest-ascii python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --ascii-query --prompt-time --runs 41
+    run million python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --entries 1000000 --prompt-time --runs 21
+    run missing-ascii python3 tools/bench_editor_input.py "$current" "$ref" --case Miss --ascii-query --prompt-time --runs 21
     for rank in 20 900; do
       run "rank-$rank" python3 tools/bench_editor_input.py "${shells[@]}" --case Ctrl-R --history-rank "$rank" --prompt-time --runs 41
     done

@@ -21,6 +21,13 @@ pub struct Launch {
 }
 
 impl Launch {
+    pub fn pipeline_child(self) {
+        if self.group.is_none() && !self.background {
+            crate::execute::reset_child_signals();
+        }
+        self.child();
+    }
+
     pub fn child(self) {
         if let Some(group) = self.group {
             if unsafe { libc::setpgid(0, group) } < 0 {

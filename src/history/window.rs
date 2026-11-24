@@ -32,6 +32,7 @@ pub(super) struct Window {
     start: u64,
     bytes: Vec<u8>,
     unicode_pages: Vec<bool>,
+    interrupted: bool,
 }
 
 impl Window {
@@ -48,10 +49,11 @@ impl Window {
         };
         let Ok(meta) = file.metadata() else { return };
         let stamp = Stamp::from(&meta);
-        if self.stamp == Some(stamp) {
+        if self.stamp == Some(stamp) && !self.interrupted {
             return;
         }
         self.stamp = None;
+        self.interrupted = false;
         self.bytes.clear();
         if !meta.is_file() || stamp.len < 32 * 1024 || waiting() {
             return;
@@ -64,6 +66,7 @@ impl Window {
         self.bytes.reserve_exact(count as usize);
         while self.bytes.len() < count as usize {
             if waiting() {
+                self.interrupted = true;
                 break;
             }
             let segment = (count - self.bytes.len() as u64).min(256 * 1024);
@@ -116,6 +119,12 @@ impl Window {
                     && entry.len() <= CAPACITY - self.bytes.len()
                 {
                     let first_page = self.bytes.len() / PAGE;
+                    let needed = self.bytes.len() + entry.len();
+                    if needed > self.bytes.capacity() {
+                        let capacity =
+                            needed.max(self.bytes.capacity().saturating_mul(2).min(CAPACITY));
+                        self.bytes.reserve_exact(capacity - self.bytes.len());
+                    }
                     self.bytes.extend_from_slice(entry);
                     self.unicode_pages.truncate(first_page);
                     self.unicode_pages.extend(

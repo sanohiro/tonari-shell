@@ -324,29 +324,42 @@ fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Resu
     }
 }
 
+fn shell_terminal() -> bool {
+    io::stdin().is_terminal() && io::stderr().is_terminal()
+}
+
 fn main() -> ExitCode {
-    use cli::{Action, Input};
-    let args = std::env::args_os();
-    let terminal = || io::stdin().is_terminal() && io::stderr().is_terminal();
-    let initial_terminal = std::cell::LazyCell::new(terminal);
+    invoke(std::env::args_os()).into()
+}
+
+fn invoke(args: impl Iterator<Item = std::ffi::OsString>) -> u8 {
+    use cli::Action;
+    let initial_terminal = std::cell::LazyCell::new(shell_terminal as fn() -> bool);
     let invocation = match cli::parse(args, || *initial_terminal) {
         Ok(Action::Run(invocation)) => invocation,
         Ok(Action::Version) => {
             println!("tonari {}", env!("CARGO_PKG_VERSION"));
-            return ExitCode::SUCCESS;
+            return 0;
         }
         Ok(Action::Help) => {
             println!(
                 "Usage: tonari [--noprofile] [--norc | --rcfile FILE] [-efilnsu] [-o OPTION] [-O SHOPT] [-c COMMAND [NAME [ARG...]] | -s [ARG...] | FILE [ARG...]]"
             );
-            return ExitCode::SUCCESS;
+            return 0;
         }
         Err(e) => {
             eprintln!("tonari: {e}");
-            return ExitCode::from(2);
+            return 2;
         }
     };
-    let mut invocation = invocation;
+    run_invocation(invocation, initial_terminal)
+}
+
+fn run_invocation(
+    mut invocation: cli::Invocation,
+    initial_terminal: std::cell::LazyCell<bool, fn() -> bool>,
+) -> u8 {
+    use cli::Input;
     let mut session = Session::default();
     session.import_functions();
     session.initialize_shell_level();
@@ -377,7 +390,7 @@ fn main() -> ExitCode {
         && let Err(e) = session.traps.init_hangup()
     {
         eprintln!("tonari: SIGHUP: {e}");
-        return ExitCode::from(1);
+        return 1;
     }
     session.jobs.monitor = invocation.monitor.unwrap_or(session.interactive);
     session.command_string = matches!(invocation.input, Input::Command(_));
@@ -391,7 +404,7 @@ fn main() -> ExitCode {
             None => vec!["-p".into()],
         };
         if session.shopt(&options) != 0 {
-            return ExitCode::from(2);
+            return 2;
         }
     }
     if session.interactive {
@@ -405,14 +418,14 @@ fn main() -> ExitCode {
         }
     }
     if session.interactive && listen_for_interrupts().is_err() {
-        return ExitCode::FAILURE;
+        return 1;
     }
     let initial = match startup::initialize(&mut session, &invocation) {
         Flow::Discard(status) | Flow::Continue(status) => status,
         Flow::Return(status) | Flow::Exit(status) => {
-            return ExitCode::from(traps::finish(&mut session, status));
+            return traps::finish(&mut session, status);
         }
-        Flow::Break(_) | Flow::LoopContinue(_) => return ExitCode::from(1),
+        Flow::Break(_) | Flow::LoopContinue(_) => return 1,
     };
     let flow = match invocation.input {
         Input::Command(text) => input::text(&mut session, &text, initial, true, invocation.check),
@@ -438,7 +451,7 @@ fn main() -> ExitCode {
             &mut session,
             initial,
             !invocation.noediting
-                && terminal()
+                && shell_terminal()
                 && std::env::var_os("TERM").is_some_and(|v| v != "dumb"),
         ) {
             Ok(code) => Flow::Continue(code),
@@ -453,5 +466,5 @@ fn main() -> ExitCode {
         Flow::Discard(s) | Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s) => s,
         Flow::Break(_) | Flow::LoopContinue(_) => 1,
     };
-    ExitCode::from(traps::finish(&mut session, code))
+    traps::finish(&mut session, code)
 }

@@ -147,8 +147,7 @@ pub(super) fn run(
         return Err(io::Error::last_os_error());
     }
     if pid == 0 {
-        reset_child_signals();
-        launch.child();
+        launch.pipeline_child();
         let code = match command(cmd, session, status) {
             Ok(Flow::Continue(s) | Flow::Discard(s) | Flow::Exit(s) | Flow::Return(s)) => s,
             Ok(_) => 1,

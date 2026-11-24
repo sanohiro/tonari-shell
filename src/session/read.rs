@@ -121,7 +121,6 @@ fn ready(fd: i32, timeout: Duration) -> io::Result<bool> {
 }
 
 pub(super) struct Input {
-    pub(super) consume_all: bool,
     fd: i32,
     seekable: bool,
     data: [std::mem::MaybeUninit<u8>; 4096],
@@ -133,7 +132,6 @@ impl Input {
     pub(super) fn new(fd: i32) -> Self {
         Self {
             fd,
-            consume_all: false,
             seekable: unsafe { libc::lseek(fd, 0, libc::SEEK_CUR) } >= 0,
             data: [std::mem::MaybeUninit::uninit(); 4096],
             position: 0,
@@ -149,7 +147,7 @@ impl Input {
         if self.position == self.end {
             // Reading beyond a delimiter on a pipe would take input from the
             // following shell command, since the kernel cannot rewind its fd.
-            let capacity = if self.seekable || self.consume_all {
+            let capacity = if self.seekable {
                 self.data.len()
             } else {
                 read_ahead.min(self.data.len())

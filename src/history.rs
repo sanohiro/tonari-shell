@@ -903,6 +903,54 @@ mod tests {
     }
 
     #[test]
+    fn search_window_tracks_complete_commands_and_journal_replacement() {
+        let root = std::env::temp_dir().join(format!("tonari-window-{}", std::process::id()));
+        fs::create_dir_all(root.join("tonari")).unwrap();
+        let mut session = Session::default();
+        session.assign("HISTFILE", "enabled");
+        session.assign("XDG_STATE_HOME", root.to_str().unwrap());
+        let path = file(&session).unwrap();
+        let pad = "1\t1\t0\t/needle\tcommon\n".repeat(2400);
+        let first = format!("1\t1\t0\t/tmp\tfirst needle\n{pad}1\t1\t0\t/tmp\t雪 needle\n");
+        fs::write(&path, first).unwrap();
+        let mut history = History::default();
+        history.prepare_search(&session, &|| false);
+        let lookup = |h: &mut History, text: &str, skip| {
+            h.find_command(
+                &session,
+                &mut View::Unread,
+                &[SearchQuery {
+                    text: text.into(),
+                    skip,
+                    shortest: text.len(),
+                }],
+                &|| false,
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            lookup(&mut history, "needle", 1).as_deref(),
+            Some("first needle")
+        );
+        History::append(&session, "new 🌱", None, 0, Some(&mut history.window));
+        assert!(history.window.complete(&session).is_some());
+        assert_eq!(lookup(&mut history, "🌱", 0).as_deref(), Some("new 🌱"));
+        let next = path.with_extension("next");
+        fs::write(
+            &next,
+            format!("{pad}1\t2\t0\t/needle\tnew text\n1\t1\t0\t/\tincomplete 🌱"),
+        )
+        .unwrap();
+        fs::rename(next, &path).unwrap();
+        assert!(history.window.complete(&session).is_none());
+        history.prepare_search(&session, &|| false);
+        assert!(lookup(&mut history, "🌱", 0).is_none());
+        assert!(lookup(&mut history, "needle", 0).is_none());
+        assert_eq!(lookup(&mut history, "text", 0).as_deref(), Some("new text"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn interrupted_read_restarts_at_the_first_unfinished_row() {
         let data = b"1\t1\t0\t/a\tfirst\n1\t2\t0\t/b\tsecond\\nline\n1\t3\t0\t/c\tlast\n";
         let mut history = History::default();

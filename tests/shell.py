@@ -1554,6 +1554,30 @@ test "$(jobs -p %1)" = "$p" && echo selected
 jobs -l | grep -q "$p" && echo long; jobs -n; wait "$p" """,
                      0, b"[1]+ Running sleep 0.12 &\nselected\nlong\n")
 
+    def test_executable_text_starts_with_fresh_shell_state(self):
+        child = self.cwd / "plain script"
+        child.write_text("""printf '%s/%s/%s/%s/%s\n' "$0" "$1" "$#" "${hidden-unset}" "${passed-unset}"
+read -r word <&8; echo "$word"; echo message >&9
+echo "$SHLVL"; exit 17
+""")
+        child.chmod(0o755)
+        (self.cwd / "input").write_text("record\n")
+        body = """hidden=local; exec 8<input 9>out
+"./plain script" "a b"; echo "$?"; cat out"""
+        self.compare(body, 0, b"./plain script/a b/1/unset/unset\nrecord\n2\n17\nmessage\n")
+        self.compare("export passed=text; " + body, 0,
+                     b"./plain script/a b/1/unset/text\nrecord\n2\n17\nmessage\n")
+        self.compare("export -n SHLVL; " + body, 0,
+                     b"./plain script/a b/1/unset/unset\nrecord\n1\n17\nmessage\n")
+
+    def test_mapfile_origin_keeps_surrounding_and_sparse_indices(self):
+        self.compare("""a=([0]=keep [2]=previous [4]=tail [81]=sparse)
+mapfile -tO 2 a <<<'one
+two'
+printf '<%s>' "${!a[@]}" "${a[@]}"
+mapfile -tO 400 empty </dev/null; declare -p empty""",
+                     0, b'<0><2><3><4><81><keep><one><two><tail><sparse>declare -a empty=()\n', minimum=4)
+
     def test_command_substitution_capture_boundaries(self):
         self.compare("""x=outside; v=$(printf 'a'; echo -ne 'b\\nc'; printf ':'); echo "$v"
 v=$(printf '%s' "$x"; false); echo "$?:$v"
@@ -2326,6 +2350,19 @@ f; printf 'END\0'; printf '%s\0' names/*'''
         fd = self.terminal_session(editing=True)
         os.write(fd, b"\x12" + target)
         self.read_until(fd, b"': echo second " + target)
+
+    def test_unsuccessful_reverse_search_keeps_the_original_draft(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                os.write(fd, b"v=previous\r")
+                self.read_until(fd, b"\x1b[?2004h")
+                os.write(fd, b"v=draft\x12" + "☃absent".encode() + b"\r")
+                self.read_until(fd, b"\x1b[?2004h")
+                os.write(fd, b'echo "$v" >miss-result\r')
+                self.read_until(fd, b"\x1b[?2004h")
+                self.assertEqual((self.cwd / "miss-result").read_text(), "draft\n")
 
     def test_reverse_search_accepts_same_escaped_command_as_bash(self):
         commands = [rb"printf '%s\n' selected=first-foo\ bar",

@@ -49,7 +49,7 @@ impl External {
             for r in redirects {
                 dup(r.word.parse().unwrap(), r.fd)?;
             }
-            self.spawn_resolved(Some(&actions))
+            self.spawn_resolved(Some(&actions), None)
         })();
         unsafe {
             libc::posix_spawn_file_actions_destroy(actions.as_mut_ptr());
@@ -60,6 +60,7 @@ impl External {
     pub(super) fn spawn_resolved(
         &self,
         actions: Option<&MaybeUninit<libc::posix_spawn_file_actions_t>>,
+        session: Option<&crate::Session>,
     ) -> io::Result<libc::pid_t> {
         let path = self
             .search_paths
@@ -103,7 +104,14 @@ impl External {
                 };
                 match spawn(path, &self.argv) {
                     Err(e) if e.raw_os_error() == Some(libc::ENOEXEC) => {
-                        self.with_script(path, spawn)
+                        self.with_script(path, |shell, args| {
+                            if let Some(session) = session
+                                && let Some(pid) = self.fork_script(session, path, shell, args, env)
+                            {
+                                return Ok(pid);
+                            }
+                            spawn(shell, args)
+                        })
                     }
                     result => result,
                 }
@@ -112,6 +120,96 @@ impl External {
             result
         }
     }
+    // A plain ENOEXEC command can start a fresh interpreter in its own child.
+    // Use exec for managed jobs, changed environments and inherited runtime
+    // state that needs an actual image transition.
+    fn fork_script(
+        &self,
+        session: &crate::Session,
+        path: &std::ffi::CStr,
+        shell: &std::ffi::CStr,
+        args: &[*const libc::c_char],
+        env: *const *mut libc::c_char,
+    ) -> Option<libc::pid_t> {
+        use std::ffi::{OsStr, OsString};
+        use std::io::Write;
+        use std::os::unix::ffi::OsStrExt;
+
+        if session.interactive
+            || session.traps.active()
+            || session.traps.in_action()
+            || crate::editor::preview::active()
+        {
+            return None;
+        }
+        let mut shell_level = None;
+        for (name, value) in session.environment_changes(&[]) {
+            if name != "SHLVL" {
+                return None;
+            }
+            shell_level = Some(value);
+        }
+        let _ = std::io::stdout().flush();
+        let pid = unsafe { libc::fork() };
+        if pid != 0 {
+            return (pid > 0).then_some(pid);
+        }
+        if has_close_on_exec_fds() {
+            unsafe {
+                libc::execve(shell.as_ptr(), args.as_ptr(), env.cast());
+                libc::_exit(126);
+            }
+        }
+        // The copied interpreter is single-threaded. Apply exactly the exported
+        // change, including export -n, before starting the ordinary script entry point.
+        match shell_level {
+            Some(Some(value)) => unsafe { std::env::set_var("SHLVL", value.as_ref()) },
+            Some(None) => unsafe { std::env::remove_var("SHLVL") },
+            None => (),
+        }
+        let argv = [
+            OsString::from("tonari"),
+            OsString::from("--"),
+            OsStr::from_bytes(path.to_bytes()).into(),
+        ]
+        .into_iter()
+        .chain(
+            self.words[1..]
+                .iter()
+                .map(|w| OsStr::from_bytes(w.as_bytes()).to_owned()),
+        );
+        let status = crate::invoke(argv);
+        let _ = std::io::stdout().flush();
+        unsafe { libc::_exit(i32::from(status)) }
+    }
+}
+
+fn has_close_on_exec_fds() -> bool {
+    // Drop the directory iterator before inspecting the numbers: it creates
+    // a close-on-exec fd of its own. No descriptors open between the two steps.
+    let Ok(entries) = std::fs::read_dir("/dev/fd") else {
+        return true;
+    };
+    let mut fds = Vec::new();
+    for entry in entries {
+        let Ok(entry) = entry else { return true };
+        let Some(fd) = entry
+            .file_name()
+            .to_str()
+            .and_then(|s| s.parse::<RawFd>().ok())
+        else {
+            continue;
+        };
+        fds.push(fd);
+    }
+    fds.into_iter().any(|fd| {
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        if flags < 0 {
+            io::Error::last_os_error().raw_os_error() != Some(libc::EBADF)
+        } else {
+            flags & libc::FD_CLOEXEC != 0
+        }
+    })
 }
 
 #[cfg(target_os = "macos")]

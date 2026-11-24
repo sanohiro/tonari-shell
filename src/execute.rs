@@ -400,6 +400,7 @@ impl External {
         if !file.metadata()?.is_file() || sample[..length].contains(&0) {
             return Err(io::Error::from_raw_os_error(libc::ENOEXEC));
         }
+        drop(file);
         let shell = CString::new(std::env::current_exe()?.as_os_str().as_bytes())?;
         let mut args = Vec::with_capacity(self.argv.len() + 2);
         args.extend([shell.as_ptr(), c"--".as_ptr(), path.as_ptr()]);
@@ -1149,12 +1150,12 @@ fn connect_pipe(
     }
     setup
 }
-fn reset_child_signals() {
+pub(crate) fn reset_child_signals() {
     for signal in [libc::SIGINT, libc::SIGQUIT] {
         unsafe {
             let mut old: libc::sigaction = std::mem::zeroed();
             libc::sigaction(signal, std::ptr::null(), &mut old);
-            if old.sa_sigaction != libc::SIG_IGN {
+            if old.sa_sigaction != libc::SIG_IGN && old.sa_sigaction != libc::SIG_DFL {
                 libc::signal(signal, libc::SIG_DFL);
             }
         }
@@ -1249,8 +1250,7 @@ fn start_raw(
         session
             .traps
             .after_fork(session.errtrace, session.functrace);
-        reset_child_signals();
-        launch.child();
+        launch.pipeline_child();
         enter_stage(session, raw.compound.as_deref(), launch.background);
         if let Some(command) = raw.compound.as_deref_mut()
             && let crate::parser::Command::Subshell(body) = command
@@ -1354,7 +1354,9 @@ fn start(
         && output.is_none()
         && cmd.redirects.is_empty()
     {
-        match External::new(cmd, session).spawn_resolved(None) {
+        match External::new(cmd, session)
+            .spawn_resolved(None, cmd.assignments.is_empty().then_some(&*session))
+        {
             Ok(pid) => return Ok(Stage::Child(pid)),
             Err(e) if e.raw_os_error() == Some(libc::ENOEXEC) => {}
             Err(e) => return spawn_failure(&cmd.words[0], e),
@@ -1423,8 +1425,7 @@ fn start(
         session
             .traps
             .after_fork(session.errtrace, session.functrace);
-        reset_child_signals();
-        launch.child();
+        launch.pipeline_child();
         enter_stage(session, cmd.compound.as_deref(), launch.background);
         session.stdin_redirected |= cmd.redirects.iter().any(|r| r.fd == 0);
         session.stdin_redirected |= input.is_some();

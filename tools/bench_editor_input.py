@@ -94,12 +94,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("shell", nargs="+", type=Path)
     parser.add_argument("--runs", type=int, default=21)
+    parser.add_argument("--entries", type=int, default=100000)
+    parser.add_argument("--ascii-query", action="store_true", help="search for an ASCII substring")
     parser.add_argument("--prompt-time", action="store_true", help="also report PTY launch to prompt and launch through search")
     parser.add_argument("--history-rank", type=int, help="place the reverse-search target this many rows before the end")
     parser.add_argument("--scan-control", type=Path, help="also measure a direct unique-name directory scan")
     parser.add_argument("--large", action="store_true", help="also measure a 1 MiB paste")
     parser.add_argument("--case", action="append", choices=["commit", "paste", "Up", "Down", "Ctrl-R", "Miss", "Tab"])
     args = parser.parse_args()
+    if args.entries < 4:
+        parser.error("history must contain four or more entries")
     if args.runs < 1:
         parser.error("runs must be positive")
     shells = [s.resolve() for s in args.shell]
@@ -110,10 +114,14 @@ def main():
         journal = home / ".local/state/tonari/history"
         journal.parent.mkdir(parents=True)
         query = "東京駅前の日本語確定結果".encode()
+        if args.ascii_query:
+            query = b"deployment-region-west"
         target = b"v=" + query + FLAG
         decoy = b"v=" + "東京駅前の日本語確定結別候補".encode()
+        if args.ascii_query:
+            decoy = b"v=deployment-region-winter"
         recalled = "前の行🌱".encode() * 32 + FLAG
-        commands = [target] + [f": padding-{i}".encode() for i in range(99997)] + [b"v=" + recalled, decoy]
+        commands = [target] + [f": padding-{i}".encode() for i in range(args.entries - 3)] + [b"v=" + recalled, decoy]
         if args.history_rank is not None:
             if not 2 <= args.history_rank < len(commands) - 1:
                 parser.error("history rank must leave the final two rows in place")
@@ -122,12 +130,15 @@ def main():
         bash_history.write_bytes(b"\n".join(commands) + b"\n")
         journal.write_bytes(b"".join(b"1\t1\t0\t/tmp\t" + c + b"\n" for c in commands))
         with (home / "rc").open("a") as rc:
-            rc.write("HISTSIZE=100000\nv=unchanged\n")
+            rc.write(f"HISTSIZE={args.entries}\n")
+            if args.case and "Miss" in args.case:
+                rc.write("v=unchanged\n")
         folder = home / "candidates"
-        folder.mkdir()
-        for i in range(9999):
-            (folder / f"item-{i:05d}").touch()
-        (folder / (query + FLAG).decode()).touch()
+        if not args.case or "Tab" in args.case:
+            folder.mkdir()
+            for i in range(9999):
+                (folder / f"item-{i:05d}").touch()
+            (folder / (query + FLAG).decode()).touch()
         sizes = {p: p.stat().st_size for p in (journal, bash_history)}
         cases = []
         for repeats in (0, 4, 64):
@@ -138,9 +149,10 @@ def main():
             cases.append((f"paste {size} B + marker", b"\x1b[200~v=" + value + b"\x1b[201~", value))
         cases.append(("Up twice (100k entries)", b"\x1b[A\x1b[A", recalled))
         cases.append(("Down to draft (100k entries)", b"\x1b[B", recalled))
-        cases.append(("Ctrl-R (100k entries)", b"\x12" + query, query + FLAG))
+        count = "100k" if args.entries == 100000 else str(args.entries)
+        cases.append((f"Ctrl-R ({count} entries)", b"\x12" + query, query + FLAG))
         if args.case and "Miss" in args.case:
-            cases.append(("Miss (100k entries, through Enter)", b"\x12" + "☃履歴に存在しない".encode(), b"unchanged"))
+            cases.append((f"Miss ({count} entries, through Enter)", b"\x12" + (b"ZzzUnseen" if args.ascii_query else "☃履歴に存在しない".encode()), b"unchanged"))
         cases.append(("Tab (10k files)", b"f candidates/" + query + b"\t", b"candidates/" + query + FLAG))
         for case in cases:
             if args.case and case[0].split()[0] not in args.case:
