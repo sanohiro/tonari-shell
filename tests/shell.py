@@ -1402,6 +1402,20 @@ printf '%s' "$BASH_SUBSHELL" | cat; echo
 ( (printf '%s' "$BASH_SUBSHELL") ) & wait
 """, 0, b"13:1:1/0\n2", minimum=4)
 
+    def test_loop_rechecks_literal_builtin_resolution(self):
+        self.compare("""for i in 1 2 3 4 5 6; do
+    case $i in
+        3) function echo { printf fn; };;
+        4) unset -f echo;;
+        5) set -x;;
+        6) set +x;;
+    esac
+    echo -n X
+done 2>trace
+grep -q 'echo -n X' trace && printf '/traced/'
+for i in 1 2 3 4; do false; echo -n "$?"; done
+""", 0, b"XXfnXXX/traced/1111")
+
     def test_positional_storage_and_live_loop_operands(self):
         self.compare("""set -- before 'two words'
 f(){ set -- "$2" "$1" ""; printf '<%s>' "$@"; }; f a b; printf '<%s>' "$@"

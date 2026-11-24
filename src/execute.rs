@@ -1489,7 +1489,8 @@ pub(crate) struct ArrayDeclaration {
     pub items: crate::session::array::ArrayItems,
 }
 
-struct PreparedCommand {
+#[derive(Default)]
+pub(crate) struct PreparedCommand {
     named_redirects: Vec<Redirect<Word>>,
     resolved: Option<PathBuf>,
     array_declarations: Vec<ArrayDeclaration>,
@@ -1502,6 +1503,47 @@ struct PreparedCommand {
     empty_status: u8,
 }
 impl PreparedCommand {
+    pub(crate) fn literal_builtin(statement: &crate::parser::Statement) -> Option<Box<Self>> {
+        let crate::parser::Command::Pipeline(stages) = &statement.command else {
+            return None;
+        };
+        let [cmd] = stages.as_slice() else {
+            return None;
+        };
+        if cmd.compound.is_some() || !cmd.assignments.is_empty() || !cmd.redirects.is_empty() {
+            return None;
+        }
+        let name = cmd.words.first()?.as_literal()?;
+        if matches!(name, "builtin" | "command" | "set" | "exec")
+            || !builtin_names().contains(&name)
+        {
+            return None;
+        }
+        let words = cmd
+            .words
+            .iter()
+            .map(|word| word.as_literal().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()?;
+        Some(Box::new(Self {
+            words,
+            ..Self::default()
+        }))
+    }
+
+    pub(crate) fn run_literal(&mut self, session: &mut Session, status: u8) -> Option<Flow> {
+        if session.xtrace || session.traps.active() || session.jobs.monitor {
+            return None;
+        }
+        let selected = builtin(self, status, session)?;
+        if matches!(selected, Builtin::Function | Builtin::Set) {
+            return None;
+        }
+        let scope = session.substitutions.scope();
+        let flow = eval_builtin(selected, self, session, status, false);
+        session.substitutions.finish(scope);
+        Some(flow)
+    }
+
     fn cacheable(&self) -> bool {
         !self.default_path && !self.assignments.iter().any(|(k, _)| k == "PATH")
     }

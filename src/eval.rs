@@ -4,6 +4,7 @@ mod timing;
 use crate::Session;
 use crate::execute::{self, Flow};
 use crate::parser::{CasePattern, Command, Statement};
+use std::borrow::Cow;
 
 pub fn execute_program(
     session: &mut Session,
@@ -11,17 +12,26 @@ pub fn execute_program(
     status: u8,
     replace_last: bool,
 ) -> Flow {
-    run_statements(session, &mut program.into_iter(), status, replace_last)
+    run_statements(
+        session,
+        &mut program.into_iter().map(Cow::Owned),
+        status,
+        replace_last,
+        &mut [],
+    )
 }
 
-fn run_statements(
+fn run_statements<'a>(
     session: &mut Session,
-    iter: &mut dyn Iterator<Item = Statement>,
+    iter: &mut dyn Iterator<Item = Cow<'a, Statement>>,
     mut status: u8,
     replace_last: bool,
+    literals: &mut [Option<Box<execute::PreparedCommand>>],
 ) -> Flow {
+    let mut literals = literals.iter_mut();
     let mut statements = iter.peekable();
     while let Some(statement) = statements.next() {
+        let literal = literals.next().and_then(Option::as_deref_mut);
         if session.interactive && session.completions.in_callback() {
             crate::editor::preview::statement();
         }
@@ -38,7 +48,7 @@ fn run_statements(
             continue;
         }
         if !session.traps.in_action() {
-            session.current_command = Some(statement.location);
+            session.current_command = Some(statement.location.clone());
         }
         let negated = statement.negated;
         let tested = negated
@@ -57,12 +67,17 @@ fn run_statements(
             Command::Subshell(_) | Command::Test(_) | Command::Arithmetic(_) => true,
             _ => false,
         };
-        let flow = command(
-            session,
-            statement.command,
-            status,
-            replace_last && statements.peek().is_none() && !negated && !session.traps.active(),
-        );
+        let flow = if let Some(flow) = literal.and_then(|cmd| cmd.run_literal(session, status)) {
+            single_status(session, &flow);
+            flow
+        } else {
+            command(
+                session,
+                statement.into_owned().command,
+                status,
+                replace_last && statements.peek().is_none() && !negated && !session.traps.active(),
+            )
+        };
         session.tested_depth -= u32::from(tested);
         match flow {
             Flow::Discard(code) if session.errexit && !tested && session.tested_depth == 0 => {
@@ -113,14 +128,17 @@ pub(crate) fn command(session: &mut Session, command: Command, status: u8, tail:
     };
     let result = run_command(session, command, status, tail);
     if single {
-        if let Flow::Discard(code) | Flow::Continue(code) | Flow::Exit(code) | Flow::Return(code) =
-            result
-        {
-            session.pipe_status.single(code);
-        }
+        single_status(session, &result);
     }
     session.substitutions.finish(scope);
     result
+}
+
+fn single_status(session: &mut Session, flow: &Flow) {
+    if let Flow::Discard(code) | Flow::Continue(code) | Flow::Exit(code) | Flow::Return(code) = flow
+    {
+        session.pipe_status.single(*code);
+    }
 }
 
 fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) -> Flow {
@@ -428,13 +446,31 @@ fn repeat(
 ) -> Flow {
     session.loop_depth += 1;
     let mut result = 0;
+    let mut iterations = 0u8;
+    let mut literals = Vec::new();
     let flow = loop {
         if crate::interrupted() {
             break Flow::Continue(130);
         }
         let step = match next(session, last) {
             Ok(None) => break Flow::Continue(result),
-            Ok(Some(status)) => run_statements(session, &mut body.iter().cloned(), status, false),
+            Ok(Some(status)) => {
+                if iterations == 2 {
+                    // Shell lookup stays live. Only immutable argument strings are reused.
+                    literals = body
+                        .iter()
+                        .map(execute::PreparedCommand::literal_builtin)
+                        .collect();
+                }
+                iterations = iterations.saturating_add(1);
+                run_statements(
+                    session,
+                    &mut body.iter().map(Cow::Borrowed),
+                    status,
+                    false,
+                    &mut literals,
+                )
+            }
             Err(Flow::Continue(code)) => break Flow::Continue(code),
             Err(flow) => flow,
         };
@@ -484,9 +520,15 @@ pub fn call_function(session: &mut Session, mut argv: Vec<String>, status: u8) -
     let flow = crate::traps::debug(session, status).unwrap_or_else(|| {
         run_statements(
             session,
-            &mut function.definition.body.statements().iter().cloned(),
+            &mut function
+                .definition
+                .body
+                .statements()
+                .iter()
+                .map(Cow::Borrowed),
             status,
             false,
+            &mut [],
         )
     });
     let flow = crate::traps::returning(session, flow);

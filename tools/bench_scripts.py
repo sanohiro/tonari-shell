@@ -71,6 +71,20 @@ for ((i=0; i<1000; i++)); do
 done
 echo "${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
 """, "dir/999"),
+    "printf-formats": (
+        "for ((i=0; i<1024; i++)); do printf '<%s:%02x:%.1f>\\n' item 31 1.5; done",
+        "\n".join(["<item:1f:1.5>"] * 1024),
+    ),
+    "completion-registration": (
+        'for ((i=0; i<512; i++)); do complete -o nospace -W "one two" app; complete -p app; done',
+        "\n".join(["complete -o nospace -W 'one two' app"] * 512),
+    ),
+    "while-arithmetic": (
+        'i=0; while ((i<2000)); do ((++i)); done; echo "$i"', "2000",
+    ),
+    "background-subshell-wait": (
+        'for ((i=0; i<32; i++)); do (exit 13) & wait "$!"; s=$?; done; echo "$s"', "13",
+    ),
     "case-edges": ("""\
 for ((i=0; i<3000; i++)); do
     case src/unit-$i.rs in
