@@ -110,6 +110,26 @@ def compare(audits, row, count, runs, floor, *, setup="", body=None):
     return {"count": count, "samples_ns": samples, "control": native}
 
 
+def single_command(audits, row, runs):
+    # A loop or trailing status marker changes the shell's last-command exec path.
+    def call(name):
+        return audits[name].call(1, row["argv"], row["stdin"], row["fixture"], timing="started")
+    reference = call("bash")
+    if reference.timeout:
+        raise ValueError("single command reference timed out")
+    expected = reference.digest()
+    names = list(audits)
+    samples = {name: [] for name in names}
+    for i in range(runs + 1):
+        for name in names[i % len(names):] + names[:i % len(names)]:
+            result = call(name)
+            if result.digest() != expected:
+                raise ValueError(f"{name} single command changed: {result.brief()}")
+            if i:
+                samples[name].append(result.ns)
+    return {"count": 1, "samples_ns": samples}
+
+
 def workloads(lane, inventory):
     fixed = [json.loads(line) for line in MANIFEST.read_text().splitlines()]
     if inventory is None:
@@ -183,6 +203,7 @@ def main():
     cli.add_argument("--above-bash", type=Path, nargs="+",
                      help="repeat exact workloads whose saved median exceeded Bash and measure available components")
     cli.add_argument("--components", action="store_true")
+    cli.add_argument("--also-single", action="store_true", help="time the unchanged final command without a batch loop")
     cli.add_argument("--release-only", action="store_true", help="compare just the two release binaries and Bash")
     cli.add_argument("--self-invocation", action="store_true",
                      help="start each shell by absolute path and verify that $BASH runs the same build")
@@ -215,6 +236,8 @@ def main():
                 continue
             n = config["iterations"]
             result = {"id": row["id"]}
+            if args.also_single:
+                result["single"] = single_command(audits, row, args.runs)
             if args.components:
                 source = row["argv"][-1]
                 native = floor_args(source, n)

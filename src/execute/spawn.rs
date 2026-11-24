@@ -21,6 +21,12 @@ pub(super) fn standard_dup(r: &Redirect) -> bool {
     r.target == Target::Duplicate && (0..=2).contains(&r.fd) && source != r.fd
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum ScriptProcess {
+    Child,
+    Replace,
+}
+
 impl External {
     pub(super) fn spawn_with_dups(
         &self,
@@ -106,7 +112,14 @@ impl External {
                     Err(e) if e.raw_os_error() == Some(libc::ENOEXEC) => {
                         self.with_script(path, |shell, args| {
                             if let Some(session) = session
-                                && let Some(pid) = self.fork_script(session, path, shell, args, env)
+                                && let Some(pid) = self.start_script(
+                                    session,
+                                    path,
+                                    shell,
+                                    args,
+                                    env.cast(),
+                                    ScriptProcess::Child,
+                                )
                             {
                                 return Ok(pid);
                             }
@@ -120,21 +133,30 @@ impl External {
             result
         }
     }
-    // A plain ENOEXEC command can start a fresh interpreter in its own child.
+    // A plain ENOEXEC command can reuse its process image for a fresh interpreter.
     // Use exec for managed jobs, changed environments and inherited runtime
     // state that needs an actual image transition.
-    fn fork_script(
+    pub(super) fn start_script(
         &self,
         session: &crate::Session,
         path: &std::ffi::CStr,
         shell: &std::ffi::CStr,
         args: &[*const libc::c_char],
-        env: *const *mut libc::c_char,
+        env: *const *const libc::c_char,
+        process: ScriptProcess,
     ) -> Option<libc::pid_t> {
         use std::ffi::{OsStr, OsString};
         use std::io::Write;
         use std::os::unix::ffi::OsStrExt;
 
+        thread_local! {
+            static REENTERED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+        // A nested fallback must release the previous interpreter stack,
+        // including when a child would inherit that stack through fork.
+        if REENTERED.get() {
+            return None;
+        }
         if session.interactive
             || session.traps.active()
             || session.traps.in_action()
@@ -150,17 +172,28 @@ impl External {
             shell_level = Some(value);
         }
         let _ = std::io::stdout().flush();
-        let pid = unsafe { libc::fork() };
-        if pid != 0 {
-            return (pid > 0).then_some(pid);
+        if process == ScriptProcess::Child {
+            let pid = unsafe { libc::fork() };
+            if pid != 0 {
+                return (pid > 0).then_some(pid);
+            }
         }
         if has_close_on_exec_fds() {
+            if process == ScriptProcess::Replace {
+                return None;
+            }
             unsafe {
-                libc::execve(shell.as_ptr(), args.as_ptr(), env.cast());
+                libc::execve(shell.as_ptr(), args.as_ptr(), env);
                 libc::_exit(126);
             }
         }
-        // The copied interpreter is single-threaded. Apply exactly the exported
+        REENTERED.set(true);
+        if process == ScriptProcess::Replace {
+            // exec() had restored the external command's default disposition.
+            // A newly entered Rust main ignores SIGPIPE.
+            unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) };
+        }
+        // The interpreter is single-threaded. Apply exactly the exported
         // change, including export -n, before starting the ordinary script entry point.
         match shell_level {
             Some(Some(value)) => unsafe { std::env::set_var("SHLVL", value.as_ref()) },

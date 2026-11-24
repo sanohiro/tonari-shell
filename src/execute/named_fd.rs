@@ -120,7 +120,7 @@ fn command(mut cmd: PreparedCommand, session: &mut Session, status: u8) -> io::R
             committed = matches!(b, Builtin::Exec) && matches!(flow, Flow::Continue(0));
             Ok(flow)
         } else {
-            Ok(Flow::Continue(External::new(&cmd, session).exec()))
+            Ok(Flow::Continue(External::new(&cmd, session).exec(None)))
         }
     })();
     if !committed {

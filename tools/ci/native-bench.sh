@@ -133,7 +133,7 @@ case "$SUITE" in
     run jobs python3 tests/compat/job_latency.py "$current" "$bin/baseline" "$ref" --runs 41 ;;
   parity-commands)
     [[ $RUNNER_OS == macOS ]]
-    python3 tests/compat/replay_budget.py --release-only --bin "$bin" --bash "$ref" --lane macOSarm64 --runs 31 \
+    python3 tests/compat/replay_budget.py --release-only --also-single --bin "$bin" --bash "$ref" --lane macOSarm64 --runs 31 \
       --only 1073fad1c5f9 27e15ee9fb24 2d8b87809a57 486d0a5c94f0 48f0f68f324f 4dbd86b7239c \
              ac121d4b6180 b231f00edd90 d2003b0a862e e4c5cb7b4108 e75fc215bb04 > "$out/replay.jsonl" ;;
   parity-invocation)

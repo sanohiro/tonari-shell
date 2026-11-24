@@ -1570,6 +1570,15 @@ echo "$SHLVL"; exit 17
         self.compare("export -n SHLVL; " + body, 0,
                      b"./plain script/a b/1/unset/unset\nrecord\n1\n17\nmessage\n")
 
+    def test_nested_executable_text_at_end_of_command(self):
+        chain = self.cwd / "chain"
+        chain.write_text("""if (( $1 )); then ./chain "$(($1 - 1))"; else
+printf '%s/%s/%s' "$0" "${private-unset}" "$2"; exit 19; fi
+""")
+        chain.chmod(0o755)
+        self.compare('private=parent; ./chain 40', 19, b"./chain/unset/")
+        self.compare('private=parent; ./chain 0 "two words"', 19, b"./chain/unset/two words")
+
     def test_mapfile_origin_keeps_surrounding_and_sparse_indices(self):
         self.compare("""a=([0]=keep [2]=previous [4]=tail [81]=sparse)
 mapfile -tO 2 a <<<'one

@@ -408,12 +408,22 @@ impl External {
         launch(&shell, &args)
     }
 
-    fn script_fallback(&self, path: &CStr) -> i32 {
+    fn script_fallback(&self, path: &CStr, session: Option<&Session>) -> i32 {
         self.with_script(path, |shell, args| {
             let env = self.env.as_ref().map_or_else(
                 || inherited_env().cast::<*const libc::c_char>(),
                 |e| e.pointers.as_ptr(),
             );
+            if let Some(session) = session {
+                self.start_script(
+                    session,
+                    path,
+                    shell,
+                    args,
+                    env,
+                    spawn::ScriptProcess::Replace,
+                );
+            }
             unsafe { libc::execve(shell.as_ptr(), args.as_ptr(), env) };
             Err::<(), _>(io::Error::last_os_error())
         })
@@ -422,7 +432,7 @@ impl External {
         .unwrap_or(libc::ENOEXEC)
     }
 
-    fn exec(&self) -> u8 {
+    fn exec(&self, session: Option<&Session>) -> u8 {
         // Rust ignores SIGPIPE in its own runtime. External commands need the
         // normal Unix disposition, including on the direct exec path.
         let program = self.original_name.as_ref().unwrap_or(&self.words[0]);
@@ -451,7 +461,7 @@ impl External {
             match errno() {
                 libc::ENOENT | libc::ENOTDIR => continue,
                 libc::ENOEXEC => {
-                    error = self.script_fallback(path);
+                    error = self.script_fallback(path, session);
                     break;
                 }
                 libc::EACCES => error = libc::EACCES,
@@ -867,7 +877,7 @@ fn exec_builtin(cmd: &PreparedCommand, session: &Session, mut args: &[String]) -
         arg0 = Some(format!("-{}", arg0.as_ref().unwrap_or(program)));
     }
     let external = External::for_words(cmd, session, args, arg0, clear);
-    let status = external.exec();
+    let status = external.exec(None);
     if session.interactive {
         Flow::Continue(status)
     } else {
@@ -1432,7 +1442,7 @@ fn start(
         let code = if !apply(&setup) {
             1
         } else if let Some(external) = external.as_ref() {
-            external.exec()
+            external.exec(None)
         } else {
             coprocess::after_fork(session);
             match eval_builtin(builtin.unwrap(), cmd, session, last_status, true) {
@@ -2028,7 +2038,9 @@ pub fn run_pipeline(
         if replace && launch.group.is_none() {
             let executable = External::new(&cmd, session);
             return Ok(Flow::Continue(if apply(&actions(&cmd)) {
-                executable.exec()
+                executable.exec(
+                    (cmd.assignments.is_empty() && cmd.redirects.is_empty()).then_some(session),
+                )
             } else {
                 1
             }));
