@@ -886,10 +886,8 @@ pub fn line(
                 let updated = session.get("READLINE_LINE").unwrap_or_default();
                 undo.boundary();
                 last_arg = None;
-                if updated != text {
-                    undo.record(&text, 0..text.len(), updated.len(), cursor, false);
-                    text = updated;
-                }
+                let len = text.len();
+                undo.replace(&mut text, 0..len, &updated, cursor);
                 cursor = char_offset(
                     &text,
                     session
@@ -1183,6 +1181,7 @@ pub fn line(
                     .and_then(|i| session.history_lines().get(i))
                     .and_then(|line| crate::parser::last_history_argument(line));
                 if let Some(arg) = arg {
+                    mark = text[..cursor].chars().count();
                     undo.record(&text, cursor..cursor, arg.len(), cursor, false);
                     text.insert_str(cursor, arg);
                     cursor += arg.len();
@@ -1270,16 +1269,7 @@ pub fn line(
                         match selected {
                             Ok(Some(index)) => {
                                 let word = result.select(index);
-                                if text[result.start..cursor] != word {
-                                    undo.record(
-                                        &text,
-                                        result.start..cursor,
-                                        word.len(),
-                                        cursor,
-                                        false,
-                                    );
-                                }
-                                text.replace_range(result.start..cursor, &word);
+                                undo.replace(&mut text, result.start..cursor, &word, cursor);
                                 cursor = result.start + word.len();
                             }
                             Ok(None) => {}
@@ -1311,16 +1301,7 @@ pub fn line(
                         screen.row = 0;
                         screen.view.invalidate();
                     } else {
-                        if text[result.start..cursor] != result.replacement {
-                            undo.record(
-                                &text,
-                                result.start..cursor,
-                                result.replacement.len(),
-                                cursor,
-                                false,
-                            );
-                        }
-                        text.replace_range(result.start..cursor, &result.replacement);
+                        undo.replace(&mut text, result.start..cursor, &result.replacement, cursor);
                         cursor = result.start + result.replacement.len();
                     }
                 }

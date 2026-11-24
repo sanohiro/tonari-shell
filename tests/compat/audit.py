@@ -299,6 +299,8 @@ def main():
     args = cli.parse_args()
     with tempfile.TemporaryDirectory() as work:
         a = Audit(args.bash.resolve(), args.tonari.resolve(), Path(work))
+        a.tty("repeat last argument", "test_last_arg_repeats_and_preserves_quoting")
+        a.tty("undo line edits", "test_undo_paste_delete_and_last_arg_against_bash")
         a.tty("prefix history arrows", "test_navigation_prefix_arrows_and_bash_bindings")
         a.tty("foreground pipeline", "test_stop_and_resume_foreground_pipeline")
         a.tty("interactive alias and signal", "test_interactive_alias_and_interrupt_trap")

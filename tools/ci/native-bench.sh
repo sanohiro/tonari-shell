@@ -61,7 +61,7 @@ if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; t
   exit
 fi
 if [[ $RUNNER_OS == macOS ]]; then
-  if [[ $SUITE == inventory || $SUITE == parity-commands || $SUITE == parity-invocation || $SUITE == foreground || $SUITE == navigation || $SUITE == budget* ]]; then
+  if [[ $SUITE == inventory || $SUITE == parity-commands || $SUITE == parity-invocation || $SUITE == foreground || $SUITE == navigation || $SUITE == edit-actions || $SUITE == budget* ]]; then
     gnu="$RUNNER_TEMP/gnu"
     mkdir -p "$gnu"
     download_bash "$version" "$digest" "$RUNNER_TEMP/bash.tar.gz"
@@ -124,6 +124,13 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
+  edit-actions)
+    REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k last_arg -k test_undo
+    run actions python3 tools/bench_edit_actions.py "$bin/baseline" "$current" "$ref" --runs 21
+    if [[ $RUNNER_OS == Linux ]]; then
+      cpu=$(python3 -c 'import os;print(min(os.sched_getaffinity(0)))')
+      run actions-one-cpu taskset -c "$cpu" python3 tools/bench_edit_actions.py "$bin/baseline" "$current" "$ref" --runs 15
+    fi ;;
   navigation)
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k navigation
     run navigation python3 tools/bench_navigation.py "$bin/baseline" "$current" --bash "$ref" --runs 21

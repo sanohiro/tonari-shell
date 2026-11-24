@@ -45,12 +45,61 @@ pub(crate) fn history_word_spans(s: &str) -> Vec<(usize, usize)> {
 
 /// Keep the original shell spelling, including quotes and substitutions.
 pub(crate) fn last_history_argument(line: &str) -> Option<&str> {
-    let source = line.trim_end_matches([' ', '\t', '\n']);
-    let (start, end) = match lex(source, false, true) {
-        Ok((_, spans, _)) => spans.last().copied()?,
-        Err(_) => history_word_spans(source).last().copied()?,
+    let blank = [' ', '\t', '\n'];
+    let trimmed = line.trim_end_matches(blank);
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // A bare prefix cannot leave the last argument inside an open quote or expansion.
+    let first_special = trimmed.bytes().position(|b| {
+        !(lexer::plain_byte(b)
+            || b >= 128
+            || matches!(b, b' ' | b'\t' | b'\n' | b'=' | b',' | b'@' | b'%'))
+    });
+    let prefix = match first_special {
+        None => return trimmed.rsplit(blank).next(),
+        Some(i) => &trimmed[..i],
     };
-    Some(&source[start..end])
+    let tail = &trimmed.as_bytes()[prefix.len()..];
+    if tail.len() >= 2
+        && tail[0] == b'\''
+        && memchr::memchr(b'\'', &tail[1..]) == Some(tail.len() - 2)
+    {
+        let start = prefix.rfind(blank).map_or(0, |i| i + 1);
+        return Some(&trimmed[start..]);
+    }
+    // Pass the untrimmed line to the lexer: an escaped trailing blank belongs to the word.
+    let (tokens, spans, _) = match lex(line, false, true) {
+        Ok(parts) => parts,
+        Err(_) => return history_word_spans(line).last().map(|&(a, b)| &line[a..b]),
+    };
+    let index = tokens
+        .iter()
+        .zip(&spans)
+        .rposition(|(t, &(a, b))| !matches!(t, Token::Newline) || b - a > 1)?;
+    if matches!(tokens[index], Token::Newline) {
+        // A newline spanning a heredoc includes its closing delimiter.
+        let (a, b) = spans[index];
+        let closing = line[a..b].trim_end_matches('\n').rsplit('\n').next()?;
+        return last_history_argument(closing);
+    }
+    let (mut start, end) = spans[index];
+    // The history word for an adjacent fd duplication includes its operator.
+    if index > 0
+        && spans[index - 1].1 == start
+        && matches!(
+            tokens[index - 1],
+            Token::Redirect(_, Target::Duplicate | Target::OutputWord)
+        )
+        && line[start..end]
+            .trim_end_matches('-')
+            .bytes()
+            .all(|b| b.is_ascii_digit())
+    {
+        start = spans[index - 1].0;
+    }
+    Some(&line[start..end])
 }
 
 /// Byte end of the next shell token in the displayed command, including any

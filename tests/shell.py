@@ -2654,6 +2654,42 @@ f; printf 'END\0'; printf '%s\0' names/*'''
         os.write(fd, b"abc\x1f\r")
         self.edited_prompt_after(fd, b"<seed>\r\n")
 
+    def test_last_arg_lexical_boundaries(self):
+        cases = [("cmd foo # trailing note", "foo"), ("cmd 2>&1", "2>&1"),
+                 ("cmd file\\ ", "file\\ "), ("cmd foo　bar", "foo　bar"),
+                 ("cat <<EOF\nhello there\nEOF", "EOF"),
+                 ("cmd $(touch YANK_EXECUTED)", "$(touch YANK_EXECUTED)")]
+        capture = """rec(){ printf '%s' "$READLINE_LINE" >captured; echo saved''OK; }; bind -x '"\\C-]":rec'; """
+        for shell in self.shells_for(5):
+            for line, want in cases + ([("cmd $((1 + 3))", "$((1 + 3))")] if shell == TONARI else []):
+                with self.subTest(shell=shell, line=line):
+                    fd = self.terminal_session(editing=True, shell=shell)
+                    # Keep multiline fixture data in one terminal submission.
+                    quoted = "$'" + line.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n") + "'"
+                    os.write(fd, (capture + "history -s " + quoted + "; echo rea''dy\r").encode())
+                    self.edited_prompt_after(fd, b"ready\r\n")
+                    os.write(fd, b"\x1b.\x1d")
+                    self.read_until(fd, b"savedOK\r\n")
+                    self.assertEqual((self.cwd / "captured").read_text(), want)
+                    self.assertFalse((self.cwd / "YANK_EXECUTED").exists())
+
+    def test_undo_overwrite_cut_picker_and_cursor(self):
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"show(){ printf '<%s>\\n' \"$1\"; }; echo rea''dy\r")
+        self.edited_prompt_after(fd, b"ready\r\n")
+        os.write(fd, "show 猫🌱".encode() + b"\x02\x1b[2~" + "海".encode() + b"\x1f\x1b[2~X\r")
+        self.edited_prompt_after(fd, "<猫X🌱>\r\n".encode())
+        os.write(fd, b"show firstmore\x02\x02\x02\x02\x0b\x1fZ\r")
+        self.edited_prompt_after(fd, b"<firstZmore>\r\n")
+        for name in ("pick-one", "pick-two"):
+            (self.cwd / name).touch()
+        os.write(fd, b"show ./pick-\t\t")
+        self.read_until(fd, b"pick-two")
+        os.write(fd, b"two\r")
+        self.read_until(fd, b"show ./pick-two")
+        os.write(fd, b"\x1fX\r")
+        self.read_until(fd, b"<./pick-X>\r\n")
+
     def test_navigation_prefix_arrows_and_bash_bindings(self):
         for shell in self.shells_for():
             with self.subTest(shell=shell):
