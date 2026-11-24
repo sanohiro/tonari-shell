@@ -271,6 +271,9 @@ case "$SUITE" in
     run external-io python3 tools/bench_streams.py "$current" "$ref" --case redirect --case pipe --sizes 64 16777216 268435456 --runs 21
     run capture python3 tools/bench_file_capture.py "$current" "$ref" --runs 21
     if [[ $RUNNER_OS == Linux ]]; then run heap python3 tools/bench_heap.py "$current" "$ref" --runs 7; fi ;;
+  tool-hooks)
+    REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q
+    run tool-hooks bash tools/ci/tool-hooks.sh ;;
   rcfiles)
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q
     rc="$RUNNER_TEMP/rc"

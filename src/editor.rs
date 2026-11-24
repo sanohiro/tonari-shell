@@ -885,22 +885,31 @@ pub fn line(
                     ("READLINE_MARK".into(), mark.to_string()),
                 ]);
                 let flow = crate::eval_text(session, &command, status);
-                let updated = session.get("READLINE_LINE").unwrap_or_default();
                 undo.boundary();
                 last_arg = None;
-                let len = text.len();
-                undo.replace(&mut text, 0..len, &updated, cursor);
-                cursor = char_offset(
-                    &text,
+                if let Some(updated) = session.get("READLINE_LINE")
+                    && updated != text
+                {
+                    let len = text.len();
+                    undo.replace(&mut text, 0..len, &updated, cursor);
+                    cursor = text.len();
+                    mark = 0;
+                }
+                // Readline keeps the position left by the edit for a non-decimal value.
+                let offset = |name| {
                     session
-                        .get("READLINE_POINT")
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(0),
-                );
-                mark = session
-                    .get("READLINE_MARK")
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
+                        .get(name)?
+                        .trim()
+                        .parse::<i64>()
+                        .ok()
+                        .map(|n| n.max(0) as usize)
+                };
+                if let Some(n) = offset("READLINE_POINT") {
+                    cursor = char_offset(&text, n);
+                }
+                if let Some(n) = offset("READLINE_MARK") {
+                    mark = n;
+                }
                 session.restore(vars);
                 recall = recall::Recall::new(session.history_lines().len());
                 if let crate::Flow::Exit(code) = flow {

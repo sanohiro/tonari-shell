@@ -1,7 +1,7 @@
 use super::{Entries, History, Session};
 use crate::Flow;
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::OpenOptionsExt;
@@ -9,6 +9,11 @@ use std::path::{Path, PathBuf};
 
 pub(crate) fn run(session: &mut Session, words: &[String], status: u8) -> Flow {
     let args = &words[1..];
+    if let Some(snapshot) = session.initial_history.take()
+        && !(words[0] == "history" && args.first().is_some_and(|s| s == "-c"))
+    {
+        let _ = snapshot.load(session);
+    }
     if words[0] == "fc" {
         match fc(session, args, status) {
             Ok(flow) => flow,
@@ -178,32 +183,63 @@ fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<
         } else {
             0
         };
-        let mut count = 0;
-        for line in BufReader::new(file).lines() {
-            let line = line?;
-            count += 1;
-            if count <= skip {
-                continue;
+        let mut reader = BufReader::new(file);
+        let mut offset = skip;
+        if skip > 0 && reader.seek(SeekFrom::Start(skip)).is_err() {
+            io::copy(&mut reader.by_ref().take(skip), &mut io::sink())?;
+        }
+        let mut line = String::new();
+        let limit = session.history_limit("HISTSIZE", 500);
+        let erase = session
+            .get("HISTCONTROL")
+            .is_some_and(|v| v.split(':').any(|rule| rule == "erasedups"));
+        let owner = session.shell_pid();
+        let h = session.history_mut();
+        loop {
+            line.clear();
+            let n = reader.read_line(&mut line)?;
+            if n == 0 {
+                break;
             }
+            offset += n as u64;
+            let line = line.strip_suffix('\n').unwrap_or(&line);
+            let line = line.strip_suffix('\r').unwrap_or(line);
             let value = if private {
                 let mut fields = line.splitn(5, '\t');
                 if fields.next() != Some("1") {
                     continue;
                 }
                 let pid = fields.next().and_then(|s| s.parse::<u32>().ok());
-                if op == 'n' && pid == Some(std::process::id()) {
+                if op == 'n' && pid == Some(owner) {
                     continue;
                 }
                 fields.nth(2).and_then(super::decode)
             } else {
-                Some(line)
+                Some(line.to_owned())
             };
-            if let Some(value) = value {
-                session.push_history(&value, false);
+            if let Some(value) = value
+                && limit != 0
+            {
+                if erase {
+                    for i in (0..h.lines.len()).rev() {
+                        if h.lines[i] == value {
+                            h.remove(i);
+                        }
+                    }
+                }
+                h.lines.push(value);
+                h.timestamps
+                    .push(unsafe { libc::time(std::ptr::null_mut()) });
+                h.current = None;
+                // Intermediate entries are unobservable during the import. Keep
+                // the exact window for erasedups, which changes history numbers.
+                if erase || h.lines.len().saturating_sub(limit) >= 1024 {
+                    h.trim_to(limit);
+                }
             }
         }
-        let h = session.history_mut();
-        h.imported = Some((path, count));
+        h.trim_to(limit);
+        h.imported = Some((path, offset));
         h.written = h.lines.len();
     } else {
         let mut file = OpenOptions::new()
@@ -277,7 +313,10 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
         return Err(error("no command found"));
     }
     let select = |arg: &String| {
-        if arg.parse::<i64>().is_ok() {
+        if let Ok(n) = arg.parse::<i64>() {
+            if n < 0 {
+                return Ok(end.saturating_sub(n.unsigned_abs() as usize));
+            }
             position(h, arg, end)
         } else {
             h.lines[..end]
@@ -301,6 +340,7 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
         reverse = true;
     }
     let mut source = String::new();
+    let mut out = list.then(|| io::stdout().lock());
     for step in 0..=last - first {
         let i = if reverse { last - step } else { first + step };
         if list && numbers {
@@ -311,9 +351,15 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
         }
         source.push_str(&h.lines[i]);
         source.push('\n');
+        if source.len() >= 16384
+            && let Some(out) = &mut out
+        {
+            out.write_all(source.as_bytes())?;
+            source.clear();
+        }
     }
-    if list {
-        io::stdout().lock().write_all(source.as_bytes())?;
+    if let Some(mut out) = out {
+        out.write_all(source.as_bytes())?;
         return Ok(Flow::Continue(0));
     }
     if let Some((before, after)) = substitution {

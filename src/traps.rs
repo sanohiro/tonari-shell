@@ -73,6 +73,7 @@ pub(crate) struct Entry {
 #[derive(Default, Clone)]
 pub struct Traps {
     entries: BTreeMap<i32, Entry>,
+    inherited_listing: Option<std::rc::Rc<BTreeMap<i32, Entry>>>,
     running: u64,
     handling_debug: bool,
     handling_error: bool,
@@ -203,6 +204,7 @@ impl Traps {
     }
 
     fn set(&mut self, sig: i32, command: &str, interactive: bool) -> io::Result<()> {
+        self.inherited_listing = None;
         if sig == 0 {
             self.watch_exit(command != "-" && !command.is_empty())?;
         }
@@ -320,23 +322,80 @@ impl Traps {
         let _ = self.watch_exit(false);
         self.exit_status = None;
         TERMINATING.store(0, Relaxed);
-        self.entries.retain(|&sig, e| {
-            if sig == ERR {
-                return errtrace;
+        // Bash exposes the parent list to trap -p until the child changes a trap.
+        // Only ignored dispositions and inherited shell handlers remain active.
+        let old = std::mem::take(&mut self.entries);
+        for (&sig, e) in &old {
+            if self.keep_after_fork(sig, e, errtrace, functrace) {
+                self.entries.insert(sig, e.clone());
             }
-            if matches!(sig, RETURN | DEBUG) {
-                return functrace;
-            }
-            if sig > 0 && e.command.is_empty() {
-                return true;
-            }
-            if sig > 0 && sig != libc::SIGKILL && sig != libc::SIGSTOP {
-                unsafe { libc::signal(sig, libc::SIG_DFL) };
-            }
-            false
-        });
+        }
+        if self.inherited_listing.is_none() {
+            self.inherited_listing = Some(std::rc::Rc::new(old));
+        }
         self.running = 0;
         PENDING.store(0, Relaxed);
+    }
+
+    fn keep_after_fork(&self, sig: i32, e: &Entry, errtrace: bool, functrace: bool) -> bool {
+        if sig == ERR {
+            return errtrace;
+        }
+        if matches!(sig, RETURN | DEBUG) {
+            return functrace;
+        }
+        if sig > 0 && e.command.is_empty() {
+            return true;
+        }
+        if sig > 0 && sig != libc::SIGKILL && sig != libc::SIGSTOP {
+            unsafe { libc::signal(sig, libc::SIG_DFL) };
+        }
+        false
+    }
+
+    pub(crate) fn list<'a>(
+        &self,
+        names: impl ExactSizeIterator<Item = &'a str>,
+        out: &mut impl Write,
+    ) -> u8 {
+        let entries = self.inherited_listing.as_deref().unwrap_or(&self.entries);
+        let mut show = |sig| {
+            if let Some(e) = entries.get(&sig) {
+                let name = if sig == DEBUG {
+                    "DEBUG"
+                } else if sig == RETURN {
+                    "RETURN"
+                } else if sig == ERR {
+                    "ERR"
+                } else {
+                    SIGNALS.iter().find(|s| s.1 == sig).unwrap().0
+                };
+                writeln!(
+                    out,
+                    "trap -- '{}' {}{name}",
+                    e.command.replace('\'', "'\\''"),
+                    if sig == 0 || sig >= DEBUG { "" } else { "SIG" }
+                )?;
+            }
+            Ok::<_, io::Error>(())
+        };
+        if names.len() == 0 {
+            for &sig in entries.keys() {
+                if show(sig).is_err() {
+                    return 1;
+                }
+            }
+        } else {
+            for s in names {
+                let Some(sig) = trap_number(s) else {
+                    return invalid(s);
+                };
+                if show(sig).is_err() {
+                    return 1;
+                }
+            }
+        }
+        0
     }
 
     pub fn builtin(&mut self, args: &[String], interactive: bool) -> u8 {
@@ -356,44 +415,10 @@ impl Traps {
             return 0;
         }
         if list || args.is_empty() {
-            let mut out = io::stdout().lock();
-            let mut show = |sig| {
-                if let Some(e) = self.entries.get(&sig) {
-                    let name = if sig == DEBUG {
-                        "DEBUG"
-                    } else if sig == RETURN {
-                        "RETURN"
-                    } else if sig == ERR {
-                        "ERR"
-                    } else {
-                        SIGNALS.iter().find(|s| s.1 == sig).unwrap().0
-                    };
-                    writeln!(
-                        out,
-                        "trap -- '{}' {}{name}",
-                        e.command.replace('\'', "'\\''"),
-                        if sig == 0 || sig >= DEBUG { "" } else { "SIG" }
-                    )?;
-                }
-                Ok::<_, io::Error>(())
-            };
-            if args.len() < 2 {
-                for &sig in self.entries.keys() {
-                    if show(sig).is_err() {
-                        return 1;
-                    }
-                }
-            } else {
-                for s in &args[1..] {
-                    let Some(sig) = trap_number(s) else {
-                        return invalid(s);
-                    };
-                    if show(sig).is_err() {
-                        return 1;
-                    }
-                }
-            }
-            return 0;
+            return self.list(
+                args.iter().skip(1).map(String::as_str),
+                &mut io::stdout().lock(),
+            );
         }
         let (command, signals) = if args[0].parse::<u32>().is_ok() {
             ("-", args)

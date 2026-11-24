@@ -166,6 +166,7 @@ fn read_terminal_line(source: &mut Vec<u8>) -> io::Result<bool> {
 
 fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Result<u8> {
     session.jobs.init();
+    session.initial_history = history::InitialJournal::snapshot(session).map(std::rc::Rc::new);
     let mut source = Vec::new();
     let mut history = history::History::default();
     let mut eof_count = 0;

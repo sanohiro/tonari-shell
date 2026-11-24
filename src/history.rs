@@ -146,7 +146,82 @@ pub(crate) struct Entries {
     base: usize,
     current: Option<usize>,
     written: usize,
-    imported: Option<(PathBuf, usize)>,
+    imported: Option<(PathBuf, u64)>,
+}
+
+pub(crate) struct InitialJournal {
+    path: PathBuf,
+    identity: (u64, u64),
+    len: u64,
+}
+
+impl InitialJournal {
+    pub(crate) fn snapshot(session: &Session) -> Option<Self> {
+        let path = file(session)?;
+        let m = fs::metadata(&path).ok()?;
+        (m.is_file() && m.len() > 0).then(|| Self {
+            path,
+            identity: (m.dev(), m.ino()),
+            len: m.len(),
+        })
+    }
+
+    // The editor already reads the shared journal in windows. History builtins
+    // need only the startup suffix permitted by HISTSIZE, on first access.
+    fn load(&self, session: &mut Session) -> std::io::Result<()> {
+        let mut journal = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&self.path)?;
+        let m = journal.metadata()?;
+        if (m.dev(), m.ino()) != self.identity || m.len() < self.len || !m.is_file() {
+            return Ok(());
+        }
+        let available = session
+            .history_limit("HISTSIZE", 500)
+            .saturating_sub(session.history_lines().len());
+        let mut pos = self.len;
+        let mut needed = available;
+        let mut block = [0u8; 16384];
+        if available > 0 {
+            'scan: while pos > 0 {
+                let count = pos.min(block.len() as u64) as usize;
+                pos -= count as u64;
+                journal.read_exact_at(&mut block[..count], pos)?;
+                for index in memchr::memrchr_iter(b'\n', &block[..count]) {
+                    if needed == 0 {
+                        pos += index as u64 + 1;
+                        break 'scan;
+                    }
+                    needed -= 1;
+                }
+            }
+        }
+        journal.seek(SeekFrom::Start(pos))?;
+        let mut older = Vec::new();
+        let mut reader = BufReader::new(journal.take(self.len - pos));
+        let mut row = Vec::new();
+        while reader.read_until(b'\n', &mut row)? != 0 {
+            if let Some(text) = row
+                .strip_suffix(b"\n")
+                .and_then(|s| std::str::from_utf8(s).ok())
+                .and_then(command_field)
+                .and_then(decode)
+            {
+                older.push(text);
+            }
+            row.clear();
+        }
+        let h = session.history_mut();
+        let n = older.len();
+        older.append(&mut h.lines);
+        h.lines = older;
+        h.current = h.current.map(|index| index + n);
+        h.timestamps.splice(0..0, std::iter::repeat_n(0, n));
+        h.written += n;
+        h.imported = Some((self.path.clone(), self.len));
+        Ok(())
+    }
 }
 
 impl Session {
@@ -192,13 +267,7 @@ impl Session {
         h.lines.push(text.into());
         h.timestamps
             .push(unsafe { libc::time(std::ptr::null_mut()) });
-        if h.lines.len() > limit {
-            let count = h.lines.len() - limit;
-            h.lines.drain(..count);
-            h.timestamps.drain(..count);
-            h.base += count;
-            h.written = h.written.saturating_sub(count);
-        }
+        h.trim_to(limit);
         h.current = current.then(|| h.lines.len() - 1);
     }
     pub(crate) fn finish_history_line(&mut self) {
@@ -263,6 +332,17 @@ impl Session {
 }
 
 impl Entries {
+    fn trim_to(&mut self, limit: usize) {
+        if self.lines.len() > limit {
+            let count = self.lines.len() - limit;
+            self.lines.drain(..count);
+            self.timestamps.drain(..count);
+            self.base += count;
+            self.written = self.written.saturating_sub(count);
+            self.current = self.current.and_then(|index| index.checked_sub(count));
+        }
+    }
+
     fn remove(&mut self, index: usize) {
         self.lines.remove(index);
         self.timestamps.remove(index);

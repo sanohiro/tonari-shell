@@ -139,6 +139,7 @@ pub struct Session {
     pub history_enabled: bool,
     pub verbose: bool,
     pub(crate) history: Option<Rc<crate::history::Entries>>,
+    pub(crate) initial_history: Option<Rc<crate::history::InitialJournal>>,
     pub command_number: usize,
     pub command_string: bool,
     pub tested_depth: u32,

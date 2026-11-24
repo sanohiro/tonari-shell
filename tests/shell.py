@@ -1312,6 +1312,14 @@ printf() { echo overridden; }; z=$(printf '%s' hi); echo "$z"''',
         if self.command(BASH, '[[ -n $BASHPID ]]').returncode == 0:
             self.compare('x=$(printf "%s" "$BASHPID"); [[ -n $BASHPID ]] && [[ $x != "$BASHPID" ]]', 0)
 
+    def test_inherited_trap_listing_and_restore(self):
+        self.compare("""trap 'echo caught' USR1
+save=$(trap -p USR1); printf '<%s>\\n' "$save"
+( :; trap -p USR1; trap '' TERM; trap -p USR1 TERM )
+trap - USR1; eval "$save"; trap -p USR1""", 0,
+                     b"<trap -- 'echo caught' SIGUSR1>\ntrap -- 'echo caught' SIGUSR1\n"
+                     b"trap -- '' SIGTERM\ntrap -- 'echo caught' SIGUSR1\n", minimum=5)
+
     def test_external_capture_and_environment(self):
         self.env["INHERITED"] = "old"
         self.compare("""export V=outer; unset INHERITED
@@ -2111,6 +2119,9 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                      b"<v:old!>inner/new\nnew/new\n<first><changed><last><0><1><4>|gone", minimum=5)
 
     def test_history_fc_and_explicit_file_roundtrip(self):
+        self.compare("history -s first; history -s last; fc -lnr -2147483648; "
+                     "history -d -2147483648 2>/dev/null; echo $?", 0,
+                     b"\t last\n\t first\n1\n")
         self.compare('history -c; history -s echo first; history -s echo second; '
                      'history -p "!!:$"; fc -ln -2 -1; fc -s second=changed -1 2>/dev/null; '
                      'history -w hist; history -c; history -r hist; '

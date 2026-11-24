@@ -278,6 +278,21 @@ fn capture_simple(
     {
         return None;
     }
+    if let Some(cmd) = sole_plain_command(body)
+        && let [name, flag, names @ ..] = cmd.words.as_slice()
+        && name.as_literal() == Some("trap")
+        && flag.as_literal() == Some("-p")
+        && !session.functions.contains_key("trap")
+        && !session.disabled_builtins.contains("trap")
+        && names.iter().all(|word| word.as_literal().is_some())
+    {
+        let mut out = Vec::new();
+        let status = session.traps.list(
+            names.iter().map(|word| word.as_literal().unwrap()),
+            &mut out,
+        );
+        return Some(captured_output(out, status));
+    }
     let command = |statement: &parser::Statement| {
         let parser::Command::Pipeline(stages) = &statement.command else {
             return None;
