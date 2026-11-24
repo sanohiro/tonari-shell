@@ -235,12 +235,19 @@ fn run(
             input.clear();
             continue;
         }
-        let mut result = parser::session_source_at(text, n == 0, session, base_line);
-        if matches!(result, Err(parser::Error::Incomplete(_)))
-            && line_start == 0
-            && !shared_offset
-            && !session.verbose
-            && session.source_depth > 0
+        let buffered = line_start == 0 && n != 0 && !shared_offset && !session.verbose;
+        let open_function = buffered
+            && parser::opens_function(text)
+            && !(session.shopt.expand_aliases && session.aliases.0.is_some());
+        let mut result = if open_function {
+            // A bare "name() {" cannot execute before the rest of the body.
+            Err(parser::Error::Incomplete("unfinished function definition"))
+        } else {
+            parser::session_source_at(text, n == 0, session, base_line)
+        };
+        if buffered
+            && (session.source_depth > 0 || open_function && !session.history_enabled)
+            && matches!(result, Err(parser::Error::Incomplete(_)))
             && let Some((program, consumed, lines)) =
                 buffered_compound(session, text, reader.buffer(), base_line)
         {

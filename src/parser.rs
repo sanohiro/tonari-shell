@@ -12,6 +12,7 @@ mod lexer;
 mod modifier;
 mod wrapper;
 pub use crate::word::{Word, is_identifier};
+pub(crate) use wrapper::opens_function;
 
 pub(crate) fn is_function_name(name: &str) -> bool {
     !name.is_empty()

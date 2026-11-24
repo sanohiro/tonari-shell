@@ -173,6 +173,28 @@ export -f f; unset -f f
         self.compare('source ./first; f; type -t f || echo gone', 0,
                      b"new ./second\noriginal ./first\ngone\n")
 
+    def test_function_wrapper_redefinition_preserves_read_time_context(self):
+        # Alias expansion happens when a function is defined. Redirections and
+        # positional arguments are evaluated at the call, even after a replacement.
+        source = r"""shopt -s expand_aliases
+alias action='printf "old:%s\n"'
+f() { action "$@"; }
+alias action='printf "new:%s\n"'
+f '雪 x'
+f() { action "$@"; }
+unalias action
+f 'two words'
+f() { printf '%s\n' "$@"; } >"$out"
+out=redirected
+f a b
+cat "$out"
+function f {
+  printf '%s:%s\n' "$LINENO" "$1"
+}
+f done
+"""
+        self.compare(source, 0, "old:雪 x\nnew:two words\na\nb\n14:done\n".encode(), minimum=4)
+
     def test_caller_lines_and_debug_inheritance(self):
         script = self.cwd / "calls.sh"
         script.write_text('inner(){\n  caller; caller 0; caller 1; echo "${BASH_LINENO[*]}:$LINENO"\n}\n'

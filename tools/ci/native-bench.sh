@@ -56,7 +56,7 @@ run() {
 }
 case "$SUITE" in
   functions)
-    REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q
+    REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k function
     run functions python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" \
       --case function-redefinitions --case function-definitions --case function-wrapper-redefinitions \
       --case function-compound-redefinitions --case function-loop-redefinitions --case functions --runs 61 ;;
