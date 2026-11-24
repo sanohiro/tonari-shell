@@ -1521,19 +1521,22 @@ IFS= read -ru3 a; printf '%s/' "$a"; IFS= read -ru3 a; printf '%s:%s' "$?" "$a" 
 
     def test_mapfile_chunk_boundaries_and_sparse_edits(self):
         self.env["LC_ALL"] = "en_US.UTF-8"
-        (self.cwd / "chunked").write_bytes(b"a" * 8191 + b"\n" + b"b" * 8192 + "雪\n".encode()
-                                           + b"\nlast\0discarded")
         if not self.command(BASH, 'type -t mapfile').stdout:
             shells = (TONARI,)
         else:
             shells = (BASH, TONARI)
         script = """mapfile -t v <chunked; printf '%s/' "${#v[@]}" "${#v[0]}" "${#v[1]}" "${v[2]}" "${v[3]}"
 v[1]=changed; unset 'v[0]'; v[20]=tail; printf '[%s]' "${!v[@]}" "${v[-1]}" """
-        for shell in shells:
-            with self.subTest(shell=shell):
-                proc = self.command(shell, script)
-                self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
-                                 (0, b"4/8191/8193//last/[1][2][3][20][tail]", b""))
+        for block in (8192, 65536):
+            # Place a delimiter at the end of one block and split 雪 across the next boundary.
+            (self.cwd / "chunked").write_bytes(
+                b"a" * (block - 1) + b"\n" + b"b" * (block - 1) + "雪\n".encode()
+                + b"\nlast\0discarded")
+            expected = f"4/{block - 1}/{block}//last/[1][2][3][20][tail]".encode()
+            for shell in shells:
+                with self.subTest(shell=shell, block=block):
+                    proc = self.command(shell, script)
+                    self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, expected, b""))
 
     def test_close_with_no_spare_file_descriptor(self):
         self.compare("""(ulimit -n 16; for fd in {3..15}; do eval "exec $fd>/dev/null" || exit 9; done
