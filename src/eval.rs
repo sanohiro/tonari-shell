@@ -292,6 +292,17 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                     Flow::Continue(1)
                 })
             } else {
+                // The background child itself is the explicit subshell. Its PID
+                // is exposed as $! and BASH_SUBSHELL increases only once.
+                if body.len() == 1
+                    && !body[0].negated
+                    && matches!(body[0].command, Command::Subshell(_))
+                {
+                    let Command::Subshell(group) = body.pop().unwrap().command else {
+                        unreachable!()
+                    };
+                    body = group;
+                }
                 crate::subshell::launch_group(session, body, status, true)
             }
         }

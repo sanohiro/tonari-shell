@@ -81,6 +81,24 @@ pub fn file_script(
     } else {
         metadata.or_else(|| file.metadata().ok())
     };
+    if session.source_depth > 0
+        && let Some(meta) = &metadata
+        && meta.is_file()
+        && meta.len() < 4096
+    {
+        // A sourced regular file starts at offset zero. Read one byte beyond
+        // the advertised length so a changed file still takes the stream path.
+        let mut bytes = [0; 4096];
+        let len = meta.len() as usize;
+        if let Ok(n) = file.read_at(&mut bytes[..=len], 0)
+            && n == len
+            && len != 0
+            && let Ok(source) = std::str::from_utf8(&bytes[..n])
+        {
+            drop(file);
+            return text(session, source, status, false, check);
+        }
+    }
     if let Some(meta) = &metadata
         && let Some(program) = file_group(session, &file, meta)
     {
@@ -352,9 +370,6 @@ pub fn text(session: &mut Session, source: &str, mut status: u8, tail: bool, che
                 let flow = execute_program(session, program, status, tail && last);
                 if remember {
                     session.finish_history_line();
-                }
-                if session.onecmd && session.source_depth == 0 && session.function_depth == 0 {
-                    return flow;
                 }
                 match flow {
                     Flow::Discard(code) | Flow::Continue(code) => status = code,

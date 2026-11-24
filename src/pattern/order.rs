@@ -56,6 +56,54 @@ impl PreviousOrder {
     }
 }
 
+// A fixed-width prefix keeps comparisons in the sort array. File names
+// cannot contain NUL, so zero padding sorts a shorter name first. Compare
+// the complete strings only within groups that share the same six bytes.
+fn sort_bytes(paths: &[String], indices: &mut [usize]) {
+    if paths.len() < 256 || paths.len() > usize::from(u16::MAX) {
+        indices.sort_unstable_by(|&i, &j| paths[i].cmp(&paths[j]));
+        return;
+    }
+    // The known directory prefix is usually identical across this expansion.
+    let first = paths[0].as_bytes();
+    let mut common = first.len();
+    for path in &paths[1..] {
+        let bytes = path.as_bytes();
+        common = common.min(bytes.len());
+        if first[..common] != bytes[..common] {
+            common = first[..common]
+                .iter()
+                .zip(bytes)
+                .take_while(|(a, b)| a == b)
+                .count();
+        }
+        if common == 0 {
+            break;
+        }
+    }
+    let mut keys = Vec::with_capacity(paths.len());
+    for (index, path) in paths.iter().enumerate() {
+        let mut key = [0; 8];
+        let bytes = &path.as_bytes()[common..];
+        let take = bytes.len().min(6);
+        key[..take].copy_from_slice(&bytes[..take]);
+        key[6..].copy_from_slice(&(index as u16).to_be_bytes());
+        keys.push(u64::from_be_bytes(key));
+    }
+    keys.sort_unstable();
+    let mut tail = indices;
+    for group in keys.chunk_by(|a, b| a >> 16 == b >> 16) {
+        let (range, rest) = tail.split_at_mut(group.len());
+        for (i, key) in range.iter_mut().zip(group) {
+            *i = usize::from(*key as u16);
+        }
+        if range.len() > 1 {
+            range.sort_unstable_by(|&i, &j| paths[i].cmp(&paths[j]));
+        }
+        tail = rest;
+    }
+}
+
 fn sort_indices(
     paths: &mut [String],
     collation: Collation,
@@ -66,7 +114,7 @@ fn sort_indices(
     indices.reserve_exact(paths.len());
     indices.extend(0..paths.len());
     if collation == Collation::Bytes {
-        indices.sort_unstable_by(|&i, &j| paths[i].cmp(&paths[j]));
+        sort_bytes(paths, indices);
     } else {
         #[cfg(target_os = "macos")]
         if sort_utf8(paths, _path_bytes, indices) {

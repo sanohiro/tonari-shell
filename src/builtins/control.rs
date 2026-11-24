@@ -153,7 +153,13 @@ pub fn help(mut args: &[String]) -> u8 {
     }
     let mut any = false;
     for pattern in args {
-        let matches = |name: &str| crate::pattern::extended::matches(name, pattern);
+        let extended = crate::pattern::extended::Pattern::new(pattern);
+        let basic = crate::pattern::Matcher::new(pattern);
+        let matches = |name: &str| {
+            extended
+                .as_ref()
+                .map_or_else(|| basic.matches(name), |p| p.accepts(name, false))
+        };
         let exact = topics
             .lines()
             .any(|s| matches(s.split(' ').next().unwrap().split('|').next().unwrap()));

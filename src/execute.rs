@@ -901,6 +901,66 @@ impl SavedFd {
     }
 }
 
+// Only these forms produce bytes without changing shell variables, reading a
+// descriptor or issuing diagnostics. Use the usual echo and printf renderers.
+enum PlainOutput<'a> {
+    Echo(&'a [String]),
+    Printf(&'a [String]),
+}
+
+impl<'a> PlainOutput<'a> {
+    fn new(builtin: Builtin, cmd: &'a PreparedCommand, limit: usize) -> Option<Self> {
+        if !cmd.assignments.is_empty() {
+            return None;
+        }
+        let words = cmd.words.get(1..)?;
+        match builtin {
+            Builtin::Echo => {
+                let bound = words
+                    .iter()
+                    .try_fold(1usize, |n, s| n.checked_add(s.len() + 1))?;
+                (bound <= limit).then_some(Self::Echo(words))
+            }
+            Builtin::Printf => {
+                let options_end = words.first().is_some_and(|s| s == "--");
+                let (format, values) = words[usize::from(options_end)..].split_first()?;
+                if !options_end && format.starts_with('-') && format != "-" {
+                    return None;
+                }
+                let bound = format
+                    .len()
+                    .saturating_mul(values.len().max(1))
+                    .saturating_add(values.iter().map(String::len).sum::<usize>());
+                if bound > limit {
+                    return None;
+                }
+                let mut rest = format.as_bytes();
+                while let Some(i) = memchr::memchr(b'%', rest) {
+                    if !matches!(rest.get(i + 1), Some(b'%' | b's'))
+                        || i > 0 && rest[i - 1] == b'\\'
+                    {
+                        return None;
+                    }
+                    rest = &rest[i + 2..];
+                }
+                Some(Self::Printf(words))
+            }
+            _ => None,
+        }
+    }
+
+    fn render(self, session: &mut Session) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        match self {
+            Self::Echo(words) => crate::builtins::echo_into(words, &mut bytes),
+            Self::Printf(words) => {
+                crate::session::printf::run(session, words, Some(&mut bytes));
+            }
+        }
+        bytes
+    }
+}
+
 fn run_builtin(
     builtin: Builtin,
     cmd: &mut PreparedCommand,
@@ -921,6 +981,22 @@ fn run_builtin(
         &multiple
     };
     protect_fds(actions)?;
+    if !final_command
+        && let [Action::Open(1, path, flags)] = actions
+        && matches!(builtin, Builtin::Echo | Builtin::Printf)
+        && let Some(output) = PlainOutput::new(builtin, cmd, usize::MAX)
+    {
+        // Reserve the same descriptor as the ordinary redirect, including
+        // failure at RLIMIT_NOFILE. A byte-only builtin can write to the file
+        // directly, avoiding two changes to the process-wide stdout.
+        let _saved = SavedFd::capture(&actions[0], actions)?;
+        let Some(fd) = open_redirect(path, *flags) else {
+            return Ok(Flow::Continue(1));
+        };
+        use std::io::Write;
+        let result = std::fs::File::from(fd).write_all(&output.render(session));
+        return Ok(Flow::Continue(u8::from(result.is_err())));
+    }
     if let (Builtin::Status(code), [Action::Open(dest, path, flags)]) = (builtin, actions) {
         // A silent builtin needs the open's effects (including a blocking FIFO),
         // but never reads or writes the destination. Open before reserving any
@@ -996,7 +1072,7 @@ fn run_builtin(
 
 enum Stage {
     Child(libc::pid_t),
-    Failed(u8),
+    Status(u8),
 }
 
 fn connect_pipe(
@@ -1103,7 +1179,7 @@ fn start_raw(
             ),
             Err(e) => {
                 eprintln!("tonari: {e}");
-                Ok(Stage::Failed(e.status))
+                Ok(Stage::Status(e.status))
             }
         };
     }
@@ -1157,20 +1233,38 @@ fn start(
     let cached = cmd
         .words
         .first()
-        .and_then(|name| cmd.cached_path(session, name));
-    let custom_search = cached.is_none()
+        .is_some_and(|name| cmd.cached_path(session, name).is_some());
+    let custom_search = !cached
         && !cmd.words.first().is_some_and(|s| s.contains('/'))
         && (cmd.default_path || session.overrides_search_path(&cmd.assignments));
     let merged_pipe = output.as_ref().filter(|_| {
         matches!(cmd.redirects.as_slice(), [r] if r.fd == 2 && r.target == Target::Duplicate && r.word == "1")
     });
+    if let Some(builtin) = builtin
+        && output.is_some()
+        && input.is_none()
+        && !launch.background
+        && launch.group.is_none()
+        && !session.traps.active()
+        && (cmd.redirects.is_empty() || merged_pipe.is_some())
+        && let Some(plain) = PlainOutput::new(builtin, cmd, 512)
+    {
+        // POSIX guarantees room for at least 512 bytes in this new, empty
+        // pipe. We still own its reader, so this write can finish before
+        // starting the consumer. Managed jobs and trapped children need a PID.
+        use std::io::Write;
+        let bytes = plain.render(session);
+        debug_assert!(bytes.len() <= 512);
+        let result = std::fs::File::from(output.unwrap()).write_all(&bytes);
+        return Ok(Stage::Status(u8::from(result.is_err())));
+    }
     if builtin.is_none()
         && launch.group.is_none()
         && !launch.background
         && ((!cmd.redirects.is_empty() && merged_pipe.is_none())
             || input.is_some()
             || output.is_some())
-        && (cached.is_some() || cmd.words[0].contains('/'))
+        && (cached || cmd.words[0].contains('/'))
         && cmd.redirects.iter().all(spawn::standard_dup)
     {
         // Only descriptor copies can be retried without repeating visible effects.
@@ -1180,7 +1274,7 @@ fn start(
             return Ok(Stage::Child(pid));
         }
     }
-    let resolved = cached.is_some() || cmd.words.first().is_some_and(|name| name.contains('/'));
+    let resolved = cached || cmd.words.first().is_some_and(|name| name.contains('/'));
     if builtin.is_none()
         && launch.group.is_none()
         && !launch.background
@@ -1310,7 +1404,7 @@ pub(super) fn capture_external(
     .map_err(|_| "cannot launch command substitution")?;
     let pid = match stage {
         Stage::Child(pid) => pid,
-        Stage::Failed(code) => return Ok((String::new(), code)),
+        Stage::Status(code) => return Ok((String::new(), code)),
     };
     crate::subshell::read_output(std::fs::File::from(reader), pid)
 }
@@ -1324,7 +1418,7 @@ fn spawn_failure(name: &str, error: io::Error) -> io::Result<Stage> {
         return Err(error);
     }
     eprintln!("tonari: {name}: {error}");
-    Ok(Stage::Failed(exec_status(code)))
+    Ok(Stage::Status(exec_status(code)))
 }
 
 pub(super) fn wait(pid: libc::pid_t) -> io::Result<u8> {
@@ -1802,7 +1896,7 @@ pub fn run_pipeline(
                     .0
             }
             Stage::Child(pid) => wait(pid)?,
-            Stage::Failed(code) => code,
+            Stage::Status(code) => code,
         };
         return Ok(Flow::Continue(status));
     }
@@ -1878,7 +1972,7 @@ pub fn run_pipeline(
             .into_iter()
             .map(|s| match s {
                 Stage::Child(p) => Ok(p),
-                Stage::Failed(c) => Err(c),
+                Stage::Status(c) => Err(c),
             })
             .collect();
         let (code, pid) = session.jobs.finish(
@@ -1899,7 +1993,7 @@ pub fn run_pipeline(
     for stage in stages {
         let result = match stage {
             Stage::Child(pid) => wait(pid),
-            Stage::Failed(code) => Ok(code),
+            Stage::Status(code) => Ok(code),
         };
         session.pipe_status.push(*result.as_ref().unwrap_or(&1));
         match result {

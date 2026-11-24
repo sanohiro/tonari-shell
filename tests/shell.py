@@ -1393,6 +1393,15 @@ IFS= read -ru3 line; echo "${a[0]}:$line"; mapfile -tu3 a; echo "${a[0]}"
 printf 'a\\0b\nc\n' > input; mapfile -t a <input; printf '[%s]' "${a[@]}" """,
                      0, b"first:second\nlast\n[a][c]")
 
+    def test_background_subshell_pid_and_stage_depth(self):
+        self.compare("""(printf '%s:%s\\n' "$BASH_SUBSHELL" "$BASHPID" >result; exit 13) &
+p=$!; wait "$p"; code=$?
+IFS=: read -r depth pid <result
+printf '%s:%s:%s/' "$code" "$depth" "$((p==pid))"
+printf '%s' "$BASH_SUBSHELL" | cat; echo
+( (printf '%s' "$BASH_SUBSHELL") ) & wait
+""", 0, b"13:1:1/0\n2", minimum=4)
+
     def test_positional_storage_and_live_loop_operands(self):
         self.compare("""set -- before 'two words'
 f(){ set -- "$2" "$1" ""; printf '<%s>' "$@"; }; f a b; printf '<%s>' "$@"
@@ -1404,6 +1413,24 @@ echo ":$i"
 declare -a v=([0]=1); for ((;v<4;v++)); do :; done; echo "${v[*]}"
 declare -n ref=v; for ((;ref<6;ref++)); do :; done; echo "${v[*]}"; set --; echo "$#"
 """, 0, b"<b><a><><before><two words>:010:target+1:17:18\n4\n6\n0\n", minimum=5)
+
+    def test_output_only_pipeline_and_redirect_fallbacks(self):
+        self.compare("""set -o pipefail; printf '%s\\n' a b |& cat; echo "${PIPESTATUS[*]}"
+printf '%02000d' 0 | wc -c | tr -d ' '; printf -v name set | cat; echo "${name-unset}"
+echo -ne 'a\\0b' | wc -c | tr -d ' '
+printf '%s%%' one >f; printf '<%s>' two >>f; cat f
+printf '%n' n >f; echo ":$n"; echo end
+""", 0, b"a\nb\n0 0\n2000\nunset\n3\none%<two>:0\nend\n")
+
+    def test_onecmd_string_and_script_boundaries(self):
+        source = "set -t; printf one\nprintf two\n"
+        self.compare(source, 0, b"onetwo")
+        script = self.cwd / "onecmd"
+        script.write_text(source)
+        self.compare(". ./onecmd; printf three", 0, b"onetwothree")
+        for binary in (BASH, TONARI):
+            proc = subprocess.run([binary, script], cwd=self.cwd, env=self.env, capture_output=True)
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"one", b""))
 
     def test_raw_read_preserves_shared_offsets(self):
         (self.cwd / "input").write_bytes(b"x" * 8192 + b"\0" + "雪".encode() + b"|tail\nlast")
