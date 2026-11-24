@@ -111,6 +111,7 @@ def main():
     ap.add_argument("shells", type=Path, nargs="+")
     ap.add_argument("--starship", type=Path, required=True)
     ap.add_argument("--runs", type=int, default=21)
+    ap.add_argument("--long-prompts-only", action="store_true", help="measure Git prompts with 256 or 1024 additional visible ASCII characters")
     args = ap.parse_args()
     shells = [sh.resolve() for sh in args.shells]
     starship = args.starship.resolve()
@@ -134,6 +135,15 @@ def main():
                         "commit", "-qm", "fixture"], cwd=project, env=env, check=True)
         rc = home / "rc"
         rc.write_text('eval "$(starship init bash)"\n')
+        if args.long_prompts_only:
+            config = home / "prompt.toml"
+            env["STARSHIP_CONFIG"] = str(config)
+            for size in (256, 1024):
+                fmt = "${directory}${git_branch}" + "x" * size + "$character"
+                config.write_text(f"format = '{fmt}'\n")
+                print(f"project, {size} additional characters", flush=True)
+                compare(shells, args.runs, lambda sh, verify: trial(sh, project, rc, env, verify))
+            return
         for cwd in (plain, project):
             print(cwd.name, flush=True)
             compare(shells, args.runs, lambda sh, verify: trial(sh, cwd, rc, env, verify))

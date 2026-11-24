@@ -134,7 +134,9 @@ case "$SUITE" in
     curl --retry 3 -fsSL "https://github.com/starship/starship/releases/download/v1.27.0/starship-$platform.tar.gz" -o "$archive"
     echo "$sha  $archive" | shasum -a 256 -c -
     tar -xzf "$archive" -C "$RUNNER_TEMP" starship
-    run starship python3 tools/bench_starship.py "$bin/baseline" "$current" "$ref" --starship "$RUNNER_TEMP/starship" --runs 25 ;;
+    starship_bench=(python3 tools/bench_starship.py "$bin/baseline" "$current" "$ref" --starship "$RUNNER_TEMP/starship")
+    run starship "${starship_bench[@]}" --runs 25
+    run starship-long "${starship_bench[@]}" --long-prompts-only --runs 15 ;;
   edit-actions)
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k last_arg -k test_undo
     run actions python3 tools/bench_edit_actions.py "$bin/baseline" "$current" "$ref" --runs 21
