@@ -362,7 +362,7 @@ pub(crate) fn launch_borrowed(
     })
 }
 
-fn launch_list(
+pub(crate) fn launch_list(
     session: &mut Session,
     background: bool,
     run: impl FnOnce(&mut Session) -> Flow,

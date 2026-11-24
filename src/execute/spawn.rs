@@ -21,6 +21,39 @@ pub(super) fn standard_dup(r: &Redirect) -> bool {
     r.target == Target::Duplicate && (0..=2).contains(&r.fd) && source != r.fd
 }
 
+struct Attributes(libc::posix_spawnattr_t);
+
+impl Drop for Attributes {
+    fn drop(&mut self) {
+        unsafe {
+            libc::posix_spawnattr_destroy(&mut self.0);
+        }
+    }
+}
+
+impl Attributes {
+    fn sigpipe_default() -> io::Result<Self> {
+        let mut attr = MaybeUninit::uninit();
+        unsafe {
+            check(libc::posix_spawnattr_init(attr.as_mut_ptr()))?;
+            let mut result = Self(attr.assume_init());
+            let mut signals = std::mem::zeroed();
+            libc::sigemptyset(&mut signals);
+            libc::sigaddset(&mut signals, libc::SIGPIPE);
+            check(libc::posix_spawnattr_setsigdefault(&mut result.0, &signals))?;
+            check(libc::posix_spawnattr_setflags(
+                &mut result.0,
+                libc::POSIX_SPAWN_SETSIGDEF as _,
+            ))?;
+            Ok(result)
+        }
+    }
+}
+
+thread_local! {
+    static DEFAULT: std::cell::OnceCell<Attributes> = const { std::cell::OnceCell::new() };
+}
+
 impl External {
     pub(super) fn spawn_with_dups(
         &self,
@@ -66,23 +99,16 @@ impl External {
             .as_ref()
             .and_then(|paths| paths.first())
             .unwrap_or(&self.words[0]);
-        let mut attr = MaybeUninit::uninit();
-        unsafe {
-            check(libc::posix_spawnattr_init(attr.as_mut_ptr()))?;
-            let result = (|| {
-                let mut signals = std::mem::zeroed();
-                libc::sigemptyset(&mut signals);
-                if !self.ignore_pipe {
-                    libc::sigaddset(&mut signals, libc::SIGPIPE);
+        DEFAULT.with(|slot| {
+            let attr = if self.ignore_pipe {
+                std::ptr::null()
+            } else {
+                if slot.get().is_none() {
+                    let _ = slot.set(Attributes::sigpipe_default()?);
                 }
-                check(libc::posix_spawnattr_setsigdefault(
-                    attr.as_mut_ptr(),
-                    &signals,
-                ))?;
-                check(libc::posix_spawnattr_setflags(
-                    attr.as_mut_ptr(),
-                    libc::POSIX_SPAWN_SETSIGDEF as _,
-                ))?;
+                &slot.get().unwrap().0
+            };
+            unsafe {
                 let env = self
                     .env
                     .as_ref()
@@ -95,7 +121,7 @@ impl External {
                         &mut pid,
                         path.as_ptr(),
                         actions.map_or(std::ptr::null(), MaybeUninit::as_ptr),
-                        attr.as_ptr(),
+                        attr,
                         argv.as_ptr().cast(),
                         env,
                     ))?;
@@ -107,10 +133,8 @@ impl External {
                     }
                     result => result,
                 }
-            })();
-            libc::posix_spawnattr_destroy(attr.as_mut_ptr());
-            result
-        }
+            }
+        })
     }
 }
 

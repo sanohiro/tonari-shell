@@ -266,6 +266,14 @@ echo "$i"
         "for ((i=0; i<16; i++)); do printf '%s\\n' \"$i\" || exit 1; done",
         "\n".join(map(str, range(16))),
     ),
+    "builtin-output-long": (
+        "for ((i=0; i<4096; i++)); do printf '%s\\n' \"$i\" || exit 1; done",
+        "\n".join(map(str, range(4096))),
+    ),
+    "redirected-subshells": (
+        "v=aB; for ((i=0; i<128; ++i)); do (printf %s \"${v^^}\") 2>/dev/null; done; echo",
+        "AB" * 128,
+    ),
     "field-split": split_case(":"),
     "field-split-unicode": split_case("😀"),
     "long-trim": (

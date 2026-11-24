@@ -94,6 +94,12 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
+  probe)
+    cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
+    run probes python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" --timing started --runs 41 \
+      --spawn-control "$bin/spawn-control" --case redirected-subshells --case descriptor-moves --case directory-stack \
+      --case builtin-output --case builtin-output-long --case external --case external-env --case pipeline --case external-substitutions \
+      --case merged-pipeline --case merged-pipeline-redirect --case redirect-stderr --case background-subshell-wait ;;
   foreground)
     run foreground python3 tests/compat/foreground.py "$current" "$ref" ;;
   history)

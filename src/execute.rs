@@ -1028,6 +1028,25 @@ fn run_builtin(
     if cmd.redirects.is_empty() {
         return Ok(eval_builtin(builtin, cmd, session, last_status, false));
     }
+    if matches!(builtin, Builtin::Compound)
+        && matches!(
+            cmd.compound.as_deref(),
+            Some(crate::parser::Command::Subshell(_))
+        )
+        && !session.interactive
+        && !session.jobs.monitor
+        && !session.traps.active()
+        && session.coprocesses.is_empty()
+        && cmd.assignments.is_empty()
+    {
+        return Ok(crate::subshell::launch_list(session, false, |s| {
+            if !apply(&actions(cmd)) {
+                return Flow::Continue(1);
+            }
+            s.stdin_redirected |= cmd.redirects.iter().any(|r| r.fd == 0);
+            eval_builtin(Builtin::Compound, cmd, s, last_status, true)
+        }));
+    }
     let multiple;
     let one;
     let actions: &[Action] = if let [redirect] = cmd.redirects.as_slice() {
