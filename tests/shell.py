@@ -92,6 +92,26 @@ class ShellTests(unittest.TestCase):
                 self.assertEqual((run.returncode, run.stdout, run.stderr),
                                  (0, f"line-{line}\nend\n".encode(), b""))
 
+    def test_large_standalone_unquoted_field_boundaries(self):
+        pad = "木🌱" * 96
+        for shell in self.shells_for():
+            def fields(code, value):
+                p = self.command(shell, code + '; printf "<%s>" "$@"', "sh", value)
+                self.assertEqual((p.returncode, p.stderr), (0, b""))
+                return p.stdout.decode()
+
+            v = pad + "  \t\nleft\rside\vstill\fhere  right "
+            self.assertEqual(fields("v=$1; set -- $v", v),
+                             "<" + pad + "><left\rside\vstill\fhere><right>")
+            self.assertEqual(fields('v=$1; set -- "$v"', v), "<" + v + ">")
+            self.assertEqual(fields("IFS=:; v=$1; set -- $v", pad + ":x y::z"),
+                             "<" + pad + "><x y><><z>")
+            (self.cwd / "match.txt").touch()
+            self.assertEqual(fields('v=$1; set -- $v', pad + " ?.txt *.txt"),
+                             "<" + pad + "><?.txt><match.txt>")
+            self.assertEqual(fields('shopt -s extglob; v=$1; set -- $v', pad + " @(match).txt"),
+                             "<" + pad + "><match.txt>")
+
     def test_named_tilde_in_arguments_and_assignments(self):
         import pwd
         home = os.fsencode(pwd.getpwnam("root").pw_dir)

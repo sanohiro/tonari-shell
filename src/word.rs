@@ -373,6 +373,29 @@ impl Word {
             return Ok(());
         }
         let ifs = lookup("IFS");
+        // A standalone, already-resolved expansion can write complete fields
+        // directly when no field can be a pathname pattern. Keep small words
+        // on the ordinary path and recognize only Bash's three IFS spaces.
+        if let Self::Expanded(parts) = &self
+            && let [Part::Unquoted(text)] = parts.as_slice()
+            && text.len() >= 256
+            && ifs.as_deref().is_none_or(|ifs| ifs == " \t\n")
+            && globbing.is_none_or(|glob| {
+                memchr::memchr3(b'*', b'?', b'[', text.as_bytes()).is_none()
+                    && !(glob.extglob && text.contains('('))
+            })
+        {
+            let mut start = 0;
+            for end in memchr::memchr3_iter(b' ', b'\t', b'\n', text.as_bytes())
+                .chain(std::iter::once(text.len()))
+            {
+                if start < end {
+                    words.push(text[start..end].to_owned());
+                }
+                start = end + 1;
+            }
+            return Ok(());
+        }
         let mut output = Output::Fields(Fields {
             lookup,
             globbing,
