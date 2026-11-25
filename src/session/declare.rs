@@ -177,7 +177,7 @@ pub(super) fn run(
             names = if local {
                 session.locals.last().unwrap().0.keys().cloned().collect()
             } else {
-                session.variable_names()
+                session.variable_names("")
             };
             &names[..]
         } else {

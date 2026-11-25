@@ -250,7 +250,6 @@ pub fn at(
     };
     // Registered definitions own the candidate list, including an explicitly
     // empty result. Only the shell's default completion offers learned arguments.
-    let mut options = (false, false);
     let generated = (!files_only)
         .then(|| crate::completion_spec::for_tab(session, command, prefix, Some(&context)))
         .flatten();
@@ -295,37 +294,109 @@ pub fn at(
                 )
             })
     };
-    let matches = if let Some(generated) = generated {
-        options = (generated.noquote, generated.nospace);
-        let directory = matches!(generated.source, Source::Directories);
-        let paths = directory || matches!(generated.source, Source::Files);
-        let result = generated.source.matches(prefix, session, list).or_else(|| {
-            paths
-                .then(|| abbreviated(prefix, directory, session))
-                .flatten()
-        });
-        if result.is_none() && generated.fallback {
-            options = (false, false);
-            ordinary()
-        } else {
-            result
+    if let Some(generated) = generated {
+        let paths = matches!(generated.source, Source::Directories | Source::Files);
+        let dirs = matches!(generated.source, Source::Directories);
+        let matches = generated
+            .source
+            .matches(prefix, session, list)
+            .or_else(|| paths.then(|| abbreviated(prefix, dirs, session)).flatten());
+        if matches.is_some() || !generated.fallback {
+            let (common, choices) = matches?;
+            return Some(Completion::new(
+                start,
+                common,
+                choices,
+                generated.noquote,
+                !generated.nospace && cursor == line.len(),
+            ));
         }
-    } else {
-        ordinary()
-    };
-    let (common, choices) = matches?;
-    let (noquote, nospace) = options;
-    let append_space = !nospace && cursor == line.len();
-    Some(Completion {
+    }
+    if !files_only
+        && let Some(variable) =
+            variable_completion(&line[start..cursor], cursor, line.len(), session, list)
+    {
+        return Some(variable);
+    }
+    let (common, choices) = ordinary()?;
+    Some(Completion::new(
         start,
-        replacement: quote_choice(&common.text, noquote, append_space && common.unique),
+        common,
         choices,
-        noquote,
-        append_space,
-    })
+        false,
+        cursor == line.len(),
+    ))
+}
+
+fn variable_completion(
+    raw: &str,
+    cursor: usize,
+    end: usize,
+    session: &Session,
+    list: bool,
+) -> Option<Completion> {
+    let (quote, raw) = match raw.as_bytes().first() {
+        Some(&q @ (b'\'' | b'"')) => (Some(char::from(q)), &raw[1..]),
+        _ => (None, raw),
+    };
+    let tail = raw.strip_prefix('$')?;
+    let (braced, prefix) = tail.strip_prefix('{').map_or((false, tail), |p| (true, p));
+    if !prefix.is_empty() && !crate::parser::is_identifier(prefix) {
+        return None;
+    }
+    let names = session.variable_names(prefix);
+    let mut common = Common::new(names.first()?.clone());
+    if names.len() > 1 {
+        let _ = common.narrow(names.last()?, prefix);
+    }
+    let close = |name: &mut String| {
+        if braced {
+            name.push('}');
+        }
+        if let Some(q) = quote {
+            name.push(q);
+        }
+    };
+    if common.unique {
+        close(&mut common.text);
+    }
+    let choices = if list {
+        names
+            .into_iter()
+            .map(|mut n| {
+                close(&mut n);
+                n
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    Some(Completion::new(
+        cursor - prefix.len(),
+        common,
+        choices,
+        true,
+        cursor == end,
+    ))
 }
 
 impl Completion {
+    fn new(
+        start: usize,
+        common: Common,
+        choices: Vec<String>,
+        noquote: bool,
+        append_space: bool,
+    ) -> Self {
+        Self {
+            start,
+            replacement: quote_choice(&common.text, noquote, append_space && common.unique),
+            choices,
+            noquote,
+            append_space,
+        }
+    }
+
     pub fn select(&self, index: usize) -> String {
         quote_choice(&self.choices[index], self.noquote, self.append_space)
     }

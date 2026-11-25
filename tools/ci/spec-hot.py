@@ -32,7 +32,18 @@ def script(shell, home, name):
 
 
 def edit(shell, home, name):
-    with terminal(shell, home, "/usr/bin:/bin", prompt=PROMPT) as fd:
+    rc = home / "rc" if name == "variable-tab-10k" else None
+    with terminal(shell, home, "/usr/bin:/bin", rc=rc, prompt=PROMPT) as fd:
+        if name == "variable-tab-10k":
+            os.write(fd, b"printf '<%s>\\n' $TNR_UNI")
+            read_until(fd, b"$TNR_UNI")
+            start = time.perf_counter_ns()
+            os.write(fd, b"\t")
+            read_until(fd, b"QUE_VALUE")
+            elapsed = time.perf_counter_ns() - start
+            os.write(fd, b"\r")
+            read_until(fd, b"<expanded>\r\n")
+            return elapsed
         if name == "resize-accept":
             termios.tcsetwinsize(fd, (41, 103))
             packet = b"printf '<%sx%s>\\n' \"$LINES\" \"$COLUMNS\"\r"
@@ -54,12 +65,18 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("shells", nargs="+", type=lambda x: Path(x).resolve())
     p.add_argument("--runs", type=int, default=19)
+    p.add_argument("--case", action="append")
     args = p.parse_args()
     with tempfile.TemporaryDirectory() as d:
         home = Path(d)
+        (home / "rc").write_text("PS1='tonari$ '\n"
+                                 "for ((i=0;i<10000;i++)); do printf -v TNR_NOISE_$i x; done\n"
+                                 "TNR_UNIQUE_VALUE=expanded\n")
         for name in ("dynamic-index", "indexed-append", "empty-fc", "control-motion",
-                     "arrow-motion", "resize-accept"):
-            run = edit if name in ("control-motion", "arrow-motion", "resize-accept") else script
+                     "arrow-motion", "resize-accept", "variable-tab-10k"):
+            if args.case and name not in args.case:
+                continue
+            run = edit if name in ("control-motion", "arrow-motion", "resize-accept", "variable-tab-10k") else script
             samples = {s: [] for s in args.shells}
             excluded = set()
             for trial in range(args.runs + 1):

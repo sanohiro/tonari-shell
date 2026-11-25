@@ -2655,6 +2655,22 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
         self.read_until(fd, PROMPT)
         return (pid, fd) if with_pid else fd
 
+    def test_variable_tab_uses_live_names_and_preserves_quoting(self):
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                os.write(fd, b"TNR_UNIQUE_VALUE=expanded; TNR_UNIQUE_HIDDEN=old; unset TNR_UNIQUE_HIDDEN; echo ready''OK\r")
+                self.read_until(fd, b"readyOK\r\n")
+                for word, expected in [(b"$TNR_UNI", b"expanded"), (b'"${TNR_UNI', b"expanded"),
+                                       (b"'$TNR_UNI", b"$TNR_UNIQUE_VALUE"),
+                                       (b"\\$TNR_UNI", b"$TNR_UNI")]:
+                    os.write(fd, b"printf '<%s>\\n' " + word + b"\t\r")
+                    self.read_until(fd, b"<" + expected + b">\r\n")
+                os.write(fd, b"complete -W WRONG printf; echo spec''OK\r")
+                self.read_until(fd, b"specOK\r\n")
+                os.write(fd, b"printf '<%s>\\n' $TNR_UNI\t\r")
+                self.read_until(fd, b"<>\r\n")
+
     def test_resize_during_edit_affects_the_command_being_entered(self):
         import struct
         import termios

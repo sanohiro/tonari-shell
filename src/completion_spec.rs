@@ -467,12 +467,7 @@ impl Spec {
                         .filter(|n| n.starts_with(prefix))
                         .cloned(),
                 ),
-                "variable" => words.extend(
-                    session
-                        .variable_names()
-                        .into_iter()
-                        .filter(|n| n.starts_with(prefix)),
-                ),
+                "variable" => words.extend(session.variable_names(prefix)),
                 "export" => {
                     let mut names: BTreeSet<_> = std::env::vars_os()
                         .filter_map(|(n, _)| n.into_string().ok())

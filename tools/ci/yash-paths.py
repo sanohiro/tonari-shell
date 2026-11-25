@@ -88,7 +88,7 @@ editor motion_burst | Apply completed unmodified motions together up to a bounde
 editor/recall navigate | Use the history position and unchanged search prefix for adjacent navigation.
 history find_command | Reuse history search state and yield to pending terminal input.
 complete at | Identify the token, consult programmable completion and enumerate eligible candidates.
-editor/viewport draw_window | Render a bounded window when a full edit buffer would exceed the screen.
+session variable_names | Start the ordered variable lookup at the requested prefix and stop after the last matching name.
 """.strip()
 
 
