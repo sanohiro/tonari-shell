@@ -613,6 +613,28 @@ f"""
         self.compare(code, 7, b"<./plain><two words x y>\n7 0\n<./plain><two words z>\n")
         self.compare('value=$(./plain z); echo "$?:$value"', 0, b"7:<./plain><two words z>\n")
 
+    def test_executable_text_with_shared_input_and_inherited_descriptor(self):
+        outer = self.cwd / "outer"
+        outer.write_text("""for fd in /dev/fd/*; do
+    if [ "$fd" != /dev/fd/0 ] && [ "$fd" -ef /dev/stdin ]; then echo "extra input: $fd"; fi
+done
+IFS= read -r line || exit 2
+./inner "$line"
+""")
+        inner = self.cwd / "inner"
+        inner.write_text('printf "<%s>\\n" "$1" >&9; exit 7\n')
+        for file in (outer, inner):
+            file.chmod(0o700)
+        script = self.cwd / "input"
+        script.write_text("exec 9>record\n./outer\nfirst line\necho $?\n"
+                          "./outer\nsecond line\necho $?\nexec 9>&-\ncat record\n")
+        for shell in self.shells_for():
+            with self.subTest(shell=shell), script.open("rb") as stdin:
+                result = subprocess.run([shell], cwd=self.cwd, env=self.env, stdin=stdin,
+                                        capture_output=True, timeout=5)
+                self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                 (0, b"7\n7\n<first line>\n<second line>\n", b""))
+
     def test_history_expansion_in_script_and_at_prompt(self):
         source = """set -o history
 set -H

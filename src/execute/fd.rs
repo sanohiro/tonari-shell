@@ -4,14 +4,17 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, RawFd};
 use std::rc::{Rc, Weak};
 
+// Only the abandoned stack of a forked script interpreter holds an empty slot.
+type FileSlot = RefCell<Option<File>>;
+
 thread_local! {
-    static PRIVATE: RefCell<Vec<Weak<RefCell<File>>>> = const { RefCell::new(Vec::new()) };
+    static PRIVATE: RefCell<Vec<Weak<FileSlot>>> = const { RefCell::new(Vec::new()) };
 }
 
 // Scripts, the controlling tty and temporary redirection backups can all outlive
 // a shell command. Every owner observes the new number when a user needs that fd.
 #[derive(Clone)]
-pub(crate) struct PrivateFile(Rc<RefCell<File>>);
+pub(crate) struct PrivateFile(Rc<FileSlot>);
 
 impl PrivateFile {
     pub(crate) fn duplicate(fd: BorrowedFd<'_>) -> io::Result<Self> {
@@ -36,13 +39,23 @@ impl PrivateFile {
     }
 
     pub(super) fn track(file: File) -> Self {
-        let file = Rc::new(RefCell::new(file));
+        let file = Rc::new(RefCell::new(Some(file)));
         PRIVATE.with_borrow_mut(|entries| {
             entries.retain(|entry| entry.strong_count() != 0);
             entries.push(Rc::downgrade(&file));
         });
         Self(file)
     }
+}
+
+// A forked child entering a fresh interpreter never returns to its old stack.
+// Release its registered close-on-exec files before checking for foreign fds.
+pub(super) fn close_in_script_child() {
+    PRIVATE.with_borrow_mut(|files| {
+        for file in files.drain(..).filter_map(|file| file.upgrade()) {
+            file.borrow_mut().take();
+        }
+    });
 }
 
 pub(super) fn duplicate_except(
@@ -68,10 +81,10 @@ pub(super) fn duplicate_except(
 pub(super) fn protect(reserved: impl Fn(RawFd) -> bool) -> io::Result<()> {
     PRIVATE.with_borrow(|files| {
         for file in files.iter().filter_map(Weak::upgrade) {
-            let current = file.borrow().as_raw_fd();
+            let current = file.borrow().as_ref().unwrap().as_raw_fd();
             if reserved(current) {
                 let copy = duplicate_except(current, 3, &reserved)?;
-                *file.borrow_mut() = copy;
+                *file.borrow_mut() = Some(copy);
             }
         }
         Ok(())
@@ -84,22 +97,22 @@ pub(crate) fn is_private(fd: RawFd) -> bool {
             entries
                 .iter()
                 .filter_map(Weak::upgrade)
-                .any(|f| f.borrow().as_raw_fd() == fd)
+                .any(|f| f.borrow().as_ref().unwrap().as_raw_fd() == fd)
         })
 }
 
 impl AsRawFd for PrivateFile {
     fn as_raw_fd(&self) -> RawFd {
-        self.0.borrow().as_raw_fd()
+        self.0.borrow().as_ref().unwrap().as_raw_fd()
     }
 }
 impl Read for PrivateFile {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.0.borrow_mut().read(buf)
+        self.0.borrow_mut().as_mut().unwrap().read(buf)
     }
 }
 impl Seek for PrivateFile {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        self.0.borrow_mut().seek(pos)
+        self.0.borrow_mut().as_mut().unwrap().seek(pos)
     }
 }

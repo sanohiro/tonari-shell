@@ -218,6 +218,11 @@ case "$SUITE" in
   external-shared-input)
     python3 tools/ci/yash-stdin.py --bash "$ref" --current "$current" --small "$bin/small" --large "$bin/large" > "$out/stdin.jsonl" ;;
   external-yash-*)
+    if [[ $SUITE == external-yash-plain ]]; then
+      python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
+        --case plain-script --case plain-script-30 --runs 81 > "$out/throughput.jsonl"
+      exit
+    fi
     if [[ $SUITE == external-yash-notify ]]; then
       python3 tools/bench_notify.py "$bin/baseline" "$current" "$ref" > "$out/notify.jsonl"
       exit
@@ -258,7 +263,13 @@ case "$SUITE" in
       selection=(--trace-shell "$bin/paths" --shard "${SUITE##*-}/8")
     fi
     python3 tools/ci/yash-posix.py "$root" "$out" --prepare --require-bash-passes --bash "$ref" --tonari "$current" \
-      --previous "$bin/baseline" --runs "${EXTERNAL_BENCH_RUNS:-3}" "${selection[@]}" ;;
+      --previous "$bin/baseline" --runs "${EXTERNAL_BENCH_RUNS:-3}" "${selection[@]}"
+    if [[ $SUITE == external-yash-[0-7] && ${EXTERNAL_BENCH_RUNS:-3} == 3 ]]; then
+      # Repeat outliers on the same machine and build, with clean upstream fixtures.
+      replay="$RUNNER_TEMP/yash-repeats"
+      git -C "$root" worktree add -q --detach "$replay" HEAD
+      python3 tools/ci/yash-repeats.py "$replay" "$out/repeats" "$out" "$current" "$ref"
+    fi ;;
   probe)
     cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
     run probes python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" --timing started --runs 41 \

@@ -23,6 +23,8 @@ WORKLOADS = {
 # Separate the builtin from the mkdir, ls, cut and grep processes used by
 # the upstream assertions. These are diagnostic workloads selected explicitly.
 DIAGNOSTICS = {
+    "plain-script": ("stdin", "./prog foo bar baz\n"),
+    "plain-script-30": ("stdin", "i=0; while [ $i -lt 30 ]; do ./prog foo bar baz || exit; i=$((i+1)); done\n"),
     "symbolic-umask": ("command", "umask 027; i=0; while [ $i -lt 5000 ]; do "
                        "umask u=xwr || exit 1; i=$((i+1)); done; umask"),
     "set-flags": ("command", "i=0; while [ $i -lt 5000 ]; do set -e +a -o noclobber -u; "
@@ -40,6 +42,10 @@ def measure(base, shells, spawn_control=None, cases=None, runs=None):
     env = {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "HOME": str(base)}
     for name in cases or WORKLOADS:
         mode, source = (DIAGNOSTICS if name in DIAGNOSTICS else WORKLOADS)[name]
+        if name in {"plain-script", "plain-script-30"}:
+            program = base / "prog"
+            program.write_text("echo external\necho command\nprintf '[%s]\\n' \"$@\"\n")
+            program.chmod(0o755)
         script = base / "input"
         script.write_text(source)
         args = {"command": ["-c", source], "file": [script], "stdin": []}[mode]

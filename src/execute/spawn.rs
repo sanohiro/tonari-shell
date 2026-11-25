@@ -188,6 +188,7 @@ impl External {
             if pid != 0 {
                 return (pid > 0).then_some(pid);
             }
+            super::fd::close_in_script_child();
         }
         if has_close_on_exec_fds() {
             if process == ScriptProcess::Replace {
