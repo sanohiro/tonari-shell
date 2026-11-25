@@ -189,6 +189,7 @@ def main():
     parser.add_argument("--previous", type=Path)
     parser.add_argument("--trace-shell", type=Path, help="separate diagnostic binary for untimed replay")
     parser.add_argument("--prepare", action="store_true")
+    parser.add_argument("--require-bash-passes", action="store_true", help="fail when any Bash pass is missing in Tonari")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--shard", default="0/1")
     parser.add_argument("--fixture", action="append", default=[])
@@ -294,12 +295,16 @@ def main():
             return len(series.get(label, [])) == args.runs and all(v[0] == "OK[PASSED]" for v in series[label])
         if passed("bash") and passed("tonari"):
             scores["comparable"] += 1
+        if any(v[0] == "OK[PASSED]" for v in series.get("bash", [])) and not passed("tonari"):
+            scores["Bash-only or unstable Tonari"] += 1
+            if args.require_bash_passes:
+                print("missing Bash pass", key)
         if args.previous and passed("previous") and passed("bash") and not passed("tonari"):
             scores["new differences"] += 1
             print("review new difference", key)
     print(dict(scores), flush=True)
     # Preserve all measurements before returning the comparison gate.
-    return int(bool(scores["new differences"] or any(
+    return int(bool(scores["new differences"] or (args.require_bash_passes and scores["Bash-only or unstable Tonari"]) or any(
         v[0] in {"CONTROLLER_EXIT","INCOMPLETE"} and label == "tonari" for series in rows.values() for label, events in series.items() for v in events)))
 
 

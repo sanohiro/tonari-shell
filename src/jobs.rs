@@ -271,6 +271,7 @@ impl Job {
 #[derive(Clone, Default)]
 pub struct Jobs {
     pub monitor: bool,
+    pub(crate) quiet: bool,
     tty: Option<Terminal>,
     table: Vec<Job>,
     detached: Vec<pid_t>,
@@ -400,7 +401,7 @@ impl Jobs {
             .map(|p| p.pid);
         if launch.background {
             self.store(job);
-            if self.terminal().is_some() {
+            if !self.quiet && self.terminal().is_some() {
                 eprintln!("[{}] {}", self.serial, last.unwrap_or(0));
             }
             Ok((0, last))
@@ -437,7 +438,9 @@ impl Jobs {
             }
             if job.stopped() {
                 self.store(job);
-                eprintln!("[{}]+ Stopped", self.serial);
+                if !self.quiet {
+                    eprintln!("[{}]+ Stopped", self.serial);
+                }
             }
             Ok((code, None))
         }
@@ -593,6 +596,34 @@ impl Jobs {
                     .iter()
                     .any(|child| child.pid == pid && !matches!(child.state, State::Done(_)))
             })
+    }
+
+    pub(crate) fn awaiting_notification(&self) -> bool {
+        self.monitor
+            && self
+                .table
+                .iter()
+                .any(|job| job.active() || !job.listed || job.stopped())
+    }
+
+    pub(crate) fn has_notification(&self) -> bool {
+        self.table.iter().any(|job| !job.active() && !job.listed)
+    }
+
+    pub(crate) fn report_changes(&mut self) {
+        for job in &mut self.table {
+            if !job.active() && !job.listed {
+                let state = if job.stopped() {
+                    "Stopped"
+                } else if job.signaled {
+                    "Terminated"
+                } else {
+                    "Done"
+                };
+                eprintln!("[{}] {state}  {}", job.id, job.name);
+                job.listed = true;
+            }
+        }
     }
 
     pub fn poll(&mut self) {
@@ -898,7 +929,9 @@ fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Opti
                 }
                 result = (code, Some(pid));
             } else {
-                eprintln!("tonari: wait: {spec}: not a child of this shell");
+                if !jobs.quiet {
+                    eprintln!("tonari: wait: {spec}: not a child of this shell");
+                }
                 result = (127, None);
             }
         } else {
@@ -1104,6 +1137,57 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
         "kill" => kill(jobs, &words[1..]),
         "jobs" => list(jobs, &words[1..]),
         "disown" => jobs.disown(&words[1..]),
+        "bg" => {
+            if !jobs.monitor {
+                eprintln!("tonari: bg: no job control");
+                return 1;
+            }
+            let mut status = 0;
+            let mut out = io::stdout().lock();
+            for spec in words[1..]
+                .iter()
+                .map(String::as_str)
+                .chain((words.len() == 1).then_some("%+"))
+            {
+                let Some(i) = jobs.select(spec) else {
+                    eprintln!("tonari: bg: {spec}: no such job");
+                    status = 1;
+                    continue;
+                };
+                let n = jobs.table.len();
+                let job = &mut jobs.table[i];
+                if job.group.is_none() {
+                    eprintln!("tonari: bg: job {} started without job control", job.id);
+                    status = 1;
+                    continue;
+                }
+                if !job.stopped() && !session.posix {
+                    eprintln!("tonari: bg: job {} already in background", job.id);
+                    continue;
+                }
+                if job.stopped() && job.resume().is_err() {
+                    status = 1;
+                    continue;
+                }
+                session.last_background = job.children.last().map(|p| p.pid);
+                let result = if session.posix {
+                    writeln!(out, "[{}] {}", job.id, job.name)
+                } else {
+                    let marker = if i + 1 == n {
+                        '+'
+                    } else if i + 2 == n {
+                        '-'
+                    } else {
+                        ' '
+                    };
+                    writeln!(out, "[{}]{marker} {} &", job.id, job.name)
+                };
+                if result.is_err() {
+                    return 1;
+                }
+            }
+            if out.flush().is_err() { 1 } else { status }
+        }
         name => {
             if !jobs.monitor {
                 eprintln!("tonari: {name}: no job control");
@@ -1119,29 +1203,6 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                     jobs.table[i].id
                 );
                 return 1;
-            }
-            if name == "bg" {
-                if !jobs.table[i].stopped() {
-                    eprintln!("tonari: bg: job {} already in background", jobs.table[i].id);
-                    return 0;
-                }
-                let marker = if i + 1 == jobs.table.len() {
-                    '+'
-                } else if i + 2 == jobs.table.len() {
-                    '-'
-                } else {
-                    ' '
-                };
-                let job = &mut jobs.table[i];
-                if job.resume().is_err() {
-                    return 1;
-                }
-                let mut out = io::stdout().lock();
-                return u8::from(
-                    writeln!(out, "[{}]{marker} {} &", job.id, job.name)
-                        .and_then(|_| out.flush())
-                        .is_err(),
-                );
             }
             let mut job = jobs.table.remove(i);
             {

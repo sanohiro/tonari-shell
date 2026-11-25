@@ -1789,11 +1789,13 @@ impl PreparedCommand {
         }
         let selected = builtin(self, status, session);
         if selected.is_none() && self.words[0].starts_with('/') && self.redirects.is_empty() {
+            let scope = session.substitutions.scope();
             let result = start(self, None, None, None, status, session, Default::default())
                 .and_then(|stage| match stage {
                     Stage::Child(pid) => wait(pid),
                     Stage::Status(code) => Ok(code),
                 });
+            session.substitutions.finish(scope);
             return Some(Flow::Continue(result.unwrap_or_else(|e| {
                 eprintln!("tonari: {e}");
                 1
@@ -2296,11 +2298,12 @@ pub fn run_pipeline(
     let mut launch = session.jobs.launch(background, pipeline.len() == 1);
     let managed = background || launch.group.is_some();
     let name = job_label(&pipeline, background, session.jobs.monitor);
-    let mut input = if background && launch.group.is_none() && !session.stdin_redirected {
-        Some(private_fd(std::fs::File::open("/dev/null")?.into())?)
-    } else {
-        None
-    };
+    let mut input =
+        if background && launch.group.is_none() && (session.posix || !session.stdin_redirected) {
+            Some(private_fd(std::fs::File::open("/dev/null")?.into())?)
+        } else {
+            None
+        };
     let length = pipeline.len();
     let mut stages = Vec::with_capacity(length);
     for (i, mut raw) in pipeline.into_iter().enumerate() {

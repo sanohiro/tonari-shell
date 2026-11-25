@@ -126,6 +126,7 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
 impl Session {
     pub fn set_posix(&mut self, enabled: bool) {
         self.posix = enabled;
+        self.jobs.quiet = enabled && !self.interactive;
         self.shopt.expand_aliases = enabled || self.interactive;
         if enabled {
             self.shopt.inherit_errexit = true;

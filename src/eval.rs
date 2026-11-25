@@ -34,6 +34,10 @@ fn run_statements<'a>(
         if session.noexec {
             return Flow::Continue(0);
         }
+        if session.notify && session.jobs.awaiting_notification() {
+            session.jobs.poll();
+            session.jobs.report_changes();
+        }
         let literal = literals.next().and_then(Option::as_deref_mut);
         if session.interactive && session.completions.in_callback() {
             crate::editor::preview::statement();

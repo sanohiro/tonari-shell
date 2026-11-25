@@ -99,6 +99,55 @@ class ShellTests(unittest.TestCase):
                                       stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
                 self.assertEqual((proc.returncode, proc.stdout), (-signal.SIGUSR1, b"env:1\n"))
 
+    def test_seekable_input_assignment_and_child_offsets(self):
+        script = self.cwd / "input"
+        script.write_text("i=one\nx=old\nx=$i\nread -r line\npayload for read\n"
+                          "i=two\nx=$i\nprintf '<%s><%s>\\n' \"$x\" \"$line\"\n"
+                          "i=three\nx=$i\ncat\nremaining | bytes\n")
+        for binary in (BASH, TONARI):
+            sh = self.cwd / "sh"
+            sh.unlink(missing_ok=True)
+            sh.symlink_to(binary)
+            with script.open("rb") as stdin:
+                proc = subprocess.run([sh], stdin=stdin, cwd=self.cwd, env=self.env,
+                                      capture_output=True, timeout=5)
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                             (0, b"<two><payload for read>\nremaining | bytes\n", b""))
+
+    def test_continuations_and_literal_command_cache(self):
+        # Physical newlines work in parameter names and operators. Escaped
+        # backslashes and quoted here-document bodies retain their bytes.
+        script = "name=works\nprintf '<%s>\\n' \"$na\\\nme\" \"${na\\\nme:\\\n+yes}\" " \
+                 "\"$name\\\\\nend\"\ncat <<'EOF'\nstring\\\ncontinued\nEOF\n"
+        self.compare(script, 0, b"<works>\n<yes>\n<works\\\nend>\nstring\\\ncontinued\n")
+        script_file = self.cwd / "external"
+        script_file.write_text("printf '%s/%s\\n' \"$setting\" \"$1\"\n")
+        script_file.chmod(0o755)
+        self.compare("export setting; for setting in one two; do " +
+                     shlex.quote(str(script_file)) + " 'a b'; done",
+                     0, b"one/a b\ntwo/a b\n")
+        self.compare("set -n; while :; do echo wrong; done; echo wrong", 0)
+
+    def test_posix_declarations_and_error_exit(self):
+        for binary in self.shells_for(5):
+            sh = self.cwd / "sh"
+            sh.unlink(missing_ok=True)
+            sh.symlink_to(binary)
+            result = self.command(sh, "set -- 'one two'; command command export val=$1; "
+                                  "printf '[%s]\\n' \"$val\"; readonly val; export val=other; echo wrong")
+            self.assertEqual(result.stdout, b"[one two]\n")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue(result.stderr)
+
+    def test_async_notifications_preserve_partial_input_and_wait_status(self):
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"set -b; (sleep 0.3; exit 7) &\n")
+        self.read_until(fd, PROMPT)
+        os.write(fd, b"wait $!; echo status=")
+        self.read_until(fd, b"Done")
+        os.write(fd, b"$?\n")
+        self.assertIn(b"status=7", self.read_until(fd, b"status=7"))
+
     def test_repeated_function_definition_and_positional_frame(self):
         self.compare('set -- outer; f() { shift; printf "%s/%s/%s\\n" "$#" "$1" "${!#}"; }; '
                      'f first "two words" {1..1024}; echo "$#:$1"; '

@@ -642,7 +642,7 @@ fn launch_list(
             .traps
             .after_fork(session.errtrace, session.functrace);
         launch.child(&mut session.traps);
-        if background && launch.group.is_none() && !session.stdin_redirected {
+        if background && launch.group.is_none() && (session.posix || !session.stdin_redirected) {
             let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
             if fd < 0 || unsafe { libc::dup2(fd, 0) } < 0 {
                 unsafe { libc::_exit(1) }

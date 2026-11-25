@@ -107,6 +107,9 @@ fn bad_substitution<'a>(
 
 // Preserve physical offsets and leave a trailing continuation for the input reader.
 pub(super) fn joined(source: &str) -> &str {
+    if !source.starts_with('\\') {
+        return source;
+    }
     let next = source.trim_start_matches("\\\n");
     if next.is_empty() { source } else { next }
 }
@@ -120,44 +123,32 @@ pub(super) fn dollar(
     let rest = chars.as_str();
     // Only the structural prefix needs joining. Quotes, expansions and here-doc
     // bodies in the suffix are read in their own lexical context.
-    let header = rest
-        .bytes()
-        .take_while(|b| {
-            b.is_ascii_alphanumeric()
-                || matches!(
-                    b,
-                    b'_' | b'{'
-                        | b'#'
-                        | b'!'
-                        | b':'
-                        | b'+'
-                        | b'-'
-                        | b'='
-                        | b'?'
-                        | b'%'
-                        | b'\\'
-                        | b'\n'
-                )
-        })
-        .count();
-    let prefix = &rest[..header];
-    if prefix.contains("\\\n") {
-        let logical = prefix.replace("\\\n", "");
-        let mut input = logical.clone();
-        input.push_str(&rest[header..]);
-        let mut cursor = input.chars();
-        dollar(&mut cursor, word, quoted)?;
-        let consumed = input.len() - cursor.as_str().len();
-        if consumed > logical.len() {
-            *chars = rest[header + consumed - logical.len()..].chars();
-        } else {
-            let mut physical = prefix;
-            for _ in 0..consumed {
-                physical = &physical.trim_start_matches("\\\n")[1..];
+    if rest.starts_with('{') {
+        let structural = |b: u8| b.is_ascii_alphanumeric() || b"_#{!:+-=?%".contains(&b);
+        let mut end = rest.bytes().take_while(|&b| structural(b)).count();
+        if rest[end..].starts_with("\\\n") {
+            while let Some(after) = rest[end..].strip_prefix("\\\n") {
+                end += 2 + after.bytes().take_while(|&b| structural(b)).count();
             }
-            *chars = rest[prefix.len() - physical.len()..].chars();
+            let prefix = &rest[..end];
+            let mut input = prefix.replace("\\\n", "");
+            let boundary = input.len();
+            input.push_str(&rest[end..]);
+            let mut cursor = input.chars();
+            dollar(&mut cursor, word, quoted)?;
+            let consumed = input.len() - cursor.as_str().len();
+            let physical = if consumed >= boundary {
+                end + consumed - boundary
+            } else {
+                let mut tail = prefix;
+                for _ in 0..consumed {
+                    tail = &tail.trim_start_matches("\\\n")[1..];
+                }
+                end - tail.len()
+            };
+            *chars = rest[physical..].chars();
+            return Ok(());
         }
-        return Ok(());
     }
     let name = match chars.clone().next() {
         Some('{') => {
@@ -341,7 +332,22 @@ pub(super) fn dollar(
                 .bytes()
                 .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
                 .count();
-            *chars = rest[end..].chars();
+            let mut tail = &rest[end..];
+            if tail.starts_with("\\\n") {
+                let mut name = rest[..end].to_owned();
+                while let Some(next) = tail.strip_prefix("\\\n") {
+                    let size = next
+                        .bytes()
+                        .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+                        .count();
+                    name.push_str(&next[..size]);
+                    tail = &next[size..];
+                }
+                *chars = tail.chars();
+                word.part(Part::Parameter { name, quoted });
+                return Ok(());
+            }
+            *chars = tail.chars();
             &rest[..end]
         }
         Some('0'..='9' | '@' | '*' | '?' | '$' | '#' | '!' | '-') => {

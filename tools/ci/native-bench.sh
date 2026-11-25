@@ -235,7 +235,7 @@ case "$SUITE" in
     else
       selection=(--trace-shell "$bin/paths" --shard "${SUITE##*-}/8")
     fi
-    python3 tools/ci/yash-posix.py "$root" "$out" --prepare --bash "$ref" --tonari "$current" \
+    python3 tools/ci/yash-posix.py "$root" "$out" --prepare --require-bash-passes --bash "$ref" --tonari "$current" \
       --previous "$bin/baseline" --runs "${EXTERNAL_BENCH_RUNS:-3}" "${selection[@]}" ;;
   probe)
     cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"

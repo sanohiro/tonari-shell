@@ -1032,12 +1032,13 @@ impl Reader {
             }
             let mut patterns = Vec::new();
             loop {
+                self.alias_at(false, Some(&[]))?;
                 match self.operand() {
                     Some(Token::Word(word)) => patterns.push(CasePattern::new(word.word)),
                     None => return Err(Error::Incomplete("unfinished case command")),
                     _ => return Err(Error::Invalid("expected a case pattern")),
                 }
-                self.alias_newlines(&[])?;
+                self.alias_at(false, Some(&[]))?;
                 match self.tokens.pop_front() {
                     Some(Token::RightParen) => break,
                     Some(Token::Pipe) => {}

@@ -309,6 +309,25 @@ fn buffered_compound<P: AsRef<[parser::Statement]>>(
     Err(buffered.len())
 }
 
+// Only use a stored scalar as the source. Dynamic parameters, namerefs,
+// arrays, unset variables and arithmetic run through ordinary expansion.
+fn assign_buffered_scalar(session: &mut Session, command: &str, scratch: &mut String) -> bool {
+    if let Some((name, value)) = parser::plain_assignment(command) {
+        return session.assign_existing_literal(name, value);
+    }
+    let Some((target, source)) = command.split_once("=$") else {
+        return false;
+    };
+    if !crate::word::is_identifier(target) || !crate::word::is_identifier(source) {
+        return false;
+    }
+    let Some(value) = session.stored_scalar(source) else {
+        return false;
+    };
+    value.clone_into(scratch);
+    session.assign_existing_literal(target, scratch)
+}
+
 fn run(
     session: &mut Session,
     mut reader: BufReader<PrivateFile>,
@@ -317,6 +336,7 @@ fn run(
     mut status: u8,
     check: bool,
 ) -> Flow {
+    let mut assignment_value = String::new();
     let mut base_line = 1;
     let mut input = Vec::new();
     let mut here_doc: Option<parser::HereDocHint> = None;
@@ -379,8 +399,7 @@ fn run(
             && session.coprocesses.is_empty()
             && session.jobs.is_empty()
             && let Some(command) = text.strip_suffix('\n')
-            && let Some((key, value)) = parser::plain_assignment(command)
-            && session.assign_existing_literal(key, value)
+            && assign_buffered_scalar(session, command, &mut assignment_value)
         {
             session.current_command = Some(parser::Location::label(command.into(), base_line));
             session.pipe_status.single(0);
