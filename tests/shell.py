@@ -90,6 +90,12 @@ class ShellTests(unittest.TestCase):
         self.compare(r"""v=$(printf x; printf '%s' 'a b' '' c; printf '%s\n' q r; printf '%s%n:%d' hi n 4; printf '!'); printf '<%s>\n' "$v" """,
                      0, b"<xa bcq\nr\nhi:4!>\n")
 
+    def test_printf_lists_with_count_conversions_and_literal_n(self):
+        self.compare(r"""n=outer; v=$(printf '%s\n' one two; printf 'name:%02d' 7); echo "$v:$n"
+v=$(printf 'xy%ln' n; printf 'seen:%s\n' "$n"); echo "$v:$n"
+v=$(printf '%%n:%s\n' ok; printf end); echo "$v:$n" """,
+                     0, b"one\ntwo\nname:07:outer\nxyseen:2:outer\n%n:ok\nend:outer\n")
+
     def test_capture_search_preserves_parent_hash_and_path_order(self):
         self.compare('mkdir -p a b; for d in b a; do printf "echo %s\\n" "$d" >"$d/tool"; '
                      'chmod +x "$d/tool"; done; PATH=a:b:/usr/bin:/bin; '

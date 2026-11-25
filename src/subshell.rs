@@ -415,7 +415,7 @@ fn capture_simple(
                 // A dynamic format, -v or a %n conversion can assign a variable
                 // used by the next command. Keep such lists in a real subshell.
                 let fmt = args.first()?.as_literal()?;
-                if fmt.starts_with('-') || (fmt.contains('%') && fmt.contains('n')) {
+                if fmt.starts_with('-') || crate::session::printf::may_assign_count(fmt) {
                     return None;
                 }
                 false

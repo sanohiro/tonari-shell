@@ -273,6 +273,14 @@ echo "$OPTIND:$last"
 for ((i=0; i<16; i++)); do value=$(printf v; printf '%s' "$i"); done
 echo "$value"
 """, "v15"),
+    "printf-list-newline": eval_loop(
+        r"""value=$(printf '%s' abc; printf '%s\n' first second; printf x)""",
+        'echo "$value"', "abcfirst\nsecond\nx", count=250,
+    ),
+    "printf-list-count": eval_loop(
+        r"""value=$(printf 'xy%n' n; printf '%s' "$n")""",
+        'echo "$value:$n"', "xy2:parent", setup="n=parent", count=100,
+    ),
     "external-substitutions": ("""\
 for ((i=0; i<16; i++)); do value=$(/usr/bin/printf 'v%s' "$i"); done
 echo "$value"

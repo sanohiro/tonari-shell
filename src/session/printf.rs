@@ -221,6 +221,23 @@ impl<'a> Arguments<'a> {
     }
 }
 
+const FLAGS: &[u8] = b"#0- +'";
+const LENGTH_MODIFIERS: &[u8] = b"hljztL";
+
+// Inspect every percent, including escaped ones. A false positive keeps the
+// real child; a false negative would hide the assignment from the next command.
+pub(crate) fn may_assign_count(format: &str) -> bool {
+    format.as_bytes().contains(&b'n')
+        && format.split('%').skip(1).any(|after| {
+            after.bytes().find(|b| {
+                !(b.is_ascii_digit()
+                    || matches!(b, b'*' | b'.')
+                    || FLAGS.contains(b)
+                    || LENGTH_MODIFIERS.contains(b))
+            }) == Some(b'n')
+        })
+}
+
 struct Spec {
     flags: Vec<u8>,
     width: i32,
@@ -231,7 +248,7 @@ impl Spec {
     fn parse(input: &mut &[u8], args: &mut Arguments<'_>) -> Result<(Self, u8), &'static str> {
         let mut flags = Vec::new();
         while let Some((&flag, rest)) = input.split_first() {
-            if !b"#0- +'".contains(&flag) {
+            if !FLAGS.contains(&flag) {
                 break;
             }
             flags.push(flag);
@@ -251,7 +268,7 @@ impl Spec {
             }
         }
         while let Some((&len, rest)) = input.split_first() {
-            if !b"hljztL".contains(&len) {
+            if !LENGTH_MODIFIERS.contains(&len) {
                 break;
             }
             *input = rest;
