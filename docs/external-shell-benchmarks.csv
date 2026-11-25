@@ -1,0 +1,148 @@
+suite,case,unit,macos_arm64_tonari,macos_arm64_bash,macos_elapsed_ratio,linux_x86_64_tonari,linux_x86_64_bash,linux_elapsed_ratio,local_m1_tonari,local_m1_bash,local_m1_elapsed_ratio
+shellspec,assign.sh: positional params,operations/s,935199,381699,0.408,792258,377022,0.476,1225644,544050,0.444
+shellspec,assign.sh: variable,operations/s,1252290,581898,0.465,882839,535057,0.606,1355555,784087,0.578
+shellspec,assign.sh: local var,operations/s,977788,652314,0.667,900487,517812,0.575,1375986,812290,0.590
+shellspec,assign.sh: local var (typeset),operations/s,1081687,548717,0.507,874098,513108,0.587,1422266,819209,0.576
+shellspec,cmp.sh: [ ],operations/s,795292,299726,0.377,611389,307838,0.504,971135,466582,0.480
+shellspec,cmp.sh: [[ ]],operations/s,902939,485087,0.537,621256,439791,0.708,1027465,663886,0.646
+shellspec,cmp.sh: case,operations/s,1298520,662355,0.510,878511,541762,0.617,1462009,832614,0.569
+shellspec,count.sh: posix,operations/s,875839,492948,0.563,617962,381676,0.618,912408,604842,0.663
+shellspec,count.sh: typeset -i,operations/s,778585,471632,0.606,577254,369269,0.640,886038,556462,0.628
+shellspec,count.sh: increment,operations/s,1034539,594258,0.574,870055,473944,0.545,1385443,738876,0.533
+shellspec,eval.sh: direct assign,operations/s,958973,283590,0.296,636200,256527,0.403,1012526,406673,0.402
+shellspec,eval.sh: eval assign,operations/s,601411,174839,0.291,509327,145538,0.286,789400,241639,0.306
+shellspec,eval.sh: command subs,operations/s,1886,1456,0.772,4981,2533,0.509,1337,1023,0.765
+shellspec,func.sh: no func,operations/s,1008190,471971,0.468,877299,487773,0.556,1323780,742671,0.561
+shellspec,func.sh: func,operations/s,671572,241584,0.360,669024,287453,0.430,1009027,432547,0.429
+shellspec,null.sh: blank,operations/s,error,error,,error,error,,error,error,
+shellspec,null.sh: assign variable,operations/s,840353,434003,0.516,921954,547899,0.594,1390519,839700,0.604
+shellspec,null.sh: define function,operations/s,1101071,479838,0.436,940440,547660,0.582,1466744,869130,0.593
+shellspec,null.sh: undefined variable,operations/s,764037,337252,0.441,697427,432253,0.620,1089454,671169,0.616
+shellspec,null.sh: : command,operations/s,971770,426118,0.438,869850,498244,0.573,1354348,767560,0.567
+shellspec,output.sh: echo,operations/s,520969,373359,0.717,523340,316271,0.604,538275,352719,0.655
+shellspec,output.sh: printf,operations/s,657297,310204,0.472,520626,314990,0.605,537302,340031,0.633
+shellspec,output.sh: print,operations/s,error,error,,error,error,,error,error,
+shellspec,stringop1.sh: string length,operations/s,822246,460691,0.560,646784,432855,0.669,824657,617450,0.749
+shellspec,stringop2.sh: substr 1 builtin,operations/s,770057,368656,0.479,593475,355430,0.599,932064,583631,0.626
+shellspec,stringop2.sh: substr 1 echo | cut,operations/s,254,259,1.020,1298,761,0.586,392,323,0.824
+shellspec,stringop2.sh: substr 1 cut here doc,operations/s,163,361,2.215,1435,854,0.595,459,348,0.758
+shellspec,stringop2.sh: substr 1 cut here str,operations/s,219,277,1.265,1447,848,0.586,410,318,0.776
+shellspec,stringop2.sh: substr 2 builtin,operations/s,693010,337170,0.487,575272,334602,0.582,897237,437470,0.488
+shellspec,stringop2.sh: substr 2 echo | cut,operations/s,283,180,0.636,1294,760,0.587,485,320,0.660
+shellspec,stringop2.sh: substr 2 cut here doc,operations/s,148,207,1.399,1431,845,0.590,382,362,0.948
+shellspec,stringop2.sh: substr 2 cut here str,operations/s,142,235,1.655,1445,848,0.587,325,273,0.840
+shellspec,stringop2.sh: substr 2 expr,operations/s,error,error,,1635,1102,0.674,error,error,
+shellspec,stringop3.sh: str remove ^ shortest builtin,operations/s,516234,351453,0.681,600304,333623,0.556,817044,484899,0.593
+shellspec,stringop3.sh: str remove ^ shortest echo | cut,operations/s,234,248,1.060,1276,762,0.597,336,208,0.619
+shellspec,stringop3.sh: str remove ^ shortest cut here doc,operations/s,171,103,0.602,1434,854,0.596,446,284,0.637
+shellspec,stringop3.sh: str remove ^ shortest cut here str,operations/s,220,264,1.200,1440,844,0.586,357,320,0.896
+shellspec,stringop3.sh: str remove ^ longest builtin,operations/s,625837,337960,0.540,596785,331127,0.555,896075,512898,0.572
+shellspec,stringop3.sh: str remove ^ longest echo | cut,operations/s,181,224,1.238,1290,764,0.592,510,334,0.655
+shellspec,stringop3.sh: str remove ^ longest cut here doc,operations/s,283,339,1.198,1429,849,0.594,519,353,0.680
+shellspec,stringop3.sh: str remove ^ longest cut here str,operations/s,265,346,1.306,1444,851,0.589,558,383,0.686
+shellspec,stringop3.sh: str remove $ shortest builtin,operations/s,752504,442076,0.587,603678,347104,0.575,932852,556378,0.596
+shellspec,stringop3.sh: str remove $ shortest echo | cut,operations/s,249,353,1.418,1287,759,0.590,543,340,0.626
+shellspec,stringop3.sh: str remove $ shortest cut here doc,operations/s,278,431,1.550,1437,850,0.592,549,391,0.712
+shellspec,stringop3.sh: str remove $ shortest cut here str,operations/s,346,396,1.145,1439,849,0.590,550,395,0.718
+shellspec,stringop3.sh: str remove $ longest builtin,operations/s,604672,314778,0.521,600729,346263,0.576,879781,558213,0.634
+shellspec,stringop3.sh: str remove $ longest echo | cut,operations/s,211,259,1.227,1290,759,0.588,464,284,0.612
+shellspec,stringop3.sh: str remove $ longest cut here doc,operations/s,222,196,0.883,1418,850,0.599,457,319,0.698
+shellspec,stringop3.sh: str remove $ longest cut here str,operations/s,247,219,0.887,1440,850,0.590,459,326,0.710
+shellspec,stringop4.sh: str subst one builtin,operations/s,437438,290629,0.664,537434,313400,0.583,825167,508866,0.617
+shellspec,stringop4.sh: str subst one echo | sed,operations/s,195,211,1.082,955,627,0.657,537,358,0.667
+shellspec,stringop4.sh: str subst one sed here doc,operations/s,181,178,0.983,1023,686,0.671,517,393,0.760
+shellspec,stringop4.sh: str subst one sed here str,operations/s,180,215,1.194,1021,685,0.671,539,386,0.716
+shellspec,stringop4.sh: str subst all builtin,operations/s,771264,393857,0.511,547517,298411,0.545,860177,498930,0.580
+shellspec,stringop4.sh: str subst all echo | sed,operations/s,223,261,1.170,945,625,0.661,532,351,0.660
+shellspec,stringop4.sh: str subst all sed here doc,operations/s,267,305,1.142,1021,684,0.670,538,386,0.717
+shellspec,stringop4.sh: str subst all sed here str,operations/s,261,217,0.831,1026,684,0.667,545,390,0.716
+shellspec,stringop4.sh: str subst front builtin,operations/s,721848,411144,0.570,539929,310198,0.575,846745,513846,0.607
+shellspec,stringop4.sh: str subst front echo | sed,operations/s,253,281,1.111,935,622,0.665,526,357,0.679
+shellspec,stringop4.sh: str subst front here doc,operations/s,267,357,1.337,1007,680,0.675,525,392,0.747
+shellspec,stringop4.sh: str subst front sed here str,operations/s,429,380,0.886,1003,678,0.676,543,388,0.715
+shellspec,stringop4.sh: str subst back builtin,operations/s,687476,456564,0.664,537893,302501,0.562,843602,521210,0.618
+shellspec,stringop4.sh: str subst back echo | sed,operations/s,246,342,1.390,926,616,0.665,499,347,0.695
+shellspec,stringop4.sh: str subst back here doc,operations/s,196,184,0.939,998,673,0.674,541,386,0.713
+shellspec,stringop4.sh: str subst back sed here str,operations/s,300,96,0.320,1002,679,0.678,544,385,0.708
+shellspec,subshell.sh: no subshell,operations/s,1060734,528314,0.498,854959,475236,0.556,1386649,755436,0.545
+shellspec,subshell.sh: brace,operations/s,1068019,595049,0.557,861128,474563,0.551,1332766,746027,0.560
+shellspec,subshell.sh: subshell,operations/s,2166,3191,1.473,5603,2939,0.525,1778,1572,0.884
+shellspec,subshell.sh: command subs,operations/s,839359,2026,0.002,660177,2724,0.004,1007232,1448,0.001
+shellspec,subshell.sh: external command,operations/s,630,383,0.608,2098,1541,0.735,989,613,0.620
+fumiyas,"Parameter Expansion 1: ""$PARAMETER""",ms,1.000,62.000,0.016,4.000,38.000,0.105,,,
+fumiyas,Parameter Expansion 2: $PARAMETER,ms,200.000,922.000,0.217,188.000,324.000,0.580,,,
+fumiyas,"Parameter Expansion 3: ""${PARAMETER##*/}"" (modifier)",ms,1187.000,3975.000,0.299,423.000,1281.000,0.330,,,
+fumiyas,"Array Parameter Expansion 1: ""${ARRAY[1]}"" (one element)",ms,38.000,992.000,0.038,22.000,1522.000,0.014,,,
+fumiyas,"Array Parameter Expansion 2: ""${ARRAY[@]}"" (all elements)",ms,415.000,8436.000,0.049,368.000,2731.000,0.135,,,
+fumiyas,Arithmetic Evaluation 1: let EXPRESSION,ms,1256.000,15448.000,0.081,902.000,4512.000,0.200,,,
+fumiyas,Arithmetic Evaluation 2: ((EXPRESSION)),ms,880.000,7040.000,0.125,806.000,2875.000,0.280,,,
+fumiyas,Arithmetic Expansion 1: $((EXPRESSION)),ms,4627.000,11323.000,0.409,2765.000,4554.000,0.607,,,
+fumiyas,Arithmetic Expansion 2: $(($PARAMETER+EXPRESSION)),ms,6343.000,13256.000,0.479,3666.000,4839.000,0.758,,,
+fumiyas,Test 1: [[ EXPRESSION ]],ms,4120.000,8023.000,0.514,2169.000,3613.000,0.600,,,
+fumiyas,Test 2: [ EXPRESSION ],ms,4497.000,15809.000,0.284,2285.000,6218.000,0.367,,,
+fumiyas,Fork,ms,12064.000,46600.000,0.259,4309.000,26839.000,0.161,,,
+fumiyas,Fork & Exec,ms,UNAVAILABLE /bin/true,UNAVAILABLE /bin/true,,11034.000,22126.000,0.499,,,
+fumiyas,Fork & Exec (/usr/bin/true),ms,52624.000,66459.000,0.792,,,,,,
+fumiyas,Iterate Parameters 1; for,ms,197.000,1844.000,0.107,177.000,940.000,0.188,,,
+fumiyas,Iterate Parameters 2: while shift,ms,36.000,184.000,0.196,21.000,76.000,0.276,,,
+fumiyas,Iterate Parameters 3: while ((n++<$#)),ms,79.000,219.000,0.361,62.000,100.000,0.620,,,
+unixwin,startup.empty_c,ms,6.080,8.683,0.700,0.534,1.153,0.463,4.299,6.892,0.624
+unixwin,startup.true_c,ms,5.485,11.739,0.467,0.518,1.145,0.452,3.861,6.565,0.588
+unixwin,startup.biglib_source,ms,10.666,20.028,0.533,7.935,9.510,0.834,7.038,11.746,0.599
+unixwin,parse.n_simple@3000,ms,5.087,9.753,0.522,2.160,3.912,0.552,5.772,9.316,0.620
+unixwin,parse.n_funcs@1500,ms,6.067,9.816,0.618,3.059,5.091,0.601,6.228,9.995,0.623
+unixwin,parse.n_mixed@5000,ms,9.074,15.024,0.604,6.816,10.342,0.659,9.656,14.907,0.648
+unixwin,expand.tilde_home,ms,6.440,15.732,0.409,4.061,11.577,0.351,7.070,15.502,0.456
+unixwin,expand.tilde_user,ms,5.296,15.726,0.337,1.791,56.437,0.032,5.216,15.421,0.338
+unixwin,expand.nested_cmdsubst,ms,700.506,1381.159,0.507,184.238,614.186,0.300,578.006,1024.807,0.564
+unixwin,strings.append_assign,ms,5.829,15.329,0.380,1.769,10.787,0.164,5.100,14.134,0.361
+unixwin,strings.concat_subst,ms,9.734,57.479,0.169,4.322,60.023,0.072,7.116,48.349,0.147
+unixwin,arrays.append_loop,ms,7.067,18.787,0.376,2.188,8.228,0.266,5.312,11.776,0.451
+unixwin,arrays.assign_idx_mod,ms,9.034,23.082,0.391,5.990,17.396,0.344,8.195,18.973,0.432
+unixwin,arrays.read_elem,ms,10.568,24.701,0.428,5.898,17.369,0.340,8.091,18.479,0.438
+unixwin,control.if_true,ms,6.515,15.279,0.426,2.316,7.460,0.310,5.559,11.784,0.472
+unixwin,control.if_false_else,ms,5.972,15.635,0.382,2.678,7.445,0.360,6.689,11.966,0.559
+unixwin,funcs.call_empty,ms,8.400,34.097,0.246,4.622,24.839,0.186,7.803,25.703,0.304
+unixwin,funcs.call_args,ms,8.358,27.859,0.300,3.463,19.385,0.179,6.559,20.903,0.314
+unixwin,funcs.redefine,ms,4.881,12.610,0.387,0.953,5.020,0.190,4.226,10.366,0.408
+unixwin,subst.cmd_builtin_echo,ms,7.516,275.762,0.027,0.962,116.003,0.008,4.363,215.246,0.020
+unixwin,subst.cmd_true,ms,4.868,586.705,0.008,1.024,184.224,0.006,4.500,353.240,0.013
+unixwin,subst.cmd_ext_date,ms,598.043,497.885,1.201,60.656,92.859,0.653,148.791,218.095,0.682
+unixwin,redir.devnull_write,ms,57.709,87.686,0.658,25.752,52.525,0.490,57.288,77.127,0.743
+unixwin,redir.file_append,ms,330.007,245.316,1.345,11.656,22.842,0.510,48.927,59.547,0.822
+unixwin,redir.pipe_data_10k,ms,18.478,18.726,0.987,1.825,2.661,0.686,7.043,10.114,0.696
+unixwin,glob.star_txt@200,ms,5.015,25.071,0.200,0.799,1.559,0.513,4.171,24.716,0.169
+unixwin,glob.star_all@300,ms,4.660,25.288,0.184,0.835,1.633,0.511,4.236,24.723,0.171
+unixwin,cond.dbracket_str_eq,ms,6.112,15.198,0.402,2.095,9.475,0.221,5.401,13.236,0.408
+unixwin,cond.dbracket_str_ne,ms,5.901,15.321,0.385,2.093,9.396,0.223,5.319,13.266,0.401
+unixwin,jobs.bg_wait_one,ms,125.828,116.582,1.079,51.710,52.821,0.979,65.849,69.209,0.951
+unixwin,jobs.bg_many@20,ms,121.844,124.743,0.977,25.368,27.253,0.931,40.097,44.581,0.899
+unixwin,data.printf_bulk@10000,ms,21.923,43.149,0.508,33.042,48.101,0.687,27.731,46.598,0.595
+unixwin,data.echo_bulk@10000,ms,13.477,30.617,0.440,17.096,33.311,0.513,20.553,34.676,0.593
+unixwin,mixed.log_tally@20000,ms,88.440,168.304,0.525,105.354,186.971,0.563,74.456,121.514,0.613
+unixwin,mixed.config_parse@2000,ms,16.635,22.156,0.751,16.200,23.662,0.685,16.457,20.925,0.786
+unixwin,mixed.arg_parse@1000,ms,4.573,6.820,0.671,0.523,1.149,0.455,3.895,6.569,0.593
+unixwin,coproc.cat_roundtrip,ms,23.740,24.655,0.963,13.220,19.574,0.675,11.683,17.865,0.654
+unixwin,coproc.tr_roundtrip,ms,23.385,27.133,0.862,9.792,11.149,0.878,11.219,16.233,0.691
+unixwin,errors.cmd_not_found,ms,19.139,384.436,0.050,13.797,184.492,0.075,6.847,323.925,0.021
+unixwin,errors.cmd_not_found_path,ms,22.430,508.245,0.044,19.519,193.027,0.101,14.697,334.700,0.044
+unixwin,builtin.echo_plain,ms,38.182,53.233,0.717,17.525,36.094,0.486,35.767,49.179,0.727
+unixwin,builtin.echo_var,ms,46.760,54.642,0.856,19.552,36.651,0.533,37.917,49.994,0.758
+unixwin,builtin.shift_one,ms,8.956,20.532,0.436,1.796,10.403,0.173,5.149,14.577,0.353
+unixwin,arith.expand_add,ms,11.328,26.776,0.423,7.437,19.862,0.374,9.640,20.413,0.472
+unixwin,arith.cmd_add,ms,7.841,23.270,0.337,3.069,16.068,0.191,6.149,18.519,0.332
+unixwin,data.read_mapfile@1000,ms,11.592,14.086,0.823,0.733,1.429,0.513,3.909,6.660,0.587
+unixwin,glob.lad_star@1000,ms,8.468,105.097,0.081,1.787,3.315,0.539,5.229,77.174,0.068
+unixwin,hotloop.floor_colon_0,ms,9.706,22.388,0.434,1.929,16.517,0.117,5.035,19.230,0.262
+unixwin,hotloop.floor_arith_incr_1,ms,6.597,26.701,0.247,2.749,15.794,0.174,5.916,19.027,0.311
+unixwin,hotloop.composite_reported_2,ms,27.652,74.208,0.373,20.791,57.830,0.360,15.639,38.829,0.403
+luish,arith,ms,480.808,884.296,0.544,335.605,593.323,0.566,337.541,585.278,0.577
+luish,arrays,ms,384.507,649.896,0.592,366.717,516.149,0.710,289.047,507.863,0.569
+luish,build,ms,3083.944,2630.056,1.173,376.488,532.175,0.707,1342.323,1888.728,0.711
+luish,configure,ms,2034.116,2354.208,0.864,510.740,702.858,0.727,1676.629,2193.550,0.764
+luish,functions,ms,285.702,984.488,0.290,249.228,613.335,0.406,215.580,537.835,0.401
+luish,strings,ms,367.307,796.387,0.461,336.617,574.396,0.586,338.567,735.571,0.460
+luish,textproc,ms,215.407,435.666,0.494,173.678,325.586,0.533,188.678,354.494,0.532
+gnu-hello,configure syntax check,ms,26.787,37.512,0.714,19.022,16.399,1.160,16.792,25.269,0.665
+gnu-hello,configure --help,ms,103.690,139.830,0.742,20.201,24.425,0.827,62.474,75.713,0.825
+gnu-hello,GNU Hello configure,ms,24154.364,22897.408,1.055,7274.491,6149.004,1.183,30148.559,30664.110,0.983

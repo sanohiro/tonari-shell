@@ -1,5 +1,48 @@
 # Startup and execution / 起動と実行性能
 
+<a id="external-suites"></a>
+
+## 2026-11-25 · Independent shell workloads / 外部シェルベンチマーク
+
+The paired results use native Ubuntu 24.04 x86-64 with its Bash 5.2.21 and native macOS 15 arm64 with Bash 5.2.37. The macOS runner reports an Apple M1 virtual machine with three cores. Counts below refer to individual workloads. The CSV contains both measurements, slower cases and unavailable commands. The local columns cover a physical M1 on macOS 27.2.1. ShellSpec there used a two-second sample and reversed shell order, and the luish and unixwin measurements used five timed trials. The elapsed-time ratio is Tonari / Bash, so a smaller value is better. For ShellSpec throughput it is Bash ops/s divided by Tonari ops/s. [All case measurements](external-shell-benchmarks.csv)
+
+Counts show faster cases / comparable cases, followed in parentheses by the number at or below two thirds of Bash time.
+
+| Suite | Linux x86-64 | macOS arm64 CI | Physical M1 |
+|---|---:|---:|---:|
+| ShellSpec samples | 68/68 (57) | 45/67 (35) | 67/67 (42) |
+| fumiyas sh-benchmark | 16/16 (15) | 16/16 (15) | — |
+| unixwin cross-section | 50/50 (42) | 47/50 (37) | 50/50 (40) |
+| luish scripts | 7/7 (4) | 6/7 (5) | 7/7 (5) |
+
+- **ShellSpec** ran every directive in all 12 sample files, using the upstream controller and its one-second preparation and measurement settings. Both shells reject the empty loop and lack the `print` builtin. The macOS `expr` also rejects GNU's `substr` syntax. The driver measures loop overhead together with the body. [Upstream samples](https://github.com/shellspec/shellbench/tree/4b04d18ecd170948fcbb52a130c708fd3e08e1af/sample)
+- **Fumiyas** ran all 16 original workloads with the original sizes and a shared system zsh to generate the large inputs. The elapsed time comes from each shell's `time` around the original body, after setup. Linux has `/bin/true`. The macOS installation lacks it, so the unmodified fork/exec row is unavailable and a separately labeled row runs the same 40,000 calls to `/usr/bin/true`. A separate check confirmed one million array elements and 50 observable writes by process substitutions. [Original workloads](https://github.com/fumiyas/fumiyas.github.io/blob/d188b4fa60eca66f2bcd9f5a48a3c80a5c4fc307/2013/12/01/sh-benchmark-scripts.sh)
+- **unixwin** has 4,302 cases at the pinned revision. We selected the first two in registration order from each of its 19 categories, plus 12 named cases for startup, expansion, functions, pipelines, globbing, data and mixed scripts. The harness uses the upstream fixtures, script generator and original iteration counts. Both shells receive identical work, with one warmup and three timed runs in alternating order on CI. It checks the expected status, output patterns, matching stdout and unexpected diagnostics. The two failing-command loops must each emit 500 diagnostics. Several other cases suppress output in the supplied workload. [Pinned corpus](https://github.com/unixwin/shellbench/tree/4fecc23d226ac5854cc2f1bbf74a6acf310c8ba8)
+- **luish** ran all seven scripts at scale one, with the shell under test also set as `SH` for the build recipes. The harness compares stdout byte for byte, checks exit status and requires empty stderr on each run. The scripts cover arithmetic, arrays, a simulated build, a configure-style script, functions, strings and text processing. [Upstream scripts](https://github.com/luispedro/luish/tree/b43b78dd25fbd671c90b9e3265525d741089414d/bench/scripts)
+- **GNU Hello 2.12.2** ran its distributed `configure --disable-nls --cache-file=/dev/null` in a fresh directory with `CC=/usr/bin/cc` and `CONFIG_SHELL` set to the shell being measured. The warmup also builds and runs `make check` and checks the resulting executable's output. Each timed run checks the generated header and the interpreter in `config.status`. Compilation and project tests after configuration are outside the timer. [GNU release](https://ftp.gnu.org/gnu/hello/hello-2.12.2.tar.gz)
+
+The complete GNU Hello configuration took **7.27 / 6.15 s** on Linux, **24.15 / 22.90 s** on the macOS runner and **30.15 / 30.66 s** on the physical M1 (Tonari / Bash). On the physical Mac a separate compiler trace counted 229 compiler invocations in each shell. The 229 includes compiler identity and version queries. The real configuration remains a separate headline workload from luish's simulated configure. The physical M1 syntax check of GNU Hello fell from 396.87 to 16.53 ms, compared with 25.15 ms for Bash in that paired run.
+
+All 67 comparable ShellSpec cases favored Tonari in the physical Mac rerun with shell order reversed. On the macOS 15 runner, 21 of its 22 slower results involved external `cut` or `sed` and the other used an explicit subshell. The runner's luish build took 3083.944 / 2630.056 ms, compared with 1342.323 / 1888.728 ms on the physical M1. Both are arm64 measurements on different OS releases and hosts.
+
+ShellSpec and fumiyas used release `7d7d0d9`. luish used `78d762c`, before the final syntax-check-only refinement. Unixwin and GNU Hello used `a234864`. The physical Mac used `ca2bcd3` for the reverse-order ShellSpec pass and `a234864` for unixwin, luish and GNU Hello. Each CI artifact contains the host, binary metadata and full results. [ShellSpec and fumiyas](https://github.com/sanohiro/tonari-shell/actions/runs/45531064181) · [luish](https://github.com/sanohiro/tonari-shell/actions/runs/45532863391) · [unixwin and GNU Hello](https://github.com/sanohiro/tonari-shell/actions/runs/45533610889)
+
+On the physical M1, a five-trial comparison of 100,000 successive shifts took 2.683 s before and 0.022 s after the change, against 0.099 s for Bash. Iterating a million quoted array elements five times took 1.183 s immediately before direct field expansion and 0.101 s afterwards, against 1.835 s for Bash in that run. The array count and low and high elements matched. Repeated appends in the 12,001-element sieve inside luish's arrays script went from 1.616 s to 0.079 s in a diagnostic run. Parent argument scopes, sparse indices, empty fields and literal wildcards have direct shell tests.
+
+The first whole-file syntax-check implementation improved GNU Hello but regressed unixwin's Linux parse workloads. On three separate native runner pairs, the original, whole-file and final Tonari / Bash elapsed ratios for 5,000 mixed statements were 0.77, 1.53 and 0.66. The final reader streams short complete statements and tries a bounded parse of the remaining input after a compound stays incomplete. [Initial survey](https://github.com/sanohiro/tonari-shell/actions/runs/45529486446) · [Whole-file version](https://github.com/sanohiro/tonari-shell/actions/runs/45532863391) · [Final reader](https://github.com/sanohiro/tonari-shell/actions/runs/45533610889)
+
+The original luish functions result was excluded because Tonari emitted an error at 128 nested calls. Both shells now finish the Ackermann workload with identical output. The evaluator still limits deep calls and accounts for the process stack limit. One Mac runner lacked `stdbuf` for the unixwin co-process case. Its rerun used Homebrew's GNU `stdbuf` and `tr` for that case only. On the physical Mac, GNU Hello produced identical results for 240 configuration checks, including 219 logged compiler command lines. There were six passes and one platform skip in each package test run.
+
+Linux x86-64 では ShellSpec の 68 件、fumiyas の 16 件、unixwin の 50 件、luish の 7 本がすべて Bash より短い所要時間でした。Mac は、手元の M1 と macOS 15 の CI で傾向が異なります。CI の ShellSpec では外部の `cut` や `sed` を使う処理で遅れが残りました。GNU Hello の構成全体は手元で 30.15 秒対 30.66 秒と近く、Linux CI では 7.27 秒対 6.15 秒、macOS CI では 24.15 秒対 22.90 秒と Bash の方が速い結果でした。
+
+再現には下のコマンドをプロジェクト直下で実行します。比較する二つのシェルには絶対パスを渡します。ShellSpec は毎秒の処理回数、fumiyas は準備を除いた処理時間、それ以外はプロセスの起動を含む経過時間を記録します。短い測定では実行順やホストの違いでも順位が動くため、個別の値と再測定結果も残しています。[計測コード](../tools/bench_external.py)
+
+```sh
+for suite in shellspec fumiyas unixwin luish gnu-hello; do
+  bash tools/ci/external-shell.sh "$suite" "$tonari" "$bash"
+done
+```
+
 <a id="tool-hooks"></a>
 
 ## 2026-11-25 · Interactive tool latency / 日常の開発操作

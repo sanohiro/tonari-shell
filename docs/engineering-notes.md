@@ -1,5 +1,19 @@
 # Engineering notes / 開発知見
 
+## 2026-11-25 · What external shell workloads exposed / 外部ベンチで見つかった実装上の差
+
+A repeated `shift` used to move every remaining positional argument. The session now consumes the front of an owning iterator and exposes its remaining slice to expansion, functions and sourced files. Repeated `a+=(word)` used to copy all existing slots. Contiguous elements now stay dense, sparse indices retain their order, and ordinary appends update the existing buffer. A standalone quoted `"${a[@]}"` can copy stored indexed values directly into argv. Empty strings, whitespace and literal wildcard characters each remain one argument. The real array script checks sorting, a sieve, a queue and string processing in the same execution. [Results](benchmarks.md#external-suites)
+
+`shift` は残りの引数を移動せず、先頭を一つ進めます。配列の末尾追加も全要素をコピーせず、連続した添字の配列をそのまま伸ばします。単独の `"${a[@]}"` は、空文字・空白・ワイルドカードを含む各要素を一つの引数として渡せます。ソート・素数のふるい・キューをまとめて使うスクリプトでも出力を照合しました。[実測](benchmarks.md#external-suites)
+
+When every PATH candidate is missing, an ordinary foreground command can return the lookup result immediately. The next invocation searches PATH again. Permission errors, redirections and active traps retain the execution path needed for their effects. Past 128 nested function calls the evaluator also checks stack usage against its soft limit before admitting deeper calls, up to 256. This lets the Ackermann workload finish with the expected value. [Regression tests](../tests/shell.py)
+
+コマンド検索では、PATH の全候補が存在しないと確認できた場合、その一回の結果を引き継ぎます。次の実行では再検索するので、直前に作られた実行ファイルを発見できます。権限エラー、リダイレクト、シグナルのトラップなどは従来の実行経路で処理します。再帰関数は通常の呼び出しのコストを保ちつつ、128 段を越えた時点でスタックの使用量とソフト上限を確認し、最大 256 段まで進めます。これで外部ベンチの Ackermann 関数も Bash と同じ結果を返しました。[回帰テスト](../tests/shell.py)
+
+GNU Hello's generated configure script is 834,518 bytes. Ordinary noninteractive script files can now look ahead for a complete compound command in their input buffer. Execution still advances one parsed command at a time so that an earlier command can affect how the next one parses. Syntax-only mode streams short complete statements. When an incomplete compound grows beyond 2 KiB in a bounded in-memory script, one parse can finish the remaining source. An unsuccessful attempt uses incremental diagnostics. [Configure timings and release checks](benchmarks.md#external-suites)
+
+GNU Hello の `configure` では構文チェック、ヘルプ表示、キャッシュなしの構成完了を個別に測りました。構文を確認する場合はまとめて解析でき、実行する場合は直前のコマンドによる設定変更を反映します。構成後には両シェルの `config.h` を比較し、実際にビルドしてテストを走らせます。[測定方法](benchmarks.md#external-suites)
+
 ## 2026-11-25 · Everyday shell integrations / 常用ツールを組み合わせた端末
 
 For nvm, time a fresh terminal through the first successful `node --version` and the return of the prompt. Resolve `command -v node` after that measurement to verify that the chosen version came from the test installation. On M1 the unmodified startup script launched dozens of small utilities while selecting the default version. This workload exercises both the script evaluator and pipelines that launch external programs. [Measurements and reproduction](benchmarks.md#tool-hooks)
