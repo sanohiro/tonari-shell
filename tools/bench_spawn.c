@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <spawn.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -82,6 +83,12 @@ static int pipeline(char *value, int merged, int builtin, int redirect_cat) {
 }
 
 int main(int argc, char **argv) {
+    if (argc == 3 && strcmp(argv[1], "--signal-exit") == 0) {
+        int sig = atoi(argv[2]);
+        if (sig <= 0 || signal(sig, SIG_DFL) == SIG_ERR || write(STDOUT_FILENO, ".", 1) != 1)
+            return 1;
+        return raise(sig) == 0 ? 0 : 1;
+    }
     if (argc == 4 && !strcmp(argv[1], "--complete")) {
         char gate;
         if (write(1, "ready\n", 6) != 6 || read(0, &gate, 1) != 1) return 1;

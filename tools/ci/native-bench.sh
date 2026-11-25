@@ -218,6 +218,12 @@ case "$SUITE" in
   external-shared-input)
     python3 tools/ci/yash-stdin.py --bash "$ref" --current "$current" --small "$bin/small" --large "$bin/large" > "$out/stdin.jsonl" ;;
   external-yash-*)
+    if [[ $SUITE == external-yash-signal-cost ]]; then
+      cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
+      python3 tools/ci/yash-signals.py --tonari "$current" --bash "$ref" \
+        --control "$bin/spawn-control" --runs 31 > "$out/signals.jsonl"
+      exit
+    fi
     if [[ $SUITE == external-yash-plain ]]; then
       python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
         --case plain-script --case plain-script-30 --runs 81 > "$out/throughput.jsonl"
