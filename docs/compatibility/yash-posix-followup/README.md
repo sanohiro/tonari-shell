@@ -24,6 +24,10 @@ In the three alias cases the original observations were an empty line where yash
 
 The corrected case passed 11/11 times on each native CI host. Bash and previous Tonari failed the same assertion on all 11 trials per host. The separately gated terminal fixture passed all nine cases per shell on the physical M1. The 1,411-entry ordinary Bash audit retained every previous verdict. 修正ケースは Linux・macOS でそれぞれ11回合格し、通常の Bash モードも再検証しました。[Native measurements](https://github.com/sanohiro/tonari-shell/actions/runs/45702341425) · [Benchmark details](../../benchmarks.md)
 
+The full Linux PR run had 11,058 passes, six failed assertions, fourteen skips and one unexpected pass. On the physical M1, the complete 11,079-case run on the same filesystem as its previous full run gained the corrected case and lost no passes. Its raw count was 11,056 passes. The two additional failures on that machine, `test-p.tst:155,156`, check a set-group-ID directory and its symlink. Under `/private/tmp` the directories inherited group `wheel`, which the test user does not belong to. A direct chmod/stat control confirmed that the requested group bit was absent. Running the unchanged 241-case fixture in a directory owned by the user's group (`staff`) passed all 241 assertions in previous Tonari, new Tonari and Bash. Neither full host run had a Bash-only pass. [Verdicts for the original 22 and the two filesystem-dependent cases](remaining-verdicts.tsv) · [Linux full run](https://github.com/sanohiro/tonari-shell/actions/runs/45703491481)
+
+実機 Mac の全件結果には、テスト用ディレクトリに setgid ビットが付かなかった2件が別にあります。修正前も同じ2件が失敗しています。ユーザーの所属グループでディレクトリを作って元の試験を丸ごと再実行すると、新旧 Tonari と Bash ともに241件すべて合格しました。元の失敗と追試の合格は個別表に併記しています。
+
 ## Bash-passing cases / Bash が通るケース
 
 | Host | Cases | Tonari passes | Both pass | Only Tonari passes | Only Bash passes | Other Tonari verdicts |

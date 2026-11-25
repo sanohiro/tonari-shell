@@ -1,0 +1,25 @@
+upstream case	prior macOS CI Tonari	Linux Tonari	Linux Bash	physical M1 Tonari	physical M1 Bash	supplemental M1 condition	supplemental Tonari	supplemental Bash
+alias-p.tst:593: alias in command substitution	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	n/a	n/a	n/a
+command-p.tst:188: output of describing non-special built-in (-v)	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	n/a	n/a	n/a
+exit-p.tst:115: exit built-in kills shell according to exit status (TERM)	SKIPPED	SKIPPED	SKIPPED	SKIPPED	SKIPPED	n/a	n/a	n/a
+exit-p.tst:133: exit built-in kills shell according to exit status (KILL)	SKIPPED	SKIPPED	SKIPPED	SKIPPED	SKIPPED	n/a	n/a	n/a
+exit-p.tst:151: exit built-in kills subshell according to exit status	SKIPPED	SKIPPED	SKIPPED	SKIPPED	SKIPPED	n/a	n/a	n/a
+exit-p.tst:169: shell kills itself according to final exit status	SKIPPED	SKIPPED	SKIPPED	SKIPPED	SKIPPED	n/a	n/a	n/a
+exit-p.tst:186: subshell kills itself according to final exit status	SKIPPED	SKIPPED	SKIPPED	SKIPPED	SKIPPED	n/a	n/a	n/a
+input-p.tst:89: shell input is line-wise (command substitution)	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	n/a	n/a	n/a
+quote-p.tst:444: aliases are ignored in command substitution in double quotes	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	n/a	n/a	n/a
+redir-p.tst:290: output duplication, failure (unreadable file descriptor)	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	n/a	n/a	n/a
+return-p.tst:159: default exit status in trap in function	ERROR[PASSED_UNEXPECTEDLY]	ERROR[PASSED_UNEXPECTEDLY]	ERROR[PASSED_UNEXPECTEDLY]	ERROR[PASSED_UNEXPECTEDLY]	ERROR[PASSED_UNEXPECTEDLY]	n/a	n/a	n/a
+simple-p.tst:172: non-intrinsic command echo is not found w/o PATH	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	ERROR[FAILED]	n/a	n/a	n/a
+simple-p.tst:18: redirections precedes assignments for non-special-builtin command	ERROR[FAILED]	OK[PASSED]	ERROR[FAILED]	OK[PASSED]	ERROR[FAILED]	n/a	n/a	n/a
+test-p.tst:155: test -g setgroupid	OK[PASSED]	OK[PASSED]	OK[PASSED]	ERROR[FAILED]	ERROR[FAILED]	unchanged fixture in staff directory	OK[PASSED]	OK[PASSED]
+test-p.tst:156: test -g setgroupidlink	OK[PASSED]	OK[PASSED]	OK[PASSED]	ERROR[FAILED]	ERROR[FAILED]	unchanged fixture in staff directory	OK[PASSED]	OK[PASSED]
+testtty-p.tst:10: unary -t: empty operand	SKIPPED	SKIPPED	SKIPPED	SKIPPED	SKIPPED	PTY with supported builtin guard	OK[PASSED]	OK[PASSED]
+testtty-p.tst:14: unary -t: non-numeric operand	SKIPPED	SKIPPED	SKIPPED	SKIPPED	SKIPPED	PTY with supported builtin guard	OK[PASSED]	OK[PASSED]
+testtty-p.tst:18: unary -t: negative operand	SKIPPED	SKIPPED	SKIPPED	SKIPPED	SKIPPED	PTY with supported builtin guard	OK[PASSED]	OK[PASSED]
+testtty-p.tst:22: unary -t: closed file descriptor 0	SKIPPED	SKIPPED	SKIPPED	SKIPPED	SKIPPED	PTY with supported builtin guard	OK[PASSED]	OK[PASSED]
+testtty-p.tst:26: unary -t: non-tty file descriptor 0	SKIPPED	SKIPPED	SKIPPED	SKIPPED	SKIPPED	PTY with supported builtin guard	OK[PASSED]	OK[PASSED]
+testtty-p.tst:30: unary -t: tty file descriptor 0	SKIPPED	SKIPPED	SKIPPED	SKIPPED	SKIPPED	PTY with supported builtin guard	OK[PASSED]	OK[PASSED]
+testtty-p.tst:34: unary -t: closed file descriptor 5	SKIPPED	SKIPPED	SKIPPED	SKIPPED	SKIPPED	PTY with supported builtin guard	OK[PASSED]	OK[PASSED]
+testtty-p.tst:38: unary -t: non-tty file descriptor 5	SKIPPED	SKIPPED	SKIPPED	SKIPPED	SKIPPED	PTY with supported builtin guard	OK[PASSED]	OK[PASSED]
+testtty-p.tst:42: unary -t: tty file descriptor 5	SKIPPED	SKIPPED	SKIPPED	SKIPPED	SKIPPED	PTY with supported builtin guard	OK[PASSED]	OK[PASSED]
