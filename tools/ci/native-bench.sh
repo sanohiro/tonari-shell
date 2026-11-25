@@ -4,6 +4,9 @@ bin="$RUNNER_TEMP/bin"
 current="$bin/current"
 out="$PWD/results"
 ref=/bin/bash
+case "$SUITE" in
+  bensch-*|oils-*|spec-builtins) exec bash tools/ci/external-spec.sh ;;
+esac
 # These Bash archives match the GNU tests used by the distribution audits.
 download_bash() {
   local version=$1 hash=$2 path=$3
