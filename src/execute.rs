@@ -1326,7 +1326,8 @@ fn start_raw(
     session: &mut Session,
     launch: crate::jobs::Launch,
 ) -> io::Result<Stage> {
-    let observable = raw.redirects.iter().any(redirection_observable)
+    let observable = needs_ordered_redirects(&raw, session)
+        || raw.redirects.iter().any(redirection_observable)
         || raw
             .words
             .iter()
@@ -1863,8 +1864,18 @@ fn prepare(
     standalone: bool,
 ) -> Result<PreparedCommand, crate::expansion::Error> {
     let captured = Cell::new(None);
+    let words = expand_command_words(&mut raw, session, last_status, &captured)?;
+    prepare_expanded(raw, words, session, last_status, standalone, &captured)
+}
+
+fn expand_command_words(
+    raw: &mut SimpleCommand<Word>,
+    session: &mut Session,
+    last_status: u8,
+    captured: &Cell<Option<u8>>,
+) -> Result<Vec<String>, crate::expansion::Error> {
     let mut words = Vec::with_capacity(raw.words.len());
-    let mut original = Expansion::new(session, last_status, &captured);
+    let mut original = Expansion::new(session, last_status, captured);
     let mut positions = raw
         .assignments
         .iter_mut()
@@ -1873,7 +1884,7 @@ fn prepare(
             _ => None,
         })
         .peekable();
-    for (index, word) in raw.words.into_iter().enumerate() {
+    for (index, word) in std::mem::take(&mut raw.words).into_iter().enumerate() {
         if positions.peek().is_some_and(|p| **p == index) {
             *positions.next().unwrap() = words.len();
         }
@@ -1882,6 +1893,17 @@ fn prepare(
             word => original.append_fields(word, &mut words)?,
         }
     }
+    Ok(words)
+}
+
+fn prepare_expanded(
+    raw: SimpleCommand<Word>,
+    words: Vec<String>,
+    session: &mut Session,
+    last_status: u8,
+    standalone: bool,
+    captured: &Cell<Option<u8>>,
+) -> Result<PreparedCommand, crate::expansion::Error> {
     // A lone assignment has no following word, redirect or trace that needs a copy.
     let direct_assignment = standalone
         && words.is_empty()
@@ -1901,7 +1923,7 @@ fn prepare(
         let mut exp = Expansion::with_assignments(
             session,
             last_status,
-            &captured,
+            captured,
             &mut assignments,
             standalone && words.is_empty(),
         );
@@ -2071,7 +2093,7 @@ fn prepare(
         let mut exp = Expansion::with_assignments(
             isolated.as_mut().unwrap_or(session),
             last_status,
-            &captured,
+            captured,
             if assignment_only {
                 &mut cmd.assignments
             } else {
@@ -2237,6 +2259,165 @@ fn job_label(
     Some(label)
 }
 
+// In sh mode a regular command installs its redirects after argument expansion
+// and before expanding its assignment prefixes (POSIX 2.9.1.1).
+fn needs_ordered_redirects(raw: &SimpleCommand<Word>, session: &Session) -> bool {
+    if !session.posix
+        || raw.redirects.is_empty()
+        || raw.assignments.is_empty()
+        || raw.words.is_empty()
+    {
+        return false;
+    }
+    if let Some(name) = raw.words[0].as_literal() {
+        if special_builtin(name) {
+            return false;
+        }
+        // An infallible literal prefix only becomes visible during dispatch.
+        // With literal file redirects the ordinary route has the same effects.
+        if !session.xtrace
+            && raw.words[1..].iter().all(|w| w.as_literal().is_some())
+            && raw.assignments.iter().all(|(key, value)| {
+                matches!(value, Assignment::Scalar(Word::Literal(_)))
+                    && crate::parser::is_identifier(key)
+                    && !session.is_nameref(key)
+                    && !session.integer(key)
+                    && !session.readonly(key)
+            })
+            && raw.redirects.iter().all(|r| {
+                r.variable.is_none()
+                    && matches!(
+                        r.target,
+                        Target::Read
+                            | Target::Write
+                            | Target::Clobber
+                            | Target::Append
+                            | Target::ReadWrite
+                    )
+                    && r.word.as_literal().is_some()
+            })
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn run_ordered(
+    mut raw: SimpleCommand<Word>,
+    name: Option<String>,
+    status: u8,
+    replace: bool,
+    session: &mut Session,
+) -> io::Result<Flow> {
+    let captured = Cell::new(None);
+    let words = match expand_command_words(&mut raw, session, status, &captured) {
+        Ok(words) => words,
+        Err(e) => {
+            eprintln!("tonari: {e}");
+            return Ok(e.flow(session));
+        }
+    };
+    let redirects = if words.first().is_some_and(|w| !special_builtin(w)) {
+        std::mem::take(&mut raw.redirects)
+    } else {
+        Vec::new()
+    };
+    // An external utility expands its redirection operands in a child
+    // environment. Only dynamic operands can expose that distinction.
+    let child_redirects = redirects
+        .iter()
+        .any(|r| r.word.as_literal().is_none() || redirection_observable(r))
+        && {
+            let mut query = PreparedCommand {
+                words: words.clone(),
+                ..Default::default()
+            };
+            lookup::command_prefix(&mut query, session);
+            builtin(&query, status, session).is_none()
+        };
+    named_fd::with_redirects(redirects, session, status, child_redirects, |session| {
+        let cmd = match prepare_expanded(raw, words, session, status, true, &captured) {
+            Ok(cmd) => cmd,
+            Err(e) => {
+                eprintln!("tonari: {e}");
+                return Ok((e.flow(session), false));
+            }
+        };
+        let exec = matches!(builtin(&cmd, status, session), Some(Builtin::Exec));
+        let flow = run_prepared(cmd, name, status, replace, session)?;
+        let commit = exec && matches!(flow, Flow::Continue(0));
+        Ok((flow, commit))
+    })
+}
+
+fn run_prepared(
+    mut cmd: PreparedCommand,
+    name: Option<String>,
+    last_status: u8,
+    replace: bool,
+    session: &mut Session,
+) -> io::Result<Flow> {
+    if !cmd.named_redirects.is_empty() {
+        let launch = session.jobs.launch(false, true);
+        return named_fd::run(cmd, session, last_status, replace, launch);
+    }
+    if let Some(builtin) = builtin(&cmd, last_status, session) {
+        return run_builtin(builtin, &mut cmd, session, last_status, replace);
+    }
+    // A foreground builtin runs in this shell. Snapshot terminal modes
+    // only when preparing to hand the terminal to a child process.
+    let mut launch = session.jobs.launch(false, true);
+    if !cmd.cacheable() {
+        if cmd.assignments.iter().any(|(k, _)| k == "PATH") {
+            session.hashes.clear();
+        }
+    } else if !replace {
+        match hash::resolve(session, &cmd.words[0]) {
+            Ok(path) => cmd.resolved = path,
+            Err(hash::Absent)
+                if cmd.redirects.is_empty()
+                    && launch.group.is_none()
+                    && !session.traps.active() =>
+            {
+                eprintln!("tonari: {}: command not found", cmd.words[0]);
+                return Ok(Flow::Continue(127));
+            }
+            Err(hash::Absent) => {}
+        }
+    }
+    if replace && launch.group.is_none() {
+        let executable = External::new(&cmd, session);
+        return Ok(Flow::Continue(
+            if apply(&actions(&cmd), here_input::PIPE_LIMIT) {
+                executable.exec(
+                    (cmd.assignments.is_empty() && cmd.redirects.is_empty()).then_some(session),
+                )
+            } else {
+                1
+            },
+        ));
+    }
+    let status = match start(&mut cmd, None, None, None, last_status, session, launch)? {
+        Stage::Child(pid) if launch.group.is_some() => {
+            launch.parent(pid);
+            session
+                .jobs
+                .finish(
+                    launch,
+                    vec![Ok(pid)],
+                    name.unwrap_or_else(|| cmd.words.join(" ")),
+                    session.pipefail,
+                    &mut session.pipe_status,
+                )?
+                .0
+        }
+        Stage::Child(pid) => wait(pid)?,
+        Stage::Status(code) => code,
+    };
+    Ok(Flow::Continue(status))
+}
+
 pub fn run_pipeline(
     mut pipeline: Pipeline<Word>,
     last_status: u8,
@@ -2261,71 +2442,17 @@ pub fn run_pipeline(
             return Ok(Flow::Continue(0));
         }
         let name = job_label(std::slice::from_ref(&raw), false, session);
-        let mut cmd = match prepare(raw, session, last_status, true) {
+        if needs_ordered_redirects(&raw, session) {
+            return run_ordered(raw, name, last_status, replace, session);
+        }
+        let cmd = match prepare(raw, session, last_status, true) {
             Ok(cmd) => cmd,
             Err(e) => {
                 eprintln!("tonari: {e}");
                 return Ok(e.flow(session));
             }
         };
-        if !cmd.named_redirects.is_empty() {
-            let launch = session.jobs.launch(false, true);
-            return named_fd::run(cmd, session, last_status, replace, launch);
-        }
-        if let Some(builtin) = builtin(&cmd, last_status, session) {
-            return run_builtin(builtin, &mut cmd, session, last_status, replace);
-        }
-        // A foreground builtin runs in this shell. Snapshot terminal modes
-        // only when preparing to hand the terminal to a child process.
-        let mut launch = session.jobs.launch(false, true);
-        if !cmd.cacheable() {
-            if cmd.assignments.iter().any(|(k, _)| k == "PATH") {
-                session.hashes.clear();
-            }
-        } else if !replace {
-            match hash::resolve(session, &cmd.words[0]) {
-                Ok(path) => cmd.resolved = path,
-                Err(hash::Absent)
-                    if cmd.redirects.is_empty()
-                        && launch.group.is_none()
-                        && !session.traps.active() =>
-                {
-                    eprintln!("tonari: {}: command not found", cmd.words[0]);
-                    return Ok(Flow::Continue(127));
-                }
-                Err(hash::Absent) => {}
-            }
-        }
-        if replace && launch.group.is_none() {
-            let executable = External::new(&cmd, session);
-            return Ok(Flow::Continue(
-                if apply(&actions(&cmd), here_input::PIPE_LIMIT) {
-                    executable.exec(
-                        (cmd.assignments.is_empty() && cmd.redirects.is_empty()).then_some(session),
-                    )
-                } else {
-                    1
-                },
-            ));
-        }
-        let status = match start(&mut cmd, None, None, None, last_status, session, launch)? {
-            Stage::Child(pid) if launch.group.is_some() => {
-                launch.parent(pid);
-                session
-                    .jobs
-                    .finish(
-                        launch,
-                        vec![Ok(pid)],
-                        name.unwrap_or_else(|| cmd.words.join(" ")),
-                        session.pipefail,
-                        &mut session.pipe_status,
-                    )?
-                    .0
-            }
-            Stage::Child(pid) => wait(pid)?,
-            Stage::Status(code) => code,
-        };
-        return Ok(Flow::Continue(status));
+        return run_prepared(cmd, name, last_status, replace, session);
     }
     let mut launch = session.jobs.launch(background, pipeline.len() == 1);
     let managed = background || launch.group.is_some();
