@@ -25,6 +25,7 @@ def execute(binary, code, script, cwd, env, timeout):
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE if script else subprocess.STDOUT)
     stdout, stderr = bytearray(), bytearray()
     limit = None
+    exited = False
     signal.setitimer(signal.ITIMER_REAL, timeout)
     try:
         with selectors.DefaultSelector() as poll:
@@ -55,7 +56,9 @@ def execute(binary, code, script, cwd, env, timeout):
                         else:
                             poll.unregister(stream)
                             stream.close()
-            proc.wait()
+            # Keep the leader's PID reserved until its process group is cleaned.
+            os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOWAIT)
+            exited = True
     except (TimeoutError, OverflowError) as exc:
         limit = "timeout" if isinstance(exc, TimeoutError) else "output"
     finally:
@@ -65,6 +68,11 @@ def execute(binary, code, script, cwd, env, timeout):
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        except PermissionError:
+            # Darwin can report EPERM for a group with only exited members.
+            # Preserve the error if the leader itself still requires stopping.
+            if not exited:
+                proc.kill()
         proc.wait()
         for stream in (proc.stdin, proc.stdout, proc.stderr):
             if stream:
