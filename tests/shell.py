@@ -104,6 +104,10 @@ class ShellTests(unittest.TestCase):
             self.assertEqual(fields("v=$1; set -- $v", v),
                              "<" + pad + "><left\rside\vstill\fhere><right>")
             self.assertEqual(fields('v=$1; set -- "$v"', v), "<" + v + ">")
+            self.assertEqual(fields('v=$1; set -- before $v after', ' \t\n' * 100),
+                             "<before><after>")
+            self.assertEqual(fields('v=$1; set -- "pre"$v"post"', pad + " middle end"),
+                             "<pre" + pad + "><middle><endpost>")
             self.assertEqual(fields("IFS=:; v=$1; set -- $v", pad + ":x y::z"),
                              "<" + pad + "><x y><><z>")
             (self.cwd / "match.txt").touch()
