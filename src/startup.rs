@@ -117,12 +117,17 @@ pub fn initialize(session: &mut Session, invocation: &Invocation) -> Flow {
     if invocation.check {
         return Flow::Continue(0);
     }
-    if invocation.login && !invocation.noprofile {
+    if invocation.login && !invocation.noprofile && (invocation.as_sh || !session.posix) {
         if let Some(exit @ Flow::Exit(_)) = optional(session, Path::new("/etc/profile")) {
             return exit;
         }
         if let Some(home) = session.get("HOME") {
-            for name in [".bash_profile", ".bash_login", ".profile"] {
+            let profiles: &[&str] = if invocation.as_sh {
+                &[".profile"]
+            } else {
+                &[".bash_profile", ".bash_login", ".profile"]
+            };
+            for name in profiles {
                 if let Some(flow) = optional(session, &Path::new(&home).join(name)) {
                     if let Flow::Exit(_) = flow {
                         return flow;
@@ -132,7 +137,7 @@ pub fn initialize(session: &mut Session, invocation: &Invocation) -> Flow {
             }
         }
     }
-    if invocation.interactive {
+    if invocation.interactive && !invocation.as_sh && !session.posix {
         if !invocation.login && !invocation.norc {
             #[cfg(target_os = "linux")]
             if let Some(exit @ Flow::Exit(_)) = optional(session, Path::new("/etc/bash.bashrc")) {
@@ -147,12 +152,25 @@ pub fn initialize(session: &mut Session, invocation: &Invocation) -> Flow {
                 return optional(session, &path).unwrap_or(Flow::Continue(0));
             }
         }
-    } else if let Some(path) = session.get("BASH_ENV").filter(|p| !p.is_empty()) {
+    } else {
+        let var = if invocation.interactive {
+            "ENV"
+        } else if invocation.as_sh || session.posix {
+            return Flow::Continue(0);
+        } else {
+            "BASH_ENV"
+        };
+        let Some(path) = session.get(var).filter(|p| !p.is_empty()) else {
+            return Flow::Continue(0);
+        };
+        if unsafe { libc::getuid() != libc::geteuid() || libc::getgid() != libc::getegid() } {
+            return Flow::Continue(0);
+        }
         let path = if path.contains(['$', '`', '\\']) {
             let word = match crate::parser::expansion_string(&path) {
                 Ok(word) => word,
                 Err(error) => {
-                    eprintln!("tonari: BASH_ENV: {}", error.message());
+                    eprintln!("tonari: {var}: {}", error.message());
                     return Flow::Continue(1);
                 }
             };

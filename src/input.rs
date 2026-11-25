@@ -145,18 +145,22 @@ fn error(message: impl std::fmt::Display, status: u8) -> Flow {
 }
 
 fn syntax_error(session: &Session, problem: parser::Error, first_line: usize) -> Flow {
+    let flow = if session.posix && !session.interactive {
+        Flow::Exit(2)
+    } else {
+        Flow::Continue(2)
+    };
     if session.source_depth > 0
         && let Some(path) = session.source_names.last()
     {
-        return error(
-            format_args!(
-                "{path}: command starting at line {first_line}: {}",
-                problem.message()
-            ),
-            2,
+        eprintln!(
+            "tonari: {path}: command starting at line {first_line}: {}",
+            problem.message()
         );
+    } else {
+        eprintln!("tonari: {}", problem.message());
     }
-    error(problem.message(), 2)
+    flow
 }
 
 fn blank_or_comment(line: &str) -> bool {

@@ -14,6 +14,8 @@ pub struct Invocation {
     pub positional: Vec<String>,
     pub interactive: bool,
     pub login: bool,
+    pub as_sh: bool,
+    pub posix: bool,
     pub norc: bool,
     pub noprofile: bool,
     pub noediting: bool,
@@ -55,6 +57,11 @@ pub fn parse(
 ) -> Result<Action, String> {
     let name = args.next().unwrap_or_else(|| "tonari".into());
     let mut login = name.as_bytes().starts_with(b"-");
+    let as_sh = matches!(
+        name.as_bytes().rsplit(|b| *b == b'/').next(),
+        Some(b"sh" | b"-sh")
+    );
+    let mut posix = as_sh;
     let mut args = args.peekable();
     let mut interactive = false;
     let mut command = false;
@@ -89,6 +96,7 @@ pub fn parse(
             "--" | "-" => break,
             "--help" => return Ok(Action::Help),
             "--version" => return Ok(Action::Version),
+            "--posix" => posix = true,
             "--login" => login = true,
             "--norc" => norc = true,
             "--noediting" => noediting = true,
@@ -124,6 +132,7 @@ pub fn parse(
                         'O' => shopts.push((enabled, args.next().map(utf8).transpose()?)),
                         'o' => match args.next().as_deref().and_then(|a| a.to_str()) {
                             Some("braceexpand") => braceexpand = enabled,
+                            Some("posix") => posix = enabled,
                             Some("pipefail") => pipefail = enabled,
                             Some("errexit") => errexit = enabled,
                             Some("verbose") => verbose = enabled,
@@ -172,6 +181,8 @@ pub fn parse(
         positional,
         interactive,
         login,
+        as_sh,
+        posix,
         norc,
         noprofile,
         noediting,

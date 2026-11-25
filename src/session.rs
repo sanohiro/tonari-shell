@@ -131,6 +131,7 @@ pub struct Session {
     shell_pid: ShellPid,
     pub interactive: bool,
     pub login: bool,
+    pub posix: bool,
     pub logout_started: bool,
     pub allexport: bool,
     pub xtrace: bool,
@@ -411,7 +412,7 @@ impl Session {
                         i += 1;
                         if let Some(value) = self.option_value(name, true) {
                             *value = enable;
-                            self.editing_option(name, enable);
+                            self.option_changed(name, enable);
                         } else {
                             eprintln!("tonari: set: {name}: unsupported option");
                             return 2;

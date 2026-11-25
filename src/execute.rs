@@ -530,6 +530,32 @@ enum Builtin {
     Unknown,
 }
 
+pub(crate) fn special_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        ":" | "."
+            | "break"
+            | "continue"
+            | "eval"
+            | "exec"
+            | "exit"
+            | "export"
+            | "readonly"
+            | "return"
+            | "set"
+            | "shift"
+            | "times"
+            | "trap"
+            | "unset"
+    )
+}
+
+fn posix_special(cmd: &PreparedCommand, session: &Session) -> bool {
+    session.posix
+        && cmd.search == lookup::Search::Normal
+        && cmd.words.first().is_some_and(|w| special_builtin(w))
+}
+
 fn builtin(cmd: &PreparedCommand, last_status: u8, session: &Session) -> Option<Builtin> {
     if cmd.compound.is_some() {
         return Some(Builtin::Compound);
@@ -537,7 +563,10 @@ fn builtin(cmd: &PreparedCommand, last_status: u8, session: &Session) -> Option<
     let Some(name) = cmd.words.first() else {
         return Some(Builtin::Status(cmd.empty_status));
     };
-    if cmd.search == lookup::Search::Normal && session.functions.contains_key(name) {
+    if cmd.search == lookup::Search::Normal
+        && session.functions.contains_key(name)
+        && !(session.posix && special_builtin(name))
+    {
         return Some(Builtin::Function);
     }
     if session.disabled_builtins.contains(name) {
@@ -680,6 +709,7 @@ fn eval_builtin(
     last_status: u8,
     in_stage_child: bool,
 ) -> Flow {
+    let persistent = !cmd.assignments.is_empty() && posix_special(cmd, session);
     let mut bindings = session.bind(&cmd.assignments);
     let args = cmd.words.get(1..).unwrap_or_default();
     let result = match builtin {
@@ -818,7 +848,9 @@ fn eval_builtin(
             Flow::Continue(1)
         }
     };
-    session.restore(bindings);
+    if !persistent {
+        session.restore(bindings);
+    }
     result
 }
 
@@ -1810,7 +1842,7 @@ fn prepare(
                     crate::session::array::subscript(&key).map_or(key.as_str(), |(base, _)| base);
                 if exp.session.readonly(base) {
                     let error = crate::expansion::Error::readonly(base);
-                    if words.is_empty() {
+                    if words.is_empty() || exp.session.posix {
                         return Err(error);
                     }
                     eprintln!("tonari: {error}");
