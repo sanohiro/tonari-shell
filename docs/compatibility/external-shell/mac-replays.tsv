@@ -1,0 +1,20 @@
+suite	case	condition	runs	tonari_ms	bash_ms	ratio
+oils	assign/38	original	25	30.677333	34.405208	0.891648
+oils	background/17	original	25	125.174125	134.634083	0.929736
+oils	background/18	original	25	113.578500	128.337083	0.885001
+oils	builtin-kill/16	original	25	235.735875	244.238750	0.965186
+oils	builtin-trap/30	original	25	133.783500	144.917958	0.923167
+oils	pipeline/10	original	25	30.930125	34.777458	0.889373
+oils	pipeline/22	original	25	128.709500	144.238750	0.892336
+oils	redirect/23	original	25	35.505083	40.519542	0.876246
+oils	redirect/28	original	25	5.042500	8.890208	0.567197
+oils	subshell/1	original	25	13.612000	17.442375	0.780398
+oils	vars-special/14	original	25	24.044125	27.769625	0.865843
+spec-builtins	portable/test_jobs_fg_bg/7	original	25	124.854208	130.551625	0.956359
+spec-builtins	portable/test_kill_wait/12	original	25	129.291500	139.880875	0.924297
+spec-builtins	portable/test_kill_wait/14	original	25	133.240375	141.309417	0.942898
+spec-builtins	portable/test_kill_wait/15	original	25	132.378041	142.955583	0.926008
+spec-builtins	portable/test_jobs_fg_bg/7	sleep 0	25	5.470125	8.274042	0.661119
+spec-builtins	portable/test_kill_wait/12	sleep 0	25	5.513459	8.359709	0.659528
+spec-builtins	portable/test_kill_wait/14	sleep 0	25	5.827750	8.686291	0.670914
+spec-builtins	portable/test_kill_wait/15	sleep 0	25	5.058834	8.734708	0.579165

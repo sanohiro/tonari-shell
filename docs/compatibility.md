@@ -2,6 +2,9 @@
 
 <a id="shell-modes"></a>
 
+The [bensch and Oils comparison](compatibility/external-shell/README.md) records Bash and Tonari results for individual interactive, builtin and language cases. 対話操作・組み込み・言語仕様の外部試験について、ケースごとの Bash との差と再現方法を記録しています。
+
+
 ## Bash by default, POSIX on request / 既定の Bash 互換動作と POSIX モード
 
 Tonari uses one executable. Starting it as `tonari` or through its private `libexec/tonari/bash` path selects Bash-compatible behavior by default, so interactive users and tools that request Bash get the interface they expect. Starting the same executable under the name `sh` selects the `sh` startup rules and enables POSIX mode after startup. Use `tonari --posix` to enable the mode from the start, or `set -o posix` to enable it in a running shell.
