@@ -1,5 +1,53 @@
 # Startup and execution / 起動と実行性能
 
+<a id="configure-pairs"></a>
+
+## 2026-11-25 · Why a full configure can lose to Bash / 個別の処理が速くても configure が逆転した理由
+
+The previous macOS CI result (20.484 s Tonari, 19.488 s Bash) measured the entire configure. The three original Tonari samples were 20.763, 19.267 and 20.484 s. Bash took 20.737, 19.488 and 17.419 s. Those samples retain total elapsed time only. We repeated the comparison with the same absolute interpreter path, fresh build path and compiler on both sides. We alternated the order and checked all progress results, the generated header, the config.status interpreter, exit status and stderr. A separate diagnostic copy timed the actual compiler and its generated executables within each run. [Original samples](https://github.com/sanohiro/tonari-shell/actions/runs/45562340445) · [Paired runs before the change](https://github.com/sanohiro/tonari-shell/actions/runs/45579287698) · [Driver](../tools/ci/configure-pairs.py)
+
+変更前の macOS CI では、計測用の6組中3組で Tonari と Bash の順位が逆転しました。以下はその3組の内訳で、正の値は Tonari のほうが長いことを示します。各行は同じ組の実測です。「その他」にはシェル本体、計時対象外の外部コマンド、ファイル操作、計測器、スケジューリングが入ります。両方とも毎回コンパイラを229回、生成した検査プログラムを46回実行しました。別に実行した計測器なしの6組では Tonari が4勝、Bash が2勝でした。[イベントと実行順](https://github.com/sanohiro/tonari-shell/actions/runs/45579287698)
+
+| Previous macOS CI, Tonari minus Bash (s) | Compiler | Generated tests | Other elapsed | Whole run |
+|---|---:|---:|---:|---:|
+| Pair 3 | +0.461 | +0.083 | +0.536 | +1.080 |
+| Pair 4 | +1.055 | −0.013 | +0.128 | +1.170 |
+| Pair 5 | +1.281 | +0.031 | −0.218 | +1.094 |
+
+A second native run recorded the compiler’s kernel-reported user and system CPU time with `wait4`. In macOS pair 1, Tonari took 1.991 s longer overall. Compiler elapsed time was 1.762 s longer, and its charged CPU time was 1.645 s higher. Of the 229 compiler calls, 156 took longer elapsed time in invocation order. In pair 2 the compiler was 2.155 s faster under Tonari. In pair 4 the compiler was 0.244 s faster, but the other elapsed time excluding the generated probes was 1.537 s longer. The records localize elapsed time and CPU time to these operations. The underlying host-level cause remains undetermined. On the Linux x86-64 runner, the six uninstrumented pairs all favored Tonari by 0.265–0.349 s. [Both shells’ wall time, CPU time and individual child records](https://github.com/sanohiro/tonari-shell/actions/runs/45582195287)
+
+The release had also been doing extra filesystem work. On the physical M1, GNU Hello invoked `cat` 218 times with an expanded here-document on fd 0 followed by a file open on fd 1. It also used other redirection orders. Across the entire configure, Tonari opened 261 here-inputs and created 128 temporary files, ranging from 514 to 53,335 bytes. The new version created zero for those same 261 inputs. Both builds produced the same header and all 240 checks. The count came from separate diagnostic builds that recorded calls to `here_input::open` and `temporary`. All release timing below excludes these counters. [Implementation and reader behavior](engineering-notes.md) · [Benchmarked code](https://github.com/sanohiro/tonari-shell/commit/026d8a2)
+
+A separate untimed M1 run recorded the compiler argument vector for every invocation and SHA-256 of each named C, assembly or preprocessed source argument. The two shells issued the same 229 compiler argument vectors in the same order. All 222 calls with named source files supplied byte-identical source. The other seven calls had no such named input. The 240 checks and `config.h` matched. The final build repeated that comparison and also inspected the exported environment in a clean startup. The differences were `SHLVL` after configure re-executed the shell, `_` for every call and `PWD` on 16 calls. The working directory was identical. Replaying the two captured environments directly with the same C source and compiler gave medians of 28.62 / 28.96 ms for compilation and 57.94 / 58.83 ms for compilation and linking (Tonari environment / Bash environment, 64 runs). In this M1 control the compiler took slightly less time with the Tonari environment. [Physical samples](native-2026-11-25/configure-m1.json)
+
+起動だけを見ると、最初の修正版の macOS CI で、起動済みシェルから外部プログラムの `main` までの中央値は Tonari **2.128 ms**、Bash **3.030 ms**、子が終了を始めて親が処理を再開するまでは **0.183 / 0.222 ms** でした。Linux x86-64 は順に **0.303 / 0.430 ms**、**0.094 / 0.110 ms** でした。各条件384回の測定です。コンパイラで頻出するログ fd の複製を追加した場合、子に入るまでは macOS **2.120 / 2.928 ms**、Linux **0.304 / 0.442 ms** でした。[子と親で対応づけたタイムスタンプ](https://github.com/sanohiro/tonari-shell/actions/runs/45580598108)
+
+The final release uses the direct launch path when a quoted positional parameter or scalar supplies the absolute executable in a command substitution. The following fresh-directory measurements rotate the previous release (`57e91ba`), the final release (`819a255`) and Bash on the same machine. Each shell has one warmup and six measured full runs. On CI a fourth build with opt-level 3 rotates through the same experiment. Warmup builds the configured program, runs its checks and verifies its output. [Final native CI samples, binaries and host records](https://github.com/sanohiro/tonari-shell/actions/runs/45584252377) · [M1 samples](native-2026-11-25/configure-m1.json)
+
+| Real GNU Hello configure (s) | Previous | Final | Bash | Final / Bash |
+|---|---:|---:|---:|---:|
+| Physical M1 | 26.337 | 26.032 | 27.583 | 0.944 |
+| macOS arm64 CI | 15.701 | 15.434 | 16.042 | 0.962 |
+| Linux x86-64 CI | 6.129 | 6.131 | 6.430 | 0.953 |
+
+同じ配布版で、外部コマンドに入力を渡す処理と、外部コマンドの出力を取り込む処理を測り直しました。各欄は「以前の Tonari → 最終版 / Bash」のミリ秒で、実行回数は M1 が各15回、両 CI が各41回です。Bash は M1 が5.2.37、macOS CI のこの短時間テストが5.3.20、Linux が5.2.21です。[短時間テストと p95](https://github.com/sanohiro/tonari-shell/actions/runs/45584252377)
+
+| Workload (repetitions per sample) | Physical M1 | macOS arm64 CI | Linux x86-64 CI |
+|---|---:|---:|---:|
+| Here-document → external `cat` → file (120) | 350.64 → 231.47 / 242.69 | 619.54 → 348.67 / 399.78 | 55.00 → 55.23 / 67.87 |
+| Here-string → captured external `cat` (120) | 341.88 → 134.28 / 298.58 | 587.86 → 339.12 / 624.74 | 38.99 → 39.17 / 102.07 |
+| Here-string → `read -r` (120) | 25.18 → 1.10 / 139.06 | 57.95 → 1.38 / 246.13 | 0.68 → 0.67 / 86.69 |
+| Captured program passed as `"$1"` (96) | 160.27 → 106.03 / 169.26 | 306.13 → 218.27 / 325.62 | 38.40 → 29.68 / 48.34 |
+| Captured program passed as `"$tool"` (96) | 160.90 → 105.54 / 170.05 | 263.95 → 185.94 / 286.10 | 38.43 → 29.88 / 48.51 |
+
+計測器を入れた独立の実験では、実機 M1 の変更前でコンパイラと生成した実行ファイル内の合計が中央値21.00秒、最初の修正版の Linux x86-64 で6.46秒でした。同じ各実験で計測器なしの Bash の2/3はそれぞれ18.96秒、5.69秒です。今回の最終版も実 configure 全体の 2/3 には届いていません。macOS CI ではコンパイラ以外の区間でも秒単位の変動を観測しました。実機の旧版ペアの一部はローカルの開発作業と重なりました。最終版の実機ベンチは順次実行しています。
+
+最終版は Rust 58件を通過し、M1 のシェル試験は229件中227件通過、OS固有の2件をスキップしました。互換性の既存判定は M1 の1,411件、Debian x86-64 の1,525件とも変更前と一致しました。配布用バイナリは M1 で1,450,016バイト、追加の動的ライブラリなし。Linux x86-64 は strip 済みの静的 PIE で1,952,344バイト（変更前より1,760バイト増）です。macOS CI の20ジョブの測定は各31回で Tonari 180.10 ms、Bash 179.94 ms、以前の Tonari 168.23 ms でした。[正確性・バイナリ・ジョブの全記録](https://github.com/sanohiro/tonari-shell/actions/runs/45584252377)
+
+In the previous review, the luish build was almost tied on hosted macOS. A new 15-run interleaved comparison took **2.776 s Tonari / 3.049 s Bash**, with the previous Tonari at 2.861 s. The physical M1's upstream `jobs.bg_many@20` ran in **40.32 / 42.81 ms** (31 samples, Tonari / Bash). Timing within the already-running shell, the launch loop for 20 external `sleep 0.02` processes took **8.40 / 8.13 ms** and the final `wait` took **26.78 / 28.17 ms**. These are medians across trials; the actual children run concurrently. These controls used the first here-input release. [luish samples](https://github.com/sanohiro/tonari-shell/actions/runs/45581338139) · [Physical samples](native-2026-11-25/configure-m1.json)
+
+To repeat the whole comparison, run `python3 tools/ci/configure-pairs.py /path/to/hello-2.12.2/configure /path/to/tonari /path/to/bash results`. For a three-way release comparison use `python3 tools/bench_external.py gnu-hello /path/to/hello-2.12.2 /path/to/tonari /path/to/bash --previous /path/to/previous --case 'GNU Hello configure' --runs 6`. For a focused case use `python3 tools/bench_scripts.py /path/to/tonari --bash /path/to/bash --previous /path/to/previous --timing started --case heredoc-external-file --runs 15`.
+
 <a id="external-case-review"></a>
 
 ## 2026-11-25 · Performance and implementation review of 147 workloads / 147項目の実装と実測

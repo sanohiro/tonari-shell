@@ -1,5 +1,11 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## Quoted paths in command substitutions / コマンド置換で引用した実行パス
+
+An executable path passed as a quoted positional parameter or scalar retains spaces, stdout and the exit status. A locally defined Bash function can take the name of a path, including `/bin/echo`. Calling that path runs the function in the substitution's scope. The `command` builtin can still select the executable. Bash 5.2 rejects an explicit `export -f` of such a function and skips importing it in a child shell. [Shell tests](../tests/shell.py)
+
+引用した引数や変数で絶対パスを指定しても、同名の関数、サブシェル内の変数変更と終了ステータスを保持します。名前にスラッシュを含む関数をローカルに定義でき、子シェルが環境からその関数を取り込まないことも確認しました。[実測と条件](benchmarks.md#configure-pairs)
+
 ## Named home directories / 名前付きユーザーのホーム
 
 Unquoted `~user` and `~user/path` resolve through the account database in command arguments and at the start of assignment values. A quoted login name or an unknown user stays literal. The named-user audit now matches Bash on Debian x86-64 and macOS arm64. [Bash witnesses](../tests/shell.py) · [Benchmarks](benchmarks.md#external-case-review)

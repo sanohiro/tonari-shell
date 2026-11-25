@@ -13,8 +13,8 @@ pub(super) fn open(data: &[u8], pipe_limit: usize) -> io::Result<OwnedFd> {
     if data.is_empty() {
         return File::open("/dev/null").map(Into::into);
     }
-    // A write within PIPE_BUF fits in a fresh pipe without a concurrent
-    // reader, including on macOS. Larger documents use a seekable file.
+    // An empty pipe can take PIPE_BUF bytes before a reader starts.
+    // For a larger document, check whether the complete write fits.
     if data.len() <= libc::PIPE_BUF {
         let (reader, mut writer) = io::pipe()?;
         writer.write_all(data)?;
