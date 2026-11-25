@@ -52,7 +52,7 @@ if [[ $SUITE == spec-hot || $SUITE == external-yash-* || $SUITE == external-revi
   git worktree add -q --detach "$RUNNER_TEMP/base" "$previous"
   (cd "$RUNNER_TEMP/base"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/baseline")
 fi
-if [[ $SUITE == external-review-* ]]; then
+if [[ $SUITE == external-review-* || $SUITE == oils-profile-* || $SUITE == spec-profile-builtins ]]; then
   cp "$(CARGO_PROFILE_RELEASE_OPT_LEVEL=3 tools/build-release.sh)" "$RUNNER_TEMP/bin/opt-3"
 fi
 if [[ $SUITE == budget* || $SUITE == inventory* ]]; then

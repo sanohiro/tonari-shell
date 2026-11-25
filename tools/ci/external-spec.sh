@@ -14,11 +14,16 @@ ln -s "$RUNNER_TEMP/bin/current" "$lab/bin/bash"
 cd "$lab"
 git init -q upstream
 case "$SUITE" in
-  bensch-*|spec-builtins|spec-tty)
+  bensch-*|spec-builtins|spec-tty|spec-profile-builtins)
     git -C upstream fetch -q --depth 1 https://github.com/tenseleyFlow/bensch.git c8e2a1ea493fc0dceb9af645dc445e619cb449e7
     git -C upstream checkout -q --detach FETCH_HEAD
-    if [[ $SUITE == spec-builtins || $SUITE == spec-tty ]]; then
+    if [[ $SUITE != bensch-* ]]; then
       python3 "$repo/tools/ci/bensch-cases.py" upstream "$lab" "$ref" > "$out/manifest.jsonl"
+      if [[ $SUITE == spec-profile-builtins ]]; then
+        python3 "$repo/tools/ci/spec-pairs.py" "$out/manifest.jsonl" "$out/profiles.jsonl" \
+          "$RUNNER_TEMP/bin/current" "$RUNNER_TEMP/bin/opt-3" "$lab/pairs" --source upstream --runs 3
+        exit
+      fi
       python3 "$repo/tools/ci/bensch-tty.py" "$out/manifest.jsonl" "$ref" "$lab/bin/bash" > "$out/tty.jsonl"
       if [[ $SUITE == spec-tty ]]; then exit; fi
       if [[ $(uname -s) == Darwin ]] && ! command -v timeout >/dev/null; then
@@ -67,6 +72,12 @@ case "$SUITE" in
     export PATH="$lab/pybin:$PATH"
     cd upstream
     PYTHONPATH=. python2 "$repo/tools/ci/oils-cases.py" > "$out/manifest.jsonl"
+    if [[ $SUITE == oils-profile-* ]]; then
+      python3 "$repo/tools/ci/spec-pairs.py" "$out/manifest.jsonl" "$out/profiles.jsonl" \
+        "$RUNNER_TEMP/bin/current" "$RUNNER_TEMP/bin/opt-3" "$lab/pairs" --source . \
+        --shards 4 --shard "${SUITE##*-}" --runs 3
+      exit
+    fi
     if [[ $SUITE == oils-argv || $SUITE == oils-printenv ]]; then
       fixture=${SUITE#oils-}
       mkdir -p "$lab/native-helper"
