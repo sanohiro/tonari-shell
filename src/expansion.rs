@@ -308,6 +308,15 @@ impl<'a> Expansion<'a> {
         fields: &mut Vec<String>,
     ) -> Result<(), Error> {
         word.resolve(self)?;
+        // Each element of a standalone quoted "${a[@]}" is already a complete field.
+        if self.assignments.is_empty()
+            && let Word::Expanded(parts) = &word
+            && let [crate::word::Part::Parameter { name, quoted: true }] = parts.as_slice()
+            && let Some(base) = name.strip_suffix("[@]")
+            && self.session.append_indexed_fields(base, fields)
+        {
+            return Ok(());
+        }
         word.append_fields(
             &|name| self.lookup(name),
             self.session.positional.as_slice(),

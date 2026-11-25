@@ -61,7 +61,7 @@ if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; t
   exit
 fi
 if [[ $RUNNER_OS == macOS ]]; then
-  if [[ $SUITE == inventory || $SUITE == parity-commands || $SUITE == parity-invocation || $SUITE == foreground || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == rcfiles || $SUITE == budget* ]]; then
+  if [[ $SUITE == external-* || $SUITE == inventory || $SUITE == parity-commands || $SUITE == parity-invocation || $SUITE == foreground || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == rcfiles || $SUITE == budget* ]]; then
     gnu="$RUNNER_TEMP/gnu"
     mkdir -p "$gnu"
     download_bash "$version" "$digest" "$RUNNER_TEMP/bash.tar.gz"

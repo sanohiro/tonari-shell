@@ -333,6 +333,19 @@ impl Session {
         names
     }
 
+    pub fn append_indexed_fields(&self, name: &str, fields: &mut Vec<String>) -> bool {
+        if name == "PIPESTATUS" {
+            return false;
+        }
+        match self.variables.get(name).and_then(|v| v.elements.as_deref()) {
+            Some(Elements::Dense(values)) => fields.extend_from_slice(values),
+            Some(Elements::Sparse(values)) => fields.extend(values.values().cloned()),
+            Some(Elements::Records(records)) => fields.extend(records.values().map(str::to_owned)),
+            _ => return false,
+        }
+        true
+    }
+
     pub fn array_values(&self, name: &str) -> Vec<String> {
         let Ok(resolved) = self.reference_name(name) else {
             return Vec::new();

@@ -61,6 +61,13 @@ class ShellTests(unittest.TestCase):
                      'a+=([1]=rest); printf "<%s>" "${a[@]}"; echo "/$#/$1"',
                      0, b"<start><rest><c d><end>/2/b\n")
 
+    def test_quoted_whole_array_preserves_fields_after_mutation(self):
+        self.compare('a=("" "a b" "*" "雪"); f() { printf "<%s>" "$@"; echo; }; '
+                     'f "${a[@]}"; unset "a[1]"; f "${a[@]}"; '
+                     '''mapfile -t a <<< $'x y\\n*'; f "${a[@]}"; '''
+                     'a=(); set -- "${a[@]}"; echo "$#"',
+                     0, "<><a b><*><雪>\n<><*><雪>\n<x y><*>\n0\n".encode(), minimum=4)
+
     def test_literal_assignment_tracks_attributes_and_integer_syntax(self):
         self.compare(r"""
 n=one
