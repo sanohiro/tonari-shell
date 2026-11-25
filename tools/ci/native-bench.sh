@@ -218,10 +218,20 @@ case "$SUITE" in
   external-shared-input)
     python3 tools/ci/yash-stdin.py --bash "$ref" --current "$current" --small "$bin/small" --large "$bin/large" > "$out/stdin.jsonl" ;;
   external-yash-*)
+    if [[ $SUITE == external-yash-spawn ]]; then
+      cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
+      python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
+        --spawn-control "$bin/spawn-control" --case spawn --runs 81 > "$out/throughput.jsonl"
+      exit
+    fi
     root="$RUNNER_TEMP/yash"
     git init -q "$root"
     git -C "$root" fetch -q --depth 1 https://github.com/magicant/yash.git 1cdb509a617894ed96a12c33b43bcd7adb6f1ff5
     git -C "$root" checkout -q --detach FETCH_HEAD
+    if [[ $SUITE == external-yash-budget-* ]]; then
+      python3 tools/ci/yash-repeats.py "$root" "$out" "$RUNNER_TEMP/reuse" "$current" "$ref"
+      exit
+    fi
     if [[ $SUITE == external-yash-pipelines ]]; then
       cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
       python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
