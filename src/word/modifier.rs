@@ -309,29 +309,37 @@ impl Modification {
                     return Err(env.missing(name, "unbound variable"));
                 }
                 let v = v.unwrap_or_default();
-                let total = v.chars().count() as i64;
-                let start = if start < 0 {
-                    total.saturating_add(start)
-                } else {
-                    start
+                // Positive bounds only need the requested prefix. Negative bounds
+                // count from the far end, independent of the UTF-8 byte width.
+                let boundary = |s: &str, n: i64| {
+                    if n < 0 {
+                        s.char_indices()
+                            .rev()
+                            .nth((n.unsigned_abs() - 1) as usize)
+                            .map(|(i, _)| i)
+                    } else if n == 0 {
+                        Some(0)
+                    } else {
+                        s.char_indices()
+                            .nth((n - 1) as usize)
+                            .map(|(i, c)| i + c.len_utf8())
+                    }
                 };
-                if !(0..=total).contains(&start) {
+                let Some(start) = boundary(&v, start) else {
                     return Ok(scalar(String::new()));
-                }
-                let end = match len {
-                    None => total,
-                    Some(n) if n < 0 => total.saturating_add(n),
-                    Some(n) => start.saturating_add(n).min(total),
                 };
-                if end < start {
-                    return Err(Error::fatal("negative substring length", 1));
-                }
-                Ok(scalar(
-                    v.chars()
-                        .skip(start as usize)
-                        .take((end - start) as usize)
-                        .collect(),
-                ))
+                let end = match len {
+                    None => v.len(),
+                    Some(n) if n < 0 => boundary(&v, n)
+                        .filter(|&end| end >= start)
+                        .ok_or_else(|| Error::fatal("negative substring length", 1))?,
+                    Some(n) => boundary(&v[start..], n).map_or(v.len(), |i| start + i),
+                };
+                Ok(scalar(if start == 0 && end == v.len() {
+                    v
+                } else {
+                    v[start..end].to_owned()
+                }))
             }
         }
     }

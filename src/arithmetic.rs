@@ -422,6 +422,19 @@ fn calculate(source: &str, variables: &mut dyn Variables, depth: u8) -> Result<i
     if depth >= 96 {
         return Err("arithmetic nesting limit exceeded");
     }
+    if let [digit @ b'0'..=b'9'] = source.as_bytes() {
+        return Ok(i64::from(digit - b'0'));
+    }
+    if let Some(name) = source
+        .strip_suffix("++")
+        .or_else(|| source.strip_suffix("--"))
+        && crate::parser::is_identifier(name)
+        && let Some(old) = variables.decimal(name)
+    {
+        let delta = if source.ends_with("++") { 1 } else { -1 };
+        variables.set(name, old.wrapping_add(delta))?;
+        return Ok(old);
+    }
     let mut p = Parser {
         source,
         token: Token::End,

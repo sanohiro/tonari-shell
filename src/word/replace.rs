@@ -79,21 +79,32 @@ pub(super) fn substitute(
         _ => None,
     };
     if group.is_none() && !crate::pattern::has_magic(pattern, false) {
-        let needle = crate::pattern::unescape(pattern);
-        let mut replacement = String::new();
-        write_replacement(&mut replacement, template, &needle, expand_amp);
+        let literal = crate::pattern::unescape(pattern);
+        let needle = literal.as_ref();
+        let mut rendered = String::new();
+        let replacement = if template.contains('\\') || (expand_amp && template.contains('&')) {
+            write_replacement(&mut rendered, template, needle, expand_amp);
+            rendered.as_str()
+        } else {
+            template
+        };
         if needle.is_empty() && !matches!(mode, Prefix | Suffix) {
             return text;
         }
         return match mode {
-            First => text.replacen(&needle, &replacement, 1),
-            All => text.replace(&needle, &replacement),
-            Prefix if text.starts_with(&needle) => {
-                text.replace_range(..needle.len(), &replacement);
+            First => {
+                if let Some(index) = text.find(needle) {
+                    text.replace_range(index..index + needle.len(), replacement);
+                }
                 text
             }
-            Suffix if text.ends_with(&needle) => {
-                text.replace_range(text.len() - needle.len().., &replacement);
+            All => text.replace(needle, replacement),
+            Prefix if text.starts_with(needle) => {
+                text.replace_range(..needle.len(), replacement);
+                text
+            }
+            Suffix if text.ends_with(needle) => {
+                text.replace_range(text.len() - needle.len().., replacement);
                 text
             }
             _ => text,

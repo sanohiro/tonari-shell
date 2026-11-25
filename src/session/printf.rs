@@ -31,7 +31,7 @@ impl Variables<'_> {
 pub(crate) fn run(
     session: &mut Session,
     mut words: &[String],
-    capture: Option<&mut Vec<u8>>,
+    mut capture: Option<&mut Vec<u8>>,
 ) -> u8 {
     let mut target = None;
     if words.first().is_some_and(|arg| arg == "-v") {
@@ -59,6 +59,27 @@ pub(crate) fn run(
         eprintln!("tonari: printf: format required");
         return 2;
     };
+    if target.is_none()
+        && let Some(out) = capture.as_deref_mut()
+    {
+        match format.as_str() {
+            "%s" => {
+                for value in values {
+                    out.extend_from_slice(value.as_bytes());
+                }
+                return 0;
+            }
+            "%s\n" | "%s\\n" => {
+                string_lines(out, values);
+                return 0;
+            }
+            text if !text.contains(['%', '\\']) => {
+                out.extend_from_slice(text.as_bytes());
+                return 0;
+            }
+            _ => {}
+        }
+    }
     if target.is_none() && capture.is_none() {
         let borrowed = if format == "%s" && values.len() <= 1 {
             Some(values.first().map_or("", String::as_str))
@@ -85,13 +106,7 @@ pub(crate) fn run(
     let mut args = Arguments { values, status: 0 };
     let mut output = Vec::new();
     if matches!(format.as_str(), "%s\\n" | "%s\n") {
-        if values.is_empty() {
-            output.push(b'\n');
-        }
-        for value in values {
-            output.extend_from_slice(value.as_bytes());
-            output.push(b'\n');
-        }
+        string_lines(&mut output, values);
     } else {
         loop {
             let count = args.values.len();
@@ -133,6 +148,16 @@ pub(crate) fn run(
         }
     }
     args.status
+}
+
+fn string_lines(out: &mut Vec<u8>, values: &[String]) {
+    if values.is_empty() {
+        out.push(b'\n');
+    }
+    for value in values {
+        out.extend_from_slice(value.as_bytes());
+        out.push(b'\n');
+    }
 }
 
 struct Arguments<'a> {

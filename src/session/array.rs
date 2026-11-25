@@ -505,6 +505,11 @@ impl Session {
         if expr.trim().is_empty() {
             return Err("empty array subscript");
         }
+        if let Some(value) = Self::plain_decimal(expr)
+            && value >= 0
+        {
+            return Ok(value);
+        }
         let n = crate::arithmetic::evaluate(expr, &|k| self.get(k))?;
         if n < 0 {
             self.last_index(name)

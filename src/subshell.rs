@@ -541,7 +541,7 @@ fn capture_simple(
         let mut env = crate::expansion::Expansion::new(session, code, &captured);
         fields.clear();
         for arg in &words[1..] {
-            fields.extend(env.fields(arg.clone()).ok()?);
+            env.append_fields(arg.clone(), &mut fields).ok()?;
         }
         code = match name {
             "echo" => {

@@ -54,7 +54,7 @@ impl Table {
 // Ok(None) leaves permission failures and existing non-executables to exec.
 pub(super) struct Absent;
 
-fn search(name: &str, session: &Session) -> Result<Option<Entry>, Absent> {
+pub(super) fn search(name: &str, session: &Session) -> Result<Option<Entry>, Absent> {
     let path = session.search_path(&[]);
     let mut relative = false;
     let mut absent = true;

@@ -55,6 +55,41 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_repeated_function_definition_and_positional_frame(self):
+        self.compare('set -- outer; f() { shift; printf "%s/%s/%s\\n" "$#" "$1" "${!#}"; }; '
+                     'f first "two words" {1..1024}; echo "$#:$1"; '
+                     'for a in 1 2; do g(){ echo inner; }; [ "$a" = 1 ] && set -a; done; '
+                     'set +a; g; env | grep -q "BASH_FUNC_g%%="; echo "$?"',
+                     0, b"1025/two words/1024\n1:outer\ninner\n0\n", minimum=5)
+
+    def test_utf8_substring_endpoints(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        self.compare('v=猫😀abc; printf "<%s>\\n" "${v:1:2}" "${v: -2}" "${v:1:-1}" '
+                     '"${v:5:0}" "${v:8:-20}" "${v: -9:2}" "${v:0:200}"',
+                     0, "<😀a>\n<bc>\n<😀ab>\n<>\n<>\n<>\n<猫😀abc>\n".encode())
+        self.compare('v=abc; printf "%s" "${v:2:-2}"', 1)
+
+    def test_arithmetic_fast_paths_keep_numeric_rules(self):
+        self.compare('a[8]=octal; a[10]=decimal; v=010; '
+                     'echo "${a[010]}:${a[10]}:$((v++)):$v"; '
+                     'declare -n ref=v; let ref++; echo "$v"; '
+                     'v=9223372036854775807; ((v++)); echo "$v"', 0,
+                     b"octal:decimal:8:9\n10\n-9223372036854775808\n", minimum=5)
+
+    def test_readonly_repeated_definition(self):
+        self.compare('for i in 1 2; do g(){ :; }; rc=$?; readonly -f g; done; exit "$rc"', 1)
+
+    def test_captured_printf_appends_and_counts_from_each_format(self):
+        self.compare(r"""v=$(printf x; printf '%s' 'a b' '' c; printf '%s\n' q r; printf '%s%n:%d' hi n 4; printf '!'); printf '<%s>\n' "$v" """,
+                     0, b"<xa bcq\nr\nhi:4!>\n")
+
+    def test_capture_search_preserves_parent_hash_and_path_order(self):
+        self.compare('mkdir -p a b; for d in b a; do printf "echo %s\\n" "$d" >"$d/tool"; '
+                     'chmod +x "$d/tool"; done; PATH=a:b:/usr/bin:/bin; '
+                     'echo "$(tool)"; hash -t tool 2>/dev/null; echo "$?"; '
+                     'rm a/tool; echo "$(tool)"; hash -p b/tool tool; echo "$(tool)"',
+                     0, b"a\n1\nb\nb\n", minimum=4)
+
     def test_large_script_read_ahead_preserves_execution_boundaries(self):
         script = self.cwd / "large.sh"
         prefix = "# a comment\n" * 12000 + "if true; then\n  echo before\nfi\n"

@@ -165,6 +165,20 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
             tail,
             borrowed_program,
         ),
+        Cow::Borrowed(Command::Function { name, definition })
+            if !session.readonly_functions.contains(name)
+                && !session.allexport
+                && session.functions.get(name).is_some_and(|old| {
+                    std::rc::Rc::ptr_eq(&old.definition, definition)
+                        && old.source.as_ref()
+                            == session
+                                .source_names
+                                .last()
+                                .map_or("environment", AsRef::as_ref)
+                }) =>
+        {
+            Flow::Continue(0)
+        }
         Cow::Borrowed(Command::Group(body)) => borrowed_program(session, body, status, tail),
         Cow::Borrowed(Command::Arithmetic(expr)) => {
             crate::arithmetic::command(expr, session, status)
@@ -554,11 +568,12 @@ fn repeat(
 
 pub fn call_function(
     session: &mut Session,
-    mut argv: Vec<String>,
+    argv: Vec<String>,
     status: u8,
     replace_last: bool,
 ) -> Flow {
-    let name = argv.remove(0);
+    let mut arguments = argv.into_iter();
+    let name = arguments.next().expect("function name");
     if session.function_nesting_full() {
         eprintln!("tonari: {name}: function nesting limit exceeded");
         return Flow::Continue(1);
@@ -577,9 +592,9 @@ pub fn call_function(
                 .debug_args
                 .push(session.positional.as_slice().to_vec());
         }
-        session.debug_args.push(argv.clone());
+        session.debug_args.push(arguments.as_slice().to_vec());
     }
-    let old = std::mem::replace(&mut session.positional, argv.into_iter());
+    let old = std::mem::replace(&mut session.positional, arguments);
     let hidden = session
         .traps
         .enter_function(session.errtrace, session.functrace || traced);

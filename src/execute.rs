@@ -1519,6 +1519,16 @@ pub(super) fn capture_external(
             return Ok((String::new(), error.status));
         }
     };
+    // A substitution inherits the parent's hash entries; a fresh lookup must
+    // never insert into the parent's hash table or change its hit counts.
+    if let Some(name) = cmd.words.first()
+        && !name.contains('/')
+        && cmd.cacheable()
+        && cmd.cached_path(session, name).is_none()
+        && let Ok(Some(entry)) = hash::search(name, session)
+    {
+        cmd.resolved = Some(entry.path);
+    }
     let (reader, writer) = pipe().map_err(|_| "cannot open command substitution pipe")?;
     let stage = start(
         &mut cmd,

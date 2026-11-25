@@ -506,7 +506,10 @@ pub(crate) fn pathnames(
     names
 }
 
-pub(crate) fn unescape(component: &str) -> String {
+pub(crate) fn unescape(component: &str) -> std::borrow::Cow<'_, str> {
+    if !component.as_bytes().contains(&b'\\') {
+        return std::borrow::Cow::Borrowed(component);
+    }
     let mut literal = String::with_capacity(component.len());
     let mut chars = component.chars();
     while let Some(c) = chars.next() {
@@ -516,7 +519,7 @@ pub(crate) fn unescape(component: &str) -> String {
             c
         });
     }
-    literal
+    std::borrow::Cow::Owned(literal)
 }
 
 // Walk by component so POSIX character classes have the same fnmatch
