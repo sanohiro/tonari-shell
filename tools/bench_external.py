@@ -138,6 +138,9 @@ def gnu_hello(args, root, env):
         old = statistics.median(samples[2])
         print(f"Previous configure\t{old:.3f}\t{b:.3f}\t{old / b:.3f}")
     print(f"GNU Hello configure\t{a:.3f}\t{b:.3f}\t{a / b:.3f}")
+    target = b * 2 / 3
+    verdict = "PASS" if a <= target else "MISS"
+    print(f"Full configure target: {verdict} ({a:.3f} ms, budget {target:.3f} ms)", file=sys.stderr)
     print(f"Raw milliseconds {dict(zip(shells, samples))}", flush=True)
 
 

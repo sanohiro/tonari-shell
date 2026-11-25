@@ -1,5 +1,38 @@
 # Startup and execution / 起動と実行性能
 
+<a id="configure-latency"></a>
+
+## 2026-11-25 · GNU Hello configure from start to exit / configure 全体の実行時間
+
+GNU Hello 2.12.2 ran its distributed `configure --disable-nls --cache-file=/dev/null` with the same `/usr/bin/cc` in fresh build directories. The columns are elapsed seconds. Each host built and tested the project during warmup, then timed three clean configurations per shell with the first shell rotated each round. The same host ran the previous release (`200a71f`), the new release (`fa9c5cf`) and Bash. Every run checked the generated `config.h` and `config.status` interpreter. The two-thirds target applies to the entire command. The stripped Linux x86-64 static PIE grew from 1,930,008 to 1,932,920 bytes. The physical Mac binary grew from 1,433,376 to 1,433,392 bytes and links only libSystem. [Native results and raw samples](https://github.com/sanohiro/tonari-shell/actions/runs/45536959010)
+
+| Native host | Previous | Tonari | Bash | Target | Tonari / Bash |
+|---|---:|---:|---:|---:|---:|
+| Linux x86-64 CI | 7.457 | 6.098 | 6.284 | 4.189 | 0.970 |
+| macOS arm64 CI | 26.638 | 24.712 | 25.532 | 17.021 | 0.968 |
+| Physical M1 | 31.043 | 30.117 | 31.961 | 21.307 | 0.942 |
+
+The macOS CI samples for the new build ranged from 24.11 to 25.13 s, and Bash ranged from 25.28 to 26.53 s. The Linux samples for the new build ranged from 6.090 to 6.114 s.
+
+A separate diagnostic used a small launcher to time the actual compiler and the generated test programs. The intervals start immediately before spawning the real program and end when it finishes. The total is the union of those intervals. The diagnostic instruments a copy of the configure script, verifies the resulting header and logs each invocation. Unmodified full-run timings appear in the table above. On Linux one generated test executes itself again and the outer invocation includes that time. The working-`fcntl.h` check contains a one-second sleep in the compiled C program. [Diagnostic](../tools/ci/configure-profile.py)
+
+| Host and shell | Compiler calls | Compiler seconds | Direct test calls | Test seconds | Combined seconds |
+|---|---:|---:|---:|---:|---:|
+| Linux x86-64, Tonari | 244 | 3.767 | 54 | 1.023 | 4.789 |
+| Linux x86-64, Bash | 244 | 3.747 | 54 | 1.022 | 4.769 |
+| macOS CI, Tonari | 229 | 12.320 | 46 | 1.179 | 13.499 |
+| macOS CI, Bash | 229 | 10.245 | 46 | 1.213 | 11.458 |
+| Physical M1, Tonari | 229 | 9.477 | 46 | 14.872 | 24.349 |
+| Physical M1, Bash | 229 | 9.749 | 46 | 13.653 | 23.402 |
+
+On the Linux profiling runner the earlier host detection phase took 761 ms in Tonari and 26 ms in Bash. The reader had parsed a 39,222-byte case statement more than 1,200 times. With the final release the complete upstream helper took 23.9 ms on Linux, down from 559.8 ms in the previous release on the same runner. `config.sub x86_64-linux-gnu` fell from 108.7 to 2.5 ms. An external command writing to inherited fd 5 took 70.7 ms for 250 launches, down from 86.4 ms. On the physical M1 a 17.6 kB loop straddling a 128 KiB buffer boundary took 40.4 ms before repositioning the read window and 5.7 ms afterwards, compared with Bash at 8.8 ms. [Earlier phase trace](https://github.com/sanohiro/tonari-shell/actions/runs/45535633215)
+
+Autoconf の結果キャッシュを無効にし、各回で新しいビルドディレクトリを使いました。最初の表は配布版 `configure` の起動から終了までです。修正前・修正後・Bash の順番を回し、各3回の中央値を比較しました。2/3 の合格条件は未達です。Linux ではコンパイラと生成したテストの待ち時間だけで、同じホストの Bash 全体の 2/3 を超えました。2つ目の表は別走行でこの2種類の外部処理を直接計測し、重複する時間を除いた値です。macOS の CI と実機にはテスト実行時間に大きな差があり、それぞれのホストで比較しました。
+
+```sh
+python3 tools/bench_external.py gnu-hello "$gnu_hello_source" "$tonari" "$bash" --previous "$previous_tonari"
+```
+
 <a id="external-suites"></a>
 
 ## 2026-11-25 · Independent shell workloads / 外部シェルベンチマーク

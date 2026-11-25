@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## 2026-11-25 · Reading long configure commands and redirecting logs / configure の複合コマンドとログ出力
+
+An incomplete `case` in GNU `config.guess` made the reader parse 25.6 MB of growing prefixes for one 39 kB command. A quoted here-document can resemble another nested header. When lookahead overshoots, the reader now uses the first statement's parser position to locate its physical line and verifies that command on its own before executing it. A regular file can refill a short read window when a growing command crosses a buffer boundary. The Bash witness checks the next line's alias and `LINENO`. An external command can now copy an inherited log descriptor onto stdout or stderr in `posix_spawn`; descriptor order, closed descriptors and private shell files retain their usual checks. [Measurements](benchmarks.md#configure-latency) · [Compatibility tests](../tests/shell.py)
+
+長い `case` を1行ずつ再解析していた箇所を直しました。ヒアドキュメント内の文字が入れ子の開始に見え、先読みしすぎた場合は、パーサーが返した位置から最初のコマンドの行末に戻って確認します。長いコマンドが読み込みバッファをまたぐ場合は必要な分を読み直します。ログ用にシェルが開いた fd 5 などへの出力も、外部コマンドの起動時に直接設定できます。実測ではコンパイラと生成されたテストの占める時間が大きく、スクリプトの解析やリダイレクトの改善が全体に寄与する範囲も測定できました。[測定条件と全体の結果](benchmarks.md#configure-latency)
+
 ## 2026-11-25 · What external shell workloads exposed / 外部ベンチで見つかった実装上の差
 
 A repeated `shift` used to move every remaining positional argument. The session now consumes the front of an owning iterator and exposes its remaining slice to expansion, functions and sourced files. Repeated `a+=(word)` used to copy all existing slots. Contiguous elements now stay dense, sparse indices retain their order, and ordinary appends update the existing buffer. A standalone quoted `"${a[@]}"` can copy stored indexed values directly into argv. Empty strings, whitespace and literal wildcard characters each remain one argument. The real array script checks sorting, a sieve, a queue and string processing in the same execution. [Results](benchmarks.md#external-suites)

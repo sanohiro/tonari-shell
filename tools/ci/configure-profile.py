@@ -43,6 +43,25 @@ def profile(script, shell, out, label, tracer, compiler=None):
         return (root / "config.h").read_bytes()
 
 
+def report_clock(path):
+    intervals = []
+    for line in path.read_text().splitlines():
+        name, start, end = line.split()
+        intervals.append((int(start), int(end), name))
+    if not intervals:
+        raise ValueError(f"no compiler or test intervals in {path}")
+    total = previous_end = 0
+    cost = {}
+    for start, end, name in sorted(intervals):
+        total += max(0, end - max(previous_end, start))
+        previous_end = max(previous_end, end)
+        count, ns = cost.get(name, (0, 0))
+        cost[name] = count + 1, ns + end - start
+    for name, (count, ns) in cost.items():
+        print(f"{path.stem} {name}: {count} calls, {ns / 1e9:.3f} s")
+    print(f"{path.stem} combined elapsed: {total / 1e9:.3f} s", flush=True)
+
+
 def components(script, shells):
     aux = Path(script).parent / "build-aux"
     true = shutil.which("true", path="/usr/bin:/bin")
@@ -71,7 +90,8 @@ def components(script, shells):
 
 if __name__ == "__main__":
     script, tonari, bash, output, *previous = sys.argv[1:]
-    out = Path(output)
+    out = Path(output).resolve()
+    out.mkdir(parents=True, exist_ok=True)
     header = None
     shells = [("tonari", tonari), ("bash", bash)]
     if previous:
@@ -106,3 +126,4 @@ if __name__ == "__main__":
         for name, shell in [("bash", bash), ("tonari", tonari)]:
             if profile(probe, shell, out, f"{name}-clock", None, compiler) != header:
                 raise ValueError("timed compiler or probe changed config.h")
+            report_clock(out / f"{name}-clock.clock")
