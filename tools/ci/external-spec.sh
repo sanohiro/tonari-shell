@@ -78,10 +78,10 @@ for line in open(sys.argv[1]):
         print(line, end="")
 PYTHON
       for helper in upstream native; do
-        flags=()
-        [[ $helper != native ]] || flags+=(--helper "$lab/native-helper")
+        set -- --source .
+        [[ $helper != native ]] || set -- "$@" --helper "$lab/native-helper"
         python3 "$repo/tools/ci/spec-pairs.py" "$lab/argv.jsonl" "$out/$helper.jsonl" \
-          "$ref" "$lab/bin/bash" "$lab/pairs" --source . "${flags[@]}"
+          "$ref" "$lab/bin/bash" "$lab/pairs" "$@"
       done
       exit
     fi

@@ -25,12 +25,12 @@ rustup toolchain install "$toolchain" --profile minimal --component rust-src --t
 rustc +"$toolchain" -vV >> results/host.txt
 export CARGO_TARGET_DIR="$RUNNER_TEMP/build"
 cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/current"
-if [[ $SUITE == external-yash-[0-7] || $SUITE == oils-* || $SUITE == spec-builtins || $SUITE == bensch-* ]]; then
+if [[ $SUITE == external-yash-[0-7] || $SUITE == oils-[0-3] || $SUITE == spec-builtins || $SUITE == bensch-* ]]; then
   observer="$RUNNER_TEMP/yash-paths"
   git worktree add -q --detach "$observer" HEAD
-  extra=()
-  [[ $SUITE != bensch-* ]] || extra+=(--editor)
-  python3 tools/ci/yash-paths.py "$observer" results/sites.json "${extra[@]}"
+  set -- "$observer" results/sites.json
+  [[ $SUITE != bensch-* ]] || set -- "$@" --editor
+  python3 tools/ci/yash-paths.py "$@"
   (cd "$observer"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/paths")
 fi
 if [[ $SUITE == external-shared-input ]]; then
