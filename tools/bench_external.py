@@ -261,7 +261,8 @@ def main():
                     label = line[3:]
                 elif line.strip():
                     if "/bin/true" in line and not Path("/bin/true").is_file():
-                        print(f"{label}\tUNAVAILABLE /bin/true", flush=True)
+                        if not args.case or label in args.case:
+                            print(f"{label}\tUNAVAILABLE /bin/true", flush=True)
                         true = shutil.which("true", path="/usr/bin:/bin")
                         if not true:
                             continue
