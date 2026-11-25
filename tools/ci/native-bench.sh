@@ -134,12 +134,7 @@ case "$SUITE" in
       sysroot=$(rustc +"$toolchain" --print sysroot)
       host=$(rustc +"$toolchain" -vV | sed -n 's/^host: //p')
       export LLVM_PROFDATA="$sysroot/lib/rustlib/$host/bin/llvm-profdata"
-      if [[ $RUNNER_OS == macOS ]]; then
-        RUST_DEMANGLER=$(xcrun -f llvm-cxxfilt)
-      else
-        RUST_DEMANGLER=c++filt
-      fi
-      export RUST_DEMANGLER
+      export LLVM_COV="$sysroot/lib/rustlib/$host/bin/llvm-cov"
       CARGO_TARGET_DIR="$RUNNER_TEMP/coverage-build" RUSTFLAGS='-C instrument-coverage' cargo +"$toolchain" build --locked
       export TONARI_COVERAGE_BINARY="$RUNNER_TEMP/coverage-build/debug/tonari"
     fi

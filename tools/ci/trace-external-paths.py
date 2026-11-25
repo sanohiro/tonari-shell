@@ -1,6 +1,7 @@
 """Report Tonari functions reached by each published workload in a coverage build."""
 import argparse
 import csv
+from functools import lru_cache
 import importlib.util
 import json
 import os
@@ -91,21 +92,40 @@ def collect(suite, source, shell, names):
             raw = list(root.glob("*.profraw"))
             if not raw:
                 raise ValueError(f"No LLVM profile for {name}")
-            yield name, result.returncode, symbols(raw, root)
+            yield name, result.returncode, symbols(raw, root, shell)
 
 
-def symbols(raw, root):
+@lru_cache(maxsize=None)
+def source_lines(path):
+    return path.read_bytes().splitlines()
+
+
+def symbols(raw, root, shell):
     profile = root / "merged.profdata"
     profdata = os.environ.get("LLVM_PROFDATA", "llvm-profdata")
+    cov = os.environ.get("LLVM_COV", "llvm-cov")
     subprocess.run([profdata, "merge", "-sparse", *raw, "-o", profile], check=True)
-    covered = subprocess.check_output([profdata, "show", "--all-functions", "--covered", profile])
-    demangler = os.environ.get("RUST_DEMANGLER", "llvm-cxxfilt")
-    command = [demangler] if "llvm" in Path(demangler).name else [demangler, "-s", "rust"]
-    names = subprocess.check_output(command, input=covered).decode().splitlines()
-    tonari = sorted({name for name in names if "tonari::" in name})
-    if not tonari:
-        raise ValueError("No demangled Tonari symbols in LLVM profile")
-    return tonari
+    export = json.loads(subprocess.check_output([
+        cov, "export", shell, "--instr-profile=" + str(profile), "-skip-branches", "-skip-expansions",
+    ]))
+    repo = Path(__file__).resolve().parents[2]
+    paths = set()
+    for function in export["data"][0]["functions"]:
+        if not function["count"]:
+            continue
+        # LLVM source positions use UTF-8 byte columns. Match the start of the
+        # definition, excluding closures whose first region is inside its body.
+        line, col, _, _, _, file_id, *_ = function["regions"][0]
+        path = Path(function["filenames"][file_id])
+        if not path.is_relative_to(repo / "src"):
+            continue
+        head = source_lines(path)[line - 1][col - 1:].lstrip()
+        name = re.match(rb'(?:pub(?:\([^)]*\))?\s+)?(?:(?:const|unsafe|extern "C")\s+)*fn\s+(\w+)', head)
+        if name:
+            paths.add(f"{path.relative_to(repo)}::{name[1].decode()}")
+    if not paths:
+        raise ValueError("No executed Tonari source definitions in the LLVM profile")
+    return sorted(paths)
 
 
 def main():
