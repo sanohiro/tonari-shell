@@ -124,7 +124,7 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
-  external-review-*|external-shellspec|external-fumiyas|external-unixwin|external-luish|external-gnu-hello|external-gnu-profile|external-gnu-waits)
+  external-review-*|external-check-shellspec|external-shellspec|external-fumiyas|external-unixwin|external-luish|external-gnu-hello|external-gnu-profile|external-gnu-waits)
     suite=${SUITE#external-}
     compare=()
     if [[ $suite == review-* ]]; then

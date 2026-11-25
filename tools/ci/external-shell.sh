@@ -39,16 +39,21 @@ case "$suite" in
     command -v zsh >/dev/null || { echo 'fumiyas fixtures require zsh' >&2; exit 1; }
     python3 tools/bench_external.py fumiyas "$work/cases.sh" "$tonari" "$bash_ref" "${compare[@]}"
     ;;
-  shellspec|unixwin|luish)
+  shellspec|check-shellspec|unixwin|luish)
     case "$suite" in
-      shellspec) repo=shellspec/shellbench rev=4b04d18ecd170948fcbb52a130c708fd3e08e1af ;;
+      shellspec|check-shellspec) repo=shellspec/shellbench rev=4b04d18ecd170948fcbb52a130c708fd3e08e1af ;;
       unixwin) repo=unixwin/shellbench rev=4fecc23d226ac5854cc2f1bbf74a6acf310c8ba8 ;;
       luish) repo=luispedro/luish rev=b43b78dd25fbd671c90b9e3265525d741089414d ;;
     esac
     git -C "$work" init -q
     git -C "$work" fetch -q --depth 1 "https://github.com/$repo.git" "$rev"
     git -C "$work" checkout -q --detach "$rev"
-    if [[ $suite == shellspec ]]; then
+    if [[ $suite == shellspec || $suite == check-shellspec ]]; then
+      check=("$bash_ref" "$tonari")
+      if [[ -n ${4:-} ]]; then check+=("$4"); fi
+      if [[ -n ${5:-} ]]; then check+=("$5"); fi
+      python3 tools/ci/check-shellspec.py "$work/sample" "${check[@]}" > "$PWD/results/shellspec-witnesses.txt"
+      if [[ $suite == check-shellspec ]]; then cat "$PWD/results/shellspec-witnesses.txt"; exit; fi
       mkdir "$work/bin" "$work/home"
       ln -s "$tonari" "$work/bin/tonari"
       ln -s "$bash_ref" "$work/bin/bash-ref"
