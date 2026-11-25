@@ -28,28 +28,41 @@ fn symbolic(text: &str, mask: libc::mode_t) -> Option<libc::mode_t> {
         if who == 0 {
             who = 0o777;
         }
-        let operator = chars.next()?;
-        let mut bits = 0;
-        for c in chars {
-            bits |= match c {
-                'r' => 0o444,
-                'w' => 0o222,
-                'x' => 0o111,
-                _ => return None,
-            };
+        if chars.peek().is_none() {
+            return None;
         }
-        bits &= who;
-        match operator {
-            '+' => allowed |= bits,
-            '-' => allowed &= !bits,
-            '=' => allowed = (allowed & !who) | bits,
-            _ => return None,
+        while let Some(operator) = chars.next() {
+            let mut bits = 0;
+            if let Some(&class @ ('u' | 'g' | 'o')) = chars.peek() {
+                chars.next();
+                let shift = match class {
+                    'u' => 6,
+                    'g' => 3,
+                    _ => 0,
+                };
+                bits = ((allowed >> shift) & 7) * 0o111;
+            } else {
+                while let Some(c) = chars.next_if(|c| matches!(c, 'r' | 'w' | 'x')) {
+                    bits |= match c {
+                        'r' => 0o444,
+                        'w' => 0o222,
+                        _ => 0o111,
+                    };
+                }
+            }
+            bits &= who;
+            match operator {
+                '+' => allowed |= bits,
+                '-' => allowed &= !bits,
+                '=' => allowed = (allowed & !who) | bits,
+                _ => return None,
+            }
         }
     }
     Some(!allowed & 0o777)
 }
 
-pub fn run(args: &[String]) -> u8 {
+pub fn run(args: &[String], posix: bool) -> u8 {
     let mut args = args.iter().peekable();
     let mut symbols = false;
     let mut reusable = false;
@@ -82,7 +95,7 @@ pub fn run(args: &[String]) -> u8 {
             return 1;
         };
         unsafe { libc::umask(mask) };
-        if !symbols {
+        if !symbols || posix {
             return 0;
         }
         mask

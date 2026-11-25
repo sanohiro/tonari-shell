@@ -222,7 +222,12 @@ case "$SUITE" in
     git init -q "$root"
     git -C "$root" fetch -q --depth 1 https://github.com/magicant/yash.git 1cdb509a617894ed96a12c33b43bcd7adb6f1ff5
     git -C "$root" checkout -q --detach FETCH_HEAD
-    if [[ $SUITE == external-yash-recheck ]]; then
+    if [[ $SUITE == external-yash-pipelines ]]; then
+      cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
+      python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
+        --spawn-control "$bin/spawn-control" > "$out/throughput.jsonl"
+      selection=(--fixture pipeline-p.tst)
+    elif [[ $SUITE == external-yash-recheck ]]; then
       python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" > "$out/throughput.jsonl"
       python3 tools/ci/yash-signals.py --tonari "$current" --bash "$ref" > "$out/signals.jsonl"
       selection=(--fixture alias-p.tst --fixture shift-p.tst --fixture kill2-p.tst --fixture set-p.tst

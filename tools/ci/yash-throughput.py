@@ -20,7 +20,7 @@ WORKLOADS = {
 }
 
 
-def measure(base, shells):
+def measure(base, shells, spawn_control=None):
     subjects = {}
     for label, binary in shells.items():
         directory = base / label
@@ -36,7 +36,8 @@ def measure(base, shells):
         def sample(label):
             with script.open("rb") as stdin:
                 start = time.monotonic_ns()
-                result = subprocess.run([subjects[label], *args], env=env, cwd=base, stdin=stdin,
+                argv = [spawn_control, "--spawn-100"] if label == "direct" else [subjects[label], *args]
+                result = subprocess.run(argv, env=env, cwd=base, stdin=stdin,
                                         capture_output=True, timeout=8)
                 elapsed = (time.monotonic_ns() - start) / 1e6
             return (result.returncode, result.stdout, result.stderr), elapsed
@@ -44,10 +45,11 @@ def measure(base, shells):
         witness, _ = sample("bash")
         if witness[0] != 0:
             raise RuntimeError(f"{name}: invalid Bash witness {witness!r}")
-        timings = {label: [] for label in shells}
+        labels = [*shells, "direct"] if name == "spawn" and spawn_control else list(shells)
+        timings = {label: [] for label in labels}
         rng = random.Random(41)
         for trial in range(1 + (61 if name == "startup" else 17)):
-            order = list(shells)
+            order = labels.copy()
             rng.shuffle(order)
             for label in order:
                 result, elapsed = sample(label)
@@ -63,6 +65,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for label in ("first", "tonari", "bash"):
         parser.add_argument("--" + label, type=Path, required=True)
+    parser.add_argument("--spawn-control", type=Path)
+    args = vars(parser.parse_args())
+    control = args.pop("spawn_control")
     with TemporaryDirectory() as directory:
-        for record in measure(Path(directory), vars(parser.parse_args())):
+        for record in measure(Path(directory), args, control):
             print(json.dumps(record), flush=True)

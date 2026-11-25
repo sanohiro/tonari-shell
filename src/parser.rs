@@ -497,14 +497,17 @@ fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnc
     }
 }
 
+pub(crate) fn plain_assignment(command: &str) -> Option<(&str, &str)> {
+    let (name, value) = command.split_once('=')?;
+    (crate::word::is_identifier(name) && value.bytes().all(lexer::plain_byte))
+        .then_some((name, value))
+}
+
 // Generated eval assignments often change just the value. Construct the same
 // simple-command AST; assignment attributes, traps and exit status stay live.
 pub(crate) fn literal_assignment(source: &str, line: usize) -> Option<Statement> {
     let command = source.strip_suffix('\n').unwrap_or(source);
-    let (name, value) = command.split_once('=')?;
-    if !crate::word::is_identifier(name) || !value.bytes().all(lexer::plain_byte) {
-        return None;
-    }
+    let (name, value) = plain_assignment(command)?;
     let location = Location {
         source: source.into(),
         start: 0,

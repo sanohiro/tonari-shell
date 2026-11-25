@@ -526,6 +526,9 @@ fn repeat(
     let mut iterations = 0u8;
     let mut literals = Vec::new();
     let flow = loop {
+        if session.noexec {
+            break Flow::Continue(0);
+        }
         if crate::interrupted() {
             break Flow::Continue(130);
         }

@@ -760,7 +760,7 @@ fn eval_builtin(
         Builtin::Ulimit => {
             Flow::Continue(crate::builtins::limits::run(args, &mut io::stdout().lock()))
         }
-        Builtin::Umask => Flow::Continue(crate::builtins::umask::run(args)),
+        Builtin::Umask => Flow::Continue(crate::builtins::umask::run(args, session.posix)),
         Builtin::Mapfile => crate::session::mapfile::run(session, &cmd.words[0], args, last_status),
         Builtin::Read => {
             let here = match cmd.redirects.as_slice() {
@@ -1179,8 +1179,13 @@ fn run_builtin(
     if !final_command
         || matches!(
             builtin,
-            Builtin::Trap | Builtin::Function | Builtin::Compound | Builtin::Eval | Builtin::Source
+            Builtin::Trap | Builtin::Function | Builtin::Eval | Builtin::Source
         )
+        || matches!(builtin, Builtin::Compound)
+            && !matches!(
+                cmd.compound.as_deref(),
+                Some(crate::parser::Command::Subshell(_))
+            )
     {
         for action in actions {
             if matches!(action, Action::CloseMoved(_)) {
@@ -1393,6 +1398,31 @@ fn start(
     launch: crate::jobs::Launch,
 ) -> io::Result<Stage> {
     let builtin = builtin(cmd, last_status, session);
+    // Numeric exit and constant status builtins do not inspect either pipe end.
+    // Keep a real child for job control and observable child-signal traps.
+    if !launch.background
+        && launch.group.is_none()
+        && !session.traps.active()
+        && cmd.redirects.is_empty()
+        && (input.is_some() || output.is_some())
+        && let Some(Builtin::Exit(status) | Builtin::Status(status)) = builtin
+    {
+        return Ok(Stage::Status(status));
+    }
+    // Pipeline lookup happens in a stage's environment. A private resolved
+    // path permits spawn file actions without populating the parent's hash.
+    if builtin.is_none()
+        && (input.is_some() || output.is_some())
+        && !launch.background
+        && launch.group.is_none()
+        && cmd.cacheable()
+        && !cmd.default_path
+        && !cmd.words[0].contains('/')
+        && cmd.cached_path(session, &cmd.words[0]).is_none()
+        && let Ok(Some(entry)) = hash::search(&cmd.words[0], session)
+    {
+        cmd.resolved = Some(entry.path);
+    }
     let cached = cmd
         .words
         .first()
@@ -1711,7 +1741,10 @@ impl PreparedCommand {
             return None;
         }
         let name = cmd.words.first()?.as_literal()?;
-        if matches!(name, "builtin" | "command" | "set") || !builtin_names().contains(&name) {
+        if matches!(name, "builtin" | "command" | "set")
+            || !(builtin_names().contains(&name)
+                || name.starts_with('/') && cmd.redirects.is_empty())
+        {
             return None;
         }
         let words = cmd
@@ -1754,7 +1787,19 @@ impl PreparedCommand {
         if session.noclobber && self.redirects.iter().any(|r| r.target == Target::Write) {
             return None;
         }
-        let selected = builtin(self, status, session)?;
+        let selected = builtin(self, status, session);
+        if selected.is_none() && self.words[0].starts_with('/') && self.redirects.is_empty() {
+            let result = start(self, None, None, None, status, session, Default::default())
+                .and_then(|stage| match stage {
+                    Stage::Child(pid) => wait(pid),
+                    Stage::Status(code) => Ok(code),
+                });
+            return Some(Flow::Continue(result.unwrap_or_else(|e| {
+                eprintln!("tonari: {e}");
+                1
+            })));
+        }
+        let selected = selected?;
         if matches!(selected, Builtin::Function | Builtin::Set) {
             return None;
         }

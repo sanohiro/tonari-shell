@@ -94,6 +94,15 @@ int main(int argc, char **argv) {
         }
         return closedir(dir) != 0;
     }
+    if (argc == 2 && strcmp(argv[1], "--spawn-100") == 0) {
+        char *const words[] = {"/usr/bin/true", NULL};
+        for (int i = 0; i < 100; ++i) {
+            pid_t child;
+            if (posix_spawn(&child, words[0], NULL, NULL, words, environ) || !waited(child)) return 1;
+        }
+        puts("100");
+        return 0;
+    }
     if (argc < 4) return 1;
     if (strcmp(argv[3], "-c") == 0) {
         char gate;

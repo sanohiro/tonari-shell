@@ -364,6 +364,33 @@ fn run(
             input.clear();
             continue;
         }
+        // A write to an existing plain scalar cannot run shell code or consume stdin.
+        // Preserve read-ahead across those lines. The next observable command still
+        // synchronizes the shared offset before any builtin, trap or child can read.
+        if shared_offset
+            && line_start == 0
+            && !check
+            && !session.noexec
+            && !session.onecmd
+            && !session.xtrace
+            && !session.history_enabled
+            && !session.traps.active()
+            && !session.traps.in_action()
+            && session.coprocesses.is_empty()
+            && session.jobs.is_empty()
+            && let Some(command) = text.strip_suffix('\n')
+            && let Some((key, value)) = parser::plain_assignment(command)
+            && session.assign_existing_literal(key, value)
+        {
+            session.current_command = Some(parser::Location::label(command.into(), base_line));
+            session.pipe_status.single(0);
+            session.substitutions.finish(session.substitutions.scope());
+            ran = true;
+            status = 0;
+            base_line += 1;
+            input.clear();
+            continue;
+        }
         let buffered = line_start == 0 && n != 0 && !shared_offset && !session.verbose;
         let open_function = buffered
             && parser::opens_function(text)
