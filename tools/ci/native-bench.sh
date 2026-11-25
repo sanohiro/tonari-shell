@@ -124,7 +124,7 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
-  external-shellspec|external-fumiyas|external-unixwin|external-luish|external-gnu-hello|external-gnu-profile)
+  external-shellspec|external-fumiyas|external-unixwin|external-luish|external-gnu-hello|external-gnu-profile|external-gnu-waits)
     if [[ $SUITE == external-fumiyas ]] && ! command -v zsh >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y zsh; fi
     if [[ $SUITE == external-unixwin && $RUNNER_OS == macOS ]] && ! command -v stdbuf >/dev/null; then
       if ! brew list --versions coreutils >/dev/null; then brew install coreutils; fi
