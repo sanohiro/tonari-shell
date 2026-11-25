@@ -24,11 +24,20 @@ toolchain=$(sed -n 's/^ *toolchain=//p' tools/build-release.sh)
 rustup toolchain install "$toolchain" --profile minimal --component rust-src --target "$target"
 rustc +"$toolchain" -vV >> results/host.txt
 export CARGO_TARGET_DIR="$RUNNER_TEMP/build"
-cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/current"
-if [[ $SUITE == external-yash-[0-7] ]]; then
+if [[ $SUITE == spec-previous-builtins ]]; then
+  previous=$(git rev-parse --verify --end-of-options "${PREVIOUS_REVISION}^{commit}")
+  git worktree add -q --detach "$RUNNER_TEMP/previous-shell" "$previous"
+  echo "Tested runtime revision $previous" >> results/host.txt
+  (cd "$RUNNER_TEMP/previous-shell"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/current")
+else
+  cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/current"
+fi
+if [[ $SUITE == external-yash-[0-7] || $SUITE == oils-[0-3] || $SUITE == spec-builtins || $SUITE == bensch-* ]]; then
   observer="$RUNNER_TEMP/yash-paths"
   git worktree add -q --detach "$observer" HEAD
-  python3 tools/ci/yash-paths.py "$observer" results/sites.json
+  set -- "$observer" results/sites.json
+  [[ $SUITE != bensch-* ]] || set -- "$@" --editor
+  python3 tools/ci/yash-paths.py "$@"
   (cd "$observer"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/paths")
 fi
 if [[ $SUITE == external-shared-input ]]; then
@@ -45,12 +54,12 @@ if [[ $SUITE == external-gnu-waits ]]; then
   git worktree add -q --detach "$observer" HEAD
   (cd "$observer"; git apply tools/ci/configure-waits.patch; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/observer")
 fi
-if [[ $SUITE == external-yash-* || $SUITE == external-review-* || $SUITE == external-gnu-profile || $SUITE == parity* || $SUITE == probe || $SUITE == functions || $SUITE == throughput || $SUITE == history || $SUITE == history-fields || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == rcfiles || $SUITE == tool-hooks || $SUITE == picker || $SUITE == budget* || $SUITE == inventory* ]]; then
+if [[ $SUITE == spec-hot || $SUITE == external-yash-* || $SUITE == external-review-* || $SUITE == external-gnu-profile || $SUITE == parity* || $SUITE == probe || $SUITE == functions || $SUITE == throughput || $SUITE == history || $SUITE == history-fields || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == rcfiles || $SUITE == tool-hooks || $SUITE == picker || $SUITE == budget* || $SUITE == inventory* ]]; then
   previous=$(git rev-parse --verify --end-of-options "${PREVIOUS_REVISION:-HEAD^}^{commit}")
   git worktree add -q --detach "$RUNNER_TEMP/base" "$previous"
   (cd "$RUNNER_TEMP/base"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/baseline")
 fi
-if [[ $SUITE == external-review-* ]]; then
+if [[ $SUITE == external-review-* || $SUITE == oils-profile-* || $SUITE == spec-profile-builtins ]]; then
   cp "$(CARGO_PROFILE_RELEASE_OPT_LEVEL=3 tools/build-release.sh)" "$RUNNER_TEMP/bin/opt-3"
 fi
 if [[ $SUITE == budget* || $SUITE == inventory* ]]; then

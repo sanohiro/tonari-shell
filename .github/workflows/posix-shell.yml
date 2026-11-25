@@ -40,6 +40,12 @@ jobs:
       - name: Check POSIX execution order and terminal operands
         if: matrix.shard == 0
         run: python3 tests/shell.py "$RUNNER_TEMP/target/release/tonari" -q -k posix_
+      - name: Check Bash witnesses from bensch and Oils
+        if: matrix.shard == 0
+        run: |
+          python3 tests/shell.py "$RUNNER_TEMP/target/release/tonari" -q \
+            -k indexed_assignment_uses -k arithmetic_error_discards -k empty_fc_and_top \
+            -k resize_during_edit -k motion_burst_stops -k variable_tab_uses
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

@@ -81,9 +81,20 @@ pub(crate) fn hit(index: u8) {
 }
 """
 
-def instrument(root, output):
+EDITOR_SITES = """
+editor binding | Check custom prefixes and the constant single-byte action table before building a sequence.
+editor insert_burst | Collect adjacent committed UTF-8 text without reading beyond the first command delimiter.
+editor motion_burst | Apply completed unmodified motions together up to a bounded repaint interval.
+editor/recall navigate | Use the history position and unchanged search prefix for adjacent navigation.
+history find_command | Reuse history search state and yield to pending terminal input.
+complete at | Identify the token, consult programmable completion and enumerate eligible candidates.
+session variable_names | Start the ordered variable lookup at the requested prefix and stop after the last matching name.
+""".strip()
+
+
+def instrument(root, output, editor=False):
     sites = []
-    for i, entry in enumerate(SITES.splitlines()):
+    for i, entry in enumerate((SITES + ("\n" + EDITOR_SITES if editor else "")).splitlines()):
         location, review = entry.split(" | ")
         module, function = location.split()
         path = root / "src" / (module + ".rs")
@@ -101,4 +112,4 @@ def instrument(root, output):
     output.write_text(json.dumps(sites, indent=2) + "\n")
 
 if __name__ == "__main__":
-    instrument(Path(sys.argv[1]), Path(sys.argv[2]))
+    instrument(Path(sys.argv[1]), Path(sys.argv[2]), "--editor" in sys.argv[3:])

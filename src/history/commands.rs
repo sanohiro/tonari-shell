@@ -316,14 +316,16 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
     if substitution.is_some() {
         args = &args[1..];
     }
-    let h = session
-        .history
-        .as_deref()
-        .ok_or_else(|| error("no command found"))?;
-    let end = h.current.unwrap_or(h.lines.len());
+    let h = session.history.as_deref();
+    let end = h.map_or(0, |h| h.current.unwrap_or(h.lines.len()));
     if end == 0 {
-        return Err(error("no command found"));
+        return if list && !substitute {
+            Ok(Flow::Continue(0))
+        } else {
+            Err(error("no command found"))
+        };
     }
+    let h = h.unwrap();
     let select = |arg: &String| {
         if let Ok(n) = arg.parse::<i64>() {
             if n < 0 {

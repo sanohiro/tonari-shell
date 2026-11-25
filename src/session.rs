@@ -224,10 +224,10 @@ impl Session {
         CharacterLocale::from_name(name.as_deref().unwrap_or(""))
     }
 
-    pub fn variable_names(&self) -> Vec<String> {
+    pub fn variable_names(&self, prefix: &str) -> Vec<String> {
         let mut names: std::collections::BTreeSet<_> = std::env::vars_os()
             .filter_map(|(k, _)| k.into_string().ok())
-            .filter(|k| is_identifier(k))
+            .filter(|k| k.starts_with(prefix) && is_identifier(k))
             .collect();
         names.extend(
             [
@@ -249,9 +249,17 @@ impl Session {
                 "MACHTYPE",
             ]
             .into_iter()
+            .filter(|k| k.starts_with(prefix))
             .map(str::to_owned),
         );
-        for (key, var) in &self.variables {
+        use std::ops::Bound::{Included, Unbounded};
+        for (key, var) in self
+            .variables
+            .range::<str, _>((Included(prefix), Unbounded))
+        {
+            if !key.starts_with(prefix) {
+                break;
+            }
             if var.declared {
                 names.insert(key.clone());
             } else {
@@ -839,7 +847,7 @@ impl Session {
         Self::plain_decimal(var.value.as_deref()?)
     }
 
-    fn plain_decimal(value: &str) -> Option<i64> {
+    pub(crate) fn plain_decimal(value: &str) -> Option<i64> {
         if value == "0" {
             return Some(0);
         }

@@ -276,12 +276,9 @@ impl<'a> Expansion<'a> {
         } else {
             expression
         };
-        arithmetic::with_variables(expression, self).map_err(|message| {
-            if message == "readonly variable" {
-                Error::discard(message)
-            } else {
-                Error::fatal(message, 1)
-            }
+        arithmetic::with_variables(expression, self).map_err(|message| match message {
+            "unbound arithmetic variable" => Error::fatal(message, 1),
+            _ => Error::discard(message),
         })
     }
 

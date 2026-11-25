@@ -408,6 +408,34 @@ chmod -x later; hash -r; { later; echo denied=$?; } 2>err
 [ -e made ] && echo created; rm -f later made""",
                      0, b"missing=127\nfound\ndenied=126\nredirected=127\ncreated\n")
 
+    def test_indexed_assignment_uses_the_live_subscript_once(self):
+        self.compare("""x=1; y=2; a=(one two)
+a[$x$y]=twelve
+i=0; a[i++]+=!
+a[-1]+=!
+a[07]=seven
+idx=(0 3); a[${idx[1]}]=three
+printf '%s ' "$i" "${a[@]}"; printf '%s' "${a[12]}"
+""", 0, b"1 one! two three seven twelve! twelve!", minimum=4)
+
+    def test_empty_fc_and_top_level_return(self):
+        self.compare('fc -lnr; echo "list=$?"; fc -s 2>/dev/null; echo "repeat=$?"; '
+                     'return 0 2>/dev/null; echo "return=$?"',
+                     0, b"list=0\nrepeat=1\nreturn=2\n", minimum=5)
+        self.compare('return 1 2 2>/dev/null', 1, minimum=5)
+
+    def test_arithmetic_error_discards_current_input_but_nounset_exits(self):
+        for shell in self.shells_for(5):
+            for script, status, output in [
+                (b"echo $((42x)); echo wrong\necho recovered\n", 0, b"recovered\n"),
+                (b"set -u\necho $((absent + 1))\necho wrong\n", 1, b""),
+                (b"echo $((02#0110))\n", 1, b""),
+            ]:
+                with self.subTest(shell=shell, script=script):
+                    p = subprocess.run([shell], input=script, capture_output=True, env=self.env, cwd=self.cwd)
+                    self.assertEqual((p.returncode, p.stdout), (status, output))
+                    self.assertTrue(p.stderr)
+
     def test_compound_append_after_shift_and_sparse_index(self):
         self.compare('set -- a b "c d"; shift; f() { shift; a+=( "$@" ); }; '
                      'a=(start); f skip "$@"; unset "a[1]"; a+=(end); '
@@ -2626,6 +2654,46 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
         self.addCleanup(close)
         self.read_until(fd, PROMPT)
         return (pid, fd) if with_pid else fd
+
+    def test_variable_tab_uses_live_names_and_preserves_quoting(self):
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                os.write(fd, b"TNR_UNIQUE_VALUE=expanded; TNR_UNIQUE_HIDDEN=old; unset TNR_UNIQUE_HIDDEN; echo ready''OK\r")
+                self.read_until(fd, b"readyOK\r\n")
+                for word, expected in [(b"$TNR_UNI", b"expanded"), (b'"${TNR_UNI', b"expanded"),
+                                       (b"'$TNR_UNI", b"$TNR_UNIQUE_VALUE"),
+                                       (b"\\$TNR_UNI", b"$TNR_UNI")]:
+                    os.write(fd, b"printf '<%s>\\n' " + word + b"\t\r")
+                    self.read_until(fd, b"<" + expected + b">\r\n")
+                os.write(fd, b"complete -W WRONG printf; echo spec''OK\r")
+                self.read_until(fd, b"specOK\r\n")
+                os.write(fd, b"printf '<%s>\\n' $TNR_UNI\t\r")
+                self.read_until(fd, b"<>\r\n")
+
+    def test_resize_during_edit_affects_the_command_being_entered(self):
+        import struct
+        import termios
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                os.write(fd, b"printf ")
+                self.read_until(fd, b"printf ")
+                fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 41, 103, 0, 0))
+                os.write(fd, b"'size<%sx%s>\\n' \"$LINES\" \"$COLUMNS\"\r")
+                self.read_until(fd, b"size<41x103>\r\n")
+
+    def test_motion_burst_stops_before_custom_binding_and_child_input(self):
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"""bind '"\\C-f":beginning-of-line'; echo configured''OK\r""")
+        self.read_until(fd, b"configuredOK\r\n")
+        os.write(fd, b"v=abc\x02\x06#\r")
+        os.write(fd, b"printf '<%s>\\n' \"${v-unset}\"\r")
+        self.read_until(fd, b"<unset>\r\n")
+        # The command is accepted by the editor. Its foreground reader takes a
+        # newline-delimited record already queued while the terminal is raw.
+        os.write(fd, b"read -r v\x02\x1b[C\rchild payload\nprintf '<%s>\\n' \"$v\"\r")
+        self.read_until(fd, b"<child payload>\r\n")
 
     def test_silent_terminal_read_restores_echo(self):
         for shell in self.shells_for(4):

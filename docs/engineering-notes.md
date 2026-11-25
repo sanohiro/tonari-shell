@@ -1,5 +1,23 @@
 # Engineering notes / 開発知見
 
+## 2026-11-26 · Observing terminal input and shell expansion / 対話入力と展開の検証
+
+bensch sets `HISTSIZE=0` in its Bash profile. Its matcher may find text in the editor's redisplay, and pexpect deliberately waits before sending each key. Time at the PTY master measures the first returned byte. For a claim about completed editing, submit the edited variable assignment and verify its expanded value. Repeating an unmodified movement in a bounded batch avoids intermediate writes. A custom binding, a partial escape sequence, and a Right at the end of a suggestion each need their own normal dispatch. [External measurements](benchmarks.md#external-shell-specs)
+
+bensch の Bash プロファイルでは履歴サイズがゼロで、編集中の表示が期待文字列に一致することもあります。履歴は有効にした端末でも測り、行編集は確定後の変数値まで確認します。連続する左右移動はまとめて描画できます。独自割り当て・途中まで届いたエスケープシーケンス・行末での右矢印は通常のキー処理に戻し、子プロセスが読む入力も残します。[試験条件と測定結果](benchmarks.md#external-shell-specs)
+
+Bash expands the right-hand side of an indexed assignment before evaluating the index. Evaluate the index in the live session once so that `a[i++]+=x` updates the selected element and increments `i` once. Retain numerical indices as integers through read and write. For Tab on a variable, the shell's ordered variable map already supports a lower-bound lookup. Visit only matching names and apply local shadowing and unset entries to inherited names. [Bash witnesses](../tests/shell.py)
+
+配列代入は右辺を展開してから、現在のシェル状態で添字を一度だけ計算します。`a[i++]+=x` の値の取得と書き込みには同じ数値を使えます。変数名の Tab 補完では、整列済み変数表を接頭辞の位置から走査すると、無関係な変数のコピーとソートを省けます。引用符と波括弧、unset 済みの名前、コマンド固有の補完を実際の端末で検証しました。[Bash との比較試験](../tests/shell.py)
+
+
+When an Oils script prints an argument list or environment variable through its Python 2 helper, interpreter startup contributes to both shells' elapsed times. Keep the original helper for the compatibility result. A second run substituting one small native helper, with unchanged bytes and status checked for each shell, measures how much the fixture changes the timing. A PTY can likewise return visible bytes before the shell has executed the command. Repeat slow first-byte observations through a verified result and exit status. [Helper comparison](compatibility/external-shell/helpers.tsv.gz) · [Confirmed PTY response](../tools/ci/bensch-response.py)
+
+Oils の引数表示や環境変数表示では、共通の Python 2 の起動がシェル間の時間差を覆います。上流の実測値を保存し、補助プログラムだけを置き換えた試験で両シェルの出力と終了状態を照合します。対話試験でも、最初に返ったバイトとコマンドの実行結果を見分けるため、同じ短い入力を結果が届くまで繰り返し測ります。[実測条件](benchmarks.md#external-shell-specs)
+
+A foreground `read` needs a newline-delimited record when a PTY sends the payload before the editor leaves raw mode. In a Linux PTY, both Bash 5.2.37 and Tonari waited after a queued carriage return and completed after a queued newline. On a physical Mac both delimiters completed. The regression sends Enter for the edit and LF for the data in one write, so any byte consumed past the command boundary still breaks the test. Linux の入力先が切り替わる境界を試すときは、編集を確定する Enter と、次の読み手に渡す行末 LF を区別します。[Foreground-input witness](../tests/shell.py)
+
+
 ## 2026-11-26 · Interpreting shared POSIX failures / 両シェルが失敗した試験の扱い
 
 When deciding whether a fix needs a mode check, run the same script through both entry points and identify the observable result each promises. The assignment and redirection examples in the compatibility guide exercise that decision on the same binary. モード分岐を追加する前に、同じ入力を通常起動と POSIX モードに渡し、どの出力・状態・副作用を守るために分けるのかを確認します。両方の仕様を満たす修正は共通の実行経路に入れます。[Mode selection and bug-fix policy / モード選択と不具合修正の方針](compatibility.md#shell-modes)

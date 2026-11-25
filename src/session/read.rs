@@ -252,6 +252,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
             0,
             Some((opts.initial.unwrap_or(""), files_only)),
             false,
+            None,
         );
         crate::INPUT_DEADLINE.set(prior);
         match result {

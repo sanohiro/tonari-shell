@@ -239,7 +239,7 @@ impl Session {
         }
     }
 
-    pub(super) fn element(&self, name: &str, index: i64) -> Option<String> {
+    pub(crate) fn element(&self, name: &str, index: i64) -> Option<String> {
         if name == "PIPESTATUS" {
             return self
                 .pipe_status
@@ -511,6 +511,10 @@ impl Session {
             return Ok(value);
         }
         let n = crate::arithmetic::evaluate(expr, &|k| self.get(k))?;
+        self.relative_index(name, n)
+    }
+
+    pub(crate) fn relative_index(&self, name: &str, n: i64) -> Result<i64, &'static str> {
         if n < 0 {
             self.last_index(name)
                 .and_then(|i| i.checked_add(n + 1))

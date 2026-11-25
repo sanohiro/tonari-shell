@@ -1,5 +1,96 @@
 # Startup and execution / 起動と実行性能
 
+<a id="external-shell-specs"></a>
+
+## 2026-11-26 · bensch and Oils / 対話操作・組み込み・言語仕様の外部試験
+
+The [external comparison](compatibility/external-shell/README.md) records each case's functional result, timings, and execution sites. Script cases use the native distribution binary and the host GNU Bash, with fresh identical inputs and isolated working directories. The [native workflow](https://github.com/sanohiro/tonari-shell/actions/runs/45712166512) includes machine details and raw samples.
+
+On a physical Apple M1, macOS 27.2.1, the following medians are milliseconds. The reference is GNU Bash 5.2.37 arm64. Each trial waits for the completed expansion, submitted edit, or visible completion. The variable-completion trial verifies the resulting command afterwards. [Measurement driver](../tools/ci/spec-hot.py)
+
+| Workload | Earlier correct Tonari version | Optimized Tonari | Bash | Trials |
+| --- | ---: | ---: | ---: | ---: |
+| 160 Ctrl-B / Ctrl-F pairs, then edit and submit | 1.122 | 0.283 | 0.882 | 27 |
+| 160 Left / Right pairs, then edit and submit | 1.646 | 0.584 | 1.621 | 27 |
+| Unique variable Tab among 10,000 shell variables | 1.979 | 0.062 | 134.358 | 25 |
+| Dynamic indexed assignment, 6,000 iterations | | 8.017 | 16.195 | 27 |
+| Indexed append, 6,000 iterations | | 7.359 | 17.610 | 27 |
+| Empty history listing, 3,000 iterations | | 3.897 | 11.025 | 27 |
+| Resize an active prompt and print the new dimensions | | 0.133 | 0.134 | 27 |
+
+For indexed append, a separate 23-pair comparison of the first working and optimized implementation measured 8.451 → 7.754 ms. It removed the reconstructed variable name and its second subscript lookup. The resize comparison with 23 trials measured 0.151 → 0.116 ms when the editor reused the dimensions already read for the prompt. The previous production build produced the wrong result for the dynamic subscript, empty listing, variable Tab and live resize. Each such timing is marked `MISMATCH` in the release comparison. The physical Mac executable remained 1,499,808 bytes with only libSystem as a dynamic dependency.
+
+Mac 実機の表は中央値（ms）です。左右移動は320キーのあとで挿入・確定した変数値、変数名補完は実際に挿入された候補と展開値まで確認しました。配列の追記では添字を文字列に戻して再解釈する処理を省きました。リサイズの試験では、プロンプト表示後に変更した端末サイズを、いま入力したコマンドが参照できることを確認します。
+
+With 100,000 real history entries, the M1 PTY medians for Tonari / Bash were 0.029 / 0.019 ms for the most recent match, 0.262 / 0.543 ms for a distant match, and 0.018 / 0.500 ms on a forward revisit (19 trials). Listing all 10,000 filename candidates took 10.684 / 33.595 ms. Listing ten took 0.128 / 0.119 ms (11 trials). 履歴を有効にした実測では、10万件の遠い一致と再訪で差が出ました。直近の一致と10件の候補表示では、この実機では Bash がわずかに速い結果です。[History inputs](../tools/bench_navigation.py) · [Candidate listing](../tools/bench_completion.py)
+
+
+To measure visible input with a populated line, the physical M1 also received 300 individually acknowledged CJK characters in each of 11 sessions per shell. The initial line was approximately 1,800 bytes. Append latency at p50 / p95 / p99 was 0.011 / 0.012 / 0.015 ms in Tonari and 0.041 / 0.048 / 0.050 ms in Bash. Repeated insertion near the beginning measured 0.026 / 0.040 / 0.044 ms and 0.158 / 0.206 / 0.210 ms respectively. The check compares the entire edited buffer after each session. [Reproduce with `--size 1800 --steady 300 --runs 11`](../tools/bench_editing.py)
+
+日本語の一文字ずつの描画は、各回で文字が実際に端末に届いてから次を送りました。計3,300回の99パーセンタイルは行末への追加で 0.015 ms、行頭付近への挿入で 0.044 ms でした。数値には疑似端末での入出力が含まれます。
+
+
+
+
+In the macOS CI Oils run, 51 comparable cases took longer in Tonari. Of these, 41 ran `argv.py` or `printenv.py`. All 41 ran faster than Bash in the native-helper control on macOS CI. The remaining ten cover five explicit sleeps, three `stdout_stderr.py` calls and two redirection or subshell scripts. A 25-trial replay of each unmodified script on the physical M1 with Bash 5.2.37 gave Tonari a lower median in all ten. These physical measurements use a different host and Bash version. The original 51 CI measurements stay in the case table. [Mac case replays](compatibility/external-shell/mac-replays.tsv) · [Helper controls](compatibility/external-shell/helpers.tsv.gz)
+
+All four macOS builtin cases above Bash time launch a 100 ms sleep and exercise `fg` or `wait`. On the physical M1 the original medians for Tonari were 124.85–133.24 ms, compared with 130.55–142.96 ms for Bash. Replacing only the sleep duration with zero retained the same per-shell output and status on both sides, and measured 5.06–5.83 ms and 8.27–8.73 ms respectively. The shell still launches and waits for the child. [All four sleep and zero-sleep pairs](compatibility/external-shell/mac-replays.tsv)
+
+macOS CI で Bash より遅かったスクリプトも、補助プログラムを変えた同じ CI と、元の入力を使う M1 実機の再測定で個別に調べました。CI と実機は環境・Bash の版が異なるため、元の結果を併記しています。再実行するには掲載したケース ID の manifest 行を抽出し、ペア計測に `--runs 25` を指定します。
+
+### Optimization level on every script / 全スクリプトでの最適化設定の比較
+
+We built the same runtime with the shipping `-O2` and with `-O3`. Each build ran every one of the 3,645 scripts three times in alternating order with the original upstream helpers. Each row below uses only stable cases with byte-identical outputs and equal status between builds. The ratio is measured time at `-O3` divided by time at `-O2`. A three-trial difference in an individual short case can include scheduler noise. [Case-level compiler comparison](compatibility/external-shell/profiles.tsv.gz) · [Linux profile run](https://github.com/sanohiro/tonari-shell/actions/runs/45716192920)
+
+| Host | Suite | Comparable | Median case ratio | More than 10% faster at `-O3` | More than 10% slower at `-O3` |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Physical M1 | bensch builtins | 874 | 1.006 | 11 | 24 |
+| Physical M1 | Oils | 2,766 | 1.004 | 8 | 16 |
+| Linux x86-64 CI | bensch builtins | 875 | 0.994 | 60 | 43 |
+| Linux x86-64 CI | Oils | 2,768 | 0.999 | 63 | 73 |
+
+The resulting `-O2` / `-O3` executables were 1,499,808 / 1,582,368 bytes on the physical Mac and 2,006,680 / 2,080,568 bytes on Linux. 全3,645件で同じソースから作った2つのバイナリを比較しました。標準設定 `-O2` を採用しています。`-O3` は両環境でサイズが増え、各ケースの時間比の中央値はすべての組み合わせで 1% 以内でした。
+
+### Native CI and timing controls / ネイティブ CI と追加計測
+
+The native jobs used Bash 5.2.21 on Linux and Bash 5.3.20 on macOS. These medians in milliseconds use 19 trials per shell. The Linux static PIE changed from 1,999,096 to 2,006,680 bytes. The macOS arm64 binary changed from 1,499,776 to 1,499,776 bytes. [Build metadata and raw samples](https://github.com/sanohiro/tonari-shell/actions/runs/45712166512)
+
+| Verified operation | Linux Tonari | Linux Bash | macOS Tonari | macOS Bash |
+| --- | ---: | ---: | ---: | ---: |
+| 6,000 dynamic indexed assignments | 4.801 | 9.502 | 9.413 | 31.220 |
+| 6,000 indexed appends | 3.514 | 9.783 | 7.822 | 24.483 |
+| 3,000 empty history listings | 0.662 | 4.585 | 3.647 | 15.117 |
+| 160 Ctrl-B / Ctrl-F pairs | 0.195 | 0.812 | 0.401 | 1.020 |
+| 160 Left / Right pairs | 0.372 | 1.341 | 0.812 | 1.848 |
+| Resize and accept | 0.084 | 0.111 | 0.140 | 0.189 |
+| Unique variable Tab among 10,000 names | 0.055 | 226.931 | 0.068 | 147.635 |
+
+We repeated eight PTY cases for which Linux's original first-byte observation was slower, comparing the time from submitting a command line to receiving its expected output and exit status. Each median below uses 41 trials per shell and host. The two-line integer test was submitted on one line while preserving the immediate read of `$?`. [Native reruns](https://github.com/sanohiro/tonari-shell/actions/runs/45714697709)
+
+| bensch case, output and status verified | Linux Tonari | Linux Bash | macOS Tonari | macOS Bash |
+| --- | ---: | ---: | ---: | ---: |
+| `posix_core/94` | 0.103 | 0.125 | 0.345 | 0.363 |
+| `posix_untested_auto/6` | 0.100 | 0.142 | 0.367 | 0.414 |
+| `posix_gaps_auto/92` | 0.106 | 0.161 | 0.315 | 0.361 |
+| `posix_basic_auto/16` | 0.098 | 0.138 | 0.253 | 0.343 |
+| `posix_core/112` | 0.101 | 0.134 | 0.351 | 0.321 |
+| `posix_core/1` | 0.087 | 0.112 | 0.234 | 0.293 |
+| `posix_basic_auto/75` | 0.092 | 0.120 | 0.283 | 0.266 |
+| `posix_extended_auto/24` | 0.094 | 0.135 | 0.246 | 0.371 |
+
+Linux の上流 PTY で最初のバイトが遅く届いた項目を再測定しました。表は実際の出力と終了状態が届くまでの時間（ms）です。範囲外の項目についても最初の実測値を個別表に残しています。
+
+| Native host | Isolated helper | Source cases | Stable identical outcomes | Median original ratio | Median native-helper ratio |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Linux x86-64 | `argv.py` | 333 | 273 | 0.960 | 0.521 |
+| Linux x86-64 | `printenv.py` | 42 | 32 | 0.965 | 0.515 |
+| macOS arm64 | `argv.py` | 333 | 271 | 0.876 | 0.498 |
+| macOS arm64 | `printenv.py` | 42 | 31 | 0.880 | 0.494 |
+
+All 27 comparable Oils cases above Bash time in the main Linux run used one of these two Python 2 helpers. Replacing just that helper placed all 27 below Bash time in the control. The original Linux run still has 27 misses. The two helper subsets may overlap. The ratio is calculated per case before taking the median. [Per-case helper comparison](compatibility/external-shell/helpers.tsv.gz)
+
+Oils 公式の入力と補助プログラムで測った値が本表の出発点です。補助プログラムを置き換えた実験では、各シェルについて標準出力・標準エラー・終了状態を元と照合しました。上流の試験を実際に動かす時間と、補助プログラムの起動コストを減らした場合の時間比を両方残しています。
+
 ## 2026-11-26 · POSIX assignment and redirection order / 代入とリダイレクトの順序
 
 The original yash case `simple-p.tst:18` passed 11/11 times on native Linux x86-64 and macOS arm64 with release `8c31058`. Median time for its passing execution was 1.365 ms on Linux and 7.949 ms on macOS. Both Bash and previous Tonari failed its stderr assertion on every trial. The loops below have the same validated output and exit status across shells. Each iteration runs a prefix assignment, `true`, and a real file redirect on descriptor 3. Times are medians in milliseconds for 3,000 iterations. [Native release samples and host details](https://github.com/sanohiro/tonari-shell/actions/runs/45702341425) · [Benchmark inputs](../tools/ci/yash-throughput.py)

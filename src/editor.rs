@@ -109,6 +109,44 @@ impl Keys {
         }
     }
 
+    // A terminal repeat or macro may deliver several completed motions at once.
+    // Stop before a partial escape, custom binding, or suggestion-accepting Right.
+    fn motion_burst(&mut self, text: &str, mut cursor: usize, session: &Session) -> usize {
+        if session.bindings.map != Keymap::Emacs {
+            return cursor;
+        }
+        for _ in 0..64 {
+            let Some(first) = self.immediate() else { break };
+            let mut seq = [first, 0, 0];
+            let mut len = 1;
+            if first == 27 && !session.bindings.custom_prefix(&[first]) {
+                if let Some(b) = self.immediate() {
+                    seq[1] = b;
+                    len = 2;
+                    if matches!(b, b'[' | b'O')
+                        && let Some(b) = self.immediate()
+                    {
+                        seq[2] = b;
+                        len = 3;
+                    }
+                }
+            }
+            match &seq[..len] {
+                [2] if !session.bindings.custom_prefix(&[2]) => cursor = previous(text, cursor),
+                [6] if !session.bindings.custom_prefix(&[6]) => cursor = next(text, cursor),
+                [27, b'[' | b'O', b'D'] => cursor = previous(text, cursor),
+                [27, b'[' | b'O', b'C'] if cursor < text.len() => cursor = next(text, cursor),
+                other => {
+                    for &b in other.iter().rev() {
+                        self.queued.push_front(b);
+                    }
+                    break;
+                }
+            }
+        }
+        cursor
+    }
+
     fn character(&mut self, first: u8) -> io::Result<Option<char>> {
         let width = match first {
             0..=127 => return Ok(Some(char::from(first))),
@@ -211,36 +249,35 @@ impl Keys {
         if unbound_text(first, session) {
             return Ok((Binding::Edit(Action::Insert), false));
         }
+        let fallback = if session.bindings.map != Keymap::Command && first >= 32 && first != 127 {
+            Binding::Edit(Action::Insert)
+        } else {
+            Binding::Removed
+        };
+        let (exact, mut longer) = session.bindings.lookup(&[first]);
+        if !longer {
+            return Ok((exact.unwrap_or(fallback), false));
+        }
         let mut seq = vec![first];
-        let mut best = None;
-        loop {
-            let (exact, longer) = session.bindings.lookup(&seq);
+        let mut best = exact.map(|action| (1, action));
+        while longer {
+            // Consume one byte at a time; a foreground child owns later typeahead.
+            let key = if let Some(key) = self.immediate() {
+                key
+            } else if ready(0, session.bindings.timeout()) {
+                let Some(key) = self.get()? else { break };
+                key
+            } else {
+                break;
+            };
+            seq.push(key);
+            let (exact, prefix) = session.bindings.lookup(&seq);
             if let Some(action) = exact {
                 best = Some((seq.len(), action));
             }
-            if !longer {
-                break;
-            }
-            // Most terminals send a complete escape sequence in one write.
-            // Consume only its next byte, preserving typeahead for foreground jobs.
-            if let Some(key) = self.immediate() {
-                seq.push(key);
-                continue;
-            }
-            if !ready(0, session.bindings.timeout()) {
-                break;
-            }
-            let Some(key) = self.get()? else { break };
-            seq.push(key);
+            longer = prefix;
         }
-        let (len, action) = best.unwrap_or((
-            1,
-            if session.bindings.map != Keymap::Command && first >= 32 && first != 127 {
-                Binding::Edit(Action::Insert)
-            } else {
-                Binding::Removed
-            },
-        ));
+        let (len, action) = best.unwrap_or((1, fallback));
         // Preserve unmatched bytes when a custom sequence shares a prefix with ordinary typing.
         for &key in seq[len..].iter().rev() {
             self.queued.push_front(key);
@@ -394,27 +431,24 @@ struct Screen {
 }
 
 impl Screen {
-    fn new() -> Self {
-        let mut size = unsafe { std::mem::zeroed::<libc::winsize>() };
-        unsafe {
-            libc::ioctl(2, libc::TIOCGWINSZ, &mut size);
-        }
+    fn new(size: Option<(u16, u16)>) -> Self {
+        let (rows, columns) = size.unwrap_or_else(|| {
+            let mut size = unsafe { std::mem::zeroed::<libc::winsize>() };
+            unsafe { libc::ioctl(2, libc::TIOCGWINSZ, &mut size) };
+            (size.ws_row, size.ws_col)
+        });
         Self {
             output: String::new(),
             row: 0,
             tail: None,
-            height: if size.ws_row == 0 {
-                24
-            } else {
-                usize::from(size.ws_row)
-            },
+            height: if rows == 0 { 24 } else { usize::from(rows) },
             view: Default::default(),
             column: 0,
             had_hint: false,
-            width: if size.ws_col < 4 {
+            width: if columns < 4 {
                 79
             } else {
-                usize::from(size.ws_col) - 1
+                usize::from(columns) - 1
             },
         }
     }
@@ -644,6 +678,7 @@ pub fn line(
     status: u8,
     read: Option<(&str, bool)>,
     primary_prompt: bool,
+    terminal_size: Option<(u16, u16)>,
 ) -> io::Result<Input> {
     bindings::initialize(session);
     session.bindings.map = if session.vi {
@@ -657,7 +692,7 @@ pub fn line(
         ..Default::default()
     };
     let mut mark = 0usize;
-    let mut screen = Screen::new();
+    let mut screen = Screen::new(terminal_size);
     let mut text = read.map_or("", |r| r.0).to_owned();
     let mut cursor = text.len();
     let mut undo = Undo::default();
@@ -1386,6 +1421,9 @@ pub fn line(
                 )?;
             }
             _ => {}
+        }
+        if motion && matches!(action, Action::Back | Action::Forward) && search.is_none() {
+            cursor = keys.motion_burst(&text, cursor, session);
         }
     }
 }
