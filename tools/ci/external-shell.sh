@@ -4,6 +4,14 @@ suite=$1 tonari=$2 bash_ref=$3
 compare=()
 if [[ -n ${4:-} ]]; then compare=(--previous "$4"); fi
 if [[ -n ${5:-} ]]; then compare+=(--opt3 "$5" --raw "$PWD/results/external-raw.json"); fi
+if [[ -n ${EXTERNAL_BENCH_CASE:-} || -n ${EXTERNAL_BENCH_RUNS:-} ]]; then
+  case "$suite" in
+    gnu-hello|fumiyas|unixwin|luish)
+      if [[ -n ${EXTERNAL_BENCH_CASE:-} ]]; then compare+=(--case "$EXTERNAL_BENCH_CASE"); fi
+      if [[ -n ${EXTERNAL_BENCH_RUNS:-} ]]; then compare+=(--runs "$EXTERNAL_BENCH_RUNS"); fi ;;
+    *) echo "Per-case selection and trial counts require a bench_external.py suite" >&2; exit 2 ;;
+  esac
+fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 case "$suite" in

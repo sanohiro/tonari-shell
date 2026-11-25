@@ -28,6 +28,8 @@ jobs:
     timeout-minutes: 180
     env:
       SUITE: ${{ matrix.suite }}
+      EXTERNAL_BENCH_CASE: ${{ matrix.case }}
+      EXTERNAL_BENCH_RUNS: ${{ matrix.runs }}
       PREVIOUS_REVISION: ${{ inputs.previous }}
       NATIVE_RUNNER: ${{ matrix.runner }}
       TIMING_RUN: ${{ inputs.timing_run }}
