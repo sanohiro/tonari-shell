@@ -2690,7 +2690,9 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
         os.write(fd, b"v=abc\x02\x06#\r")
         os.write(fd, b"printf '<%s>\\n' \"${v-unset}\"\r")
         self.read_until(fd, b"<unset>\r\n")
-        os.write(fd, b"read -r v\x02\x1b[C\rchild payload\rprintf '<%s>\\n' \"$v\"\r")
+        # The command is accepted by the editor. Its foreground reader takes a
+        # newline-delimited record already queued while the terminal is raw.
+        os.write(fd, b"read -r v\x02\x1b[C\rchild payload\nprintf '<%s>\\n' \"$v\"\r")
         self.read_until(fd, b"<child payload>\r\n")
 
     def test_silent_terminal_read_restores_echo(self):
