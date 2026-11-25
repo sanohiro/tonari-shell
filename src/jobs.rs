@@ -87,17 +87,8 @@ impl Launch {
 
     pub fn child(self, traps: &mut crate::traps::Traps) {
         if let Some(group) = self.group {
-            if unsafe { libc::setpgid(0, group) } < 0 {
-                // The parent assigns the same group after fork. Darwin can
-                // return EPERM to a child already in its requested group.
-                let target = if group == 0 {
-                    unsafe { libc::getpid() }
-                } else {
-                    group
-                };
-                if unsafe { libc::getpgrp() } != target {
-                    unsafe { libc::_exit(1) }
-                }
+            if !assign_process_group(0, group) {
+                unsafe { libc::_exit(1) }
             }
             if let Some(tty) = self.tty.filter(|_| !self.defer_tty) {
                 give_terminal(tty, unsafe { libc::getpgrp() });
@@ -113,12 +104,54 @@ impl Launch {
     pub fn parent(&mut self, pid: pid_t) {
         if let Some(group) = self.group {
             let group = if group == 0 { pid } else { group };
-            unsafe {
-                libc::setpgid(pid, group);
-            }
+            assign_process_group(pid, group);
             self.group = Some(group);
         }
     }
+}
+
+fn assign_process_group(pid: pid_t, group: pid_t) -> bool {
+    (unsafe { libc::setpgid(pid, group) == 0 }) || group_assignment_raced(pid, group)
+}
+
+#[cold]
+fn group_assignment_raced(pid: pid_t, group: pid_t) -> bool {
+    if io::Error::last_os_error().raw_os_error() != Some(libc::EPERM) {
+        return false;
+    }
+    let leader = if pid == 0 {
+        unsafe { libc::getpid() }
+    } else {
+        pid
+    };
+    let target = if group == 0 { leader } else { group };
+    // Darwin can return EPERM to one caller while the other is creating the
+    // same group. Its new membership may not yet be visible to getpgid.
+    for attempt in 0..4 {
+        let current = unsafe { libc::getpgid(pid) };
+        if current == target {
+            return true;
+        }
+        if current < 0 || target != leader {
+            return false;
+        }
+        if attempt < 2 {
+            unsafe { libc::sched_yield() };
+        } else {
+            let delay = libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 100_000,
+            };
+            unsafe { libc::nanosleep(&delay, std::ptr::null_mut()) };
+        }
+        if unsafe { libc::setpgid(pid, group) } == 0 {
+            return true;
+        }
+        if io::Error::last_os_error().raw_os_error() != Some(libc::EPERM) {
+            break;
+        }
+    }
+    unsafe { libc::getpgid(pid) == target }
 }
 
 fn terminal_modes(fd: RawFd) -> Option<libc::termios> {
