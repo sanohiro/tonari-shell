@@ -2,6 +2,8 @@
 
 ## POSIX sh invocation / sh 名での起動
 
+In POSIX mode Tonari installs a regular command's redirects before evaluating its prefix assignments. Ordinary Bash mode retains the Bash expansion order. `sh` モードでの意図した差と、上流の失敗・スキップの理由をケース別に記録しました。[Review of the 22 other verdicts](compatibility/yash-posix-followup/README.md#posix-verdict-review)
+
 The follow-up compares the same named yash cases against GNU Bash on native Linux and macOS. It also exercises the distribution versions of Bash on Debian 13 and Ubuntu 26.04. Each pull request runs all 122 fixtures on Linux. A missing upstream case, or a Bash pass that Tonari fails or skips, fails the check. 各シェルの合格・不合格・スキップと、通常の Bash モードでの再監査結果を記録しています。[Current case results](compatibility/yash-posix-followup/README.md)
 
 Both the release and GNU Bash are launched as `sh` for the upstream yash POSIX suite. The case tables preserve each shell's verdict and distinguish failures in one shell, common failures, skips and variable results. The ordinary Bash feature audit contains 1,411 entries. On the physical M1, six prior differences now match and no previously matching entry regressed. Sixty-two entries changed from an unavailable mode to an available mode with no independent probe.

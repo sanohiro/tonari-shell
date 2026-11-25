@@ -489,6 +489,12 @@ v=''; printf '<%s>' "${v//$p/x}" "${v/%$p/x}" """,
                      'exec {keep}>out; test -e /dev/fd/$keep; echo "$?"; exec {keep}>&-', 0,
                      b"1\n0\n", minimum=5)
 
+        for shell in self.shells_for(minimum=5):
+            for name, expected in (("true", (127, b"")), ("/usr/bin/true", (0, b"after\n"))):
+                result = self.command(shell, name + ' {out}>"${missing:?unset}"; echo after')
+                self.assertEqual((result.returncode, result.stdout), expected)
+                self.assertIn(b"unset", result.stderr)
+
     def test_invalid_expansion_in_unselected_shell_branch(self):
         self.compare('if false; then echo ${(M)${(k)parameters[@]}:#git_*}; fi; echo ready',
                      0, b"ready\n")

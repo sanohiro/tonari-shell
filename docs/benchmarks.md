@@ -1,5 +1,22 @@
 # Startup and execution / 起動と実行性能
 
+## 2026-11-26 · POSIX assignment and redirection order / 代入とリダイレクトの順序
+
+The original yash case `simple-p.tst:18` passed 11/11 times on native Linux x86-64 and macOS arm64 with release `8c31058`. Median time for its passing execution was 1.365 ms on Linux and 7.949 ms on macOS. Both Bash and previous Tonari failed its stderr assertion on every trial. The loops below have the same validated output and exit status across shells. Each iteration runs a prefix assignment, `true`, and a real file redirect on descriptor 3. Times are medians in milliseconds for 3,000 iterations. [Native release samples and host details](https://github.com/sanohiro/tonari-shell/actions/runs/45702341425) · [Benchmark inputs](../tools/ci/yash-throughput.py)
+
+| Native host | Prefix | Trials | Comparison Tonari | Final Tonari | Bash |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Physical M1 | `v=x` | 17 | 39.637 | 37.962 | 50.997 |
+| Physical M1 | `v=$(printf x)` | 17 | 41.266 | 41.003 | 2,504.648 |
+| Linux x86-64 | `v=x` | 13 | 6.373 | 6.583 | 16.524 |
+| Linux x86-64 | `v=$(printf x)` | 13 | 7.589 | 8.994 | 733.894 |
+| macOS arm64 | `v=x` | 13 | 36.039 | 36.463 | 54.714 |
+| macOS arm64 | `v=$(printf x)` | 13 | 34.236 | 33.109 | 2,653.015 |
+
+The M1 comparison uses the first working implementation, which always installed temporary descriptors before expanding a prefix. Final Tonari skips that bookkeeping for infallible literal assignments with literal file redirects and ordinary literal arguments. An earlier paired M1 run measured 38.903 to 37.061 ms on the literal loop (13 trials). The CI comparison uses the previous main revision `eea584d`. The Linux expanded loop costs 1.405 ms more per 3,000 commands than the previous revision. A real substitution that reads the newly installed descriptor is covered by the direct shell regression. Stripped Linux grew by 6,944 bytes and macOS CI by 16 bytes. [Regression inputs](../tests/shell.py) · [POSIX verdict review](compatibility/yash-posix-followup/README.md#posix-verdict-review)
+
+実機 M1 の比較対象は正しい結果を返す最初の実装、CI の比較対象は修正前の main です。定数代入では副作用も失敗も生じないことを確認できた場合にだけ追加の FD 保存・復元を省きます。Linux で動的な代入に増えた時間も上表に含めています。再現には `tools/ci/yash-throughput.py` に `--case literal-prefix-redirect --case expanded-prefix-redirect` と比較する3つの実行ファイルを指定します。
+
 ## 2026-11-26 · Bash-passing POSIX cases / POSIX 互換性修正後の性能
 
 The three-run comparison covers 11,079 cases per host, including the generated signal tests. The table gives the median of the per-case Tonari/Bash ratios. The last column counts cases that still took at least as long as Bash when every initial miss of the 2/3 target was repeated 11 times. [Case tables and replay method](compatibility/yash-posix-followup/README.md)
