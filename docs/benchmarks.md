@@ -27,6 +27,8 @@ A separate diagnostic used a small launcher to time the actual compiler and the 
 
 On the Linux profiling runner the earlier host detection phase took 761 ms in Tonari and 26 ms in Bash. The reader had parsed a 39,222-byte case statement more than 1,200 times. With the final release the complete upstream helper took 23.9 ms on Linux, down from 559.8 ms in the previous release on the same runner. `config.sub x86_64-linux-gnu` fell from 108.7 to 2.5 ms. An external command writing to inherited fd 5 took 70.7 ms for 250 launches, down from 86.4 ms. On the physical M1 a 17.6 kB loop straddling a 128 KiB buffer boundary took 40.4 ms before repositioning the read window and 5.7 ms afterwards, compared with Bash at 8.8 ms. [Earlier phase trace](https://github.com/sanohiro/tonari-shell/actions/runs/45535633215)
 
+The release passed all 58 Rust tests. The Mac integration suite ran 210 tests with two Linux-only skips, and all 1,411 Mac differential verdicts matched the previous build. The Debian x86-64 audit ran 1,525 feature checks including 83 GNU regression groups and retained every published match from the native comparison inventory. [Debian audit artifact](https://github.com/sanohiro/tonari-shell/actions/runs/45537822602)
+
 Autoconf の結果キャッシュを無効にし、各回で新しいビルドディレクトリを使いました。最初の表は配布版 `configure` の起動から終了までです。修正前・修正後・Bash の順番を回し、各3回の中央値を比較しました。2/3 の合格条件は未達です。Linux ではコンパイラと生成したテストの待ち時間だけで、同じホストの Bash 全体の 2/3 を超えました。2つ目の表は別走行でこの2種類の外部処理を直接計測し、重複する時間を除いた値です。macOS の CI と実機にはテスト実行時間に大きな差があり、それぞれのホストで比較しました。
 
 ```sh
