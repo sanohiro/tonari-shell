@@ -101,6 +101,7 @@ def main():
     for name in ("manifest", "output", "bash", "tonari", "scratch"):
         parser.add_argument(name, type=lambda p: Path(p).absolute())
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--helper", type=Path)
     parser.add_argument("--observer", type=Path)
     parser.add_argument("--shard", type=int, default=0)
     parser.add_argument("--shards", type=int, default=1)
@@ -115,6 +116,8 @@ def main():
     cwd = args.scratch / "case"
     trace = args.scratch / "calls"
     path = os.pathsep.join(map(str, (shell_dir, args.source.resolve() / "spec/bin", os.environ["PATH"])))
+    if args.helper:
+        path = str(args.helper.resolve()) + os.pathsep + path
     with args.output.open("w", buffering=1) as output:
         for n, case in enumerate(cases):
             if not case["include"] or n % args.shards != args.shard or (args.suite and case["suite"] != args.suite):
