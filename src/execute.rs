@@ -824,25 +824,23 @@ fn eval_builtin(
         ),
         Builtin::Eval => crate::input::eval_builtin(session, args, last_status),
         Builtin::Return(status) => {
-            if session.source_depth == 0 && session.function_depth == 0 {
+            if status.is_some() && status_operands(args).len() > 1 {
+                write_error(b"return", b": too many arguments");
+                Flow::Continue(1)
+            } else if session.source_depth == 0 && session.function_depth == 0 {
                 write_error(
                     b"return",
                     b": can only return from a function or sourced script",
                 );
-                Flow::Continue(1)
+                Flow::Continue(2)
             } else if let Some(code) = status {
-                if status_operands(args).len() > 1 {
-                    write_error(b"return", b": too many arguments");
-                    Flow::Continue(1)
+                session.traps.before_return = last_status;
+                let code = if session.posix && args.is_empty() {
+                    session.traps.signal_status.unwrap_or(code)
                 } else {
-                    session.traps.before_return = last_status;
-                    let code = if session.posix && args.is_empty() {
-                        session.traps.signal_status.unwrap_or(code)
-                    } else {
-                        code
-                    };
-                    Flow::Return(code)
-                }
+                    code
+                };
+                Flow::Return(code)
             } else {
                 write_error(b"return", b": numeric argument required");
                 Flow::Return(2)
@@ -1968,8 +1966,8 @@ fn prepare_expanded(
                 if let std::borrow::Cow::Owned(resolved) = exp.session.reference_name(&key)? {
                     key = resolved;
                 }
-                let base =
-                    crate::session::array::subscript(&key).map_or(key.as_str(), |(base, _)| base);
+                let target = crate::session::array::subscript(&key);
+                let base = target.map_or(key.as_str(), |(base, _)| base);
                 if exp.session.readonly(base) {
                     let error = crate::expansion::Error::readonly(base);
                     if words.is_empty() || exp.session.posix {
@@ -1978,7 +1976,7 @@ fn prepare_expanded(
                     eprintln!("tonari: {error}");
                     continue;
                 }
-                if let Some((base, subscript)) = crate::session::array::subscript(&key)
+                if let Some((base, subscript)) = target
                     && exp.session.is_associative(base)
                 {
                     if !words.is_empty() {
@@ -1986,7 +1984,9 @@ fn prepare_expanded(
                     }
                     if standalone {
                         let key = exp.key(subscript)?;
-                        let old = exp.session.assoc_value(base, &key).map(str::to_owned);
+                        let old = append
+                            .then(|| exp.session.assoc_value(base, &key).map(str::to_owned))
+                            .flatten();
                         let value = if exp.session.integer(base) {
                             exp.session.integer_value(old.as_deref(), &value, append)?
                         } else if append {
@@ -1998,9 +1998,33 @@ fn prepare_expanded(
                     }
                     continue;
                 }
+                let index = if let Some((_, subscript)) = target {
+                    if !words.is_empty() {
+                        return Err("invalid indexed environment assignment".into());
+                    }
+                    if !standalone {
+                        continue;
+                    }
+                    let n = if let Some(n) = Session::plain_decimal(subscript) {
+                        n
+                    } else {
+                        exp.arithmetic(subscript)?
+                    };
+                    Some(
+                        exp.session
+                            .relative_index(base, n)
+                            .map_err(crate::expansion::Error::discard)?,
+                    )
+                } else {
+                    None
+                };
+                let old = |exp: &Expansion<'_>| match index {
+                    Some(i) => exp.session.element(base, i),
+                    None => exp.lookup(&key),
+                };
                 let value = if exp.session.integer(base) {
                     let old = if append {
-                        let old = exp.lookup(&key).unwrap_or_default();
+                        let old = old(&exp).unwrap_or_default();
                         exp.arithmetic(&old)?
                     } else {
                         0
@@ -2010,18 +2034,12 @@ fn prepare_expanded(
                     if direct_assignment && exp.session.append_plain_scalar(&key, &value) {
                         continue;
                     }
-                    exp.lookup(&key).unwrap_or_default() + &value
+                    old(&exp).unwrap_or_default() + &value
                 } else {
                     value
                 };
-                if let Some((base, index)) = crate::session::array::subscript(&key) {
-                    if !words.is_empty() {
-                        return Err("invalid indexed environment assignment".into());
-                    }
-                    if standalone {
-                        let i = session.resolve_index(base, index)?;
-                        session.assign_element(base, i, value);
-                    }
+                if let Some(i) = index {
+                    session.assign_element(base, i, value);
                     continue;
                 }
                 if direct_assignment {

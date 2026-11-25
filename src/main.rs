@@ -226,7 +226,7 @@ fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Resu
         if session.notify && session.jobs.monitor {
             session.jobs.report_changes();
         }
-        session.refresh_terminal_size();
+        let terminal_size = session.refresh_terminal_size();
         if source.is_empty() {
             for hook in session.array_values("PROMPT_COMMAND") {
                 if !hook.is_empty()
@@ -252,6 +252,7 @@ fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Resu
                 status,
                 None,
                 source.is_empty(),
+                terminal_size,
             ) {
                 Ok(editor::Input::Exit(code)) => return Ok(code),
                 Ok(editor::Input::Line(line)) => {
@@ -320,6 +321,10 @@ fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Resu
             }
             Err(e) => return Err(e),
         };
+        if more {
+            // The terminal can be resized while this line is being edited.
+            session.refresh_terminal_size();
+        }
         if !more && source.is_empty() {
             if session
                 .get("IGNOREEOF")

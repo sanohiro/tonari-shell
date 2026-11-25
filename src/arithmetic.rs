@@ -515,6 +515,9 @@ fn binary(op: &str, a: i64, b: i64) -> Result<i64> {
 
 fn number(s: &str) -> Result<i64> {
     let (base, digits) = if let Some((base, digits)) = s.split_once('#') {
+        if base.starts_with('0') {
+            return Err("invalid arithmetic base");
+        }
         let base = base.parse::<u32>().map_err(|_| "invalid arithmetic base")?;
         if !(2..=64).contains(&base) {
             return Err("invalid arithmetic base");

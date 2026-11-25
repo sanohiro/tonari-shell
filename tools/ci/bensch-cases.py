@@ -23,7 +23,7 @@ skip() { record skip "$@"; }
 
 
 def main():
-    source, scratch = map(lambda a: Path(a).resolve(), sys.argv[1:])
+    source, scratch, bash = map(lambda a: Path(a).resolve(), sys.argv[1:])
     suites = scratch / "builtin-suites"
     shutil.copytree(source / "suites/builtins", suites)
     (suites / "test_harness.sh").write_text(HARNESS)
@@ -38,7 +38,7 @@ def main():
         records = scratch / "records"
         records.write_bytes(b"")
         env = dict(PATH=os.environ["PATH"], TEST_TMPDIR=str(setup), RECORDS=str(records),
-                   HOME=str(scratch), FORCE_JOB_TESTS="1", FORCE_COPROC_TESTS="1")
+                   HOME=str(scratch), BASH_REF=str(bash), FORCE_JOB_TESTS="1", FORCE_COPROC_TESTS="1")
         subprocess.run(["/bin/sh", path], env=env, cwd=setup, stdin=subprocess.DEVNULL,
                        stdout=sys.stderr, check=True)
         values = records.read_bytes().split(b"\0")

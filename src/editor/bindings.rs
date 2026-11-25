@@ -81,6 +81,34 @@ pub(crate) fn names() -> impl Iterator<Item = &'static str> {
     named_actions().map(|(_, name, _)| name)
 }
 
+// Built from the same definitions as bind -p, including vi command prefixes.
+const fn first_keys(map: Keymap) -> [(Option<Action>, bool); 128] {
+    let mut table = [(None, false); 128];
+    let mut a = 0;
+    while a < ACTIONS.len() {
+        let (action, _, emacs) = ACTIONS[a];
+        let keys = map.defaults(action, emacs);
+        let mut k = 0;
+        while k < keys.len() {
+            let key = keys[k];
+            let entry = &mut table[key[0] as usize];
+            if key.len() > 1 {
+                entry.1 = true;
+            } else if entry.0.is_none() {
+                entry.0 = Some(action);
+            }
+            k += 1;
+        }
+        a += 1;
+    }
+    table
+}
+static FIRST_KEY: [[(Option<Action>, bool); 128]; 3] = [
+    first_keys(Keymap::Emacs),
+    first_keys(Keymap::Insert),
+    first_keys(Keymap::Command),
+];
+
 #[derive(Clone)]
 pub(super) enum Binding {
     Edit(Action),
@@ -104,7 +132,11 @@ impl Keymap {
             _ => Err(format!("{name}: unsupported keymap")),
         }
     }
-    fn defaults(self, action: Action, emacs: &'static [&'static [u8]]) -> &'static [&'static [u8]] {
+    const fn defaults(
+        self,
+        action: Action,
+        emacs: &'static [&'static [u8]],
+    ) -> &'static [&'static [u8]] {
         use Action::*;
         match self {
             Self::Emacs => emacs,
@@ -190,6 +222,13 @@ impl Bindings {
                 .next()
                 .is_some_and(|(k, _)| k.starts_with(seq))
         });
+        if let [byte @ 0..=127] = seq {
+            let (default, prefix) = FIRST_KEY[self.map as usize][*byte as usize];
+            return (
+                exact.or_else(|| default.map(Binding::Edit)),
+                longer || prefix,
+            );
+        }
         for &(action, _, keys) in ACTIONS {
             for &key in self.map.defaults(action, keys) {
                 if key.starts_with(seq) {

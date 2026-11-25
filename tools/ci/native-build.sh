@@ -25,10 +25,12 @@ rustup toolchain install "$toolchain" --profile minimal --component rust-src --t
 rustc +"$toolchain" -vV >> results/host.txt
 export CARGO_TARGET_DIR="$RUNNER_TEMP/build"
 cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/current"
-if [[ $SUITE == external-yash-[0-7] || $SUITE == oils-* || $SUITE == spec-builtins ]]; then
+if [[ $SUITE == external-yash-[0-7] || $SUITE == oils-* || $SUITE == spec-builtins || $SUITE == bensch-* ]]; then
   observer="$RUNNER_TEMP/yash-paths"
   git worktree add -q --detach "$observer" HEAD
-  python3 tools/ci/yash-paths.py "$observer" results/sites.json
+  extra=()
+  [[ $SUITE != bensch-* ]] || extra+=(--editor)
+  python3 tools/ci/yash-paths.py "$observer" results/sites.json "${extra[@]}"
   (cd "$observer"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/paths")
 fi
 if [[ $SUITE == external-shared-input ]]; then
@@ -45,7 +47,7 @@ if [[ $SUITE == external-gnu-waits ]]; then
   git worktree add -q --detach "$observer" HEAD
   (cd "$observer"; git apply tools/ci/configure-waits.patch; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/observer")
 fi
-if [[ $SUITE == external-yash-* || $SUITE == external-review-* || $SUITE == external-gnu-profile || $SUITE == parity* || $SUITE == probe || $SUITE == functions || $SUITE == throughput || $SUITE == history || $SUITE == history-fields || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == rcfiles || $SUITE == tool-hooks || $SUITE == picker || $SUITE == budget* || $SUITE == inventory* ]]; then
+if [[ $SUITE == spec-hot || $SUITE == external-yash-* || $SUITE == external-review-* || $SUITE == external-gnu-profile || $SUITE == parity* || $SUITE == probe || $SUITE == functions || $SUITE == throughput || $SUITE == history || $SUITE == history-fields || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == rcfiles || $SUITE == tool-hooks || $SUITE == picker || $SUITE == budget* || $SUITE == inventory* ]]; then
   previous=$(git rev-parse --verify --end-of-options "${PREVIOUS_REVISION:-HEAD^}^{commit}")
   git worktree add -q --detach "$RUNNER_TEMP/base" "$previous"
   (cd "$RUNNER_TEMP/base"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/baseline")

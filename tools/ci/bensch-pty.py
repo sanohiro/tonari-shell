@@ -93,6 +93,8 @@ def run(args):
                 shells = [("bash", args.bash), ("tonari", args.tonari)]
                 if batch % 2:
                     shells.reverse()
+                if args.observer:
+                    shells.append(("observer", args.observer))
                 for label, binary in shells:
                     with tempfile.TemporaryDirectory() as home, contextlib.chdir(home):
                         os.environ["HOME"] = home
@@ -100,6 +102,11 @@ def run(args):
                         runner._test_count = start
                         try:
                             for i, case in enumerate(tests[start:start + 10], start):
+                                trace = Path(home) / "trace"
+                                if label == "observer":
+                                    trace.write_bytes(b"")
+                                    case = dict(case, fresh_session=True,
+                                                env={**case.get("env", {}), "TONARI_CASE_TRACE": str(trace)})
                                 runner.events = []
                                 result = runner.run_test(case)
                                 runner._test_count += 1
@@ -108,6 +115,8 @@ def run(args):
                                            seconds=result.duration,
                                            first_byte_us=[None if delay is None else delay / 1000
                                                           for _, delay in runner.events])
+                                if label == "observer":
+                                    row["sites"] = sorted(set(trace.read_bytes()))
                                 print(json.dumps(row), file=output)
                                 time.sleep(0.3 * runner.delay_scale)
                         finally:
@@ -118,6 +127,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("source", "output", "bash", "tonari"):
         parser.add_argument(name, type=lambda s: Path(s).absolute())
+    parser.add_argument("--observer", type=lambda s: Path(s).absolute())
     parser.add_argument("--shard", type=int, required=True)
     parser.add_argument("--shards", type=int, required=True)
     run(parser.parse_args())

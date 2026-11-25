@@ -29,7 +29,7 @@ case "$SUITE" in
           --shell "$shell" --profile bash --ref-shell "$ref" --suite builtins) \
           > "$out/upstream-$label.log" 2>&1 || echo "$?" > "$out/upstream-$label.status"
       done
-      python3 "$repo/tools/ci/bensch-cases.py" upstream "$lab" > "$out/manifest.jsonl"
+      python3 "$repo/tools/ci/bensch-cases.py" upstream "$lab" "$ref" > "$out/manifest.jsonl"
       python3 "$repo/tools/ci/spec-pairs.py" "$out/manifest.jsonl" "$out/cases.jsonl" \
         "$ref" "$lab/bin/bash" "$lab/pairs" --source upstream --observer "$RUNNER_TEMP/bin/paths"
       exit
@@ -40,7 +40,10 @@ case "$SUITE" in
     cd cwd
     env -i HOME="$lab/home" PATH="$PATH" TERM=xterm-256color PS1='$ ' \
       "$lab/venv/bin/python" "$repo/tools/ci/bensch-pty.py" "$lab/upstream" \
-      "$out/pty.jsonl" "$ref" "$lab/bin/bash" --shard "$shard" --shards 8
+      "$out/pty.jsonl" "$ref" "$lab/bin/bash" --shard "$shard" --shards 8 --observer "$RUNNER_TEMP/bin/paths"
+    ;;
+  spec-hot)
+    python3 "$repo/tools/ci/spec-hot.py" "$ref" "$RUNNER_TEMP/bin/baseline" "$RUNNER_TEMP/bin/current" > "$out/hot.tsv"
     ;;
   oils-*)
     git -C upstream fetch -q --depth 1 https://github.com/oils-for-unix/oils.git d114978ca467143f171a835cbcbe8ab6ccc009a7

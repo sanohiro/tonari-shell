@@ -150,9 +150,9 @@ impl Session {
             self.bindings.map = Keymap::Insert;
         }
     }
-    pub fn refresh_terminal_size(&mut self) {
+    pub fn refresh_terminal_size(&mut self) -> Option<(u16, u16)> {
         if !self.interactive || !self.shopt.checkwinsize {
-            return;
+            return None;
         }
         let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
         for fd in [libc::STDERR_FILENO, libc::STDIN_FILENO] {
@@ -166,8 +166,9 @@ impl Session {
                 self.assign("COLUMNS", &columns.to_string());
                 self.shopt.last_size = Some((rows, columns));
             }
-            break;
+            return Some((rows, columns));
         }
+        None
     }
 
     fn option_entries(set: bool) -> &'static [OptionEntry] {

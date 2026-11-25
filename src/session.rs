@@ -839,7 +839,7 @@ impl Session {
         Self::plain_decimal(var.value.as_deref()?)
     }
 
-    fn plain_decimal(value: &str) -> Option<i64> {
+    pub(crate) fn plain_decimal(value: &str) -> Option<i64> {
         if value == "0" {
             return Some(0);
         }
