@@ -124,6 +124,9 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
+  external-shellspec|external-fumiyas|external-unixwin|external-luish)
+    if [[ $SUITE == external-fumiyas ]] && ! command -v zsh >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y zsh; fi
+    run "$SUITE" bash tools/ci/external-shell.sh "${SUITE#external-}" "$current" "$ref" ;;
   starship)
     case "$NATIVE_RUNNER" in
       ubuntu-24.04) platform=x86_64-unknown-linux-musl; sha=10c8eb4cb3b761d9bf59ea828444c2dab36c900b7d69a69e08814b286969df89 ;;
