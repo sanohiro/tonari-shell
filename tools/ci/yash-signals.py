@@ -48,7 +48,7 @@ def run(directory, binaries, control=None, runs=11):
         shells[label] = path
     resource.setrlimit(resource.RLIMIT_CORE, (0, resource.getrlimit(resource.RLIMIT_CORE)[1]))
     pattern = Path("/proc/sys/kernel/core_pattern")
-    for name in ("TERM", "FPE", "SEGV", "ABRT", "ILL", "QUIT"):
+    for name in ("TERM", "FPE", "SEGV", "ABRT", "ILL", "BUS", "QUIT"):
         # Bash ignores QUIT in a simple foreground invocation. Measure the
         # kernel control for this signal alongside the upstream async-job case.
         commands = {k: [sh, "-c", f"printf .; kill -s {name} $$"]
