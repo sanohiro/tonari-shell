@@ -15,6 +15,7 @@ WORKLOADS = {
     "echo": ("command", "{ i=0; while [ $i -lt 12000 ]; do echo hello; i=$((i+1)); done; } >/dev/null; echo $i"),
     "spawn": ("command", "i=0; while [ $i -lt 100 ]; do /usr/bin/true; i=$((i+1)); done; echo $i"),
     "alias": ("file", "alias e='echo ok'\n{\n" + "e\n"*500 + "} >/dev/null\ne\n"),
+    "alias-3000": ("file", "alias e='echo ok'\n{\n" + "e\n"*3000 + "} >/dev/null\ne\n"),
     "stdin": ("stdin", "i=1\nx=$i\n"*750 + "echo $x\n"),
 }
 
