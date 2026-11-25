@@ -33,7 +33,7 @@ def profile(script, shell, out, label, tracer):
                 raise RuntimeError(f"{shell} failed")
         elapsed = (time.monotonic_ns() - start) / 1e6
         (out / f"{label}.tsv").write_text("".join(phases))
-        if (root / "config.status").read_bytes().splitlines()[0] != os.fsencode("#!" + shell):
+        if (root / "config.status").read_bytes().splitlines()[0].removeprefix(b"#!").strip() != os.fsencode(shell):
             raise RuntimeError("config.status interpreter changed")
         print(f"{label}: {elapsed:.3f} ms", flush=True)
         return (root / "config.h").read_bytes()
