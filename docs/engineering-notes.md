@@ -1,5 +1,15 @@
 # Engineering notes / 開発知見
 
+## 2026-11-25 · Where GNU configure spends its time / configure の外部処理を実測する
+
+When building a child's environment, Tonari must hide an inherited name if the script unsets it or removes its export attribute. A local variable that never existed in the process environment requires no such removal. The inherited environment stays fixed for the life of a shell session, so the binding can remember that membership after its first lookup. Each child still receives the export attributes, values, function definitions and temporary assignments in force at its launch. A regression runs real children before and after changes to inherited, local and exported variables. [Bash comparison](../tests/shell.py) · [Native release timings](benchmarks.md#configure-foreground)
+
+親から継承した変数をスクリプトが `unset` や `export -n` した場合、次の子プロセスに渡す環境から取り除く必要があります。一方、スクリプト内で作ったローカル変数の大半は元の環境に存在しません。元の環境に同名の変数があったかを各変数で一度だけ調べるようにしました。関数内のローカル変数、復帰後の値、エクスポート属性を切り替えて子プロセスから確認できます。[回帰テストと実測](benchmarks.md#configure-foreground)
+
+To budget elapsed time, time the release build on the distributed configure script, then use a separate instrumented shell to record the interval between launching each foreground child and receiving its exit status. Use a monotonic clock shared across processes and merge overlapping intervals before summing. An independent check times the compiler and generated programs from a small C launcher. GNU Hello's probes reuse the same source and executable paths, branch on previous results and perform observable filesystem changes. Reordering these commands in a general shell can change the configuration detected by the script. [Foreground wait measurement](../tools/ci/configure-waits.py) · [Independent compiler timer](../tools/ci/configure-clock.c)
+
+配布版の `configure` を通常のリリースバイナリで測り、別の計測用ビルドで、起動した子の終了をシェルが待つ時間を記録しました。複数のシェルプロセスの記録は単調時計で重なりを除いて集計できます。GNU Hello は同じ `conftest.c` と実行ファイルを何度も作り直し、前の検査結果で次の処理を選びます。シェルがここを勝手に並列化すると、別の検査が作った実行ファイルを起動する可能性があります。[実測と再現条件](benchmarks.md#configure-foreground)
+
 ## 2026-11-25 · Reading long configure commands and redirecting logs / configure の複合コマンドとログ出力
 
 An incomplete `case` in GNU `config.guess` made the reader parse 25.6 MB of growing prefixes for one 39 kB command. A quoted here-document can resemble another nested header. When lookahead overshoots, the reader now uses the first statement's parser position to locate its physical line and verifies that command on its own before executing it. A regular file can refill a short read window when a growing command crosses a buffer boundary. The Bash witness checks the next line's alias and `LINENO`. An external command can now copy an inherited log descriptor onto stdout or stderr in `posix_spawn`. The redirections still apply in order and keep private shell descriptors inaccessible. [Measurements](benchmarks.md#configure-latency) · [Compatibility tests](../tests/shell.py)

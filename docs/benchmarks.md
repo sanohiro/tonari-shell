@@ -1,5 +1,35 @@
 # Startup and execution / 起動と実行性能
 
+<a id="configure-foreground"></a>
+
+## 2026-11-25 · Child environments and the full configure budget / 子プロセスの環境と configure 全体の目標
+
+GNU Hello 2.12.2 ran its distributed `configure --disable-nls --cache-file=/dev/null` with `CC=/usr/bin/cc` in a fresh directory for every sample. Each host rotated the previous Tonari (`ce1e766`), the release with the inherited-variable lookup change (`c15db28`), and Bash. The table gives the median of three timed runs after one warmup per shell. The warmup also ran `make -j2 check` and verified the executable's output. Every timed run checked `config.h` and the interpreter in `config.status`. [Native CI runs and samples](https://github.com/sanohiro/tonari-shell/actions/runs/45546618314) · [Benchmark driver](../tools/bench_external.py)
+
+| Native host | Previous Tonari (s) | Tonari (s) | Bash (s) | Bash × 2/3 (s) | Tonari / Bash |
+|---|---:|---:|---:|---:|---:|
+| Linux x86-64 CI | 8.246 | 8.105 | 8.507 | 5.671 | 0.953 |
+| macOS arm64 CI | 21.954 | 21.841 | 20.825 | 13.883 | 1.049 |
+| Physical M1 | 29.879 | 28.448 | 30.674 | 20.449 | 0.927 |
+
+On the physical M1, the raw release times were 27.292, 29.358 and 28.448 s. Bash took 29.503, 30.674 and 30.675 s. Hosted macOS was sensitive to the run. Its three release times spanned 20.105–22.073 s and Bash spanned 20.614–22.648 s. All three hosts missed the two-thirds target.
+
+In a separate experiment each host rotated the uninstrumented release, Bash and a diagnostic build of the same Tonari source. The diagnostic times synchronous waits after launch returns. It merges overlapping intervals, counts the compiler, its generated test executables and selected system utilities, and excludes shells, make, sleeps launched by the shell and pipelines. A sleep inside a C test is part of that test's runtime. The script, compiler and generated programs run unmodified in all three cases. Each run checks the same header, stderr and all progress checks (251 Linux, 240 macOS). The release and Bash columns below are independent whole-run measurements from this experiment. [Foreground timings and raw events](https://github.com/sanohiro/tonari-shell/actions/runs/45546793668) · [Driver and category definitions](../tools/ci/configure-waits.py)
+
+| Native host | Release (s) | Bash (s) | Bash × 2/3 (s) | Median combined waits (s) | Range of waits (s) |
+|---|---:|---:|---:|---:|---:|
+| Linux x86-64 CI | 8.709 | 9.107 | 6.071 | 7.332 | 7.315–7.334 |
+| macOS arm64 CI | 20.964 | 22.094 | 14.729 | 15.567 | 13.733–15.698 |
+| Physical M1 | 28.663 | 30.517 | 20.345 | 25.410 | 24.399–26.903 |
+
+Counting only the waits for the compiler and generated probes gave medians of 6.720 s on Linux (238 compiler calls and 54 probes) and 22.953 s on the physical M1 (225 and 46). Every individual sample on both hosts exceeded the corresponding budget in the second table. A second timer around the actual compiler and generated probes on the Linux profile runner measured 6.321 s in Tonari and 6.367 s in Bash. Both exceed the 5.671 s budget in the first table. On hosted macOS the combined wait including utilities was below budget in one trial. These timings describe the observed hardware, scheduler and compiler. [Compiler timing method](../tools/ci/configure-profile.py)
+
+The inherited-variable optimization also has a direct control. With 2,000 local variables, one exported result and 250 launches of an external `true`, Linux took 90.819 ms versus 117.400 ms previously and 130.961 ms in Bash. Hosted macOS took 427.309 ms versus 419.958 and 646.010 ms, and the physical M1 took 331.797 ms versus 323.322 and 560.645 ms. These component tests used a three-variable input environment and seven timed trials. A physical M1 repeat rotated the shell order through all six permutations for 12 timed runs. It took 300.107 ms versus 318.894 ms previously (Bash 501.042 ms). Inheriting 64 additional variables named `EXPORTED_SETTING_0` through `EXPORTED_SETTING_63`, each set to `yes`, gave 306.837 ms versus 354.890 ms (Bash 513.259 ms). The small-environment Mac measurements varied in direction. Linux and the larger inherited environment on the M1 support keeping the shared implementation.
+
+The stripped x86-64 static PIE grew by 96 bytes to 1,933,016 bytes. The arm64 executables kept their previous sizes (1,433,392 bytes on the physical M1 and 1,449,872 on CI). The physical binary links only to libSystem. All 58 Rust tests passed. The Mac shell suite ran 211 tests with two platform skips. All 1,411 macOS and 1,525 Debian differential verdicts matched the previous release. [Release sizes and Debian audit artifact](https://github.com/sanohiro/tonari-shell/actions/runs/45546618314)
+
+配布版の GNU Hello、システムのコンパイラ、毎回空のビルドディレクトリで実測しました。最初の表は `configure` の起動から終了までの秒数です。Linux と M1 実機では Bash より短く、macOS CI では測定回によって前後しました。Bash の 2/3 にはいずれも届いていません。2つ目の表では、子プロセスの起動がシェルに戻った後から終了を受け取るまでの時間を別ビルドで測っています。Linux ではコンパイラと検査プログラムだけを別の方法で計時しても目標を超えました。変数が多い場合の子プロセスの環境構築には Linux で改善が見られ、両 OS に共通の実装を採用しました。
+
 <a id="configure-latency"></a>
 
 ## 2026-11-25 · GNU Hello configure from start to exit / configure 全体の実行時間
