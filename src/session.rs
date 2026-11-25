@@ -1405,6 +1405,8 @@ impl Session {
                 match flag {
                     'L' => physical = false,
                     'P' => physical = true,
+                    // The physical path lookup already propagates getcwd failures.
+                    'e' if name == "cd" => {}
                     _ => {
                         eprintln!("tonari: {name}: unsupported option {opt}");
                         return 2;

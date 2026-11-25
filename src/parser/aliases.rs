@@ -78,16 +78,27 @@ impl Reader {
                     disabled.remove(&frame.name);
                 }
             }
-            let (mut replacement, spans, _) = with(nested, || lex(value, false, true))?;
+            let (replacement, spans, _) = with(nested, || lex(value, false, true))?;
             let index = self.position();
             let (start, end) = self.spans[index];
-            let mut source = self.source.to_string();
+            let source = self
+                .alias_source
+                .get_or_insert_with(|| self.source.to_string());
+            let changes_lines = source[start..end].contains('\n') || value.contains('\n');
             source.replace_range(start..end, value);
-            self.newlines = source.match_indices('\n').map(|(n, _)| n).collect();
-            self.source = source.into();
-            for (a, b) in &mut self.spans[index + 1..] {
-                *a = *a - (end - start) + value.len();
-                *b = *b - (end - start) + value.len();
+            if changes_lines {
+                self.newlines = memchr::memchr_iter(b'\n', source.as_bytes()).collect();
+            } else if end - start != value.len() {
+                let next = self.newlines.partition_point(|&at| at < end);
+                for at in &mut self.newlines[next..] {
+                    *at = *at - (end - start) + value.len();
+                }
+            }
+            if end - start != value.len() {
+                for (a, b) in &mut self.spans[index + 1..] {
+                    *a = *a - (end - start) + value.len();
+                    *b = *b - (end - start) + value.len();
+                }
             }
             self.spans.splice(
                 index..=index,
@@ -99,8 +110,9 @@ impl Reader {
                 remaining: self.tokens.len(),
                 next_word,
             });
-            replacement.extend(self.tokens.drain(..));
-            self.tokens = replacement.into();
+            for token in replacement.into_iter().rev() {
+                self.tokens.push_front(token);
+            }
         }
     }
 }

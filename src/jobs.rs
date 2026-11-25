@@ -123,6 +123,10 @@ fn terminal_modes(fd: RawFd) -> Option<libc::termios> {
 }
 
 fn give_terminal(fd: RawFd, pgid: pid_t) {
+    give_terminal_with_modes(fd, pgid, None);
+}
+
+fn give_terminal_with_modes(fd: RawFd, pgid: pid_t, modes: Option<&libc::termios>) {
     // The shell is temporarily in the background when it takes the terminal back.
     unsafe {
         let mut block = std::mem::zeroed();
@@ -131,6 +135,9 @@ fn give_terminal(fd: RawFd, pgid: pid_t) {
         libc::sigaddset(&mut block, libc::SIGTTOU);
         libc::sigprocmask(libc::SIG_BLOCK, &block, &mut old);
         libc::tcsetpgrp(fd, pgid);
+        if let Some(modes) = modes {
+            libc::tcsetattr(fd, libc::TCSANOW, modes);
+        }
         libc::sigprocmask(libc::SIG_SETMASK, &old, std::ptr::null_mut());
     }
 }
@@ -466,12 +473,9 @@ impl Jobs {
     ) -> io::Result<u8> {
         let tty = self.terminal();
         if let (Some(t), Some(group)) = (tty, job.group) {
-            give_terminal(t.fd.as_raw_fd(), group);
-            if let Some(modes) = &job.modes {
-                unsafe {
-                    libc::tcsetattr(t.fd.as_raw_fd(), libc::TCSANOW, modes);
-                }
-            }
+            // Changing terminal modes after handoff can stop the shell with
+            // SIGTTOU. Keep the signal blocked through both operations.
+            give_terminal_with_modes(t.fd.as_raw_fd(), group, job.modes.as_ref());
         }
         let result = (|| {
             if resume {

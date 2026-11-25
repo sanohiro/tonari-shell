@@ -79,6 +79,8 @@ class ShellTests(unittest.TestCase):
                 proc = run(["-c", "trap '' PIPE; \"$0\" -c 'kill -s PIPE $$; echo ok'"])
                 self.assertEqual((proc.returncode, proc.stdout), (0, b"ok\n"))
 
+                proc = run(["-c", "alias blank=; alias e=echo\n{ e first | blank\ncat; }\nf() { return -- 17; }; f; e $?; cd -P -e .; exit -- 56"])
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (56, b"first\n17\n", b""))
                 proc = run(["-i", "+m", "-c", "shopt -oq posix"])
                 self.assertEqual((proc.returncode, proc.stdout), (0, b"env:1\n"))
                 proc = subprocess.run([str(sh), "-i", "+m", "-c",

@@ -633,6 +633,14 @@ pub(crate) fn builtin_names() -> &'static [&'static str] {
     ]
 }
 
+fn status_operands(args: &[String]) -> &[String] {
+    if args.first().is_some_and(|s| s == "--") {
+        &args[1..]
+    } else {
+        args
+    }
+}
+
 fn named_builtin(name: &str, args: &[String], last_status: u8) -> Option<Builtin> {
     match name {
         "bind" | "caller" | "enable" | "help" | "suspend" => Some(Builtin::Control),
@@ -668,11 +676,12 @@ fn named_builtin(name: &str, args: &[String], last_status: u8) -> Option<Builtin
         "source" | "." => Some(Builtin::Source),
         "eval" => Some(Builtin::Eval),
         "exec" => Some(Builtin::Exec),
-        "return" => Some(Builtin::Return(match args.first() {
+        "return" => Some(Builtin::Return(match status_operands(args).first() {
             None => Some(last_status),
             Some(s) => s.trim().parse::<i64>().ok().map(|n| n as u8),
         })),
         "exit" | "logout" => {
+            let args = status_operands(args);
             let status = match args.first() {
                 None => last_status,
                 Some(s) => match s.trim().parse::<i64>() {
@@ -818,7 +827,7 @@ fn eval_builtin(
                 );
                 Flow::Continue(1)
             } else if let Some(code) = status {
-                if args.len() > 1 {
+                if status_operands(args).len() > 1 {
                     write_error(b"return", b": too many arguments");
                     Flow::Continue(1)
                 } else {
@@ -831,11 +840,13 @@ fn eval_builtin(
             }
         }
         Builtin::Status(code) => Flow::Continue(code),
-        Builtin::Exit(code) if args.is_empty() => Flow::Exit(crate::startup::logout(
-            session,
-            session.traps.exit_status.unwrap_or(code),
-            last_status,
-        )),
+        Builtin::Exit(code) if status_operands(args).is_empty() => {
+            Flow::Exit(crate::startup::logout(
+                session,
+                session.traps.exit_status.unwrap_or(code),
+                last_status,
+            ))
+        }
         Builtin::Exit(code) => Flow::Exit(crate::startup::logout(session, code, last_status)),
         Builtin::InvalidExit => {
             write_error(b"exit", b": numeric argument required");

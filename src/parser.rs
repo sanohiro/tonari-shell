@@ -544,6 +544,7 @@ thread_local! {
 
 struct Reader {
     source: Rc<str>,
+    alias_source: Option<String>,
     spans: Vec<(usize, usize)>,
     newlines: Vec<usize>,
     aliases: crate::alias::Aliases,
@@ -568,6 +569,7 @@ impl Reader {
     fn new(tokens: Vec<Token>, spans: Vec<(usize, usize)>, source: &str) -> Self {
         Self {
             spans,
+            alias_source: None,
             newlines: memchr::memchr_iter(b'\n', source.as_bytes()).collect(),
             source: source.into(),
             tokens: tokens.into(),
@@ -580,17 +582,30 @@ impl Reader {
         self.spans.len() - self.tokens.len()
     }
     fn location(&self, from: usize) -> Location {
-        let start = self.spans.get(from).map_or(self.source.len(), |s| s.0);
+        let source = self.alias_source.as_deref().unwrap_or(&self.source);
+        let start = self.spans.get(from).map_or(source.len(), |s| s.0);
         let end = if self.position() > from {
             self.spans[self.position() - 1].1
         } else {
             start
         };
-        Location {
-            source: self.source.clone(),
-            start,
-            end,
-            line: FIRST_LINE.get() + self.newlines.partition_point(|&n| n < start),
+        let line = FIRST_LINE.get() + self.newlines.partition_point(|&n| n < start);
+        if self.alias_source.is_some() {
+            // Subsequent alias reads mutate the same buffer. Retain just the
+            // command spelling used by DEBUG traps and BASH_COMMAND.
+            Location {
+                source: source[start..end].into(),
+                start: 0,
+                end: end - start,
+                line,
+            }
+        } else {
+            Location {
+                source: self.source.clone(),
+                start,
+                end,
+                line,
+            }
         }
     }
 
@@ -766,11 +781,16 @@ impl Reader {
                     word: Word::Literal("1".into()),
                 });
             }
-            self.newlines();
+            loop {
+                self.newlines();
+                self.expand_alias(true)?;
+                if !matches!(self.peek(), Some(Token::Newline)) {
+                    break;
+                }
+            }
             if self.peek().is_none() {
                 return Err(Error::Incomplete("expected a command after pipe"));
             }
-            self.expand_alias(true)?;
             let start = self.position();
             let mut stage = match self.compound()? {
                 Some(compound) => self.compound_stage(compound)?,
