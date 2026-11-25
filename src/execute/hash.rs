@@ -86,7 +86,7 @@ pub(super) fn resolve(session: &mut Session, name: &str) -> Result<Option<PathBu
         return Ok(None);
     }
     if let Some(path) = session.hashes.hit(name) {
-        if !session.shopt.checkhash || super::lookup::executable(path) {
+        if !(session.posix || session.shopt.checkhash) || super::lookup::executable(path) {
             return Ok(Some(path.into()));
         }
         session.hashes.entries.remove(name);

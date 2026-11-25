@@ -134,6 +134,9 @@ pub struct Session {
     pub posix: bool,
     pub logout_started: bool,
     pub allexport: bool,
+    pub notify: bool,
+    pub noexec: bool,
+    pub ignoreeof: bool,
     pub xtrace: bool,
     pub onecmd: bool,
     pub subshell_depth: u32,
@@ -256,6 +259,9 @@ impl Session {
         if self.allexport {
             flags.push('a');
         }
+        if self.notify {
+            flags.push('b');
+        }
         if self.errexit {
             flags.push('e');
         }
@@ -270,6 +276,9 @@ impl Session {
         }
         if self.jobs.monitor {
             flags.push('m');
+        }
+        if self.noexec {
+            flags.push('n');
         }
         if self.onecmd {
             flags.push('t');
@@ -386,6 +395,8 @@ impl Session {
                     'e' => self.errexit = enable,
                     'E' => self.errtrace = enable,
                     'a' => self.allexport = enable,
+                    'b' => self.notify = enable,
+                    'n' => self.noexec = enable && !self.interactive,
                     't' => self.onecmd = enable,
                     'x' => self.xtrace = enable,
                     'H' => self.histexpand = enable,

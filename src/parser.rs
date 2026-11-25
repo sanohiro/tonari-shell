@@ -438,6 +438,7 @@ pub fn parse_final(source: &str) -> Result<Vec<Statement>, Error> {
 thread_local! {
     // Lexers invoked recursively by a substitution inherit the outer read's options.
     static FIRST_LINE: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
+    static POSIX: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static EXTGLOB: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -482,7 +483,9 @@ fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnc
     let read = || {
         let old_line = FIRST_LINE.replace(line);
         let before = EXTGLOB.replace(session.shopt.glob.extglob);
+        let posix = POSIX.replace(session.posix);
         let parsed = parse();
+        POSIX.set(posix);
         EXTGLOB.set(before);
         FIRST_LINE.set(old_line);
         parsed
@@ -530,7 +533,9 @@ fn parse_source(source: &str, final_input: bool) -> Result<Vec<Statement>, Error
         return Ok(vec![function]);
     }
     let (tokens, spans, _) = lex(source, false, final_input)?;
-    Reader::new(tokens, spans, source).list(&[])
+    let mut reader = Reader::new(tokens, spans, source);
+    reader.final_input = final_input;
+    reader.list(&[])
 }
 
 // Most shell reads are a few lines. Reuse their token and span allocations;
@@ -549,6 +554,7 @@ struct Reader {
     newlines: Vec<usize>,
     aliases: crate::alias::Aliases,
     alias_frames: Vec<aliases::Frame>,
+    final_input: bool,
     tokens: std::collections::VecDeque<Token>,
 }
 
@@ -575,6 +581,7 @@ impl Reader {
             tokens: tokens.into(),
             aliases: aliases::current(),
             alias_frames: Vec::new(),
+            final_input: false,
         }
     }
 
@@ -835,6 +842,7 @@ impl Reader {
             }
             return Ok(Some(Command::Subshell(body)));
         }
+        self.alias_after_name()?;
         match self.keyword() {
             Some("{") => {
                 self.tokens.pop_front();
@@ -1000,17 +1008,22 @@ impl Reader {
     fn case_clause(&mut self) -> Result<Command, Error> {
         let start = self.position();
         self.tokens.pop_front();
+        self.alias_at(false, Some(&[]))?;
         let word = match self.operand() {
             Some(Token::Word(word)) => word.word,
             None => return Err(Error::Incomplete("expected a case word")),
             _ => return Err(Error::Invalid("expected a case word")),
         };
-        self.newlines();
+        self.alias_newlines(&["in"])?;
         self.expect("in")?;
         let header = self.location(start);
         self.newlines();
         let mut arms = Vec::new();
-        while self.keyword() != Some("esac") {
+        loop {
+            self.alias_newlines(&["esac"])?;
+            if self.keyword() == Some("esac") {
+                break;
+            }
             if matches!(self.peek(), Some(Token::LeftParen)) {
                 self.tokens.pop_front();
             }
@@ -1021,6 +1034,7 @@ impl Reader {
                     None => return Err(Error::Incomplete("unfinished case command")),
                     _ => return Err(Error::Invalid("expected a case pattern")),
                 }
+                self.alias_newlines(&[])?;
                 match self.tokens.pop_front() {
                     Some(Token::RightParen) => break,
                     Some(Token::Pipe) => {}
@@ -1122,8 +1136,9 @@ impl Reader {
                 body,
             });
         }
+        self.alias_at(false, Some(&[]))?;
         let name = self.name()?;
-        self.newlines();
+        self.alias_newlines(&["in", "do"])?;
         let words = if self.keyword() == Some("in") {
             self.tokens.pop_front();
             let mut words = Vec::new();
@@ -1140,7 +1155,7 @@ impl Reader {
         if matches!(self.peek(), Some(Token::End)) {
             self.tokens.pop_front();
         }
-        self.newlines();
+        self.alias_newlines(&["do"])?;
         self.expect("do")?;
         let body = self.list(&["done"])?;
         self.expect("done")?;
@@ -1168,13 +1183,14 @@ impl Reader {
         };
         if matches!(self.peek(), Some(Token::LeftParen)) {
             self.tokens.pop_front();
+            self.alias_at(false, Some(&[]))?;
             match self.tokens.pop_front() {
                 Some(Token::RightParen) => {}
                 None => return Err(Error::Incomplete("unfinished function definition")),
                 _ => return Err(Error::Invalid("expected empty function parentheses")),
             }
         }
-        self.newlines();
+        self.alias_newlines(&["{", "if", "while", "until", "for", "case"])?;
         let start = self.position();
         let compound = self.compound()?.ok_or_else(|| {
             if self.peek().is_none() {
@@ -1288,10 +1304,15 @@ impl Reader {
                     protected,
                     assignment,
                 }) => {
-                    let declaration = matches!(
-                        cmd.words.first().and_then(Word::as_literal),
-                        Some("export" | "local" | "declare" | "typeset" | "readonly")
-                    );
+                    let declaration = assignment.is_some()
+                        && matches!(
+                            cmd.words
+                                .iter()
+                                .map(Word::as_literal)
+                                .find(|w| *w != Some("command"))
+                                .flatten(),
+                            Some("export" | "local" | "declare" | "typeset" | "readonly")
+                        );
                     if matches!(self.peek(), Some(Token::ArrayStart)) {
                         let name = assignment.ok_or(Error::Invalid("invalid array assignment"))?;
                         if !is_identifier(name.strip_suffix('+').unwrap_or(&name))
@@ -1320,12 +1341,7 @@ impl Reader {
                         }
                         // Most simple commands have only the name and one operand.
                         cmd.words.reserve_exact(2);
-                    } else if assignment.is_some()
-                        && matches!(
-                            cmd.words[0].as_literal(),
-                            Some("export" | "local" | "declare" | "typeset" | "readonly")
-                        )
-                    {
+                    } else if declaration {
                         word = word.declaration();
                     }
                     cmd.words.push(word);

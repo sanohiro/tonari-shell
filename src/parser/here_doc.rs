@@ -58,6 +58,7 @@ pub(super) fn redirect(
     pending: &mut Vec<Pending>,
 ) -> Result<(), Error> {
     chars.next();
+    *chars = super::lexer::joined(chars.as_str()).chars();
     if chars.as_str().starts_with('<') {
         chars.next();
         tokens.push(Token::Redirect(fd, Target::HereString));
@@ -67,8 +68,15 @@ pub(super) fn redirect(
     if strip_tabs {
         chars.next();
     }
-    while matches!(chars.clone().next(), Some(' ' | '\t')) {
+    loop {
+        *chars = super::lexer::joined(chars.as_str()).chars();
+        if !matches!(chars.clone().next(), Some(' ' | '\t')) {
+            break;
+        }
         chars.next();
+    }
+    if chars.as_str().starts_with("\\\n") && chars.as_str().trim_start_matches("\\\n").is_empty() {
+        return Err(Error::Incomplete("continued here-document operator"));
     }
     let (delimiter, quoted) = delimiter(chars)?;
     tokens.push(Token::Redirect(fd, Target::HereDoc { expand: !quoted }));

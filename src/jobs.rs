@@ -77,14 +77,14 @@ impl Launch {
         }
     }
 
-    pub fn pipeline_child(self) {
+    pub fn pipeline_child(self, traps: &mut crate::traps::Traps) {
         if self.group.is_none() && !self.background {
             crate::execute::reset_child_signals();
         }
-        self.child();
+        self.child(traps);
     }
 
-    pub fn child(self) {
+    pub fn child(self, traps: &mut crate::traps::Traps) {
         if let Some(group) = self.group {
             if unsafe { libc::setpgid(0, group) } < 0 {
                 unsafe { libc::_exit(1) }
@@ -95,9 +95,7 @@ impl Launch {
             crate::execute::reset_caught_signals(&JOB_SIGNALS);
         } else if self.background {
             for sig in [libc::SIGINT, libc::SIGQUIT] {
-                unsafe {
-                    libc::signal(sig, libc::SIG_IGN);
-                }
+                traps.ignore_async(sig);
             }
         }
     }

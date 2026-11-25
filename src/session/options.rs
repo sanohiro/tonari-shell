@@ -77,9 +77,12 @@ const SET_OPTIONS: &[OptionEntry] = &[
     option_entry!("hashall", hashes.enabled),
     option_entry!("histexpand", histexpand),
     option_entry!("history", history_enabled),
+    option_entry!("ignoreeof", ignoreeof),
     option_entry!("monitor", jobs.monitor),
     option_entry!("noclobber", noclobber),
+    option_entry!("noexec", noexec),
     option_entry!("noglob", noglob),
+    option_entry!("notify", notify),
     option_entry!("nounset", nounset),
     option_entry!("onecmd", onecmd),
     option_entry!("pipefail", pipefail),
@@ -131,6 +134,9 @@ impl Session {
 
     pub(super) fn option_changed(&mut self, name: &str, enabled: bool) {
         use crate::editor::bindings::Keymap;
+        if name == "noexec" && self.interactive {
+            self.noexec = false;
+        }
         if name == "posix" {
             self.set_posix(enabled);
         }

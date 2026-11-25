@@ -82,6 +82,8 @@ pub struct Traps {
     interactive_handlers: bool,
     interactive_origin: bool,
     pub before_return: u8,
+    pub signal_status: Option<u8>,
+    async_resettable: u64,
     implicit: BTreeMap<i32, libc::sigaction>,
     pub exit_status: Option<u8>,
 }
@@ -211,6 +213,13 @@ impl Traps {
         Ok(())
     }
 
+    pub fn ignore_async(&mut self, sig: i32) {
+        let old = unsafe { libc::signal(sig, libc::SIG_IGN) };
+        if old != libc::SIG_IGN && old != libc::SIG_ERR {
+            self.async_resettable |= 1 << sig;
+        }
+    }
+
     pub fn ignores(&self, signal: i32) -> bool {
         self.entries
             .get(&signal)
@@ -286,7 +295,10 @@ impl Traps {
                 return Err(io::Error::last_os_error());
             }
             if original.sa_sigaction == libc::SIG_IGN {
-                if !interactive && !self.interactive_origin {
+                if !interactive
+                    && !self.interactive_origin
+                    && self.async_resettable & (1 << sig) == 0
+                {
                     return Ok(());
                 }
                 original = if self.interactive_handlers
@@ -378,6 +390,7 @@ impl Traps {
     }
 
     pub fn after_fork(&mut self, errtrace: bool, functrace: bool) {
+        self.signal_status = None;
         if self.interactive_handlers {
             self.interactive_handlers = false;
             crate::execute::reset_caught_signals(&[
@@ -441,6 +454,7 @@ impl Traps {
         &self,
         names: impl ExactSizeIterator<Item = &'a str>,
         out: &mut impl Write,
+        defaults: bool,
     ) -> u8 {
         let entries = self.inherited_listing.as_deref().unwrap_or(&self.entries);
         let mut show = |sig| {
@@ -461,9 +475,26 @@ impl Traps {
                     if sig == 0 || sig >= DEBUG { "" } else { "SIG" }
                 )?;
             }
+            if defaults
+                && !entries.contains_key(&sig)
+                && let Some(&(name, _)) = SIGNALS.iter().find(|s| s.1 == sig)
+            {
+                writeln!(out, "trap -- - {name}")?;
+            }
             Ok::<_, io::Error>(())
         };
-        if names.len() == 0 {
+        if defaults && names.len() == 0 {
+            for &(_, sig) in SIGNALS {
+                if !matches!(sig, libc::SIGSTOP | libc::SIGKILL) && show(sig).is_err() {
+                    return 1;
+                }
+            }
+            for &sig in entries.keys().filter(|s| **s >= DEBUG) {
+                if show(sig).is_err() {
+                    return 1;
+                }
+            }
+        } else if names.len() == 0 {
             for &sig in entries.keys() {
                 if show(sig).is_err() {
                     return 1;
@@ -482,7 +513,7 @@ impl Traps {
         0
     }
 
-    pub fn builtin(&mut self, args: &[String], interactive: bool) -> u8 {
+    pub fn builtin(&mut self, args: &[String], interactive: bool, posix: bool) -> u8 {
         let args = if args.first().is_some_and(|s| s == "--") {
             &args[1..]
         } else {
@@ -502,6 +533,7 @@ impl Traps {
             return self.list(
                 args.iter().skip(1).map(String::as_str),
                 &mut io::stdout().lock(),
+                list && posix,
             );
         }
         let (command, signals) = if args[0].parse::<u32>().is_ok() {
@@ -617,7 +649,9 @@ pub fn dispatch(session: &mut Session, status: u8) -> Flow {
         if let Some(command) = session.traps.entries.get(&sig).map(|e| e.command.clone()) {
             session.traps.running |= bit;
             let previous = session.pipe_status.clone();
+            let previous_status = session.traps.signal_status.replace(status);
             let flow = crate::eval_text(session, &command, status);
+            session.traps.signal_status = previous_status;
             session.pipe_status = previous;
             session.traps.running &= !bit;
             // Commands in a CHLD handler can create children of their own.

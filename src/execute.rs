@@ -737,7 +737,11 @@ fn eval_builtin(
         Builtin::Function => {
             crate::call_function(session, std::mem::take(&mut cmd.words), last_status, false)
         }
-        Builtin::Trap => Flow::Continue(session.traps.builtin(args, session.interactive)),
+        Builtin::Trap => Flow::Continue(session.traps.builtin(
+            args,
+            session.interactive,
+            session.posix,
+        )),
         Builtin::Alias => Flow::Continue(crate::alias::builtin(&cmd.words[0], args, session)),
         Builtin::Completion => Flow::Continue(crate::completion_spec::run(
             &cmd.words[0],
@@ -832,6 +836,11 @@ fn eval_builtin(
                     Flow::Continue(1)
                 } else {
                     session.traps.before_return = last_status;
+                    let code = if session.posix && args.is_empty() {
+                        session.traps.signal_status.unwrap_or(code)
+                    } else {
+                        code
+                    };
                     Flow::Return(code)
                 }
             } else {
@@ -843,7 +852,11 @@ fn eval_builtin(
         Builtin::Exit(code) if status_operands(args).is_empty() => {
             Flow::Exit(crate::startup::logout(
                 session,
-                session.traps.exit_status.unwrap_or(code),
+                session
+                    .traps
+                    .exit_status
+                    .or(session.traps.signal_status.filter(|_| session.posix))
+                    .unwrap_or(code),
                 last_status,
             ))
         }
@@ -859,6 +872,13 @@ fn eval_builtin(
     };
     if !persistent {
         session.restore(bindings);
+    }
+    if let Flow::Continue(status @ 1..) = result
+        && !session.interactive
+        && posix_special(cmd, session)
+        && matches!(builtin, Builtin::Export | Builtin::Declare | Builtin::Unset)
+    {
+        return Flow::Exit(status);
     }
     result
 }
@@ -1156,7 +1176,12 @@ fn run_builtin(
     }
     let mut saved = [const { SavedFd::Unchanged }; 3];
     let mut extra = Vec::new();
-    if !final_command {
+    if !final_command
+        || matches!(
+            builtin,
+            Builtin::Trap | Builtin::Function | Builtin::Compound | Builtin::Eval | Builtin::Source
+        )
+    {
         for action in actions {
             if matches!(action, Action::CloseMoved(_)) {
                 continue;
@@ -1331,7 +1356,7 @@ fn start_raw(
         session
             .traps
             .after_fork(session.errtrace, session.functrace);
-        launch.pipeline_child();
+        launch.pipeline_child(&mut session.traps);
         enter_stage(session, raw.compound.as_deref(), launch.background);
         if let Some(command) = raw.compound.as_deref_mut()
             && let crate::parser::Command::Subshell(body) = command
@@ -1515,7 +1540,7 @@ fn start(
         session
             .traps
             .after_fork(session.errtrace, session.functrace);
-        launch.pipeline_child();
+        launch.pipeline_child(&mut session.traps);
         enter_stage(session, cmd.compound.as_deref(), launch.background);
         session.stdin_redirected |= cmd.redirects.iter().any(|r| r.fd == 0);
         session.stdin_redirected |= input.is_some();
@@ -1750,10 +1775,9 @@ impl PreparedCommand {
             return None;
         }
         self.resolved.as_deref().or_else(|| {
-            session
-                .hashes
-                .get(name)
-                .filter(|path| !session.shopt.checkhash || lookup::executable(path))
+            session.hashes.get(name).filter(|path| {
+                !(session.posix || session.shopt.checkhash) || lookup::executable(path)
+            })
         })
     }
 }

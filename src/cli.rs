@@ -21,6 +21,8 @@ pub struct Invocation {
     pub noediting: bool,
     pub rcfile: Option<PathBuf>,
     pub check: bool,
+    pub notify: bool,
+    pub ignoreeof: bool,
     pub errexit: bool,
     pub verbose: bool,
     pub errtrace: bool,
@@ -71,6 +73,8 @@ pub fn parse(
     let mut noediting = false;
     let mut rcfile = None;
     let mut check = false;
+    let mut notify = false;
+    let mut ignoreeof = false;
     let mut errexit = false;
     let mut verbose = false;
     let mut errtrace = false;
@@ -115,6 +119,7 @@ pub fn parse(
                         'l' => login = enabled,
                         's' => stdin = enabled,
                         'n' => check = enabled,
+                        'b' => notify = enabled,
                         'e' => errexit = enabled,
                         'v' => verbose = enabled,
                         'E' => errtrace = enabled,
@@ -146,6 +151,9 @@ pub fn parse(
                             Some("monitor") => monitor = Some(enabled),
                             Some("hashall") => hashall = enabled,
                             Some("noclobber") => noclobber = enabled,
+                            Some("noexec") => check = enabled,
+                            Some("notify") => notify = enabled,
+                            Some("ignoreeof") => ignoreeof = enabled,
                             Some("noglob") => noglob = enabled,
                             _ => {
                                 return Err(
@@ -188,6 +196,8 @@ pub fn parse(
         noediting,
         rcfile,
         check: check && !interactive,
+        notify,
+        ignoreeof,
         errexit,
         verbose,
         errtrace,

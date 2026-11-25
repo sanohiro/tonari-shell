@@ -278,7 +278,9 @@ fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Resu
         if !more && source.is_empty() {
             if session
                 .get("IGNOREEOF")
-                .is_some_and(|v| eof_count < v.parse::<usize>().unwrap_or(10))
+                .map_or(session.ignoreeof && eof_count < 10, |v| {
+                    eof_count < v.parse::<usize>().unwrap_or(10)
+                })
             {
                 eof_count += 1;
                 eprintln!(
@@ -409,6 +411,9 @@ fn run_invocation(
     session.arg0 = std::mem::take(&mut invocation.arg0);
     session.positional = std::mem::take(&mut invocation.positional).into_iter();
     session.allexport = invocation.allexport;
+    session.notify = invocation.notify;
+    session.noexec = invocation.check;
+    session.ignoreeof = invocation.ignoreeof;
     session.onecmd = invocation.onecmd;
     session.xtrace = invocation.xtrace;
     session.errexit = invocation.errexit;

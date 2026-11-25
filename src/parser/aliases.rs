@@ -152,7 +152,109 @@ impl Expanded {
 }
 
 impl Reader {
+    pub(super) fn alias_newlines(&mut self, protected: &[&str]) -> Result<(), Error> {
+        loop {
+            self.newlines();
+            self.alias_at(false, Some(protected))?;
+            if !matches!(self.peek(), Some(Token::Newline)) {
+                return Ok(());
+            }
+        }
+    }
+
+    // A replacement ending in shell syntax can take bytes from the following
+    // input. Re-lex this uncommon suffix, keeping offsets for outer frames.
+    fn joined_alias(&mut self, name: String, value: &str, nested: Aliases) -> Result<(), Error> {
+        let index = self.position();
+        let count = index + self.tokens.len();
+        let span = |i| {
+            self.alias_source.as_ref().map_or_else(
+                || {
+                    self.spans
+                        .get(i)
+                        .copied()
+                        .unwrap_or((self.source.len(), self.source.len()))
+                },
+                |s| s.span(i, self),
+            )
+        };
+        let mut physical = String::new();
+        if let Some(expanded) = &self.alias_source {
+            physical.push_str(&expanded.text);
+            physical.push_str(&self.source[expanded.original_byte..]);
+        } else {
+            physical.push_str(&self.source);
+        }
+        let (start, end) = span(index);
+        let mut suffix = &physical[end..];
+        let mut source = String::from(&physical[..start]);
+        source.push_str(value);
+        // A trailing blank permits alias substitution on the delimiter word
+        // before the lexer starts collecting its here-document.
+        if value.ends_with([' ', '\t']) && value.trim_end_matches([' ', '\t']).ends_with("<<") {
+            let rest = suffix.trim_start_matches([' ', '\t']);
+            let n = rest.find(super::lexer::separator).unwrap_or(rest.len());
+            if n != 0
+                && let Some(alias) = nested.get(&rest[..n])
+            {
+                source.push_str(&suffix[..suffix.len() - rest.len()]);
+                source.push_str(alias);
+                suffix = &rest[n..];
+            }
+        }
+        let boundary = source.len();
+        let old_boundary = physical.len() - suffix.len();
+        source.push_str(suffix);
+        let (tokens, offsets, _) = with(nested, || lex(&source[start..], false, self.final_input))?;
+        let mut spans: Vec<_> = (0..index).map(span).collect();
+        let boundaries: Vec<_> = self
+            .alias_frames
+            .iter()
+            .map(|f| span(count - f.remaining).0)
+            .collect();
+        spans.extend(offsets.iter().map(|(a, b)| (start + a, start + b)));
+        let remaining = |byte| tokens.len() - offsets.partition_point(|(a, _)| start + a < byte);
+        for (f, old) in self.alias_frames.iter_mut().zip(boundaries) {
+            f.remaining = remaining(boundary + old.saturating_sub(old_boundary));
+        }
+        self.alias_frames.push(Frame {
+            name,
+            remaining: remaining(boundary),
+            next_word: value.ends_with([' ', '\t']),
+        });
+        self.spans = spans;
+        self.tokens = tokens.into();
+        self.alias_source = None;
+        self.newlines = memchr::memchr_iter(b'\n', source.as_bytes()).collect();
+        self.source = source.into();
+        Ok(())
+    }
+
+    pub(super) fn alias_after_name(&mut self) -> Result<(), Error> {
+        if self
+            .alias_frames
+            .last()
+            .is_some_and(|f| f.next_word && f.remaining + 1 == self.tokens.len())
+            && self.keyword().is_some_and(crate::word::is_identifier)
+        {
+            let name = self.tokens.pop_front().unwrap();
+            self.alias_at(false, Some(&[]))?;
+            self.tokens.push_front(name);
+        }
+        Ok(())
+    }
+
     pub(super) fn expand_alias(&mut self, command_word: bool) -> Result<(), Error> {
+        self.alias_at(command_word, if command_word { None } else { Some(&[]) })
+    }
+
+    // A trailing blank also enables substitution outside command position.
+    // Only words reserved at the current grammar position are protected there.
+    pub(super) fn alias_at(
+        &mut self,
+        command_word: bool,
+        protected: Option<&[&str]>,
+    ) -> Result<(), Error> {
         if self.aliases.0.is_none() {
             return Ok(());
         }
@@ -170,19 +272,22 @@ impl Reader {
             if !enabled {
                 return Ok(());
             }
-            let Some(Token::Word(word)) = self.peek() else {
-                return Ok(());
-            };
-            if word.protected || word.assignment.is_some() {
-                return Ok(());
-            }
-            let Some(name) = word.word.as_literal() else {
-                return Ok(());
+            let name = match self.peek() {
+                Some(Token::Reserved(name)) => *name,
+                Some(Token::Word(word)) if !word.protected && word.assignment.is_none() => {
+                    let Some(name) = word.word.as_literal() else {
+                        return Ok(());
+                    };
+                    name
+                }
+                _ => return Ok(()),
             };
             let Some(value) = self.aliases.get(name) else {
                 return Ok(());
             };
-            if reserved(name) || self.alias_frames.iter().any(|f| f.name == name) {
+            if protected.map_or_else(|| reserved(name), |words| words.contains(&name))
+                || self.alias_frames.iter().any(|f| f.name == name)
+            {
                 return Ok(());
             }
             if self.alias_frames.len() >= 128 {
@@ -199,6 +304,12 @@ impl Reader {
                 for frame in &self.alias_frames {
                     disabled.remove(&frame.name);
                 }
+            }
+            if value.ends_with(['<', '>', '\\']) || value.contains("<<") || value.ends_with("\\\n")
+            {
+                let value = value.to_owned();
+                self.joined_alias(name, &value, nested)?;
+                continue;
             }
             let (replacement, spans, _) = with(nested, || lex(value, false, true))?;
             let index = self.position();

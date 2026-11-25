@@ -147,7 +147,7 @@ pub(super) fn run(
         return Err(io::Error::last_os_error());
     }
     if pid == 0 {
-        launch.pipeline_child();
+        launch.pipeline_child(&mut session.traps);
         let code = match command(cmd, session, status) {
             Ok(Flow::Continue(s) | Flow::Discard(s) | Flow::Exit(s) | Flow::Return(s)) => s,
             Ok(_) => 1,
