@@ -145,10 +145,15 @@ def attempt(tests, subject, fixture, environment, timeout, keep):
                 begin = (pid, int(ns))
             elif begin and begin[0] == pid:
                 elapsed = int(ns) - begin[1]
-    broken = stalled or active is not None or controller_status != 0
-    if broken:
-        rows[active or (fixture + ": controller")] = ("CONTROLLER_EXIT", None)
-    return rows, report, active if broken else None
+    if stalled or active is not None or controller_status != 0:
+        # A subordinate can flush the verdict after another process has sent
+        # SIGHUP to the fixture controller. Resume after that named case too.
+        last = active or next(reversed(rows), None)
+        if last is None:
+            raise RuntimeError(f"{fixture}: controller exited before its first case")
+        rows[last] = ("CONTROLLER_EXIT", None)
+        return rows, report, last
+    return rows, report, None
 
 
 def measure(tests, subject, fixture, environment, timeout, keep):
