@@ -88,7 +88,16 @@ impl Launch {
     pub fn child(self, traps: &mut crate::traps::Traps) {
         if let Some(group) = self.group {
             if unsafe { libc::setpgid(0, group) } < 0 {
-                unsafe { libc::_exit(1) }
+                // The parent assigns the same group after fork. Darwin can
+                // return EPERM to a child already in its requested group.
+                let target = if group == 0 {
+                    unsafe { libc::getpid() }
+                } else {
+                    group
+                };
+                if unsafe { libc::getpgrp() } != target {
+                    unsafe { libc::_exit(1) }
+                }
             }
             if let Some(tty) = self.tty.filter(|_| !self.defer_tty) {
                 give_terminal(tty, unsafe { libc::getpgrp() });
@@ -123,6 +132,30 @@ fn terminal_modes(fd: RawFd) -> Option<libc::termios> {
 
 fn give_terminal(fd: RawFd, pgid: pid_t) {
     give_terminal_with_modes(fd, pgid, None);
+}
+
+#[cfg(test)]
+#[test]
+fn group_setup_accepts_only_the_requested_group_after_a_failed_setpgid() {
+    let outer_group = unsafe { libc::getpgrp() };
+    for (target, expected) in [(0, 0), (outer_group, 1)] {
+        let launch = Launch {
+            group: Some(target),
+            ..Default::default()
+        };
+        let mut traps = crate::traps::Traps::default();
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0);
+        if pid == 0 {
+            // A session leader always gets EPERM from setpgid, even for its own group.
+            if unsafe { libc::setsid() } < 0 {
+                unsafe { libc::_exit(2) }
+            }
+            launch.child(&mut traps);
+            unsafe { libc::_exit(0) }
+        }
+        assert_eq!(crate::execute::wait(pid).unwrap(), expected);
+    }
 }
 
 fn give_terminal_with_modes(fd: RawFd, pgid: pid_t, modes: Option<&libc::termios>) {

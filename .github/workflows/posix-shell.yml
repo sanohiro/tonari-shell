@@ -34,6 +34,9 @@ jobs:
           python3 tools/ci/yash-posix.py "$RUNNER_TEMP/yash" results --prepare --runs 1 --require-bash-passes \
             --tonari "$CARGO_TARGET_DIR/release/tonari" --previous "$RUNNER_TEMP/previous" --bash /bin/bash \
             --shard "$SHARD/4" --inventory docs/compatibility/yash-posix/ubuntu-24.04.tsv.gz
+      - name: Check interpreter unit tests
+        if: matrix.shard == 0
+        run: cargo test --locked
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
