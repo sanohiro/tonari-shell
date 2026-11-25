@@ -14,10 +14,13 @@ ln -s "$RUNNER_TEMP/bin/current" "$lab/bin/bash"
 cd "$lab"
 git init -q upstream
 case "$SUITE" in
-  bensch-*|spec-builtins)
+  bensch-*|spec-builtins|spec-tty)
     git -C upstream fetch -q --depth 1 https://github.com/tenseleyFlow/bensch.git c8e2a1ea493fc0dceb9af645dc445e619cb449e7
     git -C upstream checkout -q --detach FETCH_HEAD
-    if [[ $SUITE == spec-builtins ]]; then
+    if [[ $SUITE == spec-builtins || $SUITE == spec-tty ]]; then
+      python3 "$repo/tools/ci/bensch-cases.py" upstream "$lab" "$ref" > "$out/manifest.jsonl"
+      python3 "$repo/tools/ci/bensch-tty.py" "$out/manifest.jsonl" "$ref" "$lab/bin/bash" > "$out/tty.jsonl"
+      if [[ $SUITE == spec-tty ]]; then exit; fi
       if [[ $(uname -s) == Darwin ]] && ! command -v timeout >/dev/null; then
         brew list coreutils >/dev/null || brew install coreutils
         export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
@@ -29,7 +32,6 @@ case "$SUITE" in
           --shell "$shell" --profile bash --ref-shell "$ref" --suite builtins) \
           > "$out/upstream-$label.log" 2>&1 || echo "$?" > "$out/upstream-$label.status"
       done
-      python3 "$repo/tools/ci/bensch-cases.py" upstream "$lab" "$ref" > "$out/manifest.jsonl"
       python3 "$repo/tools/ci/spec-pairs.py" "$out/manifest.jsonl" "$out/cases.jsonl" \
         "$ref" "$lab/bin/bash" "$lab/pairs" --source upstream --observer "$RUNNER_TEMP/bin/paths"
       exit
