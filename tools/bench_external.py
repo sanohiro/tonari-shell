@@ -80,6 +80,8 @@ def unixwin(args, root, env):
             work = root / str(index) / case.id
             argv, case_env = Runner(shell, root=str(root))._prepare(case, str(work))
             changes = {k: case_env[k] for k, _ in case.env}
+            if case.id == "coproc.tr_roundtrip" and "SHELLBENCH_COREUTILS" in os.environ:
+                changes["PATH"] = os.environ["SHELLBENCH_COREUTILS"] + os.pathsep + env["PATH"]
             commands.append((argv, work, {**env, **changes}, min(case.timeout, 45)))
 
         def verify(rc, out, err):

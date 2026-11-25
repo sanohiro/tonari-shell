@@ -50,9 +50,14 @@ impl Table {
     }
 }
 
-fn search(name: &str, session: &Session) -> Option<Entry> {
+// Err(Absent) means every PATH candidate was definitively missing.
+// Ok(None) leaves permission failures and existing non-executables to exec.
+pub(super) struct Absent;
+
+fn search(name: &str, session: &Session) -> Result<Option<Entry>, Absent> {
     let path = session.search_path(&[]);
     let mut relative = false;
+    let mut absent = true;
     for dir in std::env::split_paths(&path) {
         relative |= !dir.is_absolute();
         let dir = if dir.as_os_str().is_empty() {
@@ -61,35 +66,38 @@ fn search(name: &str, session: &Session) -> Option<Entry> {
             &dir
         };
         let path = dir.join(name);
-        if super::lookup::executable(&path) {
-            return Some(Entry {
-                path,
-                hits: 0,
-                relative_search: relative,
-            });
+        match super::lookup::check_executable(&path) {
+            Ok(true) => {
+                return Ok(Some(Entry {
+                    path,
+                    hits: 0,
+                    relative_search: relative,
+                }));
+            }
+            Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) => {}
+            _ => absent = false,
         }
     }
-    None
+    if absent { Err(Absent) } else { Ok(None) }
 }
 
-pub(super) fn resolve(session: &mut Session, name: &str, remember: bool) -> Option<PathBuf> {
+pub(super) fn resolve(session: &mut Session, name: &str) -> Result<Option<PathBuf>, Absent> {
     if !session.hashes.enabled || name.contains('/') || name.is_empty() {
-        return None;
+        return Ok(None);
     }
     if let Some(path) = session.hashes.hit(name) {
         if !session.shopt.checkhash || super::lookup::executable(path) {
-            return Some(path.into());
+            return Ok(Some(path.into()));
         }
         session.hashes.entries.remove(name);
     }
-    if !remember {
-        return None;
-    }
-    let mut entry = search(name, session)?;
+    let Some(mut entry) = search(name, session)? else {
+        return Ok(None);
+    };
     entry.hits = 1;
     let path = entry.path.clone();
     session.hashes.entries.insert(name.into(), entry);
-    Some(path)
+    Ok(Some(path))
 }
 
 pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
@@ -222,7 +230,7 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
                 continue;
             }
             session.hashes.entries.remove(name);
-            search(name, session)
+            search(name, session).ok().flatten()
         };
         if let Some(entry) = entry {
             session.hashes.entries.insert(name.into(), entry);

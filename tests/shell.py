@@ -55,6 +55,15 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_missing_command_is_rechecked_and_redirects_take_effect(self):
+        self.compare("""PATH=.:/usr/bin:/bin
+{ later; echo missing=$?; } 2>err
+echo 'echo found' >later; chmod +x later; later
+chmod -x later; hash -r; { later; echo denied=$?; } 2>err
+{ another >made; echo redirected=$?; } 2>err
+[ -e made ] && echo created; rm -f later made""",
+                     0, b"missing=127\nfound\ndenied=126\nredirected=127\ncreated\n")
+
     def test_compound_append_after_shift_and_sparse_index(self):
         self.compare('set -- a b "c d"; shift; f() { shift; a+=( "$@" ); }; '
                      'a=(start); f skip "$@"; unset "a[1]"; a+=(end); '

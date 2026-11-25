@@ -2068,7 +2068,18 @@ pub fn run_pipeline(
                 session.hashes.clear();
             }
         } else if !replace {
-            cmd.resolved = hash::resolve(session, &cmd.words[0], true);
+            match hash::resolve(session, &cmd.words[0]) {
+                Ok(path) => cmd.resolved = path,
+                Err(hash::Absent)
+                    if cmd.redirects.is_empty()
+                        && launch.group.is_none()
+                        && !session.traps.active() =>
+                {
+                    eprintln!("tonari: {}: command not found", cmd.words[0]);
+                    return Ok(Flow::Continue(127));
+                }
+                Err(hash::Absent) => {}
+            }
         }
         if replace && launch.group.is_none() {
             let executable = External::new(&cmd, session);

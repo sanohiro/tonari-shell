@@ -126,6 +126,11 @@ fi
 case "$SUITE" in
   external-shellspec|external-fumiyas|external-unixwin|external-luish|external-gnu-hello)
     if [[ $SUITE == external-fumiyas ]] && ! command -v zsh >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y zsh; fi
+    if [[ $SUITE == external-unixwin && $RUNNER_OS == macOS ]] && ! command -v stdbuf >/dev/null; then
+      if ! brew list --versions coreutils >/dev/null; then brew install coreutils; fi
+      export SHELLBENCH_COREUTILS
+      SHELLBENCH_COREUTILS="$(brew --prefix coreutils)/libexec/gnubin"
+    fi
     run "$SUITE" bash tools/ci/external-shell.sh "${SUITE#external-}" "$current" "$ref" ;;
   starship)
     case "$NATIVE_RUNNER" in

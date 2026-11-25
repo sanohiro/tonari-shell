@@ -270,11 +270,15 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
 }
 
 pub(super) fn executable(path: &Path) -> bool {
-    if !path.is_file() {
-        return false;
+    check_executable(path).unwrap_or(false)
+}
+
+pub(super) fn check_executable(path: &Path) -> std::io::Result<bool> {
+    if !path.metadata()?.is_file() {
+        return Ok(false);
     }
     let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
-        return false;
+        return Ok(false);
     };
-    unsafe { libc::access(path.as_ptr(), libc::X_OK) == 0 }
+    Ok(unsafe { libc::access(path.as_ptr(), libc::X_OK) == 0 })
 }
