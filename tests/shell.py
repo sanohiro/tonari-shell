@@ -622,6 +622,11 @@ f"""
         self.compare('PATH=commands:/bin; ./plain; export -n PATH; ./plain; echo "$PATH"', 0,
                      b"found\ndefault\ncommands:/bin\n")
 
+        (self.cwd / "linked").symlink_to(directory, target_is_directory=True)
+        helper.write_text('printf "<%s><%s>\\n" "${PWD##*/}" "${OLDPWD##*/}"\n')
+        self.compare("export OLDPWD; cd linked; PATH=.:$PATH; helper; unset OLDPWD; ./helper",
+                     0, f"<linked><{self.cwd.name}>\n<linked><>\n".encode())
+
     def test_executable_text_with_shared_input_and_inherited_descriptor(self):
         outer = self.cwd / "outer"
         outer.write_text("""for fd in /dev/fd/*; do

@@ -258,7 +258,7 @@ case "$SUITE" in
         --spawn-control "$bin/spawn-control" > "$out/throughput.jsonl"
       selection=(--fixture pipeline-p.tst)
     elif [[ $SUITE == external-yash-script-path ]]; then
-      selection=(--fixture quote-p.tst --fixture unset-p.tst)
+      selection=(--fixture quote-p.tst --fixture unset-p.tst --fixture simple-p.tst)
     elif [[ $SUITE == external-yash-io ]]; then
       selection=(--fixture redir-p.tst --fixture cmdsub-p.tst --fixture quote-p.tst --fixture read-p.tst
                  --fixture umask-p.tst --fixture cd-p.tst --fixture command-p.tst)

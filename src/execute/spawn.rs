@@ -175,14 +175,17 @@ impl External {
         {
             return None;
         }
-        let mut shell_level = None;
-        let mut search_path = None;
-        for (name, value) in session.environment_changes(&[]) {
-            match name {
-                "SHLVL" => shell_level = Some(value),
-                "PATH" => search_path = Some(value),
-                _ => return None,
-            }
+        // Both callers supply the session only for commands without prefix
+        // assignments. Their prepared export delta is the child's environment.
+        let changes = self
+            .env
+            .as_ref()
+            .map_or(&[][..], |env| env.changes.as_slice());
+        if changes
+            .iter()
+            .any(|(name, _)| !matches!(name.as_str(), "SHLVL" | "PATH" | "PWD" | "OLDPWD"))
+        {
+            return None;
         }
         let _ = std::io::stdout().flush();
         if process == ScriptProcess::Child {
@@ -202,14 +205,12 @@ impl External {
             }
         }
         REENTERED.set(true);
-        // PATH and SHLVL are read by the new interpreter. Other changes may
-        // need the dynamic loader or a fresh native runtime. Only the child
-        // changes its environment, including removals from export -n.
-        for (name, change) in [("SHLVL", shell_level), ("PATH", search_path)] {
-            match change {
-                Some(Some(value)) => unsafe { std::env::set_var(name, value.as_ref()) },
-                Some(None) => unsafe { std::env::remove_var(name) },
-                None => (),
+        // These variables are read by the fresh interpreter. Other changes
+        // may need the dynamic loader or a new native runtime.
+        for (name, value) in changes {
+            match value {
+                Some(value) => unsafe { std::env::set_var(name, value) },
+                None => unsafe { std::env::remove_var(name) },
             }
         }
         let argv = [
