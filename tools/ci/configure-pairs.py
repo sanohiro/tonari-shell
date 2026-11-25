@@ -40,9 +40,11 @@ def measure(script, shell, directory, compiler, log):
     record = {"elapsed": elapsed}
     if log is not None:
         intervals = []
+        cpu = Counter()
         for line in log.read_text().splitlines():
-            name, left, right = line.split()
+            name, left, right, user_us, system_us = line.split()
             intervals.append((int(left), int(right), name))
+            cpu[name] += (int(user_us) + int(system_us)) / 1e6
         totals = Counter()
         counts = Counter()
         covered_until = start
@@ -55,7 +57,8 @@ def measure(script, shell, directory, compiler, log):
         if set(totals) != {"/usr/bin/cc", "./conftest"}:
             raise ValueError(f"unexpected clocked programs: {counts}")
         record.update(compiler=totals["/usr/bin/cc"], probes=totals["./conftest"],
-                      outside=elapsed-sum(totals.values()), counts=dict(counts))
+                      outside=elapsed-sum(totals.values()), counts=dict(counts),
+                      compiler_cpu=cpu["/usr/bin/cc"], probes_cpu=cpu["./conftest"])
     return record, witness
 
 

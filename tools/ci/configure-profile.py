@@ -46,7 +46,7 @@ def profile(script, shell, out, label, tracer, compiler=None):
 def report_clock(path):
     intervals = []
     for line in path.read_text().splitlines():
-        name, start, end = line.split()
+        name, start, end = line.split()[:3]
         intervals.append((int(start), int(end), name))
     if not intervals:
         raise ValueError(f"no compiler or test intervals in {path}")

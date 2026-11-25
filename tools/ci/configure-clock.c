@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -18,15 +19,16 @@ static long long nanoseconds(clockid_t clock) {
 }
 
 int main(int argc, char **argv) {
-    if (argc == 2 && strcmp(argv[1], "--roundtrip") == 0) {
+    const char *base = strrchr(argv[0], '/');
+    int compiler = strcmp(base ? base + 1 : argv[0], "cc") == 0;
+    if (!compiler && argc == 2 && strcmp(argv[1], "--roundtrip") == 0) {
         // EPOCHREALTIME in the calling shell uses the same realtime clock.
         // The return interval includes this small write and process exit.
         long long entered = nanoseconds(CLOCK_REALTIME);
         long long leaving = nanoseconds(CLOCK_REALTIME);
         return dprintf(7, "%lld %lld\n", entered, leaving) < 0 ? 125 : 0;
     }
-    const char *base = strrchr(argv[0], '/');
-    if (strcmp(base ? base + 1 : argv[0], "cc") == 0)
+    if (compiler)
         argv[0] = "/usr/bin/cc";
     else if (argc > 1)
         argv++;
@@ -39,12 +41,16 @@ int main(int argc, char **argv) {
     if (error)
         return error == ENOENT ? 127 : 126;
     int status;
-    while (waitpid(child, &status, 0) < 0)
+    struct rusage usage;
+    while (wait4(child, &status, 0, &usage) < 0)
         if (errno != EINTR)
             return 125;
     long long end = nanoseconds(CLOCK_MONOTONIC);
     int fd = open(getenv("CONFIGURE_CLOCK_LOG"), O_WRONLY | O_APPEND);
-    if (fd < 0 || dprintf(fd, "%s %lld %lld\n", argv[0], start, end) < 0)
+    long long user_us = (long long)usage.ru_utime.tv_sec * 1000000 + usage.ru_utime.tv_usec;
+    long long system_us = (long long)usage.ru_stime.tv_sec * 1000000 + usage.ru_stime.tv_usec;
+    if (fd < 0 || dprintf(fd, "%s %lld %lld %lld %lld\n",
+                          argv[0], start, end, user_us, system_us) < 0)
         return 125;
     close(fd);
     return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
