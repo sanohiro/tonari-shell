@@ -613,6 +613,15 @@ f"""
         self.compare(code, 7, b"<./plain><two words x y>\n7 0\n<./plain><two words z>\n")
         self.compare('value=$(./plain z); echo "$?:$value"', 0, b"7:<./plain><two words z>\n")
 
+        directory = self.cwd / "commands"
+        directory.mkdir()
+        helper = directory / "helper"
+        helper.write_text("echo found\n")
+        helper.chmod(0o700)
+        script.write_text('if command -v helper >/dev/null; then helper; else echo default; fi\n')
+        self.compare('PATH=commands:/bin; ./plain; export -n PATH; ./plain; echo "$PATH"', 0,
+                     b"found\ndefault\ncommands:/bin\n")
+
     def test_executable_text_with_shared_input_and_inherited_descriptor(self):
         outer = self.cwd / "outer"
         outer.write_text("""for fd in /dev/fd/*; do

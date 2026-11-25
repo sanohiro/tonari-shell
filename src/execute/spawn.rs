@@ -145,7 +145,7 @@ impl External {
         }
     }
     // A plain ENOEXEC command can reuse its process image for a fresh interpreter.
-    // Use exec for managed jobs, changed environments and inherited runtime
+    // Use exec for managed jobs, other environment changes and inherited runtime
     // state that needs an actual image transition.
     pub(super) fn start_script(
         &self,
@@ -176,11 +176,13 @@ impl External {
             return None;
         }
         let mut shell_level = None;
+        let mut search_path = None;
         for (name, value) in session.environment_changes(&[]) {
-            if name != "SHLVL" {
-                return None;
+            match name {
+                "SHLVL" => shell_level = Some(value),
+                "PATH" => search_path = Some(value),
+                _ => return None,
             }
-            shell_level = Some(value);
         }
         let _ = std::io::stdout().flush();
         if process == ScriptProcess::Child {
@@ -200,12 +202,15 @@ impl External {
             }
         }
         REENTERED.set(true);
-        // The interpreter is single-threaded. Apply exactly the exported
-        // change, including export -n, before starting the ordinary script entry point.
-        match shell_level {
-            Some(Some(value)) => unsafe { std::env::set_var("SHLVL", value.as_ref()) },
-            Some(None) => unsafe { std::env::remove_var("SHLVL") },
-            None => (),
+        // PATH and SHLVL are read by the new interpreter. Other changes may
+        // need the dynamic loader or a fresh native runtime. Only the child
+        // changes its environment, including removals from export -n.
+        for (name, change) in [("SHLVL", shell_level), ("PATH", search_path)] {
+            match change {
+                Some(Some(value)) => unsafe { std::env::set_var(name, value.as_ref()) },
+                Some(None) => unsafe { std::env::remove_var(name) },
+                None => (),
+            }
         }
         let argv = [
             OsString::from("tonari"),
