@@ -483,7 +483,7 @@ fn run_invocation(
     }
     session.jobs.monitor = invocation.monitor.unwrap_or(session.interactive);
     if session.jobs.monitor {
-        session.jobs.init();
+        session.jobs.init(session.interactive);
     }
     session.command_string = matches!(invocation.input, Input::Command(_));
     session.set_posix(invocation.posix);

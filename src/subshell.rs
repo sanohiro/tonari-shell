@@ -672,7 +672,17 @@ fn launch_list(
     match session.jobs.finish(
         launch,
         vec![Ok(pid)],
-        "command list".into(),
+        session.current_command.as_ref().map_or_else(
+            || "command list".into(),
+            |location| {
+                location
+                    .text()
+                    .trim()
+                    .trim_end_matches('&')
+                    .trim_end()
+                    .into()
+            },
+        ),
         false,
         &mut session.pipe_status,
     ) {

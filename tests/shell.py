@@ -120,6 +120,7 @@ class ShellTests(unittest.TestCase):
         script = "name=works\nprintf '<%s>\\n' \"$na\\\nme\" \"${na\\\nme:\\\n+yes}\" " \
                  "\"$name\\\\\nend\"\ncat <<'EOF'\nstring\\\ncontinued\nEOF\n"
         self.compare(script, 0, b"<works>\n<yes>\n<works\\\nend>\nstring\\\ncontinued\n")
+        self.compare("foobar=value\nfoo=wrong\nprintf '%s' $foo\\\nbar\n", 0, b"value")
         script_file = self.cwd / "external"
         script_file.write_text("printf '%s/%s\\n' \"$setting\" \"$1\"\n")
         script_file.chmod(0o755)

@@ -75,8 +75,18 @@ def children_of(root, parents):
 
 
 def terminate_children(owner, process):
-    parents = dict(tuple(map(int, line.split())) for line in
-                   subprocess.check_output(["ps", "-A", "-o", "pid=", "-o", "ppid="], text=True).splitlines())
+    try:
+        listing = subprocess.check_output(["ps", "-A", "-o", "pid=", "-o", "ppid="], text=True)
+        parents = {pid: ppid for pid, ppid in (map(int, line.split()) for line in listing.splitlines())}
+    except FileNotFoundError:
+        # Minimal Linux installations can run the suite without procps.
+        parents = {}
+        for stat in Path("/proc").glob("[0-9]*/stat"):
+            try:
+                fields = stat.read_bytes().rsplit(b")", 1)[1].split()
+                parents[int(stat.parent.name)] = int(fields[1])
+            except (FileNotFoundError, ProcessLookupError):
+                continue
     if owner != process.pid and owner not in children_of(process.pid, parents):
         raise RuntimeError("timed case controller is outside its fixture")
     for pid in reversed(children_of(owner, parents)):

@@ -1100,6 +1100,17 @@ fn redirect_failure(cmd: &PreparedCommand, session: &Session) -> Flow {
     }
 }
 
+fn can_install_trap(builtin: Builtin, cmd: &PreparedCommand) -> bool {
+    matches!(
+        builtin,
+        Builtin::Trap | Builtin::Function | Builtin::Eval | Builtin::Source
+    ) || matches!(builtin, Builtin::Compound)
+        && !matches!(
+            cmd.compound.as_deref(),
+            Some(crate::parser::Command::Subshell(_))
+        )
+}
+
 fn run_builtin(
     builtin: Builtin,
     cmd: &mut PreparedCommand,
@@ -1176,17 +1187,7 @@ fn run_builtin(
     }
     let mut saved = [const { SavedFd::Unchanged }; 3];
     let mut extra = Vec::new();
-    if !final_command
-        || matches!(
-            builtin,
-            Builtin::Trap | Builtin::Function | Builtin::Eval | Builtin::Source
-        )
-        || matches!(builtin, Builtin::Compound)
-            && !matches!(
-                cmd.compound.as_deref(),
-                Some(crate::parser::Command::Subshell(_))
-            )
-    {
+    if !final_command || can_install_trap(builtin, cmd) {
         for action in actions {
             if matches!(action, Action::CloseMoved(_)) {
                 continue;
@@ -1557,7 +1558,12 @@ fn start(
     // Opening a FIFO can block until a later pipeline stage starts. Do those
     // opens in a child so the parent can launch the remaining stages first.
     let mut setup = connect_pipe(input.as_ref(), output.as_ref(), next_reader);
-    setup.extend(actions(cmd));
+    // A trap installed by this command runs after its local redirects end.
+    // An explicit subshell retains its enclosing redirects through shell exit.
+    let scoped = !cmd.redirects.is_empty() && builtin.is_some_and(|b| can_install_trap(b, cmd));
+    if !scoped {
+        setup.extend(actions(cmd));
+    }
     let external = builtin.is_none().then(|| External::new(cmd, session));
     let pid = unsafe { libc::fork() };
     if pid < 0 {
@@ -1580,7 +1586,17 @@ fn start(
             external.exec(None)
         } else {
             coprocess::after_fork(session);
-            match eval_builtin(builtin.unwrap(), cmd, session, last_status, true) {
+            let flow = if scoped {
+                run_builtin(builtin.unwrap(), cmd, session, last_status, false).unwrap_or_else(
+                    |e| {
+                        eprintln!("tonari: {e}");
+                        Flow::Continue(1)
+                    },
+                )
+            } else {
+                eval_builtin(builtin.unwrap(), cmd, session, last_status, true)
+            };
+            match flow {
                 Flow::Discard(s) | Flow::Exit(s) | Flow::Return(s) | Flow::Continue(s) => s,
                 Flow::Break(_) | Flow::LoopContinue(_) => 0,
             }
@@ -2173,11 +2189,27 @@ pub fn run(
     run_pipeline(pipeline, last_status, replace, session, false)
 }
 
-fn job_label(pipeline: &[SimpleCommand<Word>], background: bool, monitor: bool) -> Option<String> {
+fn job_label(
+    pipeline: &[SimpleCommand<Word>],
+    background: bool,
+    session: &Session,
+) -> Option<String> {
     // Literal arguments survive preparation, except for lookup prefixes.
     // Build their job label only if a foreground child is actually launched.
-    if !background && !monitor {
+    if !background && !session.jobs.monitor {
         return None;
+    }
+    if pipeline.iter().any(|cmd| cmd.compound.is_some())
+        && let Some(location) = &session.current_command
+    {
+        return Some(
+            location
+                .text()
+                .trim()
+                .trim_end_matches('&')
+                .trim_end()
+                .to_owned(),
+        );
     }
     if !background
         && let [cmd] = pipeline
@@ -2228,7 +2260,7 @@ pub fn run_pipeline(
         {
             return Ok(Flow::Continue(0));
         }
-        let name = job_label(std::slice::from_ref(&raw), false, session.jobs.monitor);
+        let name = job_label(std::slice::from_ref(&raw), false, session);
         let mut cmd = match prepare(raw, session, last_status, true) {
             Ok(cmd) => cmd,
             Err(e) => {
@@ -2297,7 +2329,7 @@ pub fn run_pipeline(
     }
     let mut launch = session.jobs.launch(background, pipeline.len() == 1);
     let managed = background || launch.group.is_some();
-    let name = job_label(&pipeline, background, session.jobs.monitor);
+    let name = job_label(&pipeline, background, session);
     let mut input =
         if background && launch.group.is_none() && (session.posix || !session.stdin_redirected) {
             Some(private_fd(std::fs::File::open("/dev/null")?.into())?)

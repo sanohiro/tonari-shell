@@ -701,13 +701,20 @@ fn parameter(
 }
 
 fn tilde(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
-    let key = match s {
-        "~" => "HOME",
-        "~+" => "PWD",
-        "~-" => "OLDPWD",
-        _ => return user_home(s.strip_prefix('~').unwrap_or(s)).unwrap_or_else(|| s.to_owned()),
+    let prefix = s.strip_suffix('/').unwrap_or(s);
+    let home = match prefix {
+        "~" => lookup("HOME"),
+        "~+" => lookup("PWD"),
+        "~-" => lookup("OLDPWD"),
+        _ => user_home(prefix.strip_prefix('~').unwrap_or(prefix)),
     };
-    lookup(key).unwrap_or_else(|| s.to_owned())
+    let Some(mut home) = home else {
+        return s.to_owned();
+    };
+    if prefix.len() != s.len() && !home.ends_with('/') {
+        home.push('/');
+    }
+    home
 }
 
 // Query the OS account database for each named expansion. Keep the common

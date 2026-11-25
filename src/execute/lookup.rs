@@ -207,6 +207,17 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
         if !found || search_all {
             let mut report = |path: &Path| {
                 found = true;
+                let absolute;
+                let path = if session.posix
+                    && command
+                    && matches!(format, Format::Name | Format::Verbose)
+                    && path.is_relative()
+                {
+                    absolute = session.logical_directory()?.join(path);
+                    &absolute
+                } else {
+                    path
+                };
                 match format {
                     Format::Verbose => writeln!(out, "{name} is {}", path.display()),
                     Format::Kind => writeln!(out, "file"),

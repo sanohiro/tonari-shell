@@ -336,6 +336,11 @@ pub(super) fn dollar(
             if tail.starts_with("\\\n") {
                 let mut name = rest[..end].to_owned();
                 while let Some(next) = tail.strip_prefix("\\\n") {
+                    // The input reader must see a trailing continuation so it
+                    // can fetch more bytes before deciding where the name ends.
+                    if next.is_empty() {
+                        break;
+                    }
                     let size = next
                         .bytes()
                         .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
@@ -442,7 +447,9 @@ fn parameter_word(
                     .chars()
                     .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
                 {
-                    word.part(Part::Tilde(format!("~{user}")));
+                    let slash = !stop_slash && super::POSIX.get() && rest[end..].starts_with('/');
+                    let end = end + usize::from(slash);
+                    word.part(Part::Tilde(format!("~{}", &rest[..end])));
                     *chars = rest[end..].chars();
                 } else {
                     word.push('~');
@@ -1089,8 +1096,11 @@ pub(super) fn lex(
                         .chars()
                         .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
                     {
-                        word.part(Part::Tilde(format!("~{suffix}")));
-                        chars = chars.as_str()[length..].chars();
+                        let rest = chars.as_str();
+                        let slash = super::POSIX.get() && rest[length..].starts_with('/');
+                        let end = length + usize::from(slash);
+                        word.part(Part::Tilde(format!("~{}", &rest[..end])));
+                        chars = rest[end..].chars();
                     } else {
                         word.push(c);
                     }

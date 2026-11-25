@@ -7,7 +7,8 @@ use std::os::fd::{AsFd, AsRawFd, RawFd};
 #[derive(Clone)]
 struct Terminal {
     fd: PrivateFile,
-    // The interactive shell leads its own foreground process group.
+    // The owning shell and the process group to restore after a foreground job.
+    shell_group: pid_t,
     owner: pid_t,
 }
 
@@ -289,7 +290,7 @@ impl Jobs {
         self.table.is_empty() && self.inherited.is_empty()
     }
 
-    pub fn init(&mut self) {
+    pub fn init(&mut self, interactive: bool) {
         let old = unsafe { libc::getpgrp() };
         let fd = if unsafe { libc::isatty(libc::STDERR_FILENO) } == 1 {
             PrivateFile::duplicate(io::stderr().as_fd())
@@ -305,7 +306,8 @@ impl Jobs {
             return;
         }
         let owner = unsafe { libc::getpid() };
-        if old != owner {
+        let shell_group = if interactive { owner } else { old };
+        if old != shell_group {
             if unsafe { libc::setpgid(0, 0) } < 0 {
                 return;
             }
@@ -322,7 +324,11 @@ impl Jobs {
                 libc::signal(libc::SIGTSTP, stay_running as *const () as usize);
             }
         }
-        self.tty = Some(Terminal { fd, owner });
+        self.tty = Some(Terminal {
+            fd,
+            owner,
+            shell_group,
+        });
     }
     fn terminal(&self) -> Option<&Terminal> {
         self.tty
@@ -357,7 +363,7 @@ impl Jobs {
     }
     pub fn restore(&self) {
         if let Some(t) = self.terminal() {
-            give_terminal(t.fd.as_raw_fd(), t.owner);
+            give_terminal(t.fd.as_raw_fd(), t.shell_group);
         }
     }
 

@@ -227,6 +227,9 @@ case "$SUITE" in
       python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
         --spawn-control "$bin/spawn-control" > "$out/throughput.jsonl"
       selection=(--fixture pipeline-p.tst)
+    elif [[ $SUITE == external-yash-io ]]; then
+      selection=(--fixture redir-p.tst --fixture cmdsub-p.tst --fixture quote-p.tst --fixture read-p.tst
+                 --fixture umask-p.tst --fixture cd-p.tst --fixture command-p.tst)
     elif [[ $SUITE == external-yash-recheck ]]; then
       python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" > "$out/throughput.jsonl"
       python3 tools/ci/yash-signals.py --tonari "$current" --bash "$ref" > "$out/signals.jsonl"
