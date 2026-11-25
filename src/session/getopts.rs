@@ -15,6 +15,10 @@ impl Session {
             eprintln!("getopts: invalid option: {spec}");
             return 2;
         }
+        if self.posix && self.readonly("OPTIND") {
+            eprintln!("tonari: getopts: OPTIND: readonly variable");
+            return 1;
+        }
         let inputs = if explicit.is_empty() {
             self.positional.as_slice()
         } else {

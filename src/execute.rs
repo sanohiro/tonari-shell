@@ -320,7 +320,6 @@ impl Environment {
 }
 
 struct External {
-    ignore_pipe: bool,
     // Owns the argument strings referenced by argv.
     original_name: Option<CString>,
     words: Vec<CString>,
@@ -368,7 +367,6 @@ impl External {
             words,
             argv,
             original_name: original,
-            ignore_pipe: session.traps.ignores(libc::SIGPIPE),
             search_paths,
             env: if clear_env {
                 Some(Rc::new(Environment {
@@ -433,18 +431,11 @@ impl External {
     }
 
     fn exec(&self, session: Option<&Session>) -> u8 {
-        // Rust ignores SIGPIPE in its own runtime. External commands need the
-        // normal Unix disposition, including on the direct exec path.
         let program = self.original_name.as_ref().unwrap_or(&self.words[0]);
         if program.as_bytes().is_empty() {
             write_error(b"", b": command not found");
             return 127;
         }
-        let old_pipe = if self.ignore_pipe {
-            libc::SIG_ERR
-        } else {
-            unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) }
-        };
         let mut error = libc::ENOENT;
         let paths = self
             .search_paths
@@ -470,9 +461,6 @@ impl External {
                     break;
                 }
             }
-        }
-        if old_pipe != libc::SIG_ERR {
-            unsafe { libc::signal(libc::SIGPIPE, old_pipe) };
         }
         let status = exec_status(error);
         write_error(
@@ -710,7 +698,12 @@ fn eval_builtin(
     in_stage_child: bool,
 ) -> Flow {
     let persistent = !cmd.assignments.is_empty() && posix_special(cmd, session);
-    let mut bindings = session.bind(&cmd.assignments);
+    let mut bindings = if persistent {
+        session.persist_prefix(&mut cmd.assignments);
+        Default::default()
+    } else {
+        session.bind(&cmd.assignments)
+    };
     let args = cmd.words.get(1..).unwrap_or_default();
     let result = match builtin {
         Builtin::History => crate::history::commands::run(session, &cmd.words, last_status),
@@ -810,7 +803,12 @@ fn eval_builtin(
             Flow::Continue(session.directory_stack(&cmd.words[0], args, &mut io::stdout().lock()))
         }
         Builtin::Directory => Flow::Continue(session.directory_builtin(&cmd.words[0], args)),
-        Builtin::Source => crate::source_file(session, &cmd.words, last_status),
+        Builtin::Source => crate::source_file(
+            session,
+            &cmd.words,
+            last_status,
+            !session.interactive && posix_special(cmd, session),
+        ),
         Builtin::Eval => crate::input::eval_builtin(session, args, last_status),
         Builtin::Return(status) => {
             if session.source_depth == 0 && session.function_depth == 0 {
@@ -1063,6 +1061,14 @@ fn here_pipe_limit(builtin: Option<Builtin>, cmd: &PreparedCommand) -> usize {
     }
 }
 
+fn redirect_failure(cmd: &PreparedCommand, session: &Session) -> Flow {
+    if !session.interactive && posix_special(cmd, session) {
+        Flow::Exit(1)
+    } else {
+        Flow::Continue(1)
+    }
+}
+
 fn run_builtin(
     builtin: Builtin,
     cmd: &mut PreparedCommand,
@@ -1108,7 +1114,7 @@ fn run_builtin(
         // directly, avoiding two changes to the process-wide stdout.
         let _saved = SavedFd::capture(&actions[0], actions)?;
         let Some(fd) = open_redirect(path, *flags) else {
-            return Ok(Flow::Continue(1));
+            return Ok(redirect_failure(cmd, session));
         };
         use std::io::Write;
         let (data, status) = output.render(session);
@@ -1120,7 +1126,7 @@ fn run_builtin(
         // but never reads or writes the destination. Open before reserving any
         // backup, so /dev/fd paths see the caller's descriptor table.
         let Some(fd) = open_redirect(path, *flags) else {
-            return Ok(Flow::Continue(1));
+            return Ok(redirect_failure(cmd, session));
         };
         // Bash can still fail to save a live destination at its descriptor limit.
         // This reservation drops before the single-threaded shell can exec.
@@ -1162,7 +1168,7 @@ fn run_builtin(
     let flow = if applied {
         eval_builtin(builtin, cmd, session, last_status, false)
     } else {
-        Flow::Continue(1)
+        redirect_failure(cmd, session)
     };
     if !matches!(builtin, Builtin::Exec) || !matches!(flow, Flow::Continue(0)) {
         session.stdin_redirected = old_input;
@@ -1211,7 +1217,11 @@ fn connect_pipe(
     setup
 }
 pub(crate) fn reset_child_signals() {
-    for signal in [libc::SIGINT, libc::SIGQUIT] {
+    reset_caught_signals(&[libc::SIGINT, libc::SIGQUIT, libc::SIGTERM]);
+}
+
+pub(crate) fn reset_caught_signals(signals: &[i32]) {
+    for &signal in signals {
         unsafe {
             let mut old: libc::sigaction = std::mem::zeroed();
             libc::sigaction(signal, std::ptr::null(), &mut old);
@@ -1433,7 +1443,7 @@ fn start(
     }
     if builtin.is_none()
         && !resolved
-        && !session.traps.ignores(libc::SIGPIPE)
+        && crate::traps::std_spawn_inherits_pipe(&session.traps)
         && (cmd.redirects.is_empty() || merged_pipe.is_some())
         && !custom_search
         && launch.group.is_none()
@@ -2011,6 +2021,7 @@ fn prepare_redirects(
                 text
             }
             (_, Word::Literal(word)) => word,
+            (_, word) if exp.session.posix && !exp.session.interactive => exp.scalar(word)?,
             (_, word) => {
                 let mut fields = exp.fields(word)?.into_iter();
                 let word = fields.next().ok_or("ambiguous redirect")?;

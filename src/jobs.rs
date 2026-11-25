@@ -92,11 +92,7 @@ impl Launch {
             if let Some(tty) = self.tty.filter(|_| !self.defer_tty) {
                 give_terminal(tty, unsafe { libc::getpgrp() });
             }
-            for sig in JOB_SIGNALS {
-                unsafe {
-                    libc::signal(sig, libc::SIG_DFL);
-                }
-            }
+            crate::execute::reset_caught_signals(&JOB_SIGNALS);
         } else if self.background {
             for sig in [libc::SIGINT, libc::SIGQUIT] {
                 unsafe {
@@ -289,12 +285,19 @@ impl Jobs {
 
     pub fn init(&mut self) {
         let old = unsafe { libc::getpgrp() };
-        if unsafe { libc::tcgetpgrp(libc::STDERR_FILENO) } != old {
+        let fd = if unsafe { libc::isatty(libc::STDERR_FILENO) } == 1 {
+            PrivateFile::duplicate(io::stderr().as_fd())
+        } else {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("/dev/tty")
+                .and_then(PrivateFile::new)
+        };
+        let Ok(fd) = fd else { return };
+        if unsafe { libc::tcgetpgrp(fd.as_raw_fd()) } != old {
             return;
         }
-        let Ok(fd) = PrivateFile::duplicate(io::stderr().as_fd()) else {
-            return;
-        };
         let owner = unsafe { libc::getpid() };
         if old != owner {
             if unsafe { libc::setpgid(0, 0) } < 0 {
@@ -302,8 +305,16 @@ impl Jobs {
             }
             give_terminal(fd.as_raw_fd(), owner);
         }
+        // A caught disposition becomes default on exec. Preserve a signal
+        // explicitly ignored by our parent across child process creation.
+        extern "C" fn stay_running(_: i32) {}
         unsafe {
-            libc::signal(libc::SIGTSTP, libc::SIG_IGN);
+            let mut previous = std::mem::MaybeUninit::uninit();
+            if libc::sigaction(libc::SIGTSTP, std::ptr::null(), previous.as_mut_ptr()) == 0
+                && previous.assume_init().sa_sigaction != libc::SIG_IGN
+            {
+                libc::signal(libc::SIGTSTP, stay_running as *const () as usize);
+            }
         }
         self.tty = Some(Terminal { fd, owner });
     }

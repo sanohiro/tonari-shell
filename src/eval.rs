@@ -303,7 +303,11 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 }
                 if s.readonly(&name) {
                     eprintln!("tonari: {name}: readonly variable");
-                    return Err(Flow::Continue(1));
+                    return Err(if s.posix && !s.interactive {
+                        Flow::Exit(1)
+                    } else {
+                        Flow::Continue(1)
+                    });
                 }
                 s.assign(&name, &value);
                 Ok(Some(last))

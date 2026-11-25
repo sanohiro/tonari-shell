@@ -58,7 +58,7 @@ fn sourced(
     }
 }
 
-pub fn source_file(session: &mut Session, words: &[String], status: u8) -> Flow {
+pub fn source_file(session: &mut Session, words: &[String], status: u8, fatal: bool) -> Flow {
     let args = &words[1..];
     let args = if args.first().is_some_and(|s| s == "--") {
         &args[1..]
@@ -80,11 +80,23 @@ pub fn source_file(session: &mut Session, words: &[String], status: u8) -> Flow 
             }
         }
     }
+    if session.posix && words[0] == "." && !name.contains('/') && session.shopt.sourcepath {
+        eprintln!("tonari: .: {name}: file not found");
+        return if fatal {
+            Flow::Exit(1)
+        } else {
+            Flow::Continue(1)
+        };
+    }
     match open_script(Path::new(name)) {
         Ok(file) => sourced(session, file, Path::new(name), &args[1..], status),
         Err(e) => {
             eprintln!("tonari: source: {name}: {e}");
-            Flow::Continue(1)
+            if fatal {
+                Flow::Exit(1)
+            } else {
+                Flow::Continue(1)
+            }
         }
     }
 }

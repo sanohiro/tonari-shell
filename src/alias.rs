@@ -38,10 +38,15 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
         return 2;
     }
     let mut out = io::stdout().lock();
+    let prefix = if session.posix && !print_all {
+        ""
+    } else {
+        "alias "
+    };
     if (print_all || args.is_empty()) && !remove {
         if let Some(map) = &session.aliases.0 {
             for (name, value) in map.iter() {
-                if writeln!(out, "{}", declaration(name, value)).is_err() {
+                if writeln!(out, "{prefix}{name}='{}'", value.replace('\'', "'\\''")).is_err() {
                     return 1;
                 }
             }
@@ -68,7 +73,7 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
         if let Some(value) = session.aliases.get(arg) {
             if remove {
                 Rc::make_mut(session.aliases.0.as_mut().unwrap()).remove(arg);
-            } else if writeln!(out, "{}", declaration(arg, value)).is_err() {
+            } else if writeln!(out, "{prefix}{arg}='{}'", value.replace('\'', "'\\''")).is_err() {
                 return 1;
             }
         } else {

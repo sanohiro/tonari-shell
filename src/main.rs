@@ -53,7 +53,7 @@ fn listen_for_interrupts() -> io::Result<()> {
     let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
     action.sa_sigaction = interrupt as *const () as usize;
     unsafe { libc::sigemptyset(&mut action.sa_mask) };
-    for signal in [libc::SIGINT, libc::SIGQUIT] {
+    for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGTERM] {
         if unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) } < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -147,17 +147,28 @@ fn terminal_read(buf: &mut [u8], raw: bool) -> io::Result<usize> {
     }
 }
 
-fn read_terminal_line(source: &mut Vec<u8>) -> io::Result<bool> {
+fn read_terminal_line(source: &mut Vec<u8>, terminal: bool) -> io::Result<bool> {
+    let seekable = !terminal && unsafe { libc::lseek(0, 0, libc::SEEK_CUR) } >= 0;
     let mut buf = [0u8; 4096];
     loop {
-        let n = match terminal_read(&mut buf, false) {
+        let size = if terminal || seekable { buf.len() } else { 1 };
+        let n = match terminal_read(&mut buf[..size], false) {
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
             result => result?,
         };
         if n == 0 {
             return Ok(false);
         }
-        source.extend_from_slice(&buf[..n]);
+        let mut used = n;
+        if seekable && let Some(end) = memchr::memchr(b'\n', &buf[..n]) {
+            used = end + 1;
+            if used < n
+                && unsafe { libc::lseek(0, -((n - used) as libc::off_t), libc::SEEK_CUR) } < 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        source.extend_from_slice(&buf[..used]);
         if source.ends_with(b"\n") {
             return Ok(true);
         }
@@ -165,7 +176,7 @@ fn read_terminal_line(source: &mut Vec<u8>) -> io::Result<bool> {
 }
 
 fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Result<u8> {
-    session.jobs.init();
+    let terminal_input = io::stdin().is_terminal();
     session.initial_history = history::InitialJournal::snapshot(session).map(std::rc::Rc::new);
     let mut source = Vec::new();
     let mut history = history::History::default();
@@ -228,7 +239,7 @@ fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Resu
             stderr.write_all(prompt.as_bytes())?;
             stderr.flush()?;
             drop(stderr);
-            read_terminal_line(&mut source).map(Some)
+            read_terminal_line(&mut source, terminal_input).map(Some)
         };
         INPUT_DEADLINE.set(None);
         let more = match result {
@@ -351,6 +362,7 @@ fn shell_terminal() -> bool {
 static MAIN_STACK_ORIGIN: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
 
 fn main() -> ExitCode {
+    traps::enter_process();
     let marker = 0u8;
     MAIN_STACK_ORIGIN.get_or_init(|| std::ptr::from_ref(&marker).addr());
     invoke(std::env::args_os()).into()
@@ -417,6 +429,9 @@ fn run_invocation(
         return 1;
     }
     session.jobs.monitor = invocation.monitor.unwrap_or(session.interactive);
+    if session.jobs.monitor {
+        session.jobs.init();
+    }
     session.command_string = matches!(invocation.input, Input::Command(_));
     session.set_posix(invocation.posix);
     session.shopt.progcomp_alias = session.interactive;

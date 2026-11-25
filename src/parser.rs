@@ -396,7 +396,7 @@ impl Error {
     }
 }
 
-fn reserved(word: &str) -> bool {
+pub(crate) fn reserved(word: &str) -> bool {
     reserved_spelling(word).is_some()
 }
 
@@ -657,6 +657,7 @@ impl Reader {
                 }
                 return Ok(statements);
             }
+            self.expand_alias(true)?;
             if self.at_stop(stops) {
                 if (statements.is_empty() && !stops.contains(&";;"))
                     || condition != Condition::Always
@@ -665,9 +666,11 @@ impl Reader {
                 }
                 return Ok(statements);
             }
-            self.expand_alias(true)?;
             if self.peek().is_none() && condition == Condition::Always {
                 return Ok(statements);
+            }
+            if matches!(self.peek(), Some(Token::Newline)) {
+                continue;
             }
             let mut inverted = None;
             let mut timing = None;
@@ -736,6 +739,7 @@ impl Reader {
                 }
                 Some(Token::And) => Condition::Success,
                 Some(Token::Or) => Condition::Failure,
+                _ if self.at_stop(stops) => return Ok(statements),
                 _ => return Err(Error::Invalid("expected a command separator")),
             };
             self.tokens.pop_front();
