@@ -50,7 +50,7 @@ def summarize(root, output, runs):
     output.mkdir(parents=True, exist_ok=True)
     totals = {}
     expected_fixtures = None
-    groups = []
+    groups, differences = [], []
     for host in ("ubuntu-24.04", "macos-15"):
         files = sorted(root.glob(host + "-external-yash-*/samples.jsonl"))
         if len(files) != 8:
@@ -105,7 +105,7 @@ def summarize(root, output, runs):
             for label in labels:
                 seq = [series[label].get(n, ("ABSENT", None)) for n in range(runs)]
                 statuses[label] = "|".join(sorted({v[0] for v in seq}))
-                elapsed[label] = [round(v[1]/1000, 1) for v in seq if v[1] is not None]
+                elapsed[label] = [v[1] / 1000 for v in seq if v[1] is not None]
             t, b, p = (statuses[k] for k in labels)
             passed = "OK[PASSED]"
             if "|" in t or "|" in b:
@@ -120,6 +120,11 @@ def summarize(root, output, runs):
                 verdict = "only Bash passes"
             else:
                 verdict = "different non-pass"
+            for shell, status in statuses.items():
+                stats[shell + " stable passes"] += status == passed
+                stats[shell + " stable skips"] += status == "SKIPPED"
+                stats[shell + " has timeout"] += "TIMEOUT" in status
+                stats[shell + " has controller exit"] += "CONTROLLER_EXIT" in status
             stats[verdict] += 1
             fixture = key.split(":", 1)[0]
             by_fixture[fixture][verdict] += 1
@@ -137,10 +142,13 @@ def summarize(root, output, runs):
             inp = inputs.get(key)
             row += [hashlib.sha256(json.dumps([inp["argv"], inp["source"]]).encode()).hexdigest()[:16] if inp else ""]
             row += [failures[k].get(key, "") for k in labels]
-            row += [",".join(map(str, elapsed[k])) for k in labels]
+            row += [",".join(f"{v:.3f}" for v in elapsed[k]) for k in labels]
             stats["inputs saved"] += (inp is not None)
             stats["trace verdicts"] += bool(path)
             cases[host][key] = row
+            if t != b or verdict == "variable":
+                differences.append([host, key, verdict, t, b, failures["tonari"].get(key, ""),
+                                    failures["bash"].get(key, "")])
             if ids:
                 stats["traced"] += 1
             if t == b == passed and p != passed:
@@ -169,6 +177,11 @@ def summarize(root, output, runs):
         writer = csv.DictWriter(stream, fieldnames=list(groups[0]), delimiter="\t", lineterminator="\n")
         writer.writeheader()
         writer.writerows(groups)
+    with (output / "differences.tsv").open("w") as stream:
+        writer = csv.writer(stream, delimiter="\t", lineterminator="\n")
+        writer.writerow(["host", "upstream case", "comparison", "tonari", "bash",
+                         "tonari first-trial assertions missed", "bash first-trial assertions missed"])
+        writer.writerows(differences)
     with (output / "sites.tsv").open("w") as stream:
         writer = csv.writer(stream, delimiter="\t", lineterminator="\n")
         writer.writerow(["site ID", "function", "work inspected"])

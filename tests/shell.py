@@ -74,6 +74,11 @@ class ShellTests(unittest.TestCase):
                 proc = run(["-c", "command . ./missing; echo ok; : <./missing; echo bad"])
                 self.assertNotEqual(proc.returncode, 0)
                 self.assertEqual(proc.stdout, b"ok\n")
+                proc = run(["-c", "3</dev/null >&3"])
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"", b""))
+                if binary == TONARI:
+                    proc = run(["-c", 'unset v\n<<EOF\n${v=inner}\nEOF\necho "${v-unset}"'])
+                    self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"unset\n", b""))
                 self.assertNotEqual(run(["-c", "echo >&-"]).returncode, 0)
                 self.assertEqual(run(["-c", "kill -s PIPE $$; echo bad"]).returncode, -signal.SIGPIPE)
                 proc = run(["-c", "trap '' PIPE; \"$0\" -c 'kill -s PIPE $$; echo ok'"])

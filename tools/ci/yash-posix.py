@@ -55,7 +55,7 @@ def prepare(root):
     replace(controller, '    exec_testee "$@" <"$in_file"', '    if [ -n "${TONARI_TRACE_DIR-}" ]; then '
             'export TONARI_CASE_TRACE="$TONARI_TRACE_DIR/$test_lineno"; fi\n    exec_testee "$@" <"$in_file"')
     replace(controller, '    chmod u+r "$in_file"', '    chmod u+r "$in_file"\n'
-            '    if ! "$remove_work_dir"; then for arg do printf \'%s\\0\' "$arg"; done >"../.yash-argv/$test_lineno"; fi')
+            '    if ! "$remove_work_dir"; then (umask 077; for arg do printf \'%s\\0\' "$arg"; done >"../.yash-argv/$test_lineno"); fi')
     replace(controller, "    log_stdout START\n    set +e",
             "    log_stdout START\n    set +e\n    times __test_begin")
     replace(controller, '    actual_exit_status="$?"\n', '    actual_exit_status="$?"\n    times __test_end\n')
@@ -253,6 +253,12 @@ def main():
             if args.trace_shell:
                 directory = out / ("paths-" + fixture)
                 directory.mkdir(exist_ok=True)
+                # Some fixtures set a restrictive umask before starting the
+                # shell. Precreate the diagnostic sinks outside its work tree.
+                for key in rows:
+                    source, line = key.split(":", 2)[:2]
+                    if source == fixture and line.isdecimal():
+                        (directory / line).touch(mode=0o600)
                 subject.unlink()
                 subject.symlink_to(args.trace_shell.resolve())
                 trace, _, _ = measure(tests, subject, fixture, dict(env, TONARI_TRACE_DIR=str(directory)),
@@ -260,7 +266,11 @@ def main():
                 with (out / "paths.jsonl").open("a") as path_report:
                     for key, (verdict, _) in trace.items():
                         path = directory / key.split(":", 2)[1]
-                        ids = sorted(set(path.read_bytes())) if path.is_file() else []
+                        if path.is_file():
+                            path.chmod(0o600)
+                            ids = sorted(set(path.read_bytes()))
+                        else:
+                            ids = []
                         path_report.write(json.dumps(dict(case=key, status=verdict, sites=ids)) + "\n")
                 shutil.rmtree(directory)
             print(f"{fixture} {len(obs)} cases", flush=True)
