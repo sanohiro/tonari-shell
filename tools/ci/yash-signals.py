@@ -17,16 +17,29 @@ def sample(sh, signame, directory):
                           env={"LC_ALL": "C", "HOME": str(directory), "PATH": "/usr/bin:/bin"},
                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                           stderr=subprocess.DEVNULL) as child:
-        marker = os.read(child.stdout.fileno(), 1)
-        after_marker = time.monotonic_ns()
-        code = child.wait(timeout=10)
-        end = time.monotonic_ns()
+        signal.alarm(12)
+        try:
+            marker = os.read(child.stdout.fileno(), 1)
+            after_marker = time.monotonic_ns()
+            # A timeout-based wait can add the interval between polls.
+            code = child.wait()
+            end = time.monotonic_ns()
+        except TimeoutError:
+            child.kill()
+            raise
+        finally:
+            signal.alarm(0)
     if marker != b"." or code != -getattr(signal, "SIG" + signame):
         raise ValueError(f"{sh}/{signame}: expected marker and signal, got {marker!r}, {code}")
     return [(after_marker - before)/1e6, (end-after_marker)/1e6]
 
 
+def alarm_timeout(signum, frame):
+    raise TimeoutError("signal delivery timed out")
+
+
 def run(directory, binaries):
+    signal.signal(signal.SIGALRM, alarm_timeout)
     shells = {}
     for label, binary in binaries.items():
         path = directory / label / "sh"
