@@ -30,7 +30,7 @@ def measure(script, shell, directory, compiler, log):
         interpreter = (directory / "config.status").read_bytes().splitlines()[0]
         if interpreter.removeprefix(b"#!").strip() != bytes(shell):
             raise ValueError(f"different config.status interpreter: {interpreter!r}")
-        checks = [v.replace(bytes(compiler), b"/usr/bin/cc") for v in result.stdout.splitlines()
+        checks = [v.replace(os.fsencode(compiler), b"/usr/bin/cc") for v in result.stdout.splitlines()
                   if v.startswith(b"checking ")]
         if len(checks) < 200 or result.stderr:
             raise ValueError(f"incomplete configure: {len(checks)} checks, {result.stderr!r}")
@@ -126,7 +126,8 @@ def main():
                     row, result = measure(probe if log else source.resolve(), link,
                                           root / "build", compiler if log else "/usr/bin/cc", log)
                     if witness is not None and result != witness:
-                        raise ValueError(f"{label} changed configure checks or config.h in {mode}")
+                        changed = [(a,b) for a,b in zip(witness[0], result[0]) if a != b]
+                        raise ValueError(f"{label} changed configure in {mode}: {changed[:3]}")
                     witness = result
                     row.update(trial=trial, shell=label, mode=mode, checks=len(result[0]))
                     runs.append(row)
