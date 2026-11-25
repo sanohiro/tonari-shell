@@ -493,6 +493,7 @@ impl Session {
             }
             let value = self.inherited_value(name);
             (value.is_some() || name == "OLDPWD").then(|| Variable {
+                inherited: Default::default(),
                 readonly: Self::builtin_readonly(name),
                 nameref: false,
                 integer: matches!(name, "PPID" | "EUID" | "UID"),

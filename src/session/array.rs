@@ -532,6 +532,7 @@ impl Session {
             self.variables.insert(
                 name.into(),
                 Variable {
+                    inherited: Default::default(),
                     readonly: false,
                     nameref: false,
                     integer: false,
@@ -561,6 +562,7 @@ impl Session {
             self.variables.insert(
                 name.into(),
                 Variable {
+                    inherited: Default::default(),
                     readonly: false,
                     nameref: false,
                     integer: false,

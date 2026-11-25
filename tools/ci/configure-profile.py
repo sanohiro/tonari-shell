@@ -72,6 +72,10 @@ def components(script, shells):
     ]
     with tempfile.TemporaryDirectory() as work:
         env = dict(PATH=os.environ["PATH"], HOME=work, LC_ALL="C")
+        script = Path(work) / "many-variables.sh"
+        bindings = "".join(f"configure_setting_{i}=local\n" for i in range(2000))
+        script.write_text(bindings + 'export RESULT=ok\nfor ((i=0; i<250; i++)); do "$1" || exit; done\necho "$RESULT"\n')
+        commands.append(("250 launches with 2,000 shell variables", [str(script), true]))
         for label, command in commands:
             times = {name: [] for name, _ in shells}
             expected = None

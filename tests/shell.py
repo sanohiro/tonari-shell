@@ -81,6 +81,21 @@ class ShellTests(unittest.TestCase):
                 self.assertEqual((run.returncode, run.stdout, run.stderr),
                                  (0, f"line-{line}\nend\n".encode(), b""))
 
+    def test_export_visibility_after_repeated_child_launches(self):
+        self.env["FROM_PARENT"] = "parent"
+        self.compare("""probe() { /bin/sh -c 'echo "${FROM_PARENT-missing}/${NEW_NAME-missing}"'; }
+probe
+export -n FROM_PARENT
+NEW_NAME=local
+probe; probe
+export FROM_PARENT=outer NEW_NAME=new
+inside() { local FROM_PARENT=inner; export -n NEW_NAME; probe; }
+inside
+probe
+export NEW_NAME
+unset FROM_PARENT
+probe""", 0, b"parent/missing\nmissing/missing\nmissing/missing\ninner/missing\nouter/missing\nmissing/new\n")
+
     def test_external_can_duplicate_inherited_log_descriptor(self):
         self.compare("""exec 5>log
 /bin/sh -c 'echo err >&2; echo out' >&5 2>&1

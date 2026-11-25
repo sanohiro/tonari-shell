@@ -41,6 +41,9 @@ impl CharacterLocale {
 
 #[derive(Clone, Default)]
 struct Variable {
+    // A binding keeps its name in saved scopes. The process environment is
+    // immutable until exec or entry into a new shell session.
+    inherited: std::cell::OnceCell<bool>,
     nameref: bool,
     readonly: bool,
     integer: bool,
@@ -668,6 +671,7 @@ impl Session {
         self.variables.insert(
             name.into(),
             Variable {
+                inherited: Default::default(),
                 readonly: false,
                 nameref: false,
                 integer: false,
@@ -836,6 +840,7 @@ impl Session {
             self.variables.insert(
                 name.clone(),
                 Variable {
+                    inherited: Default::default(),
                     readonly: false,
                     nameref: false,
                     integer: false,
@@ -888,7 +893,10 @@ impl Session {
                         _ => var.value.as_deref().map(Cow::Borrowed),
                     };
                     Some((name.as_str(), value))
-                } else if std::env::var_os(name).is_some() {
+                } else if *var
+                    .inherited
+                    .get_or_init(|| std::env::var_os(name).is_some())
+                {
                     Some((name.as_str(), None))
                 } else {
                     None
@@ -1051,6 +1059,7 @@ impl Session {
             self.variables.insert(
                 name.into(),
                 Variable {
+                    inherited: Default::default(),
                     nameref: false,
                     readonly,
                     integer,
@@ -1102,6 +1111,7 @@ impl Session {
                 &mut out,
                 &name,
                 &Variable {
+                    inherited: Default::default(),
                     readonly: false,
                     nameref: false,
                     integer: false,
@@ -1156,6 +1166,7 @@ impl Session {
         self.variables.insert(
             name.into(),
             Variable {
+                inherited: Default::default(),
                 readonly: false,
                 nameref: false,
                 integer: false,
@@ -1485,6 +1496,7 @@ impl Session {
             self.variables.insert(
                 "OLDPWD".into(),
                 Variable {
+                    inherited: Default::default(),
                     readonly: false,
                     nameref: false,
                     integer: false,
