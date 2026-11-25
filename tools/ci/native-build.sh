@@ -30,7 +30,7 @@ if [[ $SUITE == external-gnu-waits ]]; then
   git worktree add -q --detach "$observer" HEAD
   (cd "$observer"; git apply tools/ci/configure-waits.patch; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/observer")
 fi
-if [[ $SUITE == external-review-* || $SUITE == external-gnu-profile || $SUITE == parity* || $SUITE == probe || $SUITE == functions || $SUITE == throughput || $SUITE == history || $SUITE == history-fields || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == rcfiles || $SUITE == tool-hooks || $SUITE == picker || $SUITE == budget* || $SUITE == inventory* ]]; then
+if [[ $SUITE == external-yash-* || $SUITE == external-review-* || $SUITE == external-gnu-profile || $SUITE == parity* || $SUITE == probe || $SUITE == functions || $SUITE == throughput || $SUITE == history || $SUITE == history-fields || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == rcfiles || $SUITE == tool-hooks || $SUITE == picker || $SUITE == budget* || $SUITE == inventory* ]]; then
   previous=$(git rev-parse --verify --end-of-options "${PREVIOUS_REVISION:-HEAD^}^{commit}")
   git worktree add -q --detach "$RUNNER_TEMP/base" "$previous"
   (cd "$RUNNER_TEMP/base"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/baseline")
