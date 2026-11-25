@@ -55,7 +55,7 @@ def prepare(root):
     replace(controller, '    exec_testee "$@" <"$in_file"', '    if [ -n "${TONARI_TRACE_DIR-}" ]; then '
             'export TONARI_CASE_TRACE="$TONARI_TRACE_DIR/$test_lineno"; fi\n    exec_testee "$@" <"$in_file"')
     replace(controller, '    chmod u+r "$in_file"', '    chmod u+r "$in_file"\n'
-            '    if ! "$remove_work_dir"; then for arg do printf \'%s\\0\' "$arg"; done >"$test_lineno.argv"; fi')
+            '    if ! "$remove_work_dir"; then for arg do printf \'%s\\0\' "$arg"; done >"../.yash-argv/$test_lineno"; fi')
     replace(controller, "    log_stdout START\n    set +e",
             "    log_stdout START\n    set +e\n    times __test_begin")
     replace(controller, '    actual_exit_status="$?"\n', '    actual_exit_status="$?"\n    times __test_end\n')
@@ -132,7 +132,7 @@ def attempt(tests, subject, fixture, environment, timeout, keep):
             status, key = match.groups()
             if status == "START":
                 if active is not None:
-                    raise ValueError(f"missing verdict for {active}")
+                    rows[active] = ("CONTROLLER_EXIT", None)
                 active, begin, elapsed = key, None, None
             else:
                 if key in rows or (status != "SKIPPED" and (active != key or elapsed is None)):
@@ -203,6 +203,7 @@ def main():
     sources = [s for i, s in enumerate(sources) if i % count == shard and (not args.fixture or s in args.fixture)]
     if not sources:
         parser.error("empty fixture selection")
+    (out / "fixtures.json").write_text(json.dumps(sources) + "\n")
     shells = {"tonari": args.tonari.resolve(), "bash": args.bash.resolve()}
     if args.previous:
         shells["previous"] = args.previous.resolve()
@@ -223,6 +224,9 @@ def main():
                     subject.symlink_to(shells[label])
                     keep = label == "bash" and trial == 0
                     before = set(tests.glob("tmp.*")) if keep else set()
+                    argv_dir = tests / ".yash-argv"
+                    if keep:
+                        argv_dir.mkdir(exist_ok=True)
                     obs, wall, report = measure(tests, subject, fixture, env, args.timeout, keep)
                     if keep:
                         for directory in set(tests.glob("tmp.*")) - before:
@@ -230,12 +234,13 @@ def main():
                                 line = key.split(":", 2)[1]
                                 path = directory / (line + ".in")
                                 if path.is_file():
-                                    flags = path.with_suffix(".argv")
+                                    flags = argv_dir / line
                                     arguments = flags.read_bytes().split(b"\x00")[:-1] if flags.exists() else []
                                     inputs.write(json.dumps(dict(case=key, source=os.fsdecode(path.read_bytes()),
                                                                  argv=[os.fsdecode(v) for v in arguments])) + "\n")
                             subprocess.run(["chmod", "-R", "u+rwX", directory], check=True)
                             shutil.rmtree(directory)
+                        shutil.rmtree(argv_dir)
                     records.write(json.dumps(dict(fixture=fixture, shell=label, trial=trial,
                                                   wall=wall, cases=obs)) + "\n")
                     records.flush()

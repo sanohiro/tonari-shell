@@ -79,6 +79,8 @@ pub struct Traps {
     handling_error: bool,
     handling_return: bool,
     interactive_hup: bool,
+    interactive_handlers: bool,
+    interactive_origin: bool,
     pub before_return: u8,
     implicit: BTreeMap<i32, libc::sigaction>,
     pub exit_status: Option<u8>,
@@ -187,6 +189,8 @@ impl Traps {
     }
 
     pub fn init_hangup(&mut self) -> io::Result<()> {
+        self.interactive_origin = true;
+        self.interactive_handlers = true;
         let mut old = action(libc::SIG_DFL);
         if unsafe { libc::sigaction(libc::SIGHUP, std::ptr::null(), &mut old) } < 0 {
             return Err(io::Error::last_os_error());
@@ -281,8 +285,17 @@ impl Traps {
             if unsafe { libc::sigaction(sig, std::ptr::null(), &mut original) } < 0 {
                 return Err(io::Error::last_os_error());
             }
-            if original.sa_sigaction == libc::SIG_IGN && !interactive {
-                return Ok(());
+            if original.sa_sigaction == libc::SIG_IGN {
+                if !interactive && !self.interactive_origin {
+                    return Ok(());
+                }
+                original = if self.interactive_handlers
+                    && matches!(sig, libc::SIGINT | libc::SIGQUIT | libc::SIGTERM)
+                {
+                    action(crate::interrupt as *const () as usize)
+                } else {
+                    action(libc::SIG_DFL)
+                };
             }
         }
         if real {
@@ -365,6 +378,15 @@ impl Traps {
     }
 
     pub fn after_fork(&mut self, errtrace: bool, functrace: bool) {
+        if self.interactive_handlers {
+            self.interactive_handlers = false;
+            crate::execute::reset_caught_signals(&[
+                libc::SIGINT,
+                libc::SIGQUIT,
+                libc::SIGTERM,
+                libc::SIGTSTP,
+            ]);
+        }
         if self.interactive_hup {
             self.interactive_hup = false;
             if !self.ignores(libc::SIGHUP) {
@@ -385,7 +407,11 @@ impl Traps {
         let old = std::mem::take(&mut self.entries);
         for (&sig, e) in &old {
             if self.keep_after_fork(sig, e, errtrace, functrace) {
-                self.entries.insert(sig, e.clone());
+                let mut child = e.clone();
+                if sig > 0 && sig < DEBUG && child.original.sa_sigaction != libc::SIG_IGN {
+                    child.original = action(libc::SIG_DFL);
+                }
+                self.entries.insert(sig, child);
             }
         }
         if self.inherited_listing.is_none() {

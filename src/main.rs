@@ -54,6 +54,13 @@ fn listen_for_interrupts() -> io::Result<()> {
     action.sa_sigaction = interrupt as *const () as usize;
     unsafe { libc::sigemptyset(&mut action.sa_mask) };
     for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGTERM] {
+        let mut old = std::mem::MaybeUninit::uninit();
+        if unsafe { libc::sigaction(signal, std::ptr::null(), old.as_mut_ptr()) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if unsafe { old.assume_init().sa_sigaction } == libc::SIG_IGN {
+            continue;
+        }
         if unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) } < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -466,6 +473,9 @@ fn run_invocation(
         }
         Flow::Break(_) | Flow::LoopContinue(_) => return 1,
     };
+    if invocation.as_sh && !session.posix {
+        session.set_posix(true);
+    }
     let flow = match invocation.input {
         Input::Command(text) => {
             input::text(&mut session, &text, initial, true, invocation.check, None)

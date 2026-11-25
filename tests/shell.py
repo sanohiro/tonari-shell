@@ -59,7 +59,7 @@ class ShellTests(unittest.TestCase):
         sh = self.cwd / "sh"
         env = self.env | {"BASH_ENV": str(self.cwd / "bashenv"), "ENV": str(self.cwd / "env")}
         (self.cwd / "bashenv").write_text("echo bashenv\n")
-        (self.cwd / "env").write_text("echo env\n")
+        (self.cwd / "env").write_text('shopt -oq posix; echo "env:$?"\n')
         for binary in (BASH, TONARI):
             sh.unlink(missing_ok=True)
             sh.symlink_to(binary)
@@ -70,7 +70,7 @@ class ShellTests(unittest.TestCase):
                 proc = run(["-c", "alias x='echo yes'\nx\nv=one :; z=two command :; echo \"$0/$v/${z-_}\"", "custom"])
                 self.assertEqual((proc.returncode, proc.stdout), (0, b"yes\ncustom/one/_\n"))
                 proc = run(["-i", "+m"], b"fi\necho good\nread -r line\nchild data\necho \"$line\"\n")
-                self.assertEqual((proc.returncode, proc.stdout), (0, b"env\ngood\nchild data\n"))
+                self.assertEqual((proc.returncode, proc.stdout), (0, b"env:1\ngood\nchild data\n"))
                 proc = run(["-c", "command . ./missing; echo ok; : <./missing; echo bad"])
                 self.assertNotEqual(proc.returncode, 0)
                 self.assertEqual(proc.stdout, b"ok\n")
@@ -78,6 +78,14 @@ class ShellTests(unittest.TestCase):
                 self.assertEqual(run(["-c", "kill -s PIPE $$; echo bad"]).returncode, -signal.SIGPIPE)
                 proc = run(["-c", "trap '' PIPE; \"$0\" -c 'kill -s PIPE $$; echo ok'"])
                 self.assertEqual((proc.returncode, proc.stdout), (0, b"ok\n"))
+
+                proc = run(["-i", "+m", "-c", "shopt -oq posix"])
+                self.assertEqual((proc.returncode, proc.stdout), (0, b"env:1\n"))
+                proc = subprocess.run([str(sh), "-i", "+m", "-c",
+                                       "trap - USR1; kill -s USR1 $$; echo bad"], env=env,
+                                      preexec_fn=lambda: signal.signal(signal.SIGUSR1, signal.SIG_IGN),
+                                      stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
+                self.assertEqual((proc.returncode, proc.stdout), (-signal.SIGUSR1, b"env:1\n"))
 
     def test_repeated_function_definition_and_positional_frame(self):
         self.compare('set -- outer; f() { shift; printf "%s/%s/%s\\n" "$#" "$1" "${!#}"; }; '

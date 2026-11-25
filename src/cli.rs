@@ -61,7 +61,7 @@ pub fn parse(
         name.as_bytes().rsplit(|b| *b == b'/').next(),
         Some(b"sh" | b"-sh")
     );
-    let mut posix = as_sh;
+    let mut posix = std::env::var_os("POSIXLY_CORRECT").is_some();
     let mut args = args.peekable();
     let mut interactive = false;
     let mut command = false;
