@@ -47,6 +47,21 @@ A diagnostic trace of four M1 Git Tabs saw four Git processes per Tab, including
 
 The Linux x86-64 mise directory-entry sample had a 6.46 ms median and 108.50 ms p95 for Tonari, and a 6.92 ms median and 119.12 ms p95 for Bash. A separate native run gave 4.87 / 5.19 ms for Tonari and 5.02 / 5.43 ms for Bash. The long tail did not reproduce in both runs. [Independent run](https://github.com/sanohiro/tonari-shell/actions/runs/45500299066)
 
+On M1, a follow-up ran the stock nvm 0.40.3 startup script with default Node v24.1.0 and no nvm-managed Node on the inherited PATH. The first command was `node --version`. The harness checked both the output and the selected executable path. Times below are median / p95 in milliseconds from the same 15 interleaved trials per shell.
+
+| Operation | Tonari | Bash 5.2.37 |
+|---|---:|---:|
+| Shell launch to first prompt | 205.54 / 211.41 | 271.93 / 287.68 |
+| Shell launch through first `node --version` and next prompt | 223.70 / 229.59 | 291.04 / 307.15 |
+| Subsequent `nvm use --silent` between installed versions | 139.56 / 146.78 | 161.97 / 170.74 |
+
+In a separate startup trace, PATH wrappers around common command-line utilities counted 56 invocations in each shell before the first prompt. These included eight each of `dirname`, `awk`, `tail` and `sed`, seven of `grep`, six of `tr`, five each of `head` and `uname`, and one of `which`. The timed trials ran the utilities directly.
+
+```sh
+PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin python3 tools/bench_tool_hooks.py \
+  "$tonari" "$bash" --case nvm --nvm-script "$NVM_DIR/nvm.sh" --nodes "$node24" "$node18"
+```
+
 7 ツールを同時に読み込む条件でも、キーを押して表示されるまでと、Enter を押して次のプロンプトに戻るまでを別々に計測しました。Git と gh は実際の Tab、fzf は候補が描画された時点と選択後に編集へ戻った時点を測っています。履歴の検証では選んだ行に追記して実行し、前のセッションの履歴も対象にしました。VS Code はインストール済みの統合スクリプトでコマンドと終了値を照合し、Mac の実アプリでも自動認識を確認しました。
 
 On macOS, resolve the integration script using `code --locate-shell-integration-path bash`. Supply paths to an installed bash-completion, Git's Bash completion and two installed Node prefixes. The Linux runner downloads the pinned inputs and verifies their digests. [Fixture setup](../tools/ci/tool-hooks.sh)

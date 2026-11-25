@@ -2,6 +2,10 @@
 
 ## 2026-11-25 · Everyday shell integrations / 常用ツールを組み合わせた端末
 
+For nvm, time a fresh terminal through the first successful `node --version` and the return of the prompt. Resolve `command -v node` after that measurement to verify that the chosen version came from the test installation. On M1 the unmodified startup script launched dozens of small utilities while selecting the default version. This workload exercises both the script evaluator and pipelines that launch external programs. [Measurements and reproduction](benchmarks.md#tool-hooks)
+
+nvm は通常どおり起動時に読み込み、最初の `node --version` が正しい版を返して次の入力ができるまでを通して測ります。計測後に Node のパスも照合します。M1 では、デフォルトの版を選ぶ間に `awk` や `sed` などの外部コマンドを繰り返し起動しており、スクリプト評価とプロセス起動の両方が実際の待ち時間に含まれます。[実測と再現方法](benchmarks.md#tool-hooks)
+
 Test the keystroke, edit its result and execute the edited line. The previous release could load fzf and run Ctrl-T, but its Ctrl-R widget could not enumerate history. Bash clamps a negative `fc` offset to the oldest entry. Its line editor leaves the cursor at the end of a replacement if the binding supplies a non-decimal position. fzf relies on both behaviors. Read the startup journal suffix on the first history builtin, stream `fc` output in blocks, and trim large history imports in batches. An incomplete journal entry remains available to the next incremental import. The terminal test covers both a running session and 100,000 saved entries. [Terminal benchmark](../tools/bench_tool_hooks.py)
 
 fzf は Ctrl-T が使えていても、Ctrl-R の一覧が空になり、選択後の追加入力が行頭に入ることがありました。Bash と同じく大きな負の履歴番号を先頭に丸め、入力行を置き換えた後のカーソル位置を保持します。履歴は起動時にファイルの範囲を記録し、組み込みが参照した時点で `HISTSIZE` に収まる末尾を読みます。明示的な履歴読み込みでは上限をまとめて適用し、`erasedups` の時は各行の削除順を維持します。[実測と再現方法](benchmarks.md#tool-hooks)

@@ -61,9 +61,9 @@ def sample(shell, root, rc, env, tool, versions, saved):
 
     try:
         with os.fdopen(read, "rb") as clock:
-            start, = struct.unpack("Q", clock.read(8))
+            shell_start, = struct.unpack("Q", clock.read(8))
         first = read_until(fd, PROMPT)
-        record("first prompt", start)
+        record("first prompt", shell_start)
         if tool in ("vscode", "combined"):
             if not all(k in first for k in (b"633;P;HasRichCommandDetection=True", b"633;A\x07")):
                 raise ValueError(f"missing VS Code prompt markers: {first!r}")
@@ -104,7 +104,10 @@ def sample(shell, root, rc, env, tool, versions, saved):
                 record("first Tab" if i == 0 else "repeat Tab", start)
                 command(b"\x15:")
         elif tool == "nvm":
-            command(b'printf "<%s>\\n" "$(node --version)"', b"<" + versions[0].encode() + b">\r\n")
+            command(b"node --version", versions[0].encode() + b"\r\n")
+            record("shell start through first node --version and next prompt", shell_start)
+            command(b'printf "<%s>\\n" "$(command -v node)"',
+                    b"<" + os.fsencode(root / "nvm/versions/node" / versions[0] / "bin/node") + b">\r\n")
             for version in (versions[1], versions[0]):
                 timed("switch installed Node", b"nvm use --silent " + version.encode())
                 command(b'printf "<%s>\\n" "$(node --version)"', b"<" + version.encode() + b">\r\n")

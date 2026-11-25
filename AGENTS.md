@@ -14,6 +14,10 @@ Prefer responsive typing, history and completion, fast startup and lower executi
 
 Use the reference-derived [feature audit](docs/compatibility.md) when changing shell behavior. Add a direct Bash witness for new functionality, including its observable result. Compare release timing on the same machine and filesystem after the behavior matches. Aim for 1/2 of Bash time, with 2/3 as the upper target for shell work. Accept parity for very short operations and workloads whose elapsed time is dominated by the same OS operation or wait. Use absolute times and run-to-run variation to judge close results. Where a short operation repeats in a script, also measure its throughput in a running shell. Record outstanding differences and target misses in the matrix. Before updating the performance baseline, run the previous-snapshot comparison and inspect newly failing names and modes.
 
+When measuring a tool that ships Bash scripts, run its unmodified integration with the same settings in both shells. Time the operation someone actually waits for and verify its result. If initialization can be deferred, report startup and first use separately so the cost of the first command stays visible.
+
+Bash スクリプトを使うツールは、配布されたスクリプトをそのまま両方のシェルで同じ設定で動かす。ユーザーが待つ操作を計測し、期待した結果が得られることも確認する。遅延読み込みを測る場合は、起動時間と初回操作の待ち時間をそれぞれ記録する。
+
 ## Required optimization pass for new or extended features / 機能追加・拡張時の高速化
 
 Before merging a new or extended feature, implement and measure at least one concrete optimization of its first working version, even if that version already meets the Bash target.
