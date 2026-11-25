@@ -1,8 +1,27 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+<a id="shell-modes"></a>
+
+## Bash by default, POSIX on request / 既定の Bash 互換動作と POSIX モード
+
+Tonari uses one executable. Starting it as `tonari` or through its private `libexec/tonari/bash` path selects Bash-compatible behavior by default, so interactive users and tools that request Bash get the interface they expect. Starting the same executable under the name `sh` selects the `sh` startup rules and enables POSIX mode after startup. Use `tonari --posix` to enable the mode from the start, or `set -o posix` to enable it in a running shell.
+
+普段の対話操作や Bash を指定するツールには、`tonari` または専用の `libexec/tonari/bash` を使います。既定は Bash 互換です。同じ実行ファイルを `sh` という名前で起動すると、`sh` 用の起動設定を読んでから POSIX モードに入ります。最初から明示するには `tonari --posix`、起動済みのシェルで切り替えるには `set -o posix` を使います。
+
+The distinction matters even for a one-line script. POSIX mode keeps a variable assignment made before the special builtin `:` in the current shell. In Bash mode the assignment lasts only for that command. 特殊組み込み `:` の前に置いた変数代入が次のコマンドまで残るかどうかは、スクリプトから観測できる違いです。
+
+```sh
+tonari         -c 'unset v; v=one :; echo "${v-unset}"'  # unset
+tonari --posix -c 'unset v; v=one :; echo "${v-unset}"'  # one
+```
+
+Share the implementation whenever both interfaces admit the same correct behavior. Fix a defect in that shared behavior for both modes, even when Bash exhibits the same defect. Keep a mode-specific rule only when a script can observe a difference that matters to Bash compatibility or POSIX semantics. Where POSIX leaves a choice, prefer the Bash behavior if it satisfies Tonari's documented guarantees. [Intentional differences](#intentional-differences)
+
+両モードで同じ正しい結果を返せる処理は共通に実装します。そこに不具合があれば、Bash でも同じ問題が起きる場合を含めて両方で直します。モードで処理を分けるのは、Bash 用と POSIX 用のスクリプトが必要とする動作を一つに揃えると、結果が変わる場合です。POSIX が実装に選択を認めている箇所では、Tonari 自身の仕様を満たす範囲で Bash の動作を優先します。
+
 ## POSIX sh invocation / sh 名での起動
 
-In POSIX mode Tonari installs a regular command's redirects before evaluating its prefix assignments. Ordinary Bash mode retains the Bash expansion order. `sh` モードでの意図した差と、上流の失敗・スキップの理由をケース別に記録しました。[Review of the 22 other verdicts](compatibility/yash-posix-followup/README.md#posix-verdict-review)
+For example, in `v=$(cat file) 3>file true`, POSIX requires the redirect to truncate or create `file` before the assignment reads it. In ordinary Bash mode the assignment can read the previous contents. Tonari implements each order because it changes the data a script reads. 同じファイルをリダイレクト先と代入の読み取り元にしたとき、POSIX モードでは空になったファイルを読み、通常モードでは以前の内容を読めます。この違いを両モードの回帰テストで確認しています。[POSIX case review](compatibility/yash-posix-followup/README.md#posix-verdict-review) · [Regression tests](../tests/shell.py)
 
 The follow-up compares the same named yash cases against GNU Bash on native Linux and macOS. It also exercises the distribution versions of Bash on Debian 13 and Ubuntu 26.04. Each pull request runs all 122 fixtures on Linux. A missing upstream case, or a Bash pass that Tonari fails or skips, fails the check. 各シェルの合格・不合格・スキップと、通常の Bash モードでの再監査結果を記録しています。[Current case results](compatibility/yash-posix-followup/README.md)
 

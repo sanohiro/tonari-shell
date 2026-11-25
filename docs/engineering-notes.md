@@ -2,6 +2,8 @@
 
 ## 2026-11-26 · Interpreting shared POSIX failures / 両シェルが失敗した試験の扱い
 
+When deciding whether a fix needs a mode check, run the same script through both entry points and identify the observable result each promises. The assignment and redirection examples in the compatibility guide exercise that decision on the same binary. モード分岐を追加する前に、同じ入力を通常起動と POSIX モードに渡し、どの出力・状態・副作用を守るために分けるのかを確認します。両方の仕様を満たす修正は共通の実行経路に入れます。[Mode selection and bug-fix policy / モード選択と不具合修正の方針](compatibility.md#shell-modes)
+
 A Bash-passing gate catches compatibility regressions. For a shared failure, check the shell specification and read the upstream assertion and its preconditions. The simple-command fixture opened an output file and used it inside a prefix assignment on the same command. POSIX requires the redirect to run first for a regular command. Tests now exercise file and descriptor lifetimes across functions, external commands, pipelines, background jobs and failed opens. 同じ失敗を Bash 互換として見過ごすと、先に作るはずのファイルが読めず、失敗時にも代入側が別のファイルを書いてしまいます。通常の Bash モードと POSIX モードの両方を検証します。[Case review](compatibility/yash-posix-followup/README.md) · [Execution tests](../tests/shell.py)
 
 On Darwin, a temporary directory can inherit a group outside the user's memberships. Verify the mode with stat after setting a set-group-ID test fixture. 実機で `wheel` と `staff` の親ディレクトリに同じ条件を作ると、前者だけ setgid ビットが消えました。シェルのファイル判定と試験データの準備を個別に検証できます。[Observed fixture results](compatibility/yash-posix-followup/remaining-verdicts.tsv)
