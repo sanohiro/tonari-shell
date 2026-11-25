@@ -292,6 +292,10 @@ done
     "here-string-builtin-read": eval_loop('IFS= read -r value <<<"$text"',
                                           '[[ $value == "$text" ]] && echo ok', "ok",
                                           setup="printf -v text '%4095s' x", count=120),
+    "capture-positional-program": eval_loop('value=$("$1" ok)', 'echo "$value"', "ok",
+                                            setup="set -- /usr/bin/printf", count=96),
+    "capture-scalar-program": eval_loop('value=$("$tool" ok)', 'echo "$value"', "ok",
+                                        setup="tool=/usr/bin/printf", count=96),
     "printf-list-count": eval_loop(
         r"""value=$(printf 'xy%n' n; printf '%s' "$n")""",
         'echo "$value:$n"', "xy2:parent", setup="n=parent", count=100,

@@ -84,6 +84,10 @@ impl Session {
                 if !is_function_name(name) || !value.starts_with("() {") {
                     continue;
                 }
+                if name.contains('/') {
+                    eprintln!("tonari: error importing function definition for `{name}'");
+                    continue;
+                }
                 let key = format!("BASH_FUNC_{name}%%");
                 self.function_environment.insert(key.clone(), None);
                 let Ok(mut parsed) = parse_final(&format!("{name} {value}")) else {

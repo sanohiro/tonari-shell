@@ -1025,6 +1025,11 @@ impl Session {
                 }
             } else {
                 for name in &args[i..] {
+                    if !remove && name.contains('/') && self.functions.contains_key(name) {
+                        eprintln!("tonari: export: {name}: cannot export");
+                        status = 1;
+                        continue;
+                    }
                     if let Err(e) = self.export_function(name, !remove) {
                         eprintln!("tonari: export: {name}: {e}");
                         status = 1;

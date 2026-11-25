@@ -145,7 +145,7 @@ pub(crate) fn is_function_name(name: &str) -> bool {
     !name.is_empty()
         && name
             .chars()
-            .all(|c| c.is_alphanumeric() || "_-.+:@".contains(c))
+            .all(|c| c.is_alphanumeric() || "_-.+:@/".contains(c))
 }
 pub(crate) use here_doc::{HereDocHint, expansion_string};
 use lexer::{LexWord, Token, lex};

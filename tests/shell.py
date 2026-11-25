@@ -103,6 +103,27 @@ v=$(printf '%%n:%s\n' ok; printf end); echo "$v:$n" """,
                      'rm a/tool; echo "$(tool)"; hash -p b/tool tool; echo "$(tool)"',
                      0, b"a\n1\nb\nb\n", minimum=4)
 
+    def test_capture_quoted_executable_preserves_path_status_and_function_scope(self):
+        (self.cwd / "my shell").symlink_to("/bin/sh")
+        self.compare(r"""tool="$PWD/my shell"; set -- "$tool"
+a=$("$1" -c 'printf "%s\n" "$1"; exit 19' sh 'two words'); echo "$?:$a"
+b=$("$tool" -c 'printf scalar; exit 7'); echo "$?:$b"
+function /bin/echo { marker=inner; printf override; }
+marker=outer; tool=/bin/echo; b=$("$tool" ignored); echo "$b:$marker"
+export -f /bin/echo 2>/dev/null; echo "export:$?"
+command /bin/echo real
+set -- /usr/bin/printf; tool=/usr/bin/printf
+x=$("$1" '%s' "$BASH_SUBSHELL"); echo "$x"
+y=$("$tool" '%s' "$(printf nested)"); echo "$y" """,
+                     0, b"19:two words\n7:scalar\noverride:outer\nexport:1\nreal\n1\nnested\n")
+        for shell in self.shells_for(minimum=4):
+            proc = subprocess.run([shell, "-c",
+                                   'set -a; /bin/echo() { printf override; }; '
+                                   '"$1" -c "/bin/echo child"', "sh", shell],
+                                  env=self.env, cwd=self.cwd, capture_output=True, timeout=8)
+            self.assertEqual((proc.returncode, proc.stdout), (0, b"child\n"))
+            self.assertIn(b"error importing function definition", proc.stderr)
+
     def test_large_script_read_ahead_preserves_execution_boundaries(self):
         script = self.cwd / "large.sh"
         prefix = "# a comment\n" * 12000 + "if true; then\n  echo before\nfi\n"

@@ -318,6 +318,33 @@ fn can_elide_child(session: &Session) -> bool {
         && !session.traps.in_action()
 }
 
+fn capture_program<'a>(word: &'a parser::Word, session: &'a Session) -> Option<&'a str> {
+    use crate::word::{Part, Word, is_identifier};
+    if let Some(name) = word.as_literal() {
+        return Some(name);
+    }
+    let Word::Expanded(parts) = word else {
+        return None;
+    };
+    let [Part::Parameter { name, quoted: true }] = parts.as_slice() else {
+        return None;
+    };
+    if !can_elide_child(session) {
+        return None;
+    }
+    // A quoted stored pathname supplies exactly one word. Preserve resolution
+    // of function overrides and the ordinary subshell for dynamic shell state.
+    let path = if name.starts_with(|c: char| c.is_ascii_digit()) {
+        let index = name.parse::<usize>().ok()?.checked_sub(1)?;
+        session.positional.as_slice().get(index)?
+    } else if is_identifier(name) && !matches!(name.as_str(), "_" | "BASH_COMMAND" | "LINENO") {
+        session.stored_scalar(name)?
+    } else {
+        return None;
+    };
+    path.starts_with('/').then_some(path)
+}
+
 // Only a single output/status builtin with inert operands can be evaluated
 // inside another substitution without observing the missing subshell scope.
 fn nested_output(word: &parser::Word, session: &Session, depth: usize) -> bool {
@@ -379,7 +406,7 @@ fn capture_simple(
     }
     let command = |cmd: &parser::SimpleCommand<Word>| {
         let (first, args) = cmd.words.split_first()?;
-        let first = first.as_literal()?;
+        let first = capture_program(first, session)?;
         let (program, args) = if matches!(first, "command" | "builtin") {
             let (target, args) = args.split_first()?;
             let target = target.as_literal()?;
@@ -525,11 +552,11 @@ fn capture_simple(
         } else {
             &cmd.words[..]
         };
-        let name = words[0].as_literal().unwrap();
-        if name == "jobs" {
+        let name = words[0].as_literal();
+        if name == Some("jobs") {
             return Some(Ok((String::new(), 0)));
         }
-        if !matches!(name, "echo" | "printf" | ":" | "true" | "false") {
+        if !matches!(name, Some("echo" | "printf" | ":" | "true" | "false")) {
             return Some(crate::execute::capture_external(
                 cmd.clone(),
                 session,
@@ -543,7 +570,7 @@ fn capture_simple(
         for arg in &words[1..] {
             env.append_fields(arg.clone(), &mut fields).ok()?;
         }
-        code = match name {
+        code = match name.unwrap() {
             "echo" => {
                 crate::builtins::echo_into(&fields, &mut output);
                 0

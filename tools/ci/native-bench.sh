@@ -222,7 +222,8 @@ case "$SUITE" in
       --case builtin-output --case builtin-output-long --case external --case external-env --case pipeline --case external-substitutions \
       --case merged-pipeline --case merged-pipeline-redirect --case redirect-stderr --case background-subshell-wait \
       --case printf-list-newline --case printf-list-count \
-      --case heredoc-external-file --case here-string-capture --case here-string-builtin-read ;;
+      --case heredoc-external-file --case here-string-capture --case here-string-builtin-read \
+      --case capture-positional-program --case capture-scalar-program ;;
   foreground)
     run foreground python3 tests/compat/foreground.py "$current" "$ref" ;;
   history-windows)
