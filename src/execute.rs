@@ -1821,6 +1821,9 @@ fn prepare(
                     };
                     old.wrapping_add(exp.arithmetic(&value)?).to_string()
                 } else if append {
+                    if direct_assignment && exp.session.append_plain_scalar(&key, &value) {
+                        continue;
+                    }
                     exp.lookup(&key).unwrap_or_default() + &value
                 } else {
                     value

@@ -73,6 +73,11 @@ impl Values {
 }
 
 pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String>, Error> {
+    if let Some((base, _, _)) = name.strip_prefix('#').and_then(array_elements_name)
+        && let Some(count) = env.session.stored_array_len(base)
+    {
+        return Ok(Some(count.to_string()));
+    }
     let expanded;
     let name = if let Some((base, index)) = crate::session::array::subscript(name) {
         if !matches!(index, "@" | "*") && env.session.is_associative(base.trim_start_matches('#')) {

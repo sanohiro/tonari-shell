@@ -81,6 +81,27 @@ class ShellTests(unittest.TestCase):
                 self.assertEqual((run.returncode, run.stdout, run.stderr),
                                  (0, f"line-{line}\nend\n".encode(), b""))
 
+    def test_named_tilde_in_arguments_and_assignments(self):
+        import pwd
+        home = os.fsencode(pwd.getpwnam("root").pw_dir)
+        self.compare("""path=~root/bin
+printf '<%s>' ~root "$path" '~root/bin' ~ro"ot" ~tonari_missing_user_0432/bin""",
+                     0, b"<" + home + b"><" + home + b"/bin><~root/bin><~root><~tonari_missing_user_0432/bin>")
+
+    def test_nested_output_with_redefined_builtins(self):
+        self.compare("""v=$(echo $(echo $(echo deep))); printf '[%s]' "$v"
+echo() { builtin echo "fn:$1"; }; v=$(echo $(echo value)); printf '[%s]' "$v"
+unset -f echo; f() { echo -en 'abc'; }; v=$(f); printf '[%s]' "$v"
+v=$(echo $(echo "$BASH_SUBSHELL")); printf '[%s]' "$v" """,
+                     0, b"[deep][fn:fn:value][abc][2]")
+
+    def test_append_and_array_count_through_references(self):
+        self.compare("""v=ab; v+=cd; f() { local v=local; v+=x; printf '<%s>' "$v"; }; f
+declare -n ref=v; ref+=ef; printf '<%s>' "$v"
+a=([2]="" [75]=tail); declare -n r=a; declare -A m=([one]=x [two]="")
+printf '<%s>' "${#a[@]}" "${#r[@]}" "${#m[*]}"; unset 'a[75]'; printf '<%s>' "${#r[@]}" """,
+                     0, b"<localx><abcdef><2><2><2><1>", minimum=5)
+
     def test_export_visibility_after_repeated_child_launches(self):
         self.env["FROM_PARENT"] = "parent"
         self.compare("""probe() { /bin/sh -c 'echo "${FROM_PARENT-missing}/${NEW_NAME-missing}"'; }

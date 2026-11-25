@@ -1,5 +1,6 @@
 """Paired measurements of upstream unixwin, fumiyas and luish workloads."""
 import argparse
+import json
 from collections import Counter
 import os
 from pathlib import Path
@@ -26,12 +27,14 @@ def run(argv, cwd, env, timeout):
         return (time.monotonic_ns() - start) / 1e6, proc.returncode, out, err
 
 
-def measure(label, commands, runs, check, internal_clock=False):
+def measure(label, commands, runs, check, internal_clock=False, *, samples=None, invalid=()):
     times = [[] for _ in commands]
     for trial in range(runs + 1):
         outputs = []
         for offset in range(len(commands)):
             index = (trial + offset) % len(commands)
+            if index in invalid:
+                continue
             try:
                 ms, rc, out, err = run(*commands[index])
             except subprocess.TimeoutExpired:
@@ -51,17 +54,68 @@ def measure(label, commands, runs, check, internal_clock=False):
             outputs.append(out)
             if trial:
                 times[index].append(ms)
-        if any(out != outputs[0] for out in outputs[1:]):
-            print(f"{label}\tOUTPUT DIFF: {outputs[0][-160:]!r} / {outputs[1][-160:]!r}", flush=True)
+        different = next((out for out in outputs[1:] if out != outputs[0]), None)
+        if different is not None:
+            print(f"{label}\tOUTPUT DIFF: {outputs[0][-160:]!r} / {different[-160:]!r}", flush=True)
             return
-    a, b, *previous = map(statistics.median, times)
-    extra = f"\t{previous[0]:.3f}" if previous else ""
+    if samples is not None:
+        samples[label] = times
+    medians = [statistics.median(t) if t else None for t in times]
+    a, b = medians[:2]
+    extra = "".join(f"\t{v:.3f}" if v is not None else "\tINVALID" for v in medians[2:])
     print(f"{label}\t{a:.3f}\t{b:.3f}\t{a / b:.3f}{extra}", flush=True)
 
 
 def checked(rc, out, err):
     if rc or err.strip():
         return f"rc={rc} stderr={err[:180]!r}"
+
+
+# Some upstream loops discard stdout, and their loop epilogue masks the
+# last command's status. Inspect the result after an untimed copy has run.
+UNIXWIN_OBSERVATIONS = {
+    "expand.tilde_home": 'printf "%s" "$x"',
+    "expand.tilde_user": 'printf "%s" "$x"',
+    "expand.nested_cmdsubst": 'printf "%s" "$x"',
+    "strings.append_assign": 'printf "%s" "$s"',
+    "strings.concat_subst": 'printf "%s" "$s"',
+    "arrays.append_loop": 'printf "<%s>" "${a[@]}"',
+    "arrays.assign_idx_mod": 'printf "<%s>" "${!a[@]}" "${a[@]}"',
+    "arrays.read_elem": 'printf "<%s>" "$x" "${a[@]}"',
+    "control.if_true": 'printf "%s" "$x"',
+    "control.if_false_else": 'printf "%s" "$x"',
+    "funcs.redefine": 'type -t g',
+    "subst.cmd_builtin_echo": 'printf "%s" "$x"',
+    "subst.cmd_true": 'printf "<%s>" "$x"',
+    "subst.cmd_ext_date": 'case $x in (""|*[!0-9]*) exit 1;; esac',
+    "redir.file_append": 'cat out.log',
+    "glob.star_txt@200": 'printf "%s" "$c"',
+    "glob.star_all@300": 'printf "%s" "$c"',
+    "glob.lad_star@1000": 'printf "%s" "$c"',
+    "jobs.bg_wait_one": 'jobs -pr',
+    "jobs.bg_many@20": 'jobs -pr',
+    "mixed.log_tally@20000": 'for k in "${!cnt[@]}"; do echo "$k ${cnt[$k]}"; done | sort',
+    "mixed.config_parse@2000": 'printf "<%s>" "$x" "$C_key500"',
+    "mixed.arg_parse@1000": 'printf "<%s>" "$v" "$o" "$c" "$t"',
+    "coproc.cat_roundtrip": 'printf "%s" "$x"',
+    "coproc.tr_roundtrip": 'printf "%s" "$x"',
+    "builtin.shift_one": 'printf "<%s>" "$@"',
+    "arith.expand_add": 'printf "%s" "$x"',
+    "arith.cmd_add": 'printf "%s" "$x"',
+    "data.read_mapfile@1000": 'printf "<%s>" "$x" "${a[0]}" "${a[999]}"',
+    "hotloop.composite_reported_2": 'printf "%s" "$i"',
+}
+
+
+def observe_unixwin(commands, observation):
+    results = []
+    for argv, cwd, env, timeout in commands:
+        script = Path(cwd) / "observe.sh"
+        script.write_bytes(Path(argv[1]).read_bytes() + observation.encode() + b"\n")
+        _, code, out, err = run([argv[0], str(script)], cwd, env, timeout)
+        results.append((code, out, err))
+    return [code == 0 and not err and (code, out, err) == results[1]
+            for code, out, err in results]
 
 
 def unixwin(args, root, env):
@@ -94,7 +148,18 @@ def unixwin(args, root, env):
                     return f"expected {case.iters} diagnostic lines, got {len(err.splitlines())}"
             elif err:
                 return f"stderr={err[:180]!r}"
-        measure(case.id, commands, args.runs, verify)
+        invalid = []
+        if observation := UNIXWIN_OBSERVATIONS.get(case.id):
+            valid = observe_unixwin(commands, observation)
+            if not all(valid[:2]):
+                print(f"{case.id}\tINVALID observed result", flush=True)
+                continue
+            if len(valid) > 3 and not valid[3]:
+                raise ValueError(f"Optimization level changed the result of {case.id}")
+            if len(valid) >= 3 and not valid[2]:
+                print(f"Previous output differs for {case.id}", file=sys.stderr)
+                invalid.append(2)
+        measure(case.id, commands, args.runs, verify, samples=args.samples, invalid=invalid)
 
 
 def gnu_hello(args, root, env):
@@ -105,7 +170,7 @@ def gnu_hello(args, root, env):
     for label, flags in (("configure syntax check", ["-n", configure]),
                          ("configure --help", [configure, "--help"])):
         commands = [([sh, *flags], root, {**env, "CONFIG_SHELL": sh}, 60) for sh in args.shells]
-        measure(label, commands, args.runs, checked)
+        measure(label, commands, args.runs, checked, samples=args.samples)
     for trial in range(args.runs + 1):
         order = list(range(len(shells)))
         offset = trial % len(shells)
@@ -133,11 +198,12 @@ def gnu_hello(args, root, env):
                                    stdout=subprocess.DEVNULL, check=True, timeout=180)
                     if subprocess.check_output([str(build / "hello")], env=build_env) != b"Hello, world!\n":
                         raise ValueError("unexpected hello output")
+    args.samples["GNU Hello configure"] = samples
     a, b = map(statistics.median, samples[:2])
     if args.previous:
         old = statistics.median(samples[2])
         print(f"Previous configure\t{old:.3f}\t{b:.3f}\t{old / b:.3f}")
-    print(f"GNU Hello configure\t{a:.3f}\t{b:.3f}\t{a / b:.3f}" + (f"\t{old:.3f}" if args.previous else ""))
+    print(f"GNU Hello configure\t{a:.3f}\t{b:.3f}\t{a / b:.3f}" + "".join(f"\t{statistics.median(values):.3f}" for values in samples[2:]))
     target = b * 2 / 3
     verdict = "PASS" if a <= target else "MISS"
     print(f"Full configure target: {verdict} ({a:.3f} ms, budget {target:.3f} ms)", file=sys.stderr)
@@ -151,17 +217,24 @@ def main():
     parser.add_argument("shells", nargs=2, type=Path, metavar="SHELL")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--previous", type=Path, help="previous Tonari build on the same host")
+    parser.add_argument("--opt3", type=Path, help="same source built with opt-level=3")
+    parser.add_argument("--raw", type=Path, help="write per-shell samples in command-line order")
     args = parser.parse_args()
+    args.samples = {}
+    if args.opt3 and not args.previous:
+        parser.error("--opt3 requires --previous")
     if args.runs < 1:
         parser.error("--runs must be positive")
     args.source = args.source.resolve()
     args.shells = [str(s.absolute()) for s in args.shells]
     if args.previous:
         args.shells.append(str(args.previous.absolute()))
+    if args.opt3:
+        args.shells.append(str(args.opt3.absolute()))
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         env = dict(HOME=directory, PATH=os.environ["PATH"], LC_ALL="C", TMPDIR=directory)
-        print("case\tTonari_ms\tBash_ms\tTonari/Bash" + ("\tPrevious_ms" if args.previous else ""), flush=True)
+        print("case\tTonari_ms\tBash_ms\tTonari/Bash" + ("\tPrevious_ms" if args.previous else "") + ("\tOpt3_ms" if args.opt3 else ""), flush=True)
         if args.suite == "gnu-hello":
             gnu_hello(args, root, env)
         elif args.suite == "unixwin":
@@ -169,7 +242,7 @@ def main():
         elif args.suite == "luish":
             for script in sorted((args.source / "bench/scripts").glob("*.sh")):
                 commands = [([sh, str(script), "1"], root, {**env, "SH": sh}, 90) for sh in args.shells]
-                measure(script.stem, commands, args.runs, checked)
+                measure(script.stem, commands, args.runs, checked, samples=args.samples)
         else:
             for line in args.source.read_text().splitlines():
                 if line.startswith("## "):
@@ -184,7 +257,10 @@ def main():
                         line = line.replace("/bin/true", true)
                     code = "TIMEFORMAT='wall %3R'; " + line
                     commands = [([sh, "-c", code], root, env, 180) for sh in args.shells]
-                    measure(label, commands, args.runs, checked, internal_clock=True)
+                    measure(label, commands, args.runs, checked, internal_clock=True, samples=args.samples)
+
+    if args.raw:
+        args.raw.write_text(json.dumps(dict(shells=args.shells, milliseconds=args.samples)) + "\n")
 
 
 if __name__ == "__main__":

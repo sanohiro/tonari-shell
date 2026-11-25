@@ -333,6 +333,18 @@ impl Session {
         names
     }
 
+    pub(crate) fn stored_array_len(&self, name: &str) -> Option<usize> {
+        if name == "PIPESTATUS" {
+            return None;
+        }
+        match self.variables.get(name)?.elements.as_deref()? {
+            Elements::Dense(values) => Some(values.len()),
+            Elements::Sparse(values) => Some(values.len()),
+            Elements::Records(records) => Some(records.ends.len()),
+            Elements::Associative(map) => Some(map.len()),
+        }
+    }
+
     pub fn append_indexed_fields(&self, name: &str, fields: &mut Vec<String>) -> bool {
         if name == "PIPESTATUS" {
             return false;

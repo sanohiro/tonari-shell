@@ -3,6 +3,7 @@ set -euo pipefail
 suite=$1 tonari=$2 bash_ref=$3
 compare=()
 if [[ -n ${4:-} ]]; then compare=(--previous "$4"); fi
+if [[ -n ${5:-} ]]; then compare+=(--opt3 "$5" --raw "$PWD/results/external-raw.json"); fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 case "$suite" in
@@ -44,6 +45,7 @@ case "$suite" in
       ln -s "$tonari" "$work/bin/tonari"
       ln -s "$bash_ref" "$work/bin/bash-ref"
       if [[ -n ${4:-} ]]; then ln -s "$4" "$work/bin/previous"; fi
+      if [[ -n ${5:-} ]]; then ln -s "$5" "$work/bin/opt3"; fi
       # The upstream controller signals its own process group to release its workers.
       python3 - "$work" <<'PY'
 import os, pathlib, subprocess, sys
@@ -52,6 +54,8 @@ env = dict(PATH=str(w/'bin') + os.pathsep + os.environ['PATH'], HOME=str(w/'home
 orders = ['tonari,bash-ref']
 if (w/'bin/previous').exists():
     orders = ['tonari,bash-ref,previous', 'previous,bash-ref,tonari']
+if (w/'bin/opt3').exists():
+    orders = ['tonari,bash-ref,previous,opt3', 'opt3,previous,bash-ref,tonari']
 for names in orders:
     print('Shell order ' + names, flush=True)
     subprocess.run(['./shellbench', '-s', names, '-w', '1', '-t', '1',

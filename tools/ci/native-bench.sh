@@ -129,7 +129,7 @@ case "$SUITE" in
     compare=()
     if [[ $suite == review-* ]]; then
       suite=${suite#review-}
-      compare=("$bin/baseline")
+      compare=("$bin/baseline" "$bin/opt-3")
     fi
     if [[ $suite == fumiyas ]] && ! command -v zsh >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y zsh; fi
     if [[ $suite == unixwin && $RUNNER_OS == macOS ]] && ! command -v stdbuf >/dev/null; then

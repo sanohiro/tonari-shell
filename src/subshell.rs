@@ -270,6 +270,16 @@ fn wrapped_capture(
         ));
     }
 
+    if matches!(path, "echo" | ":" | "true" | "false")
+        && !session.functions.contains_key(path)
+        && !session.disabled_builtins.contains(path)
+        && !session.traps.has_explicit_traps()
+        && cmd.words[1..].iter().all(|arg| arg.as_literal().is_some())
+    {
+        let body = function.definition.clone();
+        return capture_simple(session, body.body.statements(), last);
+    }
+
     let words = match path {
         "builtin"
             if !session.functions.contains_key("builtin")
@@ -297,6 +307,33 @@ fn wrapped_capture(
     let mut out = Vec::new();
     let status = crate::session::printf::run(session, &args, Some(&mut out));
     Some(captured_output(out, status))
+}
+
+// Only a single output/status builtin with inert operands can be evaluated
+// inside another substitution without observing the missing subshell scope.
+fn nested_output(word: &parser::Word, session: &Session, depth: usize) -> bool {
+    use crate::word::{Part, Word};
+    match word {
+        Word::Literal(_) => true,
+        Word::Expanded(parts) => parts.iter().all(|part| match part {
+            Part::Text(_) => true,
+            Part::Substitution { body, .. } if depth < 8 => {
+                sole_plain_command(body).is_some_and(|cmd| {
+                    cmd.words.split_first().is_some_and(|(program, args)| {
+                        program.as_literal().is_some_and(|name| {
+                            matches!(name, "echo" | ":" | "true" | "false")
+                                && !session.functions.contains_key(name)
+                                && !session.disabled_builtins.contains(name)
+                        }) && args
+                            .iter()
+                            .all(|arg| nested_output(arg, session, depth + 1))
+                    })
+                })
+            }
+            _ => false,
+        }),
+        Word::Declaration(_) => false,
+    }
 }
 
 // Validate the whole list before executing any builtin. A later function,
@@ -416,7 +453,9 @@ fn capture_simple(
             }),
             Word::Declaration(_) => false,
         };
-        if !args.iter().all(safe_word) {
+        if !args.iter().all(|arg| {
+            safe_word(arg) || !session.traps.has_explicit_traps() && nested_output(arg, session, 0)
+        }) {
             return None;
         }
         let safe = match cmd.redirects.as_slice() {

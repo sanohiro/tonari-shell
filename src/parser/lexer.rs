@@ -981,7 +981,12 @@ pub(super) fn lex(
                         .find(|c| c == '/' || separator(c))
                         .unwrap_or(chars.as_str().len());
                     let suffix = &chars.as_str()[..length];
-                    if matches!(suffix, "" | "+" | "-") {
+                    // Only consume a complete unquoted prefix. Quotes, escapes and
+                    // expansions inside a login name must go through the word reader.
+                    if suffix
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
+                    {
                         word.part(Part::Tilde(format!("~{suffix}")));
                         chars = chars.as_str()[length..].chars();
                     } else {

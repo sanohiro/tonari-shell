@@ -35,6 +35,9 @@ if [[ $SUITE == external-review-* || $SUITE == external-gnu-profile || $SUITE ==
   git worktree add -q --detach "$RUNNER_TEMP/base" "$previous"
   (cd "$RUNNER_TEMP/base"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/baseline")
 fi
+if [[ $SUITE == external-review-* ]]; then
+  cp "$(CARGO_PROFILE_RELEASE_OPT_LEVEL=3 tools/build-release.sh)" "$RUNNER_TEMP/bin/opt-3"
+fi
 if [[ $SUITE == budget* || $SUITE == inventory* ]]; then
   for level in s 3; do
     cp "$(CARGO_PROFILE_RELEASE_OPT_LEVEL=$level tools/build-release.sh)" "$RUNNER_TEMP/bin/opt-$level"

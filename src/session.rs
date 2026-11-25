@@ -624,6 +624,24 @@ impl Session {
         self.assign_value(name, Cow::Borrowed(value));
     }
 
+    // The caller has resolved references and checked readonly and integer
+    // attributes. Special variables still need their regular assignment hooks.
+    pub(crate) fn append_plain_scalar(&mut self, name: &str, suffix: &str) -> bool {
+        if matches!(name, "BASH_ARGV0" | "GLOBIGNORE" | "OPTIND" | "PATH") {
+            return false;
+        }
+        let Some(variable) = self.variables.get_mut(name) else {
+            return false;
+        };
+        if variable.elements.is_some() || variable.nameref || variable.value.is_none() {
+            return false;
+        }
+        variable.value.as_mut().unwrap().push_str(suffix);
+        variable.declared = true;
+        variable.exported |= self.allexport;
+        true
+    }
+
     pub(crate) fn assign_value(&mut self, name: &str, mut value: Cow<'_, str>) {
         match self.reference_name(name) {
             Ok(Cow::Owned(target)) => {

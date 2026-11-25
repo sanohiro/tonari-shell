@@ -652,9 +652,46 @@ fn tilde(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
         "~" => "HOME",
         "~+" => "PWD",
         "~-" => "OLDPWD",
-        _ => return s.to_owned(),
+        _ => return user_home(s.strip_prefix('~').unwrap_or(s)).unwrap_or_else(|| s.to_owned()),
     };
     lookup(key).unwrap_or_else(|| s.to_owned())
+}
+
+// Query the OS account database for each named expansion. Keep the common
+// result on the stack and retry only when a larger passwd entry needs space.
+fn user_home(login: &str) -> Option<String> {
+    let name = std::ffi::CString::new(login).ok()?;
+    let mut local = [0u8; 1024];
+    let mut large = Vec::new();
+    let mut buf = local.as_mut_slice();
+    loop {
+        let mut entry = std::mem::MaybeUninit::uninit();
+        let mut found = std::ptr::null_mut();
+        let status = unsafe {
+            libc::getpwnam_r(
+                name.as_ptr(),
+                entry.as_mut_ptr(),
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+                &mut found,
+            )
+        };
+        if status == libc::ERANGE {
+            let size = buf.len().checked_mul(2)?;
+            large.try_reserve(size - large.len()).ok()?;
+            large.resize(size, 0);
+            buf = &mut large;
+            continue;
+        }
+        if status != 0 || found.is_null() {
+            return None;
+        }
+        // getpwnam_r placed pw_dir in buf. Copy it before the buffer is dropped.
+        return unsafe { std::ffi::CStr::from_ptr((*found).pw_dir) }
+            .to_str()
+            .ok()
+            .map(str::to_owned);
+    }
 }
 
 fn ifs_separator(lookup: &dyn Fn(&str) -> Option<String>) -> String {

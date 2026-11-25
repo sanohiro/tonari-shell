@@ -14,6 +14,10 @@ pub(crate) struct Associative {
 }
 
 impl Associative {
+    pub(super) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
     pub(super) fn get(&self, key: &str) -> Option<&String> {
         self.entries.get(key).map(|(value, _)| value)
     }
