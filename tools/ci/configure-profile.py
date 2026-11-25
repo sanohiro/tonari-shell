@@ -92,6 +92,22 @@ def components(script, shells):
             print(label, {name: round(statistics.median(ms), 3) for name, ms in times.items()}, flush=True)
 
 
+def clocked_source(script, root):
+    clock = root / "clock"
+    subprocess.run(["/usr/bin/cc", "-O2", Path(__file__).with_name("configure-clock.c"),
+                    "-o", clock], check=True)
+    compiler = root / "cc"
+    compiler.symlink_to(clock)
+    copy = root / "source"
+    shutil.copytree(Path(script).parent, copy, symlinks=True)
+    probe = copy / "configure"
+    source = probe.read_text()
+    for prefix in ("ac_try='", "LC_CTYPE= ", "&& "):
+        source = source.replace(prefix + "./conftest", f"{prefix}{clock} ./conftest")
+    probe.write_text(source)
+    return probe, compiler
+
+
 if __name__ == "__main__":
     script, tonari, bash, output, *previous = sys.argv[1:]
     out = Path(output).resolve()
@@ -115,18 +131,7 @@ if __name__ == "__main__":
     # The ordinary phase traces and published medians use the original script.
     with tempfile.TemporaryDirectory() as work:
         root = Path(work)
-        clock = root / "clock"
-        subprocess.run(["/usr/bin/cc", "-O2", Path(__file__).with_name("configure-clock.c"),
-                        "-o", clock], check=True)
-        compiler = root / "cc"
-        compiler.symlink_to(clock)
-        copy = root / "source"
-        shutil.copytree(Path(script).parent, copy, symlinks=True)
-        probe = copy / "configure"
-        source = probe.read_text()
-        for prefix in ("ac_try='", "LC_CTYPE= ", "&& "):
-            source = source.replace(prefix + "./conftest", f"{prefix}{clock} ./conftest")
-        probe.write_text(source)
+        probe, compiler = clocked_source(script, root)
         for name, shell in [("bash", bash), ("tonari", tonari)]:
             if profile(probe, shell, out, f"{name}-clock", None, compiler) != header:
                 raise ValueError("timed compiler or probe changed config.h")

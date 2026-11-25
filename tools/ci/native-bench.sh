@@ -124,7 +124,7 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
-  external-paths-*|external-review-*|external-check-shellspec|external-shellspec|external-fumiyas|external-unixwin|external-luish|external-gnu-hello|external-gnu-profile|external-gnu-waits)
+  external-paths-*|external-review-*|external-check-shellspec|external-shellspec|external-fumiyas|external-unixwin|external-luish|external-gnu-hello|external-gnu-profile|external-gnu-waits|external-gnu-pairs)
     suite=${SUITE#external-}
     set --
     if [[ $suite == paths-* ]]; then

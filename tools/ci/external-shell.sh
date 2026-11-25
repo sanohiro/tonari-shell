@@ -25,12 +25,14 @@ trace_paths() {
   fi
 }
 case "$suite" in
-  gnu-hello|gnu-profile|gnu-waits)
+  gnu-hello|gnu-profile|gnu-waits|gnu-pairs)
     curl -fsSL --retry 3 https://ftp.gnu.org/gnu/hello/hello-2.12.2.tar.gz -o "$work/hello.tar.gz"
     echo "5a9a996dc292cc24dcf411cee87e92f6aae5b8d13bd9c6819b4c7a9dce0818ab  $work/hello.tar.gz" | shasum -a 256 -c - >&2
     tar -xzf "$work/hello.tar.gz" -C "$work"
     trace_paths "$work/hello-2.12.2"
-    if [[ $suite == gnu-waits ]]; then
+    if [[ $suite == gnu-pairs ]]; then
+      python3 tools/ci/configure-pairs.py "$work/hello-2.12.2/configure" "$tonari" "$bash_ref" "$PWD/results"
+    elif [[ $suite == gnu-waits ]]; then
       python3 tools/ci/configure-waits.py "$work/hello-2.12.2" "$tonari" "$bash_ref" "${tonari%/*}/observer" "$PWD/results"
     elif [[ $suite == gnu-profile ]]; then
       if [[ -z $previous && -n ${RUNNER_TEMP:-} && -x $RUNNER_TEMP/bin/baseline ]]; then
