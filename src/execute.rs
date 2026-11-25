@@ -168,19 +168,19 @@ fn protect_fds(actions: &[Action<'_>]) -> io::Result<()> {
     Ok(())
 }
 
-fn apply(actions: &[Action<'_>]) -> bool {
+fn apply(actions: &[Action<'_>], pipe_limit: usize) -> bool {
     if let Err(e) = protect_fds(actions) {
         eprintln!("tonari: redirection: {e}");
         return false;
     }
-    apply_protected(actions)
+    apply_protected(actions, pipe_limit)
 }
 
-fn apply_protected(actions: &[Action<'_>]) -> bool {
+fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> bool {
     for a in actions {
         match a {
             Action::HereInput(dest, body) => {
-                let redirected = here_input::open(body).and_then(|fd| {
+                let redirected = here_input::open(body, pipe_limit).and_then(|fd| {
                     if fd.as_raw_fd() != *dest {
                         return duplicate(fd.as_raw_fd(), *dest);
                     }
@@ -729,7 +729,7 @@ fn eval_builtin(
         Builtin::Read => {
             let here = match cmd.redirects.as_slice() {
                 [r] if matches!(r.target, Target::HereDoc { .. } | Target::HereString)
-                    && r.word.len() <= libc::PIPE_BUF =>
+                    && r.word.len() <= here_input::PIPE_LIMIT =>
                 {
                     Some((r.fd, r.word.as_bytes()))
                 }
@@ -1020,6 +1020,17 @@ impl<'a> PlainOutput<'a> {
     }
 }
 
+// A direct read knows the first record boundary from its redirect. Shell
+// functions, groups and persistent descriptors can have several consumers:
+// keep medium inputs seekable so buffered reads can return any unused bytes.
+fn here_pipe_limit(builtin: Option<Builtin>, cmd: &PreparedCommand) -> usize {
+    if builtin.is_none() || matches!(builtin, Some(Builtin::Read)) && cmd.redirects.len() == 1 {
+        here_input::PIPE_LIMIT
+    } else {
+        libc::PIPE_BUF
+    }
+}
+
 fn run_builtin(
     builtin: Builtin,
     cmd: &mut PreparedCommand,
@@ -1111,7 +1122,7 @@ fn run_builtin(
             }
         }
     }
-    let applied = apply_protected(actions);
+    let applied = apply_protected(actions, here_pipe_limit(Some(builtin), cmd));
     let old_input = session.stdin_redirected;
     if applied && actions.iter().any(|a| a.destination() == 0) {
         session.stdin_redirected = true;
@@ -1276,7 +1287,7 @@ fn start_raw(
             *command = crate::parser::Command::Group(std::mem::take(body));
         }
         session.stdin_redirected |= input.is_some();
-        let code = if apply(&setup) {
+        let code = if apply(&setup, libc::PIPE_BUF) {
             match run(vec![raw], last_status, true, session) {
                 Ok(Flow::Discard(s) | Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s)) => s,
                 Ok(Flow::Break(_) | Flow::LoopContinue(_)) => 0,
@@ -1339,8 +1350,9 @@ fn start(
         && let [r] = cmd.redirects.as_slice()
         && r.fd == 0
         && matches!(r.target, Target::HereDoc { .. } | Target::HereString)
-        && r.word.len() <= libc::PIPE_BUF
-        && let Ok(reader) = here_input::open(r.word.as_bytes()).and_then(private_fd)
+        && r.word.len() <= here_input::PIPE_LIMIT
+        && let Ok(reader) =
+            here_input::open(r.word.as_bytes(), here_input::PIPE_LIMIT).and_then(private_fd)
         && let Ok(pid) =
             External::new(cmd, session).spawn_with_dups(&[], Some(&reader), output.as_ref())
     {
@@ -1454,7 +1466,7 @@ fn start(
         enter_stage(session, cmd.compound.as_deref(), launch.background);
         session.stdin_redirected |= cmd.redirects.iter().any(|r| r.fd == 0);
         session.stdin_redirected |= input.is_some();
-        let code = if !apply(&setup) {
+        let code = if !apply(&setup, here_pipe_limit(builtin, cmd)) {
             1
         } else if let Some(external) = external.as_ref() {
             external.exec(None)
@@ -2129,13 +2141,15 @@ pub fn run_pipeline(
         }
         if replace && launch.group.is_none() {
             let executable = External::new(&cmd, session);
-            return Ok(Flow::Continue(if apply(&actions(&cmd)) {
-                executable.exec(
-                    (cmd.assignments.is_empty() && cmd.redirects.is_empty()).then_some(session),
-                )
-            } else {
-                1
-            }));
+            return Ok(Flow::Continue(
+                if apply(&actions(&cmd), here_input::PIPE_LIMIT) {
+                    executable.exec(
+                        (cmd.assignments.is_empty() && cmd.redirects.is_empty()).then_some(session),
+                    )
+                } else {
+                    1
+                },
+            ));
         }
         let status = match start(&mut cmd, None, None, None, last_status, session, launch)? {
             Stage::Child(pid) if launch.group.is_some() => {

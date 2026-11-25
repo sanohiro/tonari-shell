@@ -281,9 +281,9 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     let started = opts.timeout.map(|timeout| (Instant::now(), timeout));
     let mut input = Input::new(opts.fd);
     // Even an escaped delimiter can only postpone the end of a record. Read
-    // through the first possible delimiter in one syscall and leave the rest
+    // in chunks through the first possible delimiter and leave the rest
     // of the pipe available to subsequent consumers.
-    let mut first_read = here
+    let mut known_prefix = here
         .filter(|(fd, _)| {
             *fd == opts.fd
                 && opts.max_chars.is_none()
@@ -313,11 +313,12 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         } else if opts.raw
             && opts.max_chars.is_none()
             && opts.timeout.is_none()
-            && (input.seekable || first_read != 0)
+            && (input.seekable || known_prefix != 0)
         {
-            match input.chunk(std::mem::take(&mut first_read).max(1), usize::MAX) {
+            match input.chunk(known_prefix.max(1), usize::MAX) {
                 Ok([]) => Ok(None),
                 Ok(bytes) => {
+                    known_prefix = known_prefix.saturating_sub(bytes.len());
                     let end = memchr::memchr(opts.delimiter, bytes);
                     let data = &bytes[..end.unwrap_or(bytes.len())];
                     let unused = bytes.len() - data.len();
@@ -359,9 +360,10 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
                 Err(e) => Err(e),
             }
         } else {
-            input
-                .chunk(std::mem::take(&mut first_read).max(1), 1)
-                .map(|s| s.first().copied())
+            input.chunk(known_prefix.max(1), 1).map(|s| {
+                known_prefix = known_prefix.saturating_sub(s.len());
+                s.first().copied()
+            })
         };
         let b = match input_byte {
             Ok(Some(b)) => b,

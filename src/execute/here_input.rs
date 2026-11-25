@@ -1,11 +1,15 @@
 use std::ffi::CString;
 use std::fs::File;
 use std::io::{self, Write};
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 
-pub(super) fn open(data: &[u8]) -> io::Result<OwnedFd> {
+// Bash can deliver medium documents through a pipe too. Actual capacity may
+// be reduced by the kernel; never wait for a reader that has not started yet.
+pub(super) const PIPE_LIMIT: usize = 64 * 1024;
+
+pub(super) fn open(data: &[u8], pipe_limit: usize) -> io::Result<OwnedFd> {
     if data.is_empty() {
         return File::open("/dev/null").map(Into::into);
     }
@@ -15,6 +19,19 @@ pub(super) fn open(data: &[u8]) -> io::Result<OwnedFd> {
         let (reader, mut writer) = io::pipe()?;
         writer.write_all(data)?;
         return Ok(reader.into());
+    }
+    if data.len() <= pipe_limit
+        && let Ok((reader, mut writer)) = io::pipe()
+        && unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) } == 0
+    {
+        loop {
+            match writer.write(data) {
+                Ok(n) if n == data.len() => return Ok(reader.into()),
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                // A partial pipe stays private and is dropped in its entirety.
+                _ => break,
+            }
+        }
     }
     temporary(data)
 }
@@ -67,9 +84,17 @@ mod tests {
 
     #[test]
     fn short_and_large_documents_are_read_only_and_preserve_all_bytes() {
-        for len in [0, 1, libc::PIPE_BUF, libc::PIPE_BUF * 64] {
+        for len in [
+            0,
+            1,
+            libc::PIPE_BUF,
+            8193,
+            PIPE_LIMIT,
+            PIPE_LIMIT + 1,
+            PIPE_LIMIT * 2,
+        ] {
             let data = (0..len).map(|i| i as u8).collect::<Vec<_>>();
-            let mut file = File::from(open(&data).unwrap());
+            let mut file = File::from(open(&data, PIPE_LIMIT).unwrap());
             assert!(file.write(b"!").is_err());
             let mut copy = Vec::new();
             file.read_to_end(&mut copy).unwrap();

@@ -221,7 +221,8 @@ case "$SUITE" in
       --spawn-control "$bin/spawn-control" --case redirected-subshells --case descriptor-moves --case directory-stack \
       --case builtin-output --case builtin-output-long --case external --case external-env --case pipeline --case external-substitutions \
       --case merged-pipeline --case merged-pipeline-redirect --case redirect-stderr --case background-subshell-wait \
-      --case printf-list-newline --case printf-list-count ;;
+      --case printf-list-newline --case printf-list-count \
+      --case heredoc-external-file --case here-string-capture --case here-string-builtin-read ;;
   foreground)
     run foreground python3 tests/compat/foreground.py "$current" "$ref" ;;
   history-windows)

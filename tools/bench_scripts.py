@@ -277,6 +277,21 @@ echo "$value"
         r"""value=$(printf '%s' abc; printf '%s\n' first second; printf x)""",
         'echo "$value"', "abcfirst\nsecond\nx", count=250,
     ),
+    "heredoc-external-file": ("""\
+printf -v text '%4095s' x
+for ((i=0;i<120;i++)); do
+    cat <<EOF > out
+$text
+EOF
+done
+[[ $(<out) == "$text" ]] && echo ok
+""", "ok"),
+    "here-string-capture": eval_loop('value=$(cat <<<"$text")',
+                                     '[[ $value == "$text" ]] && echo ok', "ok",
+                                     setup="printf -v text '%4095s' x", count=120),
+    "here-string-builtin-read": eval_loop('IFS= read -r value <<<"$text"',
+                                          '[[ $value == "$text" ]] && echo ok', "ok",
+                                          setup="printf -v text '%4095s' x", count=120),
     "printf-list-count": eval_loop(
         r"""value=$(printf 'xy%n' n; printf '%s' "$n")""",
         'echo "$value:$n"', "xy2:parent", setup="n=parent", count=100,

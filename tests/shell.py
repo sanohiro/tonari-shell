@@ -1547,6 +1547,19 @@ printf '%s:%s' "$s" "$x" """
                                   capture_output=True, cwd=self.cwd, env=self.env, timeout=8)
             self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, document, b""))
 
+    def test_medium_here_inputs_preserve_every_byte_and_record_boundary(self):
+        for size in (511, 512, 4095, 4096, 8193, 65535, 65536, 65537):
+            data = b"0" * size + b"\n"
+            script = f"printf -v text '%0*d' {size} 0\n"
+            self.compare(script + 'cat <<EOF > out\n$text\nEOF\ncat out', 0, data)
+            self.compare(script + 'v=$(cat <<<"$text"); printf "%s" "$v"', 0, data[:-1])
+        # The known delimiter is beyond the 4 KiB read buffer. Escapes and a
+        # later reader sharing the group input must still see the correct bytes.
+        self.compare('printf -v a "%10000s" x; IFS= read -r -d : v <<< "$a:tail"; '
+                     '[[ $v == "$a" ]] && echo ok', 0, b"ok\n")
+        self.compare(r"""printf -v a '%6000s' x; v="$a"'\:t:tail'
+{ IFS= read -d : x; [[ $x == "$a:t" ]] && cat; } <<<"$v" """, 0, b"tail\n")
+
     def test_counted_read_preserves_pipe_input_for_the_next_reader(self):
         self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
         text = "a" * 8191 + "雪🍵" + "b" * 917
