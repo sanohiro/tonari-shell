@@ -60,6 +60,13 @@ jobs:
           for suite in budget inventory; do
             gh run download "$TIMING_RUN" -n "$NATIVE_RUNNER-$suite$suffix" -D "$RUNNER_TEMP/reuse/$suite"
           done
+      - name: Retrieve original POSIX case measurements
+        if: startsWith(matrix.suite, 'external-yash-budget-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ $TIMING_RUN =~ ^[0-9]+$ && $SUITE =~ ^external-yash-budget-([0-7])$ ]]
+          gh run download "$TIMING_RUN" -n "$NATIVE_RUNNER-external-yash-${BASH_REMATCH[1]}" -D "$RUNNER_TEMP/reuse"
       - name: Measure on the native host
         run: bash tools/ci/native-bench.sh
       - name: Preserve measurements and host details

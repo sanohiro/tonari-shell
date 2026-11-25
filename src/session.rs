@@ -134,6 +134,9 @@ pub struct Session {
     pub posix: bool,
     pub logout_started: bool,
     pub allexport: bool,
+    pub notify: bool,
+    pub noexec: bool,
+    pub ignoreeof: bool,
     pub xtrace: bool,
     pub onecmd: bool,
     pub subshell_depth: u32,
@@ -191,6 +194,17 @@ pub struct Session {
 
 #[derive(Clone, Default)]
 pub struct Bindings(BTreeMap<String, Option<Variable>>, Option<usize>);
+
+enum DirectoryError {
+    NoPath(io::Error),
+    Other(io::Error),
+}
+
+impl From<io::Error> for DirectoryError {
+    fn from(e: io::Error) -> Self {
+        Self::Other(e)
+    }
+}
 
 impl Session {
     pub(crate) fn character_locale(&self) -> CharacterLocale {
@@ -256,6 +270,9 @@ impl Session {
         if self.allexport {
             flags.push('a');
         }
+        if self.notify {
+            flags.push('b');
+        }
         if self.errexit {
             flags.push('e');
         }
@@ -270,6 +287,9 @@ impl Session {
         }
         if self.jobs.monitor {
             flags.push('m');
+        }
+        if self.noexec {
+            flags.push('n');
         }
         if self.onecmd {
             flags.push('t');
@@ -386,6 +406,8 @@ impl Session {
                     'e' => self.errexit = enable,
                     'E' => self.errtrace = enable,
                     'a' => self.allexport = enable,
+                    'b' => self.notify = enable,
+                    'n' => self.noexec = enable && !self.interactive,
                     't' => self.onecmd = enable,
                     'x' => self.xtrace = enable,
                     'H' => self.histexpand = enable,
@@ -399,7 +421,7 @@ impl Session {
                     'v' => self.verbose = enable,
                     'o' => {
                         let Some(name) = args.get(i) else {
-                            let mut out = io::stdout().lock();
+                            let mut out = io::BufWriter::with_capacity(512, io::stdout().lock());
                             for (name, on) in self.options(true) {
                                 let result = if enable {
                                     writeln!(out, "{name:16}{}", if on { "on" } else { "off" })
@@ -1392,6 +1414,7 @@ impl Session {
 
     pub fn directory_builtin(&mut self, name: &str, args: &[String]) -> u8 {
         let mut physical = false;
+        let mut require_pwd = false;
         let mut i = 0;
         while let Some(opt) = args.get(i) {
             if opt == "--" {
@@ -1405,8 +1428,7 @@ impl Session {
                 match flag {
                     'L' => physical = false,
                     'P' => physical = true,
-                    // The physical path lookup already propagates getcwd failures.
-                    'e' if name == "cd" => {}
+                    'e' if name == "cd" => require_pwd = true,
                     _ => {
                         eprintln!("tonari: {name}: unsupported option {opt}");
                         return 2;
@@ -1440,6 +1462,27 @@ impl Session {
                 );
                 return 1;
             };
+            if self.posix && physical {
+                match self.try_change_directory(
+                    Path::new(&target),
+                    physical,
+                    previous,
+                    arg.is_some(),
+                ) {
+                    Ok(()) => return 0,
+                    Err(DirectoryError::NoPath(e)) => {
+                        if require_pwd {
+                            eprintln!("tonari: cd: {e}");
+                            return 1;
+                        }
+                        return 0;
+                    }
+                    Err(DirectoryError::Other(e)) => {
+                        eprintln!("tonari: cd: {e}");
+                        return if require_pwd { 2 } else { 1 };
+                    }
+                }
+            }
             self.change_directory(Path::new(&target), physical, previous, arg.is_some())
         };
         result.map_or_else(
@@ -1491,6 +1534,19 @@ impl Session {
         previous: bool,
         explicit: bool,
     ) -> io::Result<()> {
+        self.try_change_directory(target, physical, previous, explicit)
+            .map_err(|e| match e {
+                DirectoryError::NoPath(e) | DirectoryError::Other(e) => e,
+            })
+    }
+
+    fn try_change_directory(
+        &mut self,
+        target: &Path,
+        physical: bool,
+        previous: bool,
+        explicit: bool,
+    ) -> Result<(), DirectoryError> {
         let old_pwd = self.get("PWD");
         let base = self.logical_directory();
         let cdpath = if explicit
@@ -1549,7 +1605,7 @@ impl Session {
             self.logical_cwd.take();
             let cwd = match logical {
                 Some(cwd) => cwd,
-                None => std::env::current_dir()?,
+                None => std::env::current_dir().map_err(DirectoryError::NoPath)?,
             };
             if self.interactive && base.as_deref().ok() != Some(cwd.as_path()) {
                 Rc::make_mut(self.visits.get_or_insert_with(Rc::default)).record(base.ok(), &cwd);
@@ -1557,12 +1613,14 @@ impl Session {
             if via_variable {
                 print_path(&candidate)?;
             }
-            return self.finish_directory_change(cwd, old_pwd, print);
+            return self
+                .finish_directory_change(cwd, old_pwd, print)
+                .map_err(DirectoryError::Other);
         }
-        Err(io::Error::new(
+        Err(DirectoryError::Other(io::Error::new(
             error.kind(),
             format!("{}: {error}", target.display()),
-        ))
+        )))
     }
 
     fn finish_directory_change(

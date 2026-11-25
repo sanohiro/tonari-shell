@@ -1,6 +1,7 @@
 """Run pinned yash POSIX fixtures using their original controller and verdicts."""
 import argparse
 from collections import Counter
+import csv
 import gzip
 import json
 import os
@@ -75,8 +76,18 @@ def children_of(root, parents):
 
 
 def terminate_children(owner, process):
-    parents = dict(tuple(map(int, line.split())) for line in
-                   subprocess.check_output(["ps", "-A", "-o", "pid=", "-o", "ppid="], text=True).splitlines())
+    try:
+        listing = subprocess.check_output(["ps", "-A", "-o", "pid=", "-o", "ppid="], text=True)
+        parents = {pid: ppid for pid, ppid in (map(int, line.split()) for line in listing.splitlines())}
+    except FileNotFoundError:
+        # Minimal Linux installations can run the suite without procps.
+        parents = {}
+        for stat in Path("/proc").glob("[0-9]*/stat"):
+            try:
+                fields = stat.read_bytes().rsplit(b")", 1)[1].split()
+                parents[int(stat.parent.name)] = int(fields[1])
+            except (FileNotFoundError, ProcessLookupError):
+                continue
     if owner != process.pid and owner not in children_of(process.pid, parents):
         raise RuntimeError("timed case controller is outside its fixture")
     for pid in reversed(children_of(owner, parents)):
@@ -189,6 +200,8 @@ def main():
     parser.add_argument("--previous", type=Path)
     parser.add_argument("--trace-shell", type=Path, help="separate diagnostic binary for untimed replay")
     parser.add_argument("--prepare", action="store_true")
+    parser.add_argument("--require-bash-passes", action="store_true", help="fail when any Bash pass is missing in Tonari")
+    parser.add_argument("--inventory", type=Path, help="published case table for validating each shell's coverage")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--shard", default="0/1")
     parser.add_argument("--fixture", action="append", default=[])
@@ -203,6 +216,14 @@ def main():
     if not 0 <= shard < count or args.runs < 1:
         parser.error("invalid shard or run count")
     sources = fixtures(root)
+    expected = {}
+    if args.inventory:
+        with gzip.open(args.inventory, "rt", newline="") as stream:
+            for record in csv.DictReader(stream, delimiter="\t"):
+                fixture, line, _ = record["upstream case"].split(":", 2)
+                expected.setdefault(fixture, set()).add(line)
+        if set(expected) != set(sources):
+            raise ValueError("fixture files differ from the pinned case inventory")
     if set(args.fixture) - set(sources):
         parser.error("unknown fixture")
     sources = [s for i, s in enumerate(sources) if i % count == shard and (not args.fixture or s in args.fixture)]
@@ -233,6 +254,11 @@ def main():
                     if keep:
                         argv_dir.mkdir(exist_ok=True)
                     obs, wall, report = measure(tests, subject, fixture, env, args.timeout, keep)
+                    if args.inventory:
+                        actual = {key.split(":", 2)[1] for key in obs}
+                        if actual != expected[fixture]:
+                            raise ValueError(f"{fixture}/{label}: case inventory differs at "
+                                             f"{sorted(actual ^ expected[fixture])}")
                     if keep:
                         for directory in set(tests.glob("tmp.*")) - before:
                             for key in obs:
@@ -294,12 +320,16 @@ def main():
             return len(series.get(label, [])) == args.runs and all(v[0] == "OK[PASSED]" for v in series[label])
         if passed("bash") and passed("tonari"):
             scores["comparable"] += 1
+        if any(v[0] == "OK[PASSED]" for v in series.get("bash", [])) and not passed("tonari"):
+            scores["Bash-only or unstable Tonari"] += 1
+            if args.require_bash_passes:
+                print("missing Bash pass", key)
         if args.previous and passed("previous") and passed("bash") and not passed("tonari"):
             scores["new differences"] += 1
             print("review new difference", key)
     print(dict(scores), flush=True)
     # Preserve all measurements before returning the comparison gate.
-    return int(bool(scores["new differences"] or any(
+    return int(bool(scores["new differences"] or (args.require_bash_passes and scores["Bash-only or unstable Tonari"]) or any(
         v[0] in {"CONTROLLER_EXIT","INCOMPLETE"} and label == "tonari" for series in rows.values() for label, events in series.items() for v in events)))
 
 

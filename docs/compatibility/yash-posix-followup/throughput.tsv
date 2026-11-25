@@ -1,0 +1,25 @@
+host	workload	trials	previous ms	Tonari ms	Bash ms	C control ms	Tonari/Bash
+ubuntu-24.04	startup	61	0.333	0.329	0.824		0.39927
+ubuntu-24.04	prefix	17	13.912	13.925	34.192		0.40726
+ubuntu-24.04	echo	17	20.351	20.2	46.687		0.43267
+ubuntu-24.04	spawn	17	38.201	38.195	52.846	37.96	0.72276
+ubuntu-24.04	alias	17	1.205	1.226	2.116		0.5794
+ubuntu-24.04	alias-3000	17	5.028	5.225	8.332		0.6271
+ubuntu-24.04	stdin	17	3.31	0.511	1.997		0.25588
+ubuntu-24.04	spawn (81 trials)	81	33.797	33.725	46.659	33.839	0.7228
+macos-15	startup	61	3.132	3.191	5.762		0.5538
+macos-15	prefix	17	18.05	18.2	43.998		0.41366
+macos-15	echo	17	23.118	23.33	62.723		0.37195
+macos-15	spawn	17	182.179	176.124	239.917	170.595	0.7341
+macos-15	alias	17	4.307	4.239	7.8		0.54346
+macos-15	alias-3000	17	7.684	8.15	14.129		0.57683
+macos-15	stdin	17	6.523	4.051	8.451		0.47935
+macos-15	spawn (81 trials)	81	193.572	190.631	280.807	188.052	0.67887
+physical M1	startup	61	3.332	3.261	5.834		0.55896
+physical M1	prefix	17	17.166	17.072	35.34		0.48308
+physical M1	echo	17	27.886	28.275	52.421		0.53938
+physical M1	spawn	17	101.825	102.21	163.458	100.218	0.6253
+physical M1	alias	17	4.241	4.17	7.203		0.57893
+physical M1	alias-3000	17	8.45	8.427	13.955		0.60387
+physical M1	stdin	17	5.442	3.487	6.994		0.49857
+physical M1	spawn (81 trials)	81	102.878	102.97	165.856	101.542	0.62084

@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <spawn.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -82,6 +83,12 @@ static int pipeline(char *value, int merged, int builtin, int redirect_cat) {
 }
 
 int main(int argc, char **argv) {
+    if (argc == 3 && strcmp(argv[1], "--signal-exit") == 0) {
+        int sig = atoi(argv[2]);
+        if (sig <= 0 || signal(sig, SIG_DFL) == SIG_ERR || write(STDOUT_FILENO, ".", 1) != 1)
+            return 1;
+        return raise(sig) == 0 ? 0 : 1;
+    }
     if (argc == 4 && !strcmp(argv[1], "--complete")) {
         char gate;
         if (write(1, "ready\n", 6) != 6 || read(0, &gate, 1) != 1) return 1;
@@ -93,6 +100,15 @@ int main(int argc, char **argv) {
             if (!strncmp(entry->d_name, argv[3], length)) puts(entry->d_name);
         }
         return closedir(dir) != 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "--spawn-100") == 0) {
+        char *const words[] = {"/usr/bin/true", NULL};
+        for (int i = 0; i < 100; ++i) {
+            pid_t child;
+            if (posix_spawn(&child, words[0], NULL, NULL, words, environ) || !waited(child)) return 1;
+        }
+        puts("100");
+        return 0;
     }
     if (argc < 4) return 1;
     if (strcmp(argv[3], "-c") == 0) {

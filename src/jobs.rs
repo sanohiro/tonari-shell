@@ -7,7 +7,8 @@ use std::os::fd::{AsFd, AsRawFd, RawFd};
 #[derive(Clone)]
 struct Terminal {
     fd: PrivateFile,
-    // The interactive shell leads its own foreground process group.
+    // The owning shell and the process group to restore after a foreground job.
+    shell_group: pid_t,
     owner: pid_t,
 }
 
@@ -77,16 +78,16 @@ impl Launch {
         }
     }
 
-    pub fn pipeline_child(self) {
+    pub fn pipeline_child(self, traps: &mut crate::traps::Traps) {
         if self.group.is_none() && !self.background {
             crate::execute::reset_child_signals();
         }
-        self.child();
+        self.child(traps);
     }
 
-    pub fn child(self) {
+    pub fn child(self, traps: &mut crate::traps::Traps) {
         if let Some(group) = self.group {
-            if unsafe { libc::setpgid(0, group) } < 0 {
+            if !assign_process_group(0, group) {
                 unsafe { libc::_exit(1) }
             }
             if let Some(tty) = self.tty.filter(|_| !self.defer_tty) {
@@ -95,9 +96,7 @@ impl Launch {
             crate::execute::reset_caught_signals(&JOB_SIGNALS);
         } else if self.background {
             for sig in [libc::SIGINT, libc::SIGQUIT] {
-                unsafe {
-                    libc::signal(sig, libc::SIG_IGN);
-                }
+                traps.ignore_async(sig);
             }
         }
     }
@@ -105,12 +104,54 @@ impl Launch {
     pub fn parent(&mut self, pid: pid_t) {
         if let Some(group) = self.group {
             let group = if group == 0 { pid } else { group };
-            unsafe {
-                libc::setpgid(pid, group);
-            }
+            assign_process_group(pid, group);
             self.group = Some(group);
         }
     }
+}
+
+fn assign_process_group(pid: pid_t, group: pid_t) -> bool {
+    (unsafe { libc::setpgid(pid, group) == 0 }) || group_assignment_raced(pid, group)
+}
+
+#[cold]
+fn group_assignment_raced(pid: pid_t, group: pid_t) -> bool {
+    if io::Error::last_os_error().raw_os_error() != Some(libc::EPERM) {
+        return false;
+    }
+    let leader = if pid == 0 {
+        unsafe { libc::getpid() }
+    } else {
+        pid
+    };
+    let target = if group == 0 { leader } else { group };
+    // Darwin can return EPERM to one caller while the other is creating the
+    // same group. Its new membership may not yet be visible to getpgid.
+    for attempt in 0..4 {
+        let current = unsafe { libc::getpgid(pid) };
+        if current == target {
+            return true;
+        }
+        if current < 0 || target != leader {
+            return false;
+        }
+        if attempt < 2 {
+            unsafe { libc::sched_yield() };
+        } else {
+            let delay = libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 100_000,
+            };
+            unsafe { libc::nanosleep(&delay, std::ptr::null_mut()) };
+        }
+        if unsafe { libc::setpgid(pid, group) } == 0 {
+            return true;
+        }
+        if io::Error::last_os_error().raw_os_error() != Some(libc::EPERM) {
+            break;
+        }
+    }
+    unsafe { libc::getpgid(pid) == target }
 }
 
 fn terminal_modes(fd: RawFd) -> Option<libc::termios> {
@@ -124,6 +165,30 @@ fn terminal_modes(fd: RawFd) -> Option<libc::termios> {
 
 fn give_terminal(fd: RawFd, pgid: pid_t) {
     give_terminal_with_modes(fd, pgid, None);
+}
+
+#[cfg(test)]
+#[test]
+fn group_setup_accepts_only_the_requested_group_after_a_failed_setpgid() {
+    let outer_group = unsafe { libc::getpgrp() };
+    for (target, expected) in [(0, 0), (outer_group, 1)] {
+        let launch = Launch {
+            group: Some(target),
+            ..Default::default()
+        };
+        let mut traps = crate::traps::Traps::default();
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0);
+        if pid == 0 {
+            // A session leader always gets EPERM from setpgid, even for its own group.
+            if unsafe { libc::setsid() } < 0 {
+                unsafe { libc::_exit(2) }
+            }
+            launch.child(&mut traps);
+            unsafe { libc::_exit(0) }
+        }
+        assert_eq!(crate::execute::wait(pid).unwrap(), expected);
+    }
 }
 
 fn give_terminal_with_modes(fd: RawFd, pgid: pid_t, modes: Option<&libc::termios>) {
@@ -273,6 +338,7 @@ impl Job {
 #[derive(Clone, Default)]
 pub struct Jobs {
     pub monitor: bool,
+    pub(crate) quiet: bool,
     tty: Option<Terminal>,
     table: Vec<Job>,
     detached: Vec<pid_t>,
@@ -290,7 +356,7 @@ impl Jobs {
         self.table.is_empty() && self.inherited.is_empty()
     }
 
-    pub fn init(&mut self) {
+    pub fn init(&mut self, interactive: bool) {
         let old = unsafe { libc::getpgrp() };
         let fd = if unsafe { libc::isatty(libc::STDERR_FILENO) } == 1 {
             PrivateFile::duplicate(io::stderr().as_fd())
@@ -306,7 +372,8 @@ impl Jobs {
             return;
         }
         let owner = unsafe { libc::getpid() };
-        if old != owner {
+        let shell_group = if interactive { owner } else { old };
+        if old != shell_group {
             if unsafe { libc::setpgid(0, 0) } < 0 {
                 return;
             }
@@ -323,7 +390,11 @@ impl Jobs {
                 libc::signal(libc::SIGTSTP, stay_running as *const () as usize);
             }
         }
-        self.tty = Some(Terminal { fd, owner });
+        self.tty = Some(Terminal {
+            fd,
+            owner,
+            shell_group,
+        });
     }
     fn terminal(&self) -> Option<&Terminal> {
         self.tty
@@ -358,7 +429,7 @@ impl Jobs {
     }
     pub fn restore(&self) {
         if let Some(t) = self.terminal() {
-            give_terminal(t.fd.as_raw_fd(), t.owner);
+            give_terminal(t.fd.as_raw_fd(), t.shell_group);
         }
     }
 
@@ -402,7 +473,7 @@ impl Jobs {
             .map(|p| p.pid);
         if launch.background {
             self.store(job);
-            if self.terminal().is_some() {
+            if !self.quiet && self.terminal().is_some() {
                 eprintln!("[{}] {}", self.serial, last.unwrap_or(0));
             }
             Ok((0, last))
@@ -439,7 +510,9 @@ impl Jobs {
             }
             if job.stopped() {
                 self.store(job);
-                eprintln!("[{}]+ Stopped", self.serial);
+                if !self.quiet {
+                    eprintln!("[{}]+ Stopped", self.serial);
+                }
             }
             Ok((code, None))
         }
@@ -595,6 +668,34 @@ impl Jobs {
                     .iter()
                     .any(|child| child.pid == pid && !matches!(child.state, State::Done(_)))
             })
+    }
+
+    pub(crate) fn awaiting_notification(&self) -> bool {
+        self.monitor
+            && self
+                .table
+                .iter()
+                .any(|job| job.active() || !job.listed || job.stopped())
+    }
+
+    pub(crate) fn has_notification(&self) -> bool {
+        self.table.iter().any(|job| !job.active() && !job.listed)
+    }
+
+    pub(crate) fn report_changes(&mut self) {
+        for job in &mut self.table {
+            if !job.active() && !job.listed {
+                let state = if job.stopped() {
+                    "Stopped"
+                } else if job.signaled {
+                    "Terminated"
+                } else {
+                    "Done"
+                };
+                eprintln!("[{}] {state}  {}", job.id, job.name);
+                job.listed = true;
+            }
+        }
     }
 
     pub fn poll(&mut self) {
@@ -900,7 +1001,9 @@ fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Opti
                 }
                 result = (code, Some(pid));
             } else {
-                eprintln!("tonari: wait: {spec}: not a child of this shell");
+                if !jobs.quiet {
+                    eprintln!("tonari: wait: {spec}: not a child of this shell");
+                }
                 result = (127, None);
             }
         } else {
@@ -1106,6 +1209,57 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
         "kill" => kill(jobs, &words[1..]),
         "jobs" => list(jobs, &words[1..]),
         "disown" => jobs.disown(&words[1..]),
+        "bg" => {
+            if !jobs.monitor {
+                eprintln!("tonari: bg: no job control");
+                return 1;
+            }
+            let mut status = 0;
+            let mut out = io::stdout().lock();
+            for spec in words[1..]
+                .iter()
+                .map(String::as_str)
+                .chain((words.len() == 1).then_some("%+"))
+            {
+                let Some(i) = jobs.select(spec) else {
+                    eprintln!("tonari: bg: {spec}: no such job");
+                    status = 1;
+                    continue;
+                };
+                let n = jobs.table.len();
+                let job = &mut jobs.table[i];
+                if job.group.is_none() {
+                    eprintln!("tonari: bg: job {} started without job control", job.id);
+                    status = 1;
+                    continue;
+                }
+                if !job.stopped() && !session.posix {
+                    eprintln!("tonari: bg: job {} already in background", job.id);
+                    continue;
+                }
+                if job.stopped() && job.resume().is_err() {
+                    status = 1;
+                    continue;
+                }
+                session.last_background = job.children.last().map(|p| p.pid);
+                let result = if session.posix {
+                    writeln!(out, "[{}] {}", job.id, job.name)
+                } else {
+                    let marker = if i + 1 == n {
+                        '+'
+                    } else if i + 2 == n {
+                        '-'
+                    } else {
+                        ' '
+                    };
+                    writeln!(out, "[{}]{marker} {} &", job.id, job.name)
+                };
+                if result.is_err() {
+                    return 1;
+                }
+            }
+            if out.flush().is_err() { 1 } else { status }
+        }
         name => {
             if !jobs.monitor {
                 eprintln!("tonari: {name}: no job control");
@@ -1121,29 +1275,6 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                     jobs.table[i].id
                 );
                 return 1;
-            }
-            if name == "bg" {
-                if !jobs.table[i].stopped() {
-                    eprintln!("tonari: bg: job {} already in background", jobs.table[i].id);
-                    return 0;
-                }
-                let marker = if i + 1 == jobs.table.len() {
-                    '+'
-                } else if i + 2 == jobs.table.len() {
-                    '-'
-                } else {
-                    ' '
-                };
-                let job = &mut jobs.table[i];
-                if job.resume().is_err() {
-                    return 1;
-                }
-                let mut out = io::stdout().lock();
-                return u8::from(
-                    writeln!(out, "[{}]{marker} {} &", job.id, job.name)
-                        .and_then(|_| out.flush())
-                        .is_err(),
-                );
             }
             let mut job = jobs.table.remove(i);
             {

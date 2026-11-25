@@ -401,6 +401,7 @@ fn capture_simple(
         let status = session.traps.list(
             names.iter().map(|word| word.as_literal().unwrap()),
             &mut out,
+            session.posix,
         );
         return Some(captured_output(out, status));
     }
@@ -640,8 +641,8 @@ fn launch_list(
         session
             .traps
             .after_fork(session.errtrace, session.functrace);
-        launch.child();
-        if background && launch.group.is_none() && !session.stdin_redirected {
+        launch.child(&mut session.traps);
+        if background && launch.group.is_none() && (session.posix || !session.stdin_redirected) {
             let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
             if fd < 0 || unsafe { libc::dup2(fd, 0) } < 0 {
                 unsafe { libc::_exit(1) }
@@ -671,7 +672,17 @@ fn launch_list(
     match session.jobs.finish(
         launch,
         vec![Ok(pid)],
-        "command list".into(),
+        session.current_command.as_ref().map_or_else(
+            || "command list".into(),
+            |location| {
+                location
+                    .text()
+                    .trim()
+                    .trim_end_matches('&')
+                    .trim_end()
+                    .into()
+            },
+        ),
         false,
         &mut session.pipe_status,
     ) {

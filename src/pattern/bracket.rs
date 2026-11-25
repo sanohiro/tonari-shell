@@ -41,7 +41,9 @@ pub(super) fn needs_parser(source: &[u8]) -> bool {
                 };
                 // The reference shells default to globasciiranges. Native
                 // fnmatch may put accented letters between ASCII endpoints.
-                if body[..end].iter().any(|b| matches!(b, b'\\' | b'-')) {
+                if body[..end].iter().any(|b| matches!(b, b'\\' | b'-'))
+                    || body[..end].windows(2).any(|w| matches!(w, b"[." | b"[="))
+                {
                     return true;
                 }
                 i += end + 2;
@@ -84,6 +86,13 @@ impl Member {
             let item = &input[..len];
             match item[1] {
                 b'.' if item.contains(&b'\\') => return (Self::Never, &input[len..]),
+                b'.' | b'=' if len > 4 => {
+                    let (first, rest) = unit(&item[2..len - 2], utf8);
+                    if rest.is_empty() {
+                        return (Self::Literal(packed(first)), &input[len..]);
+                    }
+                    pattern.extend_from_slice(item);
+                }
                 b':' => pattern.extend(item.iter().filter(|&&b| b != b'\\')),
                 _ => pattern.extend_from_slice(item),
             }

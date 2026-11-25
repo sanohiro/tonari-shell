@@ -73,6 +73,41 @@ fn listen_for_interrupts() -> io::Result<()> {
 thread_local! {
     static INPUT_DEADLINE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
 }
+// Block child notifications before reaping to close the exit-before-sleep race.
+// A key, signal or prompt deadline wakes the same wait.
+fn wait_for_job_notice(
+    jobs: &mut jobs::Jobs,
+    mut display: impl FnMut(&mut jobs::Jobs) -> io::Result<()>,
+) -> io::Result<()> {
+    if !jobs.awaiting_notification() || editor::ready(0, 0) {
+        return Ok(());
+    }
+    let mask = traps::WaitMask::for_children(0)?;
+    loop {
+        jobs.poll();
+        if jobs.has_notification() {
+            display(jobs)?;
+        }
+        if !jobs.awaiting_notification()
+            || INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+            || traps::input_interrupted()
+            || mask.input_or_child(input_timeout().as_ref())?
+        {
+            return Ok(());
+        }
+    }
+}
+
+fn input_timeout() -> Option<libc::timespec> {
+    INPUT_DEADLINE.get().map(|end| {
+        let left = end.saturating_duration_since(std::time::Instant::now());
+        libc::timespec {
+            tv_sec: left.as_secs() as _,
+            tv_nsec: left.subsec_nanos() as _,
+        }
+    })
+}
+
 fn terminal_read(buf: &mut [u8], raw: bool) -> io::Result<usize> {
     unsafe {
         let mut blocked = std::mem::zeroed();
@@ -89,13 +124,7 @@ fn terminal_read(buf: &mut [u8], raw: bool) -> io::Result<usize> {
             let mut read_set = std::mem::zeroed();
             libc::FD_ZERO(&mut read_set);
             libc::FD_SET(0, &mut read_set);
-            let timeout = INPUT_DEADLINE.get().map(|end| {
-                let left = end.saturating_duration_since(std::time::Instant::now());
-                libc::timespec {
-                    tv_sec: left.as_secs() as _,
-                    tv_nsec: left.subsec_nanos() as _,
-                }
-            });
+            let timeout = input_timeout();
             let selected = libc::pselect(
                 1,
                 &mut read_set,
@@ -194,6 +223,9 @@ fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Resu
             return Ok(code);
         }
         session.jobs.poll();
+        if session.notify && session.jobs.monitor {
+            session.jobs.report_changes();
+        }
         session.refresh_terminal_size();
         if source.is_empty() {
             for hook in session.array_values("PROMPT_COMMAND") {
@@ -246,7 +278,20 @@ fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Resu
             stderr.write_all(prompt.as_bytes())?;
             stderr.flush()?;
             drop(stderr);
-            read_terminal_line(&mut source, terminal_input).map(Some)
+            let ready = if session.notify && terminal_input {
+                wait_for_job_notice(&mut session.jobs, |jobs| {
+                    let mut out = io::stderr().lock();
+                    writeln!(out)?;
+                    jobs.report_changes();
+                    out.write_all(prompt.as_bytes())?;
+                    out.flush()
+                })
+            } else {
+                Ok(())
+            };
+            ready
+                .and_then(|()| read_terminal_line(&mut source, terminal_input))
+                .map(Some)
         };
         INPUT_DEADLINE.set(None);
         let more = match result {
@@ -278,7 +323,9 @@ fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Resu
         if !more && source.is_empty() {
             if session
                 .get("IGNOREEOF")
-                .is_some_and(|v| eof_count < v.parse::<usize>().unwrap_or(10))
+                .map_or(session.ignoreeof && eof_count < 10, |v| {
+                    eof_count < v.parse::<usize>().unwrap_or(10)
+                })
             {
                 eof_count += 1;
                 eprintln!(
@@ -409,6 +456,9 @@ fn run_invocation(
     session.arg0 = std::mem::take(&mut invocation.arg0);
     session.positional = std::mem::take(&mut invocation.positional).into_iter();
     session.allexport = invocation.allexport;
+    session.notify = invocation.notify;
+    session.noexec = invocation.check;
+    session.ignoreeof = invocation.ignoreeof;
     session.onecmd = invocation.onecmd;
     session.xtrace = invocation.xtrace;
     session.errexit = invocation.errexit;
@@ -437,7 +487,7 @@ fn run_invocation(
     }
     session.jobs.monitor = invocation.monitor.unwrap_or(session.interactive);
     if session.jobs.monitor {
-        session.jobs.init();
+        session.jobs.init(session.interactive);
     }
     session.command_string = matches!(invocation.input, Input::Command(_));
     session.set_posix(invocation.posix);

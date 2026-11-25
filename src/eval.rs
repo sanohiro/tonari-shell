@@ -31,6 +31,13 @@ fn run_statements<'a>(
     let mut literals = literals.iter_mut();
     let mut statements = iter.peekable();
     while let Some(statement) = statements.next() {
+        if session.noexec {
+            return Flow::Continue(0);
+        }
+        if session.notify && session.jobs.awaiting_notification() {
+            session.jobs.poll();
+            session.jobs.report_changes();
+        }
         let literal = literals.next().and_then(Option::as_deref_mut);
         if session.interactive && session.completions.in_callback() {
             crate::editor::preview::statement();
@@ -523,6 +530,9 @@ fn repeat(
     let mut iterations = 0u8;
     let mut literals = Vec::new();
     let flow = loop {
+        if session.noexec {
+            break Flow::Continue(0);
+        }
         if crate::interrupted() {
             break Flow::Continue(130);
         }

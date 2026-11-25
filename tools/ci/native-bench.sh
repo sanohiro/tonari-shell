@@ -218,11 +218,55 @@ case "$SUITE" in
   external-shared-input)
     python3 tools/ci/yash-stdin.py --bash "$ref" --current "$current" --small "$bin/small" --large "$bin/large" > "$out/stdin.jsonl" ;;
   external-yash-*)
+    if [[ $SUITE == external-yash-signal-cost ]]; then
+      cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
+      python3 tools/ci/yash-signals.py --tonari "$current" --bash "$ref" \
+        --control "$bin/spawn-control" --runs 31 > "$out/signals.jsonl"
+      exit
+    fi
+    if [[ $SUITE == external-yash-plain ]]; then
+      python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
+        --case plain-script --case plain-script-30 --runs 81 > "$out/throughput.jsonl"
+      exit
+    fi
+    if [[ $SUITE == external-yash-notify ]]; then
+      python3 tools/bench_notify.py "$bin/baseline" "$current" "$ref" > "$out/notify.jsonl"
+      exit
+    fi
+    if [[ $SUITE == external-yash-builtins ]]; then
+      python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
+        --case symbolic-umask --case set-flags > "$out/throughput.jsonl"
+      exit
+    fi
+    if [[ $SUITE == external-yash-spawn ]]; then
+      cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
+      python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
+        --spawn-control "$bin/spawn-control" --case spawn --runs 81 > "$out/throughput.jsonl"
+      exit
+    fi
     root="$RUNNER_TEMP/yash"
     git init -q "$root"
     git -C "$root" fetch -q --depth 1 https://github.com/magicant/yash.git 1cdb509a617894ed96a12c33b43bcd7adb6f1ff5
     git -C "$root" checkout -q --detach FETCH_HEAD
-    if [[ $SUITE == external-yash-recheck ]]; then
+    if [[ $SUITE == external-yash-budget-* ]]; then
+      python3 tools/ci/yash-repeats.py "$root" "$out" "$RUNNER_TEMP/reuse" "$current" "$ref"
+      exit
+    fi
+    if [[ $SUITE == external-yash-pipelines ]]; then
+      cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
+      python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
+        --spawn-control "$bin/spawn-control" > "$out/throughput.jsonl"
+      selection=(--fixture pipeline-p.tst)
+    elif [[ $SUITE == external-yash-options ]]; then
+      python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
+        --case print-options --case replay-options --runs 21 > "$out/throughput.jsonl"
+      selection=(--fixture set-p.tst)
+    elif [[ $SUITE == external-yash-script-path ]]; then
+      selection=(--fixture quote-p.tst --fixture unset-p.tst --fixture simple-p.tst)
+    elif [[ $SUITE == external-yash-io ]]; then
+      selection=(--fixture redir-p.tst --fixture cmdsub-p.tst --fixture quote-p.tst --fixture read-p.tst
+                 --fixture umask-p.tst --fixture cd-p.tst --fixture command-p.tst)
+    elif [[ $SUITE == external-yash-recheck ]]; then
       python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" > "$out/throughput.jsonl"
       python3 tools/ci/yash-signals.py --tonari "$current" --bash "$ref" > "$out/signals.jsonl"
       selection=(--fixture alias-p.tst --fixture shift-p.tst --fixture kill2-p.tst --fixture set-p.tst
@@ -230,8 +274,14 @@ case "$SUITE" in
     else
       selection=(--trace-shell "$bin/paths" --shard "${SUITE##*-}/8")
     fi
-    python3 tools/ci/yash-posix.py "$root" "$out" --prepare --bash "$ref" --tonari "$current" \
-      --previous "$bin/baseline" --runs "${EXTERNAL_BENCH_RUNS:-3}" "${selection[@]}" ;;
+    python3 tools/ci/yash-posix.py "$root" "$out" --prepare --require-bash-passes --bash "$ref" --tonari "$current" \
+      --previous "$bin/baseline" --runs "${EXTERNAL_BENCH_RUNS:-3}" "${selection[@]}"
+    if [[ $SUITE == external-yash-[0-7] && ${EXTERNAL_BENCH_RUNS:-3} == 3 ]]; then
+      # Repeat outliers on the same machine and build, with clean upstream fixtures.
+      replay="$RUNNER_TEMP/yash-repeats"
+      git -C "$root" worktree add -q --detach "$replay" HEAD
+      python3 tools/ci/yash-repeats.py "$replay" "$out/repeats" "$out" "$current" "$ref"
+    fi ;;
   probe)
     cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
     run probes python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" --timing started --runs 41 \

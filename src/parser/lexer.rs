@@ -105,12 +105,51 @@ fn bad_substitution<'a>(
     Ok(())
 }
 
+// Preserve physical offsets and leave a trailing continuation for the input reader.
+pub(super) fn joined(source: &str) -> &str {
+    if !source.starts_with('\\') {
+        return source;
+    }
+    let next = source.trim_start_matches("\\\n");
+    if next.is_empty() { source } else { next }
+}
+
 pub(super) fn dollar(
     chars: &mut Chars<'_>,
     word: &mut WordBuilder,
     quoted: bool,
 ) -> Result<(), Error> {
+    *chars = joined(chars.as_str()).chars();
     let rest = chars.as_str();
+    // Only the structural prefix needs joining. Quotes, expansions and here-doc
+    // bodies in the suffix are read in their own lexical context.
+    if rest.starts_with('{') {
+        let structural = |b: u8| b.is_ascii_alphanumeric() || b"_#{!:+-=?%".contains(&b);
+        let mut end = rest.bytes().take_while(|&b| structural(b)).count();
+        if rest[end..].starts_with("\\\n") {
+            while let Some(after) = rest[end..].strip_prefix("\\\n") {
+                end += 2 + after.bytes().take_while(|&b| structural(b)).count();
+            }
+            let prefix = &rest[..end];
+            let mut input = prefix.replace("\\\n", "");
+            let boundary = input.len();
+            input.push_str(&rest[end..]);
+            let mut cursor = input.chars();
+            dollar(&mut cursor, word, quoted)?;
+            let consumed = input.len() - cursor.as_str().len();
+            let physical = if consumed >= boundary {
+                end + consumed - boundary
+            } else {
+                let mut tail = prefix;
+                for _ in 0..consumed {
+                    tail = &tail.trim_start_matches("\\\n")[1..];
+                }
+                end - tail.len()
+            };
+            *chars = rest[physical..].chars();
+            return Ok(());
+        }
+    }
     let name = match chars.clone().next() {
         Some('{') => {
             chars.next();
@@ -293,7 +332,27 @@ pub(super) fn dollar(
                 .bytes()
                 .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
                 .count();
-            *chars = rest[end..].chars();
+            let mut tail = &rest[end..];
+            if tail.starts_with("\\\n") {
+                let mut name = rest[..end].to_owned();
+                while let Some(next) = tail.strip_prefix("\\\n") {
+                    // The input reader must see a trailing continuation so it
+                    // can fetch more bytes before deciding where the name ends.
+                    if next.is_empty() {
+                        break;
+                    }
+                    let size = next
+                        .bytes()
+                        .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+                        .count();
+                    name.push_str(&next[..size]);
+                    tail = &next[size..];
+                }
+                *chars = tail.chars();
+                word.part(Part::Parameter { name, quoted });
+                return Ok(());
+            }
+            *chars = tail.chars();
             &rest[..end]
         }
         Some('0'..='9' | '@' | '*' | '?' | '$' | '#' | '!' | '-') => {
@@ -301,7 +360,7 @@ pub(super) fn dollar(
             &rest[..1]
         }
         Some('(') => {
-            if let Some(after) = rest.strip_prefix("((") {
+            if let Some(after) = joined(&rest[1..]).strip_prefix('(') {
                 *chars = after.chars();
                 let expression = arithmetic_source(chars)?;
                 word.part(Part::Arithmetic { expression, quoted });
@@ -380,13 +439,29 @@ fn parameter_word(
     let mut empty = true;
     while let Some(c) = chars.next() {
         match c {
+            '~' if empty && !outer_quoted => {
+                let rest = chars.as_str();
+                let end = rest.find(['/', '}']).unwrap_or(rest.len());
+                let user = &rest[..end];
+                if user
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
+                {
+                    let slash = !stop_slash && super::POSIX.get() && rest[end..].starts_with('/');
+                    let end = end + usize::from(slash);
+                    word.part(Part::Tilde(format!("~{}", &rest[..end])));
+                    *chars = rest[end..].chars();
+                } else {
+                    word.push('~');
+                }
+            }
             c if c == '}' || stop_slash && c == '/' => {
                 if empty && !outer_quoted {
                     word.part(Part::Unquoted(String::new()));
                 }
                 return Ok((word.finish(), c));
             }
-            '$' if outer_quoted && chars.as_str().starts_with('\'') => {
+            '$' if outer_quoted && !super::POSIX.get() && chars.as_str().starts_with('\'') => {
                 chars.next();
                 word.literal(&ansi::quoted(chars)?);
             }
@@ -560,10 +635,15 @@ fn arithmetic_source(chars: &mut Chars<'_>) -> Result<String, Error> {
         match c {
             '(' => depth += 1,
             ')' if depth > 0 => depth -= 1,
-            ')' if chars.as_str().starts_with(')') => {
+            ')' if joined(chars.as_str()).starts_with(')') => {
                 let end = source.len() - chars.as_str().len() - 1;
-                chars.next();
-                return Ok(source[..end].into());
+                *chars = joined(chars.as_str())[1..].chars();
+                return Ok(source[..end].replace("\\\n", ""));
+            }
+            ')' if !chars.as_str().is_empty()
+                && chars.as_str().trim_start_matches("\\\n").is_empty() =>
+            {
+                return Err(Error::Incomplete("continued arithmetic delimiter"));
             }
             ')' => {
                 return Err(Error::Invalid(
@@ -761,6 +841,9 @@ pub(super) fn lex(
                     return Ok((tokens, spans, chars.as_str()));
                 }
             }
+            if matches!(c, '<' | '>' | ';' | '|' | '&' | '(') {
+                chars = joined(chars.as_str()).chars();
+            }
             if c == '<' && chars.as_str().starts_with('<') {
                 here_doc::redirect(&mut chars, 0, &mut tokens, &mut pending_docs)?;
                 continue;
@@ -785,8 +868,19 @@ pub(super) fn lex(
                 }
                 ';' => Token::End,
                 '(' if chars.as_str().starts_with('(') && !in_test => {
-                    chars.next();
-                    Token::Arithmetic(arithmetic_source(&mut chars)?)
+                    let mut tail = chars.clone();
+                    tail.next();
+                    match arithmetic_source(&mut tail) {
+                        Ok(expression) => {
+                            chars = tail;
+                            Token::Arithmetic(expression)
+                        }
+                        Err(Error::Invalid(_)) => {
+                            parentheses += 1;
+                            Token::LeftParen
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
                 '(' => {
                     parentheses += 1;
@@ -918,7 +1012,11 @@ pub(super) fn lex(
                     }
                     pattern_context = true;
                 }
-                '[' | '{' if !started && chars.clone().next().is_none_or(separator) => word.push(c),
+                '[' | '{'
+                    if !started && joined(chars.as_str()).chars().next().is_none_or(separator) =>
+                {
+                    word.push(c)
+                }
                 '`' => {
                     backquote(&mut chars, &mut word, false)?;
                     pattern_context = true;
@@ -958,6 +1056,13 @@ pub(super) fn lex(
                 }
                 '=' if assignment.is_none() && !protected => {
                     let prefix = &start[..start.len() - rest.len()];
+                    let logical;
+                    let prefix = if prefix.contains('\\') {
+                        logical = prefix.replace("\\\n", "");
+                        &logical
+                    } else {
+                        prefix
+                    };
                     if is_identifier(prefix.strip_suffix('+').unwrap_or(prefix)) {
                         assignment = Some(prefix.to_owned());
                     }
@@ -991,8 +1096,11 @@ pub(super) fn lex(
                         .chars()
                         .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
                     {
-                        word.part(Part::Tilde(format!("~{suffix}")));
-                        chars = chars.as_str()[length..].chars();
+                        let rest = chars.as_str();
+                        let slash = super::POSIX.get() && rest[length..].starts_with('/');
+                        let end = length + usize::from(slash);
+                        word.part(Part::Tilde(format!("~{}", &rest[..end])));
+                        chars = rest[end..].chars();
                     } else {
                         word.push(c);
                     }
@@ -1015,6 +1123,7 @@ pub(super) fn lex(
             {
                 tokens.push(Token::DescriptorName(name.into()));
                 let op = chars.next().unwrap();
+                chars = joined(chars.as_str()).chars();
                 if op == '<' && chars.as_str().starts_with('<') {
                     here_doc::redirect(&mut chars, 0, &mut tokens, &mut pending_docs)?;
                 } else {
@@ -1027,6 +1136,7 @@ pub(super) fn lex(
                 .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
             {
                 let op = chars.next().unwrap();
+                chars = joined(chars.as_str()).chars();
                 let fd = descriptor(text)?;
                 if op == '<' && chars.as_str().starts_with('<') {
                     here_doc::redirect(&mut chars, fd, &mut tokens, &mut pending_docs)?;

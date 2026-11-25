@@ -2,6 +2,8 @@
 
 ## POSIX sh invocation / sh 名での起動
 
+The follow-up compares the same named yash cases against GNU Bash on native Linux and macOS. It also exercises the distribution versions of Bash on Debian 13 and Ubuntu 26.04. Each pull request runs all 122 fixtures on Linux. A missing upstream case, or a Bash pass that Tonari fails or skips, fails the check. 各シェルの合格・不合格・スキップと、通常の Bash モードでの再監査結果を記録しています。[Current case results](compatibility/yash-posix-followup/README.md)
+
 Both the release and GNU Bash are launched as `sh` for the upstream yash POSIX suite. The case tables preserve each shell's verdict and distinguish failures in one shell, common failures, skips and variable results. The ordinary Bash feature audit contains 1,411 entries. On the physical M1, six prior differences now match and no previously matching entry regressed. Sixty-two entries changed from an unavailable mode to an available mode with no independent probe.
 
 `sh` としての起動・試験と通常の Bash モードを個別に確認しています。上流が指定した出力や終了状態が Bash と食い違う場合には、Tonari の結果も別に記録しています。今回の検証範囲、再現コマンド、残っている差異は項目別記録にあります。[POSIX case records](compatibility/yash-posix/README.md) · [Bash POSIX mode](https://www.gnu.org/software/bash/manual/html_node/Bash-POSIX-Mode.html)

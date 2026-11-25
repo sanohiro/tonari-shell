@@ -99,6 +99,65 @@ class ShellTests(unittest.TestCase):
                                       stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
                 self.assertEqual((proc.returncode, proc.stdout), (-signal.SIGUSR1, b"env:1\n"))
 
+    def test_seekable_input_assignment_and_child_offsets(self):
+        script = self.cwd / "input"
+        script.write_text("i=one\nx=old\nx=$i\nread -r line\npayload for read\n"
+                          "i=two\nx=$i\nprintf '<%s><%s>\\n' \"$x\" \"$line\"\n"
+                          "i=three\nx=$i\ncat\nremaining | bytes\n")
+        for binary in (BASH, TONARI):
+            sh = self.cwd / "sh"
+            sh.unlink(missing_ok=True)
+            sh.symlink_to(binary)
+            with script.open("rb") as stdin:
+                proc = subprocess.run([sh], stdin=stdin, cwd=self.cwd, env=self.env,
+                                      capture_output=True, timeout=5)
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                             (0, b"<two><payload for read>\nremaining | bytes\n", b""))
+
+    def test_continuations_and_literal_command_cache(self):
+        # Physical newlines work in parameter names and operators. Escaped
+        # backslashes and quoted here-document bodies retain their bytes.
+        script = "name=works\nprintf '<%s>\\n' \"$na\\\nme\" \"${na\\\nme:\\\n+yes}\" " \
+                 "\"$name\\\\\nend\"\ncat <<'EOF'\nstring\\\ncontinued\nEOF\n"
+        self.compare(script, 0, b"<works>\n<yes>\n<works\\\nend>\nstring\\\ncontinued\n")
+        self.compare("foobar=value\nfoo=wrong\nprintf '%s' $foo\\\nbar\n", 0, b"value")
+        script_file = self.cwd / "external"
+        script_file.write_text("printf '%s/%s\\n' \"$setting\" \"$1\"\n")
+        script_file.chmod(0o755)
+        self.compare("export setting; for setting in one two; do " +
+                     shlex.quote(str(script_file)) + " 'a b'; done",
+                     0, b"one/a b\ntwo/a b\n")
+        self.compare("set -n; while :; do echo wrong; done; echo wrong", 0)
+
+    def test_posix_declarations_and_error_exit(self):
+        for binary in self.shells_for(5):
+            sh = self.cwd / "sh"
+            sh.unlink(missing_ok=True)
+            sh.symlink_to(binary)
+            result = self.command(sh, "set -- 'one two'; command command export val=$1; "
+                                  "printf '[%s]\\n' \"$val\"; readonly val; export val=other; echo wrong")
+            self.assertEqual(result.stdout, b"[one two]\n")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue(result.stderr)
+
+    def test_notification_wait_honors_prompt_timeout(self):
+        for editing in (False, True):
+            with self.subTest(editing=editing):
+                pid, fd = self.terminal_session(editing=editing, with_pid=True)
+                os.write(fd, b"set -b; TMOUT=1; sleep 2 &\n")
+                self.read_until(fd, b"timed out waiting for input")
+                self.read_until(fd, None)
+                os.waitpid(pid, 0)
+
+    def test_async_notifications_preserve_partial_input_and_wait_status(self):
+        fd = self.terminal_session(editing=True, blocked=(signal.SIGCHLD,))
+        os.write(fd, b"set -b; (sleep 0.3; exit 7) &\n")
+        self.read_until(fd, PROMPT)
+        os.write(fd, b"wait $!; echo status=")
+        self.read_until(fd, b"Done")
+        os.write(fd, b"$?\n")
+        self.assertIn(b"status=7", self.read_until(fd, b"status=7"))
+
     def test_repeated_function_definition_and_positional_frame(self):
         self.compare('set -- outer; f() { shift; printf "%s/%s/%s\\n" "$#" "$1" "${!#}"; }; '
                      'f first "two words" {1..1024}; echo "$#:$1"; '
@@ -553,6 +612,42 @@ f"""
         code = 'PATH=.:$PATH; plain "x y" | cat; echo "${PIPESTATUS[*]}"; ./plain z'
         self.compare(code, 7, b"<./plain><two words x y>\n7 0\n<./plain><two words z>\n")
         self.compare('value=$(./plain z); echo "$?:$value"', 0, b"7:<./plain><two words z>\n")
+
+        directory = self.cwd / "commands"
+        directory.mkdir()
+        helper = directory / "helper"
+        helper.write_text("echo found\n")
+        helper.chmod(0o700)
+        script.write_text('if command -v helper >/dev/null; then helper; else echo default; fi\n')
+        self.compare('PATH=commands:/bin; ./plain; export -n PATH; ./plain; echo "$PATH"', 0,
+                     b"found\ndefault\ncommands:/bin\n")
+
+        (self.cwd / "linked").symlink_to(directory, target_is_directory=True)
+        helper.write_text('printf "<%s><%s>\\n" "${PWD##*/}" "${OLDPWD##*/}"\n')
+        self.compare("export OLDPWD; cd linked; PATH=.:$PATH; helper; unset OLDPWD; ./helper",
+                     0, f"<linked><{self.cwd.name}>\n<linked><>\n".encode())
+
+    def test_executable_text_with_shared_input_and_inherited_descriptor(self):
+        outer = self.cwd / "outer"
+        outer.write_text("""for fd in /dev/fd/*; do
+    if [ "$fd" != /dev/fd/0 ] && [ "$fd" -ef /dev/stdin ]; then echo "extra input: $fd"; fi
+done
+IFS= read -r line || exit 2
+./inner "$line"
+""")
+        inner = self.cwd / "inner"
+        inner.write_text('printf "<%s>\\n" "$1" >&9; exit 7\n')
+        for file in (outer, inner):
+            file.chmod(0o700)
+        script = self.cwd / "input"
+        script.write_text("exec 9>record\n./outer\nfirst line\necho $?\n"
+                          "./outer\nsecond line\necho $?\nexec 9>&-\ncat record\n")
+        for shell in self.shells_for():
+            with self.subTest(shell=shell), script.open("rb") as stdin:
+                result = subprocess.run([shell], cwd=self.cwd, env=self.env, stdin=stdin,
+                                        capture_output=True, timeout=5)
+                self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                 (0, b"7\n7\n<first line>\n<second line>\n", b""))
 
     def test_history_expansion_in_script_and_at_prompt(self):
         source = """set -o history
@@ -2426,7 +2521,7 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                      'history 1 | sed "s/^ *[0-9]* *//"', 0,
                      b"second\n\t echo first\n\t echo second\nchanged\necho changed\n")
 
-    def terminal_session(self, editing=False, shell=TONARI, login=False, blocked=()):
+    def terminal_session(self, editing=False, shell=TONARI, login=False, blocked=(), with_pid=False):
         pid, fd = pty.fork()
         if pid == 0:
             try:
@@ -2468,7 +2563,7 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                 pass
         self.addCleanup(close)
         self.read_until(fd, PROMPT)
-        return fd
+        return (pid, fd) if with_pid else fd
 
     def test_silent_terminal_read_restores_echo(self):
         for shell in self.shells_for(4):

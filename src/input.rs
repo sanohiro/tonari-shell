@@ -309,6 +309,25 @@ fn buffered_compound<P: AsRef<[parser::Statement]>>(
     Err(buffered.len())
 }
 
+// Only use a stored scalar as the source. Dynamic parameters, namerefs,
+// arrays, unset variables and arithmetic run through ordinary expansion.
+fn assign_buffered_scalar(session: &mut Session, command: &str, scratch: &mut String) -> bool {
+    if let Some((name, value)) = parser::plain_assignment(command) {
+        return session.assign_existing_literal(name, value);
+    }
+    let Some((target, source)) = command.split_once("=$") else {
+        return false;
+    };
+    if !crate::word::is_identifier(target) || !crate::word::is_identifier(source) {
+        return false;
+    }
+    let Some(value) = session.stored_scalar(source) else {
+        return false;
+    };
+    value.clone_into(scratch);
+    session.assign_existing_literal(target, scratch)
+}
+
 fn run(
     session: &mut Session,
     mut reader: BufReader<PrivateFile>,
@@ -317,6 +336,7 @@ fn run(
     mut status: u8,
     check: bool,
 ) -> Flow {
+    let mut assignment_value = String::new();
     let mut base_line = 1;
     let mut input = Vec::new();
     let mut here_doc: Option<parser::HereDocHint> = None;
@@ -361,6 +381,32 @@ fn run(
         // accumulated compound commands, history expansion and NUL diagnostics.
         if line_start == 0 && n != 0 && blank_or_comment(text) {
             base_line += text.bytes().filter(|&b| b == b'\n').count();
+            input.clear();
+            continue;
+        }
+        // A write to an existing plain scalar cannot run shell code or consume stdin.
+        // Preserve read-ahead across those lines. The next observable command still
+        // synchronizes the shared offset before any builtin, trap or child can read.
+        if shared_offset
+            && line_start == 0
+            && !check
+            && !session.noexec
+            && !session.onecmd
+            && !session.xtrace
+            && !session.history_enabled
+            && !session.traps.active()
+            && !session.traps.in_action()
+            && session.coprocesses.is_empty()
+            && session.jobs.is_empty()
+            && let Some(command) = text.strip_suffix('\n')
+            && assign_buffered_scalar(session, command, &mut assignment_value)
+        {
+            session.current_command = Some(parser::Location::label(command.into(), base_line));
+            session.pipe_status.single(0);
+            session.substitutions.finish(session.substitutions.scope());
+            ran = true;
+            status = 0;
+            base_line += 1;
             input.clear();
             continue;
         }

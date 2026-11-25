@@ -70,7 +70,7 @@ fn byte() -> io::Result<Option<u8>> {
     }
 }
 
-fn ready(fd: RawFd, ms: i32) -> bool {
+pub(crate) fn ready(fd: RawFd, ms: i32) -> bool {
     let mut p = libc::pollfd {
         fd,
         events: libc::POLLIN,
@@ -832,6 +832,13 @@ pub fn line(
         if crate::interrupted() {
             io::stderr().write_all(b"\r\n")?;
             return Ok(Input::Cancel);
+        }
+        if session.notify && keys.queued.is_empty() {
+            crate::wait_for_job_notice(&mut session.jobs, |jobs| {
+                screen.draw("", "", 0, "")?;
+                jobs.report_changes();
+                screen.draw(visible_prompt, &text, cursor, "")
+            })?;
         }
         let first = match keys.get() {
             Ok(Some(c)) => c,

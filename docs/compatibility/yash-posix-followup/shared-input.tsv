@@ -1,0 +1,9 @@
+host	workload	release ms	Bash ms	512 byte buffer ms	32 KiB buffer ms	release/Bash
+ubuntu-24.04	short	0.673	2.605	0.683	0.69	0.25835
+ubuntu-24.04	medium	1.781	12.416	2.837	1.711	0.14344
+ubuntu-24.04	long	3.458	29.052	6.03	3.351	0.11903
+ubuntu-24.04	shared read	3.928	5.598	3.704	3.959	0.70168
+macos-15	short	7.076	12.176	7.641	6.979	0.58114
+macos-15	medium	6.98	22.283	7.035	7.063	0.31324
+macos-15	long	8.085	44.842	10.433	9.725	0.1803
+macos-15	shared read	8.619	14.103	8.583	7.676	0.61115

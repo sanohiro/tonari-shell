@@ -145,7 +145,7 @@ impl External {
         }
     }
     // A plain ENOEXEC command can reuse its process image for a fresh interpreter.
-    // Use exec for managed jobs, changed environments and inherited runtime
+    // Use exec for managed jobs, other environment changes and inherited runtime
     // state that needs an actual image transition.
     pub(super) fn start_script(
         &self,
@@ -175,12 +175,17 @@ impl External {
         {
             return None;
         }
-        let mut shell_level = None;
-        for (name, value) in session.environment_changes(&[]) {
-            if name != "SHLVL" {
-                return None;
-            }
-            shell_level = Some(value);
+        // Both callers supply the session only for commands without prefix
+        // assignments. Their prepared export delta is the child's environment.
+        let changes = self
+            .env
+            .as_ref()
+            .map_or(&[][..], |env| env.changes.as_slice());
+        if changes
+            .iter()
+            .any(|(name, _)| !matches!(name.as_str(), "SHLVL" | "PATH" | "PWD" | "OLDPWD"))
+        {
+            return None;
         }
         let _ = std::io::stdout().flush();
         if process == ScriptProcess::Child {
@@ -188,6 +193,7 @@ impl External {
             if pid != 0 {
                 return (pid > 0).then_some(pid);
             }
+            super::fd::close_in_script_child();
         }
         if has_close_on_exec_fds() {
             if process == ScriptProcess::Replace {
@@ -199,12 +205,13 @@ impl External {
             }
         }
         REENTERED.set(true);
-        // The interpreter is single-threaded. Apply exactly the exported
-        // change, including export -n, before starting the ordinary script entry point.
-        match shell_level {
-            Some(Some(value)) => unsafe { std::env::set_var("SHLVL", value.as_ref()) },
-            Some(None) => unsafe { std::env::remove_var("SHLVL") },
-            None => (),
+        // These variables are read by the fresh interpreter. Other changes
+        // may need the dynamic loader or a new native runtime.
+        for (name, value) in changes {
+            match value {
+                Some(value) => unsafe { std::env::set_var(name, value) },
+                None => unsafe { std::env::remove_var(name) },
+            }
         }
         let argv = [
             OsString::from("tonari"),

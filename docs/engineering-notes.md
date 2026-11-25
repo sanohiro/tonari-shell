@@ -1,5 +1,23 @@
 # Engineering notes / 開発知見
 
+## 2026-11-26 · Shared input, child status and foreground jobs / 共有入力と子プロセスの状態
+
+A shell reading commands from a regular file on fd 0 shares its offset with children. A physical line assigning a literal or an existing ordinary scalar can use the buffered data through the next assignment. Before a command that could read fd 0, Tonari seeks back over unread bytes. The shortcut falls back on dynamic parameters, command substitution, special bindings, tracing, active traps and jobs. The regression script alternates assignments with a builtin read and an external cat and checks the exact remaining bytes. [Input implementation](../src/input.rs) · [Regression tests](../tests/shell.py) · [Native timings](compatibility/yash-posix-followup/README.md)
+
+非対話のジョブ制御では、呼び出し元と共有するプロセスグループを記憶し、子ジョブが終了・停止したらそこに端末を返す。これで同じ端末から次に起動されるシェルも、停止した子を前面で再開できる。パイプラインの終了状態だけを返す組み込みは、ジョブ制御、シグナルトラップ、リダイレクトなどで子が観測可能になる場合に実際の子を作る。外部プログラムの起動コストは、同じ環境で C から同じプログラムを100回起動し、そのつど終了を待って比較する。[Job control](../src/jobs.rs) · [Native spawn control](../tools/bench_spawn.c)
+
+Use separate Cargo target directories when a PR check builds two revisions with the same package name and version. With a shared target directory, Cargo completed the second build in 0.01 seconds and the check exercised the older executable twice. The full native comparison records executable hashes and the POSIX PR check now builds each checkout into its own directory. 同じソース名と版番号の新旧ビルドを比較するときは、成果物の混在を避けて双方の実行ファイルを確認する。[PR workflow](../.github/workflows/posix-shell.yml)
+
+The prompt previously polled for completed jobs every 50 ms when `set -b` was active. Blocking SIGCHLD before checking the job table and atomically unblocking it during `pselect` removes that polling interval. The same call accepts keyboard input and the existing preview deadline. キー、子の状態変化、入力プレビューの期限を同時に待つため、入力中でも通知用タイマーの一周を待たずに表示を更新できます。 On native Linux x86-64 the median job notice took 50.28 ms before and 0.39 ms after. On macOS arm64 it took 52.36 and 2.00 ms respectively. [PTY measurements](compatibility/yash-posix-followup/notify.tsv)
+
+Closing private input descriptors in the forked interpreter child avoids loading a second shell executable for plain text programs. The parent retains its reader and the child retains user-opened descriptors. `#!` のない実行ファイルでは、標準入力を読むための親シェル内部の記述子が子にも残り、毎回シェルバイナリを実行し直していました。新しいインタープリターに入る子だけが、自分が引き継いだ内部の記述子を閉じます。親が読んでいる位置と、ユーザーが開いた記述子は保たれます。最後に起動したスクリプトのパスを覚えて次の起動方法を変える試作も実測しましたが、M1 の30回起動では採用した実装に対する改善を再現できませんでした。[Regression](../tests/shell.py) · [Native comparison](compatibility/yash-posix-followup/executable-text.tsv)
+
+On Darwin, the parent and child both assign the foreground process group after a fork. Occasionally the child received EPERM and exited before executing its subshell. In 19 of 150,000 C control forks the child still saw its old group at the first check. Tonari checks membership after EPERM and can retry creation of its own group. Successful calls still use one syscall. A unit test uses a session leader to exercise both matching and mismatching groups. 修正後は、実機で元のシグナル処理を15,000回反復し、子が毎回コマンドを実行することを確認しました。[Native POSIX result](compatibility/yash-posix-followup/README.md) · [Job setup](../src/jobs.rs)
+
+Two macOS fixtures changed PATH before repeatedly invoking executable text files. The forked interpreter now carries the exported search path and working directory into the new script session. 子に渡す PATH、PWD、OLDPWD の変更と削除を反映し、親シェルの環境を維持します。[Working directory cases](compatibility/yash-posix-followup/working-directory-scripts.tsv) · [Native path comparison](compatibility/yash-posix-followup/script-search-path.tsv)
+
+The set builtin groups its option listing into a single buffer and checks the final flush for errors. オプション一覧1,000組の出力を測定し、シェルスクリプトとして読み戻す負荷も別に計測しました。[Option reports](compatibility/yash-posix-followup/option-reports.tsv)
+
 ## 2026-11-25 · Running the same POSIX shell tests under two interpreters / 同じ sh 試験から分かったこと
 
 Use a symlink called `sh` for both executables. The original invocation basename selects startup behavior even when `-c` sets a different `$0`. An interactive `sh` reads `ENV` and then enters POSIX mode. A noninteractive `sh` expands aliases from earlier complete commands and retains assignment prefixes on special builtins. Running the original upstream scripts exposed failures that small standalone language probes had missed. [Bash startup semantics](https://www.gnu.org/software/bash/manual/html_node/Bash-Startup-Files.html) · [Regression witnesses](../tests/shell.py) · [Case results](compatibility/yash-posix/README.md)

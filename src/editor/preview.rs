@@ -300,7 +300,7 @@ pub(crate) fn wait_child(pid: libc::pid_t) -> std::io::Result<i32> {
             signaled = true;
         }
         if wants_keys() && !signaled {
-            if mask.input_or_child()? {
+            if mask.input_or_child(None)? {
                 poll();
             }
         } else {

@@ -107,6 +107,10 @@ impl Session {
                 }
             }
         }
+        if self.posix && self.readonly("OPTARG") {
+            eprintln!("tonari: getopts: OPTARG: readonly variable");
+            return 2;
+        }
         if let Some(value) = value {
             self.assign("OPTARG", &value);
         } else {
