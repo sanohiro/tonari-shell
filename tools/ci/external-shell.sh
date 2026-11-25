@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
-suite=$1 tonari=$2 bash_ref=$3
-compare=()
-if [[ -n ${4:-} ]]; then compare=(--previous "$4"); fi
-if [[ -n ${5:-} ]]; then compare+=(--opt3 "$5" --raw "$PWD/results/external-raw.json"); fi
+suite=$1 tonari=$2 bash_ref=$3 previous=${4:-} opt3=${5:-}
+set --
+if [[ -n $previous ]]; then set -- --previous "$previous"; fi
+if [[ -n $opt3 ]]; then set -- "$@" --opt3 "$opt3" --raw "$PWD/results/external-raw.json"; fi
 if [[ -n ${EXTERNAL_BENCH_CASE:-} || -n ${EXTERNAL_BENCH_RUNS:-} ]]; then
   case "$suite" in
     gnu-hello|fumiyas|unixwin|luish)
-      if [[ -n ${EXTERNAL_BENCH_CASE:-} ]]; then compare+=(--case "$EXTERNAL_BENCH_CASE"); fi
-      if [[ -n ${EXTERNAL_BENCH_RUNS:-} ]]; then compare+=(--runs "$EXTERNAL_BENCH_RUNS"); fi ;;
+      if [[ -n ${EXTERNAL_BENCH_CASE:-} ]]; then set -- "$@" --case "$EXTERNAL_BENCH_CASE"; fi
+      if [[ -n ${EXTERNAL_BENCH_RUNS:-} ]]; then set -- "$@" --runs "$EXTERNAL_BENCH_RUNS"; fi ;;
     *) echo "Per-case selection and trial counts require a bench_external.py suite" >&2; exit 2 ;;
   esac
 fi
@@ -22,22 +22,23 @@ case "$suite" in
     if [[ $suite == gnu-waits ]]; then
       python3 tools/ci/configure-waits.py "$work/hello-2.12.2" "$tonari" "$bash_ref" "${tonari%/*}/observer" "$PWD/results"
     elif [[ $suite == gnu-profile ]]; then
-      previous=()
-      if [[ -n ${RUNNER_TEMP:-} && -x $RUNNER_TEMP/bin/baseline ]]; then
-        previous+=("$RUNNER_TEMP/bin/baseline")
-        compare+=(--previous "$RUNNER_TEMP/bin/baseline")
+      if [[ -z $previous && -n ${RUNNER_TEMP:-} && -x $RUNNER_TEMP/bin/baseline ]]; then
+        previous=$RUNNER_TEMP/bin/baseline
+        set -- "$@" --previous "$previous"
       fi
-      python3 tools/bench_external.py gnu-hello "$work/hello-2.12.2" "$tonari" "$bash_ref" "${compare[@]}"
-      python3 tools/ci/configure-profile.py "$work/hello-2.12.2/configure" "$tonari" "$bash_ref" "$PWD/results" "${previous[@]}"
+      python3 tools/bench_external.py gnu-hello "$work/hello-2.12.2" "$tonari" "$bash_ref" "$@"
+      set --
+      if [[ -n $previous ]]; then set -- "$previous"; fi
+      python3 tools/ci/configure-profile.py "$work/hello-2.12.2/configure" "$tonari" "$bash_ref" "$PWD/results" "$@"
     else
-      python3 tools/bench_external.py gnu-hello "$work/hello-2.12.2" "$tonari" "$bash_ref" "${compare[@]}"
+      python3 tools/bench_external.py gnu-hello "$work/hello-2.12.2" "$tonari" "$bash_ref" "$@"
     fi
     ;;
   fumiyas)
     curl -fsSL --retry 3 https://raw.githubusercontent.com/fumiyas/fumiyas.github.io/d188b4fa60eca66f2bcd9f5a48a3c80a5c4fc307/2013/12/01/sh-benchmark-scripts.sh -o "$work/cases.sh"
     echo "87360d3da6988cbc5542fb339f37377b1802721353b1d89c1ceba5d773d29da7  $work/cases.sh" | shasum -a 256 -c - >&2
     command -v zsh >/dev/null || { echo 'fumiyas fixtures require zsh' >&2; exit 1; }
-    python3 tools/bench_external.py fumiyas "$work/cases.sh" "$tonari" "$bash_ref" "${compare[@]}"
+    python3 tools/bench_external.py fumiyas "$work/cases.sh" "$tonari" "$bash_ref" "$@"
     ;;
   shellspec|check-shellspec|unixwin|luish)
     case "$suite" in
@@ -50,15 +51,15 @@ case "$suite" in
     git -C "$work" checkout -q --detach "$rev"
     if [[ $suite == shellspec || $suite == check-shellspec ]]; then
       check=("$bash_ref" "$tonari")
-      if [[ -n ${4:-} ]]; then check+=("$4"); fi
-      if [[ -n ${5:-} ]]; then check+=("$5"); fi
+      if [[ -n $previous ]]; then check+=("$previous"); fi
+      if [[ -n $opt3 ]]; then check+=("$opt3"); fi
       python3 tools/ci/check-shellspec.py "$work/sample" "${check[@]}" > "$PWD/results/shellspec-witnesses.txt"
       if [[ $suite == check-shellspec ]]; then cat "$PWD/results/shellspec-witnesses.txt"; exit; fi
       mkdir "$work/bin" "$work/home"
       ln -s "$tonari" "$work/bin/tonari"
       ln -s "$bash_ref" "$work/bin/bash-ref"
-      if [[ -n ${4:-} ]]; then ln -s "$4" "$work/bin/previous"; fi
-      if [[ -n ${5:-} ]]; then ln -s "$5" "$work/bin/opt3"; fi
+      if [[ -n $previous ]]; then ln -s "$previous" "$work/bin/previous"; fi
+      if [[ -n $opt3 ]]; then ln -s "$opt3" "$work/bin/opt3"; fi
       # The upstream controller signals its own process group to release its workers.
       python3 - "$work" <<'PY'
 import os, pathlib, subprocess, sys
@@ -76,7 +77,7 @@ for names in orders:
                    env=env, cwd=w, start_new_session=True, check=True)
 PY
     else
-      python3 tools/bench_external.py "$suite" "$work" "$tonari" "$bash_ref" "${compare[@]}"
+      python3 tools/bench_external.py "$suite" "$work" "$tonari" "$bash_ref" "$@"
     fi
     ;;
   *) exit 2 ;;

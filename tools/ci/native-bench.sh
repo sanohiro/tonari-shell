@@ -126,10 +126,10 @@ fi
 case "$SUITE" in
   external-review-*|external-check-shellspec|external-shellspec|external-fumiyas|external-unixwin|external-luish|external-gnu-hello|external-gnu-profile|external-gnu-waits)
     suite=${SUITE#external-}
-    compare=()
+    set --
     if [[ $suite == review-* ]]; then
       suite=${suite#review-}
-      compare=("$bin/baseline" "$bin/opt-3")
+      set -- "$bin/baseline" "$bin/opt-3"
     fi
     if [[ $suite == fumiyas ]] && ! command -v zsh >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y zsh; fi
     if [[ $suite == unixwin && $RUNNER_OS == macOS ]] && ! command -v stdbuf >/dev/null; then
@@ -137,7 +137,7 @@ case "$SUITE" in
       export SHELLBENCH_COREUTILS
       SHELLBENCH_COREUTILS="$(brew --prefix coreutils)/libexec/gnubin"
     fi
-    run "$SUITE" bash tools/ci/external-shell.sh "$suite" "$current" "$ref" "${compare[@]}" ;;
+    run "$SUITE" bash tools/ci/external-shell.sh "$suite" "$current" "$ref" "$@" ;;
   starship)
     case "$NATIVE_RUNNER" in
       ubuntu-24.04) platform=x86_64-unknown-linux-musl; sha=10c8eb4cb3b761d9bf59ea828444c2dab36c900b7d69a69e08814b286969df89 ;;
