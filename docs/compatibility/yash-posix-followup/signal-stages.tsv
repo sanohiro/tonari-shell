@@ -1,0 +1,9 @@
+host	signal	core pattern	Tonari to marker ms	Tonari marker to wait ms	Bash to marker ms	Bash marker to wait ms
+ubuntu-24.04	TERM	|/usr/lib/systemd/systemd-coredump %P %u %g %s %t 9223372036854775808 %h %d	0.352	0.062	0.866	0.15
+ubuntu-24.04	FPE	|/usr/lib/systemd/systemd-coredump %P %u %g %s %t 9223372036854775808 %h %d	1.262	137.323	2.303	148.262
+ubuntu-24.04	SEGV	|/usr/lib/systemd/systemd-coredump %P %u %g %s %t 9223372036854775808 %h %d	1.09	156.822	2.15	166.662
+ubuntu-24.04	ABRT	|/usr/lib/systemd/systemd-coredump %P %u %g %s %t 9223372036854775808 %h %d	1.465	145.302	1.901	179.489
+macos-15	TERM		2.418	0.066	4.376	0.071
+macos-15	FPE		3.313	0.171	5.619	0.262
+macos-15	SEGV		3.052	0.156	5.238	0.264
+macos-15	ABRT		2.827	0.146	5.636	0.256

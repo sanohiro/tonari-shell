@@ -1,0 +1,7 @@
+host	workload	trials	Tonari ms	Bash ms	Tonari/Bash
+ubuntu-24.04	symbolic-umask	17	11.195	25.772	0.43439
+ubuntu-24.04	set-flags	17	8.761	26.366	0.33228
+macos-15	symbolic-umask	17	17.433	41.425	0.42083
+macos-15	set-flags	17	16.239	38.277	0.42425
+physical M1	symbolic-umask	17	11.96	25.085	0.47678
+physical M1	set-flags	17	11.22	25.685	0.43683

@@ -1,5 +1,16 @@
 # Startup and execution / 起動と実行性能
 
+## 2026-11-26 · Bash-passing POSIX cases / POSIX 互換性修正後の性能
+
+The three-run comparison covers 11,079 cases per host, including the generated signal tests. The table gives the median of the per-case Tonari/Bash ratios. The last column counts cases that still took at least as long as Bash when every initial miss of the 2/3 target was repeated 11 times. [Case tables and replay method](compatibility/yash-posix-followup/README.md)
+
+| Native host | Joint passes | Median ratio | At most 2/3 on the first sweep | At least Bash time on replay |
+| --- | ---: | ---: | ---: | ---: |
+| Linux x86-64 | 9,311 | 0.430 | 9,037 | 5 |
+| macOS arm64 | 9,310 | 0.478 | 8,640 | 0 |
+
+Linux の共有標準入力で1,500行の代入を実行する時間は、変更前 3.31 ms、修正後 0.511 ms、Bash 1.997 msでした。`#!` のない実行ファイルを30回続けて呼ぶと、M1 で 90.736 ms から 24.655 ms に短縮しました。Bash は 30.342 ms でした。外部プログラム100回の起動は同じランナーの C 対照と併記しています。[Shared stdin and process launches](compatibility/yash-posix-followup/throughput.tsv) · [Executable text](compatibility/yash-posix-followup/executable-text.tsv)
+
 <a id="yash-posix"></a>
 
 ## 2026-11-25 · POSIX sh workloads / sh モードの項目別計測

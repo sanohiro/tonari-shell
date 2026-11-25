@@ -1,0 +1,945 @@
+host	upstream case	tonari/bash	tonari us	bash us	11-trial tonari/bash	site IDs
+macos-15	errexit-p.tst:189: errexit: subshell	1.444	16695.0	11562.0	0.6129	0 1 3 7 8 23 24 26 27 30 32 33 40 42 44
+macos-15	redir-p.tst:268: output duplication, success	1.3229	19368.0	14641.0	0.5318	0 1 3 7 8 15 17 23 24 25 26 27 29 30 33 42 44 48
+macos-15	exit-p.tst:83: exit from signal trap with 3	1.2341	15127.0	12258.0	0.6576	0 1 3 5 7 8 13 14 23 24 26 29 30 33 36 39 40 41 42 48
+macos-15	trap-p.tst:58: specifying signal by number (TERM)	1.2268	16004.0	13045.0	0.705	0 1 3 5 7 8 13 14 23 24 26 29 30 33 36 39 40 41 42 44 48
+macos-15	bg-p.tst:13: bg cannot be used when job control is disabled	1.2123	9239.0	7621.0	0.5435	0 1 3 7 8 23 24 26 27 32 33 35 40 42 50
+macos-15	redir-p.tst:152: clobbering redirection, +C, success	1.197	15743.0	13152.0	0.5768	0 1 3 7 8 23 24 25 26 29 30 33 42 44 48
+macos-15	getopts-p.tst:187: single hyphen is not an option but an operand	1.1919	7396.0	6205.0	0.5268	0 1 3 7 8 21 23 24 26 42 48 51
+macos-15	errexit-p.tst:210: errexit: grouping	1.1788	14600.0	12385.0	0.6872	0 1 3 7 8 23 24 26 27 30 32 33 40 42 44
+macos-15	if-p.tst:393: nest between then and elif	1.1562	7024.0	6075.0	0.5102	0 1 3 7 8 11 23 24 26 42 44
+macos-15	builtins-p.tst:77: assignment on special built-in return is persistent	1.1416	6967.0	6103.0	0.4748	0 1 3 7 8 13 14 17 21 22 23 24 26 42 44 48
+macos-15	redir-p.tst:112: overwrite redirection, +C, success	1.1209	16384.0	14617.0	0.5999	0 1 3 7 8 23 24 25 26 29 30 33 42 44
+macos-15	if-p.tst:379: nest between if and then	1.1089	6417.0	5787.0	0.6198	0 1 3 7 8 11 23 24 26 42 44
+macos-15	trap-p.tst:52: specifying signal by number (HUP)	1.0969	12410.0	11314.0	0.6147	0 1 3 5 7 8 13 14 23 24 26 29 30 33 36 39 40 41 42 44 48
+macos-15	tilde-p.tst:217: named tilde expansion in assignment, following colon	1.0787	6140.0	5692.0	0.755	0 1 3 7 8 11 13 14 17 20 21 23 24 26 42 43 44 45 48
+macos-15	builtins-p.tst:344: intrinsic built-in jobs can be invoked without $PATH	1.0775	6366.0	5908.0	0.536	0 1 3 7 8 17 21 23 24 26 42
+macos-15	alias-p.tst:115: printing undefined alias is error	1.0715	5544.0	5174.0	0.5193	0 1 3 7 8 9 23 24 26 42 50
+macos-15	fnmatch-p.tst:252: brackets	1.0593	7233.0	6828.0	0.4455	0 1 3 7 8 17 23 24 26 42 44
+macos-15	sigterm3-p.tst:8022: SIGTERM kills shell (subshell, other, +i -m, initially defaulted, command -> keep)	1.0589	12898.0	12180.0	0.4673	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 40 41 42 48
+macos-15	builtins-p.tst:7: assignment on special built-in colon is persistent	1.0535	7064.0	6705.0	0.449	0 1 3 7 8 17 21 22 23 24 26 42 44 48
+macos-15	cd-p.tst:282: directory not found (with unset CDPATH, -P)	1.0521	6863.0	6523.0	0.5753	0 1 3 7 8 15 17 23 24 26 42 44 48 52
+macos-15	sigquit6-p.tst:7078: SIGQUIT spares child process (subshell, self, -i +m, initially ignored, ignore -> ignore)	1.0511	14684.0	13970.0	0.407	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 36 39 40 41 42 44 48 55 56
+macos-15	trap-p.tst:209: setting new trap in trap	1.0463	22702.0	21697.0	0.7353	0 1 3 5 7 8 13 14 23 24 26 29 30 33 36 39 40 41 42 44 48
+macos-15	sighup3-p.tst:8066: SIGPIPE spares child process (main, self, +i -m, initially defaulted, command -> ignore)	1.0429	9096.0	8722.0	0.5026	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48
+macos-15	until-p.tst:42: exit status of 1-round loop	1.0419	8331.0	7996.0	0.4959	0 1 3 7 8 9 12 13 14 15 17 21 23 24 26 42 45 48
+macos-15	cd-p.tst:331: symbolic links are resolved (in old PWD, -P)	1.0417	6543.0	6281.0	0.5218	0 1 3 7 8 21 23 24 26 42 43 48 52
+macos-15	sigterm3-p.tst:8026: SIGTERM kills shell (cmdsub, other, +i -m, initially defaulted, keep -> keep)	1.0347	11316.0	10936.0	0.4299	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 40 42 48
+macos-15	cd-p.tst:426: OLDPWD is set to old PWD (-L)	1.0344	6104.0	5901.0	0.5043	0 1 3 7 8 21 23 24 26 42 43 48 52
+macos-15	builtins-p.tst:245: special built-in colon can be invoked without $PATH	1.0291	5830.0	5665.0	0.4487	0 1 3 7 8 17 21 23 24 26 42
+macos-15	trap-p.tst:224: printing traps	1.0291	14942.0	14519.0	0.6815	0 1 2 3 4 5 7 8 13 14 23 24 25 26 27 29 30 33 36 39 40 41 42 44 48
+macos-15	sigcont2-p.tst:7125: SIGCONT spares execed process (main, other, +i +m, initially ignored, ignore -> clear)	1.0242	22138.0	21615.0	0.4435	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 36 39 42 44 48
+macos-15	trap-p.tst:32: specifying multiple signals	1.023	23037.0	22519.0	0.6909	0 1 3 5 7 8 13 14 23 24 26 29 30 33 36 39 40 41 42 44 48
+macos-15	trap-p.tst:198: single trap may be invoked more than once	1.0194	25666.0	25178.0	0.7581	0 1 3 5 7 8 13 14 23 24 26 29 30 33 36 39 40 41 42 44 48
+macos-15	builtins-p.tst:86: assignment on special built-in set is persistent	1.0193	6277.0	6158.0	0.5466	0 1 3 7 8 17 21 22 23 24 26 42 44 48 50
+macos-15	return-p.tst:179: returning with !	1.0097	6165.0	6106.0	0.4653	0 1 3 7 8 13 14 23 24 26 42
+macos-15	case-p.tst:345: reserved word else as pattern	1.0088	7332.0	7268.0	0.5528	0 1 3 7 8 17 23 24 26 42 44
+macos-15	tilde-p.tst:71: unnamed tilde expansion in assignment, following colon	1.0068	6084.0	6043.0	0.5527	0 1 3 7 8 11 13 14 17 20 21 23 24 26 42 43 44 45 48
+macos-15	export-p.tst:5: exporting one variable	1.0065	12103.0	12025.0	0.681	0 1 3 7 8 23 24 26 29 30 33 42 44 48
+macos-15	sighup8-p.tst:8153: SIGHUP kills execed process (cmdsub, other, -i -m, initially ignored, clear -> clear)	1.0061	20645.0	20520.0	0.4554	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 34 36 39 40 41 42 48 55 56
+macos-15	if-p.tst:282: linebreak before then (after elif)	0.9989	6335.0	6342.0	0.5777	0 1 3 7 8 11 23 24 26 42 44
+macos-15	sigquit6-p.tst:7170: SIGQUIT spares execed process (async, self, -i +m, initially ignored, clear -> ignore)	0.9984	13092.0	13113.0	0.42	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48 55 56
+macos-15	dot-p.tst:80: dot script not found, in $PATH, subshell, exit status	0.9974	6900.0	6918.0	0.5116	0 1 2 3 7 8 17 21 23 24 26 40 42 48
+macos-15	command-p.tst:37: command ignores function (external command)	0.9934	7865.0	7917.0	0.6402	0 1 3 7 8 14 24 25 27 29 31 33 40 42
+macos-15	continue-p.tst:421: continuing one more than actual nest level two	0.9879	8034.0	8132.0	0.5671	0 1 3 7 8 12 21 23 24 26 42
+macos-15	option-p.tst:67: errexit (long) off: $-	0.9857	6886.0	6986.0	0.5424	0 1 3 7 8 24 30 32 33 42 43
+macos-15	sighup3-p.tst:8000: SIGUSR1 kills shell (main, self, +i -m, initially defaulted, keep -> keep)	0.9834	6394.0	6502.0	0.4763	0 1 3 7 8 23 24 26 36 48
+macos-15	command-p.tst:5: redirection error on special built-in does not kill shell	0.983	6056.0	6161.0	0.5421	0 1 3 7 8 23 24 25 26 42 44
+macos-15	cd-p.tst:343: default option is -L	0.9821	6204.0	6317.0	0.5301	0 1 3 7 8 21 23 24 26 42 43 48 52
+macos-15	sighup2-p.tst:7162: SIGUSR2 spares execed process (cmdsub, self, +i +m, initially ignored, command -> ignore)	0.9817	13102.0	13346.0	0.5041	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 42 44 48
+macos-15	errexit-p.tst:198: noerrexit: grouping	0.9759	12649.0	12961.0	0.5358	0 1 3 7 8 23 24 26 27 30 32 33 40 42 44
+macos-15	alias-p.tst:232: alias substitution to here-document operand	0.9717	8400.0	8645.0	0.5888	0 1 3 7 8 9 10 23 24 25 26 28 29 30 33 42 50
+macos-15	sigurg2-p.tst:7016: SIGURG spares shell (subshell, other, +i +m, initially ignored, clear -> ignore)	0.9689	11328.0	11692.0	0.5349	0 1 3 5 7 8 23 24 26 29 30 33 36 39 40 42 44 48
+macos-15	cd-p.tst:365: the last option wins (-P)	0.9595	5966.0	6218.0	0.6399	0 1 3 7 8 21 23 24 26 42 43 48 52
+macos-15	sigquit2-p.tst:7123: SIGQUIT spares execed process (main, other, +i +m, initially ignored, clear -> command)	0.958	21511.0	22455.0	0.4724	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 36 39 42 44 48
+macos-15	command-p.tst:12: dot script not found does not kill shell	0.9574	5165.0	5395.0	0.5351	0 1 2 3 7 8 23 24 26 42 44
+macos-15	case-p.tst:369: redirection on case command	0.9569	10572.0	11048.0	0.7285	0 1 3 7 8 17 23 24 25 26 27 29 30 33 34 40 42 44
+macos-15	sigcont6-p.tst:7134: SIGCONT spares execed process (subshell, self, -i +m, initially ignored, keep -> ignore)	0.9559	13252.0	13864.0	0.4576	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 36 39 40 41 42 44 48 55 56
+macos-15	sigurg8-p.tst:8046: SIGURG spares shell (async, other, -i -m, initially ignored, ignore -> ignore)	0.9545	15161.0	15884.0	0.433	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+macos-15	sigurg2-p.tst:7148: SIGURG spares execed process (cmdsub, self, +i +m, initially ignored, keep -> keep)	0.9532	9282.0	9738.0	0.4872	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 40 42 44 48
+macos-15	trap-p.tst:12: setting ignore trap	0.953	19830.0	20807.0	0.6517	0 1 3 5 7 8 13 14 23 24 26 29 30 33 36 39 40 41 42 48
+macos-15	sigterm3-p.tst:8052: SIGTERM kills child process (main, self, +i -m, initially defaulted, keep -> keep)	0.9515	10461.0	10994.0	0.4558	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 40 42 48
+macos-15	sighup3-p.tst:8032: SIGUSR1 kills shell (cmdsub, other, +i -m, initially defaulted, ignore -> clear)	0.9413	11115.0	11808.0	0.5064	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 48
+macos-15	sigterm3-p.tst:8120: SIGTERM kills execed process (main, self, +i -m, initially defaulted, clear -> keep)	0.9407	9515.0	10115.0	0.4311	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 48
+macos-15	error-p.tst:305: assignment error on command ulimit spares interactive shell	0.9396	6624.0	7050.0	0.4234	0 1 7 8 17 21 23 24 26 41 42 43 48 55 56
+macos-15	if-p.tst:342: command ending with asynchronous command (after elif)	0.9379	6193.0	6603.0	0.4997	0 1 3 7 8 11 23 24 26 27 32 33 35 37 40 42 44
+macos-15	sigquit8-p.tst:8154: SIGQUIT spares execed process (cmdsub, self, -i -m, initially ignored, clear -> ignore)	0.9373	12347.0	13173.0	0.4677	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+macos-15	trap-p.tst:93: exit status of failing subshell in signal trap	0.9306	20604.0	22140.0	0.701	0 1 3 5 7 8 13 14 23 24 26 29 30 33 36 39 40 41 42 44 48
+macos-15	umask-p.tst:43: restoring umask using previous output, symbolic, 001	0.9292	6191.0	6663.0	0.5361	0 1 3 7 8 17 21 23 24 26 34 40 42 45 46 48
+macos-15	grouping-p.tst:61: redirection on brace grouping	0.9286	6797.0	7320.0	0.6314	0 1 3 7 8 23 24 25 26 27 29 30 33 42 44
+macos-15	arith-p.tst:325: operator precedence: assignments	0.9268	5910.0	6377.0	0.62	0 1 3 7 8 13 14 15 17 21 23 24 26 42 43 48
+macos-15	errexit-p.tst:165: noerrexit: all failing or list	0.9267	6767.0	7302.0	0.5159	0 1 3 7 8 23 24 26 42 44
+macos-15	sigstop7-p.tst:8024: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, ignore -> keep)	0.9259	14775.0	15958.0	0.4275	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 39 40 41 42 44 48 55 56
+macos-15	sigurg2-p.tst:7104: SIGURG spares child process (async, self, +i +m, initially ignored, clear -> keep)	0.9239	9592.0	10382.0	0.5236	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 44 48
+macos-15	trap-p.tst:279: setting command trap that starts with hyphen	0.9236	12049.0	13045.0	0.7134	0 1 3 4 5 7 8 13 14 17 21 23 24 26 29 30 33 36 39 40 41 42 44 48
+macos-15	sigint6-p.tst:7033: SIGINT spares shell (cmdsub, other, -i +m, initially ignored, ignore -> ignore)	0.9225	13162.0	14268.0	0.4213	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48 55 56
+macos-15	sigquit2-p.tst:7004: SIGQUIT spares shell (main, self, +i +m, initially ignored, clear -> command)	0.9177	8254.0	8994.0	0.4719	0 1 3 7 8 23 24 26 36 39 42 44 48
+macos-15	command-p.tst:51: effect on environment	0.9172	5219.0	5690.0	0.5586	0 1 3 7 8 10 21 23 24 25 26 27 28 42 44 47 48
+macos-15	sigterm3-p.tst:8173: SIGTERM kills execed process (async, other, +i -m, initially defaulted, ignore -> clear)	0.9127	16468.0	18043.0	0.4299	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 37 39 40 41 42 48
+macos-15	case-p.tst:195: exit status of case command (matched, non-empty)	0.9114	8266.0	9070.0	0.6078	0 1 3 7 8 17 23 24 26 34 40 42 44
+macos-15	alias-p.tst:74: reusing printed alias (simple)	0.9087	4876.0	5366.0	0.5342	0 1 3 5 6 7 8 9 17 21 23 24 26 34 40 42 44 48 50
+macos-15	sighup3-p.tst:8031: SIGPIPE spares shell (cmdsub, other, +i -m, initially defaulted, ignore -> keep)	0.9077	8734.0	9622.0	0.4628	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48
+macos-15	sighup4-p.tst:8074: SIGHUP spares child process (subshell, self, +i -m, initially ignored, clear -> ignore)	0.9037	11728.0	12978.0	0.526	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 39 40 42 44 48
+macos-15	kill2-p.tst:32: sending signal: -HUP	0.9017	6797.0	7538.0	0.5333	0 1 3 7 8 23 24 26 36 48
+macos-15	sigquit1-p.tst:7158: SIGQUIT spares execed process (cmdsub, self, +i +m, initially defaulted, ignore -> ignore)	0.9014	10100.0	11205.0	0.4619	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48
+macos-15	sigquit6-p.tst:7106: SIGQUIT spares child process (async, self, -i +m, initially ignored, clear -> ignore)	0.9006	13508.0	14999.0	0.5017	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+macos-15	umask-p.tst:42: restoring umask using previous output, symbolic, 000	0.8982	5585.0	6218.0	0.5834	0 1 3 7 8 17 21 23 24 26 34 40 42 45 46 48
+macos-15	sigcont6-p.tst:7176: SIGCONT spares execed process (async, self, -i +m, initially ignored, command -> keep)	0.8977	12308.0	13711.0	0.5047	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48 55 56
+macos-15	sigurg2-p.tst:7173: SIGURG spares execed process (async, other, +i +m, initially ignored, ignore -> clear)	0.8977	13487.0	15024.0	0.436	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 37 39 40 42 44 48
+macos-15	sigquit8-p.tst:8044: SIGQUIT spares shell (async, other, -i -m, initially ignored, ignore -> keep)	0.8972	12168.0	13562.0	0.6879	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+macos-15	umask-p.tst:92: symbolic operand o+xr	0.8951	10604.0	11847.0	0.7452	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sighup3-p.tst:8048: SIGUSR1 kills shell (async, other, +i -m, initially defaulted, command -> keep)	0.8933	9181.0	10278.0	0.5032	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 48
+macos-15	quote-p.tst:436: double quotes in command substitution in double quotes	0.8927	6953.0	7789.0	0.568	0 1 3 7 8 11 13 14 17 21 23 24 26 34 40 42 43 44 45 48
+macos-15	cd-p.tst:320: symbolic links are resolved (in operand, -P)	0.8925	5721.0	6410.0	0.5286	0 1 3 7 8 21 23 24 26 42 43 48 52
+macos-15	sigterm3-p.tst:8112: SIGTERM kills child process (async, self, +i -m, initially defaulted, command -> keep)	0.8924	10355.0	11604.0	0.4621	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 41 42 48
+macos-15	test-p.tst:362: test 11 > 11	0.8909	3928.0	4409.0	0.5385	0 1 3 7 8 17 21 23 24 26 42 45 48
+macos-15	alias-p.tst:126: using alias after assignment (simple)	0.89	8647.0	9716.0	0.6771	0 1 3 7 8 9 17 23 24 26 29 30 33 42 50
+macos-15	grouping-p.tst:28: subshell ending with semicolon	0.8878	5655.0	6370.0	0.4656	0 1 3 7 8 23 24 26 40 42 44
+macos-15	continue-p.tst:408: zero operand	0.8873	5189.0	5848.0	0.5665	0 1 3 7 8 12 21 23 24 26 42
+macos-15	umask-p.tst:84: symbolic operand g+wx	0.8838	10235.0	11581.0	0.5986	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sigurg2-p.tst:7011: SIGURG spares shell (main, other, +i +m, initially ignored, command -> ignore)	0.8818	10796.0	12243.0	0.4927	0 1 3 5 7 8 23 24 26 29 30 33 36 39 42 44 48
+macos-15	umask-p.tst:85: symbolic operand g+xwr	0.8798	9273.0	10540.0	0.5689	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sigterm6-p.tst:7000: SIGTERM spares shell (main, self, -i +m, initially ignored, keep -> keep)	0.8772	11742.0	13386.0	0.4515	0 1 7 8 17 21 23 24 26 36 41 42 44 48 55 56
+macos-15	option-p.tst:29: allexport (long) on: effect	0.8743	6554.0	7496.0	0.7964	0 1 3 7 8 17 21 23 24 26 29 30 33 42
+macos-15	errexit-p.tst:26: errexit: failed simple command	0.874	6352.0	7268.0	0.4315	0 1 3 7 8 23 24 26 42
+macos-15	sighup3-p.tst:8050: SIGPIPE spares shell (async, other, +i -m, initially defaulted, command -> ignore)	0.8733	10239.0	11725.0	0.4502	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48
+macos-15	sigquit3-p.tst:8108: SIGQUIT spares child process (async, self, +i -m, initially defaulted, ignore -> keep)	0.8725	8940.0	10247.0	0.4708	0 1 3 7 8 10 23 24 25 26 28 29 30 33 35 36 37 39 40 41 42 44 48
+macos-15	command-p.tst:60: executing with standard path	0.8713	7185.0	8246.0	0.6716	0 1 3 7 8 17 21 23 24 26 27 31 32 33 40 42
+macos-15	errexit-p.tst:76: errexit: last of pipeline	0.8673	7261.0	8372.0	0.398	0 1 3 7 8 24 32 33 42
+macos-15	command-p.tst:208: output of describing external command (-V, no slash)	0.8654	7472.0	8634.0	0.5969	0 1 3 7 8 23 24 26 27 31 32 33 34 40 42 50 53
+macos-15	sigcont4-p.tst:8022: SIGCONT spares shell (subshell, other, +i -m, initially ignored, command -> keep)	0.8652	10637.0	12294.0	0.4927	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 40 42 44 48
+macos-15	sigurg8-p.tst:8006: SIGURG spares shell (main, self, -i -m, initially ignored, ignore -> clear)	0.864	6465.0	7483.0	0.4575	0 1 7 8 17 21 23 24 26 36 39 41 42 44 48 55 56
+macos-15	sigquit2-p.tst:7008: SIGQUIT spares shell (main, self, +i +m, initially ignored, ignore -> command)	0.8636	6116.0	7082.0	0.5189	0 1 3 7 8 23 24 26 36 39 42 44 48
+macos-15	sigquit6-p.tst:7154: SIGQUIT spares execed process (cmdsub, self, -i +m, initially ignored, clear -> ignore)	0.8618	12289.0	14259.0	0.41	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+macos-15	sighup4-p.tst:8072: SIGPIPE spares child process (subshell, self, +i -m, initially ignored, clear -> keep)	0.8609	11006.0	12784.0	0.6024	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 39 40 42 44 48
+macos-15	sigterm3-p.tst:8035: SIGTERM kills shell (cmdsub, other, +i -m, initially defaulted, command -> keep)	0.8605	9448.0	10980.0	0.4844	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 48
+macos-15	sigurg2-p.tst:7032: SIGURG spares shell (cmdsub, other, +i +m, initially ignored, ignore -> clear)	0.8604	9409.0	10936.0	0.4976	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 42 44 48
+macos-15	umask-p.tst:105: symbolic operand +	0.8595	10395.0	12094.0	0.6745	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	quote-p.tst:225: line continuation in operators <> >> <& >&	0.8575	11736.0	13687.0	0.6093	0 1 3 7 8 14 17 21 23 24 25 26 27 29 31 33 40 42 44
+macos-15	sigterm3-p.tst:8134: SIGTERM spares execed process (subshell, self, +i -m, initially defaulted, keep -> ignore)	0.8571	9560.0	11154.0	0.4888	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 39 40 41 42 44 48
+macos-15	sigurg4-p.tst:8026: SIGURG spares shell (cmdsub, other, +i -m, initially ignored, keep -> keep)	0.8567	11691.0	13646.0	0.5928	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 40 42 44 48
+macos-15	sigquit1-p.tst:7172: SIGQUIT spares execed process (async, self, +i +m, initially defaulted, ignore -> keep)	0.8559	10639.0	12430.0	0.4099	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48
+macos-15	sighup3-p.tst:8060: SIGPIPE spares child process (main, self, +i -m, initially defaulted, ignore -> keep)	0.8549	9097.0	10641.0	0.5311	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48
+macos-15	sigurg2-p.tst:7017: SIGURG spares shell (subshell, other, +i +m, initially ignored, clear -> command)	0.8548	10004.0	11704.0	0.4896	0 1 3 5 7 8 23 24 26 29 30 33 36 39 40 42 44 48
+macos-15	trap-p.tst:53: specifying signal by number (INT)	0.8548	10405.0	12172.0	0.6121	0 1 3 5 7 8 13 14 23 24 26 29 30 33 36 39 40 41 42 44 48
+macos-15	sigquit6-p.tst:7040: SIGQUIT spares shell (async, other, -i +m, initially ignored, clear -> keep)	0.8521	10828.0	12707.0	0.5639	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+macos-15	sigurg2-p.tst:7103: SIGURG spares child process (async, other, +i +m, initially ignored, keep -> command)	0.8519	14051.0	16493.0	0.4537	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 37 39 40 42 44 48
+macos-15	error-p.tst:400: redirection error on special built-in exit spares interactive shell	0.8514	6398.0	7515.0	0.3423	0 1 7 8 17 21 23 24 25 26 27 41 42 43 48 55 56
+macos-15	continue-p.tst:414: continuing one more than actual nest level one	0.8509	6375.0	7492.0	0.4987	0 1 3 7 8 12 21 23 24 26 42
+macos-15	sigterm3-p.tst:8013: SIGTERM kills shell (subshell, other, +i -m, initially defaulted, keep -> keep)	0.8495	9692.0	11409.0	0.5103	0 1 3 5 7 8 23 24 26 29 30 33 35 36 40 42 48
+macos-15	if-p.tst:400: nest between elif and then	0.8484	6078.0	7164.0	0.4985	0 1 3 7 8 11 23 24 26 42 44
+macos-15	redir-p.tst:185: appending redirection, success, new file	0.8484	11238.0	13246.0	0.6532	0 1 3 7 8 23 24 25 26 29 30 33 42 44 48
+macos-15	trap-p.tst:254: with -p, all traps are printed	0.8467	6686.0	7897.0	0.5491	0 1 2 3 4 5 7 8 13 14 23 24 25 26 27 29 30 33 36 39 40 41 42 48
+macos-15	sigcont2-p.tst:7047: SIGCONT spares shell (async, other, +i +m, initially ignored, ignore -> command)	0.8461	12928.0	15280.0	0.4361	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 42 44 48
+macos-15	cd-p.tst:111: found in dot cd path (-L)	0.8433	5193.0	6158.0	0.6017	0 1 3 7 8 17 21 23 24 26 42 44 48 52
+macos-15	quote-p.tst:613: single and double quotes in substitution of expansion ${a-b}	0.8422	5993.0	7116.0	0.5096	0 1 3 7 8 11 13 14 17 21 23 24 26 42 43 44 45 48
+macos-15	sigterm3-p.tst:8031: SIGTERM spares shell (cmdsub, other, +i -m, initially defaulted, ignore -> keep)	0.8396	9764.0	11630.0	0.4481	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48
+macos-15	sigcont2-p.tst:7109: SIGCONT spares child process (async, other, +i +m, initially ignored, ignore -> clear)	0.8394	17830.0	21242.0	0.5188	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 37 39 40 42 44 48
+macos-15	sigurg7-p.tst:8023: SIGURG spares shell (subshell, other, -i -m, initially defaulted, command -> clear)	0.8384	10881.0	12978.0	0.4712	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 44 48 55 56
+macos-15	umask-p.tst:87: symbolic operand o+	0.8378	8794.0	10497.0	0.6374	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	umask-p.tst:83: symbolic operand g+xr	0.8377	9996.0	11933.0	0.6049	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	param-p.tst:313: removing longest matching suffix	0.837	5408.0	6461.0	0.4999	0 1 3 7 8 11 13 14 17 19 21 23 24 26 42 43 44 45 48
+macos-15	sigquit6-p.tst:7086: SIGQUIT spares child process (cmdsub, self, -i +m, initially ignored, keep -> ignore)	0.8362	11470.0	13717.0	0.4643	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 34 36 39 40 41 42 44 48 55 56
+macos-15	alias-p.tst:359: alias substitution to case/esac keywords	0.8338	8065.0	9673.0	0.6248	0 1 3 7 8 9 17 23 24 25 26 27 30 32 33 40 42 44 50
+macos-15	command-p.tst:82: describing reserved word } (-v)	0.8317	4785.0	5753.0	0.5245	0 1 3 7 8 23 24 26 42 50 53
+macos-15	sigquit2-p.tst:7054: SIGQUIT spares child process (main, self, +i +m, initially ignored, keep -> ignore)	0.8296	11658.0	14052.0	0.4976	0 1 3 7 8 10 23 24 25 26 28 29 30 33 36 39 42 44 48
+macos-15	sigquit8-p.tst:8098: SIGQUIT spares child process (cmdsub, self, -i -m, initially ignored, command -> ignore)	0.8295	10859.0	13091.0	0.4174	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 34 36 39 40 41 42 44 48 55 56
+macos-15	fsplit-p.tst:169: empty field removal	0.8283	5692.0	6872.0	0.5045	0 1 3 7 8 11 13 14 17 21 23 24 26 42 43 44 45 48
+macos-15	umask-p.tst:51: restoring umask using previous output, symbolic, 400	0.8282	6254.0	7551.0	0.5061	0 1 3 7 8 17 21 23 24 26 34 40 42 45 46 48
+macos-15	sigterm8-p.tst:8084: SIGTERM spares child process (cmdsub, self, -i -m, initially ignored, keep -> keep)	0.8281	14521.0	17535.0	0.432	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 40 41 42 44 48 55 56
+macos-15	sigurg2-p.tst:7060: SIGURG spares child process (main, self, +i +m, initially ignored, ignore -> keep)	0.827	8299.0	10035.0	0.4897	0 1 3 7 8 10 23 24 25 26 28 29 30 33 36 39 42 44 48
+macos-15	sigurg2-p.tst:7004: SIGURG spares shell (main, self, +i +m, initially ignored, clear -> command)	0.8269	4601.0	5564.0	0.5443	0 1 3 7 8 23 24 26 36 39 42 44 48
+macos-15	sigurg8-p.tst:8118: SIGURG spares execed process (main, self, -i -m, initially ignored, keep -> ignore)	0.8267	10915.0	13203.0	0.4225	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 36 39 41 42 44 48 55 56
+macos-15	umask-p.tst:73: symbolic operand u+rw	0.8259	10222.0	12377.0	0.7409	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	errexit-p.tst:236: errexit: for loop body	0.8255	6584.0	7976.0	0.4964	0 1 3 7 8 12 21 23 24 26 42 44 45 48
+macos-15	sigquit8-p.tst:8172: SIGQUIT spares execed process (async, self, -i -m, initially ignored, ignore -> keep)	0.8247	11320.0	13727.0	0.4808	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48 55 56
+macos-15	trap-p.tst:55: specifying signal by number (ABRT)	0.8247	11951.0	14492.0	0.614	0 1 3 5 7 8 13 14 23 24 26 29 30 33 36 39 40 41 42 44 48
+macos-15	tilde-p.tst:225: named tilde expansion in assignment, between colon	0.8244	4607.0	5588.0	0.7268	0 1 3 7 8 11 13 14 17 20 21 23 24 26 42 43 44 45 48
+macos-15	arith-p.tst:43: multiplicative operators	0.824	5662.0	6871.0	0.6243	0 1 3 7 8 13 14 15 17 21 23 24 26 42 43 48
+macos-15	umask-p.tst:108: symbolic operand +x	0.8238	10717.0	13009.0	0.6235	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sigurg2-p.tst:7083: SIGURG spares child process (subshell, other, +i +m, initially ignored, command -> command)	0.8229	13889.0	16878.0	0.4986	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 36 39 40 42 44 48
+macos-15	arith-p.tst:358: assignment in parameter expansion in arithmetic expansion	0.8217	5308.0	6460.0	0.6013	0 1 3 7 8 13 14 15 17 21 23 24 26 42 43 48
+macos-15	sigquit8-p.tst:8156: SIGQUIT spares execed process (cmdsub, self, -i -m, initially ignored, ignore -> keep)	0.8215	11876.0	14457.0	0.4814	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+macos-15	sigurg2-p.tst:7080: SIGURG spares child process (subshell, self, +i +m, initially ignored, command -> keep)	0.8211	9355.0	11393.0	0.5212	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 40 42 44 48
+macos-15	command-p.tst:204: output of describing external command (-v, no slash)	0.8204	6874.0	8379.0	0.5373	0 1 3 7 8 23 24 26 27 30 32 33 40 42 50 53
+macos-15	sigterm3-p.tst:8064: SIGTERM kills child process (main, self, +i -m, initially defaulted, command -> keep)	0.8201	8464.0	10321.0	0.4042	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 48
+macos-15	sigurg4-p.tst:8020: SIGURG spares shell (subshell, other, +i -m, initially ignored, ignore -> ignore)	0.8196	11355.0	13855.0	0.5209	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 40 42 44 48
+macos-15	sigquit8-p.tst:8158: SIGQUIT spares execed process (cmdsub, self, -i -m, initially ignored, ignore -> ignore)	0.8183	12399.0	15152.0	0.4716	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+macos-15	sigcont4-p.tst:8084: SIGCONT spares child process (cmdsub, self, +i -m, initially ignored, keep -> keep)	0.8182	11891.0	14534.0	0.5604	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 40 42 44 48
+macos-15	redir-p.tst:138: overwrite redirection, -C, existing file not modified	0.8174	10651.0	13031.0	0.5243	0 1 3 7 8 23 24 25 26 29 30 33 42 44
+macos-15	kill2-p.tst:33: sending signal: -ILL	0.8154	8510.0	10436.0	0.5494	0 1 3 7 8 23 24 26 36 48
+macos-15	sighup2-p.tst:7094: SIGUSR1 spares child process (cmdsub, self, +i +m, initially ignored, ignore -> ignore)	0.8147	11565.0	14196.0	0.4183	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 42 44 48
+macos-15	umask-p.tst:27: restoring umask using previous output, non-symbolic, 653	0.8138	8604.0	10572.0	0.495	0 1 3 7 8 17 21 23 24 26 34 40 42 45 46 48
+macos-15	option-p.tst:180: nounset (long) off: $-	0.8132	5715.0	7028.0	0.6311	0 1 3 7 8 24 30 32 33 42 43
+macos-15	sigterm6-p.tst:7154: SIGTERM spares execed process (cmdsub, self, -i +m, initially ignored, clear -> ignore)	0.8132	11116.0	13670.0	0.4674	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+macos-15	case-p.tst:294: linebreak before esac	0.8091	5999.0	7414.0	0.4385	0 1 3 7 8 17 23 24 26 42 44
+macos-15	sigurg2-p.tst:7056: SIGURG spares child process (main, self, +i +m, initially ignored, clear -> keep)	0.8091	8702.0	10755.0	0.4687	0 1 3 7 8 10 23 24 25 26 28 29 30 33 36 39 42 44 48
+macos-15	sigquit4-p.tst:8066: SIGQUIT spares child process (main, self, +i -m, initially ignored, command -> ignore)	0.8083	10522.0	13017.0	0.5078	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 39 40 42 44 48
+macos-15	errexit-p.tst:177: noerrexit: subshell	0.8071	9012.0	11166.0	0.5539	0 1 3 7 8 23 24 26 27 30 32 33 40 42 44
+macos-15	sigurg4-p.tst:8050: SIGURG spares shell (async, other, +i -m, initially ignored, command -> ignore)	0.8058	13308.0	16516.0	0.5151	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 42 44 48
+macos-15	sigcont6-p.tst:7114: SIGCONT spares child process (async, self, -i +m, initially ignored, command -> ignore)	0.8054	11403.0	14158.0	0.433	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+macos-15	sigcont4-p.tst:8017: SIGCONT spares shell (subshell, other, +i -m, initially ignored, clear -> command)	0.8047	11860.0	14739.0	0.5164	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 40 42 44 48
+macos-15	umask-p.tst:82: symbolic operand g+rw	0.8046	10015.0	12447.0	0.5536	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sigurg4-p.tst:8011: SIGURG spares shell (main, other, +i -m, initially ignored, command -> ignore)	0.8045	10396.0	12922.0	0.4876	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 42 44 48
+macos-15	sigterm3-p.tst:8048: SIGTERM kills shell (async, other, +i -m, initially defaulted, command -> keep)	0.8044	8871.0	11028.0	0.4467	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 48
+macos-15	sigquit8-p.tst:8078: SIGQUIT spares child process (subshell, self, -i -m, initially ignored, ignore -> ignore)	0.8042	12494.0	15536.0	0.4421	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sigquit2-p.tst:7012: SIGQUIT spares shell (main, self, +i +m, initially ignored, command -> command)	0.8038	5999.0	7463.0	0.5809	0 1 3 7 8 23 24 26 36 39 42 44 48
+macos-15	sigquit3-p.tst:8172: SIGQUIT spares execed process (async, self, +i -m, initially defaulted, ignore -> keep)	0.8038	8162.0	10154.0	0.4951	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48
+macos-15	error-p.tst:440: redirection error without command spares shell	0.8037	5654.0	7035.0	0.5397	0 1 3 7 8 23 24 25 26 42 44 45 48
+macos-15	sigcont4-p.tst:8110: SIGCONT spares child process (async, self, +i -m, initially ignored, ignore -> ignore)	0.8034	11944.0	14867.0	0.4341	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 44 48
+macos-15	sigurg8-p.tst:8099: SIGURG spares child process (cmdsub, other, -i -m, initially ignored, command -> command)	0.8032	16246.0	20227.0	0.4151	0 1 3 5 7 8 10 17 21 23 24 25 26 28 29 30 33 34 36 39 40 41 42 44 48 55 56
+macos-15	umask-p.tst:44: restoring umask using previous output, symbolic, 002	0.8027	5094.0	6346.0	0.4344	0 1 3 7 8 17 21 23 24 26 34 40 42 45 46 48
+macos-15	tilde-p.tst:233: many named tilde expansions in assignment	0.8017	4497.0	5609.0	0.762	0 1 3 7 8 11 13 14 17 20 21 23 24 26 42 43 44 45 48
+macos-15	sighup4-p.tst:8168: SIGPIPE spares execed process (async, self, +i -m, initially ignored, clear -> keep)	0.8014	9624.0	12009.0	0.4447	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 44 48
+macos-15	sigquit6-p.tst:7100: SIGQUIT spares child process (async, self, -i +m, initially ignored, keep -> keep)	0.8012	11424.0	14259.0	0.4917	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 40 41 42 44 48 55 56
+macos-15	sigint3-p.tst:8042: SIGINT spares shell (async, other, +i -m, initially defaulted, clear -> ignore)	0.7995	10888.0	13618.0	0.4769	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48
+macos-15	"getopts-p.tst:94: operand variable is set to ""?"" on unknown option"	0.7992	5515.0	6901.0	0.5431	0 1 3 7 8 21 23 24 26 42 43 48 51
+macos-15	sigquit1-p.tst:7142: SIGQUIT spares execed process (subshell, self, +i +m, initially defaulted, ignore -> ignore)	0.7979	9877.0	12378.0	0.4177	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 40 41 42 44 48
+macos-15	sigterm2-p.tst:7160: SIGTERM spares execed process (cmdsub, self, +i +m, initially ignored, command -> keep)	0.7977	8565.0	10737.0	0.4726	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 42 44 48
+macos-15	sigterm3-p.tst:8056: SIGTERM kills child process (main, self, +i -m, initially defaulted, clear -> keep)	0.7967	10649.0	13366.0	0.387	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 39 40 42 48
+macos-15	export-p.tst:44: exporting with assignments	0.7963	9864.0	12387.0	0.6565	0 1 3 7 8 17 22 23 24 26 29 30 33 42 44 48
+macos-15	if-p.tst:349: command ending with asynchronous command (after else)	0.7958	5819.0	7312.0	0.6778	0 1 3 7 8 11 23 24 26 37 42 44
+macos-15	sigquit3-p.tst:8013: SIGQUIT kills shell (subshell, other, +i -m, initially defaulted, keep -> keep)	0.7952	8443.0	10618.0	0.4595	0 1 3 5 7 8 23 24 26 29 30 33 35 36 40 42 48
+macos-15	case-p.tst:340: reserved word ]] as pattern	0.7941	5064.0	6377.0	0.7036	0 1 3 7 8 17 23 24 26 42 44
+macos-15	sighup8-p.tst:8154: SIGPIPE spares execed process (cmdsub, self, -i -m, initially ignored, clear -> ignore)	0.794	11360.0	14307.0	0.3834	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+macos-15	alias-p.tst:133: using alias after assignment (complex)	0.7939	7899.0	9950.0	0.627	0 1 3 7 8 9 17 23 24 26 29 30 33 42 44 50
+macos-15	umask-p.tst:74: symbolic operand u+xr	0.7926	10221.0	12895.0	0.5789	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sigterm3-p.tst:8067: SIGTERM kills child process (main, other, +i -m, initially defaulted, command -> command)	0.7924	13787.0	17398.0	0.4111	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 48
+macos-15	getopts-p.tst:215: OPTIND is first operand index after parsing all options: no operand, with --	0.7913	5821.0	7356.0	0.5669	0 1 3 7 8 21 23 24 26 42 43 48 51
+macos-15	if-p.tst:320: linebreak before fi (after else)	0.7911	4229.0	5346.0	0.5571	0 1 3 7 8 11 23 24 26 42 44
+macos-15	command-p.tst:32: command ignores function (substitutive built-in)	0.791	4291.0	5425.0	0.592	0 1 3 7 8 14 23 24 26 42 44
+macos-15	error-p.tst:310: assignment error on command unalias in subshell	0.7908	5406.0	6836.0	0.5478	0 1 3 7 8 17 23 24 26 40 42 44 45 48
+macos-15	sigquit4-p.tst:8062: SIGQUIT spares child process (main, self, +i -m, initially ignored, ignore -> ignore)	0.7907	9813.0	12410.0	0.4943	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 39 40 42 44 48
+macos-15	trap-p.tst:57: specifying signal by number (ALRM)	0.7892	9969.0	12632.0	0.6374	0 1 3 5 7 8 13 14 23 24 26 29 30 33 36 39 40 41 42 44 48
+macos-15	export-p.tst:56: read-only variable cannot be re-assigned	0.7883	4624.0	5866.0	0.4822	0 1 3 7 8 23 24 26 42
+macos-15	set-p.tst:91: errexit (long) on: $-	0.788	6807.0	8638.0	0.4441	0 1 3 7 8 14 17 21 23 24 26 30 32 33 42 43 50
+macos-15	sigquit8-p.tst:8150: SIGQUIT spares execed process (cmdsub, self, -i -m, initially ignored, keep -> ignore)	0.788	11999.0	15228.0	0.4559	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+macos-15	sigcont4-p.tst:8142: SIGCONT spares execed process (subshell, self, +i -m, initially ignored, ignore -> ignore)	0.7879	12208.0	15495.0	0.5903	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 39 40 42 44 48
+macos-15	sigurg4-p.tst:8128: SIGURG spares execed process (main, self, +i -m, initially ignored, command -> keep)	0.7873	10672.0	13555.0	0.5079	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 42 44 48
+macos-15	sigurg4-p.tst:8008: SIGURG spares shell (main, self, +i -m, initially ignored, ignore -> command)	0.7869	5901.0	7499.0	0.5058	0 1 3 7 8 23 24 26 36 39 42 44 48
+macos-15	option-p.tst:21: allexport (short) on: effect	0.7868	6449.0	8196.0	0.7717	0 1 3 7 8 17 21 23 24 26 29 30 33 42
+macos-15	umask-p.tst:103: symbolic operand a+xwr	0.7862	10374.0	13195.0	0.7601	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	builtins-p.tst:102: assignment on special built-in times is persistent	0.7858	4887.0	6219.0	0.5613	0 1 3 7 8 17 21 22 23 24 25 26 27 42 44 48
+macos-15	sigurg8-p.tst:8044: SIGURG spares shell (async, other, -i -m, initially ignored, ignore -> keep)	0.7856	11985.0	15255.0	0.4032	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+macos-15	errexit-p.tst:19: noerrexit: failed simple command	0.7853	5941.0	7565.0	0.4981	0 1 3 7 8 23 24 26 42 44
+macos-15	sigterm3-p.tst:8051: SIGTERM is handled by shell (async, other, +i -m, initially defaulted, command -> command)	0.7847	8204.0	10455.0	0.6102	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48
+macos-15	arith-p.tst:340: parameter expansion in arithmetic expansion	0.784	5396.0	6883.0	0.5651	0 1 3 7 8 13 14 15 17 19 21 23 24 26 42 43 48
+macos-15	option-p.tst:37: allexport (short) off: effect	0.7838	6550.0	8357.0	0.7009	0 1 3 7 8 17 21 23 24 26 29 30 33 42
+macos-15	alias-p.tst:108: subshell cannot affect main shell	0.7836	4237.0	5407.0	0.5014	0 1 3 7 8 9 23 24 26 40 42 44 50
+macos-15	sighup3-p.tst:8144: SIGUSR1 kills execed process (subshell, self, +i -m, initially defaulted, command -> keep)	0.7836	8979.0	11458.0	0.4096	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 39 40 41 42 48
+macos-15	umask-p.tst:81: symbolic operand g+x	0.7834	9555.0	12197.0	0.6057	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sighup3-p.tst:8059: SIGHUP kills child process (main, other, +i -m, initially defaulted, clear -> command)	0.7823	11891.0	15200.0	0.487	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 48
+macos-15	sigquit2-p.tst:7006: SIGQUIT spares shell (main, self, +i +m, initially ignored, ignore -> clear)	0.782	6631.0	8480.0	0.5344	0 1 3 7 8 23 24 26 36 39 42 44 48
+macos-15	sigquit8-p.tst:8037: SIGQUIT spares shell (cmdsub, other, -i -m, initially ignored, command -> ignore)	0.7803	11845.0	15180.0	0.4343	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48 55 56
+macos-15	command-p.tst:19: assignment on special built-in is temporary	0.779	4289.0	5506.0	0.5132	0 1 3 7 8 17 21 23 24 26 42 44 48
+macos-15	sighup2-p.tst:7129: SIGUSR1 spares execed process (main, other, +i +m, initially ignored, command -> clear)	0.7784	18108.0	23264.0	0.4889	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 36 39 42 44 48
+macos-15	sigquit3-p.tst:8106: SIGQUIT spares child process (async, self, +i -m, initially defaulted, clear -> ignore)	0.7782	8309.0	10677.0	0.4265	0 1 3 7 8 10 23 24 25 26 28 29 30 33 35 36 37 39 40 41 42 44 48
+macos-15	trap-p.tst:287: invalid signal does not kill non-interactive shell	0.7775	4239.0	5452.0	0.4908	0 1 3 7 8 14 23 24 26 42 44
+macos-15	sigurg7-p.tst:8154: SIGURG spares execed process (cmdsub, self, -i -m, initially defaulted, clear -> ignore)	0.7768	11764.0	15145.0	0.4259	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+macos-15	test-p.tst:363: test 100 > 11	0.7759	3411.0	4396.0	0.4826	0 1 3 7 8 17 21 23 24 26 42 45 48
+macos-15	sigterm3-p.tst:8000: SIGTERM kills shell (main, self, +i -m, initially defaulted, keep -> keep)	0.7757	5751.0	7414.0	0.5429	0 1 3 7 8 23 24 26 36 48
+macos-15	set-p.tst:141: setting positional parameters and shell options at once	0.7752	8809.0	11363.0	0.5741	0 1 3 7 8 11 13 14 17 21 23 24 26 30 32 33 42 43 44 45 48 50
+macos-15	sigterm3-p.tst:8028: SIGTERM kills shell (cmdsub, other, +i -m, initially defaulted, clear -> clear)	0.7742	8865.0	11451.0	0.4393	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 42 48
+macos-15	kill3-p.tst:51: sending signal: -9	0.7735	4237.0	5478.0	0.5485	0 1 3 7 8 23 24 26 36 48
+macos-15	sigurg2-p.tst:7114: SIGURG spares child process (async, self, +i +m, initially ignored, command -> ignore)	0.773	8404.0	10872.0	0.4745	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 44 48
+macos-15	sigurg4-p.tst:8012: SIGURG spares shell (main, self, +i -m, initially ignored, command -> command)	0.7727	4910.0	6354.0	0.7866	0 1 3 7 8 23 24 26 36 39 42 44 48
+macos-15	cd-p.tst:455: readonly PWD (-P)	0.7726	4681.0	6059.0	0.5152	0 1 3 7 8 21 23 24 26 42 48 52
+macos-15	case-p.tst:341: reserved word case as pattern	0.7719	4881.0	6323.0	0.518	0 1 3 7 8 17 23 24 26 42 44
+macos-15	umask-p.tst:50: restoring umask using previous output, symbolic, 200	0.7718	5232.0	6779.0	0.4452	0 1 3 7 8 17 21 23 24 26 34 40 42 45 46 48
+macos-15	errexit-p.tst:111: noerrexit: finally failing and list	0.7717	5313.0	6885.0	0.5305	0 1 3 7 8 23 24 26 42 44
+macos-15	exit-p.tst:60: default exit status in EXIT trap in exiting with default	0.7717	4622.0	5989.0	0.5492	0 1 3 5 7 8 23 24 26 39 40 41 42
+macos-15	sigquit3-p.tst:8050: SIGQUIT spares shell (async, other, +i -m, initially defaulted, command -> ignore)	0.7708	9508.0	12335.0	0.3825	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48
+macos-15	case-p.tst:39: case word is subject to quote removal	0.7701	5761.0	7481.0	0.7987	0 1 3 7 8 17 21 23 24 26 42 44 48
+macos-15	sigint7-p.tst:8029: SIGINT spares shell (cmdsub, other, -i -m, initially defaulted, clear -> ignore)	0.7693	10921.0	14196.0	0.4354	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48 55 56
+macos-15	case-p.tst:279: & before ;;	0.769	6220.0	8088.0	0.4781	0 1 3 7 8 17 23 24 26 27 32 33 35 37 40 42 44
+macos-15	getopts-p.tst:11: OPTIND and OPTARG are not exported by default	0.7681	11284.0	14691.0	0.6951	0 1 3 7 8 21 23 24 26 29 30 33 42 48 51
+macos-15	sigcont8-p.tst:8007: SIGCONT spares shell (main, other, -i -m, initially ignored, ignore -> ignore)	0.7671	10454.0	13628.0	0.5913	0 1 5 7 8 17 21 23 24 26 27 29 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sigttou8-p.tst:11011: SIGTTOU stops child process (main, other, -i -m, initially ignored, ignore -> command)	0.7667	15360.0	20035.0	0.4671	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	test-p.tst:361: test 11 > 100	0.7665	3332.0	4347.0	0.5247	0 1 3 7 8 17 21 23 24 26 42 45 48
+macos-15	if-p.tst:407: nest between then and else	0.7664	4422.0	5770.0	0.7965	0 1 3 7 8 11 23 24 26 42 44
+macos-15	umask-p.tst:115: symbolic operand u=r	0.7654	11518.0	15048.0	0.6302	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sigurg2-p.tst:7174: SIGURG spares execed process (async, self, +i +m, initially ignored, ignore -> ignore)	0.7649	8046.0	10519.0	0.4898	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 44 48
+macos-15	sigquit3-p.tst:8054: SIGQUIT spares child process (main, self, +i -m, initially defaulted, keep -> ignore)	0.7643	9111.0	11920.0	0.5019	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48
+macos-15	sigurg2-p.tst:7175: SIGURG spares execed process (async, other, +i +m, initially ignored, ignore -> command)	0.7642	13819.0	18082.0	0.4459	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 37 39 40 42 44 48
+macos-15	tilde-p.tst:172: named tilde expansion, followed by slash	0.7642	4587.0	6002.0	0.7661	0 1 3 7 8 11 13 14 17 20 21 23 24 26 42 43 44 45 48
+macos-15	sigint2-p.tst:7170: SIGINT spares execed process (async, self, +i +m, initially ignored, clear -> ignore)	0.7631	11654.0	15272.0	0.4542	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 44 48
+macos-15	command-p.tst:100: describing reserved word done (-v)	0.762	4050.0	5315.0	0.5646	0 1 3 7 8 23 24 26 42 50 53
+macos-15	sigterm3-p.tst:8049: SIGTERM kills shell (async, other, +i -m, initially defaulted, command -> clear)	0.762	9028.0	11848.0	0.4449	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 48
+macos-15	sigterm3-p.tst:8050: SIGTERM spares shell (async, other, +i -m, initially defaulted, command -> ignore)	0.7619	9008.0	11823.0	0.5487	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48
+macos-15	sigint8-p.tst:8158: SIGINT spares execed process (cmdsub, self, -i -m, initially ignored, ignore -> ignore)	0.7616	9559.0	12552.0	0.4634	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+macos-15	sigcont6-p.tst:7158: SIGCONT spares execed process (cmdsub, self, -i +m, initially ignored, ignore -> ignore)	0.7614	12115.0	15911.0	0.4425	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+macos-15	grouping-p.tst:57: exit status of brace grouping	0.7609	7389.0	9711.0	0.7426	0 1 3 7 8 23 24 26 29 30 33 42
+macos-15	sigquit3-p.tst:8066: SIGQUIT spares child process (main, self, +i -m, initially defaulted, command -> ignore)	0.7607	8042.0	10572.0	0.4302	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48
+macos-15	sigterm4-p.tst:8103: SIGTERM spares child process (async, other, +i -m, initially ignored, keep -> command)	0.7603	13972.0	18376.0	0.4018	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 37 39 40 42 44 48
+macos-15	set-p.tst:116: nounset (long) off: $-	0.7599	8218.0	10814.0	0.5605	0 1 3 7 8 14 17 21 23 24 26 30 32 33 42 43 50
+macos-15	sigterm3-p.tst:8168: SIGTERM kills execed process (async, self, +i -m, initially defaulted, clear -> keep)	0.7594	8539.0	11245.0	0.427	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 48
+macos-15	sigterm3-p.tst:8054: SIGTERM spares child process (main, self, +i -m, initially defaulted, keep -> ignore)	0.7592	8512.0	11212.0	0.4024	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48
+macos-15	sighup8-p.tst:8121: SIGHUP kills execed process (main, other, -i -m, initially ignored, clear -> clear)	0.7586	15541.0	20486.0	0.4251	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 36 39 41 42 48 55 56
+macos-15	sigtstp7-p.tst:11009: SIGTSTP stops child process (main, other, -i -m, initially defaulted, ignore -> clear)	0.7585	14522.0	19145.0	0.5475	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	until-p.tst:132: redirection on until loop	0.7585	7761.0	10232.0	0.6997	0 1 3 7 8 12 15 17 21 23 24 25 26 27 29 30 33 42 44 45 48
+macos-15	sigterm3-p.tst:8011: SIGTERM spares shell (main, other, +i -m, initially defaulted, command -> ignore)	0.7582	9051.0	11937.0	0.4558	0 1 3 5 7 8 23 24 26 27 29 31 33 35 36 39 40 41 42 44 48
+macos-15	umask-p.tst:97: symbolic operand a+r	0.7582	11592.0	15288.0	0.6241	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	builtins-p.tst:352: intrinsic built-in read can be invoked without $PATH	0.7577	5079.0	6703.0	0.5405	0 1 3 7 8 17 21 23 24 26 42 47 48
+macos-15	sigquit6-p.tst:7054: SIGQUIT spares child process (main, self, -i +m, initially ignored, keep -> ignore)	0.7577	9849.0	12998.0	0.4157	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 36 39 41 42 44 48 55 56
+macos-15	async-p.tst:65: stdin of asynchronous list is null for first command only	0.7563	7778.0	10284.0	0.7027	0 1 3 7 8 23 24 26 27 31 32 33 35 37 40 42
+macos-15	sighup3-p.tst:8005: SIGHUP spares shell (main, other, +i -m, initially defaulted, ignore -> keep)	0.7557	9531.0	12612.0	0.4858	0 1 3 5 7 8 23 24 26 27 29 31 33 35 36 39 40 41 42 44 48
+macos-15	sigterm3-p.tst:8008: SIGTERM is handled by shell (main, self, +i -m, initially defaulted, ignore -> command)	0.7553	4555.0	6031.0	0.5066	0 1 3 5 7 8 23 24 26 36 39 41 42 44 48
+macos-15	umask-p.tst:79: symbolic operand g+r	0.7553	9496.0	12572.0	0.6575	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sigquit6-p.tst:7076: SIGQUIT spares child process (subshell, self, -i +m, initially ignored, ignore -> keep)	0.755	10467.0	13864.0	0.4275	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 36 39 40 41 42 44 48 55 56
+macos-15	sigquit6-p.tst:7074: SIGQUIT spares child process (subshell, self, -i +m, initially ignored, clear -> ignore)	0.7546	10727.0	14216.0	0.4864	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 36 39 40 41 42 44 48 55 56
+macos-15	param-p.tst:427: special parameter ?	0.7545	6308.0	8361.0	0.5398	0 1 3 7 8 14 17 21 23 24 26 40 42 44 48
+macos-15	sigterm3-p.tst:8135: SIGTERM kills execed process (subshell, other, +i -m, initially defaulted, keep -> command)	0.7544	11873.0	15739.0	0.4278	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 48
+macos-15	sighup3-p.tst:8170: SIGUSR2 spares execed process (async, self, +i -m, initially defaulted, clear -> ignore)	0.7535	8099.0	10748.0	0.4812	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48
+macos-15	cd-p.tst:15: default operand is HOME (-L)	0.7519	4841.0	6438.0	0.609	0 1 3 7 8 17 21 23 24 26 42 44 48 52
+macos-15	option-p.tst:45: allexport (long) off: effect	0.7519	6530.0	8685.0	0.7156	0 1 3 7 8 17 21 23 24 26 29 30 33 42
+macos-15	sigurg6-p.tst:7124: SIGURG spares execed process (main, self, -i +m, initially ignored, ignore -> keep)	0.7515	9776.0	13008.0	0.4584	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 36 39 41 42 44 48 55 56
+macos-15	sigterm3-p.tst:8133: SIGTERM kills execed process (subshell, other, +i -m, initially defaulted, keep -> clear)	0.7514	12079.0	16075.0	0.4618	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 39 40 42 48
+macos-15	sigcont6-p.tst:7037: SIGCONT spares shell (cmdsub, other, -i +m, initially ignored, command -> ignore)	0.7512	10446.0	13906.0	0.4548	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48 55 56
+macos-15	sigcont3-p.tst:8035: SIGCONT spares shell (cmdsub, other, +i -m, initially defaulted, command -> keep)	0.7505	7073.0	9424.0	0.4649	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48
+macos-15	sigquit8-p.tst:8174: SIGQUIT spares execed process (async, self, -i -m, initially ignored, ignore -> ignore)	0.7502	10308.0	13741.0	0.4682	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48 55 56
+macos-15	option-p.tst:176: nounset (short) off: $-	0.7498	5351.0	7137.0	0.5316	0 1 3 7 8 24 30 32 33 42 43
+macos-15	async-p.tst:5: synchronous lists separated by semicolons	0.7495	3794.0	5062.0	0.4653	0 1 3 7 8 23 24 26 42 44
+macos-15	umask-p.tst:101: symbolic operand a+xr	0.749	10957.0	14628.0	0.5802	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sigquit2-p.tst:7083: SIGQUIT spares child process (subshell, other, +i +m, initially ignored, command -> command)	0.7489	17089.0	22818.0	0.5456	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 36 39 40 42 44 48
+macos-15	sigurg8-p.tst:8037: SIGURG spares shell (cmdsub, other, -i -m, initially ignored, command -> ignore)	0.7482	13553.0	18114.0	0.4477	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48 55 56
+macos-15	sigcont2-p.tst:7031: SIGCONT spares shell (cmdsub, other, +i +m, initially ignored, ignore -> keep)	0.7476	10970.0	14673.0	0.5388	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 42 44 48
+macos-15	declutil-p.tst:8: no pathname expansion or field splitting in export A=$a	0.7475	6432.0	8605.0	0.6805	0 1 3 7 8 17 21 23 24 26 29 30 33 42 48
+macos-15	export-p.tst:14: exporting many variables	0.7475	7715.0	10321.0	0.6913	0 1 3 7 8 17 21 23 24 26 29 30 33 42 44 48
+macos-15	sigquit6-p.tst:7062: SIGQUIT spares child process (main, self, -i +m, initially ignored, ignore -> ignore)	0.7475	10152.0	13581.0	0.3898	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 36 39 41 42 44 48 55 56
+macos-15	sigterm7-p.tst:8177: SIGTERM kills execed process (async, other, -i -m, initially defaulted, command -> clear)	0.7473	10433.0	13961.0	0.4351	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 37 39 40 41 42 48 55 56
+macos-15	sigquit3-p.tst:8178: SIGQUIT spares execed process (async, self, +i -m, initially defaulted, command -> ignore)	0.7472	7967.0	10663.0	0.5078	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48
+macos-15	sigterm7-p.tst:8133: SIGTERM kills execed process (subshell, other, -i -m, initially defaulted, keep -> clear)	0.7471	10317.0	13810.0	0.4035	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 48 55 56
+macos-15	sigcont6-p.tst:7152: SIGCONT spares execed process (cmdsub, self, -i +m, initially ignored, clear -> keep)	0.7465	11999.0	16074.0	0.4409	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+macos-15	sigterm3-p.tst:8156: SIGTERM spares execed process (cmdsub, self, +i -m, initially defaulted, ignore -> keep)	0.7464	9603.0	12865.0	0.4858	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48
+macos-15	sigterm6-p.tst:7082: SIGTERM spares child process (subshell, self, -i +m, initially ignored, command -> ignore)	0.7462	9657.0	12942.0	0.4705	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 36 39 40 41 42 44 48 55 56
+macos-15	sigttou8-p.tst:11017: SIGTTOU stops execed process (subshell, other, -i -m, initially ignored, keep -> clear)	0.7455	15779.0	21165.0	0.4823	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	umask-p.tst:98: symbolic operand a+w	0.7454	9002.0	12076.0	0.6933	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	set-p.tst:128: setting many shell options at once	0.7452	11429.0	15336.0	0.5596	0 1 3 7 8 14 17 21 23 24 26 30 32 33 42 43 48 50
+macos-15	sighup3-p.tst:8047: SIGPIPE is handled by shell (async, other, +i -m, initially defaulted, ignore -> command)	0.7443	8953.0	12029.0	0.4258	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48
+macos-15	sigstop7-p.tst:8021: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, clear -> clear)	0.7435	17314.0	23287.0	0.5298	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	unset-p.tst:84: deleting many functions (-f)	0.7434	7842.0	10549.0	0.5118	0 1 3 4 7 8 13 14 17 21 23 24 26 29 30 33 42 44 48
+macos-15	sigterm2-p.tst:7178: SIGTERM spares execed process (async, self, +i +m, initially ignored, command -> ignore)	0.7427	7686.0	10349.0	0.5191	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 44 48
+macos-15	sigcont2-p.tst:7177: SIGCONT spares execed process (async, other, +i +m, initially ignored, command -> clear)	0.7417	16064.0	21659.0	0.5053	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 37 39 40 42 44 48
+macos-15	option-p.tst:131: noexec (short) off: $-	0.7411	5409.0	7299.0	0.5893	0 1 3 7 8 24 30 32 33 42 43
+macos-15	arith-p.tst:334: parentheses	0.741	4838.0	6529.0	0.5982	0 1 3 7 8 13 14 15 17 21 23 24 26 42 43 48
+macos-15	sigterm1-p.tst:7034: SIGTERM is handled by shell (cmdsub, other, +i +m, initially defaulted, ignore -> command)	0.7408	7688.0	10378.0	0.4795	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48
+macos-15	param-p.tst:442: special parameter -	0.7403	10143.0	13701.0	0.6322	0 1 3 7 8 14 17 21 23 24 26 30 32 33 34 40 42 45 48 50
+macos-15	sigcont7-p.tst:8120: SIGCONT spares execed process (main, self, -i -m, initially defaulted, clear -> keep)	0.7399	9519.0	12865.0	0.4781	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 36 39 41 42 44 48 55 56
+macos-15	simple-p.tst:287: argv[0] (command name with slash)	0.7397	15282.0	20660.0	0.8041	0 1 3 7 8 14 17 21 23 24 26 29 30 33 34 40 42 53
+macos-15	sigterm8-p.tst:8178: SIGTERM spares execed process (async, self, -i -m, initially ignored, command -> ignore)	0.7396	12524.0	16934.0	0.4439	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48 55 56
+macos-15	sigterm3-p.tst:8025: SIGTERM is handled by shell (subshell, other, +i -m, initially defaulted, command -> command)	0.7395	8718.0	11789.0	0.4764	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 40 41 42 44 48
+macos-15	"param-p.tst:667: ${foo:-""$@""}"	0.7388	4413.0	5973.0	0.5621	0 1 3 7 8 11 13 14 17 21 23 24 26 42 43 44 45 48 50
+macos-15	sighup2-p.tst:7093: SIGPIPE spares child process (cmdsub, other, +i +m, initially ignored, ignore -> clear)	0.7388	14440.0	19544.0	0.4534	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 34 36 39 40 42 44 48
+macos-15	sigcont4-p.tst:8028: SIGCONT spares shell (cmdsub, other, +i -m, initially ignored, clear -> clear)	0.7385	10371.0	14044.0	0.5171	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 42 44 48
+macos-15	sigquit6-p.tst:7172: SIGQUIT spares execed process (async, self, -i +m, initially ignored, ignore -> keep)	0.7382	9977.0	13515.0	0.502	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48 55 56
+macos-15	declutil-p.tst:16: tilde expansions in export A=~:~	0.7372	6429.0	8721.0	0.6956	0 1 3 7 8 17 20 21 23 24 26 29 30 33 42 48
+macos-15	sigquit8-p.tst:8070: SIGQUIT spares child process (subshell, self, -i -m, initially ignored, keep -> ignore)	0.7372	11156.0	15132.0	0.4867	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 39 40 41 42 44 48 55 56
+macos-15	trap-p.tst:87: exit status of succeeding subshell in signal trap	0.737	13928.0	18898.0	0.6713	0 1 3 5 7 8 13 14 23 24 26 29 30 33 36 39 40 41 42 44 48
+macos-15	sigurg8-p.tst:8065: SIGURG spares child process (main, other, -i -m, initially ignored, command -> clear)	0.7364	14025.0	19045.0	0.4292	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sigquit6-p.tst:7046: SIGQUIT spares shell (async, other, -i +m, initially ignored, ignore -> ignore)	0.7363	10376.0	14093.0	0.3821	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+macos-15	sigint2-p.tst:7144: SIGINT spares execed process (subshell, self, +i +m, initially ignored, command -> keep)	0.7362	10385.0	14107.0	0.4518	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 40 42 44 48
+macos-15	sigurg8-p.tst:8063: SIGURG spares child process (main, other, -i -m, initially ignored, ignore -> command)	0.7361	14722.0	20001.0	0.4734	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sigterm3-p.tst:8004: SIGTERM is handled by shell (main, self, +i -m, initially defaulted, clear -> command)	0.7349	4966.0	6757.0	0.5477	0 1 3 5 7 8 23 24 26 36 39 41 42 44 48
+macos-15	sigterm3-p.tst:8108: SIGTERM spares child process (async, self, +i -m, initially defaulted, ignore -> keep)	0.7349	8734.0	11885.0	0.4767	0 1 3 7 8 10 23 24 25 26 28 29 30 33 35 36 37 39 40 41 42 44 48
+macos-15	sigquit7-p.tst:8092: SIGQUIT spares child process (cmdsub, self, -i -m, initially defaulted, ignore -> keep)	0.7348	11673.0	15885.0	0.4581	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 34 36 39 40 41 42 44 48 55 56
+macos-15	sigquit7-p.tst:8060: SIGQUIT spares child process (main, self, -i -m, initially defaulted, ignore -> keep)	0.7347	10019.0	13636.0	0.4864	0 1 3 7 8 10 17 21 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sigterm3-p.tst:8132: SIGTERM kills execed process (subshell, self, +i -m, initially defaulted, keep -> keep)	0.7343	8774.0	11949.0	0.4711	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 40 42 48
+macos-15	command-p.tst:200: exit status of describing external command (-V, no slash)	0.7339	4060.0	5532.0	0.5122	0 1 3 7 8 23 24 26 42 50 53
+macos-15	if-p.tst:226: linebreak after if	0.7339	3996.0	5445.0	0.685	0 1 3 7 8 11 23 24 26 42 44
+macos-15	sigterm3-p.tst:8029: SIGTERM spares shell (cmdsub, other, +i -m, initially defaulted, clear -> ignore)	0.7334	10211.0	13922.0	0.4596	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48
+macos-15	sighup3-p.tst:8057: SIGPIPE kills child process (main, other, +i -m, initially defaulted, clear -> clear)	0.7329	9513.0	12980.0	0.4787	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 39 40 42 48
+macos-15	sigquit6-p.tst:7146: SIGQUIT spares execed process (subshell, self, -i +m, initially ignored, command -> ignore)	0.7325	10383.0	14175.0	0.4257	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 36 39 40 41 42 44 48 55 56
+macos-15	kill1-p.tst:49: sending default signal TERM	0.7319	5815.0	7945.0	0.435	0 1 3 7 8 23 24 26 36 48
+macos-15	sigquit2-p.tst:7070: SIGQUIT spares child process (subshell, self, +i +m, initially ignored, keep -> ignore)	0.7314	10090.0	13795.0	0.511	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 40 42 44 48
+macos-15	case-p.tst:302: ;; can be omitted before esac	0.7313	5203.0	7115.0	0.6436	0 1 3 7 8 17 23 24 26 42 44
+macos-15	cd-p.tst:135: cd path ending with slash (-L)	0.7311	4418.0	6043.0	0.6073	0 1 3 7 8 17 21 23 24 26 42 44 48 52
+macos-15	sigquit6-p.tst:7134: SIGQUIT spares execed process (subshell, self, -i +m, initially ignored, keep -> ignore)	0.7311	11691.0	15991.0	0.4328	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 36 39 40 41 42 44 48 55 56
+macos-15	errexit-p.tst:419: noerrexit: until body	0.7306	4185.0	5728.0	0.5865	0 1 3 7 8 12 23 24 26 42 44
+macos-15	alias-p.tst:281: alias substitution to while/until/do/done keywords	0.7303	6993.0	9576.0	0.5894	0 1 3 7 8 9 12 23 24 26 27 30 32 33 40 42 44 50
+macos-15	if-p.tst:422: redirection on if	0.7302	5934.0	8127.0	0.6088	0 1 3 7 8 11 23 24 25 26 27 29 30 33 42 44
+macos-15	sigterm7-p.tst:8169: SIGTERM kills execed process (async, other, -i -m, initially defaulted, clear -> clear)	0.7302	10742.0	14712.0	0.4188	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 37 39 40 41 42 48 55 56
+macos-15	if-p.tst:204: exit status of if-elif-elif-else, false-true-false	0.7297	4125.0	5653.0	0.4493	0 1 3 7 8 9 11 13 14 23 24 26 42 48
+macos-15	umask-p.tst:76: symbolic operand u+xwr	0.7297	11236.0	15399.0	0.6923	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sigcont4-p.tst:8007: SIGCONT spares shell (main, other, +i -m, initially ignored, ignore -> ignore)	0.7294	9651.0	13231.0	0.4837	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 42 44 48
+macos-15	sigint3-p.tst:8064: SIGINT kills child process (main, self, +i -m, initially defaulted, command -> keep)	0.7292	8417.0	11543.0	0.4864	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 48
+macos-15	param-p.tst:82: tilde expansion in embedded word	0.7291	10249.0	14058.0	0.6206	0 1 3 7 8 11 13 14 17 20 21 23 24 25 26 27 30 32 33 40 42 43 44 45 48
+macos-15	case-p.tst:184: exit status of case command (unmatched, non-empty)	0.7289	6145.0	8430.0	0.5008	0 1 3 7 8 17 34 42
+macos-15	sigint8-p.tst:8132: SIGINT spares execed process (subshell, self, -i -m, initially ignored, keep -> keep)	0.7286	9820.0	13478.0	0.4643	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 40 41 42 44 48 55 56
+macos-15	error-p.tst:386: redirection error on special built-in break kills non-interactive shell	0.7285	4618.0	6339.0	0.5114	0 1 3 7 8 24 25 26 27 42
+macos-15	sigquit3-p.tst:8150: SIGQUIT spares execed process (cmdsub, self, +i -m, initially defaulted, keep -> ignore)	0.7284	8752.0	12015.0	0.4773	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48
+macos-15	trap-p.tst:176: command is evaluated each time trap is executed	0.7284	14274.0	19596.0	0.6948	0 1 3 5 7 8 9 13 14 23 24 26 29 30 33 36 39 40 41 42 44 48
+macos-15	sighup8-p.tst:8155: SIGUSR1 kills execed process (cmdsub, other, -i -m, initially ignored, clear -> command)	0.7281	14512.0	19932.0	0.4479	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 34 36 39 40 41 42 48 55 56
+macos-15	sigterm3-p.tst:8177: SIGTERM kills execed process (async, other, +i -m, initially defaulted, command -> clear)	0.7281	14013.0	19247.0	0.4201	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 37 39 40 41 42 48
+macos-15	sigquit3-p.tst:8094: SIGQUIT spares child process (cmdsub, self, +i -m, initially defaulted, ignore -> ignore)	0.7278	8194.0	11259.0	0.4733	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 34 36 39 40 41 42 44 48
+macos-15	sigquit2-p.tst:7148: SIGQUIT spares execed process (cmdsub, self, +i +m, initially ignored, keep -> keep)	0.7276	9392.0	12908.0	0.4809	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 40 42 44 48
+macos-15	sigquit6-p.tst:7178: SIGQUIT spares execed process (async, self, -i +m, initially ignored, command -> ignore)	0.7276	10670.0	14665.0	0.4677	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48 55 56
+macos-15	sigcont6-p.tst:7029: SIGCONT spares shell (cmdsub, other, -i +m, initially ignored, clear -> ignore)	0.7266	10599.0	14587.0	0.4324	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48 55 56
+macos-15	sigquit8-p.tst:8170: SIGQUIT spares execed process (async, self, -i -m, initially ignored, clear -> ignore)	0.7261	13475.0	18557.0	0.4562	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48 55 56
+macos-15	sigquit6-p.tst:7002: SIGQUIT spares shell (main, self, -i +m, initially ignored, clear -> clear)	0.7259	5014.0	6907.0	0.3774	0 1 7 8 17 21 23 24 26 36 39 41 42 44 48 55 56
+macos-15	sigurg2-p.tst:7079: SIGURG spares child process (subshell, other, +i +m, initially ignored, ignore -> command)	0.7255	12042.0	16598.0	0.5031	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 36 39 40 42 44 48
+macos-15	sigquit6-p.tst:7082: SIGQUIT spares child process (subshell, self, -i +m, initially ignored, command -> ignore)	0.7248	9870.0	13618.0	0.4157	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 36 39 40 41 42 44 48 55 56
+macos-15	sigquit7-p.tst:8062: SIGQUIT spares child process (main, self, -i -m, initially defaulted, ignore -> ignore)	0.7245	10436.0	14405.0	0.4881	0 1 3 7 8 10 17 21 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sigurg8-p.tst:8074: SIGURG spares child process (subshell, self, -i -m, initially ignored, clear -> ignore)	0.7243	11695.0	16146.0	0.4509	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 39 40 41 42 44 48 55 56
+macos-15	tilde-p.tst:193: named tilde expansion in assignment, end of word	0.7242	5110.0	7056.0	0.748	0 1 3 7 8 11 13 14 17 20 21 23 24 26 42 43 44 45 48
+macos-15	sigcont2-p.tst:7119: SIGCONT spares execed process (main, other, +i +m, initially ignored, keep -> command)	0.7231	13822.0	19115.0	0.4773	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 36 39 42 44 48
+macos-15	sigint4-p.tst:8039: SIGINT spares shell (async, other, +i -m, initially ignored, keep -> keep)	0.723	9380.0	12974.0	0.4345	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 40 42 44 48
+macos-15	sigurg2-p.tst:7170: SIGURG spares execed process (async, self, +i +m, initially ignored, clear -> ignore)	0.7229	7212.0	9977.0	0.5524	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 44 48
+macos-15	sigquit2-p.tst:7156: SIGQUIT spares execed process (cmdsub, self, +i +m, initially ignored, ignore -> keep)	0.7227	9413.0	13024.0	0.507	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 42 44 48
+macos-15	sigurg6-p.tst:7068: SIGURG spares child process (subshell, self, -i +m, initially ignored, keep -> keep)	0.7226	11322.0	15668.0	0.4786	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 36 40 41 42 44 48 55 56
+macos-15	sigterm4-p.tst:8086: SIGTERM spares child process (cmdsub, self, +i -m, initially ignored, keep -> ignore)	0.7223	8662.0	11993.0	0.4007	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 42 44 48
+macos-15	sigterm4-p.tst:8100: SIGTERM spares child process (async, self, +i -m, initially ignored, keep -> keep)	0.7219	9282.0	12857.0	0.4347	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 40 42 44 48
+macos-15	sigurg2-p.tst:7167: SIGURG spares execed process (async, other, +i +m, initially ignored, keep -> command)	0.7219	12682.0	17568.0	0.4295	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 37 39 40 42 44 48
+macos-15	if-p.tst:208: exit status of if-elif-elif-else, false-false-true-true	0.7217	4138.0	5734.0	0.5782	0 1 3 7 8 9 11 13 14 23 24 26 42 48
+macos-15	sighup8-p.tst:8123: SIGUSR1 kills execed process (main, other, -i -m, initially ignored, clear -> command)	0.7215	14220.0	19709.0	0.3009	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 36 39 41 42 48 55 56
+macos-15	sigquit3-p.tst:8166: SIGQUIT spares execed process (async, self, +i -m, initially defaulted, keep -> ignore)	0.721	8196.0	11368.0	0.4895	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48
+macos-15	sigquit3-p.tst:8042: SIGQUIT spares shell (async, other, +i -m, initially defaulted, clear -> ignore)	0.7207	9316.0	12926.0	0.3989	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48
+macos-15	getopts-p.tst:19: operand variable is updated to parsed option on each invocation	0.7206	4419.0	6132.0	0.5719	0 1 3 7 8 21 23 24 26 42 43 48 51
+macos-15	sigquit6-p.tst:7112: SIGQUIT spares child process (async, self, -i +m, initially ignored, command -> keep)	0.7205	9803.0	13605.0	0.4478	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48 55 56
+macos-15	param-p.tst:448: special parameter $	0.7204	5199.0	7217.0	0.4776	0 1 3 7 8 14 17 21 23 24 26 34 36 40 42 44 45 48
+macos-15	sigquit7-p.tst:8138: SIGQUIT spares execed process (subshell, self, -i -m, initially defaulted, clear -> ignore)	0.7201	12415.0	17241.0	0.4696	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 39 40 41 42 44 48 55 56
+macos-15	sighup2-p.tst:7045: SIGPIPE spares shell (async, other, +i +m, initially ignored, ignore -> clear)	0.7198	13913.0	19330.0	0.4572	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 42 44 48
+macos-15	sigquit4-p.tst:8134: SIGQUIT spares execed process (subshell, self, +i -m, initially ignored, keep -> ignore)	0.7198	9001.0	12504.0	0.4875	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 39 40 42 44 48
+macos-15	sigurg7-p.tst:8151: SIGURG spares execed process (cmdsub, other, -i -m, initially defaulted, keep -> command)	0.7194	15197.0	21125.0	0.4056	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 34 36 39 40 41 42 44 48 55 56
+macos-15	sigquit6-p.tst:7024: SIGQUIT spares shell (subshell, other, -i +m, initially ignored, command -> ignore)	0.719	11215.0	15597.0	0.4074	0 1 5 7 8 17 21 23 24 26 29 30 33 36 39 40 41 42 44 48 55 56
+macos-15	sigterm3-p.tst:8012: SIGTERM is handled by shell (main, self, +i -m, initially defaulted, command -> command)	0.7186	4107.0	5715.0	0.4989	0 1 3 5 7 8 23 24 26 36 39 41 42 44 48
+macos-15	sighup2-p.tst:7121: SIGHUP spares execed process (main, other, +i +m, initially ignored, clear -> clear)	0.7185	13457.0	18730.0	0.4465	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 36 39 42 44 48
+macos-15	sigquit4-p.tst:8017: SIGQUIT spares shell (subshell, other, +i -m, initially ignored, clear -> command)	0.7182	7967.0	11093.0	0.4568	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 40 42 44 48
+macos-15	sigcont3-p.tst:8053: SIGCONT spares child process (main, other, +i -m, initially defaulted, keep -> clear)	0.7177	9929.0	13835.0	0.4513	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 39 40 42 44 48
+macos-15	sigquit8-p.tst:8010: SIGQUIT spares shell (main, self, -i -m, initially ignored, command -> clear)	0.7176	6270.0	8737.0	0.4685	0 1 7 8 17 21 23 24 26 36 39 41 42 44 48 55 56
+macos-15	sigurg2-p.tst:7029: SIGURG spares shell (cmdsub, other, +i +m, initially ignored, clear -> ignore)	0.7171	7558.0	10539.0	0.4892	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 42 44 48
+macos-15	sighup3-p.tst:8045: SIGUSR1 kills shell (async, other, +i -m, initially defaulted, ignore -> clear)	0.7168	8445.0	11782.0	0.4644	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 48
+macos-15	grouping-p.tst:34: subshell ending with asynchronous list	0.7165	6026.0	8410.0	0.556	0 1 3 7 8 23 24 25 27 29 30 32 33 35 40 42 44
+macos-15	sigquit6-p.tst:7003: SIGQUIT spares shell (main, other, -i +m, initially ignored, clear -> ignore)	0.7162	9067.0	12659.0	0.4127	0 1 5 7 8 17 21 23 24 26 29 30 33 36 39 41 42 44 48 55 56
+macos-15	command-p.tst:176: describing special built-in (-V)	0.7157	3693.0	5160.0	0.5	0 1 3 7 8 23 24 26 42 50 53
+macos-15	sigterm3-p.tst:8159: SIGTERM kills execed process (cmdsub, other, +i -m, initially defaulted, ignore -> command)	0.7152	13387.0	18719.0	0.4137	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 34 36 39 40 41 42 48
+macos-15	simple-p.tst:157: assignment-like command argument	0.7152	14756.0	20632.0	0.8207	0 1 3 7 8 14 17 21 23 24 26 29 30 33 42
+macos-15	option-p.tst:81: noglob (short) off: $-	0.7151	4981.0	6965.0	0.5295	0 1 3 7 8 24 30 32 33 42 43
+macos-15	sigquit8-p.tst:8148: SIGQUIT spares execed process (cmdsub, self, -i -m, initially ignored, keep -> keep)	0.7149	10276.0	14374.0	0.4341	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 40 41 42 44 48 55 56
+macos-15	comment-p.tst:156: comment in until loop	0.7148	4325.0	6051.0	0.4901	0 1 3 7 8 12 23 24 25 26 27 42 44
+macos-15	sighup3-p.tst:8169: SIGPIPE kills execed process (async, other, +i -m, initially defaulted, clear -> clear)	0.7147	10316.0	14434.0	0.526	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 37 39 40 42 48
+macos-15	cd-p.tst:309: target pathname is canonicalized (-L)	0.714	4483.0	6279.0	0.5416	0 1 3 7 8 21 23 24 26 42 43 48 52
+macos-15	error-p.tst:304: assignment error on command ulimit in subshell	0.7131	4794.0	6723.0	0.6637	0 1 3 7 8 17 23 24 26 40 42 44 45 48
+macos-15	sigquit2-p.tst:7072: SIGQUIT spares child process (subshell, self, +i +m, initially ignored, clear -> keep)	0.7128	11810.0	16569.0	0.5167	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 40 42 44 48
+macos-15	sigquit2-p.tst:7146: SIGQUIT spares execed process (subshell, self, +i +m, initially ignored, command -> ignore)	0.7124	9265.0	13006.0	0.4911	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 40 42 44 48
+macos-15	sigquit2-p.tst:7053: SIGQUIT spares child process (main, other, +i +m, initially ignored, keep -> clear)	0.712	16116.0	22636.0	0.5004	0 1 3 5 7 8 10 23 24 25 26 28 29 30 33 36 39 42 44 48
+macos-15	sigurg8-p.tst:8024: SIGURG spares shell (subshell, other, -i -m, initially ignored, command -> ignore)	0.712	11576.0	16258.0	0.3935	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 44 48 55 56
+macos-15	option-p.tst:135: noexec (long) off: $-	0.7111	4936.0	6941.0	0.5435	0 1 3 7 8 24 30 32 33 42 43
+macos-15	sigint8-p.tst:8007: SIGINT spares shell (main, other, -i -m, initially ignored, ignore -> ignore)	0.711	9510.0	13376.0	0.4752	0 1 5 7 8 17 21 23 24 26 27 29 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	umask-p.tst:52: restoring umask using previous output, symbolic, 653	0.711	4517.0	6353.0	0.4117	0 1 3 7 8 17 21 23 24 26 34 40 42 45 46 48
+macos-15	sigcont2-p.tst:7012: SIGCONT spares shell (main, self, +i +m, initially ignored, command -> command)	0.7104	5301.0	7462.0	0.5338	0 1 3 7 8 23 24 26 36 39 42 44 48
+macos-15	sigterm2-p.tst:7148: SIGTERM spares execed process (cmdsub, self, +i +m, initially ignored, keep -> keep)	0.7104	8550.0	12036.0	0.4874	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 40 42 44 48
+macos-15	for-p.tst:153: redirection on for loop	0.7101	6272.0	8833.0	0.626	0 1 3 7 8 10 12 21 23 24 25 26 27 28 29 30 33 42 44 47 48
+macos-15	sighup2-p.tst:7031: SIGHUP spares shell (cmdsub, other, +i +m, initially ignored, ignore -> keep)	0.71	14425.0	20316.0	0.5053	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 42 44 48
+macos-15	sigterm8-p.tst:8052: SIGTERM spares child process (main, self, -i -m, initially ignored, keep -> keep)	0.7099	12368.0	17423.0	0.4759	0 1 3 7 8 10 17 21 23 24 25 26 27 28 29 31 33 35 36 40 41 42 44 48 55 56
+macos-15	for-p.tst:139: exit status with no words	0.7098	4331.0	6102.0	0.4596	0 1 3 7 8 12 23 24 26 42
+macos-15	sigquit7-p.tst:8142: SIGQUIT spares execed process (subshell, self, -i -m, initially defaulted, ignore -> ignore)	0.7094	10477.0	14768.0	0.4629	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 39 40 41 42 44 48 55 56
+macos-15	umask-p.tst:119: symbolic operand u=xr	0.7094	8700.0	12264.0	0.6178	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sighup3-p.tst:8154: SIGUSR2 spares execed process (cmdsub, self, +i -m, initially defaulted, clear -> ignore)	0.7093	8227.0	11598.0	0.4288	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48
+macos-15	umask-p.tst:116: symbolic operand u=w	0.7091	9176.0	12941.0	0.5836	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sigurg4-p.tst:8178: SIGURG spares execed process (async, self, +i -m, initially ignored, command -> ignore)	0.7087	10501.0	14817.0	0.5003	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 44 48
+macos-15	case-p.tst:31: case word is subject to arithmetic expansion	0.7083	5442.0	7683.0	0.4337	0 1 3 7 8 15 17 23 24 26 42 44
+macos-15	sigurg2-p.tst:7165: SIGURG spares execed process (async, other, +i +m, initially ignored, keep -> clear)	0.7083	9493.0	13403.0	0.4465	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 37 39 40 42 44 48
+macos-15	sigquit8-p.tst:8066: SIGQUIT spares child process (main, self, -i -m, initially ignored, command -> ignore)	0.7082	10083.0	14237.0	0.5665	0 1 3 7 8 10 17 21 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sigquit2-p.tst:7074: SIGQUIT spares child process (subshell, self, +i +m, initially ignored, clear -> ignore)	0.708	12761.0	18025.0	0.4955	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 40 42 44 48
+macos-15	exec-p.tst:72: executing non-existing command (relative, interactive)	0.7077	6792.0	9597.0	0.461	0 1 7 8 17 21 23 24 26 31 41 42 44 48 55 56
+macos-15	sigcont4-p.tst:8170: SIGCONT spares execed process (async, self, +i -m, initially ignored, clear -> ignore)	0.7077	10204.0	14418.0	0.4804	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 44 48
+macos-15	if-p.tst:61: execution path of if-elif-else, false-true	0.7075	4579.0	6472.0	0.5031	0 1 3 7 8 11 23 24 26 42 44
+macos-15	continue-p.tst:282: continuing while and until loops, outermost	0.7074	4217.0	5961.0	0.5829	0 1 3 7 8 12 15 17 21 23 24 26 42 44 45 48
+macos-15	exec-p.tst:59: exec in subshell	0.7073	9310.0	13162.0	0.6335	0 1 3 7 8 23 24 26 31 40 42 44 48
+macos-15	sighup3-p.tst:8055: SIGUSR2 kills child process (main, other, +i -m, initially defaulted, keep -> command)	0.7067	11729.0	16597.0	0.4828	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 48
+macos-15	trap-p.tst:187: traps are not handled until foreground job finishes	0.7064	9095.0	12876.0	0.638	0 1 3 5 7 8 13 14 23 24 26 29 30 33 36 39 40 41 42 44 48
+macos-15	quote-p.tst:263: line continuation in here-document operators	0.706	13352.0	18911.0	0.6454	0 1 3 7 8 10 14 17 21 23 24 25 26 28 29 30 33 42
+macos-15	grouping-p.tst:75: brace grouping ending with asynchronous list	0.7056	9612.0	13623.0	0.6333	0 1 3 7 8 23 24 25 27 29 30 32 33 35 40 42 44
+macos-15	if-p.tst:272: linebreak after elif	0.7056	3873.0	5489.0	0.4651	0 1 3 7 8 11 23 24 26 42 44
+macos-15	command-p.tst:88: describing reserved word case (-v)	0.7053	3772.0	5348.0	0.4728	0 1 3 7 8 23 24 26 42 50 53
+macos-15	umask-p.tst:107: symbolic operand +w	0.7053	8737.0	12387.0	0.6777	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	option-p.tst:89: noglob (short) on: effect	0.7051	3417.0	4846.0	0.4777	0 1 3 7 8 23 24 26 42 44 48
+macos-15	sighup7-p.tst:8083: SIGUSR2 kills child process (subshell, other, -i -m, initially defaulted, command -> command)	0.705	13579.0	19261.0	0.4552	0 1 3 5 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 39 40 41 42 48 55 56
+macos-15	command-p.tst:70: describing reserved word ! (-v)	0.704	4070.0	5781.0	0.4992	0 1 3 7 8 23 24 26 42 50 53
+macos-15	command-p.tst:148: describing reserved word then (-v)	0.7036	3742.0	5318.0	0.5082	0 1 3 7 8 23 24 26 42 50 53
+macos-15	errexit-p.tst:5: noerrexit: successful simple command	0.7036	5324.0	7567.0	0.5623	0 1 3 7 8 23 24 26 42 44
+macos-15	redir-p.tst:235: input duplication, success	0.7033	6130.0	8716.0	0.657	0 1 3 7 8 15 17 24 25 27 29 31 33 40 42
+macos-15	command-p.tst:275: describing external command with standard path (-v)	0.703	3574.0	5084.0	0.4682	0 1 3 7 8 17 21 23 24 26 42 50 53
+macos-15	exit-p.tst:55: exiting from EXIT trap with 7	0.7029	3632.0	5167.0	0.5231	0 1 3 5 7 8 23 24 26 39 41 42
+macos-15	sigquit6-p.tst:7068: SIGQUIT spares child process (subshell, self, -i +m, initially ignored, keep -> keep)	0.7026	10307.0	14670.0	0.4911	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 36 40 41 42 44 48 55 56
+macos-15	sigterm3-p.tst:8021: SIGTERM is handled by shell (subshell, other, +i -m, initially defaulted, ignore -> command)	0.7026	10302.0	14663.0	0.4761	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 40 41 42 44 48
+macos-15	trap-p.tst:112: fatal shell error in signal trap	0.7026	10548.0	15013.0	0.6883	0 1 3 5 7 8 13 14 23 24 25 26 27 29 30 33 36 39 40 41 42 48
+macos-15	sigterm3-p.tst:8082: SIGTERM spares child process (subshell, self, +i -m, initially defaulted, command -> ignore)	0.7025	8899.0	12667.0	0.3986	0 1 3 7 8 10 23 24 25 26 28 29 30 33 35 36 39 40 41 42 44 48
+macos-15	sigterm3-p.tst:8096: SIGTERM kills child process (cmdsub, self, +i -m, initially defaulted, command -> keep)	0.7022	7755.0	11044.0	0.4968	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 48
+macos-15	sigurg1-p.tst:7109: SIGURG spares child process (async, other, +i +m, initially defaulted, ignore -> clear)	0.7022	11905.0	16953.0	0.45	0 1 3 5 7 8 10 23 24 25 26 28 29 30 33 35 36 37 39 40 41 42 44 48
+macos-15	exit-p.tst:66: default exit status with previous command in trap in exiting with default	0.702	4468.0	6365.0	0.5703	0 1 3 5 7 8 23 24 26 39 40 41 42
+macos-15	sigquit7-p.tst:8011: SIGQUIT spares shell (main, other, -i -m, initially defaulted, command -> ignore)	0.7015	11662.0	16624.0	0.5288	0 1 5 7 8 17 21 23 24 26 27 29 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sigurg8-p.tst:8062: SIGURG spares child process (main, self, -i -m, initially ignored, ignore -> ignore)	0.7015	10478.0	14936.0	0.4365	0 1 3 7 8 10 17 21 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	arith-p.tst:9: single constant	0.7014	6642.0	9469.0	0.453	0 1 3 7 8 13 14 15 17 21 23 24 26 42 43 48
+macos-15	option-p.tst:355: verbose (long) off: $-	0.7012	5106.0	7282.0	0.5378	0 1 3 7 8 24 30 32 33 42 43
+macos-15	sigquit3-p.tst:8074: SIGQUIT spares child process (subshell, self, +i -m, initially defaulted, clear -> ignore)	0.701	7890.0	11256.0	0.4673	0 1 3 7 8 10 23 24 25 26 28 29 30 33 35 36 39 40 41 42 44 48
+macos-15	sigurg4-p.tst:8010: SIGURG spares shell (main, self, +i -m, initially ignored, command -> clear)	0.701	4155.0	5927.0	0.5762	0 1 3 7 8 23 24 26 36 39 42 44 48
+macos-15	sigurg8-p.tst:8109: SIGURG spares child process (async, other, -i -m, initially ignored, ignore -> clear)	0.7008	13836.0	19743.0	0.4072	0 1 3 5 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+macos-15	quote-p.tst:477: backslashes in substitution of expansion ${a+b}	0.7006	6918.0	9875.0	0.5312	0 1 3 7 8 11 13 14 17 21 23 24 26 42 43 44 45 48
+macos-15	sigcont6-p.tst:7100: SIGCONT spares child process (async, self, -i +m, initially ignored, keep -> keep)	0.7004	9285.0	13256.0	0.4704	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 40 41 42 44 48 55 56
+macos-15	sighup2-p.tst:7124: SIGHUP spares execed process (main, self, +i +m, initially ignored, ignore -> keep)	0.7003	10827.0	15460.0	0.4633	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 42 44 48
+macos-15	sigcont6-p.tst:7149: SIGCONT spares execed process (cmdsub, other, -i +m, initially ignored, keep -> clear)	0.7001	18216.0	26018.0	0.4479	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 34 36 39 40 41 42 44 48 55 56
+macos-15	sigquit2-p.tst:7046: SIGQUIT spares shell (async, other, +i +m, initially ignored, ignore -> ignore)	0.7	12513.0	17875.0	0.5199	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 42 44 48
+macos-15	tilde-p.tst:179: exit status of successful named tilde expansion (in command word)	0.6998	4278.0	6113.0	0.7654	0 1 3 7 8 14 17 20 21 23 24 26 42 48
+macos-15	simple-p.tst:278: argv[0] (command name without slash)	0.6994	14077.0	20127.0	0.8001	0 1 3 7 8 14 17 21 23 24 26 29 30 33 42 48
+macos-15	async-p.tst:38: asynchronous command runs in subshell	0.6989	4567.0	6535.0	0.5579	0 1 3 7 8 17 21 23 24 26 35 37 40 42 44 48
+macos-15	exec-p.tst:40: executing external command	0.6985	8152.0	11671.0	0.5925	0 1 3 7 8 23 24 26 31
+macos-15	sigterm3-p.tst:8030: SIGTERM is handled by shell (cmdsub, other, +i -m, initially defaulted, clear -> command)	0.6984	8588.0	12297.0	0.4749	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48
+macos-15	param-p.tst:291: removing longest matching prefix	0.6983	4109.0	5884.0	0.5537	0 1 3 7 8 11 13 14 17 19 21 23 24 26 42 43 44 45 48
+macos-15	sigcont6-p.tst:7076: SIGCONT spares child process (subshell, self, -i +m, initially ignored, ignore -> keep)	0.6982	9215.0	13198.0	0.4483	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 36 39 40 41 42 44 48 55 56
+macos-15	param-p.tst:99: parameter expansion in embedded word	0.6977	8433.0	12087.0	0.6886	0 1 3 7 8 11 13 14 17 21 23 24 25 26 27 30 32 33 40 42 43 44 45 48
+macos-15	for-p.tst:77: words are not treated as assignments	0.6976	4673.0	6699.0	0.5174	0 1 3 7 8 12 17 21 23 24 26 42 44 48
+macos-15	test-p.tst:326: test 90 -ne 0	0.6975	3232.0	4634.0	0.5766	0 1 3 7 8 17 21 23 24 26 42 45 48
+macos-15	unset-p.tst:103: only function is deleted (-f)	0.697	4592.0	6588.0	0.5123	0 1 3 7 8 14 17 21 23 24 26 42 44 48
+macos-15	sigterm3-p.tst:8023: SIGTERM kills shell (subshell, other, +i -m, initially defaulted, command -> clear)	0.6968	8039.0	11537.0	0.4527	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 40 41 42 48
+macos-15	sigterm3-p.tst:8017: SIGTERM is handled by shell (subshell, other, +i -m, initially defaulted, clear -> command)	0.6967	9058.0	13002.0	0.4596	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 40 41 42 44 48
+macos-15	startup-p.tst:49: one operand with -s	0.6966	4575.0	6568.0	0.5102	0 1 3 7 8 23 24 26 42 43 48
+macos-15	getopts-p.tst:163: OPTARG is unset after parsing all options	0.6965	5770.0	8284.0	0.4696	0 1 3 7 8 21 23 24 26 42 43 48 51
+macos-15	sigterm3-p.tst:8129: SIGTERM kills execed process (main, other, +i -m, initially defaulted, command -> clear)	0.6963	10979.0	15768.0	0.5314	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 36 39 41 42 48
+macos-15	sigttou7-p.tst:11028: SIGTTOU stops execed process (subshell, self, -i -m, initially defaulted, command -> keep)	0.6962	10250.0	14722.0	0.4662	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 39 40 41 42 44 48 55 56
+macos-15	sighup3-p.tst:8044: SIGPIPE spares shell (async, other, +i -m, initially defaulted, ignore -> keep)	0.6961	8636.0	12407.0	0.4654	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48
+macos-15	sigurg6-p.tst:7089: SIGURG spares child process (cmdsub, other, -i +m, initially ignored, clear -> clear)	0.6955	15122.0	21744.0	0.3956	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 34 36 39 40 41 42 44 48 55 56
+macos-15	alias-p.tst:583: recursive alias	0.6952	3950.0	5682.0	0.5267	0 1 3 7 8 9 23 24 26 42 44 50
+macos-15	sigterm3-p.tst:8053: SIGTERM kills child process (main, other, +i -m, initially defaulted, keep -> clear)	0.695	11288.0	16242.0	0.4088	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 39 40 42 48
+macos-15	alias-p.tst:93: printing all aliases	0.6949	6972.0	10033.0	0.6427	0 1 3 5 6 7 8 9 17 21 23 24 25 26 27 29 30 31 33 34 40 42 48 50
+macos-15	continue-p.tst:19: continuing one while loop, unnested	0.6949	4286.0	6168.0	0.4463	0 1 3 7 8 12 15 17 21 23 24 26 42 44 45 48
+macos-15	sigterm1-p.tst:7124: SIGTERM spares execed process (main, self, +i +m, initially defaulted, ignore -> keep)	0.6949	7849.0	11295.0	0.4912	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 41 42 44 48
+macos-15	tilde-p.tst:102: empty HOME	0.6948	4569.0	6576.0	0.5413	0 1 3 7 8 11 13 14 17 20 21 23 24 26 42 43 44 45 48
+macos-15	sigterm3-p.tst:8170: SIGTERM spares execed process (async, self, +i -m, initially defaulted, clear -> ignore)	0.6947	7396.0	10646.0	0.4383	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48
+macos-15	wait-p.tst:21: waiting for specific many jobs (+m)	0.6947	3983.0	5733.0	0.5554	0 1 3 7 8 17 21 23 24 26 27 32 33 35 37 40 42 48
+macos-15	sighup8-p.tst:8163: SIGHUP kills execed process (cmdsub, other, -i -m, initially ignored, command -> command)	0.6944	13791.0	19861.0	0.5159	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 34 36 39 40 41 42 48 55 56
+macos-15	sigterm1-p.tst:7038: SIGTERM is handled by shell (cmdsub, other, +i +m, initially defaulted, command -> command)	0.6944	8171.0	11767.0	0.4791	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48
+macos-15	sigurg2-p.tst:7071: SIGURG spares child process (subshell, other, +i +m, initially ignored, keep -> command)	0.6943	10390.0	14965.0	0.5106	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 36 39 40 42 44 48
+macos-15	sighup2-p.tst:7030: SIGUSR1 spares shell (cmdsub, other, +i +m, initially ignored, clear -> command)	0.6942	15918.0	22929.0	0.4642	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 42 44 48
+macos-15	error-p.tst:268: assignment error on command read in subshell	0.6937	4883.0	7039.0	0.5936	0 1 3 7 8 17 23 24 26 40 42 44 45 48
+macos-15	sigurg2-p.tst:7154: SIGURG spares execed process (cmdsub, self, +i +m, initially ignored, clear -> ignore)	0.6937	6195.0	8931.0	0.512	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 42 44 48
+macos-15	tilde-p.tst:277: result of tilde expansion is not subject to pathname expansion	0.6934	4514.0	6510.0	0.5341	0 1 3 7 8 11 13 14 17 20 21 23 24 26 42 43 44 45 48
+macos-15	sigquit8-p.tst:8016: SIGQUIT spares shell (subshell, other, -i -m, initially ignored, clear -> ignore)	0.6933	10208.0	14723.0	0.4718	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 44 48 55 56
+macos-15	command-p.tst:227: output of describing external command (-V, with slash)	0.6932	6140.0	8857.0	0.6778	0 1 3 7 8 23 24 26 27 31 32 33 34 40 42 50 53
+macos-15	sigtstp8-p.tst:11011: SIGTSTP stops child process (main, other, -i -m, initially ignored, ignore -> command)	0.693	15209.0	21947.0	0.3961	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	if-p.tst:216: exit status of if-elif-elif-else, false-false-false-true	0.6928	3891.0	5616.0	0.6023	0 1 3 7 8 9 11 13 14 23 24 26 42 48
+macos-15	sigterm3-p.tst:8003: SIGTERM spares shell (main, other, +i -m, initially defaulted, clear -> ignore)	0.6928	7923.0	11437.0	0.5058	0 1 3 5 7 8 23 24 26 27 29 31 33 35 36 39 40 41 42 44 48
+macos-15	sigquit8-p.tst:8052: SIGQUIT spares child process (main, self, -i -m, initially ignored, keep -> keep)	0.6927	10589.0	15286.0	0.6974	0 1 3 7 8 10 17 21 23 24 25 26 27 28 29 31 33 35 36 40 41 42 44 48 55 56
+macos-15	sigurg3-p.tst:8014: SIGURG spares shell (subshell, other, +i -m, initially defaulted, clear -> keep)	0.6927	6837.0	9870.0	0.4581	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 40 42 44 48
+macos-15	sigterm3-p.tst:8081: SIGTERM kills child process (subshell, other, +i -m, initially defaulted, command -> clear)	0.692	13206.0	19084.0	0.365	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 48
+macos-15	sigint3-p.tst:8078: SIGINT spares child process (subshell, self, +i -m, initially defaulted, ignore -> ignore)	0.6916	8480.0	12262.0	0.4876	0 1 3 7 8 10 23 24 25 26 28 29 30 33 35 36 39 40 41 42 44 48
+macos-15	umask-p.tst:80: symbolic operand g+w	0.6914	9599.0	13884.0	0.521	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	case-p.tst:352: reserved word select as pattern	0.6913	5020.0	7262.0	0.4557	0 1 3 7 8 17 23 24 26 42 44
+macos-15	sigcont4-p.tst:8056: SIGCONT spares child process (main, self, +i -m, initially ignored, clear -> keep)	0.6913	8869.0	12829.0	0.4856	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 39 40 42 44 48
+macos-15	sigquit8-p.tst:8003: SIGQUIT spares shell (main, other, -i -m, initially ignored, clear -> ignore)	0.6909	9261.0	13404.0	0.4829	0 1 5 7 8 17 21 23 24 26 27 29 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sigurg2-p.tst:7005: SIGURG spares shell (main, other, +i +m, initially ignored, ignore -> keep)	0.6909	6950.0	10060.0	0.5001	0 1 3 5 7 8 23 24 26 29 30 33 36 39 42 44 48
+macos-15	quote-p.tst:697: backslashes resulting from expansions (not a pattern)	0.6907	5708.0	8264.0	0.4408	0 1 3 7 8 11 13 14 17 21 23 24 26 42 43 44 45 48
+macos-15	sigurg6-p.tst:7132: SIGURG spares execed process (subshell, self, -i +m, initially ignored, keep -> keep)	0.6904	9237.0	13379.0	0.5228	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 36 40 41 42 44 48 55 56
+macos-15	sigquit8-p.tst:8007: SIGQUIT spares shell (main, other, -i -m, initially ignored, ignore -> ignore)	0.6903	9609.0	13920.0	0.4766	0 1 5 7 8 17 21 23 24 26 27 29 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	umask-p.tst:78: symbolic operand g+	0.6901	10017.0	14515.0	0.6598	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	async-p.tst:27: asynchronous commands run asynchronously	0.6897	9034.0	13098.0	0.6743	0 1 3 7 8 23 24 25 26 27 29 30 31 32 33 35 37 40 42 44 48
+macos-15	sigttou8-p.tst:11027: SIGTTOU stops execed process (subshell, other, -i -m, initially ignored, ignore -> command)	0.6897	13842.0	20069.0	0.4712	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sigquit2-p.tst:7157: SIGQUIT spares execed process (cmdsub, other, +i +m, initially ignored, ignore -> clear)	0.6893	14485.0	21015.0	0.4738	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 34 36 39 40 42 44 48
+macos-15	cd-p.tst:439: empty operand (-P)	0.6892	4031.0	5849.0	0.5247	0 1 3 7 8 23 24 26 42 48 52
+macos-15	sigterm3-p.tst:8043: SIGTERM is handled by shell (async, other, +i -m, initially defaulted, clear -> command)	0.6889	7877.0	11435.0	0.44	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48
+macos-15	sigttin7-p.tst:11004: SIGTTIN stops child process (main, self, -i -m, initially defaulted, clear -> keep)	0.6888	6521.0	9467.0	0.4785	0 1 3 7 8 10 17 21 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sighup2-p.tst:7123: SIGUSR2 spares execed process (main, other, +i +m, initially ignored, clear -> command)	0.6887	14411.0	20924.0	0.4327	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 36 39 42 44 48
+macos-15	grouping-p.tst:20: redirection on subshell	0.6885	5929.0	8612.0	0.5801	0 1 3 7 8 23 24 25 26 27 31 40 42 44
+macos-15	sigurg4-p.tst:8024: SIGURG spares shell (subshell, other, +i -m, initially ignored, command -> ignore)	0.6885	11500.0	16702.0	0.419	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 40 42 44 48
+macos-15	exit-p.tst:76: default exit status in EXIT trap in exiting with 1	0.6884	3340.0	4852.0	0.5257	0 1 3 5 7 8 23 24 26 39 41 42
+macos-15	sigurg2-p.tst:7034: SIGURG spares shell (cmdsub, other, +i +m, initially ignored, ignore -> command)	0.6883	7493.0	10886.0	0.504	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 42 44 48
+macos-15	sigterm2-p.tst:7040: SIGTERM spares shell (async, other, +i +m, initially ignored, clear -> keep)	0.688	8278.0	12032.0	0.4277	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 42 44 48
+macos-15	sigterm3-p.tst:8005: SIGTERM spares shell (main, other, +i -m, initially defaulted, ignore -> keep)	0.6877	8292.0	12058.0	0.5063	0 1 3 5 7 8 23 24 26 27 29 31 33 35 36 39 40 41 42 44 48
+macos-15	arith-p.tst:303: operator precedence: assignments in conditionals	0.6872	5311.0	7729.0	0.4825	0 1 3 7 8 13 14 15 17 21 23 24 26 42 43 48
+macos-15	sigurg3-p.tst:8132: SIGURG spares execed process (subshell, self, +i -m, initially defaulted, keep -> keep)	0.6872	6271.0	9126.0	0.4859	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 40 42 44 48
+macos-15	sigquit3-p.tst:8060: SIGQUIT spares child process (main, self, +i -m, initially defaulted, ignore -> keep)	0.6868	7262.0	10573.0	0.4655	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48
+macos-15	sigquit6-p.tst:7042: SIGQUIT spares shell (async, other, -i +m, initially ignored, clear -> ignore)	0.6868	9211.0	13411.0	0.5477	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+macos-15	sigcont2-p.tst:7061: SIGCONT spares child process (main, other, +i +m, initially ignored, ignore -> clear)	0.686	16429.0	23950.0	0.4179	0 1 3 5 7 8 10 23 24 25 26 28 29 30 33 36 39 42 44 48
+macos-15	simple-p.tst:223: running command in different directory with relative path in $PATH	0.686	13917.0	20287.0	0.7107	0 1 3 4 7 8 12 13 14 17 21 23 24 25 26 29 30 33 42 44 48 52
+macos-15	continue-p.tst:431: continuing much more than actual nest level one	0.6857	4780.0	6971.0	0.5287	0 1 3 7 8 12 21 23 24 26 42
+macos-15	redir-p.tst:100: input redirection, success	0.6856	6004.0	8757.0	0.6611	0 1 3 7 8 24 25 27 29 31 33 40 42
+macos-15	sigurg2-p.tst:7153: SIGURG spares execed process (cmdsub, other, +i +m, initially ignored, clear -> clear)	0.6855	9195.0	13413.0	0.5032	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 34 36 39 40 42 44 48
+macos-15	umask-p.tst:21: restoring umask using previous output, non-symbolic, 010	0.6852	4075.0	5947.0	0.4612	0 1 3 7 8 17 21 23 24 26 34 40 42 45 46 48
+macos-15	sighup8-p.tst:8152: SIGUSR1 kills execed process (cmdsub, self, -i -m, initially ignored, clear -> keep)	0.6851	10022.0	14628.0	0.4736	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 48 55 56
+macos-15	sigquit8-p.tst:8138: SIGQUIT spares execed process (subshell, self, -i -m, initially ignored, clear -> ignore)	0.6851	10197.0	14884.0	0.4481	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 39 40 41 42 44 48 55 56
+macos-15	sigterm3-p.tst:8007: SIGTERM spares shell (main, other, +i -m, initially defaulted, ignore -> ignore)	0.6848	8505.0	12420.0	0.4258	0 1 3 5 7 8 23 24 26 27 29 31 33 35 36 39 40 41 42 44 48
+macos-15	umask-p.tst:69: symbolic operand u+	0.6848	10710.0	15640.0	0.6121	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	cmdsub-p.tst:139: command substitution between here-document operator and body	0.6847	6049.0	8835.0	0.5476	0 1 3 7 8 10 13 14 17 21 23 24 25 26 28 29 30 33 34 42 43 48
+macos-15	sigquit7-p.tst:8166: SIGQUIT spares execed process (async, self, -i -m, initially defaulted, keep -> ignore)	0.6847	11117.0	16236.0	0.5004	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48 55 56
+macos-15	command-p.tst:196: exit status of describing external command (-v, no slash)	0.6839	3659.0	5350.0	0.4692	0 1 3 7 8 23 24 26 42 50 53
+macos-15	umask-p.tst:93: symbolic operand o+wx	0.6838	8044.0	11764.0	0.5989	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sigurg6-p.tst:7056: SIGURG spares child process (main, self, -i +m, initially ignored, clear -> keep)	0.6836	12947.0	18939.0	0.4256	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 36 39 41 42 44 48 55 56
+macos-15	builtins-p.tst:259: special built-in continue can be invoked without $PATH	0.6834	4860.0	7112.0	0.5425	0 1 3 7 8 12 17 21 23 24 26 42
+macos-15	sighup3-p.tst:8067: SIGUSR1 kills child process (main, other, +i -m, initially defaulted, command -> command)	0.6834	11785.0	17245.0	0.4174	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 48
+macos-15	sigurg2-p.tst:7038: SIGURG spares shell (cmdsub, other, +i +m, initially ignored, command -> command)	0.6831	7713.0	11291.0	0.5151	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 42 44 48
+macos-15	sigurg8-p.tst:8002: SIGURG spares shell (main, self, -i -m, initially ignored, clear -> clear)	0.6831	4691.0	6867.0	0.4868	0 1 7 8 17 21 23 24 26 36 39 41 42 44 48 55 56
+macos-15	sigquit8-p.tst:8011: SIGQUIT spares shell (main, other, -i -m, initially ignored, command -> ignore)	0.6826	10159.0	14882.0	0.5159	0 1 5 7 8 17 21 23 24 26 27 29 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sigurg8-p.tst:8022: SIGURG spares shell (subshell, other, -i -m, initially ignored, command -> keep)	0.6826	9901.0	14504.0	0.4272	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sigterm3-p.tst:8125: SIGTERM kills execed process (main, other, +i -m, initially defaulted, ignore -> clear)	0.6815	11811.0	17332.0	0.407	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 36 39 41 42 48
+macos-15	quote-p.tst:169: line continuation in reserved words until do done	0.6813	5977.0	8773.0	0.5084	0 1 3 7 8 12 14 17 21 23 24 26 42 44
+macos-15	for-p.tst:146: exit status with some words	0.6812	5609.0	8234.0	0.5786	0 1 3 7 8 12 21 23 24 26 40 42 48
+macos-15	sigurg8-p.tst:8088: SIGURG spares child process (cmdsub, self, -i -m, initially ignored, clear -> keep)	0.6811	9575.0	14058.0	0.4409	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+macos-15	sigterm3-p.tst:8010: SIGTERM kills shell (main, self, +i -m, initially defaulted, command -> clear)	0.681	3920.0	5756.0	0.5486	0 1 3 7 8 23 24 26 36 39 41 48
+macos-15	declutil-p.tst:24: pathname expansion and field splitting in export $a	0.6809	6377.0	9366.0	0.704	0 1 3 7 8 17 21 23 24 26 29 30 33 42 48
+macos-15	sigterm7-p.tst:8079: SIGTERM kills child process (subshell, other, -i -m, initially defaulted, ignore -> command)	0.6808	9523.0	13988.0	0.4621	0 1 3 5 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 39 40 41 42 48 55 56
+macos-15	sigttou7-p.tst:11022: SIGTTOU spares execed process (subshell, self, -i -m, initially defaulted, clear -> ignore)	0.6805	9472.0	13920.0	0.4552	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 39 40 41 42 44 48 55 56
+macos-15	sigcont2-p.tst:7130: SIGCONT spares execed process (main, self, +i +m, initially ignored, command -> ignore)	0.68	8758.0	12879.0	0.4381	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 42 44 48
+macos-15	sigurg8-p.tst:8077: SIGURG spares child process (subshell, other, -i -m, initially ignored, ignore -> clear)	0.68	16590.0	24396.0	0.4169	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sighup2-p.tst:7034: SIGUSR2 spares shell (cmdsub, other, +i +m, initially ignored, ignore -> command)	0.6797	13588.0	19992.0	0.4392	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 42 44 48
+macos-15	sighup3-p.tst:8065: SIGUSR2 kills child process (main, other, +i -m, initially defaulted, command -> clear)	0.6788	9349.0	13772.0	0.4434	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 48
+macos-15	sigcont2-p.tst:7063: SIGCONT spares child process (main, other, +i +m, initially ignored, ignore -> command)	0.6787	15386.0	22669.0	0.3878	0 1 3 5 7 8 10 23 24 25 26 28 29 30 33 36 39 42 44 48
+macos-15	sigurg8-p.tst:8073: SIGURG spares child process (subshell, other, -i -m, initially ignored, clear -> clear)	0.6785	13467.0	19847.0	0.4133	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	quote-p.tst:724: quoted words are not reserved words	0.6781	11513.0	16979.0	0.6401	0 1 3 4 7 8 14 17 21 23 24 25 26 29 30 33 42 44 48
+macos-15	sigquit8-p.tst:8164: SIGQUIT spares execed process (async, self, -i -m, initially ignored, keep -> keep)	0.6781	9852.0	14528.0	0.466	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 40 41 42 44 48 55 56
+macos-15	sigurg2-p.tst:7021: SIGURG spares shell (subshell, other, +i +m, initially ignored, ignore -> command)	0.678	7318.0	10794.0	0.5248	0 1 3 5 7 8 23 24 26 29 30 33 36 39 40 42 44 48
+macos-15	command-p.tst:76: describing reserved word { (-v)	0.6779	4018.0	5927.0	0.491	0 1 3 7 8 23 24 26 42 50 53
+macos-15	sigquit2-p.tst:7166: SIGQUIT spares execed process (async, self, +i +m, initially ignored, keep -> ignore)	0.6774	8428.0	12441.0	0.5343	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 44 48
+macos-15	trap-p.tst:244: without -p, only non-default traps are printed	0.6774	12265.0	18105.0	0.7114	0 1 2 3 4 5 7 8 13 14 23 24 25 26 27 29 30 33 36 39 40 41 42 44 48
+macos-15	set-p.tst:113: nounset (short) on: $-	0.6773	7389.0	10909.0	0.4762	0 1 3 7 8 14 17 21 23 24 26 30 32 33 42 43 50
+macos-15	error-p.tst:398: redirection error on special built-in exit kills non-interactive shell	0.6771	4488.0	6628.0	0.4884	0 1 3 7 8 24 25 26 27 42
+macos-15	sigurg8-p.tst:8075: SIGURG spares child process (subshell, other, -i -m, initially ignored, clear -> command)	0.6771	14130.0	20869.0	0.4919	0 1 3 5 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 39 40 41 42 44 48 55 56
+macos-15	umask-p.tst:90: symbolic operand o+x	0.6771	8446.0	12473.0	0.6697	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	test-p.tst:306: test 1 != 1	0.6769	2986.0	4411.0	0.5991	0 1 3 7 8 17 21 23 24 26 42 45 48
+macos-15	sighup3-p.tst:8162: SIGPIPE spares execed process (cmdsub, self, +i -m, initially defaulted, command -> ignore)	0.6768	7531.0	11127.0	0.4885	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48
+macos-15	sigquit8-p.tst:8134: SIGQUIT spares execed process (subshell, self, -i -m, initially ignored, keep -> ignore)	0.6767	9642.0	14249.0	0.4627	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 39 40 41 42 44 48 55 56
+macos-15	sigurg4-p.tst:8054: SIGURG spares child process (main, self, +i -m, initially ignored, keep -> ignore)	0.6767	11167.0	16502.0	0.5724	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 39 40 42 44 48
+macos-15	sigcont4-p.tst:8038: SIGCONT spares shell (cmdsub, other, +i -m, initially ignored, command -> command)	0.6766	9521.0	14071.0	0.4818	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 42 44 48
+macos-15	builtins-p.tst:348: intrinsic built-in kill can be invoked without $PATH	0.6765	4465.0	6600.0	0.475	0 1 3 7 8 17 21 23 24 26 36 42 48
+macos-15	sigurg2-p.tst:7045: SIGURG spares shell (async, other, +i +m, initially ignored, ignore -> clear)	0.6764	6662.0	9849.0	0.4955	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 42 44 48
+macos-15	command-p.tst:42: command exec retains redirection	0.6763	4891.0	7232.0	0.6054	0 1 3 7 8 10 23 24 25 26 27 28 29 30 33 42
+macos-15	sigterm1-p.tst:7035: SIGTERM kills shell (cmdsub, other, +i +m, initially defaulted, command -> keep)	0.676	6861.0	10150.0	0.4936	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 48
+macos-15	sigttin4-p.tst:8020: SIGTTIN spares execed process (subshell, self, +i -m, initially ignored, clear -> keep)	0.676	6359.0	9407.0	0.538	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 39 40 42 44 48
+macos-15	sigterm3-p.tst:8039: SIGTERM kills shell (async, other, +i -m, initially defaulted, keep -> keep)	0.6759	7463.0	11042.0	0.4096	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 40 42 48
+macos-15	sighup3-p.tst:8157: SIGUSR1 kills execed process (cmdsub, other, +i -m, initially defaulted, ignore -> clear)	0.6758	10808.0	15994.0	0.5225	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 34 36 39 40 41 42 48
+macos-15	if-p.tst:160: exit status of if-else, true-true	0.6756	4722.0	6989.0	0.5663	0 1 3 7 8 9 11 13 14 23 24 26 42 48
+macos-15	sigurg6-p.tst:7057: SIGURG spares child process (main, other, -i +m, initially ignored, clear -> clear)	0.6754	12207.0	18074.0	0.4105	0 1 3 5 7 8 10 17 21 23 24 25 26 28 29 30 33 36 39 41 42 44 48 55 56
+macos-15	sigquit6-p.tst:7018: SIGQUIT spares shell (subshell, other, -i +m, initially ignored, ignore -> keep)	0.6753	9212.0	13641.0	0.4328	0 1 5 7 8 17 21 23 24 26 29 30 33 36 39 40 41 42 44 48 55 56
+macos-15	sigquit8-p.tst:8142: SIGQUIT spares execed process (subshell, self, -i -m, initially ignored, ignore -> ignore)	0.6753	10295.0	15244.0	0.4807	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 39 40 41 42 44 48 55 56
+macos-15	redir-p.tst:36: file descriptors up to 9 are supported	0.6752	4778.0	7076.0	0.6408	0 1 3 7 8 24 25 27 29 31 33 40 42
+macos-15	sigterm3-p.tst:8047: SIGTERM is handled by shell (async, other, +i -m, initially defaulted, ignore -> command)	0.6752	7638.0	11312.0	0.4971	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48
+macos-15	sigurg4-p.tst:8174: SIGURG spares execed process (async, self, +i -m, initially ignored, ignore -> ignore)	0.6752	9573.0	14179.0	0.4549	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 44 48
+macos-15	sigurg6-p.tst:7093: SIGURG spares child process (cmdsub, other, -i +m, initially ignored, ignore -> clear)	0.6751	17228.0	25520.0	0.4316	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 34 36 39 40 41 42 44 48 55 56
+macos-15	sigurg8-p.tst:8076: SIGURG spares child process (subshell, self, -i -m, initially ignored, ignore -> keep)	0.675	8771.0	12995.0	0.4811	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 39 40 41 42 44 48 55 56
+macos-15	andor-p.tst:78: linebreak after ||	0.6749	3680.0	5453.0	0.4794	0 1 3 7 8 23 24 26 42 44
+macos-15	if-p.tst:212: exit status of if-elif-elif-else, false-false-true-false	0.6748	4498.0	6666.0	0.5138	0 1 3 7 8 9 11 13 14 23 24 26 42 48
+macos-15	sighup4-p.tst:8071: SIGHUP spares child process (subshell, other, +i -m, initially ignored, keep -> command)	0.6747	14816.0	21958.0	0.4754	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 39 40 42 44 48
+macos-15	sigterm8-p.tst:8122: SIGTERM spares execed process (main, self, -i -m, initially ignored, clear -> ignore)	0.6745	9818.0	14555.0	0.4043	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 36 39 41 42 44 48 55 56
+macos-15	sigurg3-p.tst:8035: SIGURG spares shell (cmdsub, other, +i -m, initially defaulted, command -> keep)	0.6743	6576.0	9753.0	0.4691	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48
+macos-15	if-p.tst:220: exit status of if-elif-elif-else, false-false-false-false	0.6742	4043.0	5997.0	0.5053	0 1 3 7 8 9 11 13 14 23 24 26 42 48
+macos-15	sigterm7-p.tst:8178: SIGTERM spares execed process (async, self, -i -m, initially defaulted, command -> ignore)	0.6742	7607.0	11283.0	0.4356	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48 55 56
+macos-15	sigcont3-p.tst:8156: SIGCONT spares execed process (cmdsub, self, +i -m, initially defaulted, ignore -> keep)	0.6741	6201.0	9199.0	0.4687	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48
+macos-15	continue-p.tst:305: continuing two for loops, nested in another for loop	0.6735	4013.0	5958.0	0.5769	0 1 3 7 8 12 21 23 24 26 42 44 48
+macos-15	lineno-p.tst:28: LINENO after expansions	0.6734	4576.0	6795.0	0.4164	0 1 3 7 8 15 19 23 24 26 34 42 44 48
+macos-15	sigurg8-p.tst:8066: SIGURG spares child process (main, self, -i -m, initially ignored, command -> ignore)	0.6734	9265.0	13759.0	0.5416	0 1 3 7 8 10 17 21 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	redir-p.tst:222: in-out redirection, success	0.6733	4675.0	6943.0	0.6632	0 1 3 7 8 23 24 25 26 27 29 31 33 40 42 44 48
+macos-15	sigurg7-p.tst:8015: SIGURG spares shell (subshell, other, -i -m, initially defaulted, clear -> clear)	0.6731	9908.0	14719.0	0.5436	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 44 48 55 56
+macos-15	umask-p.tst:110: symbolic operand +xr	0.6729	8873.0	13187.0	0.5681	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sigcont1-p.tst:7021: SIGCONT is handled by shell (subshell, other, +i +m, initially defaulted, ignore -> command)	0.6727	6235.0	9268.0	0.5081	0 1 3 5 7 8 23 24 26 29 30 33 36 39 40 41 42 44 48
+macos-15	sigquit2-p.tst:7102: SIGQUIT spares child process (async, self, +i +m, initially ignored, keep -> ignore)	0.6727	12044.0	17903.0	0.4873	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 44 48
+macos-15	sigurg2-p.tst:7008: SIGURG spares shell (main, self, +i +m, initially ignored, ignore -> command)	0.6726	3350.0	4981.0	0.5457	0 1 3 7 8 23 24 26 36 39 42 44 48
+macos-15	sigterm3-p.tst:8033: SIGTERM spares shell (cmdsub, other, +i -m, initially defaulted, ignore -> ignore)	0.6724	8827.0	13128.0	0.4904	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48
+macos-15	sigurg4-p.tst:8046: SIGURG spares shell (async, other, +i -m, initially ignored, ignore -> ignore)	0.6724	10620.0	15794.0	0.4542	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 42 44 48
+macos-15	if-p.tst:414: nest between else and if	0.6722	3994.0	5942.0	0.6718	0 1 3 7 8 11 23 24 26 42 44
+macos-15	umask-p.tst:75: symbolic operand u+wx	0.6719	9798.0	14583.0	0.7768	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	sigquit2-p.tst:7108: SIGQUIT spares child process (async, self, +i +m, initially ignored, ignore -> keep)	0.6718	9878.0	14704.0	0.4654	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 44 48
+macos-15	test-p.tst:214: test -r brokenlink	0.6716	3250.0	4839.0	0.605	0 1 3 7 8 17 21 23 24 26 42 45 48
+macos-15	case-p.tst:357: esac as first pattern	0.6709	4500.0	6707.0	0.5421	0 1 3 7 8 17 23 24 26 42 44
+macos-15	sigurg8-p.tst:8134: SIGURG spares execed process (subshell, self, -i -m, initially ignored, keep -> ignore)	0.6708	11078.0	16514.0	0.4804	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 39 40 41 42 44 48 55 56
+macos-15	sigstop7-p.tst:8023: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, clear -> command)	0.6705	18186.0	27123.0	0.4345	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sigurg2-p.tst:7009: SIGURG spares shell (main, other, +i +m, initially ignored, command -> keep)	0.6705	7589.0	11319.0	0.4903	0 1 3 5 7 8 23 24 26 29 30 33 36 39 42 44 48
+macos-15	until-p.tst:54: linebreak after until	0.6703	5069.0	7562.0	0.496	0 1 3 7 8 12 15 17 21 23 24 26 42 44 45 48
+macos-15	sigstop7-p.tst:8022: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, clear -> ignore)	0.6702	14161.0	21131.0	0.5039	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 39 40 41 42 44 48 55 56
+macos-15	declutil-p.tst:58: command command export	0.6701	6325.0	9439.0	0.6786	0 1 3 7 8 17 21 23 24 26 29 30 33 42 48
+macos-15	error-p.tst:178: assignment error on command alias in subshell	0.6701	4696.0	7008.0	0.4894	0 1 3 7 8 17 23 24 26 40 42 44 45 48
+macos-15	set-p.tst:74: allexport (short) on: $-	0.67	7995.0	11932.0	0.5501	0 1 3 7 8 14 17 21 23 24 26 30 32 33 42 43 50
+macos-15	sigcont2-p.tst:7101: SIGCONT spares child process (async, other, +i +m, initially ignored, keep -> clear)	0.67	15150.0	22611.0	0.4117	0 1 3 5 7 8 10 23 24 25 26 27 28 29 30 31 33 35 36 37 39 40 42 44 48
+macos-15	sigquit6-p.tst:7140: SIGQUIT spares execed process (subshell, self, -i +m, initially ignored, ignore -> keep)	0.6699	9082.0	13557.0	0.4855	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 36 39 40 41 42 44 48 55 56
+macos-15	if-p.tst:168: exit status of if-else, false-true	0.6696	4079.0	6092.0	0.5874	0 1 3 7 8 9 11 13 14 23 24 26 42 48
+macos-15	sigint3-p.tst:8038: SIGINT is handled by shell (cmdsub, other, +i -m, initially defaulted, command -> command)	0.6696	8199.0	12245.0	0.466	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48
+macos-15	sigint2-p.tst:7102: SIGINT spares child process (async, self, +i +m, initially ignored, keep -> ignore)	0.6695	8476.0	12661.0	0.4732	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 37 39 40 42 44 48
+macos-15	test-p.tst:359: test 100 < 11	0.6695	2878.0	4299.0	0.5538	0 1 3 7 8 17 21 23 24 26 42 45 48
+macos-15	test-p.tst:322: test 90 -ne 90	0.6692	2929.0	4377.0	0.5682	0 1 3 7 8 17 21 23 24 26 42 45 48
+macos-15	test-p.tst:216: test -S	0.6689	3145.0	4702.0	0.5831	0 1 3 7 8 17 21 23 24 26 42 45 48
+macos-15	sigurg7-p.tst:8021: SIGURG is handled by shell (subshell, other, -i -m, initially defaulted, ignore -> command)	0.6688	10447.0	15620.0	0.4307	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 44 48 55 56
+macos-15	sigcont4-p.tst:8150: SIGCONT spares execed process (cmdsub, self, +i -m, initially ignored, keep -> ignore)	0.6685	10562.0	15800.0	0.6049	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 42 44 48
+macos-15	sigcont2-p.tst:7059: SIGCONT spares child process (main, other, +i +m, initially ignored, clear -> command)	0.6682	18139.0	27148.0	0.4156	0 1 3 5 7 8 10 23 24 25 26 28 29 30 33 36 39 42 44 48
+macos-15	sigurg2-p.tst:7149: SIGURG spares execed process (cmdsub, other, +i +m, initially ignored, keep -> clear)	0.6681	9942.0	14880.0	0.5167	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 34 36 39 40 42 44 48
+macos-15	until-p.tst:100: command ending with asynchronous command (body)	0.6681	5905.0	8839.0	0.5487	0 1 3 7 8 12 15 17 21 23 24 26 27 32 33 35 37 40 42 44 45 48
+macos-15	sigcont2-p.tst:7124: SIGCONT spares execed process (main, self, +i +m, initially ignored, ignore -> keep)	0.668	11850.0	17740.0	0.418	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 42 44 48
+macos-15	errexit-p.tst:325: noerrexit: then body	0.6679	5606.0	8393.0	0.5568	0 1 3 7 8 11 23 24 26 42 44
+macos-15	test-p.tst:342: test -3 -lt -3	0.6679	3031.0	4538.0	0.4599	0 1 3 7 8 17 21 23 24 26 42 45 48
+macos-15	sighup3-p.tst:8051: SIGUSR1 is handled by shell (async, other, +i -m, initially defaulted, command -> command)	0.6673	6773.0	10150.0	0.4561	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48
+macos-15	sighup7-p.tst:8079: SIGUSR1 kills child process (subshell, other, -i -m, initially defaulted, ignore -> command)	0.6672	12959.0	19424.0	0.4699	0 1 3 5 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 39 40 41 42 48 55 56
+macos-15	shift-p.tst:49: too large operand 1 for 0	0.6671	4320.0	6476.0	0.4788	0 1 3 7 8 14 17 21 23 24 26 42 49
+macos-15	cd-p.tst:398: changing to unsearchable directory (-P)	0.667	4262.0	6390.0	0.5791	0 1 3 7 8 23 24 26 42 48 52
+macos-15	umask-p.tst:112: symbolic operand +xwr	0.667	10356.0	15526.0	0.6989	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+macos-15	ppid-p.tst:5: PPID is parent process ID	0.6668	39723.0	59576.0	0.7028	0 1 3 7 8 24 25 26 27 29 30 31 33 34 40 42 48
+ubuntu-24.04	sigquit3-p.tst:8014: SIGQUIT kills shell (subshell, other, +i -m, initially defaulted, clear -> keep)	1.42	51416.5	36208.5	0.8955	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 40 42 48
+ubuntu-24.04	sigcont7-p.tst:8013: SIGCONT spares shell (subshell, other, -i -m, initially defaulted, keep -> keep)	1.2922	4957.9	3836.8	0.3759	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 40 41 42 44 48 55 56
+ubuntu-24.04	set-p.tst:125: xtrace (long) on: $-	1.2883	4012.0	3114.3	0.6496	0 1 3 7 8 14 17 21 23 24 26 30 32 33 42 43 48 50
+ubuntu-24.04	kill2-p.tst:28: sending signal: -ABRT	1.2817	195009.1	152147.4	0.9184	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	sigquit5-p.tst:7013: SIGQUIT kills shell (subshell, other, -i +m, initially defaulted, keep -> keep)	1.264	63676.5	50375.7	0.8801	0 1 5 7 8 17 21 23 24 26 29 30 33 36 40 41 42 48 55 56
+ubuntu-24.04	sigquit1-p.tst:7026: SIGQUIT kills shell (cmdsub, other, +i +m, initially defaulted, keep -> keep)	1.2509	54113.1	43258.0	0.876	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 40 42 48
+ubuntu-24.04	kill2-p.tst:30: sending signal: -BUS	1.2425	163831.4	131851.3	0.9147	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	sigquit1-p.tst:7014: SIGQUIT kills shell (subshell, other, +i +m, initially defaulted, clear -> keep)	1.2343	47591.8	38558.0	0.922	0 1 3 5 7 8 23 24 26 29 30 33 36 39 40 42 48
+ubuntu-24.04	path-p.tst:22: * does not match slash	1.2205	1533.6	1256.6	0.554	0 1 3 7 8 23 24 26 42 44 48
+ubuntu-24.04	sigquit3-p.tst:8013: SIGQUIT kills shell (subshell, other, +i -m, initially defaulted, keep -> keep)	1.2065	48654.9	40327.1	0.9031	0 1 3 5 7 8 23 24 26 29 30 33 35 36 40 42 48
+ubuntu-24.04	kill2-p.tst:18: sending signal: -s ILL	1.1836	145011.8	122515.1	1.0746	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	sigcont7-p.tst:8014: SIGCONT spares shell (subshell, other, -i -m, initially defaulted, clear -> keep)	1.1743	4821.7	4106.1	0.3802	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	kill2-p.tst:23: sending signal: -s SEGV	1.1703	168011.5	143567.1	1.1147	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	sigquit3-p.tst:8022: SIGQUIT kills shell (subshell, other, +i -m, initially defaulted, command -> keep)	1.1599	49954.3	43067.2	0.8677	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 40 41 42 48
+ubuntu-24.04	sigquit8-p.tst:8024: SIGQUIT spares shell (subshell, other, -i -m, initially ignored, command -> ignore)	1.1555	4792.4	4147.6	0.3503	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	kill2-p.tst:38: sending signal: -SEGV	1.1543	144394.0	125096.9	0.953	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	set-p.tst:120: verbose (long) on: $-	1.1474	3692.4	3217.9	0.6496	0 1 3 7 8 14 17 21 23 24 26 30 32 33 42 43 50
+ubuntu-24.04	sigquit7-p.tst:8026: SIGQUIT kills shell (cmdsub, other, -i -m, initially defaulted, keep -> keep)	1.1385	47869.1	42046.3	0.9559	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 40 41 42 48 55 56
+ubuntu-24.04	sigcont8-p.tst:8029: SIGCONT spares shell (cmdsub, other, -i -m, initially ignored, clear -> ignore)	1.115	7030.5	6305.4	0.3463	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit1-p.tst:7013: SIGQUIT kills shell (subshell, other, +i +m, initially defaulted, keep -> keep)	1.1012	46831.8	42529.9	0.8736	0 1 3 5 7 8 23 24 26 29 30 33 36 40 42 48
+ubuntu-24.04	sigcont8-p.tst:8022: SIGCONT spares shell (subshell, other, -i -m, initially ignored, command -> keep)	1.0989	6892.2	6271.9	0.3556	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit7-p.tst:8039: SIGQUIT kills shell (async, other, -i -m, initially defaulted, keep -> keep)	1.0969	50219.6	45782.8	0.9189	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 40 41 42 48 55 56
+ubuntu-24.04	sigquit7-p.tst:8066: SIGQUIT spares child process (main, self, -i -m, initially defaulted, command -> ignore)	1.0781	2331.6	2162.6	0.372	0 1 3 7 8 10 17 21 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	pipeline-p.tst:61: compound commands in pipeline	1.0771	8017.2	7443.4	0.6469	0 1 3 7 8 11 23 24 26 27 29 30 32 33 40 42 44
+ubuntu-24.04	set-p.tst:123: xtrace (short) on: $-	1.0725	2659.1	2479.4	0.656	0 1 3 7 8 14 17 21 23 24 26 30 32 33 42 43 48 50
+ubuntu-24.04	sigquit5-p.tst:7017: SIGQUIT is handled by shell (subshell, other, -i +m, initially defaulted, clear -> command)	1.0719	2682.1	2502.2	0.3607	0 1 5 7 8 17 21 23 24 26 29 30 33 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigcont7-p.tst:8004: SIGCONT is handled by shell (main, self, -i -m, initially defaulted, clear -> command)	1.0717	2017.2	1882.2	0.3913	0 1 5 7 8 17 21 23 24 26 36 39 41 42 44 48 55 56
+ubuntu-24.04	sigcont7-p.tst:8068: SIGCONT spares child process (subshell, self, -i -m, initially defaulted, keep -> keep)	1.0673	3342.4	3131.7	0.4033	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 40 41 42 44 48 55 56
+ubuntu-24.04	sigcont8-p.tst:8061: SIGCONT spares child process (main, other, -i -m, initially ignored, ignore -> clear)	1.0669	7821.5	7330.8	0.3559	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit1-p.tst:7126: SIGQUIT spares execed process (main, self, +i +m, initially defaulted, ignore -> ignore)	1.0657	1534.6	1439.9	0.4244	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 41 42 44 48
+ubuntu-24.04	shift-p.tst:57: too large operand 3 for 2	1.0627	2140.5	2014.3	0.5434	0 1 3 7 8 14 17 21 23 24 26 42 49
+ubuntu-24.04	sigquit1-p.tst:7114: SIGQUIT spares child process (async, self, +i +m, initially defaulted, command -> ignore)	1.051	2240.8	2132.2	0.3866	0 1 3 7 8 10 23 24 25 26 28 29 30 33 35 36 37 39 40 41 42 44 48
+ubuntu-24.04	sigcont7-p.tst:8042: SIGCONT spares shell (async, other, -i -m, initially defaulted, clear -> ignore)	1.0442	3616.0	3462.8	0.3666	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+ubuntu-24.04	path-p.tst:48: ? does not match initial dot	1.0348	1478.7	1429.0	0.5625	0 1 3 7 8 23 24 26 42 44 48
+ubuntu-24.04	ppid-p.tst:5: PPID is parent process ID	1.0288	5403.1	5251.8	0.8623	0 1 3 7 8 24 25 26 27 29 30 31 33 34 40 42 48
+ubuntu-24.04	sigquit1-p.tst:7066: SIGQUIT spares child process (main, self, +i +m, initially defaulted, command -> ignore)	1.0284	1784.9	1735.6	0.3847	0 1 3 7 8 10 23 24 25 26 28 29 30 33 36 39 41 42 44 48
+ubuntu-24.04	set-p.tst:124: xtrace (short) off: $-	1.0212	2520.8	2468.5	0.6492	0 1 3 7 8 14 17 21 23 24 26 30 32 33 42 43 48 50
+ubuntu-24.04	set-p.tst:150: set -o/+o	1.0142	4232.0	4173.0	0.6364	0 1 3 5 6 7 8 14 17 21 23 24 25 26 27 30 32 33 34 40 42 48 50
+ubuntu-24.04	set-p.tst:87: noclobber (long) off: $-	1.0138	2311.2	2279.9	0.6481	0 1 3 7 8 14 17 21 23 24 26 30 32 33 42 43 50
+ubuntu-24.04	sigquit3-p.tst:8018: SIGQUIT spares shell (subshell, other, +i -m, initially defaulted, ignore -> keep)	1.0121	2512.7	2482.6	0.4908	0 1 3 5 7 8 23 24 26 29 30 33 35 36 39 40 41 42 44 48
+ubuntu-24.04	kill2-p.tst:33: sending signal: -ILL	1.0117	178285.2	176214.7	0.8809	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	sigquit1-p.tst:7022: SIGQUIT kills shell (subshell, other, +i +m, initially defaulted, command -> keep)	1.0117	48682.9	48119.5	1.1823	0 1 3 5 7 8 23 24 26 29 30 33 36 39 40 41 42 48
+ubuntu-24.04	sigquit7-p.tst:8098: SIGQUIT spares child process (cmdsub, self, -i -m, initially defaulted, command -> ignore)	1.0117	2779.0	2746.9	0.3517	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit5-p.tst:7035: SIGQUIT kills shell (cmdsub, other, -i +m, initially defaulted, command -> keep)	0.9943	52402.7	52703.2	0.8613	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 48 55 56
+ubuntu-24.04	sigcont7-p.tst:8090: SIGCONT spares child process (cmdsub, self, -i -m, initially defaulted, clear -> ignore)	0.9896	4075.6	4118.6	0.3947	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit8-p.tst:8158: SIGQUIT spares execed process (cmdsub, self, -i -m, initially ignored, ignore -> ignore)	0.9895	3792.1	3832.2	0.3678	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit3-p.tst:8054: SIGQUIT spares child process (main, self, +i -m, initially defaulted, keep -> ignore)	0.9819	1578.4	1607.6	0.4256	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48
+ubuntu-24.04	sigquit5-p.tst:7022: SIGQUIT kills shell (subshell, other, -i +m, initially defaulted, command -> keep)	0.979	49227.2	50285.2	0.8492	0 1 5 7 8 17 21 23 24 26 29 30 33 36 39 40 41 42 48 55 56
+ubuntu-24.04	sigquit3-p.tst:8008: SIGQUIT is handled by shell (main, self, +i -m, initially defaulted, ignore -> command)	0.9757	871.5	893.3	0.5533	0 1 3 5 7 8 23 24 26 36 39 41 42 44 48
+ubuntu-24.04	sigquit3-p.tst:8035: SIGQUIT kills shell (cmdsub, other, +i -m, initially defaulted, command -> keep)	0.9698	46266.9	47707.2	0.9163	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 48
+ubuntu-24.04	sigquit3-p.tst:8124: SIGQUIT spares execed process (main, self, +i -m, initially defaulted, ignore -> keep)	0.9678	1452.3	1500.5	0.4372	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 41 42 44 48
+ubuntu-24.04	sigquit1-p.tst:7106: SIGQUIT spares child process (async, self, +i +m, initially defaulted, clear -> ignore)	0.9653	2105.7	2181.3	0.3965	0 1 3 7 8 10 23 24 25 26 28 29 30 33 35 36 37 39 40 41 42 44 48
+ubuntu-24.04	sigcont7-p.tst:8039: SIGCONT spares shell (async, other, -i -m, initially defaulted, keep -> keep)	0.9628	3458.9	3592.6	0.3641	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 40 41 42 44 48 55 56
+ubuntu-24.04	kill2-p.tst:20: sending signal: -s KILL	0.9587	1904.6	1986.5	0.5518	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	sigquit1-p.tst:7108: SIGQUIT spares child process (async, self, +i +m, initially defaulted, ignore -> keep)	0.9565	2054.2	2147.6	0.3843	0 1 3 7 8 10 23 24 25 26 28 29 30 33 35 36 37 39 40 41 42 44 48
+ubuntu-24.04	sigquit1-p.tst:7027: SIGQUIT kills shell (cmdsub, other, +i +m, initially defaulted, clear -> keep)	0.9459	37533.3	39678.9	0.9308	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 42 48
+ubuntu-24.04	pipeline-p.tst:17: linebreak after |	0.9396	4343.8	4623.3	0.6309	0 1 3 7 8 24 30 32 33 42 43
+ubuntu-24.04	sigquit7-p.tst:8027: SIGQUIT kills shell (cmdsub, other, -i -m, initially defaulted, clear -> keep)	0.9324	49393.8	52973.1	0.8452	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 48 55 56
+ubuntu-24.04	sigquit7-p.tst:8048: SIGQUIT kills shell (async, other, -i -m, initially defaulted, command -> keep)	0.9299	50557.3	54366.9	0.9506	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 39 40 41 42 48 55 56
+ubuntu-24.04	set-p.tst:100: hashondef (short) off: $-	0.9285	2122.7	2286.2	0.6588	0 1 3 7 8 14 17 21 23 24 26 30 32 33 42 43 50
+ubuntu-24.04	sigquit6-p.tst:7130: SIGQUIT spares execed process (main, self, -i +m, initially ignored, command -> ignore)	0.9276	1960.9	2114.0	0.329	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 36 39 41 42 44 48 55 56
+ubuntu-24.04	kill2-p.tst:31: sending signal: -FPE	0.9243	143127.1	154844.0	0.8998	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	kill2-p.tst:16: sending signal: -s FPE	0.9222	150413.8	163110.5	0.9273	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	sigcont7-p.tst:8054: SIGCONT spares child process (main, self, -i -m, initially defaulted, keep -> ignore)	0.921	2354.7	2556.7	0.4051	0 1 3 7 8 10 17 21 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit3-p.tst:8134: SIGQUIT spares execed process (subshell, self, +i -m, initially defaulted, keep -> ignore)	0.9183	1721.4	1874.4	0.4527	0 1 3 7 8 10 23 24 25 26 27 28 31 35 36 39 40 41 42 44 48
+ubuntu-24.04	sigcont8-p.tst:8082: SIGCONT spares child process (subshell, self, -i -m, initially ignored, command -> ignore)	0.9181	6775.9	7380.5	0.36	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit1-p.tst:7110: SIGQUIT spares child process (async, self, +i +m, initially defaulted, ignore -> ignore)	0.9165	1984.7	2165.5	0.3852	0 1 3 7 8 10 23 24 25 26 28 29 30 33 35 36 37 39 40 41 42 44 48
+ubuntu-24.04	sigcont7-p.tst:8064: SIGCONT spares child process (main, self, -i -m, initially defaulted, command -> keep)	0.9061	2681.7	2959.4	0.3977	0 1 3 7 8 10 17 21 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit5-p.tst:7027: SIGQUIT kills shell (cmdsub, other, -i +m, initially defaulted, clear -> keep)	0.9053	53415.3	59003.0	0.8401	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 48 55 56
+ubuntu-24.04	sigcont7-p.tst:8055: SIGCONT spares child process (main, other, -i -m, initially defaulted, keep -> command)	0.9008	3940.5	4374.3	0.3632	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigcont7-p.tst:8048: SIGCONT spares shell (async, other, -i -m, initially defaulted, command -> keep)	0.8969	2754.6	3071.3	0.3592	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+ubuntu-24.04	kill2-p.tst:13: sending signal: -s ABRT	0.8944	130754.6	146194.3	1.0108	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	sigquit6-p.tst:7132: SIGQUIT spares execed process (subshell, self, -i +m, initially ignored, keep -> keep)	0.8939	2058.7	2303.1	0.3982	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 36 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit5-p.tst:7026: SIGQUIT kills shell (cmdsub, other, -i +m, initially defaulted, keep -> keep)	0.8935	49921.6	55871.8	0.9074	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 40 41 42 48 55 56
+ubuntu-24.04	sigquit1-p.tst:7094: SIGQUIT spares child process (cmdsub, self, +i +m, initially defaulted, ignore -> ignore)	0.8884	1869.3	2104.1	0.5534	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 34 36 39 40 41 42 44 48
+ubuntu-24.04	sigquit1-p.tst:7035: SIGQUIT kills shell (cmdsub, other, +i +m, initially defaulted, command -> keep)	0.888	47401.5	53379.5	0.9391	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 48
+ubuntu-24.04	sigquit3-p.tst:8154: SIGQUIT spares execed process (cmdsub, self, +i -m, initially defaulted, clear -> ignore)	0.8878	1779.8	2004.7	0.4403	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48
+ubuntu-24.04	path-p.tst:79: expansion with unreadable directory	0.8847	1285.5	1452.9	0.5907	0 1 3 7 8 23 24 26 42 44 48
+ubuntu-24.04	sigcont8-p.tst:8014: SIGCONT spares shell (subshell, other, -i -m, initially ignored, clear -> keep)	0.8837	6885.6	7792.2	0.3668	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit1-p.tst:7037: SIGQUIT spares shell (cmdsub, other, +i +m, initially defaulted, command -> ignore)	0.8779	1592.6	1814.1	0.7232	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48
+ubuntu-24.04	sigcont7-p.tst:8143: SIGCONT spares execed process (subshell, other, -i -m, initially defaulted, ignore -> command)	0.8767	3648.4	4161.5	0.367	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit1-p.tst:7098: SIGQUIT spares child process (cmdsub, self, +i +m, initially defaulted, command -> ignore)	0.8745	1811.5	2071.4	0.4778	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 34 36 39 40 41 42 44 48
+ubuntu-24.04	sigquit7-p.tst:8022: SIGQUIT kills shell (subshell, other, -i -m, initially defaulted, command -> keep)	0.8647	46394.9	53655.5	0.8324	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 48 55 56
+ubuntu-24.04	sigquit7-p.tst:8035: SIGQUIT kills shell (cmdsub, other, -i -m, initially defaulted, command -> keep)	0.8617	42829.3	49703.7	0.8448	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 48 55 56
+ubuntu-24.04	path-p.tst:14: expansion with read-and-searchable directory	0.8616	1171.7	1359.9	0.5687	0 1 3 7 8 23 24 26 42 44 48
+ubuntu-24.04	pipeline-p.tst:11: 3-command pipeline	0.8561	4897.5	5720.6	0.6237	0 1 3 7 8 24 30 32 33 42 43
+ubuntu-24.04	sigquit7-p.tst:8013: SIGQUIT kills shell (subshell, other, -i -m, initially defaulted, keep -> keep)	0.856	38792.3	45316.1	0.8298	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 40 41 42 48 55 56
+ubuntu-24.04	sigquit3-p.tst:8026: SIGQUIT kills shell (cmdsub, other, +i -m, initially defaulted, keep -> keep)	0.8482	44436.5	52391.9	0.8438	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 40 42 48
+ubuntu-24.04	sigquit3-p.tst:8162: SIGQUIT spares execed process (cmdsub, self, +i -m, initially defaulted, command -> ignore)	0.8462	1621.9	1916.6	0.4324	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48
+ubuntu-24.04	sigcont7-p.tst:8003: SIGCONT spares shell (main, other, -i -m, initially defaulted, clear -> ignore)	0.84	2223.4	2647.0	0.4228	0 1 5 7 8 17 21 23 24 26 27 29 31 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	pipeline-p.tst:5: 2-command pipeline	0.8361	4058.0	4853.5	0.5849	0 1 3 7 8 24 30 32 33 42
+ubuntu-24.04	sigquit3-p.tst:8070: SIGQUIT spares child process (subshell, self, +i -m, initially defaulted, keep -> ignore)	0.8312	1708.0	2054.9	0.396	0 1 3 7 8 10 23 24 25 26 28 29 30 33 35 36 39 40 41 42 44 48
+ubuntu-24.04	sigcont7-p.tst:8102: SIGCONT spares child process (async, self, -i -m, initially defaulted, keep -> ignore)	0.8301	3833.4	4618.0	0.3671	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+ubuntu-24.04	kill2-p.tst:15: sending signal: -s BUS	0.8296	133262.8	160644.1	1.0105	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	sigquit7-p.tst:8016: SIGQUIT spares shell (subshell, other, -i -m, initially defaulted, clear -> ignore)	0.8287	2799.6	3378.5	0.3672	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigcont8-p.tst:8078: SIGCONT spares child process (subshell, self, -i -m, initially ignored, ignore -> ignore)	0.8279	5500.7	6644.3	0.3642	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	set-p.tst:84: noclobber (short) on: $-	0.8206	2660.2	3241.7	0.659	0 1 3 7 8 14 17 21 23 24 26 30 32 33 42 43 50
+ubuntu-24.04	sigquit5-p.tst:7037: SIGQUIT spares shell (cmdsub, other, -i +m, initially defaulted, command -> ignore)	0.8156	2604.3	3193.2	0.3498	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit7-p.tst:8014: SIGQUIT kills shell (subshell, other, -i -m, initially defaulted, clear -> keep)	0.8152	36388.1	44635.7	0.9101	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 48 55 56
+ubuntu-24.04	sigquit7-p.tst:8076: SIGQUIT spares child process (subshell, self, -i -m, initially defaulted, ignore -> keep)	0.8108	1956.2	2412.5	0.4338	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	kill1-p.tst:25: printing signal name TERM from number	0.8087	929.9	1149.9	0.5004	0 1 3 7 8 23 24 26 36 42
+ubuntu-24.04	sigquit3-p.tst:8012: SIGQUIT is handled by shell (main, self, +i -m, initially defaulted, command -> command)	0.8062	711.4	882.4	0.5595	0 1 3 5 7 8 23 24 26 36 39 41 42 44 48
+ubuntu-24.04	sigquit5-p.tst:7014: SIGQUIT kills shell (subshell, other, -i +m, initially defaulted, clear -> keep)	0.8018	34080.4	42505.0	0.8269	0 1 5 7 8 17 21 23 24 26 29 30 33 36 39 40 41 42 48 55 56
+ubuntu-24.04	kill2-p.tst:29: sending signal: -ALRM	0.7952	1619.1	2036.2	0.5511	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	sigcont7-p.tst:8158: SIGCONT spares execed process (cmdsub, self, -i -m, initially defaulted, ignore -> ignore)	0.7952	2352.1	2957.9	0.4013	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit3-p.tst:8066: SIGQUIT spares child process (main, self, +i -m, initially defaulted, command -> ignore)	0.7901	1402.5	1775.1	0.4033	0 1 3 7 8 10 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48
+ubuntu-24.04	sigquit1-p.tst:7012: SIGQUIT is handled by shell (main, self, +i +m, initially defaulted, command -> command)	0.7808	656.4	840.7	0.5567	0 1 3 5 7 8 23 24 26 36 39 41 42 44 48
+ubuntu-24.04	sigquit1-p.tst:7062: SIGQUIT spares child process (main, self, +i +m, initially defaulted, ignore -> ignore)	0.7792	1390.1	1783.9	0.4276	0 1 3 7 8 10 23 24 25 26 28 29 30 33 36 39 41 42 44 48
+ubuntu-24.04	sigquit1-p.tst:7029: SIGQUIT spares shell (cmdsub, other, +i +m, initially defaulted, clear -> ignore)	0.7789	1635.2	2099.2	0.4566	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48
+ubuntu-24.04	set-p.tst:99: hashondef (short) on: $-	0.7758	1787.4	2303.9	0.6637	0 1 3 7 8 14 17 21 23 24 26 30 32 33 42 43 50
+ubuntu-24.04	kill3-p.tst:50: sending signal: -6	0.7757	35239.4	45429.2	0.966	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	sigquit7-p.tst:8106: SIGQUIT spares child process (async, self, -i -m, initially defaulted, clear -> ignore)	0.7713	2239.1	2903.1	0.4416	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit5-p.tst:7039: SIGQUIT spares shell (async, other, -i +m, initially defaulted, keep -> keep)	0.7663	2022.8	2639.8	0.4595	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 40 41 42 44 48 55 56
+ubuntu-24.04	simple-p.tst:223: running command in different directory with relative path in $PATH	0.763	3161.9	4144.1	0.7392	0 1 3 4 7 8 12 13 14 17 21 23 24 25 26 29 30 33 42 44 48 52
+ubuntu-24.04	sigquit7-p.tst:8040: SIGQUIT kills shell (async, other, -i -m, initially defaulted, clear -> keep)	0.7619	45772.3	60077.6	0.8952	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 39 40 41 42 48 55 56
+ubuntu-24.04	sigquit6-p.tst:7126: SIGQUIT spares execed process (main, self, -i +m, initially ignored, ignore -> ignore)	0.7618	1575.6	2068.3	0.3296	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 36 39 41 42 44 48 55 56
+ubuntu-24.04	set-p.tst:81: notify (long) on: $-	0.7597	2497.4	3287.2	0.6649	0 1 3 7 8 14 17 21 23 24 26 30 32 33 42 43 50
+ubuntu-24.04	sigcont7-p.tst:8047: SIGCONT is handled by shell (async, other, -i -m, initially defaulted, ignore -> command)	0.7597	2484.0	3269.8	0.3627	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+ubuntu-24.04	umask-p.tst:107: symbolic operand +w	0.7595	1791.0	2358.1	0.7047	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:82: symbolic operand g+rw	0.7573	1752.5	2314.1	0.7151	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	sigquit7-p.tst:8046: SIGQUIT spares shell (async, other, -i -m, initially defaulted, ignore -> ignore)	0.7563	2794.2	3694.5	0.5437	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit1-p.tst:7142: SIGQUIT spares execed process (subshell, self, +i +m, initially defaulted, ignore -> ignore)	0.7555	1370.6	1814.2	0.4383	0 1 3 7 8 10 23 24 25 26 27 28 31 36 39 40 41 42 44 48
+ubuntu-24.04	sigcont7-p.tst:8106: SIGCONT spares child process (async, self, -i -m, initially defaulted, clear -> ignore)	0.7551	3361.8	4451.9	0.3651	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+ubuntu-24.04	trap-p.tst:80: setting trap for EXIT (exit built-in)	0.7549	1326.9	1757.6	0.5602	0 1 3 5 7 8 23 24 26 39 40 41 42 44
+ubuntu-24.04	umask-p.tst:93: symbolic operand o+wx	0.7536	1756.6	2330.9	0.7024	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:120: symbolic operand u=wx	0.7535	1754.6	2328.6	0.7152	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:99: symbolic operand a+x	0.7523	1754.1	2331.6	0.7083	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	sigcont7-p.tst:8152: SIGCONT spares execed process (cmdsub, self, -i -m, initially defaulted, clear -> keep)	0.7517	3519.1	4681.2	0.4012	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit3-p.tst:8082: SIGQUIT spares child process (subshell, self, +i -m, initially defaulted, command -> ignore)	0.751	1565.0	2083.9	0.4288	0 1 3 7 8 10 23 24 25 26 28 29 30 33 35 36 39 40 41 42 44 48
+ubuntu-24.04	sigcont7-p.tst:8141: SIGCONT spares execed process (subshell, other, -i -m, initially defaulted, ignore -> clear)	0.7495	3118.1	4160.1	0.3694	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit3-p.tst:8027: SIGQUIT kills shell (cmdsub, other, +i -m, initially defaulted, clear -> keep)	0.7489	41554.8	55490.3	0.8865	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 42 48
+ubuntu-24.04	umask-p.tst:119: symbolic operand u=xr	0.7489	1779.2	2375.8	0.7038	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:80: symbolic operand g+w	0.7486	1741.0	2325.5	0.7175	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	quote-p.tst:724: quoted words are not reserved words	0.7455	2012.4	2699.5	0.7405	0 1 3 4 7 8 14 17 21 23 24 25 26 29 30 33 42 44 48
+ubuntu-24.04	umask-p.tst:102: symbolic operand a+wx	0.7455	1761.4	2362.7	0.7033	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:108: symbolic operand +x	0.7447	1743.8	2341.6	0.705	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:101: symbolic operand a+xr	0.7443	1753.3	2355.7	0.7144	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:109: symbolic operand +rw	0.743	1744.8	2348.3	0.6985	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:84: symbolic operand g+wx	0.743	1748.7	2353.6	0.6982	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	sigcont8-p.tst:8013: SIGCONT spares shell (subshell, other, -i -m, initially ignored, keep -> keep)	0.7419	5279.5	7116.1	0.3577	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit6-p.tst:7150: SIGQUIT spares execed process (cmdsub, self, -i +m, initially ignored, keep -> ignore)	0.7414	1773.7	2392.3	0.3992	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	umask-p.tst:74: symbolic operand u+xr	0.7407	1738.0	2346.3	0.7186	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:76: symbolic operand u+xwr	0.7406	1710.3	2309.4	0.7089	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	sigquit8-p.tst:8037: SIGQUIT spares shell (cmdsub, other, -i -m, initially ignored, command -> ignore)	0.7402	3059.2	4133.0	0.3386	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	simple-p.tst:237: assignment to $PATH removes all remembered command paths	0.7399	4995.2	6751.3	0.746	0 1 3 4 7 8 12 13 14 17 21 23 24 25 26 29 30 33 42 44 48 52
+ubuntu-24.04	trap-p.tst:279: setting command trap that starts with hyphen	0.7399	1472.8	1990.7	0.6526	0 1 3 4 5 7 8 17 21 23 24 26 29 30 33 36 39 41 42 44 48
+ubuntu-24.04	sigquit5-p.tst:7168: SIGQUIT spares execed process (async, self, -i +m, initially defaulted, clear -> keep)	0.7395	1981.9	2680.1	0.3346	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48 55 56
+ubuntu-24.04	umask-p.tst:105: symbolic operand +	0.7391	1742.1	2357.1	0.7133	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:115: symbolic operand u=r	0.7388	1724.1	2333.7	0.7158	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	kill3-p.tst:52: sending signal: -14	0.7387	606.1	820.4	0.5923	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	sigquit1-p.tst:7043: SIGQUIT is handled by shell (async, other, +i +m, initially defaulted, clear -> command)	0.7387	1411.7	1911.1	0.4009	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48
+ubuntu-24.04	sigquit6-p.tst:7040: SIGQUIT spares shell (async, other, -i +m, initially ignored, clear -> keep)	0.7377	2048.2	2776.6	0.3544	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+ubuntu-24.04	umask-p.tst:110: symbolic operand +xr	0.7364	1749.8	2376.3	0.7136	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:81: symbolic operand g+x	0.736	1729.8	2350.4	0.7205	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:73: symbolic operand u+rw	0.7356	1744.2	2371.2	0.7059	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	simple-p.tst:258: remembered command path is ignored if command is missing	0.7347	4776.0	6500.8	0.7438	0 1 3 4 7 8 12 13 14 17 21 23 24 25 26 29 30 33 42 44 48 52
+ubuntu-24.04	umask-p.tst:118: symbolic operand u=rw	0.7341	1718.5	2340.9	0.705	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:79: symbolic operand g+r	0.7325	1687.1	2303.2	0.716	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:103: symbolic operand a+xwr	0.7312	1712.8	2342.5	0.7091	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:69: symbolic operand u+	0.7311	1789.4	2447.4	0.7295	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	sigquit5-p.tst:7024: SIGQUIT spares shell (subshell, other, -i +m, initially defaulted, command -> ignore)	0.7309	2478.3	3390.9	0.3801	0 1 5 7 8 17 21 23 24 26 29 30 33 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	umask-p.tst:106: symbolic operand +r	0.7306	1741.1	2383.2	0.6963	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:114: symbolic operand u=	0.729	1712.1	2348.4	0.7203	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:111: symbolic operand +wx	0.7286	1694.2	2325.2	0.7112	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:85: symbolic operand g+xwr	0.7274	1707.0	2346.8	0.697	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:97: symbolic operand a+r	0.7272	1714.7	2357.9	0.708	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:75: symbolic operand u+wx	0.7256	1704.2	2348.8	0.7104	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	sigcont7-p.tst:8015: SIGCONT spares shell (subshell, other, -i -m, initially defaulted, clear -> clear)	0.7255	2074.0	2858.9	0.3821	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	unset-p.tst:84: deleting many functions (-f)	0.7254	1686.4	2324.9	0.7042	0 1 3 4 7 8 13 14 17 21 23 24 26 29 30 33 42 44 48
+ubuntu-24.04	umask-p.tst:100: symbolic operand a+rw	0.7245	1746.3	2410.3	0.7073	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	sigquit3-p.tst:8108: SIGQUIT spares child process (async, self, +i -m, initially defaulted, ignore -> keep)	0.7231	1597.6	2209.5	0.5394	0 1 3 7 8 10 23 24 25 26 28 29 30 33 35 36 37 39 40 41 42 44 48
+ubuntu-24.04	umask-p.tst:128: symbolic operand u=rwx,u-w	0.7229	1684.2	2329.8	0.7238	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	sigcont8-p.tst:8073: SIGCONT spares child process (subshell, other, -i -m, initially ignored, clear -> clear)	0.7228	6979.0	9655.8	0.3386	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	umask-p.tst:88: symbolic operand o+r	0.7227	1692.0	2341.3	0.7069	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:121: symbolic operand u=xwr	0.7221	1708.4	2365.8	0.7089	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	sigcont7-p.tst:8124: SIGCONT spares execed process (main, self, -i -m, initially defaulted, ignore -> keep)	0.722	2082.0	2883.5	0.3496	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 36 39 41 42 44 48 55 56
+ubuntu-24.04	umask-p.tst:71: symbolic operand u+w	0.7205	1685.3	2339.0	0.7102	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:78: symbolic operand g+	0.7205	1674.7	2324.3	0.7138	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:89: symbolic operand o+w	0.7196	1702.0	2365.1	0.7076	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:98: symbolic operand a+w	0.719	1712.1	2381.2	0.7154	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	sigquit8-p.tst:8170: SIGQUIT spares execed process (async, self, -i -m, initially ignored, clear -> ignore)	0.7186	3030.4	4217.3	0.3445	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48 55 56
+ubuntu-24.04	umask-p.tst:96: symbolic operand a+	0.717	1692.7	2361.0	0.701	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:83: symbolic operand g+xr	0.7164	1686.1	2353.8	0.7102	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	sigquit7-p.tst:8090: SIGQUIT spares child process (cmdsub, self, -i -m, initially defaulted, clear -> ignore)	0.7153	2029.3	2837.2	0.324	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	umask-p.tst:87: symbolic operand o+	0.7151	1692.1	2366.4	0.6953	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	sigcont8-p.tst:8046: SIGCONT spares shell (async, other, -i -m, initially ignored, ignore -> ignore)	0.715	4869.4	6810.6	0.3314	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48 55 56
+ubuntu-24.04	kill1-p.tst:19: printing signal name HUP from number	0.7149	926.2	1295.6	0.5375	0 1 3 7 8 23 24 26 36 42
+ubuntu-24.04	alias-p.tst:359: alias substitution to case/esac keywords	0.7144	2321.6	3249.6	0.6805	0 1 3 7 8 9 17 23 24 25 26 27 30 32 33 40 42 44 50
+ubuntu-24.04	quote-p.tst:225: line continuation in operators <> >> <& >&	0.7138	1137.6	1593.8	0.6806	0 1 3 7 8 14 17 21 23 24 25 26 27 29 31 33 40 42 44
+ubuntu-24.04	umask-p.tst:92: symbolic operand o+xr	0.7135	1694.6	2375.1	0.7	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:91: symbolic operand o+rw	0.7134	1717.3	2407.0	0.7032	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:70: symbolic operand u+r	0.7133	1721.3	2413.1	0.7199	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	sigquit7-p.tst:8024: SIGQUIT spares shell (subshell, other, -i -m, initially defaulted, command -> ignore)	0.7128	1886.8	2647.1	0.3875	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	redir-p.tst:235: input duplication, success	0.7118	1508.3	2118.8	0.6996	0 1 3 7 8 15 17 24 25 27 29 31 33 40 42
+ubuntu-24.04	sigquit3-p.tst:8033: SIGQUIT spares shell (cmdsub, other, +i -m, initially defaulted, ignore -> ignore)	0.7118	1884.9	2648.0	0.4245	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48
+ubuntu-24.04	umask-p.tst:72: symbolic operand u+x	0.7114	1699.1	2388.4	0.7152	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:94: symbolic operand o+xwr	0.7107	1682.0	2366.7	0.7087	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:112: symbolic operand +xwr	0.7084	1696.5	2394.9	0.7117	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	kill3-p.tst:14: sending signal: -s CONT	0.7083	597.1	843.1	0.5072	0 1 3 7 8 23 24 26 36 42 48
+ubuntu-24.04	umask-p.tst:116: symbolic operand u=w	0.7078	1672.4	2362.8	0.7155	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	param-p.tst:280: removing shortest matching prefix	0.7064	697.3	987.1	0.5796	0 1 3 7 8 11 13 14 17 19 21 23 24 26 42 43 44 45 48
+ubuntu-24.04	umask-p.tst:117: symbolic operand u=x	0.7053	1677.2	2377.9	0.7084	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	umask-p.tst:90: symbolic operand o+x	0.7049	1669.8	2368.7	0.7156	0 1 3 7 8 23 24 26 29 30 32 33 42 46
+ubuntu-24.04	kill3-p.tst:53: sending signal: -15	0.704	556.6	790.6	0.506	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	sigcont8-p.tst:8143: SIGCONT spares execed process (subshell, other, -i -m, initially ignored, ignore -> command)	0.7036	5838.5	8297.7	0.3437	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	simple-p.tst:278: argv[0] (command name without slash)	0.7026	1422.9	2025.3	0.6608	0 1 3 7 8 14 17 21 23 24 26 29 30 33 42 48
+ubuntu-24.04	sigquit6-p.tst:7029: SIGQUIT spares shell (cmdsub, other, -i +m, initially ignored, clear -> ignore)	0.7006	1861.5	2656.9	0.3852	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit6-p.tst:7078: SIGQUIT spares child process (subshell, self, -i +m, initially ignored, ignore -> ignore)	0.7004	1863.0	2660.0	0.388	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigcont7-p.tst:8078: SIGCONT spares child process (subshell, self, -i -m, initially defaulted, ignore -> ignore)	0.6992	2747.3	3928.9	0.3801	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	alias-p.tst:93: printing all aliases	0.6987	2238.0	3203.0	0.7143	0 1 3 5 6 7 8 9 17 21 23 24 25 26 27 29 30 31 33 34 40 42 48 50
+ubuntu-24.04	sigquit6-p.tst:7090: SIGQUIT spares child process (cmdsub, self, -i +m, initially ignored, clear -> ignore)	0.6987	1890.7	2706.0	0.3903	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit6-p.tst:7172: SIGQUIT spares execed process (async, self, -i +m, initially ignored, ignore -> keep)	0.6979	1737.4	2489.4	0.3694	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 39 40 41 42 44 48 55 56
+ubuntu-24.04	redir-p.tst:100: input redirection, success	0.6972	1450.4	2080.5	0.706	0 1 3 7 8 24 25 27 29 31 33 40 42
+ubuntu-24.04	option-p.tst:101: noglob (short) off: effect	0.697	1173.2	1683.3	0.6865	0 1 3 7 8 24 30 32 33 42 43 48
+ubuntu-24.04	sigcont8-p.tst:8036: SIGCONT spares shell (cmdsub, other, -i -m, initially ignored, command -> clear)	0.6969	4847.8	6956.2	0.3397	0 1 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	redir-p.tst:478: multiple here-documents on single command	0.6968	2103.0	3018.0	0.6966	0 1 3 7 8 10 17 21 23 24 25 26 27 28 29 30 33 42 48
+ubuntu-24.04	redir-p.tst:264: effect of input closing	0.6963	1043.7	1498.8	0.6714	0 1 3 7 8 24 25 27 29 31 33 40 42
+ubuntu-24.04	sigquit5-p.tst:7020: SIGQUIT spares shell (subshell, other, -i +m, initially defaulted, ignore -> ignore)	0.6949	1671.1	2404.9	0.4641	0 1 5 7 8 17 21 23 24 26 29 30 33 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit7-p.tst:8092: SIGQUIT spares child process (cmdsub, self, -i -m, initially defaulted, ignore -> keep)	0.6949	1901.4	2736.1	0.3583	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	simple-p.tst:157: assignment-like command argument	0.6946	1414.8	2037.0	0.6674	0 1 3 7 8 14 17 21 23 24 26 29 30 33 42
+ubuntu-24.04	redir-p.tst:318: here-document with non-default file descriptor	0.6933	1101.4	1588.6	0.6703	0 1 3 7 8 10 24 25 27 28 29 31 33 40 42
+ubuntu-24.04	simple-p.tst:166: redirection can appear between any tokens in simple command	0.6926	1078.5	1557.2	0.6635	0 1 3 7 8 14 17 21 23 24 25 26 27 29 31 33 40 42
+ubuntu-24.04	sigquit6-p.tst:7084: SIGQUIT spares child process (cmdsub, self, -i +m, initially ignored, keep -> keep)	0.6914	1872.5	2708.4	0.3697	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit8-p.tst:8162: SIGQUIT spares execed process (cmdsub, self, -i -m, initially ignored, command -> ignore)	0.6911	2766.6	4003.2	0.3482	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	async-p.tst:27: asynchronous commands run asynchronously	0.691	2001.1	2895.9	0.6823	0 1 3 7 8 23 24 25 26 27 29 30 31 32 33 35 37 40 42 44 48
+ubuntu-24.04	kill3-p.tst:15: sending signal: -s URG	0.6909	587.9	850.9	0.4792	0 1 3 7 8 23 24 26 36 42 48
+ubuntu-24.04	sigquit6-p.tst:7039: SIGQUIT spares shell (async, other, -i +m, initially ignored, keep -> keep)	0.6905	1870.0	2708.3	0.3545	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 37 40 41 42 44 48 55 56
+ubuntu-24.04	option-p.tst:107: noglob (long) off: effect	0.6901	1106.1	1603.0	0.6649	0 1 3 7 8 24 30 32 33 42 43 48
+ubuntu-24.04	option-p.tst:131: noexec (short) off: $-	0.6901	1084.8	1571.9	0.6581	0 1 3 7 8 24 30 32 33 42 43
+ubuntu-24.04	option-p.tst:168: nounset (short) on: $-	0.6894	1106.3	1604.6	0.6458	0 1 3 7 8 24 30 32 33 42 43
+ubuntu-24.04	sigquit3-p.tst:8037: SIGQUIT spares shell (cmdsub, other, +i -m, initially defaulted, command -> ignore)	0.688	1771.4	2574.6	0.4524	0 1 3 5 7 8 17 21 23 24 26 29 30 33 34 36 39 40 41 42 44 48
+ubuntu-24.04	sigquit5-p.tst:7092: SIGQUIT spares child process (cmdsub, self, -i +m, initially defaulted, ignore -> keep)	0.688	1955.8	2842.6	0.371	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigcont7-p.tst:8100: SIGCONT spares child process (async, self, -i -m, initially defaulted, keep -> keep)	0.6874	2680.1	3898.8	0.3482	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 37 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit7-p.tst:8134: SIGQUIT spares execed process (subshell, self, -i -m, initially defaulted, keep -> ignore)	0.687	1653.3	2406.6	0.3443	0 1 3 7 8 10 17 21 23 24 25 26 27 28 31 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigcont8-p.tst:8066: SIGCONT spares child process (main, self, -i -m, initially ignored, command -> ignore)	0.6868	4411.8	6423.8	0.3623	0 1 3 7 8 10 17 21 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	redir-p.tst:434: various quotation of here-document delimiter	0.6867	1718.9	2503.0	0.6735	0 1 3 7 8 10 24 25 28 29 30 33 42
+ubuntu-24.04	set-p.tst:14: setting three positional parameters (no --)	0.6856	942.1	1374.2	0.5583	0 1 3 7 8 11 13 14 17 21 23 24 26 42 43 44 45 48 50
+ubuntu-24.04	param-p.tst:82: tilde expansion in embedded word	0.6848	2199.0	3211.0	0.6875	0 1 3 7 8 11 13 14 17 20 21 23 24 25 26 27 30 32 33 40 42 43 44 45 48
+ubuntu-24.04	redir-p.tst:79: pathname expansion in redirection operand (non-interactive)	0.6848	1056.3	1542.4	0.6667	0 1 3 7 8 17 24 25 27 29 31 33 40 42
+ubuntu-24.04	sigquit3-p.tst:8042: SIGQUIT spares shell (async, other, +i -m, initially defaulted, clear -> ignore)	0.6835	1916.8	2804.5	0.362	0 1 3 5 7 8 23 24 26 29 30 33 35 36 37 39 40 41 42 44 48
+ubuntu-24.04	command-p.tst:60: executing with standard path	0.6832	1007.3	1474.3	0.677	0 1 3 7 8 17 21 23 24 26 27 31 32 33 40 42
+ubuntu-24.04	redir-p.tst:163: clobbering redirection, -C, success	0.6823	1399.8	2051.5	0.664	0 1 3 7 8 23 24 25 26 29 30 33 42 44 48
+ubuntu-24.04	set-p.tst:21: setting empty positional parameters (no --)	0.682	1400.9	2053.9	0.5479	0 1 3 7 8 11 13 14 17 21 23 24 26 42 43 44 45 48 50
+ubuntu-24.04	sigquit1-p.tst:7007: SIGQUIT spares shell (main, other, +i +m, initially defaulted, ignore -> ignore)	0.682	1055.6	1547.8	0.4378	0 1 3 5 7 8 23 24 26 29 30 33 36 39 41 42 44 48
+ubuntu-24.04	quote-p.tst:251: line continuation in operator >|	0.6803	1103.9	1622.7	0.6568	0 1 3 7 8 14 17 21 23 24 25 26 29 30 33 42
+ubuntu-24.04	param-p.tst:99: parameter expansion in embedded word	0.6797	1643.5	2417.8	0.6871	0 1 3 7 8 11 13 14 17 21 23 24 25 26 27 30 32 33 40 42 43 44 45 48
+ubuntu-24.04	set-p.tst:7: setting one positional parameter (no --)	0.6796	1004.3	1477.9	0.575	0 1 3 7 8 11 13 14 17 21 23 24 26 42 43 44 45 48 50
+ubuntu-24.04	sigquit8-p.tst:8094: SIGQUIT spares child process (cmdsub, self, -i -m, initially ignored, ignore -> ignore)	0.6793	2815.6	4144.7	0.3614	0 1 3 7 8 10 17 21 23 24 25 26 28 29 30 33 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigcont7-p.tst:8159: SIGCONT spares execed process (cmdsub, other, -i -m, initially defaulted, ignore -> command)	0.6791	3121.6	4596.8	0.3669	0 1 3 5 7 8 10 17 21 23 24 25 26 27 28 29 30 31 33 34 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	sigquit3-p.tst:8007: SIGQUIT spares shell (main, other, +i -m, initially defaulted, ignore -> ignore)	0.6791	1560.2	2297.5	0.5086	0 1 3 5 7 8 23 24 26 27 29 31 33 35 36 39 40 41 42 44 48
+ubuntu-24.04	set-p.tst:119: verbose (short) off: $-	0.6789	2881.0	4243.9	0.6547	0 1 3 7 8 14 17 21 23 24 26 30 32 33 42 43 50
+ubuntu-24.04	sigquit1-p.tst:7008: SIGQUIT is handled by shell (main, self, +i +m, initially defaulted, ignore -> command)	0.6788	579.0	853.0	0.5774	0 1 3 5 7 8 23 24 26 36 39 41 42 44 48
+ubuntu-24.04	exec-p.tst:55: process ID of executed process	0.6774	803.3	1185.8	0.6467	0 1 3 7 8 23 24 26 31 48
+ubuntu-24.04	kill3-p.tst:51: sending signal: -9	0.677	571.6	844.3	0.497	0 1 3 7 8 23 24 26 36 48
+ubuntu-24.04	exec-p.tst:59: exec in subshell	0.6761	1039.1	1536.9	0.6575	0 1 3 7 8 23 24 26 31 40 42 44 48
+ubuntu-24.04	redir-p.tst:67: arithmetic expansion in redirection operand	0.6756	1036.8	1534.7	0.6393	0 1 3 7 8 15 17 24 25 27 29 31 33 40 42
+ubuntu-24.04	redir-p.tst:73: quote removal in redirection operand	0.6756	1023.6	1515.2	0.6569	0 1 3 7 8 24 25 27 29 31 33 40 42
+ubuntu-24.04	set-p.tst:141: setting positional parameters and shell options at once	0.6743	2857.3	4237.1	0.6597	0 1 3 7 8 11 13 14 17 21 23 24 26 30 32 33 42 43 44 45 48 50
+ubuntu-24.04	command-p.tst:227: output of describing external command (-V, with slash)	0.6735	1240.6	1842.0	0.6592	0 1 3 7 8 23 24 26 27 31 32 33 34 40 42 50 53
+ubuntu-24.04	read-p.tst:73: set -o allexport	0.6735	1089.8	1618.2	0.6864	0 1 3 7 8 10 14 17 21 23 24 25 26 27 28 31 40 42 47 48 50
+ubuntu-24.04	sigcont8-p.tst:8020: SIGCONT spares shell (subshell, other, -i -m, initially ignored, ignore -> ignore)	0.6731	3904.4	5800.8	0.3708	0 1 5 7 8 17 21 23 24 26 29 30 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	simple-p.tst:186: searching PATH for command	0.6721	977.2	1453.8	0.6756	0 1 3 4 7 8 14 17 21 23 24 26 29 30 33 42 43 44 48
+ubuntu-24.04	param-p.tst:222: ${unset?b}, failure with message, stderr	0.6708	1093.6	1630.4	0.6566	0 1 3 7 8 14 17 21 23 24 25 26 27 30 32 33 40 42 48
+ubuntu-24.04	sigcont7-p.tst:8066: SIGCONT spares child process (main, self, -i -m, initially defaulted, command -> ignore)	0.6701	2204.9	3290.4	0.4029	0 1 3 7 8 10 17 21 23 24 25 26 27 28 29 31 33 35 36 39 40 41 42 44 48 55 56
+ubuntu-24.04	redir-p.tst:513: redirection is temporary	0.6699	1413.5	2109.9	0.6928	0 1 3 7 8 10 23 24 25 26 27 28 29 30 31 33 40 42
+ubuntu-24.04	test-p.tst:149: test -f dir	0.6699	618.1	922.7	0.5767	0 1 3 7 8 17 21 23 24 26 42 45 48
+ubuntu-24.04	option-p.tst:395: xtrace (short) on: $-	0.6697	1108.5	1655.3	0.6395	0 1 3 7 8 24 30 32 33 42 43 48
+ubuntu-24.04	command-p.tst:208: output of describing external command (-V, no slash)	0.6695	1253.0	1871.5	0.6608	0 1 3 7 8 23 24 26 27 31 32 33 34 40 42 50 53
+ubuntu-24.04	redir-p.tst:47: tilde expansion in redirection operand	0.6681	1023.8	1532.5	0.6777	0 1 3 7 8 17 20 21 23 24 25 26 27 29 31 33 40 42 48
+ubuntu-24.04	quote-p.tst:263: line continuation in here-document operators	0.6677	1397.3	2092.9	0.6358	0 1 3 7 8 10 14 17 21 23 24 25 26 28 29 30 33 42
+ubuntu-24.04	option-p.tst:73: noglob (short) on: $-	0.6674	1051.4	1575.3	0.6778	0 1 3 7 8 24 30 32 33 42 43
+ubuntu-24.04	simple-p.tst:287: argv[0] (command name with slash)	0.6673	1535.5	2301.0	0.6807	0 1 3 7 8 14 17 21 23 24 26 29 30 33 34 40 42 53
+ubuntu-24.04	test-p.tst:353: test 90 -le -3	0.6672	594.8	891.5	0.575	0 1 3 7 8 17 21 23 24 26 42 45 48
+ubuntu-24.04	break-p.tst:270: breaking two for loops, nested in another for loop	0.6667	631.6	947.3	0.627	0 1 3 7 8 12 21 23 24 26 42 44 48

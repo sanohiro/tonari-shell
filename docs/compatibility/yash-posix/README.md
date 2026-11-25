@@ -1,5 +1,7 @@
 # POSIX sh comparison / POSIX sh の検証
 
+The subsequent comparison repeats this inventory after the compatibility and performance fixes. 修正後の合否と速度は追試の記録にあります。[Follow-up results](../yash-posix-followup/README.md)
+
 The release under test is `10e63fd`. The previous release is `d858d41`. Yash 2.60 at `1cdb509a617894ed96a12c33b43bcd7adb6f1ff5` supplies the scripts, helpers, controlling terminal and expectations. Its runner invokes each candidate via the same name, `sh`. Linux uses the runner's GNU Bash 5.2.21 and macOS uses a native build of GNU Bash 5.2.37. Each host exercises all 122 POSIX fixture files, including 62 generated signal fixtures. [Upstream instructions](https://github.com/magicant/yash/blob/2.60/tests/README.md) · [Full native run](https://github.com/sanohiro/tonari-shell/actions/runs/45615699784)
 
 各行は上流のファイル名、行番号、試験名で識別します。同じ行の Bash と Tonari に対して、上流が指定した終了状態・標準出力・標準エラーを個別に照合します。同じ判定が示す一致の範囲は、その行で上流が指定した検査です。通常の Bash としての動作は別の1,411項目の監査で照合しました。[通常モードの監査](../../compatibility.md)

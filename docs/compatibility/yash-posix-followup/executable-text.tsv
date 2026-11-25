@@ -1,0 +1,7 @@
+host	workload	trials	e41f0bc ms	e024141 ms	Bash ms	Tonari/Bash
+ubuntu-24.04	plain-script	81	0.737	0.633	1.097	0.57703
+ubuntu-24.04	plain-script-30	81	11.248	8.052	10.094	0.7977
+macos-15	plain-script	81	14.922	9.117	13.19	0.69121
+macos-15	plain-script-30	81	163.538	36.455	48.932	0.74501
+physical M1	plain-script	81	6.356	4.117	6.87	0.59927
+physical M1	plain-script-30	81	90.736	24.655	30.342	0.81257

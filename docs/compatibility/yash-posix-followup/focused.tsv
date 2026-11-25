@@ -1,0 +1,1072 @@
+host	release	run	upstream case	trials	Tonari us	Bash us	previous us	Tonari/Bash
+ubuntu-24.04	7cad956	pipelines	pipeline-p.tst:5: 2-command pipeline	17	1153.66	1967.97	1149.56	0.58622
+ubuntu-24.04	7cad956	pipelines	pipeline-p.tst:11: 3-command pipeline	17	1213.15	1983.75	1208.19	0.61154
+ubuntu-24.04	7cad956	pipelines	pipeline-p.tst:17: linebreak after |	17	1218.73	1989.98	1224.47	0.61243
+ubuntu-24.04	7cad956	pipelines	pipeline-p.tst:26: exit status of pipeline is from last command	17	627.46	1593.91	853.43	0.39366
+ubuntu-24.04	7cad956	pipelines	pipeline-p.tst:30: exit status of negated pipelines	17	701.22	3032.41	1676.58	0.23124
+ubuntu-24.04	7cad956	pipelines	pipeline-p.tst:46: stdin for first command & stdout for last are not modified	17	1221.05	1903.92	1223.49	0.64133
+ubuntu-24.04	7cad956	pipelines	pipeline-p.tst:54: stderr is not modified	17	848.44	1539.36	847.8	0.55117
+ubuntu-24.04	7cad956	pipelines	pipeline-p.tst:61: compound commands in pipeline	17	1533.97	2416.01	1537.76	0.63492
+ubuntu-24.04	7cad956	pipelines	pipeline-p.tst:78: redirection overrides pipeline	17	1732.5	2670.13	1725.61	0.64885
+ubuntu-24.04	e4a68b8	io	cd-p.tst:15: default operand is HOME (-L)	11	814.67	1454.83	817.1	0.55997
+ubuntu-24.04	e4a68b8	io	cd-p.tst:25: default operand is HOME (-P)	11	785.51	1435.68	763.69	0.54714
+ubuntu-24.04	e4a68b8	io	cd-p.tst:41: found in first cd path (-L)	11	821.21	1447.72	813.71	0.56725
+ubuntu-24.04	e4a68b8	io	cd-p.tst:53: found in first cd path (-P)	11	808.16	1466.15	808.85	0.55121
+ubuntu-24.04	e4a68b8	io	cd-p.tst:65: found in last cd path (-L)	11	809.08	1466.2	809.89	0.55182
+ubuntu-24.04	e4a68b8	io	cd-p.tst:77: found in last cd path (-P)	11	806.54	1465.52	820.21	0.55035
+ubuntu-24.04	e4a68b8	io	cd-p.tst:89: found in empty cd path (-L)	11	801.71	1445.98	815.03	0.55444
+ubuntu-24.04	e4a68b8	io	cd-p.tst:100: found in empty cd path (-P)	11	791.69	1474.82	805.52	0.5368
+ubuntu-24.04	e4a68b8	io	cd-p.tst:111: found in dot cd path (-L)	11	817.34	1437.96	809.04	0.5684
+ubuntu-24.04	e4a68b8	io	cd-p.tst:135: cd path ending with slash (-L)	11	803.61	1454.56	803.87	0.55247
+ubuntu-24.04	e4a68b8	io	cd-p.tst:146: cd path ending with slash (-P)	11	840.36	1444.72	828.41	0.58167
+ubuntu-24.04	e4a68b8	io	cd-p.tst:157: found not in any cd path, but in PWD (-L)	11	816.03	1520.41	818.87	0.53672
+ubuntu-24.04	e4a68b8	io	cd-p.tst:168: found not in any cd path, but in PWD (-P)	11	824.09	1489.47	817.99	0.55328
+ubuntu-24.04	e4a68b8	io	cd-p.tst:179: cd paths are ignored for absolute path operand (-L)	11	814.04	1439.61	811.71	0.56546
+ubuntu-24.04	e4a68b8	io	cd-p.tst:189: cd paths are ignored for absolute path operand (-P)	11	825.49	1426.65	823.65	0.57862
+ubuntu-24.04	e4a68b8	io	cd-p.tst:199: cd paths are ignored for operand starting with dot (-L)	11	826.19	1461.8	819.81	0.56519
+ubuntu-24.04	e4a68b8	io	cd-p.tst:210: cd paths are ignored for operand starting with dot (-P)	11	834.81	1461.91	811.64	0.57104
+ubuntu-24.04	e4a68b8	io	cd-p.tst:221: cd paths are ignored for operand starting with dot-dot (-L)	11	858.99	1467.48	853.02	0.58535
+ubuntu-24.04	e4a68b8	io	cd-p.tst:234: cd paths are ignored for operand starting with dot-dot (-P)	11	850.32	1481.78	829.8	0.57385
+ubuntu-24.04	e4a68b8	io	cd-p.tst:247: not found in any cd path nor in PWD (-L)	11	890.03	1511.3	889.41	0.58892
+ubuntu-24.04	e4a68b8	io	cd-p.tst:258: not found in any cd path nor in PWD (-P)	11	828.35	1458.87	840.78	0.5678
+ubuntu-24.04	e4a68b8	io	cd-p.tst:271: directory not found (with unset CDPATH, -L)	11	842.83	1449.59	842.0	0.58143
+ubuntu-24.04	e4a68b8	io	cd-p.tst:282: directory not found (with unset CDPATH, -P)	11	810.2	1429.14	829.39	0.56691
+ubuntu-24.04	e4a68b8	io	cd-p.tst:293: non-directory file in operand component (-L)	11	804.68	1404.44	792.7	0.57295
+ubuntu-24.04	e4a68b8	io	cd-p.tst:297: non-directory file in operand component (-P)	11	782.22	1401.84	787.46	0.55799
+ubuntu-24.04	e4a68b8	io	cd-p.tst:301: non-existing file in operand component (-L)	11	808.23	1392.64	820.97	0.58036
+ubuntu-24.04	e4a68b8	io	cd-p.tst:305: non-existing file in operand component (-P)	11	802.79	1408.37	795.97	0.57001
+ubuntu-24.04	e4a68b8	io	cd-p.tst:309: target pathname is canonicalized (-L)	11	823.95	1424.21	816.21	0.57853
+ubuntu-24.04	e4a68b8	io	cd-p.tst:320: symbolic links are resolved (in operand, -P)	11	817.08	1458.83	807.91	0.5601
+ubuntu-24.04	e4a68b8	io	cd-p.tst:331: symbolic links are resolved (in old PWD, -P)	11	824.97	1452.93	831.57	0.5678
+ubuntu-24.04	e4a68b8	io	cd-p.tst:343: default option is -L	11	808.17	1423.82	834.26	0.56761
+ubuntu-24.04	e4a68b8	io	cd-p.tst:354: the last option wins (-L)	11	812.16	1426.18	837.14	0.56947
+ubuntu-24.04	e4a68b8	io	cd-p.tst:365: the last option wins (-P)	11	804.47	1463.94	818.15	0.54952
+ubuntu-24.04	e4a68b8	io	cd-p.tst:376: exit status of success with -e	11	784.55	1423.04	775.77	0.55132
+ubuntu-24.04	e4a68b8	io	cd-p.tst:394: changing to unsearchable directory (-L)	11	813.08	1407.52	802.07	0.57767
+ubuntu-24.04	e4a68b8	io	cd-p.tst:398: changing to unsearchable directory (-P)	11	785.49	1402.57	794.88	0.56004
+ubuntu-24.04	e4a68b8	io	cd-p.tst:404: hyphen operand means OLDPWD (-L)	11	833.16	1428.9	831.5	0.58308
+ubuntu-24.04	e4a68b8	io	cd-p.tst:415: hyphen operand means OLDPWD (-P)	11	828.8	1453.03	823.83	0.5704
+ubuntu-24.04	e4a68b8	io	cd-p.tst:426: OLDPWD is set to old PWD (-L)	11	802.27	1468.5	814.17	0.54632
+ubuntu-24.04	e4a68b8	io	cd-p.tst:439: empty operand (-P)	11	816.99	1422.11	802.65	0.57449
+ubuntu-24.04	e4a68b8	io	cd-p.tst:443: readonly PWD (-L)	11	843.91	1462.39	864.04	0.57708
+ubuntu-24.04	e4a68b8	io	cd-p.tst:455: readonly PWD (-P)	11	837.37	1415.33	880.32	0.59164
+ubuntu-24.04	e4a68b8	io	cd-p.tst:467: readonly OLDPWD (-L)	11	870.29	1471.99	864.33	0.59124
+ubuntu-24.04	e4a68b8	io	cd-p.tst:480: readonly OLDPWD (-P)	11	875.03	1449.95	866.72	0.60349
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:8: result of command substitution	11	873.7	2279.23	859.48	0.38333
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:14: command substitution executes in subshell	11	1048.61	1854.51	1072.08	0.56544
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:22: trailing newlines are removed	11	836.23	2595.12	838.72	0.32223
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:33: stdin is not redirected	11	1591.56	2750.86	1631.35	0.57857
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:39: stderr is not redirected	11	1045.32	1892.84	1034.32	0.55225
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:47: field splitting on result of command substitution	11	817.71	1828.5	841.9	0.4472
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:53: backslash in backquotes / nested backquotes	11	1471.51	3038.12	1479.76	0.48435
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:63: quotations in backquotes	11	2116.14	4688.8	2096.25	0.45132
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:79: quotations in backquotes in double quotes	11	2081.86	4734.59	2079.24	0.43971
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:105: quotations in command substitution	11	1045.85	1861.1	1039.9	0.56195
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:111: comment in command substitution	11	851.72	1846.1	816.09	0.46136
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:119: case command in command substitution	11	1073.98	1885.3	1051.33	0.56966
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:130: here-document in command substitution	11	1468.94	2634.87	1440.22	0.5575
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:139: command substitution between here-document operator and body	11	2026.57	3398.14	2000.73	0.59638
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:151: result of command substitution is not subject to further expansion	11	1262.42	2300.24	1232.57	0.54882
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:160: field splitting on result of command substitution	11	1264.28	2317.27	1262.75	0.54559
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:168: pathname expansion on result of command substitution	11	1327.31	2372.23	1331.25	0.55952
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:176: nested command substitutions	11	1221.07	2987.14	1213.34	0.40877
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:186: ambiguity with arithmetic expansion, missing many )s	11	833.54	1394.45	832.37	0.59776
+ubuntu-24.04	e4a68b8	io	cmdsub-p.tst:198: ambiguity with arithmetic expansion, missing one )	11	767.56	1379.07	766.2	0.55658
+ubuntu-24.04	e4a68b8	io	command-p.tst:5: redirection error on special built-in does not kill shell	11	808.86	1472.39	812.64	0.54935
+ubuntu-24.04	e4a68b8	io	command-p.tst:12: dot script not found does not kill shell	11	778.88	1387.96	772.92	0.56117
+ubuntu-24.04	e4a68b8	io	command-p.tst:19: assignment on special built-in is temporary	11	745.7	1377.27	779.56	0.54143
+ubuntu-24.04	e4a68b8	io	command-p.tst:27: command ignores function (mandatory built-in)	11	744.0	1383.03	746.78	0.53795
+ubuntu-24.04	e4a68b8	io	command-p.tst:32: command ignores function (substitutive built-in)	11	757.64	1368.87	736.38	0.55348
+ubuntu-24.04	e4a68b8	io	command-p.tst:37: command ignores function (external command)	11	1402.1	2182.51	1401.15	0.64242
+ubuntu-24.04	e4a68b8	io	command-p.tst:42: command exec retains redirection	11	1332.76	2108.04	1355.75	0.63222
+ubuntu-24.04	e4a68b8	io	command-p.tst:51: effect on environment	11	784.67	1393.16	788.9	0.56323
+ubuntu-24.04	e4a68b8	io	command-p.tst:60: executing with standard path	11	1424.12	2338.14	1429.35	0.60908
+ubuntu-24.04	e4a68b8	io	command-p.tst:70: describing reserved word ! (-v)	11	762.25	1409.48	764.82	0.5408
+ubuntu-24.04	e4a68b8	io	command-p.tst:76: describing reserved word { (-v)	11	761.2	1401.38	770.44	0.54318
+ubuntu-24.04	e4a68b8	io	command-p.tst:82: describing reserved word } (-v)	11	750.31	1365.67	761.08	0.54941
+ubuntu-24.04	e4a68b8	io	command-p.tst:88: describing reserved word case (-v)	11	781.4	1411.05	770.65	0.55377
+ubuntu-24.04	e4a68b8	io	command-p.tst:94: describing reserved word do (-v)	11	772.72	1400.47	774.46	0.55176
+ubuntu-24.04	e4a68b8	io	command-p.tst:100: describing reserved word done (-v)	11	755.42	1406.5	764.18	0.53709
+ubuntu-24.04	e4a68b8	io	command-p.tst:106: describing reserved word elif (-v)	11	770.59	1401.67	759.72	0.54976
+ubuntu-24.04	e4a68b8	io	command-p.tst:112: describing reserved word else (-v)	11	770.99	1369.8	766.15	0.56285
+ubuntu-24.04	e4a68b8	io	command-p.tst:118: describing reserved word esac (-v)	11	765.9	1386.34	764.82	0.55246
+ubuntu-24.04	e4a68b8	io	command-p.tst:124: describing reserved word fi (-v)	11	765.18	1423.6	772.04	0.5375
+ubuntu-24.04	e4a68b8	io	command-p.tst:130: describing reserved word for (-v)	11	769.32	1349.17	770.67	0.57022
+ubuntu-24.04	e4a68b8	io	command-p.tst:136: describing reserved word if (-v)	11	783.92	1382.08	781.77	0.56721
+ubuntu-24.04	e4a68b8	io	command-p.tst:142: describing reserved word in (-v)	11	767.32	1408.34	792.75	0.54484
+ubuntu-24.04	e4a68b8	io	command-p.tst:148: describing reserved word then (-v)	11	754.86	1376.79	756.02	0.54827
+ubuntu-24.04	e4a68b8	io	command-p.tst:154: describing reserved word until (-v)	11	793.83	1379.9	787.84	0.57528
+ubuntu-24.04	e4a68b8	io	command-p.tst:160: describing reserved word while (-v)	11	792.41	1380.38	783.77	0.57405
+ubuntu-24.04	e4a68b8	io	command-p.tst:166: describing reserved word (-V)	11	769.13	1418.94	771.84	0.54205
+ubuntu-24.04	e4a68b8	io	command-p.tst:170: describing special built-in (-v)	11	798.36	1366.93	779.99	0.58406
+ubuntu-24.04	e4a68b8	io	command-p.tst:176: describing special built-in (-V)	11	768.5	1410.01	769.2	0.54503
+ubuntu-24.04	e4a68b8	io	command-p.tst:180: exit status of describing non-special built-in (-v)	11	800.87	1409.53	780.23	0.56818
+ubuntu-24.04	e4a68b8	io	command-p.tst:184: exit status of describing non-special built-in (-V)	11	789.03	1380.12	765.5	0.57171
+ubuntu-24.04	e4a68b8	io	command-p.tst:192: output of describing non-special built-in (-V)	11	1909.2	2914.68	1933.06	0.65503
+ubuntu-24.04	e4a68b8	io	command-p.tst:196: exit status of describing external command (-v, no slash)	11	803.74	1422.44	799.67	0.56504
+ubuntu-24.04	e4a68b8	io	command-p.tst:200: exit status of describing external command (-V, no slash)	11	780.21	1426.65	807.37	0.54688
+ubuntu-24.04	e4a68b8	io	command-p.tst:204: output of describing external command (-v, no slash)	11	1677.65	2567.23	1689.58	0.65349
+ubuntu-24.04	e4a68b8	io	command-p.tst:208: output of describing external command (-V, no slash)	11	1924.69	2929.96	1939.36	0.6569
+ubuntu-24.04	e4a68b8	io	command-p.tst:215: exit status of describing external command (-v, with slash)	11	801.56	1412.15	793.07	0.56761
+ubuntu-24.04	e4a68b8	io	command-p.tst:219: exit status of describing external command (-V, with slash)	11	790.11	1383.87	781.42	0.57094
+ubuntu-24.04	e4a68b8	io	command-p.tst:227: output of describing external command (-V, with slash)	11	1958.64	2937.93	1949.53	0.66667
+ubuntu-24.04	e4a68b8	io	command-p.tst:231: describing function (-v)	11	806.35	1419.67	820.96	0.56799
+ubuntu-24.04	e4a68b8	io	command-p.tst:238: describing function (-V)	11	812.53	1431.31	832.96	0.56769
+ubuntu-24.04	e4a68b8	io	command-p.tst:243: describing alias (-v)	11	1036.47	1873.2	1056.19	0.55332
+ubuntu-24.04	e4a68b8	io	command-p.tst:253: describing alias (-V)	11	1017.06	1845.56	1018.99	0.55108
+ubuntu-24.04	e4a68b8	io	command-p.tst:265: describing non-existent command (-v)	11	790.2	1443.85	812.34	0.54729
+ubuntu-24.04	e4a68b8	io	command-p.tst:270: describing non-existent command (-V)	11	799.47	1427.17	836.18	0.56018
+ubuntu-24.04	e4a68b8	io	command-p.tst:275: describing external command with standard path (-v)	11	807.84	1430.44	799.65	0.56475
+ubuntu-24.04	e4a68b8	io	command-p.tst:280: describing external command with standard path (-V)	11	790.79	1424.14	815.99	0.55528
+ubuntu-24.04	e4a68b8	io	command-p.tst:287: executing non-existent command	11	894.45	1757.48	905.09	0.50894
+ubuntu-24.04	e4a68b8	io	quote-p.tst:7: backslash (not preceding newline)	11	897.93	1568.88	894.0	0.57234
+ubuntu-24.04	e4a68b8	io	quote-p.tst:19: line continuation in normal word	11	814.3	1450.42	835.42	0.56142
+ubuntu-24.04	e4a68b8	io	quote-p.tst:30: line continuation in reserved word !	11	771.48	1394.69	780.66	0.55316
+ubuntu-24.04	e4a68b8	io	quote-p.tst:36: line continuation in reserved words { }	11	800.18	1393.91		0.57406
+ubuntu-24.04	e4a68b8	io	quote-p.tst:53: line continuation in reserved words case in esac and operator ;;	11	810.34	1436.68		0.56404
+ubuntu-24.04	e4a68b8	io	quote-p.tst:74: line continuation in reserved words for in do done	11	834.55	1415.88	843.14	0.58942
+ubuntu-24.04	e4a68b8	io	quote-p.tst:103: line continuation in reserved words if then elif else fi	11	851.84	1414.21	838.13	0.60234
+ubuntu-24.04	e4a68b8	io	quote-p.tst:143: line continuation in reserved words while do done	11	829.43	1420.2	823.74	0.58402
+ubuntu-24.04	e4a68b8	io	quote-p.tst:169: line continuation in reserved words until do done	11	835.83	1420.89	852.14	0.58824
+ubuntu-24.04	e4a68b8	io	quote-p.tst:195: line continuation in operators && ||	11	810.71	1416.61		0.57229
+ubuntu-24.04	e4a68b8	io	quote-p.tst:209: line continuation in function definition	11	1012.64	1795.91	1020.07	0.56386
+ubuntu-24.04	e4a68b8	io	quote-p.tst:225: line continuation in operators <> >> <& >&	11	1590.74	2299.73		0.69171
+ubuntu-24.04	e4a68b8	io	quote-p.tst:251: line continuation in operator >|	11	1527.97	2308.98		0.66175
+ubuntu-24.04	e4a68b8	io	quote-p.tst:263: line continuation in here-document operators	11	1988.66	2971.88		0.66916
+ubuntu-24.04	e4a68b8	io	quote-p.tst:290: line continuation in assignment	11	830.59	1432.45		0.57984
+ubuntu-24.04	e4a68b8	io	quote-p.tst:301: line continuation in parameter expansion	11	883.92	1435.05		0.61595
+ubuntu-24.04	e4a68b8	io	quote-p.tst:342: line continuation in arithmetic expansion	11	837.06	1441.79		0.58057
+ubuntu-24.04	e4a68b8	io	quote-p.tst:364: line continuation in command substitution $(...)	11	815.63	1816.45		0.44902
+ubuntu-24.04	e4a68b8	io	quote-p.tst:377: line continuation in command substitution `...`	11	837.27	1828.21	824.41	0.45797
+ubuntu-24.04	e4a68b8	io	quote-p.tst:388: single quotes	11	857.98	1499.01	848.98	0.57236
+ubuntu-24.04	e4a68b8	io	quote-p.tst:402: dollar-single-quotes	11	875.27	1476.26	889.61	0.5929
+ubuntu-24.04	e4a68b8	io	quote-p.tst:415: double quotes	11	857.26	1472.82	843.11	0.58205
+ubuntu-24.04	e4a68b8	io	quote-p.tst:429: expansions in double quotes	11	857.7	2245.88	887.09	0.3819
+ubuntu-24.04	e4a68b8	io	quote-p.tst:436: double quotes in command substitution in double quotes	11	1082.64	1916.39	1091.78	0.56493
+ubuntu-24.04	e4a68b8	io	quote-p.tst:453: backslashes in double quotes	11	882.27	1541.96	910.5	0.57217
+ubuntu-24.04	e4a68b8	io	quote-p.tst:477: backslashes in substitution of expansion ${a+b}	11	918.1	1560.27	886.77	0.58843
+ubuntu-24.04	e4a68b8	io	quote-p.tst:490: backslashes in substitution of expansion ${a+b} in double quotes	11	904.72	1502.26	884.92	0.60224
+ubuntu-24.04	e4a68b8	io	quote-p.tst:503: backslashes in substitution of expansion ${a-b}	11	885.89	1515.94	899.16	0.58439
+ubuntu-24.04	e4a68b8	io	quote-p.tst:515: backslashes in substitution of expansion ${a-b} in double quotes	11	895.31	1538.58	881.92	0.58191
+ubuntu-24.04	e4a68b8	io	quote-p.tst:529: quotes in substitution of expansion ${a=b}	11	1215.71	1917.86	1225.6	0.63389
+ubuntu-24.04	e4a68b8	io	quote-p.tst:551: quotes in substitution of expansion ${a=b} in double quotes	11	997.53	1704.7	970.8	0.58516
+ubuntu-24.04	e4a68b8	io	quote-p.tst:584: single and double quotes in substitution of expansion ${a+b}	11	873.36	1540.51	882.25	0.56693
+ubuntu-24.04	e4a68b8	io	quote-p.tst:593: single quotes in substitution of expansion ${a+b} in double quotes	11	875.98	1524.17		0.57473
+ubuntu-24.04	e4a68b8	io	quote-p.tst:606: tilde in substitution of expansion ${a+b}	11	887.02	1470.97		0.60301
+ubuntu-24.04	e4a68b8	io	quote-p.tst:613: single and double quotes in substitution of expansion ${a-b}	11	892.12	1559.26	882.77	0.57215
+ubuntu-24.04	e4a68b8	io	quote-p.tst:621: single quotes in substitution of expansion ${a-b} in double quotes	11	892.84	1515.95		0.58896
+ubuntu-24.04	e4a68b8	io	quote-p.tst:633: tilde in substitution of expansion ${a-b}	11	876.6	1494.51		0.58655
+ubuntu-24.04	e4a68b8	io	quote-p.tst:640: single and double quotes in substitution of expansion ${a=b}	11	1175.72	1797.59	1161.83	0.65406
+ubuntu-24.04	e4a68b8	io	quote-p.tst:652: single quotes in substitution of expansion ${a=b} in double quotes	11	894.24	1527.63		0.58538
+ubuntu-24.04	e4a68b8	io	quote-p.tst:667: tilde in substitution of expansion ${a=b}	11	868.03	1487.76		0.58345
+ubuntu-24.04	e4a68b8	io	quote-p.tst:681: quotes in pattern of expansions	11	909.58	1563.24	892.75	0.58185
+ubuntu-24.04	e4a68b8	io	quote-p.tst:697: backslashes resulting from expansions (not a pattern)	11	890.22	1502.81	909.12	0.59237
+ubuntu-24.04	e4a68b8	io	quote-p.tst:711: backslashes resulting from expansions (a pattern)	11	884.07	1496.0	887.52	0.59096
+ubuntu-24.04	e4a68b8	io	quote-p.tst:724: quoted words are not reserved words	11	2933.65	3956.34	2946.03	0.7415
+ubuntu-24.04	e4a68b8	io	read-p.tst:6: single operand - without IFS	11	879.47	1521.0	893.18	0.57822
+ubuntu-24.04	e4a68b8	io	read-p.tst:15: single operand - with IFS whitespace	11	834.17	1484.96	854.89	0.56174
+ubuntu-24.04	e4a68b8	io	read-p.tst:24: single operand - with IFS non-whitespace	11	821.4	1448.66	835.73	0.56701
+ubuntu-24.04	e4a68b8	io	read-p.tst:33: EOF fails read	11	822.41	1467.42	831.71	0.56045
+ubuntu-24.04	e4a68b8	io	read-p.tst:40: read does not read more than needed	11	1402.3	2196.48	1449.74	0.63843
+ubuntu-24.04	e4a68b8	io	read-p.tst:55: variables are assigned even if EOF is reached without newline	11	1107.94	1983.87	1094.26	0.55848
+ubuntu-24.04	e4a68b8	io	read-p.tst:64: orphan backslash is ignored	11	1047.5	1983.03	1025.05	0.52823
+ubuntu-24.04	e4a68b8	io	read-p.tst:73: set -o allexport	11	1576.23	2366.62	1562.7	0.66603
+ubuntu-24.04	e4a68b8	io	read-p.tst:85: line continuation - followed by normal line	11	855.18	1469.36	838.97	0.58201
+ubuntu-24.04	e4a68b8	io	read-p.tst:96: line continuation - followed by EOF	11	859.74	1486.27	868.39	0.57846
+ubuntu-24.04	e4a68b8	io	read-p.tst:105: field splitting - 1	11	859.31	1472.76	845.31	0.58347
+ubuntu-24.04	e4a68b8	io	read-p.tst:114: field splitting - 2-1	11	849.94	1493.31	857.89	0.56917
+ubuntu-24.04	e4a68b8	io	read-p.tst:124: field splitting - 2-2	11	873.62	1492.2	862.97	0.58546
+ubuntu-24.04	e4a68b8	io	read-p.tst:134: field splitting - 2-3	11	868.08	1484.7	843.72	0.58468
+ubuntu-24.04	e4a68b8	io	read-p.tst:144: field splitting - 2-4	11	882.99	1490.97	861.97	0.59222
+ubuntu-24.04	e4a68b8	io	read-p.tst:154: field splitting - 3-1	11	856.75	1508.66	871.66	0.56789
+ubuntu-24.04	e4a68b8	io	read-p.tst:164: field splitting - 3-2	11	866.05	1483.11	849.33	0.58394
+ubuntu-24.04	e4a68b8	io	read-p.tst:174: field splitting - 3-3	11	856.75	1522.81	861.06	0.56261
+ubuntu-24.04	e4a68b8	io	read-p.tst:184: field splitting - 3-4	11	886.19	1478.41	866.86	0.59942
+ubuntu-24.04	e4a68b8	io	read-p.tst:194: backslash prevents field splitting - backslash not in IFS	11	878.41	1497.85	849.63	0.58645
+ubuntu-24.04	e4a68b8	io	read-p.tst:203: backslash prevents field splitting - backslash in IFS	11	866.18	1493.06	866.99	0.58014
+ubuntu-24.04	e4a68b8	io	read-p.tst:212: line continuation and newline as IFS	11	860.53	1511.71	868.95	0.56924
+ubuntu-24.04	e4a68b8	io	read-p.tst:224: variables are assigned empty string for missing fields	11	868.22	1469.87	878.07	0.59068
+ubuntu-24.04	e4a68b8	io	read-p.tst:233: exact number of fields with non-whitespace IFS	11	871.42	1529.05	873.03	0.56991
+ubuntu-24.04	e4a68b8	io	read-p.tst:242: too many fields are joined with trailing whitespaces removed	11	891.96	1494.3	885.8	0.59691
+ubuntu-24.04	e4a68b8	io	read-p.tst:252: too many fields are joined, ending with non-whitespace delimiter	11	882.77	1527.95	894.9	0.57775
+ubuntu-24.04	e4a68b8	io	read-p.tst:262: no field splitting with empty IFS	11	873.68	1485.4	881.17	0.58818
+ubuntu-24.04	e4a68b8	io	read-p.tst:271: non-default delimiters	11	888.58	1527.82	888.26	0.5816
+ubuntu-24.04	e4a68b8	io	read-p.tst:283: raw mode - backslash not in IFS	11	884.81	1548.55	895.47	0.57138
+ubuntu-24.04	e4a68b8	io	read-p.tst:293: raw mode - backslash in IFS	11	889.54	1519.51	898.02	0.58541
+ubuntu-24.04	e4a68b8	io	read-p.tst:304: in subshell	11	1275.61	2282.25	1242.93	0.55893
+ubuntu-24.04	e4a68b8	io	read-p.tst:311: failure by readonly variable	11	1090.31	1993.11	1061.81	0.54704
+ubuntu-24.04	e4a68b8	io	redir-p.tst:13: quoted file descriptor	11	1415.18	2243.46	1414.19	0.63081
+ubuntu-24.04	e4a68b8	io	redir-p.tst:22: file descriptor must immediately precede operator	11	1970.46	2952.44	2000.32	0.6674
+ubuntu-24.04	e4a68b8	io	redir-p.tst:36: file descriptors up to 9 are supported	11	1406.88	2177.54	1418.86	0.64609
+ubuntu-24.04	e4a68b8	io	redir-p.tst:42: multi-digit file descriptor	11	1354.16	2278.61	1370.69	0.59429
+ubuntu-24.04	e4a68b8	io	redir-p.tst:47: tilde expansion in redirection operand	11	1462.47	2190.12	1437.99	0.66776
+ubuntu-24.04	e4a68b8	io	redir-p.tst:54: parameter expansion in redirection operand	11	1436.92	2198.18	1428.26	0.65368
+ubuntu-24.04	e4a68b8	io	redir-p.tst:61: command substitution in redirection operand	11	1405.29	2945.28	1400.59	0.47713
+ubuntu-24.04	e4a68b8	io	redir-p.tst:67: arithmetic expansion in redirection operand	11	1414.27	2172.51	1389.35	0.65098
+ubuntu-24.04	e4a68b8	io	redir-p.tst:73: quote removal in redirection operand	11	1417.58	2184.42	1394.8	0.64895
+ubuntu-24.04	e4a68b8	io	redir-p.tst:79: pathname expansion in redirection operand (non-interactive)	11	1419.55	2141.54	1434.77	0.66286
+ubuntu-24.04	e4a68b8	io	redir-p.tst:85: redirections apply in order of appearance	11	769.55	1429.22	784.21	0.53844
+ubuntu-24.04	e4a68b8	io	redir-p.tst:100: input redirection, success	11	2050.53	2943.12	2036.99	0.69672
+ubuntu-24.04	e4a68b8	io	redir-p.tst:108: input redirection, failure	11	756.46	1735.61	761.52	0.43585
+ubuntu-24.04	e4a68b8	io	redir-p.tst:112: overwrite redirection, +C, success	11	1463.28	2274.11	1465.52	0.64345
+ubuntu-24.04	e4a68b8	io	redir-p.tst:123: overwrite redirection, -C, success	11	1400.53	2242.53	1409.7	0.62453
+ubuntu-24.04	e4a68b8	io	redir-p.tst:133: overwrite redirection, -C, existing file error	11	857.57	1444.52	827.29	0.59367
+ubuntu-24.04	e4a68b8	io	redir-p.tst:138: overwrite redirection, -C, existing file not modified	11	1390.09	2266.08	1419.05	0.61343
+ubuntu-24.04	e4a68b8	io	redir-p.tst:148: overwrite redirection, creation failure	11	742.31	1378.49	744.72	0.53849
+ubuntu-24.04	e4a68b8	io	redir-p.tst:152: clobbering redirection, +C, success	11	1484.9	2279.47	1491.88	0.65143
+ubuntu-24.04	e4a68b8	io	redir-p.tst:163: clobbering redirection, -C, success	11	2025.49	2981.49	2021.58	0.67936
+ubuntu-24.04	e4a68b8	io	redir-p.tst:181: clobbering redirection, creation failure	11	777.55	1400.93	804.85	0.55502
+ubuntu-24.04	e4a68b8	io	redir-p.tst:185: appending redirection, success, new file	11	1407.9	2247.2	1381.62	0.62651
+ubuntu-24.04	e4a68b8	io	redir-p.tst:194: appending redirection, success, existing file	11	1420.02	2233.94	1415.78	0.63565
+ubuntu-24.04	e4a68b8	io	redir-p.tst:207: effect of appending redirection	11	1425.77	2238.2	1472.43	0.63701
+ubuntu-24.04	e4a68b8	io	redir-p.tst:222: in-out redirection, success	11	1500.71	2263.25	1508.19	0.66308
+ubuntu-24.04	e4a68b8	io	redir-p.tst:231: in-out redirection, failure	11	787.81	1792.94	806.19	0.43939
+ubuntu-24.04	e4a68b8	io	redir-p.tst:235: input duplication, success	11	2104.84	3006.79	2084.57	0.70003
+ubuntu-24.04	e4a68b8	io	redir-p.tst:246: input duplication, failure (closed file descriptor)	11	804.42	1427.41	800.5	0.56355
+ubuntu-24.04	e4a68b8	io	redir-p.tst:252: input duplication, failure (unreadable file descriptor)	11	1433.05	2214.1	1452.67	0.64724
+ubuntu-24.04	e4a68b8	io	redir-p.tst:256: input closing, success, open file descriptor	11	759.35	1942.24	769.25	0.39096
+ubuntu-24.04	e4a68b8	io	redir-p.tst:260: input closing, success, closed file descriptor	11	761.88	1667.58	762.42	0.45688
+ubuntu-24.04	e4a68b8	io	redir-p.tst:264: effect of input closing	11	1461.03	2133.05	1428.77	0.68495
+ubuntu-24.04	e4a68b8	io	redir-p.tst:268: output duplication, success	11	1462.68	2254.8	1436.54	0.6487
+ubuntu-24.04	e4a68b8	io	redir-p.tst:284: output duplication, failure (closed file descriptor)	11	784.27	1414.63	784.24	0.5544
+ubuntu-24.04	e4a68b8	io	redir-p.tst:294: output closing, success, open file descriptor	11	762.6	1384.81	761.21	0.55069
+ubuntu-24.04	e4a68b8	io	redir-p.tst:298: output closing, success, closed file descriptor	11	764.84	1369.34	798.74	0.55854
+ubuntu-24.04	e4a68b8	io	redir-p.tst:302: effect of output closing	11	782.92	1414.1	781.04	0.55365
+ubuntu-24.04	e4a68b8	io	redir-p.tst:306: effect of here-document	11	1368.79	2179.4	1378.31	0.62806
+ubuntu-24.04	e4a68b8	io	redir-p.tst:318: here-document with non-default file descriptor	11	1451.21	2175.69	1460.43	0.66701
+ubuntu-24.04	e4a68b8	io	redir-p.tst:326: no tilde expansion with unquoted here-document delimiter	11	1394.47	2186.59	1388.71	0.63773
+ubuntu-24.04	e4a68b8	io	redir-p.tst:335: parameter expansion with unquoted here-document delimiter	11	1422.1	2206.65	1391.76	0.64446
+ubuntu-24.04	e4a68b8	io	redir-p.tst:344: command substitution with unquoted here-document delimiter	11	1422.54	2966.9	1382.95	0.47947
+ubuntu-24.04	e4a68b8	io	redir-p.tst:352: arithmetic expansion with unquoted here-document delimiter	11	1364.05	2242.43	1400.71	0.60829
+ubuntu-24.04	e4a68b8	io	redir-p.tst:360: backslash with unquoted here-document delimiter	11	1391.41	2231.01	1386.57	0.62367
+ubuntu-24.04	e4a68b8	io	redir-p.tst:370: single and double quotes with unquoted here-document delimiter	11	1371.31	2180.45	1378.16	0.62891
+ubuntu-24.04	e4a68b8	io	redir-p.tst:378: no tilde expansion with quoted here-document delimiter	11	1387.2	2167.88	1387.44	0.63989
+ubuntu-24.04	e4a68b8	io	redir-p.tst:387: no parameter expansion with quoted here-document delimiter	11	1374.58	2189.74	1369.59	0.62774
+ubuntu-24.04	e4a68b8	io	redir-p.tst:396: no command substitution with quoted here-document delimiter	11	1373.49	2218.89	1429.38	0.619
+ubuntu-24.04	e4a68b8	io	redir-p.tst:404: no arithmetic expansion with quoted here-document delimiter	11	1383.06	2191.87	1368.56	0.63099
+ubuntu-24.04	e4a68b8	io	redir-p.tst:412: no quote removal with quoted here-document delimiter	11	1399.13	2188.61	1370.64	0.63928
+ubuntu-24.04	e4a68b8	io	redir-p.tst:428: expansion error in here-document	11	803.32	1447.36	809.62	0.55502
+ubuntu-24.04	e4a68b8	io	redir-p.tst:434: various quotation of here-document delimiter	11	2511.56	3717.44	2508.07	0.67561
+ubuntu-24.04	e4a68b8	io	redir-p.tst:450: tab removal with <<-	11	1359.46	2199.13	1386.25	0.61818
+ubuntu-24.04	e4a68b8	io	redir-p.tst:460: here-document delimiter containing tab	11	1362.92	2176.98	1370.4	0.62606
+ubuntu-24.04	e4a68b8	io	redir-p.tst:468: here-document delimiter starting with -	11	1386.26	2215.95	1402.32	0.62559
+ubuntu-24.04	e4a68b8	io	redir-p.tst:478: multiple here-documents on single command	11	3075.97	4392.57	3095.15	0.70027
+ubuntu-24.04	e4a68b8	io	redir-p.tst:501: multiple commands each with here-document	11	1942.86	3025.59	1956.04	0.64214
+ubuntu-24.04	e4a68b8	io	redir-p.tst:513: redirection is temporary	11	2033.06	2954.59	2033.59	0.6881
+ubuntu-24.04	e4a68b8	io	redir-p.tst:543: long here-document	11	47192.06	86347.75	46948.58	0.54653
+ubuntu-24.04	e4a68b8	io	umask-p.tst:17: restoring umask using previous output, non-symbolic, 000	11	1182.06	2207.69	1176.5	0.53543
+ubuntu-24.04	e4a68b8	io	umask-p.tst:18: restoring umask using previous output, non-symbolic, 001	11	1151.89	2161.82	1158.94	0.53283
+ubuntu-24.04	e4a68b8	io	umask-p.tst:19: restoring umask using previous output, non-symbolic, 002	11	1160.53	2158.2	1146.87	0.53773
+ubuntu-24.04	e4a68b8	io	umask-p.tst:20: restoring umask using previous output, non-symbolic, 004	11	1115.91	2129.04	1124.07	0.52414
+ubuntu-24.04	e4a68b8	io	umask-p.tst:21: restoring umask using previous output, non-symbolic, 010	11	1134.36	2130.26	1148.92	0.5325
+ubuntu-24.04	e4a68b8	io	umask-p.tst:22: restoring umask using previous output, non-symbolic, 020	11	1121.83	2162.36	1120.41	0.5188
+ubuntu-24.04	e4a68b8	io	umask-p.tst:23: restoring umask using previous output, non-symbolic, 040	11	1112.41	2184.64	1124.96	0.5092
+ubuntu-24.04	e4a68b8	io	umask-p.tst:24: restoring umask using previous output, non-symbolic, 100	11	1139.52	2141.87	1112.1	0.53202
+ubuntu-24.04	e4a68b8	io	umask-p.tst:25: restoring umask using previous output, non-symbolic, 200	11	1136.42	2144.03	1125.6	0.53004
+ubuntu-24.04	e4a68b8	io	umask-p.tst:26: restoring umask using previous output, non-symbolic, 400	11	1127.61	2145.33	1128.91	0.52561
+ubuntu-24.04	e4a68b8	io	umask-p.tst:27: restoring umask using previous output, non-symbolic, 653	11	1147.57	2146.87	1125.85	0.53453
+ubuntu-24.04	e4a68b8	io	umask-p.tst:28: restoring umask using previous output, non-symbolic, 017	11	1133.54	2130.82	1139.35	0.53198
+ubuntu-24.04	e4a68b8	io	umask-p.tst:42: restoring umask using previous output, symbolic, 000	11	1157.25	2155.07	1124.85	0.53699
+ubuntu-24.04	e4a68b8	io	umask-p.tst:43: restoring umask using previous output, symbolic, 001	11	1158.68	2174.05	1132.61	0.53296
+ubuntu-24.04	e4a68b8	io	umask-p.tst:44: restoring umask using previous output, symbolic, 002	11	1134.58	2162.87	1140.45	0.52457
+ubuntu-24.04	e4a68b8	io	umask-p.tst:45: restoring umask using previous output, symbolic, 004	11	1134.43	2174.24	1119.05	0.52176
+ubuntu-24.04	e4a68b8	io	umask-p.tst:46: restoring umask using previous output, symbolic, 010	11	1126.88	2153.69	1154.47	0.52323
+ubuntu-24.04	e4a68b8	io	umask-p.tst:47: restoring umask using previous output, symbolic, 020	11	1172.1	2194.14	1140.8	0.53419
+ubuntu-24.04	e4a68b8	io	umask-p.tst:48: restoring umask using previous output, symbolic, 040	11	1131.13	2190.86	1142.62	0.5163
+ubuntu-24.04	e4a68b8	io	umask-p.tst:49: restoring umask using previous output, symbolic, 100	11	1131.23	2188.76	1137.5	0.51684
+ubuntu-24.04	e4a68b8	io	umask-p.tst:50: restoring umask using previous output, symbolic, 200	11	1145.52	2158.83	1144.07	0.53062
+ubuntu-24.04	e4a68b8	io	umask-p.tst:51: restoring umask using previous output, symbolic, 400	11	1154.91	2171.31	1142.51	0.5319
+ubuntu-24.04	e4a68b8	io	umask-p.tst:52: restoring umask using previous output, symbolic, 653	11	1149.06	2180.95	1139.82	0.52686
+ubuntu-24.04	e4a68b8	io	umask-p.tst:53: restoring umask using previous output, symbolic, 017	11	1138.95	2161.21	1150.02	0.527
+ubuntu-24.04	e4a68b8	io	umask-p.tst:69: symbolic operand u+	11	2557.33	3506.27	2596.7	0.72936
+ubuntu-24.04	e4a68b8	io	umask-p.tst:70: symbolic operand u+r	11	2474.18	3517.9	2517.26	0.70331
+ubuntu-24.04	e4a68b8	io	umask-p.tst:71: symbolic operand u+w	11	2454.23	3452.16	2504.69	0.71093
+ubuntu-24.04	e4a68b8	io	umask-p.tst:72: symbolic operand u+x	11	2470.22	3486.63	2481.72	0.70848
+ubuntu-24.04	e4a68b8	io	umask-p.tst:73: symbolic operand u+rw	11	2472.52	3500.24	2481.64	0.70639
+ubuntu-24.04	e4a68b8	io	umask-p.tst:74: symbolic operand u+xr	11	2454.43	3487.34	2486.17	0.70381
+ubuntu-24.04	e4a68b8	io	umask-p.tst:75: symbolic operand u+wx	11	2474.36	3448.63	2477.58	0.71749
+ubuntu-24.04	e4a68b8	io	umask-p.tst:76: symbolic operand u+xwr	11	2489.53	3448.6	2521.12	0.7219
+ubuntu-24.04	e4a68b8	io	umask-p.tst:78: symbolic operand g+	11	2481.34	3471.2	2488.25	0.71484
+ubuntu-24.04	e4a68b8	io	umask-p.tst:79: symbolic operand g+r	11	2468.69	3522.64	2488.69	0.70081
+ubuntu-24.04	e4a68b8	io	umask-p.tst:80: symbolic operand g+w	11	2481.71	3490.36	2457.75	0.71102
+ubuntu-24.04	e4a68b8	io	umask-p.tst:81: symbolic operand g+x	11	2464.45	3451.78	2464.96	0.71396
+ubuntu-24.04	e4a68b8	io	umask-p.tst:82: symbolic operand g+rw	11	2463.45	3498.18	2472.75	0.70421
+ubuntu-24.04	e4a68b8	io	umask-p.tst:83: symbolic operand g+xr	11	2501.12	3446.39	2506.57	0.72572
+ubuntu-24.04	e4a68b8	io	umask-p.tst:84: symbolic operand g+wx	11	2451.96	3458.32	2482.16	0.70901
+ubuntu-24.04	e4a68b8	io	umask-p.tst:85: symbolic operand g+xwr	11	2498.35	3491.3	2485.95	0.71559
+ubuntu-24.04	e4a68b8	io	umask-p.tst:87: symbolic operand o+	11	2478.05	3536.21	2499.81	0.70077
+ubuntu-24.04	e4a68b8	io	umask-p.tst:88: symbolic operand o+r	11	2481.43	3480.37	2480.41	0.71298
+ubuntu-24.04	e4a68b8	io	umask-p.tst:89: symbolic operand o+w	11	2458.35	3486.74	2483.89	0.70506
+ubuntu-24.04	e4a68b8	io	umask-p.tst:90: symbolic operand o+x	11	2493.37	3504.16	2494.16	0.71155
+ubuntu-24.04	e4a68b8	io	umask-p.tst:91: symbolic operand o+rw	11	2504.0	3494.65	2519.48	0.71652
+ubuntu-24.04	e4a68b8	io	umask-p.tst:92: symbolic operand o+xr	11	2454.86	3530.85	2495.13	0.69526
+ubuntu-24.04	e4a68b8	io	umask-p.tst:93: symbolic operand o+wx	11	2455.45	3489.12	2506.66	0.70374
+ubuntu-24.04	e4a68b8	io	umask-p.tst:94: symbolic operand o+xwr	11	2501.09	3501.95	2501.52	0.7142
+ubuntu-24.04	e4a68b8	io	umask-p.tst:96: symbolic operand a+	11	2447.14	3466.85	2506.22	0.70587
+ubuntu-24.04	e4a68b8	io	umask-p.tst:97: symbolic operand a+r	11	2475.44	3494.41	2522.39	0.7084
+ubuntu-24.04	e4a68b8	io	umask-p.tst:98: symbolic operand a+w	11	2495.39	3507.31	2526.01	0.71148
+ubuntu-24.04	e4a68b8	io	umask-p.tst:99: symbolic operand a+x	11	2526.55	3505.0	2508.49	0.72084
+ubuntu-24.04	e4a68b8	io	umask-p.tst:100: symbolic operand a+rw	11	2456.61	3493.83	2488.8	0.70313
+ubuntu-24.04	e4a68b8	io	umask-p.tst:101: symbolic operand a+xr	11	2462.33	3486.92	2508.21	0.70616
+ubuntu-24.04	e4a68b8	io	umask-p.tst:102: symbolic operand a+wx	11	2466.87	3499.95	2494.36	0.70483
+ubuntu-24.04	e4a68b8	io	umask-p.tst:103: symbolic operand a+xwr	11	2473.73	3473.13	2522.03	0.71225
+ubuntu-24.04	e4a68b8	io	umask-p.tst:105: symbolic operand +	11	2502.61	3474.31	2515.28	0.72032
+ubuntu-24.04	e4a68b8	io	umask-p.tst:106: symbolic operand +r	11	2479.23	3459.75	2512.99	0.71659
+ubuntu-24.04	e4a68b8	io	umask-p.tst:107: symbolic operand +w	11	2482.41	3491.64	2493.03	0.71096
+ubuntu-24.04	e4a68b8	io	umask-p.tst:108: symbolic operand +x	11	2490.01	3477.2	2529.48	0.7161
+ubuntu-24.04	e4a68b8	io	umask-p.tst:109: symbolic operand +rw	11	2501.02	3480.66	2487.09	0.71855
+ubuntu-24.04	e4a68b8	io	umask-p.tst:110: symbolic operand +xr	11	2496.95	3474.2	2516.04	0.71871
+ubuntu-24.04	e4a68b8	io	umask-p.tst:111: symbolic operand +wx	11	2498.31	3535.22	2491.59	0.70669
+ubuntu-24.04	e4a68b8	io	umask-p.tst:112: symbolic operand +xwr	11	2508.68	3516.95	2536.19	0.71331
+ubuntu-24.04	e4a68b8	io	umask-p.tst:114: symbolic operand u=	11	2521.37	3513.69	2493.5	0.71758
+ubuntu-24.04	e4a68b8	io	umask-p.tst:115: symbolic operand u=r	11	2497.36	3507.83	2521.52	0.71194
+ubuntu-24.04	e4a68b8	io	umask-p.tst:116: symbolic operand u=w	11	2511.3	3524.0	2489.41	0.71263
+ubuntu-24.04	e4a68b8	io	umask-p.tst:117: symbolic operand u=x	11	2483.11	3499.16	2582.79	0.70963
+ubuntu-24.04	e4a68b8	io	umask-p.tst:118: symbolic operand u=rw	11	2497.3	3522.93	2529.73	0.70887
+ubuntu-24.04	e4a68b8	io	umask-p.tst:119: symbolic operand u=xr	11	2585.03	3558.24	2596.44	0.72649
+ubuntu-24.04	e4a68b8	io	umask-p.tst:120: symbolic operand u=wx	11	2501.97	3487.41	2546.61	0.71743
+ubuntu-24.04	e4a68b8	io	umask-p.tst:121: symbolic operand u=xwr	11	2492.1	3474.25	2514.13	0.71731
+ubuntu-24.04	e4a68b8	io	umask-p.tst:128: symbolic operand u=rwx,u-w	11	2484.05	3514.07	2490.53	0.70689
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:6: defining alias	11	1057.95	1944.02	1090.19	0.54421
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:13: using alias	11	1187.13	2349.56	1919.6	0.50526
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:23: redefining alias - exit status	11	1063.63	2043.26	1063.2	0.52056
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:27: redefining alias - redefinition	11	1376.8	1949.66	1094.87	0.70618
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:34: removing specific alias - exit status	11	1231.25	1914.74	1148.17	0.64304
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:39: removing specific alias - removal	11	1113.18	1883.53	1044.53	0.59101
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:45: removing multiple aliases - exit status	11	1029.08	1989.95	1058.09	0.51714
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:50: removing multiple aliases - removal	11	2701.58	4238.17	1941.61	0.63744
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:59: removing all aliases - exit status	11	1778.9	1915.79	1116.7	0.92855
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:64: removing all aliases - removal	11	1084.23	1944.7	1044.83	0.55753
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:70: printing specific alias	11	2925.67	4677.89	2932.56	0.62542
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:74: reusing printed alias (simple)	11	2123.39	2695.9	2254.69	0.78764
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:83: reusing printed alias (complex quotation)	11	1519.64	2752.27	2292.93	0.55214
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:93: printing all aliases	11	4425.84	5541.97	4574.42	0.7986
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:104: subshell inherits aliases	11	2968.39	4832.1	2815.04	0.61431
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:108: subshell cannot affect main shell	11	2339.23	2569.7	2129.39	0.91031
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:115: printing undefined alias is error	11	1195.74	1986.93	1077.54	0.6018
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:120: removing undefined alias is error	11	1100.53	2396.1	1132.74	0.4593
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:126: using alias after assignment (simple)	11	1836.14	3598.82	3004.36	0.51021
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:133: using alias after assignment (complex)	11	2755.57	3424.27	2095.27	0.80472
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:141: using alias after redirection (simple)	11	1765.38	1971.12	1118.9	0.89562
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:146: using alias after redirection (complex)	11	1172.14	2814.53	1080.92	0.41646
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:151: using alias in pipeline (simple)	11	3337.33	5143.28	3917.14	0.64887
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:158: using alias in pipeline (complex)	11	3376.21	4490.59	2884.6	0.75184
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:166: using aliases in compound commands	11	1093.2	2031.1	1886.81	0.53823
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:173: alias substitution to empty string	11	2147.43	4083.8	2885.98	0.52584
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:185: alias substitution to blank before if	11	1111.44	2860.98	1170.78	0.38848
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:191: alias substitution to blank should not change exit status	11	1155.74	2854.83	1869.58	0.40484
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:197: alias substitution to blank before newline	11	3251.97	5331.59	3000.22	0.60994
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:208: alias substitution to assignment	11	1890.73	3107.21	2512.45	0.6085
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:215: alias substitution to redirection	11	1130.96	1917.15	1577.96	0.58992
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:232: alias substitution to here-document operand	11	2814.47	3037.71		0.92651
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:241: alias substitution to !	11	1175.43	2030.11	1211.38	0.579
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:249: alias substitution to parenthesis	11	2266.7	2767.83	2063.93	0.81894
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:263: alias substitution to if/then/elif/else/fi keywords	11	1195.81	2735.32	1330.44	0.43717
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:281: alias substitution to while/until/do/done keywords	11	4927.96	6322.98	5015.28	0.77937
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:290: alias substitution to for	11	1165.79	1986.58	1176.68	0.58683
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:298: alias substitution to word (for)	11	1034.37	2075.94		0.49826
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:329: alias substitution to do/done (for w/o in)	11	1198.45	2041.32		0.5871
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:351: inapplicable alias substitution of do (for)	11	1145.83	2017.39	1339.62	0.56798
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:359: alias substitution to case/esac keywords	11	4570.65	6021.78		0.75902
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:395: alias substitution to ( (case)	11	1148.27	2704.77		0.42454
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:411: alias substitution to ) (case)	11	1135.19	2060.13		0.55103
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:418: alias substitution to ;;	11	1909.12	2055.87	1242.98	0.92862
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:430: alias substitution to function definition	11	1859.71	2034.4	1166.91	0.91413
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:439: alias substitution to parentheses in function definition	11	1301.58	2232.63		0.58298
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:453: alias substitution to command in function definition	11	1159.87	1953.18		0.59384
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:462: IO_NUMBER cannot be aliased	11	1115.62	1928.11	1136.73	0.57861
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:471: alias starting with blank	11	1174.35	2050.29	1111.67	0.57277
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:480: alias ending with blank	11	1133.67	2038.11	1165.88	0.55624
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:496: alias ending with blank followed by line continuation	11	1764.62	1966.35	1089.55	0.89741
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:504: alias substitution can be part of an operator	11	1159.45	1980.6		0.5854
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:510: aliases cannot substitute reserved words	11	1176.98	1976.99	1200.54	0.59534
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:519: quoted aliases are not substituted	11	1117.93	2185.58	1227.09	0.5115
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:536: line continuation in alias name	11	1819.28	2444.78	1067.46	0.74415
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:557: line continuation between alias names (2)	11	1109.32	2559.74	1185.78	0.43337
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:565: alias substitution to line continuation	11	1855.98	2683.71		0.69157
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:576: characters allowed in alias name	11	1864.45	2017.64	1878.65	0.92408
+ubuntu-24.04	e4a68b8	recheck	alias-p.tst:583: recursive alias	11	1168.43	2851.77	1123.04	0.40972
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:13: sending signal: -s ABRT	11	75680.53	84890.8	69098.52	0.8915
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:14: sending signal: -s ALRM	11	1031.9	1915.39	1063.82	0.53874
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:15: sending signal: -s BUS	11	71795.95	81375.33	81985.13	0.88228
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:16: sending signal: -s FPE	11	74047.16	84918.43	99322.03	0.87198
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:17: sending signal: -s HUP	11	1062.38	1938.88	1124.37	0.54793
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:18: sending signal: -s ILL	11	95889.68	109356.45	78816.78	0.87685
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:19: sending signal: -s INT	11	1181.9	1837.17	1089.16	0.64333
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:20: sending signal: -s KILL	11	1023.73	1911.65	1022.23	0.53552
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:21: sending signal: -s PIPE	11	1017.74	1701.08	1027.13	0.59829
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:23: sending signal: -s SEGV	11	81104.42	91858.37	100455.43	0.88293
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:24: sending signal: -s TERM	11	1103.69	1918.55	1051.02	0.57527
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:25: sending signal: -s USR1	11	1041.75	1876.41	1046.89	0.55518
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:26: sending signal: -s USR2	11	1035.89	1828.69	1033.54	0.56646
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:28: sending signal: -ABRT	11	93324.67	88949.23	84083.23	1.04919
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:29: sending signal: -ALRM	11	1057.05	1901.26	1202.07	0.55597
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:30: sending signal: -BUS	11	94749.93	78724.47	89318.69	1.20356
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:31: sending signal: -FPE	11	74298.57	86450.51	96024.23	0.85943
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:32: sending signal: -HUP	11	1031.66	2100.11	1091.49	0.49124
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:33: sending signal: -ILL	11	81038.9	100644.5	96896.13	0.8052
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:34: sending signal: -INT	11	1093.94	1984.96	1120.73	0.55111
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:35: sending signal: -KILL	11	1127.75	1864.28	1152.76	0.60492
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:36: sending signal: -PIPE	11	1065.2	1932.36	1012.21	0.55125
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:38: sending signal: -SEGV	11	95568.38	89637.8	89206.57	1.06616
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:39: sending signal: -TERM	11	1148.38	1948.52	1095.66	0.58936
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:40: sending signal: -USR1	11	1079.48	1958.07	1080.79	0.5513
+ubuntu-24.04	e4a68b8	recheck	kill2-p.tst:41: sending signal: -USR2	11	1017.05	1559.38	1042.7	0.65222
+ubuntu-24.04	e4a68b8	recheck	path-p.tst:14: expansion with read-and-searchable directory	11	852.97	1494.98	864.95	0.57055
+ubuntu-24.04	e4a68b8	recheck	path-p.tst:22: * does not match slash	11	790.44	1421.31	789.79	0.55614
+ubuntu-24.04	e4a68b8	recheck	path-p.tst:28: ? does not match slash	11	819.65	1394.82	786.63	0.58764
+ubuntu-24.04	e4a68b8	recheck	path-p.tst:34: [...] does not match slash	11	758.0	1427.66	753.19	0.53094
+ubuntu-24.04	e4a68b8	recheck	path-p.tst:42: * does not match initial dot	11	791.59	1359.61	795.08	0.58222
+ubuntu-24.04	e4a68b8	recheck	path-p.tst:48: ? does not match initial dot	11	784.44	1411.93	783.85	0.55558
+ubuntu-24.04	e4a68b8	recheck	path-p.tst:54: [!...] does not match initial dot	11	788.82	1422.19	800.96	0.55465
+ubuntu-24.04	e4a68b8	recheck	path-p.tst:67: literal . and .. are not filtered out	11	810.43	1406.77	811.77	0.57609
+ubuntu-24.04	e4a68b8	recheck	path-p.tst:79: expansion with unreadable directory	11	885.67	1466.91	873.89	0.60376
+ubuntu-24.04	e4a68b8	recheck	path-p.tst:93: expansion with unsearchable directory	11	860.56	1489.95	880.95	0.57758
+ubuntu-24.04	e4a68b8	recheck	path-p.tst:114: pathnames are sorted according to current collating sequence	11	817.83	1413.64	830.51	0.57853
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:7: setting one positional parameter (no --)	11	876.53	1534.48	889.25	0.57122
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:14: setting three positional parameters (no --)	11	838.57	1503.51	832.87	0.55774
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:21: setting empty positional parameters (no --)	11	825.18	1465.1	813.86	0.56322
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:28: setting zero positional parameters	11	802.99	1446.61	830.44	0.55508
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:35: setting three positional parameters (with --)	11	841.47	1445.81	826.79	0.582
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:74: allexport (short) on: $-	11	1599.76	2606.14	1590.39	0.61384
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:75: allexport (short) off: $-	11	1599.36	2603.83	1589.66	0.61423
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:76: allexport (long) on: $-	11	1575.84	2546.25	1539.23	0.61889
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:77: allexport (long) off: $-	11	1610.41	2601.84	1600.38	0.61895
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:79: notify (short) on: $-	11	1562.39	2594.59		0.60217
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:80: notify (short) off: $-	11	1563.58	2588.74		0.60399
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:81: notify (long) on: $-	11	1553.65	2529.12		0.61431
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:82: notify (long) off: $-	11	1581.64	2566.47		0.61627
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:84: noclobber (short) on: $-	11	1580.32	2550.77	1611.63	0.61955
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:85: noclobber (short) off: $-	11	1576.8	2533.71	1573.38	0.62233
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:86: noclobber (long) on: $-	11	1588.65	2564.54	1590.91	0.61947
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:87: noclobber (long) off: $-	11	1593.5	2527.38	1595.86	0.6305
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:89: errexit (short) on: $-	11	1569.9	2563.02	1550.82	0.61252
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:90: errexit (short) off: $-	11	1575.34	2546.44	1555.78	0.61864
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:91: errexit (long) on: $-	11	1583.08	2559.93	1550.81	0.61841
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:92: errexit (long) off: $-	11	1589.72	2561.19	1585.0	0.6207
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:94: noglob (short) on: $-	11	1582.31	2549.7	1570.7	0.62059
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:95: noglob (short) off: $-	11	1550.96	2543.2	1576.88	0.60985
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:96: noglob (long) on: $-	11	1565.62	2547.15	1574.3	0.61466
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:97: noglob (long) off: $-	11	1579.54	2580.81	1584.68	0.61203
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:99: hashondef (short) on: $-	11	1588.66	2567.02	1557.88	0.61887
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:100: hashondef (short) off: $-	11	1576.44	2537.8	1569.34	0.62119
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:107: noexec (short) on: $-	11	805.22	1423.57		0.56563
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:108: noexec (short) off: $-	11	785.83	1394.15	775.58	0.56367
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:113: nounset (short) on: $-	11	1590.89	2559.64	1604.0	0.62153
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:114: nounset (short) off: $-	11	1584.43	2547.12	1570.05	0.62205
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:115: nounset (long) on: $-	11	1584.72	2569.0	1563.51	0.61686
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:116: nounset (long) off: $-	11	1592.46	2545.27	1587.12	0.62566
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:118: verbose (short) on: $-	11	1602.86	2545.47	1549.73	0.62969
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:119: verbose (short) off: $-	11	1595.55	2609.57	1582.07	0.61142
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:120: verbose (long) on: $-	11	1599.71	2542.51	1593.92	0.62918
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:121: verbose (long) off: $-	11	1624.86	2573.32	1595.74	0.63142
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:123: xtrace (short) on: $-	11	1625.76	2616.14	1578.92	0.62143
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:124: xtrace (short) off: $-	11	1611.16	2555.82	1590.9	0.63039
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:125: xtrace (long) on: $-	11	1613.39	2638.37	1596.76	0.61151
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:126: xtrace (long) off: $-	11	1633.94	2648.98	1584.44	0.61682
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:128: setting many shell options at once	11	3001.14	4483.8	3020.37	0.66933
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:134: setting only options does not change positional parameters	11	866.16	1517.79	862.61	0.57068
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:141: setting positional parameters and shell options at once	11	1793.92	2811.92	1820.0	0.63797
+ubuntu-24.04	e4a68b8	recheck	set-p.tst:150: set -o/+o	11	2009.06	3211.12	1974.9	0.62566
+ubuntu-24.04	e4a68b8	recheck	shift-p.tst:7: shift 0 -> 0	11	892.97	1531.17	887.09	0.5832
+ubuntu-24.04	e4a68b8	recheck	shift-p.tst:13: shift 1 -> 1	11	840.66	1468.71	846.48	0.57238
+ubuntu-24.04	e4a68b8	recheck	shift-p.tst:19: shift 1 -> 0	11	834.34	1477.58	817.89	0.56467
+ubuntu-24.04	e4a68b8	recheck	shift-p.tst:25: shift 2 -> 2	11	821.92	1463.13	839.99	0.56175
+ubuntu-24.04	e4a68b8	recheck	shift-p.tst:31: shift 2 -> 1	11	850.1	1470.26	842.42	0.5782
+ubuntu-24.04	e4a68b8	recheck	shift-p.tst:37: shift 2 -> 0	11	873.63	1436.15	837.33	0.60831
+ubuntu-24.04	e4a68b8	recheck	shift-p.tst:43: shift 10 -> 3	11	834.58	1450.47	830.59	0.57539
+ubuntu-24.04	e4a68b8	recheck	shift-p.tst:49: too large operand 1 for 0	11	801.66	1442.12	832.7	0.55589
+ubuntu-24.04	e4a68b8	recheck	shift-p.tst:53: too large operand 2 for 1	11	841.27	1405.36	835.59	0.59861
+ubuntu-24.04	e4a68b8	recheck	shift-p.tst:57: too large operand 3 for 2	11	836.25	1436.8	816.38	0.58202
+ubuntu-24.04	e4a68b8	recheck	shift-p.tst:61: too large operand 100 for 10	11	817.37	1458.77	825.53	0.56032
+ubuntu-24.04	e4a68b8	recheck	shift-p.tst:65: default operand is 1: success	11	866.37	1486.13	867.61	0.58297
+ubuntu-24.04	e4a68b8	recheck	shift-p.tst:75: default operand is 1: failure	11	813.84	1421.94	810.76	0.57234
+ubuntu-24.04	e4a68b8	recheck	shift-p.tst:79: arguments are shifted in function	11	852.89	1464.11	885.48	0.58253
+ubuntu-24.04	e4a68b8	recheck	shift-p.tst:88: separator preceding operand	11	860.3	1446.88	834.89	0.59459
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8000: SIGSTOP stops child process (main, self, -i -m, initially defaulted, keep -> keep)	11	1521.42	3988.01	1549.15	0.3815
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8001: SIGSTOP stops child process (main, other, -i -m, initially defaulted, keep -> clear)	11	1789.09	4918.3	1817.66	0.36376
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8002: SIGSTOP stops child process (main, self, -i -m, initially defaulted, keep -> ignore)	11	1465.15	3845.51	1512.64	0.381
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8003: SIGSTOP stops child process (main, other, -i -m, initially defaulted, keep -> command)	11	1794.01	4922.45	1796.45	0.36446
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8004: SIGSTOP stops child process (main, self, -i -m, initially defaulted, clear -> keep)	11	1486.94	3759.08	1435.81	0.39556
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8005: SIGSTOP stops child process (main, other, -i -m, initially defaulted, clear -> clear)	11	1805.79	4920.12	1798.21	0.36702
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8006: SIGSTOP stops child process (main, self, -i -m, initially defaulted, clear -> ignore)	11	1485.2	3961.66	1493.24	0.37489
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8007: SIGSTOP stops child process (main, other, -i -m, initially defaulted, clear -> command)	11	1789.85	5013.88	1789.83	0.35698
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8008: SIGSTOP stops child process (main, self, -i -m, initially defaulted, ignore -> keep)	11	1449.82	3842.74	1465.86	0.37729
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8009: SIGSTOP stops child process (main, other, -i -m, initially defaulted, ignore -> clear)	11	1785.17	5014.86	1811.45	0.35598
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8010: SIGSTOP stops child process (main, self, -i -m, initially defaulted, ignore -> ignore)	11	1462.82	4012.15	1445.49	0.3646
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8011: SIGSTOP stops child process (main, other, -i -m, initially defaulted, ignore -> command)	11	1804.71	5091.26	1788.57	0.35447
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8012: SIGSTOP stops child process (main, self, -i -m, initially defaulted, command -> keep)	11	1475.05	3923.56	1480.26	0.37595
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8013: SIGSTOP stops child process (main, other, -i -m, initially defaulted, command -> clear)	11	1786.54	5110.67	1799.12	0.34957
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8014: SIGSTOP stops child process (main, self, -i -m, initially defaulted, command -> ignore)	11	1474.95	3949.19	1478.47	0.37348
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8015: SIGSTOP stops child process (main, other, -i -m, initially defaulted, command -> command)	11	1790.54	5147.81	1819.44	0.34783
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8016: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, keep -> keep)	11	1493.46	3920.05	1512.51	0.38098
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8017: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, keep -> clear)	11	1830.46	5012.93	1835.96	0.36515
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8018: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, keep -> ignore)	11	1476.0	3922.86	1503.06	0.37626
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8019: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, keep -> command)	11	1813.21	5103.38	1831.56	0.3553
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8020: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, clear -> keep)	11	1477.12	3874.04	1499.85	0.38129
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8021: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, clear -> clear)	11	1809.85	5050.89	1863.64	0.35832
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8022: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, clear -> ignore)	11	1493.01	3964.26	1493.53	0.37662
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8023: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, clear -> command)	11	1836.93	5173.13	1838.79	0.35509
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8024: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, ignore -> keep)	11	1496.08	4003.55	1502.63	0.37369
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8025: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, ignore -> clear)	11	1823.37	5135.07	1881.32	0.35508
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8026: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, ignore -> ignore)	11	1484.07	3984.72	1515.48	0.37244
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8027: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, ignore -> command)	11	1816.82	5161.86	1848.21	0.35197
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8028: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, command -> keep)	11	1521.56	4022.43	1484.62	0.37827
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8029: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, command -> clear)	11	1813.21	5125.27	1863.39	0.35378
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8030: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, command -> ignore)	11	1481.34	4052.57	1487.76	0.36553
+ubuntu-24.04	e4a68b8	recheck	sigstop7-p.tst:8031: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, command -> command)	11	1843.8	5209.78	1837.7	0.35391
+ubuntu-24.04	e4a68b8	recheck	wait-p.tst:6: waiting for all jobs (+m)	11	1931.48	3167.05	1958.94	0.60987
+ubuntu-24.04	e4a68b8	recheck	wait-p.tst:16: waiting for specific single job (+m)	11	918.16	2041.13	902.82	0.44983
+ubuntu-24.04	e4a68b8	recheck	wait-p.tst:21: waiting for specific many jobs (+m)	11	1111.02	2293.91	1141.21	0.48433
+ubuntu-24.04	e4a68b8	recheck	wait-p.tst:43: jobs are not propagated from subshells (+m)	11	1170.66	2307.51	1178.82	0.50733
+macos-15	7cad956	pipelines	pipeline-p.tst:5: 2-command pipeline	17	4909.0	8810.0	5024.0	0.55721
+macos-15	7cad956	pipelines	pipeline-p.tst:11: 3-command pipeline	17	5188.0	10310.0	5513.0	0.5032
+macos-15	7cad956	pipelines	pipeline-p.tst:17: linebreak after |	17	5059.0	9374.0	5383.0	0.53968
+macos-15	7cad956	pipelines	pipeline-p.tst:26: exit status of pipeline is from last command	17	2954.0	6769.0	3965.0	0.4364
+macos-15	7cad956	pipelines	pipeline-p.tst:30: exit status of negated pipelines	17	3271.0	11060.0	5712.0	0.29575
+macos-15	7cad956	pipelines	pipeline-p.tst:46: stdin for first command & stdout for last are not modified	17	5681.0	8956.0	6303.0	0.63432
+macos-15	7cad956	pipelines	pipeline-p.tst:54: stderr is not modified	17	4605.0	7859.0	4276.0	0.58595
+macos-15	7cad956	pipelines	pipeline-p.tst:61: compound commands in pipeline	17	6795.0	10989.0	6411.0	0.61835
+macos-15	7cad956	pipelines	pipeline-p.tst:78: redirection overrides pipeline	17	8331.0	12594.0	7737.0	0.66151
+macos-15	e4a68b8	io	cd-p.tst:15: default operand is HOME (-L)	11	3522.0	7163.0	3379.0	0.49169
+macos-15	e4a68b8	io	cd-p.tst:25: default operand is HOME (-P)	11	3261.0	6503.0	3118.0	0.50146
+macos-15	e4a68b8	io	cd-p.tst:41: found in first cd path (-L)	11	3427.0	6443.0	3561.0	0.5319
+macos-15	e4a68b8	io	cd-p.tst:53: found in first cd path (-P)	11	3408.0	6685.0	3354.0	0.5098
+macos-15	e4a68b8	io	cd-p.tst:65: found in last cd path (-L)	11	4025.0	7245.0	3147.0	0.55556
+macos-15	e4a68b8	io	cd-p.tst:77: found in last cd path (-P)	11	3377.0	6612.0	3078.0	0.51074
+macos-15	e4a68b8	io	cd-p.tst:89: found in empty cd path (-L)	11	3323.0	7691.0	3209.0	0.43206
+macos-15	e4a68b8	io	cd-p.tst:100: found in empty cd path (-P)	11	3039.0	7050.0	3071.0	0.43106
+macos-15	e4a68b8	io	cd-p.tst:111: found in dot cd path (-L)	11	3355.0	5965.0	3464.0	0.56245
+macos-15	e4a68b8	io	cd-p.tst:135: cd path ending with slash (-L)	11	3181.0	6887.0	3388.0	0.46188
+macos-15	e4a68b8	io	cd-p.tst:146: cd path ending with slash (-P)	11	3125.0	7365.0	3130.0	0.4243
+macos-15	e4a68b8	io	cd-p.tst:157: found not in any cd path, but in PWD (-L)	11	3359.0	7957.0	3444.0	0.42214
+macos-15	e4a68b8	io	cd-p.tst:168: found not in any cd path, but in PWD (-P)	11	3269.0	7386.0	3403.0	0.44259
+macos-15	e4a68b8	io	cd-p.tst:179: cd paths are ignored for absolute path operand (-L)	11	3536.0	7832.0	3230.0	0.45148
+macos-15	e4a68b8	io	cd-p.tst:189: cd paths are ignored for absolute path operand (-P)	11	3708.0	6826.0	3328.0	0.54322
+macos-15	e4a68b8	io	cd-p.tst:199: cd paths are ignored for operand starting with dot (-L)	11	3207.0	7016.0	3551.0	0.4571
+macos-15	e4a68b8	io	cd-p.tst:210: cd paths are ignored for operand starting with dot (-P)	11	3032.0	6664.0	3275.0	0.45498
+macos-15	e4a68b8	io	cd-p.tst:221: cd paths are ignored for operand starting with dot-dot (-L)	11	3540.0	6565.0	3680.0	0.53922
+macos-15	e4a68b8	io	cd-p.tst:234: cd paths are ignored for operand starting with dot-dot (-P)	11	3454.0	6047.0	3506.0	0.57119
+macos-15	e4a68b8	io	cd-p.tst:247: not found in any cd path nor in PWD (-L)	11	3078.0	5668.0	3802.0	0.54305
+macos-15	e4a68b8	io	cd-p.tst:258: not found in any cd path nor in PWD (-P)	11	3170.0	5728.0	3555.0	0.55342
+macos-15	e4a68b8	io	cd-p.tst:271: directory not found (with unset CDPATH, -L)	11	3316.0	7100.0	3045.0	0.46704
+macos-15	e4a68b8	io	cd-p.tst:282: directory not found (with unset CDPATH, -P)	11	3332.0	6585.0	3488.0	0.506
+macos-15	e4a68b8	io	cd-p.tst:293: non-directory file in operand component (-L)	11	3245.0	5912.0	3514.0	0.54888
+macos-15	e4a68b8	io	cd-p.tst:297: non-directory file in operand component (-P)	11	3102.0	6931.0	3411.0	0.44755
+macos-15	e4a68b8	io	cd-p.tst:301: non-existing file in operand component (-L)	11	3110.0	7308.0	3134.0	0.42556
+macos-15	e4a68b8	io	cd-p.tst:305: non-existing file in operand component (-P)	11	3138.0	6614.0	3788.0	0.47445
+macos-15	e4a68b8	io	cd-p.tst:309: target pathname is canonicalized (-L)	11	3180.0	7530.0	3387.0	0.42231
+macos-15	e4a68b8	io	cd-p.tst:320: symbolic links are resolved (in operand, -P)	11	3367.0	5925.0	3449.0	0.56827
+macos-15	e4a68b8	io	cd-p.tst:331: symbolic links are resolved (in old PWD, -P)	11	3283.0	6517.0	3395.0	0.50376
+macos-15	e4a68b8	io	cd-p.tst:343: default option is -L	11	3713.0	7204.0	3149.0	0.51541
+macos-15	e4a68b8	io	cd-p.tst:354: the last option wins (-L)	11	3731.0	6409.0	3539.0	0.58215
+macos-15	e4a68b8	io	cd-p.tst:365: the last option wins (-P)	11	3468.0	6172.0	3081.0	0.56189
+macos-15	e4a68b8	io	cd-p.tst:376: exit status of success with -e	11	3207.0	6007.0	3166.0	0.53388
+macos-15	e4a68b8	io	cd-p.tst:394: changing to unsearchable directory (-L)	11	3134.0	6604.0	3471.0	0.47456
+macos-15	e4a68b8	io	cd-p.tst:398: changing to unsearchable directory (-P)	11	3284.0	6604.0	3221.0	0.49727
+macos-15	e4a68b8	io	cd-p.tst:404: hyphen operand means OLDPWD (-L)	11	3336.0	6085.0	3780.0	0.54823
+macos-15	e4a68b8	io	cd-p.tst:415: hyphen operand means OLDPWD (-P)	11	3108.0	6579.0	3720.0	0.47241
+macos-15	e4a68b8	io	cd-p.tst:426: OLDPWD is set to old PWD (-L)	11	3598.0	6649.0	3614.0	0.54113
+macos-15	e4a68b8	io	cd-p.tst:439: empty operand (-P)	11	3374.0	6475.0	3740.0	0.52108
+macos-15	e4a68b8	io	cd-p.tst:443: readonly PWD (-L)	11	3197.0	6640.0	3501.0	0.48148
+macos-15	e4a68b8	io	cd-p.tst:455: readonly PWD (-P)	11	3511.0	6500.0	3199.0	0.54015
+macos-15	e4a68b8	io	cd-p.tst:467: readonly OLDPWD (-L)	11	3506.0	6674.0	3543.0	0.52532
+macos-15	e4a68b8	io	cd-p.tst:480: readonly OLDPWD (-P)	11	3207.0	6443.0	3242.0	0.49775
+macos-15	e4a68b8	io	cmdsub-p.tst:8: result of command substitution	11	4772.0	9089.0	3866.0	0.52503
+macos-15	e4a68b8	io	cmdsub-p.tst:14: command substitution executes in subshell	11	4195.0	7846.0	4728.0	0.53467
+macos-15	e4a68b8	io	cmdsub-p.tst:22: trailing newlines are removed	11	3049.0	8542.0	3551.0	0.35694
+macos-15	e4a68b8	io	cmdsub-p.tst:33: stdin is not redirected	11	5326.0	10320.0	5502.0	0.51609
+macos-15	e4a68b8	io	cmdsub-p.tst:39: stderr is not redirected	11	4198.0	8298.0	3814.0	0.50591
+macos-15	e4a68b8	io	cmdsub-p.tst:47: field splitting on result of command substitution	11	3312.0	7872.0	3265.0	0.42073
+macos-15	e4a68b8	io	cmdsub-p.tst:53: backslash in backquotes / nested backquotes	11	4778.0	9836.0	5058.0	0.48577
+macos-15	e4a68b8	io	cmdsub-p.tst:63: quotations in backquotes	11	6427.0	12693.0	6741.0	0.50634
+macos-15	e4a68b8	io	cmdsub-p.tst:79: quotations in backquotes in double quotes	11	6657.0	12818.0	6128.0	0.51935
+macos-15	e4a68b8	io	cmdsub-p.tst:105: quotations in command substitution	11	3745.0	8530.0	3884.0	0.43904
+macos-15	e4a68b8	io	cmdsub-p.tst:111: comment in command substitution	11	3379.0	7640.0	3414.0	0.44228
+macos-15	e4a68b8	io	cmdsub-p.tst:119: case command in command substitution	11	4193.0	8045.0	4120.0	0.52119
+macos-15	e4a68b8	io	cmdsub-p.tst:130: here-document in command substitution	11	5202.0	9991.0	5380.0	0.52067
+macos-15	e4a68b8	io	cmdsub-p.tst:139: command substitution between here-document operator and body	11	6742.0	13057.0	7548.0	0.51635
+macos-15	e4a68b8	io	cmdsub-p.tst:151: result of command substitution is not subject to further expansion	11	4566.0	8150.0	4606.0	0.56025
+macos-15	e4a68b8	io	cmdsub-p.tst:160: field splitting on result of command substitution	11	4920.0	8952.0	4626.0	0.5496
+macos-15	e4a68b8	io	cmdsub-p.tst:168: pathname expansion on result of command substitution	11	5053.0	14832.0	4554.0	0.34068
+macos-15	e4a68b8	io	cmdsub-p.tst:176: nested command substitutions	11	4373.0	9618.0	4285.0	0.45467
+macos-15	e4a68b8	io	cmdsub-p.tst:186: ambiguity with arithmetic expansion, missing many )s	11	3327.0	6610.0	3664.0	0.50333
+macos-15	e4a68b8	io	cmdsub-p.tst:198: ambiguity with arithmetic expansion, missing one )	11	3383.0	6801.0	3592.0	0.49743
+macos-15	e4a68b8	io	command-p.tst:5: redirection error on special built-in does not kill shell	11	3368.0	7883.0	3711.0	0.42725
+macos-15	e4a68b8	io	command-p.tst:12: dot script not found does not kill shell	11	3416.0	6525.0	3482.0	0.52352
+macos-15	e4a68b8	io	command-p.tst:19: assignment on special built-in is temporary	11	3471.0	6446.0	3164.0	0.53847
+macos-15	e4a68b8	io	command-p.tst:27: command ignores function (mandatory built-in)	11	3864.0	6906.0	3328.0	0.55951
+macos-15	e4a68b8	io	command-p.tst:32: command ignores function (substitutive built-in)	11	3343.0	6178.0	3354.0	0.54111
+macos-15	e4a68b8	io	command-p.tst:37: command ignores function (external command)	11	7394.0	8952.0	5392.0	0.82596
+macos-15	e4a68b8	io	command-p.tst:42: command exec retains redirection	11	4821.0	8853.0	5462.0	0.54456
+macos-15	e4a68b8	io	command-p.tst:51: effect on environment	11	3126.0	6128.0	3187.0	0.51012
+macos-15	e4a68b8	io	command-p.tst:60: executing with standard path	11	5686.0	9454.0	6820.0	0.60144
+macos-15	e4a68b8	io	command-p.tst:70: describing reserved word ! (-v)	11	3371.0	5985.0	3371.0	0.56324
+macos-15	e4a68b8	io	command-p.tst:76: describing reserved word { (-v)	11	3523.0	6188.0	3270.0	0.56933
+macos-15	e4a68b8	io	command-p.tst:82: describing reserved word } (-v)	11	3334.0	6316.0	3353.0	0.52787
+macos-15	e4a68b8	io	command-p.tst:88: describing reserved word case (-v)	11	3364.0	6398.0	3355.0	0.52579
+macos-15	e4a68b8	io	command-p.tst:94: describing reserved word do (-v)	11	3281.0	5864.0	3289.0	0.55952
+macos-15	e4a68b8	io	command-p.tst:100: describing reserved word done (-v)	11	3340.0	5633.0	3388.0	0.59293
+macos-15	e4a68b8	io	command-p.tst:106: describing reserved word elif (-v)	11	3149.0	6197.0	3071.0	0.50815
+macos-15	e4a68b8	io	command-p.tst:112: describing reserved word else (-v)	11	3701.0	6100.0	3586.0	0.60672
+macos-15	e4a68b8	io	command-p.tst:118: describing reserved word esac (-v)	11	3262.0	5840.0	3430.0	0.55856
+macos-15	e4a68b8	io	command-p.tst:124: describing reserved word fi (-v)	11	3306.0	6127.0	3325.0	0.53958
+macos-15	e4a68b8	io	command-p.tst:130: describing reserved word for (-v)	11	3503.0	6564.0	3215.0	0.53367
+macos-15	e4a68b8	io	command-p.tst:136: describing reserved word if (-v)	11	3567.0	6094.0	4005.0	0.58533
+macos-15	e4a68b8	io	command-p.tst:142: describing reserved word in (-v)	11	3518.0	6104.0	3446.0	0.57634
+macos-15	e4a68b8	io	command-p.tst:148: describing reserved word then (-v)	11	3280.0	5761.0	4144.0	0.56935
+macos-15	e4a68b8	io	command-p.tst:154: describing reserved word until (-v)	11	3368.0	6544.0	4320.0	0.51467
+macos-15	e4a68b8	io	command-p.tst:160: describing reserved word while (-v)	11	3198.0	6565.0	3114.0	0.48713
+macos-15	e4a68b8	io	command-p.tst:166: describing reserved word (-V)	11	3324.0	6919.0	3280.0	0.48042
+macos-15	e4a68b8	io	command-p.tst:170: describing special built-in (-v)	11	3000.0	6634.0	3012.0	0.45222
+macos-15	e4a68b8	io	command-p.tst:176: describing special built-in (-V)	11	3162.0	8209.0	3317.0	0.38519
+macos-15	e4a68b8	io	command-p.tst:180: exit status of describing non-special built-in (-v)	11	3293.0	6897.0	3133.0	0.47745
+macos-15	e4a68b8	io	command-p.tst:184: exit status of describing non-special built-in (-V)	11	3405.0	6670.0	2969.0	0.51049
+macos-15	e4a68b8	io	command-p.tst:192: output of describing non-special built-in (-V)	11	6413.0	10047.0	5977.0	0.6383
+macos-15	e4a68b8	io	command-p.tst:196: exit status of describing external command (-v, no slash)	11	3630.0	6368.0	3093.0	0.57004
+macos-15	e4a68b8	io	command-p.tst:200: exit status of describing external command (-V, no slash)	11	3256.0	6588.0	4280.0	0.49423
+macos-15	e4a68b8	io	command-p.tst:204: output of describing external command (-v, no slash)	11	5712.0	9063.0	5700.0	0.63025
+macos-15	e4a68b8	io	command-p.tst:208: output of describing external command (-V, no slash)	11	6643.0	12449.0	6568.0	0.53362
+macos-15	e4a68b8	io	command-p.tst:215: exit status of describing external command (-v, with slash)	11	3469.0	7923.0	3328.0	0.43784
+macos-15	e4a68b8	io	command-p.tst:219: exit status of describing external command (-V, with slash)	11	4166.0	6623.0	3313.0	0.62902
+macos-15	e4a68b8	io	command-p.tst:227: output of describing external command (-V, with slash)	11	7318.0	10883.0	6383.0	0.67242
+macos-15	e4a68b8	io	command-p.tst:231: describing function (-v)	11	3330.0	5900.0	3029.0	0.56441
+macos-15	e4a68b8	io	command-p.tst:238: describing function (-V)	11	3388.0	6929.0	3602.0	0.48896
+macos-15	e4a68b8	io	command-p.tst:243: describing alias (-v)	11	3640.0	7227.0	3905.0	0.50367
+macos-15	e4a68b8	io	command-p.tst:253: describing alias (-V)	11	3735.0	6607.0	4965.0	0.56531
+macos-15	e4a68b8	io	command-p.tst:265: describing non-existent command (-v)	11	3197.0	5565.0	3439.0	0.57448
+macos-15	e4a68b8	io	command-p.tst:270: describing non-existent command (-V)	11	3904.0	6064.0	3128.0	0.6438
+macos-15	e4a68b8	io	command-p.tst:275: describing external command with standard path (-v)	11	3073.0	6693.0	3223.0	0.45914
+macos-15	e4a68b8	io	command-p.tst:280: describing external command with standard path (-V)	11	3177.0	6553.0	3549.0	0.48482
+macos-15	e4a68b8	io	command-p.tst:287: executing non-existent command	11	3336.0	7336.0	3936.0	0.45474
+macos-15	e4a68b8	io	quote-p.tst:7: backslash (not preceding newline)	11	3010.0	7240.0	3177.0	0.41575
+macos-15	e4a68b8	io	quote-p.tst:19: line continuation in normal word	11	3250.0	5920.0	3161.0	0.54899
+macos-15	e4a68b8	io	quote-p.tst:30: line continuation in reserved word !	11	2978.0	5874.0	3030.0	0.50698
+macos-15	e4a68b8	io	quote-p.tst:36: line continuation in reserved words { }	11	3014.0	5836.0		0.51645
+macos-15	e4a68b8	io	quote-p.tst:53: line continuation in reserved words case in esac and operator ;;	11	3120.0	5659.0		0.55133
+macos-15	e4a68b8	io	quote-p.tst:74: line continuation in reserved words for in do done	11	3315.0	6288.0	3218.0	0.52719
+macos-15	e4a68b8	io	quote-p.tst:103: line continuation in reserved words if then elif else fi	11	3118.0	6122.0	3356.0	0.50931
+macos-15	e4a68b8	io	quote-p.tst:143: line continuation in reserved words while do done	11	3056.0	5932.0	3234.0	0.51517
+macos-15	e4a68b8	io	quote-p.tst:169: line continuation in reserved words until do done	11	3299.0	5782.0	3350.0	0.57056
+macos-15	e4a68b8	io	quote-p.tst:195: line continuation in operators && ||	11	3533.0	6083.0		0.5808
+macos-15	e4a68b8	io	quote-p.tst:209: line continuation in function definition	11	3696.0	6637.0	4014.0	0.55688
+macos-15	e4a68b8	io	quote-p.tst:225: line continuation in operators <> >> <& >&	11	5477.0	9315.0		0.58798
+macos-15	e4a68b8	io	quote-p.tst:251: line continuation in operator >|	11	5419.0	9115.0		0.59451
+macos-15	e4a68b8	io	quote-p.tst:263: line continuation in here-document operators	11	6675.0	10573.0		0.63133
+macos-15	e4a68b8	io	quote-p.tst:290: line continuation in assignment	11	3138.0	5602.0		0.56016
+macos-15	e4a68b8	io	quote-p.tst:301: line continuation in parameter expansion	11	3179.0	6050.0		0.52545
+macos-15	e4a68b8	io	quote-p.tst:342: line continuation in arithmetic expansion	11	3178.0	6175.0		0.51466
+macos-15	e4a68b8	io	quote-p.tst:364: line continuation in command substitution $(...)	11	3138.0	6553.0		0.47886
+macos-15	e4a68b8	io	quote-p.tst:377: line continuation in command substitution `...`	11	3180.0	6894.0	3053.0	0.46127
+macos-15	e4a68b8	io	quote-p.tst:388: single quotes	11	3151.0	5903.0	3080.0	0.5338
+macos-15	e4a68b8	io	quote-p.tst:402: dollar-single-quotes	11	3396.0	6517.0	3078.0	0.5211
+macos-15	e4a68b8	io	quote-p.tst:415: double quotes	11	3408.0	5844.0	3180.0	0.58316
+macos-15	e4a68b8	io	quote-p.tst:429: expansions in double quotes	11	3443.0	6862.0	2986.0	0.50175
+macos-15	e4a68b8	io	quote-p.tst:436: double quotes in command substitution in double quotes	11	3640.0	6794.0	3515.0	0.53577
+macos-15	e4a68b8	io	quote-p.tst:453: backslashes in double quotes	11	3268.0	5765.0	3183.0	0.56687
+macos-15	e4a68b8	io	quote-p.tst:477: backslashes in substitution of expansion ${a+b}	11	3177.0	5601.0	3180.0	0.56722
+macos-15	e4a68b8	io	quote-p.tst:490: backslashes in substitution of expansion ${a+b} in double quotes	11	3171.0	6447.0	3433.0	0.49186
+macos-15	e4a68b8	io	quote-p.tst:503: backslashes in substitution of expansion ${a-b}	11	3008.0	6620.0	3201.0	0.45438
+macos-15	e4a68b8	io	quote-p.tst:515: backslashes in substitution of expansion ${a-b} in double quotes	11	3041.0	6401.0	3465.0	0.47508
+macos-15	e4a68b8	io	quote-p.tst:529: quotes in substitution of expansion ${a=b}	11	3396.0	38868.0	3343.0	0.08737
+macos-15	e4a68b8	io	quote-p.tst:551: quotes in substitution of expansion ${a=b} in double quotes	11	3258.0	5961.0	3398.0	0.54655
+macos-15	e4a68b8	io	quote-p.tst:584: single and double quotes in substitution of expansion ${a+b}	11	3148.0	6662.0	3108.0	0.47253
+macos-15	e4a68b8	io	quote-p.tst:593: single quotes in substitution of expansion ${a+b} in double quotes	11	3221.0	6993.0		0.4606
+macos-15	e4a68b8	io	quote-p.tst:606: tilde in substitution of expansion ${a+b}	11	3169.0	5988.0		0.52923
+macos-15	e4a68b8	io	quote-p.tst:613: single and double quotes in substitution of expansion ${a-b}	11	3021.0	5744.0	3210.0	0.52594
+macos-15	e4a68b8	io	quote-p.tst:621: single quotes in substitution of expansion ${a-b} in double quotes	11	3207.0	6608.0		0.48532
+macos-15	e4a68b8	io	quote-p.tst:633: tilde in substitution of expansion ${a-b}	11	3145.0	5827.0		0.53973
+macos-15	e4a68b8	io	quote-p.tst:640: single and double quotes in substitution of expansion ${a=b}	11	3395.0	40496.0	3379.0	0.08384
+macos-15	e4a68b8	io	quote-p.tst:652: single quotes in substitution of expansion ${a=b} in double quotes	11	3106.0	6603.0		0.47039
+macos-15	e4a68b8	io	quote-p.tst:667: tilde in substitution of expansion ${a=b}	11	3150.0	6282.0		0.50143
+macos-15	e4a68b8	io	quote-p.tst:681: quotes in pattern of expansions	11	3491.0	6544.0	3119.0	0.53347
+macos-15	e4a68b8	io	quote-p.tst:697: backslashes resulting from expansions (not a pattern)	11	3267.0	6131.0	3138.0	0.53287
+macos-15	e4a68b8	io	quote-p.tst:711: backslashes resulting from expansions (a pattern)	11	3366.0	6050.0	3173.0	0.55636
+macos-15	e4a68b8	io	quote-p.tst:724: quoted words are not reserved words	11	12394.0	10552.0	12690.0	1.17456
+macos-15	e4a68b8	io	read-p.tst:6: single operand - without IFS	11	3505.0	6458.0	3226.0	0.54274
+macos-15	e4a68b8	io	read-p.tst:15: single operand - with IFS whitespace	11	3472.0	6035.0	3200.0	0.57531
+macos-15	e4a68b8	io	read-p.tst:24: single operand - with IFS non-whitespace	11	3395.0	6596.0	3311.0	0.51471
+macos-15	e4a68b8	io	read-p.tst:33: EOF fails read	11	3745.0	6358.0	3214.0	0.58902
+macos-15	e4a68b8	io	read-p.tst:40: read does not read more than needed	11	5213.0	8798.0	5211.0	0.59252
+macos-15	e4a68b8	io	read-p.tst:55: variables are assigned even if EOF is reached without newline	11	4061.0	9544.0	3826.0	0.4255
+macos-15	e4a68b8	io	read-p.tst:64: orphan backslash is ignored	11	4145.0	7363.0	3914.0	0.56295
+macos-15	e4a68b8	io	read-p.tst:73: set -o allexport	11	8871.0	11990.0	8903.0	0.73987
+macos-15	e4a68b8	io	read-p.tst:85: line continuation - followed by normal line	11	3766.0	6202.0	3406.0	0.60722
+macos-15	e4a68b8	io	read-p.tst:96: line continuation - followed by EOF	11	3513.0	6315.0	3366.0	0.55629
+macos-15	e4a68b8	io	read-p.tst:105: field splitting - 1	11	3454.0	6277.0	3305.0	0.55026
+macos-15	e4a68b8	io	read-p.tst:114: field splitting - 2-1	11	3458.0	6156.0	3427.0	0.56173
+macos-15	e4a68b8	io	read-p.tst:124: field splitting - 2-2	11	3447.0	6370.0	3235.0	0.54113
+macos-15	e4a68b8	io	read-p.tst:134: field splitting - 2-3	11	3272.0	6067.0	3294.0	0.53931
+macos-15	e4a68b8	io	read-p.tst:144: field splitting - 2-4	11	3334.0	6574.0	3197.0	0.50715
+macos-15	e4a68b8	io	read-p.tst:154: field splitting - 3-1	11	3375.0	6213.0	3321.0	0.54322
+macos-15	e4a68b8	io	read-p.tst:164: field splitting - 3-2	11	3511.0	6379.0	3289.0	0.5504
+macos-15	e4a68b8	io	read-p.tst:174: field splitting - 3-3	11	3621.0	6061.0	3372.0	0.59743
+macos-15	e4a68b8	io	read-p.tst:184: field splitting - 3-4	11	3546.0	6189.0	3402.0	0.57295
+macos-15	e4a68b8	io	read-p.tst:194: backslash prevents field splitting - backslash not in IFS	11	3404.0	6166.0	3391.0	0.55206
+macos-15	e4a68b8	io	read-p.tst:203: backslash prevents field splitting - backslash in IFS	11	3448.0	6280.0	3997.0	0.54904
+macos-15	e4a68b8	io	read-p.tst:212: line continuation and newline as IFS	11	3424.0	6388.0	3602.0	0.53601
+macos-15	e4a68b8	io	read-p.tst:224: variables are assigned empty string for missing fields	11	3282.0	6075.0	3415.0	0.54025
+macos-15	e4a68b8	io	read-p.tst:233: exact number of fields with non-whitespace IFS	11	3137.0	6298.0	3318.0	0.49809
+macos-15	e4a68b8	io	read-p.tst:242: too many fields are joined with trailing whitespaces removed	11	3308.0	6376.0	3485.0	0.51882
+macos-15	e4a68b8	io	read-p.tst:252: too many fields are joined, ending with non-whitespace delimiter	11	3368.0	6245.0	3305.0	0.53931
+macos-15	e4a68b8	io	read-p.tst:262: no field splitting with empty IFS	11	3279.0	6401.0	3605.0	0.51226
+macos-15	e4a68b8	io	read-p.tst:271: non-default delimiters	11	3339.0	6465.0	3399.0	0.51647
+macos-15	e4a68b8	io	read-p.tst:283: raw mode - backslash not in IFS	11	3460.0	6106.0	3304.0	0.56666
+macos-15	e4a68b8	io	read-p.tst:293: raw mode - backslash in IFS	11	3390.0	6204.0	3272.0	0.54642
+macos-15	e4a68b8	io	read-p.tst:304: in subshell	11	4195.0	8250.0	4260.0	0.50848
+macos-15	e4a68b8	io	read-p.tst:311: failure by readonly variable	11	3764.0	7166.0	3902.0	0.52526
+macos-15	e4a68b8	io	redir-p.tst:13: quoted file descriptor	11	5322.0	10132.0	5493.0	0.52527
+macos-15	e4a68b8	io	redir-p.tst:22: file descriptor must immediately precede operator	11	7753.0	12256.0	8740.0	0.63259
+macos-15	e4a68b8	io	redir-p.tst:36: file descriptors up to 9 are supported	11	6216.0	10082.0	5850.0	0.61654
+macos-15	e4a68b8	io	redir-p.tst:42: multi-digit file descriptor	11	5630.0	9832.0	5528.0	0.57262
+macos-15	e4a68b8	io	redir-p.tst:47: tilde expansion in redirection operand	11	6582.0	9414.0	5803.0	0.69917
+macos-15	e4a68b8	io	redir-p.tst:54: parameter expansion in redirection operand	11	6604.0	8764.0	5980.0	0.75354
+macos-15	e4a68b8	io	redir-p.tst:61: command substitution in redirection operand	11	7328.0	9857.0	6165.0	0.74343
+macos-15	e4a68b8	io	redir-p.tst:67: arithmetic expansion in redirection operand	11	6655.0	8766.0	6224.0	0.75918
+macos-15	e4a68b8	io	redir-p.tst:73: quote removal in redirection operand	11	6095.0	9272.0	5484.0	0.65736
+macos-15	e4a68b8	io	redir-p.tst:79: pathname expansion in redirection operand (non-interactive)	11	6005.0	9339.0	6928.0	0.643
+macos-15	e4a68b8	io	redir-p.tst:85: redirections apply in order of appearance	11	3514.0	6560.0	3570.0	0.53567
+macos-15	e4a68b8	io	redir-p.tst:100: input redirection, success	11	8643.0	11428.0	8114.0	0.7563
+macos-15	e4a68b8	io	redir-p.tst:108: input redirection, failure	11	3804.0	7179.0	3400.0	0.52988
+macos-15	e4a68b8	io	redir-p.tst:112: overwrite redirection, +C, success	11	8221.0	10000.0	7824.0	0.8221
+macos-15	e4a68b8	io	redir-p.tst:123: overwrite redirection, -C, success	11	5207.0	9185.0	5449.0	0.5669
+macos-15	e4a68b8	io	redir-p.tst:133: overwrite redirection, -C, existing file error	11	3501.0	6449.0	3670.0	0.54287
+macos-15	e4a68b8	io	redir-p.tst:138: overwrite redirection, -C, existing file not modified	11	7159.0	10220.0	7949.0	0.70049
+macos-15	e4a68b8	io	redir-p.tst:148: overwrite redirection, creation failure	11	3426.0	6346.0	3247.0	0.53987
+macos-15	e4a68b8	io	redir-p.tst:152: clobbering redirection, +C, success	11	7530.0	10070.0	9365.0	0.74777
+macos-15	e4a68b8	io	redir-p.tst:163: clobbering redirection, -C, success	11	8615.0	11739.0	9673.0	0.73388
+macos-15	e4a68b8	io	redir-p.tst:181: clobbering redirection, creation failure	11	3447.0	6518.0	3242.0	0.52884
+macos-15	e4a68b8	io	redir-p.tst:185: appending redirection, success, new file	11	8787.0	9239.0	10483.0	0.95108
+macos-15	e4a68b8	io	redir-p.tst:194: appending redirection, success, existing file	11	5862.0	10093.0	6106.0	0.5808
+macos-15	e4a68b8	io	redir-p.tst:207: effect of appending redirection	11	5219.0	9183.0	5537.0	0.56833
+macos-15	e4a68b8	io	redir-p.tst:222: in-out redirection, success	11	5923.0	9407.0	5945.0	0.62964
+macos-15	e4a68b8	io	redir-p.tst:231: in-out redirection, failure	11	3843.0	7123.0	3485.0	0.53952
+macos-15	e4a68b8	io	redir-p.tst:235: input duplication, success	11	8165.0	11271.0	8679.0	0.72443
+macos-15	e4a68b8	io	redir-p.tst:246: input duplication, failure (closed file descriptor)	11	3176.0	5997.0	3190.0	0.5296
+macos-15	e4a68b8	io	redir-p.tst:252: input duplication, failure (unreadable file descriptor)	11	5866.0	11262.0	5927.0	0.52087
+macos-15	e4a68b8	io	redir-p.tst:256: input closing, success, open file descriptor	11	3318.0	8654.0	3188.0	0.38341
+macos-15	e4a68b8	io	redir-p.tst:260: input closing, success, closed file descriptor	11	3305.0	7081.0	3226.0	0.46674
+macos-15	e4a68b8	io	redir-p.tst:264: effect of input closing	11	5368.0	8804.0	6267.0	0.60972
+macos-15	e4a68b8	io	redir-p.tst:268: output duplication, success	11	10766.0	15819.0	10797.0	0.68057
+macos-15	e4a68b8	io	redir-p.tst:284: output duplication, failure (closed file descriptor)	11	3255.0	6290.0	3463.0	0.51749
+macos-15	e4a68b8	io	redir-p.tst:294: output closing, success, open file descriptor	11	3286.0	5948.0	3262.0	0.55245
+macos-15	e4a68b8	io	redir-p.tst:298: output closing, success, closed file descriptor	11	3063.0	6056.0	3233.0	0.50578
+macos-15	e4a68b8	io	redir-p.tst:302: effect of output closing	11	3345.0	6104.0	3342.0	0.548
+macos-15	e4a68b8	io	redir-p.tst:306: effect of here-document	11	5115.0	9120.0	5468.0	0.56086
+macos-15	e4a68b8	io	redir-p.tst:318: here-document with non-default file descriptor	11	5572.0	8994.0	5749.0	0.61952
+macos-15	e4a68b8	io	redir-p.tst:326: no tilde expansion with unquoted here-document delimiter	11	5219.0	9004.0	5062.0	0.57963
+macos-15	e4a68b8	io	redir-p.tst:335: parameter expansion with unquoted here-document delimiter	11	5660.0	9161.0	5053.0	0.61784
+macos-15	e4a68b8	io	redir-p.tst:344: command substitution with unquoted here-document delimiter	11	5139.0	10593.0	5113.0	0.48513
+macos-15	e4a68b8	io	redir-p.tst:352: arithmetic expansion with unquoted here-document delimiter	11	5192.0	9036.0	5389.0	0.57459
+macos-15	e4a68b8	io	redir-p.tst:360: backslash with unquoted here-document delimiter	11	5232.0	9284.0	5041.0	0.56355
+macos-15	e4a68b8	io	redir-p.tst:370: single and double quotes with unquoted here-document delimiter	11	5285.0	9181.0	5229.0	0.57565
+macos-15	e4a68b8	io	redir-p.tst:378: no tilde expansion with quoted here-document delimiter	11	5326.0	9099.0	5399.0	0.58534
+macos-15	e4a68b8	io	redir-p.tst:387: no parameter expansion with quoted here-document delimiter	11	4998.0	9496.0	5272.0	0.52633
+macos-15	e4a68b8	io	redir-p.tst:396: no command substitution with quoted here-document delimiter	11	5615.0	9107.0	5055.0	0.61656
+macos-15	e4a68b8	io	redir-p.tst:404: no arithmetic expansion with quoted here-document delimiter	11	4969.0	8974.0	5164.0	0.55371
+macos-15	e4a68b8	io	redir-p.tst:412: no quote removal with quoted here-document delimiter	11	5087.0	11138.0	5296.0	0.45672
+macos-15	e4a68b8	io	redir-p.tst:428: expansion error in here-document	11	3335.0	6276.0	3689.0	0.53139
+macos-15	e4a68b8	io	redir-p.tst:434: various quotation of here-document delimiter	11	8871.0	14481.0	9033.0	0.6126
+macos-15	e4a68b8	io	redir-p.tst:450: tab removal with <<-	11	5233.0	8801.0	6707.0	0.59459
+macos-15	e4a68b8	io	redir-p.tst:460: here-document delimiter containing tab	11	5675.0	9593.0	6121.0	0.59158
+macos-15	e4a68b8	io	redir-p.tst:468: here-document delimiter starting with -	11	5388.0	8791.0	5369.0	0.6129
+macos-15	e4a68b8	io	redir-p.tst:478: multiple here-documents on single command	11	10462.0	15818.0	10570.0	0.6614
+macos-15	e4a68b8	io	redir-p.tst:501: multiple commands each with here-document	11	6883.0	11400.0	6614.0	0.60377
+macos-15	e4a68b8	io	redir-p.tst:513: redirection is temporary	11	7624.0	12291.0	7834.0	0.62029
+macos-15	e4a68b8	io	redir-p.tst:543: long here-document	11	56356.0	112408.0	54534.0	0.50135
+macos-15	e4a68b8	io	umask-p.tst:17: restoring umask using previous output, non-symbolic, 000	11	4392.0	8395.0	4581.0	0.52317
+macos-15	e4a68b8	io	umask-p.tst:18: restoring umask using previous output, non-symbolic, 001	11	4329.0	7141.0	4329.0	0.60622
+macos-15	e4a68b8	io	umask-p.tst:19: restoring umask using previous output, non-symbolic, 002	11	4130.0	7228.0	4161.0	0.57139
+macos-15	e4a68b8	io	umask-p.tst:20: restoring umask using previous output, non-symbolic, 004	11	4232.0	7269.0	4100.0	0.5822
+macos-15	e4a68b8	io	umask-p.tst:21: restoring umask using previous output, non-symbolic, 010	11	4095.0	7207.0	4349.0	0.5682
+macos-15	e4a68b8	io	umask-p.tst:22: restoring umask using previous output, non-symbolic, 020	11	4024.0	7348.0	4098.0	0.54763
+macos-15	e4a68b8	io	umask-p.tst:23: restoring umask using previous output, non-symbolic, 040	11	4197.0	7075.0	4162.0	0.59322
+macos-15	e4a68b8	io	umask-p.tst:24: restoring umask using previous output, non-symbolic, 100	11	4182.0	7301.0	4166.0	0.5728
+macos-15	e4a68b8	io	umask-p.tst:25: restoring umask using previous output, non-symbolic, 200	11	4375.0	7469.0	4201.0	0.58575
+macos-15	e4a68b8	io	umask-p.tst:26: restoring umask using previous output, non-symbolic, 400	11	3990.0	7628.0	4316.0	0.52307
+macos-15	e4a68b8	io	umask-p.tst:27: restoring umask using previous output, non-symbolic, 653	11	4348.0	7457.0	4262.0	0.58308
+macos-15	e4a68b8	io	umask-p.tst:28: restoring umask using previous output, non-symbolic, 017	11	4240.0	7337.0	4117.0	0.57789
+macos-15	e4a68b8	io	umask-p.tst:42: restoring umask using previous output, symbolic, 000	11	4183.0	7580.0	4038.0	0.55185
+macos-15	e4a68b8	io	umask-p.tst:43: restoring umask using previous output, symbolic, 001	11	4065.0	7636.0	3952.0	0.53235
+macos-15	e4a68b8	io	umask-p.tst:44: restoring umask using previous output, symbolic, 002	11	4153.0	7440.0	4153.0	0.5582
+macos-15	e4a68b8	io	umask-p.tst:45: restoring umask using previous output, symbolic, 004	11	4231.0	7408.0	4172.0	0.57114
+macos-15	e4a68b8	io	umask-p.tst:46: restoring umask using previous output, symbolic, 010	11	4516.0	7761.0	4036.0	0.58188
+macos-15	e4a68b8	io	umask-p.tst:47: restoring umask using previous output, symbolic, 020	11	4126.0	7434.0	4151.0	0.55502
+macos-15	e4a68b8	io	umask-p.tst:48: restoring umask using previous output, symbolic, 040	11	4169.0	7615.0	4169.0	0.54747
+macos-15	e4a68b8	io	umask-p.tst:49: restoring umask using previous output, symbolic, 100	11	4088.0	7292.0	4205.0	0.56061
+macos-15	e4a68b8	io	umask-p.tst:50: restoring umask using previous output, symbolic, 200	11	4476.0	7531.0	4100.0	0.59434
+macos-15	e4a68b8	io	umask-p.tst:51: restoring umask using previous output, symbolic, 400	11	4221.0	7802.0	4020.0	0.54102
+macos-15	e4a68b8	io	umask-p.tst:52: restoring umask using previous output, symbolic, 653	11	4237.0	7460.0	4132.0	0.56796
+macos-15	e4a68b8	io	umask-p.tst:53: restoring umask using previous output, symbolic, 017	11	4289.0	7578.0	4125.0	0.56598
+macos-15	e4a68b8	io	umask-p.tst:69: symbolic operand u+	11	10214.0	13832.0	9754.0	0.73843
+macos-15	e4a68b8	io	umask-p.tst:70: symbolic operand u+r	11	9969.0	14597.0	9868.0	0.68295
+macos-15	e4a68b8	io	umask-p.tst:71: symbolic operand u+w	11	10485.0	13926.0	9475.0	0.75291
+macos-15	e4a68b8	io	umask-p.tst:72: symbolic operand u+x	11	10053.0	14126.0	9793.0	0.71167
+macos-15	e4a68b8	io	umask-p.tst:73: symbolic operand u+rw	11	10070.0	14348.0	9939.0	0.70184
+macos-15	e4a68b8	io	umask-p.tst:74: symbolic operand u+xr	11	10842.0	14091.0	9342.0	0.76943
+macos-15	e4a68b8	io	umask-p.tst:75: symbolic operand u+wx	11	10001.0	14204.0	9807.0	0.7041
+macos-15	e4a68b8	io	umask-p.tst:76: symbolic operand u+xwr	11	10882.0	13919.0	9553.0	0.78181
+macos-15	e4a68b8	io	umask-p.tst:78: symbolic operand g+	11	10287.0	13677.0	10124.0	0.75214
+macos-15	e4a68b8	io	umask-p.tst:79: symbolic operand g+r	11	11153.0	13676.0	10079.0	0.81552
+macos-15	e4a68b8	io	umask-p.tst:80: symbolic operand g+w	11	10284.0	13919.0	10398.0	0.73885
+macos-15	e4a68b8	io	umask-p.tst:81: symbolic operand g+x	11	9704.0	14351.0	10135.0	0.67619
+macos-15	e4a68b8	io	umask-p.tst:82: symbolic operand g+rw	11	10145.0	15307.0	10005.0	0.66277
+macos-15	e4a68b8	io	umask-p.tst:83: symbolic operand g+xr	11	10576.0	15871.0	9746.0	0.66637
+macos-15	e4a68b8	io	umask-p.tst:84: symbolic operand g+wx	11	9907.0	14503.0	10037.0	0.6831
+macos-15	e4a68b8	io	umask-p.tst:85: symbolic operand g+xwr	11	10146.0	15232.0	9828.0	0.6661
+macos-15	e4a68b8	io	umask-p.tst:87: symbolic operand o+	11	10123.0	14968.0	9939.0	0.67631
+macos-15	e4a68b8	io	umask-p.tst:88: symbolic operand o+r	11	10150.0	14365.0	9558.0	0.70658
+macos-15	e4a68b8	io	umask-p.tst:89: symbolic operand o+w	11	9882.0	14493.0	9625.0	0.68185
+macos-15	e4a68b8	io	umask-p.tst:90: symbolic operand o+x	11	10014.0	15006.0	9988.0	0.66733
+macos-15	e4a68b8	io	umask-p.tst:91: symbolic operand o+rw	11	9833.0	13934.0	9708.0	0.70568
+macos-15	e4a68b8	io	umask-p.tst:92: symbolic operand o+xr	11	10062.0	13974.0	9529.0	0.72005
+macos-15	e4a68b8	io	umask-p.tst:93: symbolic operand o+wx	11	10281.0	15306.0	9953.0	0.6717
+macos-15	e4a68b8	io	umask-p.tst:94: symbolic operand o+xwr	11	9931.0	14962.0	10180.0	0.66375
+macos-15	e4a68b8	io	umask-p.tst:96: symbolic operand a+	11	10785.0	15011.0	10155.0	0.71847
+macos-15	e4a68b8	io	umask-p.tst:97: symbolic operand a+r	11	9769.0	14904.0	10265.0	0.65546
+macos-15	e4a68b8	io	umask-p.tst:98: symbolic operand a+w	11	9753.0	14450.0	9798.0	0.67495
+macos-15	e4a68b8	io	umask-p.tst:99: symbolic operand a+x	11	9799.0	14130.0	10080.0	0.69349
+macos-15	e4a68b8	io	umask-p.tst:100: symbolic operand a+rw	11	9625.0	14527.0	9342.0	0.66256
+macos-15	e4a68b8	io	umask-p.tst:101: symbolic operand a+xr	11	9691.0	14826.0	9883.0	0.65365
+macos-15	e4a68b8	io	umask-p.tst:102: symbolic operand a+wx	11	9716.0	15811.0	9770.0	0.61451
+macos-15	e4a68b8	io	umask-p.tst:103: symbolic operand a+xwr	11	9970.0	14065.0	10197.0	0.70885
+macos-15	e4a68b8	io	umask-p.tst:105: symbolic operand +	11	9825.0	14591.0	9888.0	0.67336
+macos-15	e4a68b8	io	umask-p.tst:106: symbolic operand +r	11	9771.0	14112.0	9501.0	0.69239
+macos-15	e4a68b8	io	umask-p.tst:107: symbolic operand +w	11	9755.0	14166.0	9835.0	0.68862
+macos-15	e4a68b8	io	umask-p.tst:108: symbolic operand +x	11	10165.0	14254.0	9585.0	0.71313
+macos-15	e4a68b8	io	umask-p.tst:109: symbolic operand +rw	11	9862.0	14341.0	9889.0	0.68768
+macos-15	e4a68b8	io	umask-p.tst:110: symbolic operand +xr	11	9844.0	14244.0	11209.0	0.6911
+macos-15	e4a68b8	io	umask-p.tst:111: symbolic operand +wx	11	9898.0	14407.0	10378.0	0.68703
+macos-15	e4a68b8	io	umask-p.tst:112: symbolic operand +xwr	11	9684.0	13987.0	9785.0	0.69236
+macos-15	e4a68b8	io	umask-p.tst:114: symbolic operand u=	11	9852.0	13908.0	9596.0	0.70837
+macos-15	e4a68b8	io	umask-p.tst:115: symbolic operand u=r	11	9710.0	14046.0	10086.0	0.6913
+macos-15	e4a68b8	io	umask-p.tst:116: symbolic operand u=w	11	9810.0	14565.0	10172.0	0.67353
+macos-15	e4a68b8	io	umask-p.tst:117: symbolic operand u=x	11	10070.0	14658.0	9904.0	0.687
+macos-15	e4a68b8	io	umask-p.tst:118: symbolic operand u=rw	11	10039.0	14388.0	9749.0	0.69773
+macos-15	e4a68b8	io	umask-p.tst:119: symbolic operand u=xr	11	9530.0	14221.0	10040.0	0.67014
+macos-15	e4a68b8	io	umask-p.tst:120: symbolic operand u=wx	11	10434.0	14887.0	9616.0	0.70088
+macos-15	e4a68b8	io	umask-p.tst:121: symbolic operand u=xwr	11	10234.0	13636.0	9616.0	0.75051
+macos-15	e4a68b8	io	umask-p.tst:128: symbolic operand u=rwx,u-w	11	9657.0	14442.0	10075.0	0.66867
+macos-15	e4a68b8	recheck	alias-p.tst:6: defining alias	11	2430.0	5704.0	2707.0	0.42602
+macos-15	e4a68b8	recheck	alias-p.tst:13: using alias	11	2462.0	5023.0	2678.0	0.49015
+macos-15	e4a68b8	recheck	alias-p.tst:23: redefining alias - exit status	11	2431.0	4954.0	2489.0	0.49071
+macos-15	e4a68b8	recheck	alias-p.tst:27: redefining alias - redefinition	11	2396.0	4830.0	2551.0	0.49607
+macos-15	e4a68b8	recheck	alias-p.tst:34: removing specific alias - exit status	11	2511.0	4815.0	2365.0	0.5215
+macos-15	e4a68b8	recheck	alias-p.tst:39: removing specific alias - removal	11	2518.0	4774.0	2515.0	0.52744
+macos-15	e4a68b8	recheck	alias-p.tst:45: removing multiple aliases - exit status	11	2357.0	4915.0	2351.0	0.47955
+macos-15	e4a68b8	recheck	alias-p.tst:50: removing multiple aliases - removal	11	3898.0	6901.0	4338.0	0.56485
+macos-15	e4a68b8	recheck	alias-p.tst:59: removing all aliases - exit status	11	2667.0	5181.0	2487.0	0.51477
+macos-15	e4a68b8	recheck	alias-p.tst:64: removing all aliases - removal	11	2400.0	4941.0	2718.0	0.48573
+macos-15	e4a68b8	recheck	alias-p.tst:70: printing specific alias	11	4193.0	7294.0	4207.0	0.57486
+macos-15	e4a68b8	recheck	alias-p.tst:74: reusing printed alias (simple)	11	2931.0	5465.0	2958.0	0.53632
+macos-15	e4a68b8	recheck	alias-p.tst:83: reusing printed alias (complex quotation)	11	2999.0	7699.0	3135.0	0.38953
+macos-15	e4a68b8	recheck	alias-p.tst:93: printing all aliases	11	6755.0	9864.0	6376.0	0.68481
+macos-15	e4a68b8	recheck	alias-p.tst:104: subshell inherits aliases	11	4350.0	7135.0	4115.0	0.60967
+macos-15	e4a68b8	recheck	alias-p.tst:108: subshell cannot affect main shell	11	3080.0	5603.0	2770.0	0.54971
+macos-15	e4a68b8	recheck	alias-p.tst:115: printing undefined alias is error	11	2435.0	4624.0	2463.0	0.5266
+macos-15	e4a68b8	recheck	alias-p.tst:120: removing undefined alias is error	11	2463.0	4770.0	2631.0	0.51635
+macos-15	e4a68b8	recheck	alias-p.tst:126: using alias after assignment (simple)	11	6830.0	9216.0	6970.0	0.7411
+macos-15	e4a68b8	recheck	alias-p.tst:133: using alias after assignment (complex)	11	6352.0	9385.0	6418.0	0.67682
+macos-15	e4a68b8	recheck	alias-p.tst:141: using alias after redirection (simple)	11	2533.0	4631.0	2351.0	0.54697
+macos-15	e4a68b8	recheck	alias-p.tst:146: using alias after redirection (complex)	11	2559.0	5019.0	2516.0	0.50986
+macos-15	e4a68b8	recheck	alias-p.tst:151: using alias in pipeline (simple)	11	4266.0	6952.0	4424.0	0.61364
+macos-15	e4a68b8	recheck	alias-p.tst:158: using alias in pipeline (complex)	11	4217.0	7019.0	4329.0	0.6008
+macos-15	e4a68b8	recheck	alias-p.tst:166: using aliases in compound commands	11	2464.0	5071.0	2627.0	0.4859
+macos-15	e4a68b8	recheck	alias-p.tst:173: alias substitution to empty string	11	3867.0	6824.0	3821.0	0.56668
+macos-15	e4a68b8	recheck	alias-p.tst:185: alias substitution to blank before if	11	2566.0	5083.0	2778.0	0.50482
+macos-15	e4a68b8	recheck	alias-p.tst:191: alias substitution to blank should not change exit status	11	2364.0	4647.0	2556.0	0.50872
+macos-15	e4a68b8	recheck	alias-p.tst:197: alias substitution to blank before newline	11	4082.0	7827.0	4400.0	0.52153
+macos-15	e4a68b8	recheck	alias-p.tst:208: alias substitution to assignment	11	6037.0	9273.0	6740.0	0.65103
+macos-15	e4a68b8	recheck	alias-p.tst:215: alias substitution to redirection	11	2509.0	4752.0	2711.0	0.52799
+macos-15	e4a68b8	recheck	alias-p.tst:232: alias substitution to here-document operand	11	3903.0	6663.0		0.58577
+macos-15	e4a68b8	recheck	alias-p.tst:241: alias substitution to !	11	2455.0	4792.0	2538.0	0.51231
+macos-15	e4a68b8	recheck	alias-p.tst:249: alias substitution to parenthesis	11	2819.0	5847.0	2979.0	0.48213
+macos-15	e4a68b8	recheck	alias-p.tst:263: alias substitution to if/then/elif/else/fi keywords	11	2499.0	5124.0	2699.0	0.4877
+macos-15	e4a68b8	recheck	alias-p.tst:281: alias substitution to while/until/do/done keywords	11	5818.0	9491.0	5624.0	0.613
+macos-15	e4a68b8	recheck	alias-p.tst:290: alias substitution to for	11	2651.0	5057.0	2566.0	0.52422
+macos-15	e4a68b8	recheck	alias-p.tst:298: alias substitution to word (for)	11	2709.0	4895.0		0.55342
+macos-15	e4a68b8	recheck	alias-p.tst:329: alias substitution to do/done (for w/o in)	11	2731.0	4839.0		0.56437
+macos-15	e4a68b8	recheck	alias-p.tst:351: inapplicable alias substitution of do (for)	11	2833.0	4643.0	2531.0	0.61017
+macos-15	e4a68b8	recheck	alias-p.tst:359: alias substitution to case/esac keywords	11	5989.0	9075.0		0.65994
+macos-15	e4a68b8	recheck	alias-p.tst:395: alias substitution to ( (case)	11	2429.0	4704.0		0.51637
+macos-15	e4a68b8	recheck	alias-p.tst:411: alias substitution to ) (case)	11	2631.0	4909.0		0.53595
+macos-15	e4a68b8	recheck	alias-p.tst:418: alias substitution to ;;	11	2528.0	5012.0	2683.0	0.50439
+macos-15	e4a68b8	recheck	alias-p.tst:430: alias substitution to function definition	11	2569.0	5137.0	2531.0	0.5001
+macos-15	e4a68b8	recheck	alias-p.tst:439: alias substitution to parentheses in function definition	11	2727.0	4991.0		0.54638
+macos-15	e4a68b8	recheck	alias-p.tst:453: alias substitution to command in function definition	11	2666.0	5077.0		0.52511
+macos-15	e4a68b8	recheck	alias-p.tst:462: IO_NUMBER cannot be aliased	11	2677.0	4901.0	2546.0	0.54622
+macos-15	e4a68b8	recheck	alias-p.tst:471: alias starting with blank	11	2605.0	4639.0	2478.0	0.56154
+macos-15	e4a68b8	recheck	alias-p.tst:480: alias ending with blank	11	2715.0	4839.0	2456.0	0.56107
+macos-15	e4a68b8	recheck	alias-p.tst:496: alias ending with blank followed by line continuation	11	2540.0	4655.0	2492.0	0.54565
+macos-15	e4a68b8	recheck	alias-p.tst:504: alias substitution can be part of an operator	11	2364.0	5065.0		0.46673
+macos-15	e4a68b8	recheck	alias-p.tst:510: aliases cannot substitute reserved words	11	2691.0	4765.0	2578.0	0.56474
+macos-15	e4a68b8	recheck	alias-p.tst:519: quoted aliases are not substituted	11	2473.0	4752.0	2680.0	0.52041
+macos-15	e4a68b8	recheck	alias-p.tst:536: line continuation in alias name	11	2420.0	4751.0	2680.0	0.50937
+macos-15	e4a68b8	recheck	alias-p.tst:557: line continuation between alias names (2)	11	2410.0	4791.0	2441.0	0.50303
+macos-15	e4a68b8	recheck	alias-p.tst:565: alias substitution to line continuation	11	2432.0	4765.0		0.51039
+macos-15	e4a68b8	recheck	alias-p.tst:576: characters allowed in alias name	11	2501.0	4754.0	2614.0	0.52608
+macos-15	e4a68b8	recheck	alias-p.tst:583: recursive alias	11	2397.0	4685.0	2604.0	0.51163
+macos-15	e4a68b8	recheck	kill2-p.tst:13: sending signal: -s ABRT	11	2471.0	5103.0	2470.0	0.48422
+macos-15	e4a68b8	recheck	kill2-p.tst:14: sending signal: -s ALRM	11	2753.0	5568.0	2868.0	0.49443
+macos-15	e4a68b8	recheck	kill2-p.tst:15: sending signal: -s BUS	11	2468.0	6065.0	2844.0	0.40692
+macos-15	e4a68b8	recheck	kill2-p.tst:16: sending signal: -s FPE	11	2841.0	7068.0	3055.0	0.40195
+macos-15	e4a68b8	recheck	kill2-p.tst:17: sending signal: -s HUP	11	2903.0	8432.0	3001.0	0.34428
+macos-15	e4a68b8	recheck	kill2-p.tst:18: sending signal: -s ILL	11	2601.0	5926.0	2572.0	0.43891
+macos-15	e4a68b8	recheck	kill2-p.tst:19: sending signal: -s INT	11	2906.0	5971.0	2902.0	0.48669
+macos-15	e4a68b8	recheck	kill2-p.tst:20: sending signal: -s KILL	11	2635.0	6329.0	2560.0	0.41634
+macos-15	e4a68b8	recheck	kill2-p.tst:21: sending signal: -s PIPE	11	2721.0	5530.0	2511.0	0.49204
+macos-15	e4a68b8	recheck	kill2-p.tst:23: sending signal: -s SEGV	11	3017.0	4748.0	3005.0	0.63543
+macos-15	e4a68b8	recheck	kill2-p.tst:24: sending signal: -s TERM	11	2969.0	5560.0	2891.0	0.53399
+macos-15	e4a68b8	recheck	kill2-p.tst:25: sending signal: -s USR1	11	2638.0	5101.0	2752.0	0.51715
+macos-15	e4a68b8	recheck	kill2-p.tst:26: sending signal: -s USR2	11	2502.0	4726.0	2350.0	0.52941
+macos-15	e4a68b8	recheck	kill2-p.tst:28: sending signal: -ABRT	11	2353.0	5177.0	2417.0	0.45451
+macos-15	e4a68b8	recheck	kill2-p.tst:29: sending signal: -ALRM	11	2845.0	5499.0	2936.0	0.51737
+macos-15	e4a68b8	recheck	kill2-p.tst:30: sending signal: -BUS	11	2652.0	6000.0	2561.0	0.442
+macos-15	e4a68b8	recheck	kill2-p.tst:31: sending signal: -FPE	11	2875.0	6948.0	2899.0	0.41379
+macos-15	e4a68b8	recheck	kill2-p.tst:32: sending signal: -HUP	11	2802.0	6195.0	2849.0	0.4523
+macos-15	e4a68b8	recheck	kill2-p.tst:33: sending signal: -ILL	11	2471.0	5726.0	2477.0	0.43154
+macos-15	e4a68b8	recheck	kill2-p.tst:34: sending signal: -INT	11	2935.0	5645.0	2889.0	0.51993
+macos-15	e4a68b8	recheck	kill2-p.tst:35: sending signal: -KILL	11	2562.0	5887.0	2456.0	0.4352
+macos-15	e4a68b8	recheck	kill2-p.tst:36: sending signal: -PIPE	11	2734.0	5289.0	2330.0	0.51692
+macos-15	e4a68b8	recheck	kill2-p.tst:38: sending signal: -SEGV	11	2930.0	4784.0	2795.0	0.61246
+macos-15	e4a68b8	recheck	kill2-p.tst:39: sending signal: -TERM	11	3042.0	5371.0	2897.0	0.56637
+macos-15	e4a68b8	recheck	kill2-p.tst:40: sending signal: -USR1	11	2481.0	5232.0	2558.0	0.4742
+macos-15	e4a68b8	recheck	kill2-p.tst:41: sending signal: -USR2	11	2371.0	5154.0	2371.0	0.46003
+macos-15	e4a68b8	recheck	path-p.tst:14: expansion with read-and-searchable directory	11	2803.0	6324.0	2712.0	0.44323
+macos-15	e4a68b8	recheck	path-p.tst:22: * does not match slash	11	2737.0	6050.0	2738.0	0.4524
+macos-15	e4a68b8	recheck	path-p.tst:28: ? does not match slash	11	2851.0	6082.0	2650.0	0.46876
+macos-15	e4a68b8	recheck	path-p.tst:34: [...] does not match slash	11	2741.0	5130.0	2830.0	0.53431
+macos-15	e4a68b8	recheck	path-p.tst:42: * does not match initial dot	11	2664.0	5485.0	2626.0	0.48569
+macos-15	e4a68b8	recheck	path-p.tst:48: ? does not match initial dot	11	2529.0	5370.0	2921.0	0.47095
+macos-15	e4a68b8	recheck	path-p.tst:54: [!...] does not match initial dot	11	2479.0	5240.0	2646.0	0.47309
+macos-15	e4a68b8	recheck	path-p.tst:67: literal . and .. are not filtered out	11	2559.0	7252.0	2744.0	0.35287
+macos-15	e4a68b8	recheck	path-p.tst:79: expansion with unreadable directory	11	2722.0	8091.0	2905.0	0.33642
+macos-15	e4a68b8	recheck	path-p.tst:93: expansion with unsearchable directory	11	2757.0	7605.0	2735.0	0.36252
+macos-15	e4a68b8	recheck	path-p.tst:114: pathnames are sorted according to current collating sequence	11	2712.0	7066.0	2683.0	0.38381
+macos-15	e4a68b8	recheck	set-p.tst:7: setting one positional parameter (no --)	11	2568.0	5038.0	2507.0	0.50973
+macos-15	e4a68b8	recheck	set-p.tst:14: setting three positional parameters (no --)	11	2543.0	5073.0	2501.0	0.50128
+macos-15	e4a68b8	recheck	set-p.tst:21: setting empty positional parameters (no --)	11	2692.0	5057.0	2612.0	0.53233
+macos-15	e4a68b8	recheck	set-p.tst:28: setting zero positional parameters	11	2507.0	5177.0	2476.0	0.48426
+macos-15	e4a68b8	recheck	set-p.tst:35: setting three positional parameters (with --)	11	2455.0	5081.0	2507.0	0.48317
+macos-15	e4a68b8	recheck	set-p.tst:74: allexport (short) on: $-	11	3940.0	6997.0	4015.0	0.5631
+macos-15	e4a68b8	recheck	set-p.tst:75: allexport (short) off: $-	11	3940.0	6808.0	4176.0	0.57873
+macos-15	e4a68b8	recheck	set-p.tst:76: allexport (long) on: $-	11	3918.0	6701.0	3963.0	0.58469
+macos-15	e4a68b8	recheck	set-p.tst:77: allexport (long) off: $-	11	3924.0	7206.0	4292.0	0.54455
+macos-15	e4a68b8	recheck	set-p.tst:79: notify (short) on: $-	11	3945.0	6912.0		0.57075
+macos-15	e4a68b8	recheck	set-p.tst:80: notify (short) off: $-	11	3907.0	6762.0		0.57779
+macos-15	e4a68b8	recheck	set-p.tst:81: notify (long) on: $-	11	3829.0	6677.0		0.57346
+macos-15	e4a68b8	recheck	set-p.tst:82: notify (long) off: $-	11	3873.0	6607.0		0.5862
+macos-15	e4a68b8	recheck	set-p.tst:84: noclobber (short) on: $-	11	3851.0	6689.0	4175.0	0.57572
+macos-15	e4a68b8	recheck	set-p.tst:85: noclobber (short) off: $-	11	3953.0	6780.0	4456.0	0.58304
+macos-15	e4a68b8	recheck	set-p.tst:86: noclobber (long) on: $-	11	4327.0	6941.0	3858.0	0.6234
+macos-15	e4a68b8	recheck	set-p.tst:87: noclobber (long) off: $-	11	3950.0	6699.0	4106.0	0.58964
+macos-15	e4a68b8	recheck	set-p.tst:89: errexit (short) on: $-	11	4017.0	6905.0	3868.0	0.58175
+macos-15	e4a68b8	recheck	set-p.tst:90: errexit (short) off: $-	11	4013.0	7716.0	4044.0	0.52009
+macos-15	e4a68b8	recheck	set-p.tst:91: errexit (long) on: $-	11	3814.0	7047.0	4031.0	0.54122
+macos-15	e4a68b8	recheck	set-p.tst:92: errexit (long) off: $-	11	3899.0	7406.0	4123.0	0.52647
+macos-15	e4a68b8	recheck	set-p.tst:94: noglob (short) on: $-	11	4091.0	6897.0	4042.0	0.59316
+macos-15	e4a68b8	recheck	set-p.tst:95: noglob (short) off: $-	11	3855.0	6776.0	4089.0	0.56892
+macos-15	e4a68b8	recheck	set-p.tst:96: noglob (long) on: $-	11	4022.0	6690.0	4325.0	0.6012
+macos-15	e4a68b8	recheck	set-p.tst:97: noglob (long) off: $-	11	4312.0	6591.0	4061.0	0.65423
+macos-15	e4a68b8	recheck	set-p.tst:99: hashondef (short) on: $-	11	3887.0	6831.0	3868.0	0.56902
+macos-15	e4a68b8	recheck	set-p.tst:100: hashondef (short) off: $-	11	3887.0	6871.0	3863.0	0.56571
+macos-15	e4a68b8	recheck	set-p.tst:107: noexec (short) on: $-	11	2492.0	4790.0		0.52025
+macos-15	e4a68b8	recheck	set-p.tst:108: noexec (short) off: $-	11	2427.0	4655.0	2384.0	0.52137
+macos-15	e4a68b8	recheck	set-p.tst:113: nounset (short) on: $-	11	4082.0	6800.0	3840.0	0.60029
+macos-15	e4a68b8	recheck	set-p.tst:114: nounset (short) off: $-	11	4008.0	7505.0	3922.0	0.53404
+macos-15	e4a68b8	recheck	set-p.tst:115: nounset (long) on: $-	11	3830.0	7270.0	3875.0	0.52682
+macos-15	e4a68b8	recheck	set-p.tst:116: nounset (long) off: $-	11	3809.0	6897.0	3752.0	0.55227
+macos-15	e4a68b8	recheck	set-p.tst:118: verbose (short) on: $-	11	3829.0	6988.0	3865.0	0.54794
+macos-15	e4a68b8	recheck	set-p.tst:119: verbose (short) off: $-	11	4259.0	7377.0	3878.0	0.57733
+macos-15	e4a68b8	recheck	set-p.tst:120: verbose (long) on: $-	11	4361.0	7600.0	3769.0	0.57382
+macos-15	e4a68b8	recheck	set-p.tst:121: verbose (long) off: $-	11	4239.0	6806.0	3838.0	0.62283
+macos-15	e4a68b8	recheck	set-p.tst:123: xtrace (short) on: $-	11	3947.0	7431.0	3797.0	0.53115
+macos-15	e4a68b8	recheck	set-p.tst:124: xtrace (short) off: $-	11	3845.0	7135.0	3869.0	0.53889
+macos-15	e4a68b8	recheck	set-p.tst:125: xtrace (long) on: $-	11	3866.0	7516.0	3881.0	0.51437
+macos-15	e4a68b8	recheck	set-p.tst:126: xtrace (long) off: $-	11	4116.0	7031.0	3909.0	0.58541
+macos-15	e4a68b8	recheck	set-p.tst:128: setting many shell options at once	11	6921.0	11727.0	6872.0	0.59018
+macos-15	e4a68b8	recheck	set-p.tst:134: setting only options does not change positional parameters	11	2437.0	5034.0	2425.0	0.48411
+macos-15	e4a68b8	recheck	set-p.tst:141: setting positional parameters and shell options at once	11	4328.0	8125.0	4336.0	0.53268
+macos-15	e4a68b8	recheck	set-p.tst:150: set -o/+o	11	5097.0	9369.0	5098.0	0.54403
+macos-15	e4a68b8	recheck	shift-p.tst:7: shift 0 -> 0	11	2525.0	4646.0	2491.0	0.54348
+macos-15	e4a68b8	recheck	shift-p.tst:13: shift 1 -> 1	11	2803.0	4558.0	2450.0	0.61496
+macos-15	e4a68b8	recheck	shift-p.tst:19: shift 1 -> 0	11	2714.0	4650.0	2577.0	0.58366
+macos-15	e4a68b8	recheck	shift-p.tst:25: shift 2 -> 2	11	2563.0	4653.0	2443.0	0.55083
+macos-15	e4a68b8	recheck	shift-p.tst:31: shift 2 -> 1	11	2665.0	4789.0	2677.0	0.55648
+macos-15	e4a68b8	recheck	shift-p.tst:37: shift 2 -> 0	11	2660.0	4595.0	2421.0	0.57889
+macos-15	e4a68b8	recheck	shift-p.tst:43: shift 10 -> 3	11	2624.0	4584.0	2484.0	0.57243
+macos-15	e4a68b8	recheck	shift-p.tst:49: too large operand 1 for 0	11	2626.0	4519.0	2405.0	0.5811
+macos-15	e4a68b8	recheck	shift-p.tst:53: too large operand 2 for 1	11	2428.0	4476.0	2408.0	0.54245
+macos-15	e4a68b8	recheck	shift-p.tst:57: too large operand 3 for 2	11	2434.0	4548.0	2525.0	0.53518
+macos-15	e4a68b8	recheck	shift-p.tst:61: too large operand 100 for 10	11	2413.0	4520.0	2600.0	0.53385
+macos-15	e4a68b8	recheck	shift-p.tst:65: default operand is 1: success	11	2509.0	4765.0	2433.0	0.52655
+macos-15	e4a68b8	recheck	shift-p.tst:75: default operand is 1: failure	11	2417.0	4545.0	2409.0	0.53179
+macos-15	e4a68b8	recheck	shift-p.tst:79: arguments are shifted in function	11	2745.0	4668.0	2431.0	0.58805
+macos-15	e4a68b8	recheck	shift-p.tst:88: separator preceding operand	11	2542.0	4674.0	2505.0	0.54386
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8000: SIGSTOP stops child process (main, self, -i -m, initially defaulted, keep -> keep)	11	4870.0	9999.0	5149.0	0.48705
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8001: SIGSTOP stops child process (main, other, -i -m, initially defaulted, keep -> clear)	11	6503.0	14972.0	6737.0	0.43434
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8002: SIGSTOP stops child process (main, self, -i -m, initially defaulted, keep -> ignore)	11	4777.0	9944.0	4770.0	0.48039
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8003: SIGSTOP stops child process (main, other, -i -m, initially defaulted, keep -> command)	11	6482.0	14157.0	6516.0	0.45787
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8004: SIGSTOP stops child process (main, self, -i -m, initially defaulted, clear -> keep)	11	4743.0	10401.0	4783.0	0.45601
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8005: SIGSTOP stops child process (main, other, -i -m, initially defaulted, clear -> clear)	11	6398.0	14189.0	6536.0	0.45091
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8006: SIGSTOP stops child process (main, self, -i -m, initially defaulted, clear -> ignore)	11	4744.0	10232.0	4730.0	0.46364
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8007: SIGSTOP stops child process (main, other, -i -m, initially defaulted, clear -> command)	11	6487.0	14941.0	6485.0	0.43417
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8008: SIGSTOP stops child process (main, self, -i -m, initially defaulted, ignore -> keep)	11	4712.0	9888.0	4743.0	0.47654
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8009: SIGSTOP stops child process (main, other, -i -m, initially defaulted, ignore -> clear)	11	6403.0	14320.0	6417.0	0.44714
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8010: SIGSTOP stops child process (main, self, -i -m, initially defaulted, ignore -> ignore)	11	4804.0	9905.0	4720.0	0.48501
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8011: SIGSTOP stops child process (main, other, -i -m, initially defaulted, ignore -> command)	11	6413.0	14413.0	6496.0	0.44495
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8012: SIGSTOP stops child process (main, self, -i -m, initially defaulted, command -> keep)	11	4747.0	10091.0	4773.0	0.47042
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8013: SIGSTOP stops child process (main, other, -i -m, initially defaulted, command -> clear)	11	6600.0	14334.0	6378.0	0.46044
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8014: SIGSTOP stops child process (main, self, -i -m, initially defaulted, command -> ignore)	11	4975.0	10879.0	4832.0	0.4573
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8015: SIGSTOP stops child process (main, other, -i -m, initially defaulted, command -> command)	11	6553.0	15084.0	6457.0	0.43443
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8016: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, keep -> keep)	11	4749.0	10125.0	4893.0	0.46904
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8017: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, keep -> clear)	11	6515.0	15327.0	6597.0	0.42507
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8018: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, keep -> ignore)	11	4776.0	10027.0	4763.0	0.47631
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8019: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, keep -> command)	11	6399.0	14314.0	6472.0	0.44704
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8020: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, clear -> keep)	11	4905.0	10181.0	4703.0	0.48178
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8021: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, clear -> clear)	11	6601.0	14291.0	6521.0	0.4619
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8022: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, clear -> ignore)	11	5011.0	10005.0	4777.0	0.50085
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8023: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, clear -> command)	11	6523.0	15211.0	6584.0	0.42883
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8024: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, ignore -> keep)	11	4907.0	10071.0	4773.0	0.48724
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8025: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, ignore -> clear)	11	6642.0	14815.0	6570.0	0.44833
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8026: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, ignore -> ignore)	11	4801.0	10129.0	4765.0	0.47399
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8027: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, ignore -> command)	11	6466.0	14522.0	6531.0	0.44526
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8028: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, command -> keep)	11	4842.0	10967.0	4962.0	0.44151
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8029: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, command -> clear)	11	6506.0	16395.0	6443.0	0.39683
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8030: SIGSTOP stops execed process (subshell, self, -i -m, initially defaulted, command -> ignore)	11	4779.0	10359.0	4819.0	0.46134
+macos-15	e4a68b8	recheck	sigstop7-p.tst:8031: SIGSTOP stops execed process (subshell, other, -i -m, initially defaulted, command -> command)	11	6494.0	14371.0	6451.0	0.45188
+macos-15	e4a68b8	recheck	wait-p.tst:6: waiting for all jobs (+m)	11	4509.0	7506.0	4577.0	0.60072
+macos-15	e4a68b8	recheck	wait-p.tst:16: waiting for specific single job (+m)	11	2602.0	5111.0	2584.0	0.5091
+macos-15	e4a68b8	recheck	wait-p.tst:21: waiting for specific many jobs (+m)	11	2888.0	5473.0	3116.0	0.52768
+macos-15	e4a68b8	recheck	wait-p.tst:43: jobs are not propagated from subshells (+m)	11	2897.0	5142.0	2949.0	0.5634
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:7: exit status of empty command with command substitution	17	3884.0	6899.0	3886.0	0.56298
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:11: command words are expanded before assignments and redirections	17	4775.0	7570.0	4776.0	0.63078
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:23: single assignment	17	3397.0	6002.0	3326.0	0.56598
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:33: multiple assignments	17	3326.0	5992.0	3360.0	0.55507
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:41: assignments are subject to expansion	17	3333.0	7596.0	3373.0	0.43878
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:50: quotes in assignment	17	3320.0	6063.0	3325.0	0.54758
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:57: assignment is persistent for empty command	17	3348.0	5902.0	3385.0	0.56727
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:69: assigned variable is visible inside function	17	3321.0	5881.0	3332.0	0.5647
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:77: assignment is temporary for regular command	17	3327.0	5974.0	3331.0	0.55691
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:86: assignment is exported for regular command	17	7531.0	10676.0	7550.0	0.70541
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:92: assigning to read-only variable: exit with message (empty)	17	3275.0	5908.0	3285.0	0.55433
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:105: assigning to read-only variable in subshell	17	3916.0	6643.0	3942.0	0.58949
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:110: exit status of successful assignment	17	3222.0	5824.0	3250.0	0.55323
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:114: exit status of successful redirection	17	3254.0	5797.0	3236.0	0.56132
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:118: exit status of successful assignments and redirections	17	3239.0	6482.0	3238.0	0.49969
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:122: exit status of assignment with command substitution	17	3798.0	6564.0	3795.0	0.57861
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:126: assignment is done even if command substitution fails (+e)	17	3372.0	6646.0	3270.0	0.50737
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:133: assignment is done even if command substitution fails (-e)	17	3928.0	6712.0	3963.0	0.58522
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:141: exit status of redirection with command substitution	17	3829.0	6604.0	3819.0	0.5798
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:145: redirection is done even if command substitution fails (+e)	17	3286.0	6568.0	3308.0	0.5003
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:150: redirection is done even if command substitution fails (-e)	17	3917.0	6747.0	3976.0	0.58055
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:157: assignment-like command argument	17	11347.0	15474.0	11290.0	0.73329
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:166: redirection can appear between any tokens in simple command	17	7940.0	10624.0	7928.0	0.74736
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:186: searching PATH for command	17	5727.0	6951.0	5715.0	0.82391
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:196: command not found in PATH	17	3265.0	6579.0	3284.0	0.49628
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:201: command name with slash	17	4357.0	6862.0	6511.0	0.63495
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:223: running command in different directory with relative path in $PATH	17	13095.0	16342.0	13058.0	0.80131
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:237: assignment to $PATH removes all remembered command paths	17	22593.0	26679.0	22837.0	0.84685
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:258: remembered command path is ignored if command is missing	17	21540.0	24555.0	21612.0	0.87721
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:278: argv[0] (command name without slash)	17	11456.0	15609.0	11407.0	0.73394
+physical M1	e024141	simple (previous e41f0bc)	simple-p.tst:287: argv[0] (command name with slash)	17	11692.0	16362.0	11667.0	0.71458
