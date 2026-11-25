@@ -624,21 +624,38 @@ impl Session {
         self.assign_value(name, Cow::Borrowed(value));
     }
 
-    // The caller has resolved references and checked readonly and integer
-    // attributes. Special variables still need their regular assignment hooks.
+    fn ordinary_assignment(name: &str) -> bool {
+        !matches!(
+            name,
+            "BASH_ARGV0" | "GLOBIGNORE" | "OPTIND" | "PATH" | "PIPESTATUS"
+        )
+    }
+
+    pub(crate) fn can_append_scalar(&self, name: &str) -> bool {
+        Self::ordinary_assignment(name)
+            && !Self::builtin_readonly(name)
+            && self.variables.get(name).is_some_and(|v| {
+                !v.readonly && !v.integer && !v.nameref && v.elements.is_none() && v.value.is_some()
+            })
+    }
+
+    // The caller checked integer and readonly attributes and resolved references.
     pub(crate) fn append_plain_scalar(&mut self, name: &str, suffix: &str) -> bool {
-        if matches!(name, "BASH_ARGV0" | "GLOBIGNORE" | "OPTIND" | "PATH") {
+        if !Self::ordinary_assignment(name) {
             return false;
         }
-        let Some(variable) = self.variables.get_mut(name) else {
+        let Some(var) = self.variables.get_mut(name) else {
             return false;
         };
-        if variable.elements.is_some() || variable.nameref || variable.value.is_none() {
+        if var.elements.is_some() || var.nameref {
             return false;
         }
-        variable.value.as_mut().unwrap().push_str(suffix);
-        variable.declared = true;
-        variable.exported |= self.allexport;
+        let Some(value) = &mut var.value else {
+            return false;
+        };
+        value.push_str(suffix);
+        var.declared = true;
+        var.exported |= self.allexport;
         true
     }
 

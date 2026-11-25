@@ -108,6 +108,36 @@ impl Word {
         text.drain(..length);
     }
 
+    /// A plain scalar can keep its allocation for a self-prefixed assignment.
+    /// Evaluate the suffix normally. Expressions capable of changing the old
+    /// value (including indexed name references) require the original snapshot.
+    pub(crate) fn take_append_suffix(&mut self, target: &str, session: &crate::Session) -> bool {
+        let Self::Expanded(parts) = self else {
+            return false;
+        };
+        let parts = match parts.as_mut_slice() {
+            [Part::Text(empty), rest @ ..] if empty.is_empty() => rest,
+            other => other,
+        };
+        let Some((head, tail)) = parts.split_first_mut() else {
+            return false;
+        };
+        if !matches!(head, Part::Parameter { name, .. } | Part::BraceParameter(name) if name == target)
+            || !session.can_append_scalar(target)
+            || !tail.iter().all(|p| match p {
+                Part::Text(_) | Part::Pattern(_) => true,
+                Part::Parameter { name, .. } | Part::BraceParameter(name) => {
+                    is_identifier(name) && !session.is_nameref(name)
+                }
+                _ => false,
+            })
+        {
+            return false;
+        }
+        *head = Part::Text(String::new());
+        true
+    }
+
     /// Resolve in lexical order so an arithmetic assignment is visible to the
     /// following expansion and a skipped parameter alternative has no effects.
     pub fn resolve(

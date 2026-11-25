@@ -78,6 +78,19 @@ pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String
     {
         return Ok(Some(count.to_string()));
     }
+    // A name reference to an indexed element must evaluate its subscript in
+    // the live expansion, where arithmetic updates are visible to later words.
+    let resolved;
+    let name = if env.session.is_nameref(name)
+        && !env.shadows(name)
+        && let Ok(std::borrow::Cow::Owned(target)) = env.session.reference_name(name)
+        && crate::session::array::subscript(&target).is_some()
+    {
+        resolved = target;
+        &resolved
+    } else {
+        name
+    };
     let expanded;
     let name = if let Some((base, index)) = crate::session::array::subscript(name) {
         if !matches!(index, "@" | "*") && env.session.is_associative(base.trim_start_matches('#')) {
@@ -89,7 +102,7 @@ pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String
                 value.map(str::to_owned)
             });
         }
-        if !matches!(index, "@" | "*") && index.contains(['$', '`']) {
+        if !matches!(index, "@" | "*") && !index.bytes().all(|b| b.is_ascii_digit()) {
             let i = env.arithmetic(index)?;
             expanded = format!("{base}[{i}]");
             &expanded

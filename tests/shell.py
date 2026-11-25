@@ -95,6 +95,16 @@ unset -f echo; f() { echo -en 'abc'; }; v=$(f); printf '[%s]' "$v"
 v=$(echo $(echo "$BASH_SUBSHELL")); printf '[%s]' "$v" """,
                      0, b"[deep][fn:fn:value][abc][2]")
 
+    def test_self_prefixed_assignments_preserve_the_old_value(self):
+        self.compare("""s=abc; x=XYZ; s=$s$x; s="${s}:$s"; printf '<%s>' "$s"
+i=0; a=(A B); declare -n next='a[i++]'; i=$i$next; printf '<%s>' "$i"
+unset s; s=$s'!'; printf '<%s>' "$s"
+declare -i n=3; n=$n+1; printf '<%s>' "$n"
+a=(a b); a=$a/$a; printf '<%s>' "${a[@]}"
+v='*.rs'; [[ $v == '*.rs' ]] && printf literal; [[ xxx.rs == *.rs ]] && printf glob
+shopt -s nocasematch; [[ xyz == XYZ ]] && printf folded""",
+                     0, b"<abcXYZ:abcXYZ><0A><!><4><a/a><b>literalglobfolded", minimum=5)
+
     def test_append_and_array_count_through_references(self):
         self.compare("""v=ab; v+=cd; f() { local v=local; v+=x; printf '<%s>' "$v"; }; f
 declare -n ref=v; ref+=ef; printf '<%s>' "$v"

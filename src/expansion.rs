@@ -113,6 +113,10 @@ impl<'a> Expansion<'a> {
             })
     }
 
+    pub(super) fn shadows(&self, name: &str) -> bool {
+        self.assignments.iter().any(|(key, _)| key == name)
+    }
+
     pub fn assign(&mut self, name: &str, text: &str) {
         if let Some((_, v)) = self.assignments.iter_mut().rev().find(|(k, _)| k == name) {
             v.clear();

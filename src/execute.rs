@@ -1777,7 +1777,9 @@ fn prepare(
                     );
                 }
             }
-            Assignment::Scalar(word) => {
+            Assignment::Scalar(mut word) => {
+                let append =
+                    append || direct_assignment && word.take_append_suffix(&key, exp.session);
                 let value = exp.scalar(word)?;
                 if let std::borrow::Cow::Owned(resolved) = exp.session.reference_name(&key)? {
                     key = resolved;

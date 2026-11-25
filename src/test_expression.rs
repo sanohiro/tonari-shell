@@ -46,6 +46,11 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             let left = operand(session, left, status)?;
             match op.as_str() {
                 "=" | "==" | "!=" => {
+                    if !session.shopt.nocasematch
+                        && let Some(text) = right.as_literal()
+                    {
+                        return Ok((left == text) != (op == "!="));
+                    }
                     let captured = std::cell::Cell::new(None);
                     let mut env = crate::expansion::Expansion::new(session, status, &captured);
                     let mut right = right.clone();
