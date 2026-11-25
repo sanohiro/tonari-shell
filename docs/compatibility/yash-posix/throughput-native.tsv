@@ -1,0 +1,15 @@
+host	workload	first sh implementation ms	Tonari ms	Bash ms	Tonari/Bash
+ubuntu-24.04	startup	0.497	0.503	1.095	0.4594
+ubuntu-24.04	prefix	20.801	18.171	46.606	0.3899
+ubuntu-24.04	echo	24.173	23.302	57.885	0.4026
+ubuntu-24.04	spawn	52.881	51.455	72.122	0.7134
+ubuntu-24.04	alias	8.075	1.39	2.618	0.5309
+ubuntu-24.04	alias-3000	382.629	5.762	10.155	0.5674
+ubuntu-24.04	stdin	3.641	3.547	2.743	1.2931
+macos-15	startup	3.855	3.853	6.758	0.5701
+macos-15	prefix	20.631	18.704	48.47	0.3859
+macos-15	echo	21.771	22.41	59.667	0.3756
+macos-15	spawn	212.507	230.386	300.692	0.7662
+macos-15	alias	9.411	6.097	9.929	0.6141
+macos-15	alias-3000	134.9	11.07	20.537	0.539
+macos-15	stdin	7.109	8.029	10.02	0.8013

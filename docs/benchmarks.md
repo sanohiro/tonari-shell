@@ -1,5 +1,46 @@
 # Startup and execution / 起動と実行性能
 
+<a id="yash-posix"></a>
+
+## 2026-11-25 · POSIX sh workloads / sh モードの項目別計測
+
+The same pinned yash inputs run on native Linux x86-64 and macOS arm64. The full record links every case to its assertion results, timed samples and observed Rust functions, with a separate total per fixture. [Comparison and case tables](compatibility/yash-posix/README.md) · [Full native samples](https://github.com/sanohiro/tonari-shell/actions/runs/45615699784) · [Higher-repeat measurements](https://github.com/sanohiro/tonari-shell/actions/runs/45616001148)
+
+The physical Apple M1 comparison uses `a5ea7db` (first working sh-mode implementation), `10e63fd` and Bash 5.2.37. One warmup, 61 shuffled samples for startup and 17 for each repeated workload. Every sample validates stdout, stderr and exit status against Bash. Times are wall-clock medians in milliseconds.
+
+| M1 workload | First | Tonari | Bash | Tonari / Bash |
+| --- | ---: | ---: | ---: | ---: |
+| Start and execute `:` | 3.335 | 3.300 | 5.894 | 0.560 |
+| 10,000 special builtin prefixes | 18.227 | 16.735 | 34.748 | 0.482 |
+| 12,000 builtin writes | 27.528 | 27.285 | 51.395 | 0.531 |
+| 100 absolute external launches | 102.443 | 102.582 | 163.733 | 0.627 |
+| 500 aliases in one compound | 6.706 | 4.253 | 7.454 | 0.571 |
+| 3,000 aliases in one compound | 92.554 | 8.517 | 14.122 | 0.603 |
+| 1,500 assignment lines on stdin | 5.453 | 5.414 | 7.210 | 0.751 |
+
+変数の接頭代入では準備済みの名前と値を移動し、エイリアスでは後続の全トークンの移動とソース全体の繰り返し保存を省きました。通常の外部起動では不要な `posix_spawn` 属性を省略しましたが、M1 の100回起動では初回実装に対して測定上の改善はありません。3,000回のエイリアスは Bash 比0.603でした。共有標準入力の1,500行は改善後も Bash 比2/3に届きませんでした。M1 のリリースサイズは変更前 `d858d41` の1,450,016バイトから1,466,560バイトになり、動的依存先は引き続き libSystem のみです。[Raw M1 samples](compatibility/yash-posix/throughput-m1.jsonl) · [Reproduction driver](../tools/ci/yash-throughput.py)
+
+On Linux x86-64 the final 3,000-alias group took 5.762 ms against 10.155 ms for Bash. On the macOS arm64 CI runner the corresponding medians were 11.070 and 20.537 ms. One hundred external program launches remained above the 2/3 target on both CI hosts, at 51.455 / 72.122 ms and 230.386 / 300.692 ms respectively. The earlier working implementation on the same runners measured 52.881 and 212.507 ms. The physical M1 and both CI samples therefore give no repeatable external-launch speedup for this change. [All repeated workloads by host](compatibility/yash-posix/throughput-native.tsv)
+
+The shared-stdin experiment keeps the command text and the input descriptor identical and changes the seekable reader's capacity in a disposable build. There are 17 measured runs per executable after warmup. The short workload executes 1,500 scalar assignments. Medium lines carry 600-byte values and long lines carry 16,000-byte values. The shared-read workload consumes the following physical line inside the script. [Native buffer experiment](https://github.com/sanohiro/tonari-shell/actions/runs/45617420882) · [Inputs](../tools/ci/yash-stdin.py)
+
+| Host | Shared stdin | 512 B, ms | 8 KiB, ms | 32 KiB, ms | Bash, ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Linux x86-64 | short | 1.668 | 1.720 | 1.723 | 1.653 |
+| Linux x86-64 | medium | 3.728 | 3.516 | 4.212 | 8.402 |
+| Linux x86-64 | long | 6.489 | 5.705 | 5.705 | 20.504 |
+| Linux x86-64 | shared read | 1.683 | 1.741 | 1.733 | 2.458 |
+| macOS arm64 | short | 5.510 | 5.353 | 5.280 | 6.890 |
+| macOS arm64 | medium | 8.170 | 8.379 | 10.448 | 18.291 |
+| macOS arm64 | long | 12.331 | 10.860 | 10.316 | 34.737 |
+| macOS arm64 | shared read | 5.882 | 5.875 | 5.891 | 9.060 |
+
+512バイトは Linux の短い入力を約0.05 ms縮める一方、長い行は両OSで遅くなりました。32 KiBでは600バイト幅の入力が両OSで遅くなり、総合では8 KiBを維持しました。標準入力のオフセットは `read` や子プロセスと共有するため、先読みした内容を実行前に正しく戻す必要があります。
+
+On the Linux recheck the kernel's core pattern points to `systemd-coredump`. The soft core-size limit was zero. A second run emitted a single byte immediately before the real shell builtin `kill`, then timed until the parent reaped the process. With SIGSEGV, Tonari spent 1.477 ms before the marker and 157.781 ms afterwards. Bash spent 2.198 and 175.468 ms respectively. With SIGTERM, the corresponding times were 0.388 and 0.061 ms for Tonari and 0.911 and 0.148 ms for Bash. Thus a fatal-signal case can measure a substantially different operation from ordinary shell startup. The marker-to-reap interval includes the builtin, kernel, handler and scheduler. [Native signals and samples](https://github.com/sanohiro/tonari-shell/actions/runs/45616001148) · [Split measurement](../tools/ci/yash-signals.py)
+
+Linux `kill1-p.tst:24` only prints the name of signal 14. Its three-sample medians were 1.451 ms for Tonari and 1.203 ms for Bash. On the physical M1, the exact stdin script `kill -l 14` took 3.991 / 6.948 ms and a loop of 5,000 lookups with every output line checked took 12.464 / 26.539 ms (17 interleaved samples). The Linux observation remains in the above-target table. In the eleven-trial Linux recheck, `shift-p.tst:19` moved from a ratio of 1.316 to 0.576 and `path-p.tst:54` from 1.222 to 0.588. [Per-case repeats](compatibility/yash-posix/above-target.tsv)
+
 <a id="configure-pairs"></a>
 
 ## 2026-11-25 · Why a full configure can lose to Bash / 個別の処理が速くても configure が逆転した理由

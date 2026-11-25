@@ -1,0 +1,58 @@
+site ID	function	work inspected
+0	src/cli.rs parse	Decode argv once and borrow its basename before -c replaces $0.
+1	src/startup.rs initialize	Select the startup file for this invocation before opening a file.
+2	src/startup.rs source_file	Search PATH for dot operands and open the selected script once.
+3	src/input.rs stdin_script	Share the seekable input position with commands that read stdin.
+4	src/input.rs file_script	Reuse file metadata and the buffered script reader.
+5	src/input.rs text	Parse complete commands in order so earlier aliases take effect.
+6	src/input/eval.rs parse	Reuse the parsed eval program only while parser options allow it.
+7	src/parser/lexer.rs lex	Reuse token buffers and scan plain ASCII words in chunks.
+8	src/parser/aliases.rs expand_alias	Check the live alias table before copying replacement tokens.
+9	src/alias.rs builtin	Share alias definitions until mutation and quote only printed definitions.
+10	src/parser/here_doc.rs redirect	Save the delimiter and defer reading the body until newline.
+11	src/eval.rs run_if	Evaluate each condition once and skip unselected branches.
+12	src/eval.rs repeat	Reuse the loop body and propagate break, continue and exit.
+13	src/eval.rs call_function	Share the function definition and restore positional arguments on return.
+14	src/session/functions.rs define_function	Register an Rc definition without reparsing its body.
+15	src/arithmetic.rs with_variables	Parse the evaluated arithmetic text with the active variable lookup.
+16	src/expansion.rs fields_with_glob	Split only eligible fields and expand active patterns.
+17	src/expansion.rs scalar	Expand a single scalar without pathname enumeration.
+18	src/pattern.rs pathnames	Enumerate matching entries and sort the resulting paths.
+19	src/pattern.rs trim	Find the matching parameter boundary before copying the retained text.
+20	src/word.rs tilde	Use HOME for a bare tilde and consult the OS account database only for named users.
+21	src/session.rs assign_value	Reuse existing scalar capacity and preserve special-variable side effects.
+22	src/session.rs persist_prefix	Move prepared exported prefixes directly into the session.
+23	src/session.rs bind	Save temporary bindings for restoration after the builtin.
+24	src/execute.rs prepare	Expand command words and prefixes in their specified order.
+25	src/execute.rs prepare_redirects	Expand redirect operands once, preserving left-to-right order.
+26	src/execute.rs run_builtin	Save overwritten descriptors only for the duration of a returning builtin.
+27	src/execute.rs apply_protected	Apply opens, duplicates and closes in order and propagate OS failure.
+28	src/execute/here_input.rs open	Use the bounded pipe path when capacity permits and a file otherwise.
+29	src/execute/hash.rs resolve	Reuse a cached executable only while current search rules allow it.
+30	src/execute/spawn.rs spawn_resolved	Omit spawn attributes for ordinary foreground external commands.
+31	src/execute.rs exec	Replace the process image for eligible tail commands without an extra fork.
+32	src/execute.rs start_raw	Evaluate pipeline-stage expansions in the appropriate process.
+33	src/execute.rs start	Select spawn, fork or in-process builtin dispatch for this pipeline stage.
+34	src/subshell.rs capture_substitution	Try direct capture before creating a pipe and child.
+35	src/jobs.rs finish	Retain per-stage exit status and restore the controlling process group.
+36	src/jobs.rs kill	Resolve signal and PID or job specification before sending.
+37	src/jobs.rs wait_for_ids	Consume saved child status or wait for the requested job.
+38	src/jobs.rs wait_next	Poll and block atomically to avoid losing an exit notification.
+39	src/traps.rs set	Save the inherited disposition when first installing a signal trap.
+40	src/traps.rs after_fork	Reset caught traps while retaining ignores in shell children.
+41	src/traps.rs dispatch	Drain pending signal bits at shell command boundaries.
+42	src/traps.rs finish	Apply exit traps and preserve the signal or status seen by the parent.
+43	src/session/printf.rs run	Format directly from shell arguments and respect assignment escapes.
+44	src/builtins.rs echo	Write the prepared bytes and account for descriptor failure.
+45	src/builtins.rs test	Evaluate test operands, performing metadata queries only when needed.
+46	src/builtins/umask.rs run	Read or set the process mask and format the requested representation.
+47	src/session.rs read	Avoid consuming bytes belonging to the next stdin reader.
+48	src/session.rs get	Read special and ordinary variables through the current binding.
+49	src/session.rs shift	Advance the existing argument iterator instead of copying the tail.
+50	src/session.rs set	Change only the selected options or positional arguments.
+51	src/session/getopts.rs getopts	Reuse the option cursor while checking variable attributes.
+52	src/session.rs directory_builtin	Resolve the requested directory while preserving PWD and OLDPWD.
+53	src/execute/lookup.rs describe	Check reserved words, builtins, functions and path lookup in shell order.
+54	src/session/options.rs shopt	Query and set the option used by the interpreter.
+55	src/main.rs interactive	Redraw at command boundaries and dispatch traps before blocking for input.
+56	src/main.rs read_terminal_line	Leave later lines available to children sharing redirected stdin.
