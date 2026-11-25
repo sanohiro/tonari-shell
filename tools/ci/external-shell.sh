@@ -4,11 +4,15 @@ suite=$1 tonari=$2 bash_ref=$3
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 case "$suite" in
-  gnu-hello)
+  gnu-hello|gnu-profile)
     curl -fsSL --retry 3 https://ftp.gnu.org/gnu/hello/hello-2.12.2.tar.gz -o "$work/hello.tar.gz"
     echo "5a9a996dc292cc24dcf411cee87e92f6aae5b8d13bd9c6819b4c7a9dce0818ab  $work/hello.tar.gz" | shasum -a 256 -c - >&2
     tar -xzf "$work/hello.tar.gz" -C "$work"
-    python3 tools/bench_external.py gnu-hello "$work/hello-2.12.2" "$tonari" "$bash_ref"
+    if [[ $suite == gnu-profile ]]; then
+      python3 tools/ci/configure-profile.py "$work/hello-2.12.2/configure" "$tonari" "$bash_ref" "$PWD/results"
+    else
+      python3 tools/bench_external.py gnu-hello "$work/hello-2.12.2" "$tonari" "$bash_ref"
+    fi
     ;;
   fumiyas)
     curl -fsSL --retry 3 https://raw.githubusercontent.com/fumiyas/fumiyas.github.io/d188b4fa60eca66f2bcd9f5a48a3c80a5c4fc307/2013/12/01/sh-benchmark-scripts.sh -o "$work/cases.sh"
