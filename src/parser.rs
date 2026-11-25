@@ -455,14 +455,34 @@ pub fn session_source_at(
     session: &crate::Session,
     line: usize,
 ) -> Result<Vec<Statement>, Error> {
-    let read = || {
-        let old_line = FIRST_LINE.replace(line);
-        let before = EXTGLOB.replace(session.shopt.glob.extglob);
-        let parsed = if eof {
+    with_read_options(session, line, || {
+        if eof {
             parse_final(source)
         } else {
             parse(source)
+        }
+    })
+}
+
+pub(crate) fn validate_tail(source: &str, session: &crate::Session, line: usize) -> bool {
+    with_read_options(session, line, || {
+        if source.contains('\0') {
+            return false;
+        }
+        let Ok((tokens, spans, _)) = lex(source, false, false) else {
+            return false;
         };
+        Reader::new(tokens, spans, source)
+            .read_list(&[], true)
+            .is_ok()
+    })
+}
+
+fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnce() -> T) -> T {
+    let read = || {
+        let old_line = FIRST_LINE.replace(line);
+        let before = EXTGLOB.replace(session.shopt.glob.extglob);
+        let parsed = parse();
         EXTGLOB.set(before);
         FIRST_LINE.set(old_line);
         parsed
@@ -612,10 +632,24 @@ impl Reader {
     }
 
     fn list(&mut self, stops: &[&str]) -> Result<Vec<Statement>, Error> {
+        self.read_list(stops, false)
+    }
+
+    fn read_list(
+        &mut self,
+        stops: &[&str],
+        discard_complete: bool,
+    ) -> Result<Vec<Statement>, Error> {
         let mut statements = Vec::new();
         let mut condition = Condition::Always;
         let mut and_or_start = 0;
         loop {
+            // A syntax-only top-level read needs the pending and/or chain for
+            // a possible trailing ampersand. Every earlier command can drop.
+            if discard_complete && condition == Condition::Always {
+                statements.clear();
+                and_or_start = 0;
+            }
             self.newlines();
             if self.peek().is_none() {
                 if condition != Condition::Always {

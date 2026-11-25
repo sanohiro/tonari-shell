@@ -515,7 +515,7 @@ pub fn text(
         let open_function = probe
             && parser::opens_function(text)
             && !(session.shopt.expand_aliases && session.aliases.0.is_some());
-        let mut parse = |unit: &str, eof| {
+        let parse = |session: &mut Session, unit: &str, eof| {
             if eval_line.is_some() {
                 eval::parse(session, unit, eof, base_line)
             } else {
@@ -525,7 +525,7 @@ pub fn text(
         let mut result = if open_function {
             Err(parser::Error::Incomplete("unfinished function definition"))
         } else {
-            parse(text, last)
+            parse(session, text, last)
         };
         // Large incomplete compounds can otherwise reparse each growing prefix.
         // With -n there are no command effects between them. Keep short complete
@@ -538,7 +538,7 @@ pub fn text(
             && matches!(result, Err(parser::Error::Incomplete(_)))
         {
             check_tail = false;
-            if parse(&source[start..], false).is_ok() {
+            if parser::validate_tail(&source[start..], session, base_line) {
                 return Flow::Continue(0);
             }
         }
@@ -550,7 +550,7 @@ pub fn text(
                 text,
                 &source.as_bytes()[end..limit],
                 limit == source.len(),
-                |size| parse(&source[start..end + size], false),
+                |size| parse(session, &source[start..end + size], false),
             ) {
                 Ok((program, consumed, extra_lines)) => {
                     end += consumed;

@@ -68,6 +68,17 @@ class ShellTests(unittest.TestCase):
             run = subprocess.run([shell, script], env=self.env, capture_output=True)
             self.assertEqual((run.returncode, run.stdout), (2, b"before\n"))
 
+    def test_syntax_check_releases_only_complete_and_or_lists(self):
+        script = self.cwd / "syntax.sh"
+        prefix = "message='start\n" + "quoted value\n" * 800 + "'\n"
+        chains = "false || true && echo side_effect &\nwait\n" * 20
+        for suffix, status in [("", 0), ("true &&\n", 2), ("if true; then\n", 2)]:
+            script.write_text(prefix + chains + suffix)
+            for shell in self.shells_for():
+                run = subprocess.run([shell, "-n", script], env=self.env, capture_output=True)
+                self.assertEqual((run.returncode, run.stdout), (status, b""))
+                self.assertEqual(bool(run.stderr), bool(status))
+
     def test_case_lookahead_preserves_alias_and_line_number(self):
         script = self.cwd / "case.sh"
         source = ("shopt -s expand_aliases\ncase x in\nx) : <<'BODY'\n"
