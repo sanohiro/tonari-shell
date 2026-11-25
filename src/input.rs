@@ -106,11 +106,6 @@ pub fn file_script(
             && let Ok(source) = std::str::from_utf8(&bytes[..n])
         {
             drop(file);
-            // Syntax-only execution cannot change aliases or parser options between
-            // commands. On failure, the incremental reader supplies its line diagnostics.
-            if check && parser::session_source_at(source, false, session, 1).is_ok() {
-                return Flow::Continue(0);
-            }
             return text(session, source, status, false, check, None);
         }
     }
@@ -440,6 +435,7 @@ pub fn text(
     // additional traversal of the source beyond the ordinary per-command window.
     const WINDOW: usize = 8192;
     let mut scan_budget = source.len();
+    let mut check_tail = check && !session.verbose && source.len() <= 1024 * 1024;
     let mut lines = source.split_inclusive('\n');
     while let Some(line) = lines.next() {
         line_number += 1;
@@ -486,6 +482,21 @@ pub fn text(
         } else {
             parse(text, last)
         };
+        // Large incomplete compounds can otherwise reparse each growing prefix.
+        // With -n there are no command effects between them. Keep short complete
+        // lines on their streaming path, and fall back for precise diagnostics.
+        if check_tail
+            && !new_command
+            && !expand_history
+            && !last
+            && text.len() >= 2048
+            && matches!(result, Err(parser::Error::Incomplete(_)))
+        {
+            check_tail = false;
+            if parse(&source[start..], false).is_ok() {
+                return Flow::Continue(0);
+            }
+        }
         if probe && matches!(result, Err(parser::Error::Incomplete(_))) {
             let limit = source
                 .len()
