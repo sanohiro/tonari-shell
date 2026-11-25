@@ -68,6 +68,19 @@ class ShellTests(unittest.TestCase):
             run = subprocess.run([shell, script], env=self.env, capture_output=True)
             self.assertEqual((run.returncode, run.stdout), (2, b"before\n"))
 
+    def test_case_lookahead_preserves_alias_and_line_number(self):
+        script = self.cwd / "case.sh"
+        source = ("shopt -s expand_aliases\ncase x in\nx) : <<'BODY'\n"
+                  "case text in\ncase text in\nBODY\nalias report=echo ;;\nesac\n"
+                  "report line-$LINENO\ncase z in\nz) report end ;;\nesac\n")
+        for prefix in ("", "#" + "x" * (128 * 1024 - 70) + "\n"):
+            script.write_text(prefix + source)
+            for shell in self.shells_for():
+                run = subprocess.run([shell, script], env=self.env, capture_output=True)
+                line = 10 if prefix else 9
+                self.assertEqual((run.returncode, run.stdout, run.stderr),
+                                 (0, f"line-{line}\nend\n".encode(), b""))
+
     def test_missing_command_is_rechecked_and_redirects_take_effect(self):
         self.compare("""PATH=.:/usr/bin:/bin
 { later; echo missing=$?; } 2>err

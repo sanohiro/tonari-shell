@@ -125,7 +125,7 @@ pub fn file_script(
     // Keep large compound commands in view across the usual 8 KiB boundary.
     // Verbose mode must still report each line as it is read.
     let capacity = metadata
-        .filter(|m| m.is_file() && (session.source_depth > 0 || m.len() >= 128 * 1024))
+        .filter(|m| m.is_file())
         .map_or(8192, |m| m.len().clamp(8192, 128 * 1024) as usize);
     match PrivateFile::new(file) {
         Ok(file) => run(
@@ -216,6 +216,29 @@ fn buffered_compound<P: AsRef<[parser::Statement]>>(
         match parse(size) {
             Ok(program) if matches!(program.as_ref(), [s] if s.location.end > first.len()) => {
                 Ok(Some((program, size, lines)))
+            }
+            Ok(program) => {
+                // Quoted text and here-documents may look like nested headers.
+                // If the scan overshot, the parser already located the first
+                // command. Reparse its physical line boundary so option and
+                // alias changes still take effect before the following read.
+                let end = program
+                    .as_ref()
+                    .first()
+                    .and_then(|s| s.location.end.checked_sub(first.len()))
+                    .ok_or(size)?;
+                let newline =
+                    memchr::memchr(b'\n', buffered.get(end..size).ok_or(size)?).ok_or(size)?;
+                let boundary = end + newline + 1;
+                if boundary >= size {
+                    return Err(size);
+                }
+                let unit = parse(boundary).map_err(|_| size)?;
+                if !matches!(unit.as_ref(), [s] if s.location.end > first.len()) {
+                    return Err(size);
+                }
+                let lines = memchr::memchr_iter(b'\n', &buffered[..boundary]).count();
+                Ok(Some((unit, boundary, lines)))
             }
             Err(parser::Error::Incomplete(_) | parser::Error::HereDoc(_)) => Ok(None),
             _ => Err(size),
@@ -343,7 +366,14 @@ fn run(
         } else {
             parser::session_source_at(text, n == 0, session, base_line)
         };
-        if buffered
+        // A large compound can start near the end of a read buffer. After
+        // refilling, retry lookahead at geometrically spaced prefix sizes.
+        let retry = line_start >= 1024
+            && line_start.ilog2() != input.len().ilog2()
+            && !shared_offset
+            && !session.verbose
+            && n != 0;
+        if (buffered || retry)
             && (session.source_depth > 0 || !session.history_enabled)
             && matches!(result, Err(parser::Error::Incomplete(_)))
             && let Ok((program, consumed, lines)) =

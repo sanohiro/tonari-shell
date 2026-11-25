@@ -12,11 +12,14 @@ import tempfile
 import time
 
 
-def profile(script, shell, out, label, tracer):
+def profile(script, shell, out, label, tracer, compiler=None):
     with tempfile.TemporaryDirectory() as work:
         root = Path(work)
         env = dict(HOME=work, TMPDIR=work, PATH=os.environ["PATH"], LC_ALL="C",
                    SHELL=shell, CONFIG_SHELL=shell, CC="/usr/bin/cc")
+        if compiler:
+            env.update(CC=str(compiler), CONFIGURE_CLOCK_LOG=str(out / f"{label}.clock"))
+            Path(env["CONFIGURE_CLOCK_LOG"]).write_text("")
         argv = [shell, script, "--disable-nls", "--cache-file=/dev/null"]
         if tracer:
             argv = [tracer, "-f", "--seccomp-bpf", "-qq", "-ttt", "-s", "160",
@@ -51,3 +54,24 @@ if __name__ == "__main__":
             if header is not None and value != header:
                 raise ValueError("config.h changed")
             header = value
+
+    # Include OS execution and waiting for each generated test. Only this
+    # diagnostic copy has a launcher inserted at the shell's conftest calls.
+    # The ordinary phase traces and published medians use the original script.
+    with tempfile.TemporaryDirectory() as work:
+        root = Path(work)
+        clock = root / "clock"
+        subprocess.run(["/usr/bin/cc", "-O2", Path(__file__).with_name("configure-clock.c"),
+                        "-o", clock], check=True)
+        compiler = root / "cc"
+        compiler.symlink_to(clock)
+        copy = root / "source"
+        shutil.copytree(Path(script).parent, copy, symlinks=True)
+        probe = copy / "configure"
+        source = probe.read_text()
+        for prefix in ("ac_try='", "LC_CTYPE= ", "&& "):
+            source = source.replace(prefix + "./conftest", f"{prefix}{clock} ./conftest")
+        probe.write_text(source)
+        for name, shell in [("bash", bash), ("tonari", tonari)]:
+            if profile(probe, shell, out, f"{name}-clock", None, compiler) != header:
+                raise ValueError("timed compiler or probe changed config.h")
