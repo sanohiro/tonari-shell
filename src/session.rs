@@ -421,7 +421,7 @@ impl Session {
                     'v' => self.verbose = enable,
                     'o' => {
                         let Some(name) = args.get(i) else {
-                            let mut out = io::stdout().lock();
+                            let mut out = io::BufWriter::with_capacity(512, io::stdout().lock());
                             for (name, on) in self.options(true) {
                                 let result = if enable {
                                     writeln!(out, "{name:16}{}", if on { "on" } else { "off" })

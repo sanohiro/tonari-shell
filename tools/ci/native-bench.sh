@@ -257,6 +257,10 @@ case "$SUITE" in
       python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
         --spawn-control "$bin/spawn-control" > "$out/throughput.jsonl"
       selection=(--fixture pipeline-p.tst)
+    elif [[ $SUITE == external-yash-options ]]; then
+      python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
+        --case print-options --case replay-options --runs 21 > "$out/throughput.jsonl"
+      selection=(--fixture set-p.tst)
     elif [[ $SUITE == external-yash-script-path ]]; then
       selection=(--fixture quote-p.tst --fixture unset-p.tst --fixture simple-p.tst)
     elif [[ $SUITE == external-yash-io ]]; then

@@ -27,6 +27,10 @@ DIAGNOSTICS = {
     "plain-script-30": ("stdin", "i=0; while [ $i -lt 30 ]; do ./prog foo bar baz || exit; i=$((i+1)); done\n"),
     "symbolic-umask": ("command", "umask 027; i=0; while [ $i -lt 5000 ]; do "
                        "umask u=xwr || exit 1; i=$((i+1)); done; umask"),
+    "print-options": ("command", "i=0; while [ $i -lt 1000 ]; do set +o; set -o; "
+                      "i=$((i+1)); done >/dev/null; echo $i"),
+    "replay-options": ("command", "saved=$(set +o); i=0; while [ $i -lt 1000 ]; do "
+                       "eval \"$saved\"; i=$((i+1)); done; echo $i"),
     "set-flags": ("command", "i=0; while [ $i -lt 5000 ]; do set -e +a -o noclobber -u; "
                   "i=$((i+1)); done; case $- in *C*) echo $i;; *) exit 1;; esac"),
 }
