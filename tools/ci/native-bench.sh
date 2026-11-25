@@ -5,7 +5,7 @@ current="$bin/current"
 out="$PWD/results"
 ref=/bin/bash
 case "$SUITE" in
-  bensch-*|oils-*|spec-builtins|spec-hot|spec-tty) exec bash tools/ci/external-spec.sh ;;
+  bensch-*|oils-*|spec-builtins|spec-hot|spec-tty|spec-response) exec bash tools/ci/external-spec.sh ;;
 esac
 # These Bash archives match the GNU tests used by the distribution audits.
 download_bash() {

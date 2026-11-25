@@ -44,6 +44,9 @@ case "$SUITE" in
       "$lab/venv/bin/python" "$repo/tools/ci/bensch-pty.py" "$lab/upstream" \
       "$out/pty.jsonl" "$ref" "$lab/bin/bash" --shard "$shard" --shards 8 --observer "$RUNNER_TEMP/bin/paths"
     ;;
+  spec-response)
+    python3 "$repo/tools/ci/bensch-response.py" "$ref" "$lab/bin/bash" > "$out/response.tsv"
+    ;;
   spec-hot)
     python3 "$repo/tools/ci/spec-hot.py" "$ref" "$RUNNER_TEMP/bin/baseline" "$RUNNER_TEMP/bin/current" > "$out/hot.tsv"
     ;;
