@@ -74,7 +74,7 @@ def checked(rc, out, err):
 # Some upstream loops discard stdout, and their loop epilogue masks the
 # last command's status. Inspect the result after an untimed copy has run.
 UNIXWIN_OBSERVATIONS = {
-    "expand.tilde_home": 'printf "%s" "$x"',
+    "expand.tilde_home": 'test "$x" = "$HOME/sub/dir"',
     "expand.tilde_user": 'printf "%s" "$x"',
     "expand.nested_cmdsubst": 'printf "%s" "$x"',
     "strings.append_assign": 'printf "%s" "$s"',
