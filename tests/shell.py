@@ -60,7 +60,8 @@ class ShellTests(unittest.TestCase):
         env = self.env | {"BASH_ENV": str(self.cwd / "bashenv"), "ENV": str(self.cwd / "env")}
         (self.cwd / "bashenv").write_text("echo bashenv\n")
         (self.cwd / "env").write_text('shopt -oq posix; echo "env:$?"\n')
-        for binary in (BASH, TONARI):
+        # Bash 3.2 on macOS exits on a failing "command ." in sh mode.
+        for binary in self.shells_for(minimum=5):
             sh.unlink(missing_ok=True)
             sh.symlink_to(binary)
             def run(args, script=None):
