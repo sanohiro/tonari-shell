@@ -9,16 +9,27 @@ if [[ -n ${EXTERNAL_BENCH_CASE:-} || -n ${EXTERNAL_BENCH_RUNS:-} ]]; then
     gnu-hello|fumiyas|unixwin|luish)
       if [[ -n ${EXTERNAL_BENCH_CASE:-} ]]; then set -- "$@" --case "$EXTERNAL_BENCH_CASE"; fi
       if [[ -n ${EXTERNAL_BENCH_RUNS:-} ]]; then set -- "$@" --runs "$EXTERNAL_BENCH_RUNS"; fi ;;
+    shellspec) [[ -n ${TONARI_COVERAGE_BINARY:-} ]] || { echo "ShellSpec timing uses its upstream controller" >&2; exit 2; } ;;
     *) echo "Per-case selection and trial counts require a bench_external.py suite" >&2; exit 2 ;;
   esac
 fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+trace_paths() {
+  if [[ -n ${TONARI_COVERAGE_BINARY:-} ]]; then
+    local source=$1
+    set --
+    if [[ -n ${EXTERNAL_BENCH_CASE:-} ]]; then set -- --case "$EXTERNAL_BENCH_CASE"; fi
+    python3 tools/ci/trace-external-paths.py "$suite" "$source" "$TONARI_COVERAGE_BINARY" "$@" > "$PWD/results/paths.jsonl"
+    exit
+  fi
+}
 case "$suite" in
   gnu-hello|gnu-profile|gnu-waits)
     curl -fsSL --retry 3 https://ftp.gnu.org/gnu/hello/hello-2.12.2.tar.gz -o "$work/hello.tar.gz"
     echo "5a9a996dc292cc24dcf411cee87e92f6aae5b8d13bd9c6819b4c7a9dce0818ab  $work/hello.tar.gz" | shasum -a 256 -c - >&2
     tar -xzf "$work/hello.tar.gz" -C "$work"
+    trace_paths "$work/hello-2.12.2"
     if [[ $suite == gnu-waits ]]; then
       python3 tools/ci/configure-waits.py "$work/hello-2.12.2" "$tonari" "$bash_ref" "${tonari%/*}/observer" "$PWD/results"
     elif [[ $suite == gnu-profile ]]; then
@@ -38,6 +49,7 @@ case "$suite" in
     curl -fsSL --retry 3 https://raw.githubusercontent.com/fumiyas/fumiyas.github.io/d188b4fa60eca66f2bcd9f5a48a3c80a5c4fc307/2013/12/01/sh-benchmark-scripts.sh -o "$work/cases.sh"
     echo "87360d3da6988cbc5542fb339f37377b1802721353b1d89c1ceba5d773d29da7  $work/cases.sh" | shasum -a 256 -c - >&2
     command -v zsh >/dev/null || { echo 'fumiyas fixtures require zsh' >&2; exit 1; }
+    trace_paths "$work/cases.sh"
     python3 tools/bench_external.py fumiyas "$work/cases.sh" "$tonari" "$bash_ref" "$@"
     ;;
   shellspec|check-shellspec|unixwin|luish)
@@ -49,6 +61,7 @@ case "$suite" in
     git -C "$work" init -q
     git -C "$work" fetch -q --depth 1 "https://github.com/$repo.git" "$rev"
     git -C "$work" checkout -q --detach "$rev"
+    trace_paths "$work"
     if [[ $suite == shellspec || $suite == check-shellspec ]]; then
       check=("$bash_ref" "$tonari")
       if [[ -n $previous ]]; then check+=("$previous"); fi

@@ -124,9 +124,25 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
-  external-review-*|external-check-shellspec|external-shellspec|external-fumiyas|external-unixwin|external-luish|external-gnu-hello|external-gnu-profile|external-gnu-waits)
+  external-paths-*|external-review-*|external-check-shellspec|external-shellspec|external-fumiyas|external-unixwin|external-luish|external-gnu-hello|external-gnu-profile|external-gnu-waits)
     suite=${SUITE#external-}
     set --
+    if [[ $suite == paths-* ]]; then
+      suite=${suite#paths-}
+      toolchain=$(sed -n 's/^ *toolchain=//p' tools/build-release.sh)
+      rustup component add llvm-tools-preview --toolchain "$toolchain"
+      sysroot=$(rustc +"$toolchain" --print sysroot)
+      host=$(rustc +"$toolchain" -vV | sed -n 's/^host: //p')
+      export LLVM_PROFDATA="$sysroot/lib/rustlib/$host/bin/llvm-profdata"
+      if [[ $RUNNER_OS == macOS ]]; then
+        RUST_DEMANGLER=$(xcrun -f llvm-cxxfilt)
+      else
+        RUST_DEMANGLER=c++filt
+      fi
+      export RUST_DEMANGLER
+      CARGO_TARGET_DIR="$RUNNER_TEMP/coverage-build" RUSTFLAGS='-C instrument-coverage' cargo +"$toolchain" build --locked
+      export TONARI_COVERAGE_BINARY="$RUNNER_TEMP/coverage-build/debug/tonari"
+    fi
     if [[ $suite == review-* ]]; then
       suite=${suite#review-}
       set -- "$bin/baseline" "$bin/opt-3"
