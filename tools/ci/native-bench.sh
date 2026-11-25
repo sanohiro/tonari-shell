@@ -257,6 +257,11 @@ case "$SUITE" in
       python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
         --spawn-control "$bin/spawn-control" > "$out/throughput.jsonl"
       selection=(--fixture pipeline-p.tst)
+    elif [[ $SUITE == external-yash-assignment-order ]]; then
+      python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
+        --case literal-prefix-redirect --case expanded-prefix-redirect --runs 13 > "$out/throughput.jsonl"
+      REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k posix_
+      selection=(--fixture simple-p.tst)
     elif [[ $SUITE == external-yash-options ]]; then
       python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
         --case print-options --case replay-options --runs 21 > "$out/throughput.jsonl"

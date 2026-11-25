@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## 2026-11-26 · Interpreting shared POSIX failures / 両シェルが失敗した試験の扱い
+
+A Bash-passing gate catches compatibility regressions. For a shared failure, check the shell specification and read the upstream assertion and its preconditions. The simple-command fixture opened an output file and used it inside a prefix assignment on the same command. POSIX requires the redirect to run first for a regular command. Tests now exercise file and descriptor lifetimes across functions, external commands, pipelines, background jobs and failed opens. 同じ失敗を Bash 互換として見過ごすと、先に作るはずのファイルが読めず、失敗時にも代入側が別のファイルを書いてしまいます。通常の Bash モードと POSIX モードの両方を検証します。[Case review](compatibility/yash-posix-followup/README.md) · [Execution tests](../tests/shell.py)
+
+On Darwin, a temporary directory can inherit a group outside the user's memberships. Verify the mode with stat after setting a set-group-ID test fixture. 実機で `wheel` と `staff` の親ディレクトリに同じ条件を作ると、前者だけ setgid ビットが消えました。シェルのファイル判定と試験データの準備を個別に検証できます。[Observed fixture results](compatibility/yash-posix-followup/remaining-verdicts.tsv)
+
 ## 2026-11-26 · Shared input, child status and foreground jobs / 共有入力と子プロセスの状態
 
 A shell reading commands from a regular file on fd 0 shares its offset with children. A physical line assigning a literal or an existing ordinary scalar can use the buffered data through the next assignment. Before a command that could read fd 0, Tonari seeks back over unread bytes. The shortcut falls back on dynamic parameters, command substitution, special bindings, tracing, active traps and jobs. The regression script alternates assignments with a builtin read and an external cat and checks the exact remaining bytes. [Input implementation](../src/input.rs) · [Regression tests](../tests/shell.py) · [Native timings](compatibility/yash-posix-followup/README.md)

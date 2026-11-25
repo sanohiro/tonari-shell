@@ -25,6 +25,10 @@ WORKLOADS = {
 DIAGNOSTICS = {
     "plain-script": ("stdin", "./prog foo bar baz\n"),
     "plain-script-30": ("stdin", "i=0; while [ $i -lt 30 ]; do ./prog foo bar baz || exit; i=$((i+1)); done\n"),
+    "literal-prefix-redirect": ("command", "i=0; while [ $i -lt 3000 ]; do "
+                                "v=x true 3>/dev/null || exit; i=$((i+1)); done; echo $i"),
+    "expanded-prefix-redirect": ("command", "i=0; while [ $i -lt 3000 ]; do "
+                                 "v=$(printf x) true 3>/dev/null || exit; i=$((i+1)); done; echo $i"),
     "symbolic-umask": ("command", "umask 027; i=0; while [ $i -lt 5000 ]; do "
                        "umask u=xwr || exit 1; i=$((i+1)); done; umask"),
     "print-options": ("command", "i=0; while [ $i -lt 1000 ]; do set +o; set -o; "

@@ -99,6 +99,62 @@ class ShellTests(unittest.TestCase):
                                       stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
                 self.assertEqual((proc.returncode, proc.stdout), (-signal.SIGUSR1, b"env:1\n"))
 
+    def test_posix_redirections_precede_prefix_assignments(self):
+        sh = self.cwd / "sh"
+        sh.symlink_to(TONARI)
+        script = r"""show() { printf '<%s>:%s\n' "$v" "$1"; }
+v=outer
+printf 'input\n' >source
+v=$(cat <&5) 5<source show "$(test -e created || echo early)" >created
+cat created
+v=$(cat <&5) 5<source /usr/bin/env | grep '^v='
+v=$(cat <&5) 5<source show bg >background & wait
+cat background
+v=$(printf z >&4) 4>once true
+cat once; echo
+v=$(echo wrong >side-effect) true <absent
+echo "failed:$?"
+test ! -e side-effect || exit 31
+test ! -e readonly-file || exit 32
+(readonly x; x=bad true >readonly-file)
+test -e readonly-file || exit 33
+echo "restored:$v"
+"""
+        p = self.command(sh, script)
+        self.assertEqual((p.returncode, p.stdout), (0, b"<input>:early\nv=input\n<input>:bg\nz\nfailed:1\nrestored:outer\n"), p.stderr)
+        self.assertIn(b"absent", p.stderr)
+        self.assertIn(b"readonly", p.stderr)
+        self.assertNotIn(b"invalid file descriptor", p.stderr)
+        p = self.command(sh, 'unset red; x=ok /usr/bin/true >"${red:=external}"; '
+                             'echo "${red-unset}"; x=ok true >"${red:=builtin}"; echo "$red"')
+        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, b"unset\nbuiltin\n", b""))
+        p = self.command(sh, 'unset red; x=ok true >"${red:?missing}"; echo unreachable')
+        self.assertNotEqual(p.returncode, 0)
+        self.assertEqual(p.stdout, b"")
+        self.assertIn(b"missing", p.stderr)
+        # Bash mode reads the right-hand side before truncating an existing file.
+        for shell in (BASH, TONARI):
+            p = self.command(shell, "printf old >same; take() { echo \"$v\"; }; v=$(cat same) 3>same take")
+            self.assertEqual((p.returncode, p.stdout, p.stderr), (0, b"old\n", b""))
+
+    def test_posix_test_tty_operands(self):
+        sh = self.cwd / "sh"
+        master, slave = pty.openpty()
+        try:
+            for shell in (BASH, TONARI):
+                sh.unlink(missing_ok=True)
+                sh.symlink_to(shell)
+                script = """for value in '' x -10; do test -t "$value"; echo $?; done
+test -t 0 0<&-; echo $?; test -t 0 </dev/null; echo $?; test -t 0; echo $?
+test -t 5 5<&-; echo $?; test -t 5 5</dev/null; echo $?; test -t 5 5<&0; echo $?"""
+                p = subprocess.run([sh, "-c", script], stdin=slave, cwd=self.cwd,
+                                   env=self.env, capture_output=True, timeout=5)
+                self.assertEqual((p.returncode, p.stdout, p.stderr),
+                                 (0, b"1\n1\n1\n1\n1\n0\n1\n1\n0\n", b""))
+        finally:
+            os.close(slave)
+            os.close(master)
+
     def test_seekable_input_assignment_and_child_offsets(self):
         script = self.cwd / "input"
         script.write_text("i=one\nx=old\nx=$i\nread -r line\npayload for read\n"
@@ -432,6 +488,12 @@ v=''; printf '<%s>' "${v//$p/x}" "${v/%$p/x}" """,
         self.compare('shopt -s varredir_close; : {tmp}>out; test -e /dev/fd/$tmp; echo "$?"; '
                      'exec {keep}>out; test -e /dev/fd/$keep; echo "$?"; exec {keep}>&-', 0,
                      b"1\n0\n", minimum=5)
+
+        for shell in self.shells_for(minimum=5):
+            for name, expected in (("true", (127, b"")), ("/usr/bin/true", (0, b"after\n"))):
+                result = self.command(shell, name + ' {out}>"${missing:?unset}"; echo after')
+                self.assertEqual((result.returncode, result.stdout), expected)
+                self.assertIn(b"unset", result.stderr)
 
     def test_invalid_expansion_in_unselected_shell_branch(self):
         self.compare('if false; then echo ${(M)${(k)parameters[@]}:#git_*}; fi; echo ready',

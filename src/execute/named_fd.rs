@@ -77,13 +77,43 @@ impl Scope {
                 self.restore
                     .push((r.fd, SavedFd::capture(&action, actions)?));
             }
-            if !apply(actions, libc::PIPE_BUF) {
+            if !apply_protected(actions, libc::PIPE_BUF) {
                 return Ok(false);
             }
             self.changed.push(r.fd);
             session.stdin_redirected |= r.fd == 0;
         }
         Ok(true)
+    }
+
+    fn install(
+        &mut self,
+        redirects: Vec<Redirect<Word>>,
+        session: &mut Session,
+        status: u8,
+        child_redirects: bool,
+    ) -> io::Result<Option<Flow>> {
+        for raw in redirects {
+            match self.redirect(session, raw, status) {
+                Ok(true) => {}
+                Ok(false) => return Ok(Some(Flow::Continue(1))),
+                Err(error) => {
+                    let Some(expansion) = error
+                        .get_ref()
+                        .and_then(|e| e.downcast_ref::<crate::expansion::Error>())
+                    else {
+                        return Err(error);
+                    };
+                    eprintln!("tonari: {expansion}");
+                    return Ok(Some(if child_redirects {
+                        Flow::Continue(expansion.status)
+                    } else {
+                        expansion.flow(session)
+                    }));
+                }
+            }
+        }
+        Ok(None)
     }
 
     fn finish(self, session: &mut Session, committed: bool) -> io::Result<()> {
@@ -105,29 +135,57 @@ impl Scope {
     }
 }
 
-fn command(mut cmd: PreparedCommand, session: &mut Session, status: u8) -> io::Result<Flow> {
+pub(super) fn with_redirects(
+    redirects: Vec<Redirect<Word>>,
+    session: &mut Session,
+    status: u8,
+    child_redirects: bool,
+    run: impl FnOnce(&mut Session) -> io::Result<(Flow, bool)>,
+) -> io::Result<Flow> {
     let old_input = session.stdin_redirected;
     let mut scope = Scope::default();
-    let mut committed = false;
-    let result = (|| {
-        for raw in std::mem::take(&mut cmd.named_redirects) {
-            if !scope.redirect(session, raw, status)? {
-                return Ok(Flow::Continue(1));
-            }
-        }
-        if let Some(b) = builtin(&cmd, status, session) {
-            let flow = eval_builtin(b, &mut cmd, session, status, false);
-            committed = matches!(b, Builtin::Exec) && matches!(flow, Flow::Continue(0));
-            Ok(flow)
-        } else {
-            Ok(Flow::Continue(External::new(&cmd, session).exec(None)))
-        }
-    })();
+    let saved_substitutions = session.substitutions.scope();
+    let mut child = child_redirects.then(|| session.clone());
+    let env = child.as_mut().unwrap_or(session);
+    let applied = scope.install(redirects, env, status, child_redirects);
+    if let Some(child) = child {
+        session.stdin_redirected = child.stdin_redirected;
+        session
+            .substitutions
+            .adopt(child.substitutions, saved_substitutions);
+    }
+    let result = match applied {
+        Ok(None) => run(session),
+        Ok(Some(flow)) => Ok((flow, false)),
+        Err(error) => Err(error),
+    };
+    let committed = matches!(result, Ok((_, true)));
     if !committed {
         session.stdin_redirected = old_input;
     }
     scope.finish(session, committed)?;
-    result
+    result.map(|(flow, _)| flow)
+}
+
+fn command(mut cmd: PreparedCommand, session: &mut Session, status: u8) -> io::Result<Flow> {
+    with_redirects(
+        std::mem::take(&mut cmd.named_redirects),
+        session,
+        status,
+        false,
+        |session| {
+            if let Some(b) = builtin(&cmd, status, session) {
+                let flow = eval_builtin(b, &mut cmd, session, status, false);
+                let commit = matches!(b, Builtin::Exec) && matches!(flow, Flow::Continue(0));
+                Ok((flow, commit))
+            } else {
+                Ok((
+                    Flow::Continue(External::new(&cmd, session).exec(None)),
+                    false,
+                ))
+            }
+        },
+    )
 }
 
 pub(super) fn run(
