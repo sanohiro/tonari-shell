@@ -49,6 +49,11 @@ def prepare(root):
     subprocess.run(["make", "-C", "tests", "tester"], cwd=root, check=True)
     controller = root / "tests" / "run-timed.sh"
     shutil.copyfile(root / "tests" / "run-test.sh", controller)
+    replace(controller, '    in_file="$test_lineno.in"', '    if [ -e ../.resume-case ]; then\n'
+            '        if [ -e "../.resume-$test_lineno" ]; then rm ../.resume-case "../.resume-$test_lineno"; fi\n'
+            '        return 0\n    fi\n    in_file="$test_lineno.in"')
+    replace(controller, '    exec_testee "$@" <"$in_file"', '    if [ -n "${TONARI_TRACE_DIR-}" ]; then '
+            'export TONARI_CASE_TRACE="$TONARI_TRACE_DIR/$test_lineno"; fi\n    exec_testee "$@" <"$in_file"')
     replace(controller, '    chmod u+r "$in_file"', '    chmod u+r "$in_file"\n'
             '    if ! "$remove_work_dir"; then for arg do printf \'%s\\0\' "$arg"; done >"$test_lineno.argv"; fi')
     replace(controller, "    log_stdout START\n    set +e",
@@ -81,7 +86,7 @@ def terminate_children(owner, process):
             pass
 
 
-def measure(tests, subject, fixture, environment, timeout, keep):
+def attempt(tests, subject, fixture, environment, timeout, keep):
     report = tests / Path(fixture).with_suffix(".trs")
     report.unlink(missing_ok=True)
     command = ["./resetsig", "../yash", "./run-timed.sh", *(("-r",) if keep else ()), str(subject), fixture]
@@ -118,8 +123,7 @@ def measure(tests, subject, fixture, environment, timeout, keep):
                 process.kill()
             stalled = True
             break
-        if process.returncode and not stalled:
-            raise RuntimeError(f"{fixture}: controller exited {process.returncode}")
+        controller_status = process.wait()
     if not report.is_file():
         raise RuntimeError(f"{fixture}: no upstream report")
     rows, begin, elapsed, active = {}, None, None, None
@@ -141,10 +145,33 @@ def measure(tests, subject, fixture, environment, timeout, keep):
                 begin = (pid, int(ns))
             elif begin and begin[0] == pid:
                 elapsed = int(ns) - begin[1]
-    if active is not None:
-        rows[active] = ("INCOMPLETE", None)
-    if stalled or active is not None:
-        rows[fixture + ": controller"] = ("INCOMPLETE", None)
+    broken = stalled or active is not None or controller_status != 0
+    if broken:
+        rows[active or (fixture + ": controller")] = ("CONTROLLER_EXIT", None)
+    return rows, report, active if broken else None
+
+
+def measure(tests, subject, fixture, environment, timeout, keep):
+    # A faulty job group can signal the upstream controller itself. Preserve
+    # its evidence and resume after that case in a fresh upstream fixture.
+    rows, parts = {}, []
+    started = time.monotonic()
+    while True:
+        part, report, active = attempt(tests, subject, fixture, environment, timeout, keep)
+        parts.append(report.read_bytes())
+        if not active or active in rows:
+            rows.update(part)
+            break
+        rows.update(part)
+        line = active.split(":", 2)[1]
+        if not line.isdecimal():
+            raise ValueError(f"invalid testcase line in {active!r}")
+        (tests / ".resume-case").touch()
+        (tests / (".resume-" + line)).touch()
+    for marker in tests.glob(".resume-*"):
+        marker.unlink()
+    if len(parts) > 1:
+        report.write_bytes(b"\n".join(parts))
     return rows, time.monotonic() - started, report
 
 
@@ -155,6 +182,7 @@ def main():
     parser.add_argument("--tonari", type=Path, required=True)
     parser.add_argument("--bash", type=Path, required=True)
     parser.add_argument("--previous", type=Path)
+    parser.add_argument("--trace-shell", type=Path, help="separate diagnostic binary for untimed replay")
     parser.add_argument("--prepare", action="store_true")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--shard", default="0/1")
@@ -163,6 +191,7 @@ def main():
     args = parser.parse_args()
     root, out = args.root.resolve(), args.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
+    (out / "paths.jsonl").unlink(missing_ok=True)
     if args.prepare:
         prepare(root)
     shard, count = map(int, args.shard.split("/"))
@@ -181,6 +210,8 @@ def main():
     subject = root / "subject"
     env = dict(PATH="/usr/bin:/bin:/usr/sbin:/sbin", HOME=str(root), TMPDIR=str(root), LC_ALL="C")
     resource.setrlimit(resource.RLIMIT_CORE, (0, resource.getrlimit(resource.RLIMIT_CORE)[1]))
+    if os.environ.get("LOGNAME"):
+        env["LOGNAME"] = os.environ["LOGNAME"]
     rows = {}
     with gzip.open(out / "inputs.jsonl.gz", "wt") as inputs, (out / "samples.jsonl").open("w") as records:
         for number, fixture in enumerate(sources):
@@ -214,6 +245,19 @@ def main():
                         shutil.copyfile(report, dest / report.name)
                     for key, value in obs.items():
                         rows.setdefault(key, {}).setdefault(label, []).append(value)
+            if args.trace_shell:
+                directory = out / ("paths-" + fixture)
+                directory.mkdir(exist_ok=True)
+                subject.unlink()
+                subject.symlink_to(args.trace_shell.resolve())
+                trace, _, _ = measure(tests, subject, fixture, dict(env, TONARI_TRACE_DIR=str(directory)),
+                                      args.timeout, False)
+                with (out / "paths.jsonl").open("a") as path_report:
+                    for key, (verdict, _) in trace.items():
+                        path = directory / key.split(":", 2)[1]
+                        ids = sorted(set(path.read_bytes())) if path.is_file() else []
+                        path_report.write(json.dumps(dict(case=key, status=verdict, sites=ids)) + "\n")
+                shutil.rmtree(directory)
             print(f"{fixture} {len(obs)} cases", flush=True)
     for label in shells:
         dest = out / label
@@ -236,7 +280,7 @@ def main():
     print(dict(scores), flush=True)
     # Preserve all measurements before returning the comparison gate.
     return int(bool(scores["new differences"] or any(
-        v[0] == "INCOMPLETE" for series in rows.values() for events in series.values() for v in events)))
+        v[0] in {"CONTROLLER_EXIT","INCOMPLETE"} and label == "tonari" for series in rows.values() for label, events in series.items() for v in events)))
 
 
 if __name__ == "__main__":

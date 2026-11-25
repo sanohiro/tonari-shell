@@ -222,7 +222,7 @@ case "$SUITE" in
     git -C "$root" fetch -q --depth 1 https://github.com/magicant/yash.git 1cdb509a617894ed96a12c33b43bcd7adb6f1ff5
     git -C "$root" checkout -q --detach FETCH_HEAD
     python3 tools/ci/yash-posix.py "$root" "$out" --prepare --bash "$ref" --tonari "$current" \
-      --previous "$bin/baseline" --runs "${EXTERNAL_BENCH_RUNS:-3}" --shard "$shard/8" ;;
+      --previous "$bin/baseline" --trace-shell "$bin/paths" --runs "${EXTERNAL_BENCH_RUNS:-3}" --shard "$shard/8" ;;
   probe)
     cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
     run probes python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" --timing started --runs 41 \

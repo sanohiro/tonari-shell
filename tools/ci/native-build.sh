@@ -25,6 +25,12 @@ rustup toolchain install "$toolchain" --profile minimal --component rust-src --t
 rustc +"$toolchain" -vV >> results/host.txt
 export CARGO_TARGET_DIR="$RUNNER_TEMP/build"
 cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/current"
+if [[ $SUITE == external-yash-* ]]; then
+  observer="$RUNNER_TEMP/yash-paths"
+  git worktree add -q --detach "$observer" HEAD
+  python3 tools/ci/yash-paths.py "$observer" results/sites.json
+  (cd "$observer"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/paths")
+fi
 if [[ $SUITE == external-gnu-waits ]]; then
   observer="$RUNNER_TEMP/wait-source"
   git worktree add -q --detach "$observer" HEAD
