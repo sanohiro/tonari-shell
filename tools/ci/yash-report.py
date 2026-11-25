@@ -62,14 +62,8 @@ def build_identity(directory):
     return machine.splitlines()[0], hashes["current"], hashes["baseline"], version[1]
 
 
-def read_recheck(root, host, release, bash):
+def repeated_trials(directory):
     cases = defaultdict(lambda: defaultdict(dict))
-    if root is None:
-        return cases
-    directory = root / (host + "-external-yash-recheck")
-    _, other_release, _, other_bash = build_identity(directory)
-    if (other_release, other_bash) != (release, bash):
-        raise ValueError(f"{host}: different executable or Bash version in higher-repeat run")
     fixtures = json.loads((directory / "fixtures.json").read_text())
     trials = defaultdict(set)
     for row in read_jsonl(directory / "samples.jsonl"):
@@ -79,8 +73,47 @@ def read_recheck(root, host, release, bash):
         trials[fixture, shell].add(n)
         for key, pair in row["cases"].items():
             cases[key][shell][n] = pair
-    if len(fixtures) != 7 or any(trials[f,s] != set(range(11)) for f in fixtures for s in ("tonari", "bash")):
-        raise ValueError(f"{host}: incomplete higher-repeat measurements")
+    if any(trials[f,s] != set(range(11)) for f in fixtures for s in ("tonari", "bash")):
+        raise ValueError(f"{directory}: incomplete higher-repeat measurements")
+    return cases
+
+
+def read_recheck(root, host, release, bash):
+    if root is None:
+        return {}
+    directory = root / (host + "-external-yash-recheck")
+    _, other_release, _, other_bash = build_identity(directory)
+    if (other_release, other_bash) != (release, bash):
+        raise ValueError(f"{host}: different executable or Bash version in higher-repeat run")
+    if len(json.loads((directory / "fixtures.json").read_text())) != 7:
+        raise ValueError(f"{host}: incomplete higher-repeat fixture set")
+    return repeated_trials(directory)
+
+
+def read_shard_repeats(files):
+    directories = [file.parent / "repeats" for file in files]
+    if not any(directory.exists() for directory in directories):
+        return None
+    cases = {}
+    for directory in directories:
+        selected = json.loads((directory / "selection.json").read_text())
+        if not selected:
+            continue
+        by_id = {}
+        # An unfiltered rerun supersedes the selected run for its whole fixture.
+        for source in (directory, directory / "whole"):
+            if source.is_dir():
+                for key, series in repeated_trials(source).items():
+                    by_id[key.split(": ", 1)[0]] = series
+        for key in selected:
+            series = by_id[key.split(": ", 1)[0]]
+            if key in cases or any(
+                set(series[label]) != set(range(11))
+                or any(v[0] != "OK[PASSED]" or v[1] is None for v in series[label].values())
+                for label in ("tonari", "bash")
+            ):
+                raise ValueError(f"{directory}: incomplete or duplicate replay for {key}")
+            cases[key] = series
     return cases
 
 
@@ -141,6 +174,11 @@ def summarize(root, output, runs, recheck=None, replacements=(), hosts=("ubuntu-
             raise ValueError(f"{host}: timed executable hashes or Bash versions differ across shards")
         release, _, bash = next(iter(digests))
         repeated = read_recheck(recheck, host, release, bash)
+        shard_repeats = read_shard_repeats(files)
+        if shard_repeats is not None:
+            if shard_repeats.keys() - rows.keys():
+                raise ValueError(f"{host}: replay contains an unknown case")
+            repeated.update(shard_repeats)
         manifest = "\n".join(sorted(declared)) + "\n"
         if hashlib.sha256(manifest.encode()).hexdigest() != FIXTURE_DIGEST:
             raise ValueError(f"{host}: unexpected pinned fixture inventory")
@@ -192,6 +230,11 @@ def summarize(root, output, runs, recheck=None, replacements=(), hosts=("ubuntu-
                 ratio = median(elapsed["tonari"])/median(elapsed["bash"])
                 ratios.append(ratio)
                 fixture_ratios[fixture].append(ratio)
+            if shard_repeats is not None:
+                above_target = ratio != "" and (3 * median(v[1] for v in series["tonari"].values())
+                                                 > 2 * median(v[1] for v in series["bash"].values()))
+                if above_target != (key in shard_repeats):
+                    raise ValueError(f"{host}/{key}: replay selection differs from measured target")
             row = [key, verdict, t, b, p]
             row += [round(median(elapsed[k]), 1) if elapsed[k] else "" for k in labels]
             row += [round(ratio, 4) if ratio != "" else ""]
