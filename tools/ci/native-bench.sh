@@ -215,6 +215,8 @@ case "$SUITE" in
     [[ $RUNNER_OS == macOS ]]
     python3 tests/compat/replay_budget.py --self-invocation --release-only --bin "$bin" --bash "$ref" --lane macOSarm64 \
       --runs 61 --only b231f00edd90 > "$out/replay.jsonl" ;;
+  external-shared-input)
+    python3 tools/ci/yash-stdin.py --bash "$ref" --current "$current" --small "$bin/small" --large "$bin/large" > "$out/stdin.jsonl" ;;
   external-yash-*)
     root="$RUNNER_TEMP/yash"
     git init -q "$root"

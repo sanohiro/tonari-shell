@@ -31,6 +31,15 @@ if [[ $SUITE == external-yash-[0-7] ]]; then
   python3 tools/ci/yash-paths.py "$observer" results/sites.json
   (cd "$observer"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/paths")
 fi
+if [[ $SUITE == external-shared-input ]]; then
+  source_dir="$RUNNER_TEMP/seekable"
+  git worktree add -q --detach "$source_dir" HEAD
+  for config in small:512 large:32768; do
+    size=${config#*:}
+    sed "s/BufReader::new(file)/BufReader::with_capacity($size, file)/" src/input.rs > "$source_dir/src/input.rs"
+    (cd "$source_dir"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/${config%:*}")
+  done
+fi
 if [[ $SUITE == external-gnu-waits ]]; then
   observer="$RUNNER_TEMP/wait-source"
   git worktree add -q --detach "$observer" HEAD
