@@ -766,21 +766,26 @@ impl WaitMask {
         (bits != 0).then(|| 128 + bits.trailing_zeros() as u8)
     }
 
-    pub(crate) fn input_or_child(&self) -> io::Result<bool> {
+    pub(crate) fn input_or_child(&self, timeout: Option<&libc::timespec>) -> io::Result<bool> {
         let mut fds = unsafe { std::mem::zeroed() };
         unsafe {
             libc::FD_ZERO(&mut fds);
             libc::FD_SET(0, &mut fds);
-            if libc::pselect(
+            let mut mask = self.previous;
+            libc::sigdelset(&mut mask, libc::SIGCHLD);
+            let result = libc::pselect(
                 1,
                 &mut fds,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
-                std::ptr::null(),
-                &self.previous,
-            ) >= 0
-            {
+                timeout.map_or(std::ptr::null(), std::ptr::from_ref),
+                &mask,
+            );
+            if result > 0 {
                 return Ok(true);
+            }
+            if result == 0 {
+                return Err(io::ErrorKind::TimedOut.into());
             }
         }
         let err = io::Error::last_os_error();

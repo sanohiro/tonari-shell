@@ -218,6 +218,10 @@ case "$SUITE" in
   external-shared-input)
     python3 tools/ci/yash-stdin.py --bash "$ref" --current "$current" --small "$bin/small" --large "$bin/large" > "$out/stdin.jsonl" ;;
   external-yash-*)
+    if [[ $SUITE == external-yash-notify ]]; then
+      python3 tools/bench_notify.py "$bin/baseline" "$current" "$ref" > "$out/notify.jsonl"
+      exit
+    fi
     if [[ $SUITE == external-yash-builtins ]]; then
       python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" \
         --case symbolic-umask --case set-flags > "$out/throughput.jsonl"

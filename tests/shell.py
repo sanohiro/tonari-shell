@@ -140,8 +140,15 @@ class ShellTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertTrue(result.stderr)
 
+    def test_notification_wait_honors_prompt_timeout(self):
+        for editing in (False, True):
+            with self.subTest(editing=editing):
+                fd = self.terminal_session(editing=editing)
+                os.write(fd, b"set -b; TMOUT=1; sleep 2 &\n")
+                self.read_until(fd, b"timed out waiting for input")
+
     def test_async_notifications_preserve_partial_input_and_wait_status(self):
-        fd = self.terminal_session(editing=True)
+        fd = self.terminal_session(editing=True, blocked=(signal.SIGCHLD,))
         os.write(fd, b"set -b; (sleep 0.3; exit 7) &\n")
         self.read_until(fd, PROMPT)
         os.write(fd, b"wait $!; echo status=")
