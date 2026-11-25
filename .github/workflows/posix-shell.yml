@@ -6,8 +6,13 @@ permissions:
 jobs:
   compare:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    timeout-minutes: 25
     env:
+      SHARD: ${{ matrix.shard }}
       BASE_REVISION: ${{ github.event.pull_request.base.sha }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -28,14 +33,9 @@ jobs:
           git -C "$RUNNER_TEMP/yash" checkout -q --detach FETCH_HEAD
           python3 tools/ci/yash-posix.py "$RUNNER_TEMP/yash" results --prepare --runs 1 --require-bash-passes \
             --tonari "$CARGO_TARGET_DIR/release/tonari" --previous "$RUNNER_TEMP/previous" --bash /bin/bash \
-            --fixture redir-p.tst --fixture pipeline-p.tst --fixture cmdsub-p.tst --fixture wait-p.tst \
-            --fixture alias-p.tst --fixture if-p.tst --fixture tilde-p.tst --fixture sigstop7-p.tst \
-            --fixture quote-p.tst --fixture param-p.tst --fixture set-p.tst --fixture option-p.tst \
-            --fixture declutil-p.tst --fixture return-p.tst --fixture readonly-p.tst --fixture exit-p.tst \
-            --fixture umask-p.tst --fixture bg-p.tst --fixture unset-p.tst --fixture simple-p.tst \
-            --fixture fg-p.tst --fixture trap-p.tst --fixture cd-p.tst --fixture command-p.tst
+            --shard "$SHARD/4" --inventory docs/compatibility/yash-posix/ubuntu-24.04.tsv.gz
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: posix-sh-pr
+          name: posix-sh-pr-${{ matrix.shard }}
           path: results/

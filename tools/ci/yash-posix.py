@@ -1,6 +1,7 @@
 """Run pinned yash POSIX fixtures using their original controller and verdicts."""
 import argparse
 from collections import Counter
+import csv
 import gzip
 import json
 import os
@@ -200,6 +201,7 @@ def main():
     parser.add_argument("--trace-shell", type=Path, help="separate diagnostic binary for untimed replay")
     parser.add_argument("--prepare", action="store_true")
     parser.add_argument("--require-bash-passes", action="store_true", help="fail when any Bash pass is missing in Tonari")
+    parser.add_argument("--inventory", type=Path, help="published case table for validating each shell's coverage")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--shard", default="0/1")
     parser.add_argument("--fixture", action="append", default=[])
@@ -214,6 +216,14 @@ def main():
     if not 0 <= shard < count or args.runs < 1:
         parser.error("invalid shard or run count")
     sources = fixtures(root)
+    expected = {}
+    if args.inventory:
+        with gzip.open(args.inventory, "rt", newline="") as stream:
+            for record in csv.DictReader(stream, delimiter="\t"):
+                fixture, line, _ = record["upstream case"].split(":", 2)
+                expected.setdefault(fixture, set()).add(line)
+        if set(expected) != set(sources):
+            raise ValueError("fixture files differ from the pinned case inventory")
     if set(args.fixture) - set(sources):
         parser.error("unknown fixture")
     sources = [s for i, s in enumerate(sources) if i % count == shard and (not args.fixture or s in args.fixture)]
@@ -244,6 +254,11 @@ def main():
                     if keep:
                         argv_dir.mkdir(exist_ok=True)
                     obs, wall, report = measure(tests, subject, fixture, env, args.timeout, keep)
+                    if args.inventory:
+                        actual = {key.split(":", 2)[1] for key in obs}
+                        if actual != expected[fixture]:
+                            raise ValueError(f"{fixture}/{label}: case inventory differs at "
+                                             f"{sorted(actual ^ expected[fixture])}")
                     if keep:
                         for directory in set(tests.glob("tmp.*")) - before:
                             for key in obs:
