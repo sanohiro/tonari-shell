@@ -152,6 +152,19 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
         Cow::Borrowed(Command::Subshell(body)) => {
             crate::subshell::launch_borrowed(session, body, status)
         }
+        Cow::Borrowed(Command::If {
+            branches,
+            otherwise,
+        }) => run_if(
+            session,
+            branches
+                .iter()
+                .map(|(condition, body)| (condition.as_slice(), body.as_slice())),
+            otherwise.as_slice(),
+            status,
+            tail,
+            borrowed_program,
+        ),
         Cow::Borrowed(Command::Group(body)) => borrowed_program(session, body, status, tail),
         Cow::Borrowed(Command::Arithmetic(expr)) => {
             crate::arithmetic::command(expr, session, status)
@@ -175,6 +188,32 @@ fn single_status(session: &mut Session, flow: &Flow) {
     }
 }
 
+fn run_if<P: AsRef<[Statement]>>(
+    session: &mut Session,
+    branches: impl IntoIterator<Item = (P, P)>,
+    otherwise: P,
+    status: u8,
+    tail: bool,
+    run: impl Fn(&mut Session, P, u8, bool) -> Flow,
+) -> Flow {
+    let mut last = status;
+    for (condition, body) in branches {
+        session.tested_depth += 1;
+        let flow = run(session, condition, last, false);
+        session.tested_depth -= 1;
+        match flow {
+            Flow::Continue(0) => return run(session, body, 0, tail),
+            Flow::Continue(code) => last = code,
+            other => return other,
+        }
+    }
+    if otherwise.as_ref().is_empty() {
+        Flow::Continue(0)
+    } else {
+        run(session, otherwise, last, tail)
+    }
+}
+
 fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) -> Flow {
     match command {
         Command::Timed {
@@ -195,24 +234,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
         Command::If {
             branches,
             otherwise,
-        } => {
-            let mut last = status;
-            for (condition, body) in branches {
-                session.tested_depth += 1;
-                let flow = execute_program(session, condition, last, false);
-                session.tested_depth -= 1;
-                match flow {
-                    Flow::Continue(0) => return execute_program(session, body, 0, tail),
-                    Flow::Continue(code) => last = code,
-                    other => return other,
-                }
-            }
-            if otherwise.is_empty() {
-                Flow::Continue(0)
-            } else {
-                execute_program(session, otherwise, last, tail)
-            }
-        }
+        } => run_if(session, branches, otherwise, status, tail, execute_program),
         Command::While {
             until,
             condition,

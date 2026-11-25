@@ -1907,6 +1907,24 @@ declare -n ref=a; v=$(/usr/bin/printf '[%s]' "${ref[@]}"); echo "$v"
 jobs() { printf '%s' "shadow:$1"; }; v=$(jobs -p); echo "$v" """,
                      0, b"empty:0:<>\n<a b><><*.rs>\n[a b][][*.rs]\nshadow:-p\n", minimum=5)
 
+    def test_captured_pipeline_and_here_input(self):
+        self.compare("""v='two words'
+a=$(printf '%s' "$v" | /bin/cat); echo "$a:$?"
+a=$(echo -n | /bin/sh -c 'test -p /dev/stdin && echo pipe'); echo "$a"
+a=$(/bin/cat <<< "$v"); echo "$a"
+a=$(/bin/cat <<EOF
+$v
+EOF
+); echo "$a"
+v=before
+a=$(/bin/cat <<< "${other:=inside}"); echo "$a/${other-unset}"
+a=$(/bin/cat <<< "$BASH_SUBSHELL"); echo "$a"
+set -o pipefail
+a=$(echo one | /bin/sh -c 'cat >/dev/null; exit 7'); echo "$?"
+echo() { builtin echo override; }
+a=$(echo original | /bin/cat); builtin echo "$a" """,
+                     0, b"two words:0\npipe\ntwo words\ntwo words\ninside/unset\n1\n7\noverride\n")
+
     def test_external_capture_observes_subshell_state(self):
         self.compare(r"""args=(value); declare -n depth=BASH_SUBSHELL; set -e
 v=$(/usr/bin/printf '<%s>' "$depth" "${args[@]}"); echo "$v"

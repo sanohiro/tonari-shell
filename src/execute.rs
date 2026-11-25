@@ -1476,10 +1476,41 @@ pub(super) fn can_capture_external(name: &str) -> bool {
     !name.is_empty() && named_builtin(name, &[], 0).is_none()
 }
 
+// The builtin's entire output fits in an empty pipe. Keep a pipe on stdin
+// even for zero bytes so the consumer observes the same descriptor type.
+pub(super) fn capture_with_writer(
+    writer: &SimpleCommand<Word>,
+    reader: &SimpleCommand<Word>,
+    session: &mut Session,
+    last: u8,
+) -> Option<Result<(String, u8), &'static str>> {
+    use std::io::Write;
+    let cmd = prepare(writer.clone(), session, last, true).ok()?;
+    let output = PlainOutput::new(builtin(&cmd, last, session)?, &cmd, 512)?;
+    let (input, write) = pipe().ok()?;
+    let (bytes, status) = output.render(session);
+    if std::fs::File::from(write).write_all(&bytes).is_err() {
+        return Some(Err("cannot write command substitution input"));
+    }
+    Some(
+        capture_external(reader.clone(), session, last, Some(input)).map(|(text, code)| {
+            (
+                text,
+                if code == 0 && session.pipefail {
+                    status
+                } else {
+                    code
+                },
+            )
+        }),
+    )
+}
+
 pub(super) fn capture_external(
     raw: SimpleCommand<Word>,
     session: &mut Session,
     last: u8,
+    input: Option<OwnedFd>,
 ) -> Result<(String, u8), &'static str> {
     let mut cmd = match prepare(raw, session, last, true) {
         Ok(cmd) => cmd,
@@ -1491,7 +1522,7 @@ pub(super) fn capture_external(
     let (reader, writer) = pipe().map_err(|_| "cannot open command substitution pipe")?;
     let stage = start(
         &mut cmd,
-        None,
+        input,
         Some(writer),
         None,
         last,

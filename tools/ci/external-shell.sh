@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 suite=$1 tonari=$2 bash_ref=$3
+compare=()
+if [[ -n ${4:-} ]]; then compare=(--previous "$4"); fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 case "$suite" in
@@ -12,7 +14,6 @@ case "$suite" in
       python3 tools/ci/configure-waits.py "$work/hello-2.12.2" "$tonari" "$bash_ref" "${tonari%/*}/observer" "$PWD/results"
     elif [[ $suite == gnu-profile ]]; then
       previous=()
-      compare=()
       if [[ -n ${RUNNER_TEMP:-} && -x $RUNNER_TEMP/bin/baseline ]]; then
         previous+=("$RUNNER_TEMP/bin/baseline")
         compare+=(--previous "$RUNNER_TEMP/bin/baseline")
@@ -20,14 +21,14 @@ case "$suite" in
       python3 tools/bench_external.py gnu-hello "$work/hello-2.12.2" "$tonari" "$bash_ref" "${compare[@]}"
       python3 tools/ci/configure-profile.py "$work/hello-2.12.2/configure" "$tonari" "$bash_ref" "$PWD/results" "${previous[@]}"
     else
-      python3 tools/bench_external.py gnu-hello "$work/hello-2.12.2" "$tonari" "$bash_ref"
+      python3 tools/bench_external.py gnu-hello "$work/hello-2.12.2" "$tonari" "$bash_ref" "${compare[@]}"
     fi
     ;;
   fumiyas)
     curl -fsSL --retry 3 https://raw.githubusercontent.com/fumiyas/fumiyas.github.io/d188b4fa60eca66f2bcd9f5a48a3c80a5c4fc307/2013/12/01/sh-benchmark-scripts.sh -o "$work/cases.sh"
     echo "87360d3da6988cbc5542fb339f37377b1802721353b1d89c1ceba5d773d29da7  $work/cases.sh" | shasum -a 256 -c - >&2
     command -v zsh >/dev/null || { echo 'fumiyas fixtures require zsh' >&2; exit 1; }
-    python3 tools/bench_external.py fumiyas "$work/cases.sh" "$tonari" "$bash_ref"
+    python3 tools/bench_external.py fumiyas "$work/cases.sh" "$tonari" "$bash_ref" "${compare[@]}"
     ;;
   shellspec|unixwin|luish)
     case "$suite" in
@@ -42,17 +43,23 @@ case "$suite" in
       mkdir "$work/bin" "$work/home"
       ln -s "$tonari" "$work/bin/tonari"
       ln -s "$bash_ref" "$work/bin/bash-ref"
+      if [[ -n ${4:-} ]]; then ln -s "$4" "$work/bin/previous"; fi
       # The upstream controller signals its own process group to release its workers.
       python3 - "$work" <<'PY'
 import os, pathlib, subprocess, sys
 w = pathlib.Path(sys.argv[1])
 env = dict(PATH=str(w/'bin') + os.pathsep + os.environ['PATH'], HOME=str(w/'home'), LC_ALL='C')
-subprocess.run(['./shellbench', '-s', 'tonari,bash-ref', '-w', '1', '-t', '1',
-                *sorted(str(f) for f in (w/'sample').glob('*.sh'))],
-               env=env, cwd=w, start_new_session=True, check=True)
+orders = ['tonari,bash-ref']
+if (w/'bin/previous').exists():
+    orders = ['tonari,bash-ref,previous', 'previous,bash-ref,tonari']
+for names in orders:
+    print('Shell order ' + names, flush=True)
+    subprocess.run(['./shellbench', '-s', names, '-w', '1', '-t', '1',
+                    *sorted(str(f) for f in (w/'sample').glob('*.sh'))],
+                   env=env, cwd=w, start_new_session=True, check=True)
 PY
     else
-      python3 tools/bench_external.py "$suite" "$work" "$tonari" "$bash_ref"
+      python3 tools/bench_external.py "$suite" "$work" "$tonari" "$bash_ref" "${compare[@]}"
     fi
     ;;
   *) exit 2 ;;

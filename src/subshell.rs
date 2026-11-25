@@ -262,7 +262,12 @@ fn wrapped_capture(
         && !session.functions.contains_key(path)
         && cmd.words[1..].iter().all(|arg| arg.as_literal().is_some())
     {
-        return Some(crate::execute::capture_external(cmd.clone(), session, last));
+        return Some(crate::execute::capture_external(
+            cmd.clone(),
+            session,
+            last,
+            None,
+        ));
     }
 
     let words = match path {
@@ -326,13 +331,7 @@ fn capture_simple(
         );
         return Some(captured_output(out, status));
     }
-    let command = |statement: &parser::Statement| {
-        let parser::Command::Pipeline(stages) = &statement.command else {
-            return None;
-        };
-        let [cmd] = stages.as_slice() else {
-            return None;
-        };
+    let command = |cmd: &parser::SimpleCommand<Word>| {
         let (first, args) = cmd.words.split_first()?;
         let first = first.as_literal()?;
         let (program, args) = if matches!(first, "command" | "builtin") {
@@ -348,9 +347,7 @@ fn capture_simple(
         } else {
             (first, args)
         };
-        if statement.negated
-            || statement.condition != parser::Condition::Always
-            || cmd.compound.is_some()
+        if cmd.compound.is_some()
             || !cmd.assignments.is_empty()
             || session.functions.contains_key(first)
             || session.disabled_builtins.contains(first)
@@ -389,15 +386,7 @@ fn capture_simple(
             }
             _ => return None,
         };
-        if !cmd.redirects.is_empty()
-            && !(external
-                && matches!(cmd.redirects.as_slice(),
-            [r] if r.fd == 2 && r.variable.is_none() && r.target == parser::Target::Write
-                && r.word.as_literal() == Some("/dev/null")))
-        {
-            return None;
-        }
-        let safe = args.iter().all(|word| match word {
+        let safe_word = |word: &Word| match word {
             Word::Literal(_) => true,
             Word::Expanded(parts) => parts.iter().all(|part| match part {
                 Part::Text(_) => true,
@@ -426,10 +415,54 @@ fn capture_simple(
                 _ => false,
             }),
             Word::Declaration(_) => false,
-        });
+        };
+        if !args.iter().all(safe_word) {
+            return None;
+        }
+        let safe = match cmd.redirects.as_slice() {
+            [] => true,
+            [r] if external && r.variable.is_none() => match (r.fd, r.target) {
+                (2, parser::Target::Write) => r.word.as_literal() == Some("/dev/null"),
+                (0, parser::Target::HereString) => {
+                    !session.traps.has_explicit_traps() && safe_word(&r.word)
+                }
+                (0, parser::Target::HereDoc { expand }) if !session.traps.has_explicit_traps() => {
+                    let text = r.word.as_literal()?;
+                    !expand || parser::expansion_string(text).is_ok_and(|word| safe_word(&word))
+                }
+                _ => false,
+            },
+            _ => false,
+        };
         safe.then_some(())
     };
-    if !body.iter().all(|s| command(s).is_some()) {
+    if let [statement] = body
+        && !statement.negated
+        && statement.condition == parser::Condition::Always
+        && let parser::Command::Pipeline(stages) = &statement.command
+        && let [writer, reader] = stages.as_slice()
+        && writer.redirects.is_empty()
+        && reader.redirects.is_empty()
+        && matches!(
+            writer.words.first().and_then(Word::as_literal),
+            Some("echo" | "printf")
+        )
+        && reader
+            .words
+            .first()
+            .and_then(Word::as_literal)
+            .is_some_and(crate::execute::can_capture_external)
+        && !session.jobs.monitor
+        && !session.traps.has_explicit_traps()
+        && command(writer).is_some()
+        && command(reader).is_some()
+    {
+        return crate::execute::capture_with_writer(writer, reader, session, last);
+    }
+    if !body.iter().all(|s| {
+        !s.negated && s.condition == parser::Condition::Always
+            && matches!(&s.command, parser::Command::Pipeline(stages) if matches!(stages.as_slice(), [cmd] if command(cmd).is_some()))
+    }) {
         return wrapped_capture(session, body, last);
     }
     let mut output = Vec::new();
@@ -450,7 +483,12 @@ fn capture_simple(
             return Some(Ok((String::new(), 0)));
         }
         if !matches!(name, "echo" | "printf" | ":" | "true" | "false") {
-            return Some(crate::execute::capture_external(cmd.clone(), session, last));
+            return Some(crate::execute::capture_external(
+                cmd.clone(),
+                session,
+                last,
+                None,
+            ));
         }
         let captured = std::cell::Cell::new(None);
         let mut env = crate::expansion::Expansion::new(session, code, &captured);

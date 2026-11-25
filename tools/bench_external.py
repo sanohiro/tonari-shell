@@ -27,10 +27,11 @@ def run(argv, cwd, env, timeout):
 
 
 def measure(label, commands, runs, check, internal_clock=False):
-    times = [[], []]
+    times = [[] for _ in commands]
     for trial in range(runs + 1):
         outputs = []
-        for index in ([0, 1] if trial % 2 == 0 else [1, 0]):
+        for offset in range(len(commands)):
+            index = (trial + offset) % len(commands)
             try:
                 ms, rc, out, err = run(*commands[index])
             except subprocess.TimeoutExpired:
@@ -50,11 +51,12 @@ def measure(label, commands, runs, check, internal_clock=False):
             outputs.append(out)
             if trial:
                 times[index].append(ms)
-        if outputs[0] != outputs[1]:
+        if any(out != outputs[0] for out in outputs[1:]):
             print(f"{label}\tOUTPUT DIFF: {outputs[0][-160:]!r} / {outputs[1][-160:]!r}", flush=True)
             return
-    a, b = map(statistics.median, times)
-    print(f"{label}\t{a:.3f}\t{b:.3f}\t{a / b:.3f}", flush=True)
+    a, b, *previous = map(statistics.median, times)
+    extra = f"\t{previous[0]:.3f}" if previous else ""
+    print(f"{label}\t{a:.3f}\t{b:.3f}\t{a / b:.3f}{extra}", flush=True)
 
 
 def checked(rc, out, err):
@@ -96,9 +98,7 @@ def unixwin(args, root, env):
 
 
 def gnu_hello(args, root, env):
-    shells = args.shells.copy()
-    if args.previous:
-        shells.append(str(args.previous.absolute()))
+    shells = args.shells
     samples = [[] for _ in shells]
     reference = None
     configure = str(args.source / "configure")
@@ -137,7 +137,7 @@ def gnu_hello(args, root, env):
     if args.previous:
         old = statistics.median(samples[2])
         print(f"Previous configure\t{old:.3f}\t{b:.3f}\t{old / b:.3f}")
-    print(f"GNU Hello configure\t{a:.3f}\t{b:.3f}\t{a / b:.3f}")
+    print(f"GNU Hello configure\t{a:.3f}\t{b:.3f}\t{a / b:.3f}" + (f"\t{old:.3f}" if args.previous else ""))
     target = b * 2 / 3
     verdict = "PASS" if a <= target else "MISS"
     print(f"Full configure target: {verdict} ({a:.3f} ms, budget {target:.3f} ms)", file=sys.stderr)
@@ -150,18 +150,18 @@ def main():
     parser.add_argument("source", type=Path)
     parser.add_argument("shells", nargs=2, type=Path, metavar="SHELL")
     parser.add_argument("--runs", type=int, default=3)
-    parser.add_argument("--previous", type=Path, help="previous Tonari build for full GNU configure")
+    parser.add_argument("--previous", type=Path, help="previous Tonari build on the same host")
     args = parser.parse_args()
-    if args.previous and args.suite != "gnu-hello":
-        parser.error("--previous requires gnu-hello")
     if args.runs < 1:
         parser.error("--runs must be positive")
     args.source = args.source.resolve()
     args.shells = [str(s.absolute()) for s in args.shells]
+    if args.previous:
+        args.shells.append(str(args.previous.absolute()))
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         env = dict(HOME=directory, PATH=os.environ["PATH"], LC_ALL="C", TMPDIR=directory)
-        print("case\tTonari_ms\tBash_ms\tTonari/Bash", flush=True)
+        print("case\tTonari_ms\tBash_ms\tTonari/Bash" + ("\tPrevious_ms" if args.previous else ""), flush=True)
         if args.suite == "gnu-hello":
             gnu_hello(args, root, env)
         elif args.suite == "unixwin":

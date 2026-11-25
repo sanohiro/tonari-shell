@@ -314,6 +314,18 @@ fn trim_boundary(
     longest: bool,
     extglob: bool,
 ) -> Option<usize> {
+    // A question mark consumes one character. An ASCII boundary has the
+    // same width in every supported locale.
+    if pattern == "?" {
+        let byte = if prefix {
+            value.as_bytes().first()
+        } else {
+            value.as_bytes().last()
+        };
+        if byte.is_some_and(|b| b.is_ascii() && *b != 0) {
+            return Some(if prefix { 1 } else { value.len() - 1 });
+        }
+    }
     // A star at the end being removed can absorb everything up to a literal
     // delimiter. The nearest or farthest occurrence gives the exact cut.
     let star = if prefix {
@@ -352,10 +364,11 @@ fn trim_boundary(
         .char_indices()
         .map(|(i, _)| i)
         .chain(std::iter::once(value.len()));
+    let basic = group.is_none().then(|| Matcher::new(pattern));
     let matches_at = |&i: &usize| {
         let candidate = if prefix { &value[..i] } else { &value[i..] };
         group.as_ref().map_or_else(
-            || matches(candidate, pattern),
+            || basic.as_ref().unwrap().matches(candidate),
             |g| g.accepts(candidate, false),
         )
     };

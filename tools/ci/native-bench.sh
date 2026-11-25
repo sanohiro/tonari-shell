@@ -124,14 +124,20 @@ if [[ $RUNNER_OS == Linux && ( $SUITE == functions || $SUITE == throughput ) ]];
   done
 fi
 case "$SUITE" in
-  external-shellspec|external-fumiyas|external-unixwin|external-luish|external-gnu-hello|external-gnu-profile|external-gnu-waits)
-    if [[ $SUITE == external-fumiyas ]] && ! command -v zsh >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y zsh; fi
-    if [[ $SUITE == external-unixwin && $RUNNER_OS == macOS ]] && ! command -v stdbuf >/dev/null; then
+  external-review-*|external-shellspec|external-fumiyas|external-unixwin|external-luish|external-gnu-hello|external-gnu-profile|external-gnu-waits)
+    suite=${SUITE#external-}
+    compare=()
+    if [[ $suite == review-* ]]; then
+      suite=${suite#review-}
+      compare=("$bin/baseline")
+    fi
+    if [[ $suite == fumiyas ]] && ! command -v zsh >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y zsh; fi
+    if [[ $suite == unixwin && $RUNNER_OS == macOS ]] && ! command -v stdbuf >/dev/null; then
       if ! brew list --versions coreutils >/dev/null; then brew install coreutils; fi
       export SHELLBENCH_COREUTILS
       SHELLBENCH_COREUTILS="$(brew --prefix coreutils)/libexec/gnubin"
     fi
-    run "$SUITE" bash tools/ci/external-shell.sh "${SUITE#external-}" "$current" "$ref" ;;
+    run "$SUITE" bash tools/ci/external-shell.sh "$suite" "$current" "$ref" "${compare[@]}" ;;
   starship)
     case "$NATIVE_RUNNER" in
       ubuntu-24.04) platform=x86_64-unknown-linux-musl; sha=10c8eb4cb3b761d9bf59ea828444c2dab36c900b7d69a69e08814b286969df89 ;;

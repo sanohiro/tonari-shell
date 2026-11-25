@@ -336,6 +336,12 @@ impl Word {
             words.push(std::mem::take(text));
             return Ok(());
         }
+        if let Self::Expanded(parts) = &self
+            && matches!(parts.as_slice(), [Part::Parameter { name, quoted: true }] if name == "@")
+        {
+            words.extend_from_slice(positional);
+            return Ok(());
+        }
         let ifs = lookup("IFS");
         let mut output = Output::Fields(Fields {
             lookup,
@@ -668,8 +674,8 @@ pub(crate) fn separators(text: &str, ifs: &str, mut visit: impl FnMut(usize, &st
             visit(i, sep);
         }
     } else if ifs == " \t\n" {
-        for (i, sep) in text.match_indices([' ', '\t', '\n']) {
-            visit(i, sep);
+        for i in memchr::memchr3_iter(b' ', b'\t', b'\n', text.as_bytes()) {
+            visit(i, &text[i..i + 1]);
         }
     } else {
         for (i, sep) in text.match_indices(|c| ifs.contains(c)) {
