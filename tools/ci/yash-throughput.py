@@ -20,6 +20,16 @@ WORKLOADS = {
 }
 
 
+# Separate the builtin from the mkdir, ls, cut and grep processes used by
+# the upstream assertions. These are diagnostic workloads selected explicitly.
+DIAGNOSTICS = {
+    "symbolic-umask": ("command", "umask 027; i=0; while [ $i -lt 5000 ]; do "
+                       "umask u=xwr || exit 1; i=$((i+1)); done; umask"),
+    "set-flags": ("command", "i=0; while [ $i -lt 5000 ]; do set -e +a -o noclobber -u; "
+                  "i=$((i+1)); done; case $- in *C*) echo $i;; *) exit 1;; esac"),
+}
+
+
 def measure(base, shells, spawn_control=None, cases=None, runs=None):
     subjects = {}
     for label, binary in shells.items():
@@ -29,7 +39,7 @@ def measure(base, shells, spawn_control=None, cases=None, runs=None):
         subjects[label].symlink_to(binary.resolve())
     env = {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "HOME": str(base)}
     for name in cases or WORKLOADS:
-        mode, source = WORKLOADS[name]
+        mode, source = (DIAGNOSTICS if name in DIAGNOSTICS else WORKLOADS)[name]
         script = base / "input"
         script.write_text(source)
         args = {"command": ["-c", source], "file": [script], "stdin": []}[mode]
@@ -70,7 +80,7 @@ if __name__ == "__main__":
     for label in ("first", "tonari", "bash"):
         parser.add_argument("--" + label, type=Path, required=True)
     parser.add_argument("--spawn-control", type=Path)
-    parser.add_argument("--case", choices=WORKLOADS, action="append", dest="cases")
+    parser.add_argument("--case", choices=[*WORKLOADS, *DIAGNOSTICS], action="append", dest="cases")
     parser.add_argument("--runs", type=int, help="measured trials per workload, excluding warmup")
     args = vars(parser.parse_args())
     cases, runs = args.pop("cases"), args.pop("runs")
