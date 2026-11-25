@@ -9,7 +9,14 @@ case "$suite" in
     echo "5a9a996dc292cc24dcf411cee87e92f6aae5b8d13bd9c6819b4c7a9dce0818ab  $work/hello.tar.gz" | shasum -a 256 -c - >&2
     tar -xzf "$work/hello.tar.gz" -C "$work"
     if [[ $suite == gnu-profile ]]; then
-      python3 tools/ci/configure-profile.py "$work/hello-2.12.2/configure" "$tonari" "$bash_ref" "$PWD/results"
+      previous=()
+      compare=()
+      if [[ -n ${RUNNER_TEMP:-} && -x $RUNNER_TEMP/bin/baseline ]]; then
+        previous+=("$RUNNER_TEMP/bin/baseline")
+        compare+=(--previous "$RUNNER_TEMP/bin/baseline")
+      fi
+      python3 tools/bench_external.py gnu-hello "$work/hello-2.12.2" "$tonari" "$bash_ref" "${compare[@]}"
+      python3 tools/ci/configure-profile.py "$work/hello-2.12.2/configure" "$tonari" "$bash_ref" "$PWD/results" "${previous[@]}"
     else
       python3 tools/bench_external.py gnu-hello "$work/hello-2.12.2" "$tonari" "$bash_ref"
     fi

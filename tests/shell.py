@@ -81,6 +81,15 @@ class ShellTests(unittest.TestCase):
                 self.assertEqual((run.returncode, run.stdout, run.stderr),
                                  (0, f"line-{line}\nend\n".encode(), b""))
 
+    def test_external_can_duplicate_inherited_log_descriptor(self):
+        self.compare("""exec 5>log
+/bin/sh -c 'echo err >&2; echo out' >&5 2>&1
+/bin/sh -c 'echo visible; echo logged >&2' 2>&5
+/bin/cat log
+exec 5>&-
+{ /bin/echo wrong >&5; } 2>/dev/null || echo closed""",
+                     0, b"visible\nerr\nout\nlogged\nclosed\n")
+
     def test_missing_command_is_rechecked_and_redirects_take_effect(self):
         self.compare("""PATH=.:/usr/bin:/bin
 { later; echo missing=$?; } 2>err

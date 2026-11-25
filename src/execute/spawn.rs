@@ -12,13 +12,19 @@ fn check(code: libc::c_int) -> io::Result<()> {
 }
 
 pub(super) fn standard_dup(r: &Redirect) -> bool {
-    let source = match r.word.as_str() {
-        "0" => 0,
-        "1" => 1,
-        "2" => 2,
-        _ => return false,
-    };
-    r.target == Target::Duplicate && (0..=2).contains(&r.fd) && source != r.fd
+    if r.target != Target::Duplicate || !(0..=2).contains(&r.fd) {
+        return false;
+    }
+    match r.word.as_str() {
+        "0" => r.fd != 0,
+        "1" => r.fd != 1,
+        "2" => r.fd != 2,
+        number => number.parse::<RawFd>().is_ok_and(|fd| {
+            // A script may keep its log open on fd 5 or another inherited fd.
+            // Close-on-exec descriptors can belong to a pipe or the script reader.
+            fd > 2 && unsafe { libc::fcntl(fd, libc::F_GETFD) } == 0
+        }),
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]

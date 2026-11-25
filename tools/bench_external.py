@@ -96,7 +96,10 @@ def unixwin(args, root, env):
 
 
 def gnu_hello(args, root, env):
-    samples = [[], []]
+    shells = args.shells.copy()
+    if args.previous:
+        shells.append(str(args.previous.absolute()))
+    samples = [[] for _ in shells]
     reference = None
     configure = str(args.source / "configure")
     for label, flags in (("configure syntax check", ["-n", configure]),
@@ -104,8 +107,10 @@ def gnu_hello(args, root, env):
         commands = [([sh, *flags], root, {**env, "CONFIG_SHELL": sh}, 60) for sh in args.shells]
         measure(label, commands, args.runs, checked)
     for trial in range(args.runs + 1):
-        for i in ([0, 1] if trial % 2 == 0 else [1, 0]):
-            shell = args.shells[i]
+        order = list(range(len(shells)))
+        offset = trial % len(shells)
+        for i in order[offset:] + order[:offset]:
+            shell = shells[i]
             build_env = {**env, "SHELL": shell, "CONFIG_SHELL": shell, "CC": "/usr/bin/cc"}
             with tempfile.TemporaryDirectory(dir=root) as directory:
                 build = Path(directory)
@@ -128,9 +133,12 @@ def gnu_hello(args, root, env):
                                    stdout=subprocess.DEVNULL, check=True, timeout=180)
                     if subprocess.check_output([str(build / "hello")], env=build_env) != b"Hello, world!\n":
                         raise ValueError("unexpected hello output")
-    a, b = map(statistics.median, samples)
+    a, b = map(statistics.median, samples[:2])
+    if args.previous:
+        old = statistics.median(samples[2])
+        print(f"Previous configure\t{old:.3f}\t{b:.3f}\t{old / b:.3f}")
     print(f"GNU Hello configure\t{a:.3f}\t{b:.3f}\t{a / b:.3f}")
-    print(f"Raw milliseconds (Tonari, Bash): {samples}", file=sys.stderr)
+    print(f"Raw milliseconds {dict(zip(shells, samples))}", flush=True)
 
 
 def main():
@@ -139,7 +147,10 @@ def main():
     parser.add_argument("source", type=Path)
     parser.add_argument("shells", nargs=2, type=Path, metavar="SHELL")
     parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--previous", type=Path, help="previous Tonari build for full GNU configure")
     args = parser.parse_args()
+    if args.previous and args.suite != "gnu-hello":
+        parser.error("--previous requires gnu-hello")
     if args.runs < 1:
         parser.error("--runs must be positive")
     args.source = args.source.resolve()

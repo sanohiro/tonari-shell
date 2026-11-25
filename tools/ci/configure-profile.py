@@ -6,6 +6,7 @@ uninstrumented pair because tracing changes the timing of short commands.
 import os
 from pathlib import Path
 import shutil
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -42,13 +43,43 @@ def profile(script, shell, out, label, tracer, compiler=None):
         return (root / "config.h").read_bytes()
 
 
+def components(script, shells):
+    aux = Path(script).parent / "build-aux"
+    true = shutil.which("true", path="/usr/bin:/bin")
+    commands = [
+        ("config.guess", [str(aux / "config.guess")]),
+        ("config.sub", [str(aux / "config.sub"), "x86_64-linux-gnu"]),
+        ("250 stderr duplicates", ["-c", 'exec 5>/dev/null; for ((i=0;i<250;i++)); do "$1" 2>&5; done', "sh", true]),
+    ]
+    with tempfile.TemporaryDirectory() as work:
+        env = dict(PATH=os.environ["PATH"], HOME=work, LC_ALL="C")
+        for label, command in commands:
+            times = {name: [] for name, _ in shells}
+            expected = None
+            for trial in range(8):
+                for name, shell in (reversed(shells) if trial % 2 else shells):
+                    start = time.monotonic_ns()
+                    p = subprocess.run([shell, *command], env=env, cwd=work, check=True, capture_output=True)
+                    elapsed = (time.monotonic_ns() - start) / 1e6
+                    if p.stderr or (expected is not None and p.stdout != expected):
+                        raise ValueError(f"{name} changed {label} output")
+                    expected = p.stdout
+                    if trial:
+                        times[name].append(elapsed)
+            print(label, {name: round(statistics.median(ms), 3) for name, ms in times.items()}, flush=True)
+
+
 if __name__ == "__main__":
-    script, tonari, bash, output = sys.argv[1:]
+    script, tonari, bash, output, *previous = sys.argv[1:]
     out = Path(output)
     header = None
+    shells = [("tonari", tonari), ("bash", bash)]
+    if previous:
+        shells.append(("previous", previous[0]))
+    components(script, shells)
     trace = shutil.which("strace") if sys.platform == "linux" else None
     for tag, tracer in [("warmup", None), ("phases", None)] + ([("traced", trace)] if trace else []):
-        pairs = [("tonari", tonari), ("bash", bash)]
+        pairs = shells[:2] if tracer else shells
         for name, shell in (reversed(pairs) if tag == "phases" else pairs):
             value = profile(script, shell, out, f"{name}-{tag}", tracer)
             if header is not None and value != header:

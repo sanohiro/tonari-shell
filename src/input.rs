@@ -23,7 +23,7 @@ pub fn stdin_script(session: &mut Session, check: bool) -> Flow {
         Ok::<_, io::Error>((reader, seekable))
     })();
     match setup {
-        Ok((reader, shared_offset)) => run(session, reader, shared_offset, 0, check),
+        Ok((reader, shared_offset)) => run(session, reader, shared_offset, None, 0, check),
         Err(e) => error(e, 1),
     }
 }
@@ -124,14 +124,14 @@ pub fn file_script(
     }
     // Keep large compound commands in view across the usual 8 KiB boundary.
     // Verbose mode must still report each line as it is read.
-    let capacity = metadata
-        .filter(|m| m.is_file())
-        .map_or(8192, |m| m.len().clamp(8192, 128 * 1024) as usize);
+    let file_len = metadata.filter(|m| m.is_file()).map(|m| m.len());
+    let capacity = file_len.unwrap_or(8192).clamp(8192, 128 * 1024) as usize;
     match PrivateFile::new(file) {
         Ok(file) => run(
             session,
             BufReader::with_capacity(capacity, file),
             false,
+            file_len,
             status,
             check,
         ),
@@ -306,6 +306,7 @@ fn run(
     session: &mut Session,
     mut reader: BufReader<PrivateFile>,
     shared_offset: bool,
+    file_len: Option<u64>,
     mut status: u8,
     check: bool,
 ) -> Flow {
@@ -376,7 +377,20 @@ fn run(
         if (buffered || retry)
             && (session.source_depth > 0 || !session.history_enabled)
             && matches!(result, Err(parser::Error::Incomplete(_)))
-            && let Ok((program, consumed, lines)) =
+        {
+            // Refill a short window only when the regular file still has data.
+            // This avoids reparsing the entire old window one line at a time.
+            if retry
+                && reader.buffer().len() < reader.capacity() / 2
+                && let Some(len) = file_len
+                && let Ok(pos) = reader.stream_position()
+                && pos.saturating_add(reader.buffer().len() as u64) < len
+                && reader.seek(io::SeekFrom::Start(pos)).is_ok()
+                && let Err(e) = reader.fill_buf()
+            {
+                return error(e, 1);
+            }
+            if let Ok((program, consumed, lines)) =
                 buffered_compound(text, reader.buffer(), false, |size| {
                     let rest = std::str::from_utf8(&reader.buffer()[..size])
                         .map_err(|_| parser::Error::Invalid("expected UTF-8 command text"))?;
@@ -385,10 +399,11 @@ fn run(
                     unit.push_str(rest);
                     parser::session_source_at(&unit, false, session, base_line)
                 })
-        {
-            reader.consume(consumed);
-            base_line += lines;
-            result = Ok(program);
+            {
+                reader.consume(consumed);
+                base_line += lines;
+                result = Ok(program);
+            }
         }
         match result {
             Err(parser::Error::HereDoc(hint)) if n != 0 => {
