@@ -143,9 +143,11 @@ class ShellTests(unittest.TestCase):
     def test_notification_wait_honors_prompt_timeout(self):
         for editing in (False, True):
             with self.subTest(editing=editing):
-                fd = self.terminal_session(editing=editing)
+                pid, fd = self.terminal_session(editing=editing, with_pid=True)
                 os.write(fd, b"set -b; TMOUT=1; sleep 2 &\n")
                 self.read_until(fd, b"timed out waiting for input")
+                self.read_until(fd, None)
+                os.waitpid(pid, 0)
 
     def test_async_notifications_preserve_partial_input_and_wait_status(self):
         fd = self.terminal_session(editing=True, blocked=(signal.SIGCHLD,))
@@ -2483,7 +2485,7 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                      'history 1 | sed "s/^ *[0-9]* *//"', 0,
                      b"second\n\t echo first\n\t echo second\nchanged\necho changed\n")
 
-    def terminal_session(self, editing=False, shell=TONARI, login=False, blocked=()):
+    def terminal_session(self, editing=False, shell=TONARI, login=False, blocked=(), with_pid=False):
         pid, fd = pty.fork()
         if pid == 0:
             try:
@@ -2525,7 +2527,7 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                 pass
         self.addCleanup(close)
         self.read_until(fd, PROMPT)
-        return fd
+        return (pid, fd) if with_pid else fd
 
     def test_silent_terminal_read_restores_echo(self):
         for shell in self.shells_for(4):
