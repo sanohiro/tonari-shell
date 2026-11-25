@@ -19,6 +19,11 @@ case "$SUITE" in
     git -C upstream checkout -q --detach FETCH_HEAD
     if [[ $SUITE != bensch-* ]]; then
       python3 "$repo/tools/ci/bensch-cases.py" upstream "$lab" "$ref" > "$out/manifest.jsonl"
+      if [[ $SUITE == spec-builtins || $SUITE == spec-previous-builtins ]] &&
+         [[ $(uname -s) == Darwin ]] && ! command -v timeout >/dev/null; then
+        brew list coreutils >/dev/null || brew install coreutils
+        export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
+      fi
       if [[ $SUITE == spec-previous-builtins ]]; then
         python3 "$repo/tools/ci/spec-pairs.py" "$out/manifest.jsonl" "$out/cases.jsonl" \
           "$ref" "$lab/bin/bash" "$lab/pairs" --source upstream
@@ -31,10 +36,6 @@ case "$SUITE" in
       fi
       python3 "$repo/tools/ci/bensch-tty.py" "$out/manifest.jsonl" "$ref" "$lab/bin/bash" > "$out/tty.jsonl"
       if [[ $SUITE == spec-tty ]]; then exit; fi
-      if [[ $(uname -s) == Darwin ]] && ! command -v timeout >/dev/null; then
-        brew list coreutils >/dev/null || brew install coreutils
-        export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
-      fi
       for label in bash tonari; do
         shell=$ref
         [[ $label != tonari ]] || shell="$lab/bin/bash"
