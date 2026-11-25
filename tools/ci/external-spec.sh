@@ -14,11 +14,16 @@ ln -s "$RUNNER_TEMP/bin/current" "$lab/bin/bash"
 cd "$lab"
 git init -q upstream
 case "$SUITE" in
-  bensch-*|spec-builtins|spec-tty|spec-profile-builtins)
+  bensch-*|spec-builtins|spec-tty|spec-profile-builtins|spec-previous-builtins)
     git -C upstream fetch -q --depth 1 https://github.com/tenseleyFlow/bensch.git c8e2a1ea493fc0dceb9af645dc445e619cb449e7
     git -C upstream checkout -q --detach FETCH_HEAD
     if [[ $SUITE != bensch-* ]]; then
       python3 "$repo/tools/ci/bensch-cases.py" upstream "$lab" "$ref" > "$out/manifest.jsonl"
+      if [[ $SUITE == spec-previous-builtins ]]; then
+        python3 "$repo/tools/ci/spec-pairs.py" "$out/manifest.jsonl" "$out/cases.jsonl" \
+          "$ref" "$lab/bin/bash" "$lab/pairs" --source upstream
+        exit
+      fi
       if [[ $SUITE == spec-profile-builtins ]]; then
         python3 "$repo/tools/ci/spec-pairs.py" "$out/manifest.jsonl" "$out/profiles.jsonl" \
           "$RUNNER_TEMP/bin/current" "$RUNNER_TEMP/bin/opt-3" "$lab/pairs" --source upstream --runs 3

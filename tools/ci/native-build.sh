@@ -24,7 +24,14 @@ toolchain=$(sed -n 's/^ *toolchain=//p' tools/build-release.sh)
 rustup toolchain install "$toolchain" --profile minimal --component rust-src --target "$target"
 rustc +"$toolchain" -vV >> results/host.txt
 export CARGO_TARGET_DIR="$RUNNER_TEMP/build"
-cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/current"
+if [[ $SUITE == spec-previous-builtins ]]; then
+  previous=$(git rev-parse --verify --end-of-options "${PREVIOUS_REVISION}^{commit}")
+  git worktree add -q --detach "$RUNNER_TEMP/previous-shell" "$previous"
+  echo "Tested runtime revision $previous" >> results/host.txt
+  (cd "$RUNNER_TEMP/previous-shell"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/current")
+else
+  cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/current"
+fi
 if [[ $SUITE == external-yash-[0-7] || $SUITE == oils-[0-3] || $SUITE == spec-builtins || $SUITE == bensch-* ]]; then
   observer="$RUNNER_TEMP/yash-paths"
   git worktree add -q --detach "$observer" HEAD
