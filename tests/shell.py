@@ -55,6 +55,50 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_invoked_as_sh(self):
+        sh = self.cwd / "sh"
+        env = self.env | {"BASH_ENV": str(self.cwd / "bashenv"), "ENV": str(self.cwd / "env")}
+        (self.cwd / "bashenv").write_text("echo bashenv\n")
+        (self.cwd / "env").write_text('shopt -oq posix; echo "env:$?"\n')
+        # Bash 3.2 on macOS exits on a failing "command ." in sh mode.
+        for binary in self.shells_for(minimum=5):
+            sh.unlink(missing_ok=True)
+            sh.symlink_to(binary)
+            def run(args, script=None):
+                return subprocess.run([str(sh), *args], cwd=self.cwd, env=env, input=script,
+                                      capture_output=True, timeout=5)
+            with self.subTest(shell=binary):
+                proc = run(["-c", "alias x='echo yes'\nx\nv=one :; z=two command :; echo \"$0/$v/${z-_}\"", "custom"])
+                self.assertEqual((proc.returncode, proc.stdout), (0, b"yes\ncustom/one/_\n"))
+                proc = run(["-i", "+m"], b"fi\necho good\nread -r line\nchild data\necho \"$line\"\n")
+                self.assertEqual((proc.returncode, proc.stdout), (0, b"env:1\ngood\nchild data\n"))
+                proc = run(["-c", "command . ./missing; echo ok; : <./missing; echo bad"])
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertEqual(proc.stdout, b"ok\n")
+                proc = run(["-c", "3</dev/null >&3"])
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"", b""))
+                if binary == TONARI:
+                    proc = run(["-c", 'unset v\n<<EOF\n${v=inner}\nEOF\necho "${v-unset}"'])
+                    self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"unset\n", b""))
+                self.assertNotEqual(run(["-c", "echo >&-"]).returncode, 0)
+                self.assertEqual(run(["-c", "kill -s PIPE $$; echo bad"]).returncode, -signal.SIGPIPE)
+                proc = run(["-c", "trap '' PIPE; \"$0\" -c 'kill -s PIPE $$; echo ok'"])
+                self.assertEqual((proc.returncode, proc.stdout), (0, b"ok\n"))
+
+                proc = run(["-c", "alias blank=; alias e=echo\n{ e first | blank\ncat; }\nf() { return -- 17; }; f; e $?; cd -P -e .; exit -- 56"])
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (56, b"first\n17\n", b""))
+                proc = run(["-c", "alias e='echo '; alias a=aa; alias aa=inner\n"
+                            "{\ne a world\ne test\n}\nalias both='e one\ne two'\nboth\n"])
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                                 (0, b"inner world\ntest\none\ntwo\n", b""))
+                proc = run(["-i", "+m", "-c", "shopt -oq posix"])
+                self.assertEqual((proc.returncode, proc.stdout), (0, b"env:1\n"))
+                proc = subprocess.run([str(sh), "-i", "+m", "-c",
+                                       "trap - USR1; kill -s USR1 $$; echo bad"], env=env,
+                                      preexec_fn=lambda: signal.signal(signal.SIGUSR1, signal.SIG_IGN),
+                                      stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
+                self.assertEqual((proc.returncode, proc.stdout), (-signal.SIGUSR1, b"env:1\n"))
+
     def test_repeated_function_definition_and_positional_frame(self):
         self.compare('set -- outer; f() { shift; printf "%s/%s/%s\\n" "$#" "$1" "${!#}"; }; '
                      'f first "two words" {1..1024}; echo "$#:$1"; '

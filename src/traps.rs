@@ -79,6 +79,8 @@ pub struct Traps {
     handling_error: bool,
     handling_return: bool,
     interactive_hup: bool,
+    interactive_handlers: bool,
+    interactive_origin: bool,
     pub before_return: u8,
     implicit: BTreeMap<i32, libc::sigaction>,
     pub exit_status: Option<u8>,
@@ -103,6 +105,72 @@ fn action(handler: usize) -> libc::sigaction {
     a
 }
 
+// Stable Rust overrides SIGPIPE before main. Save the disposition inherited at
+// exec for developer builds. Distribution builds ask rustc to inherit it.
+#[cfg(not(tonari_inherit_sigpipe))]
+mod entry_pipe {
+    use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+    static IGNORED: AtomicBool = AtomicBool::new(false);
+
+    #[used]
+    #[cfg_attr(target_os = "linux", unsafe(link_section = ".init_array"))]
+    #[cfg_attr(target_os = "macos", unsafe(link_section = "__DATA,__mod_init_func"))]
+    static SAVE: extern "C" fn() = {
+        extern "C" fn save() {
+            let mut old = std::mem::MaybeUninit::uninit();
+            unsafe {
+                if libc::sigaction(libc::SIGPIPE, std::ptr::null(), old.as_mut_ptr()) == 0 {
+                    IGNORED.store(old.assume_init().sa_sigaction == libc::SIG_IGN, Relaxed);
+                }
+            }
+        }
+        save
+    };
+
+    pub(super) fn restore() {
+        if !IGNORED.load(Relaxed) {
+            unsafe {
+                libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+            }
+        }
+    }
+    pub(super) fn inherited_ignore() -> bool {
+        IGNORED.load(Relaxed)
+    }
+}
+
+pub fn enter_process() {
+    #[cfg(not(tonari_inherit_sigpipe))]
+    entry_pipe::restore();
+    // std installs its stack-overflow handlers only over SIG_DFL. An explicit
+    // kill delivers just one signal, so returning from that handler loses it.
+    for sig in [libc::SIGBUS, libc::SIGSEGV] {
+        let mut old = std::mem::MaybeUninit::uninit();
+        unsafe {
+            if libc::sigaction(sig, std::ptr::null(), old.as_mut_ptr()) == 0
+                && !matches!(
+                    old.assume_init().sa_sigaction,
+                    libc::SIG_DFL | libc::SIG_IGN
+                )
+            {
+                libc::signal(sig, libc::SIG_DFL);
+            }
+        }
+    }
+}
+
+pub fn std_spawn_inherits_pipe(traps: &Traps) -> bool {
+    #[cfg(not(tonari_inherit_sigpipe))]
+    {
+        !entry_pipe::inherited_ignore() && !traps.ignores(libc::SIGPIPE)
+    }
+    #[cfg(tonari_inherit_sigpipe)]
+    {
+        let _ = traps;
+        true
+    }
+}
+
 impl Traps {
     pub fn in_action(&self) -> bool {
         self.handling_debug
@@ -121,6 +189,8 @@ impl Traps {
     }
 
     pub fn init_hangup(&mut self) -> io::Result<()> {
+        self.interactive_origin = true;
+        self.interactive_handlers = true;
         let mut old = action(libc::SIG_DFL);
         if unsafe { libc::sigaction(libc::SIGHUP, std::ptr::null(), &mut old) } < 0 {
             return Err(io::Error::last_os_error());
@@ -180,7 +250,7 @@ impl Traps {
                 } else if unsafe { libc::sigaction(sig, std::ptr::null(), &mut old) } < 0 {
                     return Err(io::Error::last_os_error());
                 }
-                if old.sa_sigaction != libc::SIG_DFL && sig != libc::SIGPIPE {
+                if old.sa_sigaction != libc::SIG_DFL {
                     continue;
                 }
                 if !self.entries.contains_key(&sig)
@@ -193,9 +263,6 @@ impl Traps {
                     } < 0
                 {
                     return Err(io::Error::last_os_error());
-                }
-                if sig == libc::SIGPIPE && old.sa_sigaction == libc::SIG_IGN {
-                    old = action(libc::SIG_DFL);
                 }
                 self.implicit.insert(sig, old);
             }
@@ -218,13 +285,17 @@ impl Traps {
             if unsafe { libc::sigaction(sig, std::ptr::null(), &mut original) } < 0 {
                 return Err(io::Error::last_os_error());
             }
-            // Rust installs SIG_IGN for SIGPIPE on entry to main. A shell trap
-            // reset restores its ordinary external-command disposition.
-            if sig == libc::SIGPIPE && original.sa_sigaction == libc::SIG_IGN {
-                original = action(libc::SIG_DFL);
-            }
-            if original.sa_sigaction == libc::SIG_IGN && !interactive && sig != libc::SIGPIPE {
-                return Ok(());
+            if original.sa_sigaction == libc::SIG_IGN {
+                if !interactive && !self.interactive_origin {
+                    return Ok(());
+                }
+                original = if self.interactive_handlers
+                    && matches!(sig, libc::SIGINT | libc::SIGQUIT | libc::SIGTERM)
+                {
+                    action(crate::interrupt as *const () as usize)
+                } else {
+                    action(libc::SIG_DFL)
+                };
             }
         }
         if real {
@@ -307,6 +378,15 @@ impl Traps {
     }
 
     pub fn after_fork(&mut self, errtrace: bool, functrace: bool) {
+        if self.interactive_handlers {
+            self.interactive_handlers = false;
+            crate::execute::reset_caught_signals(&[
+                libc::SIGINT,
+                libc::SIGQUIT,
+                libc::SIGTERM,
+                libc::SIGTSTP,
+            ]);
+        }
         if self.interactive_hup {
             self.interactive_hup = false;
             if !self.ignores(libc::SIGHUP) {
@@ -327,7 +407,11 @@ impl Traps {
         let old = std::mem::take(&mut self.entries);
         for (&sig, e) in &old {
             if self.keep_after_fork(sig, e, errtrace, functrace) {
-                self.entries.insert(sig, e.clone());
+                let mut child = e.clone();
+                if sig > 0 && sig < DEBUG && child.original.sa_sigaction != libc::SIG_IGN {
+                    child.original = action(libc::SIG_DFL);
+                }
+                self.entries.insert(sig, child);
             }
         }
         if self.inherited_listing.is_none() {

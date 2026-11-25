@@ -396,7 +396,7 @@ impl Error {
     }
 }
 
-fn reserved(word: &str) -> bool {
+pub(crate) fn reserved(word: &str) -> bool {
     reserved_spelling(word).is_some()
 }
 
@@ -544,6 +544,7 @@ thread_local! {
 
 struct Reader {
     source: Rc<str>,
+    alias_source: Option<Box<aliases::Expanded>>,
     spans: Vec<(usize, usize)>,
     newlines: Vec<usize>,
     aliases: crate::alias::Aliases,
@@ -568,6 +569,7 @@ impl Reader {
     fn new(tokens: Vec<Token>, spans: Vec<(usize, usize)>, source: &str) -> Self {
         Self {
             spans,
+            alias_source: None,
             newlines: memchr::memchr_iter(b'\n', source.as_bytes()).collect(),
             source: source.into(),
             tokens: tokens.into(),
@@ -577,12 +579,20 @@ impl Reader {
     }
 
     fn position(&self) -> usize {
-        self.spans.len() - self.tokens.len()
+        let count = self
+            .alias_source
+            .as_ref()
+            .map_or(self.spans.len(), |s| s.token_count(self.spans.len()));
+        count - self.tokens.len()
     }
     fn location(&self, from: usize) -> Location {
+        if let Some(expanded) = &self.alias_source {
+            return expanded.location(self, from, self.position());
+        }
         let start = self.spans.get(from).map_or(self.source.len(), |s| s.0);
-        let end = if self.position() > from {
-            self.spans[self.position() - 1].1
+        let position = self.spans.len() - self.tokens.len();
+        let end = if position > from {
+            self.spans[position - 1].1
         } else {
             start
         };
@@ -657,6 +667,7 @@ impl Reader {
                 }
                 return Ok(statements);
             }
+            self.expand_alias(true)?;
             if self.at_stop(stops) {
                 if (statements.is_empty() && !stops.contains(&";;"))
                     || condition != Condition::Always
@@ -665,9 +676,11 @@ impl Reader {
                 }
                 return Ok(statements);
             }
-            self.expand_alias(true)?;
             if self.peek().is_none() && condition == Condition::Always {
                 return Ok(statements);
+            }
+            if matches!(self.peek(), Some(Token::Newline)) {
+                continue;
             }
             let mut inverted = None;
             let mut timing = None;
@@ -736,6 +749,7 @@ impl Reader {
                 }
                 Some(Token::And) => Condition::Success,
                 Some(Token::Or) => Condition::Failure,
+                _ if self.at_stop(stops) => return Ok(statements),
                 _ => return Err(Error::Invalid("expected a command separator")),
             };
             self.tokens.pop_front();
@@ -762,11 +776,16 @@ impl Reader {
                     word: Word::Literal("1".into()),
                 });
             }
-            self.newlines();
+            loop {
+                self.newlines();
+                self.expand_alias(true)?;
+                if !matches!(self.peek(), Some(Token::Newline)) {
+                    break;
+                }
+            }
             if self.peek().is_none() {
                 return Err(Error::Incomplete("expected a command after pipe"));
             }
-            self.expand_alias(true)?;
             let start = self.position();
             let mut stage = match self.compound()? {
                 Some(compound) => self.compound_stage(compound)?,

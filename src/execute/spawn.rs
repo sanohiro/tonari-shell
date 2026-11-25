@@ -80,73 +80,65 @@ impl External {
             .as_ref()
             .and_then(|paths| paths.first())
             .unwrap_or(&self.words[0]);
-        let mut attr = MaybeUninit::uninit();
-        unsafe {
-            check(libc::posix_spawnattr_init(attr.as_mut_ptr()))?;
-            let result = (|| {
-                let mut signals = std::mem::zeroed();
-                libc::sigemptyset(&mut signals);
-                if !self.ignore_pipe {
-                    libc::sigaddset(&mut signals, libc::SIGPIPE);
-                }
-                let mut flags = libc::POSIX_SPAWN_SETSIGDEF;
-                if let Some(group) = launch.group {
-                    flags |= libc::POSIX_SPAWN_SETPGROUP;
-                    check(libc::posix_spawnattr_setpgroup(attr.as_mut_ptr(), group))?;
-                    for sig in crate::jobs::JOB_SIGNALS {
-                        libc::sigaddset(&mut signals, sig);
-                    }
-                }
-                #[cfg(target_os = "macos")]
-                if launch.spawn_terminal().is_some() {
-                    flags |= libc::POSIX_SPAWN_START_SUSPENDED;
-                }
-                check(libc::posix_spawnattr_setsigdefault(
-                    attr.as_mut_ptr(),
-                    &signals,
-                ))?;
-                check(libc::posix_spawnattr_setflags(
-                    attr.as_mut_ptr(),
-                    flags as _,
-                ))?;
-                let env = self
-                    .env
-                    .as_ref()
-                    .map_or_else(inherited_env, |e| e.pointers.as_ptr().cast());
-                let spawn = |path: &std::ffi::CStr,
-                             argv: &[*const libc::c_char]|
-                 -> io::Result<libc::pid_t> {
+        let spawn_with = |attributes| unsafe {
+            let env = self
+                .env
+                .as_ref()
+                .map_or_else(inherited_env, |e| e.pointers.as_ptr().cast());
+            let spawn =
+                |path: &std::ffi::CStr, argv: &[*const libc::c_char]| -> io::Result<libc::pid_t> {
                     let mut pid = 0;
                     check(libc::posix_spawn(
                         &mut pid,
                         path.as_ptr(),
                         actions.map_or(std::ptr::null(), MaybeUninit::as_ptr),
-                        attr.as_ptr(),
+                        attributes,
                         argv.as_ptr().cast(),
                         env,
                     ))?;
                     Ok(pid)
                 };
-                match spawn(path, &self.argv) {
-                    Err(e) if e.raw_os_error() == Some(libc::ENOEXEC) => {
-                        self.with_script(path, |shell, args| {
-                            if let Some(session) = session
-                                && let Some(pid) = self.start_script(
-                                    session,
-                                    path,
-                                    shell,
-                                    args,
-                                    env.cast(),
-                                    ScriptProcess::Child,
-                                )
-                            {
-                                return Ok(pid);
-                            }
-                            spawn(shell, args)
-                        })
-                    }
-                    result => result,
+            match spawn(path, &self.argv) {
+                Err(e) if e.raw_os_error() == Some(libc::ENOEXEC) => {
+                    self.with_script(path, |shell, args| {
+                        if let Some(session) = session
+                            && let Some(pid) = self.start_script(
+                                session,
+                                path,
+                                shell,
+                                args,
+                                env.cast(),
+                                ScriptProcess::Child,
+                            )
+                        {
+                            return Ok(pid);
+                        }
+                        spawn(shell, args)
+                    })
                 }
+                result => result,
+            }
+        };
+        let Some(group) = launch.group else {
+            return spawn_with(std::ptr::null());
+        };
+        let mut attr = MaybeUninit::uninit();
+        unsafe {
+            check(libc::posix_spawnattr_init(attr.as_mut_ptr()))?;
+            let result = (|| {
+                check(libc::posix_spawnattr_setpgroup(attr.as_mut_ptr(), group))?;
+                let flags = libc::POSIX_SPAWN_SETPGROUP;
+                #[cfg(target_os = "macos")]
+                let flags = if launch.spawn_terminal().is_some() {
+                    flags | libc::POSIX_SPAWN_START_SUSPENDED
+                } else {
+                    flags
+                };
+                check(libc::posix_spawnattr_setflags(
+                    attr.as_mut_ptr(),
+                    flags as _,
+                ))?;
+                spawn_with(attr.as_ptr())
             })();
             libc::posix_spawnattr_destroy(attr.as_mut_ptr());
             result
@@ -207,11 +199,6 @@ impl External {
             }
         }
         REENTERED.set(true);
-        if process == ScriptProcess::Replace {
-            // exec() had restored the external command's default disposition.
-            // A newly entered Rust main ignores SIGPIPE.
-            unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) };
-        }
         // The interpreter is single-threaded. Apply exactly the exported
         // change, including export -n, before starting the ordinary script entry point.
         match shell_level {

@@ -83,6 +83,7 @@ const SET_OPTIONS: &[OptionEntry] = &[
     option_entry!("nounset", nounset),
     option_entry!("onecmd", onecmd),
     option_entry!("pipefail", pipefail),
+    option_entry!("posix", posix),
     option_entry!("verbose", verbose),
     option_entry!("vi", vi),
     option_entry!("xtrace", xtrace),
@@ -120,8 +121,19 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("varredir_close", shopt.varredir_close),
 ];
 impl Session {
-    pub(super) fn editing_option(&mut self, name: &str, enabled: bool) {
+    pub fn set_posix(&mut self, enabled: bool) {
+        self.posix = enabled;
+        self.shopt.expand_aliases = enabled || self.interactive;
+        if enabled {
+            self.shopt.inherit_errexit = true;
+        }
+    }
+
+    pub(super) fn option_changed(&mut self, name: &str, enabled: bool) {
         use crate::editor::bindings::Keymap;
+        if name == "posix" {
+            self.set_posix(enabled);
+        }
         if enabled && name == "emacs" {
             self.vi = false;
             self.bindings.map = Keymap::Emacs;
@@ -186,6 +198,9 @@ impl Session {
                 for name in list.split(':') {
                     if let Some(value) = self.option_value(name, set) {
                         *value = true;
+                        if set {
+                            self.option_changed(name, true);
+                        }
                     }
                 }
                 let var = self.declared_variable(variable, false).unwrap();
@@ -242,10 +257,6 @@ impl Session {
             .filter(|_| all)
             .chain(names.iter().map(String::as_str));
         for name in names {
-            if set && name == "posix" && quiet && !enable && !disable {
-                status = 1;
-                continue;
-            }
             let Some(entry) = known.iter().find(|entry| entry.name == name) else {
                 eprintln!("tonari: shopt: {name}: unsupported option");
                 status = 1;
@@ -255,7 +266,7 @@ impl Session {
                 if let Some(write) = entry.write {
                     *write(self) = enable;
                     if set {
-                        self.editing_option(name, enable);
+                        self.option_changed(name, enable);
                     }
                     if name == "extdebug" && !set {
                         self.errtrace = enable;

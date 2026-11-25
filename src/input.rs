@@ -145,18 +145,22 @@ fn error(message: impl std::fmt::Display, status: u8) -> Flow {
 }
 
 fn syntax_error(session: &Session, problem: parser::Error, first_line: usize) -> Flow {
+    let flow = if session.posix && !session.interactive {
+        Flow::Exit(2)
+    } else {
+        Flow::Continue(2)
+    };
     if session.source_depth > 0
         && let Some(path) = session.source_names.last()
     {
-        return error(
-            format_args!(
-                "{path}: command starting at line {first_line}: {}",
-                problem.message()
-            ),
-            2,
+        eprintln!(
+            "tonari: {path}: command starting at line {first_line}: {}",
+            problem.message()
         );
+    } else {
+        eprintln!("tonari: {}", problem.message());
     }
-    error(problem.message(), 2)
+    flow
 }
 
 fn blank_or_comment(line: &str) -> bool {
@@ -192,6 +196,7 @@ fn buffered_compound<P: AsRef<[parser::Statement]>>(
     first: &str,
     buffered: &[u8],
     at_eof: bool,
+    aliases: bool,
     mut parse: impl FnMut(usize) -> Result<P, parser::Error>,
 ) -> Result<(P, usize, usize), usize> {
     let header = first.lines().next().ok_or(0usize)?.trim_ascii_start();
@@ -214,9 +219,11 @@ fn buffered_compound<P: AsRef<[parser::Statement]>>(
     let mut probe = |size, lines| {
         // Only the final ordinary read may emit an unterminated here-doc warning.
         match parse(size) {
-            Ok(program) if matches!(program.as_ref(), [s] if s.location.end > first.len()) => {
+            Ok(program) if matches!(program.as_ref(), [s] if aliases || s.location.end > first.len()) => {
                 Ok(Some((program, size, lines)))
             }
+            // Expanded alias locations describe shell text, not physical input.
+            Ok(_) if aliases => Err(size),
             Ok(program) => {
                 // Quoted text and here-documents may look like nested headers.
                 // If the scan overshot, the parser already located the first
@@ -390,16 +397,20 @@ fn run(
             {
                 return error(e, 1);
             }
-            if let Ok((program, consumed, lines)) =
-                buffered_compound(text, reader.buffer(), false, |size| {
+            if let Ok((program, consumed, lines)) = buffered_compound(
+                text,
+                reader.buffer(),
+                false,
+                session.shopt.expand_aliases && session.aliases.0.is_some(),
+                |size| {
                     let rest = std::str::from_utf8(&reader.buffer()[..size])
                         .map_err(|_| parser::Error::Invalid("expected UTF-8 command text"))?;
                     let mut unit = String::with_capacity(text.len() + size);
                     unit.push_str(text);
                     unit.push_str(rest);
                     parser::session_source_at(&unit, false, session, base_line)
-                })
-            {
+                },
+            ) {
                 reader.consume(consumed);
                 base_line += lines;
                 result = Ok(program);
@@ -550,6 +561,7 @@ pub fn text(
                 text,
                 &source.as_bytes()[end..limit],
                 limit == source.len(),
+                session.shopt.expand_aliases && session.aliases.0.is_some(),
                 |size| parse(session, &source[start..end + size], false),
             ) {
                 Ok((program, consumed, extra_lines)) => {

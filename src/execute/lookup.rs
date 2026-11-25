@@ -161,22 +161,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
             }
             found = true;
         }
-        let keyword = matches!(
-            name.as_str(),
-            "if" | "then"
-                | "else"
-                | "elif"
-                | "fi"
-                | "for"
-                | "in"
-                | "do"
-                | "done"
-                | "while"
-                | "until"
-                | "function"
-                | "{"
-                | "}"
-        );
+        let keyword = crate::parser::reserved(name) || name == "]]";
         for (present, kind, label) in [
             (keyword, "keyword", "a shell keyword"),
             (

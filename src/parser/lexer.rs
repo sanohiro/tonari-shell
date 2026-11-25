@@ -830,6 +830,7 @@ pub(super) fn lex(
         let mut pattern_context = false;
         let mut braces = 0usize;
         let mut assignment = None;
+        let mut after_colon = false;
         let start = chars.as_str();
         // Copy an ordinary word in one piece. Keep indexed assignments and
         // expansion syntax on the full word reader.
@@ -865,6 +866,8 @@ pub(super) fn lex(
             }
             let rest = chars.as_str();
             chars.next();
+            let follows_colon = after_colon;
+            after_colon = c == ':';
             match c {
                 '<' | '>' => {
                     chars.next();
@@ -890,6 +893,7 @@ pub(super) fn lex(
                         None => return Err(Error::Incomplete("trailing backslash")),
                     };
                     if escaped == '\n' {
+                        after_colon = follows_colon;
                         if chars.as_str().is_empty() && !final_input {
                             return Err(Error::Incomplete("line continuation"));
                         }
@@ -972,13 +976,13 @@ pub(super) fn lex(
                     word.part(Part::BraceTilde(tilde));
                 }
                 '~' if !started
-                    || assignment
-                        .as_ref()
-                        .is_some_and(|name| start.len() - rest.len() == name.len() + 1) =>
+                    || assignment.as_ref().is_some_and(|name| {
+                        follows_colon || start.len() - rest.len() == name.len() + 1
+                    }) =>
                 {
                     let length = chars
                         .as_str()
-                        .find(|c| c == '/' || separator(c))
+                        .find(|c| c == '/' || assignment.is_some() && c == ':' || separator(c))
                         .unwrap_or(chars.as_str().len());
                     let suffix = &chars.as_str()[..length];
                     // Only consume a complete unquoted prefix. Quotes, escapes and

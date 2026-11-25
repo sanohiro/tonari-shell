@@ -320,7 +320,6 @@ impl Environment {
 }
 
 struct External {
-    ignore_pipe: bool,
     // Owns the argument strings referenced by argv.
     original_name: Option<CString>,
     words: Vec<CString>,
@@ -368,7 +367,6 @@ impl External {
             words,
             argv,
             original_name: original,
-            ignore_pipe: session.traps.ignores(libc::SIGPIPE),
             search_paths,
             env: if clear_env {
                 Some(Rc::new(Environment {
@@ -433,18 +431,11 @@ impl External {
     }
 
     fn exec(&self, session: Option<&Session>) -> u8 {
-        // Rust ignores SIGPIPE in its own runtime. External commands need the
-        // normal Unix disposition, including on the direct exec path.
         let program = self.original_name.as_ref().unwrap_or(&self.words[0]);
         if program.as_bytes().is_empty() {
             write_error(b"", b": command not found");
             return 127;
         }
-        let old_pipe = if self.ignore_pipe {
-            libc::SIG_ERR
-        } else {
-            unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) }
-        };
         let mut error = libc::ENOENT;
         let paths = self
             .search_paths
@@ -470,9 +461,6 @@ impl External {
                     break;
                 }
             }
-        }
-        if old_pipe != libc::SIG_ERR {
-            unsafe { libc::signal(libc::SIGPIPE, old_pipe) };
         }
         let status = exec_status(error);
         write_error(
@@ -530,6 +518,32 @@ enum Builtin {
     Unknown,
 }
 
+pub(crate) fn special_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        ":" | "."
+            | "break"
+            | "continue"
+            | "eval"
+            | "exec"
+            | "exit"
+            | "export"
+            | "readonly"
+            | "return"
+            | "set"
+            | "shift"
+            | "times"
+            | "trap"
+            | "unset"
+    )
+}
+
+fn posix_special(cmd: &PreparedCommand, session: &Session) -> bool {
+    session.posix
+        && cmd.search == lookup::Search::Normal
+        && cmd.words.first().is_some_and(|w| special_builtin(w))
+}
+
 fn builtin(cmd: &PreparedCommand, last_status: u8, session: &Session) -> Option<Builtin> {
     if cmd.compound.is_some() {
         return Some(Builtin::Compound);
@@ -537,7 +551,10 @@ fn builtin(cmd: &PreparedCommand, last_status: u8, session: &Session) -> Option<
     let Some(name) = cmd.words.first() else {
         return Some(Builtin::Status(cmd.empty_status));
     };
-    if cmd.search == lookup::Search::Normal && session.functions.contains_key(name) {
+    if cmd.search == lookup::Search::Normal
+        && session.functions.contains_key(name)
+        && !(session.posix && special_builtin(name))
+    {
         return Some(Builtin::Function);
     }
     if session.disabled_builtins.contains(name) {
@@ -616,6 +633,14 @@ pub(crate) fn builtin_names() -> &'static [&'static str] {
     ]
 }
 
+fn status_operands(args: &[String]) -> &[String] {
+    if args.first().is_some_and(|s| s == "--") {
+        &args[1..]
+    } else {
+        args
+    }
+}
+
 fn named_builtin(name: &str, args: &[String], last_status: u8) -> Option<Builtin> {
     match name {
         "bind" | "caller" | "enable" | "help" | "suspend" => Some(Builtin::Control),
@@ -651,11 +676,12 @@ fn named_builtin(name: &str, args: &[String], last_status: u8) -> Option<Builtin
         "source" | "." => Some(Builtin::Source),
         "eval" => Some(Builtin::Eval),
         "exec" => Some(Builtin::Exec),
-        "return" => Some(Builtin::Return(match args.first() {
+        "return" => Some(Builtin::Return(match status_operands(args).first() {
             None => Some(last_status),
             Some(s) => s.trim().parse::<i64>().ok().map(|n| n as u8),
         })),
         "exit" | "logout" => {
+            let args = status_operands(args);
             let status = match args.first() {
                 None => last_status,
                 Some(s) => match s.trim().parse::<i64>() {
@@ -680,7 +706,13 @@ fn eval_builtin(
     last_status: u8,
     in_stage_child: bool,
 ) -> Flow {
-    let mut bindings = session.bind(&cmd.assignments);
+    let persistent = !cmd.assignments.is_empty() && posix_special(cmd, session);
+    let mut bindings = if persistent {
+        session.persist_prefix(&mut cmd.assignments);
+        Default::default()
+    } else {
+        session.bind(&cmd.assignments)
+    };
     let args = cmd.words.get(1..).unwrap_or_default();
     let result = match builtin {
         Builtin::History => crate::history::commands::run(session, &cmd.words, last_status),
@@ -780,7 +812,12 @@ fn eval_builtin(
             Flow::Continue(session.directory_stack(&cmd.words[0], args, &mut io::stdout().lock()))
         }
         Builtin::Directory => Flow::Continue(session.directory_builtin(&cmd.words[0], args)),
-        Builtin::Source => crate::source_file(session, &cmd.words, last_status),
+        Builtin::Source => crate::source_file(
+            session,
+            &cmd.words,
+            last_status,
+            !session.interactive && posix_special(cmd, session),
+        ),
         Builtin::Eval => crate::input::eval_builtin(session, args, last_status),
         Builtin::Return(status) => {
             if session.source_depth == 0 && session.function_depth == 0 {
@@ -790,7 +827,7 @@ fn eval_builtin(
                 );
                 Flow::Continue(1)
             } else if let Some(code) = status {
-                if args.len() > 1 {
+                if status_operands(args).len() > 1 {
                     write_error(b"return", b": too many arguments");
                     Flow::Continue(1)
                 } else {
@@ -803,11 +840,13 @@ fn eval_builtin(
             }
         }
         Builtin::Status(code) => Flow::Continue(code),
-        Builtin::Exit(code) if args.is_empty() => Flow::Exit(crate::startup::logout(
-            session,
-            session.traps.exit_status.unwrap_or(code),
-            last_status,
-        )),
+        Builtin::Exit(code) if status_operands(args).is_empty() => {
+            Flow::Exit(crate::startup::logout(
+                session,
+                session.traps.exit_status.unwrap_or(code),
+                last_status,
+            ))
+        }
         Builtin::Exit(code) => Flow::Exit(crate::startup::logout(session, code, last_status)),
         Builtin::InvalidExit => {
             write_error(b"exit", b": numeric argument required");
@@ -818,7 +857,9 @@ fn eval_builtin(
             Flow::Continue(1)
         }
     };
-    session.restore(bindings);
+    if !persistent {
+        session.restore(bindings);
+    }
     result
 }
 
@@ -1031,6 +1072,14 @@ fn here_pipe_limit(builtin: Option<Builtin>, cmd: &PreparedCommand) -> usize {
     }
 }
 
+fn redirect_failure(cmd: &PreparedCommand, session: &Session) -> Flow {
+    if !session.interactive && posix_special(cmd, session) {
+        Flow::Exit(1)
+    } else {
+        Flow::Continue(1)
+    }
+}
+
 fn run_builtin(
     builtin: Builtin,
     cmd: &mut PreparedCommand,
@@ -1076,7 +1125,7 @@ fn run_builtin(
         // directly, avoiding two changes to the process-wide stdout.
         let _saved = SavedFd::capture(&actions[0], actions)?;
         let Some(fd) = open_redirect(path, *flags) else {
-            return Ok(Flow::Continue(1));
+            return Ok(redirect_failure(cmd, session));
         };
         use std::io::Write;
         let (data, status) = output.render(session);
@@ -1088,7 +1137,7 @@ fn run_builtin(
         // but never reads or writes the destination. Open before reserving any
         // backup, so /dev/fd paths see the caller's descriptor table.
         let Some(fd) = open_redirect(path, *flags) else {
-            return Ok(Flow::Continue(1));
+            return Ok(redirect_failure(cmd, session));
         };
         // Bash can still fail to save a live destination at its descriptor limit.
         // This reservation drops before the single-threaded shell can exec.
@@ -1130,7 +1179,7 @@ fn run_builtin(
     let flow = if applied {
         eval_builtin(builtin, cmd, session, last_status, false)
     } else {
-        Flow::Continue(1)
+        redirect_failure(cmd, session)
     };
     if !matches!(builtin, Builtin::Exec) || !matches!(flow, Flow::Continue(0)) {
         session.stdin_redirected = old_input;
@@ -1179,7 +1228,11 @@ fn connect_pipe(
     setup
 }
 pub(crate) fn reset_child_signals() {
-    for signal in [libc::SIGINT, libc::SIGQUIT] {
+    reset_caught_signals(&[libc::SIGINT, libc::SIGQUIT, libc::SIGTERM]);
+}
+
+pub(crate) fn reset_caught_signals(signals: &[i32]) {
+    for &signal in signals {
         unsafe {
             let mut old: libc::sigaction = std::mem::zeroed();
             libc::sigaction(signal, std::ptr::null(), &mut old);
@@ -1401,7 +1454,7 @@ fn start(
     }
     if builtin.is_none()
         && !resolved
-        && !session.traps.ignores(libc::SIGPIPE)
+        && crate::traps::std_spawn_inherits_pipe(&session.traps)
         && (cmd.redirects.is_empty() || merged_pipe.is_some())
         && !custom_search
         && launch.group.is_none()
@@ -1810,7 +1863,7 @@ fn prepare(
                     crate::session::array::subscript(&key).map_or(key.as_str(), |(base, _)| base);
                 if exp.session.readonly(base) {
                     let error = crate::expansion::Error::readonly(base);
-                    if words.is_empty() {
+                    if words.is_empty() || exp.session.posix {
                         return Err(error);
                     }
                     eprintln!("tonari: {error}");
@@ -1979,6 +2032,7 @@ fn prepare_redirects(
                 text
             }
             (_, Word::Literal(word)) => word,
+            (_, word) if exp.session.posix && !exp.session.interactive => exp.scalar(word)?,
             (_, word) => {
                 let mut fields = exp.fields(word)?.into_iter();
                 let word = fields.next().ok_or("ambiguous redirect")?;

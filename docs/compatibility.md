@@ -1,5 +1,11 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## POSIX sh invocation / sh 名での起動
+
+Both the release and GNU Bash are launched as `sh` for the upstream yash POSIX suite. The case tables preserve each shell's verdict and distinguish failures in one shell, common failures, skips and variable results. The ordinary Bash feature audit contains 1,411 entries. On the physical M1, six prior differences now match and no previously matching entry regressed. Sixty-two entries changed from an unavailable mode to an available mode with no independent probe.
+
+`sh` としての起動・試験と通常の Bash モードを個別に確認しています。上流が指定した出力や終了状態が Bash と食い違う場合には、Tonari の結果も別に記録しています。今回の検証範囲、再現コマンド、残っている差異は項目別記録にあります。[POSIX case records](compatibility/yash-posix/README.md) · [Bash POSIX mode](https://www.gnu.org/software/bash/manual/html_node/Bash-POSIX-Mode.html)
+
 ## Quoted paths in command substitutions / コマンド置換で引用した実行パス
 
 An executable path passed as a quoted positional parameter or scalar retains spaces, stdout and the exit status. A locally defined Bash function can take the name of a path, including `/bin/echo`. Calling that path runs the function in the substitution's scope. The `command` builtin can still select the executable. Bash 5.2 rejects an explicit `export -f` of such a function and skips importing it in a child shell. [Shell tests](../tests/shell.py)

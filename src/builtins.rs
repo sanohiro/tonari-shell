@@ -11,18 +11,39 @@ use std::path::Path;
 
 use crate::Session;
 
-// Builtins may run in a child which exits with _exit. Flush explicitly before
-// descriptors are restored in the parent or closed in the child.
+// Rust's global Stdout treats EBADF as a successful write. Shell builtins
+// must report a failed redirect, including when a parent intentionally closed fd 1.
+fn write_stdout(mut bytes: &[u8]) -> u8 {
+    while !bytes.is_empty() {
+        let n = unsafe { libc::write(1, bytes.as_ptr().cast(), bytes.len()) };
+        if n > 0 {
+            bytes = &bytes[n as usize..];
+        } else {
+            let e = io::Error::last_os_error();
+            if e.kind() != io::ErrorKind::Interrupted {
+                eprintln!("tonari: echo: write error: {e}");
+                return 1;
+            }
+        }
+    }
+    0
+}
+
 pub fn echo(args: &[String]) -> u8 {
-    let mut out = Vec::new();
-    echo_into(args, &mut out);
-    let mut stdout = io::stdout().lock();
-    u8::from(
-        stdout
-            .write_all(&out)
-            .and_then(|()| stdout.flush())
-            .is_err(),
-    )
+    match args {
+        [] => write_stdout(b"\n"),
+        [word] if word.len() < 128 && !word.starts_with('-') => {
+            let mut line = [0; 128];
+            line[..word.len()].copy_from_slice(word.as_bytes());
+            line[word.len()] = b'\n';
+            write_stdout(&line[..=word.len()])
+        }
+        _ => {
+            let mut out = Vec::new();
+            echo_into(args, &mut out);
+            write_stdout(&out)
+        }
+    }
 }
 
 pub(crate) fn echo_into(args: &[String], out: &mut Vec<u8>) {

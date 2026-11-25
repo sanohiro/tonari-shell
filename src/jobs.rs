@@ -92,11 +92,7 @@ impl Launch {
             if let Some(tty) = self.tty.filter(|_| !self.defer_tty) {
                 give_terminal(tty, unsafe { libc::getpgrp() });
             }
-            for sig in JOB_SIGNALS {
-                unsafe {
-                    libc::signal(sig, libc::SIG_DFL);
-                }
-            }
+            crate::execute::reset_caught_signals(&JOB_SIGNALS);
         } else if self.background {
             for sig in [libc::SIGINT, libc::SIGQUIT] {
                 unsafe {
@@ -127,6 +123,10 @@ fn terminal_modes(fd: RawFd) -> Option<libc::termios> {
 }
 
 fn give_terminal(fd: RawFd, pgid: pid_t) {
+    give_terminal_with_modes(fd, pgid, None);
+}
+
+fn give_terminal_with_modes(fd: RawFd, pgid: pid_t, modes: Option<&libc::termios>) {
     // The shell is temporarily in the background when it takes the terminal back.
     unsafe {
         let mut block = std::mem::zeroed();
@@ -135,6 +135,9 @@ fn give_terminal(fd: RawFd, pgid: pid_t) {
         libc::sigaddset(&mut block, libc::SIGTTOU);
         libc::sigprocmask(libc::SIG_BLOCK, &block, &mut old);
         libc::tcsetpgrp(fd, pgid);
+        if let Some(modes) = modes {
+            libc::tcsetattr(fd, libc::TCSANOW, modes);
+        }
         libc::sigprocmask(libc::SIG_SETMASK, &old, std::ptr::null_mut());
     }
 }
@@ -289,12 +292,19 @@ impl Jobs {
 
     pub fn init(&mut self) {
         let old = unsafe { libc::getpgrp() };
-        if unsafe { libc::tcgetpgrp(libc::STDERR_FILENO) } != old {
+        let fd = if unsafe { libc::isatty(libc::STDERR_FILENO) } == 1 {
+            PrivateFile::duplicate(io::stderr().as_fd())
+        } else {
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("/dev/tty")
+                .and_then(PrivateFile::new)
+        };
+        let Ok(fd) = fd else { return };
+        if unsafe { libc::tcgetpgrp(fd.as_raw_fd()) } != old {
             return;
         }
-        let Ok(fd) = PrivateFile::duplicate(io::stderr().as_fd()) else {
-            return;
-        };
         let owner = unsafe { libc::getpid() };
         if old != owner {
             if unsafe { libc::setpgid(0, 0) } < 0 {
@@ -302,8 +312,16 @@ impl Jobs {
             }
             give_terminal(fd.as_raw_fd(), owner);
         }
+        // A caught disposition becomes default on exec. Preserve a signal
+        // explicitly ignored by our parent across child process creation.
+        extern "C" fn stay_running(_: i32) {}
         unsafe {
-            libc::signal(libc::SIGTSTP, libc::SIG_IGN);
+            let mut previous = std::mem::MaybeUninit::uninit();
+            if libc::sigaction(libc::SIGTSTP, std::ptr::null(), previous.as_mut_ptr()) == 0
+                && previous.assume_init().sa_sigaction != libc::SIG_IGN
+            {
+                libc::signal(libc::SIGTSTP, stay_running as *const () as usize);
+            }
         }
         self.tty = Some(Terminal { fd, owner });
     }
@@ -455,12 +473,9 @@ impl Jobs {
     ) -> io::Result<u8> {
         let tty = self.terminal();
         if let (Some(t), Some(group)) = (tty, job.group) {
-            give_terminal(t.fd.as_raw_fd(), group);
-            if let Some(modes) = &job.modes {
-                unsafe {
-                    libc::tcsetattr(t.fd.as_raw_fd(), libc::TCSANOW, modes);
-                }
-            }
+            // Changing terminal modes after handoff can stop the shell with
+            // SIGTTOU. Keep the signal blocked through both operations.
+            give_terminal_with_modes(t.fd.as_raw_fd(), group, job.modes.as_ref());
         }
         let result = (|| {
             if resume {

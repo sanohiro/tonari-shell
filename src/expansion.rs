@@ -44,6 +44,9 @@ impl Error {
 
     pub fn flow(&self, session: &Session) -> crate::Flow {
         match self.recovery {
+            Recovery::Input if session.posix && !session.interactive => {
+                crate::Flow::Exit(self.status)
+            }
             Recovery::Input => crate::Flow::Discard(self.status),
             Recovery::Exit if !session.interactive => crate::Flow::Exit(self.status),
             _ => crate::Flow::Continue(self.status),

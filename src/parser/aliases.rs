@@ -29,6 +29,128 @@ pub(super) struct Frame {
     next_word: bool,
 }
 
+// Alias substitutions proceed left-to-right. Keep the rewritten prefix and
+// its token spans; untouched suffix bytes and offsets stay in the lexer input.
+#[derive(Default)]
+pub(super) struct Expanded {
+    text: String,
+    spans: Vec<(usize, usize)>,
+    newlines: Vec<usize>,
+    original_byte: usize,
+    original_token: usize,
+}
+
+impl Expanded {
+    pub(super) fn token_count(&self, original_count: usize) -> usize {
+        self.spans.len() + (original_count - self.original_token)
+    }
+
+    fn replace(
+        &mut self,
+        index: usize,
+        value: &str,
+        replacement: Vec<(usize, usize)>,
+        original: &str,
+        tokens: &[(usize, usize)],
+    ) {
+        let rescan;
+        if index >= self.spans.len() {
+            let token = self.original_token + (index - self.spans.len());
+            let (start, end) = tokens[token];
+            let prefix = self.text.len();
+            rescan = prefix;
+            self.spans
+                .extend(tokens[self.original_token..token].iter().map(|&(a, b)| {
+                    (
+                        prefix + (a - self.original_byte),
+                        prefix + (b - self.original_byte),
+                    )
+                }));
+            self.text.push_str(&original[self.original_byte..start]);
+            let at = self.text.len();
+            self.text.push_str(value);
+            self.spans
+                .extend(replacement.into_iter().map(|(a, b)| (at + a, at + b)));
+            self.original_byte = end;
+            self.original_token = token + 1;
+        } else {
+            // A nested alias rewrites a token in the replacement just inserted.
+            let (start, end) = self.spans[index];
+            self.text.replace_range(start..end, value);
+            self.newlines
+                .truncate(self.newlines.partition_point(|&n| n < start));
+            rescan = start;
+            if value.len() != end - start {
+                for (a, b) in &mut self.spans[index + 1..] {
+                    *a = *a - (end - start) + value.len();
+                    *b = *b - (end - start) + value.len();
+                }
+            }
+            self.spans.splice(
+                index..=index,
+                replacement.into_iter().map(|(a, b)| (start + a, start + b)),
+            );
+        }
+        self.newlines.extend(
+            memchr::memchr_iter(b'\n', &self.text.as_bytes()[rescan..]).map(|i| rescan + i),
+        );
+    }
+
+    fn span(&self, index: usize, reader: &Reader) -> (usize, usize) {
+        if let Some(span) = self.spans.get(index) {
+            return *span;
+        }
+        let original = self.original_token + (index - self.spans.len());
+        let (a, b) = reader
+            .spans
+            .get(original)
+            .copied()
+            .unwrap_or((reader.source.len(), reader.source.len()));
+        (
+            self.text.len() + (a - self.original_byte),
+            self.text.len() + (b - self.original_byte),
+        )
+    }
+
+    pub(super) fn location(
+        &self,
+        reader: &Reader,
+        from: usize,
+        position: usize,
+    ) -> super::Location {
+        let start = self.span(from, reader).0;
+        let end = if position > from {
+            self.span(position - 1, reader).1
+        } else {
+            start
+        };
+        let boundary = self.text.len();
+        let original_at = |at: usize| self.original_byte + (at - boundary);
+        let text: std::rc::Rc<str> = if end <= boundary {
+            self.text[start..end].into()
+        } else if start >= boundary {
+            reader.source[original_at(start)..original_at(end)].into()
+        } else {
+            let mut command = String::with_capacity(end - start);
+            command.push_str(&self.text[start..]);
+            command.push_str(&reader.source[self.original_byte..original_at(end)]);
+            command.into()
+        };
+        let lines = if start <= boundary {
+            self.newlines.partition_point(|&n| n < start)
+        } else {
+            let a = reader.newlines.partition_point(|&n| n < self.original_byte);
+            self.newlines.len() + (reader.newlines.partition_point(|&n| n < original_at(start)) - a)
+        };
+        super::Location {
+            start: 0,
+            end: text.len(),
+            source: text,
+            line: super::FIRST_LINE.get() + lines,
+        }
+    }
+}
+
 impl Reader {
     pub(super) fn expand_alias(&mut self, command_word: bool) -> Result<(), Error> {
         if self.aliases.0.is_none() {
@@ -78,29 +200,20 @@ impl Reader {
                     disabled.remove(&frame.name);
                 }
             }
-            let (mut replacement, spans, _) = with(nested, || lex(value, false, true))?;
+            let (replacement, spans, _) = with(nested, || lex(value, false, true))?;
             let index = self.position();
-            let (start, end) = self.spans[index];
-            let mut source = self.source.to_string();
-            source.replace_range(start..end, value);
-            self.newlines = source.match_indices('\n').map(|(n, _)| n).collect();
-            self.source = source.into();
-            for (a, b) in &mut self.spans[index + 1..] {
-                *a = *a - (end - start) + value.len();
-                *b = *b - (end - start) + value.len();
-            }
-            self.spans.splice(
-                index..=index,
-                spans.into_iter().map(|(a, b)| (start + a, start + b)),
-            );
+            self.alias_source
+                .get_or_insert_with(Default::default)
+                .replace(index, value, spans, &self.source, &self.spans);
             self.tokens.pop_front();
             self.alias_frames.push(Frame {
                 name,
                 remaining: self.tokens.len(),
                 next_word,
             });
-            replacement.extend(self.tokens.drain(..));
-            self.tokens = replacement.into();
+            for token in replacement.into_iter().rev() {
+                self.tokens.push_front(token);
+            }
         }
     }
 }

@@ -131,6 +131,7 @@ pub struct Session {
     shell_pid: ShellPid,
     pub interactive: bool,
     pub login: bool,
+    pub posix: bool,
     pub logout_started: bool,
     pub allexport: bool,
     pub xtrace: bool,
@@ -326,6 +327,9 @@ impl Session {
             return 1;
         };
         if count < 0 || count as u64 > self.positional.len() as u64 {
+            if self.posix {
+                eprintln!("tonari: shift: shift count out of range");
+            }
             return 1;
         }
         if count > 0 {
@@ -411,7 +415,7 @@ impl Session {
                         i += 1;
                         if let Some(value) = self.option_value(name, true) {
                             *value = enable;
-                            self.editing_option(name, enable);
+                            self.option_changed(name, enable);
                         } else {
                             eprintln!("tonari: set: {name}: unsupported option");
                             return 2;
@@ -861,6 +865,31 @@ impl Session {
                 .collect(),
             names.contains(&"OPTIND").then_some(self.opt_offset),
         )
+    }
+
+    // Special builtins retain their exported prefix bindings in POSIX mode.
+    // Move the prepared strings and avoid snapshotting variables for restoration.
+    pub fn persist_prefix(&mut self, assignments: &mut Vec<(String, String)>) {
+        for (name, value) in assignments.drain(..) {
+            if name == "OPTIND" {
+                self.opt_offset = 0;
+            }
+            if name == "GLOBIGNORE" {
+                self.shopt.glob.set_ignore(Some(&value));
+            }
+            if name == "PATH" {
+                self.hashes.clear();
+            }
+            self.variables.insert(
+                name,
+                Variable {
+                    declared: true,
+                    exported: true,
+                    value: Some(value),
+                    ..Variable::default()
+                },
+            );
+        }
     }
 
     pub fn bind(&mut self, assignments: &[(String, String)]) -> Bindings {
@@ -1376,6 +1405,8 @@ impl Session {
                 match flag {
                     'L' => physical = false,
                     'P' => physical = true,
+                    // The physical path lookup already propagates getcwd failures.
+                    'e' if name == "cd" => {}
                     _ => {
                         eprintln!("tonari: {name}: unsupported option {opt}");
                         return 2;
