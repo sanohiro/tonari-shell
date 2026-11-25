@@ -1,5 +1,11 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## Named home directories / 名前付きユーザーのホーム
+
+Unquoted `~user` and `~user/path` resolve through the account database in command arguments and at the start of assignment values. A quoted login name or an unknown user stays literal. The named-user audit now matches Bash on Debian x86-64 and macOS arm64. [Bash witnesses](../tests/shell.py) · [Benchmarks](benchmarks.md#external-case-review)
+
+コマンド引数や代入値の先頭にある `~root/bin` は、ユーザーのホームを調べて展開します。ログイン名の一部を引用した場合や、ユーザーが存在しない場合は元の文字列を保ちます。[実測と旧版との差](benchmarks.md#external-case-review)
+
 ## Last argument and undo / 末尾引数と取り消し
 
 In the default Emacs keymap `Alt-.` and `Alt-_` invoke Readline’s `yank-last-arg`. `insert-last-argument` is an alias. Repeated presses replace the inserted token with the one from the preceding entry of the active session history. Quoting, escaped spaces, comments, redirections and here-document delimiters have direct PTY witnesses against Bash. Tonari preserves the complete arithmetic substitution in `cmd $((1 + 3))`. Bash 5.2.37 inserts only the final `)` for that example. Keeping the full expression preserves the shell word the user typed. Against the previous macOS audit, the three Readline function names moved from missing to available, both new PTY witnesses passed, and all other verdicts were unchanged.

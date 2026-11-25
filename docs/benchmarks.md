@@ -1,5 +1,84 @@
 # Startup and execution / 起動と実行性能
 
+<a id="external-case-review"></a>
+
+## 2026-11-25 · Performance and implementation review of 147 workloads / 147項目の実装と実測
+
+Each row in the ledger identifies the operation, its source functions, the implementation decision and the native measurements. The shipping release is `350959e`, the comparison release is `135e4bb`. Each CI timing job rotated Bash, the previous release, the shipping release and an `-O3` build of the same source. The reference was Bash 5.2.37 on macOS and 5.2.21 on Ubuntu x86-64. The counts below are **at or below two-thirds of Bash time / faster than Bash / supported**. [Per-case review](external-shell-review.md) · [Raw values and observed functions](external-shell-review.csv) · [Native timings and release hashes](https://github.com/sanohiro/tonari-shell/actions/runs/45562340445)
+
+全147項目について、スクリプトが実際に行う処理、通る関数、削れる処理と残す理由を記録しました。表は **Bash の所要時間の 2/3 以下 / Bash より速い / 比較成立** の件数です。unixwin は従来から掲載している50項目で、上流の全4,302項目から選んだものです。ShellSpec の空の計時本体と `print` は両環境で比較できません。macOS の `expr substr` と、環境に存在しない外部 `true` のパスも個別に明記しました。[項目別のソースと判断](external-shell-review.md)
+
+| Suite | Published | macOS arm64 | Linux x86-64 |
+|---|---:|---:|---:|
+| shellspec | 70 | 61 / 67 / 67 | 45 / 68 / 68 |
+| fumiyas | 17 | 15 / 16 / 16 | 15 / 16 / 16 |
+| unixwin | 50 | 39 / 50 / 50 | 41 / 50 / 50 |
+| luish | 7 | 5 / 7 / 7 | 5 / 7 / 7 |
+| gnu-hello | 3 | 0 / 2 / 3 | 0 / 3 / 3 |
+| **Total** | 147 | 120 / 142 / 143 | 106 / 144 / 144 |
+
+実装を変更した経路を測る項目は74件、既存の経路を確認して維持した項目は62件、複数の経路を個別に調べた統合試験は9件でした。両方の CI で旧版と正しく比較できた141項目のうち、中央値が両方で10%以上短くなったのは40件、両方で10%以上長くなったのは0件です。旧版と Bash を分母にした所要時間の比を各項目に併記しました。[全項目の比較](external-shell-review.md)
+
+| Elapsed ms, Tonari / Bash | macOS arm64 CI | Linux x86-64 CI | Physical M1 |
+|---|---:|---:|---:|
+| startup.empty_c | 5.59 / 10.52 | 0.23 / 0.64 | 4.94 / 8.27 |
+| funcs.redefine | 7.08 / 16.80 | 0.67 / 3.63 | 5.17 / 11.80 |
+| expand.nested_cmdsubst | 6.12 / 976.67 | 1.22 / 429.71 | 6.10 / 1,345.36 |
+| strings.concat_subst | 9.61 / 83.05 | 1.98 / 23.35 | 6.95 / 61.47 |
+| subst.cmd_ext_date | 451.37 / 538.08 | 34.01 / 55.33 | 174.19 / 274.16 |
+| jobs.bg_many@20 | 183.97 / 190.63 | 23.79 / 25.27 | 47.31 / 46.15 |
+| strings | 388.79 / 1,039.81 | 378.88 / 750.03 | 309.58 / 748.75 |
+| functions | 305.98 / 951.86 | 298.30 / 806.28 | 206.68 / 554.09 |
+| build | 3,133.60 / 3,147.95 | 434.18 / 621.54 | 1,561.65 / 2,187.93 |
+| configure syntax check | 24.90 / 30.00 | 23.55 / 23.85 | 16.25 / 26.14 |
+| GNU Hello configure | 20,483.70 / 19,488.42 | 9,337.47 / 9,859.86 | 28,766.37 / 30,121.75 |
+
+On hosted macOS, GNU Hello configure took 1.051 times as long as Bash. Tonari finished every other supported macOS workload and all supported Linux x86-64 workloads faster than Bash. The real GNU Hello configure includes the compiler and generated test executables. Each sample used an empty build directory and verified config.h and the config.status interpreter. Warmup also built the program and ran `make check`. [Direct measurements of compiler and probe waits](#configure-foreground)
+
+直前の段階でも別のランナーで、`adbde41`、`aad5e23`、Bash の順を入れ替えて再検証しました。GNU Hello の実 configure は各7回の中央値で、macOS が **22.905 / 21.195 / 22.382 秒**、Linux が **6.478 / 6.467 / 6.610 秒** です。同じ macOS 再試験で20ジョブの待機を31回測ると **179.98 / 195.84 / 190.68 ms** でした。値はすべて `adbde41` / `aad5e23` / Bash です。[独立した再測定と全サンプル](https://github.com/sanohiro/tonari-shell/actions/runs/45560988354)
+
+全ファイル名を展開する `glob.star_all@300` は、macOS の全項目測定（各16回）で旧版 5.68 ms、採用版 8.43 ms、Bash 37.32 ms でした。同じコミット、同じスクリプトを使い、別の macOS arm64 ランナーで各64回、旧版・採用版・Bash・O3 の順を回して再測定すると、旧版 **3.445 ms**、採用版 **3.065 ms**、Bash **19.635 ms** でした。M1 実機でも旧版 4.90 → 採用版 4.69 ms でした。全項目表には最初の16回の結果をそのまま残しています。[64回の全サンプルとビルド情報](https://github.com/sanohiro/tonari-shell/actions/runs/45565017544)
+
+**実機での変更前後。** 次の数字はミリ秒で、同じ M1 上の配布設定ビルドです。各比較で実行順を回し、標準出力、標準エラー、終了状態を照合しました。「変更前」はそれぞれの改善を入れる直前の版です。小さい引数列・大きい引数列の関数呼び出しも比較し、1024引数の転送は 21.37 → 22.90 ms（Bash 266.53 ms）でした。不要な引数移動を除いても、この条件では経過時間の短縮は確認できませんでした。
+
+| M1 workload | Before | After | Bash | Timed runs per shell |
+|---|---:|---:|---:|---:|
+| Register the same function 100,000 times | 18.95 | 15.28 | 111.58 | 11 |
+| Slice three characters from a 64 Ki-character variable 1,800 times, before/after borrowing | 9.86 | 6.65 | 326.06 | 7 |
+| Read that variable’s UTF-8 length 1,800 times | 16.28 | 13.17 | 81.61 | 7 |
+| Replace the first delimiter in a short string 40,000 times | 32.43 | 29.99 | 79.39 | 11 |
+| Postincrement an ordinary decimal with `let` 40,000 times | 12.23 | 11.14 | 79.91 | 11 |
+| Capture external `cut` with a here-string 100 times | 252.53 | 173.23 | 358.58 | 11 |
+| Expand 100,000 unquoted words 20 times | 61 | 42 | 252 | 11 |
+| Capture a list of three printf calls containing a newline format 250 times, after shell startup | 186.85 | 0.89 | 227.79 | 15 |
+
+前の実装では、大きな変数の冒頭を切り出すために全文を複製し、全文の文字数を数えていました。現在は保存値を借用し、必要な UTF-8 の文字境界まで走査します。関数の再定義では、同じソースの同じ本体を登録済みなら再挿入を省きます。コマンド置換内の外部コマンドは、その呼び出しにだけ有効な探索結果を使って fd を渡せるので、親の hash 表に副作用を残しません。[Bash witnesses](../tests/shell.py) · [Large field-splitting control](https://github.com/sanohiro/tonari-shell/actions/runs/45553655231)
+
+An additional control outside the published 147, with several printf calls in one substitution, exposed a false positive in the child-isolation check. A literal `n` anywhere in a format containing `%` could force a fork. Tonari now checks for a count conversion after each percent using the formatter’s flags and length modifiers. A list that really assigns a byte count via `%n` still runs in its private environment. On the M1, 100 such captures took 74.18 ms versus 72.84 ms previously and 99.18 ms in Bash. Reproduce with `python3 tools/bench_scripts.py ./release/tonari --bash /path/to/bash --case printf-list-newline --case printf-list-count --timing started`. [Paired native controls](https://github.com/sanohiro/tonari-shell/actions/runs/45562343811) · [Output and isolation witnesses](../tests/shell.py)
+
+複数の printf を含む置換で、改行の `\n` を変数への書き込みとして扱い、余計な子プロセスを作る箇所を見つけました。`%n` が本当に書き込む値は後続のコマンドから見え、親の変数は保たれることを照合しました。改行の250回は CI でも旧版から macOS 124.429 → 0.691 ms、Linux 33.939 → 0.491 ms になりました。本当に書き込む100回は macOS 70.450 → 78.830 ms、Linux 14.026 → 13.973 ms でした。追加で、絵文字を含む部分文字列と置換1,920例、算術の境界値・配列・名前参照64例を Bash で照合しました。
+
+Earlier controls during this review also compared pure builtin captures with parent signal traps, short writers on a real pipe, array length and in-place concatenation. On the physical M1, 250 captures of a function returning `echo 1` took 141.19 → 4.03 ms (Bash 178.48), 120 short `printf | cut` captures took 212.51 → 137.04 ms (Bash 338.79), and 40,000 self-prefixed eight-byte concatenations took 315.63 → 22.11 ms (Bash 18,782.32). Discarding complete top-level trees during large syntax checks cut peak RSS from about 24.5 to 15.6 MB. An alternative that chunked input at 32 KiB slowed the M1 syntax check from 17.23 to 25.36 ms and was discarded. [Parser control](https://github.com/sanohiro/tonari-shell/actions/runs/45552486120) · [Engineering notes](engineering-notes.md)
+
+ShellSpec reports operations per second. Every host reverses shell order for a second independent pass, with one warmup second and one scored second for each shell. Elapsed ratios invert throughput. Other suites use medians after one warmup and rotate shell order. CI uses three timed samples per shell, except hosted macOS unixwin (16) and luish (9). Physical M1 adds unixwin (9), luish (5), GNU Hello (3), and two ShellSpec orders with the three distribution/reference binaries. Physical M1 fumiyas does not have a complete timing series. Individual short samples on the hosted runners varied substantially. A 40-sample identical-binary macOS control produced medians of 7.17 and 7.09 ms with individual samples from 4.46 to 16.46 ms. [Identical-binary control](https://github.com/sanohiro/tonari-shell/actions/runs/45556912758)
+
+M1 実機では配布版の対話操作も検証しました。PTY を通じて、入力を送ってから応答が画面に現れるまでを測っています。ファイル補完の行は Tab に続けて送ったキーが表示されるまでの時間で、計時後に補完済みの行も照合しました。起動は51回、入力と履歴は15回、ファイル補完は13回です。[入力試験](../tools/bench_editor_input.py) · [補完試験](../tools/bench_completion.py)
+
+| Physical M1, ms | Tonari median | Tonari p95 | Bash median | Bash p95 |
+|---|---:|---:|---:|---:|
+| 非対話起動から `-c :` 終了 | 2.763 | 3.035 | 5.822 | 6.740 |
+| 対話起動から最初のプロンプト | 5.073 | 10.283 | 8.429 | 14.753 |
+| 17文字の一括入力 | 0.092 | 0.194 | 0.156 | 0.556 |
+| 16 KiB 貼り付けと後続キー | 2.469 | 5.272 | 18.508 | 99.369 |
+| 10万件の履歴で Ctrl-R | 0.261 | 0.400 | 0.648 | 0.807 |
+| 10万ファイルで Tab に続けたキーの表示 | 0.199 | 0.443 | 122.527 | 181.251 |
+
+同じソースを一律に `-O3` でビルドした場合も全項目で試しました。配布設定に対し所要時間が10%以上短い件数 / 10%以上長い件数は、macOS は 143件中 20件 / 18件（全項目の比の中央値 0.988）、Linux は 144件中 0件 / 1件（全項目の比の中央値 0.993）でした。対象 CPU による実装分岐は追加していません。[設定別の実測値](external-shell-review.csv)
+
+LLVM coverage was collected separately from release timing. It recorded at least one inspected source function for **143 macOS and 144 Linux cases**. The per-case CSV distinguishes unavailable samples and any function visible only in source inspection. The profiler uses actual source positions and executed function counts. Timings and correctness checks use independent drivers. ShellSpec includes a one-iteration observable-result witness. The fumiyas diagnostic shortens loop counts and runs the timed body in the instrumented process so its counters can be written. The timing runs always use the original upstream workload. [Linux source profiles](https://github.com/sanohiro/tonari-shell/actions/runs/45562373504) · [Coverage driver](../tools/ci/trace-external-paths.py) · [ShellSpec output checks](../tools/ci/check-shellspec.py)
+
+配布バイナリの実時間と、診断ビルドの通過関数は別々に測りました。macOS arm64 と Linux x86-64 の順で、CI 配布バイナリのバイト数は **1,449,872 → 1,466,496 / 1,933,016 → 1,950,584**（旧版 → 採用版）です。Linux は静的 musl PIE、macOS の動的リンク先は libSystem のみです。物理 M1 では Rust の58テストが通り、シェル統合テストは227件中225件成功・OS 固有の2件スキップでした。参照照合は macOS 1,411件、Debian 1,525件。どちらも名前付きユーザーのチルダ展開が Bash と一致するようになり、ほかの判定の変化はありませんでした。
+
 <a id="configure-foreground"></a>
 
 ## 2026-11-25 · Child environments and the full configure budget / 子プロセスの環境と configure 全体の目標
