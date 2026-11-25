@@ -93,9 +93,42 @@ def unixwin(args, root, env):
         measure(case.id, commands, args.runs, verify)
 
 
+def gnu_hello(args, root, env):
+    samples = [[], []]
+    reference = None
+    for trial in range(args.runs + 1):
+        for i in ([0, 1] if trial % 2 == 0 else [1, 0]):
+            shell = args.shells[i]
+            build_env = {**env, "SHELL": shell, "CONFIG_SHELL": shell, "CC": "/usr/bin/cc"}
+            with tempfile.TemporaryDirectory(dir=root) as directory:
+                build = Path(directory)
+                cmd = [shell, str(args.source / "configure"), "--disable-nls", "--cache-file=/dev/null"]
+                ms, rc, out, err = run(cmd, build, build_env, 180)
+                if rc:
+                    raise RuntimeError(f"configure exited {rc}: {(out + err)[-1000:]!r}")
+                config = (build / "config.h").read_bytes()
+                if reference is None:
+                    reference = config
+                if reference != config:
+                    raise ValueError("config.h changed across trials")
+                interpreter = (build / "config.status").read_bytes().splitlines()[0][2:].strip()
+                if os.fsdecode(interpreter) != shell:
+                    raise ValueError(f"unexpected config.status interpreter {interpreter!r}")
+                if trial:
+                    samples[i].append(ms)
+                else:
+                    subprocess.run(["make", "-j2", "check"], cwd=build, env=build_env,
+                                   stdout=subprocess.DEVNULL, check=True, timeout=180)
+                    if subprocess.check_output([str(build / "hello")], env=build_env) != b"Hello, world!\n":
+                        raise ValueError("unexpected hello output")
+    a, b = map(statistics.median, samples)
+    print(f"GNU Hello configure\t{a:.3f}\t{b:.3f}\t{a / b:.3f}")
+    print(f"Raw milliseconds (Tonari, Bash): {samples}", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("suite", choices=["unixwin", "fumiyas", "luish"])
+    parser.add_argument("suite", choices=["unixwin", "fumiyas", "luish", "gnu-hello"])
     parser.add_argument("source", type=Path)
     parser.add_argument("shells", nargs=2, type=Path, metavar="SHELL")
     parser.add_argument("--runs", type=int, default=3)
@@ -108,7 +141,9 @@ def main():
         root = Path(directory)
         env = dict(HOME=directory, PATH=os.environ["PATH"], LC_ALL="C", TMPDIR=directory)
         print("case\tTonari_ms\tBash_ms\tTonari/Bash", flush=True)
-        if args.suite == "unixwin":
+        if args.suite == "gnu-hello":
+            gnu_hello(args, root, env)
+        elif args.suite == "unixwin":
             unixwin(args, root, env)
         elif args.suite == "luish":
             for script in sorted((args.source / "bench/scripts").glob("*.sh")):
