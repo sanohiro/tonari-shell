@@ -544,7 +544,7 @@ thread_local! {
 
 struct Reader {
     source: Rc<str>,
-    alias_source: Option<String>,
+    alias_source: Option<Box<aliases::Expanded>>,
     spans: Vec<(usize, usize)>,
     newlines: Vec<usize>,
     aliases: crate::alias::Aliases,
@@ -579,33 +579,28 @@ impl Reader {
     }
 
     fn position(&self) -> usize {
-        self.spans.len() - self.tokens.len()
+        let count = self
+            .alias_source
+            .as_ref()
+            .map_or(self.spans.len(), |s| s.token_count(self.spans.len()));
+        count - self.tokens.len()
     }
     fn location(&self, from: usize) -> Location {
-        let source = self.alias_source.as_deref().unwrap_or(&self.source);
-        let start = self.spans.get(from).map_or(source.len(), |s| s.0);
-        let end = if self.position() > from {
-            self.spans[self.position() - 1].1
+        if let Some(expanded) = &self.alias_source {
+            return expanded.location(self, from, self.position());
+        }
+        let start = self.spans.get(from).map_or(self.source.len(), |s| s.0);
+        let position = self.spans.len() - self.tokens.len();
+        let end = if position > from {
+            self.spans[position - 1].1
         } else {
             start
         };
-        let line = FIRST_LINE.get() + self.newlines.partition_point(|&n| n < start);
-        if self.alias_source.is_some() {
-            // Subsequent alias reads mutate the same buffer. Retain just the
-            // command spelling used by DEBUG traps and BASH_COMMAND.
-            Location {
-                source: source[start..end].into(),
-                start: 0,
-                end: end - start,
-                line,
-            }
-        } else {
-            Location {
-                source: self.source.clone(),
-                start,
-                end,
-                line,
-            }
+        Location {
+            source: self.source.clone(),
+            start,
+            end,
+            line: FIRST_LINE.get() + self.newlines.partition_point(|&n| n < start),
         }
     }
 

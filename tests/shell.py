@@ -86,6 +86,10 @@ class ShellTests(unittest.TestCase):
 
                 proc = run(["-c", "alias blank=; alias e=echo\n{ e first | blank\ncat; }\nf() { return -- 17; }; f; e $?; cd -P -e .; exit -- 56"])
                 self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (56, b"first\n17\n", b""))
+                proc = run(["-c", "alias e='echo '; alias a=aa; alias aa=inner\n"
+                            "{\ne a world\ne test\n}\nalias both='e one\ne two'\nboth\n"])
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                                 (0, b"inner world\ntest\none\ntwo\n", b""))
                 proc = run(["-i", "+m", "-c", "shopt -oq posix"])
                 self.assertEqual((proc.returncode, proc.stdout), (0, b"env:1\n"))
                 proc = subprocess.run([str(sh), "-i", "+m", "-c",
