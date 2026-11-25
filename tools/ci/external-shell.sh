@@ -73,22 +73,7 @@ case "$suite" in
       ln -s "$bash_ref" "$work/bin/bash-ref"
       if [[ -n $previous ]]; then ln -s "$previous" "$work/bin/previous"; fi
       if [[ -n $opt3 ]]; then ln -s "$opt3" "$work/bin/opt3"; fi
-      # The upstream controller signals its own process group to release its workers.
-      python3 - "$work" <<'PY'
-import os, pathlib, subprocess, sys
-w = pathlib.Path(sys.argv[1])
-env = dict(PATH=str(w/'bin') + os.pathsep + os.environ['PATH'], HOME=str(w/'home'), LC_ALL='C')
-orders = ['tonari,bash-ref']
-if (w/'bin/previous').exists():
-    orders = ['tonari,bash-ref,previous', 'previous,bash-ref,tonari']
-if (w/'bin/opt3').exists():
-    orders = ['tonari,bash-ref,previous,opt3', 'opt3,previous,bash-ref,tonari']
-for names in orders:
-    print('Shell order ' + names, flush=True)
-    subprocess.run(['./shellbench', '-s', names, '-w', '1', '-t', '1',
-                    *sorted(str(f) for f in (w/'sample').glob('*.sh'))],
-                   env=env, cwd=w, start_new_session=True, check=True)
-PY
+      python3 tools/ci/time-shellspec.py "$work"
     else
       python3 tools/bench_external.py "$suite" "$work" "$tonari" "$bash_ref" "$@"
     fi
