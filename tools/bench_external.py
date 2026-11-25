@@ -1,4 +1,4 @@
-"""Paired measurements of upstream unixwin, fumiyas and luish workloads."""
+"""Compare upstream shell workloads and check their observable results."""
 import argparse
 import json
 from collections import Counter
@@ -27,7 +27,9 @@ def run(argv, cwd, env, timeout):
         return (time.monotonic_ns() - start) / 1e6, proc.returncode, out, err
 
 
-def measure(label, commands, runs, check, internal_clock=False, *, samples=None, invalid=()):
+def measure(label, commands, runs, check, internal_clock=False, *, samples, invalid=()):
+    # Preserve failures in the artifact while letting the other cases run.
+    samples[label] = None
     times = [[] for _ in commands]
     for trial in range(runs + 1):
         outputs = []
@@ -58,8 +60,7 @@ def measure(label, commands, runs, check, internal_clock=False, *, samples=None,
         if different is not None:
             print(f"{label}\tOUTPUT DIFF: {outputs[0][-160:]!r} / {different[-160:]!r}", flush=True)
             return
-    if samples is not None:
-        samples[label] = times
+    samples[label] = times
     medians = [statistics.median(t) if t else None for t in times]
     a, b = medians[:2]
     extra = "".join(f"\t{v:.3f}" if v is not None else "\tINVALID" for v in medians[2:])
@@ -131,6 +132,8 @@ def unixwin(args, root, env):
         count[case.category] += 1
         if count[case.category] > 2 and case.id not in extra:
             continue
+        if args.case and case.id not in args.case:
+            continue
         commands = []
         for index, shell in enumerate(args.shells):
             work = root / str(index) / case.id
@@ -152,6 +155,7 @@ def unixwin(args, root, env):
         if observation := UNIXWIN_OBSERVATIONS.get(case.id):
             valid = observe_unixwin(commands, observation)
             if not all(valid[:2]):
+                args.samples[case.id] = None
                 print(f"{case.id}\tINVALID observed result", flush=True)
                 continue
             if len(valid) > 3 and not valid[3]:
@@ -169,8 +173,12 @@ def gnu_hello(args, root, env):
     configure = str(args.source / "configure")
     for label, flags in (("configure syntax check", ["-n", configure]),
                          ("configure --help", [configure, "--help"])):
+        if args.case and label not in args.case:
+            continue
         commands = [([sh, *flags], root, {**env, "CONFIG_SHELL": sh}, 60) for sh in args.shells]
         measure(label, commands, args.runs, checked, samples=args.samples)
+    if args.case and "GNU Hello configure" not in args.case:
+        return
     for trial in range(args.runs + 1):
         order = list(range(len(shells)))
         offset = trial % len(shells)
@@ -215,11 +223,13 @@ def main():
     parser.add_argument("suite", choices=["unixwin", "fumiyas", "luish", "gnu-hello"])
     parser.add_argument("source", type=Path)
     parser.add_argument("shells", nargs=2, type=Path, metavar="SHELL")
+    parser.add_argument("--case", action="append", default=[], help="exact published case name, repeatable")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--previous", type=Path, help="previous Tonari build on the same host")
     parser.add_argument("--opt3", type=Path, help="same source built with opt-level=3")
     parser.add_argument("--raw", type=Path, help="write per-shell samples in command-line order")
     args = parser.parse_args()
+    args.case = set(args.case)
     args.samples = {}
     if args.opt3 and not args.previous:
         parser.error("--opt3 requires --previous")
@@ -241,6 +251,8 @@ def main():
             unixwin(args, root, env)
         elif args.suite == "luish":
             for script in sorted((args.source / "bench/scripts").glob("*.sh")):
+                if args.case and script.stem not in args.case:
+                    continue
                 commands = [([sh, str(script), "1"], root, {**env, "SH": sh}, 90) for sh in args.shells]
                 measure(script.stem, commands, args.runs, checked, samples=args.samples)
         else:
@@ -255,12 +267,19 @@ def main():
                             continue
                         label += f" ({true})"
                         line = line.replace("/bin/true", true)
+                    if args.case and label not in args.case:
+                        continue
                     code = "TIMEFORMAT='wall %3R'; " + line
                     commands = [([sh, "-c", code], root, env, 180) for sh in args.shells]
                     measure(label, commands, args.runs, checked, internal_clock=True, samples=args.samples)
 
     if args.raw:
         args.raw.write_text(json.dumps(dict(shells=args.shells, milliseconds=args.samples)) + "\n")
+    missing = args.case.difference(args.samples)
+    if missing:
+        parser.error("unknown or unavailable cases: " + ", ".join(sorted(missing)))
+    if any(v is None for v in args.samples.values()):
+        raise SystemExit("One or more workloads failed validation or timing.")
 
 
 if __name__ == "__main__":
