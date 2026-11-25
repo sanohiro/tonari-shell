@@ -1938,6 +1938,14 @@ declare -n ref=a; v=$(/usr/bin/printf '[%s]' "${ref[@]}"); echo "$v"
 jobs() { printf '%s' "shadow:$1"; }; v=$(jobs -p); echo "$v" """,
                      0, b"empty:0:<>\n<a b><><*.rs>\n[a b][][*.rs]\nshadow:-p\n", minimum=5)
 
+    def test_parent_traps_during_direct_captures(self):
+        self.compare("""trap 'echo exit' EXIT; trap 'echo signal' USR1
+v=$(echo hello | /bin/cat); echo "$v"
+v=$(/bin/cat <<< "$v"); echo "$v"
+f() { echo inner; }; v=$(f); echo "$v"
+export parent=$$; v=$(echo value | /bin/sh -c 'kill -USR1 "$parent"; cat'); echo "$v" """,
+                     0, b"hello\nhello\ninner\nsignal\nvalue\nexit\n")
+
     def test_captured_pipeline_and_here_input(self):
         self.compare("""v='two words'
 a=$(printf '%s' "$v" | /bin/cat); echo "$a:$?"

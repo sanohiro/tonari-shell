@@ -273,7 +273,7 @@ fn wrapped_capture(
     if matches!(path, "echo" | ":" | "true" | "false")
         && !session.functions.contains_key(path)
         && !session.disabled_builtins.contains(path)
-        && !session.traps.has_explicit_traps()
+        && can_elide_child(session)
         && cmd.words[1..].iter().all(|arg| arg.as_literal().is_some())
     {
         let body = function.definition.clone();
@@ -307,6 +307,15 @@ fn wrapped_capture(
     let mut out = Vec::new();
     let status = crate::session::printf::run(session, &args, Some(&mut out));
     Some(captured_output(out, status))
+}
+
+// Caught OS signals reset at exec. Parent handlers still run after the
+// foreground wait. CHLD and inherited shell tracing can observe the child.
+fn can_elide_child(session: &Session) -> bool {
+    !session.traps.catches(libc::SIGCHLD)
+        && !session.functrace
+        && !session.errtrace
+        && !session.traps.in_action()
 }
 
 // Only a single output/status builtin with inert operands can be evaluated
@@ -453,19 +462,18 @@ fn capture_simple(
             }),
             Word::Declaration(_) => false,
         };
-        if !args.iter().all(|arg| {
-            safe_word(arg) || !session.traps.has_explicit_traps() && nested_output(arg, session, 0)
-        }) {
+        if !args
+            .iter()
+            .all(|arg| safe_word(arg) || can_elide_child(session) && nested_output(arg, session, 0))
+        {
             return None;
         }
         let safe = match cmd.redirects.as_slice() {
             [] => true,
             [r] if external && r.variable.is_none() => match (r.fd, r.target) {
                 (2, parser::Target::Write) => r.word.as_literal() == Some("/dev/null"),
-                (0, parser::Target::HereString) => {
-                    !session.traps.has_explicit_traps() && safe_word(&r.word)
-                }
-                (0, parser::Target::HereDoc { expand }) if !session.traps.has_explicit_traps() => {
+                (0, parser::Target::HereString) => can_elide_child(session) && safe_word(&r.word),
+                (0, parser::Target::HereDoc { expand }) if can_elide_child(session) => {
                     let text = r.word.as_literal()?;
                     !expand || parser::expansion_string(text).is_ok_and(|word| safe_word(&word))
                 }
@@ -492,7 +500,7 @@ fn capture_simple(
             .and_then(Word::as_literal)
             .is_some_and(crate::execute::can_capture_external)
         && !session.jobs.monitor
-        && !session.traps.has_explicit_traps()
+        && can_elide_child(session)
         && command(writer).is_some()
         && command(reader).is_some()
     {
