@@ -55,6 +55,19 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_large_script_read_ahead_preserves_execution_boundaries(self):
+        script = self.cwd / "large.sh"
+        prefix = "# a comment\n" * 12000 + "if true; then\n  echo before\nfi\n"
+        for shell in self.shells_for():
+            script.write_text(prefix + "echo after\n")
+            check = subprocess.run([shell, "-n", script], env=self.env, capture_output=True)
+            self.assertEqual((check.returncode, check.stdout, check.stderr), (0, b"", b""))
+            script.write_text(prefix + "if true; then\n")
+            check = subprocess.run([shell, "-n", script], env=self.env, capture_output=True)
+            self.assertEqual((check.returncode, check.stdout), (2, b""))
+            run = subprocess.run([shell, script], env=self.env, capture_output=True)
+            self.assertEqual((run.returncode, run.stdout), (2, b"before\n"))
+
     def test_missing_command_is_rechecked_and_redirects_take_effect(self):
         self.compare("""PATH=.:/usr/bin:/bin
 { later; echo missing=$?; } 2>err

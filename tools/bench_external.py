@@ -98,6 +98,11 @@ def unixwin(args, root, env):
 def gnu_hello(args, root, env):
     samples = [[], []]
     reference = None
+    configure = str(args.source / "configure")
+    for label, flags in (("configure syntax check", ["-n", configure]),
+                         ("configure --help", [configure, "--help"])):
+        commands = [([sh, *flags], root, {**env, "CONFIG_SHELL": sh}, 60) for sh in args.shells]
+        measure(label, commands, args.runs, checked)
     for trial in range(args.runs + 1):
         for i in ([0, 1] if trial % 2 == 0 else [1, 0]):
             shell = args.shells[i]

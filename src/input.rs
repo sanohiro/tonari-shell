@@ -84,12 +84,12 @@ pub fn file_script(
     } else {
         metadata.or_else(|| file.metadata().ok())
     };
-    if session.source_depth > 0
-        && let Some(meta) = &metadata
+    if let Some(meta) = &metadata
         && meta.is_file()
-        && meta.len() < 128 * 1024
+        && (session.source_depth > 0 && meta.len() < 128 * 1024
+            || check && (8192..=1024 * 1024).contains(&meta.len()))
     {
-        // A sourced regular file starts at offset zero. Read one byte beyond
+        // This regular script starts at offset zero. Read one byte beyond
         // the advertised length so a changed file still takes the stream path.
         let len = meta.len() as usize;
         let mut small = [0; 4096];
@@ -106,6 +106,11 @@ pub fn file_script(
             && let Ok(source) = std::str::from_utf8(&bytes[..n])
         {
             drop(file);
+            // Syntax-only execution cannot change aliases or parser options between
+            // commands. On failure, the incremental reader supplies its line diagnostics.
+            if check && parser::session_source_at(source, false, session, 1).is_ok() {
+                return Flow::Continue(0);
+            }
             return text(session, source, status, false, check, None);
         }
     }
@@ -122,10 +127,10 @@ pub fn file_script(
             }
         };
     }
-    // Keep complete profile functions in view across the usual 8 KiB buffer
-    // boundary. Verbose mode must still report each line as it is read.
+    // Keep large compound commands in view across the usual 8 KiB boundary.
+    // Verbose mode must still report each line as it is read.
     let capacity = metadata
-        .filter(|m| session.source_depth > 0 && m.is_file())
+        .filter(|m| m.is_file() && (session.source_depth > 0 || m.len() >= 128 * 1024))
         .map_or(8192, |m| m.len().clamp(8192, 128 * 1024) as usize);
     match PrivateFile::new(file) {
         Ok(file) => run(
@@ -344,7 +349,7 @@ fn run(
             parser::session_source_at(text, n == 0, session, base_line)
         };
         if buffered
-            && (session.source_depth > 0 || open_function && !session.history_enabled)
+            && (session.source_depth > 0 || !session.history_enabled)
             && matches!(result, Err(parser::Error::Incomplete(_)))
             && let Ok((program, consumed, lines)) =
                 buffered_compound(text, reader.buffer(), false, |size| {
