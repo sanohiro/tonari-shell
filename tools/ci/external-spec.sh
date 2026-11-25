@@ -64,23 +64,24 @@ case "$SUITE" in
     export PATH="$lab/pybin:$PATH"
     cd upstream
     PYTHONPATH=. python2 "$repo/tools/ci/oils-cases.py" > "$out/manifest.jsonl"
-    if [[ $SUITE == oils-argv ]]; then
+    if [[ $SUITE == oils-argv || $SUITE == oils-printenv ]]; then
+      fixture=${SUITE#oils-}
       mkdir -p "$lab/native-helper"
-      cc -std=c99 -O2 "$repo/tools/ci/oils-argv.c" -o "$lab/native-helper/argv.py"
-      python3 - "$out/manifest.jsonl" > "$lab/argv.jsonl" <<'PYTHON'
+      cc -std=c99 -O2 "$repo/tools/ci/oils-$fixture.c" -o "$lab/native-helper/$fixture.py"
+      python3 - "$out/manifest.jsonl" "$fixture.py" > "$lab/helper.jsonl" <<'PYTHON'
 import base64
 import json
 import sys
 
 for line in open(sys.argv[1]):
     row = json.loads(line)
-    if row["include"] and b"argv.py" in base64.b64decode(row["code"]):
+    if row["include"] and sys.argv[2].encode() in base64.b64decode(row["code"]):
         print(line, end="")
 PYTHON
       for helper in upstream native; do
         set -- --source .
         [[ $helper != native ]] || set -- "$@" --helper "$lab/native-helper"
-        python3 "$repo/tools/ci/spec-pairs.py" "$lab/argv.jsonl" "$out/$helper.jsonl" \
+        python3 "$repo/tools/ci/spec-pairs.py" "$lab/helper.jsonl" "$out/$helper.jsonl" \
           "$ref" "$lab/bin/bash" "$lab/pairs" "$@"
       done
       exit
