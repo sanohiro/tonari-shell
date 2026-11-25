@@ -222,6 +222,7 @@ case "$SUITE" in
     git -C "$root" checkout -q --detach FETCH_HEAD
     if [[ $SUITE == external-yash-recheck ]]; then
       python3 tools/ci/yash-throughput.py --first "$bin/baseline" --tonari "$current" --bash "$ref" > "$out/throughput.jsonl"
+      python3 tools/ci/yash-signals.py --tonari "$current" --bash "$ref" > "$out/signals.jsonl"
       selection=(--fixture alias-p.tst --fixture shift-p.tst --fixture kill2-p.tst --fixture set-p.tst
                  --fixture path-p.tst --fixture wait-p.tst --fixture sigstop7-p.tst)
     else
