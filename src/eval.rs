@@ -273,12 +273,9 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                     let mut env = crate::expansion::Expansion::new(session, status, &captured);
                     let mut fields = Vec::new();
                     for word in words {
-                        match env.fields(word) {
-                            Ok(items) => fields.extend(items),
-                            Err(error) => {
-                                eprintln!("tonari: {error}");
-                                return error.flow(env.session);
-                            }
+                        if let Err(error) = env.append_fields(word, &mut fields) {
+                            eprintln!("tonari: {error}");
+                            return error.flow(env.session);
                         }
                     }
                     fields

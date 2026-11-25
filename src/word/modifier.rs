@@ -73,6 +73,12 @@ impl Values {
 }
 
 pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String>, Error> {
+    if let Some(text) = name
+        .strip_prefix('#')
+        .and_then(|key| env.borrowed_scalar(key))
+    {
+        return Ok(Some(text.chars().count().to_string()));
+    }
     if let Some((base, _, _)) = name.strip_prefix('#').and_then(array_elements_name)
         && let Some(count) = env.session.stored_array_len(base)
     {
@@ -304,45 +310,53 @@ impl Modification {
                     };
                     return Ok(Part::Elements { values, at, quoted });
                 }
+                if let Some(text) = env.borrowed_scalar(name) {
+                    return Ok(scalar(substring(text, start, len)?.to_owned()));
+                }
                 let v = value(name, env)?;
                 if env.session.nounset && v.is_none() {
                     return Err(env.missing(name, "unbound variable"));
                 }
                 let v = v.unwrap_or_default();
-                // Positive bounds only need the requested prefix. Negative bounds
-                // count from the far end, independent of the UTF-8 byte width.
-                let boundary = |s: &str, n: i64| {
-                    if n < 0 {
-                        s.char_indices()
-                            .rev()
-                            .nth((n.unsigned_abs() - 1) as usize)
-                            .map(|(i, _)| i)
-                    } else if n == 0 {
-                        Some(0)
-                    } else {
-                        s.char_indices()
-                            .nth((n - 1) as usize)
-                            .map(|(i, c)| i + c.len_utf8())
-                    }
-                };
-                let Some(start) = boundary(&v, start) else {
-                    return Ok(scalar(String::new()));
-                };
-                let end = match len {
-                    None => v.len(),
-                    Some(n) if n < 0 => boundary(&v, n)
-                        .filter(|&end| end >= start)
-                        .ok_or_else(|| Error::fatal("negative substring length", 1))?,
-                    Some(n) => boundary(&v[start..], n).map_or(v.len(), |i| start + i),
-                };
-                Ok(scalar(if start == 0 && end == v.len() {
+                let result = substring(&v, start, len)?;
+                Ok(scalar(if result.len() == v.len() {
                     v
                 } else {
-                    v[start..end].to_owned()
+                    result.to_owned()
                 }))
             }
         }
     }
+}
+
+fn substring(v: &str, start: i64, len: Option<i64>) -> Result<&str, Error> {
+    // Positive bounds only need the requested prefix. Negative bounds
+    // count from the far end, independent of the UTF-8 byte width.
+    let boundary = |s: &str, n: i64| {
+        if n < 0 {
+            s.char_indices()
+                .rev()
+                .nth((n.unsigned_abs() - 1) as usize)
+                .map(|(i, _)| i)
+        } else if n == 0 {
+            Some(0)
+        } else {
+            s.char_indices()
+                .nth((n - 1) as usize)
+                .map(|(i, c)| i + c.len_utf8())
+        }
+    };
+    let Some(start) = boundary(v, start) else {
+        return Ok("");
+    };
+    let end = match len {
+        None => v.len(),
+        Some(n) if n < 0 => boundary(v, n)
+            .filter(|&end| end >= start)
+            .ok_or_else(|| Error::fatal("negative substring length", 1))?,
+        Some(n) => boundary(&v[start..], n).map_or(v.len(), |i| start + i),
+    };
+    Ok(&v[start..end])
 }
 
 #[cfg(test)]

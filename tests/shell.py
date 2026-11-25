@@ -69,6 +69,13 @@ class ShellTests(unittest.TestCase):
                      0, "<😀a>\n<bc>\n<😀ab>\n<>\n<>\n<>\n<猫😀abc>\n".encode())
         self.compare('v=abc; printf "%s" "${v:2:-2}"', 1)
 
+    def test_length_and_slice_follow_live_bindings(self):
+        self.compare('s=outside; f(){ local s=inside; v=$s n=${#v} sub=${v:1:3}; '
+                     'echo "$n/$sub"; declare -n ref=s; echo "${#ref}/${ref:1:3}"; }; '
+                     'f; a=(zero one); echo "${#a}/${a:1:2}/${#s}"; '
+                     'set -- abcdef; echo "${#1}/${1:2:2}"', 0,
+                     b"6/nsi\n6/nsi\n4/er/7\n6/cd\n", minimum=5)
+
     def test_arithmetic_fast_paths_keep_numeric_rules(self):
         self.compare('a[8]=octal; a[10]=decimal; v=010; '
                      'echo "${a[010]}:${a[10]}:$((v++)):$v"; '

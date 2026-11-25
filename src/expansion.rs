@@ -98,6 +98,18 @@ impl<'a> Expansion<'a> {
         }
     }
 
+    pub(crate) fn borrowed_scalar(&self, name: &str) -> Option<&str> {
+        if !crate::word::is_identifier(name) {
+            return None;
+        }
+        self.assignments
+            .iter()
+            .rev()
+            .find(|(k, _)| k == name)
+            .map(|(_, value)| value.as_str())
+            .or_else(|| self.session.stored_scalar(name))
+    }
+
     pub fn lookup(&self, name: &str) -> Option<String> {
         self.assignments
             .iter()

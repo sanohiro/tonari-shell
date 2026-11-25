@@ -794,6 +794,17 @@ impl Session {
         true
     }
 
+    pub(crate) fn stored_scalar(&self, name: &str) -> Option<&str> {
+        if matches!(name, "BASHPID" | "BASHOPTS" | "SHELLOPTS" | "PIPESTATUS") {
+            return None;
+        }
+        let var = self.variables.get(name)?;
+        if var.nameref || var.elements.is_some() {
+            return None;
+        }
+        var.value.as_deref()
+    }
+
     pub(crate) fn scalar_decimal(&self, name: &str) -> Option<i64> {
         let var = self.variables.get(name)?;
         if var.nameref || var.elements.is_some() {

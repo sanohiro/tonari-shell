@@ -28,6 +28,10 @@ Before merging a new or extended feature, implement and measure at least one con
 
 機能を追加・拡張したら、マージ前に必ず、最初に正しく動いた版を基準に少なくとも一度は具体的な高速化を実装して測る。初回から Bash 比の目標を達成した場合も対象とする。実際の使い方で結果を確認し、同じ入力・実機・リリース条件で初回版、改善案、同等機能のある Bash を比較する。対話機能では入力から画面に結果が出るまでを測る。再現する改善を採用し、採否にかかわらず再現コマンド・実測値・判断理由を記録する。未達でシェル側に削れるコストが見えている場合は改善を続ける。
 
+When reviewing a benchmark suite, inspect the implementation reached by every published case, including cases already below the performance target. Record the relevant function, the work the input actually triggers, and whether copying, parsing, lookup, allocation or system calls can be removed. Verify changes through the original workload and a Bash behavior witness. Record unavailable tools and sample failures explicitly.
+
+ベンチマークの見直しでは、目標を達成済みの項目も含め、公開した各ケースが通る実装を確認する。該当関数、入力が実際に行わせる処理、コピー・解析・探索・割り当て・システムコールを省けるかを記録する。変更は元のベンチと Bash の動作照合で検証し、実行できない試験やツールも明記する。
+
 # Intentional differences from Bash
 
 Use Bash as the compatibility reference for supported scripts and tool interfaces. When a Bash behavior breaks a documented Tonari guarantee, keep the Tonari behavior. Record the input, observed Bash and Tonari outputs, and rationale in the compatibility guide and add a regression test. Validate Tonari extensions against their own documented result. Keep observed Bash version differences and outstanding implementation gaps identifiable in the audit.
