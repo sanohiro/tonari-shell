@@ -16,7 +16,7 @@ impl Session {
             return 2;
         }
         let inputs = if explicit.is_empty() {
-            &self.positional
+            self.positional.as_slice()
         } else {
             explicit
         };

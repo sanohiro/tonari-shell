@@ -53,8 +53,10 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                         eprintln!("tonari: [[: {e}");
                         e.flow(env.session)
                     })?;
-                    let right =
-                        right.extended_pattern(&|name| env.lookup(name), &env.session.positional);
+                    let right = right.extended_pattern(
+                        &|name| env.lookup(name),
+                        env.session.positional.as_slice(),
+                    );
                     let matched = if env.session.shopt.nocasematch {
                         pattern::extended::insensitive_match(
                             &left,

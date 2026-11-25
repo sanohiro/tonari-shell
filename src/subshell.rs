@@ -248,7 +248,7 @@ fn wrapped_capture(
     };
     let name = name.as_literal()?;
     let function = session.functions.get(name)?;
-    if session.function_depth >= 128
+    if session.function_nesting_full()
         || session.shopt.extdebug
         || session.traced_functions.contains(name)
     {

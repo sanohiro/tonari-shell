@@ -31,7 +31,8 @@ fn sourced(
         eprintln!("tonari: source nesting limit exceeded");
         return Flow::Continue(1);
     }
-    let old = (!args.is_empty()).then(|| std::mem::replace(&mut session.positional, args.to_vec()));
+    let old = (!args.is_empty())
+        .then(|| std::mem::replace(&mut session.positional, Vec::from(args).into_iter()));
     let callsite = session.current_command.clone();
     session.call_lines.push(session.line());
     session.source_depth += 1;

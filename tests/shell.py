@@ -55,6 +55,12 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_compound_append_after_shift_and_sparse_index(self):
+        self.compare('set -- a b "c d"; shift; f() { shift; a+=( "$@" ); }; '
+                     'a=(start); f skip "$@"; unset "a[1]"; a+=(end); '
+                     'a+=([1]=rest); printf "<%s>" "${a[@]}"; echo "/$#/$1"',
+                     0, b"<start><rest><c d><end>/2/b\n")
+
     def test_literal_assignment_tracks_attributes_and_integer_syntax(self):
         self.compare(r"""
 n=one

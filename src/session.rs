@@ -163,7 +163,7 @@ pub struct Session {
     pub hashes: crate::execute::hash::Table,
     pub last_background: Option<libc::pid_t>,
     pub arg0: String,
-    pub positional: Vec<String>,
+    pub positional: std::vec::IntoIter<String>,
     pub source_depth: u32,
     pub function_depth: u32,
     pub function_names: Vec<String>,
@@ -325,7 +325,9 @@ impl Session {
         if count < 0 || count as u64 > self.positional.len() as u64 {
             return 1;
         }
-        self.positional.drain(..count as usize);
+        if count > 0 {
+            self.positional.nth(count as usize - 1);
+        }
         0
     }
 
@@ -421,7 +423,7 @@ impl Session {
         }
         if i < args.len() || replace_positionals {
             words.drain(..i + 1);
-            self.positional = std::mem::take(words);
+            self.positional = std::mem::take(words).into_iter();
         }
         0
     }

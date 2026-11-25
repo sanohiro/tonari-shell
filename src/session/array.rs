@@ -89,15 +89,6 @@ impl Elements {
         }
     }
 
-    fn into_map(self) -> BTreeMap<i64, String> {
-        match self {
-            Self::Associative(_) => unreachable!("cannot convert associative to indexed array"),
-            Self::Records(r) => (0..).zip(r.values().map(str::to_owned)).collect(),
-            Self::Dense(values) => (0..).zip(values).collect(),
-            Self::Sparse(values) => values,
-        }
-    }
-
     fn make_writable(&mut self) {
         if let Self::Records(records) = self {
             *self = Self::Dense(records.values().map(str::to_owned).collect());
@@ -376,6 +367,32 @@ impl Session {
         if subscript(name).is_some() {
             return Err("cannot assign an array to an array element");
         }
+        // Expanded, unnumbered words can extend an ordinary array in place.
+        // Check the last index before writing so an overflowing append is atomic.
+        if append
+            && !global
+            && let ArrayItems::Indexed(words) = items
+            && let Some(var) = self.variables.get_mut(name)
+            && !var.readonly
+            && !var.integer
+            && var.associative().is_none()
+            && words.iter().all(|(index, _)| index.is_none())
+        {
+            let last = var
+                .elements
+                .as_deref()
+                .and_then(Elements::last_index)
+                .unwrap_or(if var.value.is_some() { 0 } else { -1 });
+            last.checked_add(words.len() as i64)
+                .ok_or("array subscript out of range")?;
+            let array = var.make_array();
+            for (offset, (_, word)) in words.iter().enumerate() {
+                array.insert(last + (offset as i64 + 1), word.clone());
+            }
+            var.declared = true;
+            var.array_assigned = true;
+            return Ok(());
+        }
         let mut var = self.declared_variable(name, global).unwrap_or_default();
         if var.readonly {
             return Err("readonly variable");
@@ -415,20 +432,18 @@ impl Session {
         };
         let mut map = if append {
             var.elements.take().map_or_else(
-                || var.value.take().into_iter().map(|s| (0, s)).collect(),
-                |items| Rc::unwrap_or_clone(items).into_map(),
+                || Elements::Dense(var.value.take().into_iter().collect()),
+                Rc::unwrap_or_clone,
             )
         } else {
-            BTreeMap::new()
+            Elements::Dense(Vec::with_capacity(items.len()))
         };
-        let mut next = map
-            .last_key_value()
-            .map_or(Some(0), |(&i, _)| i.checked_add(1));
+        let mut next = map.last_index().map_or(Some(0), |i| i.checked_add(1));
         for (index, value) in items {
             let i = match index {
                 Some(n) if *n < 0 => map
-                    .last_key_value()
-                    .and_then(|(&i, _)| i.checked_add(*n + 1))
+                    .last_index()
+                    .and_then(|i| i.checked_add(*n + 1))
                     .filter(|i| *i >= 0),
                 Some(n) => Some(*n),
                 None => next,
@@ -442,7 +457,7 @@ impl Session {
             map.insert(i, value);
             next = i.checked_add(1);
         }
-        var.elements = Some(Rc::new(Elements::Sparse(map)));
+        var.elements = Some(Rc::new(map));
         var.value = None;
         var.declared = true;
         var.array_assigned = true;

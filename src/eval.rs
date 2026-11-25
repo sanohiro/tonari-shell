@@ -231,7 +231,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             body,
         } => {
             let items = match words {
-                None => session.positional.clone(),
+                None => session.positional.as_slice().to_vec(),
                 Some(words) => {
                     let captured = std::cell::Cell::new(None);
                     let mut env = crate::expansion::Expansion::new(session, status, &captured);
@@ -537,7 +537,7 @@ pub fn call_function(
     replace_last: bool,
 ) -> Flow {
     let name = argv.remove(0);
-    if session.function_depth >= 128 {
+    if session.function_nesting_full() {
         eprintln!("tonari: {name}: function nesting limit exceeded");
         return Flow::Continue(1);
     }
@@ -551,11 +551,13 @@ pub fn call_function(
     let tracked = session.shopt.extdebug;
     if tracked {
         if session.debug_args.is_empty() {
-            session.debug_args.push(session.positional.clone());
+            session
+                .debug_args
+                .push(session.positional.as_slice().to_vec());
         }
         session.debug_args.push(argv.clone());
     }
-    let old = std::mem::replace(&mut session.positional, argv);
+    let old = std::mem::replace(&mut session.positional, argv.into_iter());
     let hidden = session
         .traps
         .enter_function(session.errtrace, session.functrace || traced);

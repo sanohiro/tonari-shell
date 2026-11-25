@@ -310,7 +310,7 @@ impl<'a> Expansion<'a> {
         word.resolve(self)?;
         word.append_fields(
             &|name| self.lookup(name),
-            &self.session.positional,
+            self.session.positional.as_slice(),
             glob.then_some(&self.session.shopt.glob),
             fields,
         )
@@ -318,21 +318,33 @@ impl<'a> Expansion<'a> {
 
     pub fn scalar(&mut self, mut word: Word) -> Result<String, Error> {
         word.resolve(self)?;
-        Ok(word.scalar(&|name| self.lookup(name), &self.session.positional))
+        Ok(word.scalar(
+            &|name| self.lookup(name),
+            self.session.positional.as_slice(),
+        ))
     }
 
     pub fn pattern(&mut self, mut word: Word) -> Result<String, Error> {
         word.resolve(self)?;
         Ok(if self.session.shopt.glob.extglob {
-            word.extended_pattern(&|name| self.lookup(name), &self.session.positional)
+            word.extended_pattern(
+                &|name| self.lookup(name),
+                self.session.positional.as_slice(),
+            )
         } else {
-            word.pattern(&|name| self.lookup(name), &self.session.positional)
+            word.pattern(
+                &|name| self.lookup(name),
+                self.session.positional.as_slice(),
+            )
         })
     }
 
     pub fn regex(&mut self, mut word: Word) -> Result<String, Error> {
         word.resolve(self)?;
-        Ok(word.regex(&|name| self.lookup(name), &self.session.positional))
+        Ok(word.regex(
+            &|name| self.lookup(name),
+            self.session.positional.as_slice(),
+        ))
     }
 }
 

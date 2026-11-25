@@ -37,7 +37,10 @@ pub(super) enum Values {
 impl Values {
     pub(super) fn read(name: &str, env: &mut Expansion<'_>) -> Result<Self, Error> {
         if matches!(name, "@" | "*") {
-            return Ok(Self::Elements(env.session.positional.clone(), name == "@"));
+            return Ok(Self::Elements(
+                env.session.positional.as_slice().to_vec(),
+                name == "@",
+            ));
         }
         if let Some((base, at, keys)) = array_elements_name(name) {
             return Ok(Self::Elements(
@@ -91,7 +94,11 @@ pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String
     } else {
         name
     };
-    Ok(parameter(name, &|k| env.lookup(k), &env.session.positional))
+    Ok(parameter(
+        name,
+        &|k| env.lookup(k),
+        env.session.positional.as_slice(),
+    ))
 }
 
 fn as_number(word: &mut Word, env: &mut Expansion<'_>) -> Result<i64, Error> {
@@ -124,7 +131,7 @@ impl Modification {
                     env.pattern(std::mem::replace(pattern, Word::Literal(String::new())))?;
                 replacement.resolve(env)?;
                 let replacement = std::mem::replace(replacement, Word::Literal(String::new()))
-                    .replacement(&|k| env.lookup(k), &env.session.positional);
+                    .replacement(&|k| env.lookup(k), env.session.positional.as_slice());
                 Ok(values.map(quoted, |v| {
                     super::replace::substitute(
                         v,
@@ -269,7 +276,7 @@ impl Modification {
                             Vec::new()
                         } else {
                             std::iter::once(&env.session.arg0)
-                                .chain(env.session.positional.iter())
+                                .chain(env.session.positional.as_slice().iter())
                                 .skip(start as usize)
                                 .take(count)
                                 .cloned()

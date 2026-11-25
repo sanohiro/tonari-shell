@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import shutil
 import statistics
 import subprocess
 import sys
@@ -118,6 +119,13 @@ def main():
                 if line.startswith("## "):
                     label = line[3:]
                 elif line.strip():
+                    if "/bin/true" in line and not Path("/bin/true").is_file():
+                        print(f"{label}\tUNAVAILABLE /bin/true", flush=True)
+                        true = shutil.which("true", path="/usr/bin:/bin")
+                        if not true:
+                            continue
+                        label += f" ({true})"
+                        line = line.replace("/bin/true", true)
                     code = "TIMEFORMAT='wall %3R'; " + line
                     commands = [([sh, "-c", code], root, env, 180) for sh in args.shells]
                     measure(label, commands, args.runs, checked, internal_clock=True)

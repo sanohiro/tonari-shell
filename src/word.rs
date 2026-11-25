@@ -231,7 +231,7 @@ impl Word {
                         if matches!(*op, Alternative::Assign | Alternative::Error) {
                             let value = (**word)
                                 .clone()
-                                .scalar(&|k| env.lookup(k), &env.session.positional);
+                                .scalar(&|k| env.lookup(k), env.session.positional.as_slice());
                             if *op == Alternative::Error {
                                 let default = if *check_empty {
                                     "parameter null or not set"

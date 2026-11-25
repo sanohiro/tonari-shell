@@ -347,7 +347,12 @@ fn shell_terminal() -> bool {
     io::stdin().is_terminal() && io::stderr().is_terminal()
 }
 
+// Script fallback can reenter invoke() in a child at an arbitrary call depth.
+static MAIN_STACK_ORIGIN: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+
 fn main() -> ExitCode {
+    let marker = 0u8;
+    MAIN_STACK_ORIGIN.get_or_init(|| std::ptr::from_ref(&marker).addr());
     invoke(std::env::args_os()).into()
 }
 
@@ -383,7 +388,7 @@ fn run_invocation(
     session.import_functions();
     session.initialize_shell_level();
     session.arg0 = std::mem::take(&mut invocation.arg0);
-    session.positional = std::mem::take(&mut invocation.positional);
+    session.positional = std::mem::take(&mut invocation.positional).into_iter();
     session.allexport = invocation.allexport;
     session.onecmd = invocation.onecmd;
     session.xtrace = invocation.xtrace;
