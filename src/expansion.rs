@@ -282,8 +282,31 @@ impl<'a> Expansion<'a> {
     pub fn arithmetic(&mut self, expression: &str) -> Result<i64, Error> {
         let expanded;
         let expression = if expression.contains(['$', '`', '"', '\\']) {
-            let word = crate::parser::arithmetic_word(expression).map_err(|e| e.message())?;
-            expanded = self.scalar(word)?;
+            expanded = if expression.contains('[') {
+                let (keys, tail) = crate::parser::arithmetic_segments(expression, |name| {
+                    self.session.is_associative(name)
+                })
+                .map_err(|e| e.message())?;
+                if keys.is_empty() {
+                    self.scalar(tail)?
+                } else {
+                    let mut source = String::with_capacity(expression.len());
+                    for (prefix, key) in keys {
+                        source.push_str(&self.scalar(prefix)?);
+                        let key = self.scalar(key)?;
+                        if key.contains(['[', ']', '\\', '\'', '"', '$', '`']) {
+                            source.push_str(&crate::completion_spec::single_quote(&key));
+                        } else {
+                            source.push_str(&key);
+                        }
+                    }
+                    source.push_str(&self.scalar(tail)?);
+                    source
+                }
+            } else {
+                let word = crate::parser::arithmetic_word(expression).map_err(|e| e.message())?;
+                self.scalar(word)?
+            };
             expanded.as_str()
         } else {
             expression

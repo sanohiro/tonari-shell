@@ -8,7 +8,7 @@ mod ansi;
 pub(crate) use ansi::decode as ansi_string;
 pub(crate) mod completion_words;
 mod here_doc;
-pub(crate) use lexer::{arithmetic_word, subscript_word};
+pub(crate) use lexer::{arithmetic_segments, arithmetic_word, subscript_word};
 mod lexer;
 mod modifier;
 mod wrapper;

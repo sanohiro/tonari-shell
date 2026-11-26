@@ -68,6 +68,10 @@ case "$SUITE" in
       "$lab/venv/bin/python" "$repo/tools/ci/bensch-pty.py" "$lab/upstream" \
       "$out/pty.jsonl" "$ref" "$lab/bin/bash" --shard "$shard" --shards "$shards" "${options[@]}"
     ;;
+  spec-fixes)
+    REFERENCE_BASH="$ref" python3 "$repo/tests/shell.py" "$lab/bin/bash" -q
+    python3 "$repo/tools/ci/spec-fix-timings.py" "$lab/bin/bash" "$ref" > "$out/fixes.tsv"
+    ;;
   spec-response)
     python3 "$repo/tools/ci/bensch-response.py" "$ref" "$lab/bin/bash" > "$out/response.tsv"
     ;;

@@ -45,28 +45,6 @@ fn word(text: &str, at: usize, action: Action, big: bool) -> usize {
         }
         return after + last;
     }
-    // Most command words are ASCII. Walk their bytes directly, then resume the
-    // Unicode path at the first non-ASCII boundary.
-    let bytes = text.as_bytes();
-    let mut end = at;
-    if let Some(&b) = bytes.get(at).filter(|b| b.is_ascii()) {
-        let kind = class(char::from(b), big);
-        while bytes
-            .get(end)
-            .is_some_and(|b| b.is_ascii() && class(char::from(*b), big) == kind)
-        {
-            end += 1;
-        }
-        if bytes.get(end).is_none_or(|b| b.is_ascii()) {
-            while bytes.get(end).is_some_and(u8::is_ascii_whitespace) {
-                end += 1;
-            }
-            while let Some(c) = text[end..].chars().next().filter(|c| c.is_whitespace()) {
-                end += c.len_utf8();
-            }
-            return end;
-        }
-    }
     let mut iter = text[at..].chars().peekable();
     let Some(&first) = iter.peek() else { return at };
     let kind = class(first, big);

@@ -119,6 +119,21 @@ history -Z 2>/dev/null; echo "$?"
                 self.assertEqual((self.cwd / "match").read_text(), "editme\nchanged\n")
                 (self.cwd / "match").unlink()
 
+    def test_arithmetic_keeps_associative_keys_as_data(self):
+        self.compare(r"""declare -A A
+for key in '\' 'a]b' "x'y" '雪' '$anything'; do
+  (( A["$key"] = 42 ))
+  (( A["$key"] += 1 ))
+  printf '<%s:%s>\n' "$key" "${A[$key]}"
+done
+i=0; ((0 && A["$((++i))"])); echo "$i"
+(( A["$((i++))"] = $((i++)) )); echo "${A[1]}:$i"
+""", 0, "<\\:43>\n<a]b:43>\n<x'y:43>\n<雪:43>\n<$anything:43>\n1\n2:3\n".encode(), minimum=5)
+
+    def test_umask_applies_symbolic_clauses_in_order(self):
+        proc = self.command(TONARI, "umask 0124; umask a=,a=u && umask")
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"0777\n", b""))
+
     def test_quoted_array_declarations(self):
         self.compare("""false
 declare -a 'arr=($? "two words")'

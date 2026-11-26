@@ -5,7 +5,7 @@ current="$bin/current"
 out="$PWD/results"
 ref=/bin/bash
 case "$SUITE" in
-  bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response) exec bash tools/ci/external-spec.sh ;;
+  bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
 if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; then

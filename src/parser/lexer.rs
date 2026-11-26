@@ -625,10 +625,59 @@ pub(crate) fn arithmetic_word(source: &str) -> Result<crate::word::Word, Error> 
 }
 
 pub(crate) fn subscript_word(source: &str, associative: bool) -> Result<crate::word::Word, Error> {
+    scan_subscript(source, associative, |_, _| Ok(false))
+}
+
+// Keep an associative key as one shell word during arithmetic expansion. Its
+// expanded characters are data, even when they include a bracket or backslash.
+pub(crate) fn arithmetic_segments<'a>(
+    source: &'a str,
+    is_associative: impl Fn(&str) -> bool,
+) -> Result<(Vec<(Word, Word)>, Word), Error> {
+    let mut keys = Vec::new();
+    let tail = scan_subscript(source, false, |prefix, rest| {
+        let start = source.len() - rest.len() - 1;
+        let before = &source[..start];
+        let name = before
+            .rsplit(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .next()
+            .unwrap_or("");
+        if !is_identifier(name)
+            || before[..start - name.len()].ends_with('$')
+            || !is_associative(name)
+        {
+            return Ok(false);
+        }
+        let size = super::index_end(&source[start..])?;
+        prefix.push('[');
+        keys.push((
+            std::mem::take(prefix).finish(),
+            subscript_word(&source[start + 1..start + size - 1], true)?,
+        ));
+        *rest = &source[start + size..];
+        prefix.push(']');
+        Ok(true)
+    })?;
+    Ok((keys, tail))
+}
+
+fn scan_subscript<'a>(
+    source: &'a str,
+    associative: bool,
+    mut bracket: impl FnMut(&mut WordBuilder, &mut &'a str) -> Result<bool, Error>,
+) -> Result<Word, Error> {
     let mut chars = source.chars();
     let mut word = WordBuilder::default();
     while let Some(c) = chars.next() {
         match c {
+            '[' => {
+                let mut rest = chars.as_str();
+                if bracket(&mut word, &mut rest)? {
+                    chars = rest.chars();
+                } else {
+                    word.push(c);
+                }
+            }
             '"' => quoted(&mut chars, c, &mut word)?,
             '\'' if associative => quoted(&mut chars, c, &mut word)?,
             '$' if chars.as_str().starts_with('"') => {
