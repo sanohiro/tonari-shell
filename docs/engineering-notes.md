@@ -1,5 +1,17 @@
 # Engineering notes / 開発知見
 
+<a id="runtime-audit-v2"></a>
+
+## 2026-11-27 · Runtime audit and release diagnostics / 第2回監査と配布版の診断
+
+The second review started from main at `2d81b68`. Across fork paths Tonari now isolates child trap and process-substitution state, and preserves private descriptors when user redirections end. The terminal editor checks for hangup while waiting for programmable completion. Its key tables and printable binding syntax now agree on Meta and control bytes. The review also found a second control-key serialization issue and recursive binary trees for flat conditional chains. Flat `[[ … && … || … ]]` expressions now evaluate and drop iteratively with the original short-circuit and error order. Grouped syntax retains a separate nesting and stack budget. [Decisions and witnesses](compatibility/runtime-audit-v2.md)
+
+子プロセスの開始と終了、FD の退避と復元、対話端末の切断、関数・変数のスコープを通常のシェルの入口から検証した。連続した条件式は反復処理に変更し、短絡評価と展開の順序を保持する。グループの深さには別の上限を設け、既存の生成スクリプトにある 300 段の `if` も動作と所要時間を確認した。[監査記録](compatibility/runtime-audit-v2.md)
+
+The pinned distribution build retains formatted Rust panic messages and omits source coordinates, derived Debug formatting and std backtraces. An isolated panic witness kept its message under 1A. Immediate abort removed it and had no consistent normal-execution advantage in the native comparisons. The earlier November 23 panic-location measurements describe the former profile. Shell diagnostics and script locations use their own formatter. [Build and timing results](benchmarks.md#runtime-audit-v2)
+
+配布版は 1A を採用した。開発時には通常の Cargo ビルドでソース位置も追える。Linux のロケール表は重複レコードをまとめ、文字列のオフセットが 16 ビットに収まることを生成時に検査する。文字が複数のコードポイントに展開される地域名の大文字・小文字変換も維持した。フランス語の複合日時では参照データの古い時刻帯指定も修正し、ペア比較を CI の合否条件にした。追加の共有ライブラリはない。[配布ビルド](../tools/build-release.sh)
+
 ## 2026-11-27 · Reviewing the shell core against a moving baseline / シェル内部の再点検
 
 The original review used `f22f1f6`. We checked its findings against `7cf373e`, 82 commits later. The latter already transfers named-FD variables with `Option::take`. We also found another manual parser-line restore in escaped backquotes and stale source locations in the external test probes. Both the PTY path probe and the configure wait probe build against the new module layout.
@@ -495,6 +507,8 @@ Compile each pattern component once and reuse the active shell character locale 
 ディレクトリを列挙する前にパターンを準備し、各ファイルには照合だけを行います。`LC_CTYPE=C` で複雑なパターンを使う場合は、UTF-8 名をバイト単位で照合してから元の綴りを返します。大文字小文字の変換、角括弧の範囲、POSIX 文字クラス、先頭のドット、リテラル部分、複数ディレクトリ、除外条件を Bash と比較しました。macOS の同順位の名前については `strcoll("a🌱", "🌱a")` が 0 になる一例を確認し、Tonari の UTF-8 バイト順をテストに残しました。[動作例](compatibility.md#intentional-differences) · [回帰試験](../tests/shell.py)
 
 ## 2026-11-23 · What survives stripping / strip 後に残るもの
+
+This section records the November 23 release. 配布版のパニック診断は11月27日に更新した。[Current decision / 現行設定](#runtime-audit-v2)
 
 Cargo's release profile already strips symbols. Inspect the shipped ELF with `llvm-readelf -SW` and the Mach-O with `otool -l`. The Linux binary has no `.symtab` or `.debug_*` sections. The Mac binary has no `__DWARF` segment. To attribute machine code, produce a separate link map using the same compiler and release settings, with symbols retained in the inspection build. On x86-64, 95,770 of the previous 1,148,345 bytes of `.text` came from named input sections in musl's `libc.a`. The largest remaining contributions included Tonari's builtin implementations, parser and execution code. [Cargo strip](https://doc.rust-lang.org/cargo/reference/profiles.html#strip) · [Measured sizes](benchmarks.md#release-footprint)
 
