@@ -144,6 +144,9 @@ impl Session {
         if name == "noexec" && self.interactive {
             self.noexec = false;
         }
+        if name == "histexpand" {
+            self.command_history_expansion = enabled;
+        }
         if name == "posix" {
             self.set_posix(enabled);
         }

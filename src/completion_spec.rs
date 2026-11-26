@@ -16,9 +16,9 @@ const OPTIONS: &[&str] = &[
     "nospace",
     "plusdirs",
 ];
-const KEYWORDS: &[&str] = &[
-    "!", "[[", "]]", "case", "do", "done", "elif", "else", "esac", "fi", "for", "function", "if",
-    "in", "then", "until", "while", "{", "}",
+pub(crate) const KEYWORDS: &[&str] = &[
+    "!", "[[", "]]", "case", "coproc", "do", "done", "elif", "else", "esac", "fi", "for",
+    "function", "if", "in", "select", "then", "time", "until", "while", "{", "}",
 ];
 const ACTIONS: &[&str] = &[
     "alias",
@@ -650,7 +650,11 @@ fn callback(
     }
     session.replace_array("COMPREPLY", Vec::new());
     let flow = crate::call_function(session, args, last, false);
-    let values = session.array_values("COMPREPLY");
+    let values = if matches!(flow, crate::Flow::Discard(_) | crate::Flow::Exit(_)) {
+        Vec::new()
+    } else {
+        session.array_values("COMPREPLY")
+    };
     session.restore(old);
     (values, matches!(flow, crate::Flow::Continue(124)))
 }
@@ -695,16 +699,26 @@ fn apply(
 ) -> io::Result<u8> {
     if name == "compgen" {
         let prefix = request.operands.first().map_or("", String::as_str);
-        let words = match request.spec.candidates(session, prefix, last, None) {
+        let mut words = match request.spec.candidates(session, prefix, last, None) {
             Ok((words, _)) => words,
             Err(error) => {
                 eprintln!("tonari: compgen: {error}");
                 return Ok(1);
             }
         };
-        for word in &words {
-            writeln!(out, "{word}")?;
+        let options = &request.spec.options;
+        if options.contains("plusdirs") || words.is_empty() && options.contains("dirnames") {
+            words.extend(complete::file_names(prefix, true, false, session));
         }
+        if words.is_empty() && options.contains("default") {
+            words = complete::file_names(prefix, false, false, session);
+        }
+        let capacity = if words.len() > 8 { 8192 } else { 0 };
+        let mut output = io::BufWriter::with_capacity(capacity, out);
+        for word in &words {
+            writeln!(output, "{word}")?;
+        }
+        output.flush()?;
         return Ok(u8::from(words.is_empty()));
     }
     let registry = &mut session.completions.specs;
@@ -714,6 +728,10 @@ fn apply(
         return Ok(0);
     }
     if name == "complete" && targets.is_empty() {
+        if !request.print && request.spec != Spec::default() {
+            eprintln!("tonari: complete: a command name or a default target is required");
+            return Ok(2);
+        }
         for (key, spec) in registry.iter() {
             writeln!(out, "{}", spec.definition(key))?;
         }

@@ -484,7 +484,7 @@ fn run_invocation(
     session.histexpand = invocation.histexpand.unwrap_or(session.interactive);
     session.emacs = session.interactive
         && !invocation.noediting
-        && *initial_terminal
+        && (*initial_terminal || matches!(invocation.input, Input::Command(_)))
         && !session.get("TERM").is_some_and(|s| s == "dumb");
     if session.interactive
         && let Err(e) = session.traps.init_hangup()
@@ -497,6 +497,7 @@ fn run_invocation(
         session.jobs.init(session.interactive);
     }
     session.command_string = matches!(invocation.input, Input::Command(_));
+    session.command_history_expansion = invocation.histexpand == Some(true);
     session.stdin_script = matches!(invocation.input, Input::Stdin);
     session.set_posix(invocation.posix);
     session.shopt.progcomp_alias = session.interactive;

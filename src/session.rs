@@ -150,6 +150,7 @@ pub struct Session {
     pub(crate) initial_history: Option<Rc<crate::history::InitialJournal>>,
     pub command_number: usize,
     pub command_string: bool,
+    pub command_history_expansion: bool,
     pub stdin_script: bool,
     pub tested_depth: u32,
     pub errexit: bool,
@@ -444,7 +445,10 @@ impl Session {
                     'n' => self.noexec = enable && !self.interactive,
                     't' => self.onecmd = enable,
                     'x' => self.xtrace = enable,
-                    'H' => self.histexpand = enable,
+                    'H' => {
+                        self.histexpand = enable;
+                        self.command_history_expansion = enable;
+                    }
                     'T' => self.functrace = enable,
                     'C' => self.noclobber = enable,
                     'B' => self.shopt.braceexpand = enable,

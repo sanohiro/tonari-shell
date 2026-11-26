@@ -188,6 +188,23 @@ v=blue; show "${!indirect[@]#b}" "${!indirect[@]:-other}"
 """, 0, b"2<empty><empty>\n0\n4<><><two words><present>\n3<><><two words>\n"
         b"3<><><other>\n2<><y>\n2<lue><blue>\n", minimum=5)
 
+    def test_compgen_fallback_keywords_and_filters(self):
+        (self.cwd / "sp-dir").mkdir()
+        (self.cwd / "spam.py").touch()
+        self.compare(r"""complete -F missing 2>/dev/null; echo $?
+compgen -A command whil
+compgen -k | grep '^time$'
+compgen -o default sp | sort
+compgen -o plusdirs -W 'space' sp | sort
+compgen -o dirnames sp
+""", 0, b"2\nwhile\ntime\nsp-dir\nspam.py\nsp-dir\nspace\nsp-dir\n", minimum=5)
+        source = r"""shopt -s extglob; compgen -f -X "!*.@(py)" -- sp"""
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                p = subprocess.run([shell, "--norc", "-ic", source], cwd=self.cwd,
+                                   env=self.env, capture_output=True, timeout=5)
+                self.assertEqual((p.returncode, p.stdout), (0, b"spam.py\n"), p.stderr)
+
     def test_pipeline_last_argument_and_parent_scope(self):
         self.compare(""": before
 f() { echo "inside:$_"; : changed; }

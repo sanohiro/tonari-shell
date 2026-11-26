@@ -35,6 +35,11 @@ CASES = {
                     b"v299='two words'\n"),
     "echo escapes": (r"shopt -s xpg_echo; for ((i=0;i<4000;i++)); do x=$(echo 'a\tb'); done; "
                      'printf "%s" "$x"', b"a\tb"),
+    "large completion": ('for ((i=0;i<30;i++)); do compgen -o default files/item; done >matches; '
+                         'n=$(wc -l <matches); echo $((n))', b"61440\n"),
+    "completion fallback": ('mkdir -p work/prefix-dir; touch work/prefix-file; '
+                            'for ((i=0;i<1000;i++)); do compgen -o default work/pre; done >matches; '
+                            'tail -2 matches | sort', b"work/prefix-dir\nwork/prefix-file\n"),
     "array defaults": ('a=({1..512}); for ((i=0;i<500;i++)); do v="${a[@]:+present}"; done; echo "$v"',
                        b"present\n"),
     "array default fields": ('a=({1..512}); for ((i=0;i<200;i++)); do b=("${a[@]:-none}"); done; '
@@ -66,6 +71,11 @@ def main():
         home = Path(directory)
         regex_home = home / "^a$"
         regex_home.mkdir()
+        if not args.case or "large completion" in args.case:
+            files = home / "files"
+            files.mkdir()
+            for i in range(2048):
+                (files / f"item{i:04}").touch()
         rc = home / "rc"
         rc.write_text('PS1="tonari$ "\nset -o vi\ns(){ printf "edited:%s:%s\\n" "${#1}" "$2"; }\n')
         for trial in range(args.trials):
