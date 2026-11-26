@@ -1,5 +1,7 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+GNU distribution tests can combine diagnostics, formatting and several independent shell operations in one transcript. The case ledger records the input, the externally visible result and the reason for any intentional divergence. GNU の試験で見つかった差は、引数・終了値・ファイルへの副作用まで含めて個別に判定している。[GNU cases / GNU 回帰試験の個別判定](compatibility/bash-source-review/gnu-cases.md)
+
 The November 26 source review records fixes to Bash 5.2 and 5.3 interfaces, along with the remaining behavior differences, interface-only checks and untested entries. GNU Bash とのソース照合、各修正の動作確認、未対応項目を版・OS別に記録しました。[GNU Bash source review / ソース照合結果](compatibility/bash-source-review/README.md)
 
 The follow-up covers keyword assignments, aliases, stdin replacement, history, debugger variables, signal handling and locale-sensitive numeric formatting. 両ディストリビューションの GNU ドライバーの差分、短い再現試験、仕様差の判断を保存した。[Follow-up / 追試結果](compatibility/bash-source-review/follow-up.md)

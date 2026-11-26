@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## GNU regression witnesses and execution scope / GNU 回帰試験と実行スコープ
+
+An explicit exit can run an EXIT trap before a function restores its locals, arguments and redirections. Check the destination file as well as the exit status. For input-only command substitutions, ordinary redirections and the substitution must agree on POSIX splitting and pathname expansion. A quoted stored pathname, or a stored scalar in noninteractive POSIX mode, can be read directly when the existing file and trap checks permit it.
+
+関数内で終了する場合は、トラップが書くファイルと、その時点のローカル変数・位置パラメーターを一緒に試験する。コマンド置換によるファイル読み出しは、同じパスを通常のリダイレクトに渡した場合と照合した。プロセスを省けることは、実際に開くファイルが正しいと確かめた後に実機で計測した。[Cases / 個別判定](compatibility/bash-source-review/gnu-cases.md) · [Timings / 実測](compatibility/bash-source-review/native-case-review.tsv)
+
 ## 2026-11-26 · Following stdin, aliases and signals through execution / 入力・エイリアス・シグナルを実行まで追う
 
 A buffered private fd for script input must follow permanent redirection of fd 0 when the script came from stdin. A named script retains its own reader. A signal handler can return from an interrupted function. Its implicit status comes from the interrupted command at that scope, while a function called inside the handler sees its own status. Test function and source nesting and an explicit status operand. Share registered trap text across invocations so a large handler does not require copying its source each time.

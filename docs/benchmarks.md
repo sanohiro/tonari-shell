@@ -1,5 +1,11 @@
 # Startup and execution / 起動と実行性能
 
+## Native timings for individual GNU regression fixes / GNU 個別修正の実機計測
+
+The table lists elapsed milliseconds for Bash, the first working implementation and the tuned implementation on Apple M1 and native x86-64 Linux. The archive retains individual trials. Reading 110 regular files through an unquoted POSIX pathname variable took 69.165 ms in the first M1 implementation, 5.923 ms after using the stored name, and 10.962 ms in Bash. The corresponding Linux medians were 22.570, 2.500 and 3.293 ms. The fixture uses a literal asterisk in the file name.
+
+一覧は各 OS ごとに、同じマシンで Bash、初回実装、高速化後を交互に計測した値を載せている。ファイル名にアスタリスクを含む試験では、シェルが別のパスへ展開していないことも確認した。[Native comparisons](compatibility/bash-source-review/native-case-review.tsv) · [Individual trials](compatibility/bash-source-review/native-case-samples.jsonl.gz)
+
 The follow-up compares the revised execution, expansion, trap and editor paths on native Apple M1 and Linux x86-64. Each workload has individual samples and a Bash reference. キーの表示応答と、シェル起動を含むスクリプト全体の時間は測定区間を分けている。[Follow-up results / 追試の実測](compatibility/bash-source-review/follow-up.md) · [All follow-up timings](compatibility/bash-source-review/follow-up-timings.tsv)
 
 <a id="gnu-source-review"></a>
