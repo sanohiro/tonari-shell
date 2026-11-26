@@ -20,6 +20,16 @@ The earlier review at `40fd68f` recorded several options that could change the r
 
 `set -k` は既に定義された関数にも反映する。`exec 0<file` は標準入力からスクリプトを読んでいる場合と、引数のファイルから読んでいる場合の両方を試した。`command_not_found_handle` では空引数、空白入り引数、環境、リダイレクト、終了値を確認した。GNU の版で挙動が変わる `read` や配列は、比較対象の Bash の版も記録している。
 
+### Name references, assignment attributes and pipe ownership / 名前参照・属性・FD
+
+GNU `execute_for_command` rebinds the last name reference used as a `for` control variable. An ordinary assignment through the same reference changes the target's value. Tonari now distinguishes those operations for chained references, array elements and readonly bindings. The loop checks the current binding after each iteration because its body can change it. A declared but uninitialized reference can receive its first target in the loop.
+
+`for ref in first second` は参照している変数名を順に変える。参照先が読み取り専用なら値を保ったまま次の変数へ進める。参照自体が読み取り専用ならループが失敗する。パラメーター展開の既定値・代替値に含む二重引用符では、内側と外側のバックスラッシュを区別した。通常の二重引用符と UTF-8 文字を同時に含むケースも比較した。
+
+For a default assignment, an integer or case-conversion attribute applies to both the stored value and the expansion result. For instance, after `declare -i n`, `${n:=4+3}` yields `7` and stores `7`. The selected array element is retained through the assignment. An arithmetic index with an increment or a command used as an associative key is evaluated once. The independent test checks both the assigned location and the observed side effect. [Single-evaluation test](../../../tests/shell.py)
+
+コプロセスのパイプを `exec 4<&${P[0]}-` で移動したら、元の端の `P[0]` は `-1` になる。新しい FD で親子間のデータを受け渡し、書き手を閉じて子の終了値を取得するところまで試験した。実際に割り当てられる FD 番号は OS と既に開いているファイルに依存する。[GNU比較ケース](../../../tests/compat/source_review.py)
+
 ## The editor and history / 入力・補完・履歴
 
 Readline word-motion and editing bindings, filename completion with case or dash/underscore folding, `bind -p` filters, and suppression of empty-command completion were reviewed in `bashline.c`, `builtins/bind.def` and the bundled Readline sources. History tests cover quick substitution at a physical newline, repeated and global substitutions, recalling the last matching word, continuing after a failed argument to `history -p`, custom event characters, error re-editing, verification before execution, loading an explicit history file and multiline entries. Quotes and here-documents can require literal newlines. Ordinary compound commands can be stored on one line.
@@ -33,47 +43,58 @@ Readline word-motion and editing bindings, filename completion with case or dash
 - Tonari keeps its UTF-8 text contract, bytewise Linux filename ordering and single evaluation of subscripts. It preserves the escaped final space of a `read` operand. The hexadecimal floating spellings `0x1.8p+0` and `0xcp-3` denote the same number. The generated inventory retains their different bytes.
 - A trapped SIGCHLD wakes the interpreter. It reaps available children and calls the handler for the observed child statuses, even if the kernel coalesced several signals. Sending SIGCHLD without a child event produces no callback, as in the GNU control. A foreground child reaped by the handler does not trigger the same handler again. A 24-child burst and an action that starts an external command both have independent expected counts.
 - Headless job control was tested with a child in a separate session. Enabling job control must still put a child in the right process group. An attempt to suppress it solely because stdin lacked a terminal broke the yash signal tests and was reverted.
-- Restricted or privileged shell operation, loadable C builtins, mailbox polling, gettext message tooling and the full GNU Readline configuration surface remain outside the verified default-shell feature set. Several GNU drivers still have mixed results. One example is splitting unquoted positional parameters when the same word changes IFS twice. The full distribution records below retain the observed differences and the coverage limits.
+- In POSIX mode, unquoted positional parameters initially supply individual fields. Parameter expansions run from the beginning of the word to its end. Field splitting then uses the resulting IFS. With positional parameters `a`, `b c` and `d`, an initially unset IFS and the word `${*}${IFS=}${*}${IFS:=-}"${*}"`, Tonari yields `<a><b c><da><b c><d><a-b c-d>`. GNU Bash 5.2.37 and 5.3.20 split the first `b c` before the in-word assignment and keep the final unquoted hyphen. The independent test checks Tonari's ordering against the expansion and splitting stages in the standard. [POSIX.1-2024 §§2.5.2, 2.6 and 2.6.5](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_06)
+- The GNU `exp5.sub` example deletes characters from `hello` with the pattern `[[:alpha]`. It is missing the character class terminator `:]`. Both shells remove all the letters with the complete pattern `[[:alpha:]]`. Tonari leaves `hello` unchanged with the malformed pattern, while Bash produces `eo`. The case is retained in the raw comparison.
+- In the C locale, the Bash 5.2.37 control prints the Alt+U binding as `"\M-u"` and Bash 5.3.20 prints `"\eu"`. Tonari's query prints the former spelling. PTY coverage sends the actual editing sequence and checks the accepted text. A separate diagnostic-only difference occurs at compatibility level 5.1 when `declare -p` reports an unset array. Both processes exit with status 1 and the same stdout, and Bash includes a source location in stderr.
+- Restricted or privileged shell operation, loadable C builtins, mailbox polling, gettext message tooling and the full GNU Readline configuration surface remain outside the verified default-shell feature set. The full distribution records below retain mixed results, including diagnostic wording, source locations and observable behavior.
 
 エイリアスの末尾にしか閉じ括弧がない例については、POSIX に規定がなく、Tonari は入力の不足を報告する。UTF-8 専用、添字の一度だけの評価、端末がない場合のジョブ制御は意図して維持した。GNU の比較には診断文や書式の差と、処理結果を変える差の両方が残る。単に両シェルが失敗したことを合格の根拠にはしていない。
 
 ## Distribution results / ディストリビューション別の結果
 
-The before column uses `ca9850b`, which added GNU output retention without changing the interpreter. The tested release is `0b223cc`. The raw audits contain the observed stdout, diagnostics, exit statuses and per-driver diff output (up to 128 KiB per driver run). A complete GNU driver can retain its original classification after many of its constituent commands are fixed. An inconclusive control means the packaged Bash did not establish the upstream expected result. [Native Linux run](https://github.com/sanohiro/tonari-shell/actions/runs/45819952396) · [Per-driver comparisons](follow-up-drivers.tsv) · [All changed inventory classifications](follow-up-changes.tsv)
+The before column uses `ca9850b`, which added GNU output retention without changing the interpreter. The tested release is `d5a6d58`. The raw audits contain the observed stdout, diagnostics, exit statuses and per-driver diff output (up to 128 KiB per driver run). A complete GNU driver can retain its original classification after many of its constituent commands are fixed. An inconclusive control means the packaged Bash did not establish the upstream expected result. [Native Linux run](https://github.com/sanohiro/tonari-shell/actions/runs/45823065695) · [Per-driver comparisons](follow-up-drivers.tsv) · [All changed inventory classifications](follow-up-changes.tsv)
 
 | Distribution | Reference Bash | Inventory entries | Golden match | Different | Inconclusive control | Separate export probe |
 |---|---|---:|---:|---:|---:|---:|
-| Debian 13 | 5.2.37 | 1525 | 24 (was 22) | 55 (was 57) | 3 | 1 |
-| Ubuntu 26.04 | 5.3.9 | 1556 | 22 (was 20) | 56 (was 58) | 7 | 1 |
+| Debian 13 | 5.2.37 | 1525 | 25 (was 22) | 54 (was 57) | 3 | 1 |
+| Ubuntu 26.04 | 5.3.9 | 1556 | 23 (was 20) | 55 (was 58) | 7 | 1 |
 
 GNU のドライバーには多数の入力があり、エラーメッセージの接頭辞ひとつでも全体が不一致になる。逆に、構文解析が途中で停止すると後続の正当な入力が検証されない。ドライバー別一覧には旧版・修正版の出力行数と両シェルの終了値を併記した。見出しだけの項目、単独の再現例がない項目、シェルの識別文字列、GNU の比較側で確定できなかった項目も元の判定のまま保存した。[Debian full audit](follow-up-debian.json.gz) · [Ubuntu full audit](follow-up-ubuntu.json.gz)
 
-At `0b223cc`, the Apple M1 passed all 77 focused Bash 5.3.20 comparisons and all 58 applicable Bash 5.2.37 comparisons. The native Linux run passed all 76 applicable Bash 5.3.9 comparisons. The ordinary shell and terminal suite ran 297 tests on both platforms (three platform skips on the Mac). Across the four yash CI jobs, 9,310 comparison entries were scored comparable and the nested trap return passed its independent POSIX.1-2024 check. [POSIX and integration run](https://github.com/sanohiro/tonari-shell/actions/runs/45819933515)
+The release passed all 81 focused Bash 5.3.20 comparisons on Apple M1, all 62 applicable Bash 5.2.37 comparisons on the same Mac, and all 80 applicable Ubuntu Bash 5.3.9 comparisons on Linux x86-64. The Rust suite passed 59 tests. The local shell and terminal suite ran 299 tests with three platform skips. The Linux CI comparison scored 9,310 jointly passing yash cases and independently verified the POSIX.1-2024 nested return. [POSIX and integration run](https://github.com/sanohiro/tonari-shell/actions/runs/45823064055)
 
-Ubuntu の履歴展開ドライバーで出力された差分は 675 行から 154 行、パラメーター展開の `run-new-exp` は 553 行から 189 行になった。これは diff の行数で、テスト件数を表す数字ではない。
+Ubuntu の履歴展開ドライバーが出力した差分は 675 行から 154 行に減った。これは diff の行数で、失敗したテストの件数ではない。二重引用符を含むパラメーター展開の `run-rhs-exp` は両ディストリビューションでドライバー全体が一致した。GNU の `nameref5.sub` は、Mac でも Bash 5.2・5.3 と同じ 16 行の標準出力と終了コードを返した。
 
 ## Native timings / 実測
 
-Each release workload was warmed up, then run in shuffled shell order. The Apple M1 ran macOS 27.2.1 with Bash 5.3.20 (15 samples per shell). The Linux x86-64 job ran a stripped, static musl PIE against Ubuntu's Bash 5.3.9 (9 samples per shell). Times for scripts include shell startup, parsing and all repetitions. The terminal rows time from sending the editing action to observing its result. CI CPU scheduling and the terminal's PTY transport contribute to those values. Ratios use elapsed time, so smaller values are faster. [All 44 workloads](follow-up-timings.tsv) · [Raw samples and comparison revisions](follow-up-samples.jsonl.gz)
+Each release workload was warmed up, then run in shuffled shell order. The Apple M1 ran macOS 27.2.1 with Bash 5.3.20 (15 samples per shell). The Linux x86-64 job ran a stripped, static musl PIE against Ubuntu's Bash 5.3.9 (9 samples per shell). Times for scripts include shell startup, parsing and all repetitions. The terminal rows time from sending the editing action to observing its result. CI CPU scheduling and the terminal's PTY transport contribute to those values. Ratios use elapsed time, so smaller values are faster. [All 48 workloads](follow-up-timings.tsv) · [Raw samples and comparison revisions](follow-up-samples.jsonl.gz)
 
-The measured M1 executable occupies 1,749,024 bytes and links only libSystem. The native Linux x86-64-v3 executable occupies 2,486,872 bytes and is a stripped static PIE. Linux の単語編集は 51 µs（Bash 47 µs）、履歴を編集行へ戻す操作は 44 µs（Bash 39 µs）が中央値だった。
+The measured Apple M1 executable occupies 1,749,040 bytes and links only libSystem. The Linux x86-64-v3 executable occupies 2,494,232 bytes and is a stripped static PIE. The only higher Tonari median was Linux history verification at 40 µs, compared with 37 µs for Bash.
 
 | Workload | Repetitions | M1 Bash ms | M1 Tonari ms | x86-64 Bash ms | x86-64 Tonari ms |
 |---|---:|---:|---:|---:|---:|
-| Word editing / 単語編集 | 1 | 0.083 | 0.057 | 0.047 | 0.051 |
-| First case-folded file completion / 初回ファイル補完 | 1 | 111.39 | 0.684 | 0.319 | 0.317 |
-| History expansion shown for verification / 展開した履歴を編集行に表示 | 1 | 0.07 | 0.039 | 0.039 | 0.044 |
-| Keyword assignments / コマンド名以降の代入 | 900 | 13.702 | 6.103 | 3.445 | 1.694 |
-| POSIX case alias in command substitution / エイリアス入りのコマンド置換 | 450 | 426.857 | 368.775 | 109.717 | 67.137 |
-| Missing-command handler / 未検出コマンドのフック | 90 | 79.153 | 64.64 | 20.336 | 13.172 |
-| External background command, wait and trap / 外部起動・待機・トラップ | 90 | 213.355 | 192.223 | 42.904 | 33.388 |
-| External background command and wait / トラップなしの外部起動・待機 | 90 | 203.642 | 189.376 | 42.349 | 32.776 |
-| Braced byte escapes / 波括弧付きバイトエスケープ | 1200 | 11.635 | 5.512 | 1.81 | 1.522 |
+| Word editing / 単語編集 | 1 | 0.082 | 0.058 | 0.062 | 0.059 |
+| First case-folded file completion / 初回ファイル補完 | 1 | 108.332 | 0.691 | 0.32 | 0.313 |
+| History expansion shown for verification / 展開した履歴を編集行に表示 | 1 | 0.071 | 0.036 | 0.037 | 0.04 |
+| Keyword assignments / コマンド名以降の代入 | 900 | 13.101 | 5.819 | 3.464 | 1.674 |
+| POSIX case alias in command substitution / エイリアス入りのコマンド置換 | 450 | 360.334 | 313.876 | 108.874 | 66.296 |
+| Missing-command handler / 未検出コマンドのフック | 90 | 74.161 | 57.851 | 20.073 | 12.754 |
+| External background command, wait and trap / 外部起動・待機・トラップ | 90 | 189.392 | 173.663 | 42.569 | 32.801 |
+| External background command and wait / トラップなしの外部起動・待機 | 90 | 187.626 | 171.582 | 41.354 | 31.742 |
+| Braced byte escapes / 波括弧付きバイトエスケープ | 1200 | 10.96 | 5.106 | 1.8 | 1.503 |
+| Loop over named references / 参照先を切り替えるループ | 900 | 12.711 | 6.163 | 2.973 | 1.463 |
+| Quoted parameter operands / 入れ子の引用符の解析 | 750 | 11.539 | 5.337 | 2.172 | 1.207 |
+| Typed default assignment / 属性付きの既定値代入 | 700 | 14.423 | 5.819 | 4.145 | 1.464 |
+| Coprocess with moved pipe ends / FD を移動するコプロセス | 64 | 58.231 | 46.322 | 16.901 | 9.506 |
 
-- macOS-arm64 は44項目中 44 項目で Tonari の中央値が短く、39 項目で Bash の所要時間の 2/3 以下になった。
-- Linux-x86_64 は44項目中 42 項目で Tonari の中央値が短く、35 項目で Bash の所要時間の 2/3 以下になった。
+- macOS-arm64 は48項目中 48 項目で Tonari の中央値が短く、42 項目で Bash の所要時間の 2/3 以下になった。
+- Linux-x86_64 は48項目中 47 項目で Tonari の中央値が短く、39 項目で Bash の所要時間の 2/3 以下になった。
 
-The version before the final history optimization is also timed in the TSV. The sample archive retains earlier first-working implementations and follow-up passes for the editor, expansions, locale handling, command lookup and traps. The 90-process wait includes an actual operating-system process for each iteration. The POSIX case-alias workload sources and executes 450 command substitutions. Compare those elapsed times separately from pure shell operations. シェル全般の速度や全 GNU ドライバーの速度をこの44項目だけから推定していない。
+The first implementation of attribute-aware default assignment and coprocess endpoint invalidation is also timed in the TSV. The sample archive retains earlier first-working implementations and follow-up passes for the editor, expansions, locale handling, command lookup and traps. The 90-process wait includes an actual operating-system process for each iteration. The POSIX case-alias workload sources and executes 450 command substitutions. Compare those elapsed times separately from pure shell operations. シェル全般の速度や全 GNU ドライバーの速度をこの48項目だけから推定していない。
+
+For the 900 reference loops (2,700 bindings), passing the owned loop value through to the stored binding took 1.350 ms on x86-64, compared with 1.449 ms on the first working revision. The same M1 comparison took 5.972 and 6.060 ms across 31 trials. On the final x86-64 build the 700 typed-assignment iterations took 1.464 ms, compared with 1.548 ms before combining attribute lookups. The corresponding final M1 medians were 5.819 and 5.713 ms. The samples show that the improvement varies by workload and machine.
+
+GNU の `run-coproc` に残る 4 組の差は、各 OS が空いているパイプ端に割り当てた FD 番号をそのまま出力したものだった。親子で転送した文字列、終了コード、端を移動した後の `-1` は一致した。GNU の `run-case` では両シェルが読み取り専用変数への代入を拒否し、診断に含める変数名とソース位置が異なる。個々の差をその内容で判定した例である。
 
 Reproduce the behavioral checks on a native release with the commands below. Omit `--runs 0` to time the supported workloads. [Harness and selection options](../../../tests/compat/source_review.py)
 

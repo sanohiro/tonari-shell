@@ -3,7 +3,7 @@ debian	run-alias	different	different	0	1	False	False	23	4
 debian	run-appendop	different	different	0	1	False	False	4	4
 debian	run-arith	different	different	0	1	False	False	154	154
 debian	run-arith-for	different	different	0	1	False	False	88	88
-debian	run-array	different	different	0	1	False	False	793	299
+debian	run-array	different	different	0	1	False	False	793	285
 debian	run-array2	golden match	golden match	0	0	False	False	0	0
 debian	run-assoc	different	different	0	1	False	False	167	167
 debian	run-attr	different	different	0	1	False	False	44	44
@@ -16,7 +16,7 @@ debian	run-comsub	different	different	0	1	False	False	31	14
 debian	run-comsub-eof	different	different	0	1	False	False	25	25
 debian	run-comsub-posix	different	different	0	1	False	False	49	49
 debian	run-cond	different	different	0	1	False	False	34	34
-debian	run-coproc	different	different	0	1	False	False	20	20
+debian	run-coproc	different	different	0	1	False	False	20	16
 debian	run-cprint	different	different	0	1	False	False	111	111
 debian	run-dbg-support	different	different	0	1	False	False	495	495
 debian	run-dbg-support2	different	different	0	1	False	False	14	14
@@ -25,7 +25,7 @@ debian	run-dollars	different	different	0	1	False	False	49	37
 debian	run-dynvar	golden match	golden match	0	0	False	False	0	0
 debian	run-errors	different	different	0	1	False	False	348	359
 debian	run-execscript	control inconclusive	control inconclusive	1	1	False	False	66	62
-debian	run-exp-tests	different	different	0	1	False	False	26	26
+debian	run-exp-tests	different	different	0	1	False	False	26	16
 debian	run-exportfunc	separate export-function probe	separate export-function probe					0	0
 debian	run-extglob	golden match	golden match	0	0	False	False	0	0
 debian	run-extglob2	golden match	golden match	0	0	False	False	0	0
@@ -48,7 +48,7 @@ debian	run-jobs	different	different	0	1	False	False	111	111
 debian	run-lastpipe	golden match	golden match	0	0	False	False	0	0
 debian	run-mapfile	different	different	0	1	False	False	20	20
 debian	run-more-exp	different	different	0	1	False	False	35	20
-debian	run-nameref	different	different	0	1	False	False	541	535
+debian	run-nameref	different	different	0	1	False	False	541	514
 debian	run-new-exp	different	different	0	1	False	False	549	185
 debian	run-nquote	different	different	0	1	False	False	10	10
 debian	run-nquote1	golden match	golden match	0	0	False	False	0	0
@@ -69,7 +69,7 @@ debian	run-quote	golden match	golden match	0	0	False	False	0	0
 debian	run-quotearray	different	different	0	1	False	False	179	171
 debian	run-read	control inconclusive	control inconclusive	1	1	False	False	27	27
 debian	run-redir	different	different	0	1	False	False	65	61
-debian	run-rhs-exp	different	different	0	1	False	False	12	12
+debian	run-rhs-exp	different	golden match	0	0	False	False	12	0
 debian	run-rsh	different	different	0	1	False	False	34	34
 debian	run-set-e	golden match	golden match	0	0	False	False	0	0
 debian	run-set-x	different	different	0	1	False	False	38	38
@@ -86,7 +86,7 @@ ubuntu	run-alias	different	different	0	1	False	False	43	17
 ubuntu	run-appendop	different	different	0	1	False	False	4	4
 ubuntu	run-arith	different	different	0	1	False	False	278	278
 ubuntu	run-arith-for	different	different	0	1	False	False	106	106
-ubuntu	run-array	different	different	0	1	False	False	858	394
+ubuntu	run-array	different	different	0	1	False	False	858	380
 ubuntu	run-array2	golden match	golden match	0	0	False	False	0	0
 ubuntu	run-assoc	different	different	0	1	False	False	181	181
 ubuntu	run-attr	different	different	0	1	False	False	44	44
@@ -100,7 +100,7 @@ ubuntu	run-comsub-eof	different	different	0	1	False	False	28	28
 ubuntu	run-comsub-posix	different	different	0	1	False	False	49	49
 ubuntu	run-comsub2	different	different	0	1	False	False	76	72
 ubuntu	run-cond	different	different	0	1	False	False	95	95
-ubuntu	run-coproc	different	different	0	1	False	False	20	20
+ubuntu	run-coproc	different	different	0	1	False	False	20	16
 ubuntu	run-cprint	different	different	0	1	False	False	111	111
 ubuntu	run-dbg-support	different	different	0	1	False	False	498	498
 ubuntu	run-dbg-support2	different	different	0	1	False	False	14	14
@@ -109,7 +109,7 @@ ubuntu	run-dollars	different	different	0	1	False	False	49	37
 ubuntu	run-dynvar	different	different	0	1	False	False	6	4
 ubuntu	run-errors	different	different	0	1	False	False	610	621
 ubuntu	run-execscript	control inconclusive	control inconclusive	1	1	False	False	148	142
-ubuntu	run-exp-tests	different	different	0	1	False	False	26	26
+ubuntu	run-exp-tests	different	different	0	1	False	False	26	16
 ubuntu	run-exportfunc	separate export-function probe	separate export-function probe					0	0
 ubuntu	run-extglob	different	different	0	1	False	False	16	16
 ubuntu	run-extglob2	golden match	golden match	0	0	False	False	0	0
@@ -134,7 +134,7 @@ ubuntu	run-jobs	different	different	0	1	False	False	172	172
 ubuntu	run-lastpipe	golden match	golden match	0	0	False	False	0	0
 ubuntu	run-mapfile	different	different	0	1	False	False	20	20
 ubuntu	run-more-exp	different	different	0	1	False	False	35	20
-ubuntu	run-nameref	different	different	0	1	False	False	566	560
+ubuntu	run-nameref	different	different	0	1	False	False	566	539
 ubuntu	run-new-exp	different	different	0	1	False	False	553	189
 ubuntu	run-nquote	different	different	0	1	False	False	10	10
 ubuntu	run-nquote1	golden match	golden match	0	0	False	False	0	0
@@ -155,7 +155,7 @@ ubuntu	run-quote	golden match	golden match	0	0	False	False	0	0
 ubuntu	run-quotearray	control inconclusive	control inconclusive	1	1	False	False	179	171
 ubuntu	run-read	control inconclusive	control inconclusive	1	1	False	False	63	51
 ubuntu	run-redir	different	different	0	1	False	False	98	94
-ubuntu	run-rhs-exp	different	different	0	1	False	False	12	12
+ubuntu	run-rhs-exp	different	golden match	0	0	False	False	12	0
 ubuntu	run-rsh	different	different	0	1	False	False	36	36
 ubuntu	run-set-e	golden match	golden match	0	0	False	False	0	0
 ubuntu	run-set-x	different	different	0	1	False	False	47	47

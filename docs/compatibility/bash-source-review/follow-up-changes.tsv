@@ -79,6 +79,7 @@ debian	Compatibility level	43	different	interface only
 debian	Compatibility level	44	different	interface only
 debian	Compatibility level	50	different	match
 debian	Compatibility level	51	match	stderr differs
+debian	GNU regression group	run-rhs-exp	different	golden match
 debian	GNU regression group	run-tilde	different	golden match
 debian	GNU regression group	run-tilde2	different	golden match
 ubuntu	Invocation	-k	different	match
@@ -162,5 +163,6 @@ ubuntu	Compatibility level	44	different	interface only
 ubuntu	Compatibility level	50	different	match
 ubuntu	Compatibility level	51	match	stderr differs
 ubuntu	Compatibility level	52	match	stderr differs
+ubuntu	GNU regression group	run-rhs-exp	different	golden match
 ubuntu	GNU regression group	run-tilde	different	golden match
 ubuntu	GNU regression group	run-tilde2	different	golden match
