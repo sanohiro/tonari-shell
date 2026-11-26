@@ -109,7 +109,13 @@ fn main() {
             locale_match!(locale => LC_TIME::ERA_T_FMT).as_slice()
         );
         field!(DFmt, &[locale_match!(locale => LC_TIME::D_FMT)]);
-        field!(DTFmt, &[locale_match!(locale => LC_TIME::D_T_FMT)]);
+        // pure-rust-locales 0.8.2 carries the older French d_t_fmt.
+        // Modern fr_FR uses %Z only in date_fmt. The euro variant copies LC_TIME.
+        let datetime = match locale {
+            Locale::fr_FR | Locale::fr_FR_euro => "%a %d %b %Y %T",
+            _ => locale_match!(locale => LC_TIME::D_T_FMT),
+        };
+        field!(DTFmt, &[datetime]);
         field!(TFmt, &[locale_match!(locale => LC_TIME::T_FMT)]);
         field!(TFmtAmpm, &[locale_match!(locale => LC_TIME::T_FMT_AMPM)]);
         let index = records.iter().position(|old| *old == row).unwrap_or_else(|| {

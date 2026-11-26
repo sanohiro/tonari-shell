@@ -73,7 +73,7 @@ case "$SUITE" in
       for lang in de_DE ja_JP fr_FR pl_PL fa_IR; do
         sudo localedef -i "$lang" -f UTF-8 "$lang.UTF-8"
       done
-      python3 "$repo/tools/ci/time-locales.py" "$lab/bin/bash" "$ref" > "$out/time-locales.jsonl"
+      python3 "$repo/tools/ci/time-locales.py" "$lab/bin/bash" "$ref" --require-match > "$out/time-locales.jsonl"
     fi
     REFERENCE_BASH="$ref" python3 "$repo/tests/shell.py" "$lab/bin/bash" -q
     python3 "$repo/tools/ci/spec-fix-timings.py" "$lab/bin/bash" "$ref" > "$out/fixes.tsv"

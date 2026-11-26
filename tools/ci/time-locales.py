@@ -30,6 +30,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tonari", type=lambda p: Path(p).resolve())
     parser.add_argument("bash", type=lambda p: Path(p).resolve())
+    parser.add_argument("--require-match", action="store_true",
+                        help="fail if a paired locale differs from the reference")
     args = parser.parse_args()
     candidates = subprocess.check_output(["locale", "-a"], text=True).splitlines()
     installed = {}
@@ -60,6 +62,8 @@ def main():
                                       bash=expected, tonari=actual), ensure_ascii=False))
     print(json.dumps(dict(locales=len(names), paired=paired, fields=len(FIELDS), epochs=len(EPOCHS),
                           differences=mismatches), ensure_ascii=False))
+    if args.require_match and (mismatches or not paired):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

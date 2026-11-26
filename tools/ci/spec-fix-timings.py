@@ -105,6 +105,14 @@ CASES = {
                  'echo "$v"', b"yes\n"),
 }
 
+if sys.platform.startswith("linux"):
+    CASES["French composite datetime"] = (
+        'export TZ=UTC0 LC_ALL=fr_FR.UTF-8; for ((t=0;t<2000;t++)); do '
+        'printf -v stamp "%(%c|%Ec)T" "$t"; done; echo "$stamp"',
+        b"jeu. 01 janv. 1970 00:33:19|jeu. 01 janv. 1970 00:33:19\n",
+    )
+
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
