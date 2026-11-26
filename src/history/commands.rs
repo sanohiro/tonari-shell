@@ -474,9 +474,6 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
                     recognize = true;
                     multiline = timestamped;
                 }
-                if line.is_empty() {
-                    continue;
-                }
                 if recognize && let Some(ts) = bash_timestamp(line) {
                     if let Some((value, time)) = pending.take() {
                         import_entry(h, value, time, erase, limit);
@@ -495,6 +492,9 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
                 {
                     last.push('\n');
                     last.push_str(line);
+                    continue;
+                }
+                if line.is_empty() {
                     continue;
                 }
                 marker_offset = None;

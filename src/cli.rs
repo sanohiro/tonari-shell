@@ -217,7 +217,7 @@ pub fn parse(
         nolog,
         noediting,
         rcfile,
-        check: check && !interactive,
+        check,
         pretty,
         debugger,
         notify,

@@ -16,7 +16,9 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
-    "managed-background-spawn": "set -m; trap ':' USR1; sleep .15 & p=$!; sleep .15 & q=$!; kill -STOP \"$p\"; wait \"$p\" 2>/dev/null; s=$?; kill -CONT \"$p\"; kill \"$p\" \"$q\" 2>/dev/null; wait 2>/dev/null; [[ $s == $((128+$(kill -l STOP))) ]] && echo stopped; /bin/sh -c 'kill -USR1 $$; exit 9' & p=$!; wait \"$p\" 2>/dev/null; [[ $? == $((128+$(kill -l USR1))) ]] && echo default; trap '' USR1; /bin/sh -c 'kill -USR1 $$; exit 9' & p=$!; wait \"$p\"; echo ignored:$?",
+    "interactive-noexec": "export HISTFILE=$PWD/nonexec-history; : >nonexec-history; printf 'printf yes >ran\\n' | \"$AUDIT_SHELL\" --norc -in 2>/dev/null; [[ -e ran ]]; echo $?; cat \"$HISTFILE\"; printf 'set -n\\necho yes\\n' | \"$AUDIT_SHELL\" --norc -i 2>/dev/null",
+    "timestamped-blank-lines": "printf '#1\\n\\n\\none\\n\\nmiddle\\n\\n\\n#2\\n\\nnext\\n' >h; HISTTIMEFORMAT=; history -c; history -r h; history; history -w round; cat round",
+    "managed-background-spawn": "set -m; trap ':' USR1; /bin/sh -c 'kill -STOP $$; exec sleep 1' & p=$!; sleep 1 & q=$!; wait \"$p\" 2>/dev/null; s=$?; kill -CONT \"$p\"; kill \"$p\" \"$q\" 2>/dev/null; wait 2>/dev/null; [[ $s == $((128+$(kill -l STOP))) ]] && echo stopped; /bin/sh -c 'kill -USR1 $$; exit 9' & p=$!; wait \"$p\" 2>/dev/null; [[ $? == $((128+$(kill -l USR1))) ]] && echo default; trap '' USR1; /bin/sh -c 'kill -USR1 $$; exit 9' & p=$!; wait \"$p\"; echo ignored:$?",
     "stopped-job-selection": "set -m; sleep 3 & a=$!; sleep 3 & b=$!; sleep 3 & c=$!; trap 'kill -CONT \"$a\" \"$b\" \"$c\" 2>/dev/null; kill \"$a\" \"$b\" \"$c\" 2>/dev/null; wait 2>/dev/null' EXIT; mark(){ x=$(jobs -p %+); y=$(jobs -p %-); for p in \"$x\" \"$y\"; do case $p in \"$a\") printf a;; \"$b\") printf b;; \"$c\") printf c;; *) printf '?';; esac; done; echo; }; mark; kill -STOP \"$b\"; wait \"$b\" 2>/dev/null; mark; kill -CONT \"$b\"; for ((k=0;k<100;k++)); do [[ -z $(jobs -ps) ]] && break; sleep .01; done; mark; kill -STOP \"$a\"; wait \"$a\" 2>/dev/null; mark; bg %1 >/dev/null; mark",
     "source-trap-frame": "printf ': one\\n: two\\n' > sourced; set -T\ntrap 'echo \"${FUNCNAME[0]}:$LINENO:$1\"' RETURN\nf(){\n source ./sourced inner\n}\nf outer",
     "substitution-source-lines": "f(){\n :\n echo \"$(echo $LINENO)\" `echo $LINENO`\n echo \"$(echo \"$LINENO\"; echo \"$(echo $LINENO)\")\"\n}; f",
@@ -153,6 +155,7 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "printf-field-limits": "for f in '[%*s]:%s' '[%.*s]:%s'; do printf \"$f\\n\" 21474836470 abc z; echo $?; printf -v value \"$f\" 9223372036854775825 abc z; echo \"$?:$value\"; done; printf '[%.9223372036854775825Q]\\n' abc; echo $?",
     "alias-print-all": "alias a=one b=two; alias -p a=changed missing; echo status:$?; alias a; set -o posix; alias -p a; alias a",
     "current-arithmetic-alias": "shopt -s expand_aliases\nalias number='echo 123'\necho $(( ${ number; } ))\n(( ${ number; } )); echo $?\nset -o posix\necho $(( ${ number; } ))\n(( ${ number; } )); echo $?",
     "long-working-directory": "set -o posix; cd deep-root; p=deep-part-abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd; for ((j=0;j<20;j++)); do cd \"$p\" || exit 9; done; logical=$(pwd -L); phys=$(pwd -P); [[ $logical == */\"$p\" && $phys == */\"$p\" && ${#logical} -gt 4096 && ${#phys} -gt 4096 ]]; echo $?; cd ..; test -d \"$p\"; echo $?",
@@ -197,6 +200,9 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "interactive-noexec": ("\"$AUDIT_SHELL\" --norc -in <commands 2>/dev/null", 4),
+    "timestamped-blank-lines": ("history -c; history -r h", 160),
+    "printf-field-limits": ("printf -v out '[%*.*s]' 6 3 abcdef; printf -v out '[%.*s]' 21474836470 value", 1600),
     "alias-print-all": ("alias -p a >/dev/null", 1400),
     "managed-background-spawn": ("/usr/bin/true & p=$!; wait \"$p\"", 100),
     "stopped-job-selection": ("jobs -p %+ %- >/dev/null", 1200),
@@ -728,7 +734,7 @@ def main():
         def run(shell, code):
             start = time.perf_counter_ns()
             p = subprocess.run([shell, "--noprofile", "--norc", "-c", code],
-                               cwd=root, env=env, capture_output=True, timeout=20)
+                               cwd=root, env=env | {"AUDIT_SHELL": str(shell)}, capture_output=True, timeout=20)
             return (p.returncode, p.stdout, bool(p.stderr)), (time.perf_counter_ns()-start)/1e6
         version = run(shells[0], 'printf "%s" "$BASH_VERSION"')[0][1].decode()
         modern = tuple(map(int, version.split(".")[:2])) >= (5, 3)
@@ -760,6 +766,10 @@ def main():
         monitor = subprocess.run([shells[1], "-m", "-c", pgid + ' & wait "$!"'], start_new_session=True,
                                  cwd=root, env=env, capture_output=True, timeout=5)
         assert (monitor.returncode, monitor.stdout) == (0, b"True\n"), monitor
+        # On Darwin the Bash control occasionally misses an immediate parent
+        # stop while setting up the new job. Check Tonari's atomic spawn directly.
+        early_stop = 'set -m; sleep 1 & p=$!; kill -STOP "$p"; wait "$p" 2>/dev/null; s=$?; kill -CONT "$p"; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; [[ $s == $((128+$(kill -l STOP))) ]]'
+        assert run(shells[1], early_stop)[0][:2] == (0, b"")
         if modern:
             for shell in shells[:2]:
                 origin = subprocess.run([shell, "-c", "shopt -s extdebug; f(){ :; }; declare -F f", "caller-name"],
@@ -1055,6 +1065,9 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "interactive-noexec": "export HISTFILE=/dev/null; for ((j=0;j<250;j++)); do echo ': cmd'; done >commands",
+                "timestamped-blank-lines": "HISTTIMEFORMAT=; for ((j=0;j<100;j++)); do printf '#1\\n\\none\\n\\nmiddle\\n\\n#2\\nnext\\n'; done >h",
+                "printf-field-limits": "exec 2>/dev/null",
                 "alias-print-all": "alias a=one b=\"'two'\" c=three",
                 "managed-background-spawn": "set -m; trap ':' USR1",
                 "stopped-job-selection": "set -m; /bin/sh -c 'kill -STOP $$; exec sleep 15' & a=$!; sleep 15 & b=$!; trap 'kill -CONT \"$a\" \"$b\" 2>/dev/null; kill \"$a\" \"$b\" 2>/dev/null; wait 2>/dev/null' EXIT; wait \"$a\" 2>/dev/null",
