@@ -938,20 +938,32 @@ pub(crate) fn corrected_directory(input: &Path) -> Option<PathBuf> {
             &path
         };
         let mut best = None;
-        for entry in fs::read_dir(parent).ok()?.flatten() {
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else {
-                continue;
+        let mut visited = 0usize;
+        let editing = crate::editor::preview::active();
+        let _ = scan(parent, &[], &mut |raw, kind| {
+            if editing && visited % 256 == 0 {
+                crate::editor::preview::poll();
+            }
+            visited += 1;
+            if !matches!(kind, libc::DT_DIR | libc::DT_LNK | libc::DT_UNKNOWN) {
+                return ControlFlow::Continue(());
+            }
+            let Some(bytes) = raw.map(|n| n.to_bytes()) else {
+                return ControlFlow::Continue(());
             };
-            if let Some(rank) = spelling_distance(name, word)
-                && entry.path().is_dir()
+            if bytes.len().abs_diff(word.len()) <= 4
+                && let Ok(name) = std::str::from_utf8(bytes)
+                && !matches!(name, "." | "..")
+                && let Some(rank) = spelling_distance(name, word)
                 && best
                     .as_ref()
                     .is_none_or(|(old, s): &(u8, String)| (rank, name) < (*old, s.as_str()))
+                && (kind == libc::DT_DIR || parent.join(name).is_dir())
             {
                 best = Some((rank, name.to_owned()));
             }
-        }
+            ControlFlow::Continue(())
+        });
         path.push(best?.1);
         changed = true;
     }
