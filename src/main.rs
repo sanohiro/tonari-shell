@@ -74,26 +74,39 @@ fn listen_for_interrupts() -> io::Result<()> {
 thread_local! {
     static INPUT_DEADLINE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
 }
-struct InputDeadline(Option<std::time::Instant>);
+struct ScopedCell<T: Copy + 'static> {
+    slot: &'static std::thread::LocalKey<std::cell::Cell<T>>,
+    previous: T,
+}
 
-impl InputDeadline {
-    fn enter(timeout: Option<std::time::Duration>) -> Self {
-        Self(INPUT_DEADLINE.replace(timeout.and_then(|t| std::time::Instant::now().checked_add(t))))
+impl<T: Copy + 'static> ScopedCell<T> {
+    fn enter(slot: &'static std::thread::LocalKey<std::cell::Cell<T>>, value: T) -> Self {
+        Self {
+            slot,
+            previous: slot.replace(value),
+        }
     }
 }
 
-impl Drop for InputDeadline {
+impl<T: Copy + 'static> Drop for ScopedCell<T> {
     fn drop(&mut self) {
-        INPUT_DEADLINE.set(self.0);
+        self.slot.set(self.previous);
     }
+}
+
+fn input_deadline(timeout: Option<std::time::Duration>) -> ScopedCell<Option<std::time::Instant>> {
+    ScopedCell::enter(
+        &INPUT_DEADLINE,
+        timeout.and_then(|t| std::time::Instant::now().checked_add(t)),
+    )
 }
 
 #[test]
 fn nested_deadlines_restore_on_early_return() {
-    let outer = InputDeadline::enter(Some(std::time::Duration::from_secs(5)));
+    let outer = input_deadline(Some(std::time::Duration::from_secs(5)));
     let previous = INPUT_DEADLINE.get().unwrap();
     fn cancel() -> Option<()> {
-        let _inner = InputDeadline::enter(None);
+        let _inner = input_deadline(None);
         assert!(input_timeout().is_none());
         None?;
         Some(())
@@ -139,78 +152,84 @@ fn input_timeout() -> Option<libc::timespec> {
     })
 }
 
+// Reserve half the soft limit for callers, signal frames and nested execution.
+#[cold]
+fn stack_budget_exceeded() -> bool {
+    const STACK_RESERVE: u64 = 256 * 1024;
+    let Some(origin) = MAIN_STACK_ORIGIN.get() else {
+        return true;
+    };
+    let mut limit = std::mem::MaybeUninit::uninit();
+    if unsafe { libc::getrlimit(libc::RLIMIT_STACK, limit.as_mut_ptr()) } != 0 {
+        return true;
+    }
+    let used = origin.abs_diff(std::ptr::from_ref(&limit).addr()) as u64;
+    used + STACK_RESERVE >= unsafe { limit.assume_init() }.rlim_cur / 2
+}
+
 fn terminal_read(buf: &mut [u8], raw: bool) -> io::Result<usize> {
     unsafe {
         let mut blocked = std::mem::zeroed();
-        let mut original = std::mem::zeroed();
         libc::sigfillset(&mut blocked);
-        if libc::sigprocmask(libc::SIG_BLOCK, &blocked, &mut original) < 0 {
+        let original = traps::SignalMask::block(&blocked)?;
+        if INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) || traps::input_interrupted() {
+            return Err(io::ErrorKind::Interrupted.into());
+        }
+        let mut read_set = std::mem::zeroed();
+        libc::FD_ZERO(&mut read_set);
+        libc::FD_SET(0, &mut read_set);
+        let timeout = input_timeout();
+        let selected = libc::pselect(
+            1,
+            &mut read_set,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            timeout
+                .as_ref()
+                .map_or(std::ptr::null(), std::ptr::from_ref),
+            &original.0,
+        );
+        if selected == 0 {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        if selected < 0 {
             return Err(io::Error::last_os_error());
         }
-        let result = (|| {
-            if INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) || traps::input_interrupted()
-            {
-                return Err(io::ErrorKind::Interrupted.into());
-            }
-            let mut read_set = std::mem::zeroed();
-            libc::FD_ZERO(&mut read_set);
-            libc::FD_SET(0, &mut read_set);
-            let timeout = input_timeout();
-            let selected = libc::pselect(
-                1,
-                &mut read_set,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                timeout
-                    .as_ref()
-                    .map_or(std::ptr::null(), std::ptr::from_ref),
-                &original,
-            );
-            if selected == 0 {
-                return Err(io::ErrorKind::TimedOut.into());
-            }
-            if selected < 0 {
-                return Err(io::Error::last_os_error());
-            }
-            // A terminal interrupt can flush even bytes already reported readable.
-            // VMIN=0 makes the editor read nonblocking after pselect without modifying
-            // the open file description shared with external foreground programs.
-            if raw {
-                let n = libc::read(0, buf.as_mut_ptr().cast(), buf.len());
-                if n < 0 {
-                    return Err(io::Error::last_os_error());
-                }
-                if n == 0 {
-                    let mut p = libc::pollfd {
-                        fd: 0,
-                        events: libc::POLLIN,
-                        revents: 0,
-                    };
-                    if libc::poll(&mut p, 1, 0) >= 0
-                        && p.revents & (libc::POLLHUP | libc::POLLERR) == 0
-                    {
-                        return Err(io::ErrorKind::WouldBlock.into());
-                    }
-                }
-                return Ok(n as usize);
-            }
-            let flags = libc::fcntl(0, libc::F_GETFL);
-            if flags < 0 || libc::fcntl(0, libc::F_SETFL, flags | libc::O_NONBLOCK) < 0 {
-                return Err(io::Error::last_os_error());
-            }
+        // A terminal interrupt can flush even bytes already reported readable.
+        // VMIN=0 makes the editor read nonblocking after pselect without modifying
+        // the open file description shared with external foreground programs.
+        if raw {
             let n = libc::read(0, buf.as_mut_ptr().cast(), buf.len());
-            let read = if n >= 0 {
-                Ok(n as usize)
-            } else {
-                Err(io::Error::last_os_error())
-            };
-            if libc::fcntl(0, libc::F_SETFL, flags) < 0 {
+            if n < 0 {
                 return Err(io::Error::last_os_error());
             }
-            read
-        })();
-        libc::sigprocmask(libc::SIG_SETMASK, &original, std::ptr::null_mut());
-        result
+            if n == 0 {
+                let mut p = libc::pollfd {
+                    fd: 0,
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                if libc::poll(&mut p, 1, 0) >= 0 && p.revents & (libc::POLLHUP | libc::POLLERR) == 0
+                {
+                    return Err(io::ErrorKind::WouldBlock.into());
+                }
+            }
+            return Ok(n as usize);
+        }
+        let flags = libc::fcntl(0, libc::F_GETFL);
+        if flags < 0 || libc::fcntl(0, libc::F_SETFL, flags | libc::O_NONBLOCK) < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let n = libc::read(0, buf.as_mut_ptr().cast(), buf.len());
+        let read = if n >= 0 {
+            Ok(n as usize)
+        } else {
+            Err(io::Error::last_os_error())
+        };
+        if libc::fcntl(0, libc::F_SETFL, flags) < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        read
     }
 }
 
@@ -285,7 +304,7 @@ fn interactive_loop(
             .get("TMOUT")
             .and_then(|s| s.parse::<u64>().ok())
             .filter(|&n| n > 0);
-        let deadline = InputDeadline::enter(timeout.map(std::time::Duration::from_secs));
+        let deadline = input_deadline(timeout.map(std::time::Duration::from_secs));
         let result = if editing && (session.emacs || session.vi) {
             match editor::line(
                 &prompt,

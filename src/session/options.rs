@@ -363,9 +363,9 @@ impl Session {
 
     pub(super) fn save_local_options(&mut self) {
         if let Some(index) = self.declaration_scope("-")
-            && self.locals[index].3.is_none()
+            && self.locals[index].set_options.is_none()
         {
-            self.locals[index].3 = std::num::NonZeroU32::new(set_bits(self) | (1 << 31));
+            self.locals[index].set_options = std::num::NonZeroU32::new(set_bits(self) | (1 << 31));
         }
     }
 
@@ -450,14 +450,7 @@ impl Session {
         let (mut enable, mut disable, mut reusable, mut quiet, mut set) =
             (false, false, false, false, false);
         let mut names = args;
-        while let Some((option, rest)) = names.split_first() {
-            if option == "--" {
-                names = rest;
-                break;
-            }
-            if !option.starts_with('-') || option == "-" {
-                break;
-            }
+        while let Some(option) = crate::builtins::flags::next(&mut names) {
             for c in option[1..].chars() {
                 match c {
                     's' => enable = true,
@@ -471,7 +464,6 @@ impl Session {
                     }
                 }
             }
-            names = rest;
         }
         if enable && disable {
             eprintln!("tonari: shopt: cannot set and unset options simultaneously");

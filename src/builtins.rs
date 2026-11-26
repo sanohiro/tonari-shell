@@ -1,5 +1,6 @@
 pub(crate) mod control;
 pub(crate) mod escapes;
+pub(crate) mod flags;
 pub(crate) mod limits;
 pub(crate) mod umask;
 

@@ -76,24 +76,14 @@ pub(super) fn run<T>(
         let Some(locale) = slot else {
             return work(Collation::Current, CharacterLocale::Ascii);
         };
-        let previous = unsafe { libc::uselocale(locale.handle) };
-        if previous.is_null() {
+        let Some(_guard) = super::LocaleGuard::enter(locale.handle) else {
             return work(Collation::Current, locale.characters);
-        }
+        };
         let order = if matches!(locale.collate.as_str(), "C" | "POSIX") {
             Collation::Bytes
         } else {
             Collation::FixedLocale
         };
-        struct Restore(libc::locale_t);
-        impl Drop for Restore {
-            fn drop(&mut self) {
-                unsafe {
-                    libc::uselocale(self.0);
-                }
-            }
-        }
-        let _restore = Restore(previous);
         work(order, locale.characters)
     })
 }

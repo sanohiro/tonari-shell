@@ -30,11 +30,9 @@ impl Aliases {
 }
 
 pub fn declaration(name: &str, value: &str) -> String {
-    format!(
-        "{}{name}='{}'",
-        prefix(name, true),
-        value.replace('\'', "'\\''")
-    )
+    let mut text = format!("{}{name}=", prefix(name, true));
+    crate::word::quote::push_single_quote(&mut text, value);
+    text
 }
 
 fn prefix(name: &str, command: bool) -> &'static str {
@@ -51,15 +49,8 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
     let remove = cmd == "unalias";
     let mut print_all = false;
     let mut clear = false;
-    while let Some((arg, rest)) = args.split_first() {
-        if arg == "--" {
-            args = rest;
-            break;
-        }
-        let Some(flags) = arg.strip_prefix('-').filter(|s| !s.is_empty()) else {
-            break;
-        };
-        for flag in flags.chars() {
+    while let Some(arg) = crate::builtins::flags::next(&mut args) {
+        for flag in arg[1..].chars() {
             match (remove, flag) {
                 (false, 'p') => print_all = true,
                 (true, 'a') => clear = true,
@@ -69,7 +60,6 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
                 }
             }
         }
-        args = rest;
     }
     if clear {
         session.aliases.0 = None;
@@ -85,7 +75,7 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
         buffer.push_str(prefix(name, command_prefix));
         buffer.push_str(name);
         buffer.push('=');
-        crate::completion_spec::push_single_quote(buffer, value);
+        crate::word::quote::push_single_quote(buffer, value);
         buffer.push('\n');
     };
     if !remove && (print_all || args.is_empty()) {

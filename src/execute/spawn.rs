@@ -11,19 +11,59 @@ fn check(code: libc::c_int) -> io::Result<()> {
     }
 }
 
-pub(super) fn standard_dup(r: &Redirect) -> bool {
+fn dup_source(r: &Redirect) -> Option<RawFd> {
     if r.target != Target::Duplicate || !(0..=2).contains(&r.fd) {
-        return false;
+        return None;
     }
     match r.word.as_str() {
-        "0" => r.fd != 0,
-        "1" => r.fd != 1,
-        "2" => r.fd != 2,
-        number => number.parse::<RawFd>().is_ok_and(|fd| {
-            // A script may keep its log open on fd 5 or another inherited fd.
-            // Close-on-exec descriptors can belong to a pipe or the script reader.
-            fd > 2 && unsafe { libc::fcntl(fd, libc::F_GETFD) } == 0
-        }),
+        "0" if r.fd != 0 => Some(0),
+        "1" if r.fd != 1 => Some(1),
+        "2" if r.fd != 2 => Some(2),
+        // Only an ordinary inherited descriptor survives exec.
+        n => n
+            .parse()
+            .ok()
+            .filter(|&fd| fd > 2 && unsafe { libc::fcntl(fd, libc::F_GETFD) } == 0),
+    }
+}
+
+struct Attributes(MaybeUninit<libc::posix_spawnattr_t>);
+
+impl Attributes {
+    fn new() -> io::Result<Self> {
+        let mut raw = MaybeUninit::uninit();
+        unsafe {
+            check(libc::posix_spawnattr_init(raw.as_mut_ptr()))?;
+        }
+        Ok(Self(raw))
+    }
+}
+
+impl Drop for Attributes {
+    fn drop(&mut self) {
+        unsafe {
+            libc::posix_spawnattr_destroy(self.0.as_mut_ptr());
+        }
+    }
+}
+
+struct FileActions(MaybeUninit<libc::posix_spawn_file_actions_t>);
+
+impl FileActions {
+    fn new() -> io::Result<Self> {
+        let mut raw = MaybeUninit::uninit();
+        unsafe {
+            check(libc::posix_spawn_file_actions_init(raw.as_mut_ptr()))?;
+        }
+        Ok(Self(raw))
+    }
+}
+
+impl Drop for FileActions {
+    fn drop(&mut self) {
+        unsafe {
+            libc::posix_spawn_file_actions_destroy(self.0.as_mut_ptr());
+        }
     }
 }
 
@@ -40,33 +80,25 @@ impl External {
         input: Option<&OwnedFd>,
         output: Option<&OwnedFd>,
     ) -> io::Result<libc::pid_t> {
-        let mut actions = MaybeUninit::uninit();
-        unsafe {
-            check(libc::posix_spawn_file_actions_init(actions.as_mut_ptr()))?;
-        }
-        let result = (|| {
-            let mut dup = |src: RawFd, dest: RawFd| unsafe {
-                check(libc::posix_spawn_file_actions_adddup2(
-                    actions.as_mut_ptr(),
-                    src,
-                    dest,
-                ))
-            };
-            // The original pipe ends are close-on-exec and above fd 2.
-            for (pipe, dest) in [(input, 0), (output, 1)] {
-                if let Some(fd) = pipe {
-                    dup(fd.as_raw_fd(), dest)?;
-                }
+        let mut actions = FileActions::new()?;
+        let mut dup = |src: RawFd, dest: RawFd| unsafe {
+            check(libc::posix_spawn_file_actions_adddup2(
+                actions.0.as_mut_ptr(),
+                src,
+                dest,
+            ))
+        };
+        // The original pipe ends are close-on-exec and above fd 2.
+        for (pipe, dest) in [(input, 0), (output, 1)] {
+            if let Some(fd) = pipe {
+                dup(fd.as_raw_fd(), dest)?;
             }
-            for r in redirects {
-                dup(r.word.parse().unwrap(), r.fd)?;
-            }
-            self.spawn_resolved(Some(&actions), None, Default::default())
-        })();
-        unsafe {
-            libc::posix_spawn_file_actions_destroy(actions.as_mut_ptr());
         }
-        result
+        for r in redirects {
+            let from = dup_source(r).ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
+            dup(from, r.fd)?;
+        }
+        self.spawn_resolved(Some(&actions.0), None, Default::default())
     }
 
     pub(super) fn spawn_resolved(
@@ -123,26 +155,21 @@ impl External {
         let Some(group) = launch.group else {
             return spawn_with(std::ptr::null());
         };
-        let mut attr = MaybeUninit::uninit();
+        let mut attr = Attributes::new()?;
         unsafe {
-            check(libc::posix_spawnattr_init(attr.as_mut_ptr()))?;
-            let result = (|| {
-                check(libc::posix_spawnattr_setpgroup(attr.as_mut_ptr(), group))?;
-                let flags = libc::POSIX_SPAWN_SETPGROUP;
-                #[cfg(target_os = "macos")]
-                let flags = if launch.spawn_terminal().is_some() {
-                    flags | libc::POSIX_SPAWN_START_SUSPENDED
-                } else {
-                    flags
-                };
-                check(libc::posix_spawnattr_setflags(
-                    attr.as_mut_ptr(),
-                    flags as _,
-                ))?;
-                spawn_with(attr.as_ptr())
-            })();
-            libc::posix_spawnattr_destroy(attr.as_mut_ptr());
-            result
+            check(libc::posix_spawnattr_setpgroup(attr.0.as_mut_ptr(), group))?;
+            let flags = libc::POSIX_SPAWN_SETPGROUP;
+            #[cfg(target_os = "macos")]
+            let flags = if launch.spawn_terminal().is_some() {
+                flags | libc::POSIX_SPAWN_START_SUSPENDED
+            } else {
+                flags
+            };
+            check(libc::posix_spawnattr_setflags(
+                attr.0.as_mut_ptr(),
+                flags as _,
+            ))?;
+            spawn_with(attr.0.as_ptr())
         }
     }
     // A plain ENOEXEC command can reuse its process image for a fresh interpreter.

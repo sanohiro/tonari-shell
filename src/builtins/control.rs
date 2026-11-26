@@ -46,14 +46,7 @@ pub fn caller(session: &Session, args: &[String]) -> u8 {
 
 pub fn enable(session: &mut Session, mut args: &[String]) -> u8 {
     let (mut disable, mut list, mut all, mut special) = (false, false, false, false);
-    while let Some((opt, rest)) = args.split_first() {
-        if opt == "--" {
-            args = rest;
-            break;
-        }
-        if !opt.starts_with('-') || opt == "-" {
-            break;
-        }
+    while let Some(opt) = crate::builtins::flags::next(&mut args) {
         for c in opt[1..].chars() {
             match c {
                 'n' => disable = true,
@@ -66,7 +59,6 @@ pub fn enable(session: &mut Session, mut args: &[String]) -> u8 {
                 }
             }
         }
-        args = rest;
     }
     if list || args.is_empty() {
         let mut names = builtin_names().to_vec();
@@ -126,21 +118,13 @@ pub fn suspend(session: &Session, mut args: &[String]) -> u8 {
 
 pub fn help(mut args: &[String]) -> u8 {
     let mut mode = ' ';
-    while let Some((opt, rest)) = args.split_first() {
-        if opt == "--" {
-            args = rest;
-            break;
-        }
-        if !opt.starts_with('-') || opt == "-" {
-            break;
-        }
+    while let Some(opt) = crate::builtins::flags::next(&mut args) {
         for c in opt[1..].chars() {
             if !"dms".contains(c) {
                 return 2;
             }
             mode = c;
         }
-        args = rest;
     }
     let mut out = io::stdout().lock();
     static TOPICS: std::sync::OnceLock<Vec<(&str, &str, &str)>> = std::sync::OnceLock::new();

@@ -10,6 +10,17 @@ mod options;
 pub(crate) mod printf;
 mod read;
 
+macro_rules! bash_version {
+    ($major:literal, $minor:literal, $patch:literal, $build:literal, $vendor:literal) => {
+        pub(crate) const BASH_SERIES: &str = concat!($major, ".", $minor);
+        pub(crate) const BASH_RELEASE: &str = concat!($major, ".", $minor, ".", $patch);
+        const BASH_VERSION: &str =
+            concat!($major, ".", $minor, ".", $patch, "(", $build, ")-", $vendor);
+        const BASH_VERSINFO: [&str; 5] = [$major, $minor, $patch, $build, $vendor];
+    };
+}
+bash_version!("5", "2", "0", "1", "tonari");
+
 pub(crate) const READONLY: &str = "readonly variable";
 pub(crate) const SUBSCRIPT_RANGE: &str = "array subscript out of range";
 
@@ -229,13 +240,13 @@ pub struct Session {
 }
 
 #[derive(Clone, Default)]
-pub struct Bindings(
-    BTreeMap<String, Option<Variable>>,
-    Option<usize>,
-    bool,
-    Option<std::num::NonZeroU32>,
-    Option<PosixSettings>,
-);
+pub struct Bindings {
+    variables: BTreeMap<String, Option<Variable>>,
+    opt_offset: Option<usize>,
+    temporary: bool,
+    set_options: Option<std::num::NonZeroU32>,
+    posix_settings: Option<PosixSettings>,
+}
 
 #[derive(Clone, Copy)]
 struct PosixSettings {
@@ -946,7 +957,7 @@ impl Session {
                 .into_os_string()
                 .into_string()
                 .ok(),
-            "BASH_VERSION" => Some("5.2.0(1)-tonari".into()),
+            "BASH_VERSION" => Some(BASH_VERSION.into()),
             "GROUPS" | "BASH_VERSINFO" => self.element(name, 0),
             "SHELL" => std::env::var(name).ok().or_else(crate::word::account_shell),
             "TERM" => Some(std::env::var(name).unwrap_or_else(|_| "dumb".into())),
@@ -976,7 +987,7 @@ impl Session {
                 .into_string()
                 .ok(),
             "OPTIND" | "OPTERR" => Some("1".into()),
-            "IFS" => Some(" \t\n".into()),
+            "IFS" => Some(crate::word::DEFAULT_IFS.into()),
             "PATH" => Some(std::env::var(name).unwrap_or_else(|_| {
                 "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".into()
             })),
@@ -1382,16 +1393,14 @@ impl Session {
     }
 
     pub fn save_variables(&self, names: &[&str]) -> Bindings {
-        Bindings(
-            names
+        Bindings {
+            variables: names
                 .iter()
                 .map(|&name| (name.into(), self.variables.get(name).cloned()))
                 .collect(),
-            names.contains(&"OPTIND").then_some(self.opt_offset),
-            false,
-            None,
-            None,
-        )
+            opt_offset: names.contains(&"OPTIND").then_some(self.opt_offset),
+            ..Bindings::default()
+        }
     }
 
     // Special builtins retain their exported prefix bindings in POSIX mode.
@@ -1402,7 +1411,7 @@ impl Session {
             // binding. A function prefix can itself hide another prefix.
             if self.variables.get(&name).is_some_and(|v| v.temporary) {
                 for scope in self.locals.iter_mut().rev() {
-                    if let Some(previous) = scope.0.remove(&name)
+                    if let Some(previous) = scope.variables.remove(&name)
                         && !previous.as_ref().is_some_and(|v| v.temporary)
                     {
                         break;
@@ -1449,8 +1458,8 @@ impl Session {
                 self.apply_compat(value);
             }
             if name == "POSIXLY_CORRECT" {
-                if saved.4.is_none() {
-                    saved.4 = Some(PosixSettings {
+                if saved.posix_settings.is_none() {
+                    saved.posix_settings = Some(PosixSettings {
                         expand_aliases: self.shopt.expand_aliases,
                         inherit_errexit: self.shopt.inherit_errexit,
                         interactive_comments: self.shopt.interactive_comments,
@@ -1467,14 +1476,14 @@ impl Session {
                 self.shopt.glob.set_ignore(Some(value));
             }
             if name == "OPTIND" {
-                saved.1.get_or_insert(self.opt_offset);
+                saved.opt_offset.get_or_insert(self.opt_offset);
                 self.opt_offset = 0;
             }
             if name == "PATH" {
                 self.hashes.clear();
             }
             saved
-                .0
+                .variables
                 .entry(name.clone())
                 .or_insert_with(|| self.variables.get(name).cloned());
             self.variables.insert(
@@ -1499,10 +1508,10 @@ impl Session {
     }
 
     pub fn restore(&mut self, bindings: Bindings) {
-        if let Some(offset) = bindings.1 {
+        if let Some(offset) = bindings.opt_offset {
             self.opt_offset = offset;
         }
-        for (name, original) in bindings.0 {
+        for (name, original) in bindings.variables {
             if name == "BASH_COMPAT" {
                 let inherited;
                 let value = if let Some(v) = &original {
@@ -1519,7 +1528,7 @@ impl Session {
                     |v| v.value.is_some(),
                 );
                 self.apply_posix_mode(enabled);
-                if let Some(old) = bindings.4 {
+                if let Some(old) = bindings.posix_settings {
                     self.shopt.expand_aliases = old.expand_aliases;
                     self.shopt.inherit_errexit = old.inherit_errexit;
                     self.shopt.interactive_comments = old.interactive_comments;
@@ -1616,18 +1625,18 @@ impl Session {
         }
         self.locals
             .iter()
-            .rposition(|scope| !scope.2 || scope.0.contains_key(name))
+            .rposition(|scope| !scope.temporary || scope.variables.contains_key(name))
     }
 
     pub fn enter_scope(&mut self, bindings: &mut Bindings, temporary: bool) {
         let mut scope = std::mem::take(bindings);
-        scope.2 = temporary;
+        scope.temporary = temporary;
         self.locals.push(scope);
     }
 
     pub fn leave_scope(&mut self) {
         let scope = self.locals.pop().expect("variable scope");
-        let saved_options = scope.3;
+        let saved_options = scope.set_options;
         self.restore(scope);
         if let Some(bits) = saved_options {
             self.restore_set_options(bits.get() & !(1 << 31));
@@ -1655,7 +1664,7 @@ impl Session {
             self.locals
                 .last_mut()
                 .unwrap()
-                .0
+                .variables
                 .insert("REPLY".into(), None);
             self.variables.insert("REPLY".into(), Variable::default());
         }
@@ -1669,15 +1678,8 @@ impl Session {
     pub fn export(&mut self, args: &[String], bindings: &mut Bindings) -> u8 {
         let mut functions = false;
         let mut remove = false;
-        let mut i = 0;
-        while let Some(opt) = args.get(i) {
-            if opt == "--" {
-                i += 1;
-                break;
-            }
-            if !opt.starts_with('-') || opt == "-" {
-                break;
-            }
+        let mut args = args;
+        while let Some(opt) = crate::builtins::flags::next(&mut args) {
             for flag in opt[1..].chars() {
                 match flag {
                     'n' => remove = true,
@@ -1689,11 +1691,10 @@ impl Session {
                     }
                 }
             }
-            i += 1;
         }
         if functions {
             let mut status = 0;
-            if i == args.len() {
+            if args.is_empty() {
                 let mut out = io::stdout().lock();
                 for name in self.functions.keys().filter(|n| self.function_exported(n)) {
                     if self.print_function(&mut out, name, true).is_err() {
@@ -1701,7 +1702,7 @@ impl Session {
                     }
                 }
             } else {
-                for name in &args[i..] {
+                for name in args {
                     if !remove && name.contains('/') && self.functions.contains_key(name) {
                         eprintln!("tonari: export: {name}: cannot export");
                         status = 1;
@@ -1715,11 +1716,11 @@ impl Session {
             }
             return status;
         }
-        if i == args.len() {
+        if args.is_empty() {
             return self.list_exported().map_or(1, |()| 0);
         }
         let mut status = 0;
-        for arg in &args[i..] {
+        for arg in args {
             let (key, value) = arg
                 .split_once('=')
                 .map_or((arg.as_str(), None), |(k, v)| (k, Some(v)));
@@ -1790,7 +1791,7 @@ impl Session {
             if !remove {
                 // An explicit export inside this invocation promotes its prefix
                 // binding into the surrounding shell.
-                bindings.0.remove(name);
+                bindings.variables.remove(name);
             }
         }
         status
@@ -1882,19 +1883,19 @@ impl Session {
         if let Some(index) = self
             .locals
             .iter()
-            .rposition(|scope| scope.0.contains_key(name))
+            .rposition(|scope| scope.variables.contains_key(name))
             && (self.variables.get(name).is_some_and(|v| v.temporary)
                 || !self.shopt.localvar_unset && index + 1 < self.locals.len())
         {
             // Unsetting a caller's local exposes the binding it was shadowing.
             let scope = &mut self.locals[index];
-            if let Some(original) = scope.0.remove(name).flatten() {
+            if let Some(original) = scope.variables.remove(name).flatten() {
                 self.variables.insert(name.into(), original);
             } else {
                 self.variables.remove(name);
             }
             if name == "OPTIND"
-                && let Some(offset) = scope.1.take()
+                && let Some(offset) = scope.opt_offset.take()
             {
                 self.opt_offset = offset;
             }
@@ -1921,7 +1922,7 @@ impl Session {
                 declared: self
                     .locals
                     .last()
-                    .is_some_and(|scope| scope.0.contains_key(name)),
+                    .is_some_and(|scope| scope.variables.contains_key(name)),
                 value: None,
                 exported: false,
             },
@@ -1929,18 +1930,11 @@ impl Session {
     }
 
     pub fn unset(&mut self, args: &[String]) -> u8 {
-        let mut index = 0;
+        let mut args = args;
         let mut literal_ref = false;
         let mut functions_only = false;
         let mut variables_only = false;
-        while let Some(opt) = args.get(index) {
-            if opt == "--" {
-                index += 1;
-                break;
-            }
-            if !opt.starts_with('-') || opt == "-" {
-                break;
-            }
+        while let Some(opt) = crate::builtins::flags::next(&mut args) {
             for flag in opt[1..].chars() {
                 match flag {
                     'n' => literal_ref = true,
@@ -1952,14 +1946,13 @@ impl Session {
                     }
                 }
             }
-            index += 1;
         }
         if functions_only && variables_only {
             eprintln!("tonari: unset: cannot combine -f and -v");
             return 1;
         }
         let mut status = 0;
-        for original in &args[index..] {
+        for original in args {
             if literal_ref && !self.is_nameref(original) {
                 continue;
             }
@@ -2087,15 +2080,8 @@ impl Session {
     pub fn directory_builtin(&mut self, name: &str, args: &[String]) -> u8 {
         let mut physical = self.physical;
         let mut require_pwd = false;
-        let mut i = 0;
-        while let Some(opt) = args.get(i) {
-            if opt == "--" {
-                i += 1;
-                break;
-            }
-            if !opt.starts_with('-') || opt == "-" {
-                break;
-            }
+        let mut args = args;
+        while let Some(opt) = crate::builtins::flags::next(&mut args) {
             for flag in opt[1..].chars() {
                 match flag {
                     'L' => physical = false,
@@ -2107,7 +2093,6 @@ impl Session {
                     }
                 }
             }
-            i += 1;
         }
         let result = if name == "pwd" {
             (if physical {
@@ -2137,11 +2122,11 @@ impl Session {
             })
             .and_then(|p| print_path(&p))
         } else {
-            if args.len() - i > 1 {
+            if args.len() > 1 {
                 eprintln!("tonari: cd: too many arguments");
                 return 1;
             }
-            let arg = args.get(i).map(String::as_str);
+            let arg = args.first().map(String::as_str);
             let (target, previous) = match arg {
                 None => (self.get("HOME"), false),
                 Some("-") => (self.get("OLDPWD"), true),
@@ -2563,7 +2548,7 @@ fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Cow<'_, str> 
                 )
         })
     {
-        crate::completion_spec::single_quote(value).into()
+        crate::word::quote::single_quote(value).into()
     } else {
         Cow::Borrowed(value)
     }

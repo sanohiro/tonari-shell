@@ -63,13 +63,10 @@ fn symbolic(text: &str, mask: libc::mode_t) -> Option<libc::mode_t> {
 }
 
 pub fn run(args: &[String], posix: bool) -> u8 {
-    let mut args = args.iter().peekable();
+    let mut args = args;
     let mut symbols = false;
     let mut reusable = false;
-    while let Some(arg) = args.next_if(|arg| arg.starts_with('-') && arg.len() > 1) {
-        if arg == "--" {
-            break;
-        }
+    while let Some(arg) = crate::builtins::flags::next(&mut args) {
         for flag in arg[1..].chars() {
             match flag {
                 'S' => symbols = true,
@@ -82,7 +79,7 @@ pub fn run(args: &[String], posix: bool) -> u8 {
         }
     }
     let mut out = io::stdout().lock();
-    let mask = if let Some(text) = args.next() {
+    let mask = if let Some(text) = args.first() {
         let mask = if text.as_bytes().first().is_some_and(u8::is_ascii_digit) {
             libc::mode_t::from_str_radix(text, 8)
                 .ok()

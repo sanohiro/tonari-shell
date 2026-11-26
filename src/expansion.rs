@@ -431,7 +431,7 @@ impl<'a> Expansion<'a> {
                         source.push_str(&self.scalar(prefix)?);
                         let key = self.scalar(key)?;
                         if key.contains(['[', ']', '\\', '\'', '"', '$', '`']) {
-                            source.push_str(&crate::completion_spec::single_quote(&key));
+                            source.push_str(&crate::word::quote::single_quote(&key));
                         } else {
                             source.push_str(&key);
                         }

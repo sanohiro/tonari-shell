@@ -8,11 +8,11 @@ impl Session {
             args
         };
         let [spec, name, explicit @ ..] = args else {
-            eprintln!("getopts: usage: getopts optstring name [arg ...]");
+            eprintln!("tonari: getopts: usage: getopts optstring name [arg ...]");
             return 2;
         };
         if spec.starts_with('-') && spec.len() > 1 {
-            eprintln!("getopts: invalid option: {spec}");
+            eprintln!("tonari: getopts: invalid option: {spec}");
             return 2;
         }
         if self.posix && self.readonly("OPTIND") {

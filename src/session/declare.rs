@@ -200,7 +200,14 @@ pub(super) fn run(
         let names;
         let names = if operands.is_empty() {
             names = if local {
-                session.locals.last().unwrap().0.keys().cloned().collect()
+                session
+                    .locals
+                    .last()
+                    .unwrap()
+                    .variables
+                    .keys()
+                    .cloned()
+                    .collect()
             } else {
                 session.variable_names("")
             };
@@ -212,7 +219,10 @@ pub(super) fn run(
         let mut status = 0;
         if local
             && operands.is_empty()
-            && session.locals.last().is_some_and(|s| s.3.is_some())
+            && session
+                .locals
+                .last()
+                .is_some_and(|s| s.set_options.is_some())
             && writeln!(out, "local -").is_err()
         {
             return crate::Flow::Continue(1);
@@ -223,16 +233,16 @@ pub(super) fn run(
                     .locals
                     .iter()
                     .rev()
-                    .filter(|scope| !scope.2)
+                    .filter(|scope| !scope.temporary)
                     .take(if local { 1 } else { usize::MAX })
-                    .any(|scope| scope.3.is_some())
+                    .any(|scope| scope.set_options.is_some())
             {
                 if writeln!(out, "{}", if local { "local -" } else { "declare -- -" }).is_err() {
                     return crate::Flow::Continue(1);
                 }
                 continue;
             }
-            let listed = !local || session.locals.last().unwrap().0.contains_key(name);
+            let listed = !local || session.locals.last().unwrap().variables.contains_key(name);
             let variable = listed
                 .then(|| session.declared_variable(name, flags.global))
                 .flatten();
@@ -295,7 +305,7 @@ pub(super) fn run(
         };
         let base = super::array::subscript(name).map_or(name, |(base, _)| base);
         if flags.global
-            && let Some(previous) = bindings.0.remove(base)
+            && let Some(previous) = bindings.variables.remove(base)
         {
             if let Some(var) = previous {
                 session.variables.insert(base.into(), var);
@@ -306,7 +316,7 @@ pub(super) fn run(
         let base_scope = session.declaration_scope(base);
         let creates_local = !attribute
             && !flags.global
-            && base_scope.is_some_and(|i| !session.locals[i].0.contains_key(base));
+            && base_scope.is_some_and(|i| !session.locals[i].variables.contains_key(base));
         let mut remove_reference = None;
         let changes_target = || {
             value.is_some()
@@ -381,14 +391,14 @@ pub(super) fn run(
                 scope,
                 !attribute
                     && !flags.global
-                    && scope.is_some_and(|i| !session.locals[i].0.contains_key(name)),
+                    && scope.is_some_and(|i| !session.locals[i].variables.contains_key(name)),
             )
         };
         let outer_local = fresh_local
             && session
                 .locals
                 .iter()
-                .any(|scope| scope.0.contains_key(name));
+                .any(|scope| scope.variables.contains_key(name));
         let shadow = outer_local && !flags.inherit && !session.shopt.localvar_inherit;
         if var.readonly
             && !shadow
@@ -410,15 +420,15 @@ pub(super) fn run(
         if fresh_local {
             let scope = &mut session.locals[scope_index.unwrap()];
             if name == "OPTIND" {
-                scope.1 = Some(session.opt_offset);
+                scope.opt_offset = Some(session.opt_offset);
                 session.opt_offset = 0;
             }
             let previous = bindings
-                .0
+                .variables
                 .get(name)
                 .cloned()
                 .unwrap_or_else(|| session.variables.get(name).cloned());
-            scope.0.insert(name.into(), previous);
+            scope.variables.insert(name.into(), previous);
             var.dynamic = false;
             var.nameref = false;
             if !var.temporary && !flags.inherit && !session.shopt.localvar_inherit {
@@ -664,7 +674,7 @@ pub(super) fn run(
             || flags.exported == Some(true)
             || (!attribute && !flags.global && scope_index.is_some())
         {
-            bindings.0.remove(name);
+            bindings.variables.remove(name);
         }
         session.store_variable(name, var, flags.global);
         if let Some(source) = remove_reference
@@ -698,7 +708,7 @@ impl Session {
             && let Some(saved) = self
                 .locals
                 .iter_mut()
-                .find_map(|scope| scope.0.get_mut(name))
+                .find_map(|scope| scope.variables.get_mut(name))
         {
             *saved = Some(var);
         } else {
@@ -710,7 +720,7 @@ impl Session {
         if global {
             self.locals
                 .iter()
-                .find_map(|scope| scope.0.get(name))
+                .find_map(|scope| scope.variables.get(name))
                 .map(Option::as_ref)
                 .unwrap_or_else(|| self.variables.get(name))
         } else {

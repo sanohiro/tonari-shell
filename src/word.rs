@@ -1,5 +1,6 @@
 pub mod brace;
 mod modifier;
+pub(crate) mod quote;
 mod replace;
 use crate::parser::Statement;
 use crate::pattern::{Field, quote_into};
@@ -11,6 +12,14 @@ pub enum Word {
     Expanded(Vec<Part>),
     Declaration(Vec<Part>),
 }
+
+impl Default for Word {
+    fn default() -> Self {
+        Self::Literal(String::new())
+    }
+}
+
+pub(crate) const DEFAULT_IFS: &str = " \t\n";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Alternative {
@@ -296,10 +305,7 @@ impl Word {
                     quoted,
                 } => {
                     let values = modifier::Values::read(name, env)?;
-                    let pattern = env.pattern(std::mem::replace(
-                        pattern.as_mut(),
-                        Word::Literal(String::new()),
-                    ))?;
+                    let pattern = env.pattern(std::mem::take(pattern.as_mut()))?;
                     *part = values.map(*quoted, |v| {
                         crate::pattern::trim(
                             v,
@@ -349,10 +355,7 @@ impl Word {
                         && (!*check_empty || len > 1 && (at || !*quoted))
                     {
                         word.resolve(env)?;
-                        *part = Part::Nested(std::mem::replace(
-                            word.as_mut(),
-                            Word::Literal(String::new()),
-                        ));
+                        *part = Part::Nested(std::mem::take(word.as_mut()));
                         continue;
                     }
                     let (set, original) =
@@ -391,8 +394,7 @@ impl Word {
                     if set == use_word_if_set {
                         word.resolve(env)?;
                         if matches!(*op, Alternative::Assign | Alternative::Error) {
-                            let operand =
-                                std::mem::replace(word.as_mut(), Word::Literal(String::new()));
+                            let operand = std::mem::take(word.as_mut());
                             let value = operand
                                 .scalar(&|k| env.lookup(k), env.session.positional.as_slice());
                             if *op == Alternative::Error {
@@ -410,10 +412,7 @@ impl Word {
                             *part = literal(value, *quoted);
                             continue;
                         }
-                        *part = Part::Nested(std::mem::replace(
-                            word.as_mut(),
-                            Word::Literal(String::new()),
-                        ));
+                        *part = Part::Nested(std::mem::take(word.as_mut()));
                     } else {
                         *part = if use_word_if_set {
                             match original {
@@ -540,7 +539,9 @@ impl Word {
         if let Self::Expanded(parts) = &self
             && let [Part::Unquoted(text)] = parts.as_slice()
             && text.len() >= 256
-            && ifs.as_deref().is_none_or(|ifs| ifs == " \t\n")
+            && ifs
+                .as_deref()
+                .is_none_or(|ifs| ifs == crate::word::DEFAULT_IFS)
             && globbing.is_none_or(|glob| {
                 memchr::memchr3(b'*', b'?', b'[', text.as_bytes()).is_none()
                     && !(glob.extglob && text.contains('('))
@@ -570,7 +571,7 @@ impl Word {
             &mut output,
             lookup,
             positional,
-            ifs.as_deref().unwrap_or(" \t\n"),
+            ifs.as_deref().unwrap_or(crate::word::DEFAULT_IFS),
         );
         let Output::Fields(mut fields) = output else {
             unreachable!()
@@ -982,7 +983,7 @@ pub(crate) fn separators(text: &str, ifs: &str, mut visit: impl FnMut(usize, &st
         for (i, sep) in text.match_indices(first) {
             visit(i, sep);
         }
-    } else if ifs == " \t\n" {
+    } else if ifs == crate::word::DEFAULT_IFS {
         for i in memchr::memchr3_iter(b' ', b'\t', b'\n', text.as_bytes()) {
             visit(i, &text[i..i + 1]);
         }

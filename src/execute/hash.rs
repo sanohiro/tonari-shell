@@ -141,15 +141,7 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
     }
     let (mut list, mut remove, mut print, mut clear, mut supplied) =
         (false, false, false, false, None);
-    while let Some((opt, rest)) = args.split_first() {
-        if opt == "--" {
-            args = rest;
-            break;
-        }
-        if !opt.starts_with('-') || opt == "-" {
-            break;
-        }
-        args = rest;
+    while let Some(opt) = crate::builtins::flags::next(&mut args) {
         let mut flags = opt[1..].chars();
         while let Some(flag) = flags.next() {
             match flag {
@@ -158,16 +150,12 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
                 't' => print = true,
                 'r' => clear = true,
                 'p' => {
-                    if flags.as_str().is_empty() {
-                        let Some((path, rest)) = args.split_first() else {
-                            eprintln!("tonari: hash: -p requires a pathname");
-                            return 2;
-                        };
-                        supplied = Some(path.as_str());
-                        args = rest;
-                    } else {
-                        supplied = Some(flags.as_str());
-                    }
+                    let Some(path) = crate::builtins::flags::value(flags.as_str(), &mut args)
+                    else {
+                        eprintln!("tonari: hash: -p requires a pathname");
+                        return 2;
+                    };
+                    supplied = Some(path);
                     break;
                 }
                 _ => {
@@ -184,16 +172,7 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
     let mut out = io::stdout().lock();
     let print_entry = |out: &mut io::StdoutLock<'_>, name: &str, path: &Path| -> io::Result<()> {
         let path = path.to_string_lossy();
-        let quote = |s: &str| {
-            if !s.is_empty()
-                && s.bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || b"-._/".contains(&c))
-            {
-                s.into()
-            } else {
-                format!("'{}'", s.replace('\'', "'\\''"))
-            }
-        };
+        use crate::word::quote::shell_quote as quote;
         writeln!(out, "builtin hash -p {} {}", quote(&path), quote(name))
     };
     if args.is_empty() {

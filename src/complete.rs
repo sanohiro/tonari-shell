@@ -258,7 +258,9 @@ impl Source {
                 ));
             }
             Self::LiteralWords(source) => {
-                let ifs = session.get("IFS").unwrap_or_else(|| " \t\n".into());
+                let ifs = session
+                    .get("IFS")
+                    .unwrap_or_else(|| crate::word::DEFAULT_IFS.into());
                 if let Some(matches) = source.indexed(prefix, &ifs) {
                     let mut common = Common::new(source.word(*matches.first()?).to_owned());
                     if matches.len() > 1 {

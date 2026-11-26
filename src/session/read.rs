@@ -34,16 +34,8 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, &'static str)> {
         names: &[],
         array: None,
     };
-    let mut i = 0;
-    while let Some(arg) = args.get(i) {
-        if arg == "--" {
-            i += 1;
-            break;
-        }
-        if !arg.starts_with('-') || arg == "-" {
-            break;
-        }
-        i += 1;
+    let mut args = args;
+    while let Some(arg) = crate::builtins::flags::next(&mut args) {
         let mut flags = arg[1..].chars();
         while let Some(flag) = flags.next() {
             if flag == 'e' || flag == 'E' {
@@ -61,13 +53,8 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, &'static str)> {
             if !matches!(flag, 'a' | 'd' | 'u' | 'n' | 'N' | 'p' | 't' | 'i') {
                 return Err((2, "unsupported option"));
             }
-            let value = if flags.as_str().is_empty() {
-                let word = args.get(i).ok_or((2, "option requires an argument"))?;
-                i += 1;
-                word.as_str()
-            } else {
-                flags.as_str()
-            };
+            let value = crate::builtins::flags::value(flags.as_str(), &mut args)
+                .ok_or((2, "option requires an argument"))?;
             match flag {
                 'a' => {
                     if !is_identifier(value) {
@@ -102,7 +89,7 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, &'static str)> {
             break;
         }
     }
-    opts.names = &args[i..];
+    opts.names = args;
     Ok(opts)
 }
 
@@ -271,7 +258,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     });
     if let Some(files_only) = edit {
         let mut history = crate::history::History::default();
-        let deadline = crate::InputDeadline::enter(opts.timeout);
+        let deadline = crate::input_deadline(opts.timeout);
         let result = crate::editor::line(
             opts.prompt.unwrap_or(""),
             &mut history,
@@ -440,7 +427,9 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     let ifs = if opts.exact {
         String::new()
     } else {
-        session.get("IFS").unwrap_or_else(|| " \t\n".into())
+        session
+            .get("IFS")
+            .unwrap_or_else(|| crate::word::DEFAULT_IFS.into())
     };
     if opts.array.is_none()
         && let [name] = opts.names
@@ -535,7 +524,7 @@ mod tests {
     #[test]
     fn read_retains_the_last_variables_original_separators() {
         let line = "  a   b c  ";
-        let (spans, end) = field_ranges(line, &[], " \t\n");
+        let (spans, end) = field_ranges(line, &[], crate::word::DEFAULT_IFS);
         assert_eq!(&line[spans[1].0..end], "b c");
         let line = "x:y:z:";
         let (spans, end) = field_ranges(line, &[], ":");
