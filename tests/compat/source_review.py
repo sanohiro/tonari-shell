@@ -166,7 +166,8 @@ def socket_time(shell, run, kind, count):
         reader = threading.Thread(target=receive)
         reader.start()
         path = f"/dev/{'tcp' if stream else 'udp'}/127.0.0.1/{listener.getsockname()[1]}"
-        code = (f'p={path}; /bin/echo external >"$p"; exec {{sock}}<>"$p"; '
+        first = path.replace("127.0.0.1", "localhost") if stream else path
+        code = (f'p={path}; /bin/echo external >"{first}"; exec {{sock}}<>"$p"; '
                 'printf named >&"$sock"; exec {sock}>&-; '
                 f'for ((i=2;i<{count};i++)); do printf payload >"$p" || exit; done')
         try:

@@ -11,7 +11,7 @@ source tools/ci/bash-source.sh
 if [[ $SUITE == source-review ]]; then
   if [[ $RUNNER_OS == Linux ]]; then
     docker run --rm -v "$PWD:/repo:ro" -v "$bin:/shells:ro" ubuntu:26.04 bash -ec '
-      apt-get update -qq && apt-get install -qq --no-install-recommends python3 >/dev/null
+      apt-get update -qq && apt-get install -qq --no-install-recommends python3 netbase >/dev/null
       args=()
       if [[ -x /shells/baseline ]]; then args+=(--first /shells/baseline); fi
       python3 /repo/tests/compat/source_review.py /bin/bash /shells/current "${args[@]}"
