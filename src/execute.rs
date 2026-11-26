@@ -2637,10 +2637,11 @@ fn prepare_expanded(
 }
 
 fn prepare_redirects(
-    raw: Vec<Redirect<Word>>,
+    raw: impl IntoIterator<Item = Redirect<Word>>,
     exp: &mut Expansion<'_>,
 ) -> Result<Vec<Redirect>, crate::expansion::Error> {
-    let mut redirects = Vec::with_capacity(raw.len());
+    let raw = raw.into_iter();
+    let mut redirects = Vec::with_capacity(raw.size_hint().0);
     for r in raw {
         let word = match (r.target, r.word) {
             (Target::HereDoc { expand: true }, Word::Literal(body)) => {

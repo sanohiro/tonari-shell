@@ -13,13 +13,13 @@ impl Scope {
     fn redirect(
         &mut self,
         session: &mut Session,
-        raw: Redirect<Word>,
+        mut raw: Redirect<Word>,
         status: u8,
     ) -> io::Result<bool> {
-        let variable = raw.variable.clone();
+        let variable = raw.variable.take();
         let captured = Cell::new(None);
         let mut exp = Expansion::new(session, status, &captured);
-        let expanded = prepare_redirects(vec![raw], &mut exp).map_err(io::Error::other)?;
+        let expanded = prepare_redirects([raw], &mut exp).map_err(io::Error::other)?;
         for (i, mut r) in expanded.into_iter().enumerate() {
             let name = variable.as_deref().filter(|_| i == 0);
             let close = r.target == Target::Duplicate && r.word == "-";

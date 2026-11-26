@@ -591,8 +591,11 @@ impl Session {
             || array::subscript(name).is_some_and(|(base, index)| {
                 is_identifier(base)
                     && !index.is_empty()
-                    && crate::parser::index_end(&name[base.len()..]).ok()
-                        == Some(name.len() - base.len())
+                    && (index
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                        || crate::parser::index_end(&name[base.len()..]).ok()
+                            == Some(name.len() - base.len()))
             })
     }
 

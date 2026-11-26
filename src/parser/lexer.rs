@@ -239,7 +239,7 @@ fn dollar_word(
                 let mut decoded = content[..quote_at].to_owned();
                 while let Some(after) = tail.strip_prefix("$'") {
                     let mut cursor = after.chars();
-                    decoded.push_str(&ansi::quoted(&mut cursor)?);
+                    decoded.push_str(&ansi::quoted_fragment(&mut cursor)?);
                     let suffix = cursor.as_str();
                     let size = suffix
                         .bytes()

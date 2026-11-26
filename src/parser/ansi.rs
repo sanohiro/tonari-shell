@@ -16,6 +16,12 @@ fn digits(chars: &mut Chars<'_>, radix: u32, count: usize) -> Option<u32> {
 /// Decode a dollar-single-quoted word. Hex and octal escapes produce bytes,
 /// so adjacent escapes may together encode one UTF-8 character.
 pub(super) fn quoted(chars: &mut Chars<'_>) -> Result<String, Error> {
+    Ok(quoted_fragment(chars)?.into_owned())
+}
+
+pub(super) fn quoted_fragment<'a>(
+    chars: &mut Chars<'a>,
+) -> Result<std::borrow::Cow<'a, str>, Error> {
     let source = chars.as_str();
     let bytes = source.as_bytes();
     let mut start = 0;
@@ -24,9 +30,9 @@ pub(super) fn quoted(chars: &mut Chars<'_>) -> Result<String, Error> {
         if bytes[at] == b'\'' {
             *chars = source[at + 1..].chars();
             return if start == 0 {
-                Ok(source[..at].to_owned())
+                Ok(std::borrow::Cow::Borrowed(&source[..at]))
             } else {
-                escapes(&source[..at], true)
+                escapes(&source[..at], true).map(std::borrow::Cow::Owned)
             };
         }
         // Both delimiters are ASCII. For a non-ASCII escaped scalar its
