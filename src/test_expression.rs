@@ -494,14 +494,27 @@ impl Compiled {
             eprintln!("tonari: [[: invalid regular expression: {}", self.pattern);
             return Err(());
         };
-        let encoded = CString::new(text).map_err(|_| ())?;
-        let mut matched = vec![
-            libc::regmatch_t {
-                rm_so: -1,
-                rm_eo: -1
-            };
-            self.captures
-        ];
+        let mut small_text = [0u8; 256];
+        let allocated;
+        let encoded = if text.len() < small_text.len() {
+            small_text[..text.len()].copy_from_slice(text.as_bytes());
+            std::ffi::CStr::from_bytes_with_nul(&small_text[..=text.len()]).map_err(|_| ())?
+        } else {
+            allocated = CString::new(text).map_err(|_| ())?;
+            allocated.as_c_str()
+        };
+        let empty = libc::regmatch_t {
+            rm_so: -1,
+            rm_eo: -1,
+        };
+        let mut small_matches = [empty; 16];
+        let mut large_matches;
+        let matched = if self.captures <= small_matches.len() {
+            &mut small_matches[..self.captures]
+        } else {
+            large_matches = vec![empty; self.captures];
+            &mut large_matches[..]
+        };
         match unsafe {
             libc::regexec(
                 regex,

@@ -504,6 +504,23 @@ fn substring(v: &str, start: i64, len: Option<i64>) -> Result<&str, Error> {
     // Positive bounds only need the requested prefix. Negative bounds
     // count from the far end, independent of the UTF-8 byte width.
     let boundary = |s: &str, n: i64| {
+        let magnitude = n.unsigned_abs() as usize;
+        if magnitude > s.len() {
+            return None;
+        }
+        let bytes = s.as_bytes();
+        let part = if n < 0 {
+            &bytes[s.len() - magnitude..]
+        } else {
+            &bytes[..magnitude]
+        };
+        if part.is_ascii() {
+            return Some(if n < 0 {
+                s.len() - magnitude
+            } else {
+                magnitude
+            });
+        }
         if n < 0 {
             s.char_indices()
                 .rev()

@@ -556,6 +556,9 @@ impl<'a> Expansion<'a> {
 }
 
 impl Variables for Expansion<'_> {
+    fn decimal(&self, name: &str) -> Option<i64> {
+        self.borrowed_scalar(name).and_then(Session::plain_decimal)
+    }
     fn get(&self, name: &str) -> Option<String> {
         self.lookup(name)
     }

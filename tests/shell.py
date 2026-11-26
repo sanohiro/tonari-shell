@@ -36,11 +36,16 @@ class ShellTests(unittest.TestCase):
         )
 
     def test_declaration_failures_leave_scope_and_attributes_intact(self):
-        self.compare("""x=outer
+        source = """x=outer
 f() { local a=ok; X=2 eval 'local -p a'; local -n x=123 2>/dev/null; x=changed; }
 f; echo "$x"; readonly r=text; declare -a r 2>/dev/null; echo "$? $r"
-declare -n ref; { ref+=(one); } 2>/dev/null; declare -p ref""",
-                     0, b'declare -- a="ok"\nchanged\n1 text\ndeclare -a ref=([0]="one")\n', minimum=5)
+declare -n ref; { ref+=(one); } 2>/dev/null; declare -p ref"""
+        for shell in self.shells_for(minimum=5):
+            result = self.command(shell, source)
+            # Bash 5.2 allows declare -a to change a readonly scalar's type.
+            readonly_status = b"0" if shell == BASH and self.bash_before_53() else b"1"
+            expected = b'declare -- a="ok"\nchanged\n' + readonly_status + b' text\ndeclare -a ref=([0]="one")\n'
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, b""))
 
     def test_posix_prefix_on_redirected_special_builtin(self):
         self.compare("""set -o posix; declare -i x=1

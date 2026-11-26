@@ -301,6 +301,30 @@ fn trim_boundary(
             value.strip_suffix(literal).map(str::len)
         };
     }
+    if group.is_none()
+        && let Some((head, tail)) = pattern.split_once('*')
+        && !head.is_empty()
+        && !tail.is_empty()
+        && !head.contains(['?', '[', '\\', '\0'])
+        && !tail.contains(['*', '?', '[', '\\', '\0'])
+        && !value.contains('\0')
+    {
+        if prefix {
+            let rest = value.strip_prefix(head)?;
+            let at = if longest {
+                rest.rfind(tail)
+            } else {
+                rest.find(tail)
+            }?;
+            return Some(head.len() + at + tail.len());
+        }
+        let rest = value.strip_suffix(tail)?;
+        return if longest {
+            rest.find(head)
+        } else {
+            rest.rfind(head)
+        };
+    }
     // Try only UTF-8 boundaries, including the empty prefix or suffix.
     let mut cuts = value
         .char_indices()
@@ -372,7 +396,21 @@ pub struct GlobOptions {
     pub nocaseglob: bool,
     pub extglob: bool,
     pub globskipdots: bool,
-    ignore: Option<std::rc::Rc<[String]>>,
+    ignore: Option<std::rc::Rc<[IgnorePattern]>>,
+}
+
+struct IgnorePattern {
+    text: String,
+    simple: std::cell::OnceCell<extended::Pattern>,
+}
+
+impl From<&str> for IgnorePattern {
+    fn from(text: &str) -> Self {
+        Self {
+            text: text.into(),
+            simple: Default::default(),
+        }
+    }
 }
 
 impl Default for GlobOptions {
@@ -422,7 +460,7 @@ impl GlobOptions {
                 ')' => depth = depth.saturating_sub(1),
                 ':' if depth == 0 => {
                     if begin != i {
-                        patterns.push(value[begin..i].to_owned());
+                        patterns.push(IgnorePattern::from(&value[begin..i]));
                     }
                     begin = i + 1;
                 }
@@ -430,7 +468,7 @@ impl GlobOptions {
             }
         }
         if begin != value.len() {
-            patterns.push(value[begin..].to_owned());
+            patterns.push(IgnorePattern::from(&value[begin..]));
         }
         self.ignore = Some(patterns.into());
     }
@@ -614,8 +652,20 @@ fn paths(
         for pattern in patterns.iter() {
             // GLOBIGNORE tests the entire displayed pathname. An extended
             // alternative may contain a literal directory separator.
-            let matcher =
-                extended::Pattern::for_path(pattern, options.extglob, options.nocaseglob, locale);
+            let compiled;
+            let matcher = if !options.nocaseglob && !pattern.text.contains(['[', '(', '?']) {
+                pattern.simple.get_or_init(|| {
+                    extended::Pattern::for_path(&pattern.text, false, false, locale)
+                })
+            } else {
+                compiled = extended::Pattern::for_path(
+                    &pattern.text,
+                    options.extglob,
+                    options.nocaseglob,
+                    locale,
+                );
+                &compiled
+            };
             paths.retain(|path| !matcher.matches_in_locale::<true>(path, false));
         }
     }

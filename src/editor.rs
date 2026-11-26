@@ -1375,7 +1375,11 @@ pub fn line(
                     .and_then(|i| session.history_lines().get(i))
                     .and_then(|line| crate::parser::last_history_argument(line));
                 if let Some(arg) = arg {
-                    mark = text[..cursor].chars().count();
+                    mark = if text[..cursor].is_ascii() {
+                        cursor
+                    } else {
+                        text[..cursor].chars().count()
+                    };
                     edit.undo
                         .record(&text, cursor..cursor, arg.len(), cursor, false);
                     text.insert_str(cursor, arg);
