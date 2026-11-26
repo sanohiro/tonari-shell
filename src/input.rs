@@ -73,6 +73,23 @@ fn file_group(
     whole_group(session, std::str::from_utf8(&bytes).ok()?, 1)
 }
 
+fn executable_header(bytes: &[u8]) -> bool {
+    matches!(
+        bytes.get(..4),
+        Some(
+            b"\x7fELF"
+                | b"\xcf\xfa\xed\xfe"
+                | b"\xfe\xed\xfa\xcf"
+                | b"\xce\xfa\xed\xfe"
+                | b"\xfe\xed\xfa\xce"
+                | b"\xca\xfe\xba\xbe"
+                | b"\xca\xfe\xba\xbf"
+                | b"\xbe\xba\xfe\xca"
+                | b"\xbf\xba\xfe\xca"
+        )
+    )
+}
+
 pub fn file_script(
     session: &mut Session,
     file: File,
@@ -80,11 +97,14 @@ pub fn file_script(
     status: u8,
     check: bool,
 ) -> Flow {
-    let metadata = if session.verbose {
-        None
-    } else {
-        metadata.or_else(|| file.metadata().ok())
-    };
+    let metadata = metadata.or_else(|| file.metadata().ok());
+    if metadata.as_ref().is_some_and(|m| m.is_dir()) {
+        return error(
+            "cannot run a directory as a script",
+            if session.source_depth == 0 { 126 } else { 1 },
+        );
+    }
+    let metadata = metadata.filter(|_| !session.verbose);
     if let Some(meta) = &metadata
         && meta.is_file()
         && (session.source_depth > 0 && meta.len() < 128 * 1024
@@ -104,10 +124,14 @@ pub fn file_script(
         if let Ok(n) = file.read_at(bytes, 0)
             && n == len
             && len != 0
-            && let Ok(source) = std::str::from_utf8(&bytes[..n])
         {
-            drop(file);
-            return text(session, source, status, false, check, None);
+            if executable_header(&bytes[..n]) {
+                return error("cannot execute binary file", 126);
+            }
+            if let Ok(source) = std::str::from_utf8(&bytes[..n]) {
+                drop(file);
+                return text(session, source, status, false, check, None);
+            }
         }
     }
     if let Some(meta) = &metadata
@@ -366,6 +390,9 @@ fn run(
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => return error(e, 1),
         };
+        if !from_stdin && base_line == 1 && line_start == 0 && executable_header(&input) {
+            return error("cannot execute binary file", 126);
+        }
         if session.verbose && n != 0 {
             use std::io::Write;
             let _ = io::stderr().write_all(&input[line_start..]);

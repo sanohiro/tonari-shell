@@ -2127,12 +2127,19 @@ impl PreparedCommand {
     }
     // Bash invokes this function only for a missing PATH command. A present
     // but non-executable file and an explicit pathname keep their exec errors.
+    const MISSING_HOOK: &'static str = "command_not_found_handle";
+
+    fn select_missing_hook(&mut self) {
+        self.words.insert(0, Self::MISSING_HOOK.to_owned());
+        self.search = lookup::Search::Normal;
+        self.missing_hook = true;
+    }
+
     fn prepare_missing_hook(&mut self, session: &Session) -> bool {
-        const HOOK: &str = "command_not_found_handle";
         let Some(name) = self.words.first() else {
             return false;
         };
-        if !session.functions.contains_key(HOOK)
+        if !session.functions.contains_key(Self::MISSING_HOOK)
             || name.contains('/')
             || self.cached_path(session, name).is_some()
         {
@@ -2140,9 +2147,7 @@ impl PreparedCommand {
         }
         match hash::search_in(name, session, &lookup::path(self, session)) {
             Err(hash::Absent) => {
-                self.words.insert(0, HOOK.to_owned());
-                self.search = lookup::Search::Normal;
-                self.missing_hook = true;
+                self.select_missing_hook();
                 true
             }
             Ok(path) => {
@@ -2873,8 +2878,14 @@ fn run_external(
         match hash::resolve(session, &cmd.words[0]) {
             Ok(path) => cmd.resolved = path,
             Err(hash::Absent)
-                if !session.functions.contains_key("command_not_found_handle")
-                    && cmd.redirects.is_empty()
+                if session
+                    .functions
+                    .contains_key(PreparedCommand::MISSING_HOOK) =>
+            {
+                cmd.select_missing_hook();
+            }
+            Err(hash::Absent)
+                if cmd.redirects.is_empty()
                     && launch.group.is_none()
                     && !session.traps.active() =>
             {

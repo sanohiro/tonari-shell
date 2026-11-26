@@ -27,6 +27,7 @@ COMMON = {
     "multiline-history": "set -o history\nfor v in a b\ndo\n  : item\ndone\nshopt -s lithist\nf() {\n  : 'two\\nlines'\n}\nshopt -u cmdhist\nfor v in a\ndo\n  :\ndone\nhistory",
     "read-one-field": r"""read value <<< '  x  y  '; printf '<%s>' "$value"; IFS=$'\t' read value <<< $'\t a \t'; printf '<%s>' "$value"; read value <<< ' x\ '; printf '<%s>' "$value" """,
     "command-missing-hook": """command_not_found_handle(){ printf '<%s>' "$@" "$BASH_SUBSHELL" "${tag-unset}"; touched=yes; return 23; }; tag=local no_such_tnr 'two words' '' >hooked; echo "$?:${touched-none}"; cat hooked; echo; command no_such_tnr | cat; echo "${PIPESTATUS[*]}"; v=$(no_such_tnr x); echo "$?:$v"; ./no_such_tnr 2>/dev/null; echo $?; no_such_tnr bg >hooked & wait $!; echo $?; cat hooked""",
+    "binary-source": "source /bin/sh 2>/dev/null; echo $?; source / 2>/dev/null; echo $?",
     "history-file-enable": "printf 'stored command\\n' > imported-history\nHISTFILE=imported-history\nset -o history\nhistory -p '!!' ",
     "function-stack": """FUNCNAME=ignored; echo "<$FUNCNAME>"; f(){ FUNCNAME=no; echo "<$FUNCNAME>"; }; f; unset FUNCNAME; FUNCNAME=ordinary; echo "$FUNCNAME" """,
     "nolog": """set -o nolog; shopt -qo nolog; echo $?; set +o nolog; shopt -qo nolog; echo $?""",
@@ -104,6 +105,7 @@ HOT = {
     "nolog": ('set -o nolog; set +o nolog', 800),
     "signal-lookup": ('kill -l TERM >/dev/null', 800),
     "numeric-locale": ("""printf -v v "%'+012.2f" 12345,5""", 1100),
+    "binary-source": ("source /bin/sh 2>/dev/null", 90),
     "command-missing-hook": ("no_such_tnr", 90),
     "custom-history-event": ("history -p '^^' >/dev/null", 750),
     "open-quote-alias": ('source ./open-alias', 450),
@@ -444,6 +446,10 @@ def main():
                 origin = subprocess.run([shell, "-c", "shopt -s extdebug; f(){ :; }; declare -F f", "caller-name"],
                                         cwd=root, env=env, capture_output=True, timeout=5)
                 assert (origin.returncode, origin.stdout, origin.stderr) == (0, b"f 1 caller-name\n", b""), (shell, origin)
+        for shell in shells[:2]:
+            for script in (root, Path("/bin/sh")):
+                binary = subprocess.run([shell, script], cwd=root, env=env, capture_output=True, timeout=5)
+                assert (binary.returncode, binary.stdout, bool(binary.stderr)) == (126, b"", True), (shell, script, binary)
         failed = []
         for name, code in cases.items():
             expected = run(shells[0], code)[0]
