@@ -312,6 +312,28 @@ fn portable_list(body: &str) -> Option<String> {
     }
     use Member::*;
     let (negative, mut rest) = body.strip_prefix('^').map_or((false, body), |s| (true, s));
+    if !negative
+        && let Some((n, mark)) = list_item(rest.as_bytes())
+        && n == rest.len()
+        && matches!(mark, b'.' | b'=')
+    {
+        let name = &rest[2..n - 2];
+        let mut chars = name.chars();
+        let c = match (chars.next(), chars.next()) {
+            (Some(c), None) => c,
+            _ if mark == b'.' => char::from(crate::pattern::portable_symbol(name.as_bytes())?),
+            _ => return None,
+        };
+        if c == '\0' {
+            return None;
+        }
+        let mut quoted = String::new();
+        if "\\.[]{}()*+?^$|".contains(c) {
+            quoted.push('\\');
+        }
+        quoted.push(c);
+        return Some(quoted);
+    }
     let mut members = Vec::new();
     while !rest.is_empty() {
         if let Some((n, mark)) = list_item(rest.as_bytes()) {
