@@ -302,9 +302,13 @@ impl Job {
             } else {
                 State::Done(libc::WEXITSTATUS(status) as u8)
             };
-            if libc::WIFCONTINUED(status) {
+            if libc::WIFCONTINUED(status) || self.stopped_at != 0 && !self.stopped() {
                 self.stopped_at = 0;
-            } else if self.stopped_at == 0 && !self.active() && self.stopped() {
+            } else if self.stopped_at == 0
+                && (libc::WIFSTOPPED(status) || self.children.len() > 1)
+                && !self.active()
+                && self.stopped()
+            {
                 thread_local! { static NEXT_STOP: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
                 self.stopped_at = NEXT_STOP.get() + 1;
                 NEXT_STOP.set(self.stopped_at);
@@ -1198,24 +1202,23 @@ fn marked_jobs<'a>(jobs: impl Iterator<Item = &'a Job>) -> (Option<u32>, Option<
     )
 }
 
-fn job_id(jobs: &Jobs, spec: &str) -> Option<u32> {
-    let mut all = jobs.inherited.iter().chain(&jobs.table).rev();
+fn list_position(jobs: &Jobs, spec: &str, markers: (Option<u32>, Option<u32>)) -> Option<usize> {
+    let mut all = jobs.inherited.iter().chain(&jobs.table);
     let spec = spec.strip_prefix('%').unwrap_or(spec);
-    match spec {
-        "" | "+" | "%" => marked_jobs(all).0,
-        "-" => marked_jobs(all).1,
-        s => {
-            if let Ok(id) = s.parse::<u32>() {
-                return all.find(|job| job.id == id).map(|job| job.id);
-            }
-            let mut matches = all.filter(|j| {
-                s.strip_prefix('?')
-                    .map_or_else(|| j.name.starts_with(s), |part| j.name.contains(part))
-            });
-            let id = matches.next()?.id;
-            matches.next().is_none().then_some(id)
-        }
+    let id = match spec {
+        "" | "+" | "%" => markers.0,
+        "-" => markers.1,
+        s => s.parse::<u32>().ok(),
+    };
+    if let Some(id) = id {
+        return all.position(|j| j.id == id);
     }
+    let mut matches = all.enumerate().filter(|(_, j)| {
+        spec.strip_prefix('?')
+            .map_or_else(|| j.name.starts_with(spec), |part| j.name.contains(part))
+    });
+    let (index, _) = matches.next()?;
+    matches.next().is_none().then_some(index)
 }
 
 fn list(jobs: &mut Jobs, args: &[String], posix: bool) -> u8 {
@@ -1244,30 +1247,30 @@ fn list_to(jobs: &mut Jobs, args: &[String], posix: bool, mut out: impl Write) -
         }
     }
     let mut status = 0;
-    let mut ids = Vec::new();
-    let all = args.peek().is_none();
+    let markers = marked_jobs(jobs.inherited.iter().chain(&jobs.table));
+    let all = if args.peek().is_none() {
+        jobs.inherited.len() + jobs.table.len()
+    } else {
+        0
+    };
+    let mut selected = Vec::new();
     for spec in args {
-        if let Some(id) = job_id(jobs, spec) {
-            ids.push(id);
+        if let Some(index) = list_position(jobs, spec, markers) {
+            selected.push(index);
         } else {
             eprintln!("tonari: jobs: {spec}: no such job");
             status = 1;
         }
     }
-    if all {
-        ids.extend(jobs.inherited.iter().chain(&jobs.table).map(|j| j.id));
-    }
-    let current = job_id(jobs, "%+");
-    let previous = job_id(jobs, "%-");
-    for id in ids {
-        let Some(job) = jobs
-            .inherited
-            .iter_mut()
-            .chain(&mut jobs.table)
-            .find(|j| j.id == id)
-        else {
-            continue;
+    let (current, previous) = markers;
+    for index in (0..all).chain(selected) {
+        let inherited = jobs.inherited.len();
+        let job = if index < inherited {
+            &mut jobs.inherited[index]
+        } else {
+            &mut jobs.table[index - inherited]
         };
+        let id = job.id;
         if (changed && job.listed)
             || (filter == 'r' && !job.active())
             || (filter == 's' && !job.stopped())
@@ -1333,19 +1336,16 @@ pub fn dispatch(words: &[String], session: &mut Session, last: u8) -> crate::Flo
         if words.clone().next().is_some_and(|s| s == "--") {
             words.next();
         }
+        session.jobs.poll();
+        let all = || session.jobs.inherited.iter().chain(&session.jobs.table);
+        let markers = marked_jobs(all());
         let command = crate::parser::SimpleCommand {
             words: words
                 .map(|arg| {
-                    let id = arg
-                        .starts_with('%')
-                        .then(|| job_id(&session.jobs, arg))
-                        .flatten();
-                    let job = session
-                        .jobs
-                        .inherited
-                        .iter()
-                        .chain(&session.jobs.table)
-                        .find(|j| Some(j.id) == id);
+                    let job = arg
+                        .strip_prefix('%')
+                        .and_then(|_| list_position(&session.jobs, arg, markers))
+                        .and_then(|index| all().nth(index));
                     let text = job.map_or_else(
                         || arg.clone(),
                         |j| {
