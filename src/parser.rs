@@ -1255,7 +1255,7 @@ impl Reader {
         }
         .to_owned();
         self.tokens.pop_front();
-        Ok(Expr::Binary(left, op, self.test_word()?))
+        Ok(Expr::binary(left, op, self.test_word()?))
     }
 
     fn case_clause(&mut self) -> Result<Command, Error> {

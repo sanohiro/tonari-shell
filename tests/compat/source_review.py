@@ -862,7 +862,7 @@ def main():
                 # Input history is recorded for top-level commands, even with
                 # no terminal. Executing a sourced loop would bypass this path.
                 code = "set -o history\n" + "for v in one two\ndo\n  : item\ndone\n" * count + "echo done"
-            elif name in ("encoded-parameter-name", "lazy-malformed-operand", "quoted-operand-brace", "descriptor-overflow", "eval-array-operand", "posix-background-parameter"):
+            elif name in ("extended-operand-quotes", "encoded-parameter-name", "lazy-malformed-operand", "quoted-operand-brace", "descriptor-overflow", "eval-array-operand", "posix-background-parameter"):
                 code = setup + "\n" + (body + "\n") * min(count, 2500) + "echo done"
                 count = min(count, 2500)
             elif name in ("positional-assignment-error", "invalid-length"):

@@ -6,9 +6,31 @@ pub enum Expr {
     Word(Word),
     Unary(String, Word),
     Binary(Word, String, Word),
+    StaticRegex(Word, String, Option<String>),
     Not(Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
+}
+
+impl Expr {
+    pub(crate) fn binary(left: Word, operator: String, right: Word) -> Self {
+        use crate::word::Part;
+        if operator == "=~"
+            && match &right {
+                Word::Literal(_) => true,
+                Word::Expanded(parts) => parts
+                    .iter()
+                    .all(|p| matches!(p, Part::Pattern(_) | Part::Unquoted(_) | Part::Text(_))),
+                Word::Declaration(_) => false,
+            }
+        {
+            let quoted = right.clone().regex(&|_| None, &[]);
+            let plain = right.scalar(&|_| None, &[]);
+            let plain = (plain != quoted).then_some(plain);
+            return Self::StaticRegex(left, quoted, plain);
+        }
+        Self::Binary(left, operator, right)
+    }
 }
 
 pub fn evaluate(expr: &Expr, session: &mut Session, status: u8) -> Flow {
@@ -75,6 +97,15 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             trace(session, status, &[op, &value]);
             builtins::unary(op, &value, session).map_err(error)
         }
+        StaticRegex(left, quoted, plain) => {
+            let left = operand(session, left, status)?;
+            let pattern = if session.shopt.compat <= 31 {
+                plain.as_ref().unwrap_or(quoted)
+            } else {
+                quoted
+            };
+            regex_match(session, status, &left, pattern.as_str().into())
+        }
         Binary(left, op, right) => {
             let left = operand(session, left, status)?;
             match op.as_str() {
@@ -122,22 +153,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                             })?
                             .into()
                     };
-                    trace(session, status, &[&left, op, &expression]);
-                    let result = pattern::localized(|| {
-                        let ignore_case = session.shopt.nocasematch;
-                        let slot = &mut session.regex[usize::from(ignore_case)];
-                        if slot.as_ref().is_none_or(|r| r.pattern != expression) {
-                            *slot = Some(std::rc::Rc::new(Compiled::new(
-                                expression.into_owned(),
-                                ignore_case,
-                            )?));
-                        }
-                        slot.as_ref().unwrap().search(&left)
-                    })
-                    .map_err(|()| Flow::Continue(2))?;
-                    let matched = result.is_some();
-                    session.replace_array("BASH_REMATCH", result.unwrap_or_default());
-                    Ok(matched)
+                    regex_match(session, status, &left, expression)
                 }
                 "-eq" | "-ne" | "-lt" | "-le" | "-gt" | "-ge" => {
                     let right = operand(session, right, status)?;
@@ -165,6 +181,30 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             }
         }
     }
+}
+
+fn regex_match(
+    session: &mut Session,
+    status: u8,
+    left: &str,
+    expression: std::borrow::Cow<'_, str>,
+) -> Result<bool, Flow> {
+    trace(session, status, &[left, "=~", &expression]);
+    let result = pattern::localized(|| {
+        let ignore_case = session.shopt.nocasematch;
+        let slot = &mut session.regex[usize::from(ignore_case)];
+        if slot.as_ref().is_none_or(|r| r.pattern != expression) {
+            *slot = Some(std::rc::Rc::new(Compiled::new(
+                expression.into_owned(),
+                ignore_case,
+            )?));
+        }
+        slot.as_ref().unwrap().search(left)
+    })
+    .map_err(|()| Flow::Continue(2))?;
+    let matched = result.is_some();
+    session.replace_array("BASH_REMATCH", result.unwrap_or_default());
+    Ok(matched)
 }
 
 // Return the end of a POSIX ERE list, measured from just after its opening '['.
