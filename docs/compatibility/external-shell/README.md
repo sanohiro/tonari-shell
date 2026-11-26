@@ -1,5 +1,8 @@
 # External shell comparisons / 外部試験による Bash 比較
 
+The November 26 date, expansion and completion follow-up replays the full bensch and Oils suites. The report includes the ordinary and shell-specific grades, jointly failing cases, and notes on time locale coverage. 11 月 26 日の再計測では、個別の合否と比較可能な時間を記録しました。[Follow-up results](shared-failures.md#date-and-expansion-replay)
+
+
 These tests use Tonari's Bash entry point. The [yash comparison](../yash-posix/) covers the separate `sh` entry point. この試験では Bash として起動し、対話操作・組み込み・言語機能を調べています。
 
 The follow-up covers fixes, a review of every joint failure in this snapshot, and native comparisons with a common Bash build. 前回の両者失敗の内訳、修正後の再計測、OS 差の切り分けを記録しています。[Follow-up and current results / 最新の結果](shared-failures.md)

@@ -1,5 +1,87 @@
 # Startup and execution / 起動と実行性能
 
+<a id="calendar-and-expansion"></a>
+
+## 2026-11-26 · Dates, expansions and completion output / 日時・展開・補完出力
+
+A physical Apple M1 running macOS 27.2.1 and GNU Bash 5.2.37 produced the following medians. Each interleaved series uses 15 trials per binary and checks stdout, stderr and status. The array and mixed-date rows share a series. The first date row shows the early cache experiment. File completion uses 2,048 real names, collects 61,440 output lines, and checks the count. [Workload definitions](../tools/ci/spec-fix-timings.py)
+
+| Workload | Initial Tonari (ms) | Optimized Tonari (ms) | Bash (ms) |
+| --- | ---: | ---: | ---: |
+| Format 2,000 timestamps with a named time zone | 47.809 | 7.746 | 16.053 |
+| Format 4,000 epoch values | 84.606 | 5.598 | 27.333 |
+| Format 2,401 different timestamps across a DST transition | 9.789 | 8.124 | 19.167 |
+| Test a 512-element array for a default operator, 500 times | 44.660 | 4.920 | 24.508 |
+| Return all 512 array fields, 200 times | 26.106 | 11.468 | 45.778 |
+| Emit 2,048 filename candidates, 30 times | 168.566 | 36.206 | 175.755 |
+| Scan two completion candidates, 1,000 times | 31.670 | 32.105 | 40.697 |
+
+The two-entry workload includes creating its fixtures, repeatedly reading a directory, and validating the last two lines. Buffering improved large outputs. The difference between the two small-output implementations in this run was 0.435 ms over 1,000 scans. A separate 401-trial warm-start comparison on this Mac gave 4.004 ms for the pre-fix distribution, 4.135 ms after the expansion and completion fixes, and 7.155 ms for Bash. The Tonari interdecile ranges overlapped (3.482–4.582 and 3.564–4.613 ms).
+
+A further small-output experiment on the same M1 compared the direct-write path with a 256-byte output buffer over 31 interleaved trials. The two-entry workload fell from 29.617 to 27.271 ms, against 37.206 ms for Bash. Keep the larger buffer for long lists and skip the allocation when there are no results. この変更では少数の候補でも改行と候補名をまとめて出力します。空のリストにはバッファを確保しません。
+
+日時の計測は同じ入力の反復と、夏時間をまたいで秒数が毎回変わる入力を分けました。ファイル候補は実際に全部書き出して測定しました。大量候補では出力のまとめ書きが効き、2 件だけの繰り返しでは差が小さくなります。
+
+### Timestamped history and prompts / 日時付きの履歴とプロンプト
+
+The physical M1 test imports a 2,000-entry file with a different timestamp for every command, formats each line in UTC, and compares every output byte with an independently generated UTC fixture. Over 31 interleaved trials the first correct import and display took 6.375 ms. Resolving the formatter once per listing and buffering stdout reduced it to 4.772 ms. GNU Bash 5.2.37 took 9.083 ms. The timing process starts both shells with TZ=UTC0 because assigning TZ inside the script alone left this Bash build's history display in the launch zone. A separate PTY check sent one command at a time and waited for a complete date-bearing prompt. The median round trip was 0.047 ms for Tonari and 0.062 ms for Bash across 21 sessions of 21 submissions per shell. [History workload](../tools/ci/spec-fix-timings.py)
+
+Trimming a 100,000-entry timestamped file now reads backwards in 16 KiB blocks until the retained entries are complete. With timestamp display enabled, the first implementation scanned the file forwards in 6.713 ms. The backward scan took 3.882 ms across 41 alternating trials. With timestamp display unset and a two-line limit, both Tonari and Bash kept the last timestamp plus command. The corresponding medians were 3.969 and 6.903 ms. The file was recreated before each timed process and checked after exit.
+
+履歴 2,000 件の出力は行数・日時・コマンド名を含む全バイトで照合しました。日付入りプロンプトは 1 コマンドごとに再表示を待ち、次の入力を送っています。履歴一覧と対話時の再表示は別々の待ち時間として測定しています。
+
+### Regional data on static Linux / Linux 静的版の地域データ
+
+The storage experiment ran in an ARM64 Linux guest on Apple silicon, using the same guest filesystem for the three executables and working files. Each elapsed time includes launching a shell. There were 61 alternating runs per binary for formatting and 201 for startup. The distributor's native x86-64 results are recorded separately. The uncompressed pointer-table build and compact offset-table build format the same German output across 2,000 changing timestamps (`%A %B %F %T`). Only the requested time fields are compiled into the release.
+
+| ARM64 Linux experiment | Before locale support | Direct locale tables | Compact locale tables | GNU Bash |
+| --- | ---: | ---: | ---: | ---: |
+| Stripped executable, bytes | 2,102,704 | 2,626,992 | 2,233,776 | — |
+| Start and run `:`, ms | 0.306 | 0.358 | 0.308 | 0.534 |
+| Format 2,000 regional timestamps, ms | — | 3.046 | 2.004 | 16.764 |
+
+In a separate 41-run comparison, reading numeric padding directly from the converted calendar reduced 2,000 `%_d %0e` conversions from 2.271 to 1.717 ms. Bash took 13.326 ms. The English and German displays, time zone, and number of output bytes are checked before timings are accepted. To reproduce a single workload, run `python3 tools/ci/spec-fix-timings.py --case 'regional time' --trials 61 /path/to/tonari /path/to/bash` with the German locale available to Bash. The regional audit runs with `python3 tools/ci/time-locales.py /path/to/static-tonari /path/to/bash`. It records every differing locale, directive, epoch and pair of strings as JSON Lines.
+
+Linux ARM64 の比較では、重複を除いた表にすることで起動時間が地域対応前と同水準に戻りました。GNU 地域データはビルド時に取り込み、日時表示にも起動にも glibc の共有ライブラリは不要です。x86-64 の速度判定には実機 CI の値を使います。
+
+### Final native script timings / 実機での最終計測
+
+Release binaries at 3c9cdcb ran 13 interleaved trials per shell and case. Each cell contains median elapsed milliseconds for Tonari and GNU Bash, followed by their ratio. The Linux x86-64 runner used Bash 5.2.21. The Apple arm64 runner used Bash 5.3.20. Startup includes the parent spawning the shell and reading its exit status. The vi test times the PTY response after entering command mode. [Native runs and raw samples](https://github.com/sanohiro/tonari-shell/actions/runs/45752854550)
+
+| Workload | Linux Tonari / Bash (ms) | Ratio | macOS Tonari / Bash (ms) | Ratio |
+| --- | ---: | ---: | ---: | ---: |
+| history dates | 1.430 / 3.043 | 0.470 | 6.041 / 16.683 | 0.362 |
+| startup | 0.316 / 0.866 | 0.365 | 4.027 / 10.752 | 0.375 |
+| printf time | 1.805 / 6.171 | 0.292 | 6.505 / 22.691 | 0.287 |
+| regional time | 2.428 / 7.191 | 0.338 | 8.379 / 24.370 | 0.344 |
+| padded time | 2.163 / 6.112 | 0.354 | 7.947 / 21.703 | 0.366 |
+| changing timestamps | 2.868 / 7.707 | 0.372 | 8.727 / 28.468 | 0.307 |
+| printf epoch | 1.430 / 28.972 | 0.049 | 6.251 / 37.156 | 0.168 |
+| default tilde | 3.082 / 6.773 | 0.455 | 7.799 / 22.582 | 0.345 |
+| brace tilde | 2.577 / 4.849 | 0.531 | 6.851 / 20.740 | 0.330 |
+| indexed argument | 2.846 / 6.861 | 0.415 | 6.950 / 23.702 | 0.293 |
+| bracket arithmetic | 4.689 / 8.717 | 0.538 | 8.641 / 23.958 | 0.361 |
+| read readiness | 1.366 / 4.584 | 0.298 | 6.018 / 19.589 | 0.307 |
+| test option | 0.813 / 6.828 | 0.119 | 4.893 / 24.441 | 0.200 |
+| set listing | 15.614 / 44.802 | 0.349 | 22.833 / 96.887 | 0.236 |
+| echo escapes | 2.633 / 1051.406 | 0.003 | 6.537 / 2677.918 | 0.002 |
+| large completion | 25.490 / 72.611 | 0.351 | 35.664 / 211.002 | 0.169 |
+| completion fallback | 9.005 / 13.059 | 0.690 | 25.021 / 58.473 | 0.428 |
+| array defaults | 0.698 / 11.523 | 0.061 | 4.023 / 37.382 | 0.108 |
+| array default fields | 13.727 / 32.758 | 0.419 | 11.727 / 71.294 | 0.164 |
+| attributes | 19.400 / 63.192 | 0.307 | 14.881 / 116.191 | 0.128 |
+| last argument | 1.297 / 10.421 | 0.124 | 6.129 / 31.079 | 0.197 |
+| array index | 1.506 / 5.911 | 0.255 | 5.217 / 21.215 | 0.246 |
+| associative arithmetic | 7.578 / 14.152 | 0.535 | 11.739 / 38.606 | 0.304 |
+| signal names | 12.709 / 20.924 | 0.607 | 26.421 / 53.396 | 0.495 |
+| regex home | 4.263 / 22.801 | 0.187 | 11.076 / 86.452 | 0.128 |
+| lastpipe | 1.526 / 31.154 | 0.049 | 4.760 / 131.056 | 0.036 |
+| vi | 0.762 / 1.214 | 0.628 | 1.068 / 31.592 | 0.034 |
+
+Tonari took less time than Bash in all 27 targeted workloads on both native hosts. All 27 met the two-thirds target on macOS. On Linux, 26 met it. Scanning a directory with two matching entries 1,000 times took 0.690 of Bash on an AMD EPYC 9V45 runner and 0.649 on an earlier Intel Xeon 6975P-C runner after small-output buffering. The case deliberately rescans the filesystem each time. The raw full-suite timings below and in the corpus are separate measurements. On the final CI builds the stripped static x86-64 PIE occupied 2,245,368 bytes and the arm64 Mach-O occupied 1,582,672 bytes. On the local M1 the signed distribution was 1,566,208 bytes with libSystem as its sole dynamic dependency. [Earlier small-output measurements](https://github.com/sanohiro/tonari-shell/actions/runs/45751256343) · [Full suite comparisons](compatibility/external-shell/shared-failures.md#date-and-expansion-replay)
+
+修正箇所を中心に選んだ 27 項目は、どちらの実機 CI でもすべて Bash より速くなっています。Linux の少数ファイル補完は実行環境によって 2/3 の前後に分かれました。全外部試験の中には Bash より遅い計測や、結果が異なるため時間を比べられないケースが残っています。
+
 ## 2026-11-26 · Timings after external compatibility fixes / 互換性修正後の計測
 
 On a physical Apple M1 running macOS 27.2.1, interleaved tests checked stdout, stderr and exit status for each shell. The vi case times 30 pairs of motions over a 400-character word, a change and submission through the PTY. It stops when the called function prints the expected edited arguments. The first three rows and the lastpipe and vi rows use the same 13-trial run. The associative arithmetic and signal diagnostics rows use separate, respectively 31- and 25-trial comparisons. Values are median milliseconds. [Workloads](../tools/ci/spec-fix-timings.py)
