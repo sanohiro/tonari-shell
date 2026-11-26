@@ -306,6 +306,17 @@ impl Session {
         }
     }
 
+    pub(crate) fn locale_category(&self, category: &str) -> Option<Cow<'_, str>> {
+        ["LC_ALL", category, "LANG"]
+            .into_iter()
+            .find_map(|key| self.scalar_setting(key).filter(|s| !s.is_empty()))
+    }
+
+    pub(crate) fn ascii_quoting(&self) -> bool {
+        self.locale_category("LC_CTYPE")
+            .is_some_and(|name| matches!(name.as_ref(), "C" | "POSIX"))
+    }
+
     pub(crate) fn pattern_locale_overridden(&self) -> bool {
         ["LANG", "LC_ALL", "LC_COLLATE", "LC_CTYPE"]
             .iter()
@@ -1412,6 +1423,19 @@ impl Session {
     }
 }
 
+pub(crate) fn hostname() -> Option<&'static str> {
+    static NAME: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| {
+        let mut bytes = [0u8; 256];
+        if unsafe { libc::gethostname(bytes.as_mut_ptr().cast(), bytes.len() - 1) } != 0 {
+            return None;
+        }
+        let end = memchr::memchr(0, &bytes).unwrap_or(bytes.len());
+        Some(String::from_utf8_lossy(&bytes[..end]).into_owned())
+    })
+    .as_deref()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1440,17 +1464,4 @@ mod tests {
         session.leave_function();
         assert_eq!(session.get(key).as_deref(), Some("global"));
     }
-}
-
-pub(crate) fn hostname() -> Option<&'static str> {
-    static NAME: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-    NAME.get_or_init(|| {
-        let mut bytes = [0u8; 256];
-        if unsafe { libc::gethostname(bytes.as_mut_ptr().cast(), bytes.len() - 1) } != 0 {
-            return None;
-        }
-        let end = memchr::memchr(0, &bytes).unwrap_or(bytes.len());
-        Some(String::from_utf8_lossy(&bytes[..end]).into_owned())
-    })
-    .as_deref()
 }

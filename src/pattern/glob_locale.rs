@@ -103,10 +103,7 @@ pub(crate) fn sync_ranges(session: &crate::Session) {
         RANGE_HANDLE.set(std::ptr::null_mut());
         return;
     }
-    let name = ["LC_ALL", "LC_COLLATE", "LANG"]
-        .into_iter()
-        .find_map(|key| session.scalar_setting(key).filter(|s| !s.is_empty()))
-        .unwrap_or_default();
+    let name = session.locale_category("LC_COLLATE").unwrap_or_default();
     if matches!(name.as_ref(), "" | "C" | "POSIX" | "C.UTF-8" | "C.utf8") {
         RANGE_HANDLE.set(std::ptr::null_mut());
         return;

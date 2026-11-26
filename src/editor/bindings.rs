@@ -290,7 +290,7 @@ impl Bindings {
                     .filter(|&(_k, v)| matches!(v, Binding::Edit(a) if *a==action))
                     .map(|(k, _v)| k.clone()),
             );
-            result.sort();
+            result.sort_unstable();
         }
         result
     }

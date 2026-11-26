@@ -177,7 +177,7 @@ fn assignment(name: &str, quoted: bool, env: &mut Expansion<'_>) -> Result<Part,
                 .into_iter()
                 .chain(
                     args.iter()
-                        .map(|s| crate::session::printf::parameter_quote(s, env.session)),
+                        .map(|s| super::quote::parameter_quote(s, env.session)),
                 )
                 .collect()
         }
@@ -203,7 +203,7 @@ fn assignment(name: &str, quoted: bool, env: &mut Expansion<'_>) -> Result<Part,
             if let Some(text) = text {
                 fields.push(format!(
                     "{base}={}",
-                    crate::session::printf::parameter_quote(&text, env.session)
+                    super::quote::parameter_quote(&text, env.session)
                 ));
             } else if !fields.is_empty() {
                 fields.push(base.to_owned());
@@ -325,7 +325,7 @@ impl Modification {
                 };
                 let transform = |text: String| -> Result<String, Error> {
                     if !matches!(self, Self::Escapes) {
-                        Ok(crate::session::printf::parameter_quote(&text, env.session))
+                        Ok(super::quote::parameter_quote(&text, env.session))
                     } else {
                         crate::parser::ansi_string(&text).map_err(|e| Error::from(e.message()))
                     }

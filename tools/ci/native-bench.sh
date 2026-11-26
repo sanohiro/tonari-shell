@@ -8,6 +8,17 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == audit-hot-paths ]]; then
+  if [[ $RUNNER_OS == macOS ]]; then
+    if [[ ! -x /opt/homebrew/bin/bash ]]; then brew install bash; fi
+    ref=/opt/homebrew/bin/bash
+  fi
+  args=()
+  for name in here-string-builtin-read mapfile-here redirected-pwd printf-formats strings regex substitute-class trim-middle-star arithmetic functions case-classes glob; do args+=(--case "$name"); done
+  python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" \
+    --runs 21 --timing whole "${args[@]}" > "$out/workloads.txt"
+  exit
+fi
 if [[ $SUITE == release-diagnostics ]]; then
   if [[ $RUNNER_OS == macOS && -x /opt/homebrew/bin/bash ]]; then ref=/opt/homebrew/bin/bash; fi
   for variant in full immediate; do

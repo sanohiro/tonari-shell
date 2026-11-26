@@ -1,3 +1,4 @@
+use crate::word::quote::{ansi_quote, needs_ansi};
 use std::ffi::CString;
 use std::io::{self, Write};
 
@@ -207,7 +208,11 @@ impl<'a> Arguments<'a> {
         } else {
             value
         };
-        let input = CString::new(input).unwrap();
+        let Ok(input) = CString::new(input) else {
+            eprintln!("tonari: printf: invalid number");
+            self.status = 1;
+            return from_char(0);
+        };
         let mut end = std::ptr::null_mut();
         let errno = unsafe {
             #[cfg(target_os = "macos")]
@@ -709,34 +714,12 @@ fn render(
     Ok(true)
 }
 
-fn ascii_locale(session: &Session) -> bool {
-    ["LC_ALL", "LC_CTYPE", "LANG"]
-        .iter()
-        .find_map(|name| session.get(name).filter(|s| !s.is_empty()))
-        .is_some_and(|name| matches!(name.as_str(), "C" | "POSIX"))
-}
-
-pub(crate) fn parameter_quote(text: &str, session: &Session) -> String {
-    let ascii = ascii_locale(session);
-    if text
-        .bytes()
-        .any(|c| c.is_ascii_control() || ascii && !c.is_ascii())
-    {
-        String::from_utf8(ansi_quote(text.as_bytes(), ascii)).expect("quoted UTF-8")
-    } else {
-        crate::word::quote::single_quote(text)
-    }
-}
-
 fn quote(data: &[u8], session: &Session, single: bool) -> Vec<u8> {
     if data.is_empty() {
         return b"''".to_vec();
     }
-    let ascii_locale = ascii_locale(session);
-    let ansi = data
-        .iter()
-        .any(|b| b.is_ascii_control() || (ascii_locale && !b.is_ascii()));
-    if ansi {
+    let ascii_locale = session.ascii_quoting();
+    if needs_ansi(data, ascii_locale) {
         return ansi_quote(data, ascii_locale);
     }
     if single && let Ok(text) = std::str::from_utf8(data) {
@@ -752,37 +735,6 @@ fn quote(data: &[u8], session: &Session, single: bool) -> Vec<u8> {
         }
         out.push(b);
     }
-
-    out
-}
-
-pub(crate) fn ansi_quote(data: &[u8], ascii_locale: bool) -> Vec<u8> {
-    let mut out = Vec::new();
-
-    out.extend_from_slice(b"$'");
-    for &b in data {
-        match b {
-            7 => out.extend_from_slice(b"\\a"),
-            8 => out.extend_from_slice(b"\\b"),
-            9 => out.extend_from_slice(b"\\t"),
-            10 => out.extend_from_slice(b"\\n"),
-            11 => out.extend_from_slice(b"\\v"),
-            12 => out.extend_from_slice(b"\\f"),
-            13 => out.extend_from_slice(b"\\r"),
-            27 => out.extend_from_slice(b"\\E"),
-            b'\'' | b'\\' => out.extend_from_slice(&[b'\\', b]),
-            b if b.is_ascii_control() || (ascii_locale && !b.is_ascii()) => {
-                out.extend_from_slice(&[
-                    b'\\',
-                    b'0' + (b >> 6),
-                    b'0' + ((b >> 3) & 7),
-                    b'0' + (b & 7),
-                ]);
-            }
-            _ => out.push(b),
-        }
-    }
-    out.push(b'\'');
 
     out
 }

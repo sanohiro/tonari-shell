@@ -144,7 +144,7 @@ pub(super) fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Co
             .bytes()
             .any(|c| c.is_ascii_control() || ascii && !c.is_ascii())
     {
-        return String::from_utf8(printf::ansi_quote(value.as_bytes(), ascii))
+        return String::from_utf8(crate::word::quote::ansi_quote(value.as_bytes(), ascii))
             .unwrap()
             .into();
     }
@@ -224,7 +224,7 @@ pub(super) fn print_variable_value(out: &mut impl Write, var: &Variable) -> io::
 
 pub(super) fn print_value(out: &mut impl Write, value: &str) -> io::Result<()> {
     if value.bytes().any(|c| c.is_ascii_control()) {
-        return out.write_all(&printf::ansi_quote(value.as_bytes(), false));
+        return out.write_all(&crate::word::quote::ansi_quote(value.as_bytes(), false));
     }
     out.write_all(b"\"")?;
     let mut start = 0;

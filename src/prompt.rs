@@ -127,16 +127,35 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
             }));
         }
         '0'..='7' => {
-            let mut n = c.to_digit(8).unwrap();
-            for _ in 0..2 {
-                if let Some(d) = chars.clone().next().and_then(|c| c.to_digit(8)) {
+            let octet = |c: char, chars: &mut std::str::Chars<'_>| {
+                let mut n = c.to_digit(8).unwrap();
+                for _ in 0..2 {
+                    let Some(d) = chars.clone().next().and_then(|ch| ch.to_digit(8)) else {
+                        break;
+                    };
                     chars.next();
                     n = n * 8 + d;
-                } else {
-                    break;
                 }
+                n as u8
+            };
+            let first = octet(c, chars);
+            if first.is_ascii() {
+                output.push(first as char);
+            } else {
+                let mut bytes = vec![first];
+                loop {
+                    let mut next = chars.clone();
+                    if next.next() != Some('\\') {
+                        break;
+                    }
+                    let Some(octal @ '0'..='7') = next.next() else {
+                        break;
+                    };
+                    bytes.push(octet(octal, &mut next));
+                    *chars = next;
+                }
+                output.push_str(&String::from_utf8_lossy(&bytes));
             }
-            output.push(char::from(n as u8));
         }
         'u' => {
             if let Some(user) = crate::word::effective_user() {

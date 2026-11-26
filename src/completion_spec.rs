@@ -1042,7 +1042,7 @@ fn generate_for_tab(
         let mut seen = BTreeSet::new();
         words.retain(|w| seen.insert(w.clone()));
     } else {
-        words.sort();
+        words.sort_unstable();
         words.dedup();
     }
     Some(Generated {

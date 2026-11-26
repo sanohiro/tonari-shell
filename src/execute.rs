@@ -712,7 +712,7 @@ pub(crate) fn trace_word(word: &str) -> std::borrow::Cow<'_, str> {
         return "\\'".into();
     }
     if word.bytes().any(|b| b.is_ascii_control()) {
-        return String::from_utf8(crate::session::printf::ansi_quote(word.as_bytes(), false))
+        return String::from_utf8(crate::word::quote::ansi_quote(word.as_bytes(), false))
             .unwrap()
             .into();
     }

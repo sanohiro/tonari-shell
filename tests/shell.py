@@ -68,6 +68,30 @@ fc -ln 2 2; history -p '!$-suffix'""")
         result = self.command(TONARI, """readonly n=9; printf '%n' n 2>/dev/null; echo "$? $n" """)
         self.assertEqual((result.returncode, result.stdout), (0, b"1 9\n"))
 
+    def test_clock_flags_use_shell_timezone_and_prompt_octets_form_utf8(self):
+        source = r"""TZ=Asia/Tokyo; printf '%(%-s|%z|%-z|%-Z)T\n' 0
+p='\360\237\230\200'; echo "${p@P}" """
+        result = self.command(TONARI, source)
+        self.assertEqual(result.stdout.decode(), "0|+0900|+0900|JST\n😀\n")
+        self.assertEqual((result.returncode, result.stderr), (0, b""))
+
+    def test_regex_cache_tracks_shell_ctype(self):
+        utf8 = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        source = f"""for LC_ALL in {utf8} C {utf8}; do
+  [[ é =~ ^.$ ]]; echo $?; done"""
+        result = self.command(TONARI, source)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"0\n1\n0\n", b""))
+
+    def test_mapfile_here_callback_observes_remaining_stdin(self):
+        self.compare("""hook() { read -r more; echo "$1:$2:$more"; }
+mapfile -t -c 1 -C hook r <<'END'
+one
+two
+three
+four
+END
+printf '%s ' "${r[@]}"; echo""", 0, b"0:one:two\n1:three:four\none three \n", minimum=5)
+
     def test_posix_field_splitting_uses_ifs_after_word_expansion(self):
         source = """set -o posix
 set -f -- a 'b c' d

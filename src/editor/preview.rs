@@ -118,7 +118,7 @@ fn terminal_available() -> bool {
 }
 
 pub(crate) fn can_wait() -> bool {
-    active() && terminal_available()
+    wants_keys() && terminal_available()
 }
 
 // Capture helpers may produce more than a pipeful. Prefer draining output

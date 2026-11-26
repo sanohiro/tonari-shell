@@ -39,6 +39,7 @@ fn main() {
     let mut tables = Tables::default();
     let mut names = Vec::new();
     let mut records = Vec::new();
+    let mut locale_rows = Vec::new();
     let mut fields = Vec::new();
     let mut numeric_names = String::new();
     let mut numeric_offsets = vec![0u16];
@@ -111,7 +112,11 @@ fn main() {
         field!(DTFmt, &[locale_match!(locale => LC_TIME::D_T_FMT)]);
         field!(TFmt, &[locale_match!(locale => LC_TIME::T_FMT)]);
         field!(TFmtAmpm, &[locale_match!(locale => LC_TIME::T_FMT_AMPM)]);
-        records.push(row);
+        let index = records.iter().position(|old| *old == row).unwrap_or_else(|| {
+            records.push(row);
+            records.len() - 1
+        });
+        locale_rows.push(u16::try_from(index).unwrap());
     }
     tables
         .offsets
@@ -135,6 +140,7 @@ fn main() {
         fields.len()
     )
     .unwrap();
+    writeln!(code, "static LOCALE_ROWS: &[u16] = &{locale_rows:?};").unwrap();
     writeln!(code, "static NAMES: &[u16] = &{names:?};").unwrap();
     writeln!(code, "static ENTRIES: &[u16] = &{:?};", tables.entries).unwrap();
     writeln!(code, "static OFFSETS: &[u16] = &{:?};", tables.offsets).unwrap();
