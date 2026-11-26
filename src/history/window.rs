@@ -1,8 +1,8 @@
 // Bounded raw copy of the newest journal pages. External truncation or replacement
 // cannot fault the editor while it is reading the copy.
-use std::fs::{File, Metadata, OpenOptions};
+use std::fs::{File, Metadata};
 use std::io::{Read, Seek, SeekFrom};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::MetadataExt;
 
 #[derive(Clone, Copy, PartialEq)]
 struct Stamp {
@@ -40,14 +40,9 @@ impl Window {
         let Some(path) = super::file(session) else {
             return;
         };
-        let Ok(mut file) = OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NONBLOCK)
-            .open(path)
-        else {
+        let Ok((mut file, meta)) = super::open_journal(&path) else {
             return;
         };
-        let Ok(meta) = file.metadata() else { return };
         let stamp = Stamp::from(&meta);
         if self.stamp == Some(stamp) && !self.interrupted {
             return;
@@ -55,7 +50,7 @@ impl Window {
         self.stamp = None;
         self.interrupted = false;
         self.bytes.clear();
-        if !meta.is_file() || stamp.len < 32 * 1024 || waiting() {
+        if stamp.len < 32 * 1024 || waiting() {
             return;
         }
         let count = stamp.len.min(CAPACITY as u64);

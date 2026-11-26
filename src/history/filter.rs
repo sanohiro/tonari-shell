@@ -1,8 +1,8 @@
 use super::{command_field, decode, encoded_fragment, file};
 use crate::Session;
 use memchr::{memchr, memmem, memrchr};
-use std::fs::{File, OpenOptions};
-use std::os::unix::fs::{FileExt, OpenOptionsExt};
+use std::fs::File;
+use std::os::unix::fs::FileExt;
 
 /// Spaces separate literal search fragments. An escaped space can itself
 /// occur in a saved shell word, so keep both the backslash and the space.
@@ -43,13 +43,8 @@ pub(crate) struct Filter<'a> {
 impl<'a> Filter<'a> {
     pub fn new(session: &Session, history: &'a super::History) -> Self {
         let journal = file(session).and_then(|p| {
-            let f = OpenOptions::new()
-                .read(true)
-                .custom_flags(libc::O_NONBLOCK)
-                .open(p)
-                .ok()?;
-            let m = f.metadata().ok()?;
-            m.is_file().then(|| (f, m.len(), history.window.bytes(&m)))
+            let (f, m) = super::open_journal(&p).ok()?;
+            Some((f, m.len(), history.window.bytes(&m)))
         });
         let (file, length, cached) =
             journal.map_or((None, 0, None), |(f, size, cached)| (Some(f), size, cached));

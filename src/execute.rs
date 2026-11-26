@@ -766,70 +766,80 @@ fn builtin(cmd: &PreparedCommand, last_status: u8, session: &Session) -> Option<
         })
 }
 
-pub(crate) fn builtin_names() -> &'static [&'static str] {
-    &[
-        ":",
-        "[",
-        ".",
-        "break",
-        "bind",
-        "caller",
-        "enable",
-        "help",
-        "suspend",
-        "builtin",
-        "cd",
-        "command",
-        "compgen",
-        "complete",
-        "compopt",
-        "continue",
-        "echo",
-        "eval",
-        "exit",
-        "logout",
-        "history",
-        "fc",
-        "exec",
-        "export",
-        "false",
-        "local",
-        "printf",
-        "pwd",
-        "read",
-        "return",
-        "set",
-        "shift",
-        "source",
-        "test",
-        "true",
-        "type",
-        "unset",
-        "jobs",
-        "disown",
-        "fg",
-        "bg",
-        "kill",
-        "wait",
-        "shopt",
-        "declare",
-        "readonly",
-        "typeset",
-        "alias",
-        "unalias",
-        "trap",
-        "getopts",
-        "let",
-        "hash",
-        "umask",
-        "ulimit",
-        "times",
-        "dirs",
-        "pushd",
-        "popd",
-        "mapfile",
-        "readarray",
-    ]
+macro_rules! builtin_registry {
+    ($args:ident, $last:ident; $( $name:literal => $kind:expr ),+ $(,)?) => {
+        pub(crate) fn builtin_names() -> &'static [&'static str] { &[$($name),+] }
+        fn named_builtin(name: &str, $args: &[String], $last: u8) -> Option<Builtin> {
+            Some(match name { $($name => $kind,)+ _ => return None })
+        }
+    };
+}
+
+builtin_registry! { args, last_status;
+    ":" => Builtin::Status(0),
+    "[" => Builtin::Test,
+    "." => Builtin::Source,
+    "break" => Builtin::LoopControl,
+    "bind" => Builtin::Control,
+    "caller" => Builtin::Control,
+    "enable" => Builtin::Control,
+    "help" => Builtin::Control,
+    "suspend" => Builtin::Control,
+    "builtin" => Builtin::Status(0),
+    "cd" => Builtin::Directory,
+    "command" => Builtin::Describe,
+    "compgen" => Builtin::Completion,
+    "complete" => Builtin::Completion,
+    "compopt" => Builtin::Completion,
+    "continue" => Builtin::LoopControl,
+    "echo" => Builtin::Echo,
+    "eval" => Builtin::Eval,
+    "exit" => exit_builtin(args, last_status),
+    "logout" => exit_builtin(args, last_status),
+    "history" => Builtin::History,
+    "fc" => Builtin::History,
+    "exec" => Builtin::Exec,
+    "export" => Builtin::Export,
+    "false" => Builtin::Status(1),
+    "local" => Builtin::Declare,
+    "printf" => Builtin::Printf,
+    "pwd" => Builtin::Directory,
+    "read" => Builtin::Read,
+    "return" => Builtin::Return(match status_operands(args).first() {
+            None => Some(last_status),
+            Some(s) => s.trim().parse::<i64>().ok().map(|n| n as u8),
+        }),
+    "set" => Builtin::Set,
+    "shift" => Builtin::Shift,
+    "source" => Builtin::Source,
+    "test" => Builtin::Test,
+    "true" => Builtin::Status(0),
+    "type" => Builtin::Describe,
+    "unset" => Builtin::Unset,
+    "jobs" => Builtin::Jobs,
+    "disown" => Builtin::Jobs,
+    "fg" => Builtin::Jobs,
+    "bg" => Builtin::Jobs,
+    "kill" => Builtin::Jobs,
+    "wait" => Builtin::Jobs,
+    "shopt" => Builtin::Shopt,
+    "declare" => Builtin::Declare,
+    "readonly" => Builtin::Declare,
+    "typeset" => Builtin::Declare,
+    "alias" => Builtin::Alias,
+    "unalias" => Builtin::Alias,
+    "trap" => Builtin::Trap,
+    "getopts" => Builtin::Getopts,
+    "let" => Builtin::Let,
+    "hash" => Builtin::Hash,
+    "umask" => Builtin::Umask,
+    "ulimit" => Builtin::Ulimit,
+    "times" => Builtin::Times,
+    "dirs" => Builtin::DirectoryStack,
+    "pushd" => Builtin::DirectoryStack,
+    "popd" => Builtin::DirectoryStack,
+    "mapfile" => Builtin::Mapfile,
+    "readarray" => Builtin::Mapfile,
 }
 
 fn status_operands(args: &[String]) -> &[String] {
@@ -840,61 +850,19 @@ fn status_operands(args: &[String]) -> &[String] {
     }
 }
 
-fn named_builtin(name: &str, args: &[String], last_status: u8) -> Option<Builtin> {
-    match name {
-        "bind" | "caller" | "enable" | "help" | "suspend" => Some(Builtin::Control),
-        "history" | "fc" => Some(Builtin::History),
-        "trap" => Some(Builtin::Trap),
-        "alias" | "unalias" => Some(Builtin::Alias),
-        "builtin" => Some(Builtin::Status(0)),
-        "complete" | "compgen" | "compopt" => Some(Builtin::Completion),
-        "command" | "type" => Some(Builtin::Describe),
-        ":" | "true" => Some(Builtin::Status(0)),
-        "false" => Some(Builtin::Status(1)),
-        "printf" => Some(Builtin::Printf),
-        "jobs" | "fg" | "bg" | "kill" | "wait" | "disown" => Some(Builtin::Jobs),
-        "read" => Some(Builtin::Read),
-        "set" => Some(Builtin::Set),
-        "hash" => Some(Builtin::Hash),
-        "shopt" => Some(Builtin::Shopt),
-        "shift" => Some(Builtin::Shift),
-        "mapfile" | "readarray" => Some(Builtin::Mapfile),
-        "umask" => Some(Builtin::Umask),
-        "ulimit" => Some(Builtin::Ulimit),
-        "times" => Some(Builtin::Times),
-        "getopts" => Some(Builtin::Getopts),
-        "let" => Some(Builtin::Let),
-        "local" | "declare" | "typeset" | "readonly" => Some(Builtin::Declare),
-        "echo" => Some(Builtin::Echo),
-        "test" | "[" => Some(Builtin::Test),
-        "break" | "continue" => Some(Builtin::LoopControl),
-        "export" => Some(Builtin::Export),
-        "unset" => Some(Builtin::Unset),
-        "dirs" | "pushd" | "popd" => Some(Builtin::DirectoryStack),
-        "cd" | "pwd" => Some(Builtin::Directory),
-        "source" | "." => Some(Builtin::Source),
-        "eval" => Some(Builtin::Eval),
-        "exec" => Some(Builtin::Exec),
-        "return" => Some(Builtin::Return(match status_operands(args).first() {
-            None => Some(last_status),
-            Some(s) => s.trim().parse::<i64>().ok().map(|n| n as u8),
-        })),
-        "exit" | "logout" => {
-            let args = status_operands(args);
-            let status = match args.first() {
-                None => last_status,
-                Some(s) => match s.trim().parse::<i64>() {
-                    Ok(n) => n as u8,
-                    Err(_) => return Some(Builtin::InvalidExit),
-                },
-            };
-            Some(if args.len() > 1 {
-                Builtin::ExtraExitArgs
-            } else {
-                Builtin::Exit(status)
-            })
-        }
-        _ => None,
+fn exit_builtin(args: &[String], last_status: u8) -> Builtin {
+    let args = status_operands(args);
+    let status = match args.first() {
+        None => last_status,
+        Some(s) => match s.trim().parse::<i64>() {
+            Ok(n) => n as u8,
+            Err(_) => return Builtin::InvalidExit,
+        },
+    };
+    if args.len() > 1 {
+        Builtin::ExtraExitArgs
+    } else {
+        Builtin::Exit(status)
     }
 }
 
@@ -1227,6 +1195,12 @@ pub(crate) fn capture_stdout(run: impl FnOnce() -> Flow) -> io::Result<(Flow, Ve
     Ok((flow, output))
 }
 
+fn fd_replaced(session: &mut Session, fd: RawFd) {
+    session.stdin_replaced |= fd == 0;
+    session.substitutions.replaced(fd);
+    coprocess::replaced(session, fd);
+}
+
 enum SavedFd {
     Unchanged,
     Closed,
@@ -1234,6 +1208,16 @@ enum SavedFd {
 }
 
 impl SavedFd {
+    fn restore_all(saved: impl IntoIterator<Item = (RawFd, Self)>) -> io::Result<()> {
+        let mut result = Ok(());
+        for (fd, original) in saved {
+            if let Err(e) = original.restore(fd) {
+                result = Err(e);
+            }
+        }
+        result
+    }
+
     fn capture(action: &Action<'_>, actions: &[Action<'_>]) -> io::Result<Self> {
         let fd = action.destination();
         match fd::duplicate_except(fd, 3, |n| actions.iter().any(|a| a.references(n))) {
@@ -1498,24 +1482,17 @@ fn run_builtin(
             if r.target == Target::Duplicate && r.word.parse::<RawFd>() == Ok(r.fd) {
                 continue;
             }
-            session.stdin_replaced |= r.fd == 0;
-            session.substitutions.replaced(r.fd);
-            coprocess::replaced(session, r.fd);
+            fd_replaced(session, r.fd);
         }
         return Ok(flow);
     }
-    let mut restore = Ok(());
-    for (fd, original) in saved
-        .into_iter()
-        .enumerate()
-        .map(|(fd, v)| (fd as RawFd, v))
-        .chain(extra)
-    {
-        if let Err(e) = original.restore(fd) {
-            restore = Err(e);
-        }
-    }
-    restore?;
+    SavedFd::restore_all(
+        saved
+            .into_iter()
+            .enumerate()
+            .map(|(fd, v)| (fd as RawFd, v))
+            .chain(extra),
+    )?;
     // Failures in a compound command's body are tested by its own statement
     // list. A redirect failure happens before that list can run.
     if let Err(index) = redirection
@@ -1708,8 +1685,7 @@ fn start_raw(
         } else {
             1
         };
-        let code = crate::traps::finish(session, code);
-        unsafe { libc::_exit(i32::from(code)) }
+        crate::subshell::exit_child(session, code)
     }
     Ok(Stage::Child(pid))
 }
@@ -1945,8 +1921,7 @@ fn start(
             };
             flow.child_status()
         };
-        let code = crate::traps::finish(session, code);
-        unsafe { libc::_exit(code.into()) }
+        crate::subshell::exit_child(session, code)
     }
     Ok(Stage::Child(pid))
 }

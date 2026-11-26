@@ -699,6 +699,13 @@ pub enum Start<'a> {
     Read { initial: &'a str, files_only: bool },
 }
 
+struct ReverseSearch {
+    query: String,
+    index: usize,
+    original: String,
+    original_cursor: usize,
+}
+
 pub fn line(
     prompt: &str,
     history: &mut History,
@@ -733,7 +740,7 @@ pub fn line(
     let mut vi = vi::State::default();
     let mut last_arg: Option<(usize, bool)> = None;
     let mut recall = recall::Recall::new(session.history_lines().len());
-    let mut search: Option<(String, usize, String, usize)> = None;
+    let mut search: Option<ReverseSearch> = None;
     let mut pending_queries: Vec<SearchQuery> = Vec::new();
     let mut matched_query: Option<String> = None;
     let mut inserted = String::new();
@@ -781,7 +788,7 @@ pub fn line(
             ""
         };
         let search_prompt;
-        let visible_prompt = if let Some((query, _, _, _)) = &search {
+        let visible_prompt = if let Some(ReverseSearch { query, .. }) = &search {
             let mut display = String::from("(reverse-i-search) `");
             let visible = if query.len() > 1024 {
                 display.push('…');
@@ -1047,11 +1054,22 @@ pub fn line(
         };
         if action == Action::Search && search.is_none() {
             matched_query = None;
-            search = Some((String::new(), 0, text.clone(), cursor));
+            search = Some(ReverseSearch {
+                query: String::new(),
+                index: 0,
+                original: text.clone(),
+                original_cursor: cursor,
+            });
             // Readline keeps the current draft until a nonempty query matches.
             continue;
         }
-        if let Some((query, index, original, original_cursor)) = search.as_mut() {
+        if let Some(ReverseSearch {
+            query,
+            index,
+            original,
+            original_cursor,
+        }) = search.as_mut()
+        {
             match action {
                 Action::Abort => {
                     pending_queries.clear();

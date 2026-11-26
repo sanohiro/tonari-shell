@@ -121,9 +121,8 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars) -> String {
             output.push(char::from(n as u8));
         }
         'u' => {
-            let user = unsafe { libc::getpwuid(libc::geteuid()) };
-            if !user.is_null() {
-                output.push_str(&unsafe { CStr::from_ptr((*user).pw_name) }.to_string_lossy());
+            if let Some(user) = crate::word::effective_user() {
+                output.push_str(user);
             }
         }
         c @ ('h' | 'H') => {

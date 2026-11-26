@@ -99,6 +99,19 @@ pub(crate) fn finish_interactive(session: &mut Session) {
     }
 }
 
+// Open nonblocking before checking the descriptor: a renamed journal can be a FIFO.
+fn open_journal(path: &std::path::Path) -> std::io::Result<(fs::File, fs::Metadata)> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(std::io::ErrorKind::InvalidInput.into());
+    }
+    Ok((file, metadata))
+}
+
 fn file(session: &Session) -> Option<PathBuf> {
     let setting = session.scalar_setting("HISTFILE")?;
     if setting.is_empty()
@@ -249,12 +262,8 @@ impl InitialJournal {
     // The editor already reads the shared journal in windows. History builtins
     // need only the startup suffix permitted by HISTSIZE, on first access.
     fn load(&self, session: &mut Session) -> std::io::Result<()> {
-        let mut journal = OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NONBLOCK)
-            .open(&self.path)?;
-        let m = journal.metadata()?;
-        if (m.dev(), m.ino()) != self.identity || m.len() < self.len || !m.is_file() {
+        let (mut journal, m) = open_journal(&self.path)?;
+        if (m.dev(), m.ino()) != self.identity || m.len() < self.len {
             return Ok(());
         }
         let available = session
@@ -683,15 +692,7 @@ impl History {
         if input_ready() {
             return false;
         }
-        let journal = file(session).and_then(|path| {
-            let file = OpenOptions::new()
-                .read(true)
-                .custom_flags(libc::O_NONBLOCK)
-                .open(path)
-                .ok()?;
-            let metadata = file.metadata().ok()?;
-            metadata.is_file().then_some((file, metadata))
-        });
+        let journal = file(session).and_then(|path| open_journal(&path).ok());
         let Some((mut journal, metadata)) = journal else {
             self.shared.clear();
             self.journal = None;
@@ -799,12 +800,7 @@ impl History {
     ) -> Result<Option<String>, ()> {
         const BLOCK: usize = 240 * 1024;
         let path = file(session).ok_or(())?;
-        let journal = OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NONBLOCK)
-            .open(path)
-            .map_err(|_| ())?;
-        let m = journal.metadata().map_err(|_| ())?;
+        let (journal, m) = open_journal(&path).map_err(|_| ())?;
         if Some((m.dev(), m.ino())) != self.journal || m.len() < self.offset {
             return Err(());
         }

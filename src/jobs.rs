@@ -394,6 +394,10 @@ pub struct Jobs {
 }
 
 impl Jobs {
+    fn all_jobs(&self) -> impl DoubleEndedIterator<Item = &Job> + Clone {
+        self.inherited.iter().chain(&self.table)
+    }
+
     pub(crate) fn defer_exit(&mut self, check_running: bool, command: usize, posix: bool) -> bool {
         if self.table.is_empty()
             || self
@@ -845,14 +849,11 @@ impl Jobs {
                 if let Ok(id) = name.parse::<u32>() {
                     return self.table.iter().position(|j| j.id == id);
                 }
-                let mut hits =
-                    self.table
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, job)| match name.strip_prefix('?') {
-                            Some(part) => job.name.contains(part),
-                            None => job.name.starts_with(name),
-                        });
+                let mut hits = self
+                    .table
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, job)| job_matches(&job.name, name));
                 let (i, _) = hits.next()?;
                 hits.next().is_none().then_some(i)
             }
@@ -1190,8 +1191,15 @@ fn marked_jobs<'a>(jobs: impl Iterator<Item = &'a Job>) -> (Option<u32>, Option<
     )
 }
 
+fn job_matches(name: &str, spec: &str) -> bool {
+    match spec.strip_prefix('?') {
+        Some(part) => name.contains(part),
+        None => name.starts_with(spec),
+    }
+}
+
 fn list_position(jobs: &Jobs, spec: &str, markers: (Option<u32>, Option<u32>)) -> Option<usize> {
-    let mut all = jobs.inherited.iter().chain(&jobs.table);
+    let mut all = jobs.all_jobs();
     let spec = spec.strip_prefix('%').unwrap_or(spec);
     let id = match spec {
         "" | "+" | "%" => markers.0,
@@ -1201,10 +1209,7 @@ fn list_position(jobs: &Jobs, spec: &str, markers: (Option<u32>, Option<u32>)) -
     if let Some(id) = id {
         return all.position(|j| j.id == id);
     }
-    let mut matches = all.enumerate().filter(|(_, j)| {
-        spec.strip_prefix('?')
-            .map_or_else(|| j.name.starts_with(spec), |part| j.name.contains(part))
-    });
+    let mut matches = all.enumerate().filter(|(_, j)| job_matches(&j.name, spec));
     let (index, _) = matches.next()?;
     matches.next().is_none().then_some(index)
 }
@@ -1232,7 +1237,7 @@ fn list_to(jobs: &mut Jobs, args: &[String], posix: bool, mut out: impl Write) -
         }
     }
     let mut status = 0;
-    let markers = marked_jobs(jobs.inherited.iter().chain(&jobs.table));
+    let markers = marked_jobs(jobs.all_jobs());
     let all = if args.is_empty() {
         jobs.inherited.len() + jobs.table.len()
     } else {
@@ -1322,7 +1327,7 @@ pub fn dispatch(words: &[String], session: &mut Session, last: u8) -> crate::Flo
             words.next();
         }
         session.jobs.poll();
-        let all = || session.jobs.inherited.iter().chain(&session.jobs.table);
+        let all = || session.jobs.all_jobs();
         let markers = marked_jobs(all());
         let command = crate::parser::SimpleCommand {
             words: words
