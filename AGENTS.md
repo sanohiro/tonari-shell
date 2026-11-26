@@ -55,3 +55,7 @@ Bash と Tonari が同じ結果を返す場合も、挙動の正しさを確認�
 バグを期待値にしている試験にも適用します。上流の通常期待値とシェル固有の
 注記を個別に照合し、実際の引数、出力、終了状態、副作用を確認します。参照した
 Bash の版、ランナー、外部コマンドが結果に影響した場合は、その条件も記録します。
+
+When closing a compatibility audit, follow each discrepancy through the relevant GNU and Tonari code. Fix defects in the supported behavior, including defects shared with Bash. If an upstream driver stops early, exercise its later supported cases independently. Rerun the affected suites on the resulting release, complete the optimization pass above, and record the witness and rationale for each retained difference. Ask the user when the outcome requires a product decision.
+
+互換性監査では差分を両方の実装まで追い、対象範囲の不具合は Bash と共通のものも含めて直す。上流の試験が途中で止まったら、後続の対象ケースを単独で実行する。修正版で再試験と上記の速度検証を行い、残す差には入力・結果・理由を記録する。仕様を選び直す必要がある場合はユーザーに判断を求める。

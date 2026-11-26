@@ -1,5 +1,31 @@
 # Startup and execution / 起動と実行性能
 
+## 2026-11-27 · Native measurements for the GNU case review / 個別修正の実機計測
+
+The review measured 117 distinct workloads on each platform. In the same final release (a3f77c7), using interleaved medians, Tonari finished ahead of Bash on 116 of 117 on the Apple M1 and 114 of 117 on native x86-64 Linux. 92 Mac workloads and 91 Linux workloads completed in at most two thirds of the Bash time. The table below gives milliseconds for the complete workload, including shell startup. All final rows use the same executable revision on both hosts. The full table also keeps the earlier trials and comparison revisions. For forced interactive keymaps the preceding release returned the wrong option state under TERM=dumb. Bash and the final candidate both return the selected state.
+
+| Workload | Iterations | M1 Bash | M1 Tonari | x86-64 Bash | x86-64 Tonari |
+|---|---:|---:|---:|---:|---:|
+| Temporary descriptor move | 600 | 11.2 | 5.261 | 3.834 | 2.978 |
+| Quote variables for set output | 500 | 42.776 | 15.324 | 15.573 | 9.406 |
+| Read physical lines with history expansion | 1000 | 9.613 | 4.187 | 2.04 | 1.075 |
+| Source lines in two command substitutions | 250 | 340.075 | 7.523 | 129.761 | 2.498 |
+| Associative destinations and lookup | 1400 | 15.099 | 6.809 | 5.221 | 3.088 |
+| Literal bracket keys from command substitution | 300 | 221.555 | 4.61 | 76.367 | 1.028 |
+| Import timestamped history with blank lines | 160 | 18.794 | 8.799 | 8.021 | 4.842 |
+| GLOBIGNORE with directory separators | 100 | 1767.292 | 128.069 | 79.613 | 66.669 |
+| Start and wait for a monitored external command | 100 | 168.005 | 102.513 | 54.518 | 35.253 |
+| Resolve a deep physical working directory | 18 | 89.182 | 38.753 | 34.367 | 8.259 |
+| Edit a command using the vi external editor | 1 | 8.059 | 8.243 | 1.544 | 1.582 |
+
+Mac は Bash 5.3.20、Linux は Bash 5.3.9 と比較した。同じホスト・データでウォームアップ後に実行順を入れ替え、中央値を採用した。外部エディターは起動、端末の切り替え、編集結果の読み戻しまで含み、ジョブの停止・再開には OS の待ち時間も入る。いずれも実際の待ち時間として表に残した。両プラットフォームで同じ最終コミット a3f77c7 の全項目を再計測した。
+
+The final macOS arm64 executable was 1,865,088 bytes and linked to libSystem. The Linux x86-64 executable was a 2,627,352-byte stripped static PIE. The comparison uses native CPUs on both platforms. The stopped-job selection timing starts with a child that has already stopped itself. The fc replay timing resets the input history each iteration to ensure equal output. [All before/after medians](compatibility/bash-source-review/native-case-review.tsv) · [Individual trials](compatibility/bash-source-review/native-case-samples.jsonl.gz) · [Test and timing harness](../tests/compat/source_review.py) · [Final Linux run](https://github.com/sanohiro/tonari-shell/actions/runs/45871886321)
+
+The full sweep used nine timed samples per executable on each host. In a separate 51-sample run, the three external-editor shortcuts took Tonari 7.214–7.426 ms on the M1 and Bash 7.552–7.603 ms. On Linux, Emacs took 1.456 ms in Tonari and 1.481 ms in Bash. The two vi invocations took 1.484 and 1.487 ms in Tonari, and 1.468 and 1.445 ms in Bash. The timer runs from the keypress to the edited command's output. It includes a temporary file, an external editor script, its grep child and the terminal handoff. The implementation reopens the edited path because editors can replace the file. [51-sample measurements](compatibility/bash-source-review/editor-recheck.tsv) · [Linux repeat](https://github.com/sanohiro/tonari-shell/actions/runs/45872366046)
+
+51回の追試では、Linux の外部エディター呼び出しで vi の2経路が Bash より 0.016 ms と 0.042 ms 長かった。履歴展開1,000行は Bash 1.784 ms、Tonari 0.983 ms。変数一覧500回は Bash 14.276 ms、Tonari 8.752 ms だった。
+
 ## Native timings for individual GNU regression fixes / GNU 個別修正の実機計測
 
 The table lists elapsed milliseconds for Bash, the first working implementation and the tuned implementation on Apple M1 and native x86-64 Linux. The archive retains individual trials. Reading 110 regular files through an unquoted POSIX pathname variable took 69.165 ms in the first M1 implementation, 5.923 ms after using the stored name, and 10.962 ms in Bash. The corresponding Linux medians were 22.570, 2.500 and 3.293 ms. The fixture uses a literal asterisk in the file name.

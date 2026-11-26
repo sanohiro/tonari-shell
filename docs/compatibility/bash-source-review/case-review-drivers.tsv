@@ -1,0 +1,170 @@
+distribution	reference	driver	previous_verdict	current_verdict	bash_exit	tonari_exit	bash_timeout	tonari_timeout	bash_diff_hunks	tonari_diff_hunks	previous_tonari_diff_hunks	review_point
+debian	5.2.37(1)-release	run-alias	different	different	0	1	False	False	0	1	1	Invalid syntax and command diagnostics. Alias tables and -p are checked separately for each Bash release.
+debian	5.2.37(1)-release	run-appendop	different	different	0	1	False	False	0	1	1	Assignment and append diagnostics. Check the stored element after each operation.
+debian	5.2.37(1)-release	run-arith	different	different	0	1	False	False	0	14	17	Invalid or empty arithmetic operands, quote interpretation and recovery. Check assignment and subscript evaluation order separately.
+debian	5.2.37(1)-release	run-arith-for	different	different	0	1	False	False	0	3	3	Syntax diagnostics and printed function bodies containing arithmetic loops. Trace and execution are tested directly.
+debian	5.2.37(1)-release	run-array	different	different	0	1	False	False	0	28	36	Special-variable array snapshots, element values and declaration rendering. The focused cases check empty elements and index effects.
+debian	5.2.37(1)-release	run-array2	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-assoc	different	different	0	1	False	False	0	21	29	Associative entry order, explicit quoting, declarations and builtin receivers. Test key identity, removed entries, stored values and failure effects separately.
+debian	5.2.37(1)-release	run-attr	different	different	0	1	False	False	0	8	10	Declaration and readonly diagnostics. Check attribute persistence, local scope and partial initializers.
+debian	5.2.37(1)-release	run-braces	different	different	0	1	False	False	0	1	1	A backslash reached by a character range is data and is retained during expansion.
+debian	5.2.37(1)-release	run-builtins	different	different	0	1	False	False	0	16	16	Builtin configuration, disabled commands, error wording and platform utilities. Loadable C builtins are outside the runtime ABI.
+debian	5.2.37(1)-release	run-case	different	different	0	1	False	False	0	1	1	Case syntax diagnostics. Pattern execution and xtrace also have direct controls.
+debian	5.2.37(1)-release	run-casemod	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-complete	different	different	0	1	False	False	0	12	12	Completion specification listing order and shell-provided defaults. PTY tests check the accepted command and its arguments.
+debian	5.2.37(1)-release	run-comsub	different	different	0	1	False	False	0	3	3	An alias can supply a closing delimiter that does not appear in the input. See the documented POSIX parsing decision.
+debian	5.2.37(1)-release	run-comsub-eof	different	different	0	1	False	False	0	3	3	Here-document terminators and incomplete substitutions. Check that the complete delimiter line, including its position, is respected.
+debian	5.2.37(1)-release	run-comsub-posix	different	different	0	1	False	False	0	5	5	Printed shell syntax and command substitutions in POSIX mode. Separate cases check field boundaries and status.
+debian	5.2.37(1)-release	run-cond	different	different	0	1	False	False	0	3	7	Diagnostics for invalid grouped expressions. Separate witnesses test POSIX ERE brackets, captures and exit status.
+debian	5.2.37(1)-release	run-coproc	different	different	0	1	False	False	0	4	4	Numeric pipe descriptors and diagnostics vary. Exchange real data through each end and wait for the named child.
+debian	5.2.37(1)-release	run-cprint	different	different	0	1	False	False	0	2	2	Canonical formatting of printed compound commands. Reusable definitions and syntax-only output have separate checks.
+debian	5.2.37(1)-release	run-dbg-support	different	different	0	1	False	False	0	4	163	Debugger stack, source locations and diagnostics. Trace actual nested calls, returns and shell substitutions.
+debian	5.2.37(1)-release	run-dbg-support2	different	golden match	0	0	False	False	0	0	2	Full golden transcript matched.
+debian	5.2.37(1)-release	run-dirstack	different	different	0	0	False	False	0	2	2	Directory diagnostics. Check long physical paths and the directory reached by pushd, popd and cd.
+debian	5.2.37(1)-release	run-dollars	different	different	0	1	False	False	0	8	8	Initial fields, empty values and IFS around positional expansions. See the documented quoting and splitting cases.
+debian	5.2.37(1)-release	run-dynvar	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-errors	different	different	0	1	False	False	0	25	25	Exact diagnostic messages, locations and usage text. Independent tests check recovery, exit status and file effects.
+debian	5.2.37(1)-release	run-execscript	control inconclusive	control inconclusive	1	1	False	False	4	16	15	Platform binary/script diagnostics and shell identification. Direct checks cover binary files and directories as script operands.
+debian	5.2.37(1)-release	run-exp-tests	different	different	0	1	False	False	0	3	4	Quoted empty fields and non-UTF-8 fixtures. UTF-8 source and explicit empty scalar fields have separate assertions.
+debian	5.2.37(1)-release	run-exportfunc	separate export-function probe	separate export-function probe								Exported function call is exercised by the separate probe.
+debian	5.2.37(1)-release	run-extglob	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-extglob2	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-extglob3	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-func	different	different	0	1	False	False	0	17	20	Printed function syntax, registered functions and function-name policy in POSIX mode. Check definition round trips and execution.
+debian	5.2.37(1)-release	run-getopts	different	different	0	1	False	False	0	4	4	Option processing diagnostics. Check OPTARG, OPTIND, status and readonly destinations.
+debian	5.2.37(1)-release	run-glob-test	different	different	0	1	False	False	0	6	10	Locale and invalid-byte cases. Compare supported filenames and bytewise Linux ordering separately.
+debian	5.2.37(1)-release	run-globstar	different	golden match	0	0	False	False	0	0	44	Full golden transcript matched.
+debian	5.2.37(1)-release	run-heredoc	different	different	0	1	False	False	0	16	17	Rendered compound syntax, quoted delimiters and data bytes. Tests assert the data read and the selected descriptor.
+debian	5.2.37(1)-release	run-herestr	different	different	0	1	False	False	0	3	3	Printed functions containing here-strings. Compare the actual bytes delivered to the command separately.
+debian	5.2.37(1)-release	run-histexpand	different	different	0	1	False	False	0	2	4	History expansion diagnostics. Test retained commands and which argument the event selects.
+debian	5.2.37(1)-release	run-history	different	different	0	1	False	False	0	11	19	Forced interactive pipe output, history recall, replay and timestamps. Read and rewrite multiline records and exercise editor keys in a PTY.
+debian	5.2.37(1)-release	run-ifs	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-ifs-posix	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-input-test	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-intl	control inconclusive	control inconclusive	1	1	False	False	1	2	2	GNU gettext configuration and non-UTF-8 fixtures. UTF-8 is the supported shell text encoding.
+debian	5.2.37(1)-release	run-invert	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-iquote	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-jobs	different	different	0	1	False	False	0	26	21	Job identifiers, job notices and their ordering. Compare process groups, stopped status, current/previous selection, resume and exit.
+debian	5.2.37(1)-release	run-lastpipe	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-mapfile	different	different	0	1	False	False	0	1	1	An invalid UTF-8 text fixture interrupts the combined driver. Direct tests check valid data, array destinations, offsets and callbacks.
+debian	5.2.37(1)-release	run-more-exp	different	different	0	1	False	False	0	2	2	Expansion diagnostics. Compare parameter values and field counts independently.
+debian	5.2.37(1)-release	run-nameref	different	different	0	1	False	False	0	79	81	Invalid or circular targets, declaration rendering and recovery. Assertions check the retained binding, value and scope.
+debian	5.2.37(1)-release	run-new-exp	different	different	0	1	False	False	0	20	12	Quoted empty fields, rendered functions, prompt identity and nonprinting markers. Verify scalar and array declaration expansion independently.
+debian	5.2.37(1)-release	run-nquote	different	different	0	1	False	False	0	2	2	Alternative printable spelling of quoted bytes. Separate cases check values and replayable output.
+debian	5.2.37(1)-release	run-nquote1	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-nquote2	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-nquote3	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-nquote4	different	different	0	1	False	False	0	1	1	Non-UTF-8 shell text. Binary data remains valid on file descriptors.
+debian	5.2.37(1)-release	run-nquote5	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-parser	different	different	0	1	False	False	0	3	3	Syntax diagnostics and nested shell delimiters. Separate cases check recovery and command-substitution boundaries.
+debian	5.2.37(1)-release	run-posix2	different	different	0	1	False	False	0	1	1	POSIX-mode diagnostics. Each numbered manual rule has a dedicated input.
+debian	5.2.37(1)-release	run-posixexp	different	different	0	1	False	False	0	4	5	Field preservation in positional-parameter alternatives. Separate assertions check each argument and its boundaries.
+debian	5.2.37(1)-release	run-posixexp2	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-posixpat	different	different	0	1	False	False	0	1	1	Non-UTF-8 input interrupts this driver. Run its later collating-element, equivalence and character-class cases separately.
+debian	5.2.37(1)-release	run-posixpipe	different	different	0	1	False	False	0	1	1	Formatting of functions containing POSIX pipelines. Jobs and pipeline status have independent controls.
+debian	5.2.37(1)-release	run-precedence	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-printf	different	different	0	1	False	False	0	8	8	Formatting diagnostics, wide output and out-of-range fields. Separate checks compare generated values, -v destinations and side effects.
+debian	5.2.37(1)-release	run-procsub	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-quote	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-quotearray	different	different	0	1	False	False	0	25	30	Quote preservation and single evaluation of associative subscripts. Compare key contents and side effects through language and builtin entry points.
+debian	5.2.37(1)-release	run-read	control inconclusive	control inconclusive	1	1	False	False	3	7	7	Preserve escaped trailing whitespace and valid UTF-8 strings. Verify destination arrays and whether failed validation consumed any input.
+debian	5.2.37(1)-release	run-redir	different	different	0	1	False	False	0	10	10	Printed redirections, diagnostics and descriptor allocation. Verify data destination, file contents and failure before truncation.
+debian	5.2.37(1)-release	run-rhs-exp	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-rsh	different	different	0	1	False	False	0	1	1	Restricted-shell isolation is outside the project scope.
+debian	5.2.37(1)-release	run-set-e	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-set-x	different	golden match	0	0	False	False	0	0	15	Full golden transcript matched.
+debian	5.2.37(1)-release	run-shopt	different	different	0	1	False	False	0	22	36	Listing order, option settings and excluded GNU facilities. Individual probes change and restore observable settings.
+debian	5.2.37(1)-release	run-strip	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-test	different	different	0	1	False	False	0	22	17	Test syntax diagnostics and invalid descriptor handling. Check all 41 conditional operators and Bash-mode versus sh-mode descriptor status.
+debian	5.2.37(1)-release	run-tilde	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-tilde2	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+debian	5.2.37(1)-release	run-trap	different	different	0	1	False	False	0	1	3	Trace prefix and diagnostics. Check actual trap context, nested helper calls and child exit status.
+debian	5.2.37(1)-release	run-type	different	different	0	1	False	False	0	19	19	Hashed path listing order, function representations and lookup precedence. Check the command which actually runs.
+debian	5.2.37(1)-release	run-varenv	different	different	0	1	False	False	0	15	24	A local with export removed hides an exported global. Compare the environment received by a child process and restoration on return.
+debian	5.2.37(1)-release	run-vredir	different	different	0	1	False	False	0	21	19	Descriptor numbers, printed syntax and readonly destinations. Assert descriptor functionality and file contents.
+ubuntu	5.3.9(1)-release	run-alias	different	different	0	1	False	False	0	3	3	Invalid syntax and command diagnostics. Alias tables and -p are checked separately for each Bash release.
+ubuntu	5.3.9(1)-release	run-appendop	different	different	0	1	False	False	0	1	1	Assignment and append diagnostics. Check the stored element after each operation.
+ubuntu	5.3.9(1)-release	run-arith	different	different	0	1	False	False	0	32	36	Invalid or empty arithmetic operands, quote interpretation and recovery. Check assignment and subscript evaluation order separately.
+ubuntu	5.3.9(1)-release	run-arith-for	different	different	0	1	False	False	0	6	6	Syntax diagnostics and printed function bodies containing arithmetic loops. Trace and execution are tested directly.
+ubuntu	5.3.9(1)-release	run-array	different	different	0	1	False	False	0	39	48	Special-variable array snapshots, element values and declaration rendering. The focused cases check empty elements and index effects.
+ubuntu	5.3.9(1)-release	run-array2	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-assoc	different	different	0	1	False	False	0	22	31	Associative entry order, explicit quoting, declarations and builtin receivers. Test key identity, removed entries, stored values and failure effects separately.
+ubuntu	5.3.9(1)-release	run-attr	different	different	0	1	False	False	0	8	10	Declaration and readonly diagnostics. Check attribute persistence, local scope and partial initializers.
+ubuntu	5.3.9(1)-release	run-braces	different	different	0	1	False	False	0	2	1	A backslash reached by a character range is data and is retained during expansion.
+ubuntu	5.3.9(1)-release	run-builtins	control inconclusive	control inconclusive	1	1	False	False	2	41	41	Builtin configuration, disabled commands, error wording and platform utilities. Loadable C builtins are outside the runtime ABI.
+ubuntu	5.3.9(1)-release	run-case	different	different	0	1	False	False	0	1	1	Case syntax diagnostics. Pattern execution and xtrace also have direct controls.
+ubuntu	5.3.9(1)-release	run-casemod	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-complete	different	different	0	1	False	False	0	76	83	Completion specification listing order and shell-provided defaults. PTY tests check the accepted command and its arguments.
+ubuntu	5.3.9(1)-release	run-comsub	different	different	0	1	False	False	0	3	3	An alias can supply a closing delimiter that does not appear in the input. See the documented POSIX parsing decision.
+ubuntu	5.3.9(1)-release	run-comsub-eof	different	different	0	1	False	False	0	3	3	Here-document terminators and incomplete substitutions. Check that the complete delimiter line, including its position, is respected.
+ubuntu	5.3.9(1)-release	run-comsub-posix	different	different	0	1	False	False	0	5	5	Printed shell syntax and command substitutions in POSIX mode. Separate cases check field boundaries and status.
+ubuntu	5.3.9(1)-release	run-comsub2	different	different	0	1	False	False	0	10	15	Diagnostics, option listing layout and substitution output. Source-line tests cover nested substitutions.
+ubuntu	5.3.9(1)-release	run-cond	different	different	0	1	False	False	0	4	10	Diagnostics for invalid grouped expressions. Separate witnesses test POSIX ERE brackets, captures and exit status.
+ubuntu	5.3.9(1)-release	run-coproc	different	different	0	1	False	False	0	4	4	Numeric pipe descriptors and diagnostics vary. Exchange real data through each end and wait for the named child.
+ubuntu	5.3.9(1)-release	run-cprint	different	different	0	1	False	False	0	2	2	Canonical formatting of printed compound commands. Reusable definitions and syntax-only output have separate checks.
+ubuntu	5.3.9(1)-release	run-dbg-support	different	different	0	1	False	False	0	5	164	Debugger stack, source locations and diagnostics. Trace actual nested calls, returns and shell substitutions.
+ubuntu	5.3.9(1)-release	run-dbg-support2	different	golden match	0	0	False	False	0	0	2	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-dirstack	different	different	0	0	False	False	0	2	2	Directory diagnostics. Check long physical paths and the directory reached by pushd, popd and cd.
+ubuntu	5.3.9(1)-release	run-dollars	different	different	0	1	False	False	0	8	8	Initial fields, empty values and IFS around positional expansions. See the documented quoting and splitting cases.
+ubuntu	5.3.9(1)-release	run-dynvar	different	different	0	1	False	False	0	1	1	Diagnostics for dynamic or readonly variables. Verify dynamic values in their shell or subshell context.
+ubuntu	5.3.9(1)-release	run-errors	different	different	0	1	False	False	0	43	43	Exact diagnostic messages, locations and usage text. Independent tests check recovery, exit status and file effects.
+ubuntu	5.3.9(1)-release	run-execscript	control inconclusive	control inconclusive	1	1	False	False	4	29	29	Platform binary/script diagnostics and shell identification. Direct checks cover binary files and directories as script operands.
+ubuntu	5.3.9(1)-release	run-exp-tests	different	different	0	1	False	False	0	3	4	Quoted empty fields and non-UTF-8 fixtures. UTF-8 source and explicit empty scalar fields have separate assertions.
+ubuntu	5.3.9(1)-release	run-exportfunc	separate export-function probe	separate export-function probe								Exported function call is exercised by the separate probe.
+ubuntu	5.3.9(1)-release	run-extglob	different	different	0	1	False	False	0	2	2	Option listing and extended patterns. Direct glob and conditional cases inspect actual matches.
+ubuntu	5.3.9(1)-release	run-extglob2	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-extglob3	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-func	different	different	0	1	False	False	0	22	31	Printed function syntax, registered functions and function-name policy in POSIX mode. Check definition round trips and execution.
+ubuntu	5.3.9(1)-release	run-getopts	different	different	0	1	False	False	0	5	5	Option processing diagnostics. Check OPTARG, OPTIND, status and readonly destinations.
+ubuntu	5.3.9(1)-release	run-glob-bracket	different	different	0	1	False	False	0	1	1	The driver requires the GNU loadable C ABI. Separate shell-level cases exercise pathname separators, brackets and GLOBIGNORE.
+ubuntu	5.3.9(1)-release	run-glob-test	different	different	0	1	False	False	0	6	10	Locale and invalid-byte cases. Compare supported filenames and bytewise Linux ordering separately.
+ubuntu	5.3.9(1)-release	run-globstar	different	golden match	0	0	False	False	0	0	44	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-heredoc	different	different	0	1	False	False	0	20	21	Rendered compound syntax, quoted delimiters and data bytes. Tests assert the data read and the selected descriptor.
+ubuntu	5.3.9(1)-release	run-herestr	different	different	0	1	False	False	0	3	3	Printed functions containing here-strings. Compare the actual bytes delivered to the command separately.
+ubuntu	5.3.9(1)-release	run-histexpand	different	different	0	1	False	False	0	2	4	History expansion diagnostics. Test retained commands and which argument the event selects.
+ubuntu	5.3.9(1)-release	run-history	different	different	0	1	False	False	0	21	35	Forced interactive pipe output, history recall, replay and timestamps. Read and rewrite multiline records and exercise editor keys in a PTY.
+ubuntu	5.3.9(1)-release	run-ifs	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-ifs-posix	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-input-test	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-intl	control inconclusive	control inconclusive	1	1	False	False	1	2	4	GNU gettext configuration and non-UTF-8 fixtures. UTF-8 is the supported shell text encoding.
+ubuntu	5.3.9(1)-release	run-invert	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-invocation	different	different	0	1	False	False	0	5	4	Program identity, usage, option diagnostics and startup settings. Exercise the installed and missing debugger hooks and no-execute input.
+ubuntu	5.3.9(1)-release	run-iquote	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-jobs	different	different	0	1	False	False	0	17	27	Job identifiers, job notices and their ordering. Compare process groups, stopped status, current/previous selection, resume and exit.
+ubuntu	5.3.9(1)-release	run-lastpipe	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-mapfile	different	different	0	1	False	False	0	1	1	An invalid UTF-8 text fixture interrupts the combined driver. Direct tests check valid data, array destinations, offsets and callbacks.
+ubuntu	5.3.9(1)-release	run-more-exp	different	different	0	1	False	False	0	2	2	Expansion diagnostics. Compare parameter values and field counts independently.
+ubuntu	5.3.9(1)-release	run-nameref	different	different	0	1	False	False	0	85	87	Invalid or circular targets, declaration rendering and recovery. Assertions check the retained binding, value and scope.
+ubuntu	5.3.9(1)-release	run-new-exp	different	different	0	1	False	False	0	22	13	Quoted empty fields, rendered functions, prompt identity and nonprinting markers. Verify scalar and array declaration expansion independently.
+ubuntu	5.3.9(1)-release	run-nquote	different	different	0	1	False	False	0	2	2	Alternative printable spelling of quoted bytes. Separate cases check values and replayable output.
+ubuntu	5.3.9(1)-release	run-nquote1	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-nquote2	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-nquote3	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-nquote4	different	different	0	1	False	False	0	1	1	Non-UTF-8 shell text. Binary data remains valid on file descriptors.
+ubuntu	5.3.9(1)-release	run-nquote5	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-parser	different	different	0	1	False	False	0	4	4	Syntax diagnostics and nested shell delimiters. Separate cases check recovery and command-substitution boundaries.
+ubuntu	5.3.9(1)-release	run-posix2	different	different	0	1	False	False	0	1	1	POSIX-mode diagnostics. Each numbered manual rule has a dedicated input.
+ubuntu	5.3.9(1)-release	run-posixexp	different	different	0	1	False	False	0	4	5	Field preservation in positional-parameter alternatives. Separate assertions check each argument and its boundaries.
+ubuntu	5.3.9(1)-release	run-posixexp2	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-posixpat	different	different	0	1	False	False	0	1	1	Non-UTF-8 input interrupts this driver. Run its later collating-element, equivalence and character-class cases separately.
+ubuntu	5.3.9(1)-release	run-posixpipe	different	different	0	1	False	False	0	1	1	Formatting of functions containing POSIX pipelines. Jobs and pipeline status have independent controls.
+ubuntu	5.3.9(1)-release	run-precedence	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-printf	control inconclusive	control inconclusive	1	1	False	False	1	13	16	Formatting diagnostics, wide output and out-of-range fields. Separate checks compare generated values, -v destinations and side effects.
+ubuntu	5.3.9(1)-release	run-procsub	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-quote	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-quotearray	control inconclusive	control inconclusive	1	1	False	False	1	25	30	Quote preservation and single evaluation of associative subscripts. Compare key contents and side effects through language and builtin entry points.
+ubuntu	5.3.9(1)-release	run-read	control inconclusive	control inconclusive	1	1	False	False	3	11	11	Preserve escaped trailing whitespace and valid UTF-8 strings. Verify destination arrays and whether failed validation consumed any input.
+ubuntu	5.3.9(1)-release	run-redir	different	different	0	1	False	False	0	16	16	Printed redirections, diagnostics and descriptor allocation. Verify data destination, file contents and failure before truncation.
+ubuntu	5.3.9(1)-release	run-rhs-exp	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-rsh	different	different	0	1	False	False	0	1	1	Restricted-shell isolation is outside the project scope.
+ubuntu	5.3.9(1)-release	run-set-e	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-set-x	different	different	0	1	False	False	0	2	17	Alternative quoted representations in trace text. Check traced arithmetic, loop headers, case subjects and command locations.
+ubuntu	5.3.9(1)-release	run-shopt	different	different	0	1	False	False	0	15	30	Listing order, option settings and excluded GNU facilities. Individual probes change and restore observable settings.
+ubuntu	5.3.9(1)-release	run-strip	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-test	control inconclusive	control inconclusive	1	1	False	False	1	30	29	Test syntax diagnostics and invalid descriptor handling. Check all 41 conditional operators and Bash-mode versus sh-mode descriptor status.
+ubuntu	5.3.9(1)-release	run-tilde	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-tilde2	golden match	golden match	0	0	False	False	0	0	0	Full golden transcript matched.
+ubuntu	5.3.9(1)-release	run-trap	different	different	0	1	False	False	0	3	5	Trace prefix and diagnostics. Check actual trap context, nested helper calls and child exit status.
+ubuntu	5.3.9(1)-release	run-type	different	different	0	1	False	False	0	20	21	Hashed path listing order, function representations and lookup precedence. Check the command which actually runs.
+ubuntu	5.3.9(1)-release	run-varenv	different	different	0	1	False	False	0	20	31	A local with export removed hides an exported global. Compare the environment received by a child process and restoration on return.
+ubuntu	5.3.9(1)-release	run-vredir	different	different	0	1	False	False	0	23	22	Descriptor numbers, printed syntax and readonly destinations. Assert descriptor functionality and file contents.
