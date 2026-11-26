@@ -126,6 +126,14 @@ def main():
     path = os.pathsep.join(map(str, (shell_dir, args.source.resolve() / "spec/bin", os.environ["PATH"])))
     if args.helper:
         path = str(args.helper.resolve()) + os.pathsep + path
+    # Some Oils cases cd into REPO_ROOT and write _tmp/spec-tmp. Give them
+    # the checkout layout and a private scratch directory for each invocation.
+    repo_view = args.scratch / "repo"
+    if not repo_view.exists():
+        repo_view.mkdir()
+        for child in args.source.resolve().iterdir():
+            if child.name not in ("_tmp", ".git"):
+                (repo_view / child.name).symlink_to(child)
     with args.output.open("w", buffering=1) as output:
         for n, case in enumerate(cases):
             if not case["include"] or n % args.shards != args.shard or (args.suite and case["suite"] != args.suite):
@@ -151,6 +159,12 @@ def main():
                     entry.symlink_to(ref[label])
                     env = dict(PATH=path, TMP=str(cwd), SH="bash", LC_ALL="C.UTF-8",
                                REPO_ROOT=str(args.source.resolve()))
+                    if script and b"REPO_ROOT" in code:
+                        tmp = repo_view / "_tmp"
+                        if tmp.exists():
+                            shutil.rmtree(tmp)
+                        (tmp / "spec-tmp").mkdir(parents=True)
+                        env["REPO_ROOT"] = str(repo_view)
                     cmd = code
                     if not script:
                         fixture = Path(case["fixture"])

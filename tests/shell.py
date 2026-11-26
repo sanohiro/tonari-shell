@@ -55,6 +55,55 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_pipeline_last_argument_and_parent_scope(self):
+        self.compare(""": before
+f() { echo "inside:$_"; : changed; }
+f arg final
+echo "after:$_"
+: old
+printf x | cat >/dev/null
+echo "pipe:$_"
+shopt -s lastpipe
+printf 'joined\\n' | read -r value
+echo "$value:${PIPESTATUS[*]}"
+f() { printf x | return 23; echo unreachable; }
+f
+echo $?
+""", 0, b"inside:before\nafter:final\npipe:old\njoined:0 0\n23\n", minimum=5)
+
+    def test_array_initialization_and_attributes(self):
+        self.compare("""i=1
+a=([100+i++]=$((i++)) [200+i++]=$((i++)))
+echo "${!a[*]}:${a[*]}:$i"
+a=([0]=3 [a[0]]=7 [a[3]]=new [7]+=er)
+echo "${!a[*]}:${a[*]}"
+declare -ai attr=([7]=123 [9]=321)
+printf '<%s>' "${attr[@]@a}"
+prefB=2 prefA=1; printf '<%s>' "${!pref@}"
+""", 0, b"103 204:1 2:5\n0 3 7:3 7 newer\n<ai><ai><prefA><prefB>", minimum=5)
+        # An element append uses the value already assigned to the same key.
+        # Some Bash 5.2 builds lose this value in an associative initializer.
+        proc = self.command(TONARI, 'declare -A a=([x]=first [x]+=second); echo "${a[x]}"')
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"firstsecond\n", b""))
+        self.compare("""a=(x y); i=0; unset -v 'a[i++]'; echo "$i:${a[*]}"
+declare v; unset -v 'v[2]' 2>/dev/null; echo "$?"
+history -Z 2>/dev/null; echo "$?"
+""", 0, b"1:y\n1\n2\n", minimum=5)
+
+    def test_vi_operator_edits_submitted_argument(self):
+        for shell in self.shells_for():
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                os.write(fd, b"set -o vi; s(){ printf '<%s>' \"$@\" >vi-result; echo edit''OK; }; echo rea''dy\r")
+                self.read_until(fd, b"ready\r\n")
+                os.write(fd, b"s hello world")
+                self.read_until(fd, b"world")
+                os.write(fd, b"\x1b")
+                time.sleep(0.65)
+                os.write(fd, b"0wcwgoodbye\r")
+                self.read_until(fd, b"editOK\r\n")
+                self.assertEqual((self.cwd / "vi-result").read_bytes(), b"<goodbye><world>")
+
     def test_invoked_as_sh(self):
         sh = self.cwd / "sh"
         env = self.env | {"BASH_ENV": str(self.cwd / "bashenv"), "ENV": str(self.cwd / "env")}

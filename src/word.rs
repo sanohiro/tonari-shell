@@ -23,6 +23,11 @@ pub enum Alternative {
 #[derive(Clone, Debug)]
 pub enum Part {
     BadSubstitution(String),
+    PrefixNames {
+        prefix: String,
+        at: bool,
+        quoted: bool,
+    },
     Brace(&'static str),
     BraceParameter(String),
     BraceTilde(&'static str),
@@ -156,6 +161,14 @@ impl Word {
             }
         };
         for part in parts.iter_mut() {
+            if let Part::PrefixNames { prefix, at, quoted } = part {
+                *part = Part::Elements {
+                    values: env.session.variable_names(prefix),
+                    at: *at,
+                    quoted: *quoted,
+                };
+                continue;
+            }
             if let Part::BadSubstitution(text) = part {
                 return Err(crate::expansion::Error::fatal(
                     format!("{text}: bad substitution"),
@@ -495,7 +508,8 @@ impl Word {
                         output.append(&values.join(&ifs_separator(lookup)), quoted, ifs);
                     }
                 }
-                Part::BadSubstitution(_)
+                Part::PrefixNames { .. }
+                | Part::BadSubstitution(_)
                 | Part::Substitution { .. }
                 | Part::Process { .. }
                 | Part::Arithmetic { .. }

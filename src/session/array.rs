@@ -1,4 +1,5 @@
 use super::{Session, Variable};
+use crate::parser::Subscript;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -7,9 +8,23 @@ pub(crate) fn subscript(name: &str) -> Option<(&str, &str)> {
     Some((base, expr.strip_suffix(']')?))
 }
 
+pub(crate) enum Index {
+    Literal(i64),
+    Expression(String),
+}
+
+impl Index {
+    pub(crate) fn new(text: String) -> Self {
+        if let Some(number) = Session::plain_decimal(&text) {
+            return Self::Literal(number);
+        }
+        Self::Expression(text)
+    }
+}
+
 pub(crate) enum ArrayItems {
-    Indexed(Vec<(Option<i64>, String)>),
-    Associative(Vec<(String, String)>),
+    Indexed(Vec<(Option<Subscript<Index>>, String)>),
+    Associative(Vec<(String, String, bool)>),
 }
 
 // A full mapfile read produces consecutive UTF-8 records. Keep their storage
@@ -422,13 +437,51 @@ impl Session {
         if var.readonly {
             return Err("readonly variable");
         }
-        self.array_items(&mut var, append, items)?;
+        self.array_items(name, global, &mut var, append, items)?;
         self.store_variable(name, var, global);
         Ok(())
     }
 
+    // Arithmetic can read or modify earlier entries, including through a nameref.
+    // Temporarily expose the in-progress value to the ordinary arithmetic evaluator.
+    fn initializer_number(
+        &mut self,
+        name: &str,
+        var: &Variable,
+        map: &mut Elements,
+        visible: bool,
+        expression: &str,
+    ) -> Result<i64, &'static str> {
+        if let Some(number) = Self::plain_decimal(expression) {
+            return Ok(number);
+        }
+        if !visible {
+            return crate::arithmetic::run(expression, self);
+        }
+        if let Some((base, index)) = subscript(expression)
+            && base == name
+            && let Some(index) = Self::plain_decimal(index)
+            && let Some(value) = map.get(&index).and_then(Self::plain_decimal)
+        {
+            return Ok(value);
+        }
+        let mut current = var.clone();
+        current.value = None;
+        current.elements = Some(Rc::new(std::mem::replace(map, Elements::Dense(Vec::new()))));
+        let previous = self.variables.insert(name.into(), current);
+        let result = crate::arithmetic::run(expression, self);
+        let mut current = self.variables.remove(name).expect("active initializer");
+        if let Some(previous) = previous {
+            self.variables.insert(name.into(), previous);
+        }
+        *map = Rc::unwrap_or_clone(current.elements.take().expect("indexed initializer"));
+        result
+    }
+
     pub(super) fn array_items(
         &mut self,
+        name: &str,
+        global: bool,
         var: &mut Variable,
         append: bool,
         items: &ArrayItems,
@@ -440,9 +493,12 @@ impl Session {
                 if !append {
                     *map = Default::default();
                 }
-                for (key, value) in items {
+                for (key, value, concat) in items {
+                    let old = map.get(key).map(String::as_str);
                     let value = if integer {
-                        crate::arithmetic::run(value, self)?.to_string()
+                        self.integer_value(old, value, *concat)?
+                    } else if *concat {
+                        old.unwrap_or_default().to_owned() + value
                     } else {
                         value.clone()
                     };
@@ -463,19 +519,37 @@ impl Session {
         } else {
             Elements::Dense(Vec::with_capacity(items.len()))
         };
+        // With declare -g, an existing local still controls name resolution.
+        let visible = !global || !self.locals.iter().any(|scope| scope.0.contains_key(name));
         let mut next = map.last_index().map_or(Some(0), |i| i.checked_add(1));
         for (index, value) in items {
+            let concat = index.as_ref().is_some_and(|s| s.append);
+            let index = match index.as_ref().map(|s| &s.index) {
+                Some(Index::Literal(i)) => Some(*i),
+                Some(Index::Expression(expr)) => {
+                    Some(self.initializer_number(name, var, &mut map, visible, expr)?)
+                }
+                None => None,
+            };
             let i = match index {
-                Some(n) if *n < 0 => map
+                Some(n) if n < 0 => map
                     .last_index()
-                    .and_then(|i| i.checked_add(*n + 1))
+                    .and_then(|i| i.checked_add(n + 1))
                     .filter(|i| *i >= 0),
-                Some(n) => Some(*n),
+                Some(n) => Some(n),
                 None => next,
             }
             .ok_or("array subscript out of range")?;
             let value = if var.integer {
-                crate::arithmetic::run(value, self)?.to_string()
+                let old = if concat {
+                    map.get(&i).and_then(|s| s.parse::<i64>().ok()).unwrap_or(0)
+                } else {
+                    0
+                };
+                old.wrapping_add(self.initializer_number(name, var, &mut map, visible, value)?)
+                    .to_string()
+            } else if concat {
+                map.get(&i).unwrap_or_default().to_owned() + value
             } else {
                 value.clone()
             };
@@ -615,7 +689,16 @@ mod tests {
             .assign_array(
                 "a",
                 false,
-                &ArrayItems::Indexed(vec![(Some(3), "third".into()), (None, "fourth".into())]),
+                &ArrayItems::Indexed(vec![
+                    (
+                        Some(Subscript {
+                            index: Index::Literal(3),
+                            append: false,
+                        }),
+                        "third".into(),
+                    ),
+                    (None, "fourth".into()),
+                ]),
                 false,
             )
             .unwrap();

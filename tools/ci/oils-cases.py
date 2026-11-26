@@ -31,18 +31,24 @@ def main():
                                       legacy=bool(meta.get('legacy_tmp_dir')))))
             elif key in records:
                 row = records[key]
-                grades = {}
+                grades, defaults, failures = {}, {}, {}
                 for label, actual in row['actual'].items():
                     if actual['limit']:
                         grades[label] = 'TIME' if actual['limit'] == 'timeout' else 'OUTPUT_LIMIT'
+                        defaults[label] = grades[label]
+                        failures[label] = [actual['limit']]
                         continue
                     data = dict(status=actual['status'], stdout=base64.b64decode(actual['stdout']),
                                 stderr=base64.b64decode(actual['stderr']))
-                    results = [a.Check('bash', data)[0] for a in sh_spec.CreateAssertions(case, 'bash')]
-                    result = min(results)
-                    grades[label] = next(k for k,v in vars(sh_spec.Result).items()
-                                         if k.isupper() and v == result)
-                print(json.dumps(dict(key=key, grades=grades)))
+                    for oracle, output in [('bash', grades), ('unqualified', defaults)]:
+                        checks = [(a, a.Check(oracle, data)[0]) for a in sh_spec.CreateAssertions(case, oracle)]
+                        result = min(result for _, result in checks)
+                        output[label] = next(k for k,v in vars(sh_spec.Result).items()
+                                             if k.isupper() and v == result)
+                        if oracle == 'unqualified':
+                            failures[label] = [a.key for a, result in checks if result == sh_spec.Result.FAIL]
+                print(json.dumps(dict(key=key, grades=grades, default_grades=defaults, default_failed=failures)))
+
 
 
 if __name__ == '__main__':

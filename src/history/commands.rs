@@ -27,7 +27,11 @@ pub(crate) fn run(session: &mut Session, words: &[String], status: u8) -> Flow {
             Ok(()) => Flow::Continue(0),
             Err(e) => {
                 eprintln!("tonari: history: {e}");
-                Flow::Continue(1)
+                Flow::Continue(if e.kind() == io::ErrorKind::InvalidInput {
+                    2
+                } else {
+                    1
+                })
             }
         }
     }
@@ -52,6 +56,11 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<()> {
                 session.history = None;
             } else if "dspawrn".contains(c) && operation.is_none() {
                 operation = Some(c);
+            } else if !"dspawrn".contains(c) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("-{c}: invalid option"),
+                ));
             } else {
                 return Err(error("invalid option combination"));
             }
@@ -76,7 +85,9 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<()> {
             }
         }
         Some('d') => {
-            let arg = args.first().ok_or_else(|| error("position required"))?;
+            let arg = args
+                .first()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "position required"))?;
             let h = session.history_mut();
             let (a, b) = arg
                 .char_indices()

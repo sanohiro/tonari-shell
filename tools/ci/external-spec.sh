@@ -50,10 +50,17 @@ case "$SUITE" in
     python3 -m venv venv
     venv/bin/pip -q install pexpect==4.9.0 PyYAML==6.0.3 colorama==0.4.6
     shard=${SUITE##*-}
+    shards=8
+    options=(--observer "$RUNNER_TEMP/bin/paths")
+    if [[ $SUITE == bensch-review-* || $SUITE == bensch-control-* ]]; then
+      shards=2
+      options=(--review "$repo/docs/compatibility/external-shell")
+      [[ $SUITE != bensch-control-* ]] || options+=(--control)
+    fi
     cd cwd
     env -i HOME="$lab/home" PATH="$PATH" TERM=xterm-256color PS1='$ ' \
       "$lab/venv/bin/python" "$repo/tools/ci/bensch-pty.py" "$lab/upstream" \
-      "$out/pty.jsonl" "$ref" "$lab/bin/bash" --shard "$shard" --shards 8 --observer "$RUNNER_TEMP/bin/paths"
+      "$out/pty.jsonl" "$ref" "$lab/bin/bash" --shard "$shard" --shards "$shards" "${options[@]}"
     ;;
   spec-response)
     python3 "$repo/tools/ci/bensch-response.py" "$ref" "$lab/bin/bash" > "$out/response.tsv"

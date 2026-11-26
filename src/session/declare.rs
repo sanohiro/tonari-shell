@@ -422,7 +422,7 @@ pub(super) fn run(
             var.exported = on;
         }
         if let Some(d) = array
-            && let Err(e) = session.array_items(&mut var, d.append, &d.items)
+            && let Err(e) = session.array_items(name, flags.global, &mut var, d.append, &d.items)
         {
             eprintln!("tonari: {command}: {name}: {e}");
             status = 1;

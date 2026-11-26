@@ -1,6 +1,8 @@
 """Run pinned bensch YAML tests, observing PTY writes without counting its sleep timers."""
 import argparse
 import contextlib
+import csv
+import gzip
 import errno
 import json
 import os
@@ -80,6 +82,19 @@ def run(args):
 
     pexpect.spawn = ObservedSpawn
     profile = load_profile("bash")
+    selected_keys = None
+    if args.review:
+        selected_keys = set()
+        for archive in args.review.glob("*.tsv.gz"):
+            if archive.name not in ("macos-15.tsv.gz", "ubuntu-24.04.tsv.gz"):
+                continue
+            with gzip.open(archive, "rt") as source:
+                selected_keys.update(row["case"] for row in csv.DictReader(source, delimiter="\t")
+                                     if row["suite"] == "bensch-pty" and row["pair"] in ("neither", "bash-only"))
+        if not selected_keys:
+            raise ValueError("no previous interactive failures found")
+    if args.control:
+        profile["history_disable"]["env"]["HISTSIZE"] = "500"
     files = sorted((args.source / "suites/interactive").rglob("*.yaml"))
     with args.output.open("w", buffering=1) as output:
         batch = 0
@@ -99,9 +114,14 @@ def run(args):
                     with tempfile.TemporaryDirectory() as home, contextlib.chdir(home):
                         os.environ["HOME"] = home
                         runner = Runner(str(binary), profile=profile)
+                        if args.control:
+                            runner._use_marker_sync = False
+                            runner.tests_per_session = 1
                         runner._test_count = start
                         try:
                             for i, case in enumerate(tests[start:start + 10], start):
+                                if selected_keys is not None and f"{path.stem}/{i + 1}" not in selected_keys:
+                                    continue
                                 trace = Path(home) / "trace"
                                 if label == "observer":
                                     trace.write_bytes(b"")
@@ -130,4 +150,6 @@ if __name__ == "__main__":
     parser.add_argument("--observer", type=lambda s: Path(s).absolute())
     parser.add_argument("--shard", type=int, required=True)
     parser.add_argument("--shards", type=int, required=True)
+    parser.add_argument("--review", type=Path, help="directory holding the two previous native inventories")
+    parser.add_argument("--control", action="store_true", help="enable history and omit runner-injected commands in fresh sessions")
     run(parser.parse_args())

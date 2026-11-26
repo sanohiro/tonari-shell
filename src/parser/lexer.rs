@@ -200,6 +200,20 @@ pub(super) fn dollar(
                 chars.next();
                 name
             } else {
+                if name.starts_with('#') && name.len() > 1 {
+                    return bad_substitution(content, chars, word, quoted);
+                }
+                if let Some(prefix) = name.strip_prefix('!').filter(|p| super::is_identifier(p))
+                    && let [op @ (b'@' | b'*'), b'}', ..] = chars.as_str().as_bytes()
+                {
+                    word.part(Part::PrefixNames {
+                        prefix: prefix.into(),
+                        at: *op == b'@',
+                        quoted,
+                    });
+                    *chars = chars.as_str()[2..].chars();
+                    return Ok(());
+                }
                 if chars.as_str().starts_with('/') {
                     chars.next();
                     let mode = match chars.clone().next() {
@@ -228,12 +242,17 @@ pub(super) fn dollar(
                     });
                     return Ok(());
                 }
-                if let [b'@', op @ (b'U' | b'u' | b'L' | b'Q' | b'E'), b'}', ..] =
-                    chars.as_str().as_bytes()
+                if let [
+                    b'@',
+                    op @ (b'U' | b'u' | b'L' | b'Q' | b'E' | b'a'),
+                    b'}',
+                    ..,
+                ] = chars.as_str().as_bytes()
                 {
                     let op = *op;
                     *chars = chars.as_str()[3..].chars();
                     let operation = match op {
+                        b'a' => crate::word::Modification::Attributes,
                         b'Q' => crate::word::Modification::Quote,
                         b'E' => crate::word::Modification::Escapes,
                         _ => crate::word::Modification::Case {

@@ -13,6 +13,7 @@ pub enum Modification {
         length: Option<Word>,
     },
     Prompt,
+    Attributes,
     Quote,
     Escapes,
     Case {
@@ -224,14 +225,54 @@ impl Modification {
                     }),
                 }
             }
+            Self::Attributes => {
+                if matches!(name, "@" | "*") {
+                    return Ok(Part::Elements {
+                        values: vec![String::new(); env.session.positional.as_slice().len()],
+                        at: name == "@",
+                        quoted,
+                    });
+                }
+                let elements = array_elements_name(name);
+                let base = elements
+                    .map(|(base, _, _)| base)
+                    .or_else(|| crate::session::array::subscript(name).map(|(base, _)| base))
+                    .unwrap_or(name);
+                let flags = env.session.attributes(base);
+                if env.session.nounset && elements.is_none() {
+                    value(name, env)?.ok_or_else(|| env.missing(name, "unbound variable"))?;
+                }
+                let flags = flags.unwrap_or_default();
+                if let Some((base, at, _)) = elements {
+                    let n = if let Some(len) = env.session.stored_array_len(base) {
+                        len
+                    } else if let Values::Elements(values, _) = Values::read(name, env)? {
+                        values.len()
+                    } else {
+                        unreachable!()
+                    };
+                    if n > 0 {
+                        return Ok(Part::Elements {
+                            values: vec![flags; n],
+                            at,
+                            quoted,
+                        });
+                    }
+                    if flags.is_empty() {
+                        return Ok(Part::Elements {
+                            values: vec![],
+                            at,
+                            quoted,
+                        });
+                    }
+                }
+                Ok(scalar(flags))
+            }
             Self::Prompt => {
-                let prompt = value(name, env)?.unwrap_or_default();
                 let status = env.status();
-                Ok(scalar(crate::prompt::render_text(
-                    env.session,
-                    prompt,
-                    status,
-                )))
+                Ok(Values::read(name, env)?.map(quoted, |v| {
+                    crate::prompt::render_text(env.session, v, status)
+                }))
             }
             Self::Slice { offset, length } => {
                 let start = as_number(offset, env)?;

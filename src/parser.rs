@@ -2,7 +2,7 @@ mod aliases;
 mod array;
 use crate::pattern::Matcher;
 use crate::test_expression::Expr;
-pub use array::Assignment;
+pub use array::{Assignment, Subscript};
 mod ansi;
 pub(crate) use ansi::decode as ansi_string;
 pub(crate) mod completion_words;
