@@ -129,6 +129,30 @@ pub fn source_file(session: &mut Session, words: &[String], status: u8, fatal: b
     }
 }
 
+pub(crate) fn debugger(session: &mut Session) -> Flow {
+    let path = Path::new(
+        option_env!("DEBUGGER_START_FILE").unwrap_or("/usr/share/bashdb/bashdb-main.inc"),
+    );
+    let script = path.is_file().then(|| open_script(path).ok()).flatten();
+    let enabled = script.is_some();
+    session.shopt.extdebug = enabled;
+    let result = if let Some(script) = script {
+        session
+            .debug_base
+            .get_or_init(|| session.positional.as_slice().to_vec());
+        let errexit = std::mem::replace(&mut session.errexit, false);
+        let result = sourced(session, script, path, &[], 0);
+        session.errexit = errexit;
+        result
+    } else {
+        eprintln!("tonari: {}: cannot start debugger", path.display());
+        Flow::Continue(0)
+    };
+    session.functrace = enabled;
+    session.errtrace = enabled;
+    result
+}
+
 fn optional(session: &mut Session, path: &Path) -> Option<Flow> {
     let file = open_script(path).ok()?;
     Some(sourced(session, file, path, &[], 0))

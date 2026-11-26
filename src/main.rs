@@ -587,6 +587,14 @@ fn run_invocation(
         }
         Flow::Break(..) | Flow::LoopContinue(_) => return 1,
     };
+    if invocation.debugger
+        && !invocation.check
+        && (!session.interactive || !matches!(invocation.input, Input::Stdin))
+    {
+        if let Flow::Exit(code) = startup::debugger(&mut session) {
+            return traps::finish(&mut session, code);
+        }
+    }
     if invocation.as_sh && !session.posix {
         session.set_posix(true);
     }

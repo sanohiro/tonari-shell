@@ -10,7 +10,7 @@ esac
 source tools/ci/bash-source.sh
 if [[ $SUITE == source-review ]]; then
   if [[ $RUNNER_OS == Linux ]]; then
-    docker run --rm -e EXTERNAL_BENCH_CASE -v "$PWD:/repo:ro" -v "$bin:/shells:ro" ubuntu:26.04 bash -ec '
+    docker run --rm -e EXTERNAL_BENCH_CASE -e TONARI_TEST_BASHDB=1 -v "$PWD/tests/compat/fixtures/bashdb-main.inc:/usr/share/bashdb/bashdb-main.inc:ro" -v "$PWD:/repo:ro" -v "$bin:/shells:ro" ubuntu:26.04 bash -ec '
       apt-get update -qq && apt-get install -qq --no-install-recommends python3 netbase locales >/dev/null
       localedef -i de_DE -f UTF-8 de_DE.UTF-8
       args=()
@@ -42,7 +42,9 @@ if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; t
   distro=Debian; [[ $SUITE == *-ubuntu ]] && distro=Ubuntu
   arch=x64; [[ $RUNNER_ARCH == ARM64 ]] && arch=arm64
   if [[ $SUITE == inventory-correctness* ]]; then
-    "${run[@]}" tonari-audit --correctness-only > "$out/audit.json"
+    mkdir "$fixture/devices"
+    sudo mknod -m 000 "$fixture/devices/block" b 240 0
+    "${run[@]}" -v "$fixture/devices:/fixtures:ro" -v "$PWD/tests/compat/fixtures/bashdb-main.inc:/usr/share/bashdb/bashdb-main.inc:ro" tonari-audit --correctness-only > "$out/audit.json"
     exit
   fi
   if [[ $SUITE == inventory-trap* ]]; then

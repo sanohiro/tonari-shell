@@ -611,7 +611,7 @@ def socket_time(shell, run, kind, count):
         return ms
 
 
-EXTRA_CASES = ("pretty-print-file", "foreground-signal-notice")
+EXTRA_CASES = ("debugger-startup", "pretty-print-file", "foreground-signal-notice")
 EDITOR_PTY = ("vi-external-editor", "emacs-external-editor", "posix-vi-editor")
 DIRECTORY_PTY = ("cd-spelling", "directory-spelling-completion", "expanded-directory-completion", "quoted-directory-completion", "check-exit-jobs")
 
@@ -854,7 +854,20 @@ def main():
                 order = list(range(len(shells)))
                 rng.shuffle(order)
                 for i in order:
-                    if name == "pretty-print-file":
+                    if name == "debugger-startup":
+                        query = 'shopt -q extdebug; echo "debug=$?/$BASHDB_SOURCE_PROBE"; case $- in *E*) echo errtrace;; esac; case $- in *T*) echo functrace;; esac; :'
+                        start = time.perf_counter_ns()
+                        p = subprocess.run([shells[i], "--noprofile", "--norc", "--debugger", "-c", query], cwd=termroot, env=env, capture_output=True, timeout=4)
+                        elapsed = (time.perf_counter_ns() - start) / 1e6
+                        present = Path("/usr/share/bashdb/bashdb-main.inc").is_file()
+                        expected = b"debug=0/loaded\nerrtrace\nfunctrace\n" if present and os.environ.get("TONARI_TEST_BASHDB") else None
+                        if expected is not None:
+                            assert (p.returncode, p.stdout, p.stderr) == (0, expected, b""), (shells[i], p)
+                        elif not present:
+                            assert p.returncode == 0 and p.stdout == b"debug=1/\n" and p.stderr, (shells[i], p)
+                        else:
+                            assert p.returncode == 0 and p.stdout.startswith(b"debug=0/"), (shells[i], p)
+                    elif name == "pretty-print-file":
                         script = termroot / "layout.sh"
                         marker = termroot / "formatted-side-effect"
                         script.write_text(("if true;then printf 'hello;%s\\n' 雪;fi\n" * 250)
