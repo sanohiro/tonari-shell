@@ -19,6 +19,7 @@ fn long_physical_path() -> io::Result<std::path::PathBuf> {
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::MetadataExt;
     let mut child = File::open(".")?;
+    let mut here = child.metadata()?;
     let mut parts = Vec::new();
     loop {
         let fd = unsafe {
@@ -32,7 +33,6 @@ fn long_physical_path() -> io::Result<std::path::PathBuf> {
             return Err(io::Error::last_os_error());
         }
         let parent = unsafe { File::from_raw_fd(fd) };
-        let here = child.metadata()?;
         let up = parent.metadata()?;
         if (here.dev(), here.ino()) == (up.dev(), up.ino()) {
             break;
@@ -47,6 +47,9 @@ fn long_physical_path() -> io::Result<std::path::PathBuf> {
             let entry = unsafe { libc::readdir(stream) };
             if entry.is_null() {
                 break None;
+            }
+            if !matches!(unsafe { (*entry).d_type }, libc::DT_DIR | libc::DT_UNKNOWN) {
+                continue;
             }
             let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) };
             if matches!(name.to_bytes(), b"." | b"..") {
@@ -71,6 +74,7 @@ fn long_physical_path() -> io::Result<std::path::PathBuf> {
         unsafe { libc::closedir(stream) };
         parts.push(found.ok_or_else(|| io::Error::from_raw_os_error(libc::ENOENT))?);
         child = parent;
+        here = up;
     }
     let mut path = std::path::PathBuf::from("/");
     path.extend(parts.into_iter().rev());

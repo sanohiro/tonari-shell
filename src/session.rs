@@ -2144,7 +2144,19 @@ impl Session {
             let logical = match logical {
                 Some(path) => match std::env::set_current_dir(&path) {
                     Ok(()) => Some(path),
-                    Err(e) if self.posix && e.raw_os_error() != Some(libc::ENAMETOOLONG) => {
+                    Err(e)
+                        if e.raw_os_error() == Some(libc::ENAMETOOLONG)
+                            && candidate.is_relative() =>
+                    {
+                        // The full name exceeded the kernel argument limit. Relative
+                        // chdir still establishes this logical name, including symlinks.
+                        if let Err(err) = std::env::set_current_dir(&candidate) {
+                            error = err;
+                            continue;
+                        }
+                        Some(path)
+                    }
+                    Err(e) if self.posix => {
                         error = e;
                         continue;
                     }

@@ -452,21 +452,14 @@ impl<'a> Parser<'a> {
         let mut value = match self.advance()? {
             Token::Number(s) => Value::Number(number(s)?),
             Token::Name(n) => {
-                let name = if active
-                    && self.token != Token::Op("=")
-                    && let Some((base, index)) = crate::session::array::subscript(n)
-                {
-                    element_name(base, index, variables, depth)?
+                if active && let Some((base, index)) = crate::session::array::subscript(n) {
+                    if self.token == Token::Op("=") {
+                        Value::AssignmentTarget((base, index))
+                    } else {
+                        Value::Variable(element_name(base, index, variables, depth)?)
+                    }
                 } else {
-                    std::borrow::Cow::Borrowed(n)
-                };
-                if active
-                    && self.token == Token::Op("=")
-                    && let Some(target) = crate::session::array::subscript(n)
-                {
-                    Value::AssignmentTarget(target)
-                } else {
-                    Value::Variable(name)
+                    Value::Variable(std::borrow::Cow::Borrowed(n))
                 }
             }
             Token::Op("(") => {

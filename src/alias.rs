@@ -101,11 +101,18 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
                 continue;
             }
         }
-        let prefix = prefix(arg, command_prefix);
+        if remove
+            && session
+                .aliases
+                .0
+                .as_mut()
+                .is_some_and(|map| Rc::make_mut(map).remove(arg).is_some())
+        {
+            continue;
+        }
         if let Some(value) = session.aliases.get(arg) {
-            if remove {
-                Rc::make_mut(session.aliases.0.as_mut().unwrap()).remove(arg);
-            } else if writeln!(out, "{prefix}{arg}='{}'", value.replace('\'', "'\\''")).is_err() {
+            let prefix = prefix(arg, command_prefix);
+            if writeln!(out, "{prefix}{arg}='{}'", value.replace('\'', "'\\''")).is_err() {
                 return 1;
             }
         } else {

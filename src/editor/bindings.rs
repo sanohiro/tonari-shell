@@ -676,12 +676,13 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
                             return Ok(1);
                         }
                     } else {
-                        let names = keys
-                            .iter()
-                            .take(5)
-                            .map(|k| encode(k))
-                            .collect::<Vec<_>>()
-                            .join(", ");
+                        let mut names = String::new();
+                        for key in keys.iter().take(5) {
+                            if !names.is_empty() {
+                                names.push_str(", ");
+                            }
+                            names.push_str(&encode(key));
+                        }
                         writeln!(
                             out,
                             "{name} {} {names}{}",
