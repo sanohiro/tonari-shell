@@ -23,7 +23,7 @@ pub struct Invocation {
     pub rcfile: Option<PathBuf>,
     pub check: bool,
     pub notify: bool,
-    pub ignoreeof: bool,
+    pub ignoreeof: Option<bool>,
     pub errexit: bool,
     pub verbose: bool,
     pub errtrace: bool,
@@ -77,7 +77,7 @@ pub fn parse(
     let mut rcfile = None;
     let mut check = false;
     let mut notify = false;
-    let mut ignoreeof = false;
+    let mut ignoreeof = None;
     let mut errexit = false;
     let mut verbose = false;
     let mut errtrace = false;
@@ -168,7 +168,7 @@ pub fn parse(
                             Some("noclobber") => noclobber = enabled,
                             Some("noexec") => check = enabled,
                             Some("notify") => notify = enabled,
-                            Some("ignoreeof") => ignoreeof = enabled,
+                            Some("ignoreeof") => ignoreeof = Some(enabled),
                             Some("noglob") => noglob = enabled,
                             _ => {
                                 return Err(

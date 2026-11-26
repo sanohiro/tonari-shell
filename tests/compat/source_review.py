@@ -16,6 +16,10 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "history-physical-lines": "set -o history -H\necho first\nif :; then\necho !absent\necho done\nfi\ncat <<'END'\n!!\nEND\necho 'line\n!!\nend'\necho \"$(echo '!')\"",
+    "ignoreeof-variable": "IGNOREEOF=4; shopt -qo ignoreeof; echo $?; f(){ local IGNOREEOF=2; unset IGNOREEOF; shopt -qo ignoreeof; echo $?; }; f; echo \"$IGNOREEOF\"; shopt -qo ignoreeof; echo $?; set +o ignoreeof; echo \"${IGNOREEOF-unset}\"; ignoreeof=2; shopt -qo ignoreeof; echo $?; unset ignoreeof; shopt -qo ignoreeof; echo $?",
+    "nameref-type-change": "declare -i x=1; y=2; declare -n x=y; declare -p x; echo \"$x\"; declare +n x; declare -p x; readonly ro=y; declare -n ro; echo $?; declare -p ro\ndeclare -n r\nr='invalid name'; echo skipped\necho \"$?\"; declare -p r; read r <<< /; echo \"$?\"; printf -v r /; echo \"$?\"; declare -p r",
+    "typed-export": "a=(old); readonly 'a=(3)'; f(){ export -a 'r=(4 5)'; export -A 'm=([one]=1)'; }; f; declare -p a r m; export -an 'r=(7)'; declare -p r; export -a empty; declare -p empty",
     "globstar-overlap": "mkdir -p tree/a/a/a tree/a/b; cd tree; shopt -s globstar; printf '<%s>' **/a/**; echo; printf '<%s>' **/**/a/**",
     "local-set-options": "set +f +u; inner(){ local -; set +f; set -u; }; f(){ local -; set -f; local -; inner; case $- in *f*) echo glob;; esac; set -o ignoreeof; echo \"$IGNOREEOF\"; local -p; }; f; case $- in *f*|*u*) echo leaked;; esac; echo \"${IGNOREEOF-unset}\"",
     "getopts-readonly-end": "readonly v; OPTIND=1; getopts a v -a; echo \"$?:$OPTIND\"; getopts a v -a; echo \"$?:$OPTIND\"",
@@ -83,6 +87,8 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "empty-async-negation": "!& echo $?; wait; !; echo $?",
+    "partial-assoc-init": "declare -A a=([one]=1 bad [two]=2); echo skipped\necho \"$?:${a[one]}:${a[two]}\"; a=(old surplus)\na=([hi]=OK ['']=no [missing]=no)\necho \"$?:${a[hi]}:${a[old]}:${a[missing]}\"; a=(good yes '' ignored last ok); echo \"$?:${a[last]}\"",
     "terminal-test-operand": "for fd in bad '' ' +3 ' -1 4294967296 9999999999999999999999; do test -t \"$fd\"; echo $?; [[ -t \"$fd\" ]]; echo $?; done",
     "trap-return-context": """invoke(){ kill -USR1 $$; return 99; }; helper(){ false; return; }; trap 'helper; s=$?; false; return --' USR1; invoke; echo "$?:$s"; trap 'false; exit' USR1; kill -USR1 $$; echo wrong""",
     "compat-test": """for n in 52 53; do BASH_COMPAT=$n; test '(' '!' = '!' ')' -a yes; echo $?; test '(' '-n' ')' -a yes; echo $?; done""",
@@ -109,6 +115,12 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "empty-async-negation": ('!& wait "$!"', 80),
+    "history-physical-lines": (":", 300),
+    "ignoreeof-variable": ("IGNOREEOF=2; unset IGNOREEOF", 900),
+    "nameref-type-change": ("declare -i x=2; declare -n x=y; declare +n x", 700),
+    "partial-assoc-init": ("a=([one]=1 [two]=2 [three]=3)", 700),
+    "typed-export": ("export -a 'r=(ab cd)'", 650),
     "globstar-overlap": (": tree/**/a/**", 300),
     "local-set-options": ("f", 800),
     "terminal-test-operand": ("test -t 99999; [[ -t 99999 ]]", 1800),
@@ -686,6 +698,9 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "nameref-type-change": "y=3",
+                "partial-assoc-init": "declare -A a",
+                "typed-export": "r=(one)",
                 "globstar-overlap": "shopt -s globstar; mkdir -p tree/a/a/a/a tree/a/b/a/b tree/b/a/a/b",
                 "local-set-options": "f(){ local -; set -f; :; }",
                 "getopts-readonly-end": "readonly v; exec 2>/dev/null",
@@ -732,7 +747,14 @@ def main():
                 "glob-size": "GLOBSORT=size", "glob-numeric": "cd items; GLOBSORT=numeric",
             }.get(name, ":")
             code = f"{setup}; for ((i=0;i<{count};i++)); do {body}; done; echo done"
-            if name == "multiline-history":
+            if name == "history-physical-lines":
+                code = ("exec 2>/dev/null\nset -o history -H\n: seed\n"
+                        + "if :; then\n: !!:$\nfi\n" * count + "echo done")
+            elif name == "partial-assoc-init":
+                code = ("exec 2>/dev/null\ndeclare -A a\n"
+                        + "a=([one]=1 [two]=2 bad [extra]=3)\n" * count
+                        + '[[ ${a[one]} == 1 && ${a[two]} == 2 && -z ${a[extra]+set} ]] && echo done')
+            elif name == "multiline-history":
                 # Input history is recorded for top-level commands, even with
                 # no terminal. Executing a sourced loop would bypass this path.
                 code = "set -o history\n" + "for v in one two\ndo\n  : item\ndone\n" * count + "echo done"

@@ -956,8 +956,10 @@ impl Reader {
             }
             let start = self.position();
             let command = if (inverted.is_some() || timing.is_some())
-                && matches!(self.peek(), None | Some(Token::End | Token::Newline))
-            {
+                && matches!(
+                    self.peek(),
+                    None | Some(Token::End | Token::Newline | Token::Background)
+                ) {
                 Command::Pipeline(vec![SimpleCommand::default()])
             } else {
                 self.command()?

@@ -30,9 +30,12 @@ pub(super) fn run(
     mut operands: &[String],
     arrays: &[crate::execute::ArrayDeclaration],
     previous_status: u8,
+    mut bindings: Option<&mut super::Bindings>,
 ) -> crate::execute::Flow {
     let total_args = operands.len();
     let readonly = command == "readonly";
+    let exporting = command == "export";
+    let attribute = readonly || exporting;
     let local = command == "local";
     if local && session.function_depth == 0 {
         eprintln!("tonari: local: can only be used in a function");
@@ -40,6 +43,7 @@ pub(super) fn run(
     }
     let mut flags = Options {
         readonly: readonly.then_some(true),
+        exported: exporting.then_some(true),
         ..Options::default()
     };
     while let Some((option, rest)) = operands.split_first() {
@@ -51,11 +55,11 @@ pub(super) fn run(
             break;
         }
         let on = option.starts_with('-');
-        if readonly && !on {
+        if attribute && !on {
             break;
         }
         for c in option[1..].chars() {
-            if readonly && !matches!(c, 'a' | 'A' | 'f' | 'p') {
+            if attribute && !(matches!(c, 'a' | 'A' | 'f' | 'p') || exporting && c == 'n') {
                 eprintln!("tonari: {command}: {option}: unsupported option");
                 return crate::execute::Flow::Continue(2);
             }
@@ -76,6 +80,7 @@ pub(super) fn run(
                 'c' => flags.capitalize = Some(on),
                 'l' => flags.lower = Some(on),
                 'u' => flags.upper = Some(on),
+                'n' if exporting => flags.exported = Some(false),
                 'n' => flags.nameref = Some(on),
                 'I' => flags.inherit = on,
                 'p' => flags.print = true,
@@ -170,7 +175,7 @@ pub(super) fn run(
         }
         return crate::execute::Flow::Continue(out.flush().map_or(1, |()| status));
     }
-    if operands.is_empty() || flags.print && !readonly {
+    if operands.is_empty() || flags.print && !attribute {
         if operands.is_empty()
             && !local
             && !flags.print
@@ -277,7 +282,7 @@ pub(super) fn run(
             name
         };
         let base = super::array::subscript(name).map_or(name, |(base, _)| base);
-        let creates_local = !readonly
+        let creates_local = !attribute
             && !flags.global
             && session
                 .declaration_scope(base)
@@ -299,8 +304,8 @@ pub(super) fn run(
             name
         };
         let target = super::array::subscript(name);
-        if readonly && target.is_some() {
-            eprintln!("tonari: readonly: {name}: not a valid identifier");
+        if attribute && target.is_some() {
+            eprintln!("tonari: {command}: {name}: not a valid identifier");
             status = 1;
             continue;
         }
@@ -322,7 +327,7 @@ pub(super) fn run(
             .declared_variable(name, flags.global)
             .unwrap_or_default();
         let scope_index = session.declaration_scope(name);
-        let fresh_local = !readonly
+        let fresh_local = !attribute
             && !flags.global
             && scope_index.is_some_and(|i| !session.locals[i].0.contains_key(name));
         let outer_local = fresh_local
@@ -336,7 +341,8 @@ pub(super) fn run(
             && (fresh_local && !outer_local
                 || value.is_some()
                 || array.is_some()
-                || flags.readonly == Some(false))
+                || flags.readonly == Some(false)
+                || flags.nameref == Some(true))
         {
             eprintln!("tonari: {command}: {name}: readonly variable");
             if array.is_some() {
@@ -367,7 +373,7 @@ pub(super) fn run(
                 var.array_assigned = false;
             }
         }
-        if session.function_depth != 0 && !readonly && !flags.global {
+        if session.function_depth != 0 && !attribute && !flags.global {
             var.temporary = false;
         }
         // +n with an assignment writes through the existing reference and then
@@ -396,23 +402,36 @@ pub(super) fn run(
         } else {
             value
         };
-        if let Some(on) = flags.nameref {
+        let making_array = flags.array || flags.associative || array.is_some();
+        if making_array && (var.nameref || flags.nameref == Some(true)) && var.elements.is_none() {
+            var.nameref = false;
+        }
+        if let Some(on) = flags.nameref.filter(|_| !making_array) {
             let dest = value.or(var.value.as_deref()).unwrap_or("");
             if on
                 && (target.is_some()
                     || var.elements.is_some()
-                    || flags.array
-                    || flags.associative
-                    || array.is_some()
-                    || !dest.is_empty() && !Session::valid_reference_target(dest)
+                    || value.or(var.value.as_deref()).is_some()
+                        && !Session::valid_reference_target(dest)
                     || dest == name)
             {
                 eprintln!("tonari: {command}: {name}: invalid name reference");
                 status = 1;
                 continue;
             }
+            if on {
+                var.integer = false;
+                var.letter_case = None;
+            }
             var.nameref = on;
             session.has_namerefs |= on;
+        }
+        if flags.nameref == Some(true)
+            && making_array
+            && (array.is_some() || var.elements.is_some())
+        {
+            eprintln!("tonari: {command}: {name}: reference variable cannot be an array");
+            status = 1;
         }
         let case_flags = [
             (LetterCase::Capitalize, flags.capitalize),
@@ -434,7 +453,7 @@ pub(super) fn run(
             var.integer = integer;
         }
         if flags.associative
-            && (!readonly || value.is_some() || array.is_some())
+            && (!attribute || value.is_some() || array.is_some())
             && let Err(e) = var.make_associative()
         {
             eprintln!("tonari: {command}: {name}: {e}");
@@ -453,13 +472,15 @@ pub(super) fn run(
             status = 1;
             continue;
         }
-        if flags.array && (!readonly || value.is_some() || array.is_some()) {
+        if flags.array && (!attribute || value.is_some() || array.is_some()) {
             var.make_array();
         }
+        let mut initializer_error = array.and_then(|d| d.items.initializer_error());
         if let Some(text) = value
             && target.is_none()
             && array.is_none()
             && var.elements.is_some()
+            && (!attribute || flags.array || flags.associative)
             && text.starts_with('(')
             && text.ends_with(')')
         {
@@ -474,6 +495,7 @@ pub(super) fn run(
             let items = crate::expansion::Expansion::new(session, previous_status, &captured)
                 .array_items(parts, var.associative().is_some());
             match items.and_then(|items| {
+                initializer_error = items.initializer_error();
                 Ok(session.array_items(name, flags.global, &mut var, append, &items)?)
             }) {
                 Ok(()) => {}
@@ -574,6 +596,9 @@ pub(super) fn run(
         if let Some(on) = flags.readonly {
             var.readonly = on;
         }
+        if matches!(name, "IGNOREEOF" | "ignoreeof") && (!flags.global || scope_index.is_none()) {
+            session.set_eof_variable(var.value.as_deref());
+        }
         if name == "GLOBIGNORE" && value.is_some() {
             session.shopt.glob.set_ignore(var.value.as_deref());
         }
@@ -590,12 +615,40 @@ pub(super) fn run(
         {
             session.apply_posix_mode(var.value.is_some());
         }
+        if exporting
+            && var.exported
+            && let Some(saved) = bindings.as_mut()
+        {
+            saved.0.remove(name);
+        }
         session.store_variable(name, var, flags.global);
+        if let Some(error) = initializer_error {
+            let error = crate::expansion::Error::discard(error);
+            error.report(&format!("{command}: {name}: "));
+            return error.flow(session);
+        }
     }
     crate::execute::Flow::Continue(status)
 }
 
 impl Session {
+    pub(crate) fn export_arrays(
+        &mut self,
+        args: &[String],
+        arrays: &[crate::execute::ArrayDeclaration],
+        previous_status: u8,
+        bindings: &mut super::Bindings,
+    ) -> crate::Flow {
+        run(
+            self,
+            "export",
+            args,
+            arrays,
+            previous_status,
+            Some(bindings),
+        )
+    }
+
     pub fn declare(
         &mut self,
         name: &str,
@@ -603,7 +656,7 @@ impl Session {
         arrays: &[crate::execute::ArrayDeclaration],
         previous_status: u8,
     ) -> crate::execute::Flow {
-        run(self, name, args, arrays, previous_status)
+        run(self, name, args, arrays, previous_status, None)
     }
 
     pub(super) fn store_variable(&mut self, name: &str, var: Variable, global: bool) {

@@ -307,6 +307,7 @@ impl<'a> Expansion<'a> {
         if associative {
             let pairs = parts.first().is_some_and(|(index, _)| index.is_none());
             let mut items = Vec::new();
+            let mut error = None;
             let mut parts = parts.into_iter();
             while let Some((index, word)) = parts.next() {
                 let (key, value, append) = if pairs {
@@ -317,16 +318,24 @@ impl<'a> Expansion<'a> {
                     };
                     (key, value, false)
                 } else {
-                    let index = index.ok_or("missing associative array subscript")?;
-                    let key = self.key(&index.index)?;
+                    let Some(index) = index else {
+                        error = Some("missing associative array subscript");
+                        break;
+                    };
+                    let key = self.expanded_key(&index.index)?;
                     (key, self.scalar(word)?, index.append)
                 };
                 if key.is_empty() {
-                    return Err("bad array subscript".into());
+                    if pairs {
+                        eprintln!("tonari: bad array subscript");
+                        continue;
+                    }
+                    error = Some("bad array subscript");
+                    break;
                 }
                 items.push((key, value, append));
             }
-            return Ok(ArrayItems::Associative(items));
+            return Ok(ArrayItems::Associative(items, error));
         }
         let mut items = Vec::with_capacity(parts.len());
         for (index, word) in parts {
@@ -354,16 +363,20 @@ impl<'a> Expansion<'a> {
         Ok(ArrayItems::Indexed(items))
     }
 
-    pub fn key(&mut self, source: &str) -> Result<String, Error> {
-        let key = if source.contains(['$', '`', '"', '\'', '\\']) {
+    fn expanded_key(&mut self, source: &str) -> Result<String, Error> {
+        if source.contains(['$', '`', '"', '\'', '\\']) {
             let word = crate::parser::with_subscript_aliases(self.session, source, || {
                 crate::parser::subscript_word(source, true)
             })
             .map_err(|e| e.message())?;
-            self.scalar(word)?
+            self.scalar(word)
         } else {
-            source.to_owned()
-        };
+            Ok(source.to_owned())
+        }
+    }
+
+    pub fn key(&mut self, source: &str) -> Result<String, Error> {
+        let key = self.expanded_key(source)?;
         if key.is_empty() {
             return Err("bad array subscript".into());
         }
@@ -510,7 +523,7 @@ impl Variables for Expansion<'_> {
         self.lookup(name)
     }
     fn set(&mut self, name: &str, value: i64) -> Result<(), &'static str> {
-        if crate::session::array::subscript(name).is_some() {
+        if crate::session::array::subscript(name).is_some() || self.session.is_nameref(name) {
             return Variables::set(self.session, name, value);
         }
         if self.session.readonly(name) {

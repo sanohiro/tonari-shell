@@ -60,7 +60,12 @@ impl Scope {
                     if allocated < 0 {
                         return Err(io::Error::last_os_error());
                     }
-                    session.assign(name, &allocated.to_string());
+                    if let Err(error) = session.assign_target(name, &allocated.to_string()) {
+                        unsafe {
+                            libc::close(allocated);
+                        }
+                        return Err(io::Error::other(error));
+                    }
                     if session.shopt.varredir_close {
                         self.restore.push((allocated, SavedFd::Closed));
                     }

@@ -24,7 +24,16 @@ impl Index {
 
 pub(crate) enum ArrayItems {
     Indexed(Vec<(Option<Subscript<Index>>, String)>),
-    Associative(Vec<(String, String, bool)>),
+    Associative(Vec<(String, String, bool)>, Option<&'static str>),
+}
+
+impl ArrayItems {
+    pub(crate) fn initializer_error(&self) -> Option<&'static str> {
+        match self {
+            Self::Associative(_, error) => *error,
+            Self::Indexed(_) => None,
+        }
+    }
 }
 
 // A full mapfile read produces consecutive UTF-8 records. Keep their storage
@@ -236,6 +245,9 @@ impl Session {
         let base = subscript(target).map_or(target, |(base, _)| base);
         if self.readonly(base) {
             return Err("readonly variable");
+        }
+        if self.is_nameref(base) && !Self::valid_reference_target(value) {
+            return Err("invalid name reference");
         }
         let number;
         let value = if self.integer(base) {
@@ -602,7 +614,7 @@ impl Session {
     ) -> Result<(), &'static str> {
         if var.dynamic
             && matches!(name, "BASH_ALIASES" | "BASH_CMDS")
-            && let ArrayItems::Associative(items) = items
+            && let ArrayItems::Associative(items, _) = items
         {
             for (key, value, concat) in items {
                 let value = if *concat {
@@ -615,7 +627,7 @@ impl Session {
             return Ok(());
         }
         let items = match items {
-            ArrayItems::Associative(items) => {
+            ArrayItems::Associative(items, _) => {
                 let integer = var.integer;
                 let letter_case = var.letter_case;
                 let map = var.make_associative()?;

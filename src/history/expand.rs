@@ -191,6 +191,7 @@ pub(crate) fn expand_line<'a>(
     let mut input = line;
     let mut print = false;
     let mut expanded = false;
+    let mut substitutions = Vec::new();
     while let Some(c) = pop(&mut input) {
         if c == '\\' && quote != Some('\'') {
             out.push(c);
@@ -198,6 +199,27 @@ pub(crate) fn expand_line<'a>(
                 out.push(next);
             }
             continue;
+        }
+        if c == '$' && quote != Some('\'') && input.starts_with('(') {
+            out.push_str("$(");
+            input = &input[1..];
+            substitutions.push((quote.take(), 0usize));
+            continue;
+        }
+        if quote.is_none()
+            && let Some((_, depth)) = substitutions.last_mut()
+        {
+            if c == '(' {
+                *depth += 1;
+            } else if c == ')' {
+                if *depth == 0 {
+                    quote = substitutions.pop().unwrap().0;
+                } else {
+                    *depth -= 1;
+                }
+                out.push(c);
+                continue;
+            }
         }
         if matches!(c, '\'' | '"') {
             if quote == Some(c) {

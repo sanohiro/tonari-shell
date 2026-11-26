@@ -278,6 +278,7 @@ impl Session {
             self.set_posix(enabled);
         }
         if name == "ignoreeof" {
+            self.unset_variable("ignoreeof");
             if enabled {
                 self.assign("IGNOREEOF", "10");
             } else {
@@ -293,6 +294,14 @@ impl Session {
             self.bindings.map = Keymap::Insert;
         }
     }
+    pub(crate) fn set_eof_variable(&mut self, value: Option<&str>) {
+        self.ignoreeof = value.is_some();
+        self.ignoreeof_limit = value
+            .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(10);
+    }
+
     pub(crate) fn read_comments(&self) -> bool {
         !self.interactive || self.source_depth != 0 || self.shopt.interactive_comments
     }

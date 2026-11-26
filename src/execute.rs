@@ -1018,8 +1018,16 @@ fn eval_builtin(
             }
         }
         Builtin::Export => {
-            let status = session.export(args, &mut bindings);
-            Flow::Continue(apply_array_declarations(cmd, status, session))
+            if args
+                .iter()
+                .take_while(|s| s.len() > 1 && s.starts_with('-') && *s != "--")
+                .any(|s| s.contains(['a', 'A']))
+            {
+                session.export_arrays(args, &cmd.array_declarations, last_status, &mut bindings)
+            } else {
+                let status = session.export(args, &mut bindings);
+                Flow::Continue(apply_array_declarations(cmd, status, session))
+            }
         }
         Builtin::Unset => Flow::Continue(session.unset(args)),
         Builtin::DirectoryStack => {
@@ -2421,6 +2429,9 @@ fn prepare_expanded(
                 if words.is_empty() {
                     if standalone {
                         session.assign_array(&key, append, &items, false)?;
+                        if let Some(error) = items.initializer_error() {
+                            return Err(crate::expansion::Error::discard(error));
+                        }
                     }
                 } else if let Some(operand) = operand {
                     array_declarations.push(ArrayDeclaration {
@@ -2523,6 +2534,9 @@ fn prepare_expanded(
                 if let Some(i) = index {
                     session.assign_element(base, i, value);
                     continue;
+                }
+                if session.is_nameref(&key) && !Session::valid_reference_target(&value) {
+                    return Err(crate::expansion::Error::discard("invalid name reference"));
                 }
                 if direct_assignment {
                     session.assign_value(&key, value.into());

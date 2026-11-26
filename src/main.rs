@@ -339,12 +339,7 @@ fn interactive_loop(
             session.refresh_terminal_size();
         }
         if !more && source.is_empty() {
-            if session
-                .get("IGNOREEOF")
-                .map_or(session.ignoreeof && eof_count < 10, |v| {
-                    eof_count < v.parse::<usize>().unwrap_or(10)
-                })
-            {
+            if session.ignoreeof && eof_count < session.ignoreeof_limit {
                 eof_count += 1;
                 eprintln!(
                     "Use \"{}\" to leave the shell.",
@@ -488,7 +483,18 @@ fn run_invocation(
     session.allexport = invocation.allexport;
     session.notify = invocation.notify;
     session.noexec = invocation.check;
-    session.ignoreeof = invocation.ignoreeof;
+    if let Some(enabled) = invocation.ignoreeof {
+        if enabled {
+            session.assign("IGNOREEOF", "10");
+        } else {
+            session.unset_variable("ignoreeof");
+            session.unset_variable("IGNOREEOF");
+        }
+    } else if let Some(value) =
+        std::env::var_os("IGNOREEOF").or_else(|| std::env::var_os("ignoreeof"))
+    {
+        session.set_eof_variable(Some(value.to_str().unwrap_or("")));
+    }
     session.onecmd = invocation.onecmd;
     session.xtrace = invocation.xtrace;
     session.errexit = invocation.errexit;

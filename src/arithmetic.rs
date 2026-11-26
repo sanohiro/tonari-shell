@@ -31,6 +31,9 @@ impl Variables for Session {
                 self.assign_target(name, &value.to_string())
             };
         }
+        if self.is_nameref(name) {
+            return self.assign_target(name, &value.to_string());
+        }
         if let Some(result) = self.write_scalar_decimal(name, value) {
             return result;
         }

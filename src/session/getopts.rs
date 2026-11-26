@@ -124,7 +124,16 @@ impl Session {
             eprintln!("tonari: getopts: {name}: readonly variable");
             return if option.is_none() { 1 } else { 2 };
         }
-        self.assign(name, result.encode_utf8(&mut [0; 4]));
+        let mut bytes = [0; 4];
+        let value = result.encode_utf8(&mut bytes);
+        if self.is_nameref(name) {
+            if let Err(error) = self.assign_target(name, value) {
+                eprintln!("tonari: getopts: {name}: {error}");
+                return 1;
+            }
+        } else {
+            self.assign(name, value);
+        }
         u8::from(option.is_none())
     }
 }

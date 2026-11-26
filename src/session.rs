@@ -155,6 +155,7 @@ pub struct Session {
     pub notify: bool,
     pub noexec: bool,
     pub ignoreeof: bool,
+    pub ignoreeof_limit: usize,
     pub xtrace: bool,
     pub onecmd: bool,
     pub subshell_depth: u32,
@@ -575,7 +576,7 @@ impl Session {
         self.has_namerefs && self.variables.get(name).is_some_and(|v| v.nameref)
     }
 
-    fn valid_reference_target(name: &str) -> bool {
+    pub(crate) fn valid_reference_target(name: &str) -> bool {
         is_identifier(name)
             || array::subscript(name)
                 .is_some_and(|(base, index)| is_identifier(base) && !index.is_empty())
@@ -873,6 +874,8 @@ impl Session {
             name,
             "BASH_ARGV0"
                 | "GLOBIGNORE"
+                | "IGNOREEOF"
+                | "ignoreeof"
                 | "POSIXLY_CORRECT"
                 | "BASH_COMPAT"
                 | "HISTSIZE"
@@ -931,6 +934,10 @@ impl Session {
             }
             _ => {}
         }
+        if self.is_nameref(name) && !Self::valid_reference_target(&value) {
+            eprintln!("tonari: {name}: invalid name reference");
+            return;
+        }
         if self.readonly(name) {
             return;
         }
@@ -952,6 +959,9 @@ impl Session {
         }
         if name == "BASH_ARGV0" {
             self.arg0 = value.to_string();
+        }
+        if matches!(name, "IGNOREEOF" | "ignoreeof") {
+            self.set_eof_variable(Some(&value));
         }
         if name == "GLOBIGNORE" {
             self.shopt.glob.set_ignore(Some(&value));
@@ -1039,6 +1049,8 @@ impl Session {
             name,
             "OPTIND"
                 | "GLOBIGNORE"
+                | "IGNOREEOF"
+                | "ignoreeof"
                 | "POSIXLY_CORRECT"
                 | "BASH_COMPAT"
                 | "PATH"
@@ -1225,6 +1237,9 @@ impl Session {
             if name == "OPTIND" {
                 self.opt_offset = 0;
             }
+            if matches!(name.as_str(), "IGNOREEOF" | "ignoreeof") {
+                self.set_eof_variable(Some(&value));
+            }
             if name == "GLOBIGNORE" {
                 self.shopt.glob.set_ignore(Some(&value));
             }
@@ -1254,6 +1269,9 @@ impl Session {
             }
             if name == "POSIXLY_CORRECT" {
                 self.apply_posix_mode(true);
+            }
+            if matches!(name.as_str(), "IGNOREEOF" | "ignoreeof") {
+                self.set_eof_variable(Some(value));
             }
             if name == "GLOBIGNORE" {
                 self.shopt.glob.set_ignore(Some(value));
@@ -1311,6 +1329,16 @@ impl Session {
                     |v| v.value.is_some(),
                 );
                 self.apply_posix_mode(enabled);
+            }
+            if matches!(name.as_str(), "IGNOREEOF" | "ignoreeof") {
+                let inherited;
+                let previous = if let Some(var) = &original {
+                    var.value.as_deref()
+                } else {
+                    inherited = std::env::var(&name).ok();
+                    inherited.as_deref()
+                };
+                self.set_eof_variable(previous);
             }
             if name == "GLOBIGNORE" {
                 self.shopt
@@ -1634,6 +1662,9 @@ impl Session {
         if name == "FUNCNAME" {
             self.funcname_unset = true;
         }
+        if matches!(name, "IGNOREEOF" | "ignoreeof") {
+            self.set_eof_variable(None);
+        }
         if name == "GLOBIGNORE" {
             self.shopt.glob.set_ignore(None);
         }
@@ -1661,6 +1692,9 @@ impl Session {
                 && let Some(offset) = scope.1.take()
             {
                 self.opt_offset = offset;
+            }
+            if matches!(name, "IGNOREEOF" | "ignoreeof") {
+                self.set_eof_variable(self.get(name).as_deref());
             }
             if name == "GLOBIGNORE" {
                 self.shopt.glob.set_ignore(self.get(name).as_deref());
