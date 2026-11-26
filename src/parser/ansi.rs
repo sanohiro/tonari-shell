@@ -1,4 +1,5 @@
 use super::Error;
+use super::Incomplete;
 use std::str::Chars;
 
 fn digits(chars: &mut Chars<'_>, radix: u32, count: usize) -> Option<u32> {
@@ -39,9 +40,7 @@ pub(super) fn quoted_fragment<'a>(
         // continuation bytes cannot match either delimiter in the next scan.
         start = (at + 2).min(bytes.len());
     }
-    Err(Error::Incomplete(
-        "unterminated dollar-single-quoted string",
-    ))
+    Err(Error::Incomplete(Incomplete::AnsiQuote))
 }
 
 pub(crate) fn decode(source: &str) -> Result<String, Error> {

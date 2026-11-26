@@ -135,7 +135,7 @@ impl Session {
         let resolved = self.reference_name(name)?;
         let name = resolved.as_ref();
         if self.readonly(name) {
-            return Err("readonly variable");
+            return Err(crate::session::READONLY);
         }
         if self.live_table(name) {
             if name == "BASH_ALIASES" {

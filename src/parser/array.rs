@@ -1,3 +1,4 @@
+use super::Incomplete;
 use super::lexer::{LexWord, Token};
 use super::{Error, Reader, Word, is_identifier};
 
@@ -93,7 +94,11 @@ impl Reader {
                         word,
                     ));
                 }
-                None => return Err(Error::Incomplete("unfinished array assignment")),
+                None => {
+                    return Err(Error::Incomplete(Incomplete::Message(
+                        "unfinished array assignment",
+                    )));
+                }
                 Some(unexpected) => {
                     // Resume only after the matching closing parenthesis. A later
                     // physical line is still array text until that delimiter.
@@ -113,7 +118,7 @@ impl Reader {
                     return Err(if self.final_input {
                         Error::Invalid("unfinished invalid array assignment")
                     } else {
-                        Error::Incomplete("unfinished array assignment")
+                        Error::Incomplete(Incomplete::Message("unfinished array assignment"))
                     });
                 }
             }

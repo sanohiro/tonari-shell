@@ -174,7 +174,7 @@ fn syntax_error(session: &Session, problem: parser::Error, first_line: usize) ->
         && !session.command_string
         && !session.stdin_script
         && session.source_depth == 0
-        && matches!(problem, parser::Error::Invalid("NUL in command text"))
+        && matches!(problem, parser::Error::NulByte)
     {
         Flow::Exit(126)
     } else if matches!(problem, parser::Error::ArrayToken) && !session.errexit {
@@ -486,7 +486,9 @@ fn run(
             && !(session.shopt.expand_aliases && session.aliases.0.is_some());
         let mut result = if open_function {
             // A function header cannot execute before its compound body.
-            Err(parser::Error::Incomplete("unfinished function definition"))
+            Err(parser::Error::Incomplete(parser::Incomplete::Message(
+                "unfinished function definition",
+            )))
         } else {
             parser::session_source_at(text, n == 0, session, base_line)
         };
@@ -690,7 +692,9 @@ pub fn text(
             }
         };
         let mut result = if open_function {
-            Err(parser::Error::Incomplete("unfinished function definition"))
+            Err(parser::Error::Incomplete(parser::Incomplete::Message(
+                "unfinished function definition",
+            )))
         } else {
             parse(session, text, last)
         };

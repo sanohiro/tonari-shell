@@ -19,7 +19,7 @@ struct Options<'a> {
     array: Option<&'a str>,
 }
 
-fn options(args: &[String]) -> Result<Options<'_>, &'static str> {
+fn options(args: &[String]) -> Result<Options<'_>, (u8, &'static str)> {
     let mut opts = Options {
         raw: false,
         silent: false,
@@ -59,10 +59,10 @@ fn options(args: &[String]) -> Result<Options<'_>, &'static str> {
                 continue;
             }
             if !matches!(flag, 'a' | 'd' | 'u' | 'n' | 'N' | 'p' | 't' | 'i') {
-                return Err("unsupported option");
+                return Err((2, "unsupported option"));
             }
             let value = if flags.as_str().is_empty() {
-                let word = args.get(i).ok_or("option requires an argument")?;
+                let word = args.get(i).ok_or((2, "option requires an argument"))?;
                 i += 1;
                 word.as_str()
             } else {
@@ -71,27 +71,30 @@ fn options(args: &[String]) -> Result<Options<'_>, &'static str> {
             match flag {
                 'a' => {
                     if !is_identifier(value) {
-                        return Err("invalid array name");
+                        return Err((1, "invalid array name"));
                     }
                     opts.array = Some(value);
                 }
                 'd' => opts.delimiter = value.as_bytes().first().copied().unwrap_or(0),
                 'n' | 'N' => {
-                    opts.max_chars = Some(value.parse().map_err(|_| "invalid character count")?);
+                    opts.max_chars =
+                        Some(value.parse().map_err(|_| (1, "invalid character count"))?);
                     opts.exact = flag == 'N';
                 }
                 'u' => {
-                    opts.fd = value.parse().map_err(|_| "invalid file descriptor")?;
+                    opts.fd = value.parse().map_err(|_| (1, "invalid file descriptor"))?;
                     if opts.fd < 0 {
-                        return Err("invalid file descriptor");
+                        return Err((1, "invalid file descriptor"));
                     }
                 }
                 'i' => opts.initial = Some(value),
                 'p' => opts.prompt = Some(value),
                 't' => {
                     opts.timeout = Some(
-                        Duration::try_from_secs_f64(value.parse().map_err(|_| "invalid timeout")?)
-                            .map_err(|_| "invalid timeout")?,
+                        Duration::try_from_secs_f64(
+                            value.parse().map_err(|_| (1, "invalid timeout"))?,
+                        )
+                        .map_err(|_| (1, "invalid timeout"))?,
                     );
                 }
                 _ => unreachable!(),
@@ -233,12 +236,9 @@ impl Drop for EchoGuard {
 pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u8])>) -> u8 {
     let opts = match options(args) {
         Ok(opts) => opts,
-        Err(e) => {
+        Err((code, e)) => {
             eprintln!("tonari: read: {e}");
-            return match e {
-                "unsupported option" | "option requires an argument" => 2,
-                _ => 1,
-            };
+            return code;
         }
     };
     if crate::execute::fd::is_private(opts.fd) {
@@ -271,8 +271,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     });
     if let Some(files_only) = edit {
         let mut history = crate::history::History::default();
-        let prior =
-            crate::INPUT_DEADLINE.replace(opts.timeout.and_then(|t| Instant::now().checked_add(t)));
+        let deadline = crate::InputDeadline::enter(opts.timeout);
         let result = crate::editor::line(
             opts.prompt.unwrap_or(""),
             &mut history,
@@ -285,7 +284,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
             false,
             None,
         );
-        crate::INPUT_DEADLINE.set(prior);
+        drop(deadline);
         match result {
             Ok(crate::editor::Input::Line(text)) => edited = Some(text.into_bytes().into_iter()),
             Ok(crate::editor::Input::Directory(_)) => unreachable!(),
@@ -485,7 +484,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         });
         if let Err(e) = session.assign_builtin_target(name, value) {
             eprintln!("tonari: read: {e}");
-            return if e == "readonly variable" && i + 1 < count {
+            return if e == crate::session::READONLY && i + 1 < count {
                 2
             } else {
                 1

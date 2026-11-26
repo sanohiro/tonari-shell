@@ -176,11 +176,8 @@ pub fn parse(
                             Some("notify") => notify = enabled,
                             Some("ignoreeof") => ignoreeof = Some(enabled),
                             Some("noglob") => noglob = enabled,
-                            _ => {
-                                return Err(
-                                    "expected braceexpand, pipefail, errexit, noglob or nounset after -o".into(),
-                                );
-                            }
+                            Some(name) => return Err(format!("{name}: invalid option name")),
+                            None => return Err("expected an option name after -o".into()),
                         },
                         _ => return Err(format!("unsupported option: {arg}")),
                     }

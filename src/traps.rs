@@ -402,7 +402,7 @@ impl Traps {
         if sig == 0 {
             self.watch_exit(command != "-" && !command.is_empty())?;
         }
-        let real = sig < DEBUG && sig > 0 && sig != libc::SIGSTOP && sig != libc::SIGKILL;
+        let real = is_os_signal(sig) && sig != libc::SIGSTOP && sig != libc::SIGKILL;
         let mut original = action(libc::SIG_DFL);
         if let Some(old) = self.entries.get(&sig) {
             original = old.original;
@@ -554,7 +554,7 @@ impl Traps {
         for (&sig, e) in &old {
             if self.keep_after_fork(sig, e, errtrace, functrace) {
                 let mut child = e.clone();
-                if sig > 0 && sig < DEBUG && child.original.sa_sigaction != libc::SIG_IGN {
+                if is_os_signal(sig) && child.original.sa_sigaction != libc::SIG_IGN {
                     child.original = action(libc::SIG_DFL);
                 }
                 self.entries.insert(sig, child);
@@ -618,8 +618,7 @@ impl Traps {
                 )?;
             }
             if !entries.contains_key(&sig)
-                && sig > 0
-                && sig < DEBUG
+                && is_os_signal(sig)
                 && let Some((name, _)) = signals().find(|s| s.1 == sig)
             {
                 let ignored = if let Some(old) = self.implicit.get(&sig) {
@@ -952,6 +951,19 @@ pub(crate) struct WaitMask {
 
 extern "C" fn wake(_: i32) {}
 
+fn is_os_signal(sig: i32) -> bool {
+    sig > 0 && sig < DEBUG
+}
+
+#[test]
+fn shell_traps_alone_do_not_install_a_wait_mask() {
+    let mut traps = Traps::default();
+    for sig in [DEBUG, ERR, RETURN] {
+        traps.set(sig, ":", false).unwrap();
+    }
+    assert!(WaitMask::new(&traps).unwrap().is_none());
+}
+
 impl WaitMask {
     pub fn new(traps: &Traps) -> io::Result<Option<Self>> {
         if !traps.interactive_hup
@@ -959,7 +971,7 @@ impl WaitMask {
             && !traps
                 .entries
                 .iter()
-                .any(|(&s, e)| s < ERR && s != 0 && s != libc::SIGCHLD && !e.command.is_empty())
+                .any(|(&s, e)| is_os_signal(s) && s != libc::SIGCHLD && !e.command.is_empty())
         {
             return Ok(None);
         }

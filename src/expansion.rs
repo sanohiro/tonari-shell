@@ -564,7 +564,7 @@ impl Variables for Expansion<'_> {
             return Variables::set(self.session, name, value);
         }
         if self.session.readonly(name) {
-            return Err("readonly variable");
+            return Err(crate::session::READONLY);
         }
         self.assign(name, &value.to_string());
         Ok(())

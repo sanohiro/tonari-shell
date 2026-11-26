@@ -245,11 +245,11 @@ pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u
         {
             // A callback can read the same descriptor or replace it.
             drop(input);
-            let command = format!(
+            let callback_command = format!(
                 "{callback} {index} {}",
                 crate::completion_spec::single_quote(line)
             );
-            match crate::eval_text(session, &command, last) {
+            match crate::eval_text(session, &callback_command, last) {
                 Flow::Continue(_) => {}
                 flow => return flow,
             }

@@ -1,3 +1,4 @@
+use super::Incomplete;
 use super::lexer::{LexWord, Token, backquote, dollar, separator};
 use super::{Error, Target};
 use crate::word::{Word, WordBuilder};
@@ -76,7 +77,9 @@ pub(super) fn redirect(
         chars.next();
     }
     if chars.as_str().starts_with("\\\n") && chars.as_str().trim_start_matches("\\\n").is_empty() {
-        return Err(Error::Incomplete("continued here-document operator"));
+        return Err(Error::Incomplete(Incomplete::Message(
+            "continued here-document operator",
+        )));
     }
     let (delimiter, quoted) = delimiter(chars)?;
     tokens.push(Token::Redirect(fd, Target::HereDoc { expand: !quoted }));
@@ -121,9 +124,9 @@ fn delimiter(chars: &mut Chars<'_>) -> Result<(String, bool), Error> {
             }
             _ if quote == Some(c) => quote = None,
             '\\' if quote != Some('\'') => {
-                let next = chars
-                    .next()
-                    .ok_or(Error::Incomplete("unfinished here-document delimiter"))?;
+                let next = chars.next().ok_or(Error::Incomplete(Incomplete::Message(
+                    "unfinished here-document delimiter",
+                )))?;
                 if next == '\n' {
                     continue;
                 }
@@ -165,7 +168,9 @@ fn delimiter(chars: &mut Chars<'_>) -> Result<(String, bool), Error> {
         started = true;
     }
     if quote.is_some() || depth != 0 {
-        return Err(Error::Incomplete("unterminated here-document delimiter"));
+        return Err(Error::Incomplete(Incomplete::Message(
+            "unterminated here-document delimiter",
+        )));
     }
     if !started {
         return Err(Error::Invalid("expected a here-document delimiter"));

@@ -14,18 +14,25 @@ pub(super) enum Search {
     BuiltinsOnly,
 }
 
-pub(super) fn path(cmd: &PreparedCommand, session: &Session) -> OsString {
-    if cmd.default_path {
+fn default_system_path() -> &'static std::ffi::OsStr {
+    static PATH: std::sync::LazyLock<OsString> = std::sync::LazyLock::new(|| {
         let size = unsafe { libc::confstr(libc::_CS_PATH, std::ptr::null_mut(), 0) };
         if size > 0 {
-            let mut bytes = vec![0u8; size];
-            unsafe {
-                libc::confstr(libc::_CS_PATH, bytes.as_mut_ptr().cast(), bytes.len());
+            let mut bytes = vec![0; size];
+            let len = unsafe { libc::confstr(libc::_CS_PATH, bytes.as_mut_ptr().cast(), size) };
+            if (1..=size).contains(&len) {
+                bytes.truncate(len - 1);
+                return std::os::unix::ffi::OsStringExt::from_vec(bytes);
             }
-            bytes.pop();
-            return std::os::unix::ffi::OsStringExt::from_vec(bytes);
         }
         "/bin:/usr/bin".into()
+    });
+    &PATH
+}
+
+pub(super) fn path(cmd: &PreparedCommand, session: &Session) -> OsString {
+    if cmd.default_path {
+        default_system_path().to_owned()
     } else {
         session.search_path(&cmd.assignments)
     }
@@ -136,11 +143,12 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
     }
     let search = std::cell::LazyCell::new(|| {
         if default_path {
-            "/bin:/usr/bin".into()
+            default_system_path().to_owned()
         } else {
             session.search_path(&[])
         }
     });
+    let ignored = std::cell::LazyCell::new(|| IgnoredExecutables::new(session));
     let mut out = Vec::new();
     let mut any = false;
     let mut all = true;
@@ -217,7 +225,6 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
             }
         }
         if !found || search_all {
-            let ignored = IgnoredExecutables::new(session);
             let mut report = |path: &Path| {
                 found = true;
                 let absolute;

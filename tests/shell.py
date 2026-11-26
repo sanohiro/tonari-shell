@@ -633,6 +633,34 @@ HISTFILE=second; HISTFILESIZE=2; cat second
                                     "history -r a; history -n b; history | awk '{print $NF}'")
         self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"one\nsix\nnext\n", b""))
 
+    def test_completion_actions_survive_print_and_reload(self):
+        actions = ("alias arrayvar binding builtin command directory disabled enabled export "
+                   "file function group helptopic hostname job keyword running service setopt "
+                   "shopt signal stopped user variable")
+        source = """complete $(printf -- '-A %s ' """ + actions + """) probe
+line=$(complete -p probe); complete -r probe; eval "$line"; complete -p probe"""
+        reference = self.command(BASH, source)
+        result = self.command(TONARI, source)
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (0, reference.stdout, b""))
+        self.assertIn(b"-A binding", result.stdout)
+
+    def test_mapfile_callback_readonly_names_invoked_builtin(self):
+        for name in ("mapfile", "readarray"):
+            result = self.command(TONARI, "lock(){ readonly -a ary; }; "
+                                  + name + " -tc1 -C lock ary <<<one")
+            self.assertEqual((result.returncode, result.stderr),
+                             (1, f"tonari: {name}: ary: readonly variable\\n".encode()))
+
+    def test_debug_wait_preserves_child_status(self):
+        self.compare("trap ':' DEBUG; (exit 37) & wait $!; echo $?", 0, b"37\\n")
+
+    def test_reassign_history_limits(self):
+        self.compare("""HISTSIZE=10; HISTFILESIZE=10; HISTFILE=hist
+printf '%s\\\\n' one two three >hist; history -r hist
+HISTSIZE=1; history | awk '{ print $NF }'
+HISTFILESIZE=1; cat hist""", 0, b"three\\nthree\\n", minimum=5)
+
     def test_invoked_as_sh(self):
         sh = self.cwd / "sh"
         env = self.env | {"BASH_ENV": str(self.cwd / "bashenv"), "ENV": str(self.cwd / "env")}

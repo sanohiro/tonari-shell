@@ -1,3 +1,4 @@
+use super::Incomplete;
 use super::{CaseEnd, Error, Reader, Target, ansi, here_doc, parse_final};
 use crate::word::{Part, Word, WordBuilder, is_identifier};
 use std::str::Chars;
@@ -192,7 +193,11 @@ fn dollar_word(
                     .count(),
                 Some(b'0'..=b'9') => content.bytes().take_while(|b| b.is_ascii_digit()).count(),
                 Some(b'@' | b'*' | b'?' | b'$' | b'#' | b'!' | b'-') => 1,
-                None => return Err(Error::Incomplete("unterminated parameter expansion")),
+                None => {
+                    return Err(Error::Incomplete(Incomplete::Message(
+                        "unterminated parameter expansion",
+                    )));
+                }
                 _ => return bad_substitution(content, chars, word, quoted),
             };
             if !super::POSIX.get() && content.starts_with("!#") && !content.starts_with("!#}") {
@@ -431,7 +436,11 @@ fn dollar_word(
                     Some('-') => crate::word::Alternative::Default,
                     Some('=') => crate::word::Alternative::Assign,
                     Some('?') => crate::word::Alternative::Error,
-                    None => return Err(Error::Incomplete("unterminated parameter expansion")),
+                    None => {
+                        return Err(Error::Incomplete(Incomplete::Message(
+                            "unterminated parameter expansion",
+                        )));
+                    }
                     _ => return bad_substitution(content, chars, word, quoted),
                 };
                 let (alternative, _) =
@@ -493,8 +502,7 @@ fn dollar_word(
                         word.part(Part::Arithmetic { expression, quoted });
                         return Ok(());
                     }
-                    Err(Error::Invalid("invalid closing parenthesis in arithmetic expression")) => {
-                    }
+                    Err(Error::ArithmeticClose) => {}
                     Err(error) => return Err(error),
                 }
             }
@@ -553,9 +561,9 @@ pub(super) fn backquote(
         }
         source.push_str(literal);
         let mut escaped = after[1..].chars();
-        let next = escaped
-            .next()
-            .ok_or(Error::Incomplete("unterminated backquote"))?;
+        let next = escaped.next().ok_or(Error::Incomplete(Incomplete::Message(
+            "unterminated backquote",
+        )))?;
         if next != '\n' {
             if !(matches!(next, '$' | '`' | '\\') || quoted && next == '"') {
                 source.push('\\');
@@ -564,7 +572,9 @@ pub(super) fn backquote(
         }
         rest = escaped.as_str();
     }
-    Err(Error::Incomplete("unterminated backquote"))
+    Err(Error::Incomplete(Incomplete::Message(
+        "unterminated backquote",
+    )))
 }
 
 fn alternative_word(chars: &mut Chars<'_>, outer_quoted: bool) -> Result<Word, Error> {
@@ -657,9 +667,9 @@ fn parameter_word(
             '\'' if !outer_quoted => quoted(chars, c, &mut word)?,
             '`' => backquote(chars, &mut word, outer_quoted)?,
             '\\' => {
-                let next = chars
-                    .next()
-                    .ok_or(Error::Incomplete("unterminated parameter expansion"))?;
+                let next = chars.next().ok_or(Error::Incomplete(Incomplete::Message(
+                    "unterminated parameter expansion",
+                )))?;
                 if next == '\n' {
                     continue;
                 }
@@ -693,7 +703,9 @@ fn parameter_word(
         }
         empty = false;
     }
-    Err(Error::Incomplete("unterminated parameter expansion"))
+    Err(Error::Incomplete(Incomplete::Message(
+        "unterminated parameter expansion",
+    )))
 }
 
 pub(super) fn quoted(
@@ -705,7 +717,7 @@ pub(super) fn quoted(
         let (literal, rest) = chars
             .as_str()
             .split_once(quote)
-            .ok_or(Error::Incomplete("unterminated single quote"))?;
+            .ok_or(Error::Incomplete(Incomplete::SingleQuote))?;
         word.literal(literal);
         *chars = rest.chars();
         return Ok(());
@@ -732,7 +744,7 @@ fn double_quoted(
             {
                 let escaped = chars
                     .next()
-                    .ok_or(Error::Incomplete("unterminated double quote"))?;
+                    .ok_or(Error::Incomplete(Incomplete::DoubleQuote))?;
                 if escaped == '\n' {
                     continue;
                 }
@@ -753,7 +765,7 @@ fn double_quoted(
         }
         empty = false;
     }
-    Err(Error::Incomplete("unterminated double quote"))
+    Err(Error::Incomplete(Incomplete::DoubleQuote))
 }
 
 fn process_word(chars: &mut Chars<'_>, word: &mut WordBuilder, input: bool) -> Result<(), Error> {
@@ -912,9 +924,9 @@ fn scan_subscript<'a>(
             '$' => dollar(&mut chars, &mut word, !associative)?,
             '`' => backquote(&mut chars, &mut word, true)?,
             '\\' => {
-                let next = chars
-                    .next()
-                    .ok_or(Error::Incomplete("trailing arithmetic escape"))?;
+                let next = chars.next().ok_or(Error::Incomplete(Incomplete::Message(
+                    "trailing arithmetic escape",
+                )))?;
                 if next != '\n' {
                     word.push(next);
                 }
@@ -938,17 +950,19 @@ fn arithmetic_source(chars: &mut Chars<'_>) -> Result<String, Error> {
                 return Ok(source[..end].replace("\\\n", ""));
             }
             ')' if joined(chars.as_str()).trim().is_empty() => {
-                return Err(Error::Incomplete("continued arithmetic delimiter"));
+                return Err(Error::Incomplete(Incomplete::Message(
+                    "continued arithmetic delimiter",
+                )));
             }
             ')' => {
-                return Err(Error::Invalid(
-                    "invalid closing parenthesis in arithmetic expression",
-                ));
+                return Err(Error::ArithmeticClose);
             }
             _ => {}
         }
     }
-    Err(Error::Incomplete("unterminated arithmetic expression"))
+    Err(Error::Incomplete(Incomplete::Message(
+        "unterminated arithmetic expression",
+    )))
 }
 
 fn pattern_parts(
@@ -972,9 +986,9 @@ fn pattern_parts(
         match c {
             '\'' | '"' => quoted(chars, c, word)?,
             '\\' => {
-                let escaped = chars
-                    .next()
-                    .ok_or(Error::Incomplete("trailing regular expression escape"))?;
+                let escaped = chars.next().ok_or(Error::Incomplete(Incomplete::Message(
+                    "trailing regular expression escape",
+                )))?;
                 if escaped != '\n' {
                     word.push(escaped);
                 }
@@ -1017,7 +1031,9 @@ fn pattern_parts(
         word.part(Part::Pattern(raw));
     }
     if group.is_some() && depth != 0 {
-        return Err(Error::Incomplete("unterminated extended pattern"));
+        return Err(Error::Incomplete(Incomplete::Message(
+            "unterminated extended pattern",
+        )));
     }
     Ok(())
 }
@@ -1225,7 +1241,7 @@ fn scan(
             && let Some(rest) = chars.as_str().strip_prefix("\\\n")
         {
             if rest.is_empty() && !final_input {
-                return Err(Error::Incomplete("line continuation"));
+                return Err(Error::Incomplete(Incomplete::Message("line continuation")));
             }
             chars = rest.chars();
             continue;
@@ -1284,7 +1300,7 @@ fn scan(
                     && matches!(
                         Reader::new(tokens.clone(), spans.clone(), &source[..offset]).list(&[]),
                         Err(Error::Incomplete(
-                            "expected ')' after case pattern" | "unfinished subshell"
+                            Incomplete::CasePattern | Incomplete::Subshell
                         ))
                     );
                 if !inner_closer {
@@ -1325,7 +1341,7 @@ fn scan(
                             chars = tail;
                             Token::Arithmetic(expression)
                         }
-                        Err(Error::Invalid(_)) => {
+                        Err(Error::Invalid(_) | Error::ArithmeticClose) => {
                             parentheses += 1;
                             Token::LeftParen
                         }
@@ -1445,12 +1461,18 @@ fn scan(
                     let escaped = match chars.next() {
                         Some(c) => c,
                         None if final_input => '\\',
-                        None => return Err(Error::Incomplete("trailing backslash")),
+                        None => {
+                            return Err(Error::Incomplete(Incomplete::Message(
+                                "trailing backslash",
+                            )));
+                        }
                     };
                     if escaped == '\n' {
                         after_colon = follows_colon;
                         if chars.as_str().is_empty() && !final_input {
-                            return Err(Error::Incomplete("line continuation"));
+                            return Err(Error::Incomplete(Incomplete::Message(
+                                "line continuation",
+                            )));
                         }
                         continue;
                     }
@@ -1641,7 +1663,9 @@ fn scan(
     }
     here_doc::collect(&mut chars, &mut tokens, &mut pending_docs, final_input)?;
     if substitution || brace_substitution {
-        return Err(Error::Incomplete("unterminated command substitution"));
+        return Err(Error::Incomplete(Incomplete::Message(
+            "unterminated command substitution",
+        )));
     }
     spans.resize(tokens.len(), (token_start, source.len()));
     Ok((tokens, spans, ""))

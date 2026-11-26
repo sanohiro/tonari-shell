@@ -10,6 +10,9 @@ mod options;
 pub(crate) mod printf;
 mod read;
 
+pub(crate) const READONLY: &str = "readonly variable";
+pub(crate) const SUBSCRIPT_RANGE: &str = "array subscript out of range";
+
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -719,7 +722,7 @@ impl Session {
                 .get_mut(key.as_ref())
                 .expect("existing name reference");
             if var.readonly {
-                return Err("readonly variable");
+                return Err(crate::session::READONLY);
             }
             var.value = Some(value);
             var.declared = true;
@@ -855,7 +858,7 @@ impl Session {
             let i = self
                 .resolve_index(base, index)
                 .map_err(|error| {
-                    if error == "array subscript out of range" {
+                    if error == crate::session::SUBSCRIPT_RANGE {
                         eprintln!("tonari: {base}: bad array subscript");
                     }
                 })
@@ -1206,7 +1209,7 @@ impl Session {
             return None;
         }
         if var.readonly {
-            return Some(Err("readonly variable"));
+            return Some(Err(crate::session::READONLY));
         }
         let text = var.value.as_mut()?;
         text.clear();
@@ -1223,19 +1226,7 @@ impl Session {
         let (name, append) = key
             .strip_suffix('+')
             .map_or((key, false), |name| (name, true));
-        if matches!(
-            name,
-            "OPTIND"
-                | "GLOBIGNORE"
-                | "IGNOREEOF"
-                | "ignoreeof"
-                | "POSIXLY_CORRECT"
-                | "BASH_COMPAT"
-                | "PATH"
-                | "BASH_ARGV0"
-                | "PIPESTATUS"
-        ) || Self::builtin_readonly(name)
-        {
+        if !Self::ordinary_assignment(name) || Self::builtin_readonly(name) {
             return false;
         }
         let Some(var) = self.variables.get_mut(name) else {
