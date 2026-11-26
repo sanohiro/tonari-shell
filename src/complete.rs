@@ -555,6 +555,74 @@ pub(crate) fn user_names(prefix: &str) -> Vec<String> {
     names
 }
 
+pub(crate) fn group_names(prefix: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    unsafe {
+        libc::setgrent();
+        while let Some(group) = libc::getgrent().as_ref() {
+            if let Ok(name) = std::ffi::CStr::from_ptr(group.gr_name).to_str()
+                && name.starts_with(prefix)
+            {
+                names.push(name.to_owned());
+            }
+        }
+        libc::endgrent();
+    }
+    names
+}
+
+pub(crate) fn service_names(prefix: &str) -> Vec<String> {
+    std::fs::read_to_string("/etc/services")
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split('#').next()?.split_ascii_whitespace();
+            let primary = fields.next()?;
+            fields.next()?;
+            std::iter::once(primary)
+                .chain(fields)
+                .find(|name| name.starts_with(prefix))
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+pub(crate) fn signal_names(prefix: &str) -> Vec<String> {
+    let mut signals: Vec<_> = crate::traps::SIGNALS.iter().copied().collect();
+    signals.sort_unstable_by_key(|&(_, n)| n);
+    let mut names: Vec<_> = signals
+        .into_iter()
+        .map(|(name, n)| {
+            if n == 0 {
+                name.into()
+            } else {
+                format!("SIG{name}")
+            }
+        })
+        .collect();
+    #[cfg(target_os = "linux")]
+    {
+        names.push("SIGPWR".into());
+        names.push("SIGSTKFLT".into());
+        let low = libc::SIGRTMIN();
+        let high = libc::SIGRTMAX();
+        for n in low..=high {
+            names.push(if n == low {
+                "SIGRTMIN".into()
+            } else if n == high {
+                "SIGRTMAX".into()
+            } else if n - low <= high - n {
+                format!("SIGRTMIN+{}", n - low)
+            } else {
+                format!("SIGRTMAX-{}", high - n)
+            });
+        }
+    }
+    names.extend(["DEBUG", "ERR", "RETURN"].map(str::to_owned));
+    names.retain(|name| name.starts_with(prefix));
+    names
+}
+
 pub(crate) fn host_names(prefix: &str, session: &Session) -> Vec<String> {
     let path = session
         .get("HOSTFILE")

@@ -144,7 +144,64 @@ fn duplicate(src: RawFd, dest: RawFd) -> io::Result<()> {
     }
 }
 
+// Resolve services as well as numeric ports, and try every address returned for
+// the requested protocol. The open descriptor has the same inheritance as open(2).
+fn network_redirect(path: &CStr, address: &[u8], kind: i32) -> Option<OwnedFd> {
+    let Some(separator) = address.iter().position(|&b| b == b'/') else {
+        write_error(path.to_bytes(), b": expected host/port");
+        return None;
+    };
+    let host = CString::new(&address[..separator]).ok()?;
+    let service = CString::new(&address[separator + 1..]).ok()?;
+    if host.as_bytes().is_empty() || service.as_bytes().is_empty() {
+        write_error(path.to_bytes(), b": expected host/port");
+        return None;
+    }
+    let mut hints: libc::addrinfo = unsafe { std::mem::zeroed() };
+    hints.ai_socktype = kind;
+    let mut list = std::ptr::null_mut();
+    let result = unsafe { libc::getaddrinfo(host.as_ptr(), service.as_ptr(), &hints, &mut list) };
+    if result != 0 {
+        write_error_detail(
+            path.to_bytes(),
+            b": ",
+            unsafe { CStr::from_ptr(libc::gai_strerror(result)) }.to_bytes(),
+        );
+        return None;
+    }
+    let mut current = list;
+    let mut connected = None;
+    let mut error = io::Error::from(io::ErrorKind::AddrNotAvailable);
+    while let Some(entry) = unsafe { current.as_ref() } {
+        let fd = unsafe { libc::socket(entry.ai_family, kind, entry.ai_protocol) };
+        if fd >= 0 {
+            let socket = unsafe { OwnedFd::from_raw_fd(fd) };
+            if unsafe { libc::connect(fd, entry.ai_addr, entry.ai_addrlen) } == 0 {
+                connected = Some(socket);
+                break;
+            }
+            error = io::Error::last_os_error();
+        } else {
+            error = io::Error::last_os_error();
+        }
+        current = entry.ai_next;
+    }
+    unsafe { libc::freeaddrinfo(list) };
+    if connected.is_none() {
+        write_error_detail(path.to_bytes(), b": ", error.to_string().as_bytes());
+    }
+    connected
+}
+
 fn open_redirect(path: &CStr, flags: i32) -> Option<OwnedFd> {
+    if let Some(device) = path.to_bytes().strip_prefix(b"/dev/")
+        && let Some((kind, address)) = device
+            .strip_prefix(b"tcp/")
+            .map(|a| (libc::SOCK_STREAM, a))
+            .or_else(|| device.strip_prefix(b"udp/").map(|a| (libc::SOCK_DGRAM, a)))
+    {
+        return network_redirect(path, address, kind);
+    }
     let mut fd = unsafe { libc::open(path.as_ptr(), flags, 0o666 as libc::c_int) };
     if fd < 0 && flags & libc::O_EXCL != 0 && errno() == libc::EEXIST {
         // Open without truncation and inspect the opened object. A path swap

@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 import random
+import socket
+import threading
 import statistics
 import subprocess
 import tempfile
@@ -12,6 +14,8 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "completion-sources": "complete -g -s -A signal pick; complete -p pick; compgen -A group $(id -gn) | LC_ALL=C sort -u; compgen -s http | LC_ALL=C sort -u; compgen -A signal SIGTER; compgen -A signal DEBUG",
+
     "posix-variable": 'f(){ shopt -qo posix; printf "%s/%s " "$?" "${POSIXLY_CORRECT-unset}"; }; f; POSIXLY_CORRECT=1 f; f; set -o posix; f; unset POSIXLY_CORRECT; f; g(){ local POSIXLY_CORRECT=inside; f; }; g; f',
     "physical": 'cd linkdir; pwd; set -P; pwd; cd ..; cd linkdir; echo "$PWD"; set +o physical; cd ..; cd -L linkdir; pwd',
     "execfail": 'shopt -s execfail; exec ./missing; echo "continued:$?"; (exec ./missing; echo wrong); echo "subshell:$?"',
@@ -50,6 +54,9 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "completion-group": ('compgen -g "$group" >/dev/null', 24),
+    "completion-service": ('compgen -s http >/dev/null', 40),
+    "completion-signal": ('compgen -A signal SIGTER >/dev/null', 650),
     "posix-variable": ('POSIXLY_CORRECT=1; unset POSIXLY_CORRECT', 800),
     "physical": ('pwd >/dev/null', 900),
     "execfail": ('exec ./missing', 550),
@@ -131,6 +138,46 @@ def completion_time(shell, root):
         t.close()
 
 
+def socket_time(shell, run, kind, count):
+    # The receiver validates every payload. Exercise a builtin, an external
+    # command and a persistent named descriptor with the same loopback fixture.
+    with socket.socket(socket.AF_INET, kind) as listener:
+        listener.bind(("127.0.0.1", 0))
+        stream = kind == socket.SOCK_STREAM
+        if stream:
+            listener.listen()
+        listener.settimeout(3)
+        received = []
+        errors = []
+        def receive():
+            try:
+                for _ in range(count):
+                    if stream:
+                        peer, _ = listener.accept()
+                        with peer:
+                            data = b""
+                            while part := peer.recv(1024):
+                                data += part
+                    else:
+                        data = listener.recv(1024)
+                    received.append(data)
+            except OSError as exc:
+                errors.append(str(exc))
+        reader = threading.Thread(target=receive)
+        reader.start()
+        path = f"/dev/{'tcp' if stream else 'udp'}/127.0.0.1/{listener.getsockname()[1]}"
+        code = (f'p={path}; /bin/echo external >"$p"; exec {{sock}}<>"$p"; '
+                'printf named >&"$sock"; exec {sock}>&-; '
+                f'for ((i=2;i<{count};i++)); do printf payload >"$p" || exit; done')
+        try:
+            outcome, ms = run(shell, code)
+        finally:
+            reader.join()
+        if errors or outcome != (0, b"", False) or received != [b"external\n", b"named"] + [b"payload"] * (count-2):
+            raise ValueError((path, shell, outcome, errors, received[:4], len(received)))
+        return ms
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bash", type=Path)
@@ -178,10 +225,23 @@ def main():
             print(json.dumps(dict(case="filename-completion", repeats=1,
                                   median_ms=[round(statistics.median(g), 3) for g in samples],
                                   samples_ms=samples)), flush=True)
+        for label, kind in (("tcp-redirection", socket.SOCK_STREAM), ("udp-redirection", socket.SOCK_DGRAM)):
+            samples = [[] for _ in shells]
+            count = 80 if args.runs else 3
+            for r in range(args.runs + 1):
+                indices = list(range(len(shells)))
+                rng.shuffle(indices)
+                for i in indices:
+                    ms = socket_time(shells[i], run, kind, count)
+                    if r: samples[i].append(ms)
+            if args.runs:
+                print(json.dumps(dict(case=label, repeats=count, median_ms=[round(statistics.median(g),3) for g in samples],
+                                      samples_ms=samples)), flush=True)
         for name, (body, count) in HOT.items():
             if not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "completion-group": "group=$(id -gn)",
                 "physical": "set -P", "execfail": "shopt -s execfail; exec 2>/dev/null", "history-number": "set -o history; history -s seed", "shift-verbose": "shopt -s shift_verbose; exec 2>/dev/null",
                 "alias-table": "alias sample=value", "command-table": "hash -p /bin/sh sample",
                 "execignore": 'PATH=$PWD/a:$PWD/b; EXECIGNORE="$PWD/a/*"',

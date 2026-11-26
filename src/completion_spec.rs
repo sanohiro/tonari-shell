@@ -41,6 +41,9 @@ const ACTIONS: &[&str] = &[
     "setopt",
     "user",
     "hostname",
+    "group",
+    "service",
+    "signal",
     "variable",
 ];
 
@@ -263,7 +266,7 @@ impl Request {
                         }
                         result.spec.actions.push(action);
                     }
-                    'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'k' | 'v' | 'j' | 'u' => {
+                    'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'k' | 'v' | 'j' | 'u' | 'g' | 's' => {
                         let action = match flag {
                             'a' => "alias",
                             'b' => "builtin",
@@ -272,6 +275,8 @@ impl Request {
                             'e' => "export",
                             'f' => "file",
                             'k' => "keyword",
+                            'g' => "group",
+                            's' => "service",
                             'j' => "job",
                             'u' => "user",
                             _ => "variable",
@@ -353,8 +358,10 @@ impl Spec {
             ("directory", "-d"),
             ("export", "-e"),
             ("file", "-f"),
+            ("group", "-g"),
             ("job", "-j"),
             ("keyword", "-k"),
+            ("service", "-s"),
             ("user", "-u"),
             ("variable", "-v"),
             ("arrayvar", "-A arrayvar"),
@@ -363,6 +370,7 @@ impl Spec {
             ("running", "-A running"),
             ("setopt", "-A setopt"),
             ("shopt", "-A shopt"),
+            ("signal", "-A signal"),
             ("stopped", "-A stopped"),
         ] {
             if self.actions.iter().any(|value| value == action) {
@@ -428,6 +436,9 @@ impl Spec {
                     words.extend(session.jobs.completion_names(action, prefix))
                 }
                 "user" => words.extend(complete::user_names(prefix)),
+                "group" => words.extend(complete::group_names(prefix)),
+                "service" => words.extend(complete::service_names(prefix)),
+                "signal" => words.extend(complete::signal_names(prefix)),
                 "hostname" => words.extend(complete::host_names(prefix, session)),
                 "command" => words.extend(complete::command_names(prefix, session)),
                 "directory" | "file" => words.extend(complete::file_names(
