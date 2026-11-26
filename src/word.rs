@@ -413,6 +413,24 @@ impl Word {
                         };
                     }
                 }
+                Part::Parameter { name, quoted: true } if name == "*" => {
+                    // A later expansion in this word can change IFS or the arguments.
+                    *part = Part::Text(
+                        env.session
+                            .positional
+                            .as_slice()
+                            .join(&ifs_separator(&|k| env.lookup(k))),
+                    );
+                }
+                Part::Parameter { name, quoted: true }
+                    if name.ends_with("[*]") && array_elements_name(name).is_some() =>
+                {
+                    let modifier::Values::Elements(values, _) = modifier::Values::read(name, env)?
+                    else {
+                        unreachable!()
+                    };
+                    *part = Part::Text(values.join(&ifs_separator(&|k| env.lookup(k))));
+                }
                 Part::Parameter { name, quoted }
                     if !matches!(name.as_str(), "@" | "*")
                         && array_elements_name(name).is_none() =>

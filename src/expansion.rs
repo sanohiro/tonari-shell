@@ -197,10 +197,9 @@ impl<'a> Expansion<'a> {
                 return Ok(());
             }
         }
-        Err(Error::fatal(
-            format!("${name}: cannot assign in this way"),
-            1,
-        ))
+        Err(Error::discard(format!(
+            "${name}: cannot assign in this way"
+        )))
     }
 
     pub fn process(&mut self, body: Vec<Statement>, input: bool) -> Result<String, Error> {

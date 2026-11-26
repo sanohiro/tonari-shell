@@ -34,6 +34,8 @@ COMMON = {
     "function-stack": """FUNCNAME=ignored; echo "<$FUNCNAME>"; f(){ FUNCNAME=no; echo "<$FUNCNAME>"; }; f; unset FUNCNAME; FUNCNAME=ordinary; echo "$FUNCNAME" """,
     "nolog": """set -o nolog; shopt -qo nolog; echo $?; set +o nolog; shopt -qo nolog; echo $?""",
     "debug-arguments": r"""set -- a b; echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}"; set -- changed; f(){ echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}"; }; f x y; shopt -s extdebug; f x y; echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}" """,
+    "positional-assignment-error": 'echo ${6=x}; echo wrong\necho "next:$?"\nset -e\necho ${@:=x}; echo wrong\necho wrong',
+    "quoted-star-order": 'set -- a "b c" 雪; a=("$@"); unset IFS; printf "<%s>" "$*${IFS:=-}$*" ; IFS=; printf "<%s>" "${a[*]}${IFS:=:}${a[*]}"; set -u --; printf "<%s>" "$*"',
     "bad-expansion": "echo first\necho ${#:}; echo wrong\necho \"next:$?\"",
     "stack-tilde": 'pushd src >/dev/null; printf "<%s>\\n" ~0 ~1 ~+1 ~-0 ~-1 ~99; popd >/dev/null',
     "custom-history-event": """history -s 'echo first last'; histchars='^:#'; history -p '^^'; histchars='$:#'; history -p '$$'; histchars='@:#'; history -p '@@'""",
@@ -102,6 +104,8 @@ HOT = {
     "multiline-history": (":", 300),
     "scalar-array-slice": ('v=${text[@]:1:4}', 1600),
     "indirect-positionals": ('v=${!@:-missing}', 1600),
+    "positional-assignment-error": ("echo ${6=x}", 300),
+    "quoted-star-order": ('IFS=; v="$*${IFS:=-}$*"', 1200),
     "function-stack": ('f', 1200),
     "read-one-field": ("read value <fields", 750),
     "read-fields": ("read a b <fields", 750),
@@ -470,6 +474,8 @@ def main():
         # environment. A shell assignment to HOME must take effect immediately.
         assert run(shells[1], 'HOME=/example; x=~/src; echo "$x"')[0] == (0, b"/example/src\n", False)
         assert run(shells[1], 'v=雪abc; printf "%s" "${v[@]:0:2}"')[0] == (0, "雪a".encode(), False)
+        unicode_ifs = 'set -- a b; a=("$@"); IFS=雪; printf "%s:%s" "$*" "${a[*]}"'
+        assert run(shells[1], unicode_ifs)[0] == (0, "a雪b:a雪b".encode(), False)
         termroot = root / "completion"
         termroot.mkdir()
         (termroot / "pick.valid").touch()
@@ -642,6 +648,7 @@ def main():
                 "numeric-locale": "unset LC_ALL; LC_NUMERIC=de_DE.UTF-8",
                 "multiline-history": "set -o history",
                 "scalar-array-slice": "text=雪abcdef",
+                "quoted-star-order": 'set -- one "two words" 雪',
                 "function-stack": "f(){ FUNCNAME=ignored; :; }",
                 "read-one-field": "printf '  one  two  \\n' >fields",
                 "read-fields": r"IFS=$'\t\r\f\v'; printf '  left\tright \t\r\f\v\n' >fields",
@@ -678,6 +685,8 @@ def main():
                 # Input history is recorded for top-level commands, even with
                 # no terminal. Executing a sourced loop would bypass this path.
                 code = "set -o history\n" + "for v in one two\ndo\n  : item\ndone\n" * count + "echo done"
+            elif name == "positional-assignment-error":
+                code = "exec 2>/dev/null\n" + (body + "\n") * count + "echo done"
             elif name == "backquote-escape":
                 # Parse a fresh top-level assignment for each substitution.
                 code = "".join(f"v={i}{body[2:]}\n" for i in range(count)) + "echo done"
