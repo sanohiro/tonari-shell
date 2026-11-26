@@ -793,17 +793,18 @@ fn kill(jobs: &Jobs, mut args: &[String], posix: bool) -> u8 {
         let mut status = 0;
         if args.len() == 1 {
             if posix {
-                let mut first = true;
-                for (name, sig) in crate::traps::signals() {
-                    if sig == 0 {
-                        continue;
+                static NAMES: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+                    let mut text = String::new();
+                    for (name, _) in crate::traps::signals().filter(|s| s.1 > 0) {
+                        if !text.is_empty() {
+                            text.push(' ');
+                        }
+                        text.push_str(name);
                     }
-                    if write!(out, "{}{name}", if first { "" } else { " " }).is_err() {
-                        return 1;
-                    }
-                    first = false;
-                }
-                return u8::from(writeln!(out).is_err());
+                    text.push('\n');
+                    text
+                });
+                return u8::from(out.write_all(NAMES.as_bytes()).is_err());
             }
             return u8::from(crate::traps::print_signal_table(&mut out).is_err());
         } else {

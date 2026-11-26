@@ -19,12 +19,10 @@ COMMON = {
     "posix-prompt-expansion": "set -o posix; shopt -u promptvars; v=visible; p='!!/$v'; printf '%s\\n' \"${p@P}\"",
     "posix-ulimit-blocks": "ulimit -S -f 32; set -o posix; ulimit -S -f; ulimit -S -f 40; set +o posix; ulimit -S -f",
     "posix-signal-operands": "set -o posix; kill -l | awk '{n+=NF} END {print NR,(n>10)}'; kill -s SIGTERM 99999999 2>&1 | grep -Eq 'invalid signal'; echo $?",
-    "posix-fc-operands": "set -o posix; set -o history\nhistory -s 'echo first'\nfc -s 1 1 1; echo \"$?\"",
     "posix-fc-format": "set -o posix; set -o history\nhistory -s 'echo first'\nfc -ln -1",
     "posix-logical-directory": "set -o posix; mkdir -p movedir/leaf; cd movedir; mv ../movedir ../gone; cd leaf 2>/dev/null; echo $?; echo \"$(pwd | sed 's|.*/||')\"; cd \"$HOME\"; rmdir gone/leaf gone",
     "posix-comments-reset": "shopt -u interactive_comments; set -o posix; shopt -q interactive_comments; echo $?",
     "posix-consume-wait": "set -o posix; (exit 9) & p=$!; wait \"$p\"; echo \"$?\"; wait \"$p\" 2>/dev/null; echo \"$?\"",
-    "posix-function-path": "function ./absent { echo wrong; }; set -o posix; ./absent 2>/dev/null; echo $?",
     "posix-special-in-function": "set -o posix; a=outer; f(){ a=3 readonly a; }; a=7 f; declare -p a; g(){ local q=local; q=inside :; echo \"$q\"; }; q=outside; q=temp g; echo \"$q\"",
     "trace-arithmetic-loop": "PS4='+'; { set -x; for (( j=$((++v)); j<2; j++ )); do :; done; for ((;;)); do break; done; set +x; } 2>trace; cat trace; echo \"$v:$j\"",
     "trace-arithmetic-expansion": "PS4='+'; { set -x; (( x=$((++v)) )); set +x; } 2>trace; cat trace; echo \"$x:$v\"",
@@ -126,6 +124,8 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "posix-fc-operands": "set -o posix; set -o history\nhistory -s 'echo first'\nfc -s 1 1 1; echo \"$?\"",
+    "posix-function-path": "function ./absent { echo wrong; }; set -o posix; ./absent 2>/dev/null; echo $?",
     "posix-trap-display": "set -o posix; trap ':' USR1; trap -p USR1; trap USR1; echo after",
     "alias-display-selected": "set -o posix; alias demo='echo hi'; alias demo; alias -p demo",
     "posix-substitution-status": "set -o posix; false; echo \"$(true)/$?\"; x=$(exit 7); echo \"$?\"",
