@@ -10,65 +10,31 @@ fn project(dir: &Path) -> Option<&Path> {
     dir.ancestors().find(|p| p.join(".git").exists())
 }
 
-pub(crate) fn candidates(
-    session: &Session,
-    words: &[String],
-    current: usize,
-    dirs: bool,
-) -> Vec<String> {
+fn recent_journal(session: &Session) -> Option<(Vec<u8>, usize)> {
     const WINDOW: u64 = 256 * 1024;
-    let prefix = &words[current];
-    let command = &words[0];
-    let option = current
-        .checked_sub(1)
-        .filter(|&n| n > 0)
-        .map(|n| words[n].as_str())
-        .filter(|s| s.starts_with('-') && *s != "--");
-    if current == 0 || prefix.starts_with('-') || (prefix.is_empty() && option.is_none()) {
-        return Vec::new();
+    let (mut input, meta) = super::open_journal(&file(session)?).ok()?;
+    let count = meta.len().min(WINDOW);
+    if count == 0 {
+        return None;
     }
-    let Some(path) = file(session) else {
-        return Vec::new();
-    };
-    let Ok((mut input, meta)) = super::open_journal(&path) else {
-        return Vec::new();
-    };
-    if meta.len() == 0 {
-        return Vec::new();
-    }
-    let start = meta.len().saturating_sub(WINDOW);
-    let mut data = Vec::with_capacity((meta.len() - start) as usize);
-    if input.seek(SeekFrom::Start(start)).is_err()
-        || input
-            .take(meta.len() - start)
-            .read_to_end(&mut data)
-            .is_err()
-    {
-        return Vec::new();
-    }
-    let Some(last) = memchr::memrchr(b'\n', &data) else {
-        return Vec::new();
-    };
-    let bytes = &data[..last];
-    let bytes = if start == 0 {
-        bytes
+    let start = meta.len() - count;
+    let mut data = Vec::with_capacity(count as usize);
+    input.seek(SeekFrom::Start(start)).ok()?;
+    input.take(count).read_to_end(&mut data).ok()?;
+    data.truncate(memchr::memrchr(b'\n', &data)?);
+    let first = if start == 0 {
+        0
     } else {
-        memchr::memchr(b'\n', bytes).map_or(&[][..], |n| &bytes[n + 1..])
+        memchr::memchr(b'\n', &data)? + 1
     };
-    let Ok(cwd) = std::env::current_dir() else {
-        return Vec::new();
-    };
-    let logical = session.get("PWD").unwrap_or_default();
-    let root = project(&cwd);
+    Some((data, first))
+}
+
+fn successful_rows<'a>(bytes: &'a [u8], needle: &str) -> Vec<(&'a str, &'a str, usize)> {
     // Group identical journal commands before parsing words and probing paths.
     // The first occurrence in the reverse scan sets the recency tie-break.
     let mut groups = Vec::new();
     let mut positions = HashMap::new();
-    let needle = if prefix.is_empty() {
-        option.unwrap_or("")
-    } else {
-        prefix
-    };
     for (i, row) in bytes.rsplit(|&b| b == b'\n').enumerate() {
         if i % 64 == 0 {
             crate::editor::preview::poll();
@@ -97,6 +63,40 @@ pub(crate) fn candidates(
         });
         groups[index].2 += 1;
     }
+    groups
+}
+
+pub(crate) fn candidates(
+    session: &Session,
+    words: &[String],
+    current: usize,
+    dirs: bool,
+) -> Vec<String> {
+    let prefix = &words[current];
+    let command = &words[0];
+    let option = current
+        .checked_sub(1)
+        .filter(|&n| n > 0)
+        .map(|n| words[n].as_str())
+        .filter(|s| s.starts_with('-') && *s != "--");
+    if current == 0 || prefix.starts_with('-') || (prefix.is_empty() && option.is_none()) {
+        return Vec::new();
+    }
+    let Some((data, first)) = recent_journal(session) else {
+        return Vec::new();
+    };
+    let bytes = &data[first..];
+    let Ok(cwd) = std::env::current_dir() else {
+        return Vec::new();
+    };
+    let logical = session.get("PWD").unwrap_or_default();
+    let root = project(&cwd);
+    let needle = if prefix.is_empty() {
+        option.unwrap_or("")
+    } else {
+        prefix
+    };
+    let groups = successful_rows(bytes, needle);
     let mut directories = HashMap::new();
     let mut path_kinds = HashMap::new();
     let mut best = 0;

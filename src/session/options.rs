@@ -1,3 +1,4 @@
+use super::{Cow, dynamic, print_variable_value, set_value};
 use std::io::{self, Write};
 
 use super::Session;
@@ -129,8 +130,12 @@ macro_rules! compat_entry {
 // Derive both the lookup table and the direct snapshot reads from the same
 // order. Function return only visits hooks for bits which actually changed.
 macro_rules! set_options {
-    ($( $name:literal => $($field:ident).+ ),+ $(,)?) => {
+    ($( $name:literal $( ( $short:literal ) )? => $($field:ident).+ ),+ $(,)?) => {
         const SET_OPTIONS: &[OptionEntry] = &[$(option_entry!($name, $($field).+)),+];
+        fn set_short_option(s: &mut Session, flag: char, enabled: bool) -> bool {
+            $( set_options!(@apply s, flag, enabled, $($field).+ $(, $short)?); )+
+            false
+        }
         fn set_bits(s: &Session) -> u32 {
             let mut bits = 0;
             for (i, enabled) in [$(s.$($field).+),+].into_iter().enumerate() {
@@ -138,35 +143,39 @@ macro_rules! set_options {
             }
             bits
         }
-    }
+    };
+    (@apply $s:ident, $flag:ident, $enabled:ident, $($field:ident).+, $short:literal) => {
+        if $flag == $short { $s.$($field).+ = $enabled; return true; }
+    };
+    (@apply $s:ident, $flag:ident, $enabled:ident, $($field:ident).+) => {};
 }
 set_options! {
-    "allexport" => allexport,
-    "braceexpand" => shopt.braceexpand,
+    "allexport" ('a') => allexport,
+    "braceexpand" ('B') => shopt.braceexpand,
     "emacs" => emacs,
-    "errexit" => errexit,
-    "errtrace" => errtrace,
-    "functrace" => functrace,
-    "hashall" => hashes.enabled,
+    "errexit" ('e') => errexit,
+    "errtrace" ('E') => errtrace,
+    "functrace" ('T') => functrace,
+    "hashall" ('h') => hashes.enabled,
     "histexpand" => histexpand,
     "history" => history_enabled,
     "ignoreeof" => ignoreeof,
     "interactive-comments" => shopt.interactive_comments,
-    "keyword" => keyword,
-    "monitor" => jobs.monitor,
-    "noclobber" => noclobber,
+    "keyword" ('k') => keyword,
+    "monitor" ('m') => jobs.monitor,
+    "noclobber" ('C') => noclobber,
     "noexec" => noexec,
-    "noglob" => noglob,
+    "noglob" ('f') => noglob,
     "nolog" => shopt.nolog,
-    "notify" => notify,
-    "nounset" => nounset,
-    "onecmd" => onecmd,
-    "physical" => physical,
+    "notify" ('b') => notify,
+    "nounset" ('u') => nounset,
+    "onecmd" ('t') => onecmd,
+    "physical" ('P') => physical,
     "pipefail" => pipefail,
     "posix" => posix,
-    "verbose" => verbose,
+    "verbose" ('v') => verbose,
     "vi" => vi,
-    "xtrace" => xtrace,
+    "xtrace" ('x') => xtrace,
 }
 const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("array_expand_once", shopt.array_expand_once),
@@ -230,6 +239,19 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("varredir_close", shopt.varredir_close),
     option_entry!("xpg_echo", shopt.xpg_echo),
 ];
+fn write_option_line(
+    out: &mut impl Write,
+    name: &str,
+    value: bool,
+    reusable: bool,
+) -> io::Result<()> {
+    if reusable {
+        writeln!(out, "set {}o {name}", if value { '-' } else { '+' })
+    } else {
+        writeln!(out, "{name:15}\t{}", if value { "on" } else { "off" })
+    }
+}
+
 impl Session {
     pub(super) fn apply_compat(&mut self, value: &str) {
         self.shopt.compat = if value.is_empty() {
@@ -524,18 +546,241 @@ impl Session {
             if quiet || (enable && !value) || (disable && value) {
                 continue;
             }
-            let result = if reusable && set {
-                writeln!(out, "set {}o {name}", if value { '-' } else { '+' })
-            } else if reusable {
+            let result = if reusable && !set {
                 writeln!(out, "shopt -{} {name}", if value { 's' } else { 'u' })
             } else {
-                writeln!(out, "{name:15}\t{}", if value { "on" } else { "off" })
+                write_option_line(&mut out, name, value, reusable)
             };
             if result.is_err() {
                 return 1;
             }
         }
         out.flush().map_or(1, |()| status)
+    }
+}
+
+impl Session {
+    pub fn option_flags(&self) -> String {
+        let mut flags = String::new();
+        if self.allexport {
+            flags.push('a');
+        }
+        if self.notify {
+            flags.push('b');
+        }
+        if self.errexit {
+            flags.push('e');
+        }
+        if self.noglob {
+            flags.push('f');
+        }
+        if self.hashes.enabled {
+            flags.push('h');
+        }
+        if self.interactive {
+            flags.push('i');
+        }
+        if self.keyword {
+            flags.push('k');
+        }
+        if self.jobs.monitor {
+            flags.push('m');
+        }
+        if self.noexec {
+            flags.push('n');
+        }
+        if self.onecmd {
+            flags.push('t');
+        }
+        if self.nounset {
+            flags.push('u');
+        }
+        if self.verbose {
+            flags.push('v');
+        }
+        if self.xtrace {
+            flags.push('x');
+        }
+        if self.shopt.braceexpand {
+            flags.push('B');
+        }
+        if self.noclobber {
+            flags.push('C');
+        }
+        if self.errtrace {
+            flags.push('E');
+        }
+        if self.histexpand {
+            flags.push('H');
+        }
+        if self.physical {
+            flags.push('P');
+        }
+        if self.functrace {
+            flags.push('T');
+        }
+        if self.command_string {
+            flags.push('c');
+        }
+        if self.stdin_script {
+            flags.push('s');
+        }
+        flags
+    }
+
+    pub fn set(&mut self, words: &mut Vec<String>) -> u8 {
+        let args = words.get(1..).unwrap_or_default();
+        if args.is_empty() {
+            let mut out = io::BufWriter::new(io::stdout().lock());
+            let locale = self.character_locale();
+            for name in self.visible_names("") {
+                let stored = self.variables.get(name);
+                let snapshot;
+                let empty_snapshot = stored.is_none()
+                    && match name {
+                        "BASH_ARGV" | "BASH_ARGC" => {
+                            self.function_depth == 0 && self.debug_base.get().is_none()
+                        }
+                        "BASH_ALIASES" => self
+                            .aliases
+                            .0
+                            .as_ref()
+                            .is_none_or(|aliases| aliases.is_empty()),
+                        "BASH_CMDS" => self.hashes.items().next().is_none(),
+                        "BASH_SOURCE" => self.source_names.is_empty(),
+                        "BASH_LINENO" => self.call_lines.is_empty(),
+                        "GROUPS" => !self.dynamic.groups_read.get(),
+                        "DIRSTACK" => !self.dynamic.stack_read.get(),
+                        _ => false,
+                    };
+                let result = if name == "BASH_VERSINFO" && stored.is_none() {
+                    // The executable version is immutable across shell scopes.
+                    static VERSION: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+                    out.write_all(VERSION.get_or_init(|| {
+                        let mut bytes = name.as_bytes().to_vec();
+                        let version = self.declared_variable(name, false).unwrap();
+                        print_variable_value(&mut bytes, &version).expect("in-memory write");
+                        bytes
+                    }))
+                } else if empty_snapshot {
+                    writeln!(out, "{name}=()")
+                } else if self.array_parameter(name) {
+                    let var = if let Some(var) = stored.filter(|v| !v.dynamic) {
+                        var
+                    } else {
+                        snapshot = self.declared_variable(name, false).unwrap();
+                        &snapshot
+                    };
+                    if !var.array_assigned
+                        || name == "PIPESTATUS" && self.pipe_status.first.is_none()
+                    {
+                        continue;
+                    }
+                    write!(out, "{name}").and_then(|_| print_variable_value(&mut out, var))
+                } else {
+                    let value = if dynamic::is_dynamic(name) && stored.is_none_or(|v| v.dynamic) {
+                        // A listing must not advance RANDOM or consume fresh entropy.
+                        self.listed_number(name).map(|v| Cow::Owned(v.to_string()))
+                    } else if let Some(var) = stored {
+                        var.value.as_deref().map(Cow::Borrowed)
+                    } else if matches!(
+                        name,
+                        "BASHPID"
+                            | "BASH_ARGV0"
+                            | "BASH_COMMAND"
+                            | "BASH_SUBSHELL"
+                            | "LINENO"
+                            | "COMP_WORDBREAKS"
+                            | "EPOCHSECONDS"
+                            | "EPOCHREALTIME"
+                    ) {
+                        self.listed_text(name).map(Cow::Owned)
+                    } else {
+                        self.get(name).map(Cow::Owned)
+                    };
+                    let Some(value) = value else { continue };
+                    writeln!(out, "{name}={}", set_value(&value, self.posix, locale))
+                };
+                if result.is_err() {
+                    return 1;
+                }
+            }
+            if !self.posix {
+                for name in self.functions.keys() {
+                    if self.print_function(&mut out, name, false).is_err() {
+                        return 1;
+                    }
+                }
+            }
+            return out.flush().map_or(1, |()| 0);
+        }
+        let mut i = 0;
+        let mut replace_positionals = false;
+        while let Some(opt) = args.get(i) {
+            if opt == "--" {
+                i += 1;
+                replace_positionals = true;
+                break;
+            }
+            if opt == "+" {
+                i += 1;
+                continue;
+            }
+            if opt == "-" {
+                self.xtrace = false;
+                self.verbose = false;
+                i += 1;
+                break;
+            }
+            let Some(prefix) = opt.as_bytes().first() else {
+                break;
+            };
+            if !matches!(prefix, b'-' | b'+') || opt.len() < 2 {
+                break;
+            }
+            let enable = *prefix == b'-';
+            i += 1;
+            for flag in opt[1..].chars() {
+                match flag {
+                    'n' => self.noexec = enable && !self.interactive,
+                    'H' => {
+                        self.histexpand = enable;
+                        self.command_history_expansion = enable;
+                    }
+                    'o' => {
+                        let Some(name) = args.get(i) else {
+                            let mut out = io::BufWriter::with_capacity(512, io::stdout().lock());
+                            for (name, on) in self.options(true) {
+                                let result = write_option_line(&mut out, name, on, !enable);
+                                if result.is_err() {
+                                    return 1;
+                                }
+                            }
+                            return out.flush().map_or(1, |()| 0);
+                        };
+                        i += 1;
+                        if let Some(value) = self.option_value(name, true) {
+                            *value = enable;
+                            self.option_changed(name, enable);
+                        } else {
+                            eprintln!("tonari: set: {name}: unsupported option");
+                            return 2;
+                        }
+                    }
+                    short if set_short_option(self, short, enable) => {}
+                    _ => {
+                        eprintln!("tonari: set: {opt}: unsupported option");
+                        return 2;
+                    }
+                }
+            }
+        }
+        if i < args.len() || replace_positionals {
+            words.drain(..i + 1);
+            self.positional = std::mem::take(words).into_iter();
+            self.source_set_args = true;
+        }
+        0
     }
 }
 

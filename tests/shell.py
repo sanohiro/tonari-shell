@@ -1818,6 +1818,22 @@ show
             p = self.command(shell, source)
             self.assertEqual((p.returncode, p.stdout, p.stderr), (0, expected, b""))
 
+    def test_multiline_single_quote_keeps_input_boundaries(self):
+        text = "雪\n" + "fi\n" * 700 + "😀"
+        code = "v='" + text + "'\nprintf '%s' \"$v\"\n"
+        expected = text.encode()
+        self.compare(code, 0, expected)
+        for shell in self.shells_for():
+            with self.subTest(shell=shell):
+                proc = subprocess.run([shell], input=code.encode(), capture_output=True,
+                                      cwd=self.cwd, env=self.env, timeout=5)
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, expected, b""))
+        for suffix in (b"\xff\n", b"\x00\n", b""):
+            proc = subprocess.run([TONARI], input=b"printf first\nv='open\nsecond\n" + suffix,
+                                  capture_output=True, cwd=self.cwd, env=self.env, timeout=5)
+            self.assertEqual((proc.returncode, proc.stdout), (2, b"first"))
+            self.assertTrue(proc.stderr)
+
     def test_eval_large_profile_preserves_command_boundaries(self):
         # Read the text as an rcfile generator would. The actual function close
         # is beyond 8 KiB, with plausible terminators inside its body.

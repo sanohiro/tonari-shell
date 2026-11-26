@@ -557,7 +557,7 @@ fn deep_expression_full(depth: u16) -> bool {
     if depth >= 2048 {
         return true;
     }
-    if depth % 16 != 0 {
+    if !depth.is_multiple_of(16) {
         return false;
     }
     crate::stack_budget_exceeded()

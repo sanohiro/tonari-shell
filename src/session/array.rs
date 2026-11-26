@@ -910,23 +910,8 @@ impl Session {
         if !self.variables.contains_key(name) {
             let inherited = self.inherited_value(name);
             let exported = self.is_exported(name);
-            self.variables.insert(
-                name.into(),
-                Variable {
-                    letter_case: None,
-                    temporary: false,
-                    dynamic: false,
-                    inherited: Default::default(),
-                    readonly: false,
-                    nameref: false,
-                    integer: false,
-                    declared: true,
-                    value: inherited,
-                    array_assigned: false,
-                    elements: None,
-                    exported,
-                },
-            );
+            self.variables
+                .insert(name.into(), Variable::scalar(inherited, exported));
         }
         let value = self.convert_case(value, self.variables[name].letter_case);
         let var = self.variables.get_mut(name).unwrap();
@@ -944,23 +929,7 @@ impl Session {
                 var.declared = false;
             }
         } else if index == 0 && self.inherited_value(name).is_some() {
-            self.variables.insert(
-                name.into(),
-                Variable {
-                    letter_case: None,
-                    temporary: false,
-                    dynamic: false,
-                    inherited: Default::default(),
-                    readonly: false,
-                    nameref: false,
-                    integer: false,
-                    declared: false,
-                    value: None,
-                    array_assigned: false,
-                    elements: None,
-                    exported: false,
-                },
-            );
+            self.variables.insert(name.into(), Variable::default());
         }
     }
 }

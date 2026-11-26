@@ -1,10 +1,11 @@
-diff --git a/src/execute.rs b/src/execute.rs
-index 7e7791d..1c995dd 100644
 --- a/src/execute.rs
 +++ b/src/execute.rs
-@@ -1519,4 +1519,13 @@ fn spawn_failure(name: &str, error: io::Error) -> io::Result<Stage> {
- }
-
+@@ -659,6 +659,15 @@
+     }
+     eprintln!("tonari: {name}: {error}");
+     Ok(Stage::Status(exec_status(code)))
++}
++
 +// Benchmark build only. Use a shared clock across shell processes.
 +fn configure_clock_ns() -> u64 {
 +    unsafe {
@@ -12,31 +13,34 @@ index 7e7791d..1c995dd 100644
 +        assert_eq!(libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut t), 0);
 +        t.tv_sec as u64 * 1_000_000_000 + t.tv_nsec as u64
 +    }
-+}
-+
+ }
+
  pub(super) fn wait(pid: libc::pid_t) -> io::Result<u8> {
-     let mut status = 0;
-@@ -2092,4 +2101,5 @@ pub fn run_pipeline(
-             }));
+@@ -971,6 +980,7 @@
+             },
+         ));
+     }
++    let start_ns = configure_clock_ns();
+     let stage = start(cmd, None, None, None, last_status, session, launch)?;
+     let status = match stage {
+         Stage::Child(pid) | Stage::GroupedChild(pid) if launch.group.is_some() => {
+@@ -986,7 +996,18 @@
+                 )?
+                 .0
          }
-+        let start_ns = configure_clock_ns();
-         let status = match start(&mut cmd, None, None, None, last_status, session, launch)? {
-             Stage::Child(pid) if launch.group.is_some() => {
-@@ -2106,5 +2116,16 @@ pub fn run_pipeline(
-                     .0
-             }
--            Stage::Child(pid) => wait(pid)?,
-+            Stage::Child(pid) => {
-+                let launched_ns = configure_clock_ns();
-+                let code = wait(pid)?;
-+                let done_ns = configure_clock_ns();
-+                if let Some(path) = std::env::var_os("TONARI_CONFIGURE_WAITS") {
-+                    use std::io::Write;
-+                    let name = &cmd.words[0];
-+                    let line = format!("{} {pid} {start_ns} {launched_ns} {done_ns} {code} {name}\n", std::process::id());
-+                    std::fs::OpenOptions::new().append(true).open(path)?.write_all(line.as_bytes())?;
-+                }
-+                code
+-        Stage::Child(pid) | Stage::GroupedChild(pid) => wait(pid)?,
++        Stage::Child(pid) | Stage::GroupedChild(pid) => {
++            let launched_ns = configure_clock_ns();
++            let code = wait(pid)?;
++            let done_ns = configure_clock_ns();
++            if let Some(path) = std::env::var_os("TONARI_CONFIGURE_WAITS") {
++                use std::io::Write;
++                let name = &cmd.words[0];
++                let line = format!("{} {pid} {start_ns} {launched_ns} {done_ns} {code} {name}\n", std::process::id());
++                std::fs::OpenOptions::new().append(true).open(path)?.write_all(line.as_bytes())?;
 +            }
-             Stage::Status(code) => code,
-         };
++            code
++        }
+         Stage::Status(code) => code,
+     };
+     Ok(Flow::Continue(status))

@@ -1,5 +1,27 @@
 # Engineering notes / 開発知見
 
+## 2026-11-27 · Reviewing the shell core against a moving baseline / シェル内部の再点検
+
+The original review used `f22f1f6`. We checked its findings against `7cf373e`, 82 commits later. The latter already transfers named-FD variables with `Option::take`. We also found another manual parser-line restore in escaped backquotes and stale source locations in the external test probes. Both the PTY path probe and the configure wait probe build against the new module layout.
+
+調査の起点から82コミット進んでいたため、各指摘を現行コードと照合しました。名前付き FD は対応済みでしたが、バッククォート解析にも行番号を手動で戻す処理が残っていました。計測器も移動後の関数を実際に捕捉できることを確認しています。
+
+| Phase | What changed / 主な変更 | Evidence / 確認方法 |
+|---|---|---|
+| 0 | `complete -p` round-trips all actions. Real signals, nested deadlines, history-limit assignments and mapfile diagnostics each have a single decision point. 補完の再登録、入力期限の復元、履歴上限の再代入、コールバック後のエラー表示を修正。 | Rust unit tests and `tests/shell.py` |
+| 1 | Builtins share cluster/value parsing. Nested parser state, signal masks, thread locales and spawn resources have scoped lifetimes. 組み込みごとの引数規則を保ち、共通の読み取りと復元処理を利用。 | `builtin-option-clusters`, `execignore`, `child-trap-wait` |
+| 2 | One completion registry defines parsing, generation and printing. History readers share regular-file checks. Forked shell exit, variable assignment effects, builtin names and account lookups have common implementations. 補完の定義、履歴ファイルの読み取り、子プロセスの終了、変数の副作用を集約。 | `registry-roundtrip`, `history-event-words`, `stack-tilde` |
+| 3 | Functions borrow parsed loop bodies. Nested input, parameter expansion and operator recognition share parser helpers. ファイルと文字列の入力は解析結果の判定を共用し、ループ本体の反復コピーを削除。 | `borrowed-control-flow`, `current-arithmetic-alias`, `subscript-command-delimiters` |
+| 4 | Redirects, process launch, preparation, builtins, AST, job builtins and the interactive loop have separate modules. Editor rendering, history file operations and indirect parameter validation have smaller entry points. 通常の呼び出し経路で検証し、ソース移動後の計測器も修正。 | `tests/compat/source_review.py`, `tools/bench_edit_actions.py`, native external suites |
+
+Several similar operations have observable differences. `echo -z` prints an operand. `printf %b`, ANSI-C shell quotes and Readline inputrc syntax have their own byte and control rules. ERE brackets accept a leading `^` for negation, and glob lists also accept `!`. Keep those grammars explicit. A foreground wait can transfer terminal ownership and a shell-level wait may be interrupted by a trap. They share signal and descriptor primitives while keeping their own interruption semantics. Within the editor, completion preview replays queued bytes and a history picker can continue scanning between keys. The input loop keeps ownership of the terminal and delegates editing and drawing to those components.
+
+似ていても利用者に見える結果が違う箇所では、統合する範囲を絞りました。`echo` の未知のオプションは引数です。シェルのクォート、`printf %b`、inputrc はバックスラッシュの解釈が異なります。ERE と glob のブラケット否定、前景ジョブと `wait` の割り込み、補完と履歴ピッカーのキー処理にも個別の規則があります。編集状態は必要な処理にまとめ、端末の入力所有権と再描画の順序を保ちました。[Native timings and reproduction](benchmarks.md#shell-core-refactoring)
+
+An incomplete plain single quote is a lexer result. Until an apostrophe arrives, reparsing every growing prefix of a quoted startup hook repeats work quadratically. In a regular file, validate each new slice for UTF-8 before deferring the parse. EOF, NUL, alias expansion and edited history text still follow the normal parser rules. For repeated `eval`, two parsed entries up to 16 KiB each cover larger generated functions and conditionals. The entries keep the calling line and syntax options in their keys. Tests change alias expansion after three calls to the same 5 KiB input.
+
+閉じていない単一引用符では、次の行に引用符が現れるまで字句解析を繰り返す必要がない。日本語と絵文字を含む長い入力で、ファイルと `-c` の出力を検査した。終了時の構文エラー、NUL、UTF-8 違反も試験した。編集側では文字や単語の入れ替えで作業用文字列を再利用する。端末試験はキーから描画までを計時し、最後にバッファ全体を読み戻して結果を確かめる。
+
 ## 2026-11-27 · Job startup, source locations and history / ジョブ起動・行番号・履歴
 
 On Darwin, assigning the process group after starting a managed external child leaves a race with an immediate stop signal. Set the group in the spawn attributes and let the job table retain that group. A useful regression sends STOP immediately, waits for the stopped status, resumes the child and waits for termination. A separate child stops itself to make the timing comparison reproducible. The default and ignored signal dispositions also need witnesses.

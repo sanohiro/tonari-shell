@@ -77,6 +77,20 @@ pub(crate) fn folded_prefix(value: &str, prefix: &str, locale: CharacterLocale) 
     Some(value.len() - chars.as_str().len())
 }
 
+pub(super) fn strip_folded_suffix<'a>(
+    value: &'a str,
+    suffix: &str,
+    locale: CharacterLocale,
+) -> Option<&'a str> {
+    let mut chars = value.chars();
+    for c in suffix.chars().rev() {
+        if !same_letter(chars.next_back()?, c, locale) {
+            return None;
+        }
+    }
+    Some(chars.as_str())
+}
+
 pub(crate) fn capitalize(mut text: String, locale: crate::session::CharacterLocale) -> String {
     use crate::session::CharacterLocale;
     if locale == CharacterLocale::Ascii || (text.is_ascii() && locale != CharacterLocale::Turkic) {

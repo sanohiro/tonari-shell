@@ -65,12 +65,11 @@ pub(super) fn run<T>(
         if !slot
             .as_ref()
             .is_some_and(|c| c.ctype == ctype && c.collate == collate)
+            && let Some(next) = Cached::new(ctype, collate)
         {
-            if let Some(next) = Cached::new(ctype, collate) {
-                *slot = Some(next);
-                if !cfg!(target_os = "linux") {
-                    order::invalidate();
-                }
+            *slot = Some(next);
+            if !cfg!(target_os = "linux") {
+                order::invalidate();
             }
         }
         let Some(locale) = slot else {

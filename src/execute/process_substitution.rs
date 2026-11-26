@@ -33,7 +33,7 @@ fn status(pid: libc::pid_t, options: i32) -> Option<u8> {
         match crate::traps::waitpid(pid, &mut state, options) {
             n if n > 0 && libc::WIFEXITED(state) => return Some(libc::WEXITSTATUS(state) as u8),
             n if n > 0 && libc::WIFSIGNALED(state) => {
-                return Some((128 + libc::WTERMSIG(state)) as u8);
+                return Some(crate::traps::signal_status(libc::WTERMSIG(state)));
             }
             -1 if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted => continue,
             -1 => return Some(127),
@@ -116,7 +116,13 @@ pub(crate) fn launch(
     };
     // Favor numbers above the descriptors normally named by scripts. On a low
     // descriptor limit the pipe's own (nonstandard) number works equally well.
-    let high = unsafe { libc::fcntl(keep.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 64) };
+    let high = unsafe {
+        libc::fcntl(
+            keep.as_raw_fd(),
+            libc::F_DUPFD_CLOEXEC,
+            crate::execute::fd::PROCESS_SUBSTITUTION_MIN,
+        )
+    };
     let keep = if high >= 0 {
         drop(keep);
         unsafe { OwnedFd::from_raw_fd(high) }
@@ -128,9 +134,7 @@ pub(crate) fn launch(
         return Err("cannot fork process substitution");
     }
     if pid == 0 {
-        session
-            .traps
-            .after_fork(session.errtrace, session.functrace);
+        session.reset_forked_traps();
         drop(keep);
         super::reset_child_signals();
         if super::duplicate(child.as_raw_fd(), target).is_err() {

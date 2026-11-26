@@ -1,3 +1,5 @@
+mod interactive;
+use interactive::{interactive, shell_terminal, terminal_read};
 mod alias;
 #[cfg(all(target_os = "linux", target_env = "musl"))]
 mod allocator;
@@ -167,332 +169,6 @@ fn stack_budget_exceeded() -> bool {
     used + STACK_RESERVE >= unsafe { limit.assume_init() }.rlim_cur / 2
 }
 
-fn terminal_read(buf: &mut [u8], raw: bool) -> io::Result<usize> {
-    unsafe {
-        let mut blocked = std::mem::zeroed();
-        libc::sigfillset(&mut blocked);
-        let original = traps::SignalMask::block(&blocked)?;
-        if INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) || traps::input_interrupted() {
-            return Err(io::ErrorKind::Interrupted.into());
-        }
-        let mut read_set = std::mem::zeroed();
-        libc::FD_ZERO(&mut read_set);
-        libc::FD_SET(0, &mut read_set);
-        let timeout = input_timeout();
-        let selected = libc::pselect(
-            1,
-            &mut read_set,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            timeout
-                .as_ref()
-                .map_or(std::ptr::null(), std::ptr::from_ref),
-            &original.0,
-        );
-        if selected == 0 {
-            return Err(io::ErrorKind::TimedOut.into());
-        }
-        if selected < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        // A terminal interrupt can flush even bytes already reported readable.
-        // VMIN=0 makes the editor read nonblocking after pselect without modifying
-        // the open file description shared with external foreground programs.
-        if raw {
-            let n = libc::read(0, buf.as_mut_ptr().cast(), buf.len());
-            if n < 0 {
-                return Err(io::Error::last_os_error());
-            }
-            if n == 0 {
-                let mut p = libc::pollfd {
-                    fd: 0,
-                    events: libc::POLLIN,
-                    revents: 0,
-                };
-                if libc::poll(&mut p, 1, 0) >= 0 && p.revents & (libc::POLLHUP | libc::POLLERR) == 0
-                {
-                    return Err(io::ErrorKind::WouldBlock.into());
-                }
-            }
-            return Ok(n as usize);
-        }
-        let flags = libc::fcntl(0, libc::F_GETFL);
-        if flags < 0 || libc::fcntl(0, libc::F_SETFL, flags | libc::O_NONBLOCK) < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let n = libc::read(0, buf.as_mut_ptr().cast(), buf.len());
-        let read = if n >= 0 {
-            Ok(n as usize)
-        } else {
-            Err(io::Error::last_os_error())
-        };
-        if libc::fcntl(0, libc::F_SETFL, flags) < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        read
-    }
-}
-
-fn read_terminal_line(source: &mut Vec<u8>, terminal: bool) -> io::Result<bool> {
-    let seekable = !terminal && unsafe { libc::lseek(0, 0, libc::SEEK_CUR) } >= 0;
-    let mut buf = [0u8; 4096];
-    loop {
-        let size = if terminal || seekable { buf.len() } else { 1 };
-        let n = match terminal_read(&mut buf[..size], false) {
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
-            result => result?,
-        };
-        if n == 0 {
-            return Ok(false);
-        }
-        let mut used = n;
-        if seekable && let Some(end) = memchr::memchr(b'\n', &buf[..n]) {
-            used = end + 1;
-            if used < n
-                && unsafe { libc::lseek(0, -((n - used) as libc::off_t), libc::SEEK_CUR) } < 0
-            {
-                return Err(io::Error::last_os_error());
-            }
-        }
-        source.extend_from_slice(&buf[..used]);
-        if source.ends_with(b"\n") {
-            return Ok(true);
-        }
-    }
-}
-
-fn interactive(session: &mut Session, status: u8, editing: bool) -> io::Result<u8> {
-    let terminal_input = io::stdin().is_terminal();
-    history::start_interactive(session);
-    let result = interactive_loop(session, status, editing, terminal_input);
-    history::finish_interactive(session);
-    result
-}
-
-fn interactive_loop(
-    session: &mut Session,
-    mut status: u8,
-    editing: bool,
-    terminal_input: bool,
-) -> io::Result<u8> {
-    let mut source = Vec::new();
-    let mut history = history::History::default();
-    let mut eof_count = 0;
-    let mut editable_history = String::new();
-    loop {
-        interrupted();
-        if let Flow::Exit(code) = traps::dispatch(session, status) {
-            return Ok(code);
-        }
-        session.jobs.poll();
-        session.jobs.report_foreground();
-        if (session.notify || session.posix) && session.jobs.monitor {
-            session.jobs.report_changes(session.posix);
-        }
-        let terminal_size = session.refresh_terminal_size();
-        if source.is_empty() {
-            for hook in session.array_values("PROMPT_COMMAND") {
-                if !hook.is_empty()
-                    && let Flow::Exit(code) = eval_text(session, &hook, status)
-                {
-                    return Ok(code);
-                }
-            }
-        }
-        let prompt = prompt::render(session, !source.is_empty(), status);
-        let timeout = session
-            .get("TMOUT")
-            .and_then(|s| s.parse::<u64>().ok())
-            .filter(|&n| n > 0);
-        let deadline = input_deadline(timeout.map(std::time::Duration::from_secs));
-        let result = if editing && (session.emacs || session.vi) {
-            match editor::line(
-                &prompt,
-                &mut history,
-                session,
-                status,
-                editor::Start::Command(std::mem::take(&mut editable_history)),
-                source.is_empty(),
-                terminal_size,
-            ) {
-                Ok(editor::Input::Exit(code)) => return Ok(code),
-                Ok(editor::Input::Line(line)) => {
-                    source.extend_from_slice(line.as_bytes());
-                    Ok(Some(true))
-                }
-                Ok(editor::Input::Directory(result)) => {
-                    status = match result {
-                        Ok(()) => 0,
-                        Err(error) => {
-                            eprintln!("tonari: cd: {error}");
-                            1
-                        }
-                    };
-                    continue;
-                }
-                Ok(editor::Input::End) => Ok(Some(false)),
-                Ok(editor::Input::Cancel) => Ok(None),
-                Err(error) => Err(error),
-            }
-        } else {
-            let mut stderr = io::stderr().lock();
-            stderr.write_all(prompt.as_bytes())?;
-            stderr.flush()?;
-            drop(stderr);
-            let ready = if session.notify && terminal_input {
-                wait_for_job_notice(&mut session.jobs, |jobs| {
-                    let mut out = io::stderr().lock();
-                    writeln!(out)?;
-                    jobs.report_changes(session.posix);
-                    out.write_all(prompt.as_bytes())?;
-                    out.flush()
-                })
-            } else {
-                Ok(())
-            };
-            ready
-                .and_then(|()| read_terminal_line(&mut source, terminal_input))
-                .map(Some)
-        };
-        drop(deadline);
-        let more = match result {
-            Err(e) if e.kind() == io::ErrorKind::TimedOut => {
-                eprintln!("tonari: timed out waiting for input");
-                if startup::defer_interactive_exit(session) {
-                    continue;
-                }
-                return Ok(startup::logout(session, status, status));
-            }
-            Ok(Some(more)) => more,
-            Ok(None) => {
-                source.clear();
-                if traps::pending().is_none() && session.traps.catches(libc::SIGINT) {
-                    unsafe { libc::raise(libc::SIGINT) };
-                }
-                if traps::pending().is_none() {
-                    status = 130;
-                }
-                continue;
-            }
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                eprintln!();
-                source.clear();
-                if traps::pending().is_none() {
-                    status = 130;
-                }
-                continue;
-            }
-            Err(e) => return Err(e),
-        };
-        if more {
-            // The terminal can be resized while this line is being edited.
-            session.refresh_terminal_size();
-        }
-        if !more && source.is_empty() {
-            if session.ignoreeof && eof_count < session.ignoreeof_limit {
-                eof_count += 1;
-                eprintln!(
-                    "Use \"{}\" to leave the shell.",
-                    if session.login { "logout" } else { "exit" }
-                );
-                continue;
-            }
-            if startup::defer_interactive_exit(session) {
-                continue;
-            }
-            return Ok(startup::logout(session, status, status));
-        }
-        eof_count = 0;
-        let expanded;
-        let text = std::str::from_utf8(&source);
-        let text = if session.histexpand
-            && let Ok(line) = text
-        {
-            match history::expand::expand(session, line) {
-                Ok(event) => {
-                    expanded = event.text;
-                    if event.print {
-                        eprint!("{}", expanded);
-                        session.begin_history_line(&expanded);
-                        session.finish_history_line();
-                        source.clear();
-                        continue;
-                    }
-                    if matches!(expanded, std::borrow::Cow::Owned(_)) {
-                        if session.shopt.histverify && editing && (session.vi || session.emacs) {
-                            editable_history = expanded.into_owned();
-                            if editable_history.ends_with('\n') {
-                                editable_history.pop();
-                            }
-                            source.clear();
-                            continue;
-                        }
-                        eprint!("{}", expanded);
-                    }
-                    Ok(expanded.as_ref())
-                }
-                Err(e) => {
-                    eprintln!("tonari: {e}");
-                    if session.shopt.histreedit && editing && (session.vi || session.emacs) {
-                        editable_history = line.strip_suffix('\n').unwrap_or(line).to_owned();
-                    }
-                    source.clear();
-                    status = 1;
-                    continue;
-                }
-            }
-        } else {
-            text
-        };
-        match text {
-            Ok(text) => match parser::session_source(text, !more, session) {
-                Ok(program) if program.is_empty() => {}
-                Ok(program) => {
-                    if let Some(p) = session.get("PS0").filter(|p| !p.is_empty()) {
-                        eprint!("{}", prompt::render_text(session, p, status));
-                    }
-                    session.command_number += 1;
-                    let record = session.begin_history_line(text);
-                    let cwd = if record { session.get("PWD") } else { None };
-                    let flow = if session.noexec {
-                        Flow::Continue(0)
-                    } else {
-                        execute_program(session, program, status, false)
-                    };
-                    status = match flow {
-                        Flow::Discard(s) | Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
-                        _ => 1,
-                    };
-                    if record {
-                        session.persist_current_history(cwd.as_deref(), status, &mut history);
-                        session.finish_history_line();
-                    }
-                    if session.onecmd || matches!(flow, Flow::Exit(_) | Flow::Return(_)) {
-                        return Ok(status);
-                    }
-                }
-                Err(e) if more && e.incomplete() => continue,
-                Err(e) => {
-                    eprintln!("tonari: {}", e.message());
-                    status = 2;
-                }
-            },
-            Err(_) => {
-                eprintln!("tonari: expected UTF-8 command text");
-                status = 2;
-            }
-        }
-        if !more {
-            return Ok(status);
-        }
-        source.clear();
-    }
-}
-
-fn shell_terminal() -> bool {
-    io::stdin().is_terminal() && io::stderr().is_terminal()
-}
-
 // Script fallback can reenter invoke() in a child at an arbitrary call depth.
 static MAIN_STACK_ORIGIN: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
 
@@ -533,10 +209,10 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
     session.initialize_shell_level();
     session.arg0 = std::mem::take(&mut invocation.arg0);
     session.positional = std::mem::take(&mut invocation.positional).into_iter();
-    session.allexport = invocation.allexport;
-    session.notify = invocation.notify;
-    session.noexec = invocation.check;
-    if let Some(enabled) = invocation.ignoreeof {
+    session.allexport = invocation.options.allexport;
+    session.notify = invocation.options.notify;
+    session.noexec = invocation.options.check;
+    if let Some(enabled) = invocation.options.ignoreeof {
         if enabled {
             session.assign("IGNOREEOF", "10");
         } else {
@@ -548,25 +224,25 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
     {
         session.set_eof_variable(Some(value.to_str().unwrap_or("")));
     }
-    session.onecmd = invocation.onecmd;
-    session.xtrace = invocation.xtrace;
-    session.errexit = invocation.errexit;
-    session.verbose = invocation.verbose;
-    session.errtrace = invocation.errtrace;
-    session.functrace = invocation.functrace;
-    session.noglob = invocation.noglob;
-    session.noclobber = invocation.noclobber;
-    session.hashes.enabled = invocation.hashall;
-    session.shopt.braceexpand = invocation.braceexpand;
-    session.nounset = invocation.nounset;
-    session.pipefail = invocation.pipefail;
-    session.physical = invocation.physical;
-    session.keyword = invocation.keyword;
-    session.shopt.nolog = invocation.nolog;
+    session.onecmd = invocation.options.onecmd;
+    session.xtrace = invocation.options.xtrace;
+    session.errexit = invocation.options.errexit;
+    session.verbose = invocation.options.verbose;
+    session.errtrace = invocation.options.errtrace;
+    session.functrace = invocation.options.functrace;
+    session.noglob = invocation.options.noglob;
+    session.noclobber = invocation.options.noclobber;
+    session.hashes.enabled = invocation.options.hashall;
+    session.shopt.braceexpand = invocation.options.braceexpand;
+    session.nounset = invocation.options.nounset;
+    session.pipefail = invocation.options.pipefail;
+    session.physical = invocation.options.physical;
+    session.keyword = invocation.options.keyword;
+    session.shopt.nolog = invocation.options.nolog;
     session.interactive = invocation.interactive;
     session.login = invocation.login;
     session.history_enabled = invocation.interactive;
-    session.histexpand = invocation.histexpand.unwrap_or(session.interactive);
+    session.histexpand = invocation.options.histexpand.unwrap_or(session.interactive);
     // The selected keymap is also observable in a forced interactive script.
     // Terminal capabilities are checked separately when opening the editor.
     session.emacs = session.interactive && !invocation.noediting;
@@ -576,7 +252,7 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
         eprintln!("tonari: SIGHUP: {e}");
         return 1;
     }
-    session.jobs.monitor = invocation.monitor.unwrap_or(session.interactive);
+    session.jobs.monitor = invocation.options.monitor.unwrap_or(session.interactive);
     if session.jobs.monitor {
         session.jobs.init(session.interactive);
     }
@@ -589,12 +265,12 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
         }
         session.execution_string = Some(std::rc::Rc::new(std::mem::take(text)));
     }
-    session.command_history_expansion = invocation.histexpand == Some(true);
+    session.command_history_expansion = invocation.options.histexpand == Some(true);
     session.stdin_script = matches!(invocation.input, Input::Stdin);
-    session.set_posix(invocation.posix);
+    session.set_posix(invocation.options.posix);
     session.shopt.progcomp_alias = session.interactive;
     session.inherit_options();
-    for (enable, name) in std::mem::take(&mut invocation.shopts) {
+    for (enable, name) in std::mem::take(&mut invocation.options.shopts) {
         let options = match name {
             Some(name) => vec![if enable { "-s" } else { "-u" }.into(), name],
             None if enable => Vec::new(),
@@ -611,15 +287,15 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
         if session.get("PS1").is_none() {
             session.assign("PS1", "tonari$ ");
         }
-        if session.get("HISTFILE").is_none() {
-            if let Some(home) = session.get("HOME").or_else(crate::word::account_home) {
-                let file = if session.posix {
-                    ".sh_history"
-                } else {
-                    ".bash_history"
-                };
-                session.assign("HISTFILE", &format!("{home}/{file}"));
-            }
+        if session.get("HISTFILE").is_none()
+            && let Some(home) = session.get("HOME").or_else(crate::word::account_home)
+        {
+            let file = if session.posix {
+                ".sh_history"
+            } else {
+                ".bash_history"
+            };
+            session.assign("HISTFILE", &format!("{home}/{file}"));
         }
     }
     if session.interactive && listen_for_interrupts().is_err() {
@@ -633,12 +309,11 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
         Flow::Break(..) | Flow::LoopContinue(_) => return 1,
     };
     if invocation.debugger
-        && !invocation.check
+        && !invocation.options.check
         && (!session.interactive || !matches!(invocation.input, Input::Stdin))
+        && let Flow::Exit(code) = startup::debugger(&mut session)
     {
-        if let Flow::Exit(code) = startup::debugger(&mut session) {
-            return traps::finish(&mut session, code);
-        }
+        return traps::finish(&mut session, code);
     }
     if invocation.as_sh && !session.posix {
         session.set_posix(true);
@@ -646,14 +321,21 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
     let flow = match invocation.input {
         Input::Command(_) => {
             let text = session.execution_string.clone().unwrap();
-            input::text(&mut session, &text, initial, true, invocation.check, None)
+            input::text(
+                &mut session,
+                &text,
+                initial,
+                true,
+                invocation.options.check,
+                None,
+            )
         }
         Input::File(path) => match std::fs::File::open(&path) {
             Ok(file) => {
                 session.push_source_path(&path);
                 session.function_names.push("main".into());
                 session.call_lines.push(0);
-                input::file_script(&mut session, file, None, initial, invocation.check)
+                input::file_script(&mut session, file, None, initial, invocation.options.check)
             }
             Err(e) => {
                 eprintln!("tonari: {}: {e}", path.display());
@@ -677,7 +359,7 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
                 Flow::Continue(1)
             }
         },
-        Input::Stdin => input::stdin_script(&mut session, invocation.check),
+        Input::Stdin => input::stdin_script(&mut session, invocation.options.check),
     };
     let code = match flow {
         Flow::Discard(s) | Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s) => s,

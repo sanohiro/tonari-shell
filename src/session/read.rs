@@ -278,7 +278,9 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
             Ok(crate::editor::Input::End) => edited = Some(Vec::new().into_iter()),
             Ok(crate::editor::Input::Cancel) => return 130,
             Ok(crate::editor::Input::Exit(code)) => return code,
-            Err(e) if e.kind() == io::ErrorKind::TimedOut => return 128 + libc::SIGALRM as u8,
+            Err(e) if e.kind() == io::ErrorKind::TimedOut => {
+                return crate::traps::signal_status(libc::SIGALRM);
+            }
             Err(e) => {
                 eprintln!("tonari: read: {e}");
                 return 1;
@@ -287,10 +289,9 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     }
     if edit.is_none()
         && let Some(prompt) = opts.prompt
+        && unsafe { libc::isatty(opts.fd) } == 1
     {
-        if unsafe { libc::isatty(opts.fd) } == 1 {
-            eprint!("{prompt}");
-        }
+        eprint!("{prompt}");
     }
     let mut line = Vec::new();
     let mut escaped = Vec::new();
@@ -323,7 +324,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
             if remaining.is_zero()
                 || input.position == input.end && !ready(opts.fd, remaining).unwrap_or(false)
             {
-                break 128 + libc::SIGALRM as u8;
+                break crate::traps::signal_status(libc::SIGALRM);
             }
         }
         let input_byte = if let Some(bytes) = &mut edited {
@@ -387,7 +388,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
             Ok(Some(b)) => b,
             Ok(None) => break 1,
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                break 128 + crate::traps::pending().unwrap_or(libc::SIGINT) as u8;
+                break crate::traps::signal_status(crate::traps::pending().unwrap_or(libc::SIGINT));
             }
             Err(e) => {
                 eprintln!("tonari: read: {e}");
@@ -416,12 +417,22 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         eprintln!("tonari: read: expected UTF-8 input");
         return 1;
     };
+    assign_fields(session, &opts, &line, &escaped, status)
+}
+
+fn assign_fields(
+    session: &mut Session,
+    opts: &Options<'_>,
+    line: &str,
+    escaped: &[usize],
+    status: u8,
+) -> u8 {
     if opts.names.is_empty() && opts.array.is_none() {
         if session.readonly("REPLY") {
             eprintln!("tonari: read: REPLY: readonly variable");
             return 2;
         }
-        session.assign("REPLY", &line);
+        session.assign("REPLY", line);
         return status;
     }
     let ifs = if opts.exact {
@@ -436,7 +447,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         && (ifs.is_empty() || escaped.is_empty() && ifs.bytes().all(|b| matches!(b, 9..=13 | b' ')))
     {
         let value = if ifs.is_empty() {
-            line.as_str()
+            line
         } else {
             line.trim_matches(|c: char| ifs.contains(c))
         };
@@ -446,7 +457,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         }
         return status;
     }
-    let (spans, end) = field_ranges(&line, &escaped, &ifs);
+    let (spans, end) = field_ranges(line, escaped, &ifs);
     if let Some(target) = opts.array {
         let target = match session.indexed_receiver(target, false) {
             Ok(target) => target,

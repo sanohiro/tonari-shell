@@ -82,7 +82,7 @@ impl<'a> Filter<'a> {
         let terms: Vec<_> = fragments(query).collect();
         let matches = |line: &str| terms.iter().all(|t| line.contains(t));
         while self.local_end > 0 {
-            if self.local_end % 256 == 0 && waiting() {
+            if self.local_end.is_multiple_of(256) && waiting() {
                 return;
             }
             self.local_end -= 1;
@@ -162,7 +162,7 @@ impl<'a> Filter<'a> {
             let base = self.end;
             let mut checked = 0usize;
             while !rows.is_empty() {
-                if checked % 256 == 0 && waiting() {
+                if checked.is_multiple_of(256) && waiting() {
                     self.end = base + rows.len() as u64 + 1;
                     return;
                 }

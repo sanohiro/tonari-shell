@@ -6,6 +6,28 @@ use std::path::PathBuf;
 
 use crate::Session;
 
+pub(super) const DEFAULT_HISTSIZE: usize = 500;
+
+fn tail_lines_offset(file: &fs::File, len: u64, mut lines: usize) -> std::io::Result<u64> {
+    if lines == 0 {
+        return Ok(len);
+    }
+    let mut pos = len;
+    let mut block = [0u8; 16384];
+    while pos > 0 {
+        let n = pos.min(block.len() as u64) as usize;
+        pos -= n as u64;
+        file.read_exact_at(&mut block[..n], pos)?;
+        for i in memchr::memrchr_iter(b'\n', &block[..n]) {
+            if lines == 0 {
+                return Ok(pos + i as u64 + 1);
+            }
+            lines -= 1;
+        }
+    }
+    Ok(0)
+}
+
 pub(crate) struct SearchQuery {
     pub text: String,
     pub skip: usize,
@@ -48,7 +70,7 @@ fn custom_history(session: &Session) -> Option<String> {
         || path == "/dev/null"
         || session
             .get("HOME")
-            .is_some_and(|h| PathBuf::from(h).join(".bash_history") == PathBuf::from(&path))
+            .is_some_and(|h| PathBuf::from(h).join(".bash_history") == path)
     {
         return None;
     }
@@ -267,25 +289,9 @@ impl InitialJournal {
             return Ok(());
         }
         let available = session
-            .history_limit("HISTSIZE", 500)
+            .history_limit("HISTSIZE", DEFAULT_HISTSIZE)
             .saturating_sub(session.history_lines().len());
-        let mut pos = self.len;
-        let mut needed = available;
-        let mut block = [0u8; 16384];
-        if available > 0 {
-            'scan: while pos > 0 {
-                let count = pos.min(block.len() as u64) as usize;
-                pos -= count as u64;
-                journal.read_exact_at(&mut block[..count], pos)?;
-                for index in memchr::memrchr_iter(b'\n', &block[..count]) {
-                    if needed == 0 {
-                        pos += index as u64 + 1;
-                        break 'scan;
-                    }
-                    needed -= 1;
-                }
-            }
-        }
+        let pos = tail_lines_offset(&journal, self.len, available)?;
         journal.seek(SeekFrom::Start(pos))?;
         let mut older = Vec::new();
         let mut timestamps = Vec::new();
@@ -375,7 +381,7 @@ impl Session {
         if !self.history_enabled {
             return false;
         }
-        let limit = self.history_limit("HISTSIZE", 500);
+        let limit = self.history_limit("HISTSIZE", DEFAULT_HISTSIZE);
         if limit == 0 || !self.history_matches_rules(text, self.history_lines().last()) {
             return false;
         }
@@ -396,7 +402,7 @@ impl Session {
         true
     }
     fn push_history(&mut self, text: &str, current: bool) {
-        let limit = self.history_limit("HISTSIZE", 500);
+        let limit = self.history_limit("HISTSIZE", DEFAULT_HISTSIZE);
         self.push_history_limited(text, current, limit);
     }
 
@@ -453,11 +459,12 @@ impl Session {
     }
 
     fn accept_history(&self, source: &str, previous: Option<&String>) -> bool {
-        self.history_limit("HISTSIZE", 500) > 0 && self.history_matches_rules(source, previous)
+        self.history_limit("HISTSIZE", DEFAULT_HISTSIZE) > 0
+            && self.history_matches_rules(source, previous)
     }
 
     fn record_replay(&mut self, text: &str) {
-        let limit = self.history_limit("HISTSIZE", 500);
+        let limit = self.history_limit("HISTSIZE", DEFAULT_HISTSIZE);
         if limit != 0 && self.history_matches_rules(text, self.history_lines().last()) {
             self.push_history_limited(text, false, limit);
         }
@@ -776,10 +783,10 @@ impl History {
                     partial.extend_from_slice(line);
                     &partial
                 };
-                if let Ok(row) = std::str::from_utf8(row) {
-                    if let Some(command) = command_field(row) {
-                        self.shared.push(command);
-                    }
+                if let Ok(row) = std::str::from_utf8(row)
+                    && let Some(command) = command_field(row)
+                {
+                    self.shared.push(command);
                 }
                 partial.clear();
             }

@@ -352,16 +352,7 @@ fn literal_edge<'v>(atom: &Atom, value: &'v str, prefix: bool) -> Result<Option<
             if prefix {
                 return Ok(super::folded_prefix(value, text, *locale).map(|n| &value[n..]));
             }
-            let mut chars = value.chars();
-            for c in text.chars().rev() {
-                if !chars
-                    .next_back()
-                    .is_some_and(|v| super::same_letter(v, c, *locale))
-                {
-                    return Ok(None);
-                }
-            }
-            Ok(Some(chars.as_str()))
+            Ok(super::case::strip_folded_suffix(value, text, *locale))
         }
         Atom::Choice(options) => {
             let mut matches = options.iter().filter_map(|s| strip(s));
@@ -571,22 +562,18 @@ pub(crate) fn insensitive_match(
     extended: bool,
     locale: super::CharacterLocale,
 ) -> bool {
-    if !pattern
+    let complex = pattern
         .bytes()
         .any(|b| matches!(b, b'?' | b'[' | b'\\' | 0))
-        && !(extended && has_group(pattern))
-    {
+        || extended && has_group(pattern);
+    if !complex {
         match pattern.split_once('*') {
             None => return super::folded_prefix(value, pattern, locale) == Some(value.len()),
             Some((head, tail)) if !tail.contains('*') => {
                 let Some(offset) = super::folded_prefix(value, head, locale) else {
                     return false;
                 };
-                let mut rest = value[offset..].chars().rev();
-                return tail.chars().rev().all(|c| {
-                    rest.next()
-                        .is_some_and(|v| super::same_letter(v, c, locale))
-                });
+                return super::case::strip_folded_suffix(&value[offset..], tail, locale).is_some();
             }
             _ => {}
         }

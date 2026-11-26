@@ -182,9 +182,9 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
             borrowed_program,
         ),
         Cow::Borrowed(Command::Function { name, definition })
-            if !(session.posix && posix_function_error(name).is_some())
-                && !session.readonly_functions.contains(name)
-                && !session.allexport
+            if !(session.allexport
+                || session.readonly_functions.contains(name)
+                || session.posix && posix_function_error(name).is_some())
                 && session.functions.get(name).is_some_and(|old| {
                     std::rc::Rc::ptr_eq(&old.definition, definition)
                         && old.source.as_ref() == session.function_source()

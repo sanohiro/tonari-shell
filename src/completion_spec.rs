@@ -246,8 +246,33 @@ struct Request {
     remove: bool,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CompBuiltin {
+    Complete,
+    Compgen,
+    Compopt,
+}
+
+impl CompBuiltin {
+    fn from_name(name: &str) -> Self {
+        match name {
+            "complete" => Self::Complete,
+            "compgen" => Self::Compgen,
+            "compopt" => Self::Compopt,
+            _ => unreachable!("registered completion builtin"),
+        }
+    }
+    fn name(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Compgen => "compgen",
+            Self::Compopt => "compopt",
+        }
+    }
+}
+
 impl Request {
-    fn parse(builtin: &str, args: &[String]) -> Result<Self, String> {
+    fn parse(builtin: CompBuiltin, args: &[String]) -> Result<Self, String> {
         let mut result = Self::default();
         let mut args = args.iter();
         while let Some(arg) = args.next() {
@@ -255,7 +280,7 @@ impl Request {
                 result.operands.extend(args.cloned());
                 break;
             }
-            let plus = builtin == "compopt" && arg.starts_with('+');
+            let plus = builtin == CompBuiltin::Compopt && arg.starts_with('+');
             if !(arg.starts_with('-') || plus) || arg.len() < 2 {
                 result.operands.push(arg.clone());
                 result.operands.extend(args.cloned());
@@ -275,7 +300,7 @@ impl Request {
                     }
                 };
                 match flag {
-                    'D' | 'E' | 'I' if builtin != "compgen" => {
+                    'D' | 'E' | 'I' if builtin != CompBuiltin::Compgen => {
                         // Bash gives -D precedence over -E, and -E over -I.
                         let target = match flag {
                             'D' => Target::Default,
@@ -286,8 +311,8 @@ impl Request {
                             result.special = Some(target);
                         }
                     }
-                    'p' if builtin == "complete" => result.print = true,
-                    'r' if builtin == "complete" => result.remove = true,
+                    'p' if builtin == CompBuiltin::Complete => result.print = true,
+                    'r' if builtin == CompBuiltin::Complete => result.remove = true,
                     'o' => {
                         let option = value()?;
                         let option = CompOption::parse(option)
@@ -297,7 +322,9 @@ impl Request {
                         }
                         result.options.push((!plus, option));
                     }
-                    _ if builtin == "compopt" => return Err(format!("invalid option: {flag}")),
+                    _ if builtin == CompBuiltin::Compopt => {
+                        return Err(format!("invalid option: {flag}"));
+                    }
                     'A' => {
                         let action = value()?;
                         result.spec.actions.push(
@@ -307,7 +334,7 @@ impl Request {
                         );
                     }
                     'W' => result.spec.words = Some(Rc::new(WordList::new(value()?.to_owned()))),
-                    'V' if builtin == "compgen" => {
+                    'V' if builtin == CompBuiltin::Compgen => {
                         let name = value()?;
                         if !crate::word::is_identifier(name) {
                             return Err(format!("{name}: invalid identifier"));
@@ -743,12 +770,12 @@ fn set_options(
 
 fn apply(
     mut request: Request,
-    name: &str,
+    builtin: CompBuiltin,
     session: &mut Session,
     last: u8,
     out: &mut dyn Write,
 ) -> io::Result<u8> {
-    if name == "compgen" {
+    if builtin == CompBuiltin::Compgen {
         let prefix = request.operands.first().map_or("", String::as_str);
         let mut words = match request.spec.candidates(session, prefix, last, None) {
             Ok((words, _)) => words,
@@ -788,11 +815,11 @@ fn apply(
     }
     let registry = &mut session.completions.specs;
     let targets = request.targets();
-    if name == "complete" && request.remove && targets.is_empty() {
+    if builtin == CompBuiltin::Complete && request.remove && targets.is_empty() {
         registry.clear();
         return Ok(0);
     }
-    if name == "complete" && targets.is_empty() {
+    if builtin == CompBuiltin::Complete && targets.is_empty() {
         if !request.print && request.spec != Spec::default() {
             eprintln!("tonari: complete: a command name or a default target is required");
             return Ok(2);
@@ -802,7 +829,7 @@ fn apply(
         }
         return Ok(0);
     }
-    if name == "compopt" && targets.is_empty() {
+    if builtin == CompBuiltin::Compopt && targets.is_empty() {
         if let Some(options) = session.completions.active.as_mut() {
             if request
                 .options
@@ -820,11 +847,12 @@ fn apply(
     }
     let mut status = 0;
     for key in targets {
-        if name == "complete" && !(request.print || request.remove) {
+        if builtin == CompBuiltin::Complete && !(request.print || request.remove) {
             registry.insert(key, request.spec.clone());
             continue;
         }
         let Some(spec) = registry.get_mut(&key) else {
+            let name = builtin.name();
             eprintln!(
                 "tonari: {name}: no completion specification for {}",
                 key.argument()
@@ -834,7 +862,7 @@ fn apply(
         };
         if request.remove {
             registry.remove(&key);
-        } else if name == "complete" {
+        } else if builtin == CompBuiltin::Complete {
             writeln!(out, "{}", spec.definition(&key))?;
         } else {
             set_options(&mut spec.options, &request.options, &key.argument(), out)?;
@@ -844,17 +872,18 @@ fn apply(
 }
 
 pub fn run(name: &str, args: &[String], last: u8, session: &mut Session) -> u8 {
-    if name == "compgen" && args.is_empty() {
+    let builtin = CompBuiltin::from_name(name);
+    if builtin == CompBuiltin::Compgen && args.is_empty() {
         return 0;
     }
-    let request = match Request::parse(name, args) {
+    let request = match Request::parse(builtin, args) {
         Ok(request) => request,
         Err(error) => {
             eprintln!("tonari: {name}: {error}");
             return 2;
         }
     };
-    apply(request, name, session, last, &mut io::stdout().lock()).unwrap_or(1)
+    apply(request, builtin, session, last, &mut io::stdout().lock()).unwrap_or(1)
 }
 
 pub struct Generated {
@@ -1026,9 +1055,10 @@ mod tests {
             .iter()
             .map(|arg| (*arg).to_string())
             .collect::<Vec<_>>();
-        let request = Request::parse(name, &args).unwrap();
+        let builtin = CompBuiltin::from_name(name);
+        let request = Request::parse(builtin, &args).unwrap();
         let mut out = Vec::new();
-        let status = apply(request, name, session, 0, &mut out).unwrap();
+        let status = apply(request, builtin, session, 0, &mut out).unwrap();
         (status, String::from_utf8(out).unwrap())
     }
 

@@ -4,6 +4,10 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, RawFd};
 use std::rc::{Rc, Weak};
 
+pub(crate) const FIRST_NONSTANDARD: RawFd = 3;
+pub(crate) const SHELL_FD_MIN: RawFd = 10;
+pub(crate) const PROCESS_SUBSTITUTION_MIN: RawFd = 64;
+
 // Only the abandoned stack of a forked script interpreter holds an empty slot.
 type FileSlot = RefCell<Option<File>>;
 
@@ -19,18 +23,18 @@ pub(crate) struct PrivateFile(Rc<FileSlot>);
 impl PrivateFile {
     pub(crate) fn duplicate(fd: BorrowedFd<'_>) -> io::Result<Self> {
         let raw = fd.as_raw_fd();
-        let copy = duplicate_except(raw, 10, |_| false)
-            .or_else(|_| duplicate_except(raw, 3, |_| false))?;
+        let copy = duplicate_except(raw, SHELL_FD_MIN, |_| false)
+            .or_else(|_| duplicate_except(raw, FIRST_NONSTANDARD, |_| false))?;
         Ok(Self::track(copy))
     }
 
     pub(crate) fn new(file: File) -> io::Result<Self> {
         let fd = file.as_raw_fd();
-        let file = if fd < 10 {
-            match duplicate_except(fd, 10, |_| false) {
+        let file = if fd < SHELL_FD_MIN {
+            match duplicate_except(fd, SHELL_FD_MIN, |_| false) {
                 Ok(copy) => copy,
                 Err(_) if fd >= 3 => file,
-                Err(_) => duplicate_except(fd, 3, |_| false)?,
+                Err(_) => duplicate_except(fd, FIRST_NONSTANDARD, |_| false)?,
             }
         } else {
             file
@@ -83,7 +87,7 @@ pub(super) fn protect(reserved: impl Fn(RawFd) -> bool) -> io::Result<()> {
         for file in files.iter().filter_map(Weak::upgrade) {
             let current = file.borrow().as_ref().unwrap().as_raw_fd();
             if reserved(current) {
-                let copy = duplicate_except(current, 3, &reserved)?;
+                let copy = duplicate_except(current, FIRST_NONSTANDARD, &reserved)?;
                 *file.borrow_mut() = Some(copy);
             }
         }

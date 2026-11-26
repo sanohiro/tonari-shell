@@ -641,10 +641,10 @@ fn render(
                     }
                     b'q' | b'Q' => {
                         let mut data = args.next().as_bytes();
-                        if conversion == b'Q' {
-                            if let Some(p) = spec.precision.take() {
-                                data = &data[..data.len().min(p as usize)];
-                            }
+                        if conversion == b'Q'
+                            && let Some(p) = spec.precision.take()
+                        {
+                            data = &data[..data.len().min(p as usize)];
                         }
                         spec.bytes(
                             &quote(data, variables.read(), spec.flags.contains(&b'#')),

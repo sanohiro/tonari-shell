@@ -1,7 +1,7 @@
-use std::ffi::{CString, OsString};
+use std::ffi::{CString, OsStr, OsString};
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::{PreparedCommand, named_builtin};
 use crate::session::Session;
@@ -30,6 +30,17 @@ fn default_system_path() -> &'static std::ffi::OsStr {
     &PATH
 }
 
+// Unix PATH entries borrow the original byte string, including non-UTF-8 entries.
+pub(super) fn search_directories(path: &OsStr) -> impl Iterator<Item = &Path> {
+    path.as_bytes().split(|&b| b == b':').map(|bytes| {
+        if bytes.is_empty() {
+            Path::new(".")
+        } else {
+            Path::new(OsStr::from_bytes(bytes))
+        }
+    })
+}
+
 pub(super) fn path(cmd: &PreparedCommand, session: &Session) -> OsString {
     if cmd.default_path {
         default_system_path().to_owned()
@@ -39,25 +50,39 @@ pub(super) fn path(cmd: &PreparedCommand, session: &Session) -> OsString {
 }
 
 pub(super) fn command_prefix(cmd: &mut PreparedCommand, session: &Session) {
+    let (passed, search, default_path) = scan_prefix(&cmd.words, cmd.search, session);
+    cmd.search = search;
+    cmd.default_path |= default_path;
+    if passed != 0 {
+        cmd.words.drain(..passed);
+    }
+}
+
+pub(super) fn scan_prefix(
+    words: &[String],
+    mut search: Search,
+    session: &Session,
+) -> (usize, Search, bool) {
+    let mut use_default_path = false;
     let mut passed = 0;
-    while let Some(name) = cmd.words.get(passed) {
+    while let Some(name) = words.get(passed) {
         if session.disabled_builtins.contains(name)
-            || cmd.search == Search::Normal && session.functions.contains_key(name)
+            || search == Search::Normal && session.functions.contains_key(name)
         {
             break;
         }
         match name.as_str() {
             "builtin" => {
                 passed += 1;
-                if cmd.words.get(passed).is_some_and(|s| s == "--") {
+                if words.get(passed).is_some_and(|s| s == "--") {
                     passed += 1;
                 }
-                cmd.search = Search::BuiltinsOnly;
+                search = Search::BuiltinsOnly;
             }
             "command" => {
                 let mut i = passed + 1;
                 let mut default_path = false;
-                while let Some(opt) = cmd.words.get(i) {
+                while let Some(opt) = words.get(i) {
                     if opt == "--" {
                         i += 1;
                         break;
@@ -72,24 +97,21 @@ pub(super) fn command_prefix(cmd: &mut PreparedCommand, session: &Session) {
                     default_path = true;
                     i += 1;
                 }
-                if cmd
-                    .words
+                if words
                     .get(i)
                     .is_some_and(|arg| arg.starts_with('-') && arg != "-")
-                    && (i == passed + 1 || cmd.words[i - 1] != "--")
+                    && (i == passed + 1 || words[i - 1] != "--")
                 {
                     break;
                 }
                 passed = i;
-                cmd.search = Search::NoFunctions;
-                cmd.default_path |= default_path;
+                search = Search::NoFunctions;
+                use_default_path |= default_path;
             }
             _ => break,
         }
     }
-    if passed != 0 {
-        cmd.words.drain(..passed);
-    }
+    (passed, search, use_default_path)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -143,9 +165,9 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
     }
     let search = std::cell::LazyCell::new(|| {
         if default_path {
-            default_system_path().to_owned()
+            std::borrow::Cow::Borrowed(default_system_path())
         } else {
-            session.search_path(&[])
+            std::borrow::Cow::Owned(session.search_path(&[]))
         }
     });
     let ignored = std::cell::LazyCell::new(|| IgnoredExecutables::new(session));
@@ -211,18 +233,21 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                 }
             }
         }
-        if !found && !search_all && !force_path && !default_path {
-            if let Some(path) = session.hashes.get(name) {
-                let result = match format {
-                    Format::Verbose => writeln!(out, "{name} is hashed ({})", path.display()),
-                    Format::Kind => writeln!(out, "file"),
-                    Format::Name | Format::Path => writeln!(out, "{}", path.display()),
-                };
-                if result.is_err() {
-                    return 1;
-                }
-                found = true;
+        if !found
+            && !search_all
+            && !force_path
+            && !default_path
+            && let Some(path) = session.hashes.get(name)
+        {
+            let result = match format {
+                Format::Verbose => writeln!(out, "{name} is hashed ({})", path.display()),
+                Format::Kind => writeln!(out, "file"),
+                Format::Name | Format::Path => writeln!(out, "{}", path.display()),
+            };
+            if result.is_err() {
+                return 1;
             }
+            found = true;
         }
         if !found || search_all {
             let mut report = |path: &Path| {
@@ -250,12 +275,8 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                     return 1;
                 }
             } else {
-                for dir in std::env::split_paths(&*search) {
-                    let path = if dir.as_os_str().is_empty() {
-                        PathBuf::from(".").join(name)
-                    } else {
-                        dir.join(name)
-                    };
+                for dir in search_directories(&search) {
+                    let path = dir.join(name);
                     if !ignored.contains(&path) && executable(&path) {
                         if report(&path).is_err() {
                             return 1;

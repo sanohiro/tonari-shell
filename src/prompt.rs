@@ -42,7 +42,7 @@ pub fn render_text(session: &mut Session, mut prompt: String, status: u8) -> Str
         &prompt,
         session.shopt.promptvars || session.posix,
         session.posix,
-        |c, chars| escape(session, c, chars),
+        |c, chars, output| escape(session, c, chars, output),
     );
     parsed
         .ok()
@@ -50,8 +50,8 @@ pub fn render_text(session: &mut Session, mut prompt: String, status: u8) -> Str
         .unwrap_or(prompt)
 }
 
-fn escape(session: &Session, c: char, chars: &mut std::str::Chars) -> String {
-    let mut output = String::new();
+fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut String) {
+    use std::fmt::Write;
     match c {
         '[' | ']' => {}
         'e' => output.push('\x1b'),
@@ -74,9 +74,15 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars) -> String {
         ),
         'v' => output.push_str(crate::session::BASH_SERIES),
         'V' => output.push_str(crate::session::BASH_RELEASE),
-        '!' => output.push_str(&session.history_number().to_string()),
-        '#' => output.push_str(&(session.command_number + 1).to_string()),
-        'j' => output.push_str(&session.jobs.count().to_string()),
+        '!' => {
+            let _ = write!(output, "{}", session.history_number());
+        }
+        '#' => {
+            let _ = write!(output, "{}", session.command_number + 1);
+        }
+        'j' => {
+            let _ = write!(output, "{}", session.jobs.count());
+        }
         'l' => {
             let mut buf = [0u8; 256];
             if unsafe { libc::ttyname_r(0, buf.as_mut_ptr().cast(), buf.len()) } == 0 {
@@ -100,7 +106,8 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars) -> String {
                         *chars = tail.chars();
                         if fmt.is_empty() { "%X" } else { fmt }
                     } else {
-                        return "\\D".into();
+                        output.push_str("\\D");
+                        return;
                     }
                 }
             };
@@ -171,7 +178,7 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars) -> String {
                 if let Some((i, _)) = path.rmatch_indices('/').nth(limit - 1)
                     && i > 3
                 {
-                    output = format!("{prefix}.../{}", &path[i + 1..]);
+                    *output = format!("{prefix}.../{}", &path[i + 1..]);
                 }
             }
         }
@@ -180,5 +187,4 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars) -> String {
             output.push(c);
         }
     }
-    output
 }

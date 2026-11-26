@@ -155,11 +155,13 @@ fn conjunction(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'
 fn primary(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'static str> {
     let (first, rest) = tokens.split_first().ok_or("argument expected")?;
     *tokens = rest;
-    if let [op, right, tail @ ..] = rest {
-        if first != "(" && first != "!" && binary_op(op) {
-            *tokens = tail;
-            return binary(first, op, right);
-        }
+    if let [op, right, tail @ ..] = rest
+        && first != "("
+        && first != "!"
+        && binary_op(op)
+    {
+        *tokens = tail;
+        return binary(first, op, right);
     }
     if first == "!" {
         return Ok(!primary(tokens, session)?);
@@ -192,11 +194,12 @@ fn primary(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'stat
         *tokens = &tokens[1..];
         return Ok(value);
     }
-    if first.starts_with('-') && first.len() == 2 {
-        if let Some((arg, tail)) = rest.split_first() {
-            *tokens = tail;
-            return unary(first, arg, session);
-        }
+    if first.starts_with('-')
+        && first.len() == 2
+        && let Some((arg, tail)) = rest.split_first()
+    {
+        *tokens = tail;
+        return unary(first, arg, session);
     }
     Ok(!first.is_empty())
 }

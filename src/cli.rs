@@ -8,22 +8,9 @@ pub enum Input {
     Stdin,
 }
 
-pub struct Invocation {
-    pub input: Input,
-    pub arg0: String,
-    pub positional: Vec<String>,
-    pub interactive: bool,
-    pub login: bool,
-    pub as_sh: bool,
-    pub posix: bool,
-    pub norc: bool,
-    pub noprofile: bool,
-    pub nolog: bool,
-    pub noediting: bool,
-    pub rcfile: Option<PathBuf>,
+#[derive(Default)]
+pub struct StartupOptions {
     pub check: bool,
-    pub pretty: bool,
-    pub debugger: bool,
     pub notify: bool,
     pub ignoreeof: Option<bool>,
     pub errexit: bool,
@@ -43,7 +30,25 @@ pub struct Invocation {
     pub pipefail: bool,
     pub physical: bool,
     pub keyword: bool,
+    pub nolog: bool,
     pub shopts: Vec<(bool, Option<String>)>,
+    pub posix: bool,
+}
+
+pub struct Invocation {
+    pub options: StartupOptions,
+    pub input: Input,
+    pub arg0: String,
+    pub positional: Vec<String>,
+    pub interactive: bool,
+    pub login: bool,
+    pub as_sh: bool,
+    pub norc: bool,
+    pub noprofile: bool,
+    pub noediting: bool,
+    pub rcfile: Option<PathBuf>,
+    pub pretty: bool,
+    pub debugger: bool,
 }
 
 pub enum Action {
@@ -68,7 +73,12 @@ pub fn parse(
         name.as_bytes().rsplit(|b| *b == b'/').next(),
         Some(b"sh" | b"-sh")
     );
-    let mut posix = std::env::var_os("POSIXLY_CORRECT").is_some();
+    let mut options = StartupOptions {
+        posix: std::env::var_os("POSIXLY_CORRECT").is_some(),
+        hashall: true,
+        braceexpand: true,
+        ..Default::default()
+    };
     let mut args = args.peekable();
     let mut interactive = false;
     let mut command = false;
@@ -77,28 +87,8 @@ pub fn parse(
     let mut noprofile = false;
     let mut noediting = false;
     let mut rcfile = None;
-    let mut check = false;
-    let mut notify = false;
-    let mut ignoreeof = None;
-    let mut errexit = false;
-    let mut verbose = false;
-    let mut errtrace = false;
-    let mut functrace = false;
-    let mut nounset = false;
-    let mut noglob = false;
-    let mut noclobber = false;
-    let mut hashall = true;
-    let (mut allexport, mut onecmd, mut xtrace) = (false, false, false);
-    let mut histexpand = None;
-    let mut monitor = None;
-    let mut braceexpand = true;
-    let mut pipefail = false;
-    let mut physical = false;
-    let mut keyword = false;
-    let mut nolog = false;
     let mut pretty = false;
     let mut debugger = false;
-    let mut shopts = Vec::new();
     while args
         .peek()
         .and_then(|a| a.to_str())
@@ -112,8 +102,8 @@ pub fn parse(
             "--version" => return Ok(Action::Version),
             "--pretty-print" => pretty = true,
             "--debugger" => debugger = true,
-            "--verbose" => verbose = true,
-            "--posix" => posix = true,
+            "--verbose" => options.verbose = true,
+            "--posix" => options.posix = true,
             "--login" => login = true,
             "--norc" => norc = true,
             "--noediting" => noediting = true,
@@ -131,51 +121,53 @@ pub fn parse(
                         'i' => interactive = enabled,
                         'l' => login = enabled,
                         's' => stdin = enabled,
-                        'n' => check = enabled,
-                        'b' => notify = enabled,
-                        'e' => errexit = enabled,
-                        'v' => verbose = enabled,
-                        'E' => errtrace = enabled,
-                        'T' => functrace = enabled,
-                        'C' => noclobber = enabled,
-                        'P' => physical = enabled,
-                        'k' => keyword = enabled,
-                        'a' => allexport = enabled,
-                        't' => onecmd = enabled,
-                        'x' => xtrace = enabled,
-                        'H' => histexpand = Some(enabled),
-                        'm' => monitor = Some(enabled),
-                        'h' => hashall = enabled,
-                        'B' => braceexpand = enabled,
-                        'f' => noglob = enabled,
-                        'u' => nounset = enabled,
-                        'O' => shopts.push((enabled, args.next().map(utf8).transpose()?)),
+                        'n' => options.check = enabled,
+                        'b' => options.notify = enabled,
+                        'e' => options.errexit = enabled,
+                        'v' => options.verbose = enabled,
+                        'E' => options.errtrace = enabled,
+                        'T' => options.functrace = enabled,
+                        'C' => options.noclobber = enabled,
+                        'P' => options.physical = enabled,
+                        'k' => options.keyword = enabled,
+                        'a' => options.allexport = enabled,
+                        't' => options.onecmd = enabled,
+                        'x' => options.xtrace = enabled,
+                        'H' => options.histexpand = Some(enabled),
+                        'm' => options.monitor = Some(enabled),
+                        'h' => options.hashall = enabled,
+                        'B' => options.braceexpand = enabled,
+                        'f' => options.noglob = enabled,
+                        'u' => options.nounset = enabled,
+                        'O' => options
+                            .shopts
+                            .push((enabled, args.next().map(utf8).transpose()?)),
                         'o' => match args.next().as_deref().and_then(|a| a.to_str()) {
-                            Some("braceexpand") => braceexpand = enabled,
-                            Some("posix") => posix = enabled,
-                            Some("physical") => physical = enabled,
-                            Some("nolog") => nolog = enabled,
-                            Some("keyword") => keyword = enabled,
-                            Some("interactive-comments") => {
-                                shopts.push((enabled, Some("interactive_comments".into())))
-                            }
-                            Some("pipefail") => pipefail = enabled,
-                            Some("errexit") => errexit = enabled,
-                            Some("verbose") => verbose = enabled,
-                            Some("errtrace") => errtrace = enabled,
-                            Some("functrace") => functrace = enabled,
-                            Some("nounset") => nounset = enabled,
-                            Some("allexport") => allexport = enabled,
-                            Some("onecmd") => onecmd = enabled,
-                            Some("xtrace") => xtrace = enabled,
-                            Some("histexpand") => histexpand = Some(enabled),
-                            Some("monitor") => monitor = Some(enabled),
-                            Some("hashall") => hashall = enabled,
-                            Some("noclobber") => noclobber = enabled,
-                            Some("noexec") => check = enabled,
-                            Some("notify") => notify = enabled,
-                            Some("ignoreeof") => ignoreeof = Some(enabled),
-                            Some("noglob") => noglob = enabled,
+                            Some("braceexpand") => options.braceexpand = enabled,
+                            Some("posix") => options.posix = enabled,
+                            Some("physical") => options.physical = enabled,
+                            Some("nolog") => options.nolog = enabled,
+                            Some("keyword") => options.keyword = enabled,
+                            Some("interactive-comments") => options
+                                .shopts
+                                .push((enabled, Some("interactive_comments".into()))),
+                            Some("pipefail") => options.pipefail = enabled,
+                            Some("errexit") => options.errexit = enabled,
+                            Some("verbose") => options.verbose = enabled,
+                            Some("errtrace") => options.errtrace = enabled,
+                            Some("functrace") => options.functrace = enabled,
+                            Some("nounset") => options.nounset = enabled,
+                            Some("allexport") => options.allexport = enabled,
+                            Some("onecmd") => options.onecmd = enabled,
+                            Some("xtrace") => options.xtrace = enabled,
+                            Some("histexpand") => options.histexpand = Some(enabled),
+                            Some("monitor") => options.monitor = Some(enabled),
+                            Some("hashall") => options.hashall = enabled,
+                            Some("noclobber") => options.noclobber = enabled,
+                            Some("noexec") => options.check = enabled,
+                            Some("notify") => options.notify = enabled,
+                            Some("ignoreeof") => options.ignoreeof = Some(enabled),
+                            Some("noglob") => options.noglob = enabled,
                             Some(name) => return Err(format!("{name}: invalid option name")),
                             None => return Err("expected an option name after -o".into()),
                         },
@@ -202,40 +194,18 @@ pub fn parse(
     };
     let positional = args.map(utf8).collect::<Result<_, _>>()?;
     Ok(Action::Run(Invocation {
+        options,
         input,
         arg0,
         positional,
         interactive,
         login,
         as_sh,
-        posix,
         norc,
         noprofile,
-        nolog,
         noediting,
         rcfile,
-        check,
         pretty,
         debugger,
-        notify,
-        ignoreeof,
-        errexit,
-        verbose,
-        errtrace,
-        functrace,
-        nounset,
-        noglob,
-        noclobber,
-        hashall,
-        allexport,
-        onecmd,
-        xtrace,
-        histexpand,
-        monitor,
-        braceexpand,
-        pipefail,
-        physical,
-        keyword,
-        shopts,
     }))
 }

@@ -27,25 +27,25 @@ expansion fields_with_glob | Split only eligible fields and expand active patter
 expansion scalar | Expand a single scalar without pathname enumeration.
 pattern pathnames | Enumerate matching entries and sort the resulting paths.
 pattern trim | Find the matching parameter boundary before copying the retained text.
-word tilde | Use HOME for a bare tilde and consult the OS account database only for named users.
+word/tilde tilde | Use HOME for a bare tilde and consult the OS account database only for named users.
 session assign_value | Reuse existing scalar capacity and preserve special-variable side effects.
 session persist_prefix | Move prepared exported prefixes directly into the session.
 session bind | Save temporary bindings for restoration after the builtin.
-execute prepare | Expand command words and prefixes in their specified order.
-execute prepare_redirects | Expand redirect operands once, preserving left-to-right order.
-execute run_builtin | Save overwritten descriptors only for the duration of a returning builtin.
-execute apply_protected | Apply opens, duplicates and closes in order and propagate OS failure.
+execute/prepare prepare | Expand command words and prefixes in their specified order.
+execute/prepare prepare_redirects | Expand redirect operands once, preserving left-to-right order.
+execute/builtin run_builtin | Save overwritten descriptors only for the duration of a returning builtin.
+execute/redirect apply_protected | Apply opens, duplicates and closes in order and propagate OS failure.
 execute/here_input open | Use the bounded pipe path when capacity permits and a file otherwise.
 execute/hash resolve | Reuse a cached executable only while current search rules allow it.
 execute/spawn spawn_resolved | Omit spawn attributes for ordinary foreground external commands.
-execute exec | Replace the process image for eligible tail commands without an extra fork.
+execute/external exec | Replace the process image for eligible tail commands without an extra fork.
 execute start_raw | Evaluate pipeline-stage expansions in the appropriate process.
 execute start | Select spawn, fork or in-process builtin dispatch for this pipeline stage.
 subshell capture_substitution | Try direct capture before creating a pipe and child.
 jobs finish | Retain per-stage exit status and restore the controlling process group.
-jobs kill | Resolve signal and PID or job specification before sending.
-jobs wait_for_ids | Consume saved child status or wait for the requested job.
-jobs wait_next | Poll and block atomically to avoid losing an exit notification.
+jobs/builtins kill | Resolve signal and PID or job specification before sending.
+jobs/builtins wait_for_ids | Consume saved child status or wait for the requested job.
+jobs/builtins wait_next | Poll and block atomically to avoid losing an exit notification.
 traps set | Save the inherited disposition when first installing a signal trap.
 traps after_fork | Reset caught traps while retaining ignores in shell children.
 traps dispatch | Drain pending signal bits at shell command boundaries.
@@ -57,13 +57,13 @@ builtins/umask run | Read or set the process mask and format the requested repre
 session read | Avoid consuming bytes belonging to the next stdin reader.
 session get | Read special and ordinary variables through the current binding.
 session shift | Advance the existing argument iterator instead of copying the tail.
-session set | Change only the selected options or positional arguments.
+session/options set | Change only the selected options or positional arguments.
 session/getopts getopts | Reuse the option cursor while checking variable attributes.
-session directory_builtin | Resolve the requested directory while preserving PWD and OLDPWD.
+session/directories directory_builtin | Resolve the requested directory while preserving PWD and OLDPWD.
 execute/lookup describe | Check reserved words, builtins, functions and path lookup in shell order.
 session/options shopt | Query and set the option used by the interpreter.
-main interactive | Redraw at command boundaries and dispatch traps before blocking for input.
-main read_terminal_line | Leave later lines available to children sharing redirected stdin.
+interactive interactive | Redraw at command boundaries and dispatch traps before blocking for input.
+interactive read_terminal_line | Leave later lines available to children sharing redirected stdin.
 """.strip()
 
 PROBE = """
@@ -99,7 +99,7 @@ def instrument(root, output, editor=False):
         module, function = location.split()
         path = root / "src" / (module + ".rs")
         source = path.read_text()
-        indent = "" if location == "execute prepare" else r"[ \t]*"
+        indent = r"[ \t]*"
         matches = list(re.finditer("^" + indent + r"(?:pub(?:\([^)]*\))? )?fn " + function + r"\s*(?:<|\()", source, re.M))
         if len(matches) != 1 or i >= 64:
             raise ValueError(f"ambiguous probe {location}")

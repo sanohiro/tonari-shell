@@ -1,6 +1,13 @@
+mod ast;
+pub use ast::*;
+mod history;
+pub(crate) use history::{
+    history_command, history_designator_spans, last_history_argument, suggestion_end,
+};
 mod aliases;
 mod array;
 pub(crate) mod pretty;
+mod test_expr;
 use crate::pattern::Matcher;
 use crate::test_expression::Expr;
 pub(crate) use array::quoted_initializer;
@@ -15,227 +22,6 @@ mod modifier;
 mod wrapper;
 pub use crate::word::{Word, is_identifier};
 pub(crate) use wrapper::opens_function;
-
-// Fold only token-separating newlines. Quoted newlines, comment endings and
-// here-document boundaries must survive recall and execution.
-pub(crate) fn history_command(text: &str) -> std::borrow::Cow<'_, str> {
-    use std::borrow::Cow;
-    if text.contains(['#', '\x60']) || text.contains("<<") {
-        return Cow::Borrowed(text);
-    }
-    let Ok((tokens, spans, _)) = lex(text, false, true) else {
-        return Cow::Borrowed(text);
-    };
-    if tokens.iter().any(|t| {
-        matches!(t, Token::ArrayStart | Token::EndArm(_))
-            || matches!(t.keyword(), Some("case" | "[[" | "function"))
-    }) {
-        return Cow::Borrowed(text);
-    }
-    let mut result = String::new();
-    let mut start = 0;
-    for (i, &(a, b)) in spans.iter().enumerate() {
-        if !matches!(tokens[i], Token::Newline) || i == 0 {
-            continue;
-        }
-        let previous = &tokens[i - 1];
-        if matches!(previous, Token::RightParen)
-            || tokens.get(i + 1).and_then(Token::keyword) == Some("in")
-        {
-            continue;
-        }
-        result.push_str(&text[start..a]);
-        if !lexer::command_position(&tokens[..i]) {
-            result.push(';');
-        }
-        result.push(' ');
-        start = b;
-    }
-    if start == 0 {
-        Cow::Borrowed(text)
-    } else {
-        result.push_str(&text[start..]);
-        Cow::Owned(result)
-    }
-}
-
-pub(crate) fn history_word_spans(s: &str) -> Vec<(usize, usize)> {
-    let mut words = Vec::new();
-    let mut start = None;
-    let mut quote = None;
-    let mut escaped = false;
-    for (i, c) in s.char_indices() {
-        if !escaped && quote.is_none() && c.is_whitespace() {
-            if let Some(a) = start.take() {
-                words.push((a, i));
-            }
-            continue;
-        }
-        start.get_or_insert(i);
-        if escaped {
-            escaped = false;
-        } else if c == '\\' && quote != Some('\'') {
-            escaped = true;
-        } else if quote == Some(c) {
-            quote = None;
-        } else if quote.is_none() && matches!(c, '\'' | '"') {
-            quote = Some(c);
-        }
-    }
-    if let Some(a) = start {
-        words.push((a, s.len()));
-    }
-    words
-}
-
-pub(crate) fn history_designator_spans(line: &str, extglob: bool) -> Vec<(usize, usize)> {
-    if !line.bytes().any(|b| {
-        matches!(
-            b,
-            b'\''
-                | b'"'
-                | b'\\'
-                | b'$'
-                | b'`'
-                | b';'
-                | b'|'
-                | b'&'
-                | b'<'
-                | b'>'
-                | b'('
-                | b')'
-                | b'#'
-        )
-    }) {
-        return history_word_spans(line);
-    }
-    let parsed = {
-        let _extglob = crate::ScopedCell::enter(&EXTGLOB, extglob);
-        lex(line, false, true)
-    };
-    let Ok((tokens, spans, _)) = parsed else {
-        return history_word_spans(line);
-    };
-    let mut result: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
-    let mut duplicate = false;
-    for (token, (start, end)) in tokens.into_iter().zip(spans) {
-        if duplicate
-            && let Some(last) = result.last_mut()
-            && last.1 == start
-            && line[start..end]
-                .trim_end_matches('-')
-                .bytes()
-                .all(|b| b.is_ascii_digit())
-        {
-            last.1 = end;
-        } else if !matches!(token, Token::Newline) {
-            result.push((start, end));
-        }
-        duplicate = matches!(
-            token,
-            Token::Redirect(_, Target::Duplicate | Target::OutputWord)
-        );
-    }
-    result
-}
-
-/// Keep the original shell spelling, including quotes and substitutions.
-pub(crate) fn last_history_argument(line: &str) -> Option<&str> {
-    let blank = [' ', '\t', '\n'];
-    let trimmed = line.trim_end_matches(blank);
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    // A bare prefix cannot leave the last argument inside an open quote or expansion.
-    let first_special = trimmed.bytes().position(|b| {
-        !(lexer::plain_byte(b)
-            || b >= 128
-            || matches!(b, b' ' | b'\t' | b'\n' | b'=' | b',' | b'@' | b'%'))
-    });
-    let prefix = match first_special {
-        None => return trimmed.rsplit(blank).next(),
-        Some(i) => &trimmed[..i],
-    };
-    let tail = &trimmed.as_bytes()[prefix.len()..];
-    if tail.len() >= 2
-        && tail[0] == b'\''
-        && memchr::memchr(b'\'', &tail[1..]) == Some(tail.len() - 2)
-    {
-        let start = prefix.rfind(blank).map_or(0, |i| i + 1);
-        return Some(&trimmed[start..]);
-    }
-    // Pass the untrimmed line to the lexer: an escaped trailing blank belongs to the word.
-    let (tokens, spans, _) = match lex(line, false, true) {
-        Ok(parts) => parts,
-        Err(_) => return history_word_spans(line).last().map(|&(a, b)| &line[a..b]),
-    };
-    let index = tokens
-        .iter()
-        .zip(&spans)
-        .rposition(|(t, &(a, b))| !matches!(t, Token::Newline) || b - a > 1)?;
-    if matches!(tokens[index], Token::Newline) {
-        // A newline spanning a heredoc includes its closing delimiter.
-        let (a, b) = spans[index];
-        let closing = line[a..b].trim_end_matches('\n').rsplit('\n').next()?;
-        return last_history_argument(closing);
-    }
-    let (mut start, end) = spans[index];
-    // The history word for an adjacent fd duplication includes its operator.
-    if index > 0
-        && spans[index - 1].1 == start
-        && matches!(
-            tokens[index - 1],
-            Token::Redirect(_, Target::Duplicate | Target::OutputWord)
-        )
-        && line[start..end]
-            .trim_end_matches('-')
-            .bytes()
-            .all(|b| b.is_ascii_digit())
-    {
-        start = spans[index - 1].0;
-    }
-    Some(&line[start..end])
-}
-
-/// Byte end of the next shell token in the displayed command, including any
-/// whitespace before it. Lexing identifies quotes and substitutions without running them.
-pub(crate) fn suggestion_end(line: &str, cursor: usize) -> usize {
-    // A plain prefix cannot leave us inside quotes or a substitution. Stop
-    // at the next blank without lexing later arguments of a long suggestion.
-    let bare = |b: u8| b.is_ascii_alphanumeric() || b >= 128 || b"-_./:=,@%+".contains(&b);
-    let tail = line[cursor..].trim_start_matches([' ', '\t']);
-    let word = tail.bytes().take_while(|&b| bare(b)).count();
-    if word > 0
-        && tail
-            .as_bytes()
-            .get(word)
-            .is_none_or(|b| matches!(b, b' ' | b'\t' | b'\n'))
-        && line[..cursor]
-            .bytes()
-            .all(|b| bare(b) || matches!(b, b' ' | b'\t'))
-    {
-        return line.len() - tail.len() + word;
-    }
-    let next_end = |source| {
-        lex(source, false, true)
-            .ok()?
-            .1
-            .into_iter()
-            .find(|&(_, end)| end > cursor)
-            .map(|(_, end)| end)
-    };
-    next_end(line)
-        .or_else(|| {
-            // History can contain syntax errors beyond this argument. Confirm a
-            // shorter prefix with the lexer before copying any of it into the draft.
-            let (_, end) = history_word_spans(line)
-                .into_iter()
-                .find(|&(_, end)| end > cursor)?;
-            next_end(&line[..end])
-        })
-        .unwrap_or(cursor)
-}
 
 pub(crate) fn is_function_name(name: &str) -> bool {
     !name.is_empty()
@@ -271,10 +57,11 @@ pub(crate) fn prompt_word(
     source: &str,
     expand: bool,
     posix: bool,
-    mut escape: impl FnMut(char, &mut std::str::Chars) -> String,
+    mut escape: impl FnMut(char, &mut std::str::Chars, &mut String),
 ) -> Result<Word, Error> {
     let mut builder = crate::word::WordBuilder::default();
     let mut chars = source.chars();
+    let mut escaped = String::new();
     let mut backslash = false;
     while let Some(c) = chars.next() {
         if backslash && c != '\\' {
@@ -291,9 +78,9 @@ pub(crate) fn prompt_word(
                     chars.next();
                     builder.push('!');
                 } else {
-                    for c in escape('!', &mut chars).chars() {
-                        builder.push(c);
-                    }
+                    escaped.clear();
+                    escape('!', &mut chars, &mut escaped);
+                    builder.literal(&escaped);
                 }
             }
             '$' if expand => lexer::dollar(&mut chars, &mut builder, true)?,
@@ -313,7 +100,9 @@ pub(crate) fn prompt_word(
                         builder.push('\\');
                         backslash = false;
                     }
-                    builder.literal(&escape(code, &mut chars));
+                    escaped.clear();
+                    escape(code, &mut chars, &mut escaped);
+                    builder.literal(&escaped);
                 }
             }
             c => builder.push(c),
@@ -323,214 +112,6 @@ pub(crate) fn prompt_word(
         builder.push('\\');
     }
     Ok(builder.finish())
-}
-
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum Target {
-    ReadWrite,
-    Clobber,
-    NoClobber,
-    CloseMoved,
-    Read,
-    Write,
-    Append,
-    Duplicate,
-    OutputWord,
-    HereDoc { expand: bool },
-    HereString,
-}
-
-#[derive(Debug, Clone)]
-pub struct Redirect<W = String> {
-    pub line: usize,
-    pub variable: Option<Box<str>>,
-    pub fd: i32,
-    pub target: Target,
-    pub word: W,
-}
-
-#[derive(Debug, Clone)]
-pub struct SimpleCommand<W = String> {
-    pub location: Option<Location>,
-    pub compound: Option<Box<Command>>,
-    pub words: Vec<W>,
-    pub redirects: Vec<Redirect<W>>,
-    pub assignments: Vec<(String, Assignment<W>)>,
-    pub keyword_args: Option<Rc<Vec<(usize, String)>>>,
-}
-
-impl<W> Default for SimpleCommand<W> {
-    fn default() -> Self {
-        Self {
-            location: None,
-            compound: None,
-            words: Vec::new(),
-            redirects: Vec::new(),
-            assignments: Vec::new(),
-            keyword_args: None,
-        }
-    }
-}
-
-impl<W> SimpleCommand<W> {
-    fn empty(&self) -> bool {
-        self.compound.is_none()
-            && self.words.is_empty()
-            && self.redirects.is_empty()
-            && self.assignments.is_empty()
-    }
-}
-
-pub type Pipeline<W = String> = Vec<SimpleCommand<W>>;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Condition {
-    Always,
-    Success,
-    Failure,
-}
-
-impl Condition {
-    pub fn allows(self, status: u8) -> bool {
-        match self {
-            Self::Always => true,
-            Self::Success => status == 0,
-            Self::Failure => status != 0,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Location {
-    source: Rc<str>,
-    subscript_aliases: crate::alias::Aliases,
-    start: usize,
-    pub(crate) end: usize,
-    pub line: usize,
-}
-impl Location {
-    pub(crate) fn label(source: String, line: usize) -> Self {
-        Self {
-            start: 0,
-            end: source.len(),
-            source: source.into(),
-            subscript_aliases: Default::default(),
-            line,
-        }
-    }
-    pub(crate) fn full_source(&self) -> &Rc<str> {
-        &self.source
-    }
-    pub fn text(&self) -> &str {
-        &self.source[self.start..self.end]
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Statement {
-    pub location: Location,
-    pub condition: Condition,
-    pub negated: bool,
-    pub command: Command,
-}
-
-#[derive(Debug)]
-pub enum CasePattern {
-    Fixed(Matcher<String>),
-    Extended(crate::pattern::extended::Pattern, Matcher<String>),
-    Dynamic(Word),
-}
-
-impl CasePattern {
-    fn new(word: Word) -> Self {
-        use crate::word::Part;
-        match word {
-            Word::Literal(text) => Self::Fixed(Matcher::Literal(text)),
-            Word::Expanded(ref parts)
-                if parts
-                    .iter()
-                    .all(|p| matches!(p, Part::Text(_) | Part::Pattern(_))) =>
-            {
-                if EXTGLOB.get() && parts.iter().any(|part| matches!(part, Part::Pattern(s) if crate::pattern::extended::has_group(s))) {
-                    let text = word.extended_pattern(&|_| None, &[]);
-                    let extended = crate::pattern::extended::Pattern::new(&text);
-                    let basic = Matcher::new(text);
-                    return match extended {
-                        Some(group) => Self::Extended(group, basic),
-                        None => Self::Fixed(basic),
-                    };
-                }
-                Self::Fixed(Matcher::new(word.pattern(&|_| None, &[])))
-            }
-            word => Self::Dynamic(word),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CaseEnd {
-    Stop,
-    FallThrough,
-    Retest,
-}
-
-pub type CaseArm = (Vec<CasePattern>, Vec<Statement>, CaseEnd);
-
-#[derive(Debug)]
-pub struct FunctionDefinition {
-    pub declaration_line: usize,
-    pub location: Location,
-    pub body: wrapper::FunctionBody,
-    pub rendered_body: std::cell::OnceCell<String>,
-}
-
-#[derive(Debug, Clone)]
-pub enum Command {
-    Pipeline(Pipeline<Word>),
-    Group(Vec<Statement>),
-    Timed {
-        posix: bool,
-        command: Box<Command>,
-    },
-    Test(Expr),
-    Arithmetic(String),
-    ForArithmetic {
-        init: String,
-        condition: String,
-        step: String,
-        body: Vec<Statement>,
-    },
-    Subshell(Vec<Statement>),
-    Coprocess {
-        name: String,
-        body: Box<Command>,
-    },
-    Background(Vec<Statement>),
-    Case {
-        header: Location,
-        word: Word,
-        arms: Rc<Vec<CaseArm>>,
-    },
-    If {
-        branches: Vec<(Vec<Statement>, Vec<Statement>)>,
-        otherwise: Vec<Statement>,
-    },
-    While {
-        until: bool,
-        condition: Vec<Statement>,
-        body: Vec<Statement>,
-    },
-    For {
-        select: bool,
-        header: Location,
-        name: String,
-        words: Option<Vec<Word>>,
-        body: Vec<Statement>,
-    },
-    Function {
-        name: String,
-        definition: Rc<FunctionDefinition>,
-    },
 }
 
 #[derive(Debug)]
@@ -1285,112 +866,6 @@ impl Reader {
             name,
             body: Box::new(command),
         })
-    }
-
-    fn test_or(&mut self) -> Result<Expr, Error> {
-        let mut result = self.test_and()?;
-        while matches!(self.peek(), Some(Token::Or)) {
-            self.tokens.pop_front();
-            self.newlines();
-            result = Expr::Or(Box::new(result), Box::new(self.test_and()?));
-        }
-        Ok(result)
-    }
-
-    fn test_and(&mut self) -> Result<Expr, Error> {
-        let mut result = self.test_atom()?;
-        self.newlines();
-        while matches!(self.peek(), Some(Token::And)) {
-            self.tokens.pop_front();
-            self.newlines();
-            result = Expr::And(Box::new(result), Box::new(self.test_atom()?));
-            self.newlines();
-        }
-        Ok(result)
-    }
-
-    fn test_word(&mut self) -> Result<Word, Error> {
-        if self.keyword() == Some("]]") {
-            return Err(Error::Invalid("missing conditional operand"));
-        }
-        match self.operand() {
-            Some(Token::Word(word)) => Ok(word.word),
-            None => Err(Error::Incomplete(Incomplete::Message(
-                "unfinished conditional expression",
-            ))),
-            _ => Err(Error::Invalid("expected a conditional operand")),
-        }
-    }
-
-    fn test_atom(&mut self) -> Result<Expr, Error> {
-        self.newlines();
-        if self.keyword() == Some("!") {
-            self.tokens.pop_front();
-            return Ok(Expr::Not(Box::new(self.test_atom()?)));
-        }
-        if matches!(self.peek(), Some(Token::LeftParen)) {
-            self.tokens.pop_front();
-            let e = self.test_or()?;
-            match self.tokens.pop_front() {
-                Some(Token::RightParen) => return Ok(e),
-                None => {
-                    return Err(Error::Incomplete(Incomplete::Message(
-                        "unclosed conditional grouping",
-                    )));
-                }
-                _ => return Err(Error::Invalid("expected ')' in conditional expression")),
-            }
-        }
-        let unary = self.keyword().is_some_and(|op| {
-            matches!(
-                op,
-                "-a" | "-b"
-                    | "-c"
-                    | "-d"
-                    | "-e"
-                    | "-f"
-                    | "-g"
-                    | "-h"
-                    | "-k"
-                    | "-n"
-                    | "-o"
-                    | "-p"
-                    | "-r"
-                    | "-s"
-                    | "-t"
-                    | "-u"
-                    | "-v"
-                    | "-w"
-                    | "-x"
-                    | "-z"
-                    | "-G"
-                    | "-L"
-                    | "-N"
-                    | "-O"
-                    | "-R"
-                    | "-S"
-            )
-        });
-        if unary {
-            let op = self.keyword().unwrap().to_owned();
-            self.tokens.pop_front();
-            return Ok(Expr::Unary(op, self.test_word()?));
-        }
-        let left = self.test_word()?;
-        let op = match self.peek() {
-            Some(Token::Redirect(0, Target::Read)) => "<",
-            Some(Token::Redirect(1, Target::Write)) => ">",
-            _ => match self.keyword() {
-                Some(
-                    op @ ("=" | "==" | "!=" | "=~" | "-eq" | "-ne" | "-lt" | "-gt" | "-le" | "-ge"
-                    | "-ef" | "-nt" | "-ot"),
-                ) => op,
-                _ => return Ok(Expr::Word(left)),
-            },
-        }
-        .to_owned();
-        self.tokens.pop_front();
-        Ok(Expr::binary(left, op, self.test_word()?))
     }
 
     fn case_clause(&mut self) -> Result<Command, Error> {

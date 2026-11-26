@@ -104,14 +104,12 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
     }
     let mut status = 0;
     for arg in args {
-        if !remove {
-            if let Some((name, value)) = arg.split_once('=') {
-                if let Err(e) = session.aliases.insert(name, value) {
-                    eprintln!("tonari: alias: {name}: {e}");
-                    status = 1;
-                }
-                continue;
+        if !remove && let Some((name, value)) = arg.split_once('=') {
+            if let Err(e) = session.aliases.insert(name, value) {
+                eprintln!("tonari: alias: {name}: {e}");
+                status = 1;
             }
+            continue;
         }
         if remove
             && session

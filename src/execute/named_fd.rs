@@ -62,7 +62,8 @@ impl Scope {
                         }
                         _ => unreachable!(),
                     };
-                    let allocated = unsafe { libc::fcntl(fd, libc::F_DUPFD, 10) };
+                    let allocated =
+                        unsafe { libc::fcntl(fd, libc::F_DUPFD, crate::execute::fd::SHELL_FD_MIN) };
                     if allocated < 0 {
                         return Err(io::Error::last_os_error());
                     }
