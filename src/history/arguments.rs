@@ -3,9 +3,7 @@
 use super::{decode, file};
 use crate::{Session, parser};
 use std::collections::HashMap;
-use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
 fn project(dir: &Path) -> Option<&Path> {
@@ -32,17 +30,10 @@ pub(crate) fn candidates(
     let Some(path) = file(session) else {
         return Vec::new();
     };
-    let Ok(mut input) = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NONBLOCK)
-        .open(path)
-    else {
+    let Ok((mut input, meta)) = super::open_journal(&path) else {
         return Vec::new();
     };
-    let Ok(meta) = input.metadata() else {
-        return Vec::new();
-    };
-    if !meta.is_file() || meta.len() == 0 {
+    if meta.len() == 0 {
         return Vec::new();
     }
     let start = meta.len().saturating_sub(WINDOW);

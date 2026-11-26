@@ -149,17 +149,7 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
         match chars.next() {
             Some('s') => write!(fmt, "{seconds}").ok()?,
             Some('Z') => fmt.push_str(&designation.replace('%', "%%")),
-            Some('z') => {
-                let minutes = offset.unsigned_abs() / 60;
-                write!(
-                    fmt,
-                    "{}{:02}{:02}",
-                    if offset < 0 { '-' } else { '+' },
-                    minutes / 60,
-                    minutes % 60
-                )
-                .ok()?;
-            }
+            Some('z') => push_zone_offset(&mut fmt, offset),
             Some(c) => {
                 fmt.push('%');
                 fmt.push(c);
@@ -206,6 +196,24 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
     }
 }
 
+fn pair(dst: &mut String, n: i32) {
+    dst.push(char::from(b'0' + (n / 10) as u8));
+    dst.push(char::from(b'0' + (n % 10) as u8));
+}
+
+fn push_zone_offset(out: &mut String, offset: i32) {
+    let minutes = (offset / 60).unsigned_abs();
+    out.push(if offset < 0 { '-' } else { '+' });
+    let hours = minutes / 60;
+    if hours < 100 {
+        pair(out, hours as i32);
+    } else {
+        use std::fmt::Write;
+        write!(out, "{hours}").unwrap();
+    }
+    pair(out, (minutes % 60) as i32);
+}
+
 // Numeric log timestamps have no locale text or alternate digits. Render them
 // directly without passing each numeric component through libc's formatter.
 fn numeric_time(
@@ -219,10 +227,6 @@ fn numeric_time(
     let year = tm.tm_year.checked_add(1900)?;
     if !(1000..=9999).contains(&year) {
         return None;
-    }
-    fn pair(dst: &mut String, n: i32) {
-        dst.push(char::from(b'0' + (n / 10) as u8));
-        dst.push(char::from(b'0' + (n % 10) as u8));
     }
     if let Some((_, after)) = format.split_once('%')
         && !matches!(
@@ -276,15 +280,7 @@ fn numeric_time(
                 }
             }
             b's' => write!(result, "{seconds}").ok()?,
-            b'z' => {
-                let minutes = (offset / 60).abs();
-                if minutes >= 6000 {
-                    return None;
-                }
-                result.push(if offset < 0 { '-' } else { '+' });
-                pair(&mut result, minutes / 60);
-                pair(&mut result, minutes % 60);
-            }
+            b'z' => push_zone_offset(&mut result, offset),
             b'Z' => result.push_str(zone),
             b'%' => result.push('%'),
             _ => return None,

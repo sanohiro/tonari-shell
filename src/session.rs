@@ -1112,6 +1112,18 @@ impl Session {
         true
     }
 
+    fn apply_variable_effects(&mut self, name: &str, value: &str) {
+        match name {
+            "BASH_COMPAT" => self.apply_compat(value),
+            "POSIXLY_CORRECT" => self.apply_posix_mode(true),
+            "OPTIND" => self.opt_offset = 0,
+            "IGNOREEOF" | "ignoreeof" => self.set_eof_variable(Some(value)),
+            "GLOBIGNORE" => self.shopt.glob.set_ignore(Some(value)),
+            "PATH" => self.hashes.clear(),
+            _ => {}
+        }
+    }
+
     pub(crate) fn assign_value(&mut self, name: &str, mut value: Cow<'_, str>) {
         match self.reference_name(name) {
             Ok(Cow::Owned(target)) => {
@@ -1140,30 +1152,15 @@ impl Session {
         if self.protected_array(name) {
             return;
         }
-        if name == "BASH_COMPAT" {
-            self.apply_compat(&value);
-        }
-        if name == "POSIXLY_CORRECT" {
-            self.apply_posix_mode(true);
-        }
+        self.apply_variable_effects(name, &value);
         if matches!(name, "HISTSIZE" | "HISTFILESIZE") {
             self.apply_history_limit(name, &value);
         }
         if name == "BASH_ARGV0" {
             self.arg0 = value.to_string();
         }
-        if matches!(name, "IGNOREEOF" | "ignoreeof") {
-            self.set_eof_variable(Some(&value));
-        }
-        if name == "GLOBIGNORE" {
-            self.shopt.glob.set_ignore(Some(&value));
-        }
         if name == "OPTIND" {
-            self.opt_offset = 0;
             value = Cow::Owned(value.trim().parse::<i64>().unwrap_or(0).to_string());
-        }
-        if name == "PATH" {
-            self.hashes.clear();
         }
         let live = dynamic::is_dynamic(name) && self.variables.get(name).is_none_or(|v| v.dynamic);
         if let Some(upper) = self.variables.get(name).and_then(|v| v.letter_case) {
@@ -1418,24 +1415,7 @@ impl Session {
                     }
                 }
             }
-            if name == "BASH_COMPAT" {
-                self.apply_compat(&value);
-            }
-            if name == "POSIXLY_CORRECT" {
-                self.apply_posix_mode(true);
-            }
-            if name == "OPTIND" {
-                self.opt_offset = 0;
-            }
-            if matches!(name.as_str(), "IGNOREEOF" | "ignoreeof") {
-                self.set_eof_variable(Some(&value));
-            }
-            if name == "GLOBIGNORE" {
-                self.shopt.glob.set_ignore(Some(&value));
-            }
-            if name == "PATH" {
-                self.hashes.clear();
-            }
+            self.apply_variable_effects(&name, &value);
             self.variables.insert(
                 name,
                 Variable {
@@ -1454,34 +1434,19 @@ impl Session {
             if self.readonly(name) {
                 continue;
             }
-            if name == "BASH_COMPAT" {
-                self.apply_compat(value);
-            }
-            if name == "POSIXLY_CORRECT" {
-                if saved.posix_settings.is_none() {
-                    saved.posix_settings = Some(PosixSettings {
-                        expand_aliases: self.shopt.expand_aliases,
-                        inherit_errexit: self.shopt.inherit_errexit,
-                        interactive_comments: self.shopt.interactive_comments,
-                        shift_verbose: self.shopt.shift_verbose,
-                        sourcepath: self.shopt.sourcepath,
-                    });
-                }
-                self.apply_posix_mode(true);
-            }
-            if matches!(name.as_str(), "IGNOREEOF" | "ignoreeof") {
-                self.set_eof_variable(Some(value));
-            }
-            if name == "GLOBIGNORE" {
-                self.shopt.glob.set_ignore(Some(value));
+            if name == "POSIXLY_CORRECT" && saved.posix_settings.is_none() {
+                saved.posix_settings = Some(PosixSettings {
+                    expand_aliases: self.shopt.expand_aliases,
+                    inherit_errexit: self.shopt.inherit_errexit,
+                    interactive_comments: self.shopt.interactive_comments,
+                    shift_verbose: self.shopt.shift_verbose,
+                    sourcepath: self.shopt.sourcepath,
+                });
             }
             if name == "OPTIND" {
                 saved.opt_offset.get_or_insert(self.opt_offset);
-                self.opt_offset = 0;
             }
-            if name == "PATH" {
-                self.hashes.clear();
-            }
+            self.apply_variable_effects(name, value);
             saved
                 .variables
                 .entry(name.clone())

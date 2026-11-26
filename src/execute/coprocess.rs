@@ -127,8 +127,7 @@ pub(crate) fn launch(
         session.stdin_redirected = true;
         session.interactive = false;
         let code = crate::eval::command(session, body, status, true).child_status();
-        let code = crate::traps::finish(session, code);
-        unsafe { libc::_exit(i32::from(code)) }
+        crate::subshell::exit_child(session, code)
     }
     drop(input);
     drop(output);

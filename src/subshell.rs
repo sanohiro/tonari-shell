@@ -253,10 +253,7 @@ pub fn capture_substitution(
             unsafe { libc::_exit(i32::from(code.is_err())) }
         }
         let code = execute_program(session, body, last, true).child_status();
-        let code = crate::traps::finish(session, code);
-        unsafe {
-            libc::_exit(code as libc::c_int);
-        }
+        crate::subshell::exit_child(session, code)
     }
     // A writer can fill the pipe before it exits. Drain first, then reap even
     // when reading fails. The parent must drop its own writer to observe EOF.
@@ -773,8 +770,7 @@ fn launch_list(
         session.jobs.forked(false);
         session.command_string = false;
         let code = run(session).child_status();
-        let code = crate::traps::finish(session, code);
-        unsafe { libc::_exit(code as libc::c_int) }
+        crate::subshell::exit_child(session, code)
     }
     launch.parent(pid);
     if launch.group.is_none() && !background {
@@ -841,4 +837,10 @@ mod tests {
         assert_eq!(text, "x");
         assert!(text.capacity() < 8192);
     }
+}
+
+/// Run shell EXIT handling before terminating the forked process.
+pub(crate) fn exit_child(session: &mut Session, code: u8) -> ! {
+    let code = crate::traps::finish(session, code);
+    unsafe { libc::_exit(i32::from(code)) }
 }

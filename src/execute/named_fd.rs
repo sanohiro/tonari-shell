@@ -130,18 +130,10 @@ impl Scope {
     fn finish(self, session: &mut Session, committed: bool) -> io::Result<()> {
         if committed {
             for fd in self.changed {
-                session.stdin_replaced |= fd == 0;
-                session.substitutions.replaced(fd);
-                super::coprocess::replaced(session, fd);
+                fd_replaced(session, fd);
             }
         } else {
-            let mut result = Ok(());
-            for (fd, saved) in self.restore.into_iter().rev() {
-                if let Err(e) = saved.restore(fd) {
-                    result = Err(e);
-                }
-            }
-            result?;
+            SavedFd::restore_all(self.restore.into_iter().rev())?;
         }
         Ok(())
     }

@@ -145,8 +145,7 @@ pub(crate) fn launch(
         session.substitutions.finished.clear();
         session.bind(assignments);
         let status = crate::execute_program(session, body, prior, true).child_status();
-        let status = crate::traps::finish(session, status);
-        unsafe { libc::_exit(i32::from(status)) }
+        crate::subshell::exit_child(session, status)
     }
     drop(child);
     let fd = keep.as_raw_fd();
