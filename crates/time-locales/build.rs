@@ -6,7 +6,7 @@ use std::{collections::HashMap, env, fmt::Write, fs, path::PathBuf};
 #[derive(Default)]
 struct Tables {
     text: String,
-    offsets: Vec<u32>,
+    offsets: Vec<u16>,
     ids: HashMap<&'static str, u16>,
     lists: HashMap<Vec<u16>, u16>,
     entries: Vec<u16>,
@@ -16,7 +16,7 @@ impl Tables {
     fn intern(&mut self, s: &'static str) -> u16 {
         *self.ids.entry(s).or_insert_with(|| {
             let id = u16::try_from(self.offsets.len()).unwrap();
-            self.offsets.push(u32::try_from(self.text.len()).unwrap());
+            self.offsets.push(u16::try_from(self.text.len()).unwrap());
             self.text.push_str(s);
             id
         })
@@ -115,7 +115,7 @@ fn main() {
     }
     tables
         .offsets
-        .push(u32::try_from(tables.text.len()).unwrap());
+        .push(u16::try_from(tables.text.len()).unwrap());
     fs::write(out.join("text"), tables.text).unwrap();
     let mut code = String::new();
     let posix = include_str!("names.txt")
@@ -137,7 +137,7 @@ fn main() {
     .unwrap();
     writeln!(code, "static NAMES: &[u16] = &{names:?};").unwrap();
     writeln!(code, "static ENTRIES: &[u16] = &{:?};", tables.entries).unwrap();
-    writeln!(code, "static OFFSETS: &[u32] = &{:?};", tables.offsets).unwrap();
+    writeln!(code, "static OFFSETS: &[u16] = &{:?};", tables.offsets).unwrap();
     fs::write(out.join("tables.rs"), code).unwrap();
     let mut numeric = format!(
         "const NAMES: &str = {numeric_names:?};\nconst OFFSETS: &[u16] = &{numeric_offsets:?};\nconst KINDS: &[u8] = &{numeric_kinds:?};\nconst PROFILES: &[Numeric] = &[\n"

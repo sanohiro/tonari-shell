@@ -77,12 +77,7 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, &'static str)> {
                 'i' => opts.initial = Some(value),
                 'p' => opts.prompt = Some(value),
                 't' => {
-                    opts.timeout = Some(
-                        Duration::try_from_secs_f64(
-                            value.parse().map_err(|_| (1, "invalid timeout"))?,
-                        )
-                        .map_err(|_| (1, "invalid timeout"))?,
-                    );
+                    opts.timeout = Some(timeout(value).ok_or((1, "invalid timeout"))?);
                 }
                 _ => unreachable!(),
             }
@@ -91,6 +86,28 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, &'static str)> {
     }
     opts.names = args;
     Ok(opts)
+}
+
+// The process numeric locale remains C. Shell LC_NUMERIC is applied explicitly
+// by printf. Keep decimal/exponent syntax and the Duration range check.
+fn timeout(value: &str) -> Option<Duration> {
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    if value.is_empty()
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || b"+-.eE".contains(&b))
+    {
+        return None;
+    }
+    let input = std::ffi::CString::new(value).ok()?;
+    let mut end = std::ptr::null_mut();
+    let seconds = unsafe { libc::strtod(input.as_ptr(), &mut end) };
+    if end.cast_const() != unsafe { input.as_ptr().add(value.len()) } {
+        return None;
+    }
+    Duration::try_from_secs_f64(seconds).ok()
 }
 
 fn ready(fd: i32, timeout: Duration) -> io::Result<bool> {

@@ -64,12 +64,13 @@ impl Timer {
                 continue;
             }
             if code == 'P' {
-                let percent = if real.is_zero() {
-                    0.0
-                } else {
-                    100.0 * (user + system).as_secs_f64() / real.as_secs_f64()
-                };
-                let _ = write!(out, "{percent:.2}");
+                let elapsed = real.as_nanos();
+                let scaled = (user + system).as_nanos() * 10_000;
+                let hundredths = scaled.checked_div(elapsed).map_or(0, |whole| {
+                    let twice = 2 * (scaled % elapsed);
+                    whole + u128::from(twice > elapsed || twice == elapsed && whole % 2 == 1)
+                });
+                let _ = write!(out, "{}.{:02}", hundredths / 100, hundredths % 100);
                 continue;
             }
             let mut precision = 3;

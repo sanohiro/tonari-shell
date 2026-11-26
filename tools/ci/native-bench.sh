@@ -8,6 +8,15 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == release-diagnostics ]]; then
+  if [[ $RUNNER_OS == macOS && -x /opt/homebrew/bin/bash ]]; then ref=/opt/homebrew/bin/bash; fi
+  for variant in full immediate; do
+    python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/$variant" \
+      --runs 15 --timing whole --case arithmetic --case functions --case strings --case regex \
+      --case glob --case printf-formats > "$out/$variant.txt"
+  done
+  exit
+fi
 if [[ $SUITE == source-review ]]; then
   if [[ $RUNNER_OS == Linux ]]; then
     docker run --rm -e EXTERNAL_BENCH_CASE -e EXTERNAL_BENCH_RUNS -e TONARI_TEST_BASHDB=1 -v "$PWD/tests/compat/fixtures/bashdb-main.inc:/usr/share/bashdb/bashdb-main.inc:ro" -v "$PWD:/repo:ro" -v "$bin:/shells:ro" ubuntu:26.04 bash -ec '
