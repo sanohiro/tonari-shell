@@ -152,15 +152,14 @@ pub fn file_script(
     let file_len = metadata.filter(|m| m.is_file()).map(|m| m.len());
     let capacity = file_len.unwrap_or(8192).clamp(8192, 128 * 1024) as usize;
     match PrivateFile::new(file) {
-        Ok(file) => run(
-            session,
-            BufReader::with_capacity(capacity, file),
-            false,
-            false,
-            file_len,
-            status,
-            check,
-        ),
+        Ok(file) => {
+            let mut reader = BufReader::with_capacity(capacity, file);
+            // Reuse the parser's first read. Binary images need no line scan.
+            if reader.fill_buf().is_ok_and(executable_header) {
+                return error("cannot execute binary file", 126);
+            }
+            run(session, reader, false, false, file_len, status, check)
+        }
         Err(e) => error(e, 1),
     }
 }
@@ -390,9 +389,6 @@ fn run(
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => return error(e, 1),
         };
-        if !from_stdin && base_line == 1 && line_start == 0 && executable_header(&input) {
-            return error("cannot execute binary file", 126);
-        }
         if session.verbose && n != 0 {
             use std::io::Write;
             let _ = io::stderr().write_all(&input[line_start..]);

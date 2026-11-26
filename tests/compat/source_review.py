@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import random
 import socket
+import shlex
+import sys
 import threading
 import statistics
 import subprocess
@@ -437,10 +439,12 @@ def main():
         assert run(shells[1], localized)[0] == expected_localized, run(shells[1], localized)[0]
         if run(shells[0], localized)[0] == expected_localized:
             cases["numeric-locale"] = localized
-        for shell in shells[:2]:
-            monitor = subprocess.run([shell, "-m", "-c", 'case $- in *m*) echo on;; *) echo off;; esac'],
-                                     start_new_session=True, cwd=root, env=env, capture_output=True, timeout=5)
-            assert (monitor.returncode, monitor.stdout, bool(monitor.stderr)) == (0, b"off\n", True), (shell, monitor)
+        # Explicit monitor mode can still create job process groups without a
+        # controlling terminal. Inspect the actual child rather than just $-.
+        pgid = shlex.join([sys.executable, "-c", "import os; print(os.getpid() == os.getpgrp())"])
+        monitor = subprocess.run([shells[1], "-m", "-c", pgid + ' & wait "$!"'], start_new_session=True,
+                                 cwd=root, env=env, capture_output=True, timeout=5)
+        assert (monitor.returncode, monitor.stdout) == (0, b"True\n"), monitor
         if modern:
             for shell in shells[:2]:
                 origin = subprocess.run([shell, "-c", "shopt -s extdebug; f(){ :; }; declare -F f", "caller-name"],

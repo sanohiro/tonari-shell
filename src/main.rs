@@ -521,10 +521,6 @@ fn run_invocation(
     session.jobs.monitor = invocation.monitor.unwrap_or(session.interactive);
     if session.jobs.monitor {
         session.jobs.init(session.interactive);
-        if invocation.monitor == Some(true) && !session.jobs.has_terminal() {
-            eprintln!("tonari: no controlling terminal for job control");
-            session.jobs.monitor = false;
-        }
     }
     session.command_string = matches!(invocation.input, Input::Command(_));
     if let Input::Command(text) = &mut invocation.input {

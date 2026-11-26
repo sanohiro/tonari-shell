@@ -398,9 +398,6 @@ impl Jobs {
             shell_group,
         });
     }
-    pub fn has_terminal(&self) -> bool {
-        self.terminal().is_some()
-    }
     fn terminal(&self) -> Option<&Terminal> {
         self.tty
             .as_ref()
