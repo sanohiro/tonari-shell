@@ -132,7 +132,7 @@ pub(crate) fn run(
             eprintln!("tonari: printf: expected UTF-8 variable value");
             return 1;
         };
-        if let Err(e) = variables.write().assign_target(name, value) {
+        if let Err(e) = variables.write().assign_builtin_target(name, value) {
             eprintln!("tonari: printf: {e}");
             return 1;
         }

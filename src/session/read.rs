@@ -452,7 +452,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         } else {
             line.trim_matches(|c: char| ifs.contains(c))
         };
-        if let Err(e) = session.assign_target(name, value) {
+        if let Err(e) = session.assign_builtin_target(name, value) {
             eprintln!("tonari: read: {e}");
             return 1;
         }
@@ -483,7 +483,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
             };
             &line[start..finish]
         });
-        if let Err(e) = session.assign_target(name, value) {
+        if let Err(e) = session.assign_builtin_target(name, value) {
             eprintln!("tonari: read: {e}");
             return if e == "readonly variable" && i + 1 < count {
                 2

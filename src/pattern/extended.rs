@@ -79,7 +79,7 @@ fn sequence<const PATHNAME: bool>(
         let (atom, count) = match bytes[0] {
             b'?' => (Atom::Any, 1),
             b'*' => (Atom::Star, 1),
-            b'[' if grouped && !PATHNAME => return None,
+            b'[' if grouped => return None,
             b'\\' if bytes.len() > 1 => {
                 let end = 1 + rest[1..].chars().next()?.len_utf8();
                 (Atom::Text(rest[1..end].into()), end)

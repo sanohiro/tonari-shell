@@ -240,6 +240,23 @@ impl Session {
     }
 
     pub fn assign_target(&mut self, target: &str, value: &str) -> Result<(), &'static str> {
+        self.assign_target_value(target, value, false)
+    }
+
+    pub fn assign_builtin_target(&mut self, target: &str, value: &str) -> Result<(), &'static str> {
+        self.assign_target_value(
+            target,
+            value,
+            self.shopt.array_expand_once && subscript(target).is_some(),
+        )
+    }
+
+    fn assign_target_value(
+        &mut self,
+        target: &str,
+        value: &str,
+        literal_key: bool,
+    ) -> Result<(), &'static str> {
         let resolved = self.reference_name(target)?;
         let target = resolved.as_ref();
         let base = subscript(target).map_or(target, |(base, _)| base);
@@ -261,7 +278,14 @@ impl Session {
                 return Err("invalid variable name");
             }
             if self.is_associative(base) {
-                let key = self.subscript_key(expr)?;
+                let key = if literal_key {
+                    if expr.is_empty() {
+                        return Err("bad array subscript");
+                    }
+                    expr.to_owned()
+                } else {
+                    self.subscript_key(expr)?
+                };
                 return self.assign_key(base, key, value.into());
             }
             let index = self.resolve_index(base, expr)?;

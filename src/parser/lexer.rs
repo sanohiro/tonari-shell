@@ -909,7 +909,7 @@ fn scan_subscript<'a>(
                 chars.next();
                 quoted(&mut chars, '"', &mut word)?;
             }
-            '$' => dollar(&mut chars, &mut word, true)?,
+            '$' => dollar(&mut chars, &mut word, !associative)?,
             '`' => backquote(&mut chars, &mut word, true)?,
             '\\' => {
                 let next = chars
@@ -1082,6 +1082,7 @@ pub(super) fn command_position(tokens: &[Token]) -> bool {
 }
 
 fn indexed_assignment_position(mut tokens: &[Token]) -> bool {
+    let mut operands = false;
     while let Some((last, before)) = tokens.split_last() {
         if matches!(
             last,
@@ -1098,9 +1099,28 @@ fn indexed_assignment_position(mut tokens: &[Token]) -> bool {
             tokens = before;
             continue;
         }
-        return command_position(tokens);
+        if let Token::Word(word) = last {
+            if matches!(
+                word.word.as_literal(),
+                Some("declare" | "typeset" | "local" | "export" | "readonly")
+            ) {
+                let before = match before.split_last() {
+                    Some((Token::Word(w), prefix)) if w.word.as_literal() == Some("command") => {
+                        prefix
+                    }
+                    _ => before,
+                };
+                if command_position(before) {
+                    return true;
+                }
+            }
+            operands = true;
+            tokens = before;
+            continue;
+        }
+        return !operands && command_position(tokens);
     }
-    true
+    !operands
 }
 
 pub(super) fn lex(

@@ -16,6 +16,8 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "subscript-command-delimiters": "declare -A a; a[$(echo ])]=red; a[$(printf '[')]=blue; printf '<%s>\\n' \"${a[']']}\" \"${a['[']}\"; a[${missing:-']'}]=new; echo \"${a[']']}\"",
+    "associative-builtin-operands": "declare -A a; key=\"80's\"; shopt -s assoc_expand_once; printf -v \"a[$key]\" %s ok; echo \"$?:${a[$key]}\"; read -r \"a[$key]\" <<<green; echo \"$?:${a[$key]}\"; [[ -v a[$key] ]]; echo \"$?\"; [[ -v 'a[$key]' ]]; echo \"$?\"; unset \"a[$key]\"; echo \"$?:${#a[@]}\"; declare a[\"foo[bar\"]=blue; printf '<%s>\\n' \"${a['foo[bar']}\"; a[$(echo ])]=red; echo \"${a[']']}\"; printf -v 'a[$key]' %s literal; echo \"${a['$key']}\"; unset 'a[$key]'; echo \"${#a[@]}\"",
     "interactive-noexec": "export HISTFILE=$PWD/nonexec-history; : >nonexec-history; printf 'printf yes >ran\\n' | \"$AUDIT_SHELL\" --norc -in 2>/dev/null; [[ -e ran ]]; echo $?; cat \"$HISTFILE\"; printf 'set -n\\necho yes\\n' | \"$AUDIT_SHELL\" --norc -i 2>/dev/null",
     "managed-background-spawn": "exec 2>/dev/null; set -m; trap ':' USR1; /bin/sh -c 'kill -STOP $$; exec sleep 1' & p=$!; sleep 1 & q=$!; wait \"$p\" 2>/dev/null; s=$?; kill -CONT \"$p\"; kill \"$p\" \"$q\" 2>/dev/null; wait 2>/dev/null; [[ $s == $((128+$(kill -l STOP))) ]] && echo stopped; /bin/sh -c 'kill -USR1 $$; exit 9' & p=$!; wait \"$p\" 2>/dev/null; [[ $? == $((128+$(kill -l USR1))) ]] && echo default; trap '' USR1; /bin/sh -c 'kill -USR1 $$; exit 9' & p=$!; wait \"$p\"; echo ignored:$?",
     "stopped-job-selection": "set -m; sleep 3 & a=$!; sleep 3 & b=$!; sleep 3 & c=$!; trap 'kill -CONT \"$a\" \"$b\" \"$c\" 2>/dev/null; kill \"$a\" \"$b\" \"$c\" 2>/dev/null; wait 2>/dev/null' EXIT; mark(){ x=$(jobs -p %+); y=$(jobs -p %-); for p in \"$x\" \"$y\"; do case $p in \"$a\") printf a;; \"$b\") printf b;; \"$c\") printf c;; *) printf '?';; esac; done; echo; }; mark; kill -STOP \"$b\"; wait \"$b\" 2>/dev/null; mark; kill -CONT \"$b\"; for ((k=0;k<100;k++)); do [[ -z $(jobs -ps) ]] && break; sleep .01; done; mark; kill -STOP \"$a\"; wait \"$a\" 2>/dev/null; mark; bg %1 >/dev/null; mark",
@@ -201,6 +203,8 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "subscript-command-delimiters": ("a[$(echo ])]=red; : \"${a[']']}\"", 300),
+    "associative-builtin-operands": ("printf -v \"a[$key]\" %s green; [[ -v a[$key] ]]; unset \"a[$key]\"", 1400),
     "globignore-separators": ("items=(gb/*/efg*); [[ ${#items[@]} == 80 ]] || exit 1", 100),
     "interactive-noexec": ("\"$AUDIT_SHELL\" --norc -in <commands 2>/dev/null", 4),
     "timestamped-blank-lines": ("history -c; history -r h", 160),
@@ -1075,6 +1079,8 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "subscript-command-delimiters": "declare -A a",
+                "associative-builtin-operands": "declare -A a; key=\"80's\"; shopt -s assoc_expand_once",
                 "globignore-separators": "mkdir -p gb/g{1..80}/efg; GLOBIGNORE='gb[/]*/efg:*/bad/efg'",
                 "interactive-noexec": "export HISTFILE=/dev/null; for ((j=0;j<250;j++)); do echo ': cmd'; done >commands",
                 "timestamped-blank-lines": "HISTTIMEFORMAT=; for ((j=0;j<100;j++)); do printf '#1\\n\\none\\n\\nmiddle\\n\\n#2\\nnext\\n'; done >h",

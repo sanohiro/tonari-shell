@@ -1044,7 +1044,10 @@ fn wait_builtin(args: &[String], session: &mut Session) -> u8 {
         wait_for_ids(session, ids, options.force)
     };
     if let (Some(name), Some(pid)) = (options.variable, pid) {
-        if session.assign_target(name, &pid.to_string()).is_err() {
+        if session
+            .assign_builtin_target(name, &pid.to_string())
+            .is_err()
+        {
             return 1;
         }
     }

@@ -95,6 +95,10 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
         Unary(op, word) => {
             let value = operand(session, word, status)?;
             trace(session, status, &[op, &value]);
+            if op == "-v" {
+                return builtins::variable_set(session, &value, word.as_literal().is_none())
+                    .map_err(error);
+            }
             builtins::unary(op, &value, session).map_err(error)
         }
         StaticRegex(left, quoted, plain) => {

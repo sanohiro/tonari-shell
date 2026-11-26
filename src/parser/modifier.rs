@@ -42,10 +42,14 @@ pub(super) fn slice(chars: &mut Chars<'_>) -> Result<(Word, Option<Word>), Error
 pub(crate) fn index_end(s: &str) -> Result<usize, Error> {
     let mut brackets = 0usize;
     let mut quote = None;
-    let mut chars = s.char_indices();
-    while let Some((i, c)) = chars.next() {
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
         if c == '\\' && quote != Some('\'') {
             chars.next();
+            continue;
+        }
+        if c == '$' && matches!(quote, None | Some('"')) && chars.as_str().starts_with(['(', '{']) {
+            dollar(&mut chars, &mut WordBuilder::default(), quote.is_some())?;
             continue;
         }
         if quote == Some(c) {
@@ -61,7 +65,7 @@ pub(crate) fn index_end(s: &str) -> Result<usize, Error> {
             ']' => {
                 brackets -= 1;
                 if brackets == 0 {
-                    return Ok(i + 1);
+                    return Ok(s.len() - chars.as_str().len());
                 }
             }
             _ => {}

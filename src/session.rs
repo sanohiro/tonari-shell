@@ -1903,6 +1903,10 @@ impl Session {
                         }
                     }
                     if self.is_associative(base) {
+                        if self.shopt.array_expand_once && !index.is_empty() {
+                            self.remove_key(base, index);
+                            continue;
+                        }
                         match self.subscript_key(index) {
                             Ok(key) => self.remove_key(base, &key),
                             Err(e) => {
