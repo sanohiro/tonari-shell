@@ -16,6 +16,8 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "scalar-array-declaration": "declare -lr var; printf '<%s>\\n' \"${var@A}\" \"${var[@]@A}\"; declare -l setvar=''; printf '<%s>\\n' \"${setvar@A}\" \"${setvar[@]@A}\"; declare -a arr; printf '<%s>\\n' \"${arr[@]@A}\"",
+    "temporary-posix-settings": "shopt -s expand_aliases; shopt -u sourcepath inherit_errexit shift_verbose; f(){ shopt -p expand_aliases sourcepath inherit_errexit shift_verbose; }; POSIXLY_CORRECT=y f; f; shopt -qo posix; echo $?",
     "history-script-comments": "set -o history\n# first\n   \n   # second\nhistory",
     "fc-range-substitutions": "history -c; history -s 'echo one'; history -s 'echo axb'; history -s 'echo three'; fc -ln 999; fc -ln -0; fc -ln 0; fc -ln 3; fc -ln 1 999; fc -s a=y b=z 2 2>/dev/null; fc -s -0 2>/dev/null; echo $?",
     "caller-input": "f(){ caller foo 2>err; echo \"$?\"; test -s err; echo $?; caller -1 2>err; echo \"$?\"; caller 23; echo $?; }; f",
@@ -147,6 +149,7 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "current-arithmetic-alias": "shopt -s expand_aliases\nalias number='echo 123'\necho $(( ${ number; } ))\n(( ${ number; } )); echo $?\nset -o posix\necho $(( ${ number; } ))\n(( ${ number; } )); echo $?",
     "long-working-directory": "set -o posix; cd deep-root; p=deep-part-abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd; for ((j=0;j<20;j++)); do cd \"$p\" || exit 9; done; logical=$(pwd -L); phys=$(pwd -P); [[ $logical == */\"$p\" && $phys == */\"$p\" && ${#logical} -gt 4096 && ${#phys} -gt 4096 ]]; echo $?; cd ..; test -d \"$p\"; echo $?",
     "printf-wide-characters": "case $OSTYPE in darwin*) LC_ALL=en_US.UTF-8;; *) LC_ALL=C.UTF-8;; esac; printf '[%4.2ls][%-4C][%S][%.0lc]' '雪🌸a' '雪a' '四' q; printf '%lc' ''",
     "printf-alternate-quote": "printf '[%#q][%#.3Q]\\n' 'a b' 'a b c' '' 'ok' $'x\\ny' \"ab'\"; printf '%#q\\n' 'no-quotes-needed'",
@@ -189,6 +192,9 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "current-arithmetic-alias": ("eval 'value=$(( ${ number; } ))'", 750),
+    "scalar-array-declaration": (": \"${var[@]@A}\" \"${setvar[@]@A}\"", 1600),
+    "temporary-posix-settings": ("POSIXLY_CORRECT=x true; :", 1800),
     "history-script-comments": ("history -s '# history comment'; history -d -1", 950),
     "fc-range-substitutions": ("fc -ln 100 -1 >/dev/null; fc -s a=y b=z 1 >/dev/null 2>&1", 600),
     "caller-input": ("f", 2000),
@@ -1022,6 +1028,9 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "current-arithmetic-alias": "shopt -s expand_aliases; alias number='printf 23'",
+                "scalar-array-declaration": "declare -lr var; declare -l setvar=''",
+                "temporary-posix-settings": "shopt -s expand_aliases",
                 "fc-range-substitutions": "history -c; history -s ': axb'; history -s ': two'",
                 "caller-input": "f(){ caller bad 2>/dev/null; :; }",
                 "debug-function-entry-return": "set -T; f(){ :; :; }; trap ': \"$FUNCNAME:$LINENO\"' DEBUG RETURN",

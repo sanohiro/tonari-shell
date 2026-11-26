@@ -230,7 +230,17 @@ pub struct Bindings(
     Option<usize>,
     bool,
     Option<std::num::NonZeroU32>,
+    Option<PosixSettings>,
 );
+
+#[derive(Clone, Copy)]
+struct PosixSettings {
+    expand_aliases: bool,
+    inherit_errexit: bool,
+    interactive_comments: bool,
+    shift_verbose: bool,
+    sourcepath: bool,
+}
 
 enum DirectoryError {
     NoPath(io::Error),
@@ -1271,6 +1281,7 @@ impl Session {
             names.contains(&"OPTIND").then_some(self.opt_offset),
             false,
             None,
+            None,
         )
     }
 
@@ -1329,6 +1340,13 @@ impl Session {
                 self.apply_compat(value);
             }
             if name == "POSIXLY_CORRECT" {
+                saved.4.get_or_insert(PosixSettings {
+                    expand_aliases: self.shopt.expand_aliases,
+                    inherit_errexit: self.shopt.inherit_errexit,
+                    interactive_comments: self.shopt.interactive_comments,
+                    shift_verbose: self.shopt.shift_verbose,
+                    sourcepath: self.shopt.sourcepath,
+                });
                 self.apply_posix_mode(true);
             }
             if matches!(name.as_str(), "IGNOREEOF" | "ignoreeof") {
@@ -1390,6 +1408,13 @@ impl Session {
                     |v| v.value.is_some(),
                 );
                 self.apply_posix_mode(enabled);
+                if let Some(old) = bindings.4 {
+                    self.shopt.expand_aliases = old.expand_aliases;
+                    self.shopt.inherit_errexit = old.inherit_errexit;
+                    self.shopt.interactive_comments = old.interactive_comments;
+                    self.shopt.shift_verbose = old.shift_verbose;
+                    self.shopt.sourcepath = old.sourcepath;
+                }
             }
             if matches!(name.as_str(), "IGNOREEOF" | "ignoreeof") {
                 let inherited;

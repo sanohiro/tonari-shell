@@ -267,7 +267,7 @@ impl Modification {
                     if elements.is_some() && is_array {
                         env.session.array_declaration_fields(base)
                     } else if let Some((flags, _)) = env.session.attributes(base) {
-                        let text = value(name, env)?;
+                        let text = value(if elements.is_some() { base } else { name }, env)?;
                         let mut fields = Vec::new();
                         if !flags.is_empty() {
                             fields.extend(["declare".to_owned(), format!("-{flags}")]);
@@ -279,6 +279,9 @@ impl Modification {
                             ));
                         } else if !fields.is_empty() {
                             fields.push(base.to_owned());
+                        }
+                        if elements.is_some() && !fields.is_empty() {
+                            return Ok(scalar(fields.join(" ")));
                         }
                         fields
                     } else {
