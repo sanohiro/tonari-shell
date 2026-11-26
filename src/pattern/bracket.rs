@@ -199,7 +199,10 @@ impl Member {
     fn accepts(&self, value: &[u8; 4]) -> bool {
         match self {
             Self::Literal(v) => v == value,
-            Self::Range(lo, hi) => lo <= value && value <= hi,
+            Self::Range(lo, hi) => {
+                !super::glob_locale::range_order(lo, value).is_gt()
+                    && !super::glob_locale::range_order(value, hi).is_gt()
+            }
             Self::Never => false,
             Self::Ascii => value[0].is_ascii(),
             Self::Native(pattern) => {
@@ -272,6 +275,12 @@ impl CharacterClass {
     }
 
     fn compare(&self, a: char, b: char) -> std::cmp::Ordering {
+        if super::glob_locale::collated_ranges() {
+            let (mut left, mut right) = ([0u8; 4], [0u8; 4]);
+            a.encode_utf8(&mut left);
+            b.encode_utf8(&mut right);
+            return super::glob_locale::range_order(&left, &right);
+        }
         let order = a.cmp(&b);
         if a == b
             || (a as u32 <= 255 && b as u32 <= 255)
@@ -396,7 +405,8 @@ impl BracketPattern {
         else {
             return false;
         };
-        if self.utf8 && std::str::from_utf8(text).is_err() {
+        let utf8 = self.utf8 || super::glob_locale::collated_ranges();
+        if utf8 && std::str::from_utf8(text).is_err() {
             return false;
         }
         let mut tokens = self.tokens.as_slice();
@@ -410,7 +420,7 @@ impl BracketPattern {
                     continue;
                 }
                 Some((token, after)) if !text.is_empty() => {
-                    let (value, rest) = unit(text, self.utf8);
+                    let (value, rest) = unit(text, utf8);
                     if token.accepts(&packed(value)) {
                         tokens = after;
                         text = rest;
@@ -427,7 +437,7 @@ impl BracketPattern {
             if start.is_empty() {
                 return false;
             }
-            (_, text) = unit(start, self.utf8);
+            (_, text) = unit(start, utf8);
             retry = Some((after, text));
             tokens = after;
         }

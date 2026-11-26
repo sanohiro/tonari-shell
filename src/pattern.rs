@@ -3,6 +3,7 @@ pub(crate) use bracket::portable_symbol;
 pub(crate) mod directory;
 pub(crate) mod extended;
 mod glob_locale;
+pub(crate) use glob_locale::sync_ranges;
 mod order;
 
 use crate::session::CharacterLocale;

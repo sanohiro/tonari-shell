@@ -65,13 +65,17 @@ fn write_error(name: &[u8], message: &[u8]) {
 
 #[cold]
 fn write_error_detail(name: &[u8], message: &[u8], detail: &[u8]) {
+    write_diagnostic(b"tonari: ", name, message, detail);
+}
+
+#[cold]
+fn write_diagnostic(prefix: &[u8], name: &[u8], message: &[u8], detail: &[u8]) {
     // This can run after fork. Emit the diagnostic in a single write when
     // possible, without buffering, heap allocation or taking a stdio lock.
-    let mut buffers =
-        [b"tonari: ".as_slice(), name, message, detail, b"\n"].map(|part| libc::iovec {
-            iov_base: part.as_ptr().cast_mut().cast(),
-            iov_len: part.len(),
-        });
+    let mut buffers = [prefix, name, message, detail, b"\n"].map(|part| libc::iovec {
+        iov_base: part.as_ptr().cast_mut().cast(),
+        iov_len: part.len(),
+    });
     let mut rest = buffers.as_mut_slice();
     while !rest.is_empty() {
         let n = unsafe { libc::writev(2, rest.as_ptr(), rest.len() as libc::c_int) };
@@ -489,6 +493,7 @@ impl Environment {
 
 struct External {
     // Owns the argument strings referenced by argv.
+    diagnostic: Option<String>,
     original_name: Option<CString>,
     words: Vec<CString>,
     argv: Vec<*const libc::c_char>,
@@ -543,6 +548,7 @@ impl External {
         Self {
             words,
             argv,
+            diagnostic: session.diagnostic_prefix(session.line()),
             original_name: original,
             search_paths,
             env: if clear_env {
@@ -640,13 +646,15 @@ impl External {
             }
         }
         let status = exec_status(error);
-        write_error(
+        write_diagnostic(
+            self.diagnostic.as_deref().unwrap_or("tonari: ").as_bytes(),
             program.as_bytes(),
             if status == 127 {
                 b": command not found"
             } else {
                 b": cannot execute"
             },
+            b"",
         );
         status
     }
@@ -2937,7 +2945,12 @@ fn run_external(
                     && launch.group.is_none()
                     && !session.traps.active() =>
             {
-                eprintln!("tonari: {}: command not found", cmd.words[0]);
+                let prefix = session.diagnostic_prefix(session.line());
+                eprintln!(
+                    "{}{}: command not found",
+                    prefix.as_deref().unwrap_or("tonari: "),
+                    cmd.words[0]
+                );
                 return Ok(Flow::Continue(127));
             }
             Err(hash::Absent) => {}

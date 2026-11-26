@@ -16,6 +16,12 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "ascii-range-option": "LC_ALL=C; for opt in -s -u -s; do shopt \"$opt\" globasciiranges; shopt -q globasciiranges; printf '%s:' \"$?\"; for c in b B z Z; do [[ $c == [a-z] ]]; printf '%s' \"$?\"; done; echo; done",
+    "gnu-diagnostic-location": "shopt -s gnu_errfmt; printf '%s\\n' 'shopt -s gnu_errfmt' 'no_such_audit_tool' >location.sh; . ./location.sh 2>error; grep -Eq 'location.sh:2: .*command not found' error; echo $?; shopt -u gnu_errfmt; shopt -q gnu_errfmt; echo $?",
+    "xtrace-for-case-header": "PS4='+ '; exec 9>trace; BASH_XTRACEFD=9; set -x; set -- a 'b c'; for x; do :; done; case \"$1\" in a) :;; esac; set +x; cat trace",
+    "global-nameref-shadow": "declare -n ref=foo; f(){ local -n ref=var; declare -g ref=(X); declare -p ref foo; }; f; declare -p ref foo; declare -p var 2>/dev/null; echo $?",
+    "parenthesized-scalar-suffix": "a=(\"one two\" three)tail; declare -p a; declare -i x; x=(4*3)/2; declare -p x; let x=(5+3)/2; echo \"$x\"",
+    "nested-default-apostrophe": "unset u; printf '<%s>\\n' \"${u-'\"'hey}\" \"${u-'\"hey'}\" \"${u-'one\"two\"three'}\"",
     "posix-time-utility": "set -o posix\nalias time='printf \"<%s>\\\\n\"'\ntime -p\ntime --help",
     "history-ansi-quote": "set -o history -H\nprintf '%s\\n' $'hello\\' once!'\nprintf '%s\\n' $'two\n\\' lines!'\necho last",
     "posix-resume-job": "set -o posix; set -m; sleep 4 & p=$!; kill -s STOP \"$p\"; sleep .05; jobs -s | awk '{print $2}'; bg %+; kill \"$p\"; wait \"$p\" 2>/dev/null; :",
@@ -175,6 +181,12 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "ascii-range-option": ("[[ b == [a-z] ]]; [[ Z == [a-z] ]] || :", 2000),
+    "gnu-diagnostic-location": ("no_such_audit_tool 2>/dev/null; :", 65),
+    "xtrace-for-case-header": ("for x in a b c; do :; done; case \"$x\" in c) :;; esac", 800),
+    "global-nameref-shadow": ("f", 1600),
+    "parenthesized-scalar-suffix": ("x=(4*3)/2; let x=(5+3)/2", 1400),
+    "nested-default-apostrophe": (": \"${u-'one\"two\"three'}\"", 2600),
     "posix-time-utility": ("eval 'time -p' >/dev/null", 1100),
     "history-ansi-quote": ("history -p \"echo \\$'hello\\\\' once!'\" >/dev/null", 1000),
     "printf-wide-characters": ("printf -v v '%6.3ls:%C' '雪🌸abc' '日'", 2400),
@@ -976,6 +988,11 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "ascii-range-option": "LC_ALL=C; shopt -u globasciiranges",
+                "gnu-diagnostic-location": "shopt -s gnu_errfmt",
+                "xtrace-for-case-header": "exec 9>/dev/null; BASH_XTRACEFD=9; set -x",
+                "global-nameref-shadow": "declare -n ref=foo; f(){ local -n ref=var; declare -g ref=(X); }",
+                "parenthesized-scalar-suffix": "declare -i x",
                 "posix-time-utility": "set -o posix; alias time='printf \"%s\"'",
                 "history-ansi-quote": "set -o history",
                 "printf-wide-characters": "case $OSTYPE in darwin*) LC_ALL=en_US.UTF-8;; *) LC_ALL=C.UTF-8;; esac",

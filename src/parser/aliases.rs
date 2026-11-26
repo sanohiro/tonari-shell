@@ -96,7 +96,7 @@ impl Expanded {
         );
     }
 
-    fn span(&self, index: usize, reader: &Reader) -> (usize, usize) {
+    pub(super) fn span(&self, index: usize, reader: &Reader) -> (usize, usize) {
         if let Some(span) = self.spans.get(index) {
             return *span;
         }

@@ -134,7 +134,11 @@ fn one_character<const PATHNAME: bool>(atom: &Atom, value: &str, pos: usize) -> 
     }
     if let Atom::Class(class, cache) = atom {
         let (known, matched) = cache.get();
-        let bit = if c.is_ascii() { 1u128 << (c as u32) } else { 0 };
+        let bit = if c.is_ascii() && !super::glob_locale::collated_ranges() {
+            1u128 << (c as u32)
+        } else {
+            0
+        };
         if known & bit != 0 {
             return (matched & bit != 0).then_some(end);
         }

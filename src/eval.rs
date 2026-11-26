@@ -38,6 +38,9 @@ fn run_statements<'a>(
             session.jobs.poll();
             session.jobs.report_changes(session.posix);
         }
+        if !session.shopt.globasciiranges {
+            crate::pattern::sync_ranges(session);
+        }
         let literal = literals.next().and_then(Option::as_deref_mut);
         if session.interactive && session.completions.in_callback() {
             crate::editor::preview::statement();
@@ -280,6 +283,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 eprintln!("tonari: {name}: invalid loop variable");
                 return Flow::Continue(1);
             }
+            let implicit_words = words.is_none();
             let items = match words {
                 None => session.positional.as_slice().to_vec(),
                 Some(words) => {
@@ -314,6 +318,14 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                     if let Some(flow) = crate::traps::debug(s, last) {
                         return Err(flow);
                     }
+                }
+                if s.xtrace {
+                    execute::trace_line(s, last, |line| {
+                        line.push_str(header.text());
+                        if implicit_words {
+                            line.push_str(" in \"$@\"");
+                        }
+                    });
                 }
                 let error = if s.is_nameref(&name) {
                     s.assign_for_reference(&name, value).err()
@@ -445,6 +457,9 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 if let Some(flow) = crate::traps::debug(session, status) {
                     return flow;
                 }
+            }
+            if session.xtrace {
+                execute::trace_line(session, status, |line| line.push_str(header.text()));
             }
             let value = match expand_case(session, word, status, false) {
                 Ok(v) => v,

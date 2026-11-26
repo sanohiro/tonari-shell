@@ -649,6 +649,7 @@ fn parameter_word(
                 }
             }
             '$' => dollar_word(chars, &mut word, outer_quoted, assignment, quoted_name)?,
+            '"' if inside_apostrophes => {}
             '"' => double_quoted(chars, &mut word, outer_quoted)?,
             '\'' if !outer_quoted => quoted(chars, c, &mut word)?,
             '`' => backquote(chars, &mut word, outer_quoted)?,

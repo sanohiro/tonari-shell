@@ -188,7 +188,9 @@ fn syntax_error(session: &Session, problem: parser::Error, first_line: usize) ->
     } else {
         Flow::Continue(2)
     };
-    if session.source_depth > 0
+    if let Some(prefix) = session.diagnostic_prefix(first_line) {
+        eprintln!("{prefix}{}", problem.message());
+    } else if session.source_depth > 0
         && let Some(path) = session.source_names.last()
     {
         eprintln!(

@@ -322,9 +322,12 @@ pub(super) fn run(
         let resolved;
         let name = if !creates_local
             && (flags.nameref.is_none() || flags.nameref == Some(false) && changes_target())
-            && session.is_nameref(base)
+            && session.has_namerefs
+            && session
+                .scoped_variable(base, flags.global)
+                .is_some_and(|v| v.nameref)
         {
-            match session.reference_name(name) {
+            match session.scoped_reference_name(name, flags.global) {
                 Ok(target) => {
                     if target != name && flags.nameref == Some(false) {
                         if session.variables.get(base).is_some_and(|v| v.readonly) {
@@ -702,8 +705,8 @@ impl Session {
         }
     }
 
-    pub(super) fn declared_variable(&self, name: &str, global: bool) -> Option<Variable> {
-        let entry = if global {
+    pub(super) fn scoped_variable(&self, name: &str, global: bool) -> Option<&Variable> {
+        if global {
             self.locals
                 .iter()
                 .find_map(|scope| scope.0.get(name))
@@ -711,7 +714,11 @@ impl Session {
                 .unwrap_or_else(|| self.variables.get(name))
         } else {
             self.variables.get(name)
-        };
+        }
+    }
+
+    pub(super) fn declared_variable(&self, name: &str, global: bool) -> Option<Variable> {
+        let entry = self.scoped_variable(name, global);
         if matches!(name, "BASH_ALIASES" | "BASH_CMDS") && entry.is_none_or(|v| v.dynamic) {
             let mut var = entry.cloned().unwrap_or_default();
             var.declared = true;

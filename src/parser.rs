@@ -1588,6 +1588,25 @@ impl Reader {
         Ok(())
     }
 
+    fn array_word_suffix(&mut self) -> bool {
+        if !matches!(
+            self.peek(),
+            Some(Token::Word(_) | Token::Reserved(_) | Token::TimeUtility)
+        ) {
+            return false;
+        }
+        let end = self.position();
+        let adjacent = if let Some(expanded) = &self.alias_source {
+            expanded.span(end - 1, self).1 == expanded.span(end, self).0
+        } else {
+            self.spans[end - 1].1 == self.spans[end].0
+        };
+        if adjacent {
+            self.tokens.pop_front();
+        }
+        adjacent
+    }
+
     fn simple(&mut self) -> Result<SimpleCommand<Word>, Error> {
         let mut cmd = SimpleCommand::default();
         loop {
@@ -1628,6 +1647,7 @@ impl Reader {
                         {
                             let start = self.position() - 1;
                             self.array_items::<false>()?;
+                            self.array_word_suffix();
                             let expr = self.location(start);
                             cmd.words.push(
                                 lexer::subscript_word(expr.text(), builtin == "eval")?
@@ -1644,6 +1664,20 @@ impl Reader {
                         }
                         let source_start = self.position() - 1;
                         let items = self.array_items::<true>()?;
+                        if self.array_word_suffix() {
+                            let expr = self.location(source_start);
+                            if declaration {
+                                cmd.words
+                                    .push(lexer::subscript_word(expr.text(), true)?.declaration());
+                            } else {
+                                let value = &expr.text()[name.len() + 1..];
+                                cmd.assignments.push((
+                                    name,
+                                    Assignment::Scalar(lexer::subscript_word(value, true)?),
+                                ));
+                            }
+                            continue;
+                        }
                         let operand = declaration.then_some(cmd.words.len());
                         if declaration {
                             cmd.words

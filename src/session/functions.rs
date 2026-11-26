@@ -77,6 +77,12 @@ impl Session {
         );
     }
 
+    pub(crate) fn diagnostic_prefix(&self, line: usize) -> Option<String> {
+        self.shopt
+            .gnu_errfmt
+            .then(|| format!("{}:{line}: ", self.function_source()))
+    }
+
     pub(crate) fn function_source(&self) -> &str {
         self.source_names
             .last()

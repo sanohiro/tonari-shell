@@ -8,6 +8,8 @@ pub struct ShellOptions {
     pub autocd: bool,
     pub array_expand_once: bool,
     pub extquote: bool,
+    pub gnu_errfmt: bool,
+    pub globasciiranges: bool,
     pub cdable_vars: bool,
     pub cdspell: bool,
     pub dirspell: bool,
@@ -56,6 +58,8 @@ impl Default for ShellOptions {
             autocd: false,
             array_expand_once: false,
             extquote: true,
+            gnu_errfmt: false,
+            globasciiranges: true,
             cdable_vars: false,
             cdspell: false,
             dirspell: false,
@@ -193,8 +197,10 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("extquote", shopt.extquote),
     option_entry!("failglob", shopt.glob.failglob),
     option_entry!("force_fignore", shopt.force_fignore),
+    option_entry!("globasciiranges", shopt.globasciiranges),
     option_entry!("globskipdots", shopt.glob.globskipdots),
     option_entry!("globstar", shopt.glob.globstar),
+    option_entry!("gnu_errfmt", shopt.gnu_errfmt),
     option_entry!("histappend", shopt.histappend),
     option_entry!("histreedit", shopt.histreedit),
     option_entry!("histverify", shopt.histverify),
@@ -502,6 +508,9 @@ impl Session {
                         }
                     }
                     *write(self) = enable;
+                    if !set && name == "globasciiranges" {
+                        crate::pattern::sync_ranges(self);
+                    }
                     if set {
                         self.option_changed(name, enable);
                     }

@@ -639,6 +639,14 @@ impl Session {
     }
 
     pub fn reference_name<'a>(&self, name: &'a str) -> Result<Cow<'a, str>, &'static str> {
+        self.scoped_reference_name(name, false)
+    }
+
+    fn scoped_reference_name<'a>(
+        &self,
+        name: &'a str,
+        global: bool,
+    ) -> Result<Cow<'a, str>, &'static str> {
         if !self.has_namerefs {
             return Ok(Cow::Borrowed(name));
         }
@@ -650,8 +658,7 @@ impl Session {
         let (mut base, mut suffix) = name.split_at(split(name));
         for depth in 0..32 {
             let target = self
-                .variables
-                .get(base)
+                .scoped_variable(base, global)
                 .filter(|v| v.nameref)
                 .and_then(|v| v.value.as_deref())
                 .filter(|s| !s.is_empty());
