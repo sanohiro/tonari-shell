@@ -684,8 +684,17 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
         };
     }
     session.history_mut().discard_current();
-    for line in source.lines() {
-        session.push_history(line, false);
+    if substitute {
+        let entry = source.strip_suffix('\n').unwrap_or(&source);
+        if session.accept_history(entry, session.history_lines().last()) {
+            session.push_history(entry, false);
+        }
+    } else {
+        for line in source.lines() {
+            if session.accept_history(line, session.history_lines().last()) {
+                session.push_history(line, false);
+            }
+        }
     }
     eprint!("{source}");
     Ok(crate::eval_text(session, &source, status))

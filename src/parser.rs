@@ -804,7 +804,58 @@ thread_local! {
     };
 }
 
+// During recursive lexing, a nested AST can start after the first line of
+// the outer input. Store byte offsets only. No reference outlives the lex.
+struct SourceLines {
+    start: usize,
+    end: usize,
+    first: usize,
+    newlines: Vec<usize>,
+}
+
+thread_local! {
+    static SOURCE_LINES: std::cell::RefCell<Option<SourceLines>> = const { std::cell::RefCell::new(None) };
+}
+
+impl SourceLines {
+    fn contains(&self, source: &str) -> bool {
+        let start = source.as_ptr() as usize;
+        self.start <= start && start + source.len() <= self.end
+    }
+}
+
+fn source_line(source: &str) -> usize {
+    SOURCE_LINES.with_borrow(|map| {
+        map.as_ref().filter(|m| m.contains(source)).map_or_else(
+            || FIRST_LINE.get(),
+            |m| {
+                let offset = source.as_ptr() as usize - m.start;
+                m.first + m.newlines.partition_point(|&n| n < offset)
+            },
+        )
+    })
+}
+
+fn with_source_lines<T>(source: &str, lex: impl FnOnce() -> T) -> T {
+    if !source.contains('\n')
+        || SOURCE_LINES.with_borrow(|m| m.as_ref().is_some_and(|m| m.contains(source)))
+    {
+        return lex();
+    }
+    let start = source.as_ptr() as usize;
+    let previous = SOURCE_LINES.replace(Some(SourceLines {
+        start,
+        end: start + source.len(),
+        first: FIRST_LINE.get(),
+        newlines: memchr::memchr_iter(b'\n', source.as_bytes()).collect(),
+    }));
+    let result = lex();
+    SOURCE_LINES.replace(previous);
+    result
+}
+
 struct Reader {
+    first_line: usize,
     source: Rc<str>,
     alias_source: Option<Box<aliases::Expanded>>,
     spans: Vec<(usize, usize)>,
@@ -831,6 +882,7 @@ impl Drop for Reader {
 impl Reader {
     fn new(tokens: Vec<Token>, spans: Vec<(usize, usize)>, source: &str) -> Self {
         Self {
+            first_line: source_line(source),
             spans,
             alias_source: None,
             newlines: memchr::memchr_iter(b'\n', source.as_bytes()).collect(),
@@ -873,7 +925,7 @@ impl Reader {
             subscript_aliases: self.subscript_aliases(),
             start,
             end,
-            line: FIRST_LINE.get() + self.newlines.partition_point(|&n| n < start),
+            line: self.first_line + self.newlines.partition_point(|&n| n < start),
         }
     }
 
@@ -1527,7 +1579,7 @@ impl Reader {
             definition: Rc::new(FunctionDefinition {
                 rendered_body: Default::default(),
                 declaration_line: if self.alias_source.is_none() {
-                    FIRST_LINE.get()
+                    self.first_line
                         + self
                             .newlines
                             .partition_point(|&n| n < self.spans[start_name].0)

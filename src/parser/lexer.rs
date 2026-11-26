@@ -542,7 +542,10 @@ pub(super) fn backquote(
                 parse_final(literal)?
             } else {
                 source.push_str(literal);
-                parse_final(&source)?
+                let previous = super::FIRST_LINE.replace(super::source_line(chars.as_str()));
+                let parsed = parse_final(&source);
+                super::FIRST_LINE.set(previous);
+                parsed?
             };
             *chars = after[1..].chars();
             word.part(Part::Substitution { body, quoted });
@@ -1115,6 +1118,24 @@ pub(super) fn lex_initializer(
 }
 
 fn lex_words(
+    source: &str,
+    substitution: bool,
+    final_input: bool,
+    array_level: Option<usize>,
+    brace_substitution: bool,
+) -> Result<(Vec<Token>, Vec<(usize, usize)>, &str), Error> {
+    super::with_source_lines(source, || {
+        scan(
+            source,
+            substitution,
+            final_input,
+            array_level,
+            brace_substitution,
+        )
+    })
+}
+
+fn scan(
     source: &str,
     substitution: bool,
     final_input: bool,

@@ -42,14 +42,14 @@ fn sourced(
     session.function_names.push("source".into());
     let saved_debug = session.traps.enter_source(session.functrace);
     let result = input::file_script(session, script.file, Some(script.metadata), status, false);
-    let result = crate::traps::returning(session, result);
-    session.traps.leave_source(saved_debug);
     session.signal_line = caller_signal_line;
     session.function_names.pop();
     session.source_names.pop();
     session.source_depth -= 1;
     session.call_lines.pop();
     session.current_command = callsite;
+    let result = crate::traps::returning(session, result);
+    session.traps.leave_source(saved_debug);
     if let Some(old) = old
         && (session.function_depth != 0 || !session.source_set_args)
     {

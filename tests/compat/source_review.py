@@ -16,6 +16,8 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "source-trap-frame": "printf ': one\\n: two\\n' > sourced; set -T\ntrap 'echo \"${FUNCNAME[0]}:$LINENO:$1\"' RETURN\nf(){\n source ./sourced inner\n}\nf outer",
+    "substitution-source-lines": "f(){\n :\n echo \"$(echo $LINENO)\" `echo $LINENO`\n echo \"$(echo \"$LINENO\"; echo \"$(echo $LINENO)\")\"\n}; f",
     "scalar-array-declaration": "declare -lr var; printf '<%s>\\n' \"${var@A}\" \"${var[@]@A}\"; declare -l setvar=''; printf '<%s>\\n' \"${setvar@A}\" \"${setvar[@]@A}\"; declare -a arr; printf '<%s>\\n' \"${arr[@]@A}\"",
     "temporary-posix-settings": "shopt -s expand_aliases; shopt -u sourcepath inherit_errexit shift_verbose; f(){ shopt -p expand_aliases sourcepath inherit_errexit shift_verbose; }; POSIXLY_CORRECT=y f; f; shopt -qo posix; echo $?",
     "history-script-comments": "set -o history\n# first\n   \n   # second\nhistory",
@@ -192,11 +194,13 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "source-trap-frame": ("f >/dev/null", 600),
+    "substitution-source-lines": ("f >/dev/null", 250),
     "current-arithmetic-alias": ("eval 'value=$(( ${ number; } ))'", 750),
     "scalar-array-declaration": (": \"${var[@]@A}\" \"${setvar[@]@A}\"", 1600),
     "temporary-posix-settings": ("POSIXLY_CORRECT=x true; :", 1800),
     "history-script-comments": ("history -s '# history comment'; history -d -1", 950),
-    "fc-range-substitutions": ("fc -ln 100 -1 >/dev/null; fc -s a=y b=z 1 >/dev/null 2>&1", 600),
+    "fc-range-substitutions": ("history -c; history -s ': axb'; history -s ': two'; fc -ln 100 -1 >/dev/null; fc -s a=y b=z 1 >/dev/null 2>&1", 600),
     "caller-input": ("f", 2000),
     "debug-function-entry-return": ("f; :", 650),
     "bind-human-list": ("bind -q beginning-of-line >/dev/null 2>&1", 900),
@@ -727,6 +731,9 @@ def main():
             cases["signal-range"] = """for sig in PWR STKFLT RTMIN RTMIN+1 RTMAX-1 RTMAX; do n=$(kill -l "$sig"); echo "$(kill -l "$n")"; trap 'echo handled' "$sig"; kill -s "$sig" "$$"; trap - "$sig"; done"""
         elif os.uname().sysname == "Darwin":
             cases["signal-range"] = """for sig in INFO EMT; do n=$(kill -l "$sig"); echo "$(kill -l "$n")"; trap 'echo handled' "$sig"; kill -s "$sig" "$$"; trap - "$sig"; done"""
+        if os.uname().sysname == "Darwin":
+            locale_range = """LC_ALL=en_US.UTF-8; for opt in -s -u -s; do shopt "$opt" globasciiranges; for ch in b B é; do [[ $ch == [a-z] ]]; echo "$?"; done; done; LC_ALL=C; [[ B == [a-z] ]]; echo "$?" """
+            cases["native-locale-range"] = locale_range
         for shell in shells[:2]:
             verbose = subprocess.run([shell, "--verbose", "-c", "echo verbose"], cwd=root, env=env,
                                      capture_output=True, timeout=5)
@@ -769,6 +776,7 @@ def main():
             ('declare -n job=ends; coproc job { :; }; echo "${job_PID:+named}/${ends_PID:+resolved}"; wait', b"named/\n"),
             ("declare -n job='ends[0]'; { coproc job { echo started >unexpected-job; }; } 2>/dev/null; echo \"$?\"; wait; test ! -e unexpected-job", b"1\n"),
             ('set --; x=; f(){ echo "$#"; }; f "$x$@"; f "$x""$@"; f "$@"', b"1\n1\n0\n"),
+            ("HISTIGNORE='*reject'; history -c; history -s ': source'; history -s ': keep'; fc -s source=reject 1 2>/dev/null; fc -ln 1 -1", b"\t : source\n\t : keep\n"),
             ("function if { printf ok; }; text=$(declare -f if); unset -f if; eval \"$text\"; command_name=if; \"$command_name\"", b"ok"),
         ]:
             assert run(shells[1], code)[0] == (0, output, False), code
@@ -1028,10 +1036,11 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "source-trap-frame": "printf ': one\\n: two\\n' > source-test; set -T; trap ': \"$LINENO\" \"$1\"' RETURN; f(){ source ./source-test inner; }",
+                "substitution-source-lines": "f(){\n :\n echo \"$(echo $LINENO)\" `echo $LINENO`;\n}",
                 "current-arithmetic-alias": "shopt -s expand_aliases; alias number='printf 23'",
                 "scalar-array-declaration": "declare -lr var; declare -l setvar=''",
                 "temporary-posix-settings": "shopt -s expand_aliases",
-                "fc-range-substitutions": "history -c; history -s ': axb'; history -s ': two'",
                 "caller-input": "f(){ caller bad 2>/dev/null; :; }",
                 "debug-function-entry-return": "set -T; f(){ :; :; }; trap ': \"$FUNCNAME:$LINENO\"' DEBUG RETURN",
                 "long-working-directory": "set -o posix; cd deep-root; p=deep-part-abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd; for ((j=0;j<20;j++)); do cd \"$p\" || exit 9; done",

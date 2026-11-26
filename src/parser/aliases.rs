@@ -147,7 +147,7 @@ impl Expanded {
             end: text.len(),
             source: text,
             subscript_aliases: reader.subscript_aliases(),
-            line: super::FIRST_LINE.get() + lines,
+            line: reader.first_line + lines,
         }
     }
 }
