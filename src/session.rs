@@ -164,6 +164,7 @@ pub struct Session {
     pub history_enabled: bool,
     pub verbose: bool,
     pub(crate) history: Option<Rc<crate::history::Entries>>,
+    pub(crate) history_expansion: Option<Box<crate::history::expand::Memory>>,
     pub(crate) initial_history: Option<Rc<crate::history::InitialJournal>>,
     pub command_number: usize,
     pub(crate) evaluating: bool,
