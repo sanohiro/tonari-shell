@@ -1,5 +1,31 @@
 # Startup and execution / 起動と実行性能
 
+<a id="gnu-source-review"></a>
+
+## 2026-11-26 · GNU Bash source review / 互換機能の実測
+
+We timed 34 release workloads through their normal shell entry points at `8a4d678`. The Apple M1 ran macOS 27.2.1 and Bash 5.3.20. The native x86-64 runner used Ubuntu 26.04 Bash 5.3.9 and a stripped static musl PIE. Each shell ran once to warm up, then seven times on the Mac and nine times on Linux in shuffled order. The table gives median elapsed milliseconds for the entire indicated workload. Tab timing starts after the input is visible and ends when the result is visible. A separate assertion checks the accepted argument. The TCP and UDP receivers check each of the 80 payloads. [All medians and reviewed code paths](compatibility/bash-source-review/timings.tsv) · [Individual samples](compatibility/bash-source-review/samples.jsonl.gz) · [Workload source](../tests/compat/source_review.py)
+
+| Workload | Repetitions | macOS Bash | macOS Tonari | Linux Bash | Linux Tonari |
+|---|---:|---:|---:|---:|---:|
+| Tab among 1,025 matching filenames with FIGNORE | 1 | 68.646 | 0.451 | 0.517 | 0.331 |
+| Tab to a callback after 32 option/value pairs | 1 | 0.680 | 0.306 | 0.356 | 0.304 |
+| Capture a literal printf in the current shell | 700 | 112.037 | 4.123 | 12.799 | 0.756 |
+| Read a trap handler inside command substitution | 800 | 535.263 | 4.513 | 227.942 | 0.951 |
+| Generate and store 512 completion candidates | 80 | 28.631 | 5.226 | 15.512 | 2.625 |
+| Capitalized variable assignment | 2,200 | 12.581 | 4.814 | 3.654 | 1.362 |
+| Toggle case throughout a parameter | 2,400 | 14.428 | 6.005 | 4.552 | 1.729 |
+| Complete service names beginning with http | 40 | 176.809 | 5.322 | 2.991 | 0.717 |
+| Read the physical current directory with redirected output | 900 | 23.898 | 24.628 | 9.201 | 5.652 |
+| Source a file and resolve its full path | 600 | 20.889 | 20.774 | 9.320 | 6.705 |
+| Expand 256 names sorted by file size | 100 | 1721.641 | 34.791 | 68.255 | 64.758 |
+
+In a separate interleaved M1 run, removing the child process from handler lookup reduced the 800-call median from 437.537 to 4.465 ms. The guarded literal-output path reduced the 700-command median from 94.293 to 4.511 ms. Service completion fell from 36.525 to 5.369 ms for 40 queries. The Linux before/after comparators used distinct executable digests. The three runs record the runtime revision and executable hashes. [Full suite and inventories](https://github.com/sanohiro/tonari-shell/actions/runs/45787712939) · [Original substitution implementation](https://github.com/sanohiro/tonari-shell/actions/runs/45787717070) · [Socket and completion comparison](https://github.com/sanohiro/tonari-shell/actions/runs/45787721905)
+
+For plain arguments the completion callback can reuse the ordinary input scan. In two further 35-trial M1 runs with 64 plain arguments the median fell from 0.412 to 0.401 ms and from 0.410 to 0.403 ms. Bash measured 1.039 and 1.045 ms. With 32 punctuation-heavy arguments the optimization had no consistent timing advantage across operating systems. The callback arguments and executed line were verified on every trial.
+
+Bash の所要時間の 2/3 以内に入ったのは Mac 28/34、Linux 23/34。Mac の物理 pwd と source の実体パス解決は Bash 比でそれぞれ 1.031、0.994 だった。Linux のサイズ順 glob は、毎回 256 件の最新メタデータを取り直し、Bash 比 0.949。グループ列挙やソケット接続も OS の影響を受ける。全項目の比率と生データは上の表から参照できる。最終バイナリは Mac 1,682,768 バイトで libSystem のみ、Linux x86-64 は 2,414,616 バイトの静的 PIE。[最終 CI 計測](https://github.com/sanohiro/tonari-shell/actions/runs/45791718761) · [参照実装と動作差](compatibility/bash-source-review/README.md)
+
 <a id="shipped-shell-timings"></a>
 
 ## 2026-11-26 · Final native release / 最終バイナリでの計測
