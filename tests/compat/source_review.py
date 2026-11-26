@@ -16,6 +16,7 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "interactive-edit-mode": "for term in dumb xterm; do for opt in '' --noediting; do TERM=$term \"$AUDIT_SHELL\" --noprofile --norc $opt -ic 'test -o emacs; echo \"$?\"; test -o vi; echo \"$?\"' 2>/dev/null; printf '%s\\n' 'test -o emacs; echo \"$?\"' | TERM=$term \"$AUDIT_SHELL\" --noprofile --norc $opt -i 2>/dev/null; done; done",
     "literal-assignment-input": "HOME='/test/quote home'\nv=$'hello\\' once!'\nprintf '<%s>\\n' \"$v\"\nv='~:* $HOME'\nprintf '<%s>\\n' \"$v\"\nv=$'\\x41\\xe3\\x81\\x82'\nprintf '<%s>\\n' \"$v\"\nv='left'\" right\"\nprintf '<%s>\\n' \"$v\"\nv=$'truncated\\0after'\nprintf '<%s>\\n' \"$v\"\ndeclare -i n\nn='2 + 7'\necho \"$n\"",
     "set-materialized-values": "set >before; grep -E '^(RANDOM|SRANDOM|BASH_COMMAND|LINENO|BASHPID|COMP_WORDBREAKS|EPOCHREALTIME)=' before; echo \"$?\"; grep -E '^(BASH_ARGC|BASH_ARGV|DIRSTACK|GROUPS)=' before; p=$BASHPID; n=$LINENO; t=$EPOCHREALTIME; r=$SRANDOM; c=$BASH_COMMAND; : \"$GROUPS\" \"$DIRSTACK\" \"$BASH_SUBSHELL\" \"$BASH_ARGV0\" \"$COMP_WORDBREAKS\"; set >after; for pair in \"BASHPID=$p\" \"LINENO=$n\" \"EPOCHREALTIME=$t\" \"SRANDOM=$r\" 'BASH_SUBSHELL=0'; do grep -Fxq \"$pair\" after; echo \"$?\"; done; grep -Ec '^(DIRSTACK|GROUPS)=\\(\\[0\\]=' after",
     "set-array-snapshot": "declare -a items=([2]='x y'); declare -A flags=([key]=ok); alias snap='echo yes'; : \"${BASH_ALIASES[snap]}\"; RANDOM=357; first=$RANDOM; next=$RANDOM; RANDOM=357; : \"$RANDOM\"; false | true; set >listing; echo \"$((RANDOM == next))\"; grep -E '^(items|flags|PIPESTATUS|RANDOM)=' listing; grep '^BASH_VERSINFO=(\\[0\\]=\"5\"' listing >/dev/null; echo $?",
@@ -209,6 +210,7 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "interactive-edit-mode": ("TERM=dumb \"$AUDIT_SHELL\" --noprofile --norc -ic 'test -o emacs' </dev/null 2>/dev/null", 12),
     "literal-assignment-input": ("v=$'hello\\' once!'", 1000),
     "set-materialized-values": ("set >/dev/null", 300),
     "set-array-snapshot": ("set >/dev/null", 350),

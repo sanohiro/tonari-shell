@@ -459,8 +459,7 @@ fn main() -> ExitCode {
 
 fn invoke(args: impl Iterator<Item = std::ffi::OsString>) -> u8 {
     use cli::Action;
-    let initial_terminal = std::cell::LazyCell::new(shell_terminal as fn() -> bool);
-    let invocation = match cli::parse(args, || *initial_terminal) {
+    let invocation = match cli::parse(args, shell_terminal) {
         Ok(Action::Run(invocation)) => invocation,
         Ok(Action::Version) => {
             println!("tonari {}", env!("CARGO_PKG_VERSION"));
@@ -477,13 +476,10 @@ fn invoke(args: impl Iterator<Item = std::ffi::OsString>) -> u8 {
             return 2;
         }
     };
-    run_invocation(invocation, initial_terminal)
+    run_invocation(invocation)
 }
 
-fn run_invocation(
-    mut invocation: cli::Invocation,
-    initial_terminal: std::cell::LazyCell<bool, fn() -> bool>,
-) -> u8 {
+fn run_invocation(mut invocation: cli::Invocation) -> u8 {
     use cli::Input;
     let mut session = Session::default();
     session.started_at = unsafe { libc::time(std::ptr::null_mut()) };
@@ -525,10 +521,9 @@ fn run_invocation(
     session.login = invocation.login;
     session.history_enabled = invocation.interactive;
     session.histexpand = invocation.histexpand.unwrap_or(session.interactive);
-    session.emacs = session.interactive
-        && !invocation.noediting
-        && (*initial_terminal || matches!(invocation.input, Input::Command(_)))
-        && !session.get("TERM").is_some_and(|s| s == "dumb");
+    // The selected keymap is also observable in a forced interactive script.
+    // Terminal capabilities are checked separately when opening the editor.
+    session.emacs = session.interactive && !invocation.noediting;
     if session.interactive
         && let Err(e) = session.traps.init_hangup()
     {
