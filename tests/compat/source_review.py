@@ -16,6 +16,7 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "declaration-word-boundaries": "declare a[a[0]=1]=X; declare -p a; declare a[ a[2]=3 ]=Y; declare -p a; declare -A tab; shopt -s assoc_expand_once; declare tab[\"x [y\"]=green; printf '%s\\n' \"${tab['x [y']}\"; key='in side'; declare tab[\"$key\"]=ok; echo \"${tab[$key]}\"",
     "builtin-destination-validation": "declare -A a; k=\"80's\"; for flag in -u -s; do shopt \"$flag\" assoc_expand_once; printf -v \"a[$k]\" 'count%n%s' touched hi; echo \"fmt:$?:${touched:-no}\"; { read -r \"a[$k]\"; s=$?; read -r line; echo \"read:$s:$line\"; } <<< $'first\\nsecond'; [[ -v \"a[$k]\" ]]; echo \"stored:$?\"; done",
     "subscript-command-delimiters": "declare -A a; a[$(echo ])]=red; a[$(printf '[')]=blue; printf '<%s>\\n' \"${a[']']}\" \"${a['[']}\"; a[${missing:-']'}]=new; echo \"${a[']']}\"",
     "associative-builtin-operands": "declare -A a; key=\"80's\"; shopt -s assoc_expand_once; printf -v \"a[$key]\" %s ok; echo \"$?:${a[$key]}\"; read -r \"a[$key]\" <<<green; echo \"$?:${a[$key]}\"; [[ -v a[$key] ]]; echo \"$?\"; [[ -v 'a[$key]' ]]; echo \"$?\"; unset \"a[$key]\"; echo \"$?:${#a[@]}\"; declare a[\"foo[bar\"]=blue; printf '<%s>\\n' \"${a['foo[bar']}\"; a[$(echo ])]=red; echo \"${a[']']}\"; printf -v 'a[$key]' %s literal; echo \"${a['$key']}\"; unset 'a[$key]'; echo \"${#a[@]}\"",
@@ -204,6 +205,7 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "declaration-word-boundaries": ("declare 't[bare]=value'; declare t[\"white space\"]=value; declare t[plain]=value", 1400),
     "builtin-destination-validation": ("printf -v 'a[valid]' %s data; printf -v \"a[$k]\" %s abc", 1800),
     "subscript-command-delimiters": ("a[$(echo ])]=red; : \"${a[']']}\"", 300),
     "associative-builtin-operands": ("printf -v \"a[$key]\" %s green; [[ -v a[$key] ]]; unset \"a[$key]\"", 1400),
@@ -1081,6 +1083,7 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "declaration-word-boundaries": "declare -A t; shopt -s assoc_expand_once",
                 "builtin-destination-validation": "exec 2>/dev/null; declare -A a; k=\"80's\"; shopt -u assoc_expand_once",
                 "subscript-command-delimiters": "declare -A a",
                 "associative-builtin-operands": "declare -A a; key=\"80's\"; shopt -s assoc_expand_once",

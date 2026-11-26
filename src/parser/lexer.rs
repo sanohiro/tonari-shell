@@ -1081,7 +1081,34 @@ pub(super) fn command_position(tokens: &[Token]) -> bool {
     true
 }
 
-fn indexed_assignment_position(mut tokens: &[Token]) -> bool {
+// Builtin declaration operands are shell words. A quoted space belongs to the
+// key; an unquoted space separates two arguments before the builtin sees them.
+fn declaration_word(prefix: &str) -> bool {
+    let mut chars = prefix.chars();
+    let mut word = WordBuilder::default();
+    while let Some(c) = chars.next() {
+        let result = match c {
+            '\'' | '"' => quoted(&mut chars, c, &mut word),
+            '`' => backquote(&mut chars, &mut word, false),
+            '$' if chars.as_str().starts_with(['(', '{']) => dollar(&mut chars, &mut word, false),
+            '<' | '>' if chars.as_str().starts_with('(') => {
+                process_word(&mut chars, &mut word, c == '<')
+            }
+            '\\' => {
+                chars.next();
+                continue;
+            }
+            c if separator(c) => return false,
+            _ => continue,
+        };
+        if result.is_err() {
+            return false;
+        }
+    }
+    true
+}
+
+fn indexed_assignment_position(mut tokens: &[Token], prefix: &str) -> bool {
     let mut operands = false;
     while let Some((last, before)) = tokens.split_last() {
         if matches!(
@@ -1111,7 +1138,7 @@ fn indexed_assignment_position(mut tokens: &[Token]) -> bool {
                     _ => before,
                 };
                 if command_position(before) {
-                    return true;
+                    return declaration_word(prefix);
                 }
             }
             operands = true;
@@ -1387,7 +1414,7 @@ fn scan(
             && (if plain == 0 {
                 array_level == Some(parentheses)
             } else {
-                indexed_assignment_position(&tokens)
+                indexed_assignment_position(&tokens, prefix)
             })
         {
             word.literal(&start[..prefix.len() + 1]);
