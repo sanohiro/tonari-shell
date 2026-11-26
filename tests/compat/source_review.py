@@ -23,7 +23,9 @@ COMMON = {
     "assignment-tilde": "base=/bin\np=$base:~/bin:~/lib\necho \"$p\"\nexport p=$base:~/export\necho \"$p\"\nset -o posix\necho plain=~:~\ndeclare p=~:~\necho \"$p\"",
     "nameref-clear": """v=before; declare -n ref=v; declare +n ref=after; declare -p ref v; declare -n ref=v; declare +n ref+=plus; declare -p ref v; readonly lock=x; declare -n ref=lock; declare +n ref=other; echo "$?"; declare -p ref lock""",
     "scalar-array-slice": """v=abcd; declare -n ref=v; printf '<%s>\\n' "${v[@]:0:2}" "${v[*]:1:2}" "${ref[@]:1:2}"; a=(abcd def); printf '<%s>\\n' "${a[@]:0:1}" """,
-    "indirect-positionals": """set --; printf '<%s>' A "${!@}" B "${!*:-missing}"; set -- who; who=value; echo "${!@}" """,
+    "indirect-positionals": """set --; printf '<%s>' A "${!@}" B "${!*:-missing}" "${!9-default}"; set -- who; who=value; echo "${!@}" """,
+    "multiline-history": "set -o history\nfor v in a b\ndo\n  : item\ndone\nshopt -s lithist\nf() {\n  : 'two\\nlines'\n}\nshopt -u cmdhist\nfor v in a\ndo\n  :\ndone\nhistory",
+    "history-file-enable": "printf 'stored command\\n' > imported-history\nHISTFILE=imported-history\nset -o history\nhistory -p '!!' ",
     "function-stack": """FUNCNAME=ignored; echo "<$FUNCNAME>"; f(){ FUNCNAME=no; echo "<$FUNCNAME>"; }; f; unset FUNCNAME; FUNCNAME=ordinary; echo "$FUNCNAME" """,
     "nolog": """set -o nolog; shopt -qo nolog; echo $?; set +o nolog; shopt -qo nolog; echo $?""",
     "debug-arguments": r"""set -- a b; echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}"; set -- changed; f(){ echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}"; }; f x y; shopt -s extdebug; f x y; echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}" """,
@@ -89,6 +91,7 @@ HOT = {
     "compat-test": ("test '(' '!' = '!' ')' -a yes", 900),
     "assignment-tilde": ('p=$base:~/bin:~/lib', 1400),
     "debug-arguments": ('v=${BASH_ARGV[1]}', 1500),
+    "multiline-history": (":", 300),
     "scalar-array-slice": ('v=${text[@]:1:4}', 1600),
     "indirect-positionals": ('v=${!@:-missing}', 1600),
     "function-stack": ('f', 1200),
@@ -619,6 +622,7 @@ def main():
                 continue
             setup = {
                 "numeric-locale": "unset LC_ALL; LC_NUMERIC=de_DE.UTF-8",
+                "multiline-history": "set -o history",
                 "scalar-array-slice": "text=雪abcdef",
                 "function-stack": "f(){ FUNCNAME=ignored; :; }",
                 "read-fields": r"IFS=$'\t\r\f\v'; printf '  left\tright \t\r\f\v\n' >fields",
@@ -650,6 +654,10 @@ def main():
                 "glob-size": "GLOBSORT=size", "glob-numeric": "cd items; GLOBSORT=numeric",
             }.get(name, ":")
             code = f"{setup}; for ((i=0;i<{count};i++)); do {body}; done; echo done"
+            if name == "multiline-history":
+                # Input history is recorded for top-level commands, even with
+                # no terminal. Executing a sourced loop would bypass this path.
+                code = "set -o history\n" + "for v in one two\ndo\n  : item\ndone\n" * count + "echo done"
             samples = [[] for _ in shells]
             for r in range(args.runs + 1):
                 indices = list(range(len(shells)))

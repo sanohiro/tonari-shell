@@ -907,7 +907,7 @@ fn pattern_chunk(
     *chars = rest[end..].chars();
 }
 
-fn command_position(tokens: &[Token]) -> bool {
+pub(super) fn command_position(tokens: &[Token]) -> bool {
     for token in tokens.iter().rev() {
         match token {
             word if matches!(

@@ -449,7 +449,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     {
         if let Err(e) = session.assign_target(name, &line) {
             eprintln!("tonari: read: {e}");
-            return if e == "readonly variable" { 2 } else { 1 };
+            return 1;
         }
         return status;
     }
@@ -481,7 +481,11 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         });
         if let Err(e) = session.assign_target(name, value) {
             eprintln!("tonari: read: {e}");
-            return if e == "readonly variable" { 2 } else { 1 };
+            return if e == "readonly variable" && i + 1 < count {
+                2
+            } else {
+                1
+            };
         }
     }
     status

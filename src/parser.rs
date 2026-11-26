@@ -15,6 +15,49 @@ mod wrapper;
 pub use crate::word::{Word, is_identifier};
 pub(crate) use wrapper::opens_function;
 
+// Fold only token-separating newlines. Quoted newlines, comment endings and
+// here-document boundaries must survive recall and execution.
+pub(crate) fn history_command(text: &str) -> std::borrow::Cow<'_, str> {
+    use std::borrow::Cow;
+    if text.contains(['#', '\x60']) || text.contains("<<") {
+        return Cow::Borrowed(text);
+    }
+    let Ok((tokens, spans, _)) = lex(text, false, true) else {
+        return Cow::Borrowed(text);
+    };
+    if tokens.iter().any(|t| {
+        matches!(t, Token::ArrayStart | Token::EndArm(_))
+            || matches!(t.keyword(), Some("case" | "[[" | "function"))
+    }) {
+        return Cow::Borrowed(text);
+    }
+    let mut result = String::new();
+    let mut start = 0;
+    for (i, &(a, b)) in spans.iter().enumerate() {
+        if !matches!(tokens[i], Token::Newline) || i == 0 {
+            continue;
+        }
+        let previous = &tokens[i - 1];
+        if matches!(previous, Token::RightParen)
+            || tokens.get(i + 1).and_then(Token::keyword) == Some("in")
+        {
+            continue;
+        }
+        result.push_str(&text[start..a]);
+        if !lexer::command_position(&tokens[..i]) {
+            result.push(';');
+        }
+        result.push(' ');
+        start = b;
+    }
+    if start == 0 {
+        Cow::Borrowed(text)
+    } else {
+        result.push_str(&text[start..]);
+        Cow::Owned(result)
+    }
+}
+
 pub(crate) fn history_word_spans(s: &str) -> Vec<(usize, usize)> {
     let mut words = Vec::new();
     let mut start = None;

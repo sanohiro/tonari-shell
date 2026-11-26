@@ -218,9 +218,14 @@ impl Word {
                         "{name}: bad array subscript"
                     )));
                 }
-                if matches!(name.as_str(), "!@" | "!*")
-                    && env.session.positional.as_slice().is_empty()
+                if let Some(reference) = name.strip_prefix('!')
                     && (!env.session.nounset || plain_quote.is_none())
+                    && (matches!(reference, "@" | "*")
+                        && env.session.positional.as_slice().is_empty()
+                        || reference.as_bytes().first().is_some_and(u8::is_ascii_digit)
+                            && reference
+                                .parse::<usize>()
+                                .is_ok_and(|i| i > env.session.positional.len()))
                 {
                     name.clear();
                 }

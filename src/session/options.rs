@@ -18,6 +18,8 @@ pub struct ShellOptions {
     pub inherit_errexit: bool,
     pub huponexit: bool,
     pub histappend: bool,
+    pub cmdhist: bool,
+    pub lithist: bool,
     pub histverify: bool,
     pub histreedit: bool,
     pub no_empty_cmd_completion: bool,
@@ -57,6 +59,8 @@ impl Default for ShellOptions {
             inherit_errexit: false,
             huponexit: false,
             histappend: false,
+            cmdhist: true,
+            lithist: false,
             histverify: false,
             histreedit: false,
             no_empty_cmd_completion: false,
@@ -138,6 +142,7 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("cdable_vars", shopt.cdable_vars),
     option_entry!("checkhash", shopt.checkhash),
     option_entry!("checkwinsize", shopt.checkwinsize),
+    option_entry!("cmdhist", shopt.cmdhist),
     compat_entry!("compat31", 31),
     compat_entry!("compat32", 32),
     compat_entry!("compat40", 40),
@@ -162,6 +167,7 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("inherit_errexit", shopt.inherit_errexit),
     option_entry!("interactive_comments", shopt.interactive_comments),
     option_entry!("lastpipe", shopt.lastpipe),
+    option_entry!("lithist", shopt.lithist),
     option_entry!("localvar_inherit", shopt.localvar_inherit),
     option_entry!("localvar_unset", shopt.localvar_unset),
     OptionEntry {
@@ -247,6 +253,9 @@ impl Session {
         use crate::editor::bindings::Keymap;
         if name == "noexec" && self.interactive {
             self.noexec = false;
+        }
+        if name == "history" && enabled && !self.interactive && self.history_lines().is_empty() {
+            crate::history::load_script_history(self);
         }
         if name == "histexpand" {
             self.command_history_expansion = enabled;
