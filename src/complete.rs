@@ -590,8 +590,7 @@ fn variable_completion(
     list: bool,
 ) -> Option<Completion> {
     let (quote, raw) = match raw.as_bytes().first() {
-        Some(b'\'') => return None,
-        Some(b'"') => (Some('"'), &raw[1..]),
+        Some(&q @ (b'\'' | b'"')) => (Some(char::from(q)), &raw[1..]),
         _ => (None, raw),
     };
     let tail = raw.strip_prefix('$')?;

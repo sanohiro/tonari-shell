@@ -39,7 +39,7 @@ class ShellTests(unittest.TestCase):
         self.compare("""x=outer
 f() { local a=ok; X=2 eval 'local -p a'; local -n x=123 2>/dev/null; x=changed; }
 f; echo "$x"; readonly r=text; declare -a r 2>/dev/null; echo "$? $r"
-declare -n ref; ref+=(one); declare -p ref""",
+declare -n ref; { ref+=(one); } 2>/dev/null; declare -p ref""",
                      0, b'declare -- a="ok"\nchanged\n1 text\ndeclare -a ref=([0]="one")\n', minimum=5)
 
     def test_posix_prefix_on_redirected_special_builtin(self):
