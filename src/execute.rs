@@ -2073,7 +2073,6 @@ pub(crate) fn parameter(session: &Session, last_status: u8, name: &str) -> Optio
     match name {
         "?" => Some(last_status.to_string()),
         "$" => Some(session.shell_pid().to_string()),
-        "BASHPID" => Some(std::process::id().to_string()),
         "!" => session.last_background.map(|pid| pid.to_string()),
         "-" => Some(session.option_flags()),
         "0" => Some(session.arg0.clone()),

@@ -15,6 +15,12 @@ pub(super) struct Dynamic {
     seconds: Cell<Option<i64>>,
     random: Cell<Random>,
     listed: [Cell<Option<i64>>; 5],
+    pub(super) lineno: Cell<Option<usize>>,
+    pub(super) pid: Cell<Option<u32>>,
+    pub(super) depth: Cell<Option<u32>>,
+    text: std::cell::RefCell<std::collections::BTreeMap<&'static str, String>>,
+    pub(super) groups_read: Cell<bool>,
+    pub(super) stack_read: Cell<bool>,
 }
 
 fn number_slot(name: &str) -> Option<usize> {
@@ -55,6 +61,20 @@ impl Session {
             self.loop_depth = 0;
         }
         self.dynamic.random.set(Random::default());
+    }
+
+    pub(super) fn observe_text(&self, name: &'static str, value: String) -> String {
+        value.clone_into(self.dynamic.text.borrow_mut().entry(name).or_default());
+        value
+    }
+
+    pub(super) fn listed_text(&self, name: &str) -> Option<String> {
+        match name {
+            "LINENO" => self.dynamic.lineno.get().map(|n| n.to_string()),
+            "BASHPID" => self.dynamic.pid.get().map(|n| n.to_string()),
+            "BASH_SUBSHELL" => self.dynamic.depth.get().map(|n| n.to_string()),
+            _ => self.dynamic.text.borrow().get(name).cloned(),
+        }
     }
 
     pub(super) fn listed_number(&self, name: &str) -> Option<i64> {

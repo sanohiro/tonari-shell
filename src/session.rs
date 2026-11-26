@@ -322,6 +322,13 @@ impl Session {
                     "SHELLOPTS",
                     "BASH",
                     "BASH_VERSION",
+                    "BASHPID",
+                    "BASH_ARGV0",
+                    "BASH_COMMAND",
+                    "BASH_SUBSHELL",
+                    "LINENO",
+                    "EPOCHSECONDS",
+                    "EPOCHREALTIME",
                     "BASH_VERSINFO",
                     "BASH_ALIASES",
                     "BASH_CMDS",
@@ -499,7 +506,35 @@ impl Session {
             for name in self.visible_names("") {
                 let stored = self.variables.get(name);
                 let snapshot;
-                let result = if self.array_parameter(name) {
+                let empty_snapshot = stored.is_none()
+                    && match name {
+                        "BASH_ARGV" | "BASH_ARGC" => {
+                            self.function_depth == 0 && self.debug_base.get().is_none()
+                        }
+                        "BASH_ALIASES" => self
+                            .aliases
+                            .0
+                            .as_ref()
+                            .is_none_or(|aliases| aliases.is_empty()),
+                        "BASH_CMDS" => self.hashes.items().next().is_none(),
+                        "BASH_SOURCE" => self.source_names.is_empty(),
+                        "BASH_LINENO" => self.call_lines.is_empty(),
+                        "GROUPS" => !self.dynamic.groups_read.get(),
+                        "DIRSTACK" => !self.dynamic.stack_read.get(),
+                        _ => false,
+                    };
+                let result = if name == "BASH_VERSINFO" && stored.is_none() {
+                    // The executable version is immutable across shell scopes.
+                    static VERSION: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+                    out.write_all(VERSION.get_or_init(|| {
+                        let mut bytes = name.as_bytes().to_vec();
+                        let version = self.declared_variable(name, false).unwrap();
+                        print_variable_value(&mut bytes, &version).expect("in-memory write");
+                        bytes
+                    }))
+                } else if empty_snapshot {
+                    writeln!(out, "{name}=()")
+                } else if self.array_parameter(name) {
                     let var = if let Some(var) = stored.filter(|v| !v.dynamic) {
                         var
                     } else {
@@ -518,6 +553,18 @@ impl Session {
                         self.listed_number(name).map(|v| Cow::Owned(v.to_string()))
                     } else if let Some(var) = stored {
                         var.value.as_deref().map(Cow::Borrowed)
+                    } else if matches!(
+                        name,
+                        "BASHPID"
+                            | "BASH_ARGV0"
+                            | "BASH_COMMAND"
+                            | "BASH_SUBSHELL"
+                            | "LINENO"
+                            | "COMP_WORDBREAKS"
+                            | "EPOCHSECONDS"
+                            | "EPOCHREALTIME"
+                    ) {
+                        self.listed_text(name).map(Cow::Owned)
                     } else {
                         self.get(name).map(Cow::Owned)
                     };
@@ -850,23 +897,42 @@ impl Session {
             "HISTCMD" | "BASH_MONOSECONDS" | "RANDOM" | "SECONDS" | "SRANDOM" => {
                 self.dynamic_number(name).map(|v| v.to_string())
             }
-            "COMP_WORDBREAKS" => {
-                Some(crate::complete::default_word_breaks(self.shopt.hostcomplete).into())
+            "COMP_WORDBREAKS" => Some(self.observe_text(
+                "COMP_WORDBREAKS",
+                crate::complete::default_word_breaks(self.shopt.hostcomplete).into(),
+            )),
+            "BASHPID" => {
+                let pid = std::process::id();
+                self.dynamic.pid.set(Some(pid));
+                Some(pid.to_string())
             }
-            "BASH_SUBSHELL" => Some(self.subshell_depth.to_string()),
-            "BASH_ARGV0" => Some(self.arg0.clone()),
+            "BASH_SUBSHELL" => {
+                self.dynamic.depth.set(Some(self.subshell_depth));
+                Some(self.subshell_depth.to_string())
+            }
+            "BASH_ARGV0" => Some(self.observe_text("BASH_ARGV0", self.arg0.clone())),
             "EPOCHSECONDS" | "EPOCHREALTIME" => {
                 let dt = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .ok()?;
                 Some(if name == "EPOCHSECONDS" {
-                    dt.as_secs().to_string()
+                    self.observe_text("EPOCHSECONDS", dt.as_secs().to_string())
                 } else {
-                    format!("{}.{:06}", dt.as_secs(), dt.subsec_micros())
+                    self.observe_text(
+                        "EPOCHREALTIME",
+                        format!("{}.{:06}", dt.as_secs(), dt.subsec_micros()),
+                    )
                 })
             }
-            "LINENO" => Some(self.line().to_string()),
-            "BASH_COMMAND" => self.current_command.as_ref().map(|c| c.text().to_owned()),
+            "LINENO" => {
+                let n = self.line();
+                self.dynamic.lineno.set(Some(n));
+                Some(n.to_string())
+            }
+            "BASH_COMMAND" => self
+                .current_command
+                .as_ref()
+                .map(|c| self.observe_text("BASH_COMMAND", c.text().to_owned())),
             "EUID" => Some(unsafe { libc::geteuid() }.to_string()),
             "UID" => Some(unsafe { libc::getuid() }.to_string()),
             "PPID" => Some(self.shell_pid.1.to_string()),
@@ -2481,9 +2547,30 @@ fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Cow<'_, str> 
         return Cow::Borrowed("\\'");
     }
     if value.starts_with(['#', '~'])
-        || value
-            .bytes()
-            .any(|c| c.is_ascii_whitespace() || b"!$&*(){}[];<>?\\\"'|`".contains(&c))
+        || value.bytes().any(|c| {
+            c.is_ascii_whitespace()
+                || matches!(
+                    c,
+                    b'!' | b'$'
+                        | b'&'
+                        | b'*'
+                        | b'('
+                        | b')'
+                        | b'{'
+                        | b'}'
+                        | b'['
+                        | b']'
+                        | b';'
+                        | b'<'
+                        | b'>'
+                        | b'?'
+                        | b'\\'
+                        | b'"'
+                        | b'\''
+                        | b'|'
+                        | 0x60
+                )
+        })
     {
         crate::completion_spec::single_quote(value).into()
     } else {

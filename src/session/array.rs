@@ -333,9 +333,15 @@ impl Session {
         match name {
             "BASH_ARGV" => (0..self.debug_frames().map(Vec::len).sum::<usize>() as i64).collect(),
             "BASH_ARGC" => (0..self.debug_frames().count() as i64).collect(),
-            "GROUPS" => (0..Self::group_ids().len() as i64).collect(),
+            "GROUPS" => {
+                self.dynamic.groups_read.set(true);
+                (0..Self::group_ids().len() as i64).collect()
+            }
             "BASH_VERSINFO" => (0..6).collect(),
-            "DIRSTACK" => (0..=self.dir_stack.len() as i64).collect(),
+            "DIRSTACK" => {
+                self.dynamic.stack_read.set(true);
+                (0..=self.dir_stack.len() as i64).collect()
+            }
             "FUNCNAME" if self.function_depth == 0 => Vec::new(),
             "FUNCNAME" => (0..self.function_names.len() as i64).collect(),
             "BASH_LINENO" => (0..self.call_lines.len() as i64).collect(),
@@ -381,14 +387,20 @@ impl Session {
                 .rev()
                 .nth(index as usize)
                 .map(|v| v.len().to_string()),
-            "GROUPS" => Self::group_ids().get(usize::try_from(index).ok()?).cloned(),
+            "GROUPS" => {
+                self.dynamic.groups_read.set(true);
+                Self::group_ids().get(usize::try_from(index).ok()?).cloned()
+            }
             "BASH_VERSINFO" => match index {
                 5 => Some(Self::machine_type()),
                 i => ["5", "2", "0", "1", "tonari"]
                     .get(usize::try_from(i).ok()?)
                     .map(|s| (*s).into()),
             },
-            "DIRSTACK" => self.stack_entry(index.try_into().ok()?),
+            "DIRSTACK" => {
+                self.dynamic.stack_read.set(true);
+                self.stack_entry(index.try_into().ok()?)
+            }
             "FUNCNAME" if self.function_depth == 0 => None,
             "FUNCNAME" => self
                 .function_names
@@ -498,6 +510,7 @@ impl Session {
         };
         let name = resolved.as_ref();
         if self.active_groups(name) && !self.variables.contains_key(name) {
+            self.dynamic.groups_read.set(true);
             return Self::group_ids().to_vec();
         }
         if self.live_table(name) {

@@ -16,6 +16,7 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "set-materialized-values": "set >before; grep -E '^(RANDOM|SRANDOM|BASH_COMMAND|LINENO|BASHPID|COMP_WORDBREAKS|EPOCHREALTIME)=' before; echo \"$?\"; grep -E '^(BASH_ARGC|BASH_ARGV|DIRSTACK|GROUPS)=' before; p=$BASHPID; n=$LINENO; t=$EPOCHREALTIME; r=$SRANDOM; c=$BASH_COMMAND; : \"$GROUPS\" \"$DIRSTACK\" \"$BASH_SUBSHELL\" \"$BASH_ARGV0\" \"$COMP_WORDBREAKS\"; set >after; for pair in \"BASHPID=$p\" \"LINENO=$n\" \"EPOCHREALTIME=$t\" \"SRANDOM=$r\" 'BASH_SUBSHELL=0'; do grep -Fxq \"$pair\" after; echo \"$?\"; done; grep -Ec '^(DIRSTACK|GROUPS)=\\(\\[0\\]=' after",
     "set-array-snapshot": "declare -a items=([2]='x y'); declare -A flags=([key]=ok); alias snap='echo yes'; : \"${BASH_ALIASES[snap]}\"; RANDOM=357; first=$RANDOM; next=$RANDOM; RANDOM=357; : \"$RANDOM\"; false | true; set >listing; echo \"$((RANDOM == next))\"; grep -E '^(items|flags|PIPESTATUS|RANDOM)=' listing; grep '^BASH_VERSINFO=(\\[0\\]=\"5\"' listing >/dev/null; echo $?",
     "scoped-descriptor-move": "exec 7>permanent-move; exec 6>&7-; printf ok >&6; { : >&7; } 2>/dev/null; echo $?; exec 6>&-; cat permanent-move",
     "declaration-word-boundaries": "declare a[a[0]=1]=X; declare -p a; declare a[ a[2]=3 ]=Y; declare -p a; declare -A tab; shopt -s assoc_expand_once; declare tab[\"x [y\"]=green; printf '%s\\n' \"${tab['x [y']}\"; key='in side'; declare tab[\"$key\"]=ok; echo \"${tab[$key]}\"",
@@ -207,6 +208,7 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "set-materialized-values": ("set >/dev/null", 300),
     "set-array-snapshot": ("set >/dev/null", 350),
     "scoped-descriptor-move": ("exec 7>&1; : 6>&7-; exec 7>&-", 600),
     "declaration-word-boundaries": ("declare 't[bare]=value'; declare t[\"white space\"]=value; declare t[plain]=value", 1400),
@@ -1098,6 +1100,7 @@ printf three >&7; exec {slot}>&7; : 6>&7- {slot}>&-; printf four >&7; exec 6>&7-
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "set-materialized-values": ": \"$BASHPID\" \"$LINENO\" \"$EPOCHREALTIME\" \"$RANDOM\" \"$GROUPS\" \"$DIRSTACK\"",
                 "set-array-snapshot": "declare -a items=([2]='x y'); declare -A flags=([key]=ok); alias snap='echo yes'; : \"${BASH_ALIASES[snap]}\"; RANDOM=357; : \"$RANDOM\"",
                 "declaration-word-boundaries": "declare -A t; shopt -s assoc_expand_once",
                 "builtin-destination-validation": "exec 2>/dev/null; declare -A a; k=\"80's\"; shopt -u assoc_expand_once",
