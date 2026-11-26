@@ -964,11 +964,12 @@ fn account_field(login: Option<&str>, shell: bool) -> Option<String> {
     }
 }
 
-fn ifs_separator(lookup: &dyn Fn(&str) -> Option<String>) -> String {
-    lookup("IFS").map_or_else(
-        || " ".into(),
-        |s| s.chars().next().map(String::from).unwrap_or_default(),
-    )
+fn ifs_separator(lookup: &dyn Fn(&str) -> Option<String>) -> std::borrow::Cow<'static, str> {
+    let Some(mut ifs) = lookup("IFS") else {
+        return " ".into();
+    };
+    ifs.truncate(ifs.chars().next().map_or(0, char::len_utf8));
+    ifs.into()
 }
 
 // Visit separator spans in the original UTF-8 text. A single delimiter can
