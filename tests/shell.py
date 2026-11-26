@@ -149,6 +149,33 @@ set +x; cat calls; echo "$a" """
             self.assertIn(b"+ [[ -d / ]]\n", trace)
             self.assertIn(b" a = 42 ", trace)
 
+    def test_alias_in_a_source_array_subscript(self):
+        for posix in (False, True):
+            for late in (False, True):
+                options = ("set -o posix\n" if posix else "") + "shopt -s expand_aliases\n"
+                alias = "alias pick='echo 2'\n"
+                source = options + "pick() { echo 3; }\n" + ("" if late else alias)
+                source += """f() {
+    a[$(pick)]=simple
+    b=([$(pick)]=compound)
+    declare -A m
+    m[$(pick)]=key
+    echo "${!a[@]} ${!b[@]} ${!m[@]}"
+}
+""" + (alias if late else "") + "f"
+                index = "3" if posix and late else "2"
+                self.compare(source, 0, (" ".join([index] * 3) + "\n").encode(), minimum=5)
+
+    def test_alias_in_subscript_after_posix_mode_switch(self):
+        self.compare("""set -o posix
+shopt -s expand_aliases
+alias picked='echo 2'
+f() { a[$(picked)]=A; a[$(later)]=B; }
+set +o posix
+shopt -s expand_aliases
+alias picked='echo 4' later='echo 3'
+f; echo "${!a[@]}" """, 0, b"2 3\n", minimum=5)
+
     def test_function_parentheses_from_trailing_space_alias(self):
         self.compare(r"""shopt -s expand_aliases
 alias g='g( ' q=')'

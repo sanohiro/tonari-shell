@@ -295,6 +295,7 @@ impl Condition {
 #[derive(Debug, Clone)]
 pub struct Location {
     source: Rc<str>,
+    subscript_aliases: crate::alias::Aliases,
     start: usize,
     pub(crate) end: usize,
     pub line: usize,
@@ -305,6 +306,7 @@ impl Location {
             start: 0,
             end: source.len(),
             source: source.into(),
+            subscript_aliases: Default::default(),
             line,
         }
     }
@@ -528,6 +530,46 @@ pub(crate) fn here_word(session: &crate::Session, source: &str) -> Result<Word, 
     with_read_options(session, session.line(), || expansion_string(source))
 }
 
+// A subscript written in the script can contain its own command substitution.
+// POSIX reads aliases with the surrounding command. Bash mode consults the
+// live aliases when it expands the subscript.
+pub(crate) fn with_subscript_aliases<T>(
+    session: &crate::Session,
+    source: &str,
+    parse: impl FnOnce() -> T,
+) -> T {
+    let frozen = session
+        .current_command
+        .as_ref()
+        .and_then(|s| s.subscript_aliases.0.as_ref());
+    let live = if !session.posix && session.shopt.expand_aliases {
+        session.aliases.0.as_ref()
+    } else {
+        None
+    };
+    let Some(table) = frozen.or(live) else {
+        return parse();
+    };
+    if !source.contains("$(") && !source.contains('`') {
+        return parse();
+    }
+    // A function may be read in POSIX mode and called after switching back.
+    // Names resolved by the earlier read take precedence over later aliases.
+    let table = match (frozen, live) {
+        (Some(first), Some(second)) if !Rc::ptr_eq(first, second) => {
+            let mut combined = second.as_ref().clone();
+            combined.extend(
+                first
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone())),
+            );
+            Rc::new(combined)
+        }
+        _ => Rc::clone(table),
+    };
+    aliases::with(crate::alias::Aliases(Some(table)), parse)
+}
+
 fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnce() -> T) -> T {
     let read = || {
         let old_line = FIRST_LINE.replace(line);
@@ -559,6 +601,7 @@ pub(crate) fn literal_assignment(source: &str, line: usize) -> Option<Statement>
     let (name, value) = plain_assignment(command)?;
     let location = Location {
         source: source.into(),
+        subscript_aliases: Default::default(),
         start: 0,
         end: command.len(),
         line,
@@ -644,6 +687,14 @@ impl Reader {
             .map_or(self.spans.len(), |s| s.token_count(self.spans.len()));
         count - self.tokens.len()
     }
+    fn subscript_aliases(&self) -> crate::alias::Aliases {
+        if POSIX.get() {
+            self.aliases.clone()
+        } else {
+            Default::default()
+        }
+    }
+
     fn location(&self, from: usize) -> Location {
         if let Some(expanded) = &self.alias_source {
             return expanded.location(self, from, self.position());
@@ -657,6 +708,7 @@ impl Reader {
         };
         Location {
             source: self.source.clone(),
+            subscript_aliases: self.subscript_aliases(),
             start,
             end,
             line: FIRST_LINE.get() + self.newlines.partition_point(|&n| n < start),

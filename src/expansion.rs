@@ -251,7 +251,10 @@ impl<'a> Expansion<'a> {
                 // Shell expansions in a subscript precede its RHS, but arithmetic
                 // in the resulting text runs when the initialized array is written.
                 let index = if index.contains(['$', '`', '"', '\\']) {
-                    let word = crate::parser::arithmetic_word(&index).map_err(|e| e.message())?;
+                    let word = crate::parser::with_subscript_aliases(self.session, &index, || {
+                        crate::parser::arithmetic_word(&index)
+                    })
+                    .map_err(|e| e.message())?;
                     self.scalar(word)?
                 } else {
                     index
@@ -270,7 +273,11 @@ impl<'a> Expansion<'a> {
 
     pub fn key(&mut self, source: &str) -> Result<String, Error> {
         let key = if source.contains(['$', '`', '"', '\'', '\\']) {
-            self.scalar(crate::parser::subscript_word(source, true).map_err(|e| e.message())?)?
+            let word = crate::parser::with_subscript_aliases(self.session, source, || {
+                crate::parser::subscript_word(source, true)
+            })
+            .map_err(|e| e.message())?;
+            self.scalar(word)?
         } else {
             source.to_owned()
         };
@@ -284,10 +291,13 @@ impl<'a> Expansion<'a> {
         let expanded;
         let expression = if expression.contains(['$', '`', '"', '\\']) {
             expanded = if expression.contains('[') {
-                let (keys, tail) = crate::parser::arithmetic_segments(expression, |name| {
-                    self.session.is_associative(name)
-                })
-                .map_err(|e| e.message())?;
+                let (keys, tail) =
+                    crate::parser::with_subscript_aliases(self.session, expression, || {
+                        crate::parser::arithmetic_segments(expression, |name| {
+                            self.session.is_associative(name)
+                        })
+                    })
+                    .map_err(|e| e.message())?;
                 if keys.is_empty() {
                     self.scalar(tail)?
                 } else {
@@ -305,7 +315,10 @@ impl<'a> Expansion<'a> {
                     source
                 }
             } else {
-                let word = crate::parser::arithmetic_word(expression).map_err(|e| e.message())?;
+                let word = crate::parser::with_subscript_aliases(self.session, expression, || {
+                    crate::parser::arithmetic_word(expression)
+                })
+                .map_err(|e| e.message())?;
                 self.scalar(word)?
             };
             expanded.as_str()

@@ -26,6 +26,10 @@ CASES = {
                                   'echo "$n"', b"ok\n"),
     "punctuated function names": ('for ((i=0;i<3000;i++)); do f,%() { n=ok; }; f,%; unset -f f,%; done; '
                                   'echo "$n"', b"ok\n"),
+    "alias in indexed assignment": ("shopt -s expand_aliases\nalias pick='echo 2'\n"
+                                    'for ((i=0;i<120;i++)); do a[$(pick)]=x; done; echo "${!a[@]}"', b"2\n"),
+    "scalar index with aliases": ("shopt -s expand_aliases\nalias pick='echo 2'\nj=3\n"
+                                  'for ((i=0;i<3000;i++)); do a[$j]=x; done; echo "${!a[@]}"', b"3\n"),
     "conditional tracing": ('exec 4>trace; BASH_XTRACEFD=4; dir=/; set -x; '
                             'for ((i=0;i<700;i++)); do [[ -d $dir ]] && (( n+=1 )); done; '
                             'set +x; grep -F -c "[[ -d / ]]" trace; echo "$n"', b"700\n700\n"),
