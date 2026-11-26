@@ -41,6 +41,9 @@ const ACTIONS: &[&str] = &[
     "setopt",
     "user",
     "hostname",
+    "group",
+    "service",
+    "signal",
     "variable",
 ];
 
@@ -198,6 +201,7 @@ struct Request {
     options: Vec<(bool, String)>,
     operands: Vec<String>,
     special: Option<Target>,
+    destination: Option<String>,
     print: bool,
     remove: bool,
 }
@@ -262,7 +266,7 @@ impl Request {
                         }
                         result.spec.actions.push(action);
                     }
-                    'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'k' | 'v' | 'j' | 'u' => {
+                    'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'k' | 'v' | 'j' | 'u' | 'g' | 's' => {
                         let action = match flag {
                             'a' => "alias",
                             'b' => "builtin",
@@ -271,6 +275,8 @@ impl Request {
                             'e' => "export",
                             'f' => "file",
                             'k' => "keyword",
+                            'g' => "group",
+                            's' => "service",
                             'j' => "job",
                             'u' => "user",
                             _ => "variable",
@@ -278,6 +284,13 @@ impl Request {
                         result.spec.actions.push(action.to_owned());
                     }
                     'W' => result.spec.words = Some(Rc::new(WordList::new(value()?))),
+                    'V' if builtin == "compgen" => {
+                        let name = value()?;
+                        if !crate::word::is_identifier(&name) {
+                            return Err(format!("{name}: invalid identifier"));
+                        }
+                        result.destination = Some(name);
+                    }
                     'G' => result.spec.glob = Some(value()?),
                     'P' => result.spec.prefix = Some(value()?),
                     'S' => result.spec.suffix = Some(value()?),
@@ -345,8 +358,10 @@ impl Spec {
             ("directory", "-d"),
             ("export", "-e"),
             ("file", "-f"),
+            ("group", "-g"),
             ("job", "-j"),
             ("keyword", "-k"),
+            ("service", "-s"),
             ("user", "-u"),
             ("variable", "-v"),
             ("arrayvar", "-A arrayvar"),
@@ -355,6 +370,7 @@ impl Spec {
             ("running", "-A running"),
             ("setopt", "-A setopt"),
             ("shopt", "-A shopt"),
+            ("signal", "-A signal"),
             ("stopped", "-A stopped"),
         ] {
             if self.actions.iter().any(|value| value == action) {
@@ -420,6 +436,9 @@ impl Spec {
                     words.extend(session.jobs.completion_names(action, prefix))
                 }
                 "user" => words.extend(complete::user_names(prefix)),
+                "group" => words.extend(complete::group_names(prefix)),
+                "service" => words.extend(complete::service_names(prefix)),
+                "signal" => words.extend(complete::signal_names(prefix)),
                 "hostname" => words.extend(complete::host_names(prefix, session)),
                 "command" => words.extend(complete::command_names(prefix, session)),
                 "directory" | "file" => words.extend(complete::file_names(
@@ -713,6 +732,14 @@ fn apply(
         if words.is_empty() && options.contains("default") {
             words = complete::file_names(prefix, false, false, session);
         }
+        if let Some(name) = request.destination {
+            let status = u8::from(words.is_empty());
+            if let Err(error) = session.store_completions(&name, words) {
+                eprintln!("tonari: compgen: {name}: {error}");
+                return Ok(1);
+            }
+            return Ok(status);
+        }
         let capacity = match words.len() {
             0 => 0,
             1..=8 => 256,
@@ -783,6 +810,9 @@ fn apply(
 }
 
 pub fn run(name: &str, args: &[String], last: u8, session: &mut Session) -> u8 {
+    if name == "compgen" && args.is_empty() {
+        return 0;
+    }
     let request = match Request::parse(name, args) {
         Ok(request) => request,
         Err(error) => {
@@ -801,6 +831,18 @@ pub struct Generated {
 }
 
 impl Registry {
+    pub(crate) fn configured(
+        &self,
+        command: Option<&str>,
+        prefix: &str,
+        session: &Session,
+    ) -> bool {
+        !self.specs.is_empty()
+            && (self.lookup(command, prefix).is_some()
+                || (session.shopt.progcomp_alias
+                    && command.is_some_and(|cmd| session.aliases.get(cmd).is_some())))
+    }
+
     pub(crate) fn in_callback(&self) -> bool {
         self.active.is_some()
     }
@@ -853,6 +895,8 @@ pub fn for_tab(
             name = expanded.words.first()?.clone();
             at = expanded.command_start;
             if session.completions.lookup(Some(&name), prefix).is_some() {
+                let expanded =
+                    expanded.programmable(&session.completion_breaks(), session.shopt.hostcomplete);
                 return generate_for_tab(session, Some(&name), prefix, Some(&expanded));
             }
         }

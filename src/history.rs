@@ -309,6 +309,9 @@ impl Session {
             .as_ref()
             .map_or(1, |h| h.base + h.current.unwrap_or(h.lines.len()) + 1)
     }
+    pub(crate) fn history_command_number(&self) -> usize {
+        self.history.as_ref().map_or(0, |h| h.base + h.lines.len())
+    }
     pub(crate) fn history_lines(&self) -> &[String] {
         self.history.as_deref().map_or(&[], |h| h.lines.as_slice())
     }

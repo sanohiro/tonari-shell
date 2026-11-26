@@ -8,6 +8,18 @@ use crate::Session;
 pub struct Aliases(pub Option<Rc<BTreeMap<String, String>>>);
 
 impl Aliases {
+    pub(crate) fn insert(&mut self, name: &str, value: &str) -> Result<(), &'static str> {
+        if name.is_empty()
+            || name
+                .chars()
+                .any(|c| c.is_whitespace() || "/$`=;&|()<>'\"\\".contains(c))
+        {
+            return Err("invalid alias name");
+        }
+        Rc::make_mut(self.0.get_or_insert_with(Rc::default)).insert(name.into(), value.into());
+        Ok(())
+    }
+
     pub fn names(&self) -> impl Iterator<Item = &String> {
         self.0.iter().flat_map(|map| map.keys())
     }
@@ -56,16 +68,9 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
     for arg in args {
         if !remove {
             if let Some((name, value)) = arg.split_once('=') {
-                if name.is_empty()
-                    || name
-                        .chars()
-                        .any(|c| c.is_whitespace() || "/$`=;&|()<>'\"\\".contains(c))
-                {
-                    eprintln!("tonari: alias: {name}: invalid alias name");
+                if let Err(e) = session.aliases.insert(name, value) {
+                    eprintln!("tonari: alias: {name}: {e}");
                     status = 1;
-                } else {
-                    Rc::make_mut(session.aliases.0.get_or_insert_with(Rc::default))
-                        .insert(name.into(), value.into());
                 }
                 continue;
             }

@@ -44,6 +44,9 @@ jobs:
         if: matrix.shard == 0
         run: |
           python3 tests/shell.py "$RUNNER_TEMP/target/release/tonari" -q
+      - name: Compare source-review witnesses with the runner's Bash
+        if: matrix.shard == 0
+        run: python3 tests/compat/source_review.py /bin/bash "$RUNNER_TEMP/target/release/tonari" --runs 0
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

@@ -20,6 +20,10 @@ pub struct ShellOptions {
     pub hostcomplete: bool,
     pub checkwinsize: bool,
     pub sourcepath: bool,
+    pub bash_source_fullpath: bool,
+    pub force_fignore: bool,
+    pub shift_verbose: bool,
+    pub execfail: bool,
     pub varredir_close: bool,
     pub xpg_echo: bool,
     pub expand_aliases: bool,
@@ -49,6 +53,10 @@ impl Default for ShellOptions {
             hostcomplete: true,
             checkwinsize: true,
             sourcepath: true,
+            bash_source_fullpath: false,
+            force_fignore: true,
+            shift_verbose: false,
+            execfail: false,
             varredir_close: false,
             xpg_echo: false,
             expand_aliases: false,
@@ -91,6 +99,7 @@ const SET_OPTIONS: &[OptionEntry] = &[
     option_entry!("notify", notify),
     option_entry!("nounset", nounset),
     option_entry!("onecmd", onecmd),
+    option_entry!("physical", physical),
     option_entry!("pipefail", pipefail),
     option_entry!("posix", posix),
     option_entry!("verbose", verbose),
@@ -99,14 +108,17 @@ const SET_OPTIONS: &[OptionEntry] = &[
 ];
 const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("autocd", shopt.autocd),
+    option_entry!("bash_source_fullpath", shopt.bash_source_fullpath),
     option_entry!("cdable_vars", shopt.cdable_vars),
     option_entry!("checkhash", shopt.checkhash),
     option_entry!("checkwinsize", shopt.checkwinsize),
     option_entry!("dotglob", shopt.glob.dotglob),
+    option_entry!("execfail", shopt.execfail),
     option_entry!("expand_aliases", shopt.expand_aliases),
     option_entry!("extdebug", shopt.extdebug),
     option_entry!("extglob", shopt.glob.extglob),
     option_entry!("failglob", shopt.glob.failglob),
+    option_entry!("force_fignore", shopt.force_fignore),
     option_entry!("globskipdots", shopt.glob.globskipdots),
     option_entry!("globstar", shopt.glob.globstar),
     option_entry!("histappend", shopt.histappend),
@@ -128,17 +140,29 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("progcomp", shopt.progcomp),
     option_entry!("progcomp_alias", shopt.progcomp_alias),
     option_entry!("promptvars", shopt.promptvars),
+    option_entry!("shift_verbose", shopt.shift_verbose),
     option_entry!("sourcepath", shopt.sourcepath),
     option_entry!("varredir_close", shopt.varredir_close),
     option_entry!("xpg_echo", shopt.xpg_echo),
 ];
 impl Session {
     pub fn set_posix(&mut self, enabled: bool) {
+        if enabled && self.get("POSIXLY_CORRECT").is_none() {
+            self.assign("POSIXLY_CORRECT", "y");
+        } else if !enabled && self.get("POSIXLY_CORRECT").is_some() {
+            self.unset_variable("POSIXLY_CORRECT");
+        }
+        self.apply_posix_mode(enabled);
+    }
+
+    pub(super) fn apply_posix_mode(&mut self, enabled: bool) {
         self.posix = enabled;
+        self.shopt.shift_verbose = enabled;
         self.jobs.quiet = enabled && !self.interactive;
         self.shopt.expand_aliases = enabled || self.interactive;
         if enabled {
             self.shopt.inherit_errexit = true;
+            self.shopt.sourcepath = true;
         }
     }
 
@@ -290,6 +314,17 @@ impl Session {
             };
             if !all && (enable || disable) {
                 if let Some(write) = entry.write {
+                    if name == "hostcomplete" && !set && !self.word_breaks_unset {
+                        let breaks = self.completion_breaks();
+                        if enable != breaks.contains('@') {
+                            let adjusted = if enable {
+                                format!("@{breaks}")
+                            } else {
+                                breaks.replace('@', "")
+                            };
+                            self.assign("COMP_WORDBREAKS", &adjusted);
+                        }
+                    }
                     *write(self) = enable;
                     if set {
                         self.option_changed(name, enable);

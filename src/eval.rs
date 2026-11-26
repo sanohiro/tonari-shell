@@ -284,7 +284,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                     let mut fields = Vec::new();
                     for word in words {
                         if let Err(error) = env.append_fields(word, &mut fields) {
-                            eprintln!("tonari: {error}");
+                            error.report("");
                             return error.flow(env.session);
                         }
                     }
@@ -544,7 +544,7 @@ pub(crate) fn expand_case(
         env.scalar(word)
     };
     result.map_err(|e| {
-        eprintln!("tonari: {e}");
+        e.report("");
         e.flow(session)
     })
 }
@@ -627,7 +627,7 @@ pub(crate) fn call_with_bindings(
     let name = arguments.next().expect("function name");
     if session.function_nesting_full() {
         eprintln!("tonari: {name}: function nesting limit exceeded");
-        return Flow::Continue(1);
+        return Flow::Discard(1);
     }
     let function = session.functions[&name].clone();
     let traced = session.traced_functions.contains(&name);
@@ -666,6 +666,7 @@ pub(crate) fn call_with_bindings(
     let flow = crate::traps::returning(session, flow);
     session.traps.leave_function(hidden);
     session.positional = old;
+    session.source_set_args = false;
     if tracked {
         session.debug_args.pop();
         if session.debug_args.len() == 1 {

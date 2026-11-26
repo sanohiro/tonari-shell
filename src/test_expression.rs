@@ -75,7 +75,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                     let mut env = crate::expansion::Expansion::new(session, status, &captured);
                     let mut right = right.clone();
                     right.resolve(&mut env).map_err(|e| {
-                        eprintln!("tonari: [[: {e}");
+                        e.report("[[: ");
                         e.flow(env.session)
                     })?;
                     let right = right.extended_pattern(
@@ -100,7 +100,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                     let expression = crate::expansion::Expansion::new(session, status, &captured)
                         .regex(right.clone())
                         .map_err(|e| {
-                            eprintln!("tonari: [[: {e}");
+                            e.report("[[: ");
                             e.flow(session)
                         })?;
                     trace(session, status, &[&left, op, &expression]);

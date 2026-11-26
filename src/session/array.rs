@@ -168,6 +168,29 @@ impl Variable {
 }
 
 impl Session {
+    pub(super) fn active_groups(&self, name: &str) -> bool {
+        name == "GROUPS" && !self.groups_unset
+    }
+
+    fn group_ids() -> &'static [String] {
+        static GROUPS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+        GROUPS.get_or_init(|| {
+            let primary = unsafe { libc::getgid() };
+            let n = unsafe { libc::getgroups(0, std::ptr::null_mut()) };
+            let mut ids = vec![0; n.max(0) as usize];
+            if n > 0 {
+                let used = unsafe { libc::getgroups(n, ids.as_mut_ptr()) };
+                ids.truncate(used.max(0) as usize);
+            }
+            if let Some(i) = ids.iter().position(|&id| id == primary) {
+                ids.swap(0, i);
+            } else {
+                ids.insert(0, primary);
+            }
+            ids.into_iter().map(|id| id.to_string()).collect()
+        })
+    }
+
     pub fn valid_target(&self, target: &str) -> bool {
         if let Some((base, expr)) = subscript(target) {
             super::is_identifier(base)
@@ -230,6 +253,7 @@ impl Session {
                 (0..self.debug_args.iter().map(Vec::len).sum::<usize>() as i64).collect()
             }
             "BASH_ARGC" => (0..self.debug_args.len() as i64).collect(),
+            "GROUPS" => (0..Self::group_ids().len() as i64).collect(),
             "BASH_VERSINFO" => (0..6).collect(),
             "DIRSTACK" => (0..=self.dir_stack.len() as i64).collect(),
             "FUNCNAME" if self.function_depth == 0 => Vec::new(),
@@ -274,6 +298,7 @@ impl Session {
                 .rev()
                 .nth(index as usize)
                 .map(|v| v.len().to_string()),
+            "GROUPS" => Self::group_ids().get(usize::try_from(index).ok()?).cloned(),
             "BASH_VERSINFO" => match index {
                 5 => Some(Self::machine_type()),
                 i => ["5", "2", "0", "1", "tonari"]
@@ -323,9 +348,17 @@ impl Session {
         if !self.variables.contains_key("DIRSTACK") {
             names.push("DIRSTACK".into());
         }
+        for name in ["BASH_ALIASES", "BASH_CMDS"] {
+            if self.live_table(name) {
+                names.push(name.into());
+            }
+        }
         names.push("BASH_SOURCE".into());
         names.push("BASH_LINENO".into());
         names.push("BASH_VERSINFO".into());
+        if self.active_groups("GROUPS") {
+            names.push("GROUPS".into());
+        }
         if self.pipe_status.first.is_some() {
             names.push("PIPESTATUS".into());
         }
@@ -338,6 +371,16 @@ impl Session {
     }
 
     pub(crate) fn stored_array_len(&self, name: &str) -> Option<usize> {
+        if self.active_groups(name) && !self.variables.contains_key(name) {
+            return Some(Self::group_ids().len());
+        }
+        if self.live_table(name) {
+            return Some(if name == "BASH_ALIASES" {
+                self.aliases.0.as_ref().map_or(0, |m| m.len())
+            } else {
+                self.hashes.items().count()
+            });
+        }
         if name == "PIPESTATUS" {
             return None;
         }
@@ -350,6 +393,10 @@ impl Session {
     }
 
     pub fn append_indexed_fields(&self, name: &str, fields: &mut Vec<String>) -> bool {
+        if self.active_groups(name) && !self.variables.contains_key(name) {
+            fields.extend_from_slice(Self::group_ids());
+            return true;
+        }
         if name == "PIPESTATUS" {
             return false;
         }
@@ -367,6 +414,17 @@ impl Session {
             return Vec::new();
         };
         let name = resolved.as_ref();
+        if self.active_groups(name) && !self.variables.contains_key(name) {
+            return Self::group_ids().to_vec();
+        }
+        if self.live_table(name) {
+            return self
+                .table_snapshot(name)
+                .ordered()
+                .into_iter()
+                .map(|(_, v)| v.to_owned())
+                .collect();
+        }
         if let Some(map) = self.variables.get(name).and_then(Variable::associative) {
             return map
                 .ordered()
@@ -378,6 +436,29 @@ impl Session {
             .into_iter()
             .filter_map(|index| self.element(name, index))
             .collect()
+    }
+
+    pub(crate) fn store_completions(
+        &mut self,
+        name: &str,
+        words: Vec<String>,
+    ) -> Result<(), &'static str> {
+        let target = self.reference_name(name)?;
+        if self.readonly(&target) {
+            return Err("readonly variable");
+        }
+        if self.is_associative(&target) || !super::is_identifier(&target) {
+            return Err("not an indexed array");
+        }
+        if let Some(variable) = self.variables.get_mut(target.as_ref()) {
+            variable.declared = true;
+            variable.array_assigned = true;
+            variable.value = None;
+            variable.elements = Some(Rc::new(Elements::Dense(words)));
+        } else {
+            self.store_elements(&target, Elements::Dense(words), false);
+        }
+        Ok(())
     }
 
     pub fn replace_array(&mut self, name: &str, mut values: Vec<String>) {
@@ -398,6 +479,9 @@ impl Session {
     ) -> Result<(), &'static str> {
         let resolved = self.reference_name(name)?;
         let name = resolved.as_ref();
+        if self.active_groups(name) {
+            return Ok(());
+        }
         if subscript(name).is_some() {
             return Err("cannot assign an array to an array element");
         }
@@ -481,6 +565,20 @@ impl Session {
         append: bool,
         items: &ArrayItems,
     ) -> Result<(), &'static str> {
+        if var.dynamic
+            && matches!(name, "BASH_ALIASES" | "BASH_CMDS")
+            && let ArrayItems::Associative(items) = items
+        {
+            for (key, value, concat) in items {
+                let value = if *concat {
+                    self.assoc_value(name, key).unwrap_or_default().to_owned() + value
+                } else {
+                    value.clone()
+                };
+                self.assign_key(name, key.clone(), value)?;
+            }
+            return Ok(());
+        }
         let items = match items {
             ArrayItems::Associative(items) => {
                 let integer = var.integer;
@@ -639,7 +737,7 @@ impl Session {
     }
 
     pub fn assign_element(&mut self, name: &str, index: i64, value: String) {
-        if self.readonly(name) {
+        if self.active_groups(name) || self.readonly(name) {
             return;
         }
         if name == "DIRSTACK" && !self.variables.contains_key(name) {

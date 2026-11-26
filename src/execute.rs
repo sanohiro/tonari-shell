@@ -7,6 +7,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 mod here_input;
 mod lookup;
+pub(crate) use lookup::IgnoredExecutables;
 mod spawn;
 pub(crate) use spawn::inherited_env;
 
@@ -22,7 +23,7 @@ use crate::expansion::Expansion;
 use crate::parser::{Assignment, Pipeline, Redirect, SimpleCommand, Target, Word};
 use crate::session::Session;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Flow {
     Continue(u8),
     Discard(u8),
@@ -143,7 +144,123 @@ fn duplicate(src: RawFd, dest: RawFd) -> io::Result<()> {
     }
 }
 
+fn connect_address(
+    family: i32,
+    kind: i32,
+    protocol: i32,
+    addr: *const libc::sockaddr,
+    size: libc::socklen_t,
+) -> io::Result<OwnedFd> {
+    let fd = unsafe { libc::socket(family, kind, protocol) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let socket = unsafe { OwnedFd::from_raw_fd(fd) };
+    if unsafe { libc::connect(fd, addr, size) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(socket)
+}
+
+// Resolve services as well as numeric ports, and try every address returned for
+// the requested protocol. The open descriptor has the same inheritance as open(2).
+fn network_redirect(path: &CStr, address: &[u8], kind: i32) -> Option<OwnedFd> {
+    let Some(separator) = address.iter().position(|&b| b == b'/') else {
+        write_error(path.to_bytes(), b": expected host/port");
+        return None;
+    };
+    let host = &address[..separator];
+    let service_start = path.to_bytes().len() - address.len() + separator + 1;
+    let service = CStr::from_bytes_with_nul(&path.to_bytes_with_nul()[service_start..]).ok()?;
+    if host.is_empty() || service.to_bytes().is_empty() {
+        write_error(path.to_bytes(), b": expected host/port");
+        return None;
+    }
+    // Numeric IPv4 datagrams need no resolver or service database. Other address
+    // forms, including scoped IPv6, use the system resolver below.
+    if kind == libc::SOCK_DGRAM
+        && let Some((ip, port)) = std::str::from_utf8(host)
+            .ok()
+            .and_then(|s| s.parse::<std::net::Ipv4Addr>().ok())
+            .zip(
+                service
+                    .to_str()
+                    .ok()
+                    .filter(|s| s.bytes().all(|b| b.is_ascii_digit()))
+                    .and_then(|s| s.parse::<u16>().ok()),
+            )
+    {
+        let mut dest: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+        dest.sin_family = libc::AF_INET as _;
+        dest.sin_port = port.to_be();
+        dest.sin_addr.s_addr = u32::from_ne_bytes(ip.octets());
+        let size = std::mem::size_of_val(&dest) as libc::socklen_t;
+        #[cfg(target_os = "macos")]
+        {
+            dest.sin_len = size as u8;
+        }
+        return match connect_address(
+            libc::AF_INET,
+            kind,
+            0,
+            std::ptr::from_ref(&dest).cast(),
+            size,
+        ) {
+            Ok(fd) => Some(fd),
+            Err(error) => {
+                write_error_detail(path.to_bytes(), b": ", error.to_string().as_bytes());
+                None
+            }
+        };
+    }
+    let host = CString::new(host).ok()?;
+    let mut hints: libc::addrinfo = unsafe { std::mem::zeroed() };
+    hints.ai_socktype = kind;
+    let mut list = std::ptr::null_mut();
+    let result = unsafe { libc::getaddrinfo(host.as_ptr(), service.as_ptr(), &hints, &mut list) };
+    if result != 0 {
+        write_error_detail(
+            path.to_bytes(),
+            b": ",
+            unsafe { CStr::from_ptr(libc::gai_strerror(result)) }.to_bytes(),
+        );
+        return None;
+    }
+    let mut current = list;
+    let mut connected = None;
+    let mut error = io::Error::from(io::ErrorKind::AddrNotAvailable);
+    while let Some(entry) = unsafe { current.as_ref() } {
+        match connect_address(
+            entry.ai_family,
+            kind,
+            entry.ai_protocol,
+            entry.ai_addr,
+            entry.ai_addrlen,
+        ) {
+            Ok(fd) => {
+                connected = Some(fd);
+                break;
+            }
+            Err(e) => error = e,
+        }
+        current = entry.ai_next;
+    }
+    unsafe { libc::freeaddrinfo(list) };
+    if connected.is_none() {
+        write_error_detail(path.to_bytes(), b": ", error.to_string().as_bytes());
+    }
+    connected
+}
+
 fn open_redirect(path: &CStr, flags: i32) -> Option<OwnedFd> {
+    if let Some(device) = path.to_bytes().strip_prefix(b"/dev/")
+        && let Some((kind, address)) = device
+            .strip_prefix(b"tcp/")
+            .map(|a| (libc::SOCK_STREAM, a))
+            .or_else(|| device.strip_prefix(b"udp/").map(|a| (libc::SOCK_DGRAM, a)))
+    {
+        return network_redirect(path, address, kind);
+    }
     let mut fd = unsafe { libc::open(path.as_ptr(), flags, 0o666 as libc::c_int) };
     if fd < 0 && flags & libc::O_EXCL != 0 && errno() == libc::EEXIST {
         // Open without truncation and inspect the opened object. A path swap
@@ -411,8 +528,17 @@ impl External {
         } else {
             (!executable.as_bytes().contains(&b'/')).then(|| {
                 let path = lookup::path(cmd, session);
+                let ignored = IgnoredExecutables::new(session);
                 std::env::split_paths(&path)
-                    .map(|dir| CString::new(dir.join(name).as_os_str().as_bytes()).unwrap())
+                    .map(|dir| {
+                        if dir.as_os_str().is_empty() {
+                            Path::new(".").join(name)
+                        } else {
+                            dir.join(name)
+                        }
+                    })
+                    .filter(|path| !ignored.contains(path))
+                    .map(|path| CString::new(path.as_os_str().as_bytes()).unwrap())
                     .collect()
             })
         };
@@ -1019,7 +1145,7 @@ fn exec_builtin(cmd: &PreparedCommand, session: &Session, mut args: &[String]) -
     }
     let external = External::for_words(cmd, session, args, arg0, clear);
     let status = external.exec(None);
-    if session.interactive {
+    if session.subshell_depth == 0 && (session.interactive || session.shopt.execfail) {
         Flow::Continue(status)
     } else {
         Flow::Exit(status)
@@ -1043,6 +1169,33 @@ fn apply_array_declarations(cmd: &PreparedCommand, status: u8, session: &mut Ses
         }
     }
     0
+}
+
+// The temporary output and the saved stdout are both private descriptors. A
+// redirect inside the body can reuse their numbers without breaking restoration.
+pub(crate) fn capture_stdout(run: impl FnOnce() -> Flow) -> io::Result<(Flow, Vec<u8>)> {
+    use std::io::{Read, Seek, Write};
+    use std::os::fd::BorrowedFd;
+    io::stdout().flush()?;
+    let saved = SavedFd::capture(&Action::Dup(1, 1), &[])?;
+    let stream = unsafe { libc::tmpfile() };
+    if stream.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let file = unsafe { fd::PrivateFile::duplicate(BorrowedFd::borrow_raw(libc::fileno(stream))) };
+    unsafe {
+        libc::fclose(stream);
+    }
+    let mut file = file?;
+    duplicate(file.as_raw_fd(), 1)?;
+    let flow = run();
+    let flushed = io::stdout().flush();
+    saved.restore(1)?;
+    flushed?;
+    file.rewind()?;
+    let mut output = Vec::new();
+    file.read_to_end(&mut output)?;
+    Ok((flow, output))
 }
 
 enum SavedFd {
@@ -1389,7 +1542,10 @@ fn stage_expansion(word: &Word) -> bool {
     match word {
         Word::Literal(_) => false,
         Word::Expanded(parts) | Word::Declaration(parts) => parts.iter().any(|part| match part {
-            Part::Substitution { .. } | Part::Process { .. } | Part::Arithmetic { .. } => true,
+            Part::CurrentSubstitution { .. }
+            | Part::Substitution { .. }
+            | Part::Process { .. }
+            | Part::Arithmetic { .. } => true,
             Part::Modify { .. } => true,
             Part::Nested(word) => stage_expansion(word),
             Part::Parameter { name, .. } => name == "BASHPID",
@@ -2511,7 +2667,7 @@ fn run_ordered(
     let words = match expand_command_words(&mut raw, session, status, &captured) {
         Ok(words) => words,
         Err(e) => {
-            eprintln!("tonari: {e}");
+            e.report("");
             return Ok(e.flow(session));
         }
     };
@@ -2537,7 +2693,7 @@ fn run_ordered(
         let cmd = match prepare_expanded(raw, words, session, status, true, &captured) {
             Ok(cmd) => cmd,
             Err(e) => {
-                eprintln!("tonari: {e}");
+                e.report("");
                 return Ok((e.flow(session), false));
             }
         };
@@ -2665,7 +2821,7 @@ fn foreground(
     let cmd = match prepare(raw, session, last_status, true) {
         Ok(cmd) => cmd,
         Err(e) => {
-            eprintln!("tonari: {e}");
+            e.report("");
             return Ok(e.flow(session));
         }
     };

@@ -17,6 +17,10 @@ pub(super) struct Dynamic {
 }
 
 pub(super) fn is_dynamic(name: &str) -> bool {
+    matches!(name, "BASH_MONOSECONDS" | "HISTCMD") || integer_attribute(name)
+}
+
+pub(super) fn integer_attribute(name: &str) -> bool {
     matches!(name, "SECONDS" | "RANDOM" | "SRANDOM")
 }
 
@@ -70,6 +74,21 @@ impl Session {
                         return Some(i64::from(next));
                     }
                 }
+            }
+            "HISTCMD" => Some(if self.history_enabled {
+                self.history_command_number() as i64
+            } else {
+                0
+            }),
+            "BASH_MONOSECONDS" => {
+                let mut ts = std::mem::MaybeUninit::uninit();
+                Some(
+                    if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, ts.as_mut_ptr()) } == 0 {
+                        unsafe { ts.assume_init() }.tv_sec
+                    } else {
+                        unsafe { libc::time(std::ptr::null_mut()) }
+                    },
+                )
             }
             "SRANDOM" => entropy().map(i64::from),
             _ => None,

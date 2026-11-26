@@ -66,6 +66,11 @@ pub enum Part {
         body: Vec<Statement>,
         input: bool,
     },
+    CurrentSubstitution {
+        body: Vec<Statement>,
+        quoted: bool,
+        reply: bool,
+    },
     Substitution {
         body: Vec<Statement>,
         quoted: bool,
@@ -293,6 +298,13 @@ impl Word {
                 }
                 Part::Process { body, input } => {
                     *part = Part::Text(env.process(std::mem::take(body), *input)?);
+                }
+                Part::CurrentSubstitution {
+                    body,
+                    quoted,
+                    reply,
+                } => {
+                    *part = literal(env.current_capture(std::mem::take(body), *reply)?, *quoted);
                 }
                 Part::Substitution { body, quoted } => {
                     *part = literal(env.capture(std::mem::take(body))?, *quoted);
@@ -601,6 +613,7 @@ impl Word {
                 }
                 Part::PrefixNames { .. }
                 | Part::BadSubstitution(_)
+                | Part::CurrentSubstitution { .. }
                 | Part::Substitution { .. }
                 | Part::Process { .. }
                 | Part::Arithmetic { .. }

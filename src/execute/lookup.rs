@@ -211,6 +211,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
             }
         }
         if !found || search_all {
+            let ignored = IgnoredExecutables::new(session);
             let mut report = |path: &Path| {
                 found = true;
                 let absolute;
@@ -242,7 +243,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                     } else {
                         dir.join(name)
                     };
-                    if executable(&path) {
+                    if !ignored.contains(&path) && executable(&path) {
                         if report(&path).is_err() {
                             return 1;
                         }
@@ -269,6 +270,75 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
             all
         }),
     )
+}
+
+#[derive(Default)]
+pub(crate) struct IgnoredExecutables {
+    patterns: Option<std::rc::Rc<[crate::pattern::extended::Pattern]>>,
+}
+
+struct IgnoreCache {
+    value: String,
+    extended: bool,
+    locale: crate::session::CharacterLocale,
+    patterns: std::rc::Rc<[crate::pattern::extended::Pattern]>,
+}
+
+impl IgnoredExecutables {
+    pub(crate) fn new(session: &Session) -> Self {
+        thread_local! {
+            static CACHE: std::cell::RefCell<Option<IgnoreCache>> = const { std::cell::RefCell::new(None) };
+        }
+        let owned;
+        let value = match session.stored_scalar("EXECIGNORE") {
+            Some(value) => value,
+            None => {
+                owned = session.get("EXECIGNORE");
+                owned.as_deref().unwrap_or("")
+            }
+        };
+        if value.is_empty() {
+            return Self::default();
+        }
+        let extended = session.shopt.glob.extglob;
+        let locale = session.character_locale();
+        CACHE.with_borrow_mut(|cache| {
+            if let Some(prev) = cache
+                && prev.extended == extended
+                && prev.locale == locale
+                && prev.value == value
+            {
+                return Self {
+                    patterns: Some(prev.patterns.clone()),
+                };
+            }
+            let patterns = value
+                .split(':')
+                .filter(|p| !p.is_empty())
+                .map(|p| crate::pattern::extended::Pattern::insensitive(p, extended, locale))
+                .collect::<std::rc::Rc<[_]>>();
+            *cache = Some(IgnoreCache {
+                value: value.into(),
+                extended,
+                locale,
+                patterns: patterns.clone(),
+            });
+            Self {
+                patterns: Some(patterns),
+            }
+        })
+    }
+
+    pub(crate) fn active(&self) -> bool {
+        self.patterns.as_ref().is_some_and(|p| !p.is_empty())
+    }
+
+    pub(crate) fn contains(&self, path: &Path) -> bool {
+        self.patterns.as_ref().is_some_and(|patterns| {
+            path.to_str()
+                .is_some_and(|s| patterns.iter().any(|p| p.accepts(s, false)))
+        })
+    }
 }
 
 pub(super) fn executable(path: &Path) -> bool {

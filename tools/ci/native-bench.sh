@@ -8,6 +8,24 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == source-review ]]; then
+  if [[ $RUNNER_OS == Linux ]]; then
+    docker run --rm -e EXTERNAL_BENCH_CASE -v "$PWD:/repo:ro" -v "$bin:/shells:ro" ubuntu:26.04 bash -ec '
+      apt-get update -qq && apt-get install -qq --no-install-recommends python3 netbase >/dev/null
+      args=()
+      if [[ -x /shells/baseline ]]; then args+=(--first /shells/baseline); fi
+      for name in ${EXTERNAL_BENCH_CASE:-}; do args+=(--case "$name"); done
+      python3 /repo/tests/compat/source_review.py /bin/bash /shells/current "${args[@]}"
+    ' > "$out/source-review.jsonl"
+  else
+    if [[ ! -x /opt/homebrew/bin/bash ]]; then brew install bash; fi
+    args=()
+    if [[ -x $bin/baseline ]]; then args+=(--first "$bin/baseline"); fi
+    for name in ${EXTERNAL_BENCH_CASE:-}; do args+=(--case "$name"); done
+    python3 tests/compat/source_review.py /opt/homebrew/bin/bash "$current" "${args[@]}" > "$out/source-review.jsonl"
+  fi
+  exit
+fi
 if [[ ( $SUITE == inventory* || $SUITE == budget* ) && $RUNNER_OS == Linux ]]; then
   base=debian:trixie-slim
   if [[ $SUITE == *-ubuntu ]]; then

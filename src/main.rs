@@ -489,6 +489,7 @@ fn run_invocation(
     session.shopt.braceexpand = invocation.braceexpand;
     session.nounset = invocation.nounset;
     session.pipefail = invocation.pipefail;
+    session.physical = invocation.physical;
     session.interactive = invocation.interactive;
     session.login = invocation.login;
     session.history_enabled = invocation.interactive;
@@ -508,6 +509,12 @@ fn run_invocation(
         session.jobs.init(session.interactive);
     }
     session.command_string = matches!(invocation.input, Input::Command(_));
+    if let Input::Command(text) = &mut invocation.input {
+        if std::env::var_os("BASH_EXECUTION_STRING").is_some() {
+            session.assign("BASH_EXECUTION_STRING", text);
+        }
+        session.execution_string = Some(std::rc::Rc::new(std::mem::take(text)));
+    }
     session.command_history_expansion = invocation.histexpand == Some(true);
     session.stdin_script = matches!(invocation.input, Input::Stdin);
     session.set_posix(invocation.posix);
@@ -547,14 +554,13 @@ fn run_invocation(
         session.set_posix(true);
     }
     let flow = match invocation.input {
-        Input::Command(text) => {
+        Input::Command(_) => {
+            let text = session.execution_string.clone().unwrap();
             input::text(&mut session, &text, initial, true, invocation.check, None)
         }
         Input::File(path) => match std::fs::File::open(&path) {
             Ok(file) => {
-                session
-                    .source_names
-                    .push(path.to_string_lossy().as_ref().into());
+                session.push_source_path(&path);
                 session.function_names.push("main".into());
                 session.call_lines.push(0);
                 input::file_script(&mut session, file, None, initial, invocation.check)

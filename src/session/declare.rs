@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::rc::Rc;
 
-use super::{Session, Variable, is_identifier, print_declaration};
+use super::{LetterCase, Session, Variable, is_identifier, print_declaration};
 
 #[derive(Default)]
 struct Options {
@@ -17,6 +17,7 @@ struct Options {
     readonly: Option<bool>,
     global: bool,
     integer: Option<bool>,
+    capitalize: Option<bool>,
     lower: Option<bool>,
     upper: Option<bool>,
     inherit: bool,
@@ -72,6 +73,7 @@ pub(super) fn run(
                 'r' => flags.readonly = Some(on),
                 'g' => flags.global = on,
                 'i' => flags.integer = Some(on),
+                'c' => flags.capitalize = Some(on),
                 'l' => flags.lower = Some(on),
                 'u' => flags.upper = Some(on),
                 'n' => flags.nameref = Some(on),
@@ -178,6 +180,7 @@ pub(super) fn run(
             && !flags.associative
             && flags.nameref.is_none()
             && flags.integer.is_none()
+            && flags.capitalize.is_none()
             && flags.lower.is_none()
             && flags.upper.is_none()
         {
@@ -206,8 +209,10 @@ pub(super) fn run(
                     && (flags.readonly == Some(true) && !var.readonly
                         || flags.array && (var.elements.is_none() || var.associative().is_some())
                         || flags.associative && var.associative().is_none()
-                        || flags.lower == Some(true) && var.letter_case != Some(false)
-                        || flags.upper == Some(true) && var.letter_case != Some(true)
+                        || flags.capitalize == Some(true)
+                            && var.letter_case != Some(LetterCase::Capitalize)
+                        || flags.lower == Some(true) && var.letter_case != Some(LetterCase::Lower)
+                        || flags.upper == Some(true) && var.letter_case != Some(LetterCase::Upper)
                         || flags.integer == Some(true) && !var.integer
                         || flags.nameref == Some(true) && !var.nameref)
                 {
@@ -283,6 +288,11 @@ pub(super) fn run(
         if name == "PATH" {
             session.hashes.clear();
         }
+        if session.active_groups(name) && (local || value.is_some() || array.is_some()) {
+            eprintln!("tonari: {command}: {name}: variable may not be assigned a value");
+            status = 1;
+            continue;
+        }
         let mut var = session
             .declared_variable(name, flags.global)
             .unwrap_or_default();
@@ -357,13 +367,21 @@ pub(super) fn run(
             var.nameref = on;
             session.has_namerefs |= on;
         }
-        match (flags.lower, flags.upper) {
-            (Some(true), Some(true)) => var.letter_case = None,
-            (Some(true), _) => var.letter_case = Some(false),
-            (_, Some(true)) => var.letter_case = Some(true),
-            (Some(false), _) if var.letter_case == Some(false) => var.letter_case = None,
-            (_, Some(false)) if var.letter_case == Some(true) => var.letter_case = None,
-            _ => {}
+        let case_flags = [
+            (LetterCase::Capitalize, flags.capitalize),
+            (LetterCase::Lower, flags.lower),
+            (LetterCase::Upper, flags.upper),
+        ];
+        let mut enabled = case_flags
+            .iter()
+            .filter_map(|&(mode, on)| (on == Some(true)).then_some(mode));
+        if let Some(mode) = enabled.next() {
+            var.letter_case = enabled.next().is_none().then_some(mode);
+        } else if case_flags
+            .iter()
+            .any(|&(mode, on)| on == Some(false) && var.letter_case == Some(mode))
+        {
+            var.letter_case = None;
         }
         if let Some(integer) = flags.integer {
             var.integer = integer;
@@ -413,7 +431,7 @@ pub(super) fn run(
             }) {
                 Ok(()) => {}
                 Err(e) => {
-                    eprintln!("tonari: {command}: {name}: {e}");
+                    e.report(&format!("{command}: {name}: "));
                     return e.flow(session);
                 }
             }
@@ -518,6 +536,10 @@ pub(super) fn run(
         {
             session.apply_history_limit(name, value);
         }
+        if name == "POSIXLY_CORRECT" && (!flags.global || session.declaration_scope(name).is_none())
+        {
+            session.apply_posix_mode(var.value.is_some());
+        }
         session.store_variable(name, var, flags.global);
     }
     crate::execute::Flow::Continue(status)
@@ -557,6 +579,16 @@ impl Session {
         } else {
             self.variables.get(name)
         };
+        if matches!(name, "BASH_ALIASES" | "BASH_CMDS") && entry.is_none_or(|v| v.dynamic) {
+            let mut var = entry.cloned().unwrap_or_default();
+            var.declared = true;
+            var.dynamic = true;
+            var.array_assigned = true;
+            var.elements = Some(std::rc::Rc::new(super::array::Elements::Associative(
+                self.table_snapshot(name),
+            )));
+            return Some(var);
+        }
         if let Some(var) = entry {
             let mut var = var.clone();
             if var.dynamic || matches!(name, "BASHOPTS" | "SHELLOPTS") {
@@ -565,10 +597,10 @@ impl Session {
             return Some(var);
         }
         {
-            if name == "BASH_VERSINFO" {
+            if matches!(name, "BASH_VERSINFO" | "GROUPS") {
                 return Some(Variable {
                     declared: true,
-                    readonly: true,
+                    readonly: name == "BASH_VERSINFO",
                     array_assigned: true,
                     elements: Some(std::rc::Rc::new(super::array::Elements::Dense(
                         self.array_values(name),
@@ -584,7 +616,7 @@ impl Session {
                 inherited: Default::default(),
                 readonly: Self::builtin_readonly(name),
                 nameref: false,
-                integer: super::dynamic::is_dynamic(name)
+                integer: super::dynamic::integer_attribute(name)
                     || matches!(name, "PPID" | "EUID" | "UID"),
                 array_assigned: false,
                 elements: None,

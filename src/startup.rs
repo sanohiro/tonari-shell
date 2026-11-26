@@ -33,12 +33,11 @@ fn sourced(
     }
     let old = (!args.is_empty())
         .then(|| std::mem::replace(&mut session.positional, Vec::from(args).into_iter()));
+    session.source_set_args = false;
     let callsite = session.current_command.clone();
     session.call_lines.push(session.line());
     session.source_depth += 1;
-    session
-        .source_names
-        .push(path.to_string_lossy().as_ref().into());
+    session.push_source_path(path);
     session.function_names.push("source".into());
     let saved_debug = session.traps.enter_source(session.functrace);
     let result = input::file_script(session, script.file, Some(script.metadata), status, false);
@@ -49,8 +48,13 @@ fn sourced(
     session.source_depth -= 1;
     session.call_lines.pop();
     session.current_command = callsite;
-    if let Some(old) = old {
+    if let Some(old) = old
+        && (session.function_depth != 0 || !session.source_set_args)
+    {
         session.positional = old;
+    }
+    if !args.is_empty() {
+        session.source_set_args = false;
     }
     match result {
         Flow::Return(code) => Flow::Continue(code),
@@ -59,28 +63,50 @@ fn sourced(
 }
 
 pub fn source_file(session: &mut Session, words: &[String], status: u8, fatal: bool) -> Flow {
-    let args = &words[1..];
-    let args = if args.first().is_some_and(|s| s == "--") {
-        &args[1..]
-    } else {
-        args
-    };
+    let mut args = &words[1..];
+    let mut search = None;
+    while let Some((option, tail)) = args.split_first() {
+        if option == "--" {
+            args = tail;
+            break;
+        }
+        if option == "-" || !option.starts_with('-') {
+            break;
+        }
+        let Some(path) = option.strip_prefix("-p") else {
+            eprintln!("tonari: source: {option}: invalid option");
+            return Flow::Continue(2);
+        };
+        if path.is_empty() {
+            let Some((path, tail)) = tail.split_first() else {
+                eprintln!("tonari: source: -p requires a path");
+                return Flow::Continue(2);
+            };
+            search = Some(path.as_str());
+            args = tail;
+        } else {
+            search = Some(path);
+            args = tail;
+        }
+    }
     let Some(name) = args.first() else {
         eprintln!("tonari: source: filename required");
         return Flow::Continue(2);
     };
-    if let Some(path) = (session.shopt.sourcepath && !name.contains('/'))
+    let direct = name.contains('/');
+    let inherited = (search.is_none() && !direct && session.shopt.sourcepath)
         .then(|| session.get("PATH"))
-        .flatten()
-    {
-        for dir in std::env::split_paths(&path) {
-            let path = dir.join(name);
+        .flatten();
+    if let Some(path) = search.or(inherited.as_deref()).filter(|_| !direct) {
+        for dir in path.split(':') {
+            let path = Path::new(dir).join(name);
             if let Ok(file) = open_script(&path) {
                 return sourced(session, file, &path, &args[1..], status);
             }
         }
     }
-    if session.posix && words[0] == "." && !name.contains('/') && session.shopt.sourcepath {
+    if !direct && (search.is_some() || session.posix && words[0] == "." && session.shopt.sourcepath)
+    {
         eprintln!("tonari: .: {name}: file not found");
         return if fatal {
             Flow::Exit(1)

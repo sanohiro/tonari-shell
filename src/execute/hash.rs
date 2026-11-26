@@ -25,6 +25,29 @@ impl Default for Table {
 }
 
 impl Table {
+    pub(crate) fn items(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.entries
+            .iter()
+            .filter_map(|(k, e)| Some((k.as_str(), e.path.to_str()?)))
+    }
+
+    pub(crate) fn path_value(&self, key: &str) -> Option<&str> {
+        self.entries.get(key)?.path.to_str()
+    }
+
+    pub(crate) fn bind_path(&mut self, key: String, value: String) {
+        if self.enabled {
+            self.entries.insert(
+                key,
+                Entry {
+                    path: value.into(),
+                    hits: 0,
+                    relative_search: false,
+                },
+            );
+        }
+    }
+
     pub(crate) fn clear(&mut self) {
         self.entries.clear();
     }
@@ -56,6 +79,7 @@ pub(super) struct Absent;
 
 pub(super) fn search(name: &str, session: &Session) -> Result<Option<Entry>, Absent> {
     let path = session.search_path(&[]);
+    let ignored = super::lookup::IgnoredExecutables::new(session);
     let mut relative = false;
     let mut absent = true;
     for dir in std::env::split_paths(&path) {
@@ -66,6 +90,9 @@ pub(super) fn search(name: &str, session: &Session) -> Result<Option<Entry>, Abs
             &dir
         };
         let path = dir.join(name);
+        if ignored.contains(&path) {
+            continue;
+        }
         match super::lookup::check_executable(&path) {
             Ok(true) => {
                 return Ok(Some(Entry {

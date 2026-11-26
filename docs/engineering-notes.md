@@ -1,5 +1,17 @@
 # Engineering notes / 開発知見
 
+## 2026-11-26 · Bash source review / Bash ソースと実動作の照合
+
+A basename or option in the inventory only establishes the entry point. For a sourced script, pass arguments, run a nested source and examine the caller's positional parameters. For a special array, update the underlying alias or command hash and then read the array in both directions. For Bash 5.3 substitutions, test the bytes written to stdout independently from the returned value, and check scopes, return status and side effects. A sourced or anonymous scope does not count as a named function call for FUNCNEST. [Source map and witnesses](compatibility/bash-source-review/README.md)
+
+コマンド置換の高速化では、副作用を持つ一般のコマンドと、出力だけをメモリへ書ける組み込みを区別した。関数による上書き、リダイレクト、トラップ、変数に書き込む printf 形式があるときは通常の実行経路を通す。補完は最初の Tab で共通部分を返すまでの時間を測り、最後に確定した引数も検査する。FIGNORE の除外だけで全候補のコピーや整列が必要になることはない。[ネイティブ実測](benchmarks.md#gnu-source-review)
+
+A completion callback has two distinct views of an option like --key=value. COMP_WORDS retains the equals sign as its own entry. Readline replaces only the value segment under the default settings. A customized delimiter list can make the entire option one word. The PTY fixture records the callback arguments and executes the completed command, so it detects an incorrect replacement even when the displayed suggestion looks right.
+
+補完では候補の文字列だけを比べると挿入位置の誤りを見逃す。既定の区切り文字では --key= を残して値を置き換え、区切りから等号を外した場合はオプション全体を対象にする。引用符、エスケープ、連続した区切り、ホスト名接頭辞、未設定後の再代入も確認した。単純な引数の列なら通常の入力解析結果を再利用できる。[PTY regression and native timings](benchmarks.md#gnu-source-review)
+
+For socket redirection, verify the receiver got the bytes from a builtin, an external command and an open descriptor. For capitalization, transforming just the first character is insufficient because the remaining characters must be lowercased. Reusing the owned ASCII buffer avoids building two temporary strings. サービス名の補完では、ファイルの識別子・変更時刻・サイズと入力した接頭辞がすべて一致するときだけ直前の結果を再利用する。OS のグループ一覧は端末のディレクトリサービスから変わり得るため、実行のたびに取得する。[Implementation and test commands](compatibility/bash-source-review/README.md)
+
 ## 2026-11-26 · Indirection, source lines and child status / 間接参照・行番号・子プロセス
 
 A variable containing an indexed array reference must resolve its subscript once. With `$RANDOM` seeded to 1, reading `${!ref}` for `ref=a[RANDOM%2]` selected the correct element but used to advance the generator twice. The next random number was 19566. Resolve the numeric index using the read-only evaluator and carry its decimal result into the parameter operation. Both GNU Bash 5.2.37 and the release now produce odd followed by 10791. Exporting `RANDOM` takes one snapshot that successive child processes inherit. [Shell tests](../tests/shell.py) · [Native measurements](benchmarks.md#shell-scope-timings)

@@ -163,6 +163,20 @@ fn dollar_word(
         Some('{') => {
             chars.next();
             let content = chars.as_str();
+            if content.starts_with([' ', '\t', '\n', '|']) {
+                let reply = content.starts_with('|');
+                let nested = if reply { &content[1..] } else { content };
+                let (tokens, spans, after) = lex_words(nested, false, false, None, true)?;
+                let body = Reader::new(tokens, spans, &nested[..nested.len() - after.len() - 1])
+                    .list(&[])?;
+                word.part(Part::CurrentSubstitution {
+                    body,
+                    quoted,
+                    reply,
+                });
+                *chars = after.chars();
+                return Ok(());
+            }
             let len = match content.as_bytes().first() {
                 Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => content
                     .bytes()
@@ -278,7 +292,11 @@ fn dollar_word(
                         },
                         b'E' => crate::word::Modification::Escapes,
                         _ => crate::word::Modification::Case {
-                            upper: op != b'L',
+                            direction: if op == b'L' {
+                                crate::pattern::CaseDirection::Lower
+                            } else {
+                                crate::pattern::CaseDirection::Upper
+                            },
                             all: op != b'u',
                             pattern: crate::word::Word::Literal(String::new()),
                         },
@@ -316,7 +334,7 @@ fn dollar_word(
                     });
                     return Ok(());
                 }
-                if let Some(op @ ('^' | ',')) = chars.clone().next() {
+                if let Some(op @ ('^' | ',' | '~')) = chars.clone().next() {
                     chars.next();
                     let all = chars.as_str().starts_with(op);
                     if all {
@@ -326,7 +344,11 @@ fn dollar_word(
                     word.part(Part::Modify {
                         name: name.into(),
                         operation: Box::new(crate::word::Modification::Case {
-                            upper: op == '^',
+                            direction: match op {
+                                '^' => crate::pattern::CaseDirection::Upper,
+                                '~' => crate::pattern::CaseDirection::Toggle,
+                                _ => crate::pattern::CaseDirection::Lower,
+                            },
                             all,
                             pattern,
                         }),
@@ -915,13 +937,13 @@ pub(super) fn lex(
     substitution: bool,
     final_input: bool,
 ) -> Result<(Vec<Token>, Vec<(usize, usize)>, &str), Error> {
-    lex_words(source, substitution, final_input, None)
+    lex_words(source, substitution, final_input, None, false)
 }
 
 pub(super) fn lex_initializer(
     source: &str,
 ) -> Result<(Vec<Token>, Vec<(usize, usize)>, &str), Error> {
-    lex_words(source, false, true, Some(1))
+    lex_words(source, false, true, Some(1), false)
 }
 
 fn lex_words(
@@ -929,6 +951,7 @@ fn lex_words(
     substitution: bool,
     final_input: bool,
     mut array_level: Option<usize>,
+    brace_substitution: bool,
 ) -> Result<(Vec<Token>, Vec<(usize, usize)>, &str), Error> {
     let mut chars = source.chars();
     let mut parentheses = 0usize;
@@ -961,6 +984,16 @@ fn lex_words(
             }
             chars = rest.chars();
             continue;
+        }
+        if brace_substitution
+            && c == '}'
+            && command_position(&tokens)
+            && Reader::new(tokens.clone(), spans.clone(), &source[..offset])
+                .list(&[])
+                .is_ok()
+        {
+            chars.next();
+            return Ok((tokens, spans, chars.as_str()));
         }
         let pattern = pattern_next.take();
         if pattern == Some(false)
@@ -1354,7 +1387,7 @@ fn lex_words(
         }
     }
     here_doc::collect(&mut chars, &mut tokens, &mut pending_docs, final_input)?;
-    if substitution {
+    if substitution || brace_substitution {
         return Err(Error::Incomplete("unterminated command substitution"));
     }
     spans.resize(tokens.len(), (token_start, source.len()));

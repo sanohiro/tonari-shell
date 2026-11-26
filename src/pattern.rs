@@ -246,6 +246,65 @@ pub(super) fn folded_prefix(value: &str, prefix: &str, locale: CharacterLocale) 
     Some(value.len() - chars.as_str().len())
 }
 
+pub(crate) fn capitalize(mut text: String, locale: crate::session::CharacterLocale) -> String {
+    use crate::session::CharacterLocale;
+    if locale == CharacterLocale::Ascii || (text.is_ascii() && locale != CharacterLocale::Turkic) {
+        text.make_ascii_lowercase();
+        if let Some(first) = text.get_mut(..1) {
+            first.make_ascii_uppercase();
+        }
+        return text;
+    }
+    localized(|| {
+        text.chars()
+            .enumerate()
+            .map(|(i, c)| mapped_char(c, i == 0, locale))
+            .collect()
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum CaseDirection {
+    Upper,
+    Lower,
+    Toggle,
+}
+
+pub(crate) fn toggle_case(
+    mut text: String,
+    all: bool,
+    filter: Option<&Matcher<&str>>,
+    locale: crate::session::CharacterLocale,
+) -> String {
+    use crate::session::CharacterLocale;
+    if filter.is_none()
+        && (locale == CharacterLocale::Ascii
+            || text.is_ascii() && locale != CharacterLocale::Turkic)
+    {
+        let len = if all { text.len() } else { text.len().min(1) };
+        // Only ASCII letters change. All UTF-8 continuation and leading bytes stay intact.
+        for byte in &mut unsafe { text.as_bytes_mut() }[..len] {
+            if byte.is_ascii_alphabetic() {
+                *byte ^= 0x20;
+            }
+        }
+        return text;
+    }
+    localized(|| {
+        text.chars()
+            .enumerate()
+            .map(|(i, c)| {
+                let mut buffer = [0; 4];
+                if (all || i == 0) && filter.is_none_or(|p| p.matches(c.encode_utf8(&mut buffer))) {
+                    mapped_char(c, !c.is_uppercase(), locale)
+                } else {
+                    c
+                }
+            })
+            .collect()
+    })
+}
+
 pub(crate) fn case_chars(
     mut text: String,
     upper: bool,
@@ -501,7 +560,14 @@ pub(crate) fn pathnames(
 ) -> Vec<String> {
     let mut names = Vec::new();
     glob_locale::run(lookup, |order, locale| {
-        paths(pattern, options, &mut names, order, locale)
+        paths(
+            pattern,
+            options,
+            &mut names,
+            order,
+            locale,
+            lookup("GLOBSORT").as_deref(),
+        )
     });
     names
 }
@@ -530,6 +596,7 @@ fn paths(
     fields: &mut Vec<String>,
     collation: Collation,
     locale: CharacterLocale,
+    sorting: Option<&str>,
 ) {
     // Linux pathname order is the UTF-8 byte order even when matching uses a named locale.
     let collation = if cfg!(target_os = "linux") {
@@ -585,8 +652,13 @@ fn paths(
                 }
             }
             expanded = true;
-            found.sort_unstable();
-            found.dedup();
+            if order::sort_mode(sorting).0 == "nosort" {
+                let mut seen = std::collections::HashSet::new();
+                found.retain(|path| seen.insert(path.clone()));
+            } else {
+                found.sort_unstable();
+                found.dedup();
+            }
             paths = found;
             known_existing = rest.is_empty();
             continue;
@@ -666,7 +738,7 @@ fn paths(
             paths.retain(|path| !matcher.matches_in_locale::<true>(path, false));
         }
     }
-    order::append(paths, fields, collation);
+    order::append_expansion(paths, fields, collation, sorting);
 }
 
 // The recursive component consumes zero or more directories. A symlink to a
@@ -759,7 +831,14 @@ impl Field {
         {
             let count = fields.len();
             glob_locale::run(lookup, |order, locale| {
-                paths(&pattern, options, fields, order, locale)
+                paths(
+                    &pattern,
+                    options,
+                    fields,
+                    order,
+                    locale,
+                    lookup("GLOBSORT").as_deref(),
+                )
             });
             if fields.len() > count {
                 return Ok(());
