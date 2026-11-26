@@ -444,10 +444,15 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         session.get("IFS").unwrap_or_else(|| " \t\n".into())
     };
     if opts.array.is_none()
-        && ifs.is_empty()
         && let [name] = opts.names
+        && (ifs.is_empty() || escaped.is_empty() && ifs.bytes().all(|b| matches!(b, 9..=13 | b' ')))
     {
-        if let Err(e) = session.assign_target(name, &line) {
+        let value = if ifs.is_empty() {
+            line.as_str()
+        } else {
+            line.trim_matches(|c: char| ifs.contains(c))
+        };
+        if let Err(e) = session.assign_target(name, value) {
             eprintln!("tonari: read: {e}");
             return 1;
         }

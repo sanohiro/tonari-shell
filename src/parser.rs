@@ -1447,6 +1447,9 @@ impl Reader {
         redirects: &mut Vec<Redirect<Word>>,
     ) -> Result<(), Error> {
         let line = self.location(self.position().saturating_sub(1)).line;
+        if matches!(token, Token::Redirect(..) | Token::BothRedirect(_)) {
+            self.alias_at(false, Some(&[]))?;
+        }
         match token {
             Token::DescriptorName(name) => {
                 let first = redirects.len();

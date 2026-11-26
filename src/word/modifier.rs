@@ -365,11 +365,11 @@ impl Modification {
                 let start = as_number(offset, env)?;
                 let len = length.as_mut().map(|w| as_number(w, env)).transpose()?;
                 if let Some((base, _, false)) = array_elements_name(name) {
+                    if let Some(text) = env.borrowed_scalar(base) {
+                        return Ok(scalar(substring(text, start, len)?.to_owned()));
+                    }
                     let target = env.session.reference_name(base)?;
                     if !env.session.array_parameter(&target) {
-                        if let Some(text) = env.borrowed_scalar(&target) {
-                            return Ok(scalar(substring(text, start, len)?.to_owned()));
-                        }
                         if let Some(text) = env.lookup(&target) {
                             return Ok(scalar(substring(&text, start, len)?.to_owned()));
                         }
