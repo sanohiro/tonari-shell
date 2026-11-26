@@ -6,6 +6,8 @@ use super::Session;
 pub struct ShellOptions {
     pub compat: u8,
     pub autocd: bool,
+    pub array_expand_once: bool,
+    pub extquote: bool,
     pub cdable_vars: bool,
     pub checkhash: bool,
     pub nocasematch: bool,
@@ -47,6 +49,8 @@ impl Default for ShellOptions {
         Self {
             compat: CURRENT_COMPAT,
             autocd: false,
+            array_expand_once: false,
+            extquote: true,
             cdable_vars: false,
             checkhash: false,
             nocasematch: false,
@@ -151,6 +155,8 @@ set_options! {
     "xtrace" => xtrace,
 }
 const SHOPT_OPTIONS: &[OptionEntry] = &[
+    option_entry!("array_expand_once", shopt.array_expand_once),
+    option_entry!("assoc_expand_once", shopt.array_expand_once),
     option_entry!("autocd", shopt.autocd),
     option_entry!("bash_source_fullpath", shopt.bash_source_fullpath),
     option_entry!("cdable_vars", shopt.cdable_vars),
@@ -169,6 +175,7 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("expand_aliases", shopt.expand_aliases),
     option_entry!("extdebug", shopt.extdebug),
     option_entry!("extglob", shopt.glob.extglob),
+    option_entry!("extquote", shopt.extquote),
     option_entry!("failglob", shopt.glob.failglob),
     option_entry!("force_fignore", shopt.force_fignore),
     option_entry!("globskipdots", shopt.glob.globskipdots),

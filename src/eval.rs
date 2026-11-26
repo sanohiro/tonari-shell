@@ -685,7 +685,15 @@ pub(crate) fn call_with_bindings(
     }
     session.leave_function();
     session.loop_depth = outer_loop;
-    session.current_command = callsite;
+    if matches!(flow, Flow::Continue(1..) | Flow::Return(1..))
+        && session.traps.error_handler()
+        && let (Some(inner), Some(caller)) = (&mut session.current_command, &callsite)
+    {
+        // ERR sees the failed command's text, with LINENO at the call site.
+        inner.line = caller.line;
+    } else {
+        session.current_command = callsite;
+    }
     session.call_lines.pop();
     session.function_names.pop();
     session.source_names.pop();

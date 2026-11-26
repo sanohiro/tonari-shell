@@ -786,27 +786,7 @@ impl Output<'_> {
             }
             Self::Pattern(buffer, PatternKind::Glob) => quote_into(buffer, text),
             Self::Pattern(buffer, PatternKind::Regex) => {
-                for c in text.chars() {
-                    if matches!(
-                        c,
-                        '\\' | '.'
-                            | '['
-                            | ']'
-                            | '{'
-                            | '}'
-                            | '('
-                            | ')'
-                            | '*'
-                            | '+'
-                            | '?'
-                            | '^'
-                            | '$'
-                            | '|'
-                    ) {
-                        buffer.push('\\');
-                    }
-                    buffer.push(c);
-                }
+                crate::test_expression::quote_regex(buffer, text)
             }
             Self::Fields(fields) => fields.expansion(text, quoted, ifs),
         }

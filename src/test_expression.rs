@@ -22,9 +22,13 @@ fn trace(session: &mut Session, status: u8, words: &[&str]) {
     if session.xtrace {
         crate::execute::trace_line(session, status, |line| {
             line.push_str("[[");
-            for word in words {
+            for (index, word) in words.iter().enumerate() {
                 line.push(' ');
-                line.push_str(&crate::execute::trace_word(word));
+                if index == 1 && words.len() == 3 {
+                    line.push_str(word);
+                } else {
+                    line.push_str(&crate::execute::trace_word(word));
+                }
             }
             line.push_str(" ]]");
         });
@@ -163,6 +167,115 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
     }
 }
 
+// Return the end of a POSIX ERE list, measured from just after its opening '['.
+fn ere_list_end(body: &[u8]) -> Option<usize> {
+    let mut i = usize::from(body.first() == Some(&b'^'));
+    i += usize::from(body.get(i) == Some(&b']'));
+    while let Some(&byte) = body.get(i) {
+        if byte == b']' {
+            return Some(i);
+        }
+        if byte == b'['
+            && let Some((length, _)) = list_item(&body[i..])
+        {
+            i += length;
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+fn list_item(input: &[u8]) -> Option<(usize, u8)> {
+    let [b'[', mark @ (b'=' | b'.' | b':'), tail @ ..] = input else {
+        return None;
+    };
+    let end = tail.windows(2).position(|w| w == [*mark, b']'])?;
+    Some((end + 4, *mark))
+}
+
+fn open_list(pattern: &str) -> Option<usize> {
+    let bytes = pattern.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b'[' => match ere_list_end(&bytes[i + 1..]) {
+                Some(n) => i += n + 2,
+                None => return Some(i),
+            },
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+pub(crate) fn quote_regex(buffer: &mut String, mut text: &str) {
+    if let Some(start) = open_list(buffer) {
+        let before = buffer.len();
+        buffer.push_str(text);
+        let Some(close) = ere_list_end(&buffer.as_bytes()[start + 1..]) else {
+            return;
+        };
+        let end = start + close + 2;
+        buffer.truncate(end);
+        text = &text[end - before..];
+    }
+    for c in text.chars() {
+        if "\\.[]{}()*+?^$|".contains(c) {
+            buffer.push('\\');
+        }
+        buffer.push(c);
+    }
+}
+
+// Some POSIX regex implementations reject even the single-character
+// collating elements in the portable character set. Preserve native
+// equivalence classes whenever the host can compile the original expression.
+fn portable_ere(pattern: &str) -> Option<String> {
+    let bytes = pattern.as_bytes();
+    let mut out = Vec::new();
+    let mut copied = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        if bytes[i] != b'[' {
+            i += 1;
+            continue;
+        }
+        let end = i + 1 + ere_list_end(&bytes[i + 1..])?;
+        i += 1;
+        while i < end {
+            if let Some((length, mark)) = list_item(&bytes[i..end]) {
+                let name = &bytes[i + 2..i + length - 2];
+                let value = match (mark, name) {
+                    (b'.' | b'=', &[byte]) if byte.is_ascii() => Some(byte),
+                    (b'.', name) => crate::pattern::portable_symbol(name),
+                    _ => None,
+                };
+                if let Some(byte) = value.filter(|b| !matches!(*b, 0 | b'[' | b']' | b'^' | b'\\'))
+                {
+                    out.extend_from_slice(&bytes[copied..i]);
+                    out.push(byte);
+                    copied = i + length;
+                }
+                i += length;
+            } else {
+                i += 1;
+            }
+        }
+        i = end + 1;
+    }
+    if copied == 0 {
+        return None;
+    }
+    out.extend_from_slice(&bytes[copied..]);
+    String::from_utf8(out).ok()
+}
+
 pub struct Compiled {
     pattern: String,
     regex: Option<Box<libc::regex_t>>,
@@ -178,7 +291,14 @@ impl Compiled {
         } else {
             libc::REG_EXTENDED
         };
-        if unsafe { libc::regcomp(regex.as_mut_ptr(), encoded.as_ptr(), flags) } != 0 {
+        let compile = |compiled: *mut libc::regex_t, bytes: &CString| unsafe {
+            libc::regcomp(compiled, bytes.as_ptr(), flags) == 0
+        };
+        if !compile(regex.as_mut_ptr(), &encoded)
+            && !portable_ere(&pattern)
+                .and_then(|p| CString::new(p).ok())
+                .is_some_and(|p| compile(regex.as_mut_ptr(), &p))
+        {
             return Ok(Self {
                 pattern,
                 regex: None,

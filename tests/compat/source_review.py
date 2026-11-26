@@ -16,6 +16,10 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "conditional-trace-operator": "PS4='+ '; exec 2>trace; set -x; [[ a > b ]]; set +x; cat trace",
+    "failed-function-trap-text": "trap 'echo \"ERR:$LINENO:$BASH_COMMAND\"' ERR\nf(){\n [[ -z nonempty ]]\n}\nf",
+    "extended-operand-quotes": "hi=ok; unset u; shopt -u extquote\nprintf '<%s>\\n' \"${u-$'a\\tb'}\" \"${u-$\"hi\"}\"; shopt -s extquote\nprintf '<%s>\\n' \"${u-$'a\\tb'}\" \"${u-$\"hi\"}\"",
+    "ere-bracket-quotes": "[[ '\\' =~ [\".\"] ]]; echo $?; [[ ']' =~ [']'] ]]; echo $?; [[ dog =~ ([[.d.][.D.]])o(.) ]]; printf '%s/%s/%s\\n' \"$?\" \"${BASH_REMATCH[1]}\" \"${BASH_REMATCH[2]}\"; [[ dog =~ ['[=d=]'].. ]]; echo \"$?\"",
     "remove-nameref-attributes": "declare -n r=dest; declare +n -i r=7+4; declare -p r dest; declare -nr locked=dest; declare +n locked; echo \"$?\"; declare -p locked",
     "coproc-nameref": "arr=(previous); declare -n r=arr; coproc r { read -r line; test \"$line\" = sent; }; pid=$!; test \"$pid\" = \"$r_PID\"; echo \"$?\"; echo sent >&\"${r[1]}\"; wait \"$pid\"; echo \"$?\"",
     "read-array-nameref": "declare -n r=arr; read -a r <<<'a b'; declare -p r arr; declare -n unbound; read -a unbound <<<'c d'; declare -p unbound",
@@ -109,6 +113,7 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "array-single-evaluation-option": "shopt -s assoc_expand_once; shopt -q array_expand_once; echo $?; a=(one two); i=0; echo \"${a[i++]}:$i\"; shopt -u array_expand_once; shopt -q assoc_expand_once; echo $?",
     "lazy-malformed-operand": "a=4\necho \"${a-'$('\\'}\"\necho \"${a+'$('\\'}\"\necho survived",
     "posix-command-precedence": "break(){ echo fn; }; set -o posix; type -t break; type -at break; command -V break",
     "invalid-ere": "re='a('; [[ x =~ $re ]]; echo \"$?\"; re='(a)(b)?'; [[ a =~ $re ]]; declare -p BASH_REMATCH",
@@ -141,6 +146,11 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "conditional-trace-operator": ("[[ a > b ]]", 2600),
+    "failed-function-trap-text": ("f", 1700),
+    "array-single-evaluation-option": ("shopt -s assoc_expand_once; i=0; : \"${a[i++]}\"; shopt -u array_expand_once", 2200),
+    "extended-operand-quotes": (": \"${u-$'a\\tb'}\" \"${u-$\"hi\"}\"", 2200),
+    "ere-bracket-quotes": ("[[ dog =~ (['d'][[.o.]])([g]) ]]", 3000),
     "remove-nameref-attributes": ("declare -n r=dest; declare +n -i r=7+4", 3000),
     "coproc-nameref": ("coproc r { read -r line; }; pid=$!; echo sent >&\"${r[1]}\"; wait \"$pid\"", 60),
     "read-array-nameref": ("read -a r <<<'one two three'", 1000),
@@ -763,6 +773,9 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "conditional-trace-operator": "PS4='+ '; exec 2>/dev/null; set -x",
+                "failed-function-trap-text": "trap ': \"$BASH_COMMAND\"' ERR; f(){ [[ -z nonempty ]]; }",
+                "array-single-evaluation-option": "a=(one two)",
                 "coproc-nameref": "declare -n r=arr; exec 2>/dev/null",
                 "read-array-nameref": "declare -n r=arr",
                 "mapfile-nameref": "declare -n r=arr",

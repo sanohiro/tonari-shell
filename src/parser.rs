@@ -592,6 +592,7 @@ thread_local! {
     static FIRST_LINE: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
     static COMMENTS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
     static POSIX: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static EXTQUOTE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
     static EXTGLOB: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -680,10 +681,12 @@ fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnc
     let read = || {
         let old_line = FIRST_LINE.replace(line);
         let before = EXTGLOB.replace(session.shopt.glob.extglob);
+        let extquote = EXTQUOTE.replace(session.shopt.extquote);
         let posix = POSIX.replace(session.posix);
         let comments = COMMENTS.replace(session.read_comments());
         let parsed = parse();
         COMMENTS.set(comments);
+        EXTQUOTE.set(extquote);
         POSIX.set(posix);
         EXTGLOB.set(before);
         FIRST_LINE.set(old_line);

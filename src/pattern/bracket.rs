@@ -77,7 +77,7 @@ fn packed(value: &[u8]) -> [u8; 4] {
 
 // Names in the portable character set identify one collating element even on
 // systems whose native fnmatch does not supply the corresponding locale table.
-fn portable_symbol(name: &[u8]) -> Option<u8> {
+pub(crate) fn portable_symbol(name: &[u8]) -> Option<u8> {
     Some(match name {
         b"NUL" => 0,
         b"SOH" => 1,

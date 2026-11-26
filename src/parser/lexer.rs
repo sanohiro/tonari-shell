@@ -611,12 +611,23 @@ fn parameter_word(
                 }
                 return Ok((word.finish(), c));
             }
-            '$' if outer_quoted && !super::POSIX.get() && chars.as_str().starts_with('\'') => {
+            '$' if outer_quoted
+                && super::EXTQUOTE.get()
+                && !super::POSIX.get()
+                && chars.as_str().starts_with('\'') =>
+            {
                 chars.next();
                 word.literal(&ansi::quoted(chars)?);
             }
             '<' | '>' if !outer_quoted && chars.as_str().starts_with('(') => {
                 process_word(chars, &mut word, c == '<')?;
+            }
+            '$' if outer_quoted && chars.as_str().starts_with('"') => {
+                chars.next();
+                if !super::EXTQUOTE.get() {
+                    dollar_word(chars, &mut word, true, assignment, true)?;
+                }
+                double_quoted(chars, &mut word, true)?;
             }
             '$' if inside_apostrophes && chars.as_str().starts_with('(') => {
                 let source = chars.as_str();
