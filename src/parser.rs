@@ -57,10 +57,11 @@ pub(crate) fn prompt_word(
     source: &str,
     expand: bool,
     posix: bool,
-    mut escape: impl FnMut(char, &mut std::str::Chars) -> String,
+    mut escape: impl FnMut(char, &mut std::str::Chars, &mut String),
 ) -> Result<Word, Error> {
     let mut builder = crate::word::WordBuilder::default();
     let mut chars = source.chars();
+    let mut escaped = String::new();
     let mut backslash = false;
     while let Some(c) = chars.next() {
         if backslash && c != '\\' {
@@ -77,9 +78,9 @@ pub(crate) fn prompt_word(
                     chars.next();
                     builder.push('!');
                 } else {
-                    for c in escape('!', &mut chars).chars() {
-                        builder.push(c);
-                    }
+                    escaped.clear();
+                    escape('!', &mut chars, &mut escaped);
+                    builder.literal(&escaped);
                 }
             }
             '$' if expand => lexer::dollar(&mut chars, &mut builder, true)?,
@@ -99,7 +100,9 @@ pub(crate) fn prompt_word(
                         builder.push('\\');
                         backslash = false;
                     }
-                    builder.literal(&escape(code, &mut chars));
+                    escaped.clear();
+                    escape(code, &mut chars, &mut escaped);
+                    builder.literal(&escaped);
                 }
             }
             c => builder.push(c),

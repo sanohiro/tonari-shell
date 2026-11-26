@@ -533,12 +533,11 @@ fn capture_count(expression: &str) -> usize {
                     if c == b']' {
                         break;
                     }
-                    if c == b'[' {
-                        if let Some(&marker @ (b':' | b'=' | b'.')) = after.first() {
-                            if let Some(end) = after.windows(2).position(|s| s == [marker, b']']) {
-                                bytes = &after[end + 2..];
-                            }
-                        }
+                    if c == b'['
+                        && let Some(&marker @ (b':' | b'=' | b'.')) = after.first()
+                        && let Some(end) = after.windows(2).position(|s| s == [marker, b']'])
+                    {
+                        bytes = &after[end + 2..];
                     }
                 }
             }

@@ -39,25 +39,39 @@ pub(super) fn path(cmd: &PreparedCommand, session: &Session) -> OsString {
 }
 
 pub(super) fn command_prefix(cmd: &mut PreparedCommand, session: &Session) {
+    let (passed, search, default_path) = scan_prefix(&cmd.words, cmd.search, session);
+    cmd.search = search;
+    cmd.default_path |= default_path;
+    if passed != 0 {
+        cmd.words.drain(..passed);
+    }
+}
+
+pub(super) fn scan_prefix(
+    words: &[String],
+    mut search: Search,
+    session: &Session,
+) -> (usize, Search, bool) {
+    let mut use_default_path = false;
     let mut passed = 0;
-    while let Some(name) = cmd.words.get(passed) {
+    while let Some(name) = words.get(passed) {
         if session.disabled_builtins.contains(name)
-            || cmd.search == Search::Normal && session.functions.contains_key(name)
+            || search == Search::Normal && session.functions.contains_key(name)
         {
             break;
         }
         match name.as_str() {
             "builtin" => {
                 passed += 1;
-                if cmd.words.get(passed).is_some_and(|s| s == "--") {
+                if words.get(passed).is_some_and(|s| s == "--") {
                     passed += 1;
                 }
-                cmd.search = Search::BuiltinsOnly;
+                search = Search::BuiltinsOnly;
             }
             "command" => {
                 let mut i = passed + 1;
                 let mut default_path = false;
-                while let Some(opt) = cmd.words.get(i) {
+                while let Some(opt) = words.get(i) {
                     if opt == "--" {
                         i += 1;
                         break;
@@ -72,24 +86,21 @@ pub(super) fn command_prefix(cmd: &mut PreparedCommand, session: &Session) {
                     default_path = true;
                     i += 1;
                 }
-                if cmd
-                    .words
+                if words
                     .get(i)
                     .is_some_and(|arg| arg.starts_with('-') && arg != "-")
-                    && (i == passed + 1 || cmd.words[i - 1] != "--")
+                    && (i == passed + 1 || words[i - 1] != "--")
                 {
                     break;
                 }
                 passed = i;
-                cmd.search = Search::NoFunctions;
-                cmd.default_path |= default_path;
+                search = Search::NoFunctions;
+                use_default_path |= default_path;
             }
             _ => break,
         }
     }
-    if passed != 0 {
-        cmd.words.drain(..passed);
-    }
+    (passed, search, use_default_path)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -211,18 +222,21 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                 }
             }
         }
-        if !found && !search_all && !force_path && !default_path {
-            if let Some(path) = session.hashes.get(name) {
-                let result = match format {
-                    Format::Verbose => writeln!(out, "{name} is hashed ({})", path.display()),
-                    Format::Kind => writeln!(out, "file"),
-                    Format::Name | Format::Path => writeln!(out, "{}", path.display()),
-                };
-                if result.is_err() {
-                    return 1;
-                }
-                found = true;
+        if !found
+            && !search_all
+            && !force_path
+            && !default_path
+            && let Some(path) = session.hashes.get(name)
+        {
+            let result = match format {
+                Format::Verbose => writeln!(out, "{name} is hashed ({})", path.display()),
+                Format::Kind => writeln!(out, "file"),
+                Format::Name | Format::Path => writeln!(out, "{}", path.display()),
+            };
+            if result.is_err() {
+                return 1;
             }
+            found = true;
         }
         if !found || search_all {
             let mut report = |path: &Path| {

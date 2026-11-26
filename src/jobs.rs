@@ -300,13 +300,13 @@ impl Job {
         if let Some(p) = self.children.iter_mut().find(|p| p.pid == pid) {
             self.listed = false;
             p.state = if libc::WIFSTOPPED(status) {
-                State::Stopped((128 + libc::WSTOPSIG(status)) as u8)
+                State::Stopped(crate::traps::signal_status(libc::WSTOPSIG(status)))
             } else if libc::WIFCONTINUED(status) {
                 State::Running
             } else if libc::WIFSIGNALED(status) {
                 self.signaled = true;
                 p.signal = Some(libc::WTERMSIG(status));
-                State::Done((128 + libc::WTERMSIG(status)) as u8)
+                State::Done(crate::traps::signal_status(libc::WTERMSIG(status)))
             } else {
                 State::Done(libc::WEXITSTATUS(status) as u8)
             };
@@ -332,7 +332,7 @@ impl Job {
         while self.active() || (force && self.stopped()) {
             if foreground_tty && crate::traps::hanging_up() {
                 self.hangup();
-                return Ok(Some(128 + libc::SIGHUP as u8));
+                return Ok(Some(crate::traps::signal_status(libc::SIGHUP)));
             }
             if let Some(code) = mask.and_then(crate::traps::WaitMask::interrupt_status) {
                 return Ok(Some(code));
@@ -366,10 +366,10 @@ impl Job {
         Ok(None)
     }
     fn resume(&mut self) -> io::Result<()> {
-        if let Some(group) = self.group {
-            if unsafe { libc::kill(-group, libc::SIGCONT) } < 0 {
-                return Err(io::Error::last_os_error());
-            }
+        if let Some(group) = self.group
+            && unsafe { libc::kill(-group, libc::SIGCONT) } < 0
+        {
+            return Err(io::Error::last_os_error());
         }
         self.stopped_at = 0;
         for p in &mut self.children {
@@ -682,11 +682,11 @@ impl Jobs {
             }
             // A successful stty command intentionally changes the next prompt.
             // Suspended or interrupted full-screen programs often leave raw mode on.
-            if job.stopped() || job.signaled || result.is_err() {
-                if let Some(modes) = original {
-                    unsafe {
-                        libc::tcsetattr(t.fd.as_raw_fd(), libc::TCSANOW, &modes);
-                    }
+            if (job.stopped() || job.signaled || result.is_err())
+                && let Some(modes) = original
+            {
+                unsafe {
+                    libc::tcsetattr(t.fd.as_raw_fd(), libc::TCSANOW, &modes);
                 }
             }
         }

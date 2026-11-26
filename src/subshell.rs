@@ -23,7 +23,7 @@ fn regular_storage(query: impl FnOnce(&mut libc::statfs) -> libc::c_int) -> bool
     #[cfg(target_os = "macos")]
     {
         let name = info.f_fstypename.map(|c| c as u8);
-        return name.starts_with(b"apfs\0") || name.starts_with(b"hfs\0");
+        name.starts_with(b"apfs\0") || name.starts_with(b"hfs\0")
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     false
@@ -201,9 +201,7 @@ pub fn capture_substitution(
         return Err("cannot fork command substitution");
     }
     if pid == 0 {
-        session
-            .traps
-            .after_fork(session.errtrace, session.functrace);
+        session.reset_forked_traps();
         drop(read);
         if write.as_raw_fd() == 1 {
             let fd = write.into_raw_fd();
@@ -766,9 +764,7 @@ fn launch_list(
         return Flow::Continue(1);
     }
     if pid == 0 {
-        session
-            .traps
-            .after_fork(session.errtrace, session.functrace);
+        session.reset_forked_traps();
         launch.child(&mut session.traps);
         if background && launch.group.is_none() && (session.posix || !session.stdin_redirected) {
             let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
@@ -822,6 +818,12 @@ fn launch_list(
     }
 }
 
+/// Run shell EXIT handling before terminating the forked process.
+pub(crate) fn exit_child(session: &mut Session, code: u8) -> ! {
+    let code = crate::traps::finish(session, code);
+    unsafe { libc::_exit(i32::from(code)) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -853,10 +855,4 @@ mod tests {
         assert_eq!(text, "x");
         assert!(text.capacity() < 8192);
     }
-}
-
-/// Run shell EXIT handling before terminating the forked process.
-pub(crate) fn exit_child(session: &mut Session, code: u8) -> ! {
-    let code = crate::traps::finish(session, code);
-    unsafe { libc::_exit(i32::from(code)) }
 }

@@ -318,59 +318,57 @@ impl Session {
                 status = 1;
                 continue;
             }
-            if !functions_only {
-                if let Some((base, index)) = array::subscript(name) {
-                    if matches!(index, "*" | "@") && self.stored_array(base) {
-                        if self.shopt.compat <= 51 {
-                            self.unset_variable(base);
-                            continue;
-                        }
-                        if !self.is_associative(base) {
-                            self.replace_array(base, Vec::new());
-                            continue;
-                        }
-                    }
-                    if self.is_associative(base) {
-                        if self.shopt.array_expand_once && !index.is_empty() {
-                            self.remove_key(base, index);
-                            continue;
-                        }
-                        match self.subscript_key(index) {
-                            Ok(key) => self.remove_key(base, &key),
-                            Err(e) => {
-                                eprintln!("tonari: unset: {e}");
-                                status = 1;
-                            }
-                        }
+            if !functions_only && let Some((base, index)) = array::subscript(name) {
+                if matches!(index, "*" | "@") && self.stored_array(base) {
+                    if self.shopt.compat <= 51 {
+                        self.unset_variable(base);
                         continue;
                     }
-                    if self.active_groups(base) && !self.variables.contains_key(base) {
-                        let var = self.declared_variable(base, false).unwrap();
-                        self.variables.insert(base.into(), var);
-                    }
-                    let variable = self.variables.get(base);
-                    let array = variable.is_some_and(|v| v.elements.is_some());
-                    if !array
-                        && !variable
-                            .map_or_else(|| self.inherited_value(base).is_some(), |v| v.declared)
-                    {
+                    if !self.is_associative(base) {
+                        self.replace_array(base, Vec::new());
                         continue;
                     }
-                    let resolved = crate::arithmetic::expanded(index, self, 0)
-                        .and_then(|n| self.relative_index(base, n));
-                    match resolved {
-                        Ok(i) if !array && i != 0 => {
-                            eprintln!("tonari: unset: {base}: not an array variable");
-                            status = 1;
-                        }
-                        Ok(i) => self.unset_element(base, i),
+                }
+                if self.is_associative(base) {
+                    if self.shopt.array_expand_once && !index.is_empty() {
+                        self.remove_key(base, index);
+                        continue;
+                    }
+                    match self.subscript_key(index) {
+                        Ok(key) => self.remove_key(base, &key),
                         Err(e) => {
                             eprintln!("tonari: unset: {e}");
-                            return 1;
+                            status = 1;
                         }
                     }
                     continue;
                 }
+                if self.active_groups(base) && !self.variables.contains_key(base) {
+                    let var = self.declared_variable(base, false).unwrap();
+                    self.variables.insert(base.into(), var);
+                }
+                let variable = self.variables.get(base);
+                let array = variable.is_some_and(|v| v.elements.is_some());
+                if !array
+                    && !variable
+                        .map_or_else(|| self.inherited_value(base).is_some(), |v| v.declared)
+                {
+                    continue;
+                }
+                let resolved = crate::arithmetic::expanded(index, self, 0)
+                    .and_then(|n| self.relative_index(base, n));
+                match resolved {
+                    Ok(i) if !array && i != 0 => {
+                        eprintln!("tonari: unset: {base}: not an array variable");
+                        status = 1;
+                    }
+                    Ok(i) => self.unset_element(base, i),
+                    Err(e) => {
+                        eprintln!("tonari: unset: {e}");
+                        return 1;
+                    }
+                }
+                continue;
             }
             if resolve_function {
                 self.forget_function(name);

@@ -111,9 +111,7 @@ pub(crate) fn launch(
         drop(reader);
         drop(writer);
         after_fork(session);
-        session
-            .traps
-            .after_fork(session.errtrace, session.functrace);
+        session.reset_forked_traps();
         launch.pipeline_child(&mut session.traps);
         if super::duplicate(input.as_raw_fd(), 0).is_err()
             || super::duplicate(output.as_raw_fd(), 1).is_err()

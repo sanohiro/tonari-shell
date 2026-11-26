@@ -78,31 +78,48 @@ pub(super) fn builtin(
     if cmd.compound.is_some() {
         return Some(Builtin::Compound);
     }
-    let Some(name) = cmd.words.first() else {
-        return Some(Builtin::Status(cmd.empty_status));
+    builtin_words(
+        &cmd.words,
+        cmd.search,
+        cmd.empty_status,
+        last_status,
+        session,
+        || lookup::path(cmd, session),
+    )
+}
+
+pub(super) fn builtin_words(
+    words: &[String],
+    search: lookup::Search,
+    empty_status: u8,
+    last_status: u8,
+    session: &Session,
+    path: impl FnOnce() -> std::ffi::OsString,
+) -> Option<Builtin> {
+    let Some(name) = words.first() else {
+        return Some(Builtin::Status(empty_status));
     };
-    if cmd.search == lookup::Search::Normal
+    if search == lookup::Search::Normal
         && session.functions.contains_key(name)
         && !(session.posix && (special_builtin(name) || name.contains('/')))
     {
         return Some(Builtin::Function);
     }
     if session.disabled_builtins.contains(name) {
-        return (cmd.search == lookup::Search::BuiltinsOnly).then_some(Builtin::Unknown);
+        return (search == lookup::Search::BuiltinsOnly).then_some(Builtin::Unknown);
     }
     if name == "logout" && !session.login {
         return Some(Builtin::NotLogin);
     }
-    named_builtin(name, &cmd.words[1..], last_status)
-        .or_else(|| (cmd.search == lookup::Search::BuiltinsOnly).then_some(Builtin::Unknown))
+    named_builtin(name, &words[1..], last_status)
+        .or_else(|| (search == lookup::Search::BuiltinsOnly).then_some(Builtin::Unknown))
         .or_else(|| {
             (session.shopt.autocd
                 && session.interactive
-                && cmd.search == lookup::Search::Normal
+                && search == lookup::Search::Normal
                 && Path::new(name).is_dir()
                 && (name.contains('/')
-                    || !std::env::split_paths(&lookup::path(cmd, session))
-                        .any(|d| lookup::executable(&d.join(name)))))
+                    || !std::env::split_paths(&path()).any(|d| lookup::executable(&d.join(name)))))
             .then_some(Builtin::AutoCd)
         })
 }
@@ -629,6 +646,37 @@ pub(super) fn can_install_trap(builtin: Builtin, cmd: &PreparedCommand) -> bool 
         )
 }
 
+fn silent_redirect(
+    code: u8,
+    dest: RawFd,
+    path: &CStr,
+    flags: i32,
+    cmd: &PreparedCommand,
+    session: &mut Session,
+) -> io::Result<Flow> {
+    // A silent builtin needs the open's effects (including a blocking FIFO),
+    // but never reads or writes the destination. Open before reserving any
+    // backup, so /dev/fd paths see the caller's descriptor table.
+    let Some(fd) = open_redirect(path, flags) else {
+        return Ok(redirect_failure(cmd, session));
+    };
+    // Bash can still fail to save a live destination at its descriptor limit.
+    // This reservation drops before the single-threaded shell can exec.
+    if fd.as_raw_fd() != dest {
+        let backup =
+            unsafe { libc::fcntl(dest, libc::F_DUPFD, crate::execute::fd::FIRST_NONSTANDARD) };
+        if backup >= 0 {
+            unsafe { libc::close(backup) };
+        } else if errno() == libc::EBADF {
+            duplicate(fd.as_raw_fd(), dest)?;
+            unsafe { libc::close(dest) };
+        } else {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(Flow::Continue(code))
+}
+
 pub(super) fn run_builtin(
     builtin: Builtin,
     cmd: &mut PreparedCommand,
@@ -691,26 +739,7 @@ pub(super) fn run_builtin(
         return Ok(Flow::Continue(if result.is_err() { 1 } else { status }));
     }
     if let (Builtin::Status(code), [Action::Open(dest, path, flags)]) = (builtin, actions) {
-        // A silent builtin needs the open's effects (including a blocking FIFO),
-        // but never reads or writes the destination. Open before reserving any
-        // backup, so /dev/fd paths see the caller's descriptor table.
-        let Some(fd) = open_redirect(path, *flags) else {
-            return Ok(redirect_failure(cmd, session));
-        };
-        // Bash can still fail to save a live destination at its descriptor limit.
-        // This reservation drops before the single-threaded shell can exec.
-        if fd.as_raw_fd() != *dest {
-            let backup = unsafe { libc::fcntl(*dest, libc::F_DUPFD, 3) };
-            if backup >= 0 {
-                unsafe { libc::close(backup) };
-            } else if errno() == libc::EBADF {
-                duplicate(fd.as_raw_fd(), *dest)?;
-                unsafe { libc::close(*dest) };
-            } else {
-                return Err(io::Error::last_os_error());
-            }
-        }
-        return Ok(Flow::Continue(code));
+        return silent_redirect(code, *dest, path, *flags, cmd, session);
     }
     let mut saved = [const { SavedFd::Unchanged }; 3];
     let mut extra = Vec::new();

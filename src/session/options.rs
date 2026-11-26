@@ -130,8 +130,12 @@ macro_rules! compat_entry {
 // Derive both the lookup table and the direct snapshot reads from the same
 // order. Function return only visits hooks for bits which actually changed.
 macro_rules! set_options {
-    ($( $name:literal => $($field:ident).+ ),+ $(,)?) => {
+    ($( $name:literal $( ( $short:literal ) )? => $($field:ident).+ ),+ $(,)?) => {
         const SET_OPTIONS: &[OptionEntry] = &[$(option_entry!($name, $($field).+)),+];
+        fn set_short_option(s: &mut Session, flag: char, enabled: bool) -> bool {
+            $( set_options!(@apply s, flag, enabled, $($field).+ $(, $short)?); )+
+            false
+        }
         fn set_bits(s: &Session) -> u32 {
             let mut bits = 0;
             for (i, enabled) in [$(s.$($field).+),+].into_iter().enumerate() {
@@ -139,35 +143,39 @@ macro_rules! set_options {
             }
             bits
         }
-    }
+    };
+    (@apply $s:ident, $flag:ident, $enabled:ident, $($field:ident).+, $short:literal) => {
+        if $flag == $short { $s.$($field).+ = $enabled; return true; }
+    };
+    (@apply $s:ident, $flag:ident, $enabled:ident, $($field:ident).+) => {};
 }
 set_options! {
-    "allexport" => allexport,
-    "braceexpand" => shopt.braceexpand,
+    "allexport" ('a') => allexport,
+    "braceexpand" ('B') => shopt.braceexpand,
     "emacs" => emacs,
-    "errexit" => errexit,
-    "errtrace" => errtrace,
-    "functrace" => functrace,
-    "hashall" => hashes.enabled,
+    "errexit" ('e') => errexit,
+    "errtrace" ('E') => errtrace,
+    "functrace" ('T') => functrace,
+    "hashall" ('h') => hashes.enabled,
     "histexpand" => histexpand,
     "history" => history_enabled,
     "ignoreeof" => ignoreeof,
     "interactive-comments" => shopt.interactive_comments,
-    "keyword" => keyword,
-    "monitor" => jobs.monitor,
-    "noclobber" => noclobber,
+    "keyword" ('k') => keyword,
+    "monitor" ('m') => jobs.monitor,
+    "noclobber" ('C') => noclobber,
     "noexec" => noexec,
-    "noglob" => noglob,
+    "noglob" ('f') => noglob,
     "nolog" => shopt.nolog,
-    "notify" => notify,
-    "nounset" => nounset,
-    "onecmd" => onecmd,
-    "physical" => physical,
+    "notify" ('b') => notify,
+    "nounset" ('u') => nounset,
+    "onecmd" ('t') => onecmd,
+    "physical" ('P') => physical,
     "pipefail" => pipefail,
     "posix" => posix,
-    "verbose" => verbose,
+    "verbose" ('v') => verbose,
     "vi" => vi,
-    "xtrace" => xtrace,
+    "xtrace" ('x') => xtrace,
 }
 const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("array_expand_once", shopt.array_expand_once),
@@ -231,6 +239,19 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("varredir_close", shopt.varredir_close),
     option_entry!("xpg_echo", shopt.xpg_echo),
 ];
+fn write_option_line(
+    out: &mut impl Write,
+    name: &str,
+    value: bool,
+    reusable: bool,
+) -> io::Result<()> {
+    if reusable {
+        writeln!(out, "set {}o {name}", if value { '-' } else { '+' })
+    } else {
+        writeln!(out, "{name:15}\t{}", if value { "on" } else { "off" })
+    }
+}
+
 impl Session {
     pub(super) fn apply_compat(&mut self, value: &str) {
         self.shopt.compat = if value.is_empty() {
@@ -525,38 +546,16 @@ impl Session {
             if quiet || (enable && !value) || (disable && value) {
                 continue;
             }
-            let result = if reusable && set {
-                writeln!(out, "set {}o {name}", if value { '-' } else { '+' })
-            } else if reusable {
+            let result = if reusable && !set {
                 writeln!(out, "shopt -{} {name}", if value { 's' } else { 'u' })
             } else {
-                writeln!(out, "{name:15}\t{}", if value { "on" } else { "off" })
+                write_option_line(&mut out, name, value, reusable)
             };
             if result.is_err() {
                 return 1;
             }
         }
         out.flush().map_or(1, |()| status)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Session;
-
-    fn options(s: &str) -> Vec<String> {
-        s.split_whitespace().map(String::from).collect()
-    }
-
-    #[test]
-    fn shopt_control_and_query_share_the_actual_shell_options() {
-        let mut s = Session::default();
-        assert_eq!(s.shopt(&options("-q sourcepath")), 0);
-        assert_eq!(s.shopt(&options("-u sourcepath")), 0);
-        assert!(!s.shopt.sourcepath);
-        assert_eq!(s.shopt(&options("-q checkwinsize sourcepath")), 1);
-        assert_eq!(s.shopt(&options("-so pipefail")), 0);
-        assert!(s.pipefail);
     }
 }
 
@@ -743,36 +742,16 @@ impl Session {
             i += 1;
             for flag in opt[1..].chars() {
                 match flag {
-                    'e' => self.errexit = enable,
-                    'E' => self.errtrace = enable,
-                    'a' => self.allexport = enable,
-                    'b' => self.notify = enable,
                     'n' => self.noexec = enable && !self.interactive,
-                    't' => self.onecmd = enable,
-                    'x' => self.xtrace = enable,
                     'H' => {
                         self.histexpand = enable;
                         self.command_history_expansion = enable;
                     }
-                    'T' => self.functrace = enable,
-                    'C' => self.noclobber = enable,
-                    'P' => self.physical = enable,
-                    'k' => self.keyword = enable,
-                    'B' => self.shopt.braceexpand = enable,
-                    'f' => self.noglob = enable,
-                    'h' => self.hashes.enabled = enable,
-                    'm' => self.jobs.monitor = enable,
-                    'u' => self.nounset = enable,
-                    'v' => self.verbose = enable,
                     'o' => {
                         let Some(name) = args.get(i) else {
                             let mut out = io::BufWriter::with_capacity(512, io::stdout().lock());
                             for (name, on) in self.options(true) {
-                                let result = if enable {
-                                    writeln!(out, "{name:15}\t{}", if on { "on" } else { "off" })
-                                } else {
-                                    writeln!(out, "set {}o {name}", if on { "-" } else { "+" })
-                                };
+                                let result = write_option_line(&mut out, name, on, !enable);
                                 if result.is_err() {
                                     return 1;
                                 }
@@ -788,6 +767,7 @@ impl Session {
                             return 2;
                         }
                     }
+                    short if set_short_option(self, short, enable) => {}
                     _ => {
                         eprintln!("tonari: set: {opt}: unsupported option");
                         return 2;
@@ -801,5 +781,25 @@ impl Session {
             self.source_set_args = true;
         }
         0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Session;
+
+    fn options(s: &str) -> Vec<String> {
+        s.split_whitespace().map(String::from).collect()
+    }
+
+    #[test]
+    fn shopt_control_and_query_share_the_actual_shell_options() {
+        let mut s = Session::default();
+        assert_eq!(s.shopt(&options("-q sourcepath")), 0);
+        assert_eq!(s.shopt(&options("-u sourcepath")), 0);
+        assert!(!s.shopt.sourcepath);
+        assert_eq!(s.shopt(&options("-q checkwinsize sourcepath")), 1);
+        assert_eq!(s.shopt(&options("-so pipefail")), 0);
+        assert!(s.pipefail);
     }
 }

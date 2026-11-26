@@ -87,6 +87,11 @@ struct Keys {
 }
 
 impl Keys {
+    fn input_pending(&self) -> bool {
+        !self.queued.is_empty()
+            || ready(0, 0)
+            || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+    }
     fn get(&mut self) -> io::Result<Option<u8>> {
         if let Some(key) = self.queued.pop_front() {
             return Ok(Some(key));
@@ -120,16 +125,17 @@ impl Keys {
             let Some(first) = self.immediate() else { break };
             let mut seq = [first, 0, 0];
             let mut len = 1;
-            if first == 27 && !session.bindings.custom_prefix(&[first]) {
-                if let Some(b) = self.immediate() {
-                    seq[1] = b;
-                    len = 2;
-                    if matches!(b, b'[' | b'O')
-                        && let Some(b) = self.immediate()
-                    {
-                        seq[2] = b;
-                        len = 3;
-                    }
+            if first == 27
+                && !session.bindings.custom_prefix(&[first])
+                && let Some(b) = self.immediate()
+            {
+                seq[1] = b;
+                len = 2;
+                if matches!(b, b'[' | b'O')
+                    && let Some(b) = self.immediate()
+                {
+                    seq[2] = b;
+                    len = 3;
                 }
             }
             match &seq[..len] {
@@ -149,12 +155,11 @@ impl Keys {
     }
 
     fn character(&mut self, first: u8) -> io::Result<Option<char>> {
-        let width = match first {
-            0..=127 => return Ok(Some(char::from(first))),
-            0xc2..=0xdf => 2,
-            0xe0..=0xef => 3,
-            0xf0..=0xf4 => 4,
-            _ => return Ok(None),
+        if first.is_ascii() {
+            return Ok(Some(char::from(first)));
+        }
+        let Some(width) = multibyte_width(first) else {
+            return Ok(None);
         };
         let mut bytes = [first; 4];
         for slot in &mut bytes[1..width] {
@@ -221,29 +226,6 @@ impl Keys {
             }
         }
         Ok(())
-    }
-
-    fn insert(
-        &mut self,
-        first: u8,
-        session: &Session,
-        text: &mut String,
-        cursor: &mut usize,
-        inserted: &mut String,
-        overwrite: bool,
-        undo: &mut Undo,
-    ) -> io::Result<Option<usize>> {
-        self.insert_burst(first, session, inserted)?;
-        let append = (*cursor == text.len()).then_some(*cursor);
-        let end = if overwrite && *cursor < text.len() {
-            *cursor + char_offset(&text[*cursor..], inserted.chars().count())
-        } else {
-            *cursor
-        };
-        undo.record(text, *cursor..end, inserted.len(), *cursor, true);
-        text.replace_range(*cursor..end, inserted);
-        *cursor += inserted.len();
-        Ok(append)
     }
 
     fn binding(&mut self, first: u8, session: &Session) -> io::Result<(Binding, bool)> {
@@ -376,6 +358,15 @@ impl Keys {
             .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
     }
 }
+fn multibyte_width(first: u8) -> Option<usize> {
+    match first {
+        0xc2..=0xdf => Some(2),
+        0xe0..=0xef => Some(3),
+        0xf0..=0xf4 => Some(4),
+        _ => None,
+    }
+}
+
 fn unbound_text(first: u8, session: &Session) -> bool {
     session.bindings.map != Keymap::Command
         && first >= 32
@@ -547,12 +538,7 @@ impl Screen {
         }
         self.view.invalidate();
         let out = &mut self.output;
-        out.clear();
-        out.push('\r');
-        if self.row > 0 {
-            out.push_str(&format!("\x1b[{}A", self.row));
-        }
-        out.push_str("\x1b[J");
+        begin_redraw(out, self.row);
         let mut pos = Position::default();
         draw_prompt(prompt, self.width, out, &mut pos);
         draw_text(&text[..cursor], self.width, out, &mut pos);
@@ -565,11 +551,12 @@ impl Screen {
         }
         if pos.row != caret.row || pos.col != caret.col {
             if pos.row > caret.row {
-                out.push_str(&format!("\x1b[{}A", pos.row - caret.row));
+                let _ =
+                    std::fmt::Write::write_fmt(out, format_args!("\x1b[{}A", pos.row - caret.row));
             }
             out.push('\r');
             if caret.col > 0 {
-                out.push_str(&format!("\x1b[{}C", caret.col));
+                let _ = std::fmt::Write::write_fmt(out, format_args!("\x1b[{}C", caret.col));
             }
         }
         self.tail = (cursor == text.len() && suggestion.is_empty()).then_some(caret);
@@ -578,6 +565,16 @@ impl Screen {
         self.had_hint = !suggestion.is_empty();
         io::stderr().write_all(out.as_bytes())
     }
+}
+
+fn begin_redraw(out: &mut String, row: usize) {
+    use std::fmt::Write;
+    out.clear();
+    out.push('\r');
+    if row != 0 {
+        let _ = write!(out, "\x1b[{row}A");
+    }
+    out.push_str("\x1b[J");
 }
 
 fn draw_prompt(prompt: &str, width: usize, out: &mut String, pos: &mut Position) {
@@ -741,6 +738,101 @@ fn reverse_search_prompt(query: &str, width: usize) -> String {
     display
 }
 
+#[derive(Clone, Copy)]
+struct LineView<'a> {
+    prompt: &'a str,
+    text: &'a str,
+    cursor: usize,
+}
+
+#[derive(Default)]
+struct EditorState {
+    undo: Undo,
+    inserted: String,
+    overwrite: bool,
+    motion: bool,
+    appended: Option<usize>,
+    erased: Option<usize>,
+}
+
+impl EditorState {
+    fn insert(
+        &mut self,
+        keys: &mut Keys,
+        first: u8,
+        session: &Session,
+        text: &mut String,
+        cursor: &mut usize,
+    ) -> io::Result<Option<usize>> {
+        keys.insert_burst(first, session, &mut self.inserted)?;
+        let inserted = &self.inserted;
+        let append = (*cursor == text.len()).then_some(*cursor);
+        let end = if self.overwrite && *cursor < text.len() {
+            *cursor + char_offset(&text[*cursor..], inserted.chars().count())
+        } else {
+            *cursor
+        };
+        self.undo
+            .record(text, *cursor..end, inserted.len(), *cursor, true);
+        text.replace_range(*cursor..end, inserted);
+        *cursor += inserted.len();
+        Ok(append)
+    }
+
+    fn render_frame(
+        &mut self,
+        screen: &mut Screen,
+        line: LineView<'_>,
+        hint: &str,
+        searching: bool,
+        styled_or_multiline: bool,
+        replaying: bool,
+    ) -> io::Result<()> {
+        let LineView {
+            prompt,
+            text,
+            cursor,
+        } = line;
+        let moving = std::mem::take(&mut self.motion);
+        if replaying {
+            self.appended = None;
+            self.erased = None;
+        } else if moving
+            && !screen.had_hint
+            && hint.is_empty()
+            && !searching
+            && text.len() < 1024
+            && !text.contains('\n')
+        {
+            screen.move_short(prompt, text, cursor)?;
+        } else if let Some(start) = self.appended.take()
+            && (styled_or_multiline || start >= 1024)
+            && let Some(pos) = screen.tail
+            && screen.can_append(&text[start..])
+            && cursor == text.len()
+            && hint.is_empty()
+            && !searching
+        {
+            screen.append(&text[start..], pos)?;
+        } else if let Some(cells) = self.erased.take()
+            && let Some(mut pos) = screen.tail
+            && cells < pos.col
+            && cursor == text.len()
+            && hint.is_empty()
+            && !searching
+        {
+            pos.col -= cells;
+            screen.tail = Some(pos);
+            screen.column = pos.col;
+            screen.view.invalidate();
+            write!(io::stderr(), "\x1b[{cells}D\x1b[K")?;
+        } else {
+            screen.draw(prompt, text, cursor, hint)?;
+        }
+        Ok(())
+    }
+}
+
 pub fn line(
     prompt: &str,
     history: &mut History,
@@ -761,6 +853,7 @@ pub fn line(
         queued: std::mem::take(&mut session.editor_queue),
         ..Default::default()
     };
+    let mut edit = EditorState::default();
     let mut mark = 0usize;
     let mut screen = Screen::new(terminal_size);
     let (mut text, read) = match start {
@@ -771,22 +864,16 @@ pub fn line(
         } => (initial.to_owned(), Some(files_only)),
     };
     let mut cursor = text.len();
-    let mut undo = Undo::default();
     let mut vi = vi::State::default();
     let mut last_arg: Option<(usize, bool)> = None;
     let mut recall = recall::Recall::new(session.history_lines().len());
     let mut search: Option<ReverseSearch> = None;
     let mut pending_queries: Vec<SearchQuery> = Vec::new();
     let mut matched_query: Option<String> = None;
-    let mut inserted = String::new();
     let mut last_tab = false;
     let styled_or_multiline = prompt.contains(['\x1b', '\n']);
-    let mut appended = None;
     let mut blink = false;
-    let mut erased = None;
     let mut replaying = false;
-    let mut motion = false;
-    let mut overwrite = false;
     let mut view = View::Unread;
     if read.is_none() && keys.queued.is_empty() {
         history.prepare_search(session, &|| ready(0, 0));
@@ -801,10 +888,10 @@ pub fn line(
             && keys.queued.front().is_some_and(|&b| {
                 let width = match b {
                     8 | 32..=127 => 1,
-                    0xc2..=0xdf => 2,
-                    0xe0..=0xef => 3,
-                    0xf0..=0xf4 => 4,
-                    _ => return false,
+                    _ => match multibyte_width(b) {
+                        Some(width) => width,
+                        None => return false,
+                    },
                 };
                 keys.queued.len() >= width && !session.bindings.custom_prefix(&[b])
             });
@@ -830,42 +917,18 @@ pub fn line(
             prompt
         };
         let needs_hint = hint.is_empty();
-        let moving = std::mem::take(&mut motion);
-        if replaying {
-            appended = None;
-            erased = None;
-        } else if moving
-            && !screen.had_hint
-            && hint.is_empty()
-            && search.is_none()
-            && text.len() < 1024
-            && !text.contains('\n')
-        {
-            screen.move_short(visible_prompt, &text, cursor)?;
-        } else if let Some(start) = appended.take()
-            && (styled_or_multiline || start >= 1024)
-            && let Some(pos) = screen.tail
-            && screen.can_append(&text[start..])
-            && cursor == text.len()
-            && hint.is_empty()
-            && search.is_none()
-        {
-            screen.append(&text[start..], pos)?;
-        } else if let Some(cells) = erased.take()
-            && let Some(mut pos) = screen.tail
-            && cells < pos.col
-            && cursor == text.len()
-            && hint.is_empty()
-            && search.is_none()
-        {
-            pos.col -= cells;
-            screen.tail = Some(pos);
-            screen.column = pos.col;
-            screen.view.invalidate();
-            write!(io::stderr(), "\x1b[{cells}D\x1b[K")?;
-        } else {
-            screen.draw(visible_prompt, &text, cursor, hint)?;
-        }
+        edit.render_frame(
+            &mut screen,
+            LineView {
+                prompt: visible_prompt,
+                text: &text,
+                cursor,
+            },
+            hint,
+            search.is_some(),
+            styled_or_multiline,
+            replaying,
+        )?;
         if std::mem::take(&mut blink)
             && keys.queued.is_empty()
             && !ready(0, 0)
@@ -880,11 +943,7 @@ pub fn line(
                 && matched_query
                     .as_ref()
                     .is_some_and(|prior| last.text.starts_with(prior) && text.contains(&last.text));
-            let input_ready = || {
-                !keys.queued.is_empty()
-                    || ready(0, 0)
-                    || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
-            };
+            let input_ready = || keys.input_pending();
             // Any newer match for a longer query was also a match for its
             // prefix. If the newest hit still fits, it remains the newest.
             if cached {
@@ -909,11 +968,7 @@ pub fn line(
             }
         }
         if show_hint {
-            let input_ready = || {
-                !keys.queued.is_empty()
-                    || ready(0, 0)
-                    || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
-            };
+            let input_ready = || keys.input_pending();
             // After showing a recalled command, let the terminal paint it or send
             // the next arrow before searching older rows for a longer suggestion.
             if needs_hint
@@ -956,17 +1011,9 @@ pub fn line(
         if search.is_none() && unbound_text(first, session) {
             last_arg = None;
             recall.edited(session.history_lines().len());
-            appended = keys.insert(
-                first,
-                session,
-                &mut text,
-                &mut cursor,
-                &mut inserted,
-                overwrite,
-                &mut undo,
-            )?;
+            edit.appended = edit.insert(&mut keys, first, session, &mut text, &mut cursor)?;
             blink = session.bindings.blink_matching_paren
-                && matches!(inserted.as_bytes(), b")" | b"]" | b"}");
+                && matches!(edit.inserted.as_bytes(), b")" | b"]" | b"}");
             last_tab = false;
             continue;
         }
@@ -997,13 +1044,13 @@ pub fn line(
                     ("READLINE_MARK".into(), mark.to_string()),
                 ]);
                 let flow = crate::eval_text(session, &command, status);
-                undo.boundary();
+                edit.undo.boundary();
                 last_arg = None;
                 if let Some(updated) = session.get("READLINE_LINE")
                     && updated != text
                 {
                     let len = text.len();
-                    undo.replace(&mut text, 0..len, &updated, cursor);
+                    edit.undo.replace(&mut text, 0..len, &updated, cursor);
                     cursor = text.len();
                     mark = 0;
                 }
@@ -1038,7 +1085,7 @@ pub fn line(
             last_arg = None;
         }
         if action != Action::Insert {
-            undo.boundary();
+            edit.undo.boundary();
         }
         let history_position = recall.position();
         if !matches!(
@@ -1113,10 +1160,10 @@ pub fn line(
                         query.pop();
                         *index = 0;
                     } else if action == Action::Insert {
-                        keys.insert_burst(first, session, &mut inserted)?;
-                        if let Some(c) = inserted.chars().next() {
+                        keys.insert_burst(first, session, &mut edit.inserted)?;
+                        if let Some(c) = edit.inserted.chars().next() {
                             shortest = Some(query.len() + c.len_utf8());
-                            query.push_str(&inserted);
+                            query.push_str(&edit.inserted);
                             *index = 0;
                         }
                     } else if action == Action::Paste {
@@ -1146,7 +1193,7 @@ pub fn line(
                         pending_queries.clear();
                         match selected {
                             Ok(Some(command)) => {
-                                undo = Undo::default();
+                                edit.undo = Undo::default();
                                 text = command;
                                 cursor = text.len();
                             }
@@ -1176,13 +1223,20 @@ pub fn line(
             }
         }
         if session.bindings.map == Keymap::Command
-            && let Some(moved) = vi.apply(action, first, &mut text, &mut cursor, session, &mut undo)
+            && let Some(moved) = vi.apply(
+                action,
+                first,
+                &mut text,
+                &mut cursor,
+                session,
+                &mut edit.undo,
+            )
         {
-            motion = moved;
+            edit.motion = moved;
             last_tab = false;
             continue;
         }
-        motion = matches!(
+        edit.motion = matches!(
             action,
             Action::Back
                 | Action::BackWord
@@ -1197,7 +1251,7 @@ pub fn line(
             Action::Redraw => {
                 screen.view.invalidate();
             }
-            Action::Overwrite => overwrite = !overwrite,
+            Action::Overwrite => edit.overwrite = !edit.overwrite,
             Action::Vi
             | Action::ViInsert
             | Action::ViAppend
@@ -1286,7 +1340,7 @@ pub fn line(
             Action::Forward if !right_arrow => cursor = next(&text, cursor),
             Action::Delete => {
                 let end = next(&text, cursor);
-                undo.record(&text, cursor..end, 0, cursor, false);
+                edit.undo.record(&text, cursor..end, 0, cursor, false);
                 text.replace_range(cursor..end, "");
             }
             Action::Rubout => {
@@ -1296,9 +1350,9 @@ pub fn line(
                     && (styled_or_multiline || start >= 1024)
                     && text.as_bytes()[start].is_ascii_graphic()
                 {
-                    erased = Some(1usize);
+                    edit.erased = Some(1usize);
                 }
-                cursor = rubout(&mut text, cursor, overwrite, Some(&mut undo));
+                cursor = rubout(&mut text, cursor, edit.overwrite, Some(&mut edit.undo));
             }
             Action::Kill
             | Action::Discard
@@ -1334,7 +1388,7 @@ pub fn line(
                     _ => (0, cursor),
                 };
                 if action != Action::Copy {
-                    undo.record(&text, lo..hi, 0, cursor, false);
+                    edit.undo.record(&text, lo..hi, 0, cursor, false);
                 }
                 if lo == 0 && hi == text.len() && hi > 0 && action != Action::Copy {
                     std::mem::swap(&mut session.editor_kill, &mut text);
@@ -1350,13 +1404,13 @@ pub fn line(
                 }
             }
             Action::Undo => {
-                undo.apply(&mut text, &mut cursor);
+                edit.undo.apply(&mut text, &mut cursor);
                 screen.view.invalidate();
             }
             Action::LastArg => {
                 let (end, replace) = last_arg.unwrap_or((history_position, false));
                 if replace {
-                    undo.apply(&mut text, &mut cursor);
+                    edit.undo.apply(&mut text, &mut cursor);
                 }
                 let next = end.checked_sub(1);
                 let arg = next
@@ -1364,14 +1418,15 @@ pub fn line(
                     .and_then(|line| crate::parser::last_history_argument(line));
                 if let Some(arg) = arg {
                     mark = text[..cursor].chars().count();
-                    undo.record(&text, cursor..cursor, arg.len(), cursor, false);
+                    edit.undo
+                        .record(&text, cursor..cursor, arg.len(), cursor, false);
                     text.insert_str(cursor, arg);
                     cursor += arg.len();
                 }
                 last_arg = Some((next.unwrap_or(0), arg.is_some()));
             }
             Action::Yank => {
-                undo.record(
+                edit.undo.record(
                     &text,
                     cursor..cursor,
                     session.editor_kill.len(),
@@ -1393,7 +1448,8 @@ pub fn line(
                     && line.starts_with(&text)
                 {
                     let end = crate::parser::suggestion_end(line, cursor);
-                    undo.record(&text, cursor..cursor, end - cursor, cursor, false);
+                    edit.undo
+                        .record(&text, cursor..cursor, end - cursor, cursor, false);
                     text.push_str(&line[cursor..end]);
                     cursor = text.len();
                 }
@@ -1401,7 +1457,7 @@ pub fn line(
             Action::ForwardWord => cursor = word_end(&text, cursor),
             Action::Reload => bindings::reload(session),
             Action::TabInsert => {
-                undo.record(&text, cursor..cursor, 1, cursor, false);
+                edit.undo.record(&text, cursor..cursor, 1, cursor, false);
                 text.insert(cursor, '\t');
                 cursor += 1;
             }
@@ -1411,7 +1467,7 @@ pub fn line(
                     let suffix = text.len() - cursor;
                     if let std::borrow::Cow::Owned(expanded) = result.text {
                         let old_end = text.len();
-                        undo.replace(&mut text, 0..old_end, &expanded, cursor);
+                        edit.undo.replace(&mut text, 0..old_end, &expanded, cursor);
                         cursor = text.len();
                     }
                     if action == Action::MagicSpace {
@@ -1423,7 +1479,7 @@ pub fn line(
                         while !text.is_char_boundary(cursor) {
                             cursor -= 1;
                         }
-                        undo.record(&text, cursor..cursor, 1, cursor, false);
+                        edit.undo.record(&text, cursor..cursor, 1, cursor, false);
                         text.insert(cursor, ' ');
                         cursor += 1;
                     }
@@ -1439,7 +1495,8 @@ pub fn line(
                 if text[start..end].is_ascii()
                     && !matches!(locale, crate::session::CharacterLocale::Turkic)
                 {
-                    undo.record(&text, start..end, end - start, cursor, false);
+                    edit.undo
+                        .record(&text, start..end, end - start, cursor, false);
                     let word = &mut text[start..end];
                     if action == Action::UpperWord {
                         word.make_ascii_uppercase();
@@ -1465,7 +1522,8 @@ pub fn line(
                             locale,
                         )
                     };
-                    undo.replace(&mut text, start..end, &replacement, cursor);
+                    edit.undo
+                        .replace(&mut text, start..end, &replacement, cursor);
                     cursor = start + replacement.len();
                 }
             }
@@ -1481,7 +1539,7 @@ pub fn line(
                         &text[split..right],
                         &text[left..split]
                     );
-                    undo.replace(&mut text, left..end, &swapped, cursor);
+                    edit.undo.replace(&mut text, left..end, &swapped, cursor);
                     cursor = end;
                 }
             }
@@ -1494,7 +1552,8 @@ pub fn line(
                 let mid = previous(&text, end);
                 let start = previous(&text, mid);
                 let replacement = format!("{}{}", &text[mid..end], &text[start..mid]);
-                undo.record(&text, start..end, replacement.len(), cursor, false);
+                edit.undo
+                    .record(&text, start..end, replacement.len(), cursor, false);
                 text.replace_range(start..end, &replacement);
                 cursor = end;
             }
@@ -1502,7 +1561,8 @@ pub fn line(
                 if let Some(key) = keys.get()?
                     && let Some(c) = keys.character(key)?
                 {
-                    undo.record(&text, cursor..cursor, c.len_utf8(), cursor, false);
+                    edit.undo
+                        .record(&text, cursor..cursor, c.len_utf8(), cursor, false);
                     text.insert(cursor, c);
                     cursor += c.len_utf8();
                 }
@@ -1516,13 +1576,15 @@ pub fn line(
                 let was_tab = was_tab || action == Action::List;
                 let bindings = session.bindings.clone();
                 let result = preview::during(
-                    prompt,
-                    &text,
-                    cursor,
+                    LineView {
+                        prompt,
+                        text: &text,
+                        cursor,
+                    },
                     &mut screen,
                     &mut keys,
                     bindings,
-                    overwrite,
+                    edit.overwrite,
                     || complete::at(&text, cursor, session, was_tab, read.unwrap_or(false)),
                 );
                 replaying = !keys.queued.is_empty();
@@ -1537,7 +1599,8 @@ pub fn line(
                         match selected {
                             Ok(Some(index)) => {
                                 let word = result.select(index);
-                                undo.replace(&mut text, result.start..cursor, &word, cursor);
+                                edit.undo
+                                    .replace(&mut text, result.start..cursor, &word, cursor);
                                 cursor = result.start + word.len();
                             }
                             Ok(None) => {}
@@ -1569,7 +1632,12 @@ pub fn line(
                         screen.row = 0;
                         screen.view.invalidate();
                     } else {
-                        undo.replace(&mut text, result.start..cursor, &result.replacement, cursor);
+                        edit.undo.replace(
+                            &mut text,
+                            result.start..cursor,
+                            &result.replacement,
+                            cursor,
+                        );
                         cursor = result.start + result.replacement.len();
                     }
                 }
@@ -1582,7 +1650,7 @@ pub fn line(
             | Action::LastHistory => {
                 recall.navigate(action, session.history_lines(), &mut text, &mut cursor);
                 if recall.position() != history_position {
-                    undo = Undo::default();
+                    edit.undo = Undo::default();
                 }
             }
             Action::PreviousDirectory | Action::NextDirectory => unreachable!(),
@@ -1593,12 +1661,14 @@ pub fn line(
                         if let Some(s) =
                             history.suggestion(session.history_lines(), &text, true, || true)
                         {
-                            undo.record(&text, cursor..cursor, s.len(), cursor, false);
+                            edit.undo
+                                .record(&text, cursor..cursor, s.len(), cursor, false);
                             text.push_str(s);
                         } else if let Some(s) =
                             history.older_suggestion(session, &mut view, &text, &|| false)
                         {
-                            undo.record(&text, cursor..cursor, s.len(), cursor, false);
+                            edit.undo
+                                .record(&text, cursor..cursor, s.len(), cursor, false);
                             text.push_str(s);
                         }
                         cursor = text.len();
@@ -1609,11 +1679,12 @@ pub fn line(
             }
             Action::Paste => {
                 if cursor == text.len() {
-                    appended = Some(cursor);
+                    edit.appended = Some(cursor);
                 }
                 let pasted =
                     keys.paste(|bytes| screen.paste_frame(prompt, &text, cursor, bytes))?;
-                undo.record(&text, cursor..cursor, pasted.len(), cursor, false);
+                edit.undo
+                    .record(&text, cursor..cursor, pasted.len(), cursor, false);
                 let end = cursor + pasted.len();
                 if text.is_empty() {
                     text = pasted;
@@ -1623,19 +1694,11 @@ pub fn line(
                 cursor = end;
             }
             Action::Insert => {
-                appended = keys.insert(
-                    first,
-                    session,
-                    &mut text,
-                    &mut cursor,
-                    &mut inserted,
-                    overwrite,
-                    &mut undo,
-                )?;
+                edit.appended = edit.insert(&mut keys, first, session, &mut text, &mut cursor)?;
             }
             _ => {}
         }
-        if motion && matches!(action, Action::Back | Action::Forward) && search.is_none() {
+        if edit.motion && matches!(action, Action::Back | Action::Forward) && search.is_none() {
             cursor = keys.motion_burst(&text, cursor, session);
         }
     }

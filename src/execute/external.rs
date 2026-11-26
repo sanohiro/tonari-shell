@@ -11,19 +11,19 @@ impl Environment {
     pub(super) fn prepare(session: &Session, assignments: &[(String, String)]) -> Option<Rc<Self>> {
         let mut live = session.environment_changes(assignments).peekable();
         live.peek()?;
-        if assignments.is_empty() {
-            if let Some(cached) = &*session.external_env.borrow() {
-                let mut entries = cached.changes.iter();
-                if live.by_ref().all(|(key, value)| {
-                    entries
-                        .next()
-                        .is_some_and(|(k, v)| key == k && value.as_deref() == v.as_deref())
-                }) && entries.next().is_none()
-                {
-                    return Some(cached.clone());
-                }
-                live = session.environment_changes(assignments).peekable();
+        if assignments.is_empty()
+            && let Some(cached) = &*session.external_env.borrow()
+        {
+            let mut entries = cached.changes.iter();
+            if live.by_ref().all(|(key, value)| {
+                entries
+                    .next()
+                    .is_some_and(|(k, v)| key == k && value.as_deref() == v.as_deref())
+            }) && entries.next().is_none()
+            {
+                return Some(cached.clone());
             }
+            live = session.environment_changes(assignments).peekable();
         }
         let mut cached_changes = Vec::new();
         let changes: std::collections::BTreeMap<_, _> = live

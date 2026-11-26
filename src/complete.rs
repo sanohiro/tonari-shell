@@ -679,10 +679,12 @@ fn quote_choice(common: &str, noquote: bool, append_space: bool, source_prefix: 
     replacement
 }
 
+type CommandVisitor<'a> = dyn FnMut(&str, Option<(&Path, u8)>) -> ControlFlow<()> + 'a;
+
 fn visit_commands(
     prefix: &str,
     session: &Session,
-    visit: &mut dyn FnMut(&str, Option<(&Path, u8)>) -> ControlFlow<()>,
+    visit: &mut CommandVisitor<'_>,
 ) -> ControlFlow<()> {
     for name in crate::execute::builtin_names()
         .iter()
@@ -706,17 +708,16 @@ fn visit_commands(
             &dir
         };
         scan(path, prefix.as_bytes(), &mut |raw, kind| {
-            if editing && entries % 256 == 0 {
+            if editing && entries.is_multiple_of(256) {
                 crate::editor::preview::scan_input();
             }
             entries += 1;
             if let Some(raw) = raw
                 && !matches!(raw.to_bytes(), b"." | b"..")
                 && let Ok(name) = raw.to_str()
+                && (!ignored.active() || !ignored.contains(&path.join(name)))
             {
-                if !ignored.active() || !ignored.contains(&path.join(name)) {
-                    return visit(name, Some((path, kind)));
-                }
+                return visit(name, Some((path, kind)));
             }
             ControlFlow::Continue(())
         })?;
@@ -943,7 +944,7 @@ pub(crate) fn corrected_directory(input: &Path) -> Option<PathBuf> {
         let mut visited = 0usize;
         let editing = crate::editor::preview::active();
         let _ = scan(parent, &[], &mut |raw, kind| {
-            if editing && visited % 256 == 0 {
+            if editing && visited.is_multiple_of(256) {
                 crate::editor::preview::poll();
             }
             visited += 1;
@@ -1037,7 +1038,7 @@ impl<'a> Directory<'a> {
                 .is_some_and(|locale| !matches!(locale, crate::session::CharacterLocale::Turkic));
         let base = self.base.as_bytes();
         let _ = scan(&self.path, prefix, &mut |raw, kind| {
-            if editing && entries % 256 == 0 {
+            if editing && entries.is_multiple_of(256) {
                 crate::editor::preview::scan_input();
             }
             entries += 1;

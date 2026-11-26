@@ -227,11 +227,11 @@ impl Token {
         while !body.is_empty() {
             let (mut member, rest) = Member::read(body, utf8);
             body = rest;
-            if let (Member::Literal(lo), [b'-', _, ..]) = (&member, rest) {
-                if let (Member::Literal(hi), after) = Member::read(&rest[1..], utf8) {
-                    member = Member::Range(*lo, hi);
-                    body = after;
-                }
+            if let (Member::Literal(lo), [b'-', _, ..]) = (&member, rest)
+                && let (Member::Literal(hi), after) = Member::read(&rest[1..], utf8)
+            {
+                member = Member::Range(*lo, hi);
+                body = after;
             }
             members.push(member);
         }

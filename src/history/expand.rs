@@ -1,12 +1,19 @@
 use crate::Session;
 use std::{borrow::Cow, io};
 
+#[derive(Clone)]
+struct CachedWords {
+    line: String,
+    extglob: bool,
+    spans: Vec<(usize, usize)>,
+}
+
 #[derive(Default, Clone)]
 pub(crate) struct Memory {
     substitution: Option<(String, String)>,
     search: String,
     matched_word: Option<String>,
-    words: Option<(String, bool, Vec<(usize, usize)>)>,
+    words: Option<CachedWords>,
 }
 
 impl Memory {
@@ -14,15 +21,15 @@ impl Memory {
         if self
             .words
             .as_ref()
-            .is_none_or(|(saved, glob, _)| *glob != extglob || saved != line)
+            .is_none_or(|saved| saved.extglob != extglob || saved.line != line)
         {
-            self.words = Some((
-                line.to_owned(),
+            self.words = Some(CachedWords {
+                line: line.to_owned(),
                 extglob,
-                crate::parser::history_designator_spans(line, extglob),
-            ));
+                spans: crate::parser::history_designator_spans(line, extglob),
+            });
         }
-        &self.words.as_ref().unwrap().2
+        &self.words.as_ref().unwrap().spans
     }
 }
 
@@ -164,6 +171,28 @@ pub(crate) fn expand<'a>(session: &mut Session, line: &'a str) -> io::Result<Exp
     expand_line(session, line, None)
 }
 
+fn quick_substitution(
+    session: &mut Session,
+    q: char,
+    mut rest: &str,
+) -> io::Result<Expansion<'static>> {
+    let old = field(&mut rest, q);
+    let new = field(&mut rest, q);
+    let previous = session
+        .history
+        .as_deref()
+        .and_then(|h| h.lines.last())
+        .ok_or_else(|| error("event not found"))?;
+    let memory = session
+        .history_expansion
+        .get_or_insert_with(Default::default);
+    remember(memory, old, new)?;
+    Ok(Expansion {
+        text: Cow::Owned(substitute(previous, memory, false)? + rest),
+        print: false,
+    })
+}
+
 pub(crate) fn expand_line<'a>(
     session: &mut Session,
     line: &'a str,
@@ -183,21 +212,9 @@ pub(crate) fn expand_line<'a>(
     };
     let history = session.history.as_deref();
     if let Some(q) = quick
-        && let Some(mut rest) = line.strip_prefix(q)
+        && let Some(rest) = line.strip_prefix(q)
     {
-        let old = field(&mut rest, q);
-        let new = field(&mut rest, q);
-        let previous = history
-            .and_then(|h| h.lines.last())
-            .ok_or_else(|| error("event not found"))?;
-        let memory = session
-            .history_expansion
-            .get_or_insert_with(Default::default);
-        remember(memory, old, new)?;
-        return Ok(Expansion {
-            text: Cow::Owned(substitute(previous, memory, false)? + rest),
-            print: false,
-        });
+        return quick_substitution(session, q, rest);
     }
     if !line.contains(event) {
         return Ok(unchanged());

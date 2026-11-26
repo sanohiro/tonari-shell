@@ -561,7 +561,7 @@ fn braced_parameter<'a>(
             word: Box::new(alternative),
             quoted,
         });
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -574,17 +574,18 @@ pub(super) fn backquote(
     let mut rest = chars.as_str();
     while let Some(at) = memchr::memchr2(b'`', b'\\', rest.as_bytes()) {
         let (literal, after) = rest.split_at(at);
-        if after.starts_with('`') {
+        if let Some(tail) = after.strip_prefix('`') {
             let body = if source.is_empty() {
                 parse_final(literal)?
             } else {
                 source.push_str(literal);
-                let previous = super::FIRST_LINE.replace(super::source_line(chars.as_str()));
-                let parsed = parse_final(&source);
-                super::FIRST_LINE.set(previous);
-                parsed?
+                let _line = crate::ScopedCell::enter(
+                    &super::FIRST_LINE,
+                    super::source_line(chars.as_str()),
+                );
+                parse_final(&source)?
             };
-            *chars = after[1..].chars();
+            *chars = tail.chars();
             word.part(Part::Substitution { body, quoted });
             return Ok(());
         }
@@ -676,15 +677,14 @@ fn parameter_word(
             }
             '$' if inside_apostrophes && chars.as_str().starts_with('(') => {
                 let source = chars.as_str();
-                match dollar_word(chars, &mut word, outer_quoted, assignment, quoted_name) {
-                    Err(error) => {
-                        let Some(end) = source.find('\'') else {
-                            return Err(error);
-                        };
-                        *chars = source[end..].chars();
-                        word.part(Part::InvalidCommandSubstitution);
-                    }
-                    Ok(()) => {}
+                if let Err(error) =
+                    dollar_word(chars, &mut word, outer_quoted, assignment, quoted_name)
+                {
+                    let Some(end) = source.find('\'') else {
+                        return Err(error);
+                    };
+                    *chars = source[end..].chars();
+                    word.part(Part::InvalidCommandSubstitution);
                 }
             }
             '$' => dollar_word(chars, &mut word, outer_quoted, assignment, quoted_name)?,
@@ -876,12 +876,12 @@ pub(crate) fn arithmetic_word(source: &str) -> Result<crate::word::Word, Error> 
 }
 
 pub(crate) fn subscript_word(source: &str, associative: bool) -> Result<crate::word::Word, Error> {
-    if !source.is_empty()
-        && !(associative && source.starts_with('~'))
-        && !source
+    let needs_scan = source.is_empty()
+        || associative && source.starts_with('~')
+        || source
             .bytes()
-            .any(|b| matches!(b, b'$' | b'`' | b'"' | b'\\' | b'\''))
-    {
+            .any(|b| matches!(b, b'$' | b'`' | b'"' | b'\\' | b'\''));
+    if !needs_scan {
         return Ok(Word::Literal(source.into()));
     }
     scan_subscript(source, associative, |_, _| Ok(false))
@@ -889,8 +889,8 @@ pub(crate) fn subscript_word(source: &str, associative: bool) -> Result<crate::w
 
 // Keep an associative key as one shell word during arithmetic expansion. Its
 // expanded characters are data, even when they include a bracket or backslash.
-pub(crate) fn arithmetic_segments<'a>(
-    source: &'a str,
+pub(crate) fn arithmetic_segments(
+    source: &str,
     is_associative: impl Fn(&str) -> bool,
 ) -> Result<(Vec<(Word, Word)>, Word), Error> {
     let mut keys = Vec::new();
@@ -1597,7 +1597,7 @@ fn scan(
                     let suffix = &chars.as_str()[..length];
                     // Only consume a complete unquoted prefix. Quotes, escapes and
                     // expansions inside a login name must go through the word reader.
-                    if valid_tilde_user(&suffix) {
+                    if valid_tilde_user(suffix) {
                         let rest = chars.as_str();
                         let slash = super::POSIX.get() && rest[length..].starts_with('/');
                         let end = length + usize::from(slash);

@@ -40,34 +40,35 @@ impl Session {
         if let Some(word) = inputs.get(pos) {
             if word == "--" {
                 pos += 1;
-            } else if word.starts_with('-') && word.len() > 1 {
-                if let Some(c) = word.get(offset..).and_then(|s| s.chars().next()) {
-                    offset += c.len_utf8();
-                    option = Some(c);
-                    let rest = &word[offset..];
-                    match spec.trim_start_matches(':').split_once(c) {
-                        Some((_, tail)) if c != ':' && tail.starts_with(':') => {
-                            pos += 1;
-                            if rest.is_empty() {
-                                if let Some(argument) = inputs.get(pos) {
-                                    value = Some(argument.clone());
-                                    pos += 1;
-                                } else {
-                                    problem = Some(':');
-                                }
-                            } else {
-                                value = Some(rest.to_owned());
-                            }
-                            offset = 1;
-                        }
-                        matched => {
-                            if matched.is_none() || c == ':' {
-                                problem = Some('?');
-                            }
-                            if rest.is_empty() {
+            } else if word.starts_with('-')
+                && word.len() > 1
+                && let Some(c) = word.get(offset..).and_then(|s| s.chars().next())
+            {
+                offset += c.len_utf8();
+                option = Some(c);
+                let rest = &word[offset..];
+                match spec.trim_start_matches(':').split_once(c) {
+                    Some((_, tail)) if c != ':' && tail.starts_with(':') => {
+                        pos += 1;
+                        if rest.is_empty() {
+                            if let Some(argument) = inputs.get(pos) {
+                                value = Some(argument.clone());
                                 pos += 1;
-                                offset = 1;
+                            } else {
+                                problem = Some(':');
                             }
+                        } else {
+                            value = Some(rest.to_owned());
+                        }
+                        offset = 1;
+                    }
+                    matched => {
+                        if matched.is_none() || c == ':' {
+                            problem = Some('?');
+                        }
+                        if rest.is_empty() {
+                            pos += 1;
+                            offset = 1;
                         }
                     }
                 }

@@ -175,7 +175,7 @@ pub fn logout(session: &mut Session, code: u8, previous: u8) -> u8 {
 }
 
 pub fn initialize(session: &mut Session, invocation: &Invocation) -> Flow {
-    if invocation.check {
+    if invocation.options.check {
         return Flow::Continue(0);
     }
     if invocation.login && !invocation.noprofile && (invocation.as_sh || !session.posix) {

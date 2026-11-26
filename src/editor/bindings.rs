@@ -285,9 +285,11 @@ impl Bindings {
         }
         if let Some(map) = self.keys[self.map as usize].as_deref() {
             result.retain(|k| !map.contains_key(k));
-            result.extend(map.iter().filter_map(|(k, v)| {
-                matches!(v, Binding::Edit(a) if *a==action).then(|| k.clone())
-            }));
+            result.extend(
+                map.iter()
+                    .filter(|&(_k, v)| matches!(v, Binding::Edit(a) if *a==action))
+                    .map(|(k, _v)| k.clone()),
+            );
             result.sort();
         }
         result

@@ -571,11 +571,11 @@ pub(crate) fn insensitive_match(
     extended: bool,
     locale: super::CharacterLocale,
 ) -> bool {
-    if !pattern
+    let complex = pattern
         .bytes()
         .any(|b| matches!(b, b'?' | b'[' | b'\\' | 0))
-        && !(extended && has_group(pattern))
-    {
+        || extended && has_group(pattern);
+    if !complex {
         match pattern.split_once('*') {
             None => return super::folded_prefix(value, pattern, locale) == Some(value.len()),
             Some((head, tail)) if !tail.contains('*') => {

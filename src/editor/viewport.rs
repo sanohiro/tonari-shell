@@ -173,12 +173,7 @@ impl Screen {
             );
         } else {
             std::mem::swap(&mut self.output, &mut self.view.image);
-            self.output.clear();
-            self.output.push('\r');
-            if self.row > 0 {
-                let _ = write!(self.output, "\x1b[{}A", self.row);
-            }
-            self.output.push_str("\x1b[J");
+            super::begin_redraw(&mut self.output, self.row);
             self.output.push_str(&self.view.image);
             move_to(&mut self.output, pos, caret);
         }

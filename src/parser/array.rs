@@ -8,14 +8,12 @@ pub struct Subscript<T> {
     pub append: bool,
 }
 
+type ArrayItems<W> = Vec<(Option<Subscript<String>>, W)>;
+
 #[derive(Debug, Clone)]
 pub enum Assignment<W> {
     Scalar(W),
-    Array(
-        Option<usize>,
-        Vec<(Option<Subscript<String>>, W)>,
-        super::Location,
-    ),
+    Array(Option<usize>, ArrayItems<W>, super::Location),
 }
 
 // Keep subscripts intact while lexing the assignment name. They are arithmetic
@@ -35,9 +33,7 @@ pub(super) fn indexed_prefix(source: &str) -> Option<&str> {
         .then(|| &source[..end + plus])
 }
 
-pub(crate) fn quoted_initializer(
-    source: &str,
-) -> Result<Vec<(Option<Subscript<String>>, Word)>, Error> {
+pub(crate) fn quoted_initializer(source: &str) -> Result<ArrayItems<Word>, Error> {
     if let Some(body) = source.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
         && body.bytes().all(|b| {
             b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.' | b'/' | b' ' | b'\t')
@@ -61,9 +57,7 @@ pub(crate) fn quoted_initializer(
 }
 
 impl Reader {
-    pub(super) fn array_items<const COLLECT: bool>(
-        &mut self,
-    ) -> Result<Vec<(Option<Subscript<String>>, Word)>, Error> {
+    pub(super) fn array_items<const COLLECT: bool>(&mut self) -> Result<ArrayItems<Word>, Error> {
         self.tokens.pop_front();
         let mut items = Vec::new();
         loop {

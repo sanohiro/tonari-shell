@@ -25,9 +25,7 @@ thread_local! {
 }
 
 pub(super) fn during<T>(
-    prompt: &str,
-    line: &str,
-    cursor: usize,
+    view: super::LineView<'_>,
     screen: &mut Screen,
     keys: &mut Keys,
     bindings: Bindings,
@@ -43,9 +41,9 @@ pub(super) fn during<T>(
     }
     let pending = Preview {
         pid: unsafe { libc::getpid() },
-        prompt: prompt.into(),
-        line: line.into(),
-        cursor,
+        prompt: view.prompt.into(),
+        line: view.text.into(),
+        cursor: view.cursor,
         screen: Screen {
             output: String::new(),
             row: screen.row,

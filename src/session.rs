@@ -272,6 +272,10 @@ impl From<io::Error> for DirectoryError {
 }
 
 impl Session {
+    pub(crate) fn reset_forked_traps(&mut self) {
+        self.traps.after_fork(self.errtrace, self.functrace);
+    }
+
     fn convert_case(&self, mut text: String, letter_case: Option<LetterCase>) -> String {
         let Some(mode) = letter_case else { return text };
         if mode == LetterCase::Capitalize {
@@ -381,7 +385,7 @@ impl Session {
             .take_while(|key| key.starts_with(prefix))
             .map(String::as_str)
             .filter(|key| {
-                !(self.funcname_unset && *key == "FUNCNAME") && !self.variables.contains_key(*key)
+                !(self.funcname_unset && *key == "FUNCNAME" || self.variables.contains_key(*key))
             })
             .collect();
         for (key, active) in [
@@ -586,7 +590,7 @@ impl Session {
                 .or_else(|| std::env::var("_").ok())
                 .or_else(|| std::env::args_os().next()?.into_string().ok());
         }
-        if let Some(base) = name.strip_prefix('\u{1}') {
+        if let Some(base) = name.strip_prefix(crate::word::ARRAY_INDEXES_PREFIX) {
             let resolved = self.reference_name(base).ok()?;
             let base = resolved.as_ref();
             let snapshot;

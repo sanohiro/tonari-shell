@@ -507,15 +507,39 @@ pub(super) fn prepare_expanded(
         });
     }
     lookup::command_prefix(&mut cmd, session);
-    if raw.redirects.iter().any(|r| r.variable.is_some()) {
-        cmd.named_redirects = raw.redirects;
-    } else if !raw.redirects.is_empty() {
+    expand_prepared_redirects(
+        &mut cmd,
+        raw.redirects,
+        session,
+        last_status,
+        captured,
+        assignment_only,
+        standalone,
+    )?;
+    if assignment_only {
+        cmd.assignments.clear();
+    }
+    Ok(cmd)
+}
+
+fn expand_prepared_redirects(
+    cmd: &mut PreparedCommand,
+    redirects: Vec<Redirect<Word>>,
+    session: &mut Session,
+    last_status: u8,
+    captured: &Cell<Option<u8>>,
+    assignment_only: bool,
+    standalone: bool,
+) -> Result<(), crate::expansion::Error> {
+    if redirects.iter().any(|r| r.variable.is_some()) {
+        cmd.named_redirects = redirects;
+    } else if !redirects.is_empty() {
         // Bash expands external/redirect-only redirections in a child context.
         // Clone only if an expansion can change a variable in that context.
-        let child = assignment_only || builtin(&cmd, last_status, session).is_none();
+        let child = assignment_only || builtin(cmd, last_status, session).is_none();
         let process_scope = session.substitutions.scope();
         let mut isolated =
-            (child && raw.redirects.iter().any(redirection_observable)).then(|| session.clone());
+            (child && redirects.iter().any(redirection_observable)).then(|| session.clone());
         let mut exp = Expansion::with_assignments(
             isolated.as_mut().unwrap_or(session),
             last_status,
@@ -527,7 +551,7 @@ pub(super) fn prepare_expanded(
             },
             standalone && assignment_only,
         );
-        let result = prepare_redirects(raw.redirects, &mut exp);
+        let result = prepare_redirects(redirects, &mut exp);
         if let Some(isolated) = isolated {
             session
                 .substitutions
@@ -541,10 +565,7 @@ pub(super) fn prepare_expanded(
         })?;
         cmd.empty_status = captured.get().unwrap_or(0);
     }
-    if assignment_only {
-        cmd.assignments.clear();
-    }
-    Ok(cmd)
+    Ok(())
 }
 
 pub(super) fn prepare_redirects(

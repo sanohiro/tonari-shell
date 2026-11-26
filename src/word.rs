@@ -9,11 +9,45 @@ use crate::parser::Statement;
 use crate::pattern::{Field, quote_into};
 pub use modifier::{Modification, ReplaceMode};
 
+pub(crate) const ARRAY_INDEXES_PREFIX: char = '\u{1}';
+fn array_indexes_key(base: &str) -> String {
+    format!("{ARRAY_INDEXES_PREFIX}{base}")
+}
+
 #[derive(Clone, Debug)]
 pub enum Word {
     Literal(String),
     Expanded(Vec<Part>),
     Declaration(Vec<Part>),
+}
+
+fn indirect_target(
+    mut target: String,
+    env: &mut crate::expansion::Expansion<'_>,
+) -> Result<String, crate::expansion::Error> {
+    // Resolve a computed numeric index once. Later parameter
+    // operations consume the index without reinterpreting its source.
+    if let Some((base, expr)) = crate::session::array::subscript(&target)
+        && is_identifier(base)
+        && !matches!(expr, "@" | "*")
+        && !env.session.is_associative(base)
+        && !expr.bytes().all(|b| b.is_ascii_digit())
+    {
+        let index = env.session.resolve_index(base, expr).map_err(|_| {
+            crate::expansion::Error::discard(format!("{target}: invalid variable name"))
+        })?;
+        target = format!("{base}[{index}]");
+    } else if !(is_identifier(&target)
+        || array_elements_name(&target).is_some()
+        || (!target.is_empty() && target.bytes().all(|b| b.is_ascii_digit()))
+        || matches!(target.as_str(), "@" | "*" | "#" | "?" | "-" | "$" | "!")
+        || env.session.valid_target(&target))
+    {
+        return Err(crate::expansion::Error::discard(format!(
+            "{target}: invalid variable name"
+        )));
+    }
+    Ok(target)
 }
 
 impl Default for Word {
@@ -250,7 +284,7 @@ impl Word {
                 if let Some(reference) = name.strip_prefix('!').filter(|s| {
                     !s.is_empty() && (plain_quote.is_none() || array_elements_name(name).is_none())
                 }) {
-                    let Some(mut target) = modifier::value(reference, env)? else {
+                    let Some(target) = modifier::value(reference, env)? else {
                         if let Some(quoted) = plain_quote
                             && !env.session.nounset
                             && env.session.stored_array_len(reference).is_some()
@@ -265,31 +299,7 @@ impl Word {
                             crate::expansion::Error::discard(message)
                         });
                     };
-                    // Resolve a computed numeric index once. Later parameter
-                    // operations consume the index without reinterpreting its source.
-                    if let Some((base, expr)) = crate::session::array::subscript(&target)
-                        && is_identifier(base)
-                        && !matches!(expr, "@" | "*")
-                        && !env.session.is_associative(base)
-                        && !expr.bytes().all(|b| b.is_ascii_digit())
-                    {
-                        let index = env.session.resolve_index(base, expr).map_err(|_| {
-                            crate::expansion::Error::discard(format!(
-                                "{target}: invalid variable name"
-                            ))
-                        })?;
-                        target = format!("{base}[{index}]");
-                    } else if !(is_identifier(&target)
-                        || array_elements_name(&target).is_some()
-                        || (!target.is_empty() && target.bytes().all(|b| b.is_ascii_digit()))
-                        || matches!(target.as_str(), "@" | "*" | "#" | "?" | "-" | "$" | "!")
-                        || env.session.valid_target(&target))
-                    {
-                        return Err(crate::expansion::Error::discard(format!(
-                            "{target}: invalid variable name"
-                        )));
-                    }
-                    *name = target;
+                    *name = indirect_target(target, env)?;
                 }
             }
             match part {
@@ -812,7 +822,7 @@ fn array_elements(
     keys: bool,
     lookup: &dyn Fn(&str) -> Option<String>,
 ) -> Option<Vec<String>> {
-    let indexes = lookup(&format!("\u{1}{base}"))?;
+    let indexes = lookup(&array_indexes_key(base))?;
     Some(
         indexes
             .split('\0')
@@ -843,7 +853,7 @@ fn parameter(
         let count = if matches!(name, "@" | "*") {
             positional.len()
         } else if let Some((base, _, _)) = array_elements_name(name) {
-            lookup(&format!("\u{1}{base}"))?
+            lookup(&array_indexes_key(base))?
                 .split('\0')
                 .filter(|i| !i.is_empty())
                 .count()

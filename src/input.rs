@@ -628,17 +628,18 @@ pub fn text(
     eval_line: Option<usize>,
 ) -> Flow {
     let first_line = eval_line.unwrap_or(1);
-    if !session.verbose && source.len() >= 32 * 1024 {
-        if let Some(program) = whole_group(session, source, first_line) {
-            return if check {
-                Flow::Continue(0)
-            } else {
-                match execute_program(session, program, status, tail) {
-                    Flow::Discard(code) => Flow::Continue(code),
-                    flow => flow,
-                }
-            };
-        }
+    if !session.verbose
+        && source.len() >= 32 * 1024
+        && let Some(program) = whole_group(session, source, first_line)
+    {
+        return if check {
+            Flow::Continue(0)
+        } else {
+            match execute_program(session, program, status, tail) {
+                Flow::Discard(code) => Flow::Continue(code),
+                flow => flow,
+            }
+        };
     }
     let mut start = 0;
     let mut end = 0;

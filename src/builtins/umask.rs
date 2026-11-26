@@ -28,9 +28,7 @@ fn symbolic(text: &str, mask: libc::mode_t) -> Option<libc::mode_t> {
         if who == 0 {
             who = 0o777;
         }
-        if chars.peek().is_none() {
-            return None;
-        }
+        chars.peek()?;
         while let Some(operator) = chars.next() {
             let mut bits = 0;
             if let Some(&class @ ('u' | 'g' | 'o')) = chars.peek() {

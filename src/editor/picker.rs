@@ -267,11 +267,7 @@ pub(super) fn history(
             io::stderr().write_all(screen.output.as_bytes())?;
         }
         let filter = snapshot.get_or_insert_with(|| crate::history::Filter::new(session, history));
-        let waiting = || {
-            !keys.queued.is_empty()
-                || ready(0, 0)
-                || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
-        };
+        let waiting = || keys.input_pending();
         if refresh {
             filter.rewind(session);
             filter.fill(session, &query, 1, waiting);

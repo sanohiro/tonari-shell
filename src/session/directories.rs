@@ -101,7 +101,7 @@ fn long_physical_path() -> io::Result<std::path::PathBuf> {
             } == 0
             {
                 let st = unsafe { st.assume_init() };
-                if st.st_dev as u64 == here.dev() && st.st_ino as u64 == here.ino() {
+                if st.st_dev as u64 == here.dev() && st.st_ino == here.ino() {
                     break Some(OsStr::from_bytes(name.to_bytes()).to_owned());
                 }
             }

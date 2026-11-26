@@ -299,7 +299,7 @@ impl Modification {
                     ),
                 }))
             }
-            Self::Assignment => return assignment(name, quoted, env),
+            Self::Assignment => assignment(name, quoted, env),
             Self::Pairs { separate }
                 if array_elements_name(name).is_some_and(|(base, _, keys)| {
                     !keys
@@ -399,10 +399,10 @@ impl Modification {
                         return Ok(scalar(substring(text, start, len)?.to_owned()));
                     }
                     let target = env.session.reference_name(base)?;
-                    if !env.session.array_parameter(&target) {
-                        if let Some(text) = env.lookup(&target) {
-                            return Ok(scalar(substring(&text, start, len)?.to_owned()));
-                        }
+                    if !env.session.array_parameter(&target)
+                        && let Some(text) = env.lookup(&target)
+                    {
+                        return Ok(scalar(substring(&text, start, len)?.to_owned()));
                     }
                 }
                 if matches!(name, "@" | "*") || array_elements_name(name).is_some() {
@@ -430,7 +430,9 @@ impl Modification {
                             };
                             return Ok(Part::Elements { values, at, quoted });
                         }
-                        let indexes = env.lookup(&format!("\u{1}{base}")).unwrap_or_default();
+                        let indexes = env
+                            .lookup(&super::array_indexes_key(base))
+                            .unwrap_or_default();
                         let last = indexes
                             .split('\0')
                             .rfind(|i| !i.is_empty())

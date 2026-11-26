@@ -116,7 +116,13 @@ pub(crate) fn private_fd(fd: OwnedFd) -> io::Result<OwnedFd> {
     if fd.as_raw_fd() > 2 {
         return Ok(fd);
     }
-    let copy = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 3) };
+    let copy = unsafe {
+        libc::fcntl(
+            fd.as_raw_fd(),
+            libc::F_DUPFD_CLOEXEC,
+            crate::execute::fd::FIRST_NONSTANDARD,
+        )
+    };
     if copy < 0 {
         return Err(io::Error::last_os_error());
     }
@@ -285,9 +291,7 @@ fn start_raw(
         return Err(io::Error::last_os_error());
     }
     if pid == 0 {
-        session
-            .traps
-            .after_fork(session.errtrace, session.functrace);
+        session.reset_forked_traps();
         launch.pipeline_child(&mut session.traps);
         enter_stage(session, raw.compound.as_deref(), launch.background);
         if let Some(command) = raw.compound.as_deref_mut()
@@ -493,9 +497,28 @@ fn start(
         }
     }
 
+    fork_stage(
+        cmd,
+        builtin,
+        (input.as_ref(), output.as_ref(), next_reader),
+        last_status,
+        session,
+        launch,
+    )
+}
+
+fn fork_stage(
+    cmd: &mut PreparedCommand,
+    builtin: Option<Builtin>,
+    pipes: (Option<&OwnedFd>, Option<&OwnedFd>, Option<&OwnedFd>),
+    last_status: u8,
+    session: &mut Session,
+    launch: crate::jobs::Launch,
+) -> io::Result<Stage> {
+    let (input, output, next_reader) = pipes;
     // Opening a FIFO can block until a later pipeline stage starts. Do those
     // opens in a child so the parent can launch the remaining stages first.
-    let mut setup = connect_pipe(input.as_ref(), output.as_ref(), next_reader);
+    let mut setup = connect_pipe(input, output, next_reader);
     // A trap installed by this command runs after its local redirects end.
     // An explicit subshell retains its enclosing redirects through shell exit.
     let scoped = !cmd.redirects.is_empty() && builtin.is_some_and(|b| can_install_trap(b, cmd));
@@ -514,9 +537,7 @@ fn start(
         // External argv and environment are prepared before fork. A shell builtin
         // runs in a child copy of the single-threaded interpreter and may reenter it.
         // Restore signals caught by the interactive shell before blocking on a file.
-        session
-            .traps
-            .after_fork(session.errtrace, session.functrace);
+        session.reset_forked_traps();
         launch.pipeline_child(&mut session.traps);
         enter_stage(session, cmd.compound.as_deref(), launch.background);
         if cmd.missing_hook && !launch.background {
@@ -645,7 +666,7 @@ pub(super) fn wait(pid: libc::pid_t) -> io::Result<u8> {
     loop {
         if crate::traps::waitpid(pid, &mut status, 0) >= 0 {
             if libc::WIFSIGNALED(status) {
-                return Ok((128 + libc::WTERMSIG(status)) as u8);
+                return Ok(crate::traps::signal_status(libc::WTERMSIG(status)));
             }
             return Ok(libc::WEXITSTATUS(status) as u8);
         }
@@ -675,7 +696,10 @@ pub(crate) fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(
     if levels > 0
         && let Some(first) = line.chars().next()
     {
-        line.insert_str(0, &first.to_string().repeat(levels as usize));
+        let mut nested = String::with_capacity(line.len() + first.len_utf8() * levels as usize);
+        nested.extend(std::iter::repeat_n(first, levels as usize));
+        nested.push_str(&line);
+        line = nested;
     }
     append(&mut line);
     line.push('\n');
@@ -840,12 +864,11 @@ fn run_ordered(
         .iter()
         .any(|r| r.word.as_literal().is_none() || redirection_observable(r))
         && {
-            let mut query = PreparedCommand {
-                words: words.clone(),
-                ..Default::default()
-            };
-            lookup::command_prefix(&mut query, session);
-            builtin(&query, status, session).is_none()
+            let (skip, search, _) = lookup::scan_prefix(&words, lookup::Search::Normal, session);
+            builtin_words(&words[skip..], search, 0, status, session, || {
+                session.search_path(&[])
+            })
+            .is_none()
         };
     named_fd::with_redirects(redirects, session, status, child_redirects, |session| {
         let cmd = match prepare_expanded(raw, words, session, status, true, &captured) {

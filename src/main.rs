@@ -209,10 +209,10 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
     session.initialize_shell_level();
     session.arg0 = std::mem::take(&mut invocation.arg0);
     session.positional = std::mem::take(&mut invocation.positional).into_iter();
-    session.allexport = invocation.allexport;
-    session.notify = invocation.notify;
-    session.noexec = invocation.check;
-    if let Some(enabled) = invocation.ignoreeof {
+    session.allexport = invocation.options.allexport;
+    session.notify = invocation.options.notify;
+    session.noexec = invocation.options.check;
+    if let Some(enabled) = invocation.options.ignoreeof {
         if enabled {
             session.assign("IGNOREEOF", "10");
         } else {
@@ -224,25 +224,25 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
     {
         session.set_eof_variable(Some(value.to_str().unwrap_or("")));
     }
-    session.onecmd = invocation.onecmd;
-    session.xtrace = invocation.xtrace;
-    session.errexit = invocation.errexit;
-    session.verbose = invocation.verbose;
-    session.errtrace = invocation.errtrace;
-    session.functrace = invocation.functrace;
-    session.noglob = invocation.noglob;
-    session.noclobber = invocation.noclobber;
-    session.hashes.enabled = invocation.hashall;
-    session.shopt.braceexpand = invocation.braceexpand;
-    session.nounset = invocation.nounset;
-    session.pipefail = invocation.pipefail;
-    session.physical = invocation.physical;
-    session.keyword = invocation.keyword;
-    session.shopt.nolog = invocation.nolog;
+    session.onecmd = invocation.options.onecmd;
+    session.xtrace = invocation.options.xtrace;
+    session.errexit = invocation.options.errexit;
+    session.verbose = invocation.options.verbose;
+    session.errtrace = invocation.options.errtrace;
+    session.functrace = invocation.options.functrace;
+    session.noglob = invocation.options.noglob;
+    session.noclobber = invocation.options.noclobber;
+    session.hashes.enabled = invocation.options.hashall;
+    session.shopt.braceexpand = invocation.options.braceexpand;
+    session.nounset = invocation.options.nounset;
+    session.pipefail = invocation.options.pipefail;
+    session.physical = invocation.options.physical;
+    session.keyword = invocation.options.keyword;
+    session.shopt.nolog = invocation.options.nolog;
     session.interactive = invocation.interactive;
     session.login = invocation.login;
     session.history_enabled = invocation.interactive;
-    session.histexpand = invocation.histexpand.unwrap_or(session.interactive);
+    session.histexpand = invocation.options.histexpand.unwrap_or(session.interactive);
     // The selected keymap is also observable in a forced interactive script.
     // Terminal capabilities are checked separately when opening the editor.
     session.emacs = session.interactive && !invocation.noediting;
@@ -252,7 +252,7 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
         eprintln!("tonari: SIGHUP: {e}");
         return 1;
     }
-    session.jobs.monitor = invocation.monitor.unwrap_or(session.interactive);
+    session.jobs.monitor = invocation.options.monitor.unwrap_or(session.interactive);
     if session.jobs.monitor {
         session.jobs.init(session.interactive);
     }
@@ -265,12 +265,12 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
         }
         session.execution_string = Some(std::rc::Rc::new(std::mem::take(text)));
     }
-    session.command_history_expansion = invocation.histexpand == Some(true);
+    session.command_history_expansion = invocation.options.histexpand == Some(true);
     session.stdin_script = matches!(invocation.input, Input::Stdin);
-    session.set_posix(invocation.posix);
+    session.set_posix(invocation.options.posix);
     session.shopt.progcomp_alias = session.interactive;
     session.inherit_options();
-    for (enable, name) in std::mem::take(&mut invocation.shopts) {
+    for (enable, name) in std::mem::take(&mut invocation.options.shopts) {
         let options = match name {
             Some(name) => vec![if enable { "-s" } else { "-u" }.into(), name],
             None if enable => Vec::new(),
@@ -287,15 +287,15 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
         if session.get("PS1").is_none() {
             session.assign("PS1", "tonari$ ");
         }
-        if session.get("HISTFILE").is_none() {
-            if let Some(home) = session.get("HOME").or_else(crate::word::account_home) {
-                let file = if session.posix {
-                    ".sh_history"
-                } else {
-                    ".bash_history"
-                };
-                session.assign("HISTFILE", &format!("{home}/{file}"));
-            }
+        if session.get("HISTFILE").is_none()
+            && let Some(home) = session.get("HOME").or_else(crate::word::account_home)
+        {
+            let file = if session.posix {
+                ".sh_history"
+            } else {
+                ".bash_history"
+            };
+            session.assign("HISTFILE", &format!("{home}/{file}"));
         }
     }
     if session.interactive && listen_for_interrupts().is_err() {
@@ -309,12 +309,11 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
         Flow::Break(..) | Flow::LoopContinue(_) => return 1,
     };
     if invocation.debugger
-        && !invocation.check
+        && !invocation.options.check
         && (!session.interactive || !matches!(invocation.input, Input::Stdin))
+        && let Flow::Exit(code) = startup::debugger(&mut session)
     {
-        if let Flow::Exit(code) = startup::debugger(&mut session) {
-            return traps::finish(&mut session, code);
-        }
+        return traps::finish(&mut session, code);
     }
     if invocation.as_sh && !session.posix {
         session.set_posix(true);
@@ -322,14 +321,21 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
     let flow = match invocation.input {
         Input::Command(_) => {
             let text = session.execution_string.clone().unwrap();
-            input::text(&mut session, &text, initial, true, invocation.check, None)
+            input::text(
+                &mut session,
+                &text,
+                initial,
+                true,
+                invocation.options.check,
+                None,
+            )
         }
         Input::File(path) => match std::fs::File::open(&path) {
             Ok(file) => {
                 session.push_source_path(&path);
                 session.function_names.push("main".into());
                 session.call_lines.push(0);
-                input::file_script(&mut session, file, None, initial, invocation.check)
+                input::file_script(&mut session, file, None, initial, invocation.options.check)
             }
             Err(e) => {
                 eprintln!("tonari: {}: {e}", path.display());
@@ -353,7 +359,7 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
                 Flow::Continue(1)
             }
         },
-        Input::Stdin => input::stdin_script(&mut session, invocation.check),
+        Input::Stdin => input::stdin_script(&mut session, invocation.options.check),
     };
     let code = match flow {
         Flow::Discard(s) | Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s) => s,

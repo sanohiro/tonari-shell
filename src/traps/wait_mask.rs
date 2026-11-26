@@ -92,7 +92,7 @@ impl WaitMask {
     pub fn interrupt_status(&self) -> Option<u8> {
         let sig = TERMINATING.load(Relaxed);
         if sig != 0 {
-            return Some(128 + sig as u8);
+            return Some(crate::traps::signal_status(sig));
         }
         let bits = PENDING.load(Relaxed) & !(self.running | (signal_bit(libc::SIGCHLD)));
         (bits != 0).then(|| 129 + bits.trailing_zeros() as u8)
