@@ -21,7 +21,7 @@ pub enum Modification {
     Quote,
     Escapes,
     Case {
-        upper: bool,
+        direction: crate::pattern::CaseDirection,
         all: bool,
         pattern: Word,
     },
@@ -183,7 +183,7 @@ impl Modification {
                 }))
             }
             Self::Case {
-                upper,
+                direction,
                 all,
                 pattern,
             } => {
@@ -198,12 +198,21 @@ impl Modification {
                     Some(crate::pattern::Matcher::new(pattern.as_str()))
                 };
                 let locale = env.session.character_locale();
-                let upper = *upper;
+                let direction = *direction;
                 let all = *all;
                 // Bash applies the locale's single-character case conversion.
                 // In particular an uppercase expansion never grows into two letters.
-                Ok(values.map(quoted, |text| {
-                    crate::pattern::case_chars(text, upper, all, filter.as_ref(), locale)
+                Ok(values.map(quoted, |text| match direction {
+                    crate::pattern::CaseDirection::Toggle => {
+                        crate::pattern::toggle_case(text, all, filter.as_ref(), locale)
+                    }
+                    other => crate::pattern::case_chars(
+                        text,
+                        matches!(other, crate::pattern::CaseDirection::Upper),
+                        all,
+                        filter.as_ref(),
+                        locale,
+                    ),
                 }))
             }
             Self::Assignment => {

@@ -263,6 +263,34 @@ pub(crate) fn capitalize(mut text: String, locale: crate::session::CharacterLoca
     })
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum CaseDirection {
+    Upper,
+    Lower,
+    Toggle,
+}
+
+pub(crate) fn toggle_case(
+    text: String,
+    all: bool,
+    filter: Option<&Matcher<&str>>,
+    locale: crate::session::CharacterLocale,
+) -> String {
+    localized(|| {
+        text.chars()
+            .enumerate()
+            .map(|(i, c)| {
+                let mut buffer = [0; 4];
+                if (all || i == 0) && filter.is_none_or(|p| p.matches(c.encode_utf8(&mut buffer))) {
+                    mapped_char(c, !c.is_uppercase(), locale)
+                } else {
+                    c
+                }
+            })
+            .collect()
+    })
+}
+
 pub(crate) fn case_chars(
     mut text: String,
     upper: bool,

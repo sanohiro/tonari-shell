@@ -292,7 +292,11 @@ fn dollar_word(
                         },
                         b'E' => crate::word::Modification::Escapes,
                         _ => crate::word::Modification::Case {
-                            upper: op != b'L',
+                            direction: if op == b'L' {
+                                crate::pattern::CaseDirection::Lower
+                            } else {
+                                crate::pattern::CaseDirection::Upper
+                            },
                             all: op != b'u',
                             pattern: crate::word::Word::Literal(String::new()),
                         },
@@ -330,7 +334,7 @@ fn dollar_word(
                     });
                     return Ok(());
                 }
-                if let Some(op @ ('^' | ',')) = chars.clone().next() {
+                if let Some(op @ ('^' | ',' | '~')) = chars.clone().next() {
                     chars.next();
                     let all = chars.as_str().starts_with(op);
                     if all {
@@ -340,7 +344,11 @@ fn dollar_word(
                     word.part(Part::Modify {
                         name: name.into(),
                         operation: Box::new(crate::word::Modification::Case {
-                            upper: op == '^',
+                            direction: match op {
+                                '^' => crate::pattern::CaseDirection::Upper,
+                                '~' => crate::pattern::CaseDirection::Toggle,
+                                _ => crate::pattern::CaseDirection::Lower,
+                            },
                             all,
                             pattern,
                         }),

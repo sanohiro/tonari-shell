@@ -14,6 +14,7 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "toggle-case": """x='aB cD-eF'; printf '<%s>\\n' "${x~}" "${x~~}" "${x~[cB]}" "${x~~[cB]}"; a=('xyZ' '01' 'a雪B'); printf '<%s>\\n' "${a[@]~~}" """,
     "declared-case": """declare -c v='hELLO woRLD'; echo "$v"; v+=' ABC'; declare -p v; declare -ac arr=('eXAMPLE' '.NEXT'); declare -p arr; declare +c v; v='rAW'; echo "$v"; declare -cl z='mIx'; declare -p z""",
     "completion-sources": "complete -g -s -A signal pick; complete -p pick; compgen -A group $(id -gn) | LC_ALL=C sort -u; compgen -s http | LC_ALL=C sort -u; compgen -A signal SIGTER; compgen -A signal DEBUG",
 
@@ -55,6 +56,7 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "toggle-case": ('v=${phrase~~}', 2400),
     "declared-case": ('v="$phrase"', 2200),
     "completion-group": ('compgen -g "$group" >/dev/null', 24),
     "completion-service": ('compgen -s http >/dev/null', 40),
@@ -250,6 +252,7 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "toggle-case": "phrase='sOME mixed-CASE-123 example value for conversion'",
                 "declared-case": "declare -c v; phrase='aBCDEf GHIJKl mixed case words'",
                 "completion-group": "group=$(id -gn)",
                 "physical": "set -P", "execfail": "shopt -s execfail; exec 2>/dev/null", "history-number": "set -o history; history -s seed", "shift-verbose": "shopt -s shift_verbose; exec 2>/dev/null",
