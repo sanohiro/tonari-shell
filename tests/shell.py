@@ -134,12 +134,16 @@ i=0; ((0 && A["$((++i))"])); echo "$i"
         self.compare("kill -l HUP BAD INT 9999 129 2>/dev/null; echo $?", 0, b"1\n2\nHUP\n1\n")
 
     def test_regex_tilde_and_unquoted_operators(self):
-        self.compare("""HOME='^a$'
-[[ $HOME =~ ~ ]]; echo "$?"
+        # Start both shells with this HOME. Some Bash builds cache tilde's
+        # original value even after the HOME variable changes.
+        self.env["HOME"] = str(self.cwd / "^a$")
+        self.compare("""[[ $HOME =~ ~ ]]; echo "$?"
 [[ "$HOME/a" =~ ~/[ab] ]]; echo "$?"
 [[ '~' =~ "~" ]]; echo "$?"
 [[ '&' =~ (&) ]]; echo "$?"
 """, 0, b"0\n0\n0\n0\n")
+        p = self.command(TONARI, 'HOME=/changed; printf "%s" ~; [[ "$HOME" =~ ~ ]]')
+        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, b"/changed", b""))
         for shell in self.shells_for():
             for operator in ("&", "<>"):
                 proc = self.command(shell, "[[ x =~ " + operator + " ]]; echo unexpected")

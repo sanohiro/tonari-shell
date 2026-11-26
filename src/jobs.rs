@@ -777,7 +777,9 @@ fn kill(jobs: &Jobs, mut args: &[String]) -> u8 {
                     crate::traps::number(arg).map(|n| writeln!(out, "{n}"))
                 };
                 let Some(result) = result else {
-                    eprintln!("tonari: kill: {arg}: invalid signal specification");
+                    // stderr is unbuffered. Submit the whole diagnostic in one write.
+                    let message = format!("tonari: kill: {arg}: invalid signal specification\n");
+                    let _ = io::stderr().write_all(message.as_bytes());
                     status = 1;
                     continue;
                 };

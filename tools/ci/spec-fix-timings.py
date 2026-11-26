@@ -21,7 +21,7 @@ CASES = {
                                'do ((a["$key"]++)); done; echo "${a[$key]}"', b"8000\n"),
     "signal names": ('for ((i=0;i<3000;i++)); do kill -l HUP BAD INT 9999 129; done '
                      '>list 2>/dev/null; echo "$?"; tail -3 list', b"1\n1\n2\nHUP\n"),
-    "regex home": ('HOME="^a$"; for ((i=0;i<3000;i++)); do [[ "$HOME/a" =~ ~/[ab] ]] || exit 1; '
+    "regex home": ('for ((i=0;i<3000;i++)); do [[ "$HOME/a" =~ ~/[ab] ]] || exit 1; '
                    'done; echo ok', b"ok\n"),
     "lastpipe": ('shopt -s lastpipe; for ((i=0;i<120;i++)); do printf "yes\\n" | read -r v; done; '
                  'echo "$v"', b"yes\n"),
@@ -36,6 +36,8 @@ def main():
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as directory:
         home = Path(directory)
+        regex_home = home / "^a$"
+        regex_home.mkdir()
         rc = home / "rc"
         rc.write_text('PS1="tonari$ "\nset -o vi\ns(){ printf "edited:%s:%s\\n" "${#1}" "$2"; }\n')
         for trial in range(args.trials):
@@ -45,7 +47,9 @@ def main():
                         continue
                     start = time.perf_counter_ns()
                     run = subprocess.run([shell, "-c", script], cwd=home, capture_output=True,
-                                         env={"PATH": "/usr/bin:/bin", "HOME": directory}, timeout=15)
+                                         env={"PATH": "/usr/bin:/bin",
+                                              "HOME": str(regex_home) if name == "regex home" else directory},
+                                         timeout=15)
                     elapsed = time.perf_counter_ns() - start
                     if (run.returncode, run.stdout, run.stderr) != (0, expected, b""):
                         raise RuntimeError((shell, name, run.returncode, run.stdout, run.stderr))
