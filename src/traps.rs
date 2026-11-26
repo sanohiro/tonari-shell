@@ -179,11 +179,7 @@ impl Traps {
     }
 
     pub fn in_action(&self) -> bool {
-        self.handling_debug
-            || self.running != 0
-            || self.handling_error
-            || self.handling_return
-            || self.exit_status.is_some()
+        self.running != 0 || self.in_nested_action() || self.exit_status.is_some()
     }
 
     pub fn has_explicit_traps(&self) -> bool {

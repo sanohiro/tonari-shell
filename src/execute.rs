@@ -510,6 +510,7 @@ enum Builtin {
     Mapfile,
     Let,
     LoopControl,
+    AutoCd,
     Echo,
     Test,
     Read,
@@ -569,6 +570,16 @@ fn builtin(cmd: &PreparedCommand, last_status: u8, session: &Session) -> Option<
     }
     named_builtin(name, &cmd.words[1..], last_status)
         .or_else(|| (cmd.search == lookup::Search::BuiltinsOnly).then_some(Builtin::Unknown))
+        .or_else(|| {
+            (session.shopt.autocd
+                && session.interactive
+                && cmd.search == lookup::Search::Normal
+                && Path::new(name).is_dir()
+                && (name.contains('/')
+                    || !std::env::split_paths(&lookup::path(cmd, session))
+                        .any(|d| lookup::executable(&d.join(name)))))
+            .then_some(Builtin::AutoCd)
+        })
 }
 
 pub(crate) fn builtin_names() -> &'static [&'static str] {
@@ -828,6 +839,11 @@ fn eval_builtin(
         Builtin::Unset => Flow::Continue(session.unset(args)),
         Builtin::DirectoryStack => {
             Flow::Continue(session.directory_stack(&cmd.words[0], args, &mut io::stdout().lock()))
+        }
+        Builtin::AutoCd => {
+            eprintln!("cd -- {}", cmd.words.join(" "));
+            cmd.words.insert(0, "--".into());
+            Flow::Continue(session.directory_builtin("cd", &cmd.words))
         }
         Builtin::Directory => Flow::Continue(session.directory_builtin(&cmd.words[0], args)),
         Builtin::Source => crate::source_file(

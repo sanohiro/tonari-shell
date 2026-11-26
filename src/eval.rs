@@ -272,6 +272,10 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             words,
             body,
         } => {
+            if !crate::word::is_identifier(&name) {
+                eprintln!("tonari: {name}: invalid loop variable");
+                return Flow::Continue(1);
+            }
             let items = match words {
                 None => session.positional.as_slice().to_vec(),
                 Some(words) => {
@@ -493,6 +497,12 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             Flow::Continue(result)
         }
         Command::Function { name, definition } => {
+            if !crate::parser::is_function_name(&name)
+                || session.posix && !crate::word::is_identifier(&name)
+            {
+                eprintln!("tonari: {name}: invalid function name");
+                return Flow::Continue(1);
+            }
             if session.posix && crate::execute::special_builtin(&name) {
                 eprintln!("tonari: {name}: special builtin cannot be redefined");
                 return if session.interactive {

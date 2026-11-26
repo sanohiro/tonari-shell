@@ -21,8 +21,13 @@ pub(super) fn is_dynamic(name: &str) -> bool {
 }
 
 fn entropy() -> Option<u32> {
+    // Darwin and musl both export getentropy. The libc crate only declares it
+    // for some of the supported targets.
+    unsafe extern "C" {
+        fn getentropy(buf: *mut libc::c_void, len: libc::size_t) -> libc::c_int;
+    }
     let mut bytes = [0u8; 4];
-    (unsafe { libc::getentropy(bytes.as_mut_ptr().cast(), bytes.len()) } == 0)
+    (unsafe { getentropy(bytes.as_mut_ptr().cast(), bytes.len()) } == 0)
         .then(|| u32::from_ne_bytes(bytes))
 }
 

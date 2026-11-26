@@ -383,6 +383,28 @@ fn unbound_text(first: u8, session: &Session) -> bool {
         && !session.bindings.custom_prefix(&[first])
 }
 
+fn matching_opener(text: &str, cursor: usize) -> Option<usize> {
+    let close = *text.as_bytes().get(cursor.checked_sub(1)?)?;
+    let open = match close {
+        b')' => b'(',
+        b']' => b'[',
+        b'}' => b'{',
+        _ => return None,
+    };
+    let mut nested = 0;
+    for (i, &byte) in text.as_bytes()[..cursor - 1].iter().enumerate().rev() {
+        if byte == open {
+            if nested == 0 {
+                return Some(i);
+            }
+            nested -= 1;
+        } else if byte == close {
+            nested += 1;
+        }
+    }
+    None
+}
+
 fn previous(s: &str, i: usize) -> usize {
     s[..i].char_indices().next_back().map_or(0, |(i, _)| i)
 }
@@ -707,6 +729,7 @@ pub fn line(
     let mut last_tab = false;
     let styled_or_multiline = prompt.contains(['\x1b', '\n']);
     let mut appended = None;
+    let mut blink = false;
     let mut erased = None;
     let mut replaying = false;
     let mut motion = false;
@@ -809,6 +832,15 @@ pub fn line(
         } else {
             screen.draw(visible_prompt, &text, cursor, hint)?;
         }
+        if std::mem::take(&mut blink)
+            && keys.queued.is_empty()
+            && !ready(0, 0)
+            && let Some(open) = matching_opener(&text, cursor)
+        {
+            screen.draw(visible_prompt, &text, open, hint)?;
+            ready(0, 500);
+            screen.draw(visible_prompt, &text, cursor, hint)?;
+        }
         if let Some(last) = pending_queries.last() {
             let cached = last.skip == 0
                 && matched_query
@@ -899,6 +931,8 @@ pub fn line(
                 overwrite,
                 &mut undo,
             )?;
+            blink = session.bindings.blink_matching_paren
+                && matches!(inserted.as_bytes(), b")" | b"]" | b"}");
             last_tab = false;
             continue;
         }

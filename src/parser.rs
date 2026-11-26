@@ -871,9 +871,9 @@ impl Reader {
             Some("while" | "until") => self.while_clause(),
             Some("for" | "select") => self.for_clause(),
             Some("function") => self.function(true),
-            Some(name)
-                if matches!(self.tokens.get(1), Some(Token::LeftParen))
-                    && is_function_name(name) =>
+            _ if matches!(self.peek(), Some(Token::Word(_)))
+                && matches!(self.tokens.get(1), Some(Token::LeftParen))
+                && matches!(self.tokens.get(2), Some(Token::RightParen)) =>
             {
                 self.function(false)
             }
@@ -1153,7 +1153,17 @@ impl Reader {
             });
         }
         self.alias_at(false, Some(&[]))?;
-        let name = self.name()?;
+        let start_name = self.position();
+        let name = match self.operand() {
+            Some(Token::Word(LexWord {
+                word: Word::Literal(name),
+                protected: false,
+                ..
+            })) => name,
+            Some(Token::Word(_)) => self.location(start_name).text().into(),
+            None => return Err(Error::Incomplete("expected a loop variable")),
+            _ => return Err(Error::Invalid("expected a loop variable")),
+        };
         self.alias_newlines(&["in", "do"])?;
         let words = if self.keyword() == Some("in") {
             self.tokens.pop_front();
@@ -1192,12 +1202,14 @@ impl Reader {
         if keyword {
             self.tokens.pop_front();
         }
+        let start_name = self.position();
         let name = match self.operand() {
             Some(Token::Word(LexWord {
                 word: Word::Literal(name),
                 protected: false,
                 ..
-            })) if is_function_name(&name) => name,
+            })) => name,
+            Some(Token::Word(_)) => self.location(start_name).text().into(),
             None => return Err(Error::Incomplete("expected a function name")),
             _ => return Err(Error::Invalid("invalid function name")),
         };
@@ -1219,6 +1231,9 @@ impl Reader {
                 Error::Invalid("expected a compound function body")
             }
         })?;
+        if matches!(compound, Command::Function { .. }) {
+            return Err(Error::Invalid("expected a compound function body"));
+        }
         let body = if self.has_redirect() {
             // Function redirections are applied when the function is invoked.
             vec![Statement {
