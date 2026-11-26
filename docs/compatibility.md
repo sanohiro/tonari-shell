@@ -4,6 +4,17 @@
 
 The [bensch and Oils comparison](compatibility/external-shell/README.md) records Bash and Tonari results for individual interactive, builtin and language cases. 対話操作・組み込み・言語仕様の外部試験について、ケースごとの Bash との差と再現方法を記録しています。
 
+## Shell scopes and command execution / 変数のスコープとコマンド実行
+
+Native Linux x86-64 and macOS arm64 also ran the full yash suite with each executable named `sh`. The case tables include successes, failures, skips and unexpected passes, and the decision for every remaining failed assertion. 両シェルが失敗した非対話の `wait` も修正し、POSIX モードで特殊組み込みと同名の関数を定義する試験は、規格が要求する入力条件に照らして判定しました。[POSIX results and rationale](compatibility/yash-posix-followup/README.md#signal-wait-and-names)
+
+Function prefixes, locals created by prefixed eval, dynamic integers, case attributes and array transformations have direct Bash witnesses. Tests cover the output, the value visible to the caller and the value left for the next operation. Redirection tests also inspect the filesystem and the source line observed by ERR. The external comparison records every failing assertion and the reason for retaining a difference. [Case results and notes](compatibility/external-shell/shared-failures.md#shell-behavior) · [Native performance](benchmarks.md#shell-scope-timings)
+
+関数・eval の一時代入、RANDOM・SRANDOM・SECONDS、配列展開、大文字・小文字属性、トレース、ERR、対話履歴を対象に、同じ入力を Bash と Tonari に渡します。算術添字を含む間接参照では参照元の文字列をデータとして扱い、変数、既定値、算術式を評価します。外部プログラムの起動をこの間接参照に埋め込む挙動はサポート対象外です。UTF-8 専用の文字境界と Linux のファイル名ソート順も引き続き仕様に含まれます。
+
+The default Bash grammar accepts unquoted punctuation in function names. A function named % can be registered, queried with declare -F, and removed with unset. A name containing a comma and percent sign also survives export to a child shell. Tonari follows Bash 5.2 in requiring a portable identifier in POSIX mode. Bash 5.3 also accepts punctuation there as a permitted extension. Both references reject names of POSIX special builtins. The import parser receives the stored function body separately from its name. [Bash function grammar](https://www.gnu.org/software/bash/manual/html_node/Shell-Functions.html) · [Direct registration and child-process tests](../tests/shell.py)
+
+通常モードの関数名に使える記号と、POSIX モードの識別子規則を個別に確認しました。関数が未定義のときだけ unset の終了値を比較しても、定義後に削除できない不具合は発見できません。登録、問い合わせ、削除に加え、子シェルへのエクスポートも検査します。
 
 <a id="calendar-and-arguments"></a>
 

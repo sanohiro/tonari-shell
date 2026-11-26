@@ -1,5 +1,27 @@
 # Engineering notes / 開発知見
 
+## 2026-11-26 · Indirection, source lines and child status / 間接参照・行番号・子プロセス
+
+A variable containing an indexed array reference must resolve its subscript once. With `$RANDOM` seeded to 1, reading `${!ref}` for `ref=a[RANDOM%2]` selected the correct element but used to advance the generator twice. The next random number was 19566. Resolve the numeric index using the read-only evaluator and carry its decimal result into the parameter operation. Both GNU Bash 5.2.37 and the release now produce odd followed by 10791. Exporting `RANDOM` takes one snapshot that successive child processes inherit. [Shell tests](../tests/shell.py) · [Native measurements](benchmarks.md#shell-scope-timings)
+
+間接参照では、配列添字の妥当性検査と実際の参照で $RANDOM を二度読んでいました。選択される配列要素だけを検査しても発見できません。次の乱数も比較することで、副作用が一度だけ起きたことを確認できます。同じ理由で、条件のトレースには評価済みのオペランドを渡し、表示のためにコマンド置換をもう一度実行しないようにしました。
+
+A compound command may fail while opening its second redirection, before its body runs. Keep the operator's source line, restore the descriptors and invoke ERR on that line. Earlier redirects retain their filesystem effects. Scatter/gather writes allow a forked child to emit a complete diagnostic, including the failed path and OS reason, without allocating or locking stdio. On a physical M1, 600 failing redirections with a real ERR handler fell from 8.65 to 6.32 ms in the interleaved tuning run. [Redirection path](../src/execute.rs) · [Workload](../tools/ci/spec-fix-timings.py)
+
+複合コマンドに複数のリダイレクトがある場合も、失敗した演算子の行で ERR が発火します。先に作成済みのファイルは残り、標準入出力は復元されます。診断を一回の writev にまとめ、通常のファイルを開く経路には新たなシステムコールを加えていません。
+
+An immediate false in the last pipeline stage can close its input before the producer writes. On the M1, the producer in 120 runs of the original Oils background/12 case returned 55 three times and SIGPIPE 117 times in Tonari. Delaying the writer gave 141/1 in both shells. Draining its output before returning false gave 55/1 in both. The regression test also fills the pipe with a writer, so closure has an observable result independent of scheduling. [Behavior witnesses](../tests/shell.py) · [External comparison](compatibility/external-shell/shared-failures.md#shell-behavior)
+
+最後の段が直ちに終了するパイプでは、書き手の終了値はスケジューリングで変わります。書き手が先に完了するケースと、読み手がいなくなり SIGPIPE を受けるケースを直接検証します。子シェルで親ループへの continue が伝播した場合は子が失敗し、子の内部にあるループの continue はそのまま成功します。
+
+Oils alias/40 received a passing grade because it checked only the final array values. Its alias should have produced index zero. The failing command had also produced zero, along with an unexpected diagnostic. Changing the alias to output 2 and checking indices and stderr exposed the difference. In Bash mode an indexed assignment can use aliases active when its subscript expands. POSIX mode preserves names resolved when it read the command. Keep the alias table available only to source-level parsing. The read-only evaluator for indirect array reference data remains separate. [Direct tests](../tests/shell.py) · [Release measurements](benchmarks.md#shipped-shell-timings)
+
+Oils の元の試験は、正しく動いても別の理由で失敗しても添字が 0 になり、配列の値だけが一致しました。添字に 2 を使い、要素番号と標準エラーを確かめる回帰試験を加えています。通常モードと POSIX モードでエイリアスの定義時期を変え、関数定義後にモードを切り替えるケースも確認します。
+
+A successful noninteractive POSIX `wait` can return a child signal status without writing a job notification to stderr. The original yash fixture sends two different signals to stopped-at-FIFO jobs. It checks stdout, status and an empty stderr. The Bash interface also has a job notice for some signals. Track the actual signal separately from an ordinary exit with the same numeric code. A POSIX function name is validated when its definition executes. The repeated-definition shortcut must check it too, since a script can define a function, switch modes and execute the same definition again. [POSIX cases and sources](compatibility/yash-posix-followup/README.md#signal-wait-and-names) · [Tests](../tests/shell.py)
+
+非対話の POSIX モードでは、待ち合わせに成功した子のシグナル通知を標準エラーに書かず、終了状態は呼び出し元へ返します。POSIX モードの記号付き関数名は Bash 5.2 で拒否され、Bash 5.3 では規格が許す拡張として受理されます。Tonari は通常モードで受理し、POSIX モードでは 5.2 と同じ診断を返します。関数名の検証は、定義を読み飛ばした場合、定義が実行された場合、定義後に POSIX モードへ切り替えた場合を個別に確認します。
+
 ## 2026-11-26 · Formatting time without changing the process environment / 日時の書式とロケール
 
 The Bash builtin `printf '%(format)T'`, history and the prompt can observe shell bindings for the time zone and display language. Resolve the exported `TZ` and the first nonempty value of `LC_ALL`, `LC_TIME`, and `LANG` at use. Reuse the last zone and locale until either binding changes. `tz-rs` reads TZif files and POSIX zone rules, including historical transitions. A numeric epoch needs no calendar lookup. Numeric log timestamps can write into one output buffer. Tests cross a daylight-saving transition, restore a temporary `TZ`, and compare the shell-start timestamp before and after a delay. [Date and shell tests](../tests/shell.py)

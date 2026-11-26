@@ -1,5 +1,98 @@
 # Startup and execution / 起動と実行性能
 
+<a id="shipped-shell-timings"></a>
+
+## 2026-11-26 · Final native release / 最終バイナリでの計測
+
+Tonari 42f53ff ran 43 workloads with 13 alternating trials per executable. Each workload checks the expected output and status before recording time. The first macOS run stopped before timing because the regression test expected the Bash 5.2 rule for a punctuated POSIX function name. Bash 5.3 allows it as an extension. The test records the two versions separately at d52b53a. The native replay used the identical release binary digest. The Linux x86-64 release is a stripped static PIE. The macOS arm64 executable links to libSystem. [All samples and physical rechecks](compatibility/external-shell/release-shell-timings.tsv.gz) · [Native release audit](https://github.com/sanohiro/tonari-shell/actions/runs/45766999152) · [Corrected macOS reference and timings](https://github.com/sanohiro/tonari-shell/actions/runs/45771041245) · [Workloads](../tools/ci/spec-fix-timings.py)
+
+| Native host | Median below Bash | At most ⅔ of Bash | Bytes |
+| --- | ---: | ---: | ---: |
+| Linux x86-64 | 43/43 | 42/43 | 2,306,456 |
+| macOS arm64 | 43/43 | 43/43 | 1,632,400 |
+| Physical Apple M1 | 43/43 | 38/43 | 1,615,936 |
+
+| Native host | Workload | Bash ms | Tonari ms | Ratio |
+| --- | --- | ---: | ---: | ---: |
+| Linux x86-64 | startup | 1.082 | 0.492 | 0.455 |
+| Linux x86-64 | alias in indexed assignment | 35.534 | 0.634 | 0.018 |
+| Linux x86-64 | scalar index with aliases | 7.649 | 3.093 | 0.404 |
+| Linux x86-64 | failed compound redirects | 4.727 | 2.230 | 0.472 |
+| Linux x86-64 | indirect pure index | 12.474 | 5.565 | 0.446 |
+| Linux x86-64 | vi | 1.473 | 0.985 | 0.669 |
+| macOS arm64 | startup | 12.830 | 3.929 | 0.306 |
+| macOS arm64 | alias in indexed assignment | 122.830 | 3.966 | 0.032 |
+| macOS arm64 | scalar index with aliases | 16.864 | 5.558 | 0.330 |
+| macOS arm64 | failed compound redirects | 18.639 | 5.766 | 0.309 |
+| macOS arm64 | indirect pure index | 21.940 | 8.756 | 0.399 |
+| macOS arm64 | vi | 32.219 | 0.633 | 0.020 |
+| Physical Apple M1 | startup | 13.310 | 11.132 | 0.836 |
+| Physical Apple M1 | alias in indexed assignment | 85.469 | 6.173 | 0.072 |
+| Physical Apple M1 | scalar index with aliases | 11.148 | 8.136 | 0.730 |
+| Physical Apple M1 | failed compound redirects | 9.621 | 5.816 | 0.605 |
+| Physical Apple M1 | indirect pure index | 13.984 | 7.625 | 0.545 |
+| Physical Apple M1 | vi | 3.211 | 2.003 | 0.624 |
+
+The upstream alias/40 test calls an alias in an indexed assignment. It originally passed with a wrong index computation because both paths produced zero. The local regression requires a nonzero index, verifies stderr, exercises indexed, compound and associative assignments and changes alias definitions between parsing and calling the function. Plain scalar subscripts can bypass alias parsing. On the physical M1, 17 rotated trials for 120 assignments using a command substitution took 85.517 ms in Bash, 3.825 ms with the first correction and 3.558 ms after tuning. For 3,000 plain scalar indices with aliases enabled, the medians were 11.176, 5.160 and 5.128 ms. [Direct regression](../tests/shell.py) · [Oils fixture](https://github.com/oils-for-unix/oils/blob/d114978ca467143f171a835cbcbe8ab6ccc009a7/spec/alias.test.sh#L480-L492)
+
+物理 M1 で全 43 項目の初回計測が Bash の 2/3 を超えた5項目を、各シェルでさらに41回実行しました。全件計測と再計測のサンプルは両方保存しています。外部試験では同じ OS の同じ Bash を参照し、擬似端末の最初の応答とコマンド完了までの時間を個別に掲載しています。[全外部試験](compatibility/external-shell/shared-failures.md#shell-behavior)
+
+| Physical M1, 41-trial replay | Bash ms | Tonari ms | Ratio |
+| --- | ---: | ---: | ---: |
+| startup | 5.850 | 3.437 | 0.587 |
+| scalar index with aliases | 10.460 | 5.129 | 0.490 |
+| conditional tracing | 18.836 | 10.110 | 0.537 |
+| completion fallback | 35.909 | 26.342 | 0.734 |
+| signal names | 45.129 | 31.498 | 0.698 |
+
+<a id="shell-scope-timings"></a>
+
+## 2026-11-26 · Variable scopes, traces and redirection failures / スコープ・トレース・リダイレクト
+
+The release at 4ae605d ran 41 focused workloads with 13 interleaved trials per executable on each machine. The script checks the output, exit status and errors before recording a duration. Script timings include process launch. The Vi row measures the delay from sending an edit sequence to receiving the submitted result on a PTY. [All trials](compatibility/external-shell/shell-behavior-timings.tsv.gz) · [Workloads](../tools/ci/spec-fix-timings.py) · [Native CI](https://github.com/sanohiro/tonari-shell/actions/runs/45762847028)
+
+| Workload | Linux Bash ms | Linux Tonari ms | Ratio | macOS Bash ms | macOS Tonari ms | Ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| startup | 0.782 | 0.305 | 0.391 | 11.092 | 5.521 | 0.498 |
+| temporary scopes | 15.358 | 5.673 | 0.369 | 34.122 | 9.328 | 0.273 |
+| seeded random | 17.000 | 7.028 | 0.413 | 27.905 | 11.142 | 0.399 |
+| case attributes | 7.133 | 2.603 | 0.365 | 20.653 | 6.643 | 0.322 |
+| function definition cycle | 9.926 | 2.393 | 0.241 | 23.937 | 5.826 | 0.243 |
+| punctuated function names | 10.059 | 2.431 | 0.242 | 26.863 | 5.598 | 0.208 |
+| indirect pure index | 8.311 | 3.906 | 0.470 | 19.809 | 7.381 | 0.373 |
+| array serialization | 8.828 | 3.907 | 0.443 | 20.934 | 7.160 | 0.342 |
+| conditional tracing | 4.761 | 2.629 | 0.552 | 23.902 | 10.402 | 0.435 |
+| failed compound redirects | 3.131 | 1.551 | 0.495 | 14.384 | 5.435 | 0.378 |
+| regex conditional | 11.673 | 2.508 | 0.215 | 22.663 | 5.692 | 0.251 |
+| vi | 0.812 | 0.599 | 0.737 | 29.549 | 0.613 | 0.021 |
+
+On a physical Apple M1 with GNU Bash 5.2.37, gathering a redirection diagnostic into one write and retaining the resolved numeric subscript gave the following medians. Each row uses the same three executables in 15 interleaved trials. The optimized redirection keeps the native error reason. The array test verifies the final element. A separate seeded-RANDOM witness verifies that resolving the index has one observable side effect.
+
+| Physical M1 workload | Bash ms | Before tuning ms | After tuning ms |
+| --- | ---: | ---: | ---: |
+| 600 failed opens with an ERR trap | 10.613 | 8.646 | 6.318 |
+| 3,000 indirect indexed reads | 14.984 | 8.272 | 7.675 |
+| 700 traced conditional/arithmetic pairs | 20.686 | 11.406 | 11.902 |
+
+The final function-name check also ran on the physical M1. In 31 interleaved trials, 3,000 definitions, calls and removals of an ordinary function took 16.49 ms in Bash, 5.55 ms before the change and 5.42 ms afterwards. Names containing a comma and percent sign took 16.55 ms in Bash and 5.37 ms in Tonari in the paired run. Functions imported from the environment keep their name separate from their parsed body.
+
+CI の全 41 項目中、Bash の所要時間の 2/3 以内は Linux 40 項目、macOS 41 項目でした。表の比率は Tonari の時間を Bash の時間で割った値です。物理 M1 の追加比較には別の Bash ビルドを使い、CI の時間とは直接比較していません。正しい結果を返したケースごとの経路と未達も記録しています。[外部試験の全件記録](compatibility/external-shell/shared-failures.md#shell-behavior)
+
+All 41 focused median durations were lower than Bash on both CI hosts and the physical M1. The only hosted miss against two thirds was Linux Vi response at 0.599 / 0.812 ms. On the physical M1, 36 of 41 met two thirds in the full series. Repeating its five misses in a separate interleaved 41-trial series gave 3.366 / 5.737 ms for startup, 9.809 / 18.336 ms for tracing, and 5.388 / 9.338 ms for failing redirections. Two remained above the target there. Completion fallback took 26.123 / 35.680 ms for 1,000 directory scans and signal-name listing took 31.237 / 44.522 ms for 3,000 invocations including output and invalid-operand diagnostics. Times in this paragraph are Tonari / Bash.
+
+The shipping executable was 2,300,216 bytes on native Linux x86-64 (stripped static PIE) and 1,615,888 bytes on native macOS arm64. The physical M1 release was 1,615,920 bytes and links to libSystem. The previous physical release in the same checkout was 1,566,208 bytes. These are the target-specific release builds produced by tools/build-release.sh.
+
+### POSIX function definitions and waiting for signals / POSIX 関数定義とシグナル待ち
+
+The physical M1 ran the previous revision 4ae605d, the corrected bfaeab9 and Bash 5.2.37 in rotating order for 17 trials each. The function benchmark repeatedly defines `register_a_valid_name` in a loop, then calls it. The wait benchmark starts `/bin/sh -c 'kill -HUP $$'` 24 times and checks status 129 from each wait. The final POSIX-mode shell also checks that stderr stays empty. The time includes all child launches and waits. [Upstream POSIX measurements](compatibility/yash-posix-followup/README.md#signal-wait-and-names) · [Regression cases](../tests/shell.py)
+
+| Workload | Previous Tonari ms | Tonari ms | Bash ms |
+| --- | ---: | ---: | ---: |
+| 10,000 POSIX function definitions of the same name | 5.423 | 5.471 | 17.118 |
+| 24 external children that terminate with SIGHUP, each explicitly waited for | 105.596 | 104.851 | 110.781 |
+
+関数名の検査は同じ定義が再利用される場合にも必要です。POSIX 用の名前検査に通れば通常モード用の名前の再走査を省きます。シグナル終了を待つ測定では子の起動と待機も含めており、Bash 比の 2/3 を超えました。
+
 <a id="calendar-and-expansion"></a>
 
 ## 2026-11-26 · Dates, expansions and completion output / 日時・展開・補完出力
