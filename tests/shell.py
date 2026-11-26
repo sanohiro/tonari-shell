@@ -55,6 +55,49 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_timestamped_history_import_append_and_write(self):
+        (self.cwd / "entries").write_bytes(b"#100\nfirst\nsecond\n#120\nthird\n")
+        self.compare(r"""HISTTIMEFORMAT='%s '; history -c; history -r entries
+history; history -w copy; cat copy
+""", 0, b"    1  100 first\nsecond\n    2  120 third\n#100\nfirst\nsecond\n#120\nthird\n",
+                     minimum=5)
+        out = self.command(TONARI, r"""HISTTIMEFORMAT='%s '; history -r entries
+printf '#130\n' >>entries; history -n entries
+printf 'next\n' >>entries; history -n entries; history -n entries; history 1
+HISTFILE=entries; HISTFILESIZE=2; cat entries""")
+        self.assertEqual((out.returncode, out.stdout, out.stderr), (0,
+            b"    3  130 next\n#120\nthird\n#130\nnext\n", b""))
+
+    def test_history_limit_preserves_markers_at_block_boundaries(self):
+        prefix = b"#100\nfirst\nline\n"
+        for tail_size in (16382, 16383, 16384, 16385, 32768):
+            with self.subTest(tail_size=tail_size):
+                last = b"#200\n" + b"x" * tail_size + b"\nlast\n#300\n"
+                (self.cwd / "entries").write_bytes(prefix + last)
+                result = self.command(TONARI, "HISTFILE=entries; HISTFILESIZE=1")
+                self.assertEqual((result.returncode, result.stderr), (0, b""))
+                self.assertEqual((self.cwd / "entries").read_bytes(), last)
+
+    def test_history_journal_retains_times_and_reads_older_rows(self):
+        self.env.update(HISTFILE=str(self.cwd / ".bash_history"), HISTTIMEFORMAT="%s ",
+                        XDG_STATE_HOME=str(self.cwd / "state"))
+        journal = self.cwd / "state/tonari/history"
+        journal.parent.mkdir(parents=True)
+        journal.write_text("1\t42\t0\t/tmp\tlegacy\n2\t123\t43\t0\t/tmp\tremembered\n")
+        result = self.command(TONARI, "history -r; history")
+        self.assertEqual((result.returncode, result.stderr, result.stdout),
+                         (0, b"", b"    1  ??legacy\n    2  123 remembered\n"))
+        fd = self.terminal_session()
+        os.write(fd, b"echo record-epoch >marker\r")
+        self.read_until(fd, PROMPT)
+        entry = [s for s in journal.read_text().splitlines() if s.endswith("echo record-epoch >marker")]
+        self.assertEqual(len(entry), 1)
+        fields = entry[0].split("\t")
+        self.assertEqual(fields[0], "2")
+        self.assertLess(abs(int(fields[1]) - time.time()), 30)
+        result = self.command(TONARI, "history -r; history 1")
+        self.assertIn((fields[1] + " echo record-epoch >marker\n").encode(), result.stdout)
+
     def test_printf_time_locale_zone_and_arguments(self):
         self.compare(r"""export TZ=UTC0
 printf '[%*.*(%Y-%m-%d)T] %()T %((%Y))T\n' 7 4 0 0 0

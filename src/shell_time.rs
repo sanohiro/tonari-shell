@@ -52,8 +52,16 @@ impl Clock {
 }
 
 pub(crate) fn format(session: &Session, format: &str, seconds: libc::time_t) -> String {
+    with_formatter(session, format, |stamp| stamp(seconds))
+}
+
+pub(crate) fn with_formatter<T>(
+    session: &Session,
+    format: &str,
+    run: impl FnOnce(&dyn Fn(i64) -> String) -> T,
+) -> T {
     if format == "%s" {
-        return seconds.to_string();
+        return run(&|seconds| seconds.to_string());
     }
     let name = session
         .is_exported("TZ")
@@ -72,7 +80,7 @@ pub(crate) fn format(session: &Session, format: &str, seconds: libc::time_t) -> 
             *slot = Some(Clock::new(name, locale));
         }
         let clock = slot.as_ref().unwrap();
-        format_in_zone(clock, format, seconds).unwrap_or_default()
+        run(&|seconds| format_in_zone(clock, format, seconds).unwrap_or_default())
     })
 }
 

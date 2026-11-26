@@ -103,9 +103,22 @@ impl JournalEntries {
     }
 }
 
-fn command_field(row: &str) -> Option<&str> {
-    row.strip_prefix("1\t")?.splitn(4, '\t').nth(3)
+// Versions share pid, status, directory and command fields. Timestamped
+// journals add a Unix second after the version. Search skips it as text.
+fn journal_fields(row: &str) -> Option<(&str, Option<&str>)> {
+    if let Some(body) = row.strip_prefix("1\t") {
+        return Some((body, None));
+    }
+    let (timestamp, body) = row.strip_prefix("2\t")?.split_once('\t')?;
+    Some((body, Some(timestamp)))
 }
+
+fn command_field(row: &str) -> Option<&str> {
+    journal_fields(row)?.0.splitn(4, '\t').nth(3)
+}
+
+// Old journals and unmarked Bash files may have no creation timestamp.
+const UNKNOWN_TIME: i64 = i64::MIN;
 
 fn decode(value: &str) -> Option<String> {
     let mut out = String::with_capacity(value.len());
@@ -208,6 +221,7 @@ impl InitialJournal {
         }
         journal.seek(SeekFrom::Start(pos))?;
         let mut older = Vec::new();
+        let mut timestamps = Vec::new();
         let mut reader = BufReader::new(journal.take(self.len - pos));
         let mut row = Vec::new();
         let mut complete = pos;
@@ -216,12 +230,11 @@ impl InitialJournal {
                 break;
             };
             complete += row.len() as u64;
-            if let Some(text) = std::str::from_utf8(record)
-                .ok()
-                .and_then(command_field)
-                .and_then(decode)
+            if let Some((body, ts)) = std::str::from_utf8(record).ok().and_then(journal_fields)
+                && let Some(text) = body.splitn(4, '\t').nth(3).and_then(decode)
             {
                 older.push(text);
+                timestamps.push(ts.and_then(|s| s.parse().ok()).unwrap_or(UNKNOWN_TIME));
             }
             row.clear();
         }
@@ -230,7 +243,8 @@ impl InitialJournal {
         older.append(&mut h.lines);
         h.lines = older;
         h.current = h.current.map(|index| index + n);
-        h.timestamps.splice(0..0, std::iter::repeat_n(0, n));
+        timestamps.append(&mut h.timestamps);
+        h.timestamps = timestamps;
         h.written += n;
         h.imported = Some(Self {
             len: complete,
@@ -273,7 +287,8 @@ impl Session {
             {
                 return;
             }
-            if let Err(e) = commands::limit_plain_file(path, limit)
+            if let Err(e) =
+                commands::limit_plain_file(path, limit, self.get("HISTTIMEFORMAT").is_some())
                 && e.kind() != std::io::ErrorKind::NotFound
             {
                 eprintln!("tonari: {}: {e}", path.display());
@@ -518,7 +533,16 @@ impl History {
             return;
         }
         // One line per entry, including pastes with embedded tabs and newlines.
-        let mut entry = format!("1\t{}\t{status}\t", std::process::id());
+        let mut entry = if session.get("HISTTIMEFORMAT").is_some() {
+            let timestamp = session
+                .history
+                .as_ref()
+                .and_then(|h| h.timestamps.last().copied())
+                .unwrap_or_else(|| unsafe { libc::time(std::ptr::null_mut()) });
+            format!("2\t{timestamp}\t{}\t{status}\t", std::process::id())
+        } else {
+            format!("1\t{}\t{status}\t", std::process::id())
+        };
         encode(cwd.unwrap_or(""), &mut entry);
         entry.push('\t');
         encode(text, &mut entry);

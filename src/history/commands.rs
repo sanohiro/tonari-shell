@@ -125,18 +125,23 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<()> {
                 .unwrap_or(usize::MAX);
             if let Some(h) = session.history.as_deref() {
                 let format = session.get("HISTTIMEFORMAT").filter(|s| !s.is_empty());
-                let mut out = io::stdout().lock();
-                for (i, line) in h
-                    .lines
-                    .iter()
-                    .enumerate()
-                    .skip(h.lines.len().saturating_sub(count))
-                {
-                    let stamp = format
-                        .as_ref()
-                        .map(|f| crate::shell_time::format(session, f, h.timestamps[i]))
-                        .unwrap_or_default();
-                    writeln!(out, "{:5}  {stamp}{line}", h.base + i + 1)?;
+                let mut out = io::BufWriter::new(io::stdout().lock());
+                let mut list = |stamp: &dyn Fn(i64) -> String| -> io::Result<()> {
+                    for i in h.lines.len().saturating_sub(count)..h.lines.len() {
+                        let timestamp =
+                            if format.is_some() && h.timestamps[i] == super::UNKNOWN_TIME {
+                                "??".into()
+                            } else {
+                                stamp(h.timestamps[i])
+                            };
+                        writeln!(out, "{:5}  {timestamp}{}", h.base + i + 1, h.lines[i])?;
+                    }
+                    out.flush()
+                };
+                if let Some(f) = &format {
+                    crate::shell_time::with_formatter(session, f, list)?;
+                } else {
+                    list(&|_| String::new())?;
                 }
             }
         }
@@ -177,7 +182,47 @@ fn locked_history(path: &Path, options: &OpenOptions) -> io::Result<File> {
     }
 }
 
-pub(super) fn limit_plain_file(path: &Path, limit: usize) -> io::Result<()> {
+// Read just the retained suffix, including both bytes of a marker when its
+// start crosses a block boundary. Ignore empty lines and a trailing orphan marker.
+fn timestamped_suffix(
+    file: &File,
+    len: u64,
+    mut budget: usize,
+    count_markers: bool,
+) -> io::Result<u64> {
+    const BLOCK: usize = 16384;
+    let mut buf = [0u8; BLOCK + 2];
+    let mut end = len;
+    let mut content_lines = 0usize;
+    while end > 0 {
+        let start = end.saturating_sub(BLOCK as u64);
+        let n = (end - start) as usize;
+        let used = n + (len - end).min(2) as usize;
+        file.read_exact_at(&mut buf[..used], start)?;
+        for newline in memchr::memrchr_iter(b'\n', &buf[..n]) {
+            let index = newline + 1;
+            let tail = &buf[index..used];
+            match tail {
+                [b'#', digit, ..] if digit.is_ascii_digit() => {
+                    if content_lines > 0 {
+                        let lines = content_lines.saturating_add(usize::from(count_markers));
+                        if lines >= budget {
+                            return Ok(start + index as u64);
+                        }
+                        budget -= lines;
+                    }
+                    content_lines = 0;
+                }
+                [] | [b'\n', ..] | [b'\r', b'\n', ..] => {}
+                _ => content_lines = content_lines.saturating_add(1),
+            }
+        }
+        end = start;
+    }
+    Ok(0)
+}
+
+pub(super) fn limit_plain_file(path: &Path, limit: usize, timed: bool) -> io::Result<()> {
     let path = std::fs::canonicalize(path)?;
     let mut source = locked_history(
         &path,
@@ -193,7 +238,17 @@ pub(super) fn limit_plain_file(path: &Path, limit: usize) -> io::Result<()> {
     let mut pos = metadata.len();
     let mut lines = limit;
     let mut block = [0u8; 16384];
-    if limit > 0 {
+    let mut header = [0; 2];
+    if limit > 0
+        && source.read_at(&mut header, 0)? == 2
+        && header[0] == b'#'
+        && header[1].is_ascii_digit()
+    {
+        pos = timestamped_suffix(&source, metadata.len(), limit, !timed)?;
+        if pos == 0 {
+            return Ok(());
+        }
+    } else if limit > 0 {
         'scan: while pos > 0 {
             let n = pos.min(block.len() as u64) as usize;
             pos -= n as u64;
@@ -279,10 +334,37 @@ fn imported_prefix(
     Ok(seen.len)
 }
 
+fn import_entry(h: &mut Entries, value: String, time: i64, erase: bool, limit: usize) {
+    if erase {
+        for i in (0..h.lines.len()).rev() {
+            if h.lines[i] == value {
+                h.remove(i);
+            }
+        }
+    }
+    h.lines.push(value);
+    h.timestamps.push(time);
+    h.current = None;
+    // Trim bounded batches while the intermediate window is unobservable.
+    if h.lines.len().saturating_sub(limit) >= 1024 {
+        h.trim_to(limit);
+    }
+}
+
+fn bash_timestamp(line: &str) -> Option<i64> {
+    let value = line.strip_prefix('#')?;
+    let end = value
+        .bytes()
+        .position(|b| !b.is_ascii_digit())
+        .unwrap_or(value.len());
+    value[..end].parse().ok()
+}
+
 fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<()> {
     if args.len() > 1 {
         return Err(error("too many arguments"));
     }
+    let timestamped = session.get("HISTTIMEFORMAT").is_some();
     let histfile = session.get("HISTFILE");
     let chosen = args.first().map(String::as_str).or(histfile.as_deref());
     let default = session
@@ -317,8 +399,23 @@ fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<
         } else {
             0
         };
+        let mut header = [0; 2];
+        let marked = !private
+            && meta.is_file()
+            && file.read_at(&mut header, 0)? == 2
+            && header[0] == b'#'
+            && header[1].is_ascii_digit();
         let mut reader = BufReader::new(file);
         let mut offset = skip;
+        let mut timestamp = None;
+        let mut marker_offset = None;
+        let mut multiline = marked && timestamped;
+        let mut recognize = marked || timestamped;
+        let default_time = if timestamped || marked {
+            unsafe { libc::time(std::ptr::null_mut()) }
+        } else {
+            super::UNKNOWN_TIME
+        };
         if skip > 0 {
             reader.seek(SeekFrom::Start(skip))?;
         }
@@ -329,6 +426,12 @@ fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<
             .is_some_and(|v| v.split(':').any(|rule| rule == "erasedups"));
         let owner = session.shell_pid();
         let h = session.history_mut();
+        let mut pending: Option<(String, i64)> = None;
+        let mut previous = if skip > 0 {
+            h.written.checked_sub(1)
+        } else {
+            None
+        };
         let result = loop {
             line.clear();
             let n = match reader.read_line(&mut line) {
@@ -341,50 +444,80 @@ fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<
             offset += n as u64;
             let line = line.strip_suffix('\n').unwrap_or(&line);
             let line = line.strip_suffix('\r').unwrap_or(line);
-            let value = if private {
-                let mut fields = line.splitn(5, '\t');
-                if fields.next() != Some("1") {
+            let (value, seconds) = if private {
+                let Some((body, ts)) = super::journal_fields(line) else {
                     continue;
-                }
+                };
+                let mut fields = body.splitn(4, '\t');
                 let pid = fields.next().and_then(|s| s.parse::<u32>().ok());
                 if op == 'n' && pid == Some(owner) {
                     continue;
                 }
-                fields.nth(2).and_then(super::decode)
+                (
+                    fields.nth(2).and_then(super::decode),
+                    ts.and_then(|s| s.parse().ok())
+                        .unwrap_or(super::UNKNOWN_TIME),
+                )
             } else {
-                Some(line.to_owned())
+                if offset == n as u64
+                    && line.starts_with('#')
+                    && line.as_bytes().get(1).is_some_and(u8::is_ascii_digit)
+                {
+                    recognize = true;
+                    multiline = timestamped;
+                }
+                if line.is_empty() {
+                    continue;
+                }
+                if recognize && let Some(ts) = bash_timestamp(line) {
+                    if let Some((value, time)) = pending.take() {
+                        import_entry(h, value, time, erase, limit);
+                    }
+                    previous = None;
+                    timestamp = Some(ts);
+                    marker_offset = Some(offset - n as u64);
+                    continue;
+                }
+                if multiline
+                    && timestamp.is_none()
+                    && let Some(last) = pending
+                        .as_mut()
+                        .map(|(text, _)| text)
+                        .or_else(|| previous.and_then(|i| h.lines.get_mut(i)))
+                {
+                    last.push('\n');
+                    last.push_str(line);
+                    continue;
+                }
+                marker_offset = None;
+                (
+                    Some(line.to_owned()),
+                    timestamp.take().unwrap_or(default_time),
+                )
             };
             if let Some(value) = value
                 && limit != 0
             {
-                if erase {
-                    for i in (0..h.lines.len()).rev() {
-                        if h.lines[i] == value {
-                            h.remove(i);
-                        }
-                    }
-                }
-                h.lines.push(value);
-                h.timestamps
-                    .push(unsafe { libc::time(std::ptr::null_mut()) });
-                h.current = None;
-                // Intermediate entries are unobservable during the import. Keep
-                // the exact window for erasedups, which changes history numbers.
-                if erase || h.lines.len().saturating_sub(limit) >= 1024 {
-                    h.trim_to(limit);
+                if multiline && !private {
+                    pending = Some((value, seconds));
+                } else {
+                    import_entry(h, value, seconds, erase, limit);
                 }
             }
         };
+        if let Some((value, time)) = pending {
+            import_entry(h, value, time, erase, limit);
+        }
         h.trim_to(limit);
         h.imported = Some(InitialJournal {
             path,
             identity,
-            len: offset,
+            len: marker_offset.unwrap_or(offset),
         });
         h.written = h.lines.len();
         result?;
     } else {
-        let mut file = locked_history(
+        let file = locked_history(
             &path,
             OpenOptions::new()
                 .write(true)
@@ -402,9 +535,14 @@ fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<
             }
             0
         };
-        for line in &h.lines[first..] {
-            writeln!(file, "{line}")?;
+        let mut output = io::BufWriter::new(file);
+        for (line, &time) in h.lines[first..].iter().zip(&h.timestamps[first..]) {
+            if timestamped && time != super::UNKNOWN_TIME {
+                writeln!(output, "#{time}")?;
+            }
+            writeln!(output, "{line}")?;
         }
+        output.flush()?;
         h.written = h.lines.len();
     }
     Ok(())

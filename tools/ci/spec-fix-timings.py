@@ -1,5 +1,6 @@
 """Interleave Bash and Tonari runs for the external-suite fixes on a native host."""
 import argparse
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import subprocess
@@ -10,7 +11,16 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bench_history import PROMPT, read_until, terminal
 
+HISTORY_EPOCH = 1699999000
+HISTORY_COUNT = 2000
+HISTORY_OUTPUT = "".join(
+    f"{i + 1:5}  {datetime.fromtimestamp(HISTORY_EPOCH + i, timezone.utc):%Y-%m-%d %H:%M:%S} cmd{i:04d}\n"
+    for i in range(HISTORY_COUNT)
+).encode()
+
 CASES = {
+    "history dates": ('export TZ=UTC0; HISTSIZE=3000; HISTTIMEFORMAT="%F %T "; '
+                      'history -c; history -r dates; history', HISTORY_OUTPUT),
     "startup": (":", b""),
     "printf time": ('export TZ=America/New_York; for ((i=0;i<2000;i++)); do '
                     'printf -v stamp "%(%F %T %Z %z)T" 1593604800; done; echo "$stamp"',
@@ -81,6 +91,9 @@ def main():
             files.mkdir()
             for i in range(2048):
                 (files / f"item{i:04}").touch()
+        if not args.case or "history dates" in args.case:
+            (home / "dates").write_text("".join(f"#{HISTORY_EPOCH + i}\ncmd{i:04d}\n"
+                                                for i in range(HISTORY_COUNT)))
         rc = home / "rc"
         rc.write_text('PS1="tonari$ "\nset -o vi\ns(){ printf "edited:%s:%s\\n" "${#1}" "$2"; }\n')
         for trial in range(args.trials):
@@ -90,13 +103,13 @@ def main():
                         continue
                     start = time.perf_counter_ns()
                     run = subprocess.run([shell, "-c", script], cwd=home, capture_output=True,
-                                         env={"PATH": "/usr/bin:/bin",
+                                         env={"PATH": "/usr/bin:/bin", **({"TZ": "UTC0"} if name == "history dates" else {}),
                                               "HOME": "/abc" if name in ("default tilde", "brace tilde") else
                                                       str(regex_home) if name == "regex home" else directory},
                                          timeout=15)
                     elapsed = time.perf_counter_ns() - start
                     if (run.returncode, run.stdout, run.stderr) != (0, expected, b""):
-                        raise RuntimeError((shell, name, run.returncode, run.stdout, run.stderr))
+                        raise RuntimeError((shell, name, run.returncode, len(run.stdout), run.stdout[:512], run.stderr[:512]))
                     print(name, shell, trial, elapsed / 1e6, sep="\t", flush=True)
                 if args.case and "vi" not in args.case:
                     continue
