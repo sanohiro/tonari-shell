@@ -12,7 +12,7 @@ impl Session {
                     'f' => functions = true,
                     'p' => {}
                     _ => {
-                        eprintln!("tonari: export: unsupported option {opt}");
+                        diagnostic!("export: unsupported option {opt}");
                         return 2;
                     }
                 }
@@ -30,12 +30,12 @@ impl Session {
             } else {
                 for name in args {
                     if !remove && name.contains('/') && self.functions.contains_key(name) {
-                        eprintln!("tonari: export: {name}: cannot export");
+                        diagnostic!("export: {name}: cannot export");
                         status = 1;
                         continue;
                     }
                     if let Err(e) = self.export_function(name, !remove) {
-                        eprintln!("tonari: export: {name}: {e}");
+                        diagnostic!("export: {name}: {e}");
                         status = 1;
                     }
                 }
@@ -56,13 +56,13 @@ impl Session {
                 (key, false)
             };
             if !is_identifier(name) {
-                eprintln!("tonari: export: {arg}: invalid identifier");
+                diagnostic!("export: {arg}: invalid identifier");
                 status = 1;
                 continue;
             }
             let readonly = self.readonly(name);
             if readonly && value.is_some() {
-                eprintln!("tonari: export: {name}: readonly variable");
+                diagnostic!("export: {name}: readonly variable");
                 status = 1;
                 continue;
             }
@@ -79,7 +79,7 @@ impl Session {
                         (Some(normalized.as_str()), false)
                     }
                     Err(e) => {
-                        eprintln!("tonari: export: {e}");
+                        diagnostic!("export: {e}");
                         status = 1;
                         continue;
                     }
@@ -239,14 +239,14 @@ impl Session {
                     'v' => variables_only = true,
                     'f' => functions_only = true,
                     _ => {
-                        eprintln!("tonari: unset: unsupported option {opt}");
+                        diagnostic!("unset: unsupported option {opt}");
                         return 2;
                     }
                 }
             }
         }
         if functions_only && variables_only {
-            eprintln!("tonari: unset: cannot combine -f and -v");
+            diagnostic!("unset: cannot combine -f and -v");
             return 1;
         }
         self.unset_operands(
@@ -284,7 +284,7 @@ impl Session {
                     }
                     Ok(_) => original,
                     Err(e) => {
-                        eprintln!("tonari: unset: {original}: {e}");
+                        diagnostic!("unset: {original}: {e}");
                         status = 1;
                         continue;
                     }
@@ -295,7 +295,7 @@ impl Session {
                 && (Self::builtin_readonly(base)
                     || self.variables.get(base).is_some_and(|v| v.readonly))
             {
-                eprintln!("tonari: unset: {base}: readonly variable");
+                diagnostic!("unset: {base}: readonly variable");
                 status = 1;
                 continue;
             }
@@ -305,7 +305,7 @@ impl Session {
                         .declared_variable(name, false)
                         .is_none_or(|v| !v.declared);
             if resolve_function && self.readonly_functions.contains(name) {
-                eprintln!("tonari: unset: {name}: readonly function");
+                diagnostic!("unset: {name}: readonly function");
                 status = 1;
                 continue;
             }
@@ -328,7 +328,7 @@ impl Session {
                     match self.subscript_key(index) {
                         Ok(key) => self.remove_key(base, &key),
                         Err(e) => {
-                            eprintln!("tonari: unset: {e}");
+                            diagnostic!("unset: {e}");
                             status = 1;
                         }
                     }
@@ -350,12 +350,12 @@ impl Session {
                     .and_then(|n| self.relative_index(base, n));
                 match resolved {
                     Ok(i) if !array && i != 0 => {
-                        eprintln!("tonari: unset: {base}: not an array variable");
+                        diagnostic!("unset: {base}: not an array variable");
                         status = 1;
                     }
                     Ok(i) => self.unset_element(base, i),
                     Err(e) => {
-                        eprintln!("tonari: unset: {e}");
+                        diagnostic!("unset: {e}");
                         return 1;
                     }
                 }

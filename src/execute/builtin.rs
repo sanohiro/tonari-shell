@@ -484,14 +484,14 @@ fn exec_builtin(cmd: &PreparedCommand, session: &Session, mut args: &[String]) -
                 'l' => login = true,
                 'a' => {
                     let Some(v) = crate::builtins::flags::value(flags.as_str(), &mut args) else {
-                        eprintln!("tonari: exec: -a requires a name");
+                        diagnostic!("exec: -a requires a name");
                         return Flow::Continue(2);
                     };
                     arg0 = Some(v.to_owned());
                     break;
                 }
                 _ => {
-                    eprintln!("tonari: exec: invalid option {opt}");
+                    diagnostic!("exec: invalid option {opt}");
                     return Flow::Continue(2);
                 }
             }
@@ -524,7 +524,7 @@ fn apply_array_declarations(cmd: &PreparedCommand, status: u8, session: &mut Ses
         .any(|a| a.contains('g'));
     for d in &cmd.array_declarations {
         if let Err(e) = session.assign_array(&d.name, d.append, &d.items, global) {
-            eprintln!("tonari: {}: {e}", cmd.words[0]);
+            diagnostic!("{}: {e}", cmd.words[0]);
             return 1;
         }
     }
@@ -622,7 +622,7 @@ impl<'a> PlainOutput<'a> {
                 match session.write_pwd(physical.unwrap_or(session.physical), &mut bytes) {
                     Ok(()) => 0,
                     Err(e) => {
-                        eprintln!("tonari: pwd: {e}");
+                        diagnostic!("pwd: {e}");
                         1
                     }
                 }

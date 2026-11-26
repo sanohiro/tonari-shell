@@ -265,7 +265,7 @@ fn start_raw(
                 launch,
             ),
             Err(e) => {
-                eprintln!("tonari: {e}");
+                diagnostic!("{e}");
                 Ok(Stage::Status(e.status))
             }
         };
@@ -293,7 +293,7 @@ fn start_raw(
             match run(vec![raw], last_status, true, session) {
                 Ok(flow) => flow.child_status(),
                 Err(e) => {
-                    eprintln!("tonari: {e}");
+                    diagnostic!("{e}");
                     1
                 }
             }
@@ -564,7 +564,7 @@ fn fork_stage(
             let flow = if scoped {
                 run_builtin(builtin.unwrap(), cmd, session, last_status, false).unwrap_or_else(
                     |e| {
-                        eprintln!("tonari: {e}");
+                        diagnostic!("{e}");
                         Flow::Continue(1)
                     },
                 )
@@ -622,7 +622,7 @@ pub(super) fn capture_external(
     let mut cmd = match prepare(raw, session, last, true) {
         Ok(cmd) => cmd,
         Err(error) => {
-            eprintln!("tonari: {error}");
+            diagnostic!("{error}");
             return Ok((String::new(), error.status));
         }
     };
@@ -665,7 +665,7 @@ fn spawn_failure(name: &str, error: io::Error) -> io::Result<Stage> {
     ) {
         return Err(error);
     }
-    eprintln!("tonari: {name}: {error}");
+    diagnostic!("{name}: {error}");
     Ok(Stage::Status(exec_status(code)))
 }
 

@@ -235,7 +235,7 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
 
 #[cold]
 fn execution_error(error: std::io::Error) -> Flow {
-    eprintln!("tonari: {error}");
+    diagnostic!("{error}");
     Flow::Continue(1)
 }
 
@@ -297,7 +297,7 @@ fn run_for(
     status: u8,
 ) -> Flow {
     if !crate::word::is_identifier(name) {
-        eprintln!("tonari: {name}: invalid loop variable");
+        diagnostic!("{name}: invalid loop variable");
         return Flow::Continue(1);
     }
     let implicit_words = words.is_none();
@@ -353,7 +353,7 @@ fn run_for(
             None
         };
         if let Some(error) = error {
-            eprintln!("tonari: {name}: {error}");
+            diagnostic!("{name}: {error}");
             return Err(
                 if error == crate::session::READONLY && s.posix && !s.interactive {
                     Flow::Exit(1)
@@ -402,7 +402,7 @@ fn run_arithmetic_loop(
             compiled.run(s, last)
         };
         result.map_err(|e| {
-            eprintln!("tonari: {e}");
+            diagnostic!("{e}");
             Flow::Continue(1)
         })
     };
@@ -564,7 +564,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
         } => run_arithmetic_loop(session, &init, &condition, &step, &body, status),
         Command::Coprocess { name, body } => {
             crate::execute::coprocess::launch(session, name, *body, status).unwrap_or_else(|e| {
-                eprintln!("tonari: coproc: {e}");
+                diagnostic!("coproc: {e}");
                 Flow::Continue(1)
             })
         }
@@ -577,7 +577,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                     unreachable!()
                 };
                 execute::run_pipeline(stages, status, false, session, true).unwrap_or_else(|e| {
-                    eprintln!("tonari: {e}");
+                    diagnostic!("{e}");
                     Flow::Continue(1)
                 })
             } else {
@@ -603,7 +603,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
         Command::Function { name, definition } => {
             if session.posix {
                 if let Some(reason) = posix_function_error(&name) {
-                    eprintln!("tonari: {name}: {reason}");
+                    diagnostic!("{name}: {reason}");
                     return if session.interactive {
                         Flow::Continue(2)
                     } else {
@@ -611,11 +611,11 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                     };
                 }
             } else if !crate::parser::is_function_name(&name) {
-                eprintln!("tonari: {name}: invalid function name");
+                diagnostic!("{name}: invalid function name");
                 return Flow::Continue(1);
             }
             if session.readonly_functions.contains(&name) {
-                eprintln!("tonari: {name}: readonly function");
+                diagnostic!("{name}: readonly function");
                 return Flow::Continue(1);
             }
             session.define_function(name, definition);
@@ -730,7 +730,7 @@ pub(crate) fn call_with_bindings(
     let mut arguments = argv.into_iter();
     let name = arguments.next().expect("function name");
     if session.function_nesting_full() {
-        eprintln!("tonari: {name}: function nesting limit exceeded");
+        diagnostic!("{name}: function nesting limit exceeded");
         return Flow::Discard(1);
     }
     let function = session.functions[&name].clone();

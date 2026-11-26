@@ -726,7 +726,7 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
                 if !modern {
                     for spec in specs {
                         if let Err(err) = configure(&mut session.bindings, spec, false) {
-                            eprintln!("tonari: bind: {err}");
+                            diagnostic!("bind: {err}");
                         }
                     }
                 }

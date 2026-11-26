@@ -70,14 +70,14 @@ fn kill(jobs: &Jobs, mut args: &[String], posix: bool) -> u8 {
         _ => Some(libc::SIGTERM),
     };
     let Some(sig) = sig else {
-        eprintln!("tonari: kill: invalid signal");
+        diagnostic!("kill: invalid signal");
         return 1;
     };
     if args.first().is_some_and(|s| s == "--") {
         args = &args[1..];
     }
     if args.is_empty() {
-        eprintln!("tonari: kill: expected PID or job");
+        diagnostic!("kill: expected PID or job");
         return 2;
     }
     let mut status = 0;
@@ -102,7 +102,7 @@ fn kill(jobs: &Jobs, mut args: &[String], posix: bool) -> u8 {
             spec.parse::<pid_t>().is_ok_and(send)
         };
         if !ok {
-            eprintln!("tonari: kill: {spec}: could not signal target");
+            diagnostic!("kill: {spec}: could not signal target");
             status = 1;
         }
     }
@@ -140,12 +140,12 @@ impl<'a> WaitOptions<'a> {
 
 fn wait_builtin(args: &[String], session: &mut Session) -> u8 {
     let Some((options, ids)) = WaitOptions::parse(args) else {
-        eprintln!("tonari: wait: usage: wait [-fn] [-p var] [id ...]");
+        diagnostic!("wait: usage: wait [-fn] [-p var] [id ...]");
         return 2;
     };
     if let Some(name) = options.variable {
         if !session.valid_builtin_target(name) {
-            eprintln!("tonari: wait: {name}: not a valid identifier");
+            diagnostic!("wait: {name}: not a valid identifier");
             return 1;
         }
         if session.unset_builtin_target(name) != 0 {
@@ -174,7 +174,7 @@ fn wait_next(session: &mut Session, ids: &[String], force: bool) -> (u8, Option<
         if let Some(index) = jobs.select(spec) {
             selected.push(jobs.table[index].id);
         } else {
-            eprintln!("tonari: wait: {spec}: no such job");
+            diagnostic!("wait: {spec}: no such job");
         }
     }
     // Blocking SIGCHLD before polling closes the check/sleep race. Reap
@@ -286,12 +286,12 @@ fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Opti
                 result = (code, Some(pid));
             } else {
                 if !jobs.quiet {
-                    eprintln!("tonari: wait: {spec}: not a child of this shell");
+                    diagnostic!("wait: {spec}: not a child of this shell");
                 }
                 result = (127, None);
             }
         } else {
-            eprintln!("tonari: wait: {spec}: not a valid child or job");
+            diagnostic!("wait: {spec}: not a valid child or job");
             result = (
                 if spec.starts_with('%') || spec.bytes().all(|b| b.is_ascii_digit()) {
                     127
@@ -366,7 +366,7 @@ pub(super) fn list_to(jobs: &mut Jobs, args: &[String], posix: bool, mut out: im
                 'n' => changed = true,
                 'r' | 's' => filter = flag,
                 _ => {
-                    eprintln!("tonari: jobs: invalid option: {flag}");
+                    diagnostic!("jobs: invalid option: {flag}");
                     return 2;
                 }
             }
@@ -384,7 +384,7 @@ pub(super) fn list_to(jobs: &mut Jobs, args: &[String], posix: bool, mut out: im
         if let Some(index) = list_position(jobs, spec, markers) {
             selected.push(index);
         } else {
-            eprintln!("tonari: jobs: {spec}: no such job");
+            diagnostic!("jobs: {spec}: no such job");
             status = 1;
         }
     }
@@ -503,7 +503,7 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
         "disown" => jobs.disown(&words[1..]),
         "bg" => {
             if !jobs.monitor {
-                eprintln!("tonari: bg: no job control");
+                diagnostic!("bg: no job control");
                 return 1;
             }
             let mut status = 0;
@@ -514,19 +514,19 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                 .chain((words.len() == 1).then_some("%+"))
             {
                 let Some(i) = jobs.select(spec) else {
-                    eprintln!("tonari: bg: {spec}: no such job");
+                    diagnostic!("bg: {spec}: no such job");
                     status = 1;
                     continue;
                 };
                 let (current, previous) = marked_jobs(jobs.table.iter());
                 let job = &mut jobs.table[i];
                 if job.group.is_none() {
-                    eprintln!("tonari: bg: job {} started without job control", job.id);
+                    diagnostic!("bg: job {} started without job control", job.id);
                     status = 1;
                     continue;
                 }
                 if !job.stopped() {
-                    eprintln!("tonari: bg: job {} already in background", job.id);
+                    diagnostic!("bg: job {} already in background", job.id);
                     continue;
                 }
                 if job.stopped() && job.resume().is_err() {
@@ -554,16 +554,16 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
         }
         name => {
             if !jobs.monitor {
-                eprintln!("tonari: {name}: no job control");
+                diagnostic!("{name}: no job control");
                 return 1;
             }
             let Some(i) = jobs.select(words.get(1).map(String::as_str).unwrap_or("")) else {
-                eprintln!("tonari: {name}: no such job");
+                diagnostic!("{name}: no such job");
                 return 1;
             };
             if jobs.table[i].group.is_none() {
-                eprintln!(
-                    "tonari: {name}: job {} started without job control",
+                diagnostic!(
+                    "{name}: job {} started without job control",
                     jobs.table[i].id
                 );
                 return 1;

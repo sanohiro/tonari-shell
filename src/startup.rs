@@ -28,7 +28,7 @@ fn sourced(
 ) -> Flow {
     // Guard the interpreter stack if startup files source one another recursively.
     if session.source_depth >= 128 {
-        eprintln!("tonari: source nesting limit exceeded");
+        diagnostic!("source nesting limit exceeded");
         return Flow::Continue(1);
     }
     let old = (!args.is_empty())
@@ -67,17 +67,17 @@ pub fn source_file(session: &mut Session, words: &[String], status: u8, fatal: b
     let mut search = None;
     while let Some(option) = crate::builtins::flags::next(&mut args) {
         let Some(path) = option.strip_prefix("-p") else {
-            eprintln!("tonari: source: {option}: invalid option");
+            diagnostic!("source: {option}: invalid option");
             return Flow::Continue(2);
         };
         let Some(path) = crate::builtins::flags::value(path, &mut args) else {
-            eprintln!("tonari: source: -p requires a path");
+            diagnostic!("source: -p requires a path");
             return Flow::Continue(2);
         };
         search = Some(path);
     }
     let Some(name) = args.first() else {
-        eprintln!("tonari: source: filename required");
+        diagnostic!("source: filename required");
         return Flow::Continue(2);
     };
     let direct = name.contains('/');
@@ -94,7 +94,7 @@ pub fn source_file(session: &mut Session, words: &[String], status: u8, fatal: b
     }
     if !direct && (search.is_some() || session.posix && words[0] == "." && session.shopt.sourcepath)
     {
-        eprintln!("tonari: .: {name}: file not found");
+        diagnostic!(".: {name}: file not found");
         return if fatal {
             Flow::Exit(1)
         } else {
@@ -104,7 +104,7 @@ pub fn source_file(session: &mut Session, words: &[String], status: u8, fatal: b
     match open_script(Path::new(name)) {
         Ok(file) => sourced(session, file, Path::new(name), &args[1..], status),
         Err(e) => {
-            eprintln!("tonari: source: {name}: {e}");
+            diagnostic!("source: {name}: {e}");
             if fatal {
                 Flow::Exit(1)
             } else {
@@ -130,7 +130,7 @@ pub(crate) fn debugger(session: &mut Session) -> Flow {
         session.errexit = errexit;
         result
     } else {
-        eprintln!("tonari: {}: cannot start debugger", path.display());
+        diagnostic!("{}: cannot start debugger", path.display());
         Flow::Continue(0)
     };
     session.functrace = enabled;
@@ -229,7 +229,7 @@ pub fn initialize(session: &mut Session, invocation: &Invocation) -> Flow {
             let word = match crate::parser::expansion_string(&path) {
                 Ok(word) => word,
                 Err(error) => {
-                    eprintln!("tonari: {var}: {}", error.message());
+                    diagnostic!("{var}: {}", error.message());
                     return Flow::Continue(1);
                 }
             };

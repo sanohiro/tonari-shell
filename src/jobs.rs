@@ -727,7 +727,7 @@ impl Jobs {
                     'r' => running = true,
                     'h' => nohup = true,
                     _ => {
-                        eprintln!("tonari: disown: invalid option {option}");
+                        diagnostic!("disown: invalid option {option}");
                         return 2;
                     }
                 }
@@ -750,7 +750,7 @@ impl Jobs {
             if let Some(i) = self.select(spec) {
                 self.detach(i, nohup, true);
             } else {
-                eprintln!("tonari: disown: {spec}: no such job");
+                diagnostic!("disown: {spec}: no such job");
                 status = 1;
             }
         }

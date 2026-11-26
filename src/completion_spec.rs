@@ -781,7 +781,7 @@ fn apply(
         let mut words = match request.spec.candidates(session, prefix, last, None) {
             Ok((words, _)) => words,
             Err(error) => {
-                eprintln!("tonari: compgen: {error}");
+                diagnostic!("compgen: {error}");
                 return Ok(1);
             }
         };
@@ -797,7 +797,7 @@ fn apply(
         if let Some(name) = request.destination {
             let status = u8::from(words.is_empty());
             if let Err(error) = session.store_completions(&name, words) {
-                eprintln!("tonari: compgen: {name}: {error}");
+                diagnostic!("compgen: {name}: {error}");
                 return Ok(1);
             }
             return Ok(status);
@@ -822,7 +822,7 @@ fn apply(
     }
     if builtin == CompBuiltin::Complete && targets.is_empty() {
         if !request.print && request.spec != Spec::default() {
-            eprintln!("tonari: complete: a command name or a default target is required");
+            diagnostic!("complete: a command name or a default target is required");
             return Ok(2);
         }
         for (key, spec) in registry.iter() {
@@ -837,13 +837,13 @@ fn apply(
                 .iter()
                 .any(|(_, option)| *option == CompOption::Typeahead)
             {
-                eprintln!("tonari: compopt: register typeahead before the callback starts");
+                diagnostic!("compopt: register typeahead before the callback starts");
                 return Ok(1);
             }
             set_options(options, &request.options, "", out)?;
             return Ok(0);
         }
-        eprintln!("tonari: compopt: no completion specification is active");
+        diagnostic!("compopt: no completion specification is active");
         return Ok(1);
     }
     let mut status = 0;
@@ -854,10 +854,7 @@ fn apply(
         }
         let Some(spec) = registry.get_mut(&key) else {
             let name = builtin.name();
-            eprintln!(
-                "tonari: {name}: no completion specification for {}",
-                key.argument()
-            );
+            diagnostic!("{name}: no completion specification for {}", key.argument());
             status = 1;
             continue;
         };
@@ -880,7 +877,7 @@ pub fn run(name: &str, args: &[String], last: u8, session: &mut Session) -> u8 {
     let request = match Request::parse(builtin, args) {
         Ok(request) => request,
         Err(error) => {
-            eprintln!("tonari: {name}: {error}");
+            diagnostic!("{name}: {error}");
             return 2;
         }
     };
@@ -991,7 +988,7 @@ fn generate_for_tab(
             || spec.candidates(session, prefix, 0, context),
         )
         .unwrap_or_else(|error| {
-            eprintln!("tonari: completion: {error}");
+            diagnostic!("completion: {error}");
             (Vec::new(), false)
         });
         if !reload {
@@ -1000,7 +997,7 @@ fn generate_for_tab(
         // Bash completion loaders return 124 after installing the real spec.
         seen.push(original);
         if seen.len() > 32 {
-            eprintln!("tonari: completion: possible retry loop");
+            diagnostic!("completion: possible retry loop");
             break (spec, words);
         }
         original = session.completions.lookup(command, prefix)?.clone();

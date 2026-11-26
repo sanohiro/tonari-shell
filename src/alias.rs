@@ -61,7 +61,7 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
                 (false, 'p') => print_all = true,
                 (true, 'a') => clear = true,
                 _ => {
-                    eprintln!("tonari: {cmd}: -{flag}: invalid option");
+                    diagnostic!("{cmd}: -{flag}: invalid option");
                     return 2;
                 }
             }
@@ -106,7 +106,7 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
     for arg in args {
         if !remove && let Some((name, value)) = arg.split_once('=') {
             if let Err(e) = session.aliases.insert(name, value) {
-                eprintln!("tonari: alias: {name}: {e}");
+                diagnostic!("alias: {name}: {e}");
                 status = 1;
             }
             continue;
@@ -127,7 +127,7 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
             }
             buffer.clear();
         } else {
-            eprintln!("tonari: {cmd}: {arg}: not found");
+            diagnostic!("{cmd}: {arg}: not found");
             status = 1;
         }
     }

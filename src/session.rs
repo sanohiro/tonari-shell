@@ -460,17 +460,17 @@ impl Session {
             _ => args,
         };
         if args.len() > 1 {
-            eprintln!("tonari: shift: too many arguments");
+            diagnostic!("shift: too many arguments");
             return 1;
         }
         let count = args.first().map_or(Ok(1), |s| s.trim().parse::<i64>());
         let Ok(count) = count else {
-            eprintln!("tonari: shift: numeric argument required");
+            diagnostic!("shift: numeric argument required");
             return 1;
         };
         if count < 0 || count as u64 > self.positional.len() as u64 {
             if self.shopt.shift_verbose {
-                eprintln!("tonari: shift: shift count out of range");
+                diagnostic!("shift: shift count out of range");
             }
             return 1;
         }
@@ -664,7 +664,7 @@ impl Session {
                 .resolve_index(base, index)
                 .map_err(|error| {
                     if error == crate::session::SUBSCRIPT_RANGE {
-                        eprintln!("tonari: {base}: bad array subscript");
+                        diagnostic!("{base}: bad array subscript");
                     }
                 })
                 .ok()?;
@@ -824,7 +824,7 @@ impl Session {
             .unwrap_or(0);
         let level = inherited.saturating_add(1);
         let level = if level >= 1000 {
-            eprintln!("tonari: warning: shell level ({level}) too high, resetting to 1");
+            diagnostic!("warning: shell level ({level}) too high, resetting to 1");
             1
         } else {
             level.max(0)
@@ -916,18 +916,18 @@ impl Session {
         match self.reference_name(name) {
             Ok(Cow::Owned(target)) => {
                 if let Err(e) = self.assign_target(&target, &value) {
-                    eprintln!("tonari: {name}: {e}");
+                    diagnostic!("{name}: {e}");
                 }
                 return;
             }
             Err(e) => {
-                eprintln!("tonari: {name}: {e}");
+                diagnostic!("{name}: {e}");
                 return;
             }
             _ => {}
         }
         if self.is_nameref(name) && !Self::valid_reference_target(&value) {
-            eprintln!("tonari: {name}: invalid name reference");
+            diagnostic!("{name}: invalid name reference");
             return;
         }
         if self.readonly(name) {

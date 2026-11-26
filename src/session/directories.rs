@@ -222,7 +222,7 @@ impl Session {
                     ("dirs", 'c') => clear = true,
                     ("pushd" | "popd", 'n') => no_cd = true,
                     _ => {
-                        eprintln!("tonari: {command}: invalid option -{flag}");
+                        diagnostic!("{command}: invalid option -{flag}");
                         return 2;
                     }
                 }
@@ -230,7 +230,7 @@ impl Session {
         }
         let operand = args.next().map(String::as_str);
         if args.next().is_some() {
-            eprintln!("tonari: {command}: too many arguments");
+            diagnostic!("{command}: too many arguments");
             return 2;
         }
         if clear {
@@ -245,13 +245,13 @@ impl Session {
                     && text.as_bytes()[1..].iter().all(u8::is_ascii_digit) =>
             {
                 let Some(i) = index(text, len) else {
-                    eprintln!("tonari: {command}: {text}: directory stack index out of range");
+                    diagnostic!("{command}: {text}: directory stack index out of range");
                     return 1;
                 };
                 Some(i)
             }
             Some(_) if command != "pushd" => {
-                eprintln!("tonari: {command}: invalid directory stack index");
+                diagnostic!("{command}: invalid directory stack index");
                 return if command == "popd" { 2 } else { 1 };
             }
             _ => None,
@@ -313,7 +313,7 @@ impl Session {
             Ok(())
         })();
         if let Err(e) = result {
-            eprintln!("tonari: {command}: {e}");
+            diagnostic!("{command}: {e}");
             return 1;
         }
         if command == "pushd" && no_cd && (operand.is_none() || slot.is_some()) {
@@ -386,7 +386,7 @@ impl Session {
                     'P' => physical = true,
                     'e' if name == "cd" => require_pwd = true,
                     _ => {
-                        eprintln!("tonari: {name}: unsupported option {opt}");
+                        diagnostic!("{name}: unsupported option {opt}");
                         return 2;
                     }
                 }
@@ -396,7 +396,7 @@ impl Session {
             self.write_pwd(physical, &mut io::stdout().lock())
         } else {
             if args.len() > 1 {
-                eprintln!("tonari: cd: too many arguments");
+                diagnostic!("cd: too many arguments");
                 return 1;
             }
             let arg = args.first().map(String::as_str);
@@ -406,10 +406,7 @@ impl Session {
                 Some(s) => (Some(s.into()), false),
             };
             let Some(target) = target else {
-                eprintln!(
-                    "tonari: cd: {} not set",
-                    if previous { "OLDPWD" } else { "HOME" }
-                );
+                diagnostic!("cd: {} not set", if previous { "OLDPWD" } else { "HOME" });
                 return 1;
             };
             if self.posix && physical {
@@ -422,13 +419,13 @@ impl Session {
                     Ok(()) => return 0,
                     Err(DirectoryError::NoPath(e)) => {
                         if require_pwd {
-                            eprintln!("tonari: cd: {e}");
+                            diagnostic!("cd: {e}");
                             return 1;
                         }
                         return 0;
                     }
                     Err(DirectoryError::Other(e)) => {
-                        eprintln!("tonari: cd: {e}");
+                        diagnostic!("cd: {e}");
                         return if require_pwd { 2 } else { 1 };
                     }
                 }
@@ -437,7 +434,7 @@ impl Session {
         };
         result.map_or_else(
             |e| {
-                eprintln!("tonari: {name}: {e}");
+                diagnostic!("{name}: {e}");
                 1
             },
             |()| 0,

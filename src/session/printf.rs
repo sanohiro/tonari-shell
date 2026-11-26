@@ -38,11 +38,11 @@ pub(crate) fn run(
     let mut target = None;
     if words.first().is_some_and(|arg| arg == "-v") {
         let Some(name) = words.get(1) else {
-            eprintln!("tonari: printf: -v requires a variable");
+            diagnostic!("printf: -v requires a variable");
             return 2;
         };
         if !session.valid_builtin_target(name) {
-            eprintln!("tonari: printf: {name}: invalid identifier");
+            diagnostic!("printf: {name}: invalid identifier");
             return 2;
         }
         target = Some(name);
@@ -54,11 +54,11 @@ pub(crate) fn run(
         .first()
         .is_some_and(|arg| arg.starts_with('-') && arg != "-")
     {
-        eprintln!("tonari: printf: invalid option");
+        diagnostic!("printf: invalid option");
         return 2;
     }
     let Some((format, values)) = words.split_first() else {
-        eprintln!("tonari: printf: format required");
+        diagnostic!("printf: format required");
         return 2;
     };
     if target.is_none()
@@ -119,7 +119,7 @@ pub(crate) fn run(
             match render(format.as_bytes(), &mut args, &mut output, &mut variables) {
                 Ok(true) if !args.values.is_empty() && count != args.values.len() => continue,
                 Err(message) => {
-                    eprintln!("tonari: printf: {message}");
+                    diagnostic!("printf: {message}");
                     args.status = 1;
                 }
                 _ => {}
@@ -130,11 +130,11 @@ pub(crate) fn run(
     if let Some(name) = target {
         let bytes = output.split(|&v| v == 0).next().unwrap_or_default();
         let Ok(value) = std::str::from_utf8(bytes) else {
-            eprintln!("tonari: printf: expected UTF-8 variable value");
+            diagnostic!("printf: expected UTF-8 variable value");
             return 1;
         };
         if let Err(e) = variables.write().assign_builtin_target(name, value) {
-            eprintln!("tonari: printf: {e}");
+            diagnostic!("printf: {e}");
             return 1;
         }
     } else if let Some(capture) = capture {
@@ -209,7 +209,7 @@ impl<'a> Arguments<'a> {
             value
         };
         let Ok(input) = CString::new(input) else {
-            eprintln!("tonari: printf: invalid number");
+            diagnostic!("printf: invalid number");
             self.status = 1;
             return from_char(0);
         };
@@ -229,7 +229,7 @@ impl<'a> Arguments<'a> {
         }
         let result = parse(input.as_ptr(), &mut end);
         if unsafe { *errno != 0 || *end != 0 } {
-            eprintln!("tonari: printf: {value}: invalid or out-of-range number");
+            diagnostic!("printf: {value}: invalid or out-of-range number");
             self.status = 1;
         }
         result
@@ -565,7 +565,7 @@ fn amount(input: &mut &[u8], args: &mut Arguments<'_>, overflow: i32) -> i32 {
         amount
     };
     value.unwrap_or_else(|| {
-        eprintln!("tonari: printf: field width or precision out of range");
+        diagnostic!("printf: field width or precision out of range");
         args.status = 1;
         overflow
     })
@@ -626,7 +626,7 @@ fn render(
                             );
                             spec.bytes(stamp.as_bytes(), out)?;
                         } else {
-                            eprintln!("tonari: printf: warning: invalid time format specification");
+                            diagnostic!("printf: warning: invalid time format specification");
                             out.push(b'%');
                             out.extend_from_slice(&original[..original.len() - input.len()]);
                         }
@@ -673,7 +673,7 @@ fn render(
                                 return Err("invalid identifier for %n");
                             }
                             if variables.read().readonly(name) {
-                                eprintln!("tonari: printf: {name}: readonly variable");
+                                diagnostic!("printf: {name}: readonly variable");
                                 args.status = 1;
                             } else {
                                 variables.write().assign(name, &out.len().to_string());

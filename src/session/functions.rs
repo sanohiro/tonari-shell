@@ -121,7 +121,7 @@ impl Session {
                     continue;
                 }
                 if name.contains('/') {
-                    eprintln!("tonari: error importing function definition for `{name}'");
+                    diagnostic!("error importing function definition for `{name}'");
                     continue;
                 }
                 let key = format!("BASH_FUNC_{name}%%");

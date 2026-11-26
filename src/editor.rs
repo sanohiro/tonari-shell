@@ -1291,7 +1291,7 @@ pub fn line(
                     Ok(Err(crate::Flow::Exit(code))) => return Ok(Input::Exit(code)),
                     Ok(Err(_)) => return Ok(Input::Cancel),
                     Err(e) => {
-                        eprintln!("tonari: {editor}: {e}");
+                        diagnostic!("{editor}: {e}");
                         return Ok(Input::Cancel);
                     }
                 }

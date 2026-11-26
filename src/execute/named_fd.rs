@@ -223,7 +223,7 @@ pub(super) fn run(
             Ok(Flow::Continue(s) | Flow::Discard(s) | Flow::Exit(s) | Flow::Return(s)) => s,
             Ok(_) => 1,
             Err(e) => {
-                eprintln!("tonari: {e}");
+                diagnostic!("{e}");
                 1
             }
         };

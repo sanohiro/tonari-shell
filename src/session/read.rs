@@ -241,12 +241,12 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     let opts = match options(args) {
         Ok(opts) => opts,
         Err((code, e)) => {
-            eprintln!("tonari: read: {e}");
+            diagnostic!("read: {e}");
             return code;
         }
     };
     if crate::execute::fd::is_private(opts.fd) {
-        eprintln!("tonari: read: invalid file descriptor");
+        diagnostic!("read: invalid file descriptor");
         return 1;
     }
     if let Some(invalid) = opts
@@ -254,7 +254,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         .iter()
         .find(|s| opts.array.is_none() && !session.valid_builtin_target(s))
     {
-        eprintln!("tonari: read: {invalid}: invalid identifier");
+        diagnostic!("read: {invalid}: invalid identifier");
         return 1;
     }
     if opts.timeout == Some(Duration::ZERO) {
@@ -320,7 +320,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
                 return crate::traps::signal_status(libc::SIGALRM);
             }
             Err(e) => {
-                eprintln!("tonari: read: {e}");
+                diagnostic!("read: {e}");
                 return 1;
             }
         }
@@ -435,7 +435,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
                 break crate::traps::signal_status(crate::traps::pending().unwrap_or(libc::SIGINT));
             }
             Err(e) => {
-                eprintln!("tonari: read: {e}");
+                diagnostic!("read: {e}");
                 return 1;
             }
         };
@@ -458,7 +458,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         line.push(b);
     };
     let Ok(line) = String::from_utf8(line) else {
-        eprintln!("tonari: read: expected UTF-8 input");
+        diagnostic!("read: expected UTF-8 input");
         return 1;
     };
     assign_fields(session, &opts, &line, &escaped, status)
@@ -473,7 +473,7 @@ fn assign_fields(
 ) -> u8 {
     if opts.names.is_empty() && opts.array.is_none() {
         if session.readonly("REPLY") {
-            eprintln!("tonari: read: REPLY: readonly variable");
+            diagnostic!("read: REPLY: readonly variable");
             return 2;
         }
         session.assign("REPLY", line);
@@ -496,7 +496,7 @@ fn assign_fields(
             line.trim_matches(|c: char| ifs.contains(c))
         };
         if let Err(e) = session.assign_builtin_target(name, value) {
-            eprintln!("tonari: read: {e}");
+            diagnostic!("read: {e}");
             return 1;
         }
         return status;
@@ -506,7 +506,7 @@ fn assign_fields(
         let target = match session.indexed_receiver(target, false) {
             Ok(target) => target,
             Err(e) => {
-                eprintln!("tonari: read: {target}: {e}");
+                diagnostic!("read: {target}: {e}");
                 return 1;
             }
         };
@@ -527,7 +527,7 @@ fn assign_fields(
             &line[start..finish]
         });
         if let Err(e) = session.assign_builtin_target(name, value) {
-            eprintln!("tonari: read: {e}");
+            diagnostic!("read: {e}");
             return if e == crate::session::READONLY && i + 1 < count {
                 2
             } else {

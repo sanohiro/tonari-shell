@@ -90,9 +90,10 @@ pub(crate) fn launch(
         return Err(io::Error::other("readonly coprocess variable"));
     }
     if let Some(active) = session.coprocesses.last() {
-        eprintln!(
-            "tonari: warning: coproc [{}:{}] still exists",
-            active.pid, active.name
+        diagnostic!(
+            "warning: coproc [{}:{}] still exists",
+            active.pid,
+            active.name
         );
     }
     let (input, writer) = super::pipe()?;

@@ -18,7 +18,7 @@ pub(crate) fn run(session: &mut Session, words: &[String], status: u8) -> Flow {
         match fc(session, args, status) {
             Ok(flow) => flow,
             Err(e) => {
-                eprintln!("tonari: fc: {e}");
+                diagnostic!("fc: {e}");
                 Flow::Continue(1)
             }
         }
@@ -26,7 +26,7 @@ pub(crate) fn run(session: &mut Session, words: &[String], status: u8) -> Flow {
         match history(session, args) {
             Ok(status) => Flow::Continue(status),
             Err(e) => {
-                eprintln!("tonari: history: {e}");
+                diagnostic!("history: {e}");
                 Flow::Continue(if e.kind() == io::ErrorKind::InvalidInput {
                     2
                 } else {
@@ -113,7 +113,7 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
                 match super::expand::expand(session, arg) {
                     Ok(result) => writeln!(out, "{}", result.text)?,
                     Err(e) => {
-                        eprintln!("tonari: history: {arg}: {e}");
+                        diagnostic!("history: {arg}: {e}");
                         status = 1;
                     }
                 }

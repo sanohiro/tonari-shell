@@ -131,7 +131,7 @@ pub(super) fn resolve(session: &mut Session, name: &str) -> Result<Option<PathBu
 
 pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
     if !session.hashes.enabled {
-        eprintln!("tonari: hash: hashing disabled");
+        diagnostic!("hash: hashing disabled");
         return 1;
     }
     let (mut list, mut remove, mut print, mut clear, mut supplied) =
@@ -147,14 +147,14 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
                 'p' => {
                     let Some(path) = crate::builtins::flags::value(flags.as_str(), &mut args)
                     else {
-                        eprintln!("tonari: hash: -p requires a pathname");
+                        diagnostic!("hash: -p requires a pathname");
                         return 2;
                     };
                     supplied = Some(path);
                     break;
                 }
                 _ => {
-                    eprintln!("tonari: hash: {opt}: invalid option");
+                    diagnostic!("hash: {opt}: invalid option");
                     return 2;
                 }
             }
@@ -172,7 +172,7 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
     };
     if args.is_empty() {
         if remove || print || supplied.is_some() {
-            eprintln!("tonari: hash: command name required");
+            diagnostic!("hash: command name required");
             return 1;
         }
         if !session.posix
@@ -223,7 +223,7 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
             None
         } else if let Some(path) = supplied {
             if Path::new(path).is_dir() {
-                eprintln!("tonari: hash: {path}: is a directory");
+                diagnostic!("hash: {path}: is a directory");
                 status = 1;
                 continue;
             }
@@ -245,7 +245,7 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
         if let Some(entry) = entry {
             session.hashes.entries.insert(name.into(), entry);
         } else {
-            eprintln!("tonari: hash: {name}: not found");
+            diagnostic!("hash: {name}: not found");
             status = 1;
         }
     }

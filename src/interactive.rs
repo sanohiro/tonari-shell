@@ -158,7 +158,7 @@ pub(super) fn interactive_loop(
                     status = match result {
                         Ok(()) => 0,
                         Err(error) => {
-                            eprintln!("tonari: cd: {error}");
+                            diagnostic!("cd: {error}");
                             1
                         }
                     };
@@ -191,7 +191,7 @@ pub(super) fn interactive_loop(
         drop(deadline);
         let more = match result {
             Err(e) if e.kind() == io::ErrorKind::TimedOut => {
-                eprintln!("tonari: timed out waiting for input");
+                diagnostic!("timed out waiting for input");
                 if startup::defer_interactive_exit(session) {
                     continue;
                 }
@@ -266,7 +266,7 @@ pub(super) fn interactive_loop(
                     Ok(expanded.as_ref())
                 }
                 Err(e) => {
-                    eprintln!("tonari: {e}");
+                    diagnostic!("{e}");
                     if session.shopt.histreedit && editing && (session.vi || session.emacs) {
                         editable_history = line.strip_suffix('\n').unwrap_or(line).to_owned();
                     }
@@ -307,12 +307,12 @@ pub(super) fn interactive_loop(
                 }
                 Err(e) if more && e.incomplete() => continue,
                 Err(e) => {
-                    eprintln!("tonari: {}", e.message());
+                    diagnostic!("{}", e.message());
                     status = 2;
                 }
             },
             Err(_) => {
-                eprintln!("tonari: expected UTF-8 command text");
+                diagnostic!("expected UTF-8 command text");
                 status = 2;
             }
         }

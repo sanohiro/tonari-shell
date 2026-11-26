@@ -87,7 +87,7 @@ impl Timer {
                 'U' => user,
                 'S' => system,
                 _ => {
-                    eprintln!("tonari: TIMEFORMAT: invalid format character '{code}'");
+                    diagnostic!("TIMEFORMAT: invalid format character '{code}'");
                     return;
                 }
             };

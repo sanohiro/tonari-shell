@@ -70,7 +70,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
         crate::eval::expand_case(s, word.clone(), status, false).map(std::borrow::Cow::Owned)
     }
     let error = |message: &'static str| {
-        eprintln!("tonari: [[: {message}");
+        diagnostic!("[[: {message}");
         Flow::Continue(2)
     };
     match expr {
@@ -180,7 +180,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                     let right = operand(session, right, status)?;
                     trace(session, status, &[&left, op, &right]);
                     let arith_error = |message| {
-                        eprintln!("tonari: [[: {message}");
+                        diagnostic!("[[: {message}");
                         Flow::Continue(1)
                     };
                     let a = arithmetic::run(&left, session).map_err(arith_error)?;
@@ -501,7 +501,7 @@ impl Compiled {
 
     fn search(&self, text: &str) -> Result<Option<Vec<String>>, ()> {
         let Some(regex) = self.regex.as_deref() else {
-            eprintln!("tonari: [[: invalid regular expression: {}", self.pattern);
+            diagnostic!("[[: invalid regular expression: {}", self.pattern);
             return Err(());
         };
         let mut small_text = [0u8; 256];

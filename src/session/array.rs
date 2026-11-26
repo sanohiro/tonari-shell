@@ -580,7 +580,7 @@ impl Session {
                 return Err("not an indexed array");
             }
             if var.nameref {
-                eprintln!("tonari: warning: {target}: removing nameref attribute");
+                diagnostic!("warning: {target}: removing nameref attribute");
                 var.nameref = false;
             }
         }

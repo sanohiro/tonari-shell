@@ -273,7 +273,7 @@ pub(super) fn protect_fds(actions: &[Action<'_>]) -> io::Result<()> {
 
 pub(super) fn apply(actions: &[Action<'_>], pipe_limit: usize) -> bool {
     if let Err(e) = protect_fds(actions) {
-        eprintln!("tonari: redirection: {e}");
+        diagnostic!("redirection: {e}");
         return false;
     }
     apply_protected(actions, pipe_limit).is_ok()
@@ -294,7 +294,7 @@ pub(super) fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> Resu
                     Ok(())
                 });
                 if let Err(error) = redirected {
-                    eprintln!("tonari: here-document: {error}");
+                    diagnostic!("here-document: {error}");
                     return Err(index);
                 }
             }

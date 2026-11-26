@@ -53,7 +53,7 @@ fn declare_functions(
         for name in operands {
             if !session.functions.contains_key(name) {
                 if readonly {
-                    eprintln!("tonari: {command}: {name}: not a function");
+                    diagnostic!("{command}: {name}: not a function");
                 }
                 status = 1;
                 continue;
@@ -78,7 +78,7 @@ fn declare_functions(
                 if on {
                     session.readonly_functions.insert(name.clone());
                 } else if session.readonly_functions.contains(name) {
-                    eprintln!("tonari: {command}: {name}: readonly function");
+                    diagnostic!("{command}: {name}: readonly function");
                     status = 1;
                 }
                 continue;
@@ -142,7 +142,7 @@ impl Options {
             }
             for c in option[1..].chars() {
                 if attribute && !(matches!(c, 'a' | 'A' | 'f' | 'p') || exporting && c == 'n') {
-                    eprintln!("tonari: {command}: {option}: unsupported option");
+                    diagnostic!("{command}: {option}: unsupported option");
                     return Err(());
                 }
                 match c {
@@ -168,7 +168,7 @@ impl Options {
                     'p' => flags.print = true,
                     'x' => flags.exported = Some(on),
                     _ => {
-                        eprintln!("tonari: {command}: {option}: unsupported option");
+                        diagnostic!("{command}: {option}: unsupported option");
                         return Err(());
                     }
                 }
@@ -275,7 +275,7 @@ fn print_variables(
                 return crate::execute::Flow::Continue(1);
             }
         } else if !operands.is_empty() {
-            eprintln!("tonari: {command}: {name}: not found");
+            diagnostic!("{command}: {name}: not found");
             status = 1;
         }
     }
@@ -314,7 +314,7 @@ pub(super) fn run(
     let attribute = readonly || exporting;
     let local = command == "local";
     if local && session.function_depth == 0 {
-        eprintln!("tonari: local: can only be used in a function");
+        diagnostic!("local: can only be used in a function");
         return crate::execute::Flow::Continue(1);
     }
     let Ok((flags, operands)) = Options::parse(command, operands) else {
@@ -375,7 +375,7 @@ pub(super) fn run(
                 Ok(target) => {
                     if target != name && flags.nameref == Some(false) {
                         if session.variables.get(base).is_some_and(|v| v.readonly) {
-                            eprintln!("tonari: {command}: {base}: readonly variable");
+                            diagnostic!("{command}: {base}: readonly variable");
                             status = 1;
                             continue;
                         }
@@ -385,7 +385,7 @@ pub(super) fn run(
                     resolved.as_ref()
                 }
                 Err(e) => {
-                    eprintln!("tonari: {command}: {name}: {e}");
+                    diagnostic!("{command}: {name}: {e}");
                     status = 1;
                     continue;
                 }
@@ -395,13 +395,13 @@ pub(super) fn run(
         };
         let target = super::array::subscript(name);
         if attribute && target.is_some() {
-            eprintln!("tonari: {command}: {name}: not a valid identifier");
+            diagnostic!("{command}: {name}: not a valid identifier");
             status = 1;
             continue;
         }
         let name = target.map_or(name, |(base, _)| base);
         if !is_identifier(name) {
-            eprintln!("tonari: {command}: {arg}: invalid identifier");
+            diagnostic!("{command}: {arg}: invalid identifier");
             status = 1;
             continue;
         }
@@ -409,7 +409,7 @@ pub(super) fn run(
             session.hashes.clear();
         }
         if session.protected_array(name) && (local || value.is_some() || array.is_some()) {
-            eprintln!("tonari: {command}: {name}: variable may not be assigned a value");
+            diagnostic!("{command}: {name}: variable may not be assigned a value");
             status = 1;
             continue;
         }
@@ -443,7 +443,7 @@ pub(super) fn run(
                 || flags.readonly == Some(false)
                 || flags.nameref.is_some())
         {
-            eprintln!("tonari: {command}: {name}: readonly variable");
+            diagnostic!("{command}: {name}: readonly variable");
             if array.is_some() {
                 return crate::execute::Flow::Discard(1);
             }
@@ -488,7 +488,7 @@ pub(super) fn run(
         let making_array = flags.array || flags.associative || array.is_some();
         if making_array && (var.nameref || flags.nameref == Some(true)) && var.elements.is_none() {
             if var.nameref && flags.nameref != Some(true) {
-                eprintln!("tonari: warning: {name}: removing nameref attribute");
+                diagnostic!("warning: {name}: removing nameref attribute");
             }
             var.nameref = false;
         }
@@ -504,7 +504,7 @@ pub(super) fn run(
                         && !Session::valid_reference_target(dest)
                     || dest == name)
             {
-                eprintln!("tonari: {command}: {name}: invalid name reference");
+                diagnostic!("{command}: {name}: invalid name reference");
                 status = 1;
                 continue;
             }
@@ -519,7 +519,7 @@ pub(super) fn run(
             && making_array
             && (array.is_some() || var.elements.is_some())
         {
-            eprintln!("tonari: {command}: {name}: reference variable cannot be an array");
+            diagnostic!("{command}: {name}: reference variable cannot be an array");
             status = 1;
         }
         let case_flags = [
@@ -545,19 +545,19 @@ pub(super) fn run(
             && (!attribute || value.is_some() || array.is_some())
             && let Err(e) = var.make_associative()
         {
-            eprintln!("tonari: {command}: {name}: {e}");
+            diagnostic!("{command}: {name}: {e}");
             status = 1;
             continue;
         }
         if flags.remove_array && var.elements.is_some() && var.associative().is_none()
             || flags.remove_associative && var.associative().is_some()
         {
-            eprintln!("tonari: {command}: {name}: cannot remove array attribute");
+            diagnostic!("{command}: {name}: cannot remove array attribute");
             status = 1;
             continue;
         }
         if flags.array && var.associative().is_some() {
-            eprintln!("tonari: {command}: {name}: cannot convert associative to indexed array");
+            diagnostic!("{command}: {name}: cannot convert associative to indexed array");
             status = 1;
             continue;
         }
@@ -578,7 +578,7 @@ pub(super) fn run(
             let parts = match crate::parser::quoted_initializer(text) {
                 Ok(parts) => parts,
                 Err(e) => {
-                    eprintln!("tonari: {command}: {name}: {}", e.message());
+                    diagnostic!("{command}: {name}: {}", e.message());
                     return crate::Flow::Discard(1);
                 }
             };
@@ -605,7 +605,7 @@ pub(super) fn run(
                 {
                     Ok(key) => Some(key.unwrap_or_else(|| "0".into())),
                     Err(e) => {
-                        eprintln!("tonari: {command}: {e}");
+                        diagnostic!("{command}: {e}");
                         status = 1;
                         continue;
                     }
@@ -622,7 +622,7 @@ pub(super) fn run(
                         i
                     }
                     Err(e) => {
-                        eprintln!("tonari: {command}: {e}");
+                        diagnostic!("{command}: {e}");
                         status = 1;
                         continue;
                     }
@@ -644,7 +644,7 @@ pub(super) fn run(
                 match session.integer_value(old, text, append) {
                     Ok(v) => v,
                     Err(e) => {
-                        eprintln!("tonari: {command}: {e}");
+                        diagnostic!("{command}: {e}");
                         status = 1;
                         continue;
                     }
@@ -656,7 +656,7 @@ pub(super) fn run(
             };
             let text = session.convert_case(text, var.letter_case);
             if var.nameref && !Session::valid_reference_target(&text) {
-                eprintln!("tonari: {command}: {name}: invalid name reference");
+                diagnostic!("{command}: {name}: invalid name reference");
                 status = 1;
                 continue;
             }
@@ -689,7 +689,7 @@ pub(super) fn run(
         {
             record_scope(session);
             session.store_variable(name, var, flags.global);
-            eprintln!("tonari: {command}: {name}: {e}");
+            diagnostic!("{command}: {name}: {e}");
             return crate::Flow::Discard(1);
         }
         if let Some(on) = flags.readonly {

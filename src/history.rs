@@ -90,7 +90,7 @@ pub(crate) fn start_interactive(session: &mut Session) {
         if fs::metadata(&path).is_ok_and(|m| m.is_file())
             && let Err(e) = commands::history_file(session, 'r', &[path])
         {
-            eprintln!("tonari: history: {e}");
+            diagnostic!("history: {e}");
         }
     } else {
         session.initial_history = InitialJournal::snapshot(session).map(std::rc::Rc::new);
@@ -116,7 +116,7 @@ pub(crate) fn finish_interactive(session: &mut Session) {
                 })
             })
         {
-            eprintln!("tonari: history: {e}");
+            diagnostic!("history: {e}");
         }
     }
 }
@@ -375,7 +375,7 @@ impl Session {
                 commands::limit_plain_file(path, limit, self.get("HISTTIMEFORMAT").is_some())
                 && e.kind() != std::io::ErrorKind::NotFound
             {
-                eprintln!("tonari: {}: {e}", path.display());
+                diagnostic!("{}: {e}", path.display());
             }
         }
     }

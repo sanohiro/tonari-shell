@@ -230,7 +230,7 @@ pub fn let_builtin(args: &[String], session: &mut Session) -> u8 {
         args
     };
     if args.is_empty() {
-        eprintln!("tonari: let: expression expected");
+        diagnostic!("let: expression expected");
         return 1;
     }
     let mut last = 0;
@@ -238,7 +238,7 @@ pub fn let_builtin(args: &[String], session: &mut Session) -> u8 {
         match run(expr, session) {
             Ok(value) => last = value,
             Err(message) => {
-                eprintln!("tonari: let: {message}");
+                diagnostic!("let: {message}");
                 return 1;
             }
         }
@@ -284,7 +284,7 @@ pub fn command(source: &str, session: &mut Session, status: u8) -> Flow {
     match result {
         Ok(n) => Flow::Continue(u8::from(n == 0)),
         Err(e) => {
-            eprintln!("tonari: {e}");
+            diagnostic!("{e}");
             Flow::Continue(1)
         }
     }

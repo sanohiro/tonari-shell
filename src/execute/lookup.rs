@@ -149,7 +149,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                 }
                 (false, 'p') => format = Format::Path,
                 _ => {
-                    eprintln!("tonari: {}: unsupported option {opt}", cmd.words[0]);
+                    diagnostic!("{}: unsupported option {opt}", cmd.words[0]);
                     return 2;
                 }
             }
@@ -281,7 +281,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
             }
         }
         if !found && format == Format::Verbose {
-            eprintln!("tonari: {}: {name}: not found", cmd.words[0]);
+            diagnostic!("{}: {name}: not found", cmd.words[0]);
         }
         any |= found;
         all &= found;

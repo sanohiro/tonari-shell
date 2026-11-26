@@ -266,7 +266,7 @@ impl Session {
             if (31..=CURRENT_COMPAT).contains(&digits) {
                 digits
             } else {
-                eprintln!("tonari: BASH_COMPAT: {value}: compatibility value out of range");
+                diagnostic!("BASH_COMPAT: {value}: compatibility value out of range");
                 CURRENT_COMPAT
             }
         };
@@ -484,14 +484,14 @@ impl Session {
                     'q' => quiet = true,
                     'o' => set = true,
                     _ => {
-                        eprintln!("tonari: shopt: {option}: invalid option");
+                        diagnostic!("shopt: {option}: invalid option");
                         return 2;
                     }
                 }
             }
         }
         if enable && disable {
-            eprintln!("tonari: shopt: cannot set and unset options simultaneously");
+            diagnostic!("shopt: cannot set and unset options simultaneously");
             return 1;
         }
         let mut status = 0;
@@ -505,7 +505,7 @@ impl Session {
             .chain(names.iter().map(String::as_str));
         for name in names {
             let Some(entry) = known.iter().find(|entry| entry.name == name) else {
-                eprintln!("tonari: shopt: {name}: unsupported option");
+                diagnostic!("shopt: {name}: unsupported option");
                 status = 1;
                 continue;
             };
@@ -766,7 +766,7 @@ impl Session {
                             *value = enable;
                             self.option_changed(name, enable);
                         } else {
-                            eprintln!("tonari: set: {name}: unsupported option");
+                            diagnostic!("set: {name}: unsupported option");
                             return 2;
                         }
                     }
@@ -776,7 +776,7 @@ impl Session {
                     }
                     short if set_short_option(self, short, enable) => {}
                     _ => {
-                        eprintln!("tonari: set: {opt}: unsupported option");
+                        diagnostic!("set: {opt}: unsupported option");
                         return 2;
                     }
                 }

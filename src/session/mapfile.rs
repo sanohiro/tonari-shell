@@ -147,19 +147,19 @@ pub(crate) fn run(
     let mut options = match Options::parse(args) {
         Ok(options) => options,
         Err((code, message)) => {
-            eprintln!("tonari: {command}: {message}");
+            diagnostic!("{command}: {message}");
             return Flow::Continue(code);
         }
     };
     let fd = options.fd;
     if crate::execute::fd::is_private(fd) || unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
-        eprintln!("tonari: {command}: {fd}: invalid file descriptor");
+        diagnostic!("{command}: {fd}: invalid file descriptor");
         return Flow::Continue(1);
     }
     let destination = match session.indexed_receiver(options.name, false) {
         Ok(target) => target,
         Err(e) => {
-            eprintln!("tonari: {command}: {}: {e}", options.name);
+            diagnostic!("{command}: {}: {e}", options.name);
             return Flow::Continue(1);
         }
     };
@@ -192,7 +192,7 @@ pub(crate) fn run(
         return match result {
             Ok(()) => Flow::Continue(0),
             Err(e) => {
-                eprintln!("tonari: {command}: {e}");
+                diagnostic!("{command}: {e}");
                 Flow::Continue(1)
             }
         };
@@ -234,7 +234,7 @@ pub(crate) fn run(
                 }
                 Ok(None) => break,
                 Err(e) => {
-                    eprintln!("tonari: {command}: {e}");
+                    diagnostic!("{command}: {e}");
                     return Flow::Continue(1);
                 }
             }
@@ -247,7 +247,7 @@ pub(crate) fn run(
             continue;
         }
         let Ok(line) = std::str::from_utf8(&bytes) else {
-            eprintln!("tonari: {command}: expected UTF-8 input");
+            diagnostic!("{command}: expected UTF-8 input");
             return Flow::Continue(1);
         };
         let index = origin + count as i64;
@@ -266,7 +266,7 @@ pub(crate) fn run(
                 flow => return flow,
             }
             if session.readonly(options.name) {
-                eprintln!("tonari: {command}: {}: readonly variable", options.name);
+                diagnostic!("{command}: {}: readonly variable", options.name);
                 return Flow::Continue(1);
             }
             input = Input::new(fd);

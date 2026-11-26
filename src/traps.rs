@@ -565,14 +565,14 @@ impl Traps {
                     b'P' => actions = true,
                     b'l' => signals = true,
                     _ => {
-                        eprintln!("tonari: trap: {arg}: invalid option");
+                        diagnostic!("trap: {arg}: invalid option");
                         return 2;
                     }
                 }
             }
         }
         if actions && (list || args.is_empty()) {
-            eprintln!("tonari: trap: -P requires signal names and cannot be combined with -p");
+            diagnostic!("trap: -P requires signal names and cannot be combined with -p");
             return 2;
         }
         if signals {
@@ -596,14 +596,14 @@ impl Traps {
             (args[0].as_str(), &args[1..])
         };
         if signals.is_empty() {
-            eprintln!("tonari: trap: expected a signal name");
+            diagnostic!("trap: expected a signal name");
             return 2;
         }
         let mut status = 0;
         for s in signals {
             if let Some(sig) = trap_number(s) {
                 if let Err(e) = self.set(sig, command, interactive) {
-                    eprintln!("tonari: trap: {s}: {e}");
+                    diagnostic!("trap: {s}: {e}");
                     status = 1;
                 }
             } else {
@@ -615,7 +615,7 @@ impl Traps {
 }
 
 fn invalid(s: &str) -> u8 {
-    eprintln!("tonari: trap: {s}: invalid signal specification");
+    diagnostic!("trap: {s}: invalid signal specification");
     1
 }
 
