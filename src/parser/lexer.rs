@@ -566,7 +566,7 @@ fn parameter_word(
                 word.literal(&ansi::quoted(chars)?);
             }
             '$' => dollar_word(chars, &mut word, outer_quoted, assignment)?,
-            '"' => quoted(chars, c, &mut word)?,
+            '"' => double_quoted(chars, &mut word, outer_quoted)?,
             '\'' if !outer_quoted => quoted(chars, c, &mut word)?,
             '`' => backquote(chars, &mut word, outer_quoted)?,
             '\\' => {
@@ -620,6 +620,14 @@ pub(super) fn quoted(
         *chars = rest.chars();
         return Ok(());
     }
+    double_quoted(chars, word, false)
+}
+
+fn double_quoted(
+    chars: &mut Chars<'_>,
+    word: &mut WordBuilder,
+    inside_quoted_operand: bool,
+) -> Result<(), Error> {
     let mut empty = true;
     while let Some(c) = chars.next() {
         if c == '"' {
@@ -629,8 +637,12 @@ pub(super) fn quoted(
             return Ok(());
         }
         match c {
-            '\\' if matches!(chars.clone().next(), Some('"' | '$' | '`' | '\\' | '\n')) => {
-                let escaped = chars.next().unwrap();
+            '\\' if inside_quoted_operand
+                || matches!(chars.clone().next(), Some('"' | '$' | '`' | '\\' | '\n')) =>
+            {
+                let escaped = chars
+                    .next()
+                    .ok_or(Error::Incomplete("unterminated quote"))?;
                 if escaped == '\n' {
                     continue;
                 }

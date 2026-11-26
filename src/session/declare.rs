@@ -379,11 +379,7 @@ pub(super) fn run(
                     || flags.array
                     || flags.associative
                     || array.is_some()
-                    || !dest.is_empty()
-                        && !(is_identifier(dest)
-                            || super::array::subscript(dest).is_some_and(|(base, expr)| {
-                                is_identifier(base) && !expr.is_empty()
-                            }))
+                    || !dest.is_empty() && !Session::valid_reference_target(dest)
                     || dest == name)
             {
                 eprintln!("tonari: {command}: {name}: invalid name reference");

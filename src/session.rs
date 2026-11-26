@@ -570,6 +570,46 @@ impl Session {
         self.has_namerefs && self.variables.get(name).is_some_and(|v| v.nameref)
     }
 
+    fn valid_reference_target(name: &str) -> bool {
+        is_identifier(name)
+            || array::subscript(name)
+                .is_some_and(|(base, index)| is_identifier(base) && !index.is_empty())
+    }
+
+    pub(crate) fn assign_for_reference(
+        &mut self,
+        name: &str,
+        value: &str,
+    ) -> Result<(), &'static str> {
+        if !Self::valid_reference_target(value) {
+            return Err("invalid name reference");
+        }
+        let mut current = name.to_owned();
+        for _ in 0..32 {
+            let next = self
+                .variables
+                .get(&current)
+                .and_then(|v| v.value.as_ref())
+                .filter(|next| self.is_nameref(next))
+                .cloned();
+            if let Some(next) = next {
+                current = next;
+                continue;
+            }
+            let var = self
+                .variables
+                .get_mut(&current)
+                .expect("existing name reference");
+            if var.readonly {
+                return Err("readonly variable");
+            }
+            var.value = Some(value.to_owned());
+            var.declared = true;
+            return Ok(());
+        }
+        Err("circular name reference")
+    }
+
     pub fn reference_name<'a>(&self, name: &'a str) -> Result<Cow<'a, str>, &'static str> {
         if !self.has_namerefs {
             return Ok(Cow::Borrowed(name));

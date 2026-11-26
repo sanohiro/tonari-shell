@@ -311,15 +311,24 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                         return Err(flow);
                     }
                 }
-                if s.readonly(&name) {
-                    eprintln!("tonari: {name}: readonly variable");
-                    return Err(if s.posix && !s.interactive {
-                        Flow::Exit(1)
-                    } else {
-                        Flow::Continue(1)
-                    });
+                let error = if s.is_nameref(&name) {
+                    s.assign_for_reference(&name, &value).err()
+                } else if s.readonly(&name) {
+                    Some("readonly variable")
+                } else {
+                    s.assign(&name, &value);
+                    None
+                };
+                if let Some(error) = error {
+                    eprintln!("tonari: {name}: {error}");
+                    return Err(
+                        if error == "readonly variable" && s.posix && !s.interactive {
+                            Flow::Exit(1)
+                        } else {
+                            Flow::Continue(1)
+                        },
+                    );
                 }
-                s.assign(&name, &value);
                 Ok(Some(last))
             })
         }

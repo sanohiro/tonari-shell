@@ -23,6 +23,8 @@ COMMON = {
     "compat-loop": r"""f(){ break; echo function; }; for n in 43 44 52; do BASH_COMPAT=$n; for i in 1; do f; echo caller; done; if (( n <= 44 )); then for i in 1; do (break; echo child); echo "end:$?"; done; fi; done""",
     "compat-array": r"""for n in 51 52; do BASH_COMPAT=$n; a=(one two); declare -A m=([k]=v); test -v 'a[@]'; echo $?; [[ -v 'm[*]' ]]; echo $?; unset 'a[@]' 'm[*]'; declare -p a m; unset a m; done""",
     "assignment-tilde": "base=/bin\np=$base:~/bin:~/lib\necho \"$p\"\nexport p=$base:~/export\necho \"$p\"\nset -o posix\necho plain=~:~\ndeclare p=~:~\necho \"$p\"",
+    "nameref-loop": r"""readonly a=one b=two; xs=(zero first); declare -n inner=a outer=inner; for outer in a b 'xs[1]'; do printf '<%s/%s>' "${!inner}" "$outer"; done; declare -p outer inner; for outer in b 'bad-name' a; do echo "$outer"; done; echo "$?"; declare -nr locked=a; for locked in b; do echo wrong; done; echo "$?"; declare -n fresh; for fresh in a b; do echo "$fresh"; done; declare -p fresh""",
+    "nested-operand-quotes": r"""v=set; printf '<%s>' "${v:+"a\p\'雪"}" "${v:+a\p\'雪}" ${v:+"a\p"} "${missing:-"one\q two"}" "${made:="new\q value"}" "$made"; set -o posix; printf '<%s>' "${v:+"a\p"}" "${v:+a\p}" """,
     "nameref-clear": """v=before; declare -n ref=v; declare +n ref=after; declare -p ref v; declare -n ref=v; declare +n ref+=plus; declare -p ref v; readonly lock=x; declare -n ref=lock; declare +n ref=other; echo "$?"; declare -p ref lock""",
     "scalar-array-slice": """v=abcd; declare -n ref=v; printf '<%s>\\n' "${v[@]:0:2}" "${v[*]:1:2}" "${ref[@]:1:2}"; a=(abcd def); printf '<%s>\\n' "${a[@]:0:1}" """,
     "indirect-positionals": """set --; printf '<%s>' A "${!@}" B "${!*:-missing}" "${!9-default}"; set -- who; who=value; echo "${!@}" """,
@@ -136,6 +138,8 @@ HOT = {
     "signal-table": ('kill -l >/dev/null', 500),
     "legacy-zone": ("printf -v v '%(%T %z)T' 1275250155", 1100),
     "bind-filter": ('bind -p forward-word >/dev/null', 400),
+    "nameref-loop": ("for outer in a b c; do :; done", 900),
+    "nested-operand-quotes": (r'v="${missing:-"AlphaBravoCharlie0123456789\p"}"', 750),
     "nameref-clear": ("declare -n ref=v; declare +n ref=after", 900),
     "stack-tilde": ('p=~+1', 1100),
     "toggle-case": ('v=${phrase~~}', 2400),
@@ -690,6 +694,7 @@ def main():
                 "compat-random": "BASH_COMPAT=50; RANDOM=42",
                 "compat-regex": "BASH_COMPAT=31; re='^a.*z$'",
                 "compat-loop": "BASH_COMPAT=43; f(){ break; }",
+                "nameref-loop": "readonly a=one b=two c=three; declare -n inner=a outer=inner",
                 "compat-array": "BASH_COMPAT=51; declare -A m=([k]=v)",
                 "assignment-tilde": "base=/bin",
                 "stack-tilde": "pushd src >/dev/null",
@@ -715,7 +720,7 @@ def main():
                 code = "set -o history\n" + "for v in one two\ndo\n  : item\ndone\n" * count + "echo done"
             elif name in ("positional-assignment-error", "invalid-length"):
                 code = "exec 2>/dev/null\n" + (body + "\n") * count + "echo done"
-            elif name in ("backquote-escape", "ansi-braced-byte"):
+            elif name in ("backquote-escape", "ansi-braced-byte", "nested-operand-quotes"):
                 # Parse a fresh top-level assignment for each source spelling.
                 code = "".join(f"v={i}{body[2:]}\n" for i in range(count)) + "echo done"
             samples = [[] for _ in shells]
