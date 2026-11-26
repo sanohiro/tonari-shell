@@ -1109,6 +1109,10 @@ fn eval_builtin(
             Flow::Continue(1)
         }
     };
+    let result = match result {
+        Flow::Exit(code) => Flow::Exit(crate::traps::exit_action(session, code)),
+        other => other,
+    };
     if !persistent {
         session.restore(bindings);
     }
@@ -2654,15 +2658,7 @@ fn prepare_redirects(
                 text
             }
             (_, Word::Literal(word)) => word,
-            (_, word) if exp.session.posix && !exp.session.interactive => exp.scalar(word)?,
-            (_, word) => {
-                let mut fields = exp.fields(word)?.into_iter();
-                let word = fields.next().ok_or("ambiguous redirect")?;
-                if fields.next().is_some() {
-                    return Err("ambiguous redirect".into());
-                }
-                word
-            }
+            (_, word) => exp.redirect_path(word)?,
         };
         let mut word = word;
         let mut moved = None;

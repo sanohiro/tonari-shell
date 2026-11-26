@@ -440,6 +440,18 @@ impl<'a> Expansion<'a> {
         })
     }
 
+    pub(crate) fn redirect_path(&mut self, word: Word) -> Result<String, Error> {
+        if self.session.posix && !self.session.interactive {
+            return self.scalar(word);
+        }
+        let mut fields = self.fields(word)?.into_iter();
+        let path = fields.next().ok_or("ambiguous redirect")?;
+        if fields.next().is_some() {
+            return Err("ambiguous redirect".into());
+        }
+        Ok(path)
+    }
+
     pub fn fields(&mut self, word: Word) -> Result<Vec<String>, Error> {
         self.fields_with_glob(word, !self.session.noglob)
     }

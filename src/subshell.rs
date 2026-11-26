@@ -225,20 +225,17 @@ pub fn capture_substitution(
         if let Some(path) = input_only(&body) {
             let code = (|| {
                 let captured = std::cell::Cell::new(None);
-                let fields = crate::expansion::Expansion::new(session, last, &captured)
-                    .fields(path.clone())
+                let filename = crate::expansion::Expansion::new(session, last, &captured)
+                    .redirect_path(path.clone())
                     .map_err(std::io::Error::other)?;
-                let [filename] = fields.as_slice() else {
-                    return Err(std::io::Error::other("ambiguous redirect"));
-                };
                 #[cfg(target_os = "linux")]
                 let file = match &child_input {
                     Some(fd) => std::fs::File::open(format!("/proc/self/fd/{}", fd.as_raw_fd()))
-                        .or_else(|_| std::fs::File::open(filename)),
-                    None => std::fs::File::open(filename),
+                        .or_else(|_| std::fs::File::open(&filename)),
+                    None => std::fs::File::open(&filename),
                 };
                 #[cfg(not(target_os = "linux"))]
-                let file = std::fs::File::open(filename);
+                let file = std::fs::File::open(&filename);
                 let mut file =
                     file.map_err(|e| io::Error::new(e.kind(), format!("{filename}: {e}")))?;
                 // Write straight to fd 1. Stdout's line buffer could retain the

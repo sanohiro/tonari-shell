@@ -2310,9 +2310,13 @@ fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Cow<'_, str> 
             .unwrap()
             .into();
     }
-    if value
-        .bytes()
-        .any(|c| c.is_ascii_whitespace() || b"~!#$&*(){}[];<>?\\\"'|`".contains(&c))
+    if value == "'" {
+        return Cow::Borrowed("\\'");
+    }
+    if value.starts_with(['#', '~'])
+        || value
+            .bytes()
+            .any(|c| c.is_ascii_whitespace() || b"!$&*(){}[];<>?\\\"'|`".contains(&c))
     {
         crate::completion_spec::single_quote(value).into()
     } else {

@@ -48,9 +48,19 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
         Flow::Continue(2)
     };
     match expr {
-        Not(e) => Ok(!condition(e, session, status)?),
-        And(a, b) => Ok(condition(a, session, status)? && condition(b, session, status)?),
-        Or(a, b) => Ok(condition(a, session, status)? || condition(b, session, status)?),
+        Not(e) => match condition(e, session, status) {
+            Ok(value) => Ok(!value),
+            Err(Flow::Continue(code)) => Ok(code != 0),
+            other => other,
+        },
+        And(a, b) => match condition(a, session, status)? {
+            true => condition(b, session, status),
+            false => Ok(false),
+        },
+        Or(a, b) => match condition(a, session, status) {
+            Ok(false) | Err(Flow::Continue(1..)) => condition(b, session, status),
+            other => other,
+        },
         Word(word) => {
             let value = operand(session, word, status)?;
             trace(session, status, &["-n", &value]);
@@ -128,8 +138,12 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                 "-eq" | "-ne" | "-lt" | "-le" | "-gt" | "-ge" => {
                     let right = operand(session, right, status)?;
                     trace(session, status, &[&left, op, &right]);
-                    let a = arithmetic::run(&left, session).map_err(error)?;
-                    let b = arithmetic::run(&right, session).map_err(error)?;
+                    let arith_error = |message| {
+                        eprintln!("tonari: [[: {message}");
+                        Flow::Continue(1)
+                    };
+                    let a = arithmetic::run(&left, session).map_err(arith_error)?;
+                    let b = arithmetic::run(&right, session).map_err(arith_error)?;
                     Ok(match op.as_str() {
                         "-eq" => a == b,
                         "-ne" => a != b,
@@ -165,6 +179,7 @@ impl Compiled {
             libc::REG_EXTENDED
         };
         if unsafe { libc::regcomp(regex.as_mut_ptr(), encoded.as_ptr(), flags) } != 0 {
+            eprintln!("tonari: [[: invalid regular expression: {pattern}");
             return Err(());
         }
         let captures = capture_count(&pattern) + 1;

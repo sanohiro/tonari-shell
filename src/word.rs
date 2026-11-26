@@ -763,7 +763,7 @@ impl Output<'_> {
             Self::Scalar(buffer) => buffer.push_str(text),
             Self::Pattern(buffer, PatternKind::Replacement) => {
                 for c in text.chars() {
-                    if c == '\\' || c == '&' && quoted {
+                    if quoted && matches!(c, '\\' | '&') {
                         buffer.push('\\');
                     }
                     buffer.push(c);

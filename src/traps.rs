@@ -161,6 +161,7 @@ pub struct Traps {
     handling_debug: bool,
     handling_error: bool,
     handling_return: bool,
+    handling_exit: bool,
     interactive_hup: bool,
     interactive_handlers: bool,
     interactive_origin: bool,
@@ -509,6 +510,7 @@ impl Traps {
     }
 
     pub fn after_fork(&mut self, errtrace: bool, functrace: bool) {
+        self.handling_exit = false;
         self.current_action = None;
         if self.entries.contains_key(&libc::SIGCHLD) {
             WATCH_CHILDREN.store(false, Relaxed);
@@ -864,6 +866,25 @@ pub fn dispatch(session: &mut Session, status: u8) -> Flow {
     Flow::Continue(status)
 }
 
+// An explicit exit runs with its command redirections, positional parameters
+// and dynamically scoped locals still in effect. Natural EOF uses this too.
+pub(crate) fn exit_action(session: &mut Session, code: u8) -> u8 {
+    if session.traps.handling_exit {
+        return code;
+    }
+    let Some(exit) = session.traps.entries.remove(&0) else {
+        return code;
+    };
+    session.traps.handling_exit = true;
+    let _ = session.traps.watch_exit(false);
+    let outcome = with_trapsig(session, 0, code, |session| {
+        crate::eval_text(session, &exit.command, code)
+    });
+    session.traps.handling_exit = false;
+    session.traps.entries.remove(&0);
+    if let Flow::Exit(n) = outcome { n } else { code }
+}
+
 pub fn finish(session: &mut Session, code: u8) -> u8 {
     if session.interactive
         && (TERMINATING.load(Relaxed) == libc::SIGHUP || session.login && session.shopt.huponexit)
@@ -878,14 +899,7 @@ pub fn finish(session: &mut Session, code: u8) -> u8 {
         _ => code,
     };
     let sig = TERMINATING.swap(0, Relaxed);
-    if let Some(exit) = session.traps.entries.remove(&0) {
-        let _ = session.traps.watch_exit(false);
-        if let Flow::Exit(n) = with_trapsig(session, 0, code, |session| {
-            crate::eval_text(session, &exit.command, code)
-        }) {
-            code = n;
-        }
-    }
+    code = exit_action(session, code);
     if sig != 0 {
         unsafe {
             libc::signal(sig, libc::SIG_DFL);

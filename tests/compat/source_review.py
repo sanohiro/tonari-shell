@@ -16,6 +16,11 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "conditional-arithmetic-error": "[[ 1 -eq 4+ ]]; echo \"$?\"; [[ 1 -eq 4+ || 1 -eq 1 ]]; echo \"$?\"",
+    "replacement-backslash": "v=letssee; pattern=ss; for r in 'x&y' 'x\\&y' '\\\\&'; do printf '<%s>\\n' \"${v//$pattern/$r}\" \"${v//$pattern/\"$r\"}\"; done",
+    "quote-set-values": "set -o posix; ZZ1=\"'\"; ZZ2=\"'abc\"; ZZ3=\"abc'\"; ZZ4='ab#cd'; ZZ5='a~b'; ZZ6='#abcd'; set | sed -n '/^ZZ[0-9]/p'",
+    "posix-input-capture": "printf literal >'glob-*'; printf another >glob-a; set -o posix; p='glob-*'; result=$(< $p); echo \"$? <$result>\"; printf spaced >'with space'; p='with space'; result=$(< $p); echo \"$? <$result>\"",
+    "exit-trap-frame": "( f(){ local item=inner; trap 'printf \"<%s/%s/%s>\\n\" \"$FUNCNAME\" \"$item\" \"$1\"' EXIT; exit 7 >result; }; f arg ); echo \"$?\"; cat result",
     "posix-background-parameter": "set -o posix\n: &\nj=$!; wait \"$j\"; test \"${!?}\" = \"$j\"; echo \"$?\"",
     "descriptor-overflow": "printf '<%s>\\n' 99999999999999999999999</dev/null; : 33</dev/null; echo \"$?\"",
     "quoted-operand-brace": "v=set; x=value; printf '<%s>\\n' \"${v-'}'}\" \"${w-'}'}\" \"${w-'$x}'}\"",
@@ -96,6 +101,8 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "posix-command-precedence": "break(){ echo fn; }; set -o posix; type -t break; type -at break; command -V break",
+    "invalid-ere": "re='a('; [[ x =~ $re ]]; echo \"$?\"; re='(a)(b)?'; [[ a =~ $re ]]; declare -p BASH_REMATCH",
     "indexed-init-recovery": "a=(old)\na=([0]=start [1]=yes [-3]=bad [2]=later); echo skipped\necho \"$?\"; declare -p a\na=([]=bad [3]=end); echo skipped\necho \"$?\"; declare -p a",
     "empty-async-negation": "!& echo $?; wait; !; echo $?",
     "partial-assoc-init": "declare -A a=([one]=1 bad [two]=2); echo skipped\necho \"$?:${a[one]}:${a[two]}\"; a=(old surplus)\na=([hi]=OK ['']=no [missing]=no)\necho \"$?:${a[hi]}:${a[old]}:${a[missing]}\"; a=(good yes '' ignored last ok); echo \"$?:${a[last]}\"",
@@ -125,6 +132,13 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "posix-command-precedence": ("type -t break >/dev/null", 2500),
+    "invalid-ere": ("[[ x =~ $re ]]", 2200),
+    "conditional-arithmetic-error": ("[[ 1 -eq 4+ ]]", 4000),
+    "replacement-backslash": (": \"${v//$pattern/$r}\" \"${v//$pattern/\"$r\"}\"", 3500),
+    "quote-set-values": ("set >/dev/null", 500),
+    "posix-input-capture": ("v=$(< $p)", 110),
+    "exit-trap-frame": ("( f arg )", 90),
     "posix-background-parameter": (": \"${!?}\"", 7000),
     "descriptor-overflow": (": 99999999999999999999999</dev/null", 2500),
     "quoted-operand-brace": (": \"${w-'$x}'}\"", 7000),
@@ -726,6 +740,13 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "posix-command-precedence": "break(){ :; }; set -o posix",
+                "invalid-ere": "re='a('; exec 2>/dev/null",
+                "conditional-arithmetic-error": "exec 2>/dev/null",
+                "replacement-backslash": "v=letssee; pattern=ss; r='x\\&y'",
+                "quote-set-values": "set -o posix; ZZ1=\"'\"; ZZ2=\"'abc\"; ZZ3='a~b'; ZZ4='ab#cd'",
+                "posix-input-capture": "printf literal >'glob-*'; set -o posix; p='glob-*'",
+                "exit-trap-frame": "f(){ local item=inner; trap ': \"$FUNCNAME\" \"$item\" \"$1\"' EXIT; exit; }",
                 "posix-background-parameter": "set -o posix; : & j=$!; wait \"$j\"",
                 "quoted-operand-brace": "x=value",
                 "eval-array-operand": "a=([3]=one [5]=two); name=a",
