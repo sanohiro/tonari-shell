@@ -16,6 +16,9 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "bind-human-list": "{ bind -u beginning-of-line; bind '\"zzq\": beginning-of-line'; bind -q beginning-of-line; bind -P | grep '^beginning-of-line '; } 2>/dev/null",
+    "alias-option-processing": "alias -- -x=ok; alias -pp -- -x; alias -Z 2>/dev/null; echo $?; unalias -aZ 2>/dev/null; echo $?; alias -- -x; unalias -aa; alias -p",
+    "arithmetic-assignment-index": "n=0; ((a[n]=++n)); n=0; ((b[n]+=++n)); n=0; ((c[n++]=n++)); declare -p a b c; echo \"$n\"; n=0; a='(a[n]=++n)<7&&a[0]'; ((a[0])); echo \"${a[@]:1}\"",
     "ascii-range-option": "LC_ALL=C; for opt in -s -u -s; do shopt \"$opt\" globasciiranges; shopt -q globasciiranges; printf '%s:' \"$?\"; for c in b B z Z; do [[ $c == [a-z] ]]; printf '%s' \"$?\"; done; echo; done",
     "gnu-diagnostic-location": "shopt -s gnu_errfmt; printf '%s\\n' 'shopt -s gnu_errfmt' 'no_such_audit_tool' >location.sh; . ./location.sh 2>error; grep -Eq 'location.sh:2: .*command not found' error; echo $?; shopt -u gnu_errfmt; shopt -q gnu_errfmt; echo $?",
     "xtrace-for-case-header": "PS4='+ '; exec 9>trace; BASH_XTRACEFD=9; set -x; set -- a 'b c'; for x; do :; done; case \"$1\" in a) :;; esac; set +x; cat trace",
@@ -140,6 +143,7 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "long-working-directory": "set -o posix; cd deep-root; p=deep-part-abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd; for ((j=0;j<20;j++)); do cd \"$p\" || exit 9; done; logical=$(pwd -L); phys=$(pwd -P); [[ $logical == */\"$p\" && $phys == */\"$p\" && ${#logical} -gt 4096 && ${#phys} -gt 4096 ]]; echo $?; cd ..; test -d \"$p\"; echo $?",
     "printf-wide-characters": "case $OSTYPE in darwin*) LC_ALL=en_US.UTF-8;; *) LC_ALL=C.UTF-8;; esac; printf '[%4.2ls][%-4C][%S][%.0lc]' '雪🌸a' '雪a' '四' q; printf '%lc' ''",
     "printf-alternate-quote": "printf '[%#q][%#.3Q]\\n' 'a b' 'a b c' '' 'ok' $'x\\ny' \"ab'\"; printf '%#q\\n' 'no-quotes-needed'",
     "posix-fc-operands": "set -o posix; set -o history\nhistory -s 'echo first'\nfc -s 1 1 1; echo \"$?\"",
@@ -181,6 +185,10 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "bind-human-list": ("bind -q beginning-of-line >/dev/null 2>&1", 900),
+    "long-working-directory": ("pwd -P >/dev/null; pwd -L >/dev/null", 18),
+    "alias-option-processing": ("alias -- -sample=yes; alias -pp -- -sample >/dev/null; unalias -- -sample", 1100),
+    "arithmetic-assignment-index": ("n=0; ((a[n]=++n)); ((a[n]+=n++))", 1600),
     "ascii-range-option": ("[[ b == [a-z] ]]; [[ Z == [a-z] ]] || :", 2000),
     "gnu-diagnostic-location": ("no_such_audit_tool 2>/dev/null; :", 65),
     "xtrace-for-case-header": ("for x in a b c; do :; done; case \"$x\" in c) :;; esac", 800),
@@ -678,6 +686,19 @@ def main():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         fixture(root)
+        # Create each component relative to an open parent, beyond PATH_MAX on musl.
+        deep = root / "deep-root"
+        deep.mkdir()
+        parent = os.open(deep, os.O_RDONLY)
+        try:
+            for _ in range(20):
+                component = "deep-part-" + "abcd" * 53
+                os.mkdir(component, dir_fd=parent)
+                child = os.open(component, os.O_RDONLY, dir_fd=parent)
+                os.close(parent)
+                parent = child
+        finally:
+            os.close(parent)
         env = dict(PATH="/usr/bin:/bin", HOME=directory, LC_ALL="C", TMPDIR=directory,
                    INPUTRC="/dev/null", TERM="dumb")
         def run(shell, code):
@@ -799,6 +820,11 @@ def main():
         (termroot / "sample/unique").touch()
         for name in EXTRA_CASES:
             if not requested(name): continue
+            if name == "foreground-signal-notice" and not modern:
+                # The POSIX foreground-notification ordering rule is new in 5.3.
+                from posix_rules import terminal_rule
+                assert terminal_rule(shells[1], termroot, 26), (name, shells[1])
+                continue
             samples = [[] for _ in shells]
             for r in range(args.runs + 1):
                 order = list(range(len(shells)))
@@ -988,6 +1014,7 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "long-working-directory": "set -o posix; cd deep-root; p=deep-part-abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd; for ((j=0;j<20;j++)); do cd \"$p\" || exit 9; done",
                 "ascii-range-option": "LC_ALL=C; shopt -u globasciiranges",
                 "gnu-diagnostic-location": "shopt -s gnu_errfmt",
                 "xtrace-for-case-header": "exec 9>/dev/null; BASH_XTRACEFD=9; set -x",

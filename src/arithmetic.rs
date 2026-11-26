@@ -416,8 +416,13 @@ impl<'a> Parser<'a> {
                 )?
                 .read(variables, run_right, depth + 1)?;
             if precedence == 2 {
-                let Value::Variable(name) = left else {
-                    return Err("arithmetic assignment requires a variable");
+                let name = match left {
+                    Value::Variable(name) => name,
+                    Value::AssignmentTarget(source) => {
+                        let (base, index) = source;
+                        element_name(base, index, variables, depth)?
+                    }
+                    Value::Number(_) => return Err("arithmetic assignment requires a variable"),
                 };
                 let result = if !active || op == "=" {
                     b
@@ -447,21 +452,22 @@ impl<'a> Parser<'a> {
         let mut value = match self.advance()? {
             Token::Number(s) => Value::Number(number(s)?),
             Token::Name(n) => {
-                let name =
-                    if active && let Some((base, index)) = crate::session::array::subscript(n) {
-                        if index.is_empty() {
-                            return Err("empty array subscript");
-                        }
-                        let index = match variables.associative_key(base, index) {
-                            Some(key) => key?,
-                            None => calculate(numeric_subscript(index), variables, depth + 1)?
-                                .to_string(),
-                        };
-                        std::borrow::Cow::Owned(format!("{base}[{index}]"))
-                    } else {
-                        std::borrow::Cow::Borrowed(n)
-                    };
-                Value::Variable(name)
+                let name = if active
+                    && self.token != Token::Op("=")
+                    && let Some((base, index)) = crate::session::array::subscript(n)
+                {
+                    element_name(base, index, variables, depth)?
+                } else {
+                    std::borrow::Cow::Borrowed(n)
+                };
+                if active
+                    && self.token == Token::Op("=")
+                    && let Some(target) = crate::session::array::subscript(n)
+                {
+                    Value::AssignmentTarget(target)
+                } else {
+                    Value::Variable(name)
+                }
             }
             Token::Op("(") => {
                 let v = self.expression(variables, 1, active, depth + 1)?;
@@ -508,7 +514,24 @@ impl<'a> Parser<'a> {
     }
 }
 
+fn element_name<'a>(
+    base: &str,
+    index: &str,
+    variables: &mut dyn Variables,
+    depth: u16,
+) -> Result<std::borrow::Cow<'a, str>> {
+    if index.is_empty() {
+        return Err("empty array subscript");
+    }
+    let key = match variables.associative_key(base, index) {
+        Some(key) => key?,
+        None => calculate(numeric_subscript(index), variables, depth + 1)?.to_string(),
+    };
+    Ok(std::borrow::Cow::Owned(format!("{base}[{key}]")))
+}
+
 enum Value<'a> {
+    AssignmentTarget((&'a str, &'a str)),
     Number(i64),
     Variable(std::borrow::Cow<'a, str>),
 }
@@ -518,6 +541,7 @@ impl Value<'_> {
             return Ok(0);
         }
         match self {
+            Self::AssignmentTarget(_) => Err("expected arithmetic assignment"),
             Self::Number(n) => Ok(*n),
             Self::Variable(name) => {
                 if let Some(n) = variables.decimal(name) {

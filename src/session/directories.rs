@@ -2,6 +2,81 @@ use super::Session;
 use std::io::{self, Write};
 use std::path::Path;
 
+pub(super) fn physical_path() -> io::Result<std::path::PathBuf> {
+    match std::env::current_dir() {
+        Err(e) if e.raw_os_error() == Some(libc::ENAMETOOLONG) => long_physical_path(),
+        result => result,
+    }
+}
+
+// Some getcwd implementations cannot return a name longer than PATH_MAX.
+// Walk open directories without changing the shell's working directory.
+#[cold]
+fn long_physical_path() -> io::Result<std::path::PathBuf> {
+    use std::ffi::{CStr, OsStr};
+    use std::fs::File;
+    use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
+    let mut child = File::open(".")?;
+    let mut parts = Vec::new();
+    loop {
+        let fd = unsafe {
+            libc::openat(
+                child.as_raw_fd(),
+                c"..".as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let parent = unsafe { File::from_raw_fd(fd) };
+        let here = child.metadata()?;
+        let up = parent.metadata()?;
+        if (here.dev(), here.ino()) == (up.dev(), up.ino()) {
+            break;
+        }
+        let reader = parent.try_clone()?;
+        let stream = unsafe { libc::fdopendir(reader.as_raw_fd()) };
+        if stream.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let _ = reader.into_raw_fd();
+        let found = loop {
+            let entry = unsafe { libc::readdir(stream) };
+            if entry.is_null() {
+                break None;
+            }
+            let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) };
+            if matches!(name.to_bytes(), b"." | b"..") {
+                continue;
+            }
+            let mut st = std::mem::MaybeUninit::uninit();
+            if unsafe {
+                libc::fstatat(
+                    fd,
+                    name.as_ptr(),
+                    st.as_mut_ptr(),
+                    libc::AT_SYMLINK_NOFOLLOW,
+                )
+            } == 0
+            {
+                let st = unsafe { st.assume_init() };
+                if st.st_dev as u64 == here.dev() && st.st_ino as u64 == here.ino() {
+                    break Some(OsStr::from_bytes(name.to_bytes()).to_owned());
+                }
+            }
+        };
+        unsafe { libc::closedir(stream) };
+        parts.push(found.ok_or_else(|| io::Error::from_raw_os_error(libc::ENOENT))?);
+        child = parent;
+    }
+    let mut path = std::path::PathBuf::from("/");
+    path.extend(parts.into_iter().rev());
+    Ok(path)
+}
+
 fn index(word: &str, len: usize) -> Option<usize> {
     let n = word.get(1..)?.parse::<usize>().ok()?;
     if n >= len {

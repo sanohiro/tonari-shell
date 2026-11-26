@@ -684,7 +684,12 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
                             .join(", ");
                         writeln!(
                             out,
-                            "{name} can be invoked via {names}{}",
+                            "{name} {} {names}{}",
+                            if arg == "-P" {
+                                "can be found on"
+                            } else {
+                                "can be invoked via"
+                            },
                             if keys.len() > 5 { ", ..." } else { "." }
                         )
                         .map_err(ioerr)?;

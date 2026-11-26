@@ -86,6 +86,13 @@ def extra(a, base, source, sections):
                 if flag not in "nt":
                     src = f'set -{flag}; case $- in *{flag}*) printf on;; esac; set +{flag}; case $- in *{flag}*) printf wrong;; *) printf off;; esac'
                 a.compare("Builtin option", feature, src, interface=True)
+            elif name == "suspend" and flag == "f":
+                a.add("Builtin option", feature, row["status"], row["witness"])
+            elif name == "enable" and flag in ("d", "f"):
+                command = "enable -d absent" if flag == "d" else "enable -f ./absent absent"
+                control, candidate = (a.script(i, command) for i in (0, 1))
+                status = "intentional difference" if control.code and candidate.code and candidate.err else "different"
+                a.add("Builtin option", feature, status, command + " (native loadable builtins are outside the single-binary interface)", [control, candidate])
             elif test:
                 a.compare("Builtin option", feature, test)
             else:

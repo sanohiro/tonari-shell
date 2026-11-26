@@ -1936,7 +1936,7 @@ impl Session {
                 return Ok(self.logical_cwd.get_or_init(|| path.into()));
             }
         }
-        let cwd = std::env::current_dir()?;
+        let cwd = directories::physical_path()?;
         Ok(self.logical_cwd.get_or_init(|| cwd))
     }
 
@@ -1971,13 +1971,13 @@ impl Session {
         }
         let result = if name == "pwd" {
             (if physical {
-                std::env::current_dir()
+                directories::physical_path()
             } else if self.posix {
                 self.logical_directory().and_then(|path| {
                     if same_directory(&path, Path::new(".")) {
                         Ok(path)
                     } else {
-                        let actual = std::env::current_dir()?;
+                        let actual = directories::physical_path()?;
                         self.logical_cwd = std::cell::OnceCell::from(actual.clone());
                         Ok(actual)
                     }
@@ -2162,7 +2162,7 @@ impl Session {
             self.logical_cwd.take();
             let cwd = match logical {
                 Some(cwd) => cwd,
-                None => std::env::current_dir().map_err(DirectoryError::NoPath)?,
+                None => directories::physical_path().map_err(DirectoryError::NoPath)?,
             };
             if self.interactive && base.as_deref().ok() != Some(cwd.as_path()) {
                 Rc::make_mut(self.visits.get_or_insert_with(Rc::default)).record(base.ok(), &cwd);

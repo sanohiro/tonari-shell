@@ -313,6 +313,8 @@ for op in ("-a", "-b", "-c", "-d", "-e", "-f", "-g", "-h", "-k", "-L", "-p", "-r
     setup = {"fifo": "mkfifo fifo", "link": "ln -s file link", "sticky": "mkdir sticky; chmod +t sticky",
              "sg": "touch sg; chmod g+s sg", "su": "touch su; chmod u+s su",
              "exe": "touch exe; chmod +x exe"}.get(value, ":")
+    if op == "-N":
+        setup = "touch -at 200001010000 file; touch -mt 200101010000 file"
     CONDITIONS[op] = f"printf data >file; {setup}; [[ {op} {value} ]]; printf %s \"$?\"; [[ {op} absent ]]; printf %s \"$?\""
 CONDITIONS.update({
     "-o": "set -f; [[ -o noglob ]]; echo $?; set +f; [[ -o noglob ]]; echo $?",

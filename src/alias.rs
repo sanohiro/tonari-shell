@@ -30,34 +30,60 @@ impl Aliases {
 }
 
 pub fn declaration(name: &str, value: &str) -> String {
-    format!("alias {name}='{}'", value.replace('\'', "'\\''"))
+    format!(
+        "{}{name}='{}'",
+        prefix(name, true),
+        value.replace('\'', "'\\''")
+    )
+}
+
+fn prefix(name: &str, command: bool) -> &'static str {
+    if !command {
+        ""
+    } else if name.starts_with('-') {
+        "alias -- "
+    } else {
+        "alias "
+    }
 }
 
 pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
     let remove = cmd == "unalias";
-    let print_all = !remove && args.first().is_some_and(|s| s == "-p");
-    if print_all {
-        args = &args[1..];
+    let mut print_all = false;
+    let mut clear = false;
+    while let Some((arg, rest)) = args.split_first() {
+        if arg == "--" {
+            args = rest;
+            break;
+        }
+        let Some(flags) = arg.strip_prefix('-').filter(|s| !s.is_empty()) else {
+            break;
+        };
+        for flag in flags.chars() {
+            match (remove, flag) {
+                (false, 'p') => print_all = true,
+                (true, 'a') => clear = true,
+                _ => {
+                    eprintln!("tonari: {cmd}: -{flag}: invalid option");
+                    return 2;
+                }
+            }
+        }
+        args = rest;
     }
-    if remove && args.first().is_some_and(|s| s == "-a") {
+    if clear {
         session.aliases.0 = None;
         return 0;
-    }
-    if args.first().is_some_and(|s| s == "--") {
-        args = &args[1..];
     }
     if remove && args.is_empty() {
         return 2;
     }
     let mut out = io::stdout().lock();
-    let prefix = if session.posix && !print_all {
-        ""
-    } else {
-        "alias "
-    };
+    let command_prefix = !session.posix || print_all;
     if args.is_empty() && !remove {
         if let Some(map) = &session.aliases.0 {
             for (name, value) in map.iter() {
+                let prefix = prefix(name, command_prefix);
                 if writeln!(out, "{prefix}{name}='{}'", value.replace('\'', "'\\''")).is_err() {
                     return 1;
                 }
@@ -75,6 +101,7 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
                 continue;
             }
         }
+        let prefix = prefix(arg, command_prefix);
         if let Some(value) = session.aliases.get(arg) {
             if remove {
                 Rc::make_mut(session.aliases.0.as_mut().unwrap()).remove(arg);
