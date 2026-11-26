@@ -281,6 +281,7 @@ impl Reader {
                 return Ok(());
             }
             let name = match self.peek() {
+                Some(Token::TimeUtility) => "time",
                 Some(Token::Reserved(name)) => *name,
                 Some(Token::Word(word)) if !word.protected && word.assignment.is_none() => {
                     let Some(name) = word.word.as_literal() else {
@@ -294,6 +295,7 @@ impl Reader {
                 return Ok(());
             };
             if (!(after_blank && !super::POSIX.get())
+                && !matches!(self.peek(), Some(Token::TimeUtility))
                 && protected.map_or_else(|| reserved(name), |words| words.contains(&name)))
                 || self.alias_frames.iter().any(|f| f.name == name)
             {

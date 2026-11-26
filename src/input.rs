@@ -756,3 +756,39 @@ pub fn text(
     }
     Flow::Continue(if ran { status } else { 0 })
 }
+
+pub(crate) fn print_script(session: &Session, input: crate::cli::Input) -> u8 {
+    use std::io::Write;
+    let source = match input {
+        crate::cli::Input::Command(text) => Ok(text),
+        crate::cli::Input::File(path) => std::fs::read_to_string(path),
+        crate::cli::Input::Stdin => std::io::read_to_string(std::io::stdin().lock()),
+    };
+    let source = match source {
+        Ok(source) => source,
+        Err(e) => {
+            eprintln!("tonari: {e}");
+            return 1;
+        }
+    };
+    match parser::pretty::format(&source, session) {
+        Ok(text) => {
+            let mut out = std::io::stdout().lock();
+            let written = out
+                .write_all(text.as_bytes())
+                .and_then(|()| {
+                    if text.is_empty() || text.ends_with('\n') {
+                        Ok(())
+                    } else {
+                        out.write_all(b"\n")
+                    }
+                })
+                .and_then(|()| out.flush());
+            u8::from(written.is_err())
+        }
+        Err(e) => {
+            eprintln!("tonari: {}", e.message());
+            2
+        }
+    }
+}

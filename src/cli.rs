@@ -22,6 +22,7 @@ pub struct Invocation {
     pub noediting: bool,
     pub rcfile: Option<PathBuf>,
     pub check: bool,
+    pub pretty: bool,
     pub notify: bool,
     pub ignoreeof: Option<bool>,
     pub errexit: bool,
@@ -94,6 +95,7 @@ pub fn parse(
     let mut physical = false;
     let mut keyword = false;
     let mut nolog = false;
+    let mut pretty = false;
     let mut shopts = Vec::new();
     while args
         .peek()
@@ -106,6 +108,7 @@ pub fn parse(
             "--" | "-" => break,
             "--help" => return Ok(Action::Help),
             "--version" => return Ok(Action::Version),
+            "--pretty-print" => pretty = true,
             "--verbose" => verbose = true,
             "--posix" => posix = true,
             "--login" => login = true,
@@ -212,6 +215,7 @@ pub fn parse(
         noediting,
         rcfile,
         check: check && !interactive,
+        pretty,
         notify,
         ignoreeof,
         errexit,

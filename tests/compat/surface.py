@@ -134,12 +134,8 @@ def extra(a, base, source, sections):
                        "52": """BASH_COMPAT=5.2; test '(' '!' = '!' ')' -a yes; echo $?"""}
             script = scripts[level]
         a.compare("Compatibility level", level, script, interface=level not in ("50","51","52"))
-    rules = base["Bash POSIX Mode"].partition("@enumerate")[2].partition("@end enumerate")[0]
-    for i, item in enumerate(re.split(r"^@item\s*$", rules, flags=re.M)[1:], 1):
-        names = re.findall(r"@(?:code|env|builtin|option|var|command)\{([^{}\n]+)\}", item)
-        hint = ", ".join(dict.fromkeys(names))[:100]
-        a.add("POSIX mode item", f"{i:02d}", "mode unavailable" if a.rows["Invocation"]["--posix"]["status"] == "different" and "unsupported option" in str(a.rows["Invocation"]["--posix"].get("observed", [])) else "not independently probed",
-              f"GNU manual, Bash POSIX Mode, item {i}" + (" (" + hint + ")" if hint else ""))
+    from posix_rules import audit_rules
+    audit_rules(a, base["Bash POSIX Mode"])
     all_nodes = dict(base)
     for name in ("rluser.texi", "hsuser.texi"):
         all_nodes.update(sections(source / "lib/readline/doc" / name))

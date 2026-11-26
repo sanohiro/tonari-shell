@@ -345,7 +345,7 @@ INVOCATION = {
     "--verbose / -v": (["--verbose", "-c", "printf verbose"], ""),
     "-D / --dump-strings": (["--dump-strings", "-c", 'echo $"translated"'], ""),
     "--dump-po-strings": (["--dump-po-strings", "-c", 'echo $"translated"'], ""),
-    "--pretty-print": (["--pretty-print", "-c", "if true;then echo x;fi"], ""),
+    "--pretty-print": (["--pretty-print"], "if true;then echo x;fi\n"),
     "--debugger": (["--debugger", "-c", "shopt -q extdebug && echo debug"], ""),
     "-t": (["-t"], "echo first\necho second\n"),
     "login logout": (["--noprofile", "-l", "-c", "logout 23; echo wrong"], ""),

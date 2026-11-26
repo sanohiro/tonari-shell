@@ -236,6 +236,7 @@ fn interactive_loop(
             return Ok(code);
         }
         session.jobs.poll();
+        session.jobs.report_foreground();
         if (session.notify || session.posix) && session.jobs.monitor {
             session.jobs.report_changes(session.posix);
         }
@@ -535,7 +536,9 @@ fn run_invocation(
         session.jobs.init(session.interactive);
     }
     session.command_string = matches!(invocation.input, Input::Command(_));
-    if let Input::Command(text) = &mut invocation.input {
+    if !invocation.pretty
+        && let Input::Command(text) = &mut invocation.input
+    {
         if std::env::var_os("BASH_EXECUTION_STRING").is_some() {
             session.assign("BASH_EXECUTION_STRING", text);
         }
@@ -555,6 +558,9 @@ fn run_invocation(
         if session.shopt(&options) != 0 {
             return 2;
         }
+    }
+    if invocation.pretty {
+        return input::print_script(&session, invocation.input);
     }
     if session.interactive {
         if session.get("PS1").is_none() {

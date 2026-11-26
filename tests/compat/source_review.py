@@ -16,6 +16,8 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "posix-time-utility": "set -o posix\nalias time='printf \"<%s>\\\\n\"'\ntime -p\ntime --help",
+    "history-ansi-quote": "set -o history -H\nprintf '%s\\n' $'hello\\' once!'\nprintf '%s\\n' $'two\n\\' lines!'\necho last",
     "posix-resume-job": "set -o posix; set -m; sleep 4 & p=$!; kill -s STOP \"$p\"; sleep .05; jobs -s | awk '{print $2}'; bg %+; kill \"$p\"; wait \"$p\" 2>/dev/null; :",
     "posix-job-state": "set -o posix; (exit 17) & p=$!; sleep .04; jobs | awk '{print $2}'; wait \"$p\"; echo \"$?\"",
     "debug-return-scope": "set -T; helper(){ :; }; f(){ :; }; trap 'echo \"ret:${FUNCNAME[0]}\"' RETURN; trap 'helper' DEBUG; f",
@@ -132,6 +134,8 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "printf-wide-characters": "case $OSTYPE in darwin*) LC_ALL=en_US.UTF-8;; *) LC_ALL=C.UTF-8;; esac; printf '[%4.2ls][%-4C][%S][%.0lc]' '雪🌸a' '雪a' '四' q; printf '%lc' ''",
+    "printf-alternate-quote": "printf '[%#q][%#.3Q]\\n' 'a b' 'a b c' '' 'ok' $'x\\ny' \"ab'\"; printf '%#q\\n' 'no-quotes-needed'",
     "posix-fc-operands": "set -o posix; set -o history\nhistory -s 'echo first'\nfc -s 1 1 1; echo \"$?\"",
     "posix-function-path": "function ./absent { echo wrong; }; set -o posix; ./absent 2>/dev/null; echo $?",
     "posix-trap-display": "set -o posix; trap ':' USR1; trap -p USR1; trap USR1; echo after",
@@ -171,6 +175,10 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "posix-time-utility": ("eval 'time -p' >/dev/null", 1100),
+    "history-ansi-quote": ("history -p \"echo \\$'hello\\\\' once!'\" >/dev/null", 1000),
+    "printf-wide-characters": ("printf -v v '%6.3ls:%C' '雪🌸abc' '日'", 2400),
+    "printf-alternate-quote": ("printf -v v '%#q:%#.3Q' 'a b c' 'a;b'", 2300),
     "posix-resume-job": ("/bin/sh -c 'kill -STOP $$; exit 7' & p=$!; wait \"$p\"; bg %+ >/dev/null; wait \"$p\"; [[ $? == 7 ]] || exit 9", 35),
     "posix-job-state": ("(exit 17) & p=$!; wait \"$p\"; :", 80),
     "debug-return-scope": ("f", 900),
@@ -563,6 +571,7 @@ def socket_time(shell, run, kind, count):
         return ms
 
 
+EXTRA_CASES = ("pretty-print-file", "foreground-signal-notice")
 EDITOR_PTY = ("vi-external-editor", "emacs-external-editor", "posix-vi-editor")
 DIRECTORY_PTY = ("cd-spelling", "directory-spelling-completion", "expanded-directory-completion", "quoted-directory-completion", "check-exit-jobs")
 
@@ -648,7 +657,7 @@ def main():
     parser.add_argument("tonari", type=Path)
     parser.add_argument("--first", type=Path)
     parser.add_argument("--runs", type=int, default=9)
-    parser.add_argument("--case", action="append", choices=["history-reedit", "stdin-replacement", "inputrc-word-edit", "inputrc-file-completion", "array-recovery", "interactive-comments", "programmable-boundaries", "filename-completion", "tcp-redirection", "udp-redirection", *DIRECTORY_PTY, *EDITOR_PTY, *HOT])
+    parser.add_argument("--case", action="append", choices=["history-reedit", "stdin-replacement", "inputrc-word-edit", "inputrc-file-completion", "array-recovery", "interactive-comments", "programmable-boundaries", "filename-completion", "tcp-redirection", "udp-redirection", *DIRECTORY_PTY, *EDITOR_PTY, *EXTRA_CASES, *HOT])
     args = parser.parse_args()
     selected = set(args.case or ())
     def requested(name):
@@ -725,11 +734,24 @@ def main():
                 # This Bash patch level overwrites the first snapshot on a second
                 # local -. GNU 5.3 CHANGES ccc documents the correction.
                 expected = (0, b"glob\n10\nlocal -\nunset\n", False)
+            if name == "tilde-associative-key" and version.startswith("5.2.21(") and expected == (0, b"/literal", False):
+                # Debian 5.2.37 and both 5.3 controls expand only the unquoted tilde.
+                expected = (0, b"absolute/literal", False)
             if expected != actual:
                 failed.append((name, repr(expected), repr(actual)))
         print(json.dumps(dict(reference=version, witnesses=len(cases), differences=failed)), flush=True)
         if failed:
             raise SystemExit(1)
+        # Formatting a command string must never execute it or source BASH_ENV.
+        print_env = root / "print-env"
+        print_env.write_text("touch pretty-side-effect\n")
+        formatted = subprocess.run([shells[1], "--pretty-print", "-c", "if :;then touch pretty-side-effect;fi"], cwd=root, env=env | {"BASH_ENV":str(print_env)}, capture_output=True)
+        assert formatted.returncode == 0 and b"touch pretty-side-effect" in formatted.stdout and not (root/"pretty-side-effect").exists()
+        template = "v='a; b'\ncat <<'end'\n if data; then # literal\nend\nprintf '%s' \"$v\"\n"
+        formatted = subprocess.run([shells[1], "--pretty-print"], input=template.encode(), env=env, cwd=root, capture_output=True)
+        assert formatted.returncode == 0 and formatted.stdout == template.encode()
+        invalid = subprocess.run([shells[1], "--pretty-print", "-c", "if :; then"], env=env, cwd=root, capture_output=True)
+        assert invalid.returncode != 0 and invalid.stderr and not invalid.stdout
         # A locally linked Bash readline/tilde library may consult the process
         # environment. A shell assignment to HOME must take effect immediately.
         assert run(shells[1], 'HOME=/example; x=~/src; echo "$x"')[0] == (0, b"/example/src\n", False)
@@ -763,6 +785,34 @@ def main():
             (termroot / f"Mix-Case-other{i}").touch()
         (termroot / "sample").mkdir()
         (termroot / "sample/unique").touch()
+        for name in EXTRA_CASES:
+            if not requested(name): continue
+            samples = [[] for _ in shells]
+            for r in range(args.runs + 1):
+                order = list(range(len(shells)))
+                rng.shuffle(order)
+                for i in order:
+                    if name == "pretty-print-file":
+                        script = termroot / "layout.sh"
+                        marker = termroot / "formatted-side-effect"
+                        script.write_text(("if true;then printf 'hello;%s\\n' 雪;fi\n" * 250)
+                                          + "printf done >formatted-side-effect\n")
+                        marker.unlink(missing_ok=True)
+                        start = time.perf_counter_ns()
+                        formatted = subprocess.run([shells[i], "--pretty-print", script], cwd=termroot, capture_output=True, timeout=4, env=env)
+                        elapsed = (time.perf_counter_ns() - start) / 1e6
+                        assert formatted.returncode == 0 and not marker.exists() and b"\n    printf" in formatted.stdout, (shells[i], formatted.stderr)
+                        if r == 0:
+                            rerun = subprocess.run([shells[0]], input=formatted.stdout, cwd=termroot, env=env, capture_output=True, timeout=4)
+                            assert rerun.stdout == "hello;雪\n".encode() * 250 and marker.read_text() == "done", rerun
+                    else:
+                        from posix_rules import terminal_rule
+                        start = time.perf_counter_ns()
+                        assert terminal_rule(shells[i], termroot, 26), (name, shells[i])
+                        elapsed = (time.perf_counter_ns() - start) / 1e6
+                    if r: samples[i].append(round(elapsed, 3))
+            if args.runs:
+                print(json.dumps(dict(case=name, repeats=250 if name == "pretty-print-file" else 1, median_ms=[round(statistics.median(g),3) for g in samples], samples_ms=samples)), flush=True)
         for name in (*DIRECTORY_PTY, *EDITOR_PTY):
             if not requested(name): continue
             samples = [[] for _ in shells]
@@ -926,6 +976,9 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "posix-time-utility": "set -o posix; alias time='printf \"%s\"'",
+                "history-ansi-quote": "set -o history",
+                "printf-wide-characters": "case $OSTYPE in darwin*) LC_ALL=en_US.UTF-8;; *) LC_ALL=C.UTF-8;; esac",
                 "posix-resume-job": "set -o posix; set -m",
                 "posix-job-state": "set -o posix",
                 "debug-return-scope": "set -T; helper(){ :; }; f(){ :; }; trap ':' RETURN; trap 'helper' DEBUG",

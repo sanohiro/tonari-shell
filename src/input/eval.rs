@@ -53,6 +53,7 @@ pub(super) struct Entry {
     extglob: bool,
     extquote: bool,
     posix: bool,
+    legacy_time: bool,
     comments: bool,
 }
 
@@ -106,6 +107,7 @@ pub(super) fn parse(
             && entry.extglob == extglob
             && entry.extquote == session.shopt.extquote
             && entry.posix == session.posix
+            && entry.legacy_time == (session.posix && session.shopt.compat <= 41)
             && entry.comments == comments
             && &*entry.source == source
     }) {
@@ -125,6 +127,7 @@ pub(super) fn parse(
                 extglob,
                 extquote: session.shopt.extquote,
                 posix: session.posix,
+                legacy_time: session.posix && session.shopt.compat <= 41,
                 comments,
             });
             cache.parsed[0] = Some(entry.clone());

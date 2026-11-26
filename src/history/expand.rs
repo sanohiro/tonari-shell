@@ -210,6 +210,23 @@ pub(crate) fn expand_line<'a>(
     let mut expanded = false;
     let mut substitutions = Vec::new();
     while let Some(c) = pop(&mut input) {
+        if quote == Some('$') {
+            out.push(c);
+            if c == '\\'
+                && let Some(next) = pop(&mut input)
+            {
+                out.push(next);
+            } else if c == '\'' {
+                quote = None;
+            }
+            continue;
+        }
+        if c == '$' && quote.is_none() && input.starts_with('\'') {
+            input = &input[1..];
+            out.push_str("$'");
+            quote = Some('$');
+            continue;
+        }
         if c == '\\' && quote != Some('\'') {
             out.push(c);
             if let Some(next) = pop(&mut input) {

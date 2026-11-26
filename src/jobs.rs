@@ -364,6 +364,7 @@ impl Job {
 pub struct Jobs {
     pub monitor: bool,
     exit_warning: Option<usize>,
+    foreground_notices: Vec<(i32, String)>,
     pub(crate) quiet: bool,
     tty: Option<Terminal>,
     table: Vec<Job>,
@@ -476,6 +477,7 @@ impl Jobs {
             self.inherited.clear();
         }
         self.tty = None;
+        self.foreground_notices.clear();
         self.monitor = false;
         self.table.clear();
         self.detached.clear();
@@ -565,6 +567,7 @@ impl Jobs {
                     statuses.push(code);
                 }
             }
+            self.note_foreground_signal(&mut job);
             if job.stopped() {
                 self.store(job);
                 if !self.quiet {
@@ -574,6 +577,28 @@ impl Jobs {
             Ok((code, None))
         }
     }
+    fn note_foreground_signal(&mut self, job: &mut Job) {
+        if self.tty.is_some()
+            && !self.quiet
+            && !job.stopped()
+            && let Some(sig) = job.children.last().and_then(|c| c.signal)
+            && !matches!(sig, libc::SIGINT | libc::SIGPIPE)
+        {
+            self.foreground_notices
+                .push((sig, std::mem::take(&mut job.name)));
+        }
+    }
+
+    pub(crate) fn report_foreground(&mut self) {
+        for (signal, command) in self.foreground_notices.drain(..) {
+            let reason = unsafe { libc::strsignal(signal) };
+            if !reason.is_null() {
+                let text = unsafe { std::ffi::CStr::from_ptr(reason) }.to_string_lossy();
+                eprintln!("{text}  {command}");
+            }
+        }
+    }
+
     fn remove_reported(&mut self) {
         for i in (0..self.table.len()).rev() {
             let job = &self.table[i];
@@ -1342,7 +1367,7 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                     status = 1;
                     continue;
                 }
-                if !job.stopped() && !session.posix {
+                if !job.stopped() {
                     eprintln!("tonari: bg: job {} already in background", job.id);
                     continue;
                 }
@@ -1394,6 +1419,7 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                 .terminal()
                 .and_then(|t| terminal_modes(t.fd.as_raw_fd()));
             let r = jobs.foreground(&mut job, true, modes);
+            jobs.note_foreground_signal(&mut job);
             if job.stopped() {
                 jobs.table.push(job);
             }

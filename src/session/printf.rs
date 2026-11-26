@@ -291,10 +291,12 @@ impl Spec {
                 precision = Some(p);
             }
         }
+        let mut wide = false;
         while let Some((&len, rest)) = input.split_first() {
             if !LENGTH_MODIFIERS.contains(&len) {
                 break;
             }
+            wide |= len == b'l';
             *input = rest;
         }
         let (conversion, rest) = input.split_first().ok_or("missing format character")?;
@@ -305,7 +307,11 @@ impl Spec {
                 width,
                 precision,
             },
-            *conversion,
+            if wide && matches!(conversion, b'c' | b's') {
+                conversion.to_ascii_uppercase()
+            } else {
+                *conversion
+            },
         ))
     }
 
@@ -323,6 +329,31 @@ impl Spec {
         output.extend_from_slice(&value[..len]);
         if self.flags.contains(&b'-') {
             output.resize(output.len() + padding, b' ');
+        }
+        Ok(())
+    }
+
+    fn wide(&self, value: &str, single: bool, out: &mut Vec<u8>) -> Result<(), &'static str> {
+        let limit = self
+            .precision
+            .map_or(usize::MAX, |n| n as usize)
+            .min(if single { 1 } else { usize::MAX });
+        let mut bytes = 0;
+        let mut chars = 0;
+        for c in value.chars().take(limit) {
+            bytes += c.len_utf8();
+            chars += 1;
+        }
+        let pad = (self.width as usize).saturating_sub(chars);
+        out.try_reserve(bytes + pad)
+            .map_err(|_| "field too large")?;
+        let left = self.flags.contains(&b'-');
+        if !left {
+            out.resize(out.len() + pad, b' ');
+        }
+        out.extend_from_slice(&value.as_bytes()[..bytes]);
+        if left {
+            out.resize(out.len() + pad, b' ');
         }
         Ok(())
     }
@@ -567,6 +598,15 @@ fn render(
                             out.extend_from_slice(&original[..original.len() - input.len()]);
                         }
                     }
+                    b'S' | b'C' => {
+                        let arg = args.next();
+                        let single = conversion == b'C';
+                        spec.wide(
+                            if single && arg.is_empty() { "\0" } else { arg },
+                            single,
+                            out,
+                        )?;
+                    }
                     b'c' => {
                         let byte = args.next().as_bytes().first().copied().unwrap_or(0);
                         spec.precision = None;
@@ -588,7 +628,10 @@ fn render(
                                 data = &data[..data.len().min(p as usize)];
                             }
                         }
-                        spec.bytes(&quote(data, variables.read()), out)?;
+                        spec.bytes(
+                            &quote(data, variables.read(), spec.flags.contains(&b'#')),
+                            out,
+                        )?;
                     }
                     b'n' => {
                         let name = args.next();
@@ -656,7 +699,7 @@ pub(crate) fn parameter_quote(text: &str, session: &Session) -> String {
     }
 }
 
-fn quote(data: &[u8], session: &Session) -> Vec<u8> {
+fn quote(data: &[u8], session: &Session, single: bool) -> Vec<u8> {
     if data.is_empty() {
         return b"''".to_vec();
     }
@@ -666,6 +709,9 @@ fn quote(data: &[u8], session: &Session) -> Vec<u8> {
         .any(|b| b.is_ascii_control() || (ascii_locale && !b.is_ascii()));
     if ansi {
         return ansi_quote(data, ascii_locale);
+    }
+    if single && let Ok(text) = std::str::from_utf8(data) {
+        return crate::completion_spec::single_quote(text).into_bytes();
     }
     let mut out = Vec::new();
     for (i, &b) in data.iter().enumerate() {

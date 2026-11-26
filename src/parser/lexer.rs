@@ -12,6 +12,7 @@ pub(super) struct LexWord {
 #[derive(Clone)]
 pub(super) enum Token {
     Reserved(&'static str),
+    TimeUtility,
     Word(LexWord),
     ArrayStart,
     LeftParen,
@@ -42,6 +43,11 @@ impl Token {
     // The grammar may use the same spelling as an argument or a word operand.
     pub(super) fn into_operand(self) -> Self {
         match self {
+            Self::TimeUtility => Self::Word(LexWord {
+                word: Word::Literal("time".into()),
+                protected: true,
+                assignment: None,
+            }),
             Self::Reserved(s) => Self::Word(LexWord {
                 word: Word::Literal(s.to_owned()),
                 protected: false,
@@ -1051,6 +1057,7 @@ pub(super) fn command_position(tokens: &[Token]) -> bool {
                 continue;
             }
             Token::Reserved(_)
+            | Token::TimeUtility
             | Token::Word(_)
             | Token::Arithmetic(_)
             | Token::DescriptorName(_)
@@ -1064,9 +1071,11 @@ pub(super) fn command_position(tokens: &[Token]) -> bool {
 
 fn indexed_assignment_position(mut tokens: &[Token]) -> bool {
     while let Some((last, before)) = tokens.split_last() {
-        if matches!(last, Token::Word(_) | Token::Reserved(_))
-            && let Some((Token::Redirect(..) | Token::BothRedirect(_), prefix)) =
-                before.split_last()
+        if matches!(
+            last,
+            Token::Word(_) | Token::Reserved(_) | Token::TimeUtility
+        ) && let Some((Token::Redirect(..) | Token::BothRedirect(_), prefix)) =
+            before.split_last()
         {
             tokens = prefix;
             continue;
@@ -1306,7 +1315,17 @@ fn lex_words(
             let literal = &start[..plain];
             if let Some(fixed) = super::reserved_spelling(literal) {
                 saw_case |= substitution && fixed == "case";
-                tokens.push(Token::Reserved(fixed));
+                let token = if fixed == "time"
+                    && super::TIME_OPTIONS_EXTERNAL.get()
+                    && start[plain..]
+                        .trim_start_matches([' ', '\t'])
+                        .starts_with('-')
+                {
+                    Token::TimeUtility
+                } else {
+                    Token::Reserved(fixed)
+                };
+                tokens.push(token);
                 chars = start[plain..].chars();
                 continue;
             }

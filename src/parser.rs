@@ -1,5 +1,6 @@
 mod aliases;
 mod array;
+pub(crate) mod pretty;
 use crate::pattern::Matcher;
 use crate::test_expression::Expr;
 pub(crate) use array::quoted_initializer;
@@ -542,6 +543,7 @@ impl Error {
     pub(crate) fn pending_quote(&self) -> Option<char> {
         match self {
             Self::Incomplete("unterminated single quote") => Some('\''),
+            Self::Incomplete("unterminated dollar-single-quoted string") => Some('$'),
             Self::Incomplete("unterminated double quote") => Some('"'),
             _ => None,
         }
@@ -604,6 +606,7 @@ thread_local! {
     static FIRST_LINE: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
     static COMMENTS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
     static POSIX: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static TIME_OPTIONS_EXTERNAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static EXTQUOTE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
     static EXTGLOB: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -695,9 +698,11 @@ fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnc
         let before = EXTGLOB.replace(session.shopt.glob.extglob);
         let extquote = EXTQUOTE.replace(session.shopt.extquote);
         let posix = POSIX.replace(session.posix);
+        let time_flags = TIME_OPTIONS_EXTERNAL.replace(session.posix && session.shopt.compat > 41);
         let comments = COMMENTS.replace(session.read_comments());
         let parsed = parse();
         COMMENTS.set(comments);
+        TIME_OPTIONS_EXTERNAL.set(time_flags);
         EXTQUOTE.set(extquote);
         POSIX.set(posix);
         EXTGLOB.set(before);
@@ -1425,7 +1430,10 @@ impl Reader {
             let mut words = Vec::new();
             loop {
                 self.expand_alias(false)?;
-                if !matches!(self.peek(), Some(Token::Word(_) | Token::Reserved(_))) {
+                if !matches!(
+                    self.peek(),
+                    Some(Token::Word(_) | Token::Reserved(_) | Token::TimeUtility)
+                ) {
                     break;
                 }
                 if let Some(Token::Word(word)) = self.operand() {
@@ -1589,6 +1597,7 @@ impl Reader {
                 Some(
                     Token::Word(_)
                         | Token::Reserved(_)
+                        | Token::TimeUtility
                         | Token::DescriptorName(_)
                         | Token::Redirect(_, _)
                         | Token::BothRedirect(_)
