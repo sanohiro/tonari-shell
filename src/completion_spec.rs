@@ -198,6 +198,7 @@ struct Request {
     options: Vec<(bool, String)>,
     operands: Vec<String>,
     special: Option<Target>,
+    destination: Option<String>,
     print: bool,
     remove: bool,
 }
@@ -278,6 +279,13 @@ impl Request {
                         result.spec.actions.push(action.to_owned());
                     }
                     'W' => result.spec.words = Some(Rc::new(WordList::new(value()?))),
+                    'V' if builtin == "compgen" => {
+                        let name = value()?;
+                        if !crate::word::is_identifier(&name) {
+                            return Err(format!("{name}: invalid identifier"));
+                        }
+                        result.destination = Some(name);
+                    }
                     'G' => result.spec.glob = Some(value()?),
                     'P' => result.spec.prefix = Some(value()?),
                     'S' => result.spec.suffix = Some(value()?),
@@ -713,6 +721,14 @@ fn apply(
         if words.is_empty() && options.contains("default") {
             words = complete::file_names(prefix, false, false, session);
         }
+        if let Some(name) = request.destination {
+            let status = u8::from(words.is_empty());
+            if let Err(error) = session.store_completions(&name, words) {
+                eprintln!("tonari: compgen: {name}: {error}");
+                return Ok(1);
+            }
+            return Ok(status);
+        }
         let capacity = match words.len() {
             0 => 0,
             1..=8 => 256,
@@ -783,6 +799,9 @@ fn apply(
 }
 
 pub fn run(name: &str, args: &[String], last: u8, session: &mut Session) -> u8 {
+    if name == "compgen" && args.is_empty() {
+        return 0;
+    }
     let request = match Request::parse(name, args) {
         Ok(request) => request,
         Err(error) => {

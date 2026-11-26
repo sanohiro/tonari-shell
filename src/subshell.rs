@@ -61,6 +61,50 @@ fn read_regular_file(file: &std::fs::File, size: u64, output: &mut Vec<u8>) -> i
 
 // The interpreter has one thread. A substitution inherits its variables and
 // functions, changes its own cwd, and writes only stdout into the capture pipe.
+pub(crate) fn current_substitution(
+    session: &mut Session,
+    body: Vec<parser::Statement>,
+    last: u8,
+    reply: bool,
+) -> Result<(String, u8), crate::expansion::Error> {
+    if body.is_empty() {
+        return Ok((String::new(), 0));
+    }
+    let callsite = session.current_command.clone();
+    let pipeline = session.pipe_status.clone();
+    let restore_errexit =
+        (!session.shopt.inherit_errexit).then(|| std::mem::take(&mut session.errexit));
+    let verbose = std::mem::take(&mut session.verbose);
+    session.enter_function(&mut Default::default());
+    if reply {
+        session.declare("local", &["REPLY".into()], &[], last);
+    }
+    let run = || execute_program(session, body, last, false);
+    let captured = if reply {
+        let flow = run();
+        Ok((flow, Vec::new()))
+    } else {
+        crate::execute::capture_stdout(run)
+    };
+    let value = reply.then(|| session.get("REPLY").unwrap_or_default());
+    session.leave_function();
+    session.verbose = verbose;
+    if let Some(saved) = restore_errexit {
+        session.errexit = saved;
+    }
+    session.pipe_status = pipeline;
+    session.current_command = callsite;
+    let (flow, output) = captured.map_err(|_| "cannot capture current-shell output")?;
+    let status = match flow {
+        Flow::Continue(n) | Flow::Return(n) => n,
+        other => return Err(crate::expansion::Error::control(other)),
+    };
+    match value {
+        Some(value) => Ok((value, status)),
+        None => Ok(captured_output(output, status)?),
+    }
+}
+
 pub fn capture_substitution(
     session: &mut Session,
     body: Vec<parser::Statement>,
@@ -398,6 +442,7 @@ fn capture_simple(
             names.iter().map(|word| word.as_literal().unwrap()),
             &mut out,
             session.posix,
+            false,
         );
         return Some(captured_output(out, status));
     }

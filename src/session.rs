@@ -158,6 +158,8 @@ pub struct Session {
     pub(crate) trace_depth: u32,
     pub(crate) signal_line: Option<usize>,
     pub command_string: bool,
+    pub(crate) execution_string: Option<Rc<String>>,
+    pub(crate) source_set_args: bool,
     pub command_history_expansion: bool,
     pub stdin_script: bool,
     pub tested_depth: u32,
@@ -279,6 +281,7 @@ impl Session {
                 "SECONDS",
                 "RANDOM",
                 "SRANDOM",
+                "BASH_MONOSECONDS",
                 "HOSTTYPE",
                 "HOSTNAME",
                 "PS4",
@@ -289,6 +292,9 @@ impl Session {
             .filter(|k| k.starts_with(prefix))
             .map(str::to_owned),
         );
+        if self.execution_string.is_some() && "BASH_EXECUTION_STRING".starts_with(prefix) {
+            names.insert("BASH_EXECUTION_STRING".into());
+        }
         use std::ops::Bound::{Included, Unbounded};
         for (key, var) in self
             .variables
@@ -525,6 +531,7 @@ impl Session {
         if i < args.len() || replace_positionals {
             words.drain(..i + 1);
             self.positional = std::mem::take(words).into_iter();
+            self.source_set_args = true;
         }
         0
     }
@@ -635,7 +642,12 @@ impl Session {
 
     fn inherited_value(&self, name: &str) -> Option<String> {
         match name {
-            "RANDOM" | "SECONDS" | "SRANDOM" => self.dynamic_number(name).map(|v| v.to_string()),
+            "BASH_EXECUTION_STRING" if self.execution_string.is_some() => {
+                self.execution_string.as_deref().cloned()
+            }
+            "BASH_MONOSECONDS" | "RANDOM" | "SECONDS" | "SRANDOM" => {
+                self.dynamic_number(name).map(|v| v.to_string())
+            }
             "BASH_SUBSHELL" => Some(self.subshell_depth.to_string()),
             "BASH_ARGV0" => Some(self.arg0.clone()),
             "EPOCHSECONDS" | "EPOCHREALTIME" => {
@@ -873,7 +885,7 @@ impl Session {
                 inherited: Default::default(),
                 readonly: false,
                 nameref: false,
-                integer: live,
+                integer: live && dynamic::integer_attribute(name),
                 array_assigned: false,
                 elements: None,
                 declared: true,
@@ -1008,7 +1020,7 @@ impl Session {
     pub fn integer(&self, name: &str) -> bool {
         self.variables
             .get(name)
-            .map_or_else(|| dynamic::is_dynamic(name), |v| v.integer)
+            .map_or_else(|| dynamic::integer_attribute(name), |v| v.integer)
     }
 
     pub(crate) fn integer_value(

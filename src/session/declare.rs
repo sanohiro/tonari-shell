@@ -413,7 +413,7 @@ pub(super) fn run(
             }) {
                 Ok(()) => {}
                 Err(e) => {
-                    eprintln!("tonari: {command}: {name}: {e}");
+                    e.report(&format!("{command}: {name}: "));
                     return e.flow(session);
                 }
             }
@@ -584,7 +584,7 @@ impl Session {
                 inherited: Default::default(),
                 readonly: Self::builtin_readonly(name),
                 nameref: false,
-                integer: super::dynamic::is_dynamic(name)
+                integer: super::dynamic::integer_attribute(name)
                     || matches!(name, "PPID" | "EUID" | "UID"),
                 array_assigned: false,
                 elements: None,

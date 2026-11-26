@@ -270,7 +270,7 @@ pub(crate) fn unary(op: &str, arg: &str, session: &mut Session) -> Result<bool, 
             });
         }
         "-a" | "-e" | "-d" | "-f" | "-s" | "-b" | "-c" | "-p" | "-S" | "-O" | "-G" | "-u"
-        | "-g" | "-k" => {}
+        | "-g" | "-k" | "-N" => {}
         _ => return Err("unknown unary operator"),
     }
     let Ok(meta) = fs::metadata(arg) else {
@@ -280,6 +280,7 @@ pub(crate) fn unary(op: &str, arg: &str, session: &mut Session) -> Result<bool, 
         "-a" | "-e" => true,
         "-d" => meta.is_dir(),
         "-f" => meta.is_file(),
+        "-N" => meta.modified().ok() > meta.accessed().ok(),
         "-s" => meta.len() != 0,
         "-b" => meta.file_type().is_block_device(),
         "-c" => meta.file_type().is_char_device(),

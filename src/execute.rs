@@ -22,7 +22,7 @@ use crate::expansion::Expansion;
 use crate::parser::{Assignment, Pipeline, Redirect, SimpleCommand, Target, Word};
 use crate::session::Session;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Flow {
     Continue(u8),
     Discard(u8),
@@ -1045,6 +1045,33 @@ fn apply_array_declarations(cmd: &PreparedCommand, status: u8, session: &mut Ses
     0
 }
 
+// The temporary output and the saved stdout are both private descriptors. A
+// redirect inside the body can reuse their numbers without breaking restoration.
+pub(crate) fn capture_stdout(run: impl FnOnce() -> Flow) -> io::Result<(Flow, Vec<u8>)> {
+    use std::io::{Read, Seek, Write};
+    use std::os::fd::BorrowedFd;
+    io::stdout().flush()?;
+    let saved = SavedFd::capture(&Action::Dup(1, 1), &[])?;
+    let stream = unsafe { libc::tmpfile() };
+    if stream.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let file = unsafe { fd::PrivateFile::duplicate(BorrowedFd::borrow_raw(libc::fileno(stream))) };
+    unsafe {
+        libc::fclose(stream);
+    }
+    let mut file = file?;
+    duplicate(file.as_raw_fd(), 1)?;
+    let flow = run();
+    let flushed = io::stdout().flush();
+    saved.restore(1)?;
+    flushed?;
+    file.rewind()?;
+    let mut output = Vec::new();
+    file.read_to_end(&mut output)?;
+    Ok((flow, output))
+}
+
 enum SavedFd {
     Unchanged,
     Closed,
@@ -1389,7 +1416,10 @@ fn stage_expansion(word: &Word) -> bool {
     match word {
         Word::Literal(_) => false,
         Word::Expanded(parts) | Word::Declaration(parts) => parts.iter().any(|part| match part {
-            Part::Substitution { .. } | Part::Process { .. } | Part::Arithmetic { .. } => true,
+            Part::CurrentSubstitution { .. }
+            | Part::Substitution { .. }
+            | Part::Process { .. }
+            | Part::Arithmetic { .. } => true,
             Part::Modify { .. } => true,
             Part::Nested(word) => stage_expansion(word),
             Part::Parameter { name, .. } => name == "BASHPID",
@@ -2511,7 +2541,7 @@ fn run_ordered(
     let words = match expand_command_words(&mut raw, session, status, &captured) {
         Ok(words) => words,
         Err(e) => {
-            eprintln!("tonari: {e}");
+            e.report("");
             return Ok(e.flow(session));
         }
     };
@@ -2537,7 +2567,7 @@ fn run_ordered(
         let cmd = match prepare_expanded(raw, words, session, status, true, &captured) {
             Ok(cmd) => cmd,
             Err(e) => {
-                eprintln!("tonari: {e}");
+                e.report("");
                 return Ok((e.flow(session), false));
             }
         };
@@ -2665,7 +2695,7 @@ fn foreground(
     let cmd = match prepare(raw, session, last_status, true) {
         Ok(cmd) => cmd,
         Err(e) => {
-            eprintln!("tonari: {e}");
+            e.report("");
             return Ok(e.flow(session));
         }
     };

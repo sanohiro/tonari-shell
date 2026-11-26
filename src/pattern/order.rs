@@ -246,6 +246,55 @@ unsafe fn compare_terminated(a: &str, b: &str) -> Ordering {
     order.cmp(&0).then_with(|| a.cmp(b))
 }
 
+pub(super) fn sort_mode(value: Option<&str>) -> (&str, bool) {
+    let mode = value.unwrap_or("").trim_start_matches([' ', '\t']);
+    if let Some(key) = mode.strip_prefix('-') {
+        (key, true)
+    } else {
+        (mode.strip_prefix('+').unwrap_or(mode), false)
+    }
+}
+
+pub(super) fn append_expansion(
+    paths: Vec<String>,
+    fields: &mut Vec<String>,
+    collation: Collation,
+    sorting: Option<&str>,
+) {
+    use std::os::unix::fs::MetadataExt;
+    let (key, reverse) = sort_mode(sorting);
+    if key == "nosort" {
+        fields.extend(paths);
+        return;
+    }
+    let start = fields.len();
+    append(paths, fields, collation);
+    let paths = &mut fields[start..];
+    match key {
+        "" | "name" => {}
+        "numeric" => paths.sort_by_cached_key(|p| {
+            if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) {
+                (false, p.parse::<i64>().unwrap_or(i64::MAX))
+            } else {
+                (true, 0)
+            }
+        }),
+        "size" | "blocks" | "mtime" | "ctime" | "atime" => paths.sort_by_cached_key(|p| {
+            std::fs::metadata(p).map_or((-1, -1), |m| match key {
+                "size" => (m.size() as i64, 0),
+                "blocks" => (m.blocks() as i64, 0),
+                "mtime" => (m.mtime(), m.mtime_nsec()),
+                "ctime" => (m.ctime(), m.ctime_nsec()),
+                _ => (m.atime(), m.atime_nsec()),
+            })
+        }),
+        _ => return,
+    }
+    if reverse {
+        paths.reverse();
+    }
+}
+
 pub(super) fn append(mut paths: Vec<String>, fields: &mut Vec<String>, collation: Collation) {
     if collation != Collation::Current && (32..=16384).contains(&paths.len()) {
         let bytes = paths.iter().map(|p| p.len() + 1).sum::<usize>();

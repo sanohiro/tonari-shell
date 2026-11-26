@@ -380,6 +380,22 @@ impl Session {
             .collect()
     }
 
+    pub(crate) fn store_completions(
+        &mut self,
+        name: &str,
+        words: Vec<String>,
+    ) -> Result<(), &'static str> {
+        let target = self.reference_name(name)?.into_owned();
+        if self.readonly(&target) {
+            return Err("readonly variable");
+        }
+        if self.is_associative(&target) || !super::is_identifier(&target) {
+            return Err("not an indexed array");
+        }
+        self.store_elements(&target, Elements::Dense(words), false);
+        Ok(())
+    }
+
     pub fn replace_array(&mut self, name: &str, mut values: Vec<String>) {
         if let Some(upper) = self.variables.get(name).and_then(|v| v.letter_case) {
             for v in &mut values {

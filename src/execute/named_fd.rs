@@ -104,7 +104,7 @@ impl Scope {
                     else {
                         return Err(error);
                     };
-                    eprintln!("tonari: {expansion}");
+                    expansion.report("");
                     return Ok(Some(if child_redirects {
                         Flow::Continue(expansion.status)
                     } else {

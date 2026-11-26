@@ -459,10 +459,14 @@ impl Traps {
         names: impl ExactSizeIterator<Item = &'a str>,
         out: &mut impl Write,
         defaults: bool,
+        action_only: bool,
     ) -> u8 {
         let entries = self.inherited_listing.as_deref().unwrap_or(&self.entries);
         let mut show = |sig| {
             if let Some(e) = entries.get(&sig) {
+                if action_only {
+                    return writeln!(out, "{}", e.command);
+                }
                 let name = if sig == DEBUG {
                     "DEBUG"
                 } else if sig == RETURN {
@@ -505,23 +509,50 @@ impl Traps {
                 }
             }
         } else {
+            let mut status = 0;
             for s in names {
                 let Some(sig) = trap_number(s) else {
-                    return invalid(s);
+                    status = invalid(s);
+                    continue;
                 };
                 if show(sig).is_err() {
                     return 1;
                 }
             }
+            return status;
         }
         0
     }
 
     pub fn builtin(&mut self, args: &[String], interactive: bool, posix: bool) -> u8 {
-        let ended_options = args.first().is_some_and(|s| s == "--");
-        let args = if ended_options { &args[1..] } else { args };
-        let list = args.first().is_some_and(|s| s == "-p");
-        if args.first().is_some_and(|s| s == "-l") {
+        let mut args = args;
+        let (mut list, mut actions, mut signals) = (false, false, false);
+        while let Some((arg, rest)) = args.split_first() {
+            if arg == "--" {
+                args = rest;
+                break;
+            }
+            if arg == "-" || !arg.starts_with('-') {
+                break;
+            }
+            for flag in arg[1..].bytes() {
+                match flag {
+                    b'p' => list = true,
+                    b'P' => actions = true,
+                    b'l' => signals = true,
+                    _ => {
+                        eprintln!("tonari: trap: {arg}: invalid option");
+                        return 2;
+                    }
+                }
+            }
+            args = rest;
+        }
+        if actions && (list || args.is_empty()) {
+            eprintln!("tonari: trap: -P requires signal names and cannot be combined with -p");
+            return 2;
+        }
+        if signals {
             let mut out = io::stdout().lock();
             for &(name, n) in SIGNALS.iter().filter(|s| s.1 != 0) {
                 if writeln!(out, "{n:2}) SIG{name}").is_err() {
@@ -530,16 +561,13 @@ impl Traps {
             }
             return 0;
         }
-        if list || args.is_empty() {
+        if list || actions || args.is_empty() {
             return self.list(
-                args.iter().skip(1).map(String::as_str),
+                args.iter().map(String::as_str),
                 &mut io::stdout().lock(),
                 list && posix,
+                actions,
             );
-        }
-        if !ended_options && args[0].starts_with('-') && args[0] != "-" {
-            eprintln!("tonari: trap: {}: invalid option", args[0]);
-            return 2;
         }
         let (command, signals) = if args[0].parse::<u32>().is_ok()
             || args.len() == 1 && trap_number(&args[0]).is_some()
@@ -633,10 +661,31 @@ pub fn error(session: &mut Session, status: u8) -> Flow {
     }
 }
 
+// GNU Bash reserves the three numbers immediately following its OS signal table.
+fn with_trapsig(session: &mut Session, sig: i32, run: impl FnOnce(&mut Session) -> Flow) -> Flow {
+    #[cfg(target_os = "macos")]
+    const NSIG: i32 = 32;
+    #[cfg(target_os = "linux")]
+    const NSIG: i32 = 65;
+    let number = match sig {
+        DEBUG => NSIG,
+        ERR => NSIG + 1,
+        RETURN => NSIG + 2,
+        other => other,
+    };
+    let saved = session.save_variables(&["BASH_TRAPSIG"]);
+    session.assign("BASH_TRAPSIG", &number.to_string());
+    let flow = run(session);
+    session.restore(saved);
+    flow
+}
+
 fn action_text(session: &mut Session, sig: i32, status: u8) -> Flow {
     let command = session.traps.entries[&sig].command.clone();
     let previous = session.pipe_status.clone();
-    let flow = crate::eval_text(session, &command, status);
+    let flow = with_trapsig(session, sig, |session| {
+        crate::eval_text(session, &command, status)
+    });
     session.pipe_status = previous;
     flow
 }
@@ -658,7 +707,9 @@ pub fn dispatch(session: &mut Session, status: u8) -> Flow {
             let previous = session.pipe_status.clone();
             let previous_status = session.traps.signal_status.replace(status);
             let previous_line = session.signal_line.replace(1);
-            let flow = crate::input::text(session, &command, status, false, false, Some(1));
+            let flow = with_trapsig(session, sig, |session| {
+                crate::input::text(session, &command, status, false, false, Some(1))
+            });
             session.signal_line = previous_line;
             session.traps.signal_status = previous_status;
             session.pipe_status = previous;
@@ -692,7 +743,9 @@ pub fn finish(session: &mut Session, code: u8) -> u8 {
     if let Some(exit) = session.traps.entries.remove(&0) {
         let _ = session.traps.watch_exit(false);
         session.traps.exit_status = Some(code);
-        if let Flow::Exit(n) = crate::eval_text(session, &exit.command, code) {
+        if let Flow::Exit(n) = with_trapsig(session, 0, |session| {
+            crate::eval_text(session, &exit.command, code)
+        }) {
             code = n;
         }
         session.traps.exit_status = None;

@@ -244,11 +244,10 @@ pub(crate) fn expand<'a>(session: &Session, line: &'a str) -> io::Result<Expansi
                     .map_or(value.as_str(), |(h, _)| h)
                     .into(),
                 'r' | 'e' => {
-                    let dot = value.rfind('.').filter(|i| !value[*i..].contains('/'));
+                    let dot = value.rfind('.');
                     match (code, dot) {
                         ('r', Some(i)) => value[..i].into(),
-                        ('e', Some(i)) => value[i + 1..].into(),
-                        ('e', _) => String::new(),
+                        ('e', Some(i)) => value[i..].into(),
                         _ => value,
                     }
                 }

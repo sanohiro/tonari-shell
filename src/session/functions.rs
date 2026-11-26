@@ -19,7 +19,10 @@ impl Function {
 
 impl Session {
     pub fn function_nesting_full(&self) -> bool {
-        self.function_depth >= 128 && self.deep_function_nesting_full()
+        self.get("FUNCNEST")
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .is_some_and(|max| max > 0 && self.function_depth >= max)
+            || self.function_depth >= 128 && self.deep_function_nesting_full()
     }
 
     #[cold]

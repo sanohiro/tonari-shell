@@ -5,6 +5,7 @@ use std::cell::Cell;
 
 #[derive(Debug)]
 enum Recovery {
+    Control(crate::Flow),
     Command,
     Input,
     Exit,
@@ -38,12 +39,30 @@ impl Error {
         Self::discard(format!("{name}: readonly variable"))
     }
 
+    pub(crate) fn control(flow: crate::Flow) -> Self {
+        Self {
+            message: "".into(),
+            status: match flow {
+                crate::Flow::Discard(n) | crate::Flow::Exit(n) | crate::Flow::Break(_, n) => n,
+                _ => 0,
+            },
+            recovery: Recovery::Control(flow),
+        }
+    }
+
+    pub(crate) fn report(&self, context: &str) {
+        if !matches!(self.recovery, Recovery::Control(_)) {
+            eprintln!("tonari: {context}{self}");
+        }
+    }
+
     pub fn child_failure(&mut self) {
         self.recovery = Recovery::Command;
     }
 
     pub fn flow(&self, session: &Session) -> crate::Flow {
         match self.recovery {
+            Recovery::Control(flow) => flow,
             Recovery::Input if session.posix && !session.interactive => {
                 crate::Flow::Exit(self.status)
             }
@@ -190,6 +209,14 @@ impl<'a> Expansion<'a> {
             self.captured.get().unwrap_or(self.initial),
             self.assignments,
         )?)
+    }
+
+    pub fn current_capture(&mut self, body: Vec<Statement>, reply: bool) -> Result<String, Error> {
+        let last = self.status();
+        let (text, status) =
+            crate::subshell::current_substitution(self.session, body, last, reply)?;
+        self.captured.set(Some(status));
+        Ok(text)
     }
 
     pub fn capture(&mut self, body: Vec<Statement>) -> Result<String, &'static str> {
