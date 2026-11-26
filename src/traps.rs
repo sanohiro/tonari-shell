@@ -125,8 +125,7 @@ static CHILD_EVENTS: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) fn waitpid(pid: libc::pid_t, status: &mut i32, flags: i32) -> libc::pid_t {
     let got = unsafe { libc::waitpid(pid, status, flags) };
-    if got > 0 && WATCH_CHILDREN.load(Relaxed) {
-        CHILD_EVENTS.fetch_add(1, Relaxed);
+    if got > 0 && WATCH_CHILDREN.load(Relaxed) && CHILD_EVENTS.fetch_add(1, Relaxed) == 0 {
         record(libc::SIGCHLD);
     }
     got
@@ -847,7 +846,7 @@ pub fn dispatch(session: &mut Session, status: u8) -> Flow {
                 flow = with_trapsig(session, sig, status, |session| {
                     crate::input::text(session, &command, status, false, false, Some(1))
                 });
-                if !matches!(flow, Flow::Continue(_)) {
+                if !matches!(flow, Flow::Continue(_)) || count > 1 && !session.traps.catches(sig) {
                     break;
                 }
             }
