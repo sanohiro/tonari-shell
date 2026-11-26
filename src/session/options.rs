@@ -1,3 +1,4 @@
+use super::{Cow, dynamic, print_variable_value, set_value};
 use std::io::{self, Write};
 
 use super::Session;
@@ -556,5 +557,249 @@ mod tests {
         assert_eq!(s.shopt(&options("-q checkwinsize sourcepath")), 1);
         assert_eq!(s.shopt(&options("-so pipefail")), 0);
         assert!(s.pipefail);
+    }
+}
+
+impl Session {
+    pub fn option_flags(&self) -> String {
+        let mut flags = String::new();
+        if self.allexport {
+            flags.push('a');
+        }
+        if self.notify {
+            flags.push('b');
+        }
+        if self.errexit {
+            flags.push('e');
+        }
+        if self.noglob {
+            flags.push('f');
+        }
+        if self.hashes.enabled {
+            flags.push('h');
+        }
+        if self.interactive {
+            flags.push('i');
+        }
+        if self.keyword {
+            flags.push('k');
+        }
+        if self.jobs.monitor {
+            flags.push('m');
+        }
+        if self.noexec {
+            flags.push('n');
+        }
+        if self.onecmd {
+            flags.push('t');
+        }
+        if self.nounset {
+            flags.push('u');
+        }
+        if self.verbose {
+            flags.push('v');
+        }
+        if self.xtrace {
+            flags.push('x');
+        }
+        if self.shopt.braceexpand {
+            flags.push('B');
+        }
+        if self.noclobber {
+            flags.push('C');
+        }
+        if self.errtrace {
+            flags.push('E');
+        }
+        if self.histexpand {
+            flags.push('H');
+        }
+        if self.physical {
+            flags.push('P');
+        }
+        if self.functrace {
+            flags.push('T');
+        }
+        if self.command_string {
+            flags.push('c');
+        }
+        if self.stdin_script {
+            flags.push('s');
+        }
+        flags
+    }
+
+    pub fn set(&mut self, words: &mut Vec<String>) -> u8 {
+        let args = words.get(1..).unwrap_or_default();
+        if args.is_empty() {
+            let mut out = io::BufWriter::new(io::stdout().lock());
+            let locale = self.character_locale();
+            for name in self.visible_names("") {
+                let stored = self.variables.get(name);
+                let snapshot;
+                let empty_snapshot = stored.is_none()
+                    && match name {
+                        "BASH_ARGV" | "BASH_ARGC" => {
+                            self.function_depth == 0 && self.debug_base.get().is_none()
+                        }
+                        "BASH_ALIASES" => self
+                            .aliases
+                            .0
+                            .as_ref()
+                            .is_none_or(|aliases| aliases.is_empty()),
+                        "BASH_CMDS" => self.hashes.items().next().is_none(),
+                        "BASH_SOURCE" => self.source_names.is_empty(),
+                        "BASH_LINENO" => self.call_lines.is_empty(),
+                        "GROUPS" => !self.dynamic.groups_read.get(),
+                        "DIRSTACK" => !self.dynamic.stack_read.get(),
+                        _ => false,
+                    };
+                let result = if name == "BASH_VERSINFO" && stored.is_none() {
+                    // The executable version is immutable across shell scopes.
+                    static VERSION: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+                    out.write_all(VERSION.get_or_init(|| {
+                        let mut bytes = name.as_bytes().to_vec();
+                        let version = self.declared_variable(name, false).unwrap();
+                        print_variable_value(&mut bytes, &version).expect("in-memory write");
+                        bytes
+                    }))
+                } else if empty_snapshot {
+                    writeln!(out, "{name}=()")
+                } else if self.array_parameter(name) {
+                    let var = if let Some(var) = stored.filter(|v| !v.dynamic) {
+                        var
+                    } else {
+                        snapshot = self.declared_variable(name, false).unwrap();
+                        &snapshot
+                    };
+                    if !var.array_assigned
+                        || name == "PIPESTATUS" && self.pipe_status.first.is_none()
+                    {
+                        continue;
+                    }
+                    write!(out, "{name}").and_then(|_| print_variable_value(&mut out, var))
+                } else {
+                    let value = if dynamic::is_dynamic(name) && stored.is_none_or(|v| v.dynamic) {
+                        // A listing must not advance RANDOM or consume fresh entropy.
+                        self.listed_number(name).map(|v| Cow::Owned(v.to_string()))
+                    } else if let Some(var) = stored {
+                        var.value.as_deref().map(Cow::Borrowed)
+                    } else if matches!(
+                        name,
+                        "BASHPID"
+                            | "BASH_ARGV0"
+                            | "BASH_COMMAND"
+                            | "BASH_SUBSHELL"
+                            | "LINENO"
+                            | "COMP_WORDBREAKS"
+                            | "EPOCHSECONDS"
+                            | "EPOCHREALTIME"
+                    ) {
+                        self.listed_text(name).map(Cow::Owned)
+                    } else {
+                        self.get(name).map(Cow::Owned)
+                    };
+                    let Some(value) = value else { continue };
+                    writeln!(out, "{name}={}", set_value(&value, self.posix, locale))
+                };
+                if result.is_err() {
+                    return 1;
+                }
+            }
+            if !self.posix {
+                for name in self.functions.keys() {
+                    if self.print_function(&mut out, name, false).is_err() {
+                        return 1;
+                    }
+                }
+            }
+            return out.flush().map_or(1, |()| 0);
+        }
+        let mut i = 0;
+        let mut replace_positionals = false;
+        while let Some(opt) = args.get(i) {
+            if opt == "--" {
+                i += 1;
+                replace_positionals = true;
+                break;
+            }
+            if opt == "+" {
+                i += 1;
+                continue;
+            }
+            if opt == "-" {
+                self.xtrace = false;
+                self.verbose = false;
+                i += 1;
+                break;
+            }
+            let Some(prefix) = opt.as_bytes().first() else {
+                break;
+            };
+            if !matches!(prefix, b'-' | b'+') || opt.len() < 2 {
+                break;
+            }
+            let enable = *prefix == b'-';
+            i += 1;
+            for flag in opt[1..].chars() {
+                match flag {
+                    'e' => self.errexit = enable,
+                    'E' => self.errtrace = enable,
+                    'a' => self.allexport = enable,
+                    'b' => self.notify = enable,
+                    'n' => self.noexec = enable && !self.interactive,
+                    't' => self.onecmd = enable,
+                    'x' => self.xtrace = enable,
+                    'H' => {
+                        self.histexpand = enable;
+                        self.command_history_expansion = enable;
+                    }
+                    'T' => self.functrace = enable,
+                    'C' => self.noclobber = enable,
+                    'P' => self.physical = enable,
+                    'k' => self.keyword = enable,
+                    'B' => self.shopt.braceexpand = enable,
+                    'f' => self.noglob = enable,
+                    'h' => self.hashes.enabled = enable,
+                    'm' => self.jobs.monitor = enable,
+                    'u' => self.nounset = enable,
+                    'v' => self.verbose = enable,
+                    'o' => {
+                        let Some(name) = args.get(i) else {
+                            let mut out = io::BufWriter::with_capacity(512, io::stdout().lock());
+                            for (name, on) in self.options(true) {
+                                let result = if enable {
+                                    writeln!(out, "{name:15}\t{}", if on { "on" } else { "off" })
+                                } else {
+                                    writeln!(out, "set {}o {name}", if on { "-" } else { "+" })
+                                };
+                                if result.is_err() {
+                                    return 1;
+                                }
+                            }
+                            return out.flush().map_or(1, |()| 0);
+                        };
+                        i += 1;
+                        if let Some(value) = self.option_value(name, true) {
+                            *value = enable;
+                            self.option_changed(name, enable);
+                        } else {
+                            eprintln!("tonari: set: {name}: unsupported option");
+                            return 2;
+                        }
+                    }
+                    _ => {
+                        eprintln!("tonari: set: {opt}: unsupported option");
+                        return 2;
+                    }
+                }
+            }
+        }
+        if i < args.len() || replace_positionals {
+            words.drain(..i + 1);
+            self.positional = std::mem::take(words).into_iter();
+            self.source_set_args = true;
+        }
+        0
     }
 }

@@ -159,6 +159,73 @@ fn as_number(word: &mut Word, env: &mut Expansion<'_>) -> Result<i64, Error> {
     env.arithmetic(&text)
 }
 
+fn scalar_part(text: String, quoted: bool) -> Part {
+    if quoted {
+        Part::Text(text)
+    } else {
+        Part::Unquoted(text)
+    }
+}
+
+fn assignment(name: &str, quoted: bool, env: &mut Expansion<'_>) -> Result<Part, Error> {
+    let fields = if matches!(name, "@" | "*") {
+        let args = env.session.positional.as_slice();
+        if args.is_empty() {
+            Vec::new()
+        } else {
+            ["set".to_owned(), "--".to_owned()]
+                .into_iter()
+                .chain(
+                    args.iter()
+                        .map(|s| crate::session::printf::parameter_quote(s, env.session)),
+                )
+                .collect()
+        }
+    } else {
+        let elements = array_elements_name(name);
+        let base = elements
+            .map(|(base, _, _)| base)
+            .or_else(|| crate::session::array::subscript(name).map(|(base, _)| base))
+            .unwrap_or(name);
+        let attributes = env.session.attributes(base);
+        if elements.is_some()
+            && attributes
+                .as_ref()
+                .is_some_and(|(flags, _)| flags.contains(['a', 'A']))
+        {
+            env.session.array_declaration_fields(base)
+        } else if let Some((flags, _)) = attributes {
+            let text = value(if elements.is_some() { base } else { name }, env)?;
+            let mut fields = Vec::new();
+            if !flags.is_empty() {
+                fields.extend(["declare".to_owned(), format!("-{flags}")]);
+            }
+            if let Some(text) = text {
+                fields.push(format!(
+                    "{base}={}",
+                    crate::session::printf::parameter_quote(&text, env.session)
+                ));
+            } else if !fields.is_empty() {
+                fields.push(base.to_owned());
+            }
+            if elements.is_some() && !fields.is_empty() {
+                return Ok(scalar_part(fields.join(" "), quoted));
+            }
+            fields
+        } else {
+            Vec::new()
+        }
+    };
+    if name == "@" || array_elements_name(name).is_some_and(|(_, at, _)| at) {
+        return Ok(Part::Elements {
+            values: fields,
+            at: true,
+            quoted,
+        });
+    }
+    Ok(scalar_part(fields.join(" "), quoted))
+}
+
 impl Modification {
     pub(super) fn evaluate(
         &mut self,
@@ -166,13 +233,7 @@ impl Modification {
         quoted: bool,
         env: &mut Expansion<'_>,
     ) -> Result<Part, Error> {
-        let scalar = |s| {
-            if quoted {
-                Part::Text(s)
-            } else {
-                Part::Unquoted(s)
-            }
-        };
+        let scalar = |s| scalar_part(s, quoted);
         match self {
             Self::Replace {
                 pattern,
@@ -238,65 +299,7 @@ impl Modification {
                     ),
                 }))
             }
-            Self::Assignment => {
-                let fields = if matches!(name, "@" | "*") {
-                    let args = env.session.positional.as_slice();
-                    if args.is_empty() {
-                        Vec::new()
-                    } else {
-                        ["set".to_owned(), "--".to_owned()]
-                            .into_iter()
-                            .chain(
-                                args.iter().map(|s| {
-                                    crate::session::printf::parameter_quote(s, env.session)
-                                }),
-                            )
-                            .collect()
-                    }
-                } else {
-                    let elements = array_elements_name(name);
-                    let base = elements
-                        .map(|(base, _, _)| base)
-                        .or_else(|| crate::session::array::subscript(name).map(|(base, _)| base))
-                        .unwrap_or(name);
-                    let attributes = env.session.attributes(base);
-                    if elements.is_some()
-                        && attributes
-                            .as_ref()
-                            .is_some_and(|(flags, _)| flags.contains(['a', 'A']))
-                    {
-                        env.session.array_declaration_fields(base)
-                    } else if let Some((flags, _)) = attributes {
-                        let text = value(if elements.is_some() { base } else { name }, env)?;
-                        let mut fields = Vec::new();
-                        if !flags.is_empty() {
-                            fields.extend(["declare".to_owned(), format!("-{flags}")]);
-                        }
-                        if let Some(text) = text {
-                            fields.push(format!(
-                                "{base}={}",
-                                crate::session::printf::parameter_quote(&text, env.session)
-                            ));
-                        } else if !fields.is_empty() {
-                            fields.push(base.to_owned());
-                        }
-                        if elements.is_some() && !fields.is_empty() {
-                            return Ok(scalar(fields.join(" ")));
-                        }
-                        fields
-                    } else {
-                        Vec::new()
-                    }
-                };
-                if name == "@" || array_elements_name(name).is_some_and(|(_, at, _)| at) {
-                    return Ok(Part::Elements {
-                        values: fields,
-                        at: true,
-                        quoted,
-                    });
-                }
-                return Ok(scalar(fields.join(" ")));
-            }
+            Self::Assignment => return assignment(name, quoted, env),
             Self::Pairs { separate }
                 if array_elements_name(name).is_some_and(|(base, _, keys)| {
                     !keys

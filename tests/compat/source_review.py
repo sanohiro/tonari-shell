@@ -16,6 +16,12 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    'registry-roundtrip': 'complete -A binding -A enabled -o nospace probe; complete -p probe',
+    'borrowed-control-flow': 'f(){ for v in a b; do case $v in a) :;; b) echo ok;; esac; done; }; f',
+    'default-path-queries': 'PATH=/nowhere; command -pv sh cat | while read -r p; do test -x "$p" && echo found; done',
+    'cached-child-environment': 'export V=first; V=second /bin/sh -c \'echo "$V"\'; /bin/sh -c \'echo "$V"\'',
+    'debug-wait-empty': 'trap ":" DEBUG; wait; echo $?',
+    'builtin-option-clusters': 'read -rn3 x <<<abcdef; printf "<%s>" "$x"; umask -S >/dev/null; echo $?',
     "interactive-edit-mode": "for term in dumb xterm; do for opt in '' --noediting; do TERM=$term \"$AUDIT_SHELL\" --noprofile --norc $opt -ic 'test -o emacs; echo \"$?\"; test -o vi; echo \"$?\"' 2>/dev/null; printf '%s\\n' 'test -o emacs; echo \"$?\"' | TERM=$term \"$AUDIT_SHELL\" --noprofile --norc $opt -i 2>/dev/null; done; done",
     "literal-assignment-input": "HOME='/test/quote home'\nv=$'hello\\' once!'\nprintf '<%s>\\n' \"$v\"\nv='~:* $HOME'\nprintf '<%s>\\n' \"$v\"\nv=$'\\x41\\xe3\\x81\\x82'\nprintf '<%s>\\n' \"$v\"\nv='left'\" right\"\nprintf '<%s>\\n' \"$v\"\nv=$'truncated\\0after'\nprintf '<%s>\\n' \"$v\"\ndeclare -i n\nn='2 + 7'\necho \"$n\"",
     "set-materialized-values": "set >before; grep -E '^(RANDOM|SRANDOM|BASH_COMMAND|LINENO|BASHPID|COMP_WORDBREAKS|EPOCHREALTIME)=' before; echo \"$?\"; grep -E '^(BASH_ARGC|BASH_ARGV|DIRSTACK|GROUPS)=' before; p=$BASHPID; n=$LINENO; t=$EPOCHREALTIME; r=$SRANDOM; c=$BASH_COMMAND; : \"$GROUPS\" \"$DIRSTACK\" \"$BASH_SUBSHELL\" \"$BASH_ARGV0\" \"$COMP_WORDBREAKS\"; set >after; for pair in \"BASHPID=$p\" \"LINENO=$n\" \"EPOCHREALTIME=$t\" \"SRANDOM=$r\" 'BASH_SUBSHELL=0'; do grep -Fxq \"$pair\" after; echo \"$?\"; done; grep -Ec '^(DIRSTACK|GROUPS)=\\(\\[0\\]=' after",
@@ -210,6 +216,12 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    'registry-roundtrip': ('complete -A binding -A enabled -o nospace probe; complete -p probe >/dev/null', 1200),
+    'borrowed-control-flow': ('f', 2000),
+    'default-path-queries': ('command -pv sh cat chmod cp mv >/dev/null', 500),
+    'cached-child-environment': ('V=other /usr/bin/env >/dev/null; /usr/bin/env >/dev/null', 45),
+    'debug-wait-empty': ('wait', 2200),
+    'builtin-option-clusters': ('read -rn3 x <<<abcdef; umask -S >/dev/null; shopt -q extglob || :', 950),
     "interactive-edit-mode": ("TERM=dumb \"$AUDIT_SHELL\" --noprofile --norc -ic 'test -o emacs' </dev/null 2>/dev/null", 12),
     "literal-assignment-input": ("v=$'hello\\' once!'", 1000),
     "set-materialized-values": ("set >/dev/null", 300),
@@ -1104,6 +1116,9 @@ printf three >&7; exec {slot}>&7; : 6>&7- {slot}>&-; printf four >&7; exec 6>&7-
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "borrowed-control-flow": "f(){ for v in a b; do case $v in a) :;; b) :;; esac; done; }",
+                "debug-wait-empty": "trap ':' DEBUG",
+                "cached-child-environment": "export V=first",
                 "set-materialized-values": ": \"$BASHPID\" \"$LINENO\" \"$EPOCHREALTIME\" \"$RANDOM\" \"$GROUPS\" \"$DIRSTACK\"",
                 "set-array-snapshot": "declare -a items=([2]='x y'); declare -A flags=([key]=ok); alias snap='echo yes'; : \"${BASH_ALIASES[snap]}\"; RANDOM=357; : \"$RANDOM\"",
                 "declaration-word-boundaries": "declare -A t; shopt -s assoc_expand_once",

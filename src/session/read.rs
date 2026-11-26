@@ -416,12 +416,22 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         eprintln!("tonari: read: expected UTF-8 input");
         return 1;
     };
+    assign_fields(session, &opts, &line, &escaped, status)
+}
+
+fn assign_fields(
+    session: &mut Session,
+    opts: &Options<'_>,
+    line: &str,
+    escaped: &[usize],
+    status: u8,
+) -> u8 {
     if opts.names.is_empty() && opts.array.is_none() {
         if session.readonly("REPLY") {
             eprintln!("tonari: read: REPLY: readonly variable");
             return 2;
         }
-        session.assign("REPLY", &line);
+        session.assign("REPLY", line);
         return status;
     }
     let ifs = if opts.exact {
@@ -436,7 +446,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         && (ifs.is_empty() || escaped.is_empty() && ifs.bytes().all(|b| matches!(b, 9..=13 | b' ')))
     {
         let value = if ifs.is_empty() {
-            line.as_str()
+            line
         } else {
             line.trim_matches(|c: char| ifs.contains(c))
         };
@@ -446,7 +456,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         }
         return status;
     }
-    let (spans, end) = field_ranges(&line, &escaped, &ifs);
+    let (spans, end) = field_ranges(line, escaped, &ifs);
     if let Some(target) = opts.array {
         let target = match session.indexed_receiver(target, false) {
             Ok(target) => target,

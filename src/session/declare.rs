@@ -24,6 +24,100 @@ struct Options {
     exported: Option<bool>,
 }
 
+fn declare_functions(
+    session: &mut Session,
+    command: &str,
+    operands: &[String],
+    flags: &Options,
+    readonly: bool,
+) -> crate::Flow {
+    let mut out = io::stdout().lock();
+    let mut status = 0;
+    if operands.is_empty() {
+        for name in session.functions.keys() {
+            if !flags.function_names && !readonly {
+                if session.print_function(&mut out, name, true).is_err() {
+                    return crate::Flow::Continue(1);
+                }
+                continue;
+            }
+            if flags.readonly == Some(true) && !session.readonly_functions.contains(name) {
+                continue;
+            }
+            let attr = session.function_attributes(name);
+            if writeln!(out, "declare -{attr} {name}").is_err() {
+                return crate::execute::Flow::Continue(1);
+            }
+        }
+    } else {
+        for name in operands {
+            if !session.functions.contains_key(name) {
+                if readonly {
+                    eprintln!("tonari: {command}: {name}: not a function");
+                }
+                status = 1;
+                continue;
+            }
+            if let Some(on) = flags.traced {
+                if on {
+                    session.traced_functions.insert(name.clone());
+                } else {
+                    session.traced_functions.remove(name);
+                }
+                if flags.exported.is_none() && flags.readonly.is_none() {
+                    continue;
+                }
+            }
+            if let Some(on) = flags.exported {
+                if session.export_function(name, on).is_err() {
+                    status = 1;
+                }
+                continue;
+            }
+            if let Some(on) = flags.readonly {
+                if on {
+                    session.readonly_functions.insert(name.clone());
+                } else if session.readonly_functions.contains(name) {
+                    eprintln!("tonari: {command}: {name}: readonly function");
+                    status = 1;
+                }
+                continue;
+            }
+            if flags.function_names && !flags.print && session.shopt.extdebug {
+                let function = &session.functions[name];
+                let source = if function.source.is_empty() {
+                    "environment"
+                } else {
+                    &function.source
+                };
+                if writeln!(
+                    out,
+                    "{name} {} {source}",
+                    function.definition.declaration_line
+                )
+                .is_err()
+                {
+                    return crate::Flow::Continue(1);
+                }
+                continue;
+            }
+            let line = if flags.print {
+                format!("declare -{} ", session.function_attributes(name))
+            } else {
+                String::new()
+            };
+            if !flags.function_names && session.print_function(&mut out, name, flags.print).is_err()
+            {
+                return crate::Flow::Continue(1);
+            }
+            if flags.function_names && writeln!(out, "{line}{name}").is_err() {
+                return crate::execute::Flow::Continue(1);
+            }
+        }
+    }
+    crate::execute::Flow::Continue(out.flush().map_or(1, |()| status))
+}
+
 pub(super) fn run(
     session: &mut Session,
     command: &str,
@@ -94,92 +188,7 @@ pub(super) fn run(
         operands = rest;
     }
     if flags.functions {
-        let mut out = io::stdout().lock();
-        let mut status = 0;
-        if operands.is_empty() {
-            for name in session.functions.keys() {
-                if !flags.function_names && !readonly {
-                    if session.print_function(&mut out, name, true).is_err() {
-                        return crate::Flow::Continue(1);
-                    }
-                    continue;
-                }
-                if flags.readonly == Some(true) && !session.readonly_functions.contains(name) {
-                    continue;
-                }
-                let attr = session.function_attributes(name);
-                if writeln!(out, "declare -{attr} {name}").is_err() {
-                    return crate::execute::Flow::Continue(1);
-                }
-            }
-        } else {
-            for name in operands {
-                if !session.functions.contains_key(name) {
-                    if readonly {
-                        eprintln!("tonari: {command}: {name}: not a function");
-                    }
-                    status = 1;
-                    continue;
-                }
-                if let Some(on) = flags.traced {
-                    if on {
-                        session.traced_functions.insert(name.clone());
-                    } else {
-                        session.traced_functions.remove(name);
-                    }
-                    if flags.exported.is_none() && flags.readonly.is_none() {
-                        continue;
-                    }
-                }
-                if let Some(on) = flags.exported {
-                    if session.export_function(name, on).is_err() {
-                        status = 1;
-                    }
-                    continue;
-                }
-                if let Some(on) = flags.readonly {
-                    if on {
-                        session.readonly_functions.insert(name.clone());
-                    } else if session.readonly_functions.contains(name) {
-                        eprintln!("tonari: {command}: {name}: readonly function");
-                        status = 1;
-                    }
-                    continue;
-                }
-                if flags.function_names && !flags.print && session.shopt.extdebug {
-                    let function = &session.functions[name];
-                    let source = if function.source.is_empty() {
-                        "environment"
-                    } else {
-                        &function.source
-                    };
-                    if writeln!(
-                        out,
-                        "{name} {} {source}",
-                        function.definition.declaration_line
-                    )
-                    .is_err()
-                    {
-                        return crate::Flow::Continue(1);
-                    }
-                    continue;
-                }
-                let line = if flags.print {
-                    format!("declare -{} ", session.function_attributes(name))
-                } else {
-                    String::new()
-                };
-                if !flags.function_names
-                    && session.print_function(&mut out, name, flags.print).is_err()
-                {
-                    return crate::Flow::Continue(1);
-                }
-                if flags.function_names && writeln!(out, "{line}{name}").is_err() {
-                    return crate::execute::Flow::Continue(1);
-                }
-            }
-        }
-        return crate::execute::Flow::Continue(out.flush().map_or(1, |()| status));
+        return declare_functions(session, command, operands, &flags, readonly);
     }
     if operands.is_empty() || flags.print && !attribute {
         if operands.is_empty()

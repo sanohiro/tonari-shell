@@ -483,10 +483,22 @@ impl Screen {
     fn move_short(&mut self, prompt: &str, text: &str, cursor: usize) -> io::Result<()> {
         use std::fmt::Write as _;
         self.output.clear();
-        let mut pos = Position::default();
-        draw_prompt(prompt, self.width, &mut self.output, &mut pos);
-        draw_text(&text[..cursor], self.width, &mut self.output, &mut pos);
-        self.output.clear();
+        let prefix = &text[..cursor];
+        let col = prompt.len() + prefix.len();
+        let pos = if col < self.width
+            && prompt
+                .bytes()
+                .chain(prefix.bytes())
+                .all(|b| (32..127).contains(&b))
+        {
+            Position { row: 0, col }
+        } else {
+            let mut pos = Position::default();
+            draw_prompt(prompt, self.width, &mut self.output, &mut pos);
+            draw_text(prefix, self.width, &mut self.output, &mut pos);
+            self.output.clear();
+            pos
+        };
         if pos.row < self.row {
             let _ = write!(self.output, "\x1b[{}A", self.row - pos.row);
         }
@@ -706,6 +718,29 @@ struct ReverseSearch {
     original_cursor: usize,
 }
 
+fn reverse_search_prompt(query: &str, width: usize) -> String {
+    let mut display = String::from("(reverse-i-search) `");
+    let visible = if query.len() > 1024 {
+        display.push('…');
+        let mut start = query.len().saturating_sub(width * 2);
+        while !query.is_char_boundary(start) {
+            start += 1;
+        }
+        &query[start..]
+    } else {
+        query
+    };
+    for c in visible.chars() {
+        if c.is_control() {
+            display.extend(c.escape_default());
+        } else {
+            display.push(c);
+        }
+    }
+    display.push_str("': ");
+    display
+}
+
 pub fn line(
     prompt: &str,
     history: &mut History,
@@ -789,26 +824,7 @@ pub fn line(
         };
         let search_prompt;
         let visible_prompt = if let Some(ReverseSearch { query, .. }) = &search {
-            let mut display = String::from("(reverse-i-search) `");
-            let visible = if query.len() > 1024 {
-                display.push('…');
-                let mut start = query.len().saturating_sub(screen.width * 2);
-                while !query.is_char_boundary(start) {
-                    start += 1;
-                }
-                &query[start..]
-            } else {
-                query
-            };
-            for c in visible.chars() {
-                if c.is_control() {
-                    display.extend(c.escape_default());
-                } else {
-                    display.push(c);
-                }
-            }
-            display.push_str("': ");
-            search_prompt = display;
+            search_prompt = reverse_search_prompt(query, screen.width);
             &search_prompt
         } else {
             prompt

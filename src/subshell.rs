@@ -462,12 +462,61 @@ fn nested_output(word: &parser::Word, session: &Session, depth: usize) -> bool {
 
 // Validate the whole list before executing any builtin. A later function,
 // redirect or effectful word must send the complete substitution through fork.
+fn safe_capture_word(
+    word: &crate::word::Word,
+    session: &Session,
+    external: bool,
+    body: &[parser::Statement],
+    capture_line: &std::cell::Cell<Option<usize>>,
+) -> bool {
+    use crate::word::{Part, Word, is_identifier};
+    match word {
+        Word::Literal(_) => true,
+        Word::Expanded(parts) => parts.iter().all(|part| match part {
+            Part::Text(_) => true,
+            Part::Parameter { name, quoted } => {
+                if name == "LINENO"
+                    && !session.is_nameref(name)
+                    && !external
+                    && can_elide_child(session)
+                    && sole_plain_command(body).is_some()
+                {
+                    capture_line.set(Some(body[0].location.line));
+                    return true;
+                }
+                if let Some(base) = name.strip_suffix("[@]") {
+                    return external
+                        && *quoted
+                        && is_identifier(base)
+                        && session.stored_array(base);
+                }
+                is_identifier(name)
+                    && !session.is_nameref(name)
+                    && !matches!(
+                        name.as_str(),
+                        "BASHPID"
+                            | "BASH_SUBSHELL"
+                            | "BASH_COMMAND"
+                            | "LINENO"
+                            | "SHELLOPTS"
+                            | "RANDOM"
+                            | "SRANDOM"
+                            | "_"
+                            | "PIPESTATUS"
+                    )
+            }
+            _ => false,
+        }),
+        Word::Declaration(_) => false,
+    }
+}
+
 fn capture_simple(
     session: &mut Session,
     body: &[parser::Statement],
     last: u8,
 ) -> Option<Result<(String, u8), &'static str>> {
-    use crate::word::{Part, Word, is_identifier};
+    use crate::word::Word;
     if body.is_empty()
         || session.xtrace
         || session.functrace && session.traps.debug_handler()
@@ -557,59 +606,26 @@ fn capture_simple(
             }
             _ => return None,
         };
-        let safe_word = |word: &Word| match word {
-            Word::Literal(_) => true,
-            Word::Expanded(parts) => parts.iter().all(|part| match part {
-                Part::Text(_) => true,
-                Part::Parameter { name, quoted } => {
-                    if name == "LINENO"
-                        && !session.is_nameref(name)
-                        && !external
-                        && can_elide_child(session)
-                        && sole_plain_command(body).is_some()
-                    {
-                        capture_line.set(Some(body[0].location.line));
-                        return true;
-                    }
-                    if let Some(base) = name.strip_suffix("[@]") {
-                        return external
-                            && *quoted
-                            && is_identifier(base)
-                            && session.stored_array(base);
-                    }
-                    is_identifier(name)
-                        && !session.is_nameref(name)
-                        && !matches!(
-                            name.as_str(),
-                            "BASHPID"
-                                | "BASH_SUBSHELL"
-                                | "BASH_COMMAND"
-                                | "LINENO"
-                                | "SHELLOPTS"
-                                | "RANDOM"
-                                | "SRANDOM"
-                                | "_"
-                                | "PIPESTATUS"
-                        )
-                }
-                _ => false,
-            }),
-            Word::Declaration(_) => false,
-        };
-        if !args
-            .iter()
-            .all(|arg| safe_word(arg) || can_elide_child(session) && nested_output(arg, session, 0))
-        {
+        if !args.iter().all(|arg| {
+            safe_capture_word(arg, session, external, body, &capture_line)
+                || can_elide_child(session) && nested_output(arg, session, 0)
+        }) {
             return None;
         }
         let safe = match cmd.redirects.as_slice() {
             [] => true,
             [r] if external && r.variable.is_none() => match (r.fd, r.target) {
                 (2, parser::Target::Write) => r.word.as_literal() == Some("/dev/null"),
-                (0, parser::Target::HereString) => can_elide_child(session) && safe_word(&r.word),
+                (0, parser::Target::HereString) => {
+                    can_elide_child(session)
+                        && safe_capture_word(&r.word, session, external, body, &capture_line)
+                }
                 (0, parser::Target::HereDoc { expand }) if can_elide_child(session) => {
                     let text = r.word.as_literal()?;
-                    !expand || parser::expansion_string(text).is_ok_and(|word| safe_word(&word))
+                    !expand
+                        || parser::expansion_string(text).is_ok_and(|word| {
+                            safe_capture_word(&word, session, external, body, &capture_line)
+                        })
                 }
                 _ => false,
             },

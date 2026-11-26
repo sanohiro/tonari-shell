@@ -1,4 +1,5 @@
 use super::Session;
+use super::{Component, DirectoryError, MetadataExt, OsStrExt, PathBuf, Rc, Variable};
 use std::io::{self, Write};
 use std::path::Path;
 
@@ -301,4 +302,353 @@ impl Session {
         }
         self.show_stack(out, None, false, false, false)
     }
+}
+
+impl Session {
+    pub(super) fn logical_directory_ref(&self) -> io::Result<&Path> {
+        if let Some(cwd) = self.logical_cwd.get() {
+            return Ok(cwd);
+        }
+        if let Some(pwd) = std::env::var_os("PWD") {
+            let path = Path::new(&pwd);
+            if path.is_absolute()
+                && !path.components().any(|c| c == Component::ParentDir)
+                && same_directory(path, Path::new("."))
+            {
+                return Ok(self.logical_cwd.get_or_init(|| path.into()));
+            }
+        }
+        let cwd = physical_path()?;
+        Ok(self.logical_cwd.get_or_init(|| cwd))
+    }
+
+    pub fn logical_directory(&self) -> io::Result<PathBuf> {
+        self.logical_directory_ref().map(Path::to_owned)
+    }
+
+    pub fn directory_builtin(&mut self, name: &str, args: &[String]) -> u8 {
+        let mut physical = self.physical;
+        let mut require_pwd = false;
+        let mut args = args;
+        while let Some(opt) = crate::builtins::flags::next(&mut args) {
+            for flag in opt[1..].chars() {
+                match flag {
+                    'L' => physical = false,
+                    'P' => physical = true,
+                    'e' if name == "cd" => require_pwd = true,
+                    _ => {
+                        eprintln!("tonari: {name}: unsupported option {opt}");
+                        return 2;
+                    }
+                }
+            }
+        }
+        let result = if name == "pwd" {
+            (if physical {
+                if let Some(path) = self.logical_cwd.get()
+                    && path.as_os_str().len() >= libc::PATH_MAX as usize
+                    && long_cwd_matches(path, true)
+                {
+                    Ok(path.clone())
+                } else {
+                    physical_path()
+                }
+            } else if self.posix {
+                self.logical_directory().and_then(|path| {
+                    if same_directory(&path, Path::new("."))
+                        || path.as_os_str().len() >= libc::PATH_MAX as usize
+                            && long_cwd_matches(&path, false)
+                    {
+                        Ok(path)
+                    } else {
+                        let actual = physical_path()?;
+                        self.logical_cwd = std::cell::OnceCell::from(actual.clone());
+                        Ok(actual)
+                    }
+                })
+            } else {
+                self.logical_directory()
+            })
+            .and_then(|p| print_path(&p))
+        } else {
+            if args.len() > 1 {
+                eprintln!("tonari: cd: too many arguments");
+                return 1;
+            }
+            let arg = args.first().map(String::as_str);
+            let (target, previous) = match arg {
+                None => (self.get("HOME"), false),
+                Some("-") => (self.get("OLDPWD"), true),
+                Some(s) => (Some(s.into()), false),
+            };
+            let Some(target) = target else {
+                eprintln!(
+                    "tonari: cd: {} not set",
+                    if previous { "OLDPWD" } else { "HOME" }
+                );
+                return 1;
+            };
+            if self.posix && physical {
+                match self.try_change_directory(
+                    Path::new(&target),
+                    physical,
+                    previous,
+                    arg.is_some(),
+                ) {
+                    Ok(()) => return 0,
+                    Err(DirectoryError::NoPath(e)) => {
+                        if require_pwd {
+                            eprintln!("tonari: cd: {e}");
+                            return 1;
+                        }
+                        return 0;
+                    }
+                    Err(DirectoryError::Other(e)) => {
+                        eprintln!("tonari: cd: {e}");
+                        return if require_pwd { 2 } else { 1 };
+                    }
+                }
+            }
+            self.change_directory(Path::new(&target), physical, previous, arg.is_some())
+        };
+        result.map_or_else(
+            |e| {
+                eprintln!("tonari: {name}: {e}");
+                1
+            },
+            |()| 0,
+        )
+    }
+
+    pub(crate) fn revisit_directory(&mut self, forward: bool) -> io::Result<bool> {
+        let Some(visits) = &mut self.visits else {
+            return Ok(false);
+        };
+        let mut index = visits.current;
+        while let Some(next) = index.checked_add_signed(if forward { 1 } else { -1 }) {
+            let Some(path) = visits.paths.get(next) else {
+                break;
+            };
+            // Visits already contain normalized absolute paths. Resolve them once in the kernel.
+            match std::env::set_current_dir(path) {
+                Ok(()) => {
+                    let cwd = path.clone();
+                    Rc::make_mut(visits).current = next;
+                    let old_pwd = self.get("PWD");
+                    self.hashes.directory_changed();
+                    self.finish_directory_change(cwd, old_pwd, false)?;
+                    return Ok(true);
+                }
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                    ) =>
+                {
+                    index = next
+                }
+                Err(e) => return Err(io::Error::new(e.kind(), format!("{}: {e}", path.display()))),
+            }
+        }
+        Ok(false)
+    }
+
+    pub(super) fn change_directory(
+        &mut self,
+        target: &Path,
+        physical: bool,
+        previous: bool,
+        explicit: bool,
+    ) -> io::Result<()> {
+        self.try_change_directory(target, physical, previous, explicit)
+            .map_err(|e| match e {
+                DirectoryError::NoPath(e) | DirectoryError::Other(e) => e,
+            })
+    }
+
+    fn try_change_directory(
+        &mut self,
+        target: &Path,
+        physical: bool,
+        previous: bool,
+        explicit: bool,
+    ) -> Result<(), DirectoryError> {
+        let old_pwd = self.get("PWD");
+        let base = self.logical_directory();
+        let cdpath = if explicit
+            && !previous
+            && matches!(target.components().next(), Some(Component::Normal(_)))
+        {
+            self.get("CDPATH")
+        } else {
+            None
+        };
+        let mut paths = cdpath
+            .iter()
+            .flat_map(std::env::split_paths)
+            .map(|dir| {
+                let print = !dir.as_os_str().is_empty();
+                (dir.join(target), print)
+            })
+            .chain(std::iter::once_with(|| (target.to_owned(), previous)));
+        let mut variable = target
+            .to_str()
+            .filter(|_| explicit && !previous && self.shopt.cdable_vars);
+        let mut spell = self.interactive && self.shopt.cdspell && explicit && !previous;
+        let mut error = io::Error::from(io::ErrorKind::NotFound);
+        loop {
+            let (candidate, print, via_variable) = if let Some((path, print)) = paths.next() {
+                (path, print, false)
+            } else if let Some(value) = variable.take().and_then(|name| self.get(name)) {
+                (PathBuf::from(value), false, true)
+            } else if std::mem::take(&mut spell)
+                && let Some(path) = crate::complete::corrected_directory(target)
+            {
+                (path, false, true)
+            } else {
+                break;
+            };
+            if candidate.as_os_str().is_empty() {
+                continue;
+            }
+            let logical = if physical {
+                None
+            } else {
+                let joined = if candidate.is_absolute() {
+                    Some(candidate.clone())
+                } else {
+                    base.as_ref().ok().map(|base| base.join(&candidate))
+                };
+                joined
+                    .as_deref()
+                    .and_then(|path| normalize_directory(path).ok())
+            };
+            // A renamed ancestor can invalidate the logical path while the
+            // process still has a valid current directory for a relative chdir.
+            let logical = match logical {
+                Some(path) => match std::env::set_current_dir(&path) {
+                    Ok(()) => Some(path),
+                    Err(e)
+                        if e.raw_os_error() == Some(libc::ENAMETOOLONG)
+                            && candidate.is_relative() =>
+                    {
+                        // The full name exceeded the kernel argument limit. Relative
+                        // chdir still establishes this logical name, including symlinks.
+                        if let Err(err) = std::env::set_current_dir(&candidate) {
+                            error = err;
+                            continue;
+                        }
+                        Some(path)
+                    }
+                    Err(e) if self.posix => {
+                        error = e;
+                        continue;
+                    }
+                    Err(_) => None,
+                },
+                None => None,
+            };
+            if logical.is_none()
+                && let Err(e) = std::env::set_current_dir(&candidate)
+            {
+                error = e;
+                continue;
+            }
+            self.hashes.directory_changed();
+            self.logical_cwd.take();
+            let cwd = match logical {
+                Some(cwd) => cwd,
+                None => physical_path().map_err(DirectoryError::NoPath)?,
+            };
+            if self.interactive && base.as_deref().ok() != Some(cwd.as_path()) {
+                Rc::make_mut(self.visits.get_or_insert_with(Rc::default)).record(base.ok(), &cwd);
+            }
+            if via_variable {
+                print_path(&candidate)?;
+            }
+            return self
+                .finish_directory_change(cwd, old_pwd, print)
+                .map_err(DirectoryError::Other);
+        }
+        Err(DirectoryError::Other(io::Error::new(
+            error.kind(),
+            format!("{}: {error}", target.display()),
+        )))
+    }
+
+    fn finish_directory_change(
+        &mut self,
+        cwd: PathBuf,
+        old_pwd: Option<String>,
+        print: bool,
+    ) -> io::Result<()> {
+        self.logical_cwd = std::cell::OnceCell::from(cwd.clone());
+        let old_readonly = self.readonly("OLDPWD");
+        if !old_readonly {
+            let old_export = self.is_exported("OLDPWD");
+            self.variables.insert(
+                "OLDPWD".into(),
+                Variable {
+                    letter_case: None,
+                    temporary: false,
+                    dynamic: false,
+                    inherited: Default::default(),
+                    readonly: false,
+                    nameref: false,
+                    integer: false,
+                    array_assigned: false,
+                    elements: None,
+                    declared: true,
+                    value: old_pwd,
+                    exported: old_export,
+                },
+            );
+        }
+        let pwd_readonly = self.readonly("PWD");
+        self.assign(
+            "PWD",
+            cwd.to_str()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "non-UTF-8 directory"))?,
+        );
+        if print {
+            print_path(&cwd)?;
+        }
+        if old_readonly || pwd_readonly {
+            return Err(io::Error::other(if old_readonly {
+                "OLDPWD: readonly variable"
+            } else {
+                "PWD: readonly variable"
+            }));
+        }
+        Ok(())
+    }
+}
+
+fn same_directory(left: &Path, right: &Path) -> bool {
+    match (std::fs::metadata(left), std::fs::metadata(right)) {
+        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+        _ => false,
+    }
+}
+
+fn normalize_directory(path: &Path) -> io::Result<PathBuf> {
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        if component == Component::ParentDir {
+            if !std::fs::metadata(&result)?.is_dir() {
+                return Err(io::Error::from_raw_os_error(libc::ENOTDIR));
+            }
+            result.pop();
+        } else {
+            result.push(component);
+        }
+    }
+    Ok(result)
+}
+
+fn print_path(path: &Path) -> io::Result<()> {
+    let mut out = io::stdout().lock();
+    out.write_all(path.as_os_str().as_bytes())?;
+    out.write_all(b"\n")?;
+    out.flush()
 }
