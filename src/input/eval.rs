@@ -96,7 +96,7 @@ pub(super) fn parse(
     }
     // Alias replacement can rewrite source locations and emit parse-time
     // diagnostics. An unfinished here-document can warn every time it is read.
-    if (session.shopt.expand_aliases && session.aliases.0.is_some()) || source.contains('<') {
+    if session.reads_aliases() || source.contains('<') {
         return parser::session_source_at(source, eof, session, line).map(Program::Fresh);
     }
     let extglob = session.shopt.glob.extglob;

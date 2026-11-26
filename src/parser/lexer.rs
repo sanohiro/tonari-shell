@@ -59,6 +59,29 @@ impl Token {
     }
 }
 
+trait Cursor {
+    fn peek(&self) -> Option<char>;
+    fn advance_bytes(&mut self, bytes: usize);
+    fn consume(&mut self, prefix: &str) -> bool;
+}
+
+impl Cursor for Chars<'_> {
+    fn peek(&self) -> Option<char> {
+        self.clone().next()
+    }
+    fn advance_bytes(&mut self, bytes: usize) {
+        *self = self.as_str()[bytes..].chars();
+    }
+    fn consume(&mut self, prefix: &str) -> bool {
+        if let Some(rest) = self.as_str().strip_prefix(prefix) {
+            *self = rest.chars();
+            true
+        } else {
+            false
+        }
+    }
+}
+
 pub(super) fn descriptor(s: &str) -> Result<i32, Error> {
     if s.as_bytes().first().is_some_and(u8::is_ascii_digit) {
         return s
@@ -69,7 +92,7 @@ pub(super) fn descriptor(s: &str) -> Result<i32, Error> {
 }
 
 fn redirect(chars: &mut Chars<'_>, op: char, fd: i32) -> Result<Token, Error> {
-    let target = match (op, chars.clone().next()) {
+    let target = match (op, chars.peek()) {
         ('<', Some('<')) => return Err(Error::Invalid("unsupported redirection")),
         ('<', Some('>')) => {
             chars.next();
@@ -167,294 +190,8 @@ fn dollar_word(
             return Ok(());
         }
     }
-    let decoded_name;
-    let name = match chars.clone().next() {
-        Some('{') => {
-            chars.next();
-            let content = chars.as_str();
-            if content.starts_with([' ', '\t', '\n', '|']) {
-                let reply = content.starts_with('|');
-                let nested = if reply { &content[1..] } else { content };
-                let (tokens, spans, after) = lex_words(nested, false, false, None, true)?;
-                let body = Reader::new(tokens, spans, &nested[..nested.len() - after.len() - 1])
-                    .list(&[])?;
-                word.part(Part::CurrentSubstitution {
-                    body,
-                    quoted,
-                    reply,
-                });
-                *chars = after.chars();
-                return Ok(());
-            }
-            let len = match content.as_bytes().first() {
-                Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => content
-                    .bytes()
-                    .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
-                    .count(),
-                Some(b'0'..=b'9') => content.bytes().take_while(|b| b.is_ascii_digit()).count(),
-                Some(b'@' | b'*' | b'?' | b'$' | b'#' | b'!' | b'-') => 1,
-                None => {
-                    return Err(Error::Incomplete(Incomplete::Message(
-                        "unterminated parameter expansion",
-                    )));
-                }
-                _ => return bad_substitution(content, chars, word, quoted),
-            };
-            if !super::POSIX.get() && content.starts_with("!#") && !content.starts_with("!#}") {
-                return bad_substitution(content, chars, word, quoted);
-            }
-            let prefixed = content.starts_with(['#', '!'])
-                && content
-                    .as_bytes()
-                    .get(1)
-                    .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_');
-            let len = if content.starts_with(['#', '!'])
-                && content.as_bytes().get(1).is_some_and(u8::is_ascii_digit)
-            {
-                1 + content[1..].bytes().take_while(u8::is_ascii_digit).count()
-            } else if (content.starts_with('#')
-                || content.starts_with('!')
-                    && (matches!(content.as_bytes().get(1), Some(b'*' | b'@'))
-                        || !super::POSIX.get()
-                            && matches!(content.as_bytes().get(1), Some(b'?' | b'#'))))
-                && (content.as_bytes().get(2) == Some(&b'}')
-                    || content.starts_with("!*")
-                    || content.starts_with("!@"))
-                && matches!(
-                    content.as_bytes().get(1),
-                    Some(b'@' | b'*' | b'-' | b'#' | b'?' | b'$' | b'!')
-                )
-            {
-                2
-            } else if prefixed {
-                1 + content[1..]
-                    .bytes()
-                    .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
-                    .count()
-            } else {
-                len
-            };
-            let len = if content[len..].starts_with('[') {
-                len + super::modifier::index_end(&content[len..])?
-            } else {
-                len
-            };
-            let head = &content[..len];
-            let quote_at = if content.starts_with("$'") { 0 } else { len };
-            let name = if quoted_name
-                && !super::POSIX.get()
-                && content[quote_at..].starts_with("$'")
-                && (quote_at == 0 || is_identifier(head))
-            {
-                let mut tail = &content[quote_at..];
-                let mut decoded = content[..quote_at].to_owned();
-                while let Some(after) = tail.strip_prefix("$'") {
-                    let mut cursor = after.chars();
-                    decoded.push_str(&ansi::quoted_fragment(&mut cursor)?);
-                    let suffix = cursor.as_str();
-                    let size = suffix
-                        .bytes()
-                        .take_while(|c| c.is_ascii_alphanumeric() || *c == b'_')
-                        .count();
-                    decoded.push_str(&suffix[..size]);
-                    tail = &suffix[size..];
-                }
-                if !is_identifier(&decoded) {
-                    return bad_substitution(content, chars, word, quoted);
-                }
-                if tail.starts_with('[') {
-                    let size = super::modifier::index_end(tail)?;
-                    decoded.push_str(&tail[..size]);
-                    tail = &tail[size..];
-                }
-                decoded_name = decoded;
-                *chars = tail.chars();
-                decoded_name.as_str()
-            } else {
-                *chars = content[len..].chars();
-                head
-            };
-            if chars.as_str().starts_with('}') {
-                chars.next();
-                name
-            } else {
-                if name.starts_with('#')
-                    && (name.len() > 1 || content.as_bytes().get(2) == Some(&b'}'))
-                {
-                    return bad_substitution(content, chars, word, quoted);
-                }
-                if let Some(prefix) = name.strip_prefix('!').filter(|p| super::is_identifier(p))
-                    && let [op @ (b'@' | b'*'), b'}', ..] = chars.as_str().as_bytes()
-                {
-                    word.part(Part::PrefixNames {
-                        prefix: prefix.into(),
-                        at: *op == b'@',
-                        quoted,
-                    });
-                    *chars = chars.as_str()[2..].chars();
-                    return Ok(());
-                }
-                if chars.as_str().starts_with('/') {
-                    chars.next();
-                    let mode = match chars.clone().next() {
-                        Some('/') => crate::word::ReplaceMode::All,
-                        Some('#') => crate::word::ReplaceMode::Prefix,
-                        Some('%') => crate::word::ReplaceMode::Suffix,
-                        _ => crate::word::ReplaceMode::First,
-                    };
-                    if mode != crate::word::ReplaceMode::First {
-                        chars.next();
-                    }
-                    let (pattern, separator) = parameter_word(
-                        chars,
-                        false,
-                        true,
-                        false,
-                        mode == crate::word::ReplaceMode::All,
-                        quoted_name,
-                    )?;
-                    let replacement = if separator == '/' {
-                        parameter_word(chars, false, false, false, false, quoted_name)?.0
-                    } else {
-                        Word::Literal(String::new())
-                    };
-                    word.part(Part::Modify {
-                        name: name.into(),
-                        operation: Box::new(crate::word::Modification::Replace {
-                            pattern,
-                            replacement,
-                            mode,
-                        }),
-                        quoted,
-                    });
-                    return Ok(());
-                }
-                if let [
-                    b'@',
-                    op @ (b'U' | b'u' | b'L' | b'Q' | b'E' | b'a' | b'A' | b'K' | b'k'),
-                    b'}',
-                    ..,
-                ] = chars.as_str().as_bytes()
-                {
-                    let op = *op;
-                    *chars = chars.as_str()[3..].chars();
-                    let operation = match op {
-                        b'a' => crate::word::Modification::Attributes,
-                        b'Q' => crate::word::Modification::Quote,
-                        b'A' => crate::word::Modification::Assignment,
-                        b'K' | b'k' => crate::word::Modification::Pairs {
-                            separate: op == b'k',
-                        },
-                        b'E' => crate::word::Modification::Escapes,
-                        _ => crate::word::Modification::Case {
-                            direction: if op == b'L' {
-                                crate::pattern::CaseDirection::Lower
-                            } else {
-                                crate::pattern::CaseDirection::Upper
-                            },
-                            all: op != b'u',
-                            pattern: crate::word::Word::Literal(String::new()),
-                        },
-                    };
-                    word.part(Part::Modify {
-                        name: name.into(),
-                        operation: Box::new(operation),
-                        quoted,
-                    });
-                    return Ok(());
-                }
-                if chars.as_str().starts_with("@P}") {
-                    *chars = chars.as_str()[3..].chars();
-                    word.part(Part::Modify {
-                        name: name.into(),
-                        operation: Box::new(crate::word::Modification::Prompt),
-                        quoted,
-                    });
-                    return Ok(());
-                }
-                if chars.as_str().starts_with(':')
-                    && !chars.as_str()[1..].starts_with(['-', '+', '=', '?'])
-                {
-                    chars.next();
-                    if let Some(tail) = chars.as_str().strip_prefix('}') {
-                        *chars = tail.chars();
-                        word.part(Part::BadSubstitution(format!("${{{name}:}}")));
-                        return Ok(());
-                    }
-                    let (offset, length) = super::modifier::slice(chars)?;
-                    word.part(Part::Modify {
-                        name: name.into(),
-                        operation: Box::new(crate::word::Modification::Slice { offset, length }),
-                        quoted,
-                    });
-                    return Ok(());
-                }
-                if let Some(op @ ('^' | ',' | '~')) = chars.clone().next() {
-                    chars.next();
-                    let all = chars.as_str().starts_with(op);
-                    if all {
-                        chars.next();
-                    }
-                    let pattern = parameter_word(chars, false, false, false, false, quoted_name)?.0;
-                    word.part(Part::Modify {
-                        name: name.into(),
-                        operation: Box::new(crate::word::Modification::Case {
-                            direction: match op {
-                                '^' => crate::pattern::CaseDirection::Upper,
-                                '~' => crate::pattern::CaseDirection::Toggle,
-                                _ => crate::pattern::CaseDirection::Lower,
-                            },
-                            all,
-                            pattern,
-                        }),
-                        quoted,
-                    });
-                    return Ok(());
-                }
-                if let Some(op @ ('%' | '#')) = chars.clone().next() {
-                    chars.next();
-                    let longest = chars.as_str().starts_with(op);
-                    if longest {
-                        chars.next();
-                    }
-                    let pattern = parameter_word(chars, false, false, false, false, quoted_name)?.0;
-                    word.part(Part::Trim {
-                        name: name.into(),
-                        pattern: Box::new(pattern),
-                        prefix: op == '#',
-                        longest,
-                        quoted,
-                    });
-                    return Ok(());
-                }
-                let check_empty = chars.as_str().starts_with(':');
-                if check_empty {
-                    chars.next();
-                }
-                let op = match chars.next() {
-                    Some('+') => crate::word::Alternative::Alternate,
-                    Some('-') => crate::word::Alternative::Default,
-                    Some('=') => crate::word::Alternative::Assign,
-                    Some('?') => crate::word::Alternative::Error,
-                    None => {
-                        return Err(Error::Incomplete(Incomplete::Message(
-                            "unterminated parameter expansion",
-                        )));
-                    }
-                    _ => return bad_substitution(content, chars, word, quoted),
-                };
-                let (alternative, _) =
-                    parameter_word(chars, quoted, false, assignment, false, quoted_name)?;
-                word.part(Part::Alternative {
-                    name: name.into(),
-                    check_empty,
-                    op,
-                    word: Box::new(alternative),
-                    quoted,
-                });
-                return Ok(());
-            }
-        }
+    let name = match chars.peek() {
+        Some('{') => return braced_parameter(chars, word, quoted, assignment, quoted_name),
         Some('a'..='z' | 'A'..='Z' | '_') => {
             let end = rest
                 .bytes()
@@ -506,11 +243,9 @@ fn dollar_word(
                     Err(error) => return Err(error),
                 }
             }
-            let nested = &rest[1..];
-            let (tokens, spans, after) = lex(nested, true, false)?;
-            let body =
-                Reader::new(tokens, spans, &nested[..nested.len() - after.len() - 1]).list(&[])?;
-            *chars = after.chars();
+            // Arithmetic lookahead may already have advanced the cursor.
+            *chars = rest[1..].chars();
+            let body = nested_program(chars)?;
             word.part(Part::Substitution { body, quoted });
             return Ok(());
         }
@@ -534,6 +269,300 @@ fn dollar_word(
         quoted,
     });
     Ok(())
+}
+
+fn braced_parameter<'a>(
+    chars: &mut Chars<'a>,
+    word: &mut WordBuilder,
+    quoted: bool,
+    assignment: bool,
+    quoted_name: bool,
+) -> Result<(), Error> {
+    chars.next();
+    let content = chars.as_str();
+    if content.starts_with([' ', '\t', '\n', '|']) {
+        let reply = content.starts_with('|');
+        let nested = if reply { &content[1..] } else { content };
+        let (tokens, spans, after) = lex_words(nested, false, false, None, true)?;
+        let body =
+            Reader::new(tokens, spans, &nested[..nested.len() - after.len() - 1]).list(&[])?;
+        word.part(Part::CurrentSubstitution {
+            body,
+            quoted,
+            reply,
+        });
+        *chars = after.chars();
+        return Ok(());
+    }
+    let len = match content.as_bytes().first() {
+        Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => content
+            .bytes()
+            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+            .count(),
+        Some(b'0'..=b'9') => content.bytes().take_while(|b| b.is_ascii_digit()).count(),
+        Some(b'@' | b'*' | b'?' | b'$' | b'#' | b'!' | b'-') => 1,
+        None => {
+            return Err(Error::Incomplete(Incomplete::Message(
+                "unterminated parameter expansion",
+            )));
+        }
+        _ => return bad_substitution(content, chars, word, quoted),
+    };
+    if !super::POSIX.get() && content.starts_with("!#") && !content.starts_with("!#}") {
+        return bad_substitution(content, chars, word, quoted);
+    }
+    let prefixed = content.starts_with(['#', '!'])
+        && content
+            .as_bytes()
+            .get(1)
+            .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_');
+    let len = if content.starts_with(['#', '!'])
+        && content.as_bytes().get(1).is_some_and(u8::is_ascii_digit)
+    {
+        1 + content[1..].bytes().take_while(u8::is_ascii_digit).count()
+    } else if (content.starts_with('#')
+        || content.starts_with('!')
+            && (matches!(content.as_bytes().get(1), Some(b'*' | b'@'))
+                || !super::POSIX.get() && matches!(content.as_bytes().get(1), Some(b'?' | b'#'))))
+        && (content.as_bytes().get(2) == Some(&b'}')
+            || content.starts_with("!*")
+            || content.starts_with("!@"))
+        && matches!(
+            content.as_bytes().get(1),
+            Some(b'@' | b'*' | b'-' | b'#' | b'?' | b'$' | b'!')
+        )
+    {
+        2
+    } else if prefixed {
+        1 + content[1..]
+            .bytes()
+            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+            .count()
+    } else {
+        len
+    };
+    let len = if content[len..].starts_with('[') {
+        len + super::modifier::index_end(&content[len..])?
+    } else {
+        len
+    };
+    let head = &content[..len];
+    let quote_at = if content.starts_with("$'") { 0 } else { len };
+    let decoded_name;
+    let name = if quoted_name
+        && !super::POSIX.get()
+        && content[quote_at..].starts_with("$'")
+        && (quote_at == 0 || is_identifier(head))
+    {
+        let mut tail = &content[quote_at..];
+        let mut decoded = content[..quote_at].to_owned();
+        while let Some(after) = tail.strip_prefix("$'") {
+            let mut cursor = after.chars();
+            decoded.push_str(&ansi::quoted_fragment(&mut cursor)?);
+            let suffix = cursor.as_str();
+            let size = suffix
+                .bytes()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == b'_')
+                .count();
+            decoded.push_str(&suffix[..size]);
+            tail = &suffix[size..];
+        }
+        if !is_identifier(&decoded) {
+            return bad_substitution(content, chars, word, quoted);
+        }
+        if tail.starts_with('[') {
+            let size = super::modifier::index_end(tail)?;
+            decoded.push_str(&tail[..size]);
+            tail = &tail[size..];
+        }
+        decoded_name = decoded;
+        *chars = tail.chars();
+        decoded_name.as_str()
+    } else {
+        *chars = content[len..].chars();
+        head
+    };
+    if chars.consume("}") {
+        word.part(Part::Parameter {
+            name: name.into(),
+            quoted,
+        });
+        return Ok(());
+    }
+    {
+        if name.starts_with('#') && (name.len() > 1 || content.as_bytes().get(2) == Some(&b'}')) {
+            return bad_substitution(content, chars, word, quoted);
+        }
+        if let Some(prefix) = name.strip_prefix('!').filter(|p| super::is_identifier(p))
+            && let [op @ (b'@' | b'*'), b'}', ..] = chars.as_str().as_bytes()
+        {
+            word.part(Part::PrefixNames {
+                prefix: prefix.into(),
+                at: *op == b'@',
+                quoted,
+            });
+            chars.advance_bytes(2);
+            return Ok(());
+        }
+        if chars.as_str().starts_with('/') {
+            chars.next();
+            let mode = match chars.peek() {
+                Some('/') => crate::word::ReplaceMode::All,
+                Some('#') => crate::word::ReplaceMode::Prefix,
+                Some('%') => crate::word::ReplaceMode::Suffix,
+                _ => crate::word::ReplaceMode::First,
+            };
+            if mode != crate::word::ReplaceMode::First {
+                chars.next();
+            }
+            let (pattern, separator) = parameter_word(
+                chars,
+                false,
+                true,
+                false,
+                mode == crate::word::ReplaceMode::All,
+                quoted_name,
+            )?;
+            let replacement = if separator == '/' {
+                parameter_word(chars, false, false, false, false, quoted_name)?.0
+            } else {
+                Word::Literal(String::new())
+            };
+            word.part(Part::Modify {
+                name: name.into(),
+                operation: Box::new(crate::word::Modification::Replace {
+                    pattern,
+                    replacement,
+                    mode,
+                }),
+                quoted,
+            });
+            return Ok(());
+        }
+        if let [
+            b'@',
+            op @ (b'U' | b'u' | b'L' | b'Q' | b'E' | b'a' | b'A' | b'K' | b'k'),
+            b'}',
+            ..,
+        ] = chars.as_str().as_bytes()
+        {
+            let op = *op;
+            chars.advance_bytes(3);
+            let operation = match op {
+                b'a' => crate::word::Modification::Attributes,
+                b'Q' => crate::word::Modification::Quote,
+                b'A' => crate::word::Modification::Assignment,
+                b'K' | b'k' => crate::word::Modification::Pairs {
+                    separate: op == b'k',
+                },
+                b'E' => crate::word::Modification::Escapes,
+                _ => crate::word::Modification::Case {
+                    direction: if op == b'L' {
+                        crate::pattern::CaseDirection::Lower
+                    } else {
+                        crate::pattern::CaseDirection::Upper
+                    },
+                    all: op != b'u',
+                    pattern: crate::word::Word::Literal(String::new()),
+                },
+            };
+            word.part(Part::Modify {
+                name: name.into(),
+                operation: Box::new(operation),
+                quoted,
+            });
+            return Ok(());
+        }
+        if chars.as_str().starts_with("@P}") {
+            chars.advance_bytes(3);
+            word.part(Part::Modify {
+                name: name.into(),
+                operation: Box::new(crate::word::Modification::Prompt),
+                quoted,
+            });
+            return Ok(());
+        }
+        if chars.as_str().starts_with(':') && !chars.as_str()[1..].starts_with(['-', '+', '=', '?'])
+        {
+            chars.next();
+            if let Some(tail) = chars.as_str().strip_prefix('}') {
+                *chars = tail.chars();
+                word.part(Part::BadSubstitution(format!("${{{name}:}}")));
+                return Ok(());
+            }
+            let (offset, length) = super::modifier::slice(chars)?;
+            word.part(Part::Modify {
+                name: name.into(),
+                operation: Box::new(crate::word::Modification::Slice { offset, length }),
+                quoted,
+            });
+            return Ok(());
+        }
+        if let Some(op @ ('^' | ',' | '~')) = chars.peek() {
+            chars.next();
+            let all = chars.as_str().starts_with(op);
+            if all {
+                chars.next();
+            }
+            let pattern = parameter_word(chars, false, false, false, false, quoted_name)?.0;
+            word.part(Part::Modify {
+                name: name.into(),
+                operation: Box::new(crate::word::Modification::Case {
+                    direction: match op {
+                        '^' => crate::pattern::CaseDirection::Upper,
+                        '~' => crate::pattern::CaseDirection::Toggle,
+                        _ => crate::pattern::CaseDirection::Lower,
+                    },
+                    all,
+                    pattern,
+                }),
+                quoted,
+            });
+            return Ok(());
+        }
+        if let Some(op @ ('%' | '#')) = chars.peek() {
+            chars.next();
+            let longest = chars.as_str().starts_with(op);
+            if longest {
+                chars.next();
+            }
+            let pattern = parameter_word(chars, false, false, false, false, quoted_name)?.0;
+            word.part(Part::Trim {
+                name: name.into(),
+                pattern: Box::new(pattern),
+                prefix: op == '#',
+                longest,
+                quoted,
+            });
+            return Ok(());
+        }
+        let check_empty = chars.as_str().starts_with(':');
+        if check_empty {
+            chars.next();
+        }
+        let op = match chars.next() {
+            Some('+') => crate::word::Alternative::Alternate,
+            Some('-') => crate::word::Alternative::Default,
+            Some('=') => crate::word::Alternative::Assign,
+            Some('?') => crate::word::Alternative::Error,
+            None => {
+                return Err(Error::Incomplete(Incomplete::Message(
+                    "unterminated parameter expansion",
+                )));
+            }
+            _ => return bad_substitution(content, chars, word, quoted),
+        };
+        let (alternative, _) =
+            parameter_word(chars, quoted, false, assignment, false, quoted_name)?;
+        word.part(Part::Alternative {
+            name: name.into(),
+            check_empty,
+            op,
+            word: Box::new(alternative),
+            quoted,
+        });
+        return Ok(());
+    }
 }
 
 pub(super) fn backquote(
@@ -606,10 +635,7 @@ fn parameter_word(
                 let rest = chars.as_str();
                 let end = rest.find(['/', ':', '}']).unwrap_or(rest.len());
                 let user = &rest[..end];
-                if user
-                    .chars()
-                    .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
-                {
+                if valid_tilde_user(user) {
                     let slash = !stop_slash && super::POSIX.get() && rest[end..].starts_with('/');
                     let end = end + usize::from(slash);
                     word.part(Part::Tilde(format!("~{}", &rest[..end])));
@@ -740,7 +766,7 @@ fn double_quoted(
         }
         match c {
             '\\' if inside_quoted_operand
-                || matches!(chars.clone().next(), Some('"' | '$' | '`' | '\\' | '\n')) =>
+                || matches!(chars.peek(), Some('"' | '$' | '`' | '\\' | '\n')) =>
             {
                 let escaped = chars
                     .next()
@@ -768,14 +794,24 @@ fn double_quoted(
     Err(Error::Incomplete(Incomplete::DoubleQuote))
 }
 
-fn process_word(chars: &mut Chars<'_>, word: &mut WordBuilder, input: bool) -> Result<(), Error> {
-    chars.next();
+fn nested_program(chars: &mut Chars<'_>) -> Result<Vec<super::Statement>, Error> {
     let nested = chars.as_str();
     let (tokens, spans, after) = lex(nested, true, false)?;
     let body = Reader::new(tokens, spans, &nested[..nested.len() - after.len() - 1]).list(&[])?;
     *chars = after.chars();
+    Ok(body)
+}
+
+fn process_word(chars: &mut Chars<'_>, word: &mut WordBuilder, input: bool) -> Result<(), Error> {
+    chars.next();
+    let body = nested_program(chars)?;
     word.part(Part::Process { body, input });
     Ok(())
+}
+
+fn valid_tilde_user(user: &str) -> bool {
+    user.chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
 }
 
 fn process_start(source: &str) -> bool {
@@ -893,10 +929,7 @@ fn scan_subscript<'a>(
     let mut word = WordBuilder::default();
     if associative && let Some(rest) = source.strip_prefix('~') {
         let end = rest.find('/').unwrap_or(rest.len());
-        if rest[..end]
-            .chars()
-            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
-        {
+        if valid_tilde_user(&rest[..end]) {
             word.part(Part::Tilde(source[..end + 1].to_owned()));
             chars = rest[end..].chars();
         }
@@ -972,7 +1005,7 @@ fn pattern_parts(
 ) -> Result<(), Error> {
     let mut raw = group.map_or_else(String::new, |op| op.to_string());
     let mut depth = 0usize;
-    while let Some(c) = chars.clone().next() {
+    while let Some(c) = chars.peek() {
         if group.is_none()
             && depth == 0
             && matches!(c, ' ' | '\t' | '\n' | ';' | '&' | '<' | '>' | ')')
@@ -993,7 +1026,7 @@ fn pattern_parts(
                     word.push(escaped);
                 }
             }
-            '$' if chars.clone().next().is_some_and(|next| {
+            '$' if chars.peek().is_some_and(|next| {
                 next.is_ascii_alphanumeric()
                     || matches!(
                         next,
@@ -1169,17 +1202,13 @@ fn indexed_assignment_position(mut tokens: &[Token], prefix: &str) -> bool {
     !operands
 }
 
-pub(super) fn lex(
-    source: &str,
-    substitution: bool,
-    final_input: bool,
-) -> Result<(Vec<Token>, Vec<(usize, usize)>, &str), Error> {
+type Lexed<'a> = (Vec<Token>, Vec<(usize, usize)>, &'a str);
+
+pub(super) fn lex(source: &str, substitution: bool, final_input: bool) -> Result<Lexed<'_>, Error> {
     lex_words(source, substitution, final_input, None, false)
 }
 
-pub(super) fn lex_initializer(
-    source: &str,
-) -> Result<(Vec<Token>, Vec<(usize, usize)>, &str), Error> {
+pub(super) fn lex_initializer(source: &str) -> Result<Lexed<'_>, Error> {
     lex_words(source, false, true, Some(1), false)
 }
 
@@ -1189,7 +1218,7 @@ fn lex_words(
     final_input: bool,
     array_level: Option<usize>,
     brace_substitution: bool,
-) -> Result<(Vec<Token>, Vec<(usize, usize)>, &str), Error> {
+) -> Result<Lexed<'_>, Error> {
     super::with_source_lines(source, || {
         scan(
             source,
@@ -1201,13 +1230,73 @@ fn lex_words(
     })
 }
 
+fn operator(
+    c: char,
+    chars: &mut Chars<'_>,
+    in_test: bool,
+    parentheses: &mut usize,
+    array_level: &mut Option<usize>,
+) -> Result<Token, Error> {
+    Ok(match c {
+        ';' if chars.consume(";") => {
+            if chars.consume("&") {
+                Token::EndArm(CaseEnd::Retest)
+            } else {
+                Token::EndArm(CaseEnd::Stop)
+            }
+        }
+        ';' if chars.consume("&") => Token::EndArm(CaseEnd::FallThrough),
+        ';' => Token::End,
+        '(' if chars.as_str().starts_with('(') && !in_test => {
+            let mut tail = chars.clone();
+            tail.next();
+            match arithmetic_source(&mut tail) {
+                Ok(expression) => {
+                    *chars = tail;
+                    Token::Arithmetic(expression)
+                }
+                Err(Error::Invalid(_) | Error::ArithmeticClose) => {
+                    *parentheses += 1;
+                    Token::LeftParen
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        '(' => {
+            *parentheses += 1;
+            Token::LeftParen
+        }
+        ')' => {
+            if *array_level == Some(*parentheses) {
+                *array_level = None;
+            }
+            *parentheses = parentheses.saturating_sub(1);
+            Token::RightParen
+        }
+        '|' if chars.consume("|") => Token::Or,
+        '|' if chars.consume("&") => Token::PipeBoth,
+        '|' => Token::Pipe,
+        '&' if chars.consume("&") => Token::And,
+        '&' if chars.consume(">") => {
+            if chars.as_str().starts_with('>') {
+                chars.next();
+                Token::BothRedirect(Target::Append)
+            } else {
+                Token::BothRedirect(Target::Write)
+            }
+        }
+        '&' => Token::Background,
+        op => redirect(chars, op, if op == '<' { 0 } else { 1 })?,
+    })
+}
+
 fn scan(
     source: &str,
     substitution: bool,
     final_input: bool,
     mut array_level: Option<usize>,
     brace_substitution: bool,
-) -> Result<(Vec<Token>, Vec<(usize, usize)>, &str), Error> {
+) -> Result<Lexed<'_>, Error> {
     let mut chars = source.chars();
     let mut parentheses = 0usize;
     let mut saw_case = false;
@@ -1227,7 +1316,7 @@ fn scan(
     tokens.reserve(capacity);
     spans.reserve(capacity);
     let mut token_start = 0;
-    while let Some(c) = chars.clone().next() {
+    while let Some(c) = chars.peek() {
         let offset = source.len() - chars.as_str().len();
         spans.resize(tokens.len(), (token_start, offset));
         token_start = offset;
@@ -1269,10 +1358,7 @@ fn scan(
                 let end = rest
                     .find(['/', ' ', '\t', '\n', ';', '&', '<', '>'])
                     .unwrap_or(rest.len());
-                if rest[..end]
-                    .chars()
-                    .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
-                {
+                if valid_tilde_user(&rest[..end]) {
                     word.part(Part::Tilde(format!("~{}", &rest[..end])));
                     chars = rest[end..].chars();
                 }
@@ -1314,75 +1400,11 @@ fn scan(
                 here_doc::redirect(&mut chars, 0, &mut tokens, &mut pending_docs)?;
                 continue;
             }
-            let token = match c {
-                '\n' => {
-                    here_doc::collect(&mut chars, &mut tokens, &mut pending_docs, final_input)?;
-                    Token::Newline
-                }
-                ';' if chars.as_str().starts_with(';') => {
-                    chars.next();
-                    if chars.as_str().starts_with('&') {
-                        chars.next();
-                        Token::EndArm(CaseEnd::Retest)
-                    } else {
-                        Token::EndArm(CaseEnd::Stop)
-                    }
-                }
-                ';' if chars.as_str().starts_with('&') => {
-                    chars.next();
-                    Token::EndArm(CaseEnd::FallThrough)
-                }
-                ';' => Token::End,
-                '(' if chars.as_str().starts_with('(') && !in_test => {
-                    let mut tail = chars.clone();
-                    tail.next();
-                    match arithmetic_source(&mut tail) {
-                        Ok(expression) => {
-                            chars = tail;
-                            Token::Arithmetic(expression)
-                        }
-                        Err(Error::Invalid(_) | Error::ArithmeticClose) => {
-                            parentheses += 1;
-                            Token::LeftParen
-                        }
-                        Err(e) => return Err(e),
-                    }
-                }
-                '(' => {
-                    parentheses += 1;
-                    Token::LeftParen
-                }
-                ')' => {
-                    if array_level == Some(parentheses) {
-                        array_level = None;
-                    }
-                    parentheses = parentheses.saturating_sub(1);
-                    Token::RightParen
-                }
-                '|' if chars.as_str().starts_with('|') => {
-                    chars.next();
-                    Token::Or
-                }
-                '|' if chars.as_str().starts_with('&') => {
-                    chars.next();
-                    Token::PipeBoth
-                }
-                '|' => Token::Pipe,
-                '&' if chars.as_str().starts_with('&') => {
-                    chars.next();
-                    Token::And
-                }
-                '&' if chars.as_str().starts_with('>') => {
-                    chars.next();
-                    if chars.as_str().starts_with('>') {
-                        chars.next();
-                        Token::BothRedirect(Target::Append)
-                    } else {
-                        Token::BothRedirect(Target::Write)
-                    }
-                }
-                '&' => Token::Background,
-                op => redirect(&mut chars, op, if op == '<' { 0 } else { 1 })?,
+            let token = if c == '\n' {
+                here_doc::collect(&mut chars, &mut tokens, &mut pending_docs, final_input)?;
+                Token::Newline
+            } else {
+                operator(c, &mut chars, in_test, &mut parentheses, &mut array_level)?
             };
             tokens.push(token);
             continue;
@@ -1441,7 +1463,7 @@ fn scan(
             chars = start[prefix.len() + 1..].chars();
             started = true;
         }
-        while let Some(c) = chars.clone().next() {
+        while let Some(c) = chars.peek() {
             if separator(c) && !process_start(chars.as_str()) {
                 break;
             }
@@ -1575,10 +1597,7 @@ fn scan(
                     let suffix = &chars.as_str()[..length];
                     // Only consume a complete unquoted prefix. Quotes, escapes and
                     // expansions inside a login name must go through the word reader.
-                    if suffix
-                        .chars()
-                        .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
-                    {
+                    if valid_tilde_user(&suffix) {
                         let rest = chars.as_str();
                         let slash = super::POSIX.get() && rest[length..].starts_with('/');
                         let end = length + usize::from(slash);
@@ -1599,7 +1618,7 @@ fn scan(
             continue;
         }
         let word = word.finish();
-        if !protected && matches!(chars.clone().next(), Some('<' | '>')) {
+        if !protected && matches!(chars.peek(), Some('<' | '>')) {
             let literal = &start[..start.len() - chars.as_str().len()];
             if let Some(name) = literal
                 .strip_prefix('{')

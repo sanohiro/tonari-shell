@@ -192,6 +192,27 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
         {
             Flow::Continue(0)
         }
+        Cow::Borrowed(Command::While {
+            until,
+            condition,
+            body,
+        }) => run_while(session, *until, condition, body, status),
+        Cow::Borrowed(Command::For {
+            select,
+            header,
+            name,
+            words,
+            body,
+        }) => run_for(session, *select, header, name, words.clone(), body, status),
+        Cow::Borrowed(Command::ForArithmetic {
+            init,
+            condition,
+            step,
+            body,
+        }) => run_arithmetic_loop(session, init, condition, step, body, status),
+        Cow::Borrowed(Command::Case { header, word, arms }) => {
+            run_case(session, header, word.clone(), arms, status, tail)
+        }
         Cow::Borrowed(Command::Group(body)) => borrowed_program(session, body, status, tail),
         Cow::Borrowed(Command::Arithmetic(expr)) => {
             crate::arithmetic::command(expr, session, status)
@@ -241,6 +262,258 @@ fn run_if<P: AsRef<[Statement]>>(
     }
 }
 
+fn run_while(
+    session: &mut Session,
+    until: bool,
+    condition: &[Statement],
+    body: &[Statement],
+    status: u8,
+) -> Flow {
+    repeat(session, body, status, |s, last| {
+        match condition_program(s, condition, last) {
+            Flow::Continue(code) => Ok(((code == 0) != until).then_some(code)),
+            other => Err(other),
+        }
+    })
+}
+
+fn run_for(
+    session: &mut Session,
+    select: bool,
+    header: &crate::parser::Location,
+    name: &str,
+    words: Option<Vec<crate::word::Word>>,
+    body: &[Statement],
+    status: u8,
+) -> Flow {
+    if !crate::word::is_identifier(name) {
+        eprintln!("tonari: {name}: invalid loop variable");
+        return Flow::Continue(1);
+    }
+    let implicit_words = words.is_none();
+    let items = match words {
+        None => session.positional.as_slice().to_vec(),
+        Some(words) => {
+            let captured = std::cell::Cell::new(None);
+            let mut env = crate::expansion::Expansion::new(session, status, &captured);
+            let mut fields = Vec::new();
+            for word in words {
+                if let Err(error) = env.append_fields(word, &mut fields) {
+                    error.report("");
+                    return error.flow(env.session);
+                }
+            }
+            fields
+        }
+    };
+    if select {
+        if session.traps.debug_handler() {
+            session.current_command = Some(header.clone());
+            if let Some(flow) = crate::traps::debug(session, status) {
+                return flow;
+            }
+        }
+        return select::run(session, name, &items, body, status);
+    }
+    let mut items = items.into_iter();
+    repeat(session, body, status, |s, last| {
+        let Some(value) = items.next() else {
+            return Ok(None);
+        };
+        if s.traps.debug_handler() {
+            s.current_command = Some(header.clone());
+            if let Some(flow) = crate::traps::debug(s, last) {
+                return Err(flow);
+            }
+        }
+        if s.xtrace {
+            execute::trace_line(s, last, |line| {
+                line.push_str(header.text());
+                if implicit_words {
+                    line.push_str(" in \"$@\"");
+                }
+            });
+        }
+        let error = if s.is_nameref(name) {
+            s.assign_for_reference(name, value).err()
+        } else if s.readonly(name) {
+            Some(crate::session::READONLY)
+        } else {
+            s.assign(name, &value);
+            None
+        };
+        if let Some(error) = error {
+            eprintln!("tonari: {name}: {error}");
+            return Err(
+                if error == crate::session::READONLY && s.posix && !s.interactive {
+                    Flow::Exit(1)
+                } else {
+                    Flow::Continue(1)
+                },
+            );
+        }
+        Ok(Some(last))
+    })
+}
+
+fn run_arithmetic_loop(
+    session: &mut Session,
+    init: &str,
+    condition: &str,
+    step: &str,
+    body: &[Statement],
+    status: u8,
+) -> Flow {
+    let header = session.current_command.clone();
+    let line = session.line();
+    let mut first = true;
+    let arithmetic = |s: &mut Session,
+                      expr: &str,
+                      compiled: &crate::arithmetic::Repeated,
+                      last: u8|
+     -> Result<i64, Flow> {
+        if s.traps.debug_handler() {
+            s.current_command = Some(crate::parser::Location::label(
+                format!("(({}))", expr.trim()),
+                line,
+            ));
+            if let Some(flow) = crate::traps::debug(s, last) {
+                return Err(flow);
+            }
+        }
+        let result = if s.xtrace {
+            let expr = expr.trim_start();
+            if expr.is_empty() {
+                crate::arithmetic::traced("1", s, last, None)
+            } else {
+                crate::arithmetic::traced(expr, s, last, Some(compiled))
+            }
+        } else {
+            compiled.run(s, last)
+        };
+        result.map_err(|e| {
+            eprintln!("tonari: {e}");
+            Flow::Continue(1)
+        })
+    };
+    if (session.xtrace || !init.trim().is_empty())
+        && let Err(flow) = arithmetic(
+            session,
+            init,
+            &crate::arithmetic::Repeated::Other(init),
+            status,
+        )
+    {
+        return flow;
+    }
+    let test = crate::arithmetic::Repeated::new(condition);
+    let update = crate::arithmetic::Repeated::new(step);
+    repeat(session, body, status, |s, last| {
+        if !first && !s.traps.debug_handler() {
+            s.current_command.clone_from(&header);
+        }
+        if !first && (s.xtrace || !step.is_empty()) {
+            arithmetic(s, step, &update, last)?;
+        }
+        first = false;
+        Ok(((!s.xtrace && condition.trim().is_empty())
+            || arithmetic(s, condition, &test, last)? != 0)
+            .then_some(last))
+    })
+}
+
+fn run_case(
+    session: &mut Session,
+    header: &crate::parser::Location,
+    word: crate::word::Word,
+    arms: &[crate::parser::CaseArm],
+    status: u8,
+    tail: bool,
+) -> Flow {
+    if session.traps.debug_handler() {
+        session.current_command = Some(crate::parser::Location::label(
+            format!("{} ", header.text()),
+            header.line,
+        ));
+        if let Some(flow) = crate::traps::debug(session, status) {
+            return flow;
+        }
+    }
+    if session.xtrace {
+        execute::trace_line(session, status, |line| line.push_str(header.text()));
+    }
+    let value = match expand_case(session, word, status, false) {
+        Ok(v) => v,
+        Err(f) => return f,
+    };
+    let mut fall_through = false;
+    let mut result = 0;
+    let mut last = status;
+    for (patterns, body, end) in arms.iter() {
+        let mut matched = fall_through;
+        if !matched {
+            for pattern in patterns {
+                matched = match pattern {
+                    CasePattern::Fixed(matcher) if session.shopt.nocasematch => {
+                        matcher.insensitive(&value, false, session.character_locale())
+                    }
+                    CasePattern::Extended(_, matcher) if session.shopt.nocasematch => matcher
+                        .insensitive(
+                            &value,
+                            session.shopt.glob.extglob,
+                            session.character_locale(),
+                        ),
+                    CasePattern::Fixed(matcher) => matcher.matches(&value),
+                    CasePattern::Extended(group, basic) => {
+                        if session.shopt.glob.extglob {
+                            group.accepts(&value, false)
+                        } else {
+                            basic.matches(&value)
+                        }
+                    }
+                    CasePattern::Dynamic(word) => {
+                        match expand_case(session, word.clone(), last, true) {
+                            Ok(glob) if session.shopt.nocasematch => {
+                                crate::pattern::extended::insensitive_match(
+                                    &value,
+                                    &glob,
+                                    session.shopt.glob.extglob,
+                                    session.character_locale(),
+                                )
+                            }
+                            Ok(glob) if session.shopt.glob.extglob => {
+                                crate::pattern::extended::matches(&value, &glob)
+                            }
+                            Ok(glob) => crate::pattern::matches(&value, &glob),
+                            Err(f) => return f,
+                        }
+                    }
+                };
+                if matched {
+                    break;
+                }
+            }
+        }
+        if matched {
+            let stop = *end == crate::parser::CaseEnd::Stop;
+            if !body.is_empty() {
+                match borrowed_program(session, body, last, tail && stop) {
+                    Flow::Continue(code) => {
+                        result = code;
+                        last = code;
+                    }
+                    other => return other,
+                }
+            }
+            if stop {
+                break;
+            }
+            fall_through = *end == crate::parser::CaseEnd::FallThrough;
+        }
+    }
+    Flow::Continue(result)
+}
+
 fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) -> Flow {
     match command {
         Command::Timed {
@@ -266,88 +539,14 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             until,
             condition,
             body,
-        } => repeat(session, &body, status, |s, last| {
-            match condition_program(s, &condition, last) {
-                Flow::Continue(code) => Ok(((code == 0) != until).then_some(code)),
-                other => Err(other),
-            }
-        }),
+        } => run_while(session, until, &condition, &body, status),
         Command::For {
             select,
             header,
             name,
             words,
             body,
-        } => {
-            if !crate::word::is_identifier(&name) {
-                eprintln!("tonari: {name}: invalid loop variable");
-                return Flow::Continue(1);
-            }
-            let implicit_words = words.is_none();
-            let items = match words {
-                None => session.positional.as_slice().to_vec(),
-                Some(words) => {
-                    let captured = std::cell::Cell::new(None);
-                    let mut env = crate::expansion::Expansion::new(session, status, &captured);
-                    let mut fields = Vec::new();
-                    for word in words {
-                        if let Err(error) = env.append_fields(word, &mut fields) {
-                            error.report("");
-                            return error.flow(env.session);
-                        }
-                    }
-                    fields
-                }
-            };
-            if select {
-                if session.traps.debug_handler() {
-                    session.current_command = Some(header);
-                    if let Some(flow) = crate::traps::debug(session, status) {
-                        return flow;
-                    }
-                }
-                return select::run(session, &name, &items, &body, status);
-            }
-            let mut items = items.into_iter();
-            repeat(session, &body, status, |s, last| {
-                let Some(value) = items.next() else {
-                    return Ok(None);
-                };
-                if s.traps.debug_handler() {
-                    s.current_command = Some(header.clone());
-                    if let Some(flow) = crate::traps::debug(s, last) {
-                        return Err(flow);
-                    }
-                }
-                if s.xtrace {
-                    execute::trace_line(s, last, |line| {
-                        line.push_str(header.text());
-                        if implicit_words {
-                            line.push_str(" in \"$@\"");
-                        }
-                    });
-                }
-                let error = if s.is_nameref(&name) {
-                    s.assign_for_reference(&name, value).err()
-                } else if s.readonly(&name) {
-                    Some(crate::session::READONLY)
-                } else {
-                    s.assign(&name, &value);
-                    None
-                };
-                if let Some(error) = error {
-                    eprintln!("tonari: {name}: {error}");
-                    return Err(
-                        if error == crate::session::READONLY && s.posix && !s.interactive {
-                            Flow::Exit(1)
-                        } else {
-                            Flow::Continue(1)
-                        },
-                    );
-                }
-                Ok(Some(last))
-            })
-        }
+        } => run_for(session, select, &header, &name, words, &body, status),
         Command::Test(expr) => crate::test_expression::evaluate(&expr, session, status),
         Command::Arithmetic(expr) => crate::arithmetic::command(&expr, session, status),
         Command::ForArithmetic {
@@ -355,64 +554,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             condition,
             step,
             body,
-        } => {
-            let header = session.current_command.clone();
-            let line = session.line();
-            let mut first = true;
-            let arithmetic = |s: &mut Session,
-                              expr: &str,
-                              compiled: &crate::arithmetic::Repeated,
-                              last: u8|
-             -> Result<i64, Flow> {
-                if s.traps.debug_handler() {
-                    s.current_command = Some(crate::parser::Location::label(
-                        format!("(({}))", expr.trim()),
-                        line,
-                    ));
-                    if let Some(flow) = crate::traps::debug(s, last) {
-                        return Err(flow);
-                    }
-                }
-                let result = if s.xtrace {
-                    let expr = expr.trim_start();
-                    if expr.is_empty() {
-                        crate::arithmetic::traced("1", s, last, None)
-                    } else {
-                        crate::arithmetic::traced(expr, s, last, Some(compiled))
-                    }
-                } else {
-                    compiled.run(s, last)
-                };
-                result.map_err(|e| {
-                    eprintln!("tonari: {e}");
-                    Flow::Continue(1)
-                })
-            };
-            if (session.xtrace || !init.trim().is_empty())
-                && let Err(flow) = arithmetic(
-                    session,
-                    &init,
-                    &crate::arithmetic::Repeated::Other(&init),
-                    status,
-                )
-            {
-                return flow;
-            }
-            let test = crate::arithmetic::Repeated::new(&condition);
-            let update = crate::arithmetic::Repeated::new(&step);
-            repeat(session, &body, status, |s, last| {
-                if !first && !s.traps.debug_handler() {
-                    s.current_command.clone_from(&header);
-                }
-                if !first && (s.xtrace || !step.is_empty()) {
-                    arithmetic(s, &step, &update, last)?;
-                }
-                first = false;
-                Ok(((!s.xtrace && condition.trim().is_empty())
-                    || arithmetic(s, &condition, &test, last)? != 0)
-                    .then_some(last))
-            })
-        }
+        } => run_arithmetic_loop(session, &init, &condition, &step, &body, status),
         Command::Coprocess { name, body } => {
             crate::execute::coprocess::launch(session, name, *body, status).unwrap_or_else(|e| {
                 eprintln!("tonari: coproc: {e}");
@@ -449,89 +591,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
         Command::Group(body) => execute_program(session, body, status, tail),
         Command::Subshell(body) => crate::subshell::launch_group(session, body, status, false),
         Command::Case { header, word, arms } => {
-            if session.traps.debug_handler() {
-                session.current_command = Some(crate::parser::Location::label(
-                    format!("{} ", header.text()),
-                    header.line,
-                ));
-                if let Some(flow) = crate::traps::debug(session, status) {
-                    return flow;
-                }
-            }
-            if session.xtrace {
-                execute::trace_line(session, status, |line| line.push_str(header.text()));
-            }
-            let value = match expand_case(session, word, status, false) {
-                Ok(v) => v,
-                Err(f) => return f,
-            };
-            let mut fall_through = false;
-            let mut result = 0;
-            let mut last = status;
-            for (patterns, body, end) in arms.iter() {
-                let mut matched = fall_through;
-                if !matched {
-                    for pattern in patterns {
-                        matched = match pattern {
-                            CasePattern::Fixed(matcher) if session.shopt.nocasematch => {
-                                matcher.insensitive(&value, false, session.character_locale())
-                            }
-                            CasePattern::Extended(_, matcher) if session.shopt.nocasematch => {
-                                matcher.insensitive(
-                                    &value,
-                                    session.shopt.glob.extglob,
-                                    session.character_locale(),
-                                )
-                            }
-                            CasePattern::Fixed(matcher) => matcher.matches(&value),
-                            CasePattern::Extended(group, basic) => {
-                                if session.shopt.glob.extglob {
-                                    group.accepts(&value, false)
-                                } else {
-                                    basic.matches(&value)
-                                }
-                            }
-                            CasePattern::Dynamic(word) => {
-                                match expand_case(session, word.clone(), last, true) {
-                                    Ok(glob) if session.shopt.nocasematch => {
-                                        crate::pattern::extended::insensitive_match(
-                                            &value,
-                                            &glob,
-                                            session.shopt.glob.extglob,
-                                            session.character_locale(),
-                                        )
-                                    }
-                                    Ok(glob) if session.shopt.glob.extglob => {
-                                        crate::pattern::extended::matches(&value, &glob)
-                                    }
-                                    Ok(glob) => crate::pattern::matches(&value, &glob),
-                                    Err(f) => return f,
-                                }
-                            }
-                        };
-                        if matched {
-                            break;
-                        }
-                    }
-                }
-                if matched {
-                    let stop = *end == crate::parser::CaseEnd::Stop;
-                    if !body.is_empty() {
-                        match borrowed_program(session, body, last, tail && stop) {
-                            Flow::Continue(code) => {
-                                result = code;
-                                last = code;
-                            }
-                            other => return other,
-                        }
-                    }
-                    if stop {
-                        break;
-                    }
-                    fall_through = *end == crate::parser::CaseEnd::FallThrough;
-                }
-            }
-            Flow::Continue(result)
+            run_case(session, &header, word, &arms, status, tail)
         }
         Command::Function { name, definition } => {
             if session.posix {
