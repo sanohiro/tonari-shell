@@ -363,19 +363,23 @@ impl Session {
             .map_or(default, |n| usize::try_from(n).unwrap_or(usize::MAX))
     }
     pub(crate) fn begin_history_line(&mut self, text: &str) -> bool {
-        if !self.history_enabled || !self.accept_history(text, self.history_lines().last()) {
+        if !self.history_enabled {
+            return false;
+        }
+        let limit = self.history_limit("HISTSIZE", 500);
+        if limit == 0 || !self.history_matches_rules(text, self.history_lines().last()) {
             return false;
         }
         let text = text.strip_suffix('\n').unwrap_or(text);
         if !text.contains('\n') || self.shopt.cmdhist && self.shopt.lithist {
-            self.push_history(text, true);
+            self.push_history_limited(text, true, limit);
         } else if self.shopt.cmdhist {
             let entry = crate::parser::history_command(text);
-            self.push_history(&entry, true);
+            self.push_history_limited(&entry, true, limit);
         } else {
             let mut count = 0;
             for line in text.split('\n').filter(|s| !s.is_empty()) {
-                self.push_history(line, true);
+                self.push_history_limited(line, true, limit);
                 count += 1;
             }
             self.history_mut().current_lines = count;

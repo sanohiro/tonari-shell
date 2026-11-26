@@ -133,6 +133,7 @@ pub struct Session {
     // Only changed variables are stored here. Simple commands inherit the
     // original process environment without building a copy on startup.
     variables: BTreeMap<String, Variable>,
+    inherited_names: std::cell::OnceCell<Rc<Vec<String>>>,
     dynamic: dynamic::Dynamic,
     groups_unset: bool,
     funcname_unset: bool,
@@ -290,61 +291,82 @@ impl Session {
     }
 
     pub fn variable_names(&self, prefix: &str) -> Vec<String> {
-        let mut names: std::collections::BTreeSet<_> = std::env::vars_os()
-            .filter_map(|(k, _)| k.into_string().ok())
-            .filter(|k| k.starts_with(prefix) && is_identifier(k))
-            .collect();
-        names.extend(
-            [
-                "PWD",
-                "SHELL",
-                "TERM",
-                "_",
-                "IFS",
-                "PATH",
-                "OPTIND",
-                "OPTERR",
-                "UID",
-                "EUID",
-                "PPID",
-                "BASHOPTS",
-                "SHELLOPTS",
-                "BASH",
-                "BASH_VERSION",
-                "BASH_VERSINFO",
-                "BASH_ALIASES",
-                "BASH_CMDS",
-                "SECONDS",
-                "RANDOM",
-                "SRANDOM",
-                "BASH_MONOSECONDS",
-                "BASH_ARGC",
-                "BASH_ARGV",
-                "BASH_SOURCE",
-                "BASH_LINENO",
-                "FUNCNAME",
-                "DIRSTACK",
-                "PIPESTATUS",
-                "HISTCMD",
-                "GROUPS",
-                "HOSTTYPE",
-                "HOSTNAME",
-                "PS4",
-                "OSTYPE",
-                "MACHTYPE",
-            ]
+        self.visible_names(prefix)
             .into_iter()
-            .filter(|k| k.starts_with(prefix))
-            .map(str::to_owned),
-        );
-        if self.funcname_unset {
-            names.remove("FUNCNAME");
-        }
-        if !self.word_breaks_unset && "COMP_WORDBREAKS".starts_with(prefix) {
-            names.insert("COMP_WORDBREAKS".into());
-        }
-        if self.execution_string.is_some() && "BASH_EXECUTION_STRING".starts_with(prefix) {
-            names.insert("BASH_EXECUTION_STRING".into());
+            .map(str::to_owned)
+            .collect()
+    }
+
+    fn visible_names(&self, prefix: &str) -> Vec<&str> {
+        // Only a fresh shell session changes the inherited process environment.
+        // Shell bindings, tombstones and optional names remain live overlays.
+        let base = self.inherited_names.get_or_init(|| {
+            let mut names: Vec<_> = std::env::vars_os()
+                .filter_map(|(key, _)| key.into_string().ok())
+                .filter(|key| is_identifier(key))
+                .collect();
+            names.extend(
+                [
+                    "PWD",
+                    "SHELL",
+                    "TERM",
+                    "_",
+                    "IFS",
+                    "PATH",
+                    "OPTIND",
+                    "OPTERR",
+                    "UID",
+                    "EUID",
+                    "PPID",
+                    "BASHOPTS",
+                    "SHELLOPTS",
+                    "BASH",
+                    "BASH_VERSION",
+                    "BASH_VERSINFO",
+                    "BASH_ALIASES",
+                    "BASH_CMDS",
+                    "SECONDS",
+                    "RANDOM",
+                    "SRANDOM",
+                    "BASH_MONOSECONDS",
+                    "BASH_ARGC",
+                    "BASH_ARGV",
+                    "BASH_SOURCE",
+                    "BASH_LINENO",
+                    "FUNCNAME",
+                    "DIRSTACK",
+                    "PIPESTATUS",
+                    "HISTCMD",
+                    "GROUPS",
+                    "HOSTTYPE",
+                    "HOSTNAME",
+                    "PS4",
+                    "OSTYPE",
+                    "MACHTYPE",
+                ]
+                .into_iter()
+                .map(str::to_owned),
+            );
+            names.sort_unstable();
+            names.dedup();
+            Rc::new(names)
+        });
+        let start = base.partition_point(|key| key.as_str() < prefix);
+        let mut names: Vec<_> = base[start..]
+            .iter()
+            .take_while(|key| key.starts_with(prefix))
+            .map(String::as_str)
+            .filter(|key| {
+                !(self.funcname_unset && *key == "FUNCNAME") && !self.variables.contains_key(*key)
+            })
+            .collect();
+        for (key, active) in [
+            ("COMP_WORDBREAKS", !self.word_breaks_unset),
+            ("BASH_EXECUTION_STRING", self.execution_string.is_some()),
+        ] {
+            if active && key.starts_with(prefix) && !self.variables.contains_key(key) {
+                names.push(key);
+            }
         }
         use std::ops::Bound::{Included, Unbounded};
         for (key, var) in self
@@ -355,12 +377,12 @@ impl Session {
                 break;
             }
             if var.declared {
-                names.insert(key.clone());
-            } else {
-                names.remove(key);
+                names.push(key);
             }
         }
-        names.into_iter().collect()
+        names.sort_unstable();
+        names.dedup();
+        names
     }
 
     pub fn shell_pid(&self) -> u32 {
@@ -474,14 +496,14 @@ impl Session {
         if args.is_empty() {
             let mut out = io::BufWriter::new(io::stdout().lock());
             let locale = self.character_locale();
-            for name in self.variable_names("") {
-                let stored = self.variables.get(&name);
+            for name in self.visible_names("") {
+                let stored = self.variables.get(name);
                 let snapshot;
-                let result = if self.array_parameter(&name) {
+                let result = if self.array_parameter(name) {
                     let var = if let Some(var) = stored.filter(|v| !v.dynamic) {
                         var
                     } else {
-                        snapshot = self.declared_variable(&name, false).unwrap();
+                        snapshot = self.declared_variable(name, false).unwrap();
                         &snapshot
                     };
                     if !var.array_assigned
@@ -491,13 +513,13 @@ impl Session {
                     }
                     write!(out, "{name}").and_then(|_| print_variable_value(&mut out, var))
                 } else {
-                    let value = if dynamic::is_dynamic(&name) && stored.is_none_or(|v| v.dynamic) {
+                    let value = if dynamic::is_dynamic(name) && stored.is_none_or(|v| v.dynamic) {
                         // A listing must not advance RANDOM or consume fresh entropy.
-                        self.listed_number(&name).map(|v| Cow::Owned(v.to_string()))
+                        self.listed_number(name).map(|v| Cow::Owned(v.to_string()))
                     } else if let Some(var) = stored {
                         var.value.as_deref().map(Cow::Borrowed)
                     } else {
-                        self.get(&name).map(Cow::Owned)
+                        self.get(name).map(Cow::Owned)
                     };
                     let Some(value) = value else { continue };
                     writeln!(out, "{name}={}", set_value(&value, self.posix, locale))
@@ -706,12 +728,30 @@ impl Session {
 
     // Ordinary shell-authored scalars can be inspected without copying their value.
     pub(crate) fn scalar_setting(&self, name: &str) -> Option<Cow<'_, str>> {
-        if let Some(var) = self.variables.get(name)
-            && !var.nameref
-            && !var.dynamic
-            && var.elements.is_none()
-        {
-            return var.value.as_deref().map(Cow::Borrowed);
+        match self.variables.get(name) {
+            Some(var) if !var.nameref && !var.dynamic && var.elements.is_none() => {
+                return var.value.as_deref().map(Cow::Borrowed);
+            }
+            None => {
+                // In-process script reentry changes only PATH and directory/level
+                // variables. These inherited history settings stay constant.
+                static HISTORY: [std::sync::OnceLock<Option<String>>; 4] =
+                    [const { std::sync::OnceLock::new() }; 4];
+                let slot = match name {
+                    "HISTSIZE" => Some(0),
+                    "HISTCONTROL" => Some(1),
+                    "HISTIGNORE" => Some(2),
+                    "histchars" => Some(3),
+                    _ => None,
+                };
+                if let Some(i) = slot {
+                    return HISTORY[i]
+                        .get_or_init(|| std::env::var(name).ok())
+                        .as_deref()
+                        .map(Cow::Borrowed);
+                }
+            }
+            Some(_) => {}
         }
         self.get(name).map(Cow::Owned)
     }

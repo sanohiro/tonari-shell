@@ -171,7 +171,7 @@ pub(crate) fn expand_line<'a>(
     line: &'a str,
     mut quote: Option<char>,
 ) -> io::Result<Expansion<'a>> {
-    let chars = session.get("histchars");
+    let chars = session.scalar_setting("histchars");
     let mut chars = chars.as_deref().unwrap_or("!^#").chars();
     let event = chars.next();
     let quick = chars.next();
