@@ -825,6 +825,14 @@ pub(crate) fn arithmetic_word(source: &str) -> Result<crate::word::Word, Error> 
 }
 
 pub(crate) fn subscript_word(source: &str, associative: bool) -> Result<crate::word::Word, Error> {
+    if !source.is_empty()
+        && !(associative && source.starts_with('~'))
+        && !source
+            .bytes()
+            .any(|b| matches!(b, b'$' | b'`' | b'"' | b'\\' | b'\''))
+    {
+        return Ok(Word::Literal(source.into()));
+    }
     scan_subscript(source, associative, |_, _| Ok(false))
 }
 

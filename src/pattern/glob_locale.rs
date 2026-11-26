@@ -112,16 +112,17 @@ pub(crate) fn sync_ranges(session: &crate::Session) {
     }
     let name = ["LC_ALL", "LC_COLLATE", "LANG"]
         .into_iter()
-        .find_map(|key| session.get(key).filter(|s| !s.is_empty()))
+        .find_map(|key| session.scalar_setting(key).filter(|s| !s.is_empty()))
         .unwrap_or_default();
-    if matches!(name.as_str(), "" | "C" | "POSIX" | "C.UTF-8" | "C.utf8") {
+    if matches!(name.as_ref(), "" | "C" | "POSIX" | "C.UTF-8" | "C.utf8") {
         RANGE_HANDLE.set(std::ptr::null_mut());
         return;
     }
     RANGE_CACHE.with_borrow_mut(|cached| {
         if cached.as_ref().is_none_or(|x| x.collate != name) {
             RANGE_HANDLE.set(std::ptr::null_mut());
-            *cached = Cached::new(name.clone(), name);
+            let owned = name.into_owned();
+            *cached = Cached::new(owned.clone(), owned);
         }
         RANGE_HANDLE.set(cached.as_ref().map_or(std::ptr::null_mut(), |x| x.handle));
     });
@@ -132,7 +133,18 @@ pub(super) fn collated_ranges() -> bool {
 }
 
 pub(super) fn range_order(a: &[u8; 4], b: &[u8; 4]) -> std::cmp::Ordering {
+    compare(RANGE_HANDLE.get(), a, b)
+}
+
+pub(super) fn in_range(lo: &[u8; 4], value: &[u8; 4], hi: &[u8; 4]) -> bool {
     let locale = RANGE_HANDLE.get();
+    if locale.is_null() {
+        return lo <= value && value <= hi;
+    }
+    !compare(locale, lo, value).is_gt() && !compare(locale, value, hi).is_gt()
+}
+
+fn compare(locale: libc::locale_t, a: &[u8; 4], b: &[u8; 4]) -> std::cmp::Ordering {
     if locale.is_null() || a == b {
         return a.cmp(b);
     }

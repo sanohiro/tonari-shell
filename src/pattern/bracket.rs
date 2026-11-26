@@ -199,10 +199,7 @@ impl Member {
     fn accepts(&self, value: &[u8; 4]) -> bool {
         match self {
             Self::Literal(v) => v == value,
-            Self::Range(lo, hi) => {
-                !super::glob_locale::range_order(lo, value).is_gt()
-                    && !super::glob_locale::range_order(value, hi).is_gt()
-            }
+            Self::Range(lo, hi) => super::glob_locale::in_range(lo, value, hi),
             Self::Never => false,
             Self::Ascii => value[0].is_ascii(),
             Self::Native(pattern) => {

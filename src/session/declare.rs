@@ -323,9 +323,6 @@ pub(super) fn run(
         let name = if !creates_local
             && (flags.nameref.is_none() || flags.nameref == Some(false) && changes_target())
             && session.has_namerefs
-            && session
-                .scoped_variable(base, flags.global)
-                .is_some_and(|v| v.nameref)
         {
             match session.scoped_reference_name(name, flags.global) {
                 Ok(target) => {

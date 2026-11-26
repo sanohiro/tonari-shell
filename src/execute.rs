@@ -548,7 +548,7 @@ impl External {
         Self {
             words,
             argv,
-            diagnostic: session.diagnostic_prefix(session.line()),
+            diagnostic: session.diagnostic_prefix(|| session.line()),
             original_name: original,
             search_paths,
             env: if clear_env {
@@ -2240,7 +2240,7 @@ pub(crate) fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(
     append(&mut line);
     line.push('\n');
     let fd = session
-        .get("BASH_XTRACEFD")
+        .scalar_setting("BASH_XTRACEFD")
         .and_then(|v| v.parse().ok())
         .unwrap_or(2);
     let mut data = line.as_bytes();
@@ -2945,7 +2945,7 @@ fn run_external(
                     && launch.group.is_none()
                     && !session.traps.active() =>
             {
-                let prefix = session.diagnostic_prefix(session.line());
+                let prefix = session.diagnostic_prefix(|| session.line());
                 eprintln!(
                     "{}{}: command not found",
                     prefix.as_deref().unwrap_or("tonari: "),

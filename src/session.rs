@@ -683,6 +683,18 @@ impl Session {
         Err("circular name reference")
     }
 
+    // Ordinary shell-authored scalars can be inspected without copying their value.
+    pub(crate) fn scalar_setting(&self, name: &str) -> Option<Cow<'_, str>> {
+        if let Some(var) = self.variables.get(name)
+            && !var.nameref
+            && !var.dynamic
+            && var.elements.is_none()
+        {
+            return var.value.as_deref().map(Cow::Borrowed);
+        }
+        self.get(name).map(Cow::Owned)
+    }
+
     pub fn get(&self, name: &str) -> Option<String> {
         if name == "_" {
             return self
