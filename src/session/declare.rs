@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::rc::Rc;
 
-use super::{Session, Variable, is_identifier, print_declaration};
+use super::{LetterCase, Session, Variable, is_identifier, print_declaration};
 
 #[derive(Default)]
 struct Options {
@@ -17,6 +17,7 @@ struct Options {
     readonly: Option<bool>,
     global: bool,
     integer: Option<bool>,
+    capitalize: Option<bool>,
     lower: Option<bool>,
     upper: Option<bool>,
     inherit: bool,
@@ -72,6 +73,7 @@ pub(super) fn run(
                 'r' => flags.readonly = Some(on),
                 'g' => flags.global = on,
                 'i' => flags.integer = Some(on),
+                'c' => flags.capitalize = Some(on),
                 'l' => flags.lower = Some(on),
                 'u' => flags.upper = Some(on),
                 'n' => flags.nameref = Some(on),
@@ -178,6 +180,7 @@ pub(super) fn run(
             && !flags.associative
             && flags.nameref.is_none()
             && flags.integer.is_none()
+            && flags.capitalize.is_none()
             && flags.lower.is_none()
             && flags.upper.is_none()
         {
@@ -206,8 +209,10 @@ pub(super) fn run(
                     && (flags.readonly == Some(true) && !var.readonly
                         || flags.array && (var.elements.is_none() || var.associative().is_some())
                         || flags.associative && var.associative().is_none()
-                        || flags.lower == Some(true) && var.letter_case != Some(false)
-                        || flags.upper == Some(true) && var.letter_case != Some(true)
+                        || flags.capitalize == Some(true)
+                            && var.letter_case != Some(LetterCase::Capitalize)
+                        || flags.lower == Some(true) && var.letter_case != Some(LetterCase::Lower)
+                        || flags.upper == Some(true) && var.letter_case != Some(LetterCase::Upper)
                         || flags.integer == Some(true) && !var.integer
                         || flags.nameref == Some(true) && !var.nameref)
                 {
@@ -362,13 +367,21 @@ pub(super) fn run(
             var.nameref = on;
             session.has_namerefs |= on;
         }
-        match (flags.lower, flags.upper) {
-            (Some(true), Some(true)) => var.letter_case = None,
-            (Some(true), _) => var.letter_case = Some(false),
-            (_, Some(true)) => var.letter_case = Some(true),
-            (Some(false), _) if var.letter_case == Some(false) => var.letter_case = None,
-            (_, Some(false)) if var.letter_case == Some(true) => var.letter_case = None,
-            _ => {}
+        let case_flags = [
+            (LetterCase::Capitalize, flags.capitalize),
+            (LetterCase::Lower, flags.lower),
+            (LetterCase::Upper, flags.upper),
+        ];
+        let mut enabled = case_flags
+            .iter()
+            .filter_map(|&(mode, on)| (on == Some(true)).then_some(mode));
+        if let Some(mode) = enabled.next() {
+            var.letter_case = enabled.next().is_none().then_some(mode);
+        } else if case_flags
+            .iter()
+            .any(|&(mode, on)| on == Some(false) && var.letter_case == Some(mode))
+        {
+            var.letter_case = None;
         }
         if let Some(integer) = flags.integer {
             var.integer = integer;

@@ -14,6 +14,7 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "declared-case": """declare -c v='hELLO woRLD'; echo "$v"; v+=' ABC'; declare -p v; declare -ac arr=('eXAMPLE' '.NEXT'); declare -p arr; declare +c v; v='rAW'; echo "$v"; declare -cl z='mIx'; declare -p z""",
     "completion-sources": "complete -g -s -A signal pick; complete -p pick; compgen -A group $(id -gn) | LC_ALL=C sort -u; compgen -s http | LC_ALL=C sort -u; compgen -A signal SIGTER; compgen -A signal DEBUG",
 
     "posix-variable": 'f(){ shopt -qo posix; printf "%s/%s " "$?" "${POSIXLY_CORRECT-unset}"; }; f; POSIXLY_CORRECT=1 f; f; set -o posix; f; unset POSIXLY_CORRECT; f; g(){ local POSIXLY_CORRECT=inside; f; }; g; f',
@@ -54,6 +55,7 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "declared-case": ('v="$phrase"', 2200),
     "completion-group": ('compgen -g "$group" >/dev/null', 24),
     "completion-service": ('compgen -s http >/dev/null', 40),
     "completion-signal": ('compgen -A signal SIGTER >/dev/null', 650),
@@ -242,6 +244,7 @@ def main():
             if not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "declared-case": "declare -c v; phrase='aBCDEf GHIJKl mixed case words'",
                 "completion-group": "group=$(id -gn)",
                 "physical": "set -P", "execfail": "shopt -s execfail; exec 2>/dev/null", "history-number": "set -o history; history -s seed", "shift-verbose": "shopt -s shift_verbose; exec 2>/dev/null",
                 "alias-table": "alias sample=value", "command-table": "hash -p /bin/sh sample",

@@ -40,6 +40,13 @@ impl CharacterLocale {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LetterCase {
+    Lower,
+    Upper,
+    Capitalize,
+}
+
 #[derive(Clone, Default)]
 struct Variable {
     // A binding keeps its name in saved scopes. The process environment is
@@ -47,7 +54,7 @@ struct Variable {
     inherited: std::cell::OnceCell<bool>,
     dynamic: bool,
     temporary: bool,
-    letter_case: Option<bool>,
+    letter_case: Option<LetterCase>,
     nameref: bool,
     readonly: bool,
     integer: bool,
@@ -224,23 +231,35 @@ impl From<io::Error> for DirectoryError {
 }
 
 impl Session {
-    fn convert_case(&self, mut text: String, letter_case: Option<bool>) -> String {
-        match letter_case {
-            Some(upper)
-                if text.is_ascii()
-                    && !text.as_bytes().contains(&if upper { b'i' } else { b'I' }) =>
-            {
-                if upper {
-                    text.make_ascii_uppercase();
-                } else {
-                    text.make_ascii_lowercase();
-                }
-                text
+    fn convert_case(&self, mut text: String, letter_case: Option<LetterCase>) -> String {
+        let Some(mode) = letter_case else { return text };
+        if mode == LetterCase::Capitalize {
+            let locale = self.character_locale();
+            let mut chars = text.chars();
+            let Some(first) = chars.next() else {
+                return text;
+            };
+            let mut result =
+                crate::pattern::case_chars(first.to_string(), true, true, None, locale);
+            result.push_str(&crate::pattern::case_chars(
+                chars.as_str().to_owned(),
+                false,
+                true,
+                None,
+                locale,
+            ));
+            return result;
+        }
+        let upper = mode == LetterCase::Upper;
+        if text.is_ascii() && !text.as_bytes().contains(&if upper { b'i' } else { b'I' }) {
+            if upper {
+                text.make_ascii_uppercase();
+            } else {
+                text.make_ascii_lowercase();
             }
-            Some(upper) => {
-                crate::pattern::case_chars(text, upper, true, None, self.character_locale())
-            }
-            None => text,
+            text
+        } else {
+            crate::pattern::case_chars(text, upper, true, None, self.character_locale())
         }
     }
 
@@ -1971,8 +1990,9 @@ impl Variable {
             (self.nameref, b'n'),
             (self.readonly, b'r'),
             (self.exported, b'x'),
-            (self.letter_case == Some(false), b'l'),
-            (self.letter_case == Some(true), b'u'),
+            (self.letter_case == Some(LetterCase::Lower), b'l'),
+            (self.letter_case == Some(LetterCase::Upper), b'u'),
+            (self.letter_case == Some(LetterCase::Capitalize), b'c'),
         ]
         .into_iter()
         .filter_map(|(on, flag)| on.then_some(flag))
