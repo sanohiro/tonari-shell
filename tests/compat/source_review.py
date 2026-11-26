@@ -17,7 +17,6 @@ from terminal import Terminal
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
     "interactive-noexec": "export HISTFILE=$PWD/nonexec-history; : >nonexec-history; printf 'printf yes >ran\\n' | \"$AUDIT_SHELL\" --norc -in 2>/dev/null; [[ -e ran ]]; echo $?; cat \"$HISTFILE\"; printf 'set -n\\necho yes\\n' | \"$AUDIT_SHELL\" --norc -i 2>/dev/null",
-    "timestamped-blank-lines": "printf '#1\\n\\n\\none\\n\\nmiddle\\n\\n\\n#2\\n\\nnext\\n' >h; HISTTIMEFORMAT=; history -c; history -r h; history; history -w round; cat round",
     "managed-background-spawn": "exec 2>/dev/null; set -m; trap ':' USR1; /bin/sh -c 'kill -STOP $$; exec sleep 1' & p=$!; sleep 1 & q=$!; wait \"$p\" 2>/dev/null; s=$?; kill -CONT \"$p\"; kill \"$p\" \"$q\" 2>/dev/null; wait 2>/dev/null; [[ $s == $((128+$(kill -l STOP))) ]] && echo stopped; /bin/sh -c 'kill -USR1 $$; exit 9' & p=$!; wait \"$p\" 2>/dev/null; [[ $? == $((128+$(kill -l USR1))) ]] && echo default; trap '' USR1; /bin/sh -c 'kill -USR1 $$; exit 9' & p=$!; wait \"$p\"; echo ignored:$?",
     "stopped-job-selection": "set -m; sleep 3 & a=$!; sleep 3 & b=$!; sleep 3 & c=$!; trap 'kill -CONT \"$a\" \"$b\" \"$c\" 2>/dev/null; kill \"$a\" \"$b\" \"$c\" 2>/dev/null; wait 2>/dev/null' EXIT; mark(){ x=$(jobs -p %+); y=$(jobs -p %-); for p in \"$x\" \"$y\"; do case $p in \"$a\") printf a;; \"$b\") printf b;; \"$c\") printf c;; *) printf '?';; esac; done; echo; }; mark; kill -STOP \"$b\"; wait \"$b\" 2>/dev/null; mark; kill -CONT \"$b\"; for ((k=0;k<100;k++)); do [[ -z $(jobs -ps) ]] && break; sleep .01; done; mark; kill -STOP \"$a\"; wait \"$a\" 2>/dev/null; mark; bg %1 >/dev/null; mark",
     "source-trap-frame": "printf ': one\\n: two\\n' > sourced; set -T\ntrap 'echo \"${FUNCNAME[0]}:$LINENO:$1\"' RETURN\nf(){\n source ./sourced inner\n}\nf outer",
@@ -155,6 +154,7 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "timestamped-blank-lines": "printf '#1\\n\\n\\none\\n\\nmiddle\\n\\n\\n#2\\n\\nnext\\n' >h; HISTTIMEFORMAT=; history -c; history -r h; history; history -w round; cat round",
     "printf-field-limits": "for f in '[%*s]:%s' '[%.*s]:%s'; do printf \"$f\\n\" 21474836470 abc z; echo $?; printf -v value \"$f\" 9223372036854775825 abc z; echo \"$?:$value\"; done; printf '[%.9223372036854775825Q]\\n' abc; echo $?",
     "alias-print-all": "alias a=one b=two; alias -p a=changed missing; echo status:$?; alias a; set -o posix; alias -p a; alias a",
     "current-arithmetic-alias": "shopt -s expand_aliases\nalias number='echo 123'\necho $(( ${ number; } ))\n(( ${ number; } )); echo $?\nset -o posix\necho $(( ${ number; } ))\n(( ${ number; } )); echo $?",
@@ -770,6 +770,10 @@ def main():
         # stop while setting up the new job. Check Tonari's atomic spawn directly.
         early_stop = 'set -m; sleep 1 & p=$!; kill -STOP "$p"; wait "$p" 2>/dev/null; s=$?; kill -CONT "$p"; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; [[ $s == $((128+$(kill -l STOP))) ]]'
         assert run(shells[1], early_stop)[0][:2] == (0, b"")
+        # Bash 5.2 drops blank lines from imported multiline commands.
+        # A 5.3-format history record must round-trip on either control host.
+        imported = run(shells[1], NEW["timestamped-blank-lines"])[0]
+        assert imported == (0, b"    1  one\n\nmiddle\n\n\n    2  next\n#1\none\n\nmiddle\n\n\n#2\nnext\n", False), imported
         if modern:
             for shell in shells[:2]:
                 origin = subprocess.run([shell, "-c", "shopt -s extdebug; f(){ :; }; declare -F f", "caller-name"],
