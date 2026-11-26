@@ -228,7 +228,9 @@ fn dollar_word(
                 chars.next();
                 name
             } else {
-                if name.starts_with('#') && name.len() > 1 {
+                if name.starts_with('#')
+                    && (name.len() > 1 || content.as_bytes().get(2) == Some(&b'}'))
+                {
                     return bad_substitution(content, chars, word, quoted);
                 }
                 if let Some(prefix) = name.strip_prefix('!').filter(|p| super::is_identifier(p))

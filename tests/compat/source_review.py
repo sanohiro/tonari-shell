@@ -36,6 +36,8 @@ COMMON = {
     "debug-arguments": r"""set -- a b; echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}"; set -- changed; f(){ echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}"; }; f x y; shopt -s extdebug; f x y; echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}" """,
     "positional-assignment-error": 'echo ${6=x}; echo wrong\necho "next:$?"\nset -e\necho ${@:=x}; echo wrong\necho wrong',
     "quoted-star-order": 'set -- a "b c" 雪; a=("$@"); unset IFS; printf "<%s>" "$*${IFS:=-}$*" ; IFS=; printf "<%s>" "${a[*]}${IFS:=:}${a[*]}"; set -u --; printf "<%s>" "$*"',
+    "ansi-braced-byte": r"""printf '<%s>' $'ab\x{41}cd' $'\x{0000000000000000000041}' $'\x{c3}\x{a9}' $'x\x{}ignored' $'\x{4}x' $'\x{41X' """,
+    "invalid-length": "echo ${#/}; echo wrong\necho ${#%}; echo wrong\necho ${#=}; echo wrong\necho ${#+}; echo wrong\nset -- one two\nprintf '<%s>' \"${#}\" \"${##}\" \"${#=x}\" \"${#+x}\"",
     "bad-expansion": "echo first\necho ${#:}; echo wrong\necho \"next:$?\"",
     "stack-tilde": 'pushd src >/dev/null; printf "<%s>\\n" ~0 ~1 ~+1 ~-0 ~-1 ~99; popd >/dev/null',
     "custom-history-event": """history -s 'echo first last'; histchars='^:#'; history -p '^^'; histchars='$:#'; history -p '$$'; histchars='@:#'; history -p '@@'""",
@@ -106,6 +108,8 @@ HOT = {
     "multiline-history": (":", 300),
     "scalar-array-slice": ('v=${text[@]:1:4}', 1600),
     "indirect-positionals": ('v=${!@:-missing}', 1600),
+    "ansi-braced-byte": (r"""v=$'prefix-\x{41}-\x{c3}\x{a9}-end'""", 1200),
+    "invalid-length": ("echo ${#/}", 300),
     "positional-assignment-error": ("echo ${6=x}", 300),
     "quoted-star-order": ('IFS=; v="$*${IFS:=-}$*"', 1200),
     "function-stack": ('f', 1200),
@@ -700,10 +704,10 @@ def main():
                 # Input history is recorded for top-level commands, even with
                 # no terminal. Executing a sourced loop would bypass this path.
                 code = "set -o history\n" + "for v in one two\ndo\n  : item\ndone\n" * count + "echo done"
-            elif name == "positional-assignment-error":
+            elif name in ("positional-assignment-error", "invalid-length"):
                 code = "exec 2>/dev/null\n" + (body + "\n") * count + "echo done"
-            elif name == "backquote-escape":
-                # Parse a fresh top-level assignment for each substitution.
+            elif name in ("backquote-escape", "ansi-braced-byte"):
+                # Parse a fresh top-level assignment for each source spelling.
                 code = "".join(f"v={i}{body[2:]}\n" for i in range(count)) + "echo done"
             samples = [[] for _ in shells]
             for r in range(args.runs + 1):
