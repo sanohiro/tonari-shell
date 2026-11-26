@@ -1,5 +1,53 @@
 # Startup and execution / 起動と実行性能
 
+<a id="shell-core-refactoring"></a>
+
+## 2026-11-27 · Shell core refactoring / シェル内部の整理
+
+The native release comparison uses `7cf373e` before the refactor and `0930c96` after it. Each of 45 workloads has 15 interleaved timed samples per executable, plus warmups. The macOS 27.2.1 host was an Apple M1 with GNU Bash 5.3.20. The Linux runner was a native x86-64 CPU (AMD EPYC 7763) with GNU Bash 5.3.9. Numbers in the tables are medians in milliseconds. [All 45 workloads on both machines](compatibility/bash-source-review/shell-core-refactoring.tsv) · [Individual samples](compatibility/bash-source-review/shell-core-samples.jsonl.gz) · [Linux release run](https://github.com/sanohiro/tonari-shell/actions/runs/45896992491)
+
+45 項目のうち Bash より速かったのは M1 で 45件、Linux で 44件。Linux の残る1件は inputrc の単語編集で、どちらも 0.134 ms だった。Bash の所要時間の 2/3 以下だったのは両方とも37件。端末上のキー応答は入力から画面出力まで、スクリプトの項目は指定回数の処理全体を計測した。M1 で履歴10万件から古い一致が表示されるまでの中央値は 0.523 ms（変更前 0.564 ms）、直近の一致は 0.113 ms（変更前 0.114 ms）だった。
+
+| Workload | Iterations | M1 Bash | M1 previous | M1 Tonari | Linux Bash | Linux previous | Linux Tonari |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Register and print completion actions | 1200 | 30.059 | 19.807 | 19.538 | 16.81 | 10.519 | 9.96 |
+| Call a function with nested loops and a case | 2000 | 18.757 | 7.643 | 7.386 | 13.439 | 4.636 | 4.284 |
+| Read a script of literal assignments | 1000 | 9.944 | 4.471 | 4.458 | 2.272 | 0.94 | 0.935 |
+| Evaluate unary and binary conditions | 3500 | 15.678 | 6.009 | 5.856 | 9.461 | 2.709 | 2.679 |
+| Query five commands on the OS default path | 500 | 33.175 | 29.475 | 30.618 | 77.795 | 27.762 | 27.374 |
+| Edit a word via an inputrc binding | 1 | 0.081 | 0.059 | 0.056 | 0.134 | 0.135 | 0.134 |
+
+| Interactive and startup workloads on M1 | Bash | Previous | Tonari |
+|---|---:|---:|---:|
+| First interactive prompt, 81 samples | 9.643 | 4.836 | 4.724 |
+| Empty command (`-c :`), 81 samples | 7.390 | 2.762 | 2.635 |
+| 16 external commands, 81 samples | 35.941 | 20.404 | 20.476 |
+| Paste into a 1 MiB line, 21 samples | 13.080 | 0.135 | 0.134 |
+| Undo and type on a 1 MiB line, 21 samples | 26.037 | 0.036 | 0.035 |
+| Transpose two UTF-8 characters on a 64 KiB line, 21 samples | 2.651 | 0.050 | 0.046 |
+| Transpose two words on a 64 KiB line, 21 samples | 2.726 | 0.053 | 0.050 |
+| Recall the last argument from a short command, 21 samples | 0.018 | 0.024 | 0.023 |
+| File completion with 10,000 entries, first visible response, 13 samples | 90.969 | 0.175 | 0.172 |
+| Pipe 64 bytes, 15 samples | 11.292 | 6.406 | 6.326 |
+| Pipe 16 MiB, 15 samples | 18.945 | 13.575 | 13.782 |
+| Evaluate 300 nested conditionals 8 times, script file, 25 samples | 17.009 | 13.050 | 6.218 |
+| Same script in a running shell, 25 samples | 8.381 | 9.087 | 2.340 |
+
+The `eval` fixture contains 300 inner `if` statements in a single quoted multiline value. Deferring a reparse until the quote can close and admitting a repeated compound of this size to the bounded eval cache removed the largest measured parser cost. Separate witnesses change alias settings, exercise EOF and malformed input, and check physical line boundaries. In the native Linux rcfile run (Intel Xeon 6975P-C, system Bash 5.2.21), the same running-shell fixture took 1.971 ms in Tonari, 7.892 ms before the refactor and 5.921 ms in Bash. The editing benchmark reads back the entire buffer after each timed operation. On a short draft the two shells differed by 5 µs on last-argument recall. [Script fixtures](../tools/bench_scripts.py) · [PTY verification](../tools/bench_editing.py)
+
+`command -pv` now uses the OS default search path. On the M1 that path starts with `/usr/bin` followed by `/bin`. All five utilities in this fixture live in `/bin`, so preserving lookup order costs five extra failed probes per iteration compared with the former hardcoded path. The Linux static PIE is stripped and measures 2,620,824 bytes (previously 2,627,352). The M1 release measures 1,848,512 bytes (previously 1,865,088) and links to `libSystem`. There are no new crate dependencies. [Lookup implementation](../src/execute/lookup.rs) · [Changes by phase / 各段階の変更](engineering-notes.md)
+
+M1 の起動、貼り付け、取り消し、`eval` は上表のとおり。Linux の実行形式にはシステムの glibc への動的依存がなく、macOS はシステムの `libSystem` のみを使う。GNU Bash、yash、Oils、bensch の試験には、それぞれの上流の期待値を使った。GNU の差分には診断文、Oils には Bash 固有のバグを期待する項目もある。Oils 2,770件の通常期待値で変更前と合否差はゼロ。FD の一時移動を検査するケースでは、Tonari は復元後に両方の行を書き込める。Bash 固有の注釈は片方だけを書き込む挙動を期待する。[Existing case decisions / 個別差異の判断](compatibility/bash-source-review/gnu-cases.md) · [Full external comparison](https://github.com/sanohiro/tonari-shell/actions/runs/45896992491) · [POSIX regression run](https://github.com/sanohiro/tonari-shell/actions/runs/45896983190)
+
+To reproduce the comparison, point `bash_ref`, `tonari` and `previous` at the three release executables. The TSV supplies the same workloads to both hosts.
+
+```bash
+python3 tests/compat/source_review.py "$bash_ref" "$tonari" --first "$previous" --runs 15 \
+  $(awk -F '\t' 'NR > 1 {print "--case", $1}' docs/compatibility/bash-source-review/shell-core-refactoring.tsv)
+python3 tools/bench_scripts.py "$tonari" --bash "$bash_ref" --previous "$previous" --case eval-conditionals --runs 25
+python3 tools/bench_editing.py "$tonari" "$bash_ref" "$previous" --size 65536 --runs 21 --case 'transpose UTF-8 characters'
+```
+
 ## 2026-11-27 · Native measurements for the GNU case review / 個別修正の実機計測
 
 The review measured 117 distinct workloads on each platform. In the same final release (a3f77c7), using interleaved medians, Tonari finished ahead of Bash on 116 of 117 on the Apple M1 and 114 of 117 on native x86-64 Linux. 92 Mac workloads and 91 Linux workloads completed in at most two thirds of the Bash time. The table below gives milliseconds for the complete workload, including shell startup. All final rows use the same executable revision on both hosts. The full table also keeps the earlier trials and comparison revisions. For forced interactive keymaps the preceding release returned the wrong option state under TERM=dumb. Bash and the final candidate both return the selected state.
