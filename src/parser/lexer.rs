@@ -53,7 +53,7 @@ impl Token {
 }
 
 pub(super) fn descriptor(s: &str) -> Result<i32, Error> {
-    if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) {
+    if s.as_bytes().first().is_some_and(u8::is_ascii_digit) {
         return s
             .parse()
             .map_err(|_| Error::Invalid("invalid file descriptor"));
@@ -603,12 +603,14 @@ fn parameter_word(
                             || ((!outer_quoted || quoted_apostrophes) && v == '\'')
                     })
                     .unwrap_or(rest.len());
-                let mut text = String::from(c);
-                text.push_str(&rest[..end]);
                 *chars = rest[end..].chars();
                 if outer_quoted {
-                    word.literal(&text);
+                    word.push(c);
+                    word.literal(&rest[..end]);
                 } else {
+                    let mut text = String::with_capacity(c.len_utf8() + end);
+                    text.push(c);
+                    text.push_str(&rest[..end]);
                     word.part(Part::Unquoted(text));
                 }
             }

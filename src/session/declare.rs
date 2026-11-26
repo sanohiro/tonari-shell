@@ -297,11 +297,10 @@ pub(super) fn run(
                 session.variables.remove(base);
             }
         }
+        let base_scope = session.declaration_scope(base);
         let creates_local = !attribute
             && !flags.global
-            && session
-                .declaration_scope(base)
-                .is_some_and(|i| !session.locals[i].0.contains_key(base));
+            && base_scope.is_some_and(|i| !session.locals[i].0.contains_key(base));
         let resolved;
         let name = if !creates_local && flags.nameref.is_none() && session.is_nameref(base) {
             match session.reference_name(name) {
@@ -341,10 +340,17 @@ pub(super) fn run(
         let mut var = session
             .declared_variable(name, flags.global)
             .unwrap_or_default();
-        let scope_index = session.declaration_scope(name);
-        let fresh_local = !attribute
-            && !flags.global
-            && scope_index.is_some_and(|i| !session.locals[i].0.contains_key(name));
+        let (scope_index, fresh_local) = if name == base {
+            (base_scope, creates_local)
+        } else {
+            let scope = session.declaration_scope(name);
+            (
+                scope,
+                !attribute
+                    && !flags.global
+                    && scope.is_some_and(|i| !session.locals[i].0.contains_key(name)),
+            )
+        };
         let outer_local = fresh_local
             && session
                 .locals

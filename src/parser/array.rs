@@ -52,7 +52,7 @@ pub(crate) fn quoted_initializer(
     if !matches!(reader.peek(), Some(Token::LeftParen)) {
         return Err(Error::Invalid("expected array initializer"));
     }
-    let items = reader.array_items()?;
+    let items = reader.array_items::<true>()?;
     if !reader.tokens.is_empty() {
         return Err(Error::Invalid("unexpected token after array initializer"));
     }
@@ -60,7 +60,9 @@ pub(crate) fn quoted_initializer(
 }
 
 impl Reader {
-    pub(super) fn array_items(&mut self) -> Result<Vec<(Option<Subscript<String>>, Word)>, Error> {
+    pub(super) fn array_items<const COLLECT: bool>(
+        &mut self,
+    ) -> Result<Vec<(Option<Subscript<String>>, Word)>, Error> {
         self.tokens.pop_front();
         let mut items = Vec::new();
         loop {
@@ -72,6 +74,9 @@ impl Reader {
                     assignment,
                     ..
                 })) => {
+                    if !COLLECT {
+                        continue;
+                    }
                     let index = assignment
                         .filter(|k| k.starts_with('[') && (k.ends_with(']') || k.ends_with("]+")));
                     if let Some(name) = &index {

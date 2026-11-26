@@ -1602,7 +1602,7 @@ impl Reader {
                             cmd.words.first().and_then(Word::as_literal)
                         {
                             let start = self.position() - 1;
-                            self.array_items()?;
+                            self.array_items::<false>()?;
                             let expr = self.location(start);
                             cmd.words.push(
                                 lexer::subscript_word(expr.text(), builtin == "eval")?
@@ -1618,7 +1618,7 @@ impl Reader {
                             return Err(Error::Invalid("invalid array assignment"));
                         }
                         let source_start = self.position() - 1;
-                        let items = self.array_items()?;
+                        let items = self.array_items::<true>()?;
                         let operand = declaration.then_some(cmd.words.len());
                         if declaration {
                             cmd.words
@@ -1721,6 +1721,11 @@ mod tests {
         let fds: Vec<_> = cmd.redirects.iter().map(|r| r.fd).collect();
         assert_eq!(fds, [2, 1, 1, 1, 9]);
         assert_eq!(cmd.redirects[3].target, Target::Duplicate);
+        let parsed = parse("cmd 2147483648>&2").unwrap();
+        let cmd = &parsed[0].clone().pipeline()[0];
+        assert_eq!(literals(cmd), ["cmd", "2147483648"]);
+        assert_eq!(cmd.redirects[0].fd, 1);
+        assert_eq!(cmd.redirects[0].target, Target::Duplicate);
     }
 
     #[test]
@@ -1728,7 +1733,7 @@ mod tests {
         for source in ["cmd |\n", "cmd '", "cmd \\\n"] {
             assert!(matches!(parse(source), Err(Error::Incomplete(_))));
         }
-        for source in ["| cmd", "cmd || ; cmd", "cmd > ", "cmd 2147483648>&2"] {
+        for source in ["| cmd", "cmd || ; cmd", "cmd > "] {
             assert!(matches!(parse(source), Err(Error::Invalid(_))));
         }
         let parsed = parse("cmd |\n# comment\ncat; next\n").unwrap();
