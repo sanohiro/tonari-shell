@@ -51,6 +51,8 @@ pub(super) struct Entry {
     line: usize,
     eof: bool,
     extglob: bool,
+    extquote: bool,
+    posix: bool,
     comments: bool,
 }
 
@@ -102,6 +104,8 @@ pub(super) fn parse(
         entry.line == line
             && entry.eof == eof
             && entry.extglob == extglob
+            && entry.extquote == session.shopt.extquote
+            && entry.posix == session.posix
             && entry.comments == comments
             && &*entry.source == source
     }) {
@@ -119,6 +123,8 @@ pub(super) fn parse(
                 line,
                 eof,
                 extglob,
+                extquote: session.shopt.extquote,
+                posix: session.posix,
                 comments,
             });
             cache.parsed[0] = Some(entry.clone());
