@@ -1,5 +1,12 @@
 use super::*;
 
+// The grammar has a fixed set of operators; store their spelling in the AST.
+macro_rules! operator {
+    ($word:expr, $( $op:literal ),+ $(,)?) => {
+        match $word { $( Some($op) => Some($op), )+ _ => None }
+    };
+}
+
 impl Reader {
     pub(super) fn test_or(&mut self) -> Result<Expr, Error> {
         let mut result = self.test_and()?;
@@ -55,38 +62,35 @@ impl Reader {
                 _ => return Err(Error::Invalid("expected ')' in conditional expression")),
             }
         }
-        let unary = self.keyword().is_some_and(|op| {
-            matches!(
-                op,
-                "-a" | "-b"
-                    | "-c"
-                    | "-d"
-                    | "-e"
-                    | "-f"
-                    | "-g"
-                    | "-h"
-                    | "-k"
-                    | "-n"
-                    | "-o"
-                    | "-p"
-                    | "-r"
-                    | "-s"
-                    | "-t"
-                    | "-u"
-                    | "-v"
-                    | "-w"
-                    | "-x"
-                    | "-z"
-                    | "-G"
-                    | "-L"
-                    | "-N"
-                    | "-O"
-                    | "-R"
-                    | "-S"
-            )
-        });
-        if unary {
-            let op = self.keyword().unwrap().to_owned();
+        if let Some(op) = operator!(
+            self.keyword(),
+            "-a",
+            "-b",
+            "-c",
+            "-d",
+            "-e",
+            "-f",
+            "-g",
+            "-h",
+            "-k",
+            "-n",
+            "-o",
+            "-p",
+            "-r",
+            "-s",
+            "-t",
+            "-u",
+            "-v",
+            "-w",
+            "-x",
+            "-z",
+            "-G",
+            "-L",
+            "-N",
+            "-O",
+            "-R",
+            "-S"
+        ) {
             self.tokens.pop_front();
             return Ok(Expr::Unary(op, self.test_word()?));
         }
@@ -94,15 +98,26 @@ impl Reader {
         let op = match self.peek() {
             Some(Token::Redirect(0, Target::Read)) => "<",
             Some(Token::Redirect(1, Target::Write)) => ">",
-            _ => match self.keyword() {
-                Some(
-                    op @ ("=" | "==" | "!=" | "=~" | "-eq" | "-ne" | "-lt" | "-gt" | "-le" | "-ge"
-                    | "-ef" | "-nt" | "-ot"),
-                ) => op,
-                _ => return Ok(Expr::Word(left)),
+            _ => match operator!(
+                self.keyword(),
+                "=",
+                "==",
+                "!=",
+                "=~",
+                "-eq",
+                "-ne",
+                "-lt",
+                "-gt",
+                "-le",
+                "-ge",
+                "-ef",
+                "-nt",
+                "-ot"
+            ) {
+                Some(op) => op,
+                None => return Ok(Expr::Word(left)),
             },
-        }
-        .to_owned();
+        };
         self.tokens.pop_front();
         Ok(Expr::binary(left, op, self.test_word()?))
     }

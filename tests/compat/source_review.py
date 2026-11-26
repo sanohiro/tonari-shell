@@ -16,6 +16,8 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "conditional-operators": 'v=abc; [[ -n $v && $v = a* && 4 -gt 3 ]] && echo pass; [[ -z $v || $v != abc ]]; echo $?',
+    "relative-path-lookup": '/bin/ln -sf /bin/echo tonari-path-probe; PATH=missing::/bin; command -v tonari-path-probe; tonari-path-probe found; PATH=/bin; command -v tonari-path-probe; echo $?',
     'registry-roundtrip': 'complete -A binding -A enabled -o nospace probe; complete -p probe',
     'borrowed-control-flow': 'f(){ for v in a b; do case $v in a) :;; b) echo ok;; esac; done; }; f',
     'default-path-queries': 'PATH=/nowhere; command -pv sh cat | while read -r p; do test -x "$p" && echo found; done',
@@ -216,6 +218,8 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "conditional-operators": ('[[ -n $v && $v = a* && 4 -gt 3 ]]', 3500),
+    "relative-path-lookup": ('type -P tonari-path-probe >/dev/null', 700),
     'registry-roundtrip': ('complete -A binding -A enabled -o nospace probe; complete -p probe >/dev/null', 1200),
     'borrowed-control-flow': ('f', 2000),
     'default-path-queries': ('command -pv sh cat chmod cp mv >/dev/null', 500),
@@ -1116,6 +1120,8 @@ printf three >&7; exec {slot}>&7; : 6>&7- {slot}>&-; printf four >&7; exec 6>&7-
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "conditional-operators": "v=abc",
+                "relative-path-lookup": "/bin/ln -sf /bin/echo tonari-path-probe; PATH=missing::/bin",
                 "borrowed-control-flow": "f(){ for v in a b; do case $v in a) :;; b) :;; esac; done; }",
                 "debug-wait-empty": "trap ':' DEBUG",
                 "cached-child-environment": "export V=first",

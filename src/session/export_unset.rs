@@ -152,25 +152,7 @@ impl Session {
                 }
                 continue;
             }
-            print_attribute(
-                &mut out,
-                &name,
-                &Variable {
-                    letter_case: None,
-                    temporary: false,
-                    dynamic: false,
-                    inherited: Default::default(),
-                    readonly: false,
-                    nameref: false,
-                    integer: false,
-                    array_assigned: false,
-                    elements: None,
-                    declared: true,
-                    value,
-                    exported: true,
-                },
-                command,
-            )?;
+            print_attribute(&mut out, &name, &Variable::scalar(value, true), command)?;
         }
         out.flush()
     }
@@ -236,21 +218,11 @@ impl Session {
         self.variables.insert(
             name.into(),
             Variable {
-                letter_case: None,
-                temporary: false,
-                dynamic: false,
-                inherited: Default::default(),
-                readonly: false,
-                nameref: false,
-                integer: false,
-                array_assigned: false,
-                elements: None,
                 declared: self
                     .locals
                     .last()
                     .is_some_and(|scope| scope.variables.contains_key(name)),
-                value: None,
-                exported: false,
+                ..Variable::default()
             },
         );
     }
@@ -277,13 +249,32 @@ impl Session {
             eprintln!("tonari: unset: cannot combine -f and -v");
             return 1;
         }
+        self.unset_operands(
+            args.iter().map(String::as_str),
+            literal_ref,
+            functions_only,
+            variables_only,
+        )
+    }
+
+    pub(crate) fn unset_builtin_target(&mut self, name: &str) -> u8 {
+        self.unset_operands(std::iter::once(name), false, false, true)
+    }
+
+    fn unset_operands<'a>(
+        &mut self,
+        args: impl Iterator<Item = &'a str>,
+        literal_ref: bool,
+        functions_only: bool,
+        variables_only: bool,
+    ) -> u8 {
         let mut status = 0;
         for original in args {
             if literal_ref && !self.is_nameref(original) {
                 continue;
             }
             let resolved;
-            let name = if literal_ref || functions_only {
+            let name: &str = if literal_ref || functions_only {
                 original
             } else {
                 match self.reference_name(original) {
@@ -299,7 +290,7 @@ impl Session {
                     }
                 }
             };
-            let base = array::subscript(name).map_or(name.as_str(), |(base, _)| base);
+            let base = array::subscript(name).map_or(name, |(base, _)| base);
             if !functions_only
                 && (Self::builtin_readonly(base)
                     || self.variables.get(base).is_some_and(|v| v.readonly))

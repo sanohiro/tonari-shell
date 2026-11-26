@@ -185,19 +185,7 @@ fn connect_pipe(
     setup
 }
 pub(crate) fn reset_child_signals() {
-    reset_caught_signals(&[libc::SIGINT, libc::SIGQUIT, libc::SIGTERM]);
-}
-
-pub(crate) fn reset_caught_signals(signals: &[i32]) {
-    for &signal in signals {
-        unsafe {
-            let mut old: libc::sigaction = std::mem::zeroed();
-            libc::sigaction(signal, std::ptr::null(), &mut old);
-            if old.sa_sigaction != libc::SIG_IGN && old.sa_sigaction != libc::SIG_DFL {
-                libc::signal(signal, libc::SIG_DFL);
-            }
-        }
-    }
+    crate::traps::reset_caught_signals(&[libc::SIGINT, libc::SIGQUIT, libc::SIGTERM]);
 }
 
 fn stage_expansion(word: &Word) -> bool {

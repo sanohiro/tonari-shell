@@ -470,7 +470,7 @@ fn read_history_file(
     if skip > 0 {
         reader.seek(SeekFrom::Start(skip))?;
     }
-    let limit = session.history_limit("HISTSIZE", 500);
+    let limit = session.history_limit("HISTSIZE", super::DEFAULT_HISTSIZE);
     let erase = session
         .get("HISTCONTROL")
         .is_some_and(|v| v.split(':').any(|rule| rule == "erasedups"));

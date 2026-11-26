@@ -6,6 +6,8 @@ use std::path::PathBuf;
 
 use crate::Session;
 
+pub(super) const DEFAULT_HISTSIZE: usize = 500;
+
 fn tail_lines_offset(file: &fs::File, len: u64, mut lines: usize) -> std::io::Result<u64> {
     if lines == 0 {
         return Ok(len);
@@ -287,7 +289,7 @@ impl InitialJournal {
             return Ok(());
         }
         let available = session
-            .history_limit("HISTSIZE", 500)
+            .history_limit("HISTSIZE", DEFAULT_HISTSIZE)
             .saturating_sub(session.history_lines().len());
         let pos = tail_lines_offset(&journal, self.len, available)?;
         journal.seek(SeekFrom::Start(pos))?;
@@ -379,7 +381,7 @@ impl Session {
         if !self.history_enabled {
             return false;
         }
-        let limit = self.history_limit("HISTSIZE", 500);
+        let limit = self.history_limit("HISTSIZE", DEFAULT_HISTSIZE);
         if limit == 0 || !self.history_matches_rules(text, self.history_lines().last()) {
             return false;
         }
@@ -400,7 +402,7 @@ impl Session {
         true
     }
     fn push_history(&mut self, text: &str, current: bool) {
-        let limit = self.history_limit("HISTSIZE", 500);
+        let limit = self.history_limit("HISTSIZE", DEFAULT_HISTSIZE);
         self.push_history_limited(text, current, limit);
     }
 
@@ -457,11 +459,12 @@ impl Session {
     }
 
     fn accept_history(&self, source: &str, previous: Option<&String>) -> bool {
-        self.history_limit("HISTSIZE", 500) > 0 && self.history_matches_rules(source, previous)
+        self.history_limit("HISTSIZE", DEFAULT_HISTSIZE) > 0
+            && self.history_matches_rules(source, previous)
     }
 
     fn record_replay(&mut self, text: &str) {
-        let limit = self.history_limit("HISTSIZE", 500);
+        let limit = self.history_limit("HISTSIZE", DEFAULT_HISTSIZE);
         if limit != 0 && self.history_matches_rules(text, self.history_lines().last()) {
             self.push_history_limited(text, false, limit);
         }

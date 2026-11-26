@@ -115,14 +115,8 @@ impl External {
             (!executable.as_bytes().contains(&b'/')).then(|| {
                 let path = lookup::path(cmd, session);
                 let ignored = IgnoredExecutables::new(session);
-                std::env::split_paths(&path)
-                    .map(|dir| {
-                        if dir.as_os_str().is_empty() {
-                            Path::new(".").join(name)
-                        } else {
-                            dir.join(name)
-                        }
-                    })
+                lookup::search_directories(&path)
+                    .map(|dir| dir.join(name))
                     .filter(|path| !ignored.contains(path))
                     .map(|path| CString::new(path.as_os_str().as_bytes()).unwrap())
                     .collect()

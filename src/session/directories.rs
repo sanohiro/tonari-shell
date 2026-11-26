@@ -594,18 +594,10 @@ impl Session {
             self.variables.insert(
                 "OLDPWD".into(),
                 Variable {
-                    letter_case: None,
-                    temporary: false,
-                    dynamic: false,
-                    inherited: Default::default(),
-                    readonly: false,
-                    nameref: false,
-                    integer: false,
-                    array_assigned: false,
-                    elements: None,
                     declared: true,
                     value: old_pwd,
                     exported: old_export,
+                    ..Variable::default()
                 },
             );
         }

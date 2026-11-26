@@ -148,7 +148,7 @@ fn wait_builtin(args: &[String], session: &mut Session) -> u8 {
             eprintln!("tonari: wait: {name}: not a valid identifier");
             return 1;
         }
-        if session.unset(&["-v".into(), name.into()]) != 0 {
+        if session.unset_builtin_target(name) != 0 {
             return 1;
         }
     }

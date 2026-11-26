@@ -89,13 +89,8 @@ pub(super) fn search_in(
     let ignored = super::lookup::IgnoredExecutables::new(session);
     let mut relative = false;
     let mut absent = true;
-    for dir in std::env::split_paths(path) {
+    for dir in super::lookup::search_directories(path) {
         relative |= !dir.is_absolute();
-        let dir = if dir.as_os_str().is_empty() {
-            Path::new(".")
-        } else {
-            &dir
-        };
         let path = dir.join(name);
         if ignored.contains(&path) {
             continue;

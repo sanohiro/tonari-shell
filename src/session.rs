@@ -82,6 +82,17 @@ struct Variable {
     exported: bool,
 }
 
+impl Variable {
+    fn scalar(value: Option<String>, exported: bool) -> Self {
+        Self {
+            declared: true,
+            value,
+            exported,
+            ..Self::default()
+        }
+    }
+}
+
 #[derive(Clone)]
 struct ShellPid(u32, libc::pid_t);
 
@@ -813,12 +824,7 @@ impl Session {
         };
         self.variables.insert(
             "SHLVL".into(),
-            Variable {
-                value: Some(level.to_string()),
-                declared: true,
-                exported: true,
-                ..Variable::default()
-            },
+            Variable::scalar(Some(level.to_string()), true),
         );
     }
 
@@ -951,18 +957,12 @@ impl Session {
         self.variables.insert(
             name.into(),
             Variable {
-                letter_case: None,
-                temporary: false,
                 dynamic: live,
-                inherited: Default::default(),
-                readonly: false,
-                nameref: false,
                 integer: live && dynamic::integer_attribute(name),
-                array_assigned: false,
-                elements: None,
                 declared: true,
                 value: Some(value.into_owned()),
                 exported,
+                ..Variable::default()
             },
         );
     }
@@ -1181,15 +1181,8 @@ impl Session {
                 }
             }
             self.apply_variable_effects(&name, &value);
-            self.variables.insert(
-                name,
-                Variable {
-                    declared: true,
-                    exported: true,
-                    value: Some(value),
-                    ..Variable::default()
-                },
-            );
+            self.variables
+                .insert(name, Variable::scalar(Some(value), true));
         }
     }
 
@@ -1219,18 +1212,11 @@ impl Session {
             self.variables.insert(
                 name.clone(),
                 Variable {
-                    letter_case: None,
                     temporary: true,
-                    dynamic: false,
-                    inherited: Default::default(),
-                    readonly: false,
-                    nameref: false,
-                    integer: false,
-                    array_assigned: false,
-                    elements: None,
                     declared: true,
                     value: Some(value.clone()),
                     exported: true,
+                    ..Variable::default()
                 },
             );
         }

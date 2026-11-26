@@ -770,19 +770,14 @@ impl Session {
             }
             let value = self.inherited_value(name);
             (value.is_some() || name == "OLDPWD").then(|| Variable {
-                letter_case: None,
-                temporary: false,
                 dynamic: super::dynamic::is_dynamic(name),
-                inherited: Default::default(),
                 readonly: Self::builtin_readonly(name),
-                nameref: false,
                 integer: super::dynamic::integer_attribute(name)
                     || matches!(name, "PPID" | "EUID" | "UID"),
-                array_assigned: false,
-                elements: None,
                 declared: true,
                 value,
                 exported: matches!(name, "PWD" | "OLDPWD") || std::env::var_os(name).is_some(),
+                ..Variable::default()
             })
         }
     }

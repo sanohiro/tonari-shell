@@ -96,7 +96,7 @@ impl Launch {
             if let Some(tty) = self.tty.filter(|_| !self.defer_tty) {
                 give_terminal(tty, unsafe { libc::getpgrp() });
             }
-            crate::execute::reset_caught_signals(&JOB_SIGNALS);
+            crate::traps::reset_caught_signals(&JOB_SIGNALS);
         } else if self.background {
             for sig in [libc::SIGINT, libc::SIGQUIT] {
                 traps.ignore_async(sig);

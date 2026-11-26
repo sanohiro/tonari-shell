@@ -4,8 +4,8 @@ use std::ffi::CString;
 #[derive(Clone, Debug)]
 pub enum Expr {
     Word(Word),
-    Unary(String, Word),
-    Binary(Word, String, Word),
+    Unary(&'static str, Word),
+    Binary(Word, &'static str, Word),
     StaticRegex(Word, String, Option<String>),
     Not(Box<Expr>),
     And(Box<Expr>, Box<Expr>),
@@ -13,7 +13,7 @@ pub enum Expr {
 }
 
 impl Expr {
-    pub(crate) fn binary(left: Word, operator: String, right: Word) -> Self {
+    pub(crate) fn binary(left: Word, operator: &'static str, right: Word) -> Self {
         use crate::word::Part;
         if operator == "=~"
             && match &right {
@@ -93,6 +93,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             Ok(!value.is_empty())
         }
         Unary(op, word) => {
+            let op = *op;
             let value = operand(session, word, status)?;
             trace(session, status, &[op, &value]);
             if op == "-v" {
@@ -111,8 +112,9 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             regex_match(session, status, &left, pattern.as_str().into())
         }
         Binary(left, op, right) => {
+            let op = *op;
             let left = operand(session, left, status)?;
-            match op.as_str() {
+            match op {
                 "=" | "==" | "!=" => {
                     if !session.shopt.nocasematch
                         && let Some(text) = right.as_literal()
@@ -168,7 +170,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                     };
                     let a = arithmetic::run(&left, session).map_err(arith_error)?;
                     let b = arithmetic::run(&right, session).map_err(arith_error)?;
-                    Ok(match op.as_str() {
+                    Ok(match op {
                         "-eq" => a == b,
                         "-ne" => a != b,
                         "-lt" => a < b,

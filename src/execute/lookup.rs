@@ -1,7 +1,7 @@
-use std::ffi::{CString, OsString};
+use std::ffi::{CString, OsStr, OsString};
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::{PreparedCommand, named_builtin};
 use crate::session::Session;
@@ -28,6 +28,17 @@ fn default_system_path() -> &'static std::ffi::OsStr {
         "/bin:/usr/bin".into()
     });
     &PATH
+}
+
+// Unix PATH entries borrow the original byte string, including non-UTF-8 entries.
+pub(super) fn search_directories(path: &OsStr) -> impl Iterator<Item = &Path> {
+    path.as_bytes().split(|&b| b == b':').map(|bytes| {
+        if bytes.is_empty() {
+            Path::new(".")
+        } else {
+            Path::new(OsStr::from_bytes(bytes))
+        }
+    })
 }
 
 pub(super) fn path(cmd: &PreparedCommand, session: &Session) -> OsString {
@@ -154,9 +165,9 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
     }
     let search = std::cell::LazyCell::new(|| {
         if default_path {
-            default_system_path().to_owned()
+            std::borrow::Cow::Borrowed(default_system_path())
         } else {
-            session.search_path(&[])
+            std::borrow::Cow::Owned(session.search_path(&[]))
         }
     });
     let ignored = std::cell::LazyCell::new(|| IgnoredExecutables::new(session));
@@ -264,12 +275,8 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                     return 1;
                 }
             } else {
-                for dir in std::env::split_paths(&*search) {
-                    let path = if dir.as_os_str().is_empty() {
-                        PathBuf::from(".").join(name)
-                    } else {
-                        dir.join(name)
-                    };
+                for dir in search_directories(&search) {
+                    let path = dir.join(name);
                     if !ignored.contains(&path) && executable(&path) {
                         if report(&path).is_err() {
                             return 1;

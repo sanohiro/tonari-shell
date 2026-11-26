@@ -136,7 +136,11 @@ pub fn enter_process() {
     entry_pipe::restore();
     // std installs its stack-overflow handlers only over SIG_DFL. An explicit
     // kill delivers just one signal, so returning from that handler loses it.
-    for sig in [libc::SIGBUS, libc::SIGSEGV] {
+    reset_caught_signals(&[libc::SIGBUS, libc::SIGSEGV]);
+}
+
+pub(crate) fn reset_caught_signals(signals: &[i32]) {
+    for &sig in signals {
         let mut old = std::mem::MaybeUninit::uninit();
         unsafe {
             if libc::sigaction(sig, std::ptr::null(), old.as_mut_ptr()) == 0
@@ -411,12 +415,7 @@ impl Traps {
         }
         if self.interactive_handlers {
             self.interactive_handlers = false;
-            crate::execute::reset_caught_signals(&[
-                libc::SIGINT,
-                libc::SIGQUIT,
-                libc::SIGTERM,
-                libc::SIGTSTP,
-            ]);
+            reset_caught_signals(&[libc::SIGINT, libc::SIGQUIT, libc::SIGTERM, libc::SIGTSTP]);
         }
         if self.interactive_hup {
             self.interactive_hup = false;
