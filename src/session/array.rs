@@ -517,15 +517,23 @@ impl Session {
         if !super::is_identifier(&target) {
             return Err("array destination must be a variable name");
         }
-        if self.readonly(&target) {
+        if Self::builtin_readonly(&target) {
             return Err("readonly variable");
         }
-        if !replace_associative && self.is_associative(&target) {
+        if !replace_associative && self.live_table(&target) {
             return Err("not an indexed array");
         }
-        if self.is_nameref(&target) {
-            eprintln!("tonari: warning: {target}: removing nameref attribute");
-            self.variables.get_mut(target.as_ref()).unwrap().nameref = false;
+        if let Some(var) = self.variables.get_mut(target.as_ref()) {
+            if var.readonly {
+                return Err("readonly variable");
+            }
+            if !replace_associative && var.associative().is_some() {
+                return Err("not an indexed array");
+            }
+            if var.nameref {
+                eprintln!("tonari: warning: {target}: removing nameref attribute");
+                var.nameref = false;
+            }
         }
         Ok(target)
     }

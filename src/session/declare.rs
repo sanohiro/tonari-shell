@@ -302,22 +302,24 @@ pub(super) fn run(
             && !flags.global
             && base_scope.is_some_and(|i| !session.locals[i].0.contains_key(base));
         let mut remove_reference = None;
-        let changes_target = value.is_some()
-            || array.is_some()
-            || flags.integer.is_some()
-            || flags.lower.is_some()
-            || flags.upper.is_some()
-            || flags.capitalize.is_some()
-            || flags.exported.is_some()
-            || flags.readonly.is_some()
-            || flags.traced.is_some()
-            || flags.array
-            || flags.associative
-            || flags.remove_array
-            || flags.remove_associative;
+        let changes_target = || {
+            value.is_some()
+                || array.is_some()
+                || flags.integer.is_some()
+                || flags.lower.is_some()
+                || flags.upper.is_some()
+                || flags.capitalize.is_some()
+                || flags.exported.is_some()
+                || flags.readonly.is_some()
+                || flags.traced.is_some()
+                || flags.array
+                || flags.associative
+                || flags.remove_array
+                || flags.remove_associative
+        };
         let resolved;
         let name = if !creates_local
-            && (flags.nameref.is_none() || flags.nameref == Some(false) && changes_target)
+            && (flags.nameref.is_none() || flags.nameref == Some(false) && changes_target())
             && session.is_nameref(base)
         {
             match session.reference_name(name) {
