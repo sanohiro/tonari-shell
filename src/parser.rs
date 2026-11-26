@@ -1520,7 +1520,14 @@ impl Reader {
             name,
             definition: Rc::new(FunctionDefinition {
                 rendered_body: Default::default(),
-                declaration_line: self.location(start_name).line,
+                declaration_line: if self.alias_source.is_none() {
+                    FIRST_LINE.get()
+                        + self
+                            .newlines
+                            .partition_point(|&n| n < self.spans[start_name].0)
+                } else {
+                    self.location(start_name).line
+                },
                 body: wrapper::FunctionBody::Parsed(body),
                 location: self.location(start),
             }),

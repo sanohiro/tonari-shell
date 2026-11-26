@@ -1971,10 +1971,20 @@ impl Session {
         }
         let result = if name == "pwd" {
             (if physical {
-                directories::physical_path()
+                if let Some(path) = self.logical_cwd.get()
+                    && path.as_os_str().len() >= libc::PATH_MAX as usize
+                    && directories::long_cwd_matches(path, true)
+                {
+                    Ok(path.clone())
+                } else {
+                    directories::physical_path()
+                }
             } else if self.posix {
                 self.logical_directory().and_then(|path| {
-                    if same_directory(&path, Path::new(".")) {
+                    if same_directory(&path, Path::new("."))
+                        || path.as_os_str().len() >= libc::PATH_MAX as usize
+                            && directories::long_cwd_matches(&path, false)
+                    {
                         Ok(path)
                     } else {
                         let actual = directories::physical_path()?;

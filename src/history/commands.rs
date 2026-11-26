@@ -668,7 +668,7 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
     }
     for replacement in replacements {
         let (before, after) = replacement.split_once('=').unwrap();
-        if !before.is_empty() {
+        if !before.is_empty() && source.contains(before) {
             source = source.replace(before, after);
         }
     }

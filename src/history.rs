@@ -388,7 +388,7 @@ impl Session {
             return;
         }
         let erase = self
-            .get("HISTCONTROL")
+            .scalar_setting("HISTCONTROL")
             .is_some_and(|v| v.split(':').any(|w| w == "erasedups"));
         let h = self.history_mut();
         if erase {
@@ -440,14 +440,14 @@ impl Session {
 
         let text = source.strip_suffix('\n').unwrap_or(source);
         let limit = session
-            .get("HISTSIZE")
+            .scalar_setting("HISTSIZE")
             .and_then(|s| s.parse::<i64>().ok())
             .unwrap_or(500);
         if limit == 0 || text.is_empty() || session.interactive && text.trim().is_empty() {
             return false;
         }
         let previous = previous.map(String::as_str);
-        let control = session.get("HISTCONTROL").unwrap_or_default();
+        let control = session.scalar_setting("HISTCONTROL").unwrap_or_default();
         for rule in control.split(':') {
             if matches!(rule, "ignorespace" | "ignoreboth") && text.starts_with(' ') {
                 return false;
@@ -456,7 +456,7 @@ impl Session {
                 return false;
             }
         }
-        if session.get("HISTIGNORE").is_some_and(|s| {
+        if session.scalar_setting("HISTIGNORE").is_some_and(|s| {
             s.split(':').any(|p| {
                 !p.is_empty()
                     && (if p == "&" {

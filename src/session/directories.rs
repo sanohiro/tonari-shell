@@ -9,6 +9,40 @@ pub(super) fn physical_path() -> io::Result<std::path::PathBuf> {
     }
 }
 
+// Validate a cached absolute name component by component when it will not fit
+// in a single pathname argument. Physical pwd must reject every symbolic link.
+pub(super) fn long_cwd_matches(path: &Path, physical: bool) -> bool {
+    use std::fs::File;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
+    let Ok(mut directory) = File::open("/") else {
+        return false;
+    };
+    let mut bytes = Vec::new();
+    let flags = libc::O_DIRECTORY
+        | libc::O_RDONLY
+        | libc::O_CLOEXEC
+        | if physical { libc::O_NOFOLLOW } else { 0 };
+    for part in path.components() {
+        let std::path::Component::Normal(name) = part else {
+            continue;
+        };
+        bytes.clear();
+        bytes.extend_from_slice(name.as_bytes());
+        bytes.push(0);
+        let fd = unsafe { libc::openat(directory.as_raw_fd(), bytes.as_ptr().cast(), flags) };
+        if fd < 0 {
+            return false;
+        }
+        directory = unsafe { File::from_raw_fd(fd) };
+    }
+    match (directory.metadata(), std::fs::metadata(".")) {
+        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+        _ => false,
+    }
+}
+
 // Some getcwd implementations cannot return a name longer than PATH_MAX.
 // Walk open directories without changing the shell's working directory.
 #[cold]
