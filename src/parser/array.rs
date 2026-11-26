@@ -10,7 +10,11 @@ pub struct Subscript<T> {
 #[derive(Debug, Clone)]
 pub enum Assignment<W> {
     Scalar(W),
-    Array(Option<usize>, Vec<(Option<Subscript<String>>, W)>),
+    Array(
+        Option<usize>,
+        Vec<(Option<Subscript<String>>, W)>,
+        super::Location,
+    ),
 }
 
 // Keep subscripts intact while lexing the assignment name. They are arithmetic

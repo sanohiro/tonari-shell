@@ -162,16 +162,42 @@ pub(crate) fn prompt_word(
 ) -> Result<Word, Error> {
     let mut builder = crate::word::WordBuilder::default();
     let mut chars = source.chars();
+    let mut backslash = false;
     while let Some(c) = chars.next() {
+        if backslash && c != '\\' {
+            backslash = false;
+            if matches!(c, '$' | '\x60' | '"') {
+                builder.push(c);
+                continue;
+            }
+            builder.push('\\');
+        }
         match c {
             '$' if expand => lexer::dollar(&mut chars, &mut builder, true)?,
-            '`' if expand => lexer::backquote(&mut chars, &mut builder, true)?,
-            '\\' => match chars.next() {
-                Some(code) => builder.literal(&escape(code, &mut chars)),
-                None => builder.push('\\'),
-            },
+            '\x60' if expand => lexer::backquote(&mut chars, &mut builder, true)?,
+            '\\' => {
+                let Some(code) = chars.next() else {
+                    builder.push('\\');
+                    break;
+                };
+                if expand && code == '\\' {
+                    if backslash {
+                        builder.push('\\');
+                    }
+                    backslash = !backslash;
+                } else {
+                    if backslash {
+                        builder.push('\\');
+                        backslash = false;
+                    }
+                    builder.literal(&escape(code, &mut chars));
+                }
+            }
             c => builder.push(c),
         }
+    }
+    if backslash {
+        builder.push('\\');
     }
     Ok(builder.finish())
 }
@@ -193,6 +219,7 @@ pub enum Target {
 
 #[derive(Debug, Clone)]
 pub struct Redirect<W = String> {
+    pub line: usize,
     pub variable: Option<Box<str>>,
     pub fd: i32,
     pub target: Target,
@@ -785,6 +812,7 @@ impl Reader {
         while self.has_pipe() {
             if matches!(self.tokens.pop_front(), Some(Token::PipeBoth)) {
                 pipeline.last_mut().unwrap().redirects.push(Redirect {
+                    line: self.location(self.position().saturating_sub(1)).line,
                     variable: None,
                     fd: 2,
                     target: Target::Duplicate,
@@ -1266,6 +1294,7 @@ impl Reader {
         token: Token,
         redirects: &mut Vec<Redirect<Word>>,
     ) -> Result<(), Error> {
+        let line = self.location(self.position().saturating_sub(1)).line;
         match token {
             Token::DescriptorName(name) => {
                 let first = redirects.len();
@@ -1281,12 +1310,14 @@ impl Reader {
                     return Err(Error::Invalid("expected a redirection target"));
                 };
                 redirects.push(Redirect {
+                    line,
                     variable: None,
                     fd: 1,
                     target,
                     word,
                 });
                 redirects.push(Redirect {
+                    line,
                     variable: None,
                     fd: 2,
                     target: Target::Duplicate,
@@ -1306,6 +1337,7 @@ impl Reader {
                     target
                 };
                 redirects.push(Redirect {
+                    line,
                     variable: None,
                     fd,
                     target,
@@ -1365,14 +1397,17 @@ impl Reader {
                         {
                             return Err(Error::Invalid("invalid array assignment"));
                         }
+                        let source_start = self.position() - 1;
                         let items = self.array_items()?;
                         let operand = declaration.then_some(cmd.words.len());
                         if declaration {
                             cmd.words
                                 .push(Word::Literal(name.trim_end_matches('+').into()));
                         }
-                        cmd.assignments
-                            .push((name, Assignment::Array(operand, items)));
+                        cmd.assignments.push((
+                            name,
+                            Assignment::Array(operand, items, self.location(source_start)),
+                        ));
                         continue;
                     }
                     if cmd.words.is_empty() {

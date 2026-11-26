@@ -80,6 +80,37 @@ f; unset SECONDS; SECONDS=9; declare -p SECONDS""", 0,
 { :; } <missing-tonari
 echo bad""", 1, b"handled\n")
 
+    def test_export_snapshots_dynamic_integers(self):
+        self.compare('RANDOM=1; export RANDOM; printenv RANDOM; printenv RANDOM; echo "$RANDOM"',
+                     0, b"16807\n16807\n10791\n", minimum=5)
+
+    def test_unrelated_local_survives_prefixed_eval(self):
+        self.compare("""f() {
+    IFS= eval 'local v=keep'
+    printf '<%s>' "$v"
+}
+f; echo "<${v-unset}>" """, 0, b"<keep><unset>\n")
+
+    def test_indirect_readonly_subscript_forms(self):
+        self.compare("""a=(zero one); b=1
+for ref in 'a[$b]' 'a[${c:-1}]' 'a[$((3-2))]'; do echo "${!ref}"; done""",
+                     0, b"one\none\none\n", minimum=5)
+
+    def test_compound_redirect_reports_failing_operator_line(self):
+        proc = self.command(TONARI, """trap 'echo line=$LINENO' ERR
+{ true
+  true
+} >first \\
+  <missing-tonari
+echo end""")
+        self.assertEqual((proc.returncode, proc.stdout), (0, b"line=5\nend\n"), proc.stderr)
+        self.assertTrue((self.cwd / "first").exists())
+
+    def test_generated_ascii_range_keeps_each_character(self):
+        expected = b"".join(b"<"+bytes([n])+b">" for n in range(ord("Z"), ord("a")+1))
+        proc = self.command(TONARI, "printf '%s' '<'{Z..a}'>'")
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, expected, b""))
+
     def test_case_attributes_on_arrays_and_export(self):
         self.compare("""declare -u s=one; s+=two; export s+=three; echo "$s"
 declare -la a=(AA Bb); a[1]+=CC; echo "${a[@]}"

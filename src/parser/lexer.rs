@@ -237,7 +237,13 @@ fn dollar_word(
                     if mode != crate::word::ReplaceMode::First {
                         chars.next();
                     }
-                    let (pattern, separator) = parameter_word(chars, false, true, false)?;
+                    let (pattern, separator) = parameter_word(
+                        chars,
+                        false,
+                        true,
+                        false,
+                        mode == crate::word::ReplaceMode::All,
+                    )?;
                     let replacement = if separator == '/' {
                         alternative_word(chars, false)?
                     } else {
@@ -356,7 +362,7 @@ fn dollar_word(
                     None => return Err(Error::Incomplete("unterminated parameter expansion")),
                     _ => return bad_substitution(content, chars, word, quoted),
                 };
-                let (alternative, _) = parameter_word(chars, quoted, false, assignment)?;
+                let (alternative, _) = parameter_word(chars, quoted, false, assignment, false)?;
                 word.part(Part::Alternative {
                     name: name.into(),
                     check_empty,
@@ -480,7 +486,7 @@ pub(super) fn backquote(
 }
 
 fn alternative_word(chars: &mut Chars<'_>, outer_quoted: bool) -> Result<Word, Error> {
-    Ok(parameter_word(chars, outer_quoted, false, false)?.0)
+    Ok(parameter_word(chars, outer_quoted, false, false, false)?.0)
 }
 
 fn parameter_word(
@@ -488,6 +494,7 @@ fn parameter_word(
     outer_quoted: bool,
     stop_slash: bool,
     assignment: bool,
+    initial_slash_is_literal: bool,
 ) -> Result<(Word, char), Error> {
     let mut word = WordBuilder::default();
     let mut empty = true;
@@ -516,7 +523,7 @@ fn parameter_word(
                     word.push('~');
                 }
             }
-            c if c == '}' || stop_slash && c == '/' && !empty => {
+            c if c == '}' || stop_slash && c == '/' && !(initial_slash_is_literal && empty) => {
                 if empty && !outer_quoted {
                     word.part(Part::Unquoted(String::new()));
                 }

@@ -541,7 +541,7 @@ fn run_invocation(
         Flow::Return(status) | Flow::Exit(status) => {
             return traps::finish(&mut session, status);
         }
-        Flow::Break(_) | Flow::LoopContinue(_) => return 1,
+        Flow::Break(..) | Flow::LoopContinue(_) => return 1,
     };
     if invocation.as_sh && !session.posix {
         session.set_posix(true);
@@ -585,7 +585,7 @@ fn run_invocation(
     };
     let code = match flow {
         Flow::Discard(s) | Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s) => s,
-        Flow::Break(_) | Flow::LoopContinue(_) => 1,
+        Flow::Break(..) | Flow::LoopContinue(_) => 1,
     };
     traps::finish(&mut session, code)
 }

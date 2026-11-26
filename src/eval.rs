@@ -348,9 +348,6 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                         return Err(flow);
                     }
                 }
-                if !s.traps.debug_handler() {
-                    s.current_command.clone_from(&header);
-                }
                 compiled.run(s, last).map_err(|e| {
                     eprintln!("tonari: {e}");
                     Flow::Continue(1)
@@ -369,6 +366,9 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             let test = crate::arithmetic::Repeated::new(&condition);
             let update = crate::arithmetic::Repeated::new(&step);
             repeat(session, &body, status, |s, last| {
+                if !first && !s.traps.debug_handler() {
+                    s.current_command.clone_from(&header);
+                }
                 if !first && !step.is_empty() {
                     arithmetic(s, &step, &update, last)?;
                 }
@@ -584,12 +584,12 @@ fn repeat(
                 result = code;
                 last = code;
             }
-            Flow::Break(1) => break Flow::Continue(0),
+            Flow::Break(1, code) => break Flow::Continue(code),
             Flow::LoopContinue(1) => {
                 result = 0;
                 last = 0;
             }
-            Flow::Break(n) => break Flow::Break(n - 1),
+            Flow::Break(n, code) => break Flow::Break(n - 1, code),
             Flow::LoopContinue(n) => break Flow::LoopContinue(n - 1),
             flow => break flow,
         }

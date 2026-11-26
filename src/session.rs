@@ -155,6 +155,7 @@ pub struct Session {
     pub(crate) initial_history: Option<Rc<crate::history::InitialJournal>>,
     pub command_number: usize,
     pub(crate) evaluating: bool,
+    pub(crate) trace_depth: u32,
     pub(crate) signal_line: Option<usize>,
     pub command_string: bool,
     pub command_history_expansion: bool,
@@ -204,7 +205,7 @@ pub struct Session {
 }
 
 #[derive(Clone, Default)]
-pub struct Bindings(BTreeMap<String, Option<Variable>>, Option<usize>);
+pub struct Bindings(BTreeMap<String, Option<Variable>>, Option<usize>, bool);
 
 enum DirectoryError {
     NoPath(io::Error),
@@ -218,8 +219,19 @@ impl From<io::Error> for DirectoryError {
 }
 
 impl Session {
-    fn convert_case(&self, text: String, letter_case: Option<bool>) -> String {
+    fn convert_case(&self, mut text: String, letter_case: Option<bool>) -> String {
         match letter_case {
+            Some(upper)
+                if text.is_ascii()
+                    && !text.as_bytes().contains(&if upper { b'i' } else { b'I' }) =>
+            {
+                if upper {
+                    text.make_ascii_uppercase();
+                } else {
+                    text.make_ascii_lowercase();
+                }
+                text
+            }
             Some(upper) => {
                 crate::pattern::case_chars(text, upper, true, None, self.character_locale())
             }
@@ -408,7 +420,10 @@ impl Session {
                     }
                     write!(out, "{name}").and_then(|_| print_variable_value(&mut out, var))
                 } else if let Some(value) = self
-                    .stored_scalar(&name)
+                    .variables
+                    .get(&name)
+                    .filter(|v| !v.dynamic)
+                    .and_then(|v| v.value.as_deref())
                     .map(Cow::Borrowed)
                     .or_else(|| self.get(&name).map(Cow::Owned))
                 {
@@ -1026,6 +1041,7 @@ impl Session {
                 .map(|&name| (name.into(), self.variables.get(name).cloned()))
                 .collect(),
             names.contains(&"OPTIND").then_some(self.opt_offset),
+            false,
         )
     }
 
@@ -1173,8 +1189,19 @@ impl Session {
             .unwrap_or_else(|| self.current_command.as_ref().map_or(1, |c| c.line))
     }
 
-    pub fn enter_scope(&mut self, bindings: &mut Bindings) {
-        self.locals.push(std::mem::take(bindings));
+    fn declaration_scope(&self, name: &str) -> Option<usize> {
+        if self.function_depth == 0 {
+            return None;
+        }
+        self.locals
+            .iter()
+            .rposition(|scope| !scope.2 || scope.0.contains_key(name))
+    }
+
+    pub fn enter_scope(&mut self, bindings: &mut Bindings, temporary: bool) {
+        let mut scope = std::mem::take(bindings);
+        scope.2 = temporary;
+        self.locals.push(scope);
     }
 
     pub fn leave_scope(&mut self) {
@@ -1183,7 +1210,7 @@ impl Session {
     }
 
     pub fn enter_function(&mut self, bindings: &mut Bindings) {
-        self.enter_scope(bindings);
+        self.enter_scope(bindings, false);
         self.function_depth += 1;
     }
 
@@ -1271,7 +1298,8 @@ impl Session {
             let integer = self.integer(name);
             let normalized;
             let (value, append) = if integer && let Some(value) = value {
-                match self.integer_value(self.get(name).as_deref(), value, append) {
+                let original = append.then(|| self.get(name)).flatten();
+                match self.integer_value(original.as_deref(), value, append) {
                     Ok(v) => {
                         normalized = v;
                         (Some(normalized.as_str()), false)
@@ -1293,7 +1321,17 @@ impl Session {
                 };
                 self.assign_value(name, text);
             }
+            // Export takes a snapshot. Launching successive child processes
+            // must not advance the random sequence on behalf of the parent.
+            let snapshot = self
+                .variables
+                .get(name)
+                .filter(|var| var.dynamic)
+                .and_then(|_| self.dynamic_number(name));
             if let Some(var) = self.variables.get_mut(name) {
+                if let Some(number) = snapshot {
+                    var.value = Some(number.to_string());
+                }
                 var.exported = !remove;
                 var.declared = true;
             } else {
@@ -1998,14 +2036,17 @@ fn print_value(out: &mut impl Write, value: &str) -> io::Result<()> {
     if value.bytes().any(|c| c.is_ascii_control()) {
         return out.write_all(&printf::ansi_quote(value.as_bytes(), false));
     }
-    write!(out, "\"")?;
-    for c in value.chars() {
-        if matches!(c, '"' | '\\' | '$' | '`') {
-            write!(out, "\\")?;
+    out.write_all(b"\"")?;
+    let mut start = 0;
+    for (i, &byte) in value.as_bytes().iter().enumerate() {
+        if matches!(byte, b'"' | b'\\' | b'$' | b'\x60') {
+            out.write_all(&value.as_bytes()[start..i])?;
+            out.write_all(b"\\")?;
+            start = i;
         }
-        write!(out, "{c}")?;
     }
-    write!(out, "\"")
+    out.write_all(&value.as_bytes()[start..])?;
+    out.write_all(b"\"")
 }
 
 fn same_directory(left: &Path, right: &Path) -> bool {

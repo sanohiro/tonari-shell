@@ -571,6 +571,39 @@ impl Session {
         self.store_variable(name, variable, global);
     }
 
+    pub(super) fn declaration_index(
+        &mut self,
+        name: &str,
+        expr: &str,
+        global: bool,
+        var: &mut Variable,
+    ) -> Result<i64, &'static str> {
+        if let Some(n) = Self::plain_decimal(expr) {
+            return self.relative_index(name, n);
+        }
+        if expr.trim().is_empty() {
+            return Err("empty array subscript");
+        }
+        var.make_array();
+        let mut elements = Rc::unwrap_or_clone(var.elements.take().unwrap());
+        let visible = !global || !self.locals.iter().any(|scope| scope.0.contains_key(name));
+        let result = self
+            .initializer_number(name, var, &mut elements, visible, expr)
+            .and_then(|n| {
+                if n >= 0 {
+                    Ok(n)
+                } else {
+                    elements
+                        .last_index()
+                        .and_then(|i| i.checked_add(n + 1))
+                        .filter(|i| *i >= 0)
+                        .ok_or("array subscript out of range")
+                }
+            });
+        var.elements = Some(Rc::new(elements));
+        result
+    }
+
     pub fn resolve_index(&self, name: &str, expr: &str) -> Result<i64, &'static str> {
         if expr.trim().is_empty() {
             return Err("empty array subscript");
@@ -580,7 +613,7 @@ impl Session {
         {
             return Ok(value);
         }
-        let n = crate::arithmetic::evaluate(expr, &|k| self.get(k))?;
+        let n = crate::arithmetic::index(expr, &|k| self.get(k))?;
         self.relative_index(name, n)
     }
 

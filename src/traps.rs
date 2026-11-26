@@ -14,6 +14,10 @@ pub(crate) const SIGNALS: &[(&str, i32)] = &[
     ("TRAP", libc::SIGTRAP),
     ("ABRT", libc::SIGABRT),
     ("BUS", libc::SIGBUS),
+    #[cfg(target_os = "macos")]
+    ("EMT", libc::SIGEMT),
+    #[cfg(target_os = "macos")]
+    ("INFO", libc::SIGINFO),
     ("FPE", libc::SIGFPE),
     ("KILL", libc::SIGKILL),
     ("USR1", libc::SIGUSR1),

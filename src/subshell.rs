@@ -134,6 +134,7 @@ pub fn capture_substitution(
         }
         // fork already isolated the complete session, including shell variables.
         session.enter_subshell();
+        session.trace_depth += 1;
         crate::execute::coprocess::after_fork(session);
         session.jobs.forked(true);
         session.interactive = false;
@@ -174,7 +175,7 @@ pub fn capture_substitution(
             Flow::Discard(code) | Flow::Continue(code) | Flow::Exit(code) | Flow::Return(code) => {
                 code
             }
-            Flow::Break(_) | Flow::LoopContinue(_) => 1,
+            Flow::Break(..) | Flow::LoopContinue(_) => 1,
         };
         let code = crate::traps::finish(session, code);
         unsafe {

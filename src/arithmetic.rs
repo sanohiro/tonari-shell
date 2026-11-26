@@ -63,6 +63,64 @@ pub fn evaluate(source: &str, lookup: &impl Fn(&str) -> Option<String>) -> Resul
     calculate(source, &mut ReadOnly(lookup), 0)
 }
 
+// A subscript obtained through indirection is data. Support pure parameter
+// and arithmetic forms without dispatching commands or assigning variables.
+pub(crate) fn index(source: &str, lookup: &impl Fn(&str) -> Option<String>) -> Result<i64> {
+    if !source.contains("${") && !source.contains("$((") {
+        return evaluate(source, lookup);
+    }
+    fn text(
+        word: crate::word::Word,
+        lookup: &impl Fn(&str) -> Option<String>,
+        depth: u8,
+    ) -> Result<String> {
+        use crate::word::{Alternative, Part, Word, is_identifier};
+        if depth >= 32 {
+            return Err("array subscript nested too deeply");
+        }
+        let parts = match word {
+            Word::Literal(value) => return Ok(value),
+            Word::Expanded(parts) => parts,
+            _ => return Err("invalid indirect array subscript"),
+        };
+        let mut output = String::new();
+        for part in parts {
+            match part {
+                Part::Text(s) | Part::Pattern(s) => output.push_str(&s),
+                Part::Parameter { name, .. } if is_identifier(&name) => {
+                    if let Some(s) = lookup(&name) {
+                        output.push_str(&s);
+                    }
+                }
+                Part::Alternative {
+                    name,
+                    op: op @ (Alternative::Default | Alternative::Alternate),
+                    check_empty,
+                    word,
+                    ..
+                } if is_identifier(&name) => {
+                    let value = lookup(&name).filter(|s| !check_empty || !s.is_empty());
+                    if (op == Alternative::Default) == value.is_none() {
+                        output.push_str(&text(*word, lookup, depth + 1)?);
+                    } else if op == Alternative::Default {
+                        output.push_str(value.as_deref().unwrap_or(""));
+                    }
+                }
+                Part::Arithmetic { expression, .. } => {
+                    let word =
+                        crate::parser::arithmetic_word(&expression).map_err(|e| e.message())?;
+                    output
+                        .push_str(&evaluate(&text(word, lookup, depth + 1)?, lookup)?.to_string());
+                }
+                _ => return Err("invalid indirect array subscript"),
+            }
+        }
+        Ok(output)
+    }
+    let word = crate::parser::arithmetic_word(source).map_err(|e| e.message())?;
+    evaluate(&text(word, lookup, 0)?, lookup)
+}
+
 pub(crate) fn with_variables(source: &str, vars: &mut dyn Variables) -> Result<i64> {
     calculate(source, vars, 0)
 }

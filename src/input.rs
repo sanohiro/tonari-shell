@@ -145,7 +145,14 @@ fn error(message: impl std::fmt::Display, status: u8) -> Flow {
 }
 
 fn syntax_error(session: &Session, problem: parser::Error, first_line: usize) -> Flow {
-    let flow = if session.posix && !session.interactive {
+    let flow = if first_line == 1
+        && !session.command_string
+        && !session.stdin_script
+        && session.source_depth == 0
+        && matches!(problem, parser::Error::Invalid("NUL in command text"))
+    {
+        Flow::Exit(126)
+    } else if session.posix && !session.interactive {
         Flow::Exit(2)
     } else {
         Flow::Continue(2)

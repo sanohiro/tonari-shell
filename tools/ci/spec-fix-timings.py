@@ -22,6 +22,21 @@ CASES = {
     "history dates": ('export TZ=UTC0; HISTSIZE=3000; HISTTIMEFORMAT="%F %T "; '
                       'history -c; history -r dates; history', HISTORY_OUTPUT),
     "startup": (":", b""),
+    "seeded random": ('RANDOM=1; for ((i=0;i<12000;i++)); do n=$RANDOM; done; '
+                      'RANDOM=1; echo "$RANDOM"', b"16807\n"),
+    "elapsed seconds": ('SECONDS=10; for ((i=0;i<10000;i++)); do n=$SECONDS; done; '
+                        '(( n >= 10 )) && echo ok', b"ok\n"),
+    "temporary scopes": ('x=outer; f() { local x; unset x; }; '
+                         'for ((i=0;i<4000;i++)); do x=inner f; done; echo "$x"', b"outer\n"),
+    "case attributes": ('declare -u x; for ((i=0;i<6000;i++)); do x=hello; done; echo "$x"', b"HELLO\n"),
+    "IFS empty arguments": ('set -- one "" two; IFS=x; f() { n=$#; }; '
+                            'for ((i=0;i<3000;i++)); do f $@; done; echo "$n"', b"3\n"),
+    "function description": ('f() { echo; }; for ((i=0;i<2000;i++)); do type f; done >listing; '
+                             'grep -c "^    echo$" listing', b"2000\n"),
+    "array serialization": ('a=(first "two words"); for ((i=0;i<4000;i++)); do s="${a[@]@K}"; done; echo "$s"',
+                            b'0 "first" 1 "two words"\n'),
+    "regex conditional": ('for ((i=0;i<4000;i++)); do [[ (xyz =~ xyz) ]] || exit 1; done; echo ok', b"ok\n"),
+    "arithmetic loop lines": ('for ((i=0; i<4000; ++i)); do ((n=LINENO)); done; echo "$n"', b"1\n"),
     "printf time": ('export TZ=America/New_York; for ((i=0;i<2000;i++)); do '
                     'printf -v stamp "%(%F %T %Z %z)T" 1593604800; done; echo "$stamp"',
                     b"2020-07-01 08:00:00 EDT -0400\n"),

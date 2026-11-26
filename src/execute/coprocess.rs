@@ -106,7 +106,7 @@ pub(crate) fn launch(
         session.interactive = false;
         let code = match crate::eval::command(session, body, status, true) {
             Flow::Continue(s) | Flow::Discard(s) | Flow::Exit(s) | Flow::Return(s) => s,
-            Flow::Break(_) | Flow::LoopContinue(_) => 0,
+            Flow::Break(..) | Flow::LoopContinue(_) => 0,
         };
         let code = crate::traps::finish(session, code);
         unsafe { libc::_exit(i32::from(code)) }

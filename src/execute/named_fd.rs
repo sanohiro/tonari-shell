@@ -77,7 +77,7 @@ impl Scope {
                 self.restore
                     .push((r.fd, SavedFd::capture(&action, actions)?));
             }
-            if !apply_protected(actions, libc::PIPE_BUF) {
+            if apply_protected(actions, libc::PIPE_BUF).is_err() {
                 return Ok(false);
             }
             self.changed.push(r.fd);

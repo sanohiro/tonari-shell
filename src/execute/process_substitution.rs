@@ -146,7 +146,7 @@ pub(crate) fn launch(
         session.bind(assignments);
         let status = match crate::execute_program(session, body, prior, true) {
             Flow::Discard(s) | Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
-            Flow::Break(_) | Flow::LoopContinue(_) => 0,
+            Flow::Break(..) | Flow::LoopContinue(_) => 0,
         };
         let status = crate::traps::finish(session, status);
         unsafe { libc::_exit(i32::from(status)) }

@@ -230,9 +230,16 @@ pub(super) fn run(
     let mut arrays = arrays.iter().peekable();
     for (index, arg) in operands.iter().enumerate() {
         let array = arrays.next_if(|a| a.operand == index + first_operand);
-        let (name, value) = arg
-            .split_once('=')
-            .map_or((arg.as_str(), None), |(k, v)| (k, Some(v)));
+        let subscript_end = arg
+            .find(['[', '='])
+            .filter(|&i| arg.as_bytes()[i] == b'[')
+            .and_then(|i| crate::parser::index_end(&arg[i..]).ok().map(|n| i + n));
+        let separator = arg[subscript_end.unwrap_or(0)..]
+            .find('=')
+            .map(|i| i + subscript_end.unwrap_or(0));
+        let (name, value) = separator.map_or((arg.as_str(), None), |at| {
+            (&arg[..at], Some(&arg[at + 1..]))
+        });
         let append = value.is_some() && name.ends_with('+');
         let name = if append {
             &name[..name.len() - 1]
@@ -243,9 +250,8 @@ pub(super) fn run(
         let creates_local = !readonly
             && !flags.global
             && session
-                .locals
-                .last()
-                .is_some_and(|scope| !scope.0.contains_key(base));
+                .declaration_scope(base)
+                .is_some_and(|i| !session.locals[i].0.contains_key(base));
         let resolved;
         let name = if !creates_local && flags.nameref.is_none() && session.is_nameref(base) {
             match session.reference_name(name) {
@@ -280,12 +286,10 @@ pub(super) fn run(
         let mut var = session
             .declared_variable(name, flags.global)
             .unwrap_or_default();
+        let scope_index = session.declaration_scope(name);
         let fresh_local = !readonly
             && !flags.global
-            && session
-                .locals
-                .last()
-                .is_some_and(|scope| !scope.0.contains_key(name));
+            && scope_index.is_some_and(|i| !session.locals[i].0.contains_key(name));
         let outer_local = fresh_local
             && session
                 .locals
@@ -309,7 +313,7 @@ pub(super) fn run(
         let new_global = !fresh_local && !var.declared && !session.variables.contains_key(name);
         var.declared = true;
         if fresh_local {
-            let scope = session.locals.last_mut().unwrap();
+            let scope = &mut session.locals[scope_index.unwrap()];
             if name == "OPTIND" {
                 scope.1 = Some(session.opt_offset);
                 session.opt_offset = 0;
@@ -432,7 +436,7 @@ pub(super) fn run(
             let index = if let Some((_, expr)) = target
                 && assoc_key.is_none()
             {
-                match session.resolve_index(name, expr) {
+                match session.declaration_index(name, expr, flags.global, &mut var) {
                     Ok(i) => {
                         var.make_array();
                         i

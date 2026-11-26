@@ -28,7 +28,7 @@ pub enum Flow {
     Discard(u8),
     Exit(u8),
     Return(u8),
-    Break(u32),
+    Break(u32, u8),
     LoopContinue(u32),
 }
 
@@ -173,11 +173,11 @@ fn apply(actions: &[Action<'_>], pipe_limit: usize) -> bool {
         eprintln!("tonari: redirection: {e}");
         return false;
     }
-    apply_protected(actions, pipe_limit)
+    apply_protected(actions, pipe_limit).is_ok()
 }
 
-fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> bool {
-    for a in actions {
+fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> Result<(), usize> {
+    for (index, a) in actions.iter().enumerate() {
         match a {
             Action::HereInput(dest, body) => {
                 let redirected = here_input::open(body, pipe_limit).and_then(|fd| {
@@ -192,18 +192,18 @@ fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> bool {
                 });
                 if let Err(error) = redirected {
                     eprintln!("tonari: here-document: {error}");
-                    return false;
+                    return Err(index);
                 }
             }
             Action::Open(dest, path, flags) => {
                 let Some(fd) = open_redirect(path, *flags) else {
-                    return false;
+                    return Err(index);
                 };
                 if fd.as_raw_fd() == *dest {
                     let _ = fd.into_raw_fd();
                 } else if duplicate(fd.as_raw_fd(), *dest).is_err() {
                     write_error(path.as_bytes(), b": cannot redirect");
-                    return false;
+                    return Err(index);
                 }
             }
             Action::Dup(src, dst) => {
@@ -213,7 +213,7 @@ fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> bool {
                     } else {
                         write_error(b"redirection", b": cannot duplicate file descriptor");
                     }
-                    return false;
+                    return Err(index);
                 }
             }
             Action::Close(fd) | Action::CloseMoved(fd) => {
@@ -221,7 +221,7 @@ fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> bool {
             }
         }
     }
-    true
+    Ok(())
 }
 
 // Pipe setup uses standard streams as destinations. Reserve distinct source
@@ -816,7 +816,7 @@ fn eval_builtin(
                     Ok(n) if n > 0 => {
                         let levels = (n as u64).min(u64::from(session.loop_depth)) as u32;
                         if cmd.words[0] == "break" {
-                            Flow::Break(levels)
+                            Flow::Break(levels, 0)
                         } else {
                             Flow::LoopContinue(levels)
                         }
@@ -827,7 +827,7 @@ fn eval_builtin(
                     }
                     Ok(_) => {
                         write_error(cmd.words[0].as_bytes(), b": invalid loop count");
-                        Flow::Exit(1)
+                        Flow::Break(session.loop_depth, 1)
                     }
                 }
             }
@@ -853,7 +853,7 @@ fn eval_builtin(
             !session.interactive && posix_special(cmd, session),
         ),
         Builtin::Eval if !cmd.assignments.is_empty() => {
-            session.enter_scope(&mut bindings);
+            session.enter_scope(&mut bindings, true);
             let flow = crate::input::eval_builtin(session, args, last_status);
             session.leave_scope();
             flow
@@ -1236,7 +1236,8 @@ fn run_builtin(
             }
         }
     }
-    let applied = apply_protected(actions, here_pipe_limit(Some(builtin), cmd));
+    let redirection = apply_protected(actions, here_pipe_limit(Some(builtin), cmd));
+    let applied = redirection.is_ok();
     let old_input = session.stdin_redirected;
     if applied && actions.iter().any(|a| a.destination() == 0) {
         session.stdin_redirected = true;
@@ -1270,8 +1271,14 @@ fn run_builtin(
     restore?;
     // Failures in a compound command's body are tested by its own statement
     // list. A redirect failure happens before that list can run.
-    if !applied && matches!(builtin, Builtin::Compound) && session.tested_depth == 0 {
+    if let Err(index) = redirection
+        && matches!(builtin, Builtin::Compound)
+        && session.tested_depth == 0
+    {
         if session.traps.active() {
+            if let Some(location) = &mut session.current_command {
+                location.line = cmd.redirects[index].line;
+            }
             let trap = crate::traps::error(session, 1);
             if !matches!(trap, Flow::Continue(_)) {
                 return Ok(trap);
@@ -1383,7 +1390,7 @@ fn start_raw(
             .any(stage_expansion)
         || raw.assignments.iter().any(|(_, value)| match value {
             Assignment::Scalar(word) => stage_expansion(word),
-            Assignment::Array(_, items) => items.iter().any(|(_, word)| stage_expansion(word)),
+            Assignment::Array(_, items, _) => items.iter().any(|(_, word)| stage_expansion(word)),
         });
     if !observable {
         return match prepare(raw, session, last_status, false) {
@@ -1423,7 +1430,7 @@ fn start_raw(
         let code = if apply(&setup, libc::PIPE_BUF) {
             match run(vec![raw], last_status, true, session) {
                 Ok(Flow::Discard(s) | Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s)) => s,
-                Ok(Flow::Break(_) | Flow::LoopContinue(_)) => 0,
+                Ok(Flow::Break(..) | Flow::LoopContinue(_)) => 0,
                 Err(e) => {
                     eprintln!("tonari: {e}");
                     1
@@ -1647,7 +1654,7 @@ fn start(
             };
             match flow {
                 Flow::Discard(s) | Flow::Exit(s) | Flow::Return(s) | Flow::Continue(s) => s,
-                Flow::Break(_) | Flow::LoopContinue(_) => 0,
+                Flow::Break(..) | Flow::LoopContinue(_) => 0,
             }
         };
         let code = crate::traps::finish(session, code);
@@ -1896,6 +1903,34 @@ impl PreparedCommand {
     }
 }
 
+fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(&mut String)) {
+    let prefix = session.get("PS4").unwrap_or_default();
+    session.xtrace = false;
+    let mut line = crate::prompt::render_text(session, prefix, status);
+    session.xtrace = true;
+    let levels = session.trace_depth + session.source_depth;
+    if levels > 0
+        && let Some(first) = line.chars().next()
+    {
+        line.insert_str(0, &first.to_string().repeat(levels as usize));
+    }
+    append(&mut line);
+    line.push('\n');
+    let fd = session
+        .get("BASH_XTRACEFD")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2);
+    let mut data = line.as_bytes();
+    while !data.is_empty() {
+        let n = unsafe { libc::write(fd, data.as_ptr().cast(), data.len()) };
+        if n > 0 {
+            data = &data[n as usize..];
+        } else if n == 0 || errno() != libc::EINTR {
+            break;
+        }
+    }
+}
+
 fn trace_word(word: &str) -> std::borrow::Cow<'_, str> {
     if word.bytes().any(|b| b.is_ascii_control()) {
         return String::from_utf8(crate::session::printf::ansi_quote(word.as_bytes(), false))
@@ -1935,7 +1970,7 @@ fn expand_command_words(
         .assignments
         .iter_mut()
         .filter_map(|(_, assignment)| match assignment {
-            Assignment::Array(Some(position), _) => Some(position),
+            Assignment::Array(Some(position), _, _) => Some(position),
             _ => None,
         })
         .peekable();
@@ -1987,7 +2022,10 @@ fn prepare_expanded(
             key.pop();
         }
         match word {
-            Assignment::Array(operand, parts) => {
+            Assignment::Array(operand, parts, source) => {
+                if exp.session.xtrace {
+                    trace_line(exp.session, last_status, |out| out.push_str(source.text()));
+                }
                 if operand.is_none() && exp.session.readonly(&key) {
                     return Err(crate::expansion::Error::readonly(&key));
                 }
@@ -2047,6 +2085,13 @@ fn prepare_expanded(
                 let append =
                     append || direct_assignment && word.take_append_suffix(&key, exp.session);
                 let value = exp.scalar(word)?;
+                if exp.session.xtrace {
+                    trace_line(exp.session, last_status, |out| {
+                        out.push_str(&key);
+                        out.push_str(if append { "+=" } else { "=" });
+                        out.push_str(&trace_word(&value));
+                    });
+                }
                 if let std::borrow::Cow::Owned(resolved) = exp.session.reference_name(&key)? {
                     key = resolved;
                 }
@@ -2153,37 +2198,15 @@ fn prepare_expanded(
         assignments,
         empty_status: captured.get().unwrap_or(0),
     };
-    if session.xtrace && (!cmd.words.is_empty() || !cmd.assignments.is_empty()) {
-        use std::io::Write;
-        let prefix = session.get("PS4").unwrap_or_else(|| "+ ".into());
-        session.xtrace = false;
-        let mut trace = crate::prompt::render_text(session, prefix, last_status);
-        session.xtrace = true;
-        let fd = session
-            .get("BASH_XTRACEFD")
-            .and_then(|s| s.parse::<i32>().ok())
-            .unwrap_or(2);
-        let mut first = true;
-        for (name, value) in &cmd.assignments {
-            if !first {
-                trace.push(' ');
+    if session.xtrace && !cmd.words.is_empty() {
+        trace_line(session, last_status, |out| {
+            for (i, word) in cmd.words.iter().enumerate() {
+                if i > 0 {
+                    out.push(' ');
+                }
+                out.push_str(&trace_word(word));
             }
-            first = false;
-            trace.push_str(name);
-            trace.push('=');
-            trace.push_str(&trace_word(value));
-        }
-        for word in &cmd.words {
-            if !first {
-                trace.push(' ');
-            }
-            first = false;
-            trace.push_str(&trace_word(word));
-        }
-        trace.push('\n');
-        if let Ok(mut file) = fd::duplicate_except(fd, 3, |_| false) {
-            let _ = file.write_all(trace.as_bytes());
-        }
+        });
     }
     lookup::command_prefix(&mut cmd, session);
     if raw.redirects.iter().any(|r| r.variable.is_some()) {
@@ -2284,6 +2307,7 @@ fn prepare_redirects(
             target = Target::NoClobber;
         }
         redirects.push(Redirect {
+            line: r.line,
             variable: None,
             fd: r.fd,
             target,
@@ -2291,6 +2315,7 @@ fn prepare_redirects(
         });
         if both {
             redirects.push(Redirect {
+                line: r.line,
                 variable: None,
                 fd: 2,
                 target: Target::Duplicate,
@@ -2299,6 +2324,7 @@ fn prepare_redirects(
         }
         if let Some(fd) = moved {
             redirects.push(Redirect {
+                line: r.line,
                 variable: None,
                 fd,
                 target: Target::CloseMoved,
@@ -2655,7 +2681,7 @@ pub fn run_pipeline(
                 let code = match flow {
                     Flow::Continue(code) => return Ok(Stage::Status(code)),
                     Flow::Exit(code) | Flow::Discard(code) | Flow::Return(code) => code,
-                    Flow::Break(_) | Flow::LoopContinue(_) => 0,
+                    Flow::Break(..) | Flow::LoopContinue(_) => 0,
                 };
                 last_flow = Some(flow);
                 return Ok(Stage::Status(code));
