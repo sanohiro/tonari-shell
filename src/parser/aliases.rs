@@ -323,7 +323,15 @@ impl Reader {
                 self.joined_alias(name, &value, nested)?;
                 continue;
             }
-            let (replacement, spans, _) = with(nested, || lex(value, false, true))?;
+            let replacement = with(nested.clone(), || lex(value, false, true));
+            let (replacement, spans, _) = match replacement {
+                Err(Error::Incomplete(_)) => {
+                    let value = value.to_owned();
+                    self.joined_alias(name, &value, nested)?;
+                    continue;
+                }
+                result => result?,
+            };
             let index = self.position();
             self.alias_source
                 .get_or_insert_with(Default::default)

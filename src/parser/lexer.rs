@@ -1,4 +1,4 @@
-use super::{CaseEnd, Error, Reader, Target, ansi, here_doc, parse};
+use super::{CaseEnd, Error, Reader, Target, ansi, here_doc, parse_final};
 use crate::word::{Part, Word, WordBuilder, is_identifier};
 use std::str::Chars;
 
@@ -488,7 +488,7 @@ pub(super) fn backquote(
     while let Some(c) = chars.next() {
         match c {
             '`' => {
-                let body = parse(&source)?;
+                let body = parse_final(&source)?;
                 word.part(Part::Substitution { body, quoted });
                 return Ok(());
             }
@@ -973,6 +973,7 @@ fn lex_words(
     let mut chars = source.chars();
     let mut parentheses = 0usize;
     let mut saw_case = false;
+    let mut alias_opens_group = false;
     let sub_aliases = if substitution && super::POSIX.get() {
         super::aliases::current()
     } else {
@@ -1057,12 +1058,14 @@ fn lex_words(
             if substitution && c == ')' && parentheses == 0 {
                 // A case pattern can end with an unmatched right parenthesis.
                 // Ask the grammar only for substitutions containing a case word.
-                let ends_pattern = saw_case
+                let inner_closer = (saw_case || alias_opens_group)
                     && matches!(
                         Reader::new(tokens.clone(), spans.clone(), &source[..offset]).list(&[]),
-                        Err(Error::Incomplete("expected ')' after case pattern"))
+                        Err(Error::Incomplete(
+                            "expected ')' after case pattern" | "unfinished subshell"
+                        ))
                     );
-                if !ends_pattern {
+                if !inner_closer {
                     return Ok((tokens, spans, chars.as_str()));
                 }
             }
@@ -1397,7 +1400,11 @@ fn lex_words(
             && !protected
             && let Some(name) = word.as_literal()
         {
-            saw_case |= name == "case" || sub_aliases.get(name).is_some_and(|s| s.trim() == "case");
+            saw_case |= name == "case";
+            if let Some(replacement) = sub_aliases.get(name) {
+                saw_case |= replacement.trim() == "case";
+                alias_opens_group |= replacement.contains('(') && command_position(&tokens);
+            }
         }
         let begins_array = assignment.as_ref().is_some_and(|name| {
             chars.as_str().starts_with('(') && start.len() - chars.as_str().len() == name.len() + 1
