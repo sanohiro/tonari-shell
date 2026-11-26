@@ -8,9 +8,20 @@ import statistics
 import subprocess
 import tempfile
 import time
+from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "posix-variable": 'f(){ shopt -qo posix; printf "%s/%s " "$?" "${POSIXLY_CORRECT-unset}"; }; f; POSIXLY_CORRECT=1 f; f; set -o posix; f; unset POSIXLY_CORRECT; f; g(){ local POSIXLY_CORRECT=inside; f; }; g; f',
+    "physical": 'cd linkdir; pwd; set -P; pwd; cd ..; cd linkdir; echo "$PWD"; set +o physical; cd ..; cd -L linkdir; pwd',
+    "execfail": 'shopt -s execfail; exec ./missing; echo "continued:$?"; (exec ./missing; echo wrong); echo "subshell:$?"',
+    "shift-verbose": 'set --; shopt -s shift_verbose; shift 2 2>shift.err; test -s shift.err; echo $?; shopt -u shift_verbose; shift 2 2>shift.err; test -s shift.err; echo $?',
+    "alias-table": """alias sample='echo one'; echo "${BASH_ALIASES[sample]}"; BASH_ALIASES[sample]='echo two'; alias sample; BASH_ALIASES=([other]=ok); echo "${#BASH_ALIASES[@]}:${BASH_ALIASES[other]}"; unset 'BASH_ALIASES[sample]'; echo "${BASH_ALIASES[sample]}"; unset BASH_ALIASES; alias sample; echo "${BASH_ALIASES[sample]-unset}" """,
+    "command-table": 'hash -p /bin/sh sample; echo "${BASH_CMDS[sample]}"; BASH_CMDS[sample]=/bin/echo; hash -t sample; sample hello; unset "BASH_CMDS[sample]"; echo "${BASH_CMDS[sample]}"; hash -r; echo "${#BASH_CMDS[@]}"',
+    "execignore": 'PATH=$PWD/a:$PWD/b; EXECIGNORE="$PWD/a/*"; choice; type -P choice; hash -r; set +h; choice; EXECIGNORE="$PWD/*"; choice; echo $?; ./a/choice',
+    "groups": 'echo "$GROUPS:${GROUPS[*]}"; GROUPS[0]=999; echo "$GROUPS"; unset "GROUPS[0]"; echo "${GROUPS[0]-unset}/${#GROUPS[@]}"; unset GROUPS; GROUPS=(user); echo "$GROUPS"',
+    "history-number": 'echo "$HISTCMD"; set -o history; history -s first; echo "$HISTCMD"; history -s second; echo "$HISTCMD"; set +o history; echo "$HISTCMD"; unset HISTCMD; echo "${HISTCMD-unset}"',
+    "nested-source": 'set -- orig; source ./outer arg; echo "$1"; source ./inner; echo "$1"',
     "test-N": 'for f in newer older tied missing link; do [[ -N $f ]]; echo $?; test -N "$f"; echo $?; [ -N "$f" ]; echo $?; done',
     "execution-string": '[[ $BASH_EXECUTION_STRING == *marker* ]]; echo $?; x=$BASH_EXECUTION_STRING; unset BASH_EXECUTION_STRING; echo "${BASH_EXECUTION_STRING-unset}"; BASH_EXECUTION_STRING=value; echo "$BASH_EXECUTION_STRING"',
     "history-extension": """for x in dir/file.txt dir/a.b.c .dot dir.ext/file plain trailing.; do history -c; history -s "echo $x"; history -p '!!:$:r' '!!:$:e'; done""",
@@ -18,6 +29,7 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "source-fullpath": 'shopt -s bash_source_fullpath; source ./linked; f; shopt -u bash_source_fullpath; source ./linked; f',
     "source-path": 'PATH=none; shopt -u sourcepath; source -p empty:src mod one; . -psrc mod two; source -p empty mod; echo $?; source -p "" mod; source -p empty ./mod',
     "compgen-array": """a=(old); declare -n ref=a; compgen -V ref -W 'be bee bee' be; printf '<%s>\\n' "${a[@]}"; compgen -V ref -W 'x' z; echo "$?:${#a[@]}"; compgen -V 'bad-name' -W x; echo $?; declare -A map=([key]=ok); compgen -V map -W x; echo "$?:${map[key]}"; readonly kept=old; compgen -V kept -W x; echo "$?:$kept" """,
     "trap-action": """trap 'printf "%s" word' USR1; trap '' USR2; trap -P TERM USR1 USR2; echo $?; x=$(trap -P USR1); echo "$x"; trap -P; echo $?; trap -pP TERM; echo $?""",
@@ -37,6 +49,16 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "posix-variable": ('POSIXLY_CORRECT=1; unset POSIXLY_CORRECT', 800),
+    "physical": ('pwd >/dev/null', 900),
+    "execfail": ('shopt -q execfail', 1600),
+    "shift-verbose": ('shift 2', 800),
+    "alias-table": ('s=${BASH_ALIASES[sample]}', 2500),
+    "command-table": ('s=${BASH_CMDS[sample]}', 2500),
+    "execignore": ('type -P choice >/dev/null', 700),
+    "groups": ('s="${GROUPS[*]}"', 1800),
+    "history-number": ('s=$HISTCMD', 2400),
+    "source-fullpath": ('source ./src/noop', 600),
     "test-N": ('[[ -N newer ]]', 2500),
     "execution-string": ('s=$BASH_EXECUTION_STRING', 2500),
     "history-extension": ("history -p '!!:$:e' >/dev/null", 800),
@@ -55,14 +77,23 @@ HOT = {
 }
 
 def fixture(root):
-    for name in ("src", "empty", "names", "items"):
+    for name in ("src", "empty", "names", "items", "a", "b"):
         (root / name).mkdir()
+    for directory in ("a", "b"):
+        path = root / directory / "choice"
+        path.write_text("#!/bin/sh\necho " + directory + "\n")
+        path.chmod(0o755)
     for name in ("newer", "older", "tied"):
         path = root / name
         path.touch()
         base = 1700000000000000000
         os.utime(path, ns=(base, base + {"newer": 1, "older": -1, "tied": 0}[name]))
     (root / "link").symlink_to("newer")
+    (root / "loc").write_text('echo "$BASH_SOURCE"; f(){ echo "$BASH_SOURCE"; }')
+    (root / "linked").symlink_to("loc")
+    (root / "linkdir").symlink_to("src")
+    (root / "outer").write_text("set -- outer; source ./inner arg")
+    (root / "inner").write_text("set -- inner")
     (root / "mod").write_text("echo cwd")
     (root / "src/mod").write_text('echo "src:$1"')
     (root / "src/noop").write_text(":")
@@ -77,6 +108,27 @@ def fixture(root):
     (root / "names/broken").symlink_to("missing")
     for i in range(256):
         (root / "items" / str(i * 17)).touch()
+
+def completion_time(shell, root):
+    # Start the clock after the prefix is visible. Verify the accepted argument
+    # separately so echoed input or a suggestion cannot masquerade as completion.
+    t = Terminal(shell, root, editing=True, env={"FIGNORE": ".tmp", "HISTFILE": "/dev/null",
+                                               "XDG_STATE_HOME": str(root / "state")})
+    try:
+        assert b"READY>" in t.read(b"READY>")
+        t.send(b'printf "%s" pick.')
+        assert b"pick." in t.read(b"pick.")
+        start = time.perf_counter_ns()
+        t.send(b"\t")
+        assert b"valid" in t.read(b"valid")
+        elapsed = (time.perf_counter_ns() - start) / 1e6
+        t.send(b" >accepted; printf '\\036'\n")
+        assert b"\x1e" in t.read(b"\x1e")
+        assert (root / "accepted").read_bytes() == b"pick.valid"
+        return elapsed
+    finally:
+        t.close()
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -108,11 +160,31 @@ def main():
         print(json.dumps(dict(reference=version, witnesses=len(cases), differences=failed)), flush=True)
         if failed:
             raise SystemExit(1)
+        termroot = root / "completion"
+        termroot.mkdir()
+        (termroot / "pick.valid").touch()
+        for i in range(1024):
+            (termroot / f"pick.{i}.tmp").touch()
         rng = random.Random(1729)
+        samples = [[] for _ in shells]
+        for r in range(args.runs + 1):
+            indices = list(range(len(shells)))
+            rng.shuffle(indices)
+            for i in indices:
+                elapsed = completion_time(shells[i], termroot)
+                if r: samples[i].append(elapsed)
+        if args.runs:
+            print(json.dumps(dict(case="filename-completion", repeats=1,
+                                  median_ms=[round(statistics.median(g), 3) for g in samples],
+                                  samples_ms=samples)), flush=True)
         for name, (body, count) in HOT.items():
             if not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "physical": "set -P", "execfail": "shopt -s execfail", "shift-verbose": "shopt -s shift_verbose; exec 2>/dev/null",
+                "alias-table": "alias sample=value", "command-table": "hash -p /bin/sh sample",
+                "execignore": 'PATH=$PWD/a:$PWD/b; EXECIGNORE="$PWD/a/*"',
+                "source-fullpath": "shopt -s bash_source_fullpath",
                 "history-extension": "history -s 'echo dir/file.txt'",
                 "funcnest": 'FUNCNEST=8; f(){ :; }',
                 "compgen-array": 'words="' + " ".join(f"item{i}" for i in range(512)) + '"',

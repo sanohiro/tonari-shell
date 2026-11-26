@@ -283,6 +283,11 @@ pub(super) fn run(
         if name == "PATH" {
             session.hashes.clear();
         }
+        if session.active_groups(name) && (local || value.is_some() || array.is_some()) {
+            eprintln!("tonari: {command}: {name}: variable may not be assigned a value");
+            status = 1;
+            continue;
+        }
         let mut var = session
             .declared_variable(name, flags.global)
             .unwrap_or_default();
@@ -518,6 +523,10 @@ pub(super) fn run(
         {
             session.apply_history_limit(name, value);
         }
+        if name == "POSIXLY_CORRECT" && (!flags.global || session.declaration_scope(name).is_none())
+        {
+            session.apply_posix_mode(var.value.is_some());
+        }
         session.store_variable(name, var, flags.global);
     }
     crate::execute::Flow::Continue(status)
@@ -557,6 +566,16 @@ impl Session {
         } else {
             self.variables.get(name)
         };
+        if matches!(name, "BASH_ALIASES" | "BASH_CMDS") && entry.is_none_or(|v| v.dynamic) {
+            let mut var = entry.cloned().unwrap_or_default();
+            var.declared = true;
+            var.dynamic = true;
+            var.array_assigned = true;
+            var.elements = Some(std::rc::Rc::new(super::array::Elements::Associative(
+                self.table_snapshot(name),
+            )));
+            return Some(var);
+        }
         if let Some(var) = entry {
             let mut var = var.clone();
             if var.dynamic || matches!(name, "BASHOPTS" | "SHELLOPTS") {
@@ -565,10 +584,10 @@ impl Session {
             return Some(var);
         }
         {
-            if name == "BASH_VERSINFO" {
+            if matches!(name, "BASH_VERSINFO" | "GROUPS") {
                 return Some(Variable {
                     declared: true,
-                    readonly: true,
+                    readonly: name == "BASH_VERSINFO",
                     array_assigned: true,
                     elements: Some(std::rc::Rc::new(super::array::Elements::Dense(
                         self.array_values(name),

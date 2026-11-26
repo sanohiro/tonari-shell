@@ -70,6 +70,43 @@ pub(crate) fn current_substitution(
     if body.is_empty() {
         return Ok((String::new(), 0));
     }
+    // A single literal output builtin can write to memory directly. Everything
+    // that can redirect stdout or observe traps still executes in a real fd scope.
+    if !reply
+        && !session.traps.active()
+        && !session.xtrace
+        && let Some(cmd) = sole_plain_command(&body)
+        && let Some(name @ ("echo" | "printf")) =
+            cmd.words.first().and_then(parser::Word::as_literal)
+        && !session.functions.contains_key(name)
+        && !session.disabled_builtins.contains(name)
+        && let Some(words) = cmd
+            .words
+            .iter()
+            .map(|w| w.as_literal().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()
+        && (name == "echo"
+            || words.get(1).is_some_and(|format| {
+                !format.starts_with('-') && !crate::session::printf::may_assign_count(format)
+            }))
+    {
+        let mut output = Vec::new();
+        let code = if name == "echo" {
+            crate::builtins::echo_into(&words[1..], &mut output, session);
+            0
+        } else {
+            crate::session::printf::run(session, &words[1..], Some(&mut output))
+        };
+        session.remember_literal_argument(&words);
+        if code != 0
+            && session.shopt.inherit_errexit
+            && session.errexit
+            && session.tested_depth == 0
+        {
+            return Err(crate::expansion::Error::control(Flow::Exit(code)));
+        }
+        return Ok(captured_output(output, code)?);
+    }
     let callsite = session.current_command.clone();
     let pipeline = session.pipe_status.clone();
     let restore_errexit =
@@ -77,7 +114,7 @@ pub(crate) fn current_substitution(
     let verbose = std::mem::take(&mut session.verbose);
     session.enter_function(&mut Default::default());
     if reply {
-        session.declare("local", &["REPLY".into()], &[], last);
+        session.local_reply(last);
     }
     let run = || execute_program(session, body, last, false);
     let captured = if reply {
@@ -432,17 +469,19 @@ fn capture_simple(
     if let Some(cmd) = sole_plain_command(body)
         && let [name, flag, names @ ..] = cmd.words.as_slice()
         && name.as_literal() == Some("trap")
-        && flag.as_literal() == Some("-p")
+        && (flag.as_literal() == Some("-p") || flag.as_literal() == Some("-P") && !names.is_empty())
+        && names
+            .iter()
+            .all(|word| word.as_literal().is_some_and(|s| !s.starts_with('-')))
         && !session.functions.contains_key("trap")
         && !session.disabled_builtins.contains("trap")
-        && names.iter().all(|word| word.as_literal().is_some())
     {
         let mut out = Vec::new();
         let status = session.traps.list(
             names.iter().map(|word| word.as_literal().unwrap()),
             &mut out,
-            session.posix,
-            false,
+            session.posix && flag.as_literal() == Some("-p"),
+            flag.as_literal() == Some("-P"),
         );
         return Some(captured_output(out, status));
     }

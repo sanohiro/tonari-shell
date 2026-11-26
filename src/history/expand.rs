@@ -244,12 +244,14 @@ pub(crate) fn expand<'a>(session: &Session, line: &'a str) -> io::Result<Expansi
                     .map_or(value.as_str(), |(h, _)| h)
                     .into(),
                 'r' | 'e' => {
-                    let dot = value.rfind('.');
-                    match (code, dot) {
-                        ('r', Some(i)) => value[..i].into(),
-                        ('e', Some(i)) => value[i..].into(),
-                        _ => value,
+                    if let Some(i) = value.rfind('.') {
+                        if code == 'r' {
+                            value.truncate(i);
+                        } else {
+                            value.drain(..i);
+                        }
                     }
+                    value
                 }
                 's' => {
                     let d =

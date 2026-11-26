@@ -33,13 +33,11 @@ fn sourced(
     }
     let old = (!args.is_empty())
         .then(|| std::mem::replace(&mut session.positional, Vec::from(args).into_iter()));
-    let saved_set_args = std::mem::take(&mut session.source_set_args);
+    session.source_set_args = false;
     let callsite = session.current_command.clone();
     session.call_lines.push(session.line());
     session.source_depth += 1;
-    session
-        .source_names
-        .push(path.to_string_lossy().as_ref().into());
+    session.push_source_path(path);
     session.function_names.push("source".into());
     let saved_debug = session.traps.enter_source(session.functrace);
     let result = input::file_script(session, script.file, Some(script.metadata), status, false);
@@ -55,7 +53,9 @@ fn sourced(
     {
         session.positional = old;
     }
-    session.source_set_args = saved_set_args;
+    if !args.is_empty() {
+        session.source_set_args = false;
+    }
     match result {
         Flow::Return(code) => Flow::Continue(code),
         other => other,
@@ -98,8 +98,8 @@ pub fn source_file(session: &mut Session, words: &[String], status: u8, fatal: b
         .then(|| session.get("PATH"))
         .flatten();
     if let Some(path) = search.or(inherited.as_deref()).filter(|_| !direct) {
-        for dir in std::env::split_paths(path) {
-            let path = dir.join(name);
+        for dir in path.split(':') {
+            let path = Path::new(dir).join(name);
             if let Ok(file) = open_script(&path) {
                 return sourced(session, file, &path, &args[1..], status);
             }

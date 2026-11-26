@@ -38,6 +38,7 @@ pub struct Invocation {
     pub monitor: Option<bool>,
     pub braceexpand: bool,
     pub pipefail: bool,
+    pub physical: bool,
     pub shopts: Vec<(bool, Option<String>)>,
 }
 
@@ -88,6 +89,7 @@ pub fn parse(
     let mut monitor = None;
     let mut braceexpand = true;
     let mut pipefail = false;
+    let mut physical = false;
     let mut shopts = Vec::new();
     while args
         .peek()
@@ -125,6 +127,7 @@ pub fn parse(
                         'E' => errtrace = enabled,
                         'T' => functrace = enabled,
                         'C' => noclobber = enabled,
+                        'P' => physical = enabled,
                         'a' => allexport = enabled,
                         't' => onecmd = enabled,
                         'x' => xtrace = enabled,
@@ -138,6 +141,7 @@ pub fn parse(
                         'o' => match args.next().as_deref().and_then(|a| a.to_str()) {
                             Some("braceexpand") => braceexpand = enabled,
                             Some("posix") => posix = enabled,
+                            Some("physical") => physical = enabled,
                             Some("pipefail") => pipefail = enabled,
                             Some("errexit") => errexit = enabled,
                             Some("verbose") => verbose = enabled,
@@ -213,6 +217,7 @@ pub fn parse(
         monitor,
         braceexpand,
         pipefail,
+        physical,
         shopts,
     }))
 }

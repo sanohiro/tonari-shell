@@ -17,7 +17,7 @@ pub(super) struct Dynamic {
 }
 
 pub(super) fn is_dynamic(name: &str) -> bool {
-    name == "BASH_MONOSECONDS" || integer_attribute(name)
+    matches!(name, "BASH_MONOSECONDS" | "HISTCMD") || integer_attribute(name)
 }
 
 pub(super) fn integer_attribute(name: &str) -> bool {
@@ -75,6 +75,11 @@ impl Session {
                     }
                 }
             }
+            "HISTCMD" => Some(if self.history_enabled {
+                self.history_command_number() as i64
+            } else {
+                0
+            }),
             "BASH_MONOSECONDS" => {
                 let mut ts = std::mem::MaybeUninit::uninit();
                 Some(

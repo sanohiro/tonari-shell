@@ -211,6 +211,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
             }
         }
         if !found || search_all {
+            let ignored = IgnoredExecutables::new(session);
             let mut report = |path: &Path| {
                 found = true;
                 let absolute;
@@ -242,7 +243,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                     } else {
                         dir.join(name)
                     };
-                    if executable(&path) {
+                    if !ignored.contains(&path) && executable(&path) {
                         if report(&path).is_err() {
                             return 1;
                         }
@@ -269,6 +270,44 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
             all
         }),
     )
+}
+
+pub(crate) struct IgnoredExecutables {
+    patterns: Vec<crate::pattern::extended::Pattern>,
+}
+
+impl IgnoredExecutables {
+    pub(crate) fn new(session: &Session) -> Self {
+        let patterns = session
+            .get("EXECIGNORE")
+            .filter(|s| !s.is_empty())
+            .map_or_else(Vec::new, |value| {
+                let locale = session.character_locale();
+                value
+                    .split(':')
+                    .filter(|p| !p.is_empty())
+                    .map(|p| {
+                        crate::pattern::extended::Pattern::insensitive(
+                            p,
+                            session.shopt.glob.extglob,
+                            locale,
+                        )
+                    })
+                    .collect()
+            });
+        Self { patterns }
+    }
+
+    pub(crate) fn active(&self) -> bool {
+        !self.patterns.is_empty()
+    }
+
+    pub(crate) fn contains(&self, path: &Path) -> bool {
+        !self.patterns.is_empty()
+            && path
+                .to_str()
+                .is_some_and(|s| self.patterns.iter().any(|p| p.accepts(s, false)))
+    }
 }
 
 pub(super) fn executable(path: &Path) -> bool {

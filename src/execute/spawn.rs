@@ -75,11 +75,12 @@ impl External {
         session: Option<&crate::Session>,
         launch: crate::jobs::Launch,
     ) -> io::Result<libc::pid_t> {
-        let path = self
-            .search_paths
-            .as_ref()
-            .and_then(|paths| paths.first())
-            .unwrap_or(&self.words[0]);
+        let path = match &self.search_paths {
+            Some(paths) => paths
+                .first()
+                .ok_or_else(|| io::Error::from_raw_os_error(libc::ENOENT))?,
+            None => &self.words[0],
+        };
         let spawn_with = |attributes| unsafe {
             let env = self
                 .env

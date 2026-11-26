@@ -646,7 +646,6 @@ pub(crate) fn call_with_bindings(
         session.debug_args.push(arguments.as_slice().to_vec());
     }
     let old = std::mem::replace(&mut session.positional, arguments);
-    let saved_set_args = session.source_set_args;
     let hidden = session
         .traps
         .enter_function(session.errtrace, session.functrace || traced);
@@ -667,7 +666,7 @@ pub(crate) fn call_with_bindings(
     let flow = crate::traps::returning(session, flow);
     session.traps.leave_function(hidden);
     session.positional = old;
-    session.source_set_args = saved_set_args;
+    session.source_set_args = false;
     if tracked {
         session.debug_args.pop();
         if session.debug_args.len() == 1 {

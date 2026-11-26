@@ -75,20 +75,50 @@ impl Variable {
 }
 
 impl Session {
+    pub(super) fn live_table(&self, name: &str) -> bool {
+        matches!(name, "BASH_ALIASES" | "BASH_CMDS")
+            && self.variables.get(name).is_none_or(|v| v.dynamic)
+    }
+
+    pub(super) fn table_snapshot(&self, name: &str) -> Associative {
+        let mut map = Associative::default();
+        if name == "BASH_ALIASES" {
+            if let Some(aliases) = &self.aliases.0 {
+                for (key, value) in aliases.iter() {
+                    map.insert(key.clone(), value.clone());
+                }
+            }
+        } else {
+            for (key, value) in self.hashes.items() {
+                map.insert(key.into(), value.into());
+            }
+        }
+        map
+    }
+
     pub fn is_associative(&self, name: &str) -> bool {
         let Ok(resolved) = self.reference_name(name) else {
             return false;
         };
         let name = resolved.as_ref();
-        self.variables
-            .get(name)
-            .and_then(Variable::associative)
-            .is_some()
+        self.live_table(name)
+            || self
+                .variables
+                .get(name)
+                .and_then(Variable::associative)
+                .is_some()
     }
 
     pub fn assoc_value(&self, name: &str, key: &str) -> Option<&str> {
         let resolved = self.reference_name(name).ok()?;
         let name = resolved.as_ref();
+        if self.live_table(name) {
+            return if name == "BASH_ALIASES" {
+                self.aliases.get(key)
+            } else {
+                self.hashes.path_value(key)
+            };
+        }
         self.variables
             .get(name)?
             .associative()?
@@ -106,6 +136,13 @@ impl Session {
         let name = resolved.as_ref();
         if self.readonly(name) {
             return Err("readonly variable");
+        }
+        if self.live_table(name) {
+            if name == "BASH_ALIASES" {
+                return self.aliases.insert(&key, &value);
+            }
+            self.hashes.bind_path(key, value);
+            return Ok(());
         }
         let value = self.convert_case(value, self.variables.get(name).and_then(|v| v.letter_case));
         let var = self

@@ -127,6 +127,7 @@ pub struct Session {
     // original process environment without building a copy on startup.
     variables: BTreeMap<String, Variable>,
     dynamic: dynamic::Dynamic,
+    groups_unset: bool,
     has_namerefs: bool,
     reference_depth: std::cell::Cell<u8>,
     opt_offset: usize,
@@ -138,6 +139,7 @@ pub struct Session {
     pub interactive: bool,
     pub login: bool,
     pub posix: bool,
+    pub physical: bool,
     pub logout_started: bool,
     pub allexport: bool,
     pub notify: bool,
@@ -278,10 +280,14 @@ impl Session {
                 "BASH",
                 "BASH_VERSION",
                 "BASH_VERSINFO",
+                "BASH_ALIASES",
+                "BASH_CMDS",
                 "SECONDS",
                 "RANDOM",
                 "SRANDOM",
                 "BASH_MONOSECONDS",
+                "HISTCMD",
+                "GROUPS",
                 "HOSTTYPE",
                 "HOSTNAME",
                 "PS4",
@@ -366,6 +372,9 @@ impl Session {
         if self.histexpand {
             flags.push('H');
         }
+        if self.physical {
+            flags.push('P');
+        }
         if self.functrace {
             flags.push('T');
         }
@@ -401,7 +410,7 @@ impl Session {
             return 1;
         };
         if count < 0 || count as u64 > self.positional.len() as u64 {
-            if self.posix {
+            if self.shopt.shift_verbose {
                 eprintln!("tonari: shift: shift count out of range");
             }
             return 1;
@@ -491,6 +500,7 @@ impl Session {
                     }
                     'T' => self.functrace = enable,
                     'C' => self.noclobber = enable,
+                    'P' => self.physical = enable,
                     'B' => self.shopt.braceexpand = enable,
                     'f' => self.noglob = enable,
                     'h' => self.hashes.enabled = enable,
@@ -575,7 +585,14 @@ impl Session {
         if let Some(base) = name.strip_prefix('\u{1}') {
             let resolved = self.reference_name(base).ok()?;
             let base = resolved.as_ref();
-            if let Some(map) = self.variables.get(base).and_then(Variable::associative) {
+            let snapshot;
+            let map = if self.live_table(base) {
+                snapshot = self.table_snapshot(base);
+                Some(&snapshot)
+            } else {
+                self.variables.get(base).and_then(Variable::associative)
+            };
+            if let Some(map) = map {
                 return Some(
                     map.ordered()
                         .into_iter()
@@ -616,6 +633,9 @@ impl Session {
                 .ok()?;
             return self.element(base, i);
         }
+        if self.live_table(name) {
+            return self.assoc_value(name, "0").map(str::to_owned);
+        }
         if matches!(name, "BASHOPTS" | "SHELLOPTS") {
             return Some(self.option_list(name == "SHELLOPTS"));
         }
@@ -645,7 +665,7 @@ impl Session {
             "BASH_EXECUTION_STRING" if self.execution_string.is_some() => {
                 self.execution_string.as_deref().cloned()
             }
-            "BASH_MONOSECONDS" | "RANDOM" | "SECONDS" | "SRANDOM" => {
+            "HISTCMD" | "BASH_MONOSECONDS" | "RANDOM" | "SECONDS" | "SRANDOM" => {
                 self.dynamic_number(name).map(|v| v.to_string())
             }
             "BASH_SUBSHELL" => Some(self.subshell_depth.to_string()),
@@ -673,7 +693,7 @@ impl Session {
                 .into_string()
                 .ok(),
             "BASH_VERSION" => Some("5.2.0(1)-tonari".into()),
-            "BASH_VERSINFO" => self.element(name, 0),
+            "GROUPS" | "BASH_VERSINFO" => self.element(name, 0),
             "SHELL" => std::env::var(name).ok().or_else(crate::word::account_shell),
             "HOSTNAME" => std::env::var(name).ok().or_else(|| {
                 static HOST: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
@@ -780,6 +800,7 @@ impl Session {
             name,
             "BASH_ARGV0"
                 | "GLOBIGNORE"
+                | "POSIXLY_CORRECT"
                 | "HISTSIZE"
                 | "HISTFILESIZE"
                 | "OPTIND"
@@ -838,6 +859,16 @@ impl Session {
         }
         if self.readonly(name) {
             return;
+        }
+        if self.live_table(name) {
+            let _ = self.assign_key(name, "0".into(), value.into_owned());
+            return;
+        }
+        if self.active_groups(name) {
+            return;
+        }
+        if name == "POSIXLY_CORRECT" {
+            self.apply_posix_mode(true);
         }
         if matches!(name, "HISTSIZE" | "HISTFILESIZE") {
             self.apply_history_limit(name, &value);
@@ -929,7 +960,7 @@ impl Session {
             .map_or((key, false), |name| (name, true));
         if matches!(
             name,
-            "OPTIND" | "GLOBIGNORE" | "PATH" | "BASH_ARGV0" | "PIPESTATUS"
+            "OPTIND" | "GLOBIGNORE" | "POSIXLY_CORRECT" | "PATH" | "BASH_ARGV0" | "PIPESTATUS"
         ) || Self::builtin_readonly(name)
         {
             return false;
@@ -989,7 +1020,11 @@ impl Session {
         if matches!(name, "BASHPID" | "BASHOPTS" | "SHELLOPTS" | "PIPESTATUS") {
             return None;
         }
-        let var = self.variables.get(name)?;
+        let Some(var) = self.variables.get(name) else {
+            return (name == "BASH_EXECUTION_STRING")
+                .then(|| self.execution_string.as_deref().map(String::as_str))
+                .flatten();
+        };
         if var.dynamic || var.nameref || var.elements.is_some() {
             return None;
         }
@@ -1061,6 +1096,9 @@ impl Session {
     // Move the prepared strings and avoid snapshotting variables for restoration.
     pub fn persist_prefix(&mut self, assignments: &mut Vec<(String, String)>) {
         for (name, value) in assignments.drain(..) {
+            if name == "POSIXLY_CORRECT" {
+                self.apply_posix_mode(true);
+            }
             if name == "OPTIND" {
                 self.opt_offset = 0;
             }
@@ -1087,6 +1125,9 @@ impl Session {
         for (name, value) in assignments {
             if self.readonly(name) {
                 continue;
+            }
+            if name == "POSIXLY_CORRECT" {
+                self.apply_posix_mode(true);
             }
             if name == "GLOBIGNORE" {
                 self.shopt.glob.set_ignore(Some(value));
@@ -1128,6 +1169,13 @@ impl Session {
             self.opt_offset = offset;
         }
         for (name, original) in bindings.0 {
+            if name == "POSIXLY_CORRECT" {
+                let enabled = original.as_ref().map_or_else(
+                    || std::env::var_os("POSIXLY_CORRECT").is_some(),
+                    |v| v.value.is_some(),
+                );
+                self.apply_posix_mode(enabled);
+            }
             if name == "GLOBIGNORE" {
                 self.shopt
                     .glob
@@ -1224,6 +1272,22 @@ impl Session {
     pub fn enter_function(&mut self, bindings: &mut Bindings) {
         self.enter_scope(bindings, false);
         self.function_depth += 1;
+    }
+
+    pub(crate) fn local_reply(&mut self, last: u8) {
+        if self.shopt.localvar_inherit
+            || self.variables.contains_key("REPLY")
+            || std::env::var_os("REPLY").is_some()
+        {
+            self.declare("local", &["REPLY".into()], &[], last);
+        } else {
+            self.locals
+                .last_mut()
+                .unwrap()
+                .0
+                .insert("REPLY".into(), None);
+            self.variables.insert("REPLY".into(), Variable::default());
+        }
     }
 
     pub fn leave_function(&mut self) {
@@ -1415,6 +1479,12 @@ impl Session {
         if self.readonly(name) {
             return;
         }
+        if name == "POSIXLY_CORRECT" {
+            self.apply_posix_mode(false);
+        }
+        if name == "GROUPS" {
+            self.groups_unset = true;
+        }
         if name == "GLOBIGNORE" {
             self.shopt.glob.set_ignore(None);
         }
@@ -1553,6 +1623,10 @@ impl Session {
                         }
                         continue;
                     }
+                    if self.active_groups(base) && !self.variables.contains_key(base) {
+                        let var = self.declared_variable(base, false).unwrap();
+                        self.variables.insert(base.into(), var);
+                    }
                     let variable = self.variables.get(base);
                     let array = variable.is_some_and(|v| v.elements.is_some());
                     if !array
@@ -1609,7 +1683,7 @@ impl Session {
     }
 
     pub fn directory_builtin(&mut self, name: &str, args: &[String]) -> u8 {
-        let mut physical = false;
+        let mut physical = self.physical;
         let mut require_pwd = false;
         let mut i = 0;
         while let Some(opt) = args.get(i) {

@@ -7,6 +7,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 mod here_input;
 mod lookup;
+pub(crate) use lookup::IgnoredExecutables;
 mod spawn;
 pub(crate) use spawn::inherited_env;
 
@@ -411,8 +412,17 @@ impl External {
         } else {
             (!executable.as_bytes().contains(&b'/')).then(|| {
                 let path = lookup::path(cmd, session);
+                let ignored = IgnoredExecutables::new(session);
                 std::env::split_paths(&path)
-                    .map(|dir| CString::new(dir.join(name).as_os_str().as_bytes()).unwrap())
+                    .map(|dir| {
+                        if dir.as_os_str().is_empty() {
+                            Path::new(".").join(name)
+                        } else {
+                            dir.join(name)
+                        }
+                    })
+                    .filter(|path| !ignored.contains(path))
+                    .map(|path| CString::new(path.as_os_str().as_bytes()).unwrap())
                     .collect()
             })
         };
@@ -1019,7 +1029,7 @@ fn exec_builtin(cmd: &PreparedCommand, session: &Session, mut args: &[String]) -
     }
     let external = External::for_words(cmd, session, args, arg0, clear);
     let status = external.exec(None);
-    if session.interactive {
+    if session.subshell_depth == 0 && (session.interactive || session.shopt.execfail) {
         Flow::Continue(status)
     } else {
         Flow::Exit(status)

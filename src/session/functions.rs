@@ -19,9 +19,25 @@ impl Function {
 
 impl Session {
     pub fn function_nesting_full(&self) -> bool {
-        self.get("FUNCNEST")
-            .and_then(|v| v.trim().parse::<u32>().ok())
-            .is_some_and(|max| max > 0 && self.function_depth >= max)
+        static INHERITED: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+        let bound = match self.variables.get("FUNCNEST") {
+            Some(var) if var.nameref || var.elements.is_some() => self
+                .get("FUNCNEST")
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(0),
+            Some(var) => var
+                .value
+                .as_deref()
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(0),
+            None => *INHERITED.get_or_init(|| {
+                std::env::var("FUNCNEST")
+                    .ok()
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(0)
+            }),
+        };
+        bound > 0 && self.function_depth >= bound
             || self.function_depth >= 128 && self.deep_function_nesting_full()
     }
 
@@ -43,6 +59,22 @@ impl Session {
         let used = origin.abs_diff(std::ptr::from_ref(&limit).addr());
         let budget = unsafe { limit.assume_init() }.rlim_cur / 2;
         used as u64 + 256 * 1024 >= budget
+    }
+
+    pub(crate) fn push_source_path(&mut self, path: &std::path::Path) {
+        let absolute = self
+            .shopt
+            .bash_source_fullpath
+            .then(|| path.canonicalize().ok())
+            .flatten();
+        self.source_names.push(
+            absolute
+                .as_deref()
+                .unwrap_or(path)
+                .to_string_lossy()
+                .as_ref()
+                .into(),
+        );
     }
 
     pub(crate) fn function_source(&self) -> &str {

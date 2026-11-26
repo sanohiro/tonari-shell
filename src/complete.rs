@@ -199,10 +199,25 @@ impl Source {
             }
             Self::Files | Self::Directories => {
                 let directories_only = matches!(self, Self::Directories);
-                if !list {
+                let ignored = (!directories_only)
+                    .then(|| session.get("FIGNORE"))
+                    .flatten()
+                    .filter(|s| !s.is_empty());
+                if !list && ignored.is_none() {
                     return Some((common_file(prefix, directories_only, session)?, Vec::new()));
                 }
-                file_names(prefix, directories_only, true, session)
+                let mut choices = file_names(prefix, directories_only, true, session);
+                if let Some(suffixes) = ignored {
+                    let acceptable = |path: &String| {
+                        !suffixes.split(':').any(|suffix| {
+                            !suffix.is_empty() && path.trim_end_matches('/').ends_with(suffix)
+                        })
+                    };
+                    if session.shopt.force_fignore || choices.iter().any(acceptable) {
+                        choices.retain(acceptable);
+                    }
+                }
+                choices
             }
         };
         // These generators return sorted choices. The first and last determine
@@ -449,6 +464,7 @@ fn visit_commands(
     }
     let editing = crate::editor::preview::active();
     let mut entries = 0usize;
+    let ignored = crate::execute::IgnoredExecutables::new(session);
     for dir in std::env::split_paths(&session.search_path(&[])) {
         let path = if dir.as_os_str().is_empty() {
             Path::new(".")
@@ -464,7 +480,9 @@ fn visit_commands(
                 && !matches!(raw.to_bytes(), b"." | b"..")
                 && let Ok(name) = raw.to_str()
             {
-                return visit(name, Some((path, kind)));
+                if !ignored.active() || !ignored.contains(&path.join(name)) {
+                    return visit(name, Some((path, kind)));
+                }
             }
             ControlFlow::Continue(())
         })?;
