@@ -650,16 +650,16 @@ line=$(complete -p probe); complete -r probe; eval "$line"; complete -p probe"""
             result = self.command(TONARI, "lock(){ readonly -a ary; }; "
                                   + name + " -tc1 -C lock ary <<<one")
             self.assertEqual((result.returncode, result.stderr),
-                             (1, f"tonari: {name}: ary: readonly variable\\n".encode()))
+                             (1, f"tonari: {name}: ary: readonly variable\n".encode()))
 
     def test_debug_wait_preserves_child_status(self):
-        self.compare("trap ':' DEBUG; (exit 37) & wait $!; echo $?", 0, b"37\\n")
+        self.compare("trap ':' DEBUG; (exit 37) & wait $!; echo $?", 0, b"37\n")
 
     def test_reassign_history_limits(self):
         self.compare("""HISTSIZE=10; HISTFILESIZE=10; HISTFILE=hist
-printf '%s\\\\n' one two three >hist; history -r hist
+printf '%s\\n' one two three >hist; history -r hist
 HISTSIZE=1; history | awk '{ print $NF }'
-HISTFILESIZE=1; cat hist""", 0, b"three\\nthree\\n", minimum=5)
+HISTFILESIZE=1; cat hist""", 0, b"three\nthree\n", minimum=5)
 
     def test_invoked_as_sh(self):
         sh = self.cwd / "sh"
