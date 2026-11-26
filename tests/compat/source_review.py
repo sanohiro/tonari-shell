@@ -736,6 +736,9 @@ def main():
         elif os.uname().sysname == "Darwin":
             cases["signal-range"] = """for sig in INFO EMT; do n=$(kill -l "$sig"); echo "$(kill -l "$n")"; trap 'echo handled' "$sig"; kill -s "$sig" "$$"; trap - "$sig"; done"""
         if os.uname().sysname == "Darwin":
+            device = next((p for p in Path("/dev").glob("disk*") if p.is_block_device()), None)
+            if device is not None:
+                cases["block-device"] = f"[[ -b {shlex.quote(str(device))} && ! -b /dev/null ]] && test -b {shlex.quote(str(device))} && echo block"
             locale_range = """LC_ALL=en_US.UTF-8; for opt in -s -u -s; do shopt "$opt" globasciiranges; for ch in b B é; do [[ $ch == [a-z] ]]; echo "$?"; done; done; LC_ALL=C; [[ B == [a-z] ]]; echo "$?" """
             cases["native-locale-range"] = locale_range
         for shell in shells[:2]:

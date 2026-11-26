@@ -1556,7 +1556,25 @@ fn run_builtin(
 
 enum Stage {
     Child(libc::pid_t),
+    GroupedChild(libc::pid_t),
     Status(u8),
+}
+
+impl Stage {
+    fn pid(&self) -> Option<libc::pid_t> {
+        match *self {
+            Self::Child(pid) | Self::GroupedChild(pid) => Some(pid),
+            Self::Status(_) => None,
+        }
+    }
+
+    fn join_group(&self, launch: &mut crate::jobs::Launch) {
+        match *self {
+            Self::Child(pid) => launch.parent(pid),
+            Self::GroupedChild(pid) => launch.record_child(pid),
+            Self::Status(_) => {}
+        }
+    }
 }
 
 fn connect_pipe(
@@ -1835,7 +1853,11 @@ fn start(
             Ok(pid) => {
                 #[cfg(target_os = "macos")]
                 launch.resume_spawned(pid);
-                return Ok(Stage::Child(pid));
+                return Ok(if launch.group.is_some() {
+                    Stage::GroupedChild(pid)
+                } else {
+                    Stage::Child(pid)
+                });
             }
             Err(_) if launch.group.is_some() => {}
             Err(e) if e.raw_os_error() == Some(libc::ENOEXEC) => {}
@@ -2019,7 +2041,7 @@ pub(super) fn capture_external(
     );
     session.subshell_depth -= 1;
     let pid = match stage.map_err(|_| "cannot launch command substitution")? {
-        Stage::Child(pid) => pid,
+        Stage::Child(pid) | Stage::GroupedChild(pid) => pid,
         Stage::Status(code) => return Ok((String::new(), code)),
     };
     crate::subshell::read_output(std::fs::File::from(reader), pid)
@@ -2157,7 +2179,7 @@ impl PreparedCommand {
             let scope = session.substitutions.scope();
             let result = start(self, None, None, None, status, session, Default::default())
                 .and_then(|stage| match stage {
-                    Stage::Child(pid) => wait(pid),
+                    Stage::Child(pid) | Stage::GroupedChild(pid) => wait(pid),
                     Stage::Status(code) => Ok(code),
                 });
             session.substitutions.finish(scope);
@@ -2972,9 +2994,10 @@ fn run_external(
             },
         ));
     }
-    let status = match start(cmd, None, None, None, last_status, session, launch)? {
-        Stage::Child(pid) if launch.group.is_some() => {
-            launch.parent(pid);
+    let stage = start(cmd, None, None, None, last_status, session, launch)?;
+    let status = match stage {
+        Stage::Child(pid) | Stage::GroupedChild(pid) if launch.group.is_some() => {
+            stage.join_group(&mut launch);
             session
                 .jobs
                 .finish(
@@ -2986,7 +3009,7 @@ fn run_external(
                 )?
                 .0
         }
-        Stage::Child(pid) => wait(pid)?,
+        Stage::Child(pid) | Stage::GroupedChild(pid) => wait(pid)?,
         Stage::Status(code) => code,
     };
     Ok(Flow::Continue(status))
@@ -3069,7 +3092,7 @@ pub fn run_pipeline(
             None
         };
     let length = pipeline.len();
-    let mut stages = Vec::with_capacity(length);
+    let mut stages: Vec<Stage> = Vec::with_capacity(length);
     let mut last_flow = None;
     for (i, mut raw) in pipeline.into_iter().enumerate() {
         if !session.traps.in_action()
@@ -3082,7 +3105,7 @@ pub fn run_pipeline(
         {
             drop(input);
             for stage in stages {
-                if let Stage::Child(pid) = stage {
+                if let Some(pid) = stage.pid() {
                     let _ = wait(pid);
                 }
             }
@@ -3123,20 +3146,18 @@ pub fn run_pipeline(
         })();
         match stage {
             Ok(stage) => {
-                if let Stage::Child(pid) = stage {
-                    launch.parent(pid);
-                }
+                stage.join_group(&mut launch);
                 stages.push(stage);
             }
             Err(e) => {
                 drop(input);
                 for stage in &stages {
-                    if let Stage::Child(pid) = stage {
-                        unsafe { libc::kill(*pid, libc::SIGKILL) };
+                    if let Some(pid) = stage.pid() {
+                        unsafe { libc::kill(pid, libc::SIGKILL) };
                     }
                 }
                 for stage in stages {
-                    if let Stage::Child(pid) = stage {
+                    if let Some(pid) = stage.pid() {
                         let _ = wait(pid);
                     }
                 }
@@ -3149,7 +3170,7 @@ pub fn run_pipeline(
         let processes = stages
             .into_iter()
             .map(|s| match s {
-                Stage::Child(p) => Ok(p),
+                Stage::Child(p) | Stage::GroupedChild(p) => Ok(p),
                 Stage::Status(c) => Err(c),
             })
             .collect();
@@ -3170,7 +3191,7 @@ pub fn run_pipeline(
     session.pipe_status.clear();
     for stage in stages {
         let result = match stage {
-            Stage::Child(pid) => wait(pid),
+            Stage::Child(pid) | Stage::GroupedChild(pid) => wait(pid),
             Stage::Status(code) => Ok(code),
         };
         session.pipe_status.push(*result.as_ref().unwrap_or(&1));

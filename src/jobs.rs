@@ -102,10 +102,15 @@ impl Launch {
     }
 
     pub fn parent(&mut self, pid: pid_t) {
+        self.record_child(pid);
         if let Some(group) = self.group {
-            let group = if group == 0 { pid } else { group };
             assign_process_group(pid, group);
-            self.group = Some(group);
+        }
+    }
+
+    pub fn record_child(&mut self, pid: pid_t) {
+        if self.group == Some(0) {
+            self.group = Some(pid);
         }
     }
 }
