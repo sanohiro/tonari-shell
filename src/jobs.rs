@@ -254,7 +254,7 @@ impl Job {
             .iter()
             .any(|p| matches!(p.state, State::Stopped(_)))
     }
-    fn display_state(&self, posix: bool) -> String {
+    fn display_state(&self, posix: bool) -> std::borrow::Cow<'static, str> {
         if self.active() {
             return "Running".into();
         }
@@ -266,14 +266,14 @@ impl Job {
                 && let Some((name, _)) =
                     crate::traps::signals().find(|(_, sig)| *sig + 128 == i32::from(code))
             {
-                return format!("Stopped(SIG{name})");
+                return format!("Stopped(SIG{name})").into();
             }
             return "Stopped".into();
         }
         match self.status() {
             0 => "Done".into(),
-            code if posix => format!("Done({code})"),
-            code => format!("Exit {code}"),
+            code if posix => format!("Done({code})").into(),
+            code => format!("Exit {code}").into(),
         }
     }
 

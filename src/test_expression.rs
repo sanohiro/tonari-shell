@@ -192,14 +192,15 @@ fn regex_match(
     trace(session, status, &[left, "=~", &expression]);
     let result = pattern::localized(|| {
         let ignore_case = session.shopt.nocasematch;
-        let slot = &mut session.regex[usize::from(ignore_case)];
-        if slot.as_ref().is_none_or(|r| r.pattern != expression) {
-            *slot = Some(std::rc::Rc::new(Compiled::new(
-                expression.into_owned(),
-                ignore_case,
-            )?));
+        let recent = &mut session.regex[usize::from(ignore_case)];
+        if let Some(compiled) = recent.iter().flatten().find(|r| r.pattern == expression) {
+            return compiled.search(left);
         }
-        slot.as_ref().unwrap().search(left)
+        let compiled = Compiled::new(expression.into_owned(), ignore_case)?;
+        let result = compiled.search(left);
+        recent.rotate_right(1);
+        recent[0] = Some(std::rc::Rc::new(compiled));
+        result
     })
     .map_err(|()| Flow::Continue(2))?;
     let matched = result.is_some();

@@ -694,9 +694,8 @@ pub(crate) fn edit_text(
         .map_or_else(std::env::temp_dir, PathBuf::from);
     let mut template = directory
         .join("tonari-fc.XXXXXX")
-        .as_os_str()
-        .as_bytes()
-        .to_vec();
+        .into_os_string()
+        .into_vec();
     template.push(0);
     let fd = unsafe { libc::mkstemp(template.as_mut_ptr().cast()) };
     if fd < 0 {
@@ -710,11 +709,17 @@ pub(crate) fn edit_text(
         let name = path
             .to_str()
             .ok_or_else(|| error("expected UTF-8 temporary path"))?;
-        let flow = crate::eval_text(
-            session,
-            &format!("{program} '{}'", name.replace('\'', "'\"'\"'")),
-            status,
-        );
+        let mut command = String::with_capacity(program.len() + name.len() + 3);
+        command.push_str(program);
+        command.push_str(" '");
+        for (i, part) in name.split('\'').enumerate() {
+            if i != 0 {
+                command.push_str("'\"'\"'");
+            }
+            command.push_str(part);
+        }
+        command.push('\'');
+        let flow = crate::eval_text(session, &command, status);
         if !matches!(flow, Flow::Continue(0)) {
             return Ok(Err(flow));
         }
