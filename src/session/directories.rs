@@ -4,6 +4,20 @@ use std::io::{self, Write};
 use std::path::Path;
 
 pub(super) fn physical_path() -> io::Result<std::path::PathBuf> {
+    // Avoid getcwd(NULL, 0)'s growing allocation for ordinary paths.
+    let mut path = [std::mem::MaybeUninit::<libc::c_char>::uninit(); 512];
+    let result = unsafe { libc::getcwd(path.as_mut_ptr().cast(), path.len()) };
+    if !result.is_null() {
+        let bytes = unsafe { std::ffi::CStr::from_ptr(result) }.to_bytes();
+        return Ok(std::ffi::OsStr::from_bytes(bytes).into());
+    }
+    let error = io::Error::last_os_error();
+    if !matches!(
+        error.raw_os_error(),
+        Some(libc::ERANGE | libc::ENAMETOOLONG)
+    ) {
+        return Err(error);
+    }
     match std::env::current_dir() {
         Err(e) if e.raw_os_error() == Some(libc::ENAMETOOLONG) => long_physical_path(),
         result => result,
@@ -331,6 +345,36 @@ impl Session {
         self.logical_directory_ref().map(Path::to_owned)
     }
 
+    pub(crate) fn write_pwd(&mut self, physical: bool, out: &mut dyn Write) -> io::Result<()> {
+        if !physical && !self.posix {
+            return write_path(self.logical_directory_ref()?, out);
+        }
+        let path = if physical {
+            if let Some(path) = self.logical_cwd.get()
+                && path.as_os_str().len() >= libc::PATH_MAX as usize
+                && long_cwd_matches(path, true)
+            {
+                Ok(path.clone())
+            } else {
+                physical_path()
+            }
+        } else {
+            self.logical_directory().and_then(|path| {
+                if same_directory(&path, Path::new("."))
+                    || path.as_os_str().len() >= libc::PATH_MAX as usize
+                        && long_cwd_matches(&path, false)
+                {
+                    Ok(path)
+                } else {
+                    let actual = physical_path()?;
+                    self.logical_cwd = std::cell::OnceCell::from(actual.clone());
+                    Ok(actual)
+                }
+            })
+        }?;
+        write_path(&path, out)
+    }
+
     pub fn directory_builtin(&mut self, name: &str, args: &[String]) -> u8 {
         let mut physical = self.physical;
         let mut require_pwd = false;
@@ -349,32 +393,7 @@ impl Session {
             }
         }
         let result = if name == "pwd" {
-            (if physical {
-                if let Some(path) = self.logical_cwd.get()
-                    && path.as_os_str().len() >= libc::PATH_MAX as usize
-                    && long_cwd_matches(path, true)
-                {
-                    Ok(path.clone())
-                } else {
-                    physical_path()
-                }
-            } else if self.posix {
-                self.logical_directory().and_then(|path| {
-                    if same_directory(&path, Path::new("."))
-                        || path.as_os_str().len() >= libc::PATH_MAX as usize
-                            && long_cwd_matches(&path, false)
-                    {
-                        Ok(path)
-                    } else {
-                        let actual = physical_path()?;
-                        self.logical_cwd = std::cell::OnceCell::from(actual.clone());
-                        Ok(actual)
-                    }
-                })
-            } else {
-                self.logical_directory()
-            })
-            .and_then(|p| print_path(&p))
+            self.write_pwd(physical, &mut io::stdout().lock())
         } else {
             if args.len() > 1 {
                 eprintln!("tonari: cd: too many arguments");
@@ -641,7 +660,10 @@ fn normalize_directory(path: &Path) -> io::Result<PathBuf> {
 }
 
 fn print_path(path: &Path) -> io::Result<()> {
-    let mut out = io::stdout().lock();
+    write_path(path, &mut io::stdout().lock())
+}
+
+fn write_path(path: &Path, out: &mut dyn Write) -> io::Result<()> {
     out.write_all(path.as_os_str().as_bytes())?;
     out.write_all(b"\n")?;
     out.flush()

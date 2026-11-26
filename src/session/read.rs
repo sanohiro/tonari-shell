@@ -260,6 +260,27 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     if opts.timeout == Some(Duration::ZERO) {
         return u8::from(!ready(opts.fd, Duration::ZERO).unwrap_or(false));
     }
+    // The normal redirect installed a fresh descriptor. A plain assignment
+    // has no callback or subscript that could observe its file position.
+    if let Some((source, bytes)) = here
+        && source == opts.fd
+        && opts.timeout.is_none()
+        && opts.edit.is_none()
+        && opts.max_chars.is_none()
+        && opts.array.is_none()
+        && opts.delimiter == b'\n'
+        && opts.names.iter().all(|s| session.plain_read_target(s))
+        && (!opts.names.is_empty() || session.plain_read_target("REPLY"))
+    {
+        let end = memchr::memchr(b'\n', bytes).unwrap_or(bytes.len());
+        let line = &bytes[..end];
+        if (opts.raw || !line.contains(&b'\\'))
+            && !line.contains(&0)
+            && let Ok(text) = std::str::from_utf8(line)
+        {
+            return assign_fields(session, &opts, text, &[], u8::from(end == bytes.len()));
+        }
+    }
     let _echo = if opts.silent {
         EchoGuard::disable(opts.fd)
     } else {

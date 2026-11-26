@@ -101,7 +101,6 @@ unsafe impl GlobalAlloc for ShellHeap {
         if layout.size() >= LARGE {
             return unsafe { System.alloc(layout) };
         }
-        prepare();
         if let Some(i) = class(layout) {
             let block = CACHE
                 .try_with(|cache| cache.0[i].take())
@@ -109,8 +108,10 @@ unsafe impl GlobalAlloc for ShellHeap {
             if !block.is_null() {
                 return block;
             }
+            prepare();
             return unsafe { GlobalDlmalloc.alloc(rounded(i)) };
         }
+        prepare();
         unsafe { GlobalDlmalloc.alloc(layout) }
     }
 

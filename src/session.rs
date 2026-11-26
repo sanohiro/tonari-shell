@@ -845,6 +845,16 @@ impl Session {
         )
     }
 
+    fn plain_read_target(&self, name: &str) -> bool {
+        is_identifier(name)
+            && Self::ordinary_assignment(name)
+            && !Self::builtin_readonly(name)
+            && self
+                .variables
+                .get(name)
+                .is_none_or(|v| !v.nameref && !v.integer && !v.dynamic && v.elements.is_none())
+    }
+
     pub(crate) fn can_append_scalar(&self, name: &str) -> bool {
         Self::ordinary_assignment(name)
             && !Self::builtin_readonly(name)

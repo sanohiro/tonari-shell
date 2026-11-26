@@ -245,6 +245,16 @@ impl<'a> Arguments<'a> {
         self.number(|p, end| unsafe { libc::strtoll(p, end, 0) }, i64::from, ".")
     }
     fn unsigned(&mut self) -> u64 {
+        if let Some((word, rest)) = self.values.split_first()
+            && word
+                .as_bytes()
+                .first()
+                .is_some_and(|b| matches!(b, b'1'..=b'9'))
+            && let Ok(value) = word.parse::<u64>()
+        {
+            self.values = rest;
+            return value;
+        }
         self.number(
             |p, end| unsafe { libc::strtoull(p, end, 0) },
             u64::from,

@@ -292,17 +292,20 @@ pub(super) fn eval_builtin(
             session.posix,
         )),
         Builtin::Umask => Flow::Continue(crate::builtins::umask::run(args, session.posix)),
-        Builtin::Mapfile => crate::session::mapfile::run(session, &cmd.words[0], args, last_status),
-        Builtin::Read => {
+        Builtin::Mapfile | Builtin::Read => {
             let here = match cmd.redirects.as_slice() {
-                [r] if matches!(r.target, Target::HereDoc { .. } | Target::HereString)
-                    && r.word.len() <= here_input::PIPE_LIMIT =>
+                [r] if r.fd == 0
+                    && matches!(r.target, Target::HereDoc { .. } | Target::HereString) =>
                 {
                     Some((r.fd, r.word.as_bytes()))
                 }
                 _ => None,
             };
-            Flow::Continue(session.read(args, here))
+            if matches!(builtin, Builtin::Read) {
+                Flow::Continue(session.read(args, here))
+            } else {
+                crate::session::mapfile::run(session, &cmd.words[0], args, last_status, here)
+            }
         }
         Builtin::Set => Flow::Continue(session.set(&mut cmd.words)),
         Builtin::Hash => Flow::Continue(hash::run(session, args)),
@@ -534,6 +537,7 @@ pub(super) enum PlainOutput<'a> {
     Echo(&'a [String]),
     Printf(&'a [String]),
     DirectoryStack(&'a str, &'a [String]),
+    Pwd(Option<bool>),
     Limits(&'a [String]),
 }
 
@@ -597,6 +601,11 @@ impl<'a> PlainOutput<'a> {
             {
                 Some(Self::Limits(args))
             }
+            Builtin::Directory if cmd.words[0] == "pwd" => match args {
+                [] => Some(Self::Pwd(None)),
+                [opt] if opt == "-L" || opt == "-P" => Some(Self::Pwd(Some(opt == "-P"))),
+                _ => None,
+            },
             _ => Self::new(builtin, cmd, usize::MAX),
         }
     }
@@ -609,6 +618,15 @@ impl<'a> PlainOutput<'a> {
                 0
             }
             Self::Printf(words) => crate::session::printf::run(session, words, Some(&mut bytes)),
+            Self::Pwd(physical) => {
+                match session.write_pwd(physical.unwrap_or(session.physical), &mut bytes) {
+                    Ok(()) => 0,
+                    Err(e) => {
+                        eprintln!("tonari: pwd: {e}");
+                        1
+                    }
+                }
+            }
             Self::DirectoryStack(command, args) => {
                 session.directory_stack(command, args, &mut bytes)
             }
