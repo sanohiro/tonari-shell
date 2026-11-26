@@ -516,6 +516,13 @@ def main():
             for script in (root, Path("/bin/sh")):
                 binary = subprocess.run([shell, script], cwd=root, env=env, capture_output=True, timeout=5)
                 assert (binary.returncode, binary.stdout, bool(binary.stderr)) == (126, b"", True), (shell, script, binary)
+        # POSIX requires a full delimiter line and the subshell's final status.
+        # The reference Bash releases differ from those two guarantees.
+        for code, output in [
+            ('! false & launched=$?; wait "$!"; echo "$launched:$?"', b"0:0\n"),
+            ('x=$(cat <<EOF\none\nEOF) middle\ntwo\nEOF\n)\nprintf "%s\\n" "$x"', b"one\nEOF) middle\ntwo\n"),
+        ]:
+            assert run(shells[1], code)[0] == (0, output, False), code
         failed = []
         for name, code in cases.items():
             expected = run(shells[0], code)[0]
