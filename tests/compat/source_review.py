@@ -22,6 +22,7 @@ COMMON = {
     "compat-array": r"""for n in 51 52; do BASH_COMPAT=$n; a=(one two); declare -A m=([k]=v); test -v 'a[@]'; echo $?; [[ -v 'm[*]' ]]; echo $?; unset 'a[@]' 'm[*]'; declare -p a m; unset a m; done""",
     "assignment-tilde": "base=/bin\np=$base:~/bin:~/lib\necho \"$p\"\nexport p=$base:~/export\necho \"$p\"\nset -o posix\necho plain=~:~\ndeclare p=~:~\necho \"$p\"",
     "nameref-clear": """v=before; declare -n ref=v; declare +n ref=after; declare -p ref v; declare -n ref=v; declare +n ref+=plus; declare -p ref v; readonly lock=x; declare -n ref=lock; declare +n ref=other; echo "$?"; declare -p ref lock""",
+    "nolog": """set -o nolog; shopt -qo nolog; echo $?; set +o nolog; shopt -qo nolog; echo $?""",
     "debug-arguments": r"""set -- a b; echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}"; set -- changed; f(){ echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}"; }; f x y; shopt -s extdebug; f x y; echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}" """,
     "bad-expansion": "echo first\necho ${#:}; echo wrong\necho \"next:$?\"",
     "stack-tilde": 'pushd src >/dev/null; printf "<%s>\\n" ~0 ~1 ~+1 ~-0 ~-1 ~99; popd >/dev/null',
@@ -84,6 +85,8 @@ HOT = {
     "compat-test": ("test '(' '!' = '!' ')' -a yes", 900),
     "assignment-tilde": ('p=$base:~/bin:~/lib', 1400),
     "debug-arguments": ('v=${BASH_ARGV[1]}', 1500),
+    "function-origin": ('f(){ :; }; declare -F f >/dev/null', 700),
+    "nolog": ('set -o nolog; set +o nolog', 800),
     "signal-lookup": ('kill -l TERM >/dev/null', 800),
     "numeric-locale": ("""printf -v v "%'+012.2f" 12345,5""", 1100),
     "custom-history-event": ("history -p '^^' >/dev/null", 750),
@@ -231,6 +234,37 @@ def comment_dialogue(shell, root):
 
 
 
+def history_reedit(shell, root):
+    result = root / "accepted-history"
+    result.unlink(missing_ok=True)
+    term = Terminal(shell, root, editing=True, env={"HISTFILE": "/dev/null"})
+    try:
+        assert b"READY>" in term.read(b"READY>")
+        term.send(b"""shopt -s histverify histreedit; record(){ printf '<%s>' "$@" >>accepted-history; printf '\\036'; }; record one\n""")
+        assert b"\x1e" in term.read(b"\x1e")
+        # Use a distinct history entry so the visible expansion is unambiguous.
+        term.send(b"record seed\n")
+        assert b"\x1e" in term.read(b"\x1e")
+        term.send(b"!!")
+        assert b"!!" in term.read(b"!!")
+        start = time.perf_counter_ns()
+        term.send(b"\n")
+        visible = term.read(b"READY>record seed")
+        assert b"READY>record seed" in visible, (shell, visible)
+        elapsed = (time.perf_counter_ns() - start) / 1e6
+        assert result.read_bytes() == b"<one><seed>"
+        term.send(b" edited\n")
+        assert b"\x1e" in term.read(b"\x1e")
+        term.send(b"!absent_event\n")
+        assert b"not found" in term.read(b"not found")
+        term.send(b"\x01record '\x05'\n")
+        assert b"\x1e" in term.read(b"\x1e")
+        assert result.read_bytes() == b"<one><seed><seed><edited><!absent_event>"
+        return elapsed
+    finally:
+        term.close()
+
+
 def readline_input(shell, root, name):
     rc = root / "inputrc"
     rc.write_text('$if mode=emacs\n"\\C-xu": upcase-word\n$endif\n'
@@ -351,7 +385,7 @@ def main():
     parser.add_argument("tonari", type=Path)
     parser.add_argument("--first", type=Path)
     parser.add_argument("--runs", type=int, default=9)
-    parser.add_argument("--case", action="append", choices=["stdin-replacement", "inputrc-word-edit", "inputrc-file-completion", "array-recovery", "interactive-comments", "programmable-boundaries", "filename-completion", "tcp-redirection", "udp-redirection", *HOT])
+    parser.add_argument("--case", action="append", choices=["history-reedit", "stdin-replacement", "inputrc-word-edit", "inputrc-file-completion", "array-recovery", "interactive-comments", "programmable-boundaries", "filename-completion", "tcp-redirection", "udp-redirection", *HOT])
     args = parser.parse_args()
     selected = set(args.case or ())
     def requested(name):
@@ -385,6 +419,15 @@ def main():
         assert run(shells[1], localized)[0] == expected_localized, run(shells[1], localized)[0]
         if run(shells[0], localized)[0] == expected_localized:
             cases["numeric-locale"] = localized
+        for shell in shells[:2]:
+            monitor = subprocess.run([shell, "-m", "-c", 'case $- in *m*) echo on;; *) echo off;; esac'],
+                                     start_new_session=True, cwd=root, env=env, capture_output=True, timeout=5)
+            assert (monitor.returncode, monitor.stdout, bool(monitor.stderr)) == (0, b"off\n", True), (shell, monitor)
+        if modern:
+            for shell in shells[:2]:
+                origin = subprocess.run([shell, "-c", "shopt -s extdebug; f(){ :; }; declare -F f", "caller-name"],
+                                        cwd=root, env=env, capture_output=True, timeout=5)
+                assert (origin.returncode, origin.stdout, origin.stderr) == (0, b"f 1 caller-name\n", b""), (shell, origin)
         failed = []
         for name, code in cases.items():
             expected = run(shells[0], code)[0]
@@ -414,6 +457,16 @@ def main():
         (termroot / "Mix-Case-Unique").touch()
         for i in range(512):
             (termroot / f"Mix-Case-other{i}").touch()
+        if requested("history-reedit"):
+            samples = [[] for _ in shells]
+            for r in range(args.runs + 1):
+                indices = list(range(len(shells)))
+                rng.shuffle(indices)
+                for i in indices:
+                    ms = history_reedit(shells[i], termroot)
+                    if r: samples[i].append(round(ms, 3))
+            if args.runs:
+                print(json.dumps(dict(case="history-reedit", repeats=1, median_ms=[round(statistics.median(g), 3) for g in samples], samples_ms=samples)), flush=True)
         for name in ("inputrc-word-edit", "inputrc-file-completion"):
             if not requested(name): continue
             samples = [[] for _ in shells]
@@ -557,6 +610,7 @@ def main():
                 continue
             setup = {
                 "numeric-locale": "unset LC_ALL; LC_NUMERIC=de_DE.UTF-8",
+                "function-origin": "shopt -s extdebug",
                 "custom-history-event": "histchars='^:#'; history -s 'echo first last'",
                 "open-quote-alias": "shopt -s expand_aliases; alias message=\": 'head\"",
                 "posix-case-alias": "set -o posix; shopt -s expand_aliases; alias switch=case",

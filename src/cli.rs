@@ -18,6 +18,7 @@ pub struct Invocation {
     pub posix: bool,
     pub norc: bool,
     pub noprofile: bool,
+    pub nolog: bool,
     pub noediting: bool,
     pub rcfile: Option<PathBuf>,
     pub check: bool,
@@ -92,6 +93,7 @@ pub fn parse(
     let mut pipefail = false;
     let mut physical = false;
     let mut keyword = false;
+    let mut nolog = false;
     let mut shopts = Vec::new();
     while args
         .peek()
@@ -146,6 +148,7 @@ pub fn parse(
                             Some("braceexpand") => braceexpand = enabled,
                             Some("posix") => posix = enabled,
                             Some("physical") => physical = enabled,
+                            Some("nolog") => nolog = enabled,
                             Some("keyword") => keyword = enabled,
                             Some("interactive-comments") => {
                                 shopts.push((enabled, Some("interactive_comments".into())))
@@ -205,6 +208,7 @@ pub fn parse(
         posix,
         norc,
         noprofile,
+        nolog,
         noediting,
         rcfile,
         check: check && !interactive,

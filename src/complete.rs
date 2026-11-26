@@ -412,6 +412,9 @@ pub fn at(
         None
     };
     let ordinary = || {
+        if first && prefix.is_empty() && !files_only && session.shopt.no_empty_cmd_completion {
+            return None;
+        }
         let dirs = matches!(command, Some("cd" | "pushd")) && !files_only;
         if prefix.is_empty()
             && !files_only

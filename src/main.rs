@@ -229,6 +229,7 @@ fn interactive_loop(
     let mut source = Vec::new();
     let mut history = history::History::default();
     let mut eof_count = 0;
+    let mut editable_history = String::new();
     loop {
         interrupted();
         if let Flow::Exit(code) = traps::dispatch(session, status) {
@@ -262,7 +263,7 @@ fn interactive_loop(
                 &mut history,
                 session,
                 status,
-                None,
+                editor::Start::Command(std::mem::take(&mut editable_history)),
                 source.is_empty(),
                 terminal_size,
             ) {
@@ -370,12 +371,23 @@ fn interactive_loop(
                         continue;
                     }
                     if matches!(expanded, std::borrow::Cow::Owned(_)) {
+                        if session.shopt.histverify && editing && (session.vi || session.emacs) {
+                            editable_history = expanded.into_owned();
+                            if editable_history.ends_with('\n') {
+                                editable_history.pop();
+                            }
+                            source.clear();
+                            continue;
+                        }
                         eprint!("{}", expanded);
                     }
                     Ok(expanded.as_ref())
                 }
                 Err(e) => {
                     eprintln!("tonari: {e}");
+                    if session.shopt.histreedit && editing && (session.vi || session.emacs) {
+                        editable_history = line.strip_suffix('\n').unwrap_or(line).to_owned();
+                    }
                     source.clear();
                     status = 1;
                     continue;
@@ -491,6 +503,7 @@ fn run_invocation(
     session.pipefail = invocation.pipefail;
     session.physical = invocation.physical;
     session.keyword = invocation.keyword;
+    session.shopt.nolog = invocation.nolog;
     session.interactive = invocation.interactive;
     session.login = invocation.login;
     session.history_enabled = invocation.interactive;
@@ -508,6 +521,10 @@ fn run_invocation(
     session.jobs.monitor = invocation.monitor.unwrap_or(session.interactive);
     if session.jobs.monitor {
         session.jobs.init(session.interactive);
+        if invocation.monitor == Some(true) && !session.jobs.has_terminal() {
+            eprintln!("tonari: no controlling terminal for job control");
+            session.jobs.monitor = false;
+        }
     }
     session.command_string = matches!(invocation.input, Input::Command(_));
     if let Input::Command(text) = &mut invocation.input {

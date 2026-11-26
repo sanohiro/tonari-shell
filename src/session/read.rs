@@ -278,7 +278,10 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
             &mut history,
             session,
             0,
-            Some((opts.initial.unwrap_or(""), files_only)),
+            crate::editor::Start::Read {
+                initial: opts.initial.unwrap_or(""),
+                files_only,
+            },
             false,
             None,
         );

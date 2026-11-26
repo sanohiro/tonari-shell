@@ -694,12 +694,17 @@ fn word_end(s: &str, mut i: usize) -> usize {
     }
     i
 }
+pub enum Start<'a> {
+    Command(String),
+    Read { initial: &'a str, files_only: bool },
+}
+
 pub fn line(
     prompt: &str,
     history: &mut History,
     session: &mut Session,
     status: u8,
-    read: Option<(&str, bool)>,
+    start: Start<'_>,
     primary_prompt: bool,
     terminal_size: Option<(u16, u16)>,
 ) -> io::Result<Input> {
@@ -716,7 +721,13 @@ pub fn line(
     };
     let mut mark = 0usize;
     let mut screen = Screen::new(terminal_size);
-    let mut text = read.map_or("", |r| r.0).to_owned();
+    let (mut text, read) = match start {
+        Start::Command(initial) => (initial, None),
+        Start::Read {
+            initial,
+            files_only,
+        } => (initial.to_owned(), Some(files_only)),
+    };
     let mut cursor = text.len();
     let mut undo = Undo::default();
     let mut vi = vi::State::default();
@@ -1447,7 +1458,7 @@ pub fn line(
                     &mut keys,
                     bindings,
                     overwrite,
-                    || complete::at(&text, cursor, session, was_tab, read.is_some_and(|r| r.1)),
+                    || complete::at(&text, cursor, session, was_tab, read.unwrap_or(false)),
                 );
                 replaying = !keys.queued.is_empty();
                 screen.tail = None;
