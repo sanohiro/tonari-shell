@@ -222,6 +222,7 @@ struct Process {
 #[derive(Clone)]
 struct Job {
     id: u32,
+    stopped_at: u64,
     group: Option<pid_t>,
     children: Vec<Process>,
     name: String,
@@ -301,6 +302,13 @@ impl Job {
             } else {
                 State::Done(libc::WEXITSTATUS(status) as u8)
             };
+            if libc::WIFCONTINUED(status) {
+                self.stopped_at = 0;
+            } else if self.stopped_at == 0 && !self.active() && self.stopped() {
+                thread_local! { static NEXT_STOP: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
+                self.stopped_at = NEXT_STOP.get() + 1;
+                NEXT_STOP.set(self.stopped_at);
+            }
         }
     }
     fn wait(
@@ -351,6 +359,7 @@ impl Job {
                 return Err(io::Error::last_os_error());
             }
         }
+        self.stopped_at = 0;
         for p in &mut self.children {
             if matches!(p.state, State::Stopped(_)) {
                 p.state = State::Running;
@@ -515,6 +524,7 @@ impl Jobs {
             .collect();
         let mut job = Job {
             id: 0,
+            stopped_at: 0,
             group: launch.group.filter(|g| *g != 0),
             children,
             name,
@@ -824,8 +834,11 @@ impl Jobs {
     }
     fn select(&self, spec: &str) -> Option<usize> {
         match spec {
-            "" | "%" | "%+" | "%%" => self.table.len().checked_sub(1),
-            "%-" => self.table.len().checked_sub(2),
+            "" | "%" | "%+" | "%%" | "%-" => {
+                let (current, previous) = marked_jobs(self.table.iter());
+                let id = if spec == "%-" { previous } else { current }?;
+                self.table.iter().position(|job| job.id == id)
+            }
             s if s.starts_with('%') => {
                 let name = &s[1..];
                 if let Ok(id) = name.parse::<u32>() {
@@ -1167,12 +1180,30 @@ fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Opti
     result
 }
 
+fn marked_jobs<'a>(jobs: impl Iterator<Item = &'a Job>) -> (Option<u32>, Option<u32>) {
+    let mut current = None;
+    let mut previous = None;
+    for job in jobs {
+        let rank = Some((job.stopped_at, job.id));
+        if rank > current {
+            previous = current;
+            current = rank;
+        } else if rank > previous {
+            previous = rank;
+        }
+    }
+    (
+        current.map(|(_, id)| id),
+        previous.or(current).map(|(_, id)| id),
+    )
+}
+
 fn job_id(jobs: &Jobs, spec: &str) -> Option<u32> {
     let mut all = jobs.inherited.iter().chain(&jobs.table).rev();
     let spec = spec.strip_prefix('%').unwrap_or(spec);
     match spec {
-        "" | "+" | "%" => all.next().map(|j| j.id),
-        "-" => all.nth(1).map(|j| j.id),
+        "" | "+" | "%" => marked_jobs(all).0,
+        "-" => marked_jobs(all).1,
         s => {
             if let Ok(id) = s.parse::<u32>() {
                 return all.find(|job| job.id == id).map(|job| job.id);
@@ -1361,7 +1392,7 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                     status = 1;
                     continue;
                 };
-                let n = jobs.table.len();
+                let (current, previous) = marked_jobs(jobs.table.iter());
                 let job = &mut jobs.table[i];
                 if job.group.is_none() {
                     eprintln!("tonari: bg: job {} started without job control", job.id);
@@ -1380,9 +1411,9 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                 let result = if session.posix {
                     writeln!(out, "[{}] {} &", job.id, job.name)
                 } else {
-                    let marker = if i + 1 == n {
+                    let marker = if Some(job.id) == current {
                         '+'
-                    } else if i + 2 == n {
+                    } else if Some(job.id) == previous {
                         '-'
                     } else {
                         ' '
