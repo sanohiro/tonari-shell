@@ -769,8 +769,7 @@ fn kill(jobs: &Jobs, mut args: &[String]) -> u8 {
                 let result = if let Ok(n) = arg.parse::<i32>() {
                     // A shell wait status encodes the signal once as 128 + signal.
                     let number = if n > 128 { n - 128 } else { n };
-                    crate::traps::SIGNALS
-                        .iter()
+                    crate::traps::signals()
                         .find(|s| s.1 == number)
                         .map(|(name, _)| writeln!(out, "{name}"))
                 } else {

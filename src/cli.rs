@@ -104,6 +104,7 @@ pub fn parse(
             "--" | "-" => break,
             "--help" => return Ok(Action::Help),
             "--version" => return Ok(Action::Version),
+            "--verbose" => verbose = true,
             "--posix" => posix = true,
             "--login" => login = true,
             "--norc" => norc = true,

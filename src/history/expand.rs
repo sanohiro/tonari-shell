@@ -154,13 +154,15 @@ pub(crate) fn expand<'a>(session: &Session, line: &'a str) -> io::Result<Expansi
         let hist = history.map_or(&[][..], |h| h.lines.as_slice());
         let prev = || hist.last().map(String::as_str);
         let mut matched = None;
-        let value = if input.starts_with(event) {
+        let value = if input.starts_with(['^', '$', '*', '%']) {
+            prev()
+        } else if input.starts_with(event) {
             pop(&mut input);
             prev()
         } else if let Some(tail) = input.strip_prefix('#') {
             input = tail;
             Some(out.as_str())
-        } else if input.starts_with(['^', '$', '*', ':', '%']) {
+        } else if input.starts_with(':') {
             prev()
         } else if let Some(tail) = input.strip_prefix('?') {
             input = tail;

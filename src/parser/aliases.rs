@@ -165,7 +165,12 @@ impl Reader {
 
     // A replacement ending in shell syntax can take bytes from the following
     // input. Re-lex this uncommon suffix, keeping offsets for outer frames.
-    fn joined_alias(&mut self, name: String, value: &str, nested: Aliases) -> Result<(), Error> {
+    pub(super) fn joined_alias(
+        &mut self,
+        name: String,
+        value: &str,
+        nested: Aliases,
+    ) -> Result<(), Error> {
         let index = self.position();
         let count = index + self.tokens.len();
         let span = |i| {

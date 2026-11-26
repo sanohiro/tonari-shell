@@ -409,6 +409,10 @@ impl Session {
                         self.option_changed(name, enable);
                     }
                     if name == "extdebug" && !set {
+                        if enable {
+                            self.debug_base
+                                .get_or_init(|| self.positional.as_slice().to_vec());
+                        }
                         self.errtrace = enable;
                         self.functrace = enable;
                     }

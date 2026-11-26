@@ -753,9 +753,7 @@ pub(crate) fn service_names(prefix: &str) -> Vec<String> {
 pub(crate) fn signal_names(prefix: &str) -> Vec<String> {
     static ALL: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
     let names = ALL.get_or_init(|| {
-        let mut signals = crate::traps::SIGNALS.to_vec();
-        #[cfg(target_os = "linux")]
-        signals.extend([("PWR", libc::SIGPWR), ("STKFLT", libc::SIGSTKFLT)]);
+        let mut signals: Vec<_> = crate::traps::signals().collect();
         signals.sort_unstable_by_key(|&(_, n)| n);
         let mut names: Vec<_> = signals
             .into_iter()
@@ -767,22 +765,6 @@ pub(crate) fn signal_names(prefix: &str) -> Vec<String> {
                 }
             })
             .collect();
-        #[cfg(target_os = "linux")]
-        {
-            let low = libc::SIGRTMIN();
-            let high = libc::SIGRTMAX();
-            for n in low..=high {
-                names.push(if n == low {
-                    "SIGRTMIN".into()
-                } else if n == high {
-                    "SIGRTMAX".into()
-                } else if n - low <= high - n {
-                    format!("SIGRTMIN+{}", n - low)
-                } else {
-                    format!("SIGRTMAX-{}", high - n)
-                });
-            }
-        }
         names.extend(["DEBUG", "ERR", "RETURN"].map(str::to_owned));
         names
     });

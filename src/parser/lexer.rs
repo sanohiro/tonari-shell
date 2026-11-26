@@ -971,6 +971,11 @@ fn lex_words(
     let mut chars = source.chars();
     let mut parentheses = 0usize;
     let mut saw_case = false;
+    let sub_aliases = if substitution && super::POSIX.get() {
+        super::aliases::current()
+    } else {
+        Default::default()
+    };
     let mut in_test = false;
     let mut pattern_next: Option<bool> = None;
     let mut pending_docs = Vec::new();
@@ -1386,8 +1391,11 @@ fn lex_words(
                 _ => {}
             }
         }
-        if substitution && !protected && word.as_literal() == Some("case") {
-            saw_case = true;
+        if substitution
+            && !protected
+            && let Some(name) = word.as_literal()
+        {
+            saw_case |= name == "case" || sub_aliases.get(name).is_some_and(|s| s.trim() == "case");
         }
         let begins_array = assignment.as_ref().is_some_and(|name| {
             chars.as_str().starts_with('(') && start.len() - chars.as_str().len() == name.len() + 1

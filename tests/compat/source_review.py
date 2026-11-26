@@ -22,8 +22,12 @@ COMMON = {
     "compat-array": r"""for n in 51 52; do BASH_COMPAT=$n; a=(one two); declare -A m=([k]=v); test -v 'a[@]'; echo $?; [[ -v 'm[*]' ]]; echo $?; unset 'a[@]' 'm[*]'; declare -p a m; unset a m; done""",
     "assignment-tilde": "base=/bin\np=$base:~/bin:~/lib\necho \"$p\"\nexport p=$base:~/export\necho \"$p\"\nset -o posix\necho plain=~:~\ndeclare p=~:~\necho \"$p\"",
     "nameref-clear": """v=before; declare -n ref=v; declare +n ref=after; declare -p ref v; declare -n ref=v; declare +n ref+=plus; declare -p ref v; readonly lock=x; declare -n ref=lock; declare +n ref=other; echo "$?"; declare -p ref lock""",
+    "debug-arguments": r"""set -- a b; echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}"; set -- changed; f(){ echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}"; }; f x y; shopt -s extdebug; f x y; echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}" """,
     "bad-expansion": "echo first\necho ${#:}; echo wrong\necho \"next:$?\"",
     "stack-tilde": 'pushd src >/dev/null; printf "<%s>\\n" ~0 ~1 ~+1 ~-0 ~-1 ~99; popd >/dev/null',
+    "custom-history-event": """history -s 'echo first last'; histchars='^:#'; history -p '^^'; histchars='$:#'; history -p '$$'; histchars='@:#'; history -p '@@'""",
+    "open-quote-alias": "shopt -s expand_aliases\nalias message=\"printf '<%s>' 'Error:\"\nmessage name'\necho done",
+    "posix-case-alias": "shopt -s expand_aliases\nset -o posix\nalias switch=case\nx=$(switch x in x) echo pass;; esac)\necho \"$x\"",
     "signal-table": r"""kill -l >kill-list; trap -l >trap-list; cmp -s kill-list trap-list; echo $?; awk 'NR==1 {print $1,$2,$3,$4}' kill-list; kill -l 1 129; kill -l HUP""",
     "legacy-zone": r"""export TZ=EST5EDT; printf '%(%F %T %z %Z)T\n' 1275250155 1262304000; export TZ=EST5EDT,M3.2.0/2,M11.1.0/2; printf '%(%F %T %z %Z)T\n' 1275250155""",
     "bind-names": r"""BASH_COMPAT=5.2; bind -p forward-word >bindings 2>/dev/null; echo $?; grep -q backward-word bindings; echo $?""",
@@ -79,6 +83,11 @@ HOT = {
     "compat-array": ("[[ -v 'm[@]' ]]", 2200),
     "compat-test": ("test '(' '!' = '!' ')' -a yes", 900),
     "assignment-tilde": ('p=$base:~/bin:~/lib', 1400),
+    "debug-arguments": ('v=${BASH_ARGV[1]}', 1500),
+    "signal-lookup": ('kill -l TERM >/dev/null', 800),
+    "custom-history-event": ("history -p '^^' >/dev/null", 750),
+    "open-quote-alias": ('source ./open-alias', 450),
+    "posix-case-alias": ('source ./case-alias', 450),
     "signal-table": ('kill -l >/dev/null', 500),
     "legacy-zone": ("printf -v v '%(%T %z)T' 1275250155", 1100),
     "bind-filter": ('bind -p forward-word >/dev/null', 400),
@@ -137,6 +146,8 @@ def fixture(root):
     (root / "mod").write_text("echo cwd")
     (root / "src/mod").write_text('echo "src:$1"')
     (root / "src/noop").write_text(":")
+    (root / "open-alias").write_text("message tail'\n")
+    (root / "case-alias").write_text("x=$(switch x in x) :;; esac)\n")
     (root / "setargs").write_text('set -- changed last')
     (root / "shiftargs").write_text("shift")
     (root / "large").write_text("abcd" * 65536 + "\n")
@@ -358,6 +369,14 @@ def main():
         version = run(shells[0], 'printf "%s" "$BASH_VERSION"')[0][1].decode()
         modern = tuple(map(int, version.split(".")[:2])) >= (5, 3)
         cases = COMMON | (NEW if modern else {})
+        if os.uname().sysname == "Linux":
+            cases["signal-range"] = """for sig in PWR STKFLT RTMIN RTMIN+1 RTMAX-1 RTMAX; do n=$(kill -l "$sig"); echo "$(kill -l "$n")"; trap 'echo handled' "$sig"; kill -s "$sig" "$$"; trap - "$sig"; done"""
+        elif os.uname().sysname == "Darwin":
+            cases["signal-range"] = """for sig in INFO EMT; do n=$(kill -l "$sig"); echo "$(kill -l "$n")"; trap 'echo handled' "$sig"; kill -s "$sig" "$$"; trap - "$sig"; done"""
+        for shell in shells[:2]:
+            verbose = subprocess.run([shell, "--verbose", "-c", "echo verbose"], cwd=root, env=env,
+                                     capture_output=True, timeout=5)
+            assert (verbose.returncode, verbose.stdout, verbose.stderr) == (0, b"verbose\n", b"echo verbose\n"), (shell, verbose)
         failed = []
         for name, code in cases.items():
             expected = run(shells[0], code)[0]
@@ -529,6 +548,10 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "custom-history-event": "histchars='^:#'; history -s 'echo first last'",
+                "open-quote-alias": "shopt -s expand_aliases; alias message=\": 'head\"",
+                "posix-case-alias": "set -o posix; shopt -s expand_aliases; alias switch=case",
+                "debug-arguments": "set -- one two three",
                 "bind-filter": "exec 2>/dev/null",
                 "legacy-zone": "export TZ=EST5EDT",
                 "keyword-arguments": "set -k; inspect(){ :; }",

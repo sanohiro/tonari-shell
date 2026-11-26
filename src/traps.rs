@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicI32, AtomicU64, Ordering::Relaxed};
 
-pub(crate) const SIGNALS: &[(&str, i32)] = &[
+const SIGNALS: &[(&str, i32)] = &[
     ("EXIT", 0),
     ("HUP", libc::SIGHUP),
     ("INT", libc::SIGINT),
@@ -40,18 +40,47 @@ pub(crate) const SIGNALS: &[(&str, i32)] = &[
     ("WINCH", libc::SIGWINCH),
     ("IO", libc::SIGIO),
     ("SYS", libc::SIGSYS),
+    #[cfg(target_os = "linux")]
+    ("PWR", libc::SIGPWR),
+    #[cfg(target_os = "linux")]
+    ("STKFLT", libc::SIGSTKFLT),
 ];
+
+pub(crate) fn signals() -> impl Iterator<Item = (&'static str, i32)> {
+    let signals = SIGNALS.iter().copied();
+    #[cfg(target_os = "linux")]
+    {
+        static REALTIME: std::sync::LazyLock<Vec<(String, i32)>> = std::sync::LazyLock::new(|| {
+            let (low, high) = (libc::SIGRTMIN(), libc::SIGRTMAX());
+            (low..=high)
+                .map(|n| {
+                    let name = if n == low {
+                        "RTMIN".into()
+                    } else if n == high {
+                        "RTMAX".into()
+                    } else if n - low <= high - n {
+                        format!("RTMIN+{}", n - low)
+                    } else {
+                        format!("RTMAX-{}", high - n)
+                    };
+                    (name, n)
+                })
+                .collect()
+        });
+        signals.chain(REALTIME.iter().map(|(name, n)| (name.as_str(), *n)))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        signals
+    }
+}
 
 // Present the same numeric table to both signal-name builtins. Programs
 // commonly extract the first column or parse several entries on one line.
 pub(crate) fn print_signal_table(out: &mut impl Write) -> io::Result<()> {
     static TABLE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
         use std::fmt::Write;
-        let mut signals = SIGNALS
-            .iter()
-            .copied()
-            .filter(|s| s.1 != 0)
-            .collect::<Vec<_>>();
+        let mut signals = signals().filter(|s| s.1 != 0).collect::<Vec<_>>();
         signals.sort_unstable_by_key(|s| s.1);
         let mut table = String::new();
         for row in signals.chunks(5) {
@@ -73,9 +102,15 @@ extern "C" fn terminate(sig: i32) {
     let _ = TERMINATING.compare_exchange(0, sig, Relaxed, Relaxed);
 }
 
+// The highest user signal on Linux is 64. EXIT is synthetic and never
+// enters these masks, leaving exactly one bit for each real signal.
+const fn signal_bit(sig: i32) -> u64 {
+    1u64 << (sig - 1)
+}
+
 static PENDING: AtomicU64 = AtomicU64::new(0);
 extern "C" fn record(sig: i32) {
-    PENDING.fetch_or(1 << sig, Relaxed);
+    PENDING.fetch_or(signal_bit(sig), Relaxed);
 }
 
 // Pseudo-traps never enter the OS signal API or the pending signal bitset.
@@ -124,10 +159,26 @@ pub(crate) fn number(s: &str) -> Option<i32> {
         .get(..3)
         .filter(|prefix| prefix.eq_ignore_ascii_case("SIG"))
         .map_or(s, |_| &s[3..]);
-    SIGNALS
-        .iter()
+    let known = signals()
         .find(|(name, n)| s.eq_ignore_ascii_case(name) || number == Some(*n))
-        .map(|s| s.1)
+        .map(|s| s.1);
+    #[cfg(target_os = "linux")]
+    if known.is_none()
+        && let Some((prefix, offset)) = s.as_bytes().split_at_checked(6)
+    {
+        let (low, high) = (libc::SIGRTMIN(), libc::SIGRTMAX());
+        let delta = std::str::from_utf8(offset).ok()?.parse::<u32>().ok()?;
+        if delta > (high - low) as u32 {
+            return None;
+        }
+        if prefix.eq_ignore_ascii_case(b"RTMIN+") {
+            return Some(low + delta as i32);
+        }
+        if prefix.eq_ignore_ascii_case(b"RTMAX-") {
+            return Some(high - delta as i32);
+        }
+    }
+    known
 }
 
 fn action(handler: usize) -> libc::sigaction {
@@ -246,7 +297,7 @@ impl Traps {
     pub fn ignore_async(&mut self, sig: i32) {
         let old = unsafe { libc::signal(sig, libc::SIG_IGN) };
         if old != libc::SIG_IGN && old != libc::SIG_ERR {
-            self.async_resettable |= 1 << sig;
+            self.async_resettable |= signal_bit(sig);
         }
     }
 
@@ -327,7 +378,7 @@ impl Traps {
             if original.sa_sigaction == libc::SIG_IGN {
                 if !interactive
                     && !self.interactive_origin
-                    && self.async_resettable & (1 << sig) == 0
+                    && self.async_resettable & (signal_bit(sig)) == 0
                 {
                     return Ok(());
                 }
@@ -500,7 +551,7 @@ impl Traps {
                 } else if sig == ERR {
                     "ERR"
                 } else {
-                    SIGNALS.iter().find(|s| s.1 == sig).unwrap().0
+                    signals().find(|s| s.1 == sig).unwrap().0
                 };
                 writeln!(
                     out,
@@ -511,14 +562,14 @@ impl Traps {
             }
             if defaults
                 && !entries.contains_key(&sig)
-                && let Some(&(name, _)) = SIGNALS.iter().find(|s| s.1 == sig)
+                && let Some((name, _)) = signals().find(|s| s.1 == sig)
             {
                 writeln!(out, "trap -- - {name}")?;
             }
             Ok::<_, io::Error>(())
         };
         if defaults && names.len() == 0 {
-            for &(_, sig) in SIGNALS {
+            for (_, sig) in signals() {
                 if !matches!(sig, libc::SIGSTOP | libc::SIGKILL) && show(sig).is_err() {
                     return 1;
                 }
@@ -631,7 +682,7 @@ pub(crate) fn input_interrupted() -> bool {
 
 pub fn pending() -> Option<i32> {
     let mask = PENDING.load(Relaxed);
-    (mask != 0).then(|| mask.trailing_zeros() as i32)
+    (mask != 0).then(|| 1 + mask.trailing_zeros() as i32)
 }
 
 pub fn debug(session: &mut Session, status: u8) -> Option<Flow> {
@@ -713,8 +764,8 @@ pub fn dispatch(session: &mut Session, status: u8) -> Flow {
     }
     let mut pending = PENDING.load(Relaxed) & !session.traps.running;
     while pending != 0 {
-        let sig = pending.trailing_zeros() as i32;
-        let bit = 1 << sig;
+        let sig = 1 + pending.trailing_zeros() as i32;
+        let bit = signal_bit(sig);
         pending &= !bit;
         if PENDING.fetch_and(!bit, Relaxed) & bit == 0 {
             continue;
@@ -841,8 +892,8 @@ impl WaitMask {
         if sig != 0 {
             return Some(128 + sig as u8);
         }
-        let bits = PENDING.load(Relaxed) & !(self.running | (1 << libc::SIGCHLD));
-        (bits != 0).then(|| 128 + bits.trailing_zeros() as u8)
+        let bits = PENDING.load(Relaxed) & !(self.running | (signal_bit(libc::SIGCHLD)));
+        (bits != 0).then(|| 129 + bits.trailing_zeros() as u8)
     }
 
     pub(crate) fn input_or_child(&self, timeout: Option<&libc::timespec>) -> io::Result<bool> {

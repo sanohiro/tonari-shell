@@ -579,7 +579,11 @@ pub fn text(
     while let Some(line) = lines.next() {
         line_number += 1;
         if session.verbose {
-            eprint!("{line}");
+            if line.ends_with('\n') {
+                eprint!("{line}");
+            } else {
+                eprintln!("{line}");
+            }
         }
         let new_command = start == end;
         end += line.len();

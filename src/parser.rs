@@ -634,7 +634,33 @@ fn parse_source(source: &str, final_input: bool) -> Result<Vec<Statement>, Error
     if let Some(function) = wrapper::parse(source) {
         return Ok(vec![function]);
     }
-    let (tokens, spans, _) = lex(source, false, final_input)?;
+    let (tokens, spans, _) = match lex(source, false, final_input) {
+        Ok(tokens) => tokens,
+        Err(error @ Error::Incomplete(_)) => {
+            // An alias opening a quote can supply the missing left delimiter
+            // for the following source. Only retry a literal command name.
+            let aliases = aliases::current();
+            let trimmed = source.trim_start_matches([' ', '\t']);
+            let name = &trimmed[..lexer::plain_prefix(trimmed)];
+            let Some(value) = aliases.get(name).filter(|_| {
+                !name.is_empty() && trimmed[name.len()..].starts_with(lexer::separator)
+            }) else {
+                return Err(error);
+            };
+            if !matches!(lex(value, false, final_input), Err(Error::Incomplete(_))) {
+                return Err(error);
+            }
+            let end = source.len() - trimmed.len() + name.len();
+            let (tokens, spans, _) = lex(&source[..end], false, true)?;
+            let mut reader = Reader::new(tokens, spans, source);
+            reader.final_input = final_input;
+            let mut nested = aliases.clone();
+            Rc::make_mut(nested.0.as_mut().unwrap()).remove(name);
+            reader.joined_alias(name.into(), value, nested)?;
+            return reader.list(&[]);
+        }
+        Err(error) => return Err(error),
+    };
     let mut reader = Reader::new(tokens, spans, source);
     reader.final_input = final_input;
     reader.list(&[])

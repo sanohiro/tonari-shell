@@ -204,6 +204,7 @@ pub struct Session {
     pub source_names: Vec<Rc<str>>,
     pub current_command: Option<crate::parser::Location>,
     pub debug_args: Vec<Vec<String>>,
+    pub debug_base: std::cell::OnceCell<Vec<String>>,
     pub traced_functions: std::collections::BTreeSet<String>,
     pub call_lines: Vec<usize>,
     pub function_environment: BTreeMap<String, Option<String>>,

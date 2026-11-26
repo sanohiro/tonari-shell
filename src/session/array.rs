@@ -237,6 +237,14 @@ impl Session {
         Ok(())
     }
 
+    fn debug_frames(&self) -> impl DoubleEndedIterator<Item = &Vec<String>> {
+        if self.function_depth == 0 {
+            self.debug_base
+                .get_or_init(|| self.positional.as_slice().to_vec());
+        }
+        self.debug_base.get().into_iter().chain(&self.debug_args)
+    }
+
     pub(crate) fn indices(&self, name: &str) -> Vec<i64> {
         if name == "PIPESTATUS" {
             let len = usize::from(self.pipe_status.first.is_some()) + self.pipe_status.rest.len();
@@ -249,10 +257,8 @@ impl Session {
             );
         }
         match name {
-            "BASH_ARGV" => {
-                (0..self.debug_args.iter().map(Vec::len).sum::<usize>() as i64).collect()
-            }
-            "BASH_ARGC" => (0..self.debug_args.len() as i64).collect(),
+            "BASH_ARGV" => (0..self.debug_frames().map(Vec::len).sum::<usize>() as i64).collect(),
+            "BASH_ARGC" => (0..self.debug_frames().count() as i64).collect(),
             "GROUPS" => (0..Self::group_ids().len() as i64).collect(),
             "BASH_VERSINFO" => (0..6).collect(),
             "DIRSTACK" => (0..=self.dir_stack.len() as i64).collect(),
@@ -286,15 +292,13 @@ impl Session {
         }
         match name {
             "BASH_ARGV" => self
-                .debug_args
-                .iter()
+                .debug_frames()
                 .rev()
                 .flat_map(|args| args.iter().rev())
                 .nth(index as usize)
                 .cloned(),
             "BASH_ARGC" => self
-                .debug_args
-                .iter()
+                .debug_frames()
                 .rev()
                 .nth(index as usize)
                 .map(|v| v.len().to_string()),

@@ -642,12 +642,12 @@ pub(crate) fn call_with_bindings(
     session.enter_function(bindings);
     let tracked = session.shopt.extdebug;
     if tracked {
-        if session.debug_args.is_empty() {
-            session
-                .debug_args
-                .push(session.positional.as_slice().to_vec());
-        }
+        session
+            .debug_base
+            .get_or_init(|| session.positional.as_slice().to_vec());
         session.debug_args.push(arguments.as_slice().to_vec());
+    } else if session.shopt.compat <= 44 {
+        session.debug_base.get_or_init(Vec::new);
     }
     let old = std::mem::replace(&mut session.positional, arguments);
     let hidden = session
@@ -673,9 +673,6 @@ pub(crate) fn call_with_bindings(
     session.source_set_args = false;
     if tracked {
         session.debug_args.pop();
-        if session.debug_args.len() == 1 {
-            session.debug_args.clear();
-        }
     }
     session.leave_function();
     session.loop_depth = outer_loop;
