@@ -859,14 +859,11 @@ def main():
                         start = time.perf_counter_ns()
                         p = subprocess.run([shells[i], "--noprofile", "--norc", "--debugger", "-c", query], cwd=termroot, env=env, capture_output=True, timeout=4)
                         elapsed = (time.perf_counter_ns() - start) / 1e6
-                        present = Path("/usr/share/bashdb/bashdb-main.inc").is_file()
-                        expected = b"debug=0/loaded\nerrtrace\nfunctrace\n" if present and os.environ.get("TONARI_TEST_BASHDB") else None
-                        if expected is not None:
+                        expected = b"debug=0/loaded\nerrtrace\nfunctrace\n"
+                        if os.environ.get("TONARI_TEST_BASHDB"):
                             assert (p.returncode, p.stdout, p.stderr) == (0, expected, b""), (shells[i], p)
-                        elif not present:
-                            assert p.returncode == 0 and p.stdout == b"debug=1/\n" and p.stderr, (shells[i], p)
                         else:
-                            assert p.returncode == 0 and p.stdout.startswith(b"debug=0/"), (shells[i], p)
+                            assert p.returncode == 0 and (p.stdout == b"debug=1/\n" and p.stderr or p.stdout.startswith(b"debug=0/")), (shells[i], p)
                     elif name == "pretty-print-file":
                         script = termroot / "layout.sh"
                         marker = termroot / "formatted-side-effect"

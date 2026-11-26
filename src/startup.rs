@@ -133,7 +133,7 @@ pub(crate) fn debugger(session: &mut Session) -> Flow {
     let path = Path::new(
         option_env!("DEBUGGER_START_FILE").unwrap_or("/usr/share/bashdb/bashdb-main.inc"),
     );
-    let script = path.is_file().then(|| open_script(path).ok()).flatten();
+    let script = open_script(path).ok();
     let enabled = script.is_some();
     session.shopt.extdebug = enabled;
     let result = if let Some(script) = script {
