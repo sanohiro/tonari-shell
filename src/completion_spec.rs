@@ -181,6 +181,11 @@ impl Target {
 
 pub(crate) fn single_quote(text: &str) -> String {
     let mut output = String::with_capacity(text.len() + 2);
+    push_single_quote(&mut output, text);
+    output
+}
+
+pub(crate) fn push_single_quote(output: &mut String, text: &str) {
     output.push('\'');
     let mut tail = text;
     while let Some((before, after)) = tail.split_once('\'') {
@@ -190,7 +195,6 @@ pub(crate) fn single_quote(text: &str) -> String {
     }
     output.push_str(tail);
     output.push('\'');
-    output
 }
 
 fn shell_quote(text: &str) -> String {

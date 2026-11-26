@@ -80,16 +80,31 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
     }
     let mut out = io::stdout().lock();
     let command_prefix = !session.posix || print_all;
+    let mut buffer = String::new();
+    let record = |buffer: &mut String, name: &str, value: &str| {
+        buffer.push_str(prefix(name, command_prefix));
+        buffer.push_str(name);
+        buffer.push('=');
+        crate::completion_spec::push_single_quote(buffer, value);
+        buffer.push('\n');
+    };
     if !remove && (print_all || args.is_empty()) {
         if let Some(map) = &session.aliases.0 {
             for (name, value) in map.iter() {
-                let prefix = prefix(name, command_prefix);
-                if writeln!(out, "{prefix}{name}='{}'", value.replace('\'', "'\\''")).is_err() {
-                    return 1;
+                record(&mut buffer, name, value);
+                if buffer.len() >= 16384 {
+                    if out.write_all(buffer.as_bytes()).is_err() {
+                        return 1;
+                    }
+                    buffer.clear();
                 }
             }
         }
-        return u8::from(out.flush().is_err());
+        return u8::from(
+            out.write_all(buffer.as_bytes())
+                .and_then(|_| out.flush())
+                .is_err(),
+        );
     }
     let mut status = 0;
     for arg in args {
@@ -112,10 +127,11 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
             continue;
         }
         if let Some(value) = session.aliases.get(arg) {
-            let prefix = prefix(arg, command_prefix);
-            if writeln!(out, "{prefix}{arg}='{}'", value.replace('\'', "'\\''")).is_err() {
+            record(&mut buffer, arg, value);
+            if out.write_all(buffer.as_bytes()).is_err() {
                 return 1;
             }
+            buffer.clear();
         } else {
             eprintln!("tonari: {cmd}: {arg}: not found");
             status = 1;
