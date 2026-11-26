@@ -501,6 +501,7 @@ fn capture_simple(
         );
         return Some(captured_output(out, status));
     }
+    let capture_line = std::cell::Cell::new(None);
     let command = |cmd: &parser::SimpleCommand<Word>| {
         if session.keyword && cmd.keyword_args.is_some() {
             return None;
@@ -564,6 +565,15 @@ fn capture_simple(
             Word::Expanded(parts) => parts.iter().all(|part| match part {
                 Part::Text(_) => true,
                 Part::Parameter { name, quoted } => {
+                    if name == "LINENO"
+                        && !session.is_nameref(name)
+                        && !external
+                        && can_elide_child(session)
+                        && sole_plain_command(body).is_some()
+                    {
+                        capture_line.set(Some(body[0].location.line));
+                        return true;
+                    }
                     if let Some(base) = name.strip_suffix("[@]") {
                         return external
                             && *quoted
@@ -665,11 +675,17 @@ fn capture_simple(
             ));
         }
         let captured = std::cell::Cell::new(None);
+        let original = session.signal_line;
+        if let Some(line) = capture_line.get() {
+            session.signal_line = Some(line);
+        }
         let mut env = crate::expansion::Expansion::new(session, code, &captured);
         fields.clear();
-        for arg in &words[1..] {
-            env.append_fields(arg.clone(), &mut fields).ok()?;
-        }
+        let expanded = words[1..]
+            .iter()
+            .try_for_each(|arg| env.append_fields(arg.clone(), &mut fields));
+        session.signal_line = original;
+        expanded.ok()?;
         code = match name.unwrap() {
             "echo" => {
                 crate::builtins::echo_into(&fields, &mut output, session);
