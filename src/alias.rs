@@ -80,7 +80,7 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
     }
     let mut out = io::stdout().lock();
     let command_prefix = !session.posix || print_all;
-    if args.is_empty() && !remove {
+    if !remove && (print_all || args.is_empty()) {
         if let Some(map) = &session.aliases.0 {
             for (name, value) in map.iter() {
                 let prefix = prefix(name, command_prefix);
@@ -89,6 +89,7 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
                 }
             }
         }
+        return u8::from(out.flush().is_err());
     }
     let mut status = 0;
     for arg in args {

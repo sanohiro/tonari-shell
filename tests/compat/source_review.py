@@ -27,7 +27,7 @@ COMMON = {
     "caller-input": "f(){ caller foo 2>err; echo \"$?\"; test -s err; echo $?; caller -1 2>err; echo \"$?\"; caller 23; echo $?; }; f",
     "debug-function-entry-return": "set -T\ntrap 'echo D.$FUNCNAME.$LINENO' DEBUG\ntrap 'echo R.$FUNCNAME.$LINENO' RETURN\nf()\n{\n : one\n : two\n}\nf\nf(){ return 7; }; f; trap - DEBUG RETURN; shopt -s extdebug; declare -F f | awk '{print $1,$2}'",
     "bind-human-list": "{ bind -u beginning-of-line; bind '\"zzq\": beginning-of-line'; bind -q beginning-of-line; bind -P | grep '^beginning-of-line '; } 2>/dev/null",
-    "alias-option-processing": "alias -- -x=ok; alias -pp -- -x; alias -Z 2>/dev/null; echo $?; unalias -aZ 2>/dev/null; echo $?; alias -- -x; unalias -aa; alias -p",
+    "alias-option-processing": "alias -- -x=ok; alias -pp; alias -Z 2>/dev/null; echo $?; unalias -aZ 2>/dev/null; echo $?; alias -- -x; unalias -aa; alias -p",
     "arithmetic-assignment-index": "n=0; ((a[n]=++n)); n=0; ((b[n]+=++n)); n=0; ((c[n++]=n++)); declare -p a b c; echo \"$n\"; n=0; a='(a[n]=++n)<7&&a[0]'; ((a[0])); echo \"${a[@]:1}\"",
     "ascii-range-option": "LC_ALL=C; for opt in -s -u -s; do shopt \"$opt\" globasciiranges; shopt -q globasciiranges; printf '%s:' \"$?\"; for c in b B z Z; do [[ $c == [a-z] ]]; printf '%s' \"$?\"; done; echo; done",
     "gnu-diagnostic-location": "shopt -s gnu_errfmt; printf '%s\\n' 'shopt -s gnu_errfmt' 'no_such_audit_tool' >location.sh; . ./location.sh 2>error; grep -Eq 'location.sh:2: .*command not found' error; echo $?; shopt -u gnu_errfmt; shopt -q gnu_errfmt; echo $?",
@@ -153,6 +153,7 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "alias-print-all": "alias a=one b=two; alias -p a=changed missing; echo status:$?; alias a; set -o posix; alias -p a; alias a",
     "current-arithmetic-alias": "shopt -s expand_aliases\nalias number='echo 123'\necho $(( ${ number; } ))\n(( ${ number; } )); echo $?\nset -o posix\necho $(( ${ number; } ))\n(( ${ number; } )); echo $?",
     "long-working-directory": "set -o posix; cd deep-root; p=deep-part-abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd; for ((j=0;j<20;j++)); do cd \"$p\" || exit 9; done; logical=$(pwd -L); phys=$(pwd -P); [[ $logical == */\"$p\" && $phys == */\"$p\" && ${#logical} -gt 4096 && ${#phys} -gt 4096 ]]; echo $?; cd ..; test -d \"$p\"; echo $?",
     "printf-wide-characters": "case $OSTYPE in darwin*) LC_ALL=en_US.UTF-8;; *) LC_ALL=C.UTF-8;; esac; printf '[%4.2ls][%-4C][%S][%.0lc]' '雪🌸a' '雪a' '四' q; printf '%lc' ''",
@@ -196,6 +197,7 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "alias-print-all": ("alias -p a >/dev/null", 1400),
     "managed-background-spawn": ("/usr/bin/true & p=$!; wait \"$p\"", 100),
     "stopped-job-selection": ("jobs -p %+ %- >/dev/null", 1200),
     "source-trap-frame": ("f >/dev/null", 600),
@@ -1053,6 +1055,7 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "alias-print-all": "alias a=one b=\"'two'\" c=three",
                 "managed-background-spawn": "set -m; trap ':' USR1",
                 "stopped-job-selection": "set -m; /bin/sh -c 'kill -STOP $$; exec sleep 15' & a=$!; sleep 15 & b=$!; trap 'kill -CONT \"$a\" \"$b\" 2>/dev/null; kill \"$a\" \"$b\" 2>/dev/null; wait 2>/dev/null' EXIT; wait \"$a\" 2>/dev/null",
                 "source-trap-frame": "printf ': one\\n: two\\n' > source-test; set -T; trap ': \"$LINENO\" \"$1\"' RETURN; f(){ source ./source-test inner; }",
