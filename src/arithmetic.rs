@@ -128,6 +128,13 @@ pub(crate) fn with_variables(source: &str, vars: &mut dyn Variables) -> Result<i
     calculate(source, vars, 0)
 }
 
+pub(crate) fn numeric_subscript(source: &str) -> &str {
+    source
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(source)
+}
+
 pub fn run(source: &str, session: &mut Session) -> Result<i64> {
     calculate(source, session, 0)
 }
@@ -447,7 +454,8 @@ impl<'a> Parser<'a> {
                         }
                         let index = match variables.associative_key(base, index) {
                             Some(key) => key?,
-                            None => calculate(index, variables, depth + 1)?.to_string(),
+                            None => calculate(numeric_subscript(index), variables, depth + 1)?
+                                .to_string(),
                         };
                         std::borrow::Cow::Owned(format!("{base}[{index}]"))
                     } else {

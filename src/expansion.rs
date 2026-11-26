@@ -375,7 +375,7 @@ impl<'a> Expansion<'a> {
     }
 
     fn expanded_key(&mut self, source: &str) -> Result<String, Error> {
-        if source.contains(['$', '`', '"', '\'', '\\']) {
+        if source.starts_with('~') || source.contains(['$', '`', '"', '\'', '\\']) {
             let word = crate::parser::with_subscript_aliases(self.session, source, || {
                 crate::parser::subscript_word(source, true)
             })

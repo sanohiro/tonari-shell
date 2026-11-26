@@ -274,7 +274,7 @@ pub(crate) fn quote_regex(buffer: &mut String, mut text: &str) {
 // equivalence classes whenever the host can compile the original expression.
 fn portable_ere(pattern: &str) -> Option<String> {
     let bytes = pattern.as_bytes();
-    let mut out = Vec::new();
+    let mut out = String::new();
     let mut copied = 0;
     let mut i = 0;
     while i < bytes.len() {
@@ -287,33 +287,122 @@ fn portable_ere(pattern: &str) -> Option<String> {
             continue;
         }
         let end = i + 1 + ere_list_end(&bytes[i + 1..])?;
-        i += 1;
-        while i < end {
-            if let Some((length, mark)) = list_item(&bytes[i..end]) {
-                let name = &bytes[i + 2..i + length - 2];
-                let value = match (mark, name) {
-                    (b'.' | b'=', &[byte]) if byte.is_ascii() => Some(byte),
-                    (b'.', name) => crate::pattern::portable_symbol(name),
-                    _ => None,
-                };
-                if let Some(byte) = value.filter(|b| !matches!(*b, 0 | b'[' | b']' | b'^' | b'\\'))
-                {
-                    out.extend_from_slice(&bytes[copied..i]);
-                    out.push(byte);
-                    copied = i + length;
-                }
-                i += length;
-            } else {
-                i += 1;
-            }
+        let body = &pattern[i + 1..end];
+        if body.contains("[.") || body.contains("[=") {
+            let list = portable_list(body)?;
+            out.push_str(&pattern[copied..i]);
+            out.push_str(&list);
+            copied = end + 1;
         }
         i = end + 1;
     }
     if copied == 0 {
         return None;
     }
-    out.extend_from_slice(&bytes[copied..]);
-    String::from_utf8(out).ok()
+    out.push_str(&pattern[copied..]);
+    Some(out)
+}
+
+fn portable_list(body: &str) -> Option<String> {
+    #[derive(Clone, Copy)]
+    enum Member<'a> {
+        Scalar(char),
+        Dash,
+        Class(&'a str),
+    }
+    use Member::*;
+    let (negative, mut rest) = body.strip_prefix('^').map_or((false, body), |s| (true, s));
+    let mut members = Vec::new();
+    while !rest.is_empty() {
+        if let Some((n, mark)) = list_item(rest.as_bytes()) {
+            let name = &rest[2..n - 2];
+            let item = if mark == b':' {
+                Class(&rest[..n])
+            } else {
+                let c = if name.chars().count() == 1 {
+                    name.chars().next()?
+                } else if mark == b'.' {
+                    char::from(crate::pattern::portable_symbol(name.as_bytes())?)
+                } else {
+                    return None;
+                };
+                if c == '\0' {
+                    return None;
+                }
+                Scalar(c)
+            };
+            members.push(item);
+            rest = &rest[n..];
+        } else {
+            let c = rest.chars().next()?;
+            members.push(if c == '-' { Dash } else { Scalar(c) });
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    let mut ordinary = String::new();
+    let mut punctuation = [false; 4];
+    fn literal(c: char, ordinary: &mut String, punctuation: &mut [bool; 4]) {
+        match c {
+            ']' => punctuation[0] = true,
+            '^' => punctuation[1] = true,
+            '[' => punctuation[2] = true,
+            '-' => punctuation[3] = true,
+            c => ordinary.push(c),
+        }
+    }
+    let mut input = members.as_slice();
+    while let [first, tail @ ..] = input {
+        if let (Scalar(a), [Dash, Scalar(b), tail @ ..]) = (*first, tail) {
+            if a > *b {
+                return None;
+            }
+            if a.is_ascii() && b.is_ascii() {
+                for byte in (a as u8)..=(*b as u8) {
+                    literal(char::from(byte), &mut ordinary, &mut punctuation);
+                }
+            } else {
+                if matches!(a, ']' | '[' | '^' | '-') || matches!(b, ']' | '[' | '^' | '-') {
+                    return None;
+                }
+                ordinary.push(a);
+                ordinary.push('-');
+                ordinary.push(*b);
+            }
+            input = tail;
+        } else {
+            match *first {
+                Scalar(c) => literal(c, &mut ordinary, &mut punctuation),
+                Dash if tail.is_empty() || input.len() == members.len() => punctuation[3] = true,
+                Dash => return None,
+                Class(s) => ordinary.push_str(s),
+            }
+            input = tail;
+        }
+    }
+    let [closing, caret, opening, dash] = punctuation;
+    if !negative && caret && !closing && ordinary.is_empty() && !opening && !dash {
+        return Some(r"\^".into());
+    }
+    let mut result = String::from(if negative { "[^" } else { "[" });
+    if closing {
+        result.push(']');
+    }
+    result.push_str(&ordinary);
+    if opening {
+        result.push('[');
+    }
+    let dash_first = !negative && caret && !opening && !closing && ordinary.is_empty();
+    if dash && dash_first {
+        result.push('-');
+    }
+    if caret {
+        result.push('^');
+    }
+    if dash && !dash_first {
+        result.push('-');
+    }
+    result.push(']');
+    Some(result)
 }
 
 pub struct Compiled {

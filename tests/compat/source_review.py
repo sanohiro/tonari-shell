@@ -16,6 +16,10 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "ere-portable-punctuation": "for re in '[a[.-.]z]' '[[.].]]' '[[.^.]]' '[[.[.]]'; do for s in '-' m ']' '^' '['; do [[ $s =~ $re ]]; printf '%s' \"$?\"; done; echo; done",
+    "tilde-associative-key": "declare -A a; a[~/key]=absolute; a['~/quoted']=literal; k=\"$HOME/key\"; printf '%s/%s' \"${a[$k]}\" \"${a['~/quoted']}\"",
+    "ansi-associative-key": "declare -A a; a[$'two\\x20words']=green; k='two words'; printf '%s' \"${a[$k]}\"",
+    "quoted-numeric-subscript": "a=(zero); let 'a[\"\"]=26'; declare 'a[\" \"]=14'; let 'a[\"2+1\"]=5'; declare -p a",
     "posix-prompt-expansion": "set -o posix; shopt -u promptvars; v=visible; p='!!/$v'; printf '%s\\n' \"${p@P}\"",
     "posix-ulimit-blocks": "ulimit -S -f 32; set -o posix; ulimit -S -f; ulimit -S -f 40; set +o posix; ulimit -S -f",
     "posix-signal-operands": "set -o posix; kill -l | awk '{n+=NF} END {print NR,(n>10)}'; kill -s SIGTERM 99999999 2>&1 | grep -Eq 'invalid signal'; echo $?",
@@ -163,6 +167,10 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "ere-portable-punctuation": ("for re in '[a[.-.]z]' '[[.].]]' '[[.^.]]' '[[.[.]]'; do [[ z =~ $re ]]; done", 800),
+    "tilde-associative-key": ("a[~/key]=green; : \"${a[~/key]}\"", 1800),
+    "ansi-associative-key": ("a[$'two\\x20words']=green; : \"${a[$'two\\x20words']}\"", 1600),
+    "quoted-numeric-subscript": ("let 'a[\"k+1\"]=5'; declare 'a[\" \"]=14'", 1700),
     "posix-prompt-expansion": ("s=${p@P}", 2700),
     "posix-ulimit-blocks": ("ulimit -S -f >/dev/null", 2500),
     "posix-trap-display": ("trap -p USR1 >/dev/null", 1900),
@@ -880,6 +888,9 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "tilde-associative-key": "declare -A a",
+                "ansi-associative-key": "declare -A a",
+                "quoted-numeric-subscript": "a=(zero); k=1",
                 "posix-prompt-expansion": "set -o posix; shopt -u promptvars; v=visible; p='!!/$v'",
                 "posix-ulimit-blocks": "set -o posix",
                 "posix-trap-display": "set -o posix; trap ':' USR1",

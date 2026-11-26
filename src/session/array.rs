@@ -779,7 +779,13 @@ impl Session {
         let mut elements = Rc::unwrap_or_clone(var.elements.take().unwrap());
         let visible = !global || !self.locals.iter().any(|scope| scope.0.contains_key(name));
         let result = self
-            .initializer_number(name, var, &mut elements, visible, expr)
+            .initializer_number(
+                name,
+                var,
+                &mut elements,
+                visible,
+                crate::arithmetic::numeric_subscript(expr),
+            )
             .and_then(|n| {
                 if n >= 0 {
                     Ok(n)

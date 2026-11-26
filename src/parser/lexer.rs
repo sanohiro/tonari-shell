@@ -861,6 +861,16 @@ fn scan_subscript<'a>(
 ) -> Result<Word, Error> {
     let mut chars = source.chars();
     let mut word = WordBuilder::default();
+    if associative && let Some(rest) = source.strip_prefix('~') {
+        let end = rest.find('/').unwrap_or(rest.len());
+        if rest[..end]
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
+        {
+            word.part(Part::Tilde(source[..end + 1].to_owned()));
+            chars = rest[end..].chars();
+        }
+    }
     while let Some(c) = chars.next() {
         match c {
             '[' => {
@@ -873,6 +883,10 @@ fn scan_subscript<'a>(
             }
             '"' => quoted(&mut chars, c, &mut word)?,
             '\'' if associative => quoted(&mut chars, c, &mut word)?,
+            '$' if associative && chars.as_str().starts_with('\'') => {
+                chars.next();
+                word.literal(&ansi::quoted(&mut chars)?);
+            }
             '$' if chars.as_str().starts_with('"') => {
                 chars.next();
                 quoted(&mut chars, '"', &mut word)?;
