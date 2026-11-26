@@ -1321,7 +1321,7 @@ fn list_to(jobs: &mut Jobs, args: &[String], posix: bool, mut out: impl Write) -
                     return 1;
                 }
             }
-        } else if writeln!(out, "[{id}]{marker}  {state:<23} {}{bg}", job.name).is_err() {
+        } else if writeln!(out, "[{id}]{marker}  {state:<26} {}{bg}", job.name).is_err() {
             return 1;
         }
         job.listed = true;

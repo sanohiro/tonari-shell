@@ -16,6 +16,7 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "managed-background-spawn": "set -m; trap ':' USR1; sleep .15 & p=$!; sleep .15 & q=$!; kill -STOP \"$p\"; wait \"$p\" 2>/dev/null; s=$?; kill -CONT \"$p\"; kill \"$p\" \"$q\" 2>/dev/null; wait 2>/dev/null; [[ $s == $((128+$(kill -l STOP))) ]] && echo stopped; /bin/sh -c 'kill -USR1 $$; exit 9' & p=$!; wait \"$p\" 2>/dev/null; [[ $? == $((128+$(kill -l USR1))) ]] && echo default; trap '' USR1; /bin/sh -c 'kill -USR1 $$; exit 9' & p=$!; wait \"$p\"; echo ignored:$?",
     "stopped-job-selection": "set -m; sleep 3 & a=$!; sleep 3 & b=$!; sleep 3 & c=$!; trap 'kill -CONT \"$a\" \"$b\" \"$c\" 2>/dev/null; kill \"$a\" \"$b\" \"$c\" 2>/dev/null; wait 2>/dev/null' EXIT; mark(){ x=$(jobs -p %+); y=$(jobs -p %-); for p in \"$x\" \"$y\"; do case $p in \"$a\") printf a;; \"$b\") printf b;; \"$c\") printf c;; *) printf '?';; esac; done; echo; }; mark; kill -STOP \"$b\"; wait \"$b\" 2>/dev/null; mark; kill -CONT \"$b\"; for ((k=0;k<100;k++)); do [[ -z $(jobs -ps) ]] && break; sleep .01; done; mark; kill -STOP \"$a\"; wait \"$a\" 2>/dev/null; mark; bg %1 >/dev/null; mark",
     "source-trap-frame": "printf ': one\\n: two\\n' > sourced; set -T\ntrap 'echo \"${FUNCNAME[0]}:$LINENO:$1\"' RETURN\nf(){\n source ./sourced inner\n}\nf outer",
     "substitution-source-lines": "f(){\n :\n echo \"$(echo $LINENO)\" `echo $LINENO`\n echo \"$(echo \"$LINENO\"; echo \"$(echo $LINENO)\")\"\n}; f",
@@ -195,6 +196,7 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "managed-background-spawn": ("/usr/bin/true & p=$!; wait \"$p\"", 100),
     "stopped-job-selection": ("jobs -p %+ %- >/dev/null", 1200),
     "source-trap-frame": ("f >/dev/null", 600),
     "substitution-source-lines": ("f >/dev/null", 250),
@@ -1048,7 +1050,8 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
-                "stopped-job-selection": "set -m; sleep 15 & a=$!; sleep 15 & b=$!; trap 'kill -CONT \"$a\" \"$b\" 2>/dev/null; kill \"$a\" \"$b\" 2>/dev/null; wait 2>/dev/null' EXIT; kill -STOP \"$a\"; wait \"$a\" 2>/dev/null",
+                "managed-background-spawn": "set -m; trap ':' USR1",
+                "stopped-job-selection": "set -m; /bin/sh -c 'kill -STOP $$; exec sleep 15' & a=$!; sleep 15 & b=$!; trap 'kill -CONT \"$a\" \"$b\" 2>/dev/null; kill \"$a\" \"$b\" 2>/dev/null; wait 2>/dev/null' EXIT; wait \"$a\" 2>/dev/null",
                 "source-trap-frame": "printf ': one\\n: two\\n' > source-test; set -T; trap ': \"$LINENO\" \"$1\"' RETURN; f(){ source ./source-test inner; }",
                 "substitution-source-lines": "f(){\n :\n echo \"$(echo $LINENO)\" `echo $LINENO`;\n}",
                 "current-arithmetic-alias": "shopt -s expand_aliases; alias number='printf 23'",

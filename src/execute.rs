@@ -1743,9 +1743,12 @@ fn start(
     // Pipeline lookup happens in a stage's environment. A private resolved
     // path permits spawn file actions without populating the parent's hash.
     if builtin.is_none()
-        && (input.is_some() || output.is_some())
-        && !launch.background
-        && launch.group.is_none()
+        && ((!launch.background && launch.group.is_none() && (input.is_some() || output.is_some()))
+            || (launch.background
+                && launch.group.is_some()
+                && input.is_none()
+                && output.is_none()
+                && cmd.redirects.is_empty()))
         && cmd.cacheable()
         && !cmd.default_path
         && !cmd.words[0].contains('/')
@@ -1816,8 +1819,9 @@ fn start(
     let resolved = cached || cmd.words.first().is_some_and(|name| name.contains('/'));
     if builtin.is_none()
         && (launch.group.is_none()
-            || (!session.traps.has_explicit_traps() && launch.can_spawn_group()))
-        && !launch.background
+            || ((launch.background || !session.traps.has_explicit_traps())
+                && launch.can_spawn_group()))
+        && (!launch.background || launch.group.is_some())
         && resolved
         && input.is_none()
         && output.is_none()
