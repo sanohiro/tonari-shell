@@ -95,8 +95,12 @@ pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String
         && !env.shadows(reference)
     {
         let target = env.session.reference_name(reference)?;
-        if crate::session::array::subscript(&target).is_some() {
-            return value(&format!("#{target}"), env);
+        if let Some((base, _, _)) = array_elements_name(&target) {
+            if let Some(count) = env.session.stored_array_len(base) {
+                return Ok(Some(count.to_string()));
+            }
+        } else if crate::session::array::subscript(&target).is_some() {
+            return Ok(value(&target, env)?.map(|s| s.chars().count().to_string()));
         }
     }
     if let Some((base, _, _)) = name.strip_prefix('#').and_then(array_elements_name)

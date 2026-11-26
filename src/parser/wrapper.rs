@@ -106,6 +106,7 @@ pub(super) fn parse(source: &str) -> Option<Statement> {
             definition: Rc::new(super::FunctionDefinition {
                 body,
                 location: location(open, line.len(), line_number),
+                rendered_body: Default::default(),
             }),
         },
     })

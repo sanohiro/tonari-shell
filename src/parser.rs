@@ -467,6 +467,7 @@ pub type CaseArm = (Vec<CasePattern>, Vec<Statement>, CaseEnd);
 pub struct FunctionDefinition {
     pub location: Location,
     pub body: wrapper::FunctionBody,
+    pub rendered_body: std::cell::OnceCell<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1498,6 +1499,7 @@ impl Reader {
         Ok(Command::Function {
             name,
             definition: Rc::new(FunctionDefinition {
+                rendered_body: Default::default(),
                 body: wrapper::FunctionBody::Parsed(body),
                 location: self.location(start),
             }),

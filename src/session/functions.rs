@@ -217,17 +217,24 @@ impl Session {
         {
             write!(out, "function ")?;
         }
-        let statements = definition.body.statements();
-        if body.starts_with('{') && body.ends_with('}') && statements.iter().all(|s|
-            s.condition == crate::parser::Condition::Always && !s.negated
-            && matches!(&s.command, Command::Pipeline(stages) if stages.iter().all(|c| c.compound.is_none() && c.redirects.is_empty()))
-            && !s.location.text().contains('\n')) {
-            writeln!(out, "{name} () \n{{ ")?;
-            for s in statements { writeln!(out, "    {}", s.location.text().trim())?; }
-            writeln!(out, "}}")?;
-        } else {
-            writeln!(out, "{name} () \n{body}")?;
-        }
+        let rendered = definition.rendered_body.get_or_init(|| {
+            let statements = definition.body.statements();
+            let simple = body.starts_with('{') && body.ends_with('}') && statements.iter().all(|s|
+                s.condition == crate::parser::Condition::Always && !s.negated
+                && matches!(&s.command, Command::Pipeline(stages) if stages.iter().all(|c| c.compound.is_none() && c.redirects.is_empty()))
+                && !s.location.text().contains('\n'));
+            if !simple { return body.to_owned(); }
+            let mut result = String::with_capacity(body.len() + 4 * statements.len());
+            result.push_str("{ \n");
+            for statement in statements {
+                result.push_str("    ");
+                result.push_str(statement.location.text().trim());
+                result.push('\n');
+            }
+            result.push('}');
+            result
+        });
+        writeln!(out, "{name} () \n{rendered}")?;
         if attributes {
             let flags = self.function_attributes(name);
             if flags.len() > 1 {

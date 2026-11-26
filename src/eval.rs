@@ -359,7 +359,11 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 }
                 let result = if s.xtrace {
                     let expr = expr.trim_start();
-                    crate::arithmetic::traced(if expr.is_empty() { "1" } else { expr }, s, last)
+                    if expr.is_empty() {
+                        crate::arithmetic::traced("1", s, last, None)
+                    } else {
+                        crate::arithmetic::traced(expr, s, last, Some(compiled))
+                    }
                 } else {
                     compiled.run(s, last)
                 };

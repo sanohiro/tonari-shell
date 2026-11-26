@@ -239,23 +239,38 @@ pub fn let_builtin(args: &[String], session: &mut Session) -> u8 {
     u8::from(last == 0)
 }
 
-pub(crate) fn traced(source: &str, session: &mut Session, status: u8) -> Result<i64> {
+pub(crate) fn traced(
+    source: &str,
+    session: &mut Session,
+    status: u8,
+    compiled: Option<&Repeated>,
+) -> Result<i64> {
+    fn write_trace(text: &str, session: &mut Session, status: u8) {
+        crate::execute::trace_line(session, status, |line| {
+            line.push_str("(( ");
+            line.push_str(text);
+            line.push_str(" ))");
+        });
+    }
+    if !source.contains(['$', '`', '"', '\\']) {
+        write_trace(source, session, status);
+        return match compiled {
+            Some(header) => header.run(session, status),
+            None => run(source, session),
+        };
+    }
     let captured = std::cell::Cell::new(None);
     let mut env = crate::expansion::Expansion::new(session, status, &captured);
     let text = env
         .arithmetic_text(source)
         .map_err(|_| "invalid arithmetic expansion")?;
-    crate::execute::trace_line(env.session, status, |line| {
-        line.push_str("(( ");
-        line.push_str(&text);
-        line.push_str(" ))");
-    });
+    write_trace(&text, env.session, status);
     with_variables(&text, &mut env)
 }
 
 pub fn command(source: &str, session: &mut Session, status: u8) -> Flow {
     let result = if session.xtrace {
-        traced(source, session, status)
+        traced(source, session, status, None)
     } else {
         expanded(source, session, status)
     };
