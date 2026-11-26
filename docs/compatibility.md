@@ -2,6 +2,8 @@
 
 The November 26 source review records fixes to Bash 5.2 and 5.3 interfaces, along with the remaining behavior differences, interface-only checks and untested entries. GNU Bash とのソース照合、各修正の動作確認、未対応項目を版・OS別に記録しました。[GNU Bash source review / ソース照合結果](compatibility/bash-source-review/README.md)
 
+The follow-up covers keyword assignments, aliases, stdin replacement, history, debugger variables, signal handling and locale-sensitive numeric formatting. 両ディストリビューションの GNU ドライバーの差分、短い再現試験、仕様差の判断を保存した。[Follow-up / 追試結果](compatibility/bash-source-review/follow-up.md)
+
 <a id="shell-modes"></a>
 
 The [bensch and Oils comparison](compatibility/external-shell/README.md) records Bash and Tonari results for individual interactive, builtin and language cases. 対話操作・組み込み・言語仕様の外部試験について、ケースごとの Bash との差と再現方法を記録しています。

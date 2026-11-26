@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## 2026-11-26 · Following stdin, aliases and signals through execution / 入力・エイリアス・シグナルを実行まで追う
+
+A buffered private fd for script input must follow permanent redirection of fd 0 when the script came from stdin. A named script retains its own reader. A signal handler can return from an interrupted function. Its implicit status comes from the interrupted command at that scope, while a function called inside the handler sees its own status. Test function and source nesting and an explicit status operand. Share registered trap text across invocations so a large handler does not require copying its source each time.
+
+TTY の有無だけでは、ジョブ制御で子を別のプロセスグループに入れる必要があるか判断できない。TTY を切り離したセッションで子自身に PGID を調べさせると、オプション一覧を確認するだけでは検出できない退行を再現できた。履歴も、ファイルに書いた内容、端末の編集行、実際に実行したコマンドを別々に確かめる。同一の語で IFS が変わる場合は、引用した配列と位置引数を左から順に展開する。[Source review and measurements / 再現と実測](compatibility/bash-source-review/follow-up.md)
+
 ## 2026-11-26 · Bash source review / Bash ソースと実動作の照合
 
 A basename or option in the inventory only establishes the entry point. For a sourced script, pass arguments, run a nested source and examine the caller's positional parameters. For a special array, update the underlying alias or command hash and then read the array in both directions. For Bash 5.3 substitutions, test the bytes written to stdout independently from the returned value, and check scopes, return status and side effects. A sourced or anonymous scope does not count as a named function call for FUNCNEST. [Source map and witnesses](compatibility/bash-source-review/README.md)

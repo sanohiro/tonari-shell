@@ -1,5 +1,7 @@
 # Startup and execution / 起動と実行性能
 
+The follow-up compares the revised execution, expansion, trap and editor paths on native Apple M1 and Linux x86-64. Each workload has individual samples and a Bash reference. キーの表示応答と、シェル起動を含むスクリプト全体の時間は測定区間を分けている。[Follow-up results / 追試の実測](compatibility/bash-source-review/follow-up.md) · [All follow-up timings](compatibility/bash-source-review/follow-up-timings.tsv)
+
 <a id="gnu-source-review"></a>
 
 ## 2026-11-26 · GNU Bash source review / 互換機能の実測

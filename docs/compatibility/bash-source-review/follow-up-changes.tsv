@@ -1,0 +1,166 @@
+distribution	section	entry	baseline	reviewed
+debian	Invocation	-k	different	match
+debian	Invocation	-v	stderr differs	match
+debian	Invocation	--verbose	different	match
+debian	shopt	cmdhist	missing interface	interface only
+debian	shopt	compat31	missing interface	interface only
+debian	shopt	compat32	missing interface	interface only
+debian	shopt	compat40	missing interface	interface only
+debian	shopt	compat41	missing interface	interface only
+debian	shopt	compat42	missing interface	interface only
+debian	shopt	compat43	missing interface	interface only
+debian	shopt	compat44	missing interface	interface only
+debian	shopt	histreedit	missing interface	interface only
+debian	shopt	histverify	missing interface	interface only
+debian	shopt	lithist	missing interface	interface only
+debian	shopt	no_empty_cmd_completion	missing interface	interface only
+debian	set -o	keyword	different	interface only
+debian	set -o	nolog	different	interface only
+debian	set -o	verbose	stderr differs	match
+debian	Variable	BASH_COMPAT	different	match
+debian	Variable	LC_NUMERIC	different	match
+debian	Variable	histchars	different	match
+debian	Readline command	capitalize-word	missing interface	interface only
+debian	Readline command	downcase-word	missing interface	interface only
+debian	Readline command	history-expand-line	missing interface	interface only
+debian	Readline command	kill-whole-line	missing interface	interface only
+debian	Readline command	magic-space	missing interface	interface only
+debian	Readline command	re-read-init-file	missing interface	interface only
+debian	Readline command	tab-insert	missing interface	interface only
+debian	Readline command	transpose-words	missing interface	interface only
+debian	Readline command	unix-filename-rubout	missing interface	interface only
+debian	Readline command	upcase-word	missing interface	interface only
+debian	Readline variable	completion-ignore-case	missing interface	interface only
+debian	Readline variable	completion-map-case	missing interface	interface only
+debian	Readline variable	mark-directories	missing interface	interface only
+debian	Readline variable	match-hidden-files	missing interface	interface only
+debian	Readline variable	comment-begin	missing interface	interface only
+debian	Builtin option	set -k	different	interface only
+debian	Signal	STKFLT	different	match
+debian	Signal	CHLD	different	match
+debian	Signal	PWR	different	match
+debian	Signal	RTMIN	different	match
+debian	Signal	RTMIN+1	different	match
+debian	Signal	RTMIN+2	different	match
+debian	Signal	RTMIN+3	different	match
+debian	Signal	RTMIN+4	different	match
+debian	Signal	RTMIN+5	different	match
+debian	Signal	RTMIN+6	different	match
+debian	Signal	RTMIN+7	different	match
+debian	Signal	RTMIN+8	different	match
+debian	Signal	RTMIN+9	different	match
+debian	Signal	RTMIN+10	different	match
+debian	Signal	RTMIN+11	different	match
+debian	Signal	RTMIN+12	different	match
+debian	Signal	RTMIN+13	different	match
+debian	Signal	RTMIN+14	different	match
+debian	Signal	RTMIN+15	different	match
+debian	Signal	RTMAX-14	different	match
+debian	Signal	RTMAX-13	different	match
+debian	Signal	RTMAX-12	different	match
+debian	Signal	RTMAX-11	different	match
+debian	Signal	RTMAX-10	different	match
+debian	Signal	RTMAX-9	different	match
+debian	Signal	RTMAX-8	different	match
+debian	Signal	RTMAX-7	different	match
+debian	Signal	RTMAX-6	different	match
+debian	Signal	RTMAX-5	different	match
+debian	Signal	RTMAX-4	different	match
+debian	Signal	RTMAX-3	different	match
+debian	Signal	RTMAX-2	different	match
+debian	Signal	RTMAX-1	different	match
+debian	Signal	RTMAX	different	match
+debian	Compatibility level	31	different	interface only
+debian	Compatibility level	32	different	interface only
+debian	Compatibility level	40	different	interface only
+debian	Compatibility level	41	different	interface only
+debian	Compatibility level	42	different	interface only
+debian	Compatibility level	43	different	interface only
+debian	Compatibility level	44	different	interface only
+debian	Compatibility level	50	different	match
+debian	Compatibility level	51	match	stderr differs
+debian	GNU regression group	run-tilde	different	golden match
+debian	GNU regression group	run-tilde2	different	golden match
+ubuntu	Invocation	-k	different	match
+ubuntu	Invocation	-v	stderr differs	match
+ubuntu	Invocation	--verbose	different	match
+ubuntu	shopt	cmdhist	missing interface	interface only
+ubuntu	shopt	compat31	missing interface	interface only
+ubuntu	shopt	compat32	missing interface	interface only
+ubuntu	shopt	compat40	missing interface	interface only
+ubuntu	shopt	compat41	missing interface	interface only
+ubuntu	shopt	compat42	missing interface	interface only
+ubuntu	shopt	compat43	missing interface	interface only
+ubuntu	shopt	compat44	missing interface	interface only
+ubuntu	shopt	extdebug	different	match
+ubuntu	shopt	histreedit	missing interface	interface only
+ubuntu	shopt	histverify	missing interface	interface only
+ubuntu	shopt	lithist	missing interface	interface only
+ubuntu	shopt	no_empty_cmd_completion	missing interface	interface only
+ubuntu	set -o	keyword	different	interface only
+ubuntu	set -o	nolog	different	interface only
+ubuntu	set -o	verbose	stderr differs	match
+ubuntu	Variable	BASH_COMPAT	different	match
+ubuntu	Variable	LC_NUMERIC	different	match
+ubuntu	Variable	histchars	different	match
+ubuntu	Readline command	capitalize-word	missing interface	different
+ubuntu	Readline command	downcase-word	missing interface	different
+ubuntu	Readline command	history-expand-line	missing interface	different
+ubuntu	Readline command	kill-whole-line	missing interface	interface only
+ubuntu	Readline command	magic-space	missing interface	interface only
+ubuntu	Readline command	re-read-init-file	missing interface	interface only
+ubuntu	Readline command	tab-insert	missing interface	interface only
+ubuntu	Readline command	transpose-words	missing interface	different
+ubuntu	Readline command	unix-filename-rubout	missing interface	interface only
+ubuntu	Readline command	upcase-word	missing interface	different
+ubuntu	Readline variable	completion-ignore-case	missing interface	interface only
+ubuntu	Readline variable	completion-map-case	missing interface	interface only
+ubuntu	Readline variable	mark-directories	missing interface	interface only
+ubuntu	Readline variable	match-hidden-files	missing interface	interface only
+ubuntu	Readline variable	comment-begin	missing interface	interface only
+ubuntu	Builtin option	set -k	different	interface only
+ubuntu	Signal	STKFLT	different	match
+ubuntu	Signal	CHLD	different	match
+ubuntu	Signal	PWR	different	match
+ubuntu	Signal	RTMIN	different	match
+ubuntu	Signal	RTMIN+1	different	match
+ubuntu	Signal	RTMIN+2	different	match
+ubuntu	Signal	RTMIN+3	different	match
+ubuntu	Signal	RTMIN+4	different	match
+ubuntu	Signal	RTMIN+5	different	match
+ubuntu	Signal	RTMIN+6	different	match
+ubuntu	Signal	RTMIN+7	different	match
+ubuntu	Signal	RTMIN+8	different	match
+ubuntu	Signal	RTMIN+9	different	match
+ubuntu	Signal	RTMIN+10	different	match
+ubuntu	Signal	RTMIN+11	different	match
+ubuntu	Signal	RTMIN+12	different	match
+ubuntu	Signal	RTMIN+13	different	match
+ubuntu	Signal	RTMIN+14	different	match
+ubuntu	Signal	RTMIN+15	different	match
+ubuntu	Signal	RTMAX-14	different	match
+ubuntu	Signal	RTMAX-13	different	match
+ubuntu	Signal	RTMAX-12	different	match
+ubuntu	Signal	RTMAX-11	different	match
+ubuntu	Signal	RTMAX-10	different	match
+ubuntu	Signal	RTMAX-9	different	match
+ubuntu	Signal	RTMAX-8	different	match
+ubuntu	Signal	RTMAX-7	different	match
+ubuntu	Signal	RTMAX-6	different	match
+ubuntu	Signal	RTMAX-5	different	match
+ubuntu	Signal	RTMAX-4	different	match
+ubuntu	Signal	RTMAX-3	different	match
+ubuntu	Signal	RTMAX-2	different	match
+ubuntu	Signal	RTMAX-1	different	match
+ubuntu	Signal	RTMAX	different	match
+ubuntu	Compatibility level	31	different	interface only
+ubuntu	Compatibility level	40	different	interface only
+ubuntu	Compatibility level	41	different	interface only
+ubuntu	Compatibility level	42	different	interface only
+ubuntu	Compatibility level	43	different	interface only
+ubuntu	Compatibility level	44	different	interface only
+ubuntu	Compatibility level	50	different	match
+ubuntu	Compatibility level	51	match	stderr differs
+ubuntu	Compatibility level	52	match	stderr differs
+ubuntu	GNU regression group	run-tilde	different	golden match
+ubuntu	GNU regression group	run-tilde2	different	golden match

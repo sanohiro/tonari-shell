@@ -6,6 +6,8 @@ GNU の実装で、値がどこから来るか、どのスコープで変わる�
 
 The PR regression workflow runs the focused suite against the runner's installed Bash. The native source-review suite additionally exercises Bash 5.3 and retains the timing samples. The Rust paths below are relative to src/. [PR regression workflow](../../../.github/workflows/posix-shell.yml) · [Native comparison](../../../tools/ci/native-bench.sh)
 
+The follow-up implements keyword assignments and scoped compatibility behavior, exercises editor and history controls in a PTY and records updated full-driver results. 前回の残件に対する実装、許容する差の根拠、最新の試験結果は追試にまとめた。[Follow-up / 追試と判断](follow-up.md)
+
 ## Source map / 照合した実装
 
 | GNU Bash source | Tonari source | Observable behavior checked / 確認した動作 |
@@ -40,16 +42,16 @@ The inventory columns count entries and changes in their classification relative
 
 The inventory includes independent runtime comparisons, checks that only exercise an interface, manual section headings and POSIX items that still lack independent probes. A GNU driver can fail its output comparison on a diagnostic prefix, whitespace, or a behavior difference. A driver may contain hundreds of assertions and stop at its first syntax error. Counting each driver as one missing feature would overstate some differences and hide others. Use the recorded output and the smaller scripts to investigate.
 
-一覧には、動作の一致、インターフェースだけの確認、未検証、意図した差、GNU の期待出力との差を個別に記録した。例えば `jobs -n` の記録ではジョブ番号・状態・コマンドが一致し、表示に使う空白数が違う。一方、旧版の動作を選ぶ `BASH_COMPAT` や `set -k` の不足は実行結果を変える。例えば `set -k; set -- keep NAME=value; echo "$#"` は Bash で 1 を出し、Tonari では `-k` が未対応なので 2 を出す。これらを同じ「合格」にまとめることはできない。
+一覧には、動作の一致、インターフェースだけの確認、未検証、意図した差、GNU の期待出力との差を個別に記録した。例えば `jobs -n` の記録ではジョブ番号・状態・コマンドが一致し、表示に使う空白数が違う。一方、旧版の動作を選ぶ `BASH_COMPAT` や `set -k` の不足は実行結果を変える。例えば `set -k; set -- keep NAME=value; echo "$#"` は Bash で 1 を出し、当時の Tonari では 2 だった。追試後は両方とも 1 になる。これらを同じ「合格」にまとめることはできない。
 
-### Remaining differences / 残っている差
+### Differences at `40fd68f` / 追試前の差
 
 - GNU Readline key functions and inputrc variables extend beyond Tonari's editor. The new PTY tests cover programmable word boundaries for punctuation, consecutive delimiters, custom settings, a trailing delimiter, quotes, escaping and hostname prefixes. They check the callback arguments and the command subsequently executed.
-- `set -k` / `set -o keyword` and legacy compatibility levels have observable gaps. Restricted and privileged shell invocation remain unsupported. Tonari should not be used to confine users or to run privileged scripts.
-- The GNU array driver deliberately includes invalid array syntax. In the ordinary noninteractive mode Bash can print a diagnostic, skip the line and resume. Tonari stops at that syntax error. This also prevents the remainder of that driver from proving coverage of later valid array cases. The separate array and associative-array witnesses still run.
+- `set -k` / `set -o keyword` and legacy compatibility levels had observable gaps in this snapshot. Restricted and privileged shell invocation remain unsupported. Tonari should not be used to confine users or to run privileged scripts.
+- The GNU array driver deliberately includes invalid array syntax. In the ordinary noninteractive mode Bash can print a diagnostic, skip the line and resume. At this revision Tonari stopped at that syntax error. This also prevents the remainder of that driver from proving coverage of later valid array cases. The separate array and associative-array witnesses still run.
 - The shell identity in help, version output and the version prompt escapes differs. Tonari's UTF-8 text contract and Linux bytewise pathname collation are documented design decisions. These entries have different implications from a missing script interface. [Compatibility policy](../../compatibility.md)
 
-実用上の残件には、`-k` の代入引数や Readline の個別設定がある。制限シェルや特権モードも用途として保証していない。構文エラーからの復帰や GNU テストの制御側の失敗も記録しており、ソース全体についての完全互換や全テスト合格は宣言していない。
+この時点で残っていた代入引数や Readline 個別設定への対応は追試で更新した。制限シェルや特権モードも用途として保証していない。構文エラーからの復帰や GNU テストの制御側の失敗も記録しており、ソース全体についての完全互換や全テスト合格は宣言していない。
 
 ```sh
 python3 tests/compat/audit.py --source "$GNU_BASH_SOURCE" --bash "$BASH_REFERENCE" --tonari "$TONARI"
