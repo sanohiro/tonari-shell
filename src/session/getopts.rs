@@ -86,10 +86,6 @@ impl Session {
         if option.is_some() {
             self.opt_offset = offset;
         }
-        if !is_identifier(name) {
-            eprintln!("tonari: getopts: {name}: not a valid identifier");
-            return 1;
-        }
         let mut result = option.unwrap_or('?');
         if let (Some(c), Some(error)) = (option, problem) {
             if spec.starts_with(':') {
@@ -115,6 +111,10 @@ impl Session {
             self.assign("OPTARG", &value);
         } else {
             self.unset_variable("OPTARG");
+        }
+        if !is_identifier(name) {
+            eprintln!("tonari: getopts: {name}: not a valid identifier");
+            return 1;
         }
         if self.readonly(name) {
             eprintln!("tonari: getopts: {name}: readonly variable");

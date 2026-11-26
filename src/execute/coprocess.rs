@@ -101,7 +101,7 @@ pub(crate) fn launch(
         drop(input);
         drop(output);
         session.jobs.forked(false);
-        session.subshell_depth += 1;
+        session.enter_subshell();
         session.stdin_redirected = true;
         session.interactive = false;
         let code = match crate::eval::command(session, body, status, true) {

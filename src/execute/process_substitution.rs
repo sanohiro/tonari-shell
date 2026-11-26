@@ -137,7 +137,7 @@ pub(crate) fn launch(
             unsafe { libc::_exit(1) }
         }
         drop(child);
-        session.subshell_depth += 1;
+        session.enter_subshell();
         crate::execute::coprocess::after_fork(session);
         session.jobs.forked(false);
         session.interactive = false;

@@ -259,9 +259,9 @@ impl<'a> Parser<'a> {
         variables: &mut dyn Variables,
         minimum: u8,
         active: bool,
-        depth: u8,
+        depth: u16,
     ) -> Result<Value<'a>> {
-        if depth >= 96 {
+        if depth >= 96 && deep_expression_full(depth) {
             return Err("arithmetic nesting limit exceeded");
         }
         let mut left = self.atom(variables, active, depth + 1)?;
@@ -325,9 +325,9 @@ impl<'a> Parser<'a> {
         &mut self,
         variables: &mut dyn Variables,
         active: bool,
-        depth: u8,
+        depth: u16,
     ) -> Result<Value<'a>> {
-        if depth >= 96 {
+        if depth >= 96 && deep_expression_full(depth) {
             return Err("arithmetic nesting limit exceeded");
         }
         let mut value = match self.advance()? {
@@ -398,7 +398,7 @@ enum Value<'a> {
     Variable(std::borrow::Cow<'a, str>),
 }
 impl Value<'_> {
-    fn read(&self, variables: &mut dyn Variables, active: bool, depth: u8) -> Result<i64> {
+    fn read(&self, variables: &mut dyn Variables, active: bool, depth: u16) -> Result<i64> {
         if !active {
             return Ok(0);
         }
@@ -418,8 +418,29 @@ impl Value<'_> {
     }
 }
 
-fn calculate(source: &str, variables: &mut dyn Variables, depth: u8) -> Result<i64> {
-    if depth >= 96 {
+// Long chains of arithmetic variable references can implement terminating
+// recursions. Respect the real stack budget on the process main thread.
+#[cold]
+fn deep_expression_full(depth: u16) -> bool {
+    if depth >= 2048 {
+        return true;
+    }
+    if depth % 16 != 0 {
+        return false;
+    }
+    let Some(origin) = crate::MAIN_STACK_ORIGIN.get() else {
+        return true;
+    };
+    let mut limit = std::mem::MaybeUninit::uninit();
+    if unsafe { libc::getrlimit(libc::RLIMIT_STACK, limit.as_mut_ptr()) } != 0 {
+        return true;
+    }
+    let used = origin.abs_diff(std::ptr::from_ref(&limit).addr()) as u64;
+    used + 256 * 1024 >= unsafe { limit.assume_init() }.rlim_cur / 2
+}
+
+fn calculate(source: &str, variables: &mut dyn Variables, depth: u16) -> Result<i64> {
+    if depth >= 96 && deep_expression_full(depth) {
         return Err("arithmetic nesting limit exceeded");
     }
     if let [digit @ b'0'..=b'9'] = source.as_bytes() {

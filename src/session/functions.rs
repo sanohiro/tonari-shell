@@ -42,12 +42,25 @@ impl Session {
         used as u64 + 256 * 1024 >= budget
     }
 
+    pub(crate) fn function_source(&self) -> &str {
+        self.source_names
+            .last()
+            .map(AsRef::as_ref)
+            .unwrap_or_else(|| {
+                if self.command_string || self.stdin_script {
+                    "main"
+                } else {
+                    &self.arg0
+                }
+            })
+    }
+
     pub(crate) fn define_function(&mut self, name: String, definition: Rc<FunctionDefinition>) {
         let source = self
             .source_names
             .last()
             .cloned()
-            .unwrap_or_else(|| "environment".into());
+            .unwrap_or_else(|| self.function_source().into());
         let function = Function { definition, source };
         if self.allexport || self.function_exported(&name) {
             self.function_environment
@@ -159,8 +172,19 @@ impl Session {
     }
 
     pub fn print_function(&self, out: &mut impl Write, name: &str) -> io::Result<()> {
-        let body = self.functions[name].definition.location.text();
-        writeln!(out, "{name} () \n{body}")?;
+        let definition = &self.functions[name].definition;
+        let body = definition.location.text();
+        let statements = definition.body.statements();
+        if body.starts_with('{') && body.ends_with('}') && statements.iter().all(|s|
+            s.condition == crate::parser::Condition::Always && !s.negated
+            && matches!(&s.command, Command::Pipeline(stages) if stages.iter().all(|c| c.compound.is_none() && c.redirects.is_empty()))
+            && !s.location.text().contains('\n')) {
+            writeln!(out, "{name} () \n{{ ")?;
+            for s in statements { writeln!(out, "    {}", s.location.text().trim())?; }
+            writeln!(out, "}}")?;
+        } else {
+            writeln!(out, "{name} () \n{body}")?;
+        }
         let flags = self.function_attributes(name);
         if flags.len() > 1 {
             writeln!(out, "declare -{flags} {name}")?;

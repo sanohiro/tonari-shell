@@ -173,6 +173,9 @@ fn dollar_word(
                 None => return Err(Error::Incomplete("unterminated parameter expansion")),
                 _ => return bad_substitution(content, chars, word, quoted),
             };
+            if content.starts_with("!#") && !content.starts_with("!#}") {
+                return bad_substitution(content, chars, word, quoted);
+            }
             let prefixed = content.starts_with(['#', '!'])
                 && content
                     .as_bytes()
@@ -253,7 +256,7 @@ fn dollar_word(
                 }
                 if let [
                     b'@',
-                    op @ (b'U' | b'u' | b'L' | b'Q' | b'E' | b'a'),
+                    op @ (b'U' | b'u' | b'L' | b'Q' | b'E' | b'a' | b'A' | b'K' | b'k'),
                     b'}',
                     ..,
                 ] = chars.as_str().as_bytes()
@@ -263,6 +266,10 @@ fn dollar_word(
                     let operation = match op {
                         b'a' => crate::word::Modification::Attributes,
                         b'Q' => crate::word::Modification::Quote,
+                        b'A' => crate::word::Modification::Assignment,
+                        b'K' | b'k' => crate::word::Modification::Pairs {
+                            separate: op == b'k',
+                        },
                         b'E' => crate::word::Modification::Escapes,
                         _ => crate::word::Modification::Case {
                             upper: op != b'L',
@@ -290,6 +297,11 @@ fn dollar_word(
                     && !chars.as_str()[1..].starts_with(['-', '+', '=', '?'])
                 {
                     chars.next();
+                    if let Some(tail) = chars.as_str().strip_prefix('}') {
+                        *chars = tail.chars();
+                        word.part(Part::BadSubstitution(format!("${{{name}:}}")));
+                        return Ok(());
+                    }
                     let (offset, length) = super::modifier::slice(chars)?;
                     word.part(Part::Modify {
                         name: name.into(),
@@ -397,9 +409,15 @@ fn dollar_word(
         Some('(') => {
             if let Some(after) = joined(&rest[1..]).strip_prefix('(') {
                 *chars = after.chars();
-                let expression = arithmetic_source(chars)?;
-                word.part(Part::Arithmetic { expression, quoted });
-                return Ok(());
+                match arithmetic_source(chars) {
+                    Ok(expression) => {
+                        word.part(Part::Arithmetic { expression, quoted });
+                        return Ok(());
+                    }
+                    Err(Error::Invalid("invalid closing parenthesis in arithmetic expression")) => {
+                    }
+                    Err(error) => return Err(error),
+                }
             }
             let nested = &rest[1..];
             let (tokens, spans, after) = lex(nested, true, false)?;
@@ -498,7 +516,7 @@ fn parameter_word(
                     word.push('~');
                 }
             }
-            c if c == '}' || stop_slash && c == '/' => {
+            c if c == '}' || stop_slash && c == '/' && !empty => {
                 if empty && !outer_quoted {
                     word.part(Part::Unquoted(String::new()));
                 }
@@ -761,7 +779,10 @@ fn pattern_parts(
     let mut raw = group.map_or_else(String::new, |op| op.to_string());
     let mut depth = 0usize;
     while let Some(c) = chars.clone().next() {
-        if group.is_none() && depth == 0 && matches!(c, ' ' | '\t' | '\n' | ';' | '&' | '<' | '>') {
+        if group.is_none()
+            && depth == 0
+            && matches!(c, ' ' | '\t' | '\n' | ';' | '&' | '<' | '>' | ')')
+        {
             break;
         }
         chars.next();
@@ -782,7 +803,7 @@ fn pattern_parts(
                 next.is_ascii_alphanumeric()
                     || matches!(
                         next,
-                        '{' | '(' | '_' | '@' | '*' | '?' | '$' | '#' | '!' | '-'
+                        '{' | '(' | '_' | '@' | '*' | '?' | '$' | '#' | '!' | '-' | '\'' | '"'
                     )
             }) =>
             {
@@ -938,7 +959,7 @@ fn lex_words(
         }
         let pattern = pattern_next.take();
         if pattern == Some(false)
-            && !matches!(c, '\n' | ';' | '&' | '<' | '>')
+            && !matches!(c, '\n' | ';' | '&' | '<' | '>' | ')')
             && chars
                 .as_str()
                 .strip_prefix("]]")

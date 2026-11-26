@@ -170,10 +170,12 @@ impl Word {
                 continue;
             }
             if let Part::BadSubstitution(text) = part {
-                return Err(crate::expansion::Error::fatal(
-                    format!("{text}: bad substitution"),
-                    1,
-                ));
+                let message = format!("{text}: bad substitution");
+                return Err(if env.session.evaluating {
+                    crate::expansion::Error::discard(message)
+                } else {
+                    crate::expansion::Error::fatal(message, 1)
+                });
             }
             if let Part::BraceParameter(name) = part {
                 *part = Part::Parameter {
@@ -188,6 +190,14 @@ impl Word {
                 let target = env.session.reference_name(reference)?.into_owned();
                 *part = literal(target, *quoted);
                 continue;
+            }
+            if let Part::Parameter { name, .. } = part
+                && env.session.is_nameref(name)
+            {
+                let target = env.session.reference_name(name)?;
+                if array_elements_name(&target).is_some() {
+                    *name = target.into_owned();
+                }
             }
             let plain_quote = match part {
                 Part::Parameter { quoted, .. } => Some(*quoted),
@@ -663,6 +673,19 @@ impl Output<'_> {
             if i != 0 {
                 match self {
                     Self::Scalar(text) | Self::Pattern(text, _) => text.push(' '),
+                    Self::Fields(fields)
+                        if !quoted
+                            && ifs
+                                .as_bytes()
+                                .first()
+                                .is_some_and(|b| !matches!(b, b' ' | b'\t' | b'\n')) =>
+                    {
+                        // An implicit non-whitespace IFS separator emits even an
+                        // empty field. The final field still needs actual text.
+                        fields.emit();
+                        fields.present = false;
+                        fields.whitespace = false;
+                    }
                     Self::Fields(fields) => fields.finish_field(),
                 }
             }
@@ -787,7 +810,7 @@ fn tilde(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
         "~" => lookup("HOME").or_else(account_home),
         "~+" => lookup("PWD"),
         "~-" => lookup("OLDPWD"),
-        _ => user_home(Some(prefix.strip_prefix('~').unwrap_or(prefix))),
+        _ => account_field(Some(prefix.strip_prefix('~').unwrap_or(prefix)), false),
     };
     let Some(mut home) = home else {
         return s.to_owned();
@@ -802,10 +825,15 @@ fn tilde(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
 // result on the stack and retry only when a larger passwd entry needs space.
 pub(crate) fn account_home() -> Option<String> {
     static HOME: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-    HOME.get_or_init(|| user_home(None)).clone()
+    HOME.get_or_init(|| account_field(None, false)).clone()
 }
 
-fn user_home(login: Option<&str>) -> Option<String> {
+pub(crate) fn account_shell() -> Option<String> {
+    static SHELL: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    SHELL.get_or_init(|| account_field(None, true)).clone()
+}
+
+fn account_field(login: Option<&str>, shell: bool) -> Option<String> {
     let name = login.map(std::ffi::CString::new).transpose().ok()?;
     let mut local = [0u8; 1024];
     let mut large = Vec::new();
@@ -842,8 +870,17 @@ fn user_home(login: Option<&str>) -> Option<String> {
         if status != 0 || found.is_null() {
             return None;
         }
-        // getpwnam_r placed pw_dir in buf. Copy it before the buffer is dropped.
-        return unsafe { std::ffi::CStr::from_ptr((*found).pw_dir) }
+        let field = unsafe {
+            if shell {
+                (*found).pw_shell
+            } else {
+                (*found).pw_dir
+            }
+        };
+        if field.is_null() {
+            return None;
+        }
+        return unsafe { std::ffi::CStr::from_ptr(field) }
             .to_str()
             .ok()
             .map(str::to_owned);

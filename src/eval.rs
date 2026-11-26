@@ -56,6 +56,8 @@ fn run_statements<'a>(
         }
         if !session.traps.in_action() {
             session.current_command = Some(statement.location.clone());
+        } else if session.signal_line.is_some() && !session.traps.in_nested_action() {
+            session.signal_line = Some(statement.location.line);
         }
         let negated = statement.negated;
         let tested = negated
@@ -173,15 +175,12 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
             borrowed_program,
         ),
         Cow::Borrowed(Command::Function { name, definition })
-            if !session.readonly_functions.contains(name)
+            if !(session.posix && crate::execute::special_builtin(name))
+                && !session.readonly_functions.contains(name)
                 && !session.allexport
                 && session.functions.get(name).is_some_and(|old| {
                     std::rc::Rc::ptr_eq(&old.definition, definition)
-                        && old.source.as_ref()
-                            == session
-                                .source_names
-                                .last()
-                                .map_or("environment", AsRef::as_ref)
+                        && old.source.as_ref() == session.function_source()
                 }) =>
         {
             Flow::Continue(0)
@@ -328,6 +327,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             step,
             body,
         } => {
+            let header = session.current_command.clone();
             let line = session.line();
             let mut first = true;
             let arithmetic = |s: &mut Session,
@@ -343,6 +343,9 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                     if let Some(flow) = crate::traps::debug(s, last) {
                         return Err(flow);
                     }
+                }
+                if !s.traps.debug_handler() {
+                    s.current_command.clone_from(&header);
                 }
                 compiled.run(s, last).map_err(|e| {
                     eprintln!("tonari: {e}");
@@ -490,6 +493,14 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             Flow::Continue(result)
         }
         Command::Function { name, definition } => {
+            if session.posix && crate::execute::special_builtin(&name) {
+                eprintln!("tonari: {name}: special builtin cannot be redefined");
+                return if session.interactive {
+                    Flow::Continue(2)
+                } else {
+                    Flow::Exit(2)
+                };
+            }
             if session.readonly_functions.contains(&name) {
                 eprintln!("tonari: {name}: readonly function");
                 return Flow::Continue(1);
@@ -583,6 +594,16 @@ pub fn call_function(
     status: u8,
     replace_last: bool,
 ) -> Flow {
+    call_with_bindings(session, argv, status, replace_last, &mut Default::default())
+}
+
+pub(crate) fn call_with_bindings(
+    session: &mut Session,
+    argv: Vec<String>,
+    status: u8,
+    replace_last: bool,
+    bindings: &mut crate::session::Bindings,
+) -> Flow {
     let mut arguments = argv.into_iter();
     let name = arguments.next().expect("function name");
     if session.function_nesting_full() {
@@ -595,7 +616,7 @@ pub fn call_function(
     session.call_lines.push(session.line());
     session.source_names.push(function.source);
     session.function_names.push(name);
-    session.enter_function();
+    session.enter_function(bindings);
     let tracked = session.shopt.extdebug;
     if tracked {
         if session.debug_args.is_empty() {

@@ -55,6 +55,60 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_nested_temporary_variable_scopes(self):
+        self.compare("""v=outer
+unlocal() { unset -v v; }
+f() {
+    local v
+    echo "$v"
+    v=second eval 'local v=third; unlocal; echo "$v"; unlocal; echo "$v"'
+}
+v=first f
+echo "$v" """, 0, b"first\nfirst\nouter\nouter\n", minimum=5)
+
+    def test_dynamic_integers_and_ordinary_shadow(self):
+        self.compare("""RANDOM=1; echo "$RANDOM $RANDOM"
+SECONDS=12; ((SECONDS >= 12 && SECONDS < 15)) || exit 1
+((SRANDOM >= 0 && SRANDOM <= 4294967295)) || exit 1
+f() { local RANDOM=abc; echo "$RANDOM"; }
+f; unset SECONDS; SECONDS=9; declare -p SECONDS""", 0,
+                     b'16807 10791\nabc\ndeclare -- SECONDS="9"\n', minimum=5)
+
+    def test_compound_redirect_failure_and_tested_context(self):
+        self.compare("""set -e
+{ :; } <missing-tonari || echo handled
+{ :; } <missing-tonari
+echo bad""", 1, b"handled\n")
+
+    def test_case_attributes_on_arrays_and_export(self):
+        self.compare("""declare -u s=one; s+=two; export s+=three; echo "$s"
+declare -la a=(AA Bb); a[1]+=CC; echo "${a[@]}"
+declare -uA m=([x]=Hi); m[x]+=bye; echo "${m[x]}"
+declare +u s; s=Mixed; echo "$s" """, 0,
+                     b"ONETWOTHREE\naa bbcc\nHIBYE\nMixed\n", minimum=5)
+
+    def test_prompt_names_job_number_and_terminal_fallback(self):
+        self.compare(r"""p='\l'; echo "${p@P}"
+p='\j'; sleep 2 & echo "${p@P}" | cat; kill $!; wait $! 2>/dev/null || :
+echo "${p@P}" """, 0, b"tty\n1\n0\n", minimum=5)
+
+    def test_nonwhite_ifs_empty_parameter_boundaries(self):
+        self.compare("""set -- '' aa '' ''; IFS=x
+printf '<%s>' $@; echo; printf '<%s>' pre$*post; echo""", 0,
+                     b"<> <aa> <>".replace(b" ", b"") + b"\n<pre><aa><><post>\n")
+
+    def test_explicit_interactive_history_file(self):
+        self.env["HISTFILE"] = str(self.cwd / "entries")
+        for shell in (BASH, TONARI):
+            with self.subTest(shell=shell):
+                path = self.cwd / "entries"
+                path.write_text("older\n")
+                out = subprocess.run([shell, "--noprofile", "--norc", "-i"], cwd=self.cwd,
+                    env=self.env, input=b"echo current\nhistory\n", capture_output=True, timeout=5)
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn(b"older", out.stdout)
+                self.assertEqual(path.read_text(), "older\necho current\nhistory\n")
+
     def test_timestamped_history_import_append_and_write(self):
         (self.cwd / "entries").write_bytes(b"#100\nfirst\nsecond\n#120\nthird\n")
         self.compare(r"""HISTTIMEFORMAT='%s '; history -c; history -r entries

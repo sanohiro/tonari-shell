@@ -212,9 +212,20 @@ fn read_terminal_line(source: &mut Vec<u8>, terminal: bool) -> io::Result<bool> 
     }
 }
 
-fn interactive(session: &mut Session, mut status: u8, editing: bool) -> io::Result<u8> {
+fn interactive(session: &mut Session, status: u8, editing: bool) -> io::Result<u8> {
     let terminal_input = io::stdin().is_terminal();
-    session.initial_history = history::InitialJournal::snapshot(session).map(std::rc::Rc::new);
+    history::start_interactive(session);
+    let result = interactive_loop(session, status, editing, terminal_input);
+    history::finish_interactive(session);
+    result
+}
+
+fn interactive_loop(
+    session: &mut Session,
+    mut status: u8,
+    editing: bool,
+    terminal_input: bool,
+) -> io::Result<u8> {
     let mut source = Vec::new();
     let mut history = history::History::default();
     let mut eof_count = 0;

@@ -403,6 +403,7 @@ fn run(
         {
             session.current_command = Some(parser::Location::label(command.into(), base_line));
             session.pipe_status.single(0);
+            session.command_number += usize::from(session.source_depth == 0);
             session.substitutions.finish(session.substitutions.scope());
             ran = true;
             status = 0;
@@ -482,6 +483,7 @@ fn run(
                     && !session.interactive
                     && session.begin_history_line(text);
                 let flow = execute_program(session, program, status, false);
+                session.command_number += usize::from(session.source_depth == 0);
                 if remember {
                     session.finish_history_line();
                 }
@@ -639,6 +641,7 @@ pub fn text(
                     && (!session.interactive || session.command_history_expansion)
                     && session.begin_history_line(text);
                 let flow = program.run(session, status, tail && last);
+                session.command_number += usize::from(tail && !session.interactive);
                 if remember {
                     session.finish_history_line();
                 }

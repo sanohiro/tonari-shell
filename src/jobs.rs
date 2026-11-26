@@ -350,7 +350,7 @@ pub struct Jobs {
 
 impl Jobs {
     pub(crate) fn count(&self) -> usize {
-        self.table.len()
+        self.table.len() + self.inherited.len()
     }
     pub(crate) fn is_empty(&self) -> bool {
         self.table.is_empty() && self.inherited.is_empty()

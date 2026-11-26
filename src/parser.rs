@@ -146,7 +146,7 @@ pub(crate) fn is_function_name(name: &str) -> bool {
     !name.is_empty()
         && name
             .chars()
-            .all(|c| c.is_alphanumeric() || "_-.+:@/".contains(c))
+            .all(|c| c.is_alphanumeric() || "_-.+:@/!=#".contains(c))
 }
 pub(crate) use here_doc::{HereDocHint, expansion_string};
 use lexer::{LexWord, Token, lex};
@@ -478,6 +478,10 @@ pub(crate) fn validate_tail(source: &str, session: &crate::Session, line: usize)
             .read_list(&[], true)
             .is_ok()
     })
+}
+
+pub(crate) fn here_word(session: &crate::Session, source: &str) -> Result<Word, Error> {
+    with_read_options(session, session.line(), || expansion_string(source))
 }
 
 fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnce() -> T) -> T {
@@ -923,10 +927,12 @@ impl Reader {
 
     fn test_and(&mut self) -> Result<Expr, Error> {
         let mut result = self.test_atom()?;
+        self.newlines();
         while matches!(self.peek(), Some(Token::And)) {
             self.tokens.pop_front();
             self.newlines();
             result = Expr::And(Box::new(result), Box::new(self.test_atom()?));
+            self.newlines();
         }
         Ok(result)
     }
@@ -1131,9 +1137,14 @@ impl Reader {
                 self.tokens.pop_front();
             }
             self.newlines();
-            self.expect("do")?;
-            let body = self.list(&["done"])?;
-            self.expect("done")?;
+            let (open, close) = if self.keyword() == Some("{") {
+                ("{", "}")
+            } else {
+                ("do", "done")
+            };
+            self.expect(open)?;
+            let body = self.list(&[close])?;
+            self.expect(close)?;
             return Ok(Command::ForArithmetic {
                 init: init.into(),
                 condition: condition.into(),
@@ -1147,7 +1158,11 @@ impl Reader {
         let words = if self.keyword() == Some("in") {
             self.tokens.pop_front();
             let mut words = Vec::new();
-            while matches!(self.peek(), Some(Token::Word(_) | Token::Reserved(_))) {
+            loop {
+                self.expand_alias(false)?;
+                if !matches!(self.peek(), Some(Token::Word(_) | Token::Reserved(_))) {
+                    break;
+                }
                 if let Some(Token::Word(word)) = self.operand() {
                     words.push(word.word);
                 }
@@ -1320,8 +1335,18 @@ impl Reader {
                         );
                     if matches!(self.peek(), Some(Token::ArrayStart)) {
                         let name = assignment.ok_or(Error::Invalid("invalid array assignment"))?;
-                        if !is_identifier(name.strip_suffix('+').unwrap_or(&name))
+                        let base = name.trim_end_matches('+');
+                        if matches!(cmd.words.first().and_then(Word::as_literal), Some("let")) {
+                            let start = self.position();
+                            self.array_items()?;
+                            let expr = format!("{name}={}", self.location(start).text());
+                            cmd.words.push(lexer::arithmetic_word(&expr)?.declaration());
+                            continue;
+                        }
+                        if !(is_identifier(base)
+                            || crate::session::array::subscript(base).is_some())
                             || !(cmd.words.is_empty() || declaration)
+                            || cmd.words.first().and_then(Word::as_literal) == Some("command")
                         {
                             return Err(Error::Invalid("invalid array assignment"));
                         }
@@ -1341,7 +1366,10 @@ impl Reader {
                             cmd.assignments.push((name, Assignment::Scalar(word)));
                             continue;
                         }
-                        if !protected && word.as_literal().is_some_and(reserved) {
+                        if cmd.assignments.is_empty()
+                            && !protected
+                            && word.as_literal().is_some_and(reserved)
+                        {
                             return Err(Error::Invalid("unexpected reserved word"));
                         }
                         // Most simple commands have only the name and one operand.

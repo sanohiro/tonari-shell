@@ -738,9 +738,13 @@ fn eval_builtin(
             command => crate::eval::command(session, command, last_status, false),
         },
         Builtin::Exec => exec_builtin(cmd, session, args),
-        Builtin::Function => {
-            crate::call_function(session, std::mem::take(&mut cmd.words), last_status, false)
-        }
+        Builtin::Function => crate::eval::call_with_bindings(
+            session,
+            std::mem::take(&mut cmd.words),
+            last_status,
+            false,
+            &mut bindings,
+        ),
         Builtin::Trap => Flow::Continue(session.traps.builtin(
             args,
             session.interactive,
@@ -806,7 +810,11 @@ fn eval_builtin(
                             Flow::LoopContinue(levels)
                         }
                     }
-                    _ => {
+                    Err(_) => {
+                        write_error(cmd.words[0].as_bytes(), b": numeric argument required");
+                        Flow::Exit(128)
+                    }
+                    Ok(_) => {
                         write_error(cmd.words[0].as_bytes(), b": invalid loop count");
                         Flow::Exit(1)
                     }
@@ -828,6 +836,12 @@ fn eval_builtin(
             last_status,
             !session.interactive && posix_special(cmd, session),
         ),
+        Builtin::Eval if !cmd.assignments.is_empty() => {
+            session.enter_scope(&mut bindings);
+            let flow = crate::input::eval_builtin(session, args, last_status);
+            session.leave_scope();
+            flow
+        }
         Builtin::Eval => crate::input::eval_builtin(session, args, last_status),
         Builtin::Return(status) => {
             if status.is_some() && status_operands(args).len() > 1 {
@@ -1237,7 +1251,21 @@ fn run_builtin(
             restore = Err(e);
         }
     }
-    restore.map(|()| flow)
+    restore?;
+    // Failures in a compound command's body are tested by its own statement
+    // list. A redirect failure happens before that list can run.
+    if !applied && matches!(builtin, Builtin::Compound) && session.tested_depth == 0 {
+        if session.traps.active() {
+            let trap = crate::traps::error(session, 1);
+            if !matches!(trap, Flow::Continue(_)) {
+                return Ok(trap);
+            }
+        }
+        if session.errexit {
+            return Ok(Flow::Exit(1));
+        }
+    }
+    Ok(flow)
 }
 
 enum Stage {
@@ -1312,7 +1340,7 @@ fn redirection_observable(r: &Redirect<Word>) -> bool {
 // A parenthesized pipeline stage is already the subshell Bash exposes.
 fn enter_stage(session: &mut Session, compound: Option<&crate::parser::Command>, background: bool) {
     let explicit = matches!(compound, Some(crate::parser::Command::Subshell(_)));
-    session.subshell_depth += 1;
+    session.enter_subshell();
     session.jobs.forked(!explicit && !background);
     if explicit {
         session.command_string = false;
@@ -1853,6 +1881,11 @@ impl PreparedCommand {
 }
 
 fn trace_word(word: &str) -> std::borrow::Cow<'_, str> {
+    if word.bytes().any(|b| b.is_ascii_control()) {
+        return String::from_utf8(crate::session::printf::ansi_quote(word.as_bytes(), false))
+            .unwrap()
+            .into();
+    }
     if !word.is_empty()
         && word
             .chars()
@@ -2186,7 +2219,9 @@ fn prepare_redirects(
         let word = match (r.target, r.word) {
             (Target::HereDoc { expand: true }, Word::Literal(body)) => {
                 if body.contains(['$', '`', '\\']) {
-                    exp.scalar(crate::parser::expansion_string(&body).map_err(|e| e.message())?)?
+                    exp.scalar(
+                        crate::parser::here_word(exp.session, &body).map_err(|e| e.message())?,
+                    )?
                 } else {
                     body
                 }

@@ -1,0 +1,88 @@
+// Dynamic Bash integers. An ordinary local or an unset tombstone can shadow
+// the inherited binding; no entropy or timer state is initialized at startup.
+use super::Session;
+use std::cell::Cell;
+
+#[derive(Clone, Copy, Default)]
+struct Random {
+    seed: u32,
+    last: u16,
+    initialized: bool,
+}
+
+#[derive(Clone, Default)]
+pub(super) struct Dynamic {
+    seconds: Cell<Option<i64>>,
+    random: Cell<Random>,
+}
+
+pub(super) fn is_dynamic(name: &str) -> bool {
+    matches!(name, "SECONDS" | "RANDOM" | "SRANDOM")
+}
+
+fn entropy() -> Option<u32> {
+    let mut bytes = [0u8; 4];
+    (unsafe { libc::getentropy(bytes.as_mut_ptr().cast(), bytes.len()) } == 0)
+        .then(|| u32::from_ne_bytes(bytes))
+}
+
+impl Session {
+    pub(crate) fn enter_subshell(&mut self) {
+        self.subshell_depth += 1;
+        self.dynamic.random.set(Random::default());
+    }
+
+    pub(super) fn dynamic_number(&self, name: &str) -> Option<i64> {
+        match name {
+            "SECONDS" => {
+                let origin = self.dynamic.seconds.get().unwrap_or_else(|| {
+                    let initial = std::env::var("SECONDS")
+                        .ok()
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    let origin = self.started_at.wrapping_sub(initial);
+                    self.dynamic.seconds.set(Some(origin));
+                    origin
+                });
+                Some(unsafe { libc::time(std::ptr::null_mut()) }.wrapping_sub(origin))
+            }
+            "RANDOM" => {
+                let mut rng = self.dynamic.random.get();
+                if !rng.initialized {
+                    rng.seed = entropy()?;
+                    rng.initialized = true;
+                }
+                loop {
+                    const MODULUS: i64 = 2_147_483_647;
+                    let seed = if rng.seed == 0 { 123_459_876 } else { rng.seed };
+                    let value =
+                        16_807 * i64::from(seed % 127_773) - 2_836 * i64::from(seed / 127_773);
+                    rng.seed = if value < 0 { value + MODULUS } else { value } as u32;
+                    let next = ((rng.seed ^ (rng.seed >> 16)) & 0x7fff) as u16;
+                    if next != rng.last {
+                        rng.last = next;
+                        self.dynamic.random.set(rng);
+                        return Some(i64::from(next));
+                    }
+                }
+            }
+            "SRANDOM" => entropy().map(i64::from),
+            _ => None,
+        }
+    }
+
+    pub(super) fn set_dynamic(&self, name: &str, value: &str) {
+        let value = value.parse::<i64>().unwrap_or(0);
+        match name {
+            "SECONDS" => self.dynamic.seconds.set(Some(
+                unsafe { libc::time(std::ptr::null_mut()) }.wrapping_sub(value),
+            )),
+            "RANDOM" => self.dynamic.random.set(Random {
+                seed: value as u32,
+                initialized: true,
+                last: 0,
+            }),
+            _ => {}
+        }
+    }
+}

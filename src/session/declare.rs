@@ -8,6 +8,8 @@ struct Options {
     print: bool,
     nameref: Option<bool>,
     array: bool,
+    remove_array: bool,
+    remove_associative: bool,
     associative: bool,
     functions: bool,
     traced: Option<bool>,
@@ -15,6 +17,8 @@ struct Options {
     readonly: Option<bool>,
     global: bool,
     integer: Option<bool>,
+    lower: Option<bool>,
+    upper: Option<bool>,
     inherit: bool,
     exported: Option<bool>,
 }
@@ -29,7 +33,7 @@ pub(super) fn run(
     let total_args = operands.len();
     let readonly = command == "readonly";
     let local = command == "local";
-    if local && session.locals.is_empty() {
+    if local && session.function_depth == 0 {
         eprintln!("tonari: local: can only be used in a function");
         return crate::execute::Flow::Continue(1);
     }
@@ -56,6 +60,8 @@ pub(super) fn run(
             }
             match c {
                 'a' if on => flags.array = true,
+                'a' => flags.remove_array = true,
+                'A' if !on => flags.remove_associative = true,
                 'A' if on => flags.associative = true,
                 'F' => {
                     flags.functions = true;
@@ -66,6 +72,8 @@ pub(super) fn run(
                 'r' => flags.readonly = Some(on),
                 'g' => flags.global = on,
                 'i' => flags.integer = Some(on),
+                'l' => flags.lower = Some(on),
+                'u' => flags.upper = Some(on),
                 'n' => flags.nameref = Some(on),
                 'I' => flags.inherit = on,
                 'p' => flags.print = true,
@@ -170,6 +178,8 @@ pub(super) fn run(
             && !flags.associative
             && flags.nameref.is_none()
             && flags.integer.is_none()
+            && flags.lower.is_none()
+            && flags.upper.is_none()
         {
             return crate::execute::Flow::Continue(session.set(&mut Vec::new()));
         }
@@ -196,6 +206,8 @@ pub(super) fn run(
                     && (flags.readonly == Some(true) && !var.readonly
                         || flags.array && (var.elements.is_none() || var.associative().is_some())
                         || flags.associative && var.associative().is_none()
+                        || flags.lower == Some(true) && var.letter_case != Some(false)
+                        || flags.upper == Some(true) && var.letter_case != Some(true)
                         || flags.integer == Some(true) && !var.integer
                         || flags.nameref == Some(true) && !var.nameref)
                 {
@@ -305,14 +317,19 @@ pub(super) fn run(
             scope
                 .0
                 .insert(name.into(), session.variables.get(name).cloned());
+            var.dynamic = false;
             var.nameref = false;
-            if !flags.inherit && !session.shopt.localvar_inherit {
+            if !var.temporary && !flags.inherit && !session.shopt.localvar_inherit {
                 var.readonly = false;
                 var.integer = false;
+                var.letter_case = None;
                 var.value = None;
                 var.elements = None;
                 var.array_assigned = false;
             }
+        }
+        if session.function_depth != 0 && !readonly && !flags.global {
+            var.temporary = false;
         }
         if let Some(on) = flags.nameref {
             let dest = value.or(var.value.as_deref()).unwrap_or("");
@@ -336,6 +353,14 @@ pub(super) fn run(
             var.nameref = on;
             session.has_namerefs |= on;
         }
+        match (flags.lower, flags.upper) {
+            (Some(true), Some(true)) => var.letter_case = None,
+            (Some(true), _) => var.letter_case = Some(false),
+            (_, Some(true)) => var.letter_case = Some(true),
+            (Some(false), _) if var.letter_case == Some(false) => var.letter_case = None,
+            (_, Some(false)) if var.letter_case == Some(true) => var.letter_case = None,
+            _ => {}
+        }
         if let Some(integer) = flags.integer {
             var.integer = integer;
         }
@@ -344,6 +369,13 @@ pub(super) fn run(
             && let Err(e) = var.make_associative()
         {
             eprintln!("tonari: {command}: {name}: {e}");
+            status = 1;
+            continue;
+        }
+        if flags.remove_array && var.elements.is_some() && var.associative().is_none()
+            || flags.remove_associative && var.associative().is_some()
+        {
+            eprintln!("tonari: {command}: {name}: cannot remove array attribute");
             status = 1;
             continue;
         }
@@ -438,6 +470,7 @@ pub(super) fn run(
             } else {
                 text.into()
             };
+            let text = session.convert_case(text, var.letter_case);
             if name == "OPTIND" {
                 session.opt_offset = 0;
             }
@@ -448,6 +481,9 @@ pub(super) fn run(
                 array.insert(index, text);
                 var.array_assigned = true;
             } else {
+                if var.dynamic {
+                    session.set_dynamic(name, &text);
+                }
                 var.value = Some(text);
             }
         }
@@ -519,7 +555,7 @@ impl Session {
         };
         if let Some(var) = entry {
             let mut var = var.clone();
-            if matches!(name, "BASHOPTS" | "SHELLOPTS") {
+            if var.dynamic || matches!(name, "BASHOPTS" | "SHELLOPTS") {
                 var.value = self.inherited_value(name);
             }
             return Some(var);
@@ -538,10 +574,14 @@ impl Session {
             }
             let value = self.inherited_value(name);
             (value.is_some() || name == "OLDPWD").then(|| Variable {
+                letter_case: None,
+                temporary: false,
+                dynamic: super::dynamic::is_dynamic(name),
                 inherited: Default::default(),
                 readonly: Self::builtin_readonly(name),
                 nameref: false,
-                integer: matches!(name, "PPID" | "EUID" | "UID"),
+                integer: super::dynamic::is_dynamic(name)
+                    || matches!(name, "PPID" | "EUID" | "UID"),
                 array_assigned: false,
                 elements: None,
                 declared: true,
@@ -561,7 +601,7 @@ mod tests {
         let mut s = Session::default();
         s.assign("x", "a");
         for inner in ["b", "c"] {
-            s.enter_function();
+            s.enter_function(&mut Default::default());
             assert_eq!(
                 s.declare("local", &[format!("x={inner}")], &[], 0),
                 crate::Flow::Continue(0)

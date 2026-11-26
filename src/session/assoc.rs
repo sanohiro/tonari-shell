@@ -107,6 +107,7 @@ impl Session {
         if self.readonly(name) {
             return Err("readonly variable");
         }
+        let value = self.convert_case(value, self.variables.get(name).and_then(|v| v.letter_case));
         let var = self
             .variables
             .get_mut(name)

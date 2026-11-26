@@ -133,7 +133,7 @@ pub fn capture_substitution(
             drop(write);
         }
         // fork already isolated the complete session, including shell variables.
-        session.subshell_depth += 1;
+        session.enter_subshell();
         crate::execute::coprocess::after_fork(session);
         session.jobs.forked(true);
         session.interactive = false;
@@ -653,7 +653,7 @@ fn launch_list(
                 }
             }
         }
-        session.subshell_depth += 1;
+        session.enter_subshell();
         crate::execute::coprocess::after_fork(session);
         session.jobs.forked(false);
         session.command_string = false;

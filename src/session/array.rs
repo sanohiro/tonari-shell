@@ -141,20 +141,6 @@ impl Elements {
         self.sparse().insert(index, value);
     }
 
-    pub(super) fn append_first(&mut self, text: &str) {
-        self.make_writable();
-        match self {
-            Self::Records(_) => unreachable!(),
-            Self::Associative(map) => {
-                let mut v = map.get("0").cloned().unwrap_or_default();
-                v.push_str(text);
-                map.insert("0".into(), v);
-            }
-            Self::Dense(values) if values.is_empty() => values.push(text.into()),
-            Self::Dense(values) => values[0].push_str(text),
-            Self::Sparse(values) => values.entry(0).or_default().push_str(text),
-        }
-    }
     fn remove(&mut self, index: i64) {
         self.make_writable();
         if let Self::Dense(values) = self {
@@ -265,6 +251,9 @@ impl Session {
                 .map(u8::to_string);
         }
         if let Some(v) = self.variables.get(name) {
+            if v.dynamic && index == 0 {
+                return self.get(name);
+            }
             return match v.elements.as_ref() {
                 Some(a) => a.get(&index).map(str::to_owned),
                 None if index == 0 => v.value.clone(),
@@ -391,7 +380,12 @@ impl Session {
             .collect()
     }
 
-    pub fn replace_array(&mut self, name: &str, values: Vec<String>) {
+    pub fn replace_array(&mut self, name: &str, mut values: Vec<String>) {
+        if let Some(upper) = self.variables.get(name).and_then(|v| v.letter_case) {
+            for v in &mut values {
+                *v = self.convert_case(std::mem::take(v), Some(upper));
+            }
+        }
         self.store_elements(name, Elements::Dense(values), false);
     }
 
@@ -415,6 +409,7 @@ impl Session {
             && let Some(var) = self.variables.get_mut(name)
             && !var.readonly
             && !var.integer
+            && var.letter_case.is_none()
             && var.associative().is_none()
             && words.iter().all(|(index, _)| index.is_none())
         {
@@ -489,6 +484,7 @@ impl Session {
         let items = match items {
             ArrayItems::Associative(items) => {
                 let integer = var.integer;
+                let letter_case = var.letter_case;
                 let map = var.make_associative()?;
                 if !append {
                     *map = Default::default();
@@ -502,7 +498,7 @@ impl Session {
                     } else {
                         value.clone()
                     };
-                    map.insert(key.clone(), value);
+                    map.insert(key.clone(), self.convert_case(value, letter_case));
                 }
                 var.array_assigned = true;
                 var.declared = true;
@@ -553,7 +549,7 @@ impl Session {
             } else {
                 value.clone()
             };
-            map.insert(i, value);
+            map.insert(i, self.convert_case(value, var.letter_case));
             next = i.checked_add(1);
         }
         var.elements = Some(Rc::new(map));
@@ -627,6 +623,9 @@ impl Session {
             self.variables.insert(
                 name.into(),
                 Variable {
+                    letter_case: None,
+                    temporary: false,
+                    dynamic: false,
                     inherited: Default::default(),
                     readonly: false,
                     nameref: false,
@@ -639,6 +638,7 @@ impl Session {
                 },
             );
         }
+        let value = self.convert_case(value, self.variables[name].letter_case);
         let var = self.variables.get_mut(name).unwrap();
         var.declared = true;
         var.array_assigned = true;
@@ -657,6 +657,9 @@ impl Session {
             self.variables.insert(
                 name.into(),
                 Variable {
+                    letter_case: None,
+                    temporary: false,
+                    dynamic: false,
                     inherited: Default::default(),
                     readonly: false,
                     nameref: false,
@@ -680,7 +683,7 @@ mod tests {
     fn sparse_arrays_survive_scope_changes_and_restore_the_outer_scalar() {
         let mut shell = Session::default();
         shell.assign("a", "outer");
-        shell.enter_function();
+        shell.enter_function(&mut Default::default());
         assert_eq!(
             shell.declare("local", &["-a".into(), "a".into()], &[], 0),
             crate::Flow::Continue(0)

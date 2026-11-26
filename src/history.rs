@@ -42,6 +42,55 @@ pub(crate) enum View {
     All,
 }
 
+fn custom_history(session: &Session) -> Option<String> {
+    let path = session.get("HISTFILE")?;
+    if path.is_empty()
+        || path == "/dev/null"
+        || session
+            .get("HOME")
+            .is_some_and(|h| PathBuf::from(h).join(".bash_history") == PathBuf::from(&path))
+    {
+        return None;
+    }
+    Some(path)
+}
+
+pub(crate) fn start_interactive(session: &mut Session) {
+    if let Some(path) = custom_history(session) {
+        if fs::metadata(&path).is_ok_and(|m| m.is_file())
+            && let Err(e) = commands::history_file(session, 'r', &[path])
+        {
+            eprintln!("tonari: history: {e}");
+        }
+    } else {
+        session.initial_history = InitialJournal::snapshot(session).map(std::rc::Rc::new);
+    }
+}
+
+pub(crate) fn finish_interactive(session: &mut Session) {
+    if session
+        .history
+        .as_ref()
+        .is_none_or(|h| h.written == h.lines.len())
+    {
+        return;
+    }
+    if let Some(path) = custom_history(session) {
+        let limit = session.get("HISTFILESIZE").and_then(|s| s.parse().ok());
+        let timestamped = session.get("HISTTIMEFORMAT").is_some();
+        let op = if session.shopt.histappend { 'a' } else { 'w' };
+        if let Err(e) =
+            commands::history_file(session, op, std::slice::from_ref(&path)).and_then(|()| {
+                limit.map_or(Ok(()), |n| {
+                    commands::limit_plain_file(std::path::Path::new(&path), n, timestamped)
+                })
+            })
+        {
+            eprintln!("tonari: history: {e}");
+        }
+    }
+}
+
 fn file(session: &Session) -> Option<PathBuf> {
     let setting = session.get("HISTFILE")?;
     if setting.is_empty()
@@ -258,7 +307,7 @@ impl Session {
     pub(crate) fn history_number(&self) -> usize {
         self.history
             .as_ref()
-            .map_or(1, |h| h.base + h.lines.len() + 1)
+            .map_or(1, |h| h.base + h.current.unwrap_or(h.lines.len()) + 1)
     }
     pub(crate) fn history_lines(&self) -> &[String] {
         self.history.as_deref().map_or(&[], |h| h.lines.as_slice())
