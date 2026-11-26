@@ -368,6 +368,39 @@ fn bash_timestamp(line: &str) -> Option<i64> {
     value[..end].parse().ok()
 }
 
+// Validate complete buffered lines together. Read through a boundary only
+// when a single line spans buffers, or when an error needs its exact line.
+fn read_history_lines(
+    reader: &mut impl BufRead,
+    private: bool,
+    mut visit: impl FnMut(&str, usize),
+) -> io::Result<()> {
+    let mut spill = String::new();
+    loop {
+        let bytes = reader.fill_buf()?;
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        if let Some(end) = memchr::memrchr(b'\n', bytes)
+            && let Ok(lines) = std::str::from_utf8(&bytes[..=end])
+        {
+            for line in lines.split_terminator('\n') {
+                visit(line.strip_suffix('\r').unwrap_or(line), line.len() + 1);
+            }
+            reader.consume(end + 1);
+        } else {
+            spill.clear();
+            let count = reader.read_line(&mut spill)?;
+            let line = match spill.strip_suffix('\n') {
+                Some(line) => line,
+                None if private => return Ok(()),
+                None => spill.as_str(),
+            };
+            visit(line.strip_suffix('\r').unwrap_or(line), count);
+        }
+    }
+}
+
 pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<()> {
     if args.len() > 1 {
         return Err(error("too many arguments"));
@@ -431,7 +464,6 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
         if skip > 0 {
             reader.seek(SeekFrom::Start(skip))?;
         }
-        let mut line = String::new();
         let limit = session.history_limit("HISTSIZE", 500);
         let erase = session
             .get("HISTCONTROL")
@@ -444,26 +476,16 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
         } else {
             None
         };
-        let result = loop {
-            line.clear();
-            let n = match reader.read_line(&mut line) {
-                Ok(n) => n,
-                Err(e) => break Err(e),
-            };
-            if n == 0 || private && !line.ends_with('\n') {
-                break Ok(());
-            }
+        let result = read_history_lines(&mut reader, private, |line, n| {
             offset += n as u64;
-            let line = line.strip_suffix('\n').unwrap_or(&line);
-            let line = line.strip_suffix('\r').unwrap_or(line);
             let (value, seconds) = if private {
                 let Some((body, ts)) = super::journal_fields(line) else {
-                    continue;
+                    return;
                 };
                 let mut fields = body.splitn(4, '\t');
                 let pid = fields.next().and_then(|s| s.parse::<u32>().ok());
                 if op == 'n' && pid == Some(owner) {
-                    continue;
+                    return;
                 }
                 (
                     fields.nth(2).and_then(super::decode),
@@ -485,7 +507,7 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
                     previous = None;
                     timestamp = Some(ts);
                     marker_offset = Some(offset - n as u64);
-                    continue;
+                    return;
                 }
                 if multiline
                     && timestamp.is_none()
@@ -496,10 +518,10 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
                 {
                     last.push('\n');
                     last.push_str(line);
-                    continue;
+                    return;
                 }
                 if line.is_empty() {
-                    continue;
+                    return;
                 }
                 marker_offset = None;
                 (
@@ -516,7 +538,7 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
                     import_entry(h, value, seconds, erase, limit);
                 }
             }
-        };
+        });
         if let Some((value, time)) = pending {
             import_entry(h, value, time, erase, limit);
         }

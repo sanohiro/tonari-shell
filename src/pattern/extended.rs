@@ -531,7 +531,19 @@ impl Pattern {
         {
             return result;
         }
-        endings::<PATHNAME>(&self.atoms, value, 0, period)
+        let mut atoms = self.atoms.as_slice();
+        let mut pos = 0;
+        while let [Atom::Text(text), remaining @ ..] = atoms {
+            if !value[pos..].starts_with(text.as_ref()) {
+                return false;
+            }
+            pos += text.len();
+            atoms = remaining;
+        }
+        if atoms.is_empty() {
+            return pos == value.len();
+        }
+        endings::<PATHNAME>(atoms, value, pos, period)
             .binary_search(&value.len())
             .is_ok()
     }
