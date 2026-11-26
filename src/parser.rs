@@ -626,6 +626,12 @@ pub fn session_source_at(
     session: &crate::Session,
     line: usize,
 ) -> Result<Vec<Statement>, Error> {
+    if source.len() <= 4096
+        && !(session.shopt.expand_aliases && session.aliases.0.is_some())
+        && let Some(statement) = literal_assignment(source, line)
+    {
+        return Ok(vec![statement]);
+    }
     with_read_options(session, line, || {
         if eof {
             parse_final(source)
@@ -733,7 +739,30 @@ pub(crate) fn plain_assignment(command: &str) -> Option<(&str, &str)> {
 // simple-command AST; assignment attributes, traps and exit status stay live.
 pub(crate) fn literal_assignment(source: &str, line: usize) -> Option<Statement> {
     let command = source.strip_suffix('\n').unwrap_or(source);
-    let (name, value) = plain_assignment(command)?;
+    let (name, raw) = command.split_once('=')?;
+    if !is_identifier(name) {
+        return None;
+    }
+    let value = if raw.bytes().all(lexer::plain_byte) {
+        raw.to_owned()
+    } else if !raw.contains(['\n', '\0']) {
+        if let Some(rest) = raw.strip_prefix("$'") {
+            let mut chars = rest.chars();
+            let decoded = ansi::quoted(&mut chars).ok()?;
+            if !chars.as_str().is_empty() {
+                return None;
+            }
+            decoded
+        } else {
+            let quoted = raw.strip_prefix('\'')?.strip_suffix('\'')?;
+            if quoted.contains('\'') {
+                return None;
+            }
+            quoted.to_owned()
+        }
+    } else {
+        return None;
+    };
     let location = Location {
         source: source.into(),
         subscript_aliases: Default::default(),
@@ -746,10 +775,7 @@ pub(crate) fn literal_assignment(source: &str, line: usize) -> Option<Statement>
         condition: Condition::Always,
         negated: false,
         command: Command::Pipeline(vec![SimpleCommand {
-            assignments: vec![(
-                name.to_owned(),
-                Assignment::Scalar(Word::Literal(value.to_owned())),
-            )],
+            assignments: vec![(name.to_owned(), Assignment::Scalar(Word::Literal(value)))],
             ..Default::default()
         }]),
     })

@@ -16,6 +16,7 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "literal-assignment-input": "HOME='/test/quote home'\nv=$'hello\\' once!'\nprintf '<%s>\\n' \"$v\"\nv='~:* $HOME'\nprintf '<%s>\\n' \"$v\"\nv=$'\\x41\\xe3\\x81\\x82'\nprintf '<%s>\\n' \"$v\"\nv='left'\" right\"\nprintf '<%s>\\n' \"$v\"\nv=$'truncated\\0after'\nprintf '<%s>\\n' \"$v\"\ndeclare -i n\nn='2 + 7'\necho \"$n\"",
     "set-materialized-values": "set >before; grep -E '^(RANDOM|SRANDOM|BASH_COMMAND|LINENO|BASHPID|COMP_WORDBREAKS|EPOCHREALTIME)=' before; echo \"$?\"; grep -E '^(BASH_ARGC|BASH_ARGV|DIRSTACK|GROUPS)=' before; p=$BASHPID; n=$LINENO; t=$EPOCHREALTIME; r=$SRANDOM; c=$BASH_COMMAND; : \"$GROUPS\" \"$DIRSTACK\" \"$BASH_SUBSHELL\" \"$BASH_ARGV0\" \"$COMP_WORDBREAKS\"; set >after; for pair in \"BASHPID=$p\" \"LINENO=$n\" \"EPOCHREALTIME=$t\" \"SRANDOM=$r\" 'BASH_SUBSHELL=0'; do grep -Fxq \"$pair\" after; echo \"$?\"; done; grep -Ec '^(DIRSTACK|GROUPS)=\\(\\[0\\]=' after",
     "set-array-snapshot": "declare -a items=([2]='x y'); declare -A flags=([key]=ok); alias snap='echo yes'; : \"${BASH_ALIASES[snap]}\"; RANDOM=357; first=$RANDOM; next=$RANDOM; RANDOM=357; : \"$RANDOM\"; false | true; set >listing; echo \"$((RANDOM == next))\"; grep -E '^(items|flags|PIPESTATUS|RANDOM)=' listing; grep '^BASH_VERSINFO=(\\[0\\]=\"5\"' listing >/dev/null; echo $?",
     "scoped-descriptor-move": "exec 7>permanent-move; exec 6>&7-; printf ok >&6; { : >&7; } 2>/dev/null; echo $?; exec 6>&-; cat permanent-move",
@@ -208,6 +209,7 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "literal-assignment-input": ("v=$'hello\\' once!'", 1000),
     "set-materialized-values": ("set >/dev/null", 300),
     "set-array-snapshot": ("set >/dev/null", 350),
     "scoped-descriptor-move": ("exec 7>&1; : 6>&7-; exec 7>&-", 600),
@@ -1237,6 +1239,8 @@ printf three >&7; exec {slot}>&7; : 6>&7- {slot}>&-; printf four >&7; exec 6>&7-
                 code = ("exec 2>/dev/null\ndeclare -A a\n"
                         + "a=([one]=1 [two]=2 bad [extra]=3)\n" * count
                         + '[[ ${a[one]} == 1 && ${a[two]} == 2 && -z ${a[extra]+set} ]] && echo done')
+            elif name == "literal-assignment-input":
+                code = (body + "\n") * count + "echo done"
             elif name == "history-ansi-quote":
                 code = ("set -o history -H\n" + "v=$'hello\\' once!'\n" * count
                         + "test \"$v\" = \"hello' once\"'!' && echo done")
