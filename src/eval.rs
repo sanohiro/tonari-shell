@@ -165,6 +165,10 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
         _ => false,
     };
     let result = match command {
+        Cow::Borrowed(Command::Pipeline(stages)) if stages.len() == 1 => {
+            execute::run_single(stages[0].clone(), status, tail, session)
+                .unwrap_or_else(execution_error)
+        }
         Cow::Borrowed(Command::Subshell(body)) => {
             crate::subshell::launch_borrowed(session, body, status)
         }
@@ -227,6 +231,12 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
     }
     session.substitutions.finish(scope);
     result
+}
+
+#[cold]
+fn execution_error(error: std::io::Error) -> Flow {
+    eprintln!("tonari: {error}");
+    Flow::Continue(1)
 }
 
 fn single_status(session: &mut Session, flow: &Flow) {
@@ -526,10 +536,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             flow
         }
         Command::Pipeline(stages) => {
-            execute::run(stages, status, tail, session).unwrap_or_else(|e| {
-                eprintln!("tonari: {e}");
-                Flow::Continue(1)
-            })
+            execute::run(stages, status, tail, session).unwrap_or_else(execution_error)
         }
         Command::If {
             branches,

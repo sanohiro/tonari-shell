@@ -54,6 +54,21 @@ if [[ $SUITE == external-gnu-waits ]]; then
   git worktree add -q --detach "$observer" HEAD
   (cd "$observer"; git apply tools/ci/configure-waits.patch; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/observer")
 fi
+if [[ $SUITE == release-layout ]]; then
+  git worktree add -q --detach "$RUNNER_TEMP/size-profiles" HEAD
+  (cd "$RUNNER_TEMP/size-profiles"
+   cat >>Cargo.toml <<'TOML'
+
+[profile.release.package.unicode-width]
+opt-level = "z"
+[profile.release.package.tz-rs]
+opt-level = "s"
+TOML
+   cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/size-deps")
+  flags=-Zmerge-functions=trampolines
+  if [[ $RUNNER_OS == Linux ]]; then flags="$flags -C link-arg=-z -C link-arg=noseparate-code"; fi
+  cp "$(RUSTFLAGS="$flags" tools/build-release.sh)" "$RUNNER_TEMP/bin/layout"
+fi
 if [[ $SUITE == release-diagnostics ]]; then
   git worktree add -q --detach "$RUNNER_TEMP/full" HEAD
   (cd "$RUNNER_TEMP/full"

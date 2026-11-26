@@ -1032,6 +1032,20 @@ fn lastpipe(
     result
 }
 
+pub(crate) fn run_single(
+    raw: SimpleCommand<Word>,
+    last_status: u8,
+    replace: bool,
+    session: &mut Session,
+) -> io::Result<Flow> {
+    if raw.compound.is_none()
+        && let Some(flow) = crate::traps::debug(session, last_status)
+    {
+        return Ok(flow);
+    }
+    foreground(raw, last_status, replace, session)
+}
+
 pub fn run_pipeline(
     mut pipeline: Pipeline<Word>,
     last_status: u8,
@@ -1040,13 +1054,7 @@ pub fn run_pipeline(
     background: bool,
 ) -> io::Result<Flow> {
     if pipeline.len() == 1 && !background {
-        let raw = pipeline.pop().unwrap();
-        if raw.compound.is_none()
-            && let Some(flow) = crate::traps::debug(session, last_status)
-        {
-            return Ok(flow);
-        }
-        return foreground(raw, last_status, replace, session);
+        return run_single(pipeline.pop().unwrap(), last_status, replace, session);
     }
     let mut launch = session.jobs.launch(background, pipeline.len() == 1);
     let managed = background || launch.group.is_some();

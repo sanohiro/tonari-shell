@@ -19,9 +19,10 @@ if [[ $SUITE == audit-hot-paths ]]; then
     --runs 21 --timing whole "${args[@]}" > "$out/workloads.txt"
   exit
 fi
-if [[ $SUITE == release-diagnostics ]]; then
+if [[ $SUITE == release-diagnostics || $SUITE == release-layout ]]; then
   if [[ $RUNNER_OS == macOS && -x /opt/homebrew/bin/bash ]]; then ref=/opt/homebrew/bin/bash; fi
-  for variant in full immediate; do
+  if [[ $SUITE == release-diagnostics ]]; then variants=(full immediate); else variants=(size-deps layout); fi
+  for variant in "${variants[@]}"; do
     python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/$variant" \
       --runs 15 --timing whole --case arithmetic --case functions --case strings --case regex \
       --case glob --case printf-formats > "$out/$variant.txt"

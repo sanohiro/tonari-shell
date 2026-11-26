@@ -1321,7 +1321,7 @@ fn scan(
         spans.resize(tokens.len(), (token_start, offset));
         token_start = offset;
         if matches!(c, ' ' | '\t') {
-            chars.next();
+            chars = chars.as_str().trim_start_matches([' ', '\t']).chars();
             continue;
         }
         // A continued physical line does not start a word or consume the
@@ -1609,6 +1609,12 @@ fn scan(
                 }
                 _ if pattern_context => {
                     pattern_chunk(&mut chars, &mut word, rest, extended, assignment.is_some())
+                }
+                _ if c.is_ascii() && plain_byte(c as u8) => {
+                    let len = plain_prefix(chars.as_str());
+                    after_colon = rest.as_bytes()[len] == b':';
+                    word.literal(&rest[..1 + len]);
+                    chars = chars.as_str()[len..].chars();
                 }
                 _ => word.push(c),
             }
