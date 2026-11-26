@@ -260,13 +260,14 @@ impl Modification {
                         .map(|(base, _, _)| base)
                         .or_else(|| crate::session::array::subscript(name).map(|(base, _)| base))
                         .unwrap_or(name);
-                    let is_array = env
-                        .session
-                        .attributes(base)
-                        .is_some_and(|(flags, _)| flags.contains(['a', 'A']));
-                    if elements.is_some() && is_array {
+                    let attributes = env.session.attributes(base);
+                    if elements.is_some()
+                        && attributes
+                            .as_ref()
+                            .is_some_and(|(flags, _)| flags.contains(['a', 'A']))
+                    {
                         env.session.array_declaration_fields(base)
-                    } else if let Some((flags, _)) = env.session.attributes(base) {
+                    } else if let Some((flags, _)) = attributes {
                         let text = value(if elements.is_some() { base } else { name }, env)?;
                         let mut fields = Vec::new();
                         if !flags.is_empty() {

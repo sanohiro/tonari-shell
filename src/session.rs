@@ -1340,13 +1340,15 @@ impl Session {
                 self.apply_compat(value);
             }
             if name == "POSIXLY_CORRECT" {
-                saved.4.get_or_insert(PosixSettings {
-                    expand_aliases: self.shopt.expand_aliases,
-                    inherit_errexit: self.shopt.inherit_errexit,
-                    interactive_comments: self.shopt.interactive_comments,
-                    shift_verbose: self.shopt.shift_verbose,
-                    sourcepath: self.shopt.sourcepath,
-                });
+                if saved.4.is_none() {
+                    saved.4 = Some(PosixSettings {
+                        expand_aliases: self.shopt.expand_aliases,
+                        inherit_errexit: self.shopt.inherit_errexit,
+                        interactive_comments: self.shopt.interactive_comments,
+                        shift_verbose: self.shopt.shift_verbose,
+                        sourcepath: self.shopt.sourcepath,
+                    });
+                }
                 self.apply_posix_mode(true);
             }
             if matches!(name.as_str(), "IGNOREEOF" | "ignoreeof") {

@@ -673,13 +673,13 @@ pub(crate) fn with_subscript_aliases<T>(
     let Some(table) = frozen.or(live) else {
         return parse();
     };
-    if !source.contains("$(")
-        && !source.contains('`')
-        && !source
-            .as_bytes()
-            .windows(3)
-            .any(|w| &w[..2] == b"${" && matches!(w[2], b' ' | b'\t' | b'\n' | b'|'))
-    {
+    let bytes = source.as_bytes();
+    if !memchr::memchr2_iter(b'$', b'\x60', bytes).any(|i| {
+        bytes[i] == b'\x60'
+            || bytes.get(i + 1) == Some(&b'(')
+            || (bytes.get(i + 1) == Some(&b'{')
+                && matches!(bytes.get(i + 2), Some(b' ' | b'\t' | b'\n' | b'|')))
+    }) {
         return parse();
     }
     // A function may be read in POSIX mode and called after switching back.
