@@ -79,7 +79,7 @@ fi
 if [[ $SUITE == audit-hot-paths || $SUITE == source-review || $SUITE == spec-hot || $SUITE == external-yash-* || $SUITE == external-review-* || $SUITE == external-gnu-profile || $SUITE == parity* || $SUITE == probe || $SUITE == functions || $SUITE == throughput || $SUITE == history || $SUITE == history-fields || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == rcfiles || $SUITE == tool-hooks || $SUITE == picker || $SUITE == budget* || $SUITE == inventory* ]]; then
   previous=$(git rev-parse --verify --end-of-options "${PREVIOUS_REVISION:-HEAD^}^{commit}")
   git worktree add -q --detach "$RUNNER_TEMP/base" "$previous"
-  (cd "$RUNNER_TEMP/base"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/baseline")
+  (cd "$RUNNER_TEMP/base"; cp "$(CARGO_TARGET_DIR="$RUNNER_TEMP/build-baseline" tools/build-release.sh)" "$RUNNER_TEMP/bin/baseline")
 fi
 if [[ $SUITE == external-review-* || $SUITE == oils-profile-* || $SUITE == spec-profile-builtins ]]; then
   cp "$(CARGO_PROFILE_RELEASE_OPT_LEVEL=3 tools/build-release.sh)" "$RUNNER_TEMP/bin/opt-3"

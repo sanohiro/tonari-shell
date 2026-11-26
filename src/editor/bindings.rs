@@ -103,7 +103,7 @@ pub(crate) fn names() -> impl Iterator<Item = &'static str> {
 }
 
 // Built from the same definitions as bind -p, including vi command prefixes.
-const fn first_keys(map: Keymap) -> [(Option<Action>, bool); 128] {
+const fn default_keys(map: Keymap, escape: bool) -> [(Option<Action>, bool); 128] {
     let mut table = [(None, false); 128];
     let mut a = 0;
     while a < ACTIONS.len() {
@@ -112,8 +112,13 @@ const fn first_keys(map: Keymap) -> [(Option<Action>, bool); 128] {
         let mut k = 0;
         while k < keys.len() {
             let key = keys[k];
-            let entry = &mut table[key[0] as usize];
-            if key.len() > 1 {
+            let index = escape as usize;
+            if escape && (key[0] != 0x1b || key.len() == 1) {
+                k += 1;
+                continue;
+            }
+            let entry = &mut table[key[index] as usize];
+            if key.len() > index + 1 {
                 entry.1 = true;
             } else if entry.0.is_none() {
                 entry.0 = Some(action);
@@ -125,9 +130,14 @@ const fn first_keys(map: Keymap) -> [(Option<Action>, bool); 128] {
     table
 }
 static FIRST_KEY: [[(Option<Action>, bool); 128]; 3] = [
-    first_keys(Keymap::Emacs),
-    first_keys(Keymap::Insert),
-    first_keys(Keymap::Command),
+    default_keys(Keymap::Emacs, false),
+    default_keys(Keymap::Insert, false),
+    default_keys(Keymap::Command, false),
+];
+static ESC_KEY: [[(Option<Action>, bool); 128]; 3] = [
+    default_keys(Keymap::Emacs, true),
+    default_keys(Keymap::Insert, true),
+    default_keys(Keymap::Command, true),
 ];
 
 #[derive(Clone)]
@@ -244,17 +254,25 @@ impl Bindings {
         })
     }
     pub(super) fn lookup(&self, seq: &[u8]) -> (Option<Binding>, bool) {
-        let mut exact = self.keys[self.map as usize]
-            .as_deref()
-            .and_then(|k| k.get(seq))
-            .cloned();
-        let mut longer = self.keys[self.map as usize].as_deref().is_some_and(|keys| {
-            keys.range::<[u8], _>((std::ops::Bound::Excluded(seq), std::ops::Bound::Unbounded))
-                .next()
-                .is_some_and(|(k, _)| k.starts_with(seq))
-        });
-        if let [byte @ 0..=127] = seq {
-            let (default, prefix) = FIRST_KEY[self.map as usize][*byte as usize];
+        let (mut exact, mut longer) = (None, false);
+        if let Some(keys) = self.keys[self.map as usize].as_deref() {
+            use std::ops::Bound::{Included, Unbounded};
+            let mut items = keys.range::<[u8], _>((Included(seq), Unbounded));
+            if let Some((key, binding)) = items.next() {
+                if key.as_slice() == seq {
+                    exact = Some(binding.clone());
+                    longer = items.next().is_some_and(|(next, _)| next.starts_with(seq));
+                } else {
+                    longer = key.starts_with(seq);
+                }
+            }
+        }
+        let defaults = match seq {
+            [byte @ 0..=127] => Some(FIRST_KEY[self.map as usize][*byte as usize]),
+            [0x1b, byte @ 0..=127] => Some(ESC_KEY[self.map as usize][*byte as usize]),
+            _ => None,
+        };
+        if let Some((default, prefix)) = defaults {
             return (
                 exact.or_else(|| default.map(Binding::Edit)),
                 longer || prefix,
@@ -784,6 +802,29 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn escape_prefix_table_matches_each_keymap() {
+        for map in [Keymap::Emacs, Keymap::Insert, Keymap::Command] {
+            for byte in 0..128_u8 {
+                let seq = [0x1b, byte];
+                let mut expected = (None, false);
+                for &(action, _, keys) in ACTIONS {
+                    for &binding in map.defaults(action, keys) {
+                        if binding == seq {
+                            expected.0.get_or_insert(action);
+                        } else if binding.starts_with(&seq) {
+                            expected.1 = true;
+                        }
+                    }
+                }
+                assert!(
+                    ESC_KEY[map as usize][byte as usize] == expected,
+                    "ESC {byte}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn printed_meta_bindings_round_trip() {
         for c in 0..=127 {

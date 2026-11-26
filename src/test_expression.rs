@@ -8,8 +8,8 @@ pub enum Expr {
     Binary(Word, &'static str, Word),
     StaticRegex(Word, String, Option<String>),
     Not(Box<Expr>),
-    And(Box<Expr>, Box<Expr>),
-    Or(Box<Expr>, Box<Expr>),
+    And(Vec<Expr>),
+    Or(Vec<Expr>),
 }
 
 impl Expr {
@@ -79,14 +79,24 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             Err(Flow::Continue(code)) => Ok(code != 0),
             other => other,
         },
-        And(a, b) => match condition(a, session, status)? {
-            true => condition(b, session, status),
-            false => Ok(false),
-        },
-        Or(a, b) => match condition(a, session, status) {
-            Ok(false) | Err(Flow::Continue(1..)) => condition(b, session, status),
-            other => other,
-        },
+        And(terms) => {
+            for term in terms {
+                if !condition(term, session, status)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        Or(terms) => {
+            let (last, prefix) = terms.split_last().expect("empty conditional disjunction");
+            for term in prefix {
+                match condition(term, session, status) {
+                    Ok(false) | Err(Flow::Continue(1..)) => {}
+                    other => return other,
+                }
+            }
+            condition(last, session, status)
+        }
         Word(word) => {
             let value = operand(session, word, status)?;
             trace(session, status, &["-n", &value]);

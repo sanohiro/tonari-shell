@@ -9,25 +9,33 @@ macro_rules! operator {
 
 impl Reader {
     pub(super) fn test_or(&mut self) -> Result<Expr, Error> {
-        let mut result = self.test_and()?;
+        let first = self.test_and()?;
+        if !matches!(self.peek(), Some(Token::Or)) {
+            return Ok(first);
+        }
+        let mut terms = vec![first];
         while matches!(self.peek(), Some(Token::Or)) {
             self.tokens.pop_front();
             self.newlines();
-            result = Expr::Or(Box::new(result), Box::new(self.test_and()?));
+            terms.push(self.test_and()?);
         }
-        Ok(result)
+        Ok(Expr::Or(terms))
     }
 
     fn test_and(&mut self) -> Result<Expr, Error> {
-        let mut result = self.test_atom()?;
+        let first = self.test_atom()?;
         self.newlines();
+        if !matches!(self.peek(), Some(Token::And)) {
+            return Ok(first);
+        }
+        let mut terms = vec![first];
         while matches!(self.peek(), Some(Token::And)) {
             self.tokens.pop_front();
             self.newlines();
-            result = Expr::And(Box::new(result), Box::new(self.test_atom()?));
+            terms.push(self.test_atom()?);
             self.newlines();
         }
-        Ok(result)
+        Ok(Expr::And(terms))
     }
 
     fn test_word(&mut self) -> Result<Word, Error> {

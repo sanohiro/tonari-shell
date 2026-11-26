@@ -749,10 +749,12 @@ pub(super) fn run_builtin(
         // Reserve the same descriptor as the ordinary redirect, including
         // failure at RLIMIT_NOFILE. A byte-only builtin can write to the file
         // directly, avoiding two changes to the process-wide stdout.
-        let _saved = SavedFd::capture(&actions[0], actions)?;
+        let reservation = SavedFd::reserve(&actions[0], actions)?;
         let Some(fd) = open_redirect(path, *flags) else {
             return Ok(redirect_failure(cmd, session));
         };
+        // No shell code ran while the untracked reservation was live.
+        drop(reservation);
         use std::io::Write;
         let (data, status) = output.render(session);
         let result = std::fs::File::from(fd).write_all(&data);

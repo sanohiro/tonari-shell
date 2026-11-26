@@ -523,7 +523,8 @@ impl Reader {
     }
 
     fn nested<T>(&mut self, read: impl FnOnce(&mut Self) -> Result<T, Error>) -> Result<T, Error> {
-        if self.depth >= 128
+        // Generated configure and eval scripts can legitimately nest hundreds of lists.
+        if self.depth >= 512
             || self.depth >= 8 && self.depth.is_multiple_of(8) && crate::stack_budget_exceeded()
         {
             return Err(Error::Invalid("shell syntax nesting limit exceeded"));

@@ -385,7 +385,7 @@ fn start(
         && let Ok(reader) =
             here_input::open(r.word.as_bytes(), here_input::PIPE_LIMIT).and_then(private_fd)
         && let Ok(pid) =
-            External::new(cmd, session).spawn_with_dups(&[], Some(&reader), output.as_ref())
+            External::new(cmd, session).spawn_redirected(&[], None, Some(&reader), output.as_ref())
     {
         return Ok(Stage::Child(pid));
     }
@@ -396,16 +396,32 @@ fn start(
             || input.is_some()
             || output.is_some())
         && (cached || cmd.words[0].contains('/'))
-        && cmd
+    {
+        let copies = cmd
             .redirects
             .first()
-            .is_none_or(|r| r.target == Target::Duplicate && (0..=2).contains(&r.fd))
-    {
-        // Only descriptor copies can be retried without repeating visible effects.
-        // Let the ordinary child apply them to its diagnostic if launch fails.
-        let external = External::new(cmd, session);
-        if let Ok(pid) = external.spawn_with_dups(&cmd.redirects, input.as_ref(), output.as_ref()) {
-            return Ok(Stage::Child(pid));
+            .is_none_or(|r| r.target == Target::Duplicate && (0..=2).contains(&r.fd));
+        let null = open_null_redirect(&cmd.redirects);
+        let opened = null.as_ref().map(|(dest, fd)| (*dest, fd));
+        if copies || opened.is_some() {
+            let external = External::new(cmd, session);
+            if let Ok(pid) =
+                external.spawn_redirected(&cmd.redirects, opened, input.as_ref(), output.as_ref())
+            {
+                return Ok(Stage::Child(pid));
+            }
+            if opened.is_some() {
+                // Preserve this same open file description for ENOEXEC and diagnostics.
+                return fork_stage(
+                    cmd,
+                    builtin,
+                    (input.as_ref(), output.as_ref(), next_reader),
+                    opened,
+                    last_status,
+                    session,
+                    launch,
+                );
+            }
         }
     }
     let resolved = cached || cmd.words.first().is_some_and(|name| name.contains('/'));
@@ -489,6 +505,7 @@ fn start(
         cmd,
         builtin,
         (input.as_ref(), output.as_ref(), next_reader),
+        None,
         last_status,
         session,
         launch,
@@ -499,6 +516,7 @@ fn fork_stage(
     cmd: &mut PreparedCommand,
     builtin: Option<Builtin>,
     pipes: (Option<&OwnedFd>, Option<&OwnedFd>, Option<&OwnedFd>),
+    opened: Option<(RawFd, &OwnedFd)>,
     last_status: u8,
     session: &mut Session,
     launch: crate::jobs::Launch,
@@ -510,7 +528,9 @@ fn fork_stage(
     // A trap installed by this command runs after its local redirects end.
     // An explicit subshell retains its enclosing redirects through shell exit.
     let scoped = !cmd.redirects.is_empty() && builtin.is_some_and(|b| can_install_trap(b, cmd));
-    if !scoped {
+    if let Some((dest, fd)) = opened {
+        setup.push(Action::Dup(fd.as_raw_fd(), dest));
+    } else if !scoped {
         setup.extend(actions(cmd));
     }
     let external = builtin.is_none().then(|| External::new(cmd, session));
