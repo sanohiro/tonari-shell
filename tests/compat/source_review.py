@@ -688,7 +688,7 @@ def main():
             setup = {
                 "globstar-overlap": "shopt -s globstar; mkdir -p tree/a/a/a/a tree/a/b/a/b tree/b/a/a/b",
                 "local-set-options": "f(){ local -; set -f; :; }",
-                "getopts-readonly-end": "v=; exec 2>/dev/null",
+                "getopts-readonly-end": "readonly v; exec 2>/dev/null",
                 "history-event-words": "history -s 'cmd a.old a.html a.h   x|y 2>/dev/null'",
                 "numeric-locale": "unset LC_ALL; LC_NUMERIC=de_DE.UTF-8",
                 "multiline-history": "set -o history",

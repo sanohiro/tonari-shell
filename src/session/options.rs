@@ -108,34 +108,48 @@ macro_rules! compat_entry {
     };
 }
 
-const SET_OPTIONS: &[OptionEntry] = &[
-    option_entry!("allexport", allexport),
-    option_entry!("braceexpand", shopt.braceexpand),
-    option_entry!("emacs", emacs),
-    option_entry!("errexit", errexit),
-    option_entry!("errtrace", errtrace),
-    option_entry!("functrace", functrace),
-    option_entry!("hashall", hashes.enabled),
-    option_entry!("histexpand", histexpand),
-    option_entry!("history", history_enabled),
-    option_entry!("ignoreeof", ignoreeof),
-    option_entry!("interactive-comments", shopt.interactive_comments),
-    option_entry!("keyword", keyword),
-    option_entry!("monitor", jobs.monitor),
-    option_entry!("noclobber", noclobber),
-    option_entry!("noexec", noexec),
-    option_entry!("noglob", noglob),
-    option_entry!("nolog", shopt.nolog),
-    option_entry!("notify", notify),
-    option_entry!("nounset", nounset),
-    option_entry!("onecmd", onecmd),
-    option_entry!("physical", physical),
-    option_entry!("pipefail", pipefail),
-    option_entry!("posix", posix),
-    option_entry!("verbose", verbose),
-    option_entry!("vi", vi),
-    option_entry!("xtrace", xtrace),
-];
+// Derive both the lookup table and the direct snapshot reads from the same
+// order. Function return only visits hooks for bits which actually changed.
+macro_rules! set_options {
+    ($( $name:literal => $($field:ident).+ ),+ $(,)?) => {
+        const SET_OPTIONS: &[OptionEntry] = &[$(option_entry!($name, $($field).+)),+];
+        fn set_bits(s: &Session) -> u32 {
+            let mut bits = 0;
+            for (i, enabled) in [$(s.$($field).+),+].into_iter().enumerate() {
+                bits |= u32::from(enabled) << i;
+            }
+            bits
+        }
+    }
+}
+set_options! {
+    "allexport" => allexport,
+    "braceexpand" => shopt.braceexpand,
+    "emacs" => emacs,
+    "errexit" => errexit,
+    "errtrace" => errtrace,
+    "functrace" => functrace,
+    "hashall" => hashes.enabled,
+    "histexpand" => histexpand,
+    "history" => history_enabled,
+    "ignoreeof" => ignoreeof,
+    "interactive-comments" => shopt.interactive_comments,
+    "keyword" => keyword,
+    "monitor" => jobs.monitor,
+    "noclobber" => noclobber,
+    "noexec" => noexec,
+    "noglob" => noglob,
+    "nolog" => shopt.nolog,
+    "notify" => notify,
+    "nounset" => nounset,
+    "onecmd" => onecmd,
+    "physical" => physical,
+    "pipefail" => pipefail,
+    "posix" => posix,
+    "verbose" => verbose,
+    "vi" => vi,
+    "xtrace" => xtrace,
+}
 const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("autocd", shopt.autocd),
     option_entry!("bash_source_fullpath", shopt.bash_source_fullpath),
@@ -312,19 +326,18 @@ impl Session {
         if let Some(index) = self.declaration_scope("-")
             && self.locals[index].3.is_none()
         {
-            let bits = SET_OPTIONS.iter().enumerate().fold(0, |bits, (i, entry)| {
-                bits | (u32::from((entry.read)(self)) << i)
-            });
-            self.locals[index].3 = Some(bits);
+            self.locals[index].3 = std::num::NonZeroU32::new(set_bits(self) | (1 << 31));
         }
     }
 
     pub(super) fn restore_set_options(&mut self, bits: u32) {
-        for (index, entry) in SET_OPTIONS.iter().enumerate() {
+        let mut changed = set_bits(self) ^ bits;
+        while changed != 0 {
+            let index = changed.trailing_zeros();
+            changed &= changed - 1;
+            let entry = &SET_OPTIONS[index as usize];
             let enabled = bits & (1 << index) != 0;
-            if (entry.read)(self) != enabled
-                && let Some(write) = entry.write
-            {
+            if let Some(write) = entry.write {
                 *write(self) = enabled;
                 self.option_changed(entry.name, enabled);
             }

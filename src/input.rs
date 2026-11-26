@@ -213,8 +213,15 @@ fn blank_or_comment(line: &str, session: &Session) -> bool {
 fn history_input<'a>(
     session: &mut Session,
     text: &'a str,
-) -> Result<std::borrow::Cow<'a, str>, Flow> {
-    let event = crate::history::expand::expand(session, text).map_err(|e| error(e, 1))?;
+    quote: Option<char>,
+) -> Option<std::borrow::Cow<'a, str>> {
+    let event = match crate::history::expand::expand_line(session, text, quote) {
+        Ok(event) => event,
+        Err(error) => {
+            eprintln!("tonari: {error}");
+            return None;
+        }
+    };
     if matches!(event.text, std::borrow::Cow::Owned(_)) {
         eprint!("{}", event.text);
         if !event.text.ends_with('\n') {
@@ -224,9 +231,9 @@ fn history_input<'a>(
     if event.print {
         session.begin_history_line(&event.text);
         session.finish_history_line();
-        return Ok("".into());
+        return None;
     }
-    Ok(event.text)
+    Some(event.text)
 }
 
 // A sourced profile often has a long compound command. Try whole units already
@@ -381,6 +388,7 @@ fn run(
     let mut base_line = 1;
     let mut input = Vec::new();
     let mut here_doc: Option<parser::HereDocHint> = None;
+    let mut history_quote = None;
     let mut ran = false;
     loop {
         let line_start = input.len();
@@ -396,6 +404,27 @@ fn run(
         if n == 0 && input.is_empty() {
             break;
         }
+        if n != 0
+            && here_doc.is_none()
+            && session.histexpand
+            && session.history_enabled
+            && session.source_depth == 0
+        {
+            let Ok(line) = std::str::from_utf8(&input[line_start..]) else {
+                return error("expected UTF-8 command text", 2);
+            };
+            match history_input(session, line, history_quote) {
+                Some(std::borrow::Cow::Owned(replacement)) => {
+                    input.truncate(line_start);
+                    input.extend_from_slice(replacement.as_bytes());
+                }
+                None => {
+                    input.truncate(line_start);
+                    input.push(b'\n');
+                }
+                _ => {}
+            }
+        }
         if let Some(hint) = &mut here_doc {
             let Ok(line) = std::str::from_utf8(&input[line_start..]) else {
                 return error("expected UTF-8 command text", 2);
@@ -407,16 +436,6 @@ fn run(
         }
         let Ok(text) = std::str::from_utf8(&input) else {
             return error("expected UTF-8 command text", 2);
-        };
-        let expanded;
-        let text = if session.histexpand && session.history_enabled && session.source_depth == 0 {
-            expanded = match history_input(session, text) {
-                Ok(s) => s,
-                Err(flow) => return flow,
-            };
-            expanded.as_ref()
-        } else {
-            text
         };
         // At a new physical line these tokens cannot open a command. Keep
         // accumulated compound commands, history expansion and NUL diagnostics.
@@ -504,6 +523,7 @@ fn run(
                 result = Ok(program);
             }
         }
+        history_quote = result.as_ref().err().and_then(parser::Error::pending_quote);
         match result {
             Err(parser::Error::HereDoc(hint)) if n != 0 => {
                 here_doc = Some(hint);
@@ -590,6 +610,7 @@ pub fn text(
     let mut start = 0;
     let mut end = 0;
     let mut here_doc: Option<parser::HereDocHint> = None;
+    let mut history_quote = None;
     let mut ran = false;
     let mut base_line = first_line;
     let mut line_number = first_line - 1;
@@ -598,6 +619,7 @@ pub fn text(
     const WINDOW: usize = 8192;
     let mut scan_budget = source.len();
     let mut check_tail = check && !session.verbose && source.len() <= 1024 * 1024;
+    let mut edited: Option<String> = None;
     let mut lines = source.split_inclusive('\n');
     while let Some(line) = lines.next() {
         line_number += 1;
@@ -611,28 +633,33 @@ pub fn text(
         let new_command = start == end;
         end += line.len();
         let mut last = end == source.len();
-        if !last && here_doc.as_mut().is_some_and(|hint| !hint.may_finish(line)) {
-            continue;
-        }
-        here_doc = None;
-        let text = &source[start..end];
-        let expanded;
         let expand_history = tail
             && session.histexpand
             && session.history_enabled
             && (!session.command_string || session.command_history_expansion);
-        let mut text = if expand_history {
-            expanded = match history_input(session, text) {
-                Ok(s) => s,
-                Err(flow) => return flow,
-            };
-            expanded.as_ref()
-        } else {
-            text
-        };
+        if expand_history && here_doc.is_none() {
+            match history_input(session, line, history_quote) {
+                Some(std::borrow::Cow::Borrowed(_)) => {
+                    if let Some(edited) = &mut edited {
+                        edited.push_str(line);
+                    }
+                }
+                changed => edited
+                    .get_or_insert_with(|| source[start..end - line.len()].to_owned())
+                    .push_str(changed.as_deref().unwrap_or("\n")),
+            }
+        } else if let Some(edited) = &mut edited {
+            edited.push_str(line);
+        }
+        if !last && here_doc.as_mut().is_some_and(|hint| !hint.may_finish(line)) {
+            continue;
+        }
+        here_doc = None;
+        let mut text = edited.as_deref().unwrap_or(&source[start..end]);
         if new_command && blank_or_comment(text, session) {
             base_line = line_number + 1;
             start = end;
+            edited = None;
             continue;
         }
         let probe = new_command && !last && !session.verbose && !expand_history;
@@ -690,6 +717,7 @@ pub fn text(
                 }
             }
         }
+        history_quote = result.as_ref().err().and_then(parser::Error::pending_quote);
         match result {
             Err(parser::Error::HereDoc(hint)) if !last => {
                 here_doc = Some(hint);
@@ -724,6 +752,7 @@ pub fn text(
         }
         base_line = line_number + 1;
         start = end;
+        edited = None;
     }
     Flow::Continue(if ran { status } else { 0 })
 }

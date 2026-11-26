@@ -207,6 +207,20 @@ pub(super) fn run(
             return crate::Flow::Continue(1);
         }
         for name in names {
+            if name == "-"
+                && session
+                    .locals
+                    .iter()
+                    .rev()
+                    .filter(|scope| !scope.2)
+                    .take(if local { 1 } else { usize::MAX })
+                    .any(|scope| scope.3.is_some())
+            {
+                if writeln!(out, "{}", if local { "local -" } else { "declare -- -" }).is_err() {
+                    return crate::Flow::Continue(1);
+                }
+                continue;
+            }
             let listed = !local || session.locals.last().unwrap().0.contains_key(name);
             let variable = listed
                 .then(|| session.declared_variable(name, flags.global))

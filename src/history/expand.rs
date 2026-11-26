@@ -16,8 +16,8 @@ fn error(s: &str) -> io::Error {
     io::Error::other(s)
 }
 
-fn select(s: &str, designator: &str) -> io::Result<String> {
-    let words = crate::parser::history_designator_spans(s);
+fn select(s: &str, designator: &str, extglob: bool) -> io::Result<String> {
+    let words = crate::parser::history_designator_spans(s, extglob);
     if designator == "*" && words.len() < 2 {
         return Ok(String::new());
     }
@@ -47,11 +47,13 @@ fn select(s: &str, designator: &str) -> io::Result<String> {
     if lo > hi || hi >= words.len() {
         return Err(error("bad word specifier"));
     }
-    Ok(words[lo..=hi]
-        .iter()
-        .map(|&(a, b)| &s[a..b])
-        .collect::<Vec<_>>()
-        .join(" "))
+    let mut chosen = String::with_capacity(words[hi].1 - words[lo].0);
+    chosen.push_str(&s[words[lo].0..words[lo].1]);
+    for &(start, end) in &words[lo + 1..hi + 1] {
+        chosen.push(' ');
+        chosen.push_str(&s[start..end]);
+    }
+    Ok(chosen)
 }
 
 fn take<'a>(s: &mut &'a str, f: impl Fn(char) -> bool) -> &'a str {
@@ -144,6 +146,14 @@ fn remember(memory: &mut Memory, mut old: String, new: String) -> io::Result<()>
 }
 
 pub(crate) fn expand<'a>(session: &mut Session, line: &'a str) -> io::Result<Expansion<'a>> {
+    expand_line(session, line, None)
+}
+
+pub(crate) fn expand_line<'a>(
+    session: &mut Session,
+    line: &'a str,
+    mut quote: Option<char>,
+) -> io::Result<Expansion<'a>> {
     let chars = session.get("histchars");
     let mut chars = chars.as_deref().unwrap_or("!^#").chars();
     let event = chars.next();
@@ -179,7 +189,6 @@ pub(crate) fn expand<'a>(session: &mut Session, line: &'a str) -> io::Result<Exp
     }
     let mut out = String::with_capacity(line.len());
     let mut input = line;
-    let mut quote = None;
     let mut print = false;
     let mut expanded = false;
     while let Some(c) = pop(&mut input) {
@@ -212,7 +221,7 @@ pub(crate) fn expand<'a>(session: &mut Session, line: &'a str) -> io::Result<Exp
             || input.starts_with(['=', ';', '&', '|', '(', ')', '<', '>'])
             || out.ends_with('[') && input.contains(']')
             || event == '!' && out.ends_with('$')
-            || quote == Some('"') && input.starts_with('"')
+            || quote == Some('"') && (session.posix || input.starts_with('"'))
             || out.ends_with("${")
         {
             out.push(c);
@@ -252,11 +261,12 @@ pub(crate) fn expand<'a>(session: &mut Session, line: &'a str) -> io::Result<Exp
                 .rev()
                 .find_map(|s| s.rfind(search).map(|at| (s.as_str(), at)));
             if let Some((entry, at)) = result {
-                memory.matched_word = crate::parser::history_designator_spans(entry)
-                    .into_iter()
-                    .find(|&(start, end)| start <= at && at < end)
-                    .map(|(start, end)| &entry[start..end])
-                    .map(str::to_owned);
+                memory.matched_word =
+                    crate::parser::history_designator_spans(entry, session.shopt.glob.extglob)
+                        .into_iter()
+                        .find(|&(start, end)| start <= at && at < end)
+                        .map(|(start, end)| &entry[start..end])
+                        .map(str::to_owned);
                 if !search.is_empty() {
                     memory.search = search.to_owned();
                 }
@@ -284,26 +294,19 @@ pub(crate) fn expand<'a>(session: &mut Session, line: &'a str) -> io::Result<Exp
             .and_then(|n| hist.get(n))
             .map(String::as_str)
         } else {
-            let prefix = take(&mut input, |c| {
-                !c.is_whitespace()
+            let original = input;
+            if input.starts_with('-') {
+                pop(&mut input);
+            }
+            take(&mut input, |c| {
+                Some(c) != quote
+                    && !c.is_whitespace()
                     && !matches!(
                         c,
-                        ':' | ';'
-                            | '|'
-                            | '&'
-                            | '('
-                            | ')'
-                            | '<'
-                            | '>'
-                            | '"'
-                            | '\''
-                            | '^'
-                            | '$'
-                            | '*'
-                            | '%'
-                            | '-'
+                        ':' | ';' | '|' | '&' | '(' | ')' | '<' | '>' | '^' | '$' | '*' | '%' | '-'
                     )
             });
+            let prefix = &original[..original.len() - input.len()];
             if prefix.is_empty() {
                 out.push(event);
                 continue;
@@ -330,7 +333,7 @@ pub(crate) fn expand<'a>(session: &mut Session, line: &'a str) -> io::Result<Exp
                     .and_then(|m| m.matched_word.clone())
                     .ok_or_else(|| error("no matching word"))?
             } else {
-                select(&value, spec)?
+                select(&value, spec, session.shopt.glob.extglob)?
             };
         }
         while input.starts_with(':') {

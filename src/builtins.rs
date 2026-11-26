@@ -286,7 +286,7 @@ pub(crate) fn unary(op: &str, arg: &str, session: &mut Session) -> Result<bool, 
         }
         "-t" => {
             let number = arg
-                .trim_matches(|c: char| c.is_ascii_whitespace())
+                .trim_ascii()
                 .parse::<i64>()
                 .map_err(|_| "integer expected")?;
             return Ok(i32::try_from(number).is_ok_and(|fd| unsafe { libc::isatty(fd) == 1 }));

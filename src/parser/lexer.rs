@@ -615,7 +615,7 @@ pub(super) fn quoted(
         let (literal, rest) = chars
             .as_str()
             .split_once(quote)
-            .ok_or(Error::Incomplete("unterminated quote"))?;
+            .ok_or(Error::Incomplete("unterminated single quote"))?;
         word.literal(literal);
         *chars = rest.chars();
         return Ok(());
@@ -642,7 +642,7 @@ fn double_quoted(
             {
                 let escaped = chars
                     .next()
-                    .ok_or(Error::Incomplete("unterminated quote"))?;
+                    .ok_or(Error::Incomplete("unterminated double quote"))?;
                 if escaped == '\n' {
                     continue;
                 }
@@ -663,7 +663,7 @@ fn double_quoted(
         }
         empty = false;
     }
-    Err(Error::Incomplete("unterminated quote"))
+    Err(Error::Incomplete("unterminated double quote"))
 }
 
 fn process_start(source: &str) -> bool {

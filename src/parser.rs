@@ -87,8 +87,31 @@ pub(crate) fn history_word_spans(s: &str) -> Vec<(usize, usize)> {
     words
 }
 
-pub(crate) fn history_designator_spans(line: &str) -> Vec<(usize, usize)> {
-    let Ok((tokens, spans, _)) = lex(line, false, true) else {
+pub(crate) fn history_designator_spans(line: &str, extglob: bool) -> Vec<(usize, usize)> {
+    if !line.bytes().any(|b| {
+        matches!(
+            b,
+            b'\''
+                | b'"'
+                | b'\\'
+                | b'$'
+                | b'`'
+                | b';'
+                | b'|'
+                | b'&'
+                | b'<'
+                | b'>'
+                | b'('
+                | b')'
+                | b'#'
+        )
+    }) {
+        return history_word_spans(line);
+    }
+    let previous = EXTGLOB.replace(extglob);
+    let parsed = lex(line, false, true);
+    EXTGLOB.set(previous);
+    let Ok((tokens, spans, _)) = parsed else {
         return history_word_spans(line);
     };
     let mut result: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
@@ -504,6 +527,14 @@ pub enum Error {
 }
 
 impl Error {
+    pub(crate) fn pending_quote(&self) -> Option<char> {
+        match self {
+            Self::Incomplete("unterminated single quote") => Some('\''),
+            Self::Incomplete("unterminated double quote") => Some('"'),
+            _ => None,
+        }
+    }
+
     pub fn incomplete(&self) -> bool {
         matches!(self, Self::Incomplete(_) | Self::HereDoc(_))
     }

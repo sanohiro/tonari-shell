@@ -228,7 +228,7 @@ pub struct Bindings(
     BTreeMap<String, Option<Variable>>,
     Option<usize>,
     bool,
-    Option<u32>,
+    Option<std::num::NonZeroU32>,
 );
 
 enum DirectoryError {
@@ -1405,7 +1405,7 @@ impl Session {
         let saved_options = scope.3;
         self.restore(scope);
         if let Some(bits) = saved_options {
-            self.restore_set_options(bits);
+            self.restore_set_options(bits.get() & !(1 << 31));
         }
     }
 

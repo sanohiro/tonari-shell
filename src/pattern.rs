@@ -632,6 +632,7 @@ fn paths(
             let trailing = !rest.is_empty() && rest.trim_start_matches('/').is_empty();
             rest = rest.trim_start_matches('/');
             let mut found = Vec::new();
+            let mut pending = Vec::new();
             for prefix in paths {
                 if std::path::Path::new(if prefix.is_empty() { "." } else { &prefix }).is_dir() {
                     if !rest.is_empty() || !prefix.is_empty() {
@@ -648,6 +649,7 @@ fn paths(
                         trailing,
                         options.dotglob,
                         &mut found,
+                        &mut pending,
                     );
                 }
             }
@@ -745,9 +747,10 @@ fn descendants(
     trailing: bool,
     dotglob: bool,
     found: &mut Vec<String>,
+    pending: &mut Vec<String>,
 ) {
     let prefixed = !prefix.is_empty();
-    let mut pending = vec![prefix];
+    pending.push(prefix);
     while let Some(dir) = pending.pop() {
         let base = if dir.is_empty() { "." } else { &dir };
         visit_names(base, !terminal || trailing, true, |raw, kind| {
