@@ -218,6 +218,12 @@ impl Word {
                         "{name}: bad array subscript"
                     )));
                 }
+                if matches!(name.as_str(), "!@" | "!*")
+                    && env.session.positional.as_slice().is_empty()
+                    && (!env.session.nounset || plain_quote.is_none())
+                {
+                    name.clear();
+                }
                 if let Some(reference) = name.strip_prefix('!').filter(|s| {
                     !s.is_empty() && (plain_quote.is_none() || array_elements_name(name).is_none())
                 }) {
@@ -702,10 +708,9 @@ impl Output<'_> {
                     Self::Scalar(text) | Self::Pattern(text, _) => text.push(' '),
                     Self::Fields(fields)
                         if !quoted
-                            && ifs
-                                .as_bytes()
-                                .first()
-                                .is_some_and(|b| !matches!(b, b' ' | b'\t' | b'\n')) =>
+                            && ifs.as_bytes().first().is_some_and(|b| {
+                                !matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 11 | 12)
+                            }) =>
                     {
                         // An implicit non-whitespace IFS separator emits even an
                         // empty field. The final field still needs actual text.
@@ -1007,7 +1012,7 @@ impl Fields<'_> {
             if start < i {
                 self.literal(&text[start..i], true);
             }
-            if matches!(sep, " " | "\t" | "\n") {
+            if matches!(sep, " " | "\t" | "\n" | "\r" | "\x0b" | "\x0c") {
                 self.whitespace = true;
             } else {
                 self.emit();

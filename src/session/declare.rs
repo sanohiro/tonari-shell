@@ -288,7 +288,7 @@ pub(super) fn run(
         if name == "PATH" {
             session.hashes.clear();
         }
-        if session.active_groups(name) && (local || value.is_some() || array.is_some()) {
+        if session.protected_array(name) && (local || value.is_some() || array.is_some()) {
             eprintln!("tonari: {command}: {name}: variable may not be assigned a value");
             status = 1;
             continue;
@@ -626,11 +626,11 @@ impl Session {
             return Some(var);
         }
         {
-            if matches!(name, "BASH_VERSINFO" | "GROUPS") {
+            if self.array_parameter(name) {
                 return Some(Variable {
                     declared: true,
                     readonly: name == "BASH_VERSINFO",
-                    array_assigned: true,
+                    array_assigned: name != "FUNCNAME" || self.function_depth != 0,
                     elements: Some(std::rc::Rc::new(super::array::Elements::Dense(
                         self.array_values(name),
                     ))),

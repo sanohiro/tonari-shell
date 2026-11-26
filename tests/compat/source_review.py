@@ -22,6 +22,9 @@ COMMON = {
     "compat-array": r"""for n in 51 52; do BASH_COMPAT=$n; a=(one two); declare -A m=([k]=v); test -v 'a[@]'; echo $?; [[ -v 'm[*]' ]]; echo $?; unset 'a[@]' 'm[*]'; declare -p a m; unset a m; done""",
     "assignment-tilde": "base=/bin\np=$base:~/bin:~/lib\necho \"$p\"\nexport p=$base:~/export\necho \"$p\"\nset -o posix\necho plain=~:~\ndeclare p=~:~\necho \"$p\"",
     "nameref-clear": """v=before; declare -n ref=v; declare +n ref=after; declare -p ref v; declare -n ref=v; declare +n ref+=plus; declare -p ref v; readonly lock=x; declare -n ref=lock; declare +n ref=other; echo "$?"; declare -p ref lock""",
+    "scalar-array-slice": """v=abcd; declare -n ref=v; printf '<%s>\\n' "${v[@]:0:2}" "${v[*]:1:2}" "${ref[@]:1:2}"; a=(abcd def); printf '<%s>\\n' "${a[@]:0:1}" """,
+    "indirect-positionals": """set --; printf '<%s>' A "${!@}" B "${!*:-missing}"; set -- who; who=value; echo "${!@}" """,
+    "function-stack": """FUNCNAME=ignored; echo "<$FUNCNAME>"; f(){ FUNCNAME=no; echo "<$FUNCNAME>"; }; f; unset FUNCNAME; FUNCNAME=ordinary; echo "$FUNCNAME" """,
     "nolog": """set -o nolog; shopt -qo nolog; echo $?; set +o nolog; shopt -qo nolog; echo $?""",
     "debug-arguments": r"""set -- a b; echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}"; set -- changed; f(){ echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}"; }; f x y; shopt -s extdebug; f x y; echo "${BASH_ARGC[*]}|${BASH_ARGV[*]}" """,
     "bad-expansion": "echo first\necho ${#:}; echo wrong\necho \"next:$?\"",
@@ -59,6 +62,7 @@ NEW = {
     "source-fullpath": 'shopt -s bash_source_fullpath; source ./linked; f; shopt -u bash_source_fullpath; source ./linked; f',
     "source-path": 'PATH=none; shopt -u sourcepath; source -p empty:src mod one; . -psrc mod two; source -p empty mod; echo $?; source -p "" mod; source -p empty ./mod',
     "compgen-array": """a=(old); declare -n ref=a; compgen -V ref -W 'be bee bee' be; printf '<%s>\\n' "${a[@]}"; compgen -V ref -W 'x' z; echo "$?:${#a[@]}"; compgen -V 'bad-name' -W x; echo $?; declare -A map=([key]=ok); compgen -V map -W x; echo "$?:${map[key]}"; readonly kept=old; compgen -V kept -W x; echo "$?:$kept" """,
+    "read-fields": r"""IFS=$'\t\r\f\v'; read a b <<< $'  line\tb \t\r\f\v'; printf '<%s><%s>\n' "$a" "$b"; readonly locked=x; read first locked last <<< $'one\ttwo\tthree'; echo "$?:$first:$locked:$last" """,
     "trap-action": """trap 'printf "%s" word' USR1; trap '' USR2; trap -P TERM USR1 USR2; echo $?; x=$(trap -P USR1); echo "$x"; trap -P; echo $?; trap -pP TERM; echo $?""",
     "trap-signal": """BASH_TRAPSIG=outer; trap 'old=$BASH_TRAPSIG; kill -USR2 $$; echo "restored:$BASH_TRAPSIG"' USR1; trap 'echo "nested:$BASH_TRAPSIG"' USR2; kill -USR1 $$; echo "$old:$BASH_TRAPSIG"; trap 'echo "err:$BASH_TRAPSIG"' ERR; trap 'echo "exit:$BASH_TRAPSIG"' EXIT; false""",
     "monotonic": 'a=$BASH_MONOSECONDS; BASH_MONOSECONDS=2; b=$BASH_MONOSECONDS; [[ $a =~ ^[0-9]+$ && $b -ge $a && $b -ne 2 ]]; echo $?; unset BASH_MONOSECONDS; echo "${BASH_MONOSECONDS-unset}"; BASH_MONOSECONDS=manual; echo "$BASH_MONOSECONDS"',
@@ -85,6 +89,10 @@ HOT = {
     "compat-test": ("test '(' '!' = '!' ')' -a yes", 900),
     "assignment-tilde": ('p=$base:~/bin:~/lib', 1400),
     "debug-arguments": ('v=${BASH_ARGV[1]}', 1500),
+    "scalar-array-slice": ('v=${text[@]:1:4}', 1600),
+    "indirect-positionals": ('v=${!@:-missing}', 1600),
+    "function-stack": ('f', 1200),
+    "read-fields": ("read a b <fields", 750),
     "function-origin": ('f(){ :; }; declare -F f >/dev/null', 700),
     "nolog": ('set -o nolog; set +o nolog', 800),
     "signal-lookup": ('kill -l TERM >/dev/null', 800),
@@ -440,6 +448,7 @@ def main():
         # A locally linked Bash readline/tilde library may consult the process
         # environment. A shell assignment to HOME must take effect immediately.
         assert run(shells[1], 'HOME=/example; x=~/src; echo "$x"')[0] == (0, b"/example/src\n", False)
+        assert run(shells[1], 'v=雪abc; printf "%s" "${v[@]:0:2}"')[0] == (0, "雪a".encode(), False)
         termroot = root / "completion"
         termroot.mkdir()
         (termroot / "pick.valid").touch()
@@ -610,6 +619,9 @@ def main():
                 continue
             setup = {
                 "numeric-locale": "unset LC_ALL; LC_NUMERIC=de_DE.UTF-8",
+                "scalar-array-slice": "text=雪abcdef",
+                "function-stack": "f(){ FUNCNAME=ignored; :; }",
+                "read-fields": r"IFS=$'\t\r\f\v'; printf '  left\tright \t\r\f\v\n' >fields",
                 "function-origin": "shopt -s extdebug",
                 "custom-history-event": "histchars='^:#'; history -s 'echo first last'",
                 "open-quote-alias": "shopt -s expand_aliases; alias message=\": 'head\"",

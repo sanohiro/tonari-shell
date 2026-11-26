@@ -200,7 +200,9 @@ fn dollar_word(
             {
                 1 + content[1..].bytes().take_while(u8::is_ascii_digit).count()
             } else if content.starts_with(['#', '!'])
-                && content.as_bytes().get(2) == Some(&b'}')
+                && (content.as_bytes().get(2) == Some(&b'}')
+                    || content.starts_with("!*")
+                    || content.starts_with("!@"))
                 && matches!(
                     content.as_bytes().get(1),
                     Some(b'@' | b'*' | b'-' | b'#' | b'?' | b'$' | b'!')

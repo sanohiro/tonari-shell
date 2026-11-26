@@ -135,6 +135,7 @@ pub struct Session {
     variables: BTreeMap<String, Variable>,
     dynamic: dynamic::Dynamic,
     groups_unset: bool,
+    funcname_unset: bool,
     word_breaks_unset: bool,
     has_namerefs: bool,
     reference_depth: std::cell::Cell<u8>,
@@ -886,7 +887,7 @@ impl Session {
             let _ = self.assign_key(name, "0".into(), value.into_owned());
             return;
         }
-        if self.active_groups(name) {
+        if self.protected_array(name) {
             return;
         }
         if name == "BASH_COMPAT" {
@@ -1566,6 +1567,9 @@ impl Session {
         }
         if name == "GROUPS" {
             self.groups_unset = true;
+        }
+        if name == "FUNCNAME" {
+            self.funcname_unset = true;
         }
         if name == "GLOBIGNORE" {
             self.shopt.glob.set_ignore(None);

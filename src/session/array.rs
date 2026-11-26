@@ -172,6 +172,32 @@ impl Session {
         name == "GROUPS" && !self.groups_unset
     }
 
+    pub(super) fn protected_array(&self, name: &str) -> bool {
+        self.active_groups(name) || name == "FUNCNAME" && !self.funcname_unset
+    }
+
+    pub(crate) fn array_parameter(&self, name: &str) -> bool {
+        self.variables.get(name).map_or_else(
+            || {
+                matches!(
+                    name,
+                    "BASH_ALIASES"
+                        | "BASH_CMDS"
+                        | "BASH_ARGC"
+                        | "BASH_ARGV"
+                        | "BASH_LINENO"
+                        | "BASH_SOURCE"
+                        | "BASH_VERSINFO"
+                        | "DIRSTACK"
+                        | "FUNCNAME"
+                        | "GROUPS"
+                        | "PIPESTATUS"
+                )
+            },
+            |var| var.elements.is_some(),
+        )
+    }
+
     fn group_ids() -> &'static [String] {
         static GROUPS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
         GROUPS.get_or_init(|| {
@@ -488,7 +514,7 @@ impl Session {
     ) -> Result<(), &'static str> {
         let resolved = self.reference_name(name)?;
         let name = resolved.as_ref();
-        if self.active_groups(name) {
+        if self.protected_array(name) {
             return Ok(());
         }
         if subscript(name).is_some() {
@@ -749,7 +775,7 @@ impl Session {
     }
 
     pub fn assign_element(&mut self, name: &str, index: i64, value: String) {
-        if self.active_groups(name) || self.readonly(name) {
+        if self.protected_array(name) || self.readonly(name) {
             return;
         }
         if name == "DIRSTACK" && !self.variables.contains_key(name) {
