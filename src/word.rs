@@ -216,7 +216,7 @@ impl Word {
                 if let Some(reference) = name.strip_prefix('!').filter(|s| {
                     !s.is_empty() && (plain_quote.is_none() || array_elements_name(name).is_none())
                 }) {
-                    let Some(target) = modifier::value(reference, env)? else {
+                    let Some(mut target) = modifier::value(reference, env)? else {
                         if let Some(quoted) = plain_quote
                             && !env.session.nounset
                             && env.session.stored_array_len(reference).is_some()
@@ -231,7 +231,21 @@ impl Word {
                             crate::expansion::Error::discard(message)
                         });
                     };
-                    if !(is_identifier(&target)
+                    // Resolve a computed numeric index once. Later parameter
+                    // operations consume the index without reinterpreting its source.
+                    if let Some((base, expr)) = crate::session::array::subscript(&target)
+                        && is_identifier(base)
+                        && !matches!(expr, "@" | "*")
+                        && !env.session.is_associative(base)
+                        && !expr.bytes().all(|b| b.is_ascii_digit())
+                    {
+                        let index = env.session.resolve_index(base, expr).map_err(|_| {
+                            crate::expansion::Error::discard(format!(
+                                "{target}: invalid variable name"
+                            ))
+                        })?;
+                        target = format!("{base}[{index}]");
+                    } else if !(is_identifier(&target)
                         || array_elements_name(&target).is_some()
                         || (!target.is_empty() && target.bytes().all(|b| b.is_ascii_digit()))
                         || matches!(target.as_str(), "@" | "*" | "#" | "?" | "-" | "$" | "!")

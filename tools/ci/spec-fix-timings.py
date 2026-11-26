@@ -22,6 +22,13 @@ CASES = {
     "history dates": ('export TZ=UTC0; HISTSIZE=3000; HISTTIMEFORMAT="%F %T "; '
                       'history -c; history -r dates; history', HISTORY_OUTPUT),
     "startup": (":", b""),
+    "conditional tracing": ('exec 4>trace; BASH_XTRACEFD=4; dir=/; set -x; '
+                            'for ((i=0;i<700;i++)); do [[ -d $dir ]] && (( n+=1 )); done; '
+                            'set +x; grep -F -c "[[ -d / ]]" trace; echo "$n"', b"700\n700\n"),
+    "indirect pure index": ('a=(zero one); ref="a[\\${missing:-1}]"; '
+                            'for ((i=0;i<3000;i++)); do n="${!ref}"; done; echo "$n"', b"one\n"),
+    "failed compound redirects": ('trap "((n+=1))" ERR; { for ((i=0;i<600;i++)); do '
+                                  '{ :; } <absent; done; } 2>/dev/null; echo "$n"', b"600\n"),
     "seeded random": ('RANDOM=1; for ((i=0;i<12000;i++)); do n=$RANDOM; done; '
                       'RANDOM=1; echo "$RANDOM"', b"16807\n"),
     "elapsed seconds": ('SECONDS=10; for ((i=0;i<10000;i++)); do n=$SECONDS; done; '

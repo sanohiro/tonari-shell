@@ -120,6 +120,18 @@ done""")
         self.assertEqual((proc.returncode, proc.stdout), (0, b"child=1\ninner\n"))
         self.assertIn(b"subshell", proc.stderr)
 
+    def test_loop_control_usage_error_recovers_at_input_boundary(self):
+        script = "for x in a b; do\n echo $x\n continue 1 2\ndone\necho next\n"
+        path = self.cwd / "commands"
+        path.write_text(script)
+        for shell in self.shells_for(5):
+            command = self.command(shell, script)
+            self.assertEqual((command.returncode, command.stdout), (1, b"a\n"))
+            for args, data in (([str(path)], b""), ([], script.encode())):
+                run = subprocess.run([shell, *args], input=data, cwd=self.cwd, env=self.env,
+                                     capture_output=True, timeout=5)
+                self.assertEqual((run.returncode, run.stdout), (0, b"a\nnext\n"), run.stderr)
+
     def test_trace_expands_conditional_operands_once(self):
         script = """exec 4>trace; BASH_XTRACEFD=4; set -x
 dir=/; if [[ -d $dir ]]; then (( a = 42 )); fi

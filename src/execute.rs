@@ -61,9 +61,37 @@ fn errno() -> i32 {
 }
 
 fn write_error(name: &[u8], message: &[u8]) {
-    // Can run in a forked child. Avoid buffered output and heap allocation.
-    for part in [b"tonari: ".as_slice(), name, message, b"\n"] {
-        unsafe { libc::write(2, part.as_ptr().cast(), part.len()) };
+    write_error_detail(name, message, b"");
+}
+
+#[cold]
+fn write_error_detail(name: &[u8], message: &[u8], detail: &[u8]) {
+    // This can run after fork. Emit the diagnostic in a single write when
+    // possible, without buffering, heap allocation or taking a stdio lock.
+    let mut buffers =
+        [b"tonari: ".as_slice(), name, message, detail, b"\n"].map(|part| libc::iovec {
+            iov_base: part.as_ptr().cast_mut().cast(),
+            iov_len: part.len(),
+        });
+    let mut rest = buffers.as_mut_slice();
+    while !rest.is_empty() {
+        let n = unsafe { libc::writev(2, rest.as_ptr(), rest.len() as libc::c_int) };
+        if n < 0 && errno() == libc::EINTR {
+            continue;
+        }
+        if n <= 0 {
+            break;
+        }
+        let mut used = n as usize;
+        while let Some(first) = rest.first_mut() {
+            if used < first.iov_len {
+                first.iov_base = unsafe { first.iov_base.byte_add(used) };
+                first.iov_len -= used;
+                break;
+            }
+            used -= first.iov_len;
+            rest = &mut rest[1..];
+        }
     }
 }
 
@@ -138,15 +166,7 @@ fn open_redirect(path: &CStr, flags: i32) -> Option<OwnedFd> {
         } else {
             b"cannot open redirection"
         };
-        for part in [
-            b"tonari: ".as_slice(),
-            path.to_bytes(),
-            b": ",
-            reason,
-            b"\n",
-        ] {
-            unsafe { libc::write(2, part.as_ptr().cast(), part.len()) };
-        }
+        write_error_detail(path.to_bytes(), b": ", reason);
         return None;
     }
     Some(unsafe { OwnedFd::from_raw_fd(fd) })
@@ -838,10 +858,12 @@ fn eval_builtin(
                 Flow::Continue(0)
             } else if args.len() > 1 {
                 write_error(cmd.words[0].as_bytes(), b": too many arguments");
-                if session.posix && !session.interactive {
+                // Bash abandons the current input on a usage error. File and
+                // stdin readers can then resume at the next complete command.
+                if session.command_string && !session.interactive {
                     Flow::Exit(1)
                 } else {
-                    Flow::Continue(1)
+                    Flow::Discard(1)
                 }
             } else {
                 let depth = args.first().map_or(Ok(1), |n| n.trim().parse::<i64>());
