@@ -171,7 +171,7 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
-    "posix-resume-job": ("bg %+ > /dev/null", 1800),
+    "posix-resume-job": ("/bin/sh -c 'kill -STOP $$; exit 7' & p=$!; wait \"$p\"; bg %+ >/dev/null; wait \"$p\"; [[ $? == 7 ]] || exit 9", 35),
     "posix-job-state": ("(exit 17) & p=$!; wait \"$p\"; :", 80),
     "debug-return-scope": ("f", 900),
     "debug-handler-function-line": ("trap 'helper \"$LINENO\"' DEBUG; :; :; trap - DEBUG", 700),
@@ -926,7 +926,7 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
-                "posix-resume-job": "set -o posix; set -m; sleep 1 >/dev/null 2>&1 &",
+                "posix-resume-job": "set -o posix; set -m",
                 "posix-job-state": "set -o posix",
                 "debug-return-scope": "set -T; helper(){ :; }; f(){ :; }; trap ':' RETURN; trap 'helper' DEBUG",
                 "debug-handler-function-line": "set -T; helper(){ local x=$LINENO; : \"$1:$x:$BASH_COMMAND\"; }",
