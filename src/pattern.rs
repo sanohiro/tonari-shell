@@ -246,6 +246,23 @@ pub(super) fn folded_prefix(value: &str, prefix: &str, locale: CharacterLocale) 
     Some(value.len() - chars.as_str().len())
 }
 
+pub(crate) fn capitalize(mut text: String, locale: crate::session::CharacterLocale) -> String {
+    use crate::session::CharacterLocale;
+    if locale == CharacterLocale::Ascii || (text.is_ascii() && locale != CharacterLocale::Turkic) {
+        text.make_ascii_lowercase();
+        if let Some(first) = text.get_mut(..1) {
+            first.make_ascii_uppercase();
+        }
+        return text;
+    }
+    localized(|| {
+        text.chars()
+            .enumerate()
+            .map(|(i, c)| mapped_char(c, i == 0, locale))
+            .collect()
+    })
+}
+
 pub(crate) fn case_chars(
     mut text: String,
     upper: bool,

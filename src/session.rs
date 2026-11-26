@@ -234,21 +234,7 @@ impl Session {
     fn convert_case(&self, mut text: String, letter_case: Option<LetterCase>) -> String {
         let Some(mode) = letter_case else { return text };
         if mode == LetterCase::Capitalize {
-            let locale = self.character_locale();
-            let mut chars = text.chars();
-            let Some(first) = chars.next() else {
-                return text;
-            };
-            let mut result =
-                crate::pattern::case_chars(first.to_string(), true, true, None, locale);
-            result.push_str(&crate::pattern::case_chars(
-                chars.as_str().to_owned(),
-                false,
-                true,
-                None,
-                locale,
-            ));
-            return result;
+            return crate::pattern::capitalize(text, self.character_locale());
         }
         let upper = mode == LetterCase::Upper;
         if text.is_ascii() && !text.as_bytes().contains(&if upper { b'i' } else { b'I' }) {

@@ -187,7 +187,11 @@ def main():
     parser.add_argument("tonari", type=Path)
     parser.add_argument("--first", type=Path)
     parser.add_argument("--runs", type=int, default=9)
+    parser.add_argument("--case", action="append", choices=["filename-completion", "tcp-redirection", "udp-redirection", *HOT])
     args = parser.parse_args()
+    selected = set(args.case or ())
+    def requested(name):
+        return not selected or name in selected
     shells = [p.resolve() for p in (args.bash, args.tonari, args.first) if p]
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -217,18 +221,20 @@ def main():
         for i in range(1024):
             (termroot / f"pick.{i}.tmp").touch()
         rng = random.Random(1729)
-        samples = [[] for _ in shells]
-        for r in range(args.runs + 1):
-            indices = list(range(len(shells)))
-            rng.shuffle(indices)
-            for i in indices:
-                elapsed = completion_time(shells[i], termroot)
-                if r: samples[i].append(elapsed)
-        if args.runs:
-            print(json.dumps(dict(case="filename-completion", repeats=1,
-                                  median_ms=[round(statistics.median(g), 3) for g in samples],
-                                  samples_ms=samples)), flush=True)
+        if requested("filename-completion"):
+            samples = [[] for _ in shells]
+            for r in range(args.runs + 1):
+                indices = list(range(len(shells)))
+                rng.shuffle(indices)
+                for i in indices:
+                    elapsed = completion_time(shells[i], termroot)
+                    if r: samples[i].append(elapsed)
+            if args.runs:
+                print(json.dumps(dict(case="filename-completion", repeats=1,
+                                      median_ms=[round(statistics.median(g), 3) for g in samples],
+                                      samples_ms=samples)), flush=True)
         for label, kind in (("tcp-redirection", socket.SOCK_STREAM), ("udp-redirection", socket.SOCK_DGRAM)):
+            if not requested(label): continue
             samples = [[] for _ in shells]
             count = 80 if args.runs else 3
             for r in range(args.runs + 1):
@@ -241,7 +247,7 @@ def main():
                 print(json.dumps(dict(case=label, repeats=count, median_ms=[round(statistics.median(g),3) for g in samples],
                                       samples_ms=samples)), flush=True)
         for name, (body, count) in HOT.items():
-            if not args.runs or (not modern and name not in COMMON):
+            if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
                 "declared-case": "declare -c v; phrase='aBCDEf GHIJKl mixed case words'",

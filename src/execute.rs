@@ -176,18 +176,19 @@ fn network_redirect(path: &CStr, address: &[u8], kind: i32) -> Option<OwnedFd> {
         write_error(path.to_bytes(), b": expected host/port");
         return None;
     }
-    // Numeric IPv4 endpoints need no resolver or service database. Other address
+    // Numeric IPv4 datagrams need no resolver or service database. Other address
     // forms, including scoped IPv6, use the system resolver below.
-    if let Some((ip, port)) = std::str::from_utf8(host)
-        .ok()
-        .and_then(|s| s.parse::<std::net::Ipv4Addr>().ok())
-        .zip(
-            service
-                .to_str()
-                .ok()
-                .filter(|s| s.bytes().all(|b| b.is_ascii_digit()))
-                .and_then(|s| s.parse::<u16>().ok()),
-        )
+    if kind == libc::SOCK_DGRAM
+        && let Some((ip, port)) = std::str::from_utf8(host)
+            .ok()
+            .and_then(|s| s.parse::<std::net::Ipv4Addr>().ok())
+            .zip(
+                service
+                    .to_str()
+                    .ok()
+                    .filter(|s| s.bytes().all(|b| b.is_ascii_digit()))
+                    .and_then(|s| s.parse::<u16>().ok()),
+            )
     {
         let mut dest: libc::sockaddr_in = unsafe { std::mem::zeroed() };
         dest.sin_family = libc::AF_INET as _;
