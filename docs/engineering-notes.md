@@ -10,6 +10,10 @@ A completion callback has two distinct views of an option like --key=value. COMP
 
 補完では候補の文字列だけを比べると挿入位置の誤りを見逃す。既定の区切り文字では --key= を残して値を置き換え、区切りから等号を外した場合はオプション全体を対象にする。引用符、エスケープ、連続した区切り、ホスト名接頭辞、未設定後の再代入も確認した。単純な引数の列なら通常の入力解析結果を再利用できる。[PTY regression and native timings](benchmarks.md#gnu-source-review)
 
+The lexer recognizes a leading hash using the option in effect when it reads the command. Bash keeps comments active in sourced files even after an interactive session disables them. The eval cache therefore includes the parsing mode in its key. PTY coverage flips the setting around repeated calls to the same eval text and checks the arguments written by each call. When the hash is literal, scanning the following plain text in one span avoids decoding the tag one character at a time. [Workload and raw timings](compatibility/bash-source-review/timings.tsv)
+
+対話中にコメントを無効にすると、行頭や単語先頭のハッシュ記号を通常の文字として渡せる。同じ端末から source したファイル内では引き続きコメントになる。切り替え前に何度も eval した文字列でも、そのときの設定に沿って引数が変わることを端末で確認した。700 個のハッシュタグを渡す試験では、受け取った引数の総数も検査している。[実装と試験の対応表](compatibility/bash-source-review/README.md)
+
 For socket redirection, verify the receiver got the bytes from a builtin, an external command and an open descriptor. For capitalization, transforming just the first character is insufficient because the remaining characters must be lowercased. Reusing the owned ASCII buffer avoids building two temporary strings. サービス名の補完では、ファイルの識別子・変更時刻・サイズと入力した接頭辞がすべて一致するときだけ直前の結果を再利用する。OS のグループ一覧は端末のディレクトリサービスから変わり得るため、実行のたびに取得する。[Implementation and test commands](compatibility/bash-source-review/README.md)
 
 ## 2026-11-26 · Indirection, source lines and child status / 間接参照・行番号・子プロセス

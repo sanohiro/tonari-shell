@@ -142,6 +142,9 @@ pub fn parse(
                             Some("braceexpand") => braceexpand = enabled,
                             Some("posix") => posix = enabled,
                             Some("physical") => physical = enabled,
+                            Some("interactive-comments") => {
+                                shopts.push((enabled, Some("interactive_comments".into())))
+                            }
                             Some("pipefail") => pipefail = enabled,
                             Some("errexit") => errexit = enabled,
                             Some("verbose") => verbose = enabled,

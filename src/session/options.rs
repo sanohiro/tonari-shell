@@ -22,6 +22,7 @@ pub struct ShellOptions {
     pub sourcepath: bool,
     pub bash_source_fullpath: bool,
     pub force_fignore: bool,
+    pub interactive_comments: bool,
     pub shift_verbose: bool,
     pub execfail: bool,
     pub varredir_close: bool,
@@ -55,6 +56,7 @@ impl Default for ShellOptions {
             sourcepath: true,
             bash_source_fullpath: false,
             force_fignore: true,
+            interactive_comments: true,
             shift_verbose: false,
             execfail: false,
             varredir_close: false,
@@ -92,6 +94,7 @@ const SET_OPTIONS: &[OptionEntry] = &[
     option_entry!("histexpand", histexpand),
     option_entry!("history", history_enabled),
     option_entry!("ignoreeof", ignoreeof),
+    option_entry!("interactive-comments", shopt.interactive_comments),
     option_entry!("monitor", jobs.monitor),
     option_entry!("noclobber", noclobber),
     option_entry!("noexec", noexec),
@@ -125,6 +128,7 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("hostcomplete", shopt.hostcomplete),
     option_entry!("huponexit", shopt.huponexit),
     option_entry!("inherit_errexit", shopt.inherit_errexit),
+    option_entry!("interactive_comments", shopt.interactive_comments),
     option_entry!("lastpipe", shopt.lastpipe),
     option_entry!("localvar_inherit", shopt.localvar_inherit),
     option_entry!("localvar_unset", shopt.localvar_unset),
@@ -186,6 +190,10 @@ impl Session {
             self.bindings.map = Keymap::Insert;
         }
     }
+    pub(crate) fn read_comments(&self) -> bool {
+        !self.interactive || self.source_depth != 0 || self.shopt.interactive_comments
+    }
+
     pub fn refresh_terminal_size(&mut self) -> Option<(u16, u16)> {
         if !self.interactive || !self.shopt.checkwinsize {
             return None;

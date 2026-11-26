@@ -51,6 +51,7 @@ pub(super) struct Entry {
     line: usize,
     eof: bool,
     extglob: bool,
+    comments: bool,
 }
 
 pub(super) enum Program {
@@ -96,10 +97,12 @@ pub(super) fn parse(
         return parser::session_source_at(source, eof, session, line).map(Program::Fresh);
     }
     let extglob = session.shopt.glob.extglob;
+    let comments = session.read_comments();
     if let Some(entry) = session.eval_cache.parsed.iter().flatten().find(|entry| {
         entry.line == line
             && entry.eof == eof
             && entry.extglob == extglob
+            && entry.comments == comments
             && &*entry.source == source
     }) {
         return Ok(Program::Cached(entry.clone()));
@@ -116,6 +119,7 @@ pub(super) fn parse(
                 line,
                 eof,
                 extglob,
+                comments,
             });
             cache.parsed[0] = Some(entry.clone());
             return Ok(Program::Cached(entry));

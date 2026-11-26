@@ -485,6 +485,7 @@ pub fn parse_final(source: &str) -> Result<Vec<Statement>, Error> {
 thread_local! {
     // Lexers invoked recursively by a substitution inherit the outer read's options.
     static FIRST_LINE: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
+    static COMMENTS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
     static POSIX: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static EXTGLOB: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -575,7 +576,9 @@ fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnc
         let old_line = FIRST_LINE.replace(line);
         let before = EXTGLOB.replace(session.shopt.glob.extglob);
         let posix = POSIX.replace(session.posix);
+        let comments = COMMENTS.replace(session.read_comments());
         let parsed = parse();
+        COMMENTS.set(comments);
         POSIX.set(posix);
         EXTGLOB.set(before);
         FIRST_LINE.set(old_line);

@@ -158,6 +158,39 @@ def ignored_completion(shell, root, prefix, force):
         t.close()
 
 
+def comment_dialogue(shell, root):
+    (root / "comment-source").write_text("record source #hidden\n")
+    # Check the accepted arguments after each setting change in a real session.
+    t = Terminal(shell, root, editing=True, env={"HISTFILE": "/dev/null"})
+    try:
+        assert b"READY>" in t.read(b"READY>")
+        for line in (
+            "record() { printf '<%s>' \"$@\" >>comment-result; }",
+            "again() { eval 'record cached #tag'; }",
+            "again; again; again",
+            "record before #hidden",
+            "shopt -u interactive_comments",
+            "record bare #visible",
+            "again",
+            "source ./comment-source",
+            "eval 'record eval #visible'",
+            "record 'quoted #text' mid#word",
+            "set -o interactive-comments",
+            "again",
+            "record after #hidden",
+        ):
+            t.send(line.encode() + b"\nprintf '\\036'\n")
+            response = t.read(b"\x1e")
+            assert b"\x1e" in response, (shell, line, response)
+        observed = (root / "comment-result").read_text()
+        expected = ("<cached><cached><cached><before><bare><#visible><cached><#tag>"
+                    "<source><eval><#visible><quoted #text><mid#word><cached><after>")
+        assert observed == expected, (shell, observed)
+    finally:
+        t.close()
+        (root / "comment-result").unlink(missing_ok=True)
+
+
 def callback_tab(shell, root, line, setup=""):
     t = Terminal(shell, root, editing=True, env={"HISTFILE": "/dev/null", "XDG_STATE_HOME": str(root / "state")})
     try:
@@ -225,7 +258,7 @@ def main():
     parser.add_argument("tonari", type=Path)
     parser.add_argument("--first", type=Path)
     parser.add_argument("--runs", type=int, default=9)
-    parser.add_argument("--case", action="append", choices=["programmable-boundaries", "filename-completion", "tcp-redirection", "udp-redirection", *HOT])
+    parser.add_argument("--case", action="append", choices=["interactive-comments", "programmable-boundaries", "filename-completion", "tcp-redirection", "udp-redirection", *HOT])
     args = parser.parse_args()
     selected = set(args.case or ())
     def requested(name):
@@ -267,6 +300,31 @@ def main():
                                             ("she/unique.", True, "she/unique.")]:
                 assert ignored_completion(shell, termroot, prefix, force) == expected
         rng = random.Random(1729)
+        if requested("interactive-comments"):
+            for shell in shells[:2]:
+                comment_dialogue(shell, termroot)
+                result = run(shell, "shopt -u interactive_comments; set -- kept #ignored\necho \"$#\"")
+                assert result[0] == (0, b"1\n", False)
+            count = 700
+            # Every parsed input line must contribute its literal hash argument.
+            code = "total=0\n" + "".join(
+                f"set -- #release-component-{i}-ready-for-validation\n((total+=$#))\n" for i in range(count)
+            ) + 'echo "$total"'
+            samples = [[] for _ in shells]
+            for r in range(args.runs + 1):
+                indices = list(range(len(shells)))
+                rng.shuffle(indices)
+                for i in indices:
+                    start = time.perf_counter_ns()
+                    proc = subprocess.run([shells[i], "--noprofile", "--norc", "+o",
+                                           "interactive-comments", "-ic", code],
+                                          cwd=root, env=env, capture_output=True, timeout=20)
+                    elapsed = (time.perf_counter_ns() - start) / 1e6
+                    assert proc.returncode == 0 and proc.stdout == f"{count}\n".encode(), (shells[i], proc.stdout)
+                    if r: samples[i].append(round(elapsed, 3))
+            if args.runs:
+                print(json.dumps(dict(case="interactive-comments", repeats=count, median_ms=[
+                    round(statistics.median(g), 3) for g in samples], samples_ms=samples)), flush=True)
         if requested("programmable-boundaries"):
             for line, setup in [("demo --key=va", ""), ("demo --key=", ""), ("demo x::y==v", ""),
                                 ("demo first:val", "COMP_WORDBREAKS=' '; "), ("demo @user", ""),
