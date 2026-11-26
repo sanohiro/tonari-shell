@@ -1,5 +1,8 @@
 # External shell comparisons / 外部試験による Bash 比較
 
+The latest native replay covers all 4,659 external cases on each host. It records the effective Bash grade, the ordinary Oils grade and the reason for each remaining Tonari failure. 直近の全件比較では、Bash の注記を含む採点と通常期待値を個別に確認しています。[Results and reviewed cases](shared-failures.md#shell-behavior)
+
+
 The November 26 date, expansion and completion follow-up replays the full bensch and Oils suites. The report includes the ordinary and shell-specific grades, jointly failing cases, and notes on time locale coverage. 11 月 26 日の再計測では、個別の合否と比較可能な時間を記録しました。[Follow-up results](shared-failures.md#date-and-expansion-replay)
 
 

@@ -18,6 +18,19 @@ pub fn evaluate(expr: &Expr, session: &mut Session, status: u8) -> Flow {
     }
 }
 
+fn trace(session: &mut Session, status: u8, words: &[&str]) {
+    if session.xtrace {
+        crate::execute::trace_line(session, status, |line| {
+            line.push_str("[[");
+            for word in words {
+                line.push(' ');
+                line.push_str(&crate::execute::trace_word(word));
+            }
+            line.push_str(" ]]");
+        });
+    }
+}
+
 fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flow> {
     use Expr::*;
     fn operand<'a>(
@@ -38,9 +51,15 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
         Not(e) => Ok(!condition(e, session, status)?),
         And(a, b) => Ok(condition(a, session, status)? && condition(b, session, status)?),
         Or(a, b) => Ok(condition(a, session, status)? || condition(b, session, status)?),
-        Word(word) => Ok(!operand(session, word, status)?.is_empty()),
+        Word(word) => {
+            let value = operand(session, word, status)?;
+            trace(session, status, &["-n", &value]);
+            Ok(!value.is_empty())
+        }
         Unary(op, word) => {
-            builtins::unary(op, &operand(session, word, status)?, session).map_err(error)
+            let value = operand(session, word, status)?;
+            trace(session, status, &[op, &value]);
+            builtins::unary(op, &value, session).map_err(error)
         }
         Binary(left, op, right) => {
             let left = operand(session, left, status)?;
@@ -49,6 +68,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                     if !session.shopt.nocasematch
                         && let Some(text) = right.as_literal()
                     {
+                        trace(session, status, &[&left, op, text]);
                         return Ok((left == text) != (op == "!="));
                     }
                     let captured = std::cell::Cell::new(None);
@@ -62,6 +82,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                         &|name| env.lookup(name),
                         env.session.positional.as_slice(),
                     );
+                    trace(env.session, status, &[&left, op, &right]);
                     let matched = if env.session.shopt.nocasematch {
                         pattern::extended::insensitive_match(
                             &left,
@@ -82,6 +103,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                             eprintln!("tonari: [[: {e}");
                             e.flow(session)
                         })?;
+                    trace(session, status, &[&left, op, &expression]);
                     let result = pattern::localized(|| {
                         let ignore_case = session.shopt.nocasematch;
                         let slot = &mut session.regex[usize::from(ignore_case)];
@@ -97,6 +119,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                 }
                 "-eq" | "-ne" | "-lt" | "-le" | "-gt" | "-ge" => {
                     let right = operand(session, right, status)?;
+                    trace(session, status, &[&left, op, &right]);
                     let a = arithmetic::run(&left, session).map_err(error)?;
                     let b = arithmetic::run(&right, session).map_err(error)?;
                     Ok(match op.as_str() {
@@ -108,7 +131,11 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                         _ => a >= b,
                     })
                 }
-                _ => builtins::binary(&left, op, &operand(session, right, status)?).map_err(error),
+                _ => {
+                    let right = operand(session, right, status)?;
+                    trace(session, status, &[&left, op, &right]);
+                    builtins::binary(&left, op, &right).map_err(error)
+                }
             }
         }
     }

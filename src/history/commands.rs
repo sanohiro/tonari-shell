@@ -360,7 +360,7 @@ fn bash_timestamp(line: &str) -> Option<i64> {
     value[..end].parse().ok()
 }
 
-fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<()> {
+pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<()> {
     if args.len() > 1 {
         return Err(error("too many arguments"));
     }

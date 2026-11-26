@@ -63,6 +63,64 @@ pub fn evaluate(source: &str, lookup: &impl Fn(&str) -> Option<String>) -> Resul
     calculate(source, &mut ReadOnly(lookup), 0)
 }
 
+// A subscript obtained through indirection is data. Support pure parameter
+// and arithmetic forms without dispatching commands or assigning variables.
+pub(crate) fn index(source: &str, lookup: &impl Fn(&str) -> Option<String>) -> Result<i64> {
+    if !source.contains("${") && !source.contains("$((") {
+        return evaluate(source, lookup);
+    }
+    fn text(
+        word: crate::word::Word,
+        lookup: &impl Fn(&str) -> Option<String>,
+        depth: u8,
+    ) -> Result<String> {
+        use crate::word::{Alternative, Part, Word, is_identifier};
+        if depth >= 32 {
+            return Err("array subscript nested too deeply");
+        }
+        let parts = match word {
+            Word::Literal(value) => return Ok(value),
+            Word::Expanded(parts) => parts,
+            _ => return Err("invalid indirect array subscript"),
+        };
+        let mut output = String::new();
+        for part in parts {
+            match part {
+                Part::Text(s) | Part::Pattern(s) => output.push_str(&s),
+                Part::Parameter { name, .. } if is_identifier(&name) => {
+                    if let Some(s) = lookup(&name) {
+                        output.push_str(&s);
+                    }
+                }
+                Part::Alternative {
+                    name,
+                    op: op @ (Alternative::Default | Alternative::Alternate),
+                    check_empty,
+                    word,
+                    ..
+                } if is_identifier(&name) => {
+                    let value = lookup(&name).filter(|s| !check_empty || !s.is_empty());
+                    if (op == Alternative::Default) == value.is_none() {
+                        output.push_str(&text(*word, lookup, depth + 1)?);
+                    } else if op == Alternative::Default {
+                        output.push_str(value.as_deref().unwrap_or(""));
+                    }
+                }
+                Part::Arithmetic { expression, .. } => {
+                    let word =
+                        crate::parser::arithmetic_word(&expression).map_err(|e| e.message())?;
+                    output
+                        .push_str(&evaluate(&text(word, lookup, depth + 1)?, lookup)?.to_string());
+                }
+                _ => return Err("invalid indirect array subscript"),
+            }
+        }
+        Ok(output)
+    }
+    let word = crate::parser::arithmetic_word(source).map_err(|e| e.message())?;
+    evaluate(&text(word, lookup, 0)?, lookup)
+}
+
 pub(crate) fn with_variables(source: &str, vars: &mut dyn Variables) -> Result<i64> {
     calculate(source, vars, 0)
 }
@@ -179,6 +237,13 @@ pub fn let_builtin(args: &[String], session: &mut Session) -> u8 {
 }
 
 pub fn command(source: &str, session: &mut Session, status: u8) -> Flow {
+    if session.xtrace {
+        crate::execute::trace_line(session, status, |line| {
+            line.push_str("(( ");
+            line.push_str(source);
+            line.push_str(" ))");
+        });
+    }
     match expanded(source, session, status) {
         Ok(n) => Flow::Continue(u8::from(n == 0)),
         Err(e) => {
@@ -259,9 +324,9 @@ impl<'a> Parser<'a> {
         variables: &mut dyn Variables,
         minimum: u8,
         active: bool,
-        depth: u8,
+        depth: u16,
     ) -> Result<Value<'a>> {
-        if depth >= 96 {
+        if depth >= 96 && deep_expression_full(depth) {
             return Err("arithmetic nesting limit exceeded");
         }
         let mut left = self.atom(variables, active, depth + 1)?;
@@ -325,9 +390,9 @@ impl<'a> Parser<'a> {
         &mut self,
         variables: &mut dyn Variables,
         active: bool,
-        depth: u8,
+        depth: u16,
     ) -> Result<Value<'a>> {
-        if depth >= 96 {
+        if depth >= 96 && deep_expression_full(depth) {
             return Err("arithmetic nesting limit exceeded");
         }
         let mut value = match self.advance()? {
@@ -398,7 +463,7 @@ enum Value<'a> {
     Variable(std::borrow::Cow<'a, str>),
 }
 impl Value<'_> {
-    fn read(&self, variables: &mut dyn Variables, active: bool, depth: u8) -> Result<i64> {
+    fn read(&self, variables: &mut dyn Variables, active: bool, depth: u16) -> Result<i64> {
         if !active {
             return Ok(0);
         }
@@ -418,8 +483,29 @@ impl Value<'_> {
     }
 }
 
-fn calculate(source: &str, variables: &mut dyn Variables, depth: u8) -> Result<i64> {
-    if depth >= 96 {
+// Long chains of arithmetic variable references can implement terminating
+// recursions. Respect the real stack budget on the process main thread.
+#[cold]
+fn deep_expression_full(depth: u16) -> bool {
+    if depth >= 2048 {
+        return true;
+    }
+    if depth % 16 != 0 {
+        return false;
+    }
+    let Some(origin) = crate::MAIN_STACK_ORIGIN.get() else {
+        return true;
+    };
+    let mut limit = std::mem::MaybeUninit::uninit();
+    if unsafe { libc::getrlimit(libc::RLIMIT_STACK, limit.as_mut_ptr()) } != 0 {
+        return true;
+    }
+    let used = origin.abs_diff(std::ptr::from_ref(&limit).addr()) as u64;
+    used + 256 * 1024 >= unsafe { limit.assume_init() }.rlim_cur / 2
+}
+
+fn calculate(source: &str, variables: &mut dyn Variables, depth: u16) -> Result<i64> {
+    if depth >= 96 && deep_expression_full(depth) {
         return Err("arithmetic nesting limit exceeded");
     }
     if let [digit @ b'0'..=b'9'] = source.as_bytes() {

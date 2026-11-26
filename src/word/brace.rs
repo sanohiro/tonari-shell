@@ -70,11 +70,7 @@ impl Range {
                 self.first.wrapping_sub_unsigned(delta)
             };
             if self.letters {
-                if n == i64::from(b'\\') {
-                    String::new()
-                } else {
-                    char::from(n as u8).to_string()
-                }
+                char::from(n as u8).to_string()
             } else if self.width == 0 {
                 n.to_string()
             } else {
@@ -180,10 +176,12 @@ pub fn append_fields(
                 };
                 for value in range.values().rev() {
                     let mut word = parts[..i].to_vec();
-                    word.push(if value.is_empty() {
-                        Part::Text(value)
-                    } else {
+                    // Generated punctuation is data even when it spells a
+                    // quote, backslash or pattern delimiter in shell source.
+                    word.push(if value.as_bytes()[0].is_ascii_alphanumeric() {
                         Part::Pattern(value)
+                    } else {
+                        Part::Text(value)
                     });
                     word.extend_from_slice(&parts[i + 1..]);
                     pending.push(word);

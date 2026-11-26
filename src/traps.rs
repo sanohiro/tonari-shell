@@ -14,6 +14,10 @@ pub(crate) const SIGNALS: &[(&str, i32)] = &[
     ("TRAP", libc::SIGTRAP),
     ("ABRT", libc::SIGABRT),
     ("BUS", libc::SIGBUS),
+    #[cfg(target_os = "macos")]
+    ("EMT", libc::SIGEMT),
+    #[cfg(target_os = "macos")]
+    ("INFO", libc::SIGINFO),
     ("FPE", libc::SIGFPE),
     ("KILL", libc::SIGKILL),
     ("USR1", libc::SIGUSR1),
@@ -174,12 +178,12 @@ pub fn std_spawn_inherits_pipe(traps: &Traps) -> bool {
 }
 
 impl Traps {
+    pub(crate) fn in_nested_action(&self) -> bool {
+        self.handling_debug || self.handling_error || self.handling_return
+    }
+
     pub fn in_action(&self) -> bool {
-        self.handling_debug
-            || self.running != 0
-            || self.handling_error
-            || self.handling_return
-            || self.exit_status.is_some()
+        self.running != 0 || self.in_nested_action() || self.exit_status.is_some()
     }
 
     pub fn has_explicit_traps(&self) -> bool {
@@ -514,11 +518,8 @@ impl Traps {
     }
 
     pub fn builtin(&mut self, args: &[String], interactive: bool, posix: bool) -> u8 {
-        let args = if args.first().is_some_and(|s| s == "--") {
-            &args[1..]
-        } else {
-            args
-        };
+        let ended_options = args.first().is_some_and(|s| s == "--");
+        let args = if ended_options { &args[1..] } else { args };
         let list = args.first().is_some_and(|s| s == "-p");
         if args.first().is_some_and(|s| s == "-l") {
             let mut out = io::stdout().lock();
@@ -536,7 +537,13 @@ impl Traps {
                 list && posix,
             );
         }
-        let (command, signals) = if args[0].parse::<u32>().is_ok() {
+        if !ended_options && args[0].starts_with('-') && args[0] != "-" {
+            eprintln!("tonari: trap: {}: invalid option", args[0]);
+            return 2;
+        }
+        let (command, signals) = if args[0].parse::<u32>().is_ok()
+            || args.len() == 1 && trap_number(&args[0]).is_some()
+        {
             ("-", args)
         } else {
             (args[0].as_str(), &args[1..])
@@ -650,7 +657,9 @@ pub fn dispatch(session: &mut Session, status: u8) -> Flow {
             session.traps.running |= bit;
             let previous = session.pipe_status.clone();
             let previous_status = session.traps.signal_status.replace(status);
-            let flow = crate::eval_text(session, &command, status);
+            let previous_line = session.signal_line.replace(1);
+            let flow = crate::input::text(session, &command, status, false, false, Some(1));
+            session.signal_line = previous_line;
             session.traps.signal_status = previous_status;
             session.pipe_status = previous;
             session.traps.running &= !bit;

@@ -1,5 +1,48 @@
 # POSIX compatibility and execution time / POSIX 互換性と実行時間
 
+<a id="signal-wait-and-names"></a>
+
+## Native replay after the shell behavior fixes / 互換性修正後の再検証
+
+Tonari 42f53ff and GNU Bash ran as `sh` on the same 122 files and 11,079 upstream cases per platform. Each shell ran each case three times. Bash versions are 5.2.21 on Ubuntu and 5.2.37 on macOS. The linked case tables retain all three verdicts (Tonari, Bash and the previous executable), timings and the first failed assertions. [Native run](https://github.com/sanohiro/tonari-shell/actions/runs/45766999152) · [Test source](https://github.com/magicant/yash/tree/2.60/tests)
+
+| Host and case table | Tonari passes | Failed | Skipped | Unexpected pass | Bash passes | Bash alone passes | Tonari alone passes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| [Linux x86-64](shell-behavior-ubuntu-24.04.tsv.gz) | 11,045 | 19 | 14 | 1 | 9,311 | 0 | 1,734 |
+| [macOS arm64](shell-behavior-macos-15.tsv.gz) | 11,045 | 19 | 14 | 1 | 9,306 | 0 | 1,735 |
+
+On macOS, four additional cases varied between pass and failure in Bash across three trials. Tonari passed all three trials of each case. They send numeric signals 6, 9, 14 and 15 to a child in kill3-p.tst, lines 50–53, and are counted separately from stable Bash or Tonari-only passes. [Upstream inputs](https://github.com/magicant/yash/blob/2.60/tests/kill3-p.tst#L47-L54)
+
+The joint failure in `kill4-p.tst:44` exposed extra stderr from a successful wait for a signaled child. Noninteractive POSIX mode now returns the child's signal status without printing a job-completion notice. In a direct test an unknown job still reports a diagnostic. Another regression runs an invalid function definition both directly and from a previously registered function, after switching modes, and checks that an unexecuted definition has no effect. [POSIX wait](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/wait.html) · [Upstream test](https://github.com/magicant/yash/blob/2.60/tests/kill4-p.tst#L44-L59) · [Direct regressions](../../../tests/shell.py)
+
+Thirteen cases in `builtins-p.tst` try to define functions named `eval`, `exec`, `return` and other POSIX special builtins. The test checks that the replacement body does not run and stderr is empty. The body never runs in either shell. Both diagnose the invalid definition. POSIX puts the function-naming requirement on the application, and Bash specifies this rejection in POSIX mode. Earlier Tonari accepted these definitions and silently dispatched to the builtin. A separate reference check uses a punctuated name in POSIX mode. Tonari and Bash 5.2 reject it. Bash 5.3 accepts it as an extension, explicitly permitted by POSIX 2.9.5. The direct test records each version separately. The remaining six failures cover command-substitution alias timing (three), the enabled `echo` builtin (two), and duplicating a read-only descriptor without writing (one). The earlier review below explains all six, the fourteen skips and the unexpected pass. [POSIX function definitions](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_09_05) · [GNU Bash POSIX mode](https://www.gnu.org/software/bash/manual/html_node/Bash-POSIX-Mode.html) · [yash builtin tests](https://github.com/magicant/yash/blob/2.60/tests/builtins-p.tst#L136-L205)
+
+両 OS で Tonari の失敗は19件です。13件は POSIX がスクリプト側に禁じる名前で関数を定義し、かつ診断を出さないことを求める試験です。以前の版ではここが合格だったため、新旧の違いを件数にも反映しました。残る6件は下表の選択可能な挙動です。非対話の `wait` が余計な通知を書く不具合は、Bash と一致していても修正しました。
+
+| Host | Comparable passes | ≤ ⅔ Bash | Faster than Bash | Median ratio | Cases replayed 11 times | ≤ ⅔ on replay | Faster on replay |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Linux x86-64 | 9,311 | 8,866 | 9,250 | 0.478 | 445 | 315 | 440 |
+| macOS arm64 | 9,306 | 7,628 | 9,106 | 0.537 | 1678 | 1321 | 1668 |
+
+Each ratio compares case medians. Cases above two thirds on the first comparison were selected for eleven more trials per shell. The last three columns count replays with eleven successful observations in both shells. The per-case files identify the implementation paths and distinguish elapsed time spent starting external commands, waiting for a child or running shell operations. [Workload review](sites.tsv) · [Shell timings](../../benchmarks.md#shell-scope-timings)
+
+The cases at or above Bash time after eleven successful trials were grouped by fixture. Linux x86-64 (5): kill2-p.tst × 1, sigquit1-p.tst × 2, sigquit3-p.tst × 2 / macOS arm64 (10): dot-p.tst × 1, error-p.tst × 1, redir-p.tst × 1, sighup6-p.tst × 6, sigterm7-p.tst × 1. The signal fixtures include termination and child reaping by the host OS. [Fatal-signal controls](fatal-signal-control.tsv)
+
+The ten native macOS cases whose eleven-trial median equalled or exceeded Bash time ran again on the physical M1 against Bash 5.2.37. Each of the 420 executions passed its original assertions. These 21-trial medians retain process startup, fixture commands and file I/O. 共有ランナーで Bash 以上の時間が掛かった10件は、実機で同じ入力と期待値を使って個別に再計測しました。
+
+| M1, upstream case | Bash ms | Tonari ms | Ratio |
+| --- | ---: | ---: | ---: |
+| dot-p.tst:114 | 7.590 | 5.611 | 0.739 |
+| error-p.tst:278 | 9.327 | 6.402 | 0.686 |
+| redir-p.tst:185 | 10.666 | 6.385 | 0.599 |
+| sighup6-p.tst:7007 | 14.087 | 8.243 | 0.585 |
+| sighup6-p.tst:7011 | 13.801 | 8.270 | 0.599 |
+| sighup6-p.tst:7024 | 14.760 | 8.992 | 0.609 |
+| sighup6-p.tst:7029 | 14.759 | 9.065 | 0.614 |
+| sighup6-p.tst:7037 | 14.743 | 8.921 | 0.605 |
+| sighup6-p.tst:7154 | 14.671 | 9.179 | 0.626 |
+| sigterm7-p.tst:8042 | 15.382 | 9.151 | 0.595 |
+
 Tonari `7cad956` and GNU Bash ran as `sh` against yash 2.60, commit `1cdb509a617894ed96a12c33b43bcd7adb6f1ff5`. The Linux x86-64 reference was Ubuntu 24.04’s Bash 5.2.21 and the macOS arm64 reference was GNU Bash 5.2.37. Each native CI host ran the same 122 files three times per executable. Each comparison uses the upstream case identity and its requested stdout, stderr and exit-status assertions. The earlier Tonari executable comes from `72c2500`. [Native run](https://github.com/sanohiro/tonari-shell/actions/runs/45663406314) · [macOS shard 1](https://github.com/sanohiro/tonari-shell/actions/runs/45669899204) · [Upstream tests](https://github.com/magicant/yash/tree/2.60/tests)
 
 <a id="posix-verdict-review"></a>

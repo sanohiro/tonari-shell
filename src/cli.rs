@@ -114,7 +114,7 @@ pub fn parse(
                 let enabled = arg.starts_with('-');
                 for flag in arg[1..].chars() {
                     match flag {
-                        'c' if enabled => command = true,
+                        'c' => command = true,
                         'i' => interactive = enabled,
                         'l' => login = enabled,
                         's' => stdin = enabled,

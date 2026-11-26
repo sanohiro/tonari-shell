@@ -28,8 +28,22 @@ pub enum Flow {
     Discard(u8),
     Exit(u8),
     Return(u8),
-    Break(u32),
+    Break(u32, u8),
     LoopContinue(u32),
+}
+
+impl Flow {
+    pub(crate) fn child_status(self) -> u8 {
+        match self {
+            Self::Continue(code) | Self::Exit(code) | Self::Return(code) | Self::Discard(code) => {
+                code
+            }
+            Self::Break(..) | Self::LoopContinue(_) => {
+                eprintln!("tonari: loop control cannot cross a subshell boundary");
+                1
+            }
+        }
+    }
 }
 
 enum Action<'a> {
@@ -47,9 +61,37 @@ fn errno() -> i32 {
 }
 
 fn write_error(name: &[u8], message: &[u8]) {
-    // Can run in a forked child. Avoid buffered output and heap allocation.
-    for part in [b"tonari: ".as_slice(), name, message, b"\n"] {
-        unsafe { libc::write(2, part.as_ptr().cast(), part.len()) };
+    write_error_detail(name, message, b"");
+}
+
+#[cold]
+fn write_error_detail(name: &[u8], message: &[u8], detail: &[u8]) {
+    // This can run after fork. Emit the diagnostic in a single write when
+    // possible, without buffering, heap allocation or taking a stdio lock.
+    let mut buffers =
+        [b"tonari: ".as_slice(), name, message, detail, b"\n"].map(|part| libc::iovec {
+            iov_base: part.as_ptr().cast_mut().cast(),
+            iov_len: part.len(),
+        });
+    let mut rest = buffers.as_mut_slice();
+    while !rest.is_empty() {
+        let n = unsafe { libc::writev(2, rest.as_ptr(), rest.len() as libc::c_int) };
+        if n < 0 && errno() == libc::EINTR {
+            continue;
+        }
+        if n <= 0 {
+            break;
+        }
+        let mut used = n as usize;
+        while let Some(first) = rest.first_mut() {
+            if used < first.iov_len {
+                first.iov_base = unsafe { first.iov_base.byte_add(used) };
+                first.iov_len -= used;
+                break;
+            }
+            used -= first.iov_len;
+            rest = &mut rest[1..];
+        }
     }
 }
 
@@ -117,7 +159,14 @@ fn open_redirect(path: &CStr, flags: i32) -> Option<OwnedFd> {
         }
     }
     if fd < 0 {
-        write_error(path.to_bytes(), b": cannot open redirection");
+        let error = errno();
+        let mut buffer = [0 as libc::c_char; 128];
+        let reason = if unsafe { libc::strerror_r(error, buffer.as_mut_ptr(), buffer.len()) } == 0 {
+            unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_bytes()
+        } else {
+            b"cannot open redirection"
+        };
+        write_error_detail(path.to_bytes(), b": ", reason);
         return None;
     }
     Some(unsafe { OwnedFd::from_raw_fd(fd) })
@@ -173,11 +222,11 @@ fn apply(actions: &[Action<'_>], pipe_limit: usize) -> bool {
         eprintln!("tonari: redirection: {e}");
         return false;
     }
-    apply_protected(actions, pipe_limit)
+    apply_protected(actions, pipe_limit).is_ok()
 }
 
-fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> bool {
-    for a in actions {
+fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> Result<(), usize> {
+    for (index, a) in actions.iter().enumerate() {
         match a {
             Action::HereInput(dest, body) => {
                 let redirected = here_input::open(body, pipe_limit).and_then(|fd| {
@@ -192,18 +241,18 @@ fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> bool {
                 });
                 if let Err(error) = redirected {
                     eprintln!("tonari: here-document: {error}");
-                    return false;
+                    return Err(index);
                 }
             }
             Action::Open(dest, path, flags) => {
                 let Some(fd) = open_redirect(path, *flags) else {
-                    return false;
+                    return Err(index);
                 };
                 if fd.as_raw_fd() == *dest {
                     let _ = fd.into_raw_fd();
                 } else if duplicate(fd.as_raw_fd(), *dest).is_err() {
                     write_error(path.as_bytes(), b": cannot redirect");
-                    return false;
+                    return Err(index);
                 }
             }
             Action::Dup(src, dst) => {
@@ -213,7 +262,7 @@ fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> bool {
                     } else {
                         write_error(b"redirection", b": cannot duplicate file descriptor");
                     }
-                    return false;
+                    return Err(index);
                 }
             }
             Action::Close(fd) | Action::CloseMoved(fd) => {
@@ -221,7 +270,7 @@ fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> bool {
             }
         }
     }
-    true
+    Ok(())
 }
 
 // Pipe setup uses standard streams as destinations. Reserve distinct source
@@ -510,6 +559,7 @@ enum Builtin {
     Mapfile,
     Let,
     LoopControl,
+    AutoCd,
     Echo,
     Test,
     Read,
@@ -569,6 +619,16 @@ fn builtin(cmd: &PreparedCommand, last_status: u8, session: &Session) -> Option<
     }
     named_builtin(name, &cmd.words[1..], last_status)
         .or_else(|| (cmd.search == lookup::Search::BuiltinsOnly).then_some(Builtin::Unknown))
+        .or_else(|| {
+            (session.shopt.autocd
+                && session.interactive
+                && cmd.search == lookup::Search::Normal
+                && Path::new(name).is_dir()
+                && (name.contains('/')
+                    || !std::env::split_paths(&lookup::path(cmd, session))
+                        .any(|d| lookup::executable(&d.join(name)))))
+            .then_some(Builtin::AutoCd)
+        })
 }
 
 pub(crate) fn builtin_names() -> &'static [&'static str] {
@@ -738,9 +798,13 @@ fn eval_builtin(
             command => crate::eval::command(session, command, last_status, false),
         },
         Builtin::Exec => exec_builtin(cmd, session, args),
-        Builtin::Function => {
-            crate::call_function(session, std::mem::take(&mut cmd.words), last_status, false)
-        }
+        Builtin::Function => crate::eval::call_with_bindings(
+            session,
+            std::mem::take(&mut cmd.words),
+            last_status,
+            false,
+            &mut bindings,
+        ),
         Builtin::Trap => Flow::Continue(session.traps.builtin(
             args,
             session.interactive,
@@ -794,21 +858,31 @@ fn eval_builtin(
                 Flow::Continue(0)
             } else if args.len() > 1 {
                 write_error(cmd.words[0].as_bytes(), b": too many arguments");
-                Flow::Exit(1)
+                // Bash abandons the current input on a usage error. File and
+                // stdin readers can then resume at the next complete command.
+                if session.command_string && !session.interactive {
+                    Flow::Exit(1)
+                } else {
+                    Flow::Discard(1)
+                }
             } else {
                 let depth = args.first().map_or(Ok(1), |n| n.trim().parse::<i64>());
                 match depth {
                     Ok(n) if n > 0 => {
                         let levels = (n as u64).min(u64::from(session.loop_depth)) as u32;
                         if cmd.words[0] == "break" {
-                            Flow::Break(levels)
+                            Flow::Break(levels, 0)
                         } else {
                             Flow::LoopContinue(levels)
                         }
                     }
-                    _ => {
+                    Err(_) => {
+                        write_error(cmd.words[0].as_bytes(), b": numeric argument required");
+                        Flow::Exit(128)
+                    }
+                    Ok(_) => {
                         write_error(cmd.words[0].as_bytes(), b": invalid loop count");
-                        Flow::Exit(1)
+                        Flow::Break(session.loop_depth, 1)
                     }
                 }
             }
@@ -821,6 +895,11 @@ fn eval_builtin(
         Builtin::DirectoryStack => {
             Flow::Continue(session.directory_stack(&cmd.words[0], args, &mut io::stdout().lock()))
         }
+        Builtin::AutoCd => {
+            eprintln!("cd -- {}", cmd.words.join(" "));
+            cmd.words.insert(0, "--".into());
+            Flow::Continue(session.directory_builtin("cd", &cmd.words))
+        }
         Builtin::Directory => Flow::Continue(session.directory_builtin(&cmd.words[0], args)),
         Builtin::Source => crate::source_file(
             session,
@@ -828,6 +907,12 @@ fn eval_builtin(
             last_status,
             !session.interactive && posix_special(cmd, session),
         ),
+        Builtin::Eval if !cmd.assignments.is_empty() => {
+            session.enter_scope(&mut bindings, true);
+            let flow = crate::input::eval_builtin(session, args, last_status);
+            session.leave_scope();
+            flow
+        }
         Builtin::Eval => crate::input::eval_builtin(session, args, last_status),
         Builtin::Return(status) => {
             if status.is_some() && status_operands(args).len() > 1 {
@@ -1206,7 +1291,8 @@ fn run_builtin(
             }
         }
     }
-    let applied = apply_protected(actions, here_pipe_limit(Some(builtin), cmd));
+    let redirection = apply_protected(actions, here_pipe_limit(Some(builtin), cmd));
+    let applied = redirection.is_ok();
     let old_input = session.stdin_redirected;
     if applied && actions.iter().any(|a| a.destination() == 0) {
         session.stdin_redirected = true;
@@ -1237,7 +1323,27 @@ fn run_builtin(
             restore = Err(e);
         }
     }
-    restore.map(|()| flow)
+    restore?;
+    // Failures in a compound command's body are tested by its own statement
+    // list. A redirect failure happens before that list can run.
+    if let Err(index) = redirection
+        && matches!(builtin, Builtin::Compound)
+        && session.tested_depth == 0
+    {
+        if session.traps.active() {
+            if let Some(location) = &mut session.current_command {
+                location.line = cmd.redirects[index].line;
+            }
+            let trap = crate::traps::error(session, 1);
+            if !matches!(trap, Flow::Continue(_)) {
+                return Ok(trap);
+            }
+        }
+        if session.errexit {
+            return Ok(Flow::Exit(1));
+        }
+    }
+    Ok(flow)
 }
 
 enum Stage {
@@ -1312,7 +1418,7 @@ fn redirection_observable(r: &Redirect<Word>) -> bool {
 // A parenthesized pipeline stage is already the subshell Bash exposes.
 fn enter_stage(session: &mut Session, compound: Option<&crate::parser::Command>, background: bool) {
     let explicit = matches!(compound, Some(crate::parser::Command::Subshell(_)));
-    session.subshell_depth += 1;
+    session.enter_subshell();
     session.jobs.forked(!explicit && !background);
     if explicit {
         session.command_string = false;
@@ -1339,7 +1445,7 @@ fn start_raw(
             .any(stage_expansion)
         || raw.assignments.iter().any(|(_, value)| match value {
             Assignment::Scalar(word) => stage_expansion(word),
-            Assignment::Array(_, items) => items.iter().any(|(_, word)| stage_expansion(word)),
+            Assignment::Array(_, items, _) => items.iter().any(|(_, word)| stage_expansion(word)),
         });
     if !observable {
         return match prepare(raw, session, last_status, false) {
@@ -1378,8 +1484,7 @@ fn start_raw(
         session.stdin_redirected |= input.is_some();
         let code = if apply(&setup, libc::PIPE_BUF) {
             match run(vec![raw], last_status, true, session) {
-                Ok(Flow::Discard(s) | Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s)) => s,
-                Ok(Flow::Break(_) | Flow::LoopContinue(_)) => 0,
+                Ok(flow) => flow.child_status(),
                 Err(e) => {
                     eprintln!("tonari: {e}");
                     1
@@ -1601,10 +1706,7 @@ fn start(
             } else {
                 eval_builtin(builtin.unwrap(), cmd, session, last_status, true)
             };
-            match flow {
-                Flow::Discard(s) | Flow::Exit(s) | Flow::Return(s) | Flow::Continue(s) => s,
-                Flow::Break(_) | Flow::LoopContinue(_) => 0,
-            }
+            flow.child_status()
         };
         let code = crate::traps::finish(session, code);
         unsafe { libc::_exit(code.into()) }
@@ -1852,7 +1954,43 @@ impl PreparedCommand {
     }
 }
 
-fn trace_word(word: &str) -> std::borrow::Cow<'_, str> {
+pub(crate) fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(&mut String)) {
+    let prefix = session.get("PS4").unwrap_or_default();
+    session.xtrace = false;
+    let mut line = crate::prompt::render_text(session, prefix, status);
+    session.xtrace = true;
+    let levels = session.trace_depth + session.source_depth;
+    if levels > 0
+        && let Some(first) = line.chars().next()
+    {
+        line.insert_str(0, &first.to_string().repeat(levels as usize));
+    }
+    append(&mut line);
+    line.push('\n');
+    let fd = session
+        .get("BASH_XTRACEFD")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2);
+    let mut data = line.as_bytes();
+    while !data.is_empty() {
+        let n = unsafe { libc::write(fd, data.as_ptr().cast(), data.len()) };
+        if n > 0 {
+            data = &data[n as usize..];
+        } else if n == 0 || errno() != libc::EINTR {
+            break;
+        }
+    }
+}
+
+pub(crate) fn trace_word(word: &str) -> std::borrow::Cow<'_, str> {
+    if word == "'" {
+        return "\\'".into();
+    }
+    if word.bytes().any(|b| b.is_ascii_control()) {
+        return String::from_utf8(crate::session::printf::ansi_quote(word.as_bytes(), false))
+            .unwrap()
+            .into();
+    }
     if !word.is_empty()
         && word
             .chars()
@@ -1886,7 +2024,7 @@ fn expand_command_words(
         .assignments
         .iter_mut()
         .filter_map(|(_, assignment)| match assignment {
-            Assignment::Array(Some(position), _) => Some(position),
+            Assignment::Array(Some(position), _, _) => Some(position),
             _ => None,
         })
         .peekable();
@@ -1923,6 +2061,7 @@ fn prepare_expanded(
         Vec::with_capacity(raw.assignments.len())
     };
     let mut array_declarations = Vec::new();
+    let mut traced_operands = Vec::new();
     // Each assignment sees its predecessors, while command arguments saw the
     // outer environment. Standalone assignments persist even on redirect failure.
     for (mut key, word) in raw.assignments {
@@ -1938,7 +2077,14 @@ fn prepare_expanded(
             key.pop();
         }
         match word {
-            Assignment::Array(operand, parts) => {
+            Assignment::Array(operand, parts, source) => {
+                if exp.session.xtrace {
+                    if let Some(index) = operand {
+                        traced_operands.push((index, source));
+                    } else {
+                        trace_line(exp.session, last_status, |out| out.push_str(source.text()));
+                    }
+                }
                 if operand.is_none() && exp.session.readonly(&key) {
                     return Err(crate::expansion::Error::readonly(&key));
                 }
@@ -1998,6 +2144,13 @@ fn prepare_expanded(
                 let append =
                     append || direct_assignment && word.take_append_suffix(&key, exp.session);
                 let value = exp.scalar(word)?;
+                if exp.session.xtrace {
+                    trace_line(exp.session, last_status, |out| {
+                        out.push_str(&key);
+                        out.push_str(if append { "+=" } else { "=" });
+                        out.push_str(&trace_word(&value));
+                    });
+                }
                 if let std::borrow::Cow::Owned(resolved) = exp.session.reference_name(&key)? {
                     key = resolved;
                 }
@@ -2104,37 +2257,20 @@ fn prepare_expanded(
         assignments,
         empty_status: captured.get().unwrap_or(0),
     };
-    if session.xtrace && (!cmd.words.is_empty() || !cmd.assignments.is_empty()) {
-        use std::io::Write;
-        let prefix = session.get("PS4").unwrap_or_else(|| "+ ".into());
-        session.xtrace = false;
-        let mut trace = crate::prompt::render_text(session, prefix, last_status);
-        session.xtrace = true;
-        let fd = session
-            .get("BASH_XTRACEFD")
-            .and_then(|s| s.parse::<i32>().ok())
-            .unwrap_or(2);
-        let mut first = true;
-        for (name, value) in &cmd.assignments {
-            if !first {
-                trace.push(' ');
+    if session.xtrace && !cmd.words.is_empty() {
+        trace_line(session, last_status, |out| {
+            let mut operands = traced_operands.iter().peekable();
+            for (i, word) in cmd.words.iter().enumerate() {
+                if i > 0 {
+                    out.push(' ');
+                }
+                if let Some((_, source)) = operands.next_if(|(index, _)| *index == i) {
+                    out.push_str(source.text());
+                } else {
+                    out.push_str(&trace_word(word));
+                }
             }
-            first = false;
-            trace.push_str(name);
-            trace.push('=');
-            trace.push_str(&trace_word(value));
-        }
-        for word in &cmd.words {
-            if !first {
-                trace.push(' ');
-            }
-            first = false;
-            trace.push_str(&trace_word(word));
-        }
-        trace.push('\n');
-        if let Ok(mut file) = fd::duplicate_except(fd, 3, |_| false) {
-            let _ = file.write_all(trace.as_bytes());
-        }
+        });
     }
     lookup::command_prefix(&mut cmd, session);
     if raw.redirects.iter().any(|r| r.variable.is_some()) {
@@ -2186,7 +2322,9 @@ fn prepare_redirects(
         let word = match (r.target, r.word) {
             (Target::HereDoc { expand: true }, Word::Literal(body)) => {
                 if body.contains(['$', '`', '\\']) {
-                    exp.scalar(crate::parser::expansion_string(&body).map_err(|e| e.message())?)?
+                    exp.scalar(
+                        crate::parser::here_word(exp.session, &body).map_err(|e| e.message())?,
+                    )?
                 } else {
                     body
                 }
@@ -2233,6 +2371,7 @@ fn prepare_redirects(
             target = Target::NoClobber;
         }
         redirects.push(Redirect {
+            line: r.line,
             variable: None,
             fd: r.fd,
             target,
@@ -2240,6 +2379,7 @@ fn prepare_redirects(
         });
         if both {
             redirects.push(Redirect {
+                line: r.line,
                 variable: None,
                 fd: 2,
                 target: Target::Duplicate,
@@ -2248,6 +2388,7 @@ fn prepare_redirects(
         }
         if let Some(fd) = moved {
             redirects.push(Redirect {
+                line: r.line,
                 variable: None,
                 fd,
                 target: Target::CloseMoved,
@@ -2604,7 +2745,7 @@ pub fn run_pipeline(
                 let code = match flow {
                     Flow::Continue(code) => return Ok(Stage::Status(code)),
                     Flow::Exit(code) | Flow::Discard(code) | Flow::Return(code) => code,
-                    Flow::Break(_) | Flow::LoopContinue(_) => 0,
+                    Flow::Break(..) | Flow::LoopContinue(_) => 0,
                 };
                 last_flow = Some(flow);
                 return Ok(Stage::Status(code));

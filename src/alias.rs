@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use crate::Session;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Aliases(pub Option<Rc<BTreeMap<String, String>>>);
 
 impl Aliases {

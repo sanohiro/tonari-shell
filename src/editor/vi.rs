@@ -85,13 +85,26 @@ impl State {
             self.operator = Some((action, count));
             return Some(false);
         }
-        let operator = pending
+        let mut operator = pending
             .map(|p| p.0)
             .or_else(|| operator_key.then_some(action));
         let repeat = pending.map_or(count, |p| count.saturating_mul(p.1));
         let mut start = *cursor;
         let mut end = start;
-        if operator_key {
+        if action == ViSubstitute {
+            operator = Some(ViChange);
+            if first == b'S' {
+                start = 0;
+                end = text.len();
+            } else {
+                for _ in 0..repeat {
+                    if end == text.len() {
+                        break;
+                    }
+                    end = next(text, end);
+                }
+            }
+        } else if operator_key {
             if let Some((op, _)) = pending {
                 if op != action {
                     return Some(false);

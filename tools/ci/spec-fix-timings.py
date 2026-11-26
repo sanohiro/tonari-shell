@@ -22,6 +22,36 @@ CASES = {
     "history dates": ('export TZ=UTC0; HISTSIZE=3000; HISTTIMEFORMAT="%F %T "; '
                       'history -c; history -r dates; history', HISTORY_OUTPUT),
     "startup": (":", b""),
+    "function definition cycle": ('for ((i=0;i<3000;i++)); do f() { n=ok; }; f; unset -f f; done; '
+                                  'echo "$n"', b"ok\n"),
+    "punctuated function names": ('for ((i=0;i<3000;i++)); do f,%() { n=ok; }; f,%; unset -f f,%; done; '
+                                  'echo "$n"', b"ok\n"),
+    "alias in indexed assignment": ("shopt -s expand_aliases\nalias pick='echo 2'\n"
+                                    'for ((i=0;i<120;i++)); do a[$(pick)]=x; done; echo "${!a[@]}"', b"2\n"),
+    "scalar index with aliases": ("shopt -s expand_aliases\nalias pick='echo 2'\nj=3\n"
+                                  'for ((i=0;i<3000;i++)); do a[$j]=x; done; echo "${!a[@]}"', b"3\n"),
+    "conditional tracing": ('exec 4>trace; BASH_XTRACEFD=4; dir=/; set -x; '
+                            'for ((i=0;i<700;i++)); do [[ -d $dir ]] && (( n+=1 )); done; '
+                            'set +x; grep -F -c "[[ -d / ]]" trace; echo "$n"', b"700\n700\n"),
+    "indirect pure index": ('a=(zero one); ref="a[\\${missing:-1}]"; '
+                            'for ((i=0;i<3000;i++)); do n="${!ref}"; done; echo "$n"', b"one\n"),
+    "failed compound redirects": ('trap "((n+=1))" ERR; { for ((i=0;i<600;i++)); do '
+                                  '{ :; } <absent; done; } 2>/dev/null; echo "$n"', b"600\n"),
+    "seeded random": ('RANDOM=1; for ((i=0;i<12000;i++)); do n=$RANDOM; done; '
+                      'RANDOM=1; echo "$RANDOM"', b"16807\n"),
+    "elapsed seconds": ('SECONDS=10; for ((i=0;i<10000;i++)); do n=$SECONDS; done; '
+                        '(( n >= 10 )) && echo ok', b"ok\n"),
+    "temporary scopes": ('x=outer; f() { local x; unset x; }; '
+                         'for ((i=0;i<4000;i++)); do x=inner f; done; echo "$x"', b"outer\n"),
+    "case attributes": ('declare -u x; for ((i=0;i<6000;i++)); do x=hello; done; echo "$x"', b"HELLO\n"),
+    "IFS empty arguments": ('set -- one "" two; IFS=x; f() { n=$#; }; '
+                            'for ((i=0;i<3000;i++)); do f $@; done; echo "$n"', b"3\n"),
+    "function description": ('f() { echo; }; for ((i=0;i<2000;i++)); do type f; done >listing; '
+                             'grep -c "^    echo$" listing', b"2000\n"),
+    "array serialization": ('a=(first "two words"); for ((i=0;i<4000;i++)); do s="${a[@]@K}"; done; echo "$s"',
+                            b'0 "first" 1 "two words"\n'),
+    "regex conditional": ('for ((i=0;i<4000;i++)); do [[ (xyz =~ xyz) ]] || exit 1; done; echo ok', b"ok\n"),
+    "arithmetic loop lines": ('for ((i=0; i<4000; ++i)); do ((n=LINENO)); done; echo "$n"', b"1\n"),
     "printf time": ('export TZ=America/New_York; for ((i=0;i<2000;i++)); do '
                     'printf -v stamp "%(%F %T %Z %z)T" 1593604800; done; echo "$stamp"',
                     b"2020-07-01 08:00:00 EDT -0400\n"),

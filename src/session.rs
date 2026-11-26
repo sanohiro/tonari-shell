@@ -2,6 +2,7 @@ pub(crate) mod array;
 mod assoc;
 mod declare;
 mod directories;
+mod dynamic;
 mod functions;
 mod getopts;
 pub(crate) mod mapfile;
@@ -44,6 +45,9 @@ struct Variable {
     // A binding keeps its name in saved scopes. The process environment is
     // immutable until exec or entry into a new shell session.
     inherited: std::cell::OnceCell<bool>,
+    dynamic: bool,
+    temporary: bool,
+    letter_case: Option<bool>,
     nameref: bool,
     readonly: bool,
     integer: bool,
@@ -122,6 +126,7 @@ pub struct Session {
     // Only changed variables are stored here. Simple commands inherit the
     // original process environment without building a copy on startup.
     variables: BTreeMap<String, Variable>,
+    dynamic: dynamic::Dynamic,
     has_namerefs: bool,
     reference_depth: std::cell::Cell<u8>,
     opt_offset: usize,
@@ -149,6 +154,9 @@ pub struct Session {
     pub(crate) history: Option<Rc<crate::history::Entries>>,
     pub(crate) initial_history: Option<Rc<crate::history::InitialJournal>>,
     pub command_number: usize,
+    pub(crate) evaluating: bool,
+    pub(crate) trace_depth: u32,
+    pub(crate) signal_line: Option<usize>,
     pub command_string: bool,
     pub command_history_expansion: bool,
     pub stdin_script: bool,
@@ -197,7 +205,7 @@ pub struct Session {
 }
 
 #[derive(Clone, Default)]
-pub struct Bindings(BTreeMap<String, Option<Variable>>, Option<usize>);
+pub struct Bindings(BTreeMap<String, Option<Variable>>, Option<usize>, bool);
 
 enum DirectoryError {
     NoPath(io::Error),
@@ -211,6 +219,26 @@ impl From<io::Error> for DirectoryError {
 }
 
 impl Session {
+    fn convert_case(&self, mut text: String, letter_case: Option<bool>) -> String {
+        match letter_case {
+            Some(upper)
+                if text.is_ascii()
+                    && !text.as_bytes().contains(&if upper { b'i' } else { b'I' }) =>
+            {
+                if upper {
+                    text.make_ascii_uppercase();
+                } else {
+                    text.make_ascii_lowercase();
+                }
+                text
+            }
+            Some(upper) => {
+                crate::pattern::case_chars(text, upper, true, None, self.character_locale())
+            }
+            None => text,
+        }
+    }
+
     pub(crate) fn character_locale(&self) -> CharacterLocale {
         const NAMES: [&str; 3] = ["LC_ALL", "LC_CTYPE", "LANG"];
         static INHERITED: std::sync::OnceLock<CharacterLocale> = std::sync::OnceLock::new();
@@ -248,6 +276,9 @@ impl Session {
                 "BASH",
                 "BASH_VERSION",
                 "BASH_VERSINFO",
+                "SECONDS",
+                "RANDOM",
+                "SRANDOM",
                 "HOSTTYPE",
                 "HOSTNAME",
                 "PS4",
@@ -389,7 +420,10 @@ impl Session {
                     }
                     write!(out, "{name}").and_then(|_| print_variable_value(&mut out, var))
                 } else if let Some(value) = self
-                    .stored_scalar(&name)
+                    .variables
+                    .get(&name)
+                    .filter(|v| !v.dynamic)
+                    .and_then(|v| v.value.as_deref())
                     .map(Cow::Borrowed)
                     .or_else(|| self.get(&name).map(Cow::Owned))
                 {
@@ -462,7 +496,7 @@ impl Session {
                             let mut out = io::BufWriter::with_capacity(512, io::stdout().lock());
                             for (name, on) in self.options(true) {
                                 let result = if enable {
-                                    writeln!(out, "{name:16}{}", if on { "on" } else { "off" })
+                                    writeln!(out, "{name:15}\t{}", if on { "on" } else { "off" })
                                 } else {
                                     writeln!(out, "set {}o {name}", if on { "-" } else { "+" })
                                 };
@@ -582,6 +616,9 @@ impl Session {
             return self.element(name, 0);
         }
         if let Some(var) = self.variables.get(name) {
+            if var.dynamic {
+                return self.dynamic_number(name).map(|v| v.to_string());
+            }
             return var
                 .elements
                 .as_ref()
@@ -598,6 +635,7 @@ impl Session {
 
     fn inherited_value(&self, name: &str) -> Option<String> {
         match name {
+            "RANDOM" | "SECONDS" | "SRANDOM" => self.dynamic_number(name).map(|v| v.to_string()),
             "BASH_SUBSHELL" => Some(self.subshell_depth.to_string()),
             "BASH_ARGV0" => Some(self.arg0.clone()),
             "EPOCHSECONDS" | "EPOCHREALTIME" => {
@@ -624,6 +662,7 @@ impl Session {
                 .ok(),
             "BASH_VERSION" => Some("5.2.0(1)-tonari".into()),
             "BASH_VERSINFO" => self.element(name, 0),
+            "SHELL" => std::env::var(name).ok().or_else(crate::word::account_shell),
             "HOSTNAME" => std::env::var(name).ok().or_else(|| {
                 static HOST: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
                 HOST.get_or_init(|| {
@@ -741,7 +780,13 @@ impl Session {
         Self::ordinary_assignment(name)
             && !Self::builtin_readonly(name)
             && self.variables.get(name).is_some_and(|v| {
-                !v.readonly && !v.integer && !v.nameref && v.elements.is_none() && v.value.is_some()
+                !v.dynamic
+                    && v.letter_case.is_none()
+                    && !v.readonly
+                    && !v.integer
+                    && !v.nameref
+                    && v.elements.is_none()
+                    && v.value.is_some()
             })
     }
 
@@ -753,7 +798,7 @@ impl Session {
         let Some(var) = self.variables.get_mut(name) else {
             return false;
         };
-        if var.elements.is_some() || var.nameref {
+        if var.elements.is_some() || var.nameref || var.letter_case.is_some() || var.dynamic {
             return false;
         }
         let Some(value) = &mut var.value else {
@@ -798,6 +843,13 @@ impl Session {
         if name == "PATH" {
             self.hashes.clear();
         }
+        let live = dynamic::is_dynamic(name) && self.variables.get(name).is_none_or(|v| v.dynamic);
+        if let Some(upper) = self.variables.get(name).and_then(|v| v.letter_case) {
+            value = Cow::Owned(self.convert_case(value.into_owned(), Some(upper)));
+        }
+        if live {
+            self.set_dynamic(name, &value);
+        }
         if let Some(var) = self.variables.get_mut(name) {
             if let Some(elements) = var.elements.as_mut().map(Rc::make_mut) {
                 elements.insert(0, value.into_owned());
@@ -815,10 +867,13 @@ impl Session {
         self.variables.insert(
             name.into(),
             Variable {
+                letter_case: None,
+                temporary: false,
+                dynamic: live,
                 inherited: Default::default(),
                 readonly: false,
                 nameref: false,
-                integer: false,
+                integer: live,
                 array_assigned: false,
                 elements: None,
                 declared: true,
@@ -839,7 +894,7 @@ impl Session {
             return None;
         }
         let var = self.variables.get_mut(name)?;
-        if var.nameref || var.elements.is_some() {
+        if var.dynamic || var.nameref || var.elements.is_some() {
             return None;
         }
         if var.readonly {
@@ -870,7 +925,12 @@ impl Session {
         let Some(var) = self.variables.get_mut(name) else {
             return false;
         };
-        if var.readonly || var.nameref || var.elements.is_some() {
+        if var.dynamic
+            || var.letter_case.is_some()
+            || var.readonly
+            || var.nameref
+            || var.elements.is_some()
+        {
             return false;
         }
         let Some(current) = var.value.as_mut() else {
@@ -918,7 +978,7 @@ impl Session {
             return None;
         }
         let var = self.variables.get(name)?;
-        if var.nameref || var.elements.is_some() {
+        if var.dynamic || var.nameref || var.elements.is_some() {
             return None;
         }
         var.value.as_deref()
@@ -926,7 +986,7 @@ impl Session {
 
     pub(crate) fn scalar_decimal(&self, name: &str) -> Option<i64> {
         let var = self.variables.get(name)?;
-        if var.nameref || var.elements.is_some() {
+        if var.dynamic || var.nameref || var.elements.is_some() {
             return None;
         }
         Self::plain_decimal(var.value.as_deref()?)
@@ -946,7 +1006,9 @@ impl Session {
     }
 
     pub fn integer(&self, name: &str) -> bool {
-        self.variables.get(name).is_some_and(|v| v.integer)
+        self.variables
+            .get(name)
+            .map_or_else(|| dynamic::is_dynamic(name), |v| v.integer)
     }
 
     pub(crate) fn integer_value(
@@ -979,6 +1041,7 @@ impl Session {
                 .map(|&name| (name.into(), self.variables.get(name).cloned()))
                 .collect(),
             names.contains(&"OPTIND").then_some(self.opt_offset),
+            false,
         )
     }
 
@@ -1030,6 +1093,9 @@ impl Session {
             self.variables.insert(
                 name.clone(),
                 Variable {
+                    letter_case: None,
+                    temporary: true,
+                    dynamic: false,
                     inherited: Default::default(),
                     readonly: false,
                     nameref: false,
@@ -1119,17 +1185,37 @@ impl Session {
     }
 
     pub fn line(&self) -> usize {
-        self.current_command.as_ref().map_or(1, |c| c.line)
+        self.signal_line
+            .unwrap_or_else(|| self.current_command.as_ref().map_or(1, |c| c.line))
     }
 
-    pub fn enter_function(&mut self) {
-        self.locals.push(Bindings::default());
+    fn declaration_scope(&self, name: &str) -> Option<usize> {
+        if self.function_depth == 0 {
+            return None;
+        }
+        self.locals
+            .iter()
+            .rposition(|scope| !scope.2 || scope.0.contains_key(name))
+    }
+
+    pub fn enter_scope(&mut self, bindings: &mut Bindings, temporary: bool) {
+        let mut scope = std::mem::take(bindings);
+        scope.2 = temporary;
+        self.locals.push(scope);
+    }
+
+    pub fn leave_scope(&mut self) {
+        let scope = self.locals.pop().expect("variable scope");
+        self.restore(scope);
+    }
+
+    pub fn enter_function(&mut self, bindings: &mut Bindings) {
+        self.enter_scope(bindings, false);
         self.function_depth += 1;
     }
 
     pub fn leave_function(&mut self) {
-        let locals = self.locals.pop().expect("function scope");
-        self.restore(locals);
+        self.leave_scope();
         self.function_depth -= 1;
     }
 
@@ -1212,7 +1298,8 @@ impl Session {
             let integer = self.integer(name);
             let normalized;
             let (value, append) = if integer && let Some(value) = value {
-                match self.integer_value(self.get(name).as_deref(), value, append) {
+                let original = append.then(|| self.get(name)).flatten();
+                match self.integer_value(original.as_deref(), value, append) {
                     Ok(v) => {
                         normalized = v;
                         (Some(normalized.as_str()), false)
@@ -1226,45 +1313,33 @@ impl Session {
             } else {
                 (value, append)
             };
+            if let Some(text) = value {
+                let text = if append {
+                    Cow::Owned(self.get(name).unwrap_or_default() + text)
+                } else {
+                    Cow::Borrowed(text)
+                };
+                self.assign_value(name, text);
+            }
+            // Export takes a snapshot. Launching successive child processes
+            // must not advance the random sequence on behalf of the parent.
+            let snapshot = self
+                .variables
+                .get(name)
+                .filter(|var| var.dynamic)
+                .and_then(|_| self.dynamic_number(name));
             if let Some(var) = self.variables.get_mut(name) {
-                if let Some(array) = var.elements.as_mut().map(Rc::make_mut) {
-                    if let Some(v) = value {
-                        if append {
-                            array.append_first(v);
-                        } else {
-                            array.insert(0, v.into());
-                        }
-                        var.array_assigned = true;
-                    }
-                    var.exported = !remove;
-                    if !remove {
-                        bindings.0.remove(name);
-                    }
-                    continue;
+                if let Some(number) = snapshot {
+                    var.value = Some(number.to_string());
                 }
+                var.exported = !remove;
+                var.declared = true;
+            } else {
+                let mut var = self.declared_variable(name, false).unwrap_or_default();
+                var.exported = !remove;
+                var.declared = true;
+                self.variables.insert(name.into(), var);
             }
-            let value = match value {
-                Some(v) if append => Some(self.get(name).unwrap_or_default() + v),
-                Some(v) => Some(v.to_owned()),
-                None => self.get(name),
-            };
-            if name == "GLOBIGNORE" && arg.contains('=') {
-                self.shopt.glob.set_ignore(value.as_deref());
-            }
-            self.variables.insert(
-                name.into(),
-                Variable {
-                    inherited: Default::default(),
-                    nameref: false,
-                    readonly,
-                    integer,
-                    array_assigned: false,
-                    elements: None,
-                    declared: true,
-                    value,
-                    exported: !remove,
-                },
-            );
             if !remove {
                 // An explicit export inside this invocation promotes its prefix
                 // binding into the surrounding shell.
@@ -1306,6 +1381,9 @@ impl Session {
                 &mut out,
                 &name,
                 &Variable {
+                    letter_case: None,
+                    temporary: false,
+                    dynamic: false,
                     inherited: Default::default(),
                     readonly: false,
                     nameref: false,
@@ -1334,12 +1412,12 @@ impl Session {
         if name == "PATH" {
             self.hashes.clear();
         }
-        if !self.shopt.localvar_unset
-            && let Some(index) = self
-                .locals
-                .iter()
-                .rposition(|scope| scope.0.contains_key(name))
-            && index + 1 < self.locals.len()
+        if let Some(index) = self
+            .locals
+            .iter()
+            .rposition(|scope| scope.0.contains_key(name))
+            && (self.variables.get(name).is_some_and(|v| v.temporary)
+                || !self.shopt.localvar_unset && index + 1 < self.locals.len())
         {
             // Unsetting a caller's local exposes the binding it was shadowing.
             let scope = &mut self.locals[index];
@@ -1361,6 +1439,9 @@ impl Session {
         self.variables.insert(
             name.into(),
             Variable {
+                letter_case: None,
+                temporary: false,
+                dynamic: false,
                 inherited: Default::default(),
                 readonly: false,
                 nameref: false,
@@ -1484,14 +1565,10 @@ impl Session {
                     continue;
                 }
             }
-            if functions_only {
+            if resolve_function {
                 self.forget_function(name);
-                continue;
             }
-            if is_identifier(name) {
-                if resolve_function {
-                    self.forget_function(name);
-                }
+            if !functions_only && is_identifier(name) {
                 self.unset_variable(name);
             }
         }
@@ -1743,6 +1820,9 @@ impl Session {
             self.variables.insert(
                 "OLDPWD".into(),
                 Variable {
+                    letter_case: None,
+                    temporary: false,
+                    dynamic: false,
                     inherited: Default::default(),
                     readonly: false,
                     nameref: false,
@@ -1787,6 +1867,8 @@ impl Variable {
             (self.nameref, b'n'),
             (self.readonly, b'r'),
             (self.exported, b'x'),
+            (self.letter_case == Some(false), b'l'),
+            (self.letter_case == Some(true), b'u'),
         ]
         .into_iter()
         .filter_map(|(on, flag)| on.then_some(flag))
@@ -1794,6 +1876,67 @@ impl Variable {
 }
 
 impl Session {
+    pub(crate) fn array_declaration_fields(&self, name: &str) -> Vec<String> {
+        let Some(v) = self.declared_variable(name, false) else {
+            return Vec::new();
+        };
+        let mut assignment = name.as_bytes().to_vec();
+        print_variable_value(&mut assignment, &v).expect("in-memory write");
+        assignment.pop();
+        vec![
+            "declare".into(),
+            format!(
+                "-{}",
+                v.attribute_flags().map(char::from).collect::<String>()
+            ),
+            String::from_utf8(assignment).unwrap(),
+        ]
+    }
+
+    pub(crate) fn array_pair_fields(&self, name: &str, separate: bool) -> Vec<String> {
+        let Some(var) = self.declared_variable(name, false) else {
+            return Vec::new();
+        };
+        let mut fields = Vec::new();
+        let mut text = Vec::new();
+        let mut add = |key: &str, value: &str| {
+            if separate {
+                fields.extend([key.to_owned(), value.to_owned()]);
+            } else {
+                if !text.is_empty() {
+                    text.push(b' ');
+                }
+                if key
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || "_-./".contains(c))
+                    && !key.is_empty()
+                {
+                    text.extend_from_slice(key.as_bytes());
+                } else {
+                    print_value(&mut text, key).expect("in-memory write");
+                }
+                text.push(b' ');
+                print_value(&mut text, value).expect("in-memory write");
+            }
+        };
+        if let Some(map) = var.associative() {
+            for (key, value) in map.ordered() {
+                add(key, value);
+            }
+            if !text.is_empty() {
+                text.push(b' ');
+            }
+        } else if let Some(array) = var.elements.as_deref() {
+            for (index, value) in array.iter() {
+                add(&index.to_string(), value);
+            }
+        }
+        if !text.is_empty() {
+            fields.push(String::from_utf8(text).unwrap());
+        }
+        fields
+    }
+
     pub(crate) fn attributes(&self, name: &str) -> Option<(String, bool)> {
         let resolved = self.reference_name(name).ok()?;
         let name = array::subscript(&resolved).map_or(resolved.as_ref(), |(base, _)| base);
@@ -1889,14 +2032,17 @@ fn print_value(out: &mut impl Write, value: &str) -> io::Result<()> {
     if value.bytes().any(|c| c.is_ascii_control()) {
         return out.write_all(&printf::ansi_quote(value.as_bytes(), false));
     }
-    write!(out, "\"")?;
-    for c in value.chars() {
-        if matches!(c, '"' | '\\' | '$' | '`') {
-            write!(out, "\\")?;
+    out.write_all(b"\"")?;
+    let mut start = 0;
+    for (i, &byte) in value.as_bytes().iter().enumerate() {
+        if matches!(byte, b'"' | b'\\' | b'$' | b'\x60') {
+            out.write_all(&value.as_bytes()[start..i])?;
+            out.write_all(b"\\")?;
+            start = i;
         }
-        write!(out, "{c}")?;
     }
-    write!(out, "\"")
+    out.write_all(&value.as_bytes()[start..])?;
+    out.write_all(b"\"")
 }
 
 fn same_directory(left: &Path, right: &Path) -> bool {
@@ -1937,7 +2083,7 @@ mod tests {
         let key = "TONARI_TEST_SCOPE";
         let mut session = Session::default();
         session.assign(key, "global");
-        session.enter_function();
+        session.enter_function(&mut Default::default());
         assert_eq!(
             session.declare("local", &[format!("{key}=local")], &[], 0),
             crate::Flow::Continue(0)

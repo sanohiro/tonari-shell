@@ -195,7 +195,7 @@ pub fn help(mut args: &[String]) -> u8 {
         }
     }
     if !any {
-        eprintln!("tonari: help: no matching help topic");
+        eprintln!("tonari: help: no help topics match the requested pattern");
     }
     u8::from(!any)
 }

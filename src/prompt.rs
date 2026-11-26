@@ -76,7 +76,9 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars) -> String {
             let mut buf = [0u8; 256];
             if unsafe { libc::ttyname_r(0, buf.as_mut_ptr().cast(), buf.len()) } == 0 {
                 let tty = unsafe { CStr::from_ptr(buf.as_ptr().cast()) }.to_string_lossy();
-                output.push_str(tty.rsplit('/').next().unwrap_or(""));
+                output.push_str(tty.rsplit('/').next().unwrap_or("tty"));
+            } else {
+                output.push_str("tty");
             }
         }
         'd' | 't' | 'T' | '@' | 'A' | 'D' => {
@@ -111,9 +113,7 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars) -> String {
                     break;
                 }
             }
-            if let Some(ch) = char::from_u32(n) {
-                output.push(ch);
-            }
+            output.push(char::from(n as u8));
         }
         'u' => {
             let user = unsafe { libc::getpwuid(libc::geteuid()) };

@@ -31,7 +31,12 @@ pub(crate) fn builtin(session: &mut Session, args: &[String], status: u8) -> Flo
         .current_command
         .as_ref()
         .map_or(1, |location| location.line);
-    super::text(session, source, status, false, false, Some(line))
+    let previous = std::mem::replace(&mut session.evaluating, true);
+    session.trace_depth += 1;
+    let flow = super::text(session, source, status, false, false, Some(line));
+    session.trace_depth -= 1;
+    session.evaluating = previous;
+    flow
 }
 
 #[derive(Clone, Default)]

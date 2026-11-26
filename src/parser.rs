@@ -144,9 +144,26 @@ pub(crate) fn suggestion_end(line: &str, cursor: usize) -> usize {
 
 pub(crate) fn is_function_name(name: &str) -> bool {
     !name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_alphanumeric() || "_-.+:@/".contains(c))
+        && !name.bytes().any(|b| {
+            matches!(
+                b,
+                0 | b' '
+                    | b'\t'
+                    | b'\n'
+                    | b'$'
+                    | b'\''
+                    | b'"'
+                    | b'\\'
+                    | b'\x60'
+                    | b'('
+                    | b')'
+                    | b'<'
+                    | b'>'
+                    | b';'
+                    | b'|'
+                    | b'&'
+            )
+        })
 }
 pub(crate) use here_doc::{HereDocHint, expansion_string};
 use lexer::{LexWord, Token, lex};
@@ -162,16 +179,42 @@ pub(crate) fn prompt_word(
 ) -> Result<Word, Error> {
     let mut builder = crate::word::WordBuilder::default();
     let mut chars = source.chars();
+    let mut backslash = false;
     while let Some(c) = chars.next() {
+        if backslash && c != '\\' {
+            backslash = false;
+            if matches!(c, '$' | '\x60' | '"') {
+                builder.push(c);
+                continue;
+            }
+            builder.push('\\');
+        }
         match c {
             '$' if expand => lexer::dollar(&mut chars, &mut builder, true)?,
-            '`' if expand => lexer::backquote(&mut chars, &mut builder, true)?,
-            '\\' => match chars.next() {
-                Some(code) => builder.literal(&escape(code, &mut chars)),
-                None => builder.push('\\'),
-            },
+            '\x60' if expand => lexer::backquote(&mut chars, &mut builder, true)?,
+            '\\' => {
+                let Some(code) = chars.next() else {
+                    builder.push('\\');
+                    break;
+                };
+                if expand && code == '\\' {
+                    if backslash {
+                        builder.push('\\');
+                    }
+                    backslash = !backslash;
+                } else {
+                    if backslash {
+                        builder.push('\\');
+                        backslash = false;
+                    }
+                    builder.literal(&escape(code, &mut chars));
+                }
+            }
             c => builder.push(c),
         }
+    }
+    if backslash {
+        builder.push('\\');
     }
     Ok(builder.finish())
 }
@@ -193,6 +236,7 @@ pub enum Target {
 
 #[derive(Debug, Clone)]
 pub struct Redirect<W = String> {
+    pub line: usize,
     pub variable: Option<Box<str>>,
     pub fd: i32,
     pub target: Target,
@@ -251,6 +295,7 @@ impl Condition {
 #[derive(Debug, Clone)]
 pub struct Location {
     source: Rc<str>,
+    subscript_aliases: crate::alias::Aliases,
     start: usize,
     pub(crate) end: usize,
     pub line: usize,
@@ -261,6 +306,7 @@ impl Location {
             start: 0,
             end: source.len(),
             source: source.into(),
+            subscript_aliases: Default::default(),
             line,
         }
     }
@@ -480,6 +526,50 @@ pub(crate) fn validate_tail(source: &str, session: &crate::Session, line: usize)
     })
 }
 
+pub(crate) fn here_word(session: &crate::Session, source: &str) -> Result<Word, Error> {
+    with_read_options(session, session.line(), || expansion_string(source))
+}
+
+// A subscript written in the script can contain its own command substitution.
+// POSIX reads aliases with the surrounding command. Bash mode consults the
+// live aliases when it expands the subscript.
+pub(crate) fn with_subscript_aliases<T>(
+    session: &crate::Session,
+    source: &str,
+    parse: impl FnOnce() -> T,
+) -> T {
+    let frozen = session
+        .current_command
+        .as_ref()
+        .and_then(|s| s.subscript_aliases.0.as_ref());
+    let live = if !session.posix && session.shopt.expand_aliases {
+        session.aliases.0.as_ref()
+    } else {
+        None
+    };
+    let Some(table) = frozen.or(live) else {
+        return parse();
+    };
+    if !source.contains("$(") && !source.contains('`') {
+        return parse();
+    }
+    // A function may be read in POSIX mode and called after switching back.
+    // Names resolved by the earlier read take precedence over later aliases.
+    let table = match (frozen, live) {
+        (Some(first), Some(second)) if !Rc::ptr_eq(first, second) => {
+            let mut combined = second.as_ref().clone();
+            combined.extend(
+                first
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone())),
+            );
+            Rc::new(combined)
+        }
+        _ => Rc::clone(table),
+    };
+    aliases::with(crate::alias::Aliases(Some(table)), parse)
+}
+
 fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnce() -> T) -> T {
     let read = || {
         let old_line = FIRST_LINE.replace(line);
@@ -511,6 +601,7 @@ pub(crate) fn literal_assignment(source: &str, line: usize) -> Option<Statement>
     let (name, value) = plain_assignment(command)?;
     let location = Location {
         source: source.into(),
+        subscript_aliases: Default::default(),
         start: 0,
         end: command.len(),
         line,
@@ -596,6 +687,14 @@ impl Reader {
             .map_or(self.spans.len(), |s| s.token_count(self.spans.len()));
         count - self.tokens.len()
     }
+    fn subscript_aliases(&self) -> crate::alias::Aliases {
+        if POSIX.get() {
+            self.aliases.clone()
+        } else {
+            Default::default()
+        }
+    }
+
     fn location(&self, from: usize) -> Location {
         if let Some(expanded) = &self.alias_source {
             return expanded.location(self, from, self.position());
@@ -609,6 +708,7 @@ impl Reader {
         };
         Location {
             source: self.source.clone(),
+            subscript_aliases: self.subscript_aliases(),
             start,
             end,
             line: FIRST_LINE.get() + self.newlines.partition_point(|&n| n < start),
@@ -781,6 +881,7 @@ impl Reader {
         while self.has_pipe() {
             if matches!(self.tokens.pop_front(), Some(Token::PipeBoth)) {
                 pipeline.last_mut().unwrap().redirects.push(Redirect {
+                    line: self.location(self.position().saturating_sub(1)).line,
                     variable: None,
                     fd: 2,
                     target: Target::Duplicate,
@@ -867,9 +968,8 @@ impl Reader {
             Some("while" | "until") => self.while_clause(),
             Some("for" | "select") => self.for_clause(),
             Some("function") => self.function(true),
-            Some(name)
-                if matches!(self.tokens.get(1), Some(Token::LeftParen))
-                    && is_function_name(name) =>
+            _ if matches!(self.peek(), Some(Token::Word(_)))
+                && matches!(self.tokens.get(1), Some(Token::LeftParen)) =>
             {
                 self.function(false)
             }
@@ -923,10 +1023,12 @@ impl Reader {
 
     fn test_and(&mut self) -> Result<Expr, Error> {
         let mut result = self.test_atom()?;
+        self.newlines();
         while matches!(self.peek(), Some(Token::And)) {
             self.tokens.pop_front();
             self.newlines();
             result = Expr::And(Box::new(result), Box::new(self.test_atom()?));
+            self.newlines();
         }
         Ok(result)
     }
@@ -1131,9 +1233,14 @@ impl Reader {
                 self.tokens.pop_front();
             }
             self.newlines();
-            self.expect("do")?;
-            let body = self.list(&["done"])?;
-            self.expect("done")?;
+            let (open, close) = if self.keyword() == Some("{") {
+                ("{", "}")
+            } else {
+                ("do", "done")
+            };
+            self.expect(open)?;
+            let body = self.list(&[close])?;
+            self.expect(close)?;
             return Ok(Command::ForArithmetic {
                 init: init.into(),
                 condition: condition.into(),
@@ -1142,12 +1249,26 @@ impl Reader {
             });
         }
         self.alias_at(false, Some(&[]))?;
-        let name = self.name()?;
+        let start_name = self.position();
+        let name = match self.operand() {
+            Some(Token::Word(LexWord {
+                word: Word::Literal(name),
+                protected: false,
+                ..
+            })) => name,
+            Some(Token::Word(_)) => self.location(start_name).text().into(),
+            None => return Err(Error::Incomplete("expected a loop variable")),
+            _ => return Err(Error::Invalid("expected a loop variable")),
+        };
         self.alias_newlines(&["in", "do"])?;
         let words = if self.keyword() == Some("in") {
             self.tokens.pop_front();
             let mut words = Vec::new();
-            while matches!(self.peek(), Some(Token::Word(_) | Token::Reserved(_))) {
+            loop {
+                self.expand_alias(false)?;
+                if !matches!(self.peek(), Some(Token::Word(_) | Token::Reserved(_))) {
+                    break;
+                }
                 if let Some(Token::Word(word)) = self.operand() {
                     words.push(word.word);
                 }
@@ -1177,12 +1298,14 @@ impl Reader {
         if keyword {
             self.tokens.pop_front();
         }
+        let start_name = self.position();
         let name = match self.operand() {
             Some(Token::Word(LexWord {
                 word: Word::Literal(name),
                 protected: false,
                 ..
-            })) if is_function_name(&name) => name,
+            })) => name,
+            Some(Token::Word(_)) => self.location(start_name).text().into(),
             None => return Err(Error::Incomplete("expected a function name")),
             _ => return Err(Error::Invalid("invalid function name")),
         };
@@ -1204,6 +1327,9 @@ impl Reader {
                 Error::Invalid("expected a compound function body")
             }
         })?;
+        if matches!(compound, Command::Function { .. }) {
+            return Err(Error::Invalid("expected a compound function body"));
+        }
         let body = if self.has_redirect() {
             // Function redirections are applied when the function is invoked.
             vec![Statement {
@@ -1236,6 +1362,7 @@ impl Reader {
         token: Token,
         redirects: &mut Vec<Redirect<Word>>,
     ) -> Result<(), Error> {
+        let line = self.location(self.position().saturating_sub(1)).line;
         match token {
             Token::DescriptorName(name) => {
                 let first = redirects.len();
@@ -1251,12 +1378,14 @@ impl Reader {
                     return Err(Error::Invalid("expected a redirection target"));
                 };
                 redirects.push(Redirect {
+                    line,
                     variable: None,
                     fd: 1,
                     target,
                     word,
                 });
                 redirects.push(Redirect {
+                    line,
                     variable: None,
                     fd: 2,
                     target: Target::Duplicate,
@@ -1276,6 +1405,7 @@ impl Reader {
                     target
                 };
                 redirects.push(Redirect {
+                    line,
                     variable: None,
                     fd,
                     target,
@@ -1320,19 +1450,32 @@ impl Reader {
                         );
                     if matches!(self.peek(), Some(Token::ArrayStart)) {
                         let name = assignment.ok_or(Error::Invalid("invalid array assignment"))?;
-                        if !is_identifier(name.strip_suffix('+').unwrap_or(&name))
+                        let base = name.trim_end_matches('+');
+                        if matches!(cmd.words.first().and_then(Word::as_literal), Some("let")) {
+                            let start = self.position();
+                            self.array_items()?;
+                            let expr = format!("{name}={}", self.location(start).text());
+                            cmd.words.push(lexer::arithmetic_word(&expr)?.declaration());
+                            continue;
+                        }
+                        if !(is_identifier(base)
+                            || crate::session::array::subscript(base).is_some())
                             || !(cmd.words.is_empty() || declaration)
+                            || cmd.words.first().and_then(Word::as_literal) == Some("command")
                         {
                             return Err(Error::Invalid("invalid array assignment"));
                         }
+                        let source_start = self.position() - 1;
                         let items = self.array_items()?;
                         let operand = declaration.then_some(cmd.words.len());
                         if declaration {
                             cmd.words
                                 .push(Word::Literal(name.trim_end_matches('+').into()));
                         }
-                        cmd.assignments
-                            .push((name, Assignment::Array(operand, items)));
+                        cmd.assignments.push((
+                            name,
+                            Assignment::Array(operand, items, self.location(source_start)),
+                        ));
                         continue;
                     }
                     if cmd.words.is_empty() {
@@ -1341,7 +1484,10 @@ impl Reader {
                             cmd.assignments.push((name, Assignment::Scalar(word)));
                             continue;
                         }
-                        if !protected && word.as_literal().is_some_and(reserved) {
+                        if cmd.assignments.is_empty()
+                            && !protected
+                            && word.as_literal().is_some_and(reserved)
+                        {
                             return Err(Error::Invalid("unexpected reserved word"));
                         }
                         // Most simple commands have only the name and one operand.

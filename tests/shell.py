@@ -55,6 +55,207 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_nested_temporary_variable_scopes(self):
+        self.compare("""v=outer
+unlocal() { unset -v v; }
+f() {
+    local v
+    echo "$v"
+    v=second eval 'local v=third; unlocal; echo "$v"; unlocal; echo "$v"'
+}
+v=first f
+echo "$v" """, 0, b"first\nfirst\nouter\nouter\n", minimum=5)
+
+    def test_dynamic_integers_and_ordinary_shadow(self):
+        self.compare("""RANDOM=1; echo "$RANDOM $RANDOM"
+SECONDS=12; ((SECONDS >= 12 && SECONDS < 15)) || exit 1
+((SRANDOM >= 0 && SRANDOM <= 4294967295)) || exit 1
+f() { local RANDOM=abc; echo "$RANDOM"; }
+f; unset SECONDS; SECONDS=9; declare -p SECONDS""", 0,
+                     b'16807 10791\nabc\ndeclare -- SECONDS="9"\n', minimum=5)
+
+    def test_compound_redirect_failure_and_tested_context(self):
+        self.compare("""set -e
+{ :; } <missing-tonari || echo handled
+{ :; } <missing-tonari
+echo bad""", 1, b"handled\n")
+
+    def test_export_snapshots_dynamic_integers(self):
+        self.compare('RANDOM=1; export RANDOM; printenv RANDOM; printenv RANDOM; echo "$RANDOM"',
+                     0, b"16807\n16807\n10791\n", minimum=5)
+
+    def test_unrelated_local_survives_prefixed_eval(self):
+        self.compare("""f() {
+    IFS= eval 'local v=keep'
+    printf '<%s>' "$v"
+}
+f; echo "<${v-unset}>" """, 0, b"<keep><unset>\n")
+
+    def test_indirect_readonly_subscript_forms(self):
+        self.compare("""a=(zero one); b=1
+for ref in 'a[$b]' 'a[${c:-1}]' 'a[$((3-2))]'; do echo "${!ref}"; done""",
+                     0, b"one\none\none\n", minimum=5)
+
+    def test_indirect_subscript_reads_dynamic_operand_once(self):
+        self.compare('a=(even odd); RANDOM=1; ref="a[RANDOM%2]"; echo "${!ref} $RANDOM"',
+                     0, b"odd 10791\n", minimum=5)
+
+    def test_compound_redirect_reports_failing_operator_line(self):
+        proc = self.command(TONARI, """trap 'echo line=$LINENO' ERR
+{ true
+  true
+} >first \\
+  <missing-tonari
+echo end""")
+        self.assertEqual((proc.returncode, proc.stdout), (0, b"line=5\nend\n"), proc.stderr)
+        self.assertTrue((self.cwd / "first").exists())
+
+    def test_generated_ascii_range_keeps_each_character(self):
+        expected = b"".join(b"<"+bytes([n])+b">" for n in range(ord("Z"), ord("a")+1))
+        proc = self.command(TONARI, "printf '%s' '<'{Z..a}'>'")
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, expected, b""))
+
+    def test_subshell_loop_control_reports_failure(self):
+        proc = self.command(TONARI, """for i in 1; do
+    (continue; echo unreachable)
+    echo child=$?
+    (for j in 1; do continue; done; echo inner)
+done""")
+        self.assertEqual((proc.returncode, proc.stdout), (0, b"child=1\ninner\n"))
+        self.assertIn(b"subshell", proc.stderr)
+
+    def test_loop_control_usage_error_recovers_at_input_boundary(self):
+        script = "for x in a b; do\n echo $x\n continue 1 2\ndone\necho next\n"
+        path = self.cwd / "commands"
+        path.write_text(script)
+        for shell in self.shells_for(5):
+            command = self.command(shell, script)
+            self.assertEqual((command.returncode, command.stdout), (1, b"a\n"))
+            for args, data in (([str(path)], b""), ([], script.encode())):
+                run = subprocess.run([shell, *args], input=data, cwd=self.cwd, env=self.env,
+                                     capture_output=True, timeout=5)
+                self.assertEqual((run.returncode, run.stdout), (0, b"a\nnext\n"), run.stderr)
+
+    def test_trace_expands_conditional_operands_once(self):
+        script = """exec 4>trace; BASH_XTRACEFD=4; set -x
+dir=/; if [[ -d $dir ]]; then (( a = 42 )); fi
+[[ $(echo once >>calls; echo yes) = yes ]] || exit 1
+set +x; cat calls; echo "$a" """
+        for shell in self.shells_for(5):
+            (self.cwd / "calls").write_text("")
+            proc = self.command(shell, script)
+            self.assertEqual((proc.returncode, proc.stdout), (0, b"once\n42\n"), proc.stderr)
+            trace = (self.cwd / "trace").read_bytes()
+            self.assertIn(b"+ [[ -d / ]]\n", trace)
+            self.assertIn(b" a = 42 ", trace)
+
+    def test_alias_in_a_source_array_subscript(self):
+        for posix in (False, True):
+            for late in (False, True):
+                options = ("set -o posix\n" if posix else "") + "shopt -s expand_aliases\n"
+                alias = "alias pick='echo 2'\n"
+                source = options + "pick() { echo 3; }\n" + ("" if late else alias)
+                source += """f() {
+    a[$(pick)]=simple
+    b=([$(pick)]=compound)
+    declare -A m
+    m[$(pick)]=key
+    echo "${!a[@]} ${!b[@]} ${!m[@]}"
+}
+""" + (alias if late else "") + "f"
+                index = "3" if posix and late else "2"
+                self.compare(source, 0, (" ".join([index] * 3) + "\n").encode(), minimum=5)
+
+    def test_alias_in_subscript_after_posix_mode_switch(self):
+        self.compare("""set -o posix
+shopt -s expand_aliases
+alias picked='echo 2'
+f() { a[$(picked)]=A; a[$(later)]=B; }
+set +o posix
+shopt -s expand_aliases
+alias picked='echo 4' later='echo 3'
+f; echo "${!a[@]}" """, 0, b"2 3\n", minimum=5)
+
+    def test_function_parentheses_from_trailing_space_alias(self):
+        self.compare(r"""shopt -s expand_aliases
+alias g='g( ' q=')'
+g q
+{ echo G; }
+\g""", 0, b"G\n")
+
+    def test_incomplete_arithmetic_at_end_of_heredoc(self):
+        self.compare("echo $((cat <<EOF\n+(\nEOF\n))", 2)
+
+    def test_negated_bracket_pattern_with_closing_bracket_member(self):
+        proc = self.command(TONARI, """pat='[^]]'; s='ab^]cd^'
+printf '%s' "${s//$pat/z}" """)
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"zzz]zzz", b""))
+
+    def test_pipeline_status_with_open_and_closed_reader(self):
+        self.compare("""{ echo hi; exit 55; } | { cat >/dev/null; false; }
+echo "${PIPESTATUS[*]}"
+{ while printf '%04096d\\n' 1; do :; done; } | false
+echo "${PIPESTATUS[*]}" """, 0, b"55 1\n141 1\n")
+
+    def test_unquoted_punctuation_in_function_names(self):
+        self.compare("""%() { :; }; declare -F '%'; unset '%'; declare -F '%'; echo gone=$?
+a,b%() { echo comma; }; 'a,b%'
+f?() { echo question; }; 'f?'
+""", 0, b"%\ngone=1\ncomma\nquestion\n", minimum=5)
+        for shell in self.shells_for(5):
+            run = self.command(shell, "a,b%() { echo child; }; export -f 'a,b%'; \"$1\" -c 'a,b%'",
+                               "parent", str(shell))
+            self.assertEqual((run.returncode, run.stdout, run.stderr), (0, b"child\n", b""))
+
+    def test_posix_function_name_validation_at_definition(self):
+        for shell in self.shells_for(5):
+            for name in ("a,b%", "eval"):
+                with self.subTest(shell=shell, name=name):
+                    definition = name + "() { echo replaced; }"
+                    for prefix in ("", "register() { " + definition + "; }; register; "):
+                        proc = self.command(shell, prefix + "set -o posix; " +
+                                            ("register" if prefix else definition) + "; echo after")
+                        if name == "a,b%" and shell == BASH and not self.bash_before_53():
+                            # Bash 5.3 accepts punctuation as a POSIX extension.
+                            self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                                             (0, b"after\n", b""))
+                        else:
+                            self.assertEqual((proc.returncode, proc.stdout), (2, b""))
+                            self.assertTrue(proc.stderr)
+                    skipped = self.command(shell, "set -o posix; if false; then " + definition +
+                                           "; fi; echo ok")
+                    self.assertEqual((skipped.returncode, skipped.stdout, skipped.stderr),
+                                     (0, b"ok\n", b""))
+
+    def test_case_attributes_on_arrays_and_export(self):
+        self.compare("""declare -u s=one; s+=two; export s+=three; echo "$s"
+declare -la a=(AA Bb); a[1]+=CC; echo "${a[@]}"
+declare -uA m=([x]=Hi); m[x]+=bye; echo "${m[x]}"
+declare +u s; s=Mixed; echo "$s" """, 0,
+                     b"ONETWOTHREE\naa bbcc\nHIBYE\nMixed\n", minimum=5)
+
+    def test_prompt_names_job_number_and_terminal_fallback(self):
+        self.compare(r"""p='\l'; echo "${p@P}"
+p='\j'; sleep 2 & echo "${p@P}" | cat; kill $!; wait $! 2>/dev/null || :
+echo "${p@P}" """, 0, b"tty\n1\n0\n", minimum=5)
+
+    def test_nonwhite_ifs_empty_parameter_boundaries(self):
+        self.compare("""set -- '' aa '' ''; IFS=x
+printf '<%s>' $@; echo; printf '<%s>' pre$*post; echo""", 0,
+                     b"<> <aa> <>".replace(b" ", b"") + b"\n<pre><aa><><post>\n")
+
+    def test_explicit_interactive_history_file(self):
+        self.env["HISTFILE"] = str(self.cwd / "entries")
+        for shell in (BASH, TONARI):
+            with self.subTest(shell=shell):
+                path = self.cwd / "entries"
+                path.write_text("older\n")
+                out = subprocess.run([shell, "--noprofile", "--norc", "-i"], cwd=self.cwd,
+                    env=self.env, input=b"echo current\nhistory\n", capture_output=True, timeout=5)
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn(b"older", out.stdout)
+                self.assertEqual(path.read_text(), "older\necho current\nhistory\n")
+
     def test_timestamped_history_import_append_and_write(self):
         (self.cwd / "entries").write_bytes(b"#100\nfirst\nsecond\n#120\nthird\n")
         self.compare(r"""HISTTIMEFORMAT='%s '; history -c; history -r entries
@@ -2735,6 +2936,26 @@ test "$(jobs -p)" = "$p" && echo direct
 test "$(true; f)" = "$p" && echo nested
 test "$(jobs -p | cat)" = "$p" && echo pipe
 (jobs -p); wait "$p"; echo "$?" """, 0, b"direct\nnested\npipe\n0\n")
+
+    def test_posix_wait_reports_status_without_job_notice(self):
+        sh = self.cwd / "sh"
+        sh.symlink_to(TONARI)
+        script = """/bin/sh -c 'kill -HUP $$' & p=$!
+wait "$p"; code=$?; kill -l "$code"; exit "$code" """
+        for argv, notice in (([TONARI], True), ([TONARI, "--posix"], False), ([sh], False)):
+            with self.subTest(argv=argv):
+                proc = subprocess.run([*argv, "-c", script], cwd=self.cwd, env=self.env,
+                                      capture_output=True, timeout=5)
+                self.assertEqual((proc.returncode, proc.stdout), (129, b"HUP\n"))
+                if notice:
+                    self.assertIn(b"Hangup", proc.stderr)
+                else:
+                    self.assertEqual(proc.stderr, b"")
+        proc = self.command(sh, "wait 99999999")
+        self.assertEqual(proc.returncode, 127)
+        proc = self.command(sh, "wait %missing")
+        self.assertEqual(proc.returncode, 127)
+        self.assertIn(b"not a valid child or job", proc.stderr)
 
     def test_wait_next_selected_ids_and_signals(self):
         version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"')

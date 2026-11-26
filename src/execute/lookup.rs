@@ -1,5 +1,5 @@
 use std::ffi::{CString, OsString};
-use std::io::{self, Write};
+use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
@@ -141,7 +141,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
             session.search_path(&[])
         }
     });
-    let mut out = io::stdout().lock();
+    let mut out = Vec::new();
     let mut any = false;
     let mut all = true;
     for name in &cmd.words[index..] {
@@ -177,7 +177,13 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
         ] {
             if !force_path && present && (!found || search_all) {
                 let result = match format {
-                    Format::Verbose => writeln!(out, "{name} is {label}"),
+                    Format::Verbose => writeln!(out, "{name} is {label}").and_then(|()| {
+                        if kind == "function" {
+                            session.print_function(&mut out, name)
+                        } else {
+                            Ok(())
+                        }
+                    }),
                     Format::Kind => writeln!(out, "{kind}"),
                     Format::Name => writeln!(out, "{name}"),
                     Format::Path => Ok(()),
@@ -253,7 +259,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
         any |= found;
         all &= found;
     }
-    if out.flush().is_err() {
+    if crate::builtins::write_stdout_for(&cmd.words[0], &out) != 0 {
         return 1;
     }
     u8::from(

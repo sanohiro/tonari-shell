@@ -4,6 +4,53 @@ The original full comparison had 356 joint failures across both operating system
 
 両シェルが同じ結果でも、それだけで正しいとは判定しません。表には上流の採点をそのまま残し、実行したコマンド、標準出力・標準エラー・終了値、入力後に確定した内容を照合しました。履歴設定や外部コマンドの差で説明できるケースと、実際に Tonari の修正が必要だったケースが含まれます。[互換性の判断基準](../../compatibility.md#intentional-differences)
 
+<a id="shell-behavior"></a>
+
+## Execution, expansion and interactive behavior / 実行・展開・対話操作
+
+The release at **42f53ff** ran the complete pinned Oils and bensch inventories on Ubuntu 24.04 x86-64 with Bash 5.2.21 and macOS 15 arm64 with Bash 5.3.20. Each host ran 2,770 language scripts, 875 builtin cases and 1,014 PTY sequences. The file of remaining failures includes per-host findings for both Bash-only and joint failures, the actual process statuses and output excerpts. The native CI artifacts retain the complete raw streams for scripts. [9,318 case results and implementation paths](shell-behavior-replay.tsv.gz) · [Reviewed failures](shell-behavior-findings.tsv.gz) · [Full native audit](https://github.com/sanohiro/tonari-shell/actions/runs/45766999152)
+
+| Host | Suite | Both pass | Only Bash | Only Tonari | Neither | Timed | Tonari ≤ ⅔ Bash | Tonari > Bash |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Linux x86-64 | Oils | 2661 | 67 | 1 | 41 | 2119 | 1658 | 16 |
+| Linux x86-64 | bensch builtins | 831 | 2 | 0 | 42 | 818 | 796 | 0 |
+| Linux x86-64 | bensch PTY | 983 | 0 | 28 | 3 | 983 | 231 | 237 |
+| macOS arm64 | Oils | 2515 | 49 | 39 | 167 | 1993 | 1591 | 51 |
+| macOS arm64 | bensch builtins | 830 | 2 | 0 | 43 | 817 | 801 | 3 |
+| macOS arm64 | bensch PTY | 933 | 0 | 25 | 56 | 933 | 353 | 269 |
+
+Compared with the previous published replay, 99 Oils cases on Linux and 96 on macOS moved from a Tonari failure to an accepted grade. Among the rows graded as Bash-only in this replay, Tonari meets the ordinary Oils assertions in 31 on Linux and 21 on macOS. Oils assigns the remaining failures their original upstream grade. A passing ordinary assertion checks the complete ordinary expectation for that case.
+
+Linux と macOS の件数には参照 Bash の版、GNU と BSD の外部コマンド、ファイルシステム、TTY の有無、上流の採点方法も反映されます。例えば macOS の ps は sid 列を受け付けず、~root は /var/root に展開されます。組み込み exec の /dev/tty へのリダイレクトは、両 OS とも制御端末を与えた追加試験で出力と終了状態を照合しています。
+
+- Functions and prefix assignments now restore the correct scope across eval and unset. RANDOM and SECONDS have dynamic integer semantics. Quoted array transformations, non-whitespace IFS separators, declaration indices and case attributes have direct argument and state checks.
+- Redirection errors restore the descriptors before invoking ERR. The trap reports the failing operator's source line. SIGPIPE and child exit codes have controls that establish whether a pipe reader remains open. A child cannot signal success for a continue that targets its parent's loop.
+- Tracing includes conditional and arithmetic commands, assignment source and prompt expansion. Tests capture trace output on its own file descriptor and verify that the underlying operand executes once. Interactive tests cover explicit history files, prompt escapes, optional autocd, Vi editing and bracket-matching feedback.
+- The GNU Bash manual describes a letter range in C order. Tonari preserves generated backslashes and backticks as characters. Bash 5.2 can parse a generated backtick as syntax. For an indirect array subscript, Tonari supports numeric, variable, default-value and arithmetic forms using a read-only evaluator. Shell code introduced through variable contents is outside that interface. [GNU brace expansion](https://www.gnu.org/software/bash/manual/html_node/Brace-Expansion.html) · [Regression tests](../../../tests/shell.py)
+
+通常期待値を満たした例には、複合コマンドのリダイレクト失敗を ERR が正しい行で報告するケースがあります。UTF-8 の文字境界、再利用できるトレース表現、連想配列の順序、終了順に依存するパイプは、それぞれ実際の値と副作用で確認しました。片方だけが通るケースも、双方が落ちるケースも一覧に残しています。
+
+The macOS replay of Oils background/7 timed three independent child writes with sleeps of 10, 20 and 30 ms. Output order varied in both shells. Waiting on the explicit PIDs still returned 3, 2 and 1. A physical M1 control gave each child a release FIFO and an acknowledgement FIFO, then exercised all six output permutations in each shell. Every sequence and every wait status matched. For background/17, an independent controller released one child, read the result of wait -n, and then released the other. All 52 sequences returned the only available status first, covering both child orders in Bash and Tonari. [Original parallel jobs](https://github.com/oils-for-unix/oils/blob/d114978ca467143f171a835cbcbe8ab6ccc009a7/spec/background.test.sh#L85-L111)
+
+The script time columns compare the median of five alternating executions when both grades are accepted and every recorded status, stdout and stderr agrees. The PTY time is the median delay to the first byte over paired input steps from one complete upstream session. A redraw can acknowledge one key with several writes; rendering, terminal scheduling and running the submitted command are also measured by the separate repeated response workload. Each row includes the observed implementation sites from an independent instrumented process. [Implementation-site review](sites.tsv) · [43 verified workloads](../../benchmarks.md#shipped-shell-timings) · [Native helper and response controls](https://github.com/sanohiro/tonari-shell/actions/runs/45762981435) · [History and editing controls](https://github.com/sanohiro/tonari-shell/actions/runs/45763138891)
+
+Linux had 237 stock PTY cases with a later median first byte in Tonari. Among those cases the median difference was 65.5 µs and the 95th percentile was 279.9 µs. The repeated full-response controls below measure a separate observation.
+
+macOS had 269 stock PTY cases with a later median first byte in Tonari. Among those cases the median difference was 60.3 µs and the 95th percentile was 459.1 µs. The repeated full-response controls below measure a separate observation.
+
+### Controls for the external test environment / 上流の試験環境を揃えた追試
+
+Three independent controls ran at 4ae605d. For the 66 editing cases, each test got its own PTY, history enabled and no status-overwriting marker commands. The response test timed eight verified command results through a terminal, 41 times per shell. In Oils, compiled argv and environment helpers replaced their interpreter-starting equivalents. Helper timing counts use only cases whose outputs and status agreed before and after substitution in both shells. [Helper samples](shell-behavior-helper-controls.tsv.gz) · [Native helper and response run](https://github.com/sanohiro/tonari-shell/actions/runs/45762981435) · [Editing controls](https://github.com/sanohiro/tonari-shell/actions/runs/45763138891)
+
+| Native host | Fresh PTY both pass | Fresh PTY neither passes | Complete PTY response faster than Bash | Native argv helper ≤ ⅔ Bash | Native environment helper ≤ ⅔ Bash |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Linux x86-64 | 64/66 | 2/66 | 8/8 | 265/292 | 36/36 |
+| macOS arm64 | 64/66 | 2/66 | 8/8 | 259/290 | 30/35 |
+
+The two residual fresh-PTY assertions expect a single Tab to select `pwd` from multiple `pw` matches, and three backward-word motions to move across four words. Both shells retain the ambiguous prefix and perform the requested three motions. The source-level alias and subscript regression added after these controls also checks stderr, the selected element and the alias visible when a function runs. [Key sequences and fixtures](https://github.com/tenseleyFlow/bensch/tree/c8e2a1ea493fc0dceb9af645dc445e619cb449e7/suites/interactive) · [Source-level regression](../../../tests/shell.py)
+
+履歴を無効にする上流設定と、前の終了値を書き換えるマーカーを外した対話試験も別に記録しました。補完が一意でない入力と、移動回数が期待位置に足りない入力は、実際の候補とカーソル位置で確認しています。
+
 <a id="date-and-expansion-replay"></a>
 
 ## Date, expansion and completion replay / 日時・展開・補完の修正後

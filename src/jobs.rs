@@ -216,6 +216,7 @@ enum State {
 #[derive(Clone)]
 struct Process {
     pid: pid_t,
+    signal: Option<i32>,
     state: State,
 }
 #[derive(Clone)]
@@ -272,6 +273,7 @@ impl Job {
                 State::Running
             } else if libc::WIFSIGNALED(status) {
                 self.signaled = true;
+                p.signal = Some(libc::WTERMSIG(status));
                 State::Done((128 + libc::WTERMSIG(status)) as u8)
             } else {
                 State::Done(libc::WEXITSTATUS(status) as u8)
@@ -350,7 +352,7 @@ pub struct Jobs {
 
 impl Jobs {
     pub(crate) fn count(&self) -> usize {
-        self.table.len()
+        self.table.len() + self.inherited.len()
     }
     pub(crate) fn is_empty(&self) -> bool {
         self.table.is_empty() && self.inherited.is_empty()
@@ -445,10 +447,12 @@ impl Jobs {
             .into_iter()
             .map(|s| match s {
                 Ok(pid) => Process {
+                    signal: None,
                     pid,
                     state: State::Running,
                 },
                 Err(code) => Process {
+                    signal: None,
                     pid: 0,
                     state: State::Done(code),
                 },
@@ -994,6 +998,26 @@ fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Opti
             };
             if !job.stopped() {
                 let job = jobs.table.remove(i);
+                if (session.interactive || !session.posix)
+                    && !job.listed
+                    && let Some(process) = job
+                        .children
+                        .iter()
+                        .rev()
+                        .find(|p| number.is_none_or(|n| n == p.pid))
+                    && let Some(sig) = process.signal
+                    && !matches!(sig, libc::SIGINT | libc::SIGTERM | libc::SIGPIPE)
+                {
+                    let reason = unsafe { libc::strsignal(sig) };
+                    if !reason.is_null() {
+                        eprintln!(
+                            "{} {}  {}",
+                            process.pid,
+                            unsafe { std::ffi::CStr::from_ptr(reason) }.to_string_lossy(),
+                            job.name
+                        );
+                    }
+                }
                 jobs.remember(&job);
             }
         } else if let Some(pid) = number {

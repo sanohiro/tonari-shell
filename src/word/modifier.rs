@@ -14,6 +14,10 @@ pub enum Modification {
     },
     Prompt,
     Attributes,
+    Assignment,
+    Pairs {
+        separate: bool,
+    },
     Quote,
     Escapes,
     Case {
@@ -202,7 +206,75 @@ impl Modification {
                     crate::pattern::case_chars(text, upper, all, filter.as_ref(), locale)
                 }))
             }
-            Self::Quote | Self::Escapes => {
+            Self::Assignment => {
+                let fields = if matches!(name, "@" | "*") {
+                    let args = env.session.positional.as_slice();
+                    if args.is_empty() {
+                        Vec::new()
+                    } else {
+                        ["set".to_owned(), "--".to_owned()]
+                            .into_iter()
+                            .chain(
+                                args.iter().map(|s| {
+                                    crate::session::printf::parameter_quote(s, env.session)
+                                }),
+                            )
+                            .collect()
+                    }
+                } else {
+                    let elements = array_elements_name(name);
+                    let base = elements
+                        .map(|(base, _, _)| base)
+                        .or_else(|| crate::session::array::subscript(name).map(|(base, _)| base))
+                        .unwrap_or(name);
+                    let is_array = env
+                        .session
+                        .attributes(base)
+                        .is_some_and(|(flags, _)| flags.contains(['a', 'A']));
+                    if elements.is_some() && is_array {
+                        env.session.array_declaration_fields(base)
+                    } else if let Some((flags, _)) = env.session.attributes(base) {
+                        let text = value(name, env)?;
+                        let mut fields = Vec::new();
+                        if !flags.is_empty() {
+                            fields.extend(["declare".to_owned(), format!("-{flags}")]);
+                        }
+                        if let Some(text) = text {
+                            fields.push(format!(
+                                "{base}={}",
+                                crate::session::printf::parameter_quote(&text, env.session)
+                            ));
+                        } else if !fields.is_empty() {
+                            fields.push(base.to_owned());
+                        }
+                        fields
+                    } else {
+                        Vec::new()
+                    }
+                };
+                if name == "@" || array_elements_name(name).is_some_and(|(_, at, _)| at) {
+                    return Ok(Part::Elements {
+                        values: fields,
+                        at: true,
+                        quoted,
+                    });
+                }
+                return Ok(scalar(fields.join(" ")));
+            }
+            Self::Pairs { separate }
+                if array_elements_name(name).is_some_and(|(base, _, keys)| {
+                    !keys
+                        && env
+                            .session
+                            .attributes(base)
+                            .is_some_and(|(flags, _)| flags.contains(['a', 'A']))
+                }) =>
+            {
+                let (base, at, _) = array_elements_name(name).unwrap();
+                let values = env.session.array_pair_fields(base, *separate);
+                Ok(Part::Elements { values, at, quoted })
+            }
+            Self::Quote | Self::Pairs { .. } | Self::Escapes => {
                 let values = if array_elements_name(name).is_some() || matches!(name, "@" | "*") {
                     Values::read(name, env)?
                 } else if let Some(text) = value(name, env)? {
@@ -213,7 +285,7 @@ impl Modification {
                     return Ok(scalar(String::new()));
                 };
                 let transform = |text: String| -> Result<String, Error> {
-                    if matches!(self, Self::Quote) {
+                    if !matches!(self, Self::Escapes) {
                         Ok(crate::session::printf::parameter_quote(&text, env.session))
                     } else {
                         crate::parser::ansi_string(&text).map_err(|e| Error::from(e.message()))

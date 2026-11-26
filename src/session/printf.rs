@@ -556,7 +556,7 @@ fn quote(data: &[u8], session: &Session) -> Vec<u8> {
     out
 }
 
-pub(super) fn ansi_quote(data: &[u8], ascii_locale: bool) -> Vec<u8> {
+pub(crate) fn ansi_quote(data: &[u8], ascii_locale: bool) -> Vec<u8> {
     let mut out = Vec::new();
 
     out.extend_from_slice(b"$'");

@@ -8,6 +8,8 @@ struct Options {
     print: bool,
     nameref: Option<bool>,
     array: bool,
+    remove_array: bool,
+    remove_associative: bool,
     associative: bool,
     functions: bool,
     traced: Option<bool>,
@@ -15,6 +17,8 @@ struct Options {
     readonly: Option<bool>,
     global: bool,
     integer: Option<bool>,
+    lower: Option<bool>,
+    upper: Option<bool>,
     inherit: bool,
     exported: Option<bool>,
 }
@@ -29,7 +33,7 @@ pub(super) fn run(
     let total_args = operands.len();
     let readonly = command == "readonly";
     let local = command == "local";
-    if local && session.locals.is_empty() {
+    if local && session.function_depth == 0 {
         eprintln!("tonari: local: can only be used in a function");
         return crate::execute::Flow::Continue(1);
     }
@@ -56,6 +60,8 @@ pub(super) fn run(
             }
             match c {
                 'a' if on => flags.array = true,
+                'a' => flags.remove_array = true,
+                'A' if !on => flags.remove_associative = true,
                 'A' if on => flags.associative = true,
                 'F' => {
                     flags.functions = true;
@@ -66,6 +72,8 @@ pub(super) fn run(
                 'r' => flags.readonly = Some(on),
                 'g' => flags.global = on,
                 'i' => flags.integer = Some(on),
+                'l' => flags.lower = Some(on),
+                'u' => flags.upper = Some(on),
                 'n' => flags.nameref = Some(on),
                 'I' => flags.inherit = on,
                 'p' => flags.print = true,
@@ -170,6 +178,8 @@ pub(super) fn run(
             && !flags.associative
             && flags.nameref.is_none()
             && flags.integer.is_none()
+            && flags.lower.is_none()
+            && flags.upper.is_none()
         {
             return crate::execute::Flow::Continue(session.set(&mut Vec::new()));
         }
@@ -196,6 +206,8 @@ pub(super) fn run(
                     && (flags.readonly == Some(true) && !var.readonly
                         || flags.array && (var.elements.is_none() || var.associative().is_some())
                         || flags.associative && var.associative().is_none()
+                        || flags.lower == Some(true) && var.letter_case != Some(false)
+                        || flags.upper == Some(true) && var.letter_case != Some(true)
                         || flags.integer == Some(true) && !var.integer
                         || flags.nameref == Some(true) && !var.nameref)
                 {
@@ -218,9 +230,16 @@ pub(super) fn run(
     let mut arrays = arrays.iter().peekable();
     for (index, arg) in operands.iter().enumerate() {
         let array = arrays.next_if(|a| a.operand == index + first_operand);
-        let (name, value) = arg
-            .split_once('=')
-            .map_or((arg.as_str(), None), |(k, v)| (k, Some(v)));
+        let subscript_end = arg
+            .find(['[', '='])
+            .filter(|&i| arg.as_bytes()[i] == b'[')
+            .and_then(|i| crate::parser::index_end(&arg[i..]).ok().map(|n| i + n));
+        let separator = arg[subscript_end.unwrap_or(0)..]
+            .find('=')
+            .map(|i| i + subscript_end.unwrap_or(0));
+        let (name, value) = separator.map_or((arg.as_str(), None), |at| {
+            (&arg[..at], Some(&arg[at + 1..]))
+        });
         let append = value.is_some() && name.ends_with('+');
         let name = if append {
             &name[..name.len() - 1]
@@ -231,9 +250,8 @@ pub(super) fn run(
         let creates_local = !readonly
             && !flags.global
             && session
-                .locals
-                .last()
-                .is_some_and(|scope| !scope.0.contains_key(base));
+                .declaration_scope(base)
+                .is_some_and(|i| !session.locals[i].0.contains_key(base));
         let resolved;
         let name = if !creates_local && flags.nameref.is_none() && session.is_nameref(base) {
             match session.reference_name(name) {
@@ -268,12 +286,10 @@ pub(super) fn run(
         let mut var = session
             .declared_variable(name, flags.global)
             .unwrap_or_default();
+        let scope_index = session.declaration_scope(name);
         let fresh_local = !readonly
             && !flags.global
-            && session
-                .locals
-                .last()
-                .is_some_and(|scope| !scope.0.contains_key(name));
+            && scope_index.is_some_and(|i| !session.locals[i].0.contains_key(name));
         let outer_local = fresh_local
             && session
                 .locals
@@ -297,7 +313,7 @@ pub(super) fn run(
         let new_global = !fresh_local && !var.declared && !session.variables.contains_key(name);
         var.declared = true;
         if fresh_local {
-            let scope = session.locals.last_mut().unwrap();
+            let scope = &mut session.locals[scope_index.unwrap()];
             if name == "OPTIND" {
                 scope.1 = Some(session.opt_offset);
                 session.opt_offset = 0;
@@ -305,14 +321,19 @@ pub(super) fn run(
             scope
                 .0
                 .insert(name.into(), session.variables.get(name).cloned());
+            var.dynamic = false;
             var.nameref = false;
-            if !flags.inherit && !session.shopt.localvar_inherit {
+            if !var.temporary && !flags.inherit && !session.shopt.localvar_inherit {
                 var.readonly = false;
                 var.integer = false;
+                var.letter_case = None;
                 var.value = None;
                 var.elements = None;
                 var.array_assigned = false;
             }
+        }
+        if session.function_depth != 0 && !readonly && !flags.global {
+            var.temporary = false;
         }
         if let Some(on) = flags.nameref {
             let dest = value.or(var.value.as_deref()).unwrap_or("");
@@ -336,6 +357,14 @@ pub(super) fn run(
             var.nameref = on;
             session.has_namerefs |= on;
         }
+        match (flags.lower, flags.upper) {
+            (Some(true), Some(true)) => var.letter_case = None,
+            (Some(true), _) => var.letter_case = Some(false),
+            (_, Some(true)) => var.letter_case = Some(true),
+            (Some(false), _) if var.letter_case == Some(false) => var.letter_case = None,
+            (_, Some(false)) if var.letter_case == Some(true) => var.letter_case = None,
+            _ => {}
+        }
         if let Some(integer) = flags.integer {
             var.integer = integer;
         }
@@ -344,6 +373,13 @@ pub(super) fn run(
             && let Err(e) = var.make_associative()
         {
             eprintln!("tonari: {command}: {name}: {e}");
+            status = 1;
+            continue;
+        }
+        if flags.remove_array && var.elements.is_some() && var.associative().is_none()
+            || flags.remove_associative && var.associative().is_some()
+        {
+            eprintln!("tonari: {command}: {name}: cannot remove array attribute");
             status = 1;
             continue;
         }
@@ -400,7 +436,7 @@ pub(super) fn run(
             let index = if let Some((_, expr)) = target
                 && assoc_key.is_none()
             {
-                match session.resolve_index(name, expr) {
+                match session.declaration_index(name, expr, flags.global, &mut var) {
                     Ok(i) => {
                         var.make_array();
                         i
@@ -438,6 +474,7 @@ pub(super) fn run(
             } else {
                 text.into()
             };
+            let text = session.convert_case(text, var.letter_case);
             if name == "OPTIND" {
                 session.opt_offset = 0;
             }
@@ -448,6 +485,9 @@ pub(super) fn run(
                 array.insert(index, text);
                 var.array_assigned = true;
             } else {
+                if var.dynamic {
+                    session.set_dynamic(name, &text);
+                }
                 var.value = Some(text);
             }
         }
@@ -519,7 +559,7 @@ impl Session {
         };
         if let Some(var) = entry {
             let mut var = var.clone();
-            if matches!(name, "BASHOPTS" | "SHELLOPTS") {
+            if var.dynamic || matches!(name, "BASHOPTS" | "SHELLOPTS") {
                 var.value = self.inherited_value(name);
             }
             return Some(var);
@@ -538,10 +578,14 @@ impl Session {
             }
             let value = self.inherited_value(name);
             (value.is_some() || name == "OLDPWD").then(|| Variable {
+                letter_case: None,
+                temporary: false,
+                dynamic: super::dynamic::is_dynamic(name),
                 inherited: Default::default(),
                 readonly: Self::builtin_readonly(name),
                 nameref: false,
-                integer: matches!(name, "PPID" | "EUID" | "UID"),
+                integer: super::dynamic::is_dynamic(name)
+                    || matches!(name, "PPID" | "EUID" | "UID"),
                 array_assigned: false,
                 elements: None,
                 declared: true,
@@ -561,7 +605,7 @@ mod tests {
         let mut s = Session::default();
         s.assign("x", "a");
         for inner in ["b", "c"] {
-            s.enter_function();
+            s.enter_function(&mut Default::default());
             assert_eq!(
                 s.declare("local", &[format!("x={inner}")], &[], 0),
                 crate::Flow::Continue(0)

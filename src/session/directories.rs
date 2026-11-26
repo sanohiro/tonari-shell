@@ -119,7 +119,7 @@ impl Session {
             }
             Some(_) if command != "pushd" => {
                 eprintln!("tonari: {command}: invalid directory stack index");
-                return 1;
+                return if command == "popd" { 2 } else { 1 };
             }
             _ => None,
         };

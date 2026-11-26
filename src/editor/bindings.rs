@@ -52,6 +52,7 @@ actions! {
     ViPrevWord => "vi-prev-word" [],
     ViEndWord => "vi-end-word" [],
     ViChange => "vi-change-to" [],
+    ViSubstitute => "vi-subst" [],
     ViDelete => "vi-delete-to" [],
     ViYank => "vi-yank-to" [],
     Down => "next-history" [b"\x0e"],
@@ -177,6 +178,7 @@ impl Keymap {
                 ViPrevWord => &[b"b", b"B"],
                 ViEndWord => &[b"e", b"E"],
                 ViChange => &[b"c", b"C"],
+                ViSubstitute => &[b"s", b"S"],
                 ViDelete => &[b"d", b"D"],
                 ViYank => &[b"y", b"Y"],
                 Delete => &[b"x", b"\x1b[3~"],
@@ -199,6 +201,7 @@ pub(crate) struct Bindings {
     keys: [Option<Rc<KeyTable>>; 3],
     pub(crate) map: Keymap,
     prefer_vi: Option<bool>,
+    pub(super) blink_matching_paren: bool,
     pub(super) disable_completion: bool,
     bracketed_paste: Option<bool>,
     timeout: Option<i32>,
@@ -395,6 +398,7 @@ fn configure(bindings: &mut Bindings, spec: &str, shell: bool) -> Result<(), Str
             _ => Err("expected on or off"),
         };
         match name {
+            "blink-matching-paren" => bindings.blink_matching_paren = on()?,
             "disable-completion" => bindings.disable_completion = on()?,
             "enable-bracketed-paste" => bindings.bracketed_paste = Some(on()?),
             "keyseq-timeout" => {
@@ -607,7 +611,9 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
                             writeln!(out, "{}: {name}", encode(&k)).map_err(ioerr)?;
                         }
                     } else if keys.is_empty() {
-                        writeln!(out, "{name} is not bound to any keys.").map_err(ioerr)?;
+                        let punctuation = if arg == "-q" { "." } else { "" };
+                        writeln!(out, "{name} is not bound to any keys{punctuation}")
+                            .map_err(ioerr)?;
                         if arg == "-q" {
                             return Ok(1);
                         }
@@ -669,6 +675,7 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
                         }
                         .into(),
                     ),
+                    ("blink-matching-paren", yes(b.blink_matching_paren).into()),
                     ("keyseq-timeout", b.timeout().to_string()),
                 ] {
                     if arg == "-V" {

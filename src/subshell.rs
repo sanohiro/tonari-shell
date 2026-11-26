@@ -133,7 +133,8 @@ pub fn capture_substitution(
             drop(write);
         }
         // fork already isolated the complete session, including shell variables.
-        session.subshell_depth += 1;
+        session.enter_subshell();
+        session.trace_depth += 1;
         crate::execute::coprocess::after_fork(session);
         session.jobs.forked(true);
         session.interactive = false;
@@ -170,12 +171,7 @@ pub fn capture_substitution(
             }
             unsafe { libc::_exit(i32::from(code.is_err())) }
         }
-        let code = match execute_program(session, body, last, true) {
-            Flow::Discard(code) | Flow::Continue(code) | Flow::Exit(code) | Flow::Return(code) => {
-                code
-            }
-            Flow::Break(_) | Flow::LoopContinue(_) => 1,
-        };
+        let code = execute_program(session, body, last, true).child_status();
         let code = crate::traps::finish(session, code);
         unsafe {
             libc::_exit(code as libc::c_int);
@@ -653,15 +649,11 @@ fn launch_list(
                 }
             }
         }
-        session.subshell_depth += 1;
+        session.enter_subshell();
         crate::execute::coprocess::after_fork(session);
         session.jobs.forked(false);
         session.command_string = false;
-        let flow = run(session);
-        let code = match flow {
-            Flow::Discard(s) | Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
-            _ => 0,
-        };
+        let code = run(session).child_status();
         let code = crate::traps::finish(session, code);
         unsafe { libc::_exit(code as libc::c_int) }
     }

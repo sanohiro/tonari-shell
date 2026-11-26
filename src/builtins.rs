@@ -13,7 +13,7 @@ use crate::Session;
 
 // Rust's global Stdout treats EBADF as a successful write. Shell builtins
 // must report a failed redirect, including when a parent intentionally closed fd 1.
-fn write_stdout(mut bytes: &[u8]) -> u8 {
+pub(crate) fn write_stdout_for(name: &str, mut bytes: &[u8]) -> u8 {
     while !bytes.is_empty() {
         let n = unsafe { libc::write(1, bytes.as_ptr().cast(), bytes.len()) };
         if n > 0 {
@@ -21,7 +21,7 @@ fn write_stdout(mut bytes: &[u8]) -> u8 {
         } else {
             let e = io::Error::last_os_error();
             if e.kind() != io::ErrorKind::Interrupted {
-                eprintln!("tonari: echo: write error: {e}");
+                eprintln!("tonari: {name}: write error: {e}");
                 return 1;
             }
         }
@@ -31,7 +31,7 @@ fn write_stdout(mut bytes: &[u8]) -> u8 {
 
 pub fn echo(args: &[String], session: &Session) -> u8 {
     match args {
-        [] => write_stdout(b"\n"),
+        [] => write_stdout_for("echo", b"\n"),
         [word]
             if word.len() < 128
                 && !word.starts_with('-')
@@ -40,12 +40,12 @@ pub fn echo(args: &[String], session: &Session) -> u8 {
             let mut line = [0; 128];
             line[..word.len()].copy_from_slice(word.as_bytes());
             line[word.len()] = b'\n';
-            write_stdout(&line[..=word.len()])
+            write_stdout_for("echo", &line[..=word.len()])
         }
         _ => {
             let mut out = Vec::new();
             echo_into(args, &mut out, session);
-            write_stdout(&out)
+            write_stdout_for("echo", &out)
         }
     }
 }
@@ -155,7 +155,7 @@ fn primary(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'stat
     let (first, rest) = tokens.split_first().ok_or("argument expected")?;
     *tokens = rest;
     if let [op, right, tail @ ..] = rest {
-        if binary_op(op) {
+        if first != "(" && first != "!" && binary_op(op) {
             *tokens = tail;
             return binary(first, op, right);
         }

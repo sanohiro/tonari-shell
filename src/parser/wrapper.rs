@@ -74,6 +74,7 @@ pub(super) fn parse(source: &str) -> Option<Statement> {
     let source_text: Rc<str> = source.into();
     let location = |start, end, line| Location {
         source: source_text.clone(),
+        subscript_aliases: Default::default(),
         start,
         end,
         line,
