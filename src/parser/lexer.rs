@@ -1025,7 +1025,7 @@ fn lex_words(
             continue;
         }
         let extended = pattern == Some(true) || super::EXTGLOB.get();
-        if c == '#' {
+        if c == '#' && super::COMMENTS.get() {
             let rest = chars.as_str();
             chars = rest[rest.find('\n').unwrap_or(rest.len())..].chars();
             continue;

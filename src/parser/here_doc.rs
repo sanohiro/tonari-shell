@@ -107,7 +107,10 @@ fn delimiter(chars: &mut Chars<'_>) -> Result<(String, bool), Error> {
     let mut quote = None;
     let mut depth = 0usize;
     while let Some(c) = chars.clone().next() {
-        if quote.is_none() && depth == 0 && (separator(c) || !started && c == '#') {
+        if quote.is_none()
+            && depth == 0
+            && (separator(c) || !started && c == '#' && super::COMMENTS.get())
+        {
             break;
         }
         chars.next();

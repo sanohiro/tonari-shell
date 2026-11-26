@@ -170,11 +170,13 @@ fn syntax_error(session: &Session, problem: parser::Error, first_line: usize) ->
     flow
 }
 
-fn blank_or_comment(line: &str) -> bool {
+fn blank_or_comment(line: &str, session: &Session) -> bool {
     let first = line.trim_start_matches([' ', '\t']);
     first.is_empty()
         || first == "\n"
-        || first.starts_with('#') && !first.trim_end_matches('\n').contains(['\n', '\0'])
+        || first.starts_with('#')
+            && session.read_comments()
+            && !first.trim_end_matches('\n').contains(['\n', '\0'])
 }
 
 fn history_input<'a>(
@@ -386,7 +388,7 @@ fn run(
         };
         // At a new physical line these tokens cannot open a command. Keep
         // accumulated compound commands, history expansion and NUL diagnostics.
-        if line_start == 0 && n != 0 && blank_or_comment(text) {
+        if line_start == 0 && n != 0 && blank_or_comment(text, session) {
             base_line += text.bytes().filter(|&b| b == b'\n').count();
             input.clear();
             continue;
@@ -575,7 +577,7 @@ pub fn text(
         } else {
             text
         };
-        if new_command && blank_or_comment(text) {
+        if new_command && blank_or_comment(text, session) {
             base_line = line_number + 1;
             start = end;
             continue;
