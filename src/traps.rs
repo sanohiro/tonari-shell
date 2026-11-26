@@ -135,7 +135,7 @@ fn trap_number(name: &str) -> Option<i32> {
 
 #[derive(Clone)]
 pub(crate) struct Entry {
-    command: String,
+    command: std::rc::Rc<str>,
     original: libc::sigaction,
 }
 

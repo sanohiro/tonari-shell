@@ -1132,7 +1132,7 @@ impl Session {
     ) -> crate::Flow {
         const NAME: &str = "BASH_TRAPSIG";
         let saved = self.variables.get(NAME).cloned();
-        self.assign(NAME, &number.to_string());
+        self.assign_value(NAME, Cow::Owned(number.to_string()));
         let result = run(self);
         if let Some(var) = saved {
             self.variables.insert(NAME.into(), var);
