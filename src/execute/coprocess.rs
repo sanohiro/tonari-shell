@@ -7,6 +7,7 @@ use crate::{Flow, Session, parser::Command};
 
 pub(crate) struct Coprocess {
     name: String,
+    pid_name: String,
     pid: libc::pid_t,
     fds: [Cell<Option<RawFd>>; 2],
 }
@@ -58,7 +59,13 @@ pub(crate) fn refresh(session: &mut Session) {
             let job = session.coprocesses.remove(i);
             if !session.coprocesses.iter().any(|live| live.name == job.name) {
                 session.unset_variable(&job.name);
-                session.unset_variable(&format!("{}_PID", job.name));
+            }
+            if !session
+                .coprocesses
+                .iter()
+                .any(|live| live.pid_name == job.pid_name)
+            {
+                session.unset_variable(&job.pid_name);
             }
             job.close();
         }
@@ -72,7 +79,14 @@ pub(crate) fn launch(
     status: u8,
 ) -> io::Result<Flow> {
     let pid_name = format!("{name}_PID");
-    if session.readonly(&name) || session.readonly(&pid_name) {
+    let name = match session
+        .indexed_receiver(&name, true)
+        .map_err(io::Error::other)?
+    {
+        std::borrow::Cow::Borrowed(_) => name,
+        std::borrow::Cow::Owned(target) => target,
+    };
+    if session.readonly(&pid_name) {
         return Err(io::Error::other("readonly coprocess variable"));
     }
     if let Some(active) = session.coprocesses.last() {
@@ -137,6 +151,7 @@ pub(crate) fn launch(
     session.assign(&pid_name, &pid.to_string());
     session.coprocesses.push(Rc::new(Coprocess {
         name,
+        pid_name,
         pid,
         fds: [
             Cell::new(Some(reader.into_raw_fd())),

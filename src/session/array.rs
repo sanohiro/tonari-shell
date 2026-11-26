@@ -508,6 +508,28 @@ impl Session {
         Ok(())
     }
 
+    pub(crate) fn indexed_receiver<'a>(
+        &mut self,
+        name: &'a str,
+        replace_associative: bool,
+    ) -> Result<std::borrow::Cow<'a, str>, &'static str> {
+        let target = self.reference_name(name)?;
+        if !super::is_identifier(&target) {
+            return Err("array destination must be a variable name");
+        }
+        if self.readonly(&target) {
+            return Err("readonly variable");
+        }
+        if !replace_associative && self.is_associative(&target) {
+            return Err("not an indexed array");
+        }
+        if self.is_nameref(&target) {
+            eprintln!("tonari: warning: {target}: removing nameref attribute");
+            self.variables.get_mut(target.as_ref()).unwrap().nameref = false;
+        }
+        Ok(target)
+    }
+
     pub fn replace_array(&mut self, name: &str, mut values: Vec<String>) {
         if let Some(upper) = self.variables.get(name).and_then(|v| v.letter_case) {
             for v in &mut values {

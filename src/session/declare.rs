@@ -301,10 +301,35 @@ pub(super) fn run(
         let creates_local = !attribute
             && !flags.global
             && base_scope.is_some_and(|i| !session.locals[i].0.contains_key(base));
+        let mut remove_reference = None;
+        let changes_target = value.is_some()
+            || array.is_some()
+            || flags.integer.is_some()
+            || flags.lower.is_some()
+            || flags.upper.is_some()
+            || flags.capitalize.is_some()
+            || flags.exported.is_some()
+            || flags.readonly.is_some()
+            || flags.traced.is_some()
+            || flags.array
+            || flags.associative
+            || flags.remove_array
+            || flags.remove_associative;
         let resolved;
-        let name = if !creates_local && flags.nameref.is_none() && session.is_nameref(base) {
+        let name = if !creates_local
+            && (flags.nameref.is_none() || flags.nameref == Some(false) && changes_target)
+            && session.is_nameref(base)
+        {
             match session.reference_name(name) {
                 Ok(target) => {
+                    if target != name && flags.nameref == Some(false) {
+                        if session.variables.get(base).is_some_and(|v| v.readonly) {
+                            eprintln!("tonari: {command}: {base}: readonly variable");
+                            status = 1;
+                            continue;
+                        }
+                        remove_reference = Some(base);
+                    }
                     resolved = target;
                     resolved.as_ref()
                 }
@@ -363,7 +388,7 @@ pub(super) fn run(
                 || value.is_some()
                 || array.is_some()
                 || flags.readonly == Some(false)
-                || flags.nameref == Some(true))
+                || flags.nameref.is_some())
         {
             eprintln!("tonari: {command}: {name}: readonly variable");
             if array.is_some() {
@@ -400,37 +425,17 @@ pub(super) fn run(
         if session.function_depth != 0 && !attribute && !flags.global {
             var.temporary = false;
         }
-        // +n with an assignment writes through the existing reference and then
-        // removes its attribute. An unsuccessful write leaves the reference live.
-        let value = if flags.nameref == Some(false)
-            && var.nameref
-            && let Some(rhs) = value
-        {
-            let write = session
-                .reference_name(name)
-                .map(|s| s.into_owned())
-                .and_then(|dest| {
-                    let rhs = if append {
-                        session.get(&dest).unwrap_or_default() + rhs
-                    } else {
-                        rhs.to_owned()
-                    };
-                    session.assign_target(&dest, &rhs)
-                });
-            if let Err(e) = write {
-                eprintln!("tonari: {command}: {name}: {e}");
-                status = 1;
-                continue;
-            }
-            None
-        } else {
-            value
-        };
         let making_array = flags.array || flags.associative || array.is_some();
         if making_array && (var.nameref || flags.nameref == Some(true)) && var.elements.is_none() {
+            if var.nameref && flags.nameref != Some(true) {
+                eprintln!("tonari: warning: {name}: removing nameref attribute");
+            }
             var.nameref = false;
         }
-        if let Some(on) = flags.nameref.filter(|_| !making_array) {
+        if let Some(on) = flags
+            .nameref
+            .filter(|_| !making_array && remove_reference.is_none())
+        {
             let dest = value.or(var.value.as_deref()).unwrap_or("");
             if on
                 && (target.is_some()
@@ -589,6 +594,11 @@ pub(super) fn run(
                 text.into()
             };
             let text = session.convert_case(text, var.letter_case);
+            if var.nameref && !Session::valid_reference_target(&text) {
+                eprintln!("tonari: {command}: {name}: invalid name reference");
+                status = 1;
+                continue;
+            }
             if name == "OPTIND" {
                 session.opt_offset = 0;
             }
@@ -649,6 +659,11 @@ pub(super) fn run(
             bindings.0.remove(name);
         }
         session.store_variable(name, var, flags.global);
+        if let Some(source) = remove_reference
+            && let Some(reference) = session.variables.get_mut(source)
+        {
+            reference.nameref = false;
+        }
         if let Some(error) = initializer_error {
             let error = crate::expansion::Error::discard(error);
             error.report(&format!("{command}: {name}: "));

@@ -16,6 +16,10 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "remove-nameref-attributes": "declare -n r=dest; declare +n -i r=7+4; declare -p r dest; declare -nr locked=dest; declare +n locked; echo \"$?\"; declare -p locked",
+    "coproc-nameref": "arr=(previous); declare -n r=arr; coproc r { read -r line; test \"$line\" = sent; }; pid=$!; test \"$pid\" = \"$r_PID\"; echo \"$?\"; echo sent >&\"${r[1]}\"; wait \"$pid\"; echo \"$?\"",
+    "read-array-nameref": "declare -n r=arr; read -a r <<<'a b'; declare -p r arr; declare -n unbound; read -a unbound <<<'c d'; declare -p unbound",
+    "mapfile-nameref": "declare -n r=arr; mapfile -t r <<<'hello'; declare -p r arr; mapfile -O 2 -t r <<<'end'; declare -p arr; declare -n element='arr[2]'; mapfile -t element <<<'ignore'; echo status:$?; declare -p arr",
     "encoded-parameter-name": "x1=not; x=notOK; echo \"${x#${$'x1'%$'t'}}\"; echo \"${x$'\\x31'}\"; cat <<EOF\n${x#${$'x1'%'t'}}\nEOF",
     "operand-process-substitution": "unset v; cat ${v:-<(printf ok)}; printf '[%s]' \"${v:-<(echo a)}\"; v=yes; : ${v:-<(touch wrong)}; test ! -e wrong",
     "nameref-target-syntax": "for n in 'x[a][b]' 'x[foo]bar]' 'x[]' 'x[ ]' 'x[[1]]' 'x[2+1]'; do unset -n ref; declare -n ref=\"$n\"; echo \"$?\"; done",
@@ -137,6 +141,10 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "remove-nameref-attributes": ("declare -n r=dest; declare +n -i r=7+4", 3000),
+    "coproc-nameref": ("coproc r { read -r line; }; pid=$!; echo sent >&\"${r[1]}\"; wait \"$pid\"", 60),
+    "read-array-nameref": ("read -a r <<<'one two three'", 1000),
+    "mapfile-nameref": ("mapfile -t r <<<\"one\"", 900),
     "lazy-malformed-operand": (": \"${a-'$('\\'}\"", 2000),
     "encoded-parameter-name": (": \"${x#${$'x1'%$'t'}}\"", 2000),
     "operand-process-substitution": ("read -r s < ${v:-<(echo hi)}", 90),
@@ -755,6 +763,9 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "coproc-nameref": "declare -n r=arr; exec 2>/dev/null",
+                "read-array-nameref": "declare -n r=arr",
+                "mapfile-nameref": "declare -n r=arr",
                 "lazy-malformed-operand": "a=4",
                 "encoded-parameter-name": "x1=not; x=notOK",
                 "array-named-descriptor": "declare -A m; key=out",

@@ -135,26 +135,26 @@ fn read_all(options: &Options<'_>, mut store: impl FnMut(&str)) -> io::Result<()
 }
 
 pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u8) -> Flow {
-    let options = match Options::parse(args) {
+    let mut options = match Options::parse(args) {
         Ok(options) => options,
         Err((code, message)) => {
             eprintln!("tonari: {command}: {message}");
             return Flow::Continue(code);
         }
     };
-    if session.readonly(options.name) {
-        eprintln!("tonari: {command}: {}: readonly variable", options.name);
-        return Flow::Continue(1);
-    }
-    if session.is_associative(options.name) {
-        eprintln!("tonari: {command}: {}: not an indexed array", options.name);
-        return Flow::Continue(1);
-    }
     let fd = options.fd;
     if crate::execute::fd::is_private(fd) || unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
         eprintln!("tonari: {command}: {fd}: invalid file descriptor");
         return Flow::Continue(1);
     }
+    let destination = match session.indexed_receiver(options.name, false) {
+        Ok(target) => target,
+        Err(e) => {
+            eprintln!("tonari: {command}: {}: {e}", options.name);
+            return Flow::Continue(1);
+        }
+    };
+    options.name = &destination;
     let origin = i64::from(options.origin.unwrap_or(0));
     if options.limit == 0 && options.callback.is_none() {
         let result = if options.origin.is_some() {
