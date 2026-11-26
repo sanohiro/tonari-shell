@@ -85,6 +85,7 @@ HOT = {
     "assignment-tilde": ('p=$base:~/bin:~/lib', 1400),
     "debug-arguments": ('v=${BASH_ARGV[1]}', 1500),
     "signal-lookup": ('kill -l TERM >/dev/null', 800),
+    "numeric-locale": ("""printf -v v "%'+012.2f" 12345,5""", 1100),
     "custom-history-event": ("history -p '^^' >/dev/null", 750),
     "open-quote-alias": ('source ./open-alias', 450),
     "posix-case-alias": ('source ./case-alias', 450),
@@ -377,6 +378,13 @@ def main():
             verbose = subprocess.run([shell, "--verbose", "-c", "echo verbose"], cwd=root, env=env,
                                      capture_output=True, timeout=5)
             assert (verbose.returncode, verbose.stdout, verbose.stderr) == (0, b"verbose\n", b"echo verbose\n"), (shell, verbose)
+        # The static shell carries its own UTF-8 data. Runner images need not
+        # have the corresponding system locale generated for the control.
+        localized = """unset LC_ALL; LC_NUMERIC=de_DE.UTF-8; printf "<%'+012.2f><%'.8d><%-8.1f>\\n" 12345,5 12345 1,5; LC_ALL=C; printf '<%.1f>\\n' 1.5"""
+        expected_localized = (0, b"<+0012.345,50><0012.345><1,5     >\n<1.5>\n", False)
+        assert run(shells[1], localized)[0] == expected_localized, run(shells[1], localized)[0]
+        if run(shells[0], localized)[0] == expected_localized:
+            cases["numeric-locale"] = localized
         failed = []
         for name, code in cases.items():
             expected = run(shells[0], code)[0]
@@ -548,6 +556,7 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "numeric-locale": "unset LC_ALL; LC_NUMERIC=de_DE.UTF-8",
                 "custom-history-event": "histchars='^:#'; history -s 'echo first last'",
                 "open-quote-alias": "shopt -s expand_aliases; alias message=\": 'head\"",
                 "posix-case-alias": "set -o posix; shopt -s expand_aliases; alias switch=case",
