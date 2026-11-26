@@ -1359,21 +1359,39 @@ pub fn line(
                     - text[cursor..end]
                         .trim_start_matches(|c: char| !c.is_alphanumeric())
                         .len();
-                let word = text[start..end].to_owned();
                 let locale = session.character_locale();
-                let replacement = if action == Action::CapitalWord {
-                    crate::pattern::capitalize(word, locale)
+                if text[start..end].is_ascii()
+                    && !matches!(locale, crate::session::CharacterLocale::Turkic)
+                {
+                    undo.record(&text, start..end, end - start, cursor, false);
+                    let word = &mut text[start..end];
+                    if action == Action::UpperWord {
+                        word.make_ascii_uppercase();
+                    } else {
+                        word.make_ascii_lowercase();
+                        if action == Action::CapitalWord
+                            && let Some(first) = word.get_mut(..1)
+                        {
+                            first.make_ascii_uppercase();
+                        }
+                    }
+                    cursor = end;
                 } else {
-                    crate::pattern::case_chars(
-                        word,
-                        action == Action::UpperWord,
-                        true,
-                        None,
-                        locale,
-                    )
-                };
-                undo.replace(&mut text, start..end, &replacement, cursor);
-                cursor = start + replacement.len();
+                    let word = text[start..end].to_owned();
+                    let replacement = if action == Action::CapitalWord {
+                        crate::pattern::capitalize(word, locale)
+                    } else {
+                        crate::pattern::case_chars(
+                            word,
+                            action == Action::UpperWord,
+                            true,
+                            None,
+                            locale,
+                        )
+                    };
+                    undo.replace(&mut text, start..end, &replacement, cursor);
+                    cursor = start + replacement.len();
+                }
             }
             Action::TransposeWords => {
                 let end = word_end(&text, cursor);

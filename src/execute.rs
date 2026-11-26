@@ -1464,7 +1464,8 @@ fn run_builtin(
     }
     if applied && matches!(builtin, Builtin::Exec) && matches!(flow, Flow::Continue(0)) {
         for r in &cmd.redirects {
-            session.stdin_replaced |= r.fd == 0;
+            session.stdin_replaced |=
+                r.fd == 0 && !matches!(r.target, Target::Duplicate if r.word == "0");
             session.substitutions.replaced(r.fd);
             coprocess::replaced(session, r.fd);
         }
@@ -2012,6 +2013,7 @@ pub(crate) struct PreparedCommand {
     redirects: Vec<Redirect>,
     assignments: Vec<(String, String)>,
     empty_status: u8,
+    literal_has_keywords: bool,
 }
 impl PreparedCommand {
     pub(crate) fn literal_builtin(
@@ -2061,6 +2063,7 @@ impl PreparedCommand {
             .ok()?
         };
         Some(Box::new(Self {
+            literal_has_keywords: cmd.keyword_args.is_some(),
             words,
             redirects,
             ..Self::default()
@@ -2068,7 +2071,11 @@ impl PreparedCommand {
     }
 
     pub(crate) fn run_literal(&mut self, session: &mut Session, status: u8) -> Option<Flow> {
-        if session.keyword || session.xtrace || session.traps.active() || session.jobs.monitor {
+        if session.keyword && self.literal_has_keywords
+            || session.xtrace
+            || session.traps.active()
+            || session.jobs.monitor
+        {
             return None;
         }
         if session.noclobber && self.redirects.iter().any(|r| r.target == Target::Write) {
@@ -2197,25 +2204,29 @@ fn separate_keyword_arguments(raw: &mut SimpleCommand<Word>) {
         .map(Rc::unwrap_or_clone)
         .unwrap_or_default();
     let mut keywords = keywords.into_iter().peekable();
-    let mut args = Vec::with_capacity(raw.words.len());
-    for (index, mut word) in std::mem::take(&mut raw.words).into_iter().enumerate() {
+    raw.assignments.reserve(keywords.len() + arrays.len());
+    let mut indices = 0..;
+    raw.words.retain_mut(|word| {
+        let index = indices.next().unwrap();
         if let Some((_, key)) = keywords.next_if(|(pos, _)| *pos == index) {
             if key.contains('[') {
                 eprintln!("tonari: {key}: not a valid identifier");
-                continue;
+                return false;
             }
-            word.remove_assignment_prefix(key.len() + 1);
-            raw.assignments.push((key, Assignment::Scalar(word)));
+            let mut value = std::mem::replace(word, Word::Literal(String::new()));
+            value.remove_assignment_prefix(key.len() + 1);
+            raw.assignments.push((key, Assignment::Scalar(value)));
+            false
         } else if let Some((key, Assignment::Array(_, parts, source))) =
             arrays.next_if(|(_, a)| matches!(a, Assignment::Array(Some(pos), ..) if *pos == index))
         {
             raw.assignments
                 .push((key, Assignment::Array(None, parts, source)));
+            false
         } else {
-            args.push(word);
+            true
         }
-    }
-    raw.words = args;
+    });
 }
 
 fn expand_command_words(
@@ -2465,6 +2476,7 @@ fn prepare_expanded(
     }
     let assignment_only = words.is_empty() && raw.compound.is_none();
     let mut cmd = PreparedCommand {
+        literal_has_keywords: false,
         named_redirects: Vec::new(),
         resolved: None,
         array_declarations,

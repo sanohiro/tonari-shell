@@ -733,6 +733,9 @@ impl Session {
                 None => v.value.as_ref().map(|_| 0),
             };
         }
+        if name == "DIRSTACK" {
+            return Some(self.dir_stack.len() as i64);
+        }
         self.indices(name).last().copied()
     }
 

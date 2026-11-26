@@ -881,6 +881,19 @@ impl<'a> Directory<'a> {
                     || self.show_hidden && self.base.is_empty())
                 && let Ok(name) = raw.to_str()
                 && self.fold.is_none_or(|locale| {
+                    if !self.map_case {
+                        return crate::pattern::folded_prefix(name, self.base, locale).is_some();
+                    }
+                    if !matches!(locale, crate::session::CharacterLocale::Turkic)
+                        && self.base.is_ascii()
+                        && let Some(head) = name.as_bytes().get(..self.base.len())
+                        && head.is_ascii()
+                    {
+                        return self.base.bytes().zip(head).all(|(a, &b)| {
+                            a.eq_ignore_ascii_case(&b)
+                                || matches!((a, b), (b'-', b'_') | (b'_', b'-'))
+                        });
+                    }
                     let mut chars = name.chars();
                     self.base.chars().all(|c| {
                         chars.next().is_some_and(|d| {

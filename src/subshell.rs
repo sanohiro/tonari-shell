@@ -71,10 +71,10 @@ pub(crate) fn current_substitution(
     // A single literal output builtin can write to memory directly. Everything
     // that can redirect stdout or observe traps still executes in a real fd scope.
     if !reply
-        && !session.keyword
         && !session.traps.active()
         && !session.xtrace
         && let Some(cmd) = sole_plain_command(&body)
+        && (!session.keyword || cmd.keyword_args.is_none())
         && let Some(name @ ("echo" | "printf")) =
             cmd.words.first().and_then(parser::Word::as_literal)
         && !session.functions.contains_key(name)
@@ -459,7 +459,6 @@ fn capture_simple(
 ) -> Option<Result<(String, u8), &'static str>> {
     use crate::word::{Part, Word, is_identifier};
     if body.is_empty()
-        || session.keyword
         || session.xtrace
         || session.functrace && session.traps.debug_handler()
         || session.nounset
@@ -469,6 +468,7 @@ fn capture_simple(
         return None;
     }
     if let Some(cmd) = sole_plain_command(body)
+        && (!session.keyword || cmd.keyword_args.is_none())
         && let [name, flag, names @ ..] = cmd.words.as_slice()
         && name.as_literal() == Some("trap")
         && (flag.as_literal() == Some("-p") || flag.as_literal() == Some("-P") && !names.is_empty())
@@ -488,6 +488,9 @@ fn capture_simple(
         return Some(captured_output(out, status));
     }
     let command = |cmd: &parser::SimpleCommand<Word>| {
+        if session.keyword && cmd.keyword_args.is_some() {
+            return None;
+        }
         let (first, args) = cmd.words.split_first()?;
         let first = capture_program(first, session)?;
         let (program, args) = if matches!(first, "command" | "builtin") {
