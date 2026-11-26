@@ -96,6 +96,10 @@ f; echo "<${v-unset}>" """, 0, b"<keep><unset>\n")
 for ref in 'a[$b]' 'a[${c:-1}]' 'a[$((3-2))]'; do echo "${!ref}"; done""",
                      0, b"one\none\none\n", minimum=5)
 
+    def test_indirect_subscript_reads_dynamic_operand_once(self):
+        self.compare('a=(even odd); RANDOM=1; ref="a[RANDOM%2]"; echo "${!ref} $RANDOM"',
+                     0, b"odd 10791\n", minimum=5)
+
     def test_compound_redirect_reports_failing_operator_line(self):
         proc = self.command(TONARI, """trap 'echo line=$LINENO' ERR
 { true
@@ -154,6 +158,27 @@ g q
 
     def test_incomplete_arithmetic_at_end_of_heredoc(self):
         self.compare("echo $((cat <<EOF\n+(\nEOF\n))", 2)
+
+    def test_negated_bracket_pattern_with_closing_bracket_member(self):
+        proc = self.command(TONARI, """pat='[^]]'; s='ab^]cd^'
+printf '%s' "${s//$pat/z}" """)
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"zzz]zzz", b""))
+
+    def test_pipeline_status_with_open_and_closed_reader(self):
+        self.compare("""{ echo hi; exit 55; } | { cat >/dev/null; false; }
+echo "${PIPESTATUS[*]}"
+{ while printf '%04096d\\n' 1; do :; done; } | false
+echo "${PIPESTATUS[*]}" """, 0, b"55 1\n141 1\n")
+
+    def test_unquoted_punctuation_in_function_names(self):
+        self.compare("""%() { :; }; declare -F '%'; unset '%'; declare -F '%'; echo gone=$?
+a,b%() { echo comma; }; 'a,b%'
+f?() { echo question; }; 'f?'
+""", 0, b"%\ngone=1\ncomma\nquestion\n", minimum=5)
+        for shell in self.shells_for(5):
+            run = self.command(shell, "a,b%() { echo child; }; export -f 'a,b%'; \"$1\" -c 'a,b%'",
+                               "parent", str(shell))
+            self.assertEqual((run.returncode, run.stdout, run.stderr), (0, b"child\n", b""))
 
     def test_case_attributes_on_arrays_and_export(self):
         self.compare("""declare -u s=one; s+=two; export s+=three; echo "$s"

@@ -144,9 +144,26 @@ pub(crate) fn suggestion_end(line: &str, cursor: usize) -> usize {
 
 pub(crate) fn is_function_name(name: &str) -> bool {
     !name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_alphanumeric() || "_-.+:@/!=#".contains(c))
+        && !name.bytes().any(|b| {
+            matches!(
+                b,
+                0 | b' '
+                    | b'\t'
+                    | b'\n'
+                    | b'$'
+                    | b'\''
+                    | b'"'
+                    | b'\\'
+                    | b'\x60'
+                    | b'('
+                    | b')'
+                    | b'<'
+                    | b'>'
+                    | b';'
+                    | b'|'
+                    | b'&'
+            )
+        })
 }
 pub(crate) use here_doc::{HereDocHint, expansion_string};
 use lexer::{LexWord, Token, lex};

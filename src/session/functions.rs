@@ -103,7 +103,9 @@ impl Session {
                 }
                 let key = format!("BASH_FUNC_{name}%%");
                 self.function_environment.insert(key.clone(), None);
-                let Ok(mut parsed) = parse_final(&format!("{name} {value}")) else {
+                // Parse only the declaration body supplied by the protocol.
+                // The environment key stays a name throughout the import.
+                let Ok(mut parsed) = parse_final(&format!("__tonari_import {value}")) else {
                     continue;
                 };
                 if parsed.len() != 1 {
@@ -117,10 +119,10 @@ impl Session {
                     name: actual,
                     definition,
                 } = statement.command
-                    && actual == name
+                    && actual == "__tonari_import"
                 {
                     self.functions.insert(
-                        actual,
+                        name.to_owned(),
                         Function {
                             definition,
                             source: "environment".into(),

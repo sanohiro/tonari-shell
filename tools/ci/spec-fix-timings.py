@@ -22,6 +22,10 @@ CASES = {
     "history dates": ('export TZ=UTC0; HISTSIZE=3000; HISTTIMEFORMAT="%F %T "; '
                       'history -c; history -r dates; history', HISTORY_OUTPUT),
     "startup": (":", b""),
+    "function definition cycle": ('for ((i=0;i<3000;i++)); do f() { n=ok; }; f; unset -f f; done; '
+                                  'echo "$n"', b"ok\n"),
+    "punctuated function names": ('for ((i=0;i<3000;i++)); do f,%() { n=ok; }; f,%; unset -f f,%; done; '
+                                  'echo "$n"', b"ok\n"),
     "conditional tracing": ('exec 4>trace; BASH_XTRACEFD=4; dir=/; set -x; '
                             'for ((i=0;i<700;i++)); do [[ -d $dir ]] && (( n+=1 )); done; '
                             'set +x; grep -F -c "[[ -d / ]]" trace; echo "$n"', b"700\n700\n"),

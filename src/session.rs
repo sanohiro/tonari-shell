@@ -1565,14 +1565,10 @@ impl Session {
                     continue;
                 }
             }
-            if functions_only {
+            if resolve_function {
                 self.forget_function(name);
-                continue;
             }
-            if is_identifier(name) {
-                if resolve_function {
-                    self.forget_function(name);
-                }
+            if !functions_only && is_identifier(name) {
                 self.unset_variable(name);
             }
         }
