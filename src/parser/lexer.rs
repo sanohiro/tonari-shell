@@ -485,26 +485,32 @@ pub(super) fn backquote(
     quoted: bool,
 ) -> Result<(), Error> {
     let mut source = String::new();
-    while let Some(c) = chars.next() {
-        match c {
-            '`' => {
-                let body = parse_final(&source)?;
-                word.part(Part::Substitution { body, quoted });
-                return Ok(());
-            }
-            '\\' => {
-                let next = chars
-                    .next()
-                    .ok_or(Error::Incomplete("unterminated backquote"))?;
-                if next != '\n' {
-                    if !(matches!(next, '$' | '`' | '\\') || quoted && next == '"') {
-                        source.push('\\');
-                    }
-                    source.push(next);
-                }
-            }
-            _ => source.push(c),
+    let mut rest = chars.as_str();
+    while let Some(at) = memchr::memchr2(b'`', b'\\', rest.as_bytes()) {
+        let (literal, after) = rest.split_at(at);
+        if after.starts_with('`') {
+            let body = if source.is_empty() {
+                parse_final(literal)?
+            } else {
+                source.push_str(literal);
+                parse_final(&source)?
+            };
+            *chars = after[1..].chars();
+            word.part(Part::Substitution { body, quoted });
+            return Ok(());
         }
+        source.push_str(literal);
+        let mut escaped = after[1..].chars();
+        let next = escaped
+            .next()
+            .ok_or(Error::Incomplete("unterminated backquote"))?;
+        if next != '\n' {
+            if !(matches!(next, '$' | '`' | '\\') || quoted && next == '"') {
+                source.push('\\');
+            }
+            source.push(next);
+        }
+        rest = escaped.as_str();
     }
     Err(Error::Incomplete("unterminated backquote"))
 }

@@ -678,6 +678,9 @@ def main():
                 # Input history is recorded for top-level commands, even with
                 # no terminal. Executing a sourced loop would bypass this path.
                 code = "set -o history\n" + "for v in one two\ndo\n  : item\ndone\n" * count + "echo done"
+            elif name == "backquote-escape":
+                # Parse a fresh top-level assignment for each substitution.
+                code = "".join(f"v={i}{body[2:]}\n" for i in range(count)) + "echo done"
             samples = [[] for _ in shells]
             for r in range(args.runs + 1):
                 indices = list(range(len(shells)))
