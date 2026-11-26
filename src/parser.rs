@@ -647,7 +647,7 @@ pub fn session_source_at(
     line: usize,
 ) -> Result<Vec<Statement>, Error> {
     if source.len() <= 4096
-        && !(session.shopt.expand_aliases && session.aliases.0.is_some())
+        && !session.reads_aliases()
         && let Some(statement) = literal_assignment(source, line)
     {
         return Ok(vec![statement]);
@@ -738,7 +738,7 @@ fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnc
         let _comments = crate::ScopedCell::enter(&COMMENTS, session.read_comments());
         parse()
     };
-    if session.shopt.expand_aliases && session.aliases.0.is_some() {
+    if session.reads_aliases() {
         aliases::with(session.aliases.clone(), read)
     } else {
         read()

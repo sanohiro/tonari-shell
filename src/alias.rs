@@ -7,6 +7,12 @@ use crate::Session;
 #[derive(Clone, Debug, Default)]
 pub struct Aliases(pub Option<Rc<BTreeMap<String, String>>>);
 
+impl Session {
+    pub(crate) fn reads_aliases(&self) -> bool {
+        self.shopt.expand_aliases && self.aliases.0.is_some()
+    }
+}
+
 impl Aliases {
     pub(crate) fn insert(&mut self, name: &str, value: &str) -> Result<(), &'static str> {
         if name.is_empty()

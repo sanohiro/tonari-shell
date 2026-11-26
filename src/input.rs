@@ -377,6 +377,34 @@ fn assign_buffered_scalar(session: &mut Session, command: &str, scratch: &mut St
     session.assign_existing_literal(target, scratch)
 }
 
+enum Parsed<P> {
+    Program(P),
+    More(Option<parser::HereDocHint>),
+    Recovered,
+    Failed(Flow),
+}
+
+fn parsed<P>(
+    result: Result<P, parser::Error>,
+    more: bool,
+    session: &Session,
+    check: bool,
+    line: usize,
+) -> Parsed<P> {
+    match result {
+        Ok(program) => Parsed::Program(program),
+        Err(parser::Error::HereDoc(hint)) if more => Parsed::More(Some(hint)),
+        Err(parser::Error::Incomplete(_)) if more => Parsed::More(None),
+        Err(e @ parser::Error::ArrayToken)
+            if !check && !session.posix && !session.errexit && !session.noexec =>
+        {
+            syntax_error(session, e, line);
+            Parsed::Recovered
+        }
+        Err(e) => Parsed::Failed(syntax_error(session, e, line)),
+    }
+}
+
 fn run(
     session: &mut Session,
     mut reader: BufReader<PrivateFile>,
@@ -481,9 +509,7 @@ fn run(
             continue;
         }
         let buffered = line_start == 0 && n != 0 && !shared_offset && !session.verbose;
-        let open_function = buffered
-            && parser::opens_function(text)
-            && !(session.shopt.expand_aliases && session.aliases.0.is_some());
+        let open_function = buffered && parser::opens_function(text) && !session.reads_aliases();
         let mut result = if open_function {
             // A function header cannot execute before its compound body.
             Err(parser::Error::Incomplete(parser::Incomplete::Message(
@@ -519,7 +545,7 @@ fn run(
                 text,
                 reader.buffer(),
                 false,
-                session.shopt.expand_aliases && session.aliases.0.is_some(),
+                session.reads_aliases(),
                 |size| {
                     let rest = std::str::from_utf8(&reader.buffer()[..size])
                         .map_err(|_| parser::Error::Invalid("expected UTF-8 command text"))?;
@@ -535,22 +561,18 @@ fn run(
             }
         }
         history_quote = result.as_ref().err().and_then(parser::Error::pending_quote);
-        match result {
-            Err(parser::Error::HereDoc(hint)) if n != 0 => {
-                here_doc = Some(hint);
+        match parsed(result, n != 0, session, check, base_line) {
+            Parsed::More(hint) => {
+                here_doc = hint;
                 continue;
             }
-            Err(parser::Error::Incomplete(_)) if n != 0 => continue,
-            Err(e @ parser::Error::ArrayToken)
-                if !check && !session.posix && !session.errexit && !session.noexec =>
-            {
-                syntax_error(session, e, base_line);
+            Parsed::Recovered => {
                 status = 1;
                 session.pipe_status.single(status);
                 ran = true;
             }
-            Err(e) => return syntax_error(session, e, base_line),
-            Ok(program) if !program.is_empty() && !check => {
+            Parsed::Failed(flow) => return flow,
+            Parsed::Program(program) if !program.is_empty() && !check => {
                 if shared_offset && !reader.buffer().is_empty() {
                     // Unlike stream_position(), this discards the read-ahead buffer.
                     #[allow(clippy::seek_from_current)]
@@ -584,7 +606,7 @@ fn run(
                     other => return other,
                 }
             }
-            Ok(_) => {}
+            Parsed::Program(_) => {}
         }
         base_line += text.bytes().filter(|&b| b == b'\n').count();
         input.clear();
@@ -681,9 +703,7 @@ pub fn text(
             continue;
         }
         let probe = new_command && !last && !session.verbose && !expand_history;
-        let open_function = probe
-            && parser::opens_function(text)
-            && !(session.shopt.expand_aliases && session.aliases.0.is_some());
+        let open_function = probe && parser::opens_function(text) && !session.reads_aliases();
         let parse = |session: &mut Session, unit: &str, eof| {
             if eval_line.is_some() {
                 eval::parse(session, unit, eof, base_line)
@@ -721,7 +741,7 @@ pub fn text(
                 text,
                 &source.as_bytes()[end..limit],
                 limit == source.len(),
-                session.shopt.expand_aliases && session.aliases.0.is_some(),
+                session.reads_aliases(),
                 |size| parse(session, &source[start..end + size], false),
             ) {
                 Ok((program, consumed, extra_lines)) => {
@@ -738,22 +758,18 @@ pub fn text(
             }
         }
         history_quote = result.as_ref().err().and_then(parser::Error::pending_quote);
-        match result {
-            Err(parser::Error::HereDoc(hint)) if !last => {
-                here_doc = Some(hint);
+        match parsed(result, !last, session, check, base_line) {
+            Parsed::More(hint) => {
+                here_doc = hint;
                 continue;
             }
-            Err(parser::Error::Incomplete(_)) if !last => continue,
-            Err(e @ parser::Error::ArrayToken)
-                if !check && !session.posix && !session.errexit && !session.noexec =>
-            {
-                syntax_error(session, e, base_line);
+            Parsed::Recovered => {
                 status = 1;
                 session.pipe_status.single(status);
                 ran = true;
             }
-            Err(e) => return syntax_error(session, e, base_line),
-            Ok(program) if !program.as_ref().is_empty() && !check => {
+            Parsed::Failed(flow) => return flow,
+            Parsed::Program(program) if !program.as_ref().is_empty() && !check => {
                 ran = true;
                 let remember = tail
                     && (!session.interactive || session.command_history_expansion)
@@ -768,7 +784,7 @@ pub fn text(
                     other => return other,
                 }
             }
-            Ok(_) => {}
+            Parsed::Program(_) => {}
         }
         base_line = line_number + 1;
         start = end;
