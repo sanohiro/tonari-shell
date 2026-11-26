@@ -101,6 +101,12 @@ fn expand_into(
             }
             continue;
         }
+        // GNU locale templates use %k and %l. musl rejects either directive
+        // and otherwise discards the entire formatted timestamp.
+        if modifier.is_none() && matches!(spec, Some('k' | 'l')) {
+            short_number(out, tm, b'_', spec.unwrap());
+            continue;
+        }
         let day = tm.tm_wday as usize;
         let month = tm.tm_mon as usize;
         let name = match (modifier, spec) {

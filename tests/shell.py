@@ -120,8 +120,8 @@ done
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "GNU strftime flag semantics")
     def test_printf_time_flags_and_unknown_directives(self):
-        self.compare("export TZ=UTC0; printf '%(%^B|%#A|%#p|%#Z|%10B|%05a|%-d|%_d|%0e|%10d|%OY|%Q|%%)T' 0",
-                     0, b"JANUARY|THURSDAY|am|utc|   January|00Thu|1| 1|01|0000000001|%OY|%Q|%", minimum=5)
+        self.compare("export TZ=UTC0; printf '%(%^B|%#A|%#p|%#Z|%10B|%05a|%-d|%_d|%0e|%10d|%k|%l|%OY|%Q|%%)T' 0",
+                     0, b"JANUARY|THURSDAY|am|utc|   January|00Thu|1| 1|01|0000000001| 0|12|%OY|%Q|%", minimum=5)
 
     def test_printf_long_time_format(self):
         fmt = "%(" + "%Y" * 1000 + ")T"
