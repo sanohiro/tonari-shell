@@ -848,6 +848,12 @@ impl<'a> Directory<'a> {
         } else {
             self.base.as_bytes()
         };
+        let ascii_map = self.map_case
+            && self.base.is_ascii()
+            && self
+                .fold
+                .is_some_and(|locale| !matches!(locale, crate::session::CharacterLocale::Turkic));
+        let base = self.base.as_bytes();
         let _ = scan(&self.path, prefix, &mut |raw, kind| {
             if editing && entries % 256 == 0 {
                 crate::editor::preview::scan_input();
@@ -857,33 +863,42 @@ impl<'a> Directory<'a> {
                 return ControlFlow::Continue(());
             };
             let bytes = raw.to_bytes();
+            // A folded scan cannot use the bytewise directory prefix filter.
+            // Reject ASCII mismatches before decoding the rest of the filename.
+            let mut matched = false;
+            if ascii_map {
+                let head = &bytes[..bytes.len().min(base.len())];
+                if head.is_ascii() {
+                    if head.len() != base.len()
+                        || !base.iter().zip(head).all(|(&a, &b)| {
+                            a.eq_ignore_ascii_case(&b)
+                                || matches!((a, b), (b'-', b'_') | (b'_', b'-'))
+                        })
+                    {
+                        return ControlFlow::Continue(());
+                    }
+                    matched = true;
+                }
+            }
             if !matches!(bytes, b"." | b"..")
                 && (!bytes.starts_with(b".")
                     || self.base.starts_with('.')
                     || self.show_hidden && self.base.is_empty())
                 && let Ok(name) = raw.to_str()
-                && self.fold.is_none_or(|locale| {
-                    if !self.map_case {
-                        return crate::pattern::folded_prefix(name, self.base, locale).is_some();
-                    }
-                    if !matches!(locale, crate::session::CharacterLocale::Turkic)
-                        && self.base.is_ascii()
-                        && let Some(head) = name.as_bytes().get(..self.base.len())
-                        && head.is_ascii()
-                    {
-                        return self.base.bytes().zip(head).all(|(a, &b)| {
-                            a.eq_ignore_ascii_case(&b)
-                                || matches!((a, b), (b'-', b'_') | (b'_', b'-'))
-                        });
-                    }
-                    let mut chars = name.chars();
-                    self.base.chars().all(|c| {
-                        chars.next().is_some_and(|d| {
-                            crate::pattern::same_letter(c, d, locale)
-                                || self.map_case && matches!((c, d), ('-', '_') | ('_', '-'))
+                && (matched
+                    || self.fold.is_none_or(|locale| {
+                        if !self.map_case {
+                            return crate::pattern::folded_prefix(name, self.base, locale)
+                                .is_some();
+                        }
+                        let mut chars = name.chars();
+                        self.base.chars().all(|c| {
+                            chars.next().is_some_and(|d| {
+                                crate::pattern::same_letter(c, d, locale)
+                                    || self.map_case && matches!((c, d), ('-', '_') | ('_', '-'))
+                            })
                         })
-                    })
-                })
+                    }))
             {
                 return visitor(name, kind);
             }

@@ -647,15 +647,16 @@ fn parse_source(source: &str, final_input: bool) -> Result<Vec<Statement>, Error
             }) else {
                 return Err(error);
             };
-            if !matches!(lex(value, false, final_input), Err(Error::Incomplete(_))) {
+            let mut nested = aliases.clone();
+            Rc::make_mut(nested.0.as_mut().unwrap()).remove(name);
+            let replacement = aliases::with(nested.clone(), || lex(value, false, final_input));
+            if !matches!(replacement, Err(Error::Incomplete(_))) {
                 return Err(error);
             }
             let end = source.len() - trimmed.len() + name.len();
             let (tokens, spans, _) = lex(&source[..end], false, true)?;
             let mut reader = Reader::new(tokens, spans, source);
             reader.final_input = final_input;
-            let mut nested = aliases.clone();
-            Rc::make_mut(nested.0.as_mut().unwrap()).remove(name);
             reader.joined_alias(name.into(), value, nested)?;
             return reader.list(&[]);
         }

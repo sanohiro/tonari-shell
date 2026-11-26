@@ -67,7 +67,11 @@ pub(crate) fn signals() -> impl Iterator<Item = (&'static str, i32)> {
                 })
                 .collect()
         });
-        signals.chain(REALTIME.iter().map(|(name, n)| (name.as_str(), *n)))
+        signals.chain(
+            std::iter::once_with(|| REALTIME.iter())
+                .flatten()
+                .map(|(name, n)| (name.as_str(), *n)),
+        )
     }
     #[cfg(not(target_os = "linux"))]
     {

@@ -195,9 +195,14 @@ impl<'a> Arguments<'a> {
             return from_char(rest.chars().next().unwrap_or('\0') as u32);
         }
         let translated;
-        let input = if decimal != "." && (value.contains(decimal) || value.contains('.')) {
+        let input = if decimal == "." {
+            value
+        } else if value.contains('.') {
             // The C conversion must stop at an input dot in a comma locale.
             translated = value.replace('.', "?").replace(decimal, ".");
+            translated.as_str()
+        } else if value.contains(decimal) {
+            translated = value.replace(decimal, ".");
             translated.as_str()
         } else {
             value

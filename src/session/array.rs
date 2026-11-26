@@ -291,12 +291,17 @@ impl Session {
             };
         }
         match name {
-            "BASH_ARGV" => self
-                .debug_frames()
-                .rev()
-                .flat_map(|args| args.iter().rev())
-                .nth(index as usize)
-                .cloned(),
+            "BASH_ARGV" => {
+                let mut offset = usize::try_from(index).ok()?;
+                self.debug_frames().rev().find_map(|args| {
+                    if offset < args.len() {
+                        Some(args[args.len() - 1 - offset].clone())
+                    } else {
+                        offset -= args.len();
+                        None
+                    }
+                })
+            }
             "BASH_ARGC" => self
                 .debug_frames()
                 .rev()
