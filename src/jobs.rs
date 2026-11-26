@@ -757,6 +757,7 @@ impl Jobs {
 fn kill(jobs: &Jobs, mut args: &[String]) -> u8 {
     if args.first().is_some_and(|s| s == "-l" || s == "-L") {
         let mut out = io::stdout().lock();
+        let mut status = 0;
         if args.len() == 1 {
             for &(name, n) in crate::traps::SIGNALS.iter().filter(|s| s.1 != 0) {
                 if writeln!(out, "{n:2}) SIG{name}").is_err() {
@@ -766,22 +767,26 @@ fn kill(jobs: &Jobs, mut args: &[String]) -> u8 {
         } else {
             for arg in &args[1..] {
                 let result = if let Ok(n) = arg.parse::<i32>() {
-                    let Some((name, _)) = crate::traps::SIGNALS.iter().find(|s| s.1 == n % 128)
-                    else {
-                        return 1;
-                    };
-                    writeln!(out, "{name}")
-                } else if let Some(n) = crate::traps::number(arg) {
-                    writeln!(out, "{n}")
+                    // A shell wait status encodes the signal once as 128 + signal.
+                    let number = if n > 128 { n - 128 } else { n };
+                    crate::traps::SIGNALS
+                        .iter()
+                        .find(|s| s.1 == number)
+                        .map(|(name, _)| writeln!(out, "{name}"))
                 } else {
-                    return 1;
+                    crate::traps::number(arg).map(|n| writeln!(out, "{n}"))
+                };
+                let Some(result) = result else {
+                    eprintln!("tonari: kill: {arg}: invalid signal specification");
+                    status = 1;
+                    continue;
                 };
                 if result.is_err() {
                     return 1;
                 }
             }
         }
-        return 0;
+        return status;
     }
     let sig = match args.first().map(String::as_str) {
         Some("-s" | "-n") if args.len() >= 2 => {

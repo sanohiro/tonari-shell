@@ -95,6 +95,18 @@ case "$SUITE" in
     export PATH="$lab/pybin:$PATH"
     cd upstream
     PYTHONPATH=. python2 "$repo/tools/ci/oils-cases.py" > "$out/manifest.jsonl"
+    if [[ $SUITE == oils-fixes ]]; then
+      python3 - "$out/manifest.jsonl" > "$lab/selected.jsonl" <<'PYTHON'
+import json, sys
+for line in open(sys.argv[1]):
+    if json.loads(line)["suite"] in {"array-assoc", "builtin-kill", "dbracket", "regex"}:
+        print(line, end="")
+PYTHON
+      python3 "$repo/tools/ci/spec-pairs.py" "$lab/selected.jsonl" "$out/cases.jsonl" \
+        "$ref" "$lab/bin/bash" "$lab/pairs" --source .
+      PYTHONPATH=. python2 "$repo/tools/ci/oils-cases.py" grade < "$out/cases.jsonl" > "$out/grades.jsonl"
+      exit
+    fi
     if [[ $SUITE == oils-control ]]; then
       utilities=()
       if [[ $(uname -s) == Darwin ]]; then

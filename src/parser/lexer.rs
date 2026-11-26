@@ -736,7 +736,7 @@ fn pattern_parts(
     let mut raw = group.map_or_else(String::new, |op| op.to_string());
     let mut depth = 0usize;
     while let Some(c) = chars.clone().next() {
-        if group.is_none() && depth == 0 && matches!(c, ' ' | '\t' | '\n' | ';') {
+        if group.is_none() && depth == 0 && matches!(c, ' ' | '\t' | '\n' | ';' | '&' | '<' | '>') {
             break;
         }
         chars.next();
@@ -878,13 +878,25 @@ pub(super) fn lex(
         }
         let pattern = pattern_next.take();
         if pattern == Some(false)
-            && !matches!(c, '\n' | ';')
+            && !matches!(c, '\n' | ';' | '&' | '<' | '>')
             && chars
                 .as_str()
                 .strip_prefix("]]")
                 .is_none_or(|rest| !rest.chars().next().is_none_or(separator))
         {
             let mut word = WordBuilder::default();
+            if let Some(rest) = chars.as_str().strip_prefix('~') {
+                let end = rest
+                    .find(['/', ' ', '\t', '\n', ';', '&', '<', '>'])
+                    .unwrap_or(rest.len());
+                if rest[..end]
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
+                {
+                    word.part(Part::Tilde(format!("~{}", &rest[..end])));
+                    chars = rest[end..].chars();
+                }
+            }
             pattern_parts(&mut chars, &mut word, None)?;
             tokens.push(Token::Word(LexWord {
                 word: word.finish(),

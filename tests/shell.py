@@ -130,6 +130,21 @@ i=0; ((0 && A["$((++i))"])); echo "$i"
 (( A["$((i++))"] = $((i++)) )); echo "${A[1]}:$i"
 """, 0, "<\\:43>\n<a]b:43>\n<x'y:43>\n<雪:43>\n<$anything:43>\n1\n2:3\n".encode(), minimum=5)
 
+    def test_signal_listing_continues_past_invalid_operands(self):
+        self.compare("kill -l HUP BAD INT 9999 129 2>/dev/null; echo $?", 0, b"1\n2\nHUP\n1\n")
+
+    def test_regex_tilde_and_unquoted_operators(self):
+        self.compare("""HOME='^a$'
+[[ $HOME =~ ~ ]]; echo "$?"
+[[ "$HOME/a" =~ ~/[ab] ]]; echo "$?"
+[[ '~' =~ "~" ]]; echo "$?"
+[[ '&' =~ (&) ]]; echo "$?"
+""", 0, b"0\n0\n0\n0\n")
+        for shell in self.shells_for():
+            for operator in ("&", "<>"):
+                proc = self.command(shell, "[[ x =~ " + operator + " ]]; echo unexpected")
+                self.assertEqual((proc.returncode, proc.stdout), (2, b""))
+
     def test_umask_applies_symbolic_clauses_in_order(self):
         proc = self.command(TONARI, "umask 0124; umask a=,a=u && umask")
         self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"0777\n", b""))
@@ -249,6 +264,12 @@ test -t 0 0<&-; echo $?; test -t 0 </dev/null; echo $?; test -t 0; echo $?
 test -t 5 5<&-; echo $?; test -t 5 5</dev/null; echo $?; test -t 5 5<&0; echo $?"""
                 p = subprocess.run([sh, "-c", script], stdin=slave, cwd=self.cwd,
                                    env=self.env, capture_output=True, timeout=5)
+                if shell == BASH and not self.bash_before_53() and p.stdout.startswith(b"2\n2\n"):
+                    # Bash 5.3 diagnoses empty and nonnumeric operands. POSIX
+                    # specifies false for an invalid file descriptor number.
+                    self.assertEqual((p.returncode, p.stdout), (0, b"2\n2\n1\n1\n1\n0\n1\n1\n0\n"))
+                    self.assertEqual(p.stderr.count(b"integer expected"), 2)
+                    continue
                 self.assertEqual((p.returncode, p.stdout, p.stderr),
                                  (0, b"1\n1\n1\n1\n1\n0\n1\n1\n0\n", b""))
         finally:

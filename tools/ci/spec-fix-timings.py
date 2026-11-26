@@ -19,6 +19,10 @@ CASES = {
                     'echo "${a[5]}"', b"7\n"),
     "associative arithmetic": ('declare -A a; key=counter; for ((i=0;i<8000;i++)); '
                                'do ((a["$key"]++)); done; echo "${a[$key]}"', b"8000\n"),
+    "signal names": ('for ((i=0;i<3000;i++)); do kill -l HUP BAD INT 9999 129; done '
+                     '>list 2>/dev/null; echo "$?"; tail -3 list', b"1\n1\n2\nHUP\n"),
+    "regex home": ('HOME="^a$"; for ((i=0;i<3000;i++)); do [[ "$HOME/a" =~ ~/[ab] ]] || exit 1; '
+                   'done; echo ok', b"ok\n"),
     "lastpipe": ('shopt -s lastpipe; for ((i=0;i<120;i++)); do printf "yes\\n" | read -r v; done; '
                  'echo "$v"', b"yes\n"),
 }
