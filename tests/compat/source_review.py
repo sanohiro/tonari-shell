@@ -166,20 +166,25 @@ def comment_dialogue(shell, root):
         assert b"READY>" in t.read(b"READY>")
         for line in (
             "record() { printf '<%s>' \"$@\" >>comment-result; }",
+            "again() { eval 'record cached #tag'; }",
+            "again; again; again",
             "record before #hidden",
             "shopt -u interactive_comments",
             "record bare #visible",
+            "again",
             "source ./comment-source",
             "eval 'record eval #visible'",
             "record 'quoted #text' mid#word",
             "set -o interactive-comments",
+            "again",
             "record after #hidden",
         ):
             t.send(line.encode() + b"\nprintf '\\036'\n")
             response = t.read(b"\x1e")
             assert b"\x1e" in response, (shell, line, response)
         observed = (root / "comment-result").read_text()
-        expected = "<before><bare><#visible><source><eval><#visible><quoted #text><mid#word><after>"
+        expected = ("<cached><cached><cached><before><bare><#visible><cached><#tag>"
+                    "<source><eval><#visible><quoted #text><mid#word><cached><after>")
         assert observed == expected, (shell, observed)
     finally:
         t.close()
