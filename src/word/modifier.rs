@@ -137,6 +137,11 @@ pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String
 }
 
 fn as_number(word: &mut Word, env: &mut Expansion<'_>) -> Result<i64, Error> {
+    if let Word::Literal(s) = word
+        && let Some(n) = crate::Session::plain_decimal(s.trim_ascii())
+    {
+        return Ok(n);
+    }
     let text = env.scalar(std::mem::replace(word, Word::Literal(String::new())))?;
     env.arithmetic(&text)
 }

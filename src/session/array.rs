@@ -671,6 +671,9 @@ impl Session {
                     Some(Index::Expression(expr)) if expr.is_empty() => {
                         return Err("bad array subscript");
                     }
+                    Some(Index::Expression(expr)) if matches!(expr.as_str(), "*" | "@") => {
+                        return Err("cannot assign to non-numeric index");
+                    }
                     Some(Index::Expression(expr)) => {
                         Some(self.initializer_number(name, var, &mut map, visible, expr)?)
                     }
@@ -698,7 +701,14 @@ impl Session {
                 } else {
                     value.clone()
                 };
-                map.insert(i, self.convert_case(value, var.letter_case));
+                let value = self.convert_case(value, var.letter_case);
+                if let Elements::Dense(values) = &mut map
+                    && i == values.len() as i64
+                {
+                    values.push(value);
+                } else {
+                    map.insert(i, value);
+                }
                 next = i.checked_add(1);
             }
             Ok(())

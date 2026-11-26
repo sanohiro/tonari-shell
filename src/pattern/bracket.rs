@@ -42,9 +42,11 @@ pub(super) fn needs_parser(source: &[u8]) -> bool {
                 // The reference shells default to globasciiranges. Native
                 // fnmatch may put accented letters between ASCII endpoints.
                 if body[..end].iter().any(|b| matches!(b, b'\\' | b'-'))
-                    || body[..end]
-                        .windows(2)
-                        .any(|w| matches!(w, b"[." | b"[=" | b"[:"))
+                    || body[..end].split(|&b| b == b'[').skip(1).any(|item| {
+                        matches!(item.first(), Some(b'.' | b'='))
+                            || item.starts_with(b":ascii:]")
+                            || (item.starts_with(b":") && !item.ends_with(b":]"))
+                    })
                 {
                     return true;
                 }

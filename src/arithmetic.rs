@@ -309,12 +309,12 @@ impl<'a> Parser<'a> {
                 let len = match bytes {
                     [b'<', b'<', b'=', ..] | [b'>', b'>', b'=', ..] => 3,
                     [sign @ (b'+' | b'-'), next, rest @ ..] if sign == next => {
-                        let name_follows = rest
-                            .iter()
-                            .copied()
-                            .find(|b| !b.is_ascii_whitespace())
-                            .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_');
-                        if matches!(old, Token::Name(_)) || name_follows {
+                        if matches!(old, Token::Name(_))
+                            || rest
+                                .trim_ascii_start()
+                                .first()
+                                .is_some_and(|&b| b.is_ascii_alphabetic() || b == b'_')
+                        {
                             2
                         } else {
                             1

@@ -271,13 +271,13 @@ pub(super) fn run(
             continue;
         }
         let array = arrays.next_if(|a| a.operand == index + first_operand);
-        let subscript_end = arg
-            .find(['[', '='])
-            .filter(|&i| arg.as_bytes()[i] == b'[')
-            .and_then(|i| crate::parser::index_end(&arg[i..]).ok().map(|n| i + n));
-        let separator = arg[subscript_end.unwrap_or(0)..]
-            .find('=')
-            .map(|i| i + subscript_end.unwrap_or(0));
+        let separator = arg.find(['[', '=']).and_then(|i| {
+            if arg.as_bytes()[i] == b'=' {
+                return Some(i);
+            }
+            let end = crate::parser::index_end(&arg[i..]).ok()? + i;
+            arg[end..].find('=').map(|at| at + end)
+        });
         let (name, value) = separator.map_or((arg.as_str(), None), |at| {
             (&arg[..at], Some(&arg[at + 1..]))
         });
