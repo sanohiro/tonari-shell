@@ -296,7 +296,8 @@ impl Session {
     }
     pub(crate) fn set_eof_variable(&mut self, value: Option<&str>) {
         self.ignoreeof = value.is_some();
-        self.ignoreeof_limit = value
+        let Some(text) = value else { return };
+        self.ignoreeof_limit = Some(text)
             .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
             .and_then(|s| s.parse().ok())
             .unwrap_or(10);

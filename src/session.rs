@@ -625,22 +625,36 @@ impl Session {
         if !self.has_namerefs {
             return Ok(Cow::Borrowed(name));
         }
-        let mut result = Cow::Borrowed(name);
-        for _ in 0..32 {
-            let (base, suffix) = array::subscript(&result)
-                .map_or((result.as_ref(), ""), |(base, _)| {
-                    (base, &result[base.len()..])
+        let split = |s: &str| {
+            array::subscript(s)
+                .map(|(base, _)| base.len())
+                .unwrap_or(s.len())
+        };
+        let (mut base, mut suffix) = name.split_at(split(name));
+        for depth in 0..32 {
+            let target = self
+                .variables
+                .get(base)
+                .filter(|v| v.nameref)
+                .and_then(|v| v.value.as_deref())
+                .filter(|s| !s.is_empty());
+            let Some(target) = target else {
+                return Ok(if depth == 0 {
+                    Cow::Borrowed(name)
+                } else if suffix.is_empty() {
+                    Cow::Owned(base.to_owned())
+                } else {
+                    Cow::Owned(format!("{base}{suffix}"))
                 });
-            let Some(v) = self.variables.get(base).filter(|v| v.nameref) else {
-                return Ok(result);
             };
-            let Some(target) = v.value.as_deref().filter(|t| !t.is_empty()) else {
-                return Ok(result);
-            };
-            if !suffix.is_empty() && array::subscript(target).is_some() {
-                return Err("invalid indexed name reference");
+            let (next, index) = target.split_at(split(target));
+            if !index.is_empty() {
+                if !suffix.is_empty() {
+                    return Err("invalid indexed name reference");
+                }
+                suffix = index;
             }
-            result = Cow::Owned(format!("{target}{suffix}"));
+            base = next;
         }
         Err("circular name reference")
     }

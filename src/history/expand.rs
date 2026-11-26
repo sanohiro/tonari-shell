@@ -6,6 +6,24 @@ pub(crate) struct Memory {
     substitution: Option<(String, String)>,
     search: String,
     matched_word: Option<String>,
+    words: Option<(String, bool, Vec<(usize, usize)>)>,
+}
+
+impl Memory {
+    fn words(&mut self, line: &str, extglob: bool) -> &[(usize, usize)] {
+        if self
+            .words
+            .as_ref()
+            .is_none_or(|(saved, glob, _)| *glob != extglob || saved != line)
+        {
+            self.words = Some((
+                line.to_owned(),
+                extglob,
+                crate::parser::history_designator_spans(line, extglob),
+            ));
+        }
+        &self.words.as_ref().unwrap().2
+    }
 }
 
 pub(crate) struct Expansion<'a> {
@@ -16,8 +34,7 @@ fn error(s: &str) -> io::Error {
     io::Error::other(s)
 }
 
-fn select(s: &str, designator: &str, extglob: bool) -> io::Result<String> {
-    let words = crate::parser::history_designator_spans(s, extglob);
+fn select(s: &str, designator: &str, words: &[(usize, usize)]) -> io::Result<String> {
     if designator == "*" && words.len() < 2 {
         return Ok(String::new());
     }
@@ -270,28 +287,29 @@ pub(crate) fn expand_line<'a>(
             let memory = session
                 .history_expansion
                 .get_or_insert_with(Default::default);
-            let search = if search.is_empty() {
+            let needle = if search.is_empty() {
                 memory.search.as_str()
             } else {
                 search
             };
-            if search.is_empty() {
+            if needle.is_empty() {
                 return Err(error("no previous search"));
             }
             let result = hist
                 .iter()
                 .rev()
-                .find_map(|s| s.rfind(search).map(|at| (s.as_str(), at)));
+                .find_map(|s| s.rfind(needle).map(|at| (s.as_str(), at)));
             if let Some((entry, at)) = result {
-                memory.matched_word =
-                    crate::parser::history_designator_spans(entry, session.shopt.glob.extglob)
-                        .into_iter()
-                        .find(|&(start, end)| start <= at && at < end)
-                        .map(|(start, end)| &entry[start..end])
-                        .map(str::to_owned);
-                if !search.is_empty() {
-                    memory.search = search.to_owned();
+                if !search.is_empty() && search != memory.search {
+                    search.clone_into(&mut memory.search);
                 }
+                memory.matched_word = memory
+                    .words(entry, session.shopt.glob.extglob)
+                    .iter()
+                    .copied()
+                    .find(|&(start, end)| start <= at && at < end)
+                    .map(|(start, end)| &entry[start..end])
+                    .map(str::to_owned);
             }
             result.map(|(entry, _)| entry)
         } else if input.starts_with(|c: char| c.is_ascii_digit())
@@ -355,7 +373,14 @@ pub(crate) fn expand_line<'a>(
                     .and_then(|m| m.matched_word.clone())
                     .ok_or_else(|| error("no matching word"))?
             } else {
-                select(&value, spec, session.shopt.glob.extglob)?
+                select(
+                    &value,
+                    spec,
+                    session
+                        .history_expansion
+                        .get_or_insert_with(Default::default)
+                        .words(&value, session.shopt.glob.extglob),
+                )?
             };
         }
         while input.starts_with(':') {

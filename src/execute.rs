@@ -2969,8 +2969,9 @@ fn foreground(
         && raw.redirects.is_empty()
         && raw.compound.is_none()
         && !session.xtrace
-        && let [(key, Assignment::Scalar(Word::Literal(value)))] = raw.assignments.as_slice()
-        && session.assign_existing_literal(key, value)
+        && (raw.assignments.is_empty()
+            || matches!(raw.assignments.as_slice(),
+            [(key, Assignment::Scalar(Word::Literal(value)))] if session.assign_existing_literal(key, value)))
     {
         session.last_argument = Some(String::new());
         return Ok(Flow::Continue(0));

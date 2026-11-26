@@ -306,7 +306,11 @@ impl<'a> Expansion<'a> {
         use crate::session::array::{ArrayItems, Index};
         if associative {
             let pairs = parts.first().is_some_and(|(index, _)| index.is_none());
-            let mut items = Vec::new();
+            let mut items = Vec::with_capacity(if pairs {
+                parts.len().div_ceil(2)
+            } else {
+                parts.len()
+            });
             let mut error = None;
             let mut parts = parts.into_iter();
             while let Some((index, word)) = parts.next() {
