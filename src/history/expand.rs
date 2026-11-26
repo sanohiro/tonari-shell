@@ -86,14 +86,26 @@ fn substitute(value: &str, memory: &Memory, global: bool) -> io::Result<String> 
     let Some((old, new)) = &memory.substitution else {
         return Err(error("no previous substitution"));
     };
-    if !value.contains(old) {
+    let mut matches = value.match_indices(old.as_str());
+    let Some((mut at, _)) = matches.next() else {
         return Err(error("substitution failed"));
+    };
+    let mut result = String::with_capacity(value.len() - old.len() + new.len());
+    let mut start = 0;
+    loop {
+        result.push_str(&value[start..at]);
+        result.push_str(new);
+        start = at + old.len();
+        if !global {
+            break;
+        }
+        let Some((next, _)) = matches.next() else {
+            break;
+        };
+        at = next;
     }
-    Ok(if global {
-        value.replace(old, new)
-    } else {
-        value.replacen(old, new, 1)
-    })
+    result.push_str(&value[start..]);
+    Ok(result)
 }
 
 fn remember(memory: &mut Memory, mut old: String, new: String) -> io::Result<()> {
