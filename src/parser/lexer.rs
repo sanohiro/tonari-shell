@@ -1134,10 +1134,11 @@ fn lex_words(
         let start = chars.as_str();
         // Copy an ordinary word in one piece. Keep indexed assignments and
         // expansion syntax on the full word reader.
-        let plain = if matches!(c, '{' | '}') {
-            1
-        } else {
-            plain_prefix(start)
+        let plain = match c {
+            '{' | '}' => 1,
+            // A leading hash reaches the word reader only when it is literal.
+            '#' => 1 + plain_prefix(&start[1..]),
+            _ => plain_prefix(start),
         };
         if plain > 0
             && start.as_bytes().get(plain).is_none_or(|b| {
