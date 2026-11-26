@@ -1598,11 +1598,16 @@ impl Reader {
                     if matches!(self.peek(), Some(Token::ArrayStart)) {
                         let name = assignment.ok_or(Error::Invalid("invalid array assignment"))?;
                         let base = name.trim_end_matches('+');
-                        if matches!(cmd.words.first().and_then(Word::as_literal), Some("let")) {
-                            let start = self.position();
+                        if let Some(builtin @ ("let" | "eval")) =
+                            cmd.words.first().and_then(Word::as_literal)
+                        {
+                            let start = self.position() - 1;
                             self.array_items()?;
-                            let expr = format!("{name}={}", self.location(start).text());
-                            cmd.words.push(lexer::arithmetic_word(&expr)?.declaration());
+                            let expr = self.location(start);
+                            cmd.words.push(
+                                lexer::subscript_word(expr.text(), builtin == "eval")?
+                                    .declaration(),
+                            );
                             continue;
                         }
                         if !(is_identifier(base)

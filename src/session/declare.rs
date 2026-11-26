@@ -30,7 +30,7 @@ pub(super) fn run(
     mut operands: &[String],
     arrays: &[crate::execute::ArrayDeclaration],
     previous_status: u8,
-    mut bindings: Option<&mut super::Bindings>,
+    bindings: &mut super::Bindings,
 ) -> crate::execute::Flow {
     let total_args = operands.len();
     let readonly = command == "readonly";
@@ -288,6 +288,15 @@ pub(super) fn run(
             name
         };
         let base = super::array::subscript(name).map_or(name, |(base, _)| base);
+        if flags.global
+            && let Some(previous) = bindings.0.remove(base)
+        {
+            if let Some(var) = previous {
+                session.variables.insert(base.into(), var);
+            } else {
+                session.variables.remove(base);
+            }
+        }
         let creates_local = !attribute
             && !flags.global
             && session
@@ -365,9 +374,12 @@ pub(super) fn run(
                 scope.1 = Some(session.opt_offset);
                 session.opt_offset = 0;
             }
-            scope
+            let previous = bindings
                 .0
-                .insert(name.into(), session.variables.get(name).cloned());
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| session.variables.get(name).cloned());
+            scope.0.insert(name.into(), previous);
             var.dynamic = false;
             var.nameref = false;
             if !var.temporary && !flags.inherit && !session.shopt.localvar_inherit {
@@ -624,11 +636,11 @@ pub(super) fn run(
         {
             session.apply_posix_mode(var.value.is_some());
         }
-        if exporting
-            && var.exported
-            && let Some(saved) = bindings.as_mut()
+        if flags.readonly == Some(true)
+            || flags.exported == Some(true)
+            || (!attribute && !flags.global && scope_index.is_some())
         {
-            saved.0.remove(name);
+            bindings.0.remove(name);
         }
         session.store_variable(name, var, flags.global);
         if let Some(error) = initializer_error {
@@ -641,31 +653,15 @@ pub(super) fn run(
 }
 
 impl Session {
-    pub(crate) fn export_arrays(
-        &mut self,
-        args: &[String],
-        arrays: &[crate::execute::ArrayDeclaration],
-        previous_status: u8,
-        bindings: &mut super::Bindings,
-    ) -> crate::Flow {
-        run(
-            self,
-            "export",
-            args,
-            arrays,
-            previous_status,
-            Some(bindings),
-        )
-    }
-
     pub fn declare(
         &mut self,
         name: &str,
         args: &[String],
         arrays: &[crate::execute::ArrayDeclaration],
         previous_status: u8,
+        bindings: &mut super::Bindings,
     ) -> crate::execute::Flow {
-        run(self, name, args, arrays, previous_status, None)
+        run(self, name, args, arrays, previous_status, bindings)
     }
 
     pub(super) fn store_variable(&mut self, name: &str, var: Variable, global: bool) {
@@ -751,12 +747,24 @@ mod tests {
         for inner in ["b", "c"] {
             s.enter_function(&mut Default::default());
             assert_eq!(
-                s.declare("local", &[format!("x={inner}")], &[], 0),
+                s.declare(
+                    "local",
+                    &[format!("x={inner}")],
+                    &[],
+                    0,
+                    &mut Default::default()
+                ),
                 crate::Flow::Continue(0)
             );
         }
         assert_eq!(
-            s.declare("declare", &["-g".into(), "x+=d".into()], &[], 0),
+            s.declare(
+                "declare",
+                &["-g".into(), "x+=d".into()],
+                &[],
+                0,
+                &mut Default::default()
+            ),
             crate::Flow::Continue(0)
         );
         assert_eq!(s.get("x").as_deref(), Some("c"));

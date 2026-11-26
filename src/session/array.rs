@@ -882,7 +882,13 @@ mod tests {
         shell.assign("a", "outer");
         shell.enter_function(&mut Default::default());
         assert_eq!(
-            shell.declare("local", &["-a".into(), "a".into()], &[], 0),
+            shell.declare(
+                "local",
+                &["-a".into(), "a".into()],
+                &[],
+                0,
+                &mut Default::default()
+            ),
             crate::Flow::Continue(0)
         );
         shell

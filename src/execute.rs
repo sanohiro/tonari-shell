@@ -971,9 +971,13 @@ fn eval_builtin(
         Builtin::Getopts => Flow::Continue(session.getopts(args)),
         Builtin::Let => Flow::Continue(crate::arithmetic::let_builtin(args, session)),
         Builtin::Shift => Flow::Continue(session.shift(args)),
-        Builtin::Declare => {
-            session.declare(&cmd.words[0], args, &cmd.array_declarations, last_status)
-        }
+        Builtin::Declare => session.declare(
+            &cmd.words[0],
+            args,
+            &cmd.array_declarations,
+            last_status,
+            &mut bindings,
+        ),
         Builtin::Echo => Flow::Continue(crate::builtins::echo(args, session)),
         Builtin::Test => Flow::Continue(crate::builtins::test(&cmd.words, session)),
         Builtin::LoopControl => {
@@ -1023,7 +1027,13 @@ fn eval_builtin(
                 .take_while(|s| s.len() > 1 && s.starts_with('-') && *s != "--")
                 .any(|s| s.contains(['a', 'A']))
             {
-                session.export_arrays(args, &cmd.array_declarations, last_status, &mut bindings)
+                session.declare(
+                    "export",
+                    args,
+                    &cmd.array_declarations,
+                    last_status,
+                    &mut bindings,
+                )
             } else {
                 let status = session.export(args, &mut bindings);
                 Flow::Continue(apply_array_declarations(cmd, status, session))

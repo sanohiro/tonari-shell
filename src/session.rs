@@ -309,8 +309,6 @@ impl Session {
                 "BASH_ARGV",
                 "BASH_SOURCE",
                 "BASH_LINENO",
-                "BASH_ALIASES",
-                "BASH_CMDS",
                 "FUNCNAME",
                 "DIRSTACK",
                 "PIPESTATUS",
@@ -1473,7 +1471,13 @@ impl Session {
             || self.variables.contains_key("REPLY")
             || std::env::var_os("REPLY").is_some()
         {
-            self.declare("local", &["REPLY".into()], &[], last);
+            self.declare(
+                "local",
+                &["REPLY".into()],
+                &[],
+                last,
+                &mut Bindings::default(),
+            );
         } else {
             self.locals
                 .last_mut()
@@ -2412,7 +2416,13 @@ mod tests {
         session.assign(key, "global");
         session.enter_function(&mut Default::default());
         assert_eq!(
-            session.declare("local", &[format!("{key}=local")], &[], 0),
+            session.declare(
+                "local",
+                &[format!("{key}=local")],
+                &[],
+                0,
+                &mut Default::default()
+            ),
             crate::Flow::Continue(0)
         );
         let prefix = session.bind(&[(key.into(), "temporary".into())]);

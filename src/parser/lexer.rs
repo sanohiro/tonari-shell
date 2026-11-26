@@ -187,7 +187,7 @@ fn dollar_word(
                 None => return Err(Error::Incomplete("unterminated parameter expansion")),
                 _ => return bad_substitution(content, chars, word, quoted),
             };
-            if content.starts_with("!#") && !content.starts_with("!#}") {
+            if !super::POSIX.get() && content.starts_with("!#") && !content.starts_with("!#}") {
                 return bad_substitution(content, chars, word, quoted);
             }
             let prefixed = content.starts_with(['#', '!'])
@@ -199,7 +199,11 @@ fn dollar_word(
                 && content.as_bytes().get(1).is_some_and(u8::is_ascii_digit)
             {
                 1 + content[1..].bytes().take_while(u8::is_ascii_digit).count()
-            } else if content.starts_with(['#', '!'])
+            } else if (content.starts_with('#')
+                || content.starts_with('!')
+                    && (matches!(content.as_bytes().get(1), Some(b'*' | b'@'))
+                        || !super::POSIX.get()
+                            && matches!(content.as_bytes().get(1), Some(b'?' | b'#'))))
                 && (content.as_bytes().get(2) == Some(&b'}')
                     || content.starts_with("!*")
                     || content.starts_with("!@"))
@@ -531,6 +535,8 @@ fn parameter_word(
     let mut word = WordBuilder::default();
     let mut empty = true;
     let mut after_colon = false;
+    let quoted_apostrophes = outer_quoted && !super::POSIX.get();
+    let mut inside_apostrophes = false;
     while let Some(c) = chars.next() {
         let eligible = empty || after_colon;
         after_colon = false;
@@ -555,7 +561,13 @@ fn parameter_word(
                     word.push('~');
                 }
             }
-            c if c == '}' || stop_slash && c == '/' && !(initial_slash_is_literal && empty) => {
+            '\'' if quoted_apostrophes => {
+                inside_apostrophes = !inside_apostrophes;
+                word.push(c);
+            }
+            c if !inside_apostrophes
+                && (c == '}' || stop_slash && c == '/' && !(initial_slash_is_literal && empty)) =>
+            {
                 if empty && !outer_quoted {
                     word.part(Part::Unquoted(String::new()));
                 }
@@ -588,7 +600,7 @@ fn parameter_word(
                         stop_slash && v == '/'
                             || assignment && !outer_quoted && v == ':'
                             || matches!(v, '}' | '$' | '"' | '`' | '\\')
-                            || (!outer_quoted && v == '\'')
+                            || ((!outer_quoted || quoted_apostrophes) && v == '\'')
                     })
                     .unwrap_or(rest.len());
                 let mut text = String::from(c);
@@ -1401,13 +1413,9 @@ fn lex_words(
                 }
                 continue;
             }
-            if let Some(text) = word
-                .as_literal()
-                .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
-            {
+            if let Some(fd) = word.as_literal().and_then(|s| descriptor(s).ok()) {
                 let op = chars.next().unwrap();
                 chars = joined(chars.as_str()).chars();
-                let fd = descriptor(text)?;
                 if op == '<' && chars.as_str().starts_with('<') {
                     here_doc::redirect(&mut chars, fd, &mut tokens, &mut pending_docs)?;
                 } else {

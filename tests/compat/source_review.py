@@ -16,6 +16,11 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "posix-background-parameter": "set -o posix\n: &\nj=$!; wait \"$j\"; test \"${!?}\" = \"$j\"; echo \"$?\"",
+    "descriptor-overflow": "printf '<%s>\\n' 99999999999999999999999</dev/null; : 33</dev/null; echo \"$?\"",
+    "quoted-operand-brace": "v=set; x=value; printf '<%s>\\n' \"${v-'}'}\" \"${w-'}'}\" \"${w-'$x}'}\"",
+    "eval-array-operand": "a=([3]=one [5]=two); f(){ local -a s; eval s=(\\\"\\${!${1}[@]}\\\"); declare -p s; }; f a",
+    "prefix-declaration": "x=outer; f(){ x=inner local x; printf '<%s>' \"$x\"; }; f; echo \"$x\"; y=old; y=temp readonly y; echo \"$y\"",
     "array-declaration-print": "declare -r 'c[100]'; declare -p c; declare -a 'e[10]=(x y)'; declare -p e; export e; set -o posix; readonly -a | grep ' c$'; export -p | grep ' e='",
     "slice-error-recovery": "set -- a b; a=hello; b=(one two)\nprintf ignored \"${@:0:-2}\"; echo skipped\necho \"$?\"\nprintf ignored \"${b[@]:0:-2}\"; echo skipped\necho \"$?\"\nset -o posix\nprintf ignored \"${a:2:-7}\"; echo skipped\necho \"continued:$?\"",
     "arithmetic-adjacent-signs": "v=4; echo $((++7)) $((--7)) $((5--2)) $((3+++2)) $((--(v))) $v; echo $((++v)) $((v++)) $v",
@@ -120,6 +125,11 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "posix-background-parameter": (": \"${!?}\"", 7000),
+    "descriptor-overflow": (": 99999999999999999999999</dev/null", 2500),
+    "quoted-operand-brace": (": \"${w-'$x}'}\"", 7000),
+    "eval-array-operand": ("eval s=(\\\"\\${!${name}[@]}\\\")", 3500),
+    "prefix-declaration": ("f", 5000),
     "indexed-init-recovery": ("a=([0]=start [1]=yes [-3]=bad)", 800),
     "array-declaration-print": ("declare -a 'e[10]=(x y)'; declare -p e >/dev/null", 500),
     "slice-error-recovery": (":", 800),
@@ -716,6 +726,10 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "posix-background-parameter": "set -o posix; : & j=$!; wait \"$j\"",
+                "quoted-operand-brace": "x=value",
+                "eval-array-operand": "a=([3]=one [5]=two); name=a",
+                "prefix-declaration": "x=outer; f(){ x=inner local x; : \"$x\"; }",
                 "array-declaration-print": "e=(init)",
                 "arithmetic-adjacent-signs": "v=0",
                 "portable-bracket-members": "pat='[[.space.][.hyphen.][.tab.]]'; text=hello",
