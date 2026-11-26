@@ -16,6 +16,10 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "posix-special-in-function": "set -o posix; a=outer; f(){ a=3 readonly a; }; a=7 f; declare -p a; g(){ local q=local; q=inside :; echo \"$q\"; }; q=outside; q=temp g; echo \"$q\"",
+    "trace-arithmetic-loop": "PS4='+'; { set -x; for (( j=$((++v)); j<2; j++ )); do :; done; for ((;;)); do break; done; set +x; } 2>trace; cat trace; echo \"$v:$j\"",
+    "trace-arithmetic-expansion": "PS4='+'; { set -x; (( x=$((++v)) )); set +x; } 2>trace; cat trace; echo \"$x:$v\"",
+    "function-render-attributes": "f(){ :; }; export -f f; type f; declare -f f; declare -pf f; export -pf; set | sed -n '/^f ()/,$p'",
     "conditional-trace-operator": "PS4='+ '; exec 2>trace; set -x; [[ a > b ]]; set +x; cat trace",
     "failed-function-trap-text": "trap 'echo \"ERR:$LINENO:$BASH_COMMAND\"' ERR\nf(){\n [[ -z nonempty ]]\n}\nf",
     "extended-operand-quotes": "hi=ok; unset u; shopt -u extquote\nprintf '<%s>\\n' \"${u-$'a\\tb'}\" \"${u-$\"hi\"}\"; shopt -s extquote\nprintf '<%s>\\n' \"${u-$'a\\tb'}\" \"${u-$\"hi\"}\"",
@@ -113,6 +117,7 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "nameref-element-length": "a=(zero abc); declare -n r='a[$(printf 1)]'; declare -n all='a[@]'; printf '%s/%s/%s\\n' \"${#r}\" \"$r\" \"${#all}\"",
     "array-single-evaluation-option": "shopt -s assoc_expand_once; shopt -q array_expand_once; echo $?; a=(one two); i=0; echo \"${a[i++]}:$i\"; shopt -u array_expand_once; shopt -q assoc_expand_once; echo $?",
     "lazy-malformed-operand": "a=4\necho \"${a-'$('\\'}\"\necho \"${a+'$('\\'}\"\necho survived",
     "posix-command-precedence": "break(){ echo fn; }; set -o posix; type -t break; type -at break; command -V break",
@@ -146,6 +151,11 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "posix-special-in-function": ("q=temp f", 2000),
+    "trace-arithmetic-loop": ("for ((j=0;j<3;j++)); do :; done", 700),
+    "trace-arithmetic-expansion": ("(( x=$v + 1 ))", 2500),
+    "nameref-element-length": (": \"${#r}\" \"${#all}\"", 2600),
+    "function-render-attributes": ("type f >/dev/null; declare -f f >/dev/null", 1200),
     "conditional-trace-operator": ("[[ a > b ]]", 2600),
     "failed-function-trap-text": ("f", 1700),
     "array-single-evaluation-option": ("shopt -s assoc_expand_once; idx=0; : \"${a[idx++]}\"; shopt -u array_expand_once", 2200),
@@ -773,6 +783,11 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "posix-special-in-function": "set -o posix; f(){ q=inner :; }",
+                "trace-arithmetic-loop": "exec 2>/dev/null; set -x",
+                "trace-arithmetic-expansion": "exec 2>/dev/null; v=2; set -x",
+                "nameref-element-length": "a=(zero abc); declare -n r='a[k]'; k=1; declare -n all='a[@]'",
+                "function-render-attributes": "f(){ :; }; export -f f",
                 "conditional-trace-operator": "PS4='+ '; exec 2>/dev/null; set -x",
                 "failed-function-trap-text": "trap ': \"$BASH_COMMAND\"' ERR; f(){ [[ -z nonempty ]]; }",
                 "array-single-evaluation-option": "a=(one two)",

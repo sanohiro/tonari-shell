@@ -487,7 +487,7 @@ impl Session {
             }
             if !self.posix {
                 for name in self.functions.keys() {
-                    if self.print_function(&mut out, name).is_err() {
+                    if self.print_function(&mut out, name, false).is_err() {
                         return 1;
                     }
                 }
@@ -1259,6 +1259,17 @@ impl Session {
     // Move the prepared strings and avoid snapshotting variables for restoration.
     pub fn persist_prefix(&mut self, assignments: &mut Vec<(String, String)>) {
         for (name, value) in assignments.drain(..) {
+            // A special builtin's environment persists in the nearest real
+            // binding. A function prefix can itself hide another prefix.
+            if self.variables.get(&name).is_some_and(|v| v.temporary) {
+                for scope in self.locals.iter_mut().rev() {
+                    if let Some(previous) = scope.0.remove(&name)
+                        && !previous.as_ref().is_some_and(|v| v.temporary)
+                    {
+                        break;
+                    }
+                }
+            }
             if name == "BASH_COMPAT" {
                 self.apply_compat(&value);
             }
@@ -1530,7 +1541,7 @@ impl Session {
             if i == args.len() {
                 let mut out = io::stdout().lock();
                 for name in self.functions.keys().filter(|n| self.function_exported(n)) {
-                    if self.print_function(&mut out, name).is_err() {
+                    if self.print_function(&mut out, name, true).is_err() {
                         return 1;
                     }
                 }

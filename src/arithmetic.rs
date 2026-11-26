@@ -239,15 +239,27 @@ pub fn let_builtin(args: &[String], session: &mut Session) -> u8 {
     u8::from(last == 0)
 }
 
+pub(crate) fn traced(source: &str, session: &mut Session, status: u8) -> Result<i64> {
+    let captured = std::cell::Cell::new(None);
+    let mut env = crate::expansion::Expansion::new(session, status, &captured);
+    let text = env
+        .arithmetic_text(source)
+        .map_err(|_| "invalid arithmetic expansion")?;
+    crate::execute::trace_line(env.session, status, |line| {
+        line.push_str("(( ");
+        line.push_str(&text);
+        line.push_str(" ))");
+    });
+    with_variables(&text, &mut env)
+}
+
 pub fn command(source: &str, session: &mut Session, status: u8) -> Flow {
-    if session.xtrace {
-        crate::execute::trace_line(session, status, |line| {
-            line.push_str("(( ");
-            line.push_str(source);
-            line.push_str(" ))");
-        });
-    }
-    match expanded(source, session, status) {
+    let result = if session.xtrace {
+        traced(source, session, status)
+    } else {
+        expanded(source, session, status)
+    };
+    match result {
         Ok(n) => Flow::Continue(u8::from(n == 0)),
         Err(e) => {
             eprintln!("tonari: {e}");

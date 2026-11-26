@@ -357,12 +357,18 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                         return Err(flow);
                     }
                 }
-                compiled.run(s, last).map_err(|e| {
+                let result = if s.xtrace {
+                    let expr = expr.trim_start();
+                    crate::arithmetic::traced(if expr.is_empty() { "1" } else { expr }, s, last)
+                } else {
+                    compiled.run(s, last)
+                };
+                result.map_err(|e| {
                     eprintln!("tonari: {e}");
                     Flow::Continue(1)
                 })
             };
-            if !init.trim().is_empty()
+            if (session.xtrace || !init.trim().is_empty())
                 && let Err(flow) = arithmetic(
                     session,
                     &init,
@@ -378,14 +384,13 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 if !first && !s.traps.debug_handler() {
                     s.current_command.clone_from(&header);
                 }
-                if !first && !step.is_empty() {
+                if !first && (s.xtrace || !step.is_empty()) {
                     arithmetic(s, &step, &update, last)?;
                 }
                 first = false;
-                Ok(
-                    (condition.trim().is_empty() || arithmetic(s, &condition, &test, last)? != 0)
-                        .then_some(last),
-                )
+                Ok(((!s.xtrace && condition.trim().is_empty())
+                    || arithmetic(s, &condition, &test, last)? != 0)
+                    .then_some(last))
             })
         }
         Command::Coprocess { name, body } => {

@@ -99,7 +99,7 @@ pub(super) fn run(
         if operands.is_empty() {
             for name in session.functions.keys() {
                 if !flags.function_names && !readonly {
-                    if session.print_function(&mut out, name).is_err() {
+                    if session.print_function(&mut out, name, true).is_err() {
                         return crate::Flow::Continue(1);
                     }
                     continue;
@@ -165,7 +165,9 @@ pub(super) fn run(
                 } else {
                     String::new()
                 };
-                if !flags.function_names && session.print_function(&mut out, name).is_err() {
+                if !flags.function_names
+                    && session.print_function(&mut out, name, flags.print).is_err()
+                {
                     return crate::Flow::Continue(1);
                 }
                 if flags.function_names && writeln!(out, "{line}{name}").is_err() {

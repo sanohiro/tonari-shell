@@ -185,7 +185,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                 let result = match format {
                     Format::Verbose => writeln!(out, "{name} is {label}").and_then(|()| {
                         if kind == "function" {
-                            session.print_function(&mut out, name)
+                            session.print_function(&mut out, name, false)
                         } else {
                             Ok(())
                         }

@@ -397,9 +397,19 @@ impl<'a> Expansion<'a> {
     }
 
     pub fn arithmetic(&mut self, expression: &str) -> Result<i64, Error> {
-        let expanded;
-        let expression = if expression.contains(['$', '`', '"', '\\']) {
-            expanded = if expression.contains('[') {
+        let text = self.arithmetic_text(expression)?;
+        arithmetic::with_variables(&text, self).map_err(|message| match message {
+            "unbound arithmetic variable" => Error::fatal(message, 1),
+            _ => Error::discard(message),
+        })
+    }
+
+    pub(crate) fn arithmetic_text<'s>(
+        &mut self,
+        expression: &'s str,
+    ) -> Result<std::borrow::Cow<'s, str>, Error> {
+        if expression.contains(['$', '`', '"', '\\']) {
+            let text = if expression.contains('[') {
                 let (keys, tail) =
                     crate::parser::with_subscript_aliases(self.session, expression, || {
                         crate::parser::arithmetic_segments(expression, |name| {
@@ -430,14 +440,10 @@ impl<'a> Expansion<'a> {
                 .map_err(|e| e.message())?;
                 self.scalar(word)?
             };
-            expanded.as_str()
+            Ok(text.into())
         } else {
-            expression
-        };
-        arithmetic::with_variables(expression, self).map_err(|message| match message {
-            "unbound arithmetic variable" => Error::fatal(message, 1),
-            _ => Error::discard(message),
-        })
+            Ok(expression.into())
+        }
     }
 
     pub(crate) fn redirect_path(&mut self, word: Word) -> Result<String, Error> {

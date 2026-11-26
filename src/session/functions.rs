@@ -202,9 +202,21 @@ impl Session {
         flags
     }
 
-    pub fn print_function(&self, out: &mut impl Write, name: &str) -> io::Result<()> {
+    pub fn print_function(
+        &self,
+        out: &mut impl Write,
+        name: &str,
+        attributes: bool,
+    ) -> io::Result<()> {
         let definition = &self.functions[name].definition;
         let body = definition.location.text();
+        if crate::parser::reserved(name)
+            || name
+                .split_once('=')
+                .is_some_and(|(key, _)| crate::parser::is_identifier(key.trim_end_matches('+')))
+        {
+            write!(out, "function ")?;
+        }
         let statements = definition.body.statements();
         if body.starts_with('{') && body.ends_with('}') && statements.iter().all(|s|
             s.condition == crate::parser::Condition::Always && !s.negated
@@ -216,9 +228,11 @@ impl Session {
         } else {
             writeln!(out, "{name} () \n{body}")?;
         }
-        let flags = self.function_attributes(name);
-        if flags.len() > 1 {
-            writeln!(out, "declare -{flags} {name}")?;
+        if attributes {
+            let flags = self.function_attributes(name);
+            if flags.len() > 1 {
+                writeln!(out, "declare -{flags} {name}")?;
+            }
         }
         Ok(())
     }
