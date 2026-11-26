@@ -149,6 +149,15 @@ i=0; ((0 && A["$((++i))"])); echo "$i"
                 proc = self.command(shell, "[[ x =~ " + operator + " ]]; echo unexpected")
                 self.assertEqual((proc.returncode, proc.stdout), (2, b""))
 
+    def test_unset_removes_a_posix_special_builtin_assignment(self):
+        p = self.command(TONARI, """set -o posix
+f() { x=42; x=tmp unset x; echo "${x-unset}"; }
+f
+x=42; x=tmp eval 'unset x'; echo "${x-unset}"
+x=42; x=tmp :; echo "$x"
+""")
+        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, b"unset\nunset\ntmp\n", b""))
+
     def test_umask_applies_symbolic_clauses_in_order(self):
         proc = self.command(TONARI, "umask 0124; umask a=,a=u && umask")
         self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"0777\n", b""))

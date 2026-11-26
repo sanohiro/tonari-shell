@@ -1,5 +1,42 @@
 # Startup and execution / 起動と実行性能
 
+## 2026-11-26 · Timings after external compatibility fixes / 互換性修正後の計測
+
+On a physical Apple M1 running macOS 27.2.1, interleaved tests checked stdout, stderr and exit status for each shell. The vi case times 30 pairs of motions over a 400-character word, a change and submission through the PTY. It stops when the called function prints the expected edited arguments. The first three rows and the lastpipe and vi rows use the same 13-trial run. The associative arithmetic and signal diagnostics rows use separate, respectively 31- and 25-trial comparisons. Values are median milliseconds. [Workloads](../tools/ci/spec-fix-timings.py)
+
+| Workload | First working Tonari | After tuning | Bash 5.2.37 |
+| --- | ---: | ---: | ---: |
+| Array attributes, 1,500 elements × 100 | 58.977 | 31.512 | 108.964 |
+| Update the last argument 10,000 times | 7.230 | 6.846 | 21.988 |
+| Initialize dependent indexed elements 1,800 times | 8.494 | 7.251 | 14.727 |
+| 120 `printf \| read` pipelines using `lastpipe` | 5.748 | 6.015 | 92.635 |
+| vi word motions, change and submit | 1.830 | 2.041 | 3.253 |
+| Increment an associative element 8,000 times | 12.314 | 11.387 | 25.433 |
+| Signal lookup with valid and invalid operands, 3,000 lists | 44.828 | 33.339 | 48.135 |
+
+Compute attributes once per expanded array, use integer indices through the common initializer, and avoid quoting and rescanning simple associative keys. A whole stderr diagnostic in one write reduced signal-list time. The tuned signal workload took 69% of Bash time on this Mac. The inputs include redirected output and two diagnostics per iteration. A separate 13-trial vi experiment measured 1.924 ms with the common Unicode walk, 2.046 ms with a special ASCII walk and 2.175 ms with a second traversal variant. Retain the common implementation. The lastpipe follow-up did not improve the initial median. [Full native per-case replays](compatibility/external-shell/shared-failures.md)
+
+配列属性は要素ごとに作り直さず、数値添字は整数のまま扱います。シグナル名の診断を1回の書き込みにまとめると、中央値が 44.828 ms から 33.339 ms に短縮しました。vi の ASCII 専用処理には実測上のメリットがなく、Unicode と共通の処理を採用しました。誤った結果を返す旧版の短さは互換機能の速度としていません。
+
+On the same physical Mac, a 50,000-line plain history file held 700,000 bytes. With 15 interleaved fresh-shell trials, reading that file then importing a copy with one additional line took 7.361 ms in Tonari and 13.688 ms in Bash 5.2.37. Both returned entry 50,001 with the expected command. Assigning `HISTFILESIZE=100` to a fresh copy took 4.263 ms and 7.190 ms respectively and retained the same final 1,400 bytes. The fixture consisted of `command-00000` through `command-49999`, each followed by a newline. Set `HISTSIZE=100001`, run `HISTFILE=first history -r; HISTFILE=second history -n; history 1`. For the limit check run `HISTFILE=copy; HISTFILESIZE=100`. File creation and verification were outside the timer. 5万行の履歴で追加取り込みとファイル上限の適用を比較し、結果の件数・内容も照合しました。
+
+Final native runs used the distributed binary and each host's default benchmark Bash (Ubuntu 5.2.21 and macOS 5.3.20). The table shows median milliseconds over 13 interleaved trials. The regex workload sets the same HOME containing metacharacters at startup for both shells.
+
+| Workload | Ubuntu Tonari | Ubuntu Bash | macOS Tonari | macOS Bash |
+| --- | ---: | ---: | ---: | ---: |
+| Array attributes | 24.491 | 124.981 | 21.601 | 122.754 |
+| Last argument | 2.167 | 20.419 | 6.137 | 39.203 |
+| Indexed initializer | 2.235 | 10.449 | 7.511 | 30.062 |
+| Associative increment | 10.659 | 27.243 | 11.035 | 50.910 |
+| Signal list with errors | 16.748 | 31.161 | 29.450 | 72.560 |
+| Literal HOME in a regex | 6.825 | 42.288 | 11.232 | 91.403 |
+| Parent-side pipeline read | 2.192 | 44.805 | 4.728 | 198.191 |
+| vi edit and submit | 1.402 | 2.058 | 0.809 | 32.059 |
+
+The Linux x86-64 executable was 2,042,072 bytes, stripped and static PIE. The macOS arm64 CI executable was 1,532,912 bytes. The physical M1 build was 1,532,960 bytes and linked only libSystem. 各行は同じ実機内での比較です。
+
+Reproduce with `python3 tools/ci/spec-fix-timings.py /path/to/tonari /path/to/bash --trials 13`. Use `--case vi` or another listed workload to isolate a path. The native CI records CPU, binary size and raw samples for each machine. [Final native benchmarks](https://github.com/sanohiro/tonari-shell/actions/runs/45740024248)
+
 <a id="external-shell-specs"></a>
 
 ## 2026-11-26 · bensch and Oils / 対話操作・組み込み・言語仕様の外部試験
