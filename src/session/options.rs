@@ -314,6 +314,17 @@ impl Session {
             };
             if !all && (enable || disable) {
                 if let Some(write) = entry.write {
+                    if name == "hostcomplete" && !set && !self.word_breaks_unset {
+                        let breaks = self.completion_breaks();
+                        if enable != breaks.contains('@') {
+                            let adjusted = if enable {
+                                format!("@{breaks}")
+                            } else {
+                                breaks.replace('@', "")
+                            };
+                            self.assign("COMP_WORDBREAKS", &adjusted);
+                        }
+                    }
                     *write(self) = enable;
                     if set {
                         self.option_changed(name, enable);

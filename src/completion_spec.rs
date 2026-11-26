@@ -895,6 +895,8 @@ pub fn for_tab(
             name = expanded.words.first()?.clone();
             at = expanded.command_start;
             if session.completions.lookup(Some(&name), prefix).is_some() {
+                let expanded =
+                    expanded.programmable(&session.completion_breaks(), session.shopt.hostcomplete);
                 return generate_for_tab(session, Some(&name), prefix, Some(&expanded));
             }
         }

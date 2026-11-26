@@ -270,6 +270,7 @@ def main():
         if requested("programmable-boundaries"):
             for line, setup in [("demo --key=va", ""), ("demo --key=", ""), ("demo x::y==v", ""),
                                 ("demo first:val", "COMP_WORDBREAKS=' '; "), ("demo @user", ""),
+                                ("demo --key=va", "unset COMP_WORDBREAKS; COMP_WORDBREAKS=' '; "),
                                 ("demo 'a:b' tail", ""), (r"demo a\:b", "")]:
                 results = [callback_tab(shell, termroot, line, setup)[0] for shell in shells[:2]]
                 assert results[0] == results[1], (line, results)

@@ -135,6 +135,7 @@ pub struct Session {
     variables: BTreeMap<String, Variable>,
     dynamic: dynamic::Dynamic,
     groups_unset: bool,
+    word_breaks_unset: bool,
     has_namerefs: bool,
     reference_depth: std::cell::Cell<u8>,
     opt_offset: usize,
@@ -304,6 +305,9 @@ impl Session {
             .filter(|k| k.starts_with(prefix))
             .map(str::to_owned),
         );
+        if !self.word_breaks_unset && "COMP_WORDBREAKS".starts_with(prefix) {
+            names.insert("COMP_WORDBREAKS".into());
+        }
         if self.execution_string.is_some() && "BASH_EXECUTION_STRING".starts_with(prefix) {
             names.insert("BASH_EXECUTION_STRING".into());
         }
@@ -674,7 +678,9 @@ impl Session {
             "HISTCMD" | "BASH_MONOSECONDS" | "RANDOM" | "SECONDS" | "SRANDOM" => {
                 self.dynamic_number(name).map(|v| v.to_string())
             }
-            "COMP_WORDBREAKS" => Some(crate::complete::default_word_breaks(self.shopt.hostcomplete).into()),
+            "COMP_WORDBREAKS" => {
+                Some(crate::complete::default_word_breaks(self.shopt.hostcomplete).into())
+            }
             "BASH_SUBSHELL" => Some(self.subshell_depth.to_string()),
             "BASH_ARGV0" => Some(self.arg0.clone()),
             "EPOCHSECONDS" | "EPOCHREALTIME" => {
@@ -1018,6 +1024,18 @@ impl Session {
             slot.clear();
             slot.push_str(arg);
         }
+    }
+
+    pub(crate) fn completion_breaks(&self) -> Cow<'_, str> {
+        let default = crate::complete::default_word_breaks(self.shopt.hostcomplete);
+        if self.word_breaks_unset || !self.variables.contains_key("COMP_WORDBREAKS") {
+            return Cow::Borrowed(default);
+        }
+        if let Some(value) = self.stored_scalar("COMP_WORDBREAKS") {
+            return Cow::Borrowed(value);
+        }
+        self.get("COMP_WORDBREAKS")
+            .map_or(Cow::Borrowed(default), Cow::Owned)
     }
 
     pub(crate) fn stored_scalar(&self, name: &str) -> Option<&str> {
@@ -1505,6 +1523,9 @@ impl Session {
         }
         if name == "POSIXLY_CORRECT" {
             self.apply_posix_mode(false);
+        }
+        if name == "COMP_WORDBREAKS" {
+            self.word_breaks_unset = true;
         }
         if name == "GROUPS" {
             self.groups_unset = true;
