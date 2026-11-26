@@ -1084,6 +1084,9 @@ pub(super) fn command_position(tokens: &[Token]) -> bool {
 // Builtin declaration operands are shell words. A quoted space belongs to the
 // key; an unquoted space separates two arguments before the builtin sees them.
 fn declaration_word(prefix: &str) -> bool {
+    if !prefix.bytes().any(|b| separator(char::from(b))) {
+        return true;
+    }
     let mut chars = prefix.chars();
     let mut word = WordBuilder::default();
     while let Some(c) = chars.next() {
