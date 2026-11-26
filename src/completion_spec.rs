@@ -713,7 +713,11 @@ fn apply(
         if words.is_empty() && options.contains("default") {
             words = complete::file_names(prefix, false, false, session);
         }
-        let capacity = if words.len() > 8 { 8192 } else { 0 };
+        let capacity = match words.len() {
+            0 => 0,
+            1..=8 => 256,
+            _ => 8192,
+        };
         let mut output = io::BufWriter::with_capacity(capacity, out);
         for word in &words {
             writeln!(output, "{word}")?;
