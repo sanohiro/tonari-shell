@@ -87,6 +87,33 @@ pub(crate) fn history_word_spans(s: &str) -> Vec<(usize, usize)> {
     words
 }
 
+pub(crate) fn history_designator_spans(line: &str) -> Vec<(usize, usize)> {
+    let Ok((tokens, spans, _)) = lex(line, false, true) else {
+        return history_word_spans(line);
+    };
+    let mut result: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
+    let mut duplicate = false;
+    for (token, (start, end)) in tokens.into_iter().zip(spans) {
+        if duplicate
+            && let Some(last) = result.last_mut()
+            && last.1 == start
+            && line[start..end]
+                .trim_end_matches('-')
+                .bytes()
+                .all(|b| b.is_ascii_digit())
+        {
+            last.1 = end;
+        } else if !matches!(token, Token::Newline) {
+            result.push((start, end));
+        }
+        duplicate = matches!(
+            token,
+            Token::Redirect(_, Target::Duplicate | Target::OutputWord)
+        );
+    }
+    result
+}
+
 /// Keep the original shell spelling, including quotes and substitutions.
 pub(crate) fn last_history_argument(line: &str) -> Option<&str> {
     let blank = [' ', '\t', '\n'];

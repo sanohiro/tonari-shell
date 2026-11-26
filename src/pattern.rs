@@ -652,13 +652,9 @@ fn paths(
                 }
             }
             expanded = true;
-            if order::sort_mode(sorting).0 == "nosort" {
-                let mut seen = std::collections::HashSet::new();
-                found.retain(|path| seen.insert(path.clone()));
-            } else {
-                found.sort_unstable();
-                found.dedup();
-            }
+            // Adjacent globstars were collapsed above. Separated globstars may
+            // reach the same pathname through different matching components.
+            // Apply the requested ordering once, after the last component.
             paths = found;
             known_existing = rest.is_empty();
             continue;

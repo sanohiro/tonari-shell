@@ -118,7 +118,7 @@ impl Session {
         }
         if self.readonly(name) {
             eprintln!("tonari: getopts: {name}: readonly variable");
-            return 2;
+            return if option.is_none() { 1 } else { 2 };
         }
         self.assign(name, &result.to_string());
         u8::from(option.is_none())

@@ -17,7 +17,7 @@ fn error(s: &str) -> io::Error {
 }
 
 fn select(s: &str, designator: &str) -> io::Result<String> {
-    let words = crate::parser::history_word_spans(s);
+    let words = crate::parser::history_designator_spans(s);
     if designator == "*" && words.len() < 2 {
         return Ok(String::new());
     }
@@ -47,7 +47,11 @@ fn select(s: &str, designator: &str) -> io::Result<String> {
     if lo > hi || hi >= words.len() {
         return Err(error("bad word specifier"));
     }
-    Ok(s[words[lo].0..words[hi].1].to_owned())
+    Ok(words[lo..=hi]
+        .iter()
+        .map(|&(a, b)| &s[a..b])
+        .collect::<Vec<_>>()
+        .join(" "))
 }
 
 fn take<'a>(s: &mut &'a str, f: impl Fn(char) -> bool) -> &'a str {
@@ -205,7 +209,9 @@ pub(crate) fn expand<'a>(session: &mut Session, line: &'a str) -> io::Result<Exp
             || quote == Some('\'')
             || input.is_empty()
             || input.starts_with(char::is_whitespace)
-            || input.starts_with(['=', '('])
+            || input.starts_with(['=', ';', '&', '|', '(', ')', '<', '>'])
+            || out.ends_with('[') && input.contains(']')
+            || event == '!' && out.ends_with('$')
             || quote == Some('"') && input.starts_with('"')
             || out.ends_with("${")
         {
@@ -244,19 +250,18 @@ pub(crate) fn expand<'a>(session: &mut Session, line: &'a str) -> io::Result<Exp
             let result = hist
                 .iter()
                 .rev()
-                .find(|s| s.contains(search))
-                .map(String::as_str);
-            if let Some(entry) = result {
-                memory.matched_word = crate::parser::history_word_spans(entry)
+                .find_map(|s| s.rfind(search).map(|at| (s.as_str(), at)));
+            if let Some((entry, at)) = result {
+                memory.matched_word = crate::parser::history_designator_spans(entry)
                     .into_iter()
+                    .find(|&(start, end)| start <= at && at < end)
                     .map(|(start, end)| &entry[start..end])
-                    .find(|word| word.contains(search))
                     .map(str::to_owned);
                 if !search.is_empty() {
                     memory.search = search.to_owned();
                 }
             }
-            result
+            result.map(|(entry, _)| entry)
         } else if input.starts_with(|c: char| c.is_ascii_digit())
             || input
                 .strip_prefix('-')
@@ -281,7 +286,23 @@ pub(crate) fn expand<'a>(session: &mut Session, line: &'a str) -> io::Result<Exp
         } else {
             let prefix = take(&mut input, |c| {
                 !c.is_whitespace()
-                    && !matches!(c, ':' | '=' | ';' | '|' | '&' | '(' | ')' | '"' | '\'')
+                    && !matches!(
+                        c,
+                        ':' | ';'
+                            | '|'
+                            | '&'
+                            | '('
+                            | ')'
+                            | '<'
+                            | '>'
+                            | '"'
+                            | '\''
+                            | '^'
+                            | '$'
+                            | '*'
+                            | '%'
+                            | '-'
+                    )
             });
             if prefix.is_empty() {
                 out.push(event);
@@ -295,7 +316,7 @@ pub(crate) fn expand<'a>(session: &mut Session, line: &'a str) -> io::Result<Exp
         let mut value = value.ok_or_else(|| error("event not found"))?.to_owned();
         let colon = input.starts_with(':');
         let candidate = if colon { &input[1..] } else { input };
-        if candidate.starts_with(['^', '$', '*', '%'])
+        if candidate.starts_with(['^', '$', '*', '%', '-'])
             || colon && candidate.starts_with(|c: char| c == '-' || c.is_ascii_digit())
         {
             input = candidate;

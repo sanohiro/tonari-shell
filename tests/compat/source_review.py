@@ -16,6 +16,10 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "globstar-overlap": "mkdir -p tree/a/a/a tree/a/b; cd tree; shopt -s globstar; printf '<%s>' **/a/**; echo; printf '<%s>' **/**/a/**",
+    "local-set-options": "set +f +u; inner(){ local -; set +f; set -u; }; f(){ local -; set -f; local -; inner; case $- in *f*) echo glob;; esac; set -o ignoreeof; echo \"$IGNOREEOF\"; local -p; }; f; case $- in *f*|*u*) echo leaked;; esac; echo \"${IGNOREEOF-unset}\"",
+    "getopts-readonly-end": "readonly v; OPTIND=1; getopts a v -a; echo \"$?:$OPTIND\"; getopts a v -a; echo \"$?:$OPTIND\"",
+    "history-event-words": "history -s 'cmd a.old a.html a.h  x|y 2>/dev/null'; history -p '!?a.h?:%' '!cmd-2' '!cmd*' '!cmd$' 'echo [!A-Z] ${!name}'",
     "keyword-arguments": r"""inspect(){ printf '<%s>' "$#" "$X" "$Y" "$@"; echo; }; run(){ inspect a X=one 'Q'=b Y="$X/t" E\=c; }; run; set -k; run; inspect a X[2]=ignored b; set -- keep A=value; echo "$#:$1"; x=$(inspect aa X=tt); echo "$x"; inspect aa X=pipe | cat; set +o keyword; run; echo "${X-unset}" """,
     "array-recovery": "a=(orig)\na=(bad > untouched)\necho \"$?:${a[*]}\"\ntest ! -e untouched",
     "compat-random": r"""for level in 3.1 44 5.0 51 5.2; do BASH_COMPAT=$level; RANDOM=42; echo "$RANDOM/$RANDOM/$RANDOM"; hash -r; hash -l; done; shopt -s compat43; echo "$BASH_COMPAT"; shopt -q compat42; echo $?; f(){ local BASH_COMPAT=3.1; shopt -q compat31; echo $?; }; f; shopt -q compat43; echo $?; unset BASH_COMPAT; shopt -q compat43; echo $?""",
@@ -79,6 +83,7 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "terminal-test-operand": "for fd in bad '' ' +3 ' -1 4294967296 9999999999999999999999; do test -t \"$fd\"; echo $?; [[ -t \"$fd\" ]]; echo $?; done",
     "trap-return-context": """invoke(){ kill -USR1 $$; return 99; }; helper(){ false; return; }; trap 'helper; s=$?; false; return --' USR1; invoke; echo "$?:$s"; trap 'false; exit' USR1; kill -USR1 $$; echo wrong""",
     "compat-test": """for n in 52 53; do BASH_COMPAT=$n; test '(' '!' = '!' ')' -a yes; echo $?; test '(' '-n' ')' -a yes; echo $?; done""",
     "bind-filter": r"""bind -p forward-word beginning-of-line unknown-name 2>/dev/null | awk -F': ' '!seen[$NF]++ {print $NF}' """,
@@ -104,6 +109,11 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "globstar-overlap": (": tree/**/a/**", 300),
+    "local-set-options": ("f", 800),
+    "terminal-test-operand": ("test -t 99999; [[ -t 99999 ]]", 1800),
+    "getopts-readonly-end": ("OPTIND=1; getopts a v -a; getopts a v -a", 800),
+    "history-event-words": ("history -p '!?a.h?:%' '!cmd-2' '!cmd*' >/dev/null", 600),
     "keyword-arguments": ('inspect keep X=one Y=$X', 900),
     "compat-random": ('v=$RANDOM', 2200),
     "compat-regex": ('[[ abcz =~ "$re" ]]', 1100),
@@ -676,6 +686,10 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "globstar-overlap": "shopt -s globstar; mkdir -p tree/a/a/a/a tree/a/b/a/b tree/b/a/a/b",
+                "local-set-options": "f(){ local -; set -f; :; }",
+                "getopts-readonly-end": "v=; exec 2>/dev/null",
+                "history-event-words": "history -s 'cmd a.old a.html a.h   x|y 2>/dev/null'",
                 "numeric-locale": "unset LC_ALL; LC_NUMERIC=de_DE.UTF-8",
                 "multiline-history": "set -o history",
                 "scalar-array-slice": "text=雪abcdef",

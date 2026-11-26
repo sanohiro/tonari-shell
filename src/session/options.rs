@@ -263,6 +263,13 @@ impl Session {
         if name == "posix" {
             self.set_posix(enabled);
         }
+        if name == "ignoreeof" {
+            if enabled {
+                self.assign("IGNOREEOF", "10");
+            } else {
+                self.unset_variable("IGNOREEOF");
+            }
+        }
         if enabled && name == "emacs" {
             self.vi = false;
             self.bindings.map = Keymap::Emacs;
@@ -299,6 +306,29 @@ impl Session {
 
     fn option_entries(set: bool) -> &'static [OptionEntry] {
         if set { SET_OPTIONS } else { SHOPT_OPTIONS }
+    }
+
+    pub(super) fn save_local_options(&mut self) {
+        if let Some(index) = self.declaration_scope("-")
+            && self.locals[index].3.is_none()
+        {
+            let bits = SET_OPTIONS.iter().enumerate().fold(0, |bits, (i, entry)| {
+                bits | (u32::from((entry.read)(self)) << i)
+            });
+            self.locals[index].3 = Some(bits);
+        }
+    }
+
+    pub(super) fn restore_set_options(&mut self, bits: u32) {
+        for (index, entry) in SET_OPTIONS.iter().enumerate() {
+            let enabled = bits & (1 << index) != 0;
+            if (entry.read)(self) != enabled
+                && let Some(write) = entry.write
+            {
+                *write(self) = enabled;
+                self.option_changed(entry.name, enabled);
+            }
+        }
     }
 
     pub(crate) fn options(&self, set: bool) -> impl Iterator<Item = (&'static str, bool)> {

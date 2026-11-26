@@ -285,9 +285,11 @@ pub(crate) fn unary(op: &str, arg: &str, session: &mut Session) -> Result<bool, 
             return Ok(session.get(arg).is_some());
         }
         "-t" => {
-            return Ok(arg
-                .parse::<i32>()
-                .is_ok_and(|fd| unsafe { libc::isatty(fd) == 1 }));
+            let number = arg
+                .trim_matches(|c: char| c.is_ascii_whitespace())
+                .parse::<i64>()
+                .map_err(|_| "integer expected")?;
+            return Ok(i32::try_from(number).is_ok_and(|fd| unsafe { libc::isatty(fd) == 1 }));
         }
         "-L" | "-h" => return Ok(Path::new(arg).is_symlink()),
         "-r" | "-w" | "-x" => {

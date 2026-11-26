@@ -199,6 +199,13 @@ pub(super) fn run(
         };
         let mut out = io::stdout().lock();
         let mut status = 0;
+        if local
+            && operands.is_empty()
+            && session.locals.last().is_some_and(|s| s.3.is_some())
+            && writeln!(out, "local -").is_err()
+        {
+            return crate::Flow::Continue(1);
+        }
         for name in names {
             let listed = !local || session.locals.last().unwrap().0.contains_key(name);
             let variable = listed
@@ -234,6 +241,10 @@ pub(super) fn run(
     let first_operand = total_args - operands.len() + 1;
     let mut arrays = arrays.iter().peekable();
     for (index, arg) in operands.iter().enumerate() {
+        if local && arg == "-" {
+            session.save_local_options();
+            continue;
+        }
         let array = arrays.next_if(|a| a.operand == index + first_operand);
         let subscript_end = arg
             .find(['[', '='])

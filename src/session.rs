@@ -224,7 +224,12 @@ pub struct Session {
 }
 
 #[derive(Clone, Default)]
-pub struct Bindings(BTreeMap<String, Option<Variable>>, Option<usize>, bool);
+pub struct Bindings(
+    BTreeMap<String, Option<Variable>>,
+    Option<usize>,
+    bool,
+    Option<u32>,
+);
 
 enum DirectoryError {
     NoPath(io::Error),
@@ -1203,6 +1208,7 @@ impl Session {
                 .collect(),
             names.contains(&"OPTIND").then_some(self.opt_offset),
             false,
+            None,
         )
     }
 
@@ -1396,7 +1402,11 @@ impl Session {
 
     pub fn leave_scope(&mut self) {
         let scope = self.locals.pop().expect("variable scope");
+        let saved_options = scope.3;
         self.restore(scope);
+        if let Some(bits) = saved_options {
+            self.restore_set_options(bits);
+        }
     }
 
     pub fn enter_function(&mut self, bindings: &mut Bindings) {
