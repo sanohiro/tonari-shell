@@ -104,10 +104,7 @@ pub(crate) fn launch(
         session.enter_subshell();
         session.stdin_redirected = true;
         session.interactive = false;
-        let code = match crate::eval::command(session, body, status, true) {
-            Flow::Continue(s) | Flow::Discard(s) | Flow::Exit(s) | Flow::Return(s) => s,
-            Flow::Break(..) | Flow::LoopContinue(_) => 0,
-        };
+        let code = crate::eval::command(session, body, status, true).child_status();
         let code = crate::traps::finish(session, code);
         unsafe { libc::_exit(i32::from(code)) }
     }

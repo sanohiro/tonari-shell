@@ -32,6 +32,20 @@ pub enum Flow {
     LoopContinue(u32),
 }
 
+impl Flow {
+    pub(crate) fn child_status(self) -> u8 {
+        match self {
+            Self::Continue(code) | Self::Exit(code) | Self::Return(code) | Self::Discard(code) => {
+                code
+            }
+            Self::Break(..) | Self::LoopContinue(_) => {
+                eprintln!("tonari: loop control cannot cross a subshell boundary");
+                1
+            }
+        }
+    }
+}
+
 enum Action<'a> {
     Open(RawFd, CString, i32),
     HereInput(RawFd, &'a [u8]),
@@ -117,7 +131,22 @@ fn open_redirect(path: &CStr, flags: i32) -> Option<OwnedFd> {
         }
     }
     if fd < 0 {
-        write_error(path.to_bytes(), b": cannot open redirection");
+        let error = errno();
+        let mut buffer = [0 as libc::c_char; 128];
+        let reason = if unsafe { libc::strerror_r(error, buffer.as_mut_ptr(), buffer.len()) } == 0 {
+            unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_bytes()
+        } else {
+            b"cannot open redirection"
+        };
+        for part in [
+            b"tonari: ".as_slice(),
+            path.to_bytes(),
+            b": ",
+            reason,
+            b"\n",
+        ] {
+            unsafe { libc::write(2, part.as_ptr().cast(), part.len()) };
+        }
         return None;
     }
     Some(unsafe { OwnedFd::from_raw_fd(fd) })
@@ -809,7 +838,11 @@ fn eval_builtin(
                 Flow::Continue(0)
             } else if args.len() > 1 {
                 write_error(cmd.words[0].as_bytes(), b": too many arguments");
-                Flow::Exit(1)
+                if session.posix && !session.interactive {
+                    Flow::Exit(1)
+                } else {
+                    Flow::Continue(1)
+                }
             } else {
                 let depth = args.first().map_or(Ok(1), |n| n.trim().parse::<i64>());
                 match depth {
@@ -1429,8 +1462,7 @@ fn start_raw(
         session.stdin_redirected |= input.is_some();
         let code = if apply(&setup, libc::PIPE_BUF) {
             match run(vec![raw], last_status, true, session) {
-                Ok(Flow::Discard(s) | Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s)) => s,
-                Ok(Flow::Break(..) | Flow::LoopContinue(_)) => 0,
+                Ok(flow) => flow.child_status(),
                 Err(e) => {
                     eprintln!("tonari: {e}");
                     1
@@ -1652,10 +1684,7 @@ fn start(
             } else {
                 eval_builtin(builtin.unwrap(), cmd, session, last_status, true)
             };
-            match flow {
-                Flow::Discard(s) | Flow::Exit(s) | Flow::Return(s) | Flow::Continue(s) => s,
-                Flow::Break(..) | Flow::LoopContinue(_) => 0,
-            }
+            flow.child_status()
         };
         let code = crate::traps::finish(session, code);
         unsafe { libc::_exit(code.into()) }
@@ -1903,7 +1932,7 @@ impl PreparedCommand {
     }
 }
 
-fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(&mut String)) {
+pub(crate) fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(&mut String)) {
     let prefix = session.get("PS4").unwrap_or_default();
     session.xtrace = false;
     let mut line = crate::prompt::render_text(session, prefix, status);
@@ -1931,7 +1960,10 @@ fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(&mut String
     }
 }
 
-fn trace_word(word: &str) -> std::borrow::Cow<'_, str> {
+pub(crate) fn trace_word(word: &str) -> std::borrow::Cow<'_, str> {
+    if word == "'" {
+        return "\\'".into();
+    }
     if word.bytes().any(|b| b.is_ascii_control()) {
         return String::from_utf8(crate::session::printf::ansi_quote(word.as_bytes(), false))
             .unwrap()
@@ -2007,6 +2039,7 @@ fn prepare_expanded(
         Vec::with_capacity(raw.assignments.len())
     };
     let mut array_declarations = Vec::new();
+    let mut traced_operands = Vec::new();
     // Each assignment sees its predecessors, while command arguments saw the
     // outer environment. Standalone assignments persist even on redirect failure.
     for (mut key, word) in raw.assignments {
@@ -2024,7 +2057,11 @@ fn prepare_expanded(
         match word {
             Assignment::Array(operand, parts, source) => {
                 if exp.session.xtrace {
-                    trace_line(exp.session, last_status, |out| out.push_str(source.text()));
+                    if let Some(index) = operand {
+                        traced_operands.push((index, source));
+                    } else {
+                        trace_line(exp.session, last_status, |out| out.push_str(source.text()));
+                    }
                 }
                 if operand.is_none() && exp.session.readonly(&key) {
                     return Err(crate::expansion::Error::readonly(&key));
@@ -2200,11 +2237,16 @@ fn prepare_expanded(
     };
     if session.xtrace && !cmd.words.is_empty() {
         trace_line(session, last_status, |out| {
+            let mut operands = traced_operands.iter().peekable();
             for (i, word) in cmd.words.iter().enumerate() {
                 if i > 0 {
                     out.push(' ');
                 }
-                out.push_str(&trace_word(word));
+                if let Some((_, source)) = operands.next_if(|(index, _)| *index == i) {
+                    out.push_str(source.text());
+                } else {
+                    out.push_str(&trace_word(word));
+                }
             }
         });
     }

@@ -900,8 +900,7 @@ impl Reader {
             Some("for" | "select") => self.for_clause(),
             Some("function") => self.function(true),
             _ if matches!(self.peek(), Some(Token::Word(_)))
-                && matches!(self.tokens.get(1), Some(Token::LeftParen))
-                && matches!(self.tokens.get(2), Some(Token::RightParen)) =>
+                && matches!(self.tokens.get(1), Some(Token::LeftParen)) =>
             {
                 self.function(false)
             }

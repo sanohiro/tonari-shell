@@ -4,7 +4,7 @@ use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::rc::Rc;
 
-use crate::{Flow, Session, parser::Statement};
+use crate::{Session, parser::Statement};
 
 struct Endpoint {
     fd: Cell<Option<RawFd>>,
@@ -144,10 +144,7 @@ pub(crate) fn launch(
         session.substitutions.pending.clear();
         session.substitutions.finished.clear();
         session.bind(assignments);
-        let status = match crate::execute_program(session, body, prior, true) {
-            Flow::Discard(s) | Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
-            Flow::Break(..) | Flow::LoopContinue(_) => 0,
-        };
+        let status = crate::execute_program(session, body, prior, true).child_status();
         let status = crate::traps::finish(session, status);
         unsafe { libc::_exit(i32::from(status)) }
     }

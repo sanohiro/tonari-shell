@@ -237,6 +237,13 @@ pub fn let_builtin(args: &[String], session: &mut Session) -> u8 {
 }
 
 pub fn command(source: &str, session: &mut Session, status: u8) -> Flow {
+    if session.xtrace {
+        crate::execute::trace_line(session, status, |line| {
+            line.push_str("(( ");
+            line.push_str(source);
+            line.push_str(" ))");
+        });
+    }
     match expanded(source, session, status) {
         Ok(n) => Flow::Continue(u8::from(n == 0)),
         Err(e) => {

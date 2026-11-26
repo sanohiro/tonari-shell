@@ -111,6 +111,38 @@ echo end""")
         proc = self.command(TONARI, "printf '%s' '<'{Z..a}'>'")
         self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, expected, b""))
 
+    def test_subshell_loop_control_reports_failure(self):
+        proc = self.command(TONARI, """for i in 1; do
+    (continue; echo unreachable)
+    echo child=$?
+    (for j in 1; do continue; done; echo inner)
+done""")
+        self.assertEqual((proc.returncode, proc.stdout), (0, b"child=1\ninner\n"))
+        self.assertIn(b"subshell", proc.stderr)
+
+    def test_trace_expands_conditional_operands_once(self):
+        script = """exec 4>trace; BASH_XTRACEFD=4; set -x
+dir=/; if [[ -d $dir ]]; then (( a = 42 )); fi
+[[ $(echo once >>calls; echo yes) = yes ]] || exit 1
+set +x; cat calls; echo "$a" """
+        for shell in self.shells_for(5):
+            (self.cwd / "calls").write_text("")
+            proc = self.command(shell, script)
+            self.assertEqual((proc.returncode, proc.stdout), (0, b"once\n42\n"), proc.stderr)
+            trace = (self.cwd / "trace").read_bytes()
+            self.assertIn(b"+ [[ -d / ]]\n", trace)
+            self.assertIn(b" a = 42 ", trace)
+
+    def test_function_parentheses_from_trailing_space_alias(self):
+        self.compare(r"""shopt -s expand_aliases
+alias g='g( ' q=')'
+g q
+{ echo G; }
+\g""", 0, b"G\n")
+
+    def test_incomplete_arithmetic_at_end_of_heredoc(self):
+        self.compare("echo $((cat <<EOF\n+(\nEOF\n))", 2)
+
     def test_case_attributes_on_arrays_and_export(self):
         self.compare("""declare -u s=one; s+=two; export s+=three; echo "$s"
 declare -la a=(AA Bb); a[1]+=CC; echo "${a[@]}"

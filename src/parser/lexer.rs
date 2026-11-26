@@ -762,9 +762,7 @@ fn arithmetic_source(chars: &mut Chars<'_>) -> Result<String, Error> {
                 *chars = joined(chars.as_str())[1..].chars();
                 return Ok(source[..end].replace("\\\n", ""));
             }
-            ')' if !chars.as_str().is_empty()
-                && chars.as_str().trim_start_matches("\\\n").is_empty() =>
-            {
+            ')' if joined(chars.as_str()).trim().is_empty() => {
                 return Err(Error::Incomplete("continued arithmetic delimiter"));
             }
             ')' => {

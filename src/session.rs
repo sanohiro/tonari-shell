@@ -496,7 +496,7 @@ impl Session {
                             let mut out = io::BufWriter::with_capacity(512, io::stdout().lock());
                             for (name, on) in self.options(true) {
                                 let result = if enable {
-                                    writeln!(out, "{name:16}{}", if on { "on" } else { "off" })
+                                    writeln!(out, "{name:15}\t{}", if on { "on" } else { "off" })
                                 } else {
                                     writeln!(out, "set {}o {name}", if on { "-" } else { "+" })
                                 };
