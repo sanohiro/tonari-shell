@@ -20,5 +20,20 @@ Ubuntu の GNU 配布試験では、履歴展開は診断文 2 件を除いて�
 
 The three POSIX decisions at the end of the table also have Tonari-only regression witnesses. Bash との差を維持した項目は、ヒアドキュメントの実データ、引数の区切り、非同期ジョブの終了値で検証する。
 
+## Values, side effects and reference versions / 値・副作用・参照版
+
+| Input | GNU Bash observation | Tonari guarantee |
+|---|---|---|
+| Assign an output descriptor to a readonly variable with `{fd}>existing` | Both controls report failure and truncate the file. | Validate the receiver first. The failure leaves the existing file contents intact. |
+| Export a global, declare a local of the same name, then remove its export attribute | A child receives the hidden global value. | An unexported local shadows the global for the duration of the call, including in child processes. |
+| `declare -n r; declare r=123` | Both controls reject the target and remove the declaration. | Reject the assignment and preserve the unbound reference. |
+| A named coprocess with `declare -n job=ends` | Bash creates `ends_PID` when the array did not exist. An existing array produces `job_PID`. An element receiver can report success despite the invalid destination. | Store the descriptors in the resolved array and the child PID in `job_PID`. An invalid destination fails before launching a child. |
+| Empty `x`, no positional arguments, `f "$x$@"` | Bash passes zero arguments. | Preserve one explicitly quoted empty scalar. Both shells pass zero for `f "$@"` and one for `f "$x""$@"`. The standard permits either count inside a single pair of quotes. [POSIX special parameters](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_05_02) |
+| `declare -f` for a function named `if` | Bash 5.2 prints the `function` keyword. Bash 5.3 drops it. | Emit a definition that can be read back and called. |
+| `shopt -u assoc_expand_once` | Historic Bash versions can evaluate a subscript more than once in some contexts. | Both public option names share their queryable state. Evaluate the subscript once per access. |
+| `${#r}` when the nameref denotes a computed indexed element | Bash 5.2 can return 0 for a nonempty value. Bash 5.3 counts characters in the selected value. | Count UTF-8 characters in the resolved element. `${#r}` for a reference to the whole array expansion counts elements. |
+
+読み取り専用 FD、ローカル変数の環境継承、未束縛の参照とコプロセスは、終了値に加えてファイル内容、子に渡す値、子を起動したかを検査する。関数名が予約語の場合は、表示された定義を再読込して呼び出す。引数ゼロの `"$x$@"` は POSIX がどちらも許すため、Tonari は明示的に引用した空文字列を残す。
+
 The timing table includes the first working release, the tuned release and Bash on the same native host. The sample archive keeps all three sets of measurements in the order Bash, tuned Tonari and first working Tonari. Each workload includes shell startup. OS scheduling and filesystem operations remain part of elapsed time. [Timing table](native-case-review.tsv) · [Raw samples](native-case-samples.jsonl.gz) · [Reproduction harness](../../../tests/compat/source_review.py)
 

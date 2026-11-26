@@ -635,6 +635,17 @@ def main():
             ('x=$(cat <<EOF\none\nEOF) middle\ntwo\nEOF\n)\nprintf "%s\\n" "$x"', b"one\nEOF) middle\ntwo\n"),
         ]:
             assert run(shells[1], code)[0] == (0, output, False), code
+        # Preserve valid data and bindings when an operation cannot succeed.
+        for code, output in [
+            ('readonly fd=42; printf keep >protected; { : {fd}>protected; } 2>/dev/null; printf "%s/" "$?"; cat protected', b"1/keep"),
+            ('export local_env_probe=outer; f(){ local local_env_probe=inner; declare +x local_env_probe; printenv local_env_probe || echo hidden; }; f', b"hidden\n"),
+            ('declare -n ref; declare ref=123 2>/dev/null; echo "$?"; declare -p ref', b"1\ndeclare -n ref\n"),
+            ('declare -n job=ends; coproc job { :; }; echo "${job_PID:+named}/${ends_PID:+resolved}"; wait', b"named/\n"),
+            ("declare -n job='ends[0]'; { coproc job { echo started >unexpected-job; }; } 2>/dev/null; echo \"$?\"; wait; test ! -e unexpected-job", b"1\n"),
+            ('set --; x=; f(){ echo "$#"; }; f "$x$@"; f "$x""$@"; f "$@"', b"1\n1\n0\n"),
+            ("function if { printf ok; }; text=$(declare -f if); unset -f if; eval \"$text\"; command_name=if; \"$command_name\"", b"ok"),
+        ]:
+            assert run(shells[1], code)[0] == (0, output, False), code
         failed = []
         for name, code in cases.items():
             expected = run(shells[0], code)[0]
