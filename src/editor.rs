@@ -1,4 +1,5 @@
 pub(crate) mod bindings;
+mod editing;
 mod picker;
 pub(crate) mod preview;
 mod recall;
@@ -748,7 +749,7 @@ struct LineView<'a> {
 #[derive(Default)]
 struct EditorState {
     undo: Undo,
-    inserted: String,
+    scratch: String,
     overwrite: bool,
     motion: bool,
     appended: Option<usize>,
@@ -764,8 +765,8 @@ impl EditorState {
         text: &mut String,
         cursor: &mut usize,
     ) -> io::Result<Option<usize>> {
-        keys.insert_burst(first, session, &mut self.inserted)?;
-        let inserted = &self.inserted;
+        keys.insert_burst(first, session, &mut self.scratch)?;
+        let inserted = &self.scratch;
         let append = (*cursor == text.len()).then_some(*cursor);
         let end = if self.overwrite && *cursor < text.len() {
             *cursor + char_offset(&text[*cursor..], inserted.chars().count())
@@ -1013,7 +1014,7 @@ pub fn line(
             recall.edited(session.history_lines().len());
             edit.appended = edit.insert(&mut keys, first, session, &mut text, &mut cursor)?;
             blink = session.bindings.blink_matching_paren
-                && matches!(edit.inserted.as_bytes(), b")" | b"]" | b"}");
+                && matches!(edit.scratch.as_bytes(), b")" | b"]" | b"}");
             last_tab = false;
             continue;
         }
@@ -1035,41 +1036,15 @@ pub fn line(
             Binding::Shell(command) => {
                 drop(term);
                 io::stderr().write_all(b"\r\n")?;
-                let vars = session.bind(&[
-                    ("READLINE_LINE".into(), text.clone()),
-                    (
-                        "READLINE_POINT".into(),
-                        text[..cursor].chars().count().to_string(),
-                    ),
-                    ("READLINE_MARK".into(), mark.to_string()),
-                ]);
-                let flow = crate::eval_text(session, &command, status);
-                edit.undo.boundary();
+                let flow = edit.execute_binding(
+                    session,
+                    &command,
+                    status,
+                    &mut text,
+                    &mut cursor,
+                    &mut mark,
+                );
                 last_arg = None;
-                if let Some(updated) = session.get("READLINE_LINE")
-                    && updated != text
-                {
-                    let len = text.len();
-                    edit.undo.replace(&mut text, 0..len, &updated, cursor);
-                    cursor = text.len();
-                    mark = 0;
-                }
-                // Readline keeps the position left by the edit for a non-decimal value.
-                let offset = |name| {
-                    session
-                        .get(name)?
-                        .trim()
-                        .parse::<i64>()
-                        .ok()
-                        .map(|n| n.max(0) as usize)
-                };
-                if let Some(n) = offset("READLINE_POINT") {
-                    cursor = char_offset(&text, n);
-                }
-                if let Some(n) = offset("READLINE_MARK") {
-                    mark = n;
-                }
-                session.restore(vars);
                 recall = recall::Recall::new(session.history_lines().len());
                 if let crate::Flow::Exit(code) = flow {
                     return Ok(Input::Exit(code));
@@ -1160,10 +1135,10 @@ pub fn line(
                         query.pop();
                         *index = 0;
                     } else if action == Action::Insert {
-                        keys.insert_burst(first, session, &mut edit.inserted)?;
-                        if let Some(c) = edit.inserted.chars().next() {
+                        keys.insert_burst(first, session, &mut edit.scratch)?;
+                        if let Some(c) = edit.scratch.chars().next() {
                             shortest = Some(query.len() + c.len_utf8());
-                            query.push_str(&edit.inserted);
+                            query.push_str(&edit.scratch);
                             *index = 0;
                         }
                     } else if action == Action::Paste {
@@ -1364,44 +1339,7 @@ pub fn line(
             | Action::KillWord
             | Action::Cut
             | Action::Copy => {
-                let (lo, hi) = match action {
-                    Action::Kill => (cursor, text.len()),
-                    Action::WholeLine => (0, text.len()),
-                    Action::RubFilename => {
-                        let sep = |c: char| c == '/' || c.is_whitespace();
-                        let head = text[..cursor].trim_end_matches(sep);
-                        (head.trim_end_matches(|c| !sep(c)).len(), cursor)
-                    }
-                    Action::KillWord => (cursor, word_end(&text, cursor)),
-                    Action::RubWord => (
-                        text[..cursor]
-                            .trim_end()
-                            .rfind(char::is_whitespace)
-                            .map_or(0, |i| next(&text, i)),
-                        cursor,
-                    ),
-                    Action::KillBackWord => (word_start(&text, cursor), cursor),
-                    Action::Cut | Action::Copy => {
-                        let point = char_offset(&text, mark);
-                        (point.min(cursor), point.max(cursor))
-                    }
-                    _ => (0, cursor),
-                };
-                if action != Action::Copy {
-                    edit.undo.record(&text, lo..hi, 0, cursor, false);
-                }
-                if lo == 0 && hi == text.len() && hi > 0 && action != Action::Copy {
-                    std::mem::swap(&mut session.editor_kill, &mut text);
-                    text.clear();
-                    cursor = 0;
-                } else if lo != hi {
-                    session.editor_kill.clear();
-                    session.editor_kill.push_str(&text[lo..hi]);
-                    if action != Action::Copy {
-                        text.replace_range(lo..hi, "");
-                        cursor = lo;
-                    }
-                }
+                cursor = edit.kill(action, &mut text, cursor, mark, &mut session.editor_kill);
             }
             Action::Undo => {
                 edit.undo.apply(&mut text, &mut cursor);
@@ -1486,76 +1424,11 @@ pub fn line(
                 }
             }
             Action::UpperWord | Action::LowerWord | Action::CapitalWord => {
-                let end = word_end(&text, cursor);
-                let start = end
-                    - text[cursor..end]
-                        .trim_start_matches(|c: char| !c.is_alphanumeric())
-                        .len();
-                let locale = session.character_locale();
-                if text[start..end].is_ascii()
-                    && !matches!(locale, crate::session::CharacterLocale::Turkic)
-                {
-                    edit.undo
-                        .record(&text, start..end, end - start, cursor, false);
-                    let word = &mut text[start..end];
-                    if action == Action::UpperWord {
-                        word.make_ascii_uppercase();
-                    } else {
-                        word.make_ascii_lowercase();
-                        if action == Action::CapitalWord
-                            && let Some(first) = word.get_mut(..1)
-                        {
-                            first.make_ascii_uppercase();
-                        }
-                    }
-                    cursor = end;
-                } else {
-                    let word = text[start..end].to_owned();
-                    let replacement = if action == Action::CapitalWord {
-                        crate::pattern::capitalize(word, locale)
-                    } else {
-                        crate::pattern::case_chars(
-                            word,
-                            action == Action::UpperWord,
-                            true,
-                            None,
-                            locale,
-                        )
-                    };
-                    edit.undo
-                        .replace(&mut text, start..end, &replacement, cursor);
-                    cursor = start + replacement.len();
-                }
+                cursor =
+                    edit.change_word_case(action, &mut text, cursor, session.character_locale());
             }
-            Action::TransposeWords => {
-                let end = word_end(&text, cursor);
-                let right = word_start(&text, end);
-                let left = word_start(&text, right);
-                let split = word_end(&text, left);
-                if left < split && split <= right && right < end {
-                    let swapped = format!(
-                        "{}{}{}",
-                        &text[right..end],
-                        &text[split..right],
-                        &text[left..split]
-                    );
-                    edit.undo.replace(&mut text, left..end, &swapped, cursor);
-                    cursor = end;
-                }
-            }
-            Action::Transpose if cursor > 0 => {
-                let end = if cursor == text.len() {
-                    cursor
-                } else {
-                    next(&text, cursor)
-                };
-                let mid = previous(&text, end);
-                let start = previous(&text, mid);
-                let replacement = format!("{}{}", &text[mid..end], &text[start..mid]);
-                edit.undo
-                    .record(&text, start..end, replacement.len(), cursor, false);
-                text.replace_range(start..end, &replacement);
-                cursor = end;
+            Action::TransposeWords | Action::Transpose => {
+                cursor = edit.transpose(action, &mut text, cursor);
             }
             Action::Quote => {
                 if let Some(key) = keys.get()?
