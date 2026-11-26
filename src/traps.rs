@@ -608,8 +608,8 @@ impl Traps {
                 };
                 writeln!(
                     out,
-                    "trap -- '{}' {}{name}",
-                    e.command.replace('\'', "'\\''"),
+                    "trap -- {} {}{name}",
+                    crate::word::quote::single_quote(&e.command),
                     if posix || sig == 0 || sig >= DEBUG {
                         ""
                     } else {
@@ -674,14 +674,7 @@ impl Traps {
     pub fn builtin(&mut self, args: &[String], interactive: bool, posix: bool) -> u8 {
         let mut args = args;
         let (mut list, mut actions, mut signals) = (false, false, false);
-        while let Some((arg, rest)) = args.split_first() {
-            if arg == "--" {
-                args = rest;
-                break;
-            }
-            if arg == "-" || !arg.starts_with('-') {
-                break;
-            }
+        while let Some(arg) = crate::builtins::flags::next(&mut args) {
             for flag in arg[1..].bytes() {
                 match flag {
                     b'p' => list = true,
@@ -693,7 +686,6 @@ impl Traps {
                     }
                 }
             }
-            args = rest;
         }
         if actions && (list || args.is_empty()) {
             eprintln!("tonari: trap: -P requires signal names and cannot be combined with -p");
@@ -943,8 +935,30 @@ pub fn finish(session: &mut Session, code: u8) -> u8 {
 // An explicit wait is interruptible. Block signals while checking child and
 // trap state, then atomically release the mask in sigsuspend. A foreground
 // command instead finishes before Bash dispatches the trapped signal.
+pub(crate) struct SignalMask(pub(crate) libc::sigset_t);
+
+impl SignalMask {
+    pub(crate) fn block(set: &libc::sigset_t) -> io::Result<Self> {
+        let mut previous = std::mem::MaybeUninit::uninit();
+        unsafe {
+            if libc::sigprocmask(libc::SIG_BLOCK, set, previous.as_mut_ptr()) < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(Self(previous.assume_init()))
+        }
+    }
+}
+
+impl Drop for SignalMask {
+    fn drop(&mut self) {
+        unsafe {
+            libc::sigprocmask(libc::SIG_SETMASK, &self.0, std::ptr::null_mut());
+        }
+    }
+}
+
 pub(crate) struct WaitMask {
-    previous: libc::sigset_t,
+    previous: SignalMask,
     child: libc::sigaction,
     running: u64,
 }
@@ -985,11 +999,8 @@ impl WaitMask {
     pub(crate) fn for_children(running: u64) -> io::Result<Self> {
         unsafe {
             let mut mask = std::mem::zeroed();
-            let mut previous = std::mem::zeroed();
             libc::sigfillset(&mut mask);
-            if libc::sigprocmask(libc::SIG_BLOCK, &mask, &mut previous) < 0 {
-                return Err(io::Error::last_os_error());
-            }
+            let previous = SignalMask::block(&mask)?;
             let mut child = std::mem::zeroed();
             let res = libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut child);
             if res < 0
@@ -1000,9 +1011,7 @@ impl WaitMask {
                         std::ptr::null_mut(),
                     ) < 0
             {
-                let error = io::Error::last_os_error();
-                libc::sigprocmask(libc::SIG_SETMASK, &previous, std::ptr::null_mut());
-                return Err(error);
+                return Err(io::Error::last_os_error());
             }
             Ok(Self {
                 previous,
@@ -1026,7 +1035,7 @@ impl WaitMask {
         unsafe {
             libc::FD_ZERO(&mut fds);
             libc::FD_SET(0, &mut fds);
-            let mut mask = self.previous;
+            let mut mask = self.previous.0;
             libc::sigdelset(&mut mask, libc::SIGCHLD);
             let result = libc::pselect(
                 1,
@@ -1053,7 +1062,7 @@ impl WaitMask {
 
     pub fn suspend(&self) {
         unsafe {
-            libc::sigsuspend(&self.previous);
+            libc::sigsuspend(&self.previous.0);
         }
     }
 }
@@ -1062,7 +1071,6 @@ impl Drop for WaitMask {
     fn drop(&mut self) {
         unsafe {
             libc::sigaction(libc::SIGCHLD, &self.child, std::ptr::null_mut());
-            libc::sigprocmask(libc::SIG_SETMASK, &self.previous, std::ptr::null_mut());
         }
     }
 }

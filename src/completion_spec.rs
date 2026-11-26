@@ -96,7 +96,7 @@ impl WordList {
         prefix: &'a str,
         ifs: &'a str,
     ) -> impl Iterator<Item = &'a str> {
-        let default_ifs = ifs == " \t\n";
+        let default_ifs = ifs == crate::word::DEFAULT_IFS;
         self.source
             .split(move |c| {
                 if default_ifs {
@@ -111,7 +111,10 @@ impl WordList {
     // Delay indexing until a large immutable list is reused. compgen still
     // traverses the original words in declaration order and observes live IFS.
     pub(crate) fn indexed(&self, prefix: &str, ifs: &str) -> Option<&[(usize, usize)]> {
-        if ifs != " \t\n" || self.source.len() < 8192 || !self.queried.replace(true) {
+        if ifs != crate::word::DEFAULT_IFS
+            || self.source.len() < 8192
+            || !self.queried.replace(true)
+        {
             return None;
         }
         let index = self.offsets.get_or_init(|| {
@@ -140,7 +143,9 @@ impl WordList {
         last: u8,
         session: &mut Session,
     ) -> Result<(), crate::expansion::Error> {
-        let ifs = session.get("IFS").unwrap_or_else(|| " \t\n".into());
+        let ifs = session
+            .get("IFS")
+            .unwrap_or_else(|| crate::word::DEFAULT_IFS.into());
         if self.literal {
             out.extend(self.literal_matches(prefix, &ifs).map(str::to_owned));
         } else {
@@ -179,35 +184,7 @@ impl Target {
     }
 }
 
-pub(crate) fn single_quote(text: &str) -> String {
-    let mut output = String::with_capacity(text.len() + 2);
-    push_single_quote(&mut output, text);
-    output
-}
-
-pub(crate) fn push_single_quote(output: &mut String, text: &str) {
-    output.push('\'');
-    let mut tail = text;
-    while let Some((before, after)) = tail.split_once('\'') {
-        output.push_str(before);
-        output.push_str("'\\''");
-        tail = after;
-    }
-    output.push_str(tail);
-    output.push('\'');
-}
-
-fn shell_quote(text: &str) -> String {
-    if !text.is_empty()
-        && text
-            .bytes()
-            .all(|c| c.is_ascii_alphanumeric() || b"_./-".contains(&c))
-    {
-        text.to_owned()
-    } else {
-        single_quote(text)
-    }
-}
+use crate::word::quote::{shell_quote, single_quote};
 
 #[derive(Default)]
 struct Request {

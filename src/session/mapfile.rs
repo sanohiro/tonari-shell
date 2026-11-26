@@ -30,11 +30,8 @@ impl<'a> Options<'a> {
             callback: None,
             quantum: 5000,
         };
-        let mut args = args.iter().peekable();
-        while let Some(arg) = args.next_if(|arg| arg.starts_with('-') && arg.len() > 1) {
-            if arg == "--" {
-                break;
-            }
+        let mut args = args;
+        while let Some(arg) = crate::builtins::flags::next(&mut args) {
             let mut flags = arg[1..].chars();
             while let Some(flag) = flags.next() {
                 if flag == 't' {
@@ -44,13 +41,8 @@ impl<'a> Options<'a> {
                 if !"dOnsucC".contains(flag) {
                     return Err((2, "invalid option"));
                 }
-                let value = if flags.as_str().is_empty() {
-                    args.next()
-                        .ok_or((2, "option requires an argument"))?
-                        .as_str()
-                } else {
-                    flags.as_str()
-                };
+                let value = crate::builtins::flags::value(flags.as_str(), &mut args)
+                    .ok_or((2, "option requires an argument"))?;
                 match flag {
                     'd' => result.delimiter = value.as_bytes().first().copied().unwrap_or(0),
                     'O' => {
@@ -73,7 +65,7 @@ impl<'a> Options<'a> {
                 break;
             }
         }
-        if let Some(name) = args.next() {
+        if let Some(name) = args.first() {
             result.name = name;
         }
         if !is_identifier(result.name) {
@@ -247,7 +239,7 @@ pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u
             drop(input);
             let callback_command = format!(
                 "{callback} {index} {}",
-                crate::completion_spec::single_quote(line)
+                crate::word::quote::single_quote(line)
             );
             match crate::eval_text(session, &callback_command, last) {
                 Flow::Continue(_) => {}

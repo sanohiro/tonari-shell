@@ -560,15 +560,7 @@ fn deep_expression_full(depth: u16) -> bool {
     if depth % 16 != 0 {
         return false;
     }
-    let Some(origin) = crate::MAIN_STACK_ORIGIN.get() else {
-        return true;
-    };
-    let mut limit = std::mem::MaybeUninit::uninit();
-    if unsafe { libc::getrlimit(libc::RLIMIT_STACK, limit.as_mut_ptr()) } != 0 {
-        return true;
-    }
-    let used = origin.abs_diff(std::ptr::from_ref(&limit).addr()) as u64;
-    used + 256 * 1024 >= unsafe { limit.assume_init() }.rlim_cur / 2
+    crate::stack_budget_exceeded()
 }
 
 fn calculate(source: &str, variables: &mut dyn Variables, depth: u16) -> Result<i64> {

@@ -152,11 +152,8 @@ fn sort_large(
     let joined = std::thread::scope(|scope| {
         let worker = std::thread::Builder::new().spawn_scoped(scope, || {
             // POSIX thread locales do not propagate to newly created threads.
-            let before = unsafe { libc::uselocale(locale as libc::locale_t) };
+            let _locale = super::LocaleGuard::enter(locale as libc::locale_t);
             sort_large(left, compare, workers / 2);
-            unsafe {
-                libc::uselocale(before);
-            }
         });
         sort_large(right, compare, workers / 2);
         if let Ok(handle) = worker {

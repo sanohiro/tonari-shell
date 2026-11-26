@@ -200,15 +200,15 @@ fn give_terminal_with_modes(fd: RawFd, pgid: pid_t, modes: Option<&libc::termios
     // The shell is temporarily in the background when it takes the terminal back.
     unsafe {
         let mut block = std::mem::zeroed();
-        let mut old = std::mem::zeroed();
         libc::sigemptyset(&mut block);
         libc::sigaddset(&mut block, libc::SIGTTOU);
-        libc::sigprocmask(libc::SIG_BLOCK, &block, &mut old);
+        let Ok(_mask) = crate::traps::SignalMask::block(&block) else {
+            return;
+        };
         libc::tcsetpgrp(fd, pgid);
         if let Some(modes) = modes {
             libc::tcsetattr(fd, libc::TCSANOW, modes);
         }
-        libc::sigprocmask(libc::SIG_SETMASK, &old, std::ptr::null_mut());
     }
 }
 
@@ -710,14 +710,7 @@ impl Jobs {
     fn disown(&mut self, args: &[String]) -> u8 {
         let (mut all, mut running, mut nohup) = (false, false, false);
         let mut specs = args;
-        while let Some((option, rest)) = specs.split_first() {
-            if option == "--" {
-                specs = rest;
-                break;
-            }
-            if !option.starts_with('-') || option == "-" {
-                break;
-            }
+        while let Some(option) = crate::builtins::flags::next(&mut specs) {
             for flag in option[1..].chars() {
                 match flag {
                     'a' => all = true,
@@ -729,7 +722,6 @@ impl Jobs {
                     }
                 }
             }
-            specs = rest;
         }
         if specs.is_empty() && (all || running) {
             for i in (0..self.table.len()).rev() {
@@ -993,27 +985,15 @@ struct WaitOptions<'a> {
 impl<'a> WaitOptions<'a> {
     fn parse(mut args: &'a [String]) -> Option<(Self, &'a [String])> {
         let mut options = Self::default();
-        while let Some((arg, rest)) = args.split_first() {
-            if arg == "--" {
-                return Some((options, rest));
-            }
-            if !arg.starts_with('-') || arg == "-" {
-                break;
-            }
-            args = rest;
+        while let Some(arg) = crate::builtins::flags::next(&mut args) {
             let mut flags = arg[1..].chars();
             while let Some(flag) = flags.next() {
                 match flag {
                     'n' => options.next = true,
                     'f' => options.force = true,
                     'p' => {
-                        options.variable = Some(if flags.as_str().is_empty() {
-                            let (name, rest) = args.split_first()?;
-                            args = rest;
-                            name
-                        } else {
-                            flags.as_str()
-                        });
+                        options.variable =
+                            Some(crate::builtins::flags::value(flags.as_str(), &mut args)?);
                         break;
                     }
                     _ => return None,
@@ -1237,11 +1217,8 @@ fn list_to(jobs: &mut Jobs, args: &[String], posix: bool, mut out: impl Write) -
     let mut mode = ' ';
     let mut changed = false;
     let mut filter = ' ';
-    let mut args = args.iter().peekable();
-    while let Some(arg) = args.next_if(|s| s.starts_with('-') && s.len() > 1) {
-        if arg == "--" {
-            break;
-        }
+    let mut args = args;
+    while let Some(arg) = crate::builtins::flags::next(&mut args) {
         for flag in arg[1..].chars() {
             match flag {
                 'p' | 'l' => mode = flag,
@@ -1256,7 +1233,7 @@ fn list_to(jobs: &mut Jobs, args: &[String], posix: bool, mut out: impl Write) -
     }
     let mut status = 0;
     let markers = marked_jobs(jobs.inherited.iter().chain(&jobs.table));
-    let all = if args.peek().is_none() {
+    let all = if args.is_empty() {
         jobs.inherited.len() + jobs.table.len()
     } else {
         0

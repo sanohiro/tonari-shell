@@ -101,9 +101,7 @@ fn field(s: &mut &str, delim: char) -> String {
     }
     out
 }
-fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
+use crate::word::quote::single_quote as shell_quote;
 
 fn substitute(value: &str, memory: &Memory, global: bool) -> io::Result<String> {
     let Some((old, new)) = &memory.substitution else {

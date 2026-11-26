@@ -167,13 +167,10 @@ impl Limit {
 }
 
 pub fn run(args: &[String], out: &mut dyn Write, posix: bool) -> u8 {
-    let mut args = args.iter().map(String::as_str).peekable();
+    let mut args = args;
     let (mut soft, mut hard, mut all) = (false, false, false);
     let mut requests = Vec::new();
-    while let Some(opt) = args.next_if(|s| s.len() > 1 && s.starts_with('-')) {
-        if opt == "--" {
-            break;
-        }
+    while let Some(opt) = crate::builtins::flags::next(&mut args) {
         for (i, flag) in opt[1..].char_indices() {
             match flag {
                 'S' => soft = true,
@@ -186,7 +183,11 @@ pub fn run(args: &[String], out: &mut dyn Write, posix: bool) -> u8 {
                     };
                     let rest = &opt[1 + i + flag.len_utf8()..];
                     let value = if rest.is_empty() {
-                        args.next_if(|s| !s.starts_with('-'))
+                        if args.first().is_some_and(|s| !s.starts_with('-')) {
+                            args.split_off_first().map(String::as_str)
+                        } else {
+                            None
+                        }
                     } else {
                         Some(rest)
                     };
@@ -217,11 +218,11 @@ pub fn run(args: &[String], out: &mut dyn Write, posix: bool) -> u8 {
     } else {
         if let Some((_, arg)) = requests.last_mut() {
             if arg.is_none() {
-                *arg = args.next();
+                *arg = args.first().map(String::as_str);
             }
         } else {
             let file = LIMITS.iter().find(|limit| limit.flag == 'f').unwrap();
-            requests.push((file, args.next()));
+            requests.push((file, args.first().map(String::as_str)));
         }
         let label = requests.len() > 1;
         for (limit, arg) in requests {

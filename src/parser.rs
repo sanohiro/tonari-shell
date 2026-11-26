@@ -109,9 +109,10 @@ pub(crate) fn history_designator_spans(line: &str, extglob: bool) -> Vec<(usize,
     }) {
         return history_word_spans(line);
     }
-    let previous = EXTGLOB.replace(extglob);
-    let parsed = lex(line, false, true);
-    EXTGLOB.set(previous);
+    let parsed = {
+        let _extglob = crate::ScopedCell::enter(&EXTGLOB, extglob);
+        lex(line, false, true)
+    };
     let Ok((tokens, spans, _)) = parsed else {
         return history_word_spans(line);
     };
@@ -726,20 +727,16 @@ pub(crate) fn with_subscript_aliases<T>(
 
 fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnce() -> T) -> T {
     let read = || {
-        let old_line = FIRST_LINE.replace(line);
-        let before = EXTGLOB.replace(session.shopt.glob.extglob);
-        let extquote = EXTQUOTE.replace(session.shopt.extquote);
-        let posix = POSIX.replace(session.posix);
-        let time_flags = TIME_OPTIONS_EXTERNAL.replace(session.posix && session.shopt.compat > 41);
-        let comments = COMMENTS.replace(session.read_comments());
-        let parsed = parse();
-        COMMENTS.set(comments);
-        TIME_OPTIONS_EXTERNAL.set(time_flags);
-        EXTQUOTE.set(extquote);
-        POSIX.set(posix);
-        EXTGLOB.set(before);
-        FIRST_LINE.set(old_line);
-        parsed
+        let _first_line = crate::ScopedCell::enter(&FIRST_LINE, line);
+        let _extglob = crate::ScopedCell::enter(&EXTGLOB, session.shopt.glob.extglob);
+        let _extquote = crate::ScopedCell::enter(&EXTQUOTE, session.shopt.extquote);
+        let _posix = crate::ScopedCell::enter(&POSIX, session.posix);
+        let _time_options_external = crate::ScopedCell::enter(
+            &TIME_OPTIONS_EXTERNAL,
+            session.posix && session.shopt.compat > 41,
+        );
+        let _comments = crate::ScopedCell::enter(&COMMENTS, session.read_comments());
+        parse()
     };
     if session.shopt.expand_aliases && session.aliases.0.is_some() {
         aliases::with(session.aliases.clone(), read)

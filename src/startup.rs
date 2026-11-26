@@ -67,29 +67,16 @@ fn sourced(
 pub fn source_file(session: &mut Session, words: &[String], status: u8, fatal: bool) -> Flow {
     let mut args = &words[1..];
     let mut search = None;
-    while let Some((option, tail)) = args.split_first() {
-        if option == "--" {
-            args = tail;
-            break;
-        }
-        if option == "-" || !option.starts_with('-') {
-            break;
-        }
+    while let Some(option) = crate::builtins::flags::next(&mut args) {
         let Some(path) = option.strip_prefix("-p") else {
             eprintln!("tonari: source: {option}: invalid option");
             return Flow::Continue(2);
         };
-        if path.is_empty() {
-            let Some((path, tail)) = tail.split_first() else {
-                eprintln!("tonari: source: -p requires a path");
-                return Flow::Continue(2);
-            };
-            search = Some(path.as_str());
-            args = tail;
-        } else {
-            search = Some(path);
-            args = tail;
-        }
+        let Some(path) = crate::builtins::flags::value(path, &mut args) else {
+            eprintln!("tonari: source: -p requires a path");
+            return Flow::Continue(2);
+        };
+        search = Some(path);
     }
     let Some(name) = args.first() else {
         eprintln!("tonari: source: filename required");

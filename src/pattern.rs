@@ -28,14 +28,29 @@ pub(crate) fn localized<T>(work: impl FnOnce() -> T) -> T {
     if locale.is_null() {
         return work();
     }
-    let before = unsafe { libc::uselocale(locale) };
-    let result = work();
-    if !before.is_null() {
-        unsafe {
-            libc::uselocale(before);
+    let _locale = LocaleGuard::enter(locale);
+    work()
+}
+
+struct LocaleGuard(libc::locale_t);
+
+impl LocaleGuard {
+    fn enter(locale: libc::locale_t) -> Option<Self> {
+        let previous = unsafe { libc::uselocale(locale) };
+        if previous.is_null() {
+            None
+        } else {
+            Some(Self(previous))
         }
     }
-    result
+}
+
+impl Drop for LocaleGuard {
+    fn drop(&mut self) {
+        unsafe {
+            libc::uselocale(self.0);
+        }
+    }
 }
 
 // A star consumes the gap between literal pieces. Bracket expressions,

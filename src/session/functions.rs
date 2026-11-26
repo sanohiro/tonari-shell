@@ -46,19 +46,7 @@ impl Session {
         // The evaluator runs on the process main stack. For calls beyond the
         // original guard, keep at least half its soft limit for the environment,
         // signal frames and nested evaluation. Honor changes made by ulimit.
-        let Some(origin) = crate::MAIN_STACK_ORIGIN.get() else {
-            return true;
-        };
-        if self.function_depth >= 256 {
-            return true;
-        }
-        let mut limit = std::mem::MaybeUninit::uninit();
-        if unsafe { libc::getrlimit(libc::RLIMIT_STACK, limit.as_mut_ptr()) } != 0 {
-            return true;
-        }
-        let used = origin.abs_diff(std::ptr::from_ref(&limit).addr());
-        let budget = unsafe { limit.assume_init() }.rlim_cur / 2;
-        used as u64 + 256 * 1024 >= budget
+        self.function_depth >= 256 || crate::stack_budget_exceeded()
     }
 
     pub(crate) fn push_source_path(&mut self, path: &std::path::Path) {

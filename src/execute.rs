@@ -1145,32 +1145,18 @@ fn exec_builtin(cmd: &PreparedCommand, session: &Session, mut args: &[String]) -
     let mut clear = false;
     let mut login = false;
     let mut arg0 = None;
-    while let Some((opt, rest)) = args.split_first() {
-        if opt == "--" {
-            args = rest;
-            break;
-        }
-        if !opt.starts_with('-') || opt == "-" {
-            break;
-        }
-        args = rest;
+    while let Some(opt) = crate::builtins::flags::next(&mut args) {
         let mut flags = opt[1..].chars();
         while let Some(flag) = flags.next() {
             match flag {
                 'c' => clear = true,
                 'l' => login = true,
                 'a' => {
-                    let text = flags.as_str();
-                    if text.is_empty() {
-                        let Some((v, rest)) = args.split_first() else {
-                            eprintln!("tonari: exec: -a requires a name");
-                            return Flow::Continue(2);
-                        };
-                        arg0 = Some(v.clone());
-                        args = rest;
-                    } else {
-                        arg0 = Some(text.to_string());
-                    }
+                    let Some(v) = crate::builtins::flags::value(flags.as_str(), &mut args) else {
+                        eprintln!("tonari: exec: -a requires a name");
+                        return Flow::Continue(2);
+                    };
+                    arg0 = Some(v.to_owned());
                     break;
                 }
                 _ => {
@@ -1819,7 +1805,10 @@ fn start(
             || input.is_some()
             || output.is_some())
         && (cached || cmd.words[0].contains('/'))
-        && cmd.redirects.iter().all(spawn::standard_dup)
+        && cmd
+            .redirects
+            .first()
+            .is_none_or(|r| r.target == Target::Duplicate && (0..=2).contains(&r.fd))
     {
         // Only descriptor copies can be retried without repeating visible effects.
         // Let the ordinary child apply them to its diagnostic if launch fails.
@@ -2289,7 +2278,7 @@ pub(crate) fn trace_word(word: &str) -> std::borrow::Cow<'_, str> {
     {
         return word.into();
     }
-    format!("'{}'", word.replace('\'', "'\\''")).into()
+    crate::word::quote::single_quote(word).into()
 }
 
 fn prepare(
@@ -2333,7 +2322,7 @@ fn separate_keyword_arguments(raw: &mut SimpleCommand<Word>) {
                 eprintln!("tonari: {key}: not a valid identifier");
                 return false;
             }
-            let mut value = std::mem::replace(word, Word::Literal(String::new()));
+            let mut value = std::mem::take(word);
             value.remove_assignment_prefix(key.len() + 1);
             raw.assignments.push((key, Assignment::Scalar(value)));
             false

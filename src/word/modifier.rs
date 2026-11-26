@@ -155,7 +155,7 @@ fn as_number(word: &mut Word, env: &mut Expansion<'_>) -> Result<i64, Error> {
     {
         return Ok(n);
     }
-    let text = env.scalar(std::mem::replace(word, Word::Literal(String::new())))?;
+    let text = env.scalar(std::mem::take(word))?;
     env.arithmetic(&text)
 }
 
@@ -180,10 +180,9 @@ impl Modification {
                 mode,
             } => {
                 let values = Values::read(name, env)?;
-                let pattern =
-                    env.pattern(std::mem::replace(pattern, Word::Literal(String::new())))?;
+                let pattern = env.pattern(std::mem::take(pattern))?;
                 replacement.resolve(env)?;
-                let replacement = std::mem::replace(replacement, Word::Literal(String::new()));
+                let replacement = std::mem::take(replacement);
                 let lookup = |k: &str| env.lookup(k);
                 let positional = env.session.positional.as_slice();
                 let replacement = if env.session.shopt.patsub_replacement {
@@ -212,7 +211,7 @@ impl Modification {
                 pattern,
             } => {
                 let values = Values::read(name, env)?;
-                let pattern = match std::mem::replace(pattern, Word::Literal(String::new())) {
+                let pattern = match std::mem::take(pattern) {
                     Word::Literal(text) if text.is_empty() => text,
                     word => env.pattern(word)?,
                 };

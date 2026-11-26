@@ -393,7 +393,7 @@ impl Session {
             }
             "BASH_VERSINFO" => match index {
                 5 => Some(Self::machine_type()),
-                i => ["5", "2", "0", "1", "tonari"]
+                i => super::BASH_VERSINFO
                     .get(usize::try_from(i).ok()?)
                     .map(|s| (*s).into()),
             },
@@ -740,7 +740,11 @@ impl Session {
             Elements::Dense(Vec::with_capacity(items.len()))
         };
         // With declare -g, an existing local still controls name resolution.
-        let visible = !global || !self.locals.iter().any(|scope| scope.0.contains_key(name));
+        let visible = !global
+            || !self
+                .locals
+                .iter()
+                .any(|scope| scope.variables.contains_key(name));
         let result = (|| {
             let mut next = map.last_index().map_or(Some(0), |i| i.checked_add(1));
             for (index, value) in items {
@@ -826,7 +830,11 @@ impl Session {
         }
         var.make_array();
         let mut elements = Rc::unwrap_or_clone(var.elements.take().unwrap());
-        let visible = !global || !self.locals.iter().any(|scope| scope.0.contains_key(name));
+        let visible = !global
+            || !self
+                .locals
+                .iter()
+                .any(|scope| scope.variables.contains_key(name));
         let result = self
             .initializer_number(
                 name,

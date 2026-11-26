@@ -713,7 +713,7 @@ pub(crate) fn parameter_quote(text: &str, session: &Session) -> String {
     {
         String::from_utf8(ansi_quote(text.as_bytes(), ascii)).expect("quoted UTF-8")
     } else {
-        crate::completion_spec::single_quote(text)
+        crate::word::quote::single_quote(text)
     }
 }
 
@@ -729,7 +729,7 @@ fn quote(data: &[u8], session: &Session, single: bool) -> Vec<u8> {
         return ansi_quote(data, ascii_locale);
     }
     if single && let Ok(text) = std::str::from_utf8(data) {
-        return crate::completion_spec::single_quote(text).into_bytes();
+        return crate::word::quote::single_quote(text).into_bytes();
     }
     let mut out = Vec::new();
     for (i, &b) in data.iter().enumerate() {

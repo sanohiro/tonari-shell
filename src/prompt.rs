@@ -72,8 +72,8 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars) -> String {
                 .unwrap_or("tonari")
                 .trim_start_matches('-'),
         ),
-        'v' => output.push_str("5.2"),
-        'V' => output.push_str("5.2.0"),
+        'v' => output.push_str(crate::session::BASH_SERIES),
+        'V' => output.push_str(crate::session::BASH_RELEASE),
         '!' => output.push_str(&session.history_number().to_string()),
         '#' => output.push_str(&(session.command_number + 1).to_string()),
         'j' => output.push_str(&session.jobs.count().to_string()),
