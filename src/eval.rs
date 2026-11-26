@@ -56,7 +56,11 @@ fn run_statements<'a>(
         }
         if !session.traps.in_action() {
             session.current_command = Some(statement.location.clone());
-        } else if session.signal_line.is_some() && !session.traps.in_nested_action() {
+        } else if session
+            .traps
+            .in_action_child(session.function_depth + session.source_depth)
+            || session.signal_line.is_some() && !session.traps.in_nested_action()
+        {
             session.signal_line = Some(statement.location.line);
         }
         let negated = statement.negated;
@@ -650,6 +654,7 @@ pub(crate) fn call_with_bindings(
     let function = session.functions[&name].clone();
     let traced = session.traced_functions.contains(&name);
     let callsite = session.current_command.clone();
+    let caller_signal_line = session.signal_line;
     session.call_lines.push(session.line());
     session.source_names.push(function.source);
     session.function_names.push(name);
@@ -687,6 +692,7 @@ pub(crate) fn call_with_bindings(
     });
     let flow = crate::traps::returning(session, flow);
     session.traps.leave_function(hidden);
+    session.signal_line = caller_signal_line;
     session.positional = old;
     session.source_set_args = false;
     if tracked {

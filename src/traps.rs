@@ -284,6 +284,11 @@ impl Traps {
         self.handling_debug || self.handling_error || self.handling_return
     }
 
+    pub fn in_action_child(&self, scope_depth: u32) -> bool {
+        self.current_action
+            .is_some_and(|action| scope_depth > action.scope_depth)
+    }
+
     pub fn in_action(&self) -> bool {
         self.current_action.is_some()
     }
@@ -771,7 +776,10 @@ pub fn returning(session: &mut Session, flow: Flow) -> Flow {
         Flow::Return(_) => session.traps.before_return,
         _ => return flow,
     };
-    if session.traps.handling_return || !session.traps.catches(RETURN) {
+    if session.traps.handling_return
+        || session.traps.handling_debug
+        || !session.traps.catches(RETURN)
+    {
         return flow;
     }
     session.traps.handling_return = true;

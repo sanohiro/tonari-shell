@@ -16,6 +16,8 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "debug-return-scope": "set -T; helper(){ :; }; f(){ :; }; trap 'echo \"ret:${FUNCNAME[0]}\"' RETURN; trap 'helper' DEBUG; f",
+    "debug-handler-function-line": "set -T\nhelper(){\n printf '%s %s %s\\n' \"$1\" \"$LINENO\" \"$BASH_COMMAND\"\n}\ntrap 'helper \"$LINENO\"' DEBUG\n:\n:",
     "ere-portable-punctuation": "for re in '[a[.-.]z]' '[[.].]]' '[[.^.]]' '[[.[.]]'; do for s in '-' m ']' '^' '['; do [[ $s =~ $re ]]; printf '%s' \"$?\"; done; echo; done",
     "tilde-associative-key": "declare -A a; a[~/key]=absolute; a['~/quoted']=literal; k=\"$HOME/key\"; printf '%s/%s' \"${a[$k]}\" \"${a['~/quoted']}\"",
     "ansi-associative-key": "declare -A a; a[$'two\\x20words']=green; k='two words'; printf '%s' \"${a[$k]}\"",
@@ -167,6 +169,8 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "debug-return-scope": ("f", 900),
+    "debug-handler-function-line": ("trap 'helper \"$LINENO\"' DEBUG; :; :; trap - DEBUG", 700),
     "ere-portable-punctuation": ("for re in '[a[.-.]z]' '[[.].]]' '[[.^.]]' '[[.[.]]'; do [[ z =~ $re ]]; done", 800),
     "tilde-associative-key": ("a[~/key]=green; : \"${a[~/key]}\"", 1800),
     "ansi-associative-key": ("a[$'two\\x20words']=green; : \"${a[$'two\\x20words']}\"", 1600),
@@ -888,6 +892,8 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "debug-return-scope": "set -T; helper(){ :; }; f(){ :; }; trap ':' RETURN; trap 'helper' DEBUG",
+                "debug-handler-function-line": "set -T; helper(){ local x=$LINENO; : \"$1:$x:$BASH_COMMAND\"; }",
                 "tilde-associative-key": "declare -A a",
                 "ansi-associative-key": "declare -A a",
                 "quoted-numeric-subscript": "a=(zero); k=1",

@@ -35,6 +35,7 @@ fn sourced(
         .then(|| std::mem::replace(&mut session.positional, Vec::from(args).into_iter()));
     session.source_set_args = false;
     let callsite = session.current_command.clone();
+    let caller_signal_line = session.signal_line;
     session.call_lines.push(session.line());
     session.source_depth += 1;
     session.push_source_path(path);
@@ -43,6 +44,7 @@ fn sourced(
     let result = input::file_script(session, script.file, Some(script.metadata), status, false);
     let result = crate::traps::returning(session, result);
     session.traps.leave_source(saved_debug);
+    session.signal_line = caller_signal_line;
     session.function_names.pop();
     session.source_names.pop();
     session.source_depth -= 1;
