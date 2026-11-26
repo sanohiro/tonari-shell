@@ -271,11 +271,25 @@ pub(crate) enum CaseDirection {
 }
 
 pub(crate) fn toggle_case(
-    text: String,
+    mut text: String,
     all: bool,
     filter: Option<&Matcher<&str>>,
     locale: crate::session::CharacterLocale,
 ) -> String {
+    use crate::session::CharacterLocale;
+    if filter.is_none()
+        && (locale == CharacterLocale::Ascii
+            || text.is_ascii() && locale != CharacterLocale::Turkic)
+    {
+        let len = if all { text.len() } else { text.len().min(1) };
+        // Only ASCII letters change. All UTF-8 continuation and leading bytes stay intact.
+        for byte in &mut unsafe { text.as_bytes_mut() }[..len] {
+            if byte.is_ascii_alphabetic() {
+                *byte ^= 0x20;
+            }
+        }
+        return text;
+    }
     localized(|| {
         text.chars()
             .enumerate()
