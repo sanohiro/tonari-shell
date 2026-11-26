@@ -670,39 +670,7 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
             .or_else(|| session.get("FCEDIT"))
             .or_else(|| session.get("EDITOR"))
             .unwrap_or_else(|| if session.posix { "ed" } else { "vi" }.into());
-        let directory = session
-            .get("TMPDIR")
-            .map_or_else(std::env::temp_dir, PathBuf::from);
-        let mut template = directory
-            .join("tonari-fc.XXXXXX")
-            .as_os_str()
-            .as_bytes()
-            .to_vec();
-        template.push(0);
-        let fd = unsafe { libc::mkstemp(template.as_mut_ptr().cast()) };
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let path = Path::new(std::ffi::OsStr::from_bytes(&template[..template.len() - 1]));
-        let edited: io::Result<Result<String, Flow>> = (|| {
-            let mut file = unsafe { File::from_raw_fd(fd) };
-            file.write_all(source.as_bytes())?;
-            drop(file);
-            let name = path
-                .to_str()
-                .ok_or_else(|| error("expected UTF-8 temporary path"))?;
-            let flow = crate::eval_text(
-                session,
-                &format!("{program} '{}'", name.replace('\'', "'\"'\"'")),
-                status,
-            );
-            if !matches!(flow, Flow::Continue(0)) {
-                return Ok(Err(flow));
-            }
-            Ok(Ok(std::fs::read_to_string(path)?))
-        })();
-        let _ = std::fs::remove_file(path);
-        source = match edited? {
+        source = match edit_text(session, &program, &source, status)? {
             Ok(s) => s,
             Err(f) => return Ok(f),
         };
@@ -713,4 +681,45 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
     }
     eprint!("{source}");
     Ok(crate::eval_text(session, &source, status))
+}
+
+pub(crate) fn edit_text(
+    session: &mut Session,
+    program: &str,
+    source: &str,
+    status: u8,
+) -> io::Result<Result<String, Flow>> {
+    let directory = session
+        .get("TMPDIR")
+        .map_or_else(std::env::temp_dir, PathBuf::from);
+    let mut template = directory
+        .join("tonari-fc.XXXXXX")
+        .as_os_str()
+        .as_bytes()
+        .to_vec();
+    template.push(0);
+    let fd = unsafe { libc::mkstemp(template.as_mut_ptr().cast()) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let path = Path::new(std::ffi::OsStr::from_bytes(&template[..template.len() - 1]));
+    let edited: io::Result<Result<String, Flow>> = (|| {
+        let mut file = unsafe { File::from_raw_fd(fd) };
+        file.write_all(source.as_bytes())?;
+        drop(file);
+        let name = path
+            .to_str()
+            .ok_or_else(|| error("expected UTF-8 temporary path"))?;
+        let flow = crate::eval_text(
+            session,
+            &format!("{program} '{}'", name.replace('\'', "'\"'\"'")),
+            status,
+        );
+        if !matches!(flow, Flow::Continue(0)) {
+            return Ok(Err(flow));
+        }
+        Ok(Ok(std::fs::read_to_string(path)?))
+    })();
+    let _ = std::fs::remove_file(path);
+    edited
 }

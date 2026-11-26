@@ -1671,6 +1671,9 @@ fn start_raw(
         };
     }
     let setup = connect_pipe(input.as_ref(), output.as_ref(), next_reader);
+    if !launch.background {
+        session.jobs.refresh_snapshot();
+    }
     let pid = unsafe { libc::fork() };
     if pid < 0 {
         return Err(io::Error::last_os_error());
@@ -1884,6 +1887,9 @@ fn start(
         setup.extend(actions(cmd));
     }
     let external = builtin.is_none().then(|| External::new(cmd, session));
+    if builtin.is_some() && !launch.background {
+        session.jobs.refresh_snapshot();
+    }
     let pid = unsafe { libc::fork() };
     if pid < 0 {
         return Err(io::Error::last_os_error());

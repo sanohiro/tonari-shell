@@ -194,6 +194,7 @@ pub fn capture_substitution(
     if let Some(result) = capture_simple(session, &body, last) {
         return result;
     }
+    session.jobs.refresh_snapshot();
     let (read, write) = std::io::pipe().map_err(|_| "cannot open command substitution pipe")?;
     let pid = unsafe { libc::fork() };
     if pid < 0 {

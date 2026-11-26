@@ -16,6 +16,8 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "posix-resume-job": "set -o posix; set -m; sleep 4 & p=$!; kill -s STOP \"$p\"; sleep .05; jobs -s | awk '{print $2}'; bg %+; kill \"$p\"; wait \"$p\" 2>/dev/null; :",
+    "posix-job-state": "set -o posix; (exit 17) & p=$!; sleep .04; jobs | awk '{print $2}'; wait \"$p\"; echo \"$?\"",
     "debug-return-scope": "set -T; helper(){ :; }; f(){ :; }; trap 'echo \"ret:${FUNCNAME[0]}\"' RETURN; trap 'helper' DEBUG; f",
     "debug-handler-function-line": "set -T\nhelper(){\n printf '%s %s %s\\n' \"$1\" \"$LINENO\" \"$BASH_COMMAND\"\n}\ntrap 'helper \"$LINENO\"' DEBUG\n:\n:",
     "ere-portable-punctuation": "for re in '[a[.-.]z]' '[[.].]]' '[[.^.]]' '[[.[.]]'; do for s in '-' m ']' '^' '['; do [[ $s =~ $re ]]; printf '%s' \"$?\"; done; echo; done",
@@ -169,6 +171,8 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "posix-resume-job": ("bg %+ > /dev/null", 1800),
+    "posix-job-state": ("(exit 17) & p=$!; wait \"$p\"; :", 80),
     "debug-return-scope": ("f", 900),
     "debug-handler-function-line": ("trap 'helper \"$LINENO\"' DEBUG; :; :; trap - DEBUG", 700),
     "ere-portable-punctuation": ("for re in '[a[.-.]z]' '[[.].]]' '[[.^.]]' '[[.[.]]'; do [[ z =~ $re ]]; done", 800),
@@ -559,7 +563,37 @@ def socket_time(shell, run, kind, count):
         return ms
 
 
+EDITOR_PTY = ("vi-external-editor", "emacs-external-editor", "posix-vi-editor")
 DIRECTORY_PTY = ("cd-spelling", "directory-spelling-completion", "expanded-directory-completion", "quoted-directory-completion", "check-exit-jobs")
+
+def external_editor_pty(shell, root, name):
+    # Both executables verify the original buffer and replace it with an observable command.
+    for editor in ("chosen", "vi"):
+        exe = root / editor
+        exe.write_text("#!/bin/sh\ngrep -Fx 'echo original' \"$1\" >/dev/null || exit 9\n"
+                       f"echo 'printf {editor} >editor-result; printf \"\\\\036\"' >\"$1\"\n")
+        exe.chmod(0o755)
+    result = root / "editor-result"
+    result.unlink(missing_ok=True)
+    env = dict(PATH=str(root) + ":/usr/bin:/bin", VISUAL="chosen", EDITOR="false", HISTFILE="/dev/null")
+    term = Terminal(shell, root, editing=True, env=env)
+    try:
+        assert b"READY>" in term.read(b"READY>")
+        vi = name != "emacs-external-editor"
+        if vi:
+            term.send(b"set -o vi" + (b" -o posix" if name == "posix-vi-editor" else b"") + b"\n")
+            assert b"READY>" in term.read(b"READY>")
+        term.send(b"echo original")
+        term.read(b"original")
+        start = time.perf_counter_ns()
+        term.send(b"\x1bv" if vi else b"\x18\x05")
+        output = term.read(b"\x1e", timeout=3)
+        elapsed = (time.perf_counter_ns() - start) / 1e6
+        assert b"\x1e" in output and result.read_text() == ("vi" if name == "posix-vi-editor" else "chosen"), (shell, name, output)
+        return elapsed
+    finally:
+        term.close()
+
 
 def directory_pty(shell, root, name):
     term = Terminal(shell, root, editing=True, env={"HISTFILE": "/dev/null"})
@@ -614,7 +648,7 @@ def main():
     parser.add_argument("tonari", type=Path)
     parser.add_argument("--first", type=Path)
     parser.add_argument("--runs", type=int, default=9)
-    parser.add_argument("--case", action="append", choices=["history-reedit", "stdin-replacement", "inputrc-word-edit", "inputrc-file-completion", "array-recovery", "interactive-comments", "programmable-boundaries", "filename-completion", "tcp-redirection", "udp-redirection", *DIRECTORY_PTY, *HOT])
+    parser.add_argument("--case", action="append", choices=["history-reedit", "stdin-replacement", "inputrc-word-edit", "inputrc-file-completion", "array-recovery", "interactive-comments", "programmable-boundaries", "filename-completion", "tcp-redirection", "udp-redirection", *DIRECTORY_PTY, *EDITOR_PTY, *HOT])
     args = parser.parse_args()
     selected = set(args.case or ())
     def requested(name):
@@ -729,14 +763,14 @@ def main():
             (termroot / f"Mix-Case-other{i}").touch()
         (termroot / "sample").mkdir()
         (termroot / "sample/unique").touch()
-        for name in DIRECTORY_PTY:
+        for name in (*DIRECTORY_PTY, *EDITOR_PTY):
             if not requested(name): continue
             samples = [[] for _ in shells]
             for r in range(args.runs + 1):
                 order = list(range(len(shells)))
                 rng.shuffle(order)
                 for i in order:
-                    elapsed = directory_pty(shells[i], termroot, name)
+                    elapsed = (external_editor_pty if name in EDITOR_PTY else directory_pty)(shells[i], termroot, name)
                     if r: samples[i].append(round(elapsed, 3))
             if args.runs:
                 print(json.dumps(dict(case=name, repeats=1, median_ms=[round(statistics.median(g), 3) for g in samples], samples_ms=samples)), flush=True)
@@ -892,6 +926,8 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "posix-resume-job": "set -o posix; set -m; sleep 1 >/dev/null 2>&1 &",
+                "posix-job-state": "set -o posix",
                 "debug-return-scope": "set -T; helper(){ :; }; f(){ :; }; trap ':' RETURN; trap 'helper' DEBUG",
                 "debug-handler-function-line": "set -T; helper(){ local x=$LINENO; : \"$1:$x:$BASH_COMMAND\"; }",
                 "tilde-associative-key": "declare -A a",

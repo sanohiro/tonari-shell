@@ -50,6 +50,8 @@ actions! {
     KillWord => "kill-word" [b"\x1b[3;5~", b"\x1bd"],
     Redraw => "redraw-current-line" [],
     Emacs => "emacs-editing-mode" [],
+    EditAndExecute => "edit-and-execute-command" [b"\x18\x05"],
+    ViEditAndExecute => "vi-edit-and-execute-command" [],
     Vi => "vi-editing-mode" [],
     ViCommand => "vi-movement-mode" [],
     ViInsert => "vi-insertion-mode" [],
@@ -174,6 +176,7 @@ impl Keymap {
             },
             Self::Command => match action {
                 Undo => &[b"u", b"\x1f"],
+                ViEditAndExecute => &[b"v"],
                 ViInsert => &[b"i"],
                 ViAppend => &[b"a"],
                 ViAppendEnd => &[b"A"],

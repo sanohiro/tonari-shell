@@ -137,9 +137,11 @@ fn optional(session: &mut Session, path: &Path) -> Option<Flow> {
 pub fn defer_interactive_exit(session: &mut Session) -> bool {
     session.interactive
         && session.subshell_depth == 0
-        && session
-            .jobs
-            .defer_exit(session.shopt.checkjobs, session.command_number)
+        && session.jobs.defer_exit(
+            session.shopt.checkjobs,
+            session.command_number,
+            session.posix,
+        )
 }
 
 pub fn logout(session: &mut Session, code: u8, previous: u8) -> u8 {

@@ -236,8 +236,8 @@ fn interactive_loop(
             return Ok(code);
         }
         session.jobs.poll();
-        if session.notify && session.jobs.monitor {
-            session.jobs.report_changes();
+        if (session.notify || session.posix) && session.jobs.monitor {
+            session.jobs.report_changes(session.posix);
         }
         let terminal_size = session.refresh_terminal_size();
         if source.is_empty() {
@@ -296,7 +296,7 @@ fn interactive_loop(
                 wait_for_job_notice(&mut session.jobs, |jobs| {
                     let mut out = io::stderr().lock();
                     writeln!(out)?;
-                    jobs.report_changes();
+                    jobs.report_changes(session.posix);
                     out.write_all(prompt.as_bytes())?;
                     out.flush()
                 })

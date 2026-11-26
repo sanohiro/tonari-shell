@@ -36,7 +36,7 @@ fn run_statements<'a>(
         }
         if session.notify && session.jobs.awaiting_notification() {
             session.jobs.poll();
-            session.jobs.report_changes();
+            session.jobs.report_changes(session.posix);
         }
         let literal = literals.next().and_then(Option::as_deref_mut);
         if session.interactive && session.completions.in_callback() {

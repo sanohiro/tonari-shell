@@ -254,6 +254,29 @@ impl Job {
             .iter()
             .any(|p| matches!(p.state, State::Stopped(_)))
     }
+    fn display_state(&self, posix: bool) -> String {
+        if self.active() {
+            return "Running".into();
+        }
+        if let Some(code) = self.children.iter().rev().find_map(|p| match p.state {
+            State::Stopped(code) => Some(code),
+            _ => None,
+        }) {
+            if posix
+                && let Some((name, _)) =
+                    crate::traps::signals().find(|(_, sig)| *sig + 128 == i32::from(code))
+            {
+                return format!("Stopped(SIG{name})");
+            }
+            return "Stopped".into();
+        }
+        match self.status() {
+            0 => "Done".into(),
+            code if posix => format!("Done({code})"),
+            code => format!("Exit {code}"),
+        }
+    }
+
     fn status(&self) -> u8 {
         for p in self.children.iter().rev() {
             match p.state {
@@ -352,7 +375,7 @@ pub struct Jobs {
 }
 
 impl Jobs {
-    pub(crate) fn defer_exit(&mut self, check_running: bool, command: usize) -> bool {
+    pub(crate) fn defer_exit(&mut self, check_running: bool, command: usize, posix: bool) -> bool {
         if self.table.is_empty()
             || self
                 .exit_warning
@@ -370,7 +393,7 @@ impl Jobs {
         }
         self.exit_warning = Some(command);
         if check_running {
-            list_to(self, &[], io::stderr().lock());
+            list_to(self, &[], posix, io::stderr().lock());
         }
         true
     }
@@ -440,6 +463,12 @@ impl Jobs {
     }
     // A command substitution or foreground pipeline builtin may list its
     // parent's jobs, but cannot reap children owned by the parent process.
+    pub fn refresh_snapshot(&mut self) {
+        if !self.table.is_empty() {
+            self.poll();
+        }
+    }
+
     pub fn forked(&mut self, list_parent: bool) {
         if list_parent {
             self.inherited.append(&mut self.table);
@@ -545,6 +574,16 @@ impl Jobs {
             Ok((code, None))
         }
     }
+    fn remove_reported(&mut self) {
+        for i in (0..self.table.len()).rev() {
+            let job = &self.table[i];
+            if job.listed && !job.active() && !job.stopped() {
+                let done = self.table.remove(i);
+                self.remember(&done);
+            }
+        }
+    }
+
     fn remember(&mut self, job: &Job) {
         if let Some(pid) = job.children.last().map(|p| p.pid).filter(|&p| p > 0) {
             if self.finished.len() == 4096 {
@@ -710,7 +749,7 @@ impl Jobs {
         self.table.iter().any(|job| !job.active() && !job.listed)
     }
 
-    pub(crate) fn report_changes(&mut self) {
+    pub(crate) fn report_changes(&mut self, posix: bool) {
         for job in &mut self.table {
             if !job.active() && !job.listed {
                 let state = if job.stopped() {
@@ -720,9 +759,16 @@ impl Jobs {
                 } else {
                     "Done"
                 };
-                eprintln!("[{}] {state}  {}", job.id, job.name);
+                if posix && !job.signaled {
+                    eprintln!("[{}] {}  {}", job.id, job.display_state(true), job.name);
+                } else {
+                    eprintln!("[{}] {state}  {}", job.id, job.name);
+                }
                 job.listed = true;
             }
+        }
+        if posix {
+            self.remove_reported();
         }
     }
 
@@ -1115,11 +1161,11 @@ fn job_id(jobs: &Jobs, spec: &str) -> Option<u32> {
     }
 }
 
-fn list(jobs: &mut Jobs, args: &[String]) -> u8 {
-    list_to(jobs, args, io::stdout().lock())
+fn list(jobs: &mut Jobs, args: &[String], posix: bool) -> u8 {
+    list_to(jobs, args, posix, io::stdout().lock())
 }
 
-fn list_to(jobs: &mut Jobs, args: &[String], mut out: impl Write) -> u8 {
+fn list_to(jobs: &mut Jobs, args: &[String], posix: bool, mut out: impl Write) -> u8 {
     let mut mode = ' ';
     let mut changed = false;
     let mut filter = ' ';
@@ -1180,15 +1226,7 @@ fn list_to(jobs: &mut Jobs, args: &[String], mut out: impl Write) -> u8 {
             }
             continue;
         }
-        let state = if job.active() {
-            "Running".into()
-        } else if job.stopped() {
-            "Stopped".into()
-        } else if job.status() == 0 {
-            "Done".into()
-        } else {
-            format!("Exit {}", job.status())
-        };
+        let state = job.display_state(posix);
         let marker = if Some(id) == current {
             '+'
         } else if Some(id) == previous {
@@ -1228,13 +1266,7 @@ fn list_to(jobs: &mut Jobs, args: &[String], mut out: impl Write) -> u8 {
         }
         job.listed = true;
     }
-    for i in (0..jobs.table.len()).rev() {
-        let job = &jobs.table[i];
-        if job.listed && !job.active() && !job.stopped() {
-            let done = jobs.table.remove(i);
-            jobs.remember(&done);
-        }
-    }
+    jobs.remove_reported();
     if out.flush().is_err() { 1 } else { status }
 }
 
@@ -1284,7 +1316,7 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
     jobs.poll();
     match words[0].as_str() {
         "kill" => kill(jobs, &words[1..], session.posix),
-        "jobs" => list(jobs, &words[1..]),
+        "jobs" => list(jobs, &words[1..], session.posix),
         "disown" => jobs.disown(&words[1..]),
         "bg" => {
             if !jobs.monitor {
@@ -1320,7 +1352,7 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                 }
                 session.last_background = job.children.last().map(|p| p.pid);
                 let result = if session.posix {
-                    writeln!(out, "[{}] {}", job.id, job.name)
+                    writeln!(out, "[{}] {} &", job.id, job.name)
                 } else {
                     let marker = if i + 1 == n {
                         '+'
