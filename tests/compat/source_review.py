@@ -812,6 +812,12 @@ def main():
         fd_move = """exec 7>move-out; : 6>&7-; printf one >&7; { printf two >&6; } 6>&7-; { : 6>&7- 9<absent; } 2>/dev/null
 printf three >&7; exec {slot}>&7; : 6>&7- {slot}>&-; printf four >&7; exec 6>&7-; printf five >&6; { : >&7; } 2>/dev/null; echo "$?"; cat move-out"""
         assert run(shells[1], fd_move)[0] == (0, b"1\nonetwothreefourfive", False)
+        # Oils skips these inputs when both executables use its Bash profile.
+        # A negative offset is relative to the last index even at INT64_MAX.
+        sparse = 'a=(); a[9223372036854775807]=x; a[9223372036854775806]=y; printf "<%s>" "${a[@]: -2}" "${a[-1]}"'
+        assert run(shells[1], sparse)[0] == (0, b"<y><x><x>", False)
+        prompt = r"""x='\D{%H:%M'; printf '%s' "${x@P}" """
+        assert run(shells[1], prompt)[0] == (0, b"\\D{%H:%M", False)
         # Preserve valid data and bindings when an operation cannot succeed.
         for code, output in [
             ('readonly fd=42; printf keep >protected; { : {fd}>protected; } 2>/dev/null; printf "%s/" "$?"; cat protected', b"1/keep"),
