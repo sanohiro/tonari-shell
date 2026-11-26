@@ -14,6 +14,14 @@ pub struct Completion {
     append_space: bool,
 }
 
+pub(crate) fn default_word_breaks(hostname: bool) -> &'static str {
+    if hostname {
+        " \t\n\"'@><=;|&(:"
+    } else {
+        " \t\n\"'><=;|&(:"
+    }
+}
+
 pub struct Context<'a> {
     pub line: &'a str,
     pub cursor: usize,
@@ -24,6 +32,85 @@ pub struct Context<'a> {
 }
 
 impl<'a> Context<'a> {
+    // The callback receives source spelling, including quotes and backslashes.
+    // Readline keeps a run of punctuation as one COMP_WORDS entry, while the
+    // replacement starts after that punctuation.
+    fn programmable(&self, breaks: &str, hostname: bool) -> Self {
+        let mut words = Vec::new();
+        let mut token = self.command_start;
+        let mut punctuation = false;
+        let mut quote = None;
+        let mut escaped = false;
+        let mut end = self.line.len();
+        let mut spans = Vec::new();
+        for (off, c) in self.line[self.command_start..].char_indices() {
+            let i = self.command_start + off;
+            let protected = escaped || quote.is_some() || matches!(c, '\'' | '"' | '\\');
+            if escaped {
+                escaped = false;
+            } else if let Some(q) = quote {
+                if c == q {
+                    quote = None;
+                } else if c == '\\' && q == '"' {
+                    escaped = true;
+                }
+            } else if matches!(c, '\'' | '"') {
+                quote = Some(c);
+            } else if c == '\\' {
+                escaped = true;
+            }
+            if !protected && matches!(c, ';' | '|' | '&' | '\n') {
+                end = i;
+                break;
+            }
+            let split = !protected && breaks.contains(c);
+            let white = split && matches!(c, ' ' | '\t');
+            if white || punctuation != split {
+                if token < i {
+                    spans.push((token, i, punctuation));
+                }
+                token = i + if white { c.len_utf8() } else { 0 };
+            }
+            punctuation = split && !white;
+        }
+        if token < end {
+            spans.push((token, end, punctuation));
+        }
+        let mut current = None;
+        let mut start = self.cursor;
+        for (a, b, punct) in spans {
+            if current.is_none() && self.cursor < a {
+                current = Some(words.len());
+                words.push(String::new());
+            }
+            if current.is_none() && self.cursor >= a && self.cursor <= b {
+                current = Some(words.len());
+                start = if punct { self.cursor } else { a };
+                if !punct
+                    && hostname
+                    && a > self.command_start
+                    && self.line.as_bytes()[a - 1] == b'@'
+                    && a == self.start + 1
+                {
+                    start = a - 1;
+                }
+            }
+            words.push(self.line[a..b].to_owned());
+        }
+        let current = current.unwrap_or_else(|| {
+            words.push(String::new());
+            words.len() - 1
+        });
+        Self {
+            line: self.line,
+            cursor: self.cursor,
+            words,
+            current,
+            start,
+            command_start: self.command_start,
+        }
+    }
+
     /// Tokenize the current simple command for completion without evaluating it.
     pub(crate) fn scan(line: &'a str, cursor: usize) -> Option<Self> {
         if line[cursor..]
@@ -279,9 +366,24 @@ pub fn at(
     };
     // Registered definitions own the candidate list, including an explicitly
     // empty result. Only the shell's default completion offers learned arguments.
-    let generated = (!files_only)
-        .then(|| crate::completion_spec::for_tab(session, command, prefix, Some(&context)))
-        .flatten();
+    let callback = (!files_only
+        && session.shopt.progcomp
+        && session.completions.configured(command, prefix, session))
+    .then(|| {
+        let breaks = session
+            .get("COMP_WORDBREAKS")
+            .unwrap_or_else(|| default_word_breaks(session.shopt.hostcomplete).into());
+        context.programmable(&breaks, session.shopt.hostcomplete)
+    });
+    let callback_prefix = callback
+        .as_ref()
+        .map_or(prefix.as_str(), |c| &line[c.start..cursor]);
+    let generated = callback.as_ref().and_then(|c| {
+        if c.current == 0 && command.is_some() {
+            return None;
+        }
+        crate::completion_spec::for_tab(session, command, callback_prefix, Some(c))
+    });
     let ordinary = || {
         let dirs = matches!(command, Some("cd" | "pushd")) && !files_only;
         if prefix.is_empty()
@@ -328,12 +430,16 @@ pub fn at(
         let dirs = matches!(generated.source, Source::Directories);
         let matches = generated
             .source
-            .matches(prefix, session, list)
-            .or_else(|| paths.then(|| abbreviated(prefix, dirs, session)).flatten());
+            .matches(callback_prefix, session, list)
+            .or_else(|| {
+                paths
+                    .then(|| abbreviated(callback_prefix, dirs, session))
+                    .flatten()
+            });
         if matches.is_some() || !generated.fallback {
             let (common, choices) = matches?;
             return Some(Completion::new(
-                start,
+                callback.as_ref()?.start,
                 common,
                 choices,
                 generated.noquote,

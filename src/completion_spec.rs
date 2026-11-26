@@ -831,6 +831,18 @@ pub struct Generated {
 }
 
 impl Registry {
+    pub(crate) fn configured(
+        &self,
+        command: Option<&str>,
+        prefix: &str,
+        session: &Session,
+    ) -> bool {
+        !self.specs.is_empty()
+            && (self.lookup(command, prefix).is_some()
+                || (session.shopt.progcomp_alias
+                    && command.is_some_and(|cmd| session.aliases.get(cmd).is_some())))
+    }
+
     pub(crate) fn in_callback(&self) -> bool {
         self.active.is_some()
     }

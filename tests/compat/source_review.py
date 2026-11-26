@@ -14,6 +14,7 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "wordbreak-variable": """printf '<%s>' "$COMP_WORDBREAKS"; COMP_WORDBREAKS=' :'; printf '<%s>' "$COMP_WORDBREAKS"; unset COMP_WORDBREAKS; printf '<%s>' "${COMP_WORDBREAKS-unset}" """,
     "toggle-case": """x='aB cD-eF'; printf '<%s>\\n' "${x~}" "${x~~}" "${x~[cB]}" "${x~~[cB]}"; a=('xyZ' '01' 'a雪B'); printf '<%s>\\n' "${a[@]~~}" """,
     "declared-case": """declare -c v='hELLO woRLD'; echo "$v"; v+=' ABC'; declare -p v; declare -ac arr=('eXAMPLE' '.NEXT'); declare -p arr; declare +c v; v='rAW'; echo "$v"; declare -cl z='mIx'; declare -p z""",
     "completion-sources": "complete -g -s -A signal pick; complete -p pick; compgen -A group $(id -gn) | LC_ALL=C sort -u; compgen -s http | LC_ALL=C sort -u; compgen -A signal SIGTER; compgen -A signal DEBUG",
@@ -157,6 +158,26 @@ def ignored_completion(shell, root, prefix, force):
         t.close()
 
 
+def callback_tab(shell, root, line, setup=""):
+    t = Terminal(shell, root, editing=True, env={"HISTFILE": "/dev/null", "XDG_STATE_HOME": str(root / "state")})
+    try:
+        assert b"READY>" in t.read(b"READY>")
+        declaration = r"""demo(){ printf '<%s>' "$@" >accepted; }; cb(){ printf '<%s>' "$2" "$3" "$COMP_CWORD" "${COMP_WORDS[@]}" >callback; COMPREPLY=(CHOSEN); }; complete -F cb demo; """
+        t.send((declaration + setup + r"""printf '\036'""" + "\n").encode())
+        assert b"\x1e" in t.read(b"\x1e")
+        t.send(line.encode())
+        assert line.split()[-1].encode() in t.read(line.split()[-1].encode())
+        start = time.perf_counter_ns()
+        t.send(b"\t")
+        assert b"CHOSEN" in t.read(b"CHOSEN")
+        ms = (time.perf_counter_ns()-start)/1e6
+        t.send(b"; printf '\\036'\n")
+        assert b"\x1e" in t.read(b"\x1e")
+        return ((root / "callback").read_bytes(), (root / "accepted").read_bytes()), ms
+    finally:
+        t.close()
+
+
 def socket_time(shell, run, kind, count):
     # The receiver validates every payload. Exercise a builtin, an external
     # command and a persistent named descriptor with the same loopback fixture.
@@ -204,7 +225,7 @@ def main():
     parser.add_argument("tonari", type=Path)
     parser.add_argument("--first", type=Path)
     parser.add_argument("--runs", type=int, default=9)
-    parser.add_argument("--case", action="append", choices=["filename-completion", "tcp-redirection", "udp-redirection", *HOT])
+    parser.add_argument("--case", action="append", choices=["programmable-boundaries", "filename-completion", "tcp-redirection", "udp-redirection", *HOT])
     args = parser.parse_args()
     selected = set(args.case or ())
     def requested(name):
@@ -246,6 +267,25 @@ def main():
                                             ("she/unique.", True, "she/unique.")]:
                 assert ignored_completion(shell, termroot, prefix, force) == expected
         rng = random.Random(1729)
+        if requested("programmable-boundaries"):
+            for line, setup in [("demo --key=va", ""), ("demo --key=", ""), ("demo x::y==v", ""),
+                                ("demo first:val", "COMP_WORDBREAKS=' '; "), ("demo @user", ""),
+                                ("demo 'a:b' tail", ""), (r"demo a\:b", "")]:
+                results = [callback_tab(shell, termroot, line, setup)[0] for shell in shells[:2]]
+                assert results[0] == results[1], (line, results)
+            line = "demo " + "x:one=v " * 32 + "--key=fragTAIL"
+            samples = [[] for _ in shells]
+            for r in range(args.runs + 1):
+                indices = list(range(len(shells)))
+                rng.shuffle(indices)
+                expected = None
+                for i in indices:
+                    outcome, ms = callback_tab(shells[i], termroot, line)
+                    if expected is None: expected = outcome
+                    assert expected == outcome, (shells[i], outcome, expected)
+                    if r: samples[i].append(ms)
+            if args.runs:
+                print(json.dumps(dict(case="programmable-boundaries", repeats=1, median_ms=[round(statistics.median(g),3) for g in samples], samples_ms=samples)), flush=True)
         if requested("filename-completion"):
             samples = [[] for _ in shells]
             for r in range(args.runs + 1):

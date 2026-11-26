@@ -674,6 +674,7 @@ impl Session {
             "HISTCMD" | "BASH_MONOSECONDS" | "RANDOM" | "SECONDS" | "SRANDOM" => {
                 self.dynamic_number(name).map(|v| v.to_string())
             }
+            "COMP_WORDBREAKS" => Some(crate::complete::default_word_breaks(self.shopt.hostcomplete).into()),
             "BASH_SUBSHELL" => Some(self.subshell_depth.to_string()),
             "BASH_ARGV0" => Some(self.arg0.clone()),
             "EPOCHSECONDS" | "EPOCHREALTIME" => {
