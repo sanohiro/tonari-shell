@@ -2,7 +2,12 @@ use crate::Session;
 use std::cell::RefCell;
 use std::ffi::CString;
 
+#[cfg(target_env = "musl")]
+mod regional;
+
 struct Clock {
+    #[cfg(target_env = "musl")]
+    region: Option<tonari_time_locales::Locale>,
     name: Option<String>,
     zone: tz::TimeZone,
     locale_name: String,
@@ -32,6 +37,8 @@ impl Clock {
                     libc::newlocale(libc::LC_TIME_MASK, name.as_ptr(), std::ptr::null_mut())
                 });
         Self {
+            #[cfg(target_env = "musl")]
+            region: regional::resolve(&locale_name),
             name,
             zone,
             locale_name,
@@ -86,6 +93,21 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
     if let Some(text) = numeric_time(format, seconds, &tm, designation, offset) {
         return Some(text);
     }
+    #[cfg(target_env = "musl")]
+    let localized;
+    #[cfg(target_env = "musl")]
+    let format = if let Some(region) = clock.region {
+        localized = regional::expand(region, format, &tm);
+        if !localized.contains('%') {
+            return Some(localized);
+        }
+        if let Some(text) = numeric_time(&localized, seconds, &tm, designation, offset) {
+            return Some(text);
+        }
+        localized.as_str()
+    } else {
+        format
+    };
     let zone_name = CString::new(designation).ok()?;
     tm.tm_zone = zone_name.as_ptr().cast_mut();
 
@@ -172,6 +194,27 @@ fn numeric_time(
     fn pair(dst: &mut String, n: i32) {
         dst.push(char::from(b'0' + (n / 10) as u8));
         dst.push(char::from(b'0' + (n % 10) as u8));
+    }
+    if let Some((_, after)) = format.split_once('%')
+        && !matches!(
+            after.as_bytes().first(),
+            Some(
+                b'Y' | b'F'
+                    | b'm'
+                    | b'd'
+                    | b'H'
+                    | b'M'
+                    | b'S'
+                    | b'T'
+                    | b'R'
+                    | b's'
+                    | b'z'
+                    | b'Z'
+                    | b'%'
+            )
+        )
+    {
+        return None;
     }
     let mut result = String::with_capacity(format.len() + 16);
     let mut rest = format;

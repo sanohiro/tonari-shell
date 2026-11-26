@@ -69,6 +69,11 @@ case "$SUITE" in
       "$out/pty.jsonl" "$ref" "$lab/bin/bash" --shard "$shard" --shards "$shards" "${options[@]}"
     ;;
   spec-fixes)
+    if [[ $(uname -s) == Linux ]]; then
+      for lang in de_DE ja_JP fr_FR pl_PL fa_IR; do
+        sudo localedef -i "$lang" -f UTF-8 "$lang.UTF-8"
+      done
+    fi
     REFERENCE_BASH="$ref" python3 "$repo/tests/shell.py" "$lab/bin/bash" -q
     python3 "$repo/tools/ci/spec-fix-timings.py" "$lab/bin/bash" "$ref" > "$out/fixes.tsv"
     ;;

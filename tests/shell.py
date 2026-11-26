@@ -85,6 +85,35 @@ printf -v again '%(%s)T' -2
 (( start == again && now > start && explicit >= now ))
 """, 0, b"1969-12-31 14:00:00 -1000\n", minimum=5)
 
+    def test_printf_regional_dates_and_locale_changes(self):
+        available = subprocess.check_output(["locale", "-a"], text=True).lower().replace("-", "")
+        locales = [name for name in ("de_DE", "ja_JP", "fr_FR", "pl_PL", "fa_IR")
+                   if (name.lower() + ".utf8") in available.splitlines()]
+        if not locales or len(self.shells_for(5)) < 2:
+            self.skipTest("a named UTF-8 locale and GNU Bash 5 are required")
+        script = r"""export TZ=UTC0
+unset LC_ALL
+for lang; do
+  LC_TIME=$lang.UTF-8
+  printf '%(%A|%B)T|%(%x)T|%(%X)T|%(%r)T|%(%%A|%Z|%z|%s)T\n' 0 0 0 0 0
+  case $lang in de_DE|ja_JP) printf '%(%c)T\n' 0;; esac
+  LC_ALL=C printf '%(%A|%B)T\n' 0
+done
+"""
+        baseline = self.command(BASH, script, "_", *locales)
+        self.assertEqual((baseline.returncode, baseline.stderr), (0, b""))
+        if "de_DE" in locales:
+            self.assertIn(b"Donnerstag|Januar|", baseline.stdout)
+        if "ja_JP" in locales:
+            self.assertIn("木曜日|1月|".encode(), baseline.stdout)
+        result = self.command(TONARI, script, "_", *locales)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, baseline.stdout, b""))
+        if sys.platform.startswith("linux") and "ja_JP" in locales:
+            self.env["LC_ALL"] = "ja_JP.UTF-8"
+            self.compare("export TZ=UTC0; printf '%(%EC|%Ey|%EY|%Od)T\\n' 0 1556668800 1700000000",
+                         0, "昭和|45|昭和45年|一\n令和|01|令和元年|一\n令和|05|令和05年|十四\n".encode(),
+                         minimum=5)
+
     def test_printf_long_time_format(self):
         fmt = "%(" + "%Y" * 1000 + ")T"
         p = self.command(TONARI, 'TZ=UTC0 printf "$1" 0', '_', fmt)

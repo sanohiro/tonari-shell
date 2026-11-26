@@ -1,0 +1,9 @@
+[package]
+name = "tonari-time-locales"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[build-dependencies]
+pure-rust-locales = "=0.8.2"

@@ -15,6 +15,9 @@ CASES = {
     "printf time": ('export TZ=America/New_York; for ((i=0;i<2000;i++)); do '
                     'printf -v stamp "%(%F %T %Z %z)T" 1593604800; done; echo "$stamp"',
                     b"2020-07-01 08:00:00 EDT -0400\n"),
+    "regional time": ('export TZ=UTC0 LC_ALL=de_DE.UTF-8; for ((t=0;t<2000;t++)); do '
+                      'printf -v stamp "%(%A %B %F %T)T" "$t"; done; echo "$stamp"',
+                      b"Donnerstag Januar 1970-01-01 00:33:19\n"),
     "changing timestamps": ('export TZ=America/New_York; for ((t=1583650200;t<=1583652600;t++)); do '
                             'printf -v stamp "%(%F %T %Z %z)T" "$t"; done; echo "$stamp"',
                             b"2020-03-08 03:30:00 EDT -0400\n"),
