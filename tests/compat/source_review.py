@@ -18,10 +18,15 @@ COMMON = {
     "array-recovery": "a=(orig)\na=(bad > untouched)\necho \"$?:${a[*]}\"\ntest ! -e untouched",
     "compat-random": r"""for level in 3.1 44 5.0 51 5.2; do BASH_COMPAT=$level; RANDOM=42; echo "$RANDOM/$RANDOM/$RANDOM"; hash -r; hash -l; done; shopt -s compat43; echo "$BASH_COMPAT"; shopt -q compat42; echo $?; f(){ local BASH_COMPAT=3.1; shopt -q compat31; echo $?; }; f; shopt -q compat43; echo $?; unset BASH_COMPAT; shopt -q compat43; echo $?""",
     "compat-regex": r"""for level in 31 32; do BASH_COMPAT=$level; re='^a.*z$'; [[ abcz =~ "$re" ]]; echo $?; [[ abcz =~ $re ]]; echo $?; done""",
-    "compat-loop": r"""f(){ break; echo function; }; for n in 43 44 52; do BASH_COMPAT=$n; for i in 1; do f; echo caller; done; for i in 1; do (break; echo child); echo "end:$?"; done; done""",
+    "compat-loop": r"""f(){ break; echo function; }; for n in 43 44 52; do BASH_COMPAT=$n; for i in 1; do f; echo caller; done; if (( n <= 44 )); then for i in 1; do (break; echo child); echo "end:$?"; done; fi; done""",
     "compat-array": r"""for n in 51 52; do BASH_COMPAT=$n; a=(one two); declare -A m=([k]=v); test -v 'a[@]'; echo $?; [[ -v 'm[*]' ]]; echo $?; unset 'a[@]' 'm[*]'; declare -p a m; unset a m; done""",
     "assignment-tilde": "base=/bin\np=$base:~/bin:~/lib\necho \"$p\"\nexport p=$base:~/export\necho \"$p\"\nset -o posix\necho plain=~:~\ndeclare p=~:~\necho \"$p\"",
+    "nameref-clear": """v=before; declare -n ref=v; declare +n ref=after; declare -p ref v; declare -n ref=v; declare +n ref+=plus; declare -p ref v; readonly lock=x; declare -n ref=lock; declare +n ref=other; echo "$?"; declare -p ref lock""",
+    "bad-expansion": "echo first\necho ${#:}; echo wrong\necho \"next:$?\"",
     "stack-tilde": 'pushd src >/dev/null; printf "<%s>\\n" ~0 ~1 ~+1 ~-0 ~-1 ~99; popd >/dev/null',
+    "signal-table": r"""kill -l >kill-list; trap -l >trap-list; cmp -s kill-list trap-list; echo $?; awk 'NR==1 {print $1,$2,$3,$4}' kill-list; kill -l 1 129; kill -l HUP""",
+    "legacy-zone": r"""export TZ=EST5EDT; printf '%(%F %T %z %Z)T\n' 1275250155 1262304000; export TZ=EST5EDT,M3.2.0/2,M11.1.0/2; printf '%(%F %T %z %Z)T\n' 1275250155""",
+    "bind-names": r"""BASH_COMPAT=5.2; bind -p forward-word >bindings 2>/dev/null; echo $?; grep -q backward-word bindings; echo $?""",
     "wordbreak-variable": """printf '<%s>' "$COMP_WORDBREAKS"; COMP_WORDBREAKS=' :'; printf '<%s>' "$COMP_WORDBREAKS"; unset COMP_WORDBREAKS; printf '<%s>' "${COMP_WORDBREAKS-unset}" """,
     "toggle-case": """x='aB cD-eF'; printf '<%s>\\n' "${x~}" "${x~~}" "${x~[cB]}" "${x~~[cB]}"; a=('xyZ' '01' 'a雪B'); printf '<%s>\\n' "${a[@]~~}" """,
     "declared-case": """declare -c v='hELLO woRLD'; echo "$v"; v+=' ABC'; declare -p v; declare -ac arr=('eXAMPLE' '.NEXT'); declare -p arr; declare +c v; v='rAW'; echo "$v"; declare -cl z='mIx'; declare -p z""",
@@ -45,6 +50,7 @@ COMMON = {
 }
 NEW = {
     "compat-test": """for n in 52 53; do BASH_COMPAT=$n; test '(' '!' = '!' ')' -a yes; echo $?; test '(' '-n' ')' -a yes; echo $?; done""",
+    "bind-filter": r"""bind -p forward-word beginning-of-line unknown-name 2>/dev/null | awk -F': ' '!seen[$NF]++ {print $NF}' """,
     "source-fullpath": 'shopt -s bash_source_fullpath; source ./linked; f; shopt -u bash_source_fullpath; source ./linked; f',
     "source-path": 'PATH=none; shopt -u sourcepath; source -p empty:src mod one; . -psrc mod two; source -p empty mod; echo $?; source -p "" mod; source -p empty ./mod',
     "compgen-array": """a=(old); declare -n ref=a; compgen -V ref -W 'be bee bee' be; printf '<%s>\\n' "${a[@]}"; compgen -V ref -W 'x' z; echo "$?:${#a[@]}"; compgen -V 'bad-name' -W x; echo $?; declare -A map=([key]=ok); compgen -V map -W x; echo "$?:${map[key]}"; readonly kept=old; compgen -V kept -W x; echo "$?:$kept" """,
@@ -73,6 +79,10 @@ HOT = {
     "compat-array": ("[[ -v 'm[@]' ]]", 2200),
     "compat-test": ("test '(' '!' = '!' ')' -a yes", 900),
     "assignment-tilde": ('p=$base:~/bin:~/lib', 1400),
+    "signal-table": ('kill -l >/dev/null', 500),
+    "legacy-zone": ("printf -v v '%(%T %z)T' 1275250155", 1100),
+    "bind-filter": ('bind -p forward-word >/dev/null', 400),
+    "nameref-clear": ("declare -n ref=v; declare +n ref=after", 900),
     "stack-tilde": ('p=~+1', 1100),
     "toggle-case": ('v=${phrase~~}', 2400),
     "declared-case": ('v="$phrase"', 2200),
@@ -329,7 +339,7 @@ def main():
     parser.add_argument("tonari", type=Path)
     parser.add_argument("--first", type=Path)
     parser.add_argument("--runs", type=int, default=9)
-    parser.add_argument("--case", action="append", choices=["inputrc-word-edit", "inputrc-file-completion", "array-recovery", "interactive-comments", "programmable-boundaries", "filename-completion", "tcp-redirection", "udp-redirection", *HOT])
+    parser.add_argument("--case", action="append", choices=["stdin-replacement", "inputrc-word-edit", "inputrc-file-completion", "array-recovery", "interactive-comments", "programmable-boundaries", "filename-completion", "tcp-redirection", "udp-redirection", *HOT])
     args = parser.parse_args()
     selected = set(args.case or ())
     def requested(name):
@@ -388,6 +398,34 @@ def main():
                     if r: samples[i].append(round(ms, 3))
             if args.runs:
                 print(json.dumps(dict(case=name, repeats=1, median_ms=[round(statistics.median(g), 3) for g in samples], samples_ms=samples)), flush=True)
+        if requested("stdin-replacement"):
+            # Start with both kinds of input and redirect from a function. A
+            # named script must keep reading its source after the same exec.
+            (root / "redirected").write_text('echo switched\n')
+            source = 'f(){ exec <redirected; }; f\necho original\n'
+            (root / "input-script").write_text(source)
+            for shell in shells[:2]:
+                with (root / "input-script").open("rb") as f:
+                    result = subprocess.run([shell], stdin=f, capture_output=True, cwd=root, env=env)
+                piped = subprocess.run([shell], input=source.encode(), capture_output=True, cwd=root, env=env)
+                named = subprocess.run([shell, "input-script"], stdin=subprocess.DEVNULL, capture_output=True, cwd=root, env=env)
+                for p, want in [(result,b"switched\n"), (piped,b"switched\n"), (named,b"original\n")]:
+                    assert (p.returncode,p.stdout,p.stderr) == (0,want,b""), (shell,p)
+            count = 180
+            (root / "input-script").write_text('exec 0<&0\n' * count + 'echo done\n')
+            series = [[] for _ in shells]
+            for r in range(args.runs + 1):
+                order = list(range(len(shells))); rng.shuffle(order)
+                for i in order:
+                    with (root / "input-script").open("rb") as f:
+                        start = time.perf_counter_ns()
+                        p = subprocess.run([shells[i]], stdin=f, cwd=root, env=env, capture_output=True, timeout=20)
+                        ms = (time.perf_counter_ns()-start)/1e6
+                    assert (p.returncode,p.stdout,p.stderr) == (0,b"done\n",b""), (shells[i],p)
+                    if r: series[i].append(round(ms,3))
+            if args.runs:
+                print(json.dumps(dict(case="stdin-replacement", repeats=count, median_ms=[round(statistics.median(g),3) for g in series], samples_ms=series)), flush=True)
+
         if requested("array-recovery"):
             script = "a=(orig)\na=(bad > untouched)\necho \"$?:${a[*]}\"\n"
             broken = "if false; then\n a=(bad > untouched)\n echo unexpected > ran\nfi\n"
@@ -402,6 +440,10 @@ def main():
             for pipe in (True, False):
                 p = subprocess.run([shells[1], *(("-s",) if pipe else ("-c", broken))], input=broken.encode() if pipe else None, cwd=root, env=env, capture_output=True)
                 assert p.returncode == 2 and p.stderr and not (root / "ran").exists()
+            multi = "a=(orig)\na=(bad > untouched\n echo wrong > ran\n)\necho \"$?:${a[*]}\"\n"
+            for pipe in (True, False):
+                p = subprocess.run([shells[1], *(("-s",) if pipe else ("-c", multi))], input=multi.encode() if pipe else None, cwd=root, env=env, capture_output=True)
+                assert (p.returncode, p.stdout) == (0,b"1:orig\n") and not (root / "ran").exists(), p
             count = 300
             script = "a=(orig)\n" + "a=(bad > untouched)\n" * count + "echo \"$?:${a[*]}\""
             samples = [[] for _ in shells]
@@ -487,6 +529,8 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "bind-filter": "exec 2>/dev/null",
+                "legacy-zone": "export TZ=EST5EDT",
                 "keyword-arguments": "set -k; inspect(){ :; }",
                 "compat-random": "BASH_COMPAT=50; RANDOM=42",
                 "compat-regex": "BASH_COMPAT=31; re='^a.*z$'",

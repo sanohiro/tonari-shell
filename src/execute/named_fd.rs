@@ -119,6 +119,7 @@ impl Scope {
     fn finish(self, session: &mut Session, committed: bool) -> io::Result<()> {
         if committed {
             for fd in self.changed {
+                session.stdin_replaced |= fd == 0;
                 session.substitutions.replaced(fd);
                 super::coprocess::replaced(session, fd);
             }

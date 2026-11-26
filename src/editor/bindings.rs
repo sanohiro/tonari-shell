@@ -418,7 +418,13 @@ fn configure(bindings: &mut Bindings, spec: &str, shell: bool) -> Result<(), Str
             "completion-map-case" => bindings.map_case = on()?,
             "match-hidden-files" => bindings.hide_dotfiles = !on()?,
             "mark-directories" => bindings.unmarked_dirs = !on()?,
-            "comment-begin" => bindings.comment_begin = Some(value.into()),
+            "comment-begin" => {
+                bindings.comment_begin = Some(if let Some(end) = quoted_end(value) {
+                    value[1..end].into()
+                } else {
+                    value.into()
+                })
+            }
             "disable-completion" => bindings.disable_completion = on()?,
             "enable-bracketed-paste" => bindings.bracketed_paste = Some(on()?),
             "keyseq-timeout" => {
@@ -610,27 +616,38 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
                 let target = matches!(arg.as_str(), "-q" | "-u")
                     .then(&mut operand)
                     .transpose()?;
-                let filtered = target.is_none()
-                    && session.shopt.compat > 52
-                    && args.as_slice().first().is_some_and(|s| !s.starts_with('-'));
-                let filters = if filtered {
-                    let names = args.as_slice();
-                    args.by_ref().for_each(drop);
-                    names
+                let dump = matches!(arg.as_str(), "-p" | "-P");
+                let filtered =
+                    dump && !args.as_slice().is_empty() && !args.as_slice()[0].starts_with('-');
+                let specs = if filtered {
+                    std::mem::take(&mut args).as_slice()
                 } else {
                     &[]
                 };
+                let modern = session.shopt.compat > 52;
                 if let Some(name) = target
                     && !names().any(|n| n == name)
                 {
-                    return Err(format!("\u{60}{name}': unknown function name"));
+                    return Err(format!("`{name}': unknown function name"));
                 }
-                for (action, name, defaults) in named_actions() {
-                    if target.is_some_and(|s| s != name)
-                        || filtered && !filters.iter().any(|s| s == name)
-                    {
+                let selected = named_actions()
+                    .filter(|(_, n, _)| target.is_none_or(|s| s == *n) && !(filtered && modern))
+                    .map(|(a, n, d)| (Some((a, d)), n));
+                let requested = specs.iter().filter(|_| modern).map(|name| {
+                    let action = named_actions()
+                        .find(|(_, n, _)| *n == name)
+                        .map(|(a, _, d)| (a, d));
+                    (action, name.as_str())
+                });
+                for (definition, name) in selected.chain(requested) {
+                    let Some((action, defaults)) = definition else {
+                        if arg == "-p" {
+                            writeln!(out, "# {name} (not bound)").map_err(ioerr)?;
+                        } else {
+                            writeln!(out, "{name} is not bound to any keys").map_err(ioerr)?;
+                        }
                         continue;
-                    }
+                    };
                     let mut keys = session.bindings.keys_for(action, defaults);
                     if dumb && action == Action::Delete {
                         keys.retain(|k| k != b"\x1b[3~");
@@ -668,6 +685,13 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
                             if keys.len() > 5 { ", ..." } else { "." }
                         )
                         .map_err(ioerr)?;
+                    }
+                }
+                if !modern {
+                    for spec in specs {
+                        if let Err(err) = configure(&mut session.bindings, spec, false) {
+                            eprintln!("tonari: bind: {err}");
+                        }
                     }
                 }
             }

@@ -29,7 +29,19 @@ impl Clock {
         let zone = match name.as_deref() {
             None => tz::TimeZone::local(),
             Some("") => Ok(tz::TimeZone::utc()),
-            Some(name) => tz::TimeZone::from_posix_tz(name),
+            Some(name) => tz::TimeZone::from_posix_tz(name).or_else(|error| {
+                // Recent slim zoneinfo installations omit some historical US
+                // names. Prefer their IANA region, including historical rules.
+                let region = match name {
+                    "EST5EDT" => "America/New_York",
+                    "CST6CDT" => "America/Chicago",
+                    "MST7MDT" => "America/Denver",
+                    "PST8PDT" => "America/Los_Angeles",
+                    _ => return Err(error),
+                };
+                tz::TimeZone::from_posix_tz(region)
+                    .or_else(|_| tz::TimeZone::from_posix_tz(&format!("{name},M3.2.0/2,M11.1.0/2")))
+            }),
         }
         .unwrap_or_else(|_| tz::TimeZone::utc());
         #[cfg(not(target_env = "musl"))]

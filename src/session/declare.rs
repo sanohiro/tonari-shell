@@ -345,6 +345,32 @@ pub(super) fn run(
         if session.function_depth != 0 && !readonly && !flags.global {
             var.temporary = false;
         }
+        // +n with an assignment writes through the existing reference and then
+        // removes its attribute. An unsuccessful write leaves the reference live.
+        let value = if flags.nameref == Some(false)
+            && var.nameref
+            && let Some(rhs) = value
+        {
+            let write = session
+                .reference_name(name)
+                .map(|s| s.into_owned())
+                .and_then(|dest| {
+                    let rhs = if append {
+                        session.get(&dest).unwrap_or_default() + rhs
+                    } else {
+                        rhs.to_owned()
+                    };
+                    session.assign_target(&dest, &rhs)
+                });
+            if let Err(e) = write {
+                eprintln!("tonari: {command}: {name}: {e}");
+                status = 1;
+                continue;
+            }
+            None
+        } else {
+            value
+        };
         if let Some(on) = flags.nameref {
             let dest = value.or(var.value.as_deref()).unwrap_or("");
             if on

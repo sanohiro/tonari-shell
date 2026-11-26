@@ -176,10 +176,10 @@ impl Word {
             }
             if let Part::BadSubstitution(text) = part {
                 let message = format!("{text}: bad substitution");
-                return Err(if env.session.evaluating {
-                    crate::expansion::Error::discard(message)
-                } else {
+                return Err(if env.session.errexit && !env.session.interactive {
                     crate::expansion::Error::fatal(message, 1)
+                } else {
+                    crate::expansion::Error::discard(message)
                 });
             }
             if let Part::BraceParameter(name) = part {

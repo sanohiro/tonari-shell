@@ -763,11 +763,7 @@ fn kill(jobs: &Jobs, mut args: &[String]) -> u8 {
         let mut out = io::stdout().lock();
         let mut status = 0;
         if args.len() == 1 {
-            for &(name, n) in crate::traps::SIGNALS.iter().filter(|s| s.1 != 0) {
-                if writeln!(out, "{n:2}) SIG{name}").is_err() {
-                    return 1;
-                }
-            }
+            return u8::from(crate::traps::print_signal_table(&mut out).is_err());
         } else {
             for arg in &args[1..] {
                 let result = if let Ok(n) = arg.parse::<i32>() {

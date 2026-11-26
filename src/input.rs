@@ -12,20 +12,21 @@ use crate::{Flow, Session, execute_program, parser};
 // External commands inherit fd 0. Any unread text buffered by the shell must
 // still be available to a child which reads stdin (for example, "cat\n...").
 pub fn stdin_script(session: &mut Session, check: bool) -> Flow {
-    let setup = (|| {
-        let mut file = PrivateFile::duplicate(io::stdin().as_fd())?;
-        let seekable = file.stream_position().is_ok();
-        let reader = if seekable {
-            BufReader::new(file)
-        } else {
-            BufReader::with_capacity(1, file)
-        };
-        Ok::<_, io::Error>((reader, seekable))
-    })();
-    match setup {
-        Ok((reader, shared_offset)) => run(session, reader, shared_offset, None, 0, check),
+    match stdin_reader() {
+        Ok((reader, shared_offset)) => run(session, reader, shared_offset, true, None, 0, check),
         Err(e) => error(e, 1),
     }
+}
+
+fn stdin_reader() -> io::Result<(BufReader<PrivateFile>, bool)> {
+    let mut file = PrivateFile::duplicate(io::stdin().as_fd())?;
+    let seekable = file.stream_position().is_ok();
+    let reader = if seekable {
+        BufReader::new(file)
+    } else {
+        BufReader::with_capacity(1, file)
+    };
+    Ok((reader, seekable))
 }
 
 // Installers and version managers often wrap a whole script in one brace group.
@@ -130,6 +131,7 @@ pub fn file_script(
         Ok(file) => run(
             session,
             BufReader::with_capacity(capacity, file),
+            false,
             false,
             file_len,
             status,
@@ -346,7 +348,8 @@ fn assign_buffered_scalar(session: &mut Session, command: &str, scratch: &mut St
 fn run(
     session: &mut Session,
     mut reader: BufReader<PrivateFile>,
-    shared_offset: bool,
+    mut shared_offset: bool,
+    from_stdin: bool,
     file_len: Option<u64>,
     mut status: u8,
     check: bool,
@@ -506,6 +509,15 @@ fn run(
                     && !session.interactive
                     && session.begin_history_line(text);
                 let flow = execute_program(session, program, status, false);
+                // A permanent redirect can change fd 0 from a regular file to a
+                // pipe or the reverse. Named scripts keep their private reader.
+                if from_stdin && std::mem::take(&mut session.stdin_replaced) {
+                    match stdin_reader() {
+                        Ok(next) => (reader, shared_offset) = next,
+                        Err(e) if e.raw_os_error() == Some(libc::EBADF) => return flow,
+                        Err(e) => return error(e, 1),
+                    }
+                }
                 session.command_number += usize::from(session.source_depth == 0);
                 if remember {
                     session.finish_history_line();

@@ -42,6 +42,32 @@ pub(crate) const SIGNALS: &[(&str, i32)] = &[
     ("SYS", libc::SIGSYS),
 ];
 
+// Present the same numeric table to both signal-name builtins. Programs
+// commonly extract the first column or parse several entries on one line.
+pub(crate) fn print_signal_table(out: &mut impl Write) -> io::Result<()> {
+    static TABLE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        use std::fmt::Write;
+        let mut signals = SIGNALS
+            .iter()
+            .copied()
+            .filter(|s| s.1 != 0)
+            .collect::<Vec<_>>();
+        signals.sort_unstable_by_key(|s| s.1);
+        let mut table = String::new();
+        for row in signals.chunks(5) {
+            for (i, (name, n)) in row.iter().enumerate() {
+                if i != 0 {
+                    table.push('\t');
+                }
+                write!(table, "{n:2}) SIG{name}").unwrap();
+            }
+            table.push('\n');
+        }
+        table
+    });
+    out.write_all(TABLE.as_bytes())
+}
+
 static TERMINATING: AtomicI32 = AtomicI32::new(0);
 extern "C" fn terminate(sig: i32) {
     let _ = TERMINATING.compare_exchange(0, sig, Relaxed, Relaxed);
@@ -554,12 +580,7 @@ impl Traps {
         }
         if signals {
             let mut out = io::stdout().lock();
-            for &(name, n) in SIGNALS.iter().filter(|s| s.1 != 0) {
-                if writeln!(out, "{n:2}) SIG{name}").is_err() {
-                    return 1;
-                }
-            }
-            return 0;
+            return u8::from(print_signal_table(&mut out).is_err());
         }
         if list || actions || args.is_empty() {
             return self.list(

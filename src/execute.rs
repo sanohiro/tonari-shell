@@ -977,7 +977,13 @@ fn eval_builtin(
         Builtin::Echo => Flow::Continue(crate::builtins::echo(args, session)),
         Builtin::Test => Flow::Continue(crate::builtins::test(&cmd.words, session)),
         Builtin::LoopControl => {
-            if session.loop_depth == 0 {
+            if session.loop_depth == 0 && session.parent_loop_in_subshell {
+                write_error(
+                    cmd.words[0].as_bytes(),
+                    b": loop control cannot cross a subshell boundary",
+                );
+                Flow::Exit(1)
+            } else if session.loop_depth == 0 {
                 write_error(cmd.words[0].as_bytes(), b": only meaningful in a loop");
                 Flow::Continue(0)
             } else if args.len() > 1 {
@@ -1458,6 +1464,7 @@ fn run_builtin(
     }
     if applied && matches!(builtin, Builtin::Exec) && matches!(flow, Flow::Continue(0)) {
         for r in &cmd.redirects {
+            session.stdin_replaced |= r.fd == 0;
             session.substitutions.replaced(r.fd);
             coprocess::replaced(session, r.fd);
         }
