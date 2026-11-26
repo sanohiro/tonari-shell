@@ -1673,7 +1673,10 @@ fn start(
     session: &mut Session,
     launch: crate::jobs::Launch,
 ) -> io::Result<Stage> {
-    let builtin = builtin(cmd, last_status, session);
+    let builtin = builtin(cmd, last_status, session).or_else(|| {
+        cmd.prepare_missing_hook(session)
+            .then_some(Builtin::Function)
+    });
     // Numeric exit and constant status builtins do not inspect either pipe end.
     // Keep a real child for job control and observable child-signal traps.
     if !launch.background
@@ -1853,6 +1856,11 @@ fn start(
             .after_fork(session.errtrace, session.functrace);
         launch.pipeline_child(&mut session.traps);
         enter_stage(session, cmd.compound.as_deref(), launch.background);
+        if cmd.missing_hook && !launch.background {
+            // The hook has a private execution environment. A normal command
+            // search itself does not add a shell-language subshell level.
+            session.subshell_depth -= 1;
+        }
         session.stdin_redirected |= cmd.redirects.iter().any(|r| r.fd == 0);
         session.stdin_redirected |= input.is_some();
         let code = if !apply(&setup, here_pipe_limit(builtin, cmd)) {
@@ -1938,6 +1946,9 @@ pub(super) fn capture_external(
         cmd.resolved = Some(entry.path);
     }
     let (reader, writer) = pipe().map_err(|_| "cannot open command substitution pipe")?;
+    // An external-only capture uses its command process as the substitution
+    // scope. The command-not-found function must observe that same level.
+    session.subshell_depth += 1;
     let stage = start(
         &mut cmd,
         input,
@@ -1946,9 +1957,9 @@ pub(super) fn capture_external(
         last,
         session,
         Default::default(),
-    )
-    .map_err(|_| "cannot launch command substitution")?;
-    let pid = match stage {
+    );
+    session.subshell_depth -= 1;
+    let pid = match stage.map_err(|_| "cannot launch command substitution")? {
         Stage::Child(pid) => pid,
         Stage::Status(code) => return Ok((String::new(), code)),
     };
@@ -2003,6 +2014,7 @@ pub(crate) struct ArrayDeclaration {
 
 #[derive(Default)]
 pub(crate) struct PreparedCommand {
+    missing_hook: bool,
     named_redirects: Vec<Redirect<Word>>,
     resolved: Option<PathBuf>,
     array_declarations: Vec<ArrayDeclaration>,
@@ -2113,6 +2125,35 @@ impl PreparedCommand {
     fn cacheable(&self) -> bool {
         !self.default_path && !self.assignments.iter().any(|(k, _)| k == "PATH")
     }
+    // Bash invokes this function only for a missing PATH command. A present
+    // but non-executable file and an explicit pathname keep their exec errors.
+    fn prepare_missing_hook(&mut self, session: &Session) -> bool {
+        const HOOK: &str = "command_not_found_handle";
+        let Some(name) = self.words.first() else {
+            return false;
+        };
+        if !session.functions.contains_key(HOOK)
+            || name.contains('/')
+            || self.cached_path(session, name).is_some()
+        {
+            return false;
+        }
+        match hash::search_in(name, session, &lookup::path(self, session)) {
+            Err(hash::Absent) => {
+                self.words.insert(0, HOOK.to_owned());
+                self.search = lookup::Search::Normal;
+                self.missing_hook = true;
+                true
+            }
+            Ok(path) => {
+                if self.cacheable() {
+                    self.resolved = path.map(|entry| entry.path);
+                }
+                false
+            }
+        }
+    }
+
     fn cached_path<'a>(&'a self, session: &'a Session, name: &str) -> Option<&'a Path> {
         if !self.cacheable() || name.contains('/') {
             return None;
@@ -2476,6 +2517,7 @@ fn prepare_expanded(
     }
     let assignment_only = words.is_empty() && raw.compound.is_none();
     let mut cmd = PreparedCommand {
+        missing_hook: false,
         literal_has_keywords: false,
         named_redirects: Vec::new(),
         resolved: None,
@@ -2831,7 +2873,8 @@ fn run_external(
         match hash::resolve(session, &cmd.words[0]) {
             Ok(path) => cmd.resolved = path,
             Err(hash::Absent)
-                if cmd.redirects.is_empty()
+                if !session.functions.contains_key("command_not_found_handle")
+                    && cmd.redirects.is_empty()
                     && launch.group.is_none()
                     && !session.traps.active() =>
             {
@@ -2841,7 +2884,7 @@ fn run_external(
             Err(hash::Absent) => {}
         }
     }
-    if replace && launch.group.is_none() {
+    if replace && launch.group.is_none() && !cmd.prepare_missing_hook(session) {
         let executable = External::new(cmd, session);
         return Ok(Flow::Continue(
             if apply(&actions(cmd), here_input::PIPE_LIMIT) {

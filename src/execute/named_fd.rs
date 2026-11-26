@@ -175,7 +175,10 @@ fn command(mut cmd: PreparedCommand, session: &mut Session, status: u8) -> io::R
         status,
         false,
         |session| {
-            if let Some(b) = builtin(&cmd, status, session) {
+            if let Some(b) = builtin(&cmd, status, session).or_else(|| {
+                cmd.prepare_missing_hook(session)
+                    .then_some(Builtin::Function)
+            }) {
                 let flow = eval_builtin(b, &mut cmd, session, status, false);
                 let commit = matches!(b, Builtin::Exec) && matches!(flow, Flow::Continue(0));
                 Ok((flow, commit))
