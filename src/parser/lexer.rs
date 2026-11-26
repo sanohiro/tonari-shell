@@ -1095,12 +1095,13 @@ fn lex_words(
             word.literal(literal);
             chars = start[plain..].chars();
             started = true;
-        } else if let Some(prefix) = super::array::indexed_prefix(start)
-            && (if prefix.starts_with('[') {
+        } else if start.as_bytes().get(plain) == Some(&b'[')
+            && (if plain == 0 {
                 array_level == Some(parentheses)
             } else {
                 indexed_assignment_position(&tokens)
             })
+            && let Some(prefix) = super::array::indexed_prefix(start)
         {
             word.literal(&start[..prefix.len() + 1]);
             assignment = Some(prefix.to_owned());

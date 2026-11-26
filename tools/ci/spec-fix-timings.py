@@ -11,19 +11,34 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bench_history import PROMPT, read_until, terminal
 
 CASES = {
+    "startup": (":", b""),
     "printf time": ('export TZ=America/New_York; for ((i=0;i<2000;i++)); do '
                     'printf -v stamp "%(%F %T %Z %z)T" 1593604800; done; echo "$stamp"',
                     b"2020-07-01 08:00:00 EDT -0400\n"),
+    "changing timestamps": ('export TZ=America/New_York; for ((t=1583650200;t<=1583652600;t++)); do '
+                            'printf -v stamp "%(%F %T %Z %z)T" "$t"; done; echo "$stamp"',
+                            b"2020-03-08 03:30:00 EDT -0400\n"),
     "printf epoch": ('for ((i=0;i<4000;i++)); do printf -v ts "%(%s)T" 86400; done; echo "$ts"',
                      b"86400\n"),
-    "default tilde": ('HOME=/abc; for ((i=0;i<4000;i++)); do p=${u-~:~}; done; echo "$p"',
+    "default tilde": ('for ((i=0;i<4000;i++)); do p=${u-~:~}; done; echo "$p"',
                       b"/abc:/abc\n"),
-    "brace tilde": ('HOME=/abc; for ((i=0;i<2000;i++)); do a=({~,~}/bin); done; echo "${a[*]}"',
+    "brace tilde": ('for ((i=0;i<2000;i++)); do a=({~,~}/bin); done; echo "${a[*]}"',
                     b"/abc/bin /abc/bin\n"),
     "indexed argument": ('set -f; f() { x=$#; }; for ((i=0;i<3000;i++)); do f a[1 + 2]=x; done; echo "$x"',
                          b"3\n"),
     "bracket arithmetic": ('a[3]=7; for ((i=0;i<6000;i++)); do x=$[a[3]+1]; done; echo "$x"',
                            b"8\n"),
+    "read readiness": ('for ((i=0;i<2000;i++)); do read -t 0 || exit 1; done </dev/null; echo ok', b"ok\n"),
+    "test option": ('set -o pipefail; for ((i=0;i<5000;i++)); do test -o pipefail || exit 1; done; echo ok', b"ok\n"),
+    "set listing": ('for ((i=0;i<300;i++)); do printf -v "v$i" "%s" "two words"; done; '
+                    'for ((i=0;i<100;i++)); do set; done >vars; grep -m 1 "^v299=" vars',
+                    b"v299='two words'\n"),
+    "echo escapes": (r"shopt -s xpg_echo; for ((i=0;i<4000;i++)); do x=$(echo 'a\tb'); done; "
+                     'printf "%s" "$x"', b"a\tb"),
+    "array defaults": ('a=({1..512}); for ((i=0;i<500;i++)); do v="${a[@]:+present}"; done; echo "$v"',
+                       b"present\n"),
+    "array default fields": ('a=({1..512}); for ((i=0;i<200;i++)); do b=("${a[@]:-none}"); done; '
+                             'echo "${#b[@]}:${b[511]}"', b"512:512\n"),
     "attributes": ('a=({1..1500}); for ((i=0;i<100;i++)); do b=("${a[@]@a}"); done; '
                    'echo "${#b[@]}:${b[0]}"', b"1500:a\n"),
     "last argument": (': old; for ((i=0;i<10000;i++)); do : some-argument; done; echo "$_"',
@@ -61,7 +76,8 @@ def main():
                     start = time.perf_counter_ns()
                     run = subprocess.run([shell, "-c", script], cwd=home, capture_output=True,
                                          env={"PATH": "/usr/bin:/bin",
-                                              "HOME": str(regex_home) if name == "regex home" else directory},
+                                              "HOME": "/abc" if name in ("default tilde", "brace tilde") else
+                                                      str(regex_home) if name == "regex home" else directory},
                                          timeout=15)
                     elapsed = time.perf_counter_ns() - start
                     if (run.returncode, run.stdout, run.stderr) != (0, expected, b""):

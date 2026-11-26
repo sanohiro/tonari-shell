@@ -786,7 +786,7 @@ fn eval_builtin(
         Builtin::Declare => {
             session.declare(&cmd.words[0], args, &cmd.array_declarations, last_status)
         }
-        Builtin::Echo => Flow::Continue(crate::builtins::echo(args)),
+        Builtin::Echo => Flow::Continue(crate::builtins::echo(args, session)),
         Builtin::Test => Flow::Continue(crate::builtins::test(&cmd.words, session)),
         Builtin::LoopControl => {
             if session.loop_depth == 0 {
@@ -1072,7 +1072,7 @@ impl<'a> PlainOutput<'a> {
         let mut bytes = Vec::new();
         let status = match self {
             Self::Echo(words) => {
-                crate::builtins::echo_into(words, &mut bytes);
+                crate::builtins::echo_into(words, &mut bytes, session);
                 0
             }
             Self::Printf(words) => crate::session::printf::run(session, words, Some(&mut bytes)),
@@ -2010,6 +2010,11 @@ fn prepare_expanded(
                     }
                     eprintln!("tonari: {error}");
                     continue;
+                }
+                if target.is_some_and(|(_, index)| index.is_empty()) {
+                    return Err(crate::expansion::Error::discard(format!(
+                        "{key}: bad array subscript"
+                    )));
                 }
                 if target.is_some() && !words.is_empty() {
                     eprintln!("tonari: {key}: not a valid identifier");

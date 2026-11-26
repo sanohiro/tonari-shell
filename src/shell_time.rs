@@ -83,6 +83,9 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
     } else {
         designation
     };
+    if let Some(text) = numeric_time(format, seconds, &tm, designation, offset) {
+        return Some(text);
+    }
     let zone_name = CString::new(designation).ok()?;
     tm.tm_zone = zone_name.as_ptr().cast_mut();
 
@@ -150,4 +153,72 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
         }
         size = size.saturating_mul(2).min(max);
     }
+}
+
+// Numeric log timestamps have no locale text or alternate digits. Render them
+// directly without passing each numeric component through libc's formatter.
+fn numeric_time(
+    format: &str,
+    seconds: i64,
+    tm: &libc::tm,
+    zone: &str,
+    offset: i32,
+) -> Option<String> {
+    use std::fmt::Write;
+    let year = tm.tm_year.checked_add(1900)?;
+    if !(1000..=9999).contains(&year) {
+        return None;
+    }
+    fn pair(dst: &mut String, n: i32) {
+        dst.push(char::from(b'0' + (n / 10) as u8));
+        dst.push(char::from(b'0' + (n % 10) as u8));
+    }
+    let mut result = String::with_capacity(format.len() + 16);
+    let mut rest = format;
+    while let Some((text, after)) = rest.split_once('%') {
+        result.push_str(text);
+        let (&byte, _) = after.as_bytes().split_first()?;
+        match byte {
+            b'Y' | b'F' => {
+                pair(&mut result, year / 100);
+                pair(&mut result, year % 100);
+                if byte == b'F' {
+                    result.push('-');
+                    pair(&mut result, tm.tm_mon + 1);
+                    result.push('-');
+                    pair(&mut result, tm.tm_mday);
+                }
+            }
+            b'm' => pair(&mut result, tm.tm_mon + 1),
+            b'd' => pair(&mut result, tm.tm_mday),
+            b'H' => pair(&mut result, tm.tm_hour),
+            b'M' => pair(&mut result, tm.tm_min),
+            b'S' => pair(&mut result, tm.tm_sec),
+            b'T' | b'R' => {
+                pair(&mut result, tm.tm_hour);
+                result.push(':');
+                pair(&mut result, tm.tm_min);
+                if byte == b'T' {
+                    result.push(':');
+                    pair(&mut result, tm.tm_sec);
+                }
+            }
+            b's' => write!(result, "{seconds}").ok()?,
+            b'z' => {
+                let minutes = (offset / 60).abs();
+                if minutes >= 6000 {
+                    return None;
+                }
+                result.push(if offset < 0 { '-' } else { '+' });
+                pair(&mut result, minutes / 60);
+                pair(&mut result, minutes % 60);
+            }
+            b'Z' => result.push_str(zone),
+            b'%' => result.push('%'),
+            _ => return None,
+        }
+        rest = &after[1..];
+    }
+    result.push_str(rest);
+    Some(result)
 }

@@ -497,6 +497,7 @@ fn run_invocation(
         session.jobs.init(session.interactive);
     }
     session.command_string = matches!(invocation.input, Input::Command(_));
+    session.stdin_script = matches!(invocation.input, Input::Stdin);
     session.set_posix(invocation.posix);
     session.shopt.progcomp_alias = session.interactive;
     session.inherit_options();
@@ -515,7 +516,7 @@ fn run_invocation(
             session.assign("PS1", "tonari$ ");
         }
         if session.get("HISTFILE").is_none() {
-            if let Some(home) = session.get("HOME") {
+            if let Some(home) = session.get("HOME").or_else(crate::word::account_home) {
                 session.assign("HISTFILE", &format!("{home}/.bash_history"));
             }
         }

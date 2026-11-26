@@ -251,6 +251,11 @@ pub(super) fn run(
             name
         };
         let target = super::array::subscript(name);
+        if readonly && target.is_some() {
+            eprintln!("tonari: readonly: {name}: not a valid identifier");
+            status = 1;
+            continue;
+        }
         let name = target.map_or(name, |(base, _)| base);
         if !is_identifier(name) {
             eprintln!("tonari: {command}: {arg}: invalid identifier");

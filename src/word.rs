@@ -189,31 +189,47 @@ impl Word {
                 *part = literal(target, *quoted);
                 continue;
             }
-            let transformed = matches!(part, Part::Modify { .. });
+            let plain_quote = match part {
+                Part::Parameter { quoted, .. } => Some(*quoted),
+                _ => None,
+            };
             if let Part::Parameter { name, .. }
             | Part::Alternative { name, .. }
             | Part::Trim { name, .. }
             | Part::Modify { name, .. } = part
             {
+                if name.ends_with("[]") {
+                    return Err(crate::expansion::Error::discard(format!(
+                        "{name}: bad array subscript"
+                    )));
+                }
                 if let Some(reference) = name.strip_prefix('!').filter(|s| {
-                    !s.is_empty() && (transformed || array_elements_name(name).is_none())
+                    !s.is_empty() && (plain_quote.is_none() || array_elements_name(name).is_none())
                 }) {
-                    let target = modifier::value(reference, env)?.ok_or_else(|| {
-                        crate::expansion::Error::fatal(
-                            format!("{reference}: invalid indirect expansion"),
-                            1,
-                        )
-                    })?;
+                    let Some(target) = modifier::value(reference, env)? else {
+                        if let Some(quoted) = plain_quote
+                            && !env.session.nounset
+                            && env.session.stored_array_len(reference).is_some()
+                        {
+                            *part = literal(String::new(), quoted);
+                            continue;
+                        }
+                        let message = format!("{reference}: invalid indirect expansion");
+                        return Err(if env.session.nounset {
+                            crate::expansion::Error::fatal(message, 1)
+                        } else {
+                            crate::expansion::Error::discard(message)
+                        });
+                    };
                     if !(is_identifier(&target)
                         || array_elements_name(&target).is_some()
                         || (!target.is_empty() && target.bytes().all(|b| b.is_ascii_digit()))
                         || matches!(target.as_str(), "@" | "*" | "#" | "?" | "-" | "$" | "!")
                         || env.session.valid_target(&target))
                     {
-                        return Err(crate::expansion::Error::fatal(
-                            format!("{target}: invalid variable name"),
-                            1,
-                        ));
+                        return Err(crate::expansion::Error::discard(format!(
+                            "{target}: invalid variable name"
+                        )));
                     }
                     *name = target;
                 }
@@ -264,10 +280,51 @@ impl Word {
                     word,
                     quoted,
                 } => {
-                    let value = modifier::value(name, env)?;
-                    let set = value
-                        .as_ref()
-                        .is_some_and(|s| !*check_empty || !s.is_empty());
+                    let elements = array_elements_name(name);
+                    // A successful + alternative never reads the elements.
+                    // Multiple quoted @ fields stay distinct even if all are empty.
+                    if *op == Alternative::Alternate
+                        && let Some((base, at, false)) = elements
+                        && !env.shadows(base)
+                        && let Some(len) = env.session.stored_array_len(base)
+                        && len > 0
+                        && (!*check_empty || len > 1 && (at || !*quoted))
+                    {
+                        word.resolve(env)?;
+                        *part = Part::Nested(std::mem::replace(
+                            word.as_mut(),
+                            Word::Literal(String::new()),
+                        ));
+                        continue;
+                    }
+                    let (set, original) =
+                        if matches!(name.as_str(), "@" | "*") || elements.is_some() {
+                            let modifier::Values::Elements(values, at) =
+                                modifier::Values::read(name, env)?
+                            else {
+                                unreachable!()
+                            };
+                            let separator = ifs_separator(&|key| env.lookup(key));
+                            let nonempty = values.iter().any(|s| !s.is_empty())
+                                || values.len() > 1 && (at || !*quoted || !separator.is_empty());
+                            let set = !values.is_empty() && (!*check_empty || nonempty);
+                            let part = if !*quoted && !separator.is_empty() {
+                                Part::Unquoted(values.join(&separator))
+                            } else {
+                                Part::Elements {
+                                    values,
+                                    at,
+                                    quoted: *quoted,
+                                }
+                            };
+                            (set, part)
+                        } else {
+                            let value = modifier::value(name, env)?;
+                            let set = value
+                                .as_ref()
+                                .is_some_and(|s| !*check_empty || !s.is_empty());
+                            (set, literal(value.unwrap_or_default(), *quoted))
+                        };
                     let use_word_if_set = *op == Alternative::Alternate;
                     if set == use_word_if_set {
                         word.resolve(env)?;
@@ -295,8 +352,18 @@ impl Word {
                             Word::Literal(String::new()),
                         ));
                     } else {
-                        let text = if use_word_if_set { None } else { value };
-                        *part = literal(text.unwrap_or_default(), *quoted);
+                        *part = if use_word_if_set {
+                            match original {
+                                Part::Elements {
+                                    ref values,
+                                    at: true,
+                                    ..
+                                } if values.is_empty() => original,
+                                _ => literal(String::new(), *quoted),
+                            }
+                        } else {
+                            original
+                        };
                     }
                 }
                 Part::Parameter { name, quoted }
@@ -717,10 +784,10 @@ fn parameter(
 fn tilde(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
     let prefix = s.strip_suffix('/').unwrap_or(s);
     let home = match prefix {
-        "~" => lookup("HOME"),
+        "~" => lookup("HOME").or_else(account_home),
         "~+" => lookup("PWD"),
         "~-" => lookup("OLDPWD"),
-        _ => user_home(prefix.strip_prefix('~').unwrap_or(prefix)),
+        _ => user_home(Some(prefix.strip_prefix('~').unwrap_or(prefix))),
     };
     let Some(mut home) = home else {
         return s.to_owned();
@@ -733,8 +800,13 @@ fn tilde(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
 
 // Query the OS account database for each named expansion. Keep the common
 // result on the stack and retry only when a larger passwd entry needs space.
-fn user_home(login: &str) -> Option<String> {
-    let name = std::ffi::CString::new(login).ok()?;
+pub(crate) fn account_home() -> Option<String> {
+    static HOME: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    HOME.get_or_init(|| user_home(None)).clone()
+}
+
+fn user_home(login: Option<&str>) -> Option<String> {
+    let name = login.map(std::ffi::CString::new).transpose().ok()?;
     let mut local = [0u8; 1024];
     let mut large = Vec::new();
     let mut buf = local.as_mut_slice();
@@ -742,13 +814,23 @@ fn user_home(login: &str) -> Option<String> {
         let mut entry = std::mem::MaybeUninit::uninit();
         let mut found = std::ptr::null_mut();
         let status = unsafe {
-            libc::getpwnam_r(
-                name.as_ptr(),
-                entry.as_mut_ptr(),
-                buf.as_mut_ptr().cast(),
-                buf.len(),
-                &mut found,
-            )
+            if let Some(name) = &name {
+                libc::getpwnam_r(
+                    name.as_ptr(),
+                    entry.as_mut_ptr(),
+                    buf.as_mut_ptr().cast(),
+                    buf.len(),
+                    &mut found,
+                )
+            } else {
+                libc::getpwuid_r(
+                    libc::getuid(),
+                    entry.as_mut_ptr(),
+                    buf.as_mut_ptr().cast(),
+                    buf.len(),
+                    &mut found,
+                )
+            }
         };
         if status == libc::ERANGE {
             let size = buf.len().checked_mul(2)?;

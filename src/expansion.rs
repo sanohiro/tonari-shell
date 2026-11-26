@@ -49,6 +49,7 @@ impl Error {
             }
             Recovery::Input => crate::Flow::Discard(self.status),
             Recovery::Exit if !session.interactive => crate::Flow::Exit(self.status),
+            Recovery::Exit => crate::Flow::Discard(self.status),
             _ => crate::Flow::Continue(self.status),
         }
     }

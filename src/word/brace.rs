@@ -196,7 +196,9 @@ pub fn append_fields(
             }) => {
                 let mut end = close;
                 for start in commas.into_iter().rev().chain([open]) {
-                    let mut word = parts[..open].to_vec();
+                    let mut word =
+                        Vec::with_capacity(open + end - start - 1 + parts.len() - close - 1);
+                    word.extend_from_slice(&parts[..open]);
                     word.extend_from_slice(&parts[start + 1..end]);
                     word.extend_from_slice(&parts[close + 1..]);
                     if !word.is_empty() {

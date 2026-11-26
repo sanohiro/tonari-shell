@@ -150,6 +150,7 @@ pub struct Session {
     pub(crate) initial_history: Option<Rc<crate::history::InitialJournal>>,
     pub command_number: usize,
     pub command_string: bool,
+    pub stdin_script: bool,
     pub tested_depth: u32,
     pub errexit: bool,
     pub errtrace: bool,
@@ -247,6 +248,8 @@ impl Session {
                 "BASH_VERSION",
                 "BASH_VERSINFO",
                 "HOSTTYPE",
+                "HOSTNAME",
+                "PS4",
                 "OSTYPE",
                 "MACHTYPE",
             ]
@@ -331,6 +334,9 @@ impl Session {
         if self.command_string {
             flags.push('c');
         }
+        if self.stdin_script {
+            flags.push('s');
+        }
         flags
     }
 
@@ -371,22 +377,34 @@ impl Session {
     pub fn set(&mut self, words: &mut Vec<String>) -> u8 {
         let args = words.get(1..).unwrap_or_default();
         if args.is_empty() {
-            let mut values: BTreeMap<_, _> = std::env::vars_os()
-                .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
-                .collect();
-            for (name, var) in &self.variables {
-                if let Some(value) = &var.value {
-                    values.insert(name.clone(), value.clone());
+            let mut out = io::BufWriter::new(io::stdout().lock());
+            let locale = self.character_locale();
+            for name in self.variable_names("") {
+                let result = if let Some(var) = self.variables.get(&name)
+                    && var.elements.is_some()
+                {
+                    if !var.array_assigned {
+                        continue;
+                    }
+                    write!(out, "{name}").and_then(|_| print_variable_value(&mut out, var))
+                } else if let Some(value) = self
+                    .stored_scalar(&name)
+                    .map(Cow::Borrowed)
+                    .or_else(|| self.get(&name).map(Cow::Owned))
+                {
+                    writeln!(out, "{name}={}", set_value(&value, self.posix, locale))
                 } else {
-                    values.remove(name);
+                    continue;
+                };
+                if result.is_err() {
+                    return 1;
                 }
             }
-            let mut out = io::stdout().lock();
-            for (name, value) in values {
-                if is_identifier(&name)
-                    && writeln!(out, "{name}='{}'", value.replace('\'', "'\\''")).is_err()
-                {
-                    return 1;
+            if !self.posix {
+                for name in self.functions.keys() {
+                    if self.print_function(&mut out, name).is_err() {
+                        return 1;
+                    }
                 }
             }
             return out.flush().map_or(1, |()| 0);
@@ -602,8 +620,25 @@ impl Session {
                 .ok(),
             "BASH_VERSION" => Some("5.2.0(1)-tonari".into()),
             "BASH_VERSINFO" => self.element(name, 0),
-            "HOSTTYPE" => Some(std::env::consts::ARCH.into()),
-            "OSTYPE" => Some(Self::os_type().into()),
+            "HOSTNAME" => std::env::var(name).ok().or_else(|| {
+                static HOST: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+                HOST.get_or_init(|| {
+                    let mut host = [0u8; 256];
+                    (unsafe { libc::gethostname(host.as_mut_ptr().cast(), host.len() - 1) } == 0)
+                        .then(|| {
+                            String::from_utf8_lossy(
+                                &host[..host.iter().position(|&c| c == 0).unwrap()],
+                            )
+                            .into_owned()
+                        })
+                })
+                .clone()
+            }),
+            "PS4" => Some(std::env::var(name).unwrap_or_else(|_| "+ ".into())),
+            "HOSTTYPE" => {
+                Some(std::env::var(name).unwrap_or_else(|_| std::env::consts::ARCH.into()))
+            }
+            "OSTYPE" => Some(std::env::var(name).unwrap_or_else(|_| Self::os_type().into())),
             "MACHTYPE" => Some(Self::machine_type()),
             "BASH" => std::env::current_exe()
                 .ok()?
@@ -654,6 +689,11 @@ impl Session {
     }
 
     pub fn initialize_shell_level(&mut self) {
+        if unsafe { libc::getenv(c"PWD".as_ptr()) }.is_null()
+            && let Some(directory) = self.get("PWD")
+        {
+            self.assign("PWD", &directory);
+        }
         let inherited = std::env::var("SHLVL")
             .ok()
             .and_then(|v| v.trim().parse::<i64>().ok())
@@ -1778,6 +1818,31 @@ fn print_declaration(out: &mut impl Write, name: &str, var: &Variable) -> io::Re
         out.write_all(&[flag])?;
     }
     write!(out, " {name}")?;
+    print_variable_value(out, var)
+}
+
+fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Cow<'_, str> {
+    let ascii = matches!(locale, CharacterLocale::Ascii);
+    if !posix
+        && value
+            .bytes()
+            .any(|c| c.is_ascii_control() || ascii && !c.is_ascii())
+    {
+        return String::from_utf8(printf::ansi_quote(value.as_bytes(), ascii))
+            .unwrap()
+            .into();
+    }
+    if value
+        .bytes()
+        .any(|c| c.is_ascii_whitespace() || b"~!#$&*(){}[];<>?\\\"'|`".contains(&c))
+    {
+        crate::completion_spec::single_quote(value).into()
+    } else {
+        Cow::Borrowed(value)
+    }
+}
+
+fn print_variable_value(out: &mut impl Write, var: &Variable) -> io::Result<()> {
     if let Some(map) = var.associative() {
         if var.array_assigned {
             write!(out, "=(")?;

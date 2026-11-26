@@ -573,7 +573,7 @@ fn capture_simple(
         }
         code = match name.unwrap() {
             "echo" => {
-                crate::builtins::echo_into(&fields, &mut output);
+                crate::builtins::echo_into(&fields, &mut output, session);
                 0
             }
             "printf" => crate::session::printf::run(session, &fields, Some(&mut output)),

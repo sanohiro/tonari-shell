@@ -104,6 +104,31 @@ fn options(args: &[String]) -> Result<Options<'_>, &'static str> {
 }
 
 fn ready(fd: i32, timeout: Duration) -> io::Result<bool> {
+    // Darwin poll can report POLLNVAL for open character devices (including
+    // /dev/null). pselect reports immediate EOF as readable, like read itself.
+    if fd >= 0 && (fd as usize) < libc::FD_SETSIZE {
+        let mut set = unsafe { std::mem::zeroed() };
+        let time = libc::timespec {
+            tv_sec: timeout.as_secs().min(i64::MAX as u64) as _,
+            tv_nsec: timeout.subsec_nanos().into(),
+        };
+        let n = unsafe {
+            libc::FD_SET(fd, &mut set);
+            libc::pselect(
+                fd + 1,
+                &mut set,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &time,
+                std::ptr::null(),
+            )
+        };
+        return if n < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(n != 0)
+        };
+    }
     let mut descriptor = libc::pollfd {
         fd,
         events: libc::POLLIN,
@@ -210,7 +235,10 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         Ok(opts) => opts,
         Err(e) => {
             eprintln!("tonari: read: {e}");
-            return 2;
+            return match e {
+                "unsupported option" | "option requires an argument" => 2,
+                _ => 1,
+            };
         }
     };
     if crate::execute::fd::is_private(opts.fd) {

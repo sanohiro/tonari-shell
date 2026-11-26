@@ -93,7 +93,8 @@ printf -v again '%(%s)T' -2
     def test_assignment_tildes_and_brace_login_names(self):
         import pwd
         root = os.fsencode(pwd.getpwnam("root").pw_dir)
-        self.compare(r"""HOME=/home/test
+        self.env["HOME"] = "/home/test"
+        self.compare(r"""
 v=${u-~:${u-~:~}}
 printf '%s\n' "$v" ${u-~:~} "${u-~:~}"
 v=${u-a\:~:~}; echo "$v"
@@ -128,6 +129,64 @@ f
 declare TONARI_GLOBAL=value
 env | grep '^TONARI_GLOBAL='
 """, 0, b"14\n1:old\n3:x + y\nTONARI_LOCAL=value\nTONARI_GLOBAL=value\n")
+
+    def test_read_timeouts_on_files_and_invalid_options(self):
+        self.compare(r"""read -t 0 </dev/null; echo $?
+read -t 0.5 </dev/null; echo $?
+for args in '-t -1' '-n x' '-N -1' '-u -3' '-u x' '-k'; do
+    read $args </dev/null 2>/dev/null; echo $?
+done
+""", 0, b"0\n1\n1\n1\n1\n1\n1\n2\n", minimum=5)
+
+    def test_set_prints_reusable_scalars_and_arrays(self):
+        self.compare(r"""__plain=yes
+__words='a b'
+__new=$'a\nb'
+__empty=''
+__array=([3]=abc [9]='two words')
+set | grep '^__' >vars
+cat vars
+unset __plain __words __new __empty __array
+. ./vars
+[[ $__plain == yes && $__words == 'a b' && $__new == $'a\nb' && -v __empty && ${__array[9]} == 'two words' ]]
+""", 0, b'__array=([3]="abc" [9]="two words")\n__empty=\n__new=$\'a\\nb\'\n'
+        b"__plain=yes\n__words='a b'\n", minimum=5)
+
+    def test_shell_option_queries_echo_and_subscripts(self):
+        self.compare(r"""test -o nounset; echo $?
+set -u; [[ -o nounset ]]; echo $?
+[ -z -a -a ]; echo $?
+shopt -s xpg_echo
+echo 'a\tb'
+v=$(echo 'x\ty'); printf '<%s>\n' "$v"
+set -o posix; echo -E 'a\tb'
+""", 0, b"1\n0\n0\na\tb\n<x\ty>\n-E a\tb\n", minimum=5)
+        self.compare(r"""a=(old)
+{ a[]=oops; } 2>/dev/null
+echo "$?:${a[0]}"
+readonly 'b[2]=bad' 2>/dev/null; echo "$?:${#b[@]}"
+""", 0, b"1:old\n1:0\n", minimum=5)
+
+    def test_runtime_home_drives_tilde(self):
+        p = self.command(TONARI, 'HOME=/changed; v=${u-~:~}; printf "%s" "$v"')
+        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, b"/changed:/changed", b""))
+
+    def test_array_parameter_defaults_preserve_fields(self):
+        self.compare(r"""show() { printf '%s' "$#"; for x; do printf '<%s>' "$x"; done; echo; }
+a=()
+show "${a[@]-empty}" "${a[*]:-empty}"
+show "${a[@]+ignored}"
+a=('' '' 'two words')
+show "${a[@]:-other}" "${a[@]:+present}"
+ref='a[@]'; show "${!ref:-other}"
+IFS=; a=('' '')
+show "${a[@]:-other}" "${a[*]:-other}"
+IFS=:
+a=('' y); show ${a[@]:-other}
+declare -A indirect=([k]=v)
+v=blue; show "${!indirect[@]#b}" "${!indirect[@]:-other}"
+""", 0, b"2<empty><empty>\n0\n4<><><two words><present>\n3<><><two words>\n"
+        b"3<><><other>\n2<><y>\n2<lue><blue>\n", minimum=5)
 
     def test_pipeline_last_argument_and_parent_scope(self):
         self.compare(""": before
