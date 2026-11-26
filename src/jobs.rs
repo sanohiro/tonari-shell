@@ -578,7 +578,8 @@ impl Jobs {
         }
     }
     fn note_foreground_signal(&mut self, job: &mut Job) {
-        if self.tty.is_some()
+        if job.signaled
+            && self.tty.is_some()
             && !self.quiet
             && !job.stopped()
             && let Some(sig) = job.children.last().and_then(|c| c.signal)

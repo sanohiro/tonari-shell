@@ -338,6 +338,10 @@ impl Spec {
             .precision
             .map_or(usize::MAX, |n| n as usize)
             .min(if single { 1 } else { usize::MAX });
+        if !single && self.width == 0 && self.precision.is_none() {
+            out.extend_from_slice(value.as_bytes());
+            return Ok(());
+        }
         let mut bytes = 0;
         let mut chars = 0;
         for c in value.chars().take(limit) {

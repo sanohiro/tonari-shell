@@ -212,6 +212,12 @@ pub(crate) fn expand_line<'a>(
     while let Some(c) = pop(&mut input) {
         if quote == Some('$') {
             out.push(c);
+            if !matches!(c, '\\' | '\'') {
+                let end = memchr::memchr2(b'\\', b'\'', input.as_bytes()).unwrap_or(input.len());
+                out.push_str(&input[..end]);
+                input = &input[end..];
+                continue;
+            }
             if c == '\\'
                 && let Some(next) = pop(&mut input)
             {
