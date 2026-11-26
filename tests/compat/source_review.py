@@ -16,6 +16,10 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "encoded-parameter-name": "x1=not; x=notOK; echo \"${x#${$'x1'%$'t'}}\"; echo \"${x$'\\x31'}\"; cat <<EOF\n${x#${$'x1'%'t'}}\nEOF",
+    "operand-process-substitution": "unset v; cat ${v:-<(printf ok)}; printf '[%s]' \"${v:-<(echo a)}\"; v=yes; : ${v:-<(touch wrong)}; test ! -e wrong",
+    "nameref-target-syntax": "for n in 'x[a][b]' 'x[foo]bar]' 'x[]' 'x[ ]' 'x[[1]]' 'x[2+1]'; do unset -n ref; declare -n ref=\"$n\"; echo \"$?\"; done",
+    "array-named-descriptor": "declare -A m; key=out; exec {m[$key]}>result; echo 'ok' >&\"${m[out]}\"; exec {m[$key]}>&-; cat result; exec {a[3]}>&1; test \"${a[3]}\" -gt 2; echo $?; exec {a[3]}>&-",
     "conditional-arithmetic-error": "[[ 1 -eq 4+ ]]; echo \"$?\"; [[ 1 -eq 4+ || 1 -eq 1 ]]; echo \"$?\"",
     "replacement-backslash": "v=letssee; pattern=ss; for r in 'x&y' 'x\\&y' '\\\\&'; do printf '<%s>\\n' \"${v//$pattern/$r}\" \"${v//$pattern/\"$r\"}\"; done",
     "quote-set-values": "set -o posix; ZZ1=\"'\"; ZZ2=\"'abc\"; ZZ3=\"abc'\"; ZZ4='ab#cd'; ZZ5='a~b'; ZZ6='#abcd'; set | sed -n '/^ZZ[0-9]/p'",
@@ -101,6 +105,7 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "lazy-malformed-operand": "a=4\necho \"${a-'$('\\'}\"\necho \"${a+'$('\\'}\"\necho survived",
     "posix-command-precedence": "break(){ echo fn; }; set -o posix; type -t break; type -at break; command -V break",
     "invalid-ere": "re='a('; [[ x =~ $re ]]; echo \"$?\"; re='(a)(b)?'; [[ a =~ $re ]]; declare -p BASH_REMATCH",
     "indexed-init-recovery": "a=(old)\na=([0]=start [1]=yes [-3]=bad [2]=later); echo skipped\necho \"$?\"; declare -p a\na=([]=bad [3]=end); echo skipped\necho \"$?\"; declare -p a",
@@ -132,6 +137,11 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "lazy-malformed-operand": (": \"${a-'$('\\'}\"", 2000),
+    "encoded-parameter-name": (": \"${x#${$'x1'%$'t'}}\"", 2000),
+    "operand-process-substitution": ("read -r s < ${v:-<(echo hi)}", 90),
+    "nameref-target-syntax": ("declare -n ref='arr[12]'; unset -n ref", 3000),
+    "array-named-descriptor": ("exec {m[$key]}>&1; exec {m[$key]}>&-", 1300),
     "posix-command-precedence": ("type -t break >/dev/null", 2500),
     "invalid-ere": ("[[ x =~ $re ]]", 2200),
     "conditional-arithmetic-error": ("[[ 1 -eq 4+ ]]", 4000),
@@ -745,6 +755,9 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "lazy-malformed-operand": "a=4",
+                "encoded-parameter-name": "x1=not; x=notOK",
+                "array-named-descriptor": "declare -A m; key=out",
                 "posix-command-precedence": "break(){ :; }; set -o posix",
                 "invalid-ere": "re='a('; exec 2>/dev/null",
                 "conditional-arithmetic-error": "exec 2>/dev/null",
@@ -825,7 +838,7 @@ def main():
                 # Input history is recorded for top-level commands, even with
                 # no terminal. Executing a sourced loop would bypass this path.
                 code = "set -o history\n" + "for v in one two\ndo\n  : item\ndone\n" * count + "echo done"
-            elif name in ("quoted-operand-brace", "descriptor-overflow", "eval-array-operand", "posix-background-parameter"):
+            elif name in ("encoded-parameter-name", "lazy-malformed-operand", "quoted-operand-brace", "descriptor-overflow", "eval-array-operand", "posix-background-parameter"):
                 code = setup + "\n" + (body + "\n") * min(count, 2500) + "echo done"
                 count = min(count, 2500)
             elif name in ("positional-assignment-error", "invalid-length"):

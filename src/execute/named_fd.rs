@@ -25,8 +25,14 @@ impl Scope {
             let close = r.target == Target::Duplicate && r.word == "-";
             if let Some(name) = name {
                 if close {
-                    r.fd = session
-                        .get(name)
+                    let element = Expansion::new(session, status, &captured)
+                        .assignment_element(name)
+                        .map_err(io::Error::other)?;
+                    let value = match element {
+                        Some(element) => element.value(session),
+                        None => session.get(name),
+                    };
+                    r.fd = value
                         .and_then(|s| s.parse::<i32>().ok())
                         .filter(|&fd| fd >= 0)
                         .ok_or_else(|| io::Error::other(format!("{name}: ambiguous redirect")))?;

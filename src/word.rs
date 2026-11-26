@@ -23,6 +23,7 @@ pub enum Alternative {
 #[derive(Clone, Debug)]
 pub enum Part {
     BadSubstitution(String),
+    InvalidCommandSubstitution,
     PrefixNames {
         prefix: String,
         at: bool,
@@ -173,6 +174,11 @@ impl Word {
                     quoted: *quoted,
                 };
                 continue;
+            }
+            if matches!(part, Part::InvalidCommandSubstitution) {
+                return Err(crate::expansion::Error::discard_line(
+                    "unterminated command substitution",
+                ));
             }
             if let Part::BadSubstitution(text) = part {
                 let message = format!("{text}: bad substitution");
@@ -651,6 +657,7 @@ impl Word {
                     }
                 }
                 Part::PrefixNames { .. }
+                | Part::InvalidCommandSubstitution
                 | Part::BadSubstitution(_)
                 | Part::CurrentSubstitution { .. }
                 | Part::Substitution { .. }

@@ -588,8 +588,12 @@ impl Session {
 
     pub(crate) fn valid_reference_target(name: &str) -> bool {
         is_identifier(name)
-            || array::subscript(name)
-                .is_some_and(|(base, index)| is_identifier(base) && !index.is_empty())
+            || array::subscript(name).is_some_and(|(base, index)| {
+                is_identifier(base)
+                    && !index.is_empty()
+                    && crate::parser::index_end(&name[base.len()..]).ok()
+                        == Some(name.len() - base.len())
+            })
     }
 
     pub(crate) fn assign_for_reference(

@@ -119,7 +119,7 @@ pub(super) fn dollar(
     word: &mut WordBuilder,
     quoted: bool,
 ) -> Result<(), Error> {
-    dollar_word(chars, word, quoted, false)
+    dollar_word(chars, word, quoted, false, quoted)
 }
 
 fn dollar_word(
@@ -127,6 +127,7 @@ fn dollar_word(
     word: &mut WordBuilder,
     quoted: bool,
     assignment: bool,
+    quoted_name: bool,
 ) -> Result<(), Error> {
     *chars = joined(chars.as_str()).chars();
     let rest = chars.as_str();
@@ -144,7 +145,7 @@ fn dollar_word(
             let boundary = input.len();
             input.push_str(&rest[end..]);
             let mut cursor = input.chars();
-            dollar_word(&mut cursor, word, quoted, assignment)?;
+            dollar_word(&mut cursor, word, quoted, assignment, quoted_name)?;
             let consumed = input.len() - cursor.as_str().len();
             let physical = if consumed >= boundary {
                 end + consumed - boundary
@@ -159,6 +160,7 @@ fn dollar_word(
             return Ok(());
         }
     }
+    let decoded_name;
     let name = match chars.clone().next() {
         Some('{') => {
             chars.next();
@@ -226,8 +228,41 @@ fn dollar_word(
             } else {
                 len
             };
-            let name = &content[..len];
-            *chars = content[len..].chars();
+            let head = &content[..len];
+            let quote_at = if content.starts_with("$'") { 0 } else { len };
+            let name = if quoted_name
+                && !super::POSIX.get()
+                && content[quote_at..].starts_with("$'")
+                && (quote_at == 0 || is_identifier(head))
+            {
+                let mut tail = &content[quote_at..];
+                let mut decoded = content[..quote_at].to_owned();
+                while let Some(after) = tail.strip_prefix("$'") {
+                    let mut cursor = after.chars();
+                    decoded.push_str(&ansi::quoted(&mut cursor)?);
+                    let suffix = cursor.as_str();
+                    let size = suffix
+                        .bytes()
+                        .take_while(|c| c.is_ascii_alphanumeric() || *c == b'_')
+                        .count();
+                    decoded.push_str(&suffix[..size]);
+                    tail = &suffix[size..];
+                }
+                if !is_identifier(&decoded) {
+                    return bad_substitution(content, chars, word, quoted);
+                }
+                if tail.starts_with('[') {
+                    let size = super::modifier::index_end(tail)?;
+                    decoded.push_str(&tail[..size]);
+                    tail = &tail[size..];
+                }
+                decoded_name = decoded;
+                *chars = tail.chars();
+                decoded_name.as_str()
+            } else {
+                *chars = content[len..].chars();
+                head
+            };
             if chars.as_str().starts_with('}') {
                 chars.next();
                 name
@@ -265,9 +300,10 @@ fn dollar_word(
                         true,
                         false,
                         mode == crate::word::ReplaceMode::All,
+                        quoted_name,
                     )?;
                     let replacement = if separator == '/' {
-                        alternative_word(chars, false)?
+                        parameter_word(chars, false, false, false, false, quoted_name)?.0
                     } else {
                         Word::Literal(String::new())
                     };
@@ -348,7 +384,7 @@ fn dollar_word(
                     if all {
                         chars.next();
                     }
-                    let pattern = alternative_word(chars, false)?;
+                    let pattern = parameter_word(chars, false, false, false, false, quoted_name)?.0;
                     word.part(Part::Modify {
                         name: name.into(),
                         operation: Box::new(crate::word::Modification::Case {
@@ -370,7 +406,7 @@ fn dollar_word(
                     if longest {
                         chars.next();
                     }
-                    let pattern = alternative_word(chars, false)?;
+                    let pattern = parameter_word(chars, false, false, false, false, quoted_name)?.0;
                     word.part(Part::Trim {
                         name: name.into(),
                         pattern: Box::new(pattern),
@@ -392,7 +428,8 @@ fn dollar_word(
                     None => return Err(Error::Incomplete("unterminated parameter expansion")),
                     _ => return bad_substitution(content, chars, word, quoted),
                 };
-                let (alternative, _) = parameter_word(chars, quoted, false, assignment, false)?;
+                let (alternative, _) =
+                    parameter_word(chars, quoted, false, assignment, false, quoted_name)?;
                 word.part(Part::Alternative {
                     name: name.into(),
                     check_empty,
@@ -522,7 +559,7 @@ pub(super) fn backquote(
 }
 
 fn alternative_word(chars: &mut Chars<'_>, outer_quoted: bool) -> Result<Word, Error> {
-    Ok(parameter_word(chars, outer_quoted, false, false, false)?.0)
+    Ok(parameter_word(chars, outer_quoted, false, false, false, outer_quoted)?.0)
 }
 
 fn parameter_word(
@@ -531,6 +568,7 @@ fn parameter_word(
     stop_slash: bool,
     assignment: bool,
     initial_slash_is_literal: bool,
+    quoted_name: bool,
 ) -> Result<(Word, char), Error> {
     let mut word = WordBuilder::default();
     let mut empty = true;
@@ -577,7 +615,23 @@ fn parameter_word(
                 chars.next();
                 word.literal(&ansi::quoted(chars)?);
             }
-            '$' => dollar_word(chars, &mut word, outer_quoted, assignment)?,
+            '<' | '>' if !outer_quoted && chars.as_str().starts_with('(') => {
+                process_word(chars, &mut word, c == '<')?;
+            }
+            '$' if inside_apostrophes && chars.as_str().starts_with('(') => {
+                let source = chars.as_str();
+                match dollar_word(chars, &mut word, outer_quoted, assignment, quoted_name) {
+                    Err(error) => {
+                        let Some(end) = source.find('\'') else {
+                            return Err(error);
+                        };
+                        *chars = source[end..].chars();
+                        word.part(Part::InvalidCommandSubstitution);
+                    }
+                    Ok(()) => {}
+                }
+            }
+            '$' => dollar_word(chars, &mut word, outer_quoted, assignment, quoted_name)?,
             '"' => double_quoted(chars, &mut word, outer_quoted)?,
             '\'' if !outer_quoted => quoted(chars, c, &mut word)?,
             '`' => backquote(chars, &mut word, outer_quoted)?,
@@ -597,7 +651,8 @@ fn parameter_word(
                 let rest = chars.as_str();
                 let end = rest
                     .find(|v| {
-                        stop_slash && v == '/'
+                        (!outer_quoted && matches!(v, '<' | '>'))
+                            || stop_slash && v == '/'
                             || assignment && !outer_quoted && v == ':'
                             || matches!(v, '}' | '$' | '"' | '`' | '\\')
                             || ((!outer_quoted || quoted_apostrophes) && v == '\'')
@@ -678,6 +733,16 @@ fn double_quoted(
         empty = false;
     }
     Err(Error::Incomplete("unterminated double quote"))
+}
+
+fn process_word(chars: &mut Chars<'_>, word: &mut WordBuilder, input: bool) -> Result<(), Error> {
+    chars.next();
+    let nested = chars.as_str();
+    let (tokens, spans, after) = lex(nested, true, false)?;
+    let body = Reader::new(tokens, spans, &nested[..nested.len() - after.len() - 1]).list(&[])?;
+    *chars = after.chars();
+    word.part(Part::Process { body, input });
+    Ok(())
 }
 
 fn process_start(source: &str) -> bool {
@@ -1246,17 +1311,7 @@ fn lex_words(
             after_colon = c == ':';
             match c {
                 '<' | '>' => {
-                    chars.next();
-                    let nested = chars.as_str();
-                    let (tokens, spans, after) = lex(nested, true, false)?;
-                    let body =
-                        Reader::new(tokens, spans, &nested[..nested.len() - after.len() - 1])
-                            .list(&[])?;
-                    chars = after.chars();
-                    word.part(Part::Process {
-                        body,
-                        input: c == '<',
-                    });
+                    process_word(&mut chars, &mut word, c == '<')?;
                 }
                 '\'' | '"' => {
                     protected = true;
@@ -1285,7 +1340,7 @@ fn lex_words(
                         .as_bytes()
                         .first()
                         .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_');
-                    dollar_word(&mut chars, &mut word, false, assignment.is_some())?;
+                    dollar_word(&mut chars, &mut word, false, assignment.is_some(), false)?;
                     if named
                         && (chars.as_str().starts_with('{')
                             || braces > 0 && chars.as_str().starts_with([',', '}']))
@@ -1403,7 +1458,7 @@ fn lex_words(
             if let Some(name) = literal
                 .strip_prefix('{')
                 .and_then(|s| s.strip_suffix('}'))
-                .filter(|s| is_identifier(s))
+                .filter(|s| crate::Session::valid_reference_target(s))
             {
                 tokens.push(Token::DescriptorName(name.into()));
                 let op = chars.next().unwrap();
