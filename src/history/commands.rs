@@ -767,3 +767,31 @@ pub(crate) fn edit_text(
     let _ = std::fs::remove_file(path);
     edited
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_records_survive_buffer_boundaries() {
+        let bytes = "雪\r\n\nlast".as_bytes();
+        for capacity in 1..=bytes.len() + 1 {
+            for private in [true, false] {
+                let mut reader = BufReader::with_capacity(capacity, bytes);
+                let mut seen = Vec::new();
+                read_history_lines(&mut reader, private, |s, n| seen.push((s.to_owned(), n)))
+                    .unwrap();
+                let mut expected = vec![("雪".to_owned(), 5), ("".to_owned(), 1)];
+                if !private {
+                    expected.push(("last".to_owned(), 4));
+                }
+                assert_eq!(seen, expected);
+            }
+            let mut invalid = BufReader::with_capacity(capacity, &b"one\n\xff\n"[..]);
+            let mut prefix = Vec::new();
+            let result = read_history_lines(&mut invalid, false, |s, _| prefix.push(s.to_owned()));
+            assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
+            assert_eq!(prefix, ["one"]);
+        }
+    }
+}
