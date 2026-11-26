@@ -101,7 +101,12 @@ fn long_physical_path() -> io::Result<std::path::PathBuf> {
             } == 0
             {
                 let st = unsafe { st.assume_init() };
-                if st.st_dev as u64 == here.dev() && st.st_ino == here.ino() {
+                #[allow(
+                    clippy::unnecessary_cast,
+                    reason = "dev_t is i32 on Darwin and u64 on Linux; MetadataExt::dev returns u64"
+                )]
+                let device = st.st_dev as u64;
+                if device == here.dev() && st.st_ino == here.ino() {
                     break Some(OsStr::from_bytes(name.to_bytes()).to_owned());
                 }
             }
