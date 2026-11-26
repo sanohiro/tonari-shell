@@ -652,7 +652,10 @@ fn double_quoted(
             '`' => backquote(chars, word, true)?,
             _ => {
                 let rest = chars.as_str();
-                let end = rest.find(['"', '\\', '$', '`']).unwrap_or(rest.len());
+                let end = rest
+                    .bytes()
+                    .position(|b| matches!(b, b'"' | b'\\' | b'$' | b'`'))
+                    .unwrap_or(rest.len());
                 word.push(c);
                 word.literal(&rest[..end]);
                 *chars = rest[end..].chars();

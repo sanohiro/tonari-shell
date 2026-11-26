@@ -385,8 +385,9 @@ impl Word {
                     if set == use_word_if_set {
                         word.resolve(env)?;
                         if matches!(*op, Alternative::Assign | Alternative::Error) {
-                            let value = (**word)
-                                .clone()
+                            let operand =
+                                std::mem::replace(word.as_mut(), Word::Literal(String::new()));
+                            let value = operand
                                 .scalar(&|k| env.lookup(k), env.session.positional.as_slice());
                             if *op == Alternative::Error {
                                 let default = if *check_empty {

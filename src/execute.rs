@@ -1478,6 +1478,9 @@ fn run_builtin(
                 continue;
             }
             session.stdin_replaced |= r.fd == 0;
+            if r.target == Target::CloseMoved {
+                continue;
+            }
             session.substitutions.replaced(r.fd);
             coprocess::replaced(session, r.fd);
         }

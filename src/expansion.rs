@@ -235,10 +235,10 @@ impl<'a> Expansion<'a> {
         if self.session.readonly(base) {
             return Err(Error::readonly(base));
         }
-        if self.session.integer(base) {
+        let (integer, changes_case) = self.session.assignment_attributes(base);
+        if integer {
             value = self.arithmetic(&value)?.to_string();
         }
-        let changes_case = self.session.assignment_changes_case(base);
         match &element {
             Some(AssignmentElement::Index(base, index)) => {
                 self.session.assign_element(base, *index, value.clone())

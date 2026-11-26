@@ -1142,10 +1142,11 @@ impl Session {
         value.parse().ok()
     }
 
-    pub(crate) fn assignment_changes_case(&self, name: &str) -> bool {
-        self.variables
-            .get(name)
-            .is_some_and(|v| v.letter_case.is_some())
+    pub(crate) fn assignment_attributes(&self, name: &str) -> (bool, bool) {
+        self.variables.get(name).map_or_else(
+            || (dynamic::integer_attribute(name), false),
+            |v| (v.integer, v.letter_case.is_some()),
+        )
     }
 
     pub fn integer(&self, name: &str) -> bool {

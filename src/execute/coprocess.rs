@@ -38,8 +38,8 @@ pub(super) fn replaced(session: &mut Session, destination: RawFd) {
             .iter()
             .any(|newer| newer.name == job.name)
         {
-            let name = job.name.clone();
-            session.assign_element(&name, end as i64, "-1".into());
+            let job = Rc::clone(job);
+            session.assign_element(&job.name, end as i64, "-1".into());
         }
         return;
     }
