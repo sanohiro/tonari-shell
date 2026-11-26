@@ -180,6 +180,21 @@ f?() { echo question; }; 'f?'
                                "parent", str(shell))
             self.assertEqual((run.returncode, run.stdout, run.stderr), (0, b"child\n", b""))
 
+    def test_posix_function_name_validation_at_definition(self):
+        for shell in self.shells_for(5):
+            for name in ("a,b%", "eval"):
+                with self.subTest(shell=shell, name=name):
+                    definition = name + "() { echo replaced; }"
+                    for prefix in ("", "register() { " + definition + "; }; register; "):
+                        proc = self.command(shell, prefix + "set -o posix; " +
+                                            ("register" if prefix else definition) + "; echo after")
+                        self.assertEqual((proc.returncode, proc.stdout), (2, b""))
+                        self.assertTrue(proc.stderr)
+                    skipped = self.command(shell, "set -o posix; if false; then " + definition +
+                                           "; fi; echo ok")
+                    self.assertEqual((skipped.returncode, skipped.stdout, skipped.stderr),
+                                     (0, b"ok\n", b""))
+
     def test_case_attributes_on_arrays_and_export(self):
         self.compare("""declare -u s=one; s+=two; export s+=three; echo "$s"
 declare -la a=(AA Bb); a[1]+=CC; echo "${a[@]}"
@@ -2889,6 +2904,26 @@ test "$(jobs -p)" = "$p" && echo direct
 test "$(true; f)" = "$p" && echo nested
 test "$(jobs -p | cat)" = "$p" && echo pipe
 (jobs -p); wait "$p"; echo "$?" """, 0, b"direct\nnested\npipe\n0\n")
+
+    def test_posix_wait_reports_status_without_job_notice(self):
+        sh = self.cwd / "sh"
+        sh.symlink_to(TONARI)
+        script = """/bin/sh -c 'kill -HUP $$' & p=$!
+wait "$p"; code=$?; kill -l "$code"; exit "$code" """
+        for argv, notice in (([TONARI], True), ([TONARI, "--posix"], False), ([sh], False)):
+            with self.subTest(argv=argv):
+                proc = subprocess.run([*argv, "-c", script], cwd=self.cwd, env=self.env,
+                                      capture_output=True, timeout=5)
+                self.assertEqual((proc.returncode, proc.stdout), (129, b"HUP\n"))
+                if notice:
+                    self.assertIn(b"Hangup", proc.stderr)
+                else:
+                    self.assertEqual(proc.stderr, b"")
+        proc = self.command(sh, "wait 99999999")
+        self.assertEqual(proc.returncode, 127)
+        proc = self.command(sh, "wait %missing")
+        self.assertEqual(proc.returncode, 127)
+        self.assertIn(b"not a valid child or job", proc.stderr)
 
     def test_wait_next_selected_ids_and_signals(self):
         version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"')

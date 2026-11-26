@@ -998,7 +998,8 @@ fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Opti
             };
             if !job.stopped() {
                 let job = jobs.table.remove(i);
-                if !job.listed
+                if (session.interactive || !session.posix)
+                    && !job.listed
                     && let Some(process) = job
                         .children
                         .iter()

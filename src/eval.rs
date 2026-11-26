@@ -175,7 +175,7 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
             borrowed_program,
         ),
         Cow::Borrowed(Command::Function { name, definition })
-            if !(session.posix && crate::execute::special_builtin(name))
+            if !(session.posix && posix_function_error(name).is_some())
                 && !session.readonly_functions.contains(name)
                 && !session.allexport
                 && session.functions.get(name).is_some_and(|old| {
@@ -497,19 +497,18 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             Flow::Continue(result)
         }
         Command::Function { name, definition } => {
-            if !crate::parser::is_function_name(&name)
-                || session.posix && !crate::word::is_identifier(&name)
-            {
+            if session.posix {
+                if let Some(reason) = posix_function_error(&name) {
+                    eprintln!("tonari: {name}: {reason}");
+                    return if session.interactive {
+                        Flow::Continue(2)
+                    } else {
+                        Flow::Exit(2)
+                    };
+                }
+            } else if !crate::parser::is_function_name(&name) {
                 eprintln!("tonari: {name}: invalid function name");
                 return Flow::Continue(1);
-            }
-            if session.posix && crate::execute::special_builtin(&name) {
-                eprintln!("tonari: {name}: special builtin cannot be redefined");
-                return if session.interactive {
-                    Flow::Continue(2)
-                } else {
-                    Flow::Exit(2)
-                };
             }
             if session.readonly_functions.contains(&name) {
                 eprintln!("tonari: {name}: readonly function");
@@ -518,6 +517,16 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             session.define_function(name, definition);
             Flow::Continue(0)
         }
+    }
+}
+
+fn posix_function_error(name: &str) -> Option<&'static str> {
+    if !crate::word::is_identifier(name) {
+        Some("invalid function name")
+    } else if crate::execute::special_builtin(name) {
+        Some("special builtin cannot be redefined")
+    } else {
+        None
     }
 }
 
