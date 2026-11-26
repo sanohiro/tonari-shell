@@ -1087,6 +1087,9 @@ def main():
                 code = ("exec 2>/dev/null\ndeclare -A a\n"
                         + "a=([one]=1 [two]=2 bad [extra]=3)\n" * count
                         + '[[ ${a[one]} == 1 && ${a[two]} == 2 && -z ${a[extra]+set} ]] && echo done')
+            elif name == "history-ansi-quote":
+                code = ("set -o history -H\n" + "v=$'hello\\' once!'\n" * count
+                        + "test \"$v\" = \"hello' once\"'!' && echo done")
             elif name == "multiline-history":
                 # Input history is recorded for top-level commands, even with
                 # no terminal. Executing a sourced loop would bypass this path.
