@@ -227,26 +227,27 @@ impl Session {
     }
 
     pub fn valid_target(&self, target: &str) -> bool {
-        if let Some((base, expr)) = subscript(target) {
-            super::is_identifier(base)
-                && if self.is_associative(base) {
-                    !expr.is_empty()
-                } else {
-                    self.resolve_index(base, expr).is_ok()
-                }
-        } else {
-            super::is_identifier(target)
-        }
+        self.check_target(target, false)
     }
 
     pub fn valid_builtin_target(&self, target: &str) -> bool {
-        if !self.valid_target(target) {
+        self.check_target(target, !self.shopt.array_expand_once)
+    }
+
+    fn check_target(&self, target: &str, check_syntax: bool) -> bool {
+        let Some((base, expr)) = subscript(target) else {
+            return super::is_identifier(target);
+        };
+        if !super::is_identifier(base) {
             return false;
         }
-        self.shopt.array_expand_once
-            || subscript(target).is_none_or(|(base, _)| {
-                !self.is_associative(base) || Self::valid_reference_target(target)
-            })
+        if !self.is_associative(base) {
+            return self.resolve_index(base, expr).is_ok();
+        }
+        !expr.is_empty()
+            && (!check_syntax
+                || crate::parser::index_end(&target[base.len()..]).ok()
+                    == Some(target.len() - base.len()))
     }
 
     pub fn assign_target(&mut self, target: &str, value: &str) -> Result<(), &'static str> {

@@ -286,7 +286,7 @@ pub(crate) fn variable_set(
         let key = session.subscript_key(expr)?;
         return Ok(session.assoc_value(name, &key).is_some());
     }
-    return Ok(session.get(arg).is_some());
+    Ok(session.get(arg).is_some())
 }
 
 pub(crate) fn unary(op: &str, arg: &str, session: &mut Session) -> Result<bool, &'static str> {
