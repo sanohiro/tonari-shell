@@ -2,6 +2,7 @@ mod aliases;
 mod array;
 use crate::pattern::Matcher;
 use crate::test_expression::Expr;
+pub(crate) use array::quoted_initializer;
 pub use array::{Assignment, Subscript};
 mod ansi;
 pub(crate) use ansi::decode as ansi_string;

@@ -104,6 +104,42 @@ history -Z 2>/dev/null; echo "$?"
                 self.read_until(fd, b"editOK\r\n")
                 self.assertEqual((self.cwd / "vi-result").read_bytes(), b"<goodbye><world>")
 
+    def test_right_leaves_reverse_search_with_an_editable_match(self):
+        for shell in self.shells_for():
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                os.write(fd, b"echo editme >match; echo rea''dy\r")
+                data = self.read_until(fd, b"ready\r\n")
+                if PROMPT not in data.partition(b"ready\r\n")[2]:
+                    self.read_until(fd, PROMPT)
+                os.write(fd, b"\x12editme")
+                self.read_until(fd, b">match")
+                os.write(fd, b"\x1b[C\x05; echo changed >> match; echo done''OK\r")
+                self.read_until(fd, b"doneOK\r\n")
+                self.assertEqual((self.cwd / "match").read_text(), "editme\nchanged\n")
+                (self.cwd / "match").unlink()
+
+    def test_quoted_array_declarations(self):
+        self.compare("""false
+declare -a 'arr=($? "two words")'
+declare -A 'map=([a]=b [c]=d)'
+printf '<%s>' "${arr[@]}" "${map[a]}" "${map[c]}"
+declare 'arr[0]=(literal)'
+echo "${arr[0]}"
+""", 0, b"<1><two words><b><d>(literal)\n", minimum=5)
+
+    def test_history_limits_and_incremental_import_after_copy(self):
+        self.compare("""printf '%s\\n' one two three > first; cp first second; echo four >>second
+history -c; HISTFILE=first history -r; HISTFILE=second history -n
+history | awk '{print $NF}'
+HISTSIZE=2; history | awk '{print $NF}'
+HISTFILE=second; HISTFILESIZE=2; cat second
+""", 0, b"one\ntwo\nthree\nfour\nthree\nfour\nthree\nfour\n", minimum=5)
+        # Replacing a history file with unrelated content must keep its first line.
+        proc = self.command(TONARI, "printf 'one\\n' >a; printf 'six\\nnext\\n' >b; "
+                                    "history -r a; history -n b; history | awk '{print $NF}'")
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"one\nsix\nnext\n", b""))
+
     def test_invoked_as_sh(self):
         sh = self.cwd / "sh"
         env = self.env | {"BASH_ENV": str(self.cwd / "bashenv"), "ENV": str(self.cwd / "env")}

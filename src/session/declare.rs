@@ -24,6 +24,7 @@ pub(super) fn run(
     command: &str,
     mut operands: &[String],
     arrays: &[crate::execute::ArrayDeclaration],
+    previous_status: u8,
 ) -> crate::execute::Flow {
     let total_args = operands.len();
     let readonly = command == "readonly";
@@ -348,7 +349,33 @@ pub(super) fn run(
         if flags.array && (!readonly || value.is_some() || array.is_some()) {
             var.make_array();
         }
-        if let Some(text) = value {
+        if let Some(text) = value
+            && target.is_none()
+            && array.is_none()
+            && var.elements.is_some()
+            && text.starts_with('(')
+            && text.ends_with(')')
+        {
+            let parts = match crate::parser::quoted_initializer(text) {
+                Ok(parts) => parts,
+                Err(e) => {
+                    eprintln!("tonari: {command}: {name}: {}", e.message());
+                    return crate::Flow::Discard(1);
+                }
+            };
+            let captured = std::cell::Cell::new(None);
+            let items = crate::expansion::Expansion::new(session, previous_status, &captured)
+                .array_items(parts, var.associative().is_some());
+            match items.and_then(|items| {
+                Ok(session.array_items(name, flags.global, &mut var, append, &items)?)
+            }) {
+                Ok(()) => {}
+                Err(e) => {
+                    eprintln!("tonari: {command}: {name}: {e}");
+                    return e.flow(session);
+                }
+            }
+        } else if let Some(text) = value {
             let assoc_key = if var.associative().is_some() {
                 match target
                     .map(|(_, expr)| session.subscript_key(expr))
@@ -434,6 +461,12 @@ pub(super) fn run(
         if name == "GLOBIGNORE" && value.is_some() {
             session.shopt.glob.set_ignore(var.value.as_deref());
         }
+        if value.is_some()
+            && matches!(name, "HISTSIZE" | "HISTFILESIZE")
+            && let Some(value) = var.value.as_deref()
+        {
+            session.apply_history_limit(name, value);
+        }
         session.store_variable(name, var, flags.global);
     }
     crate::execute::Flow::Continue(status)
@@ -445,8 +478,9 @@ impl Session {
         name: &str,
         args: &[String],
         arrays: &[crate::execute::ArrayDeclaration],
+        previous_status: u8,
     ) -> crate::execute::Flow {
-        run(self, name, args, arrays)
+        run(self, name, args, arrays, previous_status)
     }
 
     pub(super) fn store_variable(&mut self, name: &str, var: Variable, global: bool) {
@@ -518,12 +552,12 @@ mod tests {
         for inner in ["b", "c"] {
             s.enter_function();
             assert_eq!(
-                s.declare("local", &[format!("x={inner}")], &[]),
+                s.declare("local", &[format!("x={inner}")], &[], 0),
                 crate::Flow::Continue(0)
             );
         }
         assert_eq!(
-            s.declare("declare", &["-g".into(), "x+=d".into()], &[]),
+            s.declare("declare", &["-g".into(), "x+=d".into()], &[], 0),
             crate::Flow::Continue(0)
         );
         assert_eq!(s.get("x").as_deref(), Some("c"));

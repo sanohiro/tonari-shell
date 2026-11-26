@@ -189,15 +189,15 @@ impl Word {
                 *part = literal(target, *quoted);
                 continue;
             }
+            let transformed = matches!(part, Part::Modify { .. });
             if let Part::Parameter { name, .. }
             | Part::Alternative { name, .. }
             | Part::Trim { name, .. }
             | Part::Modify { name, .. } = part
             {
-                if let Some(reference) = name
-                    .strip_prefix('!')
-                    .filter(|s| !s.is_empty() && array_elements_name(name).is_none())
-                {
+                if let Some(reference) = name.strip_prefix('!').filter(|s| {
+                    !s.is_empty() && (transformed || array_elements_name(name).is_none())
+                }) {
                     let target = modifier::value(reference, env)?.ok_or_else(|| {
                         crate::expansion::Error::fatal(
                             format!("{reference}: invalid indirect expansion"),

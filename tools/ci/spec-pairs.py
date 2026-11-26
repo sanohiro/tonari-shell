@@ -110,6 +110,8 @@ def main():
         parser.add_argument(name, type=lambda p: Path(p).absolute())
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--helper", type=Path)
+    parser.add_argument("--utility-path", type=Path, action="append", default=[],
+                        help="directory of explicit utility overrides for a controlled replay")
     parser.add_argument("--observer", type=Path)
     parser.add_argument("--shard", type=int, default=0)
     parser.add_argument("--shards", type=int, default=1)
@@ -123,9 +125,20 @@ def main():
     entry = shell_dir / "bash"
     cwd = args.scratch / "case"
     trace = args.scratch / "calls"
-    path = os.pathsep.join(map(str, (shell_dir, args.source.resolve() / "spec/bin", os.environ["PATH"])))
-    if args.helper:
-        path = str(args.helper.resolve()) + os.pathsep + path
+    # Keep the caller's GUI tools and login-shell customizations out of PATH.
+    # Several exit-status cases literally run X expecting command-not-found.
+    runtimes = args.scratch / "interpreters"
+    runtimes.mkdir(exist_ok=True)
+    for name in ("python2", "python3", "timeout"):
+        executable = shutil.which(name)
+        link = runtimes / name
+        if executable and not link.exists():
+            link.symlink_to(Path(executable).resolve())
+    directories = ([args.helper.resolve()] if args.helper else []) + [
+        shell_dir, args.source.resolve() / "spec/bin", runtimes,
+        *(p.resolve() for p in args.utility_path), "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+    ]
+    path = os.pathsep.join(map(str, directories))
     # Some Oils cases cd into REPO_ROOT and write _tmp/spec-tmp. Give them
     # the checkout layout and a private scratch directory for each invocation.
     repo_view = args.scratch / "repo"

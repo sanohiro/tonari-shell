@@ -5,7 +5,13 @@ out="$repo/results"
 lab="$RUNNER_TEMP/shell-spec"
 mkdir -p "$lab/home" "$lab/cwd" "$lab/bin" "$out"
 ref=/bin/bash
-if [[ $(uname -s) == Darwin ]]; then
+if [[ $SUITE == oils-control ]]; then
+  source "$repo/tools/ci/bash-source.sh"
+  download_bash "$version" "$digest" "$lab/bash.tar.gz"
+  tar -xf "$lab/bash.tar.gz" -C "$lab"
+  ref="$lab/bash-$version/bash"
+  (cd "$lab/bash-$version" && ./configure --without-bash-malloc --disable-nls >/dev/null && make -j4 bash >/dev/null)
+elif [[ $(uname -s) == Darwin ]]; then
   if [[ ! -x /opt/homebrew/bin/bash ]]; then brew install bash; fi
   ref=/opt/homebrew/bin/bash
 fi
@@ -85,6 +91,19 @@ case "$SUITE" in
     export PATH="$lab/pybin:$PATH"
     cd upstream
     PYTHONPATH=. python2 "$repo/tools/ci/oils-cases.py" > "$out/manifest.jsonl"
+    if [[ $SUITE == oils-control ]]; then
+      utilities=()
+      if [[ $(uname -s) == Darwin ]]; then
+        brew list coreutils >/dev/null || brew install coreutils
+        brew list gnu-sed >/dev/null || brew install gnu-sed
+        utilities+=(--utility-path "$(brew --prefix gnu-sed)/libexec/gnubin"
+                    --utility-path "$(brew --prefix coreutils)/libexec/gnubin")
+      fi
+      python3 "$repo/tools/ci/spec-pairs.py" "$out/manifest.jsonl" "$out/cases.jsonl" \
+        "$ref" "$lab/bin/bash" "$lab/pairs" --source . --runs 1 "${utilities[@]}"
+      PYTHONPATH=. python2 "$repo/tools/ci/oils-cases.py" grade < "$out/cases.jsonl" > "$out/grades.jsonl"
+      exit
+    fi
     if [[ $SUITE == oils-profile-* ]]; then
       python3 "$repo/tools/ci/spec-pairs.py" "$out/manifest.jsonl" "$out/profiles.jsonl" \
         "$RUNNER_TEMP/bin/current" "$RUNNER_TEMP/bin/opt-3" "$lab/pairs" --source . \

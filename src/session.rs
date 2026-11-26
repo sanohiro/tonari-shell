@@ -536,7 +536,14 @@ impl Session {
             if self.is_associative(base) {
                 return self.assoc_value(base, index).map(str::to_owned);
             }
-            let i = self.resolve_index(base, index).ok()?;
+            let i = self
+                .resolve_index(base, index)
+                .map_err(|error| {
+                    if error == "array subscript out of range" {
+                        eprintln!("tonari: {base}: bad array subscript");
+                    }
+                })
+                .ok()?;
             return self.element(base, i);
         }
         if matches!(name, "BASHOPTS" | "SHELLOPTS") {
@@ -669,7 +676,13 @@ impl Session {
     fn ordinary_assignment(name: &str) -> bool {
         !matches!(
             name,
-            "BASH_ARGV0" | "GLOBIGNORE" | "OPTIND" | "PATH" | "PIPESTATUS"
+            "BASH_ARGV0"
+                | "GLOBIGNORE"
+                | "HISTSIZE"
+                | "HISTFILESIZE"
+                | "OPTIND"
+                | "PATH"
+                | "PIPESTATUS"
         )
     }
 
@@ -717,6 +730,9 @@ impl Session {
         }
         if self.readonly(name) {
             return;
+        }
+        if matches!(name, "HISTSIZE" | "HISTFILESIZE") {
+            self.apply_history_limit(name, &value);
         }
         if name == "BASH_ARGV0" {
             self.arg0 = value.to_string();
@@ -768,9 +784,7 @@ impl Session {
         name: &str,
         value: i64,
     ) -> Option<Result<(), &'static str>> {
-        if matches!(name, "OPTIND" | "GLOBIGNORE" | "PATH" | "BASH_ARGV0")
-            || Self::builtin_readonly(name)
-        {
+        if !Self::ordinary_assignment(name) || Self::builtin_readonly(name) {
             return None;
         }
         let var = self.variables.get_mut(name)?;
@@ -1729,14 +1743,21 @@ impl Variable {
 }
 
 impl Session {
-    pub(crate) fn attributes(&self, name: &str) -> Option<String> {
+    pub(crate) fn attributes(&self, name: &str) -> Option<(String, bool)> {
         let resolved = self.reference_name(name).ok()?;
         let name = array::subscript(&resolved).map_or(resolved.as_ref(), |(base, _)| base);
         if let Some(var) = self.variables.get(name) {
-            return Some(var.attribute_flags().map(char::from).collect());
+            return Some((
+                var.attribute_flags().map(char::from).collect(),
+                var.array_assigned,
+            ));
         }
-        self.declared_variable(name, false)
-            .map(|v| v.attribute_flags().map(char::from).collect())
+        self.declared_variable(name, false).map(|v| {
+            (
+                v.attribute_flags().map(char::from).collect(),
+                v.array_assigned,
+            )
+        })
     }
 }
 
@@ -1842,7 +1863,7 @@ mod tests {
         session.assign(key, "global");
         session.enter_function();
         assert_eq!(
-            session.declare("local", &[format!("{key}=local")], &[]),
+            session.declare("local", &[format!("{key}=local")], &[], 0),
             crate::Flow::Continue(0)
         );
         let prefix = session.bind(&[(key.into(), "temporary".into())]);

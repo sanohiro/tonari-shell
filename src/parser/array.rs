@@ -30,6 +30,21 @@ pub(super) fn indexed_prefix(source: &str) -> Option<&str> {
         .then(|| &source[..end + plus])
 }
 
+pub(crate) fn quoted_initializer(
+    source: &str,
+) -> Result<Vec<(Option<Subscript<String>>, Word)>, Error> {
+    let (tokens, spans, _) = super::lexer::lex(source, false, true)?;
+    let mut reader = Reader::new(tokens, spans, source);
+    if !matches!(reader.peek(), Some(Token::LeftParen)) {
+        return Err(Error::Invalid("expected array initializer"));
+    }
+    let items = reader.array_items()?;
+    if !reader.tokens.is_empty() {
+        return Err(Error::Invalid("unexpected token after array initializer"));
+    }
+    Ok(items)
+}
+
 impl Reader {
     pub(super) fn array_items(&mut self) -> Result<Vec<(Option<Subscript<String>>, Word)>, Error> {
         self.tokens.pop_front();

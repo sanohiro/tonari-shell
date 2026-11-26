@@ -238,33 +238,33 @@ impl Modification {
                     .map(|(base, _, _)| base)
                     .or_else(|| crate::session::array::subscript(name).map(|(base, _)| base))
                     .unwrap_or(name);
-                let flags = env.session.attributes(base);
-                if env.session.nounset && elements.is_none() {
+                let (flags, assigned_array) = env.session.attributes(base).unwrap_or_default();
+                let stored_len = env.session.stored_array_len(base);
+                if env.session.nounset
+                    && elements.is_none()
+                    && !(name == base && stored_len.is_some_and(|n| n > 0))
+                {
                     value(name, env)?.ok_or_else(|| env.missing(name, "unbound variable"))?;
                 }
-                let flags = flags.unwrap_or_default();
-                if let Some((base, at, _)) = elements {
-                    let n = if let Some(len) = env.session.stored_array_len(base) {
-                        len
+                if let Some((_, at, _)) = elements {
+                    let count = if let Some(len) = stored_len {
+                        if !assigned_array && len == 0 && !flags.is_empty() {
+                            1
+                        } else {
+                            len
+                        }
+                    } else if flags.is_empty() {
+                        0
                     } else if let Values::Elements(values, _) = Values::read(name, env)? {
-                        values.len()
+                        values.len().max(1)
                     } else {
                         unreachable!()
                     };
-                    if n > 0 {
-                        return Ok(Part::Elements {
-                            values: vec![flags; n],
-                            at,
-                            quoted,
-                        });
-                    }
-                    if flags.is_empty() {
-                        return Ok(Part::Elements {
-                            values: vec![],
-                            at,
-                            quoted,
-                        });
-                    }
+                    return Ok(Part::Elements {
+                        values: vec![flags; count],
+                        at,
+                        quoted,
+                    });
                 }
                 Ok(scalar(flags))
             }

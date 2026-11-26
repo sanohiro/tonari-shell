@@ -631,6 +631,10 @@ pub(crate) fn subscript_word(source: &str, associative: bool) -> Result<crate::w
         match c {
             '"' => quoted(&mut chars, c, &mut word)?,
             '\'' if associative => quoted(&mut chars, c, &mut word)?,
+            '$' if chars.as_str().starts_with('"') => {
+                chars.next();
+                quoted(&mut chars, '"', &mut word)?;
+            }
             '$' => dollar(&mut chars, &mut word, true)?,
             '`' => backquote(&mut chars, &mut word, true)?,
             '\\' => {

@@ -682,7 +682,7 @@ mod tests {
         shell.assign("a", "outer");
         shell.enter_function();
         assert_eq!(
-            shell.declare("local", &["-a".into(), "a".into()], &[]),
+            shell.declare("local", &["-a".into(), "a".into()], &[], 0),
             crate::Flow::Continue(0)
         );
         shell
