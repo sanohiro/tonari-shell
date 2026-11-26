@@ -1471,9 +1471,6 @@ fn run_builtin(
     let mut extra = Vec::new();
     if !final_command || can_install_trap(builtin, cmd) {
         for action in actions {
-            if matches!(action, Action::CloseMoved(_)) {
-                continue;
-            }
             let fd = action.destination();
             if let Some(slot) = saved.get_mut(fd as usize) {
                 if matches!(slot, SavedFd::Unchanged) {
@@ -1485,14 +1482,6 @@ fn run_builtin(
         }
     }
     let redirection = apply_protected(actions, here_pipe_limit(Some(builtin), cmd));
-    if !session.coprocesses.is_empty() || session.substitutions.scope() != 0 {
-        for a in &actions[..redirection.err().unwrap_or(actions.len())] {
-            if let Action::CloseMoved(fd) = a {
-                session.substitutions.replaced(*fd);
-                coprocess::replaced(session, *fd);
-            }
-        }
-    }
     let applied = redirection.is_ok();
     let old_input = session.stdin_redirected;
     if applied && actions.iter().any(|a| a.destination() == 0) {
@@ -1512,9 +1501,6 @@ fn run_builtin(
                 continue;
             }
             session.stdin_replaced |= r.fd == 0;
-            if r.target == Target::CloseMoved {
-                continue;
-            }
             session.substitutions.replaced(r.fd);
             coprocess::replaced(session, r.fd);
         }

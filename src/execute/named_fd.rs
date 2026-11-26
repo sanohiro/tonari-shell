@@ -81,10 +81,7 @@ impl Scope {
             let action = action(&r);
             let actions = std::slice::from_ref(&action);
             protect_fds(actions)?;
-            if (name.is_none() || close)
-                && !matches!(action, Action::CloseMoved(_))
-                && !self.restore.iter().any(|(n, _)| *n == r.fd)
-            {
+            if (name.is_none() || close) && !self.restore.iter().any(|(n, _)| *n == r.fd) {
                 self.restore
                     .push((r.fd, SavedFd::capture(&action, actions)?));
             }
@@ -92,10 +89,6 @@ impl Scope {
                 return Ok(false);
             }
             match action {
-                Action::CloseMoved(fd) => {
-                    session.substitutions.replaced(fd);
-                    super::coprocess::replaced(session, fd);
-                }
                 Action::Dup(from, to) if from == to => {}
                 _ => self.changed.push(r.fd),
             }

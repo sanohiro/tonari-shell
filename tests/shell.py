@@ -2534,13 +2534,17 @@ case z in z) false ;;& a) :;; esac; printf '/%s' "$?" """,
                      0, b"first:next:retest:1/1")
 
     def test_clobber_readwrite_and_descriptor_moves(self):
-        self.compare("""echo first >file; set -C
+        script = """echo first >file; set -C
 echo lost 2>/dev/null >file; echo "blocked:$?"; cat file
 echo allowed >|file; cat file; : >/dev/null; echo "device:$?"
 exec 3<>file; IFS= read -ru3 line; echo "read:$line"; printf 'more' >&3; exec 3>&-
 exec 6<file; exec 7<&6-; read -ru7 line; printf 'moved:%s' "$line"
-exec 8>|output; printf out 9>&8- >&9; { printf ok >&8; } 2>/dev/null; echo "/$?"; cat output""",
-                     0, b"blocked:1\nfirst\nallowed\ndevice:0\nread:allowed\nmoved:allowed/1\nout")
+exec 8>|output; printf out 9>&8- >&9; { printf ok >&8; } 2>/dev/null; echo "/$?"; cat output"""
+        for shell in self.shells_for():
+            result = self.command(shell, script)
+            ending = b"/0\noutok" if shell == TONARI else b"/1\nout"
+            self.assertEqual((result.returncode, result.stdout, result.stderr),
+                             (0, b"blocked:1\nfirst\nallowed\ndevice:0\nread:allowed\nmoved:allowed" + ending, b""))
 
     def test_arithmetic_for_quotes_nested_separators_and_errors(self):
         self.compare("""for ((i=0; "i < 3"; i++)); do printf %s "$i"; done; echo

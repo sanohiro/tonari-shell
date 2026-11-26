@@ -16,6 +16,7 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "scoped-descriptor-move": "exec 7>permanent-move; exec 6>&7-; printf ok >&6; { : >&7; } 2>/dev/null; echo $?; exec 6>&-; cat permanent-move",
     "declaration-word-boundaries": "declare a[a[0]=1]=X; declare -p a; declare a[ a[2]=3 ]=Y; declare -p a; declare -A tab; shopt -s assoc_expand_once; declare tab[\"x [y\"]=green; printf '%s\\n' \"${tab['x [y']}\"; key='in side'; declare tab[\"$key\"]=ok; echo \"${tab[$key]}\"",
     "builtin-destination-validation": "declare -A a; k=\"80's\"; for flag in -u -s; do shopt \"$flag\" assoc_expand_once; printf -v \"a[$k]\" 'count%n%s' touched hi; echo \"fmt:$?:${touched:-no}\"; { read -r \"a[$k]\"; s=$?; read -r line; echo \"read:$s:$line\"; } <<< $'first\\nsecond'; [[ -v \"a[$k]\" ]]; echo \"stored:$?\"; done",
     "subscript-command-delimiters": "declare -A a; a[$(echo ])]=red; a[$(printf '[')]=blue; printf '<%s>\\n' \"${a[']']}\" \"${a['[']}\"; a[${missing:-']'}]=new; echo \"${a[']']}\"",
@@ -205,6 +206,7 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "scoped-descriptor-move": ("exec 7>&1; : 6>&7-; exec 7>&-", 600),
     "declaration-word-boundaries": ("declare 't[bare]=value'; declare t[\"white space\"]=value; declare t[plain]=value", 1400),
     "builtin-destination-validation": ("printf -v 'a[valid]' %s data; printf -v \"a[$k]\" %s abc", 1800),
     "subscript-command-delimiters": ("a[$(echo ])]=red; : \"${a[']']}\"", 300),
@@ -805,6 +807,11 @@ def main():
         # GNU's star lookahead skips the separator when the slash is inside @().
         slash_choice = "mkdir -p sep/ab/cd/efg; cd sep; shopt -s extglob; for GLOBIGNORE in '*/cd/efg' '*@(/)cd/efg'; do printf '<%s>' */*/efg*; done"
         assert run(shells[1], slash_choice)[0] == (0, b"<*/*/efg*><*/*/efg*>", False)
+        # Moving an fd during a builtin is scoped just like the two explicit
+        # redirections. A successful exec commits the move in the parent.
+        fd_move = """exec 7>move-out; : 6>&7-; printf one >&7; { printf two >&6; } 6>&7-; { : 6>&7- 9<absent; } 2>/dev/null
+printf three >&7; exec {slot}>&7; : 6>&7- {slot}>&-; printf four >&7; exec 6>&7-; printf five >&6; { : >&7; } 2>/dev/null; echo "$?"; cat move-out"""
+        assert run(shells[1], fd_move)[0] == (0, b"1\nonetwothreefourfive", False)
         # Preserve valid data and bindings when an operation cannot succeed.
         for code, output in [
             ('readonly fd=42; printf keep >protected; { : {fd}>protected; } 2>/dev/null; printf "%s/" "$?"; cat protected', b"1/keep"),
