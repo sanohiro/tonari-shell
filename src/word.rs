@@ -762,6 +762,10 @@ impl Output<'_> {
         match self {
             Self::Scalar(buffer) => buffer.push_str(text),
             Self::Pattern(buffer, PatternKind::Replacement) => {
+                if !quoted || !text.contains(['\\', '&']) {
+                    buffer.push_str(text);
+                    return;
+                }
                 for c in text.chars() {
                     if quoted && matches!(c, '\\' | '&') {
                         buffer.push('\\');

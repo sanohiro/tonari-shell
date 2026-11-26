@@ -180,7 +180,17 @@ impl Target {
 }
 
 pub(crate) fn single_quote(text: &str) -> String {
-    format!("'{}'", text.replace('\'', "'\\''"))
+    let mut output = String::with_capacity(text.len() + 2);
+    output.push('\'');
+    let mut tail = text;
+    while let Some((before, after)) = tail.split_once('\'') {
+        output.push_str(before);
+        output.push_str("'\\''");
+        tail = after;
+    }
+    output.push_str(tail);
+    output.push('\'');
+    output
 }
 
 fn shell_quote(text: &str) -> String {

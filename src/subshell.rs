@@ -154,7 +154,8 @@ pub fn capture_substitution(
     // Keep streams, virtual files, error reporting and trap execution in the child.
     if !session.traps.active()
         && !session.xtrace
-        && let Some(path) = input_only(&body).and_then(parser::Word::as_literal)
+        && let Some(path) = input_only(&body)
+            .and_then(|word| stored_path(word, session, session.posix && !session.interactive))
         && let Ok(before) = std::fs::metadata(path)
         && before.is_file()
     {
@@ -394,6 +395,20 @@ fn can_elide_child(session: &Session) -> bool {
 }
 
 fn capture_program<'a>(word: &'a parser::Word, session: &'a Session) -> Option<&'a str> {
+    if let Some(name) = word.as_literal() {
+        return Some(name);
+    }
+    if !can_elide_child(session) {
+        return None;
+    }
+    stored_path(word, session, false).filter(|path| path.starts_with('/'))
+}
+
+fn stored_path<'a>(
+    word: &'a parser::Word,
+    session: &'a Session,
+    allow_unquoted: bool,
+) -> Option<&'a str> {
     use crate::word::{Part, Word, is_identifier};
     if let Some(name) = word.as_literal() {
         return Some(name);
@@ -401,10 +416,10 @@ fn capture_program<'a>(word: &'a parser::Word, session: &'a Session) -> Option<&
     let Word::Expanded(parts) = word else {
         return None;
     };
-    let [Part::Parameter { name, quoted: true }] = parts.as_slice() else {
+    let [Part::Parameter { name, quoted }] = parts.as_slice() else {
         return None;
     };
-    if !can_elide_child(session) {
+    if !quoted && !allow_unquoted {
         return None;
     }
     // A quoted stored pathname supplies exactly one word. Preserve resolution
@@ -417,7 +432,7 @@ fn capture_program<'a>(word: &'a parser::Word, session: &'a Session) -> Option<&
     } else {
         return None;
     };
-    path.starts_with('/').then_some(path)
+    Some(path)
 }
 
 // Only a single output/status builtin with inert operands can be evaluated

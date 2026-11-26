@@ -881,7 +881,9 @@ pub(crate) fn exit_action(session: &mut Session, code: u8) -> u8 {
         crate::eval_text(session, &exit.command, code)
     });
     session.traps.handling_exit = false;
-    session.traps.entries.remove(&0);
+    if session.traps.entries.remove(&0).is_some() {
+        let _ = session.traps.watch_exit(false);
+    }
     if let Flow::Exit(n) = outcome { n } else { code }
 }
 

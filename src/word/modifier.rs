@@ -170,8 +170,14 @@ impl Modification {
                 let pattern =
                     env.pattern(std::mem::replace(pattern, Word::Literal(String::new())))?;
                 replacement.resolve(env)?;
-                let replacement = std::mem::replace(replacement, Word::Literal(String::new()))
-                    .replacement(&|k| env.lookup(k), env.session.positional.as_slice());
+                let replacement = std::mem::replace(replacement, Word::Literal(String::new()));
+                let lookup = |k: &str| env.lookup(k);
+                let positional = env.session.positional.as_slice();
+                let replacement = if env.session.shopt.patsub_replacement {
+                    replacement.replacement(&lookup, positional)
+                } else {
+                    replacement.scalar(&lookup, positional)
+                };
                 Ok(values.map(quoted, |v| {
                     super::replace::substitute(
                         v,

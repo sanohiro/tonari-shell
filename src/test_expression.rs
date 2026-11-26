@@ -165,7 +165,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
 
 pub struct Compiled {
     pattern: String,
-    regex: Box<libc::regex_t>,
+    regex: Option<Box<libc::regex_t>>,
     captures: usize,
 }
 
@@ -179,18 +179,25 @@ impl Compiled {
             libc::REG_EXTENDED
         };
         if unsafe { libc::regcomp(regex.as_mut_ptr(), encoded.as_ptr(), flags) } != 0 {
-            eprintln!("tonari: [[: invalid regular expression: {pattern}");
-            return Err(());
+            return Ok(Self {
+                pattern,
+                regex: None,
+                captures: 0,
+            });
         }
         let captures = capture_count(&pattern) + 1;
         Ok(Self {
             pattern,
-            regex: unsafe { regex.assume_init() },
+            regex: Some(unsafe { regex.assume_init() }),
             captures,
         })
     }
 
     fn search(&self, text: &str) -> Result<Option<Vec<String>>, ()> {
+        let Some(regex) = self.regex.as_deref() else {
+            eprintln!("tonari: [[: invalid regular expression: {}", self.pattern);
+            return Err(());
+        };
         let encoded = CString::new(text).map_err(|_| ())?;
         let mut matched = vec![
             libc::regmatch_t {
@@ -201,7 +208,7 @@ impl Compiled {
         ];
         match unsafe {
             libc::regexec(
-                &*self.regex,
+                regex,
                 encoded.as_ptr(),
                 matched.len(),
                 matched.as_mut_ptr(),
@@ -226,7 +233,9 @@ impl Compiled {
 
 impl Drop for Compiled {
     fn drop(&mut self) {
-        unsafe { libc::regfree(&mut *self.regex) };
+        if let Some(regex) = self.regex.as_deref_mut() {
+            unsafe { libc::regfree(regex) };
+        }
     }
 }
 
