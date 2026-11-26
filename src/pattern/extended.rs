@@ -17,7 +17,11 @@ enum Atom {
     Group(u8, Vec<Vec<Atom>>),
 }
 
-fn sequence(source: &mut &str, grouped: bool, extended: bool) -> Option<Vec<Atom>> {
+fn sequence<const PATHNAME: bool>(
+    source: &mut &str,
+    grouped: bool,
+    extended: bool,
+) -> Option<Vec<Atom>> {
     let mut atoms = Vec::new();
     while !source.is_empty() {
         let rest = *source;
@@ -32,7 +36,7 @@ fn sequence(source: &mut &str, grouped: bool, extended: bool) -> Option<Vec<Atom
             *source = &rest[2..];
             let mut alternatives = Vec::new();
             loop {
-                alternatives.push(sequence(source, true, extended)?);
+                alternatives.push(sequence::<PATHNAME>(source, true, extended)?);
                 let sep = source.as_bytes().first()?;
                 *source = &source[1..];
                 if *sep == b')' {
@@ -59,8 +63,10 @@ fn sequence(source: &mut &str, grouped: bool, extended: bool) -> Option<Vec<Atom
             }
             continue;
         }
+        let class = &bytes[1..];
         if bytes[0] == b'['
-            && let Some(end) = bracket::class_end(&bytes[1..])
+            && let Some(end) = bracket::class_end(class)
+            && !(PATHNAME && class[..=end].contains(&b'/'))
         {
             let len = end + 2;
             atoms.push(Atom::Class(
@@ -73,7 +79,7 @@ fn sequence(source: &mut &str, grouped: bool, extended: bool) -> Option<Vec<Atom
         let (atom, count) = match bytes[0] {
             b'?' => (Atom::Any, 1),
             b'*' => (Atom::Star, 1),
-            b'[' if grouped => return None,
+            b'[' if grouped && !PATHNAME => return None,
             b'\\' if bytes.len() > 1 => {
                 let end = 1 + rest[1..].chars().next()?.len_utf8();
                 (Atom::Text(rest[1..end].into()), end)
@@ -125,7 +131,7 @@ fn prepare_classes_and_case(atoms: &mut [Atom], fold: Option<super::CharacterLoc
 
 fn one_character<const PATHNAME: bool>(atom: &Atom, value: &str, pos: usize) -> Option<usize> {
     let c = value[pos..].chars().next()?;
-    if PATHNAME && c == '/' && matches!(atom, Atom::Any) {
+    if PATHNAME && c == '/' {
         return None;
     }
     let end = pos + c.len_utf8();
@@ -411,7 +417,7 @@ impl Pattern {
         let bytewise = matches!(locale, super::CharacterLocale::Ascii)
             && (text.contains(['?', '[']) || extended && has_group(text));
         let text = pathname_units(text, bytewise);
-        let mut pattern = Self::parse(&text, extended);
+        let mut pattern = Self::parse_mode::<true>(&text, extended);
         if nocase || bytewise {
             prepare_classes_and_case(&mut pattern.atoms, nocase.then_some(locale));
             pattern.single_run = None;
@@ -420,9 +426,13 @@ impl Pattern {
         pattern
     }
 
-    pub(crate) fn parse(mut text: &str, extended: bool) -> Self {
+    pub(crate) fn parse(text: &str, extended: bool) -> Self {
+        Self::parse_mode::<false>(text, extended)
+    }
+
+    fn parse_mode<const PATHNAME: bool>(mut text: &str, extended: bool) -> Self {
         let original = text;
-        let atoms = sequence(&mut text, false, extended)
+        let atoms = sequence::<PATHNAME>(&mut text, false, extended)
             .unwrap_or_else(|| vec![Atom::Text(original.into())]);
         let mut variable = atoms
             .iter()

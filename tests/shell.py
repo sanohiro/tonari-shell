@@ -1431,7 +1431,7 @@ GLOBIGNORE='@(sub/file|./keep)'; printf '<%s>' ./* sub/*; echo
             with self.subTest(shell=shell):
                 version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"')
                 newer = tuple(map(int, version.stdout.strip().split(b"."))) >= (5, 3)
-                prefix = b"<./++><./;>" if shell == BASH and newer else b""
+                prefix = b"<./++><./;>" if shell != BASH or newer else b""
                 expected = b"recovered:1\nredirected:1\n" + prefix + b"<./keep><./sub>\n<./++><./;><./sub><sub/*>\n"
                 result = self.command(shell, script)
                 self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, b""))

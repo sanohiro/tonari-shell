@@ -154,6 +154,7 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "globignore-separators": "mkdir -p gp/ab/cd/efg 'gp/ab[/]cd/efg' gp/abacd/efg; cd gp; shopt -s extglob; for GLOBIGNORE in 'ab/cd/efg' 'ab[/]cd/efg' 'ab[/a]cd/efg' 'ab[a/]cd/efg' 'ab[!a]cd/efg' 'ab[.-0]cd/efg' '*/*/efg' '*[/]*/efg' '*[/a]*/efg' '*[a/]*/efg' '*[!a]*/efg' '*[.-0]*/efg' '*[b]/*/efg' '*[ab]/*/efg' '*[ba]/*/efg' '*[!a]/*/efg' '*[a-c]/*/efg' 'ab@(/)cd/efg' '*/cd/efg'; do printf '<%s>' */*/efg*; echo; done",
     "timestamped-blank-lines": "printf '#1\\n\\n\\none\\n\\nmiddle\\n\\n\\n#2\\n\\nnext\\n' >h; HISTTIMEFORMAT=; history -c; history -r h; history; history -w round; cat round",
     "printf-field-limits": "for f in '[%*s]:%s' '[%.*s]:%s'; do printf \"$f\\n\" 21474836470 abc z; echo $?; printf -v value \"$f\" 9223372036854775825 abc z; echo \"$?:$value\"; done; printf '[%.9223372036854775825Q]\\n' abc; echo $?",
     "alias-print-all": "alias a=one b=two; alias -p a=changed missing; echo status:$?; alias a; set -o posix; alias -p a; alias a",
@@ -200,6 +201,7 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "globignore-separators": ("items=(gb/*/efg*); [[ ${#items[@]} == 80 ]] || exit 1", 100),
     "interactive-noexec": ("\"$AUDIT_SHELL\" --norc -in <commands 2>/dev/null", 4),
     "timestamped-blank-lines": ("history -c; history -r h", 160),
     "printf-field-limits": ("printf -v out '[%*.*s]' 6 3 abcdef; printf -v out '[%.*s]' 21474836470 value", 1600),
@@ -791,6 +793,10 @@ def main():
             ('x=$(cat <<EOF\none\nEOF) middle\ntwo\nEOF\n)\nprintf "%s\\n" "$x"', b"one\nEOF) middle\ntwo\n"),
         ]:
             assert run(shells[1], code)[0] == (0, output, False), code
+        # A single literal alternative supplies exactly the same separator.
+        # GNU's star lookahead skips the separator when the slash is inside @().
+        slash_choice = "mkdir -p sep/ab/cd/efg; cd sep; shopt -s extglob; for GLOBIGNORE in '*/cd/efg' '*@(/)cd/efg'; do printf '<%s>' */*/efg*; done"
+        assert run(shells[1], slash_choice)[0] == (0, b"<*/*/efg*><*/*/efg*>", False)
         # Preserve valid data and bindings when an operation cannot succeed.
         for code, output in [
             ('readonly fd=42; printf keep >protected; { : {fd}>protected; } 2>/dev/null; printf "%s/" "$?"; cat protected', b"1/keep"),
@@ -1069,6 +1075,7 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "globignore-separators": "mkdir -p gb/g{1..80}/efg; GLOBIGNORE='gb[/]*/efg:*/bad/efg'",
                 "interactive-noexec": "export HISTFILE=/dev/null; for ((j=0;j<250;j++)); do echo ': cmd'; done >commands",
                 "timestamped-blank-lines": "HISTTIMEFORMAT=; for ((j=0;j<100;j++)); do printf '#1\\n\\none\\n\\nmiddle\\n\\n#2\\nnext\\n'; done >h",
                 "printf-field-limits": "exec 2>/dev/null",

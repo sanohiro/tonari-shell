@@ -732,7 +732,7 @@ fn paths(
     if let Some(patterns) = &options.ignore {
         for pattern in patterns.iter() {
             // GLOBIGNORE tests the entire displayed pathname. An extended
-            // alternative may contain a slash or match one with a bracket class.
+            // alternative may contain a literal directory separator.
             let matcher =
                 extended::Pattern::for_path(pattern, options.extglob, options.nocaseglob, locale);
             paths.retain(|path| !matcher.matches_in_locale::<true>(path, false));
