@@ -18,6 +18,8 @@ CASES = {
     "regional time": ('export TZ=UTC0 LC_ALL=de_DE.UTF-8; for ((t=0;t<2000;t++)); do '
                       'printf -v stamp "%(%A %B %F %T)T" "$t"; done; echo "$stamp"',
                       b"Donnerstag Januar 1970-01-01 00:33:19\n"),
+    "padded time": ('export TZ=UTC0 LC_ALL=C; for ((t=0;t<2000;t++)); do '
+                    'printf -v stamp "%(%_d %0e)T" "$t"; done; echo "$stamp"', b" 1 01\n"),
     "changing timestamps": ('export TZ=America/New_York; for ((t=1583650200;t<=1583652600;t++)); do '
                             'printf -v stamp "%(%F %T %Z %z)T" "$t"; done; echo "$stamp"',
                             b"2020-03-08 03:30:00 EDT -0400\n"),

@@ -2,7 +2,7 @@
 // GNU locale data; the clock and calendar conversions still use the shell TZ.
 use tonari_time_locales::{Field, Locale};
 
-pub(super) fn resolve(name: &str) -> Option<Locale> {
+pub(super) fn resolve(name: &str) -> Locale {
     let normalized;
     let name = if let Some((base, codeset)) = name.split_once('.') {
         if let Some((_, modifier)) = codeset.split_once('@') {
@@ -15,14 +15,19 @@ pub(super) fn resolve(name: &str) -> Option<Locale> {
         name
     };
     if matches!(name, "C" | "POSIX") {
-        return None;
+        return tonari_time_locales::POSIX;
     }
-    Locale::find(name)
+    Locale::find(name).unwrap_or(tonari_time_locales::POSIX)
 }
 
-pub(super) fn expand(locale: Locale, format: &str, tm: &libc::tm) -> String {
+pub(super) fn expand(
+    locale: Locale,
+    format: &str,
+    tm: &libc::tm,
+    single: &dyn Fn(&str) -> Option<String>,
+) -> String {
     let mut result = String::with_capacity(format.len() + 24);
-    expand_into(&mut result, locale, format, tm, 0);
+    expand_into(&mut result, locale, format, tm, 0, single);
     result
 }
 
@@ -39,11 +44,22 @@ fn literal(out: &mut String, text: &str) {
     }
 }
 
-fn expand_into(out: &mut String, locale: Locale, format: &str, tm: &libc::tm, depth: u8) {
+fn expand_into(
+    out: &mut String,
+    locale: Locale,
+    format: &str,
+    tm: &libc::tm,
+    depth: u8,
+    single: &dyn Fn(&str) -> Option<String>,
+) {
     let mut rest = format;
     while let Some((prefix, after)) = rest.split_once('%') {
         out.push_str(prefix);
-        let mut chars = after.chars();
+        let flags = after.trim_start_matches(['_', '-', '0', '^', '#']);
+        let code = flags.trim_start_matches(|ch: char| ch.is_ascii_digit());
+        let flags_len = after.len() - flags.len();
+        let prefix_len = after.len() - code.len();
+        let mut chars = code.chars();
         let first = chars.next();
         let modifier = first.filter(|c| matches!(c, 'E' | 'O'));
         let spec = if modifier.is_some() {
@@ -52,6 +68,39 @@ fn expand_into(out: &mut String, locale: Locale, format: &str, tm: &libc::tm, de
             first
         };
         rest = chars.as_str();
+        let directive = &after[..after.len() - rest.len()];
+        let valid = match (modifier, spec) {
+            (Some('E'), Some(c)) => "cCxXyY".contains(c),
+            (Some('O'), Some(c)) => "bBhdeHIklmMSuUVwWy".contains(c),
+            (None, Some(c)) => "aAbBhCcDdeFgGHIjklmMnPprRsStTuUVwWxXyYzZ%".contains(c),
+            _ => false,
+        };
+        if !valid {
+            // GNU strftime preserves the spelling of an unknown conversion.
+            out.push_str("%%");
+            literal(out, directive);
+            continue;
+        }
+        if prefix_len > 0 {
+            if prefix_len == 1
+                && modifier.is_none()
+                && short_number(out, tm, after.as_bytes()[0], spec.unwrap())
+            {
+                continue;
+            }
+            let mut plain = String::from("%");
+            plain.push_str(&directive[prefix_len..]);
+            if let Some(value) = single(&plain) {
+                decorated(
+                    out,
+                    &value,
+                    spec.unwrap(),
+                    &after[..flags_len],
+                    &after[flags_len..prefix_len],
+                );
+            }
+            continue;
+        }
         let day = tm.tm_wday as usize;
         let month = tm.tm_mon as usize;
         let name = match (modifier, spec) {
@@ -137,7 +186,7 @@ fn expand_into(out: &mut String, locale: Locale, format: &str, tm: &libc::tm, de
             _ => None,
         };
         if let Some(nested) = nested.filter(|_| depth < 8) {
-            expand_into(out, locale, nested, tm, depth + 1);
+            expand_into(out, locale, nested, tm, depth + 1, single);
             continue;
         }
         out.push('%');
@@ -156,6 +205,86 @@ fn expand_into(out: &mut String, locale: Locale, format: &str, tm: &libc::tm, de
         }
     }
     out.push_str(rest);
+}
+
+// Common padding flags operate on an already-converted calendar field.
+fn short_number(out: &mut String, tm: &libc::tm, flag: u8, spec: char) -> bool {
+    if !matches!(flag, b'0' | b'_' | b'-') {
+        return false;
+    }
+    let number = match spec {
+        'd' | 'e' => tm.tm_mday,
+        'H' | 'k' => tm.tm_hour,
+        'I' | 'l' => (tm.tm_hour + 11) % 12 + 1,
+        'm' => tm.tm_mon + 1,
+        'M' => tm.tm_min,
+        'S' => tm.tm_sec,
+        'y' => tm.tm_year.rem_euclid(100),
+        _ => return false,
+    } as u8;
+    if number >= 10 {
+        out.push(char::from(b'0' + number / 10));
+    } else if flag != b'-' {
+        out.push(if flag == b'0' { '0' } else { ' ' });
+    }
+    out.push(char::from(b'0' + number % 10));
+    true
+}
+
+// Text widths in strftime count bytes, including multibyte month names.
+fn decorated(out: &mut String, value: &str, spec: char, flags: &str, width: &str) {
+    let upper = flags.contains('^') || flags.contains('#') && "aAbBh".contains(spec);
+    let lower = flags.contains('#') && "pZ".contains(spec);
+    let changed;
+    let value = if lower {
+        changed = value.to_lowercase();
+        changed.as_str()
+    } else if upper {
+        changed = value.to_uppercase();
+        changed.as_str()
+    } else {
+        value
+    };
+    let padding = flags
+        .bytes()
+        .rev()
+        .find(|c| matches!(c, b'-' | b'_' | b'0'));
+    let numeric =
+        "CdeGgHIjklmMSuUVwWyY".contains(spec) && value.trim().bytes().all(|b| b.is_ascii_digit());
+    let default = if numeric && !matches!(spec, 'e' | 'k' | 'l') {
+        '0'
+    } else {
+        ' '
+    };
+    let pad = match padding {
+        Some(b'0') => '0',
+        Some(b'-' | b'_') => ' ',
+        _ => default,
+    };
+    let natural = if numeric && padding != Some(b'-') {
+        value.len()
+    } else {
+        0
+    };
+    let value = if numeric && (padding.is_some() || !width.is_empty()) {
+        let digits = value.trim_start_matches(['0', ' ']);
+        if digits.is_empty() { "0" } else { digits }
+    } else {
+        value
+    };
+    let width = if width.is_empty() {
+        0
+    } else {
+        let Ok(size) = width.parse::<i32>() else {
+            return;
+        };
+        size as usize
+    };
+    let count = width.max(natural).saturating_sub(value.len());
+    if out.try_reserve(count).is_ok() {
+        out.extend(std::iter::repeat_n(pad, count));
+        literal(out, value);
+    }
 }
 
 fn numeric_value(tm: &libc::tm, spec: char) -> Option<usize> {

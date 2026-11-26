@@ -99,6 +99,11 @@ fn main() {
         .push(u32::try_from(tables.text.len()).unwrap());
     fs::write(out.join("text"), tables.text).unwrap();
     let mut code = String::new();
+    let posix = include_str!("names.txt")
+        .lines()
+        .position(|s| s == "POSIX")
+        .unwrap();
+    writeln!(code, "pub const POSIX: Locale = Locale({posix});").unwrap();
     writeln!(
         code,
         "#[derive(Clone, Copy)] pub enum Field {{ {} }}",

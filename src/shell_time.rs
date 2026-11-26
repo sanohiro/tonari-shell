@@ -7,13 +7,15 @@ mod regional;
 
 struct Clock {
     #[cfg(target_env = "musl")]
-    region: Option<tonari_time_locales::Locale>,
+    region: tonari_time_locales::Locale,
     name: Option<String>,
     zone: tz::TimeZone,
     locale_name: String,
+    #[cfg(not(target_env = "musl"))]
     locale: libc::locale_t,
 }
 
+#[cfg(not(target_env = "musl"))]
 impl Drop for Clock {
     fn drop(&mut self) {
         if !self.locale.is_null() {
@@ -30,6 +32,7 @@ impl Clock {
             Some(name) => tz::TimeZone::from_posix_tz(name),
         }
         .unwrap_or_else(|_| tz::TimeZone::utc());
+        #[cfg(not(target_env = "musl"))]
         let locale =
             CString::new(locale_name.as_str())
                 .ok()
@@ -42,6 +45,7 @@ impl Clock {
             name,
             zone,
             locale_name,
+            #[cfg(not(target_env = "musl"))]
             locale,
         }
     }
@@ -96,8 +100,10 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
     #[cfg(target_env = "musl")]
     let localized;
     #[cfg(target_env = "musl")]
-    let format = if let Some(region) = clock.region {
-        localized = regional::expand(region, format, &tm);
+    let format = {
+        localized = regional::expand(clock.region, format, &tm, &|spec| {
+            format_in_zone(clock, spec, seconds)
+        });
         if !localized.contains('%') {
             return Some(localized);
         }
@@ -105,8 +111,6 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
             return Some(text);
         }
         localized.as_str()
-    } else {
-        format
     };
     let zone_name = CString::new(designation).ok()?;
     tm.tm_zone = zone_name.as_ptr().cast_mut();
@@ -154,6 +158,11 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
         let mut bytes = Vec::<u8>::new();
         bytes.try_reserve_exact(size).ok()?;
         let n = unsafe {
+            #[cfg(target_env = "musl")]
+            {
+                libc::strftime(bytes.as_mut_ptr().cast(), size, fmt.as_ptr(), &tm)
+            }
+            #[cfg(not(target_env = "musl"))]
             if clock.locale.is_null() {
                 libc::strftime(bytes.as_mut_ptr().cast(), size, fmt.as_ptr(), &tm)
             } else {

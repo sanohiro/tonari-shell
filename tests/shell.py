@@ -109,10 +109,19 @@ done
         result = self.command(TONARI, script, "_", *locales)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, baseline.stdout, b""))
         if sys.platform.startswith("linux") and "ja_JP" in locales:
+            self.env["LC_ALL"] = "de_DE.UTF-8" if "de_DE" in locales else "C"
+            if "de_DE" in locales:
+                self.compare("TZ=UTC0 printf '%(%^B|%10B|%#A)T' 0",
+                             0, b"JANUAR|    Januar|DONNERSTAG", minimum=5)
             self.env["LC_ALL"] = "ja_JP.UTF-8"
             self.compare("export TZ=UTC0; printf '%(%EC|%Ey|%EY|%Od)T\\n' 0 1556668800 1700000000",
                          0, "昭和|45|昭和45年|一\n令和|01|令和元年|一\n令和|05|令和05年|十四\n".encode(),
                          minimum=5)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "GNU strftime flag semantics")
+    def test_printf_time_flags_and_unknown_directives(self):
+        self.compare("export TZ=UTC0; printf '%(%^B|%#A|%#p|%#Z|%10B|%05a|%-d|%_d|%0e|%10d|%OY|%Q|%%)T' 0",
+                     0, b"JANUARY|THURSDAY|am|utc|   January|00Thu|1| 1|01|0000000001|%OY|%Q|%", minimum=5)
 
     def test_printf_long_time_format(self):
         fmt = "%(" + "%Y" * 1000 + ")T"
