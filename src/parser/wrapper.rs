@@ -104,6 +104,7 @@ pub(super) fn parse(source: &str) -> Option<Statement> {
         command: Command::Function {
             name: name.to_owned(),
             definition: Rc::new(super::FunctionDefinition {
+                declaration_line: line_number,
                 body,
                 location: location(open, line.len(), line_number),
                 rendered_body: Default::default(),

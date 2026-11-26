@@ -485,6 +485,10 @@ impl Traps {
     pub fn leave_source(&mut self, saved: Option<Entry>) {
         self.restore(DEBUG, saved);
     }
+    pub fn return_handler(&self) -> bool {
+        !self.handling_return && !self.handling_debug && self.catches(RETURN)
+    }
+
     pub fn debug_handler(&self) -> bool {
         !self.handling_debug && self.catches(DEBUG)
     }
@@ -776,10 +780,7 @@ pub fn returning(session: &mut Session, flow: Flow) -> Flow {
         Flow::Return(_) => session.traps.before_return,
         _ => return flow,
     };
-    if session.traps.handling_return
-        || session.traps.handling_debug
-        || !session.traps.catches(RETURN)
-    {
+    if !session.traps.return_handler() {
         return flow;
     }
     session.traps.handling_return = true;

@@ -16,6 +16,10 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "history-script-comments": "set -o history\n# first\n   \n   # second\nhistory",
+    "fc-range-substitutions": "history -c; history -s 'echo one'; history -s 'echo axb'; history -s 'echo three'; fc -ln 999; fc -ln -0; fc -ln 0; fc -ln 3; fc -ln 1 999; fc -s a=y b=z 2 2>/dev/null; fc -s -0 2>/dev/null; echo $?",
+    "caller-input": "f(){ caller foo 2>err; echo \"$?\"; test -s err; echo $?; caller -1 2>err; echo \"$?\"; caller 23; echo $?; }; f",
+    "debug-function-entry-return": "set -T\ntrap 'echo D.$FUNCNAME.$LINENO' DEBUG\ntrap 'echo R.$FUNCNAME.$LINENO' RETURN\nf()\n{\n : one\n : two\n}\nf\nf(){ return 7; }; f; trap - DEBUG RETURN; shopt -s extdebug; declare -F f | awk '{print $1,$2}'",
     "bind-human-list": "{ bind -u beginning-of-line; bind '\"zzq\": beginning-of-line'; bind -q beginning-of-line; bind -P | grep '^beginning-of-line '; } 2>/dev/null",
     "alias-option-processing": "alias -- -x=ok; alias -pp -- -x; alias -Z 2>/dev/null; echo $?; unalias -aZ 2>/dev/null; echo $?; alias -- -x; unalias -aa; alias -p",
     "arithmetic-assignment-index": "n=0; ((a[n]=++n)); n=0; ((b[n]+=++n)); n=0; ((c[n++]=n++)); declare -p a b c; echo \"$n\"; n=0; a='(a[n]=++n)<7&&a[0]'; ((a[0])); echo \"${a[@]:1}\"",
@@ -185,6 +189,10 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "history-script-comments": ("history -s '# history comment'; history -d -1", 950),
+    "fc-range-substitutions": ("fc -ln 100 -1 >/dev/null; fc -s a=y b=z 1 >/dev/null 2>&1", 600),
+    "caller-input": ("f", 2000),
+    "debug-function-entry-return": ("f; :", 650),
     "bind-human-list": ("bind -q beginning-of-line >/dev/null 2>&1", 900),
     "long-working-directory": ("pwd -P >/dev/null; pwd -L >/dev/null", 18),
     "alias-option-processing": ("alias -- -sample=yes; alias -pp -- -sample >/dev/null; unalias -- -sample", 1100),
@@ -1014,6 +1022,9 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "fc-range-substitutions": "history -c; history -s ': axb'; history -s ': two'",
+                "caller-input": "f(){ caller bad 2>/dev/null; :; }",
+                "debug-function-entry-return": "set -T; f(){ :; :; }; trap ': \"$FUNCNAME:$LINENO\"' DEBUG RETURN",
                 "long-working-directory": "set -o posix; cd deep-root; p=deep-part-abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd; for ((j=0;j<20;j++)); do cd \"$p\" || exit 9; done",
                 "ascii-range-option": "LC_ALL=C; shopt -u globasciiranges",
                 "gnu-diagnostic-location": "shopt -s gnu_errfmt",

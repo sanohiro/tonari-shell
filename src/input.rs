@@ -442,6 +442,13 @@ fn run(
         // At a new physical line these tokens cannot open a command. Keep
         // accumulated compound commands, history expansion and NUL diagnostics.
         if line_start == 0 && n != 0 && blank_or_comment(text, session) {
+            if !check
+                && !session.interactive
+                && session.source_depth == 0
+                && session.begin_history_line(text)
+            {
+                session.finish_history_line();
+            }
             base_line += text.bytes().filter(|&b| b == b'\n').count();
             input.clear();
             continue;
@@ -659,6 +666,13 @@ pub fn text(
         here_doc = None;
         let mut text = edited.as_deref().unwrap_or(&source[start..end]);
         if new_command && blank_or_comment(text, session) {
+            if !check
+                && tail
+                && (!session.interactive || session.command_history_expansion)
+                && session.begin_history_line(text)
+            {
+                session.finish_history_line();
+            }
             base_line = line_number + 1;
             start = end;
             edited = None;

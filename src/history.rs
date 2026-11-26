@@ -443,7 +443,7 @@ impl Session {
             .get("HISTSIZE")
             .and_then(|s| s.parse::<i64>().ok())
             .unwrap_or(500);
-        if limit == 0 || text.trim().is_empty() {
+        if limit == 0 || text.is_empty() || session.interactive && text.trim().is_empty() {
             return false;
         }
         let previous = previous.map(String::as_str);

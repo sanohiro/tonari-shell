@@ -691,7 +691,17 @@ pub(crate) fn call_with_bindings(
     let hidden = session
         .traps
         .enter_function(session.errtrace, session.functrace || traced);
-    let flow = crate::traps::debug(session, status).unwrap_or_else(|| {
+    let entry = if session.traps.debug_handler() {
+        let old = session
+            .signal_line
+            .replace(function.definition.location.line);
+        let flow = crate::traps::debug(session, status);
+        session.signal_line = old;
+        flow
+    } else {
+        None
+    };
+    let flow = entry.unwrap_or_else(|| {
         run_statements(
             session,
             function
@@ -705,6 +715,9 @@ pub(crate) fn call_with_bindings(
             &mut [],
         )
     });
+    if matches!(flow, Flow::Continue(_)) && session.traps.return_handler() {
+        session.signal_line = Some(function.definition.location.line);
+    }
     let flow = crate::traps::returning(session, flow);
     session.traps.leave_function(hidden);
     session.signal_line = caller_signal_line;

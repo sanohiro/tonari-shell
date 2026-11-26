@@ -583,23 +583,14 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
             }
         }
     }
-    if session.posix
-        && args.len()
-            > (if substitute {
-                1 + usize::from(args.first().is_some_and(|s| s.contains('=')))
-            } else {
-                2
-            })
-    {
-        return Err(error("too many arguments"));
-    }
-    let substitution = if substitute {
-        args.first().and_then(|a| a.split_once('='))
+    let replacements = if substitute {
+        args.iter().take_while(|word| word.contains('=')).count()
     } else {
-        None
+        0
     };
-    if substitution.is_some() {
-        args = &args[1..];
+    let (replacements, args) = args.split_at(replacements);
+    if session.posix && args.len() > if substitute { 1 } else { 2 } {
+        return Err(error("too many arguments"));
     }
     let h = session.history.as_deref();
     let end = h.map_or(0, |h| h.current.unwrap_or(h.lines.len()));
@@ -611,12 +602,26 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
         };
     }
     let h = h.unwrap();
-    let select = |arg: &String| {
+    let select = |arg: &String, first: bool| {
         if let Ok(n) = arg.parse::<i64>() {
             if n < 0 {
                 return Ok(end.saturating_sub(n.unsigned_abs() as usize));
             }
-            position(h, arg, end)
+            if n == 0 {
+                return if arg.starts_with('-') {
+                    if list {
+                        Ok(h.lines.len() - 1)
+                    } else {
+                        Err(error("invalid history specification"))
+                    }
+                } else {
+                    Ok(end - 1)
+                };
+            }
+            let index = (n as usize).checked_sub(h.base + 1);
+            Ok(index
+                .filter(|i| *i < end - 1)
+                .unwrap_or(if first && !substitute { 0 } else { end - 1 }))
         } else {
             h.lines[..end]
                 .iter()
@@ -626,14 +631,14 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
     };
     let mut first = args
         .first()
-        .map(select)
+        .map(|arg| select(arg, true))
         .transpose()?
         .unwrap_or_else(|| end.saturating_sub(if list { 16 } else { 1 }));
-    let mut last =
-        args.get(1)
-            .map(select)
-            .transpose()?
-            .unwrap_or(if list { end - 1 } else { first });
+    let mut last = args
+        .get(1)
+        .map(|arg| select(arg, false))
+        .transpose()?
+        .unwrap_or(if list { first.max(end - 1) } else { first });
     if first > last {
         std::mem::swap(&mut first, &mut last);
         reverse = true;
@@ -661,8 +666,11 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
         out.write_all(source.as_bytes())?;
         return Ok(Flow::Continue(0));
     }
-    if let Some((before, after)) = substitution {
-        source = source.replace(before, after);
+    for replacement in replacements {
+        let (before, after) = replacement.split_once('=').unwrap();
+        if !before.is_empty() {
+            source = source.replace(before, after);
+        }
     }
     if !substitute && editor != Some("-") {
         let program = editor

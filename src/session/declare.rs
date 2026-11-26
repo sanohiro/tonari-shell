@@ -153,8 +153,12 @@ pub(super) fn run(
                     } else {
                         &function.source
                     };
-                    if writeln!(out, "{name} {} {source}", function.definition.location.line)
-                        .is_err()
+                    if writeln!(
+                        out,
+                        "{name} {} {source}",
+                        function.definition.declaration_line
+                    )
+                    .is_err()
                     {
                         return crate::Flow::Continue(1);
                     }
