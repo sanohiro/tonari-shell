@@ -1,9 +1,9 @@
 // A signal handler can run while Rust holds allocator and I/O locks. It only
-// sets a bit. The interpreter executes shell code at a command boundary.
+// records pending events. The interpreter executes shell code at a command boundary.
 use crate::{Flow, Session};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicI32, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering::Relaxed};
 
 const SIGNALS: &[(&str, i32)] = &[
     ("EXIT", 0),
@@ -115,6 +115,21 @@ const fn signal_bit(sig: i32) -> u64 {
 static PENDING: AtomicU64 = AtomicU64::new(0);
 extern "C" fn record(sig: i32) {
     PENDING.fetch_or(signal_bit(sig), Relaxed);
+}
+
+// A single kernel SIGCHLD can cover several waitable children. Count the
+// statuses consumed by the interpreter, including when wait blocks on a
+// different PID. A bare signal wakes the interpreter to check for statuses.
+static WATCH_CHILDREN: AtomicBool = AtomicBool::new(false);
+static CHILD_EVENTS: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) fn waitpid(pid: libc::pid_t, status: &mut i32, flags: i32) -> libc::pid_t {
+    let got = unsafe { libc::waitpid(pid, status, flags) };
+    if got > 0 && WATCH_CHILDREN.load(Relaxed) {
+        CHILD_EVENTS.fetch_add(1, Relaxed);
+        record(libc::SIGCHLD);
+    }
+    got
 }
 
 // Pseudo-traps never enter the OS signal API or the pending signal bitset.
@@ -424,6 +439,13 @@ impl Traps {
                 return Err(io::Error::last_os_error());
             }
         }
+        if sig == libc::SIGCHLD {
+            let watch = command != "-" && !command.is_empty();
+            if !watch {
+                CHILD_EVENTS.store(0, Relaxed);
+            }
+            WATCH_CHILDREN.store(watch && self.running & signal_bit(sig) == 0, Relaxed);
+        }
         if command == "-" {
             self.entries.remove(&sig);
         } else {
@@ -489,6 +511,10 @@ impl Traps {
 
     pub fn after_fork(&mut self, errtrace: bool, functrace: bool) {
         self.current_action = None;
+        if self.entries.contains_key(&libc::SIGCHLD) {
+            WATCH_CHILDREN.store(false, Relaxed);
+            CHILD_EVENTS.store(0, Relaxed);
+        }
         if self.interactive_handlers {
             self.interactive_handlers = false;
             crate::execute::reset_caught_signals(&[
@@ -799,18 +825,37 @@ pub fn dispatch(session: &mut Session, status: u8) -> Flow {
             continue;
         }
         if let Some(command) = session.traps.entries.get(&sig).map(|e| e.command.clone()) {
+            let count = if sig == libc::SIGCHLD {
+                session.jobs.poll();
+                session.substitutions.finish(session.substitutions.scope());
+                let n = CHILD_EVENTS.swap(0, Relaxed);
+                if n == 0 {
+                    continue;
+                }
+                // Children synchronously reaped by the action must not
+                // recursively trigger the same action.
+                WATCH_CHILDREN.store(false, Relaxed);
+                n
+            } else {
+                1
+            };
             session.traps.running |= bit;
             let previous = session.pipe_status.clone();
             let previous_line = session.signal_line.replace(1);
-            let flow = with_trapsig(session, sig, status, |session| {
-                crate::input::text(session, &command, status, false, false, Some(1))
-            });
+            let mut flow = Flow::Continue(status);
+            for _ in 0..count {
+                flow = with_trapsig(session, sig, status, |session| {
+                    crate::input::text(session, &command, status, false, false, Some(1))
+                });
+                if !matches!(flow, Flow::Continue(_)) {
+                    break;
+                }
+            }
             session.signal_line = previous_line;
             session.pipe_status = previous;
             session.traps.running &= !bit;
-            // Commands in a CHLD handler can create children of their own.
             if sig == libc::SIGCHLD {
-                PENDING.fetch_and(!bit, Relaxed);
+                WATCH_CHILDREN.store(session.traps.catches(sig), Relaxed);
             }
             if !matches!(flow, Flow::Continue(_)) {
                 return flow;

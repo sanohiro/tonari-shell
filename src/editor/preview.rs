@@ -277,7 +277,7 @@ pub(crate) fn wait_child(pid: libc::pid_t) -> std::io::Result<i32> {
     let mut signaled = false;
     loop {
         let mut status = 0;
-        let got = unsafe { libc::waitpid(pid, &mut status, libc::WUNTRACED | libc::WNOHANG) };
+        let got = crate::traps::waitpid(pid, &mut status, libc::WUNTRACED | libc::WNOHANG);
         if got == pid {
             return Ok(status);
         }

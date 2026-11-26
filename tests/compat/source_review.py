@@ -44,6 +44,7 @@ COMMON = {
     "alias-comment": "shopt -s expand_aliases\nalias quiet='# note'\nquiet echo unexpected; echo wrong\necho done\nalias out='echo value > '\nalias destination='out-file ; echo stored'\nout destination\ncat out-file",
     "open-quote-alias": "shopt -s expand_aliases\nalias message=\"printf '<%s>' 'Error:\"\nmessage name'\necho done",
     "posix-case-alias": "shopt -s expand_aliases\nset -o posix\nalias switch=case\nx=$(switch x in x) echo pass;; esac)\necho \"$x\"",
+    "child-trap-wait": """n=0; trap '((++n))' CHLD; /bin/sleep .24 & /bin/sleep .14 & /bin/sleep .04 & wait; echo "$?:$n"; trap - CHLD""",
     "signal-table": r"""kill -l >kill-list; trap -l >trap-list; cmp -s kill-list trap-list; echo $?; awk 'NR==1 {print $1,$2,$3,$4}' kill-list; kill -l 1 129; kill -l HUP""",
     "legacy-zone": r"""export TZ=EST5EDT; printf '%(%F %T %z %Z)T\n' 1275250155 1262304000; export TZ=EST5EDT,M3.2.0/2,M11.1.0/2; printf '%(%F %T %z %Z)T\n' 1275250155""",
     "bind-names": r"""BASH_COMPAT=5.2; bind -p forward-word >bindings 2>/dev/null; echo $?; grep -q backward-word bindings; echo $?""",
@@ -120,6 +121,8 @@ HOT = {
     "backquote-escape": (r"""v="`printf '%s' \\`" """, 400),
     "open-quote-alias": ('source ./open-alias', 450),
     "posix-case-alias": ('source ./case-alias', 450),
+    "child-trap-wait": ("/usr/bin/true & wait $!", 90),
+    "untrapped-wait": ("/usr/bin/true & wait $!", 90),
     "signal-table": ('kill -l >/dev/null', 500),
     "legacy-zone": ("printf -v v '%(%T %z)T' 1275250155", 1100),
     "bind-filter": ('bind -p forward-word >/dev/null', 400),
@@ -478,6 +481,14 @@ def main():
         assert run(shells[1], 'v=雪abc; printf "%s" "${v[@]:0:2}"')[0] == (0, "雪a".encode(), False)
         unicode_ifs = 'set -- a b; a=("$@"); IFS=雪; printf "%s:%s" "$*" "${a[*]}"'
         assert run(shells[1], unicode_ifs)[0] == (0, "a雪b:a雪b".encode(), False)
+        # SIGCHLD can be coalesced by the kernel while many children exit.
+        # Count wait statuses, and exclude children reaped by the action itself.
+        no_child = "n=0; trap '((++n))' CHLD; kill -CHLD $$; echo $n"
+        assert run(shells[1], no_child)[0] == (0, b"0\n", False)
+        burst = "n=0; trap '((++n))' CHLD; for ((i=0;i<24;i++)); do /usr/bin/true & done; wait; echo $n"
+        assert run(shells[1], burst)[0] == (0, b"24\n", False)
+        nested_child = "n=0; trap '/usr/bin/true; ((++n))' CHLD; /usr/bin/true; /usr/bin/true; echo $n"
+        assert run(shells[1], nested_child)[0] == (0, b"2\n", False)
         termroot = root / "completion"
         termroot.mkdir()
         (termroot / "pick.valid").touch()
@@ -679,6 +690,7 @@ def main():
                 "history-extension": "history -s 'echo dir/file.txt'",
                 "funcnest": 'FUNCNEST=8; f(){ :; }',
                 "compgen-array": 'words="' + " ".join(f"item{i}" for i in range(512)) + '"',
+                "child-trap-wait": "n=0; trap '((++n))' CHLD",
                 "trap-return-context": "invoke(){ kill -USR1 $$; }; trap ':; return' USR1",
                 "trap-action": "trap ':' USR1", "trap-signal": "trap 's=$BASH_TRAPSIG' USR1",
                 "glob-size": "GLOBSORT=size", "glob-numeric": "cd items; GLOBSORT=numeric",

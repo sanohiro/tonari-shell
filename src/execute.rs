@@ -1983,7 +1983,7 @@ fn spawn_failure(name: &str, error: io::Error) -> io::Result<Stage> {
 pub(super) fn wait(pid: libc::pid_t) -> io::Result<u8> {
     let mut status = 0;
     loop {
-        if unsafe { libc::waitpid(pid, &mut status, 0) } >= 0 {
+        if crate::traps::waitpid(pid, &mut status, 0) >= 0 {
             if libc::WIFSIGNALED(status) {
                 return Ok((128 + libc::WTERMSIG(status)) as u8);
             }
