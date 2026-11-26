@@ -10,6 +10,7 @@ pub struct ShellOptions {
     pub extdebug: bool,
     pub promptvars: bool,
     pub braceexpand: bool,
+    pub lastpipe: bool,
     pub localvar_inherit: bool,
     pub localvar_unset: bool,
     pub inherit_errexit: bool,
@@ -36,6 +37,7 @@ impl Default for ShellOptions {
             extdebug: false,
             promptvars: true,
             braceexpand: true,
+            lastpipe: false,
             localvar_inherit: false,
             localvar_unset: false,
             inherit_errexit: false,
@@ -106,6 +108,7 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("hostcomplete", shopt.hostcomplete),
     option_entry!("huponexit", shopt.huponexit),
     option_entry!("inherit_errexit", shopt.inherit_errexit),
+    option_entry!("lastpipe", shopt.lastpipe),
     option_entry!("localvar_inherit", shopt.localvar_inherit),
     option_entry!("localvar_unset", shopt.localvar_unset),
     OptionEntry {

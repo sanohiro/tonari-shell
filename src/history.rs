@@ -252,6 +252,35 @@ impl Session {
     fn history_mut(&mut self) -> &mut Entries {
         std::rc::Rc::make_mut(self.history.get_or_insert_with(Default::default))
     }
+    pub(crate) fn apply_history_limit(&mut self, name: &str, value: &str) {
+        let Ok(limit) = value.parse::<usize>() else {
+            return;
+        };
+        if name == "HISTSIZE" {
+            if let Some(history) = self.history.as_mut() {
+                std::rc::Rc::make_mut(history).trim_to(limit);
+            }
+        } else if let Some(path) = self
+            .get("HISTFILE")
+            .filter(|s| !s.is_empty() && s != "/dev/null")
+        {
+            let path = std::path::Path::new(&path);
+            // The default history is Tonari's shared journal. The user's Bash
+            // file remains independent. Explicit plain history uses line limits.
+            if self
+                .get("HOME")
+                .is_some_and(|h| std::path::Path::new(&h).join(".bash_history") == path)
+            {
+                return;
+            }
+            if let Err(e) = commands::limit_plain_file(path, limit)
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                eprintln!("tonari: {}: {e}", path.display());
+            }
+        }
+    }
+
     fn history_limit(&self, key: &str, default: usize) -> usize {
         self.get(key)
             .and_then(|s| s.parse::<i64>().ok())

@@ -216,38 +216,50 @@ impl<'a> Expansion<'a> {
 
     pub fn array_items(
         &mut self,
-        parts: Vec<(Option<String>, Word)>,
+        parts: Vec<(Option<crate::parser::Subscript<String>>, Word)>,
         associative: bool,
     ) -> Result<crate::session::array::ArrayItems, Error> {
-        use crate::session::array::ArrayItems;
+        use crate::session::array::{ArrayItems, Index};
         if associative {
             let pairs = parts.first().is_some_and(|(index, _)| index.is_none());
             let mut items = Vec::new();
             let mut parts = parts.into_iter();
             while let Some((index, word)) = parts.next() {
-                let (key, value) = if pairs {
+                let (key, value, append) = if pairs {
                     let key = self.scalar(word)?;
                     let value = match parts.next() {
                         Some((_, word)) => self.scalar(word)?,
                         None => String::new(),
                     };
-                    (key, value)
+                    (key, value, false)
                 } else {
-                    let key = self.key(&index.ok_or("missing associative array subscript")?)?;
-                    (key, self.scalar(word)?)
+                    let index = index.ok_or("missing associative array subscript")?;
+                    let key = self.key(&index.index)?;
+                    (key, self.scalar(word)?, index.append)
                 };
                 if key.is_empty() {
                     return Err("bad array subscript".into());
                 }
-                items.push((key, value));
+                items.push((key, value, append));
             }
             return Ok(ArrayItems::Associative(items));
         }
         let mut items = Vec::with_capacity(parts.len());
         for (index, word) in parts {
-            if let Some(index) = index {
-                let index = self.arithmetic(&index)?;
-                items.push((Some(index), self.scalar(word)?));
+            if let Some(crate::parser::Subscript { index, append }) = index {
+                // Shell expansions in a subscript precede its RHS, but arithmetic
+                // in the resulting text runs when the initialized array is written.
+                let index = if index.contains(['$', '`', '"', '\\']) {
+                    let word = crate::parser::arithmetic_word(&index).map_err(|e| e.message())?;
+                    self.scalar(word)?
+                } else {
+                    index
+                };
+                let index = Index::new(index);
+                items.push((
+                    Some(crate::parser::Subscript { index, append }),
+                    self.scalar(word)?,
+                ));
             } else {
                 items.extend(self.fields(word)?.into_iter().map(|s| (None, s)));
             }
@@ -270,8 +282,31 @@ impl<'a> Expansion<'a> {
     pub fn arithmetic(&mut self, expression: &str) -> Result<i64, Error> {
         let expanded;
         let expression = if expression.contains(['$', '`', '"', '\\']) {
-            let word = crate::parser::arithmetic_word(expression).map_err(|e| e.message())?;
-            expanded = self.scalar(word)?;
+            expanded = if expression.contains('[') {
+                let (keys, tail) = crate::parser::arithmetic_segments(expression, |name| {
+                    self.session.is_associative(name)
+                })
+                .map_err(|e| e.message())?;
+                if keys.is_empty() {
+                    self.scalar(tail)?
+                } else {
+                    let mut source = String::with_capacity(expression.len());
+                    for (prefix, key) in keys {
+                        source.push_str(&self.scalar(prefix)?);
+                        let key = self.scalar(key)?;
+                        if key.contains(['[', ']', '\\', '\'', '"', '$', '`']) {
+                            source.push_str(&crate::completion_spec::single_quote(&key));
+                        } else {
+                            source.push_str(&key);
+                        }
+                    }
+                    source.push_str(&self.scalar(tail)?);
+                    source
+                }
+            } else {
+                let word = crate::parser::arithmetic_word(expression).map_err(|e| e.message())?;
+                self.scalar(word)?
+            };
             expanded.as_str()
         } else {
             expression

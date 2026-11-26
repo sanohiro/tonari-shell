@@ -23,6 +23,11 @@ pub enum Alternative {
 #[derive(Clone, Debug)]
 pub enum Part {
     BadSubstitution(String),
+    PrefixNames {
+        prefix: String,
+        at: bool,
+        quoted: bool,
+    },
     Brace(&'static str),
     BraceParameter(String),
     BraceTilde(&'static str),
@@ -156,6 +161,14 @@ impl Word {
             }
         };
         for part in parts.iter_mut() {
+            if let Part::PrefixNames { prefix, at, quoted } = part {
+                *part = Part::Elements {
+                    values: env.session.variable_names(prefix),
+                    at: *at,
+                    quoted: *quoted,
+                };
+                continue;
+            }
             if let Part::BadSubstitution(text) = part {
                 return Err(crate::expansion::Error::fatal(
                     format!("{text}: bad substitution"),
@@ -176,15 +189,15 @@ impl Word {
                 *part = literal(target, *quoted);
                 continue;
             }
+            let transformed = matches!(part, Part::Modify { .. });
             if let Part::Parameter { name, .. }
             | Part::Alternative { name, .. }
             | Part::Trim { name, .. }
             | Part::Modify { name, .. } = part
             {
-                if let Some(reference) = name
-                    .strip_prefix('!')
-                    .filter(|s| !s.is_empty() && array_elements_name(name).is_none())
-                {
+                if let Some(reference) = name.strip_prefix('!').filter(|s| {
+                    !s.is_empty() && (transformed || array_elements_name(name).is_none())
+                }) {
                     let target = modifier::value(reference, env)?.ok_or_else(|| {
                         crate::expansion::Error::fatal(
                             format!("{reference}: invalid indirect expansion"),
@@ -495,7 +508,8 @@ impl Word {
                         output.append(&values.join(&ifs_separator(lookup)), quoted, ifs);
                     }
                 }
-                Part::BadSubstitution(_)
+                Part::PrefixNames { .. }
+                | Part::BadSubstitution(_)
                 | Part::Substitution { .. }
                 | Part::Process { .. }
                 | Part::Arithmetic { .. }

@@ -5,7 +5,13 @@ out="$repo/results"
 lab="$RUNNER_TEMP/shell-spec"
 mkdir -p "$lab/home" "$lab/cwd" "$lab/bin" "$out"
 ref=/bin/bash
-if [[ $(uname -s) == Darwin ]]; then
+if [[ $SUITE == oils-control ]]; then
+  source "$repo/tools/ci/bash-source.sh"
+  download_bash "$version" "$digest" "$lab/bash.tar.gz"
+  tar -xf "$lab/bash.tar.gz" -C "$lab"
+  ref="$lab/bash-$version/bash"
+  (cd "$lab/bash-$version" && ./configure --without-bash-malloc --disable-nls >/dev/null && make -j4 bash >/dev/null)
+elif [[ $(uname -s) == Darwin ]]; then
   if [[ ! -x /opt/homebrew/bin/bash ]]; then brew install bash; fi
   ref=/opt/homebrew/bin/bash
 fi
@@ -50,10 +56,21 @@ case "$SUITE" in
     python3 -m venv venv
     venv/bin/pip -q install pexpect==4.9.0 PyYAML==6.0.3 colorama==0.4.6
     shard=${SUITE##*-}
+    shards=8
+    options=(--observer "$RUNNER_TEMP/bin/paths")
+    if [[ $SUITE == bensch-review-* || $SUITE == bensch-control-* ]]; then
+      shards=2
+      options=(--review "$repo/docs/compatibility/external-shell")
+      [[ $SUITE != bensch-control-* ]] || options+=(--control)
+    fi
     cd cwd
     env -i HOME="$lab/home" PATH="$PATH" TERM=xterm-256color PS1='$ ' \
       "$lab/venv/bin/python" "$repo/tools/ci/bensch-pty.py" "$lab/upstream" \
-      "$out/pty.jsonl" "$ref" "$lab/bin/bash" --shard "$shard" --shards 8 --observer "$RUNNER_TEMP/bin/paths"
+      "$out/pty.jsonl" "$ref" "$lab/bin/bash" --shard "$shard" --shards "$shards" "${options[@]}"
+    ;;
+  spec-fixes)
+    REFERENCE_BASH="$ref" python3 "$repo/tests/shell.py" "$lab/bin/bash" -q
+    python3 "$repo/tools/ci/spec-fix-timings.py" "$lab/bin/bash" "$ref" > "$out/fixes.tsv"
     ;;
   spec-response)
     python3 "$repo/tools/ci/bensch-response.py" "$ref" "$lab/bin/bash" > "$out/response.tsv"
@@ -78,6 +95,31 @@ case "$SUITE" in
     export PATH="$lab/pybin:$PATH"
     cd upstream
     PYTHONPATH=. python2 "$repo/tools/ci/oils-cases.py" > "$out/manifest.jsonl"
+    if [[ $SUITE == oils-fixes ]]; then
+      python3 - "$out/manifest.jsonl" > "$lab/selected.jsonl" <<'PYTHON'
+import json, sys
+for line in open(sys.argv[1]):
+    if json.loads(line)["suite"] in {"array-assoc", "builtin-kill", "dbracket", "regex"}:
+        print(line, end="")
+PYTHON
+      python3 "$repo/tools/ci/spec-pairs.py" "$lab/selected.jsonl" "$out/cases.jsonl" \
+        "$ref" "$lab/bin/bash" "$lab/pairs" --source .
+      PYTHONPATH=. python2 "$repo/tools/ci/oils-cases.py" grade < "$out/cases.jsonl" > "$out/grades.jsonl"
+      exit
+    fi
+    if [[ $SUITE == oils-control ]]; then
+      utilities=()
+      if [[ $(uname -s) == Darwin ]]; then
+        brew list coreutils >/dev/null || brew install coreutils
+        brew list gnu-sed >/dev/null || brew install gnu-sed
+        utilities+=(--utility-path "$(brew --prefix gnu-sed)/libexec/gnubin"
+                    --utility-path "$(brew --prefix coreutils)/libexec/gnubin")
+      fi
+      python3 "$repo/tools/ci/spec-pairs.py" "$out/manifest.jsonl" "$out/cases.jsonl" \
+        "$ref" "$lab/bin/bash" "$lab/pairs" --source . --runs 1 "${utilities[@]}"
+      PYTHONPATH=. python2 "$repo/tools/ci/oils-cases.py" grade < "$out/cases.jsonl" > "$out/grades.jsonl"
+      exit
+    fi
     if [[ $SUITE == oils-profile-* ]]; then
       python3 "$repo/tools/ci/spec-pairs.py" "$out/manifest.jsonl" "$out/profiles.jsonl" \
         "$RUNNER_TEMP/bin/current" "$RUNNER_TEMP/bin/opt-3" "$lab/pairs" --source . \

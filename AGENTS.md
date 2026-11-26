@@ -37,3 +37,21 @@ When reviewing a benchmark suite, inspect the implementation reached by every pu
 Use Bash as the compatibility reference for supported scripts and tool interfaces. When a Bash behavior breaks a documented Tonari guarantee, keep the Tonari behavior. Record the input, observed Bash and Tonari outputs, and rationale in the compatibility guide and add a regression test. Validate Tonari extensions against their own documented result. Keep observed Bash version differences and outstanding implementation gaps identifiable in the audit.
 
 Bash の不具合や対象外の制約を再現すると Tonari の仕様を壊す場合は、Tonari の仕様を優先します。実際の入力、両者の出力、採用理由を互換性ガイドとテストに残します。Tonari 独自の機能は自身の仕様で検証し、未実装や Bash の版による違いも区別できるようにします。
+
+When Bash and Tonari return the same result, still check whether the behavior is
+correct. If both reproduce a bug or the behavior is demonstrably wrong, fix
+Tonari and accept the resulting difference from Bash. Keep a minimal witness of
+the observable problem, the reason for the expected behavior, and a regression
+test for Tonari's corrected result. Apply this rule to jointly failing cases and
+to upstream assertions that explicitly expect a Bash bug. Check the ordinary
+expectation separately from any shell-specific annotation, including the script's
+actual arguments, output, status and side effects. Account for the reference
+version, runner and external commands when they affect the result.
+
+Bash と Tonari が同じ結果を返す場合も、挙動の正しさを確認します。双方がバグを
+再現する場合や、挙動が明らかにおかしい場合は Tonari を修正し、修正によって
+生じる Bash との差を許容します。問題を再現する最小の入力、期待する挙動の根拠、
+修正結果を守る回帰テストを残します。両シェルが失敗した試験と、Bash の既知の
+バグを期待値にしている試験にも適用します。上流の通常期待値とシェル固有の
+注記を個別に照合し、実際の引数、出力、終了状態、副作用を確認します。参照した
+Bash の版、ランナー、外部コマンドが結果に影響した場合は、その条件も記録します。

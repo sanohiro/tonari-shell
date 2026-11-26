@@ -1,5 +1,15 @@
 # Engineering notes / 開発知見
 
+## 2026-11-26 · When both shells fail / 両方が失敗した場合の調べ方
+
+In Oils `array-assoc/34`, an obsolete Bash annotation expects an empty map after arithmetic assigns a value to a backslash key. The unqualified assertion requires the key and value to survive. Expand an associative subscript once as shell data, preserve it through arithmetic parsing, then test assignment, read and compound update. Re-parsing the expanded key loses backslashes and can turn other ordinary key characters into syntax. [Regression tests](../tests/shell.py) · [Oils assertion](https://github.com/oils-for-unix/oils/blob/d114978ca467143f171a835cbcbe8ab6ccc009a7/spec/array-assoc.test.sh#L567)
+
+古い Bash の不具合を期待値にした試験では、点数を上げると連想配列のキーが消えてしまう例がありました。採点と実際の値を個別に記録し、バックスラッシュ・角括弧・引用符・日本語・ドル記号を含むキーの値が代入と加算の後も残ることを確認します。[互換性の方針](compatibility.md#intentional-differences)
+
+For cross-platform differences, replay the same case with the same Bash release and utility families, then vary a single dependency for attribution. Darwin bensch status markers, disabled history, GNU/BSD utility output, absolute utility paths and signal numbers all changed observable results. An inherited PATH on the physical Mac resolved literal `x` and `X` to XQuartz. Isolate the fixture's PATH and working tree. A logging stand-in confirms command lookup without starting a graphical application. [Native controls and case findings](compatibility/external-shell/shared-failures.md)
+
+OS 間の差はシェルのコード以外からも生じます。Bash の版と外部ツールを揃えた比較に加え、履歴の有効化、同期用コマンド、外部コマンド名の解決を個別に再現しました。ファイルの内容や終了値も調べ、環境差で説明できないものは実装課題として残します。[ケース別の記録](compatibility/external-shell/shared-failures.tsv.gz)
+
 ## 2026-11-26 · Observing terminal input and shell expansion / 対話入力と展開の検証
 
 bensch sets `HISTSIZE=0` in its Bash profile. Its matcher may find text in the editor's redisplay, and pexpect deliberately waits before sending each key. Time at the PTY master measures the first returned byte. For a claim about completed editing, submit the edited variable assignment and verify its expanded value. Repeating an unmodified movement in a bounded batch avoids intermediate writes. A custom binding, a partial escape sequence, and a Right at the end of a suggestion each need their own normal dispatch. [External measurements](benchmarks.md#external-shell-specs)

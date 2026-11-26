@@ -170,6 +170,7 @@ pub struct Session {
     pub hashes: crate::execute::hash::Table,
     pub last_background: Option<libc::pid_t>,
     pub arg0: String,
+    pub(crate) last_argument: Option<String>,
     pub positional: std::vec::IntoIter<String>,
     pub source_depth: u32,
     pub function_depth: u32,
@@ -494,6 +495,13 @@ impl Session {
     }
 
     pub fn get(&self, name: &str) -> Option<String> {
+        if name == "_" {
+            return self
+                .last_argument
+                .clone()
+                .or_else(|| std::env::var("_").ok())
+                .or_else(|| std::env::args_os().next()?.into_string().ok());
+        }
         if let Some(base) = name.strip_prefix('\u{1}') {
             let resolved = self.reference_name(base).ok()?;
             let base = resolved.as_ref();
@@ -528,7 +536,14 @@ impl Session {
             if self.is_associative(base) {
                 return self.assoc_value(base, index).map(str::to_owned);
             }
-            let i = self.resolve_index(base, index).ok()?;
+            let i = self
+                .resolve_index(base, index)
+                .map_err(|error| {
+                    if error == "array subscript out of range" {
+                        eprintln!("tonari: {base}: bad array subscript");
+                    }
+                })
+                .ok()?;
             return self.element(base, i);
         }
         if matches!(name, "BASHOPTS" | "SHELLOPTS") {
@@ -661,7 +676,13 @@ impl Session {
     fn ordinary_assignment(name: &str) -> bool {
         !matches!(
             name,
-            "BASH_ARGV0" | "GLOBIGNORE" | "OPTIND" | "PATH" | "PIPESTATUS"
+            "BASH_ARGV0"
+                | "GLOBIGNORE"
+                | "HISTSIZE"
+                | "HISTFILESIZE"
+                | "OPTIND"
+                | "PATH"
+                | "PIPESTATUS"
         )
     }
 
@@ -709,6 +730,9 @@ impl Session {
         }
         if self.readonly(name) {
             return;
+        }
+        if matches!(name, "HISTSIZE" | "HISTFILESIZE") {
+            self.apply_history_limit(name, &value);
         }
         if name == "BASH_ARGV0" {
             self.arg0 = value.to_string();
@@ -760,9 +784,7 @@ impl Session {
         name: &str,
         value: i64,
     ) -> Option<Result<(), &'static str>> {
-        if matches!(name, "OPTIND" | "GLOBIGNORE" | "PATH" | "BASH_ARGV0")
-            || Self::builtin_readonly(name)
-        {
+        if !Self::ordinary_assignment(name) || Self::builtin_readonly(name) {
             return None;
         }
         let var = self.variables.get_mut(name)?;
@@ -828,7 +850,19 @@ impl Session {
         true
     }
 
+    pub(crate) fn remember_literal_argument(&mut self, words: &[String]) {
+        let arg = words.last().map_or("", String::as_str);
+        if self.last_argument.as_deref() != Some(arg) {
+            let slot = self.last_argument.get_or_insert_with(String::new);
+            slot.clear();
+            slot.push_str(arg);
+        }
+    }
+
     pub(crate) fn stored_scalar(&self, name: &str) -> Option<&str> {
+        if name == "_" {
+            return self.last_argument.as_deref();
+        }
         if matches!(name, "BASHPID" | "BASHOPTS" | "SHELLOPTS" | "PIPESTATUS") {
             return None;
         }
@@ -1375,7 +1409,21 @@ impl Session {
                         }
                         continue;
                     }
-                    match self.resolve_index(base, index) {
+                    let variable = self.variables.get(base);
+                    let array = variable.is_some_and(|v| v.elements.is_some());
+                    if !array
+                        && !variable
+                            .map_or_else(|| self.inherited_value(base).is_some(), |v| v.declared)
+                    {
+                        continue;
+                    }
+                    let resolved = crate::arithmetic::expanded(index, self, 0)
+                        .and_then(|n| self.relative_index(base, n));
+                    match resolved {
+                        Ok(i) if !array && i != 0 => {
+                            eprintln!("tonari: unset: {base}: not an array variable");
+                            status = 1;
+                        }
                         Ok(i) => self.unset_element(base, i),
                         Err(e) => {
                             eprintln!("tonari: unset: {e}");
@@ -1676,24 +1724,51 @@ impl Session {
     }
 }
 
+impl Variable {
+    fn attribute_flags(&self) -> impl Iterator<Item = u8> {
+        [
+            (self.associative().is_some(), b'A'),
+            (
+                self.elements.is_some() && self.associative().is_none(),
+                b'a',
+            ),
+            (self.integer, b'i'),
+            (self.nameref, b'n'),
+            (self.readonly, b'r'),
+            (self.exported, b'x'),
+        ]
+        .into_iter()
+        .filter_map(|(on, flag)| on.then_some(flag))
+    }
+}
+
+impl Session {
+    pub(crate) fn attributes(&self, name: &str) -> Option<(String, bool)> {
+        let resolved = self.reference_name(name).ok()?;
+        let name = array::subscript(&resolved).map_or(resolved.as_ref(), |(base, _)| base);
+        if let Some(var) = self.variables.get(name) {
+            return Some((
+                var.attribute_flags().map(char::from).collect(),
+                var.array_assigned,
+            ));
+        }
+        self.declared_variable(name, false).map(|v| {
+            (
+                v.attribute_flags().map(char::from).collect(),
+                v.array_assigned,
+            )
+        })
+    }
+}
+
 fn print_declaration(out: &mut impl Write, name: &str, var: &Variable) -> io::Result<()> {
     write!(out, "declare -")?;
-    let mut has_flags = false;
-    for (on, flag) in [
-        (var.associative().is_some(), b'A'),
-        (var.elements.is_some() && var.associative().is_none(), b'a'),
-        (var.integer, b'i'),
-        (var.nameref, b'n'),
-        (var.readonly, b'r'),
-        (var.exported, b'x'),
-    ] {
-        if on {
-            out.write_all(&[flag])?;
-            has_flags = true;
-        }
-    }
-    if !has_flags {
+    let mut flags = var.attribute_flags().peekable();
+    if flags.peek().is_none() {
         out.write_all(b"-")?;
+    }
+    for flag in flags {
+        out.write_all(&[flag])?;
     }
     write!(out, " {name}")?;
     if let Some(map) = var.associative() {
@@ -1788,7 +1863,7 @@ mod tests {
         session.assign(key, "global");
         session.enter_function();
         assert_eq!(
-            session.declare("local", &[format!("{key}=local")], &[]),
+            session.declare("local", &[format!("{key}=local")], &[], 0),
             crate::Flow::Continue(0)
         );
         let prefix = session.bind(&[(key.into(), "temporary".into())]);

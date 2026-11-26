@@ -207,8 +207,12 @@ fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> bool {
                 }
             }
             Action::Dup(src, dst) => {
-                if duplicate(*src, *dst).is_err() {
-                    write_error(b"redirection", b": invalid file descriptor");
+                if let Err(error) = duplicate(*src, *dst) {
+                    if error.raw_os_error() == Some(libc::EBADF) {
+                        write_error(b"redirection", b": Bad file descriptor");
+                    } else {
+                        write_error(b"redirection", b": cannot duplicate file descriptor");
+                    }
                     return false;
                 }
             }
@@ -779,7 +783,9 @@ fn eval_builtin(
         Builtin::Getopts => Flow::Continue(session.getopts(args)),
         Builtin::Let => Flow::Continue(crate::arithmetic::let_builtin(args, session)),
         Builtin::Shift => Flow::Continue(session.shift(args)),
-        Builtin::Declare => session.declare(&cmd.words[0], args, &cmd.array_declarations),
+        Builtin::Declare => {
+            session.declare(&cmd.words[0], args, &cmd.array_declarations, last_status)
+        }
         Builtin::Echo => Flow::Continue(crate::builtins::echo(args)),
         Builtin::Test => Flow::Continue(crate::builtins::test(&cmd.words, session)),
         Builtin::LoopControl => {
@@ -1811,6 +1817,7 @@ impl PreparedCommand {
                     Stage::Status(code) => Ok(code),
                 });
             session.substitutions.finish(scope);
+            session.remember_literal_argument(&self.words);
             return Some(Flow::Continue(result.unwrap_or_else(|e| {
                 eprintln!("tonari: {e}");
                 1
@@ -1826,6 +1833,7 @@ impl PreparedCommand {
             Flow::Continue(1)
         });
         session.substitutions.finish(scope);
+        session.remember_literal_argument(&self.words);
         Some(flow)
     }
 
@@ -2376,13 +2384,40 @@ fn run_prepared(
     replace: bool,
     session: &mut Session,
 ) -> io::Result<Flow> {
+    let simple = cmd.compound.is_none();
     if !cmd.named_redirects.is_empty() {
+        let last = simple.then(|| cmd.words.last().cloned().unwrap_or_default());
         let launch = session.jobs.launch(false, true);
-        return named_fd::run(cmd, session, last_status, replace, launch);
+        let result = named_fd::run(cmd, session, last_status, replace, launch);
+        if let Some(last) = last {
+            session.last_argument = Some(last)
+        }
+        return result;
     }
-    if let Some(builtin) = builtin(&cmd, last_status, session) {
-        return run_builtin(builtin, &mut cmd, session, last_status, replace);
+    let selected = builtin(&cmd, last_status, session);
+    // Function calls take ownership of their argv. Other commands can move
+    // their final word into $_ after execution without copying its contents.
+    let saved = matches!(selected, Some(Builtin::Function))
+        .then(|| cmd.words.last().cloned())
+        .flatten();
+    let result = if let Some(builtin) = selected {
+        run_builtin(builtin, &mut cmd, session, last_status, replace)
+    } else {
+        run_external(&mut cmd, name, last_status, replace, session)
+    };
+    if simple {
+        session.last_argument = Some(saved.or_else(|| cmd.words.pop()).unwrap_or_default());
     }
+    result
+}
+
+fn run_external(
+    cmd: &mut PreparedCommand,
+    name: Option<String>,
+    last_status: u8,
+    replace: bool,
+    session: &mut Session,
+) -> io::Result<Flow> {
     // A foreground builtin runs in this shell. Snapshot terminal modes
     // only when preparing to hand the terminal to a child process.
     let mut launch = session.jobs.launch(false, true);
@@ -2405,9 +2440,9 @@ fn run_prepared(
         }
     }
     if replace && launch.group.is_none() {
-        let executable = External::new(&cmd, session);
+        let executable = External::new(cmd, session);
         return Ok(Flow::Continue(
-            if apply(&actions(&cmd), here_input::PIPE_LIMIT) {
+            if apply(&actions(cmd), here_input::PIPE_LIMIT) {
                 executable.exec(
                     (cmd.assignments.is_empty() && cmd.redirects.is_empty()).then_some(session),
                 )
@@ -2416,7 +2451,7 @@ fn run_prepared(
             },
         ));
     }
-    let status = match start(&mut cmd, None, None, None, last_status, session, launch)? {
+    let status = match start(cmd, None, None, None, last_status, session, launch)? {
         Stage::Child(pid) if launch.group.is_some() => {
             launch.parent(pid);
             session
@@ -2436,6 +2471,53 @@ fn run_prepared(
     Ok(Flow::Continue(status))
 }
 
+fn foreground(
+    raw: SimpleCommand<Word>,
+    last_status: u8,
+    replace: bool,
+    session: &mut Session,
+) -> io::Result<Flow> {
+    if raw.words.is_empty()
+        && raw.redirects.is_empty()
+        && raw.compound.is_none()
+        && !session.xtrace
+        && let [(key, Assignment::Scalar(Word::Literal(value)))] = raw.assignments.as_slice()
+        && session.assign_existing_literal(key, value)
+    {
+        session.last_argument = Some(String::new());
+        return Ok(Flow::Continue(0));
+    }
+    let name = job_label(std::slice::from_ref(&raw), false, session);
+    if needs_ordered_redirects(&raw, session) {
+        return run_ordered(raw, name, last_status, replace, session);
+    }
+    let cmd = match prepare(raw, session, last_status, true) {
+        Ok(cmd) => cmd,
+        Err(e) => {
+            eprintln!("tonari: {e}");
+            return Ok(e.flow(session));
+        }
+    };
+    run_prepared(cmd, name, last_status, replace, session)
+}
+
+fn lastpipe(
+    raw: SimpleCommand<Word>,
+    incoming: OwnedFd,
+    last_status: u8,
+    session: &mut Session,
+) -> io::Result<Flow> {
+    let pipe = Action::Dup(incoming.as_raw_fd(), 0);
+    let saved = SavedFd::capture(&pipe, std::slice::from_ref(&pipe))?;
+    duplicate(incoming.as_raw_fd(), 0)?;
+    drop(incoming);
+    let was_redirected = std::mem::replace(&mut session.stdin_redirected, true);
+    let result = foreground(raw, last_status, false, session);
+    session.stdin_redirected = was_redirected;
+    saved.restore(0)?;
+    result
+}
+
 pub fn run_pipeline(
     mut pipeline: Pipeline<Word>,
     last_status: u8,
@@ -2450,27 +2532,7 @@ pub fn run_pipeline(
         {
             return Ok(flow);
         }
-        if raw.words.is_empty()
-            && raw.redirects.is_empty()
-            && raw.compound.is_none()
-            && !session.xtrace
-            && let [(key, Assignment::Scalar(Word::Literal(value)))] = raw.assignments.as_slice()
-            && session.assign_existing_literal(key, value)
-        {
-            return Ok(Flow::Continue(0));
-        }
-        let name = job_label(std::slice::from_ref(&raw), false, session);
-        if needs_ordered_redirects(&raw, session) {
-            return run_ordered(raw, name, last_status, replace, session);
-        }
-        let cmd = match prepare(raw, session, last_status, true) {
-            Ok(cmd) => cmd,
-            Err(e) => {
-                eprintln!("tonari: {e}");
-                return Ok(e.flow(session));
-            }
-        };
-        return run_prepared(cmd, name, last_status, replace, session);
+        return foreground(raw, last_status, replace, session);
     }
     let mut launch = session.jobs.launch(background, pipeline.len() == 1);
     let managed = background || launch.group.is_some();
@@ -2483,6 +2545,7 @@ pub fn run_pipeline(
         };
     let length = pipeline.len();
     let mut stages = Vec::with_capacity(length);
+    let mut last_flow = None;
     for (i, mut raw) in pipeline.into_iter().enumerate() {
         if !session.traps.in_action()
             && let Some(loc) = raw.location.take()
@@ -2502,6 +2565,20 @@ pub fn run_pipeline(
         }
         let stage = (|| {
             let incoming = input.take();
+            if i + 1 == length
+                && !managed
+                && session.shopt.lastpipe
+                && let Some(reader) = incoming
+            {
+                let flow = lastpipe(raw, reader, last_status, session)?;
+                let code = match flow {
+                    Flow::Continue(code) => return Ok(Stage::Status(code)),
+                    Flow::Exit(code) | Flow::Discard(code) | Flow::Return(code) => code,
+                    Flow::Break(_) | Flow::LoopContinue(_) => 0,
+                };
+                last_flow = Some(flow);
+                return Ok(Stage::Status(code));
+            }
             let output = if i + 1 < length {
                 let (reader, writer) = pipe()?;
                 input = Some(reader);
@@ -2581,5 +2658,5 @@ pub fn run_pipeline(
     if let Some(e) = wait_error {
         return Err(e);
     }
-    Ok(Flow::Continue(status))
+    Ok(last_flow.unwrap_or(Flow::Continue(status)))
 }

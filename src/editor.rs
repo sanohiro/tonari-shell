@@ -4,6 +4,7 @@ pub(crate) mod preview;
 mod recall;
 mod undo;
 use undo::Undo;
+mod vi;
 mod viewport;
 use bindings::{Action, Binding, Keymap};
 use std::collections::VecDeque;
@@ -696,6 +697,7 @@ pub fn line(
     let mut text = read.map_or("", |r| r.0).to_owned();
     let mut cursor = text.len();
     let mut undo = Undo::default();
+    let mut vi = vi::State::default();
     let mut last_arg: Option<(usize, bool)> = None;
     let mut recall = recall::Recall::new(session.history_lines().len());
     let mut search: Option<(String, usize, String, usize)> = None;
@@ -1014,7 +1016,7 @@ pub fn line(
                     search = None;
                     continue;
                 }
-                Action::Accept => {
+                Action::Accept | Action::Forward | Action::Back | Action::Home | Action::End => {
                     if !pending_queries.is_empty()
                         && let Ok(Some(found)) =
                             history.find_command(session, &mut view, &pending_queries, &|| false)
@@ -1096,6 +1098,13 @@ pub fn line(
                     continue;
                 }
             }
+        }
+        if session.bindings.map == Keymap::Command
+            && let Some(moved) = vi.apply(action, first, &mut text, &mut cursor, session, &mut undo)
+        {
+            motion = moved;
+            last_tab = false;
+            continue;
         }
         motion = matches!(
             action,

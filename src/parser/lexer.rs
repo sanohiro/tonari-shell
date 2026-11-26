@@ -200,6 +200,20 @@ pub(super) fn dollar(
                 chars.next();
                 name
             } else {
+                if name.starts_with('#') && name.len() > 1 {
+                    return bad_substitution(content, chars, word, quoted);
+                }
+                if let Some(prefix) = name.strip_prefix('!').filter(|p| super::is_identifier(p))
+                    && let [op @ (b'@' | b'*'), b'}', ..] = chars.as_str().as_bytes()
+                {
+                    word.part(Part::PrefixNames {
+                        prefix: prefix.into(),
+                        at: *op == b'@',
+                        quoted,
+                    });
+                    *chars = chars.as_str()[2..].chars();
+                    return Ok(());
+                }
                 if chars.as_str().starts_with('/') {
                     chars.next();
                     let mode = match chars.clone().next() {
@@ -228,12 +242,17 @@ pub(super) fn dollar(
                     });
                     return Ok(());
                 }
-                if let [b'@', op @ (b'U' | b'u' | b'L' | b'Q' | b'E'), b'}', ..] =
-                    chars.as_str().as_bytes()
+                if let [
+                    b'@',
+                    op @ (b'U' | b'u' | b'L' | b'Q' | b'E' | b'a'),
+                    b'}',
+                    ..,
+                ] = chars.as_str().as_bytes()
                 {
                     let op = *op;
                     *chars = chars.as_str()[3..].chars();
                     let operation = match op {
+                        b'a' => crate::word::Modification::Attributes,
                         b'Q' => crate::word::Modification::Quote,
                         b'E' => crate::word::Modification::Escapes,
                         _ => crate::word::Modification::Case {
@@ -606,12 +625,65 @@ pub(crate) fn arithmetic_word(source: &str) -> Result<crate::word::Word, Error> 
 }
 
 pub(crate) fn subscript_word(source: &str, associative: bool) -> Result<crate::word::Word, Error> {
+    scan_subscript(source, associative, |_, _| Ok(false))
+}
+
+// Keep an associative key as one shell word during arithmetic expansion. Its
+// expanded characters are data, even when they include a bracket or backslash.
+pub(crate) fn arithmetic_segments<'a>(
+    source: &'a str,
+    is_associative: impl Fn(&str) -> bool,
+) -> Result<(Vec<(Word, Word)>, Word), Error> {
+    let mut keys = Vec::new();
+    let tail = scan_subscript(source, false, |prefix, rest| {
+        let start = source.len() - rest.len() - 1;
+        let before = &source[..start];
+        let name = before
+            .rsplit(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .next()
+            .unwrap_or("");
+        if !is_identifier(name)
+            || before[..start - name.len()].ends_with('$')
+            || !is_associative(name)
+        {
+            return Ok(false);
+        }
+        let size = super::index_end(&source[start..])?;
+        prefix.push('[');
+        keys.push((
+            std::mem::take(prefix).finish(),
+            subscript_word(&source[start + 1..start + size - 1], true)?,
+        ));
+        *rest = &source[start + size..];
+        prefix.push(']');
+        Ok(true)
+    })?;
+    Ok((keys, tail))
+}
+
+fn scan_subscript<'a>(
+    source: &'a str,
+    associative: bool,
+    mut bracket: impl FnMut(&mut WordBuilder, &mut &'a str) -> Result<bool, Error>,
+) -> Result<Word, Error> {
     let mut chars = source.chars();
     let mut word = WordBuilder::default();
     while let Some(c) = chars.next() {
         match c {
+            '[' => {
+                let mut rest = chars.as_str();
+                if bracket(&mut word, &mut rest)? {
+                    chars = rest.chars();
+                } else {
+                    word.push(c);
+                }
+            }
             '"' => quoted(&mut chars, c, &mut word)?,
             '\'' if associative => quoted(&mut chars, c, &mut word)?,
+            '$' if chars.as_str().starts_with('"') => {
+                chars.next();
+                quoted(&mut chars, '"', &mut word)?;
+            }
             '$' => dollar(&mut chars, &mut word, true)?,
             '`' => backquote(&mut chars, &mut word, true)?,
             '\\' => {
@@ -664,7 +736,7 @@ fn pattern_parts(
     let mut raw = group.map_or_else(String::new, |op| op.to_string());
     let mut depth = 0usize;
     while let Some(c) = chars.clone().next() {
-        if group.is_none() && depth == 0 && matches!(c, ' ' | '\t' | '\n' | ';') {
+        if group.is_none() && depth == 0 && matches!(c, ' ' | '\t' | '\n' | ';' | '&' | '<' | '>') {
             break;
         }
         chars.next();
@@ -806,13 +878,25 @@ pub(super) fn lex(
         }
         let pattern = pattern_next.take();
         if pattern == Some(false)
-            && !matches!(c, '\n' | ';')
+            && !matches!(c, '\n' | ';' | '&' | '<' | '>')
             && chars
                 .as_str()
                 .strip_prefix("]]")
                 .is_none_or(|rest| !rest.chars().next().is_none_or(separator))
         {
             let mut word = WordBuilder::default();
+            if let Some(rest) = chars.as_str().strip_prefix('~') {
+                let end = rest
+                    .find(['/', ' ', '\t', '\n', ';', '&', '<', '>'])
+                    .unwrap_or(rest.len());
+                if rest[..end]
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
+                {
+                    word.part(Part::Tilde(format!("~{}", &rest[..end])));
+                    chars = rest[end..].chars();
+                }
+            }
             pattern_parts(&mut chars, &mut word, None)?;
             tokens.push(Token::Word(LexWord {
                 word: word.finish(),

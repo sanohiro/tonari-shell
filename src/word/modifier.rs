@@ -13,6 +13,7 @@ pub enum Modification {
         length: Option<Word>,
     },
     Prompt,
+    Attributes,
     Quote,
     Escapes,
     Case {
@@ -224,14 +225,54 @@ impl Modification {
                     }),
                 }
             }
+            Self::Attributes => {
+                if matches!(name, "@" | "*") {
+                    return Ok(Part::Elements {
+                        values: vec![String::new(); env.session.positional.as_slice().len()],
+                        at: name == "@",
+                        quoted,
+                    });
+                }
+                let elements = array_elements_name(name);
+                let base = elements
+                    .map(|(base, _, _)| base)
+                    .or_else(|| crate::session::array::subscript(name).map(|(base, _)| base))
+                    .unwrap_or(name);
+                let (flags, assigned_array) = env.session.attributes(base).unwrap_or_default();
+                let stored_len = env.session.stored_array_len(base);
+                if env.session.nounset
+                    && elements.is_none()
+                    && !(name == base && stored_len.is_some_and(|n| n > 0))
+                {
+                    value(name, env)?.ok_or_else(|| env.missing(name, "unbound variable"))?;
+                }
+                if let Some((_, at, _)) = elements {
+                    let count = if let Some(len) = stored_len {
+                        if !assigned_array && len == 0 && !flags.is_empty() {
+                            1
+                        } else {
+                            len
+                        }
+                    } else if flags.is_empty() {
+                        0
+                    } else if let Values::Elements(values, _) = Values::read(name, env)? {
+                        values.len().max(1)
+                    } else {
+                        unreachable!()
+                    };
+                    return Ok(Part::Elements {
+                        values: vec![flags; count],
+                        at,
+                        quoted,
+                    });
+                }
+                Ok(scalar(flags))
+            }
             Self::Prompt => {
-                let prompt = value(name, env)?.unwrap_or_default();
                 let status = env.status();
-                Ok(scalar(crate::prompt::render_text(
-                    env.session,
-                    prompt,
-                    status,
-                )))
+                Ok(Values::read(name, env)?.map(quoted, |v| {
+                    crate::prompt::render_text(env.session, v, status)
+                }))
             }
             Self::Slice { offset, length } => {
                 let start = as_number(offset, env)?;

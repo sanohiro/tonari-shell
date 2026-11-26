@@ -2,7 +2,9 @@
 
 These tests use Tonari's Bash entry point. The [yash comparison](../yash-posix/) covers the separate `sh` entry point. この試験では Bash として起動し、対話操作・組み込み・言語機能を調べています。
 
-## Results / 結果
+The follow-up covers fixes, a review of every joint failure in this snapshot, and native comparisons with a common Bash build. 前回の両者失敗の内訳、修正後の再計測、OS 差の切り分けを記録しています。[Follow-up and current results / 最新の結果](shared-failures.md)
+
+## Previous full snapshot / 初回の全件比較
 
 The reference was GNU Bash 5.2.21 on Ubuntu 24.04 x86-64 and GNU Bash 5.3.20 on macOS 15 arm64. Each platform ran 4,659 cases against both shells. The two-thirds count uses elapsed time, with one first-response observation per paired visible input in the upstream PTY run and five interleaved trials per ordinary script case.
 

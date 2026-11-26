@@ -3,8 +3,8 @@ use crate::Flow;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Seek, SeekFrom, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::os::unix::fs::{FileExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 pub(crate) fn run(session: &mut Session, words: &[String], status: u8) -> Flow {
@@ -27,7 +27,11 @@ pub(crate) fn run(session: &mut Session, words: &[String], status: u8) -> Flow {
             Ok(()) => Flow::Continue(0),
             Err(e) => {
                 eprintln!("tonari: history: {e}");
-                Flow::Continue(1)
+                Flow::Continue(if e.kind() == io::ErrorKind::InvalidInput {
+                    2
+                } else {
+                    1
+                })
             }
         }
     }
@@ -52,6 +56,11 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<()> {
                 session.history = None;
             } else if "dspawrn".contains(c) && operation.is_none() {
                 operation = Some(c);
+            } else if !"dspawrn".contains(c) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("-{c}: invalid option"),
+                ));
             } else {
                 return Err(error("invalid option combination"));
             }
@@ -76,7 +85,9 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<()> {
             }
         }
         Some('d') => {
-            let arg = args.first().ok_or_else(|| error("position required"))?;
+            let arg = args
+                .first()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "position required"))?;
             let h = session.history_mut();
             let (a, b) = arg
                 .char_indices()
@@ -148,6 +159,126 @@ fn position(h: &Entries, arg: &str, end: usize) -> io::Result<usize> {
         .ok_or_else(|| error("history position out of range"))
 }
 
+fn locked_history(path: &Path, options: &OpenOptions) -> io::Result<File> {
+    loop {
+        let file = options.open(path)?;
+        while unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
+        let opened = file.metadata()?;
+        let current = std::fs::metadata(path)?;
+        if (opened.dev(), opened.ino()) == (current.dev(), current.ino()) {
+            return Ok(file);
+        }
+        // A simultaneous limit change atomically replaced the old inode.
+    }
+}
+
+pub(super) fn limit_plain_file(path: &Path, limit: usize) -> io::Result<()> {
+    let path = std::fs::canonicalize(path)?;
+    let mut source = locked_history(
+        &path,
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK),
+    )?;
+    let metadata = source.metadata()?;
+    if !metadata.is_file() || metadata.len() <= limit as u64 {
+        return Ok(());
+    }
+    let mut pos = metadata.len();
+    let mut lines = limit;
+    let mut block = [0u8; 16384];
+    if limit > 0 {
+        'scan: while pos > 0 {
+            let n = pos.min(block.len() as u64) as usize;
+            pos -= n as u64;
+            source.read_exact_at(&mut block[..n], pos)?;
+            for i in memchr::memrchr_iter(b'\n', &block[..n]) {
+                if lines == 0 {
+                    pos += i as u64 + 1;
+                    break 'scan;
+                }
+                lines -= 1;
+            }
+        }
+        if pos == 0 {
+            return Ok(());
+        }
+    }
+    source.seek(SeekFrom::Start(pos))?;
+    let mut template = path
+        .with_file_name(".tonari-history-XXXXXX")
+        .into_os_string()
+        .into_vec();
+    template.push(0);
+    let fd = unsafe { libc::mkstemp(template.as_mut_ptr().cast()) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let mut copy = unsafe { File::from_raw_fd(fd) };
+    template.pop();
+    let temp = PathBuf::from(std::ffi::OsString::from_vec(template));
+    let result = (|| {
+        io::copy(&mut source, &mut copy)?;
+        copy.set_permissions(metadata.permissions())?;
+        std::fs::rename(&temp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(temp);
+    }
+    result
+}
+
+// A history file may be copied and extended under another name. Only skip
+// previously imported bytes when that prefix still denotes the same commands.
+fn imported_prefix(
+    seen: &InitialJournal,
+    file: &File,
+    path: &Path,
+    meta: &std::fs::Metadata,
+) -> io::Result<u64> {
+    if seen.len > meta.len() {
+        return Ok(0);
+    }
+    if seen.identity == (meta.dev(), meta.ino()) {
+        return Ok(seen.len);
+    }
+    if path == seen.path {
+        return Ok(0);
+    }
+    let Ok(old) = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(&seen.path)
+    else {
+        return Ok(0);
+    };
+    let original = old.metadata()?;
+    if (original.dev(), original.ino()) != seen.identity
+        || original.len() < seen.len
+        || !original.is_file()
+    {
+        return Ok(0);
+    }
+    let (mut left, mut right) = ([0u8; 4096], [0u8; 4096]);
+    let mut pos = 0;
+    while pos < seen.len {
+        let n = (seen.len - pos).min(left.len() as u64) as usize;
+        old.read_exact_at(&mut left[..n], pos)?;
+        file.read_exact_at(&mut right[..n], pos)?;
+        if left[..n] != right[..n] {
+            return Ok(0);
+        }
+        pos += n as u64;
+    }
+    Ok(seen.len)
+}
+
 fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<()> {
     if args.len() > 1 {
         return Err(error("too many arguments"));
@@ -157,15 +288,17 @@ fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<
     let default = session
         .get("HOME")
         .map(|s| Path::new(&s).join(".bash_history"));
-    let private =
-        args.is_empty() && (chosen.is_none() || default.as_deref() == chosen.map(Path::new));
+    let chosen = chosen
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| error("history file is not set"))?;
+    let private = args.is_empty() && default.as_deref() == Some(Path::new(chosen));
     if private && matches!(op, 'a' | 'w') {
         return Ok(());
     } // The private journal is written when a command finishes.
     let path = if private {
         super::file(session)
     } else {
-        chosen.filter(|s| !s.is_empty()).map(PathBuf::from)
+        Some(PathBuf::from(chosen))
     };
     let Some(path) = path else { return Ok(()) };
     if matches!(op, 'r' | 'n') {
@@ -180,10 +313,7 @@ fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<
                 .history
                 .as_deref()
                 .and_then(|h| h.imported.as_ref())
-                .filter(|seen| {
-                    seen.path == path && seen.identity == identity && seen.len <= meta.len()
-                })
-                .map_or(0, |seen| seen.len)
+                .map_or(Ok(0), |seen| imported_prefix(seen, &file, &path, &meta))?
         } else {
             0
         };
@@ -254,16 +384,15 @@ fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<
         h.written = h.lines.len();
         result?;
     } else {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .append(op == 'a')
-            .truncate(false)
-            .mode(0o600)
-            .open(&path)?;
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
+        let mut file = locked_history(
+            &path,
+            OpenOptions::new()
+                .write(true)
+                .create(true)
+                .append(op == 'a')
+                .truncate(false)
+                .mode(0o600),
+        )?;
         let h = session.history_mut();
         let first = if op == 'a' {
             h.written

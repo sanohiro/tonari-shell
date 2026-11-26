@@ -55,6 +55,134 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_pipeline_last_argument_and_parent_scope(self):
+        self.compare(""": before
+f() { echo "inside:$_"; : changed; }
+f arg final
+echo "after:$_"
+: old
+printf x | cat >/dev/null
+echo "pipe:$_"
+shopt -s lastpipe
+printf 'joined\\n' | read -r value
+echo "$value:${PIPESTATUS[*]}"
+f() { printf x | return 23; echo unreachable; }
+f
+echo $?
+""", 0, b"inside:before\nafter:final\npipe:old\njoined:0 0\n23\n", minimum=5)
+
+    def test_array_initialization_and_attributes(self):
+        self.compare("""i=1
+a=([100+i++]=$((i++)) [200+i++]=$((i++)))
+echo "${!a[*]}:${a[*]}:$i"
+a=([0]=3 [a[0]]=7 [a[3]]=new [7]+=er)
+echo "${!a[*]}:${a[*]}"
+declare -ai attr=([7]=123 [9]=321)
+printf '<%s>' "${attr[@]@a}"
+prefB=2 prefA=1; printf '<%s>' "${!pref@}"
+""", 0, b"103 204:1 2:5\n0 3 7:3 7 newer\n<ai><ai><prefA><prefB>", minimum=5)
+        # An element append uses the value already assigned to the same key.
+        # Some Bash 5.2 builds lose this value in an associative initializer.
+        proc = self.command(TONARI, 'declare -A a=([x]=first [x]+=second); echo "${a[x]}"')
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"firstsecond\n", b""))
+        self.compare("""a=(x y); i=0; unset -v 'a[i++]'; echo "$i:${a[*]}"
+declare v; unset -v 'v[2]' 2>/dev/null; echo "$?"
+history -Z 2>/dev/null; echo "$?"
+""", 0, b"1:y\n1\n2\n", minimum=5)
+
+    def test_vi_operator_edits_submitted_argument(self):
+        for shell in self.shells_for():
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                os.write(fd, b"set -o vi; s(){ printf '<%s>' \"$@\" >vi-result; echo edit''OK; }; echo rea''dy\r")
+                self.read_until(fd, b"ready\r\n")
+                os.write(fd, b"s hello world")
+                self.read_until(fd, b"world")
+                os.write(fd, b"\x1b")
+                time.sleep(0.65)
+                os.write(fd, b"0wcwgoodbye\r")
+                self.read_until(fd, b"editOK\r\n")
+                self.assertEqual((self.cwd / "vi-result").read_bytes(), b"<goodbye><world>")
+
+    def test_right_leaves_reverse_search_with_an_editable_match(self):
+        for shell in self.shells_for():
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(editing=True, shell=shell)
+                os.write(fd, b"echo editme >match; echo rea''dy\r")
+                data = self.read_until(fd, b"ready\r\n")
+                if PROMPT not in data.partition(b"ready\r\n")[2]:
+                    self.read_until(fd, PROMPT)
+                os.write(fd, b"\x12editme")
+                self.read_until(fd, b">match")
+                os.write(fd, b"\x1b[C\x05; echo changed >> match; echo done''OK\r")
+                self.read_until(fd, b"doneOK\r\n")
+                self.assertEqual((self.cwd / "match").read_text(), "editme\nchanged\n")
+                (self.cwd / "match").unlink()
+
+    def test_arithmetic_keeps_associative_keys_as_data(self):
+        self.compare(r"""declare -A A
+for key in '\' 'a]b' "x'y" '雪' '$anything'; do
+  (( A["$key"] = 42 ))
+  (( A["$key"] += 1 ))
+  printf '<%s:%s>\n' "$key" "${A[$key]}"
+done
+i=0; ((0 && A["$((++i))"])); echo "$i"
+(( A["$((i++))"] = $((i++)) )); echo "${A[1]}:$i"
+""", 0, "<\\:43>\n<a]b:43>\n<x'y:43>\n<雪:43>\n<$anything:43>\n1\n2:3\n".encode(), minimum=5)
+
+    def test_signal_listing_continues_past_invalid_operands(self):
+        self.compare("kill -l HUP BAD INT 9999 129 2>/dev/null; echo $?", 0, b"1\n2\nHUP\n1\n")
+
+    def test_regex_tilde_and_unquoted_operators(self):
+        # Start both shells with this HOME. Some Bash builds cache tilde's
+        # original value even after the HOME variable changes.
+        self.env["HOME"] = str(self.cwd / "^a$")
+        self.compare("""[[ $HOME =~ ~ ]]; echo "$?"
+[[ "$HOME/a" =~ ~/[ab] ]]; echo "$?"
+[[ '~' =~ "~" ]]; echo "$?"
+[[ '&' =~ (&) ]]; echo "$?"
+""", 0, b"0\n0\n0\n0\n")
+        p = self.command(TONARI, 'HOME=/changed; printf "%s" ~; [[ "$HOME" =~ ~ ]]')
+        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, b"/changed", b""))
+        for shell in self.shells_for():
+            for operator in ("&", "<>"):
+                proc = self.command(shell, "[[ x =~ " + operator + " ]]; echo unexpected")
+                self.assertEqual((proc.returncode, proc.stdout), (2, b""))
+
+    def test_unset_removes_a_posix_special_builtin_assignment(self):
+        p = self.command(TONARI, """set -o posix
+f() { x=42; x=tmp unset x; echo "${x-unset}"; }
+f
+x=42; x=tmp eval 'unset x'; echo "${x-unset}"
+x=42; x=tmp :; echo "$x"
+""")
+        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, b"unset\nunset\ntmp\n", b""))
+
+    def test_umask_applies_symbolic_clauses_in_order(self):
+        proc = self.command(TONARI, "umask 0124; umask a=,a=u && umask")
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"0777\n", b""))
+
+    def test_quoted_array_declarations(self):
+        self.compare("""false
+declare -a 'arr=($? "two words")'
+declare -A 'map=([a]=b [c]=d)'
+printf '<%s>' "${arr[@]}" "${map[a]}" "${map[c]}"
+declare 'arr[0]=(literal)'
+echo "${arr[0]}"
+""", 0, b"<1><two words><b><d>(literal)\n", minimum=5)
+
+    def test_history_limits_and_incremental_import_after_copy(self):
+        self.compare("""printf '%s\\n' one two three > first; cp first second; echo four >>second
+history -c; HISTFILE=first history -r; HISTFILE=second history -n
+history | awk '{print $NF}'
+HISTSIZE=2; history | awk '{print $NF}'
+HISTFILE=second; HISTFILESIZE=2; cat second
+""", 0, b"one\ntwo\nthree\nfour\nthree\nfour\nthree\nfour\n", minimum=5)
+        # Replacing a history file with unrelated content must keep its first line.
+        proc = self.command(TONARI, "printf 'one\\n' >a; printf 'six\\nnext\\n' >b; "
+                                    "history -r a; history -n b; history | awk '{print $NF}'")
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"one\nsix\nnext\n", b""))
+
     def test_invoked_as_sh(self):
         sh = self.cwd / "sh"
         env = self.env | {"BASH_ENV": str(self.cwd / "bashenv"), "ENV": str(self.cwd / "env")}
@@ -149,6 +277,12 @@ test -t 0 0<&-; echo $?; test -t 0 </dev/null; echo $?; test -t 0; echo $?
 test -t 5 5<&-; echo $?; test -t 5 5</dev/null; echo $?; test -t 5 5<&0; echo $?"""
                 p = subprocess.run([sh, "-c", script], stdin=slave, cwd=self.cwd,
                                    env=self.env, capture_output=True, timeout=5)
+                if shell == BASH and not self.bash_before_53() and p.stdout.startswith(b"2\n2\n"):
+                    # Bash 5.3 diagnoses empty and nonnumeric operands. POSIX
+                    # specifies false for an invalid file descriptor number.
+                    self.assertEqual((p.returncode, p.stdout), (0, b"2\n2\n1\n1\n1\n0\n1\n1\n0\n"))
+                    self.assertEqual(p.stderr.count(b"integer expected"), 2)
+                    continue
                 self.assertEqual((p.returncode, p.stdout, p.stderr),
                                  (0, b"1\n1\n1\n1\n1\n0\n1\n1\n0\n", b""))
         finally:
