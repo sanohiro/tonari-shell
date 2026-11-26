@@ -297,6 +297,9 @@ impl Session {
         names.extend(
             [
                 "PWD",
+                "SHELL",
+                "TERM",
+                "_",
                 "IFS",
                 "PATH",
                 "OPTIND",
@@ -472,24 +475,32 @@ impl Session {
             let mut out = io::BufWriter::new(io::stdout().lock());
             let locale = self.character_locale();
             for name in self.variable_names("") {
-                let result = if let Some(var) = self.variables.get(&name)
-                    && var.elements.is_some()
-                {
-                    if !var.array_assigned {
+                let stored = self.variables.get(&name);
+                let snapshot;
+                let result = if self.array_parameter(&name) {
+                    let var = if let Some(var) = stored.filter(|v| !v.dynamic) {
+                        var
+                    } else {
+                        snapshot = self.declared_variable(&name, false).unwrap();
+                        &snapshot
+                    };
+                    if !var.array_assigned
+                        || name == "PIPESTATUS" && self.pipe_status.first.is_none()
+                    {
                         continue;
                     }
                     write!(out, "{name}").and_then(|_| print_variable_value(&mut out, var))
-                } else if let Some(value) = self
-                    .variables
-                    .get(&name)
-                    .filter(|v| !v.dynamic)
-                    .and_then(|v| v.value.as_deref())
-                    .map(Cow::Borrowed)
-                    .or_else(|| self.get(&name).map(Cow::Owned))
-                {
-                    writeln!(out, "{name}={}", set_value(&value, self.posix, locale))
                 } else {
-                    continue;
+                    let value = if dynamic::is_dynamic(&name) && stored.is_none_or(|v| v.dynamic) {
+                        // A listing must not advance RANDOM or consume fresh entropy.
+                        self.listed_number(&name).map(|v| Cow::Owned(v.to_string()))
+                    } else if let Some(var) = stored {
+                        var.value.as_deref().map(Cow::Borrowed)
+                    } else {
+                        self.get(&name).map(Cow::Owned)
+                    };
+                    let Some(value) = value else { continue };
+                    writeln!(out, "{name}={}", set_value(&value, self.posix, locale))
                 };
                 if result.is_err() {
                     return 1;
@@ -829,6 +840,7 @@ impl Session {
             "BASH_VERSION" => Some("5.2.0(1)-tonari".into()),
             "GROUPS" | "BASH_VERSINFO" => self.element(name, 0),
             "SHELL" => std::env::var(name).ok().or_else(crate::word::account_shell),
+            "TERM" => Some(std::env::var(name).unwrap_or_else(|_| "dumb".into())),
             "HOSTNAME" => std::env::var(name).ok().or_else(|| {
                 static HOST: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
                 HOST.get_or_init(|| {
