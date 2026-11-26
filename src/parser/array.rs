@@ -33,7 +33,7 @@ pub(super) fn indexed_prefix(source: &str) -> Option<&str> {
 pub(crate) fn quoted_initializer(
     source: &str,
 ) -> Result<Vec<(Option<Subscript<String>>, Word)>, Error> {
-    let (tokens, spans, _) = super::lexer::lex(source, false, true)?;
+    let (tokens, spans, _) = super::lexer::lex_initializer(source)?;
     let mut reader = Reader::new(tokens, spans, source);
     if !matches!(reader.peek(), Some(Token::LeftParen)) {
         return Err(Error::Invalid("expected array initializer"));

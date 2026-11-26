@@ -1942,6 +1942,37 @@ fn prepare_expanded(
                 if operand.is_none() && exp.session.readonly(&key) {
                     return Err(crate::expansion::Error::readonly(&key));
                 }
+                if operand.is_none() && !words.is_empty() {
+                    let mut text = if append {
+                        exp.lookup(&key).unwrap_or_default()
+                    } else {
+                        String::new()
+                    };
+                    text.push('(');
+                    for (i, (index, mut word)) in parts.into_iter().enumerate() {
+                        if i != 0 {
+                            text.push(' ');
+                        }
+                        if let Some(index) = index {
+                            text.push('[');
+                            text.push_str(&exp.key(&index.index)?);
+                            text.push_str(if index.append { "]+=" } else { "]=" });
+                        }
+                        // This command environment entry is a scalar. Preserve
+                        // tildes, braces and globs while expanding substitutions.
+                        if let Word::Expanded(parts) = &mut word {
+                            for part in parts {
+                                if let crate::word::Part::Tilde(s) = part {
+                                    *part = crate::word::Part::Text(std::mem::take(s));
+                                }
+                            }
+                        }
+                        text.push_str(&exp.scalar(word)?);
+                    }
+                    text.push(')');
+                    assignments.push((key, text));
+                    continue;
+                }
                 let declared_assoc = operand.is_some()
                     && words
                         .iter()
@@ -1961,10 +1992,6 @@ fn prepare_expanded(
                         append,
                         items,
                     });
-                } else {
-                    return Err(
-                        "array literals as command environment assignments are unsupported".into(),
-                    );
                 }
             }
             Assignment::Scalar(mut word) => {
@@ -1984,12 +2011,13 @@ fn prepare_expanded(
                     eprintln!("tonari: {error}");
                     continue;
                 }
+                if target.is_some() && !words.is_empty() {
+                    eprintln!("tonari: {key}: not a valid identifier");
+                    continue;
+                }
                 if let Some((base, subscript)) = target
                     && exp.session.is_associative(base)
                 {
-                    if !words.is_empty() {
-                        return Err("invalid indexed environment assignment".into());
-                    }
                     if standalone {
                         let key = exp.key(subscript)?;
                         let old = append
@@ -2007,9 +2035,6 @@ fn prepare_expanded(
                     continue;
                 }
                 let index = if let Some((_, subscript)) = target {
-                    if !words.is_empty() {
-                        return Err("invalid indexed environment assignment".into());
-                    }
                     if !standalone {
                         continue;
                     }

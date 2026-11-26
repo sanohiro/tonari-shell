@@ -55,6 +55,80 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_printf_time_locale_zone_and_arguments(self):
+        self.compare(r"""export TZ=UTC0
+printf '[%*.*(%Y-%m-%d)T] %()T %((%Y))T\n' 7 4 0 0 0
+printf -v t '%(%F %T %Z %z %s %%s)T;' 0 86400
+echo "$t"
+TZ=America/New_York printf '%(%F %T %Z %z)T\n' 0 1593604800
+printf '%(%Z %z)T\n' 0
+""", 0, b"[   1970] 00:00:00 (1970)\n1970-01-01 00:00:00 UTC +0000 0 %s;"
+        b"1970-01-02 00:00:00 UTC +0000 86400 %s;\n1969-12-31 19:00:00 EST -0500\n"
+        b"2020-07-01 08:00:00 EDT -0400\nUTC +0000\n", minimum=5)
+
+    def test_printf_time_unexported_unset_and_clock(self):
+        self.compare(r"""unset TZ
+printf -v local '%(%F %T %z)T' 0
+TZ=HST10
+printf -v t '%(%F %T %z)T' 0
+[[ $t == "$local" ]] || exit 1
+export TZ
+printf '%(%F %T %z)T\n' 0
+unset TZ
+printf -v t '%(%F %T %z)T' 0
+[[ $t == "$local" ]] || exit 2
+printf -v start '%(%s)T' -2
+sleep 1
+printf -v now '%(%s)T'
+printf -v explicit '%(%s)T' -1
+printf -v again '%(%s)T' -2
+(( start == again && now > start && explicit >= now ))
+""", 0, b"1969-12-31 14:00:00 -1000\n", minimum=5)
+
+    def test_printf_long_time_format(self):
+        fmt = "%(" + "%Y" * 1000 + ")T"
+        p = self.command(TONARI, 'TZ=UTC0 printf "$1" 0', '_', fmt)
+        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, b"1970" * 1000, b""))
+
+    def test_assignment_tildes_and_brace_login_names(self):
+        import pwd
+        root = os.fsencode(pwd.getpwnam("root").pw_dir)
+        self.compare(r"""HOME=/home/test
+v=${u-~:${u-~:~}}
+printf '%s\n' "$v" ${u-~:~} "${u-~:~}"
+v=${u-a\:~:~}; echo "$v"
+printf '%s\n' ~{ro,"ro"}ot {~root,~}/a ~{root,}/x
+""", 0, b"/home/test:/home/test:/home/test\n/home/test:~\n~:~\na:~:/home/test\n"
+        + root + b"\n~root\n" + root + b"/a\n/home/test/a\n" + root + b"/x\n/home/test/x\n")
+
+    def test_array_assignment_and_argv_contexts(self):
+        self.compare(r"""i=3
+set -f
+a=([1 + 2]=abc [i + 1]=def)
+printf '<%s>\n' a[1 + 2]=xxx b[$i]=y "${a[@]}"
+{ a[1 + 2]=x true; } 2>/dev/null
+echo "$?:${a[3]}"
+v=word
+a=(hi "$v" [2]="$v" ~ *.txt {a,b}) env | grep '^a='
+""", 0, b"<a[1>\n<+>\n<2]=xxx>\n<b[3]=y>\n<abc>\n<def>\n0:abc\n"
+        b"a=(hi word [2]=word ~ *.txt {a,b})\n")
+
+    def test_legacy_arithmetic_and_set_options(self):
+        self.compare(r"""i=2; a[3]=7
+echo "$[a[i+1] * $i]"
+set -- old
+set +
+echo "$#:$*"
+set -x -v - x + y
+case $- in *x*|*v*) exit 1;; esac
+echo "$#:$*"
+set -a
+f() { local TONARI_LOCAL=value; env | grep '^TONARI_LOCAL='; }
+f
+declare TONARI_GLOBAL=value
+env | grep '^TONARI_GLOBAL='
+""", 0, b"14\n1:old\n3:x + y\nTONARI_LOCAL=value\nTONARI_GLOBAL=value\n")
+
     def test_pipeline_last_argument_and_parent_scope(self):
         self.compare(""": before
 f() { echo "inside:$_"; : changed; }

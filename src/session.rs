@@ -129,6 +129,7 @@ pub struct Session {
     dir_stack: Vec<String>,
     visits: Option<Rc<DirectoryVisits>>,
     shell_pid: ShellPid,
+    pub(crate) started_at: libc::time_t,
     pub interactive: bool,
     pub login: bool,
     pub posix: bool,
@@ -398,7 +399,13 @@ impl Session {
                 replace_positionals = true;
                 break;
             }
+            if opt == "+" {
+                i += 1;
+                continue;
+            }
             if opt == "-" {
+                self.xtrace = false;
+                self.verbose = false;
                 i += 1;
                 break;
             }

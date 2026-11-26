@@ -134,7 +134,7 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<()> {
                 {
                     let stamp = format
                         .as_ref()
-                        .map(|f| crate::prompt::format_time(f, h.timestamps[i]))
+                        .map(|f| crate::shell_time::format(session, f, h.timestamps[i]))
                         .unwrap_or_default();
                     writeln!(out, "{:5}  {stamp}{line}", h.base + i + 1)?;
                 }

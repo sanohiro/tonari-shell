@@ -11,6 +11,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from bench_history import PROMPT, read_until, terminal
 
 CASES = {
+    "printf time": ('export TZ=America/New_York; for ((i=0;i<2000;i++)); do '
+                    'printf -v stamp "%(%F %T %Z %z)T" 1593604800; done; echo "$stamp"',
+                    b"2020-07-01 08:00:00 EDT -0400\n"),
+    "printf epoch": ('for ((i=0;i<4000;i++)); do printf -v ts "%(%s)T" 86400; done; echo "$ts"',
+                     b"86400\n"),
+    "default tilde": ('HOME=/abc; for ((i=0;i<4000;i++)); do p=${u-~:~}; done; echo "$p"',
+                      b"/abc:/abc\n"),
+    "brace tilde": ('HOME=/abc; for ((i=0;i<2000;i++)); do a=({~,~}/bin); done; echo "${a[*]}"',
+                    b"/abc/bin /abc/bin\n"),
+    "indexed argument": ('set -f; f() { x=$#; }; for ((i=0;i<3000;i++)); do f a[1 + 2]=x; done; echo "$x"',
+                         b"3\n"),
+    "bracket arithmetic": ('a[3]=7; for ((i=0;i<6000;i++)); do x=$[a[3]+1]; done; echo "$x"',
+                           b"8\n"),
     "attributes": ('a=({1..1500}); for ((i=0;i<100;i++)); do b=("${a[@]@a}"); done; '
                    'echo "${#b[@]}:${b[0]}"', b"1500:a\n"),
     "last argument": (': old; for ((i=0;i<10000;i++)); do : some-argument; done; echo "$_"',

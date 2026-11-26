@@ -17,6 +17,7 @@ mod parser;
 mod pattern;
 mod prompt;
 mod session;
+mod shell_time;
 mod startup;
 mod subshell;
 mod test_expression;
@@ -456,6 +457,7 @@ fn run_invocation(
 ) -> u8 {
     use cli::Input;
     let mut session = Session::default();
+    session.started_at = unsafe { libc::time(std::ptr::null_mut()) };
     session.import_functions();
     session.initialize_shell_level();
     session.arg0 = std::mem::take(&mut invocation.arg0);

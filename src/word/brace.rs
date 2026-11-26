@@ -206,15 +206,39 @@ pub fn append_fields(
                 }
             }
             None => {
-                if let Some(Part::BraceTilde(prefix)) = parts.first()
-                    && (parts.len() == 1
-                        || matches!(parts.get(1), Some(Part::Text(s) | Part::Pattern(s)) if s.starts_with('/')))
-                {
-                    parts[0] = Part::Tilde((*prefix).into());
-                }
+                resolve_tilde(&mut parts);
                 env.append_resolved_fields(Word::Expanded(parameter_names(parts)), glob, result)?;
             }
         }
     }
     Ok(())
+}
+
+fn resolve_tilde(parts: &mut Vec<Part>) {
+    let Some(Part::BraceTilde(prefix)) = parts.first() else {
+        return;
+    };
+    let mut name = prefix.to_string();
+    let mut end = 1;
+    while let Some(part) = parts.get(end) {
+        let Part::Pattern(raw) = part else { return };
+        let login = raw.split('/').next().unwrap();
+        if !login
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
+        {
+            return;
+        }
+        name.push_str(login);
+        if login.len() < raw.len() {
+            let n = login.len();
+            if let Part::Pattern(raw) = &mut parts[end] {
+                raw.drain(..n);
+            }
+            break;
+        }
+        end += 1;
+    }
+    parts[0] = Part::Tilde(name);
+    parts.drain(1..end);
 }
