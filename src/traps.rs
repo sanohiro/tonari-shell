@@ -151,10 +151,16 @@ pub struct Traps {
     interactive_handlers: bool,
     interactive_origin: bool,
     pub before_return: u8,
-    pub signal_status: Option<u8>,
+    current_action: Option<ActionStatus>,
     async_resettable: u64,
     implicit: BTreeMap<i32, libc::sigaction>,
-    pub exit_status: Option<u8>,
+}
+
+#[derive(Clone, Copy)]
+struct ActionStatus {
+    signal: i32,
+    scope_depth: u32,
+    status: u8,
 }
 
 pub(crate) fn number(s: &str) -> Option<i32> {
@@ -264,7 +270,14 @@ impl Traps {
     }
 
     pub fn in_action(&self) -> bool {
-        self.running != 0 || self.in_nested_action() || self.exit_status.is_some()
+        self.current_action.is_some()
+    }
+
+    pub fn implicit_status(&self, scope_depth: u32, exiting: bool) -> Option<u8> {
+        let action = self.current_action?;
+        (action.signal != DEBUG
+            && (scope_depth == action.scope_depth || exiting && action.signal == 0))
+            .then_some(action.status)
     }
 
     pub fn has_explicit_traps(&self) -> bool {
@@ -475,7 +488,7 @@ impl Traps {
     }
 
     pub fn after_fork(&mut self, errtrace: bool, functrace: bool) {
-        self.signal_status = None;
+        self.current_action = None;
         if self.interactive_handlers {
             self.interactive_handlers = false;
             crate::execute::reset_caught_signals(&[
@@ -498,7 +511,6 @@ impl Traps {
             return;
         }
         let _ = self.watch_exit(false);
-        self.exit_status = None;
         TERMINATING.store(0, Relaxed);
         // Bash exposes the parent list to trap -p until the child changes a trap.
         // Only ignored dispositions and inherited shell handlers remain active.
@@ -738,7 +750,12 @@ pub fn error(session: &mut Session, status: u8) -> Flow {
 }
 
 // GNU Bash reserves the three numbers immediately following its OS signal table.
-fn with_trapsig(session: &mut Session, sig: i32, run: impl FnOnce(&mut Session) -> Flow) -> Flow {
+fn with_trapsig(
+    session: &mut Session,
+    sig: i32,
+    status: u8,
+    run: impl FnOnce(&mut Session) -> Flow,
+) -> Flow {
     #[cfg(target_os = "macos")]
     const NSIG: i32 = 32;
     #[cfg(target_os = "linux")]
@@ -749,13 +766,20 @@ fn with_trapsig(session: &mut Session, sig: i32, run: impl FnOnce(&mut Session) 
         RETURN => NSIG + 2,
         other => other,
     };
-    session.with_trap_signal(number, run)
+    let previous = session.traps.current_action.replace(ActionStatus {
+        signal: sig,
+        scope_depth: session.function_depth + session.source_depth,
+        status,
+    });
+    let flow = session.with_trap_signal(number, run);
+    session.traps.current_action = previous;
+    flow
 }
 
 fn action_text(session: &mut Session, sig: i32, status: u8) -> Flow {
     let command = session.traps.entries[&sig].command.clone();
     let previous = session.pipe_status.clone();
-    let flow = with_trapsig(session, sig, |session| {
+    let flow = with_trapsig(session, sig, status, |session| {
         crate::eval_text(session, &command, status)
     });
     session.pipe_status = previous;
@@ -777,13 +801,11 @@ pub fn dispatch(session: &mut Session, status: u8) -> Flow {
         if let Some(command) = session.traps.entries.get(&sig).map(|e| e.command.clone()) {
             session.traps.running |= bit;
             let previous = session.pipe_status.clone();
-            let previous_status = session.traps.signal_status.replace(status);
             let previous_line = session.signal_line.replace(1);
-            let flow = with_trapsig(session, sig, |session| {
+            let flow = with_trapsig(session, sig, status, |session| {
                 crate::input::text(session, &command, status, false, false, Some(1))
             });
             session.signal_line = previous_line;
-            session.traps.signal_status = previous_status;
             session.pipe_status = previous;
             session.traps.running &= !bit;
             // Commands in a CHLD handler can create children of their own.
@@ -814,13 +836,11 @@ pub fn finish(session: &mut Session, code: u8) -> u8 {
     let sig = TERMINATING.swap(0, Relaxed);
     if let Some(exit) = session.traps.entries.remove(&0) {
         let _ = session.traps.watch_exit(false);
-        session.traps.exit_status = Some(code);
-        if let Flow::Exit(n) = with_trapsig(session, 0, |session| {
+        if let Flow::Exit(n) = with_trapsig(session, 0, code, |session| {
             crate::eval_text(session, &exit.command, code)
         }) {
             code = n;
         }
-        session.traps.exit_status = None;
     }
     if sig != 0 {
         unsafe {

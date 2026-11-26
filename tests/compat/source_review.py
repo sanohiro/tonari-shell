@@ -69,6 +69,7 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "trap-return-context": """invoke(){ kill -USR1 $$; return 99; }; helper(){ false; return; }; trap 'helper; s=$?; false; return --' USR1; invoke; echo "$?:$s"; trap 'false; exit' USR1; kill -USR1 $$; echo wrong""",
     "compat-test": """for n in 52 53; do BASH_COMPAT=$n; test '(' '!' = '!' ')' -a yes; echo $?; test '(' '-n' ')' -a yes; echo $?; done""",
     "bind-filter": r"""bind -p forward-word beginning-of-line unknown-name 2>/dev/null | awk -F': ' '!seen[$NF]++ {print $NF}' """,
     "source-fullpath": 'shopt -s bash_source_fullpath; source ./linked; f; shopt -u bash_source_fullpath; source ./linked; f',
@@ -146,6 +147,7 @@ HOT = {
     "funcnest": ('f', 2500),
     "source-path": ('source -p empty:src noop', 600),
     "compgen-array": ('compgen -V arr -W "$words" item', 80),
+    "trap-return-context": ("invoke", 500),
     "trap-action": ('a=$(trap -P USR1)', 800),
     "trap-signal": ('kill -USR1 $$', 1000),
     "monotonic": ('s=$BASH_MONOSECONDS', 2500),
@@ -677,6 +679,7 @@ def main():
                 "history-extension": "history -s 'echo dir/file.txt'",
                 "funcnest": 'FUNCNEST=8; f(){ :; }',
                 "compgen-array": 'words="' + " ".join(f"item{i}" for i in range(512)) + '"',
+                "trap-return-context": "invoke(){ kill -USR1 $$; }; trap ':; return' USR1",
                 "trap-action": "trap ':' USR1", "trap-signal": "trap 's=$BASH_TRAPSIG' USR1",
                 "glob-size": "GLOBSORT=size", "glob-numeric": "cd items; GLOBSORT=numeric",
             }.get(name, ":")

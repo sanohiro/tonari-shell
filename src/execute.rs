@@ -1056,8 +1056,11 @@ fn eval_builtin(
                 Flow::Continue(2)
             } else if let Some(code) = status {
                 session.traps.before_return = last_status;
-                let code = if session.posix && args.is_empty() {
-                    session.traps.signal_status.unwrap_or(code)
+                let code = if status_operands(args).is_empty() {
+                    session
+                        .traps
+                        .implicit_status(session.function_depth + session.source_depth, false)
+                        .unwrap_or(code)
                 } else {
                     code
                 };
@@ -1073,8 +1076,7 @@ fn eval_builtin(
                 session,
                 session
                     .traps
-                    .exit_status
-                    .or(session.traps.signal_status.filter(|_| session.posix))
+                    .implicit_status(session.function_depth + session.source_depth, true)
                     .unwrap_or(code),
                 last_status,
             ))
