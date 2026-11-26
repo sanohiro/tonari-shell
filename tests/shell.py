@@ -2020,7 +2020,9 @@ shopt -u cdable_vars; cd DEST 2>/dev/null; echo "off:$?"
         for shell in [BASH, TONARI]:
             proc = self.command(shell, source)
             self.assertEqual((proc.returncode, proc.stdout), (0, b"2:a\n"))
-            if shell == TONARI:
+            if shell == TONARI or not self.bash_before_53():
+                self.assertIn(b"regular expression", proc.stderr)
+            else:
                 self.assertEqual(proc.stderr, b"")
 
     def test_single_star_literal_edges(self):
