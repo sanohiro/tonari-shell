@@ -165,7 +165,7 @@ pub fn file_script(
 }
 
 fn error(message: impl std::fmt::Display, status: u8) -> Flow {
-    eprintln!("tonari: {message}");
+    diagnostic!("{message}");
     Flow::Continue(status)
 }
 
@@ -193,12 +193,12 @@ fn syntax_error(session: &Session, problem: parser::Error, first_line: usize) ->
     } else if session.source_depth > 0
         && let Some(path) = session.source_names.last()
     {
-        eprintln!(
-            "tonari: {path}: command starting at line {first_line}: {}",
+        diagnostic!(
+            "{path}: command starting at line {first_line}: {}",
             problem.message()
         );
     } else {
-        eprintln!("tonari: {}", problem.message());
+        diagnostic!("{}", problem.message());
     }
     flow
 }
@@ -220,7 +220,7 @@ fn history_input<'a>(
     let event = match crate::history::expand::expand_line(session, text, quote) {
         Ok(event) => event,
         Err(error) => {
-            eprintln!("tonari: {error}");
+            diagnostic!("{error}");
             return None;
         }
     };
@@ -825,7 +825,7 @@ pub(crate) fn print_script(session: &Session, input: crate::cli::Input) -> u8 {
     let source = match source {
         Ok(source) => source,
         Err(e) => {
-            eprintln!("tonari: {e}");
+            diagnostic!("{e}");
             return 1;
         }
     };
@@ -845,7 +845,7 @@ pub(crate) fn print_script(session: &Session, input: crate::cli::Input) -> u8 {
             u8::from(written.is_err())
         }
         Err(e) => {
-            eprintln!("tonari: {}", e.message());
+            diagnostic!("{}", e.message());
             2
         }
     }

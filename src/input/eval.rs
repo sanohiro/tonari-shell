@@ -12,7 +12,7 @@ pub(crate) fn builtin(session: &mut Session, args: &[String], status: u8) -> Flo
         }
         Some((opt, _)) if opt.starts_with('-') && opt.len() > 1 => {
             let flag = opt[1..].chars().next().unwrap();
-            eprintln!("tonari: eval: -{flag}: invalid option\neval: usage: eval [arg ...]");
+            diagnostic!("eval: -{flag}: invalid option\neval: usage: eval [arg ...]");
             return Flow::Continue(2);
         }
         _ => args,

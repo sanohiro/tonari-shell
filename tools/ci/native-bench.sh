@@ -8,6 +8,27 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == audit-hot-paths ]]; then
+  if [[ $RUNNER_OS == macOS ]]; then
+    if [[ ! -x /opt/homebrew/bin/bash ]]; then brew install bash; fi
+    ref=/opt/homebrew/bin/bash
+  fi
+  args=()
+  for name in here-string-builtin-read mapfile-here redirected-pwd redirected-pwd-null external-null-output conditional-chain eval-conditionals printf-formats strings regex substitute-class trim-middle-star arithmetic functions case-classes glob; do args+=(--case "$name"); done
+  python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" \
+    --runs 21 --timing whole "${args[@]}" > "$out/workloads.txt"
+  exit
+fi
+if [[ $SUITE == release-diagnostics || $SUITE == release-layout ]]; then
+  if [[ $RUNNER_OS == macOS && -x /opt/homebrew/bin/bash ]]; then ref=/opt/homebrew/bin/bash; fi
+  if [[ $SUITE == release-diagnostics ]]; then variants=(full immediate); else variants=(size-deps layout); fi
+  for variant in "${variants[@]}"; do
+    python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/$variant" \
+      --runs 15 --timing whole --case arithmetic --case functions --case strings --case regex \
+      --case glob --case printf-formats > "$out/$variant.txt"
+  done
+  exit
+fi
 if [[ $SUITE == source-review ]]; then
   if [[ $RUNNER_OS == Linux ]]; then
     docker run --rm -e EXTERNAL_BENCH_CASE -e EXTERNAL_BENCH_RUNS -e TONARI_TEST_BASHDB=1 -v "$PWD/tests/compat/fixtures/bashdb-main.inc:/usr/share/bashdb/bashdb-main.inc:ro" -v "$PWD:/repo:ro" -v "$bin:/shells:ro" ubuntu:26.04 bash -ec '

@@ -19,14 +19,14 @@ enum Atom {
 
 fn sequence<const PATHNAME: bool>(
     source: &mut &str,
-    grouped: bool,
+    depth: usize,
     extended: bool,
 ) -> Option<Vec<Atom>> {
     let mut atoms = Vec::new();
     while !source.is_empty() {
         let rest = *source;
         let bytes = rest.as_bytes();
-        if grouped && matches!(bytes[0], b'|' | b')') {
+        if depth != 0 && matches!(bytes[0], b'|' | b')') {
             break;
         }
         if extended
@@ -34,9 +34,14 @@ fn sequence<const PATHNAME: bool>(
             && bytes.get(1) == Some(&b'(')
         {
             *source = &rest[2..];
+            if depth >= 64
+                || depth >= 8 && depth.is_multiple_of(8) && crate::stack_budget_exceeded()
+            {
+                return None;
+            }
             let mut alternatives = Vec::new();
             loop {
-                alternatives.push(sequence::<PATHNAME>(source, true, extended)?);
+                alternatives.push(sequence::<PATHNAME>(source, depth + 1, extended)?);
                 let sep = source.as_bytes().first()?;
                 *source = &source[1..];
                 if *sep == b')' {
@@ -79,7 +84,7 @@ fn sequence<const PATHNAME: bool>(
         let (atom, count) = match bytes[0] {
             b'?' => (Atom::Any, 1),
             b'*' => (Atom::Star, 1),
-            b'[' if grouped => return None,
+            b'[' if depth != 0 => return None,
             b'\\' if bytes.len() > 1 => {
                 let end = 1 + rest[1..].chars().next()?.len_utf8();
                 (Atom::Text(rest[1..end].into()), end)
@@ -90,7 +95,7 @@ fn sequence<const PATHNAME: bool>(
                     .skip(1)
                     .find(|&(i, c)| {
                         matches!(c, '*' | '?' | '[' | '\\')
-                            || grouped && matches!(c, ')' | '|')
+                            || depth != 0 && matches!(c, ')' | '|')
                             || matches!(c, '@' | '+' | '!') && rest[i + 1..].starts_with('(')
                     })
                     .map_or(rest.len(), |(i, _)| i);
@@ -423,7 +428,7 @@ impl Pattern {
 
     fn parse_mode<const PATHNAME: bool>(mut text: &str, extended: bool) -> Self {
         let original = text;
-        let atoms = sequence::<PATHNAME>(&mut text, false, extended)
+        let atoms = sequence::<PATHNAME>(&mut text, 0, extended)
             .unwrap_or_else(|| vec![Atom::Text(original.into())]);
         let mut variable = atoms
             .iter()

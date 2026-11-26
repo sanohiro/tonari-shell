@@ -70,7 +70,7 @@ pub fn run(args: &[String], posix: bool) -> u8 {
                 'S' => symbols = true,
                 'p' => reusable = true,
                 _ => {
-                    eprintln!("tonari: umask: invalid option: {flag}");
+                    diagnostic!("umask: invalid option: {flag}");
                     return 2;
                 }
             }
@@ -86,7 +86,7 @@ pub fn run(args: &[String], posix: bool) -> u8 {
             symbolic(text, current())
         };
         let Some(mask) = mask else {
-            eprintln!("tonari: umask: invalid mode: {text}");
+            diagnostic!("umask: invalid mode: {text}");
             return 1;
         };
         unsafe { libc::umask(mask) };

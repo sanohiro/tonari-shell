@@ -188,8 +188,10 @@ fn quick_substitution(
         .get_or_insert_with(Default::default);
     remember(memory, old, new)?;
     Ok(Expansion {
-        text: Cow::Owned(substitute(previous, memory, false)? + rest),
-        print: false,
+        text: Cow::Owned(
+            substitute(previous, memory, false)? + rest.strip_prefix(":p").unwrap_or(rest),
+        ),
+        print: rest.starts_with(":p"),
     })
 }
 
@@ -401,9 +403,15 @@ pub(crate) fn expand_line<'a>(
             || colon && candidate.starts_with(|c: char| c == '-' || c.is_ascii_digit())
         {
             input = candidate;
-            let spec = take(&mut input, |c| {
-                c.is_ascii_digit() || matches!(c, '-' | '$' | '*' | '%' | '^')
-            });
+            let spec = if input.starts_with(['$', '*', '%']) {
+                let (spec, rest) = input.split_at(1);
+                input = rest;
+                spec
+            } else {
+                take(&mut input, |c| {
+                    c.is_ascii_digit() || matches!(c, '-' | '$' | '*' | '^')
+                })
+            };
             value = if spec == "%" {
                 session
                     .history_expansion

@@ -265,7 +265,7 @@ fn start_raw(
                 launch,
             ),
             Err(e) => {
-                eprintln!("tonari: {e}");
+                diagnostic!("{e}");
                 Ok(Stage::Status(e.status))
             }
         };
@@ -279,13 +279,13 @@ fn start_raw(
         return Err(io::Error::last_os_error());
     }
     if pid == 0 {
-        session.reset_forked_traps();
+        session.after_fork();
         launch.pipeline_child(&mut session.traps);
         enter_stage(session, raw.compound.as_deref(), launch.background);
+        coprocess::after_fork(session);
         if let Some(command) = raw.compound.as_deref_mut()
             && let crate::parser::Command::Subshell(body) = command
         {
-            coprocess::after_fork(session);
             *command = crate::parser::Command::Group(std::mem::take(body));
         }
         session.stdin_redirected |= input.is_some();
@@ -293,7 +293,7 @@ fn start_raw(
             match run(vec![raw], last_status, true, session) {
                 Ok(flow) => flow.child_status(),
                 Err(e) => {
-                    eprintln!("tonari: {e}");
+                    diagnostic!("{e}");
                     1
                 }
             }
@@ -385,7 +385,7 @@ fn start(
         && let Ok(reader) =
             here_input::open(r.word.as_bytes(), here_input::PIPE_LIMIT).and_then(private_fd)
         && let Ok(pid) =
-            External::new(cmd, session).spawn_with_dups(&[], Some(&reader), output.as_ref())
+            External::new(cmd, session).spawn_redirected(&[], None, Some(&reader), output.as_ref())
     {
         return Ok(Stage::Child(pid));
     }
@@ -396,16 +396,32 @@ fn start(
             || input.is_some()
             || output.is_some())
         && (cached || cmd.words[0].contains('/'))
-        && cmd
+    {
+        let copies = cmd
             .redirects
             .first()
-            .is_none_or(|r| r.target == Target::Duplicate && (0..=2).contains(&r.fd))
-    {
-        // Only descriptor copies can be retried without repeating visible effects.
-        // Let the ordinary child apply them to its diagnostic if launch fails.
-        let external = External::new(cmd, session);
-        if let Ok(pid) = external.spawn_with_dups(&cmd.redirects, input.as_ref(), output.as_ref()) {
-            return Ok(Stage::Child(pid));
+            .is_none_or(|r| r.target == Target::Duplicate && (0..=2).contains(&r.fd));
+        let null = open_null_redirect(&cmd.redirects);
+        let opened = null.as_ref().map(|(dest, fd)| (*dest, fd));
+        if copies || opened.is_some() {
+            let external = External::new(cmd, session);
+            if let Ok(pid) =
+                external.spawn_redirected(&cmd.redirects, opened, input.as_ref(), output.as_ref())
+            {
+                return Ok(Stage::Child(pid));
+            }
+            if opened.is_some() {
+                // Preserve this same open file description for ENOEXEC and diagnostics.
+                return fork_stage(
+                    cmd,
+                    builtin,
+                    (input.as_ref(), output.as_ref(), next_reader),
+                    opened,
+                    last_status,
+                    session,
+                    launch,
+                );
+            }
         }
     }
     let resolved = cached || cmd.words.first().is_some_and(|name| name.contains('/'));
@@ -489,6 +505,7 @@ fn start(
         cmd,
         builtin,
         (input.as_ref(), output.as_ref(), next_reader),
+        None,
         last_status,
         session,
         launch,
@@ -499,6 +516,7 @@ fn fork_stage(
     cmd: &mut PreparedCommand,
     builtin: Option<Builtin>,
     pipes: (Option<&OwnedFd>, Option<&OwnedFd>, Option<&OwnedFd>),
+    opened: Option<(RawFd, &OwnedFd)>,
     last_status: u8,
     session: &mut Session,
     launch: crate::jobs::Launch,
@@ -510,7 +528,9 @@ fn fork_stage(
     // A trap installed by this command runs after its local redirects end.
     // An explicit subshell retains its enclosing redirects through shell exit.
     let scoped = !cmd.redirects.is_empty() && builtin.is_some_and(|b| can_install_trap(b, cmd));
-    if !scoped {
+    if let Some((dest, fd)) = opened {
+        setup.push(Action::Dup(fd.as_raw_fd(), dest));
+    } else if !scoped {
         setup.extend(actions(cmd));
     }
     let external = builtin.is_none().then(|| External::new(cmd, session));
@@ -525,7 +545,7 @@ fn fork_stage(
         // External argv and environment are prepared before fork. A shell builtin
         // runs in a child copy of the single-threaded interpreter and may reenter it.
         // Restore signals caught by the interactive shell before blocking on a file.
-        session.reset_forked_traps();
+        session.after_fork();
         launch.pipeline_child(&mut session.traps);
         enter_stage(session, cmd.compound.as_deref(), launch.background);
         if cmd.missing_hook && !launch.background {
@@ -544,7 +564,7 @@ fn fork_stage(
             let flow = if scoped {
                 run_builtin(builtin.unwrap(), cmd, session, last_status, false).unwrap_or_else(
                     |e| {
-                        eprintln!("tonari: {e}");
+                        diagnostic!("{e}");
                         Flow::Continue(1)
                     },
                 )
@@ -602,7 +622,7 @@ pub(super) fn capture_external(
     let mut cmd = match prepare(raw, session, last, true) {
         Ok(cmd) => cmd,
         Err(error) => {
-            eprintln!("tonari: {error}");
+            diagnostic!("{error}");
             return Ok((String::new(), error.status));
         }
     };
@@ -645,7 +665,7 @@ fn spawn_failure(name: &str, error: io::Error) -> io::Result<Stage> {
     ) {
         return Err(error);
     }
-    eprintln!("tonari: {name}: {error}");
+    diagnostic!("{name}: {error}");
     Ok(Stage::Status(exec_status(code)))
 }
 
@@ -694,6 +714,7 @@ pub(crate) fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(
     let fd = session
         .scalar_setting("BASH_XTRACEFD")
         .and_then(|v| v.parse().ok())
+        .filter(|&fd| !fd::is_private(fd))
         .unwrap_or(2);
     let mut data = line.as_bytes();
     while !data.is_empty() {
@@ -711,7 +732,7 @@ pub(crate) fn trace_word(word: &str) -> std::borrow::Cow<'_, str> {
         return "\\'".into();
     }
     if word.bytes().any(|b| b.is_ascii_control()) {
-        return String::from_utf8(crate::session::printf::ansi_quote(word.as_bytes(), false))
+        return String::from_utf8(crate::word::quote::ansi_quote(word.as_bytes(), false))
             .unwrap()
             .into();
     }
@@ -1031,6 +1052,20 @@ fn lastpipe(
     result
 }
 
+pub(crate) fn run_single(
+    raw: SimpleCommand<Word>,
+    last_status: u8,
+    replace: bool,
+    session: &mut Session,
+) -> io::Result<Flow> {
+    if raw.compound.is_none()
+        && let Some(flow) = crate::traps::debug(session, last_status)
+    {
+        return Ok(flow);
+    }
+    foreground(raw, last_status, replace, session)
+}
+
 pub fn run_pipeline(
     mut pipeline: Pipeline<Word>,
     last_status: u8,
@@ -1039,13 +1074,7 @@ pub fn run_pipeline(
     background: bool,
 ) -> io::Result<Flow> {
     if pipeline.len() == 1 && !background {
-        let raw = pipeline.pop().unwrap();
-        if raw.compound.is_none()
-            && let Some(flow) = crate::traps::debug(session, last_status)
-        {
-            return Ok(flow);
-        }
-        return foreground(raw, last_status, replace, session);
+        return run_single(pipeline.pop().unwrap(), last_status, replace, session);
     }
     let mut launch = session.jobs.launch(background, pipeline.len() == 1);
     let managed = background || launch.group.is_some();
@@ -1069,6 +1098,7 @@ pub fn run_pipeline(
             && let Some(flow) = crate::traps::debug(session, last_status)
         {
             drop(input);
+            session.jobs.restore();
             for stage in stages {
                 if let Some(pid) = stage.pid() {
                     let _ = wait(pid);

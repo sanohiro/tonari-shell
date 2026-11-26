@@ -580,13 +580,30 @@ fn begin_redraw(out: &mut String, row: usize) {
 
 fn draw_prompt(prompt: &str, width: usize, out: &mut String, pos: &mut Position) {
     let mut escape = 0;
+    let mut hidden = false;
     for c in prompt.chars() {
+        match c {
+            '\x01' => {
+                hidden = true;
+                continue;
+            }
+            '\x02' => {
+                hidden = false;
+                continue;
+            }
+            _ if hidden => {
+                out.push(c);
+                continue;
+            }
+            _ => {}
+        }
         if escape != 0 || c == '\x1b' {
             out.push(c);
             escape = match (escape, c) {
                 (0, _) => 1,
                 (1, '[') => 2,
-                (1, ']') => 3,
+                (1, ']' | 'P' | 'X' | '^' | '_') => 3,
+                (1 | 5, ' '..='/') => 5,
                 (2, '@'..='~') | (3, '\x07') | (4, '\\') => 0,
                 (3, '\x1b') => 4,
                 (2, _) => 2,
@@ -1020,7 +1037,10 @@ pub fn line(
         }
         let (binding, right_arrow) = keys.binding(first, session)?;
         let action = match binding {
-            Binding::Removed => continue,
+            Binding::Removed => {
+                vi = vi::State::default();
+                continue;
+            }
             Binding::Macro(seq) => {
                 keys.expansions += 1;
                 if keys.expansions > 64 || keys.queued.len().saturating_add(seq.len()) > 65536 {
@@ -1271,7 +1291,7 @@ pub fn line(
                     Ok(Err(crate::Flow::Exit(code))) => return Ok(Input::Exit(code)),
                     Ok(Err(_)) => return Ok(Input::Cancel),
                     Err(e) => {
-                        eprintln!("tonari: {editor}: {e}");
+                        diagnostic!("{editor}: {e}");
                         return Ok(Input::Cancel);
                     }
                 }
@@ -1355,7 +1375,11 @@ pub fn line(
                     .and_then(|i| session.history_lines().get(i))
                     .and_then(|line| crate::parser::last_history_argument(line));
                 if let Some(arg) = arg {
-                    mark = text[..cursor].chars().count();
+                    mark = if text[..cursor].is_ascii() {
+                        cursor
+                    } else {
+                        text[..cursor].chars().count()
+                    };
                     edit.undo
                         .record(&text, cursor..cursor, arg.len(), cursor, false);
                     text.insert_str(cursor, arg);

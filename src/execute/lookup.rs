@@ -133,15 +133,8 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
     let mut force_path = false;
     let mut skip_functions = false;
     let mut default_path = cmd.default_path;
-    let mut index = 1;
-    while let Some(opt) = cmd.words.get(index) {
-        if opt == "--" {
-            index += 1;
-            break;
-        }
-        if !opt.starts_with('-') || opt == "-" {
-            break;
-        }
+    let mut operands = &cmd.words[1..];
+    while let Some(opt) = crate::builtins::flags::next(&mut operands) {
         for flag in opt[1..].chars() {
             match (command, flag) {
                 (true, 'p') => default_path = true,
@@ -156,12 +149,11 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                 }
                 (false, 'p') => format = Format::Path,
                 _ => {
-                    eprintln!("tonari: {}: unsupported option {opt}", cmd.words[0]);
+                    diagnostic!("{}: unsupported option {opt}", cmd.words[0]);
                     return 2;
                 }
             }
         }
-        index += 1;
     }
     let search = std::cell::LazyCell::new(|| {
         if default_path {
@@ -174,7 +166,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
     let mut out = Vec::new();
     let mut any = false;
     let mut all = true;
-    for name in &cmd.words[index..] {
+    for name in operands {
         let mut found = false;
         if !force_path
             && session.shopt.expand_aliases
@@ -289,7 +281,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
             }
         }
         if !found && format == Format::Verbose {
-            eprintln!("tonari: {}: {name}: not found", cmd.words[0]);
+            diagnostic!("{}: {name}: not found", cmd.words[0]);
         }
         any |= found;
         all &= found;
@@ -298,7 +290,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
         return 1;
     }
     u8::from(
-        !(if command && index < cmd.words.len() {
+        !(if command && !operands.is_empty() {
             any
         } else {
             all

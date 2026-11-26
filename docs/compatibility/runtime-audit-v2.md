@@ -1,0 +1,37 @@
+# Runtime audit, November 27 / 第2回実装監査
+
+The review used main at `2d81b68`, after the first refactoring series. The identifiers below refer to the second audit. Tests exercise the release executable through shell syntax and PTYs. Rust tests cover internals such as descriptor relocation and inputrc serialization. Each source-review witness checks output and exit status, with explicit correct results for known Bash discrepancies. [Shell tests](../../tests/shell.py) · [Source witnesses](../../tests/compat/source_review.py) · [Measured costs](../benchmarks.md#runtime-audit-v2)
+
+## Compatibility / 互換性
+
+| Report items | Decision and witness |
+|---|---|
+| C1, H1–H5, M1–M5 | Relocate shell-owned descriptors before restoring a target or opening a named descriptor. Reset trap execution flags and inherited child state after fork, including the missing-command hook. Keep Bash's subshell level for that hook. Unblock SIGCHLD while waiting, restore foreground terminal ownership on early return, and initialize job control on `set -m`. Prefix assignments to POSIX special builtins survive silent redirection. |
+| H6–H7 | Nested compound syntax, conditional grouping and extglobs check depth. Flat logical chains keep source order in a vector. Counted reads validate UTF-8 incrementally and leave the next record available after an invalid byte. |
+| H8–H12, M9, M13 | Remove the reference itself with `unset -n`. Reject readonly type changes, avoid a combined array/nameref attribute, and commit local declarations after validation. Query the enclosing function's locals through temporary prefix scopes. Keep variable attributes and source positional-parameter changes through nested calls. |
+| H13, M7, M11–M12, M14 | Scope compiled regexes and bracket handling to the active shell locale. Count ERE captures following bracket syntax, handle a trailing pattern escape, and skip NUL before recording an escaped byte offset. Count precision in digits before numeric grouping. A failed `printf %n` assignment returns a failure status. |
+| H14–H18, M15–M17 | Round-trip Meta keys and control bytes, preserve zero-width prompt spans, and leave completion on terminal loss. Honor explicit history indices and attached `fc -e` arguments. Preserve suffixes on history events, complete the current command after a separator, keep a mapped-case prefix, enumerate service aliases, and invalidate oversized history windows. A custom history file has its own contents. |
+| L1–L11 | Checked automatic cd, private trace descriptors, nested source calls, directory-stack tilde syntax, getopts, continued array names, restoration of GLOBIGNORE and time formatting. Fixed prompt octets and path display, completion printing/quoting and interrupted history locks. Empty edits and unbound vi operator keys no longer create undo or operator state. |
+| M6 | The positional slice can include argument zero. With no positional arguments, `set --; printf '<%s>\n' "${@: -1}"` prints the invocation name. Preserve the Bash 5.3 result. |
+| M8 | Removing an element from `BASH_ALIASES` or `BASH_CMDS` leaves the underlying alias or hash intact, as specified by GNU Bash. The shell commands for removal are `unalias` and `hash -d`. |
+| M10 | A single-quoted associative subscript in `[[ -v 'a[$key]' ]]` still needs its first expansion. Applying the “already expanded” flag to the literal broke the Bash witness. The same distinction protects literal dollar signs during single-quoted interactive completion. |
+
+Bash 5.2 permits a readonly scalar to change type in one declaration path. Tonari protects the value and type. Bash 5.3.20 can select command one when `fc` requests the latest positive history number. Tonari selects the requested number. The timezone test explicitly exports TZ, since an ordinary shell assignment leaves the formatter in the local system timezone. [Regression cases](../../tests/shell.py)
+
+判定基準は入力、終了状態、出力と副作用である。位置パラメーターに `$0` が入る境界、特殊連想配列の削除、引用済みの添字については監査の修正案を採用すると Bash の契約を壊す。履歴番号や読み取り専用変数については Bash 側にも問題があり、Tonari が返すべき結果を試験に明記した。
+
+The Linux formatter now derives the French composite date for fr_FR and fr_FR@euro from the current GNU definition. The old bundled value added a timezone to both %c and %Ec. The paired Linux CI comparison now fails on any such discrepancy. フランス語の日時では時刻帯が余分に表示された。フランスとその euro 変種のデータを生成時に修正した。[GNU fr_FR definition](https://github.com/bminor/glibc/blob/04e750e75b73957cf1c791535a3f4319534a52fc/localedata/locales/fr_FR#L127) · [Locale comparison](../../tools/ci/time-locales.py)
+
+## Optimization decisions / 高速化の判断
+
+| Report items | Implementation or decision |
+|---|---|
+| P1–P3, P7 | Direct byte output covers redirected pwd. Reserve the undo descriptor to preserve RLIMIT_NOFILE errors. A single standard stream redirected to the null device can use spawn with a verified open descriptor. Keep the same open file description through executable-text fallback and diagnostics. General file or FIFO opens run in the child. Read and mapfile can consume prepared here input in memory when callbacks, input selection and options allow. Install the actual redirect so nested shell code observes the same stdin. |
+| P4–P6, P14–P18 | Keep effective-access checks for PATH lookup, the caller-visible spelling of sourced files, and dynamic PATH/environment/trap semantics. An executable bit alone cannot answer ACL access. `BASH_SOURCE` can distinguish two spellings of the same inode. Exported environment and function locals can change in temporary scopes. Signal masks and caught/ignored dispositions still matter around exec. Preserve opening/closing order for descriptor moves. |
+| P8–P10, P20–P23 | Avoid cloning a single pipeline stage, read stored arithmetic values directly, use stack buffers for small regex matches, precompile substitution and simple ignore patterns, and use literal edges in single-star trims. Byte spans speed up plain lexer input while preserving assignment, tilde and quoting boundaries. A locale switch still invalidates matching state. Locale-sensitive ignores and metadata sorting retain their distinct semantics. |
+| P11–P13 | The first two Meta bytes use per-keymap lookup tables; a single ordered lookup resolves custom exact and prefix matches. Bulk insert, paste boundaries, completion preview and terminal ownership have distinct paths. Keep the forward block filter before reverse history search. With one million entries the reverse-only experiment raised median time for an old suggestion from 4.55 to 14.88 ms. |
+| P19, P24–P25 | Parse unsigned decimal directly, reuse the process hostname, borrow locale settings, and specialize ASCII substring offsets. Prepare the small allocator on cache misses. Insert associative entries with one hash lookup. General numeric formatting, Unicode text and long paths retain their fallbacks. |
+
+The wider `posix_spawn_file_actions_addopen` prototype reduced timings for regular files, but the existing FIFO test timed out because the parent could not start the later writer. Retrying a failed spawn can also repeat opens or truncation. The retained optimization is bounded to a standard device and keeps arbitrary file redirection in the child. [Pipeline and fallback tests](../../tests/shell.py)
+
+大量履歴の前方フィルター削除と、任意のファイルを spawn 時に開く案はどちらも試作して比較した。前者は古い履歴を探す時間、後者は FIFO を含むパイプの正しさで不利だった。生成器の表幅、ANSI-C 引用、ホスト名、ロケールの選択は共有化した。セッション全体の分割・順序付きマップの一律の配列化・診断文言の統一は別の設計変更になる。大きな設定と明示順を持つ補完、重複キー、エラー文言、展開時の副作用を維持する。サイズの推定は加算せず、実際の配布ファイルを同じソースで比較する。[ベンチマーク](../benchmarks.md#runtime-audit-v2)

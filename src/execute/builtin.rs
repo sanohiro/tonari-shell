@@ -292,17 +292,20 @@ pub(super) fn eval_builtin(
             session.posix,
         )),
         Builtin::Umask => Flow::Continue(crate::builtins::umask::run(args, session.posix)),
-        Builtin::Mapfile => crate::session::mapfile::run(session, &cmd.words[0], args, last_status),
-        Builtin::Read => {
+        Builtin::Mapfile | Builtin::Read => {
             let here = match cmd.redirects.as_slice() {
-                [r] if matches!(r.target, Target::HereDoc { .. } | Target::HereString)
-                    && r.word.len() <= here_input::PIPE_LIMIT =>
+                [r] if r.fd == 0
+                    && matches!(r.target, Target::HereDoc { .. } | Target::HereString) =>
                 {
                     Some((r.fd, r.word.as_bytes()))
                 }
                 _ => None,
             };
-            Flow::Continue(session.read(args, here))
+            if matches!(builtin, Builtin::Read) {
+                Flow::Continue(session.read(args, here))
+            } else {
+                crate::session::mapfile::run(session, &cmd.words[0], args, last_status, here)
+            }
         }
         Builtin::Set => Flow::Continue(session.set(&mut cmd.words)),
         Builtin::Hash => Flow::Continue(hash::run(session, args)),
@@ -385,7 +388,9 @@ pub(super) fn eval_builtin(
         Builtin::AutoCd => {
             eprintln!("cd -- {}", cmd.words.join(" "));
             cmd.words.insert(0, "--".into());
-            Flow::Continue(session.directory_builtin("cd", &cmd.words))
+            let status = session.directory_builtin("cd", &cmd.words);
+            cmd.words.remove(0);
+            Flow::Continue(status)
         }
         Builtin::Directory => Flow::Continue(session.directory_builtin(&cmd.words[0], args)),
         Builtin::Source => crate::source_file(
@@ -479,14 +484,14 @@ fn exec_builtin(cmd: &PreparedCommand, session: &Session, mut args: &[String]) -
                 'l' => login = true,
                 'a' => {
                     let Some(v) = crate::builtins::flags::value(flags.as_str(), &mut args) else {
-                        eprintln!("tonari: exec: -a requires a name");
+                        diagnostic!("exec: -a requires a name");
                         return Flow::Continue(2);
                     };
                     arg0 = Some(v.to_owned());
                     break;
                 }
                 _ => {
-                    eprintln!("tonari: exec: invalid option {opt}");
+                    diagnostic!("exec: invalid option {opt}");
                     return Flow::Continue(2);
                 }
             }
@@ -519,7 +524,7 @@ fn apply_array_declarations(cmd: &PreparedCommand, status: u8, session: &mut Ses
         .any(|a| a.contains('g'));
     for d in &cmd.array_declarations {
         if let Err(e) = session.assign_array(&d.name, d.append, &d.items, global) {
-            eprintln!("tonari: {}: {e}", cmd.words[0]);
+            diagnostic!("{}: {e}", cmd.words[0]);
             return 1;
         }
     }
@@ -532,6 +537,7 @@ pub(super) enum PlainOutput<'a> {
     Echo(&'a [String]),
     Printf(&'a [String]),
     DirectoryStack(&'a str, &'a [String]),
+    Pwd(Option<bool>),
     Limits(&'a [String]),
 }
 
@@ -595,6 +601,11 @@ impl<'a> PlainOutput<'a> {
             {
                 Some(Self::Limits(args))
             }
+            Builtin::Directory if cmd.words[0] == "pwd" => match args {
+                [] => Some(Self::Pwd(None)),
+                [opt] if opt == "-L" || opt == "-P" => Some(Self::Pwd(Some(opt == "-P"))),
+                _ => None,
+            },
             _ => Self::new(builtin, cmd, usize::MAX),
         }
     }
@@ -607,6 +618,15 @@ impl<'a> PlainOutput<'a> {
                 0
             }
             Self::Printf(words) => crate::session::printf::run(session, words, Some(&mut bytes)),
+            Self::Pwd(physical) => {
+                match session.write_pwd(physical.unwrap_or(session.physical), &mut bytes) {
+                    Ok(()) => 0,
+                    Err(e) => {
+                        diagnostic!("pwd: {e}");
+                        1
+                    }
+                }
+            }
             Self::DirectoryStack(command, args) => {
                 session.directory_stack(command, args, &mut bytes)
             }
@@ -729,16 +749,20 @@ pub(super) fn run_builtin(
         // Reserve the same descriptor as the ordinary redirect, including
         // failure at RLIMIT_NOFILE. A byte-only builtin can write to the file
         // directly, avoiding two changes to the process-wide stdout.
-        let _saved = SavedFd::capture(&actions[0], actions)?;
+        let reservation = SavedFd::reserve(&actions[0], actions)?;
         let Some(fd) = open_redirect(path, *flags) else {
             return Ok(redirect_failure(cmd, session));
         };
+        // No shell code ran while the untracked reservation was live.
+        drop(reservation);
         use std::io::Write;
         let (data, status) = output.render(session);
         let result = std::fs::File::from(fd).write_all(&data);
         return Ok(Flow::Continue(if result.is_err() { 1 } else { status }));
     }
-    if let (Builtin::Status(code), [Action::Open(dest, path, flags)]) = (builtin, actions) {
+    if cmd.assignments.is_empty()
+        && let (Builtin::Status(code), [Action::Open(dest, path, flags)]) = (builtin, actions)
+    {
         return silent_redirect(code, *dest, path, *flags, cmd, session);
     }
     let mut saved = [const { SavedFd::Unchanged }; 3];

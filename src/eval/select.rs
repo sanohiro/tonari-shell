@@ -79,7 +79,7 @@ pub(super) fn run(
                 .and_then(|n| n.checked_sub(1))
                 .and_then(|n| items.get(n));
             if s.readonly(name) {
-                eprintln!("tonari: {name}: readonly variable");
+                diagnostic!("{name}: readonly variable");
                 return Err(Flow::Continue(1));
             }
             s.assign(name, item.map_or("", String::as_str));

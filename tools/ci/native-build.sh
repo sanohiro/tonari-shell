@@ -54,10 +54,32 @@ if [[ $SUITE == external-gnu-waits ]]; then
   git worktree add -q --detach "$observer" HEAD
   (cd "$observer"; git apply tools/ci/configure-waits.patch; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/observer")
 fi
-if [[ $SUITE == source-review || $SUITE == spec-hot || $SUITE == external-yash-* || $SUITE == external-review-* || $SUITE == external-gnu-profile || $SUITE == parity* || $SUITE == probe || $SUITE == functions || $SUITE == throughput || $SUITE == history || $SUITE == history-fields || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == rcfiles || $SUITE == tool-hooks || $SUITE == picker || $SUITE == budget* || $SUITE == inventory* ]]; then
+if [[ $SUITE == release-layout ]]; then
+  git worktree add -q --detach "$RUNNER_TEMP/size-profiles" HEAD
+  (cd "$RUNNER_TEMP/size-profiles"
+   cat >>Cargo.toml <<'TOML'
+
+[profile.release.package.unicode-width]
+opt-level = "z"
+[profile.release.package.tz-rs]
+opt-level = "s"
+TOML
+   cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/size-deps")
+  flags=-Zmerge-functions=trampolines
+  if [[ $RUNNER_OS == Linux ]]; then flags="$flags -C link-arg=-z -C link-arg=noseparate-code"; fi
+  cp "$(RUSTFLAGS="$flags" tools/build-release.sh)" "$RUNNER_TEMP/bin/layout"
+fi
+if [[ $SUITE == release-diagnostics ]]; then
+  git worktree add -q --detach "$RUNNER_TEMP/full" HEAD
+  (cd "$RUNNER_TEMP/full"
+   git show 9c5022e:tools/build-release.sh > tools/build-release.sh
+   cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/full")
+  cp "$(RUSTFLAGS='-Zunstable-options -Cpanic=immediate-abort' tools/build-release.sh)" "$RUNNER_TEMP/bin/immediate"
+fi
+if [[ $SUITE == audit-hot-paths || $SUITE == source-review || $SUITE == spec-hot || $SUITE == external-yash-* || $SUITE == external-review-* || $SUITE == external-gnu-profile || $SUITE == parity* || $SUITE == probe || $SUITE == functions || $SUITE == throughput || $SUITE == history || $SUITE == history-fields || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == rcfiles || $SUITE == tool-hooks || $SUITE == picker || $SUITE == budget* || $SUITE == inventory* ]]; then
   previous=$(git rev-parse --verify --end-of-options "${PREVIOUS_REVISION:-HEAD^}^{commit}")
   git worktree add -q --detach "$RUNNER_TEMP/base" "$previous"
-  (cd "$RUNNER_TEMP/base"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/baseline")
+  (cd "$RUNNER_TEMP/base"; cp "$(CARGO_TARGET_DIR="$RUNNER_TEMP/build-baseline" tools/build-release.sh)" "$RUNNER_TEMP/bin/baseline")
 fi
 if [[ $SUITE == external-review-* || $SUITE == oils-profile-* || $SUITE == spec-profile-builtins ]]; then
   cp "$(CARGO_PROFILE_RELEASE_OPT_LEVEL=3 tools/build-release.sh)" "$RUNNER_TEMP/bin/opt-3"

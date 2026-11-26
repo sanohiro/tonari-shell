@@ -18,7 +18,7 @@ pub(crate) fn run(session: &mut Session, words: &[String], status: u8) -> Flow {
         match fc(session, args, status) {
             Ok(flow) => flow,
             Err(e) => {
-                eprintln!("tonari: fc: {e}");
+                diagnostic!("fc: {e}");
                 Flow::Continue(1)
             }
         }
@@ -26,7 +26,7 @@ pub(crate) fn run(session: &mut Session, words: &[String], status: u8) -> Flow {
         match history(session, args) {
             Ok(status) => Flow::Continue(status),
             Err(e) => {
-                eprintln!("tonari: history: {e}");
+                diagnostic!("history: {e}");
                 Flow::Continue(if e.kind() == io::ErrorKind::InvalidInput {
                     2
                 } else {
@@ -113,7 +113,7 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
                 match super::expand::expand(session, arg) {
                     Ok(result) => writeln!(out, "{}", result.text)?,
                     Err(e) => {
-                        eprintln!("tonari: history: {arg}: {e}");
+                        diagnostic!("history: {arg}: {e}");
                         status = 1;
                     }
                 }
@@ -611,16 +611,19 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
             break;
         }
         args = rest;
-        for flag in arg[1..].chars() {
+        let mut flags = arg[1..].chars();
+        while let Some(flag) = flags.next() {
             match flag {
                 'l' => list = true,
                 'r' => reverse = true,
                 'n' => numbers = false,
                 's' => substitute = true,
                 'e' => {
-                    let (e, rest) = args.split_first().ok_or_else(|| error("editor required"))?;
-                    editor = Some(e.as_str());
-                    args = rest;
+                    editor = Some(
+                        crate::builtins::flags::value(flags.as_str(), &mut args)
+                            .ok_or_else(|| error("editor required"))?,
+                    );
+                    break;
                 }
                 _ => return Err(error("invalid option")),
             }
@@ -663,7 +666,7 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
             }
             let index = (n as usize).checked_sub(h.base + 1);
             Ok(index
-                .filter(|i| *i < end - 1)
+                .filter(|i| *i < end)
                 .unwrap_or(if first && !substitute { 0 } else { end - 1 }))
         } else {
             h.lines[..end]
@@ -718,8 +721,9 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
     if !substitute && editor != Some("-") {
         let program = editor
             .map(str::to_owned)
-            .or_else(|| session.get("FCEDIT"))
-            .or_else(|| session.get("EDITOR"))
+            .filter(|s| !s.is_empty())
+            .or_else(|| session.get("FCEDIT").filter(|s| !s.is_empty()))
+            .or_else(|| session.get("EDITOR").filter(|s| !s.is_empty()))
             .unwrap_or_else(|| if session.posix { "ed" } else { "vi" }.into());
         source = match edit_text(session, &program, &source, status)? {
             Ok(s) => s,
@@ -747,7 +751,8 @@ pub(crate) fn edit_text(
 ) -> io::Result<Result<String, Flow>> {
     let directory = session
         .get("TMPDIR")
-        .map_or_else(std::env::temp_dir, PathBuf::from);
+        .filter(|s| !s.is_empty())
+        .map_or_else(|| PathBuf::from("/tmp"), PathBuf::from);
     let (mut file, path) = create_temp_file(directory.join("tonari-fc.XXXXXX"))?;
     let edited: io::Result<Result<String, Flow>> = (|| {
         file.write_all(source.as_bytes())?;

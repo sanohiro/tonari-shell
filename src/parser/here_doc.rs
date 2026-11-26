@@ -199,8 +199,8 @@ pub(super) fn collect(
                         continued: was_continued,
                     }));
                 }
-                eprintln!(
-                    "tonari: warning: here-document reached end of input (wanted '{}')",
+                diagnostic!(
+                    "warning: here-document reached end of input (wanted '{}')",
                     doc.delimiter
                 );
                 if !continued.is_empty() {

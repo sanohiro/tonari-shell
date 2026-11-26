@@ -79,17 +79,14 @@ pub(crate) fn with_formatter<T>(
         .is_exported("TZ")
         .then(|| session.get("TZ"))
         .flatten();
-    let locale = ["LC_ALL", "LC_TIME", "LANG"]
-        .into_iter()
-        .find_map(|name| session.get(name).filter(|s| !s.is_empty()))
-        .unwrap_or_else(|| "C".into());
+    let locale = session.locale_category("LC_TIME").unwrap_or("C".into());
     thread_local! { static CLOCK: RefCell<Option<Clock>> = const { RefCell::new(None) }; }
     CLOCK.with_borrow_mut(|slot| {
         if slot
             .as_ref()
             .is_none_or(|c| c.name != name || c.locale_name != locale)
         {
-            *slot = Some(Clock::new(name, locale));
+            *slot = Some(Clock::new(name, locale.into_owned()));
         }
         let clock = slot.as_ref().unwrap();
         run(&|seconds| format_in_zone(clock, format, seconds).unwrap_or_default())
@@ -144,6 +141,47 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
     while let Some(c) = chars.next() {
         if c != '%' {
             fmt.push(c);
+            continue;
+        }
+        let remaining = chars.as_str();
+        let width = remaining.trim_start_matches(['-', '_', '^', '#', '0']);
+        let tail = width.trim_start_matches(|c: char| c.is_ascii_digit());
+        if tail.len() != remaining.len()
+            && let Some(spec @ ('s' | 'Z' | 'z')) = tail.chars().next()
+        {
+            let mut value = match spec {
+                's' => seconds.to_string(),
+                'Z' => designation.to_owned(),
+                _ => {
+                    let mut s = String::new();
+                    push_zone_offset(&mut s, offset);
+                    s
+                }
+            };
+            let flags = &remaining[..remaining.len() - width.len()];
+            if spec == 'Z' {
+                if flags.contains('#') {
+                    value.make_ascii_lowercase();
+                } else if flags.contains('^') {
+                    value.make_ascii_uppercase();
+                }
+            }
+            let digits = &width[..width.len() - tail.len()];
+            let size = if digits.is_empty() {
+                0
+            } else {
+                digits.parse::<i32>().ok()? as usize
+            };
+            let pad = if flags.ends_with('0') || spec == 's' && !flags.contains(['_', '-']) {
+                '0'
+            } else {
+                ' '
+            };
+            let count = size.saturating_sub(value.len());
+            fmt.try_reserve(count).ok()?;
+            fmt.extend(std::iter::repeat_n(pad, count));
+            fmt.push_str(&value.replace('%', "%%"));
+            chars = tail[1..].chars();
             continue;
         }
         match chars.next() {

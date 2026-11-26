@@ -30,7 +30,6 @@ pub(super) fn substitute(
     // A single bracket expression consumes one character. Avoid trying every
     // possible suffix when deleting matching characters from a string.
     if mode == All
-        && template.is_empty()
         && fold.is_none()
         && let Some(body) = pattern.strip_prefix('[')
         && body.ends_with(']')
@@ -40,8 +39,20 @@ pub(super) fn substitute(
     {
         let matcher = crate::pattern::Matcher::new(pattern);
         let mut bytes = [0; 4];
-        text.retain(|c| !matcher.matches(c.encode_utf8(&mut bytes)));
-        return text;
+        if template.is_empty() {
+            text.retain(|c| !matcher.matches(c.encode_utf8(&mut bytes)));
+            return text;
+        }
+        let mut out = String::with_capacity(text.len());
+        for c in text.chars() {
+            let value = c.encode_utf8(&mut bytes);
+            if matcher.matches(value) {
+                write_replacement(&mut out, template, value, expand_amp);
+            } else {
+                out.push(c);
+            }
+        }
+        return out;
     }
     if let Some(locale) = fold
         && !pattern.is_empty()
@@ -127,10 +138,15 @@ pub(super) fn substitute(
     let mut out = String::new();
     let mut copied = 0;
     let mut i = 0;
-    let starts = format!("{pattern}*");
+    let escaped_end = pattern.bytes().rev().take_while(|&b| b == b'\\').count() % 2 != 0;
+    let basic = group
+        .is_none()
+        .then(|| crate::pattern::Matcher::new(pattern));
+    let starts = (group.is_none() && !escaped_end && mode != Suffix && pattern != "?")
+        .then(|| crate::pattern::Matcher::new(format!("{pattern}*")));
     let accepts = |candidate| {
         group.as_ref().map_or_else(
-            || crate::pattern::matches(candidate, pattern),
+            || basic.as_ref().unwrap().matches(candidate),
             |g| g.accepts(candidate, false),
         )
     };
@@ -140,7 +156,10 @@ pub(super) fn substitute(
             (mode != Suffix || i + 2 == bounds.len()).then_some(i + 1)
         } else if mode == Suffix {
             accepts(&text[start..]).then_some(bounds.len() - 1)
-        } else if group.is_some() || crate::pattern::matches(&text[start..], &starts) {
+        } else if starts
+            .as_ref()
+            .is_none_or(|matcher| matcher.matches(&text[start..]))
+        {
             (i..bounds.len())
                 .rev()
                 .find(|&j| accepts(&text[start..bounds[j]]))

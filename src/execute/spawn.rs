@@ -74,9 +74,10 @@ pub(super) enum ScriptProcess {
 }
 
 impl External {
-    pub(super) fn spawn_with_dups(
+    pub(super) fn spawn_redirected(
         &self,
         redirects: &[Redirect],
+        opened: Option<(RawFd, &OwnedFd)>,
         input: Option<&OwnedFd>,
         output: Option<&OwnedFd>,
     ) -> io::Result<libc::pid_t> {
@@ -94,9 +95,14 @@ impl External {
                 dup(fd.as_raw_fd(), dest)?;
             }
         }
-        for r in redirects {
-            let from = dup_source(r).ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
-            dup(from, r.fd)?;
+        if let Some((dest, fd)) = opened {
+            dup(fd.as_raw_fd(), dest)?;
+        } else {
+            for r in redirects {
+                let from =
+                    dup_source(r).ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
+                dup(from, r.fd)?;
+            }
         }
         self.spawn_resolved(Some(&actions.0), None, Default::default())
     }

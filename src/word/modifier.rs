@@ -177,7 +177,7 @@ fn assignment(name: &str, quoted: bool, env: &mut Expansion<'_>) -> Result<Part,
                 .into_iter()
                 .chain(
                     args.iter()
-                        .map(|s| crate::session::printf::parameter_quote(s, env.session)),
+                        .map(|s| super::quote::parameter_quote(s, env.session)),
                 )
                 .collect()
         }
@@ -203,7 +203,7 @@ fn assignment(name: &str, quoted: bool, env: &mut Expansion<'_>) -> Result<Part,
             if let Some(text) = text {
                 fields.push(format!(
                     "{base}={}",
-                    crate::session::printf::parameter_quote(&text, env.session)
+                    super::quote::parameter_quote(&text, env.session)
                 ));
             } else if !fields.is_empty() {
                 fields.push(base.to_owned());
@@ -325,7 +325,7 @@ impl Modification {
                 };
                 let transform = |text: String| -> Result<String, Error> {
                     if !matches!(self, Self::Escapes) {
-                        Ok(crate::session::printf::parameter_quote(&text, env.session))
+                        Ok(super::quote::parameter_quote(&text, env.session))
                     } else {
                         crate::parser::ansi_string(&text).map_err(|e| Error::from(e.message()))
                     }
@@ -504,6 +504,23 @@ fn substring(v: &str, start: i64, len: Option<i64>) -> Result<&str, Error> {
     // Positive bounds only need the requested prefix. Negative bounds
     // count from the far end, independent of the UTF-8 byte width.
     let boundary = |s: &str, n: i64| {
+        let magnitude = n.unsigned_abs() as usize;
+        if magnitude > s.len() {
+            return None;
+        }
+        let bytes = s.as_bytes();
+        let part = if n < 0 {
+            &bytes[s.len() - magnitude..]
+        } else {
+            &bytes[..magnitude]
+        };
+        if part.is_ascii() {
+            return Some(if n < 0 {
+                s.len() - magnitude
+            } else {
+                magnitude
+            });
+        }
         if n < 0 {
             s.char_indices()
                 .rev()

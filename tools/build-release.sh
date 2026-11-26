@@ -61,11 +61,10 @@ case "$host" in
 esac
 
 if [ "$distribution" = yes ]; then
-    # Shipped binaries are stripped. Keep panic locations and frame capture
-    # without embedding an object-file reader and DWARF symbolizer.
-    tuning="$tuning -Zon-broken-pipe=inherit --cfg tonari_inherit_sigpipe"
-    std_features=backtrace,backtrace-trace-only
-    set -- -Zbuild-std=std,panic_abort "-Zbuild-std-features=$std_features" "$@"
+    # Keep Display and explicit panic messages in releases. Source locations,
+    # derived Debug formatting and std's backtrace support are development aids.
+    tuning="$tuning -Zon-broken-pipe=inherit --cfg tonari_inherit_sigpipe -Zlocation-detail=none -Zfmt-debug=none"
+    set -- -Zbuild-std=std,panic_abort -Zbuild-std-features= "$@"
 fi
 export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }$tuning"
 case "$host" in

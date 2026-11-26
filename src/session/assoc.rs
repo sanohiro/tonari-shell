@@ -23,11 +23,13 @@ impl Associative {
     }
 
     pub(super) fn insert(&mut self, key: String, value: String) {
-        if let Some((slot, _)) = self.entries.get_mut(&key) {
-            *slot = value;
-        } else {
-            self.entries.insert(key, (value, self.serial));
-            self.serial += 1;
+        use std::collections::hash_map::Entry;
+        match self.entries.entry(key) {
+            Entry::Occupied(mut entry) => entry.get_mut().0 = value,
+            Entry::Vacant(entry) => {
+                entry.insert((value, self.serial));
+                self.serial += 1;
+            }
         }
     }
 

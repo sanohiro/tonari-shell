@@ -156,6 +156,39 @@ fn network_redirect(path: &CStr, address: &[u8], kind: i32) -> Option<OwnedFd> {
     connected
 }
 
+// Only this standard device can be opened speculatively. Open without create
+// or truncate, and inspect the descriptor before committing to the fast path.
+// An installation with a missing or regular /dev/null uses normal redirection.
+pub(super) fn open_null_redirect(redirects: &[Redirect]) -> Option<(RawFd, OwnedFd)> {
+    use std::os::unix::fs::FileTypeExt;
+    let [r] = redirects else { return None };
+    if !(0..=2).contains(&r.fd) || r.word != "/dev/null" {
+        return None;
+    }
+    let flags = match r.target {
+        Target::Read => libc::O_RDONLY,
+        Target::Write | Target::Clobber => libc::O_WRONLY,
+        Target::Append => libc::O_WRONLY | libc::O_APPEND,
+        _ => return None,
+    };
+    let raw = unsafe {
+        libc::open(
+            c"/dev/null".as_ptr(),
+            flags | libc::O_NONBLOCK | libc::O_CLOEXEC | libc::O_NOCTTY,
+        )
+    };
+    if raw < 0 {
+        return None;
+    }
+    let file = unsafe { std::fs::File::from_raw_fd(raw) };
+    if !file.metadata().ok()?.file_type().is_char_device()
+        || unsafe { libc::fcntl(raw, libc::F_SETFL, flags) } < 0
+    {
+        return None;
+    }
+    Some((r.fd, super::private_fd(file.into()).ok()?))
+}
+
 pub(super) fn open_redirect(path: &CStr, flags: i32) -> Option<OwnedFd> {
     if let Some(device) = path.to_bytes().strip_prefix(b"/dev/")
         && let Some((kind, address)) = device
@@ -240,7 +273,7 @@ pub(super) fn protect_fds(actions: &[Action<'_>]) -> io::Result<()> {
 
 pub(super) fn apply(actions: &[Action<'_>], pipe_limit: usize) -> bool {
     if let Err(e) = protect_fds(actions) {
-        eprintln!("tonari: redirection: {e}");
+        diagnostic!("redirection: {e}");
         return false;
     }
     apply_protected(actions, pipe_limit).is_ok()
@@ -261,7 +294,7 @@ pub(super) fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> Resu
                     Ok(())
                 });
                 if let Err(error) = redirected {
-                    eprintln!("tonari: here-document: {error}");
+                    diagnostic!("here-document: {error}");
                     return Err(index);
                 }
             }
@@ -345,10 +378,20 @@ impl SavedFd {
     }
 
     pub(super) fn capture(action: &Action<'_>, actions: &[Action<'_>]) -> io::Result<Self> {
+        Ok(Self::reserve(action, actions)?
+            .map_or(Self::Closed, |f| Self::Open(fd::PrivateFile::track(f))))
+    }
+
+    pub(super) fn reserve(
+        action: &Action<'_>,
+        actions: &[Action<'_>],
+    ) -> io::Result<Option<std::fs::File>> {
         let fd = action.destination();
-        match fd::duplicate_except(fd, 3, |n| actions.iter().any(|a| a.references(n))) {
-            Ok(file) => Ok(Self::Open(fd::PrivateFile::track(file))),
-            Err(e) if e.raw_os_error() == Some(libc::EBADF) => Ok(Self::Closed),
+        match fd::duplicate_except(fd, fd::FIRST_NONSTANDARD, |n| {
+            actions.iter().any(|a| a.references(n))
+        }) {
+            Ok(file) => Ok(Some(file)),
+            Err(e) if e.raw_os_error() == Some(libc::EBADF) => Ok(None),
             Err(e) => {
                 // GNU Bash closes the target of n>&- even when reserving its
                 // undo descriptor fails. A failed duplicate keeps both ends.
@@ -361,6 +404,9 @@ impl SavedFd {
     }
 
     pub(super) fn restore(self, fd: RawFd) -> io::Result<()> {
+        if fd >= fd::FIRST_NONSTANDARD && !matches!(self, Self::Unchanged) {
+            fd::protect(|current| current == fd)?;
+        }
         match self {
             Self::Unchanged => {}
             Self::Closed => {
@@ -369,5 +415,19 @@ impl SavedFd {
             Self::Open(file) => duplicate(file.as_raw_fd(), fd)?,
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restore_relocates_a_tracked_file_before_reusing_its_number() {
+        let tracked = fd::PrivateFile::new(std::fs::File::open("/dev/null").unwrap()).unwrap();
+        let original = tracked.as_raw_fd();
+        SavedFd::Closed.restore(original).unwrap();
+        assert_ne!(tracked.as_raw_fd(), original);
+        assert!(unsafe { libc::fcntl(tracked.as_raw_fd(), libc::F_GETFD) } >= 0);
     }
 }

@@ -53,7 +53,7 @@ fn declare_functions(
         for name in operands {
             if !session.functions.contains_key(name) {
                 if readonly {
-                    eprintln!("tonari: {command}: {name}: not a function");
+                    diagnostic!("{command}: {name}: not a function");
                 }
                 status = 1;
                 continue;
@@ -78,7 +78,7 @@ fn declare_functions(
                 if on {
                     session.readonly_functions.insert(name.clone());
                 } else if session.readonly_functions.contains(name) {
-                    eprintln!("tonari: {command}: {name}: readonly function");
+                    diagnostic!("{command}: {name}: readonly function");
                     status = 1;
                 }
                 continue;
@@ -142,7 +142,7 @@ impl Options {
             }
             for c in option[1..].chars() {
                 if attribute && !(matches!(c, 'a' | 'A' | 'f' | 'p') || exporting && c == 'n') {
-                    eprintln!("tonari: {command}: {option}: unsupported option");
+                    diagnostic!("{command}: {option}: unsupported option");
                     return Err(());
                 }
                 match c {
@@ -168,7 +168,7 @@ impl Options {
                     'p' => flags.print = true,
                     'x' => flags.exported = Some(on),
                     _ => {
-                        eprintln!("tonari: {command}: {option}: unsupported option");
+                        diagnostic!("{command}: {option}: unsupported option");
                         return Err(());
                     }
                 }
@@ -202,17 +202,18 @@ fn print_variables(
     {
         return crate::execute::Flow::Continue(session.set(&mut Vec::new()));
     }
+    let local_scope = local.then(|| {
+        session
+            .locals
+            .iter()
+            .rev()
+            .find(|scope| !scope.temporary)
+            .expect("function scope")
+    });
     let names;
     let names = if operands.is_empty() {
-        names = if local {
-            session
-                .locals
-                .last()
-                .unwrap()
-                .variables
-                .keys()
-                .cloned()
-                .collect()
+        names = if let Some(scope) = local_scope {
+            scope.variables.keys().cloned().collect()
         } else {
             session.variable_names("")
         };
@@ -224,10 +225,7 @@ fn print_variables(
     let mut status = 0;
     if local
         && operands.is_empty()
-        && session
-            .locals
-            .last()
-            .is_some_and(|s| s.set_options.is_some())
+        && local_scope.is_some_and(|s| s.set_options.is_some())
         && writeln!(out, "local -").is_err()
     {
         return crate::Flow::Continue(1);
@@ -247,7 +245,7 @@ fn print_variables(
             }
             continue;
         }
-        let listed = !local || session.locals.last().unwrap().variables.contains_key(name);
+        let listed = local_scope.is_none_or(|scope| scope.variables.contains_key(name));
         let variable = listed
             .then(|| session.declared_variable(name, flags.global))
             .flatten();
@@ -277,7 +275,7 @@ fn print_variables(
                 return crate::execute::Flow::Continue(1);
             }
         } else if !operands.is_empty() {
-            eprintln!("tonari: {command}: {name}: not found");
+            diagnostic!("{command}: {name}: not found");
             status = 1;
         }
     }
@@ -316,7 +314,7 @@ pub(super) fn run(
     let attribute = readonly || exporting;
     let local = command == "local";
     if local && session.function_depth == 0 {
-        eprintln!("tonari: local: can only be used in a function");
+        diagnostic!("local: can only be used in a function");
         return crate::execute::Flow::Continue(1);
     }
     let Ok((flags, operands)) = Options::parse(command, operands) else {
@@ -377,7 +375,7 @@ pub(super) fn run(
                 Ok(target) => {
                     if target != name && flags.nameref == Some(false) {
                         if session.variables.get(base).is_some_and(|v| v.readonly) {
-                            eprintln!("tonari: {command}: {base}: readonly variable");
+                            diagnostic!("{command}: {base}: readonly variable");
                             status = 1;
                             continue;
                         }
@@ -387,7 +385,7 @@ pub(super) fn run(
                     resolved.as_ref()
                 }
                 Err(e) => {
-                    eprintln!("tonari: {command}: {name}: {e}");
+                    diagnostic!("{command}: {name}: {e}");
                     status = 1;
                     continue;
                 }
@@ -397,13 +395,13 @@ pub(super) fn run(
         };
         let target = super::array::subscript(name);
         if attribute && target.is_some() {
-            eprintln!("tonari: {command}: {name}: not a valid identifier");
+            diagnostic!("{command}: {name}: not a valid identifier");
             status = 1;
             continue;
         }
         let name = target.map_or(name, |(base, _)| base);
         if !is_identifier(name) {
-            eprintln!("tonari: {command}: {arg}: invalid identifier");
+            diagnostic!("{command}: {arg}: invalid identifier");
             status = 1;
             continue;
         }
@@ -411,7 +409,7 @@ pub(super) fn run(
             session.hashes.clear();
         }
         if session.protected_array(name) && (local || value.is_some() || array.is_some()) {
-            eprintln!("tonari: {command}: {name}: variable may not be assigned a value");
+            diagnostic!("{command}: {name}: variable may not be assigned a value");
             status = 1;
             continue;
         }
@@ -440,10 +438,12 @@ pub(super) fn run(
             && (fresh_local && !outer_local
                 || value.is_some()
                 || array.is_some()
+                || flags.array && (var.elements.is_none() || var.associative().is_some())
+                || flags.associative && var.associative().is_none()
                 || flags.readonly == Some(false)
                 || flags.nameref.is_some())
         {
-            eprintln!("tonari: {command}: {name}: readonly variable");
+            diagnostic!("{command}: {name}: readonly variable");
             if array.is_some() {
                 return crate::execute::Flow::Discard(1);
             }
@@ -452,18 +452,25 @@ pub(super) fn run(
         }
         let new_global = !fresh_local && !var.declared && !session.variables.contains_key(name);
         var.declared = true;
-        if fresh_local {
-            let scope = &mut session.locals[scope_index.unwrap()];
-            if name == "OPTIND" {
-                scope.opt_offset = Some(session.opt_offset);
-                session.opt_offset = 0;
-            }
+        let mut previous_local = fresh_local.then(|| {
             let previous = bindings
                 .variables
                 .get(name)
                 .cloned()
                 .unwrap_or_else(|| session.variables.get(name).cloned());
-            scope.variables.insert(name.into(), previous);
+            (scope_index.unwrap(), previous, session.opt_offset)
+        });
+        let mut record_scope = |s: &mut Session| {
+            if let Some((i, previous, offset)) = previous_local.take() {
+                let scope = &mut s.locals[i];
+                if name == "OPTIND" {
+                    scope.opt_offset = Some(offset);
+                    s.opt_offset = 0;
+                }
+                scope.variables.insert(name.into(), previous);
+            }
+        };
+        if fresh_local {
             var.dynamic = false;
             var.nameref = false;
             if !var.temporary && !flags.inherit && !session.shopt.localvar_inherit {
@@ -481,7 +488,7 @@ pub(super) fn run(
         let making_array = flags.array || flags.associative || array.is_some();
         if making_array && (var.nameref || flags.nameref == Some(true)) && var.elements.is_none() {
             if var.nameref && flags.nameref != Some(true) {
-                eprintln!("tonari: warning: {name}: removing nameref attribute");
+                diagnostic!("warning: {name}: removing nameref attribute");
             }
             var.nameref = false;
         }
@@ -497,7 +504,7 @@ pub(super) fn run(
                         && !Session::valid_reference_target(dest)
                     || dest == name)
             {
-                eprintln!("tonari: {command}: {name}: invalid name reference");
+                diagnostic!("{command}: {name}: invalid name reference");
                 status = 1;
                 continue;
             }
@@ -512,7 +519,7 @@ pub(super) fn run(
             && making_array
             && (array.is_some() || var.elements.is_some())
         {
-            eprintln!("tonari: {command}: {name}: reference variable cannot be an array");
+            diagnostic!("{command}: {name}: reference variable cannot be an array");
             status = 1;
         }
         let case_flags = [
@@ -538,19 +545,19 @@ pub(super) fn run(
             && (!attribute || value.is_some() || array.is_some())
             && let Err(e) = var.make_associative()
         {
-            eprintln!("tonari: {command}: {name}: {e}");
+            diagnostic!("{command}: {name}: {e}");
             status = 1;
             continue;
         }
         if flags.remove_array && var.elements.is_some() && var.associative().is_none()
             || flags.remove_associative && var.associative().is_some()
         {
-            eprintln!("tonari: {command}: {name}: cannot remove array attribute");
+            diagnostic!("{command}: {name}: cannot remove array attribute");
             status = 1;
             continue;
         }
         if flags.array && var.associative().is_some() {
-            eprintln!("tonari: {command}: {name}: cannot convert associative to indexed array");
+            diagnostic!("{command}: {name}: cannot convert associative to indexed array");
             status = 1;
             continue;
         }
@@ -571,7 +578,7 @@ pub(super) fn run(
             let parts = match crate::parser::quoted_initializer(text) {
                 Ok(parts) => parts,
                 Err(e) => {
-                    eprintln!("tonari: {command}: {name}: {}", e.message());
+                    diagnostic!("{command}: {name}: {}", e.message());
                     return crate::Flow::Discard(1);
                 }
             };
@@ -584,6 +591,7 @@ pub(super) fn run(
             }) {
                 Ok(()) => {}
                 Err(e) => {
+                    record_scope(session);
                     session.store_variable(name, var, flags.global);
                     e.report(&format!("{command}: {name}: "));
                     return e.flow(session);
@@ -597,7 +605,7 @@ pub(super) fn run(
                 {
                     Ok(key) => Some(key.unwrap_or_else(|| "0".into())),
                     Err(e) => {
-                        eprintln!("tonari: {command}: {e}");
+                        diagnostic!("{command}: {e}");
                         status = 1;
                         continue;
                     }
@@ -614,7 +622,7 @@ pub(super) fn run(
                         i
                     }
                     Err(e) => {
-                        eprintln!("tonari: {command}: {e}");
+                        diagnostic!("{command}: {e}");
                         status = 1;
                         continue;
                     }
@@ -636,7 +644,7 @@ pub(super) fn run(
                 match session.integer_value(old, text, append) {
                     Ok(v) => v,
                     Err(e) => {
-                        eprintln!("tonari: {command}: {e}");
+                        diagnostic!("{command}: {e}");
                         status = 1;
                         continue;
                     }
@@ -648,7 +656,7 @@ pub(super) fn run(
             };
             let text = session.convert_case(text, var.letter_case);
             if var.nameref && !Session::valid_reference_target(&text) {
-                eprintln!("tonari: {command}: {name}: invalid name reference");
+                diagnostic!("{command}: {name}: invalid name reference");
                 status = 1;
                 continue;
             }
@@ -679,8 +687,9 @@ pub(super) fn run(
         if let Some(d) = array
             && let Err(e) = session.array_items(name, flags.global, &mut var, d.append, &d.items)
         {
+            record_scope(session);
             session.store_variable(name, var, flags.global);
-            eprintln!("tonari: {command}: {name}: {e}");
+            diagnostic!("{command}: {name}: {e}");
             return crate::Flow::Discard(1);
         }
         if let Some(on) = flags.readonly {
@@ -711,6 +720,7 @@ pub(super) fn run(
         {
             bindings.variables.remove(name);
         }
+        record_scope(session);
         session.store_variable(name, var, flags.global);
         if let Some(source) = remove_reference
             && let Some(reference) = session.variables.get_mut(source)

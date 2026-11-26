@@ -77,12 +77,7 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, &'static str)> {
                 'i' => opts.initial = Some(value),
                 'p' => opts.prompt = Some(value),
                 't' => {
-                    opts.timeout = Some(
-                        Duration::try_from_secs_f64(
-                            value.parse().map_err(|_| (1, "invalid timeout"))?,
-                        )
-                        .map_err(|_| (1, "invalid timeout"))?,
-                    );
+                    opts.timeout = Some(timeout(value).ok_or((1, "invalid timeout"))?);
                 }
                 _ => unreachable!(),
             }
@@ -91,6 +86,28 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, &'static str)> {
     }
     opts.names = args;
     Ok(opts)
+}
+
+// The process numeric locale remains C. Shell LC_NUMERIC is applied explicitly
+// by printf. Keep decimal/exponent syntax and the Duration range check.
+fn timeout(value: &str) -> Option<Duration> {
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    if value.is_empty()
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || b"+-.eE".contains(&b))
+    {
+        return None;
+    }
+    let input = std::ffi::CString::new(value).ok()?;
+    let mut end = std::ptr::null_mut();
+    let seconds = unsafe { libc::strtod(input.as_ptr(), &mut end) };
+    if end.cast_const() != unsafe { input.as_ptr().add(value.len()) } {
+        return None;
+    }
+    Duration::try_from_secs_f64(seconds).ok()
 }
 
 fn ready(fd: i32, timeout: Duration) -> io::Result<bool> {
@@ -224,12 +241,12 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     let opts = match options(args) {
         Ok(opts) => opts,
         Err((code, e)) => {
-            eprintln!("tonari: read: {e}");
+            diagnostic!("read: {e}");
             return code;
         }
     };
     if crate::execute::fd::is_private(opts.fd) {
-        eprintln!("tonari: read: invalid file descriptor");
+        diagnostic!("read: invalid file descriptor");
         return 1;
     }
     if let Some(invalid) = opts
@@ -237,11 +254,32 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         .iter()
         .find(|s| opts.array.is_none() && !session.valid_builtin_target(s))
     {
-        eprintln!("tonari: read: {invalid}: invalid identifier");
+        diagnostic!("read: {invalid}: invalid identifier");
         return 1;
     }
     if opts.timeout == Some(Duration::ZERO) {
         return u8::from(!ready(opts.fd, Duration::ZERO).unwrap_or(false));
+    }
+    // The normal redirect installed a fresh descriptor. A plain assignment
+    // has no callback or subscript that could observe its file position.
+    if let Some((source, bytes)) = here
+        && source == opts.fd
+        && opts.timeout.is_none()
+        && opts.edit.is_none()
+        && opts.max_chars.is_none()
+        && opts.array.is_none()
+        && opts.delimiter == b'\n'
+        && opts.names.iter().all(|s| session.plain_read_target(s))
+        && (!opts.names.is_empty() || session.plain_read_target("REPLY"))
+    {
+        let end = memchr::memchr(b'\n', bytes).unwrap_or(bytes.len());
+        let line = &bytes[..end];
+        if (opts.raw || !line.contains(&b'\\'))
+            && !line.contains(&0)
+            && let Ok(text) = std::str::from_utf8(line)
+        {
+            return assign_fields(session, &opts, text, &[], u8::from(end == bytes.len()));
+        }
     }
     let _echo = if opts.silent {
         EchoGuard::disable(opts.fd)
@@ -282,7 +320,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
                 return crate::traps::signal_status(libc::SIGALRM);
             }
             Err(e) => {
-                eprintln!("tonari: read: {e}");
+                diagnostic!("read: {e}");
                 return 1;
             }
         }
@@ -297,6 +335,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     let mut escaped = Vec::new();
     let mut slash = false;
     let mut chars = 0;
+    let mut validated = 0;
     let started = opts.timeout.map(|timeout| (Instant::now(), timeout));
     let mut input = Input::new(opts.fd);
     // Even an escaped delimiter can only postpone the end of a record. Read
@@ -314,8 +353,13 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
             memchr::memchr(opts.delimiter, data).map_or(data.len(), |n| n + 1)
         });
     let status = loop {
-        if opts.max_chars.is_some_and(|max| chars >= max) && std::str::from_utf8(&line).is_ok() {
-            break 0;
+        if let Some(limit) = opts.max_chars {
+            match std::str::from_utf8(&line[validated..]) {
+                Ok(_) if chars >= limit => break 0,
+                Ok(_) => validated = line.len(),
+                Err(e) if e.error_len().is_none() => validated += e.valid_up_to(),
+                Err(_) => break 1,
+            }
         }
         if edited.is_none()
             && let Some((started, timeout)) = started
@@ -391,13 +435,13 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
                 break crate::traps::signal_status(crate::traps::pending().unwrap_or(libc::SIGINT));
             }
             Err(e) => {
-                eprintln!("tonari: read: {e}");
+                diagnostic!("read: {e}");
                 return 1;
             }
         };
         if slash {
             slash = false;
-            if b == b'\n' {
+            if b == b'\n' || b == 0 {
                 continue;
             }
             escaped.push(line.len());
@@ -414,7 +458,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         line.push(b);
     };
     let Ok(line) = String::from_utf8(line) else {
-        eprintln!("tonari: read: expected UTF-8 input");
+        diagnostic!("read: expected UTF-8 input");
         return 1;
     };
     assign_fields(session, &opts, &line, &escaped, status)
@@ -429,7 +473,7 @@ fn assign_fields(
 ) -> u8 {
     if opts.names.is_empty() && opts.array.is_none() {
         if session.readonly("REPLY") {
-            eprintln!("tonari: read: REPLY: readonly variable");
+            diagnostic!("read: REPLY: readonly variable");
             return 2;
         }
         session.assign("REPLY", line);
@@ -452,7 +496,7 @@ fn assign_fields(
             line.trim_matches(|c: char| ifs.contains(c))
         };
         if let Err(e) = session.assign_builtin_target(name, value) {
-            eprintln!("tonari: read: {e}");
+            diagnostic!("read: {e}");
             return 1;
         }
         return status;
@@ -462,7 +506,7 @@ fn assign_fields(
         let target = match session.indexed_receiver(target, false) {
             Ok(target) => target,
             Err(e) => {
-                eprintln!("tonari: read: {target}: {e}");
+                diagnostic!("read: {target}: {e}");
                 return 1;
             }
         };
@@ -483,7 +527,7 @@ fn assign_fields(
             &line[start..finish]
         });
         if let Err(e) = session.assign_builtin_target(name, value) {
-            eprintln!("tonari: read: {e}");
+            diagnostic!("read: {e}");
             return if e == crate::session::READONLY && i + 1 < count {
                 2
             } else {

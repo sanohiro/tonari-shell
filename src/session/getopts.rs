@@ -2,21 +2,18 @@ use super::{Session, is_identifier};
 
 impl Session {
     pub fn getopts(&mut self, args: &[String]) -> u8 {
-        let args = if args.first().is_some_and(|a| a == "--") {
-            &args[1..]
-        } else {
-            args
-        };
+        let terminated = args.first().is_some_and(|a| a == "--");
+        let args = if terminated { &args[1..] } else { args };
         let [spec, name, explicit @ ..] = args else {
-            eprintln!("tonari: getopts: usage: getopts optstring name [arg ...]");
+            diagnostic!("getopts: usage: getopts optstring name [arg ...]");
             return 2;
         };
-        if spec.starts_with('-') && spec.len() > 1 {
-            eprintln!("tonari: getopts: invalid option: {spec}");
+        if !terminated && spec.starts_with('-') && spec.len() > 1 {
+            diagnostic!("getopts: invalid option: {spec}");
             return 2;
         }
         if self.posix && self.readonly("OPTIND") {
-            eprintln!("tonari: getopts: OPTIND: readonly variable");
+            diagnostic!("getopts: OPTIND: readonly variable");
             return 1;
         }
         let inputs = if explicit.is_empty() {
@@ -109,7 +106,7 @@ impl Session {
             }
         }
         if self.posix && self.readonly("OPTARG") {
-            eprintln!("tonari: getopts: OPTARG: readonly variable");
+            diagnostic!("getopts: OPTARG: readonly variable");
             return 2;
         }
         if let Some(value) = value {
@@ -118,18 +115,18 @@ impl Session {
             self.unset_variable("OPTARG");
         }
         if !is_identifier(name) {
-            eprintln!("tonari: getopts: {name}: not a valid identifier");
+            diagnostic!("getopts: {name}: not a valid identifier");
             return 1;
         }
         if self.readonly(name) {
-            eprintln!("tonari: getopts: {name}: readonly variable");
+            diagnostic!("getopts: {name}: readonly variable");
             return if option.is_none() { 1 } else { 2 };
         }
         let mut bytes = [0; 4];
         let value = result.encode_utf8(&mut bytes);
         if self.is_nameref(name) {
             if let Err(error) = self.assign_target(name, value) {
-                eprintln!("tonari: getopts: {name}: {error}");
+                diagnostic!("getopts: {name}: {error}");
                 return 1;
             }
         } else {

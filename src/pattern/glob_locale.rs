@@ -3,11 +3,11 @@ use super::order::{self, Collation};
 use std::cell::RefCell;
 use std::ffi::CString;
 
-struct Cached {
+pub(crate) struct Cached {
     ctype: String,
     characters: CharacterLocale,
     collate: String,
-    handle: libc::locale_t,
+    pub(super) handle: libc::locale_t,
 }
 
 impl Drop for Cached {
@@ -50,7 +50,21 @@ pub(super) fn run<T>(
     lookup: &dyn Fn(&str) -> Option<String>,
     work: impl FnOnce(Collation, CharacterLocale) -> T,
 ) -> T {
-    thread_local! { static LAST: RefCell<Option<Cached>> = const { RefCell::new(None) }; }
+    let locale = resolve(lookup);
+    let Some(locale) = locale else {
+        return work(Collation::Bytes, CharacterLocale::Ascii);
+    };
+    let _guard = super::LocaleGuard::enter(locale.handle);
+    let order = if matches!(locale.collate.as_str(), "C" | "POSIX") {
+        Collation::Bytes
+    } else {
+        Collation::FixedLocale
+    };
+    work(order, locale.characters)
+}
+
+pub(crate) fn resolve(lookup: &dyn Fn(&str) -> Option<String>) -> Option<std::rc::Rc<Cached>> {
+    thread_local! { static LAST: RefCell<Option<std::rc::Rc<Cached>>> = const { RefCell::new(None) }; }
     let nonempty = |key| lookup(key).filter(|s| !s.is_empty());
     let (ctype, collate) = if let Some(all) = nonempty("LC_ALL") {
         (all.clone(), all)
@@ -62,28 +76,18 @@ pub(super) fn run<T>(
         )
     };
     LAST.with_borrow_mut(|slot| {
-        if !slot
+        if slot
             .as_ref()
-            .is_some_and(|c| c.ctype == ctype && c.collate == collate)
-            && let Some(next) = Cached::new(ctype, collate)
+            .is_none_or(|c| c.ctype != ctype || c.collate != collate)
         {
-            *slot = Some(next);
+            *slot = Cached::new(ctype, collate)
+                .or_else(|| Cached::new("C".into(), "C".into()))
+                .map(std::rc::Rc::new);
             if !cfg!(target_os = "linux") {
                 order::invalidate();
             }
         }
-        let Some(locale) = slot else {
-            return work(Collation::Current, CharacterLocale::Ascii);
-        };
-        let Some(_guard) = super::LocaleGuard::enter(locale.handle) else {
-            return work(Collation::Current, locale.characters);
-        };
-        let order = if matches!(locale.collate.as_str(), "C" | "POSIX") {
-            Collation::Bytes
-        } else {
-            Collation::FixedLocale
-        };
-        work(order, locale.characters)
+        slot.clone()
     })
 }
 
@@ -99,10 +103,7 @@ pub(crate) fn sync_ranges(session: &crate::Session) {
         RANGE_HANDLE.set(std::ptr::null_mut());
         return;
     }
-    let name = ["LC_ALL", "LC_COLLATE", "LANG"]
-        .into_iter()
-        .find_map(|key| session.scalar_setting(key).filter(|s| !s.is_empty()))
-        .unwrap_or_default();
+    let name = session.locale_category("LC_COLLATE").unwrap_or_default();
     if matches!(name.as_ref(), "" | "C" | "POSIX" | "C.UTF-8" | "C.utf8") {
         RANGE_HANDLE.set(std::ptr::null_mut());
         return;

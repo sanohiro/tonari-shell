@@ -3,7 +3,25 @@ pub(crate) use bracket::portable_symbol;
 pub(crate) mod directory;
 pub(crate) mod extended;
 mod glob_locale;
-pub(crate) use glob_locale::sync_ranges;
+pub(crate) use glob_locale::{Cached as PatternLocale, sync_ranges};
+
+pub(crate) fn session_locale(session: &crate::Session) -> Option<std::rc::Rc<PatternLocale>> {
+    thread_local! { static INHERITED: std::cell::OnceCell<Option<std::rc::Rc<PatternLocale>>> = const { std::cell::OnceCell::new() }; }
+    if session.pattern_locale_overridden() {
+        glob_locale::resolve(&|key| session.get(key))
+    } else {
+        INHERITED.with(|cell| {
+            cell.get_or_init(|| glob_locale::resolve(&|key| std::env::var(key).ok()))
+                .clone()
+        })
+    }
+}
+
+impl PatternLocale {
+    pub(crate) fn enter(&self) -> Option<LocaleGuard> {
+        LocaleGuard::enter(self.handle)
+    }
+}
 mod order;
 
 use crate::session::CharacterLocale;
@@ -17,6 +35,9 @@ use std::sync::OnceLock;
 // libc starts in the C locale. Load the caller's character and collation
 // settings only when a pattern needs them, and restore the thread afterwards.
 pub(crate) fn localized<T>(work: impl FnOnce() -> T) -> T {
+    if EXPLICIT_LOCALE.get() {
+        return work();
+    }
     static LOCALE: OnceLock<usize> = OnceLock::new();
     let locale = *LOCALE.get_or_init(|| unsafe {
         libc::newlocale(
@@ -32,7 +53,10 @@ pub(crate) fn localized<T>(work: impl FnOnce() -> T) -> T {
     work()
 }
 
-struct LocaleGuard(libc::locale_t);
+thread_local! {
+    static EXPLICIT_LOCALE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+pub(crate) struct LocaleGuard(libc::locale_t, bool);
 
 impl LocaleGuard {
     fn enter(locale: libc::locale_t) -> Option<Self> {
@@ -40,7 +64,7 @@ impl LocaleGuard {
         if previous.is_null() {
             None
         } else {
-            Some(Self(previous))
+            Some(Self(previous, EXPLICIT_LOCALE.replace(true)))
         }
     }
 }
@@ -49,6 +73,7 @@ impl Drop for LocaleGuard {
     fn drop(&mut self) {
         unsafe {
             libc::uselocale(self.0);
+            EXPLICIT_LOCALE.set(self.1);
         }
     }
 }
@@ -165,6 +190,21 @@ impl<T: AsRef<str>> Matcher<T> {
         extended::insensitive_match(value, self.source(), extended, locale)
     }
 
+    pub(crate) fn matches_session(&self, value: &str, session: &crate::Session) -> bool {
+        if !matches!(self, Self::Bracket(..) | Self::Native(_)) {
+            return self.matches(value);
+        }
+        let locale = session_locale(session);
+        let _guard = locale.as_ref().and_then(|l| l.enter());
+        if let Self::Bracket(compiled, source) = self
+            && compiled.utf8 != bracket::BracketPattern::utf8_locale()
+        {
+            return bracket::BracketPattern::new(source.as_ref().as_bytes())
+                .is_some_and(|p| p.accepts(value.as_bytes(), false));
+        }
+        self.matches(value)
+    }
+
     pub(crate) fn matches(&self, value: &str) -> bool {
         if value.contains('\0') {
             return false;
@@ -261,6 +301,30 @@ fn trim_boundary(
             value.strip_suffix(literal).map(str::len)
         };
     }
+    if group.is_none()
+        && let Some((head, tail)) = pattern.split_once('*')
+        && !head.is_empty()
+        && !tail.is_empty()
+        && !head.contains(['?', '[', '\\', '\0'])
+        && !tail.contains(['*', '?', '[', '\\', '\0'])
+        && !value.contains('\0')
+    {
+        if prefix {
+            let rest = value.strip_prefix(head)?;
+            let at = if longest {
+                rest.rfind(tail)
+            } else {
+                rest.find(tail)
+            }?;
+            return Some(head.len() + at + tail.len());
+        }
+        let rest = value.strip_suffix(tail)?;
+        return if longest {
+            rest.find(head)
+        } else {
+            rest.rfind(head)
+        };
+    }
     // Try only UTF-8 boundaries, including the empty prefix or suffix.
     let mut cuts = value
         .char_indices()
@@ -332,7 +396,21 @@ pub struct GlobOptions {
     pub nocaseglob: bool,
     pub extglob: bool,
     pub globskipdots: bool,
-    ignore: Option<std::rc::Rc<[String]>>,
+    ignore: Option<std::rc::Rc<[IgnorePattern]>>,
+}
+
+struct IgnorePattern {
+    text: String,
+    simple: std::cell::OnceCell<extended::Pattern>,
+}
+
+impl From<&str> for IgnorePattern {
+    fn from(text: &str) -> Self {
+        Self {
+            text: text.into(),
+            simple: Default::default(),
+        }
+    }
 }
 
 impl Default for GlobOptions {
@@ -382,7 +460,7 @@ impl GlobOptions {
                 ')' => depth = depth.saturating_sub(1),
                 ':' if depth == 0 => {
                     if begin != i {
-                        patterns.push(value[begin..i].to_owned());
+                        patterns.push(IgnorePattern::from(&value[begin..i]));
                     }
                     begin = i + 1;
                 }
@@ -390,7 +468,7 @@ impl GlobOptions {
             }
         }
         if begin != value.len() {
-            patterns.push(value[begin..].to_owned());
+            patterns.push(IgnorePattern::from(&value[begin..]));
         }
         self.ignore = Some(patterns.into());
     }
@@ -574,8 +652,20 @@ fn paths(
         for pattern in patterns.iter() {
             // GLOBIGNORE tests the entire displayed pathname. An extended
             // alternative may contain a literal directory separator.
-            let matcher =
-                extended::Pattern::for_path(pattern, options.extglob, options.nocaseglob, locale);
+            let compiled;
+            let matcher = if !options.nocaseglob && !pattern.text.contains(['[', '(', '?']) {
+                pattern.simple.get_or_init(|| {
+                    extended::Pattern::for_path(&pattern.text, false, false, locale)
+                })
+            } else {
+                compiled = extended::Pattern::for_path(
+                    &pattern.text,
+                    options.extglob,
+                    options.nocaseglob,
+                    locale,
+                );
+                &compiled
+            };
             paths.retain(|path| !matcher.matches_in_locale::<true>(path, false));
         }
     }

@@ -185,7 +185,7 @@ pub fn capture_substitution(
         {
             let mut output = Vec::new();
             if let Err(e) = read_regular_file(&file, metadata.len(), &mut output) {
-                eprintln!("tonari: {e}");
+                diagnostic!("{e}");
                 return captured_output(output, 1);
             }
             return captured_output(output, 0);
@@ -201,7 +201,7 @@ pub fn capture_substitution(
         return Err("cannot fork command substitution");
     }
     if pid == 0 {
-        session.reset_forked_traps();
+        session.after_fork();
         drop(read);
         if write.as_raw_fd() == 1 {
             let fd = write.into_raw_fd();
@@ -246,7 +246,7 @@ pub fn capture_substitution(
                 Ok::<_, std::io::Error>(())
             })();
             if let Err(e) = &code {
-                eprintln!("tonari: {e}");
+                diagnostic!("{e}");
             }
             unsafe { libc::_exit(i32::from(code.is_err())) }
         }
@@ -760,11 +760,11 @@ fn launch_list(
     let mut launch = session.jobs.launch(background, false);
     let pid = unsafe { libc::fork() };
     if pid < 0 {
-        eprintln!("tonari: fork: {}", std::io::Error::last_os_error());
+        diagnostic!("fork: {}", std::io::Error::last_os_error());
         return Flow::Continue(1);
     }
     if pid == 0 {
-        session.reset_forked_traps();
+        session.after_fork();
         launch.child(&mut session.traps);
         if background && launch.group.is_none() && (session.posix || !session.stdin_redirected) {
             let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
@@ -812,7 +812,7 @@ fn launch_list(
             Flow::Continue(code)
         }
         Err(e) => {
-            eprintln!("tonari: {e}");
+            diagnostic!("{e}");
             Flow::Continue(1)
         }
     }

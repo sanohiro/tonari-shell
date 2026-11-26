@@ -77,9 +77,20 @@ impl<'a> Options<'a> {
 
 // A full replacement has no callback or later reader that can observe a
 // partially filled array. Build dense indices in order with one bulk load.
-fn read_all(options: &Options<'_>, mut store: impl FnMut(&str)) -> io::Result<()> {
+fn read_all(options: &Options<'_>, here: Option<&[u8]>, store: impl FnMut(&str)) -> io::Result<()> {
+    if let Some(mut bytes) = here {
+        return records(&mut bytes, options, store);
+    }
     let fd = unsafe { BorrowedFd::borrow_raw(options.fd) }.try_clone_to_owned()?;
     let mut reader = io::BufReader::with_capacity(64 * 1024, std::fs::File::from(fd));
+    records(&mut reader, options, store)
+}
+
+fn records(
+    reader: &mut dyn BufRead,
+    options: &Options<'_>,
+    mut store: impl FnMut(&str),
+) -> io::Result<()> {
     let mut pending = Vec::new();
     let mut skip = options.skip;
     let delim = options.delimiter;
@@ -126,26 +137,35 @@ fn read_all(options: &Options<'_>, mut store: impl FnMut(&str)) -> io::Result<()
     Ok(())
 }
 
-pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u8) -> Flow {
+pub(crate) fn run(
+    session: &mut Session,
+    command: &str,
+    args: &[String],
+    last: u8,
+    here: Option<(i32, &[u8])>,
+) -> Flow {
     let mut options = match Options::parse(args) {
         Ok(options) => options,
         Err((code, message)) => {
-            eprintln!("tonari: {command}: {message}");
+            diagnostic!("{command}: {message}");
             return Flow::Continue(code);
         }
     };
     let fd = options.fd;
     if crate::execute::fd::is_private(fd) || unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
-        eprintln!("tonari: {command}: {fd}: invalid file descriptor");
+        diagnostic!("{command}: {fd}: invalid file descriptor");
         return Flow::Continue(1);
     }
     let destination = match session.indexed_receiver(options.name, false) {
         Ok(target) => target,
         Err(e) => {
-            eprintln!("tonari: {command}: {}: {e}", options.name);
+            diagnostic!("{command}: {}: {e}", options.name);
             return Flow::Continue(1);
         }
     };
+    let here = here
+        .filter(|&(source, _)| source == fd && destination == options.name)
+        .map(|(_, bytes)| bytes);
     options.name = &destination;
     let origin = i64::from(options.origin.unwrap_or(0));
     if options.limit == 0 && options.callback.is_none() {
@@ -157,7 +177,7 @@ pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u
             var.array_assigned = true;
             let elements = var.make_array();
             let mut index = origin;
-            let result = read_all(&options, |line| {
+            let result = read_all(&options, here, |line| {
                 elements.insert(index, line.to_owned());
                 index += 1;
             });
@@ -165,14 +185,14 @@ pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u
             result
         } else {
             let mut lines = Records::default();
-            read_all(&options, |line| lines.push(line)).map(|()| {
+            read_all(&options, here, |line| lines.push(line)).map(|()| {
                 session.store_elements(options.name, Elements::Records(lines), false);
             })
         };
         return match result {
             Ok(()) => Flow::Continue(0),
             Err(e) => {
-                eprintln!("tonari: {command}: {e}");
+                diagnostic!("{command}: {e}");
                 Flow::Continue(1)
             }
         };
@@ -214,7 +234,7 @@ pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u
                 }
                 Ok(None) => break,
                 Err(e) => {
-                    eprintln!("tonari: {command}: {e}");
+                    diagnostic!("{command}: {e}");
                     return Flow::Continue(1);
                 }
             }
@@ -227,7 +247,7 @@ pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u
             continue;
         }
         let Ok(line) = std::str::from_utf8(&bytes) else {
-            eprintln!("tonari: {command}: expected UTF-8 input");
+            diagnostic!("{command}: expected UTF-8 input");
             return Flow::Continue(1);
         };
         let index = origin + count as i64;
@@ -246,7 +266,7 @@ pub(crate) fn run(session: &mut Session, command: &str, args: &[String], last: u
                 flow => return flow,
             }
             if session.readonly(options.name) {
-                eprintln!("tonari: {command}: {}: readonly variable", options.name);
+                diagnostic!("{command}: {}: readonly variable", options.name);
                 return Flow::Continue(1);
             }
             input = Input::new(fd);

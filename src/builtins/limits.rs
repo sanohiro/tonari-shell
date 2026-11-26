@@ -178,7 +178,7 @@ pub fn run(args: &[String], out: &mut dyn Write, posix: bool) -> u8 {
                 'a' => all = true,
                 _ => {
                     let Some(limit) = LIMITS.iter().find(|item| item.flag == flag) else {
-                        eprintln!("tonari: ulimit: -{flag}: invalid option");
+                        diagnostic!("ulimit: -{flag}: invalid option");
                         return 2;
                     };
                     let rest = &opt[1 + i + flag.len_utf8()..];
@@ -235,7 +235,7 @@ pub fn run(args: &[String], out: &mut dyn Write, posix: bool) -> u8 {
                 None => limit.report(out, &values, hard && !soft, label),
             });
             if let Err(error) = result {
-                eprintln!("tonari: ulimit: {}: {error}", limit.name);
+                diagnostic!("ulimit: {}: {error}", limit.name);
                 return 1;
             }
         }

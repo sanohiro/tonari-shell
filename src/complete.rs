@@ -156,6 +156,7 @@ impl<'a> Context<'a> {
                         break;
                     }
                     words.clear();
+                    command_start = i + c.len_utf8();
                 }
                 if i < cursor {
                     start = i + c.len_utf8();
@@ -336,7 +337,11 @@ impl Source {
                         len = first[..len]
                             .chars()
                             .zip(name.chars())
-                            .take_while(|&(a, b)| crate::pattern::same_letter(a, b, locale))
+                            .take_while(|&(a, b)| {
+                                crate::pattern::same_letter(a, b, locale)
+                                    || session.bindings.map_case
+                                        && matches!((a, b), ('-', '_') | ('_', '-'))
+                            })
                             .map(|(c, _)| c.len_utf8())
                             .sum();
                     }
@@ -506,6 +511,12 @@ pub fn at(
                 value
             };
             let parent = format!("{}/", path.trim_end_matches('/'));
+            // The scanner has already removed quoting from the current word.
+            let rest = context
+                .words
+                .get(context.current)?
+                .split_once('/')
+                .map_or(rest, |(_, tail)| tail);
             let expanded = format!("{parent}{rest}");
             let source = if command == Some("cd") {
                 Source::Directories
@@ -823,11 +834,11 @@ pub(crate) fn service_names(prefix: &str) -> Vec<String> {
                 let mut fields = line.split('#').next()?.split_ascii_whitespace();
                 let primary = fields.next()?;
                 fields.next()?;
-                std::iter::once(primary)
-                    .chain(fields)
-                    .find(|name| name.starts_with(prefix))
-                    .map(str::to_owned)
+                Some(std::iter::once(primary).chain(fields))
             })
+            .flatten()
+            .filter(|name| name.starts_with(prefix))
+            .map(str::to_owned)
             .collect();
         *last = Some(Previous {
             file: key,

@@ -22,7 +22,7 @@ pub(crate) fn write_stdout_for(name: &str, mut bytes: &[u8]) -> u8 {
         } else {
             let e = io::Error::last_os_error();
             if e.kind() != io::ErrorKind::Interrupted {
-                eprintln!("tonari: {name}: write error: {e}");
+                diagnostic!("{name}: write error: {e}");
                 return 1;
             }
         }
@@ -95,7 +95,7 @@ pub fn test(words: &[String], session: &mut Session) -> u8 {
     let mut args = &words[1..];
     if words[0] == "[" {
         if args.last().map(String::as_str) != Some("]") {
-            eprintln!("tonari: [: missing ]");
+            diagnostic!("[: missing ]");
             return 2;
         }
         args = &args[..args.len() - 1];
@@ -103,7 +103,7 @@ pub fn test(words: &[String], session: &mut Session) -> u8 {
     match test_args(args, session) {
         Ok(value) => u8::from(!value),
         Err(msg) => {
-            eprintln!("tonari: {}: {msg}", words[0]);
+            diagnostic!("{}: {msg}", words[0]);
             2
         }
     }
@@ -350,7 +350,7 @@ pub fn times(args: &[String]) -> u8 {
         .first()
         .filter(|s| s.starts_with('-') && s.len() > 1 && *s != "--")
     {
-        eprintln!("tonari: times: {flag}: invalid option");
+        diagnostic!("times: {flag}: invalid option");
         return 2;
     }
     let mut out = io::stdout().lock();

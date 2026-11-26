@@ -109,25 +109,23 @@ impl Window {
             let new = Stamp::from(&m);
             if new.identity == old.identity
                 && old.len.checked_add(entry.len() as u64) == Some(new.len)
+                && self.start + self.bytes.len() as u64 == old.len
+                && entry.len() <= CAPACITY - self.bytes.len()
             {
-                if self.start + self.bytes.len() as u64 == old.len
-                    && entry.len() <= CAPACITY - self.bytes.len()
-                {
-                    let first_page = self.bytes.len() / PAGE;
-                    let needed = self.bytes.len() + entry.len();
-                    if needed > self.bytes.capacity() {
-                        let capacity =
-                            needed.max(self.bytes.capacity().saturating_mul(2).min(CAPACITY));
-                        self.bytes.reserve_exact(capacity - self.bytes.len());
-                    }
-                    self.bytes.extend_from_slice(entry);
-                    self.unicode_pages.truncate(first_page);
-                    self.unicode_pages.extend(
-                        self.bytes[first_page * PAGE..]
-                            .chunks(PAGE)
-                            .map(|p| !p.is_ascii()),
-                    );
+                let first_page = self.bytes.len() / PAGE;
+                let needed = self.bytes.len() + entry.len();
+                if needed > self.bytes.capacity() {
+                    let capacity =
+                        needed.max(self.bytes.capacity().saturating_mul(2).min(CAPACITY));
+                    self.bytes.reserve_exact(capacity - self.bytes.len());
                 }
+                self.bytes.extend_from_slice(entry);
+                self.unicode_pages.truncate(first_page);
+                self.unicode_pages.extend(
+                    self.bytes[first_page * PAGE..]
+                        .chunks(PAGE)
+                        .map(|p| !p.is_ascii()),
+                );
                 self.stamp = Some(new);
             }
         }

@@ -8,8 +8,8 @@ pub enum Expr {
     Binary(Word, &'static str, Word),
     StaticRegex(Word, String, Option<String>),
     Not(Box<Expr>),
-    And(Box<Expr>, Box<Expr>),
-    Or(Box<Expr>, Box<Expr>),
+    And(Vec<Expr>),
+    Or(Vec<Expr>),
 }
 
 impl Expr {
@@ -70,7 +70,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
         crate::eval::expand_case(s, word.clone(), status, false).map(std::borrow::Cow::Owned)
     }
     let error = |message: &'static str| {
-        eprintln!("tonari: [[: {message}");
+        diagnostic!("[[: {message}");
         Flow::Continue(2)
     };
     match expr {
@@ -79,14 +79,24 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             Err(Flow::Continue(code)) => Ok(code != 0),
             other => other,
         },
-        And(a, b) => match condition(a, session, status)? {
-            true => condition(b, session, status),
-            false => Ok(false),
-        },
-        Or(a, b) => match condition(a, session, status) {
-            Ok(false) | Err(Flow::Continue(1..)) => condition(b, session, status),
-            other => other,
-        },
+        And(terms) => {
+            for term in terms {
+                if !condition(term, session, status)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+        Or(terms) => {
+            let (last, prefix) = terms.split_last().expect("empty conditional disjunction");
+            for term in prefix {
+                match condition(term, session, status) {
+                    Ok(false) | Err(Flow::Continue(1..)) => {}
+                    other => return other,
+                }
+            }
+            condition(last, session, status)
+        }
         Word(word) => {
             let value = operand(session, word, status)?;
             trace(session, status, &["-n", &value]);
@@ -134,6 +144,11 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                         env.session.positional.as_slice(),
                     );
                     trace(env.session, status, &[&left, op, &right]);
+                    let locale = right
+                        .contains(['[', '?'])
+                        .then(|| pattern::session_locale(env.session))
+                        .flatten();
+                    let _guard = locale.as_ref().and_then(|l| l.enter());
                     let matched = if env.session.shopt.nocasematch {
                         pattern::extended::insensitive_match(
                             &left,
@@ -165,7 +180,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                     let right = operand(session, right, status)?;
                     trace(session, status, &[&left, op, &right]);
                     let arith_error = |message| {
-                        eprintln!("tonari: [[: {message}");
+                        diagnostic!("[[: {message}");
                         Flow::Continue(1)
                     };
                     let a = arithmetic::run(&left, session).map_err(arith_error)?;
@@ -196,18 +211,24 @@ fn regex_match(
     expression: std::borrow::Cow<'_, str>,
 ) -> Result<bool, Flow> {
     trace(session, status, &[left, "=~", &expression]);
-    let result = pattern::localized(|| {
+    let locale = pattern::session_locale(session);
+    let _guard = locale.as_ref().and_then(|l| l.enter());
+    let result = (|| {
         let ignore_case = session.shopt.nocasematch;
         let recent = &mut session.regex[usize::from(ignore_case)];
-        if let Some(compiled) = recent.iter().flatten().find(|r| r.pattern == expression) {
+        if let Some(compiled) = recent.iter().flatten().find(|r| {
+            r.pattern == expression
+                && r.locale.as_ref().map(std::rc::Rc::as_ptr)
+                    == locale.as_ref().map(std::rc::Rc::as_ptr)
+        }) {
             return compiled.search(left);
         }
-        let compiled = Compiled::new(expression.into_owned(), ignore_case)?;
+        let compiled = Compiled::new(expression.into_owned(), ignore_case, locale)?;
         let result = compiled.search(left);
         recent.rotate_right(1);
         recent[0] = Some(std::rc::Rc::new(compiled));
         result
-    })
+    })()
     .map_err(|()| Flow::Continue(2))?;
     let matched = result.is_some();
     session.replace_array("BASH_REMATCH", result.unwrap_or_default());
@@ -435,13 +456,18 @@ fn portable_list(body: &str) -> Option<String> {
 }
 
 pub struct Compiled {
+    locale: Option<std::rc::Rc<pattern::PatternLocale>>,
     pattern: String,
     regex: Option<Box<libc::regex_t>>,
     captures: usize,
 }
 
 impl Compiled {
-    fn new(pattern: String, ignore_case: bool) -> Result<Self, ()> {
+    fn new(
+        pattern: String,
+        ignore_case: bool,
+        locale: Option<std::rc::Rc<pattern::PatternLocale>>,
+    ) -> Result<Self, ()> {
         let encoded = CString::new(pattern.as_str()).map_err(|_| ())?;
         let mut regex = Box::<libc::regex_t>::new_uninit();
         let flags = if ignore_case {
@@ -459,6 +485,7 @@ impl Compiled {
         {
             return Ok(Self {
                 pattern,
+                locale,
                 regex: None,
                 captures: 0,
             });
@@ -466,6 +493,7 @@ impl Compiled {
         let captures = capture_count(&pattern) + 1;
         Ok(Self {
             pattern,
+            locale,
             regex: Some(unsafe { regex.assume_init() }),
             captures,
         })
@@ -473,17 +501,30 @@ impl Compiled {
 
     fn search(&self, text: &str) -> Result<Option<Vec<String>>, ()> {
         let Some(regex) = self.regex.as_deref() else {
-            eprintln!("tonari: [[: invalid regular expression: {}", self.pattern);
+            diagnostic!("[[: invalid regular expression: {}", self.pattern);
             return Err(());
         };
-        let encoded = CString::new(text).map_err(|_| ())?;
-        let mut matched = vec![
-            libc::regmatch_t {
-                rm_so: -1,
-                rm_eo: -1
-            };
-            self.captures
-        ];
+        let mut small_text = [0u8; 256];
+        let allocated;
+        let encoded = if text.len() < small_text.len() {
+            small_text[..text.len()].copy_from_slice(text.as_bytes());
+            std::ffi::CStr::from_bytes_with_nul(&small_text[..=text.len()]).map_err(|_| ())?
+        } else {
+            allocated = CString::new(text).map_err(|_| ())?;
+            allocated.as_c_str()
+        };
+        let empty = libc::regmatch_t {
+            rm_so: -1,
+            rm_eo: -1,
+        };
+        let mut small_matches = [empty; 16];
+        let mut large_matches;
+        let matched = if self.captures <= small_matches.len() {
+            &mut small_matches[..self.captures]
+        } else {
+            large_matches = vec![empty; self.captures];
+            &mut large_matches[..]
+        };
         match unsafe {
             libc::regexec(
                 regex,
@@ -537,9 +578,9 @@ fn capture_count(expression: &str) -> usize {
                     }
                     if c == b'['
                         && let Some(&marker @ (b':' | b'=' | b'.')) = after.first()
-                        && let Some(end) = after.windows(2).position(|s| s == [marker, b']'])
+                        && let Some(end) = after[1..].windows(2).position(|s| s == [marker, b']'])
                     {
-                        bytes = &after[end + 2..];
+                        bytes = &after[end + 3..];
                     }
                 }
             }

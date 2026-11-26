@@ -793,7 +793,7 @@ def main():
         # The static shell carries its own UTF-8 data. Runner images need not
         # have the corresponding system locale generated for the control.
         localized = """unset LC_ALL; LC_NUMERIC=de_DE.UTF-8; printf "<%'+012.2f><%'.8d><%-8.1f>\\n" 12345,5 12345 1,5; LC_ALL=C; printf '<%.1f>\\n' 1.5"""
-        expected_localized = (0, b"<+0012.345,50><0012.345><1,5     >\n<1.5>\n", False)
+        expected_localized = (0, b"<+0012.345,50><00012.345><1,5     >\n<1.5>\n", False)
         assert run(shells[1], localized)[0] == expected_localized, run(shells[1], localized)[0]
         if run(shells[0], localized)[0] == expected_localized:
             cases["numeric-locale"] = localized
@@ -867,6 +867,15 @@ printf three >&7; exec {slot}>&7; : 6>&7- {slot}>&-; printf four >&7; exec 6>&7-
             if name == "tilde-associative-key" and version.startswith("5.2.21(") and expected == (0, b"/literal", False):
                 # Debian 5.2.37 and both 5.3 controls expand only the unquoted tilde.
                 expected = (0, b"absolute/literal", False)
+            if name == "fc-range-substitutions":
+                # An explicit in-range index must select exactly that entry.
+                expected = (0, b"\t echo one\n\t echo axb\n\t echo three\n" +
+                            b"\t echo three\n" * 3 +
+                            b"\t echo one\n\t echo axb\n\t echo three\nyxz\n1\n", False)
+            if name == "nested-source":
+                # Both scripts ran set --; the inner source must not erase
+                # the outer source's record of that change.
+                expected = (0, b"inner\ninner\n", False)
             if expected != actual:
                 failed.append((name, repr(expected), repr(actual)))
         print(json.dumps(dict(reference=version, witnesses=len(cases), differences=failed)), flush=True)

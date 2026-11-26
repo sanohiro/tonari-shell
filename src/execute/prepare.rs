@@ -99,7 +99,7 @@ impl PreparedCommand {
             session.substitutions.finish(scope);
             session.remember_literal_argument(&self.words);
             return Some(Flow::Continue(result.unwrap_or_else(|e| {
-                eprintln!("tonari: {e}");
+                diagnostic!("{e}");
                 1
             })));
         }
@@ -109,7 +109,7 @@ impl PreparedCommand {
         }
         let scope = session.substitutions.scope();
         let flow = run_builtin(selected, self, session, status, false).unwrap_or_else(|e| {
-            eprintln!("tonari: {e}");
+            diagnostic!("{e}");
             Flow::Continue(1)
         });
         session.substitutions.finish(scope);
@@ -204,7 +204,7 @@ pub(super) fn separate_keyword_arguments(raw: &mut SimpleCommand<Word>) {
         let index = indices.next().unwrap();
         if let Some((_, key)) = keywords.next_if(|(pos, _)| *pos == index) {
             if key.contains('[') {
-                eprintln!("tonari: {key}: not a valid identifier");
+                diagnostic!("{key}: not a valid identifier");
                 return false;
             }
             let mut value = std::mem::take(word);
@@ -390,7 +390,7 @@ pub(super) fn prepare_expanded(
                     if words.is_empty() || exp.session.posix {
                         return Err(error);
                     }
-                    eprintln!("tonari: {error}");
+                    diagnostic!("{error}");
                     continue;
                 }
                 if target.is_some_and(|(_, index)| index.is_empty()) {
@@ -399,7 +399,7 @@ pub(super) fn prepare_expanded(
                     )));
                 }
                 if target.is_some() && !words.is_empty() {
-                    eprintln!("tonari: {key}: not a valid identifier");
+                    diagnostic!("{key}: not a valid identifier");
                     continue;
                 }
                 if let Some((base, subscript)) = target

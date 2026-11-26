@@ -1,3 +1,14 @@
+// Keep the prefix and stderr formatter in the cold path; each caller supplies its fields.
+macro_rules! diagnostic {
+    ($($arg:tt)*) => { crate::print_diagnostic(format_args!($($arg)*)) };
+}
+
+#[cold]
+#[inline(never)]
+fn print_diagnostic(args: std::fmt::Arguments<'_>) {
+    eprintln!("tonari: {args}");
+}
+
 mod interactive;
 use interactive::{interactive, shell_terminal, terminal_read};
 mod alias;
@@ -194,7 +205,7 @@ fn invoke(args: impl Iterator<Item = std::ffi::OsString>) -> u8 {
             return 0;
         }
         Err(e) => {
-            eprintln!("tonari: {e}");
+            diagnostic!("{e}");
             return 2;
         }
     };
@@ -249,7 +260,7 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
     if session.interactive
         && let Err(e) = session.traps.init_hangup()
     {
-        eprintln!("tonari: SIGHUP: {e}");
+        diagnostic!("SIGHUP: {e}");
         return 1;
     }
     session.jobs.monitor = invocation.options.monitor.unwrap_or(session.interactive);
@@ -338,7 +349,7 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
                 input::file_script(&mut session, file, None, initial, invocation.options.check)
             }
             Err(e) => {
-                eprintln!("tonari: {}: {e}", path.display());
+                diagnostic!("{}: {e}", path.display());
                 Flow::Continue(if e.kind() == io::ErrorKind::NotFound {
                     127
                 } else {
@@ -355,7 +366,7 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
         ) {
             Ok(code) => Flow::Continue(code),
             Err(e) => {
-                eprintln!("tonari: {e}");
+                diagnostic!("{e}");
                 Flow::Continue(1)
             }
         },

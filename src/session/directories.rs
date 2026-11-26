@@ -1,9 +1,23 @@
 use super::Session;
-use super::{Component, DirectoryError, MetadataExt, OsStrExt, PathBuf, Rc, Variable};
+use super::{Component, DirectoryError, MetadataExt, OsStrExt, PathBuf, Rc};
 use std::io::{self, Write};
 use std::path::Path;
 
 pub(super) fn physical_path() -> io::Result<std::path::PathBuf> {
+    // Avoid getcwd(NULL, 0)'s growing allocation for ordinary paths.
+    let mut path = [std::mem::MaybeUninit::<libc::c_char>::uninit(); 512];
+    let result = unsafe { libc::getcwd(path.as_mut_ptr().cast(), path.len()) };
+    if !result.is_null() {
+        let bytes = unsafe { std::ffi::CStr::from_ptr(result) }.to_bytes();
+        return Ok(std::ffi::OsStr::from_bytes(bytes).into());
+    }
+    let error = io::Error::last_os_error();
+    if !matches!(
+        error.raw_os_error(),
+        Some(libc::ERANGE | libc::ENAMETOOLONG)
+    ) {
+        return Err(error);
+    }
     match std::env::current_dir() {
         Err(e) if e.raw_os_error() == Some(libc::ENAMETOOLONG) => long_physical_path(),
         result => result,
@@ -208,7 +222,7 @@ impl Session {
                     ("dirs", 'c') => clear = true,
                     ("pushd" | "popd", 'n') => no_cd = true,
                     _ => {
-                        eprintln!("tonari: {command}: invalid option -{flag}");
+                        diagnostic!("{command}: invalid option -{flag}");
                         return 2;
                     }
                 }
@@ -216,7 +230,7 @@ impl Session {
         }
         let operand = args.next().map(String::as_str);
         if args.next().is_some() {
-            eprintln!("tonari: {command}: too many arguments");
+            diagnostic!("{command}: too many arguments");
             return 2;
         }
         if clear {
@@ -231,13 +245,13 @@ impl Session {
                     && text.as_bytes()[1..].iter().all(u8::is_ascii_digit) =>
             {
                 let Some(i) = index(text, len) else {
-                    eprintln!("tonari: {command}: {text}: directory stack index out of range");
+                    diagnostic!("{command}: {text}: directory stack index out of range");
                     return 1;
                 };
                 Some(i)
             }
             Some(_) if command != "pushd" => {
-                eprintln!("tonari: {command}: invalid directory stack index");
+                diagnostic!("{command}: invalid directory stack index");
                 return if command == "popd" { 2 } else { 1 };
             }
             _ => None,
@@ -299,7 +313,7 @@ impl Session {
             Ok(())
         })();
         if let Err(e) = result {
-            eprintln!("tonari: {command}: {e}");
+            diagnostic!("{command}: {e}");
             return 1;
         }
         if command == "pushd" && no_cd && (operand.is_none() || slot.is_some()) {
@@ -331,6 +345,36 @@ impl Session {
         self.logical_directory_ref().map(Path::to_owned)
     }
 
+    pub(crate) fn write_pwd(&mut self, physical: bool, out: &mut dyn Write) -> io::Result<()> {
+        if !physical && !self.posix {
+            return write_path(self.logical_directory_ref()?, out);
+        }
+        let path = if physical {
+            if let Some(path) = self.logical_cwd.get()
+                && path.as_os_str().len() >= libc::PATH_MAX as usize
+                && long_cwd_matches(path, true)
+            {
+                Ok(path.clone())
+            } else {
+                physical_path()
+            }
+        } else {
+            self.logical_directory().and_then(|path| {
+                if same_directory(&path, Path::new("."))
+                    || path.as_os_str().len() >= libc::PATH_MAX as usize
+                        && long_cwd_matches(&path, false)
+                {
+                    Ok(path)
+                } else {
+                    let actual = physical_path()?;
+                    self.logical_cwd = std::cell::OnceCell::from(actual.clone());
+                    Ok(actual)
+                }
+            })
+        }?;
+        write_path(&path, out)
+    }
+
     pub fn directory_builtin(&mut self, name: &str, args: &[String]) -> u8 {
         let mut physical = self.physical;
         let mut require_pwd = false;
@@ -342,42 +386,17 @@ impl Session {
                     'P' => physical = true,
                     'e' if name == "cd" => require_pwd = true,
                     _ => {
-                        eprintln!("tonari: {name}: unsupported option {opt}");
+                        diagnostic!("{name}: unsupported option {opt}");
                         return 2;
                     }
                 }
             }
         }
         let result = if name == "pwd" {
-            (if physical {
-                if let Some(path) = self.logical_cwd.get()
-                    && path.as_os_str().len() >= libc::PATH_MAX as usize
-                    && long_cwd_matches(path, true)
-                {
-                    Ok(path.clone())
-                } else {
-                    physical_path()
-                }
-            } else if self.posix {
-                self.logical_directory().and_then(|path| {
-                    if same_directory(&path, Path::new("."))
-                        || path.as_os_str().len() >= libc::PATH_MAX as usize
-                            && long_cwd_matches(&path, false)
-                    {
-                        Ok(path)
-                    } else {
-                        let actual = physical_path()?;
-                        self.logical_cwd = std::cell::OnceCell::from(actual.clone());
-                        Ok(actual)
-                    }
-                })
-            } else {
-                self.logical_directory()
-            })
-            .and_then(|p| print_path(&p))
+            self.write_pwd(physical, &mut io::stdout().lock())
         } else {
             if args.len() > 1 {
-                eprintln!("tonari: cd: too many arguments");
+                diagnostic!("cd: too many arguments");
                 return 1;
             }
             let arg = args.first().map(String::as_str);
@@ -387,10 +406,7 @@ impl Session {
                 Some(s) => (Some(s.into()), false),
             };
             let Some(target) = target else {
-                eprintln!(
-                    "tonari: cd: {} not set",
-                    if previous { "OLDPWD" } else { "HOME" }
-                );
+                diagnostic!("cd: {} not set", if previous { "OLDPWD" } else { "HOME" });
                 return 1;
             };
             if self.posix && physical {
@@ -403,13 +419,13 @@ impl Session {
                     Ok(()) => return 0,
                     Err(DirectoryError::NoPath(e)) => {
                         if require_pwd {
-                            eprintln!("tonari: cd: {e}");
+                            diagnostic!("cd: {e}");
                             return 1;
                         }
                         return 0;
                     }
                     Err(DirectoryError::Other(e)) => {
-                        eprintln!("tonari: cd: {e}");
+                        diagnostic!("cd: {e}");
                         return if require_pwd { 2 } else { 1 };
                     }
                 }
@@ -418,7 +434,7 @@ impl Session {
         };
         result.map_or_else(
             |e| {
-                eprintln!("tonari: {name}: {e}");
+                diagnostic!("{name}: {e}");
                 1
             },
             |()| 0,
@@ -590,16 +606,13 @@ impl Session {
         self.logical_cwd = std::cell::OnceCell::from(cwd.clone());
         let old_readonly = self.readonly("OLDPWD");
         if !old_readonly {
-            let old_export = self.is_exported("OLDPWD");
-            self.variables.insert(
-                "OLDPWD".into(),
-                Variable {
-                    declared: true,
-                    value: old_pwd,
-                    exported: old_export,
-                    ..Variable::default()
-                },
-            );
+            if let Some(old) = old_pwd {
+                self.assign("OLDPWD", &old);
+            } else {
+                let old = self.variables.entry("OLDPWD".into()).or_default();
+                old.declared = true;
+                old.value = None;
+            }
         }
         let pwd_readonly = self.readonly("PWD");
         self.assign(
@@ -644,7 +657,10 @@ fn normalize_directory(path: &Path) -> io::Result<PathBuf> {
 }
 
 fn print_path(path: &Path) -> io::Result<()> {
-    let mut out = io::stdout().lock();
+    write_path(path, &mut io::stdout().lock())
+}
+
+fn write_path(path: &Path, out: &mut dyn Write) -> io::Result<()> {
     out.write_all(path.as_os_str().as_bytes())?;
     out.write_all(b"\n")?;
     out.flush()

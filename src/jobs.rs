@@ -432,6 +432,9 @@ impl Jobs {
     }
 
     pub fn init(&mut self, interactive: bool) {
+        if self.tty.is_some() {
+            return;
+        }
         let old = unsafe { libc::getpgrp() };
         let fd = if unsafe { libc::isatty(libc::STDERR_FILENO) } == 1 {
             PrivateFile::duplicate(io::stderr().as_fd())
@@ -724,7 +727,7 @@ impl Jobs {
                     'r' => running = true,
                     'h' => nohup = true,
                     _ => {
-                        eprintln!("tonari: disown: invalid option {option}");
+                        diagnostic!("disown: invalid option {option}");
                         return 2;
                     }
                 }
@@ -747,7 +750,7 @@ impl Jobs {
             if let Some(i) = self.select(spec) {
                 self.detach(i, nohup, true);
             } else {
-                eprintln!("tonari: disown: {spec}: no such job");
+                diagnostic!("disown: {spec}: no such job");
                 status = 1;
             }
         }

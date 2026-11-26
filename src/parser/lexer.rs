@@ -1321,7 +1321,7 @@ fn scan(
         spans.resize(tokens.len(), (token_start, offset));
         token_start = offset;
         if matches!(c, ' ' | '\t') {
-            chars.next();
+            chars = chars.as_str().trim_start_matches([' ', '\t']).chars();
             continue;
         }
         // A continued physical line does not start a word or consume the
@@ -1610,6 +1610,12 @@ fn scan(
                 _ if pattern_context => {
                     pattern_chunk(&mut chars, &mut word, rest, extended, assignment.is_some())
                 }
+                _ if c.is_ascii() && plain_byte(c as u8) => {
+                    let len = plain_prefix(chars.as_str());
+                    after_colon = rest.as_bytes()[len] == b':';
+                    word.literal(&rest[..1 + len]);
+                    chars = chars.as_str()[len..].chars();
+                }
                 _ => word.push(c),
             }
             started = true;
@@ -1666,7 +1672,13 @@ fn scan(
             }
         }
         let begins_array = assignment.as_ref().is_some_and(|name| {
-            chars.as_str().starts_with('(') && start.len() - chars.as_str().len() == name.len() + 1
+            if !chars.as_str().starts_with('(') {
+                return false;
+            }
+            let raw = &start[..start.len() - chars.as_str().len()];
+            raw.len() == name.len() + 1
+                || raw.contains("\\\n")
+                    && raw.split("\\\n").map(str::len).sum::<usize>() == name.len() + 1
         });
         tokens.push(Token::Word(LexWord {
             word,

@@ -9,25 +9,33 @@ macro_rules! operator {
 
 impl Reader {
     pub(super) fn test_or(&mut self) -> Result<Expr, Error> {
-        let mut result = self.test_and()?;
+        let first = self.test_and()?;
+        if !matches!(self.peek(), Some(Token::Or)) {
+            return Ok(first);
+        }
+        let mut terms = vec![first];
         while matches!(self.peek(), Some(Token::Or)) {
             self.tokens.pop_front();
             self.newlines();
-            result = Expr::Or(Box::new(result), Box::new(self.test_and()?));
+            terms.push(self.test_and()?);
         }
-        Ok(result)
+        Ok(Expr::Or(terms))
     }
 
     fn test_and(&mut self) -> Result<Expr, Error> {
-        let mut result = self.test_atom()?;
+        let first = self.test_atom()?;
         self.newlines();
+        if !matches!(self.peek(), Some(Token::And)) {
+            return Ok(first);
+        }
+        let mut terms = vec![first];
         while matches!(self.peek(), Some(Token::And)) {
             self.tokens.pop_front();
             self.newlines();
-            result = Expr::And(Box::new(result), Box::new(self.test_atom()?));
+            terms.push(self.test_atom()?);
             self.newlines();
         }
-        Ok(result)
+        Ok(Expr::And(terms))
     }
 
     fn test_word(&mut self) -> Result<Word, Error> {
@@ -47,11 +55,11 @@ impl Reader {
         self.newlines();
         if self.keyword() == Some("!") {
             self.tokens.pop_front();
-            return Ok(Expr::Not(Box::new(self.test_atom()?)));
+            return Ok(Expr::Not(Box::new(self.nested(Self::test_atom)?)));
         }
         if matches!(self.peek(), Some(Token::LeftParen)) {
             self.tokens.pop_front();
-            let e = self.test_or()?;
+            let e = self.nested(Self::test_or)?;
             match self.tokens.pop_front() {
                 Some(Token::RightParen) => return Ok(e),
                 None => {

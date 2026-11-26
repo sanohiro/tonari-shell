@@ -1,5 +1,45 @@
 # Startup and execution / 起動と実行性能
 
+<a id="runtime-audit-v2"></a>
+
+## 2026-11-27 · Second runtime audit / 第2回監査の実測
+
+The release flags were compared at the same source revision (`0520f10`) with the pinned compiler and rebuilt standard library. Sizes are bytes in the executable. The hosted machines ran macOS arm64 and Linux x86-64-v3 static PIE natively. Rust panic text remained readable in an independent M1 witness with 1A; 1B terminated before printing the message. Across 15 interleaved samples per variant for arithmetic, functions, strings, regex, globs and printf, neither policy won every workload. [Diagnostic variants and samples](https://github.com/sanohiro/tonari-shell/actions/runs/45904444231)
+
+| Host | Former distribution flags | 1A, keep panic text | 1B, immediate abort | Extra bytes saved by 1B |
+|---|---:|---:|---:|---:|
+| Linux x86-64 | 2,585,784 | 2,469,464 | 2,398,392 | 71,072 |
+| macOS arm64 | 1,831,920 | 1,765,440 | 1,732,016 | 33,424 |
+
+現行設定には 1A を採用した。1A 単独で Linux は 116,320 バイト、macOS は 66,480 バイト縮小。別の試験では関数マージとリンカー配置を変えても双方でハッシュが元と一致した。依存別のサイズ最適化は Linux で 2,592 バイト減、Mac で 16 バイト増だった。入力速度に関わる `unicode-width` と日付処理の共通設定を維持した。[配置と依存別プロファイルの測定](https://github.com/sanohiro/tonari-shell/actions/runs/45905931458)
+
+The next table isolates the execution and editor changes through `0411a40` from the later cold-diagnostic and French-locale changes. The script driver starts each executable afresh, checks its output, and takes 21 interleaved samples. Medians are milliseconds. The previous version is `2d81b68` in a separate Cargo target directory. The CI artifact includes p95 and host details for each workload. [Full native results](https://github.com/sanohiro/tonari-shell/actions/runs/45907035783) · [Final release comparison](https://github.com/sanohiro/tonari-shell/actions/runs/45907715039)
+
+| Workload | macOS previous | macOS Tonari | macOS Bash | Linux previous | Linux Tonari | Linux Bash |
+|---|---:|---:|---:|---:|---:|---:|
+| here-string-builtin-read | 4.431 | 4.205 | 183.859 | 2.325 | 2.077 | 226.779 |
+| mapfile-here | 9.982 | 8.322 | 24.248 | 15.899 | 13.454 | 28.915 |
+| redirected-pwd | 88.095 | 89.944 | 97.118 | 181.599 | 179.688 | 186.427 |
+| redirected-pwd-null | 10.729 | 10.105 | 17.579 | 6.424 | 5.295 | 10.334 |
+| external-null-output | 85.403 | 66.694 | 92.571 | 28.061 | 23.741 | 35.265 |
+| conditional-chain | 7.431 | 7.342 | 17.227 | 4.773 | 4.692 | 12.803 |
+| eval-conditionals | 5.875 | 5.737 | 17.412 | 3.238 | 3.117 | 10.026 |
+| printf-formats | 5.000 | 5.775 | 13.522 | 3.513 | 3.487 | 6.988 |
+| strings | 9.677 | 8.838 | 20.399 | 5.848 | 5.511 | 14.376 |
+| regex | 4.440 | 4.582 | 13.900 | 3.089 | 3.082 | 16.605 |
+| substitute-class | 12.378 | 5.837 | 12.952 | 9.491 | 3.566 | 8.092 |
+| trim-middle-star | 4.910 | 4.818 | 11.953 | 2.806 | 2.550 | 7.240 |
+| arithmetic | 6.461 | 6.382 | 23.925 | 3.869 | 3.723 | 19.826 |
+| functions | 9.454 | 9.742 | 27.917 | 9.026 | 8.721 | 24.442 |
+| case-classes | 7.219 | 7.436 | 15.486 | 4.300 | 4.322 | 8.997 |
+| glob | 10.590 | 10.648 | 906.532 | 7.600 | 7.551 | 13.087 |
+
+Mac の M1 でも採用候補を個別比較した。外部コマンドを48回 `>/dev/null` 付きで起動する中央値は 76.045 から 51.476 ms に短縮した（Bash 84.877 ms、17回）。開く対象を全ファイルに広げた試作では 1 バイトと 1 MiB のパイプも速くなったが、FIFO の読み手が後続の書き手を待つ既存の回帰試験がタイムアウトした。採用版は FIFO の open を子で実行する。通常ファイルを1,000回切り詰めて書く `pwd` はストレージの待ち時間が大きく、Bash 比 2/3 を両機種で保証できない。
+
+With a shared journal of one million commands on M1, removing the forward block filter changed the median old-hint latency from 4.549 to 14.883 ms and old reverse search from 4.493 to 9.966 ms (15 runs, `tools/bench_history.py --bursts`). Keep the filter. With one CPU on the native Linux runner, pasting into a 1 MiB line took 0.060 ms median and 0.072 ms p95, versus Bash at 3.756/3.996 ms. Undo followed by typing took 0.046/0.094 ms versus 7.273/7.662 ms. Some short-key actions are at or above Bash latency. [Interactive samples](https://github.com/sanohiro/tonari-shell/actions/runs/45907035783)
+
+A trial sharing the stderr formatter across shell diagnostics reduced the M1 machine-code section by 4,992 bytes, while the signed file shrank by 32 bytes. Segment alignment matters when comparing macOS executables. A same-toolchain cross-build of both x86-64 variants saved 10,496 bytes before distribution-specific relocation packing. Timings use native machines. Linux retains a stripped static PIE, and the single Mach-O links only to libSystem. [Decisions and witnesses](compatibility/runtime-audit-v2.md)
+
 <a id="shell-core-refactoring"></a>
 
 ## 2026-11-27 · Shell core refactoring / シェル内部の整理

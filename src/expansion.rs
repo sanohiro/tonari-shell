@@ -61,7 +61,7 @@ impl Error {
 
     pub(crate) fn report(&self, context: &str) {
         if !matches!(self.recovery, Recovery::Control(_)) {
-            eprintln!("tonari: {context}{self}");
+            diagnostic!("{context}{self}");
         }
     }
 
@@ -338,7 +338,7 @@ impl<'a> Expansion<'a> {
                 };
                 if key.is_empty() {
                     if pairs {
-                        eprintln!("tonari: bad array subscript");
+                        diagnostic!("bad array subscript");
                         continue;
                     }
                     error = Some("bad array subscript");
@@ -556,6 +556,9 @@ impl<'a> Expansion<'a> {
 }
 
 impl Variables for Expansion<'_> {
+    fn decimal(&self, name: &str) -> Option<i64> {
+        self.borrowed_scalar(name).and_then(Session::plain_decimal)
+    }
     fn get(&self, name: &str) -> Option<String> {
         self.lookup(name)
     }

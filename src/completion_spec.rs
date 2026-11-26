@@ -225,6 +225,7 @@ enum Target {
 impl Target {
     fn argument(&self) -> String {
         match self {
+            Self::Command(name) if name.starts_with('-') => format!("-- {}", shell_quote(name)),
             Self::Command(name) => shell_quote(name),
             Self::Default => "-D".into(),
             Self::Empty => "-E".into(),
@@ -780,7 +781,7 @@ fn apply(
         let mut words = match request.spec.candidates(session, prefix, last, None) {
             Ok((words, _)) => words,
             Err(error) => {
-                eprintln!("tonari: compgen: {error}");
+                diagnostic!("compgen: {error}");
                 return Ok(1);
             }
         };
@@ -796,7 +797,7 @@ fn apply(
         if let Some(name) = request.destination {
             let status = u8::from(words.is_empty());
             if let Err(error) = session.store_completions(&name, words) {
-                eprintln!("tonari: compgen: {name}: {error}");
+                diagnostic!("compgen: {name}: {error}");
                 return Ok(1);
             }
             return Ok(status);
@@ -821,7 +822,7 @@ fn apply(
     }
     if builtin == CompBuiltin::Complete && targets.is_empty() {
         if !request.print && request.spec != Spec::default() {
-            eprintln!("tonari: complete: a command name or a default target is required");
+            diagnostic!("complete: a command name or a default target is required");
             return Ok(2);
         }
         for (key, spec) in registry.iter() {
@@ -836,13 +837,13 @@ fn apply(
                 .iter()
                 .any(|(_, option)| *option == CompOption::Typeahead)
             {
-                eprintln!("tonari: compopt: register typeahead before the callback starts");
+                diagnostic!("compopt: register typeahead before the callback starts");
                 return Ok(1);
             }
             set_options(options, &request.options, "", out)?;
             return Ok(0);
         }
-        eprintln!("tonari: compopt: no completion specification is active");
+        diagnostic!("compopt: no completion specification is active");
         return Ok(1);
     }
     let mut status = 0;
@@ -853,10 +854,7 @@ fn apply(
         }
         let Some(spec) = registry.get_mut(&key) else {
             let name = builtin.name();
-            eprintln!(
-                "tonari: {name}: no completion specification for {}",
-                key.argument()
-            );
+            diagnostic!("{name}: no completion specification for {}", key.argument());
             status = 1;
             continue;
         };
@@ -879,7 +877,7 @@ pub fn run(name: &str, args: &[String], last: u8, session: &mut Session) -> u8 {
     let request = match Request::parse(builtin, args) {
         Ok(request) => request,
         Err(error) => {
-            eprintln!("tonari: {name}: {error}");
+            diagnostic!("{name}: {error}");
             return 2;
         }
     };
@@ -990,7 +988,7 @@ fn generate_for_tab(
             || spec.candidates(session, prefix, 0, context),
         )
         .unwrap_or_else(|error| {
-            eprintln!("tonari: completion: {error}");
+            diagnostic!("completion: {error}");
             (Vec::new(), false)
         });
         if !reload {
@@ -999,7 +997,7 @@ fn generate_for_tab(
         // Bash completion loaders return 124 after installing the real spec.
         seen.push(original);
         if seen.len() > 32 {
-            eprintln!("tonari: completion: possible retry loop");
+            diagnostic!("completion: possible retry loop");
             break (spec, words);
         }
         original = session.completions.lookup(command, prefix)?.clone();
@@ -1022,9 +1020,17 @@ fn generate_for_tab(
             .actions
             .iter()
             .any(|a| matches!(a, CompAction::Directory | CompAction::File));
-    if filenames {
+    if filenames && !session.bindings.unmarked_dirs {
         for word in &mut words {
-            if !word.ends_with('/') && Path::new(word).is_dir() {
+            let directory = word
+                .strip_prefix("~/")
+                .and_then(|rest| session.get("HOME").map(|h| Path::new(&h).join(rest)));
+            if !word.ends_with('/')
+                && directory
+                    .as_deref()
+                    .unwrap_or_else(|| Path::new(word))
+                    .is_dir()
+            {
                 word.push('/');
             }
         }
@@ -1033,7 +1039,7 @@ fn generate_for_tab(
         let mut seen = BTreeSet::new();
         words.retain(|w| seen.insert(w.clone()));
     } else {
-        words.sort();
+        words.sort_unstable();
         words.dedup();
     }
     Some(Generated {

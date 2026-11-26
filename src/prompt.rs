@@ -2,7 +2,7 @@ use std::ffi::CStr;
 
 use crate::Session;
 
-pub fn render(session: &mut Session, secondary: bool, status: u8) -> String {
+pub fn render(session: &mut Session, secondary: bool, status: u8, editing: bool) -> String {
     let (name, fallback) = if secondary {
         ("PS2", "> ")
     } else {
@@ -11,10 +11,14 @@ pub fn render(session: &mut Session, secondary: bool, status: u8) -> String {
     let Some(prompt) = session.get(name) else {
         return fallback.to_string();
     };
-    render_text(session, prompt, status)
+    render_mode(session, prompt, status, editing)
 }
 
-pub fn render_text(session: &mut Session, mut prompt: String, status: u8) -> String {
+pub fn render_text(session: &mut Session, prompt: String, status: u8) -> String {
+    render_mode(session, prompt, status, false)
+}
+
+fn render_mode(session: &mut Session, mut prompt: String, status: u8, editing: bool) -> String {
     let bytes = prompt.as_bytes();
     let mut escapes = memchr::memchr3_iter(b'\\', b'$', b'`', bytes);
     let first = escapes.next();
@@ -26,6 +30,9 @@ pub fn render_text(session: &mut Session, mut prompt: String, status: u8) -> Str
     // Strip those literal pairs without allocating shell words or expanding anything.
     let marker = |i: usize| bytes[i] == b'\\' && matches!(bytes.get(i + 1), Some(b'[' | b']'));
     if !posix_bang && first.is_some_and(marker) && escapes.all(marker) {
+        if editing {
+            return prompt.replace(r"\[", "\x01").replace(r"\]", "\x02");
+        }
         let mut bracket = false;
         prompt.retain(|c| {
             if bracket {
@@ -42,7 +49,11 @@ pub fn render_text(session: &mut Session, mut prompt: String, status: u8) -> Str
         &prompt,
         session.shopt.promptvars || session.posix,
         session.posix,
-        |c, chars, output| escape(session, c, chars, output),
+        |c, chars, output| match c {
+            '[' if editing => output.push('\x01'),
+            ']' if editing => output.push('\x02'),
+            _ => escape(session, c, chars, output),
+        },
     );
     parsed
         .ok()
@@ -116,16 +127,35 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
             }));
         }
         '0'..='7' => {
-            let mut n = c.to_digit(8).unwrap();
-            for _ in 0..2 {
-                if let Some(d) = chars.clone().next().and_then(|c| c.to_digit(8)) {
+            let octet = |c: char, chars: &mut std::str::Chars<'_>| {
+                let mut n = c.to_digit(8).unwrap();
+                for _ in 0..2 {
+                    let Some(d) = chars.clone().next().and_then(|ch| ch.to_digit(8)) else {
+                        break;
+                    };
                     chars.next();
                     n = n * 8 + d;
-                } else {
-                    break;
                 }
+                n as u8
+            };
+            let first = octet(c, chars);
+            if first.is_ascii() {
+                output.push(first as char);
+            } else {
+                let mut bytes = vec![first];
+                loop {
+                    let mut next = chars.clone();
+                    if next.next() != Some('\\') {
+                        break;
+                    }
+                    let Some(octal @ '0'..='7') = next.next() else {
+                        break;
+                    };
+                    bytes.push(octet(octal, &mut next));
+                    *chars = next;
+                }
+                output.push_str(&String::from_utf8_lossy(&bytes));
             }
-            output.push(char::from(n as u8));
         }
         'u' => {
             if let Some(user) = crate::word::effective_user() {
@@ -133,26 +163,24 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
             }
         }
         c @ ('h' | 'H') => {
-            let mut buf = [0u8; 256];
-            if unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len() - 1) } == 0 {
-                let host = String::from_utf8_lossy(
-                    &buf[..buf.iter().position(|b| *b == 0).unwrap_or(buf.len())],
-                );
+            if let Some(host) = crate::session::hostname() {
                 output.push_str(if c == 'h' {
                     host.split('.').next().unwrap_or("")
                 } else {
-                    &host
+                    host
                 });
             }
         }
         c @ ('w' | 'W') => {
+            let start = output.len();
             let path = session.get("PWD").unwrap_or_default();
             let home = session.get("HOME").filter(|h| !h.is_empty() && h != "/");
             if home.as_ref() == Some(&path) {
                 output.push('~');
             } else if c == 'W' {
                 output.push_str(
-                    path.rsplit('/')
+                    path.trim_end_matches('/')
+                        .rsplit('/')
                         .next()
                         .filter(|s| !s.is_empty())
                         .unwrap_or("/"),
@@ -173,12 +201,18 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
                     .and_then(|s| s.parse::<usize>().ok())
                     .filter(|n| *n > 0)
             {
-                let prefix = if output.starts_with("~/") { "~/" } else { "" };
-                let path = output.trim_start_matches("~/").trim_start_matches('/');
+                let pwd = &output[start..];
+                let prefix = if pwd.starts_with("~/") { "~/" } else { "" };
+                let path = pwd
+                    .strip_prefix("~/")
+                    .unwrap_or(pwd)
+                    .trim_start_matches('/');
                 if let Some((i, _)) = path.rmatch_indices('/').nth(limit - 1)
-                    && i > 3
+                    && path[..i].chars().take(4).count() > 3
                 {
-                    *output = format!("{prefix}.../{}", &path[i + 1..]);
+                    let short = format!("{prefix}.../{}", &path[i + 1..]);
+                    output.truncate(start);
+                    output.push_str(&short);
                 }
             }
         }

@@ -19,7 +19,7 @@ pub fn caller(session: &Session, args: &[String]) -> u8 {
     let mut out = io::stdout().lock();
     let line = if let Some(arg) = args.first() {
         let Some(depth) = arg.parse::<usize>().ok() else {
-            eprintln!("tonari: caller: {arg}: invalid number");
+            diagnostic!("caller: {arg}: invalid number");
             return 2;
         };
         let Some(((name, source), line)) = session
@@ -54,7 +54,7 @@ pub fn enable(session: &mut Session, mut args: &[String]) -> u8 {
                 'a' => all = true,
                 's' => special = true,
                 _ => {
-                    eprintln!("tonari: enable: unsupported option -{c}");
+                    diagnostic!("enable: unsupported option -{c}");
                     return 2;
                 }
             }
@@ -78,7 +78,7 @@ pub fn enable(session: &mut Session, mut args: &[String]) -> u8 {
     let mut status = 0;
     for name in args {
         if !builtin_names().contains(&name.as_str()) {
-            eprintln!("tonari: enable: {name}: not a shell builtin");
+            diagnostic!("enable: {name}: not a shell builtin");
             status = 1;
         } else if disable {
             session.disabled_builtins.insert(name.clone());
@@ -98,11 +98,11 @@ pub fn suspend(session: &Session, mut args: &[String]) -> u8 {
         args = &args[1..];
     }
     if !args.is_empty() {
-        eprintln!("tonari: suspend: expected suspend [-f]");
+        diagnostic!("suspend: expected suspend [-f]");
         return 2;
     }
     if !force && (session.login || !session.jobs.monitor) {
-        eprintln!("tonari: suspend: cannot suspend this shell");
+        diagnostic!("suspend: cannot suspend this shell");
         return 1;
     }
     // A nested shell can share a process group with its launcher when job control is off.
@@ -180,7 +180,7 @@ pub fn help(mut args: &[String]) -> u8 {
         }
     }
     if !any {
-        eprintln!("tonari: help: no help topics match the requested pattern");
+        diagnostic!("help: no help topics match the requested pattern");
     }
     u8::from(!any)
 }

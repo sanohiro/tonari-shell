@@ -6,7 +6,7 @@ use std::{collections::HashMap, env, fmt::Write, fs, path::PathBuf};
 #[derive(Default)]
 struct Tables {
     text: String,
-    offsets: Vec<u32>,
+    offsets: Vec<u16>,
     ids: HashMap<&'static str, u16>,
     lists: HashMap<Vec<u16>, u16>,
     entries: Vec<u16>,
@@ -16,7 +16,7 @@ impl Tables {
     fn intern(&mut self, s: &'static str) -> u16 {
         *self.ids.entry(s).or_insert_with(|| {
             let id = u16::try_from(self.offsets.len()).unwrap();
-            self.offsets.push(u32::try_from(self.text.len()).unwrap());
+            self.offsets.push(u16::try_from(self.text.len()).unwrap());
             self.text.push_str(s);
             id
         })
@@ -39,6 +39,7 @@ fn main() {
     let mut tables = Tables::default();
     let mut names = Vec::new();
     let mut records = Vec::new();
+    let mut locale_rows = Vec::new();
     let mut fields = Vec::new();
     let mut numeric_names = String::new();
     let mut numeric_offsets = vec![0u16];
@@ -108,14 +109,24 @@ fn main() {
             locale_match!(locale => LC_TIME::ERA_T_FMT).as_slice()
         );
         field!(DFmt, &[locale_match!(locale => LC_TIME::D_FMT)]);
-        field!(DTFmt, &[locale_match!(locale => LC_TIME::D_T_FMT)]);
+        // pure-rust-locales 0.8.2 carries the older French d_t_fmt.
+        // Modern fr_FR uses %Z only in date_fmt. The euro variant copies LC_TIME.
+        let datetime = match locale {
+            Locale::fr_FR | Locale::fr_FR_euro => "%a %d %b %Y %T",
+            _ => locale_match!(locale => LC_TIME::D_T_FMT),
+        };
+        field!(DTFmt, &[datetime]);
         field!(TFmt, &[locale_match!(locale => LC_TIME::T_FMT)]);
         field!(TFmtAmpm, &[locale_match!(locale => LC_TIME::T_FMT_AMPM)]);
-        records.push(row);
+        let index = records.iter().position(|old| *old == row).unwrap_or_else(|| {
+            records.push(row);
+            records.len() - 1
+        });
+        locale_rows.push(u16::try_from(index).unwrap());
     }
     tables
         .offsets
-        .push(u32::try_from(tables.text.len()).unwrap());
+        .push(u16::try_from(tables.text.len()).unwrap());
     fs::write(out.join("text"), tables.text).unwrap();
     let mut code = String::new();
     let posix = include_str!("names.txt")
@@ -135,9 +146,10 @@ fn main() {
         fields.len()
     )
     .unwrap();
+    writeln!(code, "static LOCALE_ROWS: &[u16] = &{locale_rows:?};").unwrap();
     writeln!(code, "static NAMES: &[u16] = &{names:?};").unwrap();
     writeln!(code, "static ENTRIES: &[u16] = &{:?};", tables.entries).unwrap();
-    writeln!(code, "static OFFSETS: &[u32] = &{:?};", tables.offsets).unwrap();
+    writeln!(code, "static OFFSETS: &[u16] = &{:?};", tables.offsets).unwrap();
     fs::write(out.join("tables.rs"), code).unwrap();
     let mut numeric = format!(
         "const NAMES: &str = {numeric_names:?};\nconst OFFSETS: &[u16] = &{numeric_offsets:?};\nconst KINDS: &[u8] = &{numeric_kinds:?};\nconst PROFILES: &[Numeric] = &[\n"

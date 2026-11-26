@@ -1,5 +1,7 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+The second November 27 audit covers descriptor restoration, forked shell state, declarations, locale changes, history, completion, and terminal editing. Bash differences have individual witnesses. 第2回監査の判断と回帰試験を項目別に記録した。[Runtime audit](compatibility/runtime-audit-v2.md)
+
 The November 27 review follows the GNU source into individual cases and records the current Debian and Ubuntu driver results, independent POSIX-mode witnesses and decisions for external failures. ジョブ制御、配列、トレース、履歴、ファイル名展開などの修正と、GNU との差を残した理由を記録した。[Case decisions and distribution evidence](compatibility/bash-source-review/gnu-cases.md#november-27-source-and-regression-review--11月27日のソース照合)
 
 GNU distribution tests can combine diagnostics, formatting and several independent shell operations in one transcript. The case ledger records the input, the externally visible result and the reason for any intentional divergence. GNU の試験で見つかった差は、引数・終了値・ファイルへの副作用まで含めて個別に判定している。[GNU cases / GNU 回帰試験の個別判定](compatibility/bash-source-review/gnu-cases.md)
