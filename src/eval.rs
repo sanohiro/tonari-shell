@@ -312,7 +312,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                     }
                 }
                 let error = if s.is_nameref(&name) {
-                    s.assign_for_reference(&name, &value).err()
+                    s.assign_for_reference(&name, value).err()
                 } else if s.readonly(&name) {
                     Some("readonly variable")
                 } else {

@@ -579,31 +579,36 @@ impl Session {
     pub(crate) fn assign_for_reference(
         &mut self,
         name: &str,
-        value: &str,
+        value: String,
     ) -> Result<(), &'static str> {
-        if !Self::valid_reference_target(value) {
+        if !Self::valid_reference_target(&value) {
             return Err("invalid name reference");
         }
-        let mut current = name.to_owned();
+        // A for-loop retargets the last reference, even if its target is readonly.
+        let mut current = name;
         for _ in 0..32 {
-            let next = self
+            if let Some(next) = self
                 .variables
-                .get(&current)
-                .and_then(|v| v.value.as_ref())
+                .get(current)
+                .and_then(|v| v.value.as_deref())
                 .filter(|next| self.is_nameref(next))
-                .cloned();
-            if let Some(next) = next {
+            {
                 current = next;
                 continue;
             }
+            let key = if current == name {
+                Cow::Borrowed(name)
+            } else {
+                Cow::Owned(current.to_owned())
+            };
             let var = self
                 .variables
-                .get_mut(&current)
+                .get_mut(key.as_ref())
                 .expect("existing name reference");
             if var.readonly {
                 return Err("readonly variable");
             }
-            var.value = Some(value.to_owned());
+            var.value = Some(value);
             var.declared = true;
             return Ok(());
         }

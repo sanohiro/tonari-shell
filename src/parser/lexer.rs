@@ -650,7 +650,13 @@ fn double_quoted(
             }
             '$' => dollar(chars, word, true)?,
             '`' => backquote(chars, word, true)?,
-            _ => word.push(c),
+            _ => {
+                let rest = chars.as_str();
+                let end = rest.find(['"', '\\', '$', '`']).unwrap_or(rest.len());
+                word.push(c);
+                word.literal(&rest[..end]);
+                *chars = rest[end..].chars();
+            }
         }
         empty = false;
     }
