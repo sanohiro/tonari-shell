@@ -118,10 +118,194 @@ fn declare_functions(
     crate::execute::Flow::Continue(out.flush().map_or(1, |()| status))
 }
 
+impl Options {
+    fn parse<'a>(command: &str, mut operands: &'a [String]) -> Result<(Self, &'a [String]), ()> {
+        let readonly = command == "readonly";
+        let exporting = command == "export";
+        let attribute = readonly || exporting;
+        let mut flags = Options {
+            readonly: readonly.then_some(true),
+            exported: exporting.then_some(true),
+            ..Options::default()
+        };
+        while let Some((option, rest)) = operands.split_first() {
+            if option == "--" {
+                operands = rest;
+                break;
+            }
+            if option.len() < 2 || !option.starts_with(['-', '+']) {
+                break;
+            }
+            let on = option.starts_with('-');
+            if attribute && !on {
+                break;
+            }
+            for c in option[1..].chars() {
+                if attribute && !(matches!(c, 'a' | 'A' | 'f' | 'p') || exporting && c == 'n') {
+                    eprintln!("tonari: {command}: {option}: unsupported option");
+                    return Err(());
+                }
+                match c {
+                    'a' if on => flags.array = true,
+                    'a' => flags.remove_array = true,
+                    'A' if !on => flags.remove_associative = true,
+                    'A' if on => flags.associative = true,
+                    'F' => {
+                        flags.functions = true;
+                        flags.function_names = true;
+                    }
+                    't' => flags.traced = Some(on),
+                    'f' => flags.functions = true,
+                    'r' => flags.readonly = Some(on),
+                    'g' => flags.global = on,
+                    'i' => flags.integer = Some(on),
+                    'c' => flags.capitalize = Some(on),
+                    'l' => flags.lower = Some(on),
+                    'u' => flags.upper = Some(on),
+                    'n' if exporting => flags.exported = Some(false),
+                    'n' => flags.nameref = Some(on),
+                    'I' => flags.inherit = on,
+                    'p' => flags.print = true,
+                    'x' => flags.exported = Some(on),
+                    _ => {
+                        eprintln!("tonari: {command}: {option}: unsupported option");
+                        return Err(());
+                    }
+                }
+            }
+            operands = rest;
+        }
+        Ok((flags, operands))
+    }
+}
+
+fn print_variables(
+    session: &mut Session,
+    command: &str,
+    operands: &[String],
+    flags: &Options,
+) -> crate::Flow {
+    let local = command == "local";
+    let attribute = matches!(command, "readonly" | "export");
+    if operands.is_empty()
+        && !local
+        && !flags.print
+        && flags.exported.is_none()
+        && flags.readonly.is_none()
+        && !flags.array
+        && !flags.associative
+        && flags.nameref.is_none()
+        && flags.integer.is_none()
+        && flags.capitalize.is_none()
+        && flags.lower.is_none()
+        && flags.upper.is_none()
+    {
+        return crate::execute::Flow::Continue(session.set(&mut Vec::new()));
+    }
+    let names;
+    let names = if operands.is_empty() {
+        names = if local {
+            session
+                .locals
+                .last()
+                .unwrap()
+                .variables
+                .keys()
+                .cloned()
+                .collect()
+        } else {
+            session.variable_names("")
+        };
+        &names[..]
+    } else {
+        operands
+    };
+    let mut out = io::stdout().lock();
+    let mut status = 0;
+    if local
+        && operands.is_empty()
+        && session
+            .locals
+            .last()
+            .is_some_and(|s| s.set_options.is_some())
+        && writeln!(out, "local -").is_err()
+    {
+        return crate::Flow::Continue(1);
+    }
+    for name in names {
+        if name == "-"
+            && session
+                .locals
+                .iter()
+                .rev()
+                .filter(|scope| !scope.temporary)
+                .take(if local { 1 } else { usize::MAX })
+                .any(|scope| scope.set_options.is_some())
+        {
+            if writeln!(out, "{}", if local { "local -" } else { "declare -- -" }).is_err() {
+                return crate::Flow::Continue(1);
+            }
+            continue;
+        }
+        let listed = !local || session.locals.last().unwrap().variables.contains_key(name);
+        let variable = listed
+            .then(|| session.declared_variable(name, flags.global))
+            .flatten();
+        if let Some(var) = variable.filter(|v| v.declared) {
+            if operands.is_empty()
+                && (flags.readonly == Some(true) && !var.readonly
+                    || flags.array && (var.elements.is_none() || var.associative().is_some())
+                    || flags.associative && var.associative().is_none()
+                    || flags.capitalize == Some(true)
+                        && var.letter_case != Some(LetterCase::Capitalize)
+                    || flags.lower == Some(true) && var.letter_case != Some(LetterCase::Lower)
+                    || flags.upper == Some(true) && var.letter_case != Some(LetterCase::Upper)
+                    || flags.integer == Some(true) && !var.integer
+                    || flags.nameref == Some(true) && !var.nameref)
+            {
+                continue;
+            }
+            if (flags.exported.is_none() || !operands.is_empty() || var.exported)
+                && print_attribute(
+                    &mut out,
+                    name,
+                    &var,
+                    (attribute && session.posix).then_some(command),
+                )
+                .is_err()
+            {
+                return crate::execute::Flow::Continue(1);
+            }
+        } else if !operands.is_empty() {
+            eprintln!("tonari: {command}: {name}: not found");
+            status = 1;
+        }
+    }
+    crate::Flow::Continue(out.flush().map_or(1, |()| status))
+}
+
+fn declaration_operand(arg: &str) -> (&str, Option<&str>, bool) {
+    let separator = arg.find(['[', '=']).and_then(|i| {
+        if arg.as_bytes()[i] == b'=' {
+            return Some(i);
+        }
+        let end = crate::parser::index_end(&arg[i..]).ok()? + i;
+        arg[end..].find('=').map(|at| at + end)
+    });
+    let (name, value) = separator.map_or((arg, None), |at| (&arg[..at], Some(&arg[at + 1..])));
+    let append = value.is_some() && name.ends_with('+');
+    let name = if append {
+        &name[..name.len() - 1]
+    } else {
+        name
+    };
+    (name, value, append)
+}
+
 pub(super) fn run(
     session: &mut Session,
     command: &str,
-    mut operands: &[String],
+    operands: &[String],
     arrays: &[crate::execute::ArrayDeclaration],
     previous_status: u8,
     bindings: &mut super::Bindings,
@@ -135,157 +319,14 @@ pub(super) fn run(
         eprintln!("tonari: local: can only be used in a function");
         return crate::execute::Flow::Continue(1);
     }
-    let mut flags = Options {
-        readonly: readonly.then_some(true),
-        exported: exporting.then_some(true),
-        ..Options::default()
+    let Ok((flags, operands)) = Options::parse(command, operands) else {
+        return crate::Flow::Continue(2);
     };
-    while let Some((option, rest)) = operands.split_first() {
-        if option == "--" {
-            operands = rest;
-            break;
-        }
-        if option.len() < 2 || !option.starts_with(['-', '+']) {
-            break;
-        }
-        let on = option.starts_with('-');
-        if attribute && !on {
-            break;
-        }
-        for c in option[1..].chars() {
-            if attribute && !(matches!(c, 'a' | 'A' | 'f' | 'p') || exporting && c == 'n') {
-                eprintln!("tonari: {command}: {option}: unsupported option");
-                return crate::execute::Flow::Continue(2);
-            }
-            match c {
-                'a' if on => flags.array = true,
-                'a' => flags.remove_array = true,
-                'A' if !on => flags.remove_associative = true,
-                'A' if on => flags.associative = true,
-                'F' => {
-                    flags.functions = true;
-                    flags.function_names = true;
-                }
-                't' => flags.traced = Some(on),
-                'f' => flags.functions = true,
-                'r' => flags.readonly = Some(on),
-                'g' => flags.global = on,
-                'i' => flags.integer = Some(on),
-                'c' => flags.capitalize = Some(on),
-                'l' => flags.lower = Some(on),
-                'u' => flags.upper = Some(on),
-                'n' if exporting => flags.exported = Some(false),
-                'n' => flags.nameref = Some(on),
-                'I' => flags.inherit = on,
-                'p' => flags.print = true,
-                'x' => flags.exported = Some(on),
-                _ => {
-                    eprintln!("tonari: {command}: {option}: unsupported option");
-                    return crate::execute::Flow::Continue(2);
-                }
-            }
-        }
-        operands = rest;
-    }
     if flags.functions {
         return declare_functions(session, command, operands, &flags, readonly);
     }
     if operands.is_empty() || flags.print && !attribute {
-        if operands.is_empty()
-            && !local
-            && !flags.print
-            && flags.exported.is_none()
-            && flags.readonly.is_none()
-            && !flags.array
-            && !flags.associative
-            && flags.nameref.is_none()
-            && flags.integer.is_none()
-            && flags.capitalize.is_none()
-            && flags.lower.is_none()
-            && flags.upper.is_none()
-        {
-            return crate::execute::Flow::Continue(session.set(&mut Vec::new()));
-        }
-        let names;
-        let names = if operands.is_empty() {
-            names = if local {
-                session
-                    .locals
-                    .last()
-                    .unwrap()
-                    .variables
-                    .keys()
-                    .cloned()
-                    .collect()
-            } else {
-                session.variable_names("")
-            };
-            &names[..]
-        } else {
-            operands
-        };
-        let mut out = io::stdout().lock();
-        let mut status = 0;
-        if local
-            && operands.is_empty()
-            && session
-                .locals
-                .last()
-                .is_some_and(|s| s.set_options.is_some())
-            && writeln!(out, "local -").is_err()
-        {
-            return crate::Flow::Continue(1);
-        }
-        for name in names {
-            if name == "-"
-                && session
-                    .locals
-                    .iter()
-                    .rev()
-                    .filter(|scope| !scope.temporary)
-                    .take(if local { 1 } else { usize::MAX })
-                    .any(|scope| scope.set_options.is_some())
-            {
-                if writeln!(out, "{}", if local { "local -" } else { "declare -- -" }).is_err() {
-                    return crate::Flow::Continue(1);
-                }
-                continue;
-            }
-            let listed = !local || session.locals.last().unwrap().variables.contains_key(name);
-            let variable = listed
-                .then(|| session.declared_variable(name, flags.global))
-                .flatten();
-            if let Some(var) = variable.filter(|v| v.declared) {
-                if operands.is_empty()
-                    && (flags.readonly == Some(true) && !var.readonly
-                        || flags.array && (var.elements.is_none() || var.associative().is_some())
-                        || flags.associative && var.associative().is_none()
-                        || flags.capitalize == Some(true)
-                            && var.letter_case != Some(LetterCase::Capitalize)
-                        || flags.lower == Some(true) && var.letter_case != Some(LetterCase::Lower)
-                        || flags.upper == Some(true) && var.letter_case != Some(LetterCase::Upper)
-                        || flags.integer == Some(true) && !var.integer
-                        || flags.nameref == Some(true) && !var.nameref)
-                {
-                    continue;
-                }
-                if (flags.exported.is_none() || !operands.is_empty() || var.exported)
-                    && print_attribute(
-                        &mut out,
-                        name,
-                        &var,
-                        (attribute && session.posix).then_some(command),
-                    )
-                    .is_err()
-                {
-                    return crate::execute::Flow::Continue(1);
-                }
-            } else if !operands.is_empty() {
-                eprintln!("tonari: {command}: {name}: not found");
-                status = 1;
-            }
-        }
-        return crate::execute::Flow::Continue(out.flush().map_or(1, |()| status));
+        return print_variables(session, command, operands, &flags);
     }
     let mut status = 0;
     let first_operand = total_args - operands.len() + 1;
@@ -296,22 +337,7 @@ pub(super) fn run(
             continue;
         }
         let array = arrays.next_if(|a| a.operand == index + first_operand);
-        let separator = arg.find(['[', '=']).and_then(|i| {
-            if arg.as_bytes()[i] == b'=' {
-                return Some(i);
-            }
-            let end = crate::parser::index_end(&arg[i..]).ok()? + i;
-            arg[end..].find('=').map(|at| at + end)
-        });
-        let (name, value) = separator.map_or((arg.as_str(), None), |at| {
-            (&arg[..at], Some(&arg[at + 1..]))
-        });
-        let append = value.is_some() && name.ends_with('+');
-        let name = if append {
-            &name[..name.len() - 1]
-        } else {
-            name
-        };
+        let (name, value, append) = declaration_operand(arg);
         let base = super::array::subscript(name).map_or(name, |(base, _)| base);
         if flags.global
             && let Some(previous) = bindings.variables.remove(base)

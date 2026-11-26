@@ -16,6 +16,7 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "large-eval-alias-state": "mark(){ printf f; }; alias mark='printf a'; code='if true; then\n#" + "x" * 5100 + "\nmark\nfi'; run(){ eval \"$code\"; }; shopt -u expand_aliases; run; run; run; shopt -s expand_aliases; run; echo",
     "conditional-operators": 'v=abc; [[ -n $v && $v = a* && 4 -gt 3 ]] && echo pass; [[ -z $v || $v != abc ]]; echo $?',
     "relative-path-lookup": '/bin/ln -sf /bin/echo tonari-path-probe; PATH=missing::/bin; command -v tonari-path-probe; tonari-path-probe found; PATH=/bin; command -v tonari-path-probe; echo $?',
     'registry-roundtrip': 'complete -A binding -A enabled -o nospace probe; complete -p probe',

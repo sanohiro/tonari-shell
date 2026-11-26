@@ -88,7 +88,10 @@ pub(super) fn parse(
     eof: bool,
     line: usize,
 ) -> Result<Program, parser::Error> {
-    if source.len() > 4096 {
+    // Keep two entries and promote only repeated source. A multiline function
+    // or generated conditional can exceed a page without being a large script.
+    const MAX_CACHED_SOURCE: usize = 16 * 1024;
+    if source.len() > MAX_CACHED_SOURCE {
         return parser::session_source_at(source, eof, session, line).map(Program::Fresh);
     }
     if let Some(statement) = parser::literal_assignment(source, line) {

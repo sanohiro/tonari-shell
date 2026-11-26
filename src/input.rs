@@ -377,6 +377,11 @@ fn assign_buffered_scalar(session: &mut Session, command: &str, scratch: &mut St
     session.assign_existing_literal(target, scratch)
 }
 
+// The lexer can finish a plain single-quoted string only at another apostrophe.
+fn continues_single_quote(previous: Option<char>, line: &[u8]) -> bool {
+    previous == Some('\'') && memchr::memchr2(b'\'', 0, line).is_none()
+}
+
 enum Parsed<P> {
     Program(P),
     More(Option<parser::HereDocHint>),
@@ -454,6 +459,15 @@ fn run(
                 }
                 _ => {}
             }
+        }
+        if n != 0
+            && continues_single_quote(history_quote, &input[line_start..])
+            && !session.reads_aliases()
+        {
+            if std::str::from_utf8(&input[line_start..]).is_err() {
+                return error("expected UTF-8 command text", 2);
+            }
+            continue;
         }
         if let Some(hint) = &mut here_doc {
             let Ok(line) = std::str::from_utf8(&input[line_start..]) else {
@@ -684,6 +698,13 @@ pub fn text(
             }
         } else if let Some(edited) = &mut edited {
             edited.push_str(line);
+        }
+        if !last
+            && !expand_history
+            && continues_single_quote(history_quote, line.as_bytes())
+            && !session.reads_aliases()
+        {
+            continue;
         }
         if !last && here_doc.as_mut().is_some_and(|hint| !hint.may_finish(line)) {
             continue;
