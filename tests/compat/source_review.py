@@ -520,6 +520,7 @@ def main():
         # The reference Bash releases differ from those two guarantees.
         for code, output in [
             ('! false & launched=$?; wait "$!"; echo "$launched:$?"', b"0:0\n"),
+            ('IFS=:; set -- "a b" c; unset v; printf "<%s>" ${v-$@}', b"<a b><c>"),
             ('x=$(cat <<EOF\none\nEOF) middle\ntwo\nEOF\n)\nprintf "%s\\n" "$x"', b"one\nEOF) middle\ntwo\n"),
         ]:
             assert run(shells[1], code)[0] == (0, output, False), code
