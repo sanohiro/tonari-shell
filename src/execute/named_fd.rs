@@ -80,7 +80,14 @@ impl Scope {
             if apply_protected(actions, libc::PIPE_BUF).is_err() {
                 return Ok(false);
             }
-            self.changed.push(r.fd);
+            match action {
+                Action::CloseMoved(fd) => {
+                    session.substitutions.replaced(fd);
+                    super::coprocess::replaced(session, fd);
+                }
+                Action::Dup(from, to) if from == to => {}
+                _ => self.changed.push(r.fd),
+            }
             session.stdin_redirected |= r.fd == 0;
         }
         Ok(true)

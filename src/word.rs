@@ -327,6 +327,11 @@ impl Word {
                     word,
                     quoted,
                 } => {
+                    let element = if *op == Alternative::Assign {
+                        env.assignment_element(name)?
+                    } else {
+                        None
+                    };
                     let elements = array_elements_name(name);
                     // A successful + alternative never reads the elements.
                     // Multiple quoted @ fields stay distinct even if all are empty.
@@ -366,7 +371,11 @@ impl Word {
                             };
                             (set, part)
                         } else {
-                            let value = modifier::value(name, env)?;
+                            let value = if let Some(element) = &element {
+                                element.value(env.session)
+                            } else {
+                                modifier::value(name, env)?
+                            };
                             let set = value
                                 .as_ref()
                                 .is_some_and(|s| !*check_empty || !s.is_empty());
@@ -390,7 +399,7 @@ impl Word {
                                     if value.is_empty() { default } else { &value },
                                 ));
                             }
-                            env.assign_parameter(name, &value)?;
+                            let value = env.assign_parameter(name, element, value)?;
                             *part = literal(value, *quoted);
                             continue;
                         }

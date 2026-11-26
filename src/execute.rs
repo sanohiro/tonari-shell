@@ -1451,6 +1451,14 @@ fn run_builtin(
         }
     }
     let redirection = apply_protected(actions, here_pipe_limit(Some(builtin), cmd));
+    if !session.coprocesses.is_empty() || session.substitutions.scope() != 0 {
+        for a in &actions[..redirection.err().unwrap_or(actions.len())] {
+            if let Action::CloseMoved(fd) = a {
+                session.substitutions.replaced(*fd);
+                coprocess::replaced(session, *fd);
+            }
+        }
+    }
     let applied = redirection.is_ok();
     let old_input = session.stdin_redirected;
     if applied && actions.iter().any(|a| a.destination() == 0) {
@@ -1466,8 +1474,10 @@ fn run_builtin(
     }
     if applied && matches!(builtin, Builtin::Exec) && matches!(flow, Flow::Continue(0)) {
         for r in &cmd.redirects {
-            session.stdin_replaced |=
-                r.fd == 0 && !matches!(r.target, Target::Duplicate if r.word == "0");
+            if r.target == Target::Duplicate && r.word.parse::<RawFd>() == Ok(r.fd) {
+                continue;
+            }
+            session.stdin_replaced |= r.fd == 0;
             session.substitutions.replaced(r.fd);
             coprocess::replaced(session, r.fd);
         }
