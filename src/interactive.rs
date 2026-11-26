@@ -132,13 +132,14 @@ pub(super) fn interactive_loop(
                 }
             }
         }
-        let prompt = prompt::render(session, !source.is_empty(), status);
+        let line_editing = editing && (session.emacs || session.vi);
+        let prompt = prompt::render(session, !source.is_empty(), status, line_editing);
         let timeout = session
             .get("TMOUT")
             .and_then(|s| s.parse::<u64>().ok())
             .filter(|&n| n > 0);
         let deadline = input_deadline(timeout.map(std::time::Duration::from_secs));
-        let result = if editing && (session.emacs || session.vi) {
+        let result = if line_editing {
             match editor::line(
                 &prompt,
                 &mut history,

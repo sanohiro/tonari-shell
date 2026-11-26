@@ -418,7 +418,7 @@ impl Spec {
             + cuts.len() * locale.separator.len()
             + point.map_or(0, |_| locale.decimal.len().saturating_sub(1));
         let zeros = if integer {
-            (precision.unwrap_or(0) as usize).saturating_sub(len - sign)
+            (precision.unwrap_or(0) as usize).saturating_sub(raw.len() - sign)
         } else {
             0
         };
@@ -479,7 +479,7 @@ impl Spec {
         // Only a validated numeric conversion reaches libc. Build its exact
         // argument type explicitly; user-provided C length modifiers are discarded.
         let mut fmt = vec![b'%'];
-        fmt.extend_from_slice(&self.flags);
+        fmt.extend(self.flags.iter().copied().filter(|&f| f != b'\''));
         if self.width != 0 {
             fmt.extend_from_slice(self.width.to_string().as_bytes());
         }
@@ -659,6 +659,7 @@ fn render(
                             }
                             if variables.read().readonly(name) {
                                 eprintln!("tonari: printf: {name}: readonly variable");
+                                args.status = 1;
                             } else {
                                 variables.write().assign(name, &out.len().to_string());
                             }

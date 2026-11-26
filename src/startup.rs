@@ -33,7 +33,7 @@ fn sourced(
     }
     let old = (!args.is_empty())
         .then(|| std::mem::replace(&mut session.positional, Vec::from(args).into_iter()));
-    session.source_set_args = false;
+    let outer_set_args = std::mem::take(&mut session.source_set_args);
     session.call_lines.push(session.line());
     let callsite = session.current_command.take();
     let caller_signal_line = session.signal_line;
@@ -55,9 +55,7 @@ fn sourced(
     {
         session.positional = old;
     }
-    if !args.is_empty() {
-        session.source_set_args = false;
-    }
+    session.source_set_args = outer_set_args || args.is_empty() && session.source_set_args;
     match result {
         Flow::Return(code) => Flow::Continue(code),
         other => other,

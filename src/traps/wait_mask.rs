@@ -130,7 +130,9 @@ impl WaitMask {
 
     pub fn suspend(&self) {
         unsafe {
-            libc::sigsuspend(&self.previous.0);
+            let mut mask = self.previous.0;
+            libc::sigdelset(&mut mask, libc::SIGCHLD);
+            libc::sigsuspend(&mask);
         }
     }
 }

@@ -1,5 +1,5 @@
 use super::Session;
-use super::{Component, DirectoryError, MetadataExt, OsStrExt, PathBuf, Rc, Variable};
+use super::{Component, DirectoryError, MetadataExt, OsStrExt, PathBuf, Rc};
 use std::io::{self, Write};
 use std::path::Path;
 
@@ -590,16 +590,13 @@ impl Session {
         self.logical_cwd = std::cell::OnceCell::from(cwd.clone());
         let old_readonly = self.readonly("OLDPWD");
         if !old_readonly {
-            let old_export = self.is_exported("OLDPWD");
-            self.variables.insert(
-                "OLDPWD".into(),
-                Variable {
-                    declared: true,
-                    value: old_pwd,
-                    exported: old_export,
-                    ..Variable::default()
-                },
-            );
+            if let Some(old) = old_pwd {
+                self.assign("OLDPWD", &old);
+            } else {
+                let old = self.variables.entry("OLDPWD".into()).or_default();
+                old.declared = true;
+                old.value = None;
+            }
         }
         let pwd_readonly = self.readonly("PWD");
         self.assign(

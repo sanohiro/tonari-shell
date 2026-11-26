@@ -43,6 +43,11 @@ fn status(pid: libc::pid_t, options: i32) -> Option<u8> {
 }
 
 impl Substitutions {
+    pub(crate) fn after_fork(&mut self) {
+        // Inherited endpoints can still be used. Only this shell's children can be waited on.
+        self.pending.clear();
+        self.finished.clear();
+    }
     pub(super) fn adopt(&mut self, mut other: Self, from: usize) {
         for end in other.active.drain(from..) {
             self.pending.push(end.pid);
@@ -134,7 +139,7 @@ pub(crate) fn launch(
         return Err("cannot fork process substitution");
     }
     if pid == 0 {
-        session.reset_forked_traps();
+        session.after_fork();
         drop(keep);
         super::reset_child_signals();
         if super::duplicate(child.as_raw_fd(), target).is_err() {
@@ -145,8 +150,6 @@ pub(crate) fn launch(
         crate::execute::coprocess::after_fork(session);
         session.jobs.forked(false);
         session.interactive = false;
-        session.substitutions.pending.clear();
-        session.substitutions.finished.clear();
         session.bind(assignments);
         let status = crate::execute_program(session, body, prior, true).child_status();
         crate::subshell::exit_child(session, status)

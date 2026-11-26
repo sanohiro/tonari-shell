@@ -481,6 +481,7 @@ fn with_source_lines<T>(source: &str, lex: impl FnOnce() -> T) -> T {
 }
 
 struct Reader {
+    depth: usize,
     first_line: usize,
     source: Rc<str>,
     alias_source: Option<Box<aliases::Expanded>>,
@@ -509,6 +510,7 @@ impl Reader {
     fn new(tokens: Vec<Token>, spans: Vec<(usize, usize)>, source: &str) -> Self {
         Self {
             first_line: source_line(source),
+            depth: 0,
             spans,
             alias_source: None,
             newlines: memchr::memchr_iter(b'\n', source.as_bytes()).collect(),
@@ -518,6 +520,18 @@ impl Reader {
             alias_frames: Vec::new(),
             final_input: false,
         }
+    }
+
+    fn nested<T>(&mut self, read: impl FnOnce(&mut Self) -> Result<T, Error>) -> Result<T, Error> {
+        if self.depth >= 128
+            || self.depth >= 8 && self.depth.is_multiple_of(8) && crate::stack_budget_exceeded()
+        {
+            return Err(Error::Invalid("shell syntax nesting limit exceeded"));
+        }
+        self.depth += 1;
+        let result = read(self);
+        self.depth -= 1;
+        result
     }
 
     fn position(&self) -> usize {
@@ -595,7 +609,7 @@ impl Reader {
     }
 
     fn list(&mut self, stops: &[&str]) -> Result<Vec<Statement>, Error> {
-        self.read_list(stops, false).map_err(|error| {
+        self.nested(|r| r.read_list(stops, false)).map_err(|error| {
             // Never resume in the body of an invalid loop, conditional or function.
             if !stops.is_empty() && matches!(error, Error::ArrayToken) {
                 Error::Invalid(error.message())
@@ -853,7 +867,7 @@ impl Reader {
                 "expected a coprocess command",
             )));
         }
-        let command = if let Some(compound) = self.compound()? {
+        let command = if let Some(compound) = self.nested(Self::compound)? {
             if self.has_redirect() {
                 Command::Pipeline(vec![self.compound_stage(compound)?])
             } else {
@@ -1102,7 +1116,7 @@ impl Reader {
         }
         self.alias_newlines(&["{", "if", "while", "until", "for", "case"])?;
         let start = self.position();
-        let compound = self.compound()?.ok_or_else(|| {
+        let compound = self.nested(Self::compound)?.ok_or_else(|| {
             if self.peek().is_none() {
                 Error::Incomplete(Incomplete::Message("expected a function body"))
             } else {

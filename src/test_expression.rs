@@ -134,6 +134,11 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                         env.session.positional.as_slice(),
                     );
                     trace(env.session, status, &[&left, op, &right]);
+                    let locale = right
+                        .contains(['[', '?'])
+                        .then(|| pattern::session_locale(env.session))
+                        .flatten();
+                    let _guard = locale.as_ref().and_then(|l| l.enter());
                     let matched = if env.session.shopt.nocasematch {
                         pattern::extended::insensitive_match(
                             &left,
@@ -196,18 +201,24 @@ fn regex_match(
     expression: std::borrow::Cow<'_, str>,
 ) -> Result<bool, Flow> {
     trace(session, status, &[left, "=~", &expression]);
-    let result = pattern::localized(|| {
+    let locale = pattern::session_locale(session);
+    let _guard = locale.as_ref().and_then(|l| l.enter());
+    let result = (|| {
         let ignore_case = session.shopt.nocasematch;
         let recent = &mut session.regex[usize::from(ignore_case)];
-        if let Some(compiled) = recent.iter().flatten().find(|r| r.pattern == expression) {
+        if let Some(compiled) = recent.iter().flatten().find(|r| {
+            r.pattern == expression
+                && r.locale.as_ref().map(std::rc::Rc::as_ptr)
+                    == locale.as_ref().map(std::rc::Rc::as_ptr)
+        }) {
             return compiled.search(left);
         }
-        let compiled = Compiled::new(expression.into_owned(), ignore_case)?;
+        let compiled = Compiled::new(expression.into_owned(), ignore_case, locale)?;
         let result = compiled.search(left);
         recent.rotate_right(1);
         recent[0] = Some(std::rc::Rc::new(compiled));
         result
-    })
+    })()
     .map_err(|()| Flow::Continue(2))?;
     let matched = result.is_some();
     session.replace_array("BASH_REMATCH", result.unwrap_or_default());
@@ -435,13 +446,18 @@ fn portable_list(body: &str) -> Option<String> {
 }
 
 pub struct Compiled {
+    locale: Option<std::rc::Rc<pattern::PatternLocale>>,
     pattern: String,
     regex: Option<Box<libc::regex_t>>,
     captures: usize,
 }
 
 impl Compiled {
-    fn new(pattern: String, ignore_case: bool) -> Result<Self, ()> {
+    fn new(
+        pattern: String,
+        ignore_case: bool,
+        locale: Option<std::rc::Rc<pattern::PatternLocale>>,
+    ) -> Result<Self, ()> {
         let encoded = CString::new(pattern.as_str()).map_err(|_| ())?;
         let mut regex = Box::<libc::regex_t>::new_uninit();
         let flags = if ignore_case {
@@ -459,6 +475,7 @@ impl Compiled {
         {
             return Ok(Self {
                 pattern,
+                locale,
                 regex: None,
                 captures: 0,
             });
@@ -466,6 +483,7 @@ impl Compiled {
         let captures = capture_count(&pattern) + 1;
         Ok(Self {
             pattern,
+            locale,
             regex: Some(unsafe { regex.assume_init() }),
             captures,
         })
@@ -537,9 +555,9 @@ fn capture_count(expression: &str) -> usize {
                     }
                     if c == b'['
                         && let Some(&marker @ (b':' | b'=' | b'.')) = after.first()
-                        && let Some(end) = after.windows(2).position(|s| s == [marker, b']'])
+                        && let Some(end) = after[1..].windows(2).position(|s| s == [marker, b']'])
                     {
-                        bytes = &after[end + 2..];
+                        bytes = &after[end + 3..];
                     }
                 }
             }

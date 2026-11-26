@@ -319,6 +319,9 @@ impl Session {
         if name == "noexec" && self.interactive {
             self.noexec = false;
         }
+        if name == "monitor" && enabled {
+            self.jobs.init(self.interactive);
+        }
         if name == "history" && enabled && !self.interactive && self.history_lines().is_empty() {
             crate::history::load_script_history(self);
         }
@@ -766,6 +769,10 @@ impl Session {
                             eprintln!("tonari: set: {name}: unsupported option");
                             return 2;
                         }
+                    }
+                    'm' => {
+                        self.jobs.monitor = enable;
+                        self.option_changed("monitor", enable);
                     }
                     short if set_short_option(self, short, enable) => {}
                     _ => {

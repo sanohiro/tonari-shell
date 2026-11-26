@@ -321,6 +321,7 @@ fn decode(s: &str) -> Result<Vec<u8>, String> {
         if c == b'\\' {
             c = input.next().ok_or("incomplete key escape")?;
             let mut control = false;
+            let mut escaped = true;
             while matches!(c, b'M' | b'm' | b'C' | b'c') && input.next_if_eq(&b'-').is_some() {
                 if c.eq_ignore_ascii_case(&b'M') {
                     out.push(27);
@@ -331,11 +332,14 @@ fn decode(s: &str) -> Result<Vec<u8>, String> {
                 if c == b'\\' {
                     c = input.next().ok_or("incomplete key escape")?;
                 } else {
+                    escaped = false;
                     break;
                 }
             }
             c = if control {
                 if c == b'?' { 127 } else { c & 31 }
+            } else if !escaped {
+                c
             } else {
                 match c {
                     b'e' | b'E' => 27,
@@ -382,6 +386,9 @@ fn encode(seq: &[u8], meta: bool) -> String {
             27 => s.push_str("\\e"),
             0..=31 | 127 => {
                 s.push_str("\\C-");
+                if c == 28 {
+                    s.push('\\');
+                }
                 s.push(if c == 127 {
                     '?'
                 } else if c == 0 {
@@ -772,4 +779,15 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
         }
     }
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn printed_meta_bindings_round_trip() {
+        for c in 0..=127 {
+            assert_eq!(decode(&encode(&[27, c], true)).unwrap(), [27, c]);
+        }
+    }
 }

@@ -385,7 +385,9 @@ pub(super) fn eval_builtin(
         Builtin::AutoCd => {
             eprintln!("cd -- {}", cmd.words.join(" "));
             cmd.words.insert(0, "--".into());
-            Flow::Continue(session.directory_builtin("cd", &cmd.words))
+            let status = session.directory_builtin("cd", &cmd.words);
+            cmd.words.remove(0);
+            Flow::Continue(status)
         }
         Builtin::Directory => Flow::Continue(session.directory_builtin(&cmd.words[0], args)),
         Builtin::Source => crate::source_file(
@@ -738,7 +740,9 @@ pub(super) fn run_builtin(
         let result = std::fs::File::from(fd).write_all(&data);
         return Ok(Flow::Continue(if result.is_err() { 1 } else { status }));
     }
-    if let (Builtin::Status(code), [Action::Open(dest, path, flags)]) = (builtin, actions) {
+    if cmd.assignments.is_empty()
+        && let (Builtin::Status(code), [Action::Open(dest, path, flags)]) = (builtin, actions)
+    {
         return silent_redirect(code, *dest, path, *flags, cmd, session);
     }
     let mut saved = [const { SavedFd::Unchanged }; 3];

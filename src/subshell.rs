@@ -201,7 +201,7 @@ pub fn capture_substitution(
         return Err("cannot fork command substitution");
     }
     if pid == 0 {
-        session.reset_forked_traps();
+        session.after_fork();
         drop(read);
         if write.as_raw_fd() == 1 {
             let fd = write.into_raw_fd();
@@ -764,7 +764,7 @@ fn launch_list(
         return Flow::Continue(1);
     }
     if pid == 0 {
-        session.reset_forked_traps();
+        session.after_fork();
         launch.child(&mut session.traps);
         if background && launch.group.is_none() && (session.posix || !session.stdin_redirected) {
             let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };

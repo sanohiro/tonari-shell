@@ -279,13 +279,13 @@ fn start_raw(
         return Err(io::Error::last_os_error());
     }
     if pid == 0 {
-        session.reset_forked_traps();
+        session.after_fork();
         launch.pipeline_child(&mut session.traps);
         enter_stage(session, raw.compound.as_deref(), launch.background);
+        coprocess::after_fork(session);
         if let Some(command) = raw.compound.as_deref_mut()
             && let crate::parser::Command::Subshell(body) = command
         {
-            coprocess::after_fork(session);
             *command = crate::parser::Command::Group(std::mem::take(body));
         }
         session.stdin_redirected |= input.is_some();
@@ -525,7 +525,7 @@ fn fork_stage(
         // External argv and environment are prepared before fork. A shell builtin
         // runs in a child copy of the single-threaded interpreter and may reenter it.
         // Restore signals caught by the interactive shell before blocking on a file.
-        session.reset_forked_traps();
+        session.after_fork();
         launch.pipeline_child(&mut session.traps);
         enter_stage(session, cmd.compound.as_deref(), launch.background);
         if cmd.missing_hook && !launch.background {
@@ -694,6 +694,7 @@ pub(crate) fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(
     let fd = session
         .scalar_setting("BASH_XTRACEFD")
         .and_then(|v| v.parse().ok())
+        .filter(|&fd| !fd::is_private(fd))
         .unwrap_or(2);
     let mut data = line.as_bytes();
     while !data.is_empty() {
@@ -1069,6 +1070,7 @@ pub fn run_pipeline(
             && let Some(flow) = crate::traps::debug(session, last_status)
         {
             drop(input);
+            session.jobs.restore();
             for stage in stages {
                 if let Some(pid) = stage.pid() {
                     let _ = wait(pid);

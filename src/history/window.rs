@@ -127,8 +127,8 @@ impl Window {
                             .chunks(PAGE)
                             .map(|p| !p.is_ascii()),
                     );
+                    self.stamp = Some(new);
                 }
-                self.stamp = Some(new);
             }
         }
     }

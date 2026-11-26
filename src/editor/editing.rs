@@ -110,6 +110,9 @@ impl EditorState {
                 next(text, cursor)
             };
             let right = previous(text, end);
+            if right == 0 {
+                return cursor;
+            }
             (previous(text, right), right, right, end)
         };
         self.scratch.clear();

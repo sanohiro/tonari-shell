@@ -409,10 +409,15 @@ impl Traps {
     pub fn after_fork(&mut self, errtrace: bool, functrace: bool) {
         self.handling_exit = false;
         self.current_action = None;
-        if self.entries.contains_key(&libc::SIGCHLD) {
-            WATCH_CHILDREN.store(false, Relaxed);
-            CHILD_EVENTS.store(0, Relaxed);
-        }
+        // A still-running inherited handler must not re-enter itself.
+        self.handling_debug &= functrace;
+        self.handling_return &= functrace;
+        self.handling_error &= errtrace;
+        self.running = 0;
+        PENDING.store(0, Relaxed);
+        TERMINATING.store(0, Relaxed);
+        WATCH_CHILDREN.store(false, Relaxed);
+        CHILD_EVENTS.store(0, Relaxed);
         if self.interactive_handlers {
             self.interactive_handlers = false;
             reset_caught_signals(&[libc::SIGINT, libc::SIGQUIT, libc::SIGTERM, libc::SIGTSTP]);
@@ -424,13 +429,11 @@ impl Traps {
                     libc::signal(libc::SIGHUP, libc::SIG_DFL);
                 }
             }
-            TERMINATING.store(0, Relaxed);
         }
         if self.entries.is_empty() {
             return;
         }
         let _ = self.watch_exit(false);
-        TERMINATING.store(0, Relaxed);
         // Bash exposes the parent list to trap -p until the child changes a trap.
         // Only ignored dispositions and inherited shell handlers remain active.
         let old = std::mem::take(&mut self.entries);
@@ -446,8 +449,6 @@ impl Traps {
         if self.inherited_listing.is_none() {
             self.inherited_listing = Some(std::rc::Rc::new(old));
         }
-        self.running = 0;
-        PENDING.store(0, Relaxed);
     }
 
     fn keep_after_fork(&self, sig: i32, e: &Entry, errtrace: bool, functrace: bool) -> bool {
@@ -796,7 +797,7 @@ pub fn finish(session: &mut Session, code: u8) -> u8 {
     {
         session.jobs.hangup();
     }
-    if !session.traps.active() {
+    if !session.traps.active() && TERMINATING.load(Relaxed) == 0 {
         return code;
     }
     let mut code = match dispatch(session, code) {

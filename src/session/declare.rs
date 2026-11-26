@@ -202,17 +202,18 @@ fn print_variables(
     {
         return crate::execute::Flow::Continue(session.set(&mut Vec::new()));
     }
+    let local_scope = local.then(|| {
+        session
+            .locals
+            .iter()
+            .rev()
+            .find(|scope| !scope.temporary)
+            .expect("function scope")
+    });
     let names;
     let names = if operands.is_empty() {
-        names = if local {
-            session
-                .locals
-                .last()
-                .unwrap()
-                .variables
-                .keys()
-                .cloned()
-                .collect()
+        names = if let Some(scope) = local_scope {
+            scope.variables.keys().cloned().collect()
         } else {
             session.variable_names("")
         };
@@ -224,10 +225,7 @@ fn print_variables(
     let mut status = 0;
     if local
         && operands.is_empty()
-        && session
-            .locals
-            .last()
-            .is_some_and(|s| s.set_options.is_some())
+        && local_scope.is_some_and(|s| s.set_options.is_some())
         && writeln!(out, "local -").is_err()
     {
         return crate::Flow::Continue(1);
@@ -247,7 +245,7 @@ fn print_variables(
             }
             continue;
         }
-        let listed = !local || session.locals.last().unwrap().variables.contains_key(name);
+        let listed = local_scope.is_none_or(|scope| scope.variables.contains_key(name));
         let variable = listed
             .then(|| session.declared_variable(name, flags.global))
             .flatten();
@@ -440,6 +438,8 @@ pub(super) fn run(
             && (fresh_local && !outer_local
                 || value.is_some()
                 || array.is_some()
+                || flags.array && (var.elements.is_none() || var.associative().is_some())
+                || flags.associative && var.associative().is_none()
                 || flags.readonly == Some(false)
                 || flags.nameref.is_some())
         {
@@ -452,18 +452,25 @@ pub(super) fn run(
         }
         let new_global = !fresh_local && !var.declared && !session.variables.contains_key(name);
         var.declared = true;
-        if fresh_local {
-            let scope = &mut session.locals[scope_index.unwrap()];
-            if name == "OPTIND" {
-                scope.opt_offset = Some(session.opt_offset);
-                session.opt_offset = 0;
-            }
+        let mut previous_local = fresh_local.then(|| {
             let previous = bindings
                 .variables
                 .get(name)
                 .cloned()
                 .unwrap_or_else(|| session.variables.get(name).cloned());
-            scope.variables.insert(name.into(), previous);
+            (scope_index.unwrap(), previous, session.opt_offset)
+        });
+        let mut record_scope = |s: &mut Session| {
+            if let Some((i, previous, offset)) = previous_local.take() {
+                let scope = &mut s.locals[i];
+                if name == "OPTIND" {
+                    scope.opt_offset = Some(offset);
+                    s.opt_offset = 0;
+                }
+                scope.variables.insert(name.into(), previous);
+            }
+        };
+        if fresh_local {
             var.dynamic = false;
             var.nameref = false;
             if !var.temporary && !flags.inherit && !session.shopt.localvar_inherit {
@@ -584,6 +591,7 @@ pub(super) fn run(
             }) {
                 Ok(()) => {}
                 Err(e) => {
+                    record_scope(session);
                     session.store_variable(name, var, flags.global);
                     e.report(&format!("{command}: {name}: "));
                     return e.flow(session);
@@ -679,6 +687,7 @@ pub(super) fn run(
         if let Some(d) = array
             && let Err(e) = session.array_items(name, flags.global, &mut var, d.append, &d.items)
         {
+            record_scope(session);
             session.store_variable(name, var, flags.global);
             eprintln!("tonari: {command}: {name}: {e}");
             return crate::Flow::Discard(1);
@@ -711,6 +720,7 @@ pub(super) fn run(
         {
             bindings.variables.remove(name);
         }
+        record_scope(session);
         session.store_variable(name, var, flags.global);
         if let Some(source) = remove_reference
             && let Some(reference) = session.variables.get_mut(source)

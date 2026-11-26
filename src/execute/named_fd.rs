@@ -42,7 +42,9 @@ impl Scope {
                     }
                     // Open first so /dev/fd and duplicate sources see the original table.
                     let source;
-                    let fd = match action(&r) {
+                    let action = action(&r);
+                    protect_fds(std::slice::from_ref(&action))?;
+                    let fd = match action {
                         Action::Open(_, path, flags) => {
                             let Some(opened) = open_redirect(&path, flags) else {
                                 return Ok(false);
@@ -213,7 +215,10 @@ pub(super) fn run(
         return Err(io::Error::last_os_error());
     }
     if pid == 0 {
+        session.after_fork();
         launch.pipeline_child(&mut session.traps);
+        session.jobs.forked(false);
+        coprocess::after_fork(session);
         let code = match command(cmd, session, status) {
             Ok(Flow::Continue(s) | Flow::Discard(s) | Flow::Exit(s) | Flow::Return(s)) => s,
             Ok(_) => 1,
@@ -222,7 +227,7 @@ pub(super) fn run(
                 1
             }
         };
-        unsafe { libc::_exit(i32::from(code)) }
+        crate::subshell::exit_child(session, code)
     }
     launch.parent(pid);
     if launch.group.is_none() {

@@ -318,21 +318,25 @@ pub(crate) struct BracketPattern {
     edges: Vec<u8>,
     prefix_len: usize,
     pub(super) needs_locale: bool,
-    utf8: bool,
+    pub(super) utf8: bool,
 }
 
 impl BracketPattern {
-    pub(super) fn new(mut source: &[u8]) -> Option<Self> {
-        if source.contains(&0) {
-            return None;
-        }
-        let utf8 = super::localized(|| {
+    pub(super) fn utf8_locale() -> bool {
+        super::localized(|| {
             let codeset = unsafe { libc::nl_langinfo(libc::CODESET) };
             !codeset.is_null()
                 && unsafe { CStr::from_ptr(codeset) }
                     .to_bytes()
                     .eq_ignore_ascii_case(b"UTF-8")
-        });
+        })
+    }
+
+    pub(super) fn new(mut source: &[u8]) -> Option<Self> {
+        if source.contains(&0) {
+            return None;
+        }
+        let utf8 = Self::utf8_locale();
         let mut tokens = Vec::new();
         while !source.is_empty() {
             let (c, rest) = unit(source, utf8);

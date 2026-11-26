@@ -1666,7 +1666,13 @@ fn scan(
             }
         }
         let begins_array = assignment.as_ref().is_some_and(|name| {
-            chars.as_str().starts_with('(') && start.len() - chars.as_str().len() == name.len() + 1
+            if !chars.as_str().starts_with('(') {
+                return false;
+            }
+            let raw = &start[..start.len() - chars.as_str().len()];
+            raw.len() == name.len() + 1
+                || raw.contains("\\\n")
+                    && raw.split("\\\n").map(str::len).sum::<usize>() == name.len() + 1
         });
         tokens.push(Token::Word(LexWord {
             word,

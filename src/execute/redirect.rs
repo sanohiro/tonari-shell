@@ -361,6 +361,9 @@ impl SavedFd {
     }
 
     pub(super) fn restore(self, fd: RawFd) -> io::Result<()> {
+        if fd >= fd::FIRST_NONSTANDARD && !matches!(self, Self::Unchanged) {
+            fd::protect(|current| current == fd)?;
+        }
         match self {
             Self::Unchanged => {}
             Self::Closed => {
@@ -369,5 +372,19 @@ impl SavedFd {
             Self::Open(file) => duplicate(file.as_raw_fd(), fd)?,
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restore_relocates_a_tracked_file_before_reusing_its_number() {
+        let tracked = fd::PrivateFile::new(std::fs::File::open("/dev/null").unwrap()).unwrap();
+        let original = tracked.as_raw_fd();
+        SavedFd::Closed.restore(original).unwrap();
+        assert_ne!(tracked.as_raw_fd(), original);
+        assert!(unsafe { libc::fcntl(tracked.as_raw_fd(), libc::F_GETFD) } >= 0);
     }
 }

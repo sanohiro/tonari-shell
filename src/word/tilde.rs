@@ -17,14 +17,20 @@ pub(super) fn tilde(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String 
             } else {
                 (false, digits.strip_prefix('+').unwrap_or(digits))
             };
-            digits.parse::<u32>().ok().and_then(|n| {
-                let i = if reverse {
-                    -1 - i64::from(n)
-                } else {
-                    i64::from(n)
-                };
-                lookup(&format!("DIRSTACK[{i}]"))
-            })
+            digits
+                .as_bytes()
+                .first()
+                .is_some_and(u8::is_ascii_digit)
+                .then(|| digits.parse::<u32>().ok())
+                .flatten()
+                .and_then(|n| {
+                    let i = if reverse {
+                        -1 - i64::from(n)
+                    } else {
+                        i64::from(n)
+                    };
+                    lookup(&format!("DIRSTACK[{i}]"))
+                })
         }
         _ => account_field(
             Some(prefix.strip_prefix('~').unwrap_or(prefix)),

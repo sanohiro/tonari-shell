@@ -87,7 +87,8 @@ pub(super) fn protect(reserved: impl Fn(RawFd) -> bool) -> io::Result<()> {
         for file in files.iter().filter_map(Weak::upgrade) {
             let current = file.borrow().as_ref().unwrap().as_raw_fd();
             if reserved(current) {
-                let copy = duplicate_except(current, FIRST_NONSTANDARD, &reserved)?;
+                let copy = duplicate_except(current, SHELL_FD_MIN, &reserved)
+                    .or_else(|_| duplicate_except(current, FIRST_NONSTANDARD, &reserved))?;
                 *file.borrow_mut() = Some(copy);
             }
         }

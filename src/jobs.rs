@@ -432,6 +432,9 @@ impl Jobs {
     }
 
     pub fn init(&mut self, interactive: bool) {
+        if self.tty.is_some() {
+            return;
+        }
         let old = unsafe { libc::getpgrp() };
         let fd = if unsafe { libc::isatty(libc::STDERR_FILENO) } == 1 {
             PrivateFile::duplicate(io::stderr().as_fd())

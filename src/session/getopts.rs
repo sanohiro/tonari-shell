@@ -2,16 +2,13 @@ use super::{Session, is_identifier};
 
 impl Session {
     pub fn getopts(&mut self, args: &[String]) -> u8 {
-        let args = if args.first().is_some_and(|a| a == "--") {
-            &args[1..]
-        } else {
-            args
-        };
+        let terminated = args.first().is_some_and(|a| a == "--");
+        let args = if terminated { &args[1..] } else { args };
         let [spec, name, explicit @ ..] = args else {
             eprintln!("tonari: getopts: usage: getopts optstring name [arg ...]");
             return 2;
         };
-        if spec.starts_with('-') && spec.len() > 1 {
+        if !terminated && spec.starts_with('-') && spec.len() > 1 {
             eprintln!("tonari: getopts: invalid option: {spec}");
             return 2;
         }

@@ -283,8 +283,9 @@ impl From<io::Error> for DirectoryError {
 }
 
 impl Session {
-    pub(crate) fn reset_forked_traps(&mut self) {
+    pub(crate) fn after_fork(&mut self) {
         self.traps.after_fork(self.errtrace, self.functrace);
+        self.substitutions.after_fork();
     }
 
     fn convert_case(&self, mut text: String, letter_case: Option<LetterCase>) -> String {
@@ -303,6 +304,12 @@ impl Session {
         } else {
             crate::pattern::case_chars(text, upper, true, None, self.character_locale())
         }
+    }
+
+    pub(crate) fn pattern_locale_overridden(&self) -> bool {
+        ["LANG", "LC_ALL", "LC_COLLATE", "LC_CTYPE"]
+            .iter()
+            .any(|key| self.variables.contains_key(*key))
     }
 
     pub(crate) fn character_locale(&self) -> CharacterLocale {
@@ -737,20 +744,9 @@ impl Session {
             "GROUPS" | "BASH_VERSINFO" => self.element(name, 0),
             "SHELL" => std::env::var(name).ok().or_else(crate::word::account_shell),
             "TERM" => Some(std::env::var(name).unwrap_or_else(|_| "dumb".into())),
-            "HOSTNAME" => std::env::var(name).ok().or_else(|| {
-                static HOST: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-                HOST.get_or_init(|| {
-                    let mut host = [0u8; 256];
-                    (unsafe { libc::gethostname(host.as_mut_ptr().cast(), host.len() - 1) } == 0)
-                        .then(|| {
-                            String::from_utf8_lossy(
-                                &host[..host.iter().position(|&c| c == 0).unwrap()],
-                            )
-                            .into_owned()
-                        })
-                })
-                .clone()
-            }),
+            "HOSTNAME" => std::env::var(name)
+                .ok()
+                .or_else(|| hostname().map(str::to_owned)),
             "PS4" => Some(std::env::var(name).unwrap_or_else(|_| "+ ".into())),
             "HOSTTYPE" => {
                 Some(std::env::var(name).unwrap_or_else(|_| std::env::consts::ARCH.into()))
@@ -1181,8 +1177,15 @@ impl Session {
                 }
             }
             self.apply_variable_effects(&name, &value);
-            self.variables
-                .insert(name, Variable::scalar(Some(value), true));
+            let var = self.variables.entry(name).or_default();
+            var.exported = true;
+            var.declared = true;
+            var.temporary = false;
+            if let Some(array) = var.elements.as_mut() {
+                Rc::make_mut(array).insert(0, value);
+            } else {
+                var.value = Some(value);
+            }
         }
     }
 
@@ -1263,9 +1266,14 @@ impl Session {
                 self.set_eof_variable(previous);
             }
             if name == "GLOBIGNORE" {
-                self.shopt
-                    .glob
-                    .set_ignore(original.as_ref().and_then(|v| v.value.as_deref()));
+                let inherited;
+                let value = if let Some(var) = &original {
+                    var.value.as_deref()
+                } else {
+                    inherited = std::env::var("GLOBIGNORE").ok();
+                    inherited.as_deref()
+                };
+                self.shopt.glob.set_ignore(value);
             }
             if name == "PATH" {
                 self.hashes.clear();
@@ -1378,8 +1386,10 @@ impl Session {
             );
         } else {
             self.locals
-                .last_mut()
-                .unwrap()
+                .iter_mut()
+                .rev()
+                .find(|scope| !scope.temporary)
+                .expect("function scope")
                 .variables
                 .insert("REPLY".into(), None);
             self.variables.insert("REPLY".into(), Variable::default());
@@ -1420,4 +1430,17 @@ mod tests {
         session.leave_function();
         assert_eq!(session.get(key).as_deref(), Some("global"));
     }
+}
+
+pub(crate) fn hostname() -> Option<&'static str> {
+    static NAME: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| {
+        let mut bytes = [0u8; 256];
+        if unsafe { libc::gethostname(bytes.as_mut_ptr().cast(), bytes.len() - 1) } != 0 {
+            return None;
+        }
+        let end = memchr::memchr(0, &bytes).unwrap_or(bytes.len());
+        Some(String::from_utf8_lossy(&bytes[..end]).into_owned())
+    })
+    .as_deref()
 }

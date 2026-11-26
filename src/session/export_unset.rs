@@ -158,7 +158,7 @@ impl Session {
     }
 
     pub(crate) fn unset_variable(&mut self, name: &str) {
-        if self.readonly(name) {
+        if Self::builtin_readonly(name) || self.variables.get(name).is_some_and(|v| v.readonly) {
             return;
         }
         if name == "BASH_COMPAT" {

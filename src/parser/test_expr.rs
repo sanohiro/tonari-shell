@@ -47,11 +47,11 @@ impl Reader {
         self.newlines();
         if self.keyword() == Some("!") {
             self.tokens.pop_front();
-            return Ok(Expr::Not(Box::new(self.test_atom()?)));
+            return Ok(Expr::Not(Box::new(self.nested(Self::test_atom)?)));
         }
         if matches!(self.peek(), Some(Token::LeftParen)) {
             self.tokens.pop_front();
-            let e = self.test_or()?;
+            let e = self.nested(Self::test_or)?;
             match self.tokens.pop_front() {
                 Some(Token::RightParen) => return Ok(e),
                 None => {

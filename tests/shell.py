@@ -35,6 +35,34 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
+    def test_declaration_failures_leave_scope_and_attributes_intact(self):
+        self.compare("""x=outer
+f() { local a=ok; X=2 eval 'local -p a'; local -n x=123 2>/dev/null; x=changed; }
+f; echo "$x"; readonly r=text; declare -a r 2>/dev/null; echo "$? $r"
+declare -n ref; ref+=(one); declare -p ref""",
+                     0, b'declare -- a="ok"\nchanged\n1 text\ndeclare -a ref=([0]="one")\n', minimum=5)
+
+    def test_posix_prefix_on_redirected_special_builtin(self):
+        self.compare("""set -o posix; declare -i x=1
+x=1+2 : >/dev/null; declare -p x""", 0, b'declare -ix x="3"\n', minimum=5)
+
+    def test_read_count_utf8_leaves_next_record(self):
+        for option in ("-n", "-N"):
+            result = subprocess.run([TONARI, "-c",
+                f'read -r {option} 1 x; a=$?; read -r y; printf "%s|%s" "$a" "$y"'],
+                env=self.env, input=b"\xffnext\n", capture_output=True, timeout=3)
+            self.assertEqual((result.returncode, result.stdout), (0, b"1|next"))
+
+    def test_fc_latest_explicit_index_and_history_suffix(self):
+        result = self.command(TONARI, """history -s first; history -s 'second tail'
+fc -ln 2 2; history -p '!$-suffix'""")
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (0, b"\t second tail\ntail-suffix\n", b""))
+
+    def test_readonly_printf_count_signals_failure(self):
+        result = self.command(TONARI, """readonly n=9; printf '%n' n 2>/dev/null; echo "$? $n" """)
+        self.assertEqual((result.returncode, result.stdout), (0, b"1 9\n"))
+
     def test_posix_field_splitting_uses_ifs_after_word_expansion(self):
         source = """set -o posix
 set -f -- a 'b c' d

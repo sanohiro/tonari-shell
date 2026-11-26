@@ -297,6 +297,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     let mut escaped = Vec::new();
     let mut slash = false;
     let mut chars = 0;
+    let mut validated = 0;
     let started = opts.timeout.map(|timeout| (Instant::now(), timeout));
     let mut input = Input::new(opts.fd);
     // Even an escaped delimiter can only postpone the end of a record. Read
@@ -314,8 +315,13 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
             memchr::memchr(opts.delimiter, data).map_or(data.len(), |n| n + 1)
         });
     let status = loop {
-        if opts.max_chars.is_some_and(|max| chars >= max) && std::str::from_utf8(&line).is_ok() {
-            break 0;
+        if let Some(limit) = opts.max_chars {
+            match std::str::from_utf8(&line[validated..]) {
+                Ok(_) if chars >= limit => break 0,
+                Ok(_) => validated = line.len(),
+                Err(e) if e.error_len().is_none() => validated += e.valid_up_to(),
+                Err(_) => break 1,
+            }
         }
         if edited.is_none()
             && let Some((started, timeout)) = started
@@ -397,7 +403,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         };
         if slash {
             slash = false;
-            if b == b'\n' {
+            if b == b'\n' || b == 0 {
                 continue;
             }
             escaped.push(line.len());

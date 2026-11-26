@@ -225,6 +225,7 @@ enum Target {
 impl Target {
     fn argument(&self) -> String {
         match self {
+            Self::Command(name) if name.starts_with('-') => format!("-- {}", shell_quote(name)),
             Self::Command(name) => shell_quote(name),
             Self::Default => "-D".into(),
             Self::Empty => "-E".into(),
@@ -1022,9 +1023,17 @@ fn generate_for_tab(
             .actions
             .iter()
             .any(|a| matches!(a, CompAction::Directory | CompAction::File));
-    if filenames {
+    if filenames && !session.bindings.unmarked_dirs {
         for word in &mut words {
-            if !word.ends_with('/') && Path::new(word).is_dir() {
+            let directory = word
+                .strip_prefix("~/")
+                .and_then(|rest| session.get("HOME").map(|h| Path::new(&h).join(rest)));
+            if !word.ends_with('/')
+                && directory
+                    .as_deref()
+                    .unwrap_or_else(|| Path::new(word))
+                    .is_dir()
+            {
                 word.push('/');
             }
         }

@@ -142,6 +142,14 @@ fn file(session: &Session) -> Option<PathBuf> {
     {
         return None;
     }
+    let history = std::path::Path::new(setting.as_ref());
+    if history.file_name()? != ".bash_history"
+        || session
+            .scalar_setting("HOME")
+            .is_none_or(|home| history.parent() != Some(std::path::Path::new(home.as_ref())))
+    {
+        return None;
+    }
     let dir = session
         .get("XDG_STATE_HOME")
         .filter(|v| PathBuf::from(v).is_absolute())
@@ -640,8 +648,10 @@ impl History {
         else {
             return;
         };
-        if unsafe { libc::flock(journal.as_raw_fd(), libc::LOCK_EX) } != 0 {
-            return;
+        while unsafe { libc::flock(journal.as_raw_fd(), libc::LOCK_EX) } != 0 {
+            if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+                return;
+            }
         }
         // One line per entry, including pastes with embedded tabs and newlines.
         let mut entry = if session.get("HISTTIMEFORMAT").is_some() {
@@ -702,6 +712,9 @@ impl History {
         let journal = file(session).and_then(|path| open_journal(&path).ok());
         let Some((mut journal, metadata)) = journal else {
             self.shared.clear();
+            self.shared_query.clear();
+            self.shared_match = None;
+            self.displayed = None;
             self.journal = None;
             self.tail_start = 0;
             self.older_prefix.clear();
@@ -1181,7 +1194,8 @@ mod tests {
         fs::create_dir_all(state.join("tonari")).unwrap();
         let mut session = Session::default();
         session.assign("XDG_STATE_HOME", state.to_str().unwrap());
-        session.assign("HISTFILE", "history");
+        session.assign("HOME", state.to_str().unwrap());
+        session.assign("HISTFILE", state.join(".bash_history").to_str().unwrap());
         session.assign("HISTFILESIZE", "100000");
         let path = file(&session).unwrap();
         let mut rows = String::from("1\t1\t0\t/hit\thit oldest\n");
@@ -1222,7 +1236,8 @@ mod tests {
         let root = std::env::temp_dir().join(format!("tonari-window-{}", std::process::id()));
         fs::create_dir_all(root.join("tonari")).unwrap();
         let mut session = Session::default();
-        session.assign("HISTFILE", "enabled");
+        session.assign("HOME", root.to_str().unwrap());
+        session.assign("HISTFILE", root.join(".bash_history").to_str().unwrap());
         session.assign("XDG_STATE_HOME", root.to_str().unwrap());
         let path = file(&session).unwrap();
         let pad = "1\t1\t0\t/needle\tcommon\n".repeat(2400);

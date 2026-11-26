@@ -619,6 +619,7 @@ impl Session {
             && let Some(var) = self.variables.get_mut(name)
             && !var.readonly
             && !var.integer
+            && !var.nameref
             && var.letter_case.is_none()
             && var.associative().is_none()
             && words.iter().all(|(index, _)| index.is_none())
@@ -642,6 +643,7 @@ impl Session {
         if var.readonly {
             return Err(crate::session::READONLY);
         }
+        var.nameref = false;
         let result = self.array_items(name, global, &mut var, append, items);
         self.store_variable(name, var, global);
         result

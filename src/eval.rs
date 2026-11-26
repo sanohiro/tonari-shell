@@ -463,12 +463,12 @@ fn run_case(
                             session.shopt.glob.extglob,
                             session.character_locale(),
                         ),
-                    CasePattern::Fixed(matcher) => matcher.matches(&value),
+                    CasePattern::Fixed(matcher) => matcher.matches_session(&value, session),
                     CasePattern::Extended(group, basic) => {
                         if session.shopt.glob.extglob {
                             group.accepts(&value, false)
                         } else {
-                            basic.matches(&value)
+                            basic.matches_session(&value, session)
                         }
                     }
                     CasePattern::Dynamic(word) => {
@@ -747,6 +747,7 @@ pub(crate) fn call_with_bindings(
     } else if session.shopt.compat <= 44 {
         session.debug_base.get_or_init(Vec::new);
     }
+    let outer_set_args = std::mem::take(&mut session.source_set_args);
     let old = std::mem::replace(&mut session.positional, arguments);
     let hidden = session
         .traps
@@ -782,7 +783,7 @@ pub(crate) fn call_with_bindings(
     session.traps.leave_function(hidden);
     session.signal_line = caller_signal_line;
     session.positional = old;
-    session.source_set_args = false;
+    session.source_set_args = outer_set_args;
     if tracked {
         session.debug_args.pop();
     }

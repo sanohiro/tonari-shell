@@ -127,6 +127,7 @@ pub(super) fn substitute(
     let mut out = String::new();
     let mut copied = 0;
     let mut i = 0;
+    let escaped_end = pattern.bytes().rev().take_while(|&b| b == b'\\').count() % 2 != 0;
     let starts = format!("{pattern}*");
     let accepts = |candidate| {
         group.as_ref().map_or_else(
@@ -140,7 +141,8 @@ pub(super) fn substitute(
             (mode != Suffix || i + 2 == bounds.len()).then_some(i + 1)
         } else if mode == Suffix {
             accepts(&text[start..]).then_some(bounds.len() - 1)
-        } else if group.is_some() || crate::pattern::matches(&text[start..], &starts) {
+        } else if group.is_some() || escaped_end || crate::pattern::matches(&text[start..], &starts)
+        {
             (i..bounds.len())
                 .rev()
                 .find(|&j| accepts(&text[start..bounds[j]]))

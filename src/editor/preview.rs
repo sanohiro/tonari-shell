@@ -1,6 +1,6 @@
 // The interpreter stays on its own thread. Only the display is speculative:
 // replay the exact keys against the completed line when Tab returns.
-use super::{Action, Binding, Keys, Screen, bindings::Bindings, ready, rubout};
+use super::{Action, Binding, Keys, Screen, bindings::Bindings, rubout};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
@@ -157,7 +157,7 @@ pub(crate) fn read_capture<R: std::io::Read + std::os::fd::AsRawFd>(
             }
         }
         if fds[1].revents != 0 {
-            poll();
+            tty_event(fds[1].revents);
         }
     }
     reader.read_to_end(output).map(|_| ())
@@ -183,9 +183,27 @@ pub(crate) fn scan_input() {
 }
 
 pub(crate) fn poll() {
-    if wants_keys() && ready(0, 0) && terminal_available() {
-        CURRENT.with_borrow_mut(|slot| slot.as_mut().unwrap().typeahead());
+    if wants_keys() {
+        let mut fd = libc::pollfd {
+            fd: 0,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        if unsafe { libc::poll(&mut fd, 1, 0) } > 0 {
+            tty_event(fd.revents);
+        }
     }
+}
+
+fn tty_event(events: libc::c_short) {
+    CURRENT.with_borrow_mut(|slot| {
+        let Some(preview) = slot else { return };
+        if events & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 || !terminal_available() {
+            preview.stopped = true;
+        } else if events & libc::POLLIN != 0 {
+            preview.typeahead();
+        }
+    });
 }
 
 impl Preview {
