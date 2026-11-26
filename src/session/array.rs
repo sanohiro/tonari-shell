@@ -247,7 +247,7 @@ impl Session {
         self.assign_target_value(
             target,
             value,
-            self.shopt.array_expand_once && subscript(target).is_some(),
+            self.shopt.array_expand_once && target.as_bytes().last() == Some(&b']'),
         )
     }
 
@@ -259,7 +259,8 @@ impl Session {
     ) -> Result<(), &'static str> {
         let resolved = self.reference_name(target)?;
         let target = resolved.as_ref();
-        let base = subscript(target).map_or(target, |(base, _)| base);
+        let element = subscript(target);
+        let base = element.map_or(target, |(base, _)| base);
         if self.readonly(base) {
             return Err("readonly variable");
         }
@@ -273,7 +274,7 @@ impl Session {
         } else {
             value
         };
-        if let Some((base, expr)) = subscript(target) {
+        if let Some((base, expr)) = element {
             if !super::is_identifier(base) {
                 return Err("invalid variable name");
             }

@@ -1383,12 +1383,12 @@ fn scan(
             chars = start[plain..].chars();
             started = true;
         } else if start.as_bytes().get(plain) == Some(&b'[')
+            && let Some(prefix) = super::array::indexed_prefix(start)
             && (if plain == 0 {
                 array_level == Some(parentheses)
             } else {
                 indexed_assignment_position(&tokens)
             })
-            && let Some(prefix) = super::array::indexed_prefix(start)
         {
             word.literal(&start[..prefix.len() + 1]);
             assignment = Some(prefix.to_owned());

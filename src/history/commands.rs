@@ -516,6 +516,11 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
                         .map(|(text, _)| text)
                         .or_else(|| previous.and_then(|i| h.lines.get_mut(i)))
                 {
+                    let added = 1 + line.len();
+                    if last.capacity() - last.len() < added {
+                        // Only multiline entries need headroom for continuation lines.
+                        last.reserve(added.max(32));
+                    }
                     last.push('\n');
                     last.push_str(line);
                     return;
