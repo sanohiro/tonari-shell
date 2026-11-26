@@ -29,10 +29,14 @@ fn write_stdout(mut bytes: &[u8]) -> u8 {
     0
 }
 
-pub fn echo(args: &[String]) -> u8 {
+pub fn echo(args: &[String], session: &Session) -> u8 {
     match args {
         [] => write_stdout(b"\n"),
-        [word] if word.len() < 128 && !word.starts_with('-') => {
+        [word]
+            if word.len() < 128
+                && !word.starts_with('-')
+                && (!session.shopt.xpg_echo || !word.contains('\\')) =>
+        {
             let mut line = [0; 128];
             line[..word.len()].copy_from_slice(word.as_bytes());
             line[word.len()] = b'\n';
@@ -40,17 +44,19 @@ pub fn echo(args: &[String]) -> u8 {
         }
         _ => {
             let mut out = Vec::new();
-            echo_into(args, &mut out);
+            echo_into(args, &mut out, session);
             write_stdout(&out)
         }
     }
 }
 
-pub(crate) fn echo_into(args: &[String], out: &mut Vec<u8>) {
+pub(crate) fn echo_into(args: &[String], out: &mut Vec<u8>, session: &Session) {
     let mut newline = true;
-    let mut escapes = false;
+    let mut escapes = session.shopt.xpg_echo;
     let mut args = args.iter().peekable();
-    while let Some(arg) = args.peek() {
+    while !(session.posix && session.shopt.xpg_echo)
+        && let Some(arg) = args.peek()
+    {
         let Some(options) = arg.strip_prefix('-') else {
             break;
         };
@@ -70,7 +76,7 @@ pub(crate) fn echo_into(args: &[String], out: &mut Vec<u8>) {
         if i != 0 {
             out.push(b' ');
         }
-        if escapes {
+        if escapes && memchr::memchr(b'\\', arg.as_bytes()).is_some() {
             if !escapes::decode(arg.as_bytes(), out, escapes::Mode::Echo) {
                 newline = false;
                 break;
@@ -109,6 +115,8 @@ fn test_args(args: &[String], session: &mut Session) -> Result<bool, &'static st
         [op, value] if op == "!" => return Ok(value.is_empty()),
         [op, value] => return unary(op, value, session),
         [left, op, right] if binary_op(op) => return binary(left, op, right),
+        [left, op, right] if op == "-a" => return Ok(!left.is_empty() && !right.is_empty()),
+        [left, op, right] if op == "-o" => return Ok(!left.is_empty() || !right.is_empty()),
         [first, rest @ ..] if first == "!" && args.len() <= 4 => {
             return Ok(!test_args(rest, session)?);
         }
@@ -234,6 +242,7 @@ pub(crate) fn unary(op: &str, arg: &str, session: &mut Session) -> Result<bool, 
         "-n" => return Ok(!arg.is_empty()),
         "-z" => return Ok(arg.is_empty()),
         "-R" => return Ok(session.is_nameref(arg)),
+        "-o" => return Ok(session.set_option_enabled(arg)),
         "-v" => {
             if let Some((name, expr)) = crate::session::array::subscript(arg)
                 && session.is_associative(name)

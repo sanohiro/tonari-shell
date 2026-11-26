@@ -45,25 +45,6 @@ pub fn render_text(session: &mut Session, mut prompt: String, status: u8) -> Str
         .unwrap_or(prompt)
 }
 
-pub(crate) fn format_time(format: &str, seconds: libc::time_t) -> String {
-    let Ok(fmt) = std::ffi::CString::new(format) else {
-        return String::new();
-    };
-    let mut tm = std::mem::MaybeUninit::uninit();
-    if unsafe { libc::localtime_r(&seconds, tm.as_mut_ptr()) }.is_null() {
-        return String::new();
-    }
-    for size in [128, 512, 4096, 16384] {
-        let mut bytes = vec![0u8; size];
-        let n =
-            unsafe { libc::strftime(bytes.as_mut_ptr().cast(), size, fmt.as_ptr(), tm.as_ptr()) };
-        if n > 0 {
-            bytes.truncate(n);
-            return String::from_utf8_lossy(&bytes).into_owned();
-        }
-    }
-    String::new()
-}
 fn escape(session: &Session, c: char, chars: &mut std::str::Chars) -> String {
     let mut output = String::new();
     match c {
@@ -116,7 +97,7 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars) -> String {
                     }
                 }
             };
-            output.push_str(&format_time(fmt, unsafe {
+            output.push_str(&crate::shell_time::format(session, fmt, unsafe {
                 libc::time(std::ptr::null_mut())
             }));
         }

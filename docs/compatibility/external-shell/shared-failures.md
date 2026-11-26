@@ -4,7 +4,30 @@ The original full comparison had 356 joint failures across both operating system
 
 両シェルが同じ結果でも、それだけで正しいとは判定しません。表には上流の採点をそのまま残し、実行したコマンド、標準出力・標準エラー・終了値、入力後に確定した内容を照合しました。履歴設定や外部コマンドの差で説明できるケースと、実際に Tonari の修正が必要だったケースが含まれます。[互換性の判断基準](../../compatibility.md#intentional-differences)
 
-## Native results / 実機の結果
+<a id="date-and-expansion-replay"></a>
+
+## Date, expansion and completion replay / 日時・展開・補完の修正後
+
+Each host ran the same 2,770 Oils cases, 875 bensch builtin cases and 1,014 bensch interactive cases. The full PTY suite ran at 05aeade. The final Oils and builtin replays ran at 3c9cdcb, after the date and timestamped-history changes. Interactive journal persistence and the prompt have additional direct PTY checks on the final implementation. The table keeps upstream verdicts. Oils accepts its Bash-specific annotations. The archive also retains grades against the ordinary expectations. [9,318 case results](date-and-expansion-replay.tsv.gz) · [Oils and builtin runs](https://github.com/sanohiro/tonari-shell/actions/runs/45752854550) · [Interactive runs](https://github.com/sanohiro/tonari-shell/actions/runs/45747754708)
+
+| Host | Suite | Both | Bash only | Tonari only | Neither | Timed | Tonari ≤ ⅔ Bash | Tonari > Bash |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Linux x86-64 | Oils | 2,567 | 161 | 1 | 41 | 2,062 | 1,599 | 12 |
+| Linux x86-64 | bensch builtins | 831 | 2 | 0 | 42 | 818 | 791 | 1 |
+| Linux x86-64 | bensch PTY | 983 | 0 | 28 | 3 | 983 | 267 | 324 |
+| macOS arm64 | Oils | 2,425 | 139 | 40 | 166 | 1,938 | 1,519 | 61 |
+| macOS arm64 | bensch builtins | 830 | 2 | 0 | 43 | 817 | 777 | 4 |
+| macOS arm64 | bensch PTY | 933 | 0 | 24 | 57 | 933 | 320 | 291 |
+
+For scripts, the speed columns require five alternating trials per shell, stable identical output and status, and an accepted verdict in both shells. For PTYs, the speed columns use the median first-byte delay over matched input steps in one upstream run where both shells passed. PTY measurements include terminal scheduling. The separate 13-trial targeted benchmarks compare the time to verified results. [Native targeted timings](../../benchmarks.md#calendar-and-expansion)
+
+Compared with the preceding script replay, 86 Oils cases on Linux and 85 on macOS moved from failing to accepted for Tonari. No previously accepted Oils case moved to failing. Open cases include genuine scripting differences, such as the dynamic RANDOM and SECONDS variables, alongside reference bugs and intentional UTF-8 behavior. The historical review below describes the controls for shell-specific annotations and for explicit expectations that differ from GNU Bash.
+
+前回の Oils 全件との比較で、Tonari が新たに通ったのは Linux 86 件、macOS 85 件でした。以前通っていた Oils の項目に新たな失敗はありません。Bash だけが通るもの、双方が失敗するものも表と個別データに残しました。スクリプトは同じ結果が安定したケースに限って時間を比較し、PTY はキー入力から最初の表示までを別に扱います。
+
+One macOS PTY verdict changed from Tonari-only to neither. The bensch history/36 case submits a one-line loop, presses Up and Enter, and looks for the digit 1. Its Bash profile sets HISTSIZE=0. A local M1 control used the original loop and logged each call to echo, waited for the loop to finish, then sent Up and Enter. In 11 fresh sessions per shell and setting, both Tonari and GNU Bash 5.2.37 executed the loop once with HISTSIZE=0 and twice with HISTSIZE=500. This independently checks recall and avoids mistaking the original echoed input for a second execution. 新たに両者失敗となった履歴の 1 件は、画面に数字が見えるかに加えてループの実行回数を確認しました。履歴を有効にした場合、両シェルとも全回で再実行できました。[Upstream steps](https://github.com/tenseleyFlow/bensch/blob/c8e2a1ea493fc0dceb9af645dc445e619cb449e7/suites/interactive/history/history.yaml#L360) · [Runner settings](../../../tools/ci/bensch-pty.py)
+
+## Preceding native results / 前回の実機結果
 
 | Host | Suite | Both | Bash only | Tonari only | Neither | Timed | Tonari ≤ ⅔ Bash | Tonari > Bash |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -46,6 +69,6 @@ At revision `7f01725`, 172 of the 2,770 Oils cases had a different pair of pass/
 
 The final script comparison also has newly joint failures. On both hosts `array-assoc/34` now fails the old Bash annotation because both shells keep the data. On macOS the output order varied in `background/7`. In builtin `portable/test_exec/10`, both shells timed out without a controlling terminal. The failed reopen of `/dev/tty` left stdout pointing at the file subsequently read by `cat`. Giving the original command a controlling PTY produced `captured` and status 0 in all 11 trials for each shell. 新たに両者失敗となった行も、配列の実データ、完了順、端末の有無まで確認しました。[Script transitions](script-replay.tsv.gz) · [PTY samples](https://github.com/sanohiro/tonari-shell/actions/runs/45736947179)
 
-Open implementation differences include tilde expansion within default-value assignment words, named homes formed across brace alternatives, indexed-looking operands after an external command name, and date conversion in builtin `printf`. These are actual differences in values or behavior. Unsupported fortsh commands, specified UTF-8 behavior and reference-version quirks are individually identified. チルダ展開の一部、外部コマンドの引数解析、日時の書式変換には未解消の差があります。[Case findings](shared-failures.tsv.gz)
+The follow-up implemented the four open differences from this review. Tests cover default-value assignment tildes, named homes formed across brace alternatives, indexed-looking ordinary arguments, and the builtin date formatter. GNU Bash 5.2 drops a 128-byte result in Oils `builtin-printf/51`. Tonari returns all 128 bytes, and its own regression checks all 4,000 bytes of a longer format. この調査で特定した4件を実装し、日時・引数・チルダの実際の値を Bash と照合しました。日時書式を切り捨てる旧版のバグは期待値から除外します。[Behavior and examples](../../compatibility.md#calendar-and-arguments) · [Performance](../../benchmarks.md#calendar-and-expansion)
 
 When `background/7` runs on a loaded macOS runner, delays of 10, 20 and 30 milliseconds can produce different orders of output. Both shells varied across the five trials of the full replay at `d34efd8`. The three explicit PID waits still returned 3, 2 and 1. Keep the observed verdict and exclude unstable times from speed comparisons. macOS の並行出力は順序が変動した回があり、終了値を個別に確認しました。[Full replay](https://github.com/sanohiro/tonari-shell/actions/runs/45738742622)

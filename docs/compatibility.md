@@ -5,6 +5,26 @@
 The [bensch and Oils comparison](compatibility/external-shell/README.md) records Bash and Tonari results for individual interactive, builtin and language cases. 対話操作・組み込み・言語仕様の外部試験について、ケースごとの Bash との差と再現方法を記録しています。
 
 
+<a id="calendar-and-arguments"></a>
+
+## Dates, expansions and builtin arguments / 日時・展開・組み込みコマンド
+
+`printf '%(%F %T %Z %z)T\n' 0` formats an epoch second. With `TZ=America/New_York` exported it prints `1969-12-31 19:00:00 EST -0500`. A missing argument or `-1` uses the current time, and `-2` uses shell startup time. Repeated conversions and `printf -v` follow Bash argument consumption. Named UTF-8 time locales supply weekday/month names and the local date/time formats. Under the static Linux release, `LC_ALL=ja_JP.UTF-8 TZ=UTC0 printf '%(%EY)T\n' 1556668800` prints `令和元年`. The Linux executable includes the time fields of 336 GNU locales (including POSIX). macOS uses its installed locale definitions. The date formatter returns the complete result even for 128 or more bytes. In the long-format regression GNU Bash 5.2 returned an empty string. [Regression cases](../tests/shell.py) · [Implementation notes](engineering-notes.md)
+
+`printf` の日時変換は `-v`、現在時刻、シェルの起動時刻、過去の夏時間に対応します。表示言語を切り替えた後も同じシェルで反映されます。Linux 静的版は日本語の元号と代替数字も扱います。地域データの版による表記差はあり、例えばフランス語の `%c` にタイムゾーン名を付けるかは GNU 地域データの版で変わります。長い日時文字列は最後まで返します。
+
+A Bash history file can put a line such as #1699999000 before a command. With HISTTIMEFORMAT set, timestamp markers delimit multiline entries. The history builtin preserves the seconds on import, append and export. Incremental imports can finish a marker left at the previous end of file. The private journal records the epoch when timestamp persistence is enabled and continues reading the older journal format. Previously saved entries with no recoverable timestamp display two question marks when a timestamp is requested. File trimming keeps the timestamp and command together. [History regressions](../tests/shell.py) · [GNU Bash history file format](https://www.gnu.org/software/bash/manual/html_node/Bash-History-Facilities.html)
+
+Bash 形式の履歴を読み書きするときは、日時行を後続のコマンドに関連付けます。HISTTIMEFORMAT を指定した状態なら複数行の履歴も 1 件として扱います。Tonari の既存の履歴ジャーナルは引き続き読めます。保存時刻が記録されていない古い履歴に対しては、日時表示の要求に「??」を返します。
+
+The four yash shards at 3c9cdcb recorded 11,079 verdicts per shell on Ubuntu. Tonari received 11,058 ordinary passes, 14 skips, six failures and one unexpected pass. Bash had 9,311 ordinary passes. Every ordinary Bash pass was also an ordinary Tonari pass. [POSIX run and per-case logs](https://github.com/sanohiro/tonari-shell/actions/runs/45752859195)
+
+同じ POSIX 試験で Bash だけが合格するケースは 0 件でした。Tonari のスキップ・失敗・予期しない成功も元の判定どおりに集計しています。
+
+The suite now covers assignment-context tildes in default values, named home directories formed by brace expansion, and indexed-looking ordinary command arguments. Other witnesses exercise array default operands, `$[...]`, `read -t 0`, option tests, `set` output, and Bash completion fallback options. The scripts verify the resulting argument count, values, output and status. [External suite results](compatibility/external-shell/shared-failures.md) · [Timings](benchmarks.md#calendar-and-expansion)
+
+変数の既定値でのチルダ、波括弧展開で組み立てたユーザー名、配列代入に似た通常引数の解釈を修正しました。配列の既定値や補完も、実際に呼び出し側へ渡る値と件数を比較しています。
+
 ## Bash by default, POSIX on request / 既定の Bash 互換動作と POSIX モード
 
 Tonari uses one executable. Starting it as `tonari` or through its private `libexec/tonari/bash` path selects Bash-compatible behavior by default, so interactive users and tools that request Bash get the interface they expect. Starting the same executable under the name `sh` selects the `sh` startup rules and enables POSIX mode after startup. Use `tonari --posix` to enable the mode from the start, or `set -o posix` to enable it in a running shell.

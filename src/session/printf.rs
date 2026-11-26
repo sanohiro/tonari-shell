@@ -427,9 +427,45 @@ fn render(
                 input = &input[1..];
             }
             b'%' => {
+                let original = input;
                 let (mut spec, conversion) = Spec::parse(&mut input, args)?;
                 match conversion {
                     b's' => spec.bytes(args.next().as_bytes(), out)?,
+                    b'(' => {
+                        let mut depth = 1;
+                        let close = input.iter().position(|&b| {
+                            match b {
+                                b'(' => depth += 1,
+                                b')' => depth -= 1,
+                                _ => {}
+                            }
+                            depth == 0
+                        });
+                        if let Some(end) = close.filter(|i| input.get(i + 1) == Some(&b'T')) {
+                            let format = std::str::from_utf8(&input[..end]).unwrap();
+                            input = &input[end + 2..];
+                            let timestamp = if args.values.is_empty() {
+                                -1
+                            } else {
+                                args.signed()
+                            };
+                            let seconds = match timestamp {
+                                -1 => unsafe { libc::time(std::ptr::null_mut()) },
+                                -2 => variables.read().started_at,
+                                t => t,
+                            };
+                            let stamp = crate::shell_time::format(
+                                variables.read(),
+                                if format.is_empty() { "%X" } else { format },
+                                seconds,
+                            );
+                            spec.bytes(stamp.as_bytes(), out)?;
+                        } else {
+                            eprintln!("tonari: printf: warning: invalid time format specification");
+                            out.push(b'%');
+                            out.extend_from_slice(&original[..original.len() - input.len()]);
+                        }
+                    }
                     b'c' => {
                         let byte = args.next().as_bytes().first().copied().unwrap_or(0);
                         spec.precision = None;

@@ -32,14 +32,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "pure-rust-locales"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "869675ad2d7541aea90c6d88c81f46a7f4ea9af8cd0395d38f11a95126998a0d"
+
+[[package]]
 name = "tonari"
 version = "0.1.0"
 dependencies = [
  "dlmalloc",
  "libc",
  "memchr",
+ "tonari-time-locales",
+ "tz-rs",
  "unicode-width",
 ]
+
+[[package]]
+name = "tonari-time-locales"
+version = "0.1.0"
+dependencies = [
+ "pure-rust-locales",
+]
+
+[[package]]
+name = "tz-rs"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fc6c929ffa10fb34f4a3c7e9a73620a83ef2e85e47f9ec3381b8289e6762f42"
 
 [[package]]
 name = "unicode-width"

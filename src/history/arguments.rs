@@ -85,8 +85,11 @@ pub(crate) fn candidates(
         let Ok(row) = std::str::from_utf8(row) else {
             continue;
         };
-        let mut fields = row.splitn(5, '\t');
-        if fields.next() != Some("1") || fields.nth(1) != Some("0") {
+        let Some((body, _)) = super::journal_fields(row) else {
+            continue;
+        };
+        let mut fields = body.splitn(4, '\t');
+        if fields.nth(1) != Some("0") {
             continue;
         }
         let (Some(raw_dir), Some(raw_line)) = (fields.next(), fields.next()) else {

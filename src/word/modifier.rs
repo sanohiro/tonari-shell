@@ -44,6 +44,12 @@ impl Values {
             ));
         }
         if let Some((base, at, keys)) = array_elements_name(name) {
+            if !keys && !env.shadows(base) {
+                let mut values = Vec::new();
+                if env.session.append_indexed_fields(base, &mut values) {
+                    return Ok(Self::Elements(values, at));
+                }
+            }
             return Ok(Self::Elements(
                 super::array_elements(base, keys, &|k| env.lookup(k)).unwrap_or_default(),
                 at,

@@ -1,5 +1,25 @@
 # Engineering notes / 開発知見
 
+## 2026-11-26 · Formatting time without changing the process environment / 日時の書式とロケール
+
+The Bash builtin `printf '%(format)T'`, history and the prompt can observe shell bindings for the time zone and display language. Resolve the exported `TZ` and the first nonempty value of `LC_ALL`, `LC_TIME`, and `LANG` at use. Reuse the last zone and locale until either binding changes. `tz-rs` reads TZif files and POSIX zone rules, including historical transitions. A numeric epoch needs no calendar lookup. Numeric log timestamps can write into one output buffer. Tests cross a daylight-saving transition, restore a temporary `TZ`, and compare the shell-start timestamp before and after a delay. [Date and shell tests](../tests/shell.py)
+
+musl accepts named locales but supplies English time strings with its default installation. The Linux release builds its time vocabulary from the pinned `pure-rust-locales` crate. The build helper interns UTF-8 strings and arrays of string IDs, and the binary uses static offsets. It reads only the requested fields. Building the crate's pointer tables directly increased the static ARM64 executable by 512 KiB. The offset tables reduced the increase to 128 KiB in the same build. No locale archive or additional shared library is required. macOS uses the installed system time locale through `strftime_l`. Localized punctuation and composite date conventions can vary with the revision of the locale data. When updating the crate, refresh the sorted `crates/time-locales/names.txt` from the string keys of its `TryFrom<&str> for Locale` implementation. [Packing code](../crates/time-locales/build.rs) · [Measurements](benchmarks.md#calendar-and-expansion)
+
+`TZ` と表示言語を初回に解決し、シェル変数が変わったときにキャッシュを更新します。環境を一時的に書き換えなくても、過去のタイムゾーンと夏時間を扱えます。Linux の静的版では pure Rust クレートの GNU 地域データをビルド時に集約します。日本語の元号、曜日・月名、地域の書式と代替数字を外部プロセスなしで出せます。macOS は OS の地域データを使います。テストでは、地域によって違う書式を個別に比較し、長い結果を切り捨てる Bash の挙動も独立した期待値で検証します。[互換性ガイド](compatibility.md#calendar-and-arguments)
+
+The all-locale check formats 31 fields at three epochs for every bundled locale. Debian 13.7 with locales-all 2.41-12+deb13u5 and GNU Bash 5.2.37 supplied 313 matching UTF-8 references for the 336 entries. All bundled locales returned nonempty weekday, month, date and time fields. Of the 29,109 paired strings, 27,439 matched byte for byte. The 1,670 differences include 1,212 in %c or %Ec (the composite pattern can include a zone name), vocabulary revisions, and Unicode case conversions such as German JÄNNER versus JäNNER under the host Bash. The audit prints both values for every mismatch. It also exposed a formatter bug independent of the data revision. Afar uses %l in its clock format. Implementing the space-padded hour prevents musl from dropping the whole timestamp. [All-locale check](../tools/ci/time-locales.py) · [All 1,670 differing outputs](compatibility/external-shell/locale-date-differences.jsonl.gz)
+
+Debian で比較可能だった 313 ロケール、29,109 個の文字列のうち、27,439 個が一致しました。残った 1,670 個には、地域データの版による綴り・時刻書式の違いと、非 ASCII 文字の大文字化の違いがあります。辞書を同梱する Linux 版と OS の地域データの更新時期は独立しています。検査時に両方の文字列を保存して確認できます。
+
+A formatted history benchmark initially produced 4,000 lines from 2,000 entries. A timestamp marker in a Bash file had been entering Tonari's command list as a separate command. Import the marker with its command, preserve complete multiline entries and consume the timestamp when reading the next entry. When printing a history listing, capture the zone and locale once and write through a buffer. A new terminal session verifies the timestamp stored in the private journal. [Bash history specification](https://www.gnu.org/software/bash/manual/html_node/Bash-History-Facilities.html) · [Timing and fixture](benchmarks.md#calendar-and-expansion)
+
+日時付き履歴は出力内容を確かめてから計測します。今のセッションで生成した履歴だけでは読み込みの誤りを見逃すので、別セッションや以前の形式のファイルから読み戻すテストも用意しました。
+
+For other script paths, preserve word boundaries through parameter defaults and lexical expansion. Existence-only array operators can inspect array metadata, while an expansion that returns the array must preserve individual empty elements and array order. For completion, write a batch of candidate lines through a buffered writer before returning to the editor. This saves one write per match without caching stale directory contents. [End-to-end workloads](../tools/ci/spec-fix-timings.py)
+
+配列では「値があるか」と「全要素を引数として渡す」を別々に計測します。後者では空要素の個数と位置まで検証します。補完結果はまとめて書き出すと、ディレクトリの変更を即座に反映しながら、多数の候補を安く返せます。
+
 ## 2026-11-26 · When both shells fail / 両方が失敗した場合の調べ方
 
 In Oils `array-assoc/34`, an obsolete Bash annotation expects an empty map after arithmetic assigns a value to a backslash key. The unqualified assertion requires the key and value to survive. Expand an associative subscript once as shell data, preserve it through arithmetic parsing, then test assignment, read and compound update. Re-parsing the expanded key loses backslashes and can turn other ordinary key characters into syntax. [Regression tests](../tests/shell.py) · [Oils assertion](https://github.com/oils-for-unix/oils/blob/d114978ca467143f171a835cbcbe8ab6ccc009a7/spec/array-assoc.test.sh#L567)

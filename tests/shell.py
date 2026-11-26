@@ -55,6 +55,237 @@ class ShellTests(unittest.TestCase):
                 if code == 0 and "missing-tonari" not in source:
                     self.assertEqual(proc.stderr, b"")
 
+    def test_timestamped_history_import_append_and_write(self):
+        (self.cwd / "entries").write_bytes(b"#100\nfirst\nsecond\n#120\nthird\n")
+        self.compare(r"""HISTTIMEFORMAT='%s '; history -c; history -r entries
+history; history -w copy; cat copy
+""", 0, b"    1  100 first\nsecond\n    2  120 third\n#100\nfirst\nsecond\n#120\nthird\n",
+                     minimum=5)
+        out = self.command(TONARI, r"""HISTTIMEFORMAT='%s '; history -r entries
+printf '#130\n' >>entries; history -n entries
+printf 'next\n' >>entries; history -n entries; history -n entries; history 1
+HISTFILE=entries; HISTFILESIZE=2; cat entries""")
+        self.assertEqual((out.returncode, out.stdout, out.stderr), (0,
+            b"    3  130 next\n#120\nthird\n#130\nnext\n", b""))
+
+    def test_history_limit_preserves_markers_at_block_boundaries(self):
+        prefix = b"#100\nfirst\nline\n"
+        for tail_size in (16382, 16383, 16384, 16385, 32768):
+            with self.subTest(tail_size=tail_size):
+                last = b"#200\n" + b"x" * tail_size + b"\nlast\n#300\n"
+                (self.cwd / "entries").write_bytes(prefix + last)
+                result = self.command(TONARI, "HISTFILE=entries; HISTFILESIZE=1")
+                self.assertEqual((result.returncode, result.stderr), (0, b""))
+                self.assertEqual((self.cwd / "entries").read_bytes(), last)
+
+    def test_history_journal_retains_times_and_reads_older_rows(self):
+        self.env.update(HISTFILE=str(self.cwd / ".bash_history"), HISTTIMEFORMAT="%s ",
+                        XDG_STATE_HOME=str(self.cwd / "state"))
+        journal = self.cwd / "state/tonari/history"
+        journal.parent.mkdir(parents=True)
+        journal.write_text("1\t42\t0\t/tmp\tlegacy\n2\t123\t43\t0\t/tmp\tremembered\n")
+        result = self.command(TONARI, "history -r; history")
+        self.assertEqual((result.returncode, result.stderr, result.stdout),
+                         (0, b"", b"    1  ??legacy\n    2  123 remembered\n"))
+        fd = self.terminal_session()
+        os.write(fd, b"echo record-epoch >marker\r")
+        self.read_until(fd, PROMPT)
+        entry = [s for s in journal.read_text().splitlines() if s.endswith("echo record-epoch >marker")]
+        self.assertEqual(len(entry), 1)
+        fields = entry[0].split("\t")
+        self.assertEqual(fields[0], "2")
+        self.assertLess(abs(int(fields[1]) - time.time()), 30)
+        result = self.command(TONARI, "history -r; history 1")
+        self.assertIn((fields[1] + " echo record-epoch >marker\n").encode(), result.stdout)
+
+    def test_printf_time_locale_zone_and_arguments(self):
+        self.compare(r"""export TZ=UTC0
+printf '[%*.*(%Y-%m-%d)T] %()T %((%Y))T\n' 7 4 0 0 0
+printf -v t '%(%F %T %Z %z %s %%s)T;' 0 86400
+echo "$t"
+TZ=America/New_York printf '%(%F %T %Z %z)T\n' 0 1593604800
+printf '%(%Z %z)T\n' 0
+""", 0, b"[   1970] 00:00:00 (1970)\n1970-01-01 00:00:00 UTC +0000 0 %s;"
+        b"1970-01-02 00:00:00 UTC +0000 86400 %s;\n1969-12-31 19:00:00 EST -0500\n"
+        b"2020-07-01 08:00:00 EDT -0400\nUTC +0000\n", minimum=5)
+
+    def test_printf_time_unexported_unset_and_clock(self):
+        self.compare(r"""unset TZ
+printf -v local '%(%F %T %z)T' 0
+TZ=HST10
+printf -v t '%(%F %T %z)T' 0
+[[ $t == "$local" ]] || exit 1
+export TZ
+printf '%(%F %T %z)T\n' 0
+unset TZ
+printf -v t '%(%F %T %z)T' 0
+[[ $t == "$local" ]] || exit 2
+printf -v start '%(%s)T' -2
+sleep 1
+printf -v now '%(%s)T'
+printf -v explicit '%(%s)T' -1
+printf -v again '%(%s)T' -2
+(( start == again && now > start && explicit >= now ))
+""", 0, b"1969-12-31 14:00:00 -1000\n", minimum=5)
+
+    def test_printf_regional_dates_and_locale_changes(self):
+        available = subprocess.check_output(["locale", "-a"], text=True).lower().replace("-", "")
+        locales = [name for name in ("de_DE", "ja_JP", "fr_FR", "pl_PL", "fa_IR")
+                   if (name.lower() + ".utf8") in available.splitlines()]
+        if not locales or len(self.shells_for(5)) < 2:
+            self.skipTest("a named UTF-8 locale and GNU Bash 5 are required")
+        script = r"""export TZ=UTC0
+unset LC_ALL
+for lang; do
+  LC_TIME=$lang.UTF-8
+  printf '%(%A|%B)T|%(%x)T|%(%X)T|%(%r)T|%(%%A|%Z|%z|%s)T\n' 0 0 0 0 0
+  case $lang in de_DE|ja_JP) printf '%(%c)T\n' 0;; esac
+  LC_ALL=C printf '%(%A|%B)T\n' 0
+done
+"""
+        baseline = self.command(BASH, script, "_", *locales)
+        self.assertEqual((baseline.returncode, baseline.stderr), (0, b""))
+        if "de_DE" in locales:
+            self.assertIn(b"Donnerstag|Januar|", baseline.stdout)
+        if "ja_JP" in locales:
+            self.assertIn("木曜日|1月|".encode(), baseline.stdout)
+        result = self.command(TONARI, script, "_", *locales)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, baseline.stdout, b""))
+        if sys.platform.startswith("linux") and "ja_JP" in locales:
+            self.env["LC_ALL"] = "de_DE.UTF-8" if "de_DE" in locales else "C"
+            if "de_DE" in locales:
+                self.compare("TZ=UTC0 printf '%(%^B|%10B|%#A)T' 0",
+                             0, b"JANUAR|    Januar|DONNERSTAG", minimum=5)
+            self.env["LC_ALL"] = "ja_JP.UTF-8"
+            self.compare("export TZ=UTC0; printf '%(%EC|%Ey|%EY|%Od)T\\n' 0 1556668800 1700000000",
+                         0, "昭和|45|昭和45年|一\n令和|01|令和元年|一\n令和|05|令和05年|十四\n".encode(),
+                         minimum=5)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "GNU strftime flag semantics")
+    def test_printf_time_flags_and_unknown_directives(self):
+        self.compare("export TZ=UTC0; printf '%(%^B|%#A|%#p|%#Z|%10B|%05a|%-d|%_d|%0e|%10d|%k|%l|%OY|%Q|%%)T' 0",
+                     0, b"JANUARY|THURSDAY|am|utc|   January|00Thu|1| 1|01|0000000001| 0|12|%OY|%Q|%", minimum=5)
+
+    def test_printf_long_time_format(self):
+        fmt = "%(" + "%Y" * 1000 + ")T"
+        p = self.command(TONARI, 'TZ=UTC0 printf "$1" 0', '_', fmt)
+        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, b"1970" * 1000, b""))
+
+    def test_assignment_tildes_and_brace_login_names(self):
+        import pwd
+        root = os.fsencode(pwd.getpwnam("root").pw_dir)
+        self.env["HOME"] = "/home/test"
+        self.compare(r"""
+v=${u-~:${u-~:~}}
+printf '%s\n' "$v" ${u-~:~} "${u-~:~}"
+v=${u-a\:~:~}; echo "$v"
+printf '%s\n' ~{ro,"ro"}ot {~root,~}/a ~{root,}/x
+""", 0, b"/home/test:/home/test:/home/test\n/home/test:~\n~:~\na:~:/home/test\n"
+        + root + b"\n~root\n" + root + b"/a\n/home/test/a\n" + root + b"/x\n/home/test/x\n")
+
+    def test_array_assignment_and_argv_contexts(self):
+        self.compare(r"""i=3
+set -f
+a=([1 + 2]=abc [i + 1]=def)
+printf '<%s>\n' a[1 + 2]=xxx b[$i]=y "${a[@]}"
+{ a[1 + 2]=x true; } 2>/dev/null
+echo "$?:${a[3]}"
+v=word
+a=(hi "$v" [2]="$v" ~ *.txt {a,b}) env | grep '^a='
+""", 0, b"<a[1>\n<+>\n<2]=xxx>\n<b[3]=y>\n<abc>\n<def>\n0:abc\n"
+        b"a=(hi word [2]=word ~ *.txt {a,b})\n")
+
+    def test_legacy_arithmetic_and_set_options(self):
+        self.compare(r"""i=2; a[3]=7
+echo "$[a[i+1] * $i]"
+set -- old
+set +
+echo "$#:$*"
+set -x -v - x + y
+case $- in *x*|*v*) exit 1;; esac
+echo "$#:$*"
+set -a
+f() { local TONARI_LOCAL=value; env | grep '^TONARI_LOCAL='; }
+f
+declare TONARI_GLOBAL=value
+env | grep '^TONARI_GLOBAL='
+""", 0, b"14\n1:old\n3:x + y\nTONARI_LOCAL=value\nTONARI_GLOBAL=value\n")
+
+    def test_read_timeouts_on_files_and_invalid_options(self):
+        self.compare(r"""read -t 0 </dev/null; echo $?
+read -t 0.5 </dev/null; echo $?
+for args in '-t -1' '-n x' '-N -1' '-u -3' '-u x' '-k'; do
+    read $args </dev/null 2>/dev/null; echo $?
+done
+""", 0, b"0\n1\n1\n1\n1\n1\n1\n2\n", minimum=5)
+
+    def test_set_prints_reusable_scalars_and_arrays(self):
+        self.compare(r"""__plain=yes
+__words='a b'
+__new=$'a\nb'
+__empty=''
+__array=([3]=abc [9]='two words')
+set | grep '^__' >vars
+cat vars
+unset __plain __words __new __empty __array
+. ./vars
+[[ $__plain == yes && $__words == 'a b' && $__new == $'a\nb' && -v __empty && ${__array[9]} == 'two words' ]]
+""", 0, b'__array=([3]="abc" [9]="two words")\n__empty=\n__new=$\'a\\nb\'\n'
+        b"__plain=yes\n__words='a b'\n", minimum=5)
+
+    def test_shell_option_queries_echo_and_subscripts(self):
+        self.compare(r"""test -o nounset; echo $?
+set -u; [[ -o nounset ]]; echo $?
+[ -z -a -a ]; echo $?
+shopt -s xpg_echo
+echo 'a\tb'
+v=$(echo 'x\ty'); printf '<%s>\n' "$v"
+set -o posix; echo -E 'a\tb'
+""", 0, b"1\n0\n0\na\tb\n<x\ty>\n-E a\tb\n", minimum=5)
+        self.compare(r"""a=(old)
+{ a[]=oops; } 2>/dev/null
+echo "$?:${a[0]}"
+readonly 'b[2]=bad' 2>/dev/null; echo "$?:${#b[@]}"
+""", 0, b"1:old\n1:0\n", minimum=5)
+
+    def test_runtime_home_drives_tilde(self):
+        p = self.command(TONARI, 'HOME=/changed; v=${u-~:~}; printf "%s" "$v"')
+        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, b"/changed:/changed", b""))
+
+    def test_array_parameter_defaults_preserve_fields(self):
+        self.compare(r"""show() { printf '%s' "$#"; for x; do printf '<%s>' "$x"; done; echo; }
+a=()
+show "${a[@]-empty}" "${a[*]:-empty}"
+show "${a[@]+ignored}"
+a=('' '' 'two words')
+show "${a[@]:-other}" "${a[@]:+present}"
+ref='a[@]'; show "${!ref:-other}"
+IFS=; a=('' '')
+show "${a[@]:-other}" "${a[*]:-other}"
+IFS=:
+a=('' y); show ${a[@]:-other}
+declare -A indirect=([k]=v)
+v=blue; show "${!indirect[@]#b}" "${!indirect[@]:-other}"
+""", 0, b"2<empty><empty>\n0\n4<><><two words><present>\n3<><><two words>\n"
+        b"3<><><other>\n2<><y>\n2<lue><blue>\n", minimum=5)
+
+    def test_compgen_fallback_keywords_and_filters(self):
+        (self.cwd / "sp-dir").mkdir()
+        (self.cwd / "spam.py").touch()
+        self.compare(r"""complete -F missing 2>/dev/null; echo $?
+compgen -A command whil
+compgen -k | grep '^time$'
+compgen -o default sp | sort
+compgen -o plusdirs -W 'space' sp | sort
+compgen -o dirnames sp
+""", 0, b"2\nwhile\ntime\nsp-dir\nspam.py\nsp-dir\nspace\nsp-dir\n", minimum=5)
+        source = r"""shopt -s extglob; compgen -f -X "!*.@(py)" -- sp"""
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                p = subprocess.run([shell, "--norc", "-ic", source], cwd=self.cwd,
+                                   env=self.env, capture_output=True, timeout=5)
+                self.assertEqual((p.returncode, p.stdout), (0, b"spam.py\n"), p.stderr)
+
     def test_pipeline_last_argument_and_parent_scope(self):
         self.compare(""": before
 f() { echo "inside:$_"; : changed; }

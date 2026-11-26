@@ -17,6 +17,7 @@ mod parser;
 mod pattern;
 mod prompt;
 mod session;
+mod shell_time;
 mod startup;
 mod subshell;
 mod test_expression;
@@ -456,6 +457,7 @@ fn run_invocation(
 ) -> u8 {
     use cli::Input;
     let mut session = Session::default();
+    session.started_at = unsafe { libc::time(std::ptr::null_mut()) };
     session.import_functions();
     session.initialize_shell_level();
     session.arg0 = std::mem::take(&mut invocation.arg0);
@@ -482,7 +484,7 @@ fn run_invocation(
     session.histexpand = invocation.histexpand.unwrap_or(session.interactive);
     session.emacs = session.interactive
         && !invocation.noediting
-        && *initial_terminal
+        && (*initial_terminal || matches!(invocation.input, Input::Command(_)))
         && !session.get("TERM").is_some_and(|s| s == "dumb");
     if session.interactive
         && let Err(e) = session.traps.init_hangup()
@@ -495,6 +497,8 @@ fn run_invocation(
         session.jobs.init(session.interactive);
     }
     session.command_string = matches!(invocation.input, Input::Command(_));
+    session.command_history_expansion = invocation.histexpand == Some(true);
+    session.stdin_script = matches!(invocation.input, Input::Stdin);
     session.set_posix(invocation.posix);
     session.shopt.progcomp_alias = session.interactive;
     session.inherit_options();
@@ -513,7 +517,7 @@ fn run_invocation(
             session.assign("PS1", "tonari$ ");
         }
         if session.get("HISTFILE").is_none() {
-            if let Some(home) = session.get("HOME") {
+            if let Some(home) = session.get("HOME").or_else(crate::word::account_home) {
                 session.assign("HISTFILE", &format!("{home}/.bash_history"));
             }
         }

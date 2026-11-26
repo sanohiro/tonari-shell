@@ -20,6 +20,7 @@ pub struct ShellOptions {
     pub checkwinsize: bool,
     pub sourcepath: bool,
     pub varredir_close: bool,
+    pub xpg_echo: bool,
     pub expand_aliases: bool,
     pub progcomp: bool,
     pub progcomp_alias: bool,
@@ -47,6 +48,7 @@ impl Default for ShellOptions {
             checkwinsize: true,
             sourcepath: true,
             varredir_close: false,
+            xpg_echo: false,
             expand_aliases: false,
             progcomp: true,
             progcomp_alias: false,
@@ -125,6 +127,7 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("promptvars", shopt.promptvars),
     option_entry!("sourcepath", shopt.sourcepath),
     option_entry!("varredir_close", shopt.varredir_close),
+    option_entry!("xpg_echo", shopt.xpg_echo),
 ];
 impl Session {
     pub fn set_posix(&mut self, enabled: bool) {
@@ -140,6 +143,9 @@ impl Session {
         use crate::editor::bindings::Keymap;
         if name == "noexec" && self.interactive {
             self.noexec = false;
+        }
+        if name == "histexpand" {
+            self.command_history_expansion = enabled;
         }
         if name == "posix" {
             self.set_posix(enabled);
@@ -182,6 +188,12 @@ impl Session {
         Self::option_entries(set)
             .iter()
             .map(move |entry| (entry.name, (entry.read)(self)))
+    }
+
+    pub(crate) fn set_option_enabled(&self, name: &str) -> bool {
+        SET_OPTIONS
+            .binary_search_by_key(&name, |entry| entry.name)
+            .is_ok_and(|i| (SET_OPTIONS[i].read)(self))
     }
 
     pub(super) fn option_list(&self, set: bool) -> String {

@@ -553,7 +553,10 @@ pub fn text(
         here_doc = None;
         let text = &source[start..end];
         let expanded;
-        let expand_history = tail && session.histexpand && session.history_enabled;
+        let expand_history = tail
+            && session.histexpand
+            && session.history_enabled
+            && (!session.command_string || session.command_history_expansion);
         let mut text = if expand_history {
             expanded = match history_input(session, text) {
                 Ok(s) => s,
@@ -632,7 +635,9 @@ pub fn text(
             Err(e) => return syntax_error(session, e, base_line),
             Ok(program) if !program.as_ref().is_empty() && !check => {
                 ran = true;
-                let remember = tail && !session.interactive && session.begin_history_line(text);
+                let remember = tail
+                    && (!session.interactive || session.command_history_expansion)
+                    && session.begin_history_line(text);
                 let flow = program.run(session, status, tail && last);
                 if remember {
                     session.finish_history_line();

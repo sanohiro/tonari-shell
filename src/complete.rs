@@ -439,6 +439,7 @@ fn visit_commands(
         .iter()
         .copied()
         .filter(|n| !session.disabled_builtins.contains(*n))
+        .chain(crate::completion_spec::KEYWORDS.iter().copied())
         .chain(session.functions.keys().map(String::as_str))
         .chain(session.aliases.names().map(String::as_str))
     {

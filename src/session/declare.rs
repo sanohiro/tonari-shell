@@ -251,6 +251,11 @@ pub(super) fn run(
             name
         };
         let target = super::array::subscript(name);
+        if readonly && target.is_some() {
+            eprintln!("tonari: readonly: {name}: not a valid identifier");
+            status = 1;
+            continue;
+        }
         let name = target.map_or(name, |(base, _)| base);
         if !is_identifier(name) {
             eprintln!("tonari: {command}: {arg}: invalid identifier");
@@ -289,6 +294,7 @@ pub(super) fn run(
             status = 1;
             continue;
         }
+        let new_global = !fresh_local && !var.declared && !session.variables.contains_key(name);
         var.declared = true;
         if fresh_local {
             let scope = session.locals.last_mut().unwrap();
@@ -445,7 +451,12 @@ pub(super) fn run(
                 var.value = Some(text);
             }
         }
-        if let Some(on) = flags.exported {
+        if session.allexport
+            && (value.is_some()
+                || new_global && array.is_none() && !flags.array && !flags.associative)
+        {
+            var.exported = true;
+        } else if let Some(on) = flags.exported {
             var.exported = on;
         }
         if let Some(d) = array

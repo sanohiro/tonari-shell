@@ -119,6 +119,15 @@ pub(super) fn dollar(
     word: &mut WordBuilder,
     quoted: bool,
 ) -> Result<(), Error> {
+    dollar_word(chars, word, quoted, false)
+}
+
+fn dollar_word(
+    chars: &mut Chars<'_>,
+    word: &mut WordBuilder,
+    quoted: bool,
+    assignment: bool,
+) -> Result<(), Error> {
     *chars = joined(chars.as_str()).chars();
     let rest = chars.as_str();
     // Only the structural prefix needs joining. Quotes, expansions and here-doc
@@ -135,7 +144,7 @@ pub(super) fn dollar(
             let boundary = input.len();
             input.push_str(&rest[end..]);
             let mut cursor = input.chars();
-            dollar(&mut cursor, word, quoted)?;
+            dollar_word(&mut cursor, word, quoted, assignment)?;
             let consumed = input.len() - cursor.as_str().len();
             let physical = if consumed >= boundary {
                 end + consumed - boundary
@@ -225,7 +234,7 @@ pub(super) fn dollar(
                     if mode != crate::word::ReplaceMode::First {
                         chars.next();
                     }
-                    let (pattern, separator) = parameter_word(chars, false, true)?;
+                    let (pattern, separator) = parameter_word(chars, false, true, false)?;
                     let replacement = if separator == '/' {
                         alternative_word(chars, false)?
                     } else {
@@ -335,7 +344,7 @@ pub(super) fn dollar(
                     None => return Err(Error::Incomplete("unterminated parameter expansion")),
                     _ => return bad_substitution(content, chars, word, quoted),
                 };
-                let alternative = alternative_word(chars, quoted)?;
+                let (alternative, _) = parameter_word(chars, quoted, false, assignment)?;
                 word.part(Part::Alternative {
                     name: name.into(),
                     check_empty,
@@ -377,6 +386,13 @@ pub(super) fn dollar(
         Some('0'..='9' | '@' | '*' | '?' | '$' | '#' | '!' | '-') => {
             chars.next();
             &rest[..1]
+        }
+        Some('[') => {
+            let length = super::modifier::index_end(rest)?;
+            let expression = rest[1..length - 1].into();
+            *chars = rest[length..].chars();
+            word.part(Part::Arithmetic { expression, quoted });
+            return Ok(());
         }
         Some('(') => {
             if let Some(after) = joined(&rest[1..]).strip_prefix('(') {
@@ -446,21 +462,29 @@ pub(super) fn backquote(
 }
 
 fn alternative_word(chars: &mut Chars<'_>, outer_quoted: bool) -> Result<Word, Error> {
-    Ok(parameter_word(chars, outer_quoted, false)?.0)
+    Ok(parameter_word(chars, outer_quoted, false, false)?.0)
 }
 
 fn parameter_word(
     chars: &mut Chars<'_>,
     outer_quoted: bool,
     stop_slash: bool,
+    assignment: bool,
 ) -> Result<(Word, char), Error> {
     let mut word = WordBuilder::default();
     let mut empty = true;
+    let mut after_colon = false;
     while let Some(c) = chars.next() {
+        let eligible = empty || after_colon;
+        after_colon = false;
         match c {
-            '~' if empty && !outer_quoted => {
+            ':' if assignment && !outer_quoted => {
+                word.part(Part::Unquoted(String::from(":")));
+                after_colon = true;
+            }
+            '~' if eligible && !outer_quoted => {
                 let rest = chars.as_str();
-                let end = rest.find(['/', '}']).unwrap_or(rest.len());
+                let end = rest.find(['/', ':', '}']).unwrap_or(rest.len());
                 let user = &rest[..end];
                 if user
                     .chars()
@@ -484,7 +508,7 @@ fn parameter_word(
                 chars.next();
                 word.literal(&ansi::quoted(chars)?);
             }
-            '$' => dollar(chars, &mut word, outer_quoted)?,
+            '$' => dollar_word(chars, &mut word, outer_quoted, assignment)?,
             '"' => quoted(chars, c, &mut word)?,
             '\'' if !outer_quoted => quoted(chars, c, &mut word)?,
             '`' => backquote(chars, &mut word, outer_quoted)?,
@@ -505,6 +529,7 @@ fn parameter_word(
                 let end = rest
                     .find(|v| {
                         stop_slash && v == '/'
+                            || assignment && !outer_quoted && v == ':'
                             || matches!(v, '}' | '$' | '"' | '`' | '\\')
                             || (!outer_quoted && v == '\'')
                     })
@@ -839,10 +864,45 @@ fn command_position(tokens: &[Token]) -> bool {
     true
 }
 
+fn indexed_assignment_position(mut tokens: &[Token]) -> bool {
+    while let Some((last, before)) = tokens.split_last() {
+        if matches!(last, Token::Word(_) | Token::Reserved(_))
+            && let Some((Token::Redirect(..) | Token::BothRedirect(_), prefix)) =
+                before.split_last()
+        {
+            tokens = prefix;
+            continue;
+        }
+        if matches!(last, Token::Word(w) if w.assignment.is_some())
+            || matches!(last, Token::DescriptorName(_))
+        {
+            tokens = before;
+            continue;
+        }
+        return command_position(tokens);
+    }
+    true
+}
+
 pub(super) fn lex(
     source: &str,
     substitution: bool,
     final_input: bool,
+) -> Result<(Vec<Token>, Vec<(usize, usize)>, &str), Error> {
+    lex_words(source, substitution, final_input, None)
+}
+
+pub(super) fn lex_initializer(
+    source: &str,
+) -> Result<(Vec<Token>, Vec<(usize, usize)>, &str), Error> {
+    lex_words(source, false, true, Some(1))
+}
+
+fn lex_words(
+    source: &str,
+    substitution: bool,
+    final_input: bool,
+    mut array_level: Option<usize>,
 ) -> Result<(Vec<Token>, Vec<(usize, usize)>, &str), Error> {
     let mut chars = source.chars();
     let mut parentheses = 0usize;
@@ -971,6 +1031,9 @@ pub(super) fn lex(
                     Token::LeftParen
                 }
                 ')' => {
+                    if array_level == Some(parentheses) {
+                        array_level = None;
+                    }
                     parentheses = parentheses.saturating_sub(1);
                     Token::RightParen
                 }
@@ -1032,7 +1095,14 @@ pub(super) fn lex(
             word.literal(literal);
             chars = start[plain..].chars();
             started = true;
-        } else if let Some(prefix) = super::array::indexed_prefix(start) {
+        } else if start.as_bytes().get(plain) == Some(&b'[')
+            && (if plain == 0 {
+                array_level == Some(parentheses)
+            } else {
+                indexed_assignment_position(&tokens)
+            })
+            && let Some(prefix) = super::array::indexed_prefix(start)
+        {
             word.literal(&start[..prefix.len() + 1]);
             assignment = Some(prefix.to_owned());
             chars = start[prefix.len() + 1..].chars();
@@ -1087,7 +1157,7 @@ pub(super) fn lex(
                         .as_bytes()
                         .first()
                         .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_');
-                    dollar(&mut chars, &mut word, false)?;
+                    dollar_word(&mut chars, &mut word, false, assignment.is_some())?;
                     if named
                         && (chars.as_str().starts_with('{')
                             || braces > 0 && chars.as_str().starts_with([',', '}']))
@@ -1253,6 +1323,7 @@ pub(super) fn lex(
         if begins_array {
             chars.next();
             parentheses += 1;
+            array_level = Some(parentheses);
             tokens.push(Token::ArrayStart);
         }
     }
