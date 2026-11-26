@@ -42,7 +42,11 @@ pub(super) fn needs_parser(source: &[u8]) -> bool {
                 // The reference shells default to globasciiranges. Native
                 // fnmatch may put accented letters between ASCII endpoints.
                 if body[..end].iter().any(|b| matches!(b, b'\\' | b'-'))
-                    || body[..end].windows(2).any(|w| matches!(w, b"[." | b"[="))
+                    || body[..end].split(|&b| b == b'[').skip(1).any(|item| {
+                        matches!(item.first(), Some(b'.' | b'='))
+                            || item.starts_with(b":ascii:]")
+                            || (item.starts_with(b":") && !item.ends_with(b":]"))
+                    })
                 {
                     return true;
                 }
@@ -71,11 +75,96 @@ fn packed(value: &[u8]) -> [u8; 4] {
     bytes
 }
 
+// Names in the portable character set identify one collating element even on
+// systems whose native fnmatch does not supply the corresponding locale table.
+pub(crate) fn portable_symbol(name: &[u8]) -> Option<u8> {
+    Some(match name {
+        b"NUL" => 0,
+        b"SOH" => 1,
+        b"STX" => 2,
+        b"ETX" => 3,
+        b"EOT" => 4,
+        b"ENQ" => 5,
+        b"ACK" => 6,
+        b"alert" => 7,
+        b"BS" | b"backspace" => 8,
+        b"HT" | b"tab" => 9,
+        b"LF" | b"newline" => 10,
+        b"VT" | b"vertical-tab" => 11,
+        b"FF" | b"form-feed" => 12,
+        b"CR" | b"carriage-return" => 13,
+        b"SO" => 14,
+        b"SI" => 15,
+        b"DLE" => 16,
+        b"DC1" => 17,
+        b"DC2" => 18,
+        b"DC3" => 19,
+        b"DC4" => 20,
+        b"NAK" => 21,
+        b"SYN" => 22,
+        b"ETB" => 23,
+        b"CAN" => 24,
+        b"EM" => 25,
+        b"SUB" => 26,
+        b"ESC" => 27,
+        b"IS4" | b"FS" => 28,
+        b"IS3" | b"GS" => 29,
+        b"IS2" | b"RS" => 30,
+        b"IS1" | b"US" => 31,
+        b"space" => b' ',
+        b"exclamation-mark" => b'!',
+        b"quotation-mark" => b'"',
+        b"number-sign" => b'#',
+        b"dollar-sign" => b'$',
+        b"percent-sign" => b'%',
+        b"ampersand" => b'&',
+        b"apostrophe" => b'\'',
+        b"left-parenthesis" => b'(',
+        b"right-parenthesis" => b')',
+        b"asterisk" => b'*',
+        b"plus-sign" => b'+',
+        b"comma" => b',',
+        b"hyphen" | b"hyphen-minus" | b"minus" | b"dash" => b'-',
+        b"period" | b"full-stop" => b'.',
+        b"slash" | b"solidus" => b'/',
+        b"zero" => b'0',
+        b"one" => b'1',
+        b"two" => b'2',
+        b"three" => b'3',
+        b"four" => b'4',
+        b"five" => b'5',
+        b"six" => b'6',
+        b"seven" => b'7',
+        b"eight" => b'8',
+        b"nine" => b'9',
+        b"colon" => b':',
+        b"semicolon" => b';',
+        b"less-than-sign" => b'<',
+        b"equals-sign" => b'=',
+        b"greater-than-sign" => b'>',
+        b"question-mark" => b'?',
+        b"commercial-at" => b'@',
+        b"left-square-bracket" => b'[',
+        b"backslash" | b"reverse-solidus" => b'\\',
+        b"right-square-bracket" => b']',
+        b"circumflex" | b"circumflex-accent" => b'^',
+        b"underline" | b"underscore" | b"low-line" => b'_',
+        b"grave-accent" => b'`',
+        b"left-brace" | b"left-curly-bracket" => b'{',
+        b"vertical-line" => b'|',
+        b"right-brace" | b"right-curly-bracket" => b'}',
+        b"tilde" => b'~',
+        b"DEL" => 127,
+        _ => return None,
+    })
+}
+
 #[derive(Debug)]
 enum Member {
     Literal([u8; 4]),
     Range([u8; 4], [u8; 4]),
     Native(CString),
+    Ascii,
     Never,
 }
 
@@ -86,6 +175,10 @@ impl Member {
             let item = &input[..len];
             match item[1] {
                 b'.' if item.contains(&b'\\') => return (Self::Never, &input[len..]),
+                b':' if &item[2..len - 2] == b"ascii" => return (Self::Ascii, &input[len..]),
+                b'.' if let Some(byte) = portable_symbol(&item[2..len - 2]) => {
+                    return (Self::Literal(packed(&[byte])), &input[len..]);
+                }
                 b'.' | b'=' if len > 4 => {
                     let (first, rest) = unit(&item[2..len - 2], utf8);
                     if rest.is_empty() {
@@ -106,8 +199,9 @@ impl Member {
     fn accepts(&self, value: &[u8; 4]) -> bool {
         match self {
             Self::Literal(v) => v == value,
-            Self::Range(lo, hi) => lo <= value && value <= hi,
+            Self::Range(lo, hi) => super::glob_locale::in_range(lo, value, hi),
             Self::Never => false,
+            Self::Ascii => value[0].is_ascii(),
             Self::Native(pattern) => {
                 let mut name = [0u8; 5];
                 name[..value.len()].copy_from_slice(value);
@@ -178,6 +272,12 @@ impl CharacterClass {
     }
 
     fn compare(&self, a: char, b: char) -> std::cmp::Ordering {
+        if super::glob_locale::collated_ranges() {
+            let (mut left, mut right) = ([0u8; 4], [0u8; 4]);
+            a.encode_utf8(&mut left);
+            b.encode_utf8(&mut right);
+            return super::glob_locale::range_order(&left, &right);
+        }
         let order = a.cmp(&b);
         if a == b
             || (a as u32 <= 255 && b as u32 <= 255)
@@ -302,7 +402,8 @@ impl BracketPattern {
         else {
             return false;
         };
-        if self.utf8 && std::str::from_utf8(text).is_err() {
+        let utf8 = self.utf8 || super::glob_locale::collated_ranges();
+        if utf8 && std::str::from_utf8(text).is_err() {
             return false;
         }
         let mut tokens = self.tokens.as_slice();
@@ -316,7 +417,7 @@ impl BracketPattern {
                     continue;
                 }
                 Some((token, after)) if !text.is_empty() => {
-                    let (value, rest) = unit(text, self.utf8);
+                    let (value, rest) = unit(text, utf8);
                     if token.accepts(&packed(value)) {
                         tokens = after;
                         text = rest;
@@ -333,7 +434,7 @@ impl BracketPattern {
             if start.is_empty() {
                 return false;
             }
-            (_, text) = unit(start, self.utf8);
+            (_, text) = unit(start, utf8);
             retry = Some((after, text));
             tokens = after;
         }

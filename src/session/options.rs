@@ -6,8 +6,17 @@ use super::Session;
 pub struct ShellOptions {
     pub compat: u8,
     pub autocd: bool,
+    pub array_expand_once: bool,
+    pub extquote: bool,
+    pub gnu_errfmt: bool,
+    pub globasciiranges: bool,
     pub cdable_vars: bool,
+    pub cdspell: bool,
+    pub dirspell: bool,
+    pub direxpand: bool,
+    pub complete_fullquote: bool,
     pub checkhash: bool,
+    pub checkjobs: bool,
     pub nocasematch: bool,
     pub extdebug: bool,
     pub promptvars: bool,
@@ -47,8 +56,17 @@ impl Default for ShellOptions {
         Self {
             compat: CURRENT_COMPAT,
             autocd: false,
+            array_expand_once: false,
+            extquote: true,
+            gnu_errfmt: false,
+            globasciiranges: true,
             cdable_vars: false,
+            cdspell: false,
+            dirspell: false,
+            direxpand: false,
+            complete_fullquote: true,
             checkhash: false,
+            checkjobs: false,
             nocasematch: false,
             extdebug: false,
             promptvars: true,
@@ -108,39 +126,57 @@ macro_rules! compat_entry {
     };
 }
 
-const SET_OPTIONS: &[OptionEntry] = &[
-    option_entry!("allexport", allexport),
-    option_entry!("braceexpand", shopt.braceexpand),
-    option_entry!("emacs", emacs),
-    option_entry!("errexit", errexit),
-    option_entry!("errtrace", errtrace),
-    option_entry!("functrace", functrace),
-    option_entry!("hashall", hashes.enabled),
-    option_entry!("histexpand", histexpand),
-    option_entry!("history", history_enabled),
-    option_entry!("ignoreeof", ignoreeof),
-    option_entry!("interactive-comments", shopt.interactive_comments),
-    option_entry!("keyword", keyword),
-    option_entry!("monitor", jobs.monitor),
-    option_entry!("noclobber", noclobber),
-    option_entry!("noexec", noexec),
-    option_entry!("noglob", noglob),
-    option_entry!("nolog", shopt.nolog),
-    option_entry!("notify", notify),
-    option_entry!("nounset", nounset),
-    option_entry!("onecmd", onecmd),
-    option_entry!("physical", physical),
-    option_entry!("pipefail", pipefail),
-    option_entry!("posix", posix),
-    option_entry!("verbose", verbose),
-    option_entry!("vi", vi),
-    option_entry!("xtrace", xtrace),
-];
+// Derive both the lookup table and the direct snapshot reads from the same
+// order. Function return only visits hooks for bits which actually changed.
+macro_rules! set_options {
+    ($( $name:literal => $($field:ident).+ ),+ $(,)?) => {
+        const SET_OPTIONS: &[OptionEntry] = &[$(option_entry!($name, $($field).+)),+];
+        fn set_bits(s: &Session) -> u32 {
+            let mut bits = 0;
+            for (i, enabled) in [$(s.$($field).+),+].into_iter().enumerate() {
+                bits |= u32::from(enabled) << i;
+            }
+            bits
+        }
+    }
+}
+set_options! {
+    "allexport" => allexport,
+    "braceexpand" => shopt.braceexpand,
+    "emacs" => emacs,
+    "errexit" => errexit,
+    "errtrace" => errtrace,
+    "functrace" => functrace,
+    "hashall" => hashes.enabled,
+    "histexpand" => histexpand,
+    "history" => history_enabled,
+    "ignoreeof" => ignoreeof,
+    "interactive-comments" => shopt.interactive_comments,
+    "keyword" => keyword,
+    "monitor" => jobs.monitor,
+    "noclobber" => noclobber,
+    "noexec" => noexec,
+    "noglob" => noglob,
+    "nolog" => shopt.nolog,
+    "notify" => notify,
+    "nounset" => nounset,
+    "onecmd" => onecmd,
+    "physical" => physical,
+    "pipefail" => pipefail,
+    "posix" => posix,
+    "verbose" => verbose,
+    "vi" => vi,
+    "xtrace" => xtrace,
+}
 const SHOPT_OPTIONS: &[OptionEntry] = &[
+    option_entry!("array_expand_once", shopt.array_expand_once),
+    option_entry!("assoc_expand_once", shopt.array_expand_once),
     option_entry!("autocd", shopt.autocd),
     option_entry!("bash_source_fullpath", shopt.bash_source_fullpath),
     option_entry!("cdable_vars", shopt.cdable_vars),
+    option_entry!("cdspell", shopt.cdspell),
     option_entry!("checkhash", shopt.checkhash),
+    option_entry!("checkjobs", shopt.checkjobs),
     option_entry!("checkwinsize", shopt.checkwinsize),
     option_entry!("cmdhist", shopt.cmdhist),
     compat_entry!("compat31", 31),
@@ -150,15 +186,21 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     compat_entry!("compat42", 42),
     compat_entry!("compat43", 43),
     compat_entry!("compat44", 44),
+    option_entry!("complete_fullquote", shopt.complete_fullquote),
+    option_entry!("direxpand", shopt.direxpand),
+    option_entry!("dirspell", shopt.dirspell),
     option_entry!("dotglob", shopt.glob.dotglob),
     option_entry!("execfail", shopt.execfail),
     option_entry!("expand_aliases", shopt.expand_aliases),
     option_entry!("extdebug", shopt.extdebug),
     option_entry!("extglob", shopt.glob.extglob),
+    option_entry!("extquote", shopt.extquote),
     option_entry!("failglob", shopt.glob.failglob),
     option_entry!("force_fignore", shopt.force_fignore),
+    option_entry!("globasciiranges", shopt.globasciiranges),
     option_entry!("globskipdots", shopt.glob.globskipdots),
     option_entry!("globstar", shopt.glob.globstar),
+    option_entry!("gnu_errfmt", shopt.gnu_errfmt),
     option_entry!("histappend", shopt.histappend),
     option_entry!("histreedit", shopt.histreedit),
     option_entry!("histverify", shopt.histverify),
@@ -244,6 +286,7 @@ impl Session {
         self.jobs.quiet = enabled && !self.interactive;
         self.shopt.expand_aliases = enabled || self.interactive;
         if enabled {
+            self.shopt.interactive_comments = true;
             self.shopt.inherit_errexit = true;
             self.shopt.sourcepath = true;
         }
@@ -263,6 +306,14 @@ impl Session {
         if name == "posix" {
             self.set_posix(enabled);
         }
+        if name == "ignoreeof" {
+            self.unset_variable("ignoreeof");
+            if enabled {
+                self.assign("IGNOREEOF", "10");
+            } else {
+                self.unset_variable("IGNOREEOF");
+            }
+        }
         if enabled && name == "emacs" {
             self.vi = false;
             self.bindings.map = Keymap::Emacs;
@@ -272,6 +323,15 @@ impl Session {
             self.bindings.map = Keymap::Insert;
         }
     }
+    pub(crate) fn set_eof_variable(&mut self, value: Option<&str>) {
+        self.ignoreeof = value.is_some();
+        let Some(text) = value else { return };
+        self.ignoreeof_limit = Some(text)
+            .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(10);
+    }
+
     pub(crate) fn read_comments(&self) -> bool {
         !self.interactive || self.source_depth != 0 || self.shopt.interactive_comments
     }
@@ -299,6 +359,28 @@ impl Session {
 
     fn option_entries(set: bool) -> &'static [OptionEntry] {
         if set { SET_OPTIONS } else { SHOPT_OPTIONS }
+    }
+
+    pub(super) fn save_local_options(&mut self) {
+        if let Some(index) = self.declaration_scope("-")
+            && self.locals[index].3.is_none()
+        {
+            self.locals[index].3 = std::num::NonZeroU32::new(set_bits(self) | (1 << 31));
+        }
+    }
+
+    pub(super) fn restore_set_options(&mut self, bits: u32) {
+        let mut changed = set_bits(self) ^ bits;
+        while changed != 0 {
+            let index = changed.trailing_zeros();
+            changed &= changed - 1;
+            let entry = &SET_OPTIONS[index as usize];
+            let enabled = bits & (1 << index) != 0;
+            if let Some(write) = entry.write {
+                *write(self) = enabled;
+                self.option_changed(entry.name, enabled);
+            }
+        }
     }
 
     pub(crate) fn options(&self, set: bool) -> impl Iterator<Item = (&'static str, bool)> {
@@ -426,6 +508,9 @@ impl Session {
                         }
                     }
                     *write(self) = enable;
+                    if !set && name == "globasciiranges" {
+                        crate::pattern::sync_ranges(self);
+                    }
                     if set {
                         self.option_changed(name, enable);
                     }

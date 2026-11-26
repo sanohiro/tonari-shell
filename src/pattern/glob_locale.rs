@@ -97,3 +97,67 @@ pub(super) fn run<T>(
         work(order, locale.characters)
     })
 }
+
+// A script may change LC_COLLATE or the shopt between two matches against
+// the same compiled case pattern. Keep the comparison mode out of its AST.
+thread_local! {
+    static RANGE_CACHE: RefCell<Option<Cached>> = const { RefCell::new(None) };
+    static RANGE_HANDLE: std::cell::Cell<libc::locale_t> = const { std::cell::Cell::new(std::ptr::null_mut()) };
+}
+
+pub(crate) fn sync_ranges(session: &crate::Session) {
+    if session.shopt.globasciiranges {
+        RANGE_HANDLE.set(std::ptr::null_mut());
+        return;
+    }
+    let name = ["LC_ALL", "LC_COLLATE", "LANG"]
+        .into_iter()
+        .find_map(|key| session.scalar_setting(key).filter(|s| !s.is_empty()))
+        .unwrap_or_default();
+    if matches!(name.as_ref(), "" | "C" | "POSIX" | "C.UTF-8" | "C.utf8") {
+        RANGE_HANDLE.set(std::ptr::null_mut());
+        return;
+    }
+    RANGE_CACHE.with_borrow_mut(|cached| {
+        if cached.as_ref().is_none_or(|x| x.collate != name) {
+            RANGE_HANDLE.set(std::ptr::null_mut());
+            let owned = name.into_owned();
+            *cached = Cached::new(owned.clone(), owned);
+        }
+        RANGE_HANDLE.set(cached.as_ref().map_or(std::ptr::null_mut(), |x| x.handle));
+    });
+}
+
+pub(super) fn collated_ranges() -> bool {
+    !RANGE_HANDLE.get().is_null()
+}
+
+pub(super) fn range_order(a: &[u8; 4], b: &[u8; 4]) -> std::cmp::Ordering {
+    compare(RANGE_HANDLE.get(), a, b)
+}
+
+pub(super) fn in_range(lo: &[u8; 4], value: &[u8; 4], hi: &[u8; 4]) -> bool {
+    let locale = RANGE_HANDLE.get();
+    if locale.is_null() {
+        return lo <= value && value <= hi;
+    }
+    !compare(locale, lo, value).is_gt() && !compare(locale, value, hi).is_gt()
+}
+
+fn compare(locale: libc::locale_t, a: &[u8; 4], b: &[u8; 4]) -> std::cmp::Ordering {
+    if locale.is_null() || a == b {
+        return a.cmp(b);
+    }
+    unsafe extern "C" {
+        fn strcoll_l(
+            a: *const libc::c_char,
+            b: *const libc::c_char,
+            locale: libc::locale_t,
+        ) -> libc::c_int;
+    }
+    let mut left = [0u8; 5];
+    let mut right = [0u8; 5];
+    left[..4].copy_from_slice(a);
+    right[..4].copy_from_slice(b);
+    unsafe { strcoll_l(left.as_ptr().cast(), right.as_ptr().cast(), locale) }.cmp(&0)
+}

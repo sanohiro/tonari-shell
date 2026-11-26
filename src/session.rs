@@ -133,6 +133,7 @@ pub struct Session {
     // Only changed variables are stored here. Simple commands inherit the
     // original process environment without building a copy on startup.
     variables: BTreeMap<String, Variable>,
+    inherited_names: std::cell::OnceCell<Rc<Vec<String>>>,
     dynamic: dynamic::Dynamic,
     groups_unset: bool,
     funcname_unset: bool,
@@ -155,6 +156,7 @@ pub struct Session {
     pub notify: bool,
     pub noexec: bool,
     pub ignoreeof: bool,
+    pub ignoreeof_limit: usize,
     pub xtrace: bool,
     pub onecmd: bool,
     pub subshell_depth: u32,
@@ -189,7 +191,7 @@ pub struct Session {
     pub shopt: options::ShellOptions,
     pub(crate) external_env: std::cell::RefCell<Option<Rc<crate::execute::Environment>>>,
     pub(crate) eval_cache: crate::input::EvalCache,
-    pub regex: [Option<Rc<crate::test_expression::Compiled>>; 2],
+    pub regex: [[Option<Rc<crate::test_expression::Compiled>>; 4]; 2],
     pub(crate) coprocesses: Vec<Rc<crate::execute::coprocess::Coprocess>>,
     pub substitutions: crate::execute::process_substitution::Substitutions,
     pub jobs: crate::jobs::Jobs,
@@ -224,7 +226,22 @@ pub struct Session {
 }
 
 #[derive(Clone, Default)]
-pub struct Bindings(BTreeMap<String, Option<Variable>>, Option<usize>, bool);
+pub struct Bindings(
+    BTreeMap<String, Option<Variable>>,
+    Option<usize>,
+    bool,
+    Option<std::num::NonZeroU32>,
+    Option<PosixSettings>,
+);
+
+#[derive(Clone, Copy)]
+struct PosixSettings {
+    expand_aliases: bool,
+    inherit_errexit: bool,
+    interactive_comments: bool,
+    shift_verbose: bool,
+    sourcepath: bool,
+}
 
 enum DirectoryError {
     NoPath(io::Error),
@@ -274,48 +291,89 @@ impl Session {
     }
 
     pub fn variable_names(&self, prefix: &str) -> Vec<String> {
-        let mut names: std::collections::BTreeSet<_> = std::env::vars_os()
-            .filter_map(|(k, _)| k.into_string().ok())
-            .filter(|k| k.starts_with(prefix) && is_identifier(k))
-            .collect();
-        names.extend(
-            [
-                "PWD",
-                "IFS",
-                "PATH",
-                "OPTIND",
-                "OPTERR",
-                "UID",
-                "EUID",
-                "PPID",
-                "BASHOPTS",
-                "SHELLOPTS",
-                "BASH",
-                "BASH_VERSION",
-                "BASH_VERSINFO",
-                "BASH_ALIASES",
-                "BASH_CMDS",
-                "SECONDS",
-                "RANDOM",
-                "SRANDOM",
-                "BASH_MONOSECONDS",
-                "HISTCMD",
-                "GROUPS",
-                "HOSTTYPE",
-                "HOSTNAME",
-                "PS4",
-                "OSTYPE",
-                "MACHTYPE",
-            ]
+        self.visible_names(prefix)
             .into_iter()
-            .filter(|k| k.starts_with(prefix))
-            .map(str::to_owned),
-        );
-        if !self.word_breaks_unset && "COMP_WORDBREAKS".starts_with(prefix) {
-            names.insert("COMP_WORDBREAKS".into());
-        }
-        if self.execution_string.is_some() && "BASH_EXECUTION_STRING".starts_with(prefix) {
-            names.insert("BASH_EXECUTION_STRING".into());
+            .map(str::to_owned)
+            .collect()
+    }
+
+    fn visible_names(&self, prefix: &str) -> Vec<&str> {
+        // Only a fresh shell session changes the inherited process environment.
+        // Shell bindings, tombstones and optional names remain live overlays.
+        let base = self.inherited_names.get_or_init(|| {
+            let mut names: Vec<_> = std::env::vars_os()
+                .filter_map(|(key, _)| key.into_string().ok())
+                .filter(|key| is_identifier(key))
+                .collect();
+            names.extend(
+                [
+                    "PWD",
+                    "SHELL",
+                    "TERM",
+                    "_",
+                    "IFS",
+                    "PATH",
+                    "OPTIND",
+                    "OPTERR",
+                    "UID",
+                    "EUID",
+                    "PPID",
+                    "BASHOPTS",
+                    "SHELLOPTS",
+                    "BASH",
+                    "BASH_VERSION",
+                    "BASHPID",
+                    "BASH_ARGV0",
+                    "BASH_COMMAND",
+                    "BASH_SUBSHELL",
+                    "LINENO",
+                    "EPOCHSECONDS",
+                    "EPOCHREALTIME",
+                    "BASH_VERSINFO",
+                    "BASH_ALIASES",
+                    "BASH_CMDS",
+                    "SECONDS",
+                    "RANDOM",
+                    "SRANDOM",
+                    "BASH_MONOSECONDS",
+                    "BASH_ARGC",
+                    "BASH_ARGV",
+                    "BASH_SOURCE",
+                    "BASH_LINENO",
+                    "FUNCNAME",
+                    "DIRSTACK",
+                    "PIPESTATUS",
+                    "HISTCMD",
+                    "GROUPS",
+                    "HOSTTYPE",
+                    "HOSTNAME",
+                    "PS4",
+                    "OSTYPE",
+                    "MACHTYPE",
+                ]
+                .into_iter()
+                .map(str::to_owned),
+            );
+            names.sort_unstable();
+            names.dedup();
+            Rc::new(names)
+        });
+        let start = base.partition_point(|key| key.as_str() < prefix);
+        let mut names: Vec<_> = base[start..]
+            .iter()
+            .take_while(|key| key.starts_with(prefix))
+            .map(String::as_str)
+            .filter(|key| {
+                !(self.funcname_unset && *key == "FUNCNAME") && !self.variables.contains_key(*key)
+            })
+            .collect();
+        for (key, active) in [
+            ("COMP_WORDBREAKS", !self.word_breaks_unset),
+            ("BASH_EXECUTION_STRING", self.execution_string.is_some()),
+        ] {
+            if active && key.starts_with(prefix) && !self.variables.contains_key(key) {
+                names.push(key);
+            }
         }
         use std::ops::Bound::{Included, Unbounded};
         for (key, var) in self
@@ -326,12 +384,12 @@ impl Session {
                 break;
             }
             if var.declared {
-                names.insert(key.clone());
-            } else {
-                names.remove(key);
+                names.push(key);
             }
         }
-        names.into_iter().collect()
+        names.sort_unstable();
+        names.dedup();
+        names
     }
 
     pub fn shell_pid(&self) -> u32 {
@@ -445,25 +503,73 @@ impl Session {
         if args.is_empty() {
             let mut out = io::BufWriter::new(io::stdout().lock());
             let locale = self.character_locale();
-            for name in self.variable_names("") {
-                let result = if let Some(var) = self.variables.get(&name)
-                    && var.elements.is_some()
-                {
-                    if !var.array_assigned {
+            for name in self.visible_names("") {
+                let stored = self.variables.get(name);
+                let snapshot;
+                let empty_snapshot = stored.is_none()
+                    && match name {
+                        "BASH_ARGV" | "BASH_ARGC" => {
+                            self.function_depth == 0 && self.debug_base.get().is_none()
+                        }
+                        "BASH_ALIASES" => self
+                            .aliases
+                            .0
+                            .as_ref()
+                            .is_none_or(|aliases| aliases.is_empty()),
+                        "BASH_CMDS" => self.hashes.items().next().is_none(),
+                        "BASH_SOURCE" => self.source_names.is_empty(),
+                        "BASH_LINENO" => self.call_lines.is_empty(),
+                        "GROUPS" => !self.dynamic.groups_read.get(),
+                        "DIRSTACK" => !self.dynamic.stack_read.get(),
+                        _ => false,
+                    };
+                let result = if name == "BASH_VERSINFO" && stored.is_none() {
+                    // The executable version is immutable across shell scopes.
+                    static VERSION: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+                    out.write_all(VERSION.get_or_init(|| {
+                        let mut bytes = name.as_bytes().to_vec();
+                        let version = self.declared_variable(name, false).unwrap();
+                        print_variable_value(&mut bytes, &version).expect("in-memory write");
+                        bytes
+                    }))
+                } else if empty_snapshot {
+                    writeln!(out, "{name}=()")
+                } else if self.array_parameter(name) {
+                    let var = if let Some(var) = stored.filter(|v| !v.dynamic) {
+                        var
+                    } else {
+                        snapshot = self.declared_variable(name, false).unwrap();
+                        &snapshot
+                    };
+                    if !var.array_assigned
+                        || name == "PIPESTATUS" && self.pipe_status.first.is_none()
+                    {
                         continue;
                     }
                     write!(out, "{name}").and_then(|_| print_variable_value(&mut out, var))
-                } else if let Some(value) = self
-                    .variables
-                    .get(&name)
-                    .filter(|v| !v.dynamic)
-                    .and_then(|v| v.value.as_deref())
-                    .map(Cow::Borrowed)
-                    .or_else(|| self.get(&name).map(Cow::Owned))
-                {
-                    writeln!(out, "{name}={}", set_value(&value, self.posix, locale))
                 } else {
-                    continue;
+                    let value = if dynamic::is_dynamic(name) && stored.is_none_or(|v| v.dynamic) {
+                        // A listing must not advance RANDOM or consume fresh entropy.
+                        self.listed_number(name).map(|v| Cow::Owned(v.to_string()))
+                    } else if let Some(var) = stored {
+                        var.value.as_deref().map(Cow::Borrowed)
+                    } else if matches!(
+                        name,
+                        "BASHPID"
+                            | "BASH_ARGV0"
+                            | "BASH_COMMAND"
+                            | "BASH_SUBSHELL"
+                            | "LINENO"
+                            | "COMP_WORDBREAKS"
+                            | "EPOCHSECONDS"
+                            | "EPOCHREALTIME"
+                    ) {
+                        self.listed_text(name).map(Cow::Owned)
+                    } else {
+                        self.get(name).map(Cow::Owned)
+                    };
+                    let Some(value) = value else { continue };
+                    writeln!(out, "{name}={}", set_value(&value, self.posix, locale))
                 };
                 if result.is_err() {
                     return 1;
@@ -471,7 +577,7 @@ impl Session {
             }
             if !self.posix {
                 for name in self.functions.keys() {
-                    if self.print_function(&mut out, name).is_err() {
+                    if self.print_function(&mut out, name, false).is_err() {
                         return 1;
                     }
                 }
@@ -570,10 +676,17 @@ impl Session {
         self.has_namerefs && self.variables.get(name).is_some_and(|v| v.nameref)
     }
 
-    fn valid_reference_target(name: &str) -> bool {
+    pub(crate) fn valid_reference_target(name: &str) -> bool {
         is_identifier(name)
-            || array::subscript(name)
-                .is_some_and(|(base, index)| is_identifier(base) && !index.is_empty())
+            || array::subscript(name).is_some_and(|(base, index)| {
+                is_identifier(base)
+                    && !index.is_empty()
+                    && (index
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                        || crate::parser::index_end(&name[base.len()..]).ok()
+                            == Some(name.len() - base.len()))
+            })
     }
 
     pub(crate) fn assign_for_reference(
@@ -616,27 +729,78 @@ impl Session {
     }
 
     pub fn reference_name<'a>(&self, name: &'a str) -> Result<Cow<'a, str>, &'static str> {
+        self.scoped_reference_name(name, false)
+    }
+
+    fn scoped_reference_name<'a>(
+        &self,
+        name: &'a str,
+        global: bool,
+    ) -> Result<Cow<'a, str>, &'static str> {
         if !self.has_namerefs {
             return Ok(Cow::Borrowed(name));
         }
-        let mut result = Cow::Borrowed(name);
-        for _ in 0..32 {
-            let (base, suffix) = array::subscript(&result)
-                .map_or((result.as_ref(), ""), |(base, _)| {
-                    (base, &result[base.len()..])
+        let split = |s: &str| {
+            array::subscript(s)
+                .map(|(base, _)| base.len())
+                .unwrap_or(s.len())
+        };
+        let (mut base, mut suffix) = name.split_at(split(name));
+        for depth in 0..32 {
+            let target = self
+                .scoped_variable(base, global)
+                .filter(|v| v.nameref)
+                .and_then(|v| v.value.as_deref())
+                .filter(|s| !s.is_empty());
+            let Some(target) = target else {
+                return Ok(if depth == 0 {
+                    Cow::Borrowed(name)
+                } else if suffix.is_empty() {
+                    Cow::Owned(base.to_owned())
+                } else {
+                    Cow::Owned(format!("{base}{suffix}"))
                 });
-            let Some(v) = self.variables.get(base).filter(|v| v.nameref) else {
-                return Ok(result);
             };
-            let Some(target) = v.value.as_deref().filter(|t| !t.is_empty()) else {
-                return Ok(result);
-            };
-            if !suffix.is_empty() && array::subscript(target).is_some() {
-                return Err("invalid indexed name reference");
+            let (next, index) = target.split_at(split(target));
+            if !index.is_empty() {
+                if !suffix.is_empty() {
+                    return Err("invalid indexed name reference");
+                }
+                suffix = index;
             }
-            result = Cow::Owned(format!("{target}{suffix}"));
+            base = next;
         }
         Err("circular name reference")
+    }
+
+    // Ordinary shell-authored scalars can be inspected without copying their value.
+    pub(crate) fn scalar_setting(&self, name: &str) -> Option<Cow<'_, str>> {
+        match self.variables.get(name) {
+            Some(var) if !var.nameref && !var.dynamic && var.elements.is_none() => {
+                return var.value.as_deref().map(Cow::Borrowed);
+            }
+            None => {
+                // In-process script reentry changes only PATH and directory/level
+                // variables. These inherited history settings stay constant.
+                static HISTORY: [std::sync::OnceLock<Option<String>>; 4] =
+                    [const { std::sync::OnceLock::new() }; 4];
+                let slot = match name {
+                    "HISTSIZE" => Some(0),
+                    "HISTCONTROL" => Some(1),
+                    "HISTIGNORE" => Some(2),
+                    "histchars" => Some(3),
+                    _ => None,
+                };
+                if let Some(i) = slot {
+                    return HISTORY[i]
+                        .get_or_init(|| std::env::var(name).ok())
+                        .as_deref()
+                        .map(Cow::Borrowed);
+                }
+            }
+            Some(_) => {}
+        }
+        self.get(name).map(Cow::Owned)
     }
 
     pub fn get(&self, name: &str) -> Option<String> {
@@ -733,23 +897,42 @@ impl Session {
             "HISTCMD" | "BASH_MONOSECONDS" | "RANDOM" | "SECONDS" | "SRANDOM" => {
                 self.dynamic_number(name).map(|v| v.to_string())
             }
-            "COMP_WORDBREAKS" => {
-                Some(crate::complete::default_word_breaks(self.shopt.hostcomplete).into())
+            "COMP_WORDBREAKS" => Some(self.observe_text(
+                "COMP_WORDBREAKS",
+                crate::complete::default_word_breaks(self.shopt.hostcomplete).into(),
+            )),
+            "BASHPID" => {
+                let pid = std::process::id();
+                self.dynamic.pid.set(Some(pid));
+                Some(pid.to_string())
             }
-            "BASH_SUBSHELL" => Some(self.subshell_depth.to_string()),
-            "BASH_ARGV0" => Some(self.arg0.clone()),
+            "BASH_SUBSHELL" => {
+                self.dynamic.depth.set(Some(self.subshell_depth));
+                Some(self.subshell_depth.to_string())
+            }
+            "BASH_ARGV0" => Some(self.observe_text("BASH_ARGV0", self.arg0.clone())),
             "EPOCHSECONDS" | "EPOCHREALTIME" => {
                 let dt = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .ok()?;
                 Some(if name == "EPOCHSECONDS" {
-                    dt.as_secs().to_string()
+                    self.observe_text("EPOCHSECONDS", dt.as_secs().to_string())
                 } else {
-                    format!("{}.{:06}", dt.as_secs(), dt.subsec_micros())
+                    self.observe_text(
+                        "EPOCHREALTIME",
+                        format!("{}.{:06}", dt.as_secs(), dt.subsec_micros()),
+                    )
                 })
             }
-            "LINENO" => Some(self.line().to_string()),
-            "BASH_COMMAND" => self.current_command.as_ref().map(|c| c.text().to_owned()),
+            "LINENO" => {
+                let n = self.line();
+                self.dynamic.lineno.set(Some(n));
+                Some(n.to_string())
+            }
+            "BASH_COMMAND" => self
+                .current_command
+                .as_ref()
+                .map(|c| self.observe_text("BASH_COMMAND", c.text().to_owned())),
             "EUID" => Some(unsafe { libc::geteuid() }.to_string()),
             "UID" => Some(unsafe { libc::getuid() }.to_string()),
             "PPID" => Some(self.shell_pid.1.to_string()),
@@ -763,6 +946,7 @@ impl Session {
             "BASH_VERSION" => Some("5.2.0(1)-tonari".into()),
             "GROUPS" | "BASH_VERSINFO" => self.element(name, 0),
             "SHELL" => std::env::var(name).ok().or_else(crate::word::account_shell),
+            "TERM" => Some(std::env::var(name).unwrap_or_else(|_| "dumb".into())),
             "HOSTNAME" => std::env::var(name).ok().or_else(|| {
                 static HOST: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
                 HOST.get_or_init(|| {
@@ -868,6 +1052,8 @@ impl Session {
             name,
             "BASH_ARGV0"
                 | "GLOBIGNORE"
+                | "IGNOREEOF"
+                | "ignoreeof"
                 | "POSIXLY_CORRECT"
                 | "BASH_COMPAT"
                 | "HISTSIZE"
@@ -926,6 +1112,10 @@ impl Session {
             }
             _ => {}
         }
+        if self.is_nameref(name) && !Self::valid_reference_target(&value) {
+            eprintln!("tonari: {name}: invalid name reference");
+            return;
+        }
         if self.readonly(name) {
             return;
         }
@@ -947,6 +1137,9 @@ impl Session {
         }
         if name == "BASH_ARGV0" {
             self.arg0 = value.to_string();
+        }
+        if matches!(name, "IGNOREEOF" | "ignoreeof") {
+            self.set_eof_variable(Some(&value));
         }
         if name == "GLOBIGNORE" {
             self.shopt.glob.set_ignore(Some(&value));
@@ -1034,6 +1227,8 @@ impl Session {
             name,
             "OPTIND"
                 | "GLOBIGNORE"
+                | "IGNOREEOF"
+                | "ignoreeof"
                 | "POSIXLY_CORRECT"
                 | "BASH_COMPAT"
                 | "PATH"
@@ -1203,6 +1398,8 @@ impl Session {
                 .collect(),
             names.contains(&"OPTIND").then_some(self.opt_offset),
             false,
+            None,
+            None,
         )
     }
 
@@ -1210,6 +1407,17 @@ impl Session {
     // Move the prepared strings and avoid snapshotting variables for restoration.
     pub fn persist_prefix(&mut self, assignments: &mut Vec<(String, String)>) {
         for (name, value) in assignments.drain(..) {
+            // A special builtin's environment persists in the nearest real
+            // binding. A function prefix can itself hide another prefix.
+            if self.variables.get(&name).is_some_and(|v| v.temporary) {
+                for scope in self.locals.iter_mut().rev() {
+                    if let Some(previous) = scope.0.remove(&name)
+                        && !previous.as_ref().is_some_and(|v| v.temporary)
+                    {
+                        break;
+                    }
+                }
+            }
             if name == "BASH_COMPAT" {
                 self.apply_compat(&value);
             }
@@ -1218,6 +1426,9 @@ impl Session {
             }
             if name == "OPTIND" {
                 self.opt_offset = 0;
+            }
+            if matches!(name.as_str(), "IGNOREEOF" | "ignoreeof") {
+                self.set_eof_variable(Some(&value));
             }
             if name == "GLOBIGNORE" {
                 self.shopt.glob.set_ignore(Some(&value));
@@ -1247,7 +1458,19 @@ impl Session {
                 self.apply_compat(value);
             }
             if name == "POSIXLY_CORRECT" {
+                if saved.4.is_none() {
+                    saved.4 = Some(PosixSettings {
+                        expand_aliases: self.shopt.expand_aliases,
+                        inherit_errexit: self.shopt.inherit_errexit,
+                        interactive_comments: self.shopt.interactive_comments,
+                        shift_verbose: self.shopt.shift_verbose,
+                        sourcepath: self.shopt.sourcepath,
+                    });
+                }
                 self.apply_posix_mode(true);
+            }
+            if matches!(name.as_str(), "IGNOREEOF" | "ignoreeof") {
+                self.set_eof_variable(Some(value));
             }
             if name == "GLOBIGNORE" {
                 self.shopt.glob.set_ignore(Some(value));
@@ -1305,6 +1528,23 @@ impl Session {
                     |v| v.value.is_some(),
                 );
                 self.apply_posix_mode(enabled);
+                if let Some(old) = bindings.4 {
+                    self.shopt.expand_aliases = old.expand_aliases;
+                    self.shopt.inherit_errexit = old.inherit_errexit;
+                    self.shopt.interactive_comments = old.interactive_comments;
+                    self.shopt.shift_verbose = old.shift_verbose;
+                    self.shopt.sourcepath = old.sourcepath;
+                }
+            }
+            if matches!(name.as_str(), "IGNOREEOF" | "ignoreeof") {
+                let inherited;
+                let previous = if let Some(var) = &original {
+                    var.value.as_deref()
+                } else {
+                    inherited = std::env::var(&name).ok();
+                    inherited.as_deref()
+                };
+                self.set_eof_variable(previous);
             }
             if name == "GLOBIGNORE" {
                 self.shopt
@@ -1396,7 +1636,11 @@ impl Session {
 
     pub fn leave_scope(&mut self) {
         let scope = self.locals.pop().expect("variable scope");
+        let saved_options = scope.3;
         self.restore(scope);
+        if let Some(bits) = saved_options {
+            self.restore_set_options(bits.get() & !(1 << 31));
+        }
     }
 
     pub fn enter_function(&mut self, bindings: &mut Bindings) {
@@ -1409,7 +1653,13 @@ impl Session {
             || self.variables.contains_key("REPLY")
             || std::env::var_os("REPLY").is_some()
         {
-            self.declare("local", &["REPLY".into()], &[], last);
+            self.declare(
+                "local",
+                &["REPLY".into()],
+                &[],
+                last,
+                &mut Bindings::default(),
+            );
         } else {
             self.locals
                 .last_mut()
@@ -1455,7 +1705,7 @@ impl Session {
             if i == args.len() {
                 let mut out = io::stdout().lock();
                 for name in self.functions.keys().filter(|n| self.function_exported(n)) {
-                    if self.print_function(&mut out, name).is_err() {
+                    if self.print_function(&mut out, name, true).is_err() {
                         return 1;
                     }
                 }
@@ -1573,17 +1823,18 @@ impl Session {
             }
         }
         let mut out = io::stdout().lock();
+        let command = self.posix.then_some("export");
         for (name, value) in vars {
             if let Some(var) = self.variables.get(&name) {
                 if matches!(name.as_str(), "BASHOPTS" | "SHELLOPTS") {
                     let current = self.declared_variable(&name, false).unwrap();
-                    print_declaration(&mut out, &name, &current)?;
+                    print_attribute(&mut out, &name, &current, command)?;
                 } else {
-                    print_declaration(&mut out, &name, var)?;
+                    print_attribute(&mut out, &name, var, command)?;
                 }
                 continue;
             }
-            print_declaration(
+            print_attribute(
                 &mut out,
                 &name,
                 &Variable {
@@ -1600,6 +1851,7 @@ impl Session {
                     value,
                     exported: true,
                 },
+                command,
             )?;
         }
         out.flush()
@@ -1623,6 +1875,9 @@ impl Session {
         }
         if name == "FUNCNAME" {
             self.funcname_unset = true;
+        }
+        if matches!(name, "IGNOREEOF" | "ignoreeof") {
+            self.set_eof_variable(None);
         }
         if name == "GLOBIGNORE" {
             self.shopt.glob.set_ignore(None);
@@ -1651,6 +1906,9 @@ impl Session {
                 && let Some(offset) = scope.1.take()
             {
                 self.opt_offset = offset;
+            }
+            if matches!(name, "IGNOREEOF" | "ignoreeof") {
+                self.set_eof_variable(self.get(name).as_deref());
             }
             if name == "GLOBIGNORE" {
                 self.shopt.glob.set_ignore(self.get(name).as_deref());
@@ -1763,6 +2021,10 @@ impl Session {
                         }
                     }
                     if self.is_associative(base) {
+                        if self.shopt.array_expand_once && !index.is_empty() {
+                            self.remove_key(base, index);
+                            continue;
+                        }
                         match self.subscript_key(index) {
                             Ok(key) => self.remove_key(base, &key),
                             Err(e) => {
@@ -1823,7 +2085,7 @@ impl Session {
                 return Ok(self.logical_cwd.get_or_init(|| path.into()));
             }
         }
-        let cwd = std::env::current_dir()?;
+        let cwd = directories::physical_path()?;
         Ok(self.logical_cwd.get_or_init(|| cwd))
     }
 
@@ -1858,7 +2120,27 @@ impl Session {
         }
         let result = if name == "pwd" {
             (if physical {
-                std::env::current_dir()
+                if let Some(path) = self.logical_cwd.get()
+                    && path.as_os_str().len() >= libc::PATH_MAX as usize
+                    && directories::long_cwd_matches(path, true)
+                {
+                    Ok(path.clone())
+                } else {
+                    directories::physical_path()
+                }
+            } else if self.posix {
+                self.logical_directory().and_then(|path| {
+                    if same_directory(&path, Path::new("."))
+                        || path.as_os_str().len() >= libc::PATH_MAX as usize
+                            && directories::long_cwd_matches(&path, false)
+                    {
+                        Ok(path)
+                    } else {
+                        let actual = directories::physical_path()?;
+                        self.logical_cwd = std::cell::OnceCell::from(actual.clone());
+                        Ok(actual)
+                    }
+                })
             } else {
                 self.logical_directory()
             })
@@ -1987,12 +2269,17 @@ impl Session {
         let mut variable = target
             .to_str()
             .filter(|_| explicit && !previous && self.shopt.cdable_vars);
+        let mut spell = self.interactive && self.shopt.cdspell && explicit && !previous;
         let mut error = io::Error::from(io::ErrorKind::NotFound);
         loop {
             let (candidate, print, via_variable) = if let Some((path, print)) = paths.next() {
                 (path, print, false)
             } else if let Some(value) = variable.take().and_then(|name| self.get(name)) {
                 (PathBuf::from(value), false, true)
+            } else if std::mem::take(&mut spell)
+                && let Some(path) = crate::complete::corrected_directory(target)
+            {
+                (path, false, true)
             } else {
                 break;
             };
@@ -2013,7 +2300,29 @@ impl Session {
             };
             // A renamed ancestor can invalidate the logical path while the
             // process still has a valid current directory for a relative chdir.
-            let logical = logical.filter(|path| std::env::set_current_dir(path).is_ok());
+            let logical = match logical {
+                Some(path) => match std::env::set_current_dir(&path) {
+                    Ok(()) => Some(path),
+                    Err(e)
+                        if e.raw_os_error() == Some(libc::ENAMETOOLONG)
+                            && candidate.is_relative() =>
+                    {
+                        // The full name exceeded the kernel argument limit. Relative
+                        // chdir still establishes this logical name, including symlinks.
+                        if let Err(err) = std::env::set_current_dir(&candidate) {
+                            error = err;
+                            continue;
+                        }
+                        Some(path)
+                    }
+                    Err(e) if self.posix => {
+                        error = e;
+                        continue;
+                    }
+                    Err(_) => None,
+                },
+                None => None,
+            };
             if logical.is_none()
                 && let Err(e) = std::env::set_current_dir(&candidate)
             {
@@ -2024,7 +2333,7 @@ impl Session {
             self.logical_cwd.take();
             let cwd = match logical {
                 Some(cwd) => cwd,
-                None => std::env::current_dir().map_err(DirectoryError::NoPath)?,
+                None => directories::physical_path().map_err(DirectoryError::NoPath)?,
             };
             if self.interactive && base.as_deref().ok() != Some(cwd.as_path()) {
                 Rc::make_mut(self.visits.get_or_insert_with(Rc::default)).record(base.ok(), &cwd);
@@ -2191,6 +2500,25 @@ impl Session {
     }
 }
 
+fn print_attribute(
+    out: &mut impl Write,
+    name: &str,
+    var: &Variable,
+    command: Option<&str>,
+) -> io::Result<()> {
+    if let Some(command) = command {
+        out.write_all(command.as_bytes())?;
+        if var.associative().is_some() {
+            out.write_all(b" -A")?;
+        } else if var.elements.is_some() {
+            out.write_all(b" -a")?;
+        }
+        write!(out, " {name}")?;
+        return print_variable_value(out, var);
+    }
+    print_declaration(out, name, var)
+}
+
 fn print_declaration(out: &mut impl Write, name: &str, var: &Variable) -> io::Result<()> {
     write!(out, "declare -")?;
     let mut flags = var.attribute_flags().peekable();
@@ -2215,9 +2543,34 @@ fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Cow<'_, str> 
             .unwrap()
             .into();
     }
-    if value
-        .bytes()
-        .any(|c| c.is_ascii_whitespace() || b"~!#$&*(){}[];<>?\\\"'|`".contains(&c))
+    if value == "'" {
+        return Cow::Borrowed("\\'");
+    }
+    if value.starts_with(['#', '~'])
+        || value.bytes().any(|c| {
+            c.is_ascii_whitespace()
+                || matches!(
+                    c,
+                    b'!' | b'$'
+                        | b'&'
+                        | b'*'
+                        | b'('
+                        | b')'
+                        | b'{'
+                        | b'}'
+                        | b'['
+                        | b']'
+                        | b';'
+                        | b'<'
+                        | b'>'
+                        | b'?'
+                        | b'\\'
+                        | b'"'
+                        | b'\''
+                        | b'|'
+                        | 0x60
+                )
+        })
     {
         crate::completion_spec::single_quote(value).into()
     } else {
@@ -2321,7 +2674,13 @@ mod tests {
         session.assign(key, "global");
         session.enter_function(&mut Default::default());
         assert_eq!(
-            session.declare("local", &[format!("{key}=local")], &[], 0),
+            session.declare(
+                "local",
+                &[format!("{key}=local")],
+                &[],
+                0,
+                &mut Default::default()
+            ),
             crate::Flow::Continue(0)
         );
         let prefix = session.bind(&[(key.into(), "temporary".into())]);

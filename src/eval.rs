@@ -36,7 +36,10 @@ fn run_statements<'a>(
         }
         if session.notify && session.jobs.awaiting_notification() {
             session.jobs.poll();
-            session.jobs.report_changes();
+            session.jobs.report_changes(session.posix);
+        }
+        if !session.shopt.globasciiranges {
+            crate::pattern::sync_ranges(session);
         }
         let literal = literals.next().and_then(Option::as_deref_mut);
         if session.interactive && session.completions.in_callback() {
@@ -56,7 +59,11 @@ fn run_statements<'a>(
         }
         if !session.traps.in_action() {
             session.current_command = Some(statement.location.clone());
-        } else if session.signal_line.is_some() && !session.traps.in_nested_action() {
+        } else if session
+            .traps
+            .in_action_child(session.function_depth + session.source_depth)
+            || session.signal_line.is_some() && !session.traps.in_nested_action()
+        {
             session.signal_line = Some(statement.location.line);
         }
         let negated = statement.negated;
@@ -276,6 +283,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 eprintln!("tonari: {name}: invalid loop variable");
                 return Flow::Continue(1);
             }
+            let implicit_words = words.is_none();
             let items = match words {
                 None => session.positional.as_slice().to_vec(),
                 Some(words) => {
@@ -310,6 +318,14 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                     if let Some(flow) = crate::traps::debug(s, last) {
                         return Err(flow);
                     }
+                }
+                if s.xtrace {
+                    execute::trace_line(s, last, |line| {
+                        line.push_str(header.text());
+                        if implicit_words {
+                            line.push_str(" in \"$@\"");
+                        }
+                    });
                 }
                 let error = if s.is_nameref(&name) {
                     s.assign_for_reference(&name, value).err()
@@ -357,12 +373,22 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                         return Err(flow);
                     }
                 }
-                compiled.run(s, last).map_err(|e| {
+                let result = if s.xtrace {
+                    let expr = expr.trim_start();
+                    if expr.is_empty() {
+                        crate::arithmetic::traced("1", s, last, None)
+                    } else {
+                        crate::arithmetic::traced(expr, s, last, Some(compiled))
+                    }
+                } else {
+                    compiled.run(s, last)
+                };
+                result.map_err(|e| {
                     eprintln!("tonari: {e}");
                     Flow::Continue(1)
                 })
             };
-            if !init.trim().is_empty()
+            if (session.xtrace || !init.trim().is_empty())
                 && let Err(flow) = arithmetic(
                     session,
                     &init,
@@ -378,14 +404,13 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 if !first && !s.traps.debug_handler() {
                     s.current_command.clone_from(&header);
                 }
-                if !first && !step.is_empty() {
+                if !first && (s.xtrace || !step.is_empty()) {
                     arithmetic(s, &step, &update, last)?;
                 }
                 first = false;
-                Ok(
-                    (condition.trim().is_empty() || arithmetic(s, &condition, &test, last)? != 0)
-                        .then_some(last),
-                )
+                Ok(((!s.xtrace && condition.trim().is_empty())
+                    || arithmetic(s, &condition, &test, last)? != 0)
+                    .then_some(last))
             })
         }
         Command::Coprocess { name, body } => {
@@ -432,6 +457,9 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 if let Some(flow) = crate::traps::debug(session, status) {
                     return flow;
                 }
+            }
+            if session.xtrace {
+                execute::trace_line(session, status, |line| line.push_str(header.text()));
             }
             let value = match expand_case(session, word, status, false) {
                 Ok(v) => v,
@@ -641,6 +669,7 @@ pub(crate) fn call_with_bindings(
     let function = session.functions[&name].clone();
     let traced = session.traced_functions.contains(&name);
     let callsite = session.current_command.clone();
+    let caller_signal_line = session.signal_line;
     session.call_lines.push(session.line());
     session.source_names.push(function.source);
     session.function_names.push(name);
@@ -662,7 +691,17 @@ pub(crate) fn call_with_bindings(
     let hidden = session
         .traps
         .enter_function(session.errtrace, session.functrace || traced);
-    let flow = crate::traps::debug(session, status).unwrap_or_else(|| {
+    let entry = if session.traps.debug_handler() {
+        let old = session
+            .signal_line
+            .replace(function.definition.location.line);
+        let flow = crate::traps::debug(session, status);
+        session.signal_line = old;
+        flow
+    } else {
+        None
+    };
+    let flow = entry.unwrap_or_else(|| {
         run_statements(
             session,
             function
@@ -676,8 +715,12 @@ pub(crate) fn call_with_bindings(
             &mut [],
         )
     });
+    if matches!(flow, Flow::Continue(_)) && session.traps.return_handler() {
+        session.signal_line = Some(function.definition.location.line);
+    }
     let flow = crate::traps::returning(session, flow);
     session.traps.leave_function(hidden);
+    session.signal_line = caller_signal_line;
     session.positional = old;
     session.source_set_args = false;
     if tracked {
@@ -685,7 +728,15 @@ pub(crate) fn call_with_bindings(
     }
     session.leave_function();
     session.loop_depth = outer_loop;
-    session.current_command = callsite;
+    if matches!(flow, Flow::Continue(1..) | Flow::Return(1..))
+        && session.traps.error_handler()
+        && let (Some(inner), Some(caller)) = (&mut session.current_command, &callsite)
+    {
+        // ERR sees the failed command's text, with LINENO at the call site.
+        inner.line = caller.line;
+    } else {
+        session.current_command = callsite;
+    }
     session.call_lines.pop();
     session.function_names.pop();
     session.source_names.pop();

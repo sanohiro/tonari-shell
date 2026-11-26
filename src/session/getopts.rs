@@ -31,9 +31,8 @@ impl Session {
         let index = match ordinary {
             Some(v) => v.value.as_deref().and_then(|s| s.parse::<usize>().ok()),
             None => self.get("OPTIND").and_then(|s| s.parse::<usize>().ok()),
-        }
-        .unwrap_or(1);
-        let mut pos = index.saturating_sub(1).min(inputs.len());
+        };
+        let mut pos = index.unwrap_or(1).saturating_sub(1).min(inputs.len());
         let mut offset = self.opt_offset.max(1);
         let mut option = None;
         let mut value = None;
@@ -76,7 +75,12 @@ impl Session {
         }
         if ordinary.is_some_and(|v| !v.readonly) {
             let var = self.variables.get_mut("OPTIND").unwrap();
-            var.value = Some((pos + 1).to_string());
+            if index != Some(pos + 1) {
+                use std::fmt::Write;
+                let text = var.value.get_or_insert_with(String::new);
+                text.clear();
+                write!(text, "{}", pos + 1).unwrap();
+            }
             var.declared = true;
             var.exported |= self.allexport;
             self.opt_offset = 0;
@@ -118,9 +122,18 @@ impl Session {
         }
         if self.readonly(name) {
             eprintln!("tonari: getopts: {name}: readonly variable");
-            return 2;
+            return if option.is_none() { 1 } else { 2 };
         }
-        self.assign(name, &result.to_string());
+        let mut bytes = [0; 4];
+        let value = result.encode_utf8(&mut bytes);
+        if self.is_nameref(name) {
+            if let Err(error) = self.assign_target(name, value) {
+                eprintln!("tonari: getopts: {name}: {error}");
+                return 1;
+            }
+        } else {
+            self.assign(name, value);
+        }
         u8::from(option.is_none())
     }
 }

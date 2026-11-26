@@ -1,5 +1,21 @@
 # Engineering notes / 開発知見
 
+## 2026-11-27 · Job startup, source locations and history / ジョブ起動・行番号・履歴
+
+On Darwin, assigning the process group after starting a managed external child leaves a race with an immediate stop signal. Set the group in the spawn attributes and let the job table retain that group. A useful regression sends STOP immediately, waits for the stopped status, resumes the child and waits for termination. A separate child stops itself to make the timing comparison reproducible. The default and ignored signal dispositions also need witnesses.
+
+Mac では子の起動後にプロセスグループを設定すると、直後の停止を取りこぼすことがあった。停止状態と最終的な終了状態を別々に待って試験する。行番号を返す単純なコマンド置換は、呼び出し元の行を引き継いで余分なプロセスを省ける。トラップで子の実行を観察できる場合は通常どおり子で実行する。
+
+A timestamped Bash history file can contain complete here-documents. Preserve blank lines inside the entry and read across buffer and UTF-8 boundaries. When measuring history replay, reset the input history for each iteration so the shells emit equivalent work. 履歴の比較では読み込んだ件数だけでなく、空行、再保存したバイト列、再実行後に残るエントリも調べる。[Behavioral evidence](compatibility/bash-source-review/gnu-cases.md) · [Native measurements](benchmarks.md)
+
+A shell variable listing can change the program it inspects if it reads a fresh random number or initializes debugger arguments. Store the last observed dynamic value and format arrays with their indices. The list of inherited variable names can be shared across queries in a session; declarations and unset markers are applied on each query. In history-enabled scripts, a whole literal assignment can use the normal execution path after decoding its single shell word, saving tokenization. 変数一覧では、新しい乱数の生成とデバッガー引数の初期化を避ける。履歴を有効にしたスクリプトも、単独のリテラル代入は引用を解釈してから通常の代入処理へ渡せる。
+
+## GNU regression witnesses and execution scope / GNU 回帰試験と実行スコープ
+
+An explicit exit can run an EXIT trap before a function restores its locals, arguments and redirections. Check the destination file as well as the exit status. For input-only command substitutions, ordinary redirections and the substitution must agree on POSIX splitting and pathname expansion. A quoted stored pathname, or a stored scalar in noninteractive POSIX mode, can be read directly when the existing file and trap checks permit it.
+
+関数内で終了する場合は、トラップが書くファイルと、その時点のローカル変数・位置パラメーターを一緒に試験する。コマンド置換によるファイル読み出しは、同じパスを通常のリダイレクトに渡した場合と照合した。プロセスを省けることは、実際に開くファイルが正しいと確かめた後に実機で計測した。[Cases / 個別判定](compatibility/bash-source-review/gnu-cases.md) · [Timings / 実測](compatibility/bash-source-review/native-case-review.tsv)
+
 ## 2026-11-26 · Following stdin, aliases and signals through execution / 入力・エイリアス・シグナルを実行まで追う
 
 A buffered private fd for script input must follow permanent redirection of fd 0 when the script came from stdin. A named script retains its own reader. A signal handler can return from an interrupted function. Its implicit status comes from the interrupted command at that scope, while a function called inside the handler sees its own status. Test function and source nesting and an explicit status operand. Share registered trap text across invocations so a large handler does not require copying its source each time.

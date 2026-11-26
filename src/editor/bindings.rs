@@ -50,6 +50,8 @@ actions! {
     KillWord => "kill-word" [b"\x1b[3;5~", b"\x1bd"],
     Redraw => "redraw-current-line" [],
     Emacs => "emacs-editing-mode" [],
+    EditAndExecute => "edit-and-execute-command" [b"\x18\x05"],
+    ViEditAndExecute => "vi-edit-and-execute-command" [],
     Vi => "vi-editing-mode" [],
     ViCommand => "vi-movement-mode" [],
     ViInsert => "vi-insertion-mode" [],
@@ -174,6 +176,7 @@ impl Keymap {
             },
             Self::Command => match action {
                 Undo => &[b"u", b"\x1f"],
+                ViEditAndExecute => &[b"v"],
                 ViInsert => &[b"i"],
                 ViAppend => &[b"a"],
                 ViAppendEnd => &[b"A"],
@@ -673,15 +676,21 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
                             return Ok(1);
                         }
                     } else {
-                        let names = keys
-                            .iter()
-                            .take(5)
-                            .map(|k| encode(k))
-                            .collect::<Vec<_>>()
-                            .join(", ");
+                        let mut names = String::new();
+                        for key in keys.iter().take(5) {
+                            if !names.is_empty() {
+                                names.push_str(", ");
+                            }
+                            names.push_str(&encode(key));
+                        }
                         writeln!(
                             out,
-                            "{name} can be invoked via {names}{}",
+                            "{name} {} {names}{}",
+                            if arg == "-P" {
+                                "can be found on"
+                            } else {
+                                "can be invoked via"
+                            },
                             if keys.len() > 5 { ", ..." } else { "." }
                         )
                         .map_err(ioerr)?;

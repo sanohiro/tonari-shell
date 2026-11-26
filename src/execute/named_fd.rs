@@ -13,20 +13,26 @@ impl Scope {
     fn redirect(
         &mut self,
         session: &mut Session,
-        raw: Redirect<Word>,
+        mut raw: Redirect<Word>,
         status: u8,
     ) -> io::Result<bool> {
-        let variable = raw.variable.clone();
+        let variable = raw.variable.take();
         let captured = Cell::new(None);
         let mut exp = Expansion::new(session, status, &captured);
-        let expanded = prepare_redirects(vec![raw], &mut exp).map_err(io::Error::other)?;
+        let expanded = prepare_redirects([raw], &mut exp).map_err(io::Error::other)?;
         for (i, mut r) in expanded.into_iter().enumerate() {
             let name = variable.as_deref().filter(|_| i == 0);
             let close = r.target == Target::Duplicate && r.word == "-";
             if let Some(name) = name {
                 if close {
-                    r.fd = session
-                        .get(name)
+                    let element = Expansion::new(session, status, &captured)
+                        .assignment_element(name)
+                        .map_err(io::Error::other)?;
+                    let value = match element {
+                        Some(element) => element.value(session),
+                        None => session.get(name),
+                    };
+                    r.fd = value
                         .and_then(|s| s.parse::<i32>().ok())
                         .filter(|&fd| fd >= 0)
                         .ok_or_else(|| io::Error::other(format!("{name}: ambiguous redirect")))?;
@@ -60,7 +66,12 @@ impl Scope {
                     if allocated < 0 {
                         return Err(io::Error::last_os_error());
                     }
-                    session.assign(name, &allocated.to_string());
+                    if let Err(error) = session.assign_target(name, &allocated.to_string()) {
+                        unsafe {
+                            libc::close(allocated);
+                        }
+                        return Err(io::Error::other(error));
+                    }
                     if session.shopt.varredir_close {
                         self.restore.push((allocated, SavedFd::Closed));
                     }
@@ -70,10 +81,7 @@ impl Scope {
             let action = action(&r);
             let actions = std::slice::from_ref(&action);
             protect_fds(actions)?;
-            if (name.is_none() || close)
-                && !matches!(action, Action::CloseMoved(_))
-                && !self.restore.iter().any(|(n, _)| *n == r.fd)
-            {
+            if (name.is_none() || close) && !self.restore.iter().any(|(n, _)| *n == r.fd) {
                 self.restore
                     .push((r.fd, SavedFd::capture(&action, actions)?));
             }
@@ -81,10 +89,6 @@ impl Scope {
                 return Ok(false);
             }
             match action {
-                Action::CloseMoved(fd) => {
-                    session.substitutions.replaced(fd);
-                    super::coprocess::replaced(session, fd);
-                }
                 Action::Dup(from, to) if from == to => {}
                 _ => self.changed.push(r.fd),
             }

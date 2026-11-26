@@ -82,7 +82,7 @@ pub(super) fn parse(source: &str) -> Option<Statement> {
     let open = header.len();
     let layout = command.len() - command.trim_start_matches([' ', '\t', '\n']).len();
     let start = open + 1 + layout;
-    let line_number = super::FIRST_LINE.get();
+    let line_number = super::source_line(source);
     let command_line =
         line_number + memchr::memchr_iter(b'\n', &command.as_bytes()[..layout]).count();
     let command = location(start, start + text.len(), command_line);
@@ -104,8 +104,10 @@ pub(super) fn parse(source: &str) -> Option<Statement> {
         command: Command::Function {
             name: name.to_owned(),
             definition: Rc::new(super::FunctionDefinition {
+                declaration_line: line_number,
                 body,
                 location: location(open, line.len(), line_number),
+                rendered_body: Default::default(),
             }),
         },
     })

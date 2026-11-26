@@ -14,10 +14,28 @@ struct Random {
 pub(super) struct Dynamic {
     seconds: Cell<Option<i64>>,
     random: Cell<Random>,
+    listed: [Cell<Option<i64>>; 5],
+    pub(super) lineno: Cell<Option<usize>>,
+    pub(super) pid: Cell<Option<u32>>,
+    pub(super) depth: Cell<Option<u32>>,
+    text: std::cell::RefCell<std::collections::BTreeMap<&'static str, String>>,
+    pub(super) groups_read: Cell<bool>,
+    pub(super) stack_read: Cell<bool>,
+}
+
+fn number_slot(name: &str) -> Option<usize> {
+    Some(match name {
+        "SECONDS" => 0,
+        "RANDOM" => 1,
+        "SRANDOM" => 2,
+        "HISTCMD" => 3,
+        "BASH_MONOSECONDS" => 4,
+        _ => return None,
+    })
 }
 
 pub(super) fn is_dynamic(name: &str) -> bool {
-    matches!(name, "BASH_MONOSECONDS" | "HISTCMD") || integer_attribute(name)
+    number_slot(name).is_some()
 }
 
 pub(super) fn integer_attribute(name: &str) -> bool {
@@ -45,8 +63,26 @@ impl Session {
         self.dynamic.random.set(Random::default());
     }
 
-    pub(super) fn dynamic_number(&self, name: &str) -> Option<i64> {
+    pub(super) fn observe_text(&self, name: &'static str, value: String) -> String {
+        value.clone_into(self.dynamic.text.borrow_mut().entry(name).or_default());
+        value
+    }
+
+    pub(super) fn listed_text(&self, name: &str) -> Option<String> {
         match name {
+            "LINENO" => self.dynamic.lineno.get().map(|n| n.to_string()),
+            "BASHPID" => self.dynamic.pid.get().map(|n| n.to_string()),
+            "BASH_SUBSHELL" => self.dynamic.depth.get().map(|n| n.to_string()),
+            _ => self.dynamic.text.borrow().get(name).cloned(),
+        }
+    }
+
+    pub(super) fn listed_number(&self, name: &str) -> Option<i64> {
+        self.dynamic.listed[number_slot(name)?].get()
+    }
+
+    pub(super) fn dynamic_number(&self, name: &str) -> Option<i64> {
+        let value = match name {
             "SECONDS" => {
                 let origin = self.dynamic.seconds.get().unwrap_or_else(|| {
                     let initial = std::env::var("SECONDS")
@@ -80,7 +116,7 @@ impl Session {
                     if next != rng.last {
                         rng.last = next;
                         self.dynamic.random.set(rng);
-                        return Some(i64::from(next));
+                        break Some(i64::from(next));
                     }
                 }
             }
@@ -100,12 +136,17 @@ impl Session {
                 )
             }
             "SRANDOM" => entropy().map(i64::from),
-            _ => None,
-        }
+            _ => return None,
+        }?;
+        self.dynamic.listed[number_slot(name)?].set(Some(value));
+        Some(value)
     }
 
     pub(super) fn set_dynamic(&self, name: &str, value: &str) {
         let value = value.parse::<i64>().unwrap_or(0);
+        if let Some(slot) = number_slot(name) {
+            self.dynamic.listed[slot].set(Some(value));
+        }
         match name {
             "SECONDS" => self.dynamic.seconds.set(Some(
                 unsafe { libc::time(std::ptr::null_mut()) }.wrapping_sub(value),

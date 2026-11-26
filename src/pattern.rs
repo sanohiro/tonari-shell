@@ -1,7 +1,9 @@
 mod bracket;
+pub(crate) use bracket::portable_symbol;
 pub(crate) mod directory;
 pub(crate) mod extended;
 mod glob_locale;
+pub(crate) use glob_locale::sync_ranges;
 mod order;
 
 use crate::session::CharacterLocale;
@@ -632,6 +634,7 @@ fn paths(
             let trailing = !rest.is_empty() && rest.trim_start_matches('/').is_empty();
             rest = rest.trim_start_matches('/');
             let mut found = Vec::new();
+            let mut pending = Vec::new();
             for prefix in paths {
                 if std::path::Path::new(if prefix.is_empty() { "." } else { &prefix }).is_dir() {
                     if !rest.is_empty() || !prefix.is_empty() {
@@ -648,17 +651,14 @@ fn paths(
                         trailing,
                         options.dotglob,
                         &mut found,
+                        &mut pending,
                     );
                 }
             }
             expanded = true;
-            if order::sort_mode(sorting).0 == "nosort" {
-                let mut seen = std::collections::HashSet::new();
-                found.retain(|path| seen.insert(path.clone()));
-            } else {
-                found.sort_unstable();
-                found.dedup();
-            }
+            // Adjacent globstars were collapsed above. Separated globstars may
+            // reach the same pathname through different matching components.
+            // Apply the requested ordering once, after the last component.
             paths = found;
             known_existing = rest.is_empty();
             continue;
@@ -732,7 +732,7 @@ fn paths(
     if let Some(patterns) = &options.ignore {
         for pattern in patterns.iter() {
             // GLOBIGNORE tests the entire displayed pathname. An extended
-            // alternative may contain a slash or match one with a bracket class.
+            // alternative may contain a literal directory separator.
             let matcher =
                 extended::Pattern::for_path(pattern, options.extglob, options.nocaseglob, locale);
             paths.retain(|path| !matcher.matches_in_locale::<true>(path, false));
@@ -749,9 +749,10 @@ fn descendants(
     trailing: bool,
     dotglob: bool,
     found: &mut Vec<String>,
+    pending: &mut Vec<String>,
 ) {
     let prefixed = !prefix.is_empty();
-    let mut pending = vec![prefix];
+    pending.push(prefix);
     while let Some(dir) = pending.pop() {
         let base = if dir.is_empty() { "." } else { &dir };
         visit_names(base, !terminal || trailing, true, |raw, kind| {

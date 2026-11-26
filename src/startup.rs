@@ -34,20 +34,22 @@ fn sourced(
     let old = (!args.is_empty())
         .then(|| std::mem::replace(&mut session.positional, Vec::from(args).into_iter()));
     session.source_set_args = false;
-    let callsite = session.current_command.clone();
     session.call_lines.push(session.line());
+    let callsite = session.current_command.take();
+    let caller_signal_line = session.signal_line;
     session.source_depth += 1;
     session.push_source_path(path);
     session.function_names.push("source".into());
     let saved_debug = session.traps.enter_source(session.functrace);
     let result = input::file_script(session, script.file, Some(script.metadata), status, false);
-    let result = crate::traps::returning(session, result);
-    session.traps.leave_source(saved_debug);
+    session.signal_line = caller_signal_line;
     session.function_names.pop();
     session.source_names.pop();
     session.source_depth -= 1;
     session.call_lines.pop();
     session.current_command = callsite;
+    let result = crate::traps::returning(session, result);
+    session.traps.leave_source(saved_debug);
     if let Some(old) = old
         && (session.function_depth != 0 || !session.source_set_args)
     {
@@ -127,9 +129,43 @@ pub fn source_file(session: &mut Session, words: &[String], status: u8, fatal: b
     }
 }
 
+pub(crate) fn debugger(session: &mut Session) -> Flow {
+    let path = Path::new(
+        option_env!("DEBUGGER_START_FILE").unwrap_or("/usr/share/bashdb/bashdb-main.inc"),
+    );
+    let script = open_script(path).ok();
+    let enabled = script.is_some();
+    session.shopt.extdebug = enabled;
+    let result = if let Some(script) = script {
+        session
+            .debug_base
+            .get_or_init(|| session.positional.as_slice().to_vec());
+        let errexit = std::mem::replace(&mut session.errexit, false);
+        let result = sourced(session, script, path, &[], 0);
+        session.errexit = errexit;
+        result
+    } else {
+        eprintln!("tonari: {}: cannot start debugger", path.display());
+        Flow::Continue(0)
+    };
+    session.functrace = enabled;
+    session.errtrace = enabled;
+    result
+}
+
 fn optional(session: &mut Session, path: &Path) -> Option<Flow> {
     let file = open_script(path).ok()?;
     Some(sourced(session, file, path, &[], 0))
+}
+
+pub fn defer_interactive_exit(session: &mut Session) -> bool {
+    session.interactive
+        && session.subshell_depth == 0
+        && session.jobs.defer_exit(
+            session.shopt.checkjobs,
+            session.command_number,
+            session.posix,
+        )
 }
 
 pub fn logout(session: &mut Session, code: u8, previous: u8) -> u8 {

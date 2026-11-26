@@ -1,10 +1,14 @@
 use super::modifier::ReplaceMode;
 
 fn write_replacement(out: &mut String, template: &str, matched: &str, expand_amp: bool) {
-    let mut chars = template.chars();
+    if !expand_amp || !template.contains(['\\', '&']) {
+        out.push_str(template);
+        return;
+    }
+    let mut chars = template.chars().peekable();
     while let Some(c) = chars.next() {
-        if c == '\\' {
-            out.push(chars.next().unwrap_or(c));
+        if c == '\\' && matches!(chars.peek(), Some('\\' | '&')) {
+            out.push(chars.next().unwrap());
         } else if c == '&' && expand_amp {
             out.push_str(matched);
         } else {
@@ -82,7 +86,7 @@ pub(super) fn substitute(
         let literal = crate::pattern::unescape(pattern);
         let needle = literal.as_ref();
         let mut rendered = String::new();
-        let replacement = if template.contains('\\') || (expand_amp && template.contains('&')) {
+        let replacement = if expand_amp && template.contains(['\\', '&']) {
             write_replacement(&mut rendered, template, needle, expand_amp);
             rendered.as_str()
         } else {

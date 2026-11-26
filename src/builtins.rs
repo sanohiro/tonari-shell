@@ -257,37 +257,52 @@ pub(crate) fn binary(left: &str, op: &str, right: &str) -> Result<bool, &'static
     })
 }
 
+pub(crate) fn variable_set(
+    session: &mut Session,
+    arg: &str,
+    literal_key: bool,
+) -> Result<bool, &'static str> {
+    if arg.bytes().next().is_some_and(|c| c.is_ascii_digit())
+        && let Ok(n) = arg.parse::<usize>()
+    {
+        return Ok(n <= session.positional.len());
+    }
+    if let Some((name, expr)) = crate::session::array::subscript(arg) {
+        let associative = session.is_associative(name);
+        if matches!(expr, "*" | "@") && (!associative || session.shopt.compat <= 51) {
+            return Ok(session
+                .stored_array_len(name)
+                .map_or_else(|| !session.indices(name).is_empty(), |len| len != 0));
+        }
+        if !associative {
+            return Ok(session.get(arg).is_some());
+        }
+        if literal_key {
+            return Ok(!expr.is_empty() && session.assoc_value(name, expr).is_some());
+        }
+        if !Session::valid_reference_target(arg) {
+            return Ok(false);
+        }
+        let key = session.subscript_key(expr)?;
+        return Ok(session.assoc_value(name, &key).is_some());
+    }
+    Ok(session.get(arg).is_some())
+}
+
 pub(crate) fn unary(op: &str, arg: &str, session: &mut Session) -> Result<bool, &'static str> {
     match op {
         "-n" => return Ok(!arg.is_empty()),
         "-z" => return Ok(arg.is_empty()),
         "-R" => return Ok(session.is_nameref(arg)),
         "-o" => return Ok(session.set_option_enabled(arg)),
-        "-v" => {
-            if arg.bytes().next().is_some_and(|c| c.is_ascii_digit())
-                && let Ok(n) = arg.parse::<usize>()
-            {
-                return Ok(n <= session.positional.len());
-            }
-            if let Some((name, expr)) = crate::session::array::subscript(arg) {
-                let associative = session.is_associative(name);
-                if matches!(expr, "*" | "@") && (!associative || session.shopt.compat <= 51) {
-                    return Ok(session
-                        .stored_array_len(name)
-                        .map_or_else(|| !session.indices(name).is_empty(), |len| len != 0));
-                }
-                if !associative {
-                    return Ok(session.get(arg).is_some());
-                }
-                let key = session.subscript_key(expr)?;
-                return Ok(session.assoc_value(name, &key).is_some());
-            }
-            return Ok(session.get(arg).is_some());
-        }
+        "-v" => return variable_set(session, arg, session.shopt.array_expand_once),
         "-t" => {
-            return Ok(arg
-                .parse::<i32>()
-                .is_ok_and(|fd| unsafe { libc::isatty(fd) == 1 }));
+            let number = match arg.trim_ascii().parse::<i64>() {
+                Ok(number) => number,
+                Err(_) if session.posix => return Ok(false),
+                Err(_) => return Err("integer expected"),
+            };
+            return Ok(i32::try_from(number).is_ok_and(|fd| unsafe { libc::isatty(fd) == 1 }));
         }
         "-L" | "-h" => return Ok(Path::new(arg).is_symlink()),
         "-r" | "-w" | "-x" => {

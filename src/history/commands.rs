@@ -368,6 +368,39 @@ fn bash_timestamp(line: &str) -> Option<i64> {
     value[..end].parse().ok()
 }
 
+// Validate complete buffered lines together. Read through a boundary only
+// when a single line spans buffers, or when an error needs its exact line.
+fn read_history_lines(
+    reader: &mut impl BufRead,
+    private: bool,
+    mut visit: impl FnMut(&str, usize),
+) -> io::Result<()> {
+    let mut spill = String::new();
+    loop {
+        let bytes = reader.fill_buf()?;
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        if let Some(end) = memchr::memrchr(b'\n', bytes)
+            && let Ok(lines) = std::str::from_utf8(&bytes[..=end])
+        {
+            for line in lines.split_terminator('\n') {
+                visit(line.strip_suffix('\r').unwrap_or(line), line.len() + 1);
+            }
+            reader.consume(end + 1);
+        } else {
+            spill.clear();
+            let count = reader.read_line(&mut spill)?;
+            let line = match spill.strip_suffix('\n') {
+                Some(line) => line,
+                None if private => return Ok(()),
+                None => spill.as_str(),
+            };
+            visit(line.strip_suffix('\r').unwrap_or(line), count);
+        }
+    }
+}
+
 pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> io::Result<()> {
     if args.len() > 1 {
         return Err(error("too many arguments"));
@@ -407,13 +440,17 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
         } else {
             0
         };
-        let mut header = [0; 2];
-        let marked = !private
-            && meta.is_file()
-            && file.read_at(&mut header, 0)? == 2
-            && header[0] == b'#'
-            && header[1].is_ascii_digit();
         let mut reader = BufReader::new(file);
+        let marked = if private || !meta.is_file() {
+            false
+        } else if skip > 0 {
+            let mut header = [0; 2];
+            reader.get_ref().read_at(&mut header, 0)? == 2
+                && header[0] == b'#'
+                && header[1].is_ascii_digit()
+        } else {
+            matches!(reader.fill_buf()?, [b'#', digit, ..] if digit.is_ascii_digit())
+        };
         let mut offset = skip;
         let mut timestamp = None;
         let mut marker_offset = None;
@@ -427,7 +464,6 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
         if skip > 0 {
             reader.seek(SeekFrom::Start(skip))?;
         }
-        let mut line = String::new();
         let limit = session.history_limit("HISTSIZE", 500);
         let erase = session
             .get("HISTCONTROL")
@@ -440,26 +476,16 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
         } else {
             None
         };
-        let result = loop {
-            line.clear();
-            let n = match reader.read_line(&mut line) {
-                Ok(n) => n,
-                Err(e) => break Err(e),
-            };
-            if n == 0 || private && !line.ends_with('\n') {
-                break Ok(());
-            }
+        let result = read_history_lines(&mut reader, private, |line, n| {
             offset += n as u64;
-            let line = line.strip_suffix('\n').unwrap_or(&line);
-            let line = line.strip_suffix('\r').unwrap_or(line);
             let (value, seconds) = if private {
                 let Some((body, ts)) = super::journal_fields(line) else {
-                    continue;
+                    return;
                 };
                 let mut fields = body.splitn(4, '\t');
                 let pid = fields.next().and_then(|s| s.parse::<u32>().ok());
                 if op == 'n' && pid == Some(owner) {
-                    continue;
+                    return;
                 }
                 (
                     fields.nth(2).and_then(super::decode),
@@ -474,9 +500,6 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
                     recognize = true;
                     multiline = timestamped;
                 }
-                if line.is_empty() {
-                    continue;
-                }
                 if recognize && let Some(ts) = bash_timestamp(line) {
                     if let Some((value, time)) = pending.take() {
                         import_entry(h, value, time, erase, limit);
@@ -484,7 +507,7 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
                     previous = None;
                     timestamp = Some(ts);
                     marker_offset = Some(offset - n as u64);
-                    continue;
+                    return;
                 }
                 if multiline
                     && timestamp.is_none()
@@ -493,9 +516,17 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
                         .map(|(text, _)| text)
                         .or_else(|| previous.and_then(|i| h.lines.get_mut(i)))
                 {
+                    let added = 1 + line.len();
+                    if last.capacity() - last.len() < added {
+                        // Only multiline entries need headroom for continuation lines.
+                        last.reserve(added.max(32));
+                    }
                     last.push('\n');
                     last.push_str(line);
-                    continue;
+                    return;
+                }
+                if line.is_empty() {
+                    return;
                 }
                 marker_offset = None;
                 (
@@ -512,7 +543,7 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
                     import_entry(h, value, seconds, erase, limit);
                 }
             }
-        };
+        });
         if let Some((value, time)) = pending {
             import_entry(h, value, time, erase, limit);
         }
@@ -583,13 +614,14 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
             }
         }
     }
-    let substitution = if substitute {
-        args.first().and_then(|a| a.split_once('='))
+    let replacements = if substitute {
+        args.iter().take_while(|word| word.contains('=')).count()
     } else {
-        None
+        0
     };
-    if substitution.is_some() {
-        args = &args[1..];
+    let (replacements, args) = args.split_at(replacements);
+    if session.posix && args.len() > if substitute { 1 } else { 2 } {
+        return Err(error("too many arguments"));
     }
     let h = session.history.as_deref();
     let end = h.map_or(0, |h| h.current.unwrap_or(h.lines.len()));
@@ -601,12 +633,26 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
         };
     }
     let h = h.unwrap();
-    let select = |arg: &String| {
+    let select = |arg: &String, first: bool| {
         if let Ok(n) = arg.parse::<i64>() {
             if n < 0 {
                 return Ok(end.saturating_sub(n.unsigned_abs() as usize));
             }
-            position(h, arg, end)
+            if n == 0 {
+                return if arg.starts_with('-') {
+                    if list {
+                        Ok(h.lines.len() - 1)
+                    } else {
+                        Err(error("invalid history specification"))
+                    }
+                } else {
+                    Ok(end - 1)
+                };
+            }
+            let index = (n as usize).checked_sub(h.base + 1);
+            Ok(index
+                .filter(|i| *i < end - 1)
+                .unwrap_or(if first && !substitute { 0 } else { end - 1 }))
         } else {
             h.lines[..end]
                 .iter()
@@ -616,14 +662,14 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
     };
     let mut first = args
         .first()
-        .map(select)
+        .map(|arg| select(arg, true))
         .transpose()?
         .unwrap_or_else(|| end.saturating_sub(if list { 16 } else { 1 }));
-    let mut last =
-        args.get(1)
-            .map(select)
-            .transpose()?
-            .unwrap_or(if list { end - 1 } else { first });
+    let mut last = args
+        .get(1)
+        .map(|arg| select(arg, false))
+        .transpose()?
+        .unwrap_or(if list { first.max(end - 1) } else { first });
     if first > last {
         std::mem::swap(&mut first, &mut last);
         reverse = true;
@@ -636,7 +682,7 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
             source.push_str(&(h.base + i + 1).to_string());
         }
         if list {
-            source.push_str("\t ");
+            source.push_str(if session.posix { "\t" } else { "\t " });
         }
         source.push_str(&h.lines[i]);
         source.push('\n');
@@ -651,56 +697,106 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
         out.write_all(source.as_bytes())?;
         return Ok(Flow::Continue(0));
     }
-    if let Some((before, after)) = substitution {
-        source = source.replace(before, after);
+    for replacement in replacements {
+        let (before, after) = replacement.split_once('=').unwrap();
+        if !before.is_empty() && source.contains(before) {
+            source = source.replace(before, after);
+        }
     }
     if !substitute && editor != Some("-") {
         let program = editor
             .map(str::to_owned)
             .or_else(|| session.get("FCEDIT"))
             .or_else(|| session.get("EDITOR"))
-            .unwrap_or_else(|| "vi".into());
-        let directory = session
-            .get("TMPDIR")
-            .map_or_else(std::env::temp_dir, PathBuf::from);
-        let mut template = directory
-            .join("tonari-fc.XXXXXX")
-            .as_os_str()
-            .as_bytes()
-            .to_vec();
-        template.push(0);
-        let fd = unsafe { libc::mkstemp(template.as_mut_ptr().cast()) };
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let path = Path::new(std::ffi::OsStr::from_bytes(&template[..template.len() - 1]));
-        let edited: io::Result<Result<String, Flow>> = (|| {
-            let mut file = unsafe { File::from_raw_fd(fd) };
-            file.write_all(source.as_bytes())?;
-            drop(file);
-            let name = path
-                .to_str()
-                .ok_or_else(|| error("expected UTF-8 temporary path"))?;
-            let flow = crate::eval_text(
-                session,
-                &format!("{program} '{}'", name.replace('\'', "'\"'\"'")),
-                status,
-            );
-            if !matches!(flow, Flow::Continue(0)) {
-                return Ok(Err(flow));
-            }
-            Ok(Ok(std::fs::read_to_string(path)?))
-        })();
-        let _ = std::fs::remove_file(path);
-        source = match edited? {
+            .unwrap_or_else(|| if session.posix { "ed" } else { "vi" }.into());
+        source = match edit_text(session, &program, &source, status)? {
             Ok(s) => s,
             Err(f) => return Ok(f),
         };
     }
     session.history_mut().discard_current();
-    for line in source.lines() {
-        session.push_history(line, false);
+    if substitute {
+        let entry = source.strip_suffix('\n').unwrap_or(&source);
+        session.record_replay(entry);
+    } else {
+        for line in source.lines() {
+            session.record_replay(line);
+        }
     }
     eprint!("{source}");
     Ok(crate::eval_text(session, &source, status))
+}
+
+pub(crate) fn edit_text(
+    session: &mut Session,
+    program: &str,
+    source: &str,
+    status: u8,
+) -> io::Result<Result<String, Flow>> {
+    let directory = session
+        .get("TMPDIR")
+        .map_or_else(std::env::temp_dir, PathBuf::from);
+    let mut template = directory
+        .join("tonari-fc.XXXXXX")
+        .into_os_string()
+        .into_vec();
+    template.push(0);
+    let fd = unsafe { libc::mkstemp(template.as_mut_ptr().cast()) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let path = Path::new(std::ffi::OsStr::from_bytes(&template[..template.len() - 1]));
+    let edited: io::Result<Result<String, Flow>> = (|| {
+        let mut file = unsafe { File::from_raw_fd(fd) };
+        file.write_all(source.as_bytes())?;
+        drop(file);
+        let name = path
+            .to_str()
+            .ok_or_else(|| error("expected UTF-8 temporary path"))?;
+        let mut command = String::with_capacity(program.len() + name.len() + 3);
+        command.push_str(program);
+        command.push_str(" '");
+        for (i, part) in name.split('\'').enumerate() {
+            if i != 0 {
+                command.push_str("'\"'\"'");
+            }
+            command.push_str(part);
+        }
+        command.push('\'');
+        let flow = crate::eval_text(session, &command, status);
+        if !matches!(flow, Flow::Continue(0)) {
+            return Ok(Err(flow));
+        }
+        Ok(Ok(std::fs::read_to_string(path)?))
+    })();
+    let _ = std::fs::remove_file(path);
+    edited
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_records_survive_buffer_boundaries() {
+        let bytes = "雪\r\n\nlast".as_bytes();
+        for capacity in 1..=bytes.len() + 1 {
+            for private in [true, false] {
+                let mut reader = BufReader::with_capacity(capacity, bytes);
+                let mut seen = Vec::new();
+                read_history_lines(&mut reader, private, |s, n| seen.push((s.to_owned(), n)))
+                    .unwrap();
+                let mut expected = vec![("雪".to_owned(), 5), ("".to_owned(), 1)];
+                if !private {
+                    expected.push(("last".to_owned(), 4));
+                }
+                assert_eq!(seen, expected);
+            }
+            let mut invalid = BufReader::with_capacity(capacity, &b"one\n\xff\n"[..]);
+            let mut prefix = Vec::new();
+            let result = read_history_lines(&mut invalid, false, |s, _| prefix.push(s.to_owned()));
+            assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
+            assert_eq!(prefix, ["one"]);
+        }
+    }
 }

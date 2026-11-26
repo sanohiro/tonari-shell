@@ -102,10 +102,15 @@ impl Launch {
     }
 
     pub fn parent(&mut self, pid: pid_t) {
+        self.record_child(pid);
         if let Some(group) = self.group {
-            let group = if group == 0 { pid } else { group };
             assign_process_group(pid, group);
-            self.group = Some(group);
+        }
+    }
+
+    pub fn record_child(&mut self, pid: pid_t) {
+        if self.group == Some(0) {
+            self.group = Some(pid);
         }
     }
 }
@@ -222,6 +227,7 @@ struct Process {
 #[derive(Clone)]
 struct Job {
     id: u32,
+    stopped_at: u64,
     group: Option<pid_t>,
     children: Vec<Process>,
     name: String,
@@ -254,6 +260,29 @@ impl Job {
             .iter()
             .any(|p| matches!(p.state, State::Stopped(_)))
     }
+    fn display_state(&self, posix: bool) -> std::borrow::Cow<'static, str> {
+        if self.active() {
+            return "Running".into();
+        }
+        if let Some(code) = self.children.iter().rev().find_map(|p| match p.state {
+            State::Stopped(code) => Some(code),
+            _ => None,
+        }) {
+            if posix
+                && let Some((name, _)) =
+                    crate::traps::signals().find(|(_, sig)| *sig + 128 == i32::from(code))
+            {
+                return format!("Stopped(SIG{name})").into();
+            }
+            return "Stopped".into();
+        }
+        match self.status() {
+            0 => "Done".into(),
+            code if posix => format!("Done({code})").into(),
+            code => format!("Exit {code}").into(),
+        }
+    }
+
     fn status(&self) -> u8 {
         for p in self.children.iter().rev() {
             match p.state {
@@ -278,6 +307,17 @@ impl Job {
             } else {
                 State::Done(libc::WEXITSTATUS(status) as u8)
             };
+            if libc::WIFCONTINUED(status) || self.stopped_at != 0 && !self.stopped() {
+                self.stopped_at = 0;
+            } else if self.stopped_at == 0
+                && (libc::WIFSTOPPED(status) || self.children.len() > 1)
+                && !self.active()
+                && self.stopped()
+            {
+                thread_local! { static NEXT_STOP: std::cell::Cell<u64> = const { std::cell::Cell::new(0) }; }
+                self.stopped_at = NEXT_STOP.get() + 1;
+                NEXT_STOP.set(self.stopped_at);
+            }
         }
     }
     fn wait(
@@ -328,6 +368,7 @@ impl Job {
                 return Err(io::Error::last_os_error());
             }
         }
+        self.stopped_at = 0;
         for p in &mut self.children {
             if matches!(p.state, State::Stopped(_)) {
                 p.state = State::Running;
@@ -340,6 +381,8 @@ impl Job {
 #[derive(Clone, Default)]
 pub struct Jobs {
     pub monitor: bool,
+    exit_warning: Option<usize>,
+    foreground_notices: Vec<(i32, String)>,
     pub(crate) quiet: bool,
     tty: Option<Terminal>,
     table: Vec<Job>,
@@ -351,6 +394,29 @@ pub struct Jobs {
 }
 
 impl Jobs {
+    pub(crate) fn defer_exit(&mut self, check_running: bool, command: usize, posix: bool) -> bool {
+        if self.table.is_empty()
+            || self
+                .exit_warning
+                .is_some_and(|n| command.wrapping_sub(n) <= 1)
+        {
+            return false;
+        }
+        self.poll();
+        if self.table.iter().any(Job::stopped) {
+            eprintln!("There are stopped jobs.");
+        } else if check_running && self.table.iter().any(Job::active) {
+            eprintln!("There are running jobs.");
+        } else {
+            return false;
+        }
+        self.exit_warning = Some(command);
+        if check_running {
+            list_to(self, &[], posix, io::stderr().lock());
+        }
+        true
+    }
+
     pub(crate) fn count(&self) -> usize {
         self.table.len() + self.inherited.len()
     }
@@ -416,6 +482,12 @@ impl Jobs {
     }
     // A command substitution or foreground pipeline builtin may list its
     // parent's jobs, but cannot reap children owned by the parent process.
+    pub fn refresh_snapshot(&mut self) {
+        if !self.table.is_empty() {
+            self.poll();
+        }
+    }
+
     pub fn forked(&mut self, list_parent: bool) {
         if list_parent {
             self.inherited.append(&mut self.table);
@@ -423,6 +495,7 @@ impl Jobs {
             self.inherited.clear();
         }
         self.tty = None;
+        self.foreground_notices.clear();
         self.monitor = false;
         self.table.clear();
         self.detached.clear();
@@ -460,6 +533,7 @@ impl Jobs {
             .collect();
         let mut job = Job {
             id: 0,
+            stopped_at: 0,
             group: launch.group.filter(|g| *g != 0),
             children,
             name,
@@ -512,6 +586,7 @@ impl Jobs {
                     statuses.push(code);
                 }
             }
+            self.note_foreground_signal(&mut job);
             if job.stopped() {
                 self.store(job);
                 if !self.quiet {
@@ -521,6 +596,39 @@ impl Jobs {
             Ok((code, None))
         }
     }
+    fn note_foreground_signal(&mut self, job: &mut Job) {
+        if job.signaled
+            && self.tty.is_some()
+            && !self.quiet
+            && !job.stopped()
+            && let Some(sig) = job.children.last().and_then(|c| c.signal)
+            && !matches!(sig, libc::SIGINT | libc::SIGPIPE)
+        {
+            self.foreground_notices
+                .push((sig, std::mem::take(&mut job.name)));
+        }
+    }
+
+    pub(crate) fn report_foreground(&mut self) {
+        for (signal, command) in self.foreground_notices.drain(..) {
+            let reason = unsafe { libc::strsignal(signal) };
+            if !reason.is_null() {
+                let text = unsafe { std::ffi::CStr::from_ptr(reason) }.to_string_lossy();
+                eprintln!("{text}  {command}");
+            }
+        }
+    }
+
+    fn remove_reported(&mut self) {
+        for i in (0..self.table.len()).rev() {
+            let job = &self.table[i];
+            if job.listed && !job.active() && !job.stopped() {
+                let done = self.table.remove(i);
+                self.remember(&done);
+            }
+        }
+    }
+
     fn remember(&mut self, job: &Job) {
         if let Some(pid) = job.children.last().map(|p| p.pid).filter(|&p| p > 0) {
             if self.finished.len() == 4096 {
@@ -686,7 +794,7 @@ impl Jobs {
         self.table.iter().any(|job| !job.active() && !job.listed)
     }
 
-    pub(crate) fn report_changes(&mut self) {
+    pub(crate) fn report_changes(&mut self, posix: bool) {
         for job in &mut self.table {
             if !job.active() && !job.listed {
                 let state = if job.stopped() {
@@ -696,9 +804,16 @@ impl Jobs {
                 } else {
                     "Done"
                 };
-                eprintln!("[{}] {state}  {}", job.id, job.name);
+                if posix && !job.signaled {
+                    eprintln!("[{}] {}  {}", job.id, job.display_state(true), job.name);
+                } else {
+                    eprintln!("[{}] {state}  {}", job.id, job.name);
+                }
                 job.listed = true;
             }
+        }
+        if posix {
+            self.remove_reported();
         }
     }
 
@@ -728,8 +843,11 @@ impl Jobs {
     }
     fn select(&self, spec: &str) -> Option<usize> {
         match spec {
-            "" | "%" | "%+" | "%%" => self.table.len().checked_sub(1),
-            "%-" => self.table.len().checked_sub(2),
+            "" | "%" | "%+" | "%%" | "%-" => {
+                let (current, previous) = marked_jobs(self.table.iter());
+                let id = if spec == "%-" { previous } else { current }?;
+                self.table.iter().position(|job| job.id == id)
+            }
             s if s.starts_with('%') => {
                 let name = &s[1..];
                 if let Ok(id) = name.parse::<u32>() {
@@ -756,11 +874,32 @@ impl Jobs {
     }
 }
 
-fn kill(jobs: &Jobs, mut args: &[String]) -> u8 {
+fn kill(jobs: &Jobs, mut args: &[String], posix: bool) -> u8 {
+    let number = |s: &str| {
+        if posix && s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("SIG")) {
+            None
+        } else {
+            crate::traps::number(s)
+        }
+    };
     if args.first().is_some_and(|s| s == "-l" || s == "-L") {
         let mut out = io::stdout().lock();
         let mut status = 0;
         if args.len() == 1 {
+            if posix {
+                static NAMES: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+                    let mut text = String::new();
+                    for (name, _) in crate::traps::signals().filter(|s| s.1 > 0) {
+                        if !text.is_empty() {
+                            text.push(' ');
+                        }
+                        text.push_str(name);
+                    }
+                    text.push('\n');
+                    text
+                });
+                return u8::from(out.write_all(NAMES.as_bytes()).is_err());
+            }
             return u8::from(crate::traps::print_signal_table(&mut out).is_err());
         } else {
             for arg in &args[1..] {
@@ -771,7 +910,7 @@ fn kill(jobs: &Jobs, mut args: &[String]) -> u8 {
                         .find(|s| s.1 == number)
                         .map(|(name, _)| writeln!(out, "{name}"))
                 } else {
-                    crate::traps::number(arg).map(|n| writeln!(out, "{n}"))
+                    number(arg).map(|n| writeln!(out, "{n}"))
                 };
                 let Some(result) = result else {
                     // stderr is unbuffered. Submit the whole diagnostic in one write.
@@ -789,18 +928,18 @@ fn kill(jobs: &Jobs, mut args: &[String]) -> u8 {
     }
     let sig = match args.first().map(String::as_str) {
         Some("-s" | "-n") if args.len() >= 2 => {
-            let sig = crate::traps::number(&args[1]);
+            let sig = number(&args[1]);
             args = &args[2..];
             sig
         }
         Some(s) if s.len() > 2 && (s.starts_with("-n") || s.starts_with("-s")) => {
-            let signal = crate::traps::number(&s[2..]);
+            let signal = number(&s[2..]);
             args = &args[1..];
             signal
         }
         Some(s) if s.starts_with('-') && s != "--" => {
             args = &args[1..];
-            crate::traps::number(&s[1..])
+            number(&s[1..])
         }
         _ => Some(libc::SIGTERM),
     };
@@ -891,7 +1030,7 @@ fn wait_builtin(args: &[String], session: &mut Session) -> u8 {
         return 2;
     };
     if let Some(name) = options.variable {
-        if !session.valid_target(name) {
+        if !session.valid_builtin_target(name) {
             eprintln!("tonari: wait: {name}: not a valid identifier");
             return 1;
         }
@@ -905,7 +1044,10 @@ fn wait_builtin(args: &[String], session: &mut Session) -> u8 {
         wait_for_ids(session, ids, options.force)
     };
     if let (Some(name), Some(pid)) = (options.variable, pid) {
-        if session.assign_target(name, &pid.to_string()).is_err() {
+        if session
+            .assign_builtin_target(name, &pid.to_string())
+            .is_err()
+        {
             return 1;
         }
     }
@@ -1011,11 +1153,16 @@ fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Opti
                         );
                     }
                 }
-                jobs.remember(&job);
+                if !session.posix {
+                    jobs.remember(&job);
+                }
             }
         } else if let Some(pid) = number {
-            if let Some((_, code)) = jobs.finished.iter().rev().find(|(p, _)| *p == pid) {
-                result = (*code, Some(pid));
+            if let Some(i) = jobs.finished.iter().rposition(|(p, _)| *p == pid) {
+                result = (jobs.finished[i].1, Some(pid));
+                if session.posix {
+                    jobs.finished.remove(i);
+                }
             } else if let Some(code) = session.substitutions.wait(pid, mask.as_ref()) {
                 if let Some(interrupted) = mask
                     .as_ref()
@@ -1045,27 +1192,48 @@ fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Opti
     result
 }
 
-fn job_id(jobs: &Jobs, spec: &str) -> Option<u32> {
-    let mut all = jobs.inherited.iter().chain(&jobs.table).rev();
-    let spec = spec.strip_prefix('%').unwrap_or(spec);
-    match spec {
-        "" | "+" | "%" => all.next().map(|j| j.id),
-        "-" => all.nth(1).map(|j| j.id),
-        s => {
-            if let Ok(id) = s.parse::<u32>() {
-                return all.find(|job| job.id == id).map(|job| job.id);
-            }
-            let mut matches = all.filter(|j| {
-                s.strip_prefix('?')
-                    .map_or_else(|| j.name.starts_with(s), |part| j.name.contains(part))
-            });
-            let id = matches.next()?.id;
-            matches.next().is_none().then_some(id)
+fn marked_jobs<'a>(jobs: impl Iterator<Item = &'a Job>) -> (Option<u32>, Option<u32>) {
+    let mut current = None;
+    let mut previous = None;
+    for job in jobs {
+        let rank = Some((job.stopped_at, job.id));
+        if rank > current {
+            previous = current;
+            current = rank;
+        } else if rank > previous {
+            previous = rank;
         }
     }
+    (
+        current.map(|(_, id)| id),
+        previous.or(current).map(|(_, id)| id),
+    )
 }
 
-fn list(jobs: &mut Jobs, args: &[String]) -> u8 {
+fn list_position(jobs: &Jobs, spec: &str, markers: (Option<u32>, Option<u32>)) -> Option<usize> {
+    let mut all = jobs.inherited.iter().chain(&jobs.table);
+    let spec = spec.strip_prefix('%').unwrap_or(spec);
+    let id = match spec {
+        "" | "+" | "%" => markers.0,
+        "-" => markers.1,
+        s => s.parse::<u32>().ok(),
+    };
+    if let Some(id) = id {
+        return all.position(|j| j.id == id);
+    }
+    let mut matches = all.enumerate().filter(|(_, j)| {
+        spec.strip_prefix('?')
+            .map_or_else(|| j.name.starts_with(spec), |part| j.name.contains(part))
+    });
+    let (index, _) = matches.next()?;
+    matches.next().is_none().then_some(index)
+}
+
+fn list(jobs: &mut Jobs, args: &[String], posix: bool) -> u8 {
+    list_to(jobs, args, posix, io::stdout().lock())
+}
+
+fn list_to(jobs: &mut Jobs, args: &[String], posix: bool, mut out: impl Write) -> u8 {
     let mut mode = ' ';
     let mut changed = false;
     let mut filter = ' ';
@@ -1087,31 +1255,30 @@ fn list(jobs: &mut Jobs, args: &[String]) -> u8 {
         }
     }
     let mut status = 0;
-    let mut ids = Vec::new();
-    let all = args.peek().is_none();
+    let markers = marked_jobs(jobs.inherited.iter().chain(&jobs.table));
+    let all = if args.peek().is_none() {
+        jobs.inherited.len() + jobs.table.len()
+    } else {
+        0
+    };
+    let mut selected = Vec::new();
     for spec in args {
-        if let Some(id) = job_id(jobs, spec) {
-            ids.push(id);
+        if let Some(index) = list_position(jobs, spec, markers) {
+            selected.push(index);
         } else {
             eprintln!("tonari: jobs: {spec}: no such job");
             status = 1;
         }
     }
-    if all {
-        ids.extend(jobs.inherited.iter().chain(&jobs.table).map(|j| j.id));
-    }
-    let current = job_id(jobs, "%+");
-    let previous = job_id(jobs, "%-");
-    let mut out = io::stdout().lock();
-    for id in ids {
-        let Some(job) = jobs
-            .inherited
-            .iter_mut()
-            .chain(&mut jobs.table)
-            .find(|j| j.id == id)
-        else {
-            continue;
+    let (current, previous) = markers;
+    for index in (0..all).chain(selected) {
+        let inherited = jobs.inherited.len();
+        let job = if index < inherited {
+            &mut jobs.inherited[index]
+        } else {
+            &mut jobs.table[index - inherited]
         };
+        let id = job.id;
         if (changed && job.listed)
             || (filter == 'r' && !job.active())
             || (filter == 's' && !job.stopped())
@@ -1127,15 +1294,7 @@ fn list(jobs: &mut Jobs, args: &[String]) -> u8 {
             }
             continue;
         }
-        let state = if job.active() {
-            "Running".into()
-        } else if job.stopped() {
-            "Stopped".into()
-        } else if job.status() == 0 {
-            "Done".into()
-        } else {
-            format!("Exit {}", job.status())
-        };
+        let state = job.display_state(posix);
         let marker = if Some(id) == current {
             '+'
         } else if Some(id) == previous {
@@ -1170,18 +1329,12 @@ fn list(jobs: &mut Jobs, args: &[String]) -> u8 {
                     return 1;
                 }
             }
-        } else if writeln!(out, "[{id}]{marker}  {state:<23} {}{bg}", job.name).is_err() {
+        } else if writeln!(out, "[{id}]{marker}  {state:<26} {}{bg}", job.name).is_err() {
             return 1;
         }
         job.listed = true;
     }
-    for i in (0..jobs.table.len()).rev() {
-        let job = &jobs.table[i];
-        if job.listed && !job.active() && !job.stopped() {
-            let done = jobs.table.remove(i);
-            jobs.remember(&done);
-        }
-    }
+    jobs.remove_reported();
     if out.flush().is_err() { 1 } else { status }
 }
 
@@ -1191,19 +1344,16 @@ pub fn dispatch(words: &[String], session: &mut Session, last: u8) -> crate::Flo
         if words.clone().next().is_some_and(|s| s == "--") {
             words.next();
         }
+        session.jobs.poll();
+        let all = || session.jobs.inherited.iter().chain(&session.jobs.table);
+        let markers = marked_jobs(all());
         let command = crate::parser::SimpleCommand {
             words: words
                 .map(|arg| {
-                    let id = arg
-                        .starts_with('%')
-                        .then(|| job_id(&session.jobs, arg))
-                        .flatten();
-                    let job = session
-                        .jobs
-                        .inherited
-                        .iter()
-                        .chain(&session.jobs.table)
-                        .find(|j| Some(j.id) == id);
+                    let job = arg
+                        .strip_prefix('%')
+                        .and_then(|_| list_position(&session.jobs, arg, markers))
+                        .and_then(|index| all().nth(index));
                     let text = job.map_or_else(
                         || arg.clone(),
                         |j| {
@@ -1230,8 +1380,8 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
     let jobs = &mut session.jobs;
     jobs.poll();
     match words[0].as_str() {
-        "kill" => kill(jobs, &words[1..]),
-        "jobs" => list(jobs, &words[1..]),
+        "kill" => kill(jobs, &words[1..], session.posix),
+        "jobs" => list(jobs, &words[1..], session.posix),
         "disown" => jobs.disown(&words[1..]),
         "bg" => {
             if !jobs.monitor {
@@ -1250,14 +1400,14 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                     status = 1;
                     continue;
                 };
-                let n = jobs.table.len();
+                let (current, previous) = marked_jobs(jobs.table.iter());
                 let job = &mut jobs.table[i];
                 if job.group.is_none() {
                     eprintln!("tonari: bg: job {} started without job control", job.id);
                     status = 1;
                     continue;
                 }
-                if !job.stopped() && !session.posix {
+                if !job.stopped() {
                     eprintln!("tonari: bg: job {} already in background", job.id);
                     continue;
                 }
@@ -1267,11 +1417,11 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                 }
                 session.last_background = job.children.last().map(|p| p.pid);
                 let result = if session.posix {
-                    writeln!(out, "[{}] {}", job.id, job.name)
+                    writeln!(out, "[{}] {} &", job.id, job.name)
                 } else {
-                    let marker = if i + 1 == n {
+                    let marker = if Some(job.id) == current {
                         '+'
-                    } else if i + 2 == n {
+                    } else if Some(job.id) == previous {
                         '-'
                     } else {
                         ' '
@@ -1309,6 +1459,7 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                 .terminal()
                 .and_then(|t| terminal_modes(t.fd.as_raw_fd()));
             let r = jobs.foreground(&mut job, true, modes);
+            jobs.note_foreground_signal(&mut job);
             if job.stopped() {
                 jobs.table.push(job);
             }

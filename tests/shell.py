@@ -1431,7 +1431,7 @@ GLOBIGNORE='@(sub/file|./keep)'; printf '<%s>' ./* sub/*; echo
             with self.subTest(shell=shell):
                 version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"')
                 newer = tuple(map(int, version.stdout.strip().split(b"."))) >= (5, 3)
-                prefix = b"<./++><./;>" if shell == BASH and newer else b""
+                prefix = b"<./++><./;>" if shell != BASH or newer else b""
                 expected = b"recovered:1\nredirected:1\n" + prefix + b"<./keep><./sub>\n<./++><./;><./sub><sub/*>\n"
                 result = self.command(shell, script)
                 self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, b""))
@@ -2020,7 +2020,9 @@ shopt -u cdable_vars; cd DEST 2>/dev/null; echo "off:$?"
         for shell in [BASH, TONARI]:
             proc = self.command(shell, source)
             self.assertEqual((proc.returncode, proc.stdout), (0, b"2:a\n"))
-            if shell == TONARI:
+            if shell == TONARI or not self.bash_before_53():
+                self.assertIn(b"regular expression", proc.stderr)
+            else:
                 self.assertEqual(proc.stderr, b"")
 
     def test_single_star_literal_edges(self):
@@ -2532,13 +2534,17 @@ case z in z) false ;;& a) :;; esac; printf '/%s' "$?" """,
                      0, b"first:next:retest:1/1")
 
     def test_clobber_readwrite_and_descriptor_moves(self):
-        self.compare("""echo first >file; set -C
+        script = """echo first >file; set -C
 echo lost 2>/dev/null >file; echo "blocked:$?"; cat file
 echo allowed >|file; cat file; : >/dev/null; echo "device:$?"
 exec 3<>file; IFS= read -ru3 line; echo "read:$line"; printf 'more' >&3; exec 3>&-
 exec 6<file; exec 7<&6-; read -ru7 line; printf 'moved:%s' "$line"
-exec 8>|output; printf out 9>&8- >&9; { printf ok >&8; } 2>/dev/null; echo "/$?"; cat output""",
-                     0, b"blocked:1\nfirst\nallowed\ndevice:0\nread:allowed\nmoved:allowed/1\nout")
+exec 8>|output; printf out 9>&8- >&9; { printf ok >&8; } 2>/dev/null; echo "/$?"; cat output"""
+        for shell in self.shells_for():
+            result = self.command(shell, script)
+            ending = b"/0\noutok" if shell == TONARI else b"/1\nout"
+            self.assertEqual((result.returncode, result.stdout, result.stderr),
+                             (0, b"blocked:1\nfirst\nallowed\ndevice:0\nread:allowed\nmoved:allowed" + ending, b""))
 
     def test_arithmetic_for_quotes_nested_separators_and_errors(self):
         self.compare("""for ((i=0; "i < 3"; i++)); do printf %s "$i"; done; echo

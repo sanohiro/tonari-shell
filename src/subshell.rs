@@ -154,7 +154,8 @@ pub fn capture_substitution(
     // Keep streams, virtual files, error reporting and trap execution in the child.
     if !session.traps.active()
         && !session.xtrace
-        && let Some(path) = input_only(&body).and_then(parser::Word::as_literal)
+        && let Some(path) = input_only(&body)
+            .and_then(|word| stored_path(word, session, session.posix && !session.interactive))
         && let Ok(before) = std::fs::metadata(path)
         && before.is_file()
     {
@@ -193,6 +194,7 @@ pub fn capture_substitution(
     if let Some(result) = capture_simple(session, &body, last) {
         return result;
     }
+    session.jobs.refresh_snapshot();
     let (read, write) = std::io::pipe().map_err(|_| "cannot open command substitution pipe")?;
     let pid = unsafe { libc::fork() };
     if pid < 0 {
@@ -225,20 +227,17 @@ pub fn capture_substitution(
         if let Some(path) = input_only(&body) {
             let code = (|| {
                 let captured = std::cell::Cell::new(None);
-                let fields = crate::expansion::Expansion::new(session, last, &captured)
-                    .fields(path.clone())
+                let filename = crate::expansion::Expansion::new(session, last, &captured)
+                    .redirect_path(path.clone())
                     .map_err(std::io::Error::other)?;
-                let [filename] = fields.as_slice() else {
-                    return Err(std::io::Error::other("ambiguous redirect"));
-                };
                 #[cfg(target_os = "linux")]
                 let file = match &child_input {
                     Some(fd) => std::fs::File::open(format!("/proc/self/fd/{}", fd.as_raw_fd()))
-                        .or_else(|_| std::fs::File::open(filename)),
-                    None => std::fs::File::open(filename),
+                        .or_else(|_| std::fs::File::open(&filename)),
+                    None => std::fs::File::open(&filename),
                 };
                 #[cfg(not(target_os = "linux"))]
-                let file = std::fs::File::open(filename);
+                let file = std::fs::File::open(&filename);
                 let mut file =
                     file.map_err(|e| io::Error::new(e.kind(), format!("{filename}: {e}")))?;
                 // Write straight to fd 1. Stdout's line buffer could retain the
@@ -397,6 +396,20 @@ fn can_elide_child(session: &Session) -> bool {
 }
 
 fn capture_program<'a>(word: &'a parser::Word, session: &'a Session) -> Option<&'a str> {
+    if let Some(name) = word.as_literal() {
+        return Some(name);
+    }
+    if !can_elide_child(session) {
+        return None;
+    }
+    stored_path(word, session, false).filter(|path| path.starts_with('/'))
+}
+
+fn stored_path<'a>(
+    word: &'a parser::Word,
+    session: &'a Session,
+    allow_unquoted: bool,
+) -> Option<&'a str> {
     use crate::word::{Part, Word, is_identifier};
     if let Some(name) = word.as_literal() {
         return Some(name);
@@ -404,10 +417,10 @@ fn capture_program<'a>(word: &'a parser::Word, session: &'a Session) -> Option<&
     let Word::Expanded(parts) = word else {
         return None;
     };
-    let [Part::Parameter { name, quoted: true }] = parts.as_slice() else {
+    let [Part::Parameter { name, quoted }] = parts.as_slice() else {
         return None;
     };
-    if !can_elide_child(session) {
+    if !quoted && !allow_unquoted {
         return None;
     }
     // A quoted stored pathname supplies exactly one word. Preserve resolution
@@ -420,7 +433,7 @@ fn capture_program<'a>(word: &'a parser::Word, session: &'a Session) -> Option<&
     } else {
         return None;
     };
-    path.starts_with('/').then_some(path)
+    Some(path)
 }
 
 // Only a single output/status builtin with inert operands can be evaluated
@@ -484,9 +497,11 @@ fn capture_simple(
             &mut out,
             session.posix && flag.as_literal() == Some("-p"),
             flag.as_literal() == Some("-P"),
+            session.posix,
         );
         return Some(captured_output(out, status));
     }
+    let capture_line = std::cell::Cell::new(None);
     let command = |cmd: &parser::SimpleCommand<Word>| {
         if session.keyword && cmd.keyword_args.is_some() {
             return None;
@@ -550,6 +565,15 @@ fn capture_simple(
             Word::Expanded(parts) => parts.iter().all(|part| match part {
                 Part::Text(_) => true,
                 Part::Parameter { name, quoted } => {
+                    if name == "LINENO"
+                        && !session.is_nameref(name)
+                        && !external
+                        && can_elide_child(session)
+                        && sole_plain_command(body).is_some()
+                    {
+                        capture_line.set(Some(body[0].location.line));
+                        return true;
+                    }
                     if let Some(base) = name.strip_suffix("[@]") {
                         return external
                             && *quoted
@@ -651,11 +675,17 @@ fn capture_simple(
             ));
         }
         let captured = std::cell::Cell::new(None);
+        let original = session.signal_line;
+        if let Some(line) = capture_line.get() {
+            session.signal_line = Some(line);
+        }
         let mut env = crate::expansion::Expansion::new(session, code, &captured);
         fields.clear();
-        for arg in &words[1..] {
-            env.append_fields(arg.clone(), &mut fields).ok()?;
-        }
+        let expanded = words[1..]
+            .iter()
+            .try_for_each(|arg| env.append_fields(arg.clone(), &mut fields));
+        session.signal_line = original;
+        expanded.ok()?;
         code = match name.unwrap() {
             "echo" => {
                 crate::builtins::echo_into(&fields, &mut output, session);

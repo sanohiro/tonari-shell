@@ -6,9 +6,31 @@ pub enum Expr {
     Word(Word),
     Unary(String, Word),
     Binary(Word, String, Word),
+    StaticRegex(Word, String, Option<String>),
     Not(Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
+}
+
+impl Expr {
+    pub(crate) fn binary(left: Word, operator: String, right: Word) -> Self {
+        use crate::word::Part;
+        if operator == "=~"
+            && match &right {
+                Word::Literal(_) => true,
+                Word::Expanded(parts) => parts
+                    .iter()
+                    .all(|p| matches!(p, Part::Pattern(_) | Part::Unquoted(_) | Part::Text(_))),
+                Word::Declaration(_) => false,
+            }
+        {
+            let quoted = right.clone().regex(&|_| None, &[]);
+            let plain = right.scalar(&|_| None, &[]);
+            let plain = (plain != quoted).then_some(plain);
+            return Self::StaticRegex(left, quoted, plain);
+        }
+        Self::Binary(left, operator, right)
+    }
 }
 
 pub fn evaluate(expr: &Expr, session: &mut Session, status: u8) -> Flow {
@@ -22,9 +44,13 @@ fn trace(session: &mut Session, status: u8, words: &[&str]) {
     if session.xtrace {
         crate::execute::trace_line(session, status, |line| {
             line.push_str("[[");
-            for word in words {
+            for (index, word) in words.iter().enumerate() {
                 line.push(' ');
-                line.push_str(&crate::execute::trace_word(word));
+                if index == 1 && words.len() == 3 {
+                    line.push_str(word);
+                } else {
+                    line.push_str(&crate::execute::trace_word(word));
+                }
             }
             line.push_str(" ]]");
         });
@@ -48,9 +74,19 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
         Flow::Continue(2)
     };
     match expr {
-        Not(e) => Ok(!condition(e, session, status)?),
-        And(a, b) => Ok(condition(a, session, status)? && condition(b, session, status)?),
-        Or(a, b) => Ok(condition(a, session, status)? || condition(b, session, status)?),
+        Not(e) => match condition(e, session, status) {
+            Ok(value) => Ok(!value),
+            Err(Flow::Continue(code)) => Ok(code != 0),
+            other => other,
+        },
+        And(a, b) => match condition(a, session, status)? {
+            true => condition(b, session, status),
+            false => Ok(false),
+        },
+        Or(a, b) => match condition(a, session, status) {
+            Ok(false) | Err(Flow::Continue(1..)) => condition(b, session, status),
+            other => other,
+        },
         Word(word) => {
             let value = operand(session, word, status)?;
             trace(session, status, &["-n", &value]);
@@ -59,7 +95,20 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
         Unary(op, word) => {
             let value = operand(session, word, status)?;
             trace(session, status, &[op, &value]);
+            if op == "-v" {
+                return builtins::variable_set(session, &value, word.as_literal().is_none())
+                    .map_err(error);
+            }
             builtins::unary(op, &value, session).map_err(error)
+        }
+        StaticRegex(left, quoted, plain) => {
+            let left = operand(session, left, status)?;
+            let pattern = if session.shopt.compat <= 31 {
+                plain.as_ref().unwrap_or(quoted)
+            } else {
+                quoted
+            };
+            regex_match(session, status, &left, pattern.as_str().into())
         }
         Binary(left, op, right) => {
             let left = operand(session, left, status)?;
@@ -108,28 +157,17 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                             })?
                             .into()
                     };
-                    trace(session, status, &[&left, op, &expression]);
-                    let result = pattern::localized(|| {
-                        let ignore_case = session.shopt.nocasematch;
-                        let slot = &mut session.regex[usize::from(ignore_case)];
-                        if slot.as_ref().is_none_or(|r| r.pattern != expression) {
-                            *slot = Some(std::rc::Rc::new(Compiled::new(
-                                expression.into_owned(),
-                                ignore_case,
-                            )?));
-                        }
-                        slot.as_ref().unwrap().search(&left)
-                    })
-                    .map_err(|()| Flow::Continue(2))?;
-                    let matched = result.is_some();
-                    session.replace_array("BASH_REMATCH", result.unwrap_or_default());
-                    Ok(matched)
+                    regex_match(session, status, &left, expression)
                 }
                 "-eq" | "-ne" | "-lt" | "-le" | "-gt" | "-ge" => {
                     let right = operand(session, right, status)?;
                     trace(session, status, &[&left, op, &right]);
-                    let a = arithmetic::run(&left, session).map_err(error)?;
-                    let b = arithmetic::run(&right, session).map_err(error)?;
+                    let arith_error = |message| {
+                        eprintln!("tonari: [[: {message}");
+                        Flow::Continue(1)
+                    };
+                    let a = arithmetic::run(&left, session).map_err(arith_error)?;
+                    let b = arithmetic::run(&right, session).map_err(arith_error)?;
                     Ok(match op.as_str() {
                         "-eq" => a == b,
                         "-ne" => a != b,
@@ -149,9 +187,254 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
     }
 }
 
+fn regex_match(
+    session: &mut Session,
+    status: u8,
+    left: &str,
+    expression: std::borrow::Cow<'_, str>,
+) -> Result<bool, Flow> {
+    trace(session, status, &[left, "=~", &expression]);
+    let result = pattern::localized(|| {
+        let ignore_case = session.shopt.nocasematch;
+        let recent = &mut session.regex[usize::from(ignore_case)];
+        if let Some(compiled) = recent.iter().flatten().find(|r| r.pattern == expression) {
+            return compiled.search(left);
+        }
+        let compiled = Compiled::new(expression.into_owned(), ignore_case)?;
+        let result = compiled.search(left);
+        recent.rotate_right(1);
+        recent[0] = Some(std::rc::Rc::new(compiled));
+        result
+    })
+    .map_err(|()| Flow::Continue(2))?;
+    let matched = result.is_some();
+    session.replace_array("BASH_REMATCH", result.unwrap_or_default());
+    Ok(matched)
+}
+
+// Return the end of a POSIX ERE list, measured from just after its opening '['.
+fn ere_list_end(body: &[u8]) -> Option<usize> {
+    let mut i = usize::from(body.first() == Some(&b'^'));
+    i += usize::from(body.get(i) == Some(&b']'));
+    while let Some(&byte) = body.get(i) {
+        if byte == b']' {
+            return Some(i);
+        }
+        if byte == b'['
+            && let Some((length, _)) = list_item(&body[i..])
+        {
+            i += length;
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+fn list_item(input: &[u8]) -> Option<(usize, u8)> {
+    let [b'[', mark @ (b'=' | b'.' | b':'), tail @ ..] = input else {
+        return None;
+    };
+    let end = tail.windows(2).position(|w| w == [*mark, b']'])?;
+    Some((end + 4, *mark))
+}
+
+fn open_list(pattern: &str) -> Option<usize> {
+    let bytes = pattern.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b'[' => match ere_list_end(&bytes[i + 1..]) {
+                Some(n) => i += n + 2,
+                None => return Some(i),
+            },
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+pub(crate) fn quote_regex(buffer: &mut String, mut text: &str) {
+    if let Some(start) = open_list(buffer) {
+        let before = buffer.len();
+        buffer.push_str(text);
+        let Some(close) = ere_list_end(&buffer.as_bytes()[start + 1..]) else {
+            return;
+        };
+        let end = start + close + 2;
+        buffer.truncate(end);
+        text = &text[end - before..];
+    }
+    for c in text.chars() {
+        if "\\.[]{}()*+?^$|".contains(c) {
+            buffer.push('\\');
+        }
+        buffer.push(c);
+    }
+}
+
+// Some POSIX regex implementations reject even the single-character
+// collating elements in the portable character set. Preserve native
+// equivalence classes whenever the host can compile the original expression.
+fn portable_ere(pattern: &str) -> Option<String> {
+    let bytes = pattern.as_bytes();
+    let mut out = String::new();
+    let mut copied = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        if bytes[i] != b'[' {
+            i += 1;
+            continue;
+        }
+        let end = i + 1 + ere_list_end(&bytes[i + 1..])?;
+        let body = &pattern[i + 1..end];
+        if body.contains("[.") || body.contains("[=") {
+            let list = portable_list(body)?;
+            out.push_str(&pattern[copied..i]);
+            out.push_str(&list);
+            copied = end + 1;
+        }
+        i = end + 1;
+    }
+    if copied == 0 {
+        return None;
+    }
+    out.push_str(&pattern[copied..]);
+    Some(out)
+}
+
+fn portable_list(body: &str) -> Option<String> {
+    #[derive(Clone, Copy)]
+    enum Member<'a> {
+        Scalar(char),
+        Dash,
+        Class(&'a str),
+    }
+    use Member::*;
+    let (negative, mut rest) = body.strip_prefix('^').map_or((false, body), |s| (true, s));
+    if !negative
+        && let Some((n, mark)) = list_item(rest.as_bytes())
+        && n == rest.len()
+        && matches!(mark, b'.' | b'=')
+    {
+        let name = &rest[2..n - 2];
+        let mut chars = name.chars();
+        let c = match (chars.next(), chars.next()) {
+            (Some(c), None) => c,
+            _ if mark == b'.' => char::from(crate::pattern::portable_symbol(name.as_bytes())?),
+            _ => return None,
+        };
+        if c == '\0' {
+            return None;
+        }
+        let mut quoted = String::new();
+        if "\\.[]{}()*+?^$|".contains(c) {
+            quoted.push('\\');
+        }
+        quoted.push(c);
+        return Some(quoted);
+    }
+    let mut members = Vec::new();
+    while !rest.is_empty() {
+        if let Some((n, mark)) = list_item(rest.as_bytes()) {
+            let name = &rest[2..n - 2];
+            let item = if mark == b':' {
+                Class(&rest[..n])
+            } else {
+                let c = if name.chars().count() == 1 {
+                    name.chars().next()?
+                } else if mark == b'.' {
+                    char::from(crate::pattern::portable_symbol(name.as_bytes())?)
+                } else {
+                    return None;
+                };
+                if c == '\0' {
+                    return None;
+                }
+                Scalar(c)
+            };
+            members.push(item);
+            rest = &rest[n..];
+        } else {
+            let c = rest.chars().next()?;
+            members.push(if c == '-' { Dash } else { Scalar(c) });
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    let mut ordinary = String::new();
+    let mut punctuation = [false; 4];
+    fn literal(c: char, ordinary: &mut String, punctuation: &mut [bool; 4]) {
+        match c {
+            ']' => punctuation[0] = true,
+            '^' => punctuation[1] = true,
+            '[' => punctuation[2] = true,
+            '-' => punctuation[3] = true,
+            c => ordinary.push(c),
+        }
+    }
+    let mut input = members.as_slice();
+    while let [first, tail @ ..] = input {
+        if let (Scalar(a), [Dash, Scalar(b), tail @ ..]) = (*first, tail) {
+            if a > *b {
+                return None;
+            }
+            if a.is_ascii() && b.is_ascii() {
+                for byte in (a as u8)..=(*b as u8) {
+                    literal(char::from(byte), &mut ordinary, &mut punctuation);
+                }
+            } else {
+                if matches!(a, ']' | '[' | '^' | '-') || matches!(b, ']' | '[' | '^' | '-') {
+                    return None;
+                }
+                ordinary.push(a);
+                ordinary.push('-');
+                ordinary.push(*b);
+            }
+            input = tail;
+        } else {
+            match *first {
+                Scalar(c) => literal(c, &mut ordinary, &mut punctuation),
+                Dash if tail.is_empty() || input.len() == members.len() => punctuation[3] = true,
+                Dash => return None,
+                Class(s) => ordinary.push_str(s),
+            }
+            input = tail;
+        }
+    }
+    let [closing, caret, opening, dash] = punctuation;
+    if !negative && caret && !closing && ordinary.is_empty() && !opening && !dash {
+        return Some(r"\^".into());
+    }
+    let mut result = String::from(if negative { "[^" } else { "[" });
+    if closing {
+        result.push(']');
+    }
+    result.push_str(&ordinary);
+    if opening {
+        result.push('[');
+    }
+    let dash_first = !negative && caret && !opening && !closing && ordinary.is_empty();
+    if dash && dash_first {
+        result.push('-');
+    }
+    if caret {
+        result.push('^');
+    }
+    if dash && !dash_first {
+        result.push('-');
+    }
+    result.push(']');
+    Some(result)
+}
+
 pub struct Compiled {
     pattern: String,
-    regex: Box<libc::regex_t>,
+    regex: Option<Box<libc::regex_t>>,
     captures: usize,
 }
 
@@ -164,18 +447,33 @@ impl Compiled {
         } else {
             libc::REG_EXTENDED
         };
-        if unsafe { libc::regcomp(regex.as_mut_ptr(), encoded.as_ptr(), flags) } != 0 {
-            return Err(());
+        let compile = |compiled: *mut libc::regex_t, bytes: &CString| unsafe {
+            libc::regcomp(compiled, bytes.as_ptr(), flags) == 0
+        };
+        if !compile(regex.as_mut_ptr(), &encoded)
+            && !portable_ere(&pattern)
+                .and_then(|p| CString::new(p).ok())
+                .is_some_and(|p| compile(regex.as_mut_ptr(), &p))
+        {
+            return Ok(Self {
+                pattern,
+                regex: None,
+                captures: 0,
+            });
         }
         let captures = capture_count(&pattern) + 1;
         Ok(Self {
             pattern,
-            regex: unsafe { regex.assume_init() },
+            regex: Some(unsafe { regex.assume_init() }),
             captures,
         })
     }
 
     fn search(&self, text: &str) -> Result<Option<Vec<String>>, ()> {
+        let Some(regex) = self.regex.as_deref() else {
+            eprintln!("tonari: [[: invalid regular expression: {}", self.pattern);
+            return Err(());
+        };
         let encoded = CString::new(text).map_err(|_| ())?;
         let mut matched = vec![
             libc::regmatch_t {
@@ -186,7 +484,7 @@ impl Compiled {
         ];
         match unsafe {
             libc::regexec(
-                &*self.regex,
+                regex,
                 encoded.as_ptr(),
                 matched.len(),
                 matched.as_mut_ptr(),
@@ -211,7 +509,9 @@ impl Compiled {
 
 impl Drop for Compiled {
     fn drop(&mut self) {
-        unsafe { libc::regfree(&mut *self.regex) };
+        if let Some(regex) = self.regex.as_deref_mut() {
+            unsafe { libc::regfree(regex) };
+        }
     }
 }
 

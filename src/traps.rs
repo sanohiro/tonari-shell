@@ -161,6 +161,7 @@ pub struct Traps {
     handling_debug: bool,
     handling_error: bool,
     handling_return: bool,
+    handling_exit: bool,
     interactive_hup: bool,
     interactive_handlers: bool,
     interactive_origin: bool,
@@ -281,6 +282,11 @@ pub fn std_spawn_inherits_pipe(traps: &Traps) -> bool {
 impl Traps {
     pub(crate) fn in_nested_action(&self) -> bool {
         self.handling_debug || self.handling_error || self.handling_return
+    }
+
+    pub fn in_action_child(&self, scope_depth: u32) -> bool {
+        self.current_action
+            .is_some_and(|action| scope_depth > action.scope_depth)
     }
 
     pub fn in_action(&self) -> bool {
@@ -479,6 +485,10 @@ impl Traps {
     pub fn leave_source(&mut self, saved: Option<Entry>) {
         self.restore(DEBUG, saved);
     }
+    pub fn return_handler(&self) -> bool {
+        !self.handling_return && !self.handling_debug && self.catches(RETURN)
+    }
+
     pub fn debug_handler(&self) -> bool {
         !self.handling_debug && self.catches(DEBUG)
     }
@@ -509,6 +519,7 @@ impl Traps {
     }
 
     pub fn after_fork(&mut self, errtrace: bool, functrace: bool) {
+        self.handling_exit = false;
         self.current_action = None;
         if self.entries.contains_key(&libc::SIGCHLD) {
             WATCH_CHILDREN.store(false, Relaxed);
@@ -578,6 +589,7 @@ impl Traps {
         out: &mut impl Write,
         defaults: bool,
         action_only: bool,
+        posix: bool,
     ) -> u8 {
         let entries = self.inherited_listing.as_deref().unwrap_or(&self.entries);
         let mut show = |sig| {
@@ -598,30 +610,48 @@ impl Traps {
                     out,
                     "trap -- '{}' {}{name}",
                     e.command.replace('\'', "'\\''"),
-                    if sig == 0 || sig >= DEBUG { "" } else { "SIG" }
+                    if posix || sig == 0 || sig >= DEBUG {
+                        ""
+                    } else {
+                        "SIG"
+                    }
                 )?;
             }
-            if defaults
-                && !entries.contains_key(&sig)
+            if !entries.contains_key(&sig)
+                && sig > 0
+                && sig < DEBUG
                 && let Some((name, _)) = signals().find(|s| s.1 == sig)
             {
-                writeln!(out, "trap -- - {name}")?;
+                let ignored = if let Some(old) = self.implicit.get(&sig) {
+                    old.sa_sigaction == libc::SIG_IGN
+                } else {
+                    let mut old = std::mem::MaybeUninit::uninit();
+                    unsafe {
+                        libc::sigaction(sig, std::ptr::null(), old.as_mut_ptr()) == 0
+                            && old.assume_init().sa_sigaction == libc::SIG_IGN
+                    }
+                };
+                if !action_only && (defaults || ignored) {
+                    writeln!(
+                        out,
+                        "trap -- {} {}{name}",
+                        if ignored { "''" } else { "-" },
+                        if posix { "" } else { "SIG" }
+                    )?;
+                }
             }
             Ok::<_, io::Error>(())
         };
-        if defaults && names.len() == 0 {
+        if names.len() == 0 {
+            if entries.contains_key(&0) && show(0).is_err() {
+                return 1;
+            }
             for (_, sig) in signals() {
-                if !matches!(sig, libc::SIGSTOP | libc::SIGKILL) && show(sig).is_err() {
+                if sig > 0 && !matches!(sig, libc::SIGSTOP | libc::SIGKILL) && show(sig).is_err() {
                     return 1;
                 }
             }
             for &sig in entries.keys().filter(|s| **s >= DEBUG) {
-                if show(sig).is_err() {
-                    return 1;
-                }
-            }
-        } else if names.len() == 0 {
-            for &sig in entries.keys() {
                 if show(sig).is_err() {
                     return 1;
                 }
@@ -680,10 +710,11 @@ impl Traps {
                 &mut io::stdout().lock(),
                 list && posix,
                 actions,
+                posix,
             );
         }
         let (command, signals) = if args[0].parse::<u32>().is_ok()
-            || args.len() == 1 && trap_number(&args[0]).is_some()
+            || !posix && args.len() == 1 && trap_number(&args[0]).is_some()
         {
             ("-", args)
         } else {
@@ -749,7 +780,7 @@ pub fn returning(session: &mut Session, flow: Flow) -> Flow {
         Flow::Return(_) => session.traps.before_return,
         _ => return flow,
     };
-    if session.traps.handling_return || !session.traps.catches(RETURN) {
+    if !session.traps.return_handler() {
         return flow;
     }
     session.traps.handling_return = true;
@@ -805,7 +836,7 @@ fn action_text(session: &mut Session, sig: i32, status: u8) -> Flow {
     let command = session.traps.entries[&sig].command.clone();
     let previous = session.pipe_status.clone();
     let flow = with_trapsig(session, sig, status, |session| {
-        crate::eval_text(session, &command, status)
+        crate::input::text(session, &command, status, false, false, Some(1))
     });
     session.pipe_status = previous;
     flow
@@ -864,6 +895,27 @@ pub fn dispatch(session: &mut Session, status: u8) -> Flow {
     Flow::Continue(status)
 }
 
+// An explicit exit runs with its command redirections, positional parameters
+// and dynamically scoped locals still in effect. Natural EOF uses this too.
+pub(crate) fn exit_action(session: &mut Session, code: u8) -> u8 {
+    if session.traps.handling_exit {
+        return code;
+    }
+    let Some(exit) = session.traps.entries.remove(&0) else {
+        return code;
+    };
+    session.traps.handling_exit = true;
+    let _ = session.traps.watch_exit(false);
+    let outcome = with_trapsig(session, 0, code, |session| {
+        crate::eval_text(session, &exit.command, code)
+    });
+    session.traps.handling_exit = false;
+    if session.traps.entries.remove(&0).is_some() {
+        let _ = session.traps.watch_exit(false);
+    }
+    if let Flow::Exit(n) = outcome { n } else { code }
+}
+
 pub fn finish(session: &mut Session, code: u8) -> u8 {
     if session.interactive
         && (TERMINATING.load(Relaxed) == libc::SIGHUP || session.login && session.shopt.huponexit)
@@ -878,14 +930,7 @@ pub fn finish(session: &mut Session, code: u8) -> u8 {
         _ => code,
     };
     let sig = TERMINATING.swap(0, Relaxed);
-    if let Some(exit) = session.traps.entries.remove(&0) {
-        let _ = session.traps.watch_exit(false);
-        if let Flow::Exit(n) = with_trapsig(session, 0, code, |session| {
-            crate::eval_text(session, &exit.command, code)
-        }) {
-            code = n;
-        }
-    }
+    code = exit_action(session, code);
     if sig != 0 {
         unsafe {
             libc::signal(sig, libc::SIG_DFL);

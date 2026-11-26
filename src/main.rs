@@ -236,8 +236,9 @@ fn interactive_loop(
             return Ok(code);
         }
         session.jobs.poll();
-        if session.notify && session.jobs.monitor {
-            session.jobs.report_changes();
+        session.jobs.report_foreground();
+        if (session.notify || session.posix) && session.jobs.monitor {
+            session.jobs.report_changes(session.posix);
         }
         let terminal_size = session.refresh_terminal_size();
         if source.is_empty() {
@@ -296,7 +297,7 @@ fn interactive_loop(
                 wait_for_job_notice(&mut session.jobs, |jobs| {
                     let mut out = io::stderr().lock();
                     writeln!(out)?;
-                    jobs.report_changes();
+                    jobs.report_changes(session.posix);
                     out.write_all(prompt.as_bytes())?;
                     out.flush()
                 })
@@ -311,6 +312,9 @@ fn interactive_loop(
         let more = match result {
             Err(e) if e.kind() == io::ErrorKind::TimedOut => {
                 eprintln!("tonari: timed out waiting for input");
+                if startup::defer_interactive_exit(session) {
+                    continue;
+                }
                 return Ok(startup::logout(session, status, status));
             }
             Ok(Some(more)) => more,
@@ -339,17 +343,15 @@ fn interactive_loop(
             session.refresh_terminal_size();
         }
         if !more && source.is_empty() {
-            if session
-                .get("IGNOREEOF")
-                .map_or(session.ignoreeof && eof_count < 10, |v| {
-                    eof_count < v.parse::<usize>().unwrap_or(10)
-                })
-            {
+            if session.ignoreeof && eof_count < session.ignoreeof_limit {
                 eof_count += 1;
                 eprintln!(
                     "Use \"{}\" to leave the shell.",
                     if session.login { "logout" } else { "exit" }
                 );
+                continue;
+            }
+            if startup::defer_interactive_exit(session) {
                 continue;
             }
             return Ok(startup::logout(session, status, status));
@@ -405,8 +407,12 @@ fn interactive_loop(
                     }
                     session.command_number += 1;
                     let record = session.begin_history_line(text);
-                    let cwd = session.get("PWD");
-                    let flow = execute_program(session, program, status, false);
+                    let cwd = if record { session.get("PWD") } else { None };
+                    let flow = if session.noexec {
+                        Flow::Continue(0)
+                    } else {
+                        execute_program(session, program, status, false)
+                    };
                     status = match flow {
                         Flow::Discard(s) | Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
                         _ => 1,
@@ -453,8 +459,7 @@ fn main() -> ExitCode {
 
 fn invoke(args: impl Iterator<Item = std::ffi::OsString>) -> u8 {
     use cli::Action;
-    let initial_terminal = std::cell::LazyCell::new(shell_terminal as fn() -> bool);
-    let invocation = match cli::parse(args, || *initial_terminal) {
+    let invocation = match cli::parse(args, shell_terminal) {
         Ok(Action::Run(invocation)) => invocation,
         Ok(Action::Version) => {
             println!("tonari {}", env!("CARGO_PKG_VERSION"));
@@ -471,13 +476,10 @@ fn invoke(args: impl Iterator<Item = std::ffi::OsString>) -> u8 {
             return 2;
         }
     };
-    run_invocation(invocation, initial_terminal)
+    run_invocation(invocation)
 }
 
-fn run_invocation(
-    mut invocation: cli::Invocation,
-    initial_terminal: std::cell::LazyCell<bool, fn() -> bool>,
-) -> u8 {
+fn run_invocation(mut invocation: cli::Invocation) -> u8 {
     use cli::Input;
     let mut session = Session::default();
     session.started_at = unsafe { libc::time(std::ptr::null_mut()) };
@@ -488,7 +490,18 @@ fn run_invocation(
     session.allexport = invocation.allexport;
     session.notify = invocation.notify;
     session.noexec = invocation.check;
-    session.ignoreeof = invocation.ignoreeof;
+    if let Some(enabled) = invocation.ignoreeof {
+        if enabled {
+            session.assign("IGNOREEOF", "10");
+        } else {
+            session.unset_variable("ignoreeof");
+            session.unset_variable("IGNOREEOF");
+        }
+    } else if let Some(value) =
+        std::env::var_os("IGNOREEOF").or_else(|| std::env::var_os("ignoreeof"))
+    {
+        session.set_eof_variable(Some(value.to_str().unwrap_or("")));
+    }
     session.onecmd = invocation.onecmd;
     session.xtrace = invocation.xtrace;
     session.errexit = invocation.errexit;
@@ -508,10 +521,9 @@ fn run_invocation(
     session.login = invocation.login;
     session.history_enabled = invocation.interactive;
     session.histexpand = invocation.histexpand.unwrap_or(session.interactive);
-    session.emacs = session.interactive
-        && !invocation.noediting
-        && (*initial_terminal || matches!(invocation.input, Input::Command(_)))
-        && !session.get("TERM").is_some_and(|s| s == "dumb");
+    // The selected keymap is also observable in a forced interactive script.
+    // Terminal capabilities are checked separately when opening the editor.
+    session.emacs = session.interactive && !invocation.noediting;
     if session.interactive
         && let Err(e) = session.traps.init_hangup()
     {
@@ -523,7 +535,9 @@ fn run_invocation(
         session.jobs.init(session.interactive);
     }
     session.command_string = matches!(invocation.input, Input::Command(_));
-    if let Input::Command(text) = &mut invocation.input {
+    if !invocation.pretty
+        && let Input::Command(text) = &mut invocation.input
+    {
         if std::env::var_os("BASH_EXECUTION_STRING").is_some() {
             session.assign("BASH_EXECUTION_STRING", text);
         }
@@ -544,13 +558,21 @@ fn run_invocation(
             return 2;
         }
     }
+    if invocation.pretty {
+        return input::print_script(&session, invocation.input);
+    }
     if session.interactive {
         if session.get("PS1").is_none() {
             session.assign("PS1", "tonari$ ");
         }
         if session.get("HISTFILE").is_none() {
             if let Some(home) = session.get("HOME").or_else(crate::word::account_home) {
-                session.assign("HISTFILE", &format!("{home}/.bash_history"));
+                let file = if session.posix {
+                    ".sh_history"
+                } else {
+                    ".bash_history"
+                };
+                session.assign("HISTFILE", &format!("{home}/{file}"));
             }
         }
     }
@@ -564,6 +586,14 @@ fn run_invocation(
         }
         Flow::Break(..) | Flow::LoopContinue(_) => return 1,
     };
+    if invocation.debugger
+        && !invocation.check
+        && (!session.interactive || !matches!(invocation.input, Input::Stdin))
+    {
+        if let Flow::Exit(code) = startup::debugger(&mut session) {
+            return traps::finish(&mut session, code);
+        }
+    }
     if invocation.as_sh && !session.posix {
         session.set_posix(true);
     }

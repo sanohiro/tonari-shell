@@ -31,6 +31,9 @@ impl Variables for Session {
                 self.assign_target(name, &value.to_string())
             };
         }
+        if self.is_nameref(name) {
+            return self.assign_target(name, &value.to_string());
+        }
         if let Some(result) = self.write_scalar_decimal(name, value) {
             return result;
         }
@@ -123,6 +126,13 @@ pub(crate) fn index(source: &str, lookup: &impl Fn(&str) -> Option<String>) -> R
 
 pub(crate) fn with_variables(source: &str, vars: &mut dyn Variables) -> Result<i64> {
     calculate(source, vars, 0)
+}
+
+pub(crate) fn numeric_subscript(source: &str) -> &str {
+    source
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(source)
 }
 
 pub fn run(source: &str, session: &mut Session) -> Result<i64> {
@@ -236,15 +246,42 @@ pub fn let_builtin(args: &[String], session: &mut Session) -> u8 {
     u8::from(last == 0)
 }
 
-pub fn command(source: &str, session: &mut Session, status: u8) -> Flow {
-    if session.xtrace {
+pub(crate) fn traced(
+    source: &str,
+    session: &mut Session,
+    status: u8,
+    compiled: Option<&Repeated>,
+) -> Result<i64> {
+    fn write_trace(text: &str, session: &mut Session, status: u8) {
         crate::execute::trace_line(session, status, |line| {
             line.push_str("(( ");
-            line.push_str(source);
+            line.push_str(text);
             line.push_str(" ))");
         });
     }
-    match expanded(source, session, status) {
+    if !source.contains(['$', '`', '"', '\\']) {
+        write_trace(source, session, status);
+        return match compiled {
+            Some(header) => header.run(session, status),
+            None => run(source, session),
+        };
+    }
+    let captured = std::cell::Cell::new(None);
+    let mut env = crate::expansion::Expansion::new(session, status, &captured);
+    let text = env
+        .arithmetic_text(source)
+        .map_err(|_| "invalid arithmetic expansion")?;
+    write_trace(&text, env.session, status);
+    with_variables(&text, &mut env)
+}
+
+pub fn command(source: &str, session: &mut Session, status: u8) -> Flow {
+    let result = if session.xtrace {
+        traced(source, session, status, None)
+    } else {
+        expanded(source, session, status)
+    };
+    match result {
         Ok(n) => Flow::Continue(u8::from(n == 0)),
         Err(e) => {
             eprintln!("tonari: {e}");
@@ -305,7 +342,19 @@ impl<'a> Parser<'a> {
                 let bytes = source.as_bytes();
                 let len = match bytes {
                     [b'<', b'<', b'=', ..] | [b'>', b'>', b'=', ..] => 3,
-                    [first, second, ..] if first == second && b"+-*&|<>".contains(first) => 2,
+                    [sign @ (b'+' | b'-'), next, rest @ ..] if sign == next => {
+                        if matches!(old, Token::Name(_))
+                            || rest
+                                .trim_ascii_start()
+                                .first()
+                                .is_some_and(|&b| b.is_ascii_alphabetic() || b == b'_')
+                        {
+                            2
+                        } else {
+                            1
+                        }
+                    }
+                    [first, second, ..] if first == second && b"*&|<>".contains(first) => 2,
                     [first, b'=', ..] if b"+-*/%&^|<>=!".contains(first) => 2,
                     [first, ..] if b"+-*/%()!:~&|^<>=?,".contains(first) => 1,
                     _ => return Err("invalid arithmetic token"),
@@ -367,8 +416,13 @@ impl<'a> Parser<'a> {
                 )?
                 .read(variables, run_right, depth + 1)?;
             if precedence == 2 {
-                let Value::Variable(name) = left else {
-                    return Err("arithmetic assignment requires a variable");
+                let name = match left {
+                    Value::Variable(name) => name,
+                    Value::AssignmentTarget(source) => {
+                        let (base, index) = source;
+                        element_name(base, index, variables, depth)?
+                    }
+                    Value::Number(_) => return Err("arithmetic assignment requires a variable"),
                 };
                 let result = if !active || op == "=" {
                     b
@@ -398,20 +452,15 @@ impl<'a> Parser<'a> {
         let mut value = match self.advance()? {
             Token::Number(s) => Value::Number(number(s)?),
             Token::Name(n) => {
-                let name =
-                    if active && let Some((base, index)) = crate::session::array::subscript(n) {
-                        if index.is_empty() {
-                            return Err("empty array subscript");
-                        }
-                        let index = match variables.associative_key(base, index) {
-                            Some(key) => key?,
-                            None => calculate(index, variables, depth + 1)?.to_string(),
-                        };
-                        std::borrow::Cow::Owned(format!("{base}[{index}]"))
+                if active && let Some((base, index)) = crate::session::array::subscript(n) {
+                    if self.token == Token::Op("=") {
+                        Value::AssignmentTarget((base, index))
                     } else {
-                        std::borrow::Cow::Borrowed(n)
-                    };
-                Value::Variable(name)
+                        Value::Variable(element_name(base, index, variables, depth)?)
+                    }
+                } else {
+                    Value::Variable(std::borrow::Cow::Borrowed(n))
+                }
             }
             Token::Op("(") => {
                 let v = self.expression(variables, 1, active, depth + 1)?;
@@ -458,7 +507,24 @@ impl<'a> Parser<'a> {
     }
 }
 
+fn element_name<'a>(
+    base: &str,
+    index: &str,
+    variables: &mut dyn Variables,
+    depth: u16,
+) -> Result<std::borrow::Cow<'a, str>> {
+    if index.is_empty() {
+        return Err("empty array subscript");
+    }
+    let key = match variables.associative_key(base, index) {
+        Some(key) => key?,
+        None => calculate(numeric_subscript(index), variables, depth + 1)?.to_string(),
+    };
+    Ok(std::borrow::Cow::Owned(format!("{base}[{key}]")))
+}
+
 enum Value<'a> {
+    AssignmentTarget((&'a str, &'a str)),
     Number(i64),
     Variable(std::borrow::Cow<'a, str>),
 }
@@ -468,6 +534,7 @@ impl Value<'_> {
             return Ok(0);
         }
         match self {
+            Self::AssignmentTarget(_) => Err("expected arithmetic assignment"),
             Self::Number(n) => Ok(*n),
             Self::Variable(name) => {
                 if let Some(n) = variables.decimal(name) {

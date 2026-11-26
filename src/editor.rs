@@ -916,7 +916,7 @@ pub fn line(
         if session.notify && keys.queued.is_empty() {
             crate::wait_for_job_notice(&mut session.jobs, |jobs| {
                 screen.draw("", "", 0, "")?;
-                jobs.report_changes();
+                jobs.report_changes(session.posix);
                 screen.draw(visible_prompt, &text, cursor, "")
             })?;
         }
@@ -1181,6 +1181,40 @@ pub fn line(
                     Action::ViFirst => text.len() - text.trim_start().len(),
                     _ => cursor,
                 };
+            }
+            Action::EditAndExecute | Action::ViEditAndExecute => {
+                let vi = action == Action::ViEditAndExecute;
+                let configured = if vi && session.posix {
+                    None
+                } else {
+                    session
+                        .get("VISUAL")
+                        .filter(|s| !s.is_empty())
+                        .or_else(|| session.get("EDITOR").filter(|s| !s.is_empty()))
+                };
+                let editor = configured
+                    .as_deref()
+                    .unwrap_or(if vi { "vi" } else { "emacs" });
+                drop(term);
+                io::stderr().write_all(b"\r\n")?;
+                if !text.ends_with('\n') {
+                    text.push('\n');
+                }
+                match crate::history::commands::edit_text(session, editor, &text, status) {
+                    Ok(Ok(mut edited)) => {
+                        if !edited.ends_with('\n') {
+                            edited.push('\n');
+                        }
+                        session.editor_queue = std::mem::take(&mut keys.queued);
+                        return Ok(Input::Line(edited));
+                    }
+                    Ok(Err(crate::Flow::Exit(code))) => return Ok(Input::Exit(code)),
+                    Ok(Err(_)) => return Ok(Input::Cancel),
+                    Err(e) => {
+                        eprintln!("tonari: {editor}: {e}");
+                        return Ok(Input::Cancel);
+                    }
+                }
             }
             Action::ViCommand => {
                 session.bindings.map = Keymap::Command;

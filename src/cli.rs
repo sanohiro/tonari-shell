@@ -22,8 +22,10 @@ pub struct Invocation {
     pub noediting: bool,
     pub rcfile: Option<PathBuf>,
     pub check: bool,
+    pub pretty: bool,
+    pub debugger: bool,
     pub notify: bool,
-    pub ignoreeof: bool,
+    pub ignoreeof: Option<bool>,
     pub errexit: bool,
     pub verbose: bool,
     pub errtrace: bool,
@@ -77,7 +79,7 @@ pub fn parse(
     let mut rcfile = None;
     let mut check = false;
     let mut notify = false;
-    let mut ignoreeof = false;
+    let mut ignoreeof = None;
     let mut errexit = false;
     let mut verbose = false;
     let mut errtrace = false;
@@ -94,6 +96,8 @@ pub fn parse(
     let mut physical = false;
     let mut keyword = false;
     let mut nolog = false;
+    let mut pretty = false;
+    let mut debugger = false;
     let mut shopts = Vec::new();
     while args
         .peek()
@@ -106,6 +110,8 @@ pub fn parse(
             "--" | "-" => break,
             "--help" => return Ok(Action::Help),
             "--version" => return Ok(Action::Version),
+            "--pretty-print" => pretty = true,
+            "--debugger" => debugger = true,
             "--verbose" => verbose = true,
             "--posix" => posix = true,
             "--login" => login = true,
@@ -168,7 +174,7 @@ pub fn parse(
                             Some("noclobber") => noclobber = enabled,
                             Some("noexec") => check = enabled,
                             Some("notify") => notify = enabled,
-                            Some("ignoreeof") => ignoreeof = enabled,
+                            Some("ignoreeof") => ignoreeof = Some(enabled),
                             Some("noglob") => noglob = enabled,
                             _ => {
                                 return Err(
@@ -211,7 +217,9 @@ pub fn parse(
         nolog,
         noediting,
         rcfile,
-        check: check && !interactive,
+        check,
+        pretty,
+        debugger,
         notify,
         ignoreeof,
         errexit,

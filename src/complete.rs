@@ -12,6 +12,7 @@ pub struct Completion {
     pub choices: Vec<String>,
     noquote: bool,
     append_space: bool,
+    source_prefix: usize,
 }
 
 pub(crate) fn default_word_breaks(hostname: bool) -> &'static str {
@@ -477,6 +478,81 @@ pub fn at(
             ));
         }
     }
+    if let Some((head, rest)) = line[start..cursor].split_once('/')
+        && (head.starts_with('$') || head == "~" && session.shopt.direxpand)
+    {
+        let value = if head == "~" {
+            session.get("HOME")
+        } else {
+            let name = &head[1..];
+            let name = name
+                .strip_prefix('{')
+                .and_then(|s| s.strip_suffix('}'))
+                .unwrap_or(name);
+            crate::parser::is_identifier(name)
+                .then(|| session.get(name))
+                .flatten()
+        };
+        if let Some(value) = value.filter(|s| !s.is_empty()) {
+            let path = if session.shopt.direxpand {
+                std::path::absolute(value)
+                    .ok()?
+                    .into_os_string()
+                    .into_string()
+                    .ok()?
+            } else {
+                value
+            };
+            let parent = format!("{}/", path.trim_end_matches('/'));
+            let expanded = format!("{parent}{rest}");
+            let source = if command == Some("cd") {
+                Source::Directories
+            } else {
+                Source::Files
+            };
+            if let Some((mut common, mut choices)) = source.matches(&expanded, session, list) {
+                let mut offset = 0;
+                if !session.shopt.direxpand {
+                    // Preserve only syntax typed by the user. Names read from
+                    // the directory remain literal even if they contain '$'.
+                    let display = &line[start..start + head.len() + 1];
+                    for name in std::iter::once(&mut common.text).chain(&mut choices) {
+                        if name.starts_with(&parent) {
+                            name.replace_range(..parent.len(), display);
+                        }
+                    }
+                    offset = display.len();
+                    if !session.shopt.complete_fullquote {
+                        // An already typed variable reference in the leaf is
+                        // also eligible for expansion when full quoting is off.
+                        if let Some(n) = rest.strip_prefix('$')
+                            && crate::parser::is_identifier(n)
+                            && common
+                                .text
+                                .get(offset..)
+                                .is_some_and(|tail| tail.starts_with(rest))
+                        {
+                            offset += rest.len();
+                        }
+                    }
+                }
+                let append_space = cursor == line.len();
+                return Some(Completion {
+                    start,
+                    replacement: quote_choice(
+                        &common.text,
+                        false,
+                        append_space && common.unique,
+                        offset,
+                    ),
+                    choices,
+                    noquote: false,
+                    append_space,
+                    source_prefix: offset,
+                });
+            }
+        }
+    }
     if !files_only
         && let Some(variable) =
             variable_completion(&line[start..cursor], cursor, line.len(), session, list)
@@ -555,7 +631,8 @@ impl Completion {
     ) -> Self {
         Self {
             start,
-            replacement: quote_choice(&common.text, noquote, append_space && common.unique),
+            replacement: quote_choice(&common.text, noquote, append_space && common.unique, 0),
+            source_prefix: 0,
             choices,
             noquote,
             append_space,
@@ -563,16 +640,21 @@ impl Completion {
     }
 
     pub fn select(&self, index: usize) -> String {
-        quote_choice(&self.choices[index], self.noquote, self.append_space)
+        quote_choice(
+            &self.choices[index],
+            self.noquote,
+            self.append_space,
+            self.source_prefix,
+        )
     }
 }
 
-fn quote_choice(common: &str, noquote: bool, append_space: bool) -> String {
+fn quote_choice(common: &str, noquote: bool, append_space: bool, source_prefix: usize) -> String {
     // Re-quote the complete word. A unique file followed by Enter must remain
     // a single literal argument even when it contains shell metacharacters.
     let mut replacement = String::new();
     for (i, c) in common.char_indices() {
-        if noquote {
+        if noquote || i < source_prefix {
             replacement.push(c);
             continue;
         }
@@ -810,8 +892,86 @@ pub fn command_names(prefix: &str, session: &Session) -> Vec<String> {
     names
 }
 
+// Prefer a transposition over a single inserted, deleted or substituted scalar.
+fn spelling_distance(a: &str, b: &str) -> Option<u8> {
+    let mut a = a.chars();
+    let mut b = b.chars();
+    loop {
+        let x = a.next();
+        let y = b.next();
+        if x == y {
+            if x.is_none() {
+                return Some(0);
+            }
+            continue;
+        }
+        let ar = a.as_str();
+        let br = b.as_str();
+        if x.is_some() && y.is_some() && a.next() == y && b.next() == x && a.as_str() == b.as_str()
+        {
+            return Some(1);
+        }
+        let initial = |ch: Option<char>, tail: &str, text: &str| {
+            ch.and_then(|c| text.strip_prefix(c))
+                .is_some_and(|s| s == tail)
+        };
+        return (ar == br || initial(x, ar, br) || initial(y, br, ar)).then_some(2);
+    }
+}
+
+pub(crate) fn corrected_directory(input: &Path) -> Option<PathBuf> {
+    let mut path = PathBuf::new();
+    let mut changed = false;
+    for part in input.components() {
+        let std::path::Component::Normal(word) = part else {
+            path.push(part);
+            continue;
+        };
+        if path.join(word).is_dir() {
+            path.push(word);
+            continue;
+        }
+        let word = word.to_str()?;
+        let parent = if path.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            &path
+        };
+        let mut best = None;
+        let mut visited = 0usize;
+        let editing = crate::editor::preview::active();
+        let _ = scan(parent, &[], &mut |raw, kind| {
+            if editing && visited % 256 == 0 {
+                crate::editor::preview::poll();
+            }
+            visited += 1;
+            if !matches!(kind, libc::DT_DIR | libc::DT_LNK | libc::DT_UNKNOWN) {
+                return ControlFlow::Continue(());
+            }
+            let Some(bytes) = raw.map(|n| n.to_bytes()) else {
+                return ControlFlow::Continue(());
+            };
+            if bytes.len().abs_diff(word.len()) <= 4
+                && let Ok(name) = std::str::from_utf8(bytes)
+                && !matches!(name, "." | "..")
+                && let Some(rank) = spelling_distance(name, word)
+                && best
+                    .as_ref()
+                    .is_none_or(|(old, s): &(u8, String)| (rank, name) < (*old, s.as_str()))
+                && (kind == libc::DT_DIR || parent.join(name).is_dir())
+            {
+                best = Some((rank, name.to_owned()));
+            }
+            ControlFlow::Continue(())
+        });
+        path.push(best?.1);
+        changed = true;
+    }
+    changed.then_some(path)
+}
+
 struct Directory<'a> {
-    dir: &'a str,
+    dir: std::borrow::Cow<'a, str>,
     base: &'a str,
     path: PathBuf,
     fold: Option<crate::session::CharacterLocale>,
@@ -828,6 +988,23 @@ impl<'a> Directory<'a> {
         let path = match dir.strip_prefix("~/") {
             Some(rest) => Path::new(&session.get("HOME")?).join(rest),
             None => Path::new(if dir.is_empty() { "." } else { dir }).to_owned(),
+        };
+        let (dir, path) = if session.shopt.dirspell
+            && !dir.is_empty()
+            && !path.is_dir()
+            && let Some(corrected) = corrected_directory(&path)
+        {
+            let corrected = if session.shopt.direxpand {
+                std::path::absolute(corrected).ok()?
+            } else {
+                corrected
+            };
+            (
+                format!("{}/", corrected.to_str()?.trim_end_matches('/')).into(),
+                corrected,
+            )
+        } else {
+            (dir.into(), path)
         };
         Some(Self {
             dir,
@@ -910,7 +1087,7 @@ impl<'a> Directory<'a> {
     }
 
     fn collect(&self, directories_only: bool, mark_directories: bool, choices: &mut Vec<String>) {
-        let dir = self.dir;
+        let dir = self.dir.as_ref();
         self.visit(|name, kind| {
             let is_dir = (directories_only || mark_directories) && self.is_directory(name, kind);
             if directories_only && !is_dir {
@@ -1111,7 +1288,7 @@ fn common_file(
     {
         common.text.push('/');
     }
-    common.text.insert_str(0, directory.dir);
+    common.text.insert_str(0, &directory.dir);
     Some(common)
 }
 

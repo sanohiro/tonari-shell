@@ -1,5 +1,6 @@
 mod aliases;
 mod array;
+pub(crate) mod pretty;
 use crate::pattern::Matcher;
 use crate::test_expression::Expr;
 pub(crate) use array::quoted_initializer;
@@ -85,6 +86,56 @@ pub(crate) fn history_word_spans(s: &str) -> Vec<(usize, usize)> {
         words.push((a, s.len()));
     }
     words
+}
+
+pub(crate) fn history_designator_spans(line: &str, extglob: bool) -> Vec<(usize, usize)> {
+    if !line.bytes().any(|b| {
+        matches!(
+            b,
+            b'\''
+                | b'"'
+                | b'\\'
+                | b'$'
+                | b'`'
+                | b';'
+                | b'|'
+                | b'&'
+                | b'<'
+                | b'>'
+                | b'('
+                | b')'
+                | b'#'
+        )
+    }) {
+        return history_word_spans(line);
+    }
+    let previous = EXTGLOB.replace(extglob);
+    let parsed = lex(line, false, true);
+    EXTGLOB.set(previous);
+    let Ok((tokens, spans, _)) = parsed else {
+        return history_word_spans(line);
+    };
+    let mut result: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
+    let mut duplicate = false;
+    for (token, (start, end)) in tokens.into_iter().zip(spans) {
+        if duplicate
+            && let Some(last) = result.last_mut()
+            && last.1 == start
+            && line[start..end]
+                .trim_end_matches('-')
+                .bytes()
+                .all(|b| b.is_ascii_digit())
+        {
+            last.1 = end;
+        } else if !matches!(token, Token::Newline) {
+            result.push((start, end));
+        }
+        duplicate = matches!(
+            token,
+            Token::Redirect(_, Target::Duplicate | Target::OutputWord)
+        );
+    }
+    result
 }
 
 /// Keep the original shell spelling, including quotes and substitutions.
@@ -218,6 +269,7 @@ use std::rc::Rc;
 pub(crate) fn prompt_word(
     source: &str,
     expand: bool,
+    posix: bool,
     mut escape: impl FnMut(char, &mut std::str::Chars) -> String,
 ) -> Result<Word, Error> {
     let mut builder = crate::word::WordBuilder::default();
@@ -233,6 +285,16 @@ pub(crate) fn prompt_word(
             builder.push('\\');
         }
         match c {
+            '!' if posix => {
+                if chars.as_str().starts_with('!') {
+                    chars.next();
+                    builder.push('!');
+                } else {
+                    for c in escape('!', &mut chars).chars() {
+                        builder.push(c);
+                    }
+                }
+            }
             '$' if expand => lexer::dollar(&mut chars, &mut builder, true)?,
             '\x60' if expand => lexer::backquote(&mut chars, &mut builder, true)?,
             '\\' => {
@@ -415,8 +477,10 @@ pub type CaseArm = (Vec<CasePattern>, Vec<Statement>, CaseEnd);
 
 #[derive(Debug)]
 pub struct FunctionDefinition {
+    pub declaration_line: usize,
     pub location: Location,
     pub body: wrapper::FunctionBody,
+    pub rendered_body: std::cell::OnceCell<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -477,6 +541,15 @@ pub enum Error {
 }
 
 impl Error {
+    pub(crate) fn pending_quote(&self) -> Option<char> {
+        match self {
+            Self::Incomplete("unterminated single quote") => Some('\''),
+            Self::Incomplete("unterminated dollar-single-quoted string") => Some('$'),
+            Self::Incomplete("unterminated double quote") => Some('"'),
+            _ => None,
+        }
+    }
+
     pub fn incomplete(&self) -> bool {
         matches!(self, Self::Incomplete(_) | Self::HereDoc(_))
     }
@@ -534,6 +607,8 @@ thread_local! {
     static FIRST_LINE: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
     static COMMENTS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
     static POSIX: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static TIME_OPTIONS_EXTERNAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static EXTQUOTE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
     static EXTGLOB: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -551,6 +626,12 @@ pub fn session_source_at(
     session: &crate::Session,
     line: usize,
 ) -> Result<Vec<Statement>, Error> {
+    if source.len() <= 4096
+        && !(session.shopt.expand_aliases && session.aliases.0.is_some())
+        && let Some(statement) = literal_assignment(source, line)
+    {
+        return Ok(vec![statement]);
+    }
     with_read_options(session, line, || {
         if eof {
             parse_final(source)
@@ -598,7 +679,13 @@ pub(crate) fn with_subscript_aliases<T>(
     let Some(table) = frozen.or(live) else {
         return parse();
     };
-    if !source.contains("$(") && !source.contains('`') {
+    let bytes = source.as_bytes();
+    if !memchr::memchr2_iter(b'$', b'\x60', bytes).any(|i| {
+        bytes[i] == b'\x60'
+            || bytes.get(i + 1) == Some(&b'(')
+            || (bytes.get(i + 1) == Some(&b'{')
+                && matches!(bytes.get(i + 2), Some(b' ' | b'\t' | b'\n' | b'|')))
+    }) {
         return parse();
     }
     // A function may be read in POSIX mode and called after switching back.
@@ -622,10 +709,14 @@ fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnc
     let read = || {
         let old_line = FIRST_LINE.replace(line);
         let before = EXTGLOB.replace(session.shopt.glob.extglob);
+        let extquote = EXTQUOTE.replace(session.shopt.extquote);
         let posix = POSIX.replace(session.posix);
+        let time_flags = TIME_OPTIONS_EXTERNAL.replace(session.posix && session.shopt.compat > 41);
         let comments = COMMENTS.replace(session.read_comments());
         let parsed = parse();
         COMMENTS.set(comments);
+        TIME_OPTIONS_EXTERNAL.set(time_flags);
+        EXTQUOTE.set(extquote);
         POSIX.set(posix);
         EXTGLOB.set(before);
         FIRST_LINE.set(old_line);
@@ -648,7 +739,30 @@ pub(crate) fn plain_assignment(command: &str) -> Option<(&str, &str)> {
 // simple-command AST; assignment attributes, traps and exit status stay live.
 pub(crate) fn literal_assignment(source: &str, line: usize) -> Option<Statement> {
     let command = source.strip_suffix('\n').unwrap_or(source);
-    let (name, value) = plain_assignment(command)?;
+    let (name, raw) = command.split_once('=')?;
+    if !is_identifier(name) {
+        return None;
+    }
+    let value = if raw.bytes().all(lexer::plain_byte) {
+        raw.to_owned()
+    } else if !raw.contains(['\n', '\0']) {
+        if let Some(rest) = raw.strip_prefix("$'") {
+            let mut chars = rest.chars();
+            let decoded = ansi::quoted(&mut chars).ok()?;
+            if !chars.as_str().is_empty() {
+                return None;
+            }
+            decoded
+        } else {
+            let quoted = raw.strip_prefix('\'')?.strip_suffix('\'')?;
+            if quoted.contains('\'') {
+                return None;
+            }
+            quoted.to_owned()
+        }
+    } else {
+        return None;
+    };
     let location = Location {
         source: source.into(),
         subscript_aliases: Default::default(),
@@ -661,10 +775,7 @@ pub(crate) fn literal_assignment(source: &str, line: usize) -> Option<Statement>
         condition: Condition::Always,
         negated: false,
         command: Command::Pipeline(vec![SimpleCommand {
-            assignments: vec![(
-                name.to_owned(),
-                Assignment::Scalar(Word::Literal(value.to_owned())),
-            )],
+            assignments: vec![(name.to_owned(), Assignment::Scalar(Word::Literal(value)))],
             ..Default::default()
         }]),
     })
@@ -719,7 +830,61 @@ thread_local! {
     };
 }
 
+// During recursive lexing, a nested AST can start after the first line of
+// the outer input. Store byte offsets only. No reference outlives the lex.
+struct SourceLines {
+    start: usize,
+    end: usize,
+    first: usize,
+    newlines: Vec<usize>,
+}
+
+thread_local! {
+    static SOURCE_LINES: std::cell::RefCell<Option<SourceLines>> = const { std::cell::RefCell::new(None) };
+}
+
+impl SourceLines {
+    fn contains(&self, source: &str) -> bool {
+        let start = source.as_ptr() as usize;
+        self.start <= start && start + source.len() <= self.end
+    }
+}
+
+fn source_line(source: &str) -> usize {
+    SOURCE_LINES.with_borrow(|map| {
+        map.as_ref().filter(|m| m.contains(source)).map_or_else(
+            || FIRST_LINE.get(),
+            |m| {
+                let offset = source.as_ptr() as usize - m.start;
+                m.first + m.newlines.partition_point(|&n| n < offset)
+            },
+        )
+    })
+}
+
+fn with_source_lines<T>(source: &str, lex: impl FnOnce() -> T) -> T {
+    // A trailing newline cannot move any nested command to another line.
+    let text = source.trim_end_matches('\n');
+    if !text.contains('\n')
+        || SOURCE_LINES.with_borrow(|m| m.as_ref().is_some_and(|m| m.contains(source)))
+        || !text.contains(['(', '$', '`'])
+    {
+        return lex();
+    }
+    let start = source.as_ptr() as usize;
+    let previous = SOURCE_LINES.replace(Some(SourceLines {
+        start,
+        end: start + source.len(),
+        first: FIRST_LINE.get(),
+        newlines: memchr::memchr_iter(b'\n', source.as_bytes()).collect(),
+    }));
+    let result = lex();
+    SOURCE_LINES.replace(previous);
+    result
+}
+
 struct Reader {
+    first_line: usize,
     source: Rc<str>,
     alias_source: Option<Box<aliases::Expanded>>,
     spans: Vec<(usize, usize)>,
@@ -746,6 +911,7 @@ impl Drop for Reader {
 impl Reader {
     fn new(tokens: Vec<Token>, spans: Vec<(usize, usize)>, source: &str) -> Self {
         Self {
+            first_line: source_line(source),
             spans,
             alias_source: None,
             newlines: memchr::memchr_iter(b'\n', source.as_bytes()).collect(),
@@ -788,7 +954,7 @@ impl Reader {
             subscript_aliases: self.subscript_aliases(),
             start,
             end,
-            line: FIRST_LINE.get() + self.newlines.partition_point(|&n| n < start),
+            line: self.first_line + self.newlines.partition_point(|&n| n < start),
         }
     }
 
@@ -898,8 +1064,10 @@ impl Reader {
             }
             let start = self.position();
             let command = if (inverted.is_some() || timing.is_some())
-                && matches!(self.peek(), None | Some(Token::End | Token::Newline))
-            {
+                && matches!(
+                    self.peek(),
+                    None | Some(Token::End | Token::Newline | Token::Background)
+                ) {
                 Command::Pipeline(vec![SimpleCommand::default()])
             } else {
                 self.command()?
@@ -1192,7 +1360,7 @@ impl Reader {
         }
         .to_owned();
         self.tokens.pop_front();
-        Ok(Expr::Binary(left, op, self.test_word()?))
+        Ok(Expr::binary(left, op, self.test_word()?))
     }
 
     fn case_clause(&mut self) -> Result<Command, Error> {
@@ -1350,7 +1518,10 @@ impl Reader {
             let mut words = Vec::new();
             loop {
                 self.expand_alias(false)?;
-                if !matches!(self.peek(), Some(Token::Word(_) | Token::Reserved(_))) {
+                if !matches!(
+                    self.peek(),
+                    Some(Token::Word(_) | Token::Reserved(_) | Token::TimeUtility)
+                ) {
                     break;
                 }
                 if let Some(Token::Word(word)) = self.operand() {
@@ -1435,6 +1606,15 @@ impl Reader {
         Ok(Command::Function {
             name,
             definition: Rc::new(FunctionDefinition {
+                rendered_body: Default::default(),
+                declaration_line: if self.alias_source.is_none() {
+                    self.first_line
+                        + self
+                            .newlines
+                            .partition_point(|&n| n < self.spans[start_name].0)
+                } else {
+                    self.location(start_name).line
+                },
                 body: wrapper::FunctionBody::Parsed(body),
                 location: self.location(start),
             }),
@@ -1504,6 +1684,25 @@ impl Reader {
         Ok(())
     }
 
+    fn array_word_suffix(&mut self) -> bool {
+        if !matches!(
+            self.peek(),
+            Some(Token::Word(_) | Token::Reserved(_) | Token::TimeUtility)
+        ) {
+            return false;
+        }
+        let end = self.position();
+        let adjacent = if let Some(expanded) = &self.alias_source {
+            expanded.span(end - 1, self).1 == expanded.span(end, self).0
+        } else {
+            self.spans[end - 1].1 == self.spans[end].0
+        };
+        if adjacent {
+            self.tokens.pop_front();
+        }
+        adjacent
+    }
+
     fn simple(&mut self) -> Result<SimpleCommand<Word>, Error> {
         let mut cmd = SimpleCommand::default();
         loop {
@@ -1513,6 +1712,7 @@ impl Reader {
                 Some(
                     Token::Word(_)
                         | Token::Reserved(_)
+                        | Token::TimeUtility
                         | Token::DescriptorName(_)
                         | Token::Redirect(_, _)
                         | Token::BothRedirect(_)
@@ -1538,11 +1738,17 @@ impl Reader {
                     if matches!(self.peek(), Some(Token::ArrayStart)) {
                         let name = assignment.ok_or(Error::Invalid("invalid array assignment"))?;
                         let base = name.trim_end_matches('+');
-                        if matches!(cmd.words.first().and_then(Word::as_literal), Some("let")) {
-                            let start = self.position();
-                            self.array_items()?;
-                            let expr = format!("{name}={}", self.location(start).text());
-                            cmd.words.push(lexer::arithmetic_word(&expr)?.declaration());
+                        if let Some(builtin @ ("let" | "eval")) =
+                            cmd.words.first().and_then(Word::as_literal)
+                        {
+                            let start = self.position() - 1;
+                            self.array_items::<false>()?;
+                            self.array_word_suffix();
+                            let expr = self.location(start);
+                            cmd.words.push(
+                                lexer::subscript_word(expr.text(), builtin == "eval")?
+                                    .declaration(),
+                            );
                             continue;
                         }
                         if !(is_identifier(base)
@@ -1553,7 +1759,21 @@ impl Reader {
                             return Err(Error::Invalid("invalid array assignment"));
                         }
                         let source_start = self.position() - 1;
-                        let items = self.array_items()?;
+                        let items = self.array_items::<true>()?;
+                        if self.array_word_suffix() {
+                            let expr = self.location(source_start);
+                            if declaration {
+                                cmd.words
+                                    .push(lexer::subscript_word(expr.text(), true)?.declaration());
+                            } else {
+                                let value = &expr.text()[name.len() + 1..];
+                                cmd.assignments.push((
+                                    name,
+                                    Assignment::Scalar(lexer::subscript_word(value, true)?),
+                                ));
+                            }
+                            continue;
+                        }
                         let operand = declaration.then_some(cmd.words.len());
                         if declaration {
                             cmd.words
@@ -1656,6 +1876,11 @@ mod tests {
         let fds: Vec<_> = cmd.redirects.iter().map(|r| r.fd).collect();
         assert_eq!(fds, [2, 1, 1, 1, 9]);
         assert_eq!(cmd.redirects[3].target, Target::Duplicate);
+        let parsed = parse("cmd 2147483648>&2").unwrap();
+        let cmd = &parsed[0].clone().pipeline()[0];
+        assert_eq!(literals(cmd), ["cmd", "2147483648"]);
+        assert_eq!(cmd.redirects[0].fd, 1);
+        assert_eq!(cmd.redirects[0].target, Target::Duplicate);
     }
 
     #[test]
@@ -1663,7 +1888,7 @@ mod tests {
         for source in ["cmd |\n", "cmd '", "cmd \\\n"] {
             assert!(matches!(parse(source), Err(Error::Incomplete(_))));
         }
-        for source in ["| cmd", "cmd || ; cmd", "cmd > ", "cmd 2147483648>&2"] {
+        for source in ["| cmd", "cmd || ; cmd", "cmd > "] {
             assert!(matches!(parse(source), Err(Error::Invalid(_))));
         }
         let parsed = parse("cmd |\n# comment\ncat; next\n").unwrap();

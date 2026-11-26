@@ -19,7 +19,8 @@ pub fn caller(session: &Session, args: &[String]) -> u8 {
     let mut out = io::stdout().lock();
     let line = if let Some(arg) = args.first() {
         let Some(depth) = arg.parse::<usize>().ok() else {
-            return 1;
+            eprintln!("tonari: caller: {arg}: invalid number");
+            return 2;
         };
         let Some(((name, source), line)) = session
             .function_names

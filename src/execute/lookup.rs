@@ -162,15 +162,21 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
             found = true;
         }
         let keyword = crate::parser::reserved(name) || name == "]]";
+        let special = session.posix
+            && super::special_builtin(name)
+            && !session.disabled_builtins.contains(name);
         for (present, kind, label) in [
             (keyword, "keyword", "a shell keyword"),
+            (special, "builtin", "a special shell builtin"),
             (
                 !skip_functions && session.functions.contains_key(name),
                 "function",
                 "a function",
             ),
             (
-                !session.disabled_builtins.contains(name) && named_builtin(name, &[], 0).is_some(),
+                !special
+                    && !session.disabled_builtins.contains(name)
+                    && named_builtin(name, &[], 0).is_some(),
                 "builtin",
                 "a shell builtin",
             ),
@@ -179,7 +185,7 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                 let result = match format {
                     Format::Verbose => writeln!(out, "{name} is {label}").and_then(|()| {
                         if kind == "function" {
-                            session.print_function(&mut out, name)
+                            session.print_function(&mut out, name, false)
                         } else {
                             Ok(())
                         }

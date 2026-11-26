@@ -1,5 +1,7 @@
 # GNU Bash source review / GNU Bash ソース照合
 
+The November 27 review includes the per-distribution GNU transcripts, focused behavior tests and native timings for the follow-up fixes. 最新の判定は、個別の再現条件、期待した結果、仕様差の理由とともに参照できる。[November 27 review](gnu-cases.md#november-27-source-and-regression-review--11月27日のソース照合) · [Driver results](case-review-drivers.tsv) · [Native timings](native-case-review.tsv)
+
 This review started from the GNU Bash 5.2.37 and 5.3 source distributions. The packaged Bash was the behavioral reference on Debian 13 and Ubuntu 26.04. On macOS arm64 the controls were Bash 5.2.37 and 5.3.20. The 5.3 release archive has SHA-256 `0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba`. [GNU Bash source distributions](https://ftp.gnu.org/gnu/bash/) · [Test programs](../../../tests/compat/source_review.py)
 
 GNU の実装で、値がどこから来るか、どのスコープで変わるか、失敗時に何が残るかを確認した。既存の一覧でオプション名が受理されていた場合も、実際の引数、変数、出力、終了値、ファイル、受信データまで調べた。導入前の Mac の比較対象は `9dd5c8c`、最終測定に使ったソースは `40fd68f`。同じ入力を Bash の版ごとに実行している。

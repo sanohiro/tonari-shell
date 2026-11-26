@@ -8,6 +8,7 @@ enum Recovery {
     Control(crate::Flow),
     Command,
     Input,
+    Line,
     Exit,
 }
 
@@ -31,6 +32,14 @@ impl Error {
         Self {
             message: message.into(),
             recovery: Recovery::Input,
+            status: 1,
+        }
+    }
+
+    pub fn discard_line(message: &'static str) -> Self {
+        Self {
+            message: message.into(),
+            recovery: Recovery::Line,
             status: 1,
         }
     }
@@ -68,7 +77,7 @@ impl Error {
             {
                 crate::Flow::Exit(self.status)
             }
-            Recovery::Input => crate::Flow::Discard(self.status),
+            Recovery::Line | Recovery::Input => crate::Flow::Discard(self.status),
             Recovery::Exit if !session.interactive => crate::Flow::Exit(self.status),
             Recovery::Exit => crate::Flow::Discard(self.status),
             _ => crate::Flow::Continue(self.status),
@@ -155,13 +164,7 @@ impl<'a> Expansion<'a> {
             .rev()
             .find(|(k, _)| k == name)
             .map(|(_, v)| v.clone())
-            .or_else(|| {
-                execute::parameter(
-                    self.session,
-                    self.captured.get().unwrap_or(self.initial),
-                    name,
-                )
-            })
+            .or_else(|| execute::parameter(self.session, self.status(), name))
     }
 
     pub(super) fn shadows(&self, name: &str) -> bool {
@@ -295,7 +298,11 @@ impl<'a> Expansion<'a> {
     }
 
     pub fn status(&self) -> u8 {
-        self.captured.get().unwrap_or(self.initial)
+        if self.session.posix {
+            self.initial
+        } else {
+            self.captured.get().unwrap_or(self.initial)
+        }
     }
 
     pub fn array_items(
@@ -306,7 +313,12 @@ impl<'a> Expansion<'a> {
         use crate::session::array::{ArrayItems, Index};
         if associative {
             let pairs = parts.first().is_some_and(|(index, _)| index.is_none());
-            let mut items = Vec::new();
+            let mut items = Vec::with_capacity(if pairs {
+                parts.len().div_ceil(2)
+            } else {
+                parts.len()
+            });
+            let mut error = None;
             let mut parts = parts.into_iter();
             while let Some((index, word)) = parts.next() {
                 let (key, value, append) = if pairs {
@@ -317,16 +329,24 @@ impl<'a> Expansion<'a> {
                     };
                     (key, value, false)
                 } else {
-                    let index = index.ok_or("missing associative array subscript")?;
-                    let key = self.key(&index.index)?;
+                    let Some(index) = index else {
+                        error = Some("missing associative array subscript");
+                        break;
+                    };
+                    let key = self.expanded_key(&index.index)?;
                     (key, self.scalar(word)?, index.append)
                 };
                 if key.is_empty() {
-                    return Err("bad array subscript".into());
+                    if pairs {
+                        eprintln!("tonari: bad array subscript");
+                        continue;
+                    }
+                    error = Some("bad array subscript");
+                    break;
                 }
                 items.push((key, value, append));
             }
-            return Ok(ArrayItems::Associative(items));
+            return Ok(ArrayItems::Associative(items, error));
         }
         let mut items = Vec::with_capacity(parts.len());
         for (index, word) in parts {
@@ -354,16 +374,28 @@ impl<'a> Expansion<'a> {
         Ok(ArrayItems::Indexed(items))
     }
 
-    pub fn key(&mut self, source: &str) -> Result<String, Error> {
-        let key = if source.contains(['$', '`', '"', '\'', '\\']) {
+    fn expanded_key(&mut self, source: &str) -> Result<String, Error> {
+        if let Some(rest) = source.strip_prefix("~/")
+            && !rest.contains(['$', '`', '"', '\'', '\\'])
+            && let Some(mut home) = self.lookup("HOME")
+        {
+            home.push('/');
+            home.push_str(rest);
+            return Ok(home);
+        }
+        if source.starts_with('~') || source.contains(['$', '`', '"', '\'', '\\']) {
             let word = crate::parser::with_subscript_aliases(self.session, source, || {
                 crate::parser::subscript_word(source, true)
             })
             .map_err(|e| e.message())?;
-            self.scalar(word)?
+            self.scalar(word)
         } else {
-            source.to_owned()
-        };
+            Ok(source.to_owned())
+        }
+    }
+
+    pub fn key(&mut self, source: &str) -> Result<String, Error> {
+        let key = self.expanded_key(source)?;
         if key.is_empty() {
             return Err("bad array subscript".into());
         }
@@ -371,9 +403,19 @@ impl<'a> Expansion<'a> {
     }
 
     pub fn arithmetic(&mut self, expression: &str) -> Result<i64, Error> {
-        let expanded;
-        let expression = if expression.contains(['$', '`', '"', '\\']) {
-            expanded = if expression.contains('[') {
+        let text = self.arithmetic_text(expression)?;
+        arithmetic::with_variables(&text, self).map_err(|message| match message {
+            "unbound arithmetic variable" => Error::fatal(message, 1),
+            _ => Error::discard(message),
+        })
+    }
+
+    pub(crate) fn arithmetic_text<'s>(
+        &mut self,
+        expression: &'s str,
+    ) -> Result<std::borrow::Cow<'s, str>, Error> {
+        if expression.contains(['$', '`', '"', '\\']) {
+            let text = if expression.contains('[') {
                 let (keys, tail) =
                     crate::parser::with_subscript_aliases(self.session, expression, || {
                         crate::parser::arithmetic_segments(expression, |name| {
@@ -404,14 +446,22 @@ impl<'a> Expansion<'a> {
                 .map_err(|e| e.message())?;
                 self.scalar(word)?
             };
-            expanded.as_str()
+            Ok(text.into())
         } else {
-            expression
-        };
-        arithmetic::with_variables(expression, self).map_err(|message| match message {
-            "unbound arithmetic variable" => Error::fatal(message, 1),
-            _ => Error::discard(message),
-        })
+            Ok(expression.into())
+        }
+    }
+
+    pub(crate) fn redirect_path(&mut self, word: Word) -> Result<String, Error> {
+        if self.session.posix && !self.session.interactive {
+            return self.scalar(word);
+        }
+        let mut fields = self.fields(word)?.into_iter();
+        let path = fields.next().ok_or("ambiguous redirect")?;
+        if fields.next().is_some() {
+            return Err("ambiguous redirect".into());
+        }
+        Ok(path)
     }
 
     pub fn fields(&mut self, word: Word) -> Result<Vec<String>, Error> {
@@ -510,7 +560,7 @@ impl Variables for Expansion<'_> {
         self.lookup(name)
     }
     fn set(&mut self, name: &str, value: i64) -> Result<(), &'static str> {
-        if crate::session::array::subscript(name).is_some() {
+        if crate::session::array::subscript(name).is_some() || self.session.is_nameref(name) {
             return Variables::set(self.session, name, value);
         }
         if self.session.readonly(name) {

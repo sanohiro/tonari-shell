@@ -248,7 +248,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     if let Some(invalid) = opts
         .names
         .iter()
-        .find(|s| opts.array.is_none() && !session.valid_target(s))
+        .find(|s| opts.array.is_none() && !session.valid_builtin_target(s))
     {
         eprintln!("tonari: read: {invalid}: invalid identifier");
         return 1;
@@ -452,7 +452,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         } else {
             line.trim_matches(|c: char| ifs.contains(c))
         };
-        if let Err(e) = session.assign_target(name, value) {
+        if let Err(e) = session.assign_builtin_target(name, value) {
             eprintln!("tonari: read: {e}");
             return 1;
         }
@@ -460,16 +460,15 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     }
     let (spans, end) = field_ranges(&line, &escaped, &ifs);
     if let Some(target) = opts.array {
-        if session.is_associative(target) {
-            eprintln!("tonari: read: {target}: not an indexed array");
-            return 1;
-        }
-        if session.readonly(target) {
-            eprintln!("tonari: read: {target}: readonly variable");
-            return 1;
-        }
+        let target = match session.indexed_receiver(target, false) {
+            Ok(target) => target,
+            Err(e) => {
+                eprintln!("tonari: read: {target}: {e}");
+                return 1;
+            }
+        };
         session.replace_array(
-            target,
+            &target,
             spans.into_iter().map(|(s, e)| line[s..e].into()).collect(),
         );
         return status;
@@ -484,7 +483,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
             };
             &line[start..finish]
         });
-        if let Err(e) = session.assign_target(name, value) {
+        if let Err(e) = session.assign_builtin_target(name, value) {
             eprintln!("tonari: read: {e}");
             return if e == "readonly variable" && i + 1 < count {
                 2

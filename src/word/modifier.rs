@@ -90,6 +90,19 @@ pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String
     {
         return Ok(Some(text.chars().count().to_string()));
     }
+    if let Some(reference) = name.strip_prefix('#')
+        && env.session.is_nameref(reference)
+        && !env.shadows(reference)
+    {
+        let target = env.session.reference_name(reference)?;
+        if let Some((base, _, _)) = array_elements_name(&target) {
+            if let Some(count) = env.session.stored_array_len(base) {
+                return Ok(Some(count.to_string()));
+            }
+        } else if crate::session::array::subscript(&target).is_some() {
+            return Ok(value(&target, env)?.map(|s| s.chars().count().to_string()));
+        }
+    }
     if let Some((base, _, _)) = name.strip_prefix('#').and_then(array_elements_name)
         && let Some(count) = env.session.stored_array_len(base)
     {
@@ -137,6 +150,11 @@ pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String
 }
 
 fn as_number(word: &mut Word, env: &mut Expansion<'_>) -> Result<i64, Error> {
+    if let Word::Literal(s) = word
+        && let Some(n) = crate::Session::plain_decimal(s.trim_ascii())
+    {
+        return Ok(n);
+    }
     let text = env.scalar(std::mem::replace(word, Word::Literal(String::new())))?;
     env.arithmetic(&text)
 }
@@ -165,8 +183,14 @@ impl Modification {
                 let pattern =
                     env.pattern(std::mem::replace(pattern, Word::Literal(String::new())))?;
                 replacement.resolve(env)?;
-                let replacement = std::mem::replace(replacement, Word::Literal(String::new()))
-                    .replacement(&|k| env.lookup(k), env.session.positional.as_slice());
+                let replacement = std::mem::replace(replacement, Word::Literal(String::new()));
+                let lookup = |k: &str| env.lookup(k);
+                let positional = env.session.positional.as_slice();
+                let replacement = if env.session.shopt.patsub_replacement {
+                    replacement.replacement(&lookup, positional)
+                } else {
+                    replacement.scalar(&lookup, positional)
+                };
                 Ok(values.map(quoted, |v| {
                     super::replace::substitute(
                         v,
@@ -236,14 +260,15 @@ impl Modification {
                         .map(|(base, _, _)| base)
                         .or_else(|| crate::session::array::subscript(name).map(|(base, _)| base))
                         .unwrap_or(name);
-                    let is_array = env
-                        .session
-                        .attributes(base)
-                        .is_some_and(|(flags, _)| flags.contains(['a', 'A']));
-                    if elements.is_some() && is_array {
+                    let attributes = env.session.attributes(base);
+                    if elements.is_some()
+                        && attributes
+                            .as_ref()
+                            .is_some_and(|(flags, _)| flags.contains(['a', 'A']))
+                    {
                         env.session.array_declaration_fields(base)
-                    } else if let Some((flags, _)) = env.session.attributes(base) {
-                        let text = value(name, env)?;
+                    } else if let Some((flags, _)) = attributes {
+                        let text = value(if elements.is_some() { base } else { name }, env)?;
                         let mut fields = Vec::new();
                         if !flags.is_empty() {
                             fields.extend(["declare".to_owned(), format!("-{flags}")]);
@@ -255,6 +280,9 @@ impl Modification {
                             ));
                         } else if !fields.is_empty() {
                             fields.push(base.to_owned());
+                        }
+                        if elements.is_some() && !fields.is_empty() {
+                            return Ok(scalar(fields.join(" ")));
                         }
                         fields
                     } else {
@@ -377,7 +405,7 @@ impl Modification {
                 }
                 if matches!(name, "@" | "*") || array_elements_name(name).is_some() {
                     if len.is_some_and(|n| n < 0) {
-                        return Err(Error::fatal("negative array slice length", 1));
+                        return Err(Error::discard_line("negative array slice length"));
                     }
                     let count = len.map_or(usize::MAX, |n| n as usize);
                     let (values, at) = if let Some((base, at, keys)) = array_elements_name(name) {
@@ -492,7 +520,7 @@ fn substring(v: &str, start: i64, len: Option<i64>) -> Result<&str, Error> {
         None => v.len(),
         Some(n) if n < 0 => boundary(v, n)
             .filter(|&end| end >= start)
-            .ok_or_else(|| Error::fatal("negative substring length", 1))?,
+            .ok_or_else(|| Error::discard_line("negative substring length"))?,
         Some(n) => boundary(&v[start..], n).map_or(v.len(), |i| start + i),
     };
     Ok(&v[start..end])

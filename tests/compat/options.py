@@ -128,3 +128,55 @@ for name in ("complete", "compgen"):
     FLAG_SCRIPTS[name] = {f:comp(name, f) for f in "abcdefgjksuvoAGWFCXPSDEIrpV"}
 FLAG_SCRIPTS["compopt"] = {"o":BUILTINS["compopt"], **{f:f"complete -{f} -W yes; compopt -{f} -o nospace; complete -p -{f}" for f in "DEI"}}
 SET_FLAGS = frozenset("abefhkmnptuvxBCEHPT")
+
+# Exercise each switch against one named binding so different default keymaps
+# do not obscure a user binding that failed to take effect.
+binding = """bind -u beginning-of-line; bind '"zzq": beginning-of-line'; """
+macro = """bind '"zzq": "sample"'; """
+shell_binding = """bind -x '"zzq":echo sample'; """
+bind_scripts = {
+    "P": binding + "bind -P | grep '^beginning-of-line ' | grep -q zzq",
+    "p": binding + """bind -p | grep -F '"zzq": beginning-of-line'""",
+    "q": binding + "bind -q beginning-of-line | grep -q zzq",
+    "u": binding + "bind -u beginning-of-line; bind -q beginning-of-line >/dev/null; echo $?",
+    "r": binding + """bind -r zzq; bind -p | grep -F '"zzq": beginning-of-line'; echo $?""",
+    "l": "bind -l | grep -x beginning-of-line",
+    "m": """bind -m vi-insert '"zzq": beginning-of-line'; bind -m vi-insert -q beginning-of-line | grep -q zzq""",
+    "x": shell_binding + "bind -X | grep -q 'zzq.*sample'",
+    "X": shell_binding + "bind -X | grep -q 'zzq.*sample'",
+    "s": macro + """bind -s | grep -F '"zzq": "sample"'""",
+    "S": macro + "bind -S | grep -q 'zzq.*outputs.*sample'",
+    "f": """bind -u beginning-of-line; echo '"zzq": beginning-of-line' >keys; bind -f keys; bind -q beginning-of-line | grep -q zzq""",
+    "v": """bind 'set completion-ignore-case on'; bind -v | grep -x 'set completion-ignore-case on'""",
+    "V": """bind 'set completion-ignore-case on'; bind -V | grep -q 'completion-ignore-case is set to .*on'""",
+}
+FLAG_SCRIPTS["bind"] = {flag: "{ " + cmd + "; } 2>/dev/null" for flag, cmd in bind_scripts.items()}
+FLAG_SCRIPTS["enable"] = {
+    "a": "enable -n echo; enable -a | grep -x 'enable -n echo'",
+    "n": "enable -n echo; type -t echo; enable echo; type -t echo",
+    "p": "enable -p | grep -x 'enable printf'",
+    "s": "enable -s | grep -x 'enable export'",
+}
+FLAG_SCRIPTS["help"] = {
+    "s": "help -s read | grep -q '^read: read '",
+    "m": "help -m read | grep -Ex 'NAME|SYNOPSIS|DESCRIPTION'",
+    "d": "help -d read | grep -q '^read - .'",
+}
+seed_history = "history -c; history -s 'echo first'; history -s 'echo second'; "
+FLAG_SCRIPTS["fc"] = {
+    "e": seed_history + """printf '#!/bin/sh\\necho "echo edited" >"$1"\\n' >ed; chmod +x ed; fc -e ./ed 1 2>/dev/null""",
+    "l": seed_history + "fc -l 1 2",
+    "n": seed_history + "fc -ln 1 2",
+    "r": seed_history + "fc -lnr 1 2",
+    "s": seed_history + "fc -s first=revised 1 2>/dev/null",
+}
+FLAG_SCRIPTS["history"] = {
+    "a": seed_history + "history -a saved; cat saved",
+    "c": seed_history + "history -c; history",
+    "d": seed_history + "history -d 1; history",
+    "n": "printf 'echo first\\n' >saved; history -c; history -n saved; history",
+    "p": seed_history + """history -p '!!:$'""",
+    "r": "printf 'echo first\\necho second\\n' >saved; history -c; history -r saved; history",
+    "s": seed_history + "history",
+    "w": seed_history + "history -w saved; cat saved",
+}

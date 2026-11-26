@@ -77,6 +77,12 @@ impl Session {
         );
     }
 
+    pub(crate) fn diagnostic_prefix(&self, line: impl FnOnce() -> usize) -> Option<String> {
+        self.shopt
+            .gnu_errfmt
+            .then(|| format!("{}:{}: ", self.function_source(), line()))
+    }
+
     pub(crate) fn function_source(&self) -> &str {
         self.source_names
             .last()
@@ -202,23 +208,44 @@ impl Session {
         flags
     }
 
-    pub fn print_function(&self, out: &mut impl Write, name: &str) -> io::Result<()> {
+    pub fn print_function(
+        &self,
+        out: &mut impl Write,
+        name: &str,
+        attributes: bool,
+    ) -> io::Result<()> {
         let definition = &self.functions[name].definition;
         let body = definition.location.text();
-        let statements = definition.body.statements();
-        if body.starts_with('{') && body.ends_with('}') && statements.iter().all(|s|
-            s.condition == crate::parser::Condition::Always && !s.negated
-            && matches!(&s.command, Command::Pipeline(stages) if stages.iter().all(|c| c.compound.is_none() && c.redirects.is_empty()))
-            && !s.location.text().contains('\n')) {
-            writeln!(out, "{name} () \n{{ ")?;
-            for s in statements { writeln!(out, "    {}", s.location.text().trim())?; }
-            writeln!(out, "}}")?;
-        } else {
-            writeln!(out, "{name} () \n{body}")?;
+        if crate::parser::reserved(name)
+            || name
+                .split_once('=')
+                .is_some_and(|(key, _)| crate::parser::is_identifier(key.trim_end_matches('+')))
+        {
+            write!(out, "function ")?;
         }
-        let flags = self.function_attributes(name);
-        if flags.len() > 1 {
-            writeln!(out, "declare -{flags} {name}")?;
+        let rendered = definition.rendered_body.get_or_init(|| {
+            let statements = definition.body.statements();
+            let simple = body.starts_with('{') && body.ends_with('}') && statements.iter().all(|s|
+                s.condition == crate::parser::Condition::Always && !s.negated
+                && matches!(&s.command, Command::Pipeline(stages) if stages.iter().all(|c| c.compound.is_none() && c.redirects.is_empty()))
+                && !s.location.text().contains('\n'));
+            if !simple { return body.to_owned(); }
+            let mut result = String::with_capacity(body.len() + 4 * statements.len());
+            result.push_str("{ \n");
+            for statement in statements {
+                result.push_str("    ");
+                result.push_str(statement.location.text().trim());
+                result.push('\n');
+            }
+            result.push('}');
+            result
+        });
+        writeln!(out, "{name} () \n{rendered}")?;
+        if attributes {
+            let flags = self.function_attributes(name);
+            if flags.len() > 1 {
+                writeln!(out, "declare -{flags} {name}")?;
+            }
         }
         Ok(())
     }

@@ -37,12 +37,22 @@ pub(super) fn indexed_prefix(source: &str) -> Option<&str> {
 pub(crate) fn quoted_initializer(
     source: &str,
 ) -> Result<Vec<(Option<Subscript<String>>, Word)>, Error> {
+    if let Some(body) = source.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
+        && body.bytes().all(|b| {
+            b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.' | b'/' | b' ' | b'\t')
+        })
+    {
+        return Ok(body
+            .split_ascii_whitespace()
+            .map(|word| (None, Word::Literal(word.into())))
+            .collect());
+    }
     let (tokens, spans, _) = super::lexer::lex_initializer(source)?;
     let mut reader = Reader::new(tokens, spans, source);
     if !matches!(reader.peek(), Some(Token::LeftParen)) {
         return Err(Error::Invalid("expected array initializer"));
     }
-    let items = reader.array_items()?;
+    let items = reader.array_items::<true>()?;
     if !reader.tokens.is_empty() {
         return Err(Error::Invalid("unexpected token after array initializer"));
     }
@@ -50,7 +60,9 @@ pub(crate) fn quoted_initializer(
 }
 
 impl Reader {
-    pub(super) fn array_items(&mut self) -> Result<Vec<(Option<Subscript<String>>, Word)>, Error> {
+    pub(super) fn array_items<const COLLECT: bool>(
+        &mut self,
+    ) -> Result<Vec<(Option<Subscript<String>>, Word)>, Error> {
         self.tokens.pop_front();
         let mut items = Vec::new();
         loop {
@@ -62,6 +74,9 @@ impl Reader {
                     assignment,
                     ..
                 })) => {
+                    if !COLLECT {
+                        continue;
+                    }
                     let index = assignment
                         .filter(|k| k.starts_with('[') && (k.ends_with(']') || k.ends_with("]+")));
                     if let Some(name) = &index {

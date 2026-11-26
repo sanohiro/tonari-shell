@@ -40,7 +40,7 @@ pub(crate) fn run(
             eprintln!("tonari: printf: -v requires a variable");
             return 2;
         };
-        if !session.valid_target(name) {
+        if !session.valid_builtin_target(name) {
             eprintln!("tonari: printf: {name}: invalid identifier");
             return 2;
         }
@@ -132,7 +132,7 @@ pub(crate) fn run(
             eprintln!("tonari: printf: expected UTF-8 variable value");
             return 1;
         };
-        if let Err(e) = variables.write().assign_target(name, value) {
+        if let Err(e) = variables.write().assign_builtin_target(name, value) {
             eprintln!("tonari: printf: {e}");
             return 1;
         }
@@ -231,6 +231,17 @@ impl<'a> Arguments<'a> {
     }
 
     fn signed(&mut self) -> i64 {
+        // Common decimal widths and operands need neither a C string nor errno.
+        if let Some((word, rest)) = self.values.split_first()
+            && word
+                .as_bytes()
+                .first()
+                .is_some_and(|b| matches!(b, b'1'..=b'9'))
+            && let Ok(value) = word.parse::<i64>()
+        {
+            self.values = rest;
+            return value;
+        }
         self.number(|p, end| unsafe { libc::strtoll(p, end, 0) }, i64::from, ".")
     }
     fn unsigned(&mut self) -> u64 {
@@ -278,7 +289,7 @@ impl Spec {
             flags.push(flag);
             *input = rest;
         }
-        let mut width = amount(input, args)?;
+        let mut width = amount(input, args, 0);
         if width < 0 {
             flags.push(b'-');
             width = width.checked_abs().ok_or("field width too large")?;
@@ -286,15 +297,17 @@ impl Spec {
         let mut precision = None;
         if input.first() == Some(&b'.') {
             *input = &input[1..];
-            let p = amount(input, args)?;
+            let p = amount(input, args, -1);
             if p >= 0 {
                 precision = Some(p);
             }
         }
+        let mut wide = false;
         while let Some((&len, rest)) = input.split_first() {
             if !LENGTH_MODIFIERS.contains(&len) {
                 break;
             }
+            wide |= len == b'l';
             *input = rest;
         }
         let (conversion, rest) = input.split_first().ok_or("missing format character")?;
@@ -305,7 +318,11 @@ impl Spec {
                 width,
                 precision,
             },
-            *conversion,
+            if wide && matches!(conversion, b'c' | b's') {
+                conversion.to_ascii_uppercase()
+            } else {
+                *conversion
+            },
         ))
     }
 
@@ -323,6 +340,35 @@ impl Spec {
         output.extend_from_slice(&value[..len]);
         if self.flags.contains(&b'-') {
             output.resize(output.len() + padding, b' ');
+        }
+        Ok(())
+    }
+
+    fn wide(&self, value: &str, single: bool, out: &mut Vec<u8>) -> Result<(), &'static str> {
+        let limit = self
+            .precision
+            .map_or(usize::MAX, |n| n as usize)
+            .min(if single { 1 } else { usize::MAX });
+        if !single && self.width == 0 && self.precision.is_none() {
+            out.extend_from_slice(value.as_bytes());
+            return Ok(());
+        }
+        let mut bytes = 0;
+        let mut chars = 0;
+        for c in value.chars().take(limit) {
+            bytes += c.len_utf8();
+            chars += 1;
+        }
+        let pad = (self.width as usize).saturating_sub(chars);
+        out.try_reserve(bytes + pad)
+            .map_err(|_| "field too large")?;
+        let left = self.flags.contains(&b'-');
+        if !left {
+            out.resize(out.len() + pad, b' ');
+        }
+        out.extend_from_slice(&value.as_bytes()[..bytes]);
+        if left {
+            out.resize(out.len() + pad, b' ');
         }
         Ok(())
     }
@@ -488,23 +534,26 @@ fn append_number(
     Ok(())
 }
 
-fn amount(input: &mut &[u8], args: &mut Arguments<'_>) -> Result<i32, &'static str> {
-    if input.first() == Some(&b'*') {
+fn amount(input: &mut &[u8], args: &mut Arguments<'_>, overflow: i32) -> i32 {
+    let value = if input.first() == Some(&b'*') {
         *input = &input[1..];
-        return i32::try_from(args.signed()).map_err(|_| "field width too large");
-    }
-    let mut amount = 0i32;
-    while let Some((&digit, rest)) = input.split_first() {
-        if !digit.is_ascii_digit() {
-            break;
+        i32::try_from(args.signed()).ok()
+    } else {
+        let mut amount = Some(0i32);
+        while let Some((&digit, rest)) = input.split_first() {
+            if !digit.is_ascii_digit() {
+                break;
+            }
+            amount = amount.and_then(|n| n.checked_mul(10)?.checked_add(i32::from(digit - b'0')));
+            *input = rest;
         }
-        amount = amount
-            .checked_mul(10)
-            .and_then(|n| n.checked_add(i32::from(digit - b'0')))
-            .ok_or("field width too large")?;
-        *input = rest;
-    }
-    Ok(amount)
+        amount
+    };
+    value.unwrap_or_else(|| {
+        eprintln!("tonari: printf: field width or precision out of range");
+        args.status = 1;
+        overflow
+    })
 }
 
 fn render(
@@ -567,6 +616,15 @@ fn render(
                             out.extend_from_slice(&original[..original.len() - input.len()]);
                         }
                     }
+                    b'S' | b'C' => {
+                        let arg = args.next();
+                        let single = conversion == b'C';
+                        spec.wide(
+                            if single && arg.is_empty() { "\0" } else { arg },
+                            single,
+                            out,
+                        )?;
+                    }
                     b'c' => {
                         let byte = args.next().as_bytes().first().copied().unwrap_or(0);
                         spec.precision = None;
@@ -588,7 +646,10 @@ fn render(
                                 data = &data[..data.len().min(p as usize)];
                             }
                         }
-                        spec.bytes(&quote(data, variables.read()), out)?;
+                        spec.bytes(
+                            &quote(data, variables.read(), spec.flags.contains(&b'#')),
+                            out,
+                        )?;
                     }
                     b'n' => {
                         let name = args.next();
@@ -656,7 +717,7 @@ pub(crate) fn parameter_quote(text: &str, session: &Session) -> String {
     }
 }
 
-fn quote(data: &[u8], session: &Session) -> Vec<u8> {
+fn quote(data: &[u8], session: &Session, single: bool) -> Vec<u8> {
     if data.is_empty() {
         return b"''".to_vec();
     }
@@ -666,6 +727,9 @@ fn quote(data: &[u8], session: &Session) -> Vec<u8> {
         .any(|b| b.is_ascii_control() || (ascii_locale && !b.is_ascii()));
     if ansi {
         return ansi_quote(data, ascii_locale);
+    }
+    if single && let Ok(text) = std::str::from_utf8(data) {
+        return crate::completion_spec::single_quote(text).into_bytes();
     }
     let mut out = Vec::new();
     for (i, &b) in data.iter().enumerate() {

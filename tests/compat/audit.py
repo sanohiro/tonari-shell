@@ -185,7 +185,7 @@ def collect(a, source):
             if name in ("-b", "-S", "-t") and group == "Conditional":
                 # A false/false pair alone does not prove an implementation.
                 if name == "-b":
-                    block = next((p for p in sorted(Path("/dev").iterdir()) if p.is_block_device()), None)
+                    block = next((p for p in [Path("/fixtures/block"), *sorted(Path("/dev").iterdir())] if p.is_block_device()), None)
                     if block is None:
                         a.add(group, name, "fixture unavailable", "No block device in /dev")
                         continue

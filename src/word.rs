@@ -23,6 +23,7 @@ pub enum Alternative {
 #[derive(Clone, Debug)]
 pub enum Part {
     BadSubstitution(String),
+    InvalidCommandSubstitution,
     PrefixNames {
         prefix: String,
         at: bool,
@@ -173,6 +174,11 @@ impl Word {
                     quoted: *quoted,
                 };
                 continue;
+            }
+            if matches!(part, Part::InvalidCommandSubstitution) {
+                return Err(crate::expansion::Error::discard_line(
+                    "unterminated command substitution",
+                ));
             }
             if let Part::BadSubstitution(text) = part {
                 let message = format!("{text}: bad substitution");
@@ -651,6 +657,7 @@ impl Word {
                     }
                 }
                 Part::PrefixNames { .. }
+                | Part::InvalidCommandSubstitution
                 | Part::BadSubstitution(_)
                 | Part::CurrentSubstitution { .. }
                 | Part::Substitution { .. }
@@ -762,8 +769,12 @@ impl Output<'_> {
         match self {
             Self::Scalar(buffer) => buffer.push_str(text),
             Self::Pattern(buffer, PatternKind::Replacement) => {
+                if !quoted || !text.contains(['\\', '&']) {
+                    buffer.push_str(text);
+                    return;
+                }
                 for c in text.chars() {
-                    if c == '\\' || c == '&' && quoted {
+                    if quoted && matches!(c, '\\' | '&') {
                         buffer.push('\\');
                     }
                     buffer.push(c);
@@ -775,27 +786,7 @@ impl Output<'_> {
             }
             Self::Pattern(buffer, PatternKind::Glob) => quote_into(buffer, text),
             Self::Pattern(buffer, PatternKind::Regex) => {
-                for c in text.chars() {
-                    if matches!(
-                        c,
-                        '\\' | '.'
-                            | '['
-                            | ']'
-                            | '{'
-                            | '}'
-                            | '('
-                            | ')'
-                            | '*'
-                            | '+'
-                            | '?'
-                            | '^'
-                            | '$'
-                            | '|'
-                    ) {
-                        buffer.push('\\');
-                    }
-                    buffer.push(c);
-                }
+                crate::test_expression::quote_regex(buffer, text)
             }
             Self::Fields(fields) => fields.expansion(text, quoted, ifs),
         }

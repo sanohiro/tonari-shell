@@ -24,7 +24,16 @@ impl Index {
 
 pub(crate) enum ArrayItems {
     Indexed(Vec<(Option<Subscript<Index>>, String)>),
-    Associative(Vec<(String, String, bool)>),
+    Associative(Vec<(String, String, bool)>, Option<&'static str>),
+}
+
+impl ArrayItems {
+    pub(crate) fn initializer_error(&self) -> Option<&'static str> {
+        match self {
+            Self::Associative(_, error) => *error,
+            Self::Indexed(_) => None,
+        }
+    }
 }
 
 // A full mapfile read produces consecutive UTF-8 records. Keep their storage
@@ -218,24 +227,56 @@ impl Session {
     }
 
     pub fn valid_target(&self, target: &str) -> bool {
-        if let Some((base, expr)) = subscript(target) {
-            super::is_identifier(base)
-                && if self.is_associative(base) {
-                    !expr.is_empty()
-                } else {
-                    self.resolve_index(base, expr).is_ok()
-                }
-        } else {
-            super::is_identifier(target)
+        self.check_target(target, false)
+    }
+
+    pub fn valid_builtin_target(&self, target: &str) -> bool {
+        self.check_target(target, !self.shopt.array_expand_once)
+    }
+
+    fn check_target(&self, target: &str, check_syntax: bool) -> bool {
+        let Some((base, expr)) = subscript(target) else {
+            return super::is_identifier(target);
+        };
+        if !super::is_identifier(base) {
+            return false;
         }
+        if !self.is_associative(base) {
+            return self.resolve_index(base, expr).is_ok();
+        }
+        !expr.is_empty()
+            && (!check_syntax
+                || crate::parser::index_end(&target[base.len()..]).ok()
+                    == Some(target.len() - base.len()))
     }
 
     pub fn assign_target(&mut self, target: &str, value: &str) -> Result<(), &'static str> {
+        self.assign_target_value(target, value, false)
+    }
+
+    pub fn assign_builtin_target(&mut self, target: &str, value: &str) -> Result<(), &'static str> {
+        self.assign_target_value(
+            target,
+            value,
+            self.shopt.array_expand_once && target.as_bytes().last() == Some(&b']'),
+        )
+    }
+
+    fn assign_target_value(
+        &mut self,
+        target: &str,
+        value: &str,
+        literal_key: bool,
+    ) -> Result<(), &'static str> {
         let resolved = self.reference_name(target)?;
         let target = resolved.as_ref();
-        let base = subscript(target).map_or(target, |(base, _)| base);
+        let element = subscript(target);
+        let base = element.map_or(target, |(base, _)| base);
         if self.readonly(base) {
             return Err("readonly variable");
+        }
+        if self.is_nameref(base) && !Self::valid_reference_target(value) {
+            return Err("invalid name reference");
         }
         let number;
         let value = if self.integer(base) {
@@ -244,12 +285,19 @@ impl Session {
         } else {
             value
         };
-        if let Some((base, expr)) = subscript(target) {
+        if let Some((base, expr)) = element {
             if !super::is_identifier(base) {
                 return Err("invalid variable name");
             }
             if self.is_associative(base) {
-                let key = self.subscript_key(expr)?;
+                let key = if literal_key {
+                    if expr.is_empty() {
+                        return Err("bad array subscript");
+                    }
+                    expr.to_owned()
+                } else {
+                    self.subscript_key(expr)?
+                };
                 return self.assign_key(base, key, value.into());
             }
             let index = self.resolve_index(base, expr)?;
@@ -285,9 +333,15 @@ impl Session {
         match name {
             "BASH_ARGV" => (0..self.debug_frames().map(Vec::len).sum::<usize>() as i64).collect(),
             "BASH_ARGC" => (0..self.debug_frames().count() as i64).collect(),
-            "GROUPS" => (0..Self::group_ids().len() as i64).collect(),
+            "GROUPS" => {
+                self.dynamic.groups_read.set(true);
+                (0..Self::group_ids().len() as i64).collect()
+            }
             "BASH_VERSINFO" => (0..6).collect(),
-            "DIRSTACK" => (0..=self.dir_stack.len() as i64).collect(),
+            "DIRSTACK" => {
+                self.dynamic.stack_read.set(true);
+                (0..=self.dir_stack.len() as i64).collect()
+            }
             "FUNCNAME" if self.function_depth == 0 => Vec::new(),
             "FUNCNAME" => (0..self.function_names.len() as i64).collect(),
             "BASH_LINENO" => (0..self.call_lines.len() as i64).collect(),
@@ -333,14 +387,20 @@ impl Session {
                 .rev()
                 .nth(index as usize)
                 .map(|v| v.len().to_string()),
-            "GROUPS" => Self::group_ids().get(usize::try_from(index).ok()?).cloned(),
+            "GROUPS" => {
+                self.dynamic.groups_read.set(true);
+                Self::group_ids().get(usize::try_from(index).ok()?).cloned()
+            }
             "BASH_VERSINFO" => match index {
                 5 => Some(Self::machine_type()),
                 i => ["5", "2", "0", "1", "tonari"]
                     .get(usize::try_from(i).ok()?)
                     .map(|s| (*s).into()),
             },
-            "DIRSTACK" => self.stack_entry(index.try_into().ok()?),
+            "DIRSTACK" => {
+                self.dynamic.stack_read.set(true);
+                self.stack_entry(index.try_into().ok()?)
+            }
             "FUNCNAME" if self.function_depth == 0 => None,
             "FUNCNAME" => self
                 .function_names
@@ -450,6 +510,7 @@ impl Session {
         };
         let name = resolved.as_ref();
         if self.active_groups(name) && !self.variables.contains_key(name) {
+            self.dynamic.groups_read.set(true);
             return Self::group_ids().to_vec();
         }
         if self.live_table(name) {
@@ -494,6 +555,36 @@ impl Session {
             self.store_elements(&target, Elements::Dense(words), false);
         }
         Ok(())
+    }
+
+    pub(crate) fn indexed_receiver<'a>(
+        &mut self,
+        name: &'a str,
+        replace_associative: bool,
+    ) -> Result<std::borrow::Cow<'a, str>, &'static str> {
+        let target = self.reference_name(name)?;
+        if !super::is_identifier(&target) {
+            return Err("array destination must be a variable name");
+        }
+        if Self::builtin_readonly(&target) {
+            return Err("readonly variable");
+        }
+        if !replace_associative && self.live_table(&target) {
+            return Err("not an indexed array");
+        }
+        if let Some(var) = self.variables.get_mut(target.as_ref()) {
+            if var.readonly {
+                return Err("readonly variable");
+            }
+            if !replace_associative && var.associative().is_some() {
+                return Err("not an indexed array");
+            }
+            if var.nameref {
+                eprintln!("tonari: warning: {target}: removing nameref attribute");
+                var.nameref = false;
+            }
+        }
+        Ok(target)
     }
 
     pub fn replace_array(&mut self, name: &str, mut values: Vec<String>) {
@@ -551,9 +642,9 @@ impl Session {
         if var.readonly {
             return Err("readonly variable");
         }
-        self.array_items(name, global, &mut var, append, items)?;
+        let result = self.array_items(name, global, &mut var, append, items);
         self.store_variable(name, var, global);
-        Ok(())
+        result
     }
 
     // Arithmetic can read or modify earlier entries, including through a nameref.
@@ -602,7 +693,7 @@ impl Session {
     ) -> Result<(), &'static str> {
         if var.dynamic
             && matches!(name, "BASH_ALIASES" | "BASH_CMDS")
-            && let ArrayItems::Associative(items) = items
+            && let ArrayItems::Associative(items, _) = items
         {
             for (key, value, concat) in items {
                 let value = if *concat {
@@ -615,7 +706,9 @@ impl Session {
             return Ok(());
         }
         let items = match items {
-            ArrayItems::Associative(items) => {
+            ArrayItems::Associative(items, _) => {
+                var.array_assigned = true;
+                var.declared = true;
                 let integer = var.integer;
                 let letter_case = var.letter_case;
                 let map = var.make_associative()?;
@@ -633,8 +726,6 @@ impl Session {
                     };
                     map.insert(key.clone(), self.convert_case(value, letter_case));
                 }
-                var.array_assigned = true;
-                var.declared = true;
                 return Ok(());
             }
             ArrayItems::Indexed(items) if var.associative().is_none() => items,
@@ -650,46 +741,62 @@ impl Session {
         };
         // With declare -g, an existing local still controls name resolution.
         let visible = !global || !self.locals.iter().any(|scope| scope.0.contains_key(name));
-        let mut next = map.last_index().map_or(Some(0), |i| i.checked_add(1));
-        for (index, value) in items {
-            let concat = index.as_ref().is_some_and(|s| s.append);
-            let index = match index.as_ref().map(|s| &s.index) {
-                Some(Index::Literal(i)) => Some(*i),
-                Some(Index::Expression(expr)) => {
-                    Some(self.initializer_number(name, var, &mut map, visible, expr)?)
-                }
-                None => None,
-            };
-            let i = match index {
-                Some(n) if n < 0 => map
-                    .last_index()
-                    .and_then(|i| i.checked_add(n + 1))
-                    .filter(|i| *i >= 0),
-                Some(n) => Some(n),
-                None => next,
-            }
-            .ok_or("array subscript out of range")?;
-            let value = if var.integer {
-                let old = if concat {
-                    map.get(&i).and_then(|s| s.parse::<i64>().ok()).unwrap_or(0)
-                } else {
-                    0
+        let result = (|| {
+            let mut next = map.last_index().map_or(Some(0), |i| i.checked_add(1));
+            for (index, value) in items {
+                let concat = index.as_ref().is_some_and(|s| s.append);
+                let index = match index.as_ref().map(|s| &s.index) {
+                    Some(Index::Literal(i)) => Some(*i),
+                    Some(Index::Expression(expr)) if expr.is_empty() => {
+                        return Err("bad array subscript");
+                    }
+                    Some(Index::Expression(expr)) if matches!(expr.as_str(), "*" | "@") => {
+                        return Err("cannot assign to non-numeric index");
+                    }
+                    Some(Index::Expression(expr)) => {
+                        Some(self.initializer_number(name, var, &mut map, visible, expr)?)
+                    }
+                    None => None,
                 };
-                old.wrapping_add(self.initializer_number(name, var, &mut map, visible, value)?)
-                    .to_string()
-            } else if concat {
-                map.get(&i).unwrap_or_default().to_owned() + value
-            } else {
-                value.clone()
-            };
-            map.insert(i, self.convert_case(value, var.letter_case));
-            next = i.checked_add(1);
-        }
+                let i = match index {
+                    Some(n) if n < 0 => map
+                        .last_index()
+                        .and_then(|i| i.checked_add(n + 1))
+                        .filter(|i| *i >= 0),
+                    Some(n) => Some(n),
+                    None => next,
+                }
+                .ok_or("array subscript out of range")?;
+                let value = if var.integer {
+                    let old = if concat {
+                        map.get(&i).and_then(|s| s.parse::<i64>().ok()).unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    old.wrapping_add(self.initializer_number(name, var, &mut map, visible, value)?)
+                        .to_string()
+                } else if concat {
+                    map.get(&i).unwrap_or_default().to_owned() + value
+                } else {
+                    value.clone()
+                };
+                let value = self.convert_case(value, var.letter_case);
+                if let Elements::Dense(values) = &mut map
+                    && i == values.len() as i64
+                {
+                    values.push(value);
+                } else {
+                    map.insert(i, value);
+                }
+                next = i.checked_add(1);
+            }
+            Ok(())
+        })();
         var.elements = Some(Rc::new(map));
         var.value = None;
         var.declared = true;
         var.array_assigned = true;
-        Ok(())
+        result
     }
 
     pub(super) fn store_elements(&mut self, name: &str, values: Elements, global: bool) {
@@ -721,7 +828,13 @@ impl Session {
         let mut elements = Rc::unwrap_or_clone(var.elements.take().unwrap());
         let visible = !global || !self.locals.iter().any(|scope| scope.0.contains_key(name));
         let result = self
-            .initializer_number(name, var, &mut elements, visible, expr)
+            .initializer_number(
+                name,
+                var,
+                &mut elements,
+                visible,
+                crate::arithmetic::numeric_subscript(expr),
+            )
             .and_then(|n| {
                 if n >= 0 {
                     Ok(n)
@@ -854,7 +967,13 @@ mod tests {
         shell.assign("a", "outer");
         shell.enter_function(&mut Default::default());
         assert_eq!(
-            shell.declare("local", &["-a".into(), "a".into()], &[], 0),
+            shell.declare(
+                "local",
+                &["-a".into(), "a".into()],
+                &[],
+                0,
+                &mut Default::default()
+            ),
             crate::Flow::Continue(0)
         );
         shell
