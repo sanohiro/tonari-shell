@@ -583,6 +583,16 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
             }
         }
     }
+    if session.posix
+        && args.len()
+            > (if substitute {
+                1 + usize::from(args.first().is_some_and(|s| s.contains('=')))
+            } else {
+                2
+            })
+    {
+        return Err(error("too many arguments"));
+    }
     let substitution = if substitute {
         args.first().and_then(|a| a.split_once('='))
     } else {
@@ -636,7 +646,7 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
             source.push_str(&(h.base + i + 1).to_string());
         }
         if list {
-            source.push_str("\t ");
+            source.push_str(if session.posix { "\t" } else { "\t " });
         }
         source.push_str(&h.lines[i]);
         source.push('\n');
@@ -659,7 +669,7 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
             .map(str::to_owned)
             .or_else(|| session.get("FCEDIT"))
             .or_else(|| session.get("EDITOR"))
-            .unwrap_or_else(|| "vi".into());
+            .unwrap_or_else(|| if session.posix { "ed" } else { "vi" }.into());
         let directory = session
             .get("TMPDIR")
             .map_or_else(std::env::temp_dir, PathBuf::from);

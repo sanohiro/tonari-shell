@@ -16,6 +16,15 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "posix-prompt-expansion": "set -o posix; shopt -u promptvars; v=visible; p='!!/$v'; printf '%s\\n' \"${p@P}\"",
+    "posix-ulimit-blocks": "ulimit -S -f 32; set -o posix; ulimit -S -f; ulimit -S -f 40; set +o posix; ulimit -S -f",
+    "posix-signal-operands": "set -o posix; kill -l | awk '{n+=NF} END {print NR,(n>10)}'; kill -s SIGTERM 99999999 2>&1 | grep -Eq 'invalid signal'; echo $?",
+    "posix-fc-operands": "set -o posix; set -o history\nhistory -s 'echo first'\nfc -s 1 1 1; echo \"$?\"",
+    "posix-fc-format": "set -o posix; set -o history\nhistory -s 'echo first'\nfc -ln -1",
+    "posix-logical-directory": "set -o posix; mkdir -p movedir/leaf; cd movedir; mv ../movedir ../gone; cd leaf 2>/dev/null; echo $?; echo \"$(pwd | sed 's|.*/||')\"; cd \"$HOME\"; rmdir gone/leaf gone",
+    "posix-comments-reset": "shopt -u interactive_comments; set -o posix; shopt -q interactive_comments; echo $?",
+    "posix-consume-wait": "set -o posix; (exit 9) & p=$!; wait \"$p\"; echo \"$?\"; wait \"$p\" 2>/dev/null; echo \"$?\"",
+    "posix-function-path": "function ./absent { echo wrong; }; set -o posix; ./absent 2>/dev/null; echo $?",
     "posix-special-in-function": "set -o posix; a=outer; f(){ a=3 readonly a; }; a=7 f; declare -p a; g(){ local q=local; q=inside :; echo \"$q\"; }; q=outside; q=temp g; echo \"$q\"",
     "trace-arithmetic-loop": "PS4='+'; { set -x; for (( j=$((++v)); j<2; j++ )); do :; done; for ((;;)); do break; done; set +x; } 2>trace; cat trace; echo \"$v:$j\"",
     "trace-arithmetic-expansion": "PS4='+'; { set -x; (( x=$((++v)) )); set +x; } 2>trace; cat trace; echo \"$x:$v\"",
@@ -117,6 +126,9 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "posix-trap-display": "set -o posix; trap ':' USR1; trap -p USR1; trap USR1; echo after",
+    "alias-display-selected": "set -o posix; alias demo='echo hi'; alias demo; alias -p demo",
+    "posix-substitution-status": "set -o posix; false; echo \"$(true)/$?\"; x=$(exit 7); echo \"$?\"",
     "nameref-element-length": "a=(zero abc); declare -n r='a[$(printf 1)]'; declare -n all='a[@]'; printf '%s/%s/%s\\n' \"${#r}\" \"$r\" \"${#all}\"",
     "array-single-evaluation-option": "shopt -s assoc_expand_once; shopt -q array_expand_once; echo $?; a=(one two); i=0; echo \"${a[i++]}:$i\"; shopt -u array_expand_once; shopt -q assoc_expand_once; echo $?",
     "lazy-malformed-operand": "a=4\necho \"${a-'$('\\'}\"\necho \"${a+'$('\\'}\"\necho survived",
@@ -151,6 +163,18 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "posix-prompt-expansion": ("s=${p@P}", 2700),
+    "posix-ulimit-blocks": ("ulimit -S -f >/dev/null", 2500),
+    "posix-trap-display": ("trap -p USR1 >/dev/null", 1900),
+    "posix-signal-operands": ("kill -l >/dev/null; kill -s SIGTERM 99999999 2>/dev/null", 1200),
+    "posix-fc-operands": ("fc -s 1 1 1 2>/dev/null", 1400),
+    "posix-fc-format": ("fc -ln -1 >/dev/null", 1400),
+    "posix-logical-directory": ("pwd >/dev/null; cd .", 900),
+    "alias-display-selected": ("alias -p demo >/dev/null", 1400),
+    "posix-comments-reset": ("set +o posix; shopt -u interactive_comments; set -o posix; shopt -q interactive_comments", 1600),
+    "posix-consume-wait": ("(exit 9) & p=$!; wait \"$p\"; wait \"$p\" 2>/dev/null", 85),
+    "posix-function-path": ("./absent", 70),
+    "posix-substitution-status": ("false; v=\"$(true)$?\"", 350),
     "posix-special-in-function": ("q=temp f", 2000),
     "trace-arithmetic-loop": ("for ((j=0;j<3;j++)); do :; done", 700),
     "trace-arithmetic-expansion": ("(( x=$v + 1 ))", 2500),
@@ -856,6 +880,17 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "posix-prompt-expansion": "set -o posix; shopt -u promptvars; v=visible; p='!!/$v'",
+                "posix-ulimit-blocks": "set -o posix",
+                "posix-trap-display": "set -o posix; trap ':' USR1",
+                "posix-signal-operands": "set -o posix",
+                "posix-fc-operands": "set -o posix; set -o history; history -s 'echo first'",
+                "posix-fc-format": "set -o posix; set -o history; history -s 'echo first'",
+                "posix-logical-directory": "set -o posix",
+                "alias-display-selected": "alias demo='echo hi'; set -o posix",
+                "posix-consume-wait": "set -o posix",
+                "posix-function-path": "function ./absent { :; }; set -o posix; exec 2>/dev/null",
+                "posix-substitution-status": "set -o posix",
                 "posix-special-in-function": "set -o posix; f(){ q=inner :; }",
                 "trace-arithmetic-loop": "exec 2>/dev/null; set -x",
                 "trace-arithmetic-expansion": "exec 2>/dev/null; v=2; set -x",

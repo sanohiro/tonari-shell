@@ -280,6 +280,7 @@ impl Session {
         self.jobs.quiet = enabled && !self.interactive;
         self.shopt.expand_aliases = enabled || self.interactive;
         if enabled {
+            self.shopt.interactive_comments = true;
             self.shopt.inherit_errexit = true;
             self.shopt.sourcepath = true;
         }

@@ -562,7 +562,12 @@ fn run_invocation(
         }
         if session.get("HISTFILE").is_none() {
             if let Some(home) = session.get("HOME").or_else(crate::word::account_home) {
-                session.assign("HISTFILE", &format!("{home}/.bash_history"));
+                let file = if session.posix {
+                    ".sh_history"
+                } else {
+                    ".bash_history"
+                };
+                session.assign("HISTFILE", &format!("{home}/{file}"));
             }
         }
     }

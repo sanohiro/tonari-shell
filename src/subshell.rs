@@ -496,6 +496,7 @@ fn capture_simple(
             &mut out,
             session.posix && flag.as_literal() == Some("-p"),
             flag.as_literal() == Some("-P"),
+            session.posix,
         );
         return Some(captured_output(out, status));
     }

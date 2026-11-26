@@ -731,7 +731,7 @@ fn builtin(cmd: &PreparedCommand, last_status: u8, session: &Session) -> Option<
     };
     if cmd.search == lookup::Search::Normal
         && session.functions.contains_key(name)
-        && !(session.posix && special_builtin(name))
+        && !(session.posix && (special_builtin(name) || name.contains('/')))
     {
         return Some(Builtin::Function);
     }
@@ -949,9 +949,11 @@ fn eval_builtin(
         Builtin::Printf => Flow::Continue(session.printf(args)),
         Builtin::Jobs => crate::jobs::dispatch(&cmd.words, session, last_status),
         Builtin::Times => Flow::Continue(crate::builtins::times(args)),
-        Builtin::Ulimit => {
-            Flow::Continue(crate::builtins::limits::run(args, &mut io::stdout().lock()))
-        }
+        Builtin::Ulimit => Flow::Continue(crate::builtins::limits::run(
+            args,
+            &mut io::stdout().lock(),
+            session.posix,
+        )),
         Builtin::Umask => Flow::Continue(crate::builtins::umask::run(args, session.posix)),
         Builtin::Mapfile => crate::session::mapfile::run(session, &cmd.words[0], args, last_status),
         Builtin::Read => {
@@ -1120,7 +1122,8 @@ fn eval_builtin(
     if let Flow::Continue(status @ 1..) = result
         && !session.interactive
         && posix_special(cmd, session)
-        && matches!(builtin, Builtin::Export | Builtin::Declare | Builtin::Unset)
+        && (matches!(builtin, Builtin::Export | Builtin::Declare | Builtin::Unset)
+            || matches!(builtin, Builtin::Trap) && status == 2)
     {
         return Flow::Exit(status);
     }
@@ -1346,7 +1349,7 @@ impl<'a> PlainOutput<'a> {
             Self::DirectoryStack(command, args) => {
                 session.directory_stack(command, args, &mut bytes)
             }
-            Self::Limits(args) => crate::builtins::limits::run(args, &mut bytes),
+            Self::Limits(args) => crate::builtins::limits::run(args, &mut bytes, session.posix),
         };
         (bytes, status)
     }

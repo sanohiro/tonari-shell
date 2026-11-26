@@ -1953,6 +1953,16 @@ impl Session {
         let result = if name == "pwd" {
             (if physical {
                 std::env::current_dir()
+            } else if self.posix {
+                self.logical_directory().and_then(|path| {
+                    if same_directory(&path, Path::new(".")) {
+                        Ok(path)
+                    } else {
+                        let actual = std::env::current_dir()?;
+                        self.logical_cwd = std::cell::OnceCell::from(actual.clone());
+                        Ok(actual)
+                    }
+                })
             } else {
                 self.logical_directory()
             })
@@ -2112,7 +2122,17 @@ impl Session {
             };
             // A renamed ancestor can invalidate the logical path while the
             // process still has a valid current directory for a relative chdir.
-            let logical = logical.filter(|path| std::env::set_current_dir(path).is_ok());
+            let logical = match logical {
+                Some(path) => match std::env::set_current_dir(&path) {
+                    Ok(()) => Some(path),
+                    Err(e) if self.posix && e.raw_os_error() != Some(libc::ENAMETOOLONG) => {
+                        error = e;
+                        continue;
+                    }
+                    Err(_) => None,
+                },
+                None => None,
+            };
             if logical.is_none()
                 && let Err(e) = std::env::set_current_dir(&candidate)
             {

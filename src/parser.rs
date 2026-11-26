@@ -268,6 +268,7 @@ use std::rc::Rc;
 pub(crate) fn prompt_word(
     source: &str,
     expand: bool,
+    posix: bool,
     mut escape: impl FnMut(char, &mut std::str::Chars) -> String,
 ) -> Result<Word, Error> {
     let mut builder = crate::word::WordBuilder::default();
@@ -283,6 +284,16 @@ pub(crate) fn prompt_word(
             builder.push('\\');
         }
         match c {
+            '!' if posix => {
+                if chars.as_str().starts_with('!') {
+                    chars.next();
+                    builder.push('!');
+                } else {
+                    for c in escape('!', &mut chars).chars() {
+                        builder.push(c);
+                    }
+                }
+            }
             '$' if expand => lexer::dollar(&mut chars, &mut builder, true)?,
             '\x60' if expand => lexer::backquote(&mut chars, &mut builder, true)?,
             '\\' => {

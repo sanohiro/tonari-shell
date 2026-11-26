@@ -5,6 +5,7 @@ type Resource = libc::__rlimit_resource_t;
 #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
 type Resource = libc::c_int;
 
+#[derive(Clone, Copy)]
 struct Limit {
     flag: char,
     resource: Option<Resource>,
@@ -165,7 +166,7 @@ impl Limit {
     }
 }
 
-pub fn run(args: &[String], out: &mut dyn Write) -> u8 {
+pub fn run(args: &[String], out: &mut dyn Write, posix: bool) -> u8 {
     let mut args = args.iter().map(String::as_str).peekable();
     let (mut soft, mut hard, mut all) = (false, false, false);
     let mut requests = Vec::new();
@@ -197,7 +198,11 @@ pub fn run(args: &[String], out: &mut dyn Write) -> u8 {
     }
     if all {
         let mut lines = Vec::with_capacity(LIMITS.len() * 60);
-        for limit in LIMITS {
+        for &limit in LIMITS {
+            let mut limit = limit;
+            if posix && matches!(limit.flag, 'f' | 'c') {
+                limit.unit = 512;
+            }
             if let Ok(values) = limit.current()
                 && limit
                     .report(&mut lines, &values, hard && !soft, true)
@@ -220,6 +225,10 @@ pub fn run(args: &[String], out: &mut dyn Write) -> u8 {
         }
         let label = requests.len() > 1;
         for (limit, arg) in requests {
+            let mut limit = *limit;
+            if posix && matches!(limit.flag, 'f' | 'c') {
+                limit.unit = 512;
+            }
             let result = limit.current().and_then(|values| match arg {
                 Some(arg) => limit.set(values, arg, soft || !hard, hard || !soft),
                 None => limit.report(out, &values, hard && !soft, label),

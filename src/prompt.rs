@@ -17,13 +17,15 @@ pub fn render(session: &mut Session, secondary: bool, status: u8) -> String {
 pub fn render_text(session: &mut Session, mut prompt: String, status: u8) -> String {
     let bytes = prompt.as_bytes();
     let mut escapes = memchr::memchr3_iter(b'\\', b'$', b'`', bytes);
-    let Some(first) = escapes.next() else {
+    let first = escapes.next();
+    let posix_bang = session.posix && bytes.contains(&b'!');
+    if first.is_none() && !posix_bang {
         return prompt;
-    };
+    }
     // An already-rendered ANSI prompt often contains only Readline width markers.
     // Strip those literal pairs without allocating shell words or expanding anything.
     let marker = |i: usize| bytes[i] == b'\\' && matches!(bytes.get(i + 1), Some(b'[' | b']'));
-    if marker(first) && escapes.all(marker) {
+    if !posix_bang && first.is_some_and(marker) && escapes.all(marker) {
         let mut bracket = false;
         prompt.retain(|c| {
             if bracket {
@@ -36,9 +38,12 @@ pub fn render_text(session: &mut Session, mut prompt: String, status: u8) -> Str
         });
         return prompt;
     }
-    let parsed = crate::parser::prompt_word(&prompt, session.shopt.promptvars, |c, chars| {
-        escape(session, c, chars)
-    });
+    let parsed = crate::parser::prompt_word(
+        &prompt,
+        session.shopt.promptvars || session.posix,
+        session.posix,
+        |c, chars| escape(session, c, chars),
+    );
     parsed
         .ok()
         .and_then(|word| crate::eval::expand_case(session, word, status, false).ok())

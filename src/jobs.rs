@@ -780,11 +780,31 @@ impl Jobs {
     }
 }
 
-fn kill(jobs: &Jobs, mut args: &[String]) -> u8 {
+fn kill(jobs: &Jobs, mut args: &[String], posix: bool) -> u8 {
+    let number = |s: &str| {
+        if posix && s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("SIG")) {
+            None
+        } else {
+            crate::traps::number(s)
+        }
+    };
     if args.first().is_some_and(|s| s == "-l" || s == "-L") {
         let mut out = io::stdout().lock();
         let mut status = 0;
         if args.len() == 1 {
+            if posix {
+                let mut first = true;
+                for (name, sig) in crate::traps::signals() {
+                    if sig == 0 {
+                        continue;
+                    }
+                    if write!(out, "{}{name}", if first { "" } else { " " }).is_err() {
+                        return 1;
+                    }
+                    first = false;
+                }
+                return u8::from(writeln!(out).is_err());
+            }
             return u8::from(crate::traps::print_signal_table(&mut out).is_err());
         } else {
             for arg in &args[1..] {
@@ -795,7 +815,7 @@ fn kill(jobs: &Jobs, mut args: &[String]) -> u8 {
                         .find(|s| s.1 == number)
                         .map(|(name, _)| writeln!(out, "{name}"))
                 } else {
-                    crate::traps::number(arg).map(|n| writeln!(out, "{n}"))
+                    number(arg).map(|n| writeln!(out, "{n}"))
                 };
                 let Some(result) = result else {
                     // stderr is unbuffered. Submit the whole diagnostic in one write.
@@ -813,18 +833,18 @@ fn kill(jobs: &Jobs, mut args: &[String]) -> u8 {
     }
     let sig = match args.first().map(String::as_str) {
         Some("-s" | "-n") if args.len() >= 2 => {
-            let sig = crate::traps::number(&args[1]);
+            let sig = number(&args[1]);
             args = &args[2..];
             sig
         }
         Some(s) if s.len() > 2 && (s.starts_with("-n") || s.starts_with("-s")) => {
-            let signal = crate::traps::number(&s[2..]);
+            let signal = number(&s[2..]);
             args = &args[1..];
             signal
         }
         Some(s) if s.starts_with('-') && s != "--" => {
             args = &args[1..];
-            crate::traps::number(&s[1..])
+            number(&s[1..])
         }
         _ => Some(libc::SIGTERM),
     };
@@ -1035,11 +1055,16 @@ fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Opti
                         );
                     }
                 }
-                jobs.remember(&job);
+                if !session.posix {
+                    jobs.remember(&job);
+                }
             }
         } else if let Some(pid) = number {
-            if let Some((_, code)) = jobs.finished.iter().rev().find(|(p, _)| *p == pid) {
-                result = (*code, Some(pid));
+            if let Some(i) = jobs.finished.iter().rposition(|(p, _)| *p == pid) {
+                result = (jobs.finished[i].1, Some(pid));
+                if session.posix {
+                    jobs.finished.remove(i);
+                }
             } else if let Some(code) = session.substitutions.wait(pid, mask.as_ref()) {
                 if let Some(interrupted) = mask
                     .as_ref()
@@ -1257,7 +1282,7 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
     let jobs = &mut session.jobs;
     jobs.poll();
     match words[0].as_str() {
-        "kill" => kill(jobs, &words[1..]),
+        "kill" => kill(jobs, &words[1..], session.posix),
         "jobs" => list(jobs, &words[1..]),
         "disown" => jobs.disown(&words[1..]),
         "bg" => {

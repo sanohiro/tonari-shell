@@ -580,6 +580,7 @@ impl Traps {
         out: &mut impl Write,
         defaults: bool,
         action_only: bool,
+        posix: bool,
     ) -> u8 {
         let entries = self.inherited_listing.as_deref().unwrap_or(&self.entries);
         let mut show = |sig| {
@@ -600,30 +601,48 @@ impl Traps {
                     out,
                     "trap -- '{}' {}{name}",
                     e.command.replace('\'', "'\\''"),
-                    if sig == 0 || sig >= DEBUG { "" } else { "SIG" }
+                    if posix || sig == 0 || sig >= DEBUG {
+                        ""
+                    } else {
+                        "SIG"
+                    }
                 )?;
             }
-            if defaults
-                && !entries.contains_key(&sig)
+            if !entries.contains_key(&sig)
+                && sig > 0
+                && sig < DEBUG
                 && let Some((name, _)) = signals().find(|s| s.1 == sig)
             {
-                writeln!(out, "trap -- - {name}")?;
+                let ignored = if let Some(old) = self.implicit.get(&sig) {
+                    old.sa_sigaction == libc::SIG_IGN
+                } else {
+                    let mut old = std::mem::MaybeUninit::uninit();
+                    unsafe {
+                        libc::sigaction(sig, std::ptr::null(), old.as_mut_ptr()) == 0
+                            && old.assume_init().sa_sigaction == libc::SIG_IGN
+                    }
+                };
+                if !action_only && (defaults || ignored) {
+                    writeln!(
+                        out,
+                        "trap -- {} {}{name}",
+                        if ignored { "''" } else { "-" },
+                        if posix { "" } else { "SIG" }
+                    )?;
+                }
             }
             Ok::<_, io::Error>(())
         };
-        if defaults && names.len() == 0 {
+        if names.len() == 0 {
+            if entries.contains_key(&0) && show(0).is_err() {
+                return 1;
+            }
             for (_, sig) in signals() {
-                if !matches!(sig, libc::SIGSTOP | libc::SIGKILL) && show(sig).is_err() {
+                if sig > 0 && !matches!(sig, libc::SIGSTOP | libc::SIGKILL) && show(sig).is_err() {
                     return 1;
                 }
             }
             for &sig in entries.keys().filter(|s| **s >= DEBUG) {
-                if show(sig).is_err() {
-                    return 1;
-                }
-            }
-        } else if names.len() == 0 {
-            for &sig in entries.keys() {
                 if show(sig).is_err() {
                     return 1;
                 }
@@ -682,10 +701,11 @@ impl Traps {
                 &mut io::stdout().lock(),
                 list && posix,
                 actions,
+                posix,
             );
         }
         let (command, signals) = if args[0].parse::<u32>().is_ok()
-            || args.len() == 1 && trap_number(&args[0]).is_some()
+            || !posix && args.len() == 1 && trap_number(&args[0]).is_some()
         {
             ("-", args)
         } else {

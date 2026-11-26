@@ -55,7 +55,7 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
     } else {
         "alias "
     };
-    if (print_all || args.is_empty()) && !remove {
+    if args.is_empty() && !remove {
         if let Some(map) = &session.aliases.0 {
             for (name, value) in map.iter() {
                 if writeln!(out, "{prefix}{name}='{}'", value.replace('\'', "'\\''")).is_err() {

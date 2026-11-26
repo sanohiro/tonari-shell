@@ -164,13 +164,7 @@ impl<'a> Expansion<'a> {
             .rev()
             .find(|(k, _)| k == name)
             .map(|(_, v)| v.clone())
-            .or_else(|| {
-                execute::parameter(
-                    self.session,
-                    self.captured.get().unwrap_or(self.initial),
-                    name,
-                )
-            })
+            .or_else(|| execute::parameter(self.session, self.status(), name))
     }
 
     pub(super) fn shadows(&self, name: &str) -> bool {
@@ -304,7 +298,11 @@ impl<'a> Expansion<'a> {
     }
 
     pub fn status(&self) -> u8 {
-        self.captured.get().unwrap_or(self.initial)
+        if self.session.posix {
+            self.initial
+        } else {
+            self.captured.get().unwrap_or(self.initial)
+        }
     }
 
     pub fn array_items(
