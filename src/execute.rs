@@ -1419,14 +1419,23 @@ fn run_builtin(
     if cmd.redirects.is_empty() {
         return Ok(eval_builtin(builtin, cmd, session, last_status, false));
     }
-    let multiple;
     let one;
-    let actions: &[Action] = if let [redirect] = cmd.redirects.as_slice() {
-        one = [action(redirect)];
-        &one
-    } else {
-        multiple = actions(cmd);
-        &multiple
+    let pair;
+    let multiple;
+    let actions: &[Action] = match cmd.redirects.as_slice() {
+        [redirect] => {
+            one = [action(redirect)];
+            &one
+        }
+        [first, second] => {
+            // A descriptor move expands to a duplicate followed by a close.
+            pair = [action(first), action(second)];
+            &pair
+        }
+        _ => {
+            multiple = actions(cmd);
+            &multiple
+        }
     };
     protect_fds(actions)?;
     if !final_command
