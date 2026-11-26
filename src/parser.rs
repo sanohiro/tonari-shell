@@ -837,8 +837,11 @@ fn source_line(source: &str) -> usize {
 }
 
 fn with_source_lines<T>(source: &str, lex: impl FnOnce() -> T) -> T {
-    if !source.contains('\n')
+    // A trailing newline cannot move any nested command to another line.
+    let text = source.trim_end_matches('\n');
+    if !text.contains('\n')
         || SOURCE_LINES.with_borrow(|m| m.as_ref().is_some_and(|m| m.contains(source)))
+        || !text.contains(['(', '$', '`'])
     {
         return lex();
     }

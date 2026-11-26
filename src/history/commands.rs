@@ -686,14 +686,10 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
     session.history_mut().discard_current();
     if substitute {
         let entry = source.strip_suffix('\n').unwrap_or(&source);
-        if session.accept_history(entry, session.history_lines().last()) {
-            session.push_history(entry, false);
-        }
+        session.record_replay(entry);
     } else {
         for line in source.lines() {
-            if session.accept_history(line, session.history_lines().last()) {
-                session.push_history(line, false);
-            }
+            session.record_replay(line);
         }
     }
     eprint!("{source}");

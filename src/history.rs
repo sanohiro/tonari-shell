@@ -358,7 +358,7 @@ impl Session {
     }
 
     fn history_limit(&self, key: &str, default: usize) -> usize {
-        self.get(key)
+        self.scalar_setting(key)
             .and_then(|s| s.parse::<i64>().ok())
             .map_or(default, |n| usize::try_from(n).unwrap_or(usize::MAX))
     }
@@ -384,6 +384,10 @@ impl Session {
     }
     fn push_history(&mut self, text: &str, current: bool) {
         let limit = self.history_limit("HISTSIZE", 500);
+        self.push_history_limited(text, current, limit);
+    }
+
+    fn push_history_limited(&mut self, text: &str, current: bool, limit: usize) {
         if limit == 0 {
             return;
         }
@@ -436,14 +440,20 @@ impl Session {
     }
 
     fn accept_history(&self, source: &str, previous: Option<&String>) -> bool {
-        let session = self;
+        self.history_limit("HISTSIZE", 500) > 0 && self.history_matches_rules(source, previous)
+    }
 
+    fn record_replay(&mut self, text: &str) {
+        let limit = self.history_limit("HISTSIZE", 500);
+        if limit != 0 && self.history_matches_rules(text, self.history_lines().last()) {
+            self.push_history_limited(text, false, limit);
+        }
+    }
+
+    fn history_matches_rules(&self, source: &str, previous: Option<&String>) -> bool {
+        let session = self;
         let text = source.strip_suffix('\n').unwrap_or(source);
-        let limit = session
-            .scalar_setting("HISTSIZE")
-            .and_then(|s| s.parse::<i64>().ok())
-            .unwrap_or(500);
-        if limit == 0 || text.is_empty() || session.interactive && text.trim().is_empty() {
+        if text.is_empty() || session.interactive && text.trim().is_empty() {
             return false;
         }
         let previous = previous.map(String::as_str);

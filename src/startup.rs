@@ -34,9 +34,9 @@ fn sourced(
     let old = (!args.is_empty())
         .then(|| std::mem::replace(&mut session.positional, Vec::from(args).into_iter()));
     session.source_set_args = false;
-    let callsite = session.current_command.clone();
-    let caller_signal_line = session.signal_line;
     session.call_lines.push(session.line());
+    let callsite = session.current_command.take();
+    let caller_signal_line = session.signal_line;
     session.source_depth += 1;
     session.push_source_path(path);
     session.function_names.push("source".into());
