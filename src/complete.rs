@@ -226,16 +226,11 @@ impl Source {
                     return Some((common?, Vec::new()));
                 }
                 let mut choices = file_names(prefix, directories_only, true, session);
-                if let Some(suffixes) = ignored {
-                    let acceptable = |path: &String| {
-                        !suffixes.split(':').any(|suffix| {
-                            !suffix.is_empty() && path.trim_end_matches('/').ends_with(suffix)
-                        })
-                    };
-                    if session.shopt.force_fignore || choices.iter().any(acceptable) {
-                        choices.retain(acceptable);
-                    }
-                }
+                filter_ignored(
+                    &mut choices,
+                    ignored.as_deref(),
+                    session.shopt.force_fignore,
+                );
                 choices
             }
         };
@@ -769,6 +764,19 @@ fn alternatives(names: Vec<String>, prefix: &str) -> Option<(Common, Vec<String>
     Some((common, names))
 }
 
+fn filter_ignored(choices: &mut Vec<String>, suffixes: Option<&str>, force: bool) {
+    if let Some(suffixes) = suffixes {
+        let acceptable = |path: &String| {
+            !suffixes
+                .split(':')
+                .any(|suffix| !suffix.is_empty() && path.trim_end_matches('/').ends_with(suffix))
+        };
+        if force || choices.iter().any(acceptable) {
+            choices.retain(acceptable);
+        }
+    }
+}
+
 fn abbreviated(prefix: &str, dirs: bool, session: &Session) -> Option<(Common, Vec<String>)> {
     let (base, rest) = if let Some(rest) = prefix.strip_prefix("~/") {
         ("~/", rest)
@@ -779,6 +787,7 @@ fn abbreviated(prefix: &str, dirs: bool, session: &Session) -> Option<(Common, V
     };
     let (parents, leaf) = rest.rsplit_once('/')?;
     let mut paths = vec![base.to_owned()];
+    let mut expanded = false;
     for part in parents.split('/').filter(|s| !s.is_empty()) {
         let mut next = Vec::new();
         for mut path in paths {
@@ -788,6 +797,7 @@ fn abbreviated(prefix: &str, dirs: bool, session: &Session) -> Option<(Common, V
                 path.push('/');
                 next.push(path);
             } else if !matches!(part, "." | "..") {
+                expanded = true;
                 directory.visit(|name, kind| {
                     if directory.is_directory(name, kind) {
                         next.push(format!("{}{name}/", directory.dir));
@@ -808,6 +818,9 @@ fn abbreviated(prefix: &str, dirs: bool, session: &Session) -> Option<(Common, V
         }
         paths = next;
     }
+    if !expanded {
+        return None;
+    }
     for path in &mut paths {
         path.push_str(leaf);
     }
@@ -816,6 +829,13 @@ fn abbreviated(prefix: &str, dirs: bool, session: &Session) -> Option<(Common, V
         .filter_map(|p| Directory::open(p, session))
         .collect();
     let mut matches = branch_matches(&branches, dirs);
+    if !dirs {
+        filter_ignored(
+            &mut matches,
+            session.get("FIGNORE").as_deref(),
+            session.shopt.force_fignore,
+        );
+    }
     matches.sort_unstable();
     matches.dedup();
     alternatives(matches, prefix)

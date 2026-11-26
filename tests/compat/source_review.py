@@ -142,6 +142,21 @@ def completion_time(shell, root):
         t.close()
 
 
+def ignored_completion(shell, root, prefix, force):
+    t = Terminal(shell, root, editing=True, env={"FIGNORE": ".tmp", "HISTFILE": "/dev/null",
+                                               "XDG_STATE_HOME": str(root / "state")})
+    try:
+        assert b"READY>" in t.read(b"READY>")
+        t.send(b"shopt -" + (b"s" if force else b"u") + b" force_fignore\n")
+        assert b"READY>" in t.read(b"READY>")
+        t.send(b'printf "%s" ' + prefix.encode() + b'\t')
+        t.send(b' >accepted; printf "\\036"\n')
+        assert b"\x1e" in t.read(b"\x1e")
+        return (root / "accepted").read_text()
+    finally:
+        t.close()
+
+
 def socket_time(shell, run, kind, count):
     # The receiver validates every payload. Exercise a builtin, an external
     # command and a persistent named descriptor with the same loopback fixture.
@@ -222,6 +237,14 @@ def main():
         (termroot / "pick.valid").touch()
         for i in range(1024):
             (termroot / f"pick.{i}.tmp").touch()
+        (termroot / "unique.tmp").touch()
+        (termroot / "shelldir").mkdir()
+        (termroot / "shelldir/unique.tmp").touch()
+        for shell in shells[:2]:
+            for prefix, force, expected in [("./unique.", True, "./unique."),
+                                            ("./unique.", False, "./unique.tmp"),
+                                            ("she/unique.", True, "she/unique.")]:
+                assert ignored_completion(shell, termroot, prefix, force) == expected
         rng = random.Random(1729)
         if requested("filename-completion"):
             samples = [[] for _ in shells]
