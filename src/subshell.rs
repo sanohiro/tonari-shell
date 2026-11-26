@@ -71,6 +71,7 @@ pub(crate) fn current_substitution(
     // A single literal output builtin can write to memory directly. Everything
     // that can redirect stdout or observe traps still executes in a real fd scope.
     if !reply
+        && !session.keyword
         && !session.traps.active()
         && !session.xtrace
         && let Some(cmd) = sole_plain_command(&body)
@@ -458,6 +459,7 @@ fn capture_simple(
 ) -> Option<Result<(String, u8), &'static str>> {
     use crate::word::{Part, Word, is_identifier};
     if body.is_empty()
+        || session.keyword
         || session.xtrace
         || session.functrace && session.traps.debug_handler()
         || session.nounset

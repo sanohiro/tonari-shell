@@ -490,6 +490,7 @@ fn run_invocation(
     session.nounset = invocation.nounset;
     session.pipefail = invocation.pipefail;
     session.physical = invocation.physical;
+    session.keyword = invocation.keyword;
     session.interactive = invocation.interactive;
     session.login = invocation.login;
     session.history_enabled = invocation.interactive;

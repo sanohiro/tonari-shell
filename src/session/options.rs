@@ -4,6 +4,7 @@ use super::Session;
 
 #[derive(Clone)]
 pub struct ShellOptions {
+    pub compat: u8,
     pub autocd: bool,
     pub cdable_vars: bool,
     pub checkhash: bool,
@@ -38,6 +39,7 @@ pub struct ShellOptions {
 impl Default for ShellOptions {
     fn default() -> Self {
         Self {
+            compat: CURRENT_COMPAT,
             autocd: false,
             cdable_vars: false,
             checkhash: false,
@@ -83,6 +85,17 @@ macro_rules! option_entry {
     };
 }
 
+const CURRENT_COMPAT: u8 = 53;
+macro_rules! compat_entry {
+    ($name:literal, $level:literal) => {
+        OptionEntry {
+            name: $name,
+            read: |s| s.shopt.compat == $level,
+            write: None,
+        }
+    };
+}
+
 const SET_OPTIONS: &[OptionEntry] = &[
     option_entry!("allexport", allexport),
     option_entry!("braceexpand", shopt.braceexpand),
@@ -95,6 +108,7 @@ const SET_OPTIONS: &[OptionEntry] = &[
     option_entry!("history", history_enabled),
     option_entry!("ignoreeof", ignoreeof),
     option_entry!("interactive-comments", shopt.interactive_comments),
+    option_entry!("keyword", keyword),
     option_entry!("monitor", jobs.monitor),
     option_entry!("noclobber", noclobber),
     option_entry!("noexec", noexec),
@@ -115,6 +129,13 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("cdable_vars", shopt.cdable_vars),
     option_entry!("checkhash", shopt.checkhash),
     option_entry!("checkwinsize", shopt.checkwinsize),
+    compat_entry!("compat31", 31),
+    compat_entry!("compat32", 32),
+    compat_entry!("compat40", 40),
+    compat_entry!("compat41", 41),
+    compat_entry!("compat42", 42),
+    compat_entry!("compat43", 43),
+    compat_entry!("compat44", 44),
     option_entry!("dotglob", shopt.glob.dotglob),
     option_entry!("execfail", shopt.execfail),
     option_entry!("expand_aliases", shopt.expand_aliases),
@@ -150,6 +171,46 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("xpg_echo", shopt.xpg_echo),
 ];
 impl Session {
+    pub(super) fn apply_compat(&mut self, value: &str) {
+        self.shopt.compat = if value.is_empty() {
+            CURRENT_COMPAT
+        } else {
+            let digits = match value.as_bytes() {
+                [a, b] | [a, b'.', b] if a.is_ascii_digit() && b.is_ascii_digit() => {
+                    (a - b'0') * 10 + b - b'0'
+                }
+                _ => 0,
+            };
+            if (31..=CURRENT_COMPAT).contains(&digits) {
+                digits
+            } else {
+                eprintln!("tonari: BASH_COMPAT: {value}: compatibility value out of range");
+                CURRENT_COMPAT
+            }
+        };
+    }
+
+    // Only the seven registered shopt names are accepted; numeric levels also
+    // exist for releases without a corresponding option.
+    fn toggle_compat(&mut self, name: &str, enable: bool) {
+        let digits = &name["compat".len()..];
+        if enable {
+            self.assign("BASH_COMPAT", digits);
+        } else {
+            let active = self.shopt.compat;
+            let level = digits.parse::<u8>().unwrap();
+            self.assign(
+                "BASH_COMPAT",
+                &if level == active {
+                    CURRENT_COMPAT
+                } else {
+                    active
+                }
+                .to_string(),
+            );
+        }
+    }
+
     pub fn set_posix(&mut self, enabled: bool) {
         if enabled && self.get("POSIXLY_CORRECT").is_none() {
             self.assign("POSIXLY_CORRECT", "y");
@@ -245,6 +306,9 @@ impl Session {
     }
 
     pub fn inherit_options(&mut self) {
+        if let Ok(value) = std::env::var("BASH_COMPAT") {
+            self.apply_compat(&value);
+        }
         let allowed = std::cell::LazyCell::new(|| unsafe {
             libc::getuid() == libc::geteuid() && libc::getgid() == libc::getegid()
         });
@@ -254,7 +318,12 @@ impl Session {
                     return;
                 }
                 for name in list.split(':') {
-                    if let Some(value) = self.option_value(name, set) {
+                    if !set
+                        && name.starts_with("compat")
+                        && SHOPT_OPTIONS.iter().any(|entry| entry.name == name)
+                    {
+                        self.toggle_compat(name, true);
+                    } else if let Some(value) = self.option_value(name, set) {
                         *value = true;
                         if set {
                             self.option_changed(name, true);
@@ -321,7 +390,9 @@ impl Session {
                 continue;
             };
             if !all && (enable || disable) {
-                if let Some(write) = entry.write {
+                if !set && name.starts_with("compat") {
+                    self.toggle_compat(name, enable);
+                } else if let Some(write) = entry.write {
                     if name == "hostcomplete" && !set && !self.word_breaks_unset {
                         let breaks = self.completion_breaks();
                         if enable != breaks.contains('@') {

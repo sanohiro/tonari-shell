@@ -1189,7 +1189,7 @@ pub fn line(
             }
             Action::Accept | Action::Comment => {
                 if action == Action::Comment {
-                    text.insert(0, '#');
+                    text.insert_str(0, session.bindings.comment_begin.as_deref().unwrap_or("#"));
                 }
                 if action == Action::Comment
                     || visible_prompt != prompt
@@ -1229,11 +1229,19 @@ pub fn line(
             | Action::KillBack
             | Action::RubWord
             | Action::KillBackWord
+            | Action::WholeLine
+            | Action::RubFilename
             | Action::KillWord
             | Action::Cut
             | Action::Copy => {
                 let (lo, hi) = match action {
                     Action::Kill => (cursor, text.len()),
+                    Action::WholeLine => (0, text.len()),
+                    Action::RubFilename => {
+                        let sep = |c: char| c == '/' || c.is_whitespace();
+                        let head = text[..cursor].trim_end_matches(sep);
+                        (head.trim_end_matches(|c| !sep(c)).len(), cursor)
+                    }
                     Action::KillWord => (cursor, word_end(&text, cursor)),
                     Action::RubWord => (
                         text[..cursor]
@@ -1315,6 +1323,74 @@ pub fn line(
                 }
             }
             Action::ForwardWord => cursor = word_end(&text, cursor),
+            Action::Reload => bindings::reload(session),
+            Action::TabInsert => {
+                undo.record(&text, cursor..cursor, 1, cursor, false);
+                text.insert(cursor, '\t');
+                cursor += 1;
+            }
+            Action::HistoryExpand | Action::MagicSpace => {
+                if let Ok(result) = crate::history::expand::expand(session, &text) {
+                    let at_start = cursor == 0;
+                    let suffix = text.len() - cursor;
+                    if let std::borrow::Cow::Owned(expanded) = result.text {
+                        let old_end = text.len();
+                        undo.replace(&mut text, 0..old_end, &expanded, cursor);
+                        cursor = text.len();
+                    }
+                    if action == Action::MagicSpace {
+                        cursor = if at_start {
+                            0
+                        } else {
+                            text.len().saturating_sub(suffix)
+                        };
+                        while !text.is_char_boundary(cursor) {
+                            cursor -= 1;
+                        }
+                        undo.record(&text, cursor..cursor, 1, cursor, false);
+                        text.insert(cursor, ' ');
+                        cursor += 1;
+                    }
+                }
+            }
+            Action::UpperWord | Action::LowerWord | Action::CapitalWord => {
+                let end = word_end(&text, cursor);
+                let start = end
+                    - text[cursor..end]
+                        .trim_start_matches(|c: char| !c.is_alphanumeric())
+                        .len();
+                let word = text[start..end].to_owned();
+                let locale = session.character_locale();
+                let replacement = if action == Action::CapitalWord {
+                    crate::pattern::capitalize(word, locale)
+                } else {
+                    crate::pattern::case_chars(
+                        word,
+                        action == Action::UpperWord,
+                        true,
+                        None,
+                        locale,
+                    )
+                };
+                undo.replace(&mut text, start..end, &replacement, cursor);
+                cursor = start + replacement.len();
+            }
+            Action::TransposeWords => {
+                let end = word_end(&text, cursor);
+                let right = word_start(&text, end);
+                let left = word_start(&text, right);
+                let split = word_end(&text, left);
+                if left < split && split <= right && right < end {
+                    let swapped = format!(
+                        "{}{}{}",
+                        &text[right..end],
+                        &text[split..right],
+                        &text[left..split]
+                    );
+                    undo.replace(&mut text, left..end, &swapped, cursor);
+                    cursor = end;
+                }
+            }
             Action::Transpose if cursor > 0 => {
                 let end = if cursor == text.len() {
                     cursor

@@ -148,6 +148,7 @@ pub struct Session {
     pub login: bool,
     pub posix: bool,
     pub physical: bool,
+    pub keyword: bool,
     pub logout_started: bool,
     pub allexport: bool,
     pub notify: bool,
@@ -352,6 +353,9 @@ impl Session {
         if self.interactive {
             flags.push('i');
         }
+        if self.keyword {
+            flags.push('k');
+        }
         if self.jobs.monitor {
             flags.push('m');
         }
@@ -511,6 +515,7 @@ impl Session {
                     'T' => self.functrace = enable,
                     'C' => self.noclobber = enable,
                     'P' => self.physical = enable,
+                    'k' => self.keyword = enable,
                     'B' => self.shopt.braceexpand = enable,
                     'f' => self.noglob = enable,
                     'h' => self.hashes.enabled = enable,
@@ -814,6 +819,7 @@ impl Session {
             "BASH_ARGV0"
                 | "GLOBIGNORE"
                 | "POSIXLY_CORRECT"
+                | "BASH_COMPAT"
                 | "HISTSIZE"
                 | "HISTFILESIZE"
                 | "OPTIND"
@@ -879,6 +885,9 @@ impl Session {
         }
         if self.active_groups(name) {
             return;
+        }
+        if name == "BASH_COMPAT" {
+            self.apply_compat(&value);
         }
         if name == "POSIXLY_CORRECT" {
             self.apply_posix_mode(true);
@@ -973,7 +982,13 @@ impl Session {
             .map_or((key, false), |name| (name, true));
         if matches!(
             name,
-            "OPTIND" | "GLOBIGNORE" | "POSIXLY_CORRECT" | "PATH" | "BASH_ARGV0" | "PIPESTATUS"
+            "OPTIND"
+                | "GLOBIGNORE"
+                | "POSIXLY_CORRECT"
+                | "BASH_COMPAT"
+                | "PATH"
+                | "BASH_ARGV0"
+                | "PIPESTATUS"
         ) || Self::builtin_readonly(name)
         {
             return false;
@@ -1138,6 +1153,9 @@ impl Session {
     // Move the prepared strings and avoid snapshotting variables for restoration.
     pub fn persist_prefix(&mut self, assignments: &mut Vec<(String, String)>) {
         for (name, value) in assignments.drain(..) {
+            if name == "BASH_COMPAT" {
+                self.apply_compat(&value);
+            }
             if name == "POSIXLY_CORRECT" {
                 self.apply_posix_mode(true);
             }
@@ -1167,6 +1185,9 @@ impl Session {
         for (name, value) in assignments {
             if self.readonly(name) {
                 continue;
+            }
+            if name == "BASH_COMPAT" {
+                self.apply_compat(value);
             }
             if name == "POSIXLY_CORRECT" {
                 self.apply_posix_mode(true);
@@ -1211,6 +1232,16 @@ impl Session {
             self.opt_offset = offset;
         }
         for (name, original) in bindings.0 {
+            if name == "BASH_COMPAT" {
+                let inherited;
+                let value = if let Some(v) = &original {
+                    v.value.as_deref()
+                } else {
+                    inherited = std::env::var("BASH_COMPAT").ok();
+                    inherited.as_deref()
+                };
+                self.apply_compat(value.unwrap_or(""));
+            }
             if name == "POSIXLY_CORRECT" {
                 let enabled = original.as_ref().map_or_else(
                     || std::env::var_os("POSIXLY_CORRECT").is_some(),
@@ -1521,6 +1552,9 @@ impl Session {
         if self.readonly(name) {
             return;
         }
+        if name == "BASH_COMPAT" {
+            self.apply_compat("");
+        }
         if name == "POSIXLY_CORRECT" {
             self.apply_posix_mode(false);
         }
@@ -1658,6 +1692,16 @@ impl Session {
             }
             if !functions_only {
                 if let Some((base, index)) = array::subscript(name) {
+                    if matches!(index, "*" | "@") && self.stored_array(base) {
+                        if self.shopt.compat <= 51 {
+                            self.unset_variable(base);
+                            continue;
+                        }
+                        if !self.is_associative(base) {
+                            self.replace_array(base, Vec::new());
+                            continue;
+                        }
+                    }
                     if self.is_associative(base) {
                         match self.subscript_key(index) {
                             Ok(key) => self.remove_key(base, &key),

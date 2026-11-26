@@ -536,6 +536,9 @@ pub(super) fn run(
         {
             session.apply_history_limit(name, value);
         }
+        if name == "BASH_COMPAT" && (!flags.global || session.declaration_scope(name).is_none()) {
+            session.apply_compat(var.value.as_deref().unwrap_or(""));
+        }
         if name == "POSIXLY_CORRECT" && (!flags.global || session.declaration_scope(name).is_none())
         {
             session.apply_posix_mode(var.value.is_some());

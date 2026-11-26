@@ -289,7 +289,7 @@ impl Source {
                     .then(|| session.get("FIGNORE"))
                     .flatten()
                     .filter(|s| !s.is_empty());
-                if !list {
+                if !list && !session.bindings.ignore_case {
                     let directory = Directory::open(prefix, session)?;
                     let common = if let Some(patterns) = ignored.as_deref() {
                         let suffixes: Vec<_> =
@@ -311,12 +311,38 @@ impl Source {
                     };
                     return Some((common?, Vec::new()));
                 }
-                let mut choices = file_names(prefix, directories_only, true, session);
+                let mut choices = file_names(
+                    prefix,
+                    directories_only,
+                    !session.bindings.unmarked_dirs,
+                    session,
+                );
                 filter_ignored(
                     &mut choices,
                     ignored.as_deref(),
                     session.shopt.force_fignore,
                 );
+                if session.bindings.ignore_case {
+                    let locale = session.character_locale();
+                    let first = choices
+                        .iter()
+                        .find(|s| s.starts_with(prefix))
+                        .or_else(|| choices.first())?;
+                    let mut len = first.len();
+                    for name in &choices {
+                        len = first[..len]
+                            .chars()
+                            .zip(name.chars())
+                            .take_while(|&(a, b)| crate::pattern::same_letter(a, b, locale))
+                            .map(|(c, _)| c.len_utf8())
+                            .sum();
+                    }
+                    let common = Common {
+                        text: first[..len].into(),
+                        unique: choices.len() == 1,
+                    };
+                    return Some((common, if list { choices } else { Vec::new() }));
+                }
                 choices
             }
         };
@@ -803,6 +829,10 @@ struct Directory<'a> {
     dir: &'a str,
     base: &'a str,
     path: PathBuf,
+    fold: Option<crate::session::CharacterLocale>,
+    map_case: bool,
+    show_hidden: bool,
+    mark_dirs: bool,
 }
 
 impl<'a> Directory<'a> {
@@ -814,13 +844,29 @@ impl<'a> Directory<'a> {
             Some(rest) => Path::new(&session.get("HOME")?).join(rest),
             None => Path::new(if dir.is_empty() { "." } else { dir }).to_owned(),
         };
-        Some(Self { dir, base, path })
+        Some(Self {
+            dir,
+            base,
+            path,
+            fold: session
+                .bindings
+                .ignore_case
+                .then(|| session.character_locale()),
+            map_case: session.bindings.map_case,
+            show_hidden: !session.bindings.hide_dotfiles,
+            mark_dirs: !session.bindings.unmarked_dirs,
+        })
     }
 
     fn visit(&self, mut visitor: impl FnMut(&str, u8) -> ControlFlow<()>) {
         let mut entries = 0usize;
         let editing = crate::editor::preview::active();
-        let _ = scan(&self.path, self.base.as_bytes(), &mut |raw, kind| {
+        let prefix = if self.fold.is_some() {
+            &[][..]
+        } else {
+            self.base.as_bytes()
+        };
+        let _ = scan(&self.path, prefix, &mut |raw, kind| {
             if editing && entries % 256 == 0 {
                 crate::editor::preview::scan_input();
             }
@@ -830,8 +876,19 @@ impl<'a> Directory<'a> {
             };
             let bytes = raw.to_bytes();
             if !matches!(bytes, b"." | b"..")
-                && (!bytes.starts_with(b".") || self.base.starts_with('.'))
+                && (!bytes.starts_with(b".")
+                    || self.base.starts_with('.')
+                    || self.show_hidden && self.base.is_empty())
                 && let Ok(name) = raw.to_str()
+                && self.fold.is_none_or(|locale| {
+                    let mut chars = name.chars();
+                    self.base.chars().all(|c| {
+                        chars.next().is_some_and(|d| {
+                            crate::pattern::same_letter(c, d, locale)
+                                || self.map_case && matches!((c, d), ('-', '_') | ('_', '-'))
+                        })
+                    })
+                })
             {
                 return visitor(name, kind);
             }
@@ -1035,7 +1092,10 @@ fn common_file(
         ControlFlow::Continue(())
     });
     let mut common = common?;
-    if common.unique && (directories_only || directory.is_directory(&common.text, first_kind)) {
+    if common.unique
+        && directory.mark_dirs
+        && (directories_only || directory.is_directory(&common.text, first_kind))
+    {
         common.text.push('/');
     }
     common.text.insert_str(0, directory.dir);

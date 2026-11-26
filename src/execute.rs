@@ -39,10 +39,8 @@ impl Flow {
             Self::Continue(code) | Self::Exit(code) | Self::Return(code) | Self::Discard(code) => {
                 code
             }
-            Self::Break(..) | Self::LoopContinue(_) => {
-                eprintln!("tonari: loop control cannot cross a subshell boundary");
-                1
-            }
+            Self::Break(_, code) => code,
+            Self::LoopContinue(_) => 0,
         }
     }
 }
@@ -1592,6 +1590,9 @@ fn start_raw(
     session: &mut Session,
     launch: crate::jobs::Launch,
 ) -> io::Result<Stage> {
+    if session.keyword {
+        separate_keyword_arguments(&mut raw);
+    }
     let observable = needs_ordered_redirects(&raw, session)
         || raw.redirects.iter().any(redirection_observable)
         || raw
@@ -2060,7 +2061,7 @@ impl PreparedCommand {
     }
 
     pub(crate) fn run_literal(&mut self, session: &mut Session, status: u8) -> Option<Flow> {
-        if session.xtrace || session.traps.active() || session.jobs.monitor {
+        if session.keyword || session.xtrace || session.traps.active() || session.jobs.monitor {
             return None;
         }
         if session.noclobber && self.redirects.iter().any(|r| r.target == Target::Write) {
@@ -2168,6 +2169,48 @@ fn prepare(
     prepare_expanded(raw, words, session, last_status, standalone, &captured)
 }
 
+// The option is evaluated at execution: a previously parsed function may
+// be called both with and without -k. Only syntactic assignments qualify.
+fn separate_keyword_arguments(raw: &mut SimpleCommand<Word>) {
+    let first_array = raw
+        .assignments
+        .iter()
+        .position(|(_, a)| matches!(a, Assignment::Array(Some(_), ..)));
+    if raw.keyword_args.is_none() && first_array.is_none() {
+        return;
+    }
+    let mut arrays = first_array
+        .map(|i| raw.assignments.split_off(i))
+        .unwrap_or_default()
+        .into_iter()
+        .peekable();
+    let keywords = raw
+        .keyword_args
+        .take()
+        .map(Rc::unwrap_or_clone)
+        .unwrap_or_default();
+    let mut keywords = keywords.into_iter().peekable();
+    let mut args = Vec::with_capacity(raw.words.len());
+    for (index, mut word) in std::mem::take(&mut raw.words).into_iter().enumerate() {
+        if let Some((_, key)) = keywords.next_if(|(pos, _)| *pos == index) {
+            if key.contains('[') {
+                eprintln!("tonari: {key}: not a valid identifier");
+                continue;
+            }
+            word.remove_assignment_prefix(key.len() + 1);
+            raw.assignments.push((key, Assignment::Scalar(word)));
+        } else if let Some((key, Assignment::Array(_, parts, source))) =
+            arrays.next_if(|(_, a)| matches!(a, Assignment::Array(Some(pos), ..) if *pos == index))
+        {
+            raw.assignments
+                .push((key, Assignment::Array(None, parts, source)));
+        } else {
+            args.push(word);
+        }
+    }
+    raw.words = args;
+}
+
 fn expand_command_words(
     raw: &mut SimpleCommand<Word>,
     session: &mut Session,
@@ -2175,6 +2218,19 @@ fn expand_command_words(
     captured: &Cell<Option<u8>>,
 ) -> Result<Vec<String>, crate::expansion::Error> {
     let mut words = Vec::with_capacity(raw.words.len());
+    if session.posix
+        && let Some(operands) = raw.keyword_args.as_ref()
+    {
+        for (index, _) in operands.iter() {
+            if let Word::Expanded(parts) = &mut raw.words[*index] {
+                for part in parts {
+                    if let crate::word::Part::Tilde(tilde) = part {
+                        *part = crate::word::Part::Text(std::mem::take(tilde));
+                    }
+                }
+            }
+        }
+    }
     let mut original = Expansion::new(session, last_status, captured);
     let mut positions = raw
         .assignments
@@ -2799,11 +2855,14 @@ fn run_external(
 }
 
 fn foreground(
-    raw: SimpleCommand<Word>,
+    mut raw: SimpleCommand<Word>,
     last_status: u8,
     replace: bool,
     session: &mut Session,
 ) -> io::Result<Flow> {
+    if session.keyword {
+        separate_keyword_arguments(&mut raw);
+    }
     if raw.words.is_empty()
         && raw.redirects.is_empty()
         && raw.compound.is_none()

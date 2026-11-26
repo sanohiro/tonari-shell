@@ -194,7 +194,7 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
             eprintln!("tonari: hash: command name required");
             return 1;
         }
-        if !list {
+        if !list || session.shopt.compat <= 50 && session.hashes.entries.is_empty() {
             let label = if session.hashes.entries.is_empty() {
                 "hash: hash table empty"
             } else {

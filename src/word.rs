@@ -837,6 +837,28 @@ fn tilde(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
         "~" => lookup("HOME").or_else(account_home),
         "~+" => lookup("PWD"),
         "~-" => lookup("OLDPWD"),
+        numbered
+            if numbered[1..]
+                .trim_start_matches(['+', '-'])
+                .bytes()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit()) =>
+        {
+            let digits = &numbered[1..];
+            let (reverse, digits) = if let Some(n) = digits.strip_prefix('-') {
+                (true, n)
+            } else {
+                (false, digits.strip_prefix('+').unwrap_or(digits))
+            };
+            digits.parse::<u32>().ok().and_then(|n| {
+                let i = if reverse {
+                    -1 - i64::from(n)
+                } else {
+                    i64::from(n)
+                };
+                lookup(&format!("DIRSTACK[{i}]"))
+            })
+        }
         _ => account_field(Some(prefix.strip_prefix('~').unwrap_or(prefix)), false),
     };
     let Some(mut home) = home else {

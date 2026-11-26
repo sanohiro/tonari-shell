@@ -250,6 +250,7 @@ pub struct SimpleCommand<W = String> {
     pub words: Vec<W>,
     pub redirects: Vec<Redirect<W>>,
     pub assignments: Vec<(String, Assignment<W>)>,
+    pub keyword_args: Option<Rc<Vec<(usize, String)>>>,
 }
 
 impl<W> Default for SimpleCommand<W> {
@@ -260,6 +261,7 @@ impl<W> Default for SimpleCommand<W> {
             words: Vec::new(),
             redirects: Vec::new(),
             assignments: Vec::new(),
+            keyword_args: None,
         }
     }
 }
@@ -428,6 +430,7 @@ pub enum Error {
     Incomplete(&'static str),
     HereDoc(HereDocHint),
     Invalid(&'static str),
+    ArrayToken,
 }
 
 impl Error {
@@ -439,6 +442,7 @@ impl Error {
         match self {
             Self::Incomplete(s) | Self::Invalid(s) => s,
             Self::HereDoc(_) => "unterminated here-document",
+            Self::ArrayToken => "unexpected token in array assignment",
         }
     }
 }
@@ -756,7 +760,14 @@ impl Reader {
     }
 
     fn list(&mut self, stops: &[&str]) -> Result<Vec<Statement>, Error> {
-        self.read_list(stops, false)
+        self.read_list(stops, false).map_err(|error| {
+            // Never resume in the body of an invalid loop, conditional or function.
+            if !stops.is_empty() && matches!(error, Error::ArrayToken) {
+                Error::Invalid(error.message())
+            } else {
+                error
+            }
+        })
     }
 
     fn read_list(
@@ -1495,8 +1506,20 @@ impl Reader {
                         }
                         // Most simple commands have only the name and one operand.
                         cmd.words.reserve_exact(2);
-                    } else if declaration {
-                        word = word.declaration();
+                    } else if let Some(name) = assignment {
+                        Rc::make_mut(cmd.keyword_args.get_or_insert_with(Default::default))
+                            .push((cmd.words.len(), name));
+                        if declaration {
+                            word = word.declaration();
+                        }
+                    } else if let Word::Expanded(parts) = &word
+                        && matches!(parts.first(), Some(crate::word::Part::Text(name)) if crate::word::is_identifier(name))
+                        && matches!(parts.get(1), Some(crate::word::Part::Pattern(p)) if p.starts_with('['))
+                        && let Some(name) =
+                            array::indexed_prefix(self.location(self.position() - 1).text())
+                    {
+                        Rc::make_mut(cmd.keyword_args.get_or_insert_with(Default::default))
+                            .push((cmd.words.len(), name.to_owned()));
                     }
                     cmd.words.push(word);
                 }

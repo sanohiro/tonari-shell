@@ -14,6 +14,14 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "keyword-arguments": r"""inspect(){ printf '<%s>' "$#" "$X" "$Y" "$@"; echo; }; run(){ inspect a X=one 'Q'=b Y="$X/t" E\=c; }; run; set -k; run; inspect a X[2]=ignored b; set -- keep A=value; echo "$#:$1"; x=$(inspect aa X=tt); echo "$x"; inspect aa X=pipe | cat; set +o keyword; run; echo "${X-unset}" """,
+    "array-recovery": "a=(orig)\na=(bad > untouched)\necho \"$?:${a[*]}\"\ntest ! -e untouched",
+    "compat-random": r"""for level in 3.1 44 5.0 51 5.2; do BASH_COMPAT=$level; RANDOM=42; echo "$RANDOM/$RANDOM/$RANDOM"; hash -r; hash -l; done; shopt -s compat43; echo "$BASH_COMPAT"; shopt -q compat42; echo $?; f(){ local BASH_COMPAT=3.1; shopt -q compat31; echo $?; }; f; shopt -q compat43; echo $?; unset BASH_COMPAT; shopt -q compat43; echo $?""",
+    "compat-regex": r"""for level in 31 32; do BASH_COMPAT=$level; re='^a.*z$'; [[ abcz =~ "$re" ]]; echo $?; [[ abcz =~ $re ]]; echo $?; done""",
+    "compat-loop": r"""f(){ break; echo function; }; for n in 43 44 52; do BASH_COMPAT=$n; for i in 1; do f; echo caller; done; for i in 1; do (break; echo child); echo "end:$?"; done; done""",
+    "compat-array": r"""for n in 51 52; do BASH_COMPAT=$n; a=(one two); declare -A m=([k]=v); test -v 'a[@]'; echo $?; [[ -v 'm[*]' ]]; echo $?; unset 'a[@]' 'm[*]'; declare -p a m; unset a m; done""",
+    "assignment-tilde": "base=/bin\np=$base:~/bin:~/lib\necho \"$p\"\nexport p=$base:~/export\necho \"$p\"\nset -o posix\necho plain=~:~\ndeclare p=~:~\necho \"$p\"",
+    "stack-tilde": 'pushd src >/dev/null; printf "<%s>\\n" ~0 ~1 ~+1 ~-0 ~-1 ~99; popd >/dev/null',
     "wordbreak-variable": """printf '<%s>' "$COMP_WORDBREAKS"; COMP_WORDBREAKS=' :'; printf '<%s>' "$COMP_WORDBREAKS"; unset COMP_WORDBREAKS; printf '<%s>' "${COMP_WORDBREAKS-unset}" """,
     "toggle-case": """x='aB cD-eF'; printf '<%s>\\n' "${x~}" "${x~~}" "${x~[cB]}" "${x~~[cB]}"; a=('xyZ' '01' 'a雪B'); printf '<%s>\\n' "${a[@]~~}" """,
     "declared-case": """declare -c v='hELLO woRLD'; echo "$v"; v+=' ABC'; declare -p v; declare -ac arr=('eXAMPLE' '.NEXT'); declare -p arr; declare +c v; v='rAW'; echo "$v"; declare -cl z='mIx'; declare -p z""",
@@ -36,6 +44,7 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "compat-test": """for n in 52 53; do BASH_COMPAT=$n; test '(' '!' = '!' ')' -a yes; echo $?; test '(' '-n' ')' -a yes; echo $?; done""",
     "source-fullpath": 'shopt -s bash_source_fullpath; source ./linked; f; shopt -u bash_source_fullpath; source ./linked; f',
     "source-path": 'PATH=none; shopt -u sourcepath; source -p empty:src mod one; . -psrc mod two; source -p empty mod; echo $?; source -p "" mod; source -p empty ./mod',
     "compgen-array": """a=(old); declare -n ref=a; compgen -V ref -W 'be bee bee' be; printf '<%s>\\n' "${a[@]}"; compgen -V ref -W 'x' z; echo "$?:${#a[@]}"; compgen -V 'bad-name' -W x; echo $?; declare -A map=([key]=ok); compgen -V map -W x; echo "$?:${map[key]}"; readonly kept=old; compgen -V kept -W x; echo "$?:$kept" """,
@@ -57,6 +66,14 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "keyword-arguments": ('inspect keep X=one Y=$X', 900),
+    "compat-random": ('v=$RANDOM', 2200),
+    "compat-regex": ('[[ abcz =~ "$re" ]]', 1100),
+    "compat-loop": ('for x in 1; do f; done', 800),
+    "compat-array": ("[[ -v 'm[@]' ]]", 2200),
+    "compat-test": ("test '(' '!' = '!' ')' -a yes", 900),
+    "assignment-tilde": ('p=$base:~/bin:~/lib', 1400),
+    "stack-tilde": ('p=~+1', 1100),
     "toggle-case": ('v=${phrase~~}', 2400),
     "declared-case": ('v="$phrase"', 2200),
     "completion-group": ('compgen -g "$group" >/dev/null', 24),
@@ -191,6 +208,60 @@ def comment_dialogue(shell, root):
         (root / "comment-result").unlink(missing_ok=True)
 
 
+
+def readline_input(shell, root, name):
+    rc = root / "inputrc"
+    rc.write_text('$if mode=emacs\n"\\C-xu": upcase-word\n$endif\n'
+                  '"\\C-xk": kill-whole-line\n"\\C-x/": unix-filename-rubout\n'
+                  '"\\C-xt": tab-insert\n"\\C-xm": magic-space\n'
+                  'set completion-ignore-case on\nset completion-map-case on\n'
+                  'set match-hidden-files off\nset mark-directories off\n')
+    term = Terminal(shell, root, editing=True, env={"INPUTRC": str(rc), "HISTFILE": "/dev/null"})
+    accepted = root / "accepted"
+    try:
+        assert b"READY>" in term.read(b"READY>")
+        term.send(b"record(){ printf '<%s>' \"$@\" >accepted; }; printf '\\036'\n")
+        assert b"\x1e" in term.read(b"\x1e")
+        if name == "inputrc-word-edit":
+            typed = b'record One tWo Three'
+            # Start inside the line. Uppercase, capitalize and lowercase three
+            # words, transpose the last two, then check what was executed.
+            keys = b'\x01\x1bf\x18u\x1bc\x1bl\x1bt'
+            expected = b'<ONE><three><Two>'
+            visible = b'three Two'
+        elif name == "inputrc-file-completion":
+            typed = b'record mix_case-uni'
+            keys = b'\t'
+            expected = b'<Mix-Case-Unique>'
+            visible = b'Unique'
+        else:
+            raise ValueError(name)
+        term.send(typed)
+        assert typed.split()[-1] in term.read(typed.split()[-1])
+        start = time.perf_counter_ns()
+        term.send(keys)
+        response = term.read(visible)
+        assert visible in response, (shell, name, response)
+        ms = (time.perf_counter_ns() - start) / 1e6
+        term.send(b"; printf '\\036'\n")
+        assert b"\x1e" in term.read(b"\x1e")
+        assert accepted.read_bytes() == expected, (shell, name, accepted.read_bytes())
+        if name == "inputrc-word-edit":
+            for line, expected in [
+                (b'record ignored\x18krecord kept', b'<kept>'),
+                (b'record dir/name\x18/new', b'<dir/new>'),
+                (b"record 'a\x18tb'", b'<a\tb>'),
+                (b'record word\nrecord !!:$\x18mend', b'<word><end>'),
+            ]:
+                term.send(line + b"; printf '\\036'\n")
+                assert b"\x1e" in term.read(b"\x1e")
+                assert accepted.read_bytes() == expected, (shell, line, accepted.read_bytes())
+        return ms
+    finally:
+        term.close()
+        accepted.unlink(missing_ok=True)
+
+
 def callback_tab(shell, root, line, setup=""):
     t = Terminal(shell, root, editing=True, env={"HISTFILE": "/dev/null", "XDG_STATE_HOME": str(root / "state")})
     try:
@@ -258,7 +329,7 @@ def main():
     parser.add_argument("tonari", type=Path)
     parser.add_argument("--first", type=Path)
     parser.add_argument("--runs", type=int, default=9)
-    parser.add_argument("--case", action="append", choices=["interactive-comments", "programmable-boundaries", "filename-completion", "tcp-redirection", "udp-redirection", *HOT])
+    parser.add_argument("--case", action="append", choices=["inputrc-word-edit", "inputrc-file-completion", "array-recovery", "interactive-comments", "programmable-boundaries", "filename-completion", "tcp-redirection", "udp-redirection", *HOT])
     args = parser.parse_args()
     selected = set(args.case or ())
     def requested(name):
@@ -286,6 +357,9 @@ def main():
         print(json.dumps(dict(reference=version, witnesses=len(cases), differences=failed)), flush=True)
         if failed:
             raise SystemExit(1)
+        # A locally linked Bash readline/tilde library may consult the process
+        # environment. A shell assignment to HOME must take effect immediately.
+        assert run(shells[1], 'HOME=/example; x=~/src; echo "$x"')[0] == (0, b"/example/src\n", False)
         termroot = root / "completion"
         termroot.mkdir()
         (termroot / "pick.valid").touch()
@@ -300,6 +374,45 @@ def main():
                                             ("she/unique.", True, "she/unique.")]:
                 assert ignored_completion(shell, termroot, prefix, force) == expected
         rng = random.Random(1729)
+        (termroot / "Mix-Case-Unique").touch()
+        for i in range(512):
+            (termroot / f"Mix-Case-other{i}").touch()
+        for name in ("inputrc-word-edit", "inputrc-file-completion"):
+            if not requested(name): continue
+            samples = [[] for _ in shells]
+            for r in range(args.runs + 1):
+                indices = list(range(len(shells)))
+                rng.shuffle(indices)
+                for i in indices:
+                    ms = readline_input(shells[i], termroot, name)
+                    if r: samples[i].append(round(ms, 3))
+            if args.runs:
+                print(json.dumps(dict(case=name, repeats=1, median_ms=[round(statistics.median(g), 3) for g in samples], samples_ms=samples)), flush=True)
+        if requested("array-recovery"):
+            script = "a=(orig)\na=(bad > untouched)\necho \"$?:${a[*]}\"\n"
+            broken = "if false; then\n a=(bad > untouched)\n echo unexpected > ran\nfi\n"
+            for options, expected in [((), (0, b"1:orig\n")), (("-e",), (2,b"")), (("-n",), (1,b"")), (("--posix",), (1,b""))]:
+                for shell in shells[:2]:
+                    for pipe in (True, False):
+                        p = subprocess.run([shell, "--noprofile", "--norc", *options, *(("-s",) if pipe else ("-c", script))], input=script.encode() if pipe else None, cwd=root, env=env, capture_output=True)
+                        # Both GNU references return 127 only for --posix -c.
+                        # This syntax error never attempted a command lookup.
+                        wanted = (127, b"") if options == ("--posix",) and not pipe and shell == shells[0] else expected
+                        assert (p.returncode, p.stdout) == wanted and p.stderr and not (root / "untouched").exists(), (shell, options, pipe, p)
+            for pipe in (True, False):
+                p = subprocess.run([shells[1], *(("-s",) if pipe else ("-c", broken))], input=broken.encode() if pipe else None, cwd=root, env=env, capture_output=True)
+                assert p.returncode == 2 and p.stderr and not (root / "ran").exists()
+            count = 300
+            script = "a=(orig)\n" + "a=(bad > untouched)\n" * count + "echo \"$?:${a[*]}\""
+            samples = [[] for _ in shells]
+            for r in range(args.runs + 1):
+                order = list(range(len(shells))); rng.shuffle(order)
+                for i in order:
+                    outcome, ms = run(shells[i], script)
+                    assert outcome == (0, b"1:orig\n", True) and not (root / "untouched").exists()
+                    if r: samples[i].append(round(ms,3))
+            if args.runs:
+                print(json.dumps(dict(case="array-recovery", repeats=count, median_ms=[round(statistics.median(g),3) for g in samples], samples_ms=samples)), flush=True)
         if requested("interactive-comments"):
             for shell in shells[:2]:
                 comment_dialogue(shell, termroot)
@@ -374,6 +487,13 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "keyword-arguments": "set -k; inspect(){ :; }",
+                "compat-random": "BASH_COMPAT=50; RANDOM=42",
+                "compat-regex": "BASH_COMPAT=31; re='^a.*z$'",
+                "compat-loop": "BASH_COMPAT=43; f(){ break; }",
+                "compat-array": "BASH_COMPAT=51; declare -A m=([k]=v)",
+                "assignment-tilde": "base=/bin",
+                "stack-tilde": "pushd src >/dev/null",
                 "toggle-case": "phrase='sOME mixed-CASE-123 example value for conversion'",
                 "declared-case": "declare -c v; phrase='aBCDEf GHIJKl mixed case words'",
                 "completion-group": "group=$(id -gn)",

@@ -34,6 +34,16 @@ actions! {
     SwapMark => "exchange-point-and-mark" [b"\x18\x18"],
     Forward => "forward-char" [b"\x06", b"\x1bOC", b"\x1b[C"],
     ForwardWord => "forward-word" [b"\x1b[1;5C"],
+    UpperWord => "upcase-word" [b"\x1bu"],
+    LowerWord => "downcase-word" [b"\x1bl"],
+    CapitalWord => "capitalize-word" [b"\x1bc"],
+    TransposeWords => "transpose-words" [b"\x1bt"],
+    WholeLine => "kill-whole-line" [],
+    RubFilename => "unix-filename-rubout" [],
+    TabInsert => "tab-insert" [],
+    Reload => "re-read-init-file" [b"\x18\x12"],
+    HistoryExpand => "history-expand-line" [b"\x1b^"],
+    MagicSpace => "magic-space" [],
     Comment => "insert-comment" [b"\x1b#"],
     Kill => "kill-line" [b"\x0b"],
     Cut => "kill-region" [],
@@ -203,6 +213,11 @@ pub(crate) struct Bindings {
     prefer_vi: Option<bool>,
     pub(super) blink_matching_paren: bool,
     pub(super) disable_completion: bool,
+    pub(crate) ignore_case: bool,
+    pub(crate) map_case: bool,
+    pub(crate) hide_dotfiles: bool,
+    pub(crate) unmarked_dirs: bool,
+    pub(super) comment_begin: Option<Rc<str>>,
     bracketed_paste: Option<bool>,
     timeout: Option<i32>,
     initialized: bool,
@@ -399,6 +414,11 @@ fn configure(bindings: &mut Bindings, spec: &str, shell: bool) -> Result<(), Str
         };
         match name {
             "blink-matching-paren" => bindings.blink_matching_paren = on()?,
+            "completion-ignore-case" => bindings.ignore_case = on()?,
+            "completion-map-case" => bindings.map_case = on()?,
+            "match-hidden-files" => bindings.hide_dotfiles = !on()?,
+            "mark-directories" => bindings.unmarked_dirs = !on()?,
+            "comment-begin" => bindings.comment_begin = Some(value.into()),
             "disable-completion" => bindings.disable_completion = on()?,
             "enable-bracketed-paste" => bindings.bracketed_paste = Some(on()?),
             "keyseq-timeout" => {
@@ -469,7 +489,9 @@ fn load_file(session: &mut Session, path: &Path, depth: usize) -> Result<(), Str
         if let Some(cond) = line.strip_prefix("$if ") {
             levels.push(active);
             let cond = cond.trim();
-            active &= matches!(cond, "Bash" | "bash" | "Tonari" | "tonari" | "mode=emacs")
+            let vi = session.bindings.prefer_vi.unwrap_or(session.vi);
+            active &= matches!(cond, "Bash" | "bash" | "Tonari" | "tonari")
+                || cond == if vi { "mode=vi" } else { "mode=emacs" }
                 || cond.strip_prefix("term=").is_some_and(|t| {
                     session
                         .get("TERM")
@@ -503,6 +525,10 @@ pub(crate) fn initialize(session: &mut Session) {
         return;
     }
     session.bindings.initialized = true;
+    reload(session);
+}
+
+pub(super) fn reload(session: &mut Session) {
     let explicit = session.get("INPUTRC").filter(|v| !v.is_empty());
     let path = explicit
         .map(PathBuf::from)
@@ -584,13 +610,25 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
                 let target = matches!(arg.as_str(), "-q" | "-u")
                     .then(&mut operand)
                     .transpose()?;
+                let filtered = target.is_none()
+                    && session.shopt.compat > 52
+                    && args.as_slice().first().is_some_and(|s| !s.starts_with('-'));
+                let filters = if filtered {
+                    let names = args.as_slice();
+                    args.by_ref().for_each(drop);
+                    names
+                } else {
+                    &[]
+                };
                 if let Some(name) = target
                     && !names().any(|n| n == name)
                 {
                     return Err(format!("\u{60}{name}': unknown function name"));
                 }
                 for (action, name, defaults) in named_actions() {
-                    if target.is_some_and(|s| s != name) {
+                    if target.is_some_and(|s| s != name)
+                        || filtered && !filters.iter().any(|s| s == name)
+                    {
                         continue;
                     }
                     let mut keys = session.bindings.keys_for(action, defaults);
@@ -657,6 +695,14 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
                 let yes = |on| if on { "on" } else { "off" };
                 let b = &session.bindings;
                 for (name, value) in [
+                    ("completion-ignore-case", yes(b.ignore_case).into()),
+                    ("completion-map-case", yes(b.map_case).into()),
+                    ("match-hidden-files", yes(!b.hide_dotfiles).into()),
+                    ("mark-directories", yes(!b.unmarked_dirs).into()),
+                    (
+                        "comment-begin",
+                        b.comment_begin.as_deref().unwrap_or("#").into(),
+                    ),
                     ("disable-completion", yes(b.disable_completion).to_owned()),
                     (
                         "editing-mode",

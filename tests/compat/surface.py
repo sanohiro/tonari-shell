@@ -130,8 +130,8 @@ def extra(a, base, source, sections):
         if level in ("50", "51", "52"):
             # These levels have no shopt boolean. Exercise an actual rule.
             scripts = {"50": """BASH_COMPAT=5.0; RANDOM=42; printf '%s/%s' "$RANDOM" "$RANDOM" """,
-                       "51": """BASH_COMPAT=5.1; v=abc; echo "${v/a/[&]}" """,
-                       "52": """BASH_COMPAT=5.2; GLOBSORT=-name; touch a b; printf '<%s>' *"""}
+                       "51": """BASH_COMPAT=5.1; declare -A a=([key]=value); test -v 'a[@]'; echo $?; unset 'a[@]'; declare -p a """,
+                       "52": """BASH_COMPAT=5.2; test '(' '!' = '!' ')' -a yes; echo $?"""}
             script = scripts[level]
         a.compare("Compatibility level", level, script, interface=level not in ("50","51","52"))
     rules = base["Bash POSIX Mode"].partition("@enumerate")[2].partition("@end enumerate")[0]

@@ -237,7 +237,7 @@ impl Session {
         Ok(())
     }
 
-    pub(super) fn indices(&self, name: &str) -> Vec<i64> {
+    pub(crate) fn indices(&self, name: &str) -> Vec<i64> {
         if name == "PIPESTATUS" {
             let len = usize::from(self.pipe_status.first.is_some()) + self.pipe_status.rest.len();
             return (0..len as i64).collect();

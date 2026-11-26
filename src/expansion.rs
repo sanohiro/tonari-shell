@@ -63,7 +63,9 @@ impl Error {
     pub fn flow(&self, session: &Session) -> crate::Flow {
         match self.recovery {
             Recovery::Control(flow) => flow,
-            Recovery::Input if session.posix && !session.interactive => {
+            Recovery::Input
+                if session.posix && !session.interactive && session.shopt.compat > 43 =>
+            {
                 crate::Flow::Exit(self.status)
             }
             Recovery::Input => crate::Flow::Discard(self.status),

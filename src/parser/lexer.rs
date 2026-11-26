@@ -869,13 +869,28 @@ fn pattern_parts(
     Ok(())
 }
 
-fn pattern_chunk(chars: &mut Chars<'_>, word: &mut WordBuilder, start: &str, extended: bool) {
+fn pattern_chunk(
+    chars: &mut Chars<'_>,
+    word: &mut WordBuilder,
+    start: &str,
+    extended: bool,
+    assignment: bool,
+) {
     // Keep the spelling of ranges and classes after the first wildcard or
     // expansion. Quoted and escaped pieces take a separate, literal path.
     let rest = chars.as_str();
     let end = rest
         .find(|c| separator(c) || matches!(c, '\'' | '"' | '\\' | '$' | '`' | '{' | ',' | '}'))
         .unwrap_or(rest.len());
+    // An unquoted colon in an assignment starts a new tilde prefix. Leave
+    // both bytes for the word reader, even after an expansion or wildcard.
+    let end = if assignment {
+        start[..start.len() - rest.len() + end]
+            .find(":~")
+            .map_or(end, |pos| pos.saturating_sub(start.len() - rest.len()))
+    } else {
+        end
+    };
     // Leave the operator before the next opening parenthesis for the group reader.
     let end = if extended
         && rest[end..].starts_with('(')
@@ -1266,7 +1281,7 @@ fn lex_words(
                 }
                 '*' | '?' | '[' => {
                     pattern_context = true;
-                    pattern_chunk(&mut chars, &mut word, rest, extended);
+                    pattern_chunk(&mut chars, &mut word, rest, extended, assignment.is_some());
                 }
                 '=' if assignment.is_none() && !protected => {
                     let prefix = &start[..start.len() - rest.len()];
@@ -1319,7 +1334,9 @@ fn lex_words(
                         word.push(c);
                     }
                 }
-                _ if pattern_context => pattern_chunk(&mut chars, &mut word, rest, extended),
+                _ if pattern_context => {
+                    pattern_chunk(&mut chars, &mut word, rest, extended, assignment.is_some())
+                }
                 _ => word.push(c),
             }
             started = true;

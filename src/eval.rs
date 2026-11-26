@@ -635,6 +635,10 @@ pub(crate) fn call_with_bindings(
     session.call_lines.push(session.line());
     session.source_names.push(function.source);
     session.function_names.push(name);
+    let outer_loop = session.loop_depth;
+    if session.shopt.compat > 43 {
+        session.loop_depth = 0;
+    }
     session.enter_function(bindings);
     let tracked = session.shopt.extdebug;
     if tracked {
@@ -674,6 +678,7 @@ pub(crate) fn call_with_bindings(
         }
     }
     session.leave_function();
+    session.loop_depth = outer_loop;
     session.current_command = callsite;
     session.call_lines.pop();
     session.function_names.pop();

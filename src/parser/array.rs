@@ -79,7 +79,7 @@ impl Reader {
                     ));
                 }
                 None => return Err(Error::Incomplete("unfinished array assignment")),
-                _ => return Err(Error::Invalid("unexpected token in array assignment")),
+                _ => return Err(Error::ArrayToken),
             }
         }
     }

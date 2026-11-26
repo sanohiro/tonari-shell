@@ -152,6 +152,12 @@ fn syntax_error(session: &Session, problem: parser::Error, first_line: usize) ->
         && matches!(problem, parser::Error::Invalid("NUL in command text"))
     {
         Flow::Exit(126)
+    } else if matches!(problem, parser::Error::ArrayToken) && !session.errexit {
+        if session.posix && !session.interactive {
+            Flow::Exit(1)
+        } else {
+            Flow::Continue(1)
+        }
     } else if session.posix && !session.interactive {
         Flow::Exit(2)
     } else {
@@ -478,6 +484,14 @@ fn run(
                 continue;
             }
             Err(parser::Error::Incomplete(_)) if n != 0 => continue,
+            Err(e @ parser::Error::ArrayToken)
+                if !check && !session.posix && !session.errexit && !session.noexec =>
+            {
+                syntax_error(session, e, base_line);
+                status = 1;
+                session.pipe_status.single(status);
+                ran = true;
+            }
             Err(e) => return syntax_error(session, e, base_line),
             Ok(program) if !program.is_empty() && !check => {
                 if shared_offset && !reader.buffer().is_empty() {
@@ -643,6 +657,14 @@ pub fn text(
                 continue;
             }
             Err(parser::Error::Incomplete(_)) if !last => continue,
+            Err(e @ parser::Error::ArrayToken)
+                if !check && !session.posix && !session.errexit && !session.noexec =>
+            {
+                syntax_error(session, e, base_line);
+                status = 1;
+                session.pipe_status.single(status);
+                ran = true;
+            }
             Err(e) => return syntax_error(session, e, base_line),
             Ok(program) if !program.as_ref().is_empty() && !check => {
                 ran = true;
