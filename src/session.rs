@@ -21,7 +21,7 @@ use std::rc::Rc;
 
 use crate::parser::{FunctionDefinition, is_identifier};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CharacterLocale {
     Ascii,
     Utf8,
@@ -189,6 +189,7 @@ pub struct Session {
     pub positional: std::vec::IntoIter<String>,
     pub source_depth: u32,
     pub function_depth: u32,
+    pub(crate) substitution_scopes: u32,
     pub function_names: Vec<String>,
     pub source_names: Vec<Rc<str>>,
     pub current_command: Option<crate::parser::Location>,
@@ -1079,6 +1080,23 @@ impl Session {
             || matches!(name, "PWD" | "OLDPWD") || std::env::var_os(name).is_some(),
             |var| var.exported,
         )
+    }
+
+    pub(crate) fn with_trap_signal(
+        &mut self,
+        number: i32,
+        run: impl FnOnce(&mut Self) -> crate::Flow,
+    ) -> crate::Flow {
+        const NAME: &str = "BASH_TRAPSIG";
+        let saved = self.variables.get(NAME).cloned();
+        self.assign(NAME, &number.to_string());
+        let result = run(self);
+        if let Some(var) = saved {
+            self.variables.insert(NAME.into(), var);
+        } else {
+            self.variables.remove(NAME);
+        }
+        result
     }
 
     pub fn save_variables(&self, names: &[&str]) -> Bindings {

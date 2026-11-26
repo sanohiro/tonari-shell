@@ -37,7 +37,7 @@ impl Session {
                     .unwrap_or(0)
             }),
         };
-        bound > 0 && self.function_depth >= bound
+        bound > 0 && self.function_depth - self.substitution_scopes >= bound
             || self.function_depth >= 128 && self.deep_function_nesting_full()
     }
 

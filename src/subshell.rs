@@ -59,8 +59,6 @@ fn read_regular_file(file: &std::fs::File, size: u64, output: &mut Vec<u8>) -> i
     }
 }
 
-// The interpreter has one thread. A substitution inherits its variables and
-// functions, changes its own cwd, and writes only stdout into the capture pipe.
 pub(crate) fn current_substitution(
     session: &mut Session,
     body: Vec<parser::Statement>,
@@ -113,6 +111,7 @@ pub(crate) fn current_substitution(
         (!session.shopt.inherit_errexit).then(|| std::mem::take(&mut session.errexit));
     let verbose = std::mem::take(&mut session.verbose);
     session.enter_function(&mut Default::default());
+    session.substitution_scopes += 1;
     if reply {
         session.local_reply(last);
     }
@@ -124,6 +123,7 @@ pub(crate) fn current_substitution(
         crate::execute::capture_stdout(run)
     };
     let value = reply.then(|| session.get("REPLY").unwrap_or_default());
+    session.substitution_scopes -= 1;
     session.leave_function();
     session.verbose = verbose;
     if let Some(saved) = restore_errexit {

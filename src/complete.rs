@@ -203,8 +203,27 @@ impl Source {
                     .then(|| session.get("FIGNORE"))
                     .flatten()
                     .filter(|s| !s.is_empty());
-                if !list && ignored.is_none() {
-                    return Some((common_file(prefix, directories_only, session)?, Vec::new()));
+                if !list {
+                    let directory = Directory::open(prefix, session)?;
+                    let common = if let Some(patterns) = ignored.as_deref() {
+                        let suffixes: Vec<_> =
+                            patterns.split(':').filter(|s| !s.is_empty()).collect();
+                        common_file(&directory, directories_only, |name| {
+                            !suffixes.iter().any(|s| {
+                                name.ends_with(s)
+                                    || s.strip_suffix(name)
+                                        .is_some_and(|rest| directory.dir.ends_with(rest))
+                            })
+                        })
+                        .or_else(|| {
+                            (!session.shopt.force_fignore)
+                                .then(|| common_file(&directory, directories_only, |_| true))
+                                .flatten()
+                        })
+                    } else {
+                        common_file(&directory, directories_only, |_| true)
+                    };
+                    return Some((common?, Vec::new()));
                 }
                 let mut choices = file_names(prefix, directories_only, true, session);
                 if let Some(suffixes) = ignored {
@@ -756,11 +775,17 @@ fn branch_matches(branches: &[Directory<'_>], dirs: bool) -> Vec<String> {
     })
 }
 
-fn common_file(prefix: &str, directories_only: bool, session: &Session) -> Option<Common> {
-    let directory = Directory::open(prefix, session)?;
+fn common_file(
+    directory: &Directory<'_>,
+    directories_only: bool,
+    accept: impl Fn(&str) -> bool,
+) -> Option<Common> {
     let mut first_kind = libc::DT_UNKNOWN;
     let mut common: Option<Common> = None;
     directory.visit(|name, kind| {
+        if !accept(name) {
+            return ControlFlow::Continue(());
+        }
         if let Some(known) = &mut common {
             if known.could_change(name) && (!directories_only || directory.is_directory(name, kind))
             {

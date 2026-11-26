@@ -43,6 +43,7 @@ here } and ; }
 END
 printf '%s' "$y"; }suffix; echo "$x" """,
     "current-state": 'set -- one; f(){ local v=outer; x=${ local v=inner; printf "%s/%s/%s" "$v" "$FUNCNAME" "$1"; set -- new; }; echo "$v:$x:$1"; }; f abc',
+    "current-nesting": 'FUNCNEST=1; f(){ echo yes; }; x=${ f; }; echo "$x"',
     "current-exit": 'x=${ exit 19; }; echo wrong',
     "current-loop": 'for v in 1 2; do x=${ break; }; echo wrong; done; echo done',
     "current-large": 'x=${ cat large; }; echo "${#x}"',
@@ -51,7 +52,7 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 HOT = {
     "posix-variable": ('POSIXLY_CORRECT=1; unset POSIXLY_CORRECT', 800),
     "physical": ('pwd >/dev/null', 900),
-    "execfail": ('shopt -q execfail', 1600),
+    "execfail": ('exec ./missing', 550),
     "shift-verbose": ('shift 2', 800),
     "alias-table": ('s=${BASH_ALIASES[sample]}', 2500),
     "command-table": ('s=${BASH_CMDS[sample]}', 2500),
@@ -181,7 +182,7 @@ def main():
             if not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
-                "physical": "set -P", "execfail": "shopt -s execfail", "shift-verbose": "shopt -s shift_verbose; exec 2>/dev/null",
+                "physical": "set -P", "execfail": "shopt -s execfail; exec 2>/dev/null", "history-number": "set -o history; history -s seed", "shift-verbose": "shopt -s shift_verbose; exec 2>/dev/null",
                 "alias-table": "alias sample=value", "command-table": "hash -p /bin/sh sample",
                 "execignore": 'PATH=$PWD/a:$PWD/b; EXECIGNORE="$PWD/a/*"',
                 "source-fullpath": "shopt -s bash_source_fullpath",

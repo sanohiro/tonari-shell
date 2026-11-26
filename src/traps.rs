@@ -673,11 +673,7 @@ fn with_trapsig(session: &mut Session, sig: i32, run: impl FnOnce(&mut Session) 
         RETURN => NSIG + 2,
         other => other,
     };
-    let saved = session.save_variables(&["BASH_TRAPSIG"]);
-    session.assign("BASH_TRAPSIG", &number.to_string());
-    let flow = run(session);
-    session.restore(saved);
-    flow
+    session.with_trap_signal(number, run)
 }
 
 fn action_text(session: &mut Session, sig: i32, status: u8) -> Flow {

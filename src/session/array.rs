@@ -371,6 +371,9 @@ impl Session {
     }
 
     pub(crate) fn stored_array_len(&self, name: &str) -> Option<usize> {
+        if self.active_groups(name) && !self.variables.contains_key(name) {
+            return Some(Self::group_ids().len());
+        }
         if self.live_table(name) {
             return Some(if name == "BASH_ALIASES" {
                 self.aliases.0.as_ref().map_or(0, |m| m.len())
@@ -390,6 +393,10 @@ impl Session {
     }
 
     pub fn append_indexed_fields(&self, name: &str, fields: &mut Vec<String>) -> bool {
+        if self.active_groups(name) && !self.variables.contains_key(name) {
+            fields.extend_from_slice(Self::group_ids());
+            return true;
+        }
         if name == "PIPESTATUS" {
             return false;
         }
@@ -407,6 +414,9 @@ impl Session {
             return Vec::new();
         };
         let name = resolved.as_ref();
+        if self.active_groups(name) && !self.variables.contains_key(name) {
+            return Self::group_ids().to_vec();
+        }
         if self.live_table(name) {
             return self
                 .table_snapshot(name)
