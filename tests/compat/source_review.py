@@ -148,7 +148,7 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 HOT = {
     "conditional-trace-operator": ("[[ a > b ]]", 2600),
     "failed-function-trap-text": ("f", 1700),
-    "array-single-evaluation-option": ("shopt -s assoc_expand_once; i=0; : \"${a[i++]}\"; shopt -u array_expand_once", 2200),
+    "array-single-evaluation-option": ("shopt -s assoc_expand_once; idx=0; : \"${a[idx++]}\"; shopt -u array_expand_once", 2200),
     "extended-operand-quotes": (": \"${u-$'a\\tb'}\" \"${u-$\"hi\"}\"", 2200),
     "ere-bracket-quotes": ("[[ dog =~ (['d'][[.o.]])([g]) ]]", 3000),
     "remove-nameref-attributes": ("declare -n r=dest; declare +n -i r=7+4", 3000),
