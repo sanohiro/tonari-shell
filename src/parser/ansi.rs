@@ -17,17 +17,21 @@ fn digits(chars: &mut Chars<'_>, radix: u32, count: usize) -> Option<u32> {
 /// so adjacent escapes may together encode one UTF-8 character.
 pub(super) fn quoted(chars: &mut Chars<'_>) -> Result<String, Error> {
     let source = chars.as_str();
-    while let Some(c) = chars.next() {
-        match c {
-            '\'' => {
-                let end = source.len() - chars.as_str().len() - 1;
-                return decode(&source[..end]);
-            }
-            '\\' => {
-                chars.next();
-            }
-            _ => {}
+    let bytes = source.as_bytes();
+    let mut start = 0;
+    while let Some(relative) = memchr::memchr2(b'\\', b'\'', &bytes[start..]) {
+        let at = start + relative;
+        if bytes[at] == b'\'' {
+            *chars = source[at + 1..].chars();
+            return if start == 0 {
+                Ok(source[..at].to_owned())
+            } else {
+                escapes(&source[..at], true)
+            };
         }
+        // Both delimiters are ASCII. For a non-ASCII escaped scalar its
+        // continuation bytes cannot match either delimiter in the next scan.
+        start = (at + 2).min(bytes.len());
     }
     Err(Error::Incomplete(
         "unterminated dollar-single-quoted string",
@@ -35,6 +39,10 @@ pub(super) fn quoted(chars: &mut Chars<'_>) -> Result<String, Error> {
 }
 
 pub(crate) fn decode(source: &str) -> Result<String, Error> {
+    escapes(source, false)
+}
+
+fn escapes(source: &str, braced_hex: bool) -> Result<String, Error> {
     let mut bytes = Vec::with_capacity(source.len());
     let mut chars = source.chars();
     let mut buffer = [0u8; 4];
@@ -77,6 +85,18 @@ pub(crate) fn decode(source: &str) -> Result<String, Error> {
                 let tail = digits(&mut chars, 8, 2).unwrap_or(0);
                 let count = rest.len() - chars.as_str().len();
                 ((first << (3 * count)) + tail) as u8
+            }
+            'x' if braced_hex && chars.as_str().starts_with('{') => {
+                chars.next();
+                let mut byte = 0u8;
+                while let Some(digit) = chars.clone().next().and_then(|c| c.to_digit(16)) {
+                    byte = (byte << 4) | digit as u8;
+                    chars.next();
+                }
+                if chars.as_str().starts_with('}') {
+                    chars.next();
+                }
+                byte
             }
             'x' | 'u' | 'U' => {
                 let count = match escape {

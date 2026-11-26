@@ -4,6 +4,7 @@ use std::io::{self, Write};
 use super::Session;
 use crate::builtins::escapes::{self, Mode};
 use crate::parser::is_identifier;
+use tonari_time_locales::numeric::{self, Numeric};
 
 // Reads during a capture share the shell state. A captured %n or -v gets a
 // private session on its first assignment, visible to the rest of that printf.
@@ -103,7 +104,11 @@ pub(crate) fn run(
         capture: capture.is_some(),
         private: None,
     };
-    let mut args = Arguments { values, status: 0 };
+    let mut args = Arguments {
+        values,
+        status: 0,
+        locale: None,
+    };
     let mut output = Vec::new();
     if matches!(format.as_str(), "%s\\n" | "%s\n") {
         string_lines(&mut output, values);
@@ -163,6 +168,7 @@ fn string_lines(out: &mut Vec<u8>, values: &[String]) {
 struct Arguments<'a> {
     values: &'a [String],
     status: u8,
+    locale: Option<Numeric>,
 }
 
 impl<'a> Arguments<'a> {
@@ -179,6 +185,7 @@ impl<'a> Arguments<'a> {
         &mut self,
         parse: impl FnOnce(*const libc::c_char, *mut *mut libc::c_char) -> T,
         from_char: impl Fn(u32) -> T,
+        decimal: &str,
     ) -> T {
         let value = self.next();
         if value.is_empty() {
@@ -187,7 +194,20 @@ impl<'a> Arguments<'a> {
         if let Some(rest) = value.strip_prefix(['\'', '"']) {
             return from_char(rest.chars().next().unwrap_or('\0') as u32);
         }
-        let input = CString::new(value).unwrap();
+        let translated;
+        let input = if decimal == "." {
+            value
+        } else if value.contains('.') {
+            // The C conversion must stop at an input dot in a comma locale.
+            translated = value.replace('.', "?").replace(decimal, ".");
+            translated.as_str()
+        } else if value.contains(decimal) {
+            translated = value.replace(decimal, ".");
+            translated.as_str()
+        } else {
+            value
+        };
+        let input = CString::new(input).unwrap();
         let mut end = std::ptr::null_mut();
         let errno = unsafe {
             #[cfg(target_os = "macos")]
@@ -211,13 +231,17 @@ impl<'a> Arguments<'a> {
     }
 
     fn signed(&mut self) -> i64 {
-        self.number(|p, end| unsafe { libc::strtoll(p, end, 0) }, i64::from)
+        self.number(|p, end| unsafe { libc::strtoll(p, end, 0) }, i64::from, ".")
     }
     fn unsigned(&mut self) -> u64 {
-        self.number(|p, end| unsafe { libc::strtoull(p, end, 0) }, u64::from)
+        self.number(
+            |p, end| unsafe { libc::strtoull(p, end, 0) },
+            u64::from,
+            ".",
+        )
     }
-    fn float(&mut self) -> f64 {
-        self.number(|p, end| unsafe { libc::strtod(p, end) }, f64::from)
+    fn float(&mut self, decimal: &str) -> f64 {
+        self.number(|p, end| unsafe { libc::strtod(p, end) }, f64::from, decimal)
     }
 }
 
@@ -303,9 +327,86 @@ impl Spec {
         Ok(())
     }
 
+    fn localized(
+        &mut self,
+        conversion: u8,
+        locale: Numeric,
+        grouped: bool,
+        args: &mut Arguments<'_>,
+        out: &mut Vec<u8>,
+    ) -> Result<(), &'static str> {
+        let width = std::mem::take(&mut self.width) as usize;
+        let left = self.flags.contains(&b'-');
+        let zero = self.flags.contains(&b'0');
+        let integer = b"diu".contains(&conversion);
+        let precision = self.precision;
+        if integer && self.precision != Some(0) {
+            self.precision = None;
+        }
+        self.flags
+            .retain(|flag| !matches!(flag, b'\'' | b'-' | b'0'));
+        let mut raw = Vec::new();
+        self.numeric(conversion, locale.decimal, args, &mut raw)?;
+        let sign = usize::from(raw.first().is_some_and(|c| matches!(c, b'-' | b'+' | b' ')));
+        let mut prefix = sign;
+        if raw[sign..].starts_with(b"0x") || raw[sign..].starts_with(b"0X") {
+            prefix += 2;
+        }
+        let mut digits = raw[prefix..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+        let finite = digits != 0 || prefix != sign;
+        let mut cuts = Vec::new();
+        if grouped {
+            let mut group = locale.groups.iter().copied();
+            let mut size = group.next().unwrap() as usize;
+            while digits > size {
+                digits -= size;
+                cuts.push(prefix + digits);
+                size = group.next().map_or(size, usize::from);
+            }
+        }
+        let point = raw.iter().position(|&b| b == b'.');
+        let len = raw.len()
+            + cuts.len() * locale.separator.len()
+            + point.map_or(0, |_| locale.decimal.len().saturating_sub(1));
+        let zeros = if integer {
+            (precision.unwrap_or(0) as usize).saturating_sub(len - sign)
+        } else {
+            0
+        };
+        let padding = width.saturating_sub(len + zeros);
+        let pad_zero = zero && !left && finite && !(integer && precision.is_some());
+        out.try_reserve(len + zeros + padding)
+            .map_err(|_| "field too large")?;
+        if !left && !pad_zero {
+            out.resize(out.len() + padding, b' ');
+        }
+        out.extend_from_slice(&raw[..prefix]);
+        out.resize(out.len() + zeros + if pad_zero { padding } else { 0 }, b'0');
+        let mut start = prefix;
+        for cut in cuts.into_iter().rev() {
+            out.extend_from_slice(&raw[start..cut]);
+            out.extend_from_slice(locale.separator.as_bytes());
+            start = cut;
+        }
+        if let Some(point) = point {
+            out.extend_from_slice(&raw[start..point]);
+            out.extend_from_slice(locale.decimal.as_bytes());
+            start = point + 1;
+        }
+        out.extend_from_slice(&raw[start..]);
+        if left {
+            out.resize(out.len() + padding, b' ');
+        }
+        Ok(())
+    }
+
     fn numeric(
         &self,
         conversion: u8,
+        decimal: &str,
         args: &mut Arguments<'_>,
         output: &mut Vec<u8>,
     ) -> Result<(), &'static str> {
@@ -320,7 +421,7 @@ impl Spec {
                 b'o' => write!(output, "{:o}", args.unsigned()),
                 _ => {
                     let fmt = [b'%', conversion, 0];
-                    let n = args.float();
+                    let n = args.float(decimal);
                     return append_number(output, |dst, cap| unsafe {
                         libc::snprintf(dst, cap, fmt.as_ptr().cast(), n)
                     });
@@ -359,7 +460,7 @@ impl Spec {
                 })
             }
             _ => {
-                let n = args.float();
+                let n = args.float(decimal);
                 append_number(output, |dst, cap| unsafe {
                     libc::snprintf(dst, cap, fmt.as_ptr(), n)
                 })
@@ -502,7 +603,31 @@ fn render(
                             }
                         }
                     }
-                    k if b"diouxXaAeEfFgG".contains(&k) => spec.numeric(k, args, out)?,
+                    k if b"diouxXaAeEfFgG".contains(&k) => {
+                        let float = b"aAeEfFgG".contains(&k);
+                        let mut locale = numeric::C;
+                        if float || spec.flags.contains(&b'\'') {
+                            locale = *args.locale.get_or_insert_with(|| {
+                                ["LC_ALL", "LC_NUMERIC", "LANG"]
+                                    .into_iter()
+                                    .find_map(|key| {
+                                        variables.read().get(key).filter(|s| !s.is_empty())
+                                    })
+                                    .as_deref()
+                                    .map(numeric::find)
+                                    .unwrap_or(numeric::C)
+                            });
+                        }
+                        let grouped = spec.flags.contains(&b'\'')
+                            && !locale.groups.is_empty()
+                            && !locale.separator.is_empty()
+                            && b"diufFgG".contains(&k);
+                        if (float && locale.decimal != ".") || grouped {
+                            spec.localized(k, locale, grouped, args, out)?;
+                        } else {
+                            spec.numeric(k, ".", args, out)?;
+                        }
+                    }
                     _ => return Err("unsupported conversion"),
                 }
             }

@@ -81,13 +81,7 @@ impl Session {
         self.source_names
             .last()
             .map(AsRef::as_ref)
-            .unwrap_or_else(|| {
-                if self.command_string || self.stdin_script {
-                    "main"
-                } else {
-                    &self.arg0
-                }
-            })
+            .unwrap_or_else(|| if self.interactive { "main" } else { &self.arg0 })
     }
 
     pub(crate) fn define_function(&mut self, name: String, definition: Rc<FunctionDefinition>) {

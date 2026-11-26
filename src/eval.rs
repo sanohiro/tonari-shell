@@ -311,15 +311,24 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                         return Err(flow);
                     }
                 }
-                if s.readonly(&name) {
-                    eprintln!("tonari: {name}: readonly variable");
-                    return Err(if s.posix && !s.interactive {
-                        Flow::Exit(1)
-                    } else {
-                        Flow::Continue(1)
-                    });
+                let error = if s.is_nameref(&name) {
+                    s.assign_for_reference(&name, value).err()
+                } else if s.readonly(&name) {
+                    Some("readonly variable")
+                } else {
+                    s.assign(&name, &value);
+                    None
+                };
+                if let Some(error) = error {
+                    eprintln!("tonari: {name}: {error}");
+                    return Err(
+                        if error == "readonly variable" && s.posix && !s.interactive {
+                            Flow::Exit(1)
+                        } else {
+                            Flow::Continue(1)
+                        },
+                    );
                 }
-                s.assign(&name, &value);
                 Ok(Some(last))
             })
         }
@@ -635,15 +644,19 @@ pub(crate) fn call_with_bindings(
     session.call_lines.push(session.line());
     session.source_names.push(function.source);
     session.function_names.push(name);
+    let outer_loop = session.loop_depth;
+    if session.shopt.compat > 43 {
+        session.loop_depth = 0;
+    }
     session.enter_function(bindings);
     let tracked = session.shopt.extdebug;
     if tracked {
-        if session.debug_args.is_empty() {
-            session
-                .debug_args
-                .push(session.positional.as_slice().to_vec());
-        }
+        session
+            .debug_base
+            .get_or_init(|| session.positional.as_slice().to_vec());
         session.debug_args.push(arguments.as_slice().to_vec());
+    } else if session.shopt.compat <= 44 {
+        session.debug_base.get_or_init(Vec::new);
     }
     let old = std::mem::replace(&mut session.positional, arguments);
     let hidden = session
@@ -669,11 +682,9 @@ pub(crate) fn call_with_bindings(
     session.source_set_args = false;
     if tracked {
         session.debug_args.pop();
-        if session.debug_args.len() == 1 {
-            session.debug_args.clear();
-        }
     }
     session.leave_function();
+    session.loop_depth = outer_loop;
     session.current_command = callsite;
     session.call_lines.pop();
     session.function_names.pop();

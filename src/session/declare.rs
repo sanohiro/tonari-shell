@@ -288,7 +288,7 @@ pub(super) fn run(
         if name == "PATH" {
             session.hashes.clear();
         }
-        if session.active_groups(name) && (local || value.is_some() || array.is_some()) {
+        if session.protected_array(name) && (local || value.is_some() || array.is_some()) {
             eprintln!("tonari: {command}: {name}: variable may not be assigned a value");
             status = 1;
             continue;
@@ -345,6 +345,32 @@ pub(super) fn run(
         if session.function_depth != 0 && !readonly && !flags.global {
             var.temporary = false;
         }
+        // +n with an assignment writes through the existing reference and then
+        // removes its attribute. An unsuccessful write leaves the reference live.
+        let value = if flags.nameref == Some(false)
+            && var.nameref
+            && let Some(rhs) = value
+        {
+            let write = session
+                .reference_name(name)
+                .map(|s| s.into_owned())
+                .and_then(|dest| {
+                    let rhs = if append {
+                        session.get(&dest).unwrap_or_default() + rhs
+                    } else {
+                        rhs.to_owned()
+                    };
+                    session.assign_target(&dest, &rhs)
+                });
+            if let Err(e) = write {
+                eprintln!("tonari: {command}: {name}: {e}");
+                status = 1;
+                continue;
+            }
+            None
+        } else {
+            value
+        };
         if let Some(on) = flags.nameref {
             let dest = value.or(var.value.as_deref()).unwrap_or("");
             if on
@@ -353,11 +379,7 @@ pub(super) fn run(
                     || flags.array
                     || flags.associative
                     || array.is_some()
-                    || !dest.is_empty()
-                        && !(is_identifier(dest)
-                            || super::array::subscript(dest).is_some_and(|(base, expr)| {
-                                is_identifier(base) && !expr.is_empty()
-                            }))
+                    || !dest.is_empty() && !Session::valid_reference_target(dest)
                     || dest == name)
             {
                 eprintln!("tonari: {command}: {name}: invalid name reference");
@@ -536,6 +558,9 @@ pub(super) fn run(
         {
             session.apply_history_limit(name, value);
         }
+        if name == "BASH_COMPAT" && (!flags.global || session.declaration_scope(name).is_none()) {
+            session.apply_compat(var.value.as_deref().unwrap_or(""));
+        }
         if name == "POSIXLY_CORRECT" && (!flags.global || session.declaration_scope(name).is_none())
         {
             session.apply_posix_mode(var.value.is_some());
@@ -597,11 +622,11 @@ impl Session {
             return Some(var);
         }
         {
-            if matches!(name, "BASH_VERSINFO" | "GROUPS") {
+            if self.array_parameter(name) {
                 return Some(Variable {
                     declared: true,
                     readonly: name == "BASH_VERSINFO",
-                    array_assigned: true,
+                    array_assigned: name != "FUNCNAME" || self.function_depth != 0,
                     elements: Some(std::rc::Rc::new(super::array::Elements::Dense(
                         self.array_values(name),
                     ))),

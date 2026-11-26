@@ -165,7 +165,12 @@ impl Reader {
 
     // A replacement ending in shell syntax can take bytes from the following
     // input. Re-lex this uncommon suffix, keeping offsets for outer frames.
-    fn joined_alias(&mut self, name: String, value: &str, nested: Aliases) -> Result<(), Error> {
+    pub(super) fn joined_alias(
+        &mut self,
+        name: String,
+        value: &str,
+        nested: Aliases,
+    ) -> Result<(), Error> {
         let index = self.position();
         let count = index + self.tokens.len();
         let span = |i| {
@@ -262,13 +267,15 @@ impl Reader {
         let mut enabled = command_word;
         loop {
             let remaining = self.tokens.len();
+            let mut after_blank = false;
             while self
                 .alias_frames
                 .last()
                 .is_some_and(|f| remaining <= f.remaining)
             {
                 let frame = self.alias_frames.pop().unwrap();
-                enabled |= frame.next_word && frame.remaining == remaining;
+                after_blank |= frame.next_word && frame.remaining == remaining;
+                enabled |= after_blank;
             }
             if !enabled {
                 return Ok(());
@@ -286,7 +293,8 @@ impl Reader {
             let Some(value) = self.aliases.get(name) else {
                 return Ok(());
             };
-            if protected.map_or_else(|| reserved(name), |words| words.contains(&name))
+            if (!(after_blank && !super::POSIX.get())
+                && protected.map_or_else(|| reserved(name), |words| words.contains(&name)))
                 || self.alias_frames.iter().any(|f| f.name == name)
             {
                 return Ok(());
@@ -306,13 +314,24 @@ impl Reader {
                     disabled.remove(&frame.name);
                 }
             }
-            if value.ends_with(['<', '>', '\\']) || value.contains("<<") || value.ends_with("\\\n")
+            if value.ends_with(['<', '>', '\\'])
+                || value.contains("<<")
+                || value.contains('#')
+                || value.ends_with("\\\n")
             {
                 let value = value.to_owned();
                 self.joined_alias(name, &value, nested)?;
                 continue;
             }
-            let (replacement, spans, _) = with(nested, || lex(value, false, true))?;
+            let replacement = with(nested.clone(), || lex(value, false, true));
+            let (replacement, spans, _) = match replacement {
+                Err(Error::Incomplete(_)) => {
+                    let value = value.to_owned();
+                    self.joined_alias(name, &value, nested)?;
+                    continue;
+                }
+                result => result?,
+            };
             let index = self.position();
             self.alias_source
                 .get_or_insert_with(Default::default)

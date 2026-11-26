@@ -15,6 +15,49 @@ mod wrapper;
 pub use crate::word::{Word, is_identifier};
 pub(crate) use wrapper::opens_function;
 
+// Fold only token-separating newlines. Quoted newlines, comment endings and
+// here-document boundaries must survive recall and execution.
+pub(crate) fn history_command(text: &str) -> std::borrow::Cow<'_, str> {
+    use std::borrow::Cow;
+    if text.contains(['#', '\x60']) || text.contains("<<") {
+        return Cow::Borrowed(text);
+    }
+    let Ok((tokens, spans, _)) = lex(text, false, true) else {
+        return Cow::Borrowed(text);
+    };
+    if tokens.iter().any(|t| {
+        matches!(t, Token::ArrayStart | Token::EndArm(_))
+            || matches!(t.keyword(), Some("case" | "[[" | "function"))
+    }) {
+        return Cow::Borrowed(text);
+    }
+    let mut result = String::new();
+    let mut start = 0;
+    for (i, &(a, b)) in spans.iter().enumerate() {
+        if !matches!(tokens[i], Token::Newline) || i == 0 {
+            continue;
+        }
+        let previous = &tokens[i - 1];
+        if matches!(previous, Token::RightParen)
+            || tokens.get(i + 1).and_then(Token::keyword) == Some("in")
+        {
+            continue;
+        }
+        result.push_str(&text[start..a]);
+        if !lexer::command_position(&tokens[..i]) {
+            result.push(';');
+        }
+        result.push(' ');
+        start = b;
+    }
+    if start == 0 {
+        Cow::Borrowed(text)
+    } else {
+        result.push_str(&text[start..]);
+        Cow::Owned(result)
+    }
+}
+
 pub(crate) fn history_word_spans(s: &str) -> Vec<(usize, usize)> {
     let mut words = Vec::new();
     let mut start = None;
@@ -250,6 +293,7 @@ pub struct SimpleCommand<W = String> {
     pub words: Vec<W>,
     pub redirects: Vec<Redirect<W>>,
     pub assignments: Vec<(String, Assignment<W>)>,
+    pub keyword_args: Option<Rc<Vec<(usize, String)>>>,
 }
 
 impl<W> Default for SimpleCommand<W> {
@@ -260,6 +304,7 @@ impl<W> Default for SimpleCommand<W> {
             words: Vec::new(),
             redirects: Vec::new(),
             assignments: Vec::new(),
+            keyword_args: None,
         }
     }
 }
@@ -428,6 +473,7 @@ pub enum Error {
     Incomplete(&'static str),
     HereDoc(HereDocHint),
     Invalid(&'static str),
+    ArrayToken,
 }
 
 impl Error {
@@ -439,6 +485,7 @@ impl Error {
         match self {
             Self::Incomplete(s) | Self::Invalid(s) => s,
             Self::HereDoc(_) => "unterminated here-document",
+            Self::ArrayToken => "unexpected token in array assignment",
         }
     }
 }
@@ -630,7 +677,34 @@ fn parse_source(source: &str, final_input: bool) -> Result<Vec<Statement>, Error
     if let Some(function) = wrapper::parse(source) {
         return Ok(vec![function]);
     }
-    let (tokens, spans, _) = lex(source, false, final_input)?;
+    let (tokens, spans, _) = match lex(source, false, final_input) {
+        Ok(tokens) => tokens,
+        Err(error @ Error::Incomplete(_)) => {
+            // An alias opening a quote can supply the missing left delimiter
+            // for the following source. Only retry a literal command name.
+            let aliases = aliases::current();
+            let trimmed = source.trim_start_matches([' ', '\t']);
+            let name = &trimmed[..lexer::plain_prefix(trimmed)];
+            let Some(value) = aliases.get(name).filter(|_| {
+                !name.is_empty() && trimmed[name.len()..].starts_with(lexer::separator)
+            }) else {
+                return Err(error);
+            };
+            let mut nested = aliases.clone();
+            Rc::make_mut(nested.0.as_mut().unwrap()).remove(name);
+            let replacement = aliases::with(nested.clone(), || lex(value, false, final_input));
+            if !matches!(replacement, Err(Error::Incomplete(_))) {
+                return Err(error);
+            }
+            let end = source.len() - trimmed.len() + name.len();
+            let (tokens, spans, _) = lex(&source[..end], false, true)?;
+            let mut reader = Reader::new(tokens, spans, source);
+            reader.final_input = final_input;
+            reader.joined_alias(name.into(), value, nested)?;
+            return reader.list(&[]);
+        }
+        Err(error) => return Err(error),
+    };
     let mut reader = Reader::new(tokens, spans, source);
     reader.final_input = final_input;
     reader.list(&[])
@@ -756,7 +830,14 @@ impl Reader {
     }
 
     fn list(&mut self, stops: &[&str]) -> Result<Vec<Statement>, Error> {
-        self.read_list(stops, false)
+        self.read_list(stops, false).map_err(|error| {
+            // Never resume in the body of an invalid loop, conditional or function.
+            if !stops.is_empty() && matches!(error, Error::ArrayToken) {
+                Error::Invalid(error.message())
+            } else {
+                error
+            }
+        })
     }
 
     fn read_list(
@@ -1366,6 +1447,9 @@ impl Reader {
         redirects: &mut Vec<Redirect<Word>>,
     ) -> Result<(), Error> {
         let line = self.location(self.position().saturating_sub(1)).line;
+        if matches!(token, Token::Redirect(..) | Token::BothRedirect(_)) {
+            self.alias_at(false, Some(&[]))?;
+        }
         match token {
             Token::DescriptorName(name) => {
                 let first = redirects.len();
@@ -1495,8 +1579,20 @@ impl Reader {
                         }
                         // Most simple commands have only the name and one operand.
                         cmd.words.reserve_exact(2);
-                    } else if declaration {
-                        word = word.declaration();
+                    } else if let Some(name) = assignment {
+                        Rc::make_mut(cmd.keyword_args.get_or_insert_with(Default::default))
+                            .push((cmd.words.len(), name));
+                        if declaration {
+                            word = word.declaration();
+                        }
+                    } else if let Word::Expanded(parts) = &word
+                        && matches!(parts.first(), Some(crate::word::Part::Text(name)) if crate::word::is_identifier(name))
+                        && matches!(parts.get(1), Some(crate::word::Part::Pattern(p)) if p.starts_with('['))
+                        && let Some(name) =
+                            array::indexed_prefix(self.location(self.position() - 1).text())
+                    {
+                        Rc::make_mut(cmd.keyword_args.get_or_insert_with(Default::default))
+                            .push((cmd.words.len(), name.to_owned()));
                     }
                     cmd.words.push(word);
                 }

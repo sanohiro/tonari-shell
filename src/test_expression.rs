@@ -97,18 +97,26 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                 }
                 "=~" => {
                     let captured = std::cell::Cell::new(None);
-                    let expression = crate::expansion::Expansion::new(session, status, &captured)
-                        .regex(right.clone())
-                        .map_err(|e| {
-                            e.report("[[: ");
-                            e.flow(session)
-                        })?;
+                    let expression = if session.shopt.compat <= 31 {
+                        operand(session, right, status)?
+                    } else {
+                        crate::expansion::Expansion::new(session, status, &captured)
+                            .regex(right.clone())
+                            .map_err(|e| {
+                                e.report("[[: ");
+                                e.flow(session)
+                            })?
+                            .into()
+                    };
                     trace(session, status, &[&left, op, &expression]);
                     let result = pattern::localized(|| {
                         let ignore_case = session.shopt.nocasematch;
                         let slot = &mut session.regex[usize::from(ignore_case)];
                         if slot.as_ref().is_none_or(|r| r.pattern != expression) {
-                            *slot = Some(std::rc::Rc::new(Compiled::new(expression, ignore_case)?));
+                            *slot = Some(std::rc::Rc::new(Compiled::new(
+                                expression.into_owned(),
+                                ignore_case,
+                            )?));
                         }
                         slot.as_ref().unwrap().search(&left)
                     })

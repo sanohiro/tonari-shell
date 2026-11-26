@@ -27,13 +27,21 @@ impl Drop for Coprocess {
     }
 }
 
-pub(super) fn replaced(session: &Session, destination: RawFd) {
-    for job in &session.coprocesses {
-        for fd in &job.fds {
-            if fd.get() == Some(destination) {
-                fd.set(None);
-            }
+pub(super) fn replaced(session: &mut Session, destination: RawFd) {
+    for i in 0..session.coprocesses.len() {
+        let job = &session.coprocesses[i];
+        let Some(end) = job.fds.iter().position(|fd| fd.get() == Some(destination)) else {
+            continue;
+        };
+        job.fds[end].set(None);
+        if !session.coprocesses[i + 1..]
+            .iter()
+            .any(|newer| newer.name == job.name)
+        {
+            let job = Rc::clone(job);
+            session.assign_element(&job.name, end as i64, "-1".into());
         }
+        return;
     }
 }
 

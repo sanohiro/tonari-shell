@@ -216,7 +216,7 @@ fn mapped_char(c: char, upper: bool, locale: CharacterLocale) -> char {
     }
 }
 
-fn same_letter(left: char, right: char, locale: CharacterLocale) -> bool {
+pub(crate) fn same_letter(left: char, right: char, locale: CharacterLocale) -> bool {
     if left == right {
         return true;
     }

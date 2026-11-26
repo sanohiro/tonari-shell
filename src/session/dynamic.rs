@@ -38,6 +38,10 @@ fn entropy() -> Option<u32> {
 impl Session {
     pub(crate) fn enter_subshell(&mut self) {
         self.subshell_depth += 1;
+        if self.shopt.compat > 44 {
+            self.parent_loop_in_subshell |= self.loop_depth != 0;
+            self.loop_depth = 0;
+        }
         self.dynamic.random.set(Random::default());
     }
 
@@ -67,7 +71,12 @@ impl Session {
                     let value =
                         16_807 * i64::from(seed % 127_773) - 2_836 * i64::from(seed / 127_773);
                     rng.seed = if value < 0 { value + MODULUS } else { value } as u32;
-                    let next = ((rng.seed ^ (rng.seed >> 16)) & 0x7fff) as u16;
+                    let bits = if self.shopt.compat <= 50 {
+                        rng.seed
+                    } else {
+                        rng.seed ^ (rng.seed >> 16)
+                    };
+                    let next = (bits & 0x7fff) as u16;
                     if next != rng.last {
                         rng.last = next;
                         self.dynamic.random.set(rng);

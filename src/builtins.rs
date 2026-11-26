@@ -164,7 +164,27 @@ fn primary(tokens: &mut &[String], session: &mut Session) -> Result<bool, &'stat
         return Ok(!primary(tokens, session)?);
     }
     if first == "(" {
-        let value = disjunction(tokens, session)?;
+        // Bash 5.3 applies the POSIX small-arity rules inside parentheses.
+        // Stop scanning as soon as the group cannot qualify.
+        let mut level = 1;
+        let close = (session.shopt.compat > 52)
+            .then(|| {
+                rest.iter().take(5).position(|word| {
+                    match word.as_str() {
+                        "(" => level += 1,
+                        ")" => level -= 1,
+                        _ => (),
+                    }
+                    level == 0
+                })
+            })
+            .flatten();
+        let value = if let Some(n @ 1..=4) = close {
+            *tokens = &rest[n..];
+            test_args(&rest[..n], session)?
+        } else {
+            disjunction(tokens, session)?
+        };
         if tokens.first().is_none_or(|v| v != ")") {
             return Err("missing )");
         }
@@ -244,9 +264,21 @@ pub(crate) fn unary(op: &str, arg: &str, session: &mut Session) -> Result<bool, 
         "-R" => return Ok(session.is_nameref(arg)),
         "-o" => return Ok(session.set_option_enabled(arg)),
         "-v" => {
-            if let Some((name, expr)) = crate::session::array::subscript(arg)
-                && session.is_associative(name)
+            if arg.bytes().next().is_some_and(|c| c.is_ascii_digit())
+                && let Ok(n) = arg.parse::<usize>()
             {
+                return Ok(n <= session.positional.len());
+            }
+            if let Some((name, expr)) = crate::session::array::subscript(arg) {
+                let associative = session.is_associative(name);
+                if matches!(expr, "*" | "@") && (!associative || session.shopt.compat <= 51) {
+                    return Ok(session
+                        .stored_array_len(name)
+                        .map_or_else(|| !session.indices(name).is_empty(), |len| len != 0));
+                }
+                if !associative {
+                    return Ok(session.get(arg).is_some());
+                }
                 let key = session.subscript_key(expr)?;
                 return Ok(session.assoc_value(name, &key).is_some());
             }

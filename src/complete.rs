@@ -289,7 +289,7 @@ impl Source {
                     .then(|| session.get("FIGNORE"))
                     .flatten()
                     .filter(|s| !s.is_empty());
-                if !list {
+                if !list && !session.bindings.ignore_case {
                     let directory = Directory::open(prefix, session)?;
                     let common = if let Some(patterns) = ignored.as_deref() {
                         let suffixes: Vec<_> =
@@ -311,12 +311,38 @@ impl Source {
                     };
                     return Some((common?, Vec::new()));
                 }
-                let mut choices = file_names(prefix, directories_only, true, session);
+                let mut choices = file_names(
+                    prefix,
+                    directories_only,
+                    !session.bindings.unmarked_dirs,
+                    session,
+                );
                 filter_ignored(
                     &mut choices,
                     ignored.as_deref(),
                     session.shopt.force_fignore,
                 );
+                if session.bindings.ignore_case {
+                    let locale = session.character_locale();
+                    let first = choices
+                        .iter()
+                        .find(|s| s.starts_with(prefix))
+                        .or_else(|| choices.first())?;
+                    let mut len = first.len();
+                    for name in &choices {
+                        len = first[..len]
+                            .chars()
+                            .zip(name.chars())
+                            .take_while(|&(a, b)| crate::pattern::same_letter(a, b, locale))
+                            .map(|(c, _)| c.len_utf8())
+                            .sum();
+                    }
+                    let common = Common {
+                        text: first[..len].into(),
+                        unique: choices.len() == 1,
+                    };
+                    return Some((common, if list { choices } else { Vec::new() }));
+                }
                 choices
             }
         };
@@ -386,6 +412,9 @@ pub fn at(
         None
     };
     let ordinary = || {
+        if first && prefix.is_empty() && !files_only && session.shopt.no_empty_cmd_completion {
+            return None;
+        }
         let dirs = matches!(command, Some("cd" | "pushd")) && !files_only;
         if prefix.is_empty()
             && !files_only
@@ -727,9 +756,7 @@ pub(crate) fn service_names(prefix: &str) -> Vec<String> {
 pub(crate) fn signal_names(prefix: &str) -> Vec<String> {
     static ALL: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
     let names = ALL.get_or_init(|| {
-        let mut signals = crate::traps::SIGNALS.to_vec();
-        #[cfg(target_os = "linux")]
-        signals.extend([("PWR", libc::SIGPWR), ("STKFLT", libc::SIGSTKFLT)]);
+        let mut signals: Vec<_> = crate::traps::signals().collect();
         signals.sort_unstable_by_key(|&(_, n)| n);
         let mut names: Vec<_> = signals
             .into_iter()
@@ -741,22 +768,6 @@ pub(crate) fn signal_names(prefix: &str) -> Vec<String> {
                 }
             })
             .collect();
-        #[cfg(target_os = "linux")]
-        {
-            let low = libc::SIGRTMIN();
-            let high = libc::SIGRTMAX();
-            for n in low..=high {
-                names.push(if n == low {
-                    "SIGRTMIN".into()
-                } else if n == high {
-                    "SIGRTMAX".into()
-                } else if n - low <= high - n {
-                    format!("SIGRTMIN+{}", n - low)
-                } else {
-                    format!("SIGRTMAX-{}", high - n)
-                });
-            }
-        }
         names.extend(["DEBUG", "ERR", "RETURN"].map(str::to_owned));
         names
     });
@@ -803,6 +814,10 @@ struct Directory<'a> {
     dir: &'a str,
     base: &'a str,
     path: PathBuf,
+    fold: Option<crate::session::CharacterLocale>,
+    map_case: bool,
+    show_hidden: bool,
+    mark_dirs: bool,
 }
 
 impl<'a> Directory<'a> {
@@ -814,13 +829,35 @@ impl<'a> Directory<'a> {
             Some(rest) => Path::new(&session.get("HOME")?).join(rest),
             None => Path::new(if dir.is_empty() { "." } else { dir }).to_owned(),
         };
-        Some(Self { dir, base, path })
+        Some(Self {
+            dir,
+            base,
+            path,
+            fold: session
+                .bindings
+                .ignore_case
+                .then(|| session.character_locale()),
+            map_case: session.bindings.map_case,
+            show_hidden: !session.bindings.hide_dotfiles,
+            mark_dirs: !session.bindings.unmarked_dirs,
+        })
     }
 
     fn visit(&self, mut visitor: impl FnMut(&str, u8) -> ControlFlow<()>) {
         let mut entries = 0usize;
         let editing = crate::editor::preview::active();
-        let _ = scan(&self.path, self.base.as_bytes(), &mut |raw, kind| {
+        let prefix = if self.fold.is_some() {
+            &[][..]
+        } else {
+            self.base.as_bytes()
+        };
+        let ascii_map = self.map_case
+            && self.base.is_ascii()
+            && self
+                .fold
+                .is_some_and(|locale| !matches!(locale, crate::session::CharacterLocale::Turkic));
+        let base = self.base.as_bytes();
+        let _ = scan(&self.path, prefix, &mut |raw, kind| {
             if editing && entries % 256 == 0 {
                 crate::editor::preview::scan_input();
             }
@@ -829,9 +866,42 @@ impl<'a> Directory<'a> {
                 return ControlFlow::Continue(());
             };
             let bytes = raw.to_bytes();
+            // A folded scan cannot use the bytewise directory prefix filter.
+            // Reject ASCII mismatches before decoding the rest of the filename.
+            let mut matched = false;
+            if ascii_map {
+                let head = &bytes[..bytes.len().min(base.len())];
+                if head.is_ascii() {
+                    if head.len() != base.len()
+                        || !base.iter().zip(head).all(|(&a, &b)| {
+                            a.eq_ignore_ascii_case(&b)
+                                || matches!((a, b), (b'-', b'_') | (b'_', b'-'))
+                        })
+                    {
+                        return ControlFlow::Continue(());
+                    }
+                    matched = true;
+                }
+            }
             if !matches!(bytes, b"." | b"..")
-                && (!bytes.starts_with(b".") || self.base.starts_with('.'))
+                && (!bytes.starts_with(b".")
+                    || self.base.starts_with('.')
+                    || self.show_hidden && self.base.is_empty())
                 && let Ok(name) = raw.to_str()
+                && (matched
+                    || self.fold.is_none_or(|locale| {
+                        if !self.map_case {
+                            return crate::pattern::folded_prefix(name, self.base, locale)
+                                .is_some();
+                        }
+                        let mut chars = name.chars();
+                        self.base.chars().all(|c| {
+                            chars.next().is_some_and(|d| {
+                                crate::pattern::same_letter(c, d, locale)
+                                    || self.map_case && matches!((c, d), ('-', '_') | ('_', '-'))
+                            })
+                        })
+                    }))
             {
                 return visitor(name, kind);
             }
@@ -1035,7 +1105,10 @@ fn common_file(
         ControlFlow::Continue(())
     });
     let mut common = common?;
-    if common.unique && (directories_only || directory.is_directory(&common.text, first_kind)) {
+    if common.unique
+        && directory.mark_dirs
+        && (directories_only || directory.is_directory(&common.text, first_kind))
+    {
         common.text.push('/');
     }
     common.text.insert_str(0, directory.dir);

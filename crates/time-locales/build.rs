@@ -40,12 +40,31 @@ fn main() {
     let mut names = Vec::new();
     let mut records = Vec::new();
     let mut fields = Vec::new();
+    let mut numeric_names = String::new();
+    let mut numeric_offsets = vec![0u16];
+    let mut numeric_kinds = Vec::new();
+    let mut profiles = Vec::new();
     let mut previous = "";
     for name in include_str!("names.txt").lines() {
         assert!(name > previous, "locale names must be unique and sorted");
         previous = name;
         let locale: Locale = name.parse().unwrap();
         names.push(tables.intern(name));
+        numeric_names.push_str(name);
+        numeric_offsets.push(u16::try_from(numeric_names.len()).unwrap());
+        let profile = (
+            locale_match!(locale => LC_NUMERIC::DECIMAL_POINT),
+            locale_match!(locale => LC_NUMERIC::THOUSANDS_SEP),
+            locale_match!(locale => LC_NUMERIC::GROUPING),
+        );
+        let id = profiles
+            .iter()
+            .position(|p| p == &profile)
+            .unwrap_or_else(|| {
+                profiles.push(profile);
+                profiles.len() - 1
+            });
+        numeric_kinds.push(u8::try_from(id).unwrap());
         let mut row = Vec::new();
         macro_rules! field {
             ($id:ident, $value:expr) => {{
@@ -120,4 +139,22 @@ fn main() {
     writeln!(code, "static ENTRIES: &[u16] = &{:?};", tables.entries).unwrap();
     writeln!(code, "static OFFSETS: &[u32] = &{:?};", tables.offsets).unwrap();
     fs::write(out.join("tables.rs"), code).unwrap();
+    let mut numeric = format!(
+        "const NAMES: &str = {numeric_names:?};\nconst OFFSETS: &[u16] = &{numeric_offsets:?};\nconst KINDS: &[u8] = &{numeric_kinds:?};\nconst PROFILES: &[Numeric] = &[\n"
+    );
+    for (decimal, separator, groups) in profiles {
+        let groups: Vec<u8> = groups
+            .iter()
+            .copied()
+            .take_while(|&n| n > 0)
+            .map(|n| u8::try_from(n).unwrap())
+            .collect();
+        writeln!(
+            numeric,
+            "Numeric {{ decimal: {decimal:?}, separator: {separator:?}, groups: &{groups:?} }},"
+        )
+        .unwrap();
+    }
+    numeric.push_str("];");
+    fs::write(out.join("numeric.rs"), numeric).unwrap();
 }

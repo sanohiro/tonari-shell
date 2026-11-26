@@ -135,6 +135,7 @@ pub struct Session {
     variables: BTreeMap<String, Variable>,
     dynamic: dynamic::Dynamic,
     groups_unset: bool,
+    funcname_unset: bool,
     word_breaks_unset: bool,
     has_namerefs: bool,
     reference_depth: std::cell::Cell<u8>,
@@ -148,6 +149,7 @@ pub struct Session {
     pub login: bool,
     pub posix: bool,
     pub physical: bool,
+    pub keyword: bool,
     pub logout_started: bool,
     pub allexport: bool,
     pub notify: bool,
@@ -162,6 +164,7 @@ pub struct Session {
     pub history_enabled: bool,
     pub verbose: bool,
     pub(crate) history: Option<Rc<crate::history::Entries>>,
+    pub(crate) history_expansion: Option<Box<crate::history::expand::Memory>>,
     pub(crate) initial_history: Option<Rc<crate::history::InitialJournal>>,
     pub command_number: usize,
     pub(crate) evaluating: bool,
@@ -180,6 +183,7 @@ pub struct Session {
     pub pipefail: bool,
     pub pipe_status: PipelineStatus,
     pub stdin_redirected: bool,
+    pub stdin_replaced: bool,
     pub noglob: bool,
     pub noclobber: bool,
     pub shopt: options::ShellOptions,
@@ -202,10 +206,12 @@ pub struct Session {
     pub source_names: Vec<Rc<str>>,
     pub current_command: Option<crate::parser::Location>,
     pub debug_args: Vec<Vec<String>>,
+    pub debug_base: std::cell::OnceCell<Vec<String>>,
     pub traced_functions: std::collections::BTreeSet<String>,
     pub call_lines: Vec<usize>,
     pub function_environment: BTreeMap<String, Option<String>>,
     pub loop_depth: u32,
+    pub parent_loop_in_subshell: bool,
     pub editor_kill: String,
     pub editor_queue: std::collections::VecDeque<u8>,
     pub bindings: crate::editor::bindings::Bindings,
@@ -351,6 +357,9 @@ impl Session {
         }
         if self.interactive {
             flags.push('i');
+        }
+        if self.keyword {
+            flags.push('k');
         }
         if self.jobs.monitor {
             flags.push('m');
@@ -511,6 +520,7 @@ impl Session {
                     'T' => self.functrace = enable,
                     'C' => self.noclobber = enable,
                     'P' => self.physical = enable,
+                    'k' => self.keyword = enable,
                     'B' => self.shopt.braceexpand = enable,
                     'f' => self.noglob = enable,
                     'h' => self.hashes.enabled = enable,
@@ -558,6 +568,51 @@ impl Session {
 
     pub fn is_nameref(&self, name: &str) -> bool {
         self.has_namerefs && self.variables.get(name).is_some_and(|v| v.nameref)
+    }
+
+    fn valid_reference_target(name: &str) -> bool {
+        is_identifier(name)
+            || array::subscript(name)
+                .is_some_and(|(base, index)| is_identifier(base) && !index.is_empty())
+    }
+
+    pub(crate) fn assign_for_reference(
+        &mut self,
+        name: &str,
+        value: String,
+    ) -> Result<(), &'static str> {
+        if !Self::valid_reference_target(&value) {
+            return Err("invalid name reference");
+        }
+        // A for-loop retargets the last reference, even if its target is readonly.
+        let mut current = name;
+        for _ in 0..32 {
+            if let Some(next) = self
+                .variables
+                .get(current)
+                .and_then(|v| v.value.as_deref())
+                .filter(|next| self.is_nameref(next))
+            {
+                current = next;
+                continue;
+            }
+            let key = if current == name {
+                Cow::Borrowed(name)
+            } else {
+                Cow::Owned(current.to_owned())
+            };
+            let var = self
+                .variables
+                .get_mut(key.as_ref())
+                .expect("existing name reference");
+            if var.readonly {
+                return Err("readonly variable");
+            }
+            var.value = Some(value);
+            var.declared = true;
+            return Ok(());
+        }
+        Err("circular name reference")
     }
 
     pub fn reference_name<'a>(&self, name: &'a str) -> Result<Cow<'a, str>, &'static str> {
@@ -814,6 +869,7 @@ impl Session {
             "BASH_ARGV0"
                 | "GLOBIGNORE"
                 | "POSIXLY_CORRECT"
+                | "BASH_COMPAT"
                 | "HISTSIZE"
                 | "HISTFILESIZE"
                 | "OPTIND"
@@ -877,8 +933,11 @@ impl Session {
             let _ = self.assign_key(name, "0".into(), value.into_owned());
             return;
         }
-        if self.active_groups(name) {
+        if self.protected_array(name) {
             return;
+        }
+        if name == "BASH_COMPAT" {
+            self.apply_compat(&value);
         }
         if name == "POSIXLY_CORRECT" {
             self.apply_posix_mode(true);
@@ -973,7 +1032,13 @@ impl Session {
             .map_or((key, false), |name| (name, true));
         if matches!(
             name,
-            "OPTIND" | "GLOBIGNORE" | "POSIXLY_CORRECT" | "PATH" | "BASH_ARGV0" | "PIPESTATUS"
+            "OPTIND"
+                | "GLOBIGNORE"
+                | "POSIXLY_CORRECT"
+                | "BASH_COMPAT"
+                | "PATH"
+                | "BASH_ARGV0"
+                | "PIPESTATUS"
         ) || Self::builtin_readonly(name)
         {
             return false;
@@ -1077,6 +1142,13 @@ impl Session {
         value.parse().ok()
     }
 
+    pub(crate) fn assignment_attributes(&self, name: &str) -> (bool, bool) {
+        self.variables.get(name).map_or_else(
+            || (dynamic::integer_attribute(name), false),
+            |v| (v.integer, v.letter_case.is_some()),
+        )
+    }
+
     pub fn integer(&self, name: &str) -> bool {
         self.variables
             .get(name)
@@ -1113,7 +1185,7 @@ impl Session {
     ) -> crate::Flow {
         const NAME: &str = "BASH_TRAPSIG";
         let saved = self.variables.get(NAME).cloned();
-        self.assign(NAME, &number.to_string());
+        self.assign_value(NAME, Cow::Owned(number.to_string()));
         let result = run(self);
         if let Some(var) = saved {
             self.variables.insert(NAME.into(), var);
@@ -1138,6 +1210,9 @@ impl Session {
     // Move the prepared strings and avoid snapshotting variables for restoration.
     pub fn persist_prefix(&mut self, assignments: &mut Vec<(String, String)>) {
         for (name, value) in assignments.drain(..) {
+            if name == "BASH_COMPAT" {
+                self.apply_compat(&value);
+            }
             if name == "POSIXLY_CORRECT" {
                 self.apply_posix_mode(true);
             }
@@ -1167,6 +1242,9 @@ impl Session {
         for (name, value) in assignments {
             if self.readonly(name) {
                 continue;
+            }
+            if name == "BASH_COMPAT" {
+                self.apply_compat(value);
             }
             if name == "POSIXLY_CORRECT" {
                 self.apply_posix_mode(true);
@@ -1211,6 +1289,16 @@ impl Session {
             self.opt_offset = offset;
         }
         for (name, original) in bindings.0 {
+            if name == "BASH_COMPAT" {
+                let inherited;
+                let value = if let Some(v) = &original {
+                    v.value.as_deref()
+                } else {
+                    inherited = std::env::var("BASH_COMPAT").ok();
+                    inherited.as_deref()
+                };
+                self.apply_compat(value.unwrap_or(""));
+            }
             if name == "POSIXLY_CORRECT" {
                 let enabled = original.as_ref().map_or_else(
                     || std::env::var_os("POSIXLY_CORRECT").is_some(),
@@ -1521,6 +1609,9 @@ impl Session {
         if self.readonly(name) {
             return;
         }
+        if name == "BASH_COMPAT" {
+            self.apply_compat("");
+        }
         if name == "POSIXLY_CORRECT" {
             self.apply_posix_mode(false);
         }
@@ -1529,6 +1620,9 @@ impl Session {
         }
         if name == "GROUPS" {
             self.groups_unset = true;
+        }
+        if name == "FUNCNAME" {
+            self.funcname_unset = true;
         }
         if name == "GLOBIGNORE" {
             self.shopt.glob.set_ignore(None);
@@ -1658,6 +1752,16 @@ impl Session {
             }
             if !functions_only {
                 if let Some((base, index)) = array::subscript(name) {
+                    if matches!(index, "*" | "@") && self.stored_array(base) {
+                        if self.shopt.compat <= 51 {
+                            self.unset_variable(base);
+                            continue;
+                        }
+                        if !self.is_associative(base) {
+                            self.replace_array(base, Vec::new());
+                            continue;
+                        }
+                    }
                     if self.is_associative(base) {
                         match self.subscript_key(index) {
                             Ok(key) => self.remove_key(base, &key),

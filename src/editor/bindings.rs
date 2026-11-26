@@ -34,6 +34,16 @@ actions! {
     SwapMark => "exchange-point-and-mark" [b"\x18\x18"],
     Forward => "forward-char" [b"\x06", b"\x1bOC", b"\x1b[C"],
     ForwardWord => "forward-word" [b"\x1b[1;5C"],
+    UpperWord => "upcase-word" [b"\x1bu"],
+    LowerWord => "downcase-word" [b"\x1bl"],
+    CapitalWord => "capitalize-word" [b"\x1bc"],
+    TransposeWords => "transpose-words" [b"\x1bt"],
+    WholeLine => "kill-whole-line" [],
+    RubFilename => "unix-filename-rubout" [],
+    TabInsert => "tab-insert" [],
+    Reload => "re-read-init-file" [b"\x18\x12"],
+    HistoryExpand => "history-expand-line" [b"\x1b^"],
+    MagicSpace => "magic-space" [],
     Comment => "insert-comment" [b"\x1b#"],
     Kill => "kill-line" [b"\x0b"],
     Cut => "kill-region" [],
@@ -203,6 +213,11 @@ pub(crate) struct Bindings {
     prefer_vi: Option<bool>,
     pub(super) blink_matching_paren: bool,
     pub(super) disable_completion: bool,
+    pub(crate) ignore_case: bool,
+    pub(crate) map_case: bool,
+    pub(crate) hide_dotfiles: bool,
+    pub(crate) unmarked_dirs: bool,
+    pub(super) comment_begin: Option<Rc<str>>,
     bracketed_paste: Option<bool>,
     timeout: Option<i32>,
     initialized: bool,
@@ -399,6 +414,17 @@ fn configure(bindings: &mut Bindings, spec: &str, shell: bool) -> Result<(), Str
         };
         match name {
             "blink-matching-paren" => bindings.blink_matching_paren = on()?,
+            "completion-ignore-case" => bindings.ignore_case = on()?,
+            "completion-map-case" => bindings.map_case = on()?,
+            "match-hidden-files" => bindings.hide_dotfiles = !on()?,
+            "mark-directories" => bindings.unmarked_dirs = !on()?,
+            "comment-begin" => {
+                bindings.comment_begin = Some(if let Some(end) = quoted_end(value) {
+                    value[1..end].into()
+                } else {
+                    value.into()
+                })
+            }
             "disable-completion" => bindings.disable_completion = on()?,
             "enable-bracketed-paste" => bindings.bracketed_paste = Some(on()?),
             "keyseq-timeout" => {
@@ -469,7 +495,9 @@ fn load_file(session: &mut Session, path: &Path, depth: usize) -> Result<(), Str
         if let Some(cond) = line.strip_prefix("$if ") {
             levels.push(active);
             let cond = cond.trim();
-            active &= matches!(cond, "Bash" | "bash" | "Tonari" | "tonari" | "mode=emacs")
+            let vi = session.bindings.prefer_vi.unwrap_or(session.vi);
+            active &= matches!(cond, "Bash" | "bash" | "Tonari" | "tonari")
+                || cond == if vi { "mode=vi" } else { "mode=emacs" }
                 || cond.strip_prefix("term=").is_some_and(|t| {
                     session
                         .get("TERM")
@@ -503,6 +531,10 @@ pub(crate) fn initialize(session: &mut Session) {
         return;
     }
     session.bindings.initialized = true;
+    reload(session);
+}
+
+pub(super) fn reload(session: &mut Session) {
     let explicit = session.get("INPUTRC").filter(|v| !v.is_empty());
     let path = explicit
         .map(PathBuf::from)
@@ -584,15 +616,38 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
                 let target = matches!(arg.as_str(), "-q" | "-u")
                     .then(&mut operand)
                     .transpose()?;
+                let dump = matches!(arg.as_str(), "-p" | "-P");
+                let filtered =
+                    dump && !args.as_slice().is_empty() && !args.as_slice()[0].starts_with('-');
+                let specs = if filtered {
+                    std::mem::take(&mut args).as_slice()
+                } else {
+                    &[]
+                };
+                let modern = session.shopt.compat > 52;
                 if let Some(name) = target
                     && !names().any(|n| n == name)
                 {
-                    return Err(format!("\u{60}{name}': unknown function name"));
+                    return Err(format!("`{name}': unknown function name"));
                 }
-                for (action, name, defaults) in named_actions() {
-                    if target.is_some_and(|s| s != name) {
+                let selected = named_actions()
+                    .filter(|(_, n, _)| target.is_none_or(|s| s == *n) && !(filtered && modern))
+                    .map(|(a, n, d)| (Some((a, d)), n));
+                let requested = specs.iter().filter(|_| modern).map(|name| {
+                    let action = named_actions()
+                        .find(|(_, n, _)| *n == name)
+                        .map(|(a, _, d)| (a, d));
+                    (action, name.as_str())
+                });
+                for (definition, name) in selected.chain(requested) {
+                    let Some((action, defaults)) = definition else {
+                        if arg == "-p" {
+                            writeln!(out, "# {name} (not bound)").map_err(ioerr)?;
+                        } else {
+                            writeln!(out, "{name} is not bound to any keys").map_err(ioerr)?;
+                        }
                         continue;
-                    }
+                    };
                     let mut keys = session.bindings.keys_for(action, defaults);
                     if dumb && action == Action::Delete {
                         keys.retain(|k| k != b"\x1b[3~");
@@ -632,6 +687,13 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
                         .map_err(ioerr)?;
                     }
                 }
+                if !modern {
+                    for spec in specs {
+                        if let Err(err) = configure(&mut session.bindings, spec, false) {
+                            eprintln!("tonari: bind: {err}");
+                        }
+                    }
+                }
             }
             "-s" | "-S" | "-X" => {
                 for (key, value) in session.bindings.keys[session.bindings.map as usize]
@@ -657,6 +719,14 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
                 let yes = |on| if on { "on" } else { "off" };
                 let b = &session.bindings;
                 for (name, value) in [
+                    ("completion-ignore-case", yes(b.ignore_case).into()),
+                    ("completion-map-case", yes(b.map_case).into()),
+                    ("match-hidden-files", yes(!b.hide_dotfiles).into()),
+                    ("mark-directories", yes(!b.unmarked_dirs).into()),
+                    (
+                        "comment-begin",
+                        b.comment_begin.as_deref().unwrap_or("#").into(),
+                    ),
                     ("disable-completion", yes(b.disable_completion).to_owned()),
                     (
                         "editing-mode",

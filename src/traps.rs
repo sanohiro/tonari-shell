@@ -1,11 +1,11 @@
 // A signal handler can run while Rust holds allocator and I/O locks. It only
-// sets a bit. The interpreter executes shell code at a command boundary.
+// records pending events. The interpreter executes shell code at a command boundary.
 use crate::{Flow, Session};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicI32, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering::Relaxed};
 
-pub(crate) const SIGNALS: &[(&str, i32)] = &[
+const SIGNALS: &[(&str, i32)] = &[
     ("EXIT", 0),
     ("HUP", libc::SIGHUP),
     ("INT", libc::SIGINT),
@@ -40,16 +40,95 @@ pub(crate) const SIGNALS: &[(&str, i32)] = &[
     ("WINCH", libc::SIGWINCH),
     ("IO", libc::SIGIO),
     ("SYS", libc::SIGSYS),
+    #[cfg(target_os = "linux")]
+    ("PWR", libc::SIGPWR),
+    #[cfg(target_os = "linux")]
+    ("STKFLT", libc::SIGSTKFLT),
 ];
+
+pub(crate) fn signals() -> impl Iterator<Item = (&'static str, i32)> {
+    let signals = SIGNALS.iter().copied();
+    #[cfg(target_os = "linux")]
+    {
+        static REALTIME: std::sync::LazyLock<Vec<(String, i32)>> = std::sync::LazyLock::new(|| {
+            let (low, high) = (libc::SIGRTMIN(), libc::SIGRTMAX());
+            (low..=high)
+                .map(|n| {
+                    let name = if n == low {
+                        "RTMIN".into()
+                    } else if n == high {
+                        "RTMAX".into()
+                    } else if n - low <= high - n {
+                        format!("RTMIN+{}", n - low)
+                    } else {
+                        format!("RTMAX-{}", high - n)
+                    };
+                    (name, n)
+                })
+                .collect()
+        });
+        signals.chain(
+            std::iter::once_with(|| REALTIME.iter())
+                .flatten()
+                .map(|(name, n)| (name.as_str(), *n)),
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        signals
+    }
+}
+
+// Present the same numeric table to both signal-name builtins. Programs
+// commonly extract the first column or parse several entries on one line.
+pub(crate) fn print_signal_table(out: &mut impl Write) -> io::Result<()> {
+    static TABLE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        use std::fmt::Write;
+        let mut signals = signals().filter(|s| s.1 != 0).collect::<Vec<_>>();
+        signals.sort_unstable_by_key(|s| s.1);
+        let mut table = String::new();
+        for row in signals.chunks(5) {
+            for (i, (name, n)) in row.iter().enumerate() {
+                if i != 0 {
+                    table.push('\t');
+                }
+                write!(table, "{n:2}) SIG{name}").unwrap();
+            }
+            table.push('\n');
+        }
+        table
+    });
+    out.write_all(TABLE.as_bytes())
+}
 
 static TERMINATING: AtomicI32 = AtomicI32::new(0);
 extern "C" fn terminate(sig: i32) {
     let _ = TERMINATING.compare_exchange(0, sig, Relaxed, Relaxed);
 }
 
+// The highest user signal on Linux is 64. EXIT is synthetic and never
+// enters these masks, leaving exactly one bit for each real signal.
+const fn signal_bit(sig: i32) -> u64 {
+    1u64 << (sig - 1)
+}
+
 static PENDING: AtomicU64 = AtomicU64::new(0);
 extern "C" fn record(sig: i32) {
-    PENDING.fetch_or(1 << sig, Relaxed);
+    PENDING.fetch_or(signal_bit(sig), Relaxed);
+}
+
+// A single kernel SIGCHLD can cover several waitable children. Count the
+// statuses consumed by the interpreter, including when wait blocks on a
+// different PID. A bare signal wakes the interpreter to check for statuses.
+static WATCH_CHILDREN: AtomicBool = AtomicBool::new(false);
+static CHILD_EVENTS: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) fn waitpid(pid: libc::pid_t, status: &mut i32, flags: i32) -> libc::pid_t {
+    let got = unsafe { libc::waitpid(pid, status, flags) };
+    if got > 0 && WATCH_CHILDREN.load(Relaxed) && CHILD_EVENTS.fetch_add(1, Relaxed) == 0 {
+        record(libc::SIGCHLD);
+    }
+    got
 }
 
 // Pseudo-traps never enter the OS signal API or the pending signal bitset.
@@ -70,7 +149,7 @@ fn trap_number(name: &str) -> Option<i32> {
 
 #[derive(Clone)]
 pub(crate) struct Entry {
-    command: String,
+    command: std::rc::Rc<str>,
     original: libc::sigaction,
 }
 
@@ -86,10 +165,16 @@ pub struct Traps {
     interactive_handlers: bool,
     interactive_origin: bool,
     pub before_return: u8,
-    pub signal_status: Option<u8>,
+    current_action: Option<ActionStatus>,
     async_resettable: u64,
     implicit: BTreeMap<i32, libc::sigaction>,
-    pub exit_status: Option<u8>,
+}
+
+#[derive(Clone, Copy)]
+struct ActionStatus {
+    signal: i32,
+    scope_depth: u32,
+    status: u8,
 }
 
 pub(crate) fn number(s: &str) -> Option<i32> {
@@ -98,10 +183,26 @@ pub(crate) fn number(s: &str) -> Option<i32> {
         .get(..3)
         .filter(|prefix| prefix.eq_ignore_ascii_case("SIG"))
         .map_or(s, |_| &s[3..]);
-    SIGNALS
-        .iter()
+    let known = signals()
         .find(|(name, n)| s.eq_ignore_ascii_case(name) || number == Some(*n))
-        .map(|s| s.1)
+        .map(|s| s.1);
+    #[cfg(target_os = "linux")]
+    if known.is_none()
+        && let Some((prefix, offset)) = s.as_bytes().split_at_checked(6)
+    {
+        let (low, high) = (libc::SIGRTMIN(), libc::SIGRTMAX());
+        let delta = std::str::from_utf8(offset).ok()?.parse::<u32>().ok()?;
+        if delta > (high - low) as u32 {
+            return None;
+        }
+        if prefix.eq_ignore_ascii_case(b"RTMIN+") {
+            return Some(low + delta as i32);
+        }
+        if prefix.eq_ignore_ascii_case(b"RTMAX-") {
+            return Some(high - delta as i32);
+        }
+    }
+    known
 }
 
 fn action(handler: usize) -> libc::sigaction {
@@ -183,7 +284,14 @@ impl Traps {
     }
 
     pub fn in_action(&self) -> bool {
-        self.running != 0 || self.in_nested_action() || self.exit_status.is_some()
+        self.current_action.is_some()
+    }
+
+    pub fn implicit_status(&self, scope_depth: u32, exiting: bool) -> Option<u8> {
+        let action = self.current_action?;
+        (action.signal != DEBUG
+            && (scope_depth == action.scope_depth || exiting && action.signal == 0))
+            .then_some(action.status)
     }
 
     pub fn has_explicit_traps(&self) -> bool {
@@ -220,7 +328,7 @@ impl Traps {
     pub fn ignore_async(&mut self, sig: i32) {
         let old = unsafe { libc::signal(sig, libc::SIG_IGN) };
         if old != libc::SIG_IGN && old != libc::SIG_ERR {
-            self.async_resettable |= 1 << sig;
+            self.async_resettable |= signal_bit(sig);
         }
     }
 
@@ -301,7 +409,7 @@ impl Traps {
             if original.sa_sigaction == libc::SIG_IGN {
                 if !interactive
                     && !self.interactive_origin
-                    && self.async_resettable & (1 << sig) == 0
+                    && self.async_resettable & (signal_bit(sig)) == 0
                 {
                     return Ok(());
                 }
@@ -329,6 +437,13 @@ impl Traps {
             if unsafe { libc::sigaction(sig, &new, std::ptr::null_mut()) } < 0 {
                 return Err(io::Error::last_os_error());
             }
+        }
+        if sig == libc::SIGCHLD {
+            let watch = command != "-" && !command.is_empty();
+            if !watch {
+                CHILD_EVENTS.store(0, Relaxed);
+            }
+            WATCH_CHILDREN.store(watch && self.running & signal_bit(sig) == 0, Relaxed);
         }
         if command == "-" {
             self.entries.remove(&sig);
@@ -394,7 +509,11 @@ impl Traps {
     }
 
     pub fn after_fork(&mut self, errtrace: bool, functrace: bool) {
-        self.signal_status = None;
+        self.current_action = None;
+        if self.entries.contains_key(&libc::SIGCHLD) {
+            WATCH_CHILDREN.store(false, Relaxed);
+            CHILD_EVENTS.store(0, Relaxed);
+        }
         if self.interactive_handlers {
             self.interactive_handlers = false;
             crate::execute::reset_caught_signals(&[
@@ -417,7 +536,6 @@ impl Traps {
             return;
         }
         let _ = self.watch_exit(false);
-        self.exit_status = None;
         TERMINATING.store(0, Relaxed);
         // Bash exposes the parent list to trap -p until the child changes a trap.
         // Only ignored dispositions and inherited shell handlers remain active.
@@ -474,7 +592,7 @@ impl Traps {
                 } else if sig == ERR {
                     "ERR"
                 } else {
-                    SIGNALS.iter().find(|s| s.1 == sig).unwrap().0
+                    signals().find(|s| s.1 == sig).unwrap().0
                 };
                 writeln!(
                     out,
@@ -485,14 +603,14 @@ impl Traps {
             }
             if defaults
                 && !entries.contains_key(&sig)
-                && let Some(&(name, _)) = SIGNALS.iter().find(|s| s.1 == sig)
+                && let Some((name, _)) = signals().find(|s| s.1 == sig)
             {
                 writeln!(out, "trap -- - {name}")?;
             }
             Ok::<_, io::Error>(())
         };
         if defaults && names.len() == 0 {
-            for &(_, sig) in SIGNALS {
+            for (_, sig) in signals() {
                 if !matches!(sig, libc::SIGSTOP | libc::SIGKILL) && show(sig).is_err() {
                     return 1;
                 }
@@ -554,12 +672,7 @@ impl Traps {
         }
         if signals {
             let mut out = io::stdout().lock();
-            for &(name, n) in SIGNALS.iter().filter(|s| s.1 != 0) {
-                if writeln!(out, "{n:2}) SIG{name}").is_err() {
-                    return 1;
-                }
-            }
-            return 0;
+            return u8::from(print_signal_table(&mut out).is_err());
         }
         if list || actions || args.is_empty() {
             return self.list(
@@ -610,7 +723,7 @@ pub(crate) fn input_interrupted() -> bool {
 
 pub fn pending() -> Option<i32> {
     let mask = PENDING.load(Relaxed);
-    (mask != 0).then(|| mask.trailing_zeros() as i32)
+    (mask != 0).then(|| 1 + mask.trailing_zeros() as i32)
 }
 
 pub fn debug(session: &mut Session, status: u8) -> Option<Flow> {
@@ -662,7 +775,12 @@ pub fn error(session: &mut Session, status: u8) -> Flow {
 }
 
 // GNU Bash reserves the three numbers immediately following its OS signal table.
-fn with_trapsig(session: &mut Session, sig: i32, run: impl FnOnce(&mut Session) -> Flow) -> Flow {
+fn with_trapsig(
+    session: &mut Session,
+    sig: i32,
+    status: u8,
+    run: impl FnOnce(&mut Session) -> Flow,
+) -> Flow {
     #[cfg(target_os = "macos")]
     const NSIG: i32 = 32;
     #[cfg(target_os = "linux")]
@@ -673,13 +791,20 @@ fn with_trapsig(session: &mut Session, sig: i32, run: impl FnOnce(&mut Session) 
         RETURN => NSIG + 2,
         other => other,
     };
-    session.with_trap_signal(number, run)
+    let previous = session.traps.current_action.replace(ActionStatus {
+        signal: sig,
+        scope_depth: session.function_depth + session.source_depth,
+        status,
+    });
+    let flow = session.with_trap_signal(number, run);
+    session.traps.current_action = previous;
+    flow
 }
 
 fn action_text(session: &mut Session, sig: i32, status: u8) -> Flow {
     let command = session.traps.entries[&sig].command.clone();
     let previous = session.pipe_status.clone();
-    let flow = with_trapsig(session, sig, |session| {
+    let flow = with_trapsig(session, sig, status, |session| {
         crate::eval_text(session, &command, status)
     });
     session.pipe_status = previous;
@@ -692,27 +817,44 @@ pub fn dispatch(session: &mut Session, status: u8) -> Flow {
     }
     let mut pending = PENDING.load(Relaxed) & !session.traps.running;
     while pending != 0 {
-        let sig = pending.trailing_zeros() as i32;
-        let bit = 1 << sig;
+        let sig = 1 + pending.trailing_zeros() as i32;
+        let bit = signal_bit(sig);
         pending &= !bit;
         if PENDING.fetch_and(!bit, Relaxed) & bit == 0 {
             continue;
         }
         if let Some(command) = session.traps.entries.get(&sig).map(|e| e.command.clone()) {
+            let count = if sig == libc::SIGCHLD {
+                session.jobs.poll();
+                session.substitutions.finish(session.substitutions.scope());
+                let n = CHILD_EVENTS.swap(0, Relaxed);
+                if n == 0 {
+                    continue;
+                }
+                // Children synchronously reaped by the action must not
+                // recursively trigger the same action.
+                WATCH_CHILDREN.store(false, Relaxed);
+                n
+            } else {
+                1
+            };
             session.traps.running |= bit;
             let previous = session.pipe_status.clone();
-            let previous_status = session.traps.signal_status.replace(status);
             let previous_line = session.signal_line.replace(1);
-            let flow = with_trapsig(session, sig, |session| {
-                crate::input::text(session, &command, status, false, false, Some(1))
-            });
+            let mut flow = Flow::Continue(status);
+            for _ in 0..count {
+                flow = with_trapsig(session, sig, status, |session| {
+                    crate::input::text(session, &command, status, false, false, Some(1))
+                });
+                if !matches!(flow, Flow::Continue(_)) || count > 1 && !session.traps.catches(sig) {
+                    break;
+                }
+            }
             session.signal_line = previous_line;
-            session.traps.signal_status = previous_status;
             session.pipe_status = previous;
             session.traps.running &= !bit;
-            // Commands in a CHLD handler can create children of their own.
             if sig == libc::SIGCHLD {
-                PENDING.fetch_and(!bit, Relaxed);
+                WATCH_CHILDREN.store(session.traps.catches(sig), Relaxed);
             }
             if !matches!(flow, Flow::Continue(_)) {
                 return flow;
@@ -738,13 +880,11 @@ pub fn finish(session: &mut Session, code: u8) -> u8 {
     let sig = TERMINATING.swap(0, Relaxed);
     if let Some(exit) = session.traps.entries.remove(&0) {
         let _ = session.traps.watch_exit(false);
-        session.traps.exit_status = Some(code);
-        if let Flow::Exit(n) = with_trapsig(session, 0, |session| {
+        if let Flow::Exit(n) = with_trapsig(session, 0, code, |session| {
             crate::eval_text(session, &exit.command, code)
         }) {
             code = n;
         }
-        session.traps.exit_status = None;
     }
     if sig != 0 {
         unsafe {
@@ -820,8 +960,8 @@ impl WaitMask {
         if sig != 0 {
             return Some(128 + sig as u8);
         }
-        let bits = PENDING.load(Relaxed) & !(self.running | (1 << libc::SIGCHLD));
-        (bits != 0).then(|| 128 + bits.trailing_zeros() as u8)
+        let bits = PENDING.load(Relaxed) & !(self.running | (signal_bit(libc::SIGCHLD)));
+        (bits != 0).then(|| 129 + bits.trailing_zeros() as u8)
     }
 
     pub(crate) fn input_or_child(&self, timeout: Option<&libc::timespec>) -> io::Result<bool> {

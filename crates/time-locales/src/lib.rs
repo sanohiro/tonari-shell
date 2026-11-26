@@ -31,3 +31,48 @@ impl Locale {
         self.ids(field).iter().map(|id| text(*id))
     }
 }
+
+// Keep the much larger LC_TIME data independently removable by the linker.
+pub mod numeric {
+    #[derive(Clone, Copy)]
+    pub struct Numeric {
+        pub decimal: &'static str,
+        pub separator: &'static str,
+        pub groups: &'static [u8],
+    }
+    pub const C: Numeric = Numeric {
+        decimal: ".",
+        separator: "",
+        groups: &[],
+    };
+    include!(concat!(env!("OUT_DIR"), "/numeric.rs"));
+
+    pub fn find(name: &str) -> Numeric {
+        let normalized;
+        let name = if let Some((base, codeset)) = name.split_once('.') {
+            if let Some((_, modifier)) = codeset.split_once('@') {
+                normalized = format!("{base}@{modifier}");
+                &normalized
+            } else {
+                base
+            }
+        } else {
+            name
+        };
+        if matches!(name, "C" | "POSIX" | "") {
+            return C;
+        }
+        let mut lo = 0;
+        let mut hi = KINDS.len();
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            let candidate = &NAMES[usize::from(OFFSETS[mid])..usize::from(OFFSETS[mid + 1])];
+            match candidate.cmp(name) {
+                std::cmp::Ordering::Equal => return PROFILES[usize::from(KINDS[mid])],
+                std::cmp::Ordering::Less => lo = mid + 1,
+                std::cmp::Ordering::Greater => hi = mid,
+            }
+        }
+        C
+    }
+}

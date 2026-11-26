@@ -16,6 +16,22 @@ import time
 REVISION = "1cdb509a617894ed96a12c33b43bcd7adb6f1ff5"
 VERDICT = re.compile(r"^%%% (START|OK\[[A-Z_]+\]|ERROR\[[A-Z_]+\]|SKIPPED): (.+)$")
 
+# This pinned fixture expects the pre-Issue-8 return status. Preserve the
+# upstream verdict and independently verify its actual exit, stdout and stderr.
+RETURN_IN_TRAP = "return-p.tst:148: default exit status in function in trap"
+
+
+def issue8_return_matches(report):
+    block = report.read_text(errors="replace").partition("%%% START: " + RETURN_IN_TRAP + "\n")[2]
+    block = block.partition("%%% ")[0]
+    result = [line for line in block.splitlines() if line and not
+              line.startswith(("@clock ", "--- ", "+++ ", "@@ "))]
+    return result == [
+        "% exit status: expected=0 actual=0",
+        "% standard output diff:", "-trapped 19", "+trapped 0", "% standard error diff:",
+    ]
+
+
 # Add a monotonic clock to the *controller*. A wrapper around TESTEE changes
 # PPID, job groups and signal delivery. Neither shell under test is instrumented.
 CLOCK = r"""
@@ -240,6 +256,7 @@ def main():
     if os.environ.get("LOGNAME"):
         env["LOGNAME"] = os.environ["LOGNAME"]
     rows = {}
+    issue8_returns = []
     with gzip.open(out / "inputs.jsonl.gz", "wt") as inputs, (out / "samples.jsonl").open("w") as records:
         for number, fixture in enumerate(sources):
             for trial in range(args.runs):
@@ -254,6 +271,8 @@ def main():
                     if keep:
                         argv_dir.mkdir(exist_ok=True)
                     obs, wall, report = measure(tests, subject, fixture, env, args.timeout, keep)
+                    if label == "tonari" and RETURN_IN_TRAP in obs:
+                        issue8_returns.append(obs[RETURN_IN_TRAP][0] == "ERROR[FAILED]" and issue8_return_matches(report))
                     if args.inventory:
                         actual = {key.split(":", 2)[1] for key in obs}
                         if actual != expected[fixture]:
@@ -318,6 +337,13 @@ def main():
     for key, series in rows.items():
         def passed(label):
             return len(series.get(label, [])) == args.runs and all(v[0] == "OK[PASSED]" for v in series[label])
+        if key == RETURN_IN_TRAP:
+            if len(issue8_returns) == args.runs and all(issue8_returns):
+                scores["verified POSIX.1-2024 return"] += 1
+            else:
+                scores["incorrect POSIX.1-2024 return"] += 1
+                print("incorrect nested return status", key)
+            continue
         if passed("bash") and passed("tonari"):
             scores["comparable"] += 1
         if any(v[0] == "OK[PASSED]" for v in series.get("bash", [])) and not passed("tonari"):
@@ -329,7 +355,7 @@ def main():
             print("review new difference", key)
     print(dict(scores), flush=True)
     # Preserve all measurements before returning the comparison gate.
-    return int(bool(scores["new differences"] or (args.require_bash_passes and scores["Bash-only or unstable Tonari"]) or any(
+    return int(bool(scores["incorrect POSIX.1-2024 return"] or scores["new differences"] or (args.require_bash_passes and scores["Bash-only or unstable Tonari"]) or any(
         v[0] in {"CONTROLLER_EXIT","INCOMPLETE"} and label == "tonari" for series in rows.values() for label, events in series.items() for v in events)))
 
 

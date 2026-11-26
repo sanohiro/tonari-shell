@@ -1,6 +1,13 @@
 use crate::Session;
 use std::{borrow::Cow, io};
 
+#[derive(Default, Clone)]
+pub(crate) struct Memory {
+    substitution: Option<(String, String)>,
+    search: String,
+    matched_word: Option<String>,
+}
+
 pub(crate) struct Expansion<'a> {
     pub text: Cow<'a, str>,
     pub print: bool,
@@ -9,14 +16,8 @@ fn error(s: &str) -> io::Error {
     io::Error::other(s)
 }
 
-fn select(s: &str, designator: &str, matched: Option<&str>) -> io::Result<String> {
+fn select(s: &str, designator: &str) -> io::Result<String> {
     let words = crate::parser::history_word_spans(s);
-    if designator == "%" {
-        return matched
-            .and_then(|m| words.iter().map(|&(a, b)| &s[a..b]).find(|w| w.contains(m)))
-            .map(str::to_owned)
-            .ok_or_else(|| error("no matching word"));
-    }
     if designator == "*" && words.len() < 2 {
         return Ok(String::new());
     }
@@ -62,7 +63,9 @@ fn pop(s: &mut &str) -> Option<char> {
 }
 fn field(s: &mut &str, delim: char) -> String {
     let mut out = String::new();
-    while let Some(c) = pop(s) {
+    while !s.starts_with('\n')
+        && let Some(c) = pop(s)
+    {
         if c == delim {
             break;
         }
@@ -79,7 +82,64 @@ fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-pub(crate) fn expand<'a>(session: &Session, line: &'a str) -> io::Result<Expansion<'a>> {
+fn substitute(value: &str, memory: &Memory, global: bool) -> io::Result<String> {
+    let Some((old, new)) = &memory.substitution else {
+        return Err(error("no previous substitution"));
+    };
+    let mut matches = value.match_indices(old.as_str());
+    let Some((mut at, _)) = matches.next() else {
+        return Err(error("substitution failed"));
+    };
+    let mut result = String::with_capacity(value.len() - old.len() + new.len());
+    let mut start = 0;
+    loop {
+        result.push_str(&value[start..at]);
+        result.push_str(new);
+        start = at + old.len();
+        if !global {
+            break;
+        }
+        let Some((next, _)) = matches.next() else {
+            break;
+        };
+        at = next;
+    }
+    result.push_str(&value[start..]);
+    Ok(result)
+}
+
+fn remember(memory: &mut Memory, mut old: String, new: String) -> io::Result<()> {
+    if old.is_empty() {
+        old = memory
+            .substitution
+            .as_ref()
+            .map_or(&memory.search, |s| &s.0)
+            .clone();
+        if old.is_empty() {
+            return Err(error("no previous substitution"));
+        }
+    }
+    let replacement = if new.contains('&') {
+        let mut result = String::with_capacity(new.len());
+        let mut chars = new.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\\' && chars.next_if_eq(&'&').is_some() {
+                result.push('&');
+            } else if c == '&' {
+                result.push_str(&old);
+            } else {
+                result.push(c);
+            }
+        }
+        result
+    } else {
+        new
+    };
+    memory.substitution = Some((old, replacement));
+    Ok(())
+}
+
+pub(crate) fn expand<'a>(session: &mut Session, line: &'a str) -> io::Result<Expansion<'a>> {
     let chars = session.get("histchars");
     let mut chars = chars.as_deref().unwrap_or("!^#").chars();
     let event = chars.next();
@@ -101,11 +161,12 @@ pub(crate) fn expand<'a>(session: &Session, line: &'a str) -> io::Result<Expansi
         let previous = history
             .and_then(|h| h.lines.last())
             .ok_or_else(|| error("event not found"))?;
-        if old.is_empty() || !previous.contains(&old) {
-            return Err(error("substitution failed"));
-        }
+        let memory = session
+            .history_expansion
+            .get_or_insert_with(Default::default);
+        remember(memory, old, new)?;
         return Ok(Expansion {
-            text: Cow::Owned(previous.replacen(&old, &new, 1) + rest),
+            text: Cow::Owned(substitute(previous, memory, false)? + rest),
             print: false,
         });
     }
@@ -153,14 +214,15 @@ pub(crate) fn expand<'a>(session: &Session, line: &'a str) -> io::Result<Expansi
         }
         let hist = history.map_or(&[][..], |h| h.lines.as_slice());
         let prev = || hist.last().map(String::as_str);
-        let mut matched = None;
-        let value = if input.starts_with(event) {
+        let value = if input.starts_with(['^', '$', '*', '%']) {
+            prev()
+        } else if input.starts_with(event) {
             pop(&mut input);
             prev()
         } else if let Some(tail) = input.strip_prefix('#') {
             input = tail;
             Some(out.as_str())
-        } else if input.starts_with(['^', '$', '*', ':', '%']) {
+        } else if input.starts_with(':') {
             prev()
         } else if let Some(tail) = input.strip_prefix('?') {
             input = tail;
@@ -168,11 +230,33 @@ pub(crate) fn expand<'a>(session: &Session, line: &'a str) -> io::Result<Expansi
             if input.starts_with('?') {
                 pop(&mut input);
             }
-            matched = Some(search);
-            hist.iter()
+            let memory = session
+                .history_expansion
+                .get_or_insert_with(Default::default);
+            let search = if search.is_empty() {
+                memory.search.as_str()
+            } else {
+                search
+            };
+            if search.is_empty() {
+                return Err(error("no previous search"));
+            }
+            let result = hist
+                .iter()
                 .rev()
                 .find(|s| s.contains(search))
-                .map(String::as_str)
+                .map(String::as_str);
+            if let Some(entry) = result {
+                memory.matched_word = crate::parser::history_word_spans(entry)
+                    .into_iter()
+                    .map(|(start, end)| &entry[start..end])
+                    .find(|word| word.contains(search))
+                    .map(str::to_owned);
+                if !search.is_empty() {
+                    memory.search = search.to_owned();
+                }
+            }
+            result
         } else if input.starts_with(|c: char| c.is_ascii_digit())
             || input
                 .strip_prefix('-')
@@ -218,7 +302,15 @@ pub(crate) fn expand<'a>(session: &Session, line: &'a str) -> io::Result<Expansi
             let spec = take(&mut input, |c| {
                 c.is_ascii_digit() || matches!(c, '-' | '$' | '*' | '%' | '^')
             });
-            value = select(&value, spec, matched)?;
+            value = if spec == "%" {
+                session
+                    .history_expansion
+                    .as_deref()
+                    .and_then(|m| m.matched_word.clone())
+                    .ok_or_else(|| error("no matching word"))?
+            } else {
+                select(&value, spec)?
+            };
         }
         while input.starts_with(':') {
             pop(&mut input);
@@ -258,16 +350,20 @@ pub(crate) fn expand<'a>(session: &Session, line: &'a str) -> io::Result<Expansi
                         pop(&mut input).ok_or_else(|| error("missing substitution delimiter"))?;
                     let old = field(&mut input, d);
                     let new = field(&mut input, d);
-                    if old.is_empty() || !value.contains(&old) {
-                        return Err(error("substitution failed"));
-                    }
-                    let new = new.replace('&', &old);
-                    if global {
-                        value.replace(&old, &new)
-                    } else {
-                        value.replacen(&old, &new, 1)
-                    }
+                    let memory = session
+                        .history_expansion
+                        .get_or_insert_with(Default::default);
+                    remember(memory, old, new)?;
+                    substitute(&value, memory, global)?
                 }
+                '&' => substitute(
+                    &value,
+                    session
+                        .history_expansion
+                        .as_deref()
+                        .ok_or_else(|| error("no previous substitution"))?,
+                    global,
+                )?,
                 _ => return Err(error("unsupported history modifier")),
             };
         }

@@ -30,7 +30,7 @@ pub(crate) struct Substitutions {
 fn status(pid: libc::pid_t, options: i32) -> Option<u8> {
     let mut state = 0;
     loop {
-        match unsafe { libc::waitpid(pid, &mut state, options) } {
+        match crate::traps::waitpid(pid, &mut state, options) {
             n if n > 0 && libc::WIFEXITED(state) => return Some(libc::WEXITSTATUS(state) as u8),
             n if n > 0 && libc::WIFSIGNALED(state) => {
                 return Some((128 + libc::WTERMSIG(state)) as u8);

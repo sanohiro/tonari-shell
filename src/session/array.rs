@@ -172,6 +172,32 @@ impl Session {
         name == "GROUPS" && !self.groups_unset
     }
 
+    pub(super) fn protected_array(&self, name: &str) -> bool {
+        self.active_groups(name) || name == "FUNCNAME" && !self.funcname_unset
+    }
+
+    pub(crate) fn array_parameter(&self, name: &str) -> bool {
+        self.variables.get(name).map_or_else(
+            || {
+                matches!(
+                    name,
+                    "BASH_ALIASES"
+                        | "BASH_CMDS"
+                        | "BASH_ARGC"
+                        | "BASH_ARGV"
+                        | "BASH_LINENO"
+                        | "BASH_SOURCE"
+                        | "BASH_VERSINFO"
+                        | "DIRSTACK"
+                        | "FUNCNAME"
+                        | "GROUPS"
+                        | "PIPESTATUS"
+                )
+            },
+            |var| var.elements.is_some(),
+        )
+    }
+
     fn group_ids() -> &'static [String] {
         static GROUPS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
         GROUPS.get_or_init(|| {
@@ -237,7 +263,15 @@ impl Session {
         Ok(())
     }
 
-    pub(super) fn indices(&self, name: &str) -> Vec<i64> {
+    fn debug_frames(&self) -> impl DoubleEndedIterator<Item = &Vec<String>> {
+        if self.function_depth == 0 {
+            self.debug_base
+                .get_or_init(|| self.positional.as_slice().to_vec());
+        }
+        self.debug_base.get().into_iter().chain(&self.debug_args)
+    }
+
+    pub(crate) fn indices(&self, name: &str) -> Vec<i64> {
         if name == "PIPESTATUS" {
             let len = usize::from(self.pipe_status.first.is_some()) + self.pipe_status.rest.len();
             return (0..len as i64).collect();
@@ -249,10 +283,8 @@ impl Session {
             );
         }
         match name {
-            "BASH_ARGV" => {
-                (0..self.debug_args.iter().map(Vec::len).sum::<usize>() as i64).collect()
-            }
-            "BASH_ARGC" => (0..self.debug_args.len() as i64).collect(),
+            "BASH_ARGV" => (0..self.debug_frames().map(Vec::len).sum::<usize>() as i64).collect(),
+            "BASH_ARGC" => (0..self.debug_frames().count() as i64).collect(),
             "GROUPS" => (0..Self::group_ids().len() as i64).collect(),
             "BASH_VERSINFO" => (0..6).collect(),
             "DIRSTACK" => (0..=self.dir_stack.len() as i64).collect(),
@@ -285,16 +317,19 @@ impl Session {
             };
         }
         match name {
-            "BASH_ARGV" => self
-                .debug_args
-                .iter()
-                .rev()
-                .flat_map(|args| args.iter().rev())
-                .nth(index as usize)
-                .cloned(),
+            "BASH_ARGV" => {
+                let mut offset = usize::try_from(index).ok()?;
+                self.debug_frames().rev().find_map(|args| {
+                    if offset < args.len() {
+                        Some(args[args.len() - 1 - offset].clone())
+                    } else {
+                        offset -= args.len();
+                        None
+                    }
+                })
+            }
             "BASH_ARGC" => self
-                .debug_args
-                .iter()
+                .debug_frames()
                 .rev()
                 .nth(index as usize)
                 .map(|v| v.len().to_string()),
@@ -479,7 +514,7 @@ impl Session {
     ) -> Result<(), &'static str> {
         let resolved = self.reference_name(name)?;
         let name = resolved.as_ref();
-        if self.active_groups(name) {
+        if self.protected_array(name) {
             return Ok(());
         }
         if subscript(name).is_some() {
@@ -733,11 +768,14 @@ impl Session {
                 None => v.value.as_ref().map(|_| 0),
             };
         }
+        if name == "DIRSTACK" {
+            return Some(self.dir_stack.len() as i64);
+        }
         self.indices(name).last().copied()
     }
 
     pub fn assign_element(&mut self, name: &str, index: i64, value: String) {
-        if self.active_groups(name) || self.readonly(name) {
+        if self.protected_array(name) || self.readonly(name) {
             return;
         }
         if name == "DIRSTACK" && !self.variables.contains_key(name) {

@@ -278,7 +278,10 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
             &mut history,
             session,
             0,
-            Some((opts.initial.unwrap_or(""), files_only)),
+            crate::editor::Start::Read {
+                initial: opts.initial.unwrap_or(""),
+                files_only,
+            },
             false,
             None,
         );
@@ -430,7 +433,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     if opts.names.is_empty() && opts.array.is_none() {
         if session.readonly("REPLY") {
             eprintln!("tonari: read: REPLY: readonly variable");
-            return 1;
+            return 2;
         }
         session.assign("REPLY", &line);
         return status;
@@ -441,10 +444,15 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         session.get("IFS").unwrap_or_else(|| " \t\n".into())
     };
     if opts.array.is_none()
-        && ifs.is_empty()
         && let [name] = opts.names
+        && (ifs.is_empty() || escaped.is_empty() && ifs.bytes().all(|b| matches!(b, 9..=13 | b' ')))
     {
-        if let Err(e) = session.assign_target(name, &line) {
+        let value = if ifs.is_empty() {
+            line.as_str()
+        } else {
+            line.trim_matches(|c: char| ifs.contains(c))
+        };
+        if let Err(e) = session.assign_target(name, value) {
             eprintln!("tonari: read: {e}");
             return 1;
         }
@@ -478,7 +486,11 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         });
         if let Err(e) = session.assign_target(name, value) {
             eprintln!("tonari: read: {e}");
-            return 1;
+            return if e == "readonly variable" && i + 1 < count {
+                2
+            } else {
+                1
+            };
         }
     }
     status
@@ -495,7 +507,7 @@ fn field_ranges(line: &str, escaped: &[usize], ifs: &str) -> (Vec<(usize, usize)
         if escaped.binary_search(&offset).is_ok() {
             return;
         }
-        let space = matches!(sep, " " | "\t" | "\n");
+        let space = matches!(sep, " " | "\t" | "\n" | "\r" | "\x0b" | "\x0c");
         if start < offset {
             spans.push((start, offset));
             end = offset;

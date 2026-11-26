@@ -1,4 +1,4 @@
-use super::{CaseEnd, Error, Reader, Target, ansi, here_doc, parse};
+use super::{CaseEnd, Error, Reader, Target, ansi, here_doc, parse_final};
 use crate::word::{Part, Word, WordBuilder, is_identifier};
 use std::str::Chars;
 
@@ -200,7 +200,9 @@ fn dollar_word(
             {
                 1 + content[1..].bytes().take_while(u8::is_ascii_digit).count()
             } else if content.starts_with(['#', '!'])
-                && content.as_bytes().get(2) == Some(&b'}')
+                && (content.as_bytes().get(2) == Some(&b'}')
+                    || content.starts_with("!*")
+                    || content.starts_with("!@"))
                 && matches!(
                     content.as_bytes().get(1),
                     Some(b'@' | b'*' | b'-' | b'#' | b'?' | b'$' | b'!')
@@ -226,7 +228,9 @@ fn dollar_word(
                 chars.next();
                 name
             } else {
-                if name.starts_with('#') && name.len() > 1 {
+                if name.starts_with('#')
+                    && (name.len() > 1 || content.as_bytes().get(2) == Some(&b'}'))
+                {
                     return bad_substitution(content, chars, word, quoted);
                 }
                 if let Some(prefix) = name.strip_prefix('!').filter(|p| super::is_identifier(p))
@@ -483,26 +487,32 @@ pub(super) fn backquote(
     quoted: bool,
 ) -> Result<(), Error> {
     let mut source = String::new();
-    while let Some(c) = chars.next() {
-        match c {
-            '`' => {
-                let body = parse(&source)?;
-                word.part(Part::Substitution { body, quoted });
-                return Ok(());
-            }
-            '\\' => {
-                let next = chars
-                    .next()
-                    .ok_or(Error::Incomplete("unterminated backquote"))?;
-                if next != '\n' {
-                    if !(matches!(next, '$' | '`' | '\\') || quoted && next == '"') {
-                        source.push('\\');
-                    }
-                    source.push(next);
-                }
-            }
-            _ => source.push(c),
+    let mut rest = chars.as_str();
+    while let Some(at) = memchr::memchr2(b'`', b'\\', rest.as_bytes()) {
+        let (literal, after) = rest.split_at(at);
+        if after.starts_with('`') {
+            let body = if source.is_empty() {
+                parse_final(literal)?
+            } else {
+                source.push_str(literal);
+                parse_final(&source)?
+            };
+            *chars = after[1..].chars();
+            word.part(Part::Substitution { body, quoted });
+            return Ok(());
         }
+        source.push_str(literal);
+        let mut escaped = after[1..].chars();
+        let next = escaped
+            .next()
+            .ok_or(Error::Incomplete("unterminated backquote"))?;
+        if next != '\n' {
+            if !(matches!(next, '$' | '`' | '\\') || quoted && next == '"') {
+                source.push('\\');
+            }
+            source.push(next);
+        }
+        rest = escaped.as_str();
     }
     Err(Error::Incomplete("unterminated backquote"))
 }
@@ -556,7 +566,7 @@ fn parameter_word(
                 word.literal(&ansi::quoted(chars)?);
             }
             '$' => dollar_word(chars, &mut word, outer_quoted, assignment)?,
-            '"' => quoted(chars, c, &mut word)?,
+            '"' => double_quoted(chars, &mut word, outer_quoted)?,
             '\'' if !outer_quoted => quoted(chars, c, &mut word)?,
             '`' => backquote(chars, &mut word, outer_quoted)?,
             '\\' => {
@@ -610,6 +620,14 @@ pub(super) fn quoted(
         *chars = rest.chars();
         return Ok(());
     }
+    double_quoted(chars, word, false)
+}
+
+fn double_quoted(
+    chars: &mut Chars<'_>,
+    word: &mut WordBuilder,
+    inside_quoted_operand: bool,
+) -> Result<(), Error> {
     let mut empty = true;
     while let Some(c) = chars.next() {
         if c == '"' {
@@ -619,8 +637,12 @@ pub(super) fn quoted(
             return Ok(());
         }
         match c {
-            '\\' if matches!(chars.clone().next(), Some('"' | '$' | '`' | '\\' | '\n')) => {
-                let escaped = chars.next().unwrap();
+            '\\' if inside_quoted_operand
+                || matches!(chars.clone().next(), Some('"' | '$' | '`' | '\\' | '\n')) =>
+            {
+                let escaped = chars
+                    .next()
+                    .ok_or(Error::Incomplete("unterminated quote"))?;
                 if escaped == '\n' {
                     continue;
                 }
@@ -628,7 +650,16 @@ pub(super) fn quoted(
             }
             '$' => dollar(chars, word, true)?,
             '`' => backquote(chars, word, true)?,
-            _ => word.push(c),
+            _ => {
+                let rest = chars.as_str();
+                let end = rest
+                    .bytes()
+                    .position(|b| matches!(b, b'"' | b'\\' | b'$' | b'`'))
+                    .unwrap_or(rest.len());
+                word.push(c);
+                word.literal(&rest[..end]);
+                *chars = rest[end..].chars();
+            }
         }
         empty = false;
     }
@@ -869,13 +900,28 @@ fn pattern_parts(
     Ok(())
 }
 
-fn pattern_chunk(chars: &mut Chars<'_>, word: &mut WordBuilder, start: &str, extended: bool) {
+fn pattern_chunk(
+    chars: &mut Chars<'_>,
+    word: &mut WordBuilder,
+    start: &str,
+    extended: bool,
+    assignment: bool,
+) {
     // Keep the spelling of ranges and classes after the first wildcard or
     // expansion. Quoted and escaped pieces take a separate, literal path.
     let rest = chars.as_str();
     let end = rest
         .find(|c| separator(c) || matches!(c, '\'' | '"' | '\\' | '$' | '`' | '{' | ',' | '}'))
         .unwrap_or(rest.len());
+    // An unquoted colon in an assignment starts a new tilde prefix. Leave
+    // both bytes for the word reader, even after an expansion or wildcard.
+    let end = if assignment {
+        start[..start.len() - rest.len() + end]
+            .find(":~")
+            .map_or(end, |pos| pos.saturating_sub(start.len() - rest.len()))
+    } else {
+        end
+    };
     // Leave the operator before the next opening parenthesis for the group reader.
     let end = if extended
         && rest[end..].starts_with('(')
@@ -890,7 +936,7 @@ fn pattern_chunk(chars: &mut Chars<'_>, word: &mut WordBuilder, start: &str, ext
     *chars = rest[end..].chars();
 }
 
-fn command_position(tokens: &[Token]) -> bool {
+pub(super) fn command_position(tokens: &[Token]) -> bool {
     for token in tokens.iter().rev() {
         match token {
             word if matches!(
@@ -956,6 +1002,12 @@ fn lex_words(
     let mut chars = source.chars();
     let mut parentheses = 0usize;
     let mut saw_case = false;
+    let mut alias_opens_group = false;
+    let sub_aliases = if substitution && super::POSIX.get() {
+        super::aliases::current()
+    } else {
+        Default::default()
+    };
     let mut in_test = false;
     let mut pattern_next: Option<bool> = None;
     let mut pending_docs = Vec::new();
@@ -1035,12 +1087,14 @@ fn lex_words(
             if substitution && c == ')' && parentheses == 0 {
                 // A case pattern can end with an unmatched right parenthesis.
                 // Ask the grammar only for substitutions containing a case word.
-                let ends_pattern = saw_case
+                let inner_closer = (saw_case || alias_opens_group)
                     && matches!(
                         Reader::new(tokens.clone(), spans.clone(), &source[..offset]).list(&[]),
-                        Err(Error::Incomplete("expected ')' after case pattern"))
+                        Err(Error::Incomplete(
+                            "expected ')' after case pattern" | "unfinished subshell"
+                        ))
                     );
-                if !ends_pattern {
+                if !inner_closer {
                     return Ok((tokens, spans, chars.as_str()));
                 }
             }
@@ -1266,7 +1320,7 @@ fn lex_words(
                 }
                 '*' | '?' | '[' => {
                     pattern_context = true;
-                    pattern_chunk(&mut chars, &mut word, rest, extended);
+                    pattern_chunk(&mut chars, &mut word, rest, extended, assignment.is_some());
                 }
                 '=' if assignment.is_none() && !protected => {
                     let prefix = &start[..start.len() - rest.len()];
@@ -1319,7 +1373,9 @@ fn lex_words(
                         word.push(c);
                     }
                 }
-                _ if pattern_context => pattern_chunk(&mut chars, &mut word, rest, extended),
+                _ if pattern_context => {
+                    pattern_chunk(&mut chars, &mut word, rest, extended, assignment.is_some())
+                }
                 _ => word.push(c),
             }
             started = true;
@@ -1369,8 +1425,15 @@ fn lex_words(
                 _ => {}
             }
         }
-        if substitution && !protected && word.as_literal() == Some("case") {
-            saw_case = true;
+        if substitution
+            && !protected
+            && let Some(name) = word.as_literal()
+        {
+            saw_case |= name == "case";
+            if let Some(replacement) = sub_aliases.get(name) {
+                saw_case |= replacement.trim() == "case";
+                alias_opens_group |= replacement.contains('(') && command_position(&tokens);
+            }
         }
         let begins_array = assignment.as_ref().is_some_and(|name| {
             chars.as_str().starts_with('(') && start.len() - chars.as_str().len() == name.len() + 1

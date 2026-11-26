@@ -24,7 +24,7 @@ pub(crate) fn run(session: &mut Session, words: &[String], status: u8) -> Flow {
         }
     } else {
         match history(session, args) {
-            Ok(()) => Flow::Continue(0),
+            Ok(status) => Flow::Continue(status),
             Err(e) => {
                 eprintln!("tonari: history: {e}");
                 Flow::Continue(if e.kind() == io::ErrorKind::InvalidInput {
@@ -41,7 +41,7 @@ fn error(message: &str) -> io::Error {
     io::Error::other(message)
 }
 
-fn history(session: &mut Session, mut args: &[String]) -> io::Result<()> {
+fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
     let mut operation = None;
     while let Some((flag, rest)) = args.split_first() {
         if flag == "--" {
@@ -70,7 +70,7 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<()> {
             break;
         }
         if args.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
     }
     match operation {
@@ -108,9 +108,17 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<()> {
         Some('p') => {
             session.history_mut().discard_current();
             let mut out = io::stdout().lock();
+            let mut status = 0;
             for arg in args {
-                writeln!(out, "{}", super::expand::expand(session, arg)?.text)?;
+                match super::expand::expand(session, arg) {
+                    Ok(result) => writeln!(out, "{}", result.text)?,
+                    Err(e) => {
+                        eprintln!("tonari: history: {arg}: {e}");
+                        status = 1;
+                    }
+                }
             }
+            return Ok(status);
         }
         Some(op) => history_file(session, op, args)?,
         None => {
@@ -146,7 +154,7 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<()> {
             }
         }
     }
-    Ok(())
+    Ok(0)
 }
 
 fn position(h: &Entries, arg: &str, end: usize) -> io::Result<usize> {

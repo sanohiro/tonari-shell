@@ -1,0 +1,170 @@
+distribution	driver	baseline	reviewed	bash_exit	tonari_exit	bash_timeout	tonari_timeout	before_diff_output_lines	reviewed_diff_output_lines
+debian	run-alias	different	different	0	1	False	False	23	4
+debian	run-appendop	different	different	0	1	False	False	4	4
+debian	run-arith	different	different	0	1	False	False	154	154
+debian	run-arith-for	different	different	0	1	False	False	88	88
+debian	run-array	different	different	0	1	False	False	793	285
+debian	run-array2	golden match	golden match	0	0	False	False	0	0
+debian	run-assoc	different	different	0	1	False	False	167	167
+debian	run-attr	different	different	0	1	False	False	44	44
+debian	run-braces	different	different	0	1	False	False	6	6
+debian	run-builtins	different	different	0	1	False	False	104	62
+debian	run-case	different	different	0	1	False	False	4	4
+debian	run-casemod	golden match	golden match	0	0	False	False	0	0
+debian	run-complete	different	different	0	1	False	False	123	123
+debian	run-comsub	different	different	0	1	False	False	31	14
+debian	run-comsub-eof	different	different	0	1	False	False	25	25
+debian	run-comsub-posix	different	different	0	1	False	False	49	49
+debian	run-cond	different	different	0	1	False	False	34	34
+debian	run-coproc	different	different	0	1	False	False	20	16
+debian	run-cprint	different	different	0	1	False	False	111	111
+debian	run-dbg-support	different	different	0	1	False	False	495	495
+debian	run-dbg-support2	different	different	0	1	False	False	14	14
+debian	run-dirstack	different	different	0	0	False	False	58	34
+debian	run-dollars	different	different	0	1	False	False	49	37
+debian	run-dynvar	golden match	golden match	0	0	False	False	0	0
+debian	run-errors	different	different	0	1	False	False	348	359
+debian	run-execscript	control inconclusive	control inconclusive	1	1	False	False	66	62
+debian	run-exp-tests	different	different	0	1	False	False	26	16
+debian	run-exportfunc	separate export-function probe	separate export-function probe					0	0
+debian	run-extglob	golden match	golden match	0	0	False	False	0	0
+debian	run-extglob2	golden match	golden match	0	0	False	False	0	0
+debian	run-extglob3	golden match	golden match	0	0	False	False	0	0
+debian	run-func	different	different	0	1	False	False	248	236
+debian	run-getopts	different	different	0	1	False	False	13	13
+debian	run-glob-test	different	different	0	1	False	False	42	42
+debian	run-globstar	different	different	0	1	False	False	136	136
+debian	run-heredoc	different	different	0	1	False	False	132	132
+debian	run-herestr	different	different	0	1	False	False	30	30
+debian	run-histexpand	different	different	0	1	False	False	668	147
+debian	run-history	different	different	0	1	False	False	233	128
+debian	run-ifs	golden match	golden match	0	0	False	False	0	0
+debian	run-ifs-posix	golden match	golden match	0	0	False	False	0	0
+debian	run-input-test	golden match	golden match	0	0	False	False	0	0
+debian	run-intl	control inconclusive	control inconclusive	1	1	False	False	37	31
+debian	run-invert	golden match	golden match	0	0	False	False	0	0
+debian	run-iquote	golden match	golden match	0	0	False	False	0	0
+debian	run-jobs	different	different	0	1	False	False	111	111
+debian	run-lastpipe	golden match	golden match	0	0	False	False	0	0
+debian	run-mapfile	different	different	0	1	False	False	20	20
+debian	run-more-exp	different	different	0	1	False	False	35	20
+debian	run-nameref	different	different	0	1	False	False	541	514
+debian	run-new-exp	different	different	0	1	False	False	549	185
+debian	run-nquote	different	different	0	1	False	False	10	10
+debian	run-nquote1	golden match	golden match	0	0	False	False	0	0
+debian	run-nquote2	golden match	golden match	0	0	False	False	0	0
+debian	run-nquote3	golden match	golden match	0	0	False	False	0	0
+debian	run-nquote4	different	different	0	1	False	False	40	18
+debian	run-nquote5	golden match	golden match	0	0	False	False	0	0
+debian	run-parser	different	different	0	1	False	False	17	17
+debian	run-posix2	different	different	0	1	False	False	9	9
+debian	run-posixexp	different	different	0	1	False	False	30	37
+debian	run-posixexp2	golden match	golden match	0	0	False	False	0	0
+debian	run-posixpat	different	different	0	1	False	False	21	21
+debian	run-posixpipe	different	different	0	1	False	False	6	6
+debian	run-precedence	golden match	golden match	0	0	False	False	0	0
+debian	run-printf	different	different	0	1	False	False	62	42
+debian	run-procsub	golden match	golden match	0	0	False	False	0	0
+debian	run-quote	golden match	golden match	0	0	False	False	0	0
+debian	run-quotearray	different	different	0	1	False	False	179	171
+debian	run-read	control inconclusive	control inconclusive	1	1	False	False	27	27
+debian	run-redir	different	different	0	1	False	False	65	61
+debian	run-rhs-exp	different	golden match	0	0	False	False	12	0
+debian	run-rsh	different	different	0	1	False	False	34	34
+debian	run-set-e	golden match	golden match	0	0	False	False	0	0
+debian	run-set-x	different	different	0	1	False	False	38	38
+debian	run-shopt	different	different	0	1	False	False	161	105
+debian	run-strip	golden match	golden match	0	0	False	False	0	0
+debian	run-test	different	different	0	1	False	False	73	68
+debian	run-tilde	different	golden match	0	0	False	False	13	0
+debian	run-tilde2	different	golden match	0	0	False	False	8	0
+debian	run-trap	different	different	0	1	False	False	16	13
+debian	run-type	different	different	0	1	False	False	117	117
+debian	run-varenv	different	different	0	1	False	False	153	131
+debian	run-vredir	different	different	0	1	False	False	126	126
+ubuntu	run-alias	different	different	0	1	False	False	43	17
+ubuntu	run-appendop	different	different	0	1	False	False	4	4
+ubuntu	run-arith	different	different	0	1	False	False	278	278
+ubuntu	run-arith-for	different	different	0	1	False	False	106	106
+ubuntu	run-array	different	different	0	1	False	False	858	380
+ubuntu	run-array2	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-assoc	different	different	0	1	False	False	181	181
+ubuntu	run-attr	different	different	0	1	False	False	44	44
+ubuntu	run-braces	different	different	0	1	False	False	80	80
+ubuntu	run-builtins	control inconclusive	control inconclusive	1	1	False	False	470	428
+ubuntu	run-case	different	different	0	1	False	False	4	4
+ubuntu	run-casemod	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-complete	different	different	0	1	False	False	505	490
+ubuntu	run-comsub	different	different	0	1	False	False	31	14
+ubuntu	run-comsub-eof	different	different	0	1	False	False	28	28
+ubuntu	run-comsub-posix	different	different	0	1	False	False	49	49
+ubuntu	run-comsub2	different	different	0	1	False	False	76	72
+ubuntu	run-cond	different	different	0	1	False	False	95	95
+ubuntu	run-coproc	different	different	0	1	False	False	20	16
+ubuntu	run-cprint	different	different	0	1	False	False	111	111
+ubuntu	run-dbg-support	different	different	0	1	False	False	498	498
+ubuntu	run-dbg-support2	different	different	0	1	False	False	14	14
+ubuntu	run-dirstack	different	different	0	0	False	False	58	34
+ubuntu	run-dollars	different	different	0	1	False	False	49	37
+ubuntu	run-dynvar	different	different	0	1	False	False	6	4
+ubuntu	run-errors	different	different	0	1	False	False	610	621
+ubuntu	run-execscript	control inconclusive	control inconclusive	1	1	False	False	148	142
+ubuntu	run-exp-tests	different	different	0	1	False	False	26	16
+ubuntu	run-exportfunc	separate export-function probe	separate export-function probe					0	0
+ubuntu	run-extglob	different	different	0	1	False	False	16	16
+ubuntu	run-extglob2	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-extglob3	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-func	different	different	0	1	False	False	321	309
+ubuntu	run-getopts	different	different	0	1	False	False	19	19
+ubuntu	run-glob-bracket	different	different	0	1	False	False	106	106
+ubuntu	run-glob-test	different	different	0	1	False	False	42	42
+ubuntu	run-globstar	different	different	0	1	False	False	136	136
+ubuntu	run-heredoc	different	different	0	1	False	False	168	168
+ubuntu	run-herestr	different	different	0	1	False	False	30	30
+ubuntu	run-histexpand	different	different	0	1	False	False	675	154
+ubuntu	run-history	different	different	0	1	False	False	355	249
+ubuntu	run-ifs	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-ifs-posix	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-input-test	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-intl	control inconclusive	control inconclusive	1	1	False	False	54	48
+ubuntu	run-invert	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-invocation	different	different	0	1	False	False	116	116
+ubuntu	run-iquote	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-jobs	different	different	0	1	False	False	172	172
+ubuntu	run-lastpipe	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-mapfile	different	different	0	1	False	False	20	20
+ubuntu	run-more-exp	different	different	0	1	False	False	35	20
+ubuntu	run-nameref	different	different	0	1	False	False	566	539
+ubuntu	run-new-exp	different	different	0	1	False	False	553	189
+ubuntu	run-nquote	different	different	0	1	False	False	10	10
+ubuntu	run-nquote1	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-nquote2	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-nquote3	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-nquote4	different	different	0	1	False	False	40	18
+ubuntu	run-nquote5	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-parser	different	different	0	1	False	False	21	21
+ubuntu	run-posix2	different	different	0	1	False	False	9	9
+ubuntu	run-posixexp	different	different	0	1	False	False	30	37
+ubuntu	run-posixexp2	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-posixpat	different	different	0	1	False	False	21	21
+ubuntu	run-posixpipe	different	different	0	1	False	False	6	6
+ubuntu	run-precedence	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-printf	control inconclusive	control inconclusive	1	1	False	False	133	133
+ubuntu	run-procsub	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-quote	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-quotearray	control inconclusive	control inconclusive	1	1	False	False	179	171
+ubuntu	run-read	control inconclusive	control inconclusive	1	1	False	False	63	51
+ubuntu	run-redir	different	different	0	1	False	False	98	94
+ubuntu	run-rhs-exp	different	golden match	0	0	False	False	12	0
+ubuntu	run-rsh	different	different	0	1	False	False	36	36
+ubuntu	run-set-e	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-set-x	different	different	0	1	False	False	47	47
+ubuntu	run-shopt	different	different	0	1	False	False	197	162
+ubuntu	run-strip	golden match	golden match	0	0	False	False	0	0
+ubuntu	run-test	control inconclusive	control inconclusive	1	1	False	False	131	124
+ubuntu	run-tilde	different	golden match	0	0	False	False	13	0
+ubuntu	run-tilde2	different	golden match	0	0	False	False	8	0
+ubuntu	run-trap	different	different	0	1	False	False	42	28
+ubuntu	run-type	different	different	0	1	False	False	130	130
+ubuntu	run-varenv	different	different	0	1	False	False	205	183
+ubuntu	run-vredir	different	different	0	1	False	False	161	161

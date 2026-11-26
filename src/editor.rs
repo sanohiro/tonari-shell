@@ -694,12 +694,17 @@ fn word_end(s: &str, mut i: usize) -> usize {
     }
     i
 }
+pub enum Start<'a> {
+    Command(String),
+    Read { initial: &'a str, files_only: bool },
+}
+
 pub fn line(
     prompt: &str,
     history: &mut History,
     session: &mut Session,
     status: u8,
-    read: Option<(&str, bool)>,
+    start: Start<'_>,
     primary_prompt: bool,
     terminal_size: Option<(u16, u16)>,
 ) -> io::Result<Input> {
@@ -716,7 +721,13 @@ pub fn line(
     };
     let mut mark = 0usize;
     let mut screen = Screen::new(terminal_size);
-    let mut text = read.map_or("", |r| r.0).to_owned();
+    let (mut text, read) = match start {
+        Start::Command(initial) => (initial, None),
+        Start::Read {
+            initial,
+            files_only,
+        } => (initial.to_owned(), Some(files_only)),
+    };
     let mut cursor = text.len();
     let mut undo = Undo::default();
     let mut vi = vi::State::default();
@@ -1189,7 +1200,7 @@ pub fn line(
             }
             Action::Accept | Action::Comment => {
                 if action == Action::Comment {
-                    text.insert(0, '#');
+                    text.insert_str(0, session.bindings.comment_begin.as_deref().unwrap_or("#"));
                 }
                 if action == Action::Comment
                     || visible_prompt != prompt
@@ -1229,11 +1240,19 @@ pub fn line(
             | Action::KillBack
             | Action::RubWord
             | Action::KillBackWord
+            | Action::WholeLine
+            | Action::RubFilename
             | Action::KillWord
             | Action::Cut
             | Action::Copy => {
                 let (lo, hi) = match action {
                     Action::Kill => (cursor, text.len()),
+                    Action::WholeLine => (0, text.len()),
+                    Action::RubFilename => {
+                        let sep = |c: char| c == '/' || c.is_whitespace();
+                        let head = text[..cursor].trim_end_matches(sep);
+                        (head.trim_end_matches(|c| !sep(c)).len(), cursor)
+                    }
                     Action::KillWord => (cursor, word_end(&text, cursor)),
                     Action::RubWord => (
                         text[..cursor]
@@ -1315,6 +1334,92 @@ pub fn line(
                 }
             }
             Action::ForwardWord => cursor = word_end(&text, cursor),
+            Action::Reload => bindings::reload(session),
+            Action::TabInsert => {
+                undo.record(&text, cursor..cursor, 1, cursor, false);
+                text.insert(cursor, '\t');
+                cursor += 1;
+            }
+            Action::HistoryExpand | Action::MagicSpace => {
+                if let Ok(result) = crate::history::expand::expand(session, &text) {
+                    let at_start = cursor == 0;
+                    let suffix = text.len() - cursor;
+                    if let std::borrow::Cow::Owned(expanded) = result.text {
+                        let old_end = text.len();
+                        undo.replace(&mut text, 0..old_end, &expanded, cursor);
+                        cursor = text.len();
+                    }
+                    if action == Action::MagicSpace {
+                        cursor = if at_start {
+                            0
+                        } else {
+                            text.len().saturating_sub(suffix)
+                        };
+                        while !text.is_char_boundary(cursor) {
+                            cursor -= 1;
+                        }
+                        undo.record(&text, cursor..cursor, 1, cursor, false);
+                        text.insert(cursor, ' ');
+                        cursor += 1;
+                    }
+                }
+            }
+            Action::UpperWord | Action::LowerWord | Action::CapitalWord => {
+                let end = word_end(&text, cursor);
+                let start = end
+                    - text[cursor..end]
+                        .trim_start_matches(|c: char| !c.is_alphanumeric())
+                        .len();
+                let locale = session.character_locale();
+                if text[start..end].is_ascii()
+                    && !matches!(locale, crate::session::CharacterLocale::Turkic)
+                {
+                    undo.record(&text, start..end, end - start, cursor, false);
+                    let word = &mut text[start..end];
+                    if action == Action::UpperWord {
+                        word.make_ascii_uppercase();
+                    } else {
+                        word.make_ascii_lowercase();
+                        if action == Action::CapitalWord
+                            && let Some(first) = word.get_mut(..1)
+                        {
+                            first.make_ascii_uppercase();
+                        }
+                    }
+                    cursor = end;
+                } else {
+                    let word = text[start..end].to_owned();
+                    let replacement = if action == Action::CapitalWord {
+                        crate::pattern::capitalize(word, locale)
+                    } else {
+                        crate::pattern::case_chars(
+                            word,
+                            action == Action::UpperWord,
+                            true,
+                            None,
+                            locale,
+                        )
+                    };
+                    undo.replace(&mut text, start..end, &replacement, cursor);
+                    cursor = start + replacement.len();
+                }
+            }
+            Action::TransposeWords => {
+                let end = word_end(&text, cursor);
+                let right = word_start(&text, end);
+                let left = word_start(&text, right);
+                let split = word_end(&text, left);
+                if left < split && split <= right && right < end {
+                    let swapped = format!(
+                        "{}{}{}",
+                        &text[right..end],
+                        &text[split..right],
+                        &text[left..split]
+                    );
+                    undo.replace(&mut text, left..end, &swapped, cursor);
+                    cursor = end;
+                }
+            }
             Action::Transpose if cursor > 0 => {
                 let end = if cursor == text.len() {
                     cursor
@@ -1353,7 +1458,7 @@ pub fn line(
                     &mut keys,
                     bindings,
                     overwrite,
-                    || complete::at(&text, cursor, session, was_tab, read.is_some_and(|r| r.1)),
+                    || complete::at(&text, cursor, session, was_tab, read.unwrap_or(false)),
                 );
                 replaying = !keys.queued.is_empty();
                 screen.tail = None;

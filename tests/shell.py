@@ -35,6 +35,24 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
+    def test_posix_field_splitting_uses_ifs_after_word_expansion(self):
+        source = """set -o posix
+set -f -- a 'b c' d
+unset IFS
+printf '<%s>' ${*}${IFS=}${*}${IFS:=-}"${*}"
+"""
+        result = self.command(TONARI, source)
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (0, b"<a><b c><da><b c><d><a-b c-d>", b""))
+
+    def test_default_assignment_evaluates_the_selected_element_once(self):
+        source = """i=0; declare -ia a; declare -A m
+key(){ printf x >>hits; printf id; }
+printf '<%s>' "${a[i++]:=2+3}" "$i" "${a[0]}" "${m[$(key)]:=one}" "${m[id]}"; cat hits"""
+        result = self.command(TONARI, source)
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (0, b"<5><1><5><one><one>x", b""))
+
     def shells_for(self, minimum=0):
         if minimum:
             version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}"')

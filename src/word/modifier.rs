@@ -364,6 +364,17 @@ impl Modification {
             Self::Slice { offset, length } => {
                 let start = as_number(offset, env)?;
                 let len = length.as_mut().map(|w| as_number(w, env)).transpose()?;
+                if let Some((base, _, false)) = array_elements_name(name) {
+                    if let Some(text) = env.borrowed_scalar(base) {
+                        return Ok(scalar(substring(text, start, len)?.to_owned()));
+                    }
+                    let target = env.session.reference_name(base)?;
+                    if !env.session.array_parameter(&target) {
+                        if let Some(text) = env.lookup(&target) {
+                            return Ok(scalar(substring(&text, start, len)?.to_owned()));
+                        }
+                    }
+                }
                 if matches!(name, "@" | "*") || array_elements_name(name).is_some() {
                     if len.is_some_and(|n| n < 0) {
                         return Err(Error::fatal("negative array slice length", 1));

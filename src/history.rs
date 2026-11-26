@@ -55,6 +55,14 @@ fn custom_history(session: &Session) -> Option<String> {
     Some(path)
 }
 
+pub(crate) fn load_script_history(session: &mut Session) {
+    if let Some(path) = custom_history(session)
+        && fs::metadata(&path).is_ok_and(|m| m.is_file())
+    {
+        let _ = commands::history_file(session, 'r', &[path]);
+    }
+}
+
 pub(crate) fn start_interactive(session: &mut Session) {
     if let Some(path) = custom_history(session) {
         if fs::metadata(&path).is_ok_and(|m| m.is_file())
@@ -207,6 +215,7 @@ pub(crate) struct Entries {
     timestamps: Vec<libc::time_t>,
     base: usize,
     current: Option<usize>,
+    current_lines: usize,
     written: usize,
     imported: Option<InitialJournal>,
 }
@@ -357,7 +366,20 @@ impl Session {
         if !self.history_enabled || !self.accept_history(text, self.history_lines().last()) {
             return false;
         }
-        self.push_history(text.strip_suffix('\n').unwrap_or(text), true);
+        let text = text.strip_suffix('\n').unwrap_or(text);
+        if !text.contains('\n') || self.shopt.cmdhist && self.shopt.lithist {
+            self.push_history(text, true);
+        } else if self.shopt.cmdhist {
+            let entry = crate::parser::history_command(text);
+            self.push_history(&entry, true);
+        } else {
+            let mut count = 0;
+            for line in text.split('\n').filter(|s| !s.is_empty()) {
+                self.push_history(line, true);
+                count += 1;
+            }
+            self.history_mut().current_lines = count;
+        }
         true
     }
     fn push_history(&mut self, text: &str, current: bool) {
@@ -381,6 +403,7 @@ impl Session {
             .push(unsafe { libc::time(std::ptr::null_mut()) });
         h.trim_to(limit);
         h.current = current.then(|| h.lines.len() - 1);
+        h.current_lines = usize::from(current);
     }
     pub(crate) fn finish_history_line(&mut self) {
         if let Some(data) = &mut self.history {
@@ -398,6 +421,12 @@ impl Session {
             return;
         };
         let Some(index) = h.current else { return };
+        let start = (index + 1).saturating_sub(h.current_lines.max(1));
+        if self.history_enabled {
+            for line in &h.lines[start..index] {
+                History::append(self, line, cwd, status, Some(&mut history.window));
+            }
+        }
         let line = &h.lines[index];
         if self.history_enabled && self.accept_history(line, h.lines[..index].last()) {
             History::append(self, line, cwd, status, Some(&mut history.window));

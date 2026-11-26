@@ -39,10 +39,8 @@ impl Flow {
             Self::Continue(code) | Self::Exit(code) | Self::Return(code) | Self::Discard(code) => {
                 code
             }
-            Self::Break(..) | Self::LoopContinue(_) => {
-                eprintln!("tonari: loop control cannot cross a subshell boundary");
-                1
-            }
+            Self::Break(_, code) => code,
+            Self::LoopContinue(_) => 0,
         }
     }
 }
@@ -979,7 +977,13 @@ fn eval_builtin(
         Builtin::Echo => Flow::Continue(crate::builtins::echo(args, session)),
         Builtin::Test => Flow::Continue(crate::builtins::test(&cmd.words, session)),
         Builtin::LoopControl => {
-            if session.loop_depth == 0 {
+            if session.loop_depth == 0 && session.parent_loop_in_subshell {
+                write_error(
+                    cmd.words[0].as_bytes(),
+                    b": loop control cannot cross a subshell boundary",
+                );
+                Flow::Exit(1)
+            } else if session.loop_depth == 0 {
                 write_error(cmd.words[0].as_bytes(), b": only meaningful in a loop");
                 Flow::Continue(0)
             } else if args.len() > 1 {
@@ -1052,8 +1056,11 @@ fn eval_builtin(
                 Flow::Continue(2)
             } else if let Some(code) = status {
                 session.traps.before_return = last_status;
-                let code = if session.posix && args.is_empty() {
-                    session.traps.signal_status.unwrap_or(code)
+                let code = if status_operands(args).is_empty() {
+                    session
+                        .traps
+                        .implicit_status(session.function_depth + session.source_depth, false)
+                        .unwrap_or(code)
                 } else {
                     code
                 };
@@ -1069,8 +1076,7 @@ fn eval_builtin(
                 session,
                 session
                     .traps
-                    .exit_status
-                    .or(session.traps.signal_status.filter(|_| session.posix))
+                    .implicit_status(session.function_depth + session.source_depth, true)
                     .unwrap_or(code),
                 last_status,
             ))
@@ -1445,6 +1451,14 @@ fn run_builtin(
         }
     }
     let redirection = apply_protected(actions, here_pipe_limit(Some(builtin), cmd));
+    if !session.coprocesses.is_empty() || session.substitutions.scope() != 0 {
+        for a in &actions[..redirection.err().unwrap_or(actions.len())] {
+            if let Action::CloseMoved(fd) = a {
+                session.substitutions.replaced(*fd);
+                coprocess::replaced(session, *fd);
+            }
+        }
+    }
     let applied = redirection.is_ok();
     let old_input = session.stdin_redirected;
     if applied && actions.iter().any(|a| a.destination() == 0) {
@@ -1460,6 +1474,13 @@ fn run_builtin(
     }
     if applied && matches!(builtin, Builtin::Exec) && matches!(flow, Flow::Continue(0)) {
         for r in &cmd.redirects {
+            if r.target == Target::Duplicate && r.word.parse::<RawFd>() == Ok(r.fd) {
+                continue;
+            }
+            session.stdin_replaced |= r.fd == 0;
+            if r.target == Target::CloseMoved {
+                continue;
+            }
             session.substitutions.replaced(r.fd);
             coprocess::replaced(session, r.fd);
         }
@@ -1592,6 +1613,9 @@ fn start_raw(
     session: &mut Session,
     launch: crate::jobs::Launch,
 ) -> io::Result<Stage> {
+    if session.keyword {
+        separate_keyword_arguments(&mut raw);
+    }
     let observable = needs_ordered_redirects(&raw, session)
         || raw.redirects.iter().any(redirection_observable)
         || raw
@@ -1664,7 +1688,10 @@ fn start(
     session: &mut Session,
     launch: crate::jobs::Launch,
 ) -> io::Result<Stage> {
-    let builtin = builtin(cmd, last_status, session);
+    let builtin = builtin(cmd, last_status, session).or_else(|| {
+        cmd.prepare_missing_hook(session)
+            .then_some(Builtin::Function)
+    });
     // Numeric exit and constant status builtins do not inspect either pipe end.
     // Keep a real child for job control and observable child-signal traps.
     if !launch.background
@@ -1844,6 +1871,11 @@ fn start(
             .after_fork(session.errtrace, session.functrace);
         launch.pipeline_child(&mut session.traps);
         enter_stage(session, cmd.compound.as_deref(), launch.background);
+        if cmd.missing_hook && !launch.background {
+            // The hook has a private execution environment. A normal command
+            // search itself does not add a shell-language subshell level.
+            session.subshell_depth -= 1;
+        }
         session.stdin_redirected |= cmd.redirects.iter().any(|r| r.fd == 0);
         session.stdin_redirected |= input.is_some();
         let code = if !apply(&setup, here_pipe_limit(builtin, cmd)) {
@@ -1929,6 +1961,9 @@ pub(super) fn capture_external(
         cmd.resolved = Some(entry.path);
     }
     let (reader, writer) = pipe().map_err(|_| "cannot open command substitution pipe")?;
+    // An external-only capture uses its command process as the substitution
+    // scope. The command-not-found function must observe that same level.
+    session.subshell_depth += 1;
     let stage = start(
         &mut cmd,
         input,
@@ -1937,9 +1972,9 @@ pub(super) fn capture_external(
         last,
         session,
         Default::default(),
-    )
-    .map_err(|_| "cannot launch command substitution")?;
-    let pid = match stage {
+    );
+    session.subshell_depth -= 1;
+    let pid = match stage.map_err(|_| "cannot launch command substitution")? {
         Stage::Child(pid) => pid,
         Stage::Status(code) => return Ok((String::new(), code)),
     };
@@ -1961,7 +1996,7 @@ fn spawn_failure(name: &str, error: io::Error) -> io::Result<Stage> {
 pub(super) fn wait(pid: libc::pid_t) -> io::Result<u8> {
     let mut status = 0;
     loop {
-        if unsafe { libc::waitpid(pid, &mut status, 0) } >= 0 {
+        if crate::traps::waitpid(pid, &mut status, 0) >= 0 {
             if libc::WIFSIGNALED(status) {
                 return Ok((128 + libc::WTERMSIG(status)) as u8);
             }
@@ -1994,6 +2029,7 @@ pub(crate) struct ArrayDeclaration {
 
 #[derive(Default)]
 pub(crate) struct PreparedCommand {
+    missing_hook: bool,
     named_redirects: Vec<Redirect<Word>>,
     resolved: Option<PathBuf>,
     array_declarations: Vec<ArrayDeclaration>,
@@ -2004,6 +2040,7 @@ pub(crate) struct PreparedCommand {
     redirects: Vec<Redirect>,
     assignments: Vec<(String, String)>,
     empty_status: u8,
+    literal_has_keywords: bool,
 }
 impl PreparedCommand {
     pub(crate) fn literal_builtin(
@@ -2053,6 +2090,7 @@ impl PreparedCommand {
             .ok()?
         };
         Some(Box::new(Self {
+            literal_has_keywords: cmd.keyword_args.is_some(),
             words,
             redirects,
             ..Self::default()
@@ -2060,7 +2098,11 @@ impl PreparedCommand {
     }
 
     pub(crate) fn run_literal(&mut self, session: &mut Session, status: u8) -> Option<Flow> {
-        if session.xtrace || session.traps.active() || session.jobs.monitor {
+        if session.keyword && self.literal_has_keywords
+            || session.xtrace
+            || session.traps.active()
+            || session.jobs.monitor
+        {
             return None;
         }
         if session.noclobber && self.redirects.iter().any(|r| r.target == Target::Write) {
@@ -2098,6 +2140,40 @@ impl PreparedCommand {
     fn cacheable(&self) -> bool {
         !self.default_path && !self.assignments.iter().any(|(k, _)| k == "PATH")
     }
+    // Bash invokes this function only for a missing PATH command. A present
+    // but non-executable file and an explicit pathname keep their exec errors.
+    const MISSING_HOOK: &'static str = "command_not_found_handle";
+
+    fn select_missing_hook(&mut self) {
+        self.words.insert(0, Self::MISSING_HOOK.to_owned());
+        self.search = lookup::Search::Normal;
+        self.missing_hook = true;
+    }
+
+    fn prepare_missing_hook(&mut self, session: &Session) -> bool {
+        let Some(name) = self.words.first() else {
+            return false;
+        };
+        if !session.functions.contains_key(Self::MISSING_HOOK)
+            || name.contains('/')
+            || self.cached_path(session, name).is_some()
+        {
+            return false;
+        }
+        match hash::search_in(name, session, &lookup::path(self, session)) {
+            Err(hash::Absent) => {
+                self.select_missing_hook();
+                true
+            }
+            Ok(path) => {
+                if self.cacheable() {
+                    self.resolved = path.map(|entry| entry.path);
+                }
+                false
+            }
+        }
+    }
+
     fn cached_path<'a>(&'a self, session: &'a Session, name: &str) -> Option<&'a Path> {
         if !self.cacheable() || name.contains('/') {
             return None;
@@ -2168,6 +2244,52 @@ fn prepare(
     prepare_expanded(raw, words, session, last_status, standalone, &captured)
 }
 
+// The option is evaluated at execution: a previously parsed function may
+// be called both with and without -k. Only syntactic assignments qualify.
+fn separate_keyword_arguments(raw: &mut SimpleCommand<Word>) {
+    let first_array = raw
+        .assignments
+        .iter()
+        .position(|(_, a)| matches!(a, Assignment::Array(Some(_), ..)));
+    if raw.keyword_args.is_none() && first_array.is_none() {
+        return;
+    }
+    let mut arrays = first_array
+        .map(|i| raw.assignments.split_off(i))
+        .unwrap_or_default()
+        .into_iter()
+        .peekable();
+    let keywords = raw
+        .keyword_args
+        .take()
+        .map(Rc::unwrap_or_clone)
+        .unwrap_or_default();
+    let mut keywords = keywords.into_iter().peekable();
+    raw.assignments.reserve(keywords.len() + arrays.len());
+    let mut indices = 0..;
+    raw.words.retain_mut(|word| {
+        let index = indices.next().unwrap();
+        if let Some((_, key)) = keywords.next_if(|(pos, _)| *pos == index) {
+            if key.contains('[') {
+                eprintln!("tonari: {key}: not a valid identifier");
+                return false;
+            }
+            let mut value = std::mem::replace(word, Word::Literal(String::new()));
+            value.remove_assignment_prefix(key.len() + 1);
+            raw.assignments.push((key, Assignment::Scalar(value)));
+            false
+        } else if let Some((key, Assignment::Array(_, parts, source))) =
+            arrays.next_if(|(_, a)| matches!(a, Assignment::Array(Some(pos), ..) if *pos == index))
+        {
+            raw.assignments
+                .push((key, Assignment::Array(None, parts, source)));
+            false
+        } else {
+            true
+        }
+    });
+}
+
 fn expand_command_words(
     raw: &mut SimpleCommand<Word>,
     session: &mut Session,
@@ -2175,6 +2297,19 @@ fn expand_command_words(
     captured: &Cell<Option<u8>>,
 ) -> Result<Vec<String>, crate::expansion::Error> {
     let mut words = Vec::with_capacity(raw.words.len());
+    if session.posix
+        && let Some(operands) = raw.keyword_args.as_ref()
+    {
+        for (index, _) in operands.iter() {
+            if let Word::Expanded(parts) = &mut raw.words[*index] {
+                for part in parts {
+                    if let crate::word::Part::Tilde(tilde) = part {
+                        *part = crate::word::Part::Text(std::mem::take(tilde));
+                    }
+                }
+            }
+        }
+    }
     let mut original = Expansion::new(session, last_status, captured);
     let mut positions = raw
         .assignments
@@ -2402,6 +2537,8 @@ fn prepare_expanded(
     }
     let assignment_only = words.is_empty() && raw.compound.is_none();
     let mut cmd = PreparedCommand {
+        missing_hook: false,
+        literal_has_keywords: false,
         named_redirects: Vec::new(),
         resolved: None,
         array_declarations,
@@ -2756,6 +2893,13 @@ fn run_external(
         match hash::resolve(session, &cmd.words[0]) {
             Ok(path) => cmd.resolved = path,
             Err(hash::Absent)
+                if session
+                    .functions
+                    .contains_key(PreparedCommand::MISSING_HOOK) =>
+            {
+                cmd.select_missing_hook();
+            }
+            Err(hash::Absent)
                 if cmd.redirects.is_empty()
                     && launch.group.is_none()
                     && !session.traps.active() =>
@@ -2766,7 +2910,7 @@ fn run_external(
             Err(hash::Absent) => {}
         }
     }
-    if replace && launch.group.is_none() {
+    if replace && launch.group.is_none() && !cmd.prepare_missing_hook(session) {
         let executable = External::new(cmd, session);
         return Ok(Flow::Continue(
             if apply(&actions(cmd), here_input::PIPE_LIMIT) {
@@ -2799,11 +2943,14 @@ fn run_external(
 }
 
 fn foreground(
-    raw: SimpleCommand<Word>,
+    mut raw: SimpleCommand<Word>,
     last_status: u8,
     replace: bool,
     session: &mut Session,
 ) -> io::Result<Flow> {
+    if session.keyword {
+        separate_keyword_arguments(&mut raw);
+    }
     if raw.words.is_empty()
         && raw.redirects.is_empty()
         && raw.compound.is_none()

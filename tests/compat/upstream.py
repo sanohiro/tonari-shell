@@ -76,7 +76,10 @@ exit "$code"
         lines = f.read(128 * 1024).decode("utf-8", "replace").replace(str(root), "$WORK").splitlines()
     detail = next((s[:160] for s in lines if s.startswith(("< ", "> ", "diff:"))), "")
     skips = [s[:160] for s in lines if "skipping" in s.lower() and not s.startswith(("< ", "> "))]
-    return dict(ns=elapsed, exit=proc.returncode, timeout=timed_out, diffs=counts, skip=skips, example=detail)
+    outcome = dict(ns=elapsed, exit=proc.returncode, timeout=timed_out, diffs=counts, skip=skips, example=detail)
+    if any(counts) or proc.returncode:
+        outcome["output"] = "\n".join(lines)
+    return outcome
 
 
 def main():

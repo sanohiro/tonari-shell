@@ -1,5 +1,7 @@
 # POSIX sh comparison / POSIX sh の検証
 
+The original verdict for `return-p.tst:148` expects the status preceding a trap even inside a function called by the handler. POSIX.1-2024 limits this rule to a return that ends the trap action. The follow-up retains the original verdict in every artifact and checks the corrected result, including exit status and both streams. 上流の期待値 19 と現行仕様の 0 を別に記録し、どちらも未検証のまま合格とはしない。[Reproduction and rationale / 再現と判断根拠](../bash-source-review/follow-up.md) · [Austin Group interpretation 1602](https://www.austingroupbugs.net/view.php?id=1602)
+
 The subsequent comparison repeats this inventory after the compatibility and performance fixes. 修正後の合否と速度は追試の記録にあります。[Follow-up results](../yash-posix-followup/README.md)
 
 The release under test is `10e63fd`. The previous release is `d858d41`. Yash 2.60 at `1cdb509a617894ed96a12c33b43bcd7adb6f1ff5` supplies the scripts, helpers, controlling terminal and expectations. Its runner invokes each candidate via the same name, `sh`. Linux uses the runner's GNU Bash 5.2.21 and macOS uses a native build of GNU Bash 5.2.37. Each host exercises all 122 POSIX fixture files, including 62 generated signal fixtures. [Upstream instructions](https://github.com/magicant/yash/blob/2.60/tests/README.md) · [Full native run](https://github.com/sanohiro/tonari-shell/actions/runs/45615699784)

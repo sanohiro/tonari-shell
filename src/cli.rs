@@ -18,6 +18,7 @@ pub struct Invocation {
     pub posix: bool,
     pub norc: bool,
     pub noprofile: bool,
+    pub nolog: bool,
     pub noediting: bool,
     pub rcfile: Option<PathBuf>,
     pub check: bool,
@@ -39,6 +40,7 @@ pub struct Invocation {
     pub braceexpand: bool,
     pub pipefail: bool,
     pub physical: bool,
+    pub keyword: bool,
     pub shopts: Vec<(bool, Option<String>)>,
 }
 
@@ -90,6 +92,8 @@ pub fn parse(
     let mut braceexpand = true;
     let mut pipefail = false;
     let mut physical = false;
+    let mut keyword = false;
+    let mut nolog = false;
     let mut shopts = Vec::new();
     while args
         .peek()
@@ -102,6 +106,7 @@ pub fn parse(
             "--" | "-" => break,
             "--help" => return Ok(Action::Help),
             "--version" => return Ok(Action::Version),
+            "--verbose" => verbose = true,
             "--posix" => posix = true,
             "--login" => login = true,
             "--norc" => norc = true,
@@ -128,6 +133,7 @@ pub fn parse(
                         'T' => functrace = enabled,
                         'C' => noclobber = enabled,
                         'P' => physical = enabled,
+                        'k' => keyword = enabled,
                         'a' => allexport = enabled,
                         't' => onecmd = enabled,
                         'x' => xtrace = enabled,
@@ -142,6 +148,8 @@ pub fn parse(
                             Some("braceexpand") => braceexpand = enabled,
                             Some("posix") => posix = enabled,
                             Some("physical") => physical = enabled,
+                            Some("nolog") => nolog = enabled,
+                            Some("keyword") => keyword = enabled,
                             Some("interactive-comments") => {
                                 shopts.push((enabled, Some("interactive_comments".into())))
                             }
@@ -200,6 +208,7 @@ pub fn parse(
         posix,
         norc,
         noprofile,
+        nolog,
         noediting,
         rcfile,
         check: check && !interactive,
@@ -221,6 +230,7 @@ pub fn parse(
         braceexpand,
         pipefail,
         physical,
+        keyword,
         shopts,
     }))
 }

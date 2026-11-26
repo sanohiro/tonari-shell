@@ -63,7 +63,9 @@ impl Error {
     pub fn flow(&self, session: &Session) -> crate::Flow {
         match self.recovery {
             Recovery::Control(flow) => flow,
-            Recovery::Input if session.posix && !session.interactive => {
+            Recovery::Input
+                if session.posix && !session.interactive && session.shopt.compat > 43 =>
+            {
                 crate::Flow::Exit(self.status)
             }
             Recovery::Input => crate::Flow::Discard(self.status),
@@ -91,6 +93,20 @@ impl std::fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+pub(crate) enum AssignmentElement {
+    Index(String, i64),
+    Key(String, String),
+}
+
+impl AssignmentElement {
+    pub(crate) fn value(&self, session: &Session) -> Option<String> {
+        match self {
+            Self::Index(base, index) => session.element(base, *index),
+            Self::Key(base, key) => session.assoc_value(base, key).map(str::to_owned),
+        }
+    }
+}
 
 pub struct Expansion<'a> {
     pub session: &'a mut Session,
@@ -174,31 +190,71 @@ impl<'a> Expansion<'a> {
         )
     }
 
-    pub fn assign_parameter(&mut self, name: &str, text: &str) -> Result<(), Error> {
-        let base = crate::session::array::subscript(name).map_or(name, |(base, _)| base);
+    pub(crate) fn assignment_element(
+        &mut self,
+        name: &str,
+    ) -> Result<Option<AssignmentElement>, Error> {
+        let resolved = self.session.reference_name(name)?;
+        let Some((base, expr)) = crate::session::array::subscript(&resolved) else {
+            return Ok(None);
+        };
+        if matches!(expr, "@" | "*") {
+            return Ok(None);
+        }
+        let base = base.to_owned();
+        Ok(Some(if self.session.is_associative(&base) {
+            AssignmentElement::Key(base, self.key(expr)?)
+        } else {
+            let n = self.arithmetic(expr)?;
+            let index = self.session.relative_index(&base, n)?;
+            AssignmentElement::Index(base, index)
+        }))
+    }
+
+    pub(crate) fn assign_parameter(
+        &mut self,
+        name: &str,
+        element: Option<AssignmentElement>,
+        mut value: String,
+    ) -> Result<String, Error> {
+        let resolved;
+        let base = match &element {
+            Some(AssignmentElement::Index(base, _) | AssignmentElement::Key(base, _)) => {
+                base.as_str()
+            }
+            None if crate::parser::is_identifier(name) => {
+                resolved = self.session.reference_name(name)?;
+                resolved.as_ref()
+            }
+            None => {
+                return Err(Error::discard(format!(
+                    "${name}: cannot assign in this way"
+                )));
+            }
+        };
         if self.session.readonly(base) {
             return Err(Error::readonly(base));
         }
-        if crate::parser::is_identifier(name) {
-            self.assign(name, text);
-            return Ok(());
+        let (integer, changes_case) = self.session.assignment_attributes(base);
+        if integer {
+            value = self.arithmetic(&value)?.to_string();
         }
-        if let Some((base, index)) = crate::session::array::subscript(name) {
-            if !matches!(index, "@" | "*") {
-                if self.session.is_associative(base) {
-                    let key = self.key(index)?;
-                    self.session.assign_key(base, key, text.into())?;
-                    return Ok(());
-                }
-                let i = self.session.resolve_index(base, index)?;
-                self.session.assign_element(base, i, text.to_owned());
-                return Ok(());
+        match &element {
+            Some(AssignmentElement::Index(base, index)) => {
+                self.session.assign_element(base, *index, value.clone())
             }
+            Some(AssignmentElement::Key(base, key)) => {
+                self.session.assign_key(base, key.clone(), value.clone())?
+            }
+            None => self.assign(base, &value),
         }
-        Err(Error::fatal(
-            format!("${name}: cannot assign in this way"),
-            1,
-        ))
+        if changes_case {
+            value = element
+                .as_ref()
+                .map_or_else(|| self.lookup(base), |e| e.value(self.session))
+                .unwrap_or_default();
+        }
+        Ok(value)
     }
 
     pub fn process(&mut self, body: Vec<Statement>, input: bool) -> Result<String, Error> {

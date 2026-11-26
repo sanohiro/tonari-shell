@@ -12,20 +12,21 @@ use crate::{Flow, Session, execute_program, parser};
 // External commands inherit fd 0. Any unread text buffered by the shell must
 // still be available to a child which reads stdin (for example, "cat\n...").
 pub fn stdin_script(session: &mut Session, check: bool) -> Flow {
-    let setup = (|| {
-        let mut file = PrivateFile::duplicate(io::stdin().as_fd())?;
-        let seekable = file.stream_position().is_ok();
-        let reader = if seekable {
-            BufReader::new(file)
-        } else {
-            BufReader::with_capacity(1, file)
-        };
-        Ok::<_, io::Error>((reader, seekable))
-    })();
-    match setup {
-        Ok((reader, shared_offset)) => run(session, reader, shared_offset, None, 0, check),
+    match stdin_reader() {
+        Ok((reader, shared_offset)) => run(session, reader, shared_offset, true, None, 0, check),
         Err(e) => error(e, 1),
     }
+}
+
+fn stdin_reader() -> io::Result<(BufReader<PrivateFile>, bool)> {
+    let mut file = PrivateFile::duplicate(io::stdin().as_fd())?;
+    let seekable = file.stream_position().is_ok();
+    let reader = if seekable {
+        BufReader::new(file)
+    } else {
+        BufReader::with_capacity(1, file)
+    };
+    Ok((reader, seekable))
 }
 
 // Installers and version managers often wrap a whole script in one brace group.
@@ -72,6 +73,23 @@ fn file_group(
     whole_group(session, std::str::from_utf8(&bytes).ok()?, 1)
 }
 
+fn executable_header(bytes: &[u8]) -> bool {
+    matches!(
+        bytes.get(..4),
+        Some(
+            b"\x7fELF"
+                | b"\xcf\xfa\xed\xfe"
+                | b"\xfe\xed\xfa\xcf"
+                | b"\xce\xfa\xed\xfe"
+                | b"\xfe\xed\xfa\xce"
+                | b"\xca\xfe\xba\xbe"
+                | b"\xca\xfe\xba\xbf"
+                | b"\xbe\xba\xfe\xca"
+                | b"\xbf\xba\xfe\xca"
+        )
+    )
+}
+
 pub fn file_script(
     session: &mut Session,
     file: File,
@@ -79,11 +97,14 @@ pub fn file_script(
     status: u8,
     check: bool,
 ) -> Flow {
-    let metadata = if session.verbose {
-        None
-    } else {
-        metadata.or_else(|| file.metadata().ok())
-    };
+    let metadata = metadata.or_else(|| file.metadata().ok());
+    if metadata.as_ref().is_some_and(|m| m.is_dir()) {
+        return error(
+            "cannot run a directory as a script",
+            if session.source_depth == 0 { 126 } else { 1 },
+        );
+    }
+    let metadata = metadata.filter(|_| !session.verbose);
     if let Some(meta) = &metadata
         && meta.is_file()
         && (session.source_depth > 0 && meta.len() < 128 * 1024
@@ -103,10 +124,14 @@ pub fn file_script(
         if let Ok(n) = file.read_at(bytes, 0)
             && n == len
             && len != 0
-            && let Ok(source) = std::str::from_utf8(&bytes[..n])
         {
-            drop(file);
-            return text(session, source, status, false, check, None);
+            if executable_header(&bytes[..n]) {
+                return error("cannot execute binary file", 126);
+            }
+            if let Ok(source) = std::str::from_utf8(&bytes[..n]) {
+                drop(file);
+                return text(session, source, status, false, check, None);
+            }
         }
     }
     if let Some(meta) = &metadata
@@ -127,14 +152,14 @@ pub fn file_script(
     let file_len = metadata.filter(|m| m.is_file()).map(|m| m.len());
     let capacity = file_len.unwrap_or(8192).clamp(8192, 128 * 1024) as usize;
     match PrivateFile::new(file) {
-        Ok(file) => run(
-            session,
-            BufReader::with_capacity(capacity, file),
-            false,
-            file_len,
-            status,
-            check,
-        ),
+        Ok(file) => {
+            let mut reader = BufReader::with_capacity(capacity, file);
+            // Reuse the parser's first read. Binary images need no line scan.
+            if reader.fill_buf().is_ok_and(executable_header) {
+                return error("cannot execute binary file", 126);
+            }
+            run(session, reader, false, false, file_len, status, check)
+        }
         Err(e) => error(e, 1),
     }
 }
@@ -152,6 +177,12 @@ fn syntax_error(session: &Session, problem: parser::Error, first_line: usize) ->
         && matches!(problem, parser::Error::Invalid("NUL in command text"))
     {
         Flow::Exit(126)
+    } else if matches!(problem, parser::Error::ArrayToken) && !session.errexit {
+        if session.posix && !session.interactive {
+            Flow::Exit(1)
+        } else {
+            Flow::Continue(1)
+        }
     } else if session.posix && !session.interactive {
         Flow::Exit(2)
     } else {
@@ -340,7 +371,8 @@ fn assign_buffered_scalar(session: &mut Session, command: &str, scratch: &mut St
 fn run(
     session: &mut Session,
     mut reader: BufReader<PrivateFile>,
-    shared_offset: bool,
+    mut shared_offset: bool,
+    from_stdin: bool,
     file_len: Option<u64>,
     mut status: u8,
     check: bool,
@@ -478,6 +510,14 @@ fn run(
                 continue;
             }
             Err(parser::Error::Incomplete(_)) if n != 0 => continue,
+            Err(e @ parser::Error::ArrayToken)
+                if !check && !session.posix && !session.errexit && !session.noexec =>
+            {
+                syntax_error(session, e, base_line);
+                status = 1;
+                session.pipe_status.single(status);
+                ran = true;
+            }
             Err(e) => return syntax_error(session, e, base_line),
             Ok(program) if !program.is_empty() && !check => {
                 if shared_offset && !reader.buffer().is_empty() {
@@ -492,6 +532,15 @@ fn run(
                     && !session.interactive
                     && session.begin_history_line(text);
                 let flow = execute_program(session, program, status, false);
+                // A permanent redirect can change fd 0 from a regular file to a
+                // pipe or the reverse. Named scripts keep their private reader.
+                if from_stdin && std::mem::take(&mut session.stdin_replaced) {
+                    match stdin_reader() {
+                        Ok(next) => (reader, shared_offset) = next,
+                        Err(e) if e.raw_os_error() == Some(libc::EBADF) => return flow,
+                        Err(e) => return error(e, 1),
+                    }
+                }
                 session.command_number += usize::from(session.source_depth == 0);
                 if remember {
                     session.finish_history_line();
@@ -553,7 +602,11 @@ pub fn text(
     while let Some(line) = lines.next() {
         line_number += 1;
         if session.verbose {
-            eprint!("{line}");
+            if line.ends_with('\n') {
+                eprint!("{line}");
+            } else {
+                eprintln!("{line}");
+            }
         }
         let new_command = start == end;
         end += line.len();
@@ -643,6 +696,14 @@ pub fn text(
                 continue;
             }
             Err(parser::Error::Incomplete(_)) if !last => continue,
+            Err(e @ parser::Error::ArrayToken)
+                if !check && !session.posix && !session.errexit && !session.noexec =>
+            {
+                syntax_error(session, e, base_line);
+                status = 1;
+                session.pipe_status.single(status);
+                ran = true;
+            }
             Err(e) => return syntax_error(session, e, base_line),
             Ok(program) if !program.as_ref().is_empty() && !check => {
                 ran = true;

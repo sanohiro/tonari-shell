@@ -306,7 +306,7 @@ impl Job {
             let mut status = 0;
             let flags =
                 libc::WUNTRACED | libc::WCONTINUED | if mask.is_some() { libc::WNOHANG } else { 0 };
-            let got = unsafe { libc::waitpid(pid, &mut status, flags) };
+            let got = crate::traps::waitpid(pid, &mut status, flags);
             if got == 0 {
                 mask.unwrap().suspend();
                 continue;
@@ -704,7 +704,7 @@ impl Jobs {
 
     pub fn poll(&mut self) {
         self.detached.retain(|pid| {
-            let result = unsafe { libc::waitpid(*pid, std::ptr::null_mut(), libc::WNOHANG) };
+            let result = crate::traps::waitpid(*pid, &mut 0, libc::WNOHANG);
             result == 0
                 || result < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted
         });
@@ -715,13 +715,11 @@ impl Jobs {
                     continue;
                 }
                 let mut status = 0;
-                let got = unsafe {
-                    libc::waitpid(
-                        p.pid,
-                        &mut status,
-                        libc::WNOHANG | libc::WUNTRACED | libc::WCONTINUED,
-                    )
-                };
+                let got = crate::traps::waitpid(
+                    p.pid,
+                    &mut status,
+                    libc::WNOHANG | libc::WUNTRACED | libc::WCONTINUED,
+                );
                 if got > 0 {
                     job.update(got, status);
                 }
@@ -763,18 +761,13 @@ fn kill(jobs: &Jobs, mut args: &[String]) -> u8 {
         let mut out = io::stdout().lock();
         let mut status = 0;
         if args.len() == 1 {
-            for &(name, n) in crate::traps::SIGNALS.iter().filter(|s| s.1 != 0) {
-                if writeln!(out, "{n:2}) SIG{name}").is_err() {
-                    return 1;
-                }
-            }
+            return u8::from(crate::traps::print_signal_table(&mut out).is_err());
         } else {
             for arg in &args[1..] {
                 let result = if let Ok(n) = arg.parse::<i32>() {
                     // A shell wait status encodes the signal once as 128 + signal.
                     let number = if n > 128 { n - 128 } else { n };
-                    crate::traps::SIGNALS
-                        .iter()
+                    crate::traps::signals()
                         .find(|s| s.1 == number)
                         .map(|(name, _)| writeln!(out, "{name}"))
                 } else {

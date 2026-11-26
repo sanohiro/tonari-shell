@@ -11,7 +11,8 @@ source tools/ci/bash-source.sh
 if [[ $SUITE == source-review ]]; then
   if [[ $RUNNER_OS == Linux ]]; then
     docker run --rm -e EXTERNAL_BENCH_CASE -v "$PWD:/repo:ro" -v "$bin:/shells:ro" ubuntu:26.04 bash -ec '
-      apt-get update -qq && apt-get install -qq --no-install-recommends python3 netbase >/dev/null
+      apt-get update -qq && apt-get install -qq --no-install-recommends python3 netbase locales >/dev/null
+      localedef -i de_DE -f UTF-8 de_DE.UTF-8
       args=()
       if [[ -x /shells/baseline ]]; then args+=(--first /shells/baseline); fi
       for name in ${EXTERNAL_BENCH_CASE:-}; do args+=(--case "$name"); done

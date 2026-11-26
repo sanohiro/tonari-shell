@@ -80,7 +80,14 @@ impl Scope {
             if apply_protected(actions, libc::PIPE_BUF).is_err() {
                 return Ok(false);
             }
-            self.changed.push(r.fd);
+            match action {
+                Action::CloseMoved(fd) => {
+                    session.substitutions.replaced(fd);
+                    super::coprocess::replaced(session, fd);
+                }
+                Action::Dup(from, to) if from == to => {}
+                _ => self.changed.push(r.fd),
+            }
             session.stdin_redirected |= r.fd == 0;
         }
         Ok(true)
@@ -119,6 +126,7 @@ impl Scope {
     fn finish(self, session: &mut Session, committed: bool) -> io::Result<()> {
         if committed {
             for fd in self.changed {
+                session.stdin_replaced |= fd == 0;
                 session.substitutions.replaced(fd);
                 super::coprocess::replaced(session, fd);
             }
@@ -174,7 +182,10 @@ fn command(mut cmd: PreparedCommand, session: &mut Session, status: u8) -> io::R
         status,
         false,
         |session| {
-            if let Some(b) = builtin(&cmd, status, session) {
+            if let Some(b) = builtin(&cmd, status, session).or_else(|| {
+                cmd.prepare_missing_hook(session)
+                    .then_some(Builtin::Function)
+            }) {
                 let flow = eval_builtin(b, &mut cmd, session, status, false);
                 let commit = matches!(b, Builtin::Exec) && matches!(flow, Flow::Continue(0));
                 Ok((flow, commit))

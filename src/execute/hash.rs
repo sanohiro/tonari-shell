@@ -78,11 +78,18 @@ impl Table {
 pub(super) struct Absent;
 
 pub(super) fn search(name: &str, session: &Session) -> Result<Option<Entry>, Absent> {
-    let path = session.search_path(&[]);
+    search_in(name, session, &session.search_path(&[]))
+}
+
+pub(super) fn search_in(
+    name: &str,
+    session: &Session,
+    path: &std::ffi::OsStr,
+) -> Result<Option<Entry>, Absent> {
     let ignored = super::lookup::IgnoredExecutables::new(session);
     let mut relative = false;
     let mut absent = true;
-    for dir in std::env::split_paths(&path) {
+    for dir in std::env::split_paths(path) {
         relative |= !dir.is_absolute();
         let dir = if dir.as_os_str().is_empty() {
             Path::new(".")
@@ -194,7 +201,9 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
             eprintln!("tonari: hash: command name required");
             return 1;
         }
-        if !list {
+        if !session.posix
+            && (!list || session.shopt.compat <= 50 && session.hashes.entries.is_empty())
+        {
             let label = if session.hashes.entries.is_empty() {
                 "hash: hash table empty"
             } else {

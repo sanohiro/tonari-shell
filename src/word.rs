@@ -176,10 +176,10 @@ impl Word {
             }
             if let Part::BadSubstitution(text) = part {
                 let message = format!("{text}: bad substitution");
-                return Err(if env.session.evaluating {
-                    crate::expansion::Error::discard(message)
-                } else {
+                return Err(if env.session.errexit && !env.session.interactive {
                     crate::expansion::Error::fatal(message, 1)
+                } else {
+                    crate::expansion::Error::discard(message)
                 });
             }
             if let Part::BraceParameter(name) = part {
@@ -217,6 +217,17 @@ impl Word {
                     return Err(crate::expansion::Error::discard(format!(
                         "{name}: bad array subscript"
                     )));
+                }
+                if let Some(reference) = name.strip_prefix('!')
+                    && (!env.session.nounset || plain_quote.is_none())
+                    && (matches!(reference, "@" | "*")
+                        && env.session.positional.as_slice().is_empty()
+                        || reference.as_bytes().first().is_some_and(u8::is_ascii_digit)
+                            && reference
+                                .parse::<usize>()
+                                .is_ok_and(|i| i > env.session.positional.len()))
+                {
+                    name.clear();
                 }
                 if let Some(reference) = name.strip_prefix('!').filter(|s| {
                     !s.is_empty() && (plain_quote.is_none() || array_elements_name(name).is_none())
@@ -316,6 +327,11 @@ impl Word {
                     word,
                     quoted,
                 } => {
+                    let element = if *op == Alternative::Assign {
+                        env.assignment_element(name)?
+                    } else {
+                        None
+                    };
                     let elements = array_elements_name(name);
                     // A successful + alternative never reads the elements.
                     // Multiple quoted @ fields stay distinct even if all are empty.
@@ -355,7 +371,11 @@ impl Word {
                             };
                             (set, part)
                         } else {
-                            let value = modifier::value(name, env)?;
+                            let value = if let Some(element) = &element {
+                                element.value(env.session)
+                            } else {
+                                modifier::value(name, env)?
+                            };
                             let set = value
                                 .as_ref()
                                 .is_some_and(|s| !*check_empty || !s.is_empty());
@@ -365,8 +385,9 @@ impl Word {
                     if set == use_word_if_set {
                         word.resolve(env)?;
                         if matches!(*op, Alternative::Assign | Alternative::Error) {
-                            let value = (**word)
-                                .clone()
+                            let operand =
+                                std::mem::replace(word.as_mut(), Word::Literal(String::new()));
+                            let value = operand
                                 .scalar(&|k| env.lookup(k), env.session.positional.as_slice());
                             if *op == Alternative::Error {
                                 let default = if *check_empty {
@@ -379,7 +400,7 @@ impl Word {
                                     if value.is_empty() { default } else { &value },
                                 ));
                             }
-                            env.assign_parameter(name, &value)?;
+                            let value = env.assign_parameter(name, element, value)?;
                             *part = literal(value, *quoted);
                             continue;
                         }
@@ -401,6 +422,24 @@ impl Word {
                             original
                         };
                     }
+                }
+                Part::Parameter { name, quoted: true } if name == "*" => {
+                    // A later expansion in this word can change IFS or the arguments.
+                    *part = Part::Text(
+                        env.session
+                            .positional
+                            .as_slice()
+                            .join(&ifs_separator(&|k| env.lookup(k))),
+                    );
+                }
+                Part::Parameter { name, quoted: true }
+                    if name.ends_with("[*]") && array_elements_name(name).is_some() =>
+                {
+                    let modifier::Values::Elements(values, _) = modifier::Values::read(name, env)?
+                    else {
+                        unreachable!()
+                    };
+                    *part = Part::Text(values.join(&ifs_separator(&|k| env.lookup(k))));
                 }
                 Part::Parameter { name, quoted }
                     if !matches!(name.as_str(), "@" | "*")
@@ -702,10 +741,9 @@ impl Output<'_> {
                     Self::Scalar(text) | Self::Pattern(text, _) => text.push(' '),
                     Self::Fields(fields)
                         if !quoted
-                            && ifs
-                                .as_bytes()
-                                .first()
-                                .is_some_and(|b| !matches!(b, b' ' | b'\t' | b'\n')) =>
+                            && ifs.as_bytes().first().is_some_and(|b| {
+                                !matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 11 | 12)
+                            }) =>
                     {
                         // An implicit non-whitespace IFS separator emits even an
                         // empty field. The final field still needs actual text.
@@ -837,6 +875,28 @@ fn tilde(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
         "~" => lookup("HOME").or_else(account_home),
         "~+" => lookup("PWD"),
         "~-" => lookup("OLDPWD"),
+        numbered
+            if numbered[1..]
+                .trim_start_matches(['+', '-'])
+                .bytes()
+                .next()
+                .is_some_and(|c| c.is_ascii_digit()) =>
+        {
+            let digits = &numbered[1..];
+            let (reverse, digits) = if let Some(n) = digits.strip_prefix('-') {
+                (true, n)
+            } else {
+                (false, digits.strip_prefix('+').unwrap_or(digits))
+            };
+            digits.parse::<u32>().ok().and_then(|n| {
+                let i = if reverse {
+                    -1 - i64::from(n)
+                } else {
+                    i64::from(n)
+                };
+                lookup(&format!("DIRSTACK[{i}]"))
+            })
+        }
         _ => account_field(Some(prefix.strip_prefix('~').unwrap_or(prefix)), false),
     };
     let Some(mut home) = home else {
@@ -914,11 +974,12 @@ fn account_field(login: Option<&str>, shell: bool) -> Option<String> {
     }
 }
 
-fn ifs_separator(lookup: &dyn Fn(&str) -> Option<String>) -> String {
-    lookup("IFS").map_or_else(
-        || " ".into(),
-        |s| s.chars().next().map(String::from).unwrap_or_default(),
-    )
+fn ifs_separator(lookup: &dyn Fn(&str) -> Option<String>) -> std::borrow::Cow<'static, str> {
+    let Some(mut ifs) = lookup("IFS") else {
+        return " ".into();
+    };
+    ifs.truncate(ifs.chars().next().map_or(0, char::len_utf8));
+    ifs.into()
 }
 
 // Visit separator spans in the original UTF-8 text. A single delimiter can
@@ -985,7 +1046,7 @@ impl Fields<'_> {
             if start < i {
                 self.literal(&text[start..i], true);
             }
-            if matches!(sep, " " | "\t" | "\n") {
+            if matches!(sep, " " | "\t" | "\n" | "\r" | "\x0b" | "\x0c") {
                 self.whitespace = true;
             } else {
                 self.emit();
