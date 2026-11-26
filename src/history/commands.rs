@@ -407,13 +407,17 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
         } else {
             0
         };
-        let mut header = [0; 2];
-        let marked = !private
-            && meta.is_file()
-            && file.read_at(&mut header, 0)? == 2
-            && header[0] == b'#'
-            && header[1].is_ascii_digit();
         let mut reader = BufReader::new(file);
+        let marked = if private || !meta.is_file() {
+            false
+        } else if skip > 0 {
+            let mut header = [0; 2];
+            reader.get_ref().read_at(&mut header, 0)? == 2
+                && header[0] == b'#'
+                && header[1].is_ascii_digit()
+        } else {
+            matches!(reader.fill_buf()?, [b'#', digit, ..] if digit.is_ascii_digit())
+        };
         let mut offset = skip;
         let mut timestamp = None;
         let mut marker_offset = None;

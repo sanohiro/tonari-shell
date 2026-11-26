@@ -100,10 +100,10 @@ pub(crate) fn finish_interactive(session: &mut Session) {
 }
 
 fn file(session: &Session) -> Option<PathBuf> {
-    let setting = session.get("HISTFILE")?;
+    let setting = session.scalar_setting("HISTFILE")?;
     if setting.is_empty()
         || setting == "/dev/null"
-        || session.get("HISTFILESIZE").as_deref() == Some("0")
+        || session.scalar_setting("HISTFILESIZE").as_deref() == Some("0")
     {
         return None;
     }

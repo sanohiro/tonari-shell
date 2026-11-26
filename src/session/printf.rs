@@ -231,6 +231,17 @@ impl<'a> Arguments<'a> {
     }
 
     fn signed(&mut self) -> i64 {
+        // Common decimal widths and operands need neither a C string nor errno.
+        if let Some((word, rest)) = self.values.split_first()
+            && word
+                .as_bytes()
+                .first()
+                .is_some_and(|b| matches!(b, b'1'..=b'9'))
+            && let Ok(value) = word.parse::<i64>()
+        {
+            self.values = rest;
+            return value;
+        }
         self.number(|p, end| unsafe { libc::strtoll(p, end, 0) }, i64::from, ".")
     }
     fn unsigned(&mut self) -> u64 {

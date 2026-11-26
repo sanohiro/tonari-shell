@@ -407,8 +407,12 @@ fn interactive_loop(
                     }
                     session.command_number += 1;
                     let record = session.begin_history_line(text);
-                    let cwd = session.get("PWD");
-                    let flow = execute_program(session, program, status, false);
+                    let cwd = if record { session.get("PWD") } else { None };
+                    let flow = if session.noexec {
+                        Flow::Continue(0)
+                    } else {
+                        execute_program(session, program, status, false)
+                    };
                     status = match flow {
                         Flow::Discard(s) | Flow::Continue(s) | Flow::Return(s) | Flow::Exit(s) => s,
                         _ => 1,
