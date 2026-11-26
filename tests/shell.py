@@ -215,8 +215,13 @@ f?() { echo question; }; 'f?'
                     for prefix in ("", "register() { " + definition + "; }; register; "):
                         proc = self.command(shell, prefix + "set -o posix; " +
                                             ("register" if prefix else definition) + "; echo after")
-                        self.assertEqual((proc.returncode, proc.stdout), (2, b""))
-                        self.assertTrue(proc.stderr)
+                        if name == "a,b%" and shell == BASH and not self.bash_before_53():
+                            # Bash 5.3 accepts punctuation as a POSIX extension.
+                            self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
+                                             (0, b"after\n", b""))
+                        else:
+                            self.assertEqual((proc.returncode, proc.stdout), (2, b""))
+                            self.assertTrue(proc.stderr)
                     skipped = self.command(shell, "set -o posix; if false; then " + definition +
                                            "; fi; echo ok")
                     self.assertEqual((skipped.returncode, skipped.stdout, skipped.stderr),
