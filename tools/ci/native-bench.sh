@@ -10,10 +10,11 @@ esac
 source tools/ci/bash-source.sh
 if [[ $SUITE == source-review ]]; then
   if [[ $RUNNER_OS == Linux ]]; then
-    docker run --rm -e EXTERNAL_BENCH_CASE -e TONARI_TEST_BASHDB=1 -v "$PWD/tests/compat/fixtures/bashdb-main.inc:/usr/share/bashdb/bashdb-main.inc:ro" -v "$PWD:/repo:ro" -v "$bin:/shells:ro" ubuntu:26.04 bash -ec '
+    docker run --rm -e EXTERNAL_BENCH_CASE -e EXTERNAL_BENCH_RUNS -e TONARI_TEST_BASHDB=1 -v "$PWD/tests/compat/fixtures/bashdb-main.inc:/usr/share/bashdb/bashdb-main.inc:ro" -v "$PWD:/repo:ro" -v "$bin:/shells:ro" ubuntu:26.04 bash -ec '
       apt-get update -qq && apt-get install -qq --no-install-recommends python3 netbase locales >/dev/null
       localedef -i de_DE -f UTF-8 de_DE.UTF-8
       args=()
+      if [[ -n ${EXTERNAL_BENCH_RUNS:-} ]]; then args+=(--runs "$EXTERNAL_BENCH_RUNS"); fi
       if [[ -x /shells/baseline ]]; then args+=(--first /shells/baseline); fi
       for name in ${EXTERNAL_BENCH_CASE:-}; do args+=(--case "$name"); done
       python3 /repo/tests/compat/source_review.py /bin/bash /shells/current "${args[@]}"
@@ -21,6 +22,7 @@ if [[ $SUITE == source-review ]]; then
   else
     if [[ ! -x /opt/homebrew/bin/bash ]]; then brew install bash; fi
     args=()
+    if [[ -n ${EXTERNAL_BENCH_RUNS:-} ]]; then args+=(--runs "$EXTERNAL_BENCH_RUNS"); fi
     if [[ -x $bin/baseline ]]; then args+=(--first "$bin/baseline"); fi
     for name in ${EXTERNAL_BENCH_CASE:-}; do args+=(--case "$name"); done
     python3 tests/compat/source_review.py /opt/homebrew/bin/bash "$current" "${args[@]}" > "$out/source-review.jsonl"
