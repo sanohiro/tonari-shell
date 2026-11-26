@@ -248,7 +248,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     if let Some(invalid) = opts
         .names
         .iter()
-        .find(|s| opts.array.is_none() && !session.valid_target(s))
+        .find(|s| opts.array.is_none() && !session.valid_builtin_target(s))
     {
         eprintln!("tonari: read: {invalid}: invalid identifier");
         return 1;

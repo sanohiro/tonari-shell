@@ -239,6 +239,16 @@ impl Session {
         }
     }
 
+    pub fn valid_builtin_target(&self, target: &str) -> bool {
+        if !self.valid_target(target) {
+            return false;
+        }
+        self.shopt.array_expand_once
+            || subscript(target).is_none_or(|(base, _)| {
+                !self.is_associative(base) || Self::valid_reference_target(target)
+            })
+    }
+
     pub fn assign_target(&mut self, target: &str, value: &str) -> Result<(), &'static str> {
         self.assign_target_value(target, value, false)
     }

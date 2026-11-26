@@ -1030,7 +1030,7 @@ fn wait_builtin(args: &[String], session: &mut Session) -> u8 {
         return 2;
     };
     if let Some(name) = options.variable {
-        if !session.valid_target(name) {
+        if !session.valid_builtin_target(name) {
             eprintln!("tonari: wait: {name}: not a valid identifier");
             return 1;
         }

@@ -40,7 +40,7 @@ pub(crate) fn run(
             eprintln!("tonari: printf: -v requires a variable");
             return 2;
         };
-        if !session.valid_target(name) {
+        if !session.valid_builtin_target(name) {
             eprintln!("tonari: printf: {name}: invalid identifier");
             return 2;
         }
