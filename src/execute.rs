@@ -2428,7 +2428,9 @@ fn prepare_expanded(
                     exp.array_items(parts, declared_assoc || exp.session.is_associative(&key))?;
                 if words.is_empty() {
                     if standalone {
-                        session.assign_array(&key, append, &items, false)?;
+                        session
+                            .assign_array(&key, append, &items, false)
+                            .map_err(crate::expansion::Error::discard_line)?;
                         if let Some(error) = items.initializer_error() {
                             return Err(crate::expansion::Error::discard(error));
                         }

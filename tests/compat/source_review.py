@@ -16,6 +16,10 @@ from terminal import Terminal
 
 # Compare observable output and status. Error messages may identify the shell.
 COMMON = {
+    "array-declaration-print": "declare -r 'c[100]'; declare -p c; declare -a 'e[10]=(x y)'; declare -p e; export e; set -o posix; readonly -a | grep ' c$'; export -p | grep ' e='",
+    "slice-error-recovery": "set -- a b; a=hello; b=(one two)\nprintf ignored \"${@:0:-2}\"; echo skipped\necho \"$?\"\nprintf ignored \"${b[@]:0:-2}\"; echo skipped\necho \"$?\"\nset -o posix\nprintf ignored \"${a:2:-7}\"; echo skipped\necho \"continued:$?\"",
+    "arithmetic-adjacent-signs": "v=4; echo $((++7)) $((--7)) $((5--2)) $((3+++2)) $((--(v))) $v; echo $((++v)) $((v++)) $v",
+    "portable-bracket-members": "s=hello; echo \"${s//[[:alpha]/}\"; for p in '[[.space.]]' '[[.hyphen.]-[.nine.]]' '[[.tab.]]' '[[:ascii:]]' '[[.unknown.]a]'; do for v in ' ' $'\\t' '-' 5 a 雪; do [[ $v == $p ]]; printf '%s' \"$?\"; done; echo; done",
     "history-physical-lines": "set -o history -H\necho first\nif :; then\necho !absent\necho done\nfi\ncat <<'END'\n!!\nEND\necho 'line\n!!\nend'\necho \"$(echo '!')\"",
     "ignoreeof-variable": "IGNOREEOF=4; shopt -qo ignoreeof; echo $?; f(){ local IGNOREEOF=2; unset IGNOREEOF; shopt -qo ignoreeof; echo $?; }; f; echo \"$IGNOREEOF\"; shopt -qo ignoreeof; echo $?; set +o ignoreeof; echo \"${IGNOREEOF-unset}\"; ignoreeof=2; shopt -qo ignoreeof; echo $?; unset ignoreeof; shopt -qo ignoreeof; echo $?",
     "nameref-type-change": "declare -i x=1; y=2; declare -n x=y; declare -p x; echo \"$x\"; declare +n x; declare -p x; readonly ro=y; declare -n ro; echo $?; declare -p ro\ndeclare -n r\nr='invalid name'; echo skipped\necho \"$?\"; declare -p r; read r <<< /; echo \"$?\"; printf -v r /; echo \"$?\"; declare -p r",
@@ -87,6 +91,7 @@ COMMON = {
     "funcnest": 'FUNCNEST=2; f(){ echo f; g; echo wrong; }; g(){ h; }; h(){ echo h; }; (f); echo "$?"; unset FUNCNEST; f',
 }
 NEW = {
+    "indexed-init-recovery": "a=(old)\na=([0]=start [1]=yes [-3]=bad [2]=later); echo skipped\necho \"$?\"; declare -p a\na=([]=bad [3]=end); echo skipped\necho \"$?\"; declare -p a",
     "empty-async-negation": "!& echo $?; wait; !; echo $?",
     "partial-assoc-init": "declare -A a=([one]=1 bad [two]=2); echo skipped\necho \"$?:${a[one]}:${a[two]}\"; a=(old surplus)\na=([hi]=OK ['']=no [missing]=no)\necho \"$?:${a[hi]}:${a[old]}:${a[missing]}\"; a=(good yes '' ignored last ok); echo \"$?:${a[last]}\"",
     "terminal-test-operand": "for fd in bad '' ' +3 ' -1 4294967296 9999999999999999999999; do test -t \"$fd\"; echo $?; [[ -t \"$fd\" ]]; echo $?; done",
@@ -115,6 +120,11 @@ printf '%s' "$y"; }suffix; echo "$x" """,
 }
 
 HOT = {
+    "indexed-init-recovery": ("a=([0]=start [1]=yes [-3]=bad)", 800),
+    "array-declaration-print": ("declare -a 'e[10]=(x y)'; declare -p e >/dev/null", 500),
+    "slice-error-recovery": (":", 800),
+    "arithmetic-adjacent-signs": ("((v=7--2+ ++4)); ((++v))", 1700),
+    "portable-bracket-members": ("[[ $text == $pat ]]; v=${text//[[:alpha]/}", 1000),
     "empty-async-negation": ('!& wait "$!"', 80),
     "history-physical-lines": (":", 300),
     "ignoreeof-variable": ("IGNOREEOF=2; unset IGNOREEOF", 900),
@@ -698,6 +708,9 @@ def main():
             if not requested(name) or not args.runs or (not modern and name not in COMMON):
                 continue
             setup = {
+                "array-declaration-print": "e=(init)",
+                "arithmetic-adjacent-signs": "v=0",
+                "portable-bracket-members": "pat='[[.space.][.hyphen.][.tab.]]'; text=hello",
                 "nameref-type-change": "y=3",
                 "partial-assoc-init": "declare -A a",
                 "typed-export": "r=(one)",
@@ -747,7 +760,13 @@ def main():
                 "glob-size": "GLOBSORT=size", "glob-numeric": "cd items; GLOBSORT=numeric",
             }.get(name, ":")
             code = f"{setup}; for ((i=0;i<{count};i++)); do {body}; done; echo done"
-            if name == "history-physical-lines":
+            if name == "slice-error-recovery":
+                code = ("exec 2>/dev/null\nset -- one two\n"
+                        + ': "${@:1:-1}"\n' * count + 'echo done')
+            elif name == "indexed-init-recovery":
+                code = ("exec 2>/dev/null\n" + (body + "\n") * count
+                        + '[[ ${a[1]} == yes && ${#a[@]} == 2 ]] && echo done')
+            elif name == "history-physical-lines":
                 code = ("exec 2>/dev/null\nset -o history -H\n: seed\n"
                         + "if :; then\n: !!:$\nfi\n" * count + "echo done")
             elif name == "partial-assoc-init":

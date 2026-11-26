@@ -563,9 +563,9 @@ impl Session {
         if var.readonly {
             return Err("readonly variable");
         }
-        self.array_items(name, global, &mut var, append, items)?;
+        let result = self.array_items(name, global, &mut var, append, items);
         self.store_variable(name, var, global);
-        Ok(())
+        result
     }
 
     // Arithmetic can read or modify earlier entries, including through a nameref.
@@ -628,6 +628,8 @@ impl Session {
         }
         let items = match items {
             ArrayItems::Associative(items, _) => {
+                var.array_assigned = true;
+                var.declared = true;
                 let integer = var.integer;
                 let letter_case = var.letter_case;
                 let map = var.make_associative()?;
@@ -645,8 +647,6 @@ impl Session {
                     };
                     map.insert(key.clone(), self.convert_case(value, letter_case));
                 }
-                var.array_assigned = true;
-                var.declared = true;
                 return Ok(());
             }
             ArrayItems::Indexed(items) if var.associative().is_none() => items,
@@ -662,46 +662,52 @@ impl Session {
         };
         // With declare -g, an existing local still controls name resolution.
         let visible = !global || !self.locals.iter().any(|scope| scope.0.contains_key(name));
-        let mut next = map.last_index().map_or(Some(0), |i| i.checked_add(1));
-        for (index, value) in items {
-            let concat = index.as_ref().is_some_and(|s| s.append);
-            let index = match index.as_ref().map(|s| &s.index) {
-                Some(Index::Literal(i)) => Some(*i),
-                Some(Index::Expression(expr)) => {
-                    Some(self.initializer_number(name, var, &mut map, visible, expr)?)
-                }
-                None => None,
-            };
-            let i = match index {
-                Some(n) if n < 0 => map
-                    .last_index()
-                    .and_then(|i| i.checked_add(n + 1))
-                    .filter(|i| *i >= 0),
-                Some(n) => Some(n),
-                None => next,
-            }
-            .ok_or("array subscript out of range")?;
-            let value = if var.integer {
-                let old = if concat {
-                    map.get(&i).and_then(|s| s.parse::<i64>().ok()).unwrap_or(0)
-                } else {
-                    0
+        let result = (|| {
+            let mut next = map.last_index().map_or(Some(0), |i| i.checked_add(1));
+            for (index, value) in items {
+                let concat = index.as_ref().is_some_and(|s| s.append);
+                let index = match index.as_ref().map(|s| &s.index) {
+                    Some(Index::Literal(i)) => Some(*i),
+                    Some(Index::Expression(expr)) if expr.is_empty() => {
+                        return Err("bad array subscript");
+                    }
+                    Some(Index::Expression(expr)) => {
+                        Some(self.initializer_number(name, var, &mut map, visible, expr)?)
+                    }
+                    None => None,
                 };
-                old.wrapping_add(self.initializer_number(name, var, &mut map, visible, value)?)
-                    .to_string()
-            } else if concat {
-                map.get(&i).unwrap_or_default().to_owned() + value
-            } else {
-                value.clone()
-            };
-            map.insert(i, self.convert_case(value, var.letter_case));
-            next = i.checked_add(1);
-        }
+                let i = match index {
+                    Some(n) if n < 0 => map
+                        .last_index()
+                        .and_then(|i| i.checked_add(n + 1))
+                        .filter(|i| *i >= 0),
+                    Some(n) => Some(n),
+                    None => next,
+                }
+                .ok_or("array subscript out of range")?;
+                let value = if var.integer {
+                    let old = if concat {
+                        map.get(&i).and_then(|s| s.parse::<i64>().ok()).unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    old.wrapping_add(self.initializer_number(name, var, &mut map, visible, value)?)
+                        .to_string()
+                } else if concat {
+                    map.get(&i).unwrap_or_default().to_owned() + value
+                } else {
+                    value.clone()
+                };
+                map.insert(i, self.convert_case(value, var.letter_case));
+                next = i.checked_add(1);
+            }
+            Ok(())
+        })();
         var.elements = Some(Rc::new(map));
         var.value = None;
         var.declared = true;
         var.array_assigned = true;
-        Ok(())
+        result
     }
 
     pub(super) fn store_elements(&mut self, name: &str, values: Elements, global: bool) {

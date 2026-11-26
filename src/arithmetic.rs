@@ -308,7 +308,19 @@ impl<'a> Parser<'a> {
                 let bytes = source.as_bytes();
                 let len = match bytes {
                     [b'<', b'<', b'=', ..] | [b'>', b'>', b'=', ..] => 3,
-                    [first, second, ..] if first == second && b"+-*&|<>".contains(first) => 2,
+                    [sign @ (b'+' | b'-'), next, rest @ ..] if sign == next => {
+                        let name_follows = rest
+                            .iter()
+                            .copied()
+                            .find(|b| !b.is_ascii_whitespace())
+                            .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_');
+                        if matches!(old, Token::Name(_)) || name_follows {
+                            2
+                        } else {
+                            1
+                        }
+                    }
+                    [first, second, ..] if first == second && b"*&|<>".contains(first) => 2,
                     [first, b'=', ..] if b"+-*/%&^|<>=!".contains(first) => 2,
                     [first, ..] if b"+-*/%()!:~&|^<>=?,".contains(first) => 1,
                     _ => return Err("invalid arithmetic token"),

@@ -8,6 +8,7 @@ enum Recovery {
     Control(crate::Flow),
     Command,
     Input,
+    Line,
     Exit,
 }
 
@@ -31,6 +32,14 @@ impl Error {
         Self {
             message: message.into(),
             recovery: Recovery::Input,
+            status: 1,
+        }
+    }
+
+    pub fn discard_line(message: &'static str) -> Self {
+        Self {
+            message: message.into(),
+            recovery: Recovery::Line,
             status: 1,
         }
     }
@@ -68,7 +77,7 @@ impl Error {
             {
                 crate::Flow::Exit(self.status)
             }
-            Recovery::Input => crate::Flow::Discard(self.status),
+            Recovery::Line | Recovery::Input => crate::Flow::Discard(self.status),
             Recovery::Exit if !session.interactive => crate::Flow::Exit(self.status),
             Recovery::Exit => crate::Flow::Discard(self.status),
             _ => crate::Flow::Continue(self.status),

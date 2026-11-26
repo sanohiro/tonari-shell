@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::rc::Rc;
 
-use super::{LetterCase, Session, Variable, is_identifier, print_declaration};
+use super::{LetterCase, Session, Variable, is_identifier, print_attribute};
 
 #[derive(Default)]
 struct Options {
@@ -245,7 +245,13 @@ pub(super) fn run(
                     continue;
                 }
                 if (flags.exported.is_none() || !operands.is_empty() || var.exported)
-                    && print_declaration(&mut out, name, &var).is_err()
+                    && print_attribute(
+                        &mut out,
+                        name,
+                        &var,
+                        (attribute && session.posix).then_some(command),
+                    )
+                    .is_err()
                 {
                     return crate::execute::Flow::Continue(1);
                 }
@@ -472,12 +478,14 @@ pub(super) fn run(
             status = 1;
             continue;
         }
-        if flags.array && (!attribute || value.is_some() || array.is_some()) {
+        if (flags.array || target.is_some() && !flags.associative && var.associative().is_none())
+            && (!attribute || value.is_some() || array.is_some())
+        {
             var.make_array();
         }
         let mut initializer_error = array.and_then(|d| d.items.initializer_error());
         if let Some(text) = value
-            && target.is_none()
+            && (target.is_none() || flags.array || flags.associative)
             && array.is_none()
             && var.elements.is_some()
             && (!attribute || flags.array || flags.associative)
@@ -500,6 +508,7 @@ pub(super) fn run(
             }) {
                 Ok(()) => {}
                 Err(e) => {
+                    session.store_variable(name, var, flags.global);
                     e.report(&format!("{command}: {name}: "));
                     return e.flow(session);
                 }
@@ -589,9 +598,9 @@ pub(super) fn run(
         if let Some(d) = array
             && let Err(e) = session.array_items(name, flags.global, &mut var, d.append, &d.items)
         {
+            session.store_variable(name, var, flags.global);
             eprintln!("tonari: {command}: {name}: {e}");
-            status = 1;
-            continue;
+            return crate::Flow::Discard(1);
         }
         if let Some(on) = flags.readonly {
             var.readonly = on;

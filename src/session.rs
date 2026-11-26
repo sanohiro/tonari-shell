@@ -305,6 +305,15 @@ impl Session {
                 "RANDOM",
                 "SRANDOM",
                 "BASH_MONOSECONDS",
+                "BASH_ARGC",
+                "BASH_ARGV",
+                "BASH_SOURCE",
+                "BASH_LINENO",
+                "BASH_ALIASES",
+                "BASH_CMDS",
+                "FUNCNAME",
+                "DIRSTACK",
+                "PIPESTATUS",
                 "HISTCMD",
                 "GROUPS",
                 "HOSTTYPE",
@@ -317,6 +326,9 @@ impl Session {
             .filter(|k| k.starts_with(prefix))
             .map(str::to_owned),
         );
+        if self.funcname_unset {
+            names.remove("FUNCNAME");
+        }
         if !self.word_breaks_unset && "COMP_WORDBREAKS".starts_with(prefix) {
             names.insert("COMP_WORDBREAKS".into());
         }
@@ -1625,17 +1637,18 @@ impl Session {
             }
         }
         let mut out = io::stdout().lock();
+        let command = self.posix.then_some("export");
         for (name, value) in vars {
             if let Some(var) = self.variables.get(&name) {
                 if matches!(name.as_str(), "BASHOPTS" | "SHELLOPTS") {
                     let current = self.declared_variable(&name, false).unwrap();
-                    print_declaration(&mut out, &name, &current)?;
+                    print_attribute(&mut out, &name, &current, command)?;
                 } else {
-                    print_declaration(&mut out, &name, var)?;
+                    print_attribute(&mut out, &name, var, command)?;
                 }
                 continue;
             }
-            print_declaration(
+            print_attribute(
                 &mut out,
                 &name,
                 &Variable {
@@ -1652,6 +1665,7 @@ impl Session {
                     value,
                     exported: true,
                 },
+                command,
             )?;
         }
         out.flush()
@@ -2247,6 +2261,25 @@ impl Session {
             )
         })
     }
+}
+
+fn print_attribute(
+    out: &mut impl Write,
+    name: &str,
+    var: &Variable,
+    command: Option<&str>,
+) -> io::Result<()> {
+    if let Some(command) = command {
+        out.write_all(command.as_bytes())?;
+        if var.associative().is_some() {
+            out.write_all(b" -A")?;
+        } else if var.elements.is_some() {
+            out.write_all(b" -a")?;
+        }
+        write!(out, " {name}")?;
+        return print_variable_value(out, var);
+    }
+    print_declaration(out, name, var)
 }
 
 fn print_declaration(out: &mut impl Write, name: &str, var: &Variable) -> io::Result<()> {

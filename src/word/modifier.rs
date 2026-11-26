@@ -377,7 +377,7 @@ impl Modification {
                 }
                 if matches!(name, "@" | "*") || array_elements_name(name).is_some() {
                     if len.is_some_and(|n| n < 0) {
-                        return Err(Error::fatal("negative array slice length", 1));
+                        return Err(Error::discard_line("negative array slice length"));
                     }
                     let count = len.map_or(usize::MAX, |n| n as usize);
                     let (values, at) = if let Some((base, at, keys)) = array_elements_name(name) {
@@ -492,7 +492,7 @@ fn substring(v: &str, start: i64, len: Option<i64>) -> Result<&str, Error> {
         None => v.len(),
         Some(n) if n < 0 => boundary(v, n)
             .filter(|&end| end >= start)
-            .ok_or_else(|| Error::fatal("negative substring length", 1))?,
+            .ok_or_else(|| Error::discard_line("negative substring length"))?,
         Some(n) => boundary(&v[start..], n).map_or(v.len(), |i| start + i),
     };
     Ok(&v[start..end])
