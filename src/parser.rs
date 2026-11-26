@@ -533,8 +533,20 @@ pub enum Command {
 }
 
 #[derive(Debug)]
+pub enum Incomplete {
+    Message(&'static str),
+    SingleQuote,
+    DoubleQuote,
+    AnsiQuote,
+    CasePattern,
+    Subshell,
+}
+
+#[derive(Debug)]
 pub enum Error {
-    Incomplete(&'static str),
+    Incomplete(Incomplete),
+    NulByte,
+    ArithmeticClose,
     HereDoc(HereDocHint),
     Invalid(&'static str),
     ArrayToken,
@@ -543,9 +555,9 @@ pub enum Error {
 impl Error {
     pub(crate) fn pending_quote(&self) -> Option<char> {
         match self {
-            Self::Incomplete("unterminated single quote") => Some('\''),
-            Self::Incomplete("unterminated dollar-single-quoted string") => Some('$'),
-            Self::Incomplete("unterminated double quote") => Some('"'),
+            Self::Incomplete(Incomplete::SingleQuote) => Some('\''),
+            Self::Incomplete(Incomplete::AnsiQuote) => Some('$'),
+            Self::Incomplete(Incomplete::DoubleQuote) => Some('"'),
             _ => None,
         }
     }
@@ -556,7 +568,14 @@ impl Error {
 
     pub fn message(&self) -> &'static str {
         match self {
-            Self::Incomplete(s) | Self::Invalid(s) => s,
+            Self::Incomplete(Incomplete::Message(s)) | Self::Invalid(s) => s,
+            Self::Incomplete(Incomplete::SingleQuote) => "unterminated single quote",
+            Self::Incomplete(Incomplete::DoubleQuote) => "unterminated double quote",
+            Self::Incomplete(Incomplete::AnsiQuote) => "unterminated dollar-single-quoted string",
+            Self::Incomplete(Incomplete::CasePattern) => "expected ')' after case pattern",
+            Self::Incomplete(Incomplete::Subshell) => "unfinished subshell",
+            Self::NulByte => "NUL in command text",
+            Self::ArithmeticClose => "invalid closing parenthesis in arithmetic expression",
             Self::HereDoc(_) => "unterminated here-document",
             Self::ArrayToken => "unexpected token in array assignment",
         }
@@ -783,7 +802,7 @@ pub(crate) fn literal_assignment(source: &str, line: usize) -> Option<Statement>
 
 fn parse_source(source: &str, final_input: bool) -> Result<Vec<Statement>, Error> {
     if source.contains('\0') {
-        return Err(Error::Invalid("NUL in command text"));
+        return Err(Error::NulByte);
     }
     if let Some(function) = wrapper::parse(source) {
         return Ok(vec![function]);
@@ -975,7 +994,9 @@ impl Reader {
             self.tokens.pop_front();
             Ok(())
         } else if self.peek().is_none() {
-            Err(Error::Incomplete("unfinished compound command"))
+            Err(Error::Incomplete(Incomplete::Message(
+                "unfinished compound command",
+            )))
         } else {
             Err(Error::Invalid("unexpected token in compound command"))
         }
@@ -1024,7 +1045,9 @@ impl Reader {
             self.newlines();
             if self.peek().is_none() {
                 if condition != Condition::Always {
-                    return Err(Error::Incomplete("expected a command after operator"));
+                    return Err(Error::Incomplete(Incomplete::Message(
+                        "expected a command after operator",
+                    )));
                 }
                 return Ok(statements);
             }
@@ -1148,7 +1171,9 @@ impl Reader {
                 }
             }
             if self.peek().is_none() {
-                return Err(Error::Incomplete("expected a command after pipe"));
+                return Err(Error::Incomplete(Incomplete::Message(
+                    "expected a command after pipe",
+                )));
             }
             let start = self.position();
             let mut stage = match self.compound()? {
@@ -1195,7 +1220,7 @@ impl Reader {
             self.tokens.pop_front();
             let body = self.list(&[")"])?;
             if self.tokens.pop_front().is_none() {
-                return Err(Error::Incomplete("unfinished subshell"));
+                return Err(Error::Incomplete(Incomplete::Subshell));
             }
             return Ok(Some(Command::Subshell(body)));
         }
@@ -1246,7 +1271,9 @@ impl Reader {
             String::from("COPROC")
         };
         if self.peek().is_none() {
-            return Err(Error::Incomplete("expected a coprocess command"));
+            return Err(Error::Incomplete(Incomplete::Message(
+                "expected a coprocess command",
+            )));
         }
         let command = if let Some(compound) = self.compound()? {
             if self.has_redirect() {
@@ -1291,7 +1318,9 @@ impl Reader {
         }
         match self.operand() {
             Some(Token::Word(word)) => Ok(word.word),
-            None => Err(Error::Incomplete("unfinished conditional expression")),
+            None => Err(Error::Incomplete(Incomplete::Message(
+                "unfinished conditional expression",
+            ))),
             _ => Err(Error::Invalid("expected a conditional operand")),
         }
     }
@@ -1307,7 +1336,11 @@ impl Reader {
             let e = self.test_or()?;
             match self.tokens.pop_front() {
                 Some(Token::RightParen) => return Ok(e),
-                None => return Err(Error::Incomplete("unclosed conditional grouping")),
+                None => {
+                    return Err(Error::Incomplete(Incomplete::Message(
+                        "unclosed conditional grouping",
+                    )));
+                }
                 _ => return Err(Error::Invalid("expected ')' in conditional expression")),
             }
         }
@@ -1369,7 +1402,11 @@ impl Reader {
         self.alias_at(false, Some(&[]))?;
         let word = match self.operand() {
             Some(Token::Word(word)) => word.word,
-            None => return Err(Error::Incomplete("expected a case word")),
+            None => {
+                return Err(Error::Incomplete(Incomplete::Message(
+                    "expected a case word",
+                )));
+            }
             _ => return Err(Error::Invalid("expected a case word")),
         };
         self.alias_newlines(&["in"])?;
@@ -1390,14 +1427,18 @@ impl Reader {
                 self.alias_at(false, Some(&[]))?;
                 match self.operand() {
                     Some(Token::Word(word)) => patterns.push(CasePattern::new(word.word)),
-                    None => return Err(Error::Incomplete("unfinished case command")),
+                    None => {
+                        return Err(Error::Incomplete(Incomplete::Message(
+                            "unfinished case command",
+                        )));
+                    }
                     _ => return Err(Error::Invalid("expected a case pattern")),
                 }
                 self.alias_at(false, Some(&[]))?;
                 match self.tokens.pop_front() {
                     Some(Token::RightParen) => break,
                     Some(Token::Pipe) => {}
-                    None => return Err(Error::Incomplete("expected ')' after case pattern")),
+                    None => return Err(Error::Incomplete(Incomplete::CasePattern)),
                     _ => return Err(Error::Invalid("expected ')' after case pattern")),
                 }
             }
@@ -1467,7 +1508,9 @@ impl Reader {
                 protected: false,
                 ..
             })) if is_identifier(&name) => Ok(name),
-            None => Err(Error::Incomplete("expected an identifier")),
+            None => Err(Error::Incomplete(Incomplete::Message(
+                "expected an identifier",
+            ))),
             _ => Err(Error::Invalid("expected an identifier")),
         }
     }
@@ -1509,7 +1552,11 @@ impl Reader {
                 ..
             })) => name,
             Some(Token::Word(_)) => self.location(start_name).text().into(),
-            None => return Err(Error::Incomplete("expected a loop variable")),
+            None => {
+                return Err(Error::Incomplete(Incomplete::Message(
+                    "expected a loop variable",
+                )));
+            }
             _ => return Err(Error::Invalid("expected a loop variable")),
         };
         self.alias_newlines(&["in", "do"])?;
@@ -1561,7 +1608,11 @@ impl Reader {
                 ..
             })) => name,
             Some(Token::Word(_)) => self.location(start_name).text().into(),
-            None => return Err(Error::Incomplete("expected a function name")),
+            None => {
+                return Err(Error::Incomplete(Incomplete::Message(
+                    "expected a function name",
+                )));
+            }
             _ => return Err(Error::Invalid("invalid function name")),
         };
         if matches!(self.peek(), Some(Token::LeftParen)) {
@@ -1569,7 +1620,11 @@ impl Reader {
             self.alias_at(false, Some(&[]))?;
             match self.tokens.pop_front() {
                 Some(Token::RightParen) => {}
-                None => return Err(Error::Incomplete("unfinished function definition")),
+                None => {
+                    return Err(Error::Incomplete(Incomplete::Message(
+                        "unfinished function definition",
+                    )));
+                }
                 _ => return Err(Error::Invalid("expected empty function parentheses")),
             }
         }
@@ -1577,7 +1632,7 @@ impl Reader {
         let start = self.position();
         let compound = self.compound()?.ok_or_else(|| {
             if self.peek().is_none() {
-                Error::Incomplete("expected a function body")
+                Error::Incomplete(Incomplete::Message("expected a function body"))
             } else {
                 Error::Invalid("expected a compound function body")
             }

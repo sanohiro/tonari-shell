@@ -429,20 +429,31 @@ pub(crate) struct Environment {
 
 impl Environment {
     fn prepare(session: &Session, assignments: &[(String, String)]) -> Option<Rc<Self>> {
-        session.environment_changes(assignments).next()?;
+        let mut live = session.environment_changes(assignments).peekable();
+        live.peek()?;
         if assignments.is_empty() {
             if let Some(cached) = &*session.external_env.borrow() {
-                if session.environment_changes(&[]).eq(cached
-                    .changes
-                    .iter()
-                    .map(|(k, v)| (k.as_str(), v.as_deref().map(std::borrow::Cow::Borrowed))))
+                let mut entries = cached.changes.iter();
+                if live.by_ref().all(|(key, value)| {
+                    entries
+                        .next()
+                        .is_some_and(|(k, v)| key == k && value.as_deref() == v.as_deref())
+                }) && entries.next().is_none()
                 {
                     return Some(cached.clone());
                 }
+                live = session.environment_changes(assignments).peekable();
             }
         }
-        let changes: std::collections::BTreeMap<_, _> =
-            session.environment_changes(assignments).collect();
+        let mut cached_changes = Vec::new();
+        let changes: std::collections::BTreeMap<_, _> = live
+            .map(|(k, v)| {
+                if assignments.is_empty() {
+                    cached_changes.push((k.to_owned(), v.as_deref().map(str::to_owned)));
+                }
+                (k, v)
+            })
+            .collect();
         // Tonari keeps its variable changes in Session. The original process environment
         // remains allocated and immutable for the lifetime of these borrowed C strings.
         let mut pointers = Vec::new();
@@ -471,14 +482,6 @@ impl Environment {
             }
         }
         pointers.push(std::ptr::null());
-        let cached_changes = if assignments.is_empty() {
-            session
-                .environment_changes(&[])
-                .map(|(k, v)| (k.to_owned(), v.map(std::borrow::Cow::into_owned)))
-                .collect()
-        } else {
-            Vec::new()
-        };
         let env = Rc::new(Self {
             _strings: strings,
             pointers,
@@ -1665,11 +1668,7 @@ fn start_raw(
     }
     let observable = needs_ordered_redirects(&raw, session)
         || raw.redirects.iter().any(redirection_observable)
-        || raw
-            .words
-            .iter()
-            .chain(raw.redirects.iter().map(|r| &r.word))
-            .any(stage_expansion)
+        || raw.words.iter().any(stage_expansion)
         || raw.assignments.iter().any(|(_, value)| match value {
             Assignment::Scalar(word) => stage_expansion(word),
             Assignment::Array(_, items, _) => items.iter().any(|(_, word)| stage_expansion(word)),

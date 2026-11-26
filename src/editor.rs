@@ -1045,8 +1045,7 @@ pub fn line(
             Action::NextDirectory => Action::ForwardWord,
             action => action,
         };
-        let entering_search = action == Action::Search && search.is_none();
-        if entering_search {
+        if action == Action::Search && search.is_none() {
             matched_query = None;
             search = Some((String::new(), 0, text.clone(), cursor));
             // Readline keeps the current draft until a nonempty query matches.
@@ -1075,9 +1074,7 @@ pub fn line(
                 _ => {
                     let mut shortest = None;
                     if action == Action::Search {
-                        if !entering_search {
-                            *index += 1;
-                        }
+                        *index += 1;
                     } else if action == Action::Rubout {
                         query.pop();
                         *index = 0;

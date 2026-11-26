@@ -1075,7 +1075,7 @@ impl<'a> Directory<'a> {
                         self.base.chars().all(|c| {
                             chars.next().is_some_and(|d| {
                                 crate::pattern::same_letter(c, d, locale)
-                                    || self.map_case && matches!((c, d), ('-', '_') | ('_', '-'))
+                                    || matches!((c, d), ('-', '_') | ('_', '-'))
                             })
                         })
                     }))

@@ -330,7 +330,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 let error = if s.is_nameref(&name) {
                     s.assign_for_reference(&name, value).err()
                 } else if s.readonly(&name) {
-                    Some("readonly variable")
+                    Some(crate::session::READONLY)
                 } else {
                     s.assign(&name, &value);
                     None
@@ -338,7 +338,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
                 if let Some(error) = error {
                     eprintln!("tonari: {name}: {error}");
                     return Err(
-                        if error == "readonly variable" && s.posix && !s.interactive {
+                        if error == crate::session::READONLY && s.posix && !s.interactive {
                             Flow::Exit(1)
                         } else {
                             Flow::Continue(1)

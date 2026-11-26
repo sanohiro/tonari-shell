@@ -273,7 +273,7 @@ impl Session {
         let element = subscript(target);
         let base = element.map_or(target, |(base, _)| base);
         if self.readonly(base) {
-            return Err("readonly variable");
+            return Err(crate::session::READONLY);
         }
         if self.is_nameref(base) && !Self::valid_reference_target(value) {
             return Err("invalid name reference");
@@ -541,7 +541,7 @@ impl Session {
     ) -> Result<(), &'static str> {
         let target = self.reference_name(name)?;
         if self.readonly(&target) {
-            return Err("readonly variable");
+            return Err(crate::session::READONLY);
         }
         if self.is_associative(&target) || !super::is_identifier(&target) {
             return Err("not an indexed array");
@@ -567,14 +567,14 @@ impl Session {
             return Err("array destination must be a variable name");
         }
         if Self::builtin_readonly(&target) {
-            return Err("readonly variable");
+            return Err(crate::session::READONLY);
         }
         if !replace_associative && self.live_table(&target) {
             return Err("not an indexed array");
         }
         if let Some(var) = self.variables.get_mut(target.as_ref()) {
             if var.readonly {
-                return Err("readonly variable");
+                return Err(crate::session::READONLY);
             }
             if !replace_associative && var.associative().is_some() {
                 return Err("not an indexed array");
@@ -629,7 +629,7 @@ impl Session {
                 .and_then(Elements::last_index)
                 .unwrap_or(if var.value.is_some() { 0 } else { -1 });
             last.checked_add(words.len() as i64)
-                .ok_or("array subscript out of range")?;
+                .ok_or(crate::session::SUBSCRIPT_RANGE)?;
             let array = var.make_array();
             for (offset, (_, word)) in words.iter().enumerate() {
                 array.insert(last + (offset as i64 + 1), word.clone());
@@ -640,7 +640,7 @@ impl Session {
         }
         let mut var = self.declared_variable(name, global).unwrap_or_default();
         if var.readonly {
-            return Err("readonly variable");
+            return Err(crate::session::READONLY);
         }
         let result = self.array_items(name, global, &mut var, append, items);
         self.store_variable(name, var, global);
@@ -766,7 +766,7 @@ impl Session {
                     Some(n) => Some(n),
                     None => next,
                 }
-                .ok_or("array subscript out of range")?;
+                .ok_or(crate::session::SUBSCRIPT_RANGE)?;
                 let value = if var.integer {
                     let old = if concat {
                         map.get(&i).and_then(|s| s.parse::<i64>().ok()).unwrap_or(0)
@@ -843,7 +843,7 @@ impl Session {
                         .last_index()
                         .and_then(|i| i.checked_add(n + 1))
                         .filter(|i| *i >= 0)
-                        .ok_or("array subscript out of range")
+                        .ok_or(crate::session::SUBSCRIPT_RANGE)
                 }
             });
         var.elements = Some(Rc::new(elements));
@@ -868,7 +868,7 @@ impl Session {
             self.last_index(name)
                 .and_then(|i| i.checked_add(n + 1))
                 .filter(|i| *i >= 0)
-                .ok_or("array subscript out of range")
+                .ok_or(crate::session::SUBSCRIPT_RANGE)
         } else {
             Ok(n)
         }

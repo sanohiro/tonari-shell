@@ -38,7 +38,7 @@ impl Variables for Session {
             return result;
         }
         if self.readonly(name) {
-            return Err("readonly variable");
+            return Err(crate::session::READONLY);
         }
         self.assign(name, &value.to_string());
         Ok(())

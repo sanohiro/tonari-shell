@@ -74,6 +74,36 @@ fn listen_for_interrupts() -> io::Result<()> {
 thread_local! {
     static INPUT_DEADLINE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
 }
+struct InputDeadline(Option<std::time::Instant>);
+
+impl InputDeadline {
+    fn enter(timeout: Option<std::time::Duration>) -> Self {
+        Self(INPUT_DEADLINE.replace(timeout.and_then(|t| std::time::Instant::now().checked_add(t))))
+    }
+}
+
+impl Drop for InputDeadline {
+    fn drop(&mut self) {
+        INPUT_DEADLINE.set(self.0);
+    }
+}
+
+#[test]
+fn nested_deadlines_restore_on_early_return() {
+    let outer = InputDeadline::enter(Some(std::time::Duration::from_secs(5)));
+    let previous = INPUT_DEADLINE.get().unwrap();
+    fn cancel() -> Option<()> {
+        let _inner = InputDeadline::enter(None);
+        assert!(input_timeout().is_none());
+        None?;
+        Some(())
+    }
+    assert!(cancel().is_none());
+    assert_eq!(INPUT_DEADLINE.get(), Some(previous));
+    drop(outer);
+    assert!(input_timeout().is_none());
+}
+
 // Block child notifications before reaping to close the exit-before-sleep race.
 // A key, signal or prompt deadline wakes the same wait.
 fn wait_for_job_notice(
@@ -255,9 +285,7 @@ fn interactive_loop(
             .get("TMOUT")
             .and_then(|s| s.parse::<u64>().ok())
             .filter(|&n| n > 0);
-        INPUT_DEADLINE.set(timeout.and_then(|n| {
-            std::time::Instant::now().checked_add(std::time::Duration::from_secs(n))
-        }));
+        let deadline = InputDeadline::enter(timeout.map(std::time::Duration::from_secs));
         let result = if editing && (session.emacs || session.vi) {
             match editor::line(
                 &prompt,
@@ -274,7 +302,6 @@ fn interactive_loop(
                     Ok(Some(true))
                 }
                 Ok(editor::Input::Directory(result)) => {
-                    INPUT_DEADLINE.set(None);
                     status = match result {
                         Ok(()) => 0,
                         Err(error) => {
@@ -308,7 +335,7 @@ fn interactive_loop(
                 .and_then(|()| read_terminal_line(&mut source, terminal_input))
                 .map(Some)
         };
-        INPUT_DEADLINE.set(None);
+        drop(deadline);
         let more = match result {
             Err(e) if e.kind() == io::ErrorKind::TimedOut => {
                 eprintln!("tonari: timed out waiting for input");

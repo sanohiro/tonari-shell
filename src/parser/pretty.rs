@@ -6,7 +6,7 @@ use std::borrow::Cow;
 pub(crate) fn format<'a>(source: &'a str, session: &crate::Session) -> Result<Cow<'a, str>, Error> {
     with_read_options(session, 1, || {
         if source.contains('\0') {
-            return Err(Error::Invalid("NUL in command text"));
+            return Err(Error::NulByte);
         }
         let (tokens, spans, _) = lex(source, false, true)?;
         let mut reader = super::Reader::new(tokens, spans, source);
