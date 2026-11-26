@@ -340,6 +340,7 @@ impl Job {
 #[derive(Clone, Default)]
 pub struct Jobs {
     pub monitor: bool,
+    exit_warning: Option<usize>,
     pub(crate) quiet: bool,
     tty: Option<Terminal>,
     table: Vec<Job>,
@@ -351,6 +352,29 @@ pub struct Jobs {
 }
 
 impl Jobs {
+    pub(crate) fn defer_exit(&mut self, check_running: bool, command: usize) -> bool {
+        if self.table.is_empty()
+            || self
+                .exit_warning
+                .is_some_and(|n| command.wrapping_sub(n) <= 1)
+        {
+            return false;
+        }
+        self.poll();
+        if self.table.iter().any(Job::stopped) {
+            eprintln!("There are stopped jobs.");
+        } else if check_running && self.table.iter().any(Job::active) {
+            eprintln!("There are running jobs.");
+        } else {
+            return false;
+        }
+        self.exit_warning = Some(command);
+        if check_running {
+            list_to(self, &[], io::stderr().lock());
+        }
+        true
+    }
+
     pub(crate) fn count(&self) -> usize {
         self.table.len() + self.inherited.len()
     }
@@ -1066,6 +1090,10 @@ fn job_id(jobs: &Jobs, spec: &str) -> Option<u32> {
 }
 
 fn list(jobs: &mut Jobs, args: &[String]) -> u8 {
+    list_to(jobs, args, io::stdout().lock())
+}
+
+fn list_to(jobs: &mut Jobs, args: &[String], mut out: impl Write) -> u8 {
     let mut mode = ' ';
     let mut changed = false;
     let mut filter = ' ';
@@ -1102,7 +1130,6 @@ fn list(jobs: &mut Jobs, args: &[String]) -> u8 {
     }
     let current = job_id(jobs, "%+");
     let previous = job_id(jobs, "%-");
-    let mut out = io::stdout().lock();
     for id in ids {
         let Some(job) = jobs
             .inherited

@@ -2081,12 +2081,17 @@ impl Session {
         let mut variable = target
             .to_str()
             .filter(|_| explicit && !previous && self.shopt.cdable_vars);
+        let mut spell = self.interactive && self.shopt.cdspell && explicit && !previous;
         let mut error = io::Error::from(io::ErrorKind::NotFound);
         loop {
             let (candidate, print, via_variable) = if let Some((path, print)) = paths.next() {
                 (path, print, false)
             } else if let Some(value) = variable.take().and_then(|name| self.get(name)) {
                 (PathBuf::from(value), false, true)
+            } else if std::mem::take(&mut spell)
+                && let Some(path) = crate::complete::corrected_directory(target)
+            {
+                (path, false, true)
             } else {
                 break;
             };

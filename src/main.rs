@@ -311,6 +311,9 @@ fn interactive_loop(
         let more = match result {
             Err(e) if e.kind() == io::ErrorKind::TimedOut => {
                 eprintln!("tonari: timed out waiting for input");
+                if startup::defer_interactive_exit(session) {
+                    continue;
+                }
                 return Ok(startup::logout(session, status, status));
             }
             Ok(Some(more)) => more,
@@ -345,6 +348,9 @@ fn interactive_loop(
                     "Use \"{}\" to leave the shell.",
                     if session.login { "logout" } else { "exit" }
                 );
+                continue;
+            }
+            if startup::defer_interactive_exit(session) {
                 continue;
             }
             return Ok(startup::logout(session, status, status));

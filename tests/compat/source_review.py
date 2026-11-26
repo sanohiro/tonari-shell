@@ -523,13 +523,62 @@ def socket_time(shell, run, kind, count):
         return ms
 
 
+DIRECTORY_PTY = ("cd-spelling", "directory-spelling-completion", "expanded-directory-completion", "quoted-directory-completion", "check-exit-jobs")
+
+def directory_pty(shell, root, name):
+    term = Terminal(shell, root, editing=True, env={"HISTFILE": "/dev/null"})
+    result = root / "accepted-path"
+    result.unlink(missing_ok=True)
+    pidfile = root / "job-pid"
+    pidfile.unlink(missing_ok=True)
+    try:
+        assert b"READY>" in term.read(b"READY>")
+        if name == "check-exit-jobs":
+            term.send(b"shopt -s checkjobs; sleep 10 & echo $! >job-pid; printf '\\036'\n")
+            assert b"\x1e" in term.read(b"\x1e")
+            start = time.perf_counter_ns()
+            term.send(b"exit 23\n")
+            observed = term.read(b"There are running jobs.")
+            elapsed = (time.perf_counter_ns() - start) / 1e6
+            assert b"There are running jobs." in observed, (shell, observed)
+            after = observed.split(b"There are running jobs.", 1)[1]
+            if b"READY>" not in after: after += term.read(b"READY>")
+            assert b"sleep 10" in after and b"READY>" in after, (shell, after)
+            term.send(b"exit 23\n")
+            # Drain the terminal while the foreground process restores its tty.
+            deadline = time.monotonic() + 4
+            while term.proc.poll() is None and time.monotonic() < deadline:
+                term.read(b"\x00", timeout=.02)
+            assert term.proc.poll() == 23, (shell, term.proc.poll())
+            return elapsed
+        flag, text, expected = {
+            "cd-spelling": ("cdspell", 'cd samle; printf "%s" "$PWD"', str(root.resolve() / "sample")),
+            "directory-spelling-completion": ("direxpand dirspell", 'printf "%s" sapmle/uni\t', str(root.resolve() / "sample/unique")),
+            "expanded-directory-completion": ("direxpand", 'printf "%s" $q/uni\t', str(root.resolve() / "sample/unique")),
+            "quoted-directory-completion": ("complete_fullquote", 'printf "%s" $q/uni\t', "sample/unique"),
+        }[name]
+        term.send(f"q=sample; shopt -s {flag}; printf '\\036'\n".encode())
+        assert b"\x1e" in term.read(b"\x1e")
+        start = time.perf_counter_ns()
+        term.send((text + ' >"$HOME/accepted-path"; printf "\\035"\n').encode())
+        observed = term.read(b"\x1d")
+        elapsed = (time.perf_counter_ns() - start) / 1e6
+        assert b"\x1d" in observed and result.read_text() == expected, (name, shell, observed, result.read_text())
+        return elapsed
+    finally:
+        if pidfile.exists():
+            try: os.kill(int(pidfile.read_text()), 15)
+            except ProcessLookupError: pass
+        term.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bash", type=Path)
     parser.add_argument("tonari", type=Path)
     parser.add_argument("--first", type=Path)
     parser.add_argument("--runs", type=int, default=9)
-    parser.add_argument("--case", action="append", choices=["history-reedit", "stdin-replacement", "inputrc-word-edit", "inputrc-file-completion", "array-recovery", "interactive-comments", "programmable-boundaries", "filename-completion", "tcp-redirection", "udp-redirection", *HOT])
+    parser.add_argument("--case", action="append", choices=["history-reedit", "stdin-replacement", "inputrc-word-edit", "inputrc-file-completion", "array-recovery", "interactive-comments", "programmable-boundaries", "filename-completion", "tcp-redirection", "udp-redirection", *DIRECTORY_PTY, *HOT])
     args = parser.parse_args()
     selected = set(args.case or ())
     def requested(name):
@@ -631,6 +680,19 @@ def main():
         (termroot / "Mix-Case-Unique").touch()
         for i in range(512):
             (termroot / f"Mix-Case-other{i}").touch()
+        (termroot / "sample").mkdir()
+        (termroot / "sample/unique").touch()
+        for name in DIRECTORY_PTY:
+            if not requested(name): continue
+            samples = [[] for _ in shells]
+            for r in range(args.runs + 1):
+                order = list(range(len(shells)))
+                rng.shuffle(order)
+                for i in order:
+                    elapsed = directory_pty(shells[i], termroot, name)
+                    if r: samples[i].append(round(elapsed, 3))
+            if args.runs:
+                print(json.dumps(dict(case=name, repeats=1, median_ms=[round(statistics.median(g), 3) for g in samples], samples_ms=samples)), flush=True)
         if requested("history-reedit"):
             samples = [[] for _ in shells]
             for r in range(args.runs + 1):

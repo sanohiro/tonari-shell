@@ -1089,6 +1089,7 @@ fn eval_builtin(
             }
         }
         Builtin::Status(code) => Flow::Continue(code),
+        Builtin::Exit(_) if crate::startup::defer_interactive_exit(session) => Flow::Continue(1),
         Builtin::Exit(code) if status_operands(args).is_empty() => {
             Flow::Exit(crate::startup::logout(
                 session,

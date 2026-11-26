@@ -132,6 +132,14 @@ fn optional(session: &mut Session, path: &Path) -> Option<Flow> {
     Some(sourced(session, file, path, &[], 0))
 }
 
+pub fn defer_interactive_exit(session: &mut Session) -> bool {
+    session.interactive
+        && session.subshell_depth == 0
+        && session
+            .jobs
+            .defer_exit(session.shopt.checkjobs, session.command_number)
+}
+
 pub fn logout(session: &mut Session, code: u8, previous: u8) -> u8 {
     if !session.login || session.shell_pid() != std::process::id() || session.logout_started {
         return code;
