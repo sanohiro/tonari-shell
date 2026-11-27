@@ -3,7 +3,8 @@ static TEXT: &str = include_str!(concat!(env!("OUT_DIR"), "/text"));
 
 fn text(id: u16) -> &'static str {
     let i = usize::from(id);
-    &TEXT[OFFSETS[i] as usize..OFFSETS[i + 1] as usize]
+    let start = usize::from(OFFSETS[i]);
+    &TEXT[start..start + usize::from(LENGTHS[i])]
 }
 
 #[derive(Clone, Copy)]

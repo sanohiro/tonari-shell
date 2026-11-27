@@ -8,6 +8,15 @@ pub(crate) fn subscript(name: &str) -> Option<(&str, &str)> {
     Some((base, expr.strip_suffix(']')?))
 }
 
+pub(crate) fn absolute_index(offset: i64, last: impl FnOnce() -> Option<i64>) -> Option<i64> {
+    if offset < 0 {
+        // Adding one to the offset also works when the last index is i64::MAX.
+        last()?.checked_add(offset + 1).filter(|&i| i >= 0)
+    } else {
+        Some(offset)
+    }
+}
+
 pub(crate) enum Index {
     Literal(i64),
     Expression(String),
@@ -493,8 +502,10 @@ impl Session {
         offset: i64,
         count: usize,
     ) -> Option<Vec<String>> {
+        let resolved = self.reference_name(name).ok()?;
+        let name = resolved.as_ref();
         let variable = self.variables.get(name)?;
-        if variable.dynamic || variable.nameref || name == "PIPESTATUS" {
+        if variable.dynamic || name == "PIPESTATUS" {
             return None;
         }
         let elements = variable.elements.as_deref()?;
@@ -522,6 +533,10 @@ impl Session {
     }
 
     pub fn append_indexed_fields(&self, name: &str, keys: bool, fields: &mut Vec<String>) -> bool {
+        let Ok(resolved) = self.reference_name(name) else {
+            return false;
+        };
+        let name = resolved.as_ref();
         if keys {
             if !self.stored_array(name) || self.is_associative(name) {
                 return false;
@@ -920,14 +935,7 @@ impl Session {
     }
 
     pub(crate) fn relative_index(&self, name: &str, n: i64) -> Result<i64, &'static str> {
-        if n < 0 {
-            self.last_index(name)
-                .and_then(|i| i.checked_add(n + 1))
-                .filter(|i| *i >= 0)
-                .ok_or(crate::session::SUBSCRIPT_RANGE)
-        } else {
-            Ok(n)
-        }
+        absolute_index(n, || self.last_index(name)).ok_or(crate::session::SUBSCRIPT_RANGE)
     }
 
     pub fn last_index(&self, name: &str) -> Option<i64> {

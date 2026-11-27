@@ -410,6 +410,11 @@ echo "$i"
         'printf "%s\\n" "$@"',
         "\n".join(str(i) for i in range(8192)),
     ),
+    "array-slice-reference": (
+        'for ((i=0; i<32; i++)); do set -- "${ref[@]:8000:3}"; done\n'
+        'printf "%s\\n" "$#" "$@"',
+        "3\n8000\n8001\n8002",
+    ),
     "array-slice-dense": (
         'for ((i=0; i<32; i++)); do set -- "${items[@]:8000:3}"; done\n'
         'printf "%s\\n" "$#" "$@"',
@@ -602,8 +607,10 @@ def main():
                 count = 768 if case == "array-assoc-order" else 4
                 case_setup += (f'declare -A items=(); for ((j=0; j<{count}; j++)); '
                                'do items[package-component-dependency-$j]=$j; done; ')
-            elif case in ("array-slice-dense", "array-index-fields"):
+            elif case in ("array-slice-dense", "array-index-fields", "array-slice-reference"):
                 case_setup += 'items=({0..8191}); '
+                if case == "array-slice-reference":
+                    case_setup += 'declare -n ref=items; '
             elif case == "array-slice-sparse":
                 case_setup += 'for ((j=0; j<8192; j++)); do items[j*2]=$j; done; '
             modes = (False, True) if args.timing == "both" else (args.timing == "started",)

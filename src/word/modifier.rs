@@ -442,36 +442,27 @@ impl Modification {
                             };
                             return Ok(Part::Elements { values, at, quoted });
                         }
-                        let indexes = env
-                            .lookup(&super::array_indexes_key(base))
-                            .unwrap_or_default();
-                        let last = indexes
-                            .split('\0')
-                            .rfind(|i| !i.is_empty())
-                            .and_then(|i| i.parse::<i64>().ok())
-                            .unwrap_or(-1);
-                        let start = if start < 0 {
-                            last.saturating_add(1).saturating_add(start)
-                        } else {
-                            start
-                        };
-                        let values = if start < 0 {
-                            Vec::new()
-                        } else {
-                            indexes
-                                .split('\0')
-                                .filter(|i| !i.is_empty())
-                                .filter(|i| i.parse::<i64>().is_ok_and(|i| i >= start))
+                        let target = env.session.reference_name(base)?;
+                        let indexes = env.session.indices(&target);
+                        let start = crate::session::array::absolute_index(start, || {
+                            indexes.last().copied()
+                        });
+                        let values = start.map_or_else(Vec::new, |start| {
+                            let begin = indexes.partition_point(|&i| i < start);
+                            indexes[begin..]
+                                .iter()
                                 .take(count)
-                                .filter_map(|i| {
+                                .filter_map(|&i| {
                                     if keys {
-                                        Some(i.to_owned())
-                                    } else {
+                                        Some(i.to_string())
+                                    } else if env.has_pending_assignments() {
                                         env.lookup(&format!("{base}[{i}]"))
+                                    } else {
+                                        env.session.element(&target, i)
                                     }
                                 })
                                 .collect()
-                        };
+                        });
                         (values, at)
                     } else {
                         let start = if start < 0 {
