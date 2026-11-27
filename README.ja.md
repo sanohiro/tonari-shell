@@ -14,7 +14,7 @@ Bash 構文は Rust 製のインタープリターで実行します。今のシ
 | Tab を2回押す | 補完候補が複数あるときは、2回目の Tab で一覧が開きます。そのまま入力して絞り込み、↑↓ で選び、Enter で編集中の行に挿入できます。 |
 | Ctrl-R を押して `ssh 15432` と入力する | どのセッションで実行したかにかかわらず、両方の語を含むコマンドを探せます。語順は自由です。選んだコマンドを編集でき、Ctrl-G で書きかけの行に戻れます。 |
 
-どれも標準設定で使えます。Git や GitHub CLI などの Bash 用補完定義を読み込むと、その候補も Tab で選べます。[編集キーとプロンプトの設定](docs/guide.md#editing)
+どれも標準設定で使えます。Git や GitHub CLI などの Bash 用補完定義を読み込むと、その候補も Tab で選べます。[編集キーとプロンプトの設定](docs/guide.ja.md#editing)
 
 ## インストールして試す
 
@@ -27,7 +27,7 @@ cargo build --release --locked
 ./target/release/tonari
 ```
 
-`exit` で元のシェルに戻れます。対象は Apple Silicon の Mac と、x86-64・arm64 の Linux です。WSL2 での利用も想定しています。Linux の配布用ビルドは静的リンクした実行ファイル1本で、x86-64 版は x86-64-v3 向けです。[配布用ビルドの手順](docs/guide.md#build)
+`exit` で元のシェルに戻れます。対象は Apple Silicon の Mac と、x86-64・arm64 の Linux です。WSL2 での利用も想定しています。Linux の配布用ビルドは静的リンクした実行ファイル1本で、x86-64 版は x86-64-v3 向けです。[配布用ビルドの手順](docs/guide.ja.md#build)
 
 ## ログインシェルにする
 
