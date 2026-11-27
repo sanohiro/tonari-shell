@@ -525,6 +525,11 @@ impl Drop for Reader {
     }
 }
 
+fn scalar_assignment(name: String, mut word: Word) -> (String, Assignment<Word>) {
+    word.remove_assignment_prefix(name.len() + 1);
+    (name, Assignment::Scalar(word))
+}
+
 impl Reader {
     fn new(tokens: Vec<Token>, spans: Vec<(usize, usize)>, source: &str) -> Self {
         let mut newlines = READER_NEWLINES.take();
@@ -757,6 +762,24 @@ impl Reader {
     }
 
     fn command(&mut self) -> Result<Command, Error> {
+        // The lexer already identified the assignment. A following separator
+        // rules out a command, redirection or compound array initializer.
+        if matches!(self.peek(), Some(Token::Word(w)) if w.assignment.as_ref().is_some_and(|name| !name.starts_with('[')))
+            && matches!(self.tokens.get(1), None | Some(Token::Newline | Token::End))
+        {
+            let Some(Token::Word(LexWord {
+                assignment: Some(name),
+                word,
+                ..
+            })) = self.tokens.pop_front()
+            else {
+                unreachable!()
+            };
+            return Ok(Command::Pipeline(vec![SimpleCommand {
+                assignments: vec![scalar_assignment(name, word)],
+                ..Default::default()
+            }]));
+        }
         let start = self.position();
         let mut first = match self.compound()? {
             Some(compound) if !self.has_redirect() && !self.has_pipe() => return Ok(compound),
@@ -1349,11 +1372,10 @@ impl Reader {
                     }
                     if cmd.words.is_empty() {
                         if let Some(name) = assignment.filter(|name| !name.starts_with('[')) {
-                            word.remove_assignment_prefix(name.len() + 1);
                             if cmd.assignments.is_empty() {
                                 cmd.assignments.reserve_exact(1);
                             }
-                            cmd.assignments.push((name, Assignment::Scalar(word)));
+                            cmd.assignments.push(scalar_assignment(name, word));
                             continue;
                         }
                         if cmd.assignments.is_empty()
