@@ -273,6 +273,10 @@ fn captured_output(mut output: Vec<u8>, code: u8) -> Result<(String, u8), &'stat
 }
 
 fn sole_plain_command(body: &[parser::Statement]) -> Option<&parser::SimpleCommand<parser::Word>> {
+    sole_command(body).filter(|cmd| cmd.redirects.is_empty())
+}
+
+fn sole_command(body: &[parser::Statement]) -> Option<&parser::SimpleCommand<parser::Word>> {
     let [statement] = body else {
         return None;
     };
@@ -280,36 +284,38 @@ fn sole_plain_command(body: &[parser::Statement]) -> Option<&parser::SimpleComma
     (!statement.negated
         && statement.condition == parser::Condition::Always
         && cmd.compound.is_none()
-        && cmd.assignments.is_empty()
-        && cmd.redirects.is_empty())
+        && cmd.assignments.is_empty())
     .then_some(cmd)
 }
 
-// Literal nullary functions do not require a positional or local scope when
-// their only operation has no shell-visible effects.
+// A single builtin helper can borrow the caller's variables when neither its
+// operands nor its output can observe the omitted function and subshell frames.
 fn wrapped_capture(
     session: &mut Session,
     body: &[parser::Statement],
     last: u8,
 ) -> Option<Result<(String, u8), &'static str>> {
-    let [name] = sole_plain_command(body)?.words.as_slice() else {
-        return None;
-    };
+    let call = sole_plain_command(body)?;
+    let (name, arguments) = call.words.split_first()?;
     let name = name.as_literal()?;
     let function = session.functions.get(name)?;
     if session.function_nesting_full()
         || session.shopt.extdebug
         || session.traced_functions.contains(name)
+        || session.keyword && call.keyword_args.is_some()
     {
         return None;
     }
-    let cmd = sole_plain_command(function.definition.body.statements())?;
-    let path = cmd.words.first()?.as_literal()?;
+    let cmd = sole_command(function.definition.body.statements())?;
+    let (program, operands) = cmd.words.split_first()?;
+    let path = program.as_literal()?;
     if path.starts_with('/')
+        && cmd.redirects.is_empty()
+        && arguments.is_empty()
         && !session.traps.has_explicit_traps()
         && !session.is_exported("SHELLOPTS")
         && !session.functions.contains_key(path)
-        && cmd.words[1..].iter().all(|arg| arg.as_literal().is_some())
+        && operands.iter().all(|arg| arg.as_literal().is_some())
     {
         return Some(crate::execute::capture_external(
             cmd.clone(),
@@ -318,44 +324,51 @@ fn wrapped_capture(
             None,
         ));
     }
-
-    if matches!(path, "echo" | ":" | "true" | "false")
-        && !session.functions.contains_key(path)
-        && !session.disabled_builtins.contains(path)
-        && can_elide_child(session)
-        && cmd.words[1..].iter().all(|arg| arg.as_literal().is_some())
+    if !can_elide_child(session)
+        || session.functions.contains_key(path)
+        || session.disabled_builtins.contains(path)
+        || session.keyword && cmd.keyword_args.is_some()
     {
-        let body = function.definition.clone();
-        return capture_simple(session, body.body.statements(), last);
+        return None;
     }
-
-    let words = match path {
-        "builtin"
-            if !session.functions.contains_key("builtin")
-                && !session.disabled_builtins.contains("builtin") =>
-        {
-            &cmd.words[1..]
+    let (program, operands) = if matches!(path, "builtin" | "command") {
+        let (name, operands) = operands.split_first()?;
+        let name = name.as_literal()?;
+        if session.disabled_builtins.contains(name) {
+            return None;
         }
-        "printf" if !session.functions.contains_key("printf") => &cmd.words[..],
+        (name, operands)
+    } else {
+        (path, operands)
+    };
+    match program {
+        "echo" | ":" | "true" | "false" => {}
+        "printf" => {
+            let format = operands.first()?.as_literal()?;
+            if format.starts_with('-') || crate::session::printf::may_assign_count(format) {
+                return None;
+            }
+        }
         _ => return None,
-    };
-    let [program, format] = words else {
-        return None;
-    };
-    let format = format.as_literal()?;
-    if program.as_literal() != Some("printf")
-        || session.disabled_builtins.contains("printf")
-        || session.functrace
-        || session.errtrace
-        || format.starts_with('-')
-        || format.contains('%')
+    }
+    if !arguments
+        .iter()
+        .chain(operands)
+        .all(|arg| inert_operand(arg, session, false))
     {
         return None;
     }
-    let args = [format.to_owned()];
-    let mut out = Vec::new();
-    let status = crate::session::printf::run(session, &args, Some(&mut out));
-    Some(captured_output(out, status))
+    let definition = function.definition.clone();
+    let captured = std::cell::Cell::new(None);
+    let mut env = crate::expansion::Expansion::new(session, last, &captured);
+    let mut fields = Vec::with_capacity(arguments.len());
+    for argument in arguments {
+        env.append_fields(argument.clone(), &mut fields).ok()?;
+    }
+    let outer = std::mem::replace(&mut session.positional, fields.into_iter());
+    let result = capture_simple(session, definition.body.statements(), last);
+    session.positional = outer;
+    result
 }
 
 // Caught OS signals reset at exec. Parent handlers still run after the
@@ -435,6 +448,73 @@ fn nested_output(word: &parser::Word, session: &Session, depth: usize) -> bool {
     }
 }
 
+fn inert_parameter(name: &str, session: &Session) -> bool {
+    matches!(name, "@" | "*" | "#")
+        || (!name.is_empty() && name.bytes().all(|b| b.is_ascii_digit()))
+        || (parser::is_identifier(name)
+            && !matches!(
+                name,
+                "BASHPID"
+                    | "BASH_SUBSHELL"
+                    | "BASH_COMMAND"
+                    | "LINENO"
+                    | "SHELLOPTS"
+                    | "RANDOM"
+                    | "SRANDOM"
+                    | "_"
+                    | "PIPESTATUS"
+                    | "FUNCNAME"
+                    | "BASH_LINENO"
+                    | "BASH_SOURCE"
+                    | "BASH_ARGV"
+                    | "BASH_ARGC"
+            )
+            && !session.is_nameref(name))
+}
+
+// Pattern and unquoted literal segments inside a parameter operator are data.
+// A top-level wildcard still goes through the ordinary pathname expansion path.
+fn inert_operand(word: &parser::Word, session: &Session, operand: bool) -> bool {
+    use crate::word::{Alternative, Modification, Part, Word};
+    let Word::Expanded(parts) = word else {
+        return matches!(word, Word::Literal(_));
+    };
+    let inner = |w| inert_operand(w, session, true);
+    parts.iter().all(|part| match part {
+        Part::Text(_) => true,
+        Part::Pattern(_) | Part::Unquoted(_) => operand,
+        Part::Parameter { name, .. } => inert_parameter(name, session),
+        Part::Trim { name, pattern, .. } => inert_parameter(name, session) && inner(pattern),
+        Part::Alternative {
+            name,
+            op: Alternative::Default | Alternative::Alternate,
+            word,
+            ..
+        } => inert_parameter(name, session) && inner(word),
+        Part::Modify {
+            name, operation, ..
+        } if inert_parameter(name, session) => match operation.as_ref() {
+            Modification::Replace {
+                pattern,
+                replacement,
+                ..
+            } => inner(pattern) && inner(replacement),
+            Modification::Case { pattern, .. } => inner(pattern),
+            Modification::Slice { offset, length } => {
+                let numeric = |w: &Word| {
+                    w.as_literal()
+                        .is_some_and(|s| crate::arithmetic::inert(s, session))
+                };
+                numeric(offset) && length.as_ref().is_none_or(numeric)
+            }
+            Modification::Quote | Modification::Attributes | Modification::Escapes => true,
+            _ => false,
+        },
+        Part::Arithmetic { expression, .. } => crate::arithmetic::inert(expression, session),
+        _ => false,
+    })
+}
+
 // Validate the whole list before executing any builtin. A later function,
 // redirect or effectful word must send the complete substitution through fork.
 fn safe_capture_word(
@@ -445,45 +525,32 @@ fn safe_capture_word(
     capture_line: &std::cell::Cell<Option<usize>>,
 ) -> bool {
     use crate::word::{Part, Word, is_identifier};
-    match word {
-        Word::Literal(_) => true,
-        Word::Expanded(parts) => parts.iter().all(|part| match part {
-            Part::Text(_) => true,
-            Part::Parameter { name, quoted } => {
-                if name == "LINENO"
-                    && !session.is_nameref(name)
-                    && !external
-                    && can_elide_child(session)
-                    && sole_plain_command(body).is_some()
-                {
-                    capture_line.set(Some(body[0].location.line));
-                    return true;
-                }
-                if let Some(base) = name.strip_suffix("[@]") {
-                    return external
-                        && *quoted
-                        && is_identifier(base)
-                        && session.stored_array(base);
-                }
-                is_identifier(name)
-                    && !session.is_nameref(name)
-                    && !matches!(
-                        name.as_str(),
-                        "BASHPID"
-                            | "BASH_SUBSHELL"
-                            | "BASH_COMMAND"
-                            | "LINENO"
-                            | "SHELLOPTS"
-                            | "RANDOM"
-                            | "SRANDOM"
-                            | "_"
-                            | "PIPESTATUS"
-                    )
-            }
-            _ => false,
-        }),
-        Word::Declaration(_) => false,
+    if inert_operand(word, session, false) {
+        return true;
     }
+    let Word::Expanded(parts) = word else {
+        return false;
+    };
+    // LINENO and array arguments have separate capture rules.
+    parts.iter().all(|part| match part {
+        Part::Text(_) => true,
+        Part::Parameter { name, quoted } => {
+            if name == "LINENO"
+                && !session.is_nameref(name)
+                && !external
+                && can_elide_child(session)
+                && sole_plain_command(body).is_some()
+            {
+                capture_line.set(Some(body[0].location.line));
+                return true;
+            }
+            inert_parameter(name, session)
+                || name.strip_suffix("[@]").is_some_and(|base| {
+                    external && *quoted && is_identifier(base) && session.stored_array(base)
+                })
+        }
+        _ => false,
+    })
 }
 
 fn capture_simple(
@@ -493,6 +560,7 @@ fn capture_simple(
 ) -> Option<Result<(String, u8), &'static str>> {
     use crate::word::Word;
     if body.is_empty()
+        || session.traps.catches(libc::SIGCHLD)
         || session.xtrace
         || session.functrace && session.traps.debug_handler()
         || session.nounset
@@ -589,6 +657,21 @@ fn capture_simple(
         }
         let safe = match cmd.redirects.as_slice() {
             [] => true,
+            [r] if !external => {
+                // The string-only formatter never writes a diagnostic. Open the
+                // device after expansion, exactly where the redirect takes effect.
+                body.len() == 1
+                    && !session.noclobber
+                    && program == "printf"
+                    && matches!(
+                        args.first().and_then(Word::as_literal),
+                        Some("%s" | "%s\n" | "%s\\n")
+                    )
+                    && r.variable.is_none()
+                    && r.fd == 2
+                    && r.target == parser::Target::Write
+                    && r.word.as_literal() == Some("/dev/null")
+            }
             [r] if external && r.variable.is_none() => match (r.fd, r.target) {
                 (2, parser::Target::Write) => r.word.as_literal() == Some("/dev/null"),
                 (0, parser::Target::HereString) => {
@@ -673,7 +756,24 @@ fn capture_simple(
             .iter()
             .try_for_each(|arg| env.append_fields(arg.clone(), &mut fields));
         session.signal_line = original;
-        expanded.ok()?;
+        if let Err(error) = expanded {
+            // Earlier commands may already have printed a diagnostic. Finish
+            // the validated list with the ordinary expansion error recovery.
+            error.report("");
+            match error.flow(session) {
+                Flow::Continue(status) => {
+                    code = status;
+                    continue;
+                }
+                flow => return Some(captured_output(output, flow.child_status())),
+            }
+        }
+        if !cmd.redirects.is_empty() {
+            let device = crate::execute::open_null_device(libc::O_WRONLY)?;
+            // A real substitution needs two free descriptors for its capture pipe.
+            // Defer to it on descriptor exhaustion or an unusual device.
+            device.try_clone().ok()?;
+        }
         code = match name.unwrap() {
             "echo" => {
                 crate::builtins::echo_into(&fields, &mut output, session);

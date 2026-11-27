@@ -644,13 +644,23 @@ pub fn text(
             let limit = source
                 .len()
                 .min(end.saturating_add(WINDOW).saturating_add(scan_budget));
-            match buffered_compound(
-                text,
-                &source.as_bytes()[end..limit],
-                limit == source.len(),
-                session.reads_aliases(),
-                |size| parse(session, &source[start..end + size], false),
-            ) {
+            // A sourced file has no per-input history or command-number
+            // update. Preserve those boundaries for command strings and eval.
+            let batch = if !tail && eval_line.is_none() && session.source_depth > 0 {
+                lookahead::function_run(&source[start..], text, session, base_line)
+                    .map(|(p, n, lines)| (eval::Program::Fresh(p), n, lines))
+            } else {
+                None
+            };
+            match batch.map(Ok).unwrap_or_else(|| {
+                buffered_compound(
+                    text,
+                    &source.as_bytes()[end..limit],
+                    limit == source.len(),
+                    session.reads_aliases(),
+                    |size| parse(session, &source[start..end + size], false),
+                )
+            }) {
                 Ok((program, consumed, extra_lines)) => {
                     end += consumed;
                     line_number += extra_lines;

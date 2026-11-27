@@ -150,6 +150,34 @@ pub(crate) fn numeric_subscript(source: &str) -> &str {
         .unwrap_or(source)
 }
 
+// Arithmetic names can contain expressions themselves. Only stored decimal
+// scalars are leaves; a string such as "x++" must be evaluated in the child.
+pub(crate) fn inert(source: &str, session: &Session) -> bool {
+    if source.contains(['$', '`', '"', '\\', '[']) {
+        return false;
+    }
+    let mut parser = Parser {
+        source,
+        tokens: None,
+        token: Token::End,
+    };
+    loop {
+        if parser.advance().is_err() {
+            return false;
+        }
+        match parser.token {
+            Token::End => return true,
+            Token::Number(_) => {}
+            Token::Name(name) if session.scalar_decimal(name).is_some() => {}
+            Token::Op(
+                "+" | "-" | "*" | "/" | "%" | "**" | "~" | "!" | "(" | ")" | "<<" | ">>" | "<"
+                | ">" | "<=" | ">=" | "==" | "!=" | "&" | "|" | "^" | "&&" | "||" | "?" | ":",
+            ) => {}
+            _ => return false,
+        }
+    }
+}
+
 pub fn run(source: &str, session: &mut Session) -> Result<i64> {
     calculate(source, session, 0)
 }

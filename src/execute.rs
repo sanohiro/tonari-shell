@@ -1,6 +1,6 @@
 mod redirect;
-pub(crate) use redirect::capture_stdout;
 use redirect::*;
+pub(crate) use redirect::{capture_stdout, open_null_device};
 mod external;
 pub(crate) use external::Environment;
 use external::External;
@@ -1056,7 +1056,7 @@ pub fn run_pipeline(
         if !session.traps.in_action()
             && let Some(loc) = raw.location.take()
         {
-            session.current_command = Some(loc);
+            session.current_command = Some(*loc);
         }
         if raw.compound.is_none()
             && let Some(flow) = crate::traps::debug(session, last_status)

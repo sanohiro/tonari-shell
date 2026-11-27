@@ -160,7 +160,6 @@ fn network_redirect(path: &CStr, address: &[u8], kind: i32) -> Option<OwnedFd> {
 // or truncate, and inspect the descriptor before committing to the fast path.
 // An installation with a missing or regular /dev/null uses normal redirection.
 pub(super) fn open_null_redirect(redirects: &[Redirect]) -> Option<(RawFd, OwnedFd)> {
-    use std::os::unix::fs::FileTypeExt;
     let [r] = redirects else { return None };
     if !(0..=2).contains(&r.fd) || r.word != "/dev/null" {
         return None;
@@ -171,6 +170,14 @@ pub(super) fn open_null_redirect(redirects: &[Redirect]) -> Option<(RawFd, Owned
         Target::Append => libc::O_WRONLY | libc::O_APPEND,
         _ => return None,
     };
+    Some((
+        r.fd,
+        super::private_fd(open_null_device(flags)?.into()).ok()?,
+    ))
+}
+
+pub(crate) fn open_null_device(flags: i32) -> Option<std::fs::File> {
+    use std::os::unix::fs::FileTypeExt;
     let raw = unsafe {
         libc::open(
             c"/dev/null".as_ptr(),
@@ -187,7 +194,7 @@ pub(super) fn open_null_redirect(redirects: &[Redirect]) -> Option<(RawFd, Owned
     {
         return None;
     }
-    Some((r.fd, super::private_fd(file.into()).ok()?))
+    Some(file)
 }
 
 pub(super) fn open_redirect(path: &str, flags: i32) -> Option<OwnedFd> {

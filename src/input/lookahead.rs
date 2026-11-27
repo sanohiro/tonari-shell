@@ -53,6 +53,69 @@ pub(super) fn file_group(
     whole_group(session, std::str::from_utf8(&bytes).ok()?, 1)
 }
 
+// Adjacent function declarations can share one source buffer. Only commit
+// a batch after the normal parser has verified every top-level statement.
+pub(super) fn function_run(
+    source: &str,
+    first: &str,
+    session: &Session,
+    line: usize,
+) -> Option<(Vec<parser::Statement>, usize, usize)> {
+    if session.interactive
+        || session.xtrace
+        || session.traps.active()
+        || session.reads_aliases()
+        || !parser::opens_function(first)
+    {
+        return None;
+    }
+    // Bound both speculative scanning and the source retained by one function.
+    const WINDOW: usize = 8192;
+    let bytes = &source.as_bytes()[..source.len().min(WINDOW)];
+    let mut body_start = first.len();
+    let mut end = 0;
+    let mut count = 0;
+    for offset in memchr::memmem::find_iter(bytes, b"\n}\n") {
+        // A one-line body already has a cheaper parser that stores literal
+        // wrappers without constructing their argument vectors.
+        if bytes
+            .get(body_start..offset)
+            .is_none_or(|body| memchr::memchr(b'\n', body.trim_ascii()).is_none())
+        {
+            break;
+        }
+        end = offset + 3;
+        count += 1;
+        let rest = &bytes[end..];
+        let Some(n) = memchr::memchr(b'\n', rest) else {
+            break;
+        };
+        if !std::str::from_utf8(&rest[..n]).is_ok_and(parser::opens_function) {
+            break;
+        }
+        body_start = end + n + 1;
+    }
+    if count < 4 {
+        return None;
+    }
+    let text = &source[..end];
+    let program = parser::session_source_at(text, false, session, line).ok()?;
+    if program.len() != count
+        || !program.iter().all(|s| {
+            !s.negated
+                && s.condition == parser::Condition::Always
+                && matches!(s.command, parser::Command::Function { .. })
+        })
+    {
+        return None;
+    }
+    Some((
+        program,
+        end - first.len(),
+        memchr::memchr_iter(b'\n', &bytes[first.len()..end]).count(),
+    ))
+}
+
 fn separator(b: &u8) -> bool {
     b.is_ascii_whitespace() || b";&|()<>".contains(b)
 }

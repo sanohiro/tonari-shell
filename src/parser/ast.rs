@@ -26,7 +26,7 @@ pub struct Redirect<W = String> {
 
 #[derive(Debug, Clone)]
 pub struct SimpleCommand<W = String> {
-    pub location: Option<Location>,
+    pub location: Option<Box<Location>>,
     pub compound: Option<Box<Command>>,
     pub words: Vec<W>,
     pub redirects: Vec<Redirect<W>>,
@@ -172,6 +172,30 @@ pub struct FunctionDefinition {
 }
 
 #[derive(Debug, Clone)]
+pub struct ForClause {
+    pub select: bool,
+    pub header: Location,
+    pub name: String,
+    pub words: Option<Vec<Word>>,
+    pub body: Vec<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArithmeticForClause {
+    pub init: String,
+    pub condition: String,
+    pub step: String,
+    pub body: Vec<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CaseClause {
+    pub header: Location,
+    pub word: Word,
+    pub arms: Rc<Vec<CaseArm>>,
+}
+
+#[derive(Debug, Clone)]
 pub enum Command {
     Pipeline(Pipeline<Word>),
     Group(Vec<Statement>),
@@ -179,25 +203,16 @@ pub enum Command {
         posix: bool,
         command: Box<Command>,
     },
-    Test(Expr),
+    Test(Box<Expr>),
     Arithmetic(crate::arithmetic::Expression),
-    ForArithmetic {
-        init: String,
-        condition: String,
-        step: String,
-        body: Vec<Statement>,
-    },
+    ForArithmetic(Box<ArithmeticForClause>),
     Subshell(Vec<Statement>),
     Coprocess {
         name: String,
         body: Box<Command>,
     },
     Background(Vec<Statement>),
-    Case {
-        header: Location,
-        word: Word,
-        arms: Rc<Vec<CaseArm>>,
-    },
+    Case(Box<CaseClause>),
     If {
         branches: Vec<(Vec<Statement>, Vec<Statement>)>,
         otherwise: Vec<Statement>,
@@ -207,13 +222,7 @@ pub enum Command {
         condition: Vec<Statement>,
         body: Vec<Statement>,
     },
-    For {
-        select: bool,
-        header: Location,
-        name: String,
-        words: Option<Vec<Word>>,
-        body: Vec<Statement>,
-    },
+    For(Box<ForClause>),
     Function {
         name: String,
         definition: Rc<FunctionDefinition>,

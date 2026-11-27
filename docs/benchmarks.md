@@ -1,5 +1,53 @@
 # Startup and execution / 起動と実行性能
 
+<a id="capture-parser-review"></a>
+
+## November 28 · Command substitution, null redirection and function parsing / コマンド置換・リダイレクト・関数定義
+
+Medians are milliseconds in the order **previous Tonari / new Tonari / GNU Bash**. The compared revisions were `a7b977f` and `d797312`. We measured 25 interleaved sessions per workload on Apple M1 with GNU Bash 5.3.20 and on native Ubuntu 24.04 x86-64 (INTEL(R) XEON(R) PLATINUM 8573C) with Bash 5.2.21. The driver waits for shell readiness before sourcing the fixture. It includes loading, evaluating, checking the output and exiting. [Linux release, samples and host](https://github.com/sanohiro/tonari-shell/actions/runs/46079487163)
+
+| Workload | Apple M1 | Linux x86-64 |
+|---|---:|---:|
+| 50 × `$(echo "$1")` | 26.922 / 0.465 / 33.316 | 6.754 / 0.178 / 12.619 |
+| 50 × `$(echo "${p##*/}")` | 27.465 / 0.490 / 33.819 | 6.667 / 0.197 / 12.742 |
+| 50 × `$(echo "${p:-def}")` | 27.270 / 0.494 / 33.616 | 6.588 / 0.191 / 12.640 |
+| 50 × `$(echo "$((i+1))")` | 27.298 / 0.479 / 33.751 | 6.488 / 0.190 / 12.468 |
+| 50 × helper forwarding `"$@"` | 28.936 / 0.510 / 34.102 | 6.954 / 0.219 / 13.256 |
+| 50 × helper printing `"$1"` | 27.577 / 0.493 / 33.944 | 6.904 / 0.193 / 13.068 |
+| 50 × `command printf` helper with stderr redirected | 28.522 / 1.091 / 34.822 | 7.085 / 0.314 / 13.490 |
+| 2,000 × `echo hi >/dev/null` | 21.380 / 21.320 / 28.722 | 3.459 / 3.468 / 8.643 |
+| 2,000 × `: 2>/dev/null` | 18.667 / 18.582 / 25.682 | 2.711 / 2.709 / 7.758 |
+| Source 200 conditional functions | 0.710 / 0.655 / 0.992 | 0.640 / 0.556 / 0.687 |
+| Source 200 conditional functions 25 times | 7.328 / 5.562 / 10.454 | 8.405 / 7.638 / 10.244 |
+| Source 400 functions with local defaults and tests | 1.942 / 1.749 / 2.506 | 2.991 / 2.660 / 2.605 |
+| Source 400 single-command literal wrappers | 0.561 / 0.575 / 1.149 | 0.387 / 0.407 / 0.923 |
+| 1,000 assignments in a redirected group | 0.654 / 0.641 / 1.422 | 0.725 / 0.647 / 1.125 |
+| Repeated case matching | 4.364 / 4.314 / 35.339 | 5.672 / 5.574 / 38.352 |
+| Repeated conditional tests | 6.187 / 5.892 / 26.657 | 8.033 / 8.039 / 28.638 |
+| Repeated arithmetic | 7.908 / 7.791 / 33.905 | 9.953 / 10.005 / 36.824 |
+| External pipelines | 21.136 / 21.174 / 32.873 | 7.789 / 7.659 / 10.420 |
+
+**Real scripts.** Sourcing Ubuntu bash-completion through the first visible prompt took 5.113 / 5.028 / 10.686 ms on M1 and 5.207 / 5.101 / 7.437 ms on Linux. Loading unmodified nvm 0.40.3 with `--no-use`, calling its own `nvm_echo "$i" "two words"` 50 times and checking the result took 39.893 / 6.442 / 45.751 ms on M1 (21 sessions). Loading nvm normally through its first prompt took 165.781 / 166.460 / 215.168 ms. Starting that shell through the first `node --version` and next prompt took 181.919 / 182.617 / 232.216 ms. These PTY comparisons used installed Node 24.1.0 and 18.13.0. GNU Hello 2.12.2 full configure took 25.686 / 25.548 / 27.700 seconds on M1 (three measured clean builds per shell after warm-up, identical config.h). On the native EPYC 9V74, five clean builds per shell took 7.556 s with Tonari and 8.186 s with Bash (0.923×). [Native Linux configure](https://github.com/sanohiro/tonari-shell/actions/runs/46078759505)
+
+**Redirection.** On M1, 2,000 fresh write opens with create/truncate and closes took 16.957 ms. Removing both flags took 16.866 ms. Duplicating and closing an existing descriptor took 0.627 ms. A child setting `O_NONBLOCK` on a duplicate changed the next duplicate's flags. A fresh open had its own flags. Normal input/output redirections keep fresh opens. The optimized string-only formatter opens the device independently on each capture. With `ulimit -n` from 5 through 32 the tested formatter behaved identically to the Bash reference. At 4, the fallback's pipe allocation failed. Both Tonari revisions reported failure to the caller and continued, while the noninteractive GNU Bash 5.3.20 command string exited. A capture that needs no descriptors can still succeed in Tonari.
+
+The AMD EPYC 9V45 also ran the same workloads before the equivalent short-body guard simplification. There, sourcing 200 functions took 0.697 / 0.596 / 0.715 ms and the 400 mixed functions took 2.960 / 2.471 / 2.430 ms. [Independent x86-64 run](https://github.com/sanohiro/tonari-shell/actions/runs/46078683473)
+
+**Parser trials.** On arm64, `Statement` went from 184 to 112 bytes, `Command` from 128 to 56 and `SimpleCommand<Word>` from 136 to 96. Boxing the three loop/case variants alone left the statement at 144 bytes. Boxing the conditional expression reduced it further. Batching adjacent sourced definitions reduced the cost of repeated parses. Sending one-command literal wrappers through the general parser increased the M1 time for 400 wrappers from 0.662 to 0.803 ms in an isolated trial. They now retain their existing literal parser. Restricting the nested line-index scan to braced command substitutions changed a separate mixed-functions trial from 2.035 to 1.997 ms and the repeated-source trial from 7.508 to 7.555 ms. We retained the original scan. The distribution executable changed from 1,798,080 to 1,798,096 bytes on macOS and 2,403,288 to 2,403,256 on Linux.
+
+**Large inputs.** We also checked 15 M1 workloads against both shells (nine interleaved samples). They cover 5,000 shifts, string concatenation, indexed-array append/unset/iteration, 50,003-byte string operations, 10,000 IFS fields, literal and expanded here-documents, printing a quoted array and 100 nested calls. Tonari took less time than GNU Bash in all 15 cases.
+
+| Stress case | M1, previous / new / Bash (ms) |
+|---|---:|
+| shift-5000 | 1.034 / 1.023 / 8.205 |
+| concat-10000 | 1.412 / 1.383 / 15.262 |
+| replace-large | 0.662 / 0.646 / 41.762 |
+| heredoc-1000 | 0.535 / 0.534 / 0.767 |
+
+**Reproduction.** Use the native `capture-parser` suite or run `python3 tools/bench_scripts.py TONARI --previous BASELINE --bash BASH --timing started --runs 25 --case capture-helper-stderr --case source-functions-repeat --case source-functions-mixed`. The nvm PTY fixture is `tools/bench_tool_hooks.py --case nvm`. For full configure use `tools/bench_external.py gnu-hello SOURCE TONARI BASH --previous BASELINE --case 'GNU Hello configure' --runs 3`.
+
+表は起動済みシェルで計測した中央値を旧Tonari・新Tonari・GNU Bashの順で示す。位置引数や安全な算術を使う置換では子プロセスを省ける。nvmのヘルパー単体の短縮と、ユーザーが待つ初期化全体の時間は区別して測った。関数定義のまとめ読みは単純なラッパー専用のパーサーを残す。通常の `/dev/null` は外部コマンドのファイル状態フラグの独立性を保つため毎回開く。
+
 <a id="function-table-review"></a>
 
 ## November 28 · Function dispatch, completion and alias expansion / 関数探索・補完・エイリアス展開

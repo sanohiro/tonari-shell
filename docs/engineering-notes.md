@@ -1,5 +1,17 @@
 # Engineering notes / 開発知見
 
+## Read-only command substitutions and sourced functions / コマンド置換と関数定義の読み込み
+
+Before eliminating a substitution child, validate both the shell expansion and the values it will read. Arithmetic can recursively interpret a variable's contents, so a name in a read-only expression must resolve to a stored decimal scalar. Subscripts, namerefs, assignments and process-sensitive variables need the normal child. Expand a helper's arguments with the caller's positional parameters, install the callee's arguments for its single builtin, then restore the caller even if expansion fails. A validated list handles an expansion error in place so a diagnostic already written by an earlier builtin appears once.
+
+A descriptor obtained by duplicating an open file shares its file status flags with every other duplicate. An external program changing `O_NONBLOCK` on its redirected stdout demonstrates why caching a private `/dev/null` descriptor changes the next command. The fixed `printf '%s\n' "$*" 2>/dev/null` capture opens and checks the device for each invocation. This formatter only writes stdout, which the capture already owns.
+
+For sourced files, share at most 8 KiB between adjacent multi-line definitions after the regular parser verifies each statement is an unconditional function declaration. A one-command wrapper retains its cheaper literal parser. This avoids reading across commands that change shell options or aliases.
+
+ソースするファイルに関数定義が続く場合は、最大8 KiBをまとめて通常のパーサーで検証する。先頭からすべて独立した関数定義と確認した区間だけを使う。これで行番号や定義時の構文エラーを保ち、シェル設定を変えるコマンドをまたがずに、入力走査とパーサー初期化を減らせる。対話中、トラップ、トレース、エイリアス展開が有効な経路は従来の単位で読む。
+
+コマンド置換では、算術式自体に代入がなくても、変数の中身が `i++` なら副作用がある。引数を呼び出し元の位置引数で展開し、関数本体を評価する間だけ差し替える。`/dev/null` のFDは複製先でのフラグ変更が元にも伝わるので、コマンドをまたいで再利用しない。実際の関数呼び出し、nvmの初期化、ソースの読み込みは個別に測る。[Measurements and reproduction / 実測と再現方法](benchmarks.md#capture-parser-review)
+
 ## Function names, alias expansion and ordered completion / 関数名・エイリアス展開・補完順
 
 A shell with hundreds of registered functions looks up names for builtins as well as function calls. Hashing the names reduced dispatch time. The function table builds its sorted names on the first listing, reuses them across redefinitions and invalidates them on insertion or removal. Prefix completion uses a binary search in that list. The export table uses shell names for attribute queries and stores each encoded child-environment key with its current value or removal. Check `declare -F`, `set`, `export -fp` and completion after redefining or unsetting a function.

@@ -614,7 +614,9 @@ fn parameter_word(
     let mut after_colon = false;
     let quoted_apostrophes = outer_quoted && !super::POSIX.get();
     let mut inside_apostrophes = false;
-    while let Some(c) = chars.next() {
+    loop {
+        let start = chars.as_str();
+        let Some(c) = chars.next() else { break };
         let eligible = empty || after_colon;
         after_colon = false;
         match c {
@@ -707,13 +709,9 @@ fn parameter_word(
                     .unwrap_or(rest.len());
                 *chars = rest[end..].chars();
                 if outer_quoted {
-                    word.push(c);
-                    word.literal(&rest[..end]);
+                    word.literal(&start[..c.len_utf8() + end]);
                 } else {
-                    let mut text = String::with_capacity(c.len_utf8() + end);
-                    text.push(c);
-                    text.push_str(&rest[..end]);
-                    word.part(Part::Unquoted(text));
+                    word.part(Part::Unquoted(start[..c.len_utf8() + end].to_owned()));
                 }
             }
         }
@@ -747,7 +745,9 @@ fn double_quoted(
     inside_quoted_operand: bool,
 ) -> Result<(), Error> {
     let mut empty = true;
-    while let Some(c) = chars.next() {
+    loop {
+        let start = chars.as_str();
+        let Some(c) = chars.next() else { break };
         if c == '"' {
             if empty {
                 word.literal("");
@@ -774,8 +774,7 @@ fn double_quoted(
                     .bytes()
                     .position(|b| matches!(b, b'"' | b'\\' | b'$' | b'`'))
                     .unwrap_or(rest.len());
-                word.push(c);
-                word.literal(&rest[..end]);
+                word.literal(&start[..c.len_utf8() + end]);
                 *chars = rest[end..].chars();
             }
         }
@@ -1345,9 +1344,12 @@ fn scan_word(
             *chars = start[plain..].chars();
             return Ok(Some(token));
         }
-        word.literal(literal);
         *chars = start[plain..].chars();
-        started = true;
+        return Ok(Some(Token::Word(LexWord {
+            word: Word::Literal(literal.to_owned()),
+            protected: false,
+            assignment: None,
+        })));
     } else if start.as_bytes().get(plain) == Some(&b'[')
         && let Some(prefix) = super::array::indexed_prefix(start)
         && (if plain == 0 {

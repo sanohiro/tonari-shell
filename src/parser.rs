@@ -801,7 +801,7 @@ impl Reader {
             None => self.simple()?,
         };
         if self.has_pipe() {
-            first.location = Some(self.location(start));
+            first.location = Some(Box::new(self.location(start)));
         }
         let mut pipeline = vec![first];
         while self.has_pipe() {
@@ -831,7 +831,7 @@ impl Reader {
                 Some(compound) => self.compound_stage(compound)?,
                 None => self.simple()?,
             };
-            stage.location = Some(self.location(start));
+            stage.location = Some(Box::new(self.location(start)));
             pipeline.push(stage);
         }
         Ok(Command::Pipeline(pipeline))
@@ -888,7 +888,7 @@ impl Reader {
                 let expr = self.test_or()?;
                 self.newlines();
                 self.expect("]]")?;
-                Ok(Command::Test(expr))
+                Ok(Command::Test(Box::new(expr)))
             }
             Some("coproc") => self.coproc(),
             Some("case") => self.case_clause(),
@@ -999,16 +999,16 @@ impl Reader {
             self.newlines();
         }
         self.expect("esac")?;
-        Ok(Command::Case {
+        Ok(Command::Case(Box::new(CaseClause {
             header,
             word,
             arms: Rc::new(arms),
-        })
+        })))
     }
 
     fn if_clause(&mut self) -> Result<Command, Error> {
         self.tokens.pop_front();
-        let mut branches = Vec::new();
+        let mut branches = Vec::with_capacity(1);
         loop {
             let condition = self.list(&["then"])?;
             self.expect("then")?;
@@ -1081,12 +1081,12 @@ impl Reader {
             self.expect(open)?;
             let body = self.list(&[close])?;
             self.expect(close)?;
-            return Ok(Command::ForArithmetic {
+            return Ok(Command::ForArithmetic(Box::new(ArithmeticForClause {
                 init: init.into(),
                 condition: condition.into(),
                 step: step.into(),
                 body,
-            });
+            })));
         }
         self.alias_at(false, Some(&[]))?;
         let name = self.declaration_name(
@@ -1122,13 +1122,13 @@ impl Reader {
         self.expect("do")?;
         let body = self.list(&["done"])?;
         self.expect("done")?;
-        Ok(Command::For {
+        Ok(Command::For(Box::new(ForClause {
             select,
             header,
             name,
             words,
             body,
-        })
+        })))
     }
 
     // Quotes in a declaration name retain their source spelling. A plain word
@@ -1628,14 +1628,11 @@ mod tests {
             panic!()
         };
         assert_eq!(name, "f");
-        let Command::For {
-            words: Some(words),
-            body,
-            ..
-        } = &definition.body.statements()[0].command
-        else {
+        let Command::For(clause) = &definition.body.statements()[0].command else {
             panic!()
         };
+        let Some(words) = &clause.words else { panic!() };
+        let body = &clause.body;
         assert_eq!(words[1].as_literal(), Some("do"));
         let Command::If {
             branches,
@@ -1682,11 +1679,11 @@ mod tests {
         let program = parse(script).unwrap();
         assert!(program[0].negated);
         assert!(matches!(program[0].command, Command::Subshell(_)));
-        let Command::Case { arms, .. } = &program[1].command else {
+        let Command::Case(clause) = &program[1].command else {
             panic!()
         };
-        assert_eq!(arms[0].0.len(), 2);
-        assert!(arms[1].1.is_empty());
+        assert_eq!(clause.arms[0].0.len(), 2);
+        assert!(clause.arms[1].1.is_empty());
         assert!(parse(r#"echo "$(case a in a) echo ok;; esac)" "#).is_ok());
         assert!(matches!(parse("case x in name"), Err(Error::Incomplete(_))));
         assert!(parse("{ :; } (echo invalid)").is_err());
@@ -1745,8 +1742,10 @@ mod tests {
     #[test]
     fn conditional_syntax_and_arithmetic_commands() {
         let program=parse(r#"[[ -n "$x" && ( "$x" == a* || "$x" =~ ^(a|b)[0-9]+$ ) ]]; for ((i=0;i<3;i++)); do ((sum+=i)); done"#).unwrap();
-        assert!(matches!(program[0].command, Command::Test(Expr::And(..))));
-        assert!(matches!(program[1].command, Command::ForArithmetic { .. }));
+        assert!(
+            matches!(&program[0].command, Command::Test(expr) if matches!(**expr, Expr::And(..)))
+        );
+        assert!(matches!(program[1].command, Command::ForArithmetic(_)));
         assert!(parse("[[ x && ]]").is_err());
         assert!(matches!(parse("[[ x =="), Err(Error::Incomplete(_))));
     }

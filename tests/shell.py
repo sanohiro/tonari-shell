@@ -3720,6 +3720,84 @@ declare -n ref=a; v=$(/usr/bin/printf '[%s]' "${ref[@]}"); echo "$v"
 jobs() { printf '%s' "shadow:$1"; }; v=$(jobs -p); echo "$v" """,
                      0, b"empty:0:<>\n<a b><><*.rs>\n[a b][][*.rs]\nshadow:-p\n", minimum=5)
 
+    def test_source_consecutive_function_boundaries(self):
+        def definitions(names, body):
+            return "".join(f"{name}() {{\n{body}\n}}\n" for name in names)
+
+        names = ["first", "second", "third", "fourth", "fifth"]
+        script = self.cwd / "defs"
+        # Syntax errors later in the file must preserve earlier definitions.
+        script.write_text(definitions(names, ":\n :") + "broken() { if; }\n")
+        for shell in self.shells_for(5):
+            p = self.command(shell, ". ./defs; declare -F fifth >/dev/null && echo registered")
+            self.assertEqual(p.stdout, b"registered\n")
+            self.assertTrue(p.stderr)
+
+        script.write_text(definitions(names, ':\necho "$FUNCNAME:$LINENO"') +
+                          "alias marker='echo expanded'\n" + definitions(["after"], "marker"))
+        self.compare("shopt -s expand_aliases; . ./defs; first; fifth; after", 0,
+                     b"first:3\nfifth:19\nexpanded\n", minimum=5)
+        # Header-shaped text in a here-document is part of a single body.
+        script.write_text("doc() {\ncat <<'END'\n}\n" +
+                          definitions(names, "fake") + "END\n}\n" + definitions(names, "echo ok"))
+        self.compare(". ./defs; fifth; doc | head -1", 0, b"ok\n}\n")
+
+    def test_capture_readonly_expansions_and_helper_arguments(self):
+        self.compare(r"""set -- 'a b' '' c
+emit() { builtin printf '<%s>' "$@"; }
+first() { echo "[$1:$#]"; }
+path=a/b/c; val=日a; i=4
+printf '%s\n' "$(emit "$@" "${path##*/}" "${missing:-ok}" "$((i+1))")"
+printf '%s\n' "$(first)" "$(first "$@")" "$(emit "${val//a/b}" "${path:2:1}")"
+echo "$#:$1:$i" """, 0, "<a b><><c><c><ok><5>\n[:0]\n[a b:3]\n<日b><b>\n3:a b:4\n".encode(),
+                     minimum=4)
+
+    def test_capture_keeps_arithmetic_writes_and_function_frames_in_child(self):
+        self.compare(r"""set -- outer
+i=3; expr='i++'; declare -n ref=i
+frame() { printf '%s' "$FUNCNAME:$1"; }
+inc() { echo "$((ref++))"; }
+alt() { echo "${missing:=child}"; }
+idx() { echo "$((a[i++]))"; }; a[3]=seven
+printf '%s\n' "$(frame inner)" "$(inc)" "$(echo "$((expr))")" "$(alt)" "$(idx)"
+printf '%s\n' "$i:${missing-unset}:$1"
+""", 0, b"frame:inner\n3\n3\nchild\n0\n3:unset:outer\n", minimum=5)
+
+    def test_capture_reports_prior_diagnostic_once_on_expansion_error(self):
+        for shell in self.shells_for(5):
+            for setup, word in [("", '"$((1/0))"'), ("shopt -s failglob; z='absent*';", "$z")]:
+                with self.subTest(shell=shell, word=word):
+                    proc = self.command(shell, setup + ' v=$(printf "%d" invalid; echo '
+                                        + word + '; echo unreachable); echo "$?:$v"')
+                    self.assertEqual(proc.returncode, 0)
+                    self.assertEqual(proc.stdout, b"1:0\n")
+                    self.assertEqual(sum(b"printf:" in line for line in proc.stderr.splitlines()), 1)
+
+    def test_capture_with_child_trap(self):
+        self.compare("""n=0; trap '((n++))' CHLD; set -- ok
+v=$(echo "$1"); echo "$v:$n" """, 0, b"ok:1\n", minimum=5)
+
+    def test_captured_string_formatter_with_stderr_redirect(self):
+        self.compare(r"""set -- 'a b' ''; IFS=:
+printf() { echo shadow; }
+f() { command printf '%s\n' "$*" 2>/dev/null; }
+g() { builtin printf '%d' invalid 2>/dev/null; }
+v=$(f "$@" end); echo "$?:<$v>"
+v=$(g); echo "$?:<$v>"
+set -C; v=$(f again); echo "$?:<$v>"
+exec 2>&-; v=$(f last); echo "$?:<$v>"
+""", 0, b"0:<a b::end>\n1:<0>\n0:<again>\n0:<last>\n")
+
+    def test_null_redirects_have_independent_open_file_descriptions(self):
+        mutate = shlex.quote("import fcntl, os; fcntl.fcntl(1, fcntl.F_SETFL, os.O_NONBLOCK)")
+        verify = shlex.quote("import fcntl, os, sys; flags=fcntl.fcntl(1, fcntl.F_GETFL); "
+                             "sys.exit(bool(flags & (os.O_NONBLOCK | os.O_APPEND)))")
+        python = shlex.quote(sys.executable)
+        self.compare(f"{python} -c {mutate} >>/dev/null && {python} -c {verify} >/dev/null && echo ok",
+                     0, b"ok\n")
+        self.compare(f"{python} -c {mutate} >/dev/null && {python} -c {verify} >/dev/null && echo ok",
+                     0, b"ok\n")
+
     def test_parent_traps_during_direct_captures(self):
         self.compare("""trap 'echo exit' EXIT; trap 'echo signal' USR1
 v=$(echo hello | /bin/cat); echo "$v"
