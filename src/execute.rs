@@ -673,16 +673,11 @@ fn spawn_failure(name: &str, error: io::Error) -> io::Result<Stage> {
 }
 
 pub(super) fn wait(pid: libc::pid_t) -> io::Result<u8> {
-    let mut status = 0;
     loop {
-        if crate::traps::waitpid(pid, &mut status, 0) >= 0 {
-            if libc::WIFSIGNALED(status) {
-                return Ok(crate::traps::signal_status(libc::WTERMSIG(status)));
-            }
-            return Ok(libc::WEXITSTATUS(status) as u8);
-        }
-        if errno() != libc::EINTR {
-            return Err(io::Error::last_os_error());
+        if let Some(code) =
+            crate::traps::child_event(pid, 0)?.and_then(crate::traps::ChildEvent::exit_status)
+        {
+            return Ok(code);
         }
     }
 }

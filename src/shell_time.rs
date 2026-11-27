@@ -53,7 +53,8 @@ impl Clock {
                 });
         Self {
             #[cfg(target_env = "musl")]
-            region: regional::resolve(&locale_name),
+            region: tonari_time_locales::Locale::find(&locale_name)
+                .unwrap_or(tonari_time_locales::POSIX),
             name,
             zone,
             locale_name,

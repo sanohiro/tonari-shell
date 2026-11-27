@@ -32,6 +32,42 @@ pub struct Context<'a> {
     pub command_start: usize,
 }
 
+#[derive(Default)]
+enum Quoting {
+    #[default]
+    Unquoted,
+    Single,
+    Double,
+    Escape,
+    DoubleEscape,
+}
+
+#[derive(PartialEq, Eq)]
+enum WordChar {
+    Unquoted,
+    Quoted,
+    Delimiter,
+}
+
+impl Quoting {
+    fn consume(&mut self, ch: char) -> WordChar {
+        use Quoting::*;
+        let (next, kind) = match (&*self, ch) {
+            (Escape, _) => (Unquoted, WordChar::Quoted),
+            (DoubleEscape, _) => (Double, WordChar::Quoted),
+            (Single, '\'') | (Double, '"') => (Unquoted, WordChar::Delimiter),
+            (Double, '\\') => (DoubleEscape, WordChar::Delimiter),
+            (Single | Double, _) => return WordChar::Quoted,
+            (Unquoted, '\'') => (Single, WordChar::Delimiter),
+            (Unquoted, '"') => (Double, WordChar::Delimiter),
+            (Unquoted, '\\') => (Escape, WordChar::Delimiter),
+            (Unquoted, _) => return WordChar::Unquoted,
+        };
+        *self = next;
+        kind
+    }
+}
+
 impl<'a> Context<'a> {
     // The callback receives source spelling, including quotes and backslashes.
     // Readline keeps a run of punctuation as one COMP_WORDS entry, while the
@@ -40,8 +76,7 @@ impl<'a> Context<'a> {
         let mut words = Vec::new();
         let mut token = self.command_start;
         let mut punctuation = false;
-        let mut quote = None;
-        let mut escaped = false;
+        let mut quoting = Quoting::default();
         let mut end = self.line.len();
         let mut current = None;
         let mut start = self.cursor;
@@ -66,20 +101,7 @@ impl<'a> Context<'a> {
         };
         for (off, c) in self.line[self.command_start..].char_indices() {
             let i = self.command_start + off;
-            let protected = escaped || quote.is_some() || matches!(c, '\'' | '"' | '\\');
-            if escaped {
-                escaped = false;
-            } else if let Some(q) = quote {
-                if c == q {
-                    quote = None;
-                } else if c == '\\' && q == '"' {
-                    escaped = true;
-                }
-            } else if matches!(c, '\'' | '"') {
-                quote = Some(c);
-            } else if c == '\\' {
-                escaped = true;
-            }
+            let protected = quoting.consume(c) != WordChar::Unquoted;
             if !protected && matches!(c, ';' | '|' | '&' | '\n') {
                 end = i;
                 break;
@@ -122,8 +144,7 @@ impl<'a> Context<'a> {
         }
         let mut words = Vec::new();
         let mut word = String::new();
-        let mut quote = None;
-        let mut escaped = false;
+        let mut quoting = Quoting::default();
         let mut in_word = false;
         let mut start = 0;
         let mut command_start = 0;
@@ -135,18 +156,8 @@ impl<'a> Context<'a> {
                     words.push(String::new());
                 }
             }
-            if escaped {
-                word.push(c);
-                escaped = false;
-            } else if let Some(q) = quote {
-                if c == q {
-                    quote = None;
-                } else if c == '\\' && q == '"' {
-                    escaped = true;
-                } else {
-                    word.push(c);
-                }
-            } else if c.is_whitespace() || "|;&".contains(c) {
+            let kind = quoting.consume(c);
+            if kind == WordChar::Unquoted && (c.is_whitespace() || "|;&".contains(c)) {
                 if in_word {
                     words.push(std::mem::take(&mut word));
                 }
@@ -167,10 +178,8 @@ impl<'a> Context<'a> {
                     command_start = i;
                 }
                 in_word = true;
-                match c {
-                    '\\' => escaped = true,
-                    '\'' | '"' => quote = Some(c),
-                    _ => word.push(c),
+                if kind != WordChar::Delimiter {
+                    word.push(c);
                 }
             }
         }
@@ -1325,6 +1334,34 @@ pub fn file_names(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completion_scanners_share_quoted_word_boundaries() {
+        let line = r#"ignore; cmd '' 'x|y' "a\" b" one\ two p\:q end"#;
+        let context = Context::scan(line, line.len()).unwrap();
+        assert_eq!(
+            context.words,
+            ["cmd", "", "x|y", "a\" b", "one two", "p:q", "end"]
+        );
+        let callback = context.programmable(default_word_breaks(true), true);
+        assert_eq!(
+            callback.words,
+            [
+                "cmd",
+                "''",
+                "'x|y'",
+                r#""a\" b""#,
+                r"one\ two",
+                r"p\:q",
+                "end"
+            ]
+        );
+        assert_eq!(
+            (context.current, context.start),
+            (callback.current, callback.start)
+        );
+        assert_eq!(&line[callback.start..], "end");
+    }
 
     #[test]
     fn common_prefix_respects_utf8_and_duplicate_names() {

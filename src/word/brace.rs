@@ -1,7 +1,7 @@
 // Keep quote and expansion boundaries until brace alternatives have been chosen.
 // Cloning a parameter or substitution here makes each chosen word evaluate it
 // independently, in the same order as Bash.
-use super::{Part, Word};
+use super::{Part, Word, name_chars_len};
 use crate::expansion::{Error, Expansion};
 
 #[derive(Clone, Debug)]
@@ -133,10 +133,7 @@ fn parameter_names(parts: Vec<Part>) -> Vec<Part> {
     while let Some(part) = parts.next() {
         if let Part::BraceParameter(mut name) = part {
             while let Some(Part::Pattern(raw)) = parts.peek_mut() {
-                let len = raw
-                    .bytes()
-                    .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
-                    .count();
+                let len = name_chars_len(raw);
                 if len == 0 {
                     break;
                 }

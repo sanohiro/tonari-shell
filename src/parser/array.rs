@@ -1,6 +1,7 @@
 use super::Incomplete;
 use super::lexer::{LexWord, Token};
 use super::{Error, Reader, Word, is_identifier};
+use crate::word::name_chars_len;
 
 #[derive(Debug, Clone)]
 pub struct Subscript<T> {
@@ -19,10 +20,7 @@ pub enum Assignment<W> {
 // Keep subscripts intact while lexing the assignment name. They are arithmetic
 // expressions, and information such as whitespace belongs to that expression.
 pub(super) fn indexed_prefix(source: &str) -> Option<&str> {
-    let n = source
-        .bytes()
-        .take_while(|c| c.is_ascii_alphanumeric() || *c == b'_')
-        .count();
+    let n = name_chars_len(source);
     if !source[n..].starts_with('[') || n != 0 && !is_identifier(&source[..n]) {
         return None;
     }

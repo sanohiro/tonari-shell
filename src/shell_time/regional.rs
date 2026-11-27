@@ -2,24 +2,6 @@
 // GNU locale data; the clock and calendar conversions still use the shell TZ.
 use tonari_time_locales::{Field, Locale};
 
-pub(super) fn resolve(name: &str) -> Locale {
-    let normalized;
-    let name = if let Some((base, codeset)) = name.split_once('.') {
-        if let Some((_, modifier)) = codeset.split_once('@') {
-            normalized = format!("{base}@{modifier}");
-            &normalized
-        } else {
-            base
-        }
-    } else {
-        name
-    };
-    if matches!(name, "C" | "POSIX") {
-        return tonari_time_locales::POSIX;
-    }
-    Locale::find(name).unwrap_or(tonari_time_locales::POSIX)
-}
-
 pub(super) fn expand(
     locale: Locale,
     format: &str,

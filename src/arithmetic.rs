@@ -177,6 +177,13 @@ impl<'a> Repeated<'a> {
         let Ok(second) = parser.advance() else {
             return generic;
         };
+        if !parser
+            .source
+            .trim_matches([' ', '\t', '\n', '\r'])
+            .is_empty()
+        {
+            return generic;
+        }
         match (first, second, parser.token) {
             (Token::Name(name), Token::Op(op @ ("++" | "--")), Token::End)
             | (Token::Op(op @ ("++" | "--")), Token::Name(name), Token::End)
@@ -193,33 +200,18 @@ impl<'a> Repeated<'a> {
                 Token::Name(name),
                 Token::Op(op @ ("<" | "<=" | ">" | ">=" | "==" | "!=")),
                 Token::Number(value),
-            ) if crate::parser::is_identifier(name)
-                && parser
-                    .source
-                    .trim_matches([' ', '\t', '\n', '\r'])
-                    .is_empty() =>
-            {
+            ) if crate::parser::is_identifier(name) => {
                 number(value).map_or(generic, |n| Self::Compare(name, op, n, source))
             }
             (
                 Token::Name(name),
                 Token::Op(op @ ("<" | "<=" | ">" | ">=" | "==" | "!=")),
                 Token::Name(rhs),
-            ) if crate::parser::is_identifier(name)
-                && crate::parser::is_identifier(rhs)
-                && parser
-                    .source
-                    .trim_matches([' ', '\t', '\n', '\r'])
-                    .is_empty() =>
-            {
+            ) if crate::parser::is_identifier(name) && crate::parser::is_identifier(rhs) => {
                 Self::CompareNames(name, op, rhs, source)
             }
             (Token::Name(name), Token::Op(op @ ("+=" | "-=")), Token::Number(value))
-                if crate::parser::is_identifier(name)
-                    && parser
-                        .source
-                        .trim_matches([' ', '\t', '\n', '\r'])
-                        .is_empty() =>
+                if crate::parser::is_identifier(name) =>
             {
                 number(value).map_or(generic, |n| {
                     Self::Step(
@@ -343,11 +335,6 @@ impl<'a> Parser<'a> {
     fn advance(&mut self) -> Result<Token<'a>> {
         let old = self.token;
         let source = self.source.trim_start_matches([' ', '\t', '\n', '\r']);
-        let length = |s: &str| {
-            s.bytes()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == b'_')
-                .count()
-        };
         let (token, consumed) = match source.as_bytes().first() {
             None => (Token::End, 0),
             Some(b'0'..=b'9') => {
@@ -358,7 +345,7 @@ impl<'a> Parser<'a> {
                 (Token::Number(&source[..n]), n)
             }
             Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => {
-                let mut n = length(source);
+                let mut n = crate::word::name_chars_len(source);
                 if source[n..].starts_with('[') {
                     n += crate::parser::index_end(&source[n..])
                         .map_err(|_| "missing array subscript")?;
@@ -368,7 +355,7 @@ impl<'a> Parser<'a> {
             Some(b'$') => {
                 let braced = source.starts_with("${");
                 let rest = &source[if braced { 2 } else { 1 }..];
-                let n = length(rest);
+                let n = crate::word::name_chars_len(rest);
                 if n == 0 || (braced && !rest[n..].starts_with('}')) {
                     return Err("invalid arithmetic parameter");
                 }

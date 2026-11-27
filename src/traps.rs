@@ -43,6 +43,54 @@ pub(crate) fn waitpid(pid: libc::pid_t, status: &mut i32, flags: i32) -> libc::p
     got
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum ChildEvent {
+    Exited(u8),
+    Signaled(i32),
+    Stopped(i32),
+    Continued,
+}
+
+impl ChildEvent {
+    // The input is the status word from a successful waitpid.
+    pub(crate) fn decode(status: i32) -> Self {
+        if libc::WIFEXITED(status) {
+            Self::Exited(libc::WEXITSTATUS(status) as u8)
+        } else if libc::WIFSTOPPED(status) {
+            Self::Stopped(libc::WSTOPSIG(status))
+        } else if libc::WIFCONTINUED(status) {
+            Self::Continued
+        } else {
+            Self::Signaled(libc::WTERMSIG(status))
+        }
+    }
+
+    pub(crate) fn exit_status(self) -> Option<u8> {
+        match self {
+            Self::Exited(code) => Some(code),
+            Self::Signaled(signal) => Some(signal_status(signal)),
+            Self::Stopped(_) | Self::Continued => None,
+        }
+    }
+}
+
+/// Retry interrupted waits while accounting for trapped SIGCHLD.
+pub(crate) fn child_event(pid: libc::pid_t, flags: i32) -> io::Result<Option<ChildEvent>> {
+    let mut status = 0;
+    loop {
+        match waitpid(pid, &mut status, flags) {
+            0 => return Ok(None),
+            -1 => {
+                let err = io::Error::last_os_error();
+                if err.kind() != io::ErrorKind::Interrupted {
+                    return Err(err);
+                }
+            }
+            _ => return Ok(Some(ChildEvent::decode(status))),
+        }
+    }
+}
+
 // Pseudo-traps never enter the OS signal API or the pending signal bitset.
 const DEBUG: i32 = i32::MAX - 2;
 const ERR: i32 = i32::MAX - 1;
