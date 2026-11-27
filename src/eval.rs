@@ -166,7 +166,7 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
     };
     let result = match command {
         Cow::Borrowed(Command::Pipeline(stages)) if stages.len() == 1 => {
-            execute::run_single(stages[0].clone(), status, tail, session)
+            execute::run_single(Cow::Borrowed(&stages[0]), status, tail, session)
                 .unwrap_or_else(execution_error)
         }
         Cow::Borrowed(Command::Subshell(body)) => {
@@ -215,11 +215,11 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
             body,
         }) => run_arithmetic_loop(session, init, condition, step, body, status),
         Cow::Borrowed(Command::Case { header, word, arms }) => {
-            run_case(session, header, word.clone(), arms, status, tail)
+            run_case(session, header, Cow::Borrowed(word), arms, status, tail)
         }
         Cow::Borrowed(Command::Group(body)) => borrowed_program(session, body, status, tail),
         Cow::Borrowed(Command::Arithmetic(expr)) => {
-            crate::arithmetic::command(expr, session, status)
+            crate::arithmetic::command(expr, session, status, true)
         }
         Cow::Borrowed(Command::Test(expr)) => {
             crate::test_expression::evaluate(expr, session, status)
@@ -444,7 +444,7 @@ fn run_arithmetic_loop(
 fn run_case(
     session: &mut Session,
     header: &crate::parser::Location,
-    word: crate::word::Word,
+    word: Cow<'_, crate::word::Word>,
     arms: &[crate::parser::CaseArm],
     status: u8,
     tail: bool,
@@ -461,7 +461,11 @@ fn run_case(
     if session.xtrace {
         execute::trace_line(session, status, |line| line.push_str(header.text()));
     }
-    let value = match expand_case(session, word, status, false) {
+    let value = match word
+        .stored_parameter(session)
+        .map(|s| Ok(s.to_owned()))
+        .unwrap_or_else(|| expand_case(session, word.into_owned(), status, false))
+    {
         Ok(v) => v,
         Err(f) => return f,
     };
@@ -564,7 +568,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             body,
         } => run_for(session, select, &header, &name, words, &body, status),
         Command::Test(expr) => crate::test_expression::evaluate(&expr, session, status),
-        Command::Arithmetic(expr) => crate::arithmetic::command(&expr, session, status),
+        Command::Arithmetic(expr) => crate::arithmetic::command(&expr, session, status, false),
         Command::ForArithmetic {
             init,
             condition,
@@ -607,7 +611,7 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
         Command::Group(body) => execute_program(session, body, status, tail),
         Command::Subshell(body) => crate::subshell::launch_group(session, body, status, false),
         Command::Case { header, word, arms } => {
-            run_case(session, &header, word, &arms, status, tail)
+            run_case(session, &header, Cow::Owned(word), &arms, status, tail)
         }
         Command::Function { name, definition } => {
             if session.posix {

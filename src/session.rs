@@ -28,7 +28,7 @@ pub(crate) const READONLY: &str = "readonly variable";
 pub(crate) const SUBSCRIPT_RANGE: &str = "array subscript out of range";
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::os::unix::ffi::OsStrExt;
@@ -103,12 +103,13 @@ impl Variable {
 // scalar assignments only change membership when allexport is enabled.
 #[derive(Clone, Default)]
 struct Variables {
-    entries: BTreeMap<String, Variable>,
+    entries: HashMap<String, Variable, foldhash::fast::RandomState>,
     environment_names: std::cell::OnceCell<Option<Rc<[String]>>>,
+    prefix_names: std::cell::RefCell<Option<(String, Vec<String>)>>,
 }
 
 impl std::ops::Deref for Variables {
-    type Target = BTreeMap<String, Variable>;
+    type Target = HashMap<String, Variable, foldhash::fast::RandomState>;
     fn deref(&self) -> &Self::Target {
         &self.entries
     }
@@ -117,6 +118,7 @@ impl std::ops::Deref for Variables {
 impl std::ops::DerefMut for Variables {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.environment_names.take();
+        *self.prefix_names.get_mut() = None;
         &mut self.entries
     }
 }
@@ -129,8 +131,40 @@ impl Variables {
         self.entries.get_mut(name)
     }
 
+    fn append_visible<'a>(&'a self, prefix: &str, names: &mut Vec<&'a str>) {
+        if prefix.is_empty() || self.entries.len() < 32 {
+            names.extend(self.entries.iter().filter_map(|(key, var)| {
+                (var.declared && key.starts_with(prefix)).then_some(key.as_str())
+            }));
+            return;
+        }
+        // Typing another character narrows the preceding match set. Keep keys
+        // for just that prefix and check declaration visibility on every query.
+        let mut cache = self.prefix_names.borrow_mut();
+        if cache
+            .as_ref()
+            .is_none_or(|(old, _)| !prefix.starts_with(old.as_str()))
+        {
+            let keys = self
+                .entries
+                .keys()
+                .filter(|key| key.starts_with(prefix))
+                .cloned()
+                .collect();
+            *cache = Some((prefix.to_owned(), keys));
+        }
+        for key in &cache.as_ref().unwrap().1 {
+            if key.starts_with(prefix)
+                && let Some((key, var)) = self.entries.get_key_value(key)
+                && var.declared
+            {
+                names.push(key.as_str());
+            }
+        }
+    }
+
     fn environment_entries(&self) -> impl Iterator<Item = (&String, &Variable)> {
-        // Small or densely exported tables are cheaper to walk in key order.
+        // Small or densely exported tables are cheaper to walk directly.
         const MIN_BINDINGS: usize = 32;
         let selected = if self.entries.len() < MIN_BINDINGS {
             None
@@ -326,7 +360,7 @@ pub struct Session {
 
 #[derive(Clone, Default)]
 pub struct Bindings {
-    variables: BTreeMap<String, Option<Variable>>,
+    variables: HashMap<String, Option<Variable>, foldhash::fast::RandomState>,
     opt_offset: Option<usize>,
     temporary: bool,
     set_options: Option<std::num::NonZeroU32>,
@@ -510,18 +544,7 @@ impl Session {
                 names.push(key);
             }
         }
-        use std::ops::Bound::{Included, Unbounded};
-        for (key, var) in self
-            .variables
-            .range::<str, _>((Included(prefix), Unbounded))
-        {
-            if !key.starts_with(prefix) {
-                break;
-            }
-            if var.declared {
-                names.push(key);
-            }
-        }
+        self.variables.append_visible(prefix, &mut names);
         names.sort_unstable();
         names.dedup();
         names
@@ -1322,7 +1345,21 @@ impl Session {
         if let Some(offset) = bindings.opt_offset {
             self.opt_offset = offset;
         }
-        for (name, original) in bindings.variables {
+        if bindings
+            .variables
+            .keys()
+            .all(|name| Self::ordinary_assignment(name))
+        {
+            for (name, original) in bindings.variables {
+                self.restore_binding(name, original);
+            }
+            return;
+        }
+        // Special bindings can change shell options. Keep their original order,
+        // including when both IGNOREEOF and its lowercase alias leave scope.
+        let mut sorted: Vec<_> = bindings.variables.into_iter().collect();
+        sorted.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        for (name, original) in sorted {
             if name == "BASH_COMPAT" {
                 let inherited;
                 let value = if let Some(v) = &original {
@@ -1370,11 +1407,15 @@ impl Session {
             if name == "PATH" {
                 self.hashes.clear();
             }
-            if let Some(var) = original {
-                self.variables.insert(name, var);
-            } else {
-                self.variables.remove(&name);
-            }
+            self.restore_binding(name, original);
+        }
+    }
+
+    fn restore_binding(&mut self, name: String, original: Option<Variable>) {
+        if let Some(var) = original {
+            self.variables.insert(name, var);
+        } else {
+            self.variables.remove(&name);
         }
     }
 

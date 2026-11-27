@@ -180,7 +180,7 @@ pub enum Command {
         command: Box<Command>,
     },
     Test(Expr),
-    Arithmetic(String),
+    Arithmetic(crate::arithmetic::Expression),
     ForArithmetic {
         init: String,
         condition: String,

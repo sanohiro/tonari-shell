@@ -8,6 +8,17 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == core-engine ]]; then
+  args=()
+  for name in bindings-{0,200,1000}-{copy,sum,locals} bindings-1000-prefix core-{function,indexed,arithmetic,copy-arithmetic,trim,default,printf,case,test,parse-functions} local-eighty redirected-{group,if,loop,case,group-control}; do
+    args+=(--case "$name")
+  done
+  "$ref" --version > "$out/bash-version.txt"
+  python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 21 "${args[@]}" > "$out/scripts.txt"
+  python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing syntax --runs 41 --case syntax-control --case redirected-group --case core-parse-functions > "$out/syntax.txt"
+  python3 tools/bench_completion.py "$bin/baseline" "$current" --bash "$ref" --command-cache --runs 31 > "$out/commands.txt"
+  exit
+fi
 if [[ $SUITE == compound-listings ]]; then
   args=()
   for name in redirected-{group,if,loop,case,group-control} assoc-{values,keys,unquoted,churn} complete-list hash-list dirs-list function-list export-function-list trap-list trap-list-named; do

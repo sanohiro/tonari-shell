@@ -512,9 +512,44 @@ echo "$i"
 }
 
 
-def sample(binary, script, expected, env, started, setup=""):
+# Populate the session before the ready handshake so setup cannot explain scaling.
+for bindings in (0, 200, 1000):
+    for label, body, check, expected, setup, count in (
+        ("copy", "x=$y", 'echo "$x"', "blue", "x=; y=blue", 20000),
+        ("sum", "((c+=i))", 'echo "$c"', "199990000", "c=0", 20000),
+        ("locals", "f 7 8", 'echo "${a-outer}"', "outer",
+         "f() { local a=$1 b=$2 c=3 d=4 e=5 h=1 i0=2 j=3 k=4 m=5; }", 1000),
+    ):
+        CASES[f"bindings-{bindings}-{label}"] = eval_loop(body, check, expected, setup, count)
+
+CASES.update({
+    "bindings-1000-prefix": eval_loop('compgen -A variable bench_var_99 >/dev/null',
+                                     'compgen -A variable bench_var_999', "bench_var_999", count=500),
+    "core-parse-functions": ("".join(f"func{k}() {{\n  if :; then\n    v={k}\n  fi\n}}\n" for k in range(200))
+                             + 'func199; echo "$v"', "199"),
+    "syntax-control": ("echo ok", "ok"),
+    "core-copy-arithmetic": eval_loop('x=$((i+1))', 'echo "$x"', "20000", "x=0", 20000),
+    "core-trim": eval_loop('x=${p##*/}', 'echo "$x"', "name", "p=dir/path/name", 20000),
+    "core-default": eval_loop('x=${y:-fallback}', 'echo "$x"', "fallback", "unset y", 20000),
+    "core-printf": eval_loop('printf -v x %s "$i"', 'echo "$x"', "19999", count=20000),
+    "core-function": eval_loop('f "$i"', 'echo "$x"', "9999", 'f() { x=$1; }', 10000),
+    "core-indexed": eval_loop('((a[i%128]+=1))', 'echo "${a[0]} ${a[127]}"',
+                              "157 156", 'a=()', 20000),
+    "core-arithmetic": eval_loop('((x += (i*3+7)^(i>>1)))', 'echo "$x"',
+                                 str(sum((i*3+7) ^ (i>>1) for i in range(20000))), "x=0", 20000),
+    "core-case": eval_loop('case "$s" in hello_*) ((k++));; esac', 'echo "$k"',
+                           "20000", 's=hello_world; k=0', 20000),
+    "core-test": eval_loop('[[ $s == hello_* ]] || exit 1', 'echo "$i"', "20000",
+                           's=hello_world', 20000),
+})
+
+
+def sample(binary, script, expected, env, started, setup="", syntax=False):
     argv = [binary, "--noprofile", "--norc"]
-    if started:
+    if syntax:
+        argv.extend(["-n", script])
+        expected = b""
+    elif started:
         argv.extend(["-c", setup + 'printf "ready\\n"; IFS= read -r gate && . "$1"', "bench", script])
     elif setup:
         argv.extend(["-c", setup + '. "$1"', "bench", script])
@@ -544,7 +579,7 @@ def main():
     cli.add_argument("--bash", type=Path, default=Path("/bin/bash"))
     cli.add_argument("--previous", type=Path, help="include a previous Tonari build")
     cli.add_argument("--spawn-control", type=Path, help="compiled tools/bench_spawn.c for native process and directory controls")
-    cli.add_argument("--timing", choices=["whole", "started", "both"], default="both")
+    cli.add_argument("--timing", choices=["whole", "started", "both", "syntax"], default="both")
     cli.add_argument("--utf8-locale", default="en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8",
                      help="LC_ALL for Unicode field-splitting and pathname workloads")
     cli.add_argument("--runs", type=int, default=30)
@@ -657,6 +692,9 @@ def main():
             ):
                 participants = [*shells, ("Direct C", args.spawn_control.resolve())]
             case_setup = setup
+            if case.startswith("bindings-"):
+                count = int(case.split("-")[1])
+                case_setup += "".join(f"bench_var_{j}={j}; " for j in range(count))
             if case.startswith("assoc-"):
                 case_setup += 'declare -A m; for ((j=0;j<500;++j)); do m[key$j]=value$j; done; '
             elif case == "complete-list":
@@ -701,10 +739,11 @@ def main():
                 for i in range(5 + args.runs):
                     offset = i % len(participants)
                     for name, binary in participants[offset:] + participants[:offset]:
-                        elapsed = sample(binary, script, (expected + "\n").encode(), case_env, started, case_setup)
+                        elapsed = sample(binary, script, (expected + "\n").encode(), case_env, started, case_setup, args.timing == "syntax")
                         if i >= 5:
                             samples[name].append(elapsed)
-                print(f"{case} ({'already started' if started else 'whole script'})", flush=True)
+                label = "syntax check" if args.timing == "syntax" else "already started" if started else "whole script"
+                print(f"{case} ({label})", flush=True)
                 within_target = report(samples) and within_target
 
     if args.require_target and not within_target:

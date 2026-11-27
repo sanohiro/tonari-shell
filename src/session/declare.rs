@@ -271,7 +271,9 @@ fn print_variables(
     let names;
     let names = if operands.is_empty() {
         names = if let Some(scope) = local_scope {
-            scope.variables.keys().cloned().collect()
+            let mut names: Vec<_> = scope.variables.keys().cloned().collect();
+            names.sort_unstable();
+            names
         } else {
             session.variable_names("")
         };
@@ -456,6 +458,14 @@ impl Session {
             return print_variables(self, command, operands, &flags);
         }
         let mut status = 0;
+        if local
+            && operands.len() >= 8
+            && let Some(scope) = self.locals.last_mut().filter(|s| !s.temporary)
+        {
+            scope
+                .variables
+                .reserve(operands.len().saturating_sub(scope.variables.len()));
+        }
         let first_operand = total_args - operands.len() + 1;
         let mut arrays = arrays.iter().peekable();
         for (index, arg) in operands.iter().enumerate() {
@@ -543,10 +553,33 @@ impl Session {
             let fresh_unbound = fresh_local
                 && name.as_bytes()[0].is_ascii_lowercase()
                 && !self.variables.contains_key(name)
-                && self
-                    .inherited_variable_names()
-                    .binary_search_by(|key| key.as_str().cmp(name))
-                    .is_err();
+                && {
+                    let inherited = self.inherited_variable_names();
+                    inherited.last().is_none_or(|last| last.as_str() < name)
+                        || inherited
+                            .binary_search_by(|key| key.as_str().cmp(name))
+                            .is_err()
+                };
+            if fresh_unbound
+                && local
+                && total_args == operands.len()
+                && array.is_none()
+                && target.is_none()
+                && !append
+                && Self::ordinary_assignment(name)
+                && bindings.variables.is_empty()
+            {
+                // A new plain local has no attributes, inherited value or prior binding to restore.
+                self.locals[scope_index.unwrap()]
+                    .variables
+                    .insert(name.to_owned(), None);
+                self.store_variable(
+                    name,
+                    Variable::scalar(value.map(str::to_owned), self.allexport && value.is_some()),
+                    false,
+                );
+                continue;
+            }
             let mut var = if fresh_unbound {
                 Variable::default()
             } else {

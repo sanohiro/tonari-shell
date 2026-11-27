@@ -54,6 +54,51 @@ class ShellTests(unittest.TestCase):
                 proc = self.command(shell, command + " >&-; exit $?")
                 self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"", b""))
 
+    def test_large_variable_table_visibility_and_environment(self):
+        self.compare("""for ((i=0;i<1000;i++)); do printf -v "p_$i" %s "$i"; done
+q_z=last; q_a=first; q_m=middle; unset q_m; echo "${!q_*}"
+q_b=added; unset q_z; echo "${!q_*}"
+g() { local q_c=local; echo "${!q_*}"; }; g; echo "${!q_c*}"
+export ANSWER=outer
+f() { local ANSWER=inner; /bin/sh -c 'echo "$ANSWER"'; }
+f; /bin/sh -c 'echo "$ANSWER"'; unset ANSWER; /bin/sh -c 'echo "${ANSWER-missing}"'
+""", 0, b"q_a q_z\nq_a q_b\nq_a q_b q_c\n\ninner\nouter\nmissing\n")
+
+    def test_repeated_scalar_assignments_keep_attributes(self):
+        self.compare("""a=ab; b=; declare -u upper=old; declare -i n=0
+f() { for k in one two; do b="$a"; upper=$a; n=$1; done; }
+f 2+3; echo "$b $upper $n"
+declare -n ref=a; ref=$b; a+=$a; echo "$ref"
+set -a; b=$a; /bin/sh -c 'echo "$b"'
+""", 0, b"ab AB 5\nabab\nabab\n", minimum=5)
+
+    def test_repeated_function_arguments_and_plain_locals(self):
+        self.compare("""show() { printf '<%s>' "$@"; echo; }
+f() { local a=first a+=x empty=; show "$a" "$1" "$empty" "${late:=two words}" "$late"; }
+f 'one two'; unset late; f '*'
+n=outside; f2() { local n=inner; export check=$n; /bin/sh -c 'echo "$check"'; }
+f2; echo "$n"
+""", 0, b"<firstx><one two><><two words><two words>\n<firstx><*><><two words><two words>\ninner\noutside\n")
+
+    def test_local_listing_and_special_scope_restore(self):
+        self.compare("""f() { local z=1 a=2 m=3; local -p; }
+f
+PATH=/usr/bin:/bin; GLOBIGNORE='*.bak'; BASH_COMPAT=4.4
+g() { local PATH=/bin GLOBIGNORE='*.tmp' BASH_COMPAT=5.1;
+      printf '%s %s %s\\n' "$PATH" "$GLOBIGNORE" "$BASH_COMPAT"; }
+g; printf '%s %s %s\\n' "$PATH" "$GLOBIGNORE" "$BASH_COMPAT"
+""", 0, b'declare -- a="2"\ndeclare -- m="3"\ndeclare -- z="1"\n/bin *.tmp 5.1\n/usr/bin:/bin *.bak 4.4\n', minimum=5)
+
+    def test_repeated_arithmetic_reads_live_elements(self):
+        self.compare("""a=(2 6); i=0
+f() { ((a[i]+=1)); ((v+=(i*3+7)^(i>>1))); }
+v=0; f; i=1; f; a[1]='3+4'; f; i=-1; f
+echo "${a[@]} / $v"
+( i=0; f; echo "${a[0]}" ); echo "${a[0]}"
+declare -A a2=([other]=3); name=other
+g() { ((a2[$name]+=2)); }; g; g; echo "${a2[other]}"
+""", 0, b"3 9 / 22\n4\n3\n7\n", minimum=4)
+
     def test_inline_compound_terminators(self):
         for header, end in (("{ :", "; }"), ("if :; then", "; fi"),
                             ("for item in x; do", "; done"), ("case x in x)", " ;; esac")):

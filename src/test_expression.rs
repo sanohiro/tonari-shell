@@ -67,6 +67,9 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
         if let Some(text) = word.as_literal() {
             return Ok(std::borrow::Cow::Borrowed(text));
         }
+        if let Some(text) = word.stored_parameter(s) {
+            return Ok(std::borrow::Cow::Owned(text.to_owned()));
+        }
         crate::eval::expand_case(s, word.clone(), status, false).map(std::borrow::Cow::Owned)
     }
     let error = |message: &'static str| {

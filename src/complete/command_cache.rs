@@ -55,8 +55,9 @@ impl Listing {
             if !bytes.starts_with(prefix) {
                 continue;
             }
-            // Each indexed range includes its original dirent terminator.
-            let name = CStr::from_bytes_with_nul(bytes).expect("cached dirent");
+            // SAFETY: push copies the complete CStr including its terminating NUL,
+            // and records that exact range in the append-only byte buffer.
+            let name = unsafe { CStr::from_bytes_with_nul_unchecked(bytes) };
             visit(Some(name), entry.kind)?;
         }
         ControlFlow::Continue(())
@@ -132,10 +133,12 @@ pub(super) fn scan(
             cache.directories.swap_remove(i);
         }
 
+        // Directory sizes are filesystem-specific. Bound this initial capacity hint.
+        let entries = (meta.len() / 32).min(256) as usize;
         let mut listing = Some(Listing {
             heads: [0; 256],
-            bytes: Vec::new(),
-            index: Vec::new(),
+            bytes: Vec::with_capacity(entries * 16),
+            index: Vec::with_capacity(entries),
         });
         let result = directory::scan_checked(path, b"", &mut |raw, kind| {
             if let (Some(name), Some(active)) = (raw, &mut listing)

@@ -71,6 +71,7 @@ impl Reader {
                         continue;
                     }
                     let index = assignment
+                        .map(|len| word.assignment_name(len).to_owned())
                         .filter(|k| k.starts_with('[') && (k.ends_with(']') || k.ends_with("]+")));
                     if let Some(name) = &index {
                         word.remove_assignment_prefix(name.len() + 1);

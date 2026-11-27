@@ -984,6 +984,46 @@ impl Session {
         self.indices(name).last().copied()
     }
 
+    pub(crate) fn indexed_scalar_decimal(&self, name: &str, index: i64) -> Option<i64> {
+        let var = self.variables.get(name)?;
+        if var.dynamic || var.nameref {
+            return None;
+        }
+        match var.elements.as_deref()? {
+            Elements::Dense(values) => {
+                Self::plain_decimal(values.get(usize::try_from(index).ok()?)?)
+            }
+            Elements::Sparse(values) => Self::plain_decimal(values.get(&index)?),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn replace_indexed_decimal(&mut self, name: &str, index: i64, value: i64) -> bool {
+        if index < 0 || Self::builtin_readonly(name) || self.protected_array(name) {
+            return false;
+        }
+        let Some(var) = self.variables.entries.get_mut(name) else {
+            return false;
+        };
+        if var.dynamic || var.readonly || var.nameref {
+            return false;
+        }
+        // Only an existing indexed element changes. Array shape and export membership stay fixed.
+        let Some(elements) = var.elements.as_mut() else {
+            return false;
+        };
+        let slot = match Rc::make_mut(elements) {
+            Elements::Dense(values) => values.get_mut(index as usize),
+            Elements::Sparse(values) => values.get_mut(&index),
+            _ => None,
+        };
+        let Some(slot) = slot else { return false };
+        itoa::Buffer::new().format(value).clone_into(slot);
+        var.array_assigned = true;
+        var.declared = true;
+        true
+    }
+
     pub fn assign_element(&mut self, name: &str, index: i64, value: String) {
         if self.protected_array(name) || self.readonly(name) {
             return;
