@@ -3741,6 +3741,16 @@ printf '%s\n' "$(frame inner)" "$(inc)" "$(echo "$((expr))")" "$(alt)" "$(idx)"
 printf '%s\n' "$i:${missing-unset}:$1"
 """, 0, b"frame:inner\n3\n3\nchild\n0\n3:unset:outer\n", minimum=5)
 
+    def test_capture_reports_prior_diagnostic_once_on_expansion_error(self):
+        for shell in self.shells_for(5):
+            for setup, word in [("", '"$((1/0))"'), ("shopt -s failglob; z='absent*';", "$z")]:
+                with self.subTest(shell=shell, word=word):
+                    proc = self.command(shell, setup + ' v=$(printf "%d" invalid; echo '
+                                        + word + '; echo unreachable); echo "$?:$v"')
+                    self.assertEqual(proc.returncode, 0)
+                    self.assertEqual(proc.stdout, b"1:0\n")
+                    self.assertEqual(sum(b"printf:" in line for line in proc.stderr.splitlines()), 1)
+
     def test_capture_with_child_trap(self):
         self.compare("""n=0; trap '((n++))' CHLD; set -- ok
 v=$(echo "$1"); echo "$v:$n" """, 0, b"ok:1\n", minimum=5)

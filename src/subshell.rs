@@ -756,7 +756,18 @@ fn capture_simple(
             .iter()
             .try_for_each(|arg| env.append_fields(arg.clone(), &mut fields));
         session.signal_line = original;
-        expanded.ok()?;
+        if let Err(error) = expanded {
+            // Earlier commands may already have printed a diagnostic. Finish
+            // the validated list with the ordinary expansion error recovery.
+            error.report("");
+            match error.flow(session) {
+                Flow::Continue(status) => {
+                    code = status;
+                    continue;
+                }
+                flow => return Some(captured_output(output, flow.child_status())),
+            }
+        }
         if !cmd.redirects.is_empty() {
             let device = crate::execute::open_null_device(libc::O_WRONLY)?;
             // A real substitution needs two free descriptors for its capture pipe.
