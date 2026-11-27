@@ -162,6 +162,18 @@ fn set_disposition(sig: i32, new: &libc::sigaction) -> io::Result<()> {
     Ok(())
 }
 
+pub(crate) fn listen_for_interrupts() -> io::Result<()> {
+    // Interrupt terminal reads. Foreground executables receive the default
+    // disposition on exec, unless the shell originally inherited SIG_IGN.
+    let handler = action(crate::interrupt as *const () as usize);
+    for sig in [libc::SIGINT, libc::SIGQUIT, libc::SIGTERM] {
+        if disposition(sig)?.sa_sigaction != libc::SIG_IGN {
+            set_disposition(sig, &handler)?;
+        }
+    }
+    Ok(())
+}
+
 // Stable Rust overrides SIGPIPE before main. Save the disposition inherited at
 // exec for developer builds. Distribution builds ask rustc to inherit it.
 #[cfg(not(tonari_inherit_sigpipe))]
@@ -174,11 +186,8 @@ mod entry_pipe {
     #[cfg_attr(target_os = "macos", unsafe(link_section = "__DATA,__mod_init_func"))]
     static SAVE: extern "C" fn() = {
         extern "C" fn save() {
-            let mut old = std::mem::MaybeUninit::uninit();
-            unsafe {
-                if libc::sigaction(libc::SIGPIPE, std::ptr::null(), old.as_mut_ptr()) == 0 {
-                    IGNORED.store(old.assume_init().sa_sigaction == libc::SIG_IGN, Relaxed);
-                }
+            if let Ok(old) = super::disposition(libc::SIGPIPE) {
+                IGNORED.store(old.sa_sigaction == libc::SIG_IGN, Relaxed);
             }
         }
         save

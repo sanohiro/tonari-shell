@@ -61,27 +61,6 @@ extern "C" fn interrupt(signal: libc::c_int) {
     }
 }
 
-fn listen_for_interrupts() -> io::Result<()> {
-    // A caught signal interrupts the terminal read and resets to its default
-    // disposition on exec, so foreground programs still receive Ctrl-C.
-    let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
-    action.sa_sigaction = interrupt as *const () as usize;
-    unsafe { libc::sigemptyset(&mut action.sa_mask) };
-    for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGTERM] {
-        let mut old = std::mem::MaybeUninit::uninit();
-        if unsafe { libc::sigaction(signal, std::ptr::null(), old.as_mut_ptr()) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        if unsafe { old.assume_init().sa_sigaction } == libc::SIG_IGN {
-            continue;
-        }
-        if unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
-    }
-    Ok(())
-}
-
 // A foreground interrupt may arrive after the prompt is drawn but before read(2).
 // pselect atomically restores the signal mask while waiting for input.
 thread_local! {
@@ -315,7 +294,7 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
             session.assign("HISTFILE", &format!("{home}/{file}"));
         }
     }
-    if session.interactive && listen_for_interrupts().is_err() {
+    if session.interactive && traps::listen_for_interrupts().is_err() {
         return 1;
     }
     let initial = match startup::initialize(&mut session, &invocation) {

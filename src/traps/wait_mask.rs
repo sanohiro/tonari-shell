@@ -7,13 +7,11 @@ pub(crate) struct SignalMask(pub(crate) libc::sigset_t);
 
 impl SignalMask {
     pub(crate) fn block(set: &libc::sigset_t) -> io::Result<Self> {
-        let mut previous = std::mem::MaybeUninit::uninit();
-        unsafe {
-            if libc::sigprocmask(libc::SIG_BLOCK, set, previous.as_mut_ptr()) < 0 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(Self(previous.assume_init()))
+        let mut previous = unsafe { std::mem::zeroed() };
+        if unsafe { libc::sigprocmask(libc::SIG_BLOCK, set, &mut previous) } < 0 {
+            return Err(io::Error::last_os_error());
         }
+        Ok(Self(previous))
     }
 }
 
@@ -65,28 +63,18 @@ impl WaitMask {
     }
 
     pub(crate) fn for_children(running: u64) -> io::Result<Self> {
-        unsafe {
-            let mut mask = std::mem::zeroed();
-            libc::sigfillset(&mut mask);
-            let previous = SignalMask::block(&mask)?;
-            let mut child = std::mem::zeroed();
-            let res = libc::sigaction(libc::SIGCHLD, std::ptr::null(), &mut child);
-            if res < 0
-                || (child.sa_sigaction == libc::SIG_DFL || child.sa_sigaction == libc::SIG_IGN)
-                    && libc::sigaction(
-                        libc::SIGCHLD,
-                        &action(wake as *const () as usize),
-                        std::ptr::null_mut(),
-                    ) < 0
-            {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(Self {
-                previous,
-                child,
-                running,
-            })
+        let mut mask = unsafe { std::mem::zeroed() };
+        unsafe { libc::sigfillset(&mut mask) };
+        let previous = SignalMask::block(&mask)?;
+        let child = disposition(libc::SIGCHLD)?;
+        if matches!(child.sa_sigaction, libc::SIG_DFL | libc::SIG_IGN) {
+            set_disposition(libc::SIGCHLD, &action(wake as *const () as usize))?;
         }
+        Ok(Self {
+            previous,
+            child,
+            running,
+        })
     }
 
     pub fn interrupt_status(&self) -> Option<u8> {
@@ -139,8 +127,6 @@ impl WaitMask {
 
 impl Drop for WaitMask {
     fn drop(&mut self) {
-        unsafe {
-            libc::sigaction(libc::SIGCHLD, &self.child, std::ptr::null_mut());
-        }
+        let _ = set_disposition(libc::SIGCHLD, &self.child);
     }
 }
