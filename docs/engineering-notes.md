@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## November 27 · Passing arguments to external programs / 外部コマンドの引数
+
+External commands used to allocate a C string for every argument. Keep the program and an optional `exec -a` name separately and pack subsequent strings, including empty arguments, into one buffer. Construct pointers after the buffer is complete. Executable text files without shebangs re-enter Tonari with the same boundaries.
+
+4,098引数を12回渡し、最後の出力をバイト単位で照合する。Linux 実機では改善し、M1 の経過時間は同水準だった。M1 の別計測では 4,096 引数の `/usr/bin/true` の親側サンプル1,030件中810件がカーネルの `__posix_spawn` 内にあった。 [Measurements / 計測](benchmarks.md#packed-argv)
+
 ## November 27 · Readline sequence starts and editing / 入力とキーバインド
 
 The editor only asks whether a byte starts a custom binding while it collects a burst of committed text. Keep that answer with the copy-on-write binding table, using 32 bytes per configured keymap. Removed bindings still mask defaults. The full sequence lookup handles exact bindings and longer matches. Normal editing and completion previews share the rules for ordinary bytes and for overwriting UTF-8 text. The shell keeps the first unconsumed control key for the foreground reader.
