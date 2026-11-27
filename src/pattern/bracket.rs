@@ -29,6 +29,20 @@ pub(super) fn class_end(body: &[u8]) -> Option<usize> {
     None
 }
 
+// Directory enumeration amortizes compilation across all entries.
+pub(super) fn simple_list(pattern: &str) -> bool {
+    let Some((prefix, rest)) = pattern.split_once('[') else {
+        return false;
+    };
+    let Some((members, suffix)) = rest.split_once(']') else {
+        return false;
+    };
+    !members.is_empty()
+        && members.bytes().all(|b| b.is_ascii_alphanumeric())
+        && !prefix.contains('\\')
+        && !suffix.contains(['[', '\\'])
+}
+
 pub(super) fn needs_parser(source: &[u8]) -> bool {
     let mut i = 0;
     while i < source.len() {

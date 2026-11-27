@@ -219,13 +219,29 @@ pub(super) fn print_variable_value(out: &mut dyn Write, var: &Variable) -> io::R
     } else if let Some(array) = &var.elements {
         if var.array_assigned {
             write!(out, "=(")?;
+            const CHUNK_SIZE: usize = 4096;
+            let mut chunk = Vec::new();
+            let mut decimal = itoa::Buffer::new();
             for (position, (index, value)) in array.iter().enumerate() {
                 if position > 0 {
-                    write!(out, " ")?;
+                    chunk.push(b' ');
                 }
-                write!(out, "[{index}]=")?;
-                print_value(out, value)?;
+                chunk.push(b'[');
+                chunk.extend_from_slice(decimal.format(index).as_bytes());
+                chunk.extend_from_slice(b"]=");
+                if value.len() >= CHUNK_SIZE {
+                    out.write_all(&chunk)?;
+                    chunk.clear();
+                    print_value(out, value)?;
+                } else {
+                    print_value(&mut chunk, value)?;
+                    if chunk.len() >= CHUNK_SIZE {
+                        out.write_all(&chunk)?;
+                        chunk.clear();
+                    }
+                }
             }
+            out.write_all(&chunk)?;
             write!(out, ")")?;
         }
     } else if let Some(value) = &var.value {
@@ -235,7 +251,7 @@ pub(super) fn print_variable_value(out: &mut dyn Write, var: &Variable) -> io::R
     writeln!(out)
 }
 
-pub(super) fn print_value(out: &mut dyn Write, value: &str) -> io::Result<()> {
+pub(super) fn print_value(out: &mut (impl Write + ?Sized), value: &str) -> io::Result<()> {
     if value.bytes().any(|c| c.is_ascii_control()) {
         return out.write_all(&crate::word::quote::ansi_quote(value.as_bytes(), false));
     }

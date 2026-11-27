@@ -8,6 +8,16 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == listings-expansion ]]; then
+  args=()
+  for name in shopt-list export-list declare-indexed-list brace-product local-ten local-eighty glob-bracket-list scalar-bracket-list type-list; do
+    args+=(--case "$name")
+  done
+  "$ref" --version > "$out/bash-version.txt"
+  python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 31 "${args[@]}" > "$out/scripts.txt"
+  REFERENCE_BASH="$ref" python3 tests/shell.py "$current" ShellTests.test_listing_diagnostic_order ShellTests.test_closed_builtin_stdout_reports_only_attempted_writes ShellTests.test_literal_brace_products ShellTests.test_indexed_listing_round_trip > "$out/behavior.txt" 2>&1
+  exit
+fi
 if [[ $SUITE == priority-review ]]; then
   python3 tools/bench_completion.py "$bin/baseline" "$current" --bash "$ref" --command-cache --runs 41 > "$out/commands.txt"
   python3 tools/bench_history_fields.py "$bin/baseline" "$current" --entries 100000 --runs 31 > "$out/history.txt"

@@ -492,7 +492,7 @@ impl Session {
             return 1;
         }
         let mut status = 0;
-        let mut out = None;
+        let mut out: Option<std::io::BufWriter<_>> = None;
         let all = names.is_empty();
         let known = if set { SET_OPTIONS } else { SHOPT_OPTIONS };
         let requested = names.iter().map(|name| {
@@ -506,6 +506,9 @@ impl Session {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(name) => {
+                    if out.as_mut().is_some_and(|w| w.flush().is_err()) {
+                        return 1;
+                    }
                     diagnostic!("shopt: {name}: unsupported option");
                     status = 1;
                     continue;
@@ -552,7 +555,7 @@ impl Session {
             if quiet || (enable && !value) || (disable && value) {
                 continue;
             }
-            let writer = out.get_or_insert_with(|| crate::builtins::stdout_for("shopt"));
+            let writer = out.get_or_insert_with(|| crate::builtins::listing_stdout("shopt"));
             let result = if reusable && !set {
                 writeln!(writer, "shopt -{} {name}", if value { 's' } else { 'u' })
             } else {

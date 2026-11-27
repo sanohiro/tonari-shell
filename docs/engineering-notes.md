@@ -1,5 +1,15 @@
 # Engineering notes / 開発知見
 
+## November 27 · Buffered listings, brace products, local bindings and bracket globs / 組み込み一覧・ブレース展開・ローカル変数・glob
+
+On `0bf6aa0`, a checked 8 KiB output buffer substantially reduced writes from `shopt -p` and `export -p`. Flush pending stdout before an operand diagnostic as well as at the end. With `x=ok; declare -p x missing x 2>&1`, both reference shells print a declaration on each side of the diagnostic. Flushing only at the end moved the diagnostic to the front. For indexed arrays, formatting several elements into a reusable chunk also reduced CPU time. The array elements in a saved variable are already reference-counted.
+
+A two-range brace product with literal fragments can prepare inner spellings once and allocate each final word once. A fast path must preserve evaluation order, quoted fragments, pathname expansion and both expansion limits when falling back. Existing tests deliberately preserve a backslash produced by a mixed-case letter range. Local declarations can reuse the result of a failed binding lookup. When a fresh local has already been assigned a scope, only older scopes can hold an outer local of that name. A temporary scope created by a prefixed `eval` still requires name-dependent resolution. Ten and eighty locals per call gave different results against GNU Bash.
+
+A directory expansion reuses a compiled pattern for hundreds of names. A scalar `[[ $v == file_0[56]*.txt ]]` can construct a matcher for one value each time. Restricting the simple ASCII bracket-list change to pathname expansion preserved scalar performance. The timing and write counts are from experimental M1 builds. [Native measurements and controls](benchmarks.md#remaining-audit-review)
+
+一覧表示は末尾に加え、無効な引数の診断を出す直前にもバッファを書き出すと、`2>&1` の出力順と書き込み失敗時の終了値を保てる。数値添字の配列は整形した要素をまとめて書くとさらに速くなる。リテラルと二つの範囲から成るブレース展開では内側の表記を再利用できる。ローカル変数は既存の探索結果を再利用できるが、一時スコープの名前解決は変数ごとに決まる。単純な角括弧パターンのコンパイルは、同じパターンで多数のファイル名を照合する場合に効果があった。`[[ … ]]` まで同時に切り替えると遅くなった。 [計測条件と結果](benchmarks.md#remaining-audit-review)
+
 ## November 27 · Shipping the command cache and builtin writer / 補完キャッシュと書き込みエラー
 
 Store command names from successful PATH directory reads in a bounded byte buffer with offsets grouped by first byte. A cold query can still stop early or echo queued input. Cache only complete listings and keep explicit candidate listings in their original order. Match permissions, symlink targets and `EXECIGNORE` against the live candidate. On this Mac a full sort per directory cost more on the first Tab than first-byte buckets. The history picker can skip cached ASCII-only blocks after it has found a record boundary when any required search fragment contains Unicode. [Native PTY results](benchmarks.md#priority-implementation)

@@ -42,14 +42,57 @@ class ShellTests(unittest.TestCase):
         shells = (TONARI,) if self.bash_before_53() else (BASH, TONARI)
         for shell in shells:
             for command in ("printf %s hi", "printf '%05d' 7", "pwd", "umask -p",
-                            "hash", "alias a=text; alias", "dirs", "times", "x=1; declare -p x", "export -p", "type -t pwd"):
+                            "hash", "alias a=text; alias", "dirs", "times", "x=1; declare -p x",
+                            "export -p", "type -t pwd", "shopt -p", "f(){ :; }; declare -f f",
+                            "hash -p /bin/ls mark; hash -t mark", "complete -W yes mark; complete -p mark"):
                 with self.subTest(shell=shell, command=command):
                     proc = self.command(shell, command + " >&-; exit $?")
                     self.assertEqual((proc.returncode, proc.stdout), (1, b""))
                     self.assertEqual(len(proc.stderr.splitlines()), 1, proc.stderr)
-            for command in ("alias", "printf %s ''", "printf -v value %s hi", "umask 022"):
+            for command in ("alias", "printf %s ''", "printf -v value %s hi", "umask 022",
+                            "shopt -q promptvars", "complete -W yes mark"):
                 proc = self.command(shell, command + " >&-; exit $?")
                 self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"", b""))
+
+    def test_listing_diagnostic_order(self):
+        cases = [
+            ("shopt -p nullglob __absent dotglob", b"shopt -u nullglob", b"shopt -u dotglob", 1),
+            ("x=ok; declare -p x __absent x", b'declare -- x="ok"', b'declare -- x="ok"', 1),
+            ("hash -p /bin/ls mark; hash -t mark __absent mark", b"mark\t/bin/ls", b"mark\t/bin/ls", 1),
+            ("complete -W yes mark; complete -p mark __absent mark", b"complete -W 'yes' mark",
+             b"complete -W 'yes' mark", 1),
+            ("alias mark=yes; alias mark __absent mark", b"alias mark='yes'", b"alias mark='yes'", 1),
+            ("type printf __absent pwd", b"printf is a shell builtin", b"pwd is a shell builtin", 1),
+            ("command -V printf __absent pwd", b"printf is a shell builtin", b"pwd is a shell builtin", 0),
+        ]
+        for shell in (BASH, TONARI):
+            for script, first, last, status in cases:
+                with self.subTest(shell=shell, command=script):
+                    proc = self.command(shell, "{ " + script + "; } 2>&1")
+                    lines = proc.stdout.splitlines()
+                    self.assertEqual((len(lines), proc.stderr), (3, b""))
+                    self.assertEqual((lines[0], lines[2]), (first, last))
+                    self.assertIn(b"__absent", lines[1])
+                    if shell == BASH and script.startswith("type ") and self.command(BASH, 'echo "${BASH_VERSINFO[0]}"').stdout.strip() == b"3":
+                        status = 0
+                    self.assertEqual(proc.returncode, status)
+            # declare -f skips a missing function silently but returns failure.
+            proc = self.command(shell, "f(){ :; }; declare -f f __absent f 2>&1")
+            self.assertEqual((proc.returncode, proc.stdout.count(b"f ()"), proc.stderr), (1, 2, b""))
+            self.assertNotIn(b"__absent", proc.stdout)
+
+    def test_literal_brace_products(self):
+        source = r"""IFS=_; printf '<%s>\n' head p_{-02..02..2}_{c..a..2} {9..11}{0..1} end
+n=0; printf '[%s]' {1..2}$((++n)){1..2}; echo "/$n" """
+        self.compare(source, 0,
+                     b"<head>\n<p_-02_c>\n<p_-02_a>\n<p_000_c>\n<p_000_a>\n<p_002_c>\n<p_002_a>\n"
+                     b"<90>\n<91>\n<100>\n<101>\n<110>\n<111>\n<end>\n[111][122][231][242]/4\n", minimum=4)
+
+    def test_indexed_listing_round_trip(self):
+        source = r"""a=(); a[7]=''; a[9]=$'q"\n雪'; printf -v pad '%06000d' 0; a[2000]="$pad"
+line=$(declare -p a); unset a; eval "$line"
+printf '%s/%s/%s/%s' "${!a[*]}" "${a[7]}" "${a[9]}" "${#a[2000]}" """
+        self.compare(source, 0, '7 9 2000//q"\n雪/6000'.encode())
 
     @unittest.skipUnless(sys.platform == "darwin", "Darwin file ACLs")
     def test_path_lookup_skips_acl_only_executable(self):

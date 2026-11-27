@@ -285,6 +285,10 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
             }
         }
         if !found && format == Format::Verbose {
+            if crate::builtins::write_stdout_for(&cmd.words[0], &out) != 0 {
+                return 1;
+            }
+            out.clear();
             diagnostic!("{}: {name}: not found", cmd.words[0]);
         }
         any |= found;

@@ -38,6 +38,16 @@ def assoc_names(count):
 
 
 CASES = {
+    "shopt-list": eval_loop("shopt -p >/dev/null || exit 1", "echo ok", "ok", count=200),
+    "export-list": eval_loop("export -p >/dev/null || exit 1", 'echo "$V49"', "value49", count=200),
+    "declare-indexed-list": eval_loop("declare -p a >/dev/null || exit 1", 'echo "${a[999]}"', "999", count=50),
+    "brace-product": eval_loop("set -- p_{a..z}_{0..99}", 'echo "$# $1 ${2600}"', "2600 p_a_0 p_z_99", count=20),
+    "local-ten": eval_loop("f 7 8", 'echo "${a-outer}"', "outer", count=1000),
+    "local-eighty": eval_loop("f", 'echo "${x79-outer}"', "outer", count=150),
+    "glob-bracket-list": eval_loop("set -- file_0[56]*.txt", 'echo "$# $1 ${200}"',
+                                   "200 file_0500.txt file_0699.txt", count=50),
+    "scalar-bracket-list": eval_loop("[[ $v == file_0[56]*.txt ]] || exit 1", "echo ok", "ok", count=4000),
+    "type-list": eval_loop("type -t printf pwd >/dev/null || exit 1", "echo ok", "ok", count=400),
     "uncached-path-spawn": eval_loop("cat /dev/null || exit 1", "echo done", "done", "set +h", count=32),
     "current-shell-file-capture": eval_loop('value=${ printf "%s" "$i"; }', 'echo "$value"', "127", count=128),
     "history-long-event-word": (
@@ -531,6 +541,11 @@ def main():
         home = Path(temp)
         env = {"HOME": temp, "PATH": "/usr/bin:/bin", "LC_ALL": "C"}
         (home / "rows").write_text("".join(f"record {i}\n" for i in range(2000)))
+        if not args.case or "glob-bracket-list" in args.case:
+            directory = home / "brackets"
+            directory.mkdir()
+            for i in range(1000):
+                (directory / f"file_{i:04}.txt").touch()
         if not args.case or any(case.startswith("glob-extension-") for case in args.case):
             directory = home / "extensions"
             directory.mkdir()
@@ -616,6 +631,19 @@ def main():
             ):
                 participants = [*shells, ("Direct C", args.spawn_control.resolve())]
             case_setup = setup
+            if case == "export-list":
+                case_setup += 'for ((j=0;j<50;++j)); do export "V$j=value$j"; done; '
+            elif case == "declare-indexed-list":
+                case_setup += "a=({0..999}); "
+            elif case == "local-ten":
+                case_setup += "f() { local a=$1 b=$2 c=3 d=4 e=5 h=1 i0=2 j=3 k=4 m=5; }; "
+            elif case == "local-eighty":
+                names = " ".join(f"x{j}={j}" for j in range(80))
+                case_setup += f"f() {{ local {names}; }}; "
+            elif case == "glob-bracket-list":
+                case_setup += 'cd "$HOME/brackets" || exit 1; '
+            elif case == "scalar-bracket-list":
+                case_setup += "v=file_0533.txt; "
             if case == "external-many-locals":
                 case_setup += ('for ((i=0; i<8192; i++)); do printf -v "bench_local_$i" %d "$i"; done; '
                                'export BENCH_EXPORT=visible; ')

@@ -1,5 +1,37 @@
 # Startup and execution / 起動と実行性能
 
+<a id="remaining-audit-review"></a>
+
+## November 27 · Four proposals after PR #44 / PR #44 後の四案の追試
+
+Apple M1, macOS 27.2.1, native distribution builds based on `0bf6aa0`, Apple Bash 3.2.57 and GNU Bash 5.3.20 arm64. Each fresh shell used `--noprofile --norc`, a temporary HOME, `PATH=/usr/bin:/bin` and `LC_ALL=C`. It ran setup, wrote a readiness line and waited for a newline on stdin. The parent timed from releasing the shell to its exit, checking stdout, stderr and final status. The figures are median milliseconds after two warm-ups, with shell order shuffled each round. Use the separate single-call output checks for builtin statuses. These are reconstructed workloads for four proposals in the external audit, run on M1 only. Each trial was built outside the repository.
+
+| Workload | Repetitions per shell | Main | Trial | Apple Bash | GNU Bash |
+|---|---:|---:|---:|---:|---:|
+| `shopt -p`, all options | 200 | 14.957 | 3.254 | 11.118 | 16.514 |
+| `shopt -p`, 12 common names | 200 | 5.344 | 2.892 | 6.746 | 6.637 |
+| `export -p`, 50 added exports | 200 | 17.690 | 5.115 | 18.953 | 20.027 |
+| `declare -p a`, 200 indexed elements | 200 | 6.297 | 3.322 | 5.813 | 5.910 |
+| `declare -p a`, 1,000 indexed elements | 50 | 5.611 | 1.813 | 4.044 | 4.209 |
+| `declare -p a`, one element | 400 | 5.144 | 5.101 | 6.821 | 6.670 |
+| `set -- p_{a..z}_{0..99}` | 20 | 10.354 | 1.746 | 15.092 | 13.372 |
+| Ten local assignments including two arguments | 1,000 | 5.793 | 5.159 | 7.920 | 7.870 |
+| Eighty local assignments | 150 | 8.761 | 7.039 | 6.410 | 6.487 |
+| `set -- file_0[56]*.txt`, pathname-only trial | 50 | 23.513 | 20.343 | 23.647 | see below |
+| `set -- file_0[5-6]*.txt`, existing range matcher | 50 | 20.631 | 20.583 | 23.513 | — |
+| `[[ $v == file_0[56]*.txt ]]`, pathname-only trial | 4,000 | 3.351 | 3.318 | 9.523 | — |
+
+The table uses 21 samples per cell. The builtin and local rows use the refined listing/lookup trial. The brace row uses the initial two-range trial. In the final pathname-only build, an independent 11-sample brace run gave 10.366 / 1.712 / 13.387 ms for main / trial / GNU Bash. The main and experimental Tonari release executables were all 1,765,104 bytes. The final trial linked only libSystem. For the bracket pathname workload a separate five-sample run gave 23.471 / 20.109 / 3,428.476 ms with the local GNU Bash 5.3.20 build. A single expansion also took about 69 ms in that build. The Apple Bash control gives the more competitive comparison on this host. The cause of the GNU timing was not profiled.
+
+- **Listings.** Set up arrays once with `a=({0..999})` or `a=({0..199})`. Add exported names with `for ((j=0;j<50;++j)); do export "V$j=value$j"; done`. Redirect each listing to `/dev/null` inside an arithmetic loop. For the equal-length control, request `cdspell checkwinsize dotglob expand_aliases extglob histappend hostcomplete huponexit lithist nocaseglob nullglob promptvars`. All three released shells print 233 bytes and return 1 for this control. The unrestricted listing emits 56 / 34 / 59 lines on main / Apple / GNU. In separate instrumented builds, count each nonempty call to `StdoutFd::write` before its `libc::write`. Main/trial writes per command were 56/1 (all options), 12/1 (common options), 56/1 (exports) and 12/2 (1,000 elements). Each pair produced the same byte count. Buffering alone took 3.843 ms for the large array. Formatting indexed elements in chunks brought that to 1.813 ms. For `export -p`, buffering alone took 5.574 ms and borrowing shell binding names and skipping their unused value copies took 5.115 ms.
+- **Brace expansion.** Check all generated words against GNU Bash in both the C and UTF-8 locales. The timed product ends with `p_z_99` at position 2,600. The restricted trial accepts ordinary literal fragments and two numeric or same-case letter ranges, caches the inner range and checks a conservative bound on the output. The generic path retains substitutions, wildcard interpretation, and the documented mixed-case backslash behavior. The bare `{1..2600}` control took 1.685 / 1.663 ms on main / initial trial.
+- **Local bindings.** Call `f 7 8` in a loop. Its body for ten names is `local a=$1 b=$2 c=3 d=4 e=5 h=1 i0=2 j=3 k=4 m=5`; the larger body is one declaration assigning `x0=0` through `x79=79`. Reusing the failed lookup alone took 5.468 / 7.850 ms at ten / eighty names. Skipping the current and newer scopes during the outer-shadow check gave the table results. At eighty names the trial still took 8.5% longer than GNU Bash. No change to saved-binding data structures was measured.
+- **Bracket glob.** Create an APFS directory with `file_0000.txt` through `file_0999.txt`. Both bracket spellings select the same 200 names from `file_0500.txt` through `file_0699.txt`. With `v=file_0533.txt`, routing all bracket matches through the compiled matcher slowed scalar matching from 3.419 to 4.066 ms. Compiling only simple ASCII member lists during directory expansion produced the final rows. For the pathname row, the middle 50% was 23.149–23.671 ms on main and 20.250–20.602 ms in the trial. These elapsed times include directory reads, matching and assembling the ordered output.
+
+Sixteen existing end-to-end tests passed on the final trial, covering closed output, brace limits and effects, prefixed `eval`, local inheritance, quoting and globbing. Additional checks used C and `en_US.UTF-8`, including sparse array values containing quotes and newlines, export masking and declaration/diagnostic ordering. Apple Bash returned 0 on the three tested closed-output listings. Main, the trial and GNU Bash returned 1 and issued one diagnostic. A backslash generated by a mixed-case brace range remained literal in both Tonari builds. [Existing compatibility decision](compatibility/external-shell/shared-failures.md)
+
+M1実機で起動・配列作成・関数定義を計測の外に置き、シェル内で繰り返す時間を比較した。出力のある組み込みでは表示内容と書き込み回数も別に確認した。角括弧の2種類は同じ200件を返す。ローカル変数80個は試作後もGNU Bashを超えて時間が掛かる。この追試の対象は4案で、43ケース全体の再測定やLinuxの測定は含まない。
+
 <a id="priority-implementation"></a>
 
 ## November 27 · Repeated command completion and filtered history / 補完キャッシュと履歴の絞り込み
