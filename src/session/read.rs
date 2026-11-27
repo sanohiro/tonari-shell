@@ -207,7 +207,9 @@ impl Input {
         remaining: Option<Duration>,
         watch: bool,
     ) -> Result<bool, Flow> {
-        if watch && session.traps.read_pending() {
+        // A pipe cannot return bytes already fetched for this read. Consume
+        // that prefix before giving a trap access to the underlying fd.
+        if watch && (self.seekable || self.position == self.end) && session.traps.read_pending() {
             let fd = self.fd;
             self.rewind();
             let flow = crate::traps::dispatch(session, last);
@@ -228,6 +230,14 @@ impl Input {
         }
         if self.position != self.end || remaining.is_none() && self.seekable {
             return Ok(true);
+        }
+        if watch && remaining.is_none() && !self.seekable {
+            // Data already queued requires no signal-mask change or blocking wait.
+            // Check the live byte count; other readers can share this descriptor.
+            let mut queued: libc::c_int = 0;
+            if unsafe { libc::ioctl(self.fd, libc::FIONREAD, &mut queued) } == 0 && queued > 0 {
+                return Ok(true);
+            }
         }
         match ready(self.fd, remaining, watch.then_some(&*session)) {
             Ok(true) => Ok(true),

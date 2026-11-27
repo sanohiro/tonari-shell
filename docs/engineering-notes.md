@@ -1,5 +1,13 @@
 # Engineering notes / 開発知見
 
+## November 27 · Signals during pipe input / パイプ入力中のシグナル
+
+A trap could discard bytes that `read -N` had already removed from a pipe. A 131,072-byte read returned only 125,138 bytes in one reproduction. Consume the buffered prefix before giving the trap access to the descriptor. The regression sends repeated signals during a 512 KiB transfer and compares every output byte.
+
+`mapfile` with an active trap can check the current queued byte count before entering a signal-masked wait. The empty-pipe path still waits atomically, and timed reads keep their deadline. On an Apple M1, 4,096 short records took 21.05 ms before the change and 12.51 ms with the live check (Bash 5.3.20 took 9.00 ms, 21 interleaved medians). A 2.93 ms batch-read trial also consumed valid input after a malformed record. Caching a previous byte count reached 8.78 ms, but a second reader can drain a shared pipe before the next read. The implementation checks the live descriptor.
+
+パイプから既に取得した入力はトラップを実行する前に処理する。期限のある `read` は従来どおり残り時間を使う。コールバックによる追加の読み取り、行数の上限、不正な UTF-8 の直後に続く正常な行は、次の読み手が受け取ったバイト列まで検証した。実機で再計測するには `tools/bench_scripts.py` の `mapfile-trapped-pipe` を指定する。
+
 ## November 27 · Validating benchmark output / 測定用プログラムの出力
 
 Clang's analyzer found a possible null log path in the configure clock. Reproduction showed that the child had already run when the helper discovered the unusable log. Validate the destination before spawning, make it close-on-exec and propagate logging errors. The Oils argv and environment controls also need to flush stdout before checking stream errors; a read-only output descriptor previously returned success in both programs. A failed Homebrew prefix query now exits the external suite during setup.
