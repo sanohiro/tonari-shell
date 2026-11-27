@@ -13,10 +13,10 @@ import time
 from bench_history import PROMPT, read_until, terminal
 
 
-def timed_keys(fd, keys, marker):
+def timed_keys(fd, keys, marker, initial=b""):
     start = time.perf_counter_ns()
     os.write(fd, keys)
-    read_until(fd, marker)
+    read_until(fd, marker, initial=initial)
     return (time.perf_counter_ns() - start) / 1e6
 
 
@@ -125,16 +125,16 @@ def typing(shell, home, bindir, metrics):
         for case, word in [("recent hint", "printf entry-"), ("no hint", "zebra42雪abc")]:
             os.write(fd, b"\x15")
             read_until(fd, b"\r\x1b[J" + PROMPT)
-            line = bytearray(PROMPT)
+            line = PROMPT
             for char in word:
                 key = char.encode()
-                line.extend(key)
-                metrics[case].append(timed_keys(fd, key, line))
+                metrics[case].append(timed_keys(fd, key, line + key, initial=line))
+                line += key
         os.write(fd, b"\x15")
         read_until(fd, b"\r\x1b[J" + PROMPT)
         start = time.perf_counter_ns()
         os.write(fd, b"q")
-        output = read_until(fd, PROMPT + b"q")
+        output = read_until(fd, PROMPT + b"q", initial=PROMPT)
         metrics["oldest hint: typed key"].append((time.perf_counter_ns() - start) / 1e6)
         hint = b"\x1b[2muartz oldest"
         if hint not in output:
@@ -274,7 +274,7 @@ def main():
                             ("empty option value", b"run --model ", b"run --model mistral-large "),
                         ]:
                             os.write(fd, line)
-                            read_until(fd, PROMPT + line)
+                            read_until(fd, PROMPT + line, initial=PROMPT)
                             metrics[label].append(timed_keys(fd, b"\t", PROMPT + result))
                             os.write(fd, b"\x15")
                             read_until(fd, b"\r\x1b[J" + PROMPT)

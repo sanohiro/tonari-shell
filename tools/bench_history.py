@@ -18,6 +18,7 @@ NEW_PROMPT = b"\x1b[?2004h\r\x1b[J" + PROMPT
 
 
 def read_until(fd, marker, initial=b""):
+    # Include the already visible prefix when an edit may append or redraw.
     output = bytearray(initial)
     deadline = time.monotonic() + 10
     while marker not in output:
@@ -68,7 +69,7 @@ def sample(shell, home, bindir, action, count):
             if action == "Escaped hint":
                 start = time.perf_counter_ns()
                 os.write(fd, prefix)
-                output = read_until(fd, PROMPT + prefix)
+                output = read_until(fd, PROMPT + prefix, initial=PROMPT)
                 echo = time.perf_counter_ns()
                 read_until(fd, b"\x1b[2m-END\x1b[0m", initial=output)
                 return [(echo - start) / 1e6, (time.perf_counter_ns() - start) / 1e6]
@@ -109,10 +110,10 @@ def sample(shell, home, bindir, action, count):
         first = b"z" if tab else b":"
         start = time.perf_counter_ns()
         os.write(fd, first)
-        read_until(fd, PROMPT + first)
+        read_until(fd, PROMPT + first, initial=PROMPT)
         second = time.perf_counter_ns()
         os.write(fd, b"\t" if tab else b"\r")
-        read_until(fd, PROMPT + b"zcomplete " if tab else NEW_PROMPT)
+        read_until(fd, PROMPT + b"zcomplete " if tab else NEW_PROMPT, initial=PROMPT + first)
         end = time.perf_counter_ns()
         return [(second - start) / 1e6, (end - second) / 1e6, (end - start) / 1e6]
 
