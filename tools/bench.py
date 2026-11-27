@@ -28,7 +28,7 @@ COMMANDS = {
 CORE = ["prompt", "startup", "external", "pipeline", "builtins", "redirects", "direct"]
 
 
-def first_prompt(argv, env, prompt=PROMPT):
+def first_prompt(argv, env, prompt=PROMPT, *, after_prompt=None):
     # Keep a controlling PTY for job-control initialization in every shell.
     # The child timestamps the exec separately from the parent's full launch.
     read_stamp, write_stamp = os.pipe()
@@ -67,7 +67,8 @@ def first_prompt(argv, env, prompt=PROMPT):
         stamp = os.read(read_stamp, 8)
         if len(stamp) != 8:
             raise RuntimeError(f"missing exec timestamp for {argv[0]}")
-        return (end - start) / 1e6, (end - int.from_bytes(stamp, "big")) / 1e6
+        times = (end - start) / 1e6, (end - int.from_bytes(stamp, "big")) / 1e6
+        return times if after_prompt is None else (*times, after_prompt(fd))
     finally:
         try:
             os.kill(pid, signal.SIGKILL)

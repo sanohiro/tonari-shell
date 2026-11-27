@@ -1771,6 +1771,22 @@ s='a?b?'; p='?\?'; printf '%s\n' "${s//$p/X}"
 printf '%s\\n' "${s//$p/X}" "${s##$p}" "${s%%$p}"
 """, 0, "X:X\n:xy-12\n雪😀-ab:\n".encode(), minimum=5)
 
+    def test_uncached_launch_honors_execignore_on_inherited_path(self):
+        first, second = self.cwd / "first", self.cwd / "second"
+        first.mkdir()
+        second.mkdir()
+        for directory, value in ((first, "first"), (second, "second")):
+            program = directory / "pick"
+            program.write_text(f'#!/bin/sh\nprintf "%s" {value}\n')
+            program.chmod(0o755)
+        self.env["PATH"] = f"{first}:{second}:/usr/bin:/bin"
+        self.env["PICK_ROOT"] = str(self.cwd)
+        self.compare('''set +h; EXECIGNORE="$PICK_ROOT/first/*"
+pick; echo ":$?"
+pick |& cat; echo ":${PIPESTATUS[*]}"
+EXECIGNORE="$PICK_ROOT/*"; pick |& cat >/dev/null; echo "${PIPESTATUS[*]}"''',
+                     0, b"second:0\nsecond:0 0\n127 0\n", minimum=5)
+
     def test_executable_text_without_shebang(self):
         script = self.cwd / "plain"
         script.write_text('args=("two words" "$1"); printf "<%s><%s>\\n" "$0" "${args[*]}"; exit 7\n')

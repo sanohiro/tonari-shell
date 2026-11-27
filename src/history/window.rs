@@ -54,12 +54,7 @@ impl Window {
         if stamp.len < 32 * 1024 || waiting() {
             return;
         }
-        // Larger journals search older records in bounded blocks on demand.
-        let count = if stamp.len > CAPACITY as u64 {
-            READ_CHUNK as u64
-        } else {
-            stamp.len
-        };
+        let count = stamp.len.min(CAPACITY as u64);
         self.start = stamp.len - count;
         if self.start != 0 && file.seek(SeekFrom::Start(self.start)).is_err() {
             return;
@@ -78,19 +73,16 @@ impl Window {
             ) {
                 return;
             }
-            // Only a complete journal uses the Unicode index. Classify each
-            // full page while its bytes are still warm after the system call.
-            if self.start == 0 {
-                let start = self.unicode_pages.len() * PAGE;
-                self.unicode_pages.extend(
-                    self.bytes[start..]
-                        .chunks_exact(PAGE)
-                        .map(|page| !page.is_ascii()),
-                );
-            }
+            // Short reads may split a page. Classify each complete page once.
+            let start = self.unicode_pages.len() * PAGE;
+            self.unicode_pages.extend(
+                self.bytes[start..]
+                    .chunks_exact(PAGE)
+                    .map(|page| !page.is_ascii()),
+            );
         }
         if !self.bytes.is_empty() {
-            if self.start == 0 && self.bytes.len() % PAGE != 0 {
+            if !self.bytes.len().is_multiple_of(PAGE) {
                 self.unicode_pages
                     .push(!self.bytes[self.unicode_pages.len() * PAGE..].is_ascii());
             }
@@ -115,9 +107,11 @@ impl Window {
         (self.stamp == Some(Stamp::from(meta))).then_some(self)
     }
 
-    pub(super) fn range(&self, start: u64, size: usize) -> Option<&[u8]> {
+    pub(super) fn range(&self, start: u64, size: usize) -> Option<(&[u8], &[bool])> {
         let offset = usize::try_from(start.checked_sub(self.start)?).ok()?;
-        self.bytes.get(offset..)?.get(..size)
+        let bytes = self.bytes.get(offset..)?.get(..size)?;
+        let pages = &self.unicode_pages[offset / PAGE..(offset + size).div_ceil(PAGE)];
+        Some((bytes, pages))
     }
 
     // A cooperating append under the journal lock leaves all copied bytes intact.
@@ -145,14 +139,12 @@ impl Window {
                     self.bytes.reserve_exact(capacity - self.bytes.len());
                 }
                 self.bytes.extend_from_slice(entry);
-                if self.start == 0 {
-                    self.unicode_pages.truncate(first_page);
-                    self.unicode_pages.extend(
-                        self.bytes[first_page * PAGE..]
-                            .chunks(PAGE)
-                            .map(|p| !p.is_ascii()),
-                    );
-                }
+                self.unicode_pages.truncate(first_page);
+                self.unicode_pages.extend(
+                    self.bytes[first_page * PAGE..]
+                        .chunks(PAGE)
+                        .map(|p| !p.is_ascii()),
+                );
                 self.stamp = Some(new);
             }
         }
