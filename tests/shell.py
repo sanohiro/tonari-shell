@@ -96,9 +96,31 @@ class ShellTests(unittest.TestCase):
         complete(b"probe-li", b"probe-link ")
         target.unlink()
         complete(b"probe-li", b"probe-li")
+        if os.geteuid() != 0:
+            directory.chmod(0o100)
+            try:
+                complete(b"probe-al", b"probe-al")
+            finally:
+                directory.chmod(0o700)
         cmd.rename(directory / "probe-beta")
         complete(b"probe-al", b"probe-al")
         complete(b"probe-be", b"probe-beta ")
+
+    def test_function_source_after_changing_arg0(self):
+        source = "shopt -s extdebug\na() { :; }\nBASH_ARGV0=changed\nb() { :; }\ndeclare -F a b"
+        for shell in self.shells_for(minimum=5):
+            result = self.command(shell, source, "initial")
+            self.assertEqual((result.returncode, result.stdout, result.stderr),
+                             (0, b"a 2 initial\nb 4 changed\n", b""))
+
+    def test_path_lookup_reuses_overflow_storage(self):
+        directory = Path(*(["x" * 150] * 4))
+        (self.cwd / directory).mkdir(parents=True)
+        command = self.cwd / directory / "pick"
+        command.write_text("#!/bin/sh\necho found\n")
+        command.chmod(0o700)
+        self.env["PATH"] = f"{directory}/missing:absent:{directory}"
+        self.compare("set +h; type -P pick; pick", 0, os.fsencode(directory / "pick") + b"\nfound\n")
 
     def test_declaration_failures_leave_scope_and_attributes_intact(self):
         source = """x=outer

@@ -130,11 +130,6 @@ impl<'a> Filter<'a> {
         let non_ascii = anchor.bytes().find(|b| !b.is_ascii());
         let reverse = memmem::FinderRev::new(anchor.as_bytes());
         let needs_unicode = raw.iter().any(|s| !s.is_ascii());
-        let secondary: Vec<_> = raw
-            .iter()
-            .filter(|s| s.as_ref() != anchor && !s.is_empty())
-            .map(|s| memmem::Finder::new(s.as_bytes()))
-            .collect();
         const BLOCK: usize = 128 * 1024;
         let mut width = BLOCK;
         while self.end > 0 {
@@ -189,7 +184,9 @@ impl<'a> Filter<'a> {
             };
             let mut rows = &block[..end]; // ignore the unfinished journal tail
             if non_ascii.is_some_and(|b| memchr(b, rows).is_none())
-                || !secondary.iter().all(|f| f.find(rows).is_some())
+                || !raw.iter().all(|term| {
+                    term.as_ref() == anchor || memmem::find(rows, term.as_bytes()).is_some()
+                })
             {
                 continue;
             }

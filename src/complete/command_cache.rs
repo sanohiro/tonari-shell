@@ -35,6 +35,55 @@ impl Entry {
     }
 }
 
+impl Listing {
+    fn visit_prefix(
+        &self,
+        prefix: &[u8],
+        visit: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        let mut link = self.heads[usize::from(prefix[0])];
+        let editing = crate::editor::preview::active();
+        let mut visited = 0usize;
+        while link != 0 {
+            let entry = &self.index[usize::from(link) - 1];
+            link = entry.next;
+            if editing && visited.is_multiple_of(256) {
+                crate::editor::preview::scan_input();
+            }
+            visited += 1;
+            let bytes = entry.name(&self.bytes);
+            if !bytes.starts_with(prefix) {
+                continue;
+            }
+            // Each indexed range includes its original dirent terminator.
+            let name = CStr::from_bytes_with_nul(bytes).expect("cached dirent");
+            visit(Some(name), entry.kind)?;
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn push(&mut self, name: &CStr, kind: u8) -> bool {
+        let bytes = name.to_bytes_with_nul();
+        let Ok(len) = u16::try_from(bytes.len()) else {
+            return false;
+        };
+        if self.index.len() == MAX_ENTRIES || self.bytes.len() + bytes.len() > MAX_NAME_BYTES {
+            return false;
+        }
+        // One-based links reserve zero for the end of a first-byte bucket.
+        let head = &mut self.heads[usize::from(bytes[0])];
+        self.index.push(Entry {
+            start: self.bytes.len() as u32,
+            len,
+            kind,
+            next: *head,
+        });
+        *head = self.index.len() as u16;
+        self.bytes.extend_from_slice(bytes);
+        true
+    }
+}
+
 #[derive(Default)]
 struct Cache {
     directories: Vec<(PathBuf, Stamp, Option<Listing>)>,
@@ -78,25 +127,7 @@ pub(super) fn scan(
                     }
                     *checked_fd = true;
                 }
-                let mut link = listing.heads[usize::from(prefix[0])];
-                let editing = crate::editor::preview::active();
-                let mut visited = 0usize;
-                while link != 0 {
-                    let entry = &listing.index[usize::from(link) - 1];
-                    link = entry.next;
-                    if editing && visited.is_multiple_of(256) {
-                        crate::editor::preview::scan_input();
-                    }
-                    visited += 1;
-                    let bytes = entry.name(&listing.bytes);
-                    if !bytes.starts_with(prefix) {
-                        continue;
-                    }
-                    // Each indexed range includes its original dirent terminator.
-                    let name = CStr::from_bytes_with_nul(bytes).expect("cached dirent");
-                    visit(Some(name), entry.kind)?;
-                }
-                return ControlFlow::Continue(());
+                return listing.visit_prefix(prefix, visit);
             }
             cache.directories.swap_remove(i);
         }
@@ -107,27 +138,10 @@ pub(super) fn scan(
             index: Vec::new(),
         });
         let result = directory::scan_checked(path, b"", &mut |raw, kind| {
-            if let Some(name) = raw {
-                let bytes = name.to_bytes_with_nul();
-                if let Some(l) = &mut listing {
-                    if l.index.len() < MAX_ENTRIES
-                        && l.bytes.len() + bytes.len() <= MAX_NAME_BYTES
-                        && let Ok(len) = u16::try_from(bytes.len())
-                    {
-                        // One-based links reserve zero for the end of a bucket.
-                        let head = &mut l.heads[usize::from(bytes[0])];
-                        l.index.push(Entry {
-                            start: l.bytes.len() as u32,
-                            len,
-                            kind,
-                            next: *head,
-                        });
-                        *head = l.index.len() as u16;
-                        l.bytes.extend_from_slice(bytes);
-                    } else {
-                        listing = None;
-                    }
-                }
+            if let (Some(name), Some(active)) = (raw, &mut listing)
+                && !active.push(name, kind)
+            {
+                listing = None;
             }
             // Untouched entries still poll for typeahead. An ambiguous prefix
             // can stop the live scan without publishing a partial index.
