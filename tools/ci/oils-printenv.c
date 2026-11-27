@@ -7,5 +7,5 @@ int main(int argc, char **argv) {
         const char *value = getenv(argv[i]);
         puts(value ? value : "None");
     }
-    return ferror(stdout) != 0;
+    return fflush(stdout) == EOF || ferror(stdout);
 }

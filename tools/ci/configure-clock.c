@@ -35,6 +35,13 @@ int main(int argc, char **argv) {
     else
         return 125;
 
+    const char *log = getenv("CONFIGURE_CLOCK_LOG");
+    if (log == NULL || *log == '\0')
+        return 125;
+    int fd = open(log, O_WRONLY | O_APPEND | O_CLOEXEC);
+    if (fd < 0)
+        return 125;
+
     pid_t child;
     long long start = nanoseconds(CLOCK_MONOTONIC);
     int error = posix_spawn(&child, argv[0], NULL, NULL, argv, environ);
@@ -46,12 +53,12 @@ int main(int argc, char **argv) {
         if (errno != EINTR)
             return 125;
     long long end = nanoseconds(CLOCK_MONOTONIC);
-    int fd = open(getenv("CONFIGURE_CLOCK_LOG"), O_WRONLY | O_APPEND);
     long long user_us = (long long)usage.ru_utime.tv_sec * 1000000 + usage.ru_utime.tv_usec;
     long long system_us = (long long)usage.ru_stime.tv_sec * 1000000 + usage.ru_stime.tv_usec;
-    if (fd < 0 || dprintf(fd, "%s %lld %lld %lld %lld\n",
+    if (dprintf(fd, "%s %lld %lld %lld %lld\n",
                           argv[0], start, end, user_us, system_us) < 0)
         return 125;
-    close(fd);
+    if (close(fd) < 0)
+        return 125;
     return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
 }

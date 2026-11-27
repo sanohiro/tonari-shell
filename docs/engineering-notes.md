@@ -1,5 +1,15 @@
 # Engineering notes / 開発知見
 
+## November 27 · Validating benchmark output / 測定用プログラムの出力
+
+Clang's analyzer found a possible null log path in the configure clock. Reproduction showed that the child had already run when the helper discovered the unusable log. Validate the destination before spawning, make it close-on-exec and propagate logging errors. The Oils argv and environment controls also need to flush stdout before checking stream errors; a read-only output descriptor previously returned success in both programs. A failed Homebrew prefix query now exits the external suite during setup.
+
+全ソースの再走査で、測定ツール側の失敗も独立に再現した。テストは子の実行、終了コード、ログ内容、出力バイト、書き出し失敗を確認する。 `python3 -m unittest discover -s tests/compat -p test_benchmark_helpers.py`. [Costs and commands / 計測](benchmarks.md#helper-output-audit)
+
+The closing scan inventories 105 Rust files, 65 Python files including the helper regression, 12 shell sources and 5 C helpers. Reproduce the static checks with Clippy on all targets, Ruff (undefined names, control flow and loop-variable capture), ShellCheck, and `clang --analyze` on each C source. The reported Python closures are invoked during their own iteration. On Apple M1 the distribution signal configuration also passed all 69 Rust tests under AddressSanitizer, plus 54 shell/PTY cases in the selected array, pipeline, paste, descriptor and signal groups (one platform skip).
+
+構文解析・展開・算術・配列・履歴・引用・FD の順序・子プロセス・トラップ・パイプ入力を実際の起動経路から比較した。Bash と異なる IFS と umask の判定には専用の期待値を置いた。 [Retained differences / 差異の根拠](compatibility.md#input-and-mode-witnesses--入力とモードの差分)
+
 ## November 27 · Interrupted input and closed descriptors / 信号と入力 FD
 
 A caught signal runs its trap during a blocked read. Use the previous command's status for the trap, retain the partial line and the original deadline, and recheck the input descriptor afterwards. An asynchronous trap can read the same descriptor or replace it. mapfile also publishes complete records before such a trap. Check the descriptor on zero-length and timed reads before modifying any destination.
