@@ -311,6 +311,7 @@ Agreement with Bash is one observation. Check whether the arguments, data, statu
 
 | Input / 入力 | Reference Bash / 参照結果 | Tonari / 採用する動作 |
 |---|---|---|
+| `exec 8>&1 1>&-; v=${ printf "%s" ok; }; printf '<%s>' "$v" >&8` | GNU Bash 5.3.20 exits 1 when duplicating the capture file onto the closed stdout. | Prints `<ok>` on fd 8 and leaves fd 1 closed. The substitution establishes its own output and restores the caller’s descriptor state. 標準出力を閉じて起動しても置換結果を取得でき、終了後は閉じた状態に戻ります。 [Regression](../tests/shell.py) |
 | `declare -A a=([x]=first [x]+=second); echo "${a[x]}"` | GNU Bash 5.2.37 and the Homebrew 5.3.20 build print `second`. | `firstsecond`. Append to the existing element even when both assignments are in one initializer. 同じキーへの追記で先行する値を保持します。 |
 | POSIX mode, `x=42; x=tmp unset x; echo "${x-unset}"` | Bash 5.2.37 prints `42`. Bash 5.3.20, dash and yash print `unset`. | `unset`. Preserve the effect of the special builtin on the active binding. 明示的に削除した変数を復活させません。 |
 | Invoke as `sh` and run `test -t x` or `test -t ''` | Bash 5.2.37 returns 1. Bash 5.3.20 returns 2 with an integer diagnostic. | Status 1 and empty stderr. POSIX specifies false for an invalid file descriptor number. 無効な番号に対する偽という結果を維持します。 [POSIX test](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/test.html) |

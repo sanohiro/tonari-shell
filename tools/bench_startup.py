@@ -71,7 +71,7 @@ def main():
             for index, (scenario, shell, argv, env, _) in enumerate(cases):
                 path = args.traces / f"{index}-{shell.name}-{scenario.replace(' ', '-')}.txt"
                 first_prompt([strace, "--kill-on-exit", "-o", str(path), "-e",
-                              "trace=ioctl,rt_sigaction,open,openat,fstat,newfstatat,statx,write,writev,read,lseek,getppid",
+                              "trace=ioctl,rt_sigaction,open,openat,stat,lstat,fstat,newfstatat,statx,write,writev,read,lseek,getppid",
                               *argv], env)
         for i in range(args.runs + 3):
             offset = i % len(cases)

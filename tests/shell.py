@@ -3407,6 +3407,21 @@ printf '<%s>' "${!a[@]}" "${a[@]}"
 mapfile -tO 400 empty </dev/null; declare -p empty""",
                      0, b'<0><2><3><4><81><keep><one><two><tail><sparse>declare -a empty=()\n', minimum=4)
 
+    def test_current_shell_capture_with_closed_stdout_and_restrictive_umask(self):
+        source = r"""umask 777
+value=${ printf '<'; : 10>&-; printf '%131072s' x; printf '>\n\n'; return 7; }
+printf '%s:%s:%s:%s\n' "$?" "${#value}" "${value:0:1}" "${value: -2}" >&8"""
+        participants = (TONARI,) if self.bash_before_53() else (BASH, TONARI)
+        for shell in participants:
+            with self.subTest(shell=shell):
+                result = self.command(shell, "exec 8>&1\n" + source)
+                self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                 (0, b"7:131074:<:x>\n", b""))
+        # Tonari also restores a previously closed stdout after capturing.
+        result = self.command(TONARI, "exec 8>&1 1>&-\n" + source + "\n[[ ! -e /dev/fd/1 ]]")
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (0, b"7:131074:<:x>\n", b""))
+
     def test_command_substitution_capture_boundaries(self):
         self.compare("""x=outside; v=$(printf 'a'; echo -ne 'b\\nc'; printf ':'); echo "$v"
 v=$(printf '%s' "$x"; false); echo "$?:$v"
