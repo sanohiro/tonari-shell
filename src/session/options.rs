@@ -717,7 +717,7 @@ impl Session {
                 }
             }
             if !self.posix {
-                for name in self.functions.keys() {
+                for name in self.functions.names("") {
                     if self.print_function(&mut out, name, false).is_err() {
                         return 1;
                     }

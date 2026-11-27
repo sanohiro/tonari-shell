@@ -1,7 +1,7 @@
 use super::{command_field, decode, encoded_fragment, file};
 use crate::Session;
+use foldhash::HashSet;
 use memchr::{memchr, memmem, memrchr};
-use std::collections::HashSet;
 use std::fs::File;
 use std::os::unix::fs::FileExt;
 use std::rc::Rc;

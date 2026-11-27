@@ -2,7 +2,7 @@
 // journal; never source a history line or expand one of its words.
 use super::{decode, file};
 use crate::{Session, parser};
-use std::collections::HashMap;
+use foldhash::{HashMap, HashMapExt as _};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 

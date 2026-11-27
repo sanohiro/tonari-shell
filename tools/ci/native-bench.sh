@@ -8,6 +8,24 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == function-tables ]]; then
+  args=()
+  for name in functions-{0,200,1000}-{call,printf,colon} functions-1000-prefix core-parse-functions function-list export-function-list aliases-{0,200,1000}-miss aliases-200-{hit,braced,list} assoc-{values,keys,churn}; do
+    args+=(--case "$name")
+  done
+  "$ref" --version > "$out/bash-version.txt"
+  python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 21 "${args[@]}" > "$out/scripts.txt"
+  python3 tools/bench_completion.py "$bin/baseline" "$current" --bash "$ref" --reply-list --runs 21 > "$out/callback.txt"
+  python3 tools/bench_completion.py "$bin/baseline" "$current" --bash "$ref" --word-list --nosort --runs 21 > "$out/words.txt"
+  python3 tools/bench_completion.py "$bin/baseline" "$current" --project --runs 21 > "$out/project.txt"
+  python3 tools/bench_history_fields.py "$bin/baseline" "$current" --deep-page --entries 100000 --runs 21 > "$out/history.txt"
+  if [[ -r /usr/share/bash-completion/bash_completion ]]; then
+    printf '%s\n' '. /usr/share/bash-completion/bash_completion' \
+      'declare -F _parse_help _parse_usage _completion_loader >/dev/null || exit 1' > "$RUNNER_TEMP/completion-rc"
+    python3 tools/bench_login.py "$current" --previous "$bin/baseline" --bash "$ref" --rcfile "$RUNNER_TEMP/completion-rc" --runs 31 > "$out/bash-completion.txt"
+  fi
+  exit
+fi
 if [[ $SUITE == core-engine ]]; then
   args=()
   for name in bindings-{0,200,1000}-{copy,sum,locals} bindings-1000-prefix core-{function,indexed,arithmetic,copy-arithmetic,trim,default,printf,case,test,parse-functions} local-eighty redirected-{group,if,loop,case,group-control}; do

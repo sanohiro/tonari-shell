@@ -152,6 +152,19 @@ impl Expanded {
     }
 }
 
+// Ordinary parameter expansions do not invoke another parser. A command
+// substitution must keep the outer alias disabled while its body is read.
+fn may_read_nested_command(value: &str) -> bool {
+    if value.contains('`') {
+        return true;
+    }
+    value.contains('$')
+        && (value.contains('(')
+            || memchr::memchr_iter(b'{', value.as_bytes()).any(|i| {
+                super::lexer::starts_braced_command(super::lexer::joined(&value[i + 1..]))
+            }))
+}
+
 impl Reader {
     pub(super) fn alias_newlines(&mut self, protected: &[&str]) -> Result<(), Error> {
         loop {
@@ -161,6 +174,18 @@ impl Reader {
                 return Ok(());
             }
         }
+    }
+
+    fn replacement_aliases(&self, name: &str, mask_active: bool) -> Aliases {
+        let mut nested = self.aliases.clone();
+        if mask_active {
+            let table = std::rc::Rc::make_mut(nested.0.as_mut().unwrap());
+            table.remove(name);
+            for frame in &self.alias_frames {
+                table.remove(&frame.name);
+            }
+        }
+        nested
     }
 
     // A replacement ending in shell syntax can take bytes from the following
@@ -306,28 +331,21 @@ impl Reader {
             }
             let name = name.to_string();
             let next_word = value.ends_with([' ', '\t']);
-            // A recursive reference inside a substitution in the replacement
-            // must be disabled in that nested parser as well.
-            let mut nested = self.aliases.clone();
-            if value.contains(['$', '`']) {
-                let disabled = std::rc::Rc::make_mut(nested.0.as_mut().unwrap());
-                disabled.remove(&name);
-                for frame in &self.alias_frames {
-                    disabled.remove(&frame.name);
-                }
-            }
             if value.ends_with(['<', '>', '\\'])
                 || value.contains("<<")
                 || value.contains('#')
                 || value.ends_with("\\\n")
             {
+                let nested = self.replacement_aliases(&name, value.contains(['$', '`']));
                 let value = value.to_owned();
                 self.joined_alias(name, &value, nested)?;
                 continue;
             }
-            let replacement = with(nested.clone(), || lex(value, false, true));
+            let nested = self.replacement_aliases(&name, may_read_nested_command(value));
+            let replacement = with(nested, || lex(value, false, true));
             let (replacement, spans, _) = match replacement {
                 Err(Error::Incomplete(_)) => {
+                    let nested = self.replacement_aliases(&name, value.contains(['$', '`']));
                     let value = value.to_owned();
                     self.joined_alias(name, &value, nested)?;
                     continue;

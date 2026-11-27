@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 
 impl Session {
     pub fn export(&mut self, args: &[String], bindings: &mut Bindings) -> u8 {
@@ -22,9 +23,11 @@ impl Session {
             let mut status = 0;
             if args.is_empty() {
                 let mut out = crate::builtins::listing_stdout("export");
-                for (name, function) in &self.functions {
+                for name in self.functions.names("") {
                     let flags = self.function_attributes(name);
-                    if flags.ends_with('x') && function.print(&mut out, name, flags).is_err() {
+                    if flags.ends_with('x')
+                        && self.functions[name].print(&mut out, name, flags).is_err()
+                    {
                         return 1;
                     }
                 }

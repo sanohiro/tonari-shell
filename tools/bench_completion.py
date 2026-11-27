@@ -98,6 +98,20 @@ def reused_words(shell, home, bindir, rc, metrics):
             metrics[f"static reused, {stage}"].append(elapsed)
 
 
+def duplicate_word_listing(shell, home, bindir, rc):
+    line = b"dup pick-"
+    with terminal(shell, home, bindir, rc, prompt=PROMPT) as fd:
+        os.write(fd, line)
+        read_until(fd, line)
+        start = time.perf_counter_ns()
+        os.write(fd, b"\x1b?@")
+        output = read_until(fd, b"@")
+        elapsed = (time.perf_counter_ns() - start) / 1e6
+        if re.findall(rb"pick-[zam]", output) != [b"pick-z", b"pick-a", b"pick-m"]:
+            raise ValueError(f"{shell}: incorrect ordered literal list")
+        return elapsed
+
+
 def listing(shell, home, bash, expected, prefix):
     rc = home / ("bashrc" if shell == bash else "rc")
     line = b": " + prefix
@@ -253,6 +267,10 @@ def main():
             rc.write_text(f"PS1='{PROMPT.decode()}'\nHISTSIZE=0\nHISTFILE=/dev/null\nchoices='{words}'\n"
                           'fixed() { :; }\n'
                           f'complete{order} -W "$choices" fixed\ncomplete -W \'$choices\' dynamic\n')
+            if args.word_list and args.nosort:
+                duplicates = " ".join(["pick-z", "pick-a", "pick-m"] * 3334)
+                with rc.open("a") as f:
+                    f.write(f"complete -o nosort -W '{duplicates}' dup\n")
         elif args.listing:
             expected = {p.name.encode() for p in bindir.iterdir()}
             few = home / "few"
@@ -347,6 +365,8 @@ def main():
                         ("dynamic, unique", b"dynamic option-09876", b"-flag "),
                     ]:
                         metrics[label].append(completion(shell, home, bindir, rc, line, suffix))
+                    if args.nosort and shell != bash:
+                        metrics["display 10002 entries as 3 names"].append(duplicate_word_listing(shell, home, bindir, rc))
                     continue
                 if args.listing:
                     for folder, names, prefix in cases:

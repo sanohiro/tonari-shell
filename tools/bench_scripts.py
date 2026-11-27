@@ -522,6 +522,18 @@ for bindings in (0, 200, 1000):
     ):
         CASES[f"bindings-{bindings}-{label}"] = eval_loop(body, check, expected, setup, count)
 
+for count in (0, 200, 1000):
+    CASES[f"functions-{count}-call"] = eval_loop("myf", 'echo "$i"', "10000", "myf() { :; }", 10000)
+    CASES[f"functions-{count}-printf"] = eval_loop('printf -v x %d "$i"', 'echo "$x"', "4999", count=5000)
+    CASES[f"functions-{count}-colon"] = eval_loop(":", 'echo "$i"', "20000", count=20000)
+    CASES[f"aliases-{count}-miss"] = eval_loop("eval ': 7'", 'echo "$i"', "1000", count=1000)
+
+CASES["functions-1000-prefix"] = eval_loop("compgen -A function bench_fn_99 >/dev/null",
+                                          "compgen -A function bench_fn_999", "bench_fn_999", count=300)
+CASES["aliases-200-hit"] = eval_loop("eval selected", 'echo "$x"', "999", count=1000)
+CASES["aliases-200-braced"] = CASES["aliases-200-hit"]
+CASES["aliases-200-list"] = listing_loop("alias -p", 100)
+
 CASES.update({
     "bindings-1000-prefix": eval_loop('compgen -A variable bench_var_99 >/dev/null',
                                      'compgen -A variable bench_var_999', "bench_var_999", count=500),
@@ -695,6 +707,16 @@ def main():
             if case.startswith("bindings-"):
                 count = int(case.split("-")[1])
                 case_setup += "".join(f"bench_var_{j}={j}; " for j in range(count))
+            if case.startswith("functions-"):
+                count = int(case.split("-")[1])
+                case_setup += "".join(f"bench_fn_{j}() {{ :; }}; " for j in range(count))
+            if case.startswith("aliases-"):
+                count = int(case.split("-")[1])
+                case_setup += "shopt -s expand_aliases; " + "".join(f"alias bench_alias_{j}=:; " for j in range(count))
+                if case.endswith("-hit"):
+                    case_setup += """alias selected='x=$i'; """
+                elif case.endswith("-braced"):
+                    case_setup += """alias selected='x="${i}"'; """
             if case.startswith("assoc-"):
                 case_setup += 'declare -A m; for ((j=0;j<500;++j)); do m[key$j]=value$j; done; '
             elif case == "complete-list":

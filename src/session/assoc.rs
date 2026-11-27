@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use foldhash::HashMap;
 use std::rc::Rc;
 
 use super::array::Elements;
