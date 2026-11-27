@@ -1,5 +1,22 @@
 # Startup and execution / 起動と実行性能
 
+<a id="input-attributes"></a>
+
+## November 27 · Input attributes / 入力先の属性
+
+Apple M1, distribution builds and Bash 5.3.20, median milliseconds of 21 interleaved samples after a startup handshake. Each sample verifies the resulting count and values. The first corrected build uses per-record assignment for attributed arrays; the final build buffers case-converted records and recognizes canonical decimal integers before arithmetic parsing.
+
+| Workload | First correct | Optimized | Bash |
+|---|---:|---:|---:|
+| mapfile, uppercase, 4,096 rows | 1.265 | 0.794 | 1.601 |
+| mapfile, integer, 4,096 rows | 1.268 | 1.137 | 1.544 |
+| read, seven integer fields, 180 iterations | 1.490 | 1.500 | 4.160 |
+| mapfile, ordinary array, 4,096 rows | 0.613 | 0.617 | 1.082 |
+
+Reproduce the workloads with `yes alpha | head -4096 >case-data`, `yes 51 | head -4096 >int-data`, then `declare -au a; mapfile -t a <case-data`, `declare -ai a; mapfile -t a <int-data`, or the first command without the declaration. For read, repeat `read -ra a <<< "123 456 010 a[1]+9 18 34 52"` on an integer array. Use the ready-handshake sampler in `tools/bench_scripts.py`.
+
+整数読み込みでは途中の式が失敗する場合があるため、先に成功した代入を保持する。4,096行の整数配列は Bash の約74%の時間で、2/3 の目標には届かなかった。
+
 <a id="static-audit-final"></a>
 
 ## 2026-11-27 · Full-source audit, cumulative comparison / 全走査前後の実測

@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## November 27 · Attributes on input destinations / 入力先の変数属性
+
+`read -a` and `mapfile` assign integer elements in input order. An expression can read an earlier element or update another variable. An arithmetic error retains the successful prefix and interrupts evaluation of the command list. An unadorned `read` uses the attributes of REPLY. Test the ordinary, limited, origin and callback paths with `python3 tests/shell.py /path/to/tonari -k input` and `-k honors`.
+
+整数配列では先に代入した要素が次の式から見える。通常配列と大文字・小文字変換だけの配列は、コールバックや件数制限がなければまとめて読み込める。 [Native measurements / 実測](benchmarks.md#input-attributes)
+
 ## November 27 · Reading large completion replies / 大量の補完候補を受け取る
 
 A shell callback creates COMPREPLY and the editor restores its previous binding after reading the result. If the temporary binding owns a dense array, the interpreter can move its strings straight into the reply. Namerefs, sparse arrays and shared storage keep their ordinary lookup behavior. To preserve declaration order, record first occurrences using borrowed strings and compact the owned list once.

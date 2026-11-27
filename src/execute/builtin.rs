@@ -302,7 +302,7 @@ pub(super) fn eval_builtin(
                 _ => None,
             };
             if matches!(builtin, Builtin::Read) {
-                Flow::Continue(session.read(args, here))
+                session.read(args, here)
             } else {
                 crate::session::mapfile::run(session, &cmd.words[0], args, last_status, here)
             }

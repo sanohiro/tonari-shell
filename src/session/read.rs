@@ -2,6 +2,7 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use super::Session;
+use crate::Flow;
 use crate::parser::is_identifier;
 
 struct Options<'a> {
@@ -237,17 +238,17 @@ impl Drop for EchoGuard {
     }
 }
 
-pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u8])>) -> u8 {
+pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u8])>) -> Flow {
     let opts = match options(args) {
         Ok(opts) => opts,
         Err((code, e)) => {
             diagnostic!("read: {e}");
-            return code;
+            return Flow::Continue(code);
         }
     };
     if crate::execute::fd::is_private(opts.fd) {
         diagnostic!("read: invalid file descriptor");
-        return 1;
+        return Flow::Continue(1);
     }
     if let Some(invalid) = opts
         .names
@@ -255,10 +256,10 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         .find(|s| opts.array.is_none() && !session.valid_builtin_target(s))
     {
         diagnostic!("read: {invalid}: invalid identifier");
-        return 1;
+        return Flow::Continue(1);
     }
     if opts.timeout == Some(Duration::ZERO) {
-        return u8::from(!ready(opts.fd, Duration::ZERO).unwrap_or(false));
+        return Flow::Continue(u8::from(!ready(opts.fd, Duration::ZERO).unwrap_or(false)));
     }
     // The normal redirect installed a fresh descriptor. A plain assignment
     // has no callback or subscript that could observe its file position.
@@ -314,14 +315,14 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
             Ok(crate::editor::Input::Line(text)) => edited = Some(text.into_bytes().into_iter()),
             Ok(crate::editor::Input::Directory(_)) => unreachable!(),
             Ok(crate::editor::Input::End) => edited = Some(Vec::new().into_iter()),
-            Ok(crate::editor::Input::Cancel) => return 130,
-            Ok(crate::editor::Input::Exit(code)) => return code,
+            Ok(crate::editor::Input::Cancel) => return Flow::Continue(130),
+            Ok(crate::editor::Input::Exit(code)) => return Flow::Continue(code),
             Err(e) if e.kind() == io::ErrorKind::TimedOut => {
-                return crate::traps::signal_status(libc::SIGALRM);
+                return Flow::Continue(crate::traps::signal_status(libc::SIGALRM));
             }
             Err(e) => {
                 diagnostic!("read: {e}");
-                return 1;
+                return Flow::Continue(1);
             }
         }
     }
@@ -436,7 +437,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
             }
             Err(e) => {
                 diagnostic!("read: {e}");
-                return 1;
+                return Flow::Continue(1);
             }
         };
         if slash {
@@ -459,7 +460,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
     };
     let Ok(line) = String::from_utf8(line) else {
         diagnostic!("read: expected UTF-8 input");
-        return 1;
+        return Flow::Continue(1);
     };
     assign_fields(session, &opts, &line, &escaped, status)
 }
@@ -470,14 +471,16 @@ fn assign_fields(
     line: &str,
     escaped: &[usize],
     status: u8,
-) -> u8 {
+) -> Flow {
     if opts.names.is_empty() && opts.array.is_none() {
         if session.readonly("REPLY") {
             diagnostic!("read: REPLY: readonly variable");
-            return 2;
+            return Flow::Continue(2);
         }
-        session.assign("REPLY", line);
-        return status;
+        return match session.assign_builtin_target("REPLY", line) {
+            Ok(()) => Flow::Continue(status),
+            Err(error) => input_assignment_error(session, "REPLY", error, 2),
+        };
     }
     let ifs = if opts.exact {
         String::new()
@@ -496,10 +499,9 @@ fn assign_fields(
             line.trim_matches(|c: char| ifs.contains(c))
         };
         if let Err(e) = session.assign_builtin_target(name, value) {
-            diagnostic!("read: {e}");
-            return 1;
+            return input_assignment_error(session, name, e, 1);
         }
-        return status;
+        return Flow::Continue(status);
     }
     let (spans, end) = field_ranges(line, escaped, &ifs);
     if let Some(target) = opts.array {
@@ -507,14 +509,25 @@ fn assign_fields(
             Ok(target) => target,
             Err(e) => {
                 diagnostic!("read: {target}: {e}");
-                return 1;
+                return Flow::Continue(1);
             }
         };
-        session.replace_array(
-            &target,
-            spans.into_iter().map(|(s, e)| line[s..e].into()).collect(),
-        );
-        return status;
+        if session.integer(&target) {
+            session.replace_array(&target, Vec::new());
+            for (index, (s, e)) in spans.into_iter().enumerate() {
+                if let Err(error) = session.assign_input_element(&target, index as i64, &line[s..e])
+                {
+                    diagnostic!("read: {error}");
+                    return Flow::Discard(1);
+                }
+            }
+        } else {
+            session.replace_array(
+                &target,
+                spans.into_iter().map(|(s, e)| line[s..e].into()).collect(),
+            );
+        }
+        return Flow::Continue(status);
     }
     let count = opts.names.len();
     for (i, name) in opts.names.iter().enumerate() {
@@ -527,15 +540,30 @@ fn assign_fields(
             &line[start..finish]
         });
         if let Err(e) = session.assign_builtin_target(name, value) {
-            diagnostic!("read: {e}");
-            return if e == crate::session::READONLY && i + 1 < count {
-                2
-            } else {
-                1
-            };
+            return input_assignment_error(session, name, e, if i + 1 < count { 2 } else { 1 });
         }
     }
-    status
+    Flow::Continue(status)
+}
+
+fn input_assignment_error(
+    session: &Session,
+    name: &str,
+    error: &'static str,
+    readonly_status: u8,
+) -> Flow {
+    diagnostic!("read: {name}: {error}");
+    if error == crate::session::READONLY {
+        return Flow::Continue(readonly_status);
+    }
+    if session.reference_name(name).is_ok_and(|target| {
+        let base = super::array::subscript(&target).map_or(target.as_ref(), |(base, _)| base);
+        session.integer(base)
+    }) {
+        Flow::Discard(1)
+    } else {
+        Flow::Continue(1)
+    }
 }
 
 // Store spans into the original line so the last named variable can retain

@@ -131,6 +131,41 @@ p='\360\237\230\200'; echo "${p@P}" """
         result = self.command(TONARI, source)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"0\n1\n0\n", b""))
 
+    def test_read_honors_integer_destinations_in_input_order(self):
+        self.compare("""declare -i REPLY; read <<< '3+4'; echo "$REPLY"
+declare -ia a=(99); declare -n ref=a; i=0
+read -ra ref <<< '2 a[0]+3 i+=4 010 -7'
+printf '<%s>' "${a[@]}" "$i" """, 0, b"7\n<2><5><4><8><-7><4>", minimum=5)
+
+    def test_mapfile_honors_array_attributes_in_each_input_mode(self):
+        self.compare("""for mode in bulk origin limit callback; do
+    declare -au a=(before); declare -ia n=(99); declare -n ref=n
+    case $mode in bulk) opts=();; origin) opts=(-O 1);; limit) opts=(-n 2);; callback) opts=(-C : -c 1);; esac
+    mapfile -t "${opts[@]}" a <<< $'ab\\nCd'
+    mapfile -t "${opts[@]}" ref <<< $'2\\nn[0]+3'
+    printf '<%s>' "${a[@]}" "${n[@]}"; echo
+    unset -n ref; unset a n
+done""", 0, b"<AB><CD><2><5>\n<BEFORE><AB><CD><99><2><102>\n<AB><CD><2><5>\n<AB><CD><2><5>\n", minimum=5)
+
+    def test_integer_input_error_preserves_assigned_prefix(self):
+        for setup, command in [
+            ("declare -ai a=(9)", "read -a a <<< '2 1/0 7'"),
+            ("declare -ai a=(9)", "mapfile -t a <<< $'2\\n1/0\\n7'"),
+            ("declare -ai a=(2)", "read 'a[0]' <<< '1/0'"),
+        ]:
+            for shell in self.shells_for(minimum=5):
+                result = self.command(shell, setup + "; trap 'echo \"${a[*]}\"' EXIT; " + command + "; echo skipped")
+                self.assertEqual((result.returncode, result.stdout), (1, b"2\n"))
+                self.assertTrue(result.stderr)
+
+    def test_invalid_utf8_mapfile_keeps_completed_records(self):
+        for opts in ("", "-n 8", "-O 0", "-C : -c 1"):
+            src = f"mapfile -t {opts} a; echo \"$?:${{a[*]}}\""
+            result = subprocess.run([TONARI, "-c", src], env=self.env,
+                                    input=b"ok\n\xff\n", capture_output=True, timeout=3)
+            self.assertEqual((result.returncode, result.stdout), (0, b"1:ok\n"))
+            self.assertTrue(result.stderr)
+
     def test_mapfile_here_callback_observes_remaining_stdin(self):
         self.compare("""hook() { read -r more; echo "$1:$2:$more"; }
 mapfile -t -c 1 -C hook r <<'END'
