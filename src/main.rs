@@ -134,13 +134,16 @@ fn wait_for_job_notice(
     }
 }
 
+fn remaining_input_time() -> Option<std::time::Duration> {
+    INPUT_DEADLINE
+        .get()
+        .map(|end| end.saturating_duration_since(std::time::Instant::now()))
+}
+
 fn input_timeout() -> Option<libc::timespec> {
-    INPUT_DEADLINE.get().map(|end| {
-        let left = end.saturating_duration_since(std::time::Instant::now());
-        libc::timespec {
-            tv_sec: left.as_secs() as _,
-            tv_nsec: left.subsec_nanos() as _,
-        }
+    remaining_input_time().map(|left| libc::timespec {
+        tv_sec: left.as_secs() as _,
+        tv_nsec: left.subsec_nanos() as _,
     })
 }
 

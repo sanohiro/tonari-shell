@@ -1,6 +1,6 @@
 // The picker owns only its query. The draft and its cursor stay in the editor
 // until the user accepts a single, normally quoted completion.
-use super::{Keys, Screen, ready};
+use super::{Keys, Screen};
 use crate::Session;
 use std::fmt::Write as _;
 use std::io::{self, Write as _};
@@ -112,7 +112,7 @@ fn read_key(first: u8, keys: &mut Keys, session: &Session, query: &mut String) -
         27 => {
             // Disambiguate a lone Escape from an arrow or bracketed paste.
             let timeout = session.bindings.timeout();
-            if keys.queued.is_empty() && !ready(0, timeout.min(50)) {
+            if keys.queued.is_empty() && !super::input::key_ready(session, timeout.min(50))? {
                 return Ok(Key::Cancel);
             }
             let Some(introducer) = keys.get()? else {
@@ -125,7 +125,7 @@ fn read_key(first: u8, keys: &mut Keys, session: &Session, query: &mut String) -
             let mut params = [0u8; 3];
             let mut len = 0;
             loop {
-                if keys.queued.is_empty() && !ready(0, timeout) {
+                if keys.queued.is_empty() && !super::input::key_ready(session, timeout)? {
                     return Ok(Key::Ignore);
                 }
                 let Some(b) = keys.get()? else {

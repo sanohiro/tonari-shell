@@ -86,7 +86,7 @@ impl Read for BulkInput<'_> {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
         loop {
             let result = if let Some(traps) = self.signals {
-                super::read::ready(self.file.as_raw_fd(), None, Some(traps))
+                crate::traps::wait_readable(self.file.as_raw_fd(), None, Some(traps))
                     .and_then(|_| self.file.read(out))
             } else {
                 self.file.read(out)

@@ -28,6 +28,7 @@ impl ReverseSearch {
         first: u8,
         keys: &mut super::Keys,
         session: &Session,
+        partial: &mut Vec<u8>,
         frame: impl FnMut(&[u8]) -> std::io::Result<()>,
     ) -> std::io::Result<Option<usize>> {
         use super::Action;
@@ -47,7 +48,7 @@ impl ReverseSearch {
                 }
             }
             Action::Paste => {
-                self.query.push_str(&keys.paste(frame)?);
+                self.query.push_str(&keys.resume_paste(partial, frame)?);
                 self.index = 0;
             }
             _ => {}
