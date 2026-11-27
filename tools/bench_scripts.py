@@ -51,6 +51,8 @@ def listing_loop(command, count):
 
 CASES = {
     "source-functions-repeat": eval_loop(". ./functions.sh", 'echo "$v"', "199", count=25),
+    "source-literal-wrappers": ("".join(f"fn{k}() {{\n echo ok\n}}\n" for k in range(400))
+                                + "fn399", "ok"),
     "source-functions-mixed": ("".join(
         f'fn{k}() {{\n local a=$1 b=${{2:-default{k}}}\n'
         ' if [[ $a == arg* ]]; then\n  REPLY="$a:$b"\n else\n  REPLY="$b:$a"\n fi\n}\n'

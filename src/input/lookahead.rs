@@ -72,9 +72,18 @@ pub(super) fn function_run(
     // Bound both speculative scanning and the source retained by one function.
     const WINDOW: usize = 8192;
     let bytes = &source.as_bytes()[..source.len().min(WINDOW)];
+    let mut body_start = first.len();
     let mut end = 0;
     let mut count = 0;
     for offset in memchr::memmem::find_iter(bytes, b"\n}\n") {
+        // A one-line body already has a cheaper parser that stores literal
+        // wrappers without constructing their argument vectors.
+        if !bytes
+            .get(body_start..offset)
+            .is_some_and(|body| memchr::memchr(b'\n', body.trim_ascii()).is_some())
+        {
+            break;
+        }
         end = offset + 3;
         count += 1;
         let rest = &bytes[end..];
@@ -84,6 +93,7 @@ pub(super) fn function_run(
         if !std::str::from_utf8(&rest[..n]).is_ok_and(parser::opens_function) {
             break;
         }
+        body_start = end + n + 1;
     }
     if count < 4 {
         return None;

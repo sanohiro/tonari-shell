@@ -3727,16 +3727,16 @@ jobs() { printf '%s' "shadow:$1"; }; v=$(jobs -p); echo "$v" """,
         names = ["first", "second", "third", "fourth", "fifth"]
         script = self.cwd / "defs"
         # Syntax errors later in the file must preserve earlier definitions.
-        script.write_text(definitions(names, ":") + "broken() { if; }\n")
+        script.write_text(definitions(names, ":\n :") + "broken() { if; }\n")
         for shell in self.shells_for(5):
             p = self.command(shell, ". ./defs; declare -F fifth >/dev/null && echo registered")
             self.assertEqual(p.stdout, b"registered\n")
             self.assertTrue(p.stderr)
 
-        script.write_text(definitions(names, 'echo "$FUNCNAME:$LINENO"') +
+        script.write_text(definitions(names, ':\necho "$FUNCNAME:$LINENO"') +
                           "alias marker='echo expanded'\n" + definitions(["after"], "marker"))
         self.compare("shopt -s expand_aliases; . ./defs; first; fifth; after", 0,
-                     b"first:2\nfifth:14\nexpanded\n", minimum=5)
+                     b"first:3\nfifth:19\nexpanded\n", minimum=5)
         # Header-shaped text in a here-document is part of a single body.
         script.write_text("doc() {\ncat <<'END'\n}\n" +
                           definitions(names, "fake") + "END\n}\n" + definitions(names, "echo ok"))
