@@ -129,6 +129,7 @@ pub(super) fn resolve(session: &mut Session, name: &str) -> Result<Option<PathBu
     Ok(Some(path))
 }
 
+#[inline(never)]
 pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
     if !session.hashes.enabled {
         diagnostic!("hash: hashing disabled");

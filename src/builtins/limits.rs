@@ -166,6 +166,7 @@ impl Limit {
     }
 }
 
+#[inline(never)]
 pub fn run(args: &[String], out: &mut dyn Write, posix: bool) -> u8 {
     let mut args = args;
     let (mut soft, mut hard, mut all) = (false, false, false);

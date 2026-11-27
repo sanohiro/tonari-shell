@@ -602,6 +602,7 @@ impl Traps {
         0
     }
 
+    #[inline(never)]
     pub fn builtin(&mut self, args: &[String], interactive: bool, posix: bool) -> u8 {
         let mut args = args;
         let (mut list, mut actions, mut signals) = (false, false, false);

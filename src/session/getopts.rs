@@ -1,6 +1,7 @@
 use super::{Session, is_identifier};
 
 impl Session {
+    #[inline(never)]
     pub fn getopts(&mut self, args: &[String]) -> u8 {
         let terminated = args.first().is_some_and(|a| a == "--");
         let args = if terminated { &args[1..] } else { args };

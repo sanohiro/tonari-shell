@@ -204,6 +204,7 @@ impl Session {
         u8::from(out.flush().is_err())
     }
 
+    #[inline(never)]
     pub fn directory_stack(&mut self, command: &str, args: &[String], out: &mut dyn Write) -> u8 {
         let (mut long, mut vertical, mut numbered, mut clear, mut no_cd) =
             (false, false, false, false, false);

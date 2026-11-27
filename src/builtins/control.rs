@@ -6,6 +6,7 @@ const SPECIAL: &[&str] = &[
     "shift", "times", "trap", "unset",
 ];
 
+#[inline(never)]
 pub fn caller(session: &Session, args: &[String]) -> u8 {
     let args = if args.first().is_some_and(|a| a == "--") {
         &args[1..]
@@ -44,6 +45,7 @@ pub fn caller(session: &Session, args: &[String]) -> u8 {
     u8::from(line.is_err())
 }
 
+#[inline(never)]
 pub fn enable(session: &mut Session, mut args: &[String]) -> u8 {
     let (mut disable, mut list, mut all, mut special) = (false, false, false, false);
     while let Some(opt) = crate::builtins::flags::next(&mut args) {
@@ -89,6 +91,7 @@ pub fn enable(session: &mut Session, mut args: &[String]) -> u8 {
     status
 }
 
+#[inline(never)]
 pub fn suspend(session: &Session, mut args: &[String]) -> u8 {
     let force = args.first().is_some_and(|s| s == "-f");
     if force {
