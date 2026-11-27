@@ -109,9 +109,12 @@ class ShellTests(unittest.TestCase):
     def test_function_source_after_changing_arg0(self):
         source = "shopt -s extdebug\na() { :; }\nBASH_ARGV0=changed\nb() { :; }\ndeclare -F a b"
         for shell in self.shells_for(minimum=5):
-            result = self.command(shell, source, "initial")
-            self.assertEqual((result.returncode, result.stdout, result.stderr),
-                             (0, b"a 2 initial\nb 4 changed\n", b""))
+            with self.subTest(shell=shell):
+                expected = (b"a 2 environment\nb 4 environment\n"
+                            if shell == BASH and self.bash_before_53()
+                            else b"a 2 initial\nb 4 changed\n")
+                result = self.command(shell, source, "initial")
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, b""))
 
     def test_path_lookup_reuses_overflow_storage(self):
         directory = Path(*(["x" * 150] * 4))
