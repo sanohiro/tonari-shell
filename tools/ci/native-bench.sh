@@ -344,6 +344,7 @@ case "$SUITE" in
       --case capture-positional-program --case capture-scalar-program \
       --case array-slice-reference --case array-slice-dense --case array-slice-sparse --case array-index-fields --case array-assoc-order --case array-assoc-small \
       --case substitute-single-scalar --case trim-fixed-width --case substitute-fixed-class --case substitute-fixed-width
+    run ordered-replies python3 tools/bench_completion.py "$current" "$bin/baseline" --bash "$ref" --reply-list --runs 31
     run ordered-words python3 tools/bench_completion.py "$current" "$bin/baseline" --bash "$ref" --nosort --reuse-words --runs 31
     run sorted-words python3 tools/bench_completion.py "$current" "$bin/baseline" --bash "$ref" --reuse-words --runs 21
     run duplicate-history python3 tools/bench_history_fields.py "$current" "$bin/baseline" --deep-page --entries 100000 --runs 15 ;;

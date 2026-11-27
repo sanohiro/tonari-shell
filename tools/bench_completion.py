@@ -151,6 +151,7 @@ def main():
     parser.add_argument("--files", type=int, default=10000, choices=[10000, 100000], help="executable files in the directory and PATH fixture")
     parser.add_argument("--runs", type=int, default=30)
     mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--reply-list", action="store_true", help="measure ordered callback replies")
     mode.add_argument("--word-list", action="store_true", help="measure a registered 10,000-word completion")
     mode.add_argument("--branches", action="store_true", help="complete one filename across 12 independent directories")
     mode.add_argument("--scan-key", action="store_true", help="distinguish scan completion from a key arriving 1 ms into it")
@@ -176,7 +177,7 @@ def main():
         home = Path(scratch)
         bindir = home / "files"
         bindir.mkdir()
-        if not (args.word_list or args.reuse_words or args.callback or args.long_line or args.branches):
+        if not (args.reply_list or args.word_list or args.reuse_words or args.callback or args.long_line or args.branches):
             digits = len(str(args.files))
             for i in range(args.files):
                 (bindir / f"item-{i:0{digits}d}.dat").touch(mode=0o755)
@@ -217,6 +218,13 @@ def main():
         elif args.long_line:
             rc = home / "rc"
             rc.write_text(f"PS1='{PROMPT.decode()}'\nHISTSIZE=0\nHISTFILE=/dev/null\n")
+        elif args.reply_list:
+            numbers = [(i * 73) % 10_000 for i in range(10_000)]
+            words = " ".join(f"option-{i:05d}" for i in numbers + numbers[::32])
+            rc = home / "rc"
+            rc.write_text(f"PS1='{PROMPT.decode()}'\nHISTFILE=/dev/null\nchoices=({words})\n"
+                          '_reply() { COMPREPLY=("${choices[@]}"); }\n'
+                          'demo() { :; }\ncomplete -o nosort -F _reply demo\n')
         elif args.callback:
             rc = home / "rc"
             rc.write_text(f"PS1='{PROMPT.decode()}'\n"
@@ -291,6 +299,16 @@ def main():
                     continue
                 if args.long_line:
                     long_line(shell, home, bindir, rc, metrics)
+                    continue
+                if args.reply_list:
+                    line = b"demo opt"
+                    with terminal(shell, home, bindir, rc, prompt=PROMPT) as fd:
+                        os.write(fd, line)
+                        read_until(fd, line)
+                        elapsed = timed_keys(fd, b"\t", b"ion-0")
+                        os.write(fd, b"@\x0c")
+                        read_until(fd, PROMPT + line + b"ion-0@")
+                    metrics["ordered callback, 10000 replies"].append(elapsed)
                     continue
                 if args.callback:
                     metrics["Tab then key, 100 ms callback"].append(completion(shell, home, bindir, rc, b"demo ma", b"tch "))

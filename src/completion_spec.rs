@@ -779,7 +779,7 @@ fn callback(
     let values = if matches!(flow, crate::Flow::Discard(_) | crate::Flow::Exit(_)) {
         Vec::new()
     } else {
-        session.array_values("COMPREPLY")
+        session.take_completion_reply()
     };
     session.restore(old);
     (values, matches!(flow, crate::Flow::Continue(124)))
@@ -1080,8 +1080,16 @@ fn generate_for_tab(
         }
     }
     if spec.options.contains(CompOption::Nosort) {
-        let mut seen = BTreeSet::new();
-        words.retain(|w| seen.insert(w.clone()));
+        // Borrow the candidates while recording first occurrences, then compact in place.
+        if words.len() > 1 {
+            let mut seen = std::collections::HashSet::with_capacity(words.len());
+            let keep: Vec<_> = words
+                .iter()
+                .map(|word| seen.insert(word.as_str()))
+                .collect();
+            let mut keep = keep.into_iter();
+            words.retain(|_| keep.next().unwrap());
+        }
     } else {
         words.sort_unstable();
         words.dedup();
@@ -1208,6 +1216,26 @@ mod tests {
         assert!(!result.replacement.ends_with(' '));
         assert_eq!(session.get("COMP_LINE").as_deref(), Some("saved"));
         assert_eq!(session.array_values("COMPREPLY"), ["saved"]);
+    }
+
+    #[test]
+    fn callback_keeps_order_and_restores_dense_and_sparse_replies() {
+        for values in [
+            "(zeta alpha zeta amber)",
+            "([2]=zeta [6]=alpha [8]=zeta [9]=amber)",
+        ] {
+            let mut session = Session::default();
+            let code = format!("COMPREPLY=(saved); choose() {{ COMPREPLY={values}; }}");
+            crate::execute_program(&mut session, crate::parser::parse(&code).unwrap(), 0, false);
+            invoke(
+                &mut session,
+                "complete",
+                &["-o", "nosort", "-F", "choose", "demo"],
+            );
+            let result = complete::at("demo ", 5, &mut session, true, false).unwrap();
+            assert_eq!(result.choices, ["zeta", "alpha", "amber"]);
+            assert_eq!(session.array_values("COMPREPLY"), ["saved"]);
+        }
     }
 
     #[test]
