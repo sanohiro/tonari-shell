@@ -43,4 +43,10 @@ binary=$(tools/build-release.sh)
 "$binary" --noprofile --norc
 ```
 
-For development, use `cargo build --locked` and `cargo test --locked`. To run the shell and PTY regression suite, build the executable first and run `python3 tests/shell.py target/debug/tonari`. Use `REFERENCE_BASH` to select the Bash reference. 開発時は通常の Cargo ビルドを使えます。比較対象の Bash は `REFERENCE_BASH` で選べます。[Regression guide / 互換性検証](compatibility.md)
+For development, use `cargo build --locked` and `cargo test --locked`. The shell and terminal regression suite compares against GNU Bash 5.2 or 5.3. Build the release executable as shown in the README and point `REFERENCE_BASH` at the reference you want to test. On macOS the system ships Bash 3.2. If you installed a newer Bash through Homebrew, select that executable explicitly.
+
+```sh
+REFERENCE_BASH="$(brew --prefix bash)/bin/bash" python3 tests/shell.py target/release/tonari
+```
+
+開発時は通常の Cargo ビルドと単体テストを使えます。シェル・端末の回帰試験では GNU Bash 5.2 または 5.3 を比較対象にします。macOS 標準の Bash は 3.2 なので、Homebrew で Bash をインストールしている場合は上のようにパスを指定します。Linux で `/bin/bash` が対象の版であれば `python3 tests/shell.py target/release/tonari` で実行できます。[Regression guide / 互換性検証](compatibility.md)
