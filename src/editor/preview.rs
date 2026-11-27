@@ -46,7 +46,6 @@ pub(super) fn during<T>(
         cursor: view.cursor,
         screen: Screen {
             output: String::new(),
-            enable_paste: false,
             row: screen.row,
             width: screen.width,
             height: screen.height,

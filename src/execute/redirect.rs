@@ -346,14 +346,18 @@ pub(super) fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> Resu
 // redirect inside the body can reuse their numbers without breaking restoration.
 pub(crate) fn capture_stdout(run: impl FnOnce() -> Flow) -> io::Result<(Flow, Vec<u8>)> {
     use std::io::{Read, Seek, Write};
-    use std::os::fd::AsFd;
+    use std::os::fd::BorrowedFd;
     io::stdout().flush()?;
     let saved = SavedFd::capture(&Action::Dup(1, 1), &[])?;
-    let mut file = {
-        let (file, name) = fd::create_temp_file("/tmp/tonari-capture-XXXXXX".into())?;
-        std::fs::remove_file(name)?;
-        fd::PrivateFile::duplicate(file.as_fd())?
-    };
+    let stream = unsafe { libc::tmpfile() };
+    if stream.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let file = unsafe { fd::PrivateFile::duplicate(BorrowedFd::borrow_raw(libc::fileno(stream))) };
+    unsafe {
+        libc::fclose(stream);
+    }
+    let mut file = file?;
     duplicate(file.as_raw_fd(), 1)?;
     let flow = run();
     let flushed = io::stdout().flush();

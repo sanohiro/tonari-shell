@@ -14,6 +14,8 @@ if [[ $SUITE == startup-review ]]; then
   python3 tools/bench_startup.py "$bin/baseline" "$current" --bash "$ref" "${opts[@]}" > "$out/startup.txt"
   python3 tools/bench_editor_input.py "$bin/baseline" "$current" "$ref" --case Ctrl-R --case Miss --runs 31 > "$out/unicode.txt"
   python3 tools/bench_history.py "$bin/baseline" "$current" --escaped --entries 100000 --runs 31 > "$out/history.txt"
+  python3 tools/bench_editor_input.py "$bin/baseline" "$current" --entries 260000 --case Ctrl-R --case Miss --runs 31 > "$out/older.txt"
+  python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --case uncached-path-spawn --case current-shell-file-capture --runs 31 --timing started > "$out/execute.txt"
   wc -c "$bin/baseline" "$current" > "$out/sizes.txt"
   exit
 fi

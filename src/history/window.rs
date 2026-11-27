@@ -25,6 +25,7 @@ impl From<&Metadata> for Stamp {
 
 pub(super) const PAGE: usize = 16 * 1024;
 const CAPACITY: usize = 4 * 1024 * 1024;
+const READ_CHUNK: usize = 256 * 1024;
 
 #[derive(Default)]
 pub(super) struct Window {
@@ -53,7 +54,12 @@ impl Window {
         if stamp.len < 32 * 1024 || waiting() {
             return;
         }
-        let count = stamp.len.min(CAPACITY as u64);
+        // Larger journals search older records in bounded blocks on demand.
+        let count = if stamp.len > CAPACITY as u64 {
+            READ_CHUNK as u64
+        } else {
+            stamp.len
+        };
         self.start = stamp.len - count;
         if self.start != 0 && file.seek(SeekFrom::Start(self.start)).is_err() {
             return;
@@ -65,7 +71,7 @@ impl Window {
                 self.interrupted = true;
                 break;
             }
-            let segment = (count as usize - self.bytes.len()).min(256 * 1024);
+            let segment = (count as usize - self.bytes.len()).min(READ_CHUNK);
             if !matches!(
                 crate::input::read_spare(&file, &mut self.bytes, segment),
                 Ok(1..)
