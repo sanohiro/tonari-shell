@@ -41,12 +41,20 @@ def redirected_compound(header, footer):
     return header + "\n" + "v=1\n" * 1000 + footer + '\necho "$v"', "1"
 
 
+def function_source():
+    return "".join(f"func{k}() {{\n  if :; then\n    v={k}\n  fi\n}}\n" for k in range(200)) + "func199"
+
 def listing_loop(command, count):
     return (f'for ((i=0; i<{count}; ++i)); do {command} || exit 1; done >/dev/null\necho "$i"',
             str(count))
 
 
 CASES = {
+    "source-functions-repeat": eval_loop(". ./functions.sh", 'echo "$v"', "199", count=25),
+    "source-functions-mixed": ("".join(
+        f'fn{k}() {{\n local a=$1 b=${{2:-default{k}}}\n'
+        ' if [[ $a == arg* ]]; then\n  REPLY="$a:$b"\n else\n  REPLY="$b:$a"\n fi\n}\n'
+        for k in range(400)) + 'fn399 arg; echo "$REPLY"', "arg:default399"),
     "capture-position": eval_loop('v=$(echo "$1")', 'echo "$v"', "one two", "set -- 'one two'", 50),
     "capture-trim": eval_loop('v=$(echo "${p##*/}")', 'echo "$v"', "end", "p=/a/b/end", 50),
     "capture-default": eval_loop('v=$(echo "${p:-def}")', 'echo "$v"', "def", "unset p", 50),
@@ -55,6 +63,8 @@ CASES = {
                                 """set -- 'a b' ''; f() { builtin printf '<%s>' "$@"; }""", 50),
     "capture-helper-lines": eval_loop('v=$(f "$i")', 'echo "$v"', "49",
                                      """f() { printf '%s\\n' "$1"; }""", 50),
+    "capture-helper-stderr": eval_loop('v=$(f "$i" ok)', 'echo "$v"', "49 ok",
+                                      """f() { command printf '%s\\n' "$*" 2>/dev/null; }""", 50),
     "null-builtin-out": eval_loop("echo hi >/dev/null || exit 1", 'echo "$i"', "2000"),
     "null-builtin-err": eval_loop(": 2>/dev/null || exit 1", 'echo "$i"', "2000"),
     "redirected-group": redirected_compound("{ :", ":; } 2>/dev/null"),
@@ -547,8 +557,7 @@ CASES["aliases-200-list"] = listing_loop("alias -p", 100)
 CASES.update({
     "bindings-1000-prefix": eval_loop('compgen -A variable bench_var_99 >/dev/null',
                                      'compgen -A variable bench_var_999', "bench_var_999", count=500),
-    "core-parse-functions": ("".join(f"func{k}() {{\n  if :; then\n    v={k}\n  fi\n}}\n" for k in range(200))
-                             + 'func199; echo "$v"', "199"),
+    "core-parse-functions": (function_source() + '; echo "$v"', "199"),
     "syntax-control": ("echo ok", "ok"),
     "core-copy-arithmetic": eval_loop('x=$((i+1))', 'echo "$x"', "20000", "x=0", 20000),
     "core-trim": eval_loop('x=${p##*/}', 'echo "$x"', "name", "p=dir/path/name", 20000),
@@ -624,6 +633,8 @@ def main():
         home = Path(temp)
         env = {"HOME": temp, "PATH": "/usr/bin:/bin", "LC_ALL": "C"}
         (home / "rows").write_text("".join(f"record {i}\n" for i in range(2000)))
+        if not args.case or "source-functions-repeat" in args.case:
+            (home / "functions.sh").write_text(function_source())
         if not args.case or "glob-bracket-list" in args.case:
             directory = home / "brackets"
             directory.mkdir()

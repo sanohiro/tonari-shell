@@ -273,6 +273,10 @@ fn captured_output(mut output: Vec<u8>, code: u8) -> Result<(String, u8), &'stat
 }
 
 fn sole_plain_command(body: &[parser::Statement]) -> Option<&parser::SimpleCommand<parser::Word>> {
+    sole_command(body).filter(|cmd| cmd.redirects.is_empty())
+}
+
+fn sole_command(body: &[parser::Statement]) -> Option<&parser::SimpleCommand<parser::Word>> {
     let [statement] = body else {
         return None;
     };
@@ -280,8 +284,7 @@ fn sole_plain_command(body: &[parser::Statement]) -> Option<&parser::SimpleComma
     (!statement.negated
         && statement.condition == parser::Condition::Always
         && cmd.compound.is_none()
-        && cmd.assignments.is_empty()
-        && cmd.redirects.is_empty())
+        && cmd.assignments.is_empty())
     .then_some(cmd)
 }
 
@@ -303,10 +306,11 @@ fn wrapped_capture(
     {
         return None;
     }
-    let cmd = sole_plain_command(function.definition.body.statements())?;
+    let cmd = sole_command(function.definition.body.statements())?;
     let (program, operands) = cmd.words.split_first()?;
     let path = program.as_literal()?;
     if path.starts_with('/')
+        && cmd.redirects.is_empty()
         && arguments.is_empty()
         && !session.traps.has_explicit_traps()
         && !session.is_exported("SHELLOPTS")
@@ -327,7 +331,7 @@ fn wrapped_capture(
     {
         return None;
     }
-    let (program, operands) = if path == "builtin" {
+    let (program, operands) = if matches!(path, "builtin" | "command") {
         let (name, operands) = operands.split_first()?;
         let name = name.as_literal()?;
         if session.disabled_builtins.contains(name) {
@@ -653,6 +657,21 @@ fn capture_simple(
         }
         let safe = match cmd.redirects.as_slice() {
             [] => true,
+            [r] if !external => {
+                // The string-only formatter never writes a diagnostic. Open the
+                // device after expansion, exactly where the redirect takes effect.
+                body.len() == 1
+                    && !session.noclobber
+                    && program == "printf"
+                    && matches!(
+                        args.first().and_then(Word::as_literal),
+                        Some("%s" | "%s\n" | "%s\\n")
+                    )
+                    && r.variable.is_none()
+                    && r.fd == 2
+                    && r.target == parser::Target::Write
+                    && r.word.as_literal() == Some("/dev/null")
+            }
             [r] if external && r.variable.is_none() => match (r.fd, r.target) {
                 (2, parser::Target::Write) => r.word.as_literal() == Some("/dev/null"),
                 (0, parser::Target::HereString) => {
@@ -738,6 +757,12 @@ fn capture_simple(
             .try_for_each(|arg| env.append_fields(arg.clone(), &mut fields));
         session.signal_line = original;
         expanded.ok()?;
+        if !cmd.redirects.is_empty() {
+            let device = crate::execute::open_null_device(libc::O_WRONLY)?;
+            // A real substitution needs two free descriptors for its capture pipe.
+            // Defer to it on descriptor exhaustion or an unusual device.
+            device.try_clone().ok()?;
+        }
         code = match name.unwrap() {
             "echo" => {
                 crate::builtins::echo_into(&fields, &mut output, session);

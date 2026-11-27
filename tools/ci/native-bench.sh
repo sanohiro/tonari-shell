@@ -10,7 +10,7 @@ esac
 source tools/ci/bash-source.sh
 if [[ $SUITE == capture-parser ]]; then
   args=()
-  for name in capture-{position,trim,default,math,helper,helper-lines} null-builtin-{out,err} core-parse-functions redirected-group core-{case,test,arithmetic} pipeline; do
+  for name in capture-{position,trim,default,math,helper,helper-lines,helper-stderr} null-builtin-{out,err} source-functions-{repeat,mixed} core-parse-functions redirected-group core-{case,test,arithmetic} pipeline; do
     args+=(--case "$name")
   done
   python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 25 "${args[@]}" > "$out/scripts.txt"

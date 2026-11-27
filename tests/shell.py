@@ -3741,6 +3741,21 @@ printf '%s\n' "$(frame inner)" "$(inc)" "$(echo "$((expr))")" "$(alt)" "$(idx)"
 printf '%s\n' "$i:${missing-unset}:$1"
 """, 0, b"frame:inner\n3\n3\nchild\n0\n3:unset:outer\n", minimum=5)
 
+    def test_capture_with_child_trap(self):
+        self.compare("""n=0; trap '((n++))' CHLD; set -- ok
+v=$(echo "$1"); echo "$v:$n" """, 0, b"ok:1\n", minimum=5)
+
+    def test_captured_string_formatter_with_stderr_redirect(self):
+        self.compare(r"""set -- 'a b' ''; IFS=:
+printf() { echo shadow; }
+f() { command printf '%s\n' "$*" 2>/dev/null; }
+g() { builtin printf '%d' invalid 2>/dev/null; }
+v=$(f "$@" end); echo "$?:<$v>"
+v=$(g); echo "$?:<$v>"
+set -C; v=$(f again); echo "$?:<$v>"
+exec 2>&-; v=$(f last); echo "$?:<$v>"
+""", 0, b"0:<a b::end>\n1:<0>\n0:<again>\n0:<last>\n")
+
     def test_null_redirects_have_independent_open_file_descriptions(self):
         mutate = shlex.quote("import fcntl, os; fcntl.fcntl(1, fcntl.F_SETFL, os.O_NONBLOCK)")
         verify = shlex.quote("import fcntl, os, sys; flags=fcntl.fcntl(1, fcntl.F_GETFL); "

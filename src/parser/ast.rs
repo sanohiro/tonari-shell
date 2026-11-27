@@ -203,7 +203,7 @@ pub enum Command {
         posix: bool,
         command: Box<Command>,
     },
-    Test(Expr),
+    Test(Box<Expr>),
     Arithmetic(crate::arithmetic::Expression),
     ForArithmetic(Box<ArithmeticForClause>),
     Subshell(Vec<Statement>),

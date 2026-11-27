@@ -614,9 +614,9 @@ fn parameter_word(
     let mut after_colon = false;
     let quoted_apostrophes = outer_quoted && !super::POSIX.get();
     let mut inside_apostrophes = false;
-    while !chars.as_str().is_empty() {
+    loop {
         let start = chars.as_str();
-        let c = chars.next().unwrap();
+        let Some(c) = chars.next() else { break };
         let eligible = empty || after_colon;
         after_colon = false;
         match c {
@@ -745,9 +745,9 @@ fn double_quoted(
     inside_quoted_operand: bool,
 ) -> Result<(), Error> {
     let mut empty = true;
-    while !chars.as_str().is_empty() {
+    loop {
         let start = chars.as_str();
-        let c = chars.next().unwrap();
+        let Some(c) = chars.next() else { break };
         if c == '"' {
             if empty {
                 word.literal("");
@@ -1344,9 +1344,12 @@ fn scan_word(
             *chars = start[plain..].chars();
             return Ok(Some(token));
         }
-        word.literal(literal);
         *chars = start[plain..].chars();
-        started = true;
+        return Ok(Some(Token::Word(LexWord {
+            word: Word::Literal(literal.to_owned()),
+            protected: false,
+            assignment: None,
+        })));
     } else if start.as_bytes().get(plain) == Some(&b'[')
         && let Some(prefix) = super::array::indexed_prefix(start)
         && (if plain == 0 {

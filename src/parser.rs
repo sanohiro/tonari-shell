@@ -888,7 +888,7 @@ impl Reader {
                 let expr = self.test_or()?;
                 self.newlines();
                 self.expect("]]")?;
-                Ok(Command::Test(expr))
+                Ok(Command::Test(Box::new(expr)))
             }
             Some("coproc") => self.coproc(),
             Some("case") => self.case_clause(),
@@ -1008,7 +1008,7 @@ impl Reader {
 
     fn if_clause(&mut self) -> Result<Command, Error> {
         self.tokens.pop_front();
-        let mut branches = Vec::new();
+        let mut branches = Vec::with_capacity(1);
         loop {
             let condition = self.list(&["then"])?;
             self.expect("then")?;
@@ -1742,7 +1742,9 @@ mod tests {
     #[test]
     fn conditional_syntax_and_arithmetic_commands() {
         let program=parse(r#"[[ -n "$x" && ( "$x" == a* || "$x" =~ ^(a|b)[0-9]+$ ) ]]; for ((i=0;i<3;i++)); do ((sum+=i)); done"#).unwrap();
-        assert!(matches!(program[0].command, Command::Test(Expr::And(..))));
+        assert!(
+            matches!(&program[0].command, Command::Test(expr) if matches!(**expr, Expr::And(..)))
+        );
         assert!(matches!(program[1].command, Command::ForArithmetic(_)));
         assert!(parse("[[ x && ]]").is_err());
         assert!(matches!(parse("[[ x =="), Err(Error::Incomplete(_))));

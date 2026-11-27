@@ -1,6 +1,6 @@
 mod redirect;
-pub(crate) use redirect::capture_stdout;
 use redirect::*;
+pub(crate) use redirect::{capture_stdout, open_null_device};
 mod external;
 pub(crate) use external::Environment;
 use external::External;
