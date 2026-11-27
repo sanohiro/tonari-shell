@@ -395,6 +395,21 @@ impl BracketPattern {
         })
     }
 
+    // The caller has verified ASCII input and a star-free fixed-width pattern.
+    pub(super) fn accepts_fixed_ascii(&self, text: &[u8]) -> bool {
+        let (prefix, suffix) = self.edges.split_at(self.prefix_len);
+        text.strip_prefix(prefix)
+            .and_then(|s| s.strip_suffix(suffix))
+            .is_some_and(|middle| {
+                middle.len() == self.tokens.len()
+                    && self
+                        .tokens
+                        .iter()
+                        .zip(middle)
+                        .all(|(token, &byte)| token.accepts(&[byte, 0, 0, 0]))
+            })
+    }
+
     pub(super) fn accepts(&self, text: &[u8], period: bool) -> bool {
         let (prefix, suffix) = self.edges.split_at(self.prefix_len);
         if period && text.starts_with(b".") && !prefix.starts_with(b".") {

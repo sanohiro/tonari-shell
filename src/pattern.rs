@@ -274,6 +274,11 @@ impl FixedWidth {
                     .bytes()
                     .zip(candidate.bytes())
                     .all(|(p, c)| c != 0 && (p == b'?' || p == c))
+            } else if let Matcher::Bracket(compiled, _) = matcher
+                && !compiled.needs_locale
+            {
+                !candidate.as_bytes().contains(&0)
+                    && compiled.accepts_fixed_ascii(candidate.as_bytes())
             } else {
                 matcher.matches(candidate)
             }

@@ -1,7 +1,7 @@
 use super::modifier::ReplaceMode;
 
 fn write_replacement(out: &mut String, template: &str, matched: &str, expand_amp: bool) {
-    if !expand_amp || !template.contains(['\\', '&']) {
+    if !expand_amp {
         out.push_str(template);
         return;
     }
@@ -27,6 +27,7 @@ pub(super) fn substitute(
     fold: Option<crate::session::CharacterLocale>,
 ) -> String {
     use ReplaceMode::*;
+    let expand_amp = expand_amp && template.contains(['\\', '&']);
     // A single bracket expression consumes one character. Avoid trying every
     // possible suffix when deleting matching characters from a string.
     if mode == All
@@ -97,7 +98,7 @@ pub(super) fn substitute(
         let literal = crate::pattern::unescape(pattern);
         let needle = literal.as_ref();
         let mut rendered = String::new();
-        let replacement = if expand_amp && template.contains(['\\', '&']) {
+        let replacement = if expand_amp {
             write_replacement(&mut rendered, template, needle, expand_amp);
             rendered.as_str()
         } else {
@@ -130,12 +131,6 @@ pub(super) fn substitute(
         write_replacement(&mut out, template, &text, expand_amp);
         return out;
     }
-    let bounds: Vec<_> = text
-        .char_indices()
-        .map(|(i, _)| i)
-        .chain(std::iter::once(text.len()))
-        .collect();
-    let mut out = String::new();
     let mut copied = 0;
     let mut i = 0;
     let escaped_end = pattern.bytes().rev().take_while(|&b| b == b'\\').count() % 2 != 0;
@@ -148,6 +143,33 @@ pub(super) fn substitute(
         .and_then(|_| crate::pattern::FixedWidth::parse(pattern));
     let max_width = width.as_ref().map(|f| f.width);
     let ascii = width.as_ref().filter(|_| text.is_ascii());
+    let mut out = String::new();
+    if let Some(fixed) = ascii
+        && mode == All
+    {
+        let width = fixed.width;
+        debug_assert_ne!(width, 0);
+        while let Some(candidate) = text.get(i..i + width) {
+            if fixed.matches_ascii(pattern, candidate, basic.as_ref().unwrap()) {
+                out.push_str(&text[copied..i]);
+                write_replacement(&mut out, template, candidate, expand_amp);
+                i += width;
+                copied = i;
+            } else {
+                i += 1;
+            }
+        }
+        if copied == 0 {
+            return text;
+        }
+        out.push_str(&text[copied..]);
+        return out;
+    }
+    let bounds: Vec<_> = text
+        .char_indices()
+        .map(|(i, _)| i)
+        .chain(std::iter::once(text.len()))
+        .collect();
     let starts = (max_width.is_none()
         && group.is_none()
         && !escaped_end
