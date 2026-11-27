@@ -222,6 +222,78 @@ pub(crate) fn bracket_end(after_open: &str) -> Option<usize> {
     bracket::class_end(after_open.as_bytes())
 }
 
+// A fixed-width glob consumes this many ASCII bytes. In a byte locale,
+// multiple wildcard atoms can also consume a single UTF-8 scalar.
+pub(crate) struct FixedWidth {
+    pub(crate) width: usize,
+    literals_and_questions: bool,
+}
+
+impl FixedWidth {
+    pub(crate) fn parse(pattern: &str) -> Option<Self> {
+        if !pattern.is_ascii() || pattern.contains('\0') {
+            return None;
+        }
+        let mut rest = pattern.as_bytes();
+        let mut width = 0;
+        let mut literals_and_questions = true;
+        while let Some((&atom, tail)) = rest.split_first() {
+            rest = match atom {
+                b'*' => return None,
+                b'[' => {
+                    let end = bracket::class_end(tail)?;
+                    if tail[..end].windows(2).any(|p| p == b"[." || p == b"[=") {
+                        return None;
+                    }
+                    literals_and_questions = false;
+                    &tail[end + 1..]
+                }
+                b'\\' => {
+                    literals_and_questions = false;
+                    tail.get(1..)?
+                }
+                _ => tail,
+            };
+            width += 1;
+        }
+        Some(Self {
+            width,
+            literals_and_questions,
+        })
+    }
+
+    pub(crate) fn literal_span<'a>(&self, pattern: &'a str) -> Option<(usize, &'a [u8])> {
+        if !self.literals_and_questions {
+            return None;
+        }
+        let bare = pattern.trim_start_matches('?');
+        let literal = bare.trim_end_matches('?');
+        (!literal.contains('?')).then_some((pattern.len() - bare.len(), literal.as_bytes()))
+    }
+
+    pub(crate) fn matches_ascii(
+        &self,
+        pattern: &str,
+        candidate: &str,
+        matcher: &Matcher<&str>,
+    ) -> bool {
+        candidate.len() == self.width
+            && if self.literals_and_questions {
+                pattern
+                    .bytes()
+                    .zip(candidate.bytes())
+                    .all(|(p, c)| c != 0 && (p == b'?' || p == c))
+            } else if let Matcher::Bracket(compiled, _) = matcher
+                && !compiled.needs_locale
+            {
+                !candidate.as_bytes().contains(&0)
+                    && compiled.accepts_fixed_ascii(candidate.as_bytes())
+            } else {
+                matcher.matches(candidate)
+            }
+    }
+}
+
 pub fn matches(value: &str, pattern: &str) -> bool {
     Matcher::new(pattern).matches(value)
 }
@@ -331,6 +403,25 @@ fn trim_boundary(
         .map(|(i, _)| i)
         .chain(std::iter::once(value.len()));
     let basic = group.is_none().then(|| Matcher::new(pattern));
+    if let Some(matcher) = &basic
+        && let Some(fixed) = FixedWidth::parse(pattern)
+    {
+        let cut = if prefix {
+            fixed.width
+        } else {
+            value.len().saturating_sub(fixed.width)
+        };
+        let candidate = if prefix {
+            value.get(..cut)
+        } else {
+            value.get(cut..)
+        };
+        if let Some(candidate) = candidate.filter(|s| s.is_ascii()) {
+            return fixed
+                .matches_ascii(pattern, candidate, matcher)
+                .then_some(cut);
+        }
+    }
     let matches_at = |&i: &usize| {
         let candidate = if prefix { &value[..i] } else { &value[i..] };
         group.as_ref().map_or_else(
@@ -859,8 +950,26 @@ mod tests {
     fn trim_boundaries_agree_with_glob_matching() {
         for text in ["", "aaaa", "/a/雪/雪", ".log", "a.log.log", "a*b"] {
             for pattern in [
-                "", "*", ".log", "*aa", "aa*", "*/", "/*", "*雪", "雪*", "a*z", "*?", "[a]*",
-                r"\*", "a\\*b",
+                "",
+                "*",
+                ".log",
+                "*aa",
+                "aa*",
+                "*/",
+                "/*",
+                "*雪",
+                "雪*",
+                "a*z",
+                "*?",
+                "[a]*",
+                r"\*",
+                "a\\*b",
+                "??",
+                "??-??",
+                "[a-z]?",
+                "[[:alpha:]]?",
+                "[[=a=]]?",
+                r"\??",
             ] {
                 for prefix in [true, false] {
                     let cuts: Vec<_> = text

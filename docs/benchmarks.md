@@ -1,5 +1,25 @@
 # Startup and execution / 起動と実行性能
 
+<a id="bounded-parameter-globs"></a>
+
+## 2026-11-27 · Fixed-width substitution and trim / 変数置換と切り詰め
+
+Median/p95 ms on M1, 31 interleaved native release samples against the preceding sparse-environment release and GNU Bash 5.3.20. `tools/bench_scripts.py CURRENT --previous PREVIOUS --bash BASH --timing started --runs 31` with the named cases. The replacement cases verify the full result across 128 matches. The trim case removes both ends of a 2,058-byte scalar 32 times.
+
+| Workload | Previous | Current | Bash |
+|---|---:|---:|---:|
+| substitute-fixed-width | 54.367/55.847 | 0.506/0.570 | 0.874/1.068 |
+| substitute-fixed-class | 24.132/26.551 | 0.575/0.671 | 1.014/1.149 |
+| trim-fixed-width | 19.103/20.431 | 0.551/0.616 | 7.171/7.387 |
+| substitute-class | 2.941/3.135 | 2.931/3.106 | 5.399/5.552 |
+| strings | 4.849/5.061 | 4.687/4.906 | 10.052/10.576 |
+
+The native runner includes the three new cases in `probe`. The existing single bracket and ordinary path string cases serve as controls. 文字数に上限を付けた最初の M1 試作は疑問符の置換で 0.666 ms だった。ASCII の比較で文字ごとの C 文字列生成も省いた。
+
+The first bounded implementation on Linux x86-64 took 0.477 ms for bracket replacement (Bash 0.447 ms) and 0.229 ms for question marks (Bash 0.319 ms). Following that result, the ASCII global replacement scans byte slices directly, class matching skips the star backtracking loop when width is fixed, and the replacement template is inspected once per expansion. [First Linux run](https://github.com/sanohiro/tonari-shell/actions/runs/45950300521)
+
+On Linux the streaming bracket replacement reached 0.284 ms (previous 80.756, Bash 0.460). The question-mark case still took 0.228 ms versus 0.325 for Bash, 11 µs above the target. A further pass tests the literal span between leading/trailing wildcards and directly consumes single-character replacements. The UTF-8 throughput control replaces 3,072 scalars 16 times. [Streaming Linux run](https://github.com/sanohiro/tonari-shell/actions/runs/45950987058)
+
 <a id="sparse-environment"></a>
 
 ## 2026-11-27 · Launches with private variables / シェル内変数の多い起動
@@ -14,6 +34,8 @@
 With 32 exported keys the medians were 25.557 → 25.499 ms on M1 and 6.260 → 6.280 ms on Linux. The M1 arithmetic control took 3.836 → 4.016 ms and function calls took 6.987 → 7.168 ms. Linux reached 0.674 of Bash time for the 48 launches. M1 の配布バイナリは 1,748,896 → 1,748,912 バイト、Linux の静的 PIE は 2,428,440 → 2,431,576 バイト。 [Native Linux measurements](https://github.com/sanohiro/tonari-shell/actions/runs/45948451490)
 
 The first index build exposed a scalar arithmetic regression. Two invalidation variants still cost 2–5% on the M1 loop. The final implementation formats an integer directly into a stack buffer with `itoa` and reuses the existing shell string. In 41 interleaved M1 samples, median times (previous → final, Bash) were 3.850 → 3.762 ms (15.900) for arithmetic, 3.352 → 3.252 ms (13.658) for a changing loop bound, 6.358 → 6.314 ms (17.582) for functions and 60.495 → 57.240 ms (91.878) for the sparse environment. macOS の配布サイズとリンク先は最初の候補と同じ。
+
+Final native Linux medians (previous → final, Bash) were 28.644 → 25.559 ms (36.187) for 48 launches, 3.550 → 3.285 ms (19.126) for arithmetic, 3.096 → 2.885 ms (17.035) for a changing loop bound and 8.181 → 7.977 ms (23.492) for functions. The final static PIE is 2,431,768 bytes. [Linux run with decimal formatting](https://github.com/sanohiro/tonari-shell/actions/runs/45949317136)
 
 <a id="packed-argv"></a>
 

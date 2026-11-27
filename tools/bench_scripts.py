@@ -382,6 +382,26 @@ echo "$i"
         'for ((i=0; i<400; i++)); do base=${path##*/}; done\necho "${#base}"',
         "2048",
     ),
+    "substitute-single-scalar": (
+        "text='" + "雪🌸x" * 1024 + "'\n"
+        'for ((i=0; i<16; i++)); do value=${text//?/x}; done\necho "${#value}"',
+        "3072",
+    ),
+    "substitute-fixed-class": (
+        "text='" + "ab-12:" * 128 + "'\n"
+        'for ((i=0; i<8; i++)); do value=${text//[a-z][a-z]-[0-9][0-9]/X}; done\necho "$value"',
+        "X:" * 128,
+    ),
+    "trim-fixed-width": (
+        "text='ab-12" + "Z" * 2048 + "cd-34'\n"
+        'for ((i=0; i<32; i++)); do a=${text##??-??}; b=${a%%[a-z][a-z]-??}; done\necho "${#b}"',
+        "2048",
+    ),
+    "substitute-fixed-width": (
+        "text='" + "ab-12:" * 128 + "'\n"
+        'for ((i=0; i<8; i++)); do value=${text//??-??/X}; done\necho "$value"',
+        "X:" * 128,
+    ),
     "external-wide-argv": (
         'set -- {1..4096} "" "日本語"\n'
         'for ((i=0; i<11; i++)); do /bin/echo "$@" >/dev/null || exit 1; done\n/bin/echo "$@"',
@@ -515,7 +535,7 @@ def main():
         for case in args.case or CASES:
             case_env = env
             if case.startswith("glob-extension-") or case in (
-                "field-split-unicode", "glob-utf8-sort", "glob-utf8-once", "glob-utf8-large", "glob-utf8-large-repeat",
+                "substitute-single-scalar", "field-split-unicode", "glob-utf8-sort", "glob-utf8-once", "glob-utf8-large", "glob-utf8-large-repeat",
                 "glob-ignore-large", "glob-nocase-large", "glob-utf8-100k", "glob-utf8-mixed-40k",
             ):
                 case_env = dict(env, LC_ALL=args.utf8_locale)

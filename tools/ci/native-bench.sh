@@ -335,7 +335,8 @@ case "$SUITE" in
       --case merged-pipeline --case merged-pipeline-redirect --case redirect-stderr --case background-subshell-wait \
       --case printf-list-newline --case printf-list-count \
       --case heredoc-external-file --case here-string-capture --case here-string-builtin-read \
-      --case capture-positional-program --case capture-scalar-program ;;
+      --case capture-positional-program --case capture-scalar-program \
+      --case substitute-single-scalar --case trim-fixed-width --case substitute-fixed-class --case substitute-fixed-width ;;
   foreground)
     run foreground python3 tests/compat/foreground.py "$current" "$ref" ;;
   history-windows)

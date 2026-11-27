@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## November 27 · Fixed-width parameter patterns / 固定長パターンの変数展開
+
+A star-free ASCII pattern made of literals, question marks, escapes and ordinary bracket expressions has one possible width on ASCII text. On UTF-8 input the same number bounds the scalar endpoints worth trying, including in a byte locale. Keep locale-aware bracket matching and use the general matcher for extended groups, collating symbols and equivalence classes. The trim and substitution paths share this width calculation.
+
+疑問符や文字クラスをつないだパターンで、入力の末尾からすべての長さを試していた。ASCII では候補を一つに絞り、日本語・絵文字では UTF-8 境界を保持する。34種類の入力、53種類のパターン、8演算を2ロケール・3設定で旧版と照合した。Bash と共有する期待値は `test_fixed_width_parameter_patterns` に収録した。 入力中の末尾に未エスケープのバックスラッシュがあるパターンは従来の経路を使う。この境界は POSIX.1-2024 の 2.14.1 で未規定。今回の照合で見た既存の Bash との差はこの入力と、C ロケールでの非 ASCII 文字に限られた。 [POSIX shell patterns](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_14_01) · [Measurements / 計測](benchmarks.md#bounded-parameter-globs)
+
 ## November 27 · Private variables and process environments / 子プロセスに渡す変数
 
 Comparing cached child environments used to visit every shell binding. Only exported variables and bindings masking inherited names can affect the variable delta. An index can narrow that scan when few of the bindings qualify. Read current values, option strings, exported functions and command-prefix assignments for each launch. Small and densely exported tables use direct iteration.
