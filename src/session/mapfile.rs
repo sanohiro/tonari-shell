@@ -142,7 +142,7 @@ pub(crate) fn run(
     session: &mut Session,
     command: &str,
     args: &[String],
-    last: u8,
+    mut last: u8,
     here: Option<(i32, &[u8])>,
 ) -> Flow {
     let mut options = match Options::parse(args) {
@@ -174,7 +174,8 @@ pub(crate) fn run(
         .variables
         .get(options.name)
         .and_then(|v| v.letter_case);
-    if options.limit == 0 && options.callback.is_none() && !integer {
+    let mut watch = session.traps.read_handler();
+    if options.limit == 0 && options.callback.is_none() && !integer && !watch {
         let result = if options.origin.is_some() {
             let mut var = session
                 .declared_variable(options.name, false)
@@ -229,6 +230,16 @@ pub(crate) fn run(
         let mut any = false;
         let mut truncated = false;
         loop {
+            if watch {
+                match input.wait(session, last, command, None, true) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        watch = session.traps.read_handler();
+                        continue;
+                    }
+                    Err(flow) => return flow,
+                }
+            }
             match input.next() {
                 Ok(Some(b)) => {
                     any = true;
@@ -245,6 +256,7 @@ pub(crate) fn run(
                     }
                 }
                 Ok(None) => break,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted && watch => continue,
                 Err(e) => {
                     diagnostic!("{command}: {e}");
                     return Flow::Continue(1);
@@ -274,7 +286,7 @@ pub(crate) fn run(
                 crate::word::quote::single_quote(line)
             );
             match crate::eval_text(session, &callback_command, last) {
-                Flow::Continue(_) => {}
+                Flow::Continue(code) => last = code,
                 flow => return flow,
             }
             if session.readonly(options.name) {
@@ -282,6 +294,7 @@ pub(crate) fn run(
                 return Flow::Continue(1);
             }
             input = Input::new(fd);
+            watch = session.traps.read_handler();
         }
         if let Err(error) = session.assign_input_element(options.name, index, line) {
             diagnostic!("{command}: {error}");

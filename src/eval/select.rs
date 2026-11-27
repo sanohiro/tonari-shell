@@ -61,7 +61,7 @@ pub(super) fn run(
             } else {
                 eprint!("{prompt}");
             }
-            match s.read(&[], None) {
+            match s.read(&[], None, last) {
                 Flow::Continue(0) => {}
                 Flow::Continue(_) => {
                     println!();

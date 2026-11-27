@@ -258,6 +258,16 @@ impl Traps {
             .then_some(action.status)
     }
 
+    pub(crate) fn read_handler(&self) -> bool {
+        self.entries
+            .iter()
+            .any(|(&sig, entry)| wait_mask::is_os_signal(sig) && !entry.command.is_empty())
+    }
+
+    pub(crate) fn read_pending(&self) -> bool {
+        TERMINATING.load(Relaxed) != 0 || PENDING.load(Relaxed) & !self.running != 0
+    }
+
     pub fn has_explicit_traps(&self) -> bool {
         !self.entries.is_empty()
     }
