@@ -2,6 +2,7 @@ use crate::{Session, parser};
 use std::fs::File;
 use std::os::unix::fs::FileExt;
 
+const BULK_CLOSE_MIN_BYTES: usize = 1024;
 const GROUP_MIN_BYTES: usize = 32 * 1024;
 
 // Installers and version managers often wrap a whole script in one brace group.
@@ -130,6 +131,26 @@ pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
             _ => Err(size),
         }
     };
+    // Large, flat compounds often have only one possible terminator. Locate
+    // its line in bulk; nested or ambiguous text uses the line scan below.
+    if !aliases && buffered.len() >= BULK_CLOSE_MIN_BYTES {
+        let mut hits = memchr::memmem::find_iter(buffered, close);
+        let at = hits.next().ok_or(buffered.len())?;
+        if hits.next().is_none()
+            && (at == 0 || separator(&buffered[at - 1]))
+            && buffered.get(at + close.len()).is_none_or(separator)
+        {
+            let size = match memchr::memchr(b'\n', &buffered[at..]) {
+                Some(offset) => at + offset + 1,
+                None if at_eof => buffered.len(),
+                None => return Err(buffered.len()),
+            };
+            let bytes = &buffered[..size];
+            let lines =
+                memchr::memchr_iter(b'\n', bytes).count() + usize::from(!bytes.ends_with(b"\n"));
+            return probe(size, lines).ok().flatten().ok_or(buffered.len());
+        }
+    }
     let final_line = at_eof && !buffered.is_empty() && !buffered.ends_with(b"\n");
     let ends = memchr::memchr_iter(b'\n', buffered).chain(final_line.then_some(buffered.len()));
     for (i, end) in ends.enumerate() {
@@ -213,4 +234,24 @@ fn recognizes_redirected_terminators_without_reparsing_each_line() {
         .unwrap();
         assert_eq!((calls, consumed), (1, body.len()));
     }
+}
+
+#[test]
+fn inline_terminators_inside_heredocs_have_bounded_parse_attempts() {
+    let first = "if :; then\n";
+    let text = format!(
+        ": <<'END'\n{}END\n:; fi 2>log",
+        ":; fi 2>fake\n".repeat(256)
+    );
+    let mut attempts = 0;
+    let (_, consumed, lines) = buffered_compound(first, text.as_bytes(), true, false, |size| {
+        attempts += 1;
+        parser::parse(&format!("{first}{}", &text[..size]))
+    })
+    .unwrap();
+    assert_eq!((consumed, lines), (text.len(), text.lines().count()));
+    assert!(
+        attempts <= 12,
+        "{attempts} probes for 256 false terminators"
+    );
 }
