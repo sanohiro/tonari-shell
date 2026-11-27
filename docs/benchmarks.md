@@ -1,5 +1,71 @@
 # Startup and execution / 起動と実行性能
 
+<a id="deep-core-engine"></a>
+
+## November 28 · Session variables and repeated evaluation / セッション変数と繰り返し実行
+
+Each cell gives median milliseconds in the order **PR #46 / PR #47 / Bash**. The Tonari release revisions were `83224cd` and `13b804d`. Apple M1 ran macOS 27.2.1 and GNU Bash 5.3.20. Native Ubuntu 24.04 x86-64 ran on EPYC 9V74 with Bash 5.2.21. The driver rotated the three binaries with five warm-ups and 25 measured runs on M1 or 21 on Linux. A fresh shell populated the requested number of variables before signaling readiness. The measured interval covered sourcing the same script, its result check and shell exit. [Linux release binaries and timings](https://github.com/sanohiro/tonari-shell/actions/runs/46046262357)
+
+| Workload | Apple M1 | Linux x86-64 |
+|---|---:|---:|
+| `bindings-0-copy` | 11.824 / 3.071 / 24.750 | 10.745 / 3.399 / 27.364 |
+| `bindings-0-sum` | 6.057 / 3.779 / 28.082 | 4.746 / 4.865 / 27.345 |
+| `bindings-0-locals` | 4.998 / 2.659 / 7.597 | 5.088 / 3.057 / 7.121 |
+| `bindings-200-copy` | 21.827 / 3.098 / 24.743 | 14.719 / 3.445 / 27.633 |
+| `bindings-200-sum` | 12.720 / 3.890 / 28.142 | 7.313 / 4.979 / 27.584 |
+| `bindings-200-locals` | 6.383 / 2.972 / 7.584 | 6.718 / 3.189 / 7.418 |
+| `bindings-1000-copy` | 30.620 / 3.079 / 24.641 | 18.122 / 3.553 / 27.638 |
+| `bindings-1000-sum` | 18.468 / 3.789 / 27.937 | 9.585 / 5.026 / 27.802 |
+| `bindings-1000-locals` | 7.675 / 2.722 / 7.586 | 7.359 / 3.207 / 7.628 |
+| `bindings-1000-prefix` | 6.860 / 6.701 / 814.482 | 4.071 / 4.051 / 1047.210 |
+| `core-function` | 9.720 / 3.912 / 27.569 | 8.953 / 3.548 / 28.598 |
+| `core-indexed` | 15.061 / 5.617 / 40.801 | 13.265 / 6.581 / 40.203 |
+| `core-arithmetic` | 10.580 / 7.890 / 33.985 | 10.127 / 9.135 / 33.982 |
+| `core-copy-arithmetic` | 12.756 / 9.937 / 30.787 | 13.065 / 11.717 / 33.468 |
+| `core-trim` | 14.661 / 10.846 / 34.324 | 14.023 / 12.043 / 40.919 |
+| `core-default` | 13.138 / 9.932 / 29.470 | 11.732 / 10.488 / 33.362 |
+| `core-printf` | 13.326 / 7.325 / 41.976 | 11.983 / 7.462 / 44.732 |
+| `core-case` | 7.978 / 4.330 / 35.398 | 5.974 / 4.185 / 37.154 |
+| `core-test` | 8.535 / 5.942 / 26.680 | 7.448 / 5.461 / 28.228 |
+| `core-parse-functions` | 0.735 / 0.724 / 0.993 | 0.803 / 0.789 / 0.798 |
+| `local-eighty` | 6.878 / 2.416 / 6.176 | 7.790 / 2.867 / 6.281 |
+| `redirected-group` | 0.699 / 0.660 / 1.436 | 0.773 / 0.739 / 1.363 |
+| `redirected-if` | 0.697 / 0.665 / 1.439 | 0.777 / 0.746 / 1.340 |
+| `redirected-loop` | 0.791 / 0.676 / 1.453 | 0.794 / 0.723 / 1.362 |
+| `redirected-case` | 0.760 / 0.644 / 1.416 | 0.774 / 0.719 / 1.338 |
+| `redirected-group-control` | 0.695 / 0.660 / 1.429 | 0.761 / 0.744 / 1.347 |
+
+The copy and sum loops use 20,000 iterations. The ten-local function runs 1,000 times and the eighty-local function runs 150 times. The associative and indexed semantics are exercised separately by the shell regression suite. For the two variable lookups, changing only the container to a standard randomly seeded HashMap took copy from 12.03 / 22.30 / 31.32 ms at 0 / 200 / 1,000 bindings to 10.07 / 10.04 / 10.09 ms on M1. Holding the final source constant and changing only the hasher, copy with 1,000 bindings took 4.142 ms with std and 3.065 ms with foldhash in an otherwise identical build at `097a78a`. The corresponding sum took 5.170 and 3.883 ms. Prefix completion with 1,000 bindings initially regressed from 4.36 to 11.05 ms on an EPYC 7763 before prefix reuse. [Intermediate Linux run](https://github.com/sanohiro/tonari-shell/actions/runs/46044138889)
+
+The M1 met the two-thirds target on 25/26 script workloads and the EPYC 9V74 on 25/26. Sourcing 200 function definitions was the one workload above the threshold on both machines. With no extra bindings, the sum loop on EPYC 9V74 took 4.865 ms against the previous 4.746 ms and Bash at 27.345 ms. On a second native runner (AMD EPYC 7763 64-Core Processor), 25 of 26 script medians met the two-thirds target. Its 200-function source took 0.921 / 0.916 / 0.991 ms and 80 locals took 9.859 / 3.602 / 8.073 ms. [EPYC 7763 samples](https://github.com/sanohiro/tonari-shell/actions/runs/46046267343) · [Third native run](https://github.com/sanohiro/tonari-shell/actions/runs/46046817576)
+
+At the intermediate revision `097a78a` on an Intel Xeon 6975P-C, the five redirected compounds took 64.9–66.3% of Bash time. The 80-local workload still took 5.652 ms against Bash at 5.595 ms. Switching the per-scope save table to a hash map cut that workload from 4.249 to 2.606 ms in an M1 prototype. Full local listings still sort their output, and restoring a scope with special variables retains its previous order. [Intermediate Xeon results](https://github.com/sanohiro/tonari-shell/actions/runs/46045556792)
+
+The syntax checks below include launching a fresh binary with `-n`. The small control exposes the launch cost. The five redirected-compound controls also include execution. The 200-function source benchmark above executes declarations and verifies the final function. Across 27 M1 samples an extra ASCII lexer loop took 0.828 ms for that source, alongside 0.829 ms with the existing loop. The release keeps the existing loop.
+
+| Syntax-only workload | Apple M1 | Linux x86-64 |
+|---|---:|---:|
+| `syntax-control` | 3.511 / 3.274 / 7.960 | 0.363 / 0.354 / 0.834 |
+| `redirected-group` | 3.752 / 3.599 / 8.355 | 0.941 / 0.905 / 1.337 |
+| `core-parse-functions` | 3.799 / 3.616 / 8.311 | 0.671 / 0.666 / 1.207 |
+
+The command-name completion fixture uses a PTY, six PATH directories and 2,031 executables. The same session completes four commands. The first Tab builds the directory index. Later Tabs validate its contents. Linux used 31 sessions per binary and M1 used 41.
+
+| Visible response | Apple M1 | Linux x86-64 |
+|---|---:|---:|
+| Tab 1 | 0.904 / 0.886 / 2.230 | 0.779 / 0.755 / 0.730 |
+| Tab 2 | 0.065 / 0.065 / 1.512 | 0.071 / 0.072 / 0.694 |
+| Tab 3 | 0.056 / 0.054 / 1.484 | 0.056 / 0.056 / 0.685 |
+| Tab 4 | 0.050 / 0.050 / 1.484 | 0.055 / 0.055 / 0.681 |
+
+On M1 the first prompt with the unmodified nvm 0.40.3 script and an installed default Node took 169.34 / 168.03 / 216.99 ms. Startup through the first successful `node --version` and next prompt took 185.55 / 184.20 / 233.86 ms. The fixture switched existing Node versions 24.1.0 and 18.13.0. The switch took 107.14 / 106.47 / 129.95 ms over 17 measured sessions. With an empty temporary NVM_DIR and `--no-use`, sourcing nvm and checking its function in an already running shell took 3.38 / 3.44 / 5.80 ms. Clean exec-to-first-prompt on M1 took 2.920 / 2.676 / 7.447 ms, and first-key echo p95 took 0.033 / 0.038 / 0.029 ms.
+
+An external launch control at `097a78a` with 8,192 shell variables took 51.521 / 51.461 / 81.513 ms on M1. The comparison keeps the child environment and the reference command identical.
+
+The stripped M1 binary grew from 1,781,632 to 1,798,160 bytes, linked only to libSystem. The stripped Linux static PIE changed from 2,437,272 to 2,418,232 bytes. All 71 Rust tests passed. The M1 shell/PTY suite passed 361 cases and skipped three. Additional checks covered the exported environment after scope changes, array-subscript side effects, physical line numbers, quoted arguments and prefix completion after insertions and removals. The local source-review suite against GNU Bash 5.3.20 retained the existing `globignore-separators` difference. Run the `core-engine` native suite or select the rows above with `python3 tools/bench_scripts.py PATH_TO_TONARI --previous PREVIOUS_TONARI --bash PATH_TO_BASH --timing started --case NAME`. Use `--timing syntax` for the syntax-only rows and `python3 tools/bench_completion.py PATH_TO_TONARI --bash PATH_TO_BASH --command-cache` for PTY completion.
+
+各欄は旧版・新版・同じマシンのBashの中央値（ms）。変数を用意する時間はループ計測から除いた。1,000変数でも参照と代入は小さいセッションとほぼ同じ時間になった。関数・配列算術にも改善がある一方、関数定義200個の読み込みやnvm初期化全体の短縮は小さい。補完は最初のTabと同じセッションの再検索を別々に比較した。初回Tabやスクリプトの目標達成状況には機種差がある。
+
 <a id="compound-listings-release"></a>
 
 ## November 28 · Redirected compounds, arrays and listings / 複合コマンドのリダイレクト・連想配列・一覧出力
