@@ -75,7 +75,6 @@ fn symbolic(text: &str, mask: libc::mode_t) -> Option<libc::mode_t> {
     Some(!allowed & 0o777)
 }
 
-#[inline(never)]
 pub fn run(args: &[String], posix: bool) -> u8 {
     let mut args = args;
     let mut symbols = false;

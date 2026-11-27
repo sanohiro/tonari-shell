@@ -468,7 +468,6 @@ impl Session {
             .and_then(|entry| entry.write.map(|write| write(self)))
     }
 
-    #[inline(never)]
     pub fn shopt(&mut self, args: &[String]) -> u8 {
         let (mut enable, mut disable, mut reusable, mut quiet, mut set) =
             (false, false, false, false, false);

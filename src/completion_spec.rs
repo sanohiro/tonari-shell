@@ -913,7 +913,6 @@ fn apply(
     Ok(status)
 }
 
-#[inline(never)]
 pub fn run(name: &str, args: &[String], last: u8, session: &mut Session) -> u8 {
     let builtin = CompBuiltin::from_name(name);
     if builtin == CompBuiltin::Compgen && args.is_empty() {
