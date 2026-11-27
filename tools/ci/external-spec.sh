@@ -28,7 +28,8 @@ case "$SUITE" in
       if [[ $SUITE == spec-builtins || $SUITE == spec-previous-builtins ]] &&
          [[ $(uname -s) == Darwin ]] && ! command -v timeout >/dev/null; then
         brew list coreutils >/dev/null || brew install coreutils
-        export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
+        coreutils_prefix=$(brew --prefix coreutils)
+        export PATH="$coreutils_prefix/libexec/gnubin:$PATH"
       fi
       if [[ $SUITE == spec-previous-builtins ]]; then
         python3 "$repo/tools/ci/spec-pairs.py" "$out/manifest.jsonl" "$out/cases.jsonl" \

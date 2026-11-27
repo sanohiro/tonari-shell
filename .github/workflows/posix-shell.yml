@@ -37,6 +37,9 @@ jobs:
       - name: Check interpreter unit tests
         if: matrix.shard == 0
         run: cargo test --locked
+      - name: Check native benchmark helpers
+        if: matrix.shard == 0
+        run: python3 -m unittest discover -s tests/compat -p test_benchmark_helpers.py
       - name: Check POSIX execution order and terminal operands
         if: matrix.shard == 0
         run: python3 tests/shell.py "$RUNNER_TEMP/target/release/tonari" -q -k posix_

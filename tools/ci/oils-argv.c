@@ -31,5 +31,5 @@ int main(int argc, char **argv) {
         argument(argv[i]);
     }
     puts("]");
-    return ferror(stdout) != 0;
+    return fflush(stdout) == EOF || ferror(stdout);
 }

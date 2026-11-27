@@ -1,5 +1,30 @@
 # Startup and execution / 起動と実行性能
 
+<a id="helper-output-audit"></a>
+
+## November 27 · Measurement helper failures / 計測ツールの失敗時の扱い
+
+Apple M1, `cc -O2`, 101 interleaved median wall times in milliseconds. Each invocation includes process startup from the same Python parent. The helpers execute a fixed native workload and can be verified independently of the shell.
+
+| Invocation | Original | Corrected |
+|---|---:|---:|
+| configure-clock /usr/bin/true, writable append log | 6.055 | 5.900 |
+| oils-argv with two arguments | 3.774 | 3.847 |
+| oils-printenv HOME | 3.442 | 3.487 |
+
+The logging precondition and explicit stream flush change the result when output fails. Successful invocations keep the same data and exit status. 事前検査とバッファの書き出しは測定用実行ファイルに限定される。
+
+The cumulative native Linux x86-64 probe compared the distribution build to 01901b2 and the runner's Bash. Its 35 script workloads checked their outputs in 41 samples. Times below are medians in milliseconds; the interactive row has 31 samples. [Native Linux artifacts](https://github.com/sanohiro/tonari-shell/actions/runs/45967483809)
+
+| Linux workload | Before audit | After runtime fixes | Bash |
+|---|---:|---:|---:|
+| Here-string builtin read | 0.708 | 0.683 | 87.429 |
+| Descriptor moves | 0.460 | 0.447 | 0.788 |
+| External commands | 4.729 | 4.700 | 6.869 |
+| Pipelines | 7.048 | 7.003 | 9.592 |
+| Functions | 6.330 | 6.513 | 15.119 |
+| Tab with 10,000 callback replies | 1.633 | 1.613 | 6.514 |
+
 <a id="read-descriptor-audit"></a>
 
 ## November 27 · Read errors and traps / read のエラーとトラップ
