@@ -16,6 +16,12 @@ if [[ $SUITE == startup-review ]]; then
   python3 tools/bench_history.py "$bin/baseline" "$current" --escaped --entries 100000 --runs 31 > "$out/history.txt"
   python3 tools/bench_editor_input.py "$bin/baseline" "$current" --entries 260000 --case Ctrl-R --case Miss --runs 31 > "$out/older.txt"
   python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --case uncached-path-spawn --case current-shell-file-capture --runs 31 --timing started > "$out/execute.txt"
+  if [[ $RUNNER_OS == Linux ]]; then
+    for build in baseline current; do
+      strace -o "$out/capture-$build.trace" -e trace=open,openat,unlink,unlinkat,fcntl \
+        "$bin/$build" -c 'umask 777; x=${ printf "%s" "$0"; }; test "$x" = witness' witness
+    done
+  fi
   wc -c "$bin/baseline" "$current" > "$out/sizes.txt"
   exit
 fi
