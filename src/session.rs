@@ -29,7 +29,6 @@ pub(crate) const SUBSCRIPT_RANGE: &str = "array subscript out of range";
 
 use foldhash::HashMap;
 use std::borrow::Cow;
-use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::os::unix::ffi::OsStrExt;
@@ -345,7 +344,7 @@ pub struct Session {
     pub debug_base: std::cell::OnceCell<Vec<String>>,
     pub traced_functions: std::collections::BTreeSet<String>,
     pub call_lines: Vec<usize>,
-    pub function_environment: BTreeMap<String, Option<String>>,
+    function_environment: HashMap<String, functions::Export>,
     pub loop_depth: u32,
     pub parent_loop_in_subshell: bool,
     pub editor_kill: String,
@@ -1443,11 +1442,12 @@ impl Session {
                     None
                 }
             })
-            .chain(
-                self.function_environment
-                    .iter()
-                    .map(|(k, v)| (k.as_str(), v.as_deref().map(Cow::Borrowed))),
-            )
+            .chain(self.function_environment.values().map(|export| {
+                (
+                    export.key.as_str(),
+                    export.body.as_deref().map(Cow::Borrowed),
+                )
+            }))
             .chain(
                 assignments
                     .iter()

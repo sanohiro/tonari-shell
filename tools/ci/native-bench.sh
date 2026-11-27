@@ -19,6 +19,11 @@ if [[ $SUITE == function-tables ]]; then
   python3 tools/bench_completion.py "$bin/baseline" "$current" --bash "$ref" --word-list --nosort --runs 21 > "$out/words.txt"
   python3 tools/bench_completion.py "$bin/baseline" "$current" --project --runs 21 > "$out/project.txt"
   python3 tools/bench_history_fields.py "$bin/baseline" "$current" --deep-page --entries 100000 --runs 21 > "$out/history.txt"
+  if [[ -r /usr/share/bash-completion/bash_completion ]]; then
+    printf '%s\n' '. /usr/share/bash-completion/bash_completion' \
+      'declare -F _parse_help _parse_usage _completion_loader >/dev/null || exit 1' > "$RUNNER_TEMP/completion-rc"
+    python3 tools/bench_login.py "$current" --previous "$bin/baseline" --bash "$ref" --rcfile "$RUNNER_TEMP/completion-rc" --runs 31 > "$out/bash-completion.txt"
+  fi
   exit
 fi
 if [[ $SUITE == core-engine ]]; then

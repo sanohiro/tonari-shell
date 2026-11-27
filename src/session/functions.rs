@@ -49,6 +49,14 @@ impl FunctionTable {
     }
 }
 
+// Keep the encoded child-environment key and its optional removal in one
+// entry. Shell-side attribute queries use the original function name directly.
+#[derive(Clone)]
+pub(super) struct Export {
+    pub(super) key: String,
+    pub(super) body: Option<String>,
+}
+
 impl Function {
     fn export_value(&self) -> String {
         let body = self.definition.location.text();
@@ -134,8 +142,7 @@ impl Session {
         });
         let function = Function { definition, source };
         if self.allexport || self.function_exported(&name) {
-            self.function_environment
-                .insert(format!("BASH_FUNC_{name}%%"), Some(function.export_value()));
+            self.set_function_export(&name, Some(function.export_value()));
         }
         self.functions.insert(name, function);
     }
@@ -157,8 +164,7 @@ impl Session {
             diagnostic!("error importing function definition for `{name}'");
             return;
         }
-        let key = format!("BASH_FUNC_{name}%%");
-        self.function_environment.insert(key.clone(), None);
+        self.set_function_export(name, None);
         // Parse only the declaration body supplied by the protocol.
         // The environment key stays a name throughout the import.
         let Ok(mut parsed) = parse_final(&format!("__tonari_import {value}")) else {
@@ -184,25 +190,35 @@ impl Session {
                     source: "environment".into(),
                 },
             );
-            self.function_environment
-                .insert(key, Some(value.to_owned()));
+            self.set_function_export(name, Some(value.to_owned()));
         }
     }
 
     pub fn export_function(&mut self, name: &str, on: bool) -> Result<(), &'static str> {
         let function = self.functions.get(name).ok_or("not a function")?;
         let value = on.then(|| function.export_value());
-        self.function_environment
-            .insert(format!("BASH_FUNC_{name}%%"), value);
+        self.set_function_export(name, value);
         Ok(())
     }
 
+    fn set_function_export(&mut self, name: &str, body: Option<String>) {
+        if let Some(export) = self.function_environment.get_mut(name) {
+            export.body = body;
+        } else {
+            self.function_environment.insert(
+                name.to_owned(),
+                Export {
+                    key: format!("BASH_FUNC_{name}%%"),
+                    body,
+                },
+            );
+        }
+    }
+
     pub fn function_exported(&self, name: &str) -> bool {
-        !self.function_environment.is_empty()
-            && self
-                .function_environment
-                .get(&format!("BASH_FUNC_{name}%%"))
-                .is_some_and(Option::is_some)
+        self.function_environment
+            .get(name)
+            .is_some_and(|export| export.body.is_some())
     }
 
     pub fn forget_function(&mut self, name: &str) {

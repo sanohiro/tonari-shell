@@ -54,6 +54,16 @@ class ShellTests(unittest.TestCase):
                 proc = self.command(shell, command + " >&-; exit $?")
                 self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"", b""))
 
+    def test_simple_and_nested_alias_parameters(self):
+        self.compare("""shopt -s expand_aliases
+alias show='printf %s "$v"'
+alias nested='printf "<%s>" "$(show)"'
+for v in 'two words' '*'; do eval nested; done
+set -o posix
+v=changed; eval nested
+alias show='printf %s again'; eval nested
+""", 0, b"<two words><*><changed><again>")
+
     def test_function_name_order_tracks_live_definitions(self):
         self.compare("""fn_z() { :; }; fn_a() { :; }; fn_b() { :; }
 compgen -A function fn_

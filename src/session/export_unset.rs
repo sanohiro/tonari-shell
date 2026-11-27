@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 
 impl Session {
     pub fn export(&mut self, args: &[String], bindings: &mut Bindings) -> u8 {
