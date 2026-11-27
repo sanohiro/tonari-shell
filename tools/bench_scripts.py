@@ -100,6 +100,22 @@ for ((i=0; i<1000; i++)); do
 done
 echo "${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
 """, "dir/999"),
+    "printf-assign-number": (
+        "for ((i=0;i<2048;i++)); do printf -v x '%+08d' -31; done; echo \"$x\"",
+        "-0000031",
+    ),
+    "umask-symbolic-query": (
+        "umask 077; for ((i=0;i<1024;i++)); do umask g+x; umask g-x; done; umask",
+        "0077",
+    ),
+    "history-at-limit": (
+        'HISTSIZE=8192; for ((i=0;i<16384;i++)); do history -s "row $i"; done; history 1',
+        "16384  row 16383",
+    ),
+    "arithmetic-live-bound": (
+        'limit=16000; sum=0; for ((i=0;i<limit;i+=2)); do ((sum+=i)); done; echo "$sum"',
+        "63992000",
+    ),
     "printf-formats": (
         "for ((i=0; i<1024; i++)); do printf '<%s:%02x:%.1f>\\n' item 31 1.5; done",
         "\n".join(["<item:1f:1.5>"] * 1024),

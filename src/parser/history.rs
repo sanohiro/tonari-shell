@@ -1,5 +1,16 @@
 use super::*;
 
+fn with_tokens<T>(source: &str, read: impl FnOnce(&[Token], &[(usize, usize)]) -> T) -> Option<T> {
+    let (mut tokens, mut spans, _) = lex(source, false, true).ok()?;
+    let result = read(&tokens, &spans);
+    if tokens.capacity() <= 256 && spans.capacity() <= 256 {
+        tokens.clear();
+        spans.clear();
+        TOKEN_BUFFERS.set((tokens, spans));
+    }
+    Some(result)
+}
+
 // Fold only token-separating newlines. Quoted newlines, comment endings and
 // here-document boundaries must survive recall and execution.
 pub(crate) fn history_command(text: &str) -> std::borrow::Cow<'_, str> {
@@ -7,40 +18,40 @@ pub(crate) fn history_command(text: &str) -> std::borrow::Cow<'_, str> {
     if text.contains(['#', '\x60']) || text.contains("<<") {
         return Cow::Borrowed(text);
     }
-    let Ok((tokens, spans, _)) = lex(text, false, true) else {
-        return Cow::Borrowed(text);
-    };
-    if tokens.iter().any(|t| {
-        matches!(t, Token::ArrayStart | Token::EndArm(_))
-            || matches!(t.keyword(), Some("case" | "[[" | "function"))
-    }) {
-        return Cow::Borrowed(text);
-    }
-    let mut result = String::new();
-    let mut start = 0;
-    for (i, &(a, b)) in spans.iter().enumerate() {
-        if !matches!(tokens[i], Token::Newline) || i == 0 {
-            continue;
+    with_tokens(text, |tokens, spans| {
+        if tokens.iter().any(|t| {
+            matches!(t, Token::ArrayStart | Token::EndArm(_))
+                || matches!(t.keyword(), Some("case" | "[[" | "function"))
+        }) {
+            return Cow::Borrowed(text);
         }
-        let previous = &tokens[i - 1];
-        if matches!(previous, Token::RightParen)
-            || tokens.get(i + 1).and_then(Token::keyword) == Some("in")
-        {
-            continue;
+        let mut result = String::new();
+        let mut start = 0;
+        for (i, &(a, b)) in spans.iter().enumerate() {
+            if !matches!(tokens[i], Token::Newline) || i == 0 {
+                continue;
+            }
+            let previous = &tokens[i - 1];
+            if matches!(previous, Token::RightParen)
+                || tokens.get(i + 1).and_then(Token::keyword) == Some("in")
+            {
+                continue;
+            }
+            result.push_str(&text[start..a]);
+            if !lexer::command_position(&tokens[..i]) {
+                result.push(';');
+            }
+            result.push(' ');
+            start = b;
         }
-        result.push_str(&text[start..a]);
-        if !lexer::command_position(&tokens[..i]) {
-            result.push(';');
+        if start == 0 {
+            Cow::Borrowed(text)
+        } else {
+            result.push_str(&text[start..]);
+            Cow::Owned(result)
         }
-        result.push(' ');
-        start = b;
-    }
-    if start == 0 {
-        Cow::Borrowed(text)
-    } else {
-        result.push_str(&text[start..]);
-        Cow::Owned(result)
-    }
+    })
+    .unwrap_or(Cow::Borrowed(text))
 }
 
 pub(crate) fn history_word_spans(s: &str) -> Vec<(usize, usize)> {
@@ -93,34 +104,31 @@ pub(crate) fn history_designator_spans(line: &str, extglob: bool) -> Vec<(usize,
     }) {
         return history_word_spans(line);
     }
-    let parsed = {
-        let _extglob = crate::ScopedCell::enter(&EXTGLOB, extglob);
-        lex(line, false, true)
-    };
-    let Ok((tokens, spans, _)) = parsed else {
-        return history_word_spans(line);
-    };
-    let mut result: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
-    let mut duplicate = false;
-    for (token, (start, end)) in tokens.into_iter().zip(spans) {
-        if duplicate
-            && let Some(last) = result.last_mut()
-            && last.1 == start
-            && line[start..end]
-                .trim_end_matches('-')
-                .bytes()
-                .all(|b| b.is_ascii_digit())
-        {
-            last.1 = end;
-        } else if !matches!(token, Token::Newline) {
-            result.push((start, end));
+    let _extglob = crate::ScopedCell::enter(&EXTGLOB, extglob);
+    with_tokens(line, |tokens, spans| {
+        let mut result: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
+        let mut duplicate = false;
+        for (token, (start, end)) in tokens.iter().zip(spans.iter().copied()) {
+            if duplicate
+                && let Some(last) = result.last_mut()
+                && last.1 == start
+                && line[start..end]
+                    .trim_end_matches('-')
+                    .bytes()
+                    .all(|b| b.is_ascii_digit())
+            {
+                last.1 = end;
+            } else if !matches!(token, Token::Newline) {
+                result.push((start, end));
+            }
+            duplicate = matches!(
+                token,
+                Token::Redirect(_, Target::Duplicate | Target::OutputWord)
+            );
         }
-        duplicate = matches!(
-            token,
-            Token::Redirect(_, Target::Duplicate | Target::OutputWord)
-        );
-    }
-    result
+        result
+    })
+    .unwrap_or_else(|| history_word_spans(line))
 }
 
 /// Keep the original shell spelling, including quotes and substitutions.
@@ -150,36 +158,35 @@ pub(crate) fn last_history_argument(line: &str) -> Option<&str> {
         return Some(&trimmed[start..]);
     }
     // Pass the untrimmed line to the lexer: an escaped trailing blank belongs to the word.
-    let (tokens, spans, _) = match lex(line, false, true) {
-        Ok(parts) => parts,
-        Err(_) => return history_word_spans(line).last().map(|&(a, b)| &line[a..b]),
-    };
-    let index = tokens
-        .iter()
-        .zip(&spans)
-        .rposition(|(t, &(a, b))| !matches!(t, Token::Newline) || b - a > 1)?;
-    if matches!(tokens[index], Token::Newline) {
-        // A newline spanning a heredoc includes its closing delimiter.
-        let (a, b) = spans[index];
-        let closing = line[a..b].trim_end_matches('\n').rsplit('\n').next()?;
-        return last_history_argument(closing);
-    }
-    let (mut start, end) = spans[index];
-    // The history word for an adjacent fd duplication includes its operator.
-    if index > 0
-        && spans[index - 1].1 == start
-        && matches!(
-            tokens[index - 1],
-            Token::Redirect(_, Target::Duplicate | Target::OutputWord)
-        )
-        && line[start..end]
-            .trim_end_matches('-')
-            .bytes()
-            .all(|b| b.is_ascii_digit())
-    {
-        start = spans[index - 1].0;
-    }
-    Some(&line[start..end])
+    with_tokens(line, |tokens, spans| {
+        let index = tokens
+            .iter()
+            .zip(spans)
+            .rposition(|(t, &(a, b))| !matches!(t, Token::Newline) || b - a > 1)?;
+        if matches!(tokens[index], Token::Newline) {
+            // A newline spanning a heredoc includes its closing delimiter.
+            let (a, b) = spans[index];
+            let closing = line[a..b].trim_end_matches('\n').rsplit('\n').next()?;
+            return last_history_argument(closing);
+        }
+        let (mut start, end) = spans[index];
+        // The history word for an adjacent fd duplication includes its operator.
+        if index > 0
+            && spans[index - 1].1 == start
+            && matches!(
+                tokens[index - 1],
+                Token::Redirect(_, Target::Duplicate | Target::OutputWord)
+            )
+            && line[start..end]
+                .trim_end_matches('-')
+                .bytes()
+                .all(|b| b.is_ascii_digit())
+        {
+            start = spans[index - 1].0;
+        }
+        Some(&line[start..end])
+    })
+    .unwrap_or_else(|| history_word_spans(line).last().map(|&(a, b)| &line[a..b]))
 }
 
 /// Byte end of the next shell token in the displayed command, including any
@@ -202,12 +209,13 @@ pub(crate) fn suggestion_end(line: &str, cursor: usize) -> usize {
         return line.len() - tail.len() + word;
     }
     let next_end = |source| {
-        lex(source, false, true)
-            .ok()?
-            .1
-            .into_iter()
-            .find(|&(_, end)| end > cursor)
-            .map(|(_, end)| end)
+        with_tokens(source, |_, spans| {
+            spans
+                .iter()
+                .find(|(_, end)| *end > cursor)
+                .map(|&(_, end)| end)
+        })
+        .flatten()
     };
     next_end(line)
         .or_else(|| {

@@ -60,23 +60,24 @@ impl Range {
         })
     }
 
-    fn values(&self) -> impl DoubleEndedIterator<Item = String> + '_ {
-        let steps = self.first.abs_diff(self.last) / self.stride;
-        (0..=steps).map(|index| {
-            let delta = index * self.stride;
-            let n = if self.first <= self.last {
-                self.first.wrapping_add_unsigned(delta)
-            } else {
-                self.first.wrapping_sub_unsigned(delta)
-            };
-            if self.letters {
-                char::from(n as u8).to_string()
-            } else if self.width == 0 {
-                n.to_string()
-            } else {
-                format!("{n:0width$}", width = self.width)
-            }
-        })
+    fn count(&self) -> u64 {
+        1 + self.first.abs_diff(self.last) / self.stride
+    }
+
+    fn value(&self, index: u64) -> String {
+        let delta = index * self.stride;
+        let n = if self.first <= self.last {
+            self.first.wrapping_add_unsigned(delta)
+        } else {
+            self.first.wrapping_sub_unsigned(delta)
+        };
+        if self.letters {
+            char::from(n as u8).to_string()
+        } else if self.width == 0 {
+            n.to_string()
+        } else {
+            format!("{n:0width$}", width = self.width)
+        }
     }
 }
 
@@ -157,6 +158,106 @@ fn parameter_names(parts: Vec<Part>) -> Vec<Part> {
     result
 }
 
+const MAX_WORDS: u64 = 1 << 20;
+const MAX_BYTES: usize = 64 << 20;
+
+// Count alternatives with sums and adjacent expansions with products. An
+// unmatched opening brace leaves its commas literal, but ranges still expand.
+fn word_count(parts: &[Part]) -> u64 {
+    #[derive(Default)]
+    struct Group {
+        sum: u64,
+        product: u64,
+    }
+    let mut parents = Vec::new();
+    let mut group = Group::default();
+    let mut term = 1u64;
+    for part in parts {
+        match part {
+            Part::Range(range) => term = term.saturating_mul(range.count()),
+            Part::Brace("{") => {
+                parents.push((group, term));
+                group = Group { sum: 0, product: 1 };
+                term = 1;
+            }
+            Part::Brace(",") if !parents.is_empty() => {
+                group.sum = group.sum.saturating_add(term);
+                group.product = group.product.saturating_mul(term);
+                term = 1;
+            }
+            Part::Brace("}") if !parents.is_empty() => {
+                let alternatives = group.sum.saturating_add(term);
+                let (outer, prefix) = parents.pop().unwrap();
+                group = outer;
+                term = prefix.saturating_mul(alternatives);
+            }
+            _ => {}
+        }
+    }
+    while let Some((outer, prefix)) = parents.pop() {
+        term = term.saturating_mul(group.product).saturating_mul(prefix);
+        group = outer;
+    }
+    term
+}
+
+enum Siblings {
+    Range {
+        index: usize,
+        next: u64,
+    },
+    Alternatives {
+        open: usize,
+        start: usize,
+        ends: std::vec::IntoIter<usize>,
+        close: usize,
+    },
+}
+
+impl Siblings {
+    // Materialize only the next sibling. Large ranges do not retain a copy
+    // of their prefix, suffix and nested substitutions for every pending word.
+    fn next(&mut self, parts: &[Part]) -> Option<Vec<Part>> {
+        match self {
+            Self::Range { index, next } => {
+                let i = *index;
+                let Part::Range(range) = &parts[i] else {
+                    unreachable!()
+                };
+                if *next >= range.count() {
+                    return None;
+                }
+                let value = range.value(*next);
+                *next += 1;
+                let mut word = Vec::with_capacity(parts.len());
+                word.extend_from_slice(&parts[..i]);
+                word.push(if value.as_bytes()[0].is_ascii_alphanumeric() {
+                    Part::Pattern(value)
+                } else {
+                    Part::Text(value)
+                });
+                word.extend_from_slice(&parts[i + 1..]);
+                Some(word)
+            }
+            Self::Alternatives {
+                open,
+                start,
+                ends,
+                close,
+            } => {
+                let end = ends.next()?;
+                let begin = *start;
+                *start = end + 1;
+                let mut word = Vec::with_capacity(*open + end - begin + parts.len() - *close - 1);
+                word.extend_from_slice(&parts[..*open]);
+                word.extend_from_slice(&parts[begin..end]);
+                word.extend_from_slice(&parts[*close + 1..]);
+                Some(word)
+            }
+        }
+    }
+}
+
 pub fn append_fields(
     parts: Vec<Part>,
     env: &mut Expansion<'_>,
@@ -164,54 +265,73 @@ pub fn append_fields(
     result: &mut Vec<String>,
 ) -> Result<(), Error> {
     if let [Part::Range(range)] = &parts[..] {
-        result.extend(range.values());
+        let count = range.count();
+        if count > MAX_WORDS {
+            return Err("brace expansion exceeds word limit".into());
+        }
+        if range.width.saturating_mul(count as usize) > MAX_BYTES {
+            return Err("brace expansion exceeds byte limit".into());
+        }
+        result.reserve(count as usize);
+        result.extend((0..count).map(|i| range.value(i)));
         return Ok(());
     }
-    let mut pending = vec![parts];
-    while let Some(mut parts) = pending.pop() {
-        match choice(&parts) {
-            Some(Choice::Range(i)) => {
-                let Part::Range(range) = &parts[i] else {
-                    unreachable!()
-                };
-                for value in range.values().rev() {
-                    let mut word = parts[..i].to_vec();
-                    // Generated punctuation is data even when it spells a
-                    // quote, backslash or pattern delimiter in shell source.
-                    word.push(if value.as_bytes()[0].is_ascii_alphanumeric() {
-                        Part::Pattern(value)
-                    } else {
-                        Part::Text(value)
-                    });
-                    word.extend_from_slice(&parts[i + 1..]);
-                    pending.push(word);
+    if word_count(&parts) > MAX_WORDS {
+        return Err("brace expansion exceeds word limit".into());
+    }
+    let mut pending = Vec::new();
+    let mut word = Some(parts);
+    let mut bytes = 0usize;
+    loop {
+        if let Some(mut parts) = word.take() {
+            match choice(&parts) {
+                Some(Choice::Range(index)) => {
+                    pending.push((parts, Siblings::Range { index, next: 0 }))
                 }
-            }
-            Some(Choice::Alternatives {
-                open,
-                close,
-                commas,
-            }) => {
-                let mut end = close;
-                for start in commas.into_iter().rev().chain([open]) {
-                    let mut word =
-                        Vec::with_capacity(open + end - start - 1 + parts.len() - close - 1);
-                    word.extend_from_slice(&parts[..open]);
-                    word.extend_from_slice(&parts[start + 1..end]);
-                    word.extend_from_slice(&parts[close + 1..]);
-                    if !word.is_empty() {
-                        pending.push(word);
+                Some(Choice::Alternatives {
+                    open,
+                    close,
+                    mut commas,
+                }) => {
+                    commas.push(close);
+                    pending.push((
+                        parts,
+                        Siblings::Alternatives {
+                            open,
+                            start: open + 1,
+                            ends: commas.into_iter(),
+                            close,
+                        },
+                    ));
+                }
+                None => {
+                    resolve_tilde(&mut parts);
+                    let before = result.len();
+                    env.append_resolved_fields(
+                        Word::Expanded(parameter_names(parts)),
+                        glob,
+                        result,
+                    )?;
+                    for field in &result[before..] {
+                        bytes = bytes.saturating_add(field.len());
                     }
-                    end = start;
+                    if bytes > MAX_BYTES {
+                        return Err("brace expansion exceeds byte limit".into());
+                    }
                 }
             }
+        }
+        let Some((parts, siblings)) = pending.last_mut() else {
+            return Ok(());
+        };
+        match siblings.next(parts) {
+            Some(next) if !next.is_empty() => word = Some(next),
+            Some(_) => {}
             None => {
-                resolve_tilde(&mut parts);
-                env.append_resolved_fields(Word::Expanded(parameter_names(parts)), glob, result)?;
+                pending.pop();
             }
         }
     }
-    Ok(())
 }
 
 fn resolve_tilde(parts: &mut Vec<Part>) {

@@ -8,9 +8,14 @@ pub(crate) struct Environment {
 }
 
 impl Environment {
-    pub(super) fn prepare(session: &Session, assignments: &[(String, String)]) -> Option<Rc<Self>> {
+    pub(super) fn prepare(
+        session: &Session,
+        assignments: &[(String, String)],
+    ) -> io::Result<Option<Rc<Self>>> {
         let mut live = session.environment_changes(assignments).peekable();
-        live.peek()?;
+        if live.peek().is_none() {
+            return Ok(None);
+        }
         if assignments.is_empty()
             && let Some(cached) = &*session.external_env.borrow()
         {
@@ -21,7 +26,7 @@ impl Environment {
                     .is_some_and(|(k, v)| key == k && value.as_deref() == v.as_deref())
             }) && entries.next().is_none()
             {
-                return Some(cached.clone());
+                return Ok(Some(cached.clone()));
             }
             live = session.environment_changes(assignments).peekable();
         }
@@ -34,8 +39,9 @@ impl Environment {
                 (k, v)
             })
             .collect();
-        // Tonari keeps its variable changes in Session. The original process environment
-        // remains allocated and immutable for the lifetime of these borrowed C strings.
+        // SAFETY: ordinary assignments live in Session. Script reentry replaces
+        // process variables only after it has abandoned this environment and
+        // never returns. Each inherited entry is a NUL-terminated C string.
         let mut pointers = Vec::new();
         let mut inherited = inherited_env();
         unsafe {
@@ -56,7 +62,7 @@ impl Environment {
                 entry.extend_from_slice(name.as_bytes());
                 entry.push(b'=');
                 entry.extend_from_slice(value.as_bytes());
-                let entry = CString::new(entry).expect("validated environment value");
+                let entry = CString::new(entry)?;
                 pointers.push(entry.as_ptr());
                 strings.push(entry);
             }
@@ -70,7 +76,7 @@ impl Environment {
         if assignments.is_empty() {
             *session.external_env.borrow_mut() = Some(env.clone());
         }
-        Some(env)
+        Ok(Some(env))
     }
 }
 
@@ -85,7 +91,7 @@ pub(super) struct External {
 }
 
 impl External {
-    pub(super) fn new(cmd: &PreparedCommand, session: &Session) -> Self {
+    pub(super) fn new(cmd: &PreparedCommand, session: &Session) -> io::Result<Self> {
         Self::for_words(cmd, session, &cmd.words, None, false)
     }
     pub(super) fn for_words(
@@ -94,14 +100,14 @@ impl External {
         arguments: &[String],
         arg0: Option<String>,
         clear_env: bool,
-    ) -> Self {
+    ) -> io::Result<Self> {
         let mut words: Vec<_> = arguments
             .iter()
-            .map(|w| CString::new(w.as_bytes()).unwrap())
-            .collect();
+            .map(|w| CString::new(w.as_bytes()))
+            .collect::<Result<_, _>>()?;
         let original = arg0.as_ref().map(|_| words[0].clone());
         if let Some(arg0) = arg0 {
-            words[0] = CString::new(arg0).unwrap();
+            words[0] = CString::new(arg0)?;
         }
         let executable = original.as_ref().unwrap_or(&words[0]);
         let mut argv = Vec::with_capacity(words.len() + 1);
@@ -110,19 +116,21 @@ impl External {
         let name = std::ffi::OsStr::from_bytes(executable.as_bytes());
         let cached = cmd.cached_path(session, &arguments[0]);
         let search_paths = if let Some(path) = cached {
-            Some(vec![CString::new(path.as_os_str().as_bytes()).unwrap()])
+            Some(vec![CString::new(path.as_os_str().as_bytes())?])
         } else {
-            (!executable.as_bytes().contains(&b'/')).then(|| {
-                let path = lookup::path(cmd, session);
-                let ignored = IgnoredExecutables::new(session);
-                lookup::search_directories(&path)
-                    .map(|dir| dir.join(name))
-                    .filter(|path| !ignored.contains(path))
-                    .map(|path| CString::new(path.as_os_str().as_bytes()).unwrap())
-                    .collect()
-            })
+            (!executable.as_bytes().contains(&b'/'))
+                .then(|| {
+                    let path = lookup::path(cmd, session);
+                    let ignored = IgnoredExecutables::new(session);
+                    lookup::search_directories(&path)
+                        .map(|dir| dir.join(name))
+                        .filter(|path| !ignored.contains(path))
+                        .map(|path| CString::new(path.as_os_str().as_bytes()))
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?
         };
-        Self {
+        Ok(Self {
             words,
             argv,
             diagnostic: session.diagnostic_prefix(|| session.line()),
@@ -135,9 +143,9 @@ impl External {
                     pointers: vec![std::ptr::null()],
                 }))
             } else {
-                Environment::prepare(session, &cmd.assignments)
+                Environment::prepare(session, &cmd.assignments)?
             },
-        }
+        })
     }
 
     pub(super) fn with_script<T>(

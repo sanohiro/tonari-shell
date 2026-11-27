@@ -37,7 +37,6 @@ fn main() {
     println!("cargo:rerun-if-changed=names.txt");
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let mut tables = Tables::default();
-    let mut names = Vec::new();
     let mut records = Vec::new();
     let mut locale_rows = Vec::new();
     let mut fields = Vec::new();
@@ -50,7 +49,6 @@ fn main() {
         assert!(name > previous, "locale names must be unique and sorted");
         previous = name;
         let locale: Locale = name.parse().unwrap();
-        names.push(tables.intern(name));
         numeric_names.push_str(name);
         numeric_offsets.push(u16::try_from(numeric_names.len()).unwrap());
         let profile = (
@@ -118,10 +116,13 @@ fn main() {
         field!(DTFmt, &[datetime]);
         field!(TFmt, &[locale_match!(locale => LC_TIME::T_FMT)]);
         field!(TFmtAmpm, &[locale_match!(locale => LC_TIME::T_FMT_AMPM)]);
-        let index = records.iter().position(|old| *old == row).unwrap_or_else(|| {
-            records.push(row);
-            records.len() - 1
-        });
+        let index = records
+            .iter()
+            .position(|old| *old == row)
+            .unwrap_or_else(|| {
+                records.push(row);
+                records.len() - 1
+            });
         locale_rows.push(u16::try_from(index).unwrap());
     }
     tables
@@ -140,14 +141,34 @@ fn main() {
         fields.join(", ")
     )
     .unwrap();
+    let mut list_ids = Vec::new();
+    let mut field_offsets = Vec::new();
+    let mut compact = vec![Vec::with_capacity(fields.len()); records.len()];
+    for column in 0..fields.len() {
+        field_offsets.push(u16::try_from(list_ids.len()).unwrap());
+        let mut column_lists = Vec::new();
+        for (i, record) in records.iter().enumerate() {
+            let list = record[column];
+            let id = column_lists
+                .iter()
+                .position(|&v| v == list)
+                .unwrap_or_else(|| {
+                    column_lists.push(list);
+                    column_lists.len() - 1
+                });
+            compact[i].push(u8::try_from(id).expect("too many distinct lists for one field"));
+        }
+        list_ids.extend(column_lists);
+    }
     writeln!(
         code,
-        "static RECORDS: &[[u16; {}]] = &{records:?};",
+        "static RECORDS: &[[u8; {}]] = &{compact:?};",
         fields.len()
     )
     .unwrap();
+    writeln!(code, "static FIELD_OFFSETS: &[u16] = &{field_offsets:?};").unwrap();
+    writeln!(code, "static LIST_IDS: &[u16] = &{list_ids:?};").unwrap();
     writeln!(code, "static LOCALE_ROWS: &[u16] = &{locale_rows:?};").unwrap();
-    writeln!(code, "static NAMES: &[u16] = &{names:?};").unwrap();
     writeln!(code, "static ENTRIES: &[u16] = &{:?};", tables.entries).unwrap();
     writeln!(code, "static OFFSETS: &[u16] = &{:?};", tables.offsets).unwrap();
     fs::write(out.join("tables.rs"), code).unwrap();

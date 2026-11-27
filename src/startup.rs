@@ -5,6 +5,68 @@ use std::path::{Path, PathBuf};
 use crate::cli::Invocation;
 use crate::{Flow, Session, input};
 
+#[derive(Default)]
+pub(crate) struct Environment {
+    pub pwd: bool,
+    pub shell_level: i64,
+    pub execution_string: bool,
+    pub posix: bool,
+    pub ignore_eof: Option<String>,
+    pub compat: Option<String>,
+    pub shellopts: Option<String>,
+    pub bashopts: Option<String>,
+}
+
+impl Environment {
+    pub fn read(session: &mut Session) -> Self {
+        use std::ffi::CStr;
+        let mut settings = Self::default();
+        let mut lower_eof = None;
+        let mut entry = crate::execute::inherited_env();
+        let privileged = std::cell::LazyCell::new(|| unsafe {
+            libc::getuid() != libc::geteuid() || libc::getgid() != libc::getegid()
+        });
+        // SAFETY: the single interpreter thread is still in initialization.
+        // No shell code runs or changes environ, and no borrowed entry escapes.
+        unsafe {
+            while !(*entry).is_null() {
+                let raw = *entry;
+                entry = entry.add(1);
+                if !matches!(*raw as u8, b'B' | b'P' | b'S' | b'I' | b'i') {
+                    continue;
+                }
+                let bytes = CStr::from_ptr(raw).to_bytes();
+                let Some(i) = memchr::memchr(b'=', bytes) else {
+                    continue;
+                };
+                let key = &bytes[..i];
+                let value = &bytes[i + 1..];
+                let utf8 = || std::str::from_utf8(value).ok();
+                match key {
+                    b"PWD" => settings.pwd = true,
+                    b"SHLVL" => {
+                        settings.shell_level =
+                            utf8().and_then(|s| s.trim().parse().ok()).unwrap_or(0)
+                    }
+                    b"POSIXLY_CORRECT" => settings.posix = true,
+                    b"BASH_EXECUTION_STRING" => settings.execution_string = true,
+                    b"IGNOREEOF" => settings.ignore_eof = Some(utf8().unwrap_or("").into()),
+                    b"ignoreeof" => lower_eof = Some(utf8().unwrap_or("").into()),
+                    b"BASH_COMPAT" => settings.compat = utf8().map(str::to_owned),
+                    b"SHELLOPTS" => settings.shellopts = utf8().map(str::to_owned),
+                    b"BASHOPTS" => settings.bashopts = utf8().map(str::to_owned),
+                    _ if key.starts_with(b"BASH_FUNC_") && !*privileged => {
+                        session.import_function(bytes)
+                    }
+                    _ => {}
+                }
+            }
+        }
+        settings.ignore_eof = settings.ignore_eof.or(lower_eof);
+        settings
+    }
+}
+
 struct Script {
     file: File,
     metadata: std::fs::Metadata,

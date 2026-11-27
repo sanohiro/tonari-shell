@@ -80,7 +80,7 @@ pub struct Traps {
     pub before_return: u8,
     current_action: Option<ActionStatus>,
     async_resettable: u64,
-    implicit: BTreeMap<i32, libc::sigaction>,
+    implicit: Vec<(i32, libc::sigaction)>,
 }
 
 #[derive(Clone, Copy)]
@@ -279,10 +279,17 @@ impl Traps {
                 {
                     return Err(io::Error::last_os_error());
                 }
-                self.implicit.insert(sig, old);
+                self.implicit.push((sig, old));
             }
         }
         Ok(())
+    }
+
+    fn implicit_action(&self, sig: i32) -> Option<&libc::sigaction> {
+        self.implicit
+            .iter()
+            .find(|(n, _)| *n == sig)
+            .map(|(_, old)| old)
     }
 
     fn set(&mut self, sig: i32, command: &str, interactive: bool) -> io::Result<()> {
@@ -294,7 +301,7 @@ impl Traps {
         let mut original = action(libc::SIG_DFL);
         if let Some(old) = self.entries.get(&sig) {
             original = old.original;
-        } else if let Some(old) = self.implicit.get(&sig) {
+        } else if let Some(old) = self.implicit_action(sig) {
             original = *old;
         } else if real {
             if unsafe { libc::sigaction(sig, std::ptr::null(), &mut original) } < 0 {
@@ -318,7 +325,7 @@ impl Traps {
         }
         if real {
             let new = match command {
-                "-" if self.implicit.contains_key(&sig)
+                "-" if self.implicit_action(sig).is_some()
                     || sig == libc::SIGHUP && self.interactive_hup =>
                 {
                     action(terminate as *const () as usize)
@@ -470,7 +477,7 @@ impl Traps {
     pub(crate) fn list<'a>(
         &self,
         names: impl ExactSizeIterator<Item = &'a str>,
-        out: &mut impl Write,
+        out: &mut dyn Write,
         defaults: bool,
         action_only: bool,
         posix: bool,
@@ -505,7 +512,7 @@ impl Traps {
                 && is_os_signal(sig)
                 && let Some((name, _)) = signals().find(|s| s.1 == sig)
             {
-                let ignored = if let Some(old) = self.implicit.get(&sig) {
+                let ignored = if let Some(old) = self.implicit_action(sig) {
                     old.sa_sigaction == libc::SIG_IGN
                 } else {
                     let mut old = std::mem::MaybeUninit::uninit();

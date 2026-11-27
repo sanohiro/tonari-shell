@@ -154,6 +154,7 @@ pub fn expanded(source: &str, session: &mut Session, status: u8) -> Result<i64> 
 pub(crate) enum Repeated<'a> {
     Other(&'a str),
     Compare(&'a str, &'a str, i64, &'a str),
+    CompareNames(&'a str, &'a str, &'a str, &'a str),
     Step(&'a str, i64, bool, &'a str),
 }
 
@@ -200,6 +201,35 @@ impl<'a> Repeated<'a> {
             {
                 number(value).map_or(generic, |n| Self::Compare(name, op, n, source))
             }
+            (
+                Token::Name(name),
+                Token::Op(op @ ("<" | "<=" | ">" | ">=" | "==" | "!=")),
+                Token::Name(rhs),
+            ) if crate::parser::is_identifier(name)
+                && crate::parser::is_identifier(rhs)
+                && parser
+                    .source
+                    .trim_matches([' ', '\t', '\n', '\r'])
+                    .is_empty() =>
+            {
+                Self::CompareNames(name, op, rhs, source)
+            }
+            (Token::Name(name), Token::Op(op @ ("+=" | "-=")), Token::Number(value))
+                if crate::parser::is_identifier(name)
+                    && parser
+                        .source
+                        .trim_matches([' ', '\t', '\n', '\r'])
+                        .is_empty() =>
+            {
+                number(value).map_or(generic, |n| {
+                    Self::Step(
+                        name,
+                        if op == "+=" { n } else { n.wrapping_neg() },
+                        false,
+                        source,
+                    )
+                })
+            }
             _ => generic,
         }
     }
@@ -211,6 +241,12 @@ impl<'a> Repeated<'a> {
                 Some(n) => binary(op, n, rhs),
                 None => expanded(source, session, status),
             },
+            Self::CompareNames(name, op, other, source) => {
+                match (session.scalar_decimal(name), session.scalar_decimal(other)) {
+                    (Some(left), Some(right)) => binary(op, left, right),
+                    _ => expanded(source, session, status),
+                }
+            }
             Self::Step(name, delta, postfix, source) => {
                 let Some(old) = session.scalar_decimal(name) else {
                     return expanded(source, session, status);

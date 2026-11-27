@@ -216,8 +216,8 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
     use cli::Input;
     let mut session = Session::default();
     session.started_at = unsafe { libc::time(std::ptr::null_mut()) };
-    session.import_functions();
-    session.initialize_shell_level();
+    let env = startup::Environment::read(&mut session);
+    session.initialize_shell_level(&env);
     session.arg0 = std::mem::take(&mut invocation.arg0);
     session.positional = std::mem::take(&mut invocation.positional).into_iter();
     session.allexport = invocation.options.allexport;
@@ -230,10 +230,8 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
             session.unset_variable("ignoreeof");
             session.unset_variable("IGNOREEOF");
         }
-    } else if let Some(value) =
-        std::env::var_os("IGNOREEOF").or_else(|| std::env::var_os("ignoreeof"))
-    {
-        session.set_eof_variable(Some(value.to_str().unwrap_or("")));
+    } else if let Some(value) = env.ignore_eof.as_deref() {
+        session.set_eof_variable(Some(value));
     }
     session.onecmd = invocation.options.onecmd;
     session.xtrace = invocation.options.xtrace;
@@ -271,16 +269,24 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
     if !invocation.pretty
         && let Input::Command(text) = &mut invocation.input
     {
-        if std::env::var_os("BASH_EXECUTION_STRING").is_some() {
+        if env.execution_string {
             session.assign("BASH_EXECUTION_STRING", text);
         }
         session.execution_string = Some(std::rc::Rc::new(std::mem::take(text)));
     }
     session.command_history_expansion = invocation.options.histexpand == Some(true);
     session.stdin_script = matches!(invocation.input, Input::Stdin);
-    session.set_posix(invocation.options.posix);
+    if let Some(enabled) = invocation
+        .options
+        .posix
+        .filter(|&enabled| enabled != env.posix)
+    {
+        session.set_posix(enabled);
+    } else {
+        session.apply_posix_mode(env.posix);
+    }
     session.shopt.progcomp_alias = session.interactive;
-    session.inherit_options();
+    session.inherit_options(&env);
     for (enable, name) in std::mem::take(&mut invocation.options.shopts) {
         let options = match name {
             Some(name) => vec![if enable { "-s" } else { "-u" }.into(), name],
@@ -357,19 +363,15 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
                 })
             }
         },
-        Input::Stdin if invocation.interactive => match interactive(
-            &mut session,
-            initial,
-            !invocation.noediting
-                && shell_terminal()
-                && std::env::var_os("TERM").is_some_and(|v| v != "dumb"),
-        ) {
-            Ok(code) => Flow::Continue(code),
-            Err(e) => {
-                diagnostic!("{e}");
-                Flow::Continue(1)
+        Input::Stdin if invocation.interactive => {
+            match interactive(&mut session, initial, !invocation.noediting) {
+                Ok(code) => Flow::Continue(code),
+                Err(e) => {
+                    diagnostic!("{e}");
+                    Flow::Continue(1)
+                }
             }
-        },
+        }
         Input::Stdin => input::stdin_script(&mut session, invocation.options.check),
     };
     let code = match flow {

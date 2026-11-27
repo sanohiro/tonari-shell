@@ -1,17 +1,28 @@
 use std::io::{self, Write};
 
+thread_local! {
+    // A fork inherits both the OS mask and this snapshot. All mask changes
+    // in the interpreter go through the setter in this module.
+    static MASK: std::cell::Cell<Option<libc::mode_t>> = const { std::cell::Cell::new(None) };
+}
+
 fn current() -> libc::mode_t {
-    // The interpreter runs builtins on one thread, so no file creation can
-    // interleave with reading and restoring the process-wide mask.
-    unsafe {
+    if let Some(mask) = MASK.get() {
+        return mask;
+    }
+    // SAFETY: only the interpreter thread creates files or changes the mask.
+    let mask = unsafe {
         let mask = libc::umask(0o022);
         libc::umask(mask);
         mask
-    }
+    };
+    MASK.set(Some(mask));
+    mask
 }
 
 fn symbolic(text: &str, mask: libc::mode_t) -> Option<libc::mode_t> {
-    let mut allowed = !mask & 0o777;
+    let original = !mask & 0o777;
+    let mut allowed = original;
     for clause in text.split(',') {
         let mut chars = clause.chars().peekable();
         let mut who = 0;
@@ -40,11 +51,15 @@ fn symbolic(text: &str, mask: libc::mode_t) -> Option<libc::mode_t> {
                 };
                 bits = ((allowed >> shift) & 7) * 0o111;
             } else {
-                while let Some(c) = chars.next_if(|c| matches!(c, 'r' | 'w' | 'x')) {
+                while let Some(c) =
+                    chars.next_if(|c| matches!(c, 'r' | 'w' | 'x' | 'X' | 's' | 't'))
+                {
                     bits |= match c {
                         'r' => 0o444,
                         'w' => 0o222,
-                        _ => 0o111,
+                        'x' => 0o111,
+                        'X' if original & 0o111 != 0 => 0o111,
+                        _ => 0,
                     };
                 }
             }
@@ -76,7 +91,6 @@ pub fn run(args: &[String], posix: bool) -> u8 {
             }
         }
     }
-    let mut out = io::stdout().lock();
     let mask = if let Some(text) = args.first() {
         let mask = if text.as_bytes().first().is_some_and(u8::is_ascii_digit) {
             libc::mode_t::from_str_radix(text, 8)
@@ -90,16 +104,25 @@ pub fn run(args: &[String], posix: bool) -> u8 {
             return 1;
         };
         unsafe { libc::umask(mask) };
+        MASK.set(Some(mask & 0o777));
         if !symbols || posix {
             return 0;
         }
         mask
     } else {
-        if reusable && write!(out, "umask {}", if symbols { "-S " } else { "" }).is_err() {
+        if reusable
+            && write!(
+                io::stdout().lock(),
+                "umask {}",
+                if symbols { "-S " } else { "" }
+            )
+            .is_err()
+        {
             return 1;
         }
         current()
     };
+    let mut out = io::stdout().lock();
     let result = if symbols {
         let mut text = String::with_capacity(19);
         for (prefix, shift) in [("u=", 6), (",g=", 3), (",o=", 0)] {

@@ -137,6 +137,7 @@ fn records(
     Ok(())
 }
 
+#[inline(never)]
 pub(crate) fn run(
     session: &mut Session,
     command: &str,

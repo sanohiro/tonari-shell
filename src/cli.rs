@@ -32,7 +32,7 @@ pub struct StartupOptions {
     pub keyword: bool,
     pub nolog: bool,
     pub shopts: Vec<(bool, Option<String>)>,
-    pub posix: bool,
+    pub posix: Option<bool>,
 }
 
 pub struct Invocation {
@@ -74,7 +74,6 @@ pub fn parse(
         Some(b"sh" | b"-sh")
     );
     let mut options = StartupOptions {
-        posix: std::env::var_os("POSIXLY_CORRECT").is_some(),
         hashall: true,
         braceexpand: true,
         ..Default::default()
@@ -103,7 +102,7 @@ pub fn parse(
             "--pretty-print" => pretty = true,
             "--debugger" => debugger = true,
             "--verbose" => options.verbose = true,
-            "--posix" => options.posix = true,
+            "--posix" => options.posix = Some(true),
             "--login" => login = true,
             "--norc" => norc = true,
             "--noediting" => noediting = true,
@@ -144,7 +143,7 @@ pub fn parse(
                             .push((enabled, args.next().map(utf8).transpose()?)),
                         'o' => match args.next().as_deref().and_then(|a| a.to_str()) {
                             Some("braceexpand") => options.braceexpand = enabled,
-                            Some("posix") => options.posix = enabled,
+                            Some("posix") => options.posix = Some(enabled),
                             Some("physical") => options.physical = enabled,
                             Some("nolog") => options.nolog = enabled,
                             Some("keyword") => options.keyword = enabled,

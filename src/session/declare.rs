@@ -300,6 +300,7 @@ fn declaration_operand(arg: &str) -> (&str, Option<&str>, bool) {
     (name, value, append)
 }
 
+#[inline(never)]
 pub(super) fn run(
     session: &mut Session,
     command: &str,
@@ -413,9 +414,6 @@ pub(super) fn run(
             status = 1;
             continue;
         }
-        let mut var = session
-            .declared_variable(name, flags.global)
-            .unwrap_or_default();
         let (scope_index, fresh_local) = if name == base {
             (base_scope, creates_local)
         } else {
@@ -426,6 +424,22 @@ pub(super) fn run(
                     && !flags.global
                     && scope.is_some_and(|i| !session.locals[i].variables.contains_key(name)),
             )
+        };
+        // Lowercase names have no implicit shell value. Repeated function
+        // calls can rule out an inherited binding without scanning environ.
+        let mut var = if fresh_local
+            && name.as_bytes()[0].is_ascii_lowercase()
+            && !session.variables.contains_key(name)
+            && session
+                .inherited_variable_names()
+                .binary_search_by(|key| key.as_str().cmp(name))
+                .is_err()
+        {
+            Variable::default()
+        } else {
+            session
+                .declared_variable(name, flags.global)
+                .unwrap_or_default()
         };
         let outer_local = fresh_local
             && session

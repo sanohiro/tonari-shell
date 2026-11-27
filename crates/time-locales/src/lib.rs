@@ -11,14 +11,13 @@ pub struct Locale(usize);
 
 impl Locale {
     pub fn find(name: &str) -> Option<Self> {
-        NAMES
-            .binary_search_by(|id| text(*id).cmp(name))
-            .ok()
-            .map(Self)
+        numeric::index(name).map(Self)
     }
 
     fn ids(self, field: Field) -> &'static [u16] {
-        let start = usize::from(RECORDS[usize::from(LOCALE_ROWS[self.0])][field as usize]);
+        let column = field as usize;
+        let id = RECORDS[usize::from(LOCALE_ROWS[self.0])][column];
+        let start = usize::from(LIST_IDS[usize::from(FIELD_OFFSETS[column]) + usize::from(id)]);
         let count = usize::from(ENTRIES[start]);
         &ENTRIES[start + 1..][..count]
     }
@@ -62,17 +61,21 @@ pub mod numeric {
         if matches!(name, "C" | "POSIX" | "") {
             return C;
         }
+        index(name).map_or(C, |i| PROFILES[usize::from(KINDS[i])])
+    }
+
+    pub(super) fn index(name: &str) -> Option<usize> {
         let mut lo = 0;
         let mut hi = KINDS.len();
         while lo < hi {
             let mid = (lo + hi) / 2;
             let candidate = &NAMES[usize::from(OFFSETS[mid])..usize::from(OFFSETS[mid + 1])];
             match candidate.cmp(name) {
-                std::cmp::Ordering::Equal => return PROFILES[usize::from(KINDS[mid])],
+                std::cmp::Ordering::Equal => return Some(mid),
                 std::cmp::Ordering::Less => lo = mid + 1,
                 std::cmp::Ordering::Greater => hi = mid,
             }
         }
-        C
+        None
     }
 }

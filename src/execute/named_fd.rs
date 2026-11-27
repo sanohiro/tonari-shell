@@ -46,7 +46,7 @@ impl Scope {
                     protect_fds(std::slice::from_ref(&action))?;
                     let fd = match action {
                         Action::Open(_, path, flags) => {
-                            let Some(opened) = open_redirect(&path, flags) else {
+                            let Some(opened) = open_redirect(path, flags) else {
                                 return Ok(false);
                             };
                             source = opened;
@@ -190,7 +190,7 @@ fn command(mut cmd: PreparedCommand, session: &mut Session, status: u8) -> io::R
                 Ok((flow, commit))
             } else {
                 Ok((
-                    Flow::Continue(External::new(&cmd, session).exec(None)),
+                    Flow::Continue(External::new(&cmd, session)?.exec(None)),
                     false,
                 ))
             }

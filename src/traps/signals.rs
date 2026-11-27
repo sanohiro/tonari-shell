@@ -76,7 +76,7 @@ pub(crate) fn signals() -> impl Iterator<Item = (&'static str, i32)> {
 
 // Present the same numeric table to both signal-name builtins. Programs
 // commonly extract the first column or parse several entries on one line.
-pub(crate) fn print_signal_table(out: &mut impl Write) -> io::Result<()> {
+pub(crate) fn print_signal_table(out: &mut dyn Write) -> io::Result<()> {
     static TABLE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
         use std::fmt::Write;
         let mut signals = signals().filter(|s| s.1 != 0).collect::<Vec<_>>();

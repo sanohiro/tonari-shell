@@ -18,7 +18,7 @@ pub(super) struct Dynamic {
     pub(super) lineno: Cell<Option<usize>>,
     pub(super) pid: Cell<Option<u32>>,
     pub(super) depth: Cell<Option<u32>>,
-    text: std::cell::RefCell<std::collections::BTreeMap<&'static str, String>>,
+    text: std::cell::RefCell<Vec<(&'static str, String)>>,
     pub(super) groups_read: Cell<bool>,
     pub(super) stack_read: Cell<bool>,
 }
@@ -64,7 +64,12 @@ impl Session {
     }
 
     pub(super) fn observe_text(&self, name: &'static str, value: String) -> String {
-        value.clone_into(self.dynamic.text.borrow_mut().entry(name).or_default());
+        let mut entries = self.dynamic.text.borrow_mut();
+        if let Some((_, old)) = entries.iter_mut().find(|(key, _)| *key == name) {
+            value.clone_into(old);
+        } else {
+            entries.push((name, value.clone()));
+        }
         value
     }
 
@@ -73,7 +78,13 @@ impl Session {
             "LINENO" => self.dynamic.lineno.get().map(|n| n.to_string()),
             "BASHPID" => self.dynamic.pid.get().map(|n| n.to_string()),
             "BASH_SUBSHELL" => self.dynamic.depth.get().map(|n| n.to_string()),
-            _ => self.dynamic.text.borrow().get(name).cloned(),
+            _ => self
+                .dynamic
+                .text
+                .borrow()
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| value.clone()),
         }
     }
 

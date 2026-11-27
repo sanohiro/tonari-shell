@@ -64,6 +64,49 @@ fc -ln 2 2; history -p '!$-suffix'""")
         self.assertEqual((result.returncode, result.stdout, result.stderr),
                          (0, b"\t second tail\ntail-suffix\n", b""))
 
+    def test_printf_attached_and_repeated_variable_options(self):
+        self.compare("""printf -vx '%s' one; printf -v x -vy -- '%s' two
+printf '<%s><%s>' "$x" "$y"; printf -- '-v%s' ok""", 0, b"<one><two>-vok", minimum=5)
+
+    def test_conditional_umask_uses_initial_permissions(self):
+        script = """for initial in 077 777; do umask "$initial"; umask a+X && umask; done
+umask 777; umask u+x,g+X && umask; umask a+st && umask"""
+        result = self.command(TONARI, script)
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (0, b"0066\n0777\n0677\n0677\n", b""))
+        if not self.bash_before_53():
+            self.compare(script, 0, result.stdout)
+
+    def test_function_loop_control_follows_compat_level(self):
+        for command in ("break", "continue"):
+            code = f'f() {{ {command}; }}; for i in 1 2; do f; echo "$?:$i"; done'
+            self.compare("set -o posix; " + code, 0, b"0:1\n0:2\n", minimum=5)
+            self.compare("BASH_COMPAT=4.3; " + code, 0, b"", minimum=5)
+
+    def test_repeated_arithmetic_reads_live_variable_bound(self):
+        self.compare("""n=6; for ((i=0;i<n;i+=2)); do echo "$i"; ((n--)); done
+n=4; declare -n bound=n; for ((i=4;i>=bound;i-=3)); do echo "$i"; done
+for ((i=0;i<10;i+=010)); do echo "$i"; done""", 0, b"0\n2\n4\n0\n8\n", minimum=5)
+
+    def test_history_trim_keeps_numbers_and_timestamp_pairs(self):
+        source = """HISTSIZE=300; for ((i=0;i<1900;i++)); do history -s "row $i"; done
+history -d 1602; history -w saved; history 1; head -n 2 saved; tail -n 1 saved"""
+        self.compare(source, 0, b" 1899  row 1899\nrow 1600\nrow 1602\nrow 1899\n", minimum=5)
+
+    def test_excessive_braces_fail_before_command_runs(self):
+        for word in ("{1..5000000000}", "a{5000000000..1}", "{1..5000000000..2}x",
+                     "{1..65536}{a,b}{1..9}", "{a,b}" * 21):
+            result = self.command(TONARI, "touch sentinel " + word)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"brace expansion exceeds word limit", result.stderr)
+            self.assertFalse((self.cwd / "sentinel").exists())
+
+        padded = "{" + "0" * 2047 + "1..32769}"
+        result = self.command(TONARI, "touch sentinel " + padded)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b"brace expansion exceeds byte limit", result.stderr)
+        self.assertFalse((self.cwd / "sentinel").exists())
+
     def test_readonly_printf_count_signals_failure(self):
         result = self.command(TONARI, """readonly n=9; printf '%n' n 2>/dev/null; echo "$? $n" """)
         self.assertEqual((result.returncode, result.stdout), (0, b"1 9\n"))
@@ -1792,6 +1835,17 @@ v=$(printf 'z\n' | ( read -r x; printf '%s:%s' "$BASH_SUBSHELL" "$x" )); echo "$
                 )
                 self.assertEqual(proc.returncode, status, proc.stderr)
                 self.assertEqual(file.read_bytes(), b"")
+                # The direct pwd writer reserves stdout before opening the file.
+                # One free fd must fail without destroying the previous contents.
+                file.write_bytes(b"keep")
+                proc = subprocess.run(
+                    [TONARI, "-c", 'pwd >data; r=$?; exit "$r"'], cwd=self.cwd, env=self.env,
+                    preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_NOFILE, (limit, limit)),
+                    capture_output=True, timeout=5,
+                )
+                self.assertEqual(proc.returncode, status, proc.stderr)
+                expected = b"keep" if status else os.fsencode(self.cwd.resolve()) + b"\n"
+                self.assertEqual(file.read_bytes(), expected)
 
     def test_parse_errors_precede_execution(self):
         for source in ["touch side-effect; printf '", "touch side-effect | | cat",

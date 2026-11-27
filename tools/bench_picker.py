@@ -26,7 +26,7 @@ def sample(shell, home, kind, filename, matched):
         if kind == "files":
             line = b"save files/item-"
             os.write(fd, line)
-            read_until(fd, PROMPT + line)
+            read_until(fd, PROMPT + line, initial=PROMPT)
             timed(fd, b"\t", PROMPT + line)
             timings["Open file choices"] = timed(fd, b"\t", b"> files/item-00000")
             timings["Filter, many matches"] = timed(fd, b"item", b"> files/item-00000")
@@ -38,7 +38,7 @@ def sample(shell, home, kind, filename, matched):
             # The editor may append a history hint after the first echo.
             # Wait for that settled frame before timing the next key.
             ready = PROMPT + line + b"\x1b[2mamber"
-            read_until(fd, ready)
+            read_until(fd, ready, initial=PROMPT)
             timings[kind + ", first Tab"] = timed(fd, b"\t", ready)
             timings[kind + ", open choices"] = timed(fd, b"\t", b"  amber")
             expected = b"violet"

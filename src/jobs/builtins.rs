@@ -351,10 +351,10 @@ pub(super) fn list_position(
 }
 
 fn list(jobs: &mut Jobs, args: &[String], posix: bool) -> u8 {
-    list_to(jobs, args, posix, io::stdout().lock())
+    list_to(jobs, args, posix, &mut io::stdout().lock())
 }
 
-pub(super) fn list_to(jobs: &mut Jobs, args: &[String], posix: bool, mut out: impl Write) -> u8 {
+pub(super) fn list_to(jobs: &mut Jobs, args: &[String], posix: bool, out: &mut dyn Write) -> u8 {
     let mut mode = ' ';
     let mut changed = false;
     let mut filter = ' ';

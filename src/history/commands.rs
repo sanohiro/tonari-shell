@@ -7,6 +7,7 @@ use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::{FileExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
+#[inline(never)]
 pub(crate) fn run(session: &mut Session, words: &[String], status: u8) -> Flow {
     let args = &words[1..];
     if let Some(snapshot) = session.initial_history.take()
@@ -43,14 +44,7 @@ fn error(message: &str) -> io::Error {
 
 fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
     let mut operation = None;
-    while let Some((flag, rest)) = args.split_first() {
-        if flag == "--" {
-            args = rest;
-            break;
-        }
-        if !flag.starts_with('-') || flag == "-" {
-            break;
-        }
+    while let Some(flag) = crate::builtins::flags::next(&mut args) {
         for c in flag[1..].chars() {
             if c == 'c' {
                 session.history = None;
@@ -65,7 +59,6 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
                 return Err(error("invalid option combination"));
             }
         }
-        args = rest;
         if operation.is_some() {
             break;
         }

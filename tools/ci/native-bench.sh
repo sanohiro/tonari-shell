@@ -14,7 +14,7 @@ if [[ $SUITE == audit-hot-paths ]]; then
     ref=/opt/homebrew/bin/bash
   fi
   args=()
-  for name in here-string-builtin-read mapfile-here redirected-pwd redirected-pwd-null external-null-output conditional-chain eval-conditionals printf-formats strings regex substitute-class trim-middle-star arithmetic functions case-classes glob; do args+=(--case "$name"); done
+  for name in here-string-builtin-read mapfile-here redirected-pwd redirected-pwd-null external-null-output conditional-chain eval-conditionals printf-formats printf-assign-number umask-symbolic-query history-at-limit arithmetic-live-bound completion-registration brace-range strings regex substitute-class trim-middle-star arithmetic functions case-classes glob; do args+=(--case "$name"); done
   python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" \
     --runs 21 --timing whole "${args[@]}" > "$out/workloads.txt"
   exit
