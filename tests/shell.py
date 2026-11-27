@@ -101,6 +101,12 @@ history -d 1602; history -w saved; history 1; head -n 2 saved; tail -n 1 saved""
             self.assertIn(b"brace expansion exceeds word limit", result.stderr)
             self.assertFalse((self.cwd / "sentinel").exists())
 
+        padded = "{" + "0" * 2047 + "1..32769}"
+        result = self.command(TONARI, "touch sentinel " + padded)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b"brace expansion exceeds byte limit", result.stderr)
+        self.assertFalse((self.cwd / "sentinel").exists())
+
     def test_readonly_printf_count_signals_failure(self):
         result = self.command(TONARI, """readonly n=9; printf '%n' n 2>/dev/null; echo "$? $n" """)
         self.assertEqual((result.returncode, result.stdout), (0, b"1 9\n"))
@@ -1829,6 +1835,17 @@ v=$(printf 'z\n' | ( read -r x; printf '%s:%s' "$BASH_SUBSHELL" "$x" )); echo "$
                 )
                 self.assertEqual(proc.returncode, status, proc.stderr)
                 self.assertEqual(file.read_bytes(), b"")
+                # The direct pwd writer reserves stdout before opening the file.
+                # One free fd must fail without destroying the previous contents.
+                file.write_bytes(b"keep")
+                proc = subprocess.run(
+                    [TONARI, "-c", 'pwd >data; r=$?; exit "$r"'], cwd=self.cwd, env=self.env,
+                    preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_NOFILE, (limit, limit)),
+                    capture_output=True, timeout=5,
+                )
+                self.assertEqual(proc.returncode, status, proc.stderr)
+                expected = b"keep" if status else os.fsencode(self.cwd.resolve()) + b"\n"
+                self.assertEqual(file.read_bytes(), expected)
 
     def test_parse_errors_precede_execution(self):
         for source in ["touch side-effect; printf '", "touch side-effect | | cat",
