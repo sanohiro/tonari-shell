@@ -4185,8 +4185,15 @@ f; printf 'END\0'; printf '%s\0' names/*'''
         os.write(fd, b"abc\x1f\r")
         self.edited_prompt_after(fd, b"<seed>\r\n")
 
+    def test_history_descriptor_word_boundaries(self):
+        self.compare("""history -s 'cmd 2>&31-suffix <&-tail >&3-- >& 1'
+history -p '!!:1' '!!:2' '!!:3' '!!:4' '!!:5' '!!:6' '!!:7' '!!:8'""",
+                     0, b"2>&31-\nsuffix\n<&-\ntail\n>&3-\n-\n>&\n1\n", minimum=5)
+
     def test_last_arg_lexical_boundaries(self):
         cases = [("cmd foo # trailing note", "foo"), ("cmd 2>&1", "2>&1"),
+                 ("cmd 2>&31-suffix", "suffix"), ("cmd <&-tail", "tail"),
+                 ("cmd >&3--", "-"), ("cmd >& 1", "1"),
                  ("cmd file\\ ", "file\\ "), ("cmd foo　bar", "foo　bar"),
                  ("cat <<EOF\nhello there\nEOF", "EOF"),
                  ("cmd $(touch YANK_EXECUTED)", "$(touch YANK_EXECUTED)")]

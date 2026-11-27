@@ -91,8 +91,13 @@ impl Window {
         Some((&self.bytes[..end], &self.unicode_pages))
     }
 
-    pub(super) fn bytes(&self, meta: &Metadata) -> Option<(u64, &[u8])> {
-        (self.stamp == Some(Stamp::from(meta))).then_some((self.start, &self.bytes))
+    pub(super) fn matching(&self, meta: &Metadata) -> Option<&Self> {
+        (self.stamp == Some(Stamp::from(meta))).then_some(self)
+    }
+
+    pub(super) fn range(&self, start: u64, size: usize) -> Option<&[u8]> {
+        let offset = usize::try_from(start.checked_sub(self.start)?).ok()?;
+        self.bytes.get(offset..)?.get(..size)
     }
 
     // A cooperating append under the journal lock leaves all copied bytes intact.

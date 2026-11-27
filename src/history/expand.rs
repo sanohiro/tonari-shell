@@ -195,6 +195,102 @@ fn quick_substitution(
     })
 }
 
+// Select words from the borrowed event before allocating the transformed output.
+fn expand_event(
+    value: &str,
+    rest: &mut &str,
+    memory: &mut Option<Box<Memory>>,
+    extglob: bool,
+    print: &mut bool,
+) -> io::Result<String> {
+    let mut input = *rest;
+    let colon = input.starts_with(':');
+    let candidate = if colon { &input[1..] } else { input };
+    let mut value = if candidate.starts_with(['^', '$', '*', '%', '-'])
+        || colon && candidate.starts_with(|c: char| c == '-' || c.is_ascii_digit())
+    {
+        input = candidate;
+        let spec = if input.starts_with(['$', '*', '%']) {
+            let (spec, rest) = input.split_at(1);
+            input = rest;
+            spec
+        } else {
+            take(&mut input, |c| {
+                c.is_ascii_digit() || matches!(c, '-' | '$' | '*' | '^')
+            })
+        };
+        if spec == "%" {
+            memory
+                .as_deref()
+                .and_then(|m| m.matched_word.clone())
+                .ok_or_else(|| error("no matching word"))?
+        } else {
+            select(
+                value,
+                spec,
+                memory
+                    .get_or_insert_with(Default::default)
+                    .words(value, extglob),
+            )?
+        }
+    } else {
+        value.to_owned()
+    };
+    while input.starts_with(':') {
+        pop(&mut input);
+        let global = input.starts_with('g');
+        if global {
+            pop(&mut input);
+        }
+        let code = pop(&mut input).ok_or_else(|| error("missing history modifier"))?;
+        value = match code {
+            'p' => {
+                *print = true;
+                value
+            }
+            'q' => shell_quote(&value),
+            'x' => value
+                .split_whitespace()
+                .map(shell_quote)
+                .collect::<Vec<_>>()
+                .join(" "),
+            't' => value.rsplit('/').next().unwrap_or("").into(),
+            'h' => value
+                .rsplit_once('/')
+                .map_or(value.as_str(), |(h, _)| h)
+                .into(),
+            'r' | 'e' => {
+                if let Some(i) = value.rfind('.') {
+                    if code == 'r' {
+                        value.truncate(i);
+                    } else {
+                        value.drain(..i);
+                    }
+                }
+                value
+            }
+            's' => {
+                let d = pop(&mut input).ok_or_else(|| error("missing substitution delimiter"))?;
+                let old = field(&mut input, d);
+                let new = field(&mut input, d);
+                let memory = memory.get_or_insert_with(Default::default);
+                remember(memory, old, new)?;
+                substitute(&value, memory, global)?
+            }
+            '&' => substitute(
+                &value,
+                memory
+                    .as_deref()
+                    .ok_or_else(|| error("no previous substitution"))?,
+                global,
+            )?,
+            _ => return Err(error("unsupported history modifier")),
+        };
+    }
+    *rest = input;
+    Ok(value)
+}
+
 pub(crate) fn expand_line<'a>(
     session: &mut Session,
     line: &'a str,
@@ -396,94 +492,13 @@ pub(crate) fn expand_line<'a>(
                 .find(|s| s.starts_with(prefix))
                 .map(String::as_str)
         };
-        let mut value = value.ok_or_else(|| error("event not found"))?.to_owned();
-        let colon = input.starts_with(':');
-        let candidate = if colon { &input[1..] } else { input };
-        if candidate.starts_with(['^', '$', '*', '%', '-'])
-            || colon && candidate.starts_with(|c: char| c == '-' || c.is_ascii_digit())
-        {
-            input = candidate;
-            let spec = if input.starts_with(['$', '*', '%']) {
-                let (spec, rest) = input.split_at(1);
-                input = rest;
-                spec
-            } else {
-                take(&mut input, |c| {
-                    c.is_ascii_digit() || matches!(c, '-' | '$' | '*' | '^')
-                })
-            };
-            value = if spec == "%" {
-                session
-                    .history_expansion
-                    .as_deref()
-                    .and_then(|m| m.matched_word.clone())
-                    .ok_or_else(|| error("no matching word"))?
-            } else {
-                select(
-                    &value,
-                    spec,
-                    session
-                        .history_expansion
-                        .get_or_insert_with(Default::default)
-                        .words(&value, session.shopt.glob.extglob),
-                )?
-            };
-        }
-        while input.starts_with(':') {
-            pop(&mut input);
-            let global = input.starts_with('g');
-            if global {
-                pop(&mut input);
-            }
-            let code = pop(&mut input).ok_or_else(|| error("missing history modifier"))?;
-            value = match code {
-                'p' => {
-                    print = true;
-                    value
-                }
-                'q' => shell_quote(&value),
-                'x' => value
-                    .split_whitespace()
-                    .map(shell_quote)
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                't' => value.rsplit('/').next().unwrap_or("").into(),
-                'h' => value
-                    .rsplit_once('/')
-                    .map_or(value.as_str(), |(h, _)| h)
-                    .into(),
-                'r' | 'e' => {
-                    if let Some(i) = value.rfind('.') {
-                        if code == 'r' {
-                            value.truncate(i);
-                        } else {
-                            value.drain(..i);
-                        }
-                    }
-                    value
-                }
-                's' => {
-                    let d =
-                        pop(&mut input).ok_or_else(|| error("missing substitution delimiter"))?;
-                    let old = field(&mut input, d);
-                    let new = field(&mut input, d);
-                    let memory = session
-                        .history_expansion
-                        .get_or_insert_with(Default::default);
-                    remember(memory, old, new)?;
-                    substitute(&value, memory, global)?
-                }
-                '&' => substitute(
-                    &value,
-                    session
-                        .history_expansion
-                        .as_deref()
-                        .ok_or_else(|| error("no previous substitution"))?,
-                    global,
-                )?,
-                _ => return Err(error("unsupported history modifier")),
-            };
-        }
+        let value = expand_event(
+            value.ok_or_else(|| error("event not found"))?,
+            &mut input,
+            &mut session.history_expansion,
+            session.shopt.glob.extglob,
+            &mut print,
+        )?;
         expanded = true;
         out.push_str(&value);
     }

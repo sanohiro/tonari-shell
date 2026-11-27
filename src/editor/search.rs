@@ -6,7 +6,7 @@ use crate::{
 #[derive(Default)]
 pub(super) struct ReverseSearch {
     pub(super) query: String,
-    pub(super) index: usize,
+    index: usize,
     pub(super) original: String,
     pub(super) original_cursor: usize,
     pub(super) pending: Vec<SearchQuery>,
@@ -20,6 +20,56 @@ impl ReverseSearch {
             original_cursor,
             ..Self::default()
         }
+    }
+
+    pub(super) fn edit_query(
+        &mut self,
+        action: super::Action,
+        first: u8,
+        keys: &mut super::Keys,
+        session: &Session,
+        frame: impl FnMut(&[u8]) -> std::io::Result<()>,
+    ) -> std::io::Result<Option<usize>> {
+        use super::Action;
+        let mut shortest = None;
+        match action {
+            Action::Search => self.index += 1,
+            Action::Rubout => {
+                self.query.pop();
+                self.index = 0;
+            }
+            Action::Insert => {
+                let start = self.query.len();
+                keys.append_burst(first, session, &mut self.query)?;
+                if let Some(c) = self.query[start..].chars().next() {
+                    shortest = Some(start + c.len_utf8());
+                    self.index = 0;
+                }
+            }
+            Action::Paste => {
+                self.query.push_str(&keys.paste(frame)?);
+                self.index = 0;
+            }
+            _ => {}
+        }
+        Ok(shortest)
+    }
+
+    pub(super) fn wants_picker(&self, action: super::Action) -> bool {
+        use super::Action;
+        matches!(
+            action,
+            Action::Complete | Action::Up | Action::Down | Action::PrefixUp | Action::PrefixDown
+        ) || (!self.query.chars().any(char::is_control)
+            && crate::history::fragments(&self.query).nth(1).is_some())
+    }
+
+    pub(super) fn queue(&mut self, shortest: Option<usize>) {
+        self.pending.push(SearchQuery {
+            text: self.query.clone(),
+            skip: self.index,
+            shortest: shortest.unwrap_or(self.query.len()),
+        });
     }
 
     pub(super) fn update(

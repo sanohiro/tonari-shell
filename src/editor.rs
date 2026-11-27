@@ -19,7 +19,7 @@ use unicode_width::UnicodeWidthChar;
 
 use crate::{
     Session, complete,
-    history::{History, SearchQuery, View},
+    history::{History, View},
 };
 
 pub enum Input {
@@ -446,10 +446,18 @@ impl EditorState {
         text: &mut String,
         cursor: &mut usize,
     ) -> io::Result<Option<usize>> {
-        keys.insert_burst(first, session, &mut self.scratch)?;
+        if *cursor == text.len() {
+            let start = *cursor;
+            keys.append_burst(first, session, text)?;
+            self.undo
+                .record(text, start..start, text.len() - start, start, true);
+            *cursor = text.len();
+            return Ok(Some(start));
+        }
+        self.scratch.clear();
+        keys.append_burst(first, session, &mut self.scratch)?;
         let inserted = &self.scratch;
-        let append = (*cursor == text.len()).then_some(*cursor);
-        let end = if self.overwrite && *cursor < text.len() {
+        let end = if self.overwrite {
             *cursor + char_offset(&text[*cursor..], inserted.chars().count())
         } else {
             *cursor
@@ -458,7 +466,7 @@ impl EditorState {
             .record(text, *cursor..end, inserted.len(), *cursor, true);
         text.replace_range(*cursor..end, inserted);
         *cursor += inserted.len();
-        Ok(append)
+        Ok(None)
     }
 
     fn render_frame(
@@ -654,9 +662,10 @@ pub fn line(
         if search.is_none() && unbound_text(first, session) {
             last_arg = None;
             recall.edited(session.history_lines().len());
+            let start = cursor;
             edit.appended = edit.insert(&mut keys, first, session, &mut text, &mut cursor)?;
             blink = session.bindings.blink_matching_paren
-                && matches!(edit.scratch.as_bytes(), b")" | b"]" | b"}");
+                && matches!(&text.as_bytes()[start..cursor], b")" | b"]" | b"}");
             last_tab = false;
             continue;
         }
@@ -732,26 +741,18 @@ pub fn line(
             // Readline keeps the current draft until a nonempty query matches.
             continue;
         }
-        if let Some(ReverseSearch {
-            query,
-            index,
-            original,
-            original_cursor,
-            pending,
-            ..
-        }) = search.as_mut()
-        {
+        if let Some(state) = search.as_mut() {
             match action {
                 Action::Abort => {
-                    text = std::mem::take(original);
-                    cursor = *original_cursor;
+                    text = std::mem::take(&mut state.original);
+                    cursor = state.original_cursor;
                     search = None;
                     continue;
                 }
                 Action::Accept | Action::Forward | Action::Back | Action::Home | Action::End => {
-                    if !pending.is_empty()
+                    if !state.pending.is_empty()
                         && let Ok(Some(found)) =
-                            history.find_command(session, &mut view, pending, &|| false)
+                            history.find_command(session, &mut view, &state.pending, &|| false)
                     {
                         text = found;
                     }
@@ -759,38 +760,13 @@ pub fn line(
                     cursor = text.len();
                 }
                 _ => {
-                    let mut shortest = None;
-                    if action == Action::Search {
-                        *index += 1;
-                    } else if action == Action::Rubout {
-                        query.pop();
-                        *index = 0;
-                    } else if action == Action::Insert {
-                        keys.insert_burst(first, session, &mut edit.scratch)?;
-                        if let Some(c) = edit.scratch.chars().next() {
-                            shortest = Some(query.len() + c.len_utf8());
-                            query.push_str(&edit.scratch);
-                            *index = 0;
-                        }
-                    } else if action == Action::Paste {
-                        query.push_str(
-                            &keys
-                                .paste(|bytes| screen.paste_frame(visible_prompt, "", 0, bytes))?,
-                        );
-                        *index = 0;
-                    }
-                    if matches!(
-                        action,
-                        Action::Complete
-                            | Action::Up
-                            | Action::Down
-                            | Action::PrefixUp
-                            | Action::PrefixDown
-                    ) || (!query.chars().any(char::is_control)
-                        && crate::history::fragments(query).nth(1).is_some())
-                    {
+                    let shortest =
+                        state.edit_query(action, first, &mut keys, session, |bytes| {
+                            screen.paste_frame(visible_prompt, "", 0, bytes)
+                        })?;
+                    if state.wants_picker(action) {
                         let selected = picker::history(
-                            std::mem::take(query),
+                            std::mem::take(&mut state.query),
                             history,
                             session,
                             &mut keys,
@@ -803,11 +779,11 @@ pub fn line(
                                 cursor = text.len();
                             }
                             Ok(None) => {
-                                text = std::mem::take(original);
-                                cursor = *original_cursor;
+                                text = std::mem::take(&mut state.original);
+                                cursor = state.original_cursor;
                             }
                             Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                                screen.draw(prompt, original, *original_cursor, "")?;
+                                screen.draw(prompt, &state.original, state.original_cursor, "")?;
                                 io::stderr().write_all(b"\r\n")?;
                                 return Ok(Input::Cancel);
                             }
@@ -817,11 +793,7 @@ pub fn line(
                         last_tab = false;
                         continue;
                     }
-                    pending.push(SearchQuery {
-                        text: query.clone(),
-                        skip: *index,
-                        shortest: shortest.unwrap_or(query.len()),
-                    });
+                    state.queue(shortest);
                     cursor = text.len();
                     continue;
                 }

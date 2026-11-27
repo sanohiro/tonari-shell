@@ -31,7 +31,7 @@ pub(crate) fn fragments(mut query: &str) -> impl Iterator<Item = &str> {
 // One picker owns a snapshot of the journal length. New pages resume from the
 // last examined record. A new query rewinds offsets and reuses the read buffer.
 pub(crate) struct Filter<'a> {
-    cached: Option<(u64, &'a [u8])>,
+    cached: Option<&'a super::window::Window>,
     file: Option<File>,
     length: u64,
     end: u64,
@@ -44,7 +44,7 @@ impl<'a> Filter<'a> {
     pub fn new(session: &Session, history: &'a super::History) -> Self {
         let journal = file(session).and_then(|p| {
             let (f, m) = super::open_journal(&p).ok()?;
-            Some((f, m.len(), history.window.bytes(&m)))
+            Some((f, m.len(), history.window.matching(&m)))
         });
         let (file, length, cached) =
             journal.map_or((None, 0, None), |(f, size, cached)| (Some(f), size, cached));
@@ -111,9 +111,7 @@ impl<'a> Filter<'a> {
             }
             let start = self.end.saturating_sub(width as u64);
             let size = (self.end - start) as usize;
-            let buf = if let Some((base, data)) = self.cached
-                && let Some(offset) = start.checked_sub(base)
-                && let Some(bytes) = data.get(offset as usize..offset as usize + size)
+            let buf = if let Some(bytes) = self.cached.and_then(|window| window.range(start, size))
             {
                 bytes
             } else {

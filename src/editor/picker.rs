@@ -6,6 +6,11 @@ use std::fmt::Write as _;
 use std::io::{self, Write as _};
 use unicode_width::UnicodeWidthChar;
 
+fn page_rows(screen: &Screen) -> usize {
+    const MAX_ROWS: usize = 8;
+    screen.height.saturating_sub(1).clamp(1, MAX_ROWS)
+}
+
 fn label(out: &mut String, text: &str, mut cells: usize) -> usize {
     let start = cells;
     for c in text.chars() {
@@ -86,23 +91,24 @@ fn draw<'a>(
 }
 
 enum Key {
-    Text,
-    Paste,
+    Changed,
     Up,
     Down,
     Accept,
-    Erase,
     Cancel,
     Ignore,
 }
 
-fn read_key(first: u8, keys: &mut Keys, session: &Session) -> io::Result<Key> {
+fn read_key(first: u8, keys: &mut Keys, session: &Session, query: &mut String) -> io::Result<Key> {
     Ok(match first {
         b'\r' | b'\n' => Key::Accept,
         b'\t' | 14 => Key::Down,
         16 => Key::Up,
         7 => Key::Cancel,
-        8 | 127 => Key::Erase,
+        8 | 127 => {
+            query.pop();
+            Key::Changed
+        }
         27 => {
             // Disambiguate a lone Escape from an arrow or bracketed paste.
             let timeout = session.bindings.timeout();
@@ -136,7 +142,10 @@ fn read_key(first: u8, keys: &mut Keys, session: &Session) -> io::Result<Key> {
                         return Ok(match (b, len) {
                             (b'A' | b'Z', 0) => Key::Up,
                             (b'B', 0) => Key::Down,
-                            (b'~', 3) if introducer == b'[' && &params == b"200" => Key::Paste,
+                            (b'~', 3) if introducer == b'[' && &params == b"200" => {
+                                query.push_str(&keys.paste(|_| Ok(()))?);
+                                Key::Changed
+                            }
                             _ => Key::Ignore,
                         });
                     }
@@ -147,7 +156,10 @@ fn read_key(first: u8, keys: &mut Keys, session: &Session) -> io::Result<Key> {
                 }
             }
         }
-        32.. => Key::Text,
+        32.. => {
+            keys.append_burst(first, session, query)?;
+            Key::Changed
+        }
         _ => {
             keys.queued.push_front(first);
             Key::Cancel
@@ -162,11 +174,10 @@ pub(super) fn choose(
     session: &Session,
 ) -> io::Result<Option<usize>> {
     let mut query = String::new();
-    let mut inserted = String::new();
     let mut hits = Vec::new();
     let mut scanned = 0;
     let mut selected: usize = 0;
-    let rows = screen.height.saturating_sub(1).clamp(1, 8);
+    let rows = page_rows(screen);
     loop {
         // Preserve source order, and resume scanning only when the user
         // navigates past the matches already found for this query.
@@ -206,15 +217,8 @@ pub(super) fn choose(
         let Some(first) = keys.get()? else {
             return Ok(None);
         };
-        match read_key(first, keys, session)? {
-            Key::Text => {
-                keys.insert_burst(first, session, &mut inserted)?;
-                query.push_str(&inserted);
-            }
-            Key::Paste => query.push_str(&keys.paste(|_| Ok(()))?),
-            Key::Erase => {
-                query.pop();
-            }
+        match read_key(first, keys, session, &mut query)? {
+            Key::Changed => {}
             Key::Cancel => return Ok(None),
             Key::Accept => {
                 if let Some(&index) = hits.get(selected) {
@@ -247,10 +251,9 @@ pub(super) fn history(
     keys: &mut Keys,
     screen: &mut Screen,
 ) -> io::Result<Option<String>> {
-    let rows = screen.height.saturating_sub(1).clamp(1, 8);
+    let rows = page_rows(screen);
     let mut selected: usize = 0;
     let mut snapshot = None;
-    let mut inserted = String::new();
     let mut refresh = true;
     loop {
         let offset = selected / rows * rows;
@@ -314,7 +317,7 @@ pub(super) fn history(
         let key = if first == 18 {
             Key::Down
         } else {
-            read_key(first, keys, session)?
+            read_key(first, keys, session, &mut query)?
         };
         match key {
             Key::Cancel => return Ok(None),
@@ -339,14 +342,7 @@ pub(super) fn history(
                 continue;
             }
             Key::Ignore => continue,
-            Key::Text => {
-                keys.insert_burst(first, session, &mut inserted)?;
-                query.push_str(&inserted);
-            }
-            Key::Paste => query.push_str(&keys.paste(|_| Ok(()))?),
-            Key::Erase => {
-                query.pop();
-            }
+            Key::Changed => {}
         }
         refresh = true;
         selected = 0;
