@@ -239,6 +239,10 @@ echo "$value"
 for ((i=0; i<64; i++)); do value=$(echo "v$i"); done
 echo "$value"
 """, "v63"),
+    "mapfile-trapped-pipe": (
+        'trap : USR1; mapfile -t table < <(cat rows); echo "${#table[@]}:${table[1999]}"',
+        "2000:record 1999",
+    ),
     "mapfile-lines": ("""
 for ((i=0; i<16; i++)); do mapfile -t table <rows; done
 echo "${#table[@]}:${table[1999]}"

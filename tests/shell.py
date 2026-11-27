@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import termios
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -233,6 +234,54 @@ done""", 0, b"<AB><CD><2><5>\n<BEFORE><AB><CD><99><2><102>\n<AB><CD><2><5>\n<AB>
             result = subprocess.run([TONARI, "-c", src], env=self.env,
                                     input=b"ok\n\xff\n", capture_output=True, timeout=3)
             self.assertEqual((result.returncode, result.stdout), (0, b"1:ok\n"))
+            self.assertTrue(result.stderr)
+
+    def test_exact_pipe_read_keeps_buffered_bytes_across_traps(self):
+        payload = b"abcdefgh" * 65536
+        source = """hits=0; trap '((++hits))' USR1; echo ready
+IFS= read -N "$1" value; status=$?
+printf '%d %d\\n' "$status" "$hits"; printf '%s' "$value" """
+        with subprocess.Popen([TONARI, "-c", source, "test", str(len(payload))], env=self.env,
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as child:
+            self.assertEqual(child.stdout.readline(), b"ready\n")
+            done = threading.Event()
+
+            def signal_reader():
+                while not done.is_set() and child.poll() is None:
+                    child.send_signal(signal.SIGUSR1)
+                    done.wait(0.001)
+
+            sender = threading.Thread(target=signal_reader)
+            sender.start()
+            try:
+                out, err = child.communicate(input=payload, timeout=10)
+            finally:
+                done.set()
+                sender.join()
+                if child.poll() is None:
+                    child.kill()
+            status, data = out.split(b"\n", 1)
+            read_status, hits = map(int, status.split())
+            self.assertGreater(hits, 0)
+            self.assertEqual((child.returncode, read_status, err), (0, 0, b""))
+            self.assertEqual(data, payload)
+
+    def test_mapfile_leaves_pipe_suffix_for_other_readers(self):
+        source = """exec 3<&0; trap : USR1
+callback() { IFS= read -ru3 line; printf 'callback=<%s>\\n' "$line"; }
+mapfile -tu3 -s1 -n2 -C callback -c2 a
+printf '%s:<%s>:<%s>\\n' "$?" "${a[0]}" "${a[1]}"
+cat <&3"""
+        for sh in self.shells_for(minimum=5):
+            result = subprocess.run([sh, "-c", source], env=self.env, capture_output=True,
+                                    input="omit\n雪\n🌸\nconsumed\nleft\n".encode(), timeout=3)
+            self.assertEqual((result.returncode, result.stdout, result.stderr),
+                             (0, "callback=<consumed>\n0:<雪>:<🌸>\nleft\n".encode(), b""))
+        for opts in ("", "-n4", "-C : -c2"):
+            src = f'trap : USR1; mapfile -t {opts} a; echo "$?:${{a[*]}}"; cat'
+            result = subprocess.run([TONARI, "-c", src], env=self.env, capture_output=True,
+                                    input=b"ok\nA\xff\nkeep\nlast\n", timeout=3)
+            self.assertEqual((result.returncode, result.stdout), (0, b"1:ok\nkeep\nlast\n"))
             self.assertTrue(result.stderr)
 
     def test_for_select_and_getopts_use_declared_integer_destinations(self):
