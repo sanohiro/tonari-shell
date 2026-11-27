@@ -3511,6 +3511,13 @@ shopt -qo monitor; echo "disabled:$?" """,
 a=$(pwd -L); b=$(pwd -P); echo "${a##*/}/${b##*/}"; cd .. && mv renamed outer""",
                      0, b"outer/renamed\n")
 
+    def test_physical_pwd_rechecks_replaced_and_unlinked_directory(self):
+        proc = self.command(TONARI, """mkdir old; cd old; mv ../old ../new; mkdir ../old
+actual=$(pwd -P); echo "${actual##*/}"; rmdir ../new
+pwd -P >/dev/null 2>&1 && exit 1
+echo unlinked""")
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"new\nunlinked\n", b""))
+
     def test_extended_patterns_in_conditionals_files_and_parameters(self):
         self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
         for name in ("lib.rs", "lib.c", "lib.txt", ".hidden"):

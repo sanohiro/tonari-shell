@@ -29,6 +29,41 @@ fn with_physical_path<T>(use_path: impl FnOnce(&Path) -> io::Result<T>) -> io::R
     use_path(&path)
 }
 
+// Darwin can resolve the current vnode's physical path in one attribute query.
+// Validate the returned name before printing it: the cwd may be unlinked or
+// replaced, and volumes can truncate or omit the variable-length attribute.
+#[cfg(target_os = "macos")]
+fn vnode_cwd(buf: &mut [u8]) -> Option<&Path> {
+    let mut attrs = unsafe { std::mem::zeroed::<libc::attrlist>() };
+    attrs.bitmapcount = libc::ATTR_BIT_MAP_COUNT as _;
+    attrs.commonattr = libc::ATTR_CMN_FULLPATH;
+    let status = unsafe {
+        libc::getattrlist(
+            c".".as_ptr(),
+            (&raw mut attrs).cast(),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            libc::FSOPT_REPORT_FULLSIZE,
+        )
+    };
+    if status != 0 {
+        return None;
+    }
+    // The packed result is a u32 length followed by an attrreference_t.
+    let word = |offset| {
+        buf.get(offset..offset + 4)?
+            .try_into()
+            .ok()
+            .map(u32::from_ne_bytes)
+    };
+    let returned = word(0)? as usize;
+    let start = 4usize.checked_add(word(4)? as usize)?;
+    let end = start.checked_add(word(8)? as usize)?;
+    let bytes = buf.get(..returned)?.get(start..end)?.strip_suffix(&[0])?;
+    let path = Path::new(std::ffi::OsStr::from_bytes(bytes));
+    (path.is_absolute() && same_directory(path, Path::new("."))).then_some(path)
+}
+
 // Validate a cached absolute name component by component when it will not fit
 // in a single pathname argument. Physical pwd must reject every symbolic link.
 pub(super) fn long_cwd_matches(path: &Path, physical: bool) -> bool {
@@ -364,6 +399,10 @@ impl Session {
                 && path.as_os_str().len() >= libc::PATH_MAX as usize
                 && long_cwd_matches(path, true)
             {
+                return write_path(path, out);
+            }
+            #[cfg(target_os = "macos")]
+            if let Some(path) = vnode_cwd(&mut [0; 12 + libc::PATH_MAX as usize]) {
                 return write_path(path, out);
             }
             return with_physical_path(|path| write_path(path, out));
