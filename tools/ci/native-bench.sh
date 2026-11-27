@@ -327,6 +327,12 @@ case "$SUITE" in
       git -C "$root" worktree add -q --detach "$replay" HEAD
       python3 tools/ci/yash-repeats.py "$replay" "$out/repeats" "$out" "$current" "$ref"
     fi ;;
+  locale-storage)
+    if [[ $RUNNER_OS == Linux ]]; then
+      for lang in de_DE ja_JP fr_FR pl_PL fa_IR; do sudo localedef -i "$lang" -f UTF-8 "$lang.UTF-8"; done
+      python3 tools/ci/time-locales.py "$current" "$ref" --require-match > "$out/time-locales.jsonl"
+    fi
+    run regional-time python3 tools/ci/spec-fix-timings.py "$current" "$bin/baseline" "$ref" --trials 41 --case 'regional time' ;;
   probe)
     cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
     run probes python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" --timing started --runs 41 \
