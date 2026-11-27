@@ -1,5 +1,36 @@
 # Startup and execution / 起動と実行性能
 
+<a id="listings-expansion-native"></a>
+
+## November 28 · Native release results for listings and expansion / 一覧表示と展開のリリース計測
+
+Distribution builds at `0bf6aa0` and `26c6542`. Each cell gives previous Tonari / current Tonari / Bash in median milliseconds. The driver rotates execution order with five warm-ups and 31 samples. Each shell sets up its data before a readiness handshake. The timed interval includes sourcing the workload and checking its result. macOS 27.2.1 uses GNU Bash 5.3.20 for script workloads and Apple Bash 3.2.57 for the directory glob. Both Ubuntu 24.04 runs use the system Bash 5.2.21. The directory contains 1,000 files and produces 200 matches. Compare the three binaries within each host. [Linux run A](https://github.com/sanohiro/tonari-shell/actions/runs/46020610963) · [Linux run B](https://github.com/sanohiro/tonari-shell/actions/runs/46020615875)
+
+| Workload | M1 | Linux A · AMD EPYC 9V74 | Linux B · AMD EPYC 9V74 |
+|---|---:|---:|---:|
+| All shell options ×200 | 14.854 / 3.231 / 16.751 | 8.978 / 1.984 / 9.397 | 8.974 / 1.982 / 9.404 |
+| 50 additional exports ×200 | 17.428 / 5.070 / 19.992 | 10.898 / 2.797 / 12.724 | 10.914 / 2.808 / 12.761 |
+| 1,000 indexed elements ×50 | 5.561 / 1.613 / 4.176 | 5.528 / 1.037 / 3.797 | 5.555 / 1.058 / 3.830 |
+| 2,600-word brace product ×20 | 10.428 / 1.834 / 13.325 | 12.008 / 2.640 / 15.645 | 12.062 / 2.652 / 15.673 |
+| Ten locals ×1,000 | 5.769 / 5.156 / 7.817 | 5.232 / 5.207 / 7.122 | 5.363 / 5.194 / 7.121 |
+| Eighty locals ×150 | 8.625 / 6.982 / 6.343 | 8.161 / 7.659 / 6.280 | 8.162 / 7.670 / 6.294 |
+| 1,000-file bracket glob ×50 | 22.889 / 19.658 / 23.235 | 15.420 / 13.996 / 16.722 | 15.729 / 14.056 / 16.789 |
+| Scalar bracket match ×4,000 | 3.374 / 3.297 / 6.776 | 2.349 / 2.463 / 6.086 | 2.345 / 2.457 / 6.092 |
+| Two builtin descriptions ×400 | 5.187 / 5.095 / 7.189 | 2.480 / 2.459 / 4.302 | 2.486 / 2.476 / 4.314 |
+
+The M1 executable grew from 1,765,104 to 1,781,616 bytes (+16,512) and links libSystem. Linux static PIE size went from 2,410,200 to 2,428,536 bytes (+18,336). On M1, a separate 41-sample comparison of two correct listing implementations took 2.320 ms with per-value formatting and 1.795 ms when short values needing no escaping went directly into the chunk. Large values stream to the outer writer. For braces the release reuses the first output row and needs no auxiliary vector of inner spellings.
+
+On the first Linux Xeon trial, sending the plain member list through the general bracket token loop took 10.142 ms against 9.518 ms in the previous release. The final implementation compiles ASCII members to a bitset and can decide a list followed by a star from the first remaining byte after checking the literal edges. The shared implementation also keeps scalar matches on their previous dispatch path. Eighty locals remain slower than Bash. The implementation keeps the existing scope representation. [Initial Xeon run](https://github.com/sanohiro/tonari-shell/actions/runs/46018237138)
+
+For short indices and values, copying up to seven bytes inline reduced the M1 median from 1.792 to 1.578 ms in a separate 41-sample comparison. Two Linux runs comparing that change on the same machine went from 2.130 to 1.368 ms on EPYC 7763 and from 1.669 to 1.054 ms on EPYC 9V74. The common implementation keeps larger fields on the slice copy path. A separate compatibility sweep compared 100 literal, quoted and computed two-range products against GNU Bash 5.3.20 on M1. All 1,135 argument lines matched. [EPYC 7763](https://github.com/sanohiro/tonari-shell/actions/runs/46019539382) · [EPYC 9V74](https://github.com/sanohiro/tonari-shell/actions/runs/46019555821)
+
+Before the short-field copy change, a separate full run on Intel Xeon 6975P-C measured 9.536 / 8.303 / 10.316 ms for the bracket glob and 14.321 / 3.951 / 2.838 ms for the indexed listing (previous / candidate / Bash). The EPYC ratios in the table are specific to those machines. [Xeon measurements](https://github.com/sanohiro/tonari-shell/actions/runs/46018854677) · [Additional native release run](https://github.com/sanohiro/tonari-shell/actions/runs/46021024951)
+
+Reproduce each row with `python3 tools/bench_scripts.py CURRENT --previous PREVIOUS --bash BASH --timing started --runs 31 --case NAME`. The `listings-expansion` suite in `tools/ci/native-bench.sh` lists all nine case names. The Linux job also verifies mixed output/diagnostic order, closed descriptors, brace products and indexed-array quoting.
+
+MacとLinuxで、同じホスト上の旧版・新版・Bashを交互に比較した。組み込み一覧では出力先を閉じたときの終了値と診断の順序も検証した。角括弧globは1,000ファイル中200件を展開する。ローカル変数80個の宣言にはBashより時間が掛かる。 [実測に使ったスクリプト](../tools/bench_scripts.py)
+
+
 <a id="remaining-audit-review"></a>
 
 ## November 27 · Four proposals after PR #44 / PR #44 後の四案の追試

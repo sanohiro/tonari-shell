@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## November 28 · Preserving diagnostic order and measuring pathname matching / 診断の順序とファイル名照合
+
+Keep complete lines visible before a builtin issues an operand diagnostic. Named `declare -p` and `shopt -p` flush the bulk writer on this path. Verbose `type` and `command -V` now deliver pending descriptions before reporting a missing name. Check `{ type printf __absent pwd; } 2>&1`. The missing-name diagnostic belongs between the two descriptions. Function listings, `hash -t` and `complete -p` use line-buffered output. A missing operand of `declare -f` affects the status without issuing a diagnostic. For plain ASCII bracket members in pathnames, test both the full directory expansion and a separate repeated scalar match. The first general matcher trial regressed on a native Xeon. A bitset and a direct check for a member followed by a star reduce work per entry. [Native results](benchmarks.md#listings-expansion-native)
+
+組み込みの正常出力と診断は、`2>&1` でも引数の順に出す。`type` と `command -V` では未定義の名前を報告する前に蓄積した説明を書き出す。`declare -f` で存在しない関数を指定した場合は、診断を追加せず終了値に反映する。角括弧globは最初の試作がLinuxのXeonで旧版を下回った。ASCIIの候補をビット列にまとめ、直後に星印がある場合の照合を短縮した。CPU・OSでコードを分けず、ファイル名列挙とスカラー比較を別に計測した。 [実機計測](benchmarks.md#listings-expansion-native)
+
 ## November 27 · Buffered listings, brace products, local bindings and bracket globs / 組み込み一覧・ブレース展開・ローカル変数・glob
 
 On `0bf6aa0`, a checked 8 KiB output buffer substantially reduced writes from `shopt -p` and `export -p`. Flush pending stdout before an operand diagnostic as well as at the end. With `x=ok; declare -p x missing x 2>&1`, both reference shells print a declaration on each side of the diagnostic. Flushing only at the end moved the diagnostic to the front. For indexed arrays, formatting several elements into a reusable chunk also reduced CPU time. The array elements in a saved variable are already reference-counted.

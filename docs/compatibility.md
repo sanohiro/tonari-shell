@@ -8,6 +8,10 @@ GNU Bash 5.3.20 and Tonari report an output error and return 1 for `printf '%s' 
 
 標準出力を閉じてある場合も、出力のない代入や空の一覧は成功する。実際の表示に失敗した場合は診断と終了ステータスを返す。macOSのPATH探索は、ACLだけで実行が許可されて見える通常ファイルについても、OSが実行に必要とするモードビットを確認する。
 
+With stdout and stderr merged, `type printf __absent pwd` and `command -V printf __absent pwd` put the missing-name diagnostic between the two successful descriptions. `shopt -p`, `declare -p`, `hash -t` and `complete -p` preserve operand order as well. `declare -f f __absent f` prints the existing definition twice, silently skips the missing one and returns 1. The mixed-stream tests compare the position of the diagnostic independently of the shell's diagnostic prefix. [Executable witnesses](../tests/shell.py)
+
+標準出力と標準エラーをまとめても、正常な項目と診断が引数の順に並ぶ。`declare -f` の存在しない関数は診断を出さず、終了値に反映する。
+
 ## Input and mode witnesses / 入力とモードの差分
 
 * With IFS set to carriage return, a single named `read -r x` trims the leading and trailing separator and preserves the doubled interior separator. Bash 5.3.20 keeps the leading carriage return in this case. Tonari consistently applies IFS whitespace trimming to carriage return, vertical tab and form feed. With `IFS=' '` and input consisting of `a`, a space, a backslash and a space, Tonari preserves both the separator between the two fields and the quoted space in the last field. Bash 5.3.20 returns just `a`. [Bash word splitting](https://www.gnu.org/software/bash/manual/bash.html#Word-Splitting)
