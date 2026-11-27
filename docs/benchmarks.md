@@ -1,5 +1,24 @@
 # Startup and execution / 起動と実行性能
 
+<a id="shell-child-state"></a>
+
+## 2026-11-27 · Shell child setup, traps and wait / 子プロセスとシグナル
+
+Started-shell medians in ms for `46bbbdb` and `e784e9c`. M1 used 31 interleaved samples with Bash 5.3.20, Ubuntu x86-64 used 41 with Bash 5.2.21. The job-control and trap witnesses on Linux ran against Bash 5.3.9.
+
+| Host and workload | Previous | Current | Bash |
+|---|---:|---:|---:|
+| M1, pipeline | 26.607 | 26.469 | 43.365 |
+| M1, external command substitutions | 22.937 | 23.255 | 37.923 |
+| M1, background subshell and wait | 20.761 | 20.603 | 25.449 |
+| M1, redirected subshells | 89.793 | 87.820 | 100.896 |
+| Linux, pipeline | 7.066 | 6.937 | 9.360 |
+| Linux, external command substitutions | 5.390 | 5.332 | 8.792 |
+| Linux, background subshell and wait | 3.980 | 3.991 | 8.091 |
+| Linux, redirected subshells | 17.650 | 17.609 | 29.947 |
+
+Linux の独立した21回のシグナル計測は、`trap-signal` が Bash / 新版 / 旧版の順に 12.009 / 6.031 / 6.005 ms、`child-trap-wait` が 64.936 / 53.119 / 52.539 ms。M1 の `managed-background-spawn` の2回の計測では Bash が終了値 0 と期待どおりの標準出力を返したが、標準エラーを出したため集計から除外した。再試行で捉えた診断は `child setpgid … Operation not permitted`。Linux では同じ検証を通過した。配布物は M1 が 1,748,896 バイト、Linux が 2,427,512 → 2,429,560 バイト。 [Native Linux measurements](https://github.com/sanohiro/tonari-shell/actions/runs/45943578012)
+
 <a id="word-grammar-readers"></a>
 
 ## 2026-11-27 · Word and grammar readers / 語と構文の解析

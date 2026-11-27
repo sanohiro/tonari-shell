@@ -42,13 +42,16 @@ def cases(text):
     ]
 
 
-def sample(shell, home, rc, content, keys, expected):
+def sample(shell, home, rc, content, keys, expected, *, burst=False):
     with terminal(shell, home, home, rc, prompt=PROMPT) as fd:
         visible(fd, PASTE + content.encode() + END_PASTE)
-        start = time.perf_counter_ns()
-        os.write(fd, keys)
-        read_until(fd, b"@")
-        elapsed = (time.perf_counter_ns() - start) / 1e6
+        if burst:
+            elapsed = visible(fd, keys, marker=b"@")
+        else:
+            start = time.perf_counter_ns()
+            os.write(fd, keys)
+            read_until(fd, b"@")
+            elapsed = (time.perf_counter_ns() - start) / 1e6
         check_buffer(fd, home, expected, (shell, keys))
         return elapsed
 
@@ -101,9 +104,10 @@ def main():
     cli.add_argument("--case", action="append", help="time only this named operation (repeatable)")
     cli.add_argument("--runs", type=int, default=11)
     cli.add_argument("--size", type=int, default=65536, help="approximate initial buffer size in bytes")
+    cli.add_argument("--binding-bursts", action="store_true", help="time committed ASCII and UTF-8 text with 256 custom key sequences")
     cli.add_argument("--steady", type=int, metavar="EDITS", help="time successive acknowledged edits within each session")
     args = cli.parse_args()
-    if args.steady is not None and (not 1 <= args.steady <= 4000 or args.case):
+    if args.steady is not None and (not 1 <= args.steady <= 4000 or args.case or args.binding_bursts):
         cli.error("--steady accepts 1 to 4000 edits and its own two workloads")
     if args.runs < 1 or args.size < 0:
         cli.error("use a positive run count and nonnegative size")
@@ -123,13 +127,22 @@ def main():
             print("operation | " + " | ".join(s.name for s in shells) + " (p50/p95/p99/max ms)", flush=True)
             return steady(shells, root, rc, content, args.steady, args.runs)
         print("operation | " + " | ".join(s.name for s in shells) + " (median/p95 ms)", flush=True)
-        for label, keys, expected in cases(content):
+        if args.binding_bursts:
+            with rc.open("a") as config:
+                for i in range(256):
+                    config.write(f"""bind '"\\e[9{i:03}~": abort'\n""")
+            content = "start🏁"
+            workloads = [(label, (burst + "@").encode(), content + burst + "@")
+                         for label, burst in [("ASCII typeahead", "a" * 3072), ("UTF-8 typeahead", "日本語🌱" * 225)]]
+        else:
+            workloads = cases(content)
+        for label, keys, expected in workloads:
             if args.case and label not in args.case: continue
             values = {s: [] for s in shells}
             for i in range(args.runs + 2):
                 for s in shells[i % len(shells):] + shells[:i % len(shells)]:
                     if label == "overwrite" and not overwrite[s]: continue
-                    elapsed = sample(s, root, rc, content, keys, expected)
+                    elapsed = sample(s, root, rc, content, keys, expected, burst=args.binding_bursts)
                     if i >= 2:
                         values[s].append(elapsed)
             print(label, *(f"{statistics.median(v):.3f}/{sorted(v)[math.ceil(.95*len(v))-1]:.3f}"

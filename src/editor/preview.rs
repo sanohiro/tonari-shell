@@ -208,13 +208,8 @@ fn tty_event(events: libc::c_short) {
 
 impl Preview {
     fn insert_text(&mut self, text: &str) {
-        if self.overwrite && self.cursor < self.line.len() {
-            let end =
-                self.cursor + super::char_offset(&self.line[self.cursor..], text.chars().count());
-            self.line.replace_range(self.cursor..end, text);
-        } else {
-            self.line.insert_str(self.cursor, text);
-        }
+        let end = super::overwrite_end(&self.line, self.cursor, text, self.overwrite);
+        self.line.replace_range(self.cursor..end, text);
         self.cursor += text.len();
     }
 
@@ -224,7 +219,7 @@ impl Preview {
         let mut erased = false;
         let mut edited = false;
         let mut text = String::new();
-        for n in 0..4096 {
+        for n in 0..Keys::BURST_BYTES {
             let mut byte = 0u8;
             if unsafe { libc::read(0, (&mut byte as *mut u8).cast(), 1) } != 1 {
                 // VMIN=0. A hung-up terminal stays readable.
@@ -238,9 +233,7 @@ impl Preview {
                 self.stopped = true;
                 break;
             }
-            if self.utf8.is_empty()
-                && (byte < 32 || byte == 127 || self.bindings.custom_prefix(&[byte]))
-            {
+            if self.utf8.is_empty() && !self.bindings.literal_byte(byte) {
                 let (action, longer) = self.bindings.lookup(&[byte]);
                 if !longer && matches!(action, Some(Binding::Edit(Action::Rubout))) {
                     self.insert_text(&text);
@@ -253,6 +246,11 @@ impl Preview {
                 // Enter may launch an external reader. Leave everything after it in the tty.
                 self.stopped = true;
                 break;
+            }
+            if byte.is_ascii() && self.utf8.is_empty() {
+                text.push(char::from(byte));
+                edited = true;
+                continue;
             }
             self.utf8.push(byte);
             match std::str::from_utf8(&self.utf8) {

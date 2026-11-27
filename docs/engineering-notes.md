@@ -1,5 +1,9 @@
 # Engineering notes / 開発知見
 
+## November 27 · Forking a shell child / シェル子プロセスの初期状態
+
+A child that continues interpreting shell code must reset inherited trap bookkeeping and forget which process substitutions its parent can wait on. `Session::fork_shell` does both before returning in the child. Pipe endpoints, process groups and terminal ownership are specific to the launch site. A successful signal query may fill only the OS-supported portion of the mask, so initialize the entire saved action before querying libc. シェルコードを実行する7か所の fork と、直後に新しいインタプリタを exec する経路には異なる準備が必要になる。名前付き記述子、coproc、捕捉するシグナル、バックグラウンドの wait は `tests/shell.py` と `tests/compat/source_review.py` で検証する。 [Measurements / 計測](benchmarks.md#shell-child-state)
+
 ## November 27 · Shell words and source grammar / 語と構文の境界
 
 The lexer finishes one shell word before the surrounding grammar interprets operators or here-document boundaries. Numeric and named descriptor syntax shares one recognition point. Quoted regular expressions, shell patterns and scalar text each retain their own escaping rules when expanding into a caller-owned buffer. Run `cargo test --locked` and `tests/compat/source_review.py` to exercise those boundaries. 関数の先読みと構文解析は同じ関数ヘッダーを判定する。改行位置をスレッドローカルに再利用する案は、複合関数の差が小さく、内容が変化する eval に不利だったため採用しなかった。 [Measurements / 計測](benchmarks.md#word-grammar-readers)

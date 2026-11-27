@@ -393,6 +393,15 @@ fn char_offset(s: &str, n: usize) -> usize {
     }
     s.char_indices().nth(n).map_or(s.len(), |(i, _)| i)
 }
+// Overwrite counts Unicode scalars in both the preview and the editable line.
+fn overwrite_end(text: &str, cursor: usize, inserted: &str, overwrite: bool) -> usize {
+    if overwrite && cursor < text.len() {
+        cursor + char_offset(&text[cursor..], inserted.chars().count())
+    } else {
+        cursor
+    }
+}
+
 fn word_start(s: &str, mut i: usize) -> usize {
     for alnum in [false, true] {
         while let Some((j, c)) = s[..i].char_indices().next_back() {
@@ -435,6 +444,7 @@ struct EditorState {
     motion: bool,
     appended: Option<usize>,
     erased: Option<usize>,
+    last_argument: Option<(usize, bool)>,
 }
 
 impl EditorState {
@@ -457,11 +467,7 @@ impl EditorState {
         self.scratch.clear();
         keys.append_burst(first, session, &mut self.scratch)?;
         let inserted = &self.scratch;
-        let end = if self.overwrite {
-            *cursor + char_offset(&text[*cursor..], inserted.chars().count())
-        } else {
-            *cursor
-        };
+        let end = overwrite_end(text, *cursor, inserted, self.overwrite);
         self.undo
             .record(text, *cursor..end, inserted.len(), *cursor, true);
         text.replace_range(*cursor..end, inserted);
@@ -550,7 +556,6 @@ pub fn line(
     };
     let mut cursor = text.len();
     let mut vi = vi::State::default();
-    let mut last_arg: Option<(usize, bool)> = None;
     let mut recall = recall::Recall::new(session.history_lines().len());
     let mut search: Option<ReverseSearch> = None;
     let mut last_tab = false;
@@ -660,7 +665,7 @@ pub fn line(
         };
         // Ordinary committed text can bypass key-sequence and editing-action dispatch.
         if search.is_none() && unbound_text(first, session) {
-            last_arg = None;
+            edit.last_argument = None;
             recall.edited(session.history_lines().len());
             let start = cursor;
             edit.appended = edit.insert(&mut keys, first, session, &mut text, &mut cursor)?;
@@ -690,7 +695,7 @@ pub fn line(
                     &mut cursor,
                     &mut mark,
                 );
-                last_arg = None;
+                edit.last_argument = None;
                 recall = recall::Recall::new(session.history_lines().len());
                 if let crate::Flow::Exit(code) = flow {
                     return Ok(Input::Exit(code));
@@ -703,7 +708,7 @@ pub fn line(
             Binding::Edit(a) => a,
         };
         if action != Action::LastArg {
-            last_arg = None;
+            edit.last_argument = None;
         }
         if action != Action::Insert {
             edit.undo.boundary();
@@ -927,40 +932,16 @@ pub fn line(
                 edit.undo.apply(&mut text, &mut cursor);
                 screen.view.invalidate();
             }
-            Action::LastArg => {
-                let (end, replace) = last_arg.unwrap_or((history_position, false));
-                if replace {
-                    edit.undo.apply(&mut text, &mut cursor);
-                }
-                let next = end.checked_sub(1);
-                let arg = next
-                    .and_then(|i| session.history_lines().get(i))
-                    .and_then(|line| crate::parser::last_history_argument(line));
-                if let Some(arg) = arg {
-                    mark = if text[..cursor].is_ascii() {
-                        cursor
-                    } else {
-                        text[..cursor].chars().count()
-                    };
-                    edit.undo
-                        .record(&text, cursor..cursor, arg.len(), cursor, false);
-                    edit.appended = (!replace && cursor == text.len()).then_some(cursor);
-                    text.insert_str(cursor, arg);
-                    cursor += arg.len();
-                }
-                last_arg = Some((next.unwrap_or(0), arg.is_some()));
-            }
-            Action::Yank => {
-                edit.undo.record(
-                    &text,
-                    cursor..cursor,
-                    session.editor_kill.len(),
-                    cursor,
-                    false,
-                );
-                text.insert_str(cursor, &session.editor_kill);
-                cursor += session.editor_kill.len();
-            }
+            Action::LastArg => edit.insert_last_argument(
+                session.history_lines(),
+                history_position,
+                &mut text,
+                &mut cursor,
+                &mut mark,
+            ),
+            Action::Yank => edit
+                .undo
+                .insert(&mut text, &mut cursor, &session.editor_kill),
             Action::Mark => mark = text[..cursor].chars().count(),
             Action::SwapMark => {
                 let p = char_offset(&text, mark);
@@ -973,42 +954,22 @@ pub fn line(
                     && line.starts_with(&text)
                 {
                     let end = crate::parser::suggestion_end(line, cursor);
-                    edit.undo
-                        .record(&text, cursor..cursor, end - cursor, cursor, false);
-                    text.push_str(&line[cursor..end]);
-                    cursor = text.len();
+                    let word = &line[cursor..end];
+                    edit.undo.insert(&mut text, &mut cursor, word);
                 }
             }
             Action::ForwardWord => cursor = word_end(&text, cursor),
             Action::Reload => bindings::reload(session),
             Action::TabInsert => {
-                edit.undo.record(&text, cursor..cursor, 1, cursor, false);
-                text.insert(cursor, '\t');
-                cursor += 1;
+                edit.undo.insert(&mut text, &mut cursor, "\t");
             }
             Action::HistoryExpand | Action::MagicSpace => {
-                if let Ok(result) = crate::history::expand::expand(session, &text) {
-                    let at_start = cursor == 0;
-                    let suffix = text.len() - cursor;
-                    if let std::borrow::Cow::Owned(expanded) = result.text {
-                        let old_end = text.len();
-                        edit.undo.replace(&mut text, 0..old_end, &expanded, cursor);
-                        cursor = text.len();
-                    }
-                    if action == Action::MagicSpace {
-                        cursor = if at_start {
-                            0
-                        } else {
-                            text.len().saturating_sub(suffix)
-                        };
-                        while !text.is_char_boundary(cursor) {
-                            cursor -= 1;
-                        }
-                        edit.undo.record(&text, cursor..cursor, 1, cursor, false);
-                        text.insert(cursor, ' ');
-                        cursor += 1;
-                    }
-                }
+                edit.expand_history(
+                    session,
+                    &mut text,
+                    &mut cursor,
+                    action == Action::MagicSpace,
+                );
             }
             Action::UpperWord | Action::LowerWord | Action::CapitalWord => {
                 cursor =
@@ -1022,9 +983,7 @@ pub fn line(
                     && let Some(c) = keys.character(key)?
                 {
                     edit.undo
-                        .record(&text, cursor..cursor, c.len_utf8(), cursor, false);
-                    text.insert(cursor, c);
-                    cursor += c.len_utf8();
+                        .insert(&mut text, &mut cursor, c.encode_utf8(&mut [0; 4]));
                 }
             }
             Action::Clear => {
@@ -1096,29 +1055,10 @@ pub fn line(
                 }
             }
             Action::PreviousDirectory | Action::NextDirectory => unreachable!(),
-            Action::Forward => {
-                if cursor == text.len() {
-                    if !text.is_empty() {
-                        history.ensure(session, &mut view, false, &|| false);
-                        if let Some(s) =
-                            history.suggestion(session.history_lines(), &text, true, || true)
-                        {
-                            edit.undo
-                                .record(&text, cursor..cursor, s.len(), cursor, false);
-                            text.push_str(s);
-                        } else if let Some(s) =
-                            history.older_suggestion(session, &mut view, &text, &|| false)
-                        {
-                            edit.undo
-                                .record(&text, cursor..cursor, s.len(), cursor, false);
-                            text.push_str(s);
-                        }
-                        cursor = text.len();
-                    }
-                } else {
-                    cursor = next(&text, cursor);
-                }
+            Action::Forward if cursor == text.len() => {
+                edit.accept_suggestion(history, session, &mut view, &mut text, &mut cursor);
             }
+            Action::Forward => cursor = next(&text, cursor),
             Action::Paste => {
                 if cursor == text.len() {
                     edit.appended = Some(cursor);
