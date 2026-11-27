@@ -2,8 +2,8 @@ use super::array::{Elements, Records};
 use super::read::Input;
 use super::{Session, is_identifier};
 use crate::Flow;
-use std::io::{self, BufRead};
-use std::os::fd::BorrowedFd;
+use std::io::{self, BufRead, Read};
+use std::os::fd::{AsRawFd, BorrowedFd};
 
 struct Options<'a> {
     name: &'a str,
@@ -75,14 +75,55 @@ impl<'a> Options<'a> {
     }
 }
 
+// Full-array reads can keep their block buffer when only an interrupt or
+// termination can stop the builtin. Both are handled after storing the prefix.
+struct BulkInput<'a> {
+    file: std::fs::File,
+    signals: Option<&'a crate::traps::Traps>,
+}
+
+impl Read for BulkInput<'_> {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        loop {
+            let result = if let Some(traps) = self.signals {
+                super::read::ready(self.file.as_raw_fd(), None, Some(traps))
+                    .and_then(|_| self.file.read(out))
+            } else {
+                self.file.read(out)
+            };
+            if let Err(e) = &result
+                && e.kind() == io::ErrorKind::Interrupted
+                && !self.signals.is_some_and(|t| {
+                    t.read_pending()
+                        || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+                })
+            {
+                continue;
+            }
+            return result;
+        }
+    }
+}
+
 // A full replacement has no callback or later reader that can observe a
 // partially filled array. Build dense indices in order with one bulk load.
-fn read_all(options: &Options<'_>, here: Option<&[u8]>, store: impl FnMut(&str)) -> io::Result<()> {
+fn read_all(
+    options: &Options<'_>,
+    here: Option<&[u8]>,
+    signals: Option<&crate::traps::Traps>,
+    store: impl FnMut(&str),
+) -> io::Result<()> {
     if let Some(mut bytes) = here {
         return records(&mut bytes, options, store);
     }
     let fd = unsafe { BorrowedFd::borrow_raw(options.fd) }.try_clone_to_owned()?;
-    let mut reader = io::BufReader::with_capacity(64 * 1024, std::fs::File::from(fd));
+    let mut reader = io::BufReader::with_capacity(
+        64 * 1024,
+        BulkInput {
+            file: fd.into(),
+            signals,
+        },
+    );
     records(&mut reader, options, store)
 }
 
@@ -174,8 +215,10 @@ pub(crate) fn run(
         .variables
         .get(options.name)
         .and_then(|v| v.letter_case);
-    let mut watch = session.traps.read_handler();
-    if options.limit == 0 && options.callback.is_none() && !integer && !watch {
+    let mut watch = session.interactive || session.traps.active();
+    if options.limit == 0 && options.callback.is_none() && !integer && !session.traps.read_handler()
+    {
+        let signals = watch.then_some(&session.traps);
         let result = if options.origin.is_some() {
             let mut var = session
                 .declared_variable(options.name, false)
@@ -184,7 +227,7 @@ pub(crate) fn run(
             var.array_assigned = true;
             let elements = var.make_array();
             let mut index = origin;
-            let result = read_all(&options, here, |line| {
+            let result = read_all(&options, here, signals, |line| {
                 elements.insert(index, session.convert_case(line.to_owned(), letter_case));
                 index += 1;
             });
@@ -192,7 +235,7 @@ pub(crate) fn run(
             result
         } else {
             let mut lines = Records::default();
-            let result = read_all(&options, here, |line| {
+            let result = read_all(&options, here, signals, |line| {
                 if letter_case.is_some() {
                     lines.push(&session.convert_case(line.to_owned(), letter_case));
                 } else {
@@ -202,6 +245,12 @@ pub(crate) fn run(
             session.store_elements(options.name, Elements::Records(lines), false);
             result
         };
+        if watch && session.traps.read_pending() {
+            return crate::traps::dispatch(session, last);
+        }
+        if watch && crate::interrupted() {
+            return Flow::Discard(crate::traps::signal_status(libc::SIGINT));
+        }
         return match result {
             Ok(()) => Flow::Continue(0),
             Err(e) => {
@@ -234,7 +283,7 @@ pub(crate) fn run(
                 match input.wait(session, last, command, None, true) {
                     Ok(true) => {}
                     Ok(false) => {
-                        watch = session.traps.read_handler();
+                        watch = session.interactive || session.traps.active();
                         continue;
                     }
                     Err(flow) => return flow,
@@ -294,7 +343,7 @@ pub(crate) fn run(
                 return Flow::Continue(1);
             }
             input = Input::new(fd);
-            watch = session.traps.read_handler();
+            watch = session.interactive || session.traps.active();
         }
         if let Err(error) = session.assign_input_element(options.name, index, line) {
             diagnostic!("{command}: {error}");

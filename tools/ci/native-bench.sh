@@ -340,7 +340,7 @@ case "$SUITE" in
       --case builtin-output --case builtin-output-long --case external --case external-env --case external-wide-argv --case external-many-locals --case arithmetic --case arithmetic-live-bound --case functions --case pipeline --case external-substitutions \
       --case merged-pipeline --case merged-pipeline-redirect --case redirect-stderr --case background-subshell-wait \
       --case printf-list-newline --case printf-list-count \
-      --case heredoc-external-file --case here-string-capture --case here-string-builtin-read --case mapfile-trapped-pipe \
+      --case heredoc-external-file --case here-string-capture --case here-string-builtin-read --case mapfile-trapped-pipe --case mapfile-exit-pipe \
       --case capture-positional-program --case capture-scalar-program \
       --case array-slice-reference --case array-slice-dense --case array-slice-sparse --case array-index-fields --case array-assoc-order --case array-assoc-small \
       --case substitute-single-scalar --case trim-fixed-width --case substitute-fixed-class --case substitute-fixed-width

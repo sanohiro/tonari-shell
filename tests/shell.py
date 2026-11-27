@@ -162,6 +162,83 @@ p='\360\237\230\200'; echo "${p@P}" """
             finally:
                 os.close(high)
 
+    def wait_for_empty_pipe(self, fd):
+        pending = array.array("i", [0])
+        limit = time.monotonic() + 3
+        while time.monotonic() < limit:
+            fcntl.ioctl(fd, termios.FIONREAD, pending, True)
+            if not pending[0]:
+                return
+            time.sleep(0.005)
+        self.fail("reader did not consume the queued input")
+
+    def test_terminal_interrupt_discards_input_command_list(self):
+        cases = (("read -ru3 a", b"partial", b"old"),
+                 ("mapfile -tu3 a", b"saved\npart", b"saved"),
+                 ("mapfile -tu3 -n5 a", b"saved\npart", b"saved"))
+        for shell in self.shells_for(5):
+            for command, data, expected in cases:
+                r, w = os.pipe()
+                with self.subTest(shell=shell, command=command), os.fdopen(r, "rb") as reader, os.fdopen(w, "wb", buffering=0) as writer:
+                    os.set_inheritable(r, True)
+                    fd = self.terminal_session(shell=shell)
+                    os.write(fd, f"a=old; exec 3<&{r}; echo input''READY; {command}; echo still''RUNNING\n".encode())
+                    self.read_until(fd, b"inputREADY\r\n")
+                    writer.write(data)
+                    self.wait_for_empty_pipe(reader.fileno())
+                    os.write(fd, b"\x03")
+                    reply = self.read_until(fd, PROMPT)
+                    self.assertNotIn(b"stillRUNNING", reply)
+                    self.assertNotIn(b"Interrupted system call", reply)
+                    os.write(fd, b'echo "status=$? value=${a[*]}"\n')
+                    self.assertIn(b"status=130 value=" + expected + b"\r\n", self.read_until(fd, PROMPT))
+
+    def test_edited_read_resumes_after_a_caught_signal(self):
+        for shell in self.shells_for(5):
+            pid, fd = self.terminal_session(editing=True, shell=shell, with_pid=True)
+            for sig in (signal.SIGUSR1, signal.SIGINT):
+                with self.subTest(shell=shell, sig=sig):
+                    command = f"""trap 'echo caught=$?' {sig.name[3:]}; false; read -e -p 'reading'INPUT value; echo "status=$? value=$value"\n"""
+                    os.write(fd, command.encode())
+                    self.read_until(fd, b"readingINPUT")
+                    os.write(fd, b"hel")
+                    self.read_until(fd, b"hel")
+                    os.kill(pid, sig)
+                    self.read_until(fd, b"caught=1\r\n")
+                    os.write(fd, b"lo\n")
+                    self.assertIn(b"status=0 value=hello\r\n", self.read_until(fd, PROMPT))
+
+    def test_interrupting_edited_read_preserves_its_destination(self):
+        for shell in self.shells_for(5):
+            fd = self.terminal_session(shell=shell)
+            os.write(fd, b"a=old; read -e -p 'typed'INPUT a; echo still''RUNNING\n")
+            self.read_until(fd, b"typedINPUT")
+            os.write(fd, b"part\x03")
+            self.assertNotIn(b"stillRUNNING", self.read_until(fd, PROMPT))
+            os.write(fd, b'echo "status=$? value=$a"\n')
+            self.assertIn(b"status=130 value=old\r\n", self.read_until(fd, PROMPT))
+
+    def test_mapfile_termination_runs_exit_trap_with_completed_records(self):
+        for shell in self.shells_for(5):
+            for opts in ("", "-n5"):
+                code = f"""trap 'echo "exit=$?:${{a[*]}}"' EXIT; echo ready; :
+mapfile -t {opts} a; echo continued"""
+                r, w = os.pipe()
+                with os.fdopen(r, "rb") as reader, os.fdopen(w, "wb", buffering=0) as writer, subprocess.Popen(
+                    [shell, "-c", code], env=self.env, stdin=reader, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                ) as child:
+                    try:
+                        self.assertEqual(child.stdout.readline(), b"ready\n")
+                        writer.write(b"saved\npartial")
+                        self.wait_for_empty_pipe(reader.fileno())
+                        child.terminate()
+                        child.wait(timeout=3)
+                        out, err = child.communicate()
+                        self.assertEqual((child.returncode, out, err), (-signal.SIGTERM, b"exit=0:saved\n", b""))
+                    finally:
+                        if child.poll() is None:
+                            child.kill()
+
     def test_read_dispatches_a_trap_before_resuming_partial_input(self):
         cases = [
             ("read -r value", b"hel", b"1", b"hello"),
@@ -181,15 +258,7 @@ p='\360\237\230\200'; echo "${p@P}" """
                     try:
                         self.assertEqual(child.stdout.readline(), b"ready\n")
                         writer.write(prefix)
-                        # Wait until the reader has consumed the prefix before delivering the signal.
-                        limit = time.monotonic() + 2
-                        while time.monotonic() < limit:
-                            pending = array.array("i", [0])
-                            fcntl.ioctl(observe.fileno(), termios.FIONREAD, pending, True)
-                            if not pending[0]:
-                                break
-                            time.sleep(0.005)
-                        self.assertEqual(pending[0], 0)
+                        self.wait_for_empty_pipe(observe.fileno())
                         child.send_signal(signal.SIGUSR1)
                         self.assertTrue(select.select([child.stdout], [], [], 2)[0])
                         self.assertEqual(child.stdout.readline(), b"caught:" + last + b"\n")
