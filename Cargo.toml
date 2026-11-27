@@ -3,7 +3,8 @@ name = "tonari"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
-description = "An experimental Bash-compatible interactive shell for macOS and Linux"
+description = "A Bash-compatible login shell with built-in autosuggestions, history search, and tab completion"
+license = "MIT"
 publish = false
 
 [dependencies]

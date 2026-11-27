@@ -2,88 +2,71 @@
 
 [日本語](README.ja.md)
 
-Tonari is a Rust shell for modern macOS and Linux, including WSL2. It aims to replace Bash as an everyday login shell. Bash-style commands, startup files and tool integrations run on Tonari’s own interpreter. Interactive editing, history suggestions and completion are built in.
+Tonari is a fast, Bash-compatible login shell for macOS and Linux. It runs your Bash scripts and startup files, with fish-style autosuggestions, searchable history, and tab completion built in. It is designed to be your everyday shell in place of Bash or zsh.
 
-**Tonari is a working prototype.** All 61 Bash builtins pass their primary check on the three reference systems. A login session can load Bash profiles, import exported functions, and run fzf’s Ctrl-T binding. Some Readline commands, shell options and script behaviors still differ. The feature matrix lists the individual results.
+Tonari runs Bash syntax in its own Rust interpreter. You can try it from your current shell, keep your existing `~/.bashrc`, and call the system Bash at `/bin/bash` whenever you want.
 
-The current inventory gives the outcome for every named check on Debian, Ubuntu and macOS. The audit guide links the commands, observed differences and measured timings. [Current inventory](docs/compatibility/current.tsv) · [Audit guide](docs/compatibility.md) · [Intentional differences](docs/compatibility.md#intentional-differences)
+## At the prompt
 
-## Try it
+| Try this | What happens |
+|---|---|
+| Type `git sw` | When a history suggestion appears, press → to accept it or Alt-F to take just the next argument. ↑ and ↓ browse commands from this session that start with `git sw`. |
+| Press Tab twice | When several completions match, the second Tab opens a list. Type to filter it, use ↑ or ↓ to choose, and press Enter to insert your choice. |
+| Press Ctrl-R and type `ssh 15432` | Find commands across sessions containing both fragments, in either order. Select a command to edit, or press Ctrl-G to return to your draft. |
 
-Development builds require Rust 1.88 or later. Distribution builds use a pinned rustup toolchain to optimize the standard library with the shell. The arm64 release targets the build CPU. Linux x86-64 targets x86-64-v3. Build on the target OS and architecture. Linux also requires binutils for the linker checks.
+These features work with the default settings. Tab also uses existing Bash completion definitions from tools such as Git and GitHub CLI. [Editing shortcuts and prompt setup](docs/guide.md#editing)
+
+## Install and try it
+
+Build from source with a current stable Rust toolchain and a native linker. Packages for **Homebrew** on macOS, **APT** on Debian/Ubuntu, and installation from crates.io with `cargo install` are planned.
 
 ```sh
-case "$(uname -s)" in
-  Darwin) target=aarch64-apple-darwin ;;
-  Linux) target="$(uname -m)-unknown-linux-musl" ;;
-esac
-rustup toolchain install nightly-2026-11-20 --profile minimal --component rust-src --target "$target"
-binary=$(tools/build-release.sh)
-"$binary" --noprofile --norc
+git clone https://github.com/sanohiro/tonari-shell.git
+cd tonari-shell
+cargo build --release --locked
+./target/release/tonari
 ```
 
-To build with the installed compiler and its prebuilt standard library, pass `--host-toolchain`. On GNU/Linux install the matching musl target for that compiler first. A plain `cargo build` targets the development host. All release entry points use O2, fat LTO and symbol stripping.
+Type `exit` to return to your previous shell. Tonari targets Apple Silicon Macs and Linux on x86-64 and arm64. WSL2 is an intended target. The optimized Linux distribution build is a single static executable and targets x86-64-v3 on x86-64. [Distribution build instructions](docs/guide.md#build)
 
-Type `git sw` and press ↑ or ↓ to recall commands from this session that start with `git sw`. The prefix ends at the cursor. Moving past the newest match restores the draft and its cursor. On an empty line the arrows browse chronologically. At an empty prompt, Alt-← and Alt-→ move back and forward through directories visited in this shell.
+## Use Tonari as your login shell
 
-Ctrl-R searches across sessions. At the end of the line, → accepts a suggestion. Alt-F accepts just the next shell argument, including its quoting. Inside the line, Alt-F moves forward a word. Tab completes paths with spaces. If the exact directory is missing, you can abbreviate each level, for example `s/b/c/ker<Tab>` for `src/backend/cuda/kernel.cu`. When several candidates match, press Tab again. Type part of a name, move with ↑ or ↓, and press Enter to insert the selection. Esc or Ctrl-G returns to your draft. Alt-? prints the full list.
+From the checkout above, install the binary under a stable prefix.
 
-In Ctrl-R, type two fragments such as `ssh 15432` to list commands containing both in either order. Tab opens the same list for a single fragment or an empty search. Use ↑/↓ to select and Enter to return the command to the editor. Esc or Ctrl-G restores your draft and cursor. A single-fragment inline search keeps Bash’s Enter-to-execute behavior.
+```sh
+sudo ./tools/stage.sh target/release/tonari /usr/local
+```
 
-Alt-. inserts the last argument of the previous command at the cursor, with its quoting intact. Press it again to use the argument from the next older command. For example, after `less 'research notes.txt'`, type `rg ERROR ` and press Alt-. to reuse that filename.
+This installs one executable at `/usr/local/libexec/tonari/bash` and a `/usr/local/bin/tonari` symlink to it. Add the full `/usr/local/libexec/tonari/bash` path on its own line in `/etc/shells`, then select it as your login shell.
 
-Ctrl-_ undoes one edit on the current line. A completion, an accepted suggestion, and a multiline paste each undo in one step. Ctrl-X Ctrl-U also works in the default Emacs keymap.
+```sh
+chsh -s /usr/local/libexec/tonari/bash
+```
 
-Insert toggles overwrite mode. Ctrl-Space sets a mark, Alt-W copies the region and Ctrl-Y pastes it. Bracketed paste keeps multiline commands editable until you press Enter. Long commands show a moving window around the cursor.
+Log out and back in. Tools that check the basename of `$SHELL` now see `bash`, and scripts can use `BASH_VERSION` to select their Bash integration. You can load `nvm.sh` in your usual Bash rc and run `nvm use`. With GitHub CLI’s Bash completion loaded, Tab after `gh iss` completes `gh issue`. Scripts with a `#!/bin/bash` shebang still run the system Bash. Starting `tonari` inside another shell inherits that session’s `$SHELL`. To switch your login shell back, pass its original path to `chsh -s` and log in again. [Tested tool integrations](docs/benchmarks.md#tool-hooks)
+
+### Your Bash configuration
+
+An interactive non-login shell reads `~/.bashrc`. A login shell reads `/etc/profile`, then the first readable file among `~/.bash_profile`, `~/.bash_login`, and `~/.profile`, in that order. If you keep aliases, completions, or nvm in `~/.bashrc`, you can source it from your login profile.
 
 ```bash
-count_lines() { wc -l < "$1"; }
-for file in README*.md; do printf '%s ' "$file"; count_lines "$file"; done
+if [ -n "${BASH_VERSION-}" ] && [ -r "$HOME/.bashrc" ]; then
+    . "$HOME/.bashrc"
+fi
 ```
 
-To stage the Bash-compatible entry point under a temporary prefix, run these commands. Both names start the same executable. A nested session inherits `SHELL`.
+## Performance and compatibility
 
-```sh
-prefix=$(mktemp -d)
-tools/stage.sh "$binary" "$prefix"
-"$prefix/libexec/tonari/bash" --noprofile --norc -c 'printf "%s\n" one two | wc -l'
-"$prefix/bin/tonari" --noprofile --norc
-```
+| Task (median elapsed time) | Tonari | GNU Bash |
+|---|---:|---:|
+| First interactive prompt, Apple M1 | 4.02 ms | 8.58 ms |
+| Launch 48 external commands with output to `/dev/null`, Linux x86-64 | 14.0 ms | 22.4 ms |
+| Write `pwd` to a regular file 1,000 times, Linux x86-64 | 68.7 ms | 65.0 ms |
 
-To use an installed Starship prompt, add `eval "$(starship init bash)"` to your interactive `~/.bashrc`. Tonari runs Starship’s Bash integration. With Starship 1.27.0, `eval "$(starship init bash --print-full-init)"` loads the same Bash hook with one fewer Starship launch. [Startup, typing and prompt timings](docs/benchmarks.md#starship-filter)
+The M1 comparison used 61 starts per shell and GNU Bash 5.3.20. Both Linux tests used the same native runner. The optimized binaries measured 1.78 MB on macOS arm64 and 2.47 MB on Linux x86-64 in CI. [Measurements and conditions](docs/benchmarks.md#runtime-audit-v2) · [M1 startup results](https://github.com/sanohiro/tonari-shell/pull/18)
 
-## Current capabilities
+Tonari is tested against GNU Bash on Debian, Ubuntu, and macOS. It accepts UTF-8 shell text and passes arbitrary bytes through pipes and redirections. The compatibility guide records differences in scripting and interactive behavior. [Bash compatibility](docs/compatibility.md) · [Intentional differences](docs/compatibility.md#intentional-differences)
 
-- **Input and state.** Interactive terminals, `-c`, script files, stdin, `source`, and `eval` share the evaluator. Read-only variables, exported environment values, function-local scope, positional parameters, and `cd` persist within their Bash scopes.
-- **Language.** Conditional lists, groups, subshells, functions, loops, `case`, `[[ ]]`, arithmetic, command substitution, globs, quoted words, indexed arrays, and associative arrays are implemented. Extended patterns work in conditionals, case arms, filename expansion and parameter operations. Pathname expansion supports `dotglob`, `failglob`, `nullglob`, and recursive `globstar`. Parameter expansion supports indirection such as `${!name}` and `${!#}`. Alias definitions affect subsequently read commands. The parser accepts UTF-8 shell text.
-- **Processes.** External commands and concurrent pipelines support ordered redirections, here-documents and here-strings. Streams can carry arbitrary bytes. Foreground job control, Ctrl-C, Ctrl-Z, `jobs`, `bg`, `fg`, background pipelines, `disown`, and `wait` are exercised with real processes. Scripts can inspect `PIPESTATUS`, signal jobs with `kill`, and register signal, `EXIT`, `DEBUG`, `ERR`, and `RETURN` handlers with `trap`.
-- **Startup.** Login sessions read `/etc/profile` and the first readable file among `~/.bash_profile`, `~/.bash_login`, and `~/.profile`, in order. A login session runs `~/.bash_logout` on interactive EOF or explicit exit. Interactive non-login sessions read the user’s Bash rc. Noninteractive sessions support `BASH_ENV`. The editor honors `PS1`, `PS2`, and scalar or array `PROMPT_COMMAND`.
-- **History and completion.** Tonari keeps its own journal under `$XDG_STATE_HOME/tonari` or `~/.local/state/tonari`. With the default history setting, sessions share that journal. Setting `HISTFILE` to a different filename selects a separate plain history file. History supports common Bash exclusion and persistence settings. Tab uses Bash definitions registered with `complete`. Interactive shells enable `progcomp_alias` so an alias inherits its command’s completion. When ordinary candidates run out, Tab can recall a path used by another command in the same project, or a previous value for the same command and option. Among equally relevant history candidates, frequently used arguments appear first, with the most recently used first on a tie. Ctrl-G leaves reverse search and restores the draft and its cursor.
+## License
 
-We sourced nvm 0.40.3 and 0.40.5 in Tonari, switched between Node 24.1.0 and 18.13.0 in the same session, and verified each switch with `node --version`. On macOS arm64, a staged login session loaded Debian bash-completion 2.16.0 and the script from GitHub CLI 2.96.0. Pressing Tab after `gh iss` inserted `gh issue `.
-
-Git also completed a branch created by another process after startup, and direnv 2.32.1 applied and removed a directory environment on Debian. An fzf 0.74.0 integration test selected a filename containing a space and Japanese text with Ctrl-T in both Emacs and vi editing modes. The editor supports `bind -x`, key macros, `INPUTRC` and editable `read -e -i` input. Scripts can use `select`, `time` and `coproc`. Named redirections such as `exec {log}>file` allocate a descriptor that the caller can use and close. The `nocasematch` option works in `case`, `[[ ]]`, parameter replacement and completion filters. `shopt -s nocaseglob` makes pathname expansion and `GLOBIGNORE` filters case-insensitive. Bash 5.3 current-environment command substitutions are supported. Programmable completions honor COMP_WORDBREAKS and receive punctuation and quotes in COMP_WORDS. Some advanced Readline commands still have differences. Native CI measures Linux x86-64 on Intel and AMD, Linux arm64 and macOS arm64. WSL2 validation and a persistent startup parsing cache remain open. Debian and Ubuntu arm64 also passed actual account login and logout using Tonari’s private `bash` path. [Per-feature results](docs/compatibility.md)
-
-For VS Code, set the terminal profile executable to the staged `libexec/tonari/bash` path to enable automatic shell integration. Real terminal benchmarks cover nvm, direnv, Git and GitHub CLI completion, fzf history and file selection, mise, and VS Code running with all seven integrations. [Interactive timings and test conditions](docs/benchmarks.md#tool-hooks)
-
-## Speed and size
-
-The feature reference is GNU Bash 5.2.37 on Debian 13 and 5.3.9 on Ubuntu 26.04. For work done by the shell we aim for half of Bash’s elapsed time, with two-thirds as the upper target. Bash-equivalent time is acceptable for very short operations and workloads dominated by the same OS work. The benchmark records startup, external commands, pipelines, and repeated operations separately. The macOS system Bash 3.2 is an additional comparison. [Measurements, binary sizes and build conditions](docs/benchmarks.md)
-
-Linux releases for arm64 and x86-64-v3 are single, static musl executables. They run without glibc, a dynamic loader or an installed musl package. The macOS arm64 executable links to libSystem. [Release sizes and startup measurements](docs/native-2026-11-24/README.md)
-
-## Development
-
-Prefer the Rust standard library or a pure Rust crate for a self-contained operation. Terminal cell width uses `unicode-width`, history searches use `memchr`, and the Linux musl build uses `dlmalloc` for small allocations and its static system allocator for large buffers. File descriptors, terminals and process control use native APIs through the `libc` crate. Evaluate additional native libraries against the required behavior, latency and shipped size. Linux orders pathname expansions by UTF-8 bytes in every locale. macOS follows the active locale. [Dependency policy and filename order](docs/engineering-notes.md#runtime-dependencies)
-
-```sh
-cargo test --locked
-cargo build --locked
-python3 tests/shell.py target/debug/tonari
-binary=$(tools/build-release.sh)
-python3 tools/bench.py "$binary" --bash /bin/bash
-```
-
-The end-to-end tests compare output, files, and exit status with Bash. They also exercise the editor and job control through pseudo-terminals. Use `REFERENCE_BASH` to select a test reference, or `--bash` for benchmarks. Use `--compare-tonari Previous /path/to/previous` to interleave builds in the same run.
-
-Keep English and Japanese documentation in sync. Write commit messages and PR titles and descriptions in English. Record findings and their verification steps in the [engineering notes](docs/engineering-notes.md).
+Tonari’s original code and documentation are available under the [MIT License](LICENSE). Third-party dependencies and upstream test material retain their respective licenses.
