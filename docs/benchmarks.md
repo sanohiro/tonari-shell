@@ -1,5 +1,28 @@
 # Startup and execution / 起動と実行性能
 
+<a id="array-static-audit"></a>
+
+## 2026-11-27 · Indexed slices and associative iteration / 配列の切り出しと列挙
+
+Native release medians/p95 in ms. Compare the immediately preceding release to the new release and Bash. M1 used Bash 5.3.20 and 31 samples. Linux x86-64 used Bash 5.2.21 and 41. Run `tools/bench_scripts.py CURRENT --previous PREVIOUS --bash BASH --timing started --runs 31` with the cases below. The driver populates the arrays before its ready signal.
+
+| Host and workload | Previous | Current | Bash |
+|---|---:|---:|---:|
+| M1, array-slice-dense | 9.006/9.031 | 0.501/0.511 | 20.261/20.371 |
+| M1, array-slice-sparse | 9.693/9.762 | 0.511/0.606 | 20.028/20.472 |
+| M1, array-index-fields | 5.849/6.122 | 1.994/2.159 | 33.541/34.434 |
+| M1, array-assoc-order | 8.514/8.987 | 2.536/2.711 | 16.069/16.159 |
+| M1, array-assoc-small | 0.707/0.782 | 0.712/0.773 | 1.956/2.053 |
+| Linux x86-64, array-slice-dense | 30.751/30.988 | 0.330/0.356 | 28.083/28.562 |
+| Linux x86-64, array-slice-sparse | 32.001/32.557 | 0.360/0.415 | 24.950/25.290 |
+| Linux x86-64, array-index-fields | 18.477/18.731 | 5.288/5.419 | 34.400/34.876 |
+| Linux x86-64, array-assoc-order | 8.243/8.454 | 3.801/3.866 | 12.620/12.728 |
+| Linux x86-64, array-assoc-small | 0.412/0.436 | 0.412/0.448 | 1.238/1.290 |
+
+The slice cases request three members near the end of an 8,192-element array, 32 times. The sparse array has a hole between every two occupied indices. The key tests verify all printed fields and their order. Indexed keys are enumerated eight times, 768 associative keys 24 times and four associative keys 240 times. 8,192件の数値キーを一旦ひとつのバッファに書く試作は M1 で 4.739 ms、引用したキーを直接引数にする実装は同じ計測で 2.020 ms だった。
+
+Release size for this change was 1,765,456 → 1,765,472 bytes on M1 and 2,446,872 → 2,439,384 on Linux. Across all five audit changes the increase was 16,576 and 9,280 bytes respectively. M1 exec to first prompt, before all five changes / final / Bash, was 2.761/2.932 / 2.634/2.843 / 7.331/7.566 ms (median/p95 per binary). [Native Linux measurements](https://github.com/sanohiro/tonari-shell/actions/runs/45954023557)
+
 <a id="picker-static-audit"></a>
 
 ## 2026-11-27 · Ordered completion and deep history / 順序付き補完と履歴

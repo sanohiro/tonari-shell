@@ -24,6 +24,19 @@ def eval_loop(body, check, expected, setup="", count=2000):
 
 
 # The last command prints a result that the driver checks on every run.
+def assoc_names(count):
+    # Bash visits its hash buckets in order and prepends each new key.
+    def order(pair):
+        index, name = pair
+        bucket = 2166136261
+        for byte in name.encode("ascii"):
+            bucket = ((bucket * 16777619) ^ byte) & 1023
+        return bucket, -index
+
+    names = [f"package-component-dependency-{i}" for i in range(count)]
+    return [name for _, name in sorted(enumerate(names), key=order)]
+
+
 CASES = {
     "history-long-event-word": (
         """printf -v pad '%65536s' x
@@ -382,6 +395,31 @@ echo "$i"
         'for ((i=0; i<400; i++)); do base=${path##*/}; done\necho "${#base}"',
         "2048",
     ),
+    "array-assoc-order": (
+        'for ((i=0; i<24; i++)); do set -- "${!items[@]}"; done\n'
+        'printf "%s\\n" "$@"',
+        "\n".join(assoc_names(768)),
+    ),
+    "array-assoc-small": (
+        'for ((i=0; i<240; i++)); do set -- "${!items[@]}"; done\n'
+        'printf "%s\\n" "$@"',
+        "\n".join(assoc_names(4)),
+    ),
+    "array-index-fields": (
+        'for ((i=0; i<8; i++)); do set -- "${!items[@]}"; done\n'
+        'printf "%s\\n" "$@"',
+        "\n".join(str(i) for i in range(8192)),
+    ),
+    "array-slice-dense": (
+        'for ((i=0; i<32; i++)); do set -- "${items[@]:8000:3}"; done\n'
+        'printf "%s\\n" "$#" "$@"',
+        "3\n8000\n8001\n8002",
+    ),
+    "array-slice-sparse": (
+        'for ((i=0; i<32; i++)); do set -- "${items[@]:16000:3}"; done\n'
+        'printf "%s\\n" "$#" "$@"',
+        "3\n8000\n8001\n8002",
+    ),
     "substitute-single-scalar": (
         "text='" + "雪🌸x" * 1024 + "'\n"
         'for ((i=0; i<16; i++)); do value=${text//?/x}; done\necho "${#value}"',
@@ -560,6 +598,14 @@ def main():
             if case == "external-many-locals":
                 case_setup += ('for ((i=0; i<8192; i++)); do printf -v "bench_local_$i" %d "$i"; done; '
                                'export BENCH_EXPORT=visible; ')
+            if case in ("array-assoc-order", "array-assoc-small"):
+                count = 768 if case == "array-assoc-order" else 4
+                case_setup += (f'declare -A items=(); for ((j=0; j<{count}; j++)); '
+                               'do items[package-component-dependency-$j]=$j; done; ')
+            elif case in ("array-slice-dense", "array-index-fields"):
+                case_setup += 'items=({0..8191}); '
+            elif case == "array-slice-sparse":
+                case_setup += 'for ((j=0; j<8192; j++)); do items[j*2]=$j; done; '
             modes = (False, True) if args.timing == "both" else (args.timing == "started",)
             for started in modes:
                 samples = {name: [] for name, _ in participants}

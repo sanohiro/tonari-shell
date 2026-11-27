@@ -167,6 +167,10 @@ impl<'a> Expansion<'a> {
             .or_else(|| execute::parameter(self.session, self.status(), name))
     }
 
+    pub(crate) fn has_pending_assignments(&self) -> bool {
+        !self.assignments.is_empty()
+    }
+
     pub(super) fn shadows(&self, name: &str) -> bool {
         self.assignments.iter().any(|(key, _)| key == name)
     }
@@ -280,7 +284,7 @@ impl<'a> Expansion<'a> {
 
     pub fn capture(&mut self, body: Vec<Statement>) -> Result<String, &'static str> {
         let mut overridden;
-        let session = if self.assignments.is_empty() {
+        let session = if !self.has_pending_assignments() {
             &mut *self.session
         } else {
             let mut copy = self.session.clone();
@@ -507,11 +511,11 @@ impl<'a> Expansion<'a> {
     ) -> Result<(), Error> {
         word.resolve(self)?;
         // Each element of a standalone quoted "${a[@]}" is already a complete field.
-        if self.assignments.is_empty()
+        if !self.has_pending_assignments()
             && let Word::Expanded(parts) = &word
             && let [crate::word::Part::Parameter { name, quoted: true }] = parts.as_slice()
-            && let Some(base) = name.strip_suffix("[@]")
-            && self.session.append_indexed_fields(base, fields)
+            && let Some((base, true, keys)) = crate::word::array_elements_name(name)
+            && self.session.append_indexed_fields(base, keys, fields)
         {
             return Ok(());
         }

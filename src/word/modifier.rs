@@ -48,9 +48,9 @@ impl Values {
             ));
         }
         if let Some((base, at, keys)) = array_elements_name(name) {
-            if !keys && !env.shadows(base) {
+            if !env.shadows(base) {
                 let mut values = Vec::new();
-                if env.session.append_indexed_fields(base, &mut values) {
+                if env.session.append_indexed_fields(base, keys, &mut values) {
                     return Ok(Self::Elements(values, at));
                 }
             }
@@ -416,6 +416,13 @@ impl Modification {
                     }
                     let count = len.map_or(usize::MAX, |n| n as usize);
                     let (values, at) = if let Some((base, at, keys)) = array_elements_name(name) {
+                        if !keys
+                            && !env.has_pending_assignments()
+                            && let Some(values) =
+                                env.session.stored_indexed_slice(base, start, count)
+                        {
+                            return Ok(Part::Elements { values, at, quoted });
+                        }
                         if env.session.is_associative(base) {
                             let values = super::array_elements(base, keys, &|k| env.lookup(k))
                                 .unwrap_or_default();

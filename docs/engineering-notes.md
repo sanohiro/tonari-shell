@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## November 27 · Array ranges and key order / 配列の範囲とキー順序
+
+The last pass also inventoried 365 formatting, vector, output and related macro calls across 105 Rust files. Of these, 168 occurred inside a loop or closure. It followed a formatting call from slice expansion back to the array storage. A three-element slice used to serialize every occupied numeric index, parse it, construct subscript strings, and look up the requested values. Dense arrays and mapfile records can address the requested interval directly. Sparse arrays seek to its first occupied index in their ordered map. Standalone quoted index fields can write the decimal keys directly into the argument list. Associative iteration computes the Bash bucket and insertion-order sort key once per entry.
+
+配列の生成を計測区間の前に済ませ、全出力・終了状態を検証した。1,152パターンで従来版と同じ結果になり、うち1,146件は Bash 5.3.20 とも一致した。残る6件はいずれも長さ0の連想配列スライスで、Tonari は空の結果を返す。Bash のマニュアルは連想配列のスライスを未定義としている。添字付き配列、負のオフセット、空要素、名前参照、mapfile、PIPESTATUS の回帰試験は `test_slices_of_dense_sparse_and_mapfile_arrays` で実行できる。 [GNU Bash parameter expansion](https://www.gnu.org/software/bash/manual/bash.html#Shell-Parameter-Expansion) · [Measurements / 計測](benchmarks.md#array-static-audit)
+
 ## November 27 · Full-source performance review / 全ソースの速度調査
 
 Scanned all 105 tracked Rust files, including the locale generator and allocator test. The syntax-tree walk associated candidate calls with their containing function and loop or closure. The first pass flagged 1,800 sites for allocation, copying, search and OS calls. The review also parsed all 64 Python drivers, syntax-checked 12 shell scripts/fixtures and five C helpers, and inspected the CI definitions, Dockerfile and compiler timing patch. Build and test work does not run in the installed shell. A separate ASCII mask compiler for bracket tokens changed an M1 median from 0.546 to 0.506 ms while p95 went from 0.633 to 0.680 ms. The shipped code reuses the existing range and locale rules.

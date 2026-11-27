@@ -720,13 +720,15 @@ impl Session {
                         .join("\0"),
                 );
             }
-            return Some(
-                self.indices(base)
-                    .into_iter()
-                    .map(|i| i.to_string())
-                    .collect::<Vec<_>>()
-                    .join("\0"),
-            );
+            let mut text = String::new();
+            let mut decimal = itoa::Buffer::new();
+            for index in self.indices(base) {
+                if !text.is_empty() {
+                    text.push('\0');
+                }
+                text.push_str(decimal.format(index));
+            }
+            return Some(text);
         }
         if let Cow::Owned(target) = self.reference_name(name).ok()? {
             let depth = self.reference_depth.get();

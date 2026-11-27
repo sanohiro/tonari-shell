@@ -946,6 +946,44 @@ test -t 5 5<&-; echo $?; test -t 5 5</dev/null; echo $?; test -t 5 5<&0; echo $?
                      0, "<😀a>\n<bc>\n<😀ab>\n<>\n<>\n<>\n<猫😀abc>\n".encode())
         self.compare('v=abc; printf "%s" "${v:2:-2}"', 1)
 
+    def test_slices_of_dense_sparse_and_mapfile_arrays(self):
+        self.compare(r"""show() { printf '[%d]' "$#"; printf '<%s>' "$@"; echo; }
+a=(one "" "雪 🌸" four)
+show "${a[@]:1:2}"
+show "${a[@]: -1}"
+show "${a[@]: -9:2}"
+show "${a[@]:2:0}"
+show "${a[@]:4:999999999999}"
+a=([2]=low [7]="" [20]="雪 🌸" [90]=high)
+show "${a[@]:3:2}"
+show "${a[@]: -71:2}"
+show "${a[@]: -100:5}"
+declare -n ref=a
+show "${ref[@]:7:2}"
+mapfile -t lines < <(printf 'zero\n\n雪 🌸\nend\n')
+show "${lines[@]:1:2}"
+show "${lines[@]: -2:1}"
+false | true
+show "${PIPESTATUS[@]:0:2}"
+declare -A assoc=([only]="kept value")
+show "${assoc[@]:1:1}"
+show "${a[*]:7:2}"
+""", 0, """[2]<><雪 🌸>
+[1]<four>
+[0]<>
+[0]<>
+[0]<>
+[2]<><雪 🌸>
+[2]<雪 🌸><high>
+[0]<>
+[2]<><雪 🌸>
+[2]<><雪 🌸>
+[1]<雪 🌸>
+[2]<1><0>
+[1]<kept value>
+[1]< 雪 🌸>
+""".encode(), minimum=5)
+
     def test_length_and_slice_follow_live_bindings(self):
         self.compare('s=outside; f(){ local s=inside; v=$s n=${#v} sub=${v:1:3}; '
                      'echo "$n/$sub"; declare -n ref=s; echo "${#ref}/${ref:1:3}"; }; '

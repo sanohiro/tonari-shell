@@ -39,7 +39,7 @@ impl Associative {
 
     pub(super) fn ordered(&self) -> Vec<(&str, &str)> {
         let mut entries: Vec<_> = self.entries.iter().collect();
-        entries.sort_unstable_by_key(|(key, (_, serial))| {
+        entries.sort_by_cached_key(|(key, (_, serial))| {
             let hash = key.bytes().fold(2166136261u32, |hash, c| {
                 hash.wrapping_mul(16777619) ^ (c as libc::c_char as u32)
             });
