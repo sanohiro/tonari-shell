@@ -1,5 +1,39 @@
 # Startup and execution / 起動と実行性能
 
+<a id="static-audit-final"></a>
+
+## 2026-11-27 · Full-source audit, cumulative comparison / 全走査前後の実測
+
+All rows compare the same initial revision 5670567 with the final release code. Medians in milliseconds. Apple M1 used GNU Bash 5.3.20 and the native Ubuntu x86-64 runner used Bash 5.2.21. The interactive rows time a visible edit or selection in a PTY. Script timings start after the ready handshake. Bash has no equivalent for the deep history picker. M1 used 21 samples for history, 31 for Tab and expansions, 41 for launches and 81 for startup. Linux used 15 for history, 31 for Tab and 41 for scripts. A warm static Tab has ten samples per session.
+
+| Host | Workload | Initial | Final | Bash |
+|---|---|---:|---:|---:|
+| M1 | ordered static Tab, warm | 0.169 | 0.031 | 26.076 |
+| M1 | ordered callback Tab | 2.457 | 0.830 | 7.006 |
+| M1 | deep history page | 36.379 | 12.277 | — |
+| M1 | substitute-fixed-class | 24.136 | 0.480 | 0.926 |
+| M1 | array-slice-dense | 9.069 | 0.519 | 20.339 |
+| M1 | array-slice-reference | 9.093 | 0.524 | 20.310 |
+| M1 | external-wide-argv | 70.921 | 70.594 | 85.564 |
+| M1 | external-many-locals | 53.151 | 51.733 | 84.722 |
+| M1 | external | 18.312 | 17.900 | 29.509 |
+| M1 | pipeline | 21.686 | 21.699 | 34.787 |
+| Linux | ordered static Tab, warm | 0.204 | 0.040 | 11.500 |
+| Linux | ordered callback Tab | 5.471 | 1.624 | 6.466 |
+| Linux | deep history page | 191.067 | 10.182 | — |
+| Linux | substitute-fixed-class | 80.551 | 0.297 | 0.466 |
+| Linux | array-slice-dense | 30.628 | 0.344 | 28.190 |
+| Linux | array-slice-reference | 30.780 | 0.348 | 27.903 |
+| Linux | external-wide-argv | 14.514 | 14.168 | 27.888 |
+| Linux | external-many-locals | 17.997 | 16.055 | 24.950 |
+| Linux | external | 4.666 | 4.649 | 6.691 |
+| Linux | pipeline | 6.701 | 6.647 | 8.999 |
+| M1 | exec to first prompt | 2.768 | 2.759 | 7.411 |
+
+The callback fixture returns 10,000 distinct words in declaration order plus 313 repetitions. Time Tab through the visible common prefix and verify the edited line after a full redraw. On the immediately preceding release and the callback change alone, medians fell 2.384 → 0.831 ms on M1 and 5.099 → 1.619 ms on Linux. Run tools/bench_completion.py with --reply-list --runs 31. [Isolated native Linux callback run](https://github.com/sanohiro/tonari-shell/actions/runs/45956783316)
+
+配布バイナリは初版との比較で M1 が 1,748,896 → 1,765,472 バイト、Linux static PIE が 2,430,104 → 2,433,272 バイト。補完の最初の Tab、p95、個別コマンドの直接 C 対照群、ホスト・ツールチェーンは Linux の成果物に収録した。 [Cumulative native Linux measurements](https://github.com/sanohiro/tonari-shell/actions/runs/45956914628)
+
 <a id="shortlist-and-references"></a>
 
 ## 2026-11-27 · Reference slices, release layout and locale storage / 名前参照・配布サイズ

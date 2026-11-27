@@ -595,6 +595,18 @@ impl Session {
             .collect()
     }
 
+    // The caller restores the original COMPREPLY binding immediately afterwards.
+    // A callback may redirect the name through a nameref or share its storage.
+    pub(crate) fn take_completion_reply(&mut self) -> Vec<String> {
+        if let Some(variable) = self.variables.get_mut("COMPREPLY")
+            && !variable.nameref
+            && let Some(Elements::Dense(values)) = variable.elements.as_mut().and_then(Rc::get_mut)
+        {
+            return std::mem::take(values);
+        }
+        self.array_values("COMPREPLY")
+    }
+
     pub(crate) fn store_completions(
         &mut self,
         name: &str,

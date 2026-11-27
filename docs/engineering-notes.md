@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## November 27 · Reading large completion replies / 大量の補完候補を受け取る
+
+A shell callback creates COMPREPLY and the editor restores its previous binding after reading the result. If the temporary binding owns a dense array, the interpreter can move its strings straight into the reply. Namerefs, sparse arrays and shared storage keep their ordinary lookup behavior. To preserve declaration order, record first occurrences using borrowed strings and compact the owned list once.
+
+シェル関数が返す候補10,000件に重複313件を加え、Tab から共通部分が表示されるまでを測定した。全画面を再描画して編集中の行を照合し、密な配列・疎な配列の候補順と COMPREPLY の復元も回帰試験に追加した。 [Benchmark and full audit / 実測と監査全体](benchmarks.md#static-audit-final) · [Evaluation of the ten proposals / 候補10件の採否](compatibility/runtime-audit-v3.md#final-shortlist)
+
 ## November 27 · Reference slices and locale storage / 名前参照とロケール文字列
 
 Resolve a nameref before selecting the stored array. For a negative offset, add one to the offset before adding the greatest occupied index. This stays within range even at INT64_MAX. Numeric fallback indices can be searched directly. At indices 9223372036854775806 and 9223372036854775807, a slice from -1 now returns the last element through both names. GNU Bash 5.3.20 drops that slice despite documenting offsets relative to the largest index plus one. The witness also exercises a prefixed assignment. [GNU Bash parameter expansion](https://www.gnu.org/software/bash/manual/bash.html#Shell-Parameter-Expansion)
