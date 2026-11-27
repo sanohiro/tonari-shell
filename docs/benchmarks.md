@@ -1,5 +1,25 @@
 # Startup and execution / 起動と実行性能
 
+<a id="word-grammar-readers"></a>
+
+## 2026-11-27 · Word and grammar readers / 語と構文の解析
+
+Started-shell medians in ms for `772d8f5` and `82e9ded`. M1 used 41 interleaved samples with Bash 5.3.20, Ubuntu x86-64 used 61 for functions with Bash 5.2.21.
+
+| Host and workload | Previous | Current | Bash |
+|---|---:|---:|---:|
+| M1, arithmetic loop with changing bound | 3.283 | 3.210 | 13.218 |
+| M1, regex | 1.617 | 1.616 | 7.059 |
+| M1, character class substitution | 2.837 | 2.814 | 5.239 |
+| M1, case with character classes | 3.470 | 3.711 | 6.119 |
+| M1, changing eval | 2.051 | 2.041 | 6.639 |
+| M1, redefine 2,000 distinct compound bodies | 4.510 | 4.583 | 6.766 |
+| Linux, redefine 2,000 distinct compound bodies | 4.338 | 4.405 | 5.955 |
+| Linux, function definitions | 1.494 | 1.483 | 3.416 |
+| Linux, function redefinitions | 0.615 | 0.601 | 2.112 |
+
+The compound case exceeded two thirds of Bash on both hosts. A separate 61-sample M1 trial of reusing a thread-local newline buffer yielded 4.560 → 4.535 ms for compound definitions and 2.036 → 2.067 ms for changing eval. The release omits that pool. macOS のサイズは 1,748,896 バイト、Linux の静的 PIE は 2,434,776 → 2,427,512 バイト。 `tools/bench_scripts.py --timing started` で再測定できる。 [Native Linux results](https://github.com/sanohiro/tonari-shell/actions/runs/45941917002)
+
 <a id="history-editor-input"></a>
 
 ## 2026-11-27 · History search and terminal editing / 履歴検索と行編集

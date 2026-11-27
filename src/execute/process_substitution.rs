@@ -124,12 +124,10 @@ pub(crate) fn launch(
     } else {
         keep
     };
-    let pid = unsafe { libc::fork() };
-    if pid < 0 {
-        return Err("cannot fork process substitution");
-    }
+    let pid = session
+        .fork_shell()
+        .map_err(|_| "cannot fork process substitution")?;
     if pid == 0 {
-        session.after_fork();
         drop(keep);
         super::reset_child_signals();
         if super::duplicate(child.as_raw_fd(), target).is_err() {

@@ -27,12 +27,7 @@ impl PreparedCommand {
         statement: &crate::parser::Statement,
         session: &mut Session,
     ) -> Option<Box<Self>> {
-        let crate::parser::Command::Pipeline(stages) = &statement.command else {
-            return None;
-        };
-        let [cmd] = stages.as_slice() else {
-            return None;
-        };
+        let cmd = statement.single_stage()?;
         if cmd.compound.is_some() || !cmd.assignments.is_empty() {
             return None;
         }

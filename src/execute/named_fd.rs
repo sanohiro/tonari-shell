@@ -210,12 +210,8 @@ pub(super) fn run(
     if local || replace && launch.group.is_none() {
         return command(cmd, session, status);
     }
-    let pid = unsafe { libc::fork() };
-    if pid < 0 {
-        return Err(io::Error::last_os_error());
-    }
+    let pid = session.fork_shell()?;
     if pid == 0 {
-        session.after_fork();
         launch.pipeline_child(&mut session.traps);
         session.jobs.forked(false);
         coprocess::after_fork(session);

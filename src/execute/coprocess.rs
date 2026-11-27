@@ -99,20 +99,17 @@ pub(crate) fn launch(
     let (input, writer) = super::pipe()?;
     let (reader, output) = super::pipe()?;
     let high = |fd: OwnedFd| -> io::Result<OwnedFd> {
-        super::fd::duplicate_except(fd.as_raw_fd(), 10, |_| false).map(Into::into)
+        super::fd::duplicate_except(fd.as_raw_fd(), super::fd::SHELL_FD_MIN, |_| false)
+            .map(Into::into)
     };
     let reader = high(reader)?;
     let writer = high(writer)?;
     let mut launch = session.jobs.launch(true, false);
-    let pid = unsafe { libc::fork() };
-    if pid < 0 {
-        return Err(io::Error::last_os_error());
-    }
+    let pid = session.fork_shell()?;
     if pid == 0 {
         drop(reader);
         drop(writer);
         after_fork(session);
-        session.after_fork();
         launch.pipeline_child(&mut session.traps);
         if super::duplicate(input.as_raw_fd(), 0).is_err()
             || super::duplicate(output.as_raw_fd(), 1).is_err()

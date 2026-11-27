@@ -196,12 +196,10 @@ pub fn capture_substitution(
     }
     session.jobs.refresh_snapshot();
     let (read, write) = std::io::pipe().map_err(|_| "cannot open command substitution pipe")?;
-    let pid = unsafe { libc::fork() };
-    if pid < 0 {
-        return Err("cannot fork command substitution");
-    }
+    let pid = session
+        .fork_shell()
+        .map_err(|_| "cannot fork command substitution")?;
     if pid == 0 {
-        session.after_fork();
         drop(read);
         if write.as_raw_fd() == 1 {
             let fd = write.into_raw_fd();
@@ -293,13 +291,10 @@ fn captured_output(mut output: Vec<u8>, code: u8) -> Result<(String, u8), &'stat
 }
 
 fn sole_plain_command(body: &[parser::Statement]) -> Option<&parser::SimpleCommand<parser::Word>> {
-    let [statement] = body else { return None };
-    let parser::Command::Pipeline(stages) = &statement.command else {
+    let [statement] = body else {
         return None;
     };
-    let [cmd] = stages.as_slice() else {
-        return None;
-    };
+    let cmd = statement.single_stage()?;
     (!statement.negated
         && statement.condition == parser::Condition::Always
         && cmd.compound.is_none()
@@ -712,13 +707,10 @@ fn capture_simple(
 }
 
 fn input_only(body: &[parser::Statement]) -> Option<&parser::Word> {
-    let [statement] = body else { return None };
-    let parser::Command::Pipeline(stages) = &statement.command else {
+    let [statement] = body else {
         return None;
     };
-    let [cmd] = stages.as_slice() else {
-        return None;
-    };
+    let cmd = statement.single_stage()?;
     let [redirect] = cmd.redirects.as_slice() else {
         return None;
     };
@@ -758,13 +750,14 @@ fn launch_list(
     run: impl FnOnce(&mut Session) -> Flow,
 ) -> Flow {
     let mut launch = session.jobs.launch(background, false);
-    let pid = unsafe { libc::fork() };
-    if pid < 0 {
-        diagnostic!("fork: {}", std::io::Error::last_os_error());
-        return Flow::Continue(1);
-    }
+    let pid = match session.fork_shell() {
+        Ok(pid) => pid,
+        Err(e) => {
+            diagnostic!("fork: {e}");
+            return Flow::Continue(1);
+        }
+    };
     if pid == 0 {
-        session.after_fork();
         launch.child(&mut session.traps);
         if background && launch.group.is_none() && (session.posix || !session.stdin_redirected) {
             let fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };

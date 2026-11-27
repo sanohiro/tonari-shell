@@ -109,6 +109,18 @@ pub struct Statement {
     pub command: Command,
 }
 
+impl Statement {
+    pub(crate) fn single_stage(&self) -> Option<&SimpleCommand<Word>> {
+        let Command::Pipeline(stages) = &self.command else {
+            return None;
+        };
+        match stages.as_slice() {
+            [cmd] => Some(cmd),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum CasePattern {
     Fixed(Matcher<String>),
