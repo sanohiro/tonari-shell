@@ -1,5 +1,9 @@
 # Engineering notes / 開発知見
 
+## November 27 · Incremental script input / スクリプトの逐次読み込み
+
+Streamed input and borrowed script text now own the same parse state. Empty input returns zero even when the caller supplied a previous failure status. A recoverable array syntax error updates both the command status and `PIPESTATUS`. File descriptors, history recording and tail execution follow each input source's rules. ファイルと文字列で、引用符、ヒアドキュメント、構文エラー後の状態更新を共通化した。子が標準入力の残りを読めるよう、先読みした FD の位置調整はファイル側で行う。[Measurements / 計測](benchmarks.md#script-read-state)
+
 <a id="shared-shell-rules"></a>
 
 ## 2026-11-27 · Sharing shell rules / シェルの判定と責務の整理

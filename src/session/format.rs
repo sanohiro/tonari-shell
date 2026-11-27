@@ -22,27 +22,39 @@ impl Variable {
 }
 
 impl Session {
-    pub(crate) fn array_declaration_fields(&self, name: &str) -> Vec<String> {
-        let Some(v) = self.declared_variable(name, false) else {
-            return Vec::new();
-        };
+    // Stored arrays can be formatted in place. Dynamic shell arrays are materialized
+    // on demand so each transform sees the current snapshot.
+    fn transform_array(&self, name: &str) -> Option<Cow<'_, Variable>> {
+        if let Some(var) = self.variables.get(name)
+            && !var.dynamic
+        {
+            return var.elements.as_ref().map(|_| Cow::Borrowed(var));
+        }
+        if !self.array_parameter(name) {
+            return None;
+        }
+        self.declared_variable(name, false)
+            .filter(|v| v.elements.is_some())
+            .map(Cow::Owned)
+    }
+
+    pub(crate) fn array_declaration_fields(&self, name: &str) -> Option<Vec<String>> {
+        let v = self.transform_array(name)?;
         let mut assignment = name.as_bytes().to_vec();
         print_variable_value(&mut assignment, &v).expect("in-memory write");
         assignment.pop();
-        vec![
+        Some(vec![
             "declare".into(),
             format!(
                 "-{}",
                 v.attribute_flags().map(char::from).collect::<String>()
             ),
             String::from_utf8(assignment).unwrap(),
-        ]
+        ])
     }
 
-    pub(crate) fn array_pair_fields(&self, name: &str, separate: bool) -> Vec<String> {
-        let Some(var) = self.declared_variable(name, false) else {
-            return Vec::new();
-        };
+    pub(crate) fn array_pair_fields(&self, name: &str, separate: bool) -> Option<Vec<String>> {
+        let var = self.transform_array(name)?;
         let mut fields = Vec::new();
         let mut text = Vec::new();
         let mut add = |key: &str, value: &str| {
@@ -80,13 +92,18 @@ impl Session {
         if !text.is_empty() {
             fields.push(String::from_utf8(text).unwrap());
         }
-        fields
+        Some(fields)
     }
 
     pub(crate) fn attributes(&self, name: &str) -> Option<(String, bool)> {
-        let resolved = self.reference_name(name).ok()?;
-        let name = array::subscript(&resolved).map_or(resolved.as_ref(), |(base, _)| base);
+        // An array member has a value but no declaration attributes of its own.
+        if array::subscript(name).is_some() {
+            return None;
+        }
         if let Some(var) = self.variables.get(name) {
+            if var.nameref {
+                return None;
+            }
             return Some((
                 var.attribute_flags().map(char::from).collect(),
                 var.array_assigned,

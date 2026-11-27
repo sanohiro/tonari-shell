@@ -39,6 +39,14 @@ COMMON = {
     "stopped-job-selection": "set -m; sleep 3 & a=$!; sleep 3 & b=$!; sleep 3 & c=$!; trap 'kill -CONT \"$a\" \"$b\" \"$c\" 2>/dev/null; kill \"$a\" \"$b\" \"$c\" 2>/dev/null; wait 2>/dev/null' EXIT; mark(){ x=$(jobs -p %+); y=$(jobs -p %-); for p in \"$x\" \"$y\"; do case $p in \"$a\") printf a;; \"$b\") printf b;; \"$c\") printf c;; *) printf '?';; esac; done; echo; }; mark; kill -STOP \"$b\"; wait \"$b\" 2>/dev/null; mark; kill -CONT \"$b\"; for ((k=0;k<100;k++)); do [[ -z $(jobs -ps) ]] && break; sleep .01; done; mark; kill -STOP \"$a\"; wait \"$a\" 2>/dev/null; mark; bg %1 >/dev/null; mark",
     "source-trap-frame": "printf ': one\\n: two\\n' > sourced; set -T\ntrap 'echo \"${FUNCNAME[0]}:$LINENO:$1\"' RETURN\nf(){\n source ./sourced inner\n}\nf outer",
     "substitution-source-lines": "f(){\n :\n echo \"$(echo $LINENO)\" `echo $LINENO`\n echo \"$(echo \"$LINENO\"; echo \"$(echo $LINENO)\")\"\n}; f",
+    "nameref-transform": """a=([2]="two words" [5]=xy); declare -n first=a r=first
+printf '<%s>\\n' "${r@A}" "${r[2]@A}" "${r[@]@A}" "${r[*]@A}" "${r[@]@a}" "${r[@]@k}" "${r[*]@K}"
+declare -A map=([key]="value with spaces"); declare -n m=map; printf '<%s>\\n' "${m[@]@A}" "${m[@]@k}" "${m[@]@K}"
+set -u; printf '<%s>\\n' "${r@a}"; set +u
+declare -n unsetref; printf '<%s>\\n' "${unsetref@A}" "${unsetref@a}"
+scalar=ok; declare -n s=scalar member='a[2]'; printf '<%s>\\n' "${s@A}" "${s[@]@A}" "${member@A}" "${member@a}" "${member@K}"
+declare -n left=right right=left; show(){ printf '[%s]' "$#"; }; { show "${left@A}"; show "${left@a}"; show "${left[@]@A}"; show "${left[@]@k}"; } 2>warnings; test -s warnings; echo "$?"
+""",
     "scalar-array-declaration": "declare -lr var; printf '<%s>\\n' \"${var@A}\" \"${var[@]@A}\"; declare -l setvar=''; printf '<%s>\\n' \"${setvar@A}\" \"${setvar[@]@A}\"; declare -a arr; printf '<%s>\\n' \"${arr[@]@A}\"",
     "temporary-posix-settings": "shopt -s expand_aliases; shopt -u sourcepath inherit_errexit shift_verbose; f(){ shopt -p expand_aliases sourcepath inherit_errexit shift_verbose; }; POSIXLY_CORRECT=y f; f; shopt -qo posix; echo $?",
     "history-script-comments": "set -o history\n# first\n   \n   # second\nhistory",
@@ -246,6 +254,7 @@ HOT = {
     "source-trap-frame": ("f >/dev/null", 600),
     "substitution-source-lines": ("f >/dev/null", 250),
     "current-arithmetic-alias": ("eval 'value=$(( ${ number; } ))'", 750),
+    "nameref-transform": (': "${r[@]@A}" "${r[@]@k}" "${r[*]@K}"', 2000),
     "scalar-array-declaration": (": \"${var[@]@A}\" \"${setvar[@]@A}\"", 1600),
     "temporary-posix-settings": ("POSIXLY_CORRECT=x true; :", 1800),
     "history-script-comments": ("history -s '# history comment'; history -d -1", 950),
@@ -1151,6 +1160,7 @@ printf three >&7; exec {slot}>&7; : 6>&7- {slot}>&-; printf four >&7; exec 6>&7-
                 "source-trap-frame": "printf ': one\\n: two\\n' > source-test; set -T; trap ': \"$LINENO\" \"$1\"' RETURN; f(){ source ./source-test inner; }",
                 "substitution-source-lines": "f(){\n :\n echo \"$(echo $LINENO)\" `echo $LINENO`;\n}",
                 "current-arithmetic-alias": "shopt -s expand_aliases; alias number='printf 23'",
+                "nameref-transform": "a=([2]='two words' [5]=xy); declare -n first=a r=first",
                 "scalar-array-declaration": "declare -lr var; declare -l setvar=''",
                 "temporary-posix-settings": "shopt -s expand_aliases",
                 "caller-input": "f(){ caller bad 2>/dev/null; :; }",

@@ -119,6 +119,64 @@ fn declare_functions(
 }
 
 impl Options {
+    fn changes_target(&self) -> bool {
+        self.integer.is_some()
+            || self.lower.is_some()
+            || self.upper.is_some()
+            || self.capitalize.is_some()
+            || self.exported.is_some()
+            || self.readonly.is_some()
+            || self.traced.is_some()
+            || self.array
+            || self.associative
+            || self.remove_array
+            || self.remove_associative
+    }
+
+    fn apply_value_attributes(
+        &self,
+        var: &mut Variable,
+        subscript: bool,
+        may_create_array: bool,
+    ) -> Result<(), &'static str> {
+        let case_flags = [
+            (LetterCase::Capitalize, self.capitalize),
+            (LetterCase::Lower, self.lower),
+            (LetterCase::Upper, self.upper),
+        ];
+        let mut enabled = case_flags
+            .iter()
+            .filter_map(|&(mode, on)| (on == Some(true)).then_some(mode));
+        if let Some(mode) = enabled.next() {
+            var.letter_case = enabled.next().is_none().then_some(mode);
+        } else if case_flags
+            .iter()
+            .any(|&(mode, on)| on == Some(false) && var.letter_case == Some(mode))
+        {
+            var.letter_case = None;
+        }
+        if let Some(integer) = self.integer {
+            var.integer = integer;
+        }
+        if self.associative && may_create_array {
+            var.make_associative()?;
+        }
+        if self.remove_array && var.elements.is_some() && var.associative().is_none()
+            || self.remove_associative && var.associative().is_some()
+        {
+            return Err("cannot remove array attribute");
+        }
+        if self.array && var.associative().is_some() {
+            return Err("cannot convert associative to indexed array");
+        }
+        if (self.array || subscript && !self.associative && var.associative().is_none())
+            && may_create_array
+        {
+            var.make_array();
+        }
+        Ok(())
+    }
+
     fn parse<'a>(command: &str, mut operands: &'a [String]) -> Result<(Self, &'a [String]), ()> {
         let readonly = command == "readonly";
         let exporting = command == "export";
@@ -301,465 +359,410 @@ fn declaration_operand(arg: &str) -> (&str, Option<&str>, bool) {
 }
 
 #[inline(never)]
-pub(super) fn run(
+// Assign one expanded word. Compound initializers have separate partial-commit rules.
+fn assign_value(
     session: &mut Session,
-    command: &str,
-    operands: &[String],
-    arrays: &[crate::execute::ArrayDeclaration],
-    previous_status: u8,
-    bindings: &mut super::Bindings,
-) -> crate::execute::Flow {
-    let total_args = operands.len();
-    let readonly = command == "readonly";
-    let exporting = command == "export";
-    let attribute = readonly || exporting;
-    let local = command == "local";
-    if local && session.function_depth == 0 {
-        diagnostic!("local: can only be used in a function");
-        return crate::execute::Flow::Continue(1);
-    }
-    let Ok((flags, operands)) = Options::parse(command, operands) else {
-        return crate::Flow::Continue(2);
+    var: &mut Variable,
+    name: &str,
+    subscript: Option<&str>,
+    text: &str,
+    append: bool,
+    global: bool,
+) -> Result<(), String> {
+    let assoc_key = if var.associative().is_some() {
+        Some(match subscript {
+            Some(expr) => session.subscript_key(expr)?,
+            None => "0".into(),
+        })
+    } else {
+        None
     };
-    if flags.functions {
-        return declare_functions(session, command, operands, &flags, readonly);
+    let index = if let Some(expr) = subscript
+        && assoc_key.is_none()
+    {
+        let index = session.declaration_index(name, expr, global, var)?;
+        var.make_array();
+        index
+    } else {
+        0
+    };
+    let old = if let Some(key) = &assoc_key {
+        var.associative()
+            .and_then(|map| map.get(key))
+            .map(String::as_str)
+    } else {
+        var.elements
+            .as_ref()
+            .and_then(|a| a.get(&index))
+            .or(var.value.as_deref())
+    };
+    let text = if var.integer {
+        session.integer_value(old, text, append)?
+    } else if append {
+        old.unwrap_or_default().to_owned() + text
+    } else {
+        text.into()
+    };
+    let text = session.convert_case(text, var.letter_case);
+    if var.nameref && !Session::valid_reference_target(&text) {
+        return Err(format!("{name}: invalid name reference"));
     }
-    if operands.is_empty() || flags.print && !attribute {
-        return print_variables(session, command, operands, &flags);
+    if name == "OPTIND" {
+        session.opt_offset = 0;
     }
-    let mut status = 0;
-    let first_operand = total_args - operands.len() + 1;
-    let mut arrays = arrays.iter().peekable();
-    for (index, arg) in operands.iter().enumerate() {
-        if local && arg == "-" {
-            session.save_local_options();
-            continue;
+    if let Some(key) = assoc_key {
+        var.make_associative().unwrap().insert(key, text);
+        var.array_assigned = true;
+    } else if let Some(array) = var.elements.as_mut().map(Rc::make_mut) {
+        array.insert(index, text);
+        var.array_assigned = true;
+    } else {
+        if var.dynamic {
+            session.set_dynamic(name, &text);
         }
-        let array = arrays.next_if(|a| a.operand == index + first_operand);
-        let (name, value, append) = declaration_operand(arg);
-        let base = super::array::subscript(name).map_or(name, |(base, _)| base);
-        if flags.global
-            && let Some(previous) = bindings.variables.remove(base)
-        {
-            if let Some(var) = previous {
-                session.variables.insert(base.into(), var);
-            } else {
-                session.variables.remove(base);
-            }
-        }
-        let base_scope = session.declaration_scope(base);
-        let creates_local = !attribute
-            && !flags.global
-            && base_scope.is_some_and(|i| !session.locals[i].variables.contains_key(base));
-        let mut remove_reference = None;
-        let changes_target = || {
-            value.is_some()
-                || array.is_some()
-                || flags.integer.is_some()
-                || flags.lower.is_some()
-                || flags.upper.is_some()
-                || flags.capitalize.is_some()
-                || flags.exported.is_some()
-                || flags.readonly.is_some()
-                || flags.traced.is_some()
-                || flags.array
-                || flags.associative
-                || flags.remove_array
-                || flags.remove_associative
-        };
-        let resolved;
-        let name = if !creates_local
-            && (flags.nameref.is_none() || flags.nameref == Some(false) && changes_target())
-            && session.has_namerefs
-        {
-            match session.scoped_reference_name(name, flags.global) {
-                Ok(target) => {
-                    if target != name && flags.nameref == Some(false) {
-                        if session.variables.get(base).is_some_and(|v| v.readonly) {
-                            diagnostic!("{command}: {base}: readonly variable");
-                            status = 1;
-                            continue;
-                        }
-                        remove_reference = Some(base);
-                    }
-                    resolved = target;
-                    resolved.as_ref()
-                }
-                Err(e) => {
-                    diagnostic!("{command}: {name}: {e}");
-                    status = 1;
-                    continue;
-                }
-            }
-        } else {
-            name
-        };
-        let target = super::array::subscript(name);
-        if attribute && target.is_some() {
-            diagnostic!("{command}: {name}: not a valid identifier");
-            status = 1;
-            continue;
-        }
-        let name = target.map_or(name, |(base, _)| base);
-        if !is_identifier(name) {
-            diagnostic!("{command}: {arg}: invalid identifier");
-            status = 1;
-            continue;
-        }
-        if name == "PATH" {
-            session.hashes.clear();
-        }
-        if session.protected_array(name) && (local || value.is_some() || array.is_some()) {
-            diagnostic!("{command}: {name}: variable may not be assigned a value");
-            status = 1;
-            continue;
-        }
-        let (scope_index, fresh_local) = if name == base {
-            (base_scope, creates_local)
-        } else {
-            let scope = session.declaration_scope(name);
-            (
-                scope,
-                !attribute
-                    && !flags.global
-                    && scope.is_some_and(|i| !session.locals[i].variables.contains_key(name)),
-            )
-        };
-        // Lowercase names have no implicit shell value. Repeated function
-        // calls can rule out an inherited binding without scanning environ.
-        let mut var = if fresh_local
-            && name.as_bytes()[0].is_ascii_lowercase()
-            && !session.variables.contains_key(name)
-            && session
-                .inherited_variable_names()
-                .binary_search_by(|key| key.as_str().cmp(name))
-                .is_err()
-        {
-            Variable::default()
-        } else {
-            session
-                .declared_variable(name, flags.global)
-                .unwrap_or_default()
-        };
-        let outer_local = fresh_local
-            && session
-                .locals
-                .iter()
-                .any(|scope| scope.variables.contains_key(name));
-        let shadow = outer_local && !flags.inherit && !session.shopt.localvar_inherit;
-        if var.readonly
-            && !shadow
-            && (fresh_local && !outer_local
-                || value.is_some()
-                || array.is_some()
-                || flags.array && (var.elements.is_none() || var.associative().is_some())
-                || flags.associative && var.associative().is_none()
-                || flags.readonly == Some(false)
-                || flags.nameref.is_some())
-        {
-            diagnostic!("{command}: {name}: readonly variable");
-            if array.is_some() {
-                return crate::execute::Flow::Discard(1);
-            }
-            status = 1;
-            continue;
-        }
-        let new_global = !fresh_local && !var.declared && !session.variables.contains_key(name);
-        var.declared = true;
-        let mut previous_local = fresh_local.then(|| {
-            let previous = bindings
-                .variables
-                .get(name)
-                .cloned()
-                .unwrap_or_else(|| session.variables.get(name).cloned());
-            (scope_index.unwrap(), previous, session.opt_offset)
-        });
-        let mut record_scope = |s: &mut Session| {
-            if let Some((i, previous, offset)) = previous_local.take() {
-                let scope = &mut s.locals[i];
-                if name == "OPTIND" {
-                    scope.opt_offset = Some(offset);
-                    s.opt_offset = 0;
-                }
-                scope.variables.insert(name.into(), previous);
-            }
-        };
-        if fresh_local {
-            var.dynamic = false;
-            var.nameref = false;
-            if !var.temporary && !flags.inherit && !session.shopt.localvar_inherit {
-                var.readonly = false;
-                var.integer = false;
-                var.letter_case = None;
-                var.value = None;
-                var.elements = None;
-                var.array_assigned = false;
-            }
-        }
-        if session.function_depth != 0 && !attribute && !flags.global {
-            var.temporary = false;
-        }
-        let making_array = flags.array || flags.associative || array.is_some();
-        if making_array && (var.nameref || flags.nameref == Some(true)) && var.elements.is_none() {
-            if var.nameref && flags.nameref != Some(true) {
-                diagnostic!("warning: {name}: removing nameref attribute");
-            }
-            var.nameref = false;
-        }
-        if let Some(on) = flags
-            .nameref
-            .filter(|_| !making_array && remove_reference.is_none())
-        {
-            let dest = value.or(var.value.as_deref()).unwrap_or("");
-            if on
-                && (target.is_some()
-                    || var.elements.is_some()
-                    || value.or(var.value.as_deref()).is_some()
-                        && !Session::valid_reference_target(dest)
-                    || dest == name)
-            {
-                diagnostic!("{command}: {name}: invalid name reference");
-                status = 1;
-                continue;
-            }
-            if on {
-                var.integer = false;
-                var.letter_case = None;
-            }
-            var.nameref = on;
-            session.has_namerefs |= on;
-        }
-        if flags.nameref == Some(true)
-            && making_array
-            && (array.is_some() || var.elements.is_some())
-        {
-            diagnostic!("{command}: {name}: reference variable cannot be an array");
-            status = 1;
-        }
-        let case_flags = [
-            (LetterCase::Capitalize, flags.capitalize),
-            (LetterCase::Lower, flags.lower),
-            (LetterCase::Upper, flags.upper),
-        ];
-        let mut enabled = case_flags
-            .iter()
-            .filter_map(|&(mode, on)| (on == Some(true)).then_some(mode));
-        if let Some(mode) = enabled.next() {
-            var.letter_case = enabled.next().is_none().then_some(mode);
-        } else if case_flags
-            .iter()
-            .any(|&(mode, on)| on == Some(false) && var.letter_case == Some(mode))
-        {
-            var.letter_case = None;
-        }
-        if let Some(integer) = flags.integer {
-            var.integer = integer;
-        }
-        if flags.associative
-            && (!attribute || value.is_some() || array.is_some())
-            && let Err(e) = var.make_associative()
-        {
-            diagnostic!("{command}: {name}: {e}");
-            status = 1;
-            continue;
-        }
-        if flags.remove_array && var.elements.is_some() && var.associative().is_none()
-            || flags.remove_associative && var.associative().is_some()
-        {
-            diagnostic!("{command}: {name}: cannot remove array attribute");
-            status = 1;
-            continue;
-        }
-        if flags.array && var.associative().is_some() {
-            diagnostic!("{command}: {name}: cannot convert associative to indexed array");
-            status = 1;
-            continue;
-        }
-        if (flags.array || target.is_some() && !flags.associative && var.associative().is_none())
-            && (!attribute || value.is_some() || array.is_some())
-        {
-            var.make_array();
-        }
-        let mut initializer_error = array.and_then(|d| d.items.initializer_error());
-        if let Some(text) = value
-            && (target.is_none() || flags.array || flags.associative)
-            && array.is_none()
-            && var.elements.is_some()
-            && (!attribute || flags.array || flags.associative)
-            && text.starts_with('(')
-            && text.ends_with(')')
-        {
-            let parts = match crate::parser::quoted_initializer(text) {
-                Ok(parts) => parts,
-                Err(e) => {
-                    diagnostic!("{command}: {name}: {}", e.message());
-                    return crate::Flow::Discard(1);
-                }
-            };
-            let captured = std::cell::Cell::new(None);
-            let items = crate::expansion::Expansion::new(session, previous_status, &captured)
-                .array_items(parts, var.associative().is_some());
-            match items.and_then(|items| {
-                initializer_error = items.initializer_error();
-                Ok(session.array_items(name, flags.global, &mut var, append, &items)?)
-            }) {
-                Ok(()) => {}
-                Err(e) => {
-                    record_scope(session);
-                    session.store_variable(name, var, flags.global);
-                    e.report(&format!("{command}: {name}: "));
-                    return e.flow(session);
-                }
-            }
-        } else if let Some(text) = value {
-            let assoc_key = if var.associative().is_some() {
-                match target
-                    .map(|(_, expr)| session.subscript_key(expr))
-                    .transpose()
-                {
-                    Ok(key) => Some(key.unwrap_or_else(|| "0".into())),
-                    Err(e) => {
-                        diagnostic!("{command}: {e}");
-                        status = 1;
-                        continue;
-                    }
-                }
-            } else {
-                None
-            };
-            let index = if let Some((_, expr)) = target
-                && assoc_key.is_none()
-            {
-                match session.declaration_index(name, expr, flags.global, &mut var) {
-                    Ok(i) => {
-                        var.make_array();
-                        i
-                    }
-                    Err(e) => {
-                        diagnostic!("{command}: {e}");
-                        status = 1;
-                        continue;
-                    }
-                }
-            } else {
-                0
-            };
-            let old = if let Some(key) = &assoc_key {
-                var.associative()
-                    .and_then(|map| map.get(key))
-                    .map(String::as_str)
-            } else {
-                var.elements
-                    .as_ref()
-                    .and_then(|a| a.get(&index))
-                    .or(var.value.as_deref())
-            };
-            let text = if var.integer {
-                match session.integer_value(old, text, append) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        diagnostic!("{command}: {e}");
-                        status = 1;
-                        continue;
-                    }
-                }
-            } else if append {
-                old.unwrap_or_default().to_owned() + text
-            } else {
-                text.into()
-            };
-            let text = session.convert_case(text, var.letter_case);
-            if var.nameref && !Session::valid_reference_target(&text) {
-                diagnostic!("{command}: {name}: invalid name reference");
-                status = 1;
-                continue;
-            }
-            if name == "OPTIND" {
-                session.opt_offset = 0;
-            }
-            if let Some(key) = assoc_key {
-                var.make_associative().unwrap().insert(key, text);
-                var.array_assigned = true;
-            } else if let Some(array) = var.elements.as_mut().map(Rc::make_mut) {
-                array.insert(index, text);
-                var.array_assigned = true;
-            } else {
-                if var.dynamic {
-                    session.set_dynamic(name, &text);
-                }
-                var.value = Some(text);
-            }
-        }
-        if session.allexport
-            && (value.is_some()
-                || new_global && array.is_none() && !flags.array && !flags.associative)
-        {
-            var.exported = true;
-        } else if let Some(on) = flags.exported {
-            var.exported = on;
-        }
-        if let Some(d) = array
-            && let Err(e) = session.array_items(name, flags.global, &mut var, d.append, &d.items)
-        {
-            record_scope(session);
-            session.store_variable(name, var, flags.global);
-            diagnostic!("{command}: {name}: {e}");
-            return crate::Flow::Discard(1);
-        }
-        if let Some(on) = flags.readonly {
-            var.readonly = on;
-        }
-        if matches!(name, "IGNOREEOF" | "ignoreeof") && (!flags.global || scope_index.is_none()) {
-            session.set_eof_variable(var.value.as_deref());
-        }
-        if name == "GLOBIGNORE" && value.is_some() {
-            session.shopt.glob.set_ignore(var.value.as_deref());
-        }
-        if value.is_some()
-            && matches!(name, "HISTSIZE" | "HISTFILESIZE")
-            && let Some(value) = var.value.as_deref()
-        {
-            session.apply_history_limit(name, value);
-        }
-        if name == "BASH_COMPAT" && (!flags.global || session.declaration_scope(name).is_none()) {
-            session.apply_compat(var.value.as_deref().unwrap_or(""));
-        }
-        if name == "POSIXLY_CORRECT" && (!flags.global || session.declaration_scope(name).is_none())
-        {
-            session.apply_posix_mode(var.value.is_some());
-        }
-        if flags.readonly == Some(true)
-            || flags.exported == Some(true)
-            || (!attribute && !flags.global && scope_index.is_some())
-        {
-            bindings.variables.remove(name);
-        }
-        record_scope(session);
-        session.store_variable(name, var, flags.global);
-        if let Some(source) = remove_reference
-            && let Some(reference) = session.variables.get_mut(source)
-        {
-            reference.nameref = false;
-        }
-        if let Some(error) = initializer_error {
-            let error = crate::expansion::Error::discard(error);
-            error.report(&format!("{command}: {name}: "));
-            return error.flow(session);
-        }
+        var.value = Some(text);
     }
-    crate::execute::Flow::Continue(status)
+    Ok(())
 }
 
 impl Session {
     pub fn declare(
         &mut self,
-        name: &str,
-        args: &[String],
+        command: &str,
+        operands: &[String],
         arrays: &[crate::execute::ArrayDeclaration],
         previous_status: u8,
         bindings: &mut super::Bindings,
     ) -> crate::execute::Flow {
-        run(self, name, args, arrays, previous_status, bindings)
+        let total_args = operands.len();
+        let readonly = command == "readonly";
+        let exporting = command == "export";
+        let attribute = readonly || exporting;
+        let local = command == "local";
+        if local && self.function_depth == 0 {
+            diagnostic!("local: can only be used in a function");
+            return crate::execute::Flow::Continue(1);
+        }
+        let Ok((flags, operands)) = Options::parse(command, operands) else {
+            return crate::Flow::Continue(2);
+        };
+        if flags.functions {
+            return declare_functions(self, command, operands, &flags, readonly);
+        }
+        if operands.is_empty() || flags.print && !attribute {
+            return print_variables(self, command, operands, &flags);
+        }
+        let mut status = 0;
+        let first_operand = total_args - operands.len() + 1;
+        let mut arrays = arrays.iter().peekable();
+        for (index, arg) in operands.iter().enumerate() {
+            if local && arg == "-" {
+                self.save_local_options();
+                continue;
+            }
+            let array = arrays.next_if(|a| a.operand == index + first_operand);
+            let (name, value, append) = declaration_operand(arg);
+            let base = super::array::subscript(name).map_or(name, |(base, _)| base);
+            if flags.global
+                && let Some(previous) = bindings.variables.remove(base)
+            {
+                if let Some(var) = previous {
+                    self.variables.insert(base.into(), var);
+                } else {
+                    self.variables.remove(base);
+                }
+            }
+            let scope_for = |shell: &Session, name: &str| {
+                let scope = shell.declaration_scope(name);
+                let fresh = !attribute
+                    && !flags.global
+                    && scope.is_some_and(|i| !shell.locals[i].variables.contains_key(name));
+                (scope, fresh)
+            };
+            let (base_scope, creates_local) = scope_for(self, base);
+            let mut remove_reference = None;
+            let resolved;
+            let name = if !creates_local
+                && (flags.nameref.is_none()
+                    || flags.nameref == Some(false)
+                        && (value.is_some() || array.is_some() || flags.changes_target()))
+                && self.has_namerefs
+            {
+                match self.scoped_reference_name(name, flags.global) {
+                    Ok(target) => {
+                        if target != name && flags.nameref == Some(false) {
+                            if self.variables.get(base).is_some_and(|v| v.readonly) {
+                                diagnostic!("{command}: {base}: readonly variable");
+                                status = 1;
+                                continue;
+                            }
+                            remove_reference = Some(base);
+                        }
+                        resolved = target;
+                        resolved.as_ref()
+                    }
+                    Err(e) => {
+                        diagnostic!("{command}: {name}: {e}");
+                        status = 1;
+                        continue;
+                    }
+                }
+            } else {
+                name
+            };
+            let target = super::array::subscript(name);
+            if attribute && target.is_some() {
+                diagnostic!("{command}: {name}: not a valid identifier");
+                status = 1;
+                continue;
+            }
+            let name = target.map_or(name, |(base, _)| base);
+            if !is_identifier(name) {
+                diagnostic!("{command}: {arg}: invalid identifier");
+                status = 1;
+                continue;
+            }
+            if name == "PATH" {
+                self.hashes.clear();
+            }
+            if self.protected_array(name) && (local || value.is_some() || array.is_some()) {
+                diagnostic!("{command}: {name}: variable may not be assigned a value");
+                status = 1;
+                continue;
+            }
+            let (scope_index, fresh_local) = if name == base {
+                (base_scope, creates_local)
+            } else {
+                scope_for(self, name)
+            };
+            // Lowercase names have no implicit shell value. Repeated function
+            // calls can rule out an inherited binding without scanning environ.
+            let mut var = if fresh_local
+                && name.as_bytes()[0].is_ascii_lowercase()
+                && !self.variables.contains_key(name)
+                && self
+                    .inherited_variable_names()
+                    .binary_search_by(|key| key.as_str().cmp(name))
+                    .is_err()
+            {
+                Variable::default()
+            } else {
+                self.declared_variable(name, flags.global)
+                    .unwrap_or_default()
+            };
+            let outer_local = fresh_local
+                && self
+                    .locals
+                    .iter()
+                    .any(|scope| scope.variables.contains_key(name));
+            let shadow = outer_local && !flags.inherit && !self.shopt.localvar_inherit;
+            if var.readonly
+                && !shadow
+                && (fresh_local && !outer_local
+                    || value.is_some()
+                    || array.is_some()
+                    || flags.array && (var.elements.is_none() || var.associative().is_some())
+                    || flags.associative && var.associative().is_none()
+                    || flags.readonly == Some(false)
+                    || flags.nameref.is_some())
+            {
+                diagnostic!("{command}: {name}: readonly variable");
+                if array.is_some() {
+                    return crate::execute::Flow::Discard(1);
+                }
+                status = 1;
+                continue;
+            }
+            let new_global = !fresh_local && !var.declared && !self.variables.contains_key(name);
+            var.declared = true;
+            let mut previous_local = fresh_local.then(|| {
+                let previous = bindings
+                    .variables
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| self.variables.get(name).cloned());
+                (scope_index.unwrap(), previous, self.opt_offset)
+            });
+            let mut record_scope = |s: &mut Session| {
+                if let Some((i, previous, offset)) = previous_local.take() {
+                    let scope = &mut s.locals[i];
+                    if name == "OPTIND" {
+                        scope.opt_offset = Some(offset);
+                        s.opt_offset = 0;
+                    }
+                    scope.variables.insert(name.into(), previous);
+                }
+            };
+            if fresh_local {
+                var.dynamic = false;
+                var.nameref = false;
+                if !var.temporary && !flags.inherit && !self.shopt.localvar_inherit {
+                    var.readonly = false;
+                    var.integer = false;
+                    var.letter_case = None;
+                    var.value = None;
+                    var.elements = None;
+                    var.array_assigned = false;
+                }
+            }
+            if self.function_depth != 0 && !attribute && !flags.global {
+                var.temporary = false;
+            }
+            let making_array = flags.array || flags.associative || array.is_some();
+            if making_array
+                && (var.nameref || flags.nameref == Some(true))
+                && var.elements.is_none()
+            {
+                if var.nameref && flags.nameref != Some(true) {
+                    diagnostic!("warning: {name}: removing nameref attribute");
+                }
+                var.nameref = false;
+            }
+            if let Some(on) = flags
+                .nameref
+                .filter(|_| !making_array && remove_reference.is_none())
+            {
+                let dest = value.or(var.value.as_deref()).unwrap_or("");
+                if on
+                    && (target.is_some()
+                        || var.elements.is_some()
+                        || value.or(var.value.as_deref()).is_some()
+                            && !Session::valid_reference_target(dest)
+                        || dest == name)
+                {
+                    diagnostic!("{command}: {name}: invalid name reference");
+                    status = 1;
+                    continue;
+                }
+                if on {
+                    var.integer = false;
+                    var.letter_case = None;
+                }
+                var.nameref = on;
+                self.has_namerefs |= on;
+            }
+            if flags.nameref == Some(true)
+                && making_array
+                && (array.is_some() || var.elements.is_some())
+            {
+                diagnostic!("{command}: {name}: reference variable cannot be an array");
+                status = 1;
+            }
+            if let Err(e) = flags.apply_value_attributes(
+                &mut var,
+                target.is_some(),
+                !attribute || value.is_some() || array.is_some(),
+            ) {
+                diagnostic!("{command}: {name}: {e}");
+                status = 1;
+                continue;
+            }
+            let mut initializer_error = array.and_then(|d| d.items.initializer_error());
+            if let Some(text) = value
+                && (target.is_none() || flags.array || flags.associative)
+                && array.is_none()
+                && var.elements.is_some()
+                && (!attribute || flags.array || flags.associative)
+                && text.starts_with('(')
+                && text.ends_with(')')
+            {
+                let parts = match crate::parser::quoted_initializer(text) {
+                    Ok(parts) => parts,
+                    Err(e) => {
+                        diagnostic!("{command}: {name}: {}", e.message());
+                        return crate::Flow::Discard(1);
+                    }
+                };
+                let captured = std::cell::Cell::new(None);
+                let items = crate::expansion::Expansion::new(self, previous_status, &captured)
+                    .array_items(parts, var.associative().is_some());
+                match items.and_then(|items| {
+                    initializer_error = items.initializer_error();
+                    Ok(self.array_items(name, flags.global, &mut var, append, &items)?)
+                }) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        record_scope(self);
+                        self.store_variable(name, var, flags.global);
+                        e.report(&format!("{command}: {name}: "));
+                        return e.flow(self);
+                    }
+                }
+            } else if let Some(text) = value
+                && let Err(e) = assign_value(
+                    self,
+                    &mut var,
+                    name,
+                    target.map(|(_, expr)| expr),
+                    text,
+                    append,
+                    flags.global,
+                )
+            {
+                diagnostic!("{command}: {e}");
+                status = 1;
+                continue;
+            }
+            if self.allexport
+                && (value.is_some()
+                    || new_global && array.is_none() && !flags.array && !flags.associative)
+            {
+                var.exported = true;
+            } else if let Some(on) = flags.exported {
+                var.exported = on;
+            }
+            if let Some(d) = array
+                && let Err(e) = self.array_items(name, flags.global, &mut var, d.append, &d.items)
+            {
+                record_scope(self);
+                self.store_variable(name, var, flags.global);
+                diagnostic!("{command}: {name}: {e}");
+                return crate::Flow::Discard(1);
+            }
+            if let Some(on) = flags.readonly {
+                var.readonly = on;
+            }
+            if matches!(name, "IGNOREEOF" | "ignoreeof") && (!flags.global || scope_index.is_none())
+            {
+                self.set_eof_variable(var.value.as_deref());
+            }
+            if name == "GLOBIGNORE" && value.is_some() {
+                self.shopt.glob.set_ignore(var.value.as_deref());
+            }
+            if value.is_some()
+                && matches!(name, "HISTSIZE" | "HISTFILESIZE")
+                && let Some(value) = var.value.as_deref()
+            {
+                self.apply_history_limit(name, value);
+            }
+            if name == "BASH_COMPAT" && (!flags.global || self.declaration_scope(name).is_none()) {
+                self.apply_compat(var.value.as_deref().unwrap_or(""));
+            }
+            if name == "POSIXLY_CORRECT"
+                && (!flags.global || self.declaration_scope(name).is_none())
+            {
+                self.apply_posix_mode(var.value.is_some());
+            }
+            if flags.readonly == Some(true)
+                || flags.exported == Some(true)
+                || (!attribute && !flags.global && scope_index.is_some())
+            {
+                bindings.variables.remove(name);
+            }
+            record_scope(self);
+            self.store_variable(name, var, flags.global);
+            if let Some(source) = remove_reference
+                && let Some(reference) = self.variables.get_mut(source)
+            {
+                reference.nameref = false;
+            }
+            if let Some(error) = initializer_error {
+                let error = crate::expansion::Error::discard(error);
+                error.report(&format!("{command}: {name}: "));
+                return error.flow(self);
+            }
+        }
+        crate::execute::Flow::Continue(status)
     }
 
     pub(super) fn store_variable(&mut self, name: &str, var: Variable, global: bool) {
