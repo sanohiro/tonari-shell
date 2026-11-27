@@ -1,5 +1,15 @@
 # Engineering notes / 開発知見
 
+## Function names, alias expansion and ordered completion / 関数名・エイリアス展開・補完順
+
+A shell with hundreds of registered functions looks up names for builtins as well as function calls. Hashing the names reduced dispatch time. The function table builds its sorted names on the first listing, reuses them across redefinitions and invalidates them on insertion or removal. Prefix completion uses a binary search in that list. The export table uses shell names for attribute queries and stores each encoded child-environment key with its current value or removal. Check `declare -F`, `set`, `export -fp` and completion after redefining or unsetting a function.
+
+Timing alias hits separately from misses exposed a full table copy for every simple parameter reference. Keep the ordered alias table. Share it for ordinary and braced scalar expansions, and retain a masked table when lexing commands nested in a replacement. The slow path also handles aliases whose syntax continues into the original input. For associative arrays and completion, keep enumeration, ranking ties and first-occurrence ordering independent of the randomized lookup tables. Native timings cover both cold registration and repeated use. [Measurements and commands](benchmarks.md#function-table-review)
+
+関数表は組み込みコマンドの探索にも使う。普段の探索をハッシュ化し、関数一覧は初回だけソートする。追加・削除で一覧を無効にし、同名の再定義では名前と順位を再利用する。エクスポート属性の照会には元の関数名を使い、子プロセスに渡す名前は登録時に生成する。
+
+エイリアスでは名前が一致した場合と一致しない場合の時間を別々に測った。単純な変数展開でも全エイリアス定義をコピーしていたため、通常の参照では表を共有する。入れ子のコマンド置換と、後続の入力に続く不完全な置換は再帰展開を防ぐ。連想配列の列挙順、履歴候補の同点順位、補完候補の初出順はハッシュ表の格納順に依存させない。 [実測結果](benchmarks.md#function-table-review)
+
 ## Variable lookup, repeated commands and parsing / 変数探索・繰り返し実行・構文解析
 
 Time session setup separately from the command under test. With 1,000 existing bindings the tree lookup dominated even a two-variable assignment. A randomized hash table keeps lookup time close to the small-session case. The table uses the pure Rust foldhash crate with no transitive dependencies. Listings retain their explicit sort. A prefix scan initially made variable-name completion slower. Caching the keys matching the last prefix lets subsequent queries narrow that set. Keys and visibility track insertion, removal and local scope restoration. Large local declarations also spend time in the per-scope save table. A hash table with a capacity hint removes repeated ordered inserts. Listing locals sorts the keys, and scopes containing special assignments still restore in lexical order.

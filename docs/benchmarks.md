@@ -1,5 +1,65 @@
 # Startup and execution / 起動と実行性能
 
+<a id="function-table-review"></a>
+
+## November 28 · Function dispatch, completion and alias expansion / 関数探索・補完・エイリアス展開
+
+The medians below are milliseconds in the order **previous Tonari / new Tonari / GNU Bash**. The releases are `aaa37ca` and `95a8842`. Apple M1 used GNU Bash 5.3.20 and 25 measured sessions. Ubuntu 24.04 x86-64 used Bash 5.2.21 and 21 sessions on AMD EPYC 7763 64-Core Processor. Each script ran after a fresh shell populated its tables and signaled readiness. The timed interval includes sourcing the script, its output check and shell exit. Five warm-ups preceded the interleaved measurements. [Native Linux release and samples](https://github.com/sanohiro/tonari-shell/actions/runs/46072880612)
+
+| Workload | Apple M1 | Linux x86-64 |
+|---|---:|---:|
+| `functions-0-call` | 4.561 / 4.559 / 26.151 | 5.132 / 5.550 / 31.390 |
+| `functions-0-printf` | 2.632 / 2.671 / 12.412 | 3.204 / 3.349 / 15.437 |
+| `functions-0-colon` | 2.608 / 2.627 / 26.609 | 3.019 / 3.102 / 33.084 |
+| `functions-200-call` | 6.246 / 4.521 / 25.228 | 6.218 / 5.600 / 31.319 |
+| `functions-200-printf` | 2.989 / 2.701 / 12.442 | 3.543 / 3.480 / 15.486 |
+| `functions-200-colon` | 2.918 / 2.697 / 26.470 | 3.285 / 3.226 / 33.157 |
+| `functions-1000-call` | 7.381 / 4.808 / 25.840 | 6.968 / 5.848 / 31.589 |
+| `functions-1000-printf` | 3.268 / 2.857 / 12.170 | 3.851 / 3.705 / 15.780 |
+| `functions-1000-colon` | 3.104 / 2.760 / 26.277 | 3.558 / 3.483 / 33.575 |
+| `functions-1000-prefix` | 6.450 / 4.834 / 12.495 | 5.458 / 2.790 / 10.563 |
+| `core-parse-functions` | 0.809 / 0.801 / 1.127 | 0.930 / 0.901 / 1.004 |
+| `function-list` | 1.700 / 1.041 / 30.160 | 2.088 / 1.203 / 10.388 |
+| `export-function-list` | 1.423 / 1.025 / 29.867 | 1.892 / 1.207 / 10.400 |
+| `aliases-0-miss` | 0.781 / 0.797 / 4.237 | 0.610 / 0.651 / 4.538 |
+| `aliases-200-miss` | 1.178 / 1.175 / 4.189 | 1.238 / 1.270 / 4.591 |
+| `aliases-1000-miss` | 1.282 / 1.249 / 4.090 | 1.373 / 1.394 / 4.722 |
+| `aliases-200-hit` | 9.517 / 1.581 / 4.255 | 19.992 / 1.590 / 4.784 |
+| `aliases-200-braced` | 9.470 / 1.598 / 4.600 | 19.766 / 1.658 / 5.443 |
+| `aliases-200-list` | 1.127 / 1.126 / 26.198 | 1.329 / 1.340 / 13.214 |
+| `assoc-values` | 4.152 / 2.932 / 45.576 | 6.546 / 5.642 / 64.380 |
+| `assoc-keys` | 2.380 / 2.401 / 43.383 | 4.859 / 4.887 / 62.224 |
+| `assoc-churn` | 7.976 / 6.791 / 47.585 | 13.832 / 12.891 / 64.821 |
+
+The two-thirds target was met for 21 of 22 script workloads on both hosts. Sourcing 200 functions was the exception. With zero preloaded functions, the EPYC took 5.550 ms for 10,000 calls against the previous 5.132 ms. The function workload calls `myf() { :; }` 10,000 times. The builtin workloads run 5,000 formatted assignments and 20,000 colons. The loop and its final check are included. Prefix completion queries 1,000 functions 300 times. Listing benchmarks print 100 exported functions 50 times. The 200-function source includes parsing the function bodies, registration and a call to the last function. Its M1 sampling profile concentrated in the parser and lexer. A trial advancing past newline tokens without running their drop code changed 25 successive loads from 7.798 to 7.767 ms and the single redirected group from 0.761 to 0.781 ms. The release retains the original token consumption.
+
+On M1, changing only the alias container to a hash table moved 1,000 successful expansions among 200 aliases from 8.863 to 8.080 ms. Printing the ordered aliases 100 times increased from 1.032 to 2.014 ms. Keeping the tree and sharing the existing table while lexing simple parameter references took 1.418 ms on the same successful expansion trial. Nested substitutions still mask the active aliases. The final suite checks both `x=$i` and `x="${i}"`.
+
+The next rows time actual PTY responses in milliseconds. Ordered callbacks contain 10,000 distinct names and repeated entries. The literal listing contains 10,002 entries drawn from three names and verifies their full display order. Bash's Readline offered to display all 10,002 possibilities on the same literal fixture. Project-history suggestions and the deep picker are Tonari features. The deep picker traverses 100,000 duplicate history records.
+
+| Visible response | Apple M1 | Linux x86-64 |
+|---|---:|---:|
+| ordered callback, 10000 replies | 0.972 / 0.759 / 7.772 | 2.077 / 1.906 / 9.641 |
+| static, all | 0.156 / 0.156 / 29.949 | 0.268 / 0.297 / 19.011 |
+| static, unique | 0.059 / 0.060 / 28.581 | 0.072 / 0.073 / 17.372 |
+| dynamic, unique | 0.441 / 0.431 / 4.057 | 0.919 / 0.918 / 3.872 |
+| display 10002 entries as 3 names | 0.308 / 0.205 / — | 0.452 / 0.344 / — |
+| abbreviated path | 4.015 / 4.006 / — | 3.689 / 3.688 / — |
+| cross-command path | 1.278 / 1.285 / — | 1.297 / 1.351 / — |
+| empty option value | 1.020 / 1.084 / — | 1.129 / 1.155 / — |
+| Show next distinct history entry | 13.947 / 13.228 / — | 14.438 / 13.209 / — |
+| bash-completion, first prompt | 5.579 / 5.585 / 11.537 | 6.399 / 6.339 / 9.359 |
+
+On M1, starting with nvm 0.40.3 and an installed default Node took 187.621 / 187.025 / 241.702 ms through the first prompt, and 204.618 / 204.174 / 260.102 ms through the first checked Node invocation and next prompt (17 sessions). The bash-completion fixture loads Ubuntu's unmodified script and requires three registered completion functions before displaying the prompt. M1 used 35 measured sessions and Linux used 31.
+
+The macOS distribution executable changed from 1,798,160 to 1,798,080 bytes. The Linux static PIE changed from 2,418,232 to 2,403,288 bytes. The hash table aliases come from the existing foldhash dependency. Run the `function-tables` native suite, or `python3 tools/bench_scripts.py TONARI --previous PREVIOUS --bash BASH --timing started --case functions-1000-call` for the dispatch case.
+
+各欄は旧Tonari・新Tonari・Bashの中央値。同じセッション状態で関数呼び出し、組み込み、関数定義の読み込みを別々に測った。エイリアスの表は木を維持し、単純な変数展開で全定義をコピーする処理を省いた。候補一覧は先頭からの順序と重複も検証した。初回プロンプトは実際の bash-completion と nvm 初期化後に測定した。
+
+With the function-table change held constant on M1, switching the remaining candidate and associative lookup tables to foldhash reduced the 500-element value expansion from 3.816 to 2.745 ms and ordered callback completion from 0.835 to 0.666 ms. The project-history argument medians were close. Some individual samples and workloads are unchanged or slightly slower. The comparison uses the terminal-visible result where the shell provides it.
+
+Clean M1 startup through first prompt took 3.162 / 3.084 / 8.121 ms. The corresponding first-key echo p95 was 0.050 / 0.051 / 0.043 ms over 41 measured sessions. The M1 integration suite passed 363 of 366 cases with three skips. Twenty extra default/POSIX-mode alias cases matched GNU Bash 5.3.20, including nested substitutions, braced parameters and arithmetic. The 198 source-review cases retained the previous `globignore-separators` difference.
+
 <a id="deep-core-engine"></a>
 
 ## November 28 · Session variables and repeated evaluation / セッション変数と繰り返し実行
