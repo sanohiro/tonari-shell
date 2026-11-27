@@ -230,6 +230,13 @@ p='\360\237\230\200'; echo "${p@P}" """
                     os.write(fd, suffix + b"\n")
                     self.read_until(fd, ("got=<" + expected + ">\r\n").encode())
 
+    def test_partial_binding_observes_edited_read_timeout(self):
+        fd = self.terminal_session(editing=True)
+        os.write(fd, b"""bind 'set keyseq-timeout 10000'; bind '"\\e[8q":"bound"'; read -e -t 0.4 -p 'timed'INPUT v; echo timedout=$?\n""")
+        self.read_until(fd, b"timedINPUT")
+        os.write(fd, b"\x1b[8")
+        self.read_until(fd, b"timedout=142\r\n")
+
     def test_interrupting_edited_read_preserves_its_destination(self):
         for shell in self.shells_for(5):
             fd = self.terminal_session(shell=shell)

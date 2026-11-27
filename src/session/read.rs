@@ -111,75 +111,6 @@ fn timeout(value: &str) -> Option<Duration> {
     Duration::try_from_secs_f64(seconds).ok()
 }
 
-// Darwin exports its dynamically sized fd_set ABI under a separate symbol.
-#[cfg(target_os = "macos")]
-unsafe extern "C" {
-    #[link_name = "pselect$DARWIN_EXTSN"]
-    fn pselect_input(
-        nfds: libc::c_int,
-        readfds: *mut libc::fd_set,
-        writefds: *mut libc::fd_set,
-        exceptfds: *mut libc::fd_set,
-        timeout: *const libc::timespec,
-        sigmask: *const libc::sigset_t,
-    ) -> libc::c_int;
-}
-#[cfg(not(target_os = "macos"))]
-use libc::pselect as pselect_input;
-
-pub(super) fn ready(
-    fd: i32,
-    timeout: Option<Duration>,
-    watch: Option<&crate::traps::Traps>,
-) -> io::Result<bool> {
-    // A single ordinary fd_set covers the common case. Both supported kernels
-    // read ceil(nfds / word_bits) words, including for EOF on character devices.
-    let index = fd as usize / libc::FD_SETSIZE;
-    let mut first = unsafe { std::mem::zeroed() };
-    let mut extra;
-    let sets = if index == 0 {
-        std::slice::from_mut(&mut first)
-    } else {
-        // Bound the allocation to a real descriptor owned by this process.
-        if unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        extra = vec![first; index + 1];
-        &mut extra[..]
-    };
-    unsafe { libc::FD_SET(fd % libc::FD_SETSIZE as i32, &mut sets[index]) };
-    let time = timeout.map(|t| libc::timespec {
-        tv_sec: t.as_secs().min(i64::MAX as u64) as _,
-        tv_nsec: t.subsec_nanos().into(),
-    });
-    let mask = if let Some(traps) = watch {
-        let mut all = unsafe { std::mem::zeroed() };
-        unsafe { libc::sigfillset(&mut all) };
-        let mask = crate::traps::SignalMask::block(&all)?;
-        if traps.read_pending() || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(io::ErrorKind::Interrupted.into());
-        }
-        Some(mask)
-    } else {
-        None
-    };
-    let result = unsafe {
-        pselect_input(
-            fd + 1,
-            sets.as_mut_ptr(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            time.as_ref().map_or(std::ptr::null(), std::ptr::from_ref),
-            mask.as_ref().map_or(std::ptr::null(), |m| &m.0),
-        )
-    };
-    if result < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(result > 0)
-    }
-}
-
 pub(super) struct Input {
     fd: i32,
     seekable: bool,
@@ -241,7 +172,7 @@ impl Input {
                 return Ok(true);
             }
         }
-        match ready(self.fd, remaining, watch.then_some(&session.traps)) {
+        match crate::traps::wait_readable(self.fd, remaining, watch.then_some(&session.traps)) {
             Ok(true) => Ok(true),
             Ok(false) => Err(Flow::Continue(crate::traps::signal_status(libc::SIGALRM))),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => Ok(false),
@@ -354,7 +285,7 @@ pub(super) fn run(
         return Flow::Continue(1);
     }
     if opts.timeout == Some(Duration::ZERO) {
-        return match ready(opts.fd, Some(Duration::ZERO), None) {
+        return match crate::traps::wait_readable(opts.fd, Some(Duration::ZERO), None) {
             Ok(readable) => Flow::Continue(u8::from(!readable)),
             Err(error) => {
                 diagnostic!("read: {error}");

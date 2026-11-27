@@ -64,6 +64,19 @@ pub(crate) fn ready(fd: RawFd, ms: i32) -> bool {
     unsafe { libc::poll(&mut p, 1, ms) > 0 }
 }
 
+// Both the key-sequence timer and a containing read -t can bound the wait.
+// Atomically check pending signals before allowing the kernel to sleep.
+pub(super) fn key_ready(session: &Session, millis: i32) -> io::Result<bool> {
+    let delay = std::time::Duration::from_millis(millis as u64);
+    let remaining = crate::remaining_input_time();
+    let wait = remaining.map_or(delay, |t| t.min(delay));
+    let ready = crate::traps::wait_readable(0, Some(wait), Some(&session.traps))?;
+    if !ready && remaining.is_some_and(|t| t <= delay) {
+        return Err(io::ErrorKind::TimedOut.into());
+    }
+    Ok(ready)
+}
+
 #[derive(Default)]
 pub(super) struct Keys {
     pub(super) queued: VecDeque<u8>,
@@ -295,15 +308,8 @@ impl Keys {
             let key = if let Some(key) = self.immediate() {
                 key
             } else {
-                let next = if ready(0, session.bindings.timeout()) {
-                    self.get()
-                } else if crate::traps::input_interrupted()
-                    || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
-                {
-                    Err(io::ErrorKind::Interrupted.into())
-                } else {
-                    break;
-                };
+                let next = key_ready(session, session.bindings.timeout())
+                    .and_then(|ready| if ready { self.get() } else { Ok(None) });
                 match next {
                     Ok(Some(key)) => key,
                     Ok(None) => break,

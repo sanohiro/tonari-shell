@@ -5,7 +5,7 @@ pub(crate) const fn signal_status(signal: i32) -> u8 {
     (128 + signal) as u8
 }
 use wait_mask::is_os_signal;
-pub(crate) use wait_mask::{SignalMask, WaitMask};
+pub(crate) use wait_mask::{SignalMask, WaitMask, wait_readable};
 // A signal handler can run while Rust holds allocator and I/O locks. It only
 // records pending events. The interpreter executes shell code at a command boundary.
 use crate::{Flow, Session};
