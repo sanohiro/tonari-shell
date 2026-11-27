@@ -18,7 +18,7 @@ Bash 構文は Rust 製のインタープリターで実行します。今のシ
 
 ## インストールして試す
 
-現在はソースからビルドできます。安定版の Rust とネイティブリンカーを用意してください。macOS 向けの **Homebrew**、Debian・Ubuntu 向けの **APT**、**Cargo** 経由のインストールも予定しています。
+現在はソースからビルドできます。安定版の Rust とネイティブリンカーを用意してください。macOS 向けの **Homebrew**、Debian・Ubuntu 向けの **APT**、crates.io からの `cargo install` による導入も予定しています。
 
 ```sh
 git clone https://github.com/sanohiro/tonari-shell.git
@@ -43,14 +43,16 @@ sudo ./tools/stage.sh target/release/tonari /usr/local
 chsh -s /usr/local/libexec/tonari/bash
 ```
 
-ログインし直すと、`$SHELL` の末尾で判定するツールには `bash` と見えます。スクリプトは `BASH_VERSION` も参照できます。いつもの Bash 設定から `nvm.sh` を読み込めば `nvm use` が使えます。GitHub CLI の Bash 用補完を読み込むと、`gh iss` で Tab を押して `gh issue` を補完できます。先頭が `#!/bin/bash` のスクリプトは従来どおりシステムの Bash が実行します。別のシェルで `tonari` と打って起動した場合、`$SHELL` は親の設定を引き継ぎます。[ツール連携の検証結果](docs/benchmarks.md#tool-hooks)
+ログインし直すと、`$SHELL` の末尾で判定するツールには `bash` と見えます。スクリプトは `BASH_VERSION` も参照できます。いつもの Bash 設定から `nvm.sh` を読み込めば `nvm use` が使えます。GitHub CLI の Bash 用補完を読み込むと、`gh iss` で Tab を押して `gh issue` を補完できます。先頭が `#!/bin/bash` のスクリプトは従来どおりシステムの Bash が実行します。別のシェルで `tonari` と打って起動した場合、`$SHELL` は親の設定を引き継ぎます。ログインシェルを元に戻すには、元のパスを `chsh -s` に指定してログインし直してください。[ツール連携の検証結果](docs/benchmarks.md#tool-hooks)
 
 ### Bash の設定を引き継ぐ
 
 ログインシェル以外で対話起動すると `~/.bashrc` を読みます。ログイン時は `/etc/profile` を読んだ後、`~/.bash_profile`、`~/.bash_login`、`~/.profile` の順に最初に読めるファイルを一つ読みます。エイリアスや補完、nvm の設定を `~/.bashrc` にまとめているなら、Bash と同じようにログインプロファイルから読み込めます。
 
 ```bash
-[[ -f ~/.bashrc ]] && . ~/.bashrc
+if [ -n "${BASH_VERSION-}" ] && [ -r "$HOME/.bashrc" ]; then
+    . "$HOME/.bashrc"
+fi
 ```
 
 ## 速度と互換性

@@ -18,7 +18,7 @@ These features work with the default settings. Tab also uses existing Bash compl
 
 ## Install and try it
 
-Build from source with a current stable Rust toolchain and a native linker. Packages for **Homebrew** on macOS, **APT** on Debian/Ubuntu, and installation via **Cargo** are planned.
+Build from source with a current stable Rust toolchain and a native linker. Packages for **Homebrew** on macOS, **APT** on Debian/Ubuntu, and installation from crates.io with `cargo install` are planned.
 
 ```sh
 git clone https://github.com/sanohiro/tonari-shell.git
@@ -43,14 +43,16 @@ This installs one executable at `/usr/local/libexec/tonari/bash` and a `/usr/loc
 chsh -s /usr/local/libexec/tonari/bash
 ```
 
-Log out and back in. Tools that check the basename of `$SHELL` now see `bash`, and scripts can use `BASH_VERSION` to select their Bash integration. You can load `nvm.sh` in your usual Bash rc and run `nvm use`. With GitHub CLI’s Bash completion loaded, Tab after `gh iss` completes `gh issue`. Scripts with a `#!/bin/bash` shebang still run the system Bash. Starting `tonari` inside another shell inherits that session’s `$SHELL`. [Tested tool integrations](docs/benchmarks.md#tool-hooks)
+Log out and back in. Tools that check the basename of `$SHELL` now see `bash`, and scripts can use `BASH_VERSION` to select their Bash integration. You can load `nvm.sh` in your usual Bash rc and run `nvm use`. With GitHub CLI’s Bash completion loaded, Tab after `gh iss` completes `gh issue`. Scripts with a `#!/bin/bash` shebang still run the system Bash. Starting `tonari` inside another shell inherits that session’s `$SHELL`. To switch your login shell back, pass its original path to `chsh -s` and log in again. [Tested tool integrations](docs/benchmarks.md#tool-hooks)
 
 ### Your Bash configuration
 
 An interactive non-login shell reads `~/.bashrc`. A login shell reads `/etc/profile`, then the first readable file among `~/.bash_profile`, `~/.bash_login`, and `~/.profile`, in that order. If you keep aliases, completions, or nvm in `~/.bashrc`, you can source it from your login profile.
 
 ```bash
-[[ -f ~/.bashrc ]] && . ~/.bashrc
+if [ -n "${BASH_VERSION-}" ] && [ -r "$HOME/.bashrc" ]; then
+    . "$HOME/.bashrc"
+fi
 ```
 
 ## Performance and compatibility
