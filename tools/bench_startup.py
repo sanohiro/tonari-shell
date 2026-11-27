@@ -2,6 +2,7 @@
 
 import argparse
 import math
+import shutil
 import statistics
 import tempfile
 from pathlib import Path
@@ -14,6 +15,7 @@ def main():
     parser.add_argument("shells", nargs="+", type=Path)
     parser.add_argument("--bash", type=Path, default=Path("/bin/bash"))
     parser.add_argument("--runs", type=int, default=61)
+    parser.add_argument("--traces", type=Path, help="save separate Linux syscall traces outside timing samples")
     args = parser.parse_args()
     if args.runs < 1:
         parser.error("--runs must be positive")
@@ -45,6 +47,16 @@ def main():
                 if scenario == "forced interactive":
                     argv.append("-i")
                 cases.append((scenario, shell, argv, env, []))
+        if args.traces:
+            strace = shutil.which("strace")
+            if not strace:
+                parser.error("--traces requires strace")
+            args.traces.mkdir(parents=True, exist_ok=True)
+            for scenario, shell, argv, env, _ in cases:
+                path = args.traces / f"{shell.name}-{scenario.replace(' ', '-')}.txt"
+                first_prompt([strace, "--kill-on-exit", "-o", str(path), "-e",
+                              "trace=ioctl,rt_sigaction,open,openat,fstat,newfstatat,statx,write,writev,read,lseek,getppid",
+                              *argv], env)
         for i in range(args.runs + 3):
             offset = i % len(cases)
             for _, _, argv, env, samples in cases[offset:] + cases[:offset]:

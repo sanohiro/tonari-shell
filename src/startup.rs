@@ -8,6 +8,8 @@ use crate::{Flow, Session, input};
 #[derive(Default)]
 pub(crate) struct Environment {
     pub pwd: bool,
+    pub prompt: Option<bool>,
+    pub history_file: Option<bool>,
     pub shell_level: i64,
     pub execution_string: bool,
     pub posix: bool,
@@ -18,7 +20,7 @@ pub(crate) struct Environment {
 }
 
 impl Environment {
-    pub fn read(session: &mut Session) -> Self {
+    pub fn read(session: &mut Session, interactive: bool) -> Self {
         use std::ffi::CStr;
         let mut settings = Self::default();
         let mut lower_eof = None;
@@ -32,7 +34,9 @@ impl Environment {
             while !(*entry).is_null() {
                 let raw = *entry;
                 entry = entry.add(1);
-                if !matches!(*raw as u8, b'B' | b'P' | b'S' | b'I' | b'i') {
+                if !matches!(*raw as u8, b'B' | b'P' | b'S' | b'I' | b'i')
+                    && !(interactive && *raw as u8 == b'H')
+                {
                     continue;
                 }
                 let bytes = CStr::from_ptr(raw).to_bytes();
@@ -43,6 +47,14 @@ impl Environment {
                 let value = &bytes[i + 1..];
                 let utf8 = || std::str::from_utf8(value).ok();
                 match key {
+                    b"PS1" if interactive => {
+                        settings.prompt.get_or_insert_with(|| utf8().is_some());
+                    }
+                    b"HISTFILE" if interactive => {
+                        settings
+                            .history_file
+                            .get_or_insert_with(|| utf8().is_some());
+                    }
                     b"PWD" => settings.pwd = true,
                     b"SHLVL" => {
                         settings.shell_level =

@@ -198,7 +198,7 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
     use cli::Input;
     let mut session = Session::default();
     session.started_at = unsafe { libc::time(std::ptr::null_mut()) };
-    let env = startup::Environment::read(&mut session);
+    let env = startup::Environment::read(&mut session, invocation.interactive);
     session.initialize_shell_level(&env);
     session.arg0 = std::mem::take(&mut invocation.arg0);
     session.positional = std::mem::take(&mut invocation.positional).into_iter();
@@ -283,10 +283,10 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
         return input::print_script(&session, invocation.input);
     }
     if session.interactive {
-        if session.get("PS1").is_none() {
+        if !env.prompt.unwrap_or(false) {
             session.assign("PS1", "tonari$ ");
         }
-        if session.get("HISTFILE").is_none()
+        if !env.history_file.unwrap_or(false)
             && let Some(home) = session.get("HOME").or_else(crate::word::account_home)
         {
             let file = if session.posix {

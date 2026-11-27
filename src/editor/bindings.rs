@@ -544,6 +544,10 @@ fn load_file(session: &mut Session, path: &Path, depth: usize) -> Result<(), Str
         return Err("inputrc include nesting limit".into());
     }
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    parse_file(session, path, depth, &text)
+}
+
+fn parse_file(session: &mut Session, path: &Path, depth: usize, text: &str) -> Result<(), String> {
     let mut levels = Vec::new();
     let mut active = true;
     let mut error = None;
@@ -591,17 +595,26 @@ pub(crate) fn initialize(session: &mut Session) {
 }
 
 pub(super) fn reload(session: &mut Session) {
-    let explicit = session.get("INPUTRC").filter(|v| !v.is_empty());
-    let path = explicit
-        .map(PathBuf::from)
-        .or_else(|| {
-            session
-                .get("HOME")
-                .map(|p| PathBuf::from(p).join(".inputrc"))
-                .filter(|p| p.is_file())
-        })
-        .unwrap_or_else(|| PathBuf::from("/etc/inputrc"));
-    let _ = load_file(session, &path, 0);
+    if let Some(path) = session.get("INPUTRC").filter(|v| !v.is_empty()) {
+        let _ = load_file(session, Path::new(&path), 0);
+    } else if let Some(home) = session.get("HOME")
+        && let path = Path::new(&home).join(".inputrc")
+        && let Ok(meta) = path.metadata()
+        && meta.is_file()
+    {
+        // The lookup already checked this regular file. Reuse its length
+        // without treating the snapshot as EOF if the file grows.
+        if let Ok(file) = std::fs::File::open(&path) {
+            let mut bytes = Vec::new();
+            if crate::input::read_regular_file(&file, meta.len(), &mut bytes).is_ok()
+                && let Ok(text) = std::str::from_utf8(&bytes)
+            {
+                let _ = parse_file(session, &path, 0, text);
+            }
+        }
+    } else {
+        let _ = load_file(session, Path::new("/etc/inputrc"), 0);
+    }
     if let Some(vi) = session.bindings.prefer_vi.take() {
         session.vi = vi;
         session.emacs = !vi;

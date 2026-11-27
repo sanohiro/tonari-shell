@@ -30,6 +30,22 @@ pub(crate) fn read_spare(file: &File, output: &mut Vec<u8>, limit: usize) -> io:
     }
 }
 
+pub(crate) fn read_regular_file(
+    file: &std::fs::File,
+    size: u64,
+    output: &mut Vec<u8>,
+) -> io::Result<()> {
+    // One extra byte distinguishes EOF from a stale size without growing a full buffer.
+    const MAX_INITIAL_SIZE: usize = 64 * 1024 * 1024;
+    output.try_reserve_exact(size.min(MAX_INITIAL_SIZE as u64) as usize + 1)?;
+    loop {
+        output.try_reserve(1)?;
+        if read_spare(file, output, MAX_INITIAL_SIZE + 1)? == 0 {
+            return Ok(());
+        }
+    }
+}
+
 // External commands inherit fd 0. Any unread text buffered by the shell must
 // still be available to a child which reads stdin (for example, "cat\n...").
 pub fn stdin_script(session: &mut Session, check: bool) -> Flow {

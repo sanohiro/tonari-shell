@@ -9,7 +9,9 @@ case "$SUITE" in
 esac
 source tools/ci/bash-source.sh
 if [[ $SUITE == startup-review ]]; then
-  python3 tools/bench_startup.py "$bin/baseline" "$current" --bash "$ref" > "$out/startup.txt"
+  opts=()
+  if [[ $RUNNER_OS == Linux ]]; then opts+=(--traces "$out/traces"); fi
+  python3 tools/bench_startup.py "$bin/baseline" "$current" --bash "$ref" "${opts[@]}" > "$out/startup.txt"
   python3 tools/bench_editor_input.py "$bin/baseline" "$current" "$ref" --case Ctrl-R --case Miss --runs 31 > "$out/unicode.txt"
   python3 tools/bench_history.py "$bin/baseline" "$current" --escaped --entries 100000 --runs 31 > "$out/history.txt"
   wc -c "$bin/baseline" "$current" > "$out/sizes.txt"

@@ -93,6 +93,7 @@ const VIEWPORT_THRESHOLD: usize = 1024;
 
 struct Screen {
     output: String,
+    enable_paste: bool,
     row: usize,
     width: usize,
     // A visible, undecorated end-of-line can accept a suffix directly.
@@ -126,6 +127,7 @@ impl Screen {
             .unwrap_or_default();
         Self {
             output: String::new(),
+            enable_paste: false,
             row: 0,
             tail: None,
             height: if rows == 0 { 24 } else { usize::from(rows) },
@@ -198,6 +200,9 @@ impl Screen {
         suggestion: &str,
     ) -> io::Result<()> {
         self.frame(prompt, text, cursor, suggestion);
+        if std::mem::take(&mut self.enable_paste) {
+            self.output.insert_str(0, "\x1b[?2004h");
+        }
         io::stderr().write_all(self.output.as_bytes())
     }
 
@@ -544,7 +549,7 @@ fn read_trap(
     if !matches!(flow, crate::Flow::Continue(_)) {
         return Ok(Some(Input::Control(flow)));
     }
-    *term = Some(Terminal::enter(session.bindings.paste())?);
+    *term = Some(Terminal::enter(session.bindings.paste(), false)?);
     screen.row = 0;
     screen.tail = None;
     screen.view.invalidate();
@@ -566,11 +571,12 @@ pub fn line(
     } else {
         Keymap::Emacs
     };
-    let mut term = Some(Terminal::enter(session.bindings.paste())?);
+    let mut term = Some(Terminal::enter(session.bindings.paste(), true)?);
     let mut keys = Keys::new(std::mem::take(&mut session.editor_queue));
     let mut edit = EditorState::default();
     let mut mark = 0usize;
     let mut screen = Screen::new(terminal_size);
+    screen.enable_paste = session.bindings.paste();
     let (mut text, read) = match start {
         Start::Command(initial) => (initial, None),
         Start::Read {
@@ -749,7 +755,7 @@ pub fn line(
                 if let crate::Flow::Exit(_) = flow {
                     return Ok(Input::Control(flow));
                 }
-                term = Some(Terminal::enter(session.bindings.paste())?);
+                term = Some(Terminal::enter(session.bindings.paste(), false)?);
                 screen.row = 0;
                 screen.view.invalidate();
                 continue;

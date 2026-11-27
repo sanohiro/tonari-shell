@@ -29,18 +29,6 @@ fn regular_storage(query: impl FnOnce(&mut libc::statfs) -> libc::c_int) -> bool
     false
 }
 
-fn read_regular_file(file: &std::fs::File, size: u64, output: &mut Vec<u8>) -> io::Result<()> {
-    // One extra byte distinguishes EOF from a stale size without growing a full buffer.
-    const MAX_INITIAL_SIZE: usize = 64 * 1024 * 1024;
-    output.try_reserve_exact(size.min(MAX_INITIAL_SIZE as u64) as usize + 1)?;
-    loop {
-        output.try_reserve(1)?;
-        if crate::input::read_spare(file, output, MAX_INITIAL_SIZE + 1)? == 0 {
-            return Ok(());
-        }
-    }
-}
-
 pub(crate) fn current_substitution(
     session: &mut Session,
     body: Vec<parser::Statement>,
@@ -166,7 +154,7 @@ pub fn capture_substitution(
                 || regular_storage(|info| unsafe { libc::fstatfs(file.as_raw_fd(), info) }))
         {
             let mut output = Vec::new();
-            if let Err(e) = read_regular_file(&file, metadata.len(), &mut output) {
+            if let Err(e) = crate::input::read_regular_file(&file, metadata.len(), &mut output) {
                 diagnostic!("{e}");
                 return captured_output(output, 1);
             }
@@ -812,7 +800,7 @@ mod tests {
             writer.write_all(b"hello").unwrap();
             drop(writer);
             let mut bytes = Vec::new();
-            read_regular_file(
+            crate::input::read_regular_file(
                 &std::fs::File::from(OwnedFd::from(reader)),
                 hint,
                 &mut bytes,

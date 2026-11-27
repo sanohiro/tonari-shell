@@ -9,7 +9,7 @@ pub(super) struct Terminal {
 }
 
 impl Terminal {
-    pub(super) fn enter(bracketed: bool) -> io::Result<Self> {
+    pub(super) fn enter(bracketed: bool, defer_paste: bool) -> io::Result<Self> {
         let mut old = unsafe { std::mem::zeroed::<libc::termios>() };
         if unsafe { libc::tcgetattr(0, &mut old) } < 0 {
             return Err(io::Error::last_os_error());
@@ -27,7 +27,7 @@ impl Terminal {
             original: old,
             bracketed_paste: bracketed,
         };
-        if bracketed {
+        if bracketed && !defer_paste {
             io::stderr().write_all(b"\x1b[?2004h")?;
         }
         Ok(term)
