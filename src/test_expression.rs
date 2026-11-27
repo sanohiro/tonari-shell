@@ -16,7 +16,16 @@ pub enum Expr {
 #[derive(Debug)]
 pub struct StaticGlob {
     word: Word,
-    compiled: std::cell::OnceCell<(pattern::Matcher<String>, Option<pattern::extended::Pattern>)>,
+    text: std::cell::OnceCell<String>,
+    compiled: std::cell::RefCell<Option<CompiledGlob>>,
+}
+
+#[derive(Debug)]
+struct CompiledGlob {
+    locale: Option<std::rc::Rc<pattern::PatternLocale>>,
+    ascii_ranges: bool,
+    matcher: pattern::Matcher<String>,
+    group: Option<pattern::extended::Pattern>,
 }
 
 impl Expr {
@@ -35,6 +44,7 @@ impl Expr {
                 operator,
                 std::rc::Rc::new(StaticGlob {
                     word: right,
+                    text: Default::default(),
                     compiled: Default::default(),
                 }),
             );
@@ -133,40 +143,45 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
         }
         StaticGlob(left, op, glob) => {
             let left = operand(session, left, status)?;
-            let (matcher, group) = glob.compiled.get_or_init(|| {
-                let text = glob.word.clone().extended_pattern(&|_| None, &[]);
-                let group = pattern::extended::Pattern::new(&text);
-                (pattern::Matcher::new(text), group)
-            });
-            let invalid;
-            let source = if matches!(matcher, pattern::Matcher::Invalid) {
-                invalid = glob.word.clone().extended_pattern(&|_| None, &[]);
-                &invalid
-            } else {
-                matcher.source()
-            };
+            let source = glob
+                .text
+                .get_or_init(|| glob.word.clone().extended_pattern(&|_| None, &[]));
             trace(session, status, &[&left, op, source]);
-            let matched = if session.shopt.nocasematch || group.is_some() {
-                let locale = source
-                    .contains(['[', '?'])
-                    .then(|| pattern::session_locale(session))
-                    .flatten();
-                let _guard = locale.as_ref().and_then(|l| l.enter());
-                if session.shopt.nocasematch {
-                    pattern::extended::insensitive_match(
-                        &left,
-                        source,
-                        true,
-                        session.character_locale(),
-                    )
-                } else {
-                    group
-                        .as_ref()
-                        .expect("compiled extended pattern")
-                        .accepts(&left, false)
-                }
+            let locale = source
+                .contains(['[', '?'])
+                .then(|| pattern::session_locale(session))
+                .flatten();
+            let _guard = locale.as_ref().and_then(|l| l.enter());
+            let matched = if session.shopt.nocasematch {
+                pattern::extended::insensitive_match(
+                    &left,
+                    source,
+                    true,
+                    session.character_locale(),
+                )
             } else {
-                matcher.matches_session(&left, session)
+                let mut entry = glob.compiled.borrow_mut();
+                // Bracket ranges and their per-character results belong to the
+                // active locale. Keep its handle alive until recompilation.
+                let ascii_ranges = session.shopt.globasciiranges;
+                let current = entry.as_ref().is_some_and(|cached| {
+                    cached.ascii_ranges == ascii_ranges
+                        && cached.locale.as_ref().map(std::rc::Rc::as_ptr)
+                            == locale.as_ref().map(std::rc::Rc::as_ptr)
+                });
+                if !current {
+                    *entry = Some(CompiledGlob {
+                        matcher: pattern::Matcher::new(source.clone()),
+                        group: pattern::extended::Pattern::new(source),
+                        locale,
+                        ascii_ranges,
+                    });
+                }
+                let compiled = entry.as_ref().unwrap();
+                compiled.group.as_ref().map_or_else(
+                    || compiled.matcher.matches(&left),
+                    |group| group.accepts(&left, false),
+                )
             };
             Ok(matched != (*op == "!="))
         }

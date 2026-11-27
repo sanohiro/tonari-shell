@@ -4,12 +4,16 @@ use std::io::{self, Write};
 use std::path::Path;
 
 pub(super) fn physical_path() -> io::Result<std::path::PathBuf> {
+    with_physical_path(|path| Ok(path.to_owned()))
+}
+
+fn with_physical_path<T>(use_path: impl FnOnce(&Path) -> io::Result<T>) -> io::Result<T> {
     // Avoid getcwd(NULL, 0)'s growing allocation for ordinary paths.
     let mut path = [std::mem::MaybeUninit::<libc::c_char>::uninit(); 512];
     let result = unsafe { libc::getcwd(path.as_mut_ptr().cast(), path.len()) };
     if !result.is_null() {
         let bytes = unsafe { std::ffi::CStr::from_ptr(result) }.to_bytes();
-        return Ok(std::ffi::OsStr::from_bytes(bytes).into());
+        return use_path(Path::new(std::ffi::OsStr::from_bytes(bytes)));
     }
     let error = io::Error::last_os_error();
     if !matches!(
@@ -18,10 +22,11 @@ pub(super) fn physical_path() -> io::Result<std::path::PathBuf> {
     ) {
         return Err(error);
     }
-    match std::env::current_dir() {
+    let path = match std::env::current_dir() {
         Err(e) if e.raw_os_error() == Some(libc::ENAMETOOLONG) => long_physical_path(),
         result => result,
-    }
+    }?;
+    use_path(&path)
 }
 
 // Validate a cached absolute name component by component when it will not fit
@@ -354,16 +359,16 @@ impl Session {
         if !physical && !self.posix {
             return write_path(self.logical_directory_ref()?, out);
         }
-        let path = if physical {
+        if physical {
             if let Some(path) = self.logical_cwd.get()
                 && path.as_os_str().len() >= libc::PATH_MAX as usize
                 && long_cwd_matches(path, true)
             {
-                Ok(path.clone())
-            } else {
-                physical_path()
+                return write_path(path, out);
             }
-        } else {
+            return with_physical_path(|path| write_path(path, out));
+        }
+        let path = {
             self.logical_directory().and_then(|path| {
                 if same_directory(&path, Path::new("."))
                     || path.as_os_str().len() >= libc::PATH_MAX as usize

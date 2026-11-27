@@ -1282,8 +1282,6 @@ fn operator(
     })
 }
 
-// Read one word or reserved spelling. The outer scanner owns command position,
-// pending here-documents and the nesting of compound commands.
 fn parameter_name(name: &str) -> std::borrow::Cow<'static, str> {
     // The lexer already validated the name. Borrow the one-byte spelling of
     // positional parameters, common variables and special parameters.
@@ -1297,6 +1295,8 @@ fn parameter_name(name: &str) -> std::borrow::Cow<'static, str> {
     }
 }
 
+// Read one word or reserved spelling. The outer scanner owns command position,
+// pending here-documents and the nesting of compound commands.
 fn scan_word(
     chars: &mut Chars<'_>,
     first: char,

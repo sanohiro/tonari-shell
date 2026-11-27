@@ -3,6 +3,7 @@ use super::order::{self, Collation};
 use std::cell::RefCell;
 use std::ffi::CString;
 
+#[derive(Debug)]
 pub(crate) struct Cached {
     ctype: String,
     characters: CharacterLocale,

@@ -84,6 +84,11 @@ CASES = {
                                        "a=({0..99})", 5000),
     "review-negative-index": eval_loop('x=${a[-1]}', 'echo "$x"', "99", "a=({0..99})", 10000),
     "review-length": eval_loop('x=${#s}', 'echo "$x"', "256", "printf -v s '%256s' x", 20000),
+    "review-length-ascii-wide": eval_loop('x=${#s}', 'echo "$x"', "65536",
+                                        "printf -v s '%65536s' x", 250),
+    "review-length-mixed-wide": eval_loop('x=${#s}', 'echo "$x"', "65537",
+        "export LC_ALL=C.UTF-8; printf -v s '%65536s' x; s+=雪", 250),
+    "review-pwd-physical": listing_loop("pwd -P", 5000),
     "review-pwd": ("for ((i=0;i<5000;i++)); do pwd || exit; done >/dev/null\n"
                    '[[ $(pwd) == "$PWD" ]] && echo ok', "ok"),
 

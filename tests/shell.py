@@ -108,6 +108,42 @@ END
 echo "first=${a[0]}"
 ''', 0, b"<a>\n<b>\n0:ab\n0:a b:\n0:ab\nouter\ncallback:two\nfirst=one\n\n", minimum=4)
 
+    def test_static_conditional_rechecks_locale_after_first_use(self):
+        locales = subprocess.check_output(["locale", "-a"], text=True).splitlines()
+        utf8 = next((name for name in locales if name.lower().replace("-", "") in
+                     ("en_us.utf8", "c.utf8")), None)
+        if utf8 is None:
+            self.skipTest("requires an installed UTF-8 locale")
+        script = """f() { [[ $1 == +([a-ú]) ]]; }
+pattern='+([a-ú])'
+for LC_ALL in C "$1" C "$1"; do
+    f é; cached=$?
+    [[ é == $pattern ]]; direct=$?
+    [[ $cached == "$direct" ]] || exit 1
+done"""
+        for shell in self.shells_for():
+            tested = self.command(shell, script, "bench", utf8)
+            self.assertEqual((tested.stdout, tested.stderr, tested.returncode), (b"", b"", 0))
+
+    def test_short_here_input_reports_descriptor_exhaustion(self):
+        for name in ("read -r x", "mapfile -t x"):
+            for limit, expected in [(4, b"1:\n"), (5, b"0:ok\n")]:
+                source = f'ulimit -n {limit}; {name} <<<ok; echo "$?:$x"'
+                with self.subTest(builtin=name, limit=limit):
+                    tested = self.command(TONARI, source)
+                    self.assertEqual((tested.returncode, tested.stdout), (0, expected))
+                    self.assertEqual(bool(tested.stderr), limit == 4)
+
+    def test_counted_read_rewinds_to_next_utf8_character(self):
+        (self.cwd / "words").write_text("雪a\n🐟b\nxyz", encoding="utf-8")
+        proc = self.command(TONARI, """exec 3<words
+IFS= read -ru3 -n1 x; echo "$?:$x"
+IFS= read -ru3 -n4 x; echo "$?:$x"
+IFS= read -ru3 -n1 x; echo "$?:$x"
+IFS= read -ru3 x; echo "$?:$x"
+IFS= read -ru3 -n8 x; echo "$?:$x" """)
+        self.assertEqual((proc.returncode, proc.stdout.decode(), proc.stderr),
+                         (0, "0:雪\n0:a\n0:🐟\n0:b\n1:xyz\n", b""))
 
     def test_closed_builtin_stdout_reports_only_attempted_writes(self):
         shells = (TONARI,) if self.bash_before_53() else (BASH, TONARI)
