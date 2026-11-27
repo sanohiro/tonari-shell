@@ -1,5 +1,20 @@
 # Startup and execution / 起動と実行性能
 
+<a id="typed-loop-audit"></a>
+
+## November 27 · Typed loops and options / ループ代入の監査
+
+Apple M1, Bash 5.3.20, 21 interleaved release medians in milliseconds after the ready handshake in `tools/bench_scripts.py`. The optimized interpreter first tries updating an existing ordinary scalar in place. Values are checked after each sample.
+
+| Workload | First correct | Optimized | Bash |
+|---|---:|---:|---:|
+| 6,000 integer for-loop assignments plus two expressions | 2.272 | 1.127 | 6.964 |
+| 6,000 ordinary for-loop assignments | 1.690 | 1.061 | 6.081 |
+| 600 getopts calls with integer option and OPTARG | 1.230 | 1.249 | 2.655 |
+| 80 select assignments of an integer expression | 1.028 | 0.986 | 1.528 |
+
+Use `declare -i n; for n in {1..6000} 010 n+1; do :; done; echo "$n"` for the integer loop. Omit the declaration and two final expressions for the plain loop. For getopts, set `a=7; declare -i o OPTARG` and repeat `OPTIND=1; getopts a: o -a3+4`. For select use `declare -i x; select x in 3+4; do break; done <<< 1` with the menu redirected to /dev/null. 正しい初回実装とも比較し、主に for の変数ごとの重複検索と文字列の再確保を削減した。
+
 <a id="input-attributes"></a>
 
 ## November 27 · Input attributes / 入力先の属性

@@ -1,20 +1,21 @@
 use super::{Session, is_identifier};
+use crate::Flow;
 
 impl Session {
-    pub fn getopts(&mut self, args: &[String]) -> u8 {
+    pub fn getopts(&mut self, args: &[String]) -> Flow {
         let terminated = args.first().is_some_and(|a| a == "--");
         let args = if terminated { &args[1..] } else { args };
         let [spec, name, explicit @ ..] = args else {
             diagnostic!("getopts: usage: getopts optstring name [arg ...]");
-            return 2;
+            return Flow::Continue(2);
         };
         if !terminated && spec.starts_with('-') && spec.len() > 1 {
             diagnostic!("getopts: invalid option: {spec}");
-            return 2;
+            return Flow::Continue(2);
         }
         if self.posix && self.readonly("OPTIND") {
             diagnostic!("getopts: OPTIND: readonly variable");
-            return 1;
+            return Flow::Continue(1);
         }
         let inputs = if explicit.is_empty() {
             self.positional.as_slice()
@@ -82,6 +83,8 @@ impl Session {
             var.declared = true;
             var.exported |= self.allexport;
             self.opt_offset = 0;
+        } else if self.readonly("OPTIND") {
+            diagnostic!("getopts: OPTIND: readonly variable");
         } else {
             self.assign("OPTIND", &(pos + 1).to_string());
         }
@@ -105,33 +108,35 @@ impl Session {
                 }
             }
         }
-        if self.posix && self.readonly("OPTARG") {
+        if self.readonly("OPTARG") {
             diagnostic!("getopts: OPTARG: readonly variable");
-            return 2;
-        }
-        if let Some(value) = value {
-            self.assign("OPTARG", &value);
+            if self.posix {
+                return Flow::Continue(2);
+            }
+        } else if let Some(value) = value {
+            if let Err(error) = self.assign_target("OPTARG", &value) {
+                diagnostic!("getopts: OPTARG: {error}");
+                return Flow::Discard(1);
+            }
         } else {
             self.unset_variable("OPTARG");
         }
         if !is_identifier(name) {
             diagnostic!("getopts: {name}: not a valid identifier");
-            return 1;
+            return Flow::Continue(1);
         }
         if self.readonly(name) {
             diagnostic!("getopts: {name}: readonly variable");
-            return if option.is_none() { 1 } else { 2 };
+            return Flow::Continue(if option.is_none() { 1 } else { 2 });
         }
         let mut bytes = [0; 4];
         let value = result.encode_utf8(&mut bytes);
-        if self.is_nameref(name) {
-            if let Err(error) = self.assign_target(name, value) {
-                diagnostic!("getopts: {name}: {error}");
-                return 1;
-            }
-        } else {
-            self.assign(name, value);
+        if !self.assign_existing_literal(name, value)
+            && let Err(error) = self.assign_target(name, value)
+        {
+            diagnostic!("getopts: {name}: {error}");
+            return Flow::Discard(1);
         }
-        u8::from(option.is_none())
+        Flow::Continue(u8::from(option.is_none()))
     }
 }

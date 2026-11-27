@@ -310,7 +310,7 @@ pub(super) fn eval_builtin(
         Builtin::Set => Flow::Continue(session.set(&mut cmd.words)),
         Builtin::Hash => Flow::Continue(hash::run(session, args)),
         Builtin::Shopt => Flow::Continue(session.shopt(args)),
-        Builtin::Getopts => Flow::Continue(session.getopts(args)),
+        Builtin::Getopts => session.getopts(args),
         Builtin::Let => Flow::Continue(crate::arithmetic::let_builtin(args, session)),
         Builtin::Shift => Flow::Continue(session.shift(args)),
         Builtin::Declare => session.declare(

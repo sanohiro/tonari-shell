@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## November 27 · Typed loop and option assignments / ループとオプション解析の変数属性
+
+A for-loop over an integer variable evaluates each item in order. A nameref used as a for-loop counter retargets the reference; a select destination writes through it. getopts applies attributes both to its output name and to OPTARG. An arithmetic error stops the current command list before the next item. The loop may reuse the existing scalar buffer after checking its attributes.
+
+通常の for、select、getopts の出力で整数属性の値と副作用を確認した。for の名前参照の付け替えと select の参照先への代入は別々に回帰試験で保護している。 [Measurements / 計測](benchmarks.md#typed-loop-audit)
+
 ## November 27 · Attributes on input destinations / 入力先の変数属性
 
 `read -a` and `mapfile` assign integer elements in input order. An expression can read an earlier element or update another variable. An arithmetic error retains the successful prefix and interrupts evaluation of the command list. An unadorned `read` uses the attributes of REPLY. Test the ordinary, limited, origin and callback paths with `python3 tests/shell.py /path/to/tonari -k input` and `-k honors`.

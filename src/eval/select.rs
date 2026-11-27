@@ -86,7 +86,10 @@ pub(super) fn run(
                 diagnostic!("{name}: readonly variable");
                 return Err(Flow::Continue(1));
             }
-            s.assign(name, item.map_or("", String::as_str));
+            if let Err(error) = s.assign_target(name, item.map_or("", String::as_str)) {
+                diagnostic!("{name}: {error}");
+                return Err(Flow::Discard(1));
+            }
             return Ok(Some(last));
         }
     })
