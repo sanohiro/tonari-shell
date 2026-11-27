@@ -10,7 +10,7 @@ esac
 source tools/ci/bash-source.sh
 if [[ $SUITE == function-tables ]]; then
   args=()
-  for name in functions-{0,200,1000}-{call,printf,colon} functions-1000-prefix core-parse-functions function-list export-function-list aliases-{0,200,1000}-miss aliases-200-{hit,list} assoc-{values,keys,churn}; do
+  for name in functions-{0,200,1000}-{call,printf,colon} functions-1000-prefix core-parse-functions function-list export-function-list aliases-{0,200,1000}-miss aliases-200-{hit,braced,list} assoc-{values,keys,churn}; do
     args+=(--case "$name")
   done
   "$ref" --version > "$out/bash-version.txt"

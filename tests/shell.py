@@ -56,7 +56,7 @@ class ShellTests(unittest.TestCase):
 
     def test_simple_and_nested_alias_parameters(self):
         self.compare("""shopt -s expand_aliases
-alias show='printf %s "$v"'
+alias show='printf %s "${v}"'
 alias nested='printf "<%s>" "$(show)"'
 for v in 'two words' '*'; do eval nested; done
 set -o posix

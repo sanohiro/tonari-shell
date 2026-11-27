@@ -152,6 +152,19 @@ impl Expanded {
     }
 }
 
+// Ordinary parameter expansions do not invoke another parser. A command
+// substitution must keep the outer alias disabled while its body is read.
+fn may_read_nested_command(value: &str) -> bool {
+    if value.contains('`') {
+        return true;
+    }
+    value.contains('$')
+        && (value.contains('(')
+            || memchr::memchr_iter(b'{', value.as_bytes()).any(|i| {
+                super::lexer::starts_braced_command(super::lexer::joined(&value[i + 1..]))
+            }))
+}
+
 impl Reader {
     pub(super) fn alias_newlines(&mut self, protected: &[&str]) -> Result<(), Error> {
         loop {
@@ -328,12 +341,7 @@ impl Reader {
                 self.joined_alias(name, &value, nested)?;
                 continue;
             }
-            // Simple parameter references, including quoted ones, need no nested
-            // parser. Preserve the active alias mask for command substitutions.
-            let nested = self.replacement_aliases(
-                &name,
-                value.contains('`') || value.contains('$') && value.contains(['(', '{']),
-            );
+            let nested = self.replacement_aliases(&name, may_read_nested_command(value));
             let replacement = with(nested, || lex(value, false, true));
             let (replacement, spans, _) = match replacement {
                 Err(Error::Incomplete(_)) => {

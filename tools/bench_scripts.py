@@ -531,6 +531,7 @@ for count in (0, 200, 1000):
 CASES["functions-1000-prefix"] = eval_loop("compgen -A function bench_fn_99 >/dev/null",
                                           "compgen -A function bench_fn_999", "bench_fn_999", count=300)
 CASES["aliases-200-hit"] = eval_loop("eval selected", 'echo "$x"', "999", count=1000)
+CASES["aliases-200-braced"] = CASES["aliases-200-hit"]
 CASES["aliases-200-list"] = listing_loop("alias -p", 100)
 
 CASES.update({
@@ -714,6 +715,8 @@ def main():
                 case_setup += "shopt -s expand_aliases; " + "".join(f"alias bench_alias_{j}=:; " for j in range(count))
                 if case.endswith("-hit"):
                     case_setup += """alias selected='x=$i'; """
+                elif case.endswith("-braced"):
+                    case_setup += """alias selected='x="${i}"'; """
             if case.startswith("assoc-"):
                 case_setup += 'declare -A m; for ((j=0;j<500;++j)); do m[key$j]=value$j; done; '
             elif case == "complete-list":

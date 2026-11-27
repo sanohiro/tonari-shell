@@ -265,6 +265,10 @@ fn dollar_word(
     Ok(())
 }
 
+pub(super) fn starts_braced_command(content: &str) -> bool {
+    content.starts_with([' ', '\t', '\n', '|'])
+}
+
 fn braced_parameter<'a>(
     chars: &mut Chars<'a>,
     word: &mut WordBuilder,
@@ -274,7 +278,7 @@ fn braced_parameter<'a>(
 ) -> Result<(), Error> {
     chars.next();
     let content = chars.as_str();
-    if content.starts_with([' ', '\t', '\n', '|']) {
+    if starts_braced_command(content) {
         let reply = content.starts_with('|');
         let nested = if reply { &content[1..] } else { content };
         let (tokens, spans, after) = lex_words(nested, false, false, None, true)?;

@@ -288,8 +288,7 @@ pub(crate) fn with_subscript_aliases<T>(
     if !memchr::memchr2_iter(b'$', b'\x60', bytes).any(|i| {
         bytes[i] == b'\x60'
             || bytes.get(i + 1) == Some(&b'(')
-            || (bytes.get(i + 1) == Some(&b'{')
-                && matches!(bytes.get(i + 2), Some(b' ' | b'\t' | b'\n' | b'|')))
+            || (bytes.get(i + 1) == Some(&b'{') && lexer::starts_braced_command(&source[i + 2..]))
     }) {
         return parse();
     }
