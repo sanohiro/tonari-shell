@@ -3835,11 +3835,11 @@ printf '%s\n' "$marker"
         self.assertIn(b"> cedar\n  birch\n  birch-2\n  alder", out)
         os.write(fd, b"bir\x1b[B\r")
         self.read_until(fd, PROMPT + b"tool --model birch-2 ")
-        os.write(fd, b"\x15complete -o nosort -W 'zeta alpha' tool\r")
+        os.write(fd, b"\x15complete -o nosort -W 'zeta zeta alpha amber alpha' tool\r")
         self.read_until(fd, b"\x1b[?2004h")
         os.write(fd, b"tool \t\t")
-        out = self.read_until(fd, b"  alpha").replace(b"\r", b"")
-        self.assertIn(b"> zeta\n  alpha", out)
+        out = self.read_until(fd, b"  amber").replace(b"\r", b"")
+        self.assertIn(b"> zeta\n  alpha\n  amber", out)
 
     def test_completion_keeps_terminal_input_with_its_owner(self):
         for shell in self.shells_for(5):

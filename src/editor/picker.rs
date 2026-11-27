@@ -278,7 +278,7 @@ pub(super) fn history(
                 draw(
                     screen,
                     "history> ",
-                    std::iter::once(first.as_str()),
+                    std::iter::once(first.as_ref()),
                     0,
                     &query,
                     "",
@@ -296,7 +296,7 @@ pub(super) fn history(
             .iter()
             .skip(offset)
             .take(rows)
-            .map(String::as_str);
+            .map(AsRef::as_ref);
         draw(
             screen,
             "history> ",
@@ -327,7 +327,7 @@ pub(super) fn history(
                 });
                 selected = selected.min(filter.hits.len().saturating_sub(1));
                 if selected < filter.hits.len() {
-                    return Ok(Some(filter.hits.swap_remove(selected)));
+                    return Ok(Some(filter.hits[selected].to_string()));
                 }
                 continue;
             }

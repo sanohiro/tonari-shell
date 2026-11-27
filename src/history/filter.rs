@@ -1,8 +1,10 @@
 use super::{command_field, decode, encoded_fragment, file};
 use crate::Session;
 use memchr::{memchr, memmem, memrchr};
+use std::collections::HashSet;
 use std::fs::File;
 use std::os::unix::fs::FileExt;
+use std::rc::Rc;
 
 /// Spaces separate literal search fragments. An escaped space can itself
 /// occur in a saved shell word, so keep both the backslash and the space.
@@ -37,7 +39,8 @@ pub(crate) struct Filter<'a> {
     end: u64,
     local_end: usize,
     buf: Vec<u8>,
-    pub hits: Vec<String>,
+    pub hits: Vec<Rc<str>>,
+    seen: Option<HashSet<Rc<str>>>,
 }
 
 impl<'a> Filter<'a> {
@@ -56,11 +59,13 @@ impl<'a> Filter<'a> {
             local_end: session.history_lines().len(),
             buf: Vec::new(),
             hits: Vec::new(),
+            seen: None,
         }
     }
 
     pub fn rewind(&mut self, session: &Session) {
         self.hits.clear();
+        self.seen = None;
         self.end = self.length;
         self.local_end = session.history_lines().len();
     }
@@ -81,17 +86,38 @@ impl<'a> Filter<'a> {
         }
         let terms: Vec<_> = fragments(query).collect();
         let matches = |line: &str| terms.iter().all(|t| line.contains(t));
+        let mut record = |line: &str| {
+            if !matches(line) {
+                return false;
+            }
+            // A few visible pages fit in a short linear scan. Deeper pages
+            // share string storage with an index for both journal sources.
+            const INDEX_AFTER: usize = 32;
+            if self.hits.len() == INDEX_AFTER && self.seen.is_none() {
+                self.seen = Some(self.hits.iter().cloned().collect());
+            }
+            let known = self.seen.as_ref().map_or_else(
+                || self.hits.iter().any(|s| s.as_ref() == line),
+                |seen| seen.contains(line),
+            );
+            if known {
+                return false;
+            }
+            let line: Rc<str> = Rc::from(line);
+            if let Some(seen) = &mut self.seen {
+                seen.insert(Rc::clone(&line));
+            }
+            self.hits.push(line);
+            self.hits.len() == wanted
+        };
         while self.local_end > 0 {
             if self.local_end.is_multiple_of(256) && waiting() {
                 return;
             }
             self.local_end -= 1;
             let line = &session.history_lines()[self.local_end];
-            if matches(line) && !self.hits.contains(line) {
-                self.hits.push(line.clone());
-                if self.hits.len() == wanted {
-                    return;
-                }
+            if record(line) {
+                return;
             }
         }
 
@@ -188,12 +214,9 @@ impl<'a> Filter<'a> {
                 } else {
                     field
                 };
-                if matches(line) && !self.hits.iter().any(|s| s == line) {
-                    self.hits.push(line.to_owned());
-                    if self.hits.len() == wanted {
-                        self.end = base + begin as u64;
-                        return;
-                    }
+                if record(line) {
+                    self.end = base + begin as u64;
+                    return;
                 }
             }
         }

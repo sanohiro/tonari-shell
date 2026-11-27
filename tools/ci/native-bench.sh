@@ -336,7 +336,10 @@ case "$SUITE" in
       --case printf-list-newline --case printf-list-count \
       --case heredoc-external-file --case here-string-capture --case here-string-builtin-read \
       --case capture-positional-program --case capture-scalar-program \
-      --case substitute-single-scalar --case trim-fixed-width --case substitute-fixed-class --case substitute-fixed-width ;;
+      --case substitute-single-scalar --case trim-fixed-width --case substitute-fixed-class --case substitute-fixed-width
+    run ordered-words python3 tools/bench_completion.py "$current" "$bin/baseline" --bash "$ref" --nosort --reuse-words --runs 31
+    run sorted-words python3 tools/bench_completion.py "$current" "$bin/baseline" --bash "$ref" --reuse-words --runs 21
+    run duplicate-history python3 tools/bench_history_fields.py "$current" "$bin/baseline" --deep-page --entries 100000 --runs 15 ;;
   foreground)
     run foreground python3 tests/compat/foreground.py "$current" "$ref" ;;
   history-windows)

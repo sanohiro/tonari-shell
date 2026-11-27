@@ -252,7 +252,10 @@ impl Common {
 
 pub enum Source {
     Words(Vec<String>),
-    LiteralWords(std::rc::Rc<crate::completion_spec::WordList>),
+    LiteralWords {
+        source: std::rc::Rc<crate::completion_spec::WordList>,
+        keep_order: bool,
+    },
     Files,
     Directories,
     Commands,
@@ -267,10 +270,25 @@ impl Source {
                     words,
                 ));
             }
-            Self::LiteralWords(source) => {
+            Self::LiteralWords { source, keep_order } => {
                 let ifs = session
                     .get("IFS")
                     .unwrap_or_else(|| crate::word::DEFAULT_IFS.into());
+                if keep_order {
+                    let names = source.ordered_matches(prefix, &ifs);
+                    if !list {
+                        return Some((Common::from_names(names, prefix)?, Vec::new()));
+                    }
+                    let mut seen = std::collections::HashSet::new();
+                    let words: Vec<_> = names
+                        .filter(|name| seen.insert(*name))
+                        .map(str::to_owned)
+                        .collect();
+                    return Some((
+                        Common::from_names(words.iter().map(String::as_str), prefix)?,
+                        words,
+                    ));
+                }
                 if let Some(matches) = source.indexed(prefix, &ifs) {
                     let mut common = Common::new(source.word(*matches.first()?).to_owned());
                     if matches.len() > 1 {
