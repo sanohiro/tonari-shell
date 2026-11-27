@@ -80,6 +80,15 @@ n=outside; f2() { local n=inner; export check=$n; /bin/sh -c 'echo "$check"'; }
 f2; echo "$n"
 """, 0, b"<firstx><one two><><two words><two words>\n<firstx><*><><two words><two words>\ninner\noutside\n")
 
+    def test_local_listing_and_special_scope_restore(self):
+        self.compare("""f() { local z=1 a=2 m=3; local -p; }
+f
+PATH=/usr/bin:/bin; GLOBIGNORE='*.bak'; BASH_COMPAT=4.4
+g() { local PATH=/bin GLOBIGNORE='*.tmp' BASH_COMPAT=5.1;
+      printf '%s %s %s\\n' "$PATH" "$GLOBIGNORE" "$BASH_COMPAT"; }
+g; printf '%s %s %s\\n' "$PATH" "$GLOBIGNORE" "$BASH_COMPAT"
+""", 0, b'declare -- a="2"\ndeclare -- m="3"\ndeclare -- z="1"\n/bin *.tmp 5.1\n/usr/bin:/bin *.bak 4.4\n', minimum=5)
+
     def test_repeated_arithmetic_reads_live_elements(self):
         self.compare("""a=(2 6); i=0
 f() { ((a[i]+=1)); ((v+=(i*3+7)^(i>>1))); }

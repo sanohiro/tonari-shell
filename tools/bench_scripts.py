@@ -528,6 +528,10 @@ CASES.update({
     "core-parse-functions": ("".join(f"func{k}() {{\n  if :; then\n    v={k}\n  fi\n}}\n" for k in range(200))
                              + 'func199; echo "$v"', "199"),
     "syntax-control": ("echo ok", "ok"),
+    "core-copy-arithmetic": eval_loop('x=$((i+1))', 'echo "$x"', "20000", "x=0", 20000),
+    "core-trim": eval_loop('x=${p##*/}', 'echo "$x"', "name", "p=dir/path/name", 20000),
+    "core-default": eval_loop('x=${y:-fallback}', 'echo "$x"', "fallback", "unset y", 20000),
+    "core-printf": eval_loop('printf -v x %s "$i"', 'echo "$x"', "19999", count=20000),
     "core-function": eval_loop('f "$i"', 'echo "$x"', "9999", 'f() { x=$1; }', 10000),
     "core-indexed": eval_loop('((a[i%128]+=1))', 'echo "${a[0]} ${a[127]}"',
                               "157 156", 'a=()', 20000),

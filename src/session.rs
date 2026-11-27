@@ -360,7 +360,7 @@ pub struct Session {
 
 #[derive(Clone, Default)]
 pub struct Bindings {
-    variables: BTreeMap<String, Option<Variable>>,
+    variables: HashMap<String, Option<Variable>, foldhash::fast::RandomState>,
     opt_offset: Option<usize>,
     temporary: bool,
     set_options: Option<std::num::NonZeroU32>,
@@ -1345,7 +1345,21 @@ impl Session {
         if let Some(offset) = bindings.opt_offset {
             self.opt_offset = offset;
         }
-        for (name, original) in bindings.variables {
+        if bindings
+            .variables
+            .keys()
+            .all(|name| Self::ordinary_assignment(name))
+        {
+            for (name, original) in bindings.variables {
+                self.restore_binding(name, original);
+            }
+            return;
+        }
+        // Special bindings can change shell options. Keep their original order,
+        // including when both IGNOREEOF and its lowercase alias leave scope.
+        let mut sorted: Vec<_> = bindings.variables.into_iter().collect();
+        sorted.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        for (name, original) in sorted {
             if name == "BASH_COMPAT" {
                 let inherited;
                 let value = if let Some(v) = &original {
@@ -1393,11 +1407,15 @@ impl Session {
             if name == "PATH" {
                 self.hashes.clear();
             }
-            if let Some(var) = original {
-                self.variables.insert(name, var);
-            } else {
-                self.variables.remove(&name);
-            }
+            self.restore_binding(name, original);
+        }
+    }
+
+    fn restore_binding(&mut self, name: String, original: Option<Variable>) {
+        if let Some(var) = original {
+            self.variables.insert(name, var);
+        } else {
+            self.variables.remove(&name);
         }
     }
 

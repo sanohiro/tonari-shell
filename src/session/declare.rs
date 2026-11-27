@@ -271,7 +271,9 @@ fn print_variables(
     let names;
     let names = if operands.is_empty() {
         names = if let Some(scope) = local_scope {
-            scope.variables.keys().cloned().collect()
+            let mut names: Vec<_> = scope.variables.keys().cloned().collect();
+            names.sort_unstable();
+            names
         } else {
             session.variable_names("")
         };
@@ -456,6 +458,14 @@ impl Session {
             return print_variables(self, command, operands, &flags);
         }
         let mut status = 0;
+        if local
+            && operands.len() >= 8
+            && let Some(scope) = self.locals.last_mut().filter(|s| !s.temporary)
+        {
+            scope
+                .variables
+                .reserve(operands.len().saturating_sub(scope.variables.len()));
+        }
         let first_operand = total_args - operands.len() + 1;
         let mut arrays = arrays.iter().peekable();
         for (index, arg) in operands.iter().enumerate() {

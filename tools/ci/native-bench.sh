@@ -10,7 +10,7 @@ esac
 source tools/ci/bash-source.sh
 if [[ $SUITE == core-engine ]]; then
   args=()
-  for name in bindings-{0,200,1000}-{copy,sum,locals} bindings-1000-prefix core-{function,indexed,arithmetic,case,test,parse-functions} local-eighty redirected-{group,if,loop,case,group-control}; do
+  for name in bindings-{0,200,1000}-{copy,sum,locals} bindings-1000-prefix core-{function,indexed,arithmetic,copy-arithmetic,trim,default,printf,case,test,parse-functions} local-eighty redirected-{group,if,loop,case,group-control}; do
     args+=(--case "$name")
   done
   "$ref" --version > "$out/bash-version.txt"
