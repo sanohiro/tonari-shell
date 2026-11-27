@@ -510,14 +510,30 @@ impl<'a> Expansion<'a> {
         fields: &mut Vec<String>,
     ) -> Result<(), Error> {
         word.resolve(self)?;
-        // Each element of a standalone quoted "${a[@]}" is already a complete field.
         if !self.has_pending_assignments()
-            && let Word::Expanded(parts) = &word
-            && let [crate::word::Part::Parameter { name, quoted: true }] = parts.as_slice()
-            && let Some((base, true, keys)) = crate::word::array_elements_name(name)
-            && self.session.append_indexed_fields(base, keys, fields)
+            && let Word::Expanded(parts) = &mut word
+            && let [part] = parts.as_mut_slice()
         {
-            return Ok(());
+            use crate::word::Part;
+            let parameter = match part {
+                Part::Parameter { name, quoted } => Some((name.as_str(), *quoted)),
+                Part::BraceParameter(name) => Some((name.as_str(), false)),
+                _ => None,
+            };
+            if let Some((name, quoted)) = parameter
+                && let Some((base, at, keys)) = crate::word::array_elements_name(name)
+            {
+                if quoted && at && self.session.append_array_fields(base, keys, fields) {
+                    return Ok(());
+                }
+                if !quoted && self.session.is_associative(base) {
+                    // Feed the stored elements to ordinary IFS splitting and globbing.
+                    let mut values = Vec::new();
+                    if self.session.append_array_fields(base, keys, &mut values) {
+                        *part = Part::Elements { values, at, quoted };
+                    }
+                }
+            }
         }
         word.append_fields(
             &|name| self.lookup(name),

@@ -9,6 +9,7 @@ pub(crate) use wait_mask::{SignalMask, WaitMask, wait_readable};
 // A signal handler can run while Rust holds allocator and I/O locks. It only
 // records pending events. The interpreter executes shell code at a command boundary.
 use crate::{Flow, Session};
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering::Relaxed};
@@ -128,6 +129,8 @@ pub struct Traps {
     pub before_return: u8,
     current_action: Option<ActionStatus>,
     async_resettable: u64,
+    queried_dispositions: Cell<u64>,
+    ignored_dispositions: Cell<u64>,
     implicit: Vec<(i32, libc::sigaction)>,
 }
 
@@ -262,6 +265,7 @@ impl Traps {
     }
 
     pub fn init_hangup(&mut self) -> io::Result<()> {
+        self.queried_dispositions.set(0);
         self.interactive_origin = true;
         self.interactive_handlers = true;
         if disposition(libc::SIGHUP)?.sa_sigaction == libc::SIG_DFL {
@@ -272,6 +276,7 @@ impl Traps {
     }
 
     pub fn ignore_async(&mut self, sig: i32) {
+        self.queried_dispositions.set(0);
         let old = unsafe { libc::signal(sig, libc::SIG_IGN) };
         if old != libc::SIG_IGN && old != libc::SIG_ERR {
             self.async_resettable |= signal_bit(sig);
@@ -334,6 +339,7 @@ impl Traps {
     }
 
     fn set(&mut self, sig: i32, command: &str, interactive: bool) -> io::Result<()> {
+        self.queried_dispositions.set(0);
         self.inherited_listing = None;
         if sig == 0 {
             self.watch_exit(command != "-" && !command.is_empty())?;
@@ -453,6 +459,7 @@ impl Traps {
     }
 
     pub fn after_fork(&mut self, errtrace: bool, functrace: bool) {
+        self.queried_dispositions.set(0);
         self.handling_exit = false;
         self.current_action = None;
         // A still-running inherited handler must not re-enter itself.
@@ -513,6 +520,33 @@ impl Traps {
         false
     }
 
+    fn lists_as_ignored(&self, sig: i32) -> bool {
+        let bit = signal_bit(sig);
+        // Background commands ignore INT and QUIT internally. A signal already
+        // ignored on entry is still visible, as is an explicit empty trap.
+        if self.async_resettable & bit != 0 {
+            return false;
+        }
+        if let Some(original) = self.implicit_action(sig) {
+            return original.sa_sigaction == libc::SIG_IGN;
+        }
+        if self.queried_dispositions.get() & bit == 0 {
+            let Ok(original) = disposition(sig) else {
+                return false;
+            };
+            let ignored = self.ignored_dispositions.get() & !bit;
+            self.ignored_dispositions
+                .set(if original.sa_sigaction == libc::SIG_IGN {
+                    ignored | bit
+                } else {
+                    ignored
+                });
+            self.queried_dispositions
+                .set(self.queried_dispositions.get() | bit);
+        }
+        self.ignored_dispositions.get() & bit != 0
+    }
+
     pub(crate) fn list<'a>(
         &self,
         names: impl ExactSizeIterator<Item = &'a str>,
@@ -522,62 +556,53 @@ impl Traps {
         posix: bool,
     ) -> u8 {
         let entries = self.inherited_listing.as_deref().unwrap_or(&self.entries);
-        let mut show = |sig| {
-            if let Some(e) = entries.get(&sig) {
+        let mut show = |sig, name: &str| {
+            let prefix = if posix || sig == 0 || sig >= DEBUG {
+                ""
+            } else {
+                "SIG"
+            };
+            if let Some(entry) = entries.get(&sig) {
                 if action_only {
-                    return writeln!(out, "{}", e.command);
+                    return writeln!(out, "{}", entry.command);
                 }
-                let name = if sig == DEBUG {
-                    "DEBUG"
-                } else if sig == RETURN {
-                    "RETURN"
-                } else if sig == ERR {
-                    "ERR"
-                } else {
-                    signals().find(|s| s.1 == sig).unwrap().0
-                };
                 writeln!(
                     out,
-                    "trap -- {} {}{name}",
-                    crate::word::quote::single_quote(&e.command),
-                    if posix || sig == 0 || sig >= DEBUG {
-                        ""
-                    } else {
-                        "SIG"
-                    }
+                    "trap -- {} {prefix}{name}",
+                    crate::word::quote::single_quote(&entry.command)
                 )?;
-            }
-            if !entries.contains_key(&sig)
-                && is_os_signal(sig)
-                && let Some((name, _)) = signals().find(|s| s.1 == sig)
-            {
-                let ignored = if let Some(old) = self.implicit_action(sig) {
-                    old.sa_sigaction == libc::SIG_IGN
-                } else {
-                    disposition(sig).is_ok_and(|old| old.sa_sigaction == libc::SIG_IGN)
-                };
-                if !action_only && (defaults || ignored) {
+            } else if !action_only && is_os_signal(sig) {
+                let ignored = self.lists_as_ignored(sig);
+                if defaults || ignored {
                     writeln!(
                         out,
-                        "trap -- {} {}{name}",
-                        if ignored { "''" } else { "-" },
-                        if posix { "" } else { "SIG" }
+                        "trap -- {} {prefix}{name}",
+                        if ignored { "''" } else { "-" }
                     )?;
                 }
             }
             Ok::<_, io::Error>(())
         };
+        let name_of = |sig| match sig {
+            DEBUG => "DEBUG",
+            RETURN => "RETURN",
+            ERR => "ERR",
+            _ => signals().find(|&(_, n)| n == sig).unwrap().0,
+        };
         if names.len() == 0 {
-            if entries.contains_key(&0) && show(0).is_err() {
+            if entries.contains_key(&0) && show(0, "EXIT").is_err() {
                 return 1;
             }
-            for (_, sig) in signals() {
-                if sig > 0 && !matches!(sig, libc::SIGSTOP | libc::SIGKILL) && show(sig).is_err() {
+            for (name, sig) in signals() {
+                if sig > 0
+                    && !matches!(sig, libc::SIGSTOP | libc::SIGKILL)
+                    && show(sig, name).is_err()
+                {
                     return 1;
                 }
             }
             for &sig in entries.keys().filter(|s| **s >= DEBUG) {
-                if show(sig).is_err() {
+                if show(sig, name_of(sig)).is_err() {
                     return 1;
                 }
             }
@@ -588,7 +613,7 @@ impl Traps {
                     status = invalid(s);
                     continue;
                 };
-                if show(sig).is_err() {
+                if show(sig, name_of(sig)).is_err() {
                     return 1;
                 }
             }
@@ -621,7 +646,12 @@ impl Traps {
             let mut out = crate::builtins::stdout_for("trap");
             return u8::from(print_signal_table(&mut out).is_err());
         }
-        if list || actions || args.is_empty() {
+        if args.is_empty() {
+            let mut out = crate::builtins::listing_stdout("trap");
+            let status = self.list(std::iter::empty(), &mut out, list && posix, actions, posix);
+            return out.flush().map_or(1, |()| status);
+        }
+        if list || actions {
             return self.list(
                 args.iter().map(String::as_str),
                 &mut crate::builtins::stdout_for("trap"),

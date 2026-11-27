@@ -8,6 +8,16 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == compound-listings ]]; then
+  args=()
+  for name in redirected-{group,if,loop,case,group-control} assoc-{values,keys,unquoted,churn} complete-list hash-list dirs-list function-list export-function-list trap-list trap-list-named; do
+    args+=(--case "$name")
+  done
+  "$ref" --version > "$out/bash-version.txt"
+  python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 31 "${args[@]}" > "$out/scripts.txt"
+  REFERENCE_BASH="$ref" python3 tests/shell.py "$current" ShellTests.test_inline_compound_terminators ShellTests.test_associative_field_cache ShellTests.test_background_trap_listing ShellTests.test_bulk_listing_errors ShellTests.test_listing_diagnostic_order > "$out/behavior.txt" 2>&1
+  exit
+fi
 if [[ $SUITE == listings-expansion ]]; then
   args=()
   for name in shopt-list export-list declare-indexed-list brace-product local-ten local-eighty glob-bracket-list scalar-bracket-list type-list; do

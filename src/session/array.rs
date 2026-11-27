@@ -532,11 +532,21 @@ impl Session {
         }
     }
 
-    pub fn append_indexed_fields(&self, name: &str, keys: bool, fields: &mut Vec<String>) -> bool {
+    pub fn append_array_fields(&self, name: &str, keys: bool, fields: &mut Vec<String>) -> bool {
         let Ok(resolved) = self.reference_name(name) else {
             return false;
         };
         let name = resolved.as_ref();
+        if !self.live_table(name)
+            && let Some(map) = self.variables.get(name).and_then(Variable::associative)
+        {
+            if keys {
+                fields.extend_from_slice(map.ordered_keys());
+            } else {
+                fields.extend(map.ordered().map(|(_, v)| v.to_owned()));
+            }
+            return true;
+        }
         if keys {
             if !self.stored_array(name) || self.is_associative(name) {
                 return false;
@@ -578,16 +588,11 @@ impl Session {
             return self
                 .table_snapshot(name)
                 .ordered()
-                .into_iter()
                 .map(|(_, v)| v.to_owned())
                 .collect();
         }
         if let Some(map) = self.variables.get(name).and_then(Variable::associative) {
-            return map
-                .ordered()
-                .into_iter()
-                .map(|(_, v)| v.to_owned())
-                .collect();
+            return map.ordered().map(|(_, v)| v.to_owned()).collect();
         }
         self.indices(name)
             .into_iter()

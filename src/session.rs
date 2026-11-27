@@ -713,13 +713,7 @@ impl Session {
                 self.variables.get(base).and_then(Variable::associative)
             };
             if let Some(map) = map {
-                return Some(
-                    map.ordered()
-                        .into_iter()
-                        .map(|(key, _)| key)
-                        .collect::<Vec<_>>()
-                        .join("\0"),
-                );
+                return Some(map.ordered_keys().join("\0"));
             }
             let mut text = String::new();
             let mut decimal = itoa::Buffer::new();

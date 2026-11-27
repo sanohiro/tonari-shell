@@ -31,9 +31,8 @@ fn declare_functions(
     flags: &Options,
     readonly: bool,
 ) -> crate::Flow {
-    let mut out = crate::builtins::stdout_for(command);
-    let mut status = 0;
     if operands.is_empty() {
+        let mut out = crate::builtins::listing_stdout(command);
         for name in session.functions.keys() {
             if !flags.function_names && !readonly {
                 if session.print_function(&mut out, name, true).is_err() {
@@ -49,70 +48,71 @@ fn declare_functions(
                 return crate::execute::Flow::Continue(1);
             }
         }
-    } else {
-        for name in operands {
-            if !session.functions.contains_key(name) {
-                if readonly {
-                    diagnostic!("{command}: {name}: not a function");
-                }
-                status = 1;
-                continue;
+        return crate::Flow::Continue(u8::from(out.flush().is_err()));
+    }
+    let mut out = crate::builtins::stdout_for(command);
+    let mut status = 0;
+    for name in operands {
+        if !session.functions.contains_key(name) {
+            if readonly {
+                diagnostic!("{command}: {name}: not a function");
             }
-            if let Some(on) = flags.traced {
-                if on {
-                    session.traced_functions.insert(name.clone());
-                } else {
-                    session.traced_functions.remove(name);
-                }
-                if flags.exported.is_none() && flags.readonly.is_none() {
-                    continue;
-                }
-            }
-            if let Some(on) = flags.exported {
-                if session.export_function(name, on).is_err() {
-                    status = 1;
-                }
-                continue;
-            }
-            if let Some(on) = flags.readonly {
-                if on {
-                    session.readonly_functions.insert(name.clone());
-                } else if session.readonly_functions.contains(name) {
-                    diagnostic!("{command}: {name}: readonly function");
-                    status = 1;
-                }
-                continue;
-            }
-            if flags.function_names && !flags.print && session.shopt.extdebug {
-                let function = &session.functions[name];
-                let source = if function.source.is_empty() {
-                    "environment"
-                } else {
-                    &function.source
-                };
-                if writeln!(
-                    out,
-                    "{name} {} {source}",
-                    function.definition.declaration_line
-                )
-                .is_err()
-                {
-                    return crate::Flow::Continue(1);
-                }
-                continue;
-            }
-            let line = if flags.print {
-                format!("declare -{} ", session.function_attributes(name))
+            status = 1;
+            continue;
+        }
+        if let Some(on) = flags.traced {
+            if on {
+                session.traced_functions.insert(name.clone());
             } else {
-                String::new()
+                session.traced_functions.remove(name);
+            }
+            if flags.exported.is_none() && flags.readonly.is_none() {
+                continue;
+            }
+        }
+        if let Some(on) = flags.exported {
+            if session.export_function(name, on).is_err() {
+                status = 1;
+            }
+            continue;
+        }
+        if let Some(on) = flags.readonly {
+            if on {
+                session.readonly_functions.insert(name.clone());
+            } else if session.readonly_functions.contains(name) {
+                diagnostic!("{command}: {name}: readonly function");
+                status = 1;
+            }
+            continue;
+        }
+        if flags.function_names && !flags.print && session.shopt.extdebug {
+            let function = &session.functions[name];
+            let source = if function.source.is_empty() {
+                "environment"
+            } else {
+                &function.source
             };
-            if !flags.function_names && session.print_function(&mut out, name, flags.print).is_err()
+            if writeln!(
+                out,
+                "{name} {} {source}",
+                function.definition.declaration_line
+            )
+            .is_err()
             {
                 return crate::Flow::Continue(1);
             }
-            if flags.function_names && writeln!(out, "{line}{name}").is_err() {
-                return crate::execute::Flow::Continue(1);
-            }
+            continue;
+        }
+        let line = if flags.print {
+            format!("declare -{} ", session.function_attributes(name))
+        } else {
+            String::new()
+        };
+        if !flags.function_names && session.print_function(&mut out, name, flags.print).is_err() {
+            return crate::Flow::Continue(1);
+        }
+        if flags.function_names && writeln!(out, "{line}{name}").is_err() {
+            return crate::execute::Flow::Continue(1);
         }
     }
     crate::execute::Flow::Continue(out.flush().map_or(1, |()| status))

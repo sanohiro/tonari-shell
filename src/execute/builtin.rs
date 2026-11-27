@@ -387,7 +387,7 @@ pub(super) fn eval_builtin(
         Builtin::DirectoryStack => Flow::Continue(session.directory_stack(
             &cmd.words[0],
             args,
-            &mut crate::builtins::stdout_for(&cmd.words[0]),
+            &mut crate::builtins::listing_stdout(&cmd.words[0]),
         )),
         Builtin::AutoCd => {
             eprintln!("cd -- {}", cmd.words.join(" "));

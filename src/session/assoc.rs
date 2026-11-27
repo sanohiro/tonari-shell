@@ -11,6 +11,7 @@ use super::{Session, Variable};
 pub(crate) struct Associative {
     entries: HashMap<String, (String, usize)>,
     serial: usize,
+    order: std::cell::OnceCell<Vec<String>>,
 }
 
 impl Associative {
@@ -27,6 +28,7 @@ impl Associative {
         match self.entries.entry(key) {
             Entry::Occupied(mut entry) => entry.get_mut().0 = value,
             Entry::Vacant(entry) => {
+                self.order.take();
                 entry.insert((value, self.serial));
                 self.serial += 1;
             }
@@ -34,21 +36,27 @@ impl Associative {
     }
 
     pub(super) fn remove(&mut self, key: &str) {
-        self.entries.remove(key);
+        if self.entries.remove(key).is_some() {
+            self.order.take();
+        }
     }
 
-    pub(super) fn ordered(&self) -> Vec<(&str, &str)> {
-        let mut entries: Vec<_> = self.entries.iter().collect();
-        entries.sort_by_cached_key(|(key, (_, serial))| {
-            let hash = key.bytes().fold(2166136261u32, |hash, c| {
-                hash.wrapping_mul(16777619) ^ (c as libc::c_char as u32)
+    pub(super) fn ordered_keys(&self) -> &[String] {
+        self.order.get_or_init(|| {
+            let mut keys: Vec<_> = self.entries.iter().collect();
+            keys.sort_by_cached_key(|(key, (_, serial))| {
+                let hash = key.bytes().fold(2166136261u32, |hash, c| {
+                    hash.wrapping_mul(16777619) ^ (c as libc::c_char as u32)
+                });
+                (hash & 1023, std::cmp::Reverse(*serial))
             });
-            (hash & 1023, std::cmp::Reverse(*serial))
-        });
-        entries
-            .into_iter()
-            .map(|(k, (v, _))| (k.as_str(), v.as_str()))
-            .collect()
+            keys.into_iter().map(|(k, _)| k.clone()).collect()
+        })
+    }
+    pub(super) fn ordered(&self) -> impl ExactSizeIterator<Item = (&str, &str)> {
+        self.ordered_keys()
+            .iter()
+            .map(|k| (k.as_str(), self.entries[k].0.as_str()))
     }
 }
 

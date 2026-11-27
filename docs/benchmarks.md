@@ -1,5 +1,44 @@
 # Startup and execution / 起動と実行性能
 
+<a id="post-45-performance-review"></a>
+
+## November 28 · Associative arrays, builtin listings, traps and script input / 連想配列・組み込み一覧・スクリプト入力
+
+Apple M1, macOS 27.2.1, native release at `738f1e0`, experimental builds from the same revision, GNU Bash 5.3.20. The benchmark used fresh processes in randomized order with `LC_ALL=C`. Setup finished before the shell signaled readiness. Medians in milliseconds cover release of the input gate through process exit, including the result check. Listings shared one outer redirection to `/dev/null`. Arrays and listings used two warm-ups and 21 timed samples per shell. The prototype column describes experiments, including a follow-up for unquoted arrays and compound input. These are M1 measurements.
+
+| Workload | Tonari at PR #45 | Prototype | GNU Bash |
+|---|---:|---:|---:|
+| 500 associative values, quoted, ×200 | 25.550 | 4.341 | 41.379 |
+| 500 associative keys, quoted, ×200 | 8.650 | 2.267 | 41.243 |
+| 500 associative values, unquoted, ×200 | 26.345 | 8.330 | 31.901 |
+| Delete and reinsert one key before each quoted expansion, ×200 | 24.926 | 7.737 | 39.695 |
+| 300 completion definitions, `complete -p` ×100 | 39.651 | 8.652 | 39.752 |
+| 50 hashed paths, `hash` ×200 | 11.644 | 1.189 | 12.378 |
+| Ten directories, `dirs -v` ×200 | 2.624 | 0.783 | 3.229 |
+| 100 functions, `declare -f` ×50 | 16.313 | 1.081 | 23.259 |
+| 100 exported functions, `export -fp` ×50 | 24.399 | 2.435 | 30.690 |
+| Three installed traps, `trap -p` ×200 | 2.276 | 0.914 | 1.838 |
+| Same traps named explicitly, ×200 | 1.343 | 1.349 | 2.079 |
+| 1,000 loop iterations with default `PS4` | 4.437 | 4.482 | 6.064 |
+| Same loop with `PS4='+ ${LINENO}: '` | 5.479 | 5.160 | 6.652 |
+| Same loop with tracing disabled | 0.657 | 0.666 | 1.807 |
+
+Ten targeted integration tests passed on the final prototype, including closed stdout, mixed diagnostics, associative expansion, heredocs, aliases and multiline `eval`. The M1 executable was 1,781,616 bytes at PR #45 and 1,798,144 bytes with all trials combined. Both link libSystem. In a separate interactive control with `PS1='\u@\h:\w READY> '`, each keystroke waited for visible echo and each Enter waited for the next prompt. Over 200 warm cycles, main's median/p95 for typing `:` was 0.006/0.031 ms and for Enter it was 0.028/0.055 ms. GNU Bash measured 0.015/0.023 and 0.104/0.137 ms respectively.
+
+### Closing a redirected group on the last command's line
+
+With tracing disabled, run a group starting with `{ :`, followed by 1,000 physical lines of `v=1`, then `:; } 2>/dev/null`. Check that `v` is 1 after the group. A control moves only the closing brace and its redirection to the next line. The table uses 15 timed samples per shell. For the traced case, `set -x` and `set +x` take the place of the two `:` commands.
+
+| Input | Tonari at PR #45 | Parser prototype | GNU Bash |
+|---|---:|---:|---:|
+| `-c`, same-line close, tracing off | 105.922 | 0.910 | 1.597 |
+| `-c`, next-line close, tracing off | 0.933 | 0.873 | 1.621 |
+| Source a file, same-line close, tracing off | 105.627 | 0.984 | 1.647 |
+| Source a file, next-line close, tracing off | 0.943 | 0.959 | 1.626 |
+| `-c`, same-line close, tracing on | 108.205 | 2.459 | 3.086 |
+
+現行版では同じ行で閉じた場合、250行で7.91 ms、500行で27.56 ms、1,000行で105.92 msになった。終端の候補を先読みで拾い、構文解析器で確認する試作では、ファイルを `source` する場合も1 ms前後になった。対話計測は1打鍵ごとにエコーを待った。表の試作値はリリース前のもので、Linuxでの比較は今回の対象外。
+
 <a id="listings-expansion-native"></a>
 
 ## November 28 · Native release results for listings and expansion / 一覧表示と展開のリリース計測
