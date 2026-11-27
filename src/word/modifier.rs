@@ -167,7 +167,21 @@ fn scalar_part(text: String, quoted: bool) -> Part {
     }
 }
 
+// Attribute transformations describe the target variable of a nameref.
+fn attribute_base<'a>(
+    name: &'a str,
+    elements: Option<(&'a str, bool, bool)>,
+    session: &crate::Session,
+) -> Result<std::borrow::Cow<'a, str>, Error> {
+    let base = elements
+        .map(|(base, _, _)| base)
+        .or_else(|| crate::session::array::subscript(name).map(|(base, _)| base))
+        .unwrap_or(name);
+    Ok(session.reference_name(base)?)
+}
+
 fn assignment(name: &str, quoted: bool, env: &mut Expansion<'_>) -> Result<Part, Error> {
+    let elements = array_elements_name(name);
     let fields = if matches!(name, "@" | "*") {
         let args = env.session.positional.as_slice();
         if args.is_empty() {
@@ -182,19 +196,13 @@ fn assignment(name: &str, quoted: bool, env: &mut Expansion<'_>) -> Result<Part,
                 .collect()
         }
     } else {
-        let elements = array_elements_name(name);
-        let base = elements
-            .map(|(base, _, _)| base)
-            .or_else(|| crate::session::array::subscript(name).map(|(base, _)| base))
-            .unwrap_or(name);
-        let attributes = env.session.attributes(base);
+        let resolved = attribute_base(name, elements, env.session)?;
+        let base = resolved.as_ref();
         if elements.is_some()
-            && attributes
-                .as_ref()
-                .is_some_and(|(flags, _)| flags.contains(['a', 'A']))
+            && let Some(fields) = env.session.array_declaration_fields(base)
         {
-            env.session.array_declaration_fields(base)
-        } else if let Some((flags, _)) = attributes {
+            fields
+        } else if let Some((flags, _)) = env.session.attributes(base) {
             let text = value(if elements.is_some() { base } else { name }, env)?;
             let mut fields = Vec::new();
             if !flags.is_empty() {
@@ -216,7 +224,7 @@ fn assignment(name: &str, quoted: bool, env: &mut Expansion<'_>) -> Result<Part,
             Vec::new()
         }
     };
-    if name == "@" || array_elements_name(name).is_some_and(|(_, at, _)| at) {
+    if name == "@" || elements.is_some_and(|(_, at, _)| at) {
         return Ok(Part::Elements {
             values: fields,
             at: true,
@@ -300,20 +308,15 @@ impl Modification {
                 }))
             }
             Self::Assignment => assignment(name, quoted, env),
-            Self::Pairs { separate }
-                if array_elements_name(name).is_some_and(|(base, _, keys)| {
-                    !keys
-                        && env
-                            .session
-                            .attributes(base)
-                            .is_some_and(|(flags, _)| flags.contains(['a', 'A']))
-                }) =>
-            {
-                let (base, at, _) = array_elements_name(name).unwrap();
-                let values = env.session.array_pair_fields(base, *separate);
-                Ok(Part::Elements { values, at, quoted })
-            }
             Self::Quote | Self::Pairs { .. } | Self::Escapes => {
+                if let Self::Pairs { separate } = self
+                    && let Some((base, at, false)) = array_elements_name(name)
+                {
+                    let base = env.session.reference_name(base)?;
+                    if let Some(values) = env.session.array_pair_fields(&base, *separate) {
+                        return Ok(Part::Elements { values, at, quoted });
+                    }
+                }
                 let values = if array_elements_name(name).is_some() || matches!(name, "@" | "*") {
                     Values::read(name, env)?
                 } else if let Some(text) = value(name, env)? {
@@ -351,15 +354,14 @@ impl Modification {
                     });
                 }
                 let elements = array_elements_name(name);
-                let base = elements
-                    .map(|(base, _, _)| base)
-                    .or_else(|| crate::session::array::subscript(name).map(|(base, _)| base))
-                    .unwrap_or(name);
+                let resolved = attribute_base(name, elements, env.session)?;
+                let base = resolved.as_ref();
                 let (flags, assigned_array) = env.session.attributes(base).unwrap_or_default();
                 let stored_len = env.session.stored_array_len(base);
                 if env.session.nounset
                     && elements.is_none()
-                    && !(name == base && stored_len.is_some_and(|n| n > 0))
+                    && !(crate::session::array::subscript(name).is_none()
+                        && stored_len.is_some_and(|n| n > 0))
                 {
                     value(name, env)?.ok_or_else(|| env.missing(name, "unbound variable"))?;
                 }

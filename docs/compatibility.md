@@ -1,5 +1,7 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+For a chain of namerefs ending in an array, `"${r[@]@k}"` returns alternating keys and values, and `"${r[@]@A}"` names the target in its declaration. A reference to a single element has a value and no separate declaration. 配列全体への参照、要素への参照、未束縛の参照を Bash と比較する。再現試験は `tests/compat/source_review.py` の `nameref-transform`。
+
 The third November 27 audit covers brace expansion limits, `printf -v`, symbolic `umask`, function loop control and the order of descriptor side effects. 第3回監査では、Bash との版別の差と、Tonari が意図的に設ける展開上限を記録した。[Findings and witnesses / 個別判断と再現試験](compatibility/runtime-audit-v3.md)
 
 The second November 27 audit covers descriptor restoration, forked shell state, declarations, locale changes, history, completion, and terminal editing. Bash differences have individual witnesses. 第2回監査の判断と回帰試験を項目別に記録した。[Runtime audit](compatibility/runtime-audit-v2.md)

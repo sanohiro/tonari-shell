@@ -1,5 +1,20 @@
 # Startup and execution / 起動と実行性能
 
+<a id="script-read-state"></a>
+
+## 2026-11-27 · Incremental script state / 入力経路の共通化
+
+Release medians in milliseconds after shell startup. Each row checks its script output. The M1 distribution binaries were both 1,748,896 bytes. The Linux x86-64 static PIE changed from 2,441,656 to 2,441,400 bytes.
+
+| Host and case | Previous | Current | Bash |
+|---|---:|---:|---:|
+| M1, 2,000 multiline evals | 3.087 | 3.122 | 9.804 |
+| M1, 2,000 compound function redefinitions | 4.589 | 4.608 | 6.877 |
+| Ubuntu x86-64, 2,000 distinct function definitions | 2.023 | 1.954 | 5.629 |
+| Ubuntu x86-64, 2,000 compound function redefinitions | 5.826 | 5.707 | 8.552 |
+
+M1 は Bash 5.3.20 で各71回、Linux は Bash 5.2.21 で各61回の交互測定。複合関数の再定義は両環境とも Bash 比 0.67 前後。実装の境界を整理した変更であり、M1 での短縮は観測していない。`tools/bench_scripts.py CURRENT --previous PREVIOUS --bash BASH --timing started --case eval-multiline --case function-compound-redefinitions --runs 71` reproduces the M1 comparison. [Linux run and raw results](https://github.com/sanohiro/tonari-shell/actions/runs/45938507112)
+
 <a id="shared-shell-rules"></a>
 
 ## 2026-11-27 · Shared parsing and terminal input / 共通化後の測定
