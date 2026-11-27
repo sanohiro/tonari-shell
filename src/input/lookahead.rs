@@ -2,6 +2,7 @@ use crate::{Session, parser};
 use std::fs::File;
 use std::os::unix::fs::FileExt;
 
+const BULK_CLOSE_MIN_BYTES: usize = 1024;
 const GROUP_MIN_BYTES: usize = 32 * 1024;
 
 // Installers and version managers often wrap a whole script in one brace group.
@@ -52,6 +53,21 @@ pub(super) fn file_group(
     whole_group(session, std::str::from_utf8(&bytes).ok()?, 1)
 }
 
+fn separator(b: &u8) -> bool {
+    b.is_ascii_whitespace() || b";&|()<>".contains(b)
+}
+
+// In `:; fi 2>log` the terminator is an interior token. The same rule
+// covers a case arm ending in `;; esac`. The parser validates every hint.
+fn inline_close(line: &[u8], close: &[u8]) -> bool {
+    memchr::memchr2_iter(b';', b'&', line).any(|i| {
+        line[i + 1..]
+            .trim_ascii_start()
+            .strip_prefix(close)
+            .is_some_and(|rest| rest.first().is_none_or(separator))
+    })
+}
+
 // A sourced profile often has a long compound command. Try whole units already
 // in the buffer, leaving following commands for the current alias/options state.
 // On a miss report the distance inspected, so string input can bound repeated scans.
@@ -79,6 +95,7 @@ pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
     let mut nested = 0usize;
     let mut needs_open_brace = close == b"}" && !header.contains('{');
     let mut deferred = None;
+    let mut next_inline_probe = 0;
     let mut probe = |size, lines| {
         // Only the final ordinary read may emit an unterminated here-doc warning.
         match parse(size) {
@@ -114,6 +131,26 @@ pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
             _ => Err(size),
         }
     };
+    // Large, flat compounds often have only one possible terminator. Locate
+    // its line in bulk; nested or ambiguous text uses the line scan below.
+    if !aliases && buffered.len() >= BULK_CLOSE_MIN_BYTES {
+        let mut hits = memchr::memmem::find_iter(buffered, close);
+        let at = hits.next().ok_or(buffered.len())?;
+        if hits.next().is_none()
+            && (at == 0 || separator(&buffered[at - 1]))
+            && buffered.get(at + close.len()).is_none_or(separator)
+        {
+            let size = match memchr::memchr(b'\n', &buffered[at..]) {
+                Some(offset) => at + offset + 1,
+                None if at_eof => buffered.len(),
+                None => return Err(buffered.len()),
+            };
+            let bytes = &buffered[..size];
+            let lines =
+                memchr::memchr_iter(b'\n', bytes).count() + usize::from(!bytes.ends_with(b"\n"));
+            return probe(size, lines).ok().flatten().ok_or(buffered.len());
+        }
+    }
     let final_line = at_eof && !buffered.is_empty() && !buffered.ends_with(b"\n");
     let ends = memchr::memchr_iter(b'\n', buffered).chain(final_line.then_some(buffered.len()));
     for (i, end) in ends.enumerate() {
@@ -122,7 +159,6 @@ pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
         start = size;
         // A closing reserved word is a token. Suffixes such as `${value}`
         // and `config_done` cannot complete the compound.
-        let separator = |b: &u8| b.is_ascii_whitespace() || b";&|()<>".contains(b);
         let next = next.trim_ascii();
         // Inner terminators otherwise cause a full reparse of a growing prefix
         // at every fi/done/brace. Count common nested headers as a hint only.
@@ -150,7 +186,8 @@ pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
         let ends = next
             .strip_suffix(close)
             .is_some_and(|rest| rest.last().is_none_or(separator));
-        if !begins && !ends {
+        let inline = !begins && !ends;
+        if inline && !inline_close(next, close) {
             continue;
         }
         if nested > 0 {
@@ -158,9 +195,17 @@ pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
             deferred = Some((size, i + 1));
             continue;
         }
+        if inline && size < next_inline_probe {
+            deferred = Some((size, i + 1));
+            continue;
+        }
         deferred = None;
         if let Some(unit) = probe(size, i + 1)? {
             return Ok(unit);
+        }
+        // Text in quotes and heredocs can repeatedly resemble an inline close.
+        if inline {
+            next_inline_probe = size.saturating_mul(2);
         }
     }
     // A literal header inside a quote or here-document can hide the outer close.
@@ -170,4 +215,43 @@ pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
         return Ok(unit);
     }
     Err(buffered.len())
+}
+
+#[test]
+fn recognizes_redirected_terminators_without_reparsing_each_line() {
+    for (header, end) in [
+        ("{ :\n", ":; } 2>log"),
+        ("if :; then\n", ":; fi 2>&1"),
+        ("for k in x; do\n", ":; done >out"),
+        ("case x in x)\n", ": ;; esac >out"),
+    ] {
+        let body = format!("{}{end}\n", "v=1\n".repeat(1000));
+        let mut calls = 0;
+        let (_, consumed, _) = buffered_compound(header, body.as_bytes(), true, false, |size| {
+            calls += 1;
+            parser::parse(&format!("{header}{}", &body[..size]))
+        })
+        .unwrap();
+        assert_eq!((calls, consumed), (1, body.len()));
+    }
+}
+
+#[test]
+fn inline_terminators_inside_heredocs_have_bounded_parse_attempts() {
+    let first = "if :; then\n";
+    let text = format!(
+        ": <<'END'\n{}END\n:; fi 2>log",
+        ":; fi 2>fake\n".repeat(256)
+    );
+    let mut attempts = 0;
+    let (_, consumed, lines) = buffered_compound(first, text.as_bytes(), true, false, |size| {
+        attempts += 1;
+        parser::parse(&format!("{first}{}", &text[..size]))
+    })
+    .unwrap();
+    assert_eq!((consumed, lines), (text.len(), text.lines().count()));
+    assert!(
+        attempts <= 12,
+        "{attempts} probes for 256 false terminators"
+    );
 }

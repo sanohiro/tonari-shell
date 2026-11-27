@@ -50,7 +50,7 @@ impl Values {
         if let Some((base, at, keys)) = array_elements_name(name) {
             if !env.shadows(base) {
                 let mut values = Vec::new();
-                if env.session.append_indexed_fields(base, keys, &mut values) {
+                if env.session.append_array_fields(base, keys, &mut values) {
                     return Ok(Self::Elements(values, at));
                 }
             }

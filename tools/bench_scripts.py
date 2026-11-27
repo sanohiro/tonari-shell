@@ -37,7 +37,33 @@ def assoc_names(count):
     return [name for _, name in sorted(enumerate(names), key=order)]
 
 
+def redirected_compound(header, footer):
+    return header + "\n" + "v=1\n" * 1000 + footer + '\necho "$v"', "1"
+
+
+def listing_loop(command, count):
+    return (f'for ((i=0; i<{count}; ++i)); do {command} || exit 1; done >/dev/null\necho "$i"',
+            str(count))
+
+
 CASES = {
+    "redirected-group": redirected_compound("{ :", ":; } 2>/dev/null"),
+    "redirected-if": redirected_compound("if :; then", ":; fi 2>/dev/null"),
+    "redirected-loop": redirected_compound("for k in pass; do", ":; done >out"),
+    "redirected-case": redirected_compound("case x in x)", ": ;; esac 2>&1"),
+    "redirected-group-control": redirected_compound("{ :", ":\n} 2>/dev/null"),
+    "assoc-values": eval_loop('set -- "${m[@]}"', 'echo "$#"', "500", count=200),
+    "assoc-keys": eval_loop('set -- "${!m[@]}"', 'echo "$#"', "500", count=200),
+    "assoc-unquoted": eval_loop('set -- ${m[@]}', 'echo "$#"', "500", count=200),
+    "assoc-churn": eval_loop('unset "m[key7]"; m[key7]=$i; set -- "${m[@]}"',
+                             'echo "$# ${m[key7]}"', "500 199", count=200),
+    "complete-list": listing_loop("complete -p", 100),
+    "hash-list": listing_loop("hash", 200),
+    "dirs-list": listing_loop("dirs -v", 200),
+    "function-list": listing_loop("declare -f", 50),
+    "export-function-list": listing_loop("export -fp", 50),
+    "trap-list": listing_loop("trap -p", 200),
+    "trap-list-named": listing_loop("trap -p HUP USR1 USR2", 200),
     "shopt-list": eval_loop("shopt -p >/dev/null || exit 1", "echo ok", "ok", count=200),
     "export-list": eval_loop("export -p >/dev/null || exit 1", 'echo "$V49"', "value49", count=200),
     "declare-indexed-list": eval_loop("declare -p a >/dev/null || exit 1", 'echo "${a[999]}"', "999", count=50),
@@ -631,6 +657,18 @@ def main():
             ):
                 participants = [*shells, ("Direct C", args.spawn_control.resolve())]
             case_setup = setup
+            if case.startswith("assoc-"):
+                case_setup += 'declare -A m; for ((j=0;j<500;++j)); do m[key$j]=value$j; done; '
+            elif case == "complete-list":
+                case_setup += 'for ((j=0;j<300;++j)); do complete -F "_comp_$j" "cmd_$j"; done; '
+            elif case == "hash-list":
+                case_setup += 'for ((j=0;j<50;++j)); do hash -p "/tmp/tool$j" "tool$j"; done; '
+            elif case == "dirs-list":
+                case_setup += 'for ((j=0;j<9;++j)); do pushd . >/dev/null; done; '
+            elif case in ("function-list", "export-function-list"):
+                case_setup += 'for ((j=0;j<100;++j)); do eval "fn$j() { :; }"; export -f "fn$j"; done; '
+            elif case in ("trap-list", "trap-list-named"):
+                case_setup += "trap : HUP USR1 USR2; "
             if case == "export-list":
                 case_setup += 'for ((j=0;j<50;++j)); do export "V$j=value$j"; done; '
             elif case == "declare-indexed-list":

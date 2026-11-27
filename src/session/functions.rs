@@ -169,18 +169,21 @@ impl Session {
         self.functions.remove(name);
     }
 
-    pub fn function_attributes(&self, name: &str) -> String {
-        let mut flags = String::from("f");
-        if self.readonly_functions.contains(name) {
-            flags.push('r');
+    pub fn function_attributes(&self, name: &str) -> &'static str {
+        match (
+            self.readonly_functions.contains(name),
+            self.traced_functions.contains(name),
+            self.function_exported(name),
+        ) {
+            (false, false, false) => "f",
+            (false, false, true) => "fx",
+            (false, true, false) => "ft",
+            (false, true, true) => "ftx",
+            (true, false, false) => "fr",
+            (true, false, true) => "frx",
+            (true, true, false) => "frt",
+            (true, true, true) => "frtx",
         }
-        if self.traced_functions.contains(name) {
-            flags.push('t');
-        }
-        if self.function_exported(name) {
-            flags.push('x');
-        }
-        flags
     }
 
     pub fn print_function(
@@ -189,7 +192,18 @@ impl Session {
         name: &str,
         attributes: bool,
     ) -> io::Result<()> {
-        let definition = &self.functions[name].definition;
+        let flags = if attributes {
+            self.function_attributes(name)
+        } else {
+            "f"
+        };
+        self.functions[name].print(out, name, flags)
+    }
+}
+
+impl Function {
+    pub(super) fn print(&self, out: &mut dyn Write, name: &str, flags: &str) -> io::Result<()> {
+        let definition = &self.definition;
         let body = definition.location.text();
         if crate::parser::reserved(name)
             || name
@@ -216,11 +230,8 @@ impl Session {
             result
         });
         writeln!(out, "{name} () \n{rendered}")?;
-        if attributes {
-            let flags = self.function_attributes(name);
-            if flags.len() > 1 {
-                writeln!(out, "declare -{flags} {name}")?;
-            }
+        if flags.len() > 1 {
+            writeln!(out, "declare -{flags} {name}")?;
         }
         Ok(())
     }

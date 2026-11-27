@@ -1,5 +1,81 @@
 # Startup and execution / 起動と実行性能
 
+<a id="compound-listings-release"></a>
+
+## November 28 · Redirected compounds, arrays and listings / 複合コマンドのリダイレクト・連想配列・一覧出力
+
+Each cell gives **PR #45 / PR #46 / Bash** in median milliseconds. The release binaries come from `738f1e0` and `1ca2028`. The Apple M1 ran macOS 27.2.1 with GNU Bash 5.3.20. The native Ubuntu 24.04 x86-64 runner used an AMD EPYC 9V74 and Bash 5.2.21. `tools/bench_scripts.py --timing started --runs 31` rotates the shell order. After five warm-ups, each sample sources the fixture in a fresh shell that has finished setting up its data. Timing ends after the result check and shell exit. [Linux samples, host and distribution binaries' sizes](https://github.com/sanohiro/tonari-shell/actions/runs/46034627949)
+
+| Workload | Apple M1 | Linux x86-64 |
+|---|---:|---:|
+| Brace group | 106.485 / 0.865 / 1.652 | 143.613 / 0.809 / 1.367 |
+| Conditional | 107.246 / 0.813 / 1.631 | 142.297 / 0.804 / 1.360 |
+| Loop | 106.826 / 0.955 / 1.822 | 144.450 / 0.849 / 1.371 |
+| Case | 106.382 / 0.948 / 1.675 | 144.066 / 0.823 / 1.353 |
+| Brace on its own line | 0.912 / 0.846 / 1.607 | 1.044 / 0.763 / 1.338 |
+| Quoted associative values | 25.127 / 4.459 / 46.094 | 25.394 / 5.098 / 51.948 |
+| Quoted associative keys | 8.797 / 2.360 / 42.084 | 13.028 / 3.650 / 50.542 |
+| Unquoted associative values | 26.533 / 8.621 / 36.552 | 26.385 / 10.664 / 42.800 |
+| Delete/reinsert and expand | 25.556 / 8.366 / 46.969 | 25.775 / 10.742 / 52.626 |
+| Completion definitions | 40.252 / 3.667 / 40.600 | 25.980 / 3.506 / 20.878 |
+| Command hash table | 12.133 / 1.034 / 12.725 | 6.518 / 0.703 / 6.377 |
+| Directory stack | 2.837 / 0.838 / 3.430 | 1.436 / 0.431 / 2.069 |
+| Function definitions | 22.922 / 1.743 / 29.708 | 13.302 / 1.602 / 10.459 |
+| Exported functions | 23.482 / 1.435 / 29.671 | 13.860 / 1.427 / 10.459 |
+| All traps | 2.235 / 0.941 / 1.833 | 5.970 / 0.565 / 1.086 |
+| Three named traps | 1.370 / 1.342 / 2.326 | 0.773 / 0.728 / 1.209 |
+
+The first five workloads use 1,000 physical lines of `v=1`. Four place the terminator and a redirection on the last command's line. The control places the brace on its own line. The array holds 500 keys and each test expands it 200 times. Full listings share one outer redirection per loop. They print 300 completion definitions 100 times, 50 hashed paths or ten directories 200 times, and 100 functions 50 times. Trap tests install HUP, USR1 and USR2 and print all or those three names 200 times.
+
+On an earlier Linux run, finding the four close tokens brought the scripts down to 1.30–1.35 ms, or 74–78% of Bash. Limiting allocation for a scalar assignment and tokenizing a plain right-hand side in one pass brought them to 1.04–1.09 ms on another EPYC 7763 runner. The final parser consumes a lone assignment token followed by a statement boundary directly. A bulk search for the only possible terminator can also avoid the per-line scan. A file with several candidates still uses nested-header hints and parser validation. Each step keeps the assignment AST and its runtime effects. On a pair of Xeon 6975P-C runners the first bulk hash listing still took 2.87 ms for 200 calls against Bash at 2.55–2.56 ms. The final build writes the padded hit count and pathname into a reusable row, formats directory numbers directly, and looks up exported function attributes once. [Xeon comparison before row formatting](https://github.com/sanohiro/tonari-shell/actions/runs/46033740308) · [Paired comparison after row formatting](https://github.com/sanohiro/tonari-shell/actions/runs/46034633053). [First Linux comparison](https://github.com/sanohiro/tonari-shell/actions/runs/46031321503) · [Assignment lexer comparison](https://github.com/sanohiro/tonari-shell/actions/runs/46032541955)
+
+All sixteen final medians were within two thirds of Bash on the M1 and the EPYC 9V74 in the table, as well as on a second EPYC 7763 runner. The target varies by host. With the same parser on the earlier Xeon pair, the four redirected compounds took 67–78% of Bash time. The paired EPYC 7763 run of the final listing changes took 1.489 → 0.904 ms for `hash` and 2.951 → 1.973 ms for `export -fp`. The paired Xeon 6975P-C run took 2.857 → 1.293 ms for `hash` (Bash 2.529 ms). Nine of sixteen final medians met the two-thirds target there. The five parser workloads took 67.5–75.5% of Bash time and the two trap listings took 72.6–80.3%. On an EPYC 9V45, fourteen of sixteen met the target. The loop and case took 69.1% and 68.0% of Bash time. [Paired Xeon results](https://github.com/sanohiro/tonari-shell/actions/runs/46035104130) · [Paired EPYC 9V45 results](https://github.com/sanohiro/tonari-shell/actions/runs/46035108972)
+
+The M1 release passed the shell integration suite with GNU Bash 5.3.20 (356 passed, three skipped). Using Apple Bash 3.2 as the reference for the same suite produced the same 32 failed assertions as before this PR. Of the 198 independent source-review witnesses against GNU Bash 5.3.20, the sole difference was the existing `globignore-separators` case. The regression tests also check exact output formatting and failures on closed stdout.
+
+The M1 executable went from 1,781,616 to 1,781,632 bytes and links libSystem. The stripped Linux static PIE went from 2,428,536 to 2,437,272 bytes. A separate M1 PTY check waited for the visible response on every action. Across 200 warm cycles, the previous and current median/p95 were 0.009/0.033 and 0.008/0.035 ms for typing `:`, then 0.034/0.057 and 0.028/0.055 ms for Enter through the next prompt.
+
+各欄は旧版・新版・Bashの順。ファイルを読む時間、構文解析、実行、結果確認、シェル終了までを含む。4種類の終端は同じ先読みで扱い、実際の構文はパーサーで確認する。新しい回帰試験では、1,000行に対する先読み中の構文解析呼び出しが1回であることも検証した。全16項目がBashより短時間で完了した。Bash時間の2/3以内だったのはM1・EPYC 9V74・7763で16項目、Xeon 6975P-Cで9項目、EPYC 9V45で14項目だった。 [回帰試験](../src/input/lookahead.rs)
+
+<a id="post-45-performance-review"></a>
+
+## November 28 · Associative arrays, builtin listings, traps and script input / 連想配列・組み込み一覧・スクリプト入力
+
+Apple M1, macOS 27.2.1, native release at `738f1e0`, experimental builds from the same revision, GNU Bash 5.3.20. The benchmark used fresh processes in randomized order with `LC_ALL=C`. Setup finished before the shell signaled readiness. Medians in milliseconds cover release of the input gate through process exit, including the result check. Listings shared one outer redirection to `/dev/null`. Arrays and listings used two warm-ups and 21 timed samples per shell. The prototype column describes experiments, including a follow-up for unquoted arrays and compound input. These are M1 measurements.
+
+| Workload | Tonari at PR #45 | Prototype | GNU Bash |
+|---|---:|---:|---:|
+| 500 associative values, quoted, ×200 | 25.550 | 4.341 | 41.379 |
+| 500 associative keys, quoted, ×200 | 8.650 | 2.267 | 41.243 |
+| 500 associative values, unquoted, ×200 | 26.345 | 8.330 | 31.901 |
+| Delete and reinsert one key before each quoted expansion, ×200 | 24.926 | 7.737 | 39.695 |
+| 300 completion definitions, `complete -p` ×100 | 39.651 | 8.652 | 39.752 |
+| 50 hashed paths, `hash` ×200 | 11.644 | 1.189 | 12.378 |
+| Ten directories, `dirs -v` ×200 | 2.624 | 0.783 | 3.229 |
+| 100 functions, `declare -f` ×50 | 16.313 | 1.081 | 23.259 |
+| 100 exported functions, `export -fp` ×50 | 24.399 | 2.435 | 30.690 |
+| Three installed traps, `trap -p` ×200 | 2.276 | 0.914 | 1.838 |
+| Same traps named explicitly, ×200 | 1.343 | 1.349 | 2.079 |
+| 1,000 loop iterations with default `PS4` | 4.437 | 4.482 | 6.064 |
+| Same loop with `PS4='+ ${LINENO}: '` | 5.479 | 5.160 | 6.652 |
+| Same loop with tracing disabled | 0.657 | 0.666 | 1.807 |
+
+Ten targeted integration tests passed on the final prototype, including closed stdout, mixed diagnostics, associative expansion, heredocs, aliases and multiline `eval`. The M1 executable was 1,781,616 bytes at PR #45 and 1,798,144 bytes with all trials combined. Both link libSystem. In a separate interactive control with `PS1='\u@\h:\w READY> '`, each keystroke waited for visible echo and each Enter waited for the next prompt. Over 200 warm cycles, main's median/p95 for typing `:` was 0.006/0.031 ms and for Enter it was 0.028/0.055 ms. GNU Bash measured 0.015/0.023 and 0.104/0.137 ms respectively.
+
+### Closing a redirected group on the last command's line
+
+With tracing disabled, run a group starting with `{ :`, followed by 1,000 physical lines of `v=1`, then `:; } 2>/dev/null`. Check that `v` is 1 after the group. A control moves only the closing brace and its redirection to the next line. The table uses 15 timed samples per shell. For the traced case, `set -x` and `set +x` take the place of the two `:` commands.
+
+| Input | Tonari at PR #45 | Parser prototype | GNU Bash |
+|---|---:|---:|---:|
+| `-c`, same-line close, tracing off | 105.922 | 0.910 | 1.597 |
+| `-c`, next-line close, tracing off | 0.933 | 0.873 | 1.621 |
+| Source a file, same-line close, tracing off | 105.627 | 0.984 | 1.647 |
+| Source a file, next-line close, tracing off | 0.943 | 0.959 | 1.626 |
+| `-c`, same-line close, tracing on | 108.205 | 2.459 | 3.086 |
+
+現行版では同じ行で閉じた場合、250行で7.91 ms、500行で27.56 ms、1,000行で105.92 msになった。終端の候補を先読みで拾い、構文解析器で確認する試作では、ファイルを `source` する場合も1 ms前後になった。対話計測は1打鍵ごとにエコーを待った。表の試作値はリリース前のもので、Linuxでの比較は今回の対象外。
+
 <a id="listings-expansion-native"></a>
 
 ## November 28 · Native release results for listings and expansion / 一覧表示と展開のリリース計測

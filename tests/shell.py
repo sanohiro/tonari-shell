@@ -54,6 +54,88 @@ class ShellTests(unittest.TestCase):
                 proc = self.command(shell, command + " >&-; exit $?")
                 self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"", b""))
 
+    def test_inline_compound_terminators(self):
+        for header, end in (("{ :", "; }"), ("if :; then", "; fi"),
+                            ("for item in x; do", "; done"), ("case x in x)", " ;; esac")):
+            close = end.split()[-1]
+            body = ("shopt -s expand_aliases\n" + header + "\n: <<'END'\n"
+                    + (f":; {close} >false-close\n" * 64) + "END\n"
+                    + "alias after='printf alias'\n" + "v=ok\n" * 250
+                    + "printf '%s' \"$v\"" + end + " 2>&1 >result\n"
+                    + "after; cat result; test ! -e false-close\n")
+            (self.cwd / "unit.sh").write_text(body)
+            for shell in self.shells_for():
+                for command in (body, ". ./unit.sh"):
+                    with self.subTest(close=close, shell=shell, sourced=command != body):
+                        p = self.command(shell, command)
+                        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, b"aliasok", b""))
+
+    def test_associative_field_cache(self):
+        (self.cwd / "hit-one").touch()
+        source = r"""declare -A m=(['space key']='a b' [p]='hit-*' [blank]='' [雪]='冬')
+declare -n ref=m
+dump() { printf 'k<%s>\n' "${!m[@]}"; printf 'v<%s>\n' "${ref[@]}"; }
+dump; m['space key']=updated; dump
+unset 'm[blank]'; m[new]='x:y'; IFS=:; dump
+printf 'field<%s>\n' ${ref[@]}; (m[new]=sub; dump); dump
+alias one=live; printf 'live<%s>\n' "${BASH_ALIASES[@]}"; unalias one
+alias two=changed; printf 'live<%s>\n' "${BASH_ALIASES[@]}"
+"""
+        p = self.command(TONARI, source)
+        self.assertEqual((p.returncode, p.stderr), (0, b""))
+        for line in (b"v<a b>", b"v<>", b"v<updated>", b"field<hit-one>", b"field<x>",
+                     b"field<y>", b"v<sub>", b"live<live>", b"live<changed>"):
+            self.assertIn(line, p.stdout.splitlines())
+        if BASH in self.shells_for(minimum=5):
+            ref = self.command(BASH, source)
+            self.assertEqual((ref.returncode, ref.stdout, ref.stderr), (0, p.stdout, b""))
+
+    def test_background_trap_listing(self):
+        # Bash 5.3 prints dispositions ignored on entry. Earlier versions differ.
+        for shell in ((TONARI,) if self.bash_before_53() else (TONARI, BASH)):
+            for mask in range(4):
+                signals = (("INT", signal.SIGINT), ("QUIT", signal.SIGQUIT))
+                def setup():
+                    for i, (_, sig) in enumerate(signals):
+                        signal.signal(sig, signal.SIG_IGN if mask & (1 << i) else signal.SIG_DFL)
+                for posix in (False, True):
+                    opts = ["--posix"] if posix else []
+                    prefix = "" if posix else "SIG"
+                    def listing(explicit):
+                        lines = []
+                        for i, (name, _) in enumerate(signals):
+                            ignored = mask & (1 << i) or explicit
+                            if ignored or posix:
+                                action = "''" if ignored else "-"
+                                lines.append(f"trap -- {action} {prefix}{name}\n")
+                        return "".join(lines)
+                    code = ("trap -p >/dev/null; (trap -p INT QUIT; trap '' INT QUIT; "
+                            "trap -p INT QUIT; trap - INT QUIT; trap -p INT QUIT) & wait")
+                    p = subprocess.run([shell, *opts, "-c", code], env=self.env, cwd=self.cwd,
+                                       preexec_fn=setup, capture_output=True, timeout=5)
+                    with self.subTest(shell=shell, mask=mask, posix=posix):
+                        self.assertEqual((p.returncode, p.stdout, p.stderr),
+                                         (0, (listing(False) + listing(True) + listing(False)).encode(), b""))
+
+    def test_bulk_listing_format(self):
+        self.compare("hash -p /bin/echo mark; mark >/dev/null; hash", 0,
+                     b"hits\tcommand\n   1\t/bin/echo\n")
+        self.compare("for ((i=0;i<11;++i)); do pushd -n /tmp >/dev/null; done; dirs -v +10",
+                     0, b"10  /tmp\n")
+        self.compare("f(){ :; }; g(){ :; }; export -f f; readonly -f f; declare -ft f; export -fp",
+                     0, b"f () \n{ \n    :\n}\ndeclare -frtx f\n", minimum=5)
+
+    def test_bulk_listing_errors(self):
+        commands = ("complete -F _f one; complete -p", "f(){ :; }; declare -f",
+                    "f(){ :; }; export -f f; export -fp", "dirs -v",
+                    "hash -p /bin/ls mark; hash", "trap : USR2; trap -p")
+        for code in commands:
+            with self.subTest(code=code):
+                p = self.command(TONARI, code + " >&-")
+                self.assertEqual((p.returncode, p.stdout), (1, b""))
+                self.assertEqual(len(p.stderr.splitlines()), 1, p.stderr)
+        self.compare("complete -p >&-; echo $?", 0, b"0\n")
+
     def test_listing_diagnostic_order(self):
         cases = [
             ("shopt -p nullglob __absent dotglob", b"shopt -u nullglob", b"shopt -u dotglob", 1),

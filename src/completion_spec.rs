@@ -273,7 +273,7 @@ impl Target<'_> {
     }
 }
 
-use crate::word::quote::{shell_quote, single_quote};
+use crate::word::quote::shell_quote;
 
 #[derive(Default)]
 struct Request {
@@ -449,8 +449,14 @@ impl Spec {
         })
     }
 
-    fn definition(&self, target: &Target<'_>) -> String {
-        let mut line = "complete".to_owned();
+    fn write_definition(
+        &self,
+        target: &Target<'_>,
+        line: &mut String,
+        out: &mut dyn Write,
+    ) -> io::Result<()> {
+        line.clear();
+        line.push_str("complete");
         for option in CompOption::ALL {
             if self.options.contains(*option) {
                 line.push_str(" -o ");
@@ -473,17 +479,20 @@ impl Spec {
             ('F', self.function.as_deref()),
         ] {
             if let Some(arg) = arg {
-                let quoted = if flag == 'F' {
-                    shell_quote(arg)
+                line.push_str(" -");
+                line.push(flag);
+                line.push(' ');
+                if flag == 'F' {
+                    line.push_str(&shell_quote(arg));
                 } else {
-                    single_quote(arg)
-                };
-                line.push_str(&format!(" -{flag} {quoted}"));
+                    crate::word::quote::push_single_quote(line, arg);
+                }
             }
         }
         line.push(' ');
         line.push_str(&target.argument());
-        line
+        line.push('\n');
+        out.write_all(line.as_bytes())
     }
 
     fn candidates(
@@ -869,8 +878,9 @@ fn apply(
             diagnostic!("complete: a command name or a default target is required");
             return Ok(2);
         }
+        let mut line = String::new();
         for (key, spec) in registry.iter() {
-            writeln!(out, "{}", spec.definition(key))?;
+            spec.write_definition(key, &mut line, out)?;
         }
         return Ok(0);
     }
@@ -891,6 +901,7 @@ fn apply(
         return Ok(1);
     }
     let mut status = 0;
+    let mut line = String::new();
     for key in targets {
         if builtin == CompBuiltin::Complete && !(request.print || request.remove) {
             registry.insert(key, request.spec.clone());
@@ -905,7 +916,7 @@ fn apply(
         if request.remove {
             registry.remove(&key);
         } else if builtin == CompBuiltin::Complete {
-            writeln!(out, "{}", spec.definition(&key))?;
+            spec.write_definition(&key, &mut line, out)?;
         } else {
             set_options(&mut spec.options, &request.options, &key.argument(), out)?;
         }
@@ -925,6 +936,16 @@ pub fn run(name: &str, args: &[String], last: u8, session: &mut Session) -> u8 {
             return 2;
         }
     };
+    if builtin == CompBuiltin::Complete
+        && request.operands.is_empty()
+        && request.special.is_none()
+        && !request.remove
+    {
+        let mut out = crate::builtins::listing_stdout(name);
+        return apply(request, builtin, session, last, &mut out)
+            .and_then(|status| out.flush().map(|()| status))
+            .unwrap_or(1);
+    }
     apply(
         request,
         builtin,

@@ -170,13 +170,13 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
         session.hashes.clear();
         return 0;
     }
-    let mut out = crate::builtins::stdout_for("hash");
     let print_entry = |out: &mut dyn Write, name: &str, path: &Path| -> io::Result<()> {
         let path = path.to_string_lossy();
         use crate::word::quote::shell_quote as quote;
         writeln!(out, "builtin hash -p {} {}", quote(&path), quote(name))
     };
     if args.is_empty() {
+        let mut out = crate::builtins::listing_stdout("hash");
         if remove || print || supplied.is_some() {
             diagnostic!("hash: command name required");
             return 1;
@@ -193,11 +193,20 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
                 return 1;
             }
         }
+        let mut decimal = itoa::Buffer::new();
+        let mut row = Vec::new();
         for (name, e) in &session.hashes.entries {
             let result = if list {
                 print_entry(&mut out, name, &e.path)
             } else {
-                writeln!(out, "{:4}\t{}", e.hits, e.path.display())
+                let hits = decimal.format(e.hits).as_bytes();
+                row.clear();
+                row.resize(4usize.saturating_sub(hits.len()), b' ');
+                row.extend_from_slice(hits);
+                row.push(b'\t');
+                row.extend_from_slice(e.path.to_string_lossy().as_bytes());
+                row.push(b'\n');
+                out.write_all(&row)
             };
             if result.is_err() {
                 return 1;
@@ -205,6 +214,7 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
         }
         return out.flush().map_or(1, |()| 0);
     }
+    let mut out = crate::builtins::stdout_for("hash");
     let mut status = 0;
     for name in args {
         let entry = if print {

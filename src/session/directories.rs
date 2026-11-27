@@ -184,18 +184,23 @@ impl Session {
                 .filter(|s| s.is_empty() || s.starts_with('/'));
             let result = (|| {
                 if numbered {
-                    write!(out, "{i:2}  ")?;
+                    if i < 10 {
+                        out.write_all(b" ")?;
+                    }
+                    out.write_all(itoa::Buffer::new().format(i).as_bytes())?;
+                    out.write_all(b"  ")?;
                 }
                 if let Some(tail) = name {
-                    write!(out, "~{tail}")?;
+                    out.write_all(b"~")?;
+                    out.write_all(tail.as_bytes())?;
                 } else {
-                    write!(out, "{path}")?;
+                    out.write_all(path.as_bytes())?;
                 }
-                if vertical || numbered || i == last {
-                    writeln!(out)
+                out.write_all(if vertical || numbered || i == last {
+                    b"\n"
                 } else {
-                    write!(out, " ")
-                }
+                    b" "
+                })
             })();
             if result.is_err() {
                 return 1;
