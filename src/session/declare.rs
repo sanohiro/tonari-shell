@@ -33,7 +33,7 @@ fn declare_functions(
 ) -> crate::Flow {
     if operands.is_empty() {
         let mut out = crate::builtins::listing_stdout(command);
-        for name in session.functions.keys() {
+        for name in session.functions.names("") {
             if !flags.function_names && !readonly {
                 if session.print_function(&mut out, name, true).is_err() {
                     return crate::Flow::Continue(1);

@@ -281,7 +281,7 @@ impl Source {
                     if !list {
                         return Some((Common::from_names(names, prefix)?, Vec::new()));
                     }
-                    let mut seen = std::collections::HashSet::new();
+                    let mut seen = foldhash::HashSet::default();
                     let words: Vec<_> = names
                         .filter(|name| seen.insert(*name))
                         .map(str::to_owned)
@@ -732,7 +732,7 @@ fn visit_commands(
         .copied()
         .filter(|n| !session.disabled_builtins.contains(*n))
         .chain(crate::completion_spec::KEYWORDS.iter().copied())
-        .chain(session.functions.keys().map(String::as_str))
+        .chain(session.functions.names(prefix).map(String::as_str))
         .chain(session.aliases.names().map(String::as_str))
     {
         if name.starts_with(prefix) {

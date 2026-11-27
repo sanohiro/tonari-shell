@@ -27,8 +27,9 @@ bash_version!("5", "2", "0", "1", "tonari");
 pub(crate) const READONLY: &str = "readonly variable";
 pub(crate) const SUBSCRIPT_RANGE: &str = "array subscript out of range";
 
+use foldhash::HashMap;
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::os::unix::ffi::OsStrExt;
@@ -103,13 +104,13 @@ impl Variable {
 // scalar assignments only change membership when allexport is enabled.
 #[derive(Clone, Default)]
 struct Variables {
-    entries: HashMap<String, Variable, foldhash::fast::RandomState>,
+    entries: HashMap<String, Variable>,
     environment_names: std::cell::OnceCell<Option<Rc<[String]>>>,
     prefix_names: std::cell::RefCell<Option<(String, Vec<String>)>>,
 }
 
 impl std::ops::Deref for Variables {
-    type Target = HashMap<String, Variable, foldhash::fast::RandomState>;
+    type Target = HashMap<String, Variable>;
     fn deref(&self) -> &Self::Target {
         &self.entries
     }
@@ -354,13 +355,13 @@ pub struct Session {
     pub aliases: crate::alias::Aliases,
     pub completions: crate::completion_spec::Registry,
     pub readonly_functions: std::collections::BTreeSet<String>,
-    pub(crate) functions: BTreeMap<String, Function>,
+    pub(crate) functions: functions::FunctionTable,
     locals: Vec<Bindings>,
 }
 
 #[derive(Clone, Default)]
 pub struct Bindings {
-    variables: HashMap<String, Option<Variable>, foldhash::fast::RandomState>,
+    variables: HashMap<String, Option<Variable>>,
     opt_offset: Option<usize>,
     temporary: bool,
     set_options: Option<std::num::NonZeroU32>,

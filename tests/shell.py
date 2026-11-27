@@ -54,6 +54,20 @@ class ShellTests(unittest.TestCase):
                 proc = self.command(shell, command + " >&-; exit $?")
                 self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"", b""))
 
+    def test_function_name_order_tracks_live_definitions(self):
+        self.compare("""fn_z() { :; }; fn_a() { :; }; fn_b() { :; }
+compgen -A function fn_
+unset -f fn_b; fn_m() { :; }; fn_a() { echo updated; }
+compgen -A function fn_; fn_a
+export -f fn_m fn_a
+export -fp | sed -n '/^declare -fx fn_/p'
+declare -F | sed -n '/ fn_/p'
+set | sed -n '/^fn_[amz] ()/s/ .*//p'
+""", 0, b"fn_a\nfn_b\nfn_z\nfn_a\nfn_m\nfn_z\nupdated\n"
+        b"declare -fx fn_a\ndeclare -fx fn_m\n"
+        b"declare -fx fn_a\ndeclare -fx fn_m\ndeclare -f fn_z\nfn_a\nfn_m\nfn_z\n",
+                     minimum=4)
+
     def test_large_variable_table_visibility_and_environment(self):
         self.compare("""for ((i=0;i<1000;i++)); do printf -v "p_$i" %s "$i"; done
 q_z=last; q_a=first; q_m=middle; unset q_m; echo "${!q_*}"

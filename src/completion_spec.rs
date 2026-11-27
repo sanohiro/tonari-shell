@@ -580,13 +580,7 @@ impl Spec {
                             .map(|s| (*s).to_owned()),
                     );
                 }
-                CompAction::Function => words.extend(
-                    session
-                        .functions
-                        .keys()
-                        .filter(|n| n.starts_with(prefix))
-                        .cloned(),
-                ),
+                CompAction::Function => words.extend(session.functions.names(prefix).cloned()),
                 CompAction::Variable => words.extend(session.variable_names(prefix)),
                 CompAction::Export => {
                     let mut names: BTreeSet<_> = std::env::vars_os()
@@ -1110,7 +1104,8 @@ fn generate_for_tab(
     if spec.options.contains(CompOption::Nosort) {
         // Borrow the candidates while recording first occurrences, then compact in place.
         if words.len() > 1 {
-            let mut seen = std::collections::HashSet::with_capacity(words.len());
+            let mut seen =
+                foldhash::HashSet::with_capacity_and_hasher(words.len(), Default::default());
             let keep: Vec<_> = words
                 .iter()
                 .map(|word| seen.insert(word.as_str()))

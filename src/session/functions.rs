@@ -5,6 +5,50 @@ use std::{
     rc::Rc,
 };
 
+#[derive(Clone, Default)]
+pub(crate) struct FunctionTable {
+    entries: foldhash::HashMap<String, Function>,
+    names: std::cell::OnceCell<Vec<String>>,
+}
+
+impl std::ops::Deref for FunctionTable {
+    type Target = foldhash::HashMap<String, Function>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
+}
+
+impl FunctionTable {
+    fn insert(&mut self, name: String, function: Function) {
+        if self.entries.insert(name, function).is_none() {
+            self.names.take();
+        }
+    }
+
+    fn remove(&mut self, name: &str) {
+        if self.entries.remove(name).is_some() {
+            self.names.take();
+        }
+    }
+
+    pub(crate) fn names(&self, prefix: &str) -> impl Iterator<Item = &String> {
+        let names = self.names.get_or_init(|| {
+            let mut names: Vec<_> = self.entries.keys().cloned().collect();
+            names.sort_unstable();
+            names
+        });
+        let start = if prefix.is_empty() {
+            0
+        } else {
+            names.partition_point(|name| name.as_str() < prefix)
+        };
+        names[start..]
+            .iter()
+            .take_while(move |name| name.starts_with(prefix))
+    }
+}
+
 impl Function {
     fn export_value(&self) -> String {
         let body = self.definition.location.text();
