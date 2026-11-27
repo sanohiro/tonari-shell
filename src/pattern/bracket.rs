@@ -29,6 +29,20 @@ pub(super) fn class_end(body: &[u8]) -> Option<usize> {
     None
 }
 
+// Directory enumeration amortizes compilation across all entries.
+pub(super) fn simple_list(pattern: &str) -> bool {
+    let Some((prefix, rest)) = pattern.split_once('[') else {
+        return false;
+    };
+    let Some((members, suffix)) = rest.split_once(']') else {
+        return false;
+    };
+    !members.is_empty()
+        && members.bytes().all(|b| b.is_ascii_alphanumeric())
+        && !prefix.contains('\\')
+        && !suffix.contains(['[', '\\'])
+}
+
 pub(super) fn needs_parser(source: &[u8]) -> bool {
     let mut i = 0;
     while i < source.len() {
@@ -216,11 +230,20 @@ enum Token {
     Star,
     Any,
     Literal([u8; 4]),
+    AsciiList(u128),
     List { negated: bool, members: Vec<Member> },
+}
+
+fn ascii_member(mask: u128, byte: u8) -> bool {
+    byte.is_ascii() && mask & (1u128 << byte) != 0
 }
 
 impl Token {
     fn list(mut body: &[u8], utf8: bool) -> Self {
+        if !body.is_empty() && body.iter().all(u8::is_ascii_alphanumeric) {
+            let members = body.iter().fold(0, |mask, &b| mask | (1u128 << b));
+            return Self::AsciiList(members);
+        }
         let negated = matches!(body.first(), Some(b'!' | b'^'));
         body = &body[usize::from(negated)..];
         let mut members = Vec::new();
@@ -242,6 +265,7 @@ impl Token {
         match self {
             Self::Any => true,
             Self::Literal(literal) => literal == value,
+            Self::AsciiList(mask) => ascii_member(*mask, value[0]),
             Self::List { negated, members } => members.iter().any(|m| m.accepts(value)) != *negated,
             Self::Star => unreachable!(),
         }
@@ -424,6 +448,11 @@ impl BracketPattern {
         let utf8 = self.utf8 || super::glob_locale::collated_ranges();
         if utf8 && std::str::from_utf8(text).is_err() {
             return false;
+        }
+        // The literal prefix and suffix have already been consumed. In this
+        // common pathname shape the star accepts everything after the member.
+        if let [Token::AsciiList(mask), Token::Star] = self.tokens.as_slice() {
+            return text.first().is_some_and(|&b| ascii_member(*mask, b));
         }
         let mut tokens = self.tokens.as_slice();
         let mut retry = None;

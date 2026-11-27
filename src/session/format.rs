@@ -196,6 +196,18 @@ pub(super) fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Co
     }
 }
 
+// Short indices and values dominate dense array listings. Copying these inline
+// avoids a variable-length slice copy for each field on the static build.
+fn append_listing_bytes(chunk: &mut Vec<u8>, bytes: &[u8]) {
+    if bytes.len() < std::mem::size_of::<usize>() {
+        for &byte in bytes {
+            chunk.push(byte);
+        }
+    } else {
+        chunk.extend_from_slice(bytes);
+    }
+}
+
 pub(super) fn print_variable_value(out: &mut dyn Write, var: &Variable) -> io::Result<()> {
     if let Some(map) = var.associative() {
         if var.array_assigned {
@@ -219,13 +231,38 @@ pub(super) fn print_variable_value(out: &mut dyn Write, var: &Variable) -> io::R
     } else if let Some(array) = &var.elements {
         if var.array_assigned {
             write!(out, "=(")?;
+            const CHUNK_SIZE: usize = 4096;
+            let mut chunk = Vec::with_capacity(CHUNK_SIZE);
+            let mut decimal = itoa::Buffer::new();
             for (position, (index, value)) in array.iter().enumerate() {
                 if position > 0 {
-                    write!(out, " ")?;
+                    chunk.push(b' ');
                 }
-                write!(out, "[{index}]=")?;
-                print_value(out, value)?;
+                chunk.push(b'[');
+                append_listing_bytes(&mut chunk, decimal.format(index).as_bytes());
+                chunk.extend_from_slice(b"]=");
+                if value.len() >= CHUNK_SIZE {
+                    out.write_all(&chunk)?;
+                    chunk.clear();
+                    print_value(out, value)?;
+                } else {
+                    if value
+                        .bytes()
+                        .any(|b| b.is_ascii_control() || double_quote_escape(b))
+                    {
+                        print_value(&mut chunk, value)?;
+                    } else {
+                        chunk.push(b'"');
+                        append_listing_bytes(&mut chunk, value.as_bytes());
+                        chunk.push(b'"');
+                    }
+                    if chunk.len() >= CHUNK_SIZE {
+                        out.write_all(&chunk)?;
+                        chunk.clear();
+                    }
+                }
             }
+            out.write_all(&chunk)?;
             write!(out, ")")?;
         }
     } else if let Some(value) = &var.value {
@@ -235,6 +272,10 @@ pub(super) fn print_variable_value(out: &mut dyn Write, var: &Variable) -> io::R
     writeln!(out)
 }
 
+fn double_quote_escape(byte: u8) -> bool {
+    matches!(byte, b'"' | b'\\' | b'$' | b'`')
+}
+
 pub(super) fn print_value(out: &mut dyn Write, value: &str) -> io::Result<()> {
     if value.bytes().any(|c| c.is_ascii_control()) {
         return out.write_all(&crate::word::quote::ansi_quote(value.as_bytes(), false));
@@ -242,7 +283,7 @@ pub(super) fn print_value(out: &mut dyn Write, value: &str) -> io::Result<()> {
     out.write_all(b"\"")?;
     let mut start = 0;
     for (i, &byte) in value.as_bytes().iter().enumerate() {
-        if matches!(byte, b'"' | b'\\' | b'$' | b'\x60') {
+        if double_quote_escape(byte) {
             out.write_all(&value.as_bytes()[start..i])?;
             out.write_all(b"\\")?;
             start = i;

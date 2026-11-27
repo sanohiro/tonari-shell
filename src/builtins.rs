@@ -42,6 +42,11 @@ pub(crate) fn stdout_for(name: &str) -> io::LineWriter<StdoutFd<'_>> {
     io::LineWriter::new(StdoutFd(Some(name)))
 }
 
+// Bulk listings check flush at completion and before any interleaved diagnostic.
+pub(crate) fn listing_stdout(name: &str) -> io::BufWriter<StdoutFd<'_>> {
+    io::BufWriter::new(StdoutFd(Some(name)))
+}
+
 pub(crate) fn write_stdout_for(name: &str, bytes: &[u8]) -> u8 {
     u8::from(StdoutFd(Some(name)).write_all(bytes).is_err())
 }

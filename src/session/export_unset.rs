@@ -124,10 +124,10 @@ impl Session {
     }
 
     fn list_exported(&self) -> io::Result<()> {
-        let mut vars: BTreeMap<String, Option<String>> = std::env::vars_os()
+        let mut vars: BTreeMap<Cow<'_, str>, Option<String>> = std::env::vars_os()
             .filter_map(|(k, v)| {
                 let name = k.into_string().ok()?;
-                is_identifier(&name).then(|| (name, v.into_string().ok()))
+                is_identifier(&name).then(|| (Cow::Owned(name), v.into_string().ok()))
             })
             .collect();
         vars.insert("PWD".into(), self.get("PWD"));
@@ -135,16 +135,16 @@ impl Session {
         vars.remove("_");
         for (name, var) in self.variables.iter() {
             if var.exported {
-                vars.insert(name.clone(), var.value.clone());
+                vars.insert(Cow::Borrowed(name), None);
             } else {
-                vars.remove(name);
+                vars.remove(name.as_str());
             }
         }
-        let mut out = crate::builtins::stdout_for("export");
+        let mut out = crate::builtins::listing_stdout("export");
         let command = self.posix.then_some("export");
         for (name, value) in vars {
-            if let Some(var) = self.variables.get(&name) {
-                if matches!(name.as_str(), "BASHOPTS" | "SHELLOPTS") {
+            if let Some(var) = self.variables.get(name.as_ref()) {
+                if matches!(name.as_ref(), "BASHOPTS" | "SHELLOPTS") {
                     let current = self.declared_variable(&name, false).unwrap();
                     print_attribute(&mut out, &name, &current, command)?;
                 } else {

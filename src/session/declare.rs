@@ -279,7 +279,7 @@ fn print_variables(
     } else {
         operands
     };
-    let mut out = crate::builtins::stdout_for(command);
+    let mut out = crate::builtins::listing_stdout(command);
     let mut status = 0;
     if local
         && operands.is_empty()
@@ -333,6 +333,9 @@ fn print_variables(
                 return crate::execute::Flow::Continue(1);
             }
         } else if !operands.is_empty() {
+            if out.flush().is_err() {
+                return crate::Flow::Continue(1);
+            }
             diagnostic!("{command}: {name}: not found");
             status = 1;
         }
@@ -537,22 +540,21 @@ impl Session {
             };
             // Lowercase names have no implicit shell value. Repeated function
             // calls can rule out an inherited binding without scanning environ.
-            let mut var = if fresh_local
+            let fresh_unbound = fresh_local
                 && name.as_bytes()[0].is_ascii_lowercase()
                 && !self.variables.contains_key(name)
                 && self
                     .inherited_variable_names()
                     .binary_search_by(|key| key.as_str().cmp(name))
-                    .is_err()
-            {
+                    .is_err();
+            let mut var = if fresh_unbound {
                 Variable::default()
             } else {
                 self.declared_variable(name, flags.global)
                     .unwrap_or_default()
             };
             let outer_local = fresh_local
-                && self
-                    .locals
+                && self.locals[..scope_index.unwrap()]
                     .iter()
                     .any(|scope| scope.variables.contains_key(name));
             let shadow = outer_local && !flags.inherit && !self.shopt.localvar_inherit;
@@ -576,11 +578,13 @@ impl Session {
             let new_global = !fresh_local && !var.declared && !self.variables.contains_key(name);
             var.declared = true;
             let mut previous_local = fresh_local.then(|| {
-                let previous = bindings
-                    .variables
-                    .get(name)
-                    .cloned()
-                    .unwrap_or_else(|| self.variables.get(name).cloned());
+                let previous = bindings.variables.get(name).cloned().unwrap_or_else(|| {
+                    if fresh_unbound {
+                        None
+                    } else {
+                        self.variables.get(name).cloned()
+                    }
+                });
                 (scope_index.unwrap(), previous, self.opt_offset)
             });
             let mut record_scope = |s: &mut Session| {

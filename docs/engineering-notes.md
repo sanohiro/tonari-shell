@@ -1,5 +1,21 @@
 # Engineering notes / 開発知見
 
+## November 28 · Preserving diagnostic order and measuring pathname matching / 診断の順序とファイル名照合
+
+Keep complete lines visible before a builtin issues an operand diagnostic. Named `declare -p` and `shopt -p` flush the bulk writer on this path. Verbose `type` and `command -V` now deliver pending descriptions before reporting a missing name. Check `{ type printf __absent pwd; } 2>&1`. The missing-name diagnostic belongs between the two descriptions. Function listings, `hash -t` and `complete -p` use line-buffered output. A missing operand of `declare -f` affects the status without issuing a diagnostic. For plain ASCII bracket members in pathnames, test both the full directory expansion and a separate repeated scalar match. The first general matcher trial regressed on a native Xeon. A bitset and a direct check for a member followed by a star reduce work per entry. [Native results](benchmarks.md#listings-expansion-native)
+
+組み込みの正常出力と診断は、`2>&1` でも引数の順に出す。`type` と `command -V` では未定義の名前を報告する前に蓄積した説明を書き出す。`declare -f` で存在しない関数を指定した場合は、診断を追加せず終了値に反映する。角括弧globは最初の試作がLinuxのXeonで旧版を下回った。ASCIIの候補をビット列にまとめ、直後に星印がある場合の照合を短縮した。CPU・OSでコードを分けず、ファイル名列挙とスカラー比較を別に計測した。 [実機計測](benchmarks.md#listings-expansion-native)
+
+## November 27 · Buffered listings, brace products, local bindings and bracket globs / 組み込み一覧・ブレース展開・ローカル変数・glob
+
+On `0bf6aa0`, a checked 8 KiB output buffer substantially reduced writes from `shopt -p` and `export -p`. Flush pending stdout before an operand diagnostic as well as at the end. With `x=ok; declare -p x missing x 2>&1`, both reference shells print a declaration on each side of the diagnostic. Flushing only at the end moved the diagnostic to the front. For indexed arrays, formatting several elements into a reusable chunk also reduced CPU time. The array elements in a saved variable are already reference-counted.
+
+A two-range brace product with literal fragments can prepare inner spellings once and allocate each final word once. A fast path must preserve evaluation order, quoted fragments, pathname expansion and both expansion limits when falling back. Existing tests deliberately preserve a backslash produced by a mixed-case letter range. Local declarations can reuse the result of a failed binding lookup. When a fresh local has already been assigned a scope, only older scopes can hold an outer local of that name. A temporary scope created by a prefixed `eval` still requires name-dependent resolution. Ten and eighty locals per call gave different results against GNU Bash.
+
+A directory expansion reuses a compiled pattern for hundreds of names. A scalar `[[ $v == file_0[56]*.txt ]]` can construct a matcher for one value each time. Restricting the simple ASCII bracket-list change to pathname expansion preserved scalar performance. The timing and write counts are from experimental M1 builds. [Native measurements and controls](benchmarks.md#remaining-audit-review)
+
+一覧表示は末尾に加え、無効な引数の診断を出す直前にもバッファを書き出すと、`2>&1` の出力順と書き込み失敗時の終了値を保てる。数値添字の配列は整形した要素をまとめて書くとさらに速くなる。リテラルと二つの範囲から成るブレース展開では内側の表記を再利用できる。ローカル変数は既存の探索結果を再利用できるが、一時スコープの名前解決は変数ごとに決まる。単純な角括弧パターンのコンパイルは、同じパターンで多数のファイル名を照合する場合に効果があった。`[[ … ]]` まで同時に切り替えると遅くなった。 [計測条件と結果](benchmarks.md#remaining-audit-review)
+
 ## November 27 · Shipping the command cache and builtin writer / 補完キャッシュと書き込みエラー
 
 Store command names from successful PATH directory reads in a bounded byte buffer with offsets grouped by first byte. A cold query can still stop early or echo queued input. Cache only complete listings and keep explicit candidate listings in their original order. Match permissions, symlink targets and `EXECIGNORE` against the live candidate. On this Mac a full sort per directory cost more on the first Tab than first-byte buckets. The history picker can skip cached ASCII-only blocks after it has found a record boundary when any required search fragment contains Unicode. [Native PTY results](benchmarks.md#priority-implementation)

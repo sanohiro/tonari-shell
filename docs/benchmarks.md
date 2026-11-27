@@ -1,5 +1,68 @@
 # Startup and execution / 起動と実行性能
 
+<a id="listings-expansion-native"></a>
+
+## November 28 · Native release results for listings and expansion / 一覧表示と展開のリリース計測
+
+Distribution builds at `0bf6aa0` and `26c6542`. Each cell gives previous Tonari / current Tonari / Bash in median milliseconds. The driver rotates execution order with five warm-ups and 31 samples. Each shell sets up its data before a readiness handshake. The timed interval includes sourcing the workload and checking its result. macOS 27.2.1 uses GNU Bash 5.3.20 for script workloads and Apple Bash 3.2.57 for the directory glob. Both Ubuntu 24.04 runs use the system Bash 5.2.21. The directory contains 1,000 files and produces 200 matches. Compare the three binaries within each host. [Linux run A](https://github.com/sanohiro/tonari-shell/actions/runs/46020610963) · [Linux run B](https://github.com/sanohiro/tonari-shell/actions/runs/46020615875)
+
+| Workload | M1 | Linux A · AMD EPYC 9V74 | Linux B · AMD EPYC 9V74 |
+|---|---:|---:|---:|
+| All shell options ×200 | 14.854 / 3.231 / 16.751 | 8.978 / 1.984 / 9.397 | 8.974 / 1.982 / 9.404 |
+| 50 additional exports ×200 | 17.428 / 5.070 / 19.992 | 10.898 / 2.797 / 12.724 | 10.914 / 2.808 / 12.761 |
+| 1,000 indexed elements ×50 | 5.561 / 1.613 / 4.176 | 5.528 / 1.037 / 3.797 | 5.555 / 1.058 / 3.830 |
+| 2,600-word brace product ×20 | 10.428 / 1.834 / 13.325 | 12.008 / 2.640 / 15.645 | 12.062 / 2.652 / 15.673 |
+| Ten locals ×1,000 | 5.769 / 5.156 / 7.817 | 5.232 / 5.207 / 7.122 | 5.363 / 5.194 / 7.121 |
+| Eighty locals ×150 | 8.625 / 6.982 / 6.343 | 8.161 / 7.659 / 6.280 | 8.162 / 7.670 / 6.294 |
+| 1,000-file bracket glob ×50 | 22.889 / 19.658 / 23.235 | 15.420 / 13.996 / 16.722 | 15.729 / 14.056 / 16.789 |
+| Scalar bracket match ×4,000 | 3.374 / 3.297 / 6.776 | 2.349 / 2.463 / 6.086 | 2.345 / 2.457 / 6.092 |
+| Two builtin descriptions ×400 | 5.187 / 5.095 / 7.189 | 2.480 / 2.459 / 4.302 | 2.486 / 2.476 / 4.314 |
+
+The M1 executable grew from 1,765,104 to 1,781,616 bytes (+16,512) and links libSystem. Linux static PIE size went from 2,410,200 to 2,428,536 bytes (+18,336). On M1, a separate 41-sample comparison of two correct listing implementations took 2.320 ms with per-value formatting and 1.795 ms when short values needing no escaping went directly into the chunk. Large values stream to the outer writer. For braces the release reuses the first output row and needs no auxiliary vector of inner spellings.
+
+On the first Linux Xeon trial, sending the plain member list through the general bracket token loop took 10.142 ms against 9.518 ms in the previous release. The final implementation compiles ASCII members to a bitset and can decide a list followed by a star from the first remaining byte after checking the literal edges. The shared implementation also keeps scalar matches on their previous dispatch path. Eighty locals remain slower than Bash. The implementation keeps the existing scope representation. [Initial Xeon run](https://github.com/sanohiro/tonari-shell/actions/runs/46018237138)
+
+For short indices and values, copying up to seven bytes inline reduced the M1 median from 1.792 to 1.578 ms in a separate 41-sample comparison. Two Linux runs comparing that change on the same machine went from 2.130 to 1.368 ms on EPYC 7763 and from 1.669 to 1.054 ms on EPYC 9V74. The common implementation keeps larger fields on the slice copy path. A separate compatibility sweep compared 100 literal, quoted and computed two-range products against GNU Bash 5.3.20 on M1. All 1,135 argument lines matched. [EPYC 7763](https://github.com/sanohiro/tonari-shell/actions/runs/46019539382) · [EPYC 9V74](https://github.com/sanohiro/tonari-shell/actions/runs/46019555821)
+
+Before the short-field copy change, a separate full run on Intel Xeon 6975P-C measured 9.536 / 8.303 / 10.316 ms for the bracket glob and 14.321 / 3.951 / 2.838 ms for the indexed listing (previous / candidate / Bash). The EPYC ratios in the table are specific to those machines. [Xeon measurements](https://github.com/sanohiro/tonari-shell/actions/runs/46018854677) · [Additional native release run](https://github.com/sanohiro/tonari-shell/actions/runs/46021024951)
+
+Reproduce each row with `python3 tools/bench_scripts.py CURRENT --previous PREVIOUS --bash BASH --timing started --runs 31 --case NAME`. The `listings-expansion` suite in `tools/ci/native-bench.sh` lists all nine case names. The Linux job also verifies mixed output/diagnostic order, closed descriptors, brace products and indexed-array quoting.
+
+MacとLinuxで、同じホスト上の旧版・新版・Bashを交互に比較した。組み込み一覧では出力先を閉じたときの終了値と診断の順序も検証した。角括弧globは1,000ファイル中200件を展開する。ローカル変数80個の宣言にはBashより時間が掛かる。 [実測に使ったスクリプト](../tools/bench_scripts.py)
+
+
+<a id="remaining-audit-review"></a>
+
+## November 27 · Four proposals after PR #44 / PR #44 後の四案の追試
+
+Apple M1, macOS 27.2.1, native distribution builds based on `0bf6aa0`, Apple Bash 3.2.57 and GNU Bash 5.3.20 arm64. Each fresh shell used `--noprofile --norc`, a temporary HOME, `PATH=/usr/bin:/bin` and `LC_ALL=C`. It ran setup, wrote a readiness line and waited for a newline on stdin. The parent timed from releasing the shell to its exit, checking stdout, stderr and final status. The figures are median milliseconds after two warm-ups, with shell order shuffled each round. Use the separate single-call output checks for builtin statuses. These are reconstructed workloads for four proposals in the external audit, run on M1 only. Each trial was built outside the repository.
+
+| Workload | Repetitions per shell | Main | Trial | Apple Bash | GNU Bash |
+|---|---:|---:|---:|---:|---:|
+| `shopt -p`, all options | 200 | 14.957 | 3.254 | 11.118 | 16.514 |
+| `shopt -p`, 12 common names | 200 | 5.344 | 2.892 | 6.746 | 6.637 |
+| `export -p`, 50 added exports | 200 | 17.690 | 5.115 | 18.953 | 20.027 |
+| `declare -p a`, 200 indexed elements | 200 | 6.297 | 3.322 | 5.813 | 5.910 |
+| `declare -p a`, 1,000 indexed elements | 50 | 5.611 | 1.813 | 4.044 | 4.209 |
+| `declare -p a`, one element | 400 | 5.144 | 5.101 | 6.821 | 6.670 |
+| `set -- p_{a..z}_{0..99}` | 20 | 10.354 | 1.746 | 15.092 | 13.372 |
+| Ten local assignments including two arguments | 1,000 | 5.793 | 5.159 | 7.920 | 7.870 |
+| Eighty local assignments | 150 | 8.761 | 7.039 | 6.410 | 6.487 |
+| `set -- file_0[56]*.txt`, pathname-only trial | 50 | 23.513 | 20.343 | 23.647 | see below |
+| `set -- file_0[5-6]*.txt`, existing range matcher | 50 | 20.631 | 20.583 | 23.513 | — |
+| `[[ $v == file_0[56]*.txt ]]`, pathname-only trial | 4,000 | 3.351 | 3.318 | 9.523 | — |
+
+The table uses 21 samples per cell. The builtin and local rows use the refined listing/lookup trial. The brace row uses the initial two-range trial. In the final pathname-only build, an independent 11-sample brace run gave 10.366 / 1.712 / 13.387 ms for main / trial / GNU Bash. The main and experimental Tonari release executables were all 1,765,104 bytes. The final trial linked only libSystem. For the bracket pathname workload a separate five-sample run gave 23.471 / 20.109 / 3,428.476 ms with the local GNU Bash 5.3.20 build. A single expansion also took about 69 ms in that build. The Apple Bash control gives the more competitive comparison on this host. The cause of the GNU timing was not profiled.
+
+- **Listings.** Set up arrays once with `a=({0..999})` or `a=({0..199})`. Add exported names with `for ((j=0;j<50;++j)); do export "V$j=value$j"; done`. Redirect each listing to `/dev/null` inside an arithmetic loop. For the equal-length control, request `cdspell checkwinsize dotglob expand_aliases extglob histappend hostcomplete huponexit lithist nocaseglob nullglob promptvars`. All three released shells print 233 bytes and return 1 for this control. The unrestricted listing emits 56 / 34 / 59 lines on main / Apple / GNU. In separate instrumented builds, count each nonempty call to `StdoutFd::write` before its `libc::write`. Main/trial writes per command were 56/1 (all options), 12/1 (common options), 56/1 (exports) and 12/2 (1,000 elements). Each pair produced the same byte count. Buffering alone took 3.843 ms for the large array. Formatting indexed elements in chunks brought that to 1.813 ms. For `export -p`, buffering alone took 5.574 ms and borrowing shell binding names and skipping their unused value copies took 5.115 ms.
+- **Brace expansion.** Check all generated words against GNU Bash in both the C and UTF-8 locales. The timed product ends with `p_z_99` at position 2,600. The restricted trial accepts ordinary literal fragments and two numeric or same-case letter ranges, caches the inner range and checks a conservative bound on the output. The generic path retains substitutions, wildcard interpretation, and the documented mixed-case backslash behavior. The bare `{1..2600}` control took 1.685 / 1.663 ms on main / initial trial.
+- **Local bindings.** Call `f 7 8` in a loop. Its body for ten names is `local a=$1 b=$2 c=3 d=4 e=5 h=1 i0=2 j=3 k=4 m=5`; the larger body is one declaration assigning `x0=0` through `x79=79`. Reusing the failed lookup alone took 5.468 / 7.850 ms at ten / eighty names. Skipping the current and newer scopes during the outer-shadow check gave the table results. At eighty names the trial still took 8.5% longer than GNU Bash. No change to saved-binding data structures was measured.
+- **Bracket glob.** Create an APFS directory with `file_0000.txt` through `file_0999.txt`. Both bracket spellings select the same 200 names from `file_0500.txt` through `file_0699.txt`. With `v=file_0533.txt`, routing all bracket matches through the compiled matcher slowed scalar matching from 3.419 to 4.066 ms. Compiling only simple ASCII member lists during directory expansion produced the final rows. For the pathname row, the middle 50% was 23.149–23.671 ms on main and 20.250–20.602 ms in the trial. These elapsed times include directory reads, matching and assembling the ordered output.
+
+Sixteen existing end-to-end tests passed on the final trial, covering closed output, brace limits and effects, prefixed `eval`, local inheritance, quoting and globbing. Additional checks used C and `en_US.UTF-8`, including sparse array values containing quotes and newlines, export masking and declaration/diagnostic ordering. Apple Bash returned 0 on the three tested closed-output listings. Main, the trial and GNU Bash returned 1 and issued one diagnostic. A backslash generated by a mixed-case brace range remained literal in both Tonari builds. [Existing compatibility decision](compatibility/external-shell/shared-failures.md)
+
+M1実機で起動・配列作成・関数定義を計測の外に置き、シェル内で繰り返す時間を比較した。出力のある組み込みでは表示内容と書き込み回数も別に確認した。角括弧の2種類は同じ200件を返す。ローカル変数80個は試作後もGNU Bashを超えて時間が掛かる。この追試の対象は4案で、43ケース全体の再測定やLinuxの測定は含まない。
+
 <a id="priority-implementation"></a>
 
 ## November 27 · Repeated command completion and filtered history / 補完キャッシュと履歴の絞り込み

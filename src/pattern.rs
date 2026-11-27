@@ -92,6 +92,10 @@ pub(crate) enum Matcher<T> {
 
 impl<T: AsRef<str>> Matcher<T> {
     pub(crate) fn new(pattern: T) -> Self {
+        Self::compile(pattern, false)
+    }
+
+    fn compile(pattern: T, pathname: bool) -> Self {
         let text = pattern.as_ref();
         if !text.bytes().any(|b| matches!(b, b'?' | b'[' | b'\\' | 0)) {
             match text.split_once('*') {
@@ -105,7 +109,9 @@ impl<T: AsRef<str>> Matcher<T> {
                 }
             }
         }
-        if text.contains('[') && bracket::needs_parser(text.as_bytes()) {
+        if text.contains('[')
+            && (bracket::needs_parser(text.as_bytes()) || pathname && bracket::simple_list(text))
+        {
             return bracket::BracketPattern::new(text.as_bytes())
                 .map_or(Self::Invalid, |compiled| {
                     Self::Bracket(Box::new(compiled), pattern)
@@ -683,7 +689,7 @@ fn paths(
         }
         let extended = (grouped || options.nocaseglob)
             .then(|| extended::Pattern::for_path(part, grouped, options.nocaseglob, locale));
-        let matcher = Matcher::new(part);
+        let matcher = Matcher::compile(part, extended.is_none());
         // A final dot followed only by ASCII letters or digits is literal,
         // even if earlier characters require fnmatch. Check it once per name.
         let required_extension = if extended.is_none() && matches!(matcher, Matcher::Native(_)) {
@@ -898,6 +904,10 @@ mod tests {
             "雪🌱e\u{301}",
             "a/b",
             "a*b",
+            "5.txt",
+            "6雪.txt",
+            ".5.txt",
+            "p.txt",
         ];
         localized(|| {
             for source in [
@@ -925,9 +935,13 @@ mod tests {
                 ".**v",
                 r"a\*b",
                 "[!a]*",
+                "[56]*.txt",
+                "*.[ab]",
+                ".[56]*.txt",
+                "a[ab]a",
                 ".??*",
             ] {
-                let matcher = Matcher::new(source);
+                let matchers = [Matcher::new(source), Matcher::compile(source, true)];
                 let native = CString::new(source).unwrap();
                 for value in values {
                     let name = CString::new(value).unwrap();
@@ -935,11 +949,13 @@ mod tests {
                         let flags = if period { libc::FNM_PERIOD } else { 0 };
                         let expected =
                             unsafe { libc::fnmatch(native.as_ptr(), name.as_ptr(), flags) == 0 };
-                        assert_eq!(
-                            matcher.accepts(value.as_bytes(), period, None),
-                            expected,
-                            "{source:?} {value:?} {flags}"
-                        );
+                        for matcher in &matchers {
+                            assert_eq!(
+                                matcher.accepts(value.as_bytes(), period, None),
+                                expected,
+                                "{source:?} {value:?} {flags}"
+                            );
+                        }
                     }
                 }
             }

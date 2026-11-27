@@ -255,6 +255,69 @@ impl Siblings {
     }
 }
 
+// Restrict the product to inert fragments. Quoting, splitting, pathname
+// patterns and mixed-case letter ranges keep their existing expansion path.
+fn literal_fragment(parts: &[Part]) -> Option<&str> {
+    match parts {
+        [] => Some(""),
+        [Part::Text(s) | Part::Pattern(s)]
+            if s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')) =>
+        {
+            Some(s)
+        }
+        _ => None,
+    }
+}
+
+fn append_range_product(parts: &[Part], count: usize, result: &mut Vec<String>) -> Option<()> {
+    let mut ranges = parts.iter().enumerate().filter_map(|(index, part)| {
+        if let Part::Range(range) = part {
+            Some((index, range))
+        } else {
+            None
+        }
+    });
+    let (i, left) = ranges.next()?;
+    let (j, right) = ranges.next()?;
+    let prefix = literal_fragment(&parts[..i])?;
+    let middle = literal_fragment(&parts[i + 1..j])?;
+    let suffix = literal_fragment(&parts[j + 1..])?;
+    if [left, right].iter().any(|r| {
+        r.letters && (r.first as u8).is_ascii_uppercase() != (r.last as u8).is_ascii_uppercase()
+    }) {
+        return None;
+    }
+    // A signed i64 needs at most 20 decimal bytes before zero padding.
+    // Near the byte limit, fall back to accounting for actual expanded fields.
+    let max_word = (prefix.len() + middle.len() + suffix.len())
+        .saturating_add(left.width.max(20))
+        .saturating_add(right.width.max(20));
+    if max_word.saturating_mul(count) > MAX_BYTES {
+        return None;
+    }
+    result.reserve(count);
+    let start = result.len();
+    let mut head = [prefix, &left.value(0), middle].concat();
+    let head_len = head.len();
+    for n in 0..right.count() {
+        result.push([&head, right.value(n).as_str(), suffix].concat());
+    }
+    // Reuse the tails in the first row, including when this word was appended
+    // after earlier arguments. No auxiliary copy of the inner range is needed.
+    let first_row = start..result.len();
+    for n in 1..left.count() {
+        head.truncate(prefix.len());
+        head.push_str(&left.value(n));
+        head.push_str(middle);
+        for index in first_row.clone() {
+            let word = [head.as_str(), &result[index][head_len..]].concat();
+            result.push(word);
+        }
+    }
+    Some(())
+}
+
 pub fn append_fields(
     parts: Vec<Part>,
     env: &mut Expansion<'_>,
@@ -273,8 +336,12 @@ pub fn append_fields(
         result.extend((0..count).map(|i| range.value(i)));
         return Ok(());
     }
-    if word_count(&parts) > MAX_WORDS {
+    let count = word_count(&parts);
+    if count > MAX_WORDS {
         return Err("brace expansion exceeds word limit".into());
+    }
+    if append_range_product(&parts, count as usize, result).is_some() {
+        return Ok(());
     }
     let mut pending = Vec::new();
     let mut word = Some(parts);
