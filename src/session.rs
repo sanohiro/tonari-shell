@@ -534,7 +534,7 @@ impl Session {
         printf::run(self, args, None)
     }
 
-    pub fn read(&mut self, args: &[String], here: Option<(i32, &[u8])>) -> u8 {
+    pub fn read(&mut self, args: &[String], here: Option<(i32, &[u8])>) -> crate::Flow {
         read::run(self, args, here)
     }
 

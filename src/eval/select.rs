@@ -61,9 +61,13 @@ pub(super) fn run(
             } else {
                 eprint!("{prompt}");
             }
-            if s.read(&[], None) != 0 {
-                println!();
-                return Err(Flow::Continue(1));
+            match s.read(&[], None) {
+                Flow::Continue(0) => {}
+                Flow::Continue(_) => {
+                    println!();
+                    return Err(Flow::Continue(1));
+                }
+                flow => return Err(flow),
             }
             let Some(reply) = s.get("REPLY") else {
                 return Err(Flow::Continue(1));

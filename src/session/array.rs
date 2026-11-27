@@ -660,6 +660,22 @@ impl Session {
         Ok(target)
     }
 
+    // Store each converted integer immediately: the next read field can refer to it.
+    pub(super) fn assign_input_element(
+        &mut self,
+        name: &str,
+        index: i64,
+        text: &str,
+    ) -> Result<(), &'static str> {
+        let value = if self.integer(name) && Self::plain_decimal(text).is_none() {
+            crate::arithmetic::run(text, self)?.to_string()
+        } else {
+            text.to_owned()
+        };
+        self.assign_element(name, index, value);
+        Ok(())
+    }
+
     pub fn replace_array(&mut self, name: &str, mut values: Vec<String>) {
         if let Some(upper) = self.variables.get(name).and_then(|v| v.letter_case) {
             for v in &mut values {

@@ -169,7 +169,12 @@ pub(crate) fn run(
         .map(|(_, bytes)| bytes);
     options.name = &destination;
     let origin = i64::from(options.origin.unwrap_or(0));
-    if options.limit == 0 && options.callback.is_none() {
+    let integer = session.integer(options.name);
+    let letter_case = session
+        .variables
+        .get(options.name)
+        .and_then(|v| v.letter_case);
+    if options.limit == 0 && options.callback.is_none() && !integer {
         let result = if options.origin.is_some() {
             let mut var = session
                 .declared_variable(options.name, false)
@@ -179,16 +184,22 @@ pub(crate) fn run(
             let elements = var.make_array();
             let mut index = origin;
             let result = read_all(&options, here, |line| {
-                elements.insert(index, line.to_owned());
+                elements.insert(index, session.convert_case(line.to_owned(), letter_case));
                 index += 1;
             });
             session.variables.insert(options.name.into(), var);
             result
         } else {
             let mut lines = Records::default();
-            read_all(&options, here, |line| lines.push(line)).map(|()| {
-                session.store_elements(options.name, Elements::Records(lines), false);
-            })
+            let result = read_all(&options, here, |line| {
+                if letter_case.is_some() {
+                    lines.push(&session.convert_case(line.to_owned(), letter_case));
+                } else {
+                    lines.push(line);
+                }
+            });
+            session.store_elements(options.name, Elements::Records(lines), false);
+            result
         };
         return match result {
             Ok(()) => Flow::Continue(0),
@@ -272,7 +283,10 @@ pub(crate) fn run(
             }
             input = Input::new(fd);
         }
-        session.assign_element(options.name, index, line.into());
+        if let Err(error) = session.assign_input_element(options.name, index, line) {
+            diagnostic!("{command}: {error}");
+            return Flow::Discard(1);
+        }
     }
     Flow::Continue(0)
 }
