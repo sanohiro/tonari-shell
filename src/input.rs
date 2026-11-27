@@ -1,5 +1,7 @@
 mod eval;
+mod lookahead;
 pub(crate) use eval::{EvalCache, builtin as eval_builtin};
+use lookahead::{buffered_compound, file_group, whole_group};
 
 use crate::execute::fd::PrivateFile;
 use std::fs::File;
@@ -27,50 +29,6 @@ fn stdin_reader() -> io::Result<(BufReader<PrivateFile>, bool)> {
         BufReader::with_capacity(1, file)
     };
     Ok((reader, seekable))
-}
-
-// Installers and version managers often wrap a whole script in one brace group.
-// Bash reads such a unit before running any of it. Parse that unit once rather
-// than reparsing its growing prefix after every newline.
-fn starts_group(bytes: &[u8]) -> bool {
-    bytes
-        .split(|&c| c == b'\n')
-        .map(<[u8]>::trim_ascii_start)
-        .find(|line| !line.is_empty() && !line.starts_with(b"#"))
-        .is_some_and(|line| line[0] == b'{' && line.get(1).is_none_or(u8::is_ascii_whitespace))
-}
-
-fn whole_group(session: &Session, text: &str, first_line: usize) -> Option<Vec<parser::Statement>> {
-    if !starts_group(text.as_bytes()) {
-        return None;
-    }
-    let program = parser::session_source_at(text, false, session, first_line).ok()?;
-    if matches!(program.as_slice(), [s] if matches!(s.command, parser::Command::Group(_))) {
-        Some(program)
-    } else {
-        None
-    }
-}
-
-fn file_group(
-    session: &Session,
-    file: &File,
-    meta: &std::fs::Metadata,
-) -> Option<Vec<parser::Statement>> {
-    if !meta.is_file() || !(32 * 1024..=8 * 1024 * 1024).contains(&meta.len()) {
-        return None;
-    }
-    let mut prefix = [0; 4096];
-    file.read_exact_at(&mut prefix, 0).ok()?;
-    if !starts_group(&prefix) {
-        return None;
-    }
-    let mut bytes = vec![0; meta.len() as usize];
-    bytes[..prefix.len()].copy_from_slice(&prefix);
-    file.read_exact_at(&mut bytes[prefix.len()..], prefix.len() as u64)
-        .ok()?;
-    // pread preserves the offset for the ordinary incremental fallback.
-    whole_group(session, std::str::from_utf8(&bytes).ok()?, 1)
 }
 
 fn executable_header(bytes: &[u8]) -> bool {
@@ -238,126 +196,6 @@ fn history_input<'a>(
     Some(event.text)
 }
 
-// A sourced profile often has a long compound command. Try whole units already
-// in the buffer, leaving following commands for the current alias/options state.
-// On a miss report the distance inspected, so string input can bound repeated scans.
-fn buffered_compound<P: AsRef<[parser::Statement]>>(
-    first: &str,
-    buffered: &[u8],
-    at_eof: bool,
-    aliases: bool,
-    mut parse: impl FnMut(usize) -> Result<P, parser::Error>,
-) -> Result<(P, usize, usize), usize> {
-    let header = first.lines().next().ok_or(0usize)?.trim_ascii_start();
-    let key = header
-        .split(|c: char| c.is_ascii_whitespace() || c == ';')
-        .next()
-        .unwrap_or_default();
-    let close: &[u8] = match key {
-        "if" => b"fi",
-        "case" => b"esac",
-        "while" | "until" | "for" | "select" => b"done",
-        "function" | "{" => b"}",
-        _ if header.contains("()") => b"}",
-        _ => return Err(0),
-    };
-    let mut start = 0;
-    let mut nested = 0usize;
-    let mut needs_open_brace = close == b"}" && !header.contains('{');
-    let mut deferred = None;
-    let mut probe = |size, lines| {
-        // Only the final ordinary read may emit an unterminated here-doc warning.
-        match parse(size) {
-            Ok(program) if matches!(program.as_ref(), [s] if aliases || s.location.end > first.len()) => {
-                Ok(Some((program, size, lines)))
-            }
-            // Expanded alias locations describe shell text, not physical input.
-            Ok(_) if aliases => Err(size),
-            Ok(program) => {
-                // Quoted text and here-documents may look like nested headers.
-                // If the scan overshot, the parser already located the first
-                // command. Reparse its physical line boundary so option and
-                // alias changes still take effect before the following read.
-                let end = program
-                    .as_ref()
-                    .first()
-                    .and_then(|s| s.location.end.checked_sub(first.len()))
-                    .ok_or(size)?;
-                let newline =
-                    memchr::memchr(b'\n', buffered.get(end..size).ok_or(size)?).ok_or(size)?;
-                let boundary = end + newline + 1;
-                if boundary >= size {
-                    return Err(size);
-                }
-                let unit = parse(boundary).map_err(|_| size)?;
-                if !matches!(unit.as_ref(), [s] if s.location.end > first.len()) {
-                    return Err(size);
-                }
-                let lines = memchr::memchr_iter(b'\n', &buffered[..boundary]).count();
-                Ok(Some((unit, boundary, lines)))
-            }
-            Err(parser::Error::Incomplete(_) | parser::Error::HereDoc(_)) => Ok(None),
-            _ => Err(size),
-        }
-    };
-    let final_line = at_eof && !buffered.is_empty() && !buffered.ends_with(b"\n");
-    let ends = memchr::memchr_iter(b'\n', buffered).chain(final_line.then_some(buffered.len()));
-    for (i, end) in ends.enumerate() {
-        let size = (end + 1).min(buffered.len());
-        let next = &buffered[start..end];
-        start = size;
-        // A closing reserved word is a token. Suffixes such as `${value}`
-        // and `config_done` cannot complete the compound.
-        let separator = |b: &u8| b.is_ascii_whitespace() || b";&|()<>".contains(b);
-        let next = next.trim_ascii();
-        // Inner terminators otherwise cause a full reparse of a growing prefix
-        // at every fi/done/brace. Count common nested headers as a hint only.
-        // Quotes and here-documents can resemble shell code. The parser still
-        // validates the entire unit, and a missed boundary uses the line reader.
-        let word = next.split(|b| b.is_ascii_whitespace() || *b == b';').next();
-        let opens = match close {
-            b"fi" => word == Some(b"if"),
-            b"esac" => word == Some(b"case"),
-            b"done" => matches!(word, Some(b"for" | b"while" | b"until" | b"select")),
-            _ if needs_open_brace && next.starts_with(b"{") => {
-                needs_open_brace = false;
-                false
-            }
-            _ => {
-                next == b"{"
-                    || next.ends_with(b"{")
-                        && std::str::from_utf8(next).is_ok_and(parser::opens_function)
-            }
-        };
-        nested += usize::from(opens);
-        let begins = next
-            .strip_prefix(close)
-            .is_some_and(|rest| rest.first().is_none_or(separator));
-        let ends = next
-            .strip_suffix(close)
-            .is_some_and(|rest| rest.last().is_none_or(separator));
-        if !begins && !ends {
-            continue;
-        }
-        if nested > 0 {
-            nested -= 1;
-            deferred = Some((size, i + 1));
-            continue;
-        }
-        deferred = None;
-        if let Some(unit) = probe(size, i + 1)? {
-            return Ok(unit);
-        }
-    }
-    // A literal header inside a quote or here-document can hide the outer close.
-    if let Some((size, lines)) = deferred
-        && let Some(unit) = probe(size, lines)?
-    {
-        return Ok(unit);
-    }
-    Err(buffered.len())
-}
-
 // Only use a stored scalar as the source. Dynamic parameters, namerefs,
 // arrays, unset variables and arithmetic run through ordinary expansion.
 fn assign_buffered_scalar(session: &mut Session, command: &str, scratch: &mut String) -> bool {
@@ -383,30 +221,67 @@ fn continues_single_quote(previous: Option<char>, line: &[u8]) -> bool {
 }
 
 enum Parsed<P> {
-    Program(P),
-    More(Option<parser::HereDocHint>),
-    Recovered,
+    Execute(P),
+    ReadMore,
+    Skip,
     Failed(Flow),
 }
 
-fn parsed<P>(
-    result: Result<P, parser::Error>,
-    more: bool,
-    session: &Session,
-    check: bool,
-    line: usize,
-) -> Parsed<P> {
-    match result {
-        Ok(program) => Parsed::Program(program),
-        Err(parser::Error::HereDoc(hint)) if more => Parsed::More(Some(hint)),
-        Err(parser::Error::Incomplete(_)) if more => Parsed::More(None),
-        Err(e @ parser::Error::ArrayToken)
-            if !check && !session.posix && !session.errexit && !session.noexec =>
-        {
-            syntax_error(session, e, line);
-            Parsed::Recovered
+// Both file and string inputs execute one complete unit at a time. The initial
+// status is visible to the first command, but empty input returns success.
+struct ScriptState {
+    status: u8,
+    ran: bool,
+    history_quote: Option<char>,
+    here_doc: Option<parser::HereDocHint>,
+}
+
+impl ScriptState {
+    fn new(status: u8) -> Self {
+        Self {
+            status,
+            ran: false,
+            history_quote: None,
+            here_doc: None,
         }
-        Err(e) => Parsed::Failed(syntax_error(session, e, line)),
+    }
+
+    fn record(&mut self, status: u8) {
+        self.status = status;
+        self.ran = true;
+    }
+
+    fn finish(self) -> Flow {
+        Flow::Continue(if self.ran { self.status } else { 0 })
+    }
+
+    fn parsed<P: AsRef<[parser::Statement]>>(
+        &mut self,
+        result: Result<P, parser::Error>,
+        more: bool,
+        session: &mut Session,
+        check: bool,
+        line: usize,
+    ) -> Parsed<P> {
+        self.history_quote = result.as_ref().err().and_then(parser::Error::pending_quote);
+        match result {
+            Ok(p) if !check && !p.as_ref().is_empty() => Parsed::Execute(p),
+            Ok(_) => Parsed::Skip,
+            Err(parser::Error::HereDoc(hint)) if more => {
+                self.here_doc = Some(hint);
+                Parsed::ReadMore
+            }
+            Err(parser::Error::Incomplete(_)) if more => Parsed::ReadMore,
+            Err(e @ parser::Error::ArrayToken)
+                if !check && !session.posix && !session.errexit && !session.noexec =>
+            {
+                syntax_error(session, e, line);
+                self.record(1);
+                session.pipe_status.single(1);
+                Parsed::Skip
+            }
+            Err(e) => Parsed::Failed(syntax_error(session, e, line)),
+        }
     }
 }
 
@@ -416,15 +291,13 @@ fn run(
     mut shared_offset: bool,
     from_stdin: bool,
     file_len: Option<u64>,
-    mut status: u8,
+    status: u8,
     check: bool,
 ) -> Flow {
     let mut assignment_value = String::new();
     let mut base_line = 1;
     let mut input = Vec::new();
-    let mut here_doc: Option<parser::HereDocHint> = None;
-    let mut history_quote = None;
-    let mut ran = false;
+    let mut state = ScriptState::new(status);
     loop {
         let line_start = input.len();
         let n = match reader.read_until(b'\n', &mut input) {
@@ -440,7 +313,7 @@ fn run(
             break;
         }
         if n != 0
-            && here_doc.is_none()
+            && state.here_doc.is_none()
             && session.histexpand
             && session.history_enabled
             && session.source_depth == 0
@@ -448,7 +321,7 @@ fn run(
             let Ok(line) = std::str::from_utf8(&input[line_start..]) else {
                 return error("expected UTF-8 command text", 2);
             };
-            match history_input(session, line, history_quote) {
+            match history_input(session, line, state.history_quote) {
                 Some(std::borrow::Cow::Owned(replacement)) => {
                     input.truncate(line_start);
                     input.extend_from_slice(replacement.as_bytes());
@@ -461,7 +334,7 @@ fn run(
             }
         }
         if n != 0
-            && continues_single_quote(history_quote, &input[line_start..])
+            && continues_single_quote(state.history_quote, &input[line_start..])
             && !session.reads_aliases()
         {
             if std::str::from_utf8(&input[line_start..]).is_err() {
@@ -469,14 +342,14 @@ fn run(
             }
             continue;
         }
-        if let Some(hint) = &mut here_doc {
+        if let Some(hint) = &mut state.here_doc {
             let Ok(line) = std::str::from_utf8(&input[line_start..]) else {
                 return error("expected UTF-8 command text", 2);
             };
             if n != 0 && !hint.may_finish(line) {
                 continue;
             }
-            here_doc = None;
+            state.here_doc = None;
         }
         let Ok(text) = std::str::from_utf8(&input) else {
             return error("expected UTF-8 command text", 2);
@@ -516,8 +389,7 @@ fn run(
             session.pipe_status.single(0);
             session.command_number += usize::from(session.source_depth == 0);
             session.substitutions.finish(session.substitutions.scope());
-            ran = true;
-            status = 0;
+            state.record(0);
             base_line += 1;
             input.clear();
             continue;
@@ -574,19 +446,11 @@ fn run(
                 result = Ok(program);
             }
         }
-        history_quote = result.as_ref().err().and_then(parser::Error::pending_quote);
-        match parsed(result, n != 0, session, check, base_line) {
-            Parsed::More(hint) => {
-                here_doc = hint;
-                continue;
-            }
-            Parsed::Recovered => {
-                status = 1;
-                session.pipe_status.single(status);
-                ran = true;
-            }
+        match state.parsed(result, n != 0, session, check, base_line) {
+            Parsed::ReadMore => continue,
+            Parsed::Skip => {}
             Parsed::Failed(flow) => return flow,
-            Parsed::Program(program) if !program.is_empty() && !check => {
+            Parsed::Execute(program) => {
                 if shared_offset && !reader.buffer().is_empty() {
                     // Unlike stream_position(), this discards the read-ahead buffer.
                     #[allow(clippy::seek_from_current)]
@@ -594,11 +458,10 @@ fn run(
                         return error(e, 1);
                     }
                 }
-                ran = true;
                 let remember = session.source_depth == 0
                     && !session.interactive
                     && session.begin_history_line(text);
-                let flow = execute_program(session, program, status, false);
+                let flow = execute_program(session, program, state.status, false);
                 // A permanent redirect can change fd 0 from a regular file to a
                 // pipe or the reverse. Named scripts keep their private reader.
                 if from_stdin && std::mem::take(&mut session.stdin_replaced) {
@@ -616,11 +479,10 @@ fn run(
                     return flow;
                 }
                 match flow {
-                    Flow::Discard(code) | Flow::Continue(code) => status = code,
+                    Flow::Discard(code) | Flow::Continue(code) => state.record(code),
                     other => return other,
                 }
             }
-            Parsed::Program(_) => {}
         }
         base_line += text.bytes().filter(|&b| b == b'\n').count();
         input.clear();
@@ -628,7 +490,7 @@ fn run(
             break;
         }
     }
-    Flow::Continue(if ran { status } else { 0 })
+    state.finish()
 }
 
 // A syntax error on a later physical line must not undo an already executed
@@ -636,14 +498,13 @@ fn run(
 pub fn text(
     session: &mut Session,
     source: &str,
-    mut status: u8,
+    status: u8,
     tail: bool,
     check: bool,
     eval_line: Option<usize>,
 ) -> Flow {
     let first_line = eval_line.unwrap_or(1);
     if !session.verbose
-        && source.len() >= 32 * 1024
         && let Some(program) = whole_group(session, source, first_line)
     {
         return if check {
@@ -657,9 +518,7 @@ pub fn text(
     }
     let mut start = 0;
     let mut end = 0;
-    let mut here_doc: Option<parser::HereDocHint> = None;
-    let mut history_quote = None;
-    let mut ran = false;
+    let mut state = ScriptState::new(status);
     let mut base_line = first_line;
     let mut line_number = first_line - 1;
     // Successful lookahead consumes a command. Across misses, allow one
@@ -685,8 +544,8 @@ pub fn text(
             && session.histexpand
             && session.history_enabled
             && (!session.command_string || session.command_history_expansion);
-        if expand_history && here_doc.is_none() {
-            match history_input(session, line, history_quote) {
+        if expand_history && state.here_doc.is_none() {
+            match history_input(session, line, state.history_quote) {
                 Some(std::borrow::Cow::Borrowed(_)) => {
                     if let Some(edited) = &mut edited {
                         edited.push_str(line);
@@ -701,15 +560,20 @@ pub fn text(
         }
         if !last
             && !expand_history
-            && continues_single_quote(history_quote, line.as_bytes())
+            && continues_single_quote(state.history_quote, line.as_bytes())
             && !session.reads_aliases()
         {
             continue;
         }
-        if !last && here_doc.as_mut().is_some_and(|hint| !hint.may_finish(line)) {
+        if !last
+            && state
+                .here_doc
+                .as_mut()
+                .is_some_and(|hint| !hint.may_finish(line))
+        {
             continue;
         }
-        here_doc = None;
+        state.here_doc = None;
         let mut text = edited.as_deref().unwrap_or(&source[start..end]);
         if new_command && blank_or_comment(text, session) {
             if !check
@@ -779,40 +643,30 @@ pub fn text(
                 }
             }
         }
-        history_quote = result.as_ref().err().and_then(parser::Error::pending_quote);
-        match parsed(result, !last, session, check, base_line) {
-            Parsed::More(hint) => {
-                here_doc = hint;
-                continue;
-            }
-            Parsed::Recovered => {
-                status = 1;
-                session.pipe_status.single(status);
-                ran = true;
-            }
+        match state.parsed(result, !last, session, check, base_line) {
+            Parsed::ReadMore => continue,
+            Parsed::Skip => {}
             Parsed::Failed(flow) => return flow,
-            Parsed::Program(program) if !program.as_ref().is_empty() && !check => {
-                ran = true;
+            Parsed::Execute(program) => {
                 let remember = tail
                     && (!session.interactive || session.command_history_expansion)
                     && session.begin_history_line(text);
-                let flow = program.run(session, status, tail && last);
+                let flow = program.run(session, state.status, tail && last);
                 session.command_number += usize::from(tail && !session.interactive);
                 if remember {
                     session.finish_history_line();
                 }
                 match flow {
-                    Flow::Discard(code) | Flow::Continue(code) => status = code,
+                    Flow::Discard(code) | Flow::Continue(code) => state.record(code),
                     other => return other,
                 }
             }
-            Parsed::Program(_) => {}
         }
         base_line = line_number + 1;
         start = end;
         edited = None;
     }
-    Flow::Continue(if ran { status } else { 0 })
+    state.finish()
 }
 
 pub(crate) fn print_script(session: &Session, input: crate::cli::Input) -> u8 {
