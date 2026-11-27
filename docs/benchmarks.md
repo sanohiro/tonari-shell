@@ -1,5 +1,28 @@
 # Startup and execution / 起動と実行性能
 
+<a id="editor-binding-starts"></a>
+
+## 2026-11-27 · Configured key sequences, editing and undo / キーバインドと編集
+
+Native release latency from input until the expected edit was visible, median/p95 in ms. The 256-binding fixture verifies the complete buffer after typing 3,073 ASCII bytes or 2,926 UTF-8 bytes. M1 used Bash 5.3.20 with 41 burst and 31 edit samples. Linux x86-64 used Bash 5.2.21 with 31 burst and 15 single-CPU edit samples.
+
+| Host and operation | Previous | Current | Bash |
+|---|---:|---:|---:|
+| M1, ASCII typeahead | 1.951/2.451 | 1.680/1.964 | 5.472/6.565 |
+| M1, UTF-8 typeahead | 1.921/2.658 | 1.653/2.413 | 5.528/6.759 |
+| M1, append | 0.029/0.079 | 0.029/0.068 | 0.743/1.443 |
+| M1, overwrite | 0.104/0.272 | 0.098/0.202 | 3.554/5.511 |
+| M1, kill and yank | 0.095/0.379 | 0.098/0.593 | 3.909/6.341 |
+| M1, IME at head | 0.073/0.119 | 0.074/0.268 | 1.531/1.945 |
+| M1, Alt-. many | 0.060/0.165 | 0.054/0.089 | 0.369/0.947 |
+| M1, Undo + type into 1 MiB line | 0.038/0.098 | 0.035/0.074 | 29.863/41.001 |
+| Linux, ASCII typeahead | 2.644/2.926 | 2.422/2.722 | 7.837/8.778 |
+| Linux, UTF-8 typeahead | 2.777/2.801 | 2.584/2.599 | 8.467/8.542 |
+| Linux, one CPU, Alt-. many | 0.060/0.066 | 0.061/0.083 | 0.491/0.552 |
+| Linux, one CPU, Undo + type into 1 MiB line | 0.077/0.089 | 0.079/0.087 | 11.590/14.960 |
+
+Both Tonari releases registered all 256 bindings. A 61-sample M1 trial of checking the first-byte index a second time during full sequence lookup yielded 0.039 → 0.041 ms for character motion and 0.096 → 0.098 ms for overwrite. Only callers that need the single-byte answer use the index. PTY の長い入力では双方向の読み書きを進め、描画待ちと入力待ちが互いを塞がないようにした。計測は \`tools/bench_editing.py --binding-bursts\`、\`tools/bench_edit_actions.py\`、\`tools/bench_completion.py --callback\` で再現できる。Linux 静的 PIE は 2,429,560 → 2,430,104 バイト、M1 は 1,748,896 バイト。 [Native Linux results for 73741c2](https://github.com/sanohiro/tonari-shell/actions/runs/45944681080)
+
 <a id="shell-child-state"></a>
 
 ## 2026-11-27 · Shell child setup, traps and wait / 子プロセスとシグナル
