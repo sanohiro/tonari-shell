@@ -1413,6 +1413,24 @@ f"""
             self.assertEqual(result.read_text(), "ready\n")
             self.assertEqual(capture.read_text().splitlines(), ["猫🌸ZZ", "3", "0"])
 
+    def test_child_environment_with_many_private_variables(self):
+        code = """for ((i=0;i<256;i++)); do printf -v "private_$i" %d "$i"; done
+export shared=first
+/usr/bin/printenv shared
+private_7=changed; shared=second; /usr/bin/printenv shared
+/usr/bin/printenv private_7 || echo private
+set -a; private_7+=promoted; set +a; /usr/bin/printenv private_7
+f() { local shared=local; /usr/bin/printenv shared; }; f
+/usr/bin/printenv shared
+export -n LC_ALL; /usr/bin/printenv LC_ALL || echo masked
+export -n shared; /usr/bin/printenv shared || echo hidden
+private_8=prefix /usr/bin/printenv private_8
+/usr/bin/printenv private_8 || echo restored
+unset private_7; /usr/bin/printenv private_7 || echo unset
+"""
+        self.compare(code, 0, b"first\nsecond\nprivate\nchangedpromoted\nlocal\nsecond\n"
+                              b"masked\nhidden\nprefix\nrestored\nunset\n")
+
     def test_executable_text_without_shebang(self):
         script = self.cwd / "plain"
         script.write_text('args=("two words" "$1"); printf "<%s><%s>\\n" "$0" "${args[*]}"; exit 7\n')

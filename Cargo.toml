@@ -13,6 +13,7 @@ tz-rs = "0.7.3"
 memchr = { version = "2.8", default-features = false }
 unicode-width = { version = "0.2", default-features = false }
 tonari-time-locales = { path = "crates/time-locales" }
+itoa = "1"
 
 [target.'cfg(all(target_os = "linux", target_env = "musl"))'.dependencies]
 dlmalloc = { version = "0.2.14", features = ["global"] }
