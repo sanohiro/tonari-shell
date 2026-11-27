@@ -1,5 +1,13 @@
 # Engineering notes / 開発知見
 
+<a id="shared-shell-rules"></a>
+
+## 2026-11-27 · Sharing shell rules / シェルの判定と責務の整理
+
+Native completion needs decoded words. A Bash completion callback needs the same boundaries and the original quotes and backslashes in `COMP_WORDS`. Both now use the same quote transitions. The regression `completion_scanners_share_quoted_word_boundaries` checks both outputs for empty quotes, an escaped word break, and a pipe inside quotes. The lexer, brace expander, array parser and arithmetic reader also share the ASCII name continuation rule. The grammar at each call site still decides whether a digit can start an operand.
+
+端末モードの復元、キー列の再生、ペーストの読み取りを `editor/input.rs` にまとめた。逆検索の保留中クエリと直近の一致は、検索セッションが所有する。子プロセスの終了・シグナル終了・停止・再開は同じ列挙型で解釈し、ジョブ制御には停止したシグナル番号を渡す。通常の待機は終了ステータスを返し、割り込み可能な待機は既存のシグナルマスクを使用する。端末サイズの取得と、数値・時刻用のロケール名の解釈も各1か所に集約した。全336ロケールに C と未知の名前を加え、素の名前とコードセット付きの計676通りで数値出力が旧版と一致することを確認した。[変更前後のネイティブ実測](benchmarks.md#shared-shell-rules)
+
 <a id="runtime-audit-v3"></a>
 
 ## 2026-11-27 · Third runtime audit / 第3回監査
