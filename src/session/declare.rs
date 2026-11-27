@@ -1,4 +1,4 @@
-use std::io::{self, Write};
+use std::io::Write;
 use std::rc::Rc;
 
 use super::{LetterCase, Session, Variable, is_identifier, print_attribute};
@@ -31,7 +31,7 @@ fn declare_functions(
     flags: &Options,
     readonly: bool,
 ) -> crate::Flow {
-    let mut out = io::stdout().lock();
+    let mut out = crate::builtins::stdout_for(command);
     let mut status = 0;
     if operands.is_empty() {
         for name in session.functions.keys() {
@@ -279,7 +279,7 @@ fn print_variables(
     } else {
         operands
     };
-    let mut out = io::stdout().lock();
+    let mut out = crate::builtins::stdout_for(command);
     let mut status = 0;
     if local
         && operands.is_empty()

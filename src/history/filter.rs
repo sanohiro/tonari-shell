@@ -129,6 +129,7 @@ impl<'a> Filter<'a> {
             .map_or("", |s| s.as_ref());
         let non_ascii = anchor.bytes().find(|b| !b.is_ascii());
         let reverse = memmem::FinderRev::new(anchor.as_bytes());
+        let needs_unicode = raw.iter().any(|s| !s.is_ascii());
         const BLOCK: usize = 128 * 1024;
         let mut width = BLOCK;
         while self.end > 0 {
@@ -137,9 +138,11 @@ impl<'a> Filter<'a> {
             }
             let start = self.end.saturating_sub(width as u64);
             let size = (self.end - start) as usize;
-            let buf = if let Some((bytes, _)) =
+            let mut ascii_only = false;
+            let buf = if let Some((bytes, pages)) =
                 self.cached.and_then(|window| window.range(start, size))
             {
+                ascii_only = needs_unicode && pages.iter().all(|&v| !v);
                 bytes
             } else {
                 self.buf.resize(size, 0);
@@ -172,15 +175,18 @@ impl<'a> Filter<'a> {
             };
             width = BLOCK;
             self.end = start + boundary as u64;
+            if ascii_only {
+                continue;
+            }
             let block = &buf[boundary..];
             let Some(end) = memrchr(b'\n', block) else {
                 continue;
             };
             let mut rows = &block[..end]; // ignore the unfinished journal tail
             if non_ascii.is_some_and(|b| memchr(b, rows).is_none())
-                || !raw
-                    .iter()
-                    .all(|s| s.as_ref() == anchor || memmem::find(rows, s.as_bytes()).is_some())
+                || !raw.iter().all(|term| {
+                    term.as_ref() == anchor || memmem::find(rows, term.as_bytes()).is_some()
+                })
             {
                 continue;
             }

@@ -1,5 +1,23 @@
 # Engineering notes / 開発知見
 
+## November 27 · Shipping the command cache and builtin writer / 補完キャッシュと書き込みエラー
+
+Store command names from successful PATH directory reads in a bounded byte buffer with offsets grouped by first byte. A cold query can still stop early or echo queued input. Cache only complete listings and keep explicit candidate listings in their original order. Match permissions, symlink targets and `EXECIGNORE` against the live candidate. On this Mac a full sort per directory cost more on the first Tab than first-byte buckets. The history picker can skip cached ASCII-only blocks after it has found a record boundary when any required search fragment contains Unicode. [Native PTY results](benchmarks.md#priority-implementation)
+
+初回Tabで列挙した名前をまとめて保持し、先頭バイトで候補を絞る。パス、ディレクトリの識別子、更新・変更時刻を照合する。途中で打ち切った列挙や読み取りエラーはキャッシュしない。組み込みの出力は書き込み時にOSのエラーを返し、出力が空の操作は成功する。`printf` と `umask` は完成したバイト列をまとめて書く。関数の定義元は `BASH_ARGV0` が変わったときに更新する。行番号の索引は入れ子の置換を含みうる複数行の入力で作る。PATHの候補用バッファは長い名前にも対応し、macOSで実行モードビットのないACL付きファイルを飛ばして次の候補を選ぶ。 [Behavior witnesses](compatibility.md#builtin-output-and-acl)
+
+## November 27 · Completion, shared input and builtin output / 補完・共有入力・組み込みの出力
+
+On `06a998a`, writing to a closed stdout could succeed silently in at least eight builtins. Run `printf '%s' hi >&-` and inspect both the status and stderr. The same failure occurred with `pwd`, `umask`, `hash`, listing a defined `alias`, `dirs`, `times` and `declare -p`. GNU Bash 5.3.20 returned 1 with a diagnostic in all eight cases. Tonari already reported an error for the short `printf '%s\n' hi` path. An empty alias listing and `printf -v v '%s' hi` correctly succeeded with stdout closed. A shared output writer must propagate errors on bytes actually written and preserve the success of operations that produce no output.
+
+閉じた標準出力への書き込みで、少なくとも上記8種類が成功を返した。終了ステータスと標準エラーの両方を検証し、同じ組み込みでも表示、変数への代入、出力が空の場合を区別する。
+
+FD の番号から残りの空き数を推定することはできない。上限16で4〜15を継承した子では、出力ファイルを開くとFD 3を取得できたが、標準出力を複製する空きはなかった。`pwd >data` は現行Tonariで終了1となり既存内容を保持し、GNU Bash 5.3.20では終了1でファイルが空になった。先に開くと `O_TRUNC` の副作用は戻せない。また、親子が共有する入力ファイルから子が `read` した直後、親は同じ読み取り位置から次の行を読める。子を組み込みの `kill -STOP $$` で停止し、親が1行読んでから再開すると、両シェルとも子は3行目を受け取った。外部コマンドの起動時だけ巻き戻す方式では、この読み順を保証できない。 [FD-limit regression](../tests/shell.py)
+
+A PATH cache may reuse names while checking candidate permissions and symlink targets on every match. Include directory identity and change time when validating the listing. On this Mac, removing directory read permission left its mtime unchanged and prevented enumeration, while a known entry still resolved. Preserve early exit and input polling on the first scan. For history search, `Window::range` provides a slice of 16 KiB page flags. An all-ASCII span can skip a required non-ASCII term once the picker has advanced to a complete record boundary. Measure the filtered picker through the visible selected row and verify the accepted command. [PTY measurements and parser counts](benchmarks.md#priority-review-06a998a)
+
+未キャッシュのコマンド起動では、候補が存在しなければ `metadata()?` で戻る。追加の `CString` と `access(X_OK)` が必要になるのは通常ファイルまで到達したとき。子に渡す環境も、シェル内での変更がなければ早期に戻る。macOS では実行を許す ACL を設定したモード0600のファイルに `access(X_OK)` が成功しても実行が拒否された。同名の実行可能ファイルを PATH の後方にも置くと、Tonari は先頭を選んで終了126、GNU Bash 5.3.20は後方を実行した。PATH 探索を変える際には、候補なし、実行不可、複数候補を分けて照合する。Linux の通常パイプは容量64 KiB以上128 KiB未満のときだけ拡張する。小さい転送と大きい転送の実機比較は既存の Xeon 記録にある。 [Native Linux pipe comparison](native-2026-11-24/README.md)
+
 ## November 27 · Reading history before the first prompt / 初回表示前の履歴読み込み
 
 Keep the 4 MiB history snapshot and its Unicode page index. Read once per bounded chunk and classify completed pages while the bytes are warm. Older searches can use the same index to skip ASCII-only blocks in a partial snapshot. A 256 KiB tail improved startup but increased the time to the first visible search result. The uncached command launch now uses the shell's PATH resolver, which also fixes an inherited-PATH case where `set +h` allowed a program excluded by `EXECIGNORE` to run. [Measurements and reproduction](benchmarks.md#startup-journal-launch)

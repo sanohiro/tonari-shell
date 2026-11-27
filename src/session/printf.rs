@@ -1,6 +1,6 @@
 use crate::word::quote::{ansi_quote, needs_ansi};
 use std::ffi::CString;
-use std::io::{self, Write};
+use std::io::Write;
 
 use super::Session;
 use crate::builtins::escapes::{self, Mode};
@@ -94,13 +94,7 @@ pub(crate) fn run(
             None
         };
         if let Some(text) = borrowed {
-            let mut stdout = io::stdout().lock();
-            return u8::from(
-                stdout
-                    .write_all(text.as_bytes())
-                    .and_then(|()| stdout.flush())
-                    .is_err(),
-            );
+            return crate::builtins::write_stdout_for("printf", text.as_bytes());
         }
     }
     let mut variables = Variables {
@@ -146,15 +140,8 @@ pub(crate) fn run(
         } else {
             capture.extend_from_slice(&output);
         }
-    } else {
-        let mut stdout = io::stdout().lock();
-        if stdout
-            .write_all(&output)
-            .and_then(|()| stdout.flush())
-            .is_err()
-        {
-            return 1;
-        }
+    } else if crate::builtins::write_stdout_for("printf", &output) != 0 {
+        return 1;
     }
     args.status
 }

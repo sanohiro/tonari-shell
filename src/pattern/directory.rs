@@ -10,7 +10,7 @@ pub(super) fn visit_names(
     mut visit: impl FnMut(&CStr, u8),
 ) {
     let Ok(path) = CString::new(dir) else { return };
-    let _ = read_names(&path, false, b"", &mut |name, kind| {
+    let _ = read_names::<false>(&path, false, b"", &mut |name, kind| {
         let Some(name) = name else {
             return ControlFlow::Continue(());
         };
@@ -32,16 +32,26 @@ pub(crate) fn scan(
     let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
         return ControlFlow::Continue(());
     };
-    read_names(&path, true, prefix, visitor)
+    read_names::<false>(&path, true, prefix, visitor).unwrap_or(ControlFlow::Continue(()))
+}
+
+// Only a complete, successful listing may populate a reusable directory cache.
+pub(crate) fn scan_checked(
+    path: &Path,
+    prefix: &[u8],
+    visitor: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
+) -> Option<ControlFlow<()>> {
+    let path = CString::new(path.as_os_str().as_bytes()).ok()?;
+    read_names::<true>(&path, true, prefix, visitor)
 }
 
 #[cfg(not(target_os = "linux"))]
-fn read_names(
+fn read_names<const CHECK_END: bool>(
     path: &CStr,
     _interruptible: bool,
     prefix: &[u8],
     visit: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
-) -> ControlFlow<()> {
+) -> Option<ControlFlow<()>> {
     use std::ptr::NonNull;
 
     struct DirectoryStream(NonNull<libc::DIR>);
@@ -51,14 +61,19 @@ fn read_names(
         }
     }
 
-    let Some(stream) = NonNull::new(unsafe { libc::opendir(path.as_ptr()) }) else {
-        return ControlFlow::Continue(());
-    };
+    let stream = NonNull::new(unsafe { libc::opendir(path.as_ptr()) })?;
     let stream = DirectoryStream(stream);
+    let errno = CHECK_END.then(|| unsafe { libc::__error() });
     loop {
-        let entry = unsafe { libc::readdir(stream.0.as_ptr()) };
+        // POSIX distinguishes EOF from an error by errno on a null result.
+        let entry = unsafe {
+            if let Some(errno) = errno {
+                *errno = 0;
+            }
+            libc::readdir(stream.0.as_ptr())
+        };
         if entry.is_null() {
-            return ControlFlow::Continue(());
+            return (errno.is_none_or(|p| unsafe { *p } == 0)).then_some(ControlFlow::Continue(()));
         }
         // readdir owns the name until the next call on this stream.
         let name = unsafe {
@@ -69,20 +84,24 @@ fn read_names(
             );
             CStr::from_bytes_with_nul_unchecked(bytes)
         };
-        visit(
+        if visit(
             name.to_bytes().starts_with(prefix).then_some(name),
             unsafe { (*entry).d_type },
-        )?;
+        )
+        .is_break()
+        {
+            return Some(ControlFlow::Break(()));
+        }
     }
 }
 
 #[cfg(target_os = "linux")]
-fn read_names(
+fn read_names<const CHECK_END: bool>(
     path: &CStr,
     interruptible: bool,
     prefix: &[u8],
     visit: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
-) -> ControlFlow<()> {
+) -> Option<ControlFlow<()>> {
     use std::mem::offset_of;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
@@ -93,7 +112,7 @@ fn read_names(
         )
     };
     if fd < 0 {
-        return ControlFlow::Continue(());
+        return None;
     }
     let dir = unsafe { OwnedFd::from_raw_fd(fd) };
     let mut bytes = std::mem::MaybeUninit::<[u8; 32768]>::uninit();
@@ -119,7 +138,7 @@ fn read_names(
             {
                 continue;
             }
-            return ControlFlow::Continue(());
+            return (count == 0).then_some(ControlFlow::Continue(()));
         }
         request = CAPACITY;
         // getdents64 initialized exactly the returned prefix of the buffer.
@@ -128,7 +147,7 @@ fn read_names(
         while batch.len() > NAME {
             let len = usize::from(u16::from_ne_bytes([batch[RECLEN], batch[RECLEN + 1]]));
             if len <= NAME || len > batch.len() {
-                return ControlFlow::Continue(());
+                return None;
             }
             let (record, rest) = batch.split_at(len);
             let raw = &record[NAME..];
@@ -137,7 +156,9 @@ fn read_names(
             } else {
                 None
             };
-            visit(name, record[TYPE])?;
+            if visit(name, record[TYPE]).is_break() {
+                return Some(ControlFlow::Break(()));
+            }
             batch = rest;
         }
     }

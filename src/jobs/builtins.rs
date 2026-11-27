@@ -9,7 +9,7 @@ fn kill(jobs: &Jobs, mut args: &[String], posix: bool) -> u8 {
         }
     };
     if args.first().is_some_and(|s| s == "-l" || s == "-L") {
-        let mut out = io::stdout().lock();
+        let mut out = crate::builtins::stdout_for("kill");
         let mut status = 0;
         if args.len() == 1 {
             if posix {
@@ -351,7 +351,7 @@ pub(super) fn list_position(
 }
 
 fn list(jobs: &mut Jobs, args: &[String], posix: bool) -> u8 {
-    list_to(jobs, args, posix, &mut io::stdout().lock())
+    list_to(jobs, args, posix, &mut crate::builtins::stdout_for("jobs"))
 }
 
 pub(super) fn list_to(jobs: &mut Jobs, args: &[String], posix: bool, out: &mut dyn Write) -> u8 {
@@ -507,7 +507,7 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                 return 1;
             }
             let mut status = 0;
-            let mut out = io::stdout().lock();
+            let mut out = crate::builtins::stdout_for("bg");
             for spec in words[1..]
                 .iter()
                 .map(String::as_str)
@@ -570,7 +570,7 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
             }
             let mut job = jobs.table.remove(i);
             {
-                let mut out = io::stdout().lock();
+                let mut out = crate::builtins::stdout_for("fg");
                 let _ = writeln!(out, "{}", job.name).and_then(|_| out.flush());
             }
             let modes = jobs

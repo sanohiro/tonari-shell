@@ -1,3 +1,5 @@
+mod command_cache;
+
 use crate::pattern::directory::scan;
 use std::fs;
 use std::ops::ControlFlow;
@@ -722,6 +724,7 @@ type CommandVisitor<'a> = dyn FnMut(&str, Option<(&Path, u8)>) -> ControlFlow<()
 fn visit_commands(
     prefix: &str,
     session: &Session,
+    cache_names: bool,
     visit: &mut CommandVisitor<'_>,
 ) -> ControlFlow<()> {
     for name in crate::execute::builtin_names()
@@ -738,6 +741,7 @@ fn visit_commands(
     }
     let editing = crate::editor::preview::active();
     let mut entries = 0usize;
+    let mut checked_fd = false;
     let ignored = crate::execute::IgnoredExecutables::new(session);
     for dir in std::env::split_paths(&session.search_path(&[])) {
         let path = if dir.as_os_str().is_empty() {
@@ -745,7 +749,7 @@ fn visit_commands(
         } else {
             &dir
         };
-        scan(path, prefix.as_bytes(), &mut |raw, kind| {
+        let mut candidate = |raw: Option<&std::ffi::CStr>, kind| {
             if editing && entries.is_multiple_of(256) {
                 crate::editor::preview::scan_input();
             }
@@ -758,7 +762,12 @@ fn visit_commands(
                 return visit(name, Some((path, kind)));
             }
             ControlFlow::Continue(())
-        })?;
+        };
+        if cache_names && prefix.len() >= 2 {
+            command_cache::scan(path, prefix.as_bytes(), &mut checked_fd, &mut candidate)?;
+        } else {
+            scan(path, prefix.as_bytes(), &mut candidate)?;
+        }
     }
     ControlFlow::Continue(())
 }
@@ -773,7 +782,7 @@ fn executable(name: &str, entry: Option<(&Path, u8)>) -> bool {
 
 fn common_command(prefix: &str, session: &Session) -> Option<Common> {
     let mut common: Option<Common> = None;
-    let _ = visit_commands(prefix, session, &mut |name, entry| {
+    let _ = visit_commands(prefix, session, true, &mut |name, entry| {
         if let Some(known) = &mut common {
             // Only a name that could shorten the prefix or change uniqueness
             // needs a filesystem permission check.
@@ -922,7 +931,7 @@ pub(crate) fn host_names(prefix: &str, session: &Session) -> Vec<String> {
 
 pub fn command_names(prefix: &str, session: &Session) -> Vec<String> {
     let mut names = Vec::new();
-    let _ = visit_commands(prefix, session, &mut |name, entry| {
+    let _ = visit_commands(prefix, session, false, &mut |name, entry| {
         if executable(name, entry) {
             names.push(name.to_owned());
         }

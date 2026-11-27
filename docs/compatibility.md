@@ -1,5 +1,13 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+<a id="builtin-output-and-acl"></a>
+
+## Builtin output and executable lookup / 組み込みの書き込みとPATH探索
+
+GNU Bash 5.3.20 and Tonari report an output error and return 1 for `printf '%s' hi >&-`, `pwd >&-`, and printing a defined alias or variable with stdout closed. Empty output and assignments such as `printf -v v '%s' hi >&-` succeed. On macOS, both shells skip an earlier mode-0600 regular file with an execute ACL when a later executable has the same name. Both `type -P` and actual execution select that later path. The regression also checks paths longer than the inline candidate buffer. In a separate function-source witness, Bash 5.3.20 and Tonari record the active script name for each definition when a script passed via `-c` changes `BASH_ARGV0`. Ubuntu 24.04 Bash 5.2 labels both definitions `environment`. [Executable witnesses](../tests/shell.py)
+
+標準出力を閉じてある場合も、出力のない代入や空の一覧は成功する。実際の表示に失敗した場合は診断と終了ステータスを返す。macOSのPATH探索は、ACLだけで実行が許可されて見える通常ファイルについても、OSが実行に必要とするモードビットを確認する。
+
 ## Input and mode witnesses / 入力とモードの差分
 
 * With IFS set to carriage return, a single named `read -r x` trims the leading and trailing separator and preserves the doubled interior separator. Bash 5.3.20 keeps the leading carriage return in this case. Tonari consistently applies IFS whitespace trimming to carriage return, vertical tab and form feed. With `IFS=' '` and input consisting of `a`, a space, a backslash and a space, Tonari preserves both the separator between the two fields and the quoted space in the last field. Bash 5.3.20 returns just `a`. [Bash word splitting](https://www.gnu.org/software/bash/manual/bash.html#Word-Splitting)

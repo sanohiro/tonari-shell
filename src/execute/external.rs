@@ -136,7 +136,7 @@ impl External {
                     lookup::search_directories(&path)
                         .map(|dir| dir.join(name))
                         .filter(|path| !ignored.contains(path))
-                        .map(|path| CString::new(path.as_os_str().as_bytes()))
+                        .map(|path| CString::new(path.into_os_string().into_encoded_bytes()))
                         .collect::<Result<Vec<_>, _>>()
                 })
                 .transpose()?

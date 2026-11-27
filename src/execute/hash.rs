@@ -1,6 +1,7 @@
 use crate::Session;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone)]
@@ -89,16 +90,21 @@ pub(super) fn search_in(
     let ignored = super::lookup::IgnoredExecutables::new(session);
     let mut relative = false;
     let mut absent = true;
+    let mut candidate = super::lookup::Candidate::new();
     for dir in super::lookup::search_directories(path) {
         relative |= !dir.is_absolute();
-        let path = dir.join(name);
-        if ignored.contains(&path) {
+        let Some(c) = candidate.join(dir, name) else {
+            absent = false;
+            continue;
+        };
+        let path = Path::new(std::ffi::OsStr::from_bytes(c.to_bytes()));
+        if ignored.contains(path) {
             continue;
         }
-        match super::lookup::check_executable(&path) {
+        match super::lookup::check_candidate(c) {
             Ok(true) => {
                 return Ok(Some(Entry {
-                    path,
+                    path: path.to_owned(),
                     hits: 0,
                     relative_search: relative,
                 }));
@@ -164,8 +170,8 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
         session.hashes.clear();
         return 0;
     }
-    let mut out = io::stdout().lock();
-    let print_entry = |out: &mut io::StdoutLock<'_>, name: &str, path: &Path| -> io::Result<()> {
+    let mut out = crate::builtins::stdout_for("hash");
+    let print_entry = |out: &mut dyn Write, name: &str, path: &Path| -> io::Result<()> {
         let path = path.to_string_lossy();
         use crate::word::quote::shell_quote as quote;
         writeln!(out, "builtin hash -p {} {}", quote(&path), quote(name))

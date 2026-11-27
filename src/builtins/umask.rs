@@ -1,4 +1,4 @@
-use std::io::{self, Write};
+use std::io::Write;
 
 thread_local! {
     // A fork inherits both the OS mask and this snapshot. All mask changes
@@ -110,32 +110,28 @@ pub fn run(args: &[String], posix: bool) -> u8 {
         }
         mask
     } else {
-        if reusable
-            && write!(
-                io::stdout().lock(),
-                "umask {}",
-                if symbols { "-S " } else { "" }
-            )
-            .is_err()
-        {
-            return 1;
-        }
         current()
     };
-    let mut out = io::stdout().lock();
-    let result = if symbols {
-        let mut text = String::with_capacity(19);
-        for (prefix, shift) in [("u=", 6), (",g=", 3), (",o=", 0)] {
-            text.push_str(prefix);
-            for (ch, bit) in [('r', 4), ('w', 2), ('x', 1)] {
+    // The longest form is "umask -S u=rwx,g=rwx,o=rwx" plus a newline.
+    let mut storage = [0; 32];
+    let mut out = std::io::Cursor::new(&mut storage[..]);
+    if reusable && args.is_empty() {
+        out.write_all(if symbols { b"umask -S " } else { b"umask " })
+            .unwrap();
+    }
+    if symbols {
+        for (prefix, shift) in [(b"u=".as_slice(), 6), (b",g=", 3), (b",o=", 0)] {
+            out.write_all(prefix).unwrap();
+            for (ch, bit) in [(b'r', 4), (b'w', 2), (b'x', 1)] {
                 if (mask >> shift) & bit == 0 {
-                    text.push(ch);
+                    out.write_all(&[ch]).unwrap();
                 }
             }
         }
-        writeln!(out, "{text}")
+        out.write_all(b"\n").unwrap();
     } else {
-        writeln!(out, "{mask:04o}")
-    };
-    u8::from(result.and_then(|_| out.flush()).is_err())
+        writeln!(out, "{mask:04o}").unwrap();
+    }
+    let len = out.position() as usize;
+    crate::builtins::write_stdout_for("umask", &storage[..len])
 }

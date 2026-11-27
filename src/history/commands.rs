@@ -100,7 +100,7 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
         }
         Some('p') => {
             session.history_mut().discard_current();
-            let mut out = io::stdout().lock();
+            let mut out = io::LineWriter::new(crate::builtins::StdoutFd(None));
             let mut status = 0;
             for arg in args {
                 match super::expand::expand(session, arg) {
@@ -126,7 +126,7 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
                 .unwrap_or(usize::MAX);
             if let Some(h) = session.history.as_deref() {
                 let format = session.get("HISTTIMEFORMAT").filter(|s| !s.is_empty());
-                let mut out = io::BufWriter::new(io::stdout().lock());
+                let mut out = io::BufWriter::new(crate::builtins::StdoutFd(None));
                 let mut list = |stamp: &dyn Fn(i64) -> String| -> io::Result<()> {
                     for i in h.lines.len().saturating_sub(count)..h.lines.len() {
                         let timestamp =
@@ -683,7 +683,7 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
         reverse = true;
     }
     let mut source = String::new();
-    let mut out = list.then(|| io::stdout().lock());
+    let mut out = list.then(|| io::LineWriter::new(crate::builtins::StdoutFd(None)));
     for step in 0..=last - first {
         let i = if reverse { last - step } else { first + step };
         if list && numbers {

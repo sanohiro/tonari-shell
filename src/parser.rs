@@ -442,6 +442,7 @@ struct SourceLines {
 }
 
 thread_local! {
+    static READER_NEWLINES: std::cell::Cell<Vec<usize>> = const { std::cell::Cell::new(Vec::new()) };
     static SOURCE_LINES: std::cell::RefCell<Option<SourceLines>> = const { std::cell::RefCell::new(None) };
 }
 
@@ -469,7 +470,16 @@ fn with_source_lines<T>(source: &str, lex: impl FnOnce() -> T) -> T {
     let text = source.trim_end_matches('\n');
     if !text.contains('\n')
         || SOURCE_LINES.with_borrow(|m| m.as_ref().is_some_and(|m| m.contains(source)))
-        || !text.contains(['(', '$', '`'])
+        || !memchr::memchr3_iter(b'(', b'{', b'`', text.as_bytes()).any(|i| {
+            // Nested lexing starts at a substitution. A physical newline can
+            // also separate its introducer from the opener via a continuation.
+            let prev = i.checked_sub(1).map(|p| text.as_bytes()[p]);
+            match text.as_bytes()[i] {
+                b'(' => matches!(prev, Some(b'$' | b'<' | b'>' | b'\n')),
+                b'{' => matches!(prev, Some(b'$' | b'\n')),
+                _ => true,
+            }
+        })
     {
         return lex();
     }
@@ -500,6 +510,10 @@ struct Reader {
 
 impl Drop for Reader {
     fn drop(&mut self) {
+        if self.newlines.capacity() <= MAX_CACHED_TOKENS && self.newlines.capacity() != 0 {
+            self.newlines.clear();
+            READER_NEWLINES.set(std::mem::take(&mut self.newlines));
+        }
         if self.tokens.capacity().max(self.spans.capacity()) <= MAX_CACHED_TOKENS {
             self.tokens.clear();
             self.spans.clear();
@@ -513,12 +527,14 @@ impl Drop for Reader {
 
 impl Reader {
     fn new(tokens: Vec<Token>, spans: Vec<(usize, usize)>, source: &str) -> Self {
+        let mut newlines = READER_NEWLINES.take();
+        newlines.extend(memchr::memchr_iter(b'\n', source.as_bytes()));
         Self {
             first_line: source_line(source),
             depth: 0,
             spans,
             alias_source: None,
-            newlines: memchr::memchr_iter(b'\n', source.as_bytes()).collect(),
+            newlines,
             source: source.into(),
             tokens: tokens.into(),
             aliases: aliases::current(),

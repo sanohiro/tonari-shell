@@ -304,6 +304,7 @@ pub struct Session {
     pub(crate) substitution_scopes: u32,
     pub function_names: Vec<String>,
     pub source_names: Vec<Rc<str>>,
+    default_function_source: Option<Rc<str>>,
     pub current_command: Option<crate::parser::Location>,
     pub debug_args: Vec<Vec<String>>,
     pub debug_base: std::cell::OnceCell<Vec<String>>,

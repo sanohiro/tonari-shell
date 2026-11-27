@@ -643,7 +643,7 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
     let dumb = session.get("TERM").as_deref() == Some("dumb");
     let encode = |s: &[u8]| encode(s, meta);
     let mut args = args.iter();
-    let mut out = io::stdout().lock();
+    let mut out = io::LineWriter::new(crate::builtins::StdoutFd(None));
     let ioerr = |e: io::Error| e.to_string();
     while let Some(arg) = args.next() {
         let mut operand = || {

@@ -78,11 +78,16 @@ impl Session {
     }
 
     pub(crate) fn define_function(&mut self, name: String, definition: Rc<FunctionDefinition>) {
-        let source = self
-            .source_names
-            .last()
-            .cloned()
-            .unwrap_or_else(|| self.function_source().into());
+        let source = self.source_names.last().cloned().unwrap_or_else(|| {
+            let default = if self.interactive { "main" } else { &self.arg0 };
+            let cached = self
+                .default_function_source
+                .get_or_insert_with(|| Rc::from(default));
+            if cached.as_ref() != default {
+                *cached = Rc::from(default);
+            }
+            cached.clone()
+        });
         let function = Function { definition, source };
         if self.allexport || self.function_exported(&name) {
             self.function_environment

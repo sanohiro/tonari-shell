@@ -38,6 +38,93 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
+    def test_closed_builtin_stdout_reports_only_attempted_writes(self):
+        shells = (TONARI,) if self.bash_before_53() else (BASH, TONARI)
+        for shell in shells:
+            for command in ("printf %s hi", "printf '%05d' 7", "pwd", "umask -p",
+                            "hash", "alias a=text; alias", "dirs", "times", "x=1; declare -p x", "export -p", "type -t pwd"):
+                with self.subTest(shell=shell, command=command):
+                    proc = self.command(shell, command + " >&-; exit $?")
+                    self.assertEqual((proc.returncode, proc.stdout), (1, b""))
+                    self.assertEqual(len(proc.stderr.splitlines()), 1, proc.stderr)
+            for command in ("alias", "printf %s ''", "printf -v value %s hi", "umask 022"):
+                proc = self.command(shell, command + " >&-; exit $?")
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"", b""))
+
+    @unittest.skipUnless(sys.platform == "darwin", "Darwin file ACLs")
+    def test_path_lookup_skips_acl_only_executable(self):
+        first = self.cwd / "first"
+        second = self.cwd / "second"
+        for directory in (first, second):
+            directory.mkdir()
+            cmd = directory / "acl-command"
+            cmd.write_text("#!/bin/sh\nprintf 'ran\\n'\n")
+            cmd.chmod(0o700)
+        cmd = first / "acl-command"
+        cmd.chmod(0o600)
+        import pwd
+        subprocess.run(["chmod", "+a", pwd.getpwuid(os.getuid()).pw_name + " allow execute", cmd], check=True)
+        self.assertTrue(os.access(cmd, os.X_OK))
+        self.env["PATH"] = f"{first}:{second}"
+        self.compare("set +h; type -P acl-command; acl-command", 0,
+                     os.fsencode(second / "acl-command") + b"\nran\n")
+
+    def test_command_cache_observes_permissions_and_new_names(self):
+        directory = self.cwd / "bin"
+        directory.mkdir()
+        self.env["PATH"] = str(directory)
+        cmd = directory / "probe-alpha"
+        cmd.touch(mode=0o700)
+        fd = self.terminal_session(editing=True)
+
+        def complete(prefix, expected):
+            os.write(fd, prefix + b"\t@")
+            self.read_until(fd, b"@")
+            os.write(fd, b"\x0c")
+            self.read_until(fd, PROMPT + expected + b"@")
+            os.write(fd, b"\x03")
+            self.read_until(fd, PROMPT)
+
+        complete(b"probe-al", b"probe-alpha ")
+        cmd.chmod(0o600)
+        complete(b"probe-al", b"probe-al")
+        cmd.chmod(0o700)
+        target = self.cwd / "target"
+        (directory / "probe-link").symlink_to(target)
+        complete(b"probe-li", b"probe-li")
+        target.touch(mode=0o700)
+        complete(b"probe-li", b"probe-link ")
+        target.unlink()
+        complete(b"probe-li", b"probe-li")
+        if os.geteuid() != 0:
+            directory.chmod(0o100)
+            try:
+                complete(b"probe-al", b"probe-al")
+            finally:
+                directory.chmod(0o700)
+        cmd.rename(directory / "probe-beta")
+        complete(b"probe-al", b"probe-al")
+        complete(b"probe-be", b"probe-beta ")
+
+    def test_function_source_after_changing_arg0(self):
+        source = "shopt -s extdebug\na() { :; }\nBASH_ARGV0=changed\nb() { :; }\ndeclare -F a b"
+        for shell in self.shells_for(minimum=5):
+            with self.subTest(shell=shell):
+                expected = (b"a 2 environment\nb 4 environment\n"
+                            if shell == BASH and self.bash_before_53()
+                            else b"a 2 initial\nb 4 changed\n")
+                result = self.command(shell, source, "initial")
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, b""))
+
+    def test_path_lookup_reuses_overflow_storage(self):
+        directory = Path(*(["x" * 150] * 4))
+        (self.cwd / directory).mkdir(parents=True)
+        command = self.cwd / directory / "pick"
+        command.write_text("#!/bin/sh\necho found\n")
+        command.chmod(0o700)
+        self.env["PATH"] = f"{directory}/missing:absent:{directory}"
+        self.compare("set +h; type -P pick; pick", 0, os.fsencode(directory / "pick") + b"\nfound\n")
+
     def test_declaration_failures_leave_scope_and_attributes_intact(self):
         source = """x=outer
 f() { local a=ok; X=2 eval 'local -p a'; local -n x=123 2>/dev/null; x=changed; }

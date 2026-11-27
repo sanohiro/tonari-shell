@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::io::{self, Write};
+use std::io::Write;
 use std::rc::Rc;
 
 use crate::Session;
@@ -74,7 +74,7 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
     if remove && args.is_empty() {
         return 2;
     }
-    let mut out = io::stdout().lock();
+    let mut out = crate::builtins::StdoutFd(Some(cmd));
     let command_prefix = !session.posix || print_all;
     let mut buffer = String::new();
     let record = |buffer: &mut String, name: &str, value: &str| {

@@ -153,6 +153,7 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--reply-list", action="store_true", help="measure ordered callback replies")
     mode.add_argument("--word-list", action="store_true", help="measure a registered 10,000-word completion")
+    mode.add_argument("--command-cache", action="store_true", help="time four command-name Tabs in a single session")
     mode.add_argument("--branches", action="store_true", help="complete one filename across 12 independent directories")
     mode.add_argument("--scan-key", action="store_true", help="distinguish scan completion from a key arriving 1 ms into it")
     mode.add_argument("--project", action="store_true", help="time completed abbreviated paths and project history arguments")
@@ -177,11 +178,21 @@ def main():
         home = Path(scratch)
         bindir = home / "files"
         bindir.mkdir()
-        if not (args.reply_list or args.word_list or args.reuse_words or args.callback or args.long_line or args.branches):
+        if not (args.command_cache or args.reply_list or args.word_list or args.reuse_words or args.callback or args.long_line or args.branches):
             digits = len(str(args.files))
             for i in range(args.files):
                 (bindir / f"item-{i:0{digits}d}.dat").touch(mode=0o755)
-        if args.branches:
+        if args.command_cache:
+            directories = [home / f"bin-{i}" for i in range(6)]
+            for i, directory in enumerate(directories):
+                directory.mkdir()
+                for j in range(338):
+                    (directory / f"tool-{i}-{j}").touch(mode=0o755)
+            commands = (b"quartz-first", b"topaz-next", b"onyx-last", b"quartz-first")
+            for name, directory in zip(commands, directories[::2]):
+                (directory / name.decode()).touch(mode=0o755)
+            command_path = os.pathsep.join(map(str, directories))
+        elif args.branches:
             if bash: parser.error("--branches uses Tonari abbreviated paths")
             basedir = home / "src"
             for i in range(12):
@@ -274,6 +285,17 @@ def main():
             shift = i % len(shells)
             for shell in shells[shift:] + shells[:shift]:
                 metrics = results[shell] if i >= 3 else defaultdict(list)
+                if args.command_cache:
+                    with terminal(shell, home, command_path, prompt=PROMPT) as fd:
+                        for order, name in enumerate(commands, 1):
+                            prefix = name[:-2]
+                            os.write(fd, prefix)
+                            read_until(fd, prefix)
+                            metrics[f"Tab {order}"].append(timed_keys(fd, b"\t", name + b" ", initial=prefix))
+                            if order < len(commands):
+                                os.write(fd, b"\x03")
+                                read_until(fd, PROMPT)
+                    continue
                 if args.branches:
                     with terminal(shell, home, bindir, rc, prompt=PROMPT) as fd:
                         line = b": s/mod/k/needle"

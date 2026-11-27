@@ -12,22 +12,38 @@ use std::path::Path;
 
 use crate::Session;
 
-// Rust's global Stdout treats EBADF as a successful write. Shell builtins
-// must report a failed redirect, including when a parent intentionally closed fd 1.
-pub(crate) fn write_stdout_for(name: &str, mut bytes: &[u8]) -> u8 {
-    while !bytes.is_empty() {
-        let n = unsafe { libc::write(1, bytes.as_ptr().cast(), bytes.len()) };
-        if n > 0 {
-            bytes = &bytes[n as usize..];
-        } else {
-            let e = io::Error::last_os_error();
-            if e.kind() != io::ErrorKind::Interrupted {
-                diagnostic!("{name}: write error: {e}");
-                return 1;
-            }
+// A shell must observe write errors even when fd 1 was closed by its caller.
+pub(crate) struct StdoutFd<'a>(pub Option<&'a str>);
+
+impl Write for StdoutFd<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.is_empty() {
+            return Ok(0);
         }
+        let n = unsafe { libc::write(libc::STDOUT_FILENO, bytes.as_ptr().cast(), bytes.len()) };
+        if n >= 0 {
+            return Ok(n as usize);
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted
+            && let Some(name) = self.0.take()
+        {
+            diagnostic!("{name}: write error: {error}");
+        }
+        Err(error)
     }
-    0
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+pub(crate) fn stdout_for(name: &str) -> io::LineWriter<StdoutFd<'_>> {
+    io::LineWriter::new(StdoutFd(Some(name)))
+}
+
+pub(crate) fn write_stdout_for(name: &str, bytes: &[u8]) -> u8 {
+    u8::from(StdoutFd(Some(name)).write_all(bytes).is_err())
 }
 
 pub fn echo(args: &[String], session: &Session) -> u8 {
@@ -353,7 +369,7 @@ pub fn times(args: &[String]) -> u8 {
         diagnostic!("times: {flag}: invalid option");
         return 2;
     }
-    let mut out = io::stdout().lock();
+    let mut out = stdout_for("times");
     for who in [libc::RUSAGE_SELF, libc::RUSAGE_CHILDREN] {
         let mut usage = std::mem::MaybeUninit::uninit();
         if unsafe { libc::getrusage(who, usage.as_mut_ptr()) } == -1 {
