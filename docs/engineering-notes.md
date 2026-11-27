@@ -1,10 +1,16 @@
 # Engineering notes / 開発知見
 
+## November 27 · Interrupting shell input / 読み取り中の中断
+
+At a terminal, an uncaught Ctrl-C in `read`, `read -e`, or `mapfile` discards the remaining commands on the line and sets status 130. A scalar retains its old value. A map retains completed records. An edited read interrupted by a caught signal instead restores the terminal for the handler, supplies the preceding command status and resumes at the editing cursor. A terminating signal runs EXIT cleanup with the preceding status before the process terminates by the original signal.
+
+通常の `mapfile` と EXIT トラップだけを登録した場合は、一括読み込みを維持する。ユーザーのハンドラーが途中で同じ入力を読める場合は、各行の境界とファイル位置を維持する。Apple M1 のシェル起動後の2,000行パイプ・31回の中央値は、EXIT トラップ付きで Tonari 2.40 ms、Bash 5.3.20 は9.22 ms。ユーザー定義の USR1 トラップ付きでは13.85 ms と9.89 ms。Linux x86-64 でも後者は8.08 ms と4.79 ms（41回の中央値）だった。 [Linux native measurements](https://github.com/sanohiro/tonari-shell/actions/runs/45970563878)
+
 ## November 27 · Signals during pipe input / パイプ入力中のシグナル
 
 A trap could discard bytes that `read -N` had already removed from a pipe. A 131,072-byte read returned only 125,138 bytes in one reproduction. Consume the buffered prefix before giving the trap access to the descriptor. The regression sends repeated signals during a 512 KiB transfer and compares every output byte.
 
-`mapfile` with an active trap can check the current queued byte count before entering a signal-masked wait. The empty-pipe path still waits atomically, and timed reads keep their deadline. On an Apple M1, 4,096 short records took 21.05 ms before the change and 12.51 ms with the live check (Bash 5.3.20 took 9.00 ms, 21 interleaved medians). A 2.93 ms batch-read trial also consumed valid input after a malformed record. Caching a previous byte count reached 8.78 ms, but a second reader can drain a shared pipe before the next read. The implementation checks the live descriptor.
+`mapfile` with an active trap can check the current queued byte count before entering a signal-masked wait. The empty-pipe path still waits atomically, and timed reads keep their deadline. On an Apple M1, 4,096 short records took 21.05 ms before the change and 12.51 ms with the live check (Bash 5.3.20 took 9.00 ms, medians of 21 interleaved samples). A 2.93 ms batch-read trial also consumed valid input after a malformed record. Caching a previous byte count reached 8.78 ms, but a second reader can drain a shared pipe before the next read. The implementation checks the live descriptor.
 
 パイプから既に取得した入力はトラップを実行する前に処理する。期限のある `read` は従来どおり残り時間を使う。コールバックによる追加の読み取り、行数の上限、不正な UTF-8 の直後に続く正常な行は、次の読み手が受け取ったバイト列まで検証した。実機で再計測するには `tools/bench_scripts.py` の `mapfile-trapped-pipe` を指定する。
 

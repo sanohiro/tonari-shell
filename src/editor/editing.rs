@@ -31,7 +31,7 @@ pub(super) fn edit_and_execute(
             session.editor_queue = queued;
             Input::Line(edited)
         }
-        Ok(Err(crate::Flow::Exit(code))) => Input::Exit(code),
+        Ok(Err(flow @ crate::Flow::Exit(_))) => Input::Control(flow),
         Ok(Err(_)) => Input::Cancel,
         Err(e) => {
             diagnostic!("{editor}: {e}");

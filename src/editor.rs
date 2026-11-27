@@ -27,7 +27,7 @@ pub enum Input {
     End,
     Cancel,
     Directory(io::Result<()>),
-    Exit(u8),
+    Control(crate::Flow),
 }
 
 fn matching_opener(text: &str, cursor: usize) -> Option<usize> {
@@ -567,6 +567,23 @@ pub fn line(
         history.prepare_search(session, &|| ready(0, 0));
     }
     loop {
+        if read.is_some() && session.traps.read_pending() {
+            // A read trap can run another terminal command. Restore cooked
+            // mode for it and keep this editor's buffer, cursor and deadline.
+            drop(term);
+            io::stderr().write_all(b"\r\n")?;
+            let flow = {
+                let _deadline = crate::input_deadline(None);
+                crate::traps::dispatch(session, status)
+            };
+            if !matches!(flow, crate::Flow::Continue(_)) {
+                return Ok(Input::Control(flow));
+            }
+            term = Terminal::enter(session.bindings.paste())?;
+            screen.row = 0;
+            screen.tail = None;
+            screen.view.invalidate();
+        }
         if session.bindings.map == Keymap::Command && !text.is_empty() {
             cursor = cursor.min(previous(&text, text.len()));
         }
@@ -658,6 +675,9 @@ pub fn line(
             Ok(Some(c)) => c,
             Ok(None) => return Ok(Input::End),
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                if read.is_some() && session.traps.read_pending() {
+                    continue;
+                }
                 io::stderr().write_all(b"\r\n")?;
                 return Ok(Input::Cancel);
             }
@@ -697,8 +717,8 @@ pub fn line(
                 );
                 edit.last_argument = None;
                 recall = recall::Recall::new(session.history_lines().len());
-                if let crate::Flow::Exit(code) = flow {
-                    return Ok(Input::Exit(code));
+                if let crate::Flow::Exit(_) = flow {
+                    return Ok(Input::Control(flow));
                 }
                 term = Terminal::enter(session.bindings.paste())?;
                 screen.row = 0;
@@ -788,6 +808,9 @@ pub fn line(
                                 cursor = state.original_cursor;
                             }
                             Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                                if read.is_some() && session.traps.read_pending() {
+                                    continue;
+                                }
                                 screen.draw(prompt, &state.original, state.original_cursor, "")?;
                                 io::stderr().write_all(b"\r\n")?;
                                 return Ok(Input::Cancel);
@@ -1024,6 +1047,9 @@ pub fn line(
                             }
                             Ok(None) => {}
                             Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                                if read.is_some() && session.traps.read_pending() {
+                                    continue;
+                                }
                                 screen.draw(prompt, &text, cursor, "")?;
                                 io::stderr().write_all(b"\r\n")?;
                                 return Ok(Input::Cancel);

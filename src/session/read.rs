@@ -127,7 +127,11 @@ unsafe extern "C" {
 #[cfg(not(target_os = "macos"))]
 use libc::pselect as pselect_input;
 
-fn ready(fd: i32, timeout: Option<Duration>, watch: Option<&Session>) -> io::Result<bool> {
+pub(super) fn ready(
+    fd: i32,
+    timeout: Option<Duration>,
+    watch: Option<&crate::traps::Traps>,
+) -> io::Result<bool> {
     // A single ordinary fd_set covers the common case. Both supported kernels
     // read ceil(nfds / word_bits) words, including for EOF on character devices.
     let index = fd as usize / libc::FD_SETSIZE;
@@ -148,13 +152,11 @@ fn ready(fd: i32, timeout: Option<Duration>, watch: Option<&Session>) -> io::Res
         tv_sec: t.as_secs().min(i64::MAX as u64) as _,
         tv_nsec: t.subsec_nanos().into(),
     });
-    let mask = if let Some(session) = watch {
+    let mask = if let Some(traps) = watch {
         let mut all = unsafe { std::mem::zeroed() };
         unsafe { libc::sigfillset(&mut all) };
         let mask = crate::traps::SignalMask::block(&all)?;
-        if session.traps.read_pending()
-            || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
-        {
+        if traps.read_pending() || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(io::ErrorKind::Interrupted.into());
         }
         Some(mask)
@@ -223,7 +225,7 @@ impl Input {
             && crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
             && crate::interrupted()
         {
-            return Err(Flow::Continue(crate::traps::signal_status(libc::SIGINT)));
+            return Err(Flow::Discard(crate::traps::signal_status(libc::SIGINT)));
         }
         if remaining == Some(Duration::ZERO) {
             return Err(Flow::Continue(crate::traps::signal_status(libc::SIGALRM)));
@@ -239,7 +241,7 @@ impl Input {
                 return Ok(true);
             }
         }
-        match ready(self.fd, remaining, watch.then_some(&*session)) {
+        match ready(self.fd, remaining, watch.then_some(&session.traps)) {
             Ok(true) => Ok(true),
             Ok(false) => Err(Flow::Continue(crate::traps::signal_status(libc::SIGALRM))),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => Ok(false),
@@ -401,7 +403,7 @@ pub(super) fn run(
             opts.prompt.unwrap_or(""),
             &mut history,
             session,
-            0,
+            last,
             crate::editor::Start::Read {
                 initial: opts.initial.unwrap_or(""),
                 files_only,
@@ -414,8 +416,8 @@ pub(super) fn run(
             Ok(crate::editor::Input::Line(text)) => edited = Some(text.into_bytes().into_iter()),
             Ok(crate::editor::Input::Directory(_)) => unreachable!(),
             Ok(crate::editor::Input::End) => edited = Some(Vec::new().into_iter()),
-            Ok(crate::editor::Input::Cancel) => return Flow::Continue(130),
-            Ok(crate::editor::Input::Exit(code)) => return Flow::Continue(code),
+            Ok(crate::editor::Input::Cancel) => return Flow::Discard(130),
+            Ok(crate::editor::Input::Control(flow)) => return flow,
             Err(e) if e.kind() == io::ErrorKind::TimedOut => {
                 return Flow::Continue(crate::traps::signal_status(libc::SIGALRM));
             }

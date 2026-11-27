@@ -168,7 +168,12 @@ pub(super) fn interactive_loop(
                 source.is_empty(),
                 terminal_size,
             ) {
-                Ok(editor::Input::Exit(code)) => return Ok(code),
+                Ok(editor::Input::Control(Flow::Exit(code))) => return Ok(code),
+                Ok(editor::Input::Control(flow)) => {
+                    source.clear();
+                    status = flow.child_status();
+                    continue;
+                }
                 Ok(editor::Input::Line(line)) => {
                     source.extend_from_slice(line.as_bytes());
                     Ok(Some(true))
