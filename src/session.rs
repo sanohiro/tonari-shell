@@ -105,6 +105,7 @@ impl Variable {
 struct Variables {
     entries: HashMap<String, Variable, foldhash::fast::RandomState>,
     environment_names: std::cell::OnceCell<Option<Rc<[String]>>>,
+    prefix_names: std::cell::RefCell<Option<(String, Vec<String>)>>,
 }
 
 impl std::ops::Deref for Variables {
@@ -117,6 +118,7 @@ impl std::ops::Deref for Variables {
 impl std::ops::DerefMut for Variables {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.environment_names.take();
+        *self.prefix_names.get_mut() = None;
         &mut self.entries
     }
 }
@@ -127,6 +129,38 @@ impl Variables {
             self.environment_names.take();
         }
         self.entries.get_mut(name)
+    }
+
+    fn append_visible<'a>(&'a self, prefix: &str, names: &mut Vec<&'a str>) {
+        if prefix.is_empty() || self.entries.len() < 32 {
+            names.extend(self.entries.iter().filter_map(|(key, var)| {
+                (var.declared && key.starts_with(prefix)).then_some(key.as_str())
+            }));
+            return;
+        }
+        // Typing another character narrows the preceding match set. Keep keys
+        // for just that prefix and check declaration visibility on every query.
+        let mut cache = self.prefix_names.borrow_mut();
+        if cache
+            .as_ref()
+            .is_none_or(|(old, _)| !prefix.starts_with(old.as_str()))
+        {
+            let keys = self
+                .entries
+                .keys()
+                .filter(|key| key.starts_with(prefix))
+                .cloned()
+                .collect();
+            *cache = Some((prefix.to_owned(), keys));
+        }
+        for key in &cache.as_ref().unwrap().1 {
+            if key.starts_with(prefix)
+                && let Some((key, var)) = self.entries.get_key_value(key)
+                && var.declared
+            {
+                names.push(key.as_str());
+            }
+        }
     }
 
     fn environment_entries(&self) -> impl Iterator<Item = (&String, &Variable)> {
@@ -510,9 +544,7 @@ impl Session {
                 names.push(key);
             }
         }
-        names.extend(self.variables.iter().filter_map(|(key, var)| {
-            (var.declared && key.starts_with(prefix)).then_some(key.as_str())
-        }));
+        self.variables.append_visible(prefix, &mut names);
         names.sort_unstable();
         names.dedup();
         names

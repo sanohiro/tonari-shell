@@ -719,6 +719,11 @@ fn calculate(source: &str, variables: &mut dyn Variables, depth: u16) -> Result<
     if let [digit @ b'0'..=b'9'] = source.as_bytes() {
         return Ok(i64::from(digit - b'0'));
     }
+    if crate::word::is_identifier(source)
+        && let Some(n) = variables.decimal(source)
+    {
+        return Ok(n);
+    }
     if let Some(name) = source
         .strip_suffix("++")
         .or_else(|| source.strip_suffix("--"))

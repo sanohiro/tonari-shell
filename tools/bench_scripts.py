@@ -527,6 +527,7 @@ CASES.update({
                                      'compgen -A variable bench_var_999', "bench_var_999", count=500),
     "core-parse-functions": ("".join(f"func{k}() {{\n  if :; then\n    v={k}\n  fi\n}}\n" for k in range(200))
                              + 'func199; echo "$v"', "199"),
+    "syntax-control": ("echo ok", "ok"),
     "core-function": eval_loop('f "$i"', 'echo "$x"', "9999", 'f() { x=$1; }', 10000),
     "core-indexed": eval_loop('((a[i%128]+=1))', 'echo "${a[0]} ${a[127]}"',
                               "157 156", 'a=()', 20000),
@@ -539,9 +540,12 @@ CASES.update({
 })
 
 
-def sample(binary, script, expected, env, started, setup=""):
+def sample(binary, script, expected, env, started, setup="", syntax=False):
     argv = [binary, "--noprofile", "--norc"]
-    if started:
+    if syntax:
+        argv.extend(["-n", script])
+        expected = b""
+    elif started:
         argv.extend(["-c", setup + 'printf "ready\\n"; IFS= read -r gate && . "$1"', "bench", script])
     elif setup:
         argv.extend(["-c", setup + '. "$1"', "bench", script])
@@ -571,7 +575,7 @@ def main():
     cli.add_argument("--bash", type=Path, default=Path("/bin/bash"))
     cli.add_argument("--previous", type=Path, help="include a previous Tonari build")
     cli.add_argument("--spawn-control", type=Path, help="compiled tools/bench_spawn.c for native process and directory controls")
-    cli.add_argument("--timing", choices=["whole", "started", "both"], default="both")
+    cli.add_argument("--timing", choices=["whole", "started", "both", "syntax"], default="both")
     cli.add_argument("--utf8-locale", default="en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8",
                      help="LC_ALL for Unicode field-splitting and pathname workloads")
     cli.add_argument("--runs", type=int, default=30)
@@ -731,10 +735,11 @@ def main():
                 for i in range(5 + args.runs):
                     offset = i % len(participants)
                     for name, binary in participants[offset:] + participants[:offset]:
-                        elapsed = sample(binary, script, (expected + "\n").encode(), case_env, started, case_setup)
+                        elapsed = sample(binary, script, (expected + "\n").encode(), case_env, started, case_setup, args.timing == "syntax")
                         if i >= 5:
                             samples[name].append(elapsed)
-                print(f"{case} ({'already started' if started else 'whole script'})", flush=True)
+                label = "syntax check" if args.timing == "syntax" else "already started" if started else "whole script"
+                print(f"{case} ({label})", flush=True)
                 within_target = report(samples) and within_target
 
     if args.require_target and not within_target:

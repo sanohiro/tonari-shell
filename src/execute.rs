@@ -969,12 +969,22 @@ fn foreground(
             return Ok(Flow::Continue(0));
         }
     }
-    let raw = raw.into_owned();
-    let name = job_label(std::slice::from_ref(&raw), false, session);
+    let name = job_label(std::slice::from_ref(raw.as_ref()), false, session);
     if needs_ordered_redirects(&raw, session) {
-        return run_ordered(raw, name, last_status, replace, session);
+        return run_ordered(raw.into_owned(), name, last_status, replace, session);
     }
-    let cmd = match prepare(raw, session, last_status, true) {
+    let prepared = match raw {
+        std::borrow::Cow::Borrowed(stage)
+            if stage.compound.is_none()
+                && stage.assignments.is_empty()
+                && stage.redirects.is_empty()
+                && !(session.posix && stage.keyword_args.is_some()) =>
+        {
+            prepare::borrowed_arguments(&stage.words, session, last_status)
+        }
+        _ => prepare(raw.into_owned(), session, last_status, true),
+    };
+    let cmd = match prepared {
         Ok(cmd) => cmd,
         Err(e) => {
             e.report("");

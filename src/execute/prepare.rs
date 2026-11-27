@@ -161,6 +161,37 @@ impl PreparedCommand {
     }
 }
 
+// A repeatedly executed command owns its final argv. Clone only words whose
+// expansion needs mutable parts, retaining the ordinary splitting and globbing rules.
+pub(super) fn borrowed_arguments(
+    raw: &[Word],
+    session: &mut Session,
+    status: u8,
+) -> Result<PreparedCommand, crate::expansion::Error> {
+    let captured = Cell::new(None);
+    let mut exp = Expansion::new(session, status, &captured);
+    let mut words = Vec::with_capacity(raw.len());
+    for word in raw {
+        if let Some(s) = word.as_literal() {
+            words.push(s.to_owned());
+        } else if matches!(word, Word::Expanded(parts) if matches!(parts.as_slice(), [crate::word::Part::Parameter { quoted: true, .. }]))
+            && let Some(s) = word.stored_parameter(exp.session)
+        {
+            words.push(s.to_owned());
+        } else {
+            exp.append_fields(word.clone(), &mut words)?;
+        }
+    }
+    prepare_expanded(
+        SimpleCommand::default(),
+        words,
+        session,
+        status,
+        true,
+        &captured,
+    )
+}
+
 pub(super) fn prepare(
     mut raw: SimpleCommand<Word>,
     session: &mut Session,

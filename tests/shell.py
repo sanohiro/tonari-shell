@@ -57,10 +57,12 @@ class ShellTests(unittest.TestCase):
     def test_large_variable_table_visibility_and_environment(self):
         self.compare("""for ((i=0;i<1000;i++)); do printf -v "p_$i" %s "$i"; done
 q_z=last; q_a=first; q_m=middle; unset q_m; echo "${!q_*}"
+q_b=added; unset q_z; echo "${!q_*}"
+g() { local q_c=local; echo "${!q_*}"; }; g; echo "${!q_c*}"
 export ANSWER=outer
 f() { local ANSWER=inner; /bin/sh -c 'echo "$ANSWER"'; }
 f; /bin/sh -c 'echo "$ANSWER"'; unset ANSWER; /bin/sh -c 'echo "${ANSWER-missing}"'
-""", 0, b"q_a q_z\ninner\nouter\nmissing\n")
+""", 0, b"q_a q_z\nq_a q_b\nq_a q_b q_c\n\ninner\nouter\nmissing\n")
 
     def test_repeated_scalar_assignments_keep_attributes(self):
         self.compare("""a=ab; b=; declare -u upper=old; declare -i n=0
@@ -69,6 +71,14 @@ f 2+3; echo "$b $upper $n"
 declare -n ref=a; ref=$b; a+=$a; echo "$ref"
 set -a; b=$a; /bin/sh -c 'echo "$b"'
 """, 0, b"ab AB 5\nabab\nabab\n", minimum=5)
+
+    def test_repeated_function_arguments_and_plain_locals(self):
+        self.compare("""show() { printf '<%s>' "$@"; echo; }
+f() { local a=first a+=x empty=; show "$a" "$1" "$empty" "${late:=two words}" "$late"; }
+f 'one two'; unset late; f '*'
+n=outside; f2() { local n=inner; export check=$n; /bin/sh -c 'echo "$check"'; }
+f2; echo "$n"
+""", 0, b"<firstx><one two><><two words><two words>\n<firstx><*><><two words><two words>\ninner\noutside\n")
 
     def test_repeated_arithmetic_reads_live_elements(self):
         self.compare("""a=(2 6); i=0

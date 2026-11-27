@@ -15,6 +15,7 @@ if [[ $SUITE == core-engine ]]; then
   done
   "$ref" --version > "$out/bash-version.txt"
   python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 21 "${args[@]}" > "$out/scripts.txt"
+  python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing syntax --runs 41 --case syntax-control --case redirected-group --case core-parse-functions > "$out/syntax.txt"
   python3 tools/bench_completion.py "$bin/baseline" "$current" --bash "$ref" --command-cache --runs 31 > "$out/commands.txt"
   exit
 fi
