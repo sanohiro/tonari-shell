@@ -220,6 +220,21 @@ fn continues_single_quote(previous: Option<char>, line: &[u8]) -> bool {
     previous == Some('\'') && memchr::memchr2(b'\'', 0, line).is_none()
 }
 
+// An unaliased function header cannot execute before its compound body. Both
+// readers can skip the first parse when they have buffered text to probe.
+fn parse_prefix<P>(
+    session: &mut Session,
+    text: &str,
+    probe: bool,
+    parse: impl FnOnce(&mut Session) -> Result<P, parser::Error>,
+) -> Result<P, parser::Error> {
+    if probe && parser::opens_function(text) && !session.reads_aliases() {
+        Err(parser::Error::unfinished_function())
+    } else {
+        parse(session)
+    }
+}
+
 enum Parsed<P> {
     Execute(P),
     ReadMore,
@@ -395,15 +410,9 @@ fn run(
             continue;
         }
         let buffered = line_start == 0 && n != 0 && !shared_offset && !session.verbose;
-        let open_function = buffered && parser::opens_function(text) && !session.reads_aliases();
-        let mut result = if open_function {
-            // A function header cannot execute before its compound body.
-            Err(parser::Error::Incomplete(parser::Incomplete::Message(
-                "unfinished function definition",
-            )))
-        } else {
-            parser::session_source_at(text, n == 0, session, base_line)
-        };
+        let mut result = parse_prefix(session, text, buffered, |s| {
+            parser::session_source_at(text, n == 0, s, base_line)
+        });
         // A large compound can start near the end of a read buffer. After
         // refilling, retry lookahead at geometrically spaced prefix sizes.
         let retry = line_start >= 1024
@@ -589,7 +598,6 @@ pub fn text(
             continue;
         }
         let probe = new_command && !last && !session.verbose && !expand_history;
-        let open_function = probe && parser::opens_function(text) && !session.reads_aliases();
         let parse = |session: &mut Session, unit: &str, eof| {
             if eval_line.is_some() {
                 eval::parse(session, unit, eof, base_line)
@@ -597,13 +605,7 @@ pub fn text(
                 parser::session_source_at(unit, eof, session, base_line).map(eval::Program::Fresh)
             }
         };
-        let mut result = if open_function {
-            Err(parser::Error::Incomplete(parser::Incomplete::Message(
-                "unfinished function definition",
-            )))
-        } else {
-            parse(session, text, last)
-        };
+        let mut result = parse_prefix(session, text, probe, |s| parse(s, text, last));
         // Large incomplete compounds can otherwise reparse each growing prefix.
         // With -n there are no command effects between them. Keep short complete
         // lines on their streaming path, and fall back for precise diagnostics.

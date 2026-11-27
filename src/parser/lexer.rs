@@ -289,7 +289,7 @@ fn braced_parameter<'a>(
         return Ok(());
     }
     let len = match content.as_bytes().first() {
-        Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => name_chars_len(content),
+        Some(&byte) if crate::word::is_name_start(byte) => name_chars_len(content),
         Some(b'0'..=b'9') => content.bytes().take_while(|b| b.is_ascii_digit()).count(),
         Some(b'@' | b'*' | b'?' | b'$' | b'#' | b'!' | b'-') => 1,
         None => {
@@ -306,7 +306,8 @@ fn braced_parameter<'a>(
         && content
             .as_bytes()
             .get(1)
-            .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_');
+            .copied()
+            .is_some_and(crate::word::is_name_start);
     let len = if content.starts_with(['#', '!'])
         && content.as_bytes().get(1).is_some_and(u8::is_ascii_digit)
     {
@@ -1275,6 +1276,233 @@ fn operator(
     })
 }
 
+// Read one word or reserved spelling. The outer scanner owns command position,
+// pending here-documents and the nesting of compound commands.
+fn scan_word(
+    chars: &mut Chars<'_>,
+    first: char,
+    tokens: &[Token],
+    array_item: bool,
+    final_input: bool,
+    extended: bool,
+) -> Result<Option<Token>, Error> {
+    let mut word = WordBuilder::default();
+    let mut protected = false;
+    let mut started = false;
+    let mut pattern_context = false;
+    let mut braces = 0usize;
+    let mut assignment = None;
+    let mut after_colon = false;
+    let start = chars.as_str();
+    // Copy an ordinary word in one piece. Keep indexed assignments and
+    // expansion syntax on the full word reader.
+    let plain = match first {
+        '{' | '}' => 1,
+        // A leading hash reaches the word reader only when it is literal.
+        '#' => 1 + plain_prefix(&start[1..]),
+        _ => plain_prefix(start),
+    };
+    if plain > 0
+        && start
+            .as_bytes()
+            .get(plain)
+            .is_none_or(|b| matches!(b, b' ' | b'\t' | b'\n' | b';' | b'|' | b'&' | b'(' | b')'))
+    {
+        let literal = &start[..plain];
+        if let Some(fixed) = super::reserved_spelling(literal) {
+            let token = if fixed == "time"
+                && super::TIME_OPTIONS_EXTERNAL.get()
+                && start[plain..]
+                    .trim_start_matches([' ', '\t'])
+                    .starts_with('-')
+            {
+                Token::TimeUtility
+            } else {
+                Token::Reserved(fixed)
+            };
+            *chars = start[plain..].chars();
+            return Ok(Some(token));
+        }
+        word.literal(literal);
+        *chars = start[plain..].chars();
+        started = true;
+    } else if start.as_bytes().get(plain) == Some(&b'[')
+        && let Some(prefix) = super::array::indexed_prefix(start)
+        && (if plain == 0 {
+            array_item
+        } else {
+            indexed_assignment_position(tokens, prefix)
+        })
+    {
+        word.literal(&start[..prefix.len() + 1]);
+        assignment = Some(prefix.to_owned());
+        *chars = start[prefix.len() + 1..].chars();
+        started = true;
+    }
+    while let Some(c) = chars.peek() {
+        if separator(c) && !process_start(chars.as_str()) {
+            break;
+        }
+        let rest = chars.as_str();
+        chars.next();
+        let follows_colon = after_colon;
+        after_colon = c == ':';
+        match c {
+            '<' | '>' => {
+                process_word(chars, &mut word, c == '<')?;
+            }
+            '\'' | '"' => {
+                protected = true;
+                quoted(chars, c, &mut word)?;
+            }
+            '\\' => {
+                let escaped = match chars.next() {
+                    Some(c) => c,
+                    None if final_input => '\\',
+                    None => {
+                        return Err(Error::Incomplete(Incomplete::Message("trailing backslash")));
+                    }
+                };
+                if escaped == '\n' {
+                    after_colon = follows_colon;
+                    if chars.as_str().is_empty() && !final_input {
+                        return Err(Error::Incomplete(Incomplete::Message("line continuation")));
+                    }
+                    continue;
+                }
+                protected = true;
+                word.push(escaped);
+            }
+            '$' => {
+                protected |= chars.as_str().starts_with(['\'', '"']);
+                let named = chars
+                    .as_str()
+                    .as_bytes()
+                    .first()
+                    .copied()
+                    .is_some_and(crate::word::is_name_start);
+                dollar_word(chars, &mut word, false, assignment.is_some(), false)?;
+                if named
+                    && (chars.as_str().starts_with('{')
+                        || braces > 0 && chars.as_str().starts_with([',', '}']))
+                {
+                    word.brace_parameter();
+                }
+                pattern_context = true;
+            }
+            '[' | '{'
+                if !started && joined(chars.as_str()).chars().next().is_none_or(separator) =>
+            {
+                word.push(c)
+            }
+            '`' => {
+                backquote(chars, &mut word, false)?;
+                pattern_context = true;
+            }
+            '[' if !started
+                && chars.as_str().starts_with('[')
+                && chars.as_str()[1..].chars().next().is_none_or(separator) =>
+            {
+                word.literal("[[");
+                chars.next();
+            }
+            '{' => {
+                pattern_context = true;
+                let tail = chars.as_str();
+                if let Some((inner, after)) = tail.split_once('}')
+                    && let Some(range) = crate::word::brace::Range::parse(inner)
+                {
+                    word.part(Part::Range(Box::new(range)));
+                    *chars = after.chars();
+                } else {
+                    word.part(Part::Brace("{"));
+                    braces += 1;
+                }
+            }
+            '}' if braces > 0 => {
+                word.part(Part::Brace("}"));
+                braces -= 1;
+            }
+            ',' if braces > 0 => word.part(Part::Brace(",")),
+            '@' | '?' | '*' | '+' | '!' if extended && chars.as_str().starts_with('(') => {
+                pattern_parts(chars, &mut word, Some(c))?;
+                pattern_context = true;
+            }
+            '*' | '?' | '[' => {
+                pattern_context = true;
+                pattern_chunk(chars, &mut word, rest, extended, assignment.is_some());
+            }
+            '=' if assignment.is_none() && !protected => {
+                let prefix = &start[..start.len() - rest.len()];
+                let logical;
+                let prefix = if prefix.contains('\\') {
+                    logical = prefix.replace("\\\n", "");
+                    &logical
+                } else {
+                    prefix
+                };
+                if is_identifier(prefix.strip_suffix('+').unwrap_or(prefix)) {
+                    assignment = Some(prefix.to_owned());
+                }
+                word.push(c);
+            }
+            '~' if braces != 0 || chars.as_str().starts_with('{') => {
+                let tilde = if chars.as_str().starts_with('+') {
+                    chars.next();
+                    "~+"
+                } else if chars.as_str().starts_with('-') {
+                    chars.next();
+                    "~-"
+                } else {
+                    "~"
+                };
+                word.part(Part::BraceTilde(tilde));
+            }
+            '~' if !started
+                || assignment.as_ref().is_some_and(|name| {
+                    follows_colon || start.len() - rest.len() == name.len() + 1
+                }) =>
+            {
+                let length = chars
+                    .as_str()
+                    .find(|c| c == '/' || assignment.is_some() && c == ':' || separator(c))
+                    .unwrap_or(chars.as_str().len());
+                let suffix = &chars.as_str()[..length];
+                // Only consume a complete unquoted prefix. Quotes, escapes and
+                // expansions inside a login name must go through the word reader.
+                if valid_tilde_user(suffix) {
+                    let rest = chars.as_str();
+                    let slash = super::POSIX.get() && rest[length..].starts_with('/');
+                    let end = length + usize::from(slash);
+                    word.part(Part::Tilde(format!("~{}", &rest[..end])));
+                    *chars = rest[end..].chars();
+                } else {
+                    word.push(c);
+                }
+            }
+            _ if pattern_context => {
+                pattern_chunk(chars, &mut word, rest, extended, assignment.is_some())
+            }
+            _ if c.is_ascii() && plain_byte(c as u8) => {
+                let len = plain_prefix(chars.as_str());
+                after_colon = rest.as_bytes()[len] == b':';
+                word.literal(&rest[..1 + len]);
+                *chars = chars.as_str()[len..].chars();
+            }
+            _ => word.push(c),
+        }
+        started = true;
+    }
+    if !started {
+        return Ok(None);
+    }
+    Ok(Some(Token::Word(LexWord {
+        word: word.finish(),
+        protected,
+        assignment,
+    })))
+}
+
 fn scan(
     source: &str,
     substitution: bool,
@@ -1394,239 +1622,41 @@ fn scan(
             tokens.push(token);
             continue;
         }
-        let mut word = WordBuilder::default();
-        let mut protected = false;
-        let mut started = false;
-        let mut pattern_context = false;
-        let mut braces = 0usize;
-        let mut assignment = None;
-        let mut after_colon = false;
         let start = chars.as_str();
-        // Copy an ordinary word in one piece. Keep indexed assignments and
-        // expansion syntax on the full word reader.
-        let plain = match c {
-            '{' | '}' => 1,
-            // A leading hash reaches the word reader only when it is literal.
-            '#' => 1 + plain_prefix(&start[1..]),
-            _ => plain_prefix(start),
-        };
-        if plain > 0
-            && start.as_bytes().get(plain).is_none_or(|b| {
-                matches!(b, b' ' | b'\t' | b'\n' | b';' | b'|' | b'&' | b'(' | b')')
-            })
-        {
-            let literal = &start[..plain];
-            if let Some(fixed) = super::reserved_spelling(literal) {
-                saw_case |= substitution && fixed == "case";
-                let token = if fixed == "time"
-                    && super::TIME_OPTIONS_EXTERNAL.get()
-                    && start[plain..]
-                        .trim_start_matches([' ', '\t'])
-                        .starts_with('-')
-                {
-                    Token::TimeUtility
-                } else {
-                    Token::Reserved(fixed)
-                };
-                tokens.push(token);
-                chars = start[plain..].chars();
-                continue;
-            }
-            word.literal(literal);
-            chars = start[plain..].chars();
-            started = true;
-        } else if start.as_bytes().get(plain) == Some(&b'[')
-            && let Some(prefix) = super::array::indexed_prefix(start)
-            && (if plain == 0 {
-                array_level == Some(parentheses)
-            } else {
-                indexed_assignment_position(&tokens, prefix)
-            })
-        {
-            word.literal(&start[..prefix.len() + 1]);
-            assignment = Some(prefix.to_owned());
-            chars = start[prefix.len() + 1..].chars();
-            started = true;
-        }
-        while let Some(c) = chars.peek() {
-            if separator(c) && !process_start(chars.as_str()) {
-                break;
-            }
-            let rest = chars.as_str();
-            chars.next();
-            let follows_colon = after_colon;
-            after_colon = c == ':';
-            match c {
-                '<' | '>' => {
-                    process_word(&mut chars, &mut word, c == '<')?;
-                }
-                '\'' | '"' => {
-                    protected = true;
-                    quoted(&mut chars, c, &mut word)?;
-                }
-                '\\' => {
-                    let escaped = match chars.next() {
-                        Some(c) => c,
-                        None if final_input => '\\',
-                        None => {
-                            return Err(Error::Incomplete(Incomplete::Message(
-                                "trailing backslash",
-                            )));
-                        }
-                    };
-                    if escaped == '\n' {
-                        after_colon = follows_colon;
-                        if chars.as_str().is_empty() && !final_input {
-                            return Err(Error::Incomplete(Incomplete::Message(
-                                "line continuation",
-                            )));
-                        }
-                        continue;
-                    }
-                    protected = true;
-                    word.push(escaped);
-                }
-                '$' => {
-                    protected |= chars.as_str().starts_with(['\'', '"']);
-                    let named = chars
-                        .as_str()
-                        .as_bytes()
-                        .first()
-                        .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_');
-                    dollar_word(&mut chars, &mut word, false, assignment.is_some(), false)?;
-                    if named
-                        && (chars.as_str().starts_with('{')
-                            || braces > 0 && chars.as_str().starts_with([',', '}']))
-                    {
-                        word.brace_parameter();
-                    }
-                    pattern_context = true;
-                }
-                '[' | '{'
-                    if !started && joined(chars.as_str()).chars().next().is_none_or(separator) =>
-                {
-                    word.push(c)
-                }
-                '`' => {
-                    backquote(&mut chars, &mut word, false)?;
-                    pattern_context = true;
-                }
-                '[' if !started
-                    && chars.as_str().starts_with('[')
-                    && chars.as_str()[1..].chars().next().is_none_or(separator) =>
-                {
-                    word.literal("[[");
-                    chars.next();
-                }
-                '{' => {
-                    pattern_context = true;
-                    let tail = chars.as_str();
-                    if let Some((inner, after)) = tail.split_once('}')
-                        && let Some(range) = crate::word::brace::Range::parse(inner)
-                    {
-                        word.part(Part::Range(Box::new(range)));
-                        chars = after.chars();
-                    } else {
-                        word.part(Part::Brace("{"));
-                        braces += 1;
-                    }
-                }
-                '}' if braces > 0 => {
-                    word.part(Part::Brace("}"));
-                    braces -= 1;
-                }
-                ',' if braces > 0 => word.part(Part::Brace(",")),
-                '@' | '?' | '*' | '+' | '!' if extended && chars.as_str().starts_with('(') => {
-                    pattern_parts(&mut chars, &mut word, Some(c))?;
-                    pattern_context = true;
-                }
-                '*' | '?' | '[' => {
-                    pattern_context = true;
-                    pattern_chunk(&mut chars, &mut word, rest, extended, assignment.is_some());
-                }
-                '=' if assignment.is_none() && !protected => {
-                    let prefix = &start[..start.len() - rest.len()];
-                    let logical;
-                    let prefix = if prefix.contains('\\') {
-                        logical = prefix.replace("\\\n", "");
-                        &logical
-                    } else {
-                        prefix
-                    };
-                    if is_identifier(prefix.strip_suffix('+').unwrap_or(prefix)) {
-                        assignment = Some(prefix.to_owned());
-                    }
-                    word.push(c);
-                }
-                '~' if braces != 0 || chars.as_str().starts_with('{') => {
-                    let tilde = if chars.as_str().starts_with('+') {
-                        chars.next();
-                        "~+"
-                    } else if chars.as_str().starts_with('-') {
-                        chars.next();
-                        "~-"
-                    } else {
-                        "~"
-                    };
-                    word.part(Part::BraceTilde(tilde));
-                }
-                '~' if !started
-                    || assignment.as_ref().is_some_and(|name| {
-                        follows_colon || start.len() - rest.len() == name.len() + 1
-                    }) =>
-                {
-                    let length = chars
-                        .as_str()
-                        .find(|c| c == '/' || assignment.is_some() && c == ':' || separator(c))
-                        .unwrap_or(chars.as_str().len());
-                    let suffix = &chars.as_str()[..length];
-                    // Only consume a complete unquoted prefix. Quotes, escapes and
-                    // expansions inside a login name must go through the word reader.
-                    if valid_tilde_user(suffix) {
-                        let rest = chars.as_str();
-                        let slash = super::POSIX.get() && rest[length..].starts_with('/');
-                        let end = length + usize::from(slash);
-                        word.part(Part::Tilde(format!("~{}", &rest[..end])));
-                        chars = rest[end..].chars();
-                    } else {
-                        word.push(c);
-                    }
-                }
-                _ if pattern_context => {
-                    pattern_chunk(&mut chars, &mut word, rest, extended, assignment.is_some())
-                }
-                _ if c.is_ascii() && plain_byte(c as u8) => {
-                    let len = plain_prefix(chars.as_str());
-                    after_colon = rest.as_bytes()[len] == b':';
-                    word.literal(&rest[..1 + len]);
-                    chars = chars.as_str()[len..].chars();
-                }
-                _ => word.push(c),
-            }
-            started = true;
-        }
-        if !started {
+        let Some(token) = scan_word(
+            &mut chars,
+            c,
+            &tokens,
+            array_level == Some(parentheses),
+            final_input,
+            extended,
+        )?
+        else {
             continue;
-        }
-        let word = word.finish();
+        };
+        let Token::Word(LexWord {
+            word,
+            protected,
+            assignment,
+        }) = token
+        else {
+            saw_case |= substitution && matches!(token, Token::Reserved("case"));
+            tokens.push(token);
+            continue;
+        };
         if !protected && matches!(chars.peek(), Some('<' | '>')) {
             let literal = &start[..start.len() - chars.as_str().len()];
-            if let Some(name) = literal
+            let fd = if let Some(name) = literal
                 .strip_prefix('{')
                 .and_then(|s| s.strip_suffix('}'))
                 .filter(|s| crate::Session::valid_reference_target(s))
             {
                 tokens.push(Token::DescriptorName(name.into()));
-                let op = chars.next().unwrap();
-                chars = joined(chars.as_str()).chars();
-                if op == '<' && chars.as_str().starts_with('<') {
-                    here_doc::redirect(&mut chars, 0, &mut tokens, &mut pending_docs)?;
-                } else {
-                    tokens.push(redirect(&mut chars, op, 0)?);
-                }
-                continue;
-            }
-            if let Some(fd) = word.as_literal().and_then(|s| descriptor(s).ok()) {
+                Some(0)
+            } else {
+                word.as_literal().and_then(|s| descriptor(s).ok())
+            };
+            if let Some(fd) = fd {
                 let op = chars.next().unwrap();
                 chars = joined(chars.as_str()).chars();
                 if op == '<' && chars.as_str().starts_with('<') {

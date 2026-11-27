@@ -1,5 +1,9 @@
 # Engineering notes / 開発知見
 
+## November 27 · History word boundaries and editor input / 履歴の語境界と入力
+
+Readline groups an adjacent decimal descriptor and at most one `-` with `<&` or `>&`. In `2>&31-suffix`, the final history word is `suffix`. The history designator and Alt-dot now use the same boundary. `test_history_descriptor_word_boundaries` checks word indexes and `test_last_arg_lexical_boundaries` captures the editable buffer in a PTY. 行末への入力と検索語への追記では、デコードした文字列を直接バッファへ書く。通常入力では改行の後を子プロセスが読む場合があるため、端末からの先読み範囲は従来どおり制限する。 [Measurements / 計測](benchmarks.md#history-editor-input)
+
 ## November 27 · Declaration targets / 変数宣言と名前参照
 
 The attribute flag, variable name and array contents used by `@A`, `@a`, `@K` and `@k` belong to the same resolved declaration. Looking up the flags through a nameref and then formatting the original binding printed a nameref declaration or lost all array entries. Ordinary arrays can be formatted by reference. Dynamic shell arrays need a current snapshot. 添字付きの要素に独立した宣言属性はなく、配列全体への参照とは結果が異なる。未束縛と循環参照についても引数の個数まで比較した。The differential witness is `nameref-transform`. [Measurements / 計測](benchmarks.md#declaration-transform)

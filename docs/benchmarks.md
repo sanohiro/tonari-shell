@@ -1,5 +1,24 @@
 # Startup and execution / 起動と実行性能
 
+<a id="history-editor-input"></a>
+
+## 2026-11-27 · History search and terminal editing / 履歴検索と行編集
+
+Interleaved native release medians in ms. M1 compares `dc568dd` and `92f10e8` with Bash 5.3.20. Editor trials verify the resulting buffer or selected command.
+
+| M1 workload | Previous | Current | Bash |
+|---|---:|---:|---:|
+| Select the final word from a 64 KiB event 300 times (31 runs) | 5.052 | 4.592 | 25.535 |
+| Append to a 64 KiB line (25) | 0.022 | 0.021 | 0.695 |
+| Insert near the start of that line (25) | 0.062 | 0.059 | 2.682 |
+| Insert a Japanese UTF-8 sequence at the start (25) | 0.065 | 0.065 | 1.473 |
+| Filter 20,000 filenames down to a late match (21) | 0.091 | 0.085 | — |
+| Show an old match in 100,000 history entries (15) | 0.525 | 0.517 | — |
+
+On M1, 3,073 bytes of ASCII typeahead took 1.552/1.569/1.563/5.050 ms (previous/first refactor/direct append/Bash, 31 runs). UTF-8 typeahead took 1.486/1.505/1.493/4.836 ms. Direct append removes a scratch copy with comparable latency. The distribution binary stayed at 1,748,896 bytes.
+
+Linux x86-64 の静的 PIE は 2,439,640 → 2,434,776 バイト。CPU を一つに固定して履歴100万件の古い候補が見えるまで 4.649 → 4.633 ms。10万件の Ctrl-R は Tonari 0.119 ms、Bash 0.700 ms。2万件のファイル候補の遅い位置にある一致は 0.165 → 0.177 ms だった。`tools/bench_scripts.py` の `history-long-event-word`、`tools/bench_editing.py --size 65536`、`tools/bench_picker.py`、`tools/bench_history_fields.py` で再測定できる。 [Linux results, including single-CPU and p95](https://github.com/sanohiro/tonari-shell/actions/runs/45941002331)
+
 <a id="declaration-transform"></a>
 
 ## 2026-11-27 · Declaration transforms / 宣言属性と配列展開

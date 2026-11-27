@@ -370,7 +370,8 @@ impl<'a> Parser<'a> {
                             || rest
                                 .trim_ascii_start()
                                 .first()
-                                .is_some_and(|&b| b.is_ascii_alphabetic() || b == b'_')
+                                .copied()
+                                .is_some_and(crate::word::is_name_start)
                         {
                             2
                         } else {
@@ -398,9 +399,7 @@ impl<'a> Parser<'a> {
         active: bool,
         depth: u16,
     ) -> Result<Value<'a>> {
-        if depth >= 96 && deep_expression_full(depth) {
-            return Err("arithmetic nesting limit exceeded");
-        }
+        check_depth(depth)?;
         let mut left = self.atom(variables, active, depth + 1)?;
         while let Token::Op(op) = self.token {
             let Some((precedence, right_associative)) = precedence(op) else {
@@ -469,9 +468,7 @@ impl<'a> Parser<'a> {
         active: bool,
         depth: u16,
     ) -> Result<Value<'a>> {
-        if depth >= 96 && deep_expression_full(depth) {
-            return Err("arithmetic nesting limit exceeded");
-        }
+        check_depth(depth)?;
         let mut value = match self.advance()? {
             Token::Number(s) => Value::Number(number(s)?),
             Token::Name(n) => {
@@ -573,6 +570,15 @@ impl Value<'_> {
     }
 }
 
+fn check_depth(depth: u16) -> Result<()> {
+    const FIRST_STACK_CHECK: u16 = 96;
+    if depth >= FIRST_STACK_CHECK && deep_expression_full(depth) {
+        Err("arithmetic nesting limit exceeded")
+    } else {
+        Ok(())
+    }
+}
+
 // Long chains of arithmetic variable references can implement terminating
 // recursions. Respect the real stack budget on the process main thread.
 #[cold]
@@ -587,9 +593,7 @@ fn deep_expression_full(depth: u16) -> bool {
 }
 
 fn calculate(source: &str, variables: &mut dyn Variables, depth: u16) -> Result<i64> {
-    if depth >= 96 && deep_expression_full(depth) {
-        return Err("arithmetic nesting limit exceeded");
-    }
+    check_depth(depth)?;
     if let [digit @ b'0'..=b'9'] = source.as_bytes() {
         return Ok(i64::from(digit - b'0'));
     }
