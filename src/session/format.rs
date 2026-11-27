@@ -234,7 +234,16 @@ pub(super) fn print_variable_value(out: &mut dyn Write, var: &Variable) -> io::R
                     chunk.clear();
                     print_value(out, value)?;
                 } else {
-                    print_value(&mut chunk, value)?;
+                    if value
+                        .bytes()
+                        .any(|b| b.is_ascii_control() || double_quote_escape(b))
+                    {
+                        print_value(&mut chunk, value)?;
+                    } else {
+                        chunk.push(b'"');
+                        chunk.extend_from_slice(value.as_bytes());
+                        chunk.push(b'"');
+                    }
                     if chunk.len() >= CHUNK_SIZE {
                         out.write_all(&chunk)?;
                         chunk.clear();
@@ -251,14 +260,18 @@ pub(super) fn print_variable_value(out: &mut dyn Write, var: &Variable) -> io::R
     writeln!(out)
 }
 
-pub(super) fn print_value(out: &mut (impl Write + ?Sized), value: &str) -> io::Result<()> {
+fn double_quote_escape(byte: u8) -> bool {
+    matches!(byte, b'"' | b'\\' | b'$' | b'`')
+}
+
+pub(super) fn print_value(out: &mut dyn Write, value: &str) -> io::Result<()> {
     if value.bytes().any(|c| c.is_ascii_control()) {
         return out.write_all(&crate::word::quote::ansi_quote(value.as_bytes(), false));
     }
     out.write_all(b"\"")?;
     let mut start = 0;
     for (i, &byte) in value.as_bytes().iter().enumerate() {
-        if matches!(byte, b'"' | b'\\' | b'$' | b'\x60') {
+        if double_quote_escape(byte) {
             out.write_all(&value.as_bytes()[start..i])?;
             out.write_all(b"\\")?;
             start = i;
