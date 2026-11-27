@@ -4,7 +4,7 @@
 
 Comparing cached child environments used to visit every shell binding. Only exported variables and bindings masking inherited names can affect the variable delta. An index can narrow that scan when few of the bindings qualify. Read current values, option strings, exported functions and command-prefix assignments for each launch. Small and densely exported tables use direct iteration.
 
-8,192 個のシェル内変数を先に作成し、子プロセスが実際に受け取った値を検証してから時間を比較する。属性変更、ローカル変数の復元、継承値のマスク、`set -a` は `test_child_environment_with_many_private_variables` で確認する。 [Measurements / 計測](benchmarks.md#sparse-environment)
+整数の更新は pure Rust の `itoa` で既存の文字列へ書き戻す。追加の推移依存はなく、配布バイナリの動的リンク先も増えなかった。8,192 個のシェル内変数を先に作成し、子プロセスが実際に受け取った値を検証してから時間を比較する。属性変更、ローカル変数の復元、継承値のマスク、`set -a` は `test_child_environment_with_many_private_variables` で確認する。 [Measurements / 計測](benchmarks.md#sparse-environment)
 
 ## November 27 · Passing arguments to external programs / 外部コマンドの引数
 

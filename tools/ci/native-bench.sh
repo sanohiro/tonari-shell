@@ -331,7 +331,7 @@ case "$SUITE" in
     cc -O2 tools/bench_spawn.c -o "$bin/spawn-control"
     run probes python3 tools/bench_scripts.py "$current" --bash "$ref" --previous "$bin/baseline" --timing started --runs 41 \
       --spawn-control "$bin/spawn-control" --case redirected-subshells --case descriptor-moves --case directory-stack \
-      --case builtin-output --case builtin-output-long --case external --case external-env --case external-wide-argv --case external-many-locals --case pipeline --case external-substitutions \
+      --case builtin-output --case builtin-output-long --case external --case external-env --case external-wide-argv --case external-many-locals --case arithmetic --case arithmetic-live-bound --case functions --case pipeline --case external-substitutions \
       --case merged-pipeline --case merged-pipeline-redirect --case redirect-stderr --case background-subshell-wait \
       --case printf-list-newline --case printf-list-count \
       --case heredoc-external-file --case here-string-capture --case here-string-builtin-read \

@@ -13,6 +13,8 @@
 
 With 32 exported keys the medians were 25.557 → 25.499 ms on M1 and 6.260 → 6.280 ms on Linux. The M1 arithmetic control took 3.836 → 4.016 ms and function calls took 6.987 → 7.168 ms. Linux reached 0.674 of Bash time for the 48 launches. M1 の配布バイナリは 1,748,896 → 1,748,912 バイト、Linux の静的 PIE は 2,428,440 → 2,431,576 バイト。 [Native Linux measurements](https://github.com/sanohiro/tonari-shell/actions/runs/45948451490)
 
+The first index build exposed a scalar arithmetic regression. Two invalidation variants still cost 2–5% on the M1 loop. The final implementation formats an integer directly into a stack buffer with `itoa` and reuses the existing shell string. In 41 interleaved M1 samples, median times (previous → final, Bash) were 3.850 → 3.762 ms (15.900) for arithmetic, 3.352 → 3.252 ms (13.658) for a changing loop bound, 6.358 → 6.314 ms (17.582) for functions and 60.495 → 57.240 ms (91.878) for the sparse environment. macOS の配布サイズとリンク先は最初の候補と同じ。
+
 <a id="packed-argv"></a>
 
 ## 2026-11-27 · External argument storage / 外部起動時の引数

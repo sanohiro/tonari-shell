@@ -1080,9 +1080,7 @@ impl Session {
             return Some(Err(crate::session::READONLY));
         }
         let text = var.value.as_mut()?;
-        text.clear();
-        use std::fmt::Write;
-        write!(text, "{value}").unwrap();
+        itoa::Buffer::new().format(value).clone_into(text);
         var.declared = true;
         var.exported |= self.allexport;
         Some(Ok(()))
@@ -1123,9 +1121,7 @@ impl Session {
             } else {
                 rhs
             };
-            current.clear();
-            use std::fmt::Write;
-            write!(current, "{result}").unwrap();
+            itoa::Buffer::new().format(result).clone_into(current);
         } else if append {
             current.push_str(value);
         } else {
