@@ -1350,6 +1350,9 @@ impl Reader {
                     if cmd.words.is_empty() {
                         if let Some(name) = assignment.filter(|name| !name.starts_with('[')) {
                             word.remove_assignment_prefix(name.len() + 1);
+                            if cmd.assignments.is_empty() {
+                                cmd.assignments.reserve_exact(1);
+                            }
                             cmd.assignments.push((name, Assignment::Scalar(word)));
                             continue;
                         }

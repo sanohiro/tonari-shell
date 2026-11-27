@@ -1302,6 +1302,24 @@ fn scan_word(
         '#' => 1 + plain_prefix(&start[1..]),
         _ => plain_prefix(start),
     };
+    // An unquoted name=value with a plain right-hand side is already one
+    // complete literal. Leave tildes, globs, substitutions and quoted tails
+    // to the ordinary word reader.
+    if start.as_bytes().get(plain) == Some(&b'=') && is_identifier(&start[..plain]) {
+        let end = plain + 1 + plain_prefix(&start[plain + 1..]);
+        if start
+            .as_bytes()
+            .get(end)
+            .is_none_or(|b| matches!(b, b' ' | b'\t' | b'\n' | b';' | b'|' | b'&' | b'(' | b')'))
+        {
+            *chars = start[end..].chars();
+            return Ok(Some(Token::Word(LexWord {
+                word: Word::Literal(start[..end].to_owned()),
+                assignment: Some(start[..plain].to_owned()),
+                protected: false,
+            })));
+        }
+    }
     if plain > 0
         && start
             .as_bytes()

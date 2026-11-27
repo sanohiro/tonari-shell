@@ -86,7 +86,7 @@ alias two=changed; printf 'live<%s>\n' "${BASH_ALIASES[@]}"
         for line in (b"v<a b>", b"v<>", b"v<updated>", b"field<hit-one>", b"field<x>",
                      b"field<y>", b"v<sub>", b"live<live>", b"live<changed>"):
             self.assertIn(line, p.stdout.splitlines())
-        if not self.bash_before_53():
+        if BASH in self.shells_for(minimum=5):
             ref = self.command(BASH, source)
             self.assertEqual((ref.returncode, ref.stdout, ref.stderr), (0, p.stdout, b""))
 
