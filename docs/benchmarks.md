@@ -1,5 +1,34 @@
 # Startup and execution / 起動と実行性能
 
+<a id="runtime-audit-v3"></a>
+
+## 2026-11-27 · Third runtime audit / 第3回監査の実測
+
+The previous release is `8349230` and the new interpreter is `2ae4a52`. Times are interleaved medians in milliseconds. The M1 used GNU Bash 5.3.20 and measured each script **after startup** (23 samples). Ubuntu 24.04 on a native x86-64 Xeon used the distribution Bash 5.2 and measured the **whole script** (21 samples). Compare the three columns within each host. Each run checks the result of the workload. [Linux host, workloads, startup and PTY samples](https://github.com/sanohiro/tonari-shell/actions/runs/45932332461)
+
+| Workload | M1 previous | M1 Tonari | M1 Bash | Linux previous | Linux Tonari | Linux Bash |
+|---|---:|---:|---:|---:|---:|---:|
+| Add 16,384 history entries, HISTSIZE=8,192 | 54.382 | 11.726 | 32.763 | 83.782 | 13.016 | 168.450 |
+| Mixed printf formats | 1.829 | 1.615 | 4.104 | 2.401 | 2.275 | 3.685 |
+| Assign a formatted number | 1.692 | 1.407 | 5.340 | 1.632 | 1.451 | 4.402 |
+| Symbolic umask operations | 1.454 | 0.907 | 3.942 | 1.234 | 0.750 | 3.202 |
+| Loop with variable bound and explicit step | 4.211 | 3.401 | 13.808 | 3.610 | 2.759 | 12.195 |
+| Brace range | 1.165 | 1.145 | 5.057 | 1.745 | 1.727 | 4.960 |
+| Function calls | 6.656 | 6.577 | 17.876 | 6.735 | 6.607 | 15.689 |
+| Completion registration | 1.258 | 1.286 | 3.161 | 1.155 | 1.167 | 2.662 |
+| Write pwd to a regular file 1,000 times | 42.676 | 42.317 | 47.113 | 66.969 | 65.603 | 67.871 |
+| Write pwd to /dev/null 1,000 times | 11.449 | 11.102 | 14.993 | 1.804 | 1.688 | 4.178 |
+
+Both hosts also timed startup. M1 `-c :` took 2.772/2.753/7.635 ms (previous/current/Bash, 81 samples), and exec to first prompt took 3.191/3.144/8.174 ms. Linux measured 0.270/0.264/0.741 ms and 0.608/0.609/1.264 ms respectively. Including the PTY harness before exec brings the Linux first-prompt medians to 1.308/1.310/1.960 ms. With 150 extra environment variables the same M1 startup comparison measured 3.271/3.172/8.532 ms.
+
+The first working implementation of attached and repeated `printf -v` options took 1.737 ms on M1 for 2,048 assignments using `printf -va -vb '%+08d' -31`. The tuned version took 1.476 ms and Bash took 5.706 ms. Alternating `umask g+X` and `umask g-x` 1,024 times from 077 measured 1.592/1.051/4.191 ms for the first version, the tuned version and Bash (41 samples after startup). For 4,096 runtime bracket matches against `[[.colon.]]`, a trial replacing the name match with a sorted table took 3.241 ms, versus 3.102 ms with the existing match and 7.943 ms with Bash (27 samples). Both Tonari binaries were 1,748,880 bytes on M1, so the release keeps the match.
+
+履歴の上限到達後、古い1件を外すたびに全件を移動していた。使用中の範囲を管理してまとめて詰め直す変更で、同じ追加処理は M1 で約4.6倍、Linux で約6.4倍速くなった。通常ファイルへの `pwd` は両機種で Bash 比 2/3 に届かない。シェル内部でパスと改行をまとめて書いても、ファイルを1,000回開き直して切り詰める費用が残る。補完登録の中央値も両機種でわずかに増えた。Linux の固定上限の算術ループは 2.996 → 3.170 ms（Bash 13.338 ms）で、変数上限のループとは差がある。
+
+For terminal latency, `tools/bench_edit_actions.py PREVIOUS CURRENT BASH --runs 31` checks the executed command after timing the visible echo. On M1, inserting the last argument from a long history entry took 0.056/0.053/0.363 ms and the short case took 0.025/0.022/0.018 ms. Pasting into a 1 MiB line took 0.135/0.136/13.179 ms. The Linux run with normal affinity measured 0.059/0.058/4.646 ms for that paste. With the driver and all three shells pinned to one CPU the paste measured 0.090/0.309/4.736 ms, with p95 of 0.564/0.530/4.827 ms. An independent one-CPU repeat measured 0.080/0.089/4.712 ms (p95 0.404/0.635/4.887 ms). Both repeats put the new median above the previous release under affinity, with substantially different magnitudes. [One-CPU repeat and host details](https://github.com/sanohiro/tonari-shell/actions/runs/45932890441)
+
+配布バイナリのサイズは M1 が 1,765,472 → 1,748,880 バイト、Linux x86-64 が 2,469,720 → 2,441,816 バイト。macOS は libSystem のみをリンクし、Linux は strip 済みの static PIE。再現には `tools/build-release.sh` で両リビジョンをビルドし、`python3 tools/bench_scripts.py CURRENT --previous PREVIOUS --bash BASH --case history-at-limit --case printf-formats --case arithmetic-live-bound --case redirected-pwd --runs 23 --timing started` を使う。[Native Linux suite and workload selection](../tools/ci/native-bench.sh)
+
 <a id="runtime-audit-v2"></a>
 
 ## 2026-11-27 · Second runtime audit / 第2回監査の実測

@@ -1,5 +1,13 @@
 # Engineering notes / 開発知見
 
+<a id="runtime-audit-v3"></a>
+
+## 2026-11-27 · Third runtime audit / 第3回監査
+
+A bounded history can drop an expired entry immediately and move its remaining entries in batches. Check history numbers, timestamp pairs, deletion and file output across more than one compaction. Startup can read imported functions and Bash settings in one environment pass. Copy the few settings needed later, since an external script can reenter the interpreter with a changed environment. Terminal checks made after rc files and input ownership after Enter affect actual shell behavior. [Cases and implementation decisions](compatibility/runtime-audit-v3.md)
+
+満杯の履歴では、追加・削除・保存を複数回の詰め直しにまたがって検証した。リダイレクトでは、未使用 FD の番号が上限未満でも、標準出力を退避するための空きが別にあるとは限らない。切り詰め前に退避用 FD を確保し、短いパスと改行は1回で書く。ロケール表の再配置は全336ロケール、16,081個の文字列を旧データと突き合わせた。端末入力は描画済みのカーソル位置がわかる場合に末尾へ追記できる。通常ファイル、端末の短い操作、CPUを1個に固定した場合も個別に記録した。[実行時間とバイナリサイズ](benchmarks.md#runtime-audit-v3)
+
 <a id="runtime-audit-v2"></a>
 
 ## 2026-11-27 · Runtime audit and release diagnostics / 第2回監査と配布版の診断
