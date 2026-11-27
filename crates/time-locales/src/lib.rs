@@ -47,6 +47,10 @@ pub mod numeric {
     include!(concat!(env!("OUT_DIR"), "/numeric.rs"));
 
     pub fn find(name: &str) -> Numeric {
+        index(name).map_or(C, |i| PROFILES[usize::from(KINDS[i])])
+    }
+
+    pub(super) fn index(name: &str) -> Option<usize> {
         let normalized;
         let name = if let Some((base, codeset)) = name.split_once('.') {
             if let Some((_, modifier)) = codeset.split_once('@') {
@@ -58,13 +62,11 @@ pub mod numeric {
         } else {
             name
         };
-        if matches!(name, "C" | "POSIX" | "") {
-            return C;
+        match name {
+            "" | "C" => return None,
+            "POSIX" => return Some(super::POSIX.0),
+            _ => {}
         }
-        index(name).map_or(C, |i| PROFILES[usize::from(KINDS[i])])
-    }
-
-    pub(super) fn index(name: &str) -> Option<usize> {
         let mut lo = 0;
         let mut hi = KINDS.len();
         while lo < hi {

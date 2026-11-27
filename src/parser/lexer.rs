@@ -1,6 +1,6 @@
 use super::Incomplete;
 use super::{CaseEnd, Error, Reader, Target, ansi, here_doc, parse_final};
-use crate::word::{Part, Word, WordBuilder, is_identifier};
+use crate::word::{Part, Word, WordBuilder, is_identifier, name_chars_len};
 use std::str::Chars;
 
 #[derive(Debug, Clone)]
@@ -193,10 +193,7 @@ fn dollar_word(
     let name = match chars.peek() {
         Some('{') => return braced_parameter(chars, word, quoted, assignment, quoted_name),
         Some('a'..='z' | 'A'..='Z' | '_') => {
-            let end = rest
-                .bytes()
-                .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
-                .count();
+            let end = name_chars_len(rest);
             let mut tail = &rest[end..];
             if tail.starts_with("\\\n") {
                 let mut name = rest[..end].to_owned();
@@ -206,10 +203,7 @@ fn dollar_word(
                     if next.is_empty() {
                         break;
                     }
-                    let size = next
-                        .bytes()
-                        .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
-                        .count();
+                    let size = name_chars_len(next);
                     name.push_str(&next[..size]);
                     tail = &next[size..];
                 }
@@ -295,10 +289,7 @@ fn braced_parameter<'a>(
         return Ok(());
     }
     let len = match content.as_bytes().first() {
-        Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => content
-            .bytes()
-            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
-            .count(),
+        Some(b'a'..=b'z' | b'A'..=b'Z' | b'_') => name_chars_len(content),
         Some(b'0'..=b'9') => content.bytes().take_while(|b| b.is_ascii_digit()).count(),
         Some(b'@' | b'*' | b'?' | b'$' | b'#' | b'!' | b'-') => 1,
         None => {
@@ -334,10 +325,7 @@ fn braced_parameter<'a>(
     {
         2
     } else if prefixed {
-        1 + content[1..]
-            .bytes()
-            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
-            .count()
+        1 + name_chars_len(&content[1..])
     } else {
         len
     };
@@ -360,10 +348,7 @@ fn braced_parameter<'a>(
             let mut cursor = after.chars();
             decoded.push_str(&ansi::quoted_fragment(&mut cursor)?);
             let suffix = cursor.as_str();
-            let size = suffix
-                .bytes()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == b'_')
-                .count();
+            let size = name_chars_len(suffix);
             decoded.push_str(&suffix[..size]);
             tail = &suffix[size..];
         }

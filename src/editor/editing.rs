@@ -1,4 +1,44 @@
-use super::{Action, EditorState, Session, char_offset, next, previous, word_end, word_start};
+use super::{
+    Action, EditorState, Input, Session, char_offset, next, previous, word_end, word_start,
+};
+
+pub(super) fn edit_and_execute(
+    session: &mut Session,
+    mut text: String,
+    vi: bool,
+    status: u8,
+    queued: std::collections::VecDeque<u8>,
+) -> Input {
+    let configured = if vi && session.posix {
+        None
+    } else {
+        session
+            .get("VISUAL")
+            .filter(|s| !s.is_empty())
+            .or_else(|| session.get("EDITOR").filter(|s| !s.is_empty()))
+    };
+    let editor = configured
+        .as_deref()
+        .unwrap_or(if vi { "vi" } else { "emacs" });
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    match crate::history::commands::edit_text(session, editor, &text, status) {
+        Ok(Ok(mut edited)) => {
+            if !edited.ends_with('\n') {
+                edited.push('\n');
+            }
+            session.editor_queue = queued;
+            Input::Line(edited)
+        }
+        Ok(Err(crate::Flow::Exit(code))) => Input::Exit(code),
+        Ok(Err(_)) => Input::Cancel,
+        Err(e) => {
+            diagnostic!("{editor}: {e}");
+            Input::Cancel
+        }
+    }
+}
 
 impl EditorState {
     pub(super) fn kill(

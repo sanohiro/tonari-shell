@@ -219,7 +219,7 @@ impl Preview {
     }
 
     fn typeahead(&mut self) {
-        let append = self.cursor == self.line.len() && self.cursor >= 1024;
+        let append = self.cursor == self.line.len() && self.cursor >= super::VIEWPORT_THRESHOLD;
         let start = self.cursor;
         let mut erased = false;
         let mut edited = false;
@@ -234,7 +234,7 @@ impl Preview {
                 break;
             }
             self.replay.push_back(byte);
-            if self.replay.len() >= 65536 {
+            if self.replay.len() >= Keys::MAX_QUEUED_BYTES {
                 self.stopped = true;
                 break;
             }

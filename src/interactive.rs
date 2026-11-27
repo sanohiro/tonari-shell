@@ -1,5 +1,17 @@
 use super::*;
 
+pub(crate) fn terminal_size(fd: std::os::fd::RawFd) -> Option<(u16, u16)> {
+    let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
+    // SAFETY: TIOCGWINSZ initializes winsize on success.
+    let size = unsafe {
+        if libc::ioctl(fd, libc::TIOCGWINSZ, size.as_mut_ptr()) < 0 {
+            return None;
+        }
+        size.assume_init()
+    };
+    Some((size.ws_row, size.ws_col))
+}
+
 pub(super) fn terminal_read(buf: &mut [u8], raw: bool) -> io::Result<usize> {
     unsafe {
         let mut blocked = std::mem::zeroed();

@@ -131,10 +131,21 @@ pub enum Part {
     },
 }
 
+pub(crate) fn is_name_char(byte: u8) -> bool {
+    byte == b'_' || byte.is_ascii_alphanumeric()
+}
+
+// Continuations can start with a digit, e.g. after a backslash-newline.
+pub(crate) fn name_chars_len(source: &str) -> usize {
+    source
+        .bytes()
+        .take_while(|&byte| is_name_char(byte))
+        .count()
+}
+
 pub fn is_identifier(name: &str) -> bool {
     let mut chars = name.bytes();
-    matches!(chars.next(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_'))
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == b'_')
+    matches!(chars.next(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_')) && chars.all(is_name_char)
 }
 
 impl Word {

@@ -365,21 +365,15 @@ impl Session {
         if !self.interactive || !self.shopt.checkwinsize {
             return None;
         }
-        let mut size = std::mem::MaybeUninit::<libc::winsize>::uninit();
-        for fd in [libc::STDERR_FILENO, libc::STDIN_FILENO] {
-            if unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, size.as_mut_ptr()) } == -1 {
-                continue;
-            }
-            let size = unsafe { size.assume_init() };
-            let (rows, columns) = (size.ws_row, size.ws_col);
-            if rows > 0 && columns > 0 && self.shopt.last_size != Some((rows, columns)) {
-                self.assign("LINES", &rows.to_string());
-                self.assign("COLUMNS", &columns.to_string());
-                self.shopt.last_size = Some((rows, columns));
-            }
-            return Some((rows, columns));
+        let (rows, columns) = [libc::STDERR_FILENO, libc::STDIN_FILENO]
+            .into_iter()
+            .find_map(crate::interactive::terminal_size)?;
+        if rows > 0 && columns > 0 && self.shopt.last_size != Some((rows, columns)) {
+            self.assign("LINES", &rows.to_string());
+            self.assign("COLUMNS", &columns.to_string());
+            self.shopt.last_size = Some((rows, columns));
         }
-        None
+        Some((rows, columns))
     }
 
     fn option_entries(set: bool) -> &'static [OptionEntry] {

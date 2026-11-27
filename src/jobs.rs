@@ -1,5 +1,9 @@
 mod builtins;
 use crate::Session;
+use crate::traps::{ChildEvent, signal_status};
+
+// Completed jobs and process substitutions remain available to a later wait by PID.
+pub(crate) const MAX_FINISHED_STATUSES: usize = 4096;
 use crate::execute::fd::PrivateFile;
 pub use builtins::dispatch;
 use builtins::*;
@@ -273,7 +277,7 @@ impl Job {
         }) {
             if posix
                 && let Some((name, _)) =
-                    crate::traps::signals().find(|(_, sig)| *sig + 128 == i32::from(code))
+                    crate::traps::signals().find(|(_, sig)| signal_status(*sig) == code)
             {
                 return format!("Stopped(SIG{name})").into();
             }
@@ -296,24 +300,23 @@ impl Job {
         }
         0
     }
-    fn update(&mut self, pid: pid_t, status: i32) {
+    fn update(&mut self, pid: pid_t, event: ChildEvent) {
         if let Some(p) = self.children.iter_mut().find(|p| p.pid == pid) {
             self.listed = false;
-            p.state = if libc::WIFSTOPPED(status) {
-                State::Stopped(crate::traps::signal_status(libc::WSTOPSIG(status)))
-            } else if libc::WIFCONTINUED(status) {
-                State::Running
-            } else if libc::WIFSIGNALED(status) {
-                self.signaled = true;
-                p.signal = Some(libc::WTERMSIG(status));
-                State::Done(crate::traps::signal_status(libc::WTERMSIG(status)))
-            } else {
-                State::Done(libc::WEXITSTATUS(status) as u8)
+            p.state = match event {
+                ChildEvent::Stopped(signal) => State::Stopped(signal_status(signal)),
+                ChildEvent::Continued => State::Running,
+                ChildEvent::Signaled(signal) => {
+                    self.signaled = true;
+                    p.signal = Some(signal);
+                    State::Done(signal_status(signal))
+                }
+                ChildEvent::Exited(code) => State::Done(code),
             };
-            if libc::WIFCONTINUED(status) || self.stopped_at != 0 && !self.stopped() {
+            if matches!(event, ChildEvent::Continued) || self.stopped_at != 0 && !self.stopped() {
                 self.stopped_at = 0;
             } else if self.stopped_at == 0
-                && (libc::WIFSTOPPED(status) || self.children.len() > 1)
+                && (matches!(event, ChildEvent::Stopped(_)) || self.children.len() > 1)
                 && !self.active()
                 && self.stopped()
             {
@@ -361,7 +364,7 @@ impl Job {
                 }
                 return Err(e);
             }
-            self.update(got, status);
+            self.update(got, ChildEvent::decode(status));
         }
         Ok(None)
     }
@@ -572,9 +575,8 @@ impl Jobs {
                 && let Some(pid) = job.group
                 && let Ok(status) = crate::editor::preview::wait_child(pid)
             {
-                if libc::WIFSTOPPED(status)
-                    && matches!(libc::WSTOPSIG(status), libc::SIGTTIN | libc::SIGTTOU)
-                {
+                let event = ChildEvent::decode(status);
+                if matches!(event, ChildEvent::Stopped(libc::SIGTTIN | libc::SIGTTOU)) {
                     if let Some(t) = self.terminal() {
                         give_terminal(t.fd.as_raw_fd(), pid);
                     }
@@ -582,7 +584,7 @@ impl Jobs {
                         libc::kill(-pid, libc::SIGCONT);
                     }
                 } else {
-                    job.update(pid, status);
+                    job.update(pid, event);
                 }
             }
             let code = if job.active() || job.stopped() || !launch.defer_tty {
@@ -641,7 +643,7 @@ impl Jobs {
 
     fn remember(&mut self, job: &Job) {
         if let Some(pid) = job.children.last().map(|p| p.pid).filter(|&p| p > 0) {
-            if self.finished.len() == 4096 {
+            if self.finished.len() == MAX_FINISHED_STATUSES {
                 self.finished.pop_front();
             }
             self.finished.push_back((pid, job.status()));
@@ -838,7 +840,7 @@ impl Jobs {
                     libc::WNOHANG | libc::WUNTRACED | libc::WCONTINUED,
                 );
                 if got > 0 {
-                    job.update(got, status);
+                    job.update(got, ChildEvent::decode(status));
                 }
             }
         }

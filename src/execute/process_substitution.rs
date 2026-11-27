@@ -1,6 +1,5 @@
 use std::cell::Cell;
 use std::collections::BTreeMap;
-use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::rc::Rc;
 
@@ -28,18 +27,9 @@ pub(crate) struct Substitutions {
 }
 
 fn status(pid: libc::pid_t, options: i32) -> Option<u8> {
-    let mut state = 0;
-    loop {
-        match crate::traps::waitpid(pid, &mut state, options) {
-            n if n > 0 && libc::WIFEXITED(state) => return Some(libc::WEXITSTATUS(state) as u8),
-            n if n > 0 && libc::WIFSIGNALED(state) => {
-                return Some(crate::traps::signal_status(libc::WTERMSIG(state)));
-            }
-            -1 if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted => continue,
-            -1 => return Some(127),
-            _ => return None,
-        }
-    }
+    crate::traps::child_event(pid, options).map_or(Some(127), |event| {
+        event.and_then(crate::traps::ChildEvent::exit_status)
+    })
 }
 
 impl Substitutions {
@@ -61,7 +51,7 @@ impl Substitutions {
         self.active.truncate(start);
         self.pending.retain(|&pid| {
             if let Some(code) = status(pid, libc::WNOHANG) {
-                if self.finished.len() >= 4096 {
+                if self.finished.len() >= crate::jobs::MAX_FINISHED_STATUSES {
                     self.finished.pop_first();
                 }
                 self.finished.insert(pid, code);

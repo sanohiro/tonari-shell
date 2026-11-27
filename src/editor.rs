@@ -1,16 +1,20 @@
 pub(crate) mod bindings;
 mod editing;
+mod input;
 mod picker;
 pub(crate) mod preview;
 mod recall;
+mod search;
 mod undo;
-use undo::Undo;
 mod vi;
 mod viewport;
+
 use bindings::{Action, Binding, Keymap};
-use std::collections::VecDeque;
+pub(crate) use input::ready;
+use input::{Keys, Terminal, unbound_text};
+use search::ReverseSearch;
 use std::io::{self, Write};
-use std::os::fd::RawFd;
+use undo::Undo;
 use unicode_width::UnicodeWidthChar;
 
 use crate::{
@@ -24,357 +28,6 @@ pub enum Input {
     Cancel,
     Directory(io::Result<()>),
     Exit(u8),
-}
-
-struct Terminal(libc::termios, bool);
-
-impl Terminal {
-    fn enter(bracketed: bool) -> io::Result<Self> {
-        let mut old = unsafe { std::mem::zeroed::<libc::termios>() };
-        if unsafe { libc::tcgetattr(0, &mut old) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let mut new = old;
-        new.c_lflag &= !(libc::ICANON | libc::ECHO | libc::IEXTEN);
-        new.c_iflag &= !(libc::IXON | libc::ICRNL);
-        new.c_cc[libc::VSUSP] = libc::_POSIX_VDISABLE as _;
-        new.c_cc[libc::VMIN] = 0;
-        new.c_cc[libc::VTIME] = 0;
-        if unsafe { libc::tcsetattr(0, libc::TCSANOW, &new) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let term = Self(old, bracketed);
-        if bracketed {
-            io::stderr().write_all(b"\x1b[?2004h")?;
-        }
-        Ok(term)
-    }
-}
-impl Drop for Terminal {
-    fn drop(&mut self) {
-        if self.1 {
-            let _ = io::stderr().write_all(b"\x1b[?2004l");
-        }
-        unsafe {
-            libc::tcsetattr(0, libc::TCSANOW, &self.0);
-        }
-    }
-}
-
-fn byte() -> io::Result<Option<u8>> {
-    let mut key = [0u8];
-    loop {
-        match crate::terminal_read(&mut key, true) {
-            Ok(n) => return Ok((n == 1).then_some(key[0])),
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
-            Err(e) => return Err(e),
-        }
-    }
-}
-
-pub(crate) fn ready(fd: RawFd, ms: i32) -> bool {
-    let mut p = libc::pollfd {
-        fd,
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    unsafe { libc::poll(&mut p, 1, ms) > 0 }
-}
-
-#[derive(Default)]
-struct Keys {
-    queued: VecDeque<u8>,
-    expansions: usize,
-    sequence: Vec<u8>,
-}
-
-impl Keys {
-    fn input_pending(&self) -> bool {
-        !self.queued.is_empty()
-            || ready(0, 0)
-            || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
-    }
-    fn get(&mut self) -> io::Result<Option<u8>> {
-        if let Some(key) = self.queued.pop_front() {
-            return Ok(Some(key));
-        }
-        self.expansions = 0;
-        byte()
-    }
-
-    // VMIN and VTIME are zero. Only consume bytes belonging to this edit:
-    // a foreground child can read the terminal immediately after accept-line.
-    fn immediate(&mut self) -> Option<u8> {
-        if let Some(b) = self.queued.pop_front() {
-            return Some(b);
-        }
-        let mut b = 0u8;
-        if unsafe { libc::read(0, std::ptr::addr_of_mut!(b).cast(), 1) } == 1 {
-            self.expansions = 0;
-            Some(b)
-        } else {
-            None
-        }
-    }
-
-    // A terminal repeat or macro may deliver several completed motions at once.
-    // Stop before a partial escape, custom binding, or suggestion-accepting Right.
-    fn motion_burst(&mut self, text: &str, mut cursor: usize, session: &Session) -> usize {
-        if session.bindings.map != Keymap::Emacs {
-            return cursor;
-        }
-        for _ in 0..64 {
-            let Some(first) = self.immediate() else { break };
-            let mut seq = [first, 0, 0];
-            let mut len = 1;
-            if first == 27
-                && !session.bindings.custom_prefix(&[first])
-                && let Some(b) = self.immediate()
-            {
-                seq[1] = b;
-                len = 2;
-                if matches!(b, b'[' | b'O')
-                    && let Some(b) = self.immediate()
-                {
-                    seq[2] = b;
-                    len = 3;
-                }
-            }
-            match &seq[..len] {
-                [2] if !session.bindings.custom_prefix(&[2]) => cursor = previous(text, cursor),
-                [6] if !session.bindings.custom_prefix(&[6]) => cursor = next(text, cursor),
-                [27, b'[' | b'O', b'D'] => cursor = previous(text, cursor),
-                [27, b'[' | b'O', b'C'] if cursor < text.len() => cursor = next(text, cursor),
-                other => {
-                    for &b in other.iter().rev() {
-                        self.queued.push_front(b);
-                    }
-                    break;
-                }
-            }
-        }
-        cursor
-    }
-
-    fn character(&mut self, first: u8) -> io::Result<Option<char>> {
-        if first.is_ascii() {
-            return Ok(Some(char::from(first)));
-        }
-        let Some(width) = multibyte_width(first) else {
-            return Ok(None);
-        };
-        let mut bytes = [first; 4];
-        for slot in &mut bytes[1..width] {
-            let b = if let Some(b) = self.immediate() {
-                b
-            } else if let Some(b) = self.get()? {
-                b
-            } else {
-                return Ok(None);
-            };
-            if b & 0xc0 != 0x80 {
-                self.queued.push_front(b);
-                return Ok(None);
-            }
-            *slot = b;
-        }
-        Ok(std::str::from_utf8(&bytes[..width])
-            .ok()
-            .and_then(|s| s.chars().next()))
-    }
-
-    fn insert_burst(&mut self, first: u8, session: &Session, out: &mut String) -> io::Result<()> {
-        out.clear();
-        let Some(c) = self.character(first)? else {
-            return Ok(());
-        };
-        out.push(c);
-        if session.bindings.map == Keymap::Command {
-            return Ok(());
-        }
-        // Gather an immediately available run without waiting for more keys.
-        // A bound keeps long streams responsive to signals and screen updates.
-        let mut bytes = [0; 4096];
-        let mut n = 0;
-        while n < bytes.len() {
-            let Some(b) = self.immediate() else { break };
-            if b < 32 || b == 127 || session.bindings.custom_prefix(&[b]) {
-                self.queued.push_front(b);
-                break;
-            }
-            bytes[n] = b;
-            n += 1;
-        }
-        let mut rest = &bytes[..n];
-        loop {
-            match std::str::from_utf8(rest) {
-                Ok(text) => {
-                    out.push_str(text);
-                    break;
-                }
-                Err(e) => {
-                    let (valid, tail) = rest.split_at(e.valid_up_to());
-                    out.push_str(std::str::from_utf8(valid).unwrap());
-                    if let Some(invalid) = e.error_len() {
-                        rest = &tail[invalid..];
-                    } else {
-                        // Display the valid prefix before waiting for a split scalar.
-                        for &b in tail.iter().rev() {
-                            self.queued.push_front(b);
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn binding(&mut self, first: u8, session: &Session) -> io::Result<(Binding, bool)> {
-        if unbound_text(first, session) {
-            return Ok((Binding::Edit(Action::Insert), false));
-        }
-        let fallback = if session.bindings.map != Keymap::Command && first >= 32 && first != 127 {
-            Binding::Edit(Action::Insert)
-        } else {
-            Binding::Removed
-        };
-        let (exact, mut longer) = session.bindings.lookup(&[first]);
-        if !longer {
-            return Ok((exact.unwrap_or(fallback), false));
-        }
-        let mut seq = std::mem::take(&mut self.sequence);
-        seq.clear();
-        seq.push(first);
-        let mut best = exact.map(|action| (1, action));
-        while longer {
-            // Consume one byte at a time; a foreground child owns later typeahead.
-            let key = if let Some(key) = self.immediate() {
-                key
-            } else if ready(0, session.bindings.timeout()) {
-                let Some(key) = self.get()? else { break };
-                key
-            } else {
-                break;
-            };
-            seq.push(key);
-            let (exact, prefix) = session.bindings.lookup(&seq);
-            if let Some(action) = exact {
-                best = Some((seq.len(), action));
-            }
-            longer = prefix;
-        }
-        let (len, action) = best.unwrap_or((1, fallback));
-        // Preserve unmatched bytes when a custom sequence shares a prefix with ordinary typing.
-        for &key in seq[len..].iter().rev() {
-            self.queued.push_front(key);
-        }
-        let right = matches!(&seq[..len], b"\x1b[C" | b"\x1bOC");
-        self.sequence = seq;
-        Ok((action, right))
-    }
-
-    // After the end marker one byte still belongs to the editor. It could be
-    // Enter, so leave everything after that byte on the tty for the next reader.
-    fn paste(&mut self, mut paint: impl FnMut(&[u8]) -> io::Result<()>) -> io::Result<String> {
-        const END: &[u8; 6] = b"\x1b[201~";
-        let mut data = Vec::new();
-        let mut matched = 0;
-        let mut chunk = [0; END.len() + 1];
-        let mut displayed = 0;
-        let mut checkpoint = 16 * 1024;
-        let mut painted_at = std::time::Instant::now();
-        'paste: loop {
-            if crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
-                || crate::traps::input_interrupted()
-            {
-                return Err(io::ErrorKind::Interrupted.into());
-            }
-            let available = data.len() - matched;
-            if available >= checkpoint {
-                checkpoint = available + 16 * 1024;
-                if painted_at.elapsed() >= std::time::Duration::from_millis(16) {
-                    paint(&data[..available])?;
-                    displayed = available;
-                    painted_at = std::time::Instant::now();
-                }
-            }
-            let limit = chunk.len() - matched;
-            let n = if self.queued.is_empty() {
-                let immediate = unsafe { libc::read(0, chunk.as_mut_ptr().cast(), limit) };
-                if immediate > 0 {
-                    immediate as usize
-                } else {
-                    // A split packet may pause for an arbitrary time. Give a
-                    // contiguous paste one short frame interval to resume.
-                    if available > displayed && !ready(0, 8) {
-                        paint(&data[..available])?;
-                        displayed = available;
-                        painted_at = std::time::Instant::now();
-                    }
-                    match crate::terminal_read(&mut chunk[..limit], true) {
-                        Ok(0) => break,
-                        Ok(n) => n,
-                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
-                        Err(e) => return Err(e),
-                    }
-                }
-            } else {
-                let n = limit.min(self.queued.len());
-                for slot in &mut chunk[..n] {
-                    *slot = self.queued.pop_front().unwrap();
-                }
-                n
-            };
-            data.extend_from_slice(&chunk[..n]);
-            if matched == 0 && !chunk[..n].contains(&END[0]) {
-                continue;
-            }
-            for (i, &b) in chunk[..n].iter().enumerate() {
-                matched = if b == END[matched] {
-                    matched + 1
-                } else {
-                    usize::from(b == END[0])
-                };
-                if matched == END.len() {
-                    let following = &chunk[i + 1..n];
-                    if let Some(&key) = following.first() {
-                        self.queued.push_front(key);
-                    }
-                    data.truncate(data.len() - END.len() - following.len());
-                    break 'paste;
-                }
-            }
-        }
-        if memchr::memchr(b'\r', &data).is_some() {
-            let mut after_cr = false;
-            data.retain_mut(|b| {
-                let keep = !(after_cr && *b == b'\n');
-                after_cr = *b == b'\r';
-                if after_cr {
-                    *b = b'\n';
-                }
-                keep
-            });
-        }
-        Ok(String::from_utf8(data)
-            .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
-    }
-}
-fn multibyte_width(first: u8) -> Option<usize> {
-    match first {
-        0xc2..=0xdf => Some(2),
-        0xe0..=0xef => Some(3),
-        0xf0..=0xf4 => Some(4),
-        _ => None,
-    }
-}
-
-fn unbound_text(first: u8, session: &Session) -> bool {
-    session.bindings.map != Keymap::Command
-        && first >= 32
-        && first != 127
-        && !session.bindings.custom_prefix(&[first])
 }
 
 fn matching_opener(text: &str, cursor: usize) -> Option<usize> {
@@ -435,6 +88,9 @@ struct Position {
     col: usize,
 }
 
+// Approximate byte length at which drawing switches to a window around the cursor.
+const VIEWPORT_THRESHOLD: usize = 1024;
+
 struct Screen {
     output: String,
     row: usize,
@@ -448,12 +104,26 @@ struct Screen {
 }
 
 impl Screen {
+    fn list_choices(&mut self, prompt: &str, text: &str, choices: &[String]) -> io::Result<()> {
+        self.frame(prompt, text, text.len(), "");
+        self.output.push_str("\r\n");
+        for (i, choice) in choices.iter().enumerate() {
+            if i != 0 {
+                self.output.push_str("  ");
+            }
+            push_visible(&mut self.output, choice);
+        }
+        self.output.push_str("\r\n");
+        io::stderr().write_all(self.output.as_bytes())?;
+        self.row = 0;
+        self.view.invalidate();
+        Ok(())
+    }
+
     fn new(size: Option<(u16, u16)>) -> Self {
-        let (rows, columns) = size.unwrap_or_else(|| {
-            let mut size = unsafe { std::mem::zeroed::<libc::winsize>() };
-            unsafe { libc::ioctl(2, libc::TIOCGWINSZ, &mut size) };
-            (size.ws_row, size.ws_col)
-        });
+        let (rows, columns) = size
+            .or_else(|| crate::interactive::terminal_size(libc::STDERR_FILENO))
+            .unwrap_or_default();
         Self {
             output: String::new(),
             row: 0,
@@ -532,7 +202,7 @@ impl Screen {
     }
 
     fn frame(&mut self, prompt: &str, text: &str, cursor: usize, suggestion: &str) {
-        if text.len().saturating_add(suggestion.len()) >= 1024
+        if text.len().saturating_add(suggestion.len()) >= VIEWPORT_THRESHOLD
             || text.len() >= self.height
                 && memchr::memchr_iter(b'\n', text.as_bytes())
                     .nth(self.height.saturating_sub(3))
@@ -571,6 +241,16 @@ impl Screen {
         self.row = caret.row;
         self.column = caret.col;
         self.had_hint = !suggestion.is_empty();
+    }
+}
+
+fn push_visible(out: &mut String, text: &str) {
+    for c in text.chars() {
+        if c.is_control() {
+            out.extend(c.escape_default());
+        } else {
+            out.push(c);
+        }
     }
 }
 
@@ -740,36 +420,6 @@ pub enum Start<'a> {
     Read { initial: &'a str, files_only: bool },
 }
 
-struct ReverseSearch {
-    query: String,
-    index: usize,
-    original: String,
-    original_cursor: usize,
-}
-
-fn reverse_search_prompt(query: &str, width: usize) -> String {
-    let mut display = String::from("(reverse-i-search) `");
-    let visible = if query.len() > 1024 {
-        display.push('…');
-        let mut start = query.len().saturating_sub(width * 2);
-        while !query.is_char_boundary(start) {
-            start += 1;
-        }
-        &query[start..]
-    } else {
-        query
-    };
-    for c in visible.chars() {
-        if c.is_control() {
-            display.extend(c.escape_default());
-        } else {
-            display.push(c);
-        }
-    }
-    display.push_str("': ");
-    display
-}
-
 #[derive(Clone, Copy)]
 struct LineView<'a> {
     prompt: &'a str,
@@ -832,7 +482,7 @@ impl EditorState {
             && !screen.had_hint
             && hint.is_empty()
             && !searching
-            && text.len() < 1024
+            && text.len() < VIEWPORT_THRESHOLD
             && !text.contains('\n')
         {
             screen.move_short(prompt, text, cursor)?;
@@ -879,10 +529,7 @@ pub fn line(
         Keymap::Emacs
     };
     let mut term = Terminal::enter(session.bindings.paste())?;
-    let mut keys = Keys {
-        queued: std::mem::take(&mut session.editor_queue),
-        ..Default::default()
-    };
+    let mut keys = Keys::new(std::mem::take(&mut session.editor_queue));
     let mut edit = EditorState::default();
     let mut mark = 0usize;
     let mut screen = Screen::new(terminal_size);
@@ -898,8 +545,6 @@ pub fn line(
     let mut last_arg: Option<(usize, bool)> = None;
     let mut recall = recall::Recall::new(session.history_lines().len());
     let mut search: Option<ReverseSearch> = None;
-    let mut pending_queries: Vec<SearchQuery> = Vec::new();
-    let mut matched_query: Option<String> = None;
     let mut last_tab = false;
     let styled_or_multiline = prompt.contains(['\x1b', '\n']);
     let mut blink = false;
@@ -914,17 +559,7 @@ pub fn line(
         }
         // Apply already visible typeahead to the completion before repainting.
         // A custom binding or control key must see the settled line first.
-        replaying = replaying
-            && keys.queued.front().is_some_and(|&b| {
-                let width = match b {
-                    8 | 32..=127 => 1,
-                    _ => match multibyte_width(b) {
-                        Some(width) => width,
-                        None => return false,
-                    },
-                };
-                keys.queued.len() >= width && !session.bindings.custom_prefix(&[b])
-            });
+        replaying = replaying && keys.can_replay(session);
         let show_hint = !replaying
             && read.is_none()
             && search.is_none()
@@ -940,8 +575,8 @@ pub fn line(
             ""
         };
         let search_prompt;
-        let visible_prompt = if let Some(ReverseSearch { query, .. }) = &search {
-            search_prompt = reverse_search_prompt(query, screen.width);
+        let visible_prompt = if let Some(search) = &search {
+            search_prompt = search.prompt(screen.width);
             &search_prompt
         } else {
             prompt
@@ -967,34 +602,13 @@ pub fn line(
             ready(0, 500);
             screen.draw(visible_prompt, &text, cursor, hint)?;
         }
-        if let Some(last) = pending_queries.last() {
-            let cached = last.skip == 0
-                && matched_query
-                    .as_ref()
-                    .is_some_and(|prior| last.text.starts_with(prior) && text.contains(&last.text));
-            let input_ready = || keys.input_pending();
-            // Any newer match for a longer query was also a match for its
-            // prefix. If the newest hit still fits, it remains the newest.
-            if cached {
-                matched_query = pending_queries.pop().map(|q| q.text);
-                pending_queries.clear();
-            } else if let Ok(result) =
-                history.find_command(session, &mut view, &pending_queries, &input_ready)
-            {
-                let last = pending_queries.pop().unwrap();
-                matched_query = result
-                    .as_ref()
-                    .filter(|hit| last.skip == 0 && hit.contains(&last.text))
-                    .map(|_| last.text);
-                pending_queries.clear();
-                if let Some(found) = result
-                    && found != text
-                {
-                    text = found;
-                    cursor = text.len();
-                    screen.draw(visible_prompt, &text, cursor, "")?;
-                }
-            }
+        if let Some(search) = &mut search
+            && let Some(found) =
+                search.update(&text, history, session, &mut view, &|| keys.input_pending())
+        {
+            text = found;
+            cursor = text.len();
+            screen.draw(visible_prompt, &text, cursor, "")?;
         }
         if show_hint {
             let input_ready = || keys.input_pending();
@@ -1053,15 +667,7 @@ pub fn line(
                 continue;
             }
             Binding::Macro(seq) => {
-                keys.expansions += 1;
-                if keys.expansions > 64 || keys.queued.len().saturating_add(seq.len()) > 65536 {
-                    keys.queued.clear();
-                    io::stderr().write_all(b"\x07")?;
-                } else {
-                    for key in seq.into_iter().rev() {
-                        keys.queued.push_front(key);
-                    }
-                }
+                keys.expand_macro(seq)?;
                 continue;
             }
             Binding::Shell(command) => {
@@ -1122,13 +728,7 @@ pub fn line(
             action => action,
         };
         if action == Action::Search && search.is_none() {
-            matched_query = None;
-            search = Some(ReverseSearch {
-                query: String::new(),
-                index: 0,
-                original: text.clone(),
-                original_cursor: cursor,
-            });
+            search = Some(ReverseSearch::new(&text, cursor));
             // Readline keeps the current draft until a nonempty query matches.
             continue;
         }
@@ -1137,24 +737,24 @@ pub fn line(
             index,
             original,
             original_cursor,
+            pending,
+            ..
         }) = search.as_mut()
         {
             match action {
                 Action::Abort => {
-                    pending_queries.clear();
                     text = std::mem::take(original);
                     cursor = *original_cursor;
                     search = None;
                     continue;
                 }
                 Action::Accept | Action::Forward | Action::Back | Action::Home | Action::End => {
-                    if !pending_queries.is_empty()
+                    if !pending.is_empty()
                         && let Ok(Some(found)) =
-                            history.find_command(session, &mut view, &pending_queries, &|| false)
+                            history.find_command(session, &mut view, pending, &|| false)
                     {
                         text = found;
                     }
-                    pending_queries.clear();
                     search = None;
                     cursor = text.len();
                 }
@@ -1196,7 +796,6 @@ pub fn line(
                             &mut keys,
                             &mut screen,
                         );
-                        pending_queries.clear();
                         match selected {
                             Ok(Some(command)) => {
                                 edit.undo = Undo::default();
@@ -1218,7 +817,7 @@ pub fn line(
                         last_tab = false;
                         continue;
                     }
-                    pending_queries.push(SearchQuery {
+                    pending.push(SearchQuery {
                         text: query.clone(),
                         skip: *index,
                         shortest: shortest.unwrap_or(query.len()),
@@ -1274,38 +873,15 @@ pub fn line(
                 };
             }
             Action::EditAndExecute | Action::ViEditAndExecute => {
-                let vi = action == Action::ViEditAndExecute;
-                let configured = if vi && session.posix {
-                    None
-                } else {
-                    session
-                        .get("VISUAL")
-                        .filter(|s| !s.is_empty())
-                        .or_else(|| session.get("EDITOR").filter(|s| !s.is_empty()))
-                };
-                let editor = configured
-                    .as_deref()
-                    .unwrap_or(if vi { "vi" } else { "emacs" });
                 drop(term);
                 io::stderr().write_all(b"\r\n")?;
-                if !text.ends_with('\n') {
-                    text.push('\n');
-                }
-                match crate::history::commands::edit_text(session, editor, &text, status) {
-                    Ok(Ok(mut edited)) => {
-                        if !edited.ends_with('\n') {
-                            edited.push('\n');
-                        }
-                        session.editor_queue = std::mem::take(&mut keys.queued);
-                        return Ok(Input::Line(edited));
-                    }
-                    Ok(Err(crate::Flow::Exit(code))) => return Ok(Input::Exit(code)),
-                    Ok(Err(_)) => return Ok(Input::Cancel),
-                    Err(e) => {
-                        diagnostic!("{editor}: {e}");
-                        return Ok(Input::Cancel);
-                    }
-                }
+                return Ok(editing::edit_and_execute(
+                    session,
+                    text,
+                    action == Action::ViEditAndExecute,
+                    status,
+                    keys.queued,
+                ));
             }
             Action::ViCommand => {
                 session.bindings.map = Keymap::Command;
@@ -1329,7 +905,7 @@ pub fn line(
                 }
                 if action == Action::Comment
                     || visible_prompt != prompt
-                    || (!styled_or_multiline && text.len() < 1024)
+                    || (!styled_or_multiline && text.len() < VIEWPORT_THRESHOLD)
                     || replaying
                     || screen.tail.is_none()
                 {
@@ -1356,7 +932,7 @@ pub fn line(
                 let start = previous(&text, cursor);
                 if cursor == text.len()
                     && start < cursor
-                    && (styled_or_multiline || start >= 1024)
+                    && (styled_or_multiline || start >= VIEWPORT_THRESHOLD)
                     && text.as_bytes()[start].is_ascii_graphic()
                 {
                     edit.erased = Some(1usize);
@@ -1524,25 +1100,7 @@ pub fn line(
                             Err(e) => return Err(e),
                         }
                     } else if was_tab && result.choices.len() > 1 {
-                        screen.draw(prompt, &text, text.len(), "")?;
-                        io::stderr().write_all(b"\r\n")?;
-                        let mut display = String::new();
-                        for (i, choice) in result.choices.iter().enumerate() {
-                            if i > 0 {
-                                display.push_str("  ");
-                            }
-                            for c in choice.chars() {
-                                if c.is_control() {
-                                    display.extend(c.escape_default());
-                                } else {
-                                    display.push(c);
-                                }
-                            }
-                        }
-                        io::stderr().write_all(display.as_bytes())?;
-                        io::stderr().write_all(b"\r\n")?;
-                        screen.row = 0;
-                        screen.view.invalidate();
+                        screen.list_choices(prompt, &text, &result.choices)?;
                     } else {
                         edit.undo.replace(
                             &mut text,

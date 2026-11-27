@@ -1,5 +1,31 @@
 # Startup and execution / 起動と実行性能
 
+<a id="shared-shell-rules"></a>
+
+## 2026-11-27 · Shared parsing and terminal input / 共通化後の測定
+
+Apple M1, distribution releases `62206db` and `9ae5ff0`, GNU Bash 5.3.20. Times are interleaved medians in milliseconds. The script workloads start timing after the interpreter is ready (23 samples). PTY workloads measure visible output and check the resulting completion or command.
+
+| M1 workload | Previous | Current | Bash |
+|---|---:|---:|---:|
+| 10,000 registered words, unique static match (21 samples) | 0.183 | 0.185 | 28.052 |
+| 10,000 registered words, unique dynamic match (21) | 0.406 | 0.400 | 3.964 |
+| Display and verify all 10,000 filenames (15) | 12.652 | 12.621 | 83.575 |
+| Paste into a 1 MiB line (31) | 0.127 | 0.127 | 12.649 |
+| Exec to first prompt (61) | 2.764 | 2.682 | 7.388 |
+| Arithmetic loop with variable bound | 3.190 | 3.114 | 13.252 |
+| External command substitutions | 18.125 | 18.117 | 28.517 |
+| Pipeline | 21.489 | 21.403 | 33.327 |
+| Background subshell and wait | 18.192 | 17.944 | 21.902 |
+
+Under LC_ALL=POSIX, 4,096 calls to `printf -v v '%.2f' 123` took 2.923 ms before refactoring, 3.111 ms when the shared lookup performed a binary search, and 2.916 ms after restoring the direct POSIX index (Bash 9.387 ms, 41 interleaved samples after startup). Under C, the same four values were 2.904/2.890/2.890/9.390 ms.
+
+10万件の履歴で、古い一致の逆検索は 0.531 → 0.546 ms（21回）。ロケール修正前の同じ検索コードでも実行順を逆にして41回測り、0.505 → 0.502 ms だった。M1 の配布バイナリは 1,748,880 → 1,748,896 バイト（+16）。通常のキー操作には短いケースで Bash より時間を要するものがあり、バックグラウンド起動と待機も Bash 比 2/3 に届かない。
+
+On native Ubuntu 24.04 x86-64, the stripped static PIE changed from 2,441,816 to 2,441,656 bytes. Pasting into a 1 MiB line took 0.055/0.055/4.666 ms (previous/current/Bash), while undo followed by typing took 0.036/0.043/9.206 ms. Listing all 10,000 candidates took 5.427 ms with Tonari and 23.311 ms with Bash. The variable-bound arithmetic loop including startup took 2.787/2.657/12.176 ms. Script timings on Linux include startup.
+
+Reproduce with `python3 tools/bench_history.py PREVIOUS CURRENT --entries 100000 --bursts --runs 21`, `python3 tools/bench_completion.py PREVIOUS CURRENT --bash BASH --word-list --runs 21` (or `--listing --files 10000 --runs 15`), and `python3 tools/bench_scripts.py CURRENT --previous PREVIOUS --bash BASH --timing started --case pipeline --case background-subshell-wait --case external-substitutions --runs 23`. The Linux artifacts include per-workload p95, executable sizes, and host details. [Native Linux x86-64 run](https://github.com/sanohiro/tonari-shell/actions/runs/45936594965)
+
 <a id="runtime-audit-v3"></a>
 
 ## 2026-11-27 · Third runtime audit / 第3回監査の実測
@@ -1573,7 +1599,7 @@ On macOS, p95 for the 257-scalar commit, 1 MiB paste, Ctrl-R and Tab, in the sam
 
 The cold oldest-entry Ctrl-R exceeded two-thirds of Bash time on all three lanes. Bash loads its history before the first prompt and Tonari reads the journal on demand. Other misses on native arm64 were the single emoji and session recall on both operating systems, and the 17-scalar commit and Tab on Debian. All 1,408 macOS, 1,522 Debian and 1,553 Ubuntu compatibility verdicts matched the previous snapshot. Distribution sizes were 1,184,608 bytes on macOS arm64 (+16), 1,363,832 on Linux arm64 (+4,032) and 1,163,728 on Linux x86-64-v3 (+3,456).
 
-確定済みの日本語を受け取った時点から、編集後の表示が疑似端末に届くまでを計測します。通常入力ではすでに届いた範囲をまとめて処理します。ブラケットペーストでは末尾の改行も文字列に含め、終端を受け取ってから1回で挿入します。終端直後の1バイトが Enter の可能性があるため、端末からの読み取りは最大7バイトに制限します。これにより、同じ書き込みで届いた後続データを外部コマンドが自分で読めます。[実装](../src/editor.rs) · [疑似端末テスト](../tests/shell.py)
+確定済みの日本語を受け取った時点から、編集後の表示が疑似端末に届くまでを計測します。通常入力ではすでに届いた範囲をまとめて処理します。ブラケットペーストでは末尾の改行も文字列に含め、終端を受け取ってから1回で挿入します。終端直後の1バイトが Enter の可能性があるため、端末からの読み取りは最大7バイトに制限します。これにより、同じ書き込みで届いた後続データを外部コマンドが自分で読めます。[実装](../src/editor/input.rs) · [疑似端末テスト](../tests/shell.py)
 
 ~~~sh
 python3 tools/bench_editor_input.py ./previous ./current /path/to/bash --large --runs 23
