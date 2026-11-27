@@ -45,6 +45,7 @@ declare -A map=([key]="value with spaces"); declare -n m=map; printf '<%s>\\n' "
 set -u; printf '<%s>\\n' "${r@a}"; set +u
 declare -n unsetref; printf '<%s>\\n' "${unsetref@A}" "${unsetref@a}"
 scalar=ok; declare -n s=scalar member='a[2]'; printf '<%s>\\n' "${s@A}" "${s[@]@A}" "${member@A}" "${member@a}" "${member@K}"
+declare -n left=right right=left; show(){ printf '[%s]' "$#"; }; { show "${left@A}"; show "${left@a}"; show "${left[@]@A}"; show "${left[@]@k}"; } 2>warnings; test -s warnings; echo "$?"
 """,
     "scalar-array-declaration": "declare -lr var; printf '<%s>\\n' \"${var@A}\" \"${var[@]@A}\"; declare -l setvar=''; printf '<%s>\\n' \"${setvar@A}\" \"${setvar[@]@A}\"; declare -a arr; printf '<%s>\\n' \"${arr[@]@A}\"",
     "temporary-posix-settings": "shopt -s expand_aliases; shopt -u sourcepath inherit_errexit shift_verbose; f(){ shopt -p expand_aliases sourcepath inherit_errexit shift_verbose; }; POSIXLY_CORRECT=y f; f; shopt -qo posix; echo $?",

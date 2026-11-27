@@ -172,12 +172,15 @@ fn attribute_base<'a>(
     name: &'a str,
     elements: Option<(&'a str, bool, bool)>,
     session: &crate::Session,
-) -> Result<std::borrow::Cow<'a, str>, Error> {
+) -> std::borrow::Cow<'a, str> {
     let base = elements
         .map(|(base, _, _)| base)
         .or_else(|| crate::session::array::subscript(name).map(|(base, _)| base))
         .unwrap_or(name);
-    Ok(session.reference_name(base)?)
+    session.reference_name(base).unwrap_or_else(|e| {
+        diagnostic!("warning: {base}: {e}");
+        std::borrow::Cow::Borrowed(base)
+    })
 }
 
 fn assignment(name: &str, quoted: bool, env: &mut Expansion<'_>) -> Result<Part, Error> {
@@ -196,7 +199,7 @@ fn assignment(name: &str, quoted: bool, env: &mut Expansion<'_>) -> Result<Part,
                 .collect()
         }
     } else {
-        let resolved = attribute_base(name, elements, env.session)?;
+        let resolved = attribute_base(name, elements, env.session);
         let base = resolved.as_ref();
         if elements.is_some()
             && let Some(fields) = env.session.array_declaration_fields(base)
@@ -312,7 +315,7 @@ impl Modification {
                 if let Self::Pairs { separate } = self
                     && let Some((base, at, false)) = array_elements_name(name)
                 {
-                    let base = env.session.reference_name(base)?;
+                    let base = attribute_base(base, None, env.session);
                     if let Some(values) = env.session.array_pair_fields(&base, *separate) {
                         return Ok(Part::Elements { values, at, quoted });
                     }
@@ -354,7 +357,7 @@ impl Modification {
                     });
                 }
                 let elements = array_elements_name(name);
-                let resolved = attribute_base(name, elements, env.session)?;
+                let resolved = attribute_base(name, elements, env.session);
                 let base = resolved.as_ref();
                 let (flags, assigned_array) = env.session.attributes(base).unwrap_or_default();
                 let stored_len = env.session.stored_array_len(base);
