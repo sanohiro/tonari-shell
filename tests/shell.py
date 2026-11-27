@@ -64,6 +64,27 @@ fc -ln 2 2; history -p '!$-suffix'""")
         self.assertEqual((result.returncode, result.stdout, result.stderr),
                          (0, b"\t second tail\ntail-suffix\n", b""))
 
+    def test_printf_attached_and_repeated_variable_options(self):
+        self.compare("""printf -vx '%s' one; printf -v x -vy -- '%s' two
+printf '<%s><%s>' "$x" "$y"; printf -- '-v%s' ok""", 0, b"<one><two>-vok", minimum=5)
+
+    def test_conditional_umask_uses_initial_permissions(self):
+        script = """for initial in 077 777; do umask "$initial"; umask a+X && umask; done
+umask 777; umask u+x,g+X && umask; umask a+st && umask"""
+        result = self.command(TONARI, script)
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (0, b"0066\n0777\n0677\n0677\n", b""))
+        if not self.bash_before_53():
+            self.compare(script, 0, result.stdout)
+
+    def test_excessive_braces_fail_before_command_runs(self):
+        for word in ("{1..5000000000}", "a{5000000000..1}", "{1..5000000000..2}x",
+                     "{1..65536}{a,b}{1..9}", "{a,b}" * 21):
+            result = self.command(TONARI, "touch sentinel " + word)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"brace expansion exceeds word limit", result.stderr)
+            self.assertFalse((self.cwd / "sentinel").exists())
+
     def test_readonly_printf_count_signals_failure(self):
         result = self.command(TONARI, """readonly n=9; printf '%n' n 2>/dev/null; echo "$? $n" """)
         self.assertEqual((result.returncode, result.stdout), (0, b"1 9\n"))

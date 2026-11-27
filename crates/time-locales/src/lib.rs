@@ -11,10 +11,7 @@ pub struct Locale(usize);
 
 impl Locale {
     pub fn find(name: &str) -> Option<Self> {
-        NAMES
-            .binary_search_by(|id| text(*id).cmp(name))
-            .ok()
-            .map(Self)
+        numeric::index(name).map(Self)
     }
 
     fn ids(self, field: Field) -> &'static [u16] {
@@ -62,17 +59,21 @@ pub mod numeric {
         if matches!(name, "C" | "POSIX" | "") {
             return C;
         }
+        index(name).map_or(C, |i| PROFILES[usize::from(KINDS[i])])
+    }
+
+    pub(super) fn index(name: &str) -> Option<usize> {
         let mut lo = 0;
         let mut hi = KINDS.len();
         while lo < hi {
             let mid = (lo + hi) / 2;
             let candidate = &NAMES[usize::from(OFFSETS[mid])..usize::from(OFFSETS[mid + 1])];
             match candidate.cmp(name) {
-                std::cmp::Ordering::Equal => return PROFILES[usize::from(KINDS[mid])],
+                std::cmp::Ordering::Equal => return Some(mid),
                 std::cmp::Ordering::Less => lo = mid + 1,
                 std::cmp::Ordering::Greater => hi = mid,
             }
         }
-        C
+        None
     }
 }

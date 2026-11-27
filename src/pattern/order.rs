@@ -59,9 +59,13 @@ impl PreviousOrder {
 // A fixed-width prefix keeps comparisons in the sort array. File names
 // cannot contain NUL, so zero padding sorts a shorter name first. Compare
 // the complete strings only within groups that share a prefix. Large inputs leave four bytes for the index.
+fn sort_path_indices(paths: &[String], indices: &mut [usize]) {
+    indices.sort_unstable_by(|&i, &j| paths[i].cmp(&paths[j]));
+}
+
 fn sort_bytes(paths: &[String], indices: &mut [usize]) {
     if paths.len() < 256 || paths.len() > u32::MAX as usize {
-        indices.sort_unstable_by(|&i, &j| paths[i].cmp(&paths[j]));
+        sort_path_indices(paths, indices);
         return;
     }
     // The known directory prefix is usually identical across this expansion.
@@ -104,7 +108,7 @@ fn sort_bytes(paths: &[String], indices: &mut [usize]) {
             *i = (*key & index_mask) as usize;
         }
         if range.len() > 1 {
-            range.sort_unstable_by(|&i, &j| paths[i].cmp(&paths[j]));
+            sort_path_indices(paths, range);
         }
         tail = rest;
     }
@@ -219,7 +223,7 @@ fn sort_utf8(paths: &[String], bytes: usize, indices: &mut [usize]) -> bool {
     if indices.len() >= 4096 {
         let stride = indices.len() / 128;
         let mut sample: [usize; 128] = std::array::from_fn(|i| i * stride);
-        sample.sort_unstable_by(|&i, &j| paths[i].cmp(&paths[j]));
+        sort_path_indices(paths, &mut sample);
         if sample
             .windows(2)
             .filter(|pair| compare(&pair[0], &pair[1]).is_gt())

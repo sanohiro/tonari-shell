@@ -64,17 +64,22 @@ pub(crate) enum View {
     All,
 }
 
+fn default_history(session: &Session, path: &std::path::Path) -> bool {
+    path.file_name().is_some_and(|s| s == ".bash_history")
+        && session
+            .scalar_setting("HOME")
+            .is_some_and(|home| path.parent() == Some(std::path::Path::new(home.as_ref())))
+}
+
 fn custom_history(session: &Session) -> Option<String> {
-    let path = session.get("HISTFILE")?;
+    let path = session.scalar_setting("HISTFILE")?;
     if path.is_empty()
         || path == "/dev/null"
-        || session
-            .get("HOME")
-            .is_some_and(|h| PathBuf::from(h).join(".bash_history") == path)
+        || default_history(session, std::path::Path::new(path.as_ref()))
     {
         return None;
     }
-    Some(path)
+    Some(path.into_owned())
 }
 
 pub(crate) fn load_script_history(session: &mut Session) {
@@ -143,11 +148,7 @@ fn file(session: &Session) -> Option<PathBuf> {
         return None;
     }
     let history = std::path::Path::new(setting.as_ref());
-    if history.file_name()? != ".bash_history"
-        || session
-            .scalar_setting("HOME")
-            .is_none_or(|home| history.parent() != Some(std::path::Path::new(home.as_ref())))
-    {
+    if !default_history(session, history) {
         return None;
     }
     let dir = session
@@ -252,10 +253,58 @@ pub(crate) mod commands;
 pub(crate) mod expand;
 mod window;
 
+// Keep the live window contiguous for prefix and reverse searches. Dropping
+// an entry frees its string immediately, but moves the live suffix in batches.
+#[derive(Clone, Default)]
+struct HistoryWindow<T> {
+    values: Vec<T>,
+    head: usize,
+}
+
+impl<T> std::ops::Deref for HistoryWindow<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &[T] {
+        &self.values[self.head..]
+    }
+}
+
+impl<T> std::ops::DerefMut for HistoryWindow<T> {
+    fn deref_mut(&mut self) -> &mut [T] {
+        &mut self.values[self.head..]
+    }
+}
+
+impl<T: Default> HistoryWindow<T> {
+    fn push(&mut self, value: T) {
+        self.values.push(value);
+    }
+
+    fn remove(&mut self, index: usize) {
+        self.values.remove(self.head + index);
+    }
+
+    fn discard(&mut self, count: usize) {
+        self.head += count;
+        if self.head >= 256 || self.head >= self.len() {
+            self.values.drain(..self.head);
+            self.head = 0;
+        } else {
+            self.values[self.head - count..self.head].fill_with(T::default);
+        }
+    }
+
+    fn prepend(&mut self, mut prefix: Vec<T>) {
+        prefix.extend(self.values.drain(self.head..));
+        self.values = prefix;
+        self.head = 0;
+    }
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct Entries {
-    pub lines: Vec<String>,
-    timestamps: Vec<libc::time_t>,
+    lines: HistoryWindow<String>,
+    timestamps: HistoryWindow<libc::time_t>,
     base: usize,
     current: Option<usize>,
     current_lines: usize,
@@ -321,11 +370,9 @@ impl InitialJournal {
         }
         let h = session.history_mut();
         let n = older.len();
-        older.append(&mut h.lines);
-        h.lines = older;
+        h.lines.prepend(older);
         h.current = h.current.map(|index| index + n);
-        timestamps.append(&mut h.timestamps);
-        h.timestamps = timestamps;
+        h.timestamps.prepend(timestamps);
         h.written += n;
         h.imported = Some(Self {
             len: complete,
@@ -345,7 +392,7 @@ impl Session {
         self.history.as_ref().map_or(0, |h| h.base + h.lines.len())
     }
     pub(crate) fn history_lines(&self) -> &[String] {
-        self.history.as_deref().map_or(&[], |h| h.lines.as_slice())
+        self.history.as_deref().map_or(&[], |h| &h.lines[..])
     }
     fn history_mut(&mut self) -> &mut Entries {
         std::rc::Rc::make_mut(self.history.get_or_insert_with(Default::default))
@@ -365,10 +412,7 @@ impl Session {
             let path = std::path::Path::new(&path);
             // The default history is Tonari's shared journal. The user's Bash
             // file remains independent. Explicit plain history uses line limits.
-            if self
-                .get("HOME")
-                .is_some_and(|h| std::path::Path::new(&h).join(".bash_history") == path)
-            {
+            if default_history(self, std::path::Path::new(&path)) {
                 return;
             }
             if let Err(e) =
@@ -514,8 +558,8 @@ impl Entries {
     fn trim_to(&mut self, limit: usize) {
         if self.lines.len() > limit {
             let count = self.lines.len() - limit;
-            self.lines.drain(..count);
-            self.timestamps.drain(..count);
+            self.lines.discard(count);
+            self.timestamps.discard(count);
             self.base += count;
             self.written = self.written.saturating_sub(count);
             self.current = self.current.and_then(|index| index.checked_sub(count));

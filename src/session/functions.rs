@@ -1,7 +1,6 @@
 use super::{Function, Session};
 use crate::parser::{Command, FunctionDefinition, is_function_name, parse_final};
 use std::{
-    ffi::CStr,
     io::{self, Write},
     rc::Rc,
 };
@@ -92,69 +91,52 @@ impl Session {
         self.functions.insert(name, function);
     }
 
-    pub fn import_functions(&mut self) {
-        // Startup is single-threaded. Leave the ordinary inherited environment in place.
-        let mut env = crate::execute::inherited_env();
-        unsafe {
-            while !(*env).is_null() {
-                let raw = *env;
-                env = env.add(1);
-                if *raw != b'B' as libc::c_char
-                    || libc::strncmp(raw, c"BASH_FUNC_".as_ptr(), 10) != 0
-                {
-                    continue;
-                }
-                if libc::getuid() != libc::geteuid() || libc::getgid() != libc::getegid() {
-                    return;
-                }
-                let entry = CStr::from_ptr(raw).to_bytes();
-                let Some(rest) = entry.strip_prefix(b"BASH_FUNC_") else {
-                    continue;
-                };
-                let Ok(rest) = std::str::from_utf8(rest) else {
-                    continue;
-                };
-                let Some((name, value)) = rest.split_once("%%=") else {
-                    continue;
-                };
-                if !is_function_name(name) || !value.starts_with("() {") {
-                    continue;
-                }
-                if name.contains('/') {
-                    diagnostic!("error importing function definition for `{name}'");
-                    continue;
-                }
-                let key = format!("BASH_FUNC_{name}%%");
-                self.function_environment.insert(key.clone(), None);
-                // Parse only the declaration body supplied by the protocol.
-                // The environment key stays a name throughout the import.
-                let Ok(mut parsed) = parse_final(&format!("__tonari_import {value}")) else {
-                    continue;
-                };
-                if parsed.len() != 1 {
-                    continue;
-                }
-                let statement = parsed.pop().unwrap();
-                if statement.negated {
-                    continue;
-                }
-                if let Command::Function {
-                    name: actual,
+    pub(crate) fn import_function(&mut self, entry: &[u8]) {
+        let Some(rest) = entry.strip_prefix(b"BASH_FUNC_") else {
+            return;
+        };
+        let Ok(rest) = std::str::from_utf8(rest) else {
+            return;
+        };
+        let Some((name, value)) = rest.split_once("%%=") else {
+            return;
+        };
+        if !is_function_name(name) || !value.starts_with("() {") {
+            return;
+        }
+        if name.contains('/') {
+            diagnostic!("error importing function definition for `{name}'");
+            return;
+        }
+        let key = format!("BASH_FUNC_{name}%%");
+        self.function_environment.insert(key.clone(), None);
+        // Parse only the declaration body supplied by the protocol.
+        // The environment key stays a name throughout the import.
+        let Ok(mut parsed) = parse_final(&format!("__tonari_import {value}")) else {
+            return;
+        };
+        if parsed.len() != 1 {
+            return;
+        }
+        let statement = parsed.pop().unwrap();
+        if statement.negated {
+            return;
+        }
+        if let Command::Function {
+            name: actual,
+            definition,
+        } = statement.command
+            && actual == "__tonari_import"
+        {
+            self.functions.insert(
+                name.to_owned(),
+                Function {
                     definition,
-                } = statement.command
-                    && actual == "__tonari_import"
-                {
-                    self.functions.insert(
-                        name.to_owned(),
-                        Function {
-                            definition,
-                            source: "environment".into(),
-                        },
-                    );
-                    self.function_environment
-                        .insert(key, Some(value.to_owned()));
-                }
-            }
+                    source: "environment".into(),
+                },
+            );
+            self.function_environment
+                .insert(key, Some(value.to_owned()));
         }
     }
 
@@ -198,7 +180,7 @@ impl Session {
 
     pub fn print_function(
         &self,
-        out: &mut impl Write,
+        out: &mut dyn Write,
         name: &str,
         attributes: bool,
     ) -> io::Result<()> {

@@ -95,7 +95,14 @@ fn read_terminal_line(source: &mut Vec<u8>, terminal: bool) -> io::Result<bool> 
 }
 
 pub(super) fn interactive(session: &mut Session, status: u8, editing: bool) -> io::Result<u8> {
+    // Startup files may have replaced either descriptor or reassigned TERM.
     let terminal_input = io::stdin().is_terminal();
+    let editing = editing
+        && terminal_input
+        && io::stderr().is_terminal()
+        && session
+            .scalar_setting("TERM")
+            .is_some_and(|term| term != "dumb");
     history::start_interactive(session);
     let result = interactive_loop(session, status, editing, terminal_input);
     history::finish_interactive(session);

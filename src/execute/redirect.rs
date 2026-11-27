@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) enum Action<'a> {
-    Open(RawFd, CString, i32),
+    Open(RawFd, &'a str, i32),
     HereInput(RawFd, &'a [u8]),
     Dup(RawFd, RawFd),
     Close(RawFd),
@@ -27,7 +27,7 @@ pub(super) fn action(r: &Redirect) -> Action<'_> {
                 | Target::HereDoc { .. }
                 | Target::HereString => unreachable!(),
             };
-            Action::Open(r.fd, CString::new(r.word.as_bytes()).unwrap(), flags)
+            Action::Open(r.fd, &r.word, flags)
         }
     }
 }
@@ -189,7 +189,21 @@ pub(super) fn open_null_redirect(redirects: &[Redirect]) -> Option<(RawFd, Owned
     Some((r.fd, super::private_fd(file.into()).ok()?))
 }
 
-pub(super) fn open_redirect(path: &CStr, flags: i32) -> Option<OwnedFd> {
+pub(super) fn open_redirect(path: &str, flags: i32) -> Option<OwnedFd> {
+    let bytes = path.as_bytes();
+    let mut short = [0u8; 256];
+    let owned;
+    let path = if bytes.len() < short.len() {
+        short[..bytes.len()].copy_from_slice(bytes);
+        CStr::from_bytes_with_nul(&short[..=bytes.len()]).ok()
+    } else {
+        owned = CString::new(bytes).ok();
+        owned.as_deref()
+    };
+    let Some(path) = path else {
+        diagnostic!("redirection: path contains NUL");
+        return None;
+    };
     if let Some(device) = path.to_bytes().strip_prefix(b"/dev/")
         && let Some((kind, address)) = device
             .strip_prefix(b"tcp/")
@@ -256,8 +270,8 @@ impl Action<'_> {
     }
 }
 
-fn path_fd(path: &CStr) -> Option<RawFd> {
-    let bytes = path.to_bytes();
+fn path_fd(path: &str) -> Option<RawFd> {
+    let bytes = path.as_bytes();
     let number = bytes
         .strip_prefix(b"/dev/fd/")
         .or_else(|| bytes.strip_prefix(b"/proc/self/fd/"))?;

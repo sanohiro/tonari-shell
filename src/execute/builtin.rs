@@ -503,8 +503,13 @@ fn exec_builtin(cmd: &PreparedCommand, session: &Session, mut args: &[String]) -
     if login {
         arg0 = Some(format!("-{}", arg0.as_ref().unwrap_or(program)));
     }
-    let external = External::for_words(cmd, session, args, arg0, clear);
-    let status = external.exec(None);
+    let status = match External::for_words(cmd, session, args, arg0, clear) {
+        Ok(external) => external.exec(None),
+        Err(error) => {
+            diagnostic!("exec: {error}");
+            126
+        }
+    };
     if session.subshell_depth == 0 && (session.interactive || session.shopt.execfail) {
         Flow::Continue(status)
     } else {
@@ -669,7 +674,7 @@ pub(super) fn can_install_trap(builtin: Builtin, cmd: &PreparedCommand) -> bool 
 fn silent_redirect(
     code: u8,
     dest: RawFd,
-    path: &CStr,
+    path: &str,
     flags: i32,
     cmd: &PreparedCommand,
     session: &mut Session,
@@ -756,8 +761,29 @@ pub(super) fn run_builtin(
         // No shell code ran while the untracked reservation was live.
         drop(reservation);
         use std::io::Write;
+        let mut file = std::fs::File::from(fd);
+        if let PlainOutput::Pwd(physical) = output
+            && !physical.unwrap_or(session.physical)
+            && !session.posix
+        {
+            let path = match session.logical_directory_ref() {
+                Ok(path) => path.as_os_str().as_bytes(),
+                Err(e) => {
+                    diagnostic!("pwd: {e}");
+                    return Ok(Flow::Continue(1));
+                }
+            };
+            let mut line = [0u8; 512];
+            if path.len() < line.len() {
+                line[..path.len()].copy_from_slice(path);
+                line[path.len()] = b'\n';
+                return Ok(Flow::Continue(u8::from(
+                    file.write_all(&line[..=path.len()]).is_err(),
+                )));
+            }
+        }
         let (data, status) = output.render(session);
-        let result = std::fs::File::from(fd).write_all(&data);
+        let result = file.write_all(&data);
         return Ok(Flow::Continue(if result.is_err() { 1 } else { status }));
     }
     if cmd.assignments.is_empty()

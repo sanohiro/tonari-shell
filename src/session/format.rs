@@ -102,7 +102,7 @@ impl Session {
 }
 
 pub(super) fn print_attribute(
-    out: &mut impl Write,
+    out: &mut dyn Write,
     name: &str,
     var: &Variable,
     command: Option<&str>,
@@ -120,11 +120,7 @@ pub(super) fn print_attribute(
     print_declaration(out, name, var)
 }
 
-pub(super) fn print_declaration(
-    out: &mut impl Write,
-    name: &str,
-    var: &Variable,
-) -> io::Result<()> {
+pub(super) fn print_declaration(out: &mut dyn Write, name: &str, var: &Variable) -> io::Result<()> {
     write!(out, "declare -")?;
     let mut flags = var.attribute_flags().peekable();
     if flags.peek().is_none() {
@@ -183,7 +179,7 @@ pub(super) fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Co
     }
 }
 
-pub(super) fn print_variable_value(out: &mut impl Write, var: &Variable) -> io::Result<()> {
+pub(super) fn print_variable_value(out: &mut dyn Write, var: &Variable) -> io::Result<()> {
     if let Some(map) = var.associative() {
         if var.array_assigned {
             write!(out, "=(")?;
@@ -222,7 +218,7 @@ pub(super) fn print_variable_value(out: &mut impl Write, var: &Variable) -> io::
     writeln!(out)
 }
 
-pub(super) fn print_value(out: &mut impl Write, value: &str) -> io::Result<()> {
+pub(super) fn print_value(out: &mut dyn Write, value: &str) -> io::Result<()> {
     if value.bytes().any(|c| c.is_ascii_control()) {
         return out.write_all(&crate::word::quote::ansi_quote(value.as_bytes(), false));
     }

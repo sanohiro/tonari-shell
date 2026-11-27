@@ -306,7 +306,7 @@ pub(crate) fn expand_line<'a>(
             out.push(c);
             continue;
         }
-        let hist = history.map_or(&[][..], |h| h.lines.as_slice());
+        let hist = history.map_or(&[][..], |h| &h.lines[..]);
         let prev = || hist.last().map(String::as_str);
         let value = if input.starts_with(['^', '$', '*', '%']) {
             prev()

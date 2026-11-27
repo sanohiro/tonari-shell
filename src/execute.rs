@@ -385,7 +385,7 @@ fn start(
         && let Ok(reader) =
             here_input::open(r.word.as_bytes(), here_input::PIPE_LIMIT).and_then(private_fd)
         && let Ok(pid) =
-            External::new(cmd, session).spawn_redirected(&[], None, Some(&reader), output.as_ref())
+            External::new(cmd, session)?.spawn_redirected(&[], None, Some(&reader), output.as_ref())
     {
         return Ok(Stage::Child(pid));
     }
@@ -404,7 +404,7 @@ fn start(
         let null = open_null_redirect(&cmd.redirects);
         let opened = null.as_ref().map(|(dest, fd)| (*dest, fd));
         if copies || opened.is_some() {
-            let external = External::new(cmd, session);
+            let external = External::new(cmd, session)?;
             if let Ok(pid) =
                 external.spawn_redirected(&cmd.redirects, opened, input.as_ref(), output.as_ref())
             {
@@ -435,7 +435,7 @@ fn start(
         && output.is_none()
         && cmd.redirects.is_empty()
     {
-        match External::new(cmd, session).spawn_resolved(
+        match External::new(cmd, session)?.spawn_resolved(
             None,
             (launch.group.is_none() && cmd.assignments.is_empty()).then_some(&*session),
             launch,
@@ -533,7 +533,10 @@ fn fork_stage(
     } else if !scoped {
         setup.extend(actions(cmd));
     }
-    let external = builtin.is_none().then(|| External::new(cmd, session));
+    let external = builtin
+        .is_none()
+        .then(|| External::new(cmd, session))
+        .transpose()?;
     if builtin.is_some() && !launch.background {
         session.jobs.refresh_snapshot();
     }
@@ -969,7 +972,7 @@ fn run_external(
         }
     }
     if replace && launch.group.is_none() && !cmd.prepare_missing_hook(session) {
-        let executable = External::new(cmd, session);
+        let executable = External::new(cmd, session)?;
         return Ok(Flow::Continue(
             if apply(&actions(cmd), here_input::PIPE_LIMIT) {
                 executable.exec(

@@ -98,7 +98,7 @@ impl CompOptions {
 
 #[derive(Clone, Default)]
 pub struct Registry {
-    specs: BTreeMap<Target, Spec>,
+    specs: BTreeMap<Target<'static>, Spec>,
     active: Option<CompOptions>,
 }
 
@@ -215,14 +215,14 @@ impl WordList {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum Target {
-    Command(String),
+enum Target<'a> {
+    Command(std::borrow::Cow<'a, str>),
     Default,
     Empty,
     Initial,
 }
 
-impl Target {
+impl Target<'_> {
     fn argument(&self) -> String {
         match self {
             Self::Command(name) if name.starts_with('-') => format!("-- {}", shell_quote(name)),
@@ -241,7 +241,7 @@ struct Request {
     spec: Spec,
     options: Vec<(bool, CompOption)>,
     operands: Vec<String>,
-    special: Option<Target>,
+    special: Option<Target<'static>>,
     destination: Option<String>,
     print: bool,
     remove: bool,
@@ -358,9 +358,15 @@ impl Request {
         Ok(result)
     }
 
-    fn targets(&self) -> Vec<Target> {
+    fn targets(&self) -> Vec<Target<'static>> {
         self.special.clone().map_or_else(
-            || self.operands.iter().cloned().map(Target::Command).collect(),
+            || {
+                self.operands
+                    .iter()
+                    .cloned()
+                    .map(|s| Target::Command(s.into()))
+                    .collect()
+            },
             |target| vec![target],
         )
     }
@@ -405,7 +411,7 @@ impl Spec {
         })
     }
 
-    fn definition(&self, target: &Target) -> String {
+    fn definition(&self, target: &Target<'_>) -> String {
         let mut line = "complete".to_owned();
         for option in CompOption::ALL {
             if self.options.contains(*option) {
@@ -908,14 +914,14 @@ impl Registry {
         self.active.is_some()
     }
 
-    fn lookup(&self, command: Option<&str>, prefix: &str) -> Option<&Spec> {
+    fn lookup<'a>(&'a self, command: Option<&'a str>, prefix: &str) -> Option<&'a Spec> {
         let registry = &self.specs;
         match command {
             Some(cmd) => registry
-                .get(&Target::Command(cmd.to_owned()))
+                .get(&Target::Command(cmd.into()))
                 .or_else(|| {
                     cmd.rsplit_once('/')
-                        .and_then(|(_, base)| registry.get(&Target::Command(base.to_owned())))
+                        .and_then(|(_, base)| registry.get(&Target::Command(base.into())))
                 })
                 .or_else(|| registry.get(&Target::Default)),
             None if prefix.is_empty() => registry

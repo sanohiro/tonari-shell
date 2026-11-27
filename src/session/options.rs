@@ -226,9 +226,9 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
         read: |s| s.login,
         write: None,
     },
+    option_entry!("no_empty_cmd_completion", shopt.no_empty_cmd_completion),
     option_entry!("nocaseglob", shopt.glob.nocaseglob),
     option_entry!("nocasematch", shopt.nocasematch),
-    option_entry!("no_empty_cmd_completion", shopt.no_empty_cmd_completion),
     option_entry!("nullglob", shopt.glob.nullglob),
     option_entry!("patsub_replacement", shopt.patsub_replacement),
     option_entry!("progcomp", shopt.progcomp),
@@ -240,7 +240,7 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("xpg_echo", shopt.xpg_echo),
 ];
 fn write_option_line(
-    out: &mut impl Write,
+    out: &mut dyn Write,
     name: &str,
     value: bool,
     reusable: bool,
@@ -302,7 +302,7 @@ impl Session {
         self.apply_posix_mode(enabled);
     }
 
-    pub(super) fn apply_posix_mode(&mut self, enabled: bool) {
+    pub(crate) fn apply_posix_mode(&mut self, enabled: bool) {
         self.posix = enabled;
         self.shopt.shift_verbose = enabled;
         self.jobs.quiet = enabled && !self.interactive;
@@ -433,15 +433,18 @@ impl Session {
         result
     }
 
-    pub fn inherit_options(&mut self) {
-        if let Ok(value) = std::env::var("BASH_COMPAT") {
-            self.apply_compat(&value);
+    pub fn inherit_options(&mut self, env: &crate::startup::Environment) {
+        if let Some(value) = &env.compat {
+            self.apply_compat(value);
         }
         let allowed = std::cell::LazyCell::new(|| unsafe {
             libc::getuid() == libc::geteuid() && libc::getgid() == libc::getegid()
         });
-        for (variable, set) in [("SHELLOPTS", true), ("BASHOPTS", false)] {
-            if let Ok(list) = std::env::var(variable) {
+        for (variable, set, list) in [
+            ("SHELLOPTS", true, &env.shellopts),
+            ("BASHOPTS", false, &env.bashopts),
+        ] {
+            if let Some(list) = list {
                 if !*allowed {
                     return;
                 }
@@ -495,20 +498,26 @@ impl Session {
             return 1;
         }
         let mut status = 0;
-        let mut out = io::stdout().lock();
+        let mut out = None;
         let all = names.is_empty();
         let known = if set { SET_OPTIONS } else { SHOPT_OPTIONS };
-        let names = known
-            .iter()
-            .map(|entry| entry.name)
-            .filter(|_| all)
-            .chain(names.iter().map(String::as_str));
-        for name in names {
-            let Some(entry) = known.iter().find(|entry| entry.name == name) else {
-                diagnostic!("shopt: {name}: unsupported option");
-                status = 1;
-                continue;
+        let requested = names.iter().map(|name| {
+            known
+                .binary_search_by_key(&name.as_str(), |entry| entry.name)
+                .map(|i| &known[i])
+                .map_err(|_| name)
+        });
+        let listed = if all { known } else { &[] };
+        for entry in listed.iter().map(Ok).chain(requested) {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(name) => {
+                    diagnostic!("shopt: {name}: unsupported option");
+                    status = 1;
+                    continue;
+                }
             };
+            let name = entry.name;
             if !all && (enable || disable) {
                 if !set && name.starts_with("compat") {
                     self.toggle_compat(name, enable);
@@ -549,16 +558,18 @@ impl Session {
             if quiet || (enable && !value) || (disable && value) {
                 continue;
             }
+            let writer = out.get_or_insert_with(|| io::stdout().lock());
             let result = if reusable && !set {
-                writeln!(out, "shopt -{} {name}", if value { 's' } else { 'u' })
+                writeln!(writer, "shopt -{} {name}", if value { 's' } else { 'u' })
             } else {
-                write_option_line(&mut out, name, value, reusable)
+                write_option_line(writer, name, value, reusable)
             };
             if result.is_err() {
                 return 1;
             }
         }
-        out.flush().map_or(1, |()| status)
+        out.map_or(Ok(()), |mut out| out.flush())
+            .map_or(1, |()| status)
     }
 }
 

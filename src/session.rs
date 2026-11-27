@@ -812,17 +812,13 @@ impl Session {
         )
     }
 
-    pub fn initialize_shell_level(&mut self) {
-        if unsafe { libc::getenv(c"PWD".as_ptr()) }.is_null()
+    pub fn initialize_shell_level(&mut self, env: &crate::startup::Environment) {
+        if !env.pwd
             && let Some(directory) = self.get("PWD")
         {
             self.assign("PWD", &directory);
         }
-        let inherited = std::env::var("SHLVL")
-            .ok()
-            .and_then(|v| v.trim().parse::<i64>().ok())
-            .unwrap_or(0);
-        let level = inherited.saturating_add(1);
+        let level = env.shell_level.saturating_add(1);
         let level = if level >= 1000 {
             diagnostic!("warning: shell level ({level}) too high, resetting to 1");
             1

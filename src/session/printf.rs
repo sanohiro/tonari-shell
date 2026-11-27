@@ -36,8 +36,12 @@ pub(crate) fn run(
     mut capture: Option<&mut Vec<u8>>,
 ) -> u8 {
     let mut target = None;
-    if words.first().is_some_and(|arg| arg == "-v") {
-        let Some(name) = words.get(1) else {
+    while let Some(option) = crate::builtins::flags::next(&mut words) {
+        let Some(attached) = option.strip_prefix("-v") else {
+            diagnostic!("printf: invalid option");
+            return 2;
+        };
+        let Some(name) = crate::builtins::flags::value(attached, &mut words) else {
             diagnostic!("printf: -v requires a variable");
             return 2;
         };
@@ -46,16 +50,6 @@ pub(crate) fn run(
             return 2;
         }
         target = Some(name);
-        words = &words[2..];
-    }
-    if words.first().is_some_and(|arg| arg == "--") {
-        words = &words[1..];
-    } else if words
-        .first()
-        .is_some_and(|arg| arg.starts_with('-') && arg != "-")
-    {
-        diagnostic!("printf: invalid option");
-        return 2;
     }
     let Some((format, values)) = words.split_first() else {
         diagnostic!("printf: format required");
@@ -83,6 +77,15 @@ pub(crate) fn run(
         }
     }
     if target.is_none() && capture.is_none() {
+        if matches!(format.as_str(), "%s\\n" | "%s\n") && values.len() <= 1 {
+            let text = values.first().map_or("", String::as_str);
+            let mut line = [0u8; 256];
+            if text.len() < line.len() {
+                line[..text.len()].copy_from_slice(text.as_bytes());
+                line[text.len()] = b'\n';
+                return crate::builtins::write_stdout_for("printf", &line[..=text.len()]);
+            }
+        }
         let borrowed = if format == "%s" && values.len() <= 1 {
             Some(values.first().map_or("", String::as_str))
         } else if !format.contains(['%', '\\']) {
@@ -238,10 +241,13 @@ impl<'a> Arguments<'a> {
     fn signed(&mut self) -> i64 {
         // Common decimal widths and operands need neither a C string nor errno.
         if let Some((word, rest)) = self.values.split_first()
-            && word
-                .as_bytes()
-                .first()
-                .is_some_and(|b| matches!(b, b'1'..=b'9'))
+            && (word == "0"
+                || word
+                    .strip_prefix(['-', '+'])
+                    .unwrap_or(word)
+                    .as_bytes()
+                    .first()
+                    .is_some_and(|b| matches!(b, b'1'..=b'9')))
             && let Ok(value) = word.parse::<i64>()
         {
             self.values = rest;
@@ -251,10 +257,11 @@ impl<'a> Arguments<'a> {
     }
     fn unsigned(&mut self) -> u64 {
         if let Some((word, rest)) = self.values.split_first()
-            && word
-                .as_bytes()
-                .first()
-                .is_some_and(|b| matches!(b, b'1'..=b'9'))
+            && (word == "0"
+                || word
+                    .as_bytes()
+                    .first()
+                    .is_some_and(|b| matches!(b, b'1'..=b'9')))
             && let Ok(value) = word.parse::<u64>()
         {
             self.values = rest;
@@ -288,25 +295,42 @@ pub(crate) fn may_assign_count(format: &str) -> bool {
         })
 }
 
+fn flag_bit(flag: u8) -> u8 {
+    match flag {
+        b'#' => 1,
+        b'0' => 2,
+        b'-' => 4,
+        b' ' => 8,
+        b'+' => 16,
+        b'\'' => 32,
+        _ => 0,
+    }
+}
+
 struct Spec {
-    flags: Vec<u8>,
+    flags: u8,
     width: i32,
     precision: Option<i32>,
 }
 
 impl Spec {
+    fn has(&self, flag: u8) -> bool {
+        self.flags & flag_bit(flag) != 0
+    }
+
     fn parse(input: &mut &[u8], args: &mut Arguments<'_>) -> Result<(Self, u8), &'static str> {
-        let mut flags = Vec::new();
+        let mut flags = 0;
         while let Some((&flag, rest)) = input.split_first() {
-            if !FLAGS.contains(&flag) {
+            let bit = flag_bit(flag);
+            if bit == 0 {
                 break;
             }
-            flags.push(flag);
+            flags |= bit;
             *input = rest;
         }
         let mut width = amount(input, args, 0);
         if width < 0 {
-            flags.push(b'-');
+            flags |= flag_bit(b'-');
             width = width.checked_abs().ok_or("field width too large")?;
         }
         let mut precision = None;
@@ -349,11 +373,11 @@ impl Spec {
         output
             .try_reserve(len + padding)
             .map_err(|_| "field too large")?;
-        if !self.flags.contains(&b'-') {
+        if !self.has(b'-') {
             output.resize(output.len() + padding, b' ');
         }
         output.extend_from_slice(&value[..len]);
-        if self.flags.contains(&b'-') {
+        if self.has(b'-') {
             output.resize(output.len() + padding, b' ');
         }
         Ok(())
@@ -377,7 +401,7 @@ impl Spec {
         let pad = (self.width as usize).saturating_sub(chars);
         out.try_reserve(bytes + pad)
             .map_err(|_| "field too large")?;
-        let left = self.flags.contains(&b'-');
+        let left = self.has(b'-');
         if !left {
             out.resize(out.len() + pad, b' ');
         }
@@ -397,15 +421,14 @@ impl Spec {
         out: &mut Vec<u8>,
     ) -> Result<(), &'static str> {
         let width = std::mem::take(&mut self.width) as usize;
-        let left = self.flags.contains(&b'-');
-        let zero = self.flags.contains(&b'0');
+        let left = self.has(b'-');
+        let zero = self.has(b'0');
         let integer = b"diu".contains(&conversion);
         let precision = self.precision;
         if integer && self.precision != Some(0) {
             self.precision = None;
         }
-        self.flags
-            .retain(|flag| !matches!(flag, b'\'' | b'-' | b'0'));
+        self.flags &= !(flag_bit(b'\'') | flag_bit(b'-') | flag_bit(b'0'));
         let mut raw = Vec::new();
         self.numeric(conversion, locale.decimal, args, &mut raw)?;
         let sign = usize::from(raw.first().is_some_and(|c| matches!(c, b'-' | b'+' | b' ')));
@@ -471,7 +494,7 @@ impl Spec {
         args: &mut Arguments<'_>,
         output: &mut Vec<u8>,
     ) -> Result<(), &'static str> {
-        if self.flags.is_empty() && self.width == 0 && self.precision.is_none() {
+        if self.flags == 0 && self.width == 0 && self.precision.is_none() {
             // The default integer conversions have no padding, grouping or
             // alternate prefixes. Write directly into the existing byte buffer.
             match conversion {
@@ -493,37 +516,44 @@ impl Spec {
         }
         // Only a validated numeric conversion reaches libc. Build its exact
         // argument type explicitly; user-provided C length modifiers are discarded.
-        let mut fmt = vec![b'%'];
-        fmt.extend(self.flags.iter().copied().filter(|&f| f != b'\''));
+        // Six distinct flags and two nonnegative i32 fields fit in 32 bytes,
+        // including %, the decimal point, ll, conversion and terminating NUL.
+        let mut format = [0u8; 32];
+        let mut fmt = &mut format[..];
+        fmt.write_all(b"%").unwrap();
+        for &flag in b"#0- +" {
+            if self.has(flag) {
+                fmt.write_all(&[flag]).unwrap();
+            }
+        }
         if self.width != 0 {
-            fmt.extend_from_slice(self.width.to_string().as_bytes());
+            write!(fmt, "{}", self.width).unwrap();
         }
         if let Some(p) = self.precision {
-            fmt.push(b'.');
-            fmt.extend_from_slice(p.to_string().as_bytes());
+            write!(fmt, ".{p}").unwrap();
         }
         if b"diouxX".contains(&conversion) {
-            fmt.extend_from_slice(b"ll");
+            fmt.write_all(b"ll").unwrap();
         }
-        fmt.push(conversion);
-        let fmt = CString::new(fmt).unwrap();
+        fmt[0] = conversion;
+        let fmt = format.as_ptr().cast::<libc::c_char>();
         match conversion {
             b'd' | b'i' => {
                 let n = args.signed();
                 append_number(output, |dst, cap| unsafe {
-                    libc::snprintf(dst, cap, fmt.as_ptr(), n)
+                    libc::snprintf(dst, cap, fmt, n)
                 })
             }
             b'o' | b'u' | b'x' | b'X' => {
                 let n = args.unsigned();
                 append_number(output, |dst, cap| unsafe {
-                    libc::snprintf(dst, cap, fmt.as_ptr(), n)
+                    libc::snprintf(dst, cap, fmt, n)
                 })
             }
             _ => {
                 let n = args.float(decimal);
                 append_number(output, |dst, cap| unsafe {
-                    libc::snprintf(dst, cap, fmt.as_ptr(), n)
+                    libc::snprintf(dst, cap, fmt, n)
                 })
             }
         }
@@ -661,10 +691,7 @@ fn render(
                         {
                             data = &data[..data.len().min(p as usize)];
                         }
-                        spec.bytes(
-                            &quote(data, variables.read(), spec.flags.contains(&b'#')),
-                            out,
-                        )?;
+                        spec.bytes(&quote(data, variables.read(), spec.has(b'#')), out)?;
                     }
                     b'n' => {
                         let name = args.next();
@@ -683,7 +710,7 @@ fn render(
                     k if b"diouxXaAeEfFgG".contains(&k) => {
                         let float = b"aAeEfFgG".contains(&k);
                         let mut locale = numeric::C;
-                        if float || spec.flags.contains(&b'\'') {
+                        if float || spec.has(b'\'') {
                             locale = *args.locale.get_or_insert_with(|| {
                                 ["LC_ALL", "LC_NUMERIC", "LANG"]
                                     .into_iter()
@@ -695,7 +722,7 @@ fn render(
                                     .unwrap_or(numeric::C)
                             });
                         }
-                        let grouped = spec.flags.contains(&b'\'')
+                        let grouped = spec.has(b'\'')
                             && !locale.groups.is_empty()
                             && !locale.separator.is_empty()
                             && b"diufFgG".contains(&k);

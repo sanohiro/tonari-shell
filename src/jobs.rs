@@ -419,7 +419,7 @@ impl Jobs {
         }
         self.exit_warning = Some(command);
         if check_running {
-            list_to(self, &[], posix, io::stderr().lock());
+            list_to(self, &[], posix, &mut io::stderr().lock());
         }
         true
     }

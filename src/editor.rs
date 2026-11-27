@@ -85,6 +85,7 @@ pub(crate) fn ready(fd: RawFd, ms: i32) -> bool {
 struct Keys {
     queued: VecDeque<u8>,
     expansions: usize,
+    sequence: Vec<u8>,
 }
 
 impl Keys {
@@ -242,7 +243,9 @@ impl Keys {
         if !longer {
             return Ok((exact.unwrap_or(fallback), false));
         }
-        let mut seq = vec![first];
+        let mut seq = std::mem::take(&mut self.sequence);
+        seq.clear();
+        seq.push(first);
         let mut best = exact.map(|action| (1, action));
         while longer {
             // Consume one byte at a time; a foreground child owns later typeahead.
@@ -266,10 +269,9 @@ impl Keys {
         for &key in seq[len..].iter().rev() {
             self.queued.push_front(key);
         }
-        Ok((
-            action,
-            len > 1 && matches!(&seq[..len], b"\x1b[C" | b"\x1bOC"),
-        ))
+        let right = matches!(&seq[..len], b"\x1b[C" | b"\x1bOC");
+        self.sequence = seq;
+        Ok((action, right))
     }
 
     // After the end marker one byte still belongs to the editor. It could be
@@ -803,7 +805,6 @@ impl EditorState {
         line: LineView<'_>,
         hint: &str,
         searching: bool,
-        styled_or_multiline: bool,
         replaying: bool,
     ) -> io::Result<()> {
         let LineView {
@@ -824,7 +825,6 @@ impl EditorState {
         {
             screen.move_short(prompt, text, cursor)?;
         } else if let Some(start) = self.appended.take()
-            && (styled_or_multiline || start >= 1024)
             && let Some(pos) = screen.tail
             && screen.can_append(&text[start..])
             && cursor == text.len()
@@ -944,7 +944,6 @@ pub fn line(
             },
             hint,
             search.is_some(),
-            styled_or_multiline,
             replaying,
         )?;
         if std::mem::take(&mut blink)
@@ -1382,6 +1381,7 @@ pub fn line(
                     };
                     edit.undo
                         .record(&text, cursor..cursor, arg.len(), cursor, false);
+                    edit.appended = (!replace && cursor == text.len()).then_some(cursor);
                     text.insert_str(cursor, arg);
                     cursor += arg.len();
                 }

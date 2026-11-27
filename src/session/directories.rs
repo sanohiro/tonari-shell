@@ -324,7 +324,7 @@ impl Session {
 }
 
 impl Session {
-    pub(super) fn logical_directory_ref(&self) -> io::Result<&Path> {
+    pub(crate) fn logical_directory_ref(&self) -> io::Result<&Path> {
         if let Some(cwd) = self.logical_cwd.get() {
             return Ok(cwd);
         }
