@@ -54,6 +54,10 @@ CASES = {
         'f() { local v="$1"; case "$v" in v*) echo "$v";; *) echo "v$v";; esac; }', 50),
     "review-helper-if": eval_loop('x=$(f "/$i")', 'echo "$x"', "49",
         '''f() { local p="$1"; if [ -n "$p" ]; then printf '%s\\n' "${p#/}"; else echo empty; fi; }''', 50),
+    "review-repeated-words": eval_loop('b=("${a[@]//+(foo|bar)/X}")', 'echo "${#b[@]} ${b[499]}"',
+        "500 preX499X", 'shopt -s extglob; for ((j=0;j<500;j++)); do a[j]=prefoobar${j}bar; done', 20),
+    "review-overlapping-words": eval_loop('b="${s//+(f|fo|foo)/X}"', 'echo "$b"', "X-X",
+        "shopt -s extglob; s=foofof-ffoo", 500),
     "review-array-extglob": eval_loop('b=("${a[@]//+([0-9])/X}")', 'echo "${#b[@]} ${b[499]}"',
         "500 preX-post", 'shopt -s extglob; for ((j=0;j<500;j++)); do a[j]=pre$j-post; done', 20),
     "review-array-trim": eval_loop('b=("${a[@]##+([0-9])}")', 'echo "${#b[@]} ${b[499]}"',
@@ -66,6 +70,7 @@ CASES = {
                                      "s=hello_X_123", 10000),
     "review-static-extglob": eval_loop('[[ $s == @(foo|baz)_+([0-9])_bar ]] || exit 1', 'echo "$i"',
                                      "5000", "s=foo_123_bar", 5000),
+    "review-read-file": ('exec 3<short-records\nfor ((i=0;i<2000;i++)); do IFS= read -ru3 -n10 x || exit 1; done\necho "$x"', "0123456789"),
     "review-read": eval_loop('IFS= read -r x <<<"$s"', 'echo "$x"', "a b", "s='a b'"),
     "review-mapfile": eval_loop('mapfile -t a <<<"$s"', 'echo "${a[0]}"', "a b", "s='a b'"),
     "review-read-n": eval_loop('read -r -n 5 x <<<"$s"', 'echo "$x"', "abcde", "s=abcdefg"),
@@ -666,6 +671,8 @@ def main():
     with tempfile.TemporaryDirectory() as temp:
         home = Path(temp)
         env = {"HOME": temp, "PATH": "/usr/bin:/bin", "LC_ALL": "C"}
+        if not args.case or "review-read-file" in args.case:
+            (home / "short-records").write_bytes(b"0123456789" * 2000)
         (home / "rows").write_text("".join(f"record {i}\n" for i in range(2000)))
         if not args.case or "source-functions-repeat" in args.case:
             (home / "functions.sh").write_text(function_source())

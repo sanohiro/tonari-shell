@@ -370,15 +370,13 @@ impl Word {
                 } => {
                     let values = modifier::Values::read(name, env)?;
                     let pattern = env.pattern(std::mem::take(pattern.as_mut()))?;
-                    let group = env
-                        .session
-                        .shopt
-                        .glob
-                        .extglob
-                        .then(|| crate::pattern::extended::Pattern::new(&pattern))
-                        .flatten();
+                    let compiled = crate::pattern::ParameterPattern::new(
+                        &pattern,
+                        env.session.shopt.glob.extglob,
+                        None,
+                    );
                     *part = values.map(*quoted, |v| {
-                        crate::pattern::trim(v, &pattern, *prefix, *longest, group.as_ref())
+                        crate::pattern::trim(v, &compiled, *prefix, *longest)
                     });
                 }
                 Part::Arithmetic { expression, quoted } => {

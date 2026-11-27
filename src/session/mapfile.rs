@@ -179,6 +179,15 @@ fn records(
 }
 
 #[inline(never)]
+pub(super) fn memory_eligible(session: &Session, args: &[String]) -> bool {
+    Options::parse(args).is_ok_and(|opts| {
+        opts.fd == 0
+            && opts.limit == 0
+            && opts.callback.is_none()
+            && session.memory_array_target(opts.name)
+    })
+}
+
 pub(crate) fn run(
     session: &mut Session,
     command: &str,

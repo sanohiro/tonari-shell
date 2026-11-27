@@ -56,10 +56,10 @@ pub(super) fn file_group(
 // Adjacent function declarations can share one source buffer. Only commit
 // a batch after the normal parser has verified every top-level statement.
 pub(super) fn function_run(
-    source: &str,
     first: &str,
+    rest: &[u8],
     session: &Session,
-    line: usize,
+    parse: impl FnOnce(usize) -> Result<Vec<parser::Statement>, parser::Error>,
 ) -> Option<(Vec<parser::Statement>, usize, usize)> {
     if session.interactive
         || session.xtrace
@@ -71,8 +71,8 @@ pub(super) fn function_run(
     }
     // Bound both speculative scanning and the source retained by one function.
     const WINDOW: usize = 8192;
-    let bytes = &source.as_bytes()[..source.len().min(WINDOW)];
-    let mut body_start = first.len();
+    let bytes = &rest[..rest.len().min(WINDOW.saturating_sub(first.len()))];
+    let mut body_start = 0;
     let mut end = 0;
     let mut count = 0;
     for offset in memchr::memmem::find_iter(bytes, b"\n}\n") {
@@ -98,8 +98,7 @@ pub(super) fn function_run(
     if count < 4 {
         return None;
     }
-    let text = &source[..end];
-    let program = parser::session_source_at(text, false, session, line).ok()?;
+    let program = parse(end).ok()?;
     if program.len() != count
         || !program.iter().all(|s| {
             !s.negated
@@ -111,8 +110,8 @@ pub(super) fn function_run(
     }
     Some((
         program,
-        end - first.len(),
-        memchr::memchr_iter(b'\n', &bytes[first.len()..end]).count(),
+        end,
+        memchr::memchr_iter(b'\n', &bytes[..end]).count(),
     ))
 }
 

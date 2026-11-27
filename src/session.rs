@@ -558,6 +558,23 @@ impl Session {
         printf::run(self, args, None)
     }
 
+    fn memory_array_target(&self, name: &str) -> bool {
+        is_identifier(name)
+            && Self::ordinary_assignment(name)
+            && !self.protected_array(name)
+            && self.variables.get(name).is_none_or(|v| {
+                !v.readonly && !v.integer && !v.nameref && !v.dynamic && v.associative().is_none()
+            })
+    }
+
+    pub(crate) fn memory_input(&self, read: bool, args: &[String], bytes: &[u8]) -> bool {
+        if read {
+            read::memory_eligible(self, args, bytes)
+        } else {
+            mapfile::memory_eligible(self, args)
+        }
+    }
+
     pub fn read(&mut self, args: &[String], here: Option<(i32, &[u8])>, status: u8) -> crate::Flow {
         read::run(self, args, here, status)
     }

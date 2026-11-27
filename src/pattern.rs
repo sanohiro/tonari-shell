@@ -310,14 +310,67 @@ pub(crate) use case::{
     CaseDirection, capitalize, case_chars, folded_prefix, same_letter, toggle_case,
 };
 
+pub(crate) struct ParameterPattern<'a> {
+    pub(crate) text: &'a str,
+    basic: std::cell::OnceCell<Matcher<&'a str>>,
+    width: std::cell::OnceCell<Option<FixedWidth>>,
+    starts: std::cell::OnceCell<Matcher<String>>,
+    pub(crate) extended: bool,
+    pub(crate) fold: Option<crate::session::CharacterLocale>,
+    pub(crate) group: Option<crate::pattern::extended::Pattern>,
+}
+
+impl<'a> ParameterPattern<'a> {
+    pub(crate) fn new(
+        text: &'a str,
+        extended: bool,
+        fold: Option<crate::session::CharacterLocale>,
+    ) -> Self {
+        use crate::pattern::extended::Pattern;
+        let group = match fold {
+            Some(locale)
+                if !text.is_empty()
+                    && (crate::pattern::has_magic(text, false)
+                        || extended && crate::pattern::extended::has_group(text)) =>
+            {
+                Some(Pattern::insensitive(text, extended, locale))
+            }
+            _ if extended => Pattern::new(text),
+            _ => None,
+        };
+        Self {
+            text,
+            basic: Default::default(),
+            width: Default::default(),
+            starts: Default::default(),
+            extended,
+            fold,
+            group,
+        }
+    }
+    pub(crate) fn basic(&self) -> &Matcher<&'a str> {
+        self.basic.get_or_init(|| Matcher::new(self.text))
+    }
+
+    pub(crate) fn width(&self) -> Option<&FixedWidth> {
+        self.width
+            .get_or_init(|| FixedWidth::parse(self.text))
+            .as_ref()
+    }
+
+    pub(crate) fn starts(&self) -> &Matcher<String> {
+        self.starts
+            .get_or_init(|| Matcher::new(format!("{}*", self.text)))
+    }
+}
+
 pub fn trim(
     mut value: String,
-    pattern: &str,
+    compiled: &ParameterPattern<'_>,
     prefix: bool,
     longest: bool,
-    group: Option<&extended::Pattern>,
 ) -> String {
-    if let Some(cut) = trim_boundary(&value, pattern, prefix, longest, group) {
+    if let Some(cut) = trim_boundary(&value, compiled, prefix, longest) {
         if prefix {
             value.drain(..cut);
         } else {
@@ -329,11 +382,12 @@ pub fn trim(
 
 fn trim_boundary(
     value: &str,
-    pattern: &str,
+    compiled: &ParameterPattern<'_>,
     prefix: bool,
     longest: bool,
-    group: Option<&extended::Pattern>,
 ) -> Option<usize> {
+    let pattern = compiled.text;
+    let group = compiled.group.as_ref();
     // A question mark consumes one character. An ASCII boundary has the
     // same width in every supported locale.
     if pattern == "?" {
@@ -410,9 +464,9 @@ fn trim_boundary(
         .char_indices()
         .map(|(i, _)| i)
         .chain(std::iter::once(value.len()));
-    let basic = group.is_none().then(|| Matcher::new(pattern));
+    let basic = group.is_none().then(|| compiled.basic());
     if let Some(matcher) = &basic
-        && let Some(fixed) = FixedWidth::parse(pattern)
+        && let Some(fixed) = compiled.width()
     {
         let cut = if prefix {
             fixed.width
@@ -1003,7 +1057,12 @@ mod tests {
                             cuts.first()
                         };
                         assert_eq!(
-                            trim_boundary(text, pattern, prefix, longest, None),
+                            trim_boundary(
+                                text,
+                                &ParameterPattern::new(pattern, false, None),
+                                prefix,
+                                longest
+                            ),
                             expected.copied(),
                             "{text:?} {pattern:?} prefix={prefix} longest={longest}"
                         );

@@ -15,8 +15,8 @@ pub enum Expr {
 
 #[derive(Debug)]
 pub struct StaticGlob {
-    matcher: pattern::Matcher<String>,
-    extended: Option<pattern::extended::Pattern>,
+    word: Word,
+    compiled: std::cell::OnceCell<(pattern::Matcher<String>, Option<pattern::extended::Pattern>)>,
 }
 
 impl Expr {
@@ -30,14 +30,12 @@ impl Expr {
             Word::Declaration(_) => false,
         };
         if matches!(operator, "=" | "==" | "!=") && fixed && right.as_literal().is_none() {
-            let text = right.extended_pattern(&|_| None, &[]);
-            let extended = pattern::extended::Pattern::new(&text);
             return Self::StaticGlob(
                 left,
                 operator,
                 std::rc::Rc::new(StaticGlob {
-                    matcher: pattern::Matcher::new(text),
-                    extended,
+                    word: right,
+                    compiled: Default::default(),
                 }),
             );
         }
@@ -135,24 +133,40 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
         }
         StaticGlob(left, op, glob) => {
             let left = operand(session, left, status)?;
-            let source = glob.matcher.source();
-            trace(session, status, &[&left, op, source]);
-            let locale = source
-                .contains(['[', '?'])
-                .then(|| pattern::session_locale(session))
-                .flatten();
-            let _guard = locale.as_ref().and_then(|l| l.enter());
-            let matched = if session.shopt.nocasematch {
-                pattern::extended::insensitive_match(
-                    &left,
-                    source,
-                    true,
-                    session.character_locale(),
-                )
-            } else if let Some(group) = &glob.extended {
-                group.accepts(&left, false)
+            let (matcher, group) = glob.compiled.get_or_init(|| {
+                let text = glob.word.clone().extended_pattern(&|_| None, &[]);
+                let group = pattern::extended::Pattern::new(&text);
+                (pattern::Matcher::new(text), group)
+            });
+            let invalid;
+            let source = if matches!(matcher, pattern::Matcher::Invalid) {
+                invalid = glob.word.clone().extended_pattern(&|_| None, &[]);
+                &invalid
             } else {
-                glob.matcher.matches(&left)
+                matcher.source()
+            };
+            trace(session, status, &[&left, op, source]);
+            let matched = if session.shopt.nocasematch || group.is_some() {
+                let locale = source
+                    .contains(['[', '?'])
+                    .then(|| pattern::session_locale(session))
+                    .flatten();
+                let _guard = locale.as_ref().and_then(|l| l.enter());
+                if session.shopt.nocasematch {
+                    pattern::extended::insensitive_match(
+                        &left,
+                        source,
+                        true,
+                        session.character_locale(),
+                    )
+                } else {
+                    group
+                        .as_ref()
+                        .expect("compiled extended pattern")
+                        .accepts(&left, false)
+                }
+            } else {
+                matcher.matches_session(&left, session)
             };
             Ok(matched != (*op == "!="))
         }

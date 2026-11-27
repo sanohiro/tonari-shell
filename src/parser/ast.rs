@@ -238,6 +238,7 @@ pub struct CaseClause {
 
 #[derive(Debug, Clone)]
 pub enum Command {
+    Scalar(Box<(String, Word)>),
     Pipeline(Pipeline<Word>),
     Group(Vec<Statement>),
     Timed {

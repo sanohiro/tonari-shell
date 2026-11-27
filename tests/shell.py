@@ -38,6 +38,77 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
+    def test_readonly_helper_uses_callee_arguments_and_restores_locals(self):
+        self.compare(r'''set -- outside
+v=parent; p=parent
+normalize() { local v="$1"; case "$v" in v*) echo "$v";; *) echo "v$v";; esac; }
+strip() { local p="$1"; if [ -n "$p" ]; then printf '%s\n' "${p#/}"; else echo empty; fi; }
+printf '<%s>\n' "$(normalize 'a b')" "$(normalize v)" "$(strip /ok)" "$(strip '')"
+echo "$1 $v $p"
+function [ { return 1; }
+echo "$(strip /ok)"
+unset -f '['
+shopt -s nocasematch
+echo "$(normalize Vyes)"
+observe() { local v="$1"; case "$v" in *) echo "$BASH_SUBSHELL";; esac; }
+echo "$(observe ok)"
+''', 0, b"<va b>\n<v>\n<ok>\n<empty>\noutside parent parent\nempty\nVyes\n1\n")
+
+    def test_compiled_parameter_patterns_and_conditional_options(self):
+        self.compare(r'''shopt -s extglob
+a=(foofoo-ffoo foo fo '雪fo')
+printf '<%s>\n' "${a[@]//+(f|fo|foo)/X}"
+printf '<%s>\n' "${a[@]##+(foo|fo)}"
+match() { [[ $1 == @(foo|bar)_+([0-9]) ]]; }
+match foo_71; echo "$?"; match FOO_7; echo "$?"
+shopt -s nocasematch; match FOO_7; echo "$?"
+s=''; set -- "${s:+words}" "${s:-a b}"; printf '<%s>\n' "$@"
+''', 0, b"<X-X>\n<X>\n<X>\n<\xe9\x9b\xaaX>\n<-ffoo>\n<>\n<>\n<\xe9\x9b\xaafo>\n0\n1\n0\n<>\n<a b>\n", minimum=4)
+
+    def test_query_prefers_executable_and_completion_rechecks_permissions(self):
+        first = self.cwd / "first"
+        second = self.cwd / "second"
+        for directory in (first, second):
+            directory.mkdir()
+            (directory / "probe").touch()
+        (second / "probe").chmod(0o700)
+        self.env["PATH"] = f"{first}:{second}:/bin:/usr/bin"
+        script = '''command -v probe; type -t probe; compgen -c pr | /usr/bin/grep -x probe | /usr/bin/head -1
+/bin/chmod 600 "$1/probe"
+command -v probe; type -t probe
+type -aP probe >/dev/null; echo all=$?
+compgen -c pr | /usr/bin/grep -x probe; echo completion=$?
+/bin/chmod 700 "$1/probe"
+command -v probe'''
+        expected = f"{second}/probe\nfile\nprobe\n{first}/probe\nfile\nall=1\ncompletion=1\n{second}/probe\n".encode()
+        for shell in self.shells_for():
+            (second / "probe").chmod(0o700)
+            proc = self.command(shell, script, "bench", str(second))
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, expected, b""))
+
+    def test_keyword_operands_beyond_bitset_and_quoted_spelling(self):
+        filler = " ".join(["x"] * 70)
+        self.compare("f() { printf '<%s:%s:%s>\\n' \"$one\" \"$two\" \"$#\"; }\n"
+                     "set -k\nf one=1 " + filler + " two=2 'quoted=yes'\n"
+                     "set +k\nf one=1 two=2", 0, b"<1:2:71>\n<::2>\n")
+
+    def test_memory_here_inputs_preserve_fd_observers(self):
+        self.compare(r'''IFS=: read -ra a <<< 'a:b'
+printf '<%s>\n' "${a[@]}"
+read -rd : x <<< 'ab:cd'; echo "$?:$x"
+read -rN 4 x <<< 'a b:c'; echo "$?:$x"
+read -rn 8 x <<< 'ab'; echo "$?:$x"
+exec 3<<<outer
+read -ru3 x <<< inner; echo "$x"
+cb() { IFS= read -r x; echo "callback:$x"; }
+mapfile -C cb -c 1 a <<'END'
+one
+two
+END
+echo "first=${a[0]}"
+''', 0, b"<a>\n<b>\n0:ab\n0:a b:\n0:ab\nouter\ncallback:two\nfirst=one\n\n", minimum=4)
+
+
     def test_closed_builtin_stdout_reports_only_attempted_writes(self):
         shells = (TONARI,) if self.bash_before_53() else (BASH, TONARI)
         for shell in shells:

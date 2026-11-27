@@ -274,7 +274,7 @@ impl Modification {
                 } else {
                     replacement.scalar(&lookup, positional)
                 };
-                let compiled = super::replace::ReplacePattern::new(
+                let compiled = crate::pattern::ParameterPattern::new(
                     &pattern,
                     env.session.shopt.glob.extglob,
                     env.session

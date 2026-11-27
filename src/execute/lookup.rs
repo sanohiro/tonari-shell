@@ -272,19 +272,43 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                 }
             } else {
                 let mut candidate = Candidate::new();
-                for dir in search_directories(&search) {
+                let mut directories = search_directories(&search).peekable();
+                let mut fallback = None;
+                while let Some(dir) = directories.next() {
                     let Some(c) = candidate.join(dir, name) else {
                         continue;
                     };
                     let path = Path::new(OsStr::from_bytes(c.to_bytes()));
-                    if !ignored.contains(path) && check_candidate(c).unwrap_or(false) {
+                    if ignored.contains(path) {
+                        continue;
+                    }
+                    let Ok(mode) = candidate_mode(c) else {
+                        continue;
+                    };
+                    if mode & libc::S_IFMT != libc::S_IFREG {
+                        continue;
+                    }
+                    // A single-result Bash query prefers any executable, then
+                    // the first regular file. If this is the last candidate,
+                    // either permission result selects the same pathname.
+                    if !search_all && fallback.is_none() && directories.peek().is_none()
+                        || executable_mode(c, mode)
+                    {
                         if report(path).is_err() {
                             return 1;
                         }
                         if !search_all {
+                            fallback = None;
                             break;
                         }
+                    } else if !search_all && fallback.is_none() {
+                        fallback = Some(path.to_owned());
                     }
+                }
+                if let Some(path) = fallback
+                    && report(&path).is_err()
+                {
+                    return 1;
                 }
             }
         }
@@ -385,20 +409,20 @@ pub(super) fn executable(path: &Path) -> bool {
 
 // Most PATH candidates fit in the inline buffer. A long component reuses
 // the overflow allocation for the rest of this search.
-pub(super) struct Candidate {
+pub(crate) struct Candidate {
     short: [u8; 512],
     overflow: Vec<u8>,
 }
 
 impl Candidate {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             short: [0; 512],
             overflow: Vec::new(),
         }
     }
 
-    pub(super) fn join(&mut self, dir: &Path, name: &str) -> Option<&CStr> {
+    pub(crate) fn join(&mut self, dir: &Path, name: &str) -> Option<&CStr> {
         let prefix = if name.starts_with('/') {
             &[][..]
         } else {
@@ -423,17 +447,23 @@ impl Candidate {
     }
 }
 
-pub(super) fn check_candidate(path: &CStr) -> std::io::Result<bool> {
+pub(crate) fn check_candidate(path: &CStr) -> std::io::Result<bool> {
+    candidate_mode(path)
+        .map(|mode| mode & libc::S_IFMT == libc::S_IFREG && executable_mode(path, mode))
+}
+
+fn candidate_mode(path: &CStr) -> std::io::Result<libc::mode_t> {
     let mut stat = std::mem::MaybeUninit::uninit();
     if unsafe { libc::stat(path.as_ptr(), stat.as_mut_ptr()) } < 0 {
         return Err(std::io::Error::last_os_error());
     }
-    let mode = unsafe { stat.assume_init() }.st_mode;
-    // Darwin can grant X_OK via an ACL while exec rejects a regular file
-    // with no executable mode bit. Keep searching later PATH components.
-    Ok(mode & libc::S_IFMT == libc::S_IFREG
-        && mode & 0o111 != 0
-        && unsafe { libc::access(path.as_ptr(), libc::X_OK) } == 0)
+    Ok(unsafe { stat.assume_init() }.st_mode)
+}
+
+fn executable_mode(path: &CStr, mode: libc::mode_t) -> bool {
+    // An execute ACL alone can satisfy X_OK on Darwin, even when exec
+    // rejects a regular file with no executable mode bit.
+    mode & 0o111 != 0 && unsafe { libc::access(path.as_ptr(), libc::X_OK) } == 0
 }
 
 fn check_executable(path: &Path) -> std::io::Result<bool> {

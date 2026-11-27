@@ -786,13 +786,10 @@ impl Reader {
             else {
                 unreachable!()
             };
-            return Ok(Command::Pipeline(vec![SimpleCommand {
-                assignments: vec![scalar_assignment(
-                    word.assignment_name(name).to_owned(),
-                    word,
-                )],
-                ..Default::default()
-            }]));
+            let name = word.assignment_name(name).to_owned();
+            let mut word = word;
+            word.remove_assignment_prefix(name.len() + 1);
+            return Ok(Command::Scalar(Box::new((name, word))));
         }
         let start = self.position();
         let mut first = match self.compound()? {
