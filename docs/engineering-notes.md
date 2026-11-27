@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## November 27 · Reference slices and locale storage / 名前参照とロケール文字列
+
+Resolve a nameref before selecting the stored array. For a negative offset, add one to the offset before adding the greatest occupied index. This stays within range even at INT64_MAX. Numeric fallback indices can be searched directly. At indices 9223372036854775806 and 9223372036854775807, a slice from -1 now returns the last element through both names. GNU Bash 5.3.20 drops that slice despite documenting offsets relative to the largest index plus one. The witness also exercises a prefixed assignment. [GNU Bash parameter expansion](https://www.gnu.org/software/bash/manual/bash.html#Shell-Parameter-Expansion)
+
+日付文字列は長い順に共有テーブルへ収録し、ビルド時に開始位置と長さを決める。同じ長さでは元の ID 順にして再現性を保つ。6,256個すべての文字列、各ロケールの列・リスト、数値形式を旧テーブルと照合した。起動時の展開処理は不要。 [Ten proposals / 10項目の評価](compatibility/runtime-audit-v3.md#final-shortlist) · [Native benchmarks / 実測](benchmarks.md#shortlist-and-references)
+
 ## November 27 · Array ranges and key order / 配列の範囲とキー順序
 
 The last pass also inventoried 365 formatting, vector, output and related macro calls across 105 Rust files. Of these, 168 occurred inside a loop or closure. It followed a formatting call from slice expansion back to the array storage. A three-element slice used to serialize every occupied numeric index, parse it, construct subscript strings, and look up the requested values. Dense arrays and mapfile records can address the requested interval directly. Sparse arrays seek to its first occupied index in their ordered map. Standalone quoted index fields can write the decimal keys directly into the argument list. Associative iteration computes the Bash bucket and insertion-order sort key once per entry.

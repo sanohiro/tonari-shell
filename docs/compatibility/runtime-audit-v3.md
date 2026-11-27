@@ -1,5 +1,26 @@
 # Third runtime audit / 第3回監査
 
+<a id="final-shortlist"></a>
+
+## November 27 follow-up / 最終候補10項目の再評価
+
+The shortlist describes `8e7b4f7`. We checked the ten proposals against the merged source through PR #33, exercised their public entry points and built release variants for the remaining scope and layout proposals.
+
+| # | Candidate | Evaluation on the current source |
+|---:|---|---|
+| 1 | printf options and numeric formats | Attached and repeated `-v` already have Bash regression cases. The flags fit in a bit set. The C conversion format fits a checked 32-byte stack buffer. |
+| 2 | Brace limits, umask and C strings | The word and byte limits, conditional `X`, and checked strings for user-supplied OS arguments and paths all landed in PR #21. The limits apply before materializing large ranges. |
+| 3 | Startup environment and tty checks | Bash flags and imported functions share the initial environment scan. PS1, HOME, TERM, HISTFILE and editing descriptors may change in startup scripts. Read live values when opening the editor. |
+| 4 | Editing and key sequences | Short lines already append when the old screen tail is valid. Multi-key bindings reuse a growable buffer, including custom sequences longer than 32 bytes. Coalescing still needs to stop where an accepted command can inherit queued input. |
+| 5 | Completion | Registry lookup borrows command names through `Cow<str>`. Literal and native candidates bypass terminal-mode changes. A scripted callback can read the tty, change foreground group or redirect descriptors. PR #32 measures 10,000 literal words through a PTY. |
+| 6 | File redirection | Short paths and logical pwd already use stack buffers. A free fd below the soft limit does not imply there is another free fd for the saved destination. Reserving the descriptor before a truncating open preserves the file on failure. A fast route for a builtin must also preserve its diagnostics and shell side effects. |
+| 7 | Spawn and here-input | `private_fd` directly returns descriptors above 2. Opening an unknown path just to test its type can touch a FIFO or device before the child exists. The input descriptor remains observable by callbacks, traps and fd pressure. Packed argv and sparse environment comparison landed in PRs #29–30. An environment-generation counter would also have to track scope restoration, command-local assignments, exported functions and inherited masking. |
+| 8 | Scripts and collections | Inherited variable names, FUNCNEST and simple arithmetic loops already have dedicated paths. In a sorted-Vec scope prototype the M1 function median fell 7.153 → 6.945 ms. Declaring 1,024 reverse-ordered locals rose 5.252 → 11.118 ms. The scope map also supports ordered listing, removal and restoration. Keep the map. PR #33 caches Bash's associative ordering key for the duration of a sort. A blanket deterministic hash introduces predictable user-key collisions and does not remove this ordering work. |
+| 9 | Outlining and tiny sets | Forcing eleven more builtin boundaries left the M1 executable at 1,765,472 bytes and grew the Linux static PIE by 2,176 bytes. Linux functions improved slightly and file-redirection medians rose slightly in that run. Keep the previously measured boundaries. Trap output requires order and process substitution can retain thousands of child statuses. |
+| 10 | Sorting, writers and locale data | Path sorting already shares comparison code and caches file metadata per key. A numeric filename and a file attribute have different keys. Multiple cold paths already use `dyn Write`. Packing shared substrings in the generated time tables preserved every string and reduced Linux by 5,504 bytes. The estimate of hundreds of kilobytes did not materialize in the measured layouts. |
+
+`Bindings` の試作では、大きなスコープでも元の表示順・復元順を保って比較した。端末の所有権、FIFO の open、切り詰め前の FD 予約は、速度とともに利用者が観測する挙動を照合した。起動時に保存できる値と rc ファイルの実行後に変化する値は読み取る時点を区別する。 [Measurements / 測定](../benchmarks.md#shortlist-and-references) · [Prior audit / 前回の判定](#engineering-decisions--実装判断)
+
 The audit described `8e7b4f7`. We checked its findings against `8349230` and compared the changes in `2ae4a52` with GNU Bash 5.3.20 on Apple M1 and the Ubuntu 24.04 Bash on native Linux x86-64. The scripts use their normal command, script or PTY entry points. [Regression cases](../../tests/shell.py) · [Release measurements](../benchmarks.md#runtime-audit-v3)
 
 ## Behavior / 挙動

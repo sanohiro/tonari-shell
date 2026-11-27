@@ -1,5 +1,15 @@
 # Startup and execution / 起動と実行性能
 
+<a id="shortlist-and-references"></a>
+
+## 2026-11-27 · Reference slices, release layout and locale storage / 名前参照・配布サイズ
+
+For 8,192 elements accessed through `declare -n`, the median for 32 three-member slices on M1 fell from 4.675 to 0.633 ms (Bash 21.331). On native Linux x86-64 it fell from 5.807 to 0.331 ms (Bash 22.296). Use `bench_scripts.py --case array-slice-reference --timing started` with 31 or 41 samples respectively. [Native Linux array run](https://github.com/sanohiro/tonari-shell/actions/runs/45955604175)
+
+Eleven extra `inline(never)` attributes gave the same M1 file size, and 2,438,072 → 2,440,248 bytes on native Linux. On the M1 function workload the medians were 6.420 → 6.590 ms. On Linux they were 7.135 → 7.035 ms. The variant was dropped. In a separate M1 comparison an ordered vector for saved local bindings took 11.118 ms (previous 5.252, Bash 6.263) for eight functions each declaring 1,024 distinct names in descending order. [Linux outlining controls](https://github.com/sanohiro/tonari-shell/actions/runs/45955650980)
+
+The shipped locale packing changes the Linux static PIE from 2,438,072 to 2,432,568 bytes. M1 stays at 1,765,472. For 2,000 German date formats in 41 interleaved trials, M1 median/p95 ms was 8.148/8.639 → 8.189/8.837 (Bash 21.968/23.261). Linux was 2.826/2.876 → 2.745/2.783 (Bash 8.964/9.086). The Linux suite exercised 336 Tonari locales and directly paired seven installed Bash locales across 31 directives and three epochs. 配布版は従来と同じ案1A。336ロケールのうち Bash と直接比較できた7件に差分はなかった。 [Linux format checks and release sizes](https://github.com/sanohiro/tonari-shell/actions/runs/45956113287)
+
 <a id="array-static-audit"></a>
 
 ## 2026-11-27 · Indexed slices and associative iteration / 配列の切り出しと列挙
