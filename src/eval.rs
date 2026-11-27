@@ -344,10 +344,19 @@ fn run_for(
                 }
             });
         }
+        if s.assign_existing_literal(name, &value) {
+            return Ok(Some(last));
+        }
         let error = if s.is_nameref(name) {
             s.assign_for_reference(name, value).err()
         } else if s.readonly(name) {
             Some(crate::session::READONLY)
+        } else if s.integer(name) {
+            if let Err(error) = s.assign_target(name, &value) {
+                diagnostic!("{name}: {error}");
+                return Err(Flow::Discard(1));
+            }
+            None
         } else {
             s.assign(name, &value);
             None

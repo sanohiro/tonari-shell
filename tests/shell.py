@@ -166,6 +166,25 @@ done""", 0, b"<AB><CD><2><5>\n<BEFORE><AB><CD><99><2><102>\n<AB><CD><2><5>\n<AB>
             self.assertEqual((result.returncode, result.stdout), (0, b"1:ok\n"))
             self.assertTrue(result.stderr)
 
+    def test_for_select_and_getopts_use_declared_integer_destinations(self):
+        self.compare("""declare -i x; for x in 2+3 010 x+1; do echo "$x"; done
+select x in 3+4; do echo "$x"; break; done 2>/dev/null <<< 1
+a=12; declare -i opt OPTARG; getopts a: opt -a2+3; echo "$?:$opt:$OPTARG"
+declare -n ref=x; for ref in a; do echo "$ref"; done
+select ref in 2+4; do echo "$a"; break; done 2>/dev/null <<< 1""",
+                     0, b"5\n8\n9\n7\n0:12:5\n12\n2+4\n", minimum=5)
+
+    def test_arithmetic_error_in_loop_or_getopts_stops_the_command_list(self):
+        for code in [
+            "for x in 2 1/0; do :; done",
+            "select x in 1/0; do break; done <<< 1",
+            "OPTIND=1; getopts a: y -a1/0",
+        ]:
+            for shell in self.shells_for(minimum=5):
+                result = self.command(shell, "declare -i x OPTARG; " + code + "; echo skipped")
+                self.assertEqual((result.returncode, result.stdout), (1, b""))
+                self.assertTrue(result.stderr)
+
     def test_mapfile_here_callback_observes_remaining_stdin(self):
         self.compare("""hook() { read -r more; echo "$1:$2:$more"; }
 mapfile -t -c 1 -C hook r <<'END'
