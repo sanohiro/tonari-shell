@@ -62,8 +62,10 @@ pub mod numeric {
         } else {
             name
         };
-        if matches!(name, "C" | "") {
-            return None;
+        match name {
+            "" | "C" => return None,
+            "POSIX" => return Some(super::POSIX.0),
+            _ => {}
         }
         let mut lo = 0;
         let mut hi = KINDS.len();
