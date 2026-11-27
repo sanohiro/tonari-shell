@@ -1,5 +1,6 @@
 """End-to-end tests for Tonari's -c and terminal entry points."""
 
+import array
 import errno
 import fcntl
 import os
@@ -12,6 +13,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import termios
 import time
 import unittest
 from pathlib import Path
@@ -131,6 +133,73 @@ p='\360\237\230\200'; echo "${p@P}" """
         result = self.command(TONARI, source)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"0\n1\n0\n", b""))
 
+    def test_read_rejects_closed_descriptors_without_assigning(self):
+        for fd in (9, 1200):
+            for flags in ("-t 0", "-t 0.05", "-n 0", "-N 0", "-t 1 -a a"):
+                src = f'v=old; a=(keep); read -u {fd} {flags} v; echo "$?:$v:${{a[*]}}"'
+                for sh in self.shells_for(minimum=5):
+                    result = self.command(sh, src)
+                    self.assertEqual((result.returncode, result.stdout), (0, b"1:old:keep\n"))
+                    self.assertTrue(result.stderr)
+
+    def test_high_numbered_input_descriptor_observes_eof(self):
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if hard != resource.RLIM_INFINITY and hard <= 1200:
+            self.skipTest("requires 1201 descriptors")
+        with open(os.devnull, "rb") as source:
+            try:
+                if soft != resource.RLIM_INFINITY and soft <= 1200:
+                    resource.setrlimit(resource.RLIMIT_NOFILE, (1201, hard))
+                high = fcntl.fcntl(source, fcntl.F_DUPFD, 1200)
+            finally:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
+            try:
+                result = subprocess.run([TONARI, "-c",
+                    f'v=keep; read -u {high} -t 0 v; echo "$?:$v"; read -u {high} -t 1 v; echo "$?:$v"'],
+                    pass_fds=(high,), capture_output=True, timeout=3)
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"0:keep\n1:\n", b""))
+            finally:
+                os.close(high)
+
+    def test_read_dispatches_a_trap_before_resuming_partial_input(self):
+        cases = [
+            ("read -r value", b"hel", b"1", b"hello"),
+            ("read -r -t 4 value", b"hel", b"1", b"hello"),
+            ("mapfile -t value", b"one\nhel", b"1", b"one hello"),
+            ("mapfile -tn2 value", b"one\nhel", b"1", b"one hello"),
+            ("mapfile -t -C : -c 1 value", b"one\nhel", b"0", b"one hello"),
+        ]
+        for sh in self.shells_for(minimum=5):
+            for command, prefix, last, result in cases:
+                source = f"""trap 'echo caught:$?' USR1; echo ready; false
+{command}; printf '%s:%s\\n' "$?" "${{value[*]}}" """
+                read_fd, write_fd = os.pipe()
+                with os.fdopen(read_fd, "rb") as observe, os.fdopen(write_fd, "wb", buffering=0) as writer, subprocess.Popen(
+                    [sh, "-c", source], env=self.env, stdin=observe, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                ) as child:
+                    try:
+                        self.assertEqual(child.stdout.readline(), b"ready\n")
+                        writer.write(prefix)
+                        # Wait until the reader has consumed the prefix before delivering the signal.
+                        limit = time.monotonic() + 2
+                        while time.monotonic() < limit:
+                            pending = array.array("i", [0])
+                            fcntl.ioctl(observe.fileno(), termios.FIONREAD, pending, True)
+                            if not pending[0]:
+                                break
+                            time.sleep(0.005)
+                        self.assertEqual(pending[0], 0)
+                        child.send_signal(signal.SIGUSR1)
+                        self.assertTrue(select.select([child.stdout], [], [], 2)[0])
+                        self.assertEqual(child.stdout.readline(), b"caught:" + last + b"\n")
+                        writer.write(b"lo\n")
+                        writer.close()
+                        out, err = child.communicate(timeout=3)
+                        self.assertEqual((child.returncode, out, err), (0, b"0:" + result + b"\n", b""))
+                    finally:
+                        if child.poll() is None:
+                            child.kill()
+
     def test_read_honors_integer_destinations_in_input_order(self):
         self.compare("""declare -i REPLY; read <<< '3+4'; echo "$REPLY"
 declare -ia a=(99); declare -n ref=a; i=0
@@ -184,6 +253,18 @@ select ref in 2+4; do echo "$a"; break; done 2>/dev/null <<< 1""",
                 result = self.command(shell, "declare -i x OPTARG; " + code + "; echo skipped")
                 self.assertEqual((result.returncode, result.stdout), (1, b""))
                 self.assertTrue(result.stderr)
+
+    def test_read_preserves_quoted_space_and_trims_ifs_whitespace(self):
+        for ws in ("\r", "\v", "\f"):
+            code = 'IFS="$1"; read -r x <<< "$1' + 'a$1$1' + 'b$1"; printf "%s" "$x"'
+            got = self.command(TONARI, code, "test", ws)
+            self.assertEqual((got.returncode, got.stdout, got.stderr), (0, ("a" + ws * 2 + "b").encode(), b""))
+        got = self.command(TONARI, r"""IFS=' '; read x <<< 'a \ '; printf '<%s>' "$x" """)
+        self.assertEqual((got.returncode, got.stdout, got.stderr), (0, b"<a  >", b""))
+
+    def test_umask_permission_copies_see_preceding_clauses(self):
+        got = self.command(TONARI, "umask 022; umask u=rw,go=u; umask; umask 077; umask g=u,o+g; umask")
+        self.assertEqual((got.returncode, got.stdout, got.stderr), (0, b"0111\n0000\n", b""))
 
     def test_mapfile_here_callback_observes_remaining_stdin(self):
         self.compare("""hook() { read -r more; echo "$1:$2:$more"; }

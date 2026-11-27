@@ -1,5 +1,12 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## Input and mode witnesses / 入力とモードの差分
+
+* With IFS set to carriage return, a single named `read -r x` trims the leading and trailing separator and preserves the doubled interior separator. Bash 5.3.20 keeps the leading carriage return in this case. Tonari consistently applies IFS whitespace trimming to carriage return, vertical tab and form feed. With `IFS=' '` and input consisting of `a`, a space, a backslash and a space, Tonari preserves both the separator between the two fields and the quoted space in the last field. Bash 5.3.20 returns just `a`. [Bash word splitting](https://www.gnu.org/software/bash/manual/bash.html#Word-Splitting)
+* Starting at `umask 022`, `umask u=rw,go=u` gives `0111`. Each copy observes the permissions set by the preceding clause. Bash 5.3.20 copies the initial bits and yields `0100`; macOS chmod on a file initially set to 0755 produces 0666, agreeing with Tonari. [POSIX chmod operands](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/chmod.html#tag_20_17_05)
+* 改行以外の IFS 空白も両端から除き、バックスラッシュで保護した空白は保持する。umask の権限コピーは直前までの節の適用結果を参照する。この二点は実装と参照シェルを個別に検証した。回帰試験は `test_read_preserves_quoted_space_and_trims_ifs_whitespace` と `test_umask_permission_copies_see_preceding_clauses`。
+
+
 For a chain of namerefs ending in an array, `"${r[@]@k}"` returns alternating keys and values, and `"${r[@]@A}"` names the target in its declaration. A reference to a single element has a value and no separate declaration. 配列全体への参照、要素への参照、未束縛の参照を Bash と比較する。再現試験は `tests/compat/source_review.py` の `nameref-transform`。
 
 The third November 27 audit covers brace expansion limits, `printf -v`, symbolic `umask`, function loop control and the order of descriptor side effects. 第3回監査では、Bash との版別の差と、Tonari が意図的に設ける展開上限を記録した。[Findings and witnesses / 個別判断と再現試験](compatibility/runtime-audit-v3.md)

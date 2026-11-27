@@ -111,45 +111,70 @@ fn timeout(value: &str) -> Option<Duration> {
     Duration::try_from_secs_f64(seconds).ok()
 }
 
-fn ready(fd: i32, timeout: Duration) -> io::Result<bool> {
-    // Darwin poll can report POLLNVAL for open character devices (including
-    // /dev/null). pselect reports immediate EOF as readable, like read itself.
-    if fd >= 0 && (fd as usize) < libc::FD_SETSIZE {
-        let mut set = unsafe { std::mem::zeroed() };
-        let time = libc::timespec {
-            tv_sec: timeout.as_secs().min(i64::MAX as u64) as _,
-            tv_nsec: timeout.subsec_nanos().into(),
-        };
-        let n = unsafe {
-            libc::FD_SET(fd, &mut set);
-            libc::pselect(
-                fd + 1,
-                &mut set,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                &time,
-                std::ptr::null(),
-            )
-        };
-        return if n < 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(n != 0)
-        };
-    }
-    let mut descriptor = libc::pollfd {
-        fd,
-        events: libc::POLLIN,
-        revents: 0,
+// Darwin exports its dynamically sized fd_set ABI under a separate symbol.
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    #[link_name = "pselect$DARWIN_EXTSN"]
+    fn pselect_input(
+        nfds: libc::c_int,
+        readfds: *mut libc::fd_set,
+        writefds: *mut libc::fd_set,
+        exceptfds: *mut libc::fd_set,
+        timeout: *const libc::timespec,
+        sigmask: *const libc::sigset_t,
+    ) -> libc::c_int;
+}
+#[cfg(not(target_os = "macos"))]
+use libc::pselect as pselect_input;
+
+fn ready(fd: i32, timeout: Option<Duration>, watch: Option<&Session>) -> io::Result<bool> {
+    // A single ordinary fd_set covers the common case. Both supported kernels
+    // read ceil(nfds / word_bits) words, including for EOF on character devices.
+    let index = fd as usize / libc::FD_SETSIZE;
+    let mut first = unsafe { std::mem::zeroed() };
+    let mut extra;
+    let sets = if index == 0 {
+        std::slice::from_mut(&mut first)
+    } else {
+        // Bound the allocation to a real descriptor owned by this process.
+        if unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        extra = vec![first; index + 1];
+        &mut extra[..]
     };
-    let millis = timeout.as_millis().saturating_add(u128::from(
-        !timeout.subsec_nanos().is_multiple_of(1_000_000),
-    ));
-    let result = unsafe { libc::poll(&mut descriptor, 1, millis.min(i32::MAX as u128) as i32) };
+    unsafe { libc::FD_SET(fd % libc::FD_SETSIZE as i32, &mut sets[index]) };
+    let time = timeout.map(|t| libc::timespec {
+        tv_sec: t.as_secs().min(i64::MAX as u64) as _,
+        tv_nsec: t.subsec_nanos().into(),
+    });
+    let mask = if let Some(session) = watch {
+        let mut all = unsafe { std::mem::zeroed() };
+        unsafe { libc::sigfillset(&mut all) };
+        let mask = crate::traps::SignalMask::block(&all)?;
+        if session.traps.read_pending()
+            || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Err(io::ErrorKind::Interrupted.into());
+        }
+        Some(mask)
+    } else {
+        None
+    };
+    let result = unsafe {
+        pselect_input(
+            fd + 1,
+            sets.as_mut_ptr(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            time.as_ref().map_or(std::ptr::null(), std::ptr::from_ref),
+            mask.as_ref().map_or(std::ptr::null(), |m| &m.0),
+        )
+    };
     if result < 0 {
         Err(io::Error::last_os_error())
     } else {
-        Ok(result > 0 && descriptor.revents & libc::POLLNVAL == 0)
+        Ok(result > 0)
     }
 }
 
@@ -169,6 +194,49 @@ impl Input {
             data: [std::mem::MaybeUninit::uninit(); 4096],
             position: 0,
             end: 0,
+        }
+    }
+
+    // False asks the caller to recompute its deadline and any input lookahead.
+    // A handler can replace the descriptor or consume input through another name.
+    pub(super) fn wait(
+        &mut self,
+        session: &mut Session,
+        last: u8,
+        command: &str,
+        remaining: Option<Duration>,
+        watch: bool,
+    ) -> Result<bool, Flow> {
+        if watch && session.traps.read_pending() {
+            let fd = self.fd;
+            self.rewind();
+            let flow = crate::traps::dispatch(session, last);
+            if !matches!(flow, Flow::Continue(_)) {
+                return Err(flow);
+            }
+            *self = Self::new(fd);
+            return Ok(false);
+        }
+        if watch
+            && crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+            && crate::interrupted()
+        {
+            return Err(Flow::Continue(crate::traps::signal_status(libc::SIGINT)));
+        }
+        if remaining == Some(Duration::ZERO) {
+            return Err(Flow::Continue(crate::traps::signal_status(libc::SIGALRM)));
+        }
+        if self.position != self.end || remaining.is_none() && self.seekable {
+            return Ok(true);
+        }
+        match ready(self.fd, remaining, watch.then_some(&*session)) {
+            Ok(true) => Ok(true),
+            Ok(false) => Err(Flow::Continue(crate::traps::signal_status(libc::SIGALRM))),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => Ok(false),
+            Err(error) => {
+                diagnostic!("{command}: {error}");
+                Err(Flow::Continue(1))
+            }
         }
     }
 
@@ -201,8 +269,8 @@ impl Input {
     }
 }
 
-impl Drop for Input {
-    fn drop(&mut self) {
+impl Input {
+    fn rewind(&mut self) {
         if self.seekable && self.end > self.position {
             unsafe {
                 libc::lseek(
@@ -212,6 +280,13 @@ impl Drop for Input {
                 )
             };
         }
+        self.position = self.end;
+    }
+}
+
+impl Drop for Input {
+    fn drop(&mut self) {
+        self.rewind();
     }
 }
 
@@ -238,7 +313,12 @@ impl Drop for EchoGuard {
     }
 }
 
-pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u8])>) -> Flow {
+pub(super) fn run(
+    session: &mut Session,
+    args: &[String],
+    here: Option<(i32, &[u8])>,
+    last: u8,
+) -> Flow {
     let opts = match options(args) {
         Ok(opts) => opts,
         Err((code, e)) => {
@@ -246,8 +326,11 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
             return Flow::Continue(code);
         }
     };
-    if crate::execute::fd::is_private(opts.fd) {
-        diagnostic!("read: invalid file descriptor");
+    if crate::execute::fd::is_private(opts.fd)
+        || (opts.max_chars == Some(0) || opts.timeout.is_some())
+            && unsafe { libc::fcntl(opts.fd, libc::F_GETFD) } < 0
+    {
+        diagnostic!("read: {}: invalid file descriptor", opts.fd);
         return Flow::Continue(1);
     }
     if let Some(invalid) = opts
@@ -259,7 +342,13 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         return Flow::Continue(1);
     }
     if opts.timeout == Some(Duration::ZERO) {
-        return Flow::Continue(u8::from(!ready(opts.fd, Duration::ZERO).unwrap_or(false)));
+        return match ready(opts.fd, Some(Duration::ZERO), None) {
+            Ok(readable) => Flow::Continue(u8::from(!readable)),
+            Err(error) => {
+                diagnostic!("read: {error}");
+                Flow::Continue(1)
+            }
+        };
     }
     // The normal redirect installed a fresh descriptor. A plain assignment
     // has no callback or subscript that could observe its file position.
@@ -353,6 +442,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         .map_or(0, |(_, data)| {
             memchr::memchr(opts.delimiter, data).map_or(data.len(), |n| n + 1)
         });
+    let mut watch = session.interactive || session.traps.active();
     let status = loop {
         if let Some(limit) = opts.max_chars {
             match std::str::from_utf8(&line[validated..]) {
@@ -362,14 +452,17 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
                 Err(_) => break 1,
             }
         }
-        if edited.is_none()
-            && let Some((started, timeout)) = started
-        {
-            let remaining = timeout.saturating_sub(started.elapsed());
-            if remaining.is_zero()
-                || input.position == input.end && !ready(opts.fd, remaining).unwrap_or(false)
-            {
-                break crate::traps::signal_status(libc::SIGALRM);
+        let remaining = started.map(|(start, timeout)| timeout.saturating_sub(start.elapsed()));
+        if edited.is_none() && (watch || remaining.is_some()) {
+            match input.wait(session, last, "read", remaining, watch) {
+                Ok(true) => {}
+                Ok(false) => {
+                    known_prefix = 0;
+                    watch = session.interactive || session.traps.active();
+                    continue;
+                }
+                Err(Flow::Continue(code)) if code > 128 => break code,
+                Err(flow) => return flow,
             }
         }
         let input_byte = if let Some(bytes) = &mut edited {
@@ -432,9 +525,7 @@ pub(super) fn run(session: &mut Session, args: &[String], here: Option<(i32, &[u
         let b = match input_byte {
             Ok(Some(b)) => b,
             Ok(None) => break 1,
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                break crate::traps::signal_status(crate::traps::pending().unwrap_or(libc::SIGINT));
-            }
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => {
                 diagnostic!("read: {e}");
                 return Flow::Continue(1);

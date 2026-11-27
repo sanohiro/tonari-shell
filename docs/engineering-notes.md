@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## November 27 · Interrupted input and closed descriptors / 信号と入力 FD
+
+A caught signal runs its trap during a blocked read. Use the previous command's status for the trap, retain the partial line and the original deadline, and recheck the input descriptor afterwards. An asynchronous trap can read the same descriptor or replace it. mapfile also publishes complete records before such a trap. Check the descriptor on zero-length and timed reads before modifying any destination.
+
+`USR1` を送ってトラップの出力を待ち、それから残りの入力を送る試験を追加した。通常の read、期限付き read、mapfile の全件・件数指定・コールバックを検証できる。FD 1200 の /dev/null も通常の FD と同じく読み取り可能な EOF として扱う。macOS は拡張 fd_set 用の pselect シンボルを使う。 [Measurements / 測定](benchmarks.md#read-descriptor-audit) · [Other audited differences / 仕様との差分](compatibility.md#input-and-mode-witnesses--入力とモードの差分)
+
 ## November 27 · Typed loop and option assignments / ループとオプション解析の変数属性
 
 A for-loop over an integer variable evaluates each item in order. A nameref used as a for-loop counter retargets the reference; a select destination writes through it. getopts applies attributes both to its output name and to OPTARG. An arithmetic error stops the current command list before the next item. The loop may reuse the existing scalar buffer after checking its attributes.

@@ -1,5 +1,21 @@
 # Startup and execution / 起動と実行性能
 
+<a id="read-descriptor-audit"></a>
+
+## November 27 · Read errors and traps / read のエラーとトラップ
+
+Apple M1, Bash 5.3.20, 21 interleaved release medians in milliseconds after the ready handshake. Verify the final field, record or error status for each run. The first corrected build checks descriptor validity on all reads. The selected version lets an ordinary read perform that check itself, and waits on high-numbered descriptors using a sized fd_set.
+
+| Workload | First correct on these inputs | Selected | Bash |
+|---|---:|---:|---:|
+| 512 reads on fd 7 | 1.507 | 1.422 | 3.504 |
+| 512 timed reads on fd 7 | 1.774 | 1.791 | 3.828 |
+| 512 zero-length reads on a closed fd, diagnostics redirected | 3.494 | 3.482 | 3.167 |
+| mapfile, 512 records with a USR1 trap installed | 0.635 | 0.657 | 0.825 |
+| mapfile, 512 records without a trap | 0.577 | 0.574 | 0.788 |
+
+Create input with `yes abcd | head -512 >readlines`. Use `exec 7<readlines` then repeat `read -r -u7 x`, with or without `-t 1`. For the error case start with `x=keep` and repeat `read -n 0 -u7 x` on a closed fd. For mapfile run `mapfile -t a <readlines`, with or without `trap : USR1`. The closed-fd row includes 512 diagnostic emissions; the Bash control was faster on this error workload. 短い正常読み込みと異常時の診断を個別に測定した。
+
 <a id="typed-loop-audit"></a>
 
 ## November 27 · Typed loops and options / ループ代入の監査
