@@ -8,6 +8,15 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == priority-review ]]; then
+  python3 tools/bench_completion.py "$bin/baseline" "$current" --bash "$ref" --command-cache --runs 41 > "$out/commands.txt"
+  python3 tools/bench_history_fields.py "$bin/baseline" "$current" --entries 100000 --runs 31 > "$out/history.txt"
+  args=()
+  for name in function-definitions function-compound-redefinitions uncached-path-spawn printf-formats printf-assign-number umask-symbolic-query; do args+=(--case "$name"); done
+  python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 41 "${args[@]}" > "$out/scripts.txt"
+  wc -c "$bin/baseline" "$current" > "$out/sizes.txt"
+  exit
+fi
 if [[ $SUITE == startup-review ]]; then
   opts=()
   if [[ $RUNNER_OS == Linux ]]; then opts+=(--traces "$out/traces"); fi

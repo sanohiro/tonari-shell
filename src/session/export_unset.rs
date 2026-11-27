@@ -21,7 +21,7 @@ impl Session {
         if functions {
             let mut status = 0;
             if args.is_empty() {
-                let mut out = io::stdout().lock();
+                let mut out = crate::builtins::stdout_for("export");
                 for name in self.functions.keys().filter(|n| self.function_exported(n)) {
                     if self.print_function(&mut out, name, true).is_err() {
                         return 1;
@@ -140,7 +140,7 @@ impl Session {
                 vars.remove(name);
             }
         }
-        let mut out = io::stdout().lock();
+        let mut out = crate::builtins::stdout_for("export");
         let command = self.posix.then_some("export");
         for (name, value) in vars {
             if let Some(var) = self.variables.get(&name) {

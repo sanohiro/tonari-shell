@@ -618,13 +618,13 @@ impl Traps {
             return 2;
         }
         if signals {
-            let mut out = io::stdout().lock();
+            let mut out = crate::builtins::stdout_for("trap");
             return u8::from(print_signal_table(&mut out).is_err());
         }
         if list || actions || args.is_empty() {
             return self.list(
                 args.iter().map(String::as_str),
-                &mut io::stdout().lock(),
+                &mut crate::builtins::stdout_for("trap"),
                 list && posix,
                 actions,
                 posix,

@@ -393,7 +393,10 @@ impl Session {
             }
         }
         let result = if name == "pwd" {
-            self.write_pwd(physical, &mut io::stdout().lock())
+            self.write_pwd(
+                physical,
+                &mut io::LineWriter::new(crate::builtins::StdoutFd(None)),
+            )
         } else {
             if args.len() > 1 {
                 diagnostic!("cd: too many arguments");
@@ -657,7 +660,10 @@ fn normalize_directory(path: &Path) -> io::Result<PathBuf> {
 }
 
 fn print_path(path: &Path) -> io::Result<()> {
-    write_path(path, &mut io::stdout().lock())
+    write_path(
+        path,
+        &mut io::LineWriter::new(crate::builtins::StdoutFd(None)),
+    )
 }
 
 fn write_path(path: &Path, out: &mut dyn Write) -> io::Result<()> {

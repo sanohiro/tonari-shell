@@ -1,4 +1,4 @@
-use std::ffi::{CString, OsStr, OsString};
+use std::ffi::{CStr, CString, OsStr, OsString};
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -267,10 +267,14 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
                     return 1;
                 }
             } else {
+                let mut candidate = Candidate::new();
                 for dir in search_directories(&search) {
-                    let path = dir.join(name);
-                    if !ignored.contains(&path) && executable(&path) {
-                        if report(&path).is_err() {
+                    let Some(c) = candidate.join(dir, name) else {
+                        continue;
+                    };
+                    let path = Path::new(OsStr::from_bytes(c.to_bytes()));
+                    if !ignored.contains(path) && check_candidate(c).unwrap_or(false) {
+                        if report(path).is_err() {
                             return 1;
                         }
                         if !search_all {
@@ -371,12 +375,62 @@ pub(super) fn executable(path: &Path) -> bool {
     check_executable(path).unwrap_or(false)
 }
 
-pub(super) fn check_executable(path: &Path) -> std::io::Result<bool> {
-    if !path.metadata()?.is_file() {
-        return Ok(false);
+// Most PATH candidates fit in the inline buffer. A long component reuses
+// the overflow allocation for the rest of this search.
+pub(super) struct Candidate {
+    short: [u8; 512],
+    overflow: Vec<u8>,
+}
+
+impl Candidate {
+    pub(super) fn new() -> Self {
+        Self {
+            short: [0; 512],
+            overflow: Vec::new(),
+        }
     }
+
+    pub(super) fn join(&mut self, dir: &Path, name: &str) -> Option<&CStr> {
+        let prefix = if name.starts_with('/') {
+            &[][..]
+        } else {
+            dir.as_os_str().as_bytes()
+        };
+        let slash = !prefix.is_empty() && !prefix.ends_with(b"/");
+        let offset = prefix.len() + usize::from(slash);
+        let len = offset + name.len() + 1;
+        let bytes = if len <= self.short.len() {
+            &mut self.short[..len]
+        } else {
+            self.overflow.resize(len, 0);
+            &mut self.overflow[..]
+        };
+        bytes[..prefix.len()].copy_from_slice(prefix);
+        if slash {
+            bytes[prefix.len()] = b'/';
+        }
+        bytes[offset..len - 1].copy_from_slice(name.as_bytes());
+        bytes[len - 1] = 0;
+        CStr::from_bytes_with_nul(bytes).ok()
+    }
+}
+
+pub(super) fn check_candidate(path: &CStr) -> std::io::Result<bool> {
+    let mut stat = std::mem::MaybeUninit::uninit();
+    if unsafe { libc::stat(path.as_ptr(), stat.as_mut_ptr()) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mode = unsafe { stat.assume_init() }.st_mode;
+    // Darwin can grant X_OK via an ACL while exec rejects a regular file
+    // with no executable mode bit. Keep searching later PATH components.
+    Ok(mode & libc::S_IFMT == libc::S_IFREG
+        && mode & 0o111 != 0
+        && unsafe { libc::access(path.as_ptr(), libc::X_OK) } == 0)
+}
+
+fn check_executable(path: &Path) -> std::io::Result<bool> {
     let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
         return Ok(false);
     };
-    Ok(unsafe { libc::access(path.as_ptr(), libc::X_OK) == 0 })
+    check_candidate(&path)
 }

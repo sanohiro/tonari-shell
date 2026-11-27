@@ -925,7 +925,14 @@ pub fn run(name: &str, args: &[String], last: u8, session: &mut Session) -> u8 {
             return 2;
         }
     };
-    apply(request, builtin, session, last, &mut io::stdout().lock()).unwrap_or(1)
+    apply(
+        request,
+        builtin,
+        session,
+        last,
+        &mut crate::builtins::stdout_for(name),
+    )
+    .unwrap_or(1)
 }
 
 pub struct Generated {

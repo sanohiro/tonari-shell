@@ -552,7 +552,7 @@ impl Session {
             if quiet || (enable && !value) || (disable && value) {
                 continue;
             }
-            let writer = out.get_or_insert_with(|| io::stdout().lock());
+            let writer = out.get_or_insert_with(|| crate::builtins::stdout_for("shopt"));
             let result = if reusable && !set {
                 writeln!(writer, "shopt -{} {name}", if value { 's' } else { 'u' })
             } else {
@@ -639,7 +639,7 @@ impl Session {
     pub fn set(&mut self, words: &mut Vec<String>) -> u8 {
         let args = words.get(1..).unwrap_or_default();
         if args.is_empty() {
-            let mut out = io::BufWriter::new(io::stdout().lock());
+            let mut out = io::BufWriter::new(crate::builtins::StdoutFd(Some("set")));
             let locale = self.character_locale();
             for name in self.visible_names("") {
                 let stored = self.variables.get(name);
@@ -757,7 +757,10 @@ impl Session {
                     }
                     'o' => {
                         let Some(name) = args.get(i) else {
-                            let mut out = io::BufWriter::with_capacity(512, io::stdout().lock());
+                            let mut out = io::BufWriter::with_capacity(
+                                512,
+                                crate::builtins::StdoutFd(Some("set")),
+                            );
                             for (name, on) in self.options(true) {
                                 let result = write_option_line(&mut out, name, on, !enable);
                                 if result.is_err() {

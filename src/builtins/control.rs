@@ -1,5 +1,5 @@
 use crate::{Session, execute::builtin_names};
-use std::io::{self, Write};
+use std::io::Write;
 
 const SPECIAL: &[&str] = &[
     ":", ".", "break", "continue", "eval", "exec", "exit", "export", "readonly", "return", "set",
@@ -16,7 +16,7 @@ pub fn caller(session: &Session, args: &[String]) -> u8 {
         return 1;
     };
     let mut sources = session.source_names.iter().rev().skip(1);
-    let mut out = io::stdout().lock();
+    let mut out = crate::builtins::stdout_for("caller");
     let line = if let Some(arg) = args.first() {
         let Some(depth) = arg.parse::<usize>().ok() else {
             diagnostic!("caller: {arg}: invalid number");
@@ -63,7 +63,7 @@ pub fn enable(session: &mut Session, mut args: &[String]) -> u8 {
     if list || args.is_empty() {
         let mut names = builtin_names().to_vec();
         names.sort_unstable();
-        let mut out = io::stdout().lock();
+        let mut out = crate::builtins::stdout_for("enable");
         for name in names {
             let off = session.disabled_builtins.contains(name);
             if (!special || SPECIAL.contains(&name))
@@ -127,7 +127,7 @@ pub fn help(mut args: &[String]) -> u8 {
             mode = c;
         }
     }
-    let mut out = io::stdout().lock();
+    let mut out = crate::builtins::stdout_for("help");
     static TOPICS: std::sync::OnceLock<Vec<(&str, &str, &str)>> = std::sync::OnceLock::new();
     let topics = TOPICS.get_or_init(|| {
         include_str!("help.txt")

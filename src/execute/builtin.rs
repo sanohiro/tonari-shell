@@ -288,7 +288,7 @@ pub(super) fn eval_builtin(
         Builtin::Times => Flow::Continue(crate::builtins::times(args)),
         Builtin::Ulimit => Flow::Continue(crate::builtins::limits::run(
             args,
-            &mut io::stdout().lock(),
+            &mut crate::builtins::stdout_for("ulimit"),
             session.posix,
         )),
         Builtin::Umask => Flow::Continue(crate::builtins::umask::run(args, session.posix)),
@@ -384,9 +384,11 @@ pub(super) fn eval_builtin(
             }
         }
         Builtin::Unset => Flow::Continue(session.unset(args)),
-        Builtin::DirectoryStack => {
-            Flow::Continue(session.directory_stack(&cmd.words[0], args, &mut io::stdout().lock()))
-        }
+        Builtin::DirectoryStack => Flow::Continue(session.directory_stack(
+            &cmd.words[0],
+            args,
+            &mut crate::builtins::stdout_for(&cmd.words[0]),
+        )),
         Builtin::AutoCd => {
             eprintln!("cd -- {}", cmd.words.join(" "));
             cmd.words.insert(0, "--".into());

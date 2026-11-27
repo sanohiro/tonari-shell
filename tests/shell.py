@@ -38,6 +38,68 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
+    def test_closed_builtin_stdout_reports_only_attempted_writes(self):
+        shells = (TONARI,) if self.bash_before_53() else (BASH, TONARI)
+        for shell in shells:
+            for command in ("printf %s hi", "printf '%05d' 7", "pwd", "umask -p",
+                            "hash", "alias a=text; alias", "dirs", "times", "x=1; declare -p x", "export -p", "type -t pwd"):
+                with self.subTest(shell=shell, command=command):
+                    proc = self.command(shell, command + " >&-; exit $?")
+                    self.assertEqual((proc.returncode, proc.stdout), (1, b""))
+                    self.assertEqual(len(proc.stderr.splitlines()), 1, proc.stderr)
+            for command in ("alias", "printf %s ''", "printf -v value %s hi", "umask 022"):
+                proc = self.command(shell, command + " >&-; exit $?")
+                self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"", b""))
+
+    @unittest.skipUnless(sys.platform == "darwin", "Darwin file ACLs")
+    def test_path_lookup_skips_acl_only_executable(self):
+        first = self.cwd / "first"
+        second = self.cwd / "second"
+        for directory in (first, second):
+            directory.mkdir()
+            cmd = directory / "acl-command"
+            cmd.write_text("#!/bin/sh\nprintf 'ran\\n'\n")
+            cmd.chmod(0o700)
+        cmd = first / "acl-command"
+        cmd.chmod(0o600)
+        import pwd
+        subprocess.run(["chmod", "+a", pwd.getpwuid(os.getuid()).pw_name + " allow execute", cmd], check=True)
+        self.assertTrue(os.access(cmd, os.X_OK))
+        self.env["PATH"] = f"{first}:{second}"
+        self.compare("set +h; type -P acl-command; acl-command", 0,
+                     os.fsencode(second / "acl-command") + b"\nran\n")
+
+    def test_command_cache_observes_permissions_and_new_names(self):
+        directory = self.cwd / "bin"
+        directory.mkdir()
+        self.env["PATH"] = str(directory)
+        cmd = directory / "probe-alpha"
+        cmd.touch(mode=0o700)
+        fd = self.terminal_session(editing=True)
+
+        def complete(prefix, expected):
+            os.write(fd, prefix + b"\t@")
+            self.read_until(fd, b"@")
+            os.write(fd, b"\x0c")
+            self.read_until(fd, PROMPT + expected + b"@")
+            os.write(fd, b"\x03")
+            self.read_until(fd, PROMPT)
+
+        complete(b"probe-al", b"probe-alpha ")
+        cmd.chmod(0o600)
+        complete(b"probe-al", b"probe-al")
+        cmd.chmod(0o700)
+        target = self.cwd / "target"
+        (directory / "probe-link").symlink_to(target)
+        complete(b"probe-li", b"probe-li")
+        target.touch(mode=0o700)
+        complete(b"probe-li", b"probe-link ")
+        target.unlink()
+        complete(b"probe-li", b"probe-li")
+        cmd.rename(directory / "probe-beta")
+        complete(b"probe-al", b"probe-al")
+        complete(b"probe-be", b"probe-beta ")
+
     def test_declaration_failures_leave_scope_and_attributes_intact(self):
         source = """x=outer
 f() { local a=ok; X=2 eval 'local -p a'; local -n x=123 2>/dev/null; x=changed; }
