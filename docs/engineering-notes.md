@@ -1,5 +1,13 @@
 # Engineering notes / 開発知見
 
+## November 27 · Startup, history and account lookup / 起動と履歴・アカウント照会
+
+On Apple M1, deferring the pre-prompt journal read saved time with a large history but made an immediate reverse search slower. Measure the first visible match and the first typed character along with the prompt before changing prefetch. In a separate comparison, adding only `\u` cost about 1.08 ms on first display. Tonari already caches the effective username. Sharing a passwd lookup with the home and login-shell fallbacks can help when their UIDs match and the session needs multiple fields. The real and effective UIDs can differ. [Measurements and conditions](benchmarks.md#startup-review-0ec497f)
+
+Apple M1 で履歴を描画後に先読みする試作を測ると、表示直後の Ctrl-R と先読み開始に重なったキー入力に待ち時間が移った。また、標準的なプロンプトで初回表示を重くしたのはユーザー名の展開だった。OS の実効ユーザー名はプロセス内で再利用できる。環境変数の `USER` や `LOGNAME` はアカウント名と異なる場合がある。 [計測条件と結果](benchmarks.md#startup-review-0ec497f)
+
+Linux directory completion can start worker threads. The musl release registers the dlmalloc fork handlers once before its first global dlmalloc allocation, as required by version 0.2.14. Moving registration to the first fork after allocation would violate that requirement. Linux でもディレクトリ補完はスレッドを使う。現在のアロケータでは、最初のヒープ確保前に一度だけ fork ハンドラーを登録する。 [Completion workers](../src/complete.rs) · [Fork regression](../tests/allocator_fork.rs) · [dlmalloc 0.2.14](https://docs.rs/crate/dlmalloc/0.2.14/source/src/unix.rs)
+
 ## November 27 · Signals between terminal packets / 分割入力とシグナル
 
 During `read -e`, a caught signal can arrive between UTF-8 continuation bytes, during a bound escape sequence, or before the end of a bracketed paste. Preserve what the current operation already consumed and retry it after running the handler. Match a partial end marker against its last five bytes at most. The PTY regression splits a four-byte scalar at every interior boundary and sends a signal at every boundary before the paste end marker completes. It also checks a split custom binding and a quoted character. The key-sequence wait shares the masked readiness check with read and mapfile. A 10-second key-sequence timer yields to a 0.4-second read deadline.

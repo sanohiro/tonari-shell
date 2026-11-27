@@ -1,5 +1,32 @@
 # Startup and execution / 起動と実行性能
 
+<a id="startup-review-0ec497f"></a>
+
+## November 27 · First prompt and first input / 初回プロンプトと初回入力
+
+Apple M1, macOS 27.2.1, native releases, Tonari `0ec497f`. Each PTY child timestamped immediately before exec. The parent waited for a marker at the end of the prompt, typed `Z`, timed its visible echo and used that character in an assignment to verify that the editor consumed it. The shells ran with `--noprofile --norc -i`, a temporary home, `LC_ALL=C`, `TERM=xterm-256color`, `INPUTRC=/dev/null` and the default history path. Each row reports the median of 61 interleaved warm samples after four warmups.
+
+| First prompt, empty history (ms) | Tonari | Apple Bash 3.2.57 | GNU Bash 5.3.20 |
+|---|---:|---:|---:|
+| Literal prompt | 2.851 | 3.177 | 7.207 |
+| Add username (`\u`) | 3.926 | 3.135 | 7.218 |
+| Host, directory and prompt sign (`\h:\w\$`) | 2.866 | 3.185 | 7.426 |
+| Username, host, directory and prompt sign | 3.938 | 3.153 | 7.449 |
+
+All three shells displayed the OS account when `USER` and `LOGNAME` contained a different name. The first character echoed in 0.028–0.029 ms on Tonari across the four prompts.
+
+Two separate trials used Tonari's own journal. In the first trial the prototype removed the call to `history.prepare_search` before drawing. In the second, the prototype moved it after drawing, waited up to 8 ms for input first and checked for queued input between 64 KiB reads. Each trial ran alongside the unmodified release. Search times run from sending Ctrl-R and the query through the display of the oldest matching entry in 100,000 records (31 samples).
+
+| Workload (ms) | Original | Remove prefetch | Original in second trial | Prefetch after idle |
+|---|---:|---:|---:|---:|
+| First prompt, 4 MiB journal | 3.907 | 3.159 | 3.547 | 2.921 |
+| First character echo, 4 MiB journal | 0.031 | 0.027 | 0.026 | 0.029 |
+| Immediate oldest-entry search | 0.520 | 0.918 | 1.123 | 1.968 |
+
+The first search trial used the escaped-entry fixture. The second used plain entries and explicitly sent the query as soon as the prompt appeared. The 8 ms prototype also increased the 95th percentile for a keystroke sent 8 ms after the prompt from 0.124 to 1.586 ms in this run. Both prototypes were evaluated on a warm filesystem. These trials did not measure cold storage or Linux.
+
+4 MiB の履歴ではどちらの試作も表示が早まった。表示直後の Ctrl-R は両方とも遅くなり、8 ms 待つ試作は先読み開始と重なった打鍵の応答にも影響した。履歴を使う起動では、表示時刻・最初の打鍵・最初の検索結果を個別に測る。空の履歴での比較には `python3 tools/bench.py CURRENT --compare-tonari previous BASELINE --bash /bin/bash --case prompt --runs 61`、履歴検索には `python3 tools/bench_history.py BASELINE TRIAL --escaped --entries 100000 --runs 31` を使える。前者は固定プロンプトと `HISTFILE=/dev/null` を使うため、上の表では各条件の PS1 と履歴を設定した。
+
 <a id="helper-output-audit"></a>
 
 ## November 27 · Measurement helper failures / 計測ツールの失敗時の扱い

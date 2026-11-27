@@ -942,7 +942,7 @@ impl History {
         queries: &[SearchQuery],
         waiting: &dyn Fn() -> bool,
     ) -> Result<Option<String>, ()> {
-        if let Some((bytes, pages)) = self.window.complete(session) {
+        if let Some(bytes) = self.window.complete(session) {
             let result = Self::best_match(queries, |needle, mut skip| {
                 let encoded = encoded_fragment(needle);
                 let matches = journal_matcher(needle, false, &encoded);
@@ -958,8 +958,7 @@ impl History {
                     } else {
                         memchr::memrchr(b'\n', &bytes[..split]).map_or(0, |i| i + 1)
                     };
-                    if (!unicode
-                        || pages[start / window::PAGE..=(end - 1) / window::PAGE].contains(&true))
+                    if (!unicode || self.window.may_contain_unicode(start, end))
                         && let Some(hit) = matches(&bytes[start..end], &mut skip)
                     {
                         return Ok(Some(hit));

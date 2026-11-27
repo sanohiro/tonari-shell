@@ -8,6 +8,13 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == startup-review ]]; then
+  python3 tools/bench_startup.py "$bin/baseline" "$current" --bash "$ref" > "$out/startup.txt"
+  python3 tools/bench_editor_input.py "$bin/baseline" "$current" "$ref" --case Ctrl-R --case Miss --runs 31 > "$out/unicode.txt"
+  python3 tools/bench_history.py "$bin/baseline" "$current" --escaped --entries 100000 --runs 31 > "$out/history.txt"
+  wc -c "$bin/baseline" "$current" > "$out/sizes.txt"
+  exit
+fi
 if [[ $SUITE == audit-hot-paths ]]; then
   if [[ $RUNNER_OS == macOS ]]; then
     if [[ ! -x /opt/homebrew/bin/bash ]]; then brew install bash; fi

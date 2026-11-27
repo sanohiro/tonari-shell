@@ -1,7 +1,8 @@
 // Bounded raw copy of the newest journal pages. External truncation or replacement
 // cannot fault the editor while it is reading the copy.
+use std::cell::Cell;
 use std::fs::{File, Metadata};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Seek, SeekFrom};
 use std::os::unix::fs::MetadataExt;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -23,7 +24,7 @@ impl From<&Metadata> for Stamp {
     }
 }
 
-pub(super) const PAGE: usize = 16 * 1024;
+const PAGE: usize = 16 * 1024;
 const CAPACITY: usize = 4 * 1024 * 1024;
 
 #[derive(Default)]
@@ -31,7 +32,7 @@ pub(super) struct Window {
     stamp: Option<Stamp>,
     start: u64,
     bytes: Vec<u8>,
-    unicode_pages: Vec<bool>,
+    unicode_pages: Vec<Cell<Option<bool>>>,
     interrupted: bool,
 }
 
@@ -55,7 +56,7 @@ impl Window {
         }
         let count = stamp.len.min(CAPACITY as u64);
         self.start = stamp.len - count;
-        if file.seek(SeekFrom::Start(self.start)).is_err() {
+        if self.start != 0 && file.seek(SeekFrom::Start(self.start)).is_err() {
             return;
         }
         self.bytes.reserve_exact(count as usize);
@@ -64,21 +65,23 @@ impl Window {
                 self.interrupted = true;
                 break;
             }
-            let segment = (count - self.bytes.len() as u64).min(256 * 1024);
-            if (&mut file).take(segment).read_to_end(&mut self.bytes).ok() != Some(segment as usize)
-            {
+            let segment = (count as usize - self.bytes.len()).min(256 * 1024);
+            if !matches!(
+                crate::input::read_spare(&file, &mut self.bytes, segment),
+                Ok(1..)
+            ) {
                 return;
             }
         }
         if !self.bytes.is_empty() {
             self.unicode_pages.clear();
             self.unicode_pages
-                .extend(self.bytes.chunks(PAGE).map(|page| !page.is_ascii()));
+                .resize(self.bytes.len().div_ceil(PAGE), Cell::new(None));
             self.stamp = Some(stamp);
         }
     }
 
-    pub(super) fn complete(&self, session: &crate::Session) -> Option<(&[u8], &[bool])> {
+    pub(super) fn complete(&self, session: &crate::Session) -> Option<&[u8]> {
         let stamp = self.stamp?;
         if self.start != 0 || self.bytes.len() as u64 != stamp.len {
             return None;
@@ -88,7 +91,19 @@ impl Window {
             return None;
         }
         let end = memchr::memrchr(b'\n', &self.bytes).map_or(0, |i| i + 1);
-        Some((&self.bytes[..end], &self.unicode_pages))
+        Some(&self.bytes[..end])
+    }
+
+    pub(super) fn may_contain_unicode(&self, start: usize, end: usize) -> bool {
+        (start / PAGE..=(end - 1) / PAGE).any(|page| {
+            let cached = &self.unicode_pages[page];
+            cached.get().unwrap_or_else(|| {
+                let offset = page * PAGE;
+                let unicode = !self.bytes[offset..(offset + PAGE).min(self.bytes.len())].is_ascii();
+                cached.set(Some(unicode));
+                unicode
+            })
+        })
     }
 
     pub(super) fn matching(&self, meta: &Metadata) -> Option<&Self> {
@@ -126,11 +141,8 @@ impl Window {
                 }
                 self.bytes.extend_from_slice(entry);
                 self.unicode_pages.truncate(first_page);
-                self.unicode_pages.extend(
-                    self.bytes[first_page * PAGE..]
-                        .chunks(PAGE)
-                        .map(|p| !p.is_ascii()),
-                );
+                self.unicode_pages
+                    .resize(needed.div_ceil(PAGE), Cell::new(None));
                 self.stamp = Some(new);
             }
         }

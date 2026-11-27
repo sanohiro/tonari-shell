@@ -15,7 +15,6 @@ pub(crate) mod fd;
 pub(crate) mod hash;
 mod named_fd;
 pub(crate) mod process_substitution;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 mod here_input;
 mod lookup;
@@ -28,7 +27,6 @@ use std::ffi::{CStr, CString};
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
-use std::process::{Command, Stdio};
 use std::rc::Rc;
 
 use crate::expansion::Expansion;
@@ -325,17 +323,18 @@ fn start(
     {
         return Ok(Stage::Status(status));
     }
-    // Pipeline lookup happens in a stage's environment. A private resolved
-    // path permits spawn file actions without populating the parent's hash.
+    // Resolve the stage privately when pipeline or disabled-hash lookup has
+    // not populated the parent's table. Leave PATH assignments to the child.
     if builtin.is_none()
-        && ((!launch.background && launch.group.is_none() && (input.is_some() || output.is_some()))
+        && ((!launch.background
+            && launch.group.is_none()
+            && (input.is_some() || output.is_some() || cmd.redirects.is_empty()))
             || (launch.background
                 && launch.group.is_some()
                 && input.is_none()
                 && output.is_none()
                 && cmd.redirects.is_empty()))
         && cmd.cacheable()
-        && !cmd.default_path
         && !cmd.words[0].contains('/')
         && cmd.cached_path(session, &cmd.words[0]).is_none()
         && let Ok(Some(entry)) = hash::search(&cmd.words[0], session)
@@ -346,9 +345,6 @@ fn start(
         .words
         .first()
         .is_some_and(|name| cmd.cached_path(session, name).is_some());
-    let custom_search = !cached
-        && !cmd.words.first().is_some_and(|s| s.contains('/'))
-        && (cmd.default_path || session.overrides_search_path(&cmd.assignments));
     let merged_pipe = output.as_ref().filter(|_| {
         matches!(cmd.redirects.as_slice(), [r] if r.fd == 2 && r.target == Target::Duplicate && r.word == "1")
     });
@@ -450,53 +446,6 @@ fn start(
             Err(e) => return spawn_failure(&cmd.words[0], e),
         }
     }
-    if builtin.is_none()
-        && !resolved
-        && crate::traps::std_spawn_inherits_pipe(&session.traps)
-        && (cmd.redirects.is_empty() || merged_pipe.is_some())
-        && !custom_search
-        && launch.group.is_none()
-        && !launch.background
-    {
-        // Let the standard library select the platform's process-spawn path.
-        let mut external = Command::new(&cmd.words[0]);
-        external.arg0(&cmd.words[0]);
-        external.args(&cmd.words[1..]);
-        for (key, val) in session.environment_changes(&cmd.assignments) {
-            if let Some(val) = val {
-                external.env(key, val.as_ref());
-            } else {
-                external.env_remove(key);
-            }
-        }
-        if let Some(writer) = merged_pipe {
-            // Retain the original pipe ends until spawn succeeds. On failure
-            // the ordinary child must send its diagnostic through the same pipe.
-            let mut spawn = || -> io::Result<_> {
-                if let Some(reader) = &input {
-                    external.stdin(Stdio::from(reader.try_clone()?));
-                }
-                external.stdout(Stdio::from(writer.try_clone()?));
-                external.stderr(Stdio::from(writer.try_clone()?));
-                external.spawn()
-            };
-            if let Ok(child) = spawn() {
-                return Ok(Stage::Child(child.id() as libc::pid_t));
-            }
-        } else {
-            if let Some(input) = input {
-                external.stdin(Stdio::from(input));
-            }
-            if let Some(output) = output {
-                external.stdout(Stdio::from(output));
-            }
-            return match external.spawn() {
-                Ok(child) => Ok(Stage::Child(child.id() as libc::pid_t)),
-                Err(e) => spawn_failure(&cmd.words[0], e),
-            };
-        }
-    }
-
     fork_stage(
         cmd,
         builtin,

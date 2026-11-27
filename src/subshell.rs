@@ -35,27 +35,9 @@ fn read_regular_file(file: &std::fs::File, size: u64, output: &mut Vec<u8>) -> i
     output.try_reserve_exact(size.min(MAX_INITIAL_SIZE as u64) as usize + 1)?;
     loop {
         output.try_reserve(1)?;
-        let tail = output.spare_capacity_mut();
-        // read initializes only the returned bytes in this writable allocation.
-        let n = unsafe {
-            libc::read(
-                file.as_raw_fd(),
-                tail.as_mut_ptr().cast(),
-                tail.len().min(MAX_INITIAL_SIZE + 1),
-            )
-        };
-        if n == 0 {
+        if crate::input::read_spare(file, output, MAX_INITIAL_SIZE + 1)? == 0 {
             return Ok(());
         }
-        if n < 0 {
-            let error = io::Error::last_os_error();
-            if error.kind() == io::ErrorKind::Interrupted {
-                continue;
-            }
-            return Err(error);
-        }
-        // The kernel initialized this prefix of the spare capacity.
-        unsafe { output.set_len(output.len() + n as usize) };
     }
 }
 

@@ -200,9 +200,6 @@ mod entry_pipe {
             }
         }
     }
-    pub(super) fn inherited_ignore() -> bool {
-        IGNORED.load(Relaxed)
-    }
 }
 
 pub fn enter_process() {
@@ -222,18 +219,6 @@ pub(crate) fn reset_caught_signals(signals: &[i32]) {
                 libc::signal(sig, libc::SIG_DFL);
             }
         }
-    }
-}
-
-pub fn std_spawn_inherits_pipe(traps: &Traps) -> bool {
-    #[cfg(not(tonari_inherit_sigpipe))]
-    {
-        !entry_pipe::inherited_ignore() && !traps.ignores(libc::SIGPIPE)
-    }
-    #[cfg(tonari_inherit_sigpipe)]
-    {
-        let _ = traps;
-        true
     }
 }
 

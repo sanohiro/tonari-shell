@@ -1,9 +1,9 @@
 use super::{Entries, History, InitialJournal, Session};
 use crate::Flow;
+use crate::execute::fd::create_temp_file;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Seek, SeekFrom, Write};
-use std::os::fd::{AsRawFd, FromRawFd};
-use std::os::unix::ffi::OsStringExt;
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
@@ -221,23 +221,6 @@ fn timestamped_suffix(
         end = start;
     }
     Ok(0)
-}
-
-fn create_temp_file(path: PathBuf) -> io::Result<(File, PathBuf)> {
-    let mut bytes = path.into_os_string().into_vec();
-    if bytes.contains(&0) {
-        return Err(io::Error::from(io::ErrorKind::InvalidInput));
-    }
-    bytes.push(0);
-    let fd = unsafe { libc::mkstemp(bytes.as_mut_ptr().cast()) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    bytes.pop();
-    Ok((
-        unsafe { File::from_raw_fd(fd) },
-        std::ffi::OsString::from_vec(bytes).into(),
-    ))
 }
 
 pub(super) fn limit_plain_file(path: &Path, limit: usize, timed: bool) -> io::Result<()> {

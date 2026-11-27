@@ -2,7 +2,26 @@ use std::cell::RefCell;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, RawFd};
+use std::os::unix::ffi::OsStringExt;
+use std::path::PathBuf;
 use std::rc::{Rc, Weak};
+
+pub(crate) fn create_temp_file(path: PathBuf) -> io::Result<(File, PathBuf)> {
+    let mut bytes = path.into_os_string().into_vec();
+    if bytes.contains(&0) {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
+    bytes.push(0);
+    let fd = unsafe { libc::mkstemp(bytes.as_mut_ptr().cast()) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    bytes.pop();
+    Ok((
+        unsafe { File::from_raw_fd(fd) },
+        std::ffi::OsString::from_vec(bytes).into(),
+    ))
+}
 
 pub(crate) const FIRST_NONSTANDARD: RawFd = 3;
 pub(crate) const SHELL_FD_MIN: RawFd = 10;
