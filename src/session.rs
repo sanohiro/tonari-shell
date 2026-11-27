@@ -283,9 +283,19 @@ impl From<io::Error> for DirectoryError {
 }
 
 impl Session {
-    pub(crate) fn after_fork(&mut self) {
-        self.traps.after_fork(self.errtrace, self.functrace);
-        self.substitutions.after_fork();
+    /// Fork a copy that can run shell code. Reset inherited traps and waitable
+    /// process substitutions only in the child. The caller configures job control
+    /// and descriptors before running the command and exiting the child.
+    pub(crate) fn fork_shell(&mut self) -> io::Result<libc::pid_t> {
+        match unsafe { libc::fork() } {
+            -1 => Err(io::Error::last_os_error()),
+            0 => {
+                self.traps.after_fork(self.errtrace, self.functrace);
+                self.substitutions.after_fork();
+                Ok(0)
+            }
+            pid => Ok(pid),
+        }
     }
 
     fn convert_case(&self, mut text: String, letter_case: Option<LetterCase>) -> String {

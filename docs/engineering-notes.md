@@ -1,5 +1,9 @@
 # Engineering notes / 開発知見
 
+## November 27 · Shell words and source grammar / 語と構文の境界
+
+The lexer finishes one shell word before the surrounding grammar interprets operators or here-document boundaries. Numeric and named descriptor syntax shares one recognition point. Quoted regular expressions, shell patterns and scalar text each retain their own escaping rules when expanding into a caller-owned buffer. Run `cargo test --locked` and `tests/compat/source_review.py` to exercise those boundaries. 関数の先読みと構文解析は同じ関数ヘッダーを判定する。改行位置をスレッドローカルに再利用する案は、複合関数の差が小さく、内容が変化する eval に不利だったため採用しなかった。 [Measurements / 計測](benchmarks.md#word-grammar-readers)
+
 ## November 27 · History word boundaries and editor input / 履歴の語境界と入力
 
 Readline groups an adjacent decimal descriptor and at most one `-` with `<&` or `>&`. In `2>&31-suffix`, the final history word is `suffix`. The history designator and Alt-dot now use the same boundary. `test_history_descriptor_word_boundaries` checks word indexes and `test_last_arg_lexical_boundaries` captures the editable buffer in a PTY. 行末への入力と検索語への追記では、デコードした文字列を直接バッファへ書く。通常入力では改行の後を子プロセスが読む場合があるため、端末からの先読み範囲は従来どおり制限する。 [Measurements / 計測](benchmarks.md#history-editor-input)

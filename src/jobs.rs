@@ -463,11 +463,10 @@ impl Jobs {
         // A caught disposition becomes default on exec. Preserve a signal
         // explicitly ignored by our parent across child process creation.
         extern "C" fn stay_running(_: i32) {}
-        unsafe {
-            let mut previous = std::mem::MaybeUninit::uninit();
-            if libc::sigaction(libc::SIGTSTP, std::ptr::null(), previous.as_mut_ptr()) == 0
-                && previous.assume_init().sa_sigaction != libc::SIG_IGN
-            {
+        if crate::traps::disposition(libc::SIGTSTP)
+            .is_ok_and(|old| old.sa_sigaction != libc::SIG_IGN)
+        {
+            unsafe {
                 libc::signal(libc::SIGTSTP, stay_running as *const () as usize);
             }
         }

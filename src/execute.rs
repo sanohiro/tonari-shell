@@ -274,12 +274,8 @@ fn start_raw(
     if !launch.background {
         session.jobs.refresh_snapshot();
     }
-    let pid = unsafe { libc::fork() };
-    if pid < 0 {
-        return Err(io::Error::last_os_error());
-    }
+    let pid = session.fork_shell()?;
     if pid == 0 {
-        session.after_fork();
         launch.pipeline_child(&mut session.traps);
         enter_stage(session, raw.compound.as_deref(), launch.background);
         coprocess::after_fork(session);
@@ -540,15 +536,11 @@ fn fork_stage(
     if builtin.is_some() && !launch.background {
         session.jobs.refresh_snapshot();
     }
-    let pid = unsafe { libc::fork() };
-    if pid < 0 {
-        return Err(io::Error::last_os_error());
-    }
+    let pid = session.fork_shell()?;
     if pid == 0 {
         // External argv and environment are prepared before fork. A shell builtin
         // runs in a child copy of the single-threaded interpreter and may reenter it.
         // Restore signals caught by the interactive shell before blocking on a file.
-        session.after_fork();
         launch.pipeline_child(&mut session.traps);
         enter_stage(session, cmd.compound.as_deref(), launch.background);
         if cmd.missing_hook && !launch.background {

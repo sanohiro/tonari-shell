@@ -145,6 +145,35 @@ fn action(handler: usize) -> libc::sigaction {
     a
 }
 
+pub(crate) fn disposition(sig: i32) -> io::Result<libc::sigaction> {
+    // libc may write only the kernel-sized prefix of a signal mask. Start
+    // with initialized storage because traps save and restore the whole action.
+    let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
+    if unsafe { libc::sigaction(sig, std::ptr::null(), &mut old) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(old)
+}
+
+fn set_disposition(sig: i32, new: &libc::sigaction) -> io::Result<()> {
+    if unsafe { libc::sigaction(sig, new, std::ptr::null_mut()) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+pub(crate) fn listen_for_interrupts() -> io::Result<()> {
+    // Interrupt terminal reads. Foreground executables receive the default
+    // disposition on exec, unless the shell originally inherited SIG_IGN.
+    let handler = action(crate::interrupt as *const () as usize);
+    for sig in [libc::SIGINT, libc::SIGQUIT, libc::SIGTERM] {
+        if disposition(sig)?.sa_sigaction != libc::SIG_IGN {
+            set_disposition(sig, &handler)?;
+        }
+    }
+    Ok(())
+}
+
 // Stable Rust overrides SIGPIPE before main. Save the disposition inherited at
 // exec for developer builds. Distribution builds ask rustc to inherit it.
 #[cfg(not(tonari_inherit_sigpipe))]
@@ -157,11 +186,8 @@ mod entry_pipe {
     #[cfg_attr(target_os = "macos", unsafe(link_section = "__DATA,__mod_init_func"))]
     static SAVE: extern "C" fn() = {
         extern "C" fn save() {
-            let mut old = std::mem::MaybeUninit::uninit();
-            unsafe {
-                if libc::sigaction(libc::SIGPIPE, std::ptr::null(), old.as_mut_ptr()) == 0 {
-                    IGNORED.store(old.assume_init().sa_sigaction == libc::SIG_IGN, Relaxed);
-                }
+            if let Ok(old) = super::disposition(libc::SIGPIPE) {
+                IGNORED.store(old.sa_sigaction == libc::SIG_IGN, Relaxed);
             }
         }
         save
@@ -189,14 +215,10 @@ pub fn enter_process() {
 
 pub(crate) fn reset_caught_signals(signals: &[i32]) {
     for &sig in signals {
-        let mut old = std::mem::MaybeUninit::uninit();
-        unsafe {
-            if libc::sigaction(sig, std::ptr::null(), old.as_mut_ptr()) == 0
-                && !matches!(
-                    old.assume_init().sa_sigaction,
-                    libc::SIG_DFL | libc::SIG_IGN
-                )
-            {
+        if disposition(sig)
+            .is_ok_and(|old| !matches!(old.sa_sigaction, libc::SIG_DFL | libc::SIG_IGN))
+        {
+            unsafe {
                 libc::signal(sig, libc::SIG_DFL);
             }
         }
@@ -247,21 +269,8 @@ impl Traps {
     pub fn init_hangup(&mut self) -> io::Result<()> {
         self.interactive_origin = true;
         self.interactive_handlers = true;
-        let mut old = action(libc::SIG_DFL);
-        if unsafe { libc::sigaction(libc::SIGHUP, std::ptr::null(), &mut old) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        if old.sa_sigaction == libc::SIG_DFL {
-            if unsafe {
-                libc::sigaction(
-                    libc::SIGHUP,
-                    &action(terminate as *const () as usize),
-                    std::ptr::null_mut(),
-                )
-            } < 0
-            {
-                return Err(io::Error::last_os_error());
-            }
+        if disposition(libc::SIGHUP)?.sa_sigaction == libc::SIG_DFL {
+            set_disposition(libc::SIGHUP, &action(terminate as *const () as usize))?;
             self.interactive_hup = true;
         }
         Ok(())
@@ -292,9 +301,7 @@ impl Traps {
         if !enable {
             for (sig, old) in std::mem::take(&mut self.implicit) {
                 if !self.entries.contains_key(&sig) {
-                    unsafe {
-                        libc::sigaction(sig, &old, std::ptr::null_mut());
-                    }
+                    let _ = set_disposition(sig, &old);
                 }
             }
         } else if self.implicit.is_empty() {
@@ -307,25 +314,16 @@ impl Traps {
                 libc::SIGALRM,
                 libc::SIGPIPE,
             ] {
-                let mut old = action(libc::SIG_DFL);
-                if let Some(entry) = self.entries.get(&sig) {
-                    old = entry.original;
-                } else if unsafe { libc::sigaction(sig, std::ptr::null(), &mut old) } < 0 {
-                    return Err(io::Error::last_os_error());
-                }
+                let entry = self.entries.get(&sig);
+                let old = match entry {
+                    Some(entry) => entry.original,
+                    None => disposition(sig)?,
+                };
                 if old.sa_sigaction != libc::SIG_DFL {
                     continue;
                 }
-                if !self.entries.contains_key(&sig)
-                    && unsafe {
-                        libc::sigaction(
-                            sig,
-                            &action(terminate as *const () as usize),
-                            std::ptr::null_mut(),
-                        )
-                    } < 0
-                {
-                    return Err(io::Error::last_os_error());
+                if entry.is_none() {
+                    set_disposition(sig, &action(terminate as *const () as usize))?;
                 }
                 self.implicit.push((sig, old));
             }
@@ -346,15 +344,13 @@ impl Traps {
             self.watch_exit(command != "-" && !command.is_empty())?;
         }
         let real = is_os_signal(sig) && sig != libc::SIGSTOP && sig != libc::SIGKILL;
-        let mut original = action(libc::SIG_DFL);
+        let mut original;
         if let Some(old) = self.entries.get(&sig) {
             original = old.original;
         } else if let Some(old) = self.implicit_action(sig) {
             original = *old;
         } else if real {
-            if unsafe { libc::sigaction(sig, std::ptr::null(), &mut original) } < 0 {
-                return Err(io::Error::last_os_error());
-            }
+            original = disposition(sig)?;
             if original.sa_sigaction == libc::SIG_IGN {
                 if !interactive
                     && !self.interactive_origin
@@ -370,6 +366,8 @@ impl Traps {
                     action(libc::SIG_DFL)
                 };
             }
+        } else {
+            original = action(libc::SIG_DFL);
         }
         if real {
             let new = match command {
@@ -383,9 +381,7 @@ impl Traps {
                 "" => action(libc::SIG_IGN),
                 _ => action(record as *const () as usize),
             };
-            if unsafe { libc::sigaction(sig, &new, std::ptr::null_mut()) } < 0 {
-                return Err(io::Error::last_os_error());
-            }
+            set_disposition(sig, &new)?;
         }
         if sig == libc::SIGCHLD {
             let watch = command != "-" && !command.is_empty();
@@ -563,11 +559,7 @@ impl Traps {
                 let ignored = if let Some(old) = self.implicit_action(sig) {
                     old.sa_sigaction == libc::SIG_IGN
                 } else {
-                    let mut old = std::mem::MaybeUninit::uninit();
-                    unsafe {
-                        libc::sigaction(sig, std::ptr::null(), old.as_mut_ptr()) == 0
-                            && old.assume_init().sa_sigaction == libc::SIG_IGN
-                    }
+                    disposition(sig).is_ok_and(|old| old.sa_sigaction == libc::SIG_IGN)
                 };
                 if !action_only && (defaults || ignored) {
                     writeln!(
