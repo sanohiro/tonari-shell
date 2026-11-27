@@ -145,16 +145,43 @@ impl WordList {
         prefix: &'a str,
         ifs: &'a str,
     ) -> impl Iterator<Item = &'a str> {
-        let default_ifs = ifs == crate::word::DEFAULT_IFS;
-        self.source
-            .split(move |c| {
-                if default_ifs {
-                    matches!(c, ' ' | '\t' | '\n')
-                } else {
-                    ifs.contains(c)
-                }
-            })
-            .filter(move |word| !word.is_empty() && word.starts_with(prefix))
+        let default = ifs == crate::word::DEFAULT_IFS;
+        let mut ordinary = default.then(|| crate::word::default_fields(&self.source));
+        let mut custom = self
+            .source
+            .split(move |c| ifs.contains(c))
+            .filter(|w| !w.is_empty());
+        std::iter::from_fn(move || match &mut ordinary {
+            Some(words) => words.next(),
+            None => custom.next(),
+        })
+        .filter(move |word| word.starts_with(prefix))
+    }
+
+    // Search selective prefixes directly in declaration order. A hit is a
+    // candidate only at a field boundary. A separator-free needle cannot
+    // overlap a valid match in the following field.
+    pub(crate) fn ordered_matches<'a>(
+        &'a self,
+        prefix: &'a str,
+        ifs: &'a str,
+    ) -> impl Iterator<Item = &'a str> {
+        let separator = |b| matches!(b, b' ' | b'\t' | b'\n');
+        let mut hits = (ifs == crate::word::DEFAULT_IFS
+            && prefix.len() >= 4
+            && self.source.len() >= 8192
+            && !prefix.bytes().any(separator))
+        .then(|| memchr::memmem::find_iter(self.source.as_bytes(), prefix.as_bytes()));
+        let mut fields = self.literal_matches(prefix, ifs);
+        std::iter::from_fn(move || {
+            let Some(hits) = &mut hits else {
+                return fields.next();
+            };
+            let start = hits.find(|&i| i == 0 || separator(self.source.as_bytes()[i - 1]))?;
+            let tail = &self.source[start + prefix.len()..];
+            let len = memchr::memchr3(b' ', b'\t', b'\n', tail.as_bytes()).unwrap_or(tail.len());
+            Some(&self.source[start..start + prefix.len() + len])
+        })
     }
 
     // Delay indexing until a large immutable list is reused. compgen still
@@ -168,12 +195,24 @@ impl WordList {
         }
         let index = self.offsets.get_or_init(|| {
             let base = self.source.as_ptr() as usize;
-            let mut words: Vec<_> = self
-                .literal_matches("", ifs)
-                .map(|w| (w.as_ptr() as usize - base, w.len()))
-                .collect();
-            words.sort_unstable_by_key(|&r| self.word(r));
-            words.dedup_by_key(|&mut r| self.word(r));
+            let mut words = Vec::new();
+            let mut sorted = true;
+            let mut previous = "";
+            for word in self.literal_matches("", ifs) {
+                if sorted {
+                    match previous.cmp(word) {
+                        std::cmp::Ordering::Equal => continue,
+                        std::cmp::Ordering::Greater => sorted = false,
+                        std::cmp::Ordering::Less => {}
+                    }
+                    previous = word;
+                }
+                words.push((word.as_ptr() as usize - base, word.len()));
+            }
+            if !sorted {
+                words.sort_unstable_by_key(|&r| self.word(r));
+                words.dedup_by_key(|&mut r| self.word(r));
+            }
             words
         });
         let start = index.partition_point(|&r| self.word(r) < prefix);
@@ -392,11 +431,10 @@ impl Spec {
         .iter()
         .any(|o| self.options.contains(*o));
         let source = match (self.actions.as_slice(), self.words.as_ref()) {
-            ([], Some(list))
-                if list.literal && !file_options && !self.options.contains(CompOption::Nosort) =>
-            {
-                complete::Source::LiteralWords(Rc::clone(list))
-            }
+            ([], Some(list)) if list.literal && !file_options => complete::Source::LiteralWords {
+                source: Rc::clone(list),
+                keep_order: self.options.contains(CompOption::Nosort),
+            },
             ([CompAction::File], None) => complete::Source::Files,
             ([CompAction::Directory], None) => complete::Source::Directories,
             ([CompAction::Command], None) if !file_options => complete::Source::Commands,
@@ -1072,6 +1110,21 @@ mod tests {
         let mut out = Vec::new();
         let status = apply(request, builtin, session, 0, &mut out).unwrap();
         (status, String::from_utf8(out).unwrap())
+    }
+
+    #[test]
+    fn ordered_prefixes_only_match_complete_fields() {
+        let source = "pre雪火山猫 target-targeted\r\x0b 雪火山猫A\t雪火山猫B\n".repeat(256);
+        let list = WordList::new(source);
+        for ifs in [crate::word::DEFAULT_IFS, "猫", ""] {
+            for prefix in ["", "target", "arget", "雪火山猫", "target-", "猫 ", "猫A\t"] {
+                let ordered: Vec<_> = list.ordered_matches(prefix, ifs).collect();
+                assert_eq!(
+                    ordered,
+                    list.literal_matches(prefix, ifs).collect::<Vec<_>>()
+                );
+            }
+        }
     }
 
     #[test]

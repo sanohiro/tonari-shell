@@ -88,7 +88,8 @@ def reused_words(shell, home, bindir, rc, metrics):
             os.write(fd, line)
             read_until(fd, line)
             marker = f"@{i:02d}X".encode()
-            elapsed = timed_keys(fd, b"\t" + marker, marker)
+            elapsed = timed_keys(fd, b"\t", b"-flag ")
+            os.write(fd, marker)
             os.write(fd, b"\x0c")
             read_until(fd, PROMPT + line + b"-flag " + marker)
             os.write(fd, b"\r")
@@ -158,8 +159,11 @@ def main():
     mode.add_argument("--callback", action="store_true", help="queue a key behind a callback that waits 100 ms")
     mode.add_argument("--reuse-words", action="store_true", help="repeated queries to one registered literal list")
     mode.add_argument("--listing", action="store_true", help="measure the complete candidate listing")
+    parser.add_argument("--nosort", action="store_true", help="preserve declaration order in the literal list fixture")
     parser.add_argument("--require-target", action="store_true", help="check the 2/3 median target for cases shared with Bash")
     args = parser.parse_args()
+    if args.nosort and not (args.word_list or args.reuse_words):
+        parser.error("--nosort requires --word-list or --reuse-words")
     if args.require_target and not args.bash:
         parser.error("--require-target requires --bash")
     if args.runs < 1:
@@ -220,10 +224,16 @@ def main():
                           "complete -F _slow demo\n"
                           "complete -o typeahead -F _slow declared 2>/dev/null || complete -F _slow declared\n")
         elif args.word_list or args.reuse_words:
-            words = " ".join(f"option-{i:05d}-flag" for i in range(10_000))
+            order = " -o nosort" if args.nosort else ""
+            order_indices = range(10_000)
+            if args.nosort:
+                mixed = [(i * 73) % 10_000 for i in order_indices]
+                order_indices = mixed + mixed[::128]
+            words = " ".join(f"option-{i:05d}-flag" for i in order_indices)
             rc = home / "rc"
             rc.write_text(f"PS1='{PROMPT.decode()}'\nHISTSIZE=0\nHISTFILE=/dev/null\nchoices='{words}'\n"
-                          'fixed() { :; }\ncomplete -W "$choices" fixed\ncomplete -W \'$choices\' dynamic\n')
+                          'fixed() { :; }\n'
+                          f'complete{order} -W "$choices" fixed\ncomplete -W \'$choices\' dynamic\n')
         elif args.listing:
             expected = {p.name.encode() for p in bindir.iterdir()}
             few = home / "few"

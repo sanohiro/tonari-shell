@@ -1,5 +1,33 @@
 # Startup and execution / 起動と実行性能
 
+<a id="picker-static-audit"></a>
+
+## 2026-11-27 · Ordered completion and deep history / 順序付き補完と履歴
+
+`tools/bench_completion.py CURRENT PREVIOUS --bash BASH --nosort --reuse-words --runs 31`. The PTY waits for the completed suffix and verifies the entire input after a redraw. The list contains 10,000 terms in mixed declaration order and 79 duplicates. Each shell handles 12 different prefixes per session. Median/p95 ms.
+
+| Host and Tab | Previous | Current | Bash |
+|---|---:|---:|---:|
+| M1, first | 0.181/0.215 | 0.044/0.061 | 27.437/28.202 |
+| M1, second | 0.169/0.187 | 0.038/0.056 | 27.020/27.483 |
+| M1, warm | 0.170/0.191 | 0.030/0.045 | 27.054/27.763 |
+| Linux, first | 0.207/0.234 | 0.055/0.063 | 11.964/12.288 |
+| Linux, second | 0.198/0.213 | 0.041/0.057 | 11.127/11.453 |
+| Linux, warm | 0.193/0.217 | 0.039/0.061 | 11.217/11.528 |
+
+`tools/bench_history_fields.py CURRENT PREVIOUS --deep-page --entries 100000`. After 128 distinct matches, time the Down key until the next distinct command appears past 100,000 duplicate journal rows. Accept the selection and verify the draft. M1 used 21 samples and Linux used 15. This picker is specific to Tonari.
+
+| Host | Previous | Current |
+|---|---:|---:|
+| M1 | 38.542/39.220 | 13.353/14.146 |
+| Linux | 95.395/95.670 | 10.157/10.279 |
+
+Release sizes were 1,765,440 → 1,765,456 bytes on M1 and 2,438,712 → 2,446,872 bytes for Linux static PIE. The sorted-list control uses `--reuse-words` with the default registration order. 初回・2回目・ウォーム時を別々に測定し、参照する索引を作る費用も含めた。 [Native Linux controls](https://github.com/sanohiro/tonari-shell/actions/runs/45952891766)
+
+On M1, comparing all four changes to `5670567`, `-c :` took 2.780 → 2.756 ms (Bash 7.560). From exec until the first prompt the medians were 3.168 → 3.134 ms (Bash 8.196). A repeat with 81 interleaved samples from an already-running shell measured ordinary external commands at 20.038 → 20.326 ms (Bash 33.934), commands with an environment override at 21.114 → 20.985 ms (Bash 33.599), and pipelines at 24.836 → 25.020 ms (Bash 39.412).
+
+補完はキー送信から補完文字が端末に現れるまで、履歴は次の異なる候補が表示されるまでを測った。通常の外部起動やパイプは、Mac では変更前からの短縮が一貫して見られなかった。Linux でも OS が時間の大半を占めるケースがある。たとえば同じランナーで、通常の外部起動は Tonari 4.682 ms・直接 C 4.735 ms・Bash 6.796 ms、パイプは順に 6.829・6.692・9.192 ms だった。 [Linux control workloads](https://github.com/sanohiro/tonari-shell/actions/runs/45951891199)
+
 <a id="bounded-parameter-globs"></a>
 
 ## 2026-11-27 · Fixed-width substitution and trim / 変数置換と切り詰め
@@ -19,6 +47,21 @@ The native runner includes the three new cases in `probe`. The existing single b
 The first bounded implementation on Linux x86-64 took 0.477 ms for bracket replacement (Bash 0.447 ms) and 0.229 ms for question marks (Bash 0.319 ms). Following that result, the ASCII global replacement scans byte slices directly, class matching skips the star backtracking loop when width is fixed, and the replacement template is inspected once per expansion. [First Linux run](https://github.com/sanohiro/tonari-shell/actions/runs/45950300521)
 
 On Linux the streaming bracket replacement reached 0.284 ms (previous 80.756, Bash 0.460). The question-mark case still took 0.228 ms versus 0.325 for Bash, 11 µs above the target. A further pass tests the literal span between leading/trailing wildcards and directly consumes single-character replacements. The UTF-8 throughput control replaces 3,072 scalars 16 times. [Streaming Linux run](https://github.com/sanohiro/tonari-shell/actions/runs/45950987058)
+
+Final native median/p95 ms for the width, streaming and single-scalar changes together. Native M1 used 31 samples and native Linux x86-64 used 41. The single-scalar case uses UTF-8 and checks the complete output length after replacing 49,152 scalar values.
+
+| Host and workload | Previous | Current | Bash |
+|---|---:|---:|---:|
+| M1 substitute-fixed-width | 56.150/57.281 | 0.530/0.623 | 0.913/1.057 |
+| M1 substitute-fixed-class | 25.279/26.111 | 0.605/0.749 | 1.091/1.398 |
+| M1 trim-fixed-width | 19.512/20.444 | 0.619/0.784 | 7.309/7.779 |
+| M1 substitute-single-scalar | 1.121/1.278 | 0.537/0.701 | 957.374/997.943 |
+| Linux substitute-fixed-width | 47.837/48.199 | 0.235/0.270 | 0.341/0.363 |
+| Linux substitute-fixed-class | 81.461/81.800 | 0.294/0.331 | 0.466/0.497 |
+| Linux trim-fixed-width | 17.297/17.552 | 0.204/0.243 | 3.204/3.250 |
+| Linux substitute-single-scalar | 2.167/2.233 | 0.184/0.233 | 1134.761/1163.237 |
+
+[Final Linux parameter expansion run](https://github.com/sanohiro/tonari-shell/actions/runs/45951891199)
 
 <a id="sparse-environment"></a>
 

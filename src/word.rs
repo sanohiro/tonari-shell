@@ -572,15 +572,7 @@ impl Word {
                     && !(glob.extglob && text.contains('('))
             })
         {
-            let mut start = 0;
-            for end in memchr::memchr3_iter(b' ', b'\t', b'\n', text.as_bytes())
-                .chain(std::iter::once(text.len()))
-            {
-                if start < end {
-                    words.push(text[start..end].to_owned());
-                }
-                start = end + 1;
-            }
+            words.extend(default_fields(text).map(str::to_owned));
             return Ok(());
         }
         let mut fields = Fields {
@@ -885,6 +877,17 @@ fn ifs_separator(lookup: &dyn Fn(&str) -> Option<String>) -> std::borrow::Cow<'s
     };
     ifs.truncate(ifs.chars().next().map_or(0, char::len_utf8));
     ifs.into()
+}
+
+pub(crate) fn default_fields(text: &str) -> impl Iterator<Item = &str> {
+    let mut start = 0;
+    memchr::memchr3_iter(b' ', b'\t', b'\n', text.as_bytes())
+        .chain(std::iter::once(text.len()))
+        .filter_map(move |end| {
+            let field = &text[start..end];
+            start = end + 1;
+            (!field.is_empty()).then_some(field)
+        })
 }
 
 // Visit separator spans in the original UTF-8 text. A single delimiter can
