@@ -1,5 +1,22 @@
 # Engineering notes / 開発知見
 
+## November 27 · Full-source performance review / 全ソースの速度調査
+
+Scanned all 105 tracked Rust files, including the locale generator and allocator test. The syntax-tree walk associated candidate calls with their containing function and loop or closure. The first pass flagged 1,800 sites for allocation, copying, search and OS calls. The review also parsed all 64 Python drivers, syntax-checked 12 shell scripts/fixtures and five C helpers, and inspected the CI definitions, Dockerfile and compiler timing patch. Build and test work does not run in the installed shell. A separate ASCII mask compiler for bracket tokens changed an M1 median from 0.546 to 0.506 ms while p95 went from 0.633 to 0.680 ms. The shipped code reuses the existing range and locale rules.
+
+| Production path | Finding and decision |
+|---|---|
+| Process execution and session state | Pack external arguments, index sparse environment names and reuse the decimal assignment buffer. Compare short and wide commands, masking of inherited variables and command-local overrides. |
+| Expansion, parsing and evaluation | Bound endpoints for fixed-width patterns. Variable-width globs and extended groups still need their matcher. Literal case patterns are already compiled, and dynamic case words can expand differently on successive iterations. |
+| Completion and editing | Match ordered literal lists without generating and sorting all candidates on a prefix-only Tab. Validate the live IFS, word boundaries and actual displayed edit. Explicit candidate lists keep first-occurrence order. |
+| History | A deep page used to check each matching input line against all earlier hits. After 32 distinct hits the picker shares strings between the ordered results and a hash set. The first pages keep the linear check. Rewinding discards both the previous matches and their index. |
+| Directory traversal and I/O | Default file completion uses directory entry types where available. Symlinks and unknown types need metadata. Sorting by file attributes already caches its keys. Child file actions and pipe ends have stage-specific ownership. |
+| Startup, jobs, traps and remaining builtins | Preserve lazy initialization, individual child statuses and signal masks. Distinguish searches in bounded option tables and allocation in error/reporting paths from repeated work during normal command execution. |
+
+宣言順を保つ補完では、通常の Tab は入力中の接頭辞に一致する単語だけを参照する。カスタム IFS と候補一覧の順序も検証した。履歴は先頭32件まで従来どおり順番に比較し、深い位置までたどったときだけ重複判定用の索引を作る。
+
+各マージ後にもう一度走査し、変更前・変更後・Bash を同じ入力で比較した。マクロ展開後のコードや OS 内部のコストは構文木の件数から判断できないため、Clippy、リリースビルド、PTY、Bash 差分試験と実機計測を併用した。 [Completion and history / 補完と履歴](benchmarks.md#picker-static-audit) · [Pattern expansion / 変数展開](benchmarks.md#bounded-parameter-globs) · [Process environment / 環境変数](benchmarks.md#sparse-environment) · [Process arguments / 引数](benchmarks.md#packed-argv)
+
 ## November 27 · Fixed-width parameter patterns / 固定長パターンの変数展開
 
 A star-free ASCII pattern made of literals, question marks, escapes and ordinary bracket expressions has one possible width on ASCII text. On UTF-8 input the same number bounds the scalar endpoints worth trying, including in a byte locale. Keep locale-aware bracket matching and use the general matcher for extended groups, collating symbols and equivalence classes. The trim and substitution paths share this width calculation.
