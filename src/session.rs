@@ -83,6 +83,12 @@ struct Variable {
 }
 
 impl Variable {
+    fn inherited(&self, name: &str) -> bool {
+        *self
+            .inherited
+            .get_or_init(|| std::env::var_os(name).is_some())
+    }
+
     fn scalar(value: Option<String>, exported: bool) -> Self {
         Self {
             declared: true,
@@ -90,6 +96,70 @@ impl Variable {
             exported,
             ..Self::default()
         }
+    }
+}
+
+// Any unrestricted mutation may change which bindings reach a child. Ordinary
+// scalar assignments only change membership when allexport is enabled.
+#[derive(Clone, Default)]
+struct Variables {
+    entries: BTreeMap<String, Variable>,
+    environment_names: std::cell::OnceCell<Option<Rc<[String]>>>,
+}
+
+impl std::ops::Deref for Variables {
+    type Target = BTreeMap<String, Variable>;
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
+}
+
+impl std::ops::DerefMut for Variables {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.environment_names.take();
+        &mut self.entries
+    }
+}
+
+impl Variables {
+    fn value_mut(&mut self, name: &str, allexport: bool) -> Option<&mut Variable> {
+        if allexport {
+            self.environment_names.take();
+        }
+        self.entries.get_mut(name)
+    }
+
+    fn environment_entries(&self) -> impl Iterator<Item = (&String, &Variable)> {
+        // Small or densely exported tables are cheaper to walk in key order.
+        const MIN_BINDINGS: usize = 32;
+        let selected = if self.entries.len() < MIN_BINDINGS {
+            None
+        } else {
+            self.environment_names
+                .get_or_init(|| {
+                    let max_names = self.entries.len() / 4;
+                    let names: Vec<_> = self
+                        .entries
+                        .iter()
+                        .filter(|(name, var)| var.exported || var.inherited(name))
+                        .take(max_names + 1)
+                        .map(|(name, _)| name.clone())
+                        .collect();
+                    (names.len() <= max_names).then(|| Rc::from(names))
+                })
+                .as_deref()
+        };
+        let mut names = selected.into_iter().flatten();
+        let mut all = selected.is_none().then(|| self.entries.iter());
+        std::iter::from_fn(move || {
+            if let Some(all) = &mut all {
+                all.next()
+            } else {
+                names
+                    .next()
+                    .and_then(|name| self.entries.get_key_value(name))
+            }
+        })
     }
 }
 
@@ -160,7 +230,7 @@ impl DirectoryVisits {
 pub struct Session {
     // Only changed variables are stored here. Simple commands inherit the
     // original process environment without building a copy on startup.
-    variables: BTreeMap<String, Variable>,
+    variables: Variables,
     inherited_names: std::cell::OnceCell<Rc<Vec<String>>>,
     dynamic: dynamic::Dynamic,
     groups_unset: bool,
@@ -893,7 +963,7 @@ impl Session {
         if !Self::ordinary_assignment(name) {
             return false;
         }
-        let Some(var) = self.variables.get_mut(name) else {
+        let Some(var) = self.variables.value_mut(name, self.allexport) else {
             return false;
         };
         if var.elements.is_some() || var.nameref || var.letter_case.is_some() || var.dynamic {
@@ -965,7 +1035,7 @@ impl Session {
         if live {
             self.set_dynamic(name, &value);
         }
-        if let Some(var) = self.variables.get_mut(name) {
+        if let Some(var) = self.variables.value_mut(name, self.allexport) {
             if let Some(elements) = var.elements.as_mut().map(Rc::make_mut) {
                 elements.insert(0, value.into_owned());
                 var.array_assigned = true;
@@ -1002,7 +1072,7 @@ impl Session {
         if !Self::ordinary_assignment(name) || Self::builtin_readonly(name) {
             return None;
         }
-        let var = self.variables.get_mut(name)?;
+        let var = self.variables.value_mut(name, self.allexport)?;
         if var.dynamic || var.nameref || var.elements.is_some() {
             return None;
         }
@@ -1027,7 +1097,7 @@ impl Session {
         if !Self::ordinary_assignment(name) || Self::builtin_readonly(name) {
             return false;
         }
-        let Some(var) = self.variables.get_mut(name) else {
+        let Some(var) = self.variables.value_mut(name, self.allexport) else {
             return false;
         };
         if var.dynamic
@@ -1322,7 +1392,7 @@ impl Session {
         assignments: &'a [(String, String)],
     ) -> impl Iterator<Item = (&'a str, Option<Cow<'a, str>>)> {
         self.variables
-            .iter()
+            .environment_entries()
             .filter_map(|(name, var)| {
                 if var.exported && var.elements.is_none() && var.value.is_some() {
                     let value = match name.as_str() {
@@ -1332,10 +1402,7 @@ impl Session {
                         _ => var.value.as_deref().map(Cow::Borrowed),
                     };
                     Some((name.as_str(), value))
-                } else if *var
-                    .inherited
-                    .get_or_init(|| std::env::var_os(name).is_some())
-                {
+                } else if var.inherited(name) {
                     Some((name.as_str(), None))
                 } else {
                     None

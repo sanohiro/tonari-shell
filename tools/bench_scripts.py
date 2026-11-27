@@ -387,6 +387,10 @@ echo "$i"
         'for ((i=0; i<11; i++)); do /bin/echo "$@" >/dev/null || exit 1; done\n/bin/echo "$@"',
         " ".join([*(str(i) for i in range(1, 4097)), "", "日本語"]),
     ),
+    "external-many-locals": (
+        'for ((i=0; i<48; i++)); do /usr/bin/printenv BENCH_EXPORT || exit 1; done',
+        "\n".join(["visible"] * 48),
+    ),
     "external-env": (
         "export " + " ".join(f"BENCH_KEY_{i}=value{i}" for i in range(32)) + "\n"
         "for ((i=0; i<16; i++)); do /usr/bin/printenv BENCH_KEY_31 || exit 1; done\n",
@@ -532,13 +536,17 @@ def main():
                 "glob-sparse", "glob-multi-star", "glob-utf8-once", "glob-utf8-large",
             ):
                 participants = [*shells, ("Direct C", args.spawn_control.resolve())]
+            case_setup = setup
+            if case == "external-many-locals":
+                case_setup += ('for ((i=0; i<8192; i++)); do printf -v "bench_local_$i" %d "$i"; done; '
+                               'export BENCH_EXPORT=visible; ')
             modes = (False, True) if args.timing == "both" else (args.timing == "started",)
             for started in modes:
                 samples = {name: [] for name, _ in participants}
                 for i in range(5 + args.runs):
                     offset = i % len(participants)
                     for name, binary in participants[offset:] + participants[:offset]:
-                        elapsed = sample(binary, script, (expected + "\n").encode(), case_env, started, setup)
+                        elapsed = sample(binary, script, (expected + "\n").encode(), case_env, started, case_setup)
                         if i >= 5:
                             samples[name].append(elapsed)
                 print(f"{case} ({'already started' if started else 'whole script'})", flush=True)

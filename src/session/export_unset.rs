@@ -133,7 +133,7 @@ impl Session {
         vars.insert("PWD".into(), self.get("PWD"));
         vars.entry("OLDPWD".into()).or_insert(None);
         vars.remove("_");
-        for (name, var) in &self.variables {
+        for (name, var) in self.variables.iter() {
             if var.exported {
                 vars.insert(name.clone(), var.value.clone());
             } else {
