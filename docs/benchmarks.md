@@ -21,7 +21,7 @@ Native release latency from input until the expected edit was visible, median/p9
 | Linux, one CPU, Alt-. many | 0.060/0.066 | 0.061/0.083 | 0.491/0.552 |
 | Linux, one CPU, Undo + type into 1 MiB line | 0.077/0.089 | 0.079/0.087 | 11.590/14.960 |
 
-Both Tonari releases registered all 256 bindings. A 61-sample M1 trial of checking the first-byte index a second time during full sequence lookup yielded 0.039 → 0.041 ms for character motion and 0.096 → 0.098 ms for overwrite. Only callers that need the single-byte answer use the index. PTY の長い入力では双方向の読み書きを進め、描画待ちと入力待ちが互いを塞がないようにした。計測は \`tools/bench_editing.py --binding-bursts\`、\`tools/bench_edit_actions.py\`、\`tools/bench_completion.py --callback\` で再現できる。Linux 静的 PIE は 2,429,560 → 2,430,104 バイト、M1 は 1,748,896 バイト。 [Native Linux results for 73741c2](https://github.com/sanohiro/tonari-shell/actions/runs/45944681080)
+Both Tonari releases registered all 256 bindings. A 61-sample M1 trial of checking the first-byte index a second time during full sequence lookup yielded 0.039 → 0.041 ms for character motion and 0.096 → 0.098 ms for overwrite. Only callers that need the single-byte answer use the index. PTY の長い入力では双方向の読み書きを進め、描画待ちと入力待ちが互いを塞がないようにした。計測は `tools/bench_editing.py --binding-bursts`、`tools/bench_edit_actions.py`、`tools/bench_completion.py --callback` で再現できる。Linux 静的 PIE は 2,429,560 → 2,430,104 バイト、M1 は 1,748,896 バイト。 [Native Linux results for 73741c2](https://github.com/sanohiro/tonari-shell/actions/runs/45944681080)
 
 <a id="shell-child-state"></a>
 
