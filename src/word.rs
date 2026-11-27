@@ -806,7 +806,7 @@ impl Output<'_, '_> {
 
 // The internal index query cannot collide with a Bash identifier. Sparse arrays
 // enumerate their occupied indexes in ascending order, including empty values.
-fn array_elements_name(name: &str) -> Option<(&str, bool, bool)> {
+pub(crate) fn array_elements_name(name: &str) -> Option<(&str, bool, bool)> {
     let (name, keys) = name.strip_prefix('!').map_or((name, false), |s| (s, true));
     let base = name
         .strip_suffix("[@]")

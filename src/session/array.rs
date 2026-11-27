@@ -487,7 +487,53 @@ impl Session {
         }
     }
 
-    pub fn append_indexed_fields(&self, name: &str, fields: &mut Vec<String>) -> bool {
+    pub(crate) fn stored_indexed_slice(
+        &self,
+        name: &str,
+        offset: i64,
+        count: usize,
+    ) -> Option<Vec<String>> {
+        let variable = self.variables.get(name)?;
+        if variable.dynamic || variable.nameref || name == "PIPESTATUS" {
+            return None;
+        }
+        let elements = variable.elements.as_deref()?;
+        let start = self.relative_index(name, offset).ok();
+        let range = |len: usize| {
+            let from = start.map_or(len, |i| (i as usize).min(len));
+            from..from.saturating_add(count).min(len)
+        };
+        match elements {
+            Elements::Associative(_) => None,
+            Elements::Sparse(values) => Some(start.map_or_else(Vec::new, |i| {
+                values
+                    .range(i..)
+                    .take(count)
+                    .map(|(_, value)| value.clone())
+                    .collect()
+            })),
+            Elements::Dense(values) => Some(values[range(values.len())].to_vec()),
+            Elements::Records(records) => Some(
+                range(records.ends.len())
+                    .filter_map(|i| records.get(i).map(str::to_owned))
+                    .collect(),
+            ),
+        }
+    }
+
+    pub fn append_indexed_fields(&self, name: &str, keys: bool, fields: &mut Vec<String>) -> bool {
+        if keys {
+            if !self.stored_array(name) || self.is_associative(name) {
+                return false;
+            }
+            let mut decimal = itoa::Buffer::new();
+            fields.extend(
+                self.indices(name)
+                    .into_iter()
+                    .map(|i| decimal.format(i).to_owned()),
+            );
+            return true;
+        }
         if self.active_groups(name) && !self.variables.contains_key(name) {
             fields.extend_from_slice(Self::group_ids());
             return true;
