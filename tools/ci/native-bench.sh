@@ -336,7 +336,7 @@ case "$SUITE" in
       --case printf-list-newline --case printf-list-count \
       --case heredoc-external-file --case here-string-capture --case here-string-builtin-read \
       --case capture-positional-program --case capture-scalar-program \
-      --case array-slice-dense --case array-slice-sparse --case array-index-fields --case array-assoc-order --case array-assoc-small \
+      --case array-slice-reference --case array-slice-dense --case array-slice-sparse --case array-index-fields --case array-assoc-order --case array-assoc-small \
       --case substitute-single-scalar --case trim-fixed-width --case substitute-fixed-class --case substitute-fixed-width
     run ordered-words python3 tools/bench_completion.py "$current" "$bin/baseline" --bash "$ref" --nosort --reuse-words --runs 31
     run sorted-words python3 tools/bench_completion.py "$current" "$bin/baseline" --bash "$ref" --reuse-words --runs 21

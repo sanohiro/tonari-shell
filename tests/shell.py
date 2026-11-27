@@ -946,6 +946,14 @@ test -t 5 5<&-; echo $?; test -t 5 5</dev/null; echo $?; test -t 5 5<&0; echo $?
                      0, "<😀a>\n<bc>\n<😀ab>\n<>\n<>\n<>\n<猫😀abc>\n".encode())
         self.compare('v=abc; printf "%s" "${v:2:-2}"', 1)
 
+    def test_array_slice_at_greatest_representable_index(self):
+        # GNU Bash 5.3 wraps the exclusive endpoint of this valid sparse array.
+        source = ('a=([9223372036854775806]=before [9223372036854775807]=last); '
+                  'declare -n ref=a; printf "<%s>\\n" "${a[@]: -1:1}" "${ref[@]: -2:2}"; '
+                  'v=1 selected="${ref[*]: -1:1}"; printf "<%s>\\n" "$selected"')
+        proc = self.command(TONARI, source)
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"<last>\n<before>\n<last>\n<last>\n", b""))
+
     def test_slices_of_dense_sparse_and_mapfile_arrays(self):
         self.compare(r"""show() { printf '[%d]' "$#"; printf '<%s>' "$@"; echo; }
 a=(one "" "雪 🌸" four)
