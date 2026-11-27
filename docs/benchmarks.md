@@ -1,5 +1,18 @@
 # Startup and execution / 起動と実行性能
 
+<a id="packed-argv"></a>
+
+## 2026-11-27 · External argument storage / 外部起動時の引数
+
+`python3 tools/bench_scripts.py CURRENT --previous PREVIOUS --bash BASH --case external-wide-argv --timing started --runs 41`. Each shell expands 4,096 numbers, an empty string and Japanese text for 12 external `/bin/echo` launches. The driver checks the complete final output. Median/p95 ms against `5670567`.
+
+| Host | Previous | Packed argv | Bash |
+|---|---:|---:|---:|
+| Apple M1 | 76.754/81.118 | 76.726/84.184 | 94.523/99.835 |
+| Linux x86-64 | 14.902/15.175 | 14.446/14.736 | 28.864/29.590 |
+
+M1 remains above the two-thirds target on this workload. Release sizes were 1,748,896 bytes for both M1 builds and 2,430,104 → 2,428,440 bytes for static Linux PIE. Mac の通常起動、パイプ、コマンド置換は旧版と同水準。 [Linux controls and host](https://github.com/sanohiro/tonari-shell/actions/runs/45947076665)
+
 <a id="editor-binding-starts"></a>
 
 ## 2026-11-27 · Configured key sequences, editing and undo / キーバインドと編集

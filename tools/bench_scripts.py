@@ -382,6 +382,11 @@ echo "$i"
         'for ((i=0; i<400; i++)); do base=${path##*/}; done\necho "${#base}"',
         "2048",
     ),
+    "external-wide-argv": (
+        'set -- {1..4096} "" "日本語"\n'
+        'for ((i=0; i<11; i++)); do /bin/echo "$@" >/dev/null || exit 1; done\n/bin/echo "$@"',
+        " ".join([*(str(i) for i in range(1, 4097)), "", "日本語"]),
+    ),
     "external-env": (
         "export " + " ".join(f"BENCH_KEY_{i}=value{i}" for i in range(32)) + "\n"
         "for ((i=0; i<16; i++)); do /usr/bin/printenv BENCH_KEY_31 || exit 1; done\n",

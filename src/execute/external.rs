@@ -81,10 +81,11 @@ impl Environment {
 }
 
 pub(super) struct External {
-    // Owns the argument strings referenced by argv.
     pub(super) diagnostic: Option<String>,
-    pub(super) original_name: Option<CString>,
-    pub(super) words: Vec<CString>,
+    pub(super) program: CString,
+    _arg0: Option<CString>,
+    // Fully built before taking any pointers, then immutable through spawn/exec.
+    pub(super) argument_bytes: Vec<u8>,
     pub(super) argv: Vec<*const libc::c_char>,
     pub(super) search_paths: Option<Vec<CString>>,
     pub(super) env: Option<Rc<Environment>>,
@@ -101,24 +102,34 @@ impl External {
         arg0: Option<String>,
         clear_env: bool,
     ) -> io::Result<Self> {
-        let mut words: Vec<_> = arguments
-            .iter()
-            .map(|w| CString::new(w.as_bytes()))
-            .collect::<Result<_, _>>()?;
-        let original = arg0.as_ref().map(|_| words[0].clone());
-        if let Some(arg0) = arg0 {
-            words[0] = CString::new(arg0)?;
+        let program = CString::new(arguments[0].as_bytes())?;
+        let arg0 = arg0.map(CString::new).transpose()?;
+        let tail = &arguments[1..];
+        let mut argument_bytes = Vec::with_capacity(tail.iter().map(|w| w.len() + 1).sum());
+        for word in tail {
+            if word.as_bytes().contains(&0) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "data provided contains a nul byte",
+                ));
+            }
+            argument_bytes.extend_from_slice(word.as_bytes());
+            argument_bytes.push(0);
         }
-        let executable = original.as_ref().unwrap_or(&words[0]);
-        let mut argv = Vec::with_capacity(words.len() + 1);
-        argv.extend(words.iter().map(|w| w.as_ptr()));
+        let mut argv = Vec::with_capacity(arguments.len() + 1);
+        argv.push(arg0.as_ref().unwrap_or(&program).as_ptr());
+        let mut offset = 0;
+        for word in tail {
+            argv.push(argument_bytes[offset..].as_ptr().cast());
+            offset += word.len() + 1;
+        }
         argv.push(std::ptr::null());
-        let name = std::ffi::OsStr::from_bytes(executable.as_bytes());
+        let name = std::ffi::OsStr::from_bytes(program.as_bytes());
         let cached = cmd.cached_path(session, &arguments[0]);
         let search_paths = if let Some(path) = cached {
             Some(vec![CString::new(path.as_os_str().as_bytes())?])
         } else {
-            (!executable.as_bytes().contains(&b'/'))
+            (!arguments[0].contains('/'))
                 .then(|| {
                     let path = lookup::path(cmd, session);
                     let ignored = IgnoredExecutables::new(session);
@@ -131,10 +142,11 @@ impl External {
                 .transpose()?
         };
         Ok(Self {
-            words,
+            argument_bytes,
             argv,
             diagnostic: session.diagnostic_prefix(|| session.line()),
-            original_name: original,
+            program,
+            _arg0: arg0,
             search_paths,
             env: if clear_env {
                 Some(Rc::new(Environment {
@@ -199,7 +211,7 @@ impl External {
     }
 
     pub(super) fn exec(&self, session: Option<&Session>) -> u8 {
-        let program = self.original_name.as_ref().unwrap_or(&self.words[0]);
+        let program = &self.program;
         if program.as_bytes().is_empty() {
             write_error(b"", b": command not found");
             return 127;

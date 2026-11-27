@@ -1421,6 +1421,10 @@ f"""
         self.compare(code, 7, b"<./plain><two words x y>\n7 0\n<./plain><two words z>\n")
         self.compare('value=$(./plain z); echo "$?:$value"', 0, b"7:<./plain><two words z>\n")
 
+        script.write_text('printf "<%s>\\n" "$#" "$@"\n')
+        for launch in ('./plain', 'exec -a renamed ./plain'):
+            self.compare(launch + ' "" "a b" 日本語 ""', 0, "<4>\n<>\n<a b>\n<日本語>\n<>\n".encode())
+
         directory = self.cwd / "commands"
         directory.mkdir()
         helper = directory / "helper"
