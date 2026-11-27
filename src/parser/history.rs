@@ -3,7 +3,7 @@ use super::*;
 fn with_tokens<T>(source: &str, read: impl FnOnce(&[Token], &[(usize, usize)]) -> T) -> Option<T> {
     let (mut tokens, mut spans, _) = lex(source, false, true).ok()?;
     let result = read(&tokens, &spans);
-    if tokens.capacity() <= 256 && spans.capacity() <= 256 {
+    if tokens.capacity().max(spans.capacity()) <= MAX_CACHED_TOKENS {
         tokens.clear();
         spans.clear();
         TOKEN_BUFFERS.set((tokens, spans));

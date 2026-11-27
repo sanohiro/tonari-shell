@@ -135,6 +135,10 @@ pub enum Error {
 }
 
 impl Error {
+    pub(crate) fn unfinished_function() -> Self {
+        Self::Incomplete(Incomplete::Message("unfinished function definition"))
+    }
+
     pub(crate) fn pending_quote(&self) -> Option<char> {
         match self {
             Self::Incomplete(Incomplete::SingleQuote) => Some('\''),
@@ -420,6 +424,7 @@ fn parse_source(source: &str, final_input: bool) -> Result<Vec<Statement>, Error
 
 // Most shell reads are a few lines. Reuse their token and span allocations;
 // nested parses take another pair while the outer reader owns its buffers.
+const MAX_CACHED_TOKENS: usize = 256;
 type TokenBuffers = (Vec<Token>, Vec<(usize, usize)>);
 thread_local! {
     static TOKEN_BUFFERS: std::cell::Cell<TokenBuffers> = const {
@@ -495,7 +500,7 @@ struct Reader {
 
 impl Drop for Reader {
     fn drop(&mut self) {
-        if self.tokens.capacity() <= 256 && self.spans.capacity() <= 256 {
+        if self.tokens.capacity().max(self.spans.capacity()) <= MAX_CACHED_TOKENS {
             self.tokens.clear();
             self.spans.clear();
             TOKEN_BUFFERS.set((
@@ -1031,21 +1036,11 @@ impl Reader {
             });
         }
         self.alias_at(false, Some(&[]))?;
-        let start_name = self.position();
-        let name = match self.operand() {
-            Some(Token::Word(LexWord {
-                word: Word::Literal(name),
-                protected: false,
-                ..
-            })) => name,
-            Some(Token::Word(_)) => self.location(start_name).text().into(),
-            None => {
-                return Err(Error::Incomplete(Incomplete::Message(
-                    "expected a loop variable",
-                )));
-            }
-            _ => return Err(Error::Invalid("expected a loop variable")),
-        };
+        let name = self.declaration_name(
+            self.position(),
+            "expected a loop variable",
+            "expected a loop variable",
+        )?;
         self.alias_newlines(&["in", "do"])?;
         let words = if self.keyword() == Some("in") {
             self.tokens.pop_front();
@@ -1083,34 +1078,43 @@ impl Reader {
         })
     }
 
+    // Quotes in a declaration name retain their source spelling. A plain word
+    // already owns the exact string the AST needs.
+    fn declaration_name(
+        &mut self,
+        start: usize,
+        missing: &'static str,
+        invalid: &'static str,
+    ) -> Result<String, Error> {
+        match self.operand() {
+            Some(Token::Word(LexWord {
+                word: Word::Literal(name),
+                protected: false,
+                ..
+            })) => Ok(name),
+            Some(Token::Word(_)) => Ok(self.location(start).text().into()),
+            None => Err(Error::Incomplete(Incomplete::Message(missing))),
+            _ => Err(Error::Invalid(invalid)),
+        }
+    }
+
     fn function(&mut self, keyword: bool) -> Result<Command, Error> {
         if keyword {
             self.tokens.pop_front();
         }
         let start_name = self.position();
-        let name = match self.operand() {
-            Some(Token::Word(LexWord {
-                word: Word::Literal(name),
-                protected: false,
-                ..
-            })) => name,
-            Some(Token::Word(_)) => self.location(start_name).text().into(),
-            None => {
-                return Err(Error::Incomplete(Incomplete::Message(
-                    "expected a function name",
-                )));
-            }
-            _ => return Err(Error::Invalid("invalid function name")),
-        };
+        let name = self.declaration_name(
+            start_name,
+            "expected a function name",
+            "invalid function name",
+        )?;
         if matches!(self.peek(), Some(Token::LeftParen)) {
             self.tokens.pop_front();
             self.alias_at(false, Some(&[]))?;
             match self.tokens.pop_front() {
                 Some(Token::RightParen) => {}
                 None => {
-                    return Err(Error::Incomplete(Incomplete::Message(
-                        "unfinished function definition",
-                    )));
+                    return Err(Error::unfinished_function());
                 }
                 _ => return Err(Error::Invalid("expected empty function parentheses")),
             }

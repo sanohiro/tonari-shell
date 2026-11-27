@@ -131,6 +131,10 @@ pub enum Part {
     },
 }
 
+pub(crate) fn is_name_start(byte: u8) -> bool {
+    byte == b'_' || byte.is_ascii_alphabetic()
+}
+
 pub(crate) fn is_name_char(byte: u8) -> bool {
     byte == b'_' || byte.is_ascii_alphanumeric()
 }
@@ -145,7 +149,7 @@ pub(crate) fn name_chars_len(source: &str) -> usize {
 
 pub fn is_identifier(name: &str) -> bool {
     let mut chars = name.bytes();
-    matches!(chars.next(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_')) && chars.all(is_name_char)
+    chars.next().is_some_and(is_name_start) && chars.all(is_name_char)
 }
 
 impl Word {
@@ -512,11 +516,8 @@ impl Word {
         {
             return std::mem::take(value);
         }
-        let mut output = Output::Scalar(String::new());
-        self.expand_into(&mut output, lookup, positional, "");
-        let Output::Scalar(text) = output else {
-            unreachable!()
-        };
+        let mut text = String::new();
+        self.expand_into(&mut Output::Scalar(&mut text), lookup, positional, "");
         text
     }
 
@@ -582,7 +583,7 @@ impl Word {
             }
             return Ok(());
         }
-        let mut output = Output::Fields(Fields {
+        let mut fields = Fields {
             lookup,
             globbing,
             words,
@@ -590,27 +591,19 @@ impl Word {
             error: None,
             present: false,
             whitespace: false,
-        });
+        };
         self.expand_into(
-            &mut output,
+            &mut Output::Fields(&mut fields),
             lookup,
             positional,
             ifs.as_deref().unwrap_or(crate::word::DEFAULT_IFS),
         );
-        let Output::Fields(mut fields) = output else {
-            unreachable!()
-        };
         fields.finish_field();
         fields.error.map_or(Ok(()), Err)
     }
 
     pub fn pattern(self, lookup: &dyn Fn(&str) -> Option<String>, positional: &[String]) -> String {
-        let mut output = Output::Pattern(String::new(), PatternKind::Glob);
-        self.expand_into(&mut output, lookup, positional, "");
-        let Output::Pattern(text, _) = output else {
-            unreachable!()
-        };
-        text
+        self.expand_pattern(PatternKind::Glob, lookup, positional)
     }
 
     pub fn extended_pattern(
@@ -618,28 +611,29 @@ impl Word {
         lookup: &dyn Fn(&str) -> Option<String>,
         positional: &[String],
     ) -> String {
-        let mut output = Output::Pattern(String::new(), PatternKind::Extended);
-        self.expand_into(&mut output, lookup, positional, "");
-        let Output::Pattern(text, _) = output else {
-            unreachable!()
-        };
-        text
+        self.expand_pattern(PatternKind::Extended, lookup, positional)
     }
 
     fn replacement(self, lookup: &dyn Fn(&str) -> Option<String>, positional: &[String]) -> String {
-        let mut output = Output::Pattern(String::new(), PatternKind::Replacement);
-        self.expand_into(&mut output, lookup, positional, "");
-        let Output::Pattern(text, _) = output else {
-            unreachable!()
-        };
-        text
+        self.expand_pattern(PatternKind::Replacement, lookup, positional)
     }
     pub fn regex(self, lookup: &dyn Fn(&str) -> Option<String>, positional: &[String]) -> String {
-        let mut output = Output::Pattern(String::new(), PatternKind::Regex);
-        self.expand_into(&mut output, lookup, positional, "");
-        let Output::Pattern(text, _) = output else {
-            unreachable!()
-        };
+        self.expand_pattern(PatternKind::Regex, lookup, positional)
+    }
+
+    fn expand_pattern(
+        self,
+        kind: PatternKind,
+        lookup: &dyn Fn(&str) -> Option<String>,
+        positional: &[String],
+    ) -> String {
+        let mut text = String::new();
+        self.expand_into(
+            &mut Output::Pattern(&mut text, kind),
+            lookup,
+            positional,
+            "",
+        );
         text
     }
 
@@ -759,13 +753,13 @@ enum PatternKind {
     Regex,
 }
 
-enum Output<'a> {
-    Scalar(String),
-    Pattern(String, PatternKind),
-    Fields(Fields<'a>),
+enum Output<'out, 'fields> {
+    Scalar(&'out mut String),
+    Pattern(&'out mut String, PatternKind),
+    Fields(&'out mut Fields<'fields>),
 }
 
-impl Output<'_> {
+impl Output<'_, '_> {
     fn elements(&mut self, values: &[String], quoted: bool, ifs: &str) {
         for (i, value) in values.iter().enumerate() {
             if i != 0 {
