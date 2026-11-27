@@ -78,9 +78,9 @@ pub(super) fn function_run(
     for offset in memchr::memmem::find_iter(bytes, b"\n}\n") {
         // A one-line body already has a cheaper parser that stores literal
         // wrappers without constructing their argument vectors.
-        if !bytes
+        if bytes
             .get(body_start..offset)
-            .is_some_and(|body| memchr::memchr(b'\n', body.trim_ascii()).is_some())
+            .is_none_or(|body| memchr::memchr(b'\n', body.trim_ascii()).is_none())
         {
             break;
         }
