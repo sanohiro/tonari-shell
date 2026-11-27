@@ -8,6 +8,12 @@ pub(crate) trait Variables {
         None
     }
     fn set(&mut self, name: &str, value: i64) -> Result<()>;
+    fn indexed_decimal(&self, _name: &str, _index: i64) -> Option<i64> {
+        None
+    }
+    fn set_indexed(&mut self, name: &str, index: i64, value: i64) -> Result<()> {
+        self.set(&format!("{name}[{index}]"), value)
+    }
     fn associative_key(&mut self, _name: &str, _source: &str) -> Option<Result<String>> {
         None
     }
@@ -41,6 +47,15 @@ impl Variables for Session {
             return Err(crate::session::READONLY);
         }
         self.assign(name, &value.to_string());
+        Ok(())
+    }
+    fn indexed_decimal(&self, name: &str, index: i64) -> Option<i64> {
+        self.indexed_scalar_decimal(name, index)
+    }
+    fn set_indexed(&mut self, name: &str, index: i64, value: i64) -> Result<()> {
+        if !self.replace_indexed_decimal(name, index, value) {
+            Variables::set(self, &format!("{name}[{index}]"), value)?;
+        }
         Ok(())
     }
     fn associative_key(&mut self, name: &str, source: &str) -> Option<Result<String>> {
@@ -165,6 +180,7 @@ impl<'a> Repeated<'a> {
             return generic;
         }
         let mut parser = Parser {
+            tokens: None,
             source,
             token: Token::End,
         };
@@ -303,9 +319,74 @@ pub(crate) fn traced(
     with_variables(&text, &mut env)
 }
 
-pub fn command(source: &str, session: &mut Session, status: u8) -> Flow {
+#[derive(Debug, Clone)]
+pub(crate) struct Expression {
+    source: String,
+    tokens: std::cell::OnceCell<Option<Box<[Lexeme]>>>,
+}
+
+impl From<String> for Expression {
+    fn from(source: String) -> Self {
+        Self {
+            source,
+            tokens: Default::default(),
+        }
+    }
+}
+
+// Offsets refer to this command's immutable source. Variables, array subscripts
+// and short-circuit branches are still evaluated by the ordinary parser.
+#[derive(Debug, Clone, Copy)]
+enum Lexeme {
+    Number(u32, u32),
+    Name(u32, u32),
+    Op(u32, u32),
+}
+
+impl Expression {
+    fn lexemes(&self) -> Option<Box<[Lexeme]>> {
+        if self.source.len() > 64 * 1024 || self.source.contains(['$', '`', '"', '\\']) {
+            return None;
+        }
+        let mut scanner = Parser {
+            source: &self.source,
+            tokens: None,
+            token: Token::End,
+        };
+        let mut out = Vec::new();
+        loop {
+            scanner.advance().ok()?;
+            let (text, kind) = match scanner.token {
+                Token::Number(t) => (t, Lexeme::Number as fn(u32, u32) -> Lexeme),
+                Token::Name(t) => (t, Lexeme::Name as fn(u32, u32) -> Lexeme),
+                Token::Op(t) => (t, Lexeme::Op as fn(u32, u32) -> Lexeme),
+                Token::End => return Some(out.into_boxed_slice()),
+            };
+            let end = self.source.len() - scanner.source.len();
+            out.push(kind((end - text.len()) as u32, end as u32));
+        }
+    }
+}
+
+pub(crate) fn command(
+    expr: &Expression,
+    session: &mut Session,
+    status: u8,
+    repeated: bool,
+) -> Flow {
+    let source = expr.source.as_str();
     let result = if session.xtrace {
         traced(source, session, status, None)
+    } else if repeated
+        && !(source.ends_with("++") || source.ends_with("--"))
+        && let Some(tokens) = expr.tokens.get_or_init(|| expr.lexemes())
+    {
+        Parser {
+            source,
+            tokens: Some(tokens),
+            token: Token::End,
+        }
+        .evaluate(session, 0)
     } else {
         expanded(source, session, status)
     };
@@ -327,6 +408,7 @@ enum Token<'a> {
 }
 
 struct Parser<'a> {
+    tokens: Option<&'a [Lexeme]>,
     source: &'a str,
     token: Token<'a>,
 }
@@ -334,6 +416,19 @@ struct Parser<'a> {
 impl<'a> Parser<'a> {
     fn advance(&mut self) -> Result<Token<'a>> {
         let old = self.token;
+        if let Some(tokens) = self.tokens {
+            self.token = if let Some((&token, rest)) = tokens.split_first() {
+                self.tokens = Some(rest);
+                match token {
+                    Lexeme::Number(a, b) => Token::Number(&self.source[a as usize..b as usize]),
+                    Lexeme::Name(a, b) => Token::Name(&self.source[a as usize..b as usize]),
+                    Lexeme::Op(a, b) => Token::Op(&self.source[a as usize..b as usize]),
+                }
+            } else {
+                Token::End
+            };
+            return Ok(old);
+        }
         let source = self.source.trim_start_matches([' ', '\t', '\n', '\r']);
         let (token, consumed) = match source.as_bytes().first() {
             None => (Token::End, 0),
@@ -452,7 +547,7 @@ impl<'a> Parser<'a> {
                     binary(&op[..op.len() - 1], a, b)?
                 };
                 if active {
-                    variables.set(&name, result)?;
+                    name.set(variables, result)?;
                 }
                 left = Value::Number(result);
             } else {
@@ -479,7 +574,7 @@ impl<'a> Parser<'a> {
                         Value::Variable(element_name(base, index, variables, depth)?)
                     }
                 } else {
-                    Value::Variable(std::borrow::Cow::Borrowed(n))
+                    Value::Variable(Target::Name(std::borrow::Cow::Borrowed(n)))
                 }
             }
             Token::Op("(") => {
@@ -503,7 +598,7 @@ impl<'a> Parser<'a> {
                         };
                         let next = n.wrapping_add(if op == "++" { 1 } else { -1 });
                         if active {
-                            variables.set(&name, next)?;
+                            name.set(variables, next)?;
                         }
                         next
                     }
@@ -519,7 +614,7 @@ impl<'a> Parser<'a> {
             };
             let old = value.read(variables, active, depth + 1)?;
             if active {
-                variables.set(name, old.wrapping_add(if op == "++" { 1 } else { -1 }))?;
+                name.set(variables, old.wrapping_add(if op == "++" { 1 } else { -1 }))?;
             }
             value = Value::Number(old);
         }
@@ -528,25 +623,41 @@ impl<'a> Parser<'a> {
 }
 
 fn element_name<'a>(
-    base: &str,
+    base: &'a str,
     index: &str,
     variables: &mut dyn Variables,
     depth: u16,
-) -> Result<std::borrow::Cow<'a, str>> {
+) -> Result<Target<'a>> {
     if index.is_empty() {
         return Err("empty array subscript");
     }
-    let key = match variables.associative_key(base, index) {
-        Some(key) => key?,
-        None => calculate(numeric_subscript(index), variables, depth + 1)?.to_string(),
-    };
-    Ok(std::borrow::Cow::Owned(format!("{base}[{key}]")))
+    if let Some(key) = variables.associative_key(base, index) {
+        return Ok(Target::Name(format!("{base}[{}]", key?).into()));
+    }
+    Ok(Target::Indexed(
+        base,
+        calculate(numeric_subscript(index), variables, depth + 1)?,
+    ))
+}
+
+enum Target<'a> {
+    Name(std::borrow::Cow<'a, str>),
+    Indexed(&'a str, i64),
+}
+
+impl Target<'_> {
+    fn set(&self, vars: &mut dyn Variables, value: i64) -> Result<()> {
+        match self {
+            Self::Name(name) => vars.set(name, value),
+            Self::Indexed(name, index) => vars.set_indexed(name, *index, value),
+        }
+    }
 }
 
 enum Value<'a> {
     AssignmentTarget((&'a str, &'a str)),
     Number(i64),
-    Variable(std::borrow::Cow<'a, str>),
+    Variable(Target<'a>),
 }
 impl Value<'_> {
     fn read(&self, variables: &mut dyn Variables, active: bool, depth: u16) -> Result<i64> {
@@ -556,11 +667,22 @@ impl Value<'_> {
         match self {
             Self::AssignmentTarget(_) => Err("expected arithmetic assignment"),
             Self::Number(n) => Ok(*n),
-            Self::Variable(name) => {
-                if let Some(n) = variables.decimal(name) {
-                    return Ok(n);
-                }
-                match variables.get(name) {
+            Self::Variable(target) => {
+                let text = match target {
+                    Target::Name(name) => {
+                        if let Some(n) = variables.decimal(name) {
+                            return Ok(n);
+                        }
+                        variables.get(name)
+                    }
+                    Target::Indexed(name, index) => {
+                        if let Some(n) = variables.indexed_decimal(name, *index) {
+                            return Ok(n);
+                        }
+                        variables.get(&format!("{name}[{index}]"))
+                    }
+                };
+                match text {
                     Some(s) => calculate(&s, variables, depth + 1),
                     None if variables.nounset() => Err("unbound arithmetic variable"),
                     None => Ok(0),
@@ -607,21 +729,28 @@ fn calculate(source: &str, variables: &mut dyn Variables, depth: u16) -> Result<
         variables.set(name, old.wrapping_add(delta))?;
         return Ok(old);
     }
-    let mut p = Parser {
+    Parser {
         source,
+        tokens: None,
         token: Token::End,
-    };
-    p.advance()?;
-    if p.token == Token::End {
-        return Ok(0);
     }
-    let value = p
-        .expression(variables, 1, true, depth + 1)?
-        .read(variables, true, depth + 1)?;
-    if p.token != Token::End {
-        return Err("unexpected arithmetic token");
+    .evaluate(variables, depth)
+}
+
+impl Parser<'_> {
+    fn evaluate(&mut self, variables: &mut dyn Variables, depth: u16) -> Result<i64> {
+        self.advance()?;
+        if self.token == Token::End {
+            return Ok(0);
+        }
+        let value =
+            self.expression(variables, 1, true, depth + 1)?
+                .read(variables, true, depth + 1)?;
+        if self.token != Token::End {
+            return Err("unexpected arithmetic token");
+        }
+        Ok(value)
     }
-    Ok(value)
 }
 
 fn precedence(op: &str) -> Option<(u8, bool)> {

@@ -502,6 +502,7 @@ struct Reader {
     alias_source: Option<Box<aliases::Expanded>>,
     spans: Vec<(usize, usize)>,
     newlines: Vec<usize>,
+    line_index: std::cell::Cell<usize>,
     aliases: crate::alias::Aliases,
     alias_frames: Vec<aliases::Frame>,
     final_input: bool,
@@ -536,6 +537,7 @@ impl Reader {
         newlines.extend(memchr::memchr_iter(b'\n', source.as_bytes()));
         Self {
             first_line: source_line(source),
+            line_index: std::cell::Cell::new(0),
             depth: 0,
             spans,
             alias_source: None,
@@ -587,12 +589,22 @@ impl Reader {
         } else {
             start
         };
+        let mut line = self.line_index.get();
+        if line > 0 && self.newlines[line - 1] >= start {
+            line = self.newlines[..line].partition_point(|&n| n < start);
+        } else if self.newlines.get(line).is_some_and(|&n| n < start) {
+            line += 1;
+            if self.newlines.get(line).is_some_and(|&n| n < start) {
+                line += self.newlines[line..].partition_point(|&n| n < start);
+            }
+        }
+        self.line_index.set(line);
         Location {
             source: self.source.clone(),
             subscript_aliases: self.subscript_aliases(),
             start,
             end,
-            line: self.first_line + self.newlines.partition_point(|&n| n < start),
+            line: self.first_line + line,
         }
     }
 
@@ -764,7 +776,7 @@ impl Reader {
     fn command(&mut self) -> Result<Command, Error> {
         // The lexer already identified the assignment. A following separator
         // rules out a command, redirection or compound array initializer.
-        if matches!(self.peek(), Some(Token::Word(w)) if w.assignment.as_ref().is_some_and(|name| !name.starts_with('[')))
+        if matches!(self.peek(), Some(Token::Word(w)) if w.assignment.is_some_and(|len| !w.word.assignment_name(len).starts_with('[')))
             && matches!(self.tokens.get(1), None | Some(Token::Newline | Token::End))
         {
             let Some(Token::Word(LexWord {
@@ -776,7 +788,10 @@ impl Reader {
                 unreachable!()
             };
             return Ok(Command::Pipeline(vec![SimpleCommand {
-                assignments: vec![scalar_assignment(name, word)],
+                assignments: vec![scalar_assignment(
+                    word.assignment_name(name).to_owned(),
+                    word,
+                )],
                 ..Default::default()
             }]));
         }
@@ -851,7 +866,7 @@ impl Reader {
             let Some(Token::Arithmetic(expr)) = self.tokens.pop_front() else {
                 unreachable!()
             };
-            return Ok(Some(Command::Arithmetic(expr)));
+            return Ok(Some(Command::Arithmetic(expr.into())));
         }
         if matches!(self.peek(), Some(Token::LeftParen)) {
             self.tokens.pop_front();
@@ -1311,6 +1326,8 @@ impl Reader {
                     protected,
                     assignment,
                 }) => {
+                    let assignment =
+                        assignment.map(|length| word.assignment_name(length).to_owned());
                     let declaration = assignment.is_some()
                         && matches!(
                             cmd.words

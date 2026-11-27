@@ -512,6 +512,33 @@ echo "$i"
 }
 
 
+# Populate the session before the ready handshake so setup cannot explain scaling.
+for bindings in (0, 200, 1000):
+    for label, body, check, expected, setup, count in (
+        ("copy", "x=$y", 'echo "$x"', "blue", "x=; y=blue", 20000),
+        ("sum", "((c+=i))", 'echo "$c"', "199990000", "c=0", 20000),
+        ("locals", "f 7 8", 'echo "${a-outer}"', "outer",
+         "f() { local a=$1 b=$2 c=3 d=4 e=5 h=1 i0=2 j=3 k=4 m=5; }", 1000),
+    ):
+        CASES[f"bindings-{bindings}-{label}"] = eval_loop(body, check, expected, setup, count)
+
+CASES.update({
+    "bindings-1000-prefix": eval_loop('compgen -A variable bench_var_99 >/dev/null',
+                                     'compgen -A variable bench_var_999', "bench_var_999", count=500),
+    "core-parse-functions": ("".join(f"func{k}() {{\n  if :; then\n    v={k}\n  fi\n}}\n" for k in range(200))
+                             + 'func199; echo "$v"', "199"),
+    "core-function": eval_loop('f "$i"', 'echo "$x"', "9999", 'f() { x=$1; }', 10000),
+    "core-indexed": eval_loop('((a[i%128]+=1))', 'echo "${a[0]} ${a[127]}"',
+                              "157 156", 'a=()', 20000),
+    "core-arithmetic": eval_loop('((x += (i*3+7)^(i>>1)))', 'echo "$x"',
+                                 str(sum((i*3+7) ^ (i>>1) for i in range(20000))), "x=0", 20000),
+    "core-case": eval_loop('case "$s" in hello_*) ((k++));; esac', 'echo "$k"',
+                           "20000", 's=hello_world; k=0', 20000),
+    "core-test": eval_loop('[[ $s == hello_* ]] || exit 1', 'echo "$i"', "20000",
+                           's=hello_world', 20000),
+})
+
+
 def sample(binary, script, expected, env, started, setup=""):
     argv = [binary, "--noprofile", "--norc"]
     if started:
@@ -657,6 +684,9 @@ def main():
             ):
                 participants = [*shells, ("Direct C", args.spawn_control.resolve())]
             case_setup = setup
+            if case.startswith("bindings-"):
+                count = int(case.split("-")[1])
+                case_setup += "".join(f"bench_var_{j}={j}; " for j in range(count))
             if case.startswith("assoc-"):
                 case_setup += 'declare -A m; for ((j=0;j<500;++j)); do m[key$j]=value$j; done; '
             elif case == "complete-list":

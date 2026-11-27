@@ -28,7 +28,7 @@ pub(crate) const READONLY: &str = "readonly variable";
 pub(crate) const SUBSCRIPT_RANGE: &str = "array subscript out of range";
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::os::unix::ffi::OsStrExt;
@@ -103,12 +103,12 @@ impl Variable {
 // scalar assignments only change membership when allexport is enabled.
 #[derive(Clone, Default)]
 struct Variables {
-    entries: BTreeMap<String, Variable>,
+    entries: HashMap<String, Variable, foldhash::fast::RandomState>,
     environment_names: std::cell::OnceCell<Option<Rc<[String]>>>,
 }
 
 impl std::ops::Deref for Variables {
-    type Target = BTreeMap<String, Variable>;
+    type Target = HashMap<String, Variable, foldhash::fast::RandomState>;
     fn deref(&self) -> &Self::Target {
         &self.entries
     }
@@ -130,7 +130,7 @@ impl Variables {
     }
 
     fn environment_entries(&self) -> impl Iterator<Item = (&String, &Variable)> {
-        // Small or densely exported tables are cheaper to walk in key order.
+        // Small or densely exported tables are cheaper to walk directly.
         const MIN_BINDINGS: usize = 32;
         let selected = if self.entries.len() < MIN_BINDINGS {
             None
@@ -510,18 +510,9 @@ impl Session {
                 names.push(key);
             }
         }
-        use std::ops::Bound::{Included, Unbounded};
-        for (key, var) in self
-            .variables
-            .range::<str, _>((Included(prefix), Unbounded))
-        {
-            if !key.starts_with(prefix) {
-                break;
-            }
-            if var.declared {
-                names.push(key);
-            }
-        }
+        names.extend(self.variables.iter().filter_map(|(key, var)| {
+            (var.declared && key.starts_with(prefix)).then_some(key.as_str())
+        }));
         names.sort_unstable();
         names.dedup();
         names

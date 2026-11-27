@@ -7,7 +7,7 @@ use std::str::Chars;
 pub(super) struct LexWord {
     pub(super) word: Word,
     pub(super) protected: bool,
-    pub(super) assignment: Option<String>,
+    pub(super) assignment: Option<std::num::NonZeroUsize>,
 }
 
 #[derive(Clone)]
@@ -1315,7 +1315,7 @@ fn scan_word(
             *chars = start[end..].chars();
             return Ok(Some(Token::Word(LexWord {
                 word: Word::Literal(start[..end].to_owned()),
-                assignment: Some(start[..plain].to_owned()),
+                assignment: std::num::NonZeroUsize::new(plain),
                 protected: false,
             })));
         }
@@ -1353,7 +1353,7 @@ fn scan_word(
         })
     {
         word.literal(&start[..prefix.len() + 1]);
-        assignment = Some(prefix.to_owned());
+        assignment = std::num::NonZeroUsize::new(prefix.len());
         *chars = start[prefix.len() + 1..].chars();
         started = true;
     }
@@ -1460,7 +1460,7 @@ fn scan_word(
                     prefix
                 };
                 if is_identifier(prefix.strip_suffix('+').unwrap_or(prefix)) {
-                    assignment = Some(prefix.to_owned());
+                    assignment = std::num::NonZeroUsize::new(prefix.len());
                 }
                 word.push(c);
             }
@@ -1477,8 +1477,8 @@ fn scan_word(
                 word.part(Part::BraceTilde(tilde));
             }
             '~' if !started
-                || assignment.as_ref().is_some_and(|name| {
-                    follows_colon || start.len() - rest.len() == name.len() + 1
+                || assignment.is_some_and(|length| {
+                    follows_colon || start.len() - rest.len() == length.get() + 1
                 }) =>
             {
                 let length = chars
@@ -1544,6 +1544,14 @@ fn scan(
     // because the source can also be one very long quoted word.
     let capacity = (source.len() / 3).min(32);
     let (mut tokens, mut spans) = super::TOKEN_BUFFERS.take();
+    let capacity = if source.len() >= 1024 && tokens.capacity() <= 32 {
+        // Probe a bounded prefix so one long quoted argument does not reserve a token per byte.
+        let sample = &source.as_bytes()[..1024];
+        let lines = memchr::memchr_iter(b'\n', sample).count();
+        capacity.max((source.len() / 1024).saturating_mul(lines * 2).min(2048))
+    } else {
+        capacity
+    };
     tokens.reserve(capacity);
     spans.reserve(capacity);
     let mut token_start = 0;
@@ -1704,14 +1712,14 @@ fn scan(
                 alias_opens_group |= replacement.contains('(') && command_position(&tokens);
             }
         }
-        let begins_array = assignment.as_ref().is_some_and(|name| {
+        let begins_array = assignment.is_some_and(|length| {
             if !chars.as_str().starts_with('(') {
                 return false;
             }
             let raw = &start[..start.len() - chars.as_str().len()];
-            raw.len() == name.len() + 1
+            raw.len() == length.get() + 1
                 || raw.contains("\\\n")
-                    && raw.split("\\\n").map(str::len).sum::<usize>() == name.len() + 1
+                    && raw.split("\\\n").map(str::len).sum::<usize>() == length.get() + 1
         });
         tokens.push(Token::Word(LexWord {
             word,

@@ -941,25 +941,35 @@ fn run_external(
 }
 
 fn foreground(
-    mut raw: SimpleCommand<Word>,
+    mut raw: std::borrow::Cow<'_, SimpleCommand<Word>>,
     last_status: u8,
     replace: bool,
     session: &mut Session,
 ) -> io::Result<Flow> {
     if session.keyword {
-        separate_keyword_arguments(&mut raw);
+        separate_keyword_arguments(raw.to_mut());
     }
-    if raw.words.is_empty()
-        && raw.redirects.is_empty()
-        && raw.compound.is_none()
-        && !session.xtrace
-        && (raw.assignments.is_empty()
-            || matches!(raw.assignments.as_slice(),
-            [(key, Assignment::Scalar(Word::Literal(value)))] if session.assign_existing_literal(key, value)))
+    if raw.words.is_empty() && raw.redirects.is_empty() && raw.compound.is_none() && !session.xtrace
     {
-        session.last_argument = Some(String::new());
-        return Ok(Flow::Continue(0));
+        let assigned = match raw.assignments.as_slice() {
+            [] => true,
+            [(key, Assignment::Scalar(word))] => {
+                if let Some(value) = word.as_literal() {
+                    session.assign_existing_literal(key, value)
+                } else if let Some(value) = word.stored_parameter(session).map(str::to_owned) {
+                    session.assign_existing_literal(key, &value)
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
+        if assigned {
+            session.last_argument = Some(String::new());
+            return Ok(Flow::Continue(0));
+        }
     }
+    let raw = raw.into_owned();
     let name = job_label(std::slice::from_ref(&raw), false, session);
     if needs_ordered_redirects(&raw, session) {
         return run_ordered(raw, name, last_status, replace, session);
@@ -985,14 +995,14 @@ fn lastpipe(
     duplicate(incoming.as_raw_fd(), 0)?;
     drop(incoming);
     let was_redirected = std::mem::replace(&mut session.stdin_redirected, true);
-    let result = foreground(raw, last_status, false, session);
+    let result = foreground(std::borrow::Cow::Owned(raw), last_status, false, session);
     session.stdin_redirected = was_redirected;
     saved.restore(0)?;
     result
 }
 
 pub(crate) fn run_single(
-    raw: SimpleCommand<Word>,
+    raw: std::borrow::Cow<'_, SimpleCommand<Word>>,
     last_status: u8,
     replace: bool,
     session: &mut Session,
@@ -1013,7 +1023,12 @@ pub fn run_pipeline(
     background: bool,
 ) -> io::Result<Flow> {
     if pipeline.len() == 1 && !background {
-        return run_single(pipeline.pop().unwrap(), last_status, replace, session);
+        return run_single(
+            std::borrow::Cow::Owned(pipeline.pop().unwrap()),
+            last_status,
+            replace,
+            session,
+        );
     }
     let mut launch = session.jobs.launch(background, pipeline.len() == 1);
     let managed = background || launch.group.is_some();

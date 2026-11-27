@@ -66,49 +66,50 @@ pub(super) fn scan_prefix(
     let mut use_default_path = false;
     let mut passed = 0;
     while let Some(name) = words.get(passed) {
+        let builtin = match name.as_str() {
+            "builtin" => true,
+            "command" => false,
+            _ => break,
+        };
         if session.disabled_builtins.contains(name)
             || search == Search::Normal && session.functions.contains_key(name)
         {
             break;
         }
-        match name.as_str() {
-            "builtin" => {
+        if builtin {
+            passed += 1;
+            if words.get(passed).is_some_and(|s| s == "--") {
                 passed += 1;
-                if words.get(passed).is_some_and(|s| s == "--") {
-                    passed += 1;
-                }
-                search = Search::BuiltinsOnly;
             }
-            "command" => {
-                let mut i = passed + 1;
-                let mut default_path = false;
-                while let Some(opt) = words.get(i) {
-                    if opt == "--" {
-                        i += 1;
-                        break;
-                    }
-                    if !opt.starts_with('-') || opt == "-" {
-                        break;
-                    }
-                    // A query or usage error is handled by the builtin itself.
-                    if !opt[1..].chars().all(|flag| flag == 'p') {
-                        break;
-                    }
-                    default_path = true;
+            search = Search::BuiltinsOnly;
+        } else {
+            let mut i = passed + 1;
+            let mut default_path = false;
+            while let Some(opt) = words.get(i) {
+                if opt == "--" {
                     i += 1;
-                }
-                if words
-                    .get(i)
-                    .is_some_and(|arg| arg.starts_with('-') && arg != "-")
-                    && (i == passed + 1 || words[i - 1] != "--")
-                {
                     break;
                 }
-                passed = i;
-                search = Search::NoFunctions;
-                use_default_path |= default_path;
+                if !opt.starts_with('-') || opt == "-" {
+                    break;
+                }
+                // A query or usage error is handled by the builtin itself.
+                if !opt[1..].chars().all(|flag| flag == 'p') {
+                    break;
+                }
+                default_path = true;
+                i += 1;
             }
-            _ => break,
+            if words
+                .get(i)
+                .is_some_and(|arg| arg.starts_with('-') && arg != "-")
+                && (i == passed + 1 || words[i - 1] != "--")
+            {
+                break;
+            }
+            passed = i;
+            search = Search::NoFunctions;
+            use_default_path |= default_path;
         }
     }
     (passed, search, use_default_path)

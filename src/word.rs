@@ -160,11 +160,47 @@ impl Word {
         }
     }
 
+    // Assignment words can retain an empty literal where their name was removed.
+    pub(crate) fn stored_parameter<'s>(&self, session: &'s crate::Session) -> Option<&'s str> {
+        let Self::Expanded(parts) = self else {
+            return None;
+        };
+        let parts = match parts.as_slice() {
+            [Part::Text(prefix), rest @ ..] if prefix.is_empty() => rest,
+            other => other,
+        };
+        let [Part::Parameter { name, .. } | Part::BraceParameter(name)] = parts else {
+            return None;
+        };
+        match name.as_bytes() {
+            [digit @ b'1'..=b'9'] => session
+                .positional
+                .as_slice()
+                .get(usize::from(digit - b'1'))
+                .map(String::as_str),
+            _ if is_identifier(name) => session.stored_scalar(name),
+            _ => None,
+        }
+    }
+
     pub fn declaration(self) -> Self {
         match self {
             Self::Expanded(parts) => Self::Declaration(parts),
             word => word,
         }
+    }
+
+    pub(crate) fn assignment_name(&self, length: std::num::NonZeroUsize) -> &str {
+        let text = match self {
+            Self::Literal(s) => s,
+            Self::Expanded(parts) | Self::Declaration(parts) => {
+                let Part::Text(s) = &parts[0] else {
+                    unreachable!()
+                };
+                s
+            }
+        };
+        &text[..length.get()]
     }
 
     pub fn remove_assignment_prefix(&mut self, length: usize) {
