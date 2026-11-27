@@ -299,19 +299,37 @@ pub(super) fn run(
         && source == opts.fd
         && opts.timeout.is_none()
         && opts.edit.is_none()
-        && opts.max_chars.is_none()
-        && opts.array.is_none()
-        && opts.delimiter == b'\n'
+        && opts.array.is_none_or(|name| {
+            is_identifier(name)
+                && Session::ordinary_assignment(name)
+                && session
+                    .variables
+                    .get(name)
+                    .is_none_or(|v| !v.integer && !v.nameref && !v.dynamic)
+        })
         && opts.names.iter().all(|s| session.plain_read_target(s))
         && (!opts.names.is_empty() || session.plain_read_target("REPLY"))
     {
-        let end = memchr::memchr(b'\n', bytes).unwrap_or(bytes.len());
+        let delimiter = (!opts.exact)
+            .then(|| memchr::memchr(opts.delimiter, bytes))
+            .flatten();
+        let end = delimiter.unwrap_or(bytes.len());
         let line = &bytes[..end];
         if (opts.raw || !line.contains(&b'\\'))
             && !line.contains(&0)
             && let Ok(text) = std::str::from_utf8(line)
         {
-            return assign_fields(session, &opts, text, &[], u8::from(end == bytes.len()));
+            if let Some(limit) = opts.max_chars {
+                let mut chars = text.char_indices();
+                if limit == 0 {
+                    return assign_fields(session, &opts, "", &[], 0);
+                }
+                if chars.nth(limit - 1).is_some() {
+                    let end = chars.next().map_or(text.len(), |(end, _)| end);
+                    return assign_fields(session, &opts, &text[..end], &[], 0);
+                }
+            }
+            return assign_fields(session, &opts, text, &[], u8::from(delimiter.is_none()));
         }
     }
     let _echo = if opts.silent {

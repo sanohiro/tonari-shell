@@ -477,6 +477,28 @@ impl Pattern {
         Some(true)
     }
 
+    /// A repeated single-character atom has a contiguous range of possible
+    /// prefix lengths. Compute the requested end without testing every slice.
+    pub(crate) fn run_prefix(&self, value: &str, longest: bool) -> Option<Option<usize>> {
+        let [atom] = self.atoms.as_slice() else {
+            return None;
+        };
+        let (unit, empty) = unit_run(atom)?;
+        Some(super::localized(|| {
+            if !longest && empty {
+                return Some(0);
+            }
+            let mut end = 0;
+            while let Some(next) = one_character::<false>(unit, value, end) {
+                end = next;
+                if !longest {
+                    break;
+                }
+            }
+            (empty || end != 0).then_some(end)
+        }))
+    }
+
     pub(crate) fn accepts(&self, value: &str, period: bool) -> bool {
         super::localized(|| self.matches_in_locale::<false>(value, period))
     }

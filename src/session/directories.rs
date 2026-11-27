@@ -398,10 +398,7 @@ impl Session {
             }
         }
         let result = if name == "pwd" {
-            self.write_pwd(
-                physical,
-                &mut io::LineWriter::new(crate::builtins::StdoutFd(None)),
-            )
+            self.write_pwd(physical, &mut crate::builtins::StdoutFd(None))
         } else {
             if args.len() > 1 {
                 diagnostic!("cd: too many arguments");
@@ -672,7 +669,15 @@ fn print_path(path: &Path) -> io::Result<()> {
 }
 
 fn write_path(path: &Path, out: &mut dyn Write) -> io::Result<()> {
-    out.write_all(path.as_os_str().as_bytes())?;
-    out.write_all(b"\n")?;
+    let bytes = path.as_os_str().as_bytes();
+    let mut line = [0; 512];
+    if bytes.len() < line.len() {
+        line[..bytes.len()].copy_from_slice(bytes);
+        line[bytes.len()] = b'\n';
+        out.write_all(&line[..=bytes.len()])?;
+    } else {
+        out.write_all(bytes)?;
+        out.write_all(b"\n")?;
+    }
     out.flush()
 }

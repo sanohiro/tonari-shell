@@ -315,9 +315,9 @@ pub fn trim(
     pattern: &str,
     prefix: bool,
     longest: bool,
-    extglob: bool,
+    group: Option<&extended::Pattern>,
 ) -> String {
-    if let Some(cut) = trim_boundary(&value, pattern, prefix, longest, extglob) {
+    if let Some(cut) = trim_boundary(&value, pattern, prefix, longest, group) {
         if prefix {
             value.drain(..cut);
         } else {
@@ -332,7 +332,7 @@ fn trim_boundary(
     pattern: &str,
     prefix: bool,
     longest: bool,
-    extglob: bool,
+    group: Option<&extended::Pattern>,
 ) -> Option<usize> {
     // A question mark consumes one character. An ASCII boundary has the
     // same width in every supported locale.
@@ -354,7 +354,9 @@ fn trim_boundary(
         pattern.strip_suffix('*')
     };
     let literal = star.unwrap_or(pattern);
-    let group = extglob.then(|| extended::Pattern::new(pattern)).flatten();
+    if prefix && let Some(end) = group.and_then(|g| g.run_prefix(value, longest)) {
+        return end;
+    }
     let plain = group.is_none()
         && !literal
             .bytes()
@@ -1001,7 +1003,7 @@ mod tests {
                             cuts.first()
                         };
                         assert_eq!(
-                            trim_boundary(text, pattern, prefix, longest, false),
+                            trim_boundary(text, pattern, prefix, longest, None),
                             expected.copied(),
                             "{text:?} {pattern:?} prefix={prefix} longest={longest}"
                         );

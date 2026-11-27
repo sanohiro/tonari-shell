@@ -24,6 +24,47 @@ pub struct Redirect<W = String> {
     pub word: W,
 }
 
+// Ordinary keyword operands keep their name in the word itself. Only indexed
+// syntax and operands beyond the inline bitset need an additional spelling.
+#[derive(Default, Debug, Clone)]
+pub struct KeywordArgs {
+    plain: u64,
+    other: Option<Rc<Vec<(usize, String)>>>,
+}
+
+impl KeywordArgs {
+    pub(super) fn record(&mut self, index: usize, name: &str) {
+        if index < u64::BITS as usize && !name.contains('[') {
+            self.plain |= 1 << index;
+        } else {
+            Rc::make_mut(self.other.get_or_insert_with(Default::default))
+                .push((index, name.into()));
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.plain == 0 && self.other.is_none()
+    }
+
+    pub(crate) fn key<'a>(&'a self, index: usize, word: &'a Word) -> Option<&'a str> {
+        if index < u64::BITS as usize && self.plain & (1 << index) != 0 {
+            let text = match word {
+                Word::Literal(text) => text,
+                Word::Expanded(parts) | Word::Declaration(parts) => {
+                    let crate::word::Part::Text(text) = parts.first()? else {
+                        return None;
+                    };
+                    text
+                }
+            };
+            return Some(text.split_once('=').map_or(text.as_str(), |(name, _)| name));
+        }
+        let other = self.other.as_ref()?;
+        let pos = other.binary_search_by_key(&index, |(i, _)| *i).ok()?;
+        Some(&other[pos].1)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SimpleCommand<W = String> {
     pub location: Option<Box<Location>>,
@@ -31,7 +72,7 @@ pub struct SimpleCommand<W = String> {
     pub words: Vec<W>,
     pub redirects: Vec<Redirect<W>>,
     pub assignments: Vec<(String, Assignment<W>)>,
-    pub keyword_args: Option<Rc<Vec<(usize, String)>>>,
+    pub keyword_args: KeywordArgs,
 }
 
 impl<W> Default for SimpleCommand<W> {
@@ -42,7 +83,7 @@ impl<W> Default for SimpleCommand<W> {
             words: Vec::new(),
             redirects: Vec::new(),
             assignments: Vec::new(),
-            keyword_args: None,
+            keyword_args: KeywordArgs::default(),
         }
     }
 }

@@ -8,6 +8,14 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == expansion-review ]]; then
+  args=(--case source-functions-mixed --case core-parse-functions)
+  while read -r name; do args+=(--case "$name"); done < <(
+    PYTHONPATH=tools python3 -c 'from bench_scripts import CASES; print("\n".join(k for k in CASES if k.startswith("review-")))'
+  )
+  python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 15 "${args[@]}" > "$out/scripts.txt"
+  exit
+fi
 if [[ $SUITE == capture-parser ]]; then
   args=()
   for name in capture-{position,trim,default,math,helper,helper-lines,helper-stderr} null-builtin-{out,err} source-functions-{repeat,mixed} source-literal-wrappers core-parse-functions redirected-group core-{case,test,arithmetic} pipeline; do

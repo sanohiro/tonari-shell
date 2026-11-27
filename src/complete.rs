@@ -724,7 +724,6 @@ type CommandVisitor<'a> = dyn FnMut(&str, Option<(&Path, u8)>) -> ControlFlow<()
 fn visit_commands(
     prefix: &str,
     session: &Session,
-    cache_names: bool,
     visit: &mut CommandVisitor<'_>,
 ) -> ControlFlow<()> {
     for name in crate::execute::builtin_names()
@@ -763,7 +762,7 @@ fn visit_commands(
             }
             ControlFlow::Continue(())
         };
-        if cache_names && prefix.len() >= 2 {
+        if !prefix.is_empty() {
             command_cache::scan(path, prefix.as_bytes(), &mut checked_fd, &mut candidate)?;
         } else {
             scan(path, prefix.as_bytes(), &mut candidate)?;
@@ -782,7 +781,7 @@ fn executable(name: &str, entry: Option<(&Path, u8)>) -> bool {
 
 fn common_command(prefix: &str, session: &Session) -> Option<Common> {
     let mut common: Option<Common> = None;
-    let _ = visit_commands(prefix, session, true, &mut |name, entry| {
+    let _ = visit_commands(prefix, session, &mut |name, entry| {
         if let Some(known) = &mut common {
             // Only a name that could shorten the prefix or change uniqueness
             // needs a filesystem permission check.
@@ -931,7 +930,7 @@ pub(crate) fn host_names(prefix: &str, session: &Session) -> Vec<String> {
 
 pub fn command_names(prefix: &str, session: &Session) -> Vec<String> {
     let mut names = Vec::new();
-    let _ = visit_commands(prefix, session, false, &mut |name, entry| {
+    let _ = visit_commands(prefix, session, &mut |name, entry| {
         if executable(name, entry) {
             names.push(name.to_owned());
         }

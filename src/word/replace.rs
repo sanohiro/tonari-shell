@@ -17,15 +17,50 @@ fn write_replacement(out: &mut String, template: &str, matched: &str, expand_amp
     }
 }
 
+pub(super) struct ReplacePattern<'a> {
+    pub text: &'a str,
+    pub extended: bool,
+    pub fold: Option<crate::session::CharacterLocale>,
+    pub group: Option<crate::pattern::extended::Pattern>,
+}
+
+impl<'a> ReplacePattern<'a> {
+    pub fn new(
+        text: &'a str,
+        extended: bool,
+        fold: Option<crate::session::CharacterLocale>,
+    ) -> Self {
+        use crate::pattern::extended::Pattern;
+        let group = match fold {
+            Some(locale)
+                if !text.is_empty()
+                    && (crate::pattern::has_magic(text, false)
+                        || extended && crate::pattern::extended::has_group(text)) =>
+            {
+                Some(Pattern::insensitive(text, extended, locale))
+            }
+            _ if extended => Pattern::new(text),
+            _ => None,
+        };
+        Self {
+            text,
+            extended,
+            fold,
+            group,
+        }
+    }
+}
+
 pub(super) fn substitute(
     mut text: String,
-    pattern: &str,
+    compiled: &ReplacePattern<'_>,
     template: &str,
     mode: ReplaceMode,
     expand_amp: bool,
-    extglob: bool,
-    fold: Option<crate::session::CharacterLocale>,
 ) -> String {
+    let pattern = compiled.text;
+    let fold = compiled.fold;
+    let extglob = compiled.extended;
     use ReplaceMode::*;
     let expand_amp = expand_amp && template.contains(['\\', '&']);
     if expand_amp && template == "&" {
@@ -123,13 +158,7 @@ pub(super) fn substitute(
         out.push_str(&text[copied..]);
         return out;
     }
-    let group = match fold {
-        Some(locale) if !pattern.is_empty() => Some(
-            crate::pattern::extended::Pattern::insensitive(pattern, extglob, locale),
-        ),
-        _ if extglob => crate::pattern::extended::Pattern::new(pattern),
-        _ => None,
-    };
+    let group = compiled.group.as_ref();
     if group.is_none() && !crate::pattern::has_magic(pattern, false) {
         let literal = crate::pattern::unescape(pattern);
         let needle = literal.as_ref();
@@ -231,6 +260,8 @@ pub(super) fn substitute(
         let start = bounds[i];
         let end = if mode == Suffix {
             accepts(&text[start..]).then_some(bounds.len() - 1)
+        } else if let Some(end) = group.and_then(|g| g.run_prefix(&text[start..], true)) {
+            end.map(|length| i + bounds[i..].partition_point(|&offset| offset < start + length))
         } else if let Some(width) = max_width {
             let last = i.saturating_add(width);
             if ascii.is_some() {

@@ -1,3 +1,5 @@
+mod helper;
+
 use std::io::{self, Read};
 use std::os::fd::{AsFd, AsRawFd, IntoRawFd};
 
@@ -56,7 +58,7 @@ pub(crate) fn current_substitution(
         && !session.traps.active()
         && !session.xtrace
         && let Some(cmd) = sole_plain_command(&body)
-        && (!session.keyword || cmd.keyword_args.is_none())
+        && (!session.keyword || cmd.keyword_args.is_empty())
         && let Some(name @ ("echo" | "printf")) =
             cmd.words.first().and_then(parser::Word::as_literal)
         && !session.functions.contains_key(name)
@@ -302,11 +304,14 @@ fn wrapped_capture(
     if session.function_nesting_full()
         || session.shopt.extdebug
         || session.traced_functions.contains(name)
-        || session.keyword && call.keyword_args.is_some()
+        || session.keyword && !call.keyword_args.is_empty()
     {
         return None;
     }
-    let cmd = sole_command(function.definition.body.statements())?;
+    let Some(cmd) = sole_command(function.definition.body.statements()) else {
+        let definition = function.definition.clone();
+        return helper::capture(session, definition.body.statements(), arguments, last);
+    };
     let (program, operands) = cmd.words.split_first()?;
     let path = program.as_literal()?;
     if path.starts_with('/')
@@ -327,7 +332,7 @@ fn wrapped_capture(
     if !can_elide_child(session)
         || session.functions.contains_key(path)
         || session.disabled_builtins.contains(path)
-        || session.keyword && cmd.keyword_args.is_some()
+        || session.keyword && !cmd.keyword_args.is_empty()
     {
         return None;
     }
@@ -413,7 +418,7 @@ fn stored_path<'a>(
     let path = if name.starts_with(|c: char| c.is_ascii_digit()) {
         let index = name.parse::<usize>().ok()?.checked_sub(1)?;
         session.positional.as_slice().get(index)?
-    } else if is_identifier(name) && !matches!(name.as_str(), "_" | "BASH_COMMAND" | "LINENO") {
+    } else if is_identifier(name) && !matches!(name.as_ref(), "_" | "BASH_COMMAND" | "LINENO") {
         session.stored_scalar(name)?
     } else {
         return None;
@@ -570,7 +575,7 @@ fn capture_simple(
         return None;
     }
     if let Some(cmd) = sole_plain_command(body)
-        && (!session.keyword || cmd.keyword_args.is_none())
+        && (!session.keyword || cmd.keyword_args.is_empty())
         && let [name, flag, names @ ..] = cmd.words.as_slice()
         && name.as_literal() == Some("trap")
         && (flag.as_literal() == Some("-p") || flag.as_literal() == Some("-P") && !names.is_empty())
@@ -592,7 +597,7 @@ fn capture_simple(
     }
     let capture_line = std::cell::Cell::new(None);
     let command = |cmd: &parser::SimpleCommand<Word>| {
-        if session.keyword && cmd.keyword_args.is_some() {
+        if session.keyword && !cmd.keyword_args.is_empty() {
             return None;
         }
         let (first, args) = cmd.words.split_first()?;

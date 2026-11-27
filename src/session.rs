@@ -954,6 +954,22 @@ impl Session {
         )
     }
 
+    pub(crate) fn capture_local(&self, name: &str) -> bool {
+        is_identifier(name)
+            && name.as_bytes()[0].is_ascii_lowercase()
+            && !name.bytes().any(|b| b.is_ascii_uppercase())
+            && !matches!(name, "histchars" | "auto_resume")
+            && Self::ordinary_assignment(name)
+            && self.variables.get(name).is_none_or(|v| {
+                !v.readonly
+                    && !v.integer
+                    && !v.dynamic
+                    && !v.nameref
+                    && v.elements.is_none()
+                    && v.letter_case.is_none()
+            })
+    }
+
     fn plain_read_target(&self, name: &str) -> bool {
         is_identifier(name)
             && Self::ordinary_assignment(name)

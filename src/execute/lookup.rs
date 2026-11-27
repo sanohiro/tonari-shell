@@ -160,7 +160,10 @@ pub(super) fn describe(cmd: &PreparedCommand, session: &Session) -> u8 {
         if default_path {
             std::borrow::Cow::Borrowed(default_system_path())
         } else {
-            std::borrow::Cow::Owned(session.search_path(&[]))
+            session.stored_scalar("PATH").map_or_else(
+                || std::borrow::Cow::Owned(session.search_path(&[])),
+                |path| std::borrow::Cow::Borrowed(OsStr::new(path)),
+            )
         }
     });
     let ignored = std::cell::LazyCell::new(|| IgnoredExecutables::new(session));

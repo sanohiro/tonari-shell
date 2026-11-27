@@ -88,7 +88,12 @@ pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String
         .strip_prefix('#')
         .and_then(|key| env.borrowed_scalar(key))
     {
-        return Ok(Some(text.chars().count().to_string()));
+        let length = if text.is_ascii() {
+            text.len()
+        } else {
+            text.chars().count()
+        };
+        return Ok(Some(itoa::Buffer::new().format(length).to_owned()));
     }
     if let Some(reference) = name.strip_prefix('#')
         && env.session.is_nameref(reference)
@@ -134,6 +139,13 @@ pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String
         }
         if !matches!(index, "@" | "*") && !index.bytes().all(|b| b.is_ascii_digit()) {
             let i = env.arithmetic(index)?;
+            if !env.shadows(base)
+                && crate::word::is_identifier(base)
+                && !env.session.is_nameref(base)
+                && let Ok(index) = env.session.relative_index(base, i)
+            {
+                return Ok(env.session.element(base, index));
+            }
             expanded = format!("{base}[{i}]");
             &expanded
         } else {
@@ -262,18 +274,21 @@ impl Modification {
                 } else {
                     replacement.scalar(&lookup, positional)
                 };
+                let compiled = super::replace::ReplacePattern::new(
+                    &pattern,
+                    env.session.shopt.glob.extglob,
+                    env.session
+                        .shopt
+                        .nocasematch
+                        .then(|| env.session.character_locale()),
+                );
                 Ok(values.map(quoted, |v| {
                     super::replace::substitute(
                         v,
-                        &pattern,
+                        &compiled,
                         &replacement,
                         *mode,
                         env.session.shopt.patsub_replacement,
-                        env.session.shopt.glob.extglob,
-                        env.session
-                            .shopt
-                            .nocasematch
-                            .then(|| env.session.character_locale()),
                     )
                 }))
             }

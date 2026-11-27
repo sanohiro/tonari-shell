@@ -690,6 +690,36 @@ impl Session {
         self.store_elements(name, Elements::Dense(values), false);
     }
 
+    pub(crate) fn assign_expanded_array(
+        &mut self,
+        name: &str,
+        append: bool,
+        items: ArrayItems,
+    ) -> Result<(), &'static str> {
+        if let ArrayItems::Indexed(words) = &items
+            && !append
+            && super::is_identifier(name)
+            && !self.protected_array(name)
+            && self.variables.get(name).is_none_or(|v| {
+                !v.readonly
+                    && !v.dynamic
+                    && !v.integer
+                    && !v.nameref
+                    && v.letter_case.is_none()
+                    && v.associative().is_none()
+            })
+            && words.iter().all(|(index, _)| index.is_none())
+        {
+            let ArrayItems::Indexed(words) = items else {
+                unreachable!()
+            };
+            let values = words.into_iter().map(|(_, value)| value).collect();
+            self.store_elements(name, Elements::Dense(values), false);
+            return Ok(());
+        }
+        self.assign_array(name, append, &items, false)
+    }
+
     pub fn assign_array(
         &mut self,
         name: &str,

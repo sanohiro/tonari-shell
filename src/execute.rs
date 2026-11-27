@@ -978,7 +978,7 @@ fn foreground(
             if stage.compound.is_none()
                 && stage.assignments.is_empty()
                 && stage.redirects.is_empty()
-                && !(session.posix && stage.keyword_args.is_some()) =>
+                && (!session.posix || stage.keyword_args.is_empty()) =>
         {
             prepare::borrowed_arguments(&stage.words, session, last_status)
         }

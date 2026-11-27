@@ -646,7 +646,7 @@ pub fn text(
                 .min(end.saturating_add(WINDOW).saturating_add(scan_budget));
             // A sourced file has no per-input history or command-number
             // update. Preserve those boundaries for command strings and eval.
-            let batch = if !tail && eval_line.is_none() && session.source_depth > 0 {
+            let batch = if !tail && eval_line.is_none() && (check || session.source_depth > 0) {
                 lookahead::function_run(&source[start..], text, session, base_line)
                     .map(|(p, n, lines)| (eval::Program::Fresh(p), n, lines))
             } else {
