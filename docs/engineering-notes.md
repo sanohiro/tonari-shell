@@ -1,5 +1,9 @@
 # Engineering notes / 開発知見
 
+## November 27 · Declaration targets / 変数宣言と名前参照
+
+The attribute flag, variable name and array contents used by `@A`, `@a`, `@K` and `@k` belong to the same resolved declaration. Looking up the flags through a nameref and then formatting the original binding printed a nameref declaration or lost all array entries. Ordinary arrays can be formatted by reference. Dynamic shell arrays need a current snapshot. 添字付きの要素に独立した宣言属性はなく、配列全体への参照とは結果が異なる。未束縛と循環参照についても引数の個数まで比較した。The differential witness is `nameref-transform`. [Measurements / 計測](benchmarks.md#declaration-transform)
+
 ## November 27 · Incremental script input / スクリプトの逐次読み込み
 
 Streamed input and borrowed script text now own the same parse state. Empty input returns zero even when the caller supplied a previous failure status. A recoverable array syntax error updates both the command status and `PIPESTATUS`. File descriptors, history recording and tail execution follow each input source's rules. ファイルと文字列で、引用符、ヒアドキュメント、構文エラー後の状態更新を共通化した。子が標準入力の残りを読めるよう、先読みした FD の位置調整はファイル側で行う。[Measurements / 計測](benchmarks.md#script-read-state)

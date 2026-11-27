@@ -83,6 +83,31 @@ pub(crate) fn history_word_spans(s: &str) -> Vec<(usize, usize)> {
     words
 }
 
+// Readline groups an adjacent decimal descriptor and one optional move/close
+// marker with <& or >&. Any remaining text starts a separate history word.
+fn history_fd_end(
+    line: &str,
+    tokens: &[Token],
+    spans: &[(usize, usize)],
+    index: usize,
+) -> Option<usize> {
+    let previous = index.checked_sub(1)?;
+    if !matches!(
+        tokens[previous],
+        Token::Redirect(_, Target::Duplicate | Target::OutputWord)
+    ) {
+        return None;
+    }
+    let (start, end) = spans[index];
+    if spans[previous].1 != start {
+        return None;
+    }
+    let bytes = &line.as_bytes()[start..end];
+    let digits = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
+    let consumed = digits + usize::from(bytes.get(digits) == Some(&b'-'));
+    (consumed != 0).then_some(start + consumed)
+}
+
 pub(crate) fn history_designator_spans(line: &str, extglob: bool) -> Vec<(usize, usize)> {
     if !line.bytes().any(|b| {
         matches!(
@@ -107,24 +132,16 @@ pub(crate) fn history_designator_spans(line: &str, extglob: bool) -> Vec<(usize,
     let _extglob = crate::ScopedCell::enter(&EXTGLOB, extglob);
     with_tokens(line, |tokens, spans| {
         let mut result: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
-        let mut duplicate = false;
-        for (token, (start, end)) in tokens.iter().zip(spans.iter().copied()) {
-            if duplicate
-                && let Some(last) = result.last_mut()
-                && last.1 == start
-                && line[start..end]
-                    .trim_end_matches('-')
-                    .bytes()
-                    .all(|b| b.is_ascii_digit())
+        for (i, (token, &(mut start, end))) in tokens.iter().zip(spans).enumerate() {
+            if let Some(split) = history_fd_end(line, tokens, spans, i)
+                && let Some(previous) = result.last_mut()
             {
-                last.1 = end;
-            } else if !matches!(token, Token::Newline) {
+                previous.1 = split;
+                start = split;
+            }
+            if start < end && !matches!(token, Token::Newline) {
                 result.push((start, end));
             }
-            duplicate = matches!(
-                token,
-                Token::Redirect(_, Target::Duplicate | Target::OutputWord)
-            );
         }
         result
     })
@@ -169,21 +186,12 @@ pub(crate) fn last_history_argument(line: &str) -> Option<&str> {
             let closing = line[a..b].trim_end_matches('\n').rsplit('\n').next()?;
             return last_history_argument(closing);
         }
-        let (mut start, end) = spans[index];
-        // The history word for an adjacent fd duplication includes its operator.
-        if index > 0
-            && spans[index - 1].1 == start
-            && matches!(
-                tokens[index - 1],
-                Token::Redirect(_, Target::Duplicate | Target::OutputWord)
-            )
-            && line[start..end]
-                .trim_end_matches('-')
-                .bytes()
-                .all(|b| b.is_ascii_digit())
-        {
-            start = spans[index - 1].0;
-        }
+        let (start, end) = spans[index];
+        let start = match history_fd_end(line, tokens, spans, index) {
+            Some(split) if split == end => spans[index - 1].0,
+            Some(split) => split,
+            None => start,
+        };
         Some(&line[start..end])
     })
     .unwrap_or_else(|| history_word_spans(line).last().map(|&(a, b)| &line[a..b]))

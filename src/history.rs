@@ -871,7 +871,7 @@ impl History {
         let encoded = encoded_fragment(needle);
         let matches = journal_matcher(needle, prefix, &encoded);
         let mut end = self.tail_start;
-        let cached = self.window.bytes(&m);
+        let cached = self.window.matching(&m);
         let block = &mut self.search_buffer;
         while end != 0 {
             if waiting() {
@@ -879,10 +879,7 @@ impl History {
             }
             let start = end.saturating_sub(BLOCK as u64);
             let size = (end - start) as usize;
-            let buf = if let Some((base, data)) = cached
-                && let Some(offset) = start.checked_sub(base)
-                && let Some(bytes) = data.get(offset as usize..offset as usize + size)
-            {
+            let buf = if let Some(bytes) = cached.and_then(|window| window.range(start, size)) {
                 bytes
             } else {
                 block.resize(size, 0);

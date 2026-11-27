@@ -1,5 +1,21 @@
 # Startup and execution / 起動と実行性能
 
+<a id="declaration-transform"></a>
+
+## 2026-11-27 · Declaration transforms / 宣言属性と配列展開
+
+Interleaved release medians in ms. On M1, the first implementation and the final implementation produce the same result on the timed valid reference chain. Each of 2,000 iterations expands an array declaration, its key/value fields and the quoted pairs.
+
+| Workload | First fix | Final | Bash 5.3.20 |
+|---|---:|---:|---:|
+| M1 nameref transforms | 9.436 | 9.140 | 22.531 |
+| M1 declaration word boundaries | 6.116 | 6.047 | 15.187 |
+| M1 scalar declaration transform | 5.829 | 5.983 | 14.952 |
+| M1 temporary binding and local declaration | 11.359 | 11.235 | 39.251 |
+| M1 array declaration and printing | 10.283 | 10.328 | 17.463 |
+
+`python3 tests/compat/source_review.py BASH CURRENT --first FIRST_FIX --case nameref-transform --runs 31`. On native Linux x86-64 (21 samples), the reference transforms took 5.885 ms with the fix and 17.452 ms with Bash. The old implementation returned empty key/value fields, so its timing for that case measures less work. The working prefix declaration workload took 10.096/9.817/43.354 ms (previous/current/Bash). M1 の配布サイズは変更前後とも 1,748,896 バイト。Linux の静的 PIE は 2,441,400 → 2,439,640 バイト。 [Linux samples](https://github.com/sanohiro/tonari-shell/actions/runs/45939931495)
+
 <a id="script-read-state"></a>
 
 ## 2026-11-27 · Incremental script state / 入力経路の共通化

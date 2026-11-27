@@ -25,6 +25,12 @@ def eval_loop(body, check, expected, setup="", count=2000):
 
 # The last command prints a result that the driver checks on every run.
 CASES = {
+    "history-long-event-word": (
+        """printf -v pad '%65536s' x
+history -s "cmd '$pad' 2>&31- last"
+for ((i=0; i<300; i++)); do history -p '!cmd:$' >/dev/null; done
+history -p '!cmd:$'""", "last",
+    ),
     "eval-fixed": eval_loop("""eval '((sum += i))'""", 'echo "$sum"', "1999000"),
     "eval-changing": eval_loop('eval "n=$i"', 'echo "$n"', "1999"),
     "eval-arguments": eval_loop("""eval -- '((sum' += 'i))'""", 'echo "$sum"', "1999000"),

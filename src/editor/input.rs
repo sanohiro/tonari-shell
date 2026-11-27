@@ -209,13 +209,12 @@ impl Keys {
             .and_then(|s| s.chars().next()))
     }
 
-    pub(super) fn insert_burst(
+    pub(super) fn append_burst(
         &mut self,
         first: u8,
         session: &Session,
         out: &mut String,
     ) -> io::Result<()> {
-        out.clear();
         let Some(c) = self.character(first)? else {
             return Ok(());
         };
