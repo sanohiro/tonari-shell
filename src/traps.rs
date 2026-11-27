@@ -146,12 +146,13 @@ fn action(handler: usize) -> libc::sigaction {
 }
 
 pub(crate) fn disposition(sig: i32) -> io::Result<libc::sigaction> {
-    let mut old = std::mem::MaybeUninit::uninit();
-    if unsafe { libc::sigaction(sig, std::ptr::null(), old.as_mut_ptr()) } < 0 {
+    // libc may write only the kernel-sized prefix of a signal mask. Start
+    // with initialized storage because traps save and restore the whole action.
+    let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
+    if unsafe { libc::sigaction(sig, std::ptr::null(), &mut old) } < 0 {
         return Err(io::Error::last_os_error());
     }
-    // A successful query filled the caller-provided sigaction.
-    Ok(unsafe { old.assume_init() })
+    Ok(old)
 }
 
 fn set_disposition(sig: i32, new: &libc::sigaction) -> io::Result<()> {
@@ -334,7 +335,7 @@ impl Traps {
             self.watch_exit(command != "-" && !command.is_empty())?;
         }
         let real = is_os_signal(sig) && sig != libc::SIGSTOP && sig != libc::SIGKILL;
-        let mut original = action(libc::SIG_DFL);
+        let mut original;
         if let Some(old) = self.entries.get(&sig) {
             original = old.original;
         } else if let Some(old) = self.implicit_action(sig) {
@@ -356,6 +357,8 @@ impl Traps {
                     action(libc::SIG_DFL)
                 };
             }
+        } else {
+            original = action(libc::SIG_DFL);
         }
         if real {
             let new = match command {
