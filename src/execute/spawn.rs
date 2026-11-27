@@ -116,8 +116,9 @@ impl External {
         let path = match &self.search_paths {
             Some(paths) => paths
                 .first()
+                .map(|p| p.as_c_str())
                 .ok_or_else(|| io::Error::from_raw_os_error(libc::ENOENT))?,
-            None => &self.words[0],
+            None => &self.program,
         };
         let spawn_with = |attributes| unsafe {
             let env = self
@@ -254,9 +255,9 @@ impl External {
         ]
         .into_iter()
         .chain(
-            self.words[1..]
-                .iter()
-                .map(|w| OsStr::from_bytes(w.as_bytes()).to_owned()),
+            self.argument_bytes
+                .split_inclusive(|&b| b == 0)
+                .map(|word| OsStr::from_bytes(&word[..word.len() - 1]).to_owned()),
         );
         let status = crate::invoke(argv);
         let _ = std::io::stdout().flush();
