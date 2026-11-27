@@ -1,5 +1,69 @@
 # Startup and execution / 起動と実行性能
 
+<a id="priority-implementation"></a>
+
+## November 27 · Repeated command completion and filtered history / 補完キャッシュと履歴の絞り込み
+
+Native distribution builds compared with `06a998a`. The Mac PTY test used the real six-directory PATH and the four prefixes described below, rotating builds over 51 sessions. Ubuntu 24.04 x86-64 used six fixture directories, 2,031 entries and 41 sessions. Each Tab ends when the unique completed name and its trailing space appear. The table gives medians in milliseconds. [Linux samples, p95 and host details](https://github.com/sanohiro/tonari-shell/actions/runs/46010969786)
+
+| Workload | M1 previous | M1 current | GNU Bash 5.3.20 | Linux previous | Linux current | Ubuntu Bash |
+|---|---:|---:|---:|---:|---:|---:|
+| First command-name Tab | 1.018 | 1.070 | 2.332 | 0.377 | 0.530 | 0.425 |
+| Second Tab, a different command | 0.931 | 0.058 | 1.520 | 0.347 | 0.053 | 0.401 |
+| Third Tab, a different command | 0.933 | 0.058 | 1.513 | 0.339 | 0.043 | 0.383 |
+| Fourth Tab, first command again | 0.924 | 0.055 | 1.521 | 0.338 | 0.042 | 0.381 |
+| Oldest Japanese history match, 100,000 entries | 0.572 | 0.460 | — | 0.253 | 0.136 | — |
+| Query echo during history typeahead | 0.040 | 0.040 | — | 0.059 | 0.077 | — |
+
+On M1, a separate string per entry with sorting took 1.225 ms on the first Tab. Sorting offsets into packed names took 1.187 ms. Scanning a packed list linearly on reuse took 1.097 ms on the first Tab and 0.077–0.083 ms afterwards. The release groups offsets by the first byte, preserves early exit on a cold lookup and bounds stored names per directory. Apple Bash 3.2.57 took 1.023 ms on the first Tab and 0.930–0.958 on the next three. The first Ubuntu Tab took 0.105 ms longer than Bash. The second Tab recovered the additional build cost on both machines.
+
+On Ubuntu the older history match improved at p95 from 0.357 to 0.160 ms. During typeahead, query-echo p95 changed from 0.099 to 0.091 ms, while the selected-row median changed from 0.068 to 0.099 ms. Preparing additional substring searchers on every fill also increased the Linux typeahead median. The release uses the Unicode page index and retains the existing substring search for secondary terms. Reproduce with `tools/bench_completion.py PREVIOUS CURRENT --bash BASH --command-cache --runs 41` and `tools/bench_history_fields.py PREVIOUS CURRENT --entries 100000 --runs 31`. [Earlier Linux trial](https://github.com/sanohiro/tonari-shell/actions/runs/46010353235)
+
+| Started-shell workload, 41 samples | M1 previous/current/Bash (ms) | Linux previous/current/Bash (ms) |
+|---|---:|---:|
+| 2,000 function definitions | 1.315 / 1.313 / 3.505 | 1.514 / 1.506 / 3.473 |
+| 2,000 compound function redefinitions | 4.690 / 4.692 / 7.061 | 4.427 / 4.382 / 5.998 |
+| 32 uncached PATH launches | 39.252 / 39.342 / 61.860 | 10.354 / 10.292 / 14.389 |
+| 1,024 formatted prints | 1.557 / 1.532 / 4.158 | 2.073 / 2.046 / 3.070 |
+| Numeric printf assignment | 1.339 / 1.342 / 5.228 | 1.280 / 1.275 / 3.896 |
+| Symbolic umask query | 0.901 / 0.911 / 3.907 | 0.590 / 0.592 / 2.714 |
+
+Linux compound definitions and uncached launches still took 73% and 72% of Bash time. The M1 whole-invocation control resolving a command 128 times after 16 missing PATH entries took 9.019/8.634/14.194 ms (previous/current/Bash). For 2,000 multiline functions passed via `-c`, the same comparison was 8.409/8.392/14.246 ms. The time difference for the latter was within sample variation. A symbolic umask trial replaced a heap-allocated output string and line writer with a bounded stack buffer and one write. On M1 this reduced the first corrected implementation from 1.050 to 0.960 ms in a paired run. The native CI suite `priority-review` runs the paired script workloads via `tools/bench_scripts.py --timing started`.
+
+macOSの配布バイナリは1,748,544バイトから約1,765,100バイト、Linux x86-64の静的PIEは2,406,904から2,410,200バイトになった。初回Tabの追加コストと2回目からの短縮を別々に記録した。履歴ピッカーも、検索結果が見えるまでと、追加入力が表示されるまでを分けて計測した。
+
+<a id="priority-review-06a998a"></a>
+
+## November 27 · Command completion, filtered history and file reads / コマンド補完・履歴の絞り込み・ファイル入力
+
+Apple M1, macOS 27.2.1, native distribution build of `06a998a`. The figures below are from local research builds. Linux pipe numbers in the engineering notes come from the earlier native Xeon experiment.
+
+**Command-name Tab.** Each sample opened a fresh PTY with an empty home, `--noprofile --norc` and `INPUTRC=/dev/null`. The six PATH directories were `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`, containing 2,030 entries. In one session type the four prefixes below in order, wait for the prefix to echo, send Tab, and wait for the completed name and its trailing space. Use Ctrl-C to clear the line between completions. All four executables rotated over 31 sessions each. Elapsed milliseconds are median/p95.
+
+| Prefix | Tonari | Name-cache trial | GNU Bash 5.3.20 | Apple Bash 3.2.57 |
+|---|---:|---:|---:|---:|
+| `sw_ver`, first Tab | 0.993/1.214 | 1.221/1.510 | 2.341/3.440 | 1.031/1.351 |
+| `osacomp` | 0.932/1.127 | 0.044/0.111 | 1.532/1.902 | 0.969/1.237 |
+| `xcode-selec` | 0.939/1.169 | 0.045/0.062 | 1.528/1.824 | 0.954/1.210 |
+| `sw_ver`, repeat | 0.933/1.049 | 0.041/0.054 | 1.535/1.794 | 0.951/1.149 |
+
+The trial sorted directory names on first use and searched by prefix on reuse. The live executable checks and PATH order were retained. Current Tonari took 61% of GNU Bash time on the three warm completions in this run. Populating the cache added 0.228 ms to the first Tab. This measurement covers unique matches on a warm filesystem. A separate PTY check warmed the directory, toggled executable permission, created and removed a symlink target, removed and restored directory read permission, and renamed an executable. Both builds returned the expected edited line on all ten Tabs.
+
+**Filtered history.** A separate change in the same trial used the existing Unicode page flags and prepared the secondary term matchers once per fill. Run `python3 tools/bench_history_fields.py BASELINE TRIAL --entries 100000 --runs 31`. The driver types two terms, waits for the matching row and checks the accepted command. The oldest Japanese match went from 0.608/0.745 to 0.500/0.576 ms. A recent match went from 0.123/0.170 to 0.126/0.175 ms. During typeahead, the query echo was 0.057/0.076 and 0.057/0.073 ms. The distribution binaries measured 1,748,544 and 1,765,104 bytes respectively for baseline and the combined Tab/picker trial.
+
+**Regular-file read.** An instrumented baseline running `while read -r a b c d` on 2,000 copies of `aaaa bbbb cccc dddd\n` (40,000 bytes) counted 2,001 position queries, 2,001 reads including EOF, 1,999 rewinds and 7,774,616 bytes returned by `read`. These are bytes delivered to the process through the kernel cache. The parent/child offset witness is in the [engineering notes](engineering-notes.md).
+
+In an uninstrumented trial each builtin started with a 256-byte read and could grow to 4 KiB within that call. For timing, start each shell, wait for its ready marker, then release it to count four-field rows in a warm file. Verify the count from the running shell. Each row below is the median/p95 of 31 rotating trials after three warmups. The long-row case had 16,377 ASCII characters in the first field followed by ` b c d\n`.
+
+| Workload | Tonari | 256-byte first read | GNU Bash 5.3.20 | Apple Bash 3.2.57 |
+|---|---:|---:|---:|---:|
+| 2,000 × 20-byte rows | 5.264/6.762 | 5.143/5.883 | 9.779/10.385 | 9.123/10.463 |
+| 256 × 16 KiB rows | 1.889/2.078 | 2.147/2.534 | 76.438/79.817 | 56.600/58.919 |
+
+**Parser counts.** Instrumenting the outer source-line map construction, `Reader::new` and the function source-name allocation distinguished the same 2,000 definitions written as one line each or three lines each. The body was `if test -n "$1"; then :; else :; fi` and the last command invoked the last function. Direct files built the outer map 0 and 2,000 times respectively, and constructed 2,001 readers in each case. Sourcing the files gave the same map counts and one extra reader. Both file entry points reused the source name for all 2,000 functions. Passing the same text via `-c` allocated the fallback source name 2,000 times for either layout. Counts came from a debug build and were kept separate from release timings.
+
+実機の端末で、初回の Tab、同じセッションでの別候補・同一候補、履歴での古い一致・近い一致・入力中の表示を個別に計測した。ファイルの `read` は行の長さによって先読み量の影響が逆転した。関数定義の行番号表は、スクリプトの行構成と読み込み方で構築回数が変わる。
+
 <a id="startup-journal-launch"></a>
 
 ## November 27 · Journal reads, first search and process launch / 履歴先読み・初回検索・プロセス起動

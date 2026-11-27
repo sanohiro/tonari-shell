@@ -61,21 +61,19 @@ fn read_names<const CHECK_END: bool>(
         }
     }
 
-    let Some(stream) = NonNull::new(unsafe { libc::opendir(path.as_ptr()) }) else {
-        return None;
-    };
+    let stream = NonNull::new(unsafe { libc::opendir(path.as_ptr()) })?;
     let stream = DirectoryStream(stream);
-    let errno = unsafe { libc::__error() };
+    let errno = CHECK_END.then(|| unsafe { libc::__error() });
     loop {
         // POSIX distinguishes EOF from an error by errno on a null result.
         let entry = unsafe {
-            if CHECK_END {
+            if let Some(errno) = errno {
                 *errno = 0;
             }
             libc::readdir(stream.0.as_ptr())
         };
         if entry.is_null() {
-            return (!CHECK_END || unsafe { *errno } == 0).then_some(ControlFlow::Continue(()));
+            return (errno.is_none_or(|p| unsafe { *p } == 0)).then_some(ControlFlow::Continue(()));
         }
         // readdir owns the name until the next call on this stream.
         let name = unsafe {
