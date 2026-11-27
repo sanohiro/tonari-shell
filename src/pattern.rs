@@ -904,6 +904,10 @@ mod tests {
             "雪🌱e\u{301}",
             "a/b",
             "a*b",
+            "5.txt",
+            "6雪.txt",
+            ".5.txt",
+            "p.txt",
         ];
         localized(|| {
             for source in [
@@ -931,9 +935,13 @@ mod tests {
                 ".**v",
                 r"a\*b",
                 "[!a]*",
+                "[56]*.txt",
+                "*.[ab]",
+                ".[56]*.txt",
+                "a[ab]a",
                 ".??*",
             ] {
-                let matcher = Matcher::new(source);
+                let matchers = [Matcher::new(source), Matcher::compile(source, true)];
                 let native = CString::new(source).unwrap();
                 for value in values {
                     let name = CString::new(value).unwrap();
@@ -941,11 +949,13 @@ mod tests {
                         let flags = if period { libc::FNM_PERIOD } else { 0 };
                         let expected =
                             unsafe { libc::fnmatch(native.as_ptr(), name.as_ptr(), flags) == 0 };
-                        assert_eq!(
-                            matcher.accepts(value.as_bytes(), period, None),
-                            expected,
-                            "{source:?} {value:?} {flags}"
-                        );
+                        for matcher in &matchers {
+                            assert_eq!(
+                                matcher.accepts(value.as_bytes(), period, None),
+                                expected,
+                                "{source:?} {value:?} {flags}"
+                            );
+                        }
                     }
                 }
             }

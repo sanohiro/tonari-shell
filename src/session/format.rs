@@ -196,6 +196,18 @@ pub(super) fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Co
     }
 }
 
+// Short indices and values dominate dense array listings. Copying these inline
+// avoids a variable-length slice copy for each field on the static build.
+fn append_listing_bytes(chunk: &mut Vec<u8>, bytes: &[u8]) {
+    if bytes.len() < std::mem::size_of::<usize>() {
+        for &byte in bytes {
+            chunk.push(byte);
+        }
+    } else {
+        chunk.extend_from_slice(bytes);
+    }
+}
+
 pub(super) fn print_variable_value(out: &mut dyn Write, var: &Variable) -> io::Result<()> {
     if let Some(map) = var.associative() {
         if var.array_assigned {
@@ -220,14 +232,14 @@ pub(super) fn print_variable_value(out: &mut dyn Write, var: &Variable) -> io::R
         if var.array_assigned {
             write!(out, "=(")?;
             const CHUNK_SIZE: usize = 4096;
-            let mut chunk = Vec::new();
+            let mut chunk = Vec::with_capacity(CHUNK_SIZE);
             let mut decimal = itoa::Buffer::new();
             for (position, (index, value)) in array.iter().enumerate() {
                 if position > 0 {
                     chunk.push(b' ');
                 }
                 chunk.push(b'[');
-                chunk.extend_from_slice(decimal.format(index).as_bytes());
+                append_listing_bytes(&mut chunk, decimal.format(index).as_bytes());
                 chunk.extend_from_slice(b"]=");
                 if value.len() >= CHUNK_SIZE {
                     out.write_all(&chunk)?;
@@ -241,7 +253,7 @@ pub(super) fn print_variable_value(out: &mut dyn Write, var: &Variable) -> io::R
                         print_value(&mut chunk, value)?;
                     } else {
                         chunk.push(b'"');
-                        chunk.extend_from_slice(value.as_bytes());
+                        append_listing_bytes(&mut chunk, value.as_bytes());
                         chunk.push(b'"');
                     }
                     if chunk.len() >= CHUNK_SIZE {
