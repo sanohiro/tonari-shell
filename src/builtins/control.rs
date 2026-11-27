@@ -116,6 +116,7 @@ pub fn suspend(session: &Session, mut args: &[String]) -> u8 {
     u8::from(unsafe { libc::kill(target, libc::SIGSTOP) } != 0)
 }
 
+#[inline(never)]
 pub fn help(mut args: &[String]) -> u8 {
     let mut mode = ' ';
     while let Some(opt) = crate::builtins::flags::next(&mut args) {

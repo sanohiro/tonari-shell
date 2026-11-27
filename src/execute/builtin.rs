@@ -330,7 +330,9 @@ pub(super) fn eval_builtin(
                 );
                 Flow::Exit(1)
             } else if session.loop_depth == 0 {
-                write_error(cmd.words[0].as_bytes(), b": only meaningful in a loop");
+                if !session.posix {
+                    write_error(cmd.words[0].as_bytes(), b": only meaningful in a loop");
+                }
                 Flow::Continue(0)
             } else if args.len() > 1 {
                 write_error(cmd.words[0].as_bytes(), b": too many arguments");
@@ -472,6 +474,7 @@ pub(super) fn eval_builtin(
     result
 }
 
+#[inline(never)]
 fn exec_builtin(cmd: &PreparedCommand, session: &Session, mut args: &[String]) -> Flow {
     let mut clear = false;
     let mut login = false;

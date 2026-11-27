@@ -347,10 +347,10 @@ impl Session {
             .collect()
     }
 
-    fn visible_names(&self, prefix: &str) -> Vec<&str> {
+    fn inherited_variable_names(&self) -> &[String] {
         // Only a fresh shell session changes the inherited process environment.
         // Shell bindings, tombstones and optional names remain live overlays.
-        let base = self.inherited_names.get_or_init(|| {
+        self.inherited_names.get_or_init(|| {
             let mut names: Vec<_> = std::env::vars_os()
                 .filter_map(|(key, _)| key.into_string().ok())
                 .filter(|key| is_identifier(key))
@@ -407,7 +407,11 @@ impl Session {
             names.sort_unstable();
             names.dedup();
             Rc::new(names)
-        });
+        })
+    }
+
+    fn visible_names(&self, prefix: &str) -> Vec<&str> {
+        let base = self.inherited_variable_names();
         let start = base.partition_point(|key| key.as_str() < prefix);
         let mut names: Vec<_> = base[start..]
             .iter()

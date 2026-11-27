@@ -39,8 +39,9 @@ impl Environment {
                 (k, v)
             })
             .collect();
-        // Tonari keeps its variable changes in Session. The original process environment
-        // remains allocated and immutable for the lifetime of these borrowed C strings.
+        // SAFETY: ordinary assignments live in Session. Script reentry replaces
+        // process variables only after it has abandoned this environment and
+        // never returns. Each inherited entry is a NUL-terminated C string.
         let mut pointers = Vec::new();
         let mut inherited = inherited_env();
         unsafe {

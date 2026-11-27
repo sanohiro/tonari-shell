@@ -2,7 +2,7 @@
 // megabyte. Cursor indices and history entries always refer to the full text.
 use super::{Position, Screen, draw_prompt, draw_text};
 use std::fmt::Write as _;
-use std::io::{self, Write as _};
+use std::io;
 use unicode_width::UnicodeWidthChar;
 
 #[derive(Default)]
@@ -113,13 +113,7 @@ impl Screen {
         self.tail = None;
         Ok(())
     }
-    pub(super) fn draw_window(
-        &mut self,
-        prompt: &str,
-        text: &str,
-        cursor: usize,
-        hint: &str,
-    ) -> io::Result<()> {
+    pub(super) fn window_frame(&mut self, prompt: &str, text: &str, cursor: usize, hint: &str) {
         self.output.clear();
         let mut pos = Position::default();
         draw_prompt(prompt, self.width, &mut self.output, &mut pos);
@@ -181,6 +175,5 @@ impl Screen {
         self.column = caret.col;
         self.had_hint = !hint.is_empty();
         self.tail = (cursor == text.len() && hint.is_empty()).then_some(caret);
-        io::stderr().write_all(self.output.as_bytes())
     }
 }

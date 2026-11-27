@@ -412,7 +412,7 @@ impl Session {
             let path = std::path::Path::new(&path);
             // The default history is Tonari's shared journal. The user's Bash
             // file remains independent. Explicit plain history uses line limits.
-            if default_history(self, std::path::Path::new(&path)) {
+            if default_history(self, path) {
                 return;
             }
             if let Err(e) =

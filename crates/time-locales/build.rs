@@ -141,12 +141,33 @@ fn main() {
         fields.join(", ")
     )
     .unwrap();
+    let mut list_ids = Vec::new();
+    let mut field_offsets = Vec::new();
+    let mut compact = vec![Vec::with_capacity(fields.len()); records.len()];
+    for column in 0..fields.len() {
+        field_offsets.push(u16::try_from(list_ids.len()).unwrap());
+        let mut column_lists = Vec::new();
+        for (i, record) in records.iter().enumerate() {
+            let list = record[column];
+            let id = column_lists
+                .iter()
+                .position(|&v| v == list)
+                .unwrap_or_else(|| {
+                    column_lists.push(list);
+                    column_lists.len() - 1
+                });
+            compact[i].push(u8::try_from(id).expect("too many distinct lists for one field"));
+        }
+        list_ids.extend(column_lists);
+    }
     writeln!(
         code,
-        "static RECORDS: &[[u16; {}]] = &{records:?};",
+        "static RECORDS: &[[u8; {}]] = &{compact:?};",
         fields.len()
     )
     .unwrap();
+    writeln!(code, "static FIELD_OFFSETS: &[u16] = &{field_offsets:?};").unwrap();
+    writeln!(code, "static LIST_IDS: &[u16] = &{list_ids:?};").unwrap();
     writeln!(code, "static LOCALE_ROWS: &[u16] = &{locale_rows:?};").unwrap();
     writeln!(code, "static ENTRIES: &[u16] = &{:?};", tables.entries).unwrap();
     writeln!(code, "static OFFSETS: &[u16] = &{:?};", tables.offsets).unwrap();

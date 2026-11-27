@@ -15,7 +15,9 @@ impl Locale {
     }
 
     fn ids(self, field: Field) -> &'static [u16] {
-        let start = usize::from(RECORDS[usize::from(LOCALE_ROWS[self.0])][field as usize]);
+        let column = field as usize;
+        let id = RECORDS[usize::from(LOCALE_ROWS[self.0])][column];
+        let start = usize::from(LIST_IDS[usize::from(FIELD_OFFSETS[column]) + usize::from(id)]);
         let count = usize::from(ENTRIES[start]);
         &ENTRIES[start + 1..][..count]
     }

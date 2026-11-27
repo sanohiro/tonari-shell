@@ -527,6 +527,11 @@ impl Screen {
         cursor: usize,
         suggestion: &str,
     ) -> io::Result<()> {
+        self.frame(prompt, text, cursor, suggestion);
+        io::stderr().write_all(self.output.as_bytes())
+    }
+
+    fn frame(&mut self, prompt: &str, text: &str, cursor: usize, suggestion: &str) {
         if text.len().saturating_add(suggestion.len()) >= 1024
             || text.len() >= self.height
                 && memchr::memchr_iter(b'\n', text.as_bytes())
@@ -537,7 +542,7 @@ impl Screen {
                     .nth(self.height.saturating_sub(3))
                     .is_some()
         {
-            return self.draw_window(prompt, text, cursor, suggestion);
+            return self.window_frame(prompt, text, cursor, suggestion);
         }
         self.view.invalidate();
         let out = &mut self.output;
@@ -566,7 +571,6 @@ impl Screen {
         self.row = caret.row;
         self.column = caret.col;
         self.had_hint = !suggestion.is_empty();
-        io::stderr().write_all(out.as_bytes())
     }
 }
 
@@ -581,6 +585,14 @@ fn begin_redraw(out: &mut String, row: usize) {
 }
 
 fn draw_prompt(prompt: &str, width: usize, out: &mut String, pos: &mut Position) {
+    // Plain prompts fit in the current row in the common case.
+    if prompt.len() <= width.saturating_sub(pos.col)
+        && prompt.bytes().all(|b| (b' '..=b'~').contains(&b))
+    {
+        out.push_str(prompt);
+        pos.col += prompt.len();
+        return;
+    }
     let mut escape = 0;
     let mut hidden = false;
     for c in prompt.chars() {
@@ -1321,9 +1333,12 @@ pub fn line(
                     || replaying
                     || screen.tail.is_none()
                 {
-                    screen.draw(prompt, &text, text.len(), "")?;
+                    screen.frame(prompt, &text, text.len(), "");
+                } else {
+                    screen.output.clear();
                 }
-                io::stderr().write_all(b"\r\n")?;
+                screen.output.push_str("\r\n");
+                io::stderr().write_all(screen.output.as_bytes())?;
                 text.push('\n');
                 session.editor_queue = std::mem::take(&mut keys.queued);
                 return Ok(Input::Line(text));

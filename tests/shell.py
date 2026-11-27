@@ -77,6 +77,22 @@ umask 777; umask u+x,g+X && umask; umask a+st && umask"""
         if not self.bash_before_53():
             self.compare(script, 0, result.stdout)
 
+    def test_function_loop_control_follows_compat_level(self):
+        for command in ("break", "continue"):
+            code = f'f() {{ {command}; }}; for i in 1 2; do f; echo "$?:$i"; done'
+            self.compare("set -o posix; " + code, 0, b"0:1\n0:2\n", minimum=5)
+            self.compare("BASH_COMPAT=4.3; " + code, 0, b"", minimum=5)
+
+    def test_repeated_arithmetic_reads_live_variable_bound(self):
+        self.compare("""n=6; for ((i=0;i<n;i+=2)); do echo "$i"; ((n--)); done
+n=4; declare -n bound=n; for ((i=4;i>=bound;i-=3)); do echo "$i"; done
+for ((i=0;i<10;i+=010)); do echo "$i"; done""", 0, b"0\n2\n4\n0\n8\n", minimum=5)
+
+    def test_history_trim_keeps_numbers_and_timestamp_pairs(self):
+        source = """HISTSIZE=300; for ((i=0;i<1900;i++)); do history -s "row $i"; done
+history -d 1602; history -w saved; history 1; head -n 2 saved; tail -n 1 saved"""
+        self.compare(source, 0, b" 1899  row 1899\nrow 1600\nrow 1602\nrow 1899\n", minimum=5)
+
     def test_excessive_braces_fail_before_command_runs(self):
         for word in ("{1..5000000000}", "a{5000000000..1}", "{1..5000000000..2}x",
                      "{1..65536}{a,b}{1..9}", "{a,b}" * 21):

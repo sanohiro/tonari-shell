@@ -582,6 +582,7 @@ pub(super) fn reload(session: &mut Session) {
     }
 }
 
+#[inline(never)]
 pub(crate) fn builtin(session: &mut Session, args: &[String]) -> u8 {
     if !session.interactive {
         eprintln!(

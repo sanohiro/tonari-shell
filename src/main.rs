@@ -276,10 +276,14 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
     }
     session.command_history_expansion = invocation.options.histexpand == Some(true);
     session.stdin_script = matches!(invocation.input, Input::Stdin);
-    if invocation.options.posix == env.posix {
-        session.apply_posix_mode(invocation.options.posix);
+    if let Some(enabled) = invocation
+        .options
+        .posix
+        .filter(|&enabled| enabled != env.posix)
+    {
+        session.set_posix(enabled);
     } else {
-        session.set_posix(invocation.options.posix);
+        session.apply_posix_mode(env.posix);
     }
     session.shopt.progcomp_alias = session.interactive;
     session.inherit_options(&env);

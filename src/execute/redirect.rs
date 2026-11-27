@@ -180,6 +180,7 @@ pub(super) fn open_null_redirect(redirects: &[Redirect]) -> Option<(RawFd, Owned
     if raw < 0 {
         return None;
     }
+    // SAFETY: open returned a new descriptor and this File takes sole ownership.
     let file = unsafe { std::fs::File::from_raw_fd(raw) };
     if !file.metadata().ok()?.file_type().is_char_device()
         || unsafe { libc::fcntl(raw, libc::F_SETFL, flags) } < 0
