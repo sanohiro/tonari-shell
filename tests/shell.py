@@ -3720,6 +3720,28 @@ declare -n ref=a; v=$(/usr/bin/printf '[%s]' "${ref[@]}"); echo "$v"
 jobs() { printf '%s' "shadow:$1"; }; v=$(jobs -p); echo "$v" """,
                      0, b"empty:0:<>\n<a b><><*.rs>\n[a b][][*.rs]\nshadow:-p\n", minimum=5)
 
+    def test_source_consecutive_function_boundaries(self):
+        def definitions(names, body):
+            return "".join(f"{name}() {{\n{body}\n}}\n" for name in names)
+
+        names = ["first", "second", "third", "fourth", "fifth"]
+        script = self.cwd / "defs"
+        # Syntax errors later in the file must preserve earlier definitions.
+        script.write_text(definitions(names, ":") + "broken() { if; }\n")
+        for shell in self.shells_for(5):
+            p = self.command(shell, ". ./defs; declare -F fifth >/dev/null && echo registered")
+            self.assertEqual(p.stdout, b"registered\n")
+            self.assertTrue(p.stderr)
+
+        script.write_text(definitions(names, 'echo "$FUNCNAME:$LINENO"') +
+                          "alias marker='echo expanded'\n" + definitions(["after"], "marker"))
+        self.compare("shopt -s expand_aliases; . ./defs; first; fifth; after", 0,
+                     b"first:2\nfifth:14\nexpanded\n", minimum=5)
+        # Header-shaped text in a here-document is part of a single body.
+        script.write_text("doc() {\ncat <<'END'\n}\n" +
+                          definitions(names, "fake") + "END\n}\n" + definitions(names, "echo ok"))
+        self.compare(". ./defs; fifth; doc | head -1", 0, b"ok\n}\n")
+
     def test_capture_readonly_expansions_and_helper_arguments(self):
         self.compare(r"""set -- 'a b' '' c
 emit() { builtin printf '<%s>' "$@"; }
