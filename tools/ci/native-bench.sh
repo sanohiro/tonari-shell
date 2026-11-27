@@ -8,6 +8,18 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == capture-parser ]]; then
+  args=()
+  for name in capture-{position,trim,default,math,helper,helper-lines} null-builtin-{out,err} core-parse-functions redirected-group core-{case,test,arithmetic} pipeline; do
+    args+=(--case "$name")
+  done
+  python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 25 "${args[@]}" > "$out/scripts.txt"
+  if [[ -r /usr/share/bash-completion/bash_completion ]]; then
+    printf '%s\n' '. /usr/share/bash-completion/bash_completion' 'declare -F _completion_loader >/dev/null || exit 1' > "$RUNNER_TEMP/completion-rc"
+    python3 tools/bench_login.py "$current" --previous "$bin/baseline" --bash "$ref" --rcfile "$RUNNER_TEMP/completion-rc" --runs 25 > "$out/bash-completion.txt"
+  fi
+  exit
+fi
 if [[ $SUITE == function-tables ]]; then
   args=()
   for name in functions-{0,200,1000}-{call,printf,colon} functions-1000-prefix core-parse-functions function-list export-function-list aliases-{0,200,1000}-miss aliases-200-{hit,braced,list} assoc-{values,keys,churn}; do

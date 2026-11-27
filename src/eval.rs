@@ -201,22 +201,26 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
             condition,
             body,
         }) => run_while(session, *until, condition, body, status),
-        Cow::Borrowed(Command::For {
-            select,
-            header,
-            name,
-            words,
-            body,
-        }) => run_for(session, *select, header, name, words.clone(), body, status),
-        Cow::Borrowed(Command::ForArithmetic {
-            init,
-            condition,
-            step,
-            body,
-        }) => run_arithmetic_loop(session, init, condition, step, body, status),
-        Cow::Borrowed(Command::Case { header, word, arms }) => {
-            run_case(session, header, Cow::Borrowed(word), arms, status, tail)
+        Cow::Borrowed(Command::For(c)) => run_for(
+            session,
+            c.select,
+            &c.header,
+            &c.name,
+            c.words.clone(),
+            &c.body,
+            status,
+        ),
+        Cow::Borrowed(Command::ForArithmetic(c)) => {
+            run_arithmetic_loop(session, &c.init, &c.condition, &c.step, &c.body, status)
         }
+        Cow::Borrowed(Command::Case(c)) => run_case(
+            session,
+            &c.header,
+            Cow::Borrowed(&c.word),
+            &c.arms,
+            status,
+            tail,
+        ),
         Cow::Borrowed(Command::Group(body)) => borrowed_program(session, body, status, tail),
         Cow::Borrowed(Command::Arithmetic(expr)) => {
             crate::arithmetic::command(expr, session, status, true)
@@ -560,21 +564,14 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             condition,
             body,
         } => run_while(session, until, &condition, &body, status),
-        Command::For {
-            select,
-            header,
-            name,
-            words,
-            body,
-        } => run_for(session, select, &header, &name, words, &body, status),
+        Command::For(c) => run_for(
+            session, c.select, &c.header, &c.name, c.words, &c.body, status,
+        ),
         Command::Test(expr) => crate::test_expression::evaluate(&expr, session, status),
         Command::Arithmetic(expr) => crate::arithmetic::command(&expr, session, status, false),
-        Command::ForArithmetic {
-            init,
-            condition,
-            step,
-            body,
-        } => run_arithmetic_loop(session, &init, &condition, &step, &body, status),
+        Command::ForArithmetic(c) => {
+            run_arithmetic_loop(session, &c.init, &c.condition, &c.step, &c.body, status)
+        }
         Command::Coprocess { name, body } => {
             crate::execute::coprocess::launch(session, name, *body, status).unwrap_or_else(|e| {
                 diagnostic!("coproc: {e}");
@@ -610,9 +607,14 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
         }
         Command::Group(body) => execute_program(session, body, status, tail),
         Command::Subshell(body) => crate::subshell::launch_group(session, body, status, false),
-        Command::Case { header, word, arms } => {
-            run_case(session, &header, Cow::Owned(word), &arms, status, tail)
-        }
+        Command::Case(c) => run_case(
+            session,
+            &c.header,
+            Cow::Owned(c.word),
+            &c.arms,
+            status,
+            tail,
+        ),
         Command::Function { name, definition } => {
             if session.posix {
                 if let Some(reason) = posix_function_error(&name) {

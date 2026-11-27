@@ -3720,6 +3720,37 @@ declare -n ref=a; v=$(/usr/bin/printf '[%s]' "${ref[@]}"); echo "$v"
 jobs() { printf '%s' "shadow:$1"; }; v=$(jobs -p); echo "$v" """,
                      0, b"empty:0:<>\n<a b><><*.rs>\n[a b][][*.rs]\nshadow:-p\n", minimum=5)
 
+    def test_capture_readonly_expansions_and_helper_arguments(self):
+        self.compare(r"""set -- 'a b' '' c
+emit() { builtin printf '<%s>' "$@"; }
+first() { echo "[$1:$#]"; }
+path=a/b/c; val=日a; i=4
+printf '%s\n' "$(emit "$@" "${path##*/}" "${missing:-ok}" "$((i+1))")"
+printf '%s\n' "$(first)" "$(first "$@")" "$(emit "${val//a/b}" "${path:2:1}")"
+echo "$#:$1:$i" """, 0, "<a b><><c><c><ok><5>\n[:0]\n[a b:3]\n<日b><b>\n3:a b:4\n".encode(),
+                     minimum=4)
+
+    def test_capture_keeps_arithmetic_writes_and_function_frames_in_child(self):
+        self.compare(r"""set -- outer
+i=3; expr='i++'; declare -n ref=i
+frame() { printf '%s' "$FUNCNAME:$1"; }
+inc() { echo "$((ref++))"; }
+alt() { echo "${missing:=child}"; }
+idx() { echo "$((a[i++]))"; }; a[3]=seven
+printf '%s\n' "$(frame inner)" "$(inc)" "$(echo "$((expr))")" "$(alt)" "$(idx)"
+printf '%s\n' "$i:${missing-unset}:$1"
+""", 0, b"frame:inner\n3\n3\nchild\n0\n3:unset:outer\n", minimum=5)
+
+    def test_null_redirects_have_independent_open_file_descriptions(self):
+        mutate = shlex.quote("import fcntl, os; fcntl.fcntl(1, fcntl.F_SETFL, os.O_NONBLOCK)")
+        verify = shlex.quote("import fcntl, os, sys; flags=fcntl.fcntl(1, fcntl.F_GETFL); "
+                             "sys.exit(bool(flags & (os.O_NONBLOCK | os.O_APPEND)))")
+        python = shlex.quote(sys.executable)
+        self.compare(f"{python} -c {mutate} >>/dev/null && {python} -c {verify} >/dev/null && echo ok",
+                     0, b"ok\n")
+        self.compare(f"{python} -c {mutate} >/dev/null && {python} -c {verify} >/dev/null && echo ok",
+                     0, b"ok\n")
+
     def test_parent_traps_during_direct_captures(self):
         self.compare("""trap 'echo exit' EXIT; trap 'echo signal' USR1
 v=$(echo hello | /bin/cat); echo "$v"

@@ -47,6 +47,16 @@ def listing_loop(command, count):
 
 
 CASES = {
+    "capture-position": eval_loop('v=$(echo "$1")', 'echo "$v"', "one two", "set -- 'one two'", 50),
+    "capture-trim": eval_loop('v=$(echo "${p##*/}")', 'echo "$v"', "end", "p=/a/b/end", 50),
+    "capture-default": eval_loop('v=$(echo "${p:-def}")', 'echo "$v"', "def", "unset p", 50),
+    "capture-math": eval_loop('v=$(echo "$((i+1))")', 'echo "$v"', "50", count=50),
+    "capture-helper": eval_loop('v=$(f "$i" "$@")', 'echo "$v"', "<49><a b><>",
+                                """set -- 'a b' ''; f() { builtin printf '<%s>' "$@"; }""", 50),
+    "capture-helper-lines": eval_loop('v=$(f "$i")', 'echo "$v"', "49",
+                                     """f() { printf '%s\\n' "$1"; }""", 50),
+    "null-builtin-out": eval_loop("echo hi >/dev/null || exit 1", 'echo "$i"', "2000"),
+    "null-builtin-err": eval_loop(": 2>/dev/null || exit 1", 'echo "$i"', "2000"),
     "redirected-group": redirected_compound("{ :", ":; } 2>/dev/null"),
     "redirected-if": redirected_compound("if :; then", ":; fi 2>/dev/null"),
     "redirected-loop": redirected_compound("for k in pass; do", ":; done >out"),
