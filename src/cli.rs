@@ -188,7 +188,7 @@ pub fn parse(
         arg0 = file.to_string_lossy().into_owned();
         Input::File(file.into())
     } else {
-        interactive |= terminal();
+        interactive = interactive || terminal();
         Input::Stdin
     };
     let positional = args.map(utf8).collect::<Result<_, _>>()?;

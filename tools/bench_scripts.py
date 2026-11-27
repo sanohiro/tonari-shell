@@ -38,6 +38,8 @@ def assoc_names(count):
 
 
 CASES = {
+    "uncached-path-spawn": eval_loop("cat /dev/null || exit 1", "echo done", "done", "set +h", count=32),
+    "current-shell-file-capture": eval_loop('value=${ printf "%s" "$i"; }', 'echo "$value"', "127", count=128),
     "history-long-event-word": (
         """printf -v pad '%65536s' x
 history -s "cmd '$pad' 2>&31- last"
@@ -594,6 +596,12 @@ def main():
             script = home / f"{case}.sh"
             script.write_text(source)
             participants = shells
+            if case == "current-shell-file-capture" and subprocess.run(
+                [args.bash.resolve(), "--noprofile", "--norc", "-c", 'x=${ :; }'],
+                env=env, capture_output=True,
+            ).returncode:
+                print("Skipping the Bash timing for current-shell substitution (requires Bash 5.3).")
+                participants = [(name, shell) for name, shell in shells if name != "Bash"]
             if case == "cdable-vars" and args.previous and subprocess.run(
                 [args.previous.resolve(), "--noprofile", "--norc", "-c", "shopt -s cdable_vars"],
                 env=env, capture_output=True,

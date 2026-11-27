@@ -1,5 +1,21 @@
 # Engineering notes / 開発知見
 
+## November 27 · Reading history before the first prompt / 初回表示前の履歴読み込み
+
+Keep the 4 MiB history snapshot and its Unicode page index. Read once per bounded chunk and classify completed pages while the bytes are warm. Older searches can use the same index to skip ASCII-only blocks in a partial snapshot. A 256 KiB tail improved startup but increased the time to the first visible search result. The uncached command launch now uses the shell's PATH resolver, which also fixes an inherited-PATH case where `set +h` allowed a program excluded by `EXECIGNORE` to run. [Measurements and reproduction](benchmarks.md#startup-journal-launch)
+
+先読みの上限を 4 MiB に保つと、入力直後の日本語検索に索引を使える。読み込み回数を減らし、履歴全体が収まらない場合にも読み込み済みの索引を利用する。端末のペースト開始通知は、履歴を開く前に送る。Linux の `-i` 指定時は、オプション判定中の端末検査を省き、起動設定実行後に実際の入出力を検査する。 [計測と採否](benchmarks.md#startup-journal-launch)
+
+Linux current-shell substitution can capture output in an unnamed regular file opened with `O_TMPFILE`. It remains seekable, honors descriptor restoration and uses the existing file fallback when the filesystem lacks support. Linux では名前の作成・削除を省ける。Mac では名前付き一時ファイルへの置換で実測が悪化したため、既存の `tmpfile` を使う。 [Capture benchmark](benchmarks.md#startup-journal-launch)
+
+## November 27 · Startup, history and account lookup / 起動と履歴・アカウント照会
+
+On Apple M1, deferring the pre-prompt journal read saved time with a large history but made an immediate reverse search slower. Measure the first visible match and the first typed character along with the prompt before changing prefetch. In a separate comparison, adding only `\u` cost about 1.08 ms on first display. Tonari already caches the effective username. Sharing a passwd lookup with the home and login-shell fallbacks can help when their UIDs match and the session needs multiple fields. The real and effective UIDs can differ. [Measurements and conditions](benchmarks.md#startup-review-0ec497f)
+
+Apple M1 で履歴を描画後に先読みする試作を測ると、表示直後の Ctrl-R と先読み開始に重なったキー入力に待ち時間が移った。また、標準的なプロンプトで初回表示を重くしたのはユーザー名の展開だった。OS の実効ユーザー名はプロセス内で再利用できる。環境変数の `USER` や `LOGNAME` はアカウント名と異なる場合がある。 [計測条件と結果](benchmarks.md#startup-review-0ec497f)
+
+Linux directory completion can start worker threads. The musl release registers the dlmalloc fork handlers once before its first global dlmalloc allocation, as required by version 0.2.14. Moving registration to the first fork after allocation would violate that requirement. Linux でもディレクトリ補完はスレッドを使う。現在のアロケータでは、最初のヒープ確保前に一度だけ fork ハンドラーを登録する。 [Completion workers](../src/complete.rs) · [Fork regression](../tests/allocator_fork.rs) · [dlmalloc 0.2.14](https://docs.rs/crate/dlmalloc/0.2.14/source/src/unix.rs)
+
 ## November 27 · Signals between terminal packets / 分割入力とシグナル
 
 During `read -e`, a caught signal can arrive between UTF-8 continuation bytes, during a bound escape sequence, or before the end of a bracketed paste. Preserve what the current operation already consumed and retry it after running the handler. Match a partial end marker against its last five bytes at most. The PTY regression splits a four-byte scalar at every interior boundary and sends a signal at every boundary before the paste end marker completes. It also checks a split custom binding and a quoted character. The key-sequence wait shares the masked readiness check with read and mapfile. A 10-second key-sequence timer yields to a 0.4-second read deadline.

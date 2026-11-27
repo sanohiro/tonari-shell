@@ -8,6 +8,23 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == startup-review ]]; then
+  opts=()
+  if [[ $RUNNER_OS == Linux ]]; then opts+=(--traces "$out/traces"); fi
+  python3 tools/bench_startup.py "$bin/baseline" "$current" --bash "$ref" "${opts[@]}" > "$out/startup.txt"
+  python3 tools/bench_editor_input.py "$bin/baseline" "$current" "$ref" --case Ctrl-R --case Miss --runs 31 > "$out/unicode.txt"
+  python3 tools/bench_history.py "$bin/baseline" "$current" --escaped --entries 100000 --runs 31 > "$out/history.txt"
+  python3 tools/bench_editor_input.py "$bin/baseline" "$current" --entries 260000 --case Ctrl-R --case Miss --runs 31 > "$out/older.txt"
+  python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --case uncached-path-spawn --case current-shell-file-capture --runs 31 --timing started > "$out/execute.txt"
+  if [[ $RUNNER_OS == Linux ]]; then
+    for build in baseline current; do
+      strace -o "$out/capture-$build.trace" -e trace=open,openat,unlink,unlinkat,fcntl \
+        "$bin/$build" -c 'umask 777; x=${ printf "%s" "$0"; }; test "$x" = witness' witness
+    done
+  fi
+  wc -c "$bin/baseline" "$current" > "$out/sizes.txt"
+  exit
+fi
 if [[ $SUITE == audit-hot-paths ]]; then
   if [[ $RUNNER_OS == macOS ]]; then
     if [[ ! -x /opt/homebrew/bin/bash ]]; then brew install bash; fi

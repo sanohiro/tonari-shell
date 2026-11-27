@@ -869,6 +869,7 @@ impl History {
             return Err(());
         }
         let encoded = encoded_fragment(needle);
+        let unicode = !encoded.is_ascii();
         let matches = journal_matcher(needle, prefix, &encoded);
         let mut end = self.tail_start;
         let cached = self.window.matching(&m);
@@ -879,13 +880,14 @@ impl History {
             }
             let start = end.saturating_sub(BLOCK as u64);
             let size = (end - start) as usize;
-            let buf = if let Some(bytes) = cached.and_then(|window| window.range(start, size)) {
-                bytes
-            } else {
-                block.resize(size, 0);
-                journal.read_exact_at(block, start).map_err(|_| ())?;
-                &block[..]
-            };
+            let (buf, possible) =
+                if let Some((bytes, pages)) = cached.and_then(|window| window.range(start, size)) {
+                    (bytes, !unicode || pages.contains(&true))
+                } else {
+                    block.resize(size, 0);
+                    journal.read_exact_at(block, start).map_err(|_| ())?;
+                    (&block[..], true)
+                };
             let boundary = if start == 0 {
                 0
             } else {
@@ -895,7 +897,7 @@ impl History {
                 return Err(());
             } // An oversized record needs the streaming reader.
             let rows = &buf[boundary..];
-            if let Some(hit) = matches(rows, &mut skip) {
+            if possible && let Some(hit) = matches(rows, &mut skip) {
                 return Ok(Some(hit));
             }
             end = start + boundary as u64;
@@ -1240,7 +1242,8 @@ mod tests {
         session.assign("HISTFILESIZE", "100000");
         let path = file(&session).unwrap();
         let mut rows = String::from("1\t1\t0\t/hit\thit oldest\n");
-        for _ in 0..42000 {
+        // The oldest hit is outside the snapshot and the Unicode hit is inside it.
+        for _ in 0..230000 {
             rows.push_str("1\t1\t0\t/hit\tpadding\n");
         }
         rows.push_str("1\t1\t0\t/hit\tcmd hit hit\\n雪\n1\t1\t0\t/hit\tfinal\\tword\n");
@@ -1252,6 +1255,7 @@ mod tests {
             tail_start: m.len(),
             ..History::default()
         };
+        history.prepare_search(&session, &|| false);
         let mut search = |query, prefix, skip| {
             history
                 .older_match(&session, query, prefix, skip, &|| false)

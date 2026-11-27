@@ -1428,10 +1428,6 @@ impl Session {
         std::env::var_os("PATH").unwrap_or_else(|| self.get("PATH").unwrap().into())
     }
 
-    pub fn overrides_search_path(&self, assignments: &[(String, String)]) -> bool {
-        self.variables.contains_key("PATH") || assignments.iter().any(|(k, _)| k == "PATH")
-    }
-
     pub fn line(&self) -> usize {
         self.signal_line
             .unwrap_or_else(|| self.current_command.as_ref().map_or(1, |c| c.line))

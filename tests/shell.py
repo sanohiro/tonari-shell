@@ -1771,6 +1771,22 @@ s='a?b?'; p='?\?'; printf '%s\n' "${s//$p/X}"
 printf '%s\\n' "${s//$p/X}" "${s##$p}" "${s%%$p}"
 """, 0, "X:X\n:xy-12\n雪😀-ab:\n".encode(), minimum=5)
 
+    def test_uncached_launch_honors_execignore_on_inherited_path(self):
+        first, second = self.cwd / "first", self.cwd / "second"
+        first.mkdir()
+        second.mkdir()
+        for directory, value in ((first, "first"), (second, "second")):
+            program = directory / "pick"
+            program.write_text(f'#!/bin/sh\nprintf "%s" {value}\n')
+            program.chmod(0o755)
+        self.env["PATH"] = f"{first}:{second}:/usr/bin:/bin"
+        self.env["PICK_ROOT"] = str(self.cwd)
+        self.compare('''set +h; EXECIGNORE="$PICK_ROOT/first/*"
+pick; echo ":$?"
+pick |& cat; echo ":${PIPESTATUS[*]}"
+EXECIGNORE="$PICK_ROOT/*"; pick |& cat >/dev/null; echo "${PIPESTATUS[*]}"''',
+                     0, b"second:0\nsecond:0 0\n127 0\n", minimum=5)
+
     def test_executable_text_without_shebang(self):
         script = self.cwd / "plain"
         script.write_text('args=("two words" "$1"); printf "<%s><%s>\\n" "$0" "${args[*]}"; exit 7\n')
@@ -3390,6 +3406,21 @@ two'
 printf '<%s>' "${!a[@]}" "${a[@]}"
 mapfile -tO 400 empty </dev/null; declare -p empty""",
                      0, b'<0><2><3><4><81><keep><one><two><tail><sparse>declare -a empty=()\n', minimum=4)
+
+    def test_current_shell_capture_with_closed_stdout_and_restrictive_umask(self):
+        source = r"""umask 777
+value=${ printf '<'; : 10>&-; printf '%131072s' x; printf '>\n\n'; return 7; }
+printf '%s:%s:%s:%s\n' "$?" "${#value}" "${value:0:1}" "${value: -2}" >&8"""
+        participants = (TONARI,) if self.bash_before_53() else (BASH, TONARI)
+        for shell in participants:
+            with self.subTest(shell=shell):
+                result = self.command(shell, "exec 8>&1\n" + source)
+                self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                 (0, b"7:131074:<:x>\n", b""))
+        # Tonari also restores a previously closed stdout after capturing.
+        result = self.command(TONARI, "exec 8>&1 1>&-\n" + source + "\n[[ ! -e /dev/fd/1 ]]")
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (0, b"7:131074:<:x>\n", b""))
 
     def test_command_substitution_capture_boundaries(self):
         self.compare("""x=outside; v=$(printf 'a'; echo -ne 'b\\nc'; printf ':'); echo "$v"

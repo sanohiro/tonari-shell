@@ -1,7 +1,7 @@
 // Bounded raw copy of the newest journal pages. External truncation or replacement
 // cannot fault the editor while it is reading the copy.
 use std::fs::{File, Metadata};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Seek, SeekFrom};
 use std::os::unix::fs::MetadataExt;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -25,6 +25,7 @@ impl From<&Metadata> for Stamp {
 
 pub(super) const PAGE: usize = 16 * 1024;
 const CAPACITY: usize = 4 * 1024 * 1024;
+const READ_CHUNK: usize = 256 * 1024;
 
 #[derive(Default)]
 pub(super) struct Window {
@@ -55,25 +56,36 @@ impl Window {
         }
         let count = stamp.len.min(CAPACITY as u64);
         self.start = stamp.len - count;
-        if file.seek(SeekFrom::Start(self.start)).is_err() {
+        if self.start != 0 && file.seek(SeekFrom::Start(self.start)).is_err() {
             return;
         }
         self.bytes.reserve_exact(count as usize);
+        self.unicode_pages.clear();
         while self.bytes.len() < count as usize {
             if waiting() {
                 self.interrupted = true;
                 break;
             }
-            let segment = (count - self.bytes.len() as u64).min(256 * 1024);
-            if (&mut file).take(segment).read_to_end(&mut self.bytes).ok() != Some(segment as usize)
-            {
+            let segment = (count as usize - self.bytes.len()).min(READ_CHUNK);
+            if !matches!(
+                crate::input::read_spare(&file, &mut self.bytes, segment),
+                Ok(1..)
+            ) {
                 return;
             }
+            // Short reads may split a page. Classify each complete page once.
+            let start = self.unicode_pages.len() * PAGE;
+            self.unicode_pages.extend(
+                self.bytes[start..]
+                    .chunks_exact(PAGE)
+                    .map(|page| !page.is_ascii()),
+            );
         }
         if !self.bytes.is_empty() {
-            self.unicode_pages.clear();
-            self.unicode_pages
-                .extend(self.bytes.chunks(PAGE).map(|page| !page.is_ascii()));
+            if !self.bytes.len().is_multiple_of(PAGE) {
+                self.unicode_pages
+                    .push(!self.bytes[self.unicode_pages.len() * PAGE..].is_ascii());
+            }
             self.stamp = Some(stamp);
         }
     }
@@ -95,9 +107,11 @@ impl Window {
         (self.stamp == Some(Stamp::from(meta))).then_some(self)
     }
 
-    pub(super) fn range(&self, start: u64, size: usize) -> Option<&[u8]> {
+    pub(super) fn range(&self, start: u64, size: usize) -> Option<(&[u8], &[bool])> {
         let offset = usize::try_from(start.checked_sub(self.start)?).ok()?;
-        self.bytes.get(offset..)?.get(..size)
+        let bytes = self.bytes.get(offset..)?.get(..size)?;
+        let pages = &self.unicode_pages[offset / PAGE..(offset + size).div_ceil(PAGE)];
+        Some((bytes, pages))
     }
 
     // A cooperating append under the journal lock leaves all copied bytes intact.

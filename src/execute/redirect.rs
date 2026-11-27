@@ -342,13 +342,22 @@ pub(super) fn apply_protected(actions: &[Action<'_>], pipe_limit: usize) -> Resu
     Ok(())
 }
 
-// The temporary output and the saved stdout are both private descriptors. A
-// redirect inside the body can reuse their numbers without breaking restoration.
-pub(crate) fn capture_stdout(run: impl FnOnce() -> Flow) -> io::Result<(Flow, Vec<u8>)> {
-    use std::io::{Read, Seek, Write};
+fn capture_file() -> io::Result<fd::PrivateFile> {
     use std::os::fd::BorrowedFd;
-    io::stdout().flush()?;
-    let saved = SavedFd::capture(&Action::Dup(1, 1), &[])?;
+    #[cfg(target_os = "linux")]
+    {
+        // The filesystem supplies an unnamed regular file with a private offset.
+        let raw = unsafe {
+            libc::open(
+                c"/tmp".as_ptr(),
+                libc::O_TMPFILE | libc::O_RDWR | libc::O_CLOEXEC,
+                0o600 as libc::c_uint,
+            )
+        };
+        if raw >= 0 {
+            return fd::PrivateFile::new(unsafe { std::fs::File::from_raw_fd(raw) });
+        }
+    }
     let stream = unsafe { libc::tmpfile() };
     if stream.is_null() {
         return Err(io::Error::last_os_error());
@@ -357,7 +366,16 @@ pub(crate) fn capture_stdout(run: impl FnOnce() -> Flow) -> io::Result<(Flow, Ve
     unsafe {
         libc::fclose(stream);
     }
-    let mut file = file?;
+    file
+}
+
+// The temporary output and the saved stdout are both private descriptors. A
+// redirect inside the body can reuse their numbers without breaking restoration.
+pub(crate) fn capture_stdout(run: impl FnOnce() -> Flow) -> io::Result<(Flow, Vec<u8>)> {
+    use std::io::{Read, Seek, Write};
+    io::stdout().flush()?;
+    let saved = SavedFd::capture(&Action::Dup(1, 1), &[])?;
+    let mut file = capture_file()?;
     duplicate(file.as_raw_fd(), 1)?;
     let flow = run();
     let flushed = io::stdout().flush();

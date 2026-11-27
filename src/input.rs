@@ -6,10 +6,29 @@ use lookahead::{buffered_compound, file_group, whole_group};
 use crate::execute::fd::PrivateFile;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Seek};
-use std::os::fd::AsFd;
+use std::os::fd::{AsFd, AsRawFd};
 use std::os::unix::fs::FileExt;
 
 use crate::{Flow, Session, execute_program, parser};
+
+// Append at most one read to an already reserved buffer.
+pub(crate) fn read_spare(file: &File, output: &mut Vec<u8>, limit: usize) -> io::Result<usize> {
+    let tail = output.spare_capacity_mut();
+    let count = tail.len().min(limit);
+    debug_assert_ne!(count, 0);
+    loop {
+        // The kernel initializes only the returned prefix of this writable allocation.
+        let n = unsafe { libc::read(file.as_raw_fd(), tail.as_mut_ptr().cast(), count) };
+        if n >= 0 {
+            unsafe { output.set_len(output.len() + n as usize) };
+            return Ok(n as usize);
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+}
 
 // External commands inherit fd 0. Any unread text buffered by the shell must
 // still be available to a child which reads stdin (for example, "cat\n...").

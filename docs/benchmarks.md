@@ -1,5 +1,65 @@
 # Startup and execution / 起動と実行性能
 
+<a id="startup-journal-launch"></a>
+
+## November 27 · Journal reads, first search and process launch / 履歴先読み・初回検索・プロセス起動
+
+Native distribution builds compared with `0ec497f`. Startup used warm filesystem caches and a fresh PTY with profiles and rcfiles disabled. The startup driver alternates shells, checks that the first typed character reaches the editor and verifies the journal size after the run. Apple M1 on macOS 27.2.1 used 81 samples against GNU Bash 5.3.20. Ubuntu x86-64 used 61 samples against its system Bash. First search times include sending the query through to its visible result. The miss includes pressing Enter and verifying the unchanged command. All times below are medians in milliseconds. [Linux run and syscall traces](https://github.com/sanohiro/tonari-shell/actions/runs/45989338025)
+
+| Workload | Mac before | Mac after | Linux before | Linux after |
+|---|---:|---:|---:|---:|
+| First prompt, empty history | 3.399 | 3.359 | 0.533 | 0.520 |
+| First prompt, 4 MiB journal | 4.332 | 4.297 | 2.234 | 1.950 |
+| First prompt, 8 MiB journal | 4.348 | 4.255 | 2.046 | 1.883 |
+| First echo, 4 MiB journal | 0.045 | 0.045 | 0.045 | 0.045 |
+| Japanese Ctrl-R, oldest of 260,000 mostly ASCII entries | 0.868 | 0.790 | 0.522 | 0.420 |
+| Japanese query absent from the same history | 1.522 | 1.188 | 1.717 | 1.048 |
+
+The empty-history Bash controls took 8.572 ms on M1 and 1.104 ms on Linux. A separate 61-sample M1 run with Apple Bash 3.2.57 took 3.158 ms before, 3.016 ms after and 3.671 ms for Apple Bash. With a 4 MiB journal that repeat took 3.926 and 3.994 ms. The Mac journal startup differences were within run-to-run variation. On the 100,000-entry Japanese hit, the M1 medians were 0.210 ms before, 0.218 ms after and 0.723 ms for GNU Bash. The index helps when whole pages contain only ASCII. The 260,000-entry mixed-language M1 control took 3.407 and 3.444 ms.
+
+The Linux 4 MiB trace went from 33 reads to 17, including the inputrc read. Lazy Unicode classification increased first Japanese search time from 0.103 to 0.190 ms on one Linux runner. Retaining only 256 KiB for large journals increased the M1 260,000-entry miss from 1.591 to 2.488 ms. A 2 MiB indexed tail took 1.800 ms against 1.520 ms in its paired control. [Lazy index](https://github.com/sanohiro/tonari-shell/actions/runs/45987414630) · [Short tail](https://github.com/sanohiro/tonari-shell/actions/runs/45988506229)
+
+Combining bracketed-paste enable and the prompt reduced two writes to one but placed the enable after the journal reads. Keep paste available throughout prefetch. Reusing the home inputrc's file size saved one fstat. On Linux the user-inputrc prompt took 0.605 ms before the combined trial and 0.612 ms after. Checking for PS1 and HISTFILE during the initial environment scan also showed no clear gain with 512 extra variables (0.835 and 0.832 ms). Explicit `-i` saved two tty ioctls. Preserve the checks after startup files and inherited ignored signals. [Combined trial and traces](https://github.com/sanohiro/tonari-shell/actions/runs/45987874754)
+
+Removing the standard-library command launcher reduced the M1 release from 191 to 182 undefined symbols and from 1,782,096 to 1,748,544 bytes. The Linux static PIE went from 2,443,640 to 2,406,904 bytes with anonymous-file capture included. On M1, 32 unredirected external `cat /dev/null` commands with hashing disabled took 38.402 ms before, 37.833 ms after and 58.156 ms in GNU Bash 5.3.20. On Linux the same workload took 16.907, 17.082 and 22.533 ms. This Linux run reached 76% of Bash time and missed the two-thirds target.
+
+For 128 current-shell substitutions with nonliteral output, the named `mkstemp` prototype on M1 took 18.380 ms against 17.319 ms for the original `tmpfile` implementation. Keep the macOS implementation. On Linux, opening an anonymous regular file with `O_TMPFILE` took 4.877 ms against 8.484 ms for the original. The trace shows the original opening and unlinking a name on each capture. Unsupported filesystems retain the existing fallback. Ubuntu's system Bash predates this syntax. The corresponding M1 GNU Bash 5.3.20 control took 21.214 ms against 17.978 ms in Tonari. [Linux capture trace and timings](https://github.com/sanohiro/tonari-shell/actions/runs/45989750314)
+
+Linux では 4 MiB の読み込み回数が半減し、初回打鍵の中央値を保てた。Mac の履歴あり起動にはばらつきがあり、26万件の古い履歴を日本語で検索する場合に差が出た。比較には下記のコマンドを使う。大きな履歴は Tonari 固有のジャーナルで、Bash の検索比較では同じコマンドを Bash の履歴ファイルにも用意する。
+
+```sh
+python3 tools/bench_startup.py BASELINE CURRENT --bash BASH --runs 61
+python3 tools/bench_editor_input.py BASELINE CURRENT BASH --entries 260000 --case Ctrl-R --case Miss --runs 41
+python3 tools/bench_scripts.py CURRENT --previous BASELINE --bash BASH --case uncached-path-spawn --case current-shell-file-capture --timing started --runs 41
+```
+
+<a id="startup-review-0ec497f"></a>
+
+## November 27 · First prompt and first input / 初回プロンプトと初回入力
+
+Apple M1, macOS 27.2.1, native releases, Tonari `0ec497f`. Each PTY child timestamped immediately before exec. The parent waited for a marker at the end of the prompt, typed `Z`, timed its visible echo and used that character in an assignment to verify that the editor consumed it. The shells ran with `--noprofile --norc -i`, a temporary home, `LC_ALL=C`, `TERM=xterm-256color`, `INPUTRC=/dev/null` and the default history path. Each row reports the median of 61 interleaved warm samples after four warmups.
+
+| First prompt, empty history (ms) | Tonari | Apple Bash 3.2.57 | GNU Bash 5.3.20 |
+|---|---:|---:|---:|
+| Literal prompt | 2.851 | 3.177 | 7.207 |
+| Add username (`\u`) | 3.926 | 3.135 | 7.218 |
+| Host, directory and prompt sign (`\h:\w\$`) | 2.866 | 3.185 | 7.426 |
+| Username, host, directory and prompt sign | 3.938 | 3.153 | 7.449 |
+
+All three shells displayed the OS account when `USER` and `LOGNAME` contained a different name. The first character echoed in 0.028–0.029 ms on Tonari across the four prompts.
+
+Two separate trials used Tonari's own journal. In the first trial the prototype removed the call to `history.prepare_search` before drawing. In the second, the prototype moved it after drawing, waited up to 8 ms for input first and checked for queued input between 64 KiB reads. Each trial ran alongside the unmodified release. Search times run from sending Ctrl-R and the query through the display of the oldest matching entry in 100,000 records (31 samples).
+
+| Workload (ms) | Original | Remove prefetch | Original in second trial | Prefetch after idle |
+|---|---:|---:|---:|---:|
+| First prompt, 4 MiB journal | 3.907 | 3.159 | 3.547 | 2.921 |
+| First character echo, 4 MiB journal | 0.031 | 0.027 | 0.026 | 0.029 |
+| Immediate oldest-entry search | 0.520 | 0.918 | 1.123 | 1.968 |
+
+The first search trial used the escaped-entry fixture. The second used plain entries and explicitly sent the query as soon as the prompt appeared. The 8 ms prototype also increased the 95th percentile for a keystroke sent 8 ms after the prompt from 0.124 to 1.586 ms in this run. Both prototypes were evaluated on a warm filesystem. These trials did not measure cold storage or Linux.
+
+4 MiB の履歴ではどちらの試作も表示が早まった。表示直後の Ctrl-R は両方とも遅くなり、8 ms 待つ試作は先読み開始と重なった打鍵の応答にも影響した。履歴を使う起動では、表示時刻・最初の打鍵・最初の検索結果を個別に測る。空の履歴での比較には `python3 tools/bench.py CURRENT --compare-tonari previous BASELINE --bash /bin/bash --case prompt --runs 61`、履歴検索には `python3 tools/bench_history.py BASELINE TRIAL --escaped --entries 100000 --runs 31` を使える。前者は固定プロンプトと `HISTFILE=/dev/null` を使うため、上の表では各条件の PS1 と履歴を設定した。
+
 <a id="helper-output-audit"></a>
 
 ## November 27 · Measurement helper failures / 計測ツールの失敗時の扱い

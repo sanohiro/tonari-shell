@@ -137,7 +137,8 @@ impl<'a> Filter<'a> {
             }
             let start = self.end.saturating_sub(width as u64);
             let size = (self.end - start) as usize;
-            let buf = if let Some(bytes) = self.cached.and_then(|window| window.range(start, size))
+            let buf = if let Some((bytes, _)) =
+                self.cached.and_then(|window| window.range(start, size))
             {
                 bytes
             } else {
