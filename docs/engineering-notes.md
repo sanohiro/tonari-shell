@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## November 27 · Private variables and process environments / 子プロセスに渡す変数
+
+Comparing cached child environments used to visit every shell binding. Only exported variables and bindings masking inherited names can affect the variable delta. An index can narrow that scan when few of the bindings qualify. Read current values, option strings, exported functions and command-prefix assignments for each launch. Small and densely exported tables use direct iteration.
+
+8,192 個のシェル内変数を先に作成し、子プロセスが実際に受け取った値を検証してから時間を比較する。属性変更、ローカル変数の復元、継承値のマスク、`set -a` は `test_child_environment_with_many_private_variables` で確認する。 [Measurements / 計測](benchmarks.md#sparse-environment)
+
 ## November 27 · Passing arguments to external programs / 外部コマンドの引数
 
 External commands used to allocate a C string for every argument. Keep the program and an optional `exec -a` name separately and pack subsequent strings, including empty arguments, into one buffer. Construct pointers after the buffer is complete. Executable text files without shebangs re-enter Tonari with the same boundaries.
