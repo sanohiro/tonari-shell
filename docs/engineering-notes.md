@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## November 28 · Reading the last line of a redirected compound / リダイレクト付き終端の先読み
+
+The same token-boundary hint works for `:; } 2>log`, `:; fi 2>log`, `:; done >out` and `: ;; esac 2>&1`. After an unsuccessful inline probe, space further probes geometrically and retain the final candidate. When aliases are inactive and the buffered text has just one possible terminator, search for it in bulk and validate its physical line. A heredoc can contain hundreds of lines resembling a terminator. The parser still decides where a complete statement ends, so the next physical command sees the aliases and options set by that statement. A targeted CPU sample also showed work in the lexer's word reader and the parser's single-operand path. A plain assignment can reuse its token boundaries, reserve space for one assignment and keep the existing AST for runtime evaluation. For `hash`, copying the padded decimal count and path into a reusable row avoided per-entry formatting. Exported-function listings reuse the attributes already looked up during traversal. [Final measurements](benchmarks.md#compound-listings-release)
+
+行の途中にある `}`、`fi`、`done`、`esac` を同じ規則で見つける。ヒアドキュメントなどで候補が続くときは、検証の間隔を広げ、最後の候補も確認する。連続する代入では、字句解析済みの名前と値を活用し、代入1件分の領域を確保すると、Linuxでも処理時間が縮まった。`hash` は各行の文字列整形を減らし、関数一覧では同じ属性の二重検索を省いた。 [実機の比較](benchmarks.md#compound-listings-release)
+
 ## November 28 · Reviewing the performance audit after PR #45 / PR #45 後の速度監査
 
 The largest cost in a traced 1,000-line script came from reading the compound command. In `src/input/lookahead.rs`, the terminator hint looks at the beginning and end of a trimmed line. A last line such as `set +x; } 2>/dev/null` puts the brace in the middle. Missing it sends the unit to the incremental reader, which reparses its growing prefix. A prototype also recognized a closing token before a redirection and let the existing parser validate the candidate. A quoted terminator, a heredoc containing a terminator, changes of alias between commands and physical source positions matter here. The effect reproduces with tracing disabled and when sourcing a file.
