@@ -262,6 +262,15 @@ impl FixedWidth {
         })
     }
 
+    pub(crate) fn literal_span<'a>(&self, pattern: &'a str) -> Option<(usize, &'a [u8])> {
+        if !self.literals_and_questions {
+            return None;
+        }
+        let bare = pattern.trim_start_matches('?');
+        let literal = bare.trim_end_matches('?');
+        (!literal.contains('?')).then_some((pattern.len() - bare.len(), literal.as_bytes()))
+    }
+
     pub(crate) fn matches_ascii(
         &self,
         pattern: &str,

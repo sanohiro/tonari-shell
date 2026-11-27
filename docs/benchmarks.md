@@ -18,6 +18,8 @@ The native runner includes the three new cases in `probe`. The existing single b
 
 The first bounded implementation on Linux x86-64 took 0.477 ms for bracket replacement (Bash 0.447 ms) and 0.229 ms for question marks (Bash 0.319 ms). Following that result, the ASCII global replacement scans byte slices directly, class matching skips the star backtracking loop when width is fixed, and the replacement template is inspected once per expansion. [First Linux run](https://github.com/sanohiro/tonari-shell/actions/runs/45950300521)
 
+On Linux the streaming bracket replacement reached 0.284 ms (previous 80.756, Bash 0.460). The question-mark case still took 0.228 ms versus 0.325 for Bash, 11 µs above the target. A further pass tests the literal span between leading/trailing wildcards and directly consumes single-character replacements. The UTF-8 throughput control replaces 3,072 scalars 16 times. [Streaming Linux run](https://github.com/sanohiro/tonari-shell/actions/runs/45950987058)
+
 <a id="sparse-environment"></a>
 
 ## 2026-11-27 · Launches with private variables / シェル内変数の多い起動

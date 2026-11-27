@@ -336,7 +336,7 @@ case "$SUITE" in
       --case printf-list-newline --case printf-list-count \
       --case heredoc-external-file --case here-string-capture --case here-string-builtin-read \
       --case capture-positional-program --case capture-scalar-program \
-      --case trim-fixed-width --case substitute-fixed-class --case substitute-fixed-width ;;
+      --case substitute-single-scalar --case trim-fixed-width --case substitute-fixed-class --case substitute-fixed-width ;;
   foreground)
     run foreground python3 tests/compat/foreground.py "$current" "$ref" ;;
   history-windows)

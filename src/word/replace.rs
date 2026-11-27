@@ -9,7 +9,7 @@ fn write_replacement(out: &mut String, template: &str, matched: &str, expand_amp
     while let Some(c) = chars.next() {
         if c == '\\' && matches!(chars.peek(), Some('\\' | '&')) {
             out.push(chars.next().unwrap());
-        } else if c == '&' && expand_amp {
+        } else if c == '&' {
             out.push_str(matched);
         } else {
             out.push(c);
@@ -28,6 +28,42 @@ pub(super) fn substitute(
 ) -> String {
     use ReplaceMode::*;
     let expand_amp = expand_amp && template.contains(['\\', '&']);
+    if expand_amp && template == "&" {
+        return text;
+    }
+    if pattern == "?" {
+        if mode == All {
+            if template.is_empty() {
+                text.clear();
+                return text;
+            }
+            if !expand_amp {
+                return template.repeat(text.chars().count());
+            }
+            let mut out = String::with_capacity(text.len());
+            for (i, c) in text.char_indices() {
+                write_replacement(&mut out, template, &text[i..i + c.len_utf8()], expand_amp);
+            }
+            return out;
+        }
+        let mut chars = text.char_indices();
+        let selected = if mode == Suffix {
+            chars.next_back()
+        } else {
+            chars.next()
+        };
+        if let Some((i, c)) = selected {
+            let range = i..i + c.len_utf8();
+            if expand_amp {
+                let mut rendered = String::new();
+                write_replacement(&mut rendered, template, &text[range.clone()], true);
+                text.replace_range(range, &rendered);
+            } else {
+                text.replace_range(range, template);
+            }
+        }
+        return text;
+    }
     // A single bracket expression consumes one character. Avoid trying every
     // possible suffix when deleting matching characters from a string.
     if mode == All
@@ -139,7 +175,6 @@ pub(super) fn substitute(
         .then(|| crate::pattern::Matcher::new(pattern));
     let width = basic
         .as_ref()
-        .filter(|_| pattern != "?")
         .and_then(|_| crate::pattern::FixedWidth::parse(pattern));
     let max_width = width.as_ref().map(|f| f.width);
     let ascii = width.as_ref().filter(|_| text.is_ascii());
@@ -149,8 +184,14 @@ pub(super) fn substitute(
     {
         let width = fixed.width;
         debug_assert_ne!(width, 0);
+        // With only edge wildcards, a single literal span decides a match.
+        let literal = fixed.literal_span(pattern).filter(|_| !text.contains('\0'));
         while let Some(candidate) = text.get(i..i + width) {
-            if fixed.matches_ascii(pattern, candidate, basic.as_ref().unwrap()) {
+            let matches = literal.map_or_else(
+                || fixed.matches_ascii(pattern, candidate, basic.as_ref().unwrap()),
+                |(offset, literal)| candidate.as_bytes()[offset..].starts_with(literal),
+            );
+            if matches {
                 out.push_str(&text[copied..i]);
                 write_replacement(&mut out, template, candidate, expand_amp);
                 i += width;
@@ -170,11 +211,7 @@ pub(super) fn substitute(
         .map(|(i, _)| i)
         .chain(std::iter::once(text.len()))
         .collect();
-    let starts = (max_width.is_none()
-        && group.is_none()
-        && !escaped_end
-        && mode != Suffix
-        && pattern != "?")
+    let starts = (max_width.is_none() && group.is_none() && !escaped_end && mode != Suffix)
         .then(|| crate::pattern::Matcher::new(format!("{pattern}*")));
     let accepts = |candidate: &str| {
         if let Some(width) = ascii {
@@ -192,9 +229,7 @@ pub(super) fn substitute(
     }
     while i + 1 < bounds.len() {
         let start = bounds[i];
-        let end = if pattern == "?" {
-            (mode != Suffix || i + 2 == bounds.len()).then_some(i + 1)
-        } else if mode == Suffix {
+        let end = if mode == Suffix {
             accepts(&text[start..]).then_some(bounds.len() - 1)
         } else if let Some(width) = max_width {
             let last = i.saturating_add(width);
