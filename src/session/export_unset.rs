@@ -22,8 +22,9 @@ impl Session {
             let mut status = 0;
             if args.is_empty() {
                 let mut out = crate::builtins::listing_stdout("export");
-                for name in self.functions.keys().filter(|n| self.function_exported(n)) {
-                    if self.print_function(&mut out, name, true).is_err() {
+                for (name, function) in &self.functions {
+                    let flags = self.function_attributes(name);
+                    if flags.ends_with('x') && function.print(&mut out, name, flags).is_err() {
                         return 1;
                     }
                 }

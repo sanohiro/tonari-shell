@@ -15,7 +15,7 @@ if [[ $SUITE == compound-listings ]]; then
   done
   "$ref" --version > "$out/bash-version.txt"
   python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 31 "${args[@]}" > "$out/scripts.txt"
-  REFERENCE_BASH="$ref" python3 tests/shell.py "$current" ShellTests.test_inline_compound_terminators ShellTests.test_associative_field_cache ShellTests.test_background_trap_listing ShellTests.test_bulk_listing_errors ShellTests.test_listing_diagnostic_order > "$out/behavior.txt" 2>&1
+  REFERENCE_BASH="$ref" python3 tests/shell.py "$current" ShellTests.test_inline_compound_terminators ShellTests.test_associative_field_cache ShellTests.test_background_trap_listing ShellTests.test_bulk_listing_format ShellTests.test_bulk_listing_errors ShellTests.test_listing_diagnostic_order > "$out/behavior.txt" 2>&1
   exit
 fi
 if [[ $SUITE == listings-expansion ]]; then

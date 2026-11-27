@@ -117,6 +117,14 @@ alias two=changed; printf 'live<%s>\n' "${BASH_ALIASES[@]}"
                         self.assertEqual((p.returncode, p.stdout, p.stderr),
                                          (0, (listing(False) + listing(True) + listing(False)).encode(), b""))
 
+    def test_bulk_listing_format(self):
+        self.compare("hash -p /bin/echo mark; mark >/dev/null; hash", 0,
+                     b"hits\tcommand\n   1\t/bin/echo\n")
+        self.compare("for ((i=0;i<11;++i)); do pushd -n /tmp >/dev/null; done; dirs -v +10",
+                     0, b"10  /tmp\n")
+        self.compare("f(){ :; }; g(){ :; }; export -f f; readonly -f f; declare -ft f; export -fp",
+                     0, b"f () \n{ \n    :\n}\ndeclare -frtx f\n", minimum=5)
+
     def test_bulk_listing_errors(self):
         commands = ("complete -F _f one; complete -p", "f(){ :; }; declare -f",
                     "f(){ :; }; export -f f; export -fp", "dirs -v",
