@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## November 27 · Signals between terminal packets / 分割入力とシグナル
+
+During `read -e`, a caught signal can arrive between UTF-8 continuation bytes, during a bound escape sequence, or before the end of a bracketed paste. Preserve what the current operation already consumed and retry it after running the handler. Match a partial end marker against its last five bytes at most. The PTY regression splits a four-byte scalar at every interior boundary and sends a signal at every boundary before the paste end marker completes. It also checks a split custom binding and a quoted character.
+
+日本語入力やペーストが途中で分割されても、組み込みの `read -e` はハンドラーから戻った後に同じ入力を最後まで受け取る。Apple M1 で256個のキー割り当てを有効にし、31回の中央値を比較した。ASCII の一括入力は修正前1.602 ms、修正後1.596 ms、Bash 5.3.20 は5.188 ms。日本語と絵文字は順に1.551 ms、1.544 ms、4.959 ms。完了後に編集バッファ全体を照合している。 [Editing benchmark](../tools/bench_editing.py)
+
 ## November 27 · Interrupting shell input / 読み取り中の中断
 
 At a terminal, an uncaught Ctrl-C in `read`, `read -e`, or `mapfile` discards the remaining commands on the line and sets status 130. A scalar retains its old value. A map retains completed records. An edited read interrupted by a caught signal instead restores the terminal for the handler, supplies the preceding command status and resumes at the editing cursor. A terminating signal runs EXIT cleanup with the preceding status before the process terminates by the original signal.

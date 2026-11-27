@@ -192,19 +192,24 @@ impl Keys {
             return Ok(None);
         };
         let mut bytes = [first; 4];
-        for slot in &mut bytes[1..width] {
+        for index in 1..width {
             let b = if let Some(b) = self.immediate() {
                 b
-            } else if let Some(b) = self.get()? {
-                b
             } else {
-                return Ok(None);
+                match self.get() {
+                    Ok(Some(b)) => b,
+                    Ok(None) => return Ok(None),
+                    Err(e) => {
+                        self.unread(&bytes[1..index]);
+                        return Err(e);
+                    }
+                }
             };
             if b & 0xc0 != 0x80 {
                 self.queued.push_front(b);
                 return Ok(None);
             }
-            *slot = b;
+            bytes[index] = b;
         }
         Ok(std::str::from_utf8(&bytes[..width])
             .ok()
@@ -262,6 +267,12 @@ impl Keys {
         Ok(())
     }
 
+    fn unread(&mut self, bytes: &[u8]) {
+        for &key in bytes.iter().rev() {
+            self.queued.push_front(key);
+        }
+    }
+
     pub(super) fn binding(&mut self, first: u8, session: &Session) -> io::Result<(Binding, bool)> {
         if unbound_text(first, session) {
             return Ok((Binding::Edit(Action::Insert), false));
@@ -283,11 +294,24 @@ impl Keys {
             // Consume one byte at a time; a foreground child owns later typeahead.
             let key = if let Some(key) = self.immediate() {
                 key
-            } else if ready(0, session.bindings.timeout()) {
-                let Some(key) = self.get()? else { break };
-                key
             } else {
-                break;
+                let next = if ready(0, session.bindings.timeout()) {
+                    self.get()
+                } else if crate::traps::input_interrupted()
+                    || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    Err(io::ErrorKind::Interrupted.into())
+                } else {
+                    break;
+                };
+                match next {
+                    Ok(Some(key)) => key,
+                    Ok(None) => break,
+                    Err(e) => {
+                        self.unread(&seq[1..]);
+                        return Err(e);
+                    }
+                }
             };
             seq.push(key);
             let (exact, prefix) = session.bindings.lookup(&seq);
@@ -298,9 +322,7 @@ impl Keys {
         }
         let (len, action) = best.unwrap_or((1, fallback));
         // Preserve unmatched bytes when a custom sequence shares a prefix with ordinary typing.
-        for &key in seq[len..].iter().rev() {
-            self.queued.push_front(key);
-        }
+        self.unread(&seq[len..]);
         let right = matches!(&seq[..len], b"\x1b[C" | b"\x1bOC");
         self.sequence = seq;
         Ok((action, right))
@@ -310,11 +332,22 @@ impl Keys {
     // Enter, so leave everything after that byte on the tty for the next reader.
     pub(super) fn paste(
         &mut self,
+        paint: impl FnMut(&[u8]) -> io::Result<()>,
+    ) -> io::Result<String> {
+        self.resume_paste(&mut Vec::new(), paint)
+    }
+
+    pub(super) fn resume_paste(
+        &mut self,
+        data: &mut Vec<u8>,
         mut paint: impl FnMut(&[u8]) -> io::Result<()>,
     ) -> io::Result<String> {
         const END: &[u8; 6] = b"\x1b[201~";
-        let mut data = Vec::new();
-        let mut matched = 0;
+        // Only a caught signal can leave a partially received end marker.
+        let mut matched = (1..=data.len().min(END.len() - 1))
+            .rev()
+            .find(|&n| data.ends_with(&END[..n]))
+            .unwrap_or(0);
         let mut chunk = [0; END.len() + 1];
         let mut displayed = 0;
         const PREVIEW_INTERVAL: usize = 16 * 1024;
@@ -382,6 +415,7 @@ impl Keys {
                 }
             }
         }
+        let mut data = std::mem::take(data);
         if memchr::memchr(b'\r', &data).is_some() {
             let mut after_cr = false;
             data.retain_mut(|b| {

@@ -527,6 +527,30 @@ impl EditorState {
     }
 }
 
+#[cold]
+fn read_trap(
+    term: &mut Option<Terminal>,
+    session: &mut Session,
+    status: u8,
+    screen: &mut Screen,
+) -> io::Result<Option<Input>> {
+    // A handler may run another terminal program, including a nested read.
+    drop(term.take());
+    io::stderr().write_all(b"\r\n")?;
+    let flow = {
+        let _deadline = crate::input_deadline(None);
+        crate::traps::dispatch(session, status)
+    };
+    if !matches!(flow, crate::Flow::Continue(_)) {
+        return Ok(Some(Input::Control(flow)));
+    }
+    *term = Some(Terminal::enter(session.bindings.paste())?);
+    screen.row = 0;
+    screen.tail = None;
+    screen.view.invalidate();
+    Ok(None)
+}
+
 pub fn line(
     prompt: &str,
     history: &mut History,
@@ -542,7 +566,7 @@ pub fn line(
     } else {
         Keymap::Emacs
     };
-    let mut term = Terminal::enter(session.bindings.paste())?;
+    let mut term = Some(Terminal::enter(session.bindings.paste())?);
     let mut keys = Keys::new(std::mem::take(&mut session.editor_queue));
     let mut edit = EditorState::default();
     let mut mark = 0usize;
@@ -566,23 +590,36 @@ pub fn line(
     if read.is_none() && keys.queued.is_empty() {
         history.prepare_search(session, &|| ready(0, 0));
     }
-    loop {
-        if read.is_some() && session.traps.read_pending() {
-            // A read trap can run another terminal command. Restore cooked
-            // mode for it and keep this editor's buffer, cursor and deadline.
-            drop(term);
-            io::stderr().write_all(b"\r\n")?;
-            let flow = {
-                let _deadline = crate::input_deadline(None);
-                crate::traps::dispatch(session, status)
-            };
-            if !matches!(flow, crate::Flow::Continue(_)) {
-                return Ok(Input::Control(flow));
+    // A signal can interrupt any part of one input operation. Retry that
+    // operation with its consumed bytes intact after running a read handler.
+    macro_rules! read_key {
+        ($operation:expr) => {
+            loop {
+                match $operation {
+                    Ok(value) => break value,
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                        if read.is_some() && session.traps.read_pending() {
+                            if let Some(outcome) =
+                                read_trap(&mut term, session, status, &mut screen)?
+                            {
+                                return Ok(outcome);
+                            }
+                        } else {
+                            io::stderr().write_all(b"\r\n")?;
+                            return Ok(Input::Cancel);
+                        }
+                    }
+                    Err(e) => return Err(e),
+                }
             }
-            term = Terminal::enter(session.bindings.paste())?;
-            screen.row = 0;
-            screen.tail = None;
-            screen.view.invalidate();
+        };
+    }
+    loop {
+        if read.is_some()
+            && session.traps.read_pending()
+            && let Some(outcome) = read_trap(&mut term, session, status, &mut screen)?
+        {
+            return Ok(outcome);
         }
         if session.bindings.map == Keymap::Command && !text.is_empty() {
             cursor = cursor.min(previous(&text, text.len()));
@@ -671,30 +708,22 @@ pub fn line(
                 screen.draw(visible_prompt, &text, cursor, "")
             })?;
         }
-        let first = match keys.get() {
-            Ok(Some(c)) => c,
-            Ok(None) => return Ok(Input::End),
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                if read.is_some() && session.traps.read_pending() {
-                    continue;
-                }
-                io::stderr().write_all(b"\r\n")?;
-                return Ok(Input::Cancel);
-            }
-            Err(e) => return Err(e),
+        let Some(first) = read_key!(keys.get()) else {
+            return Ok(Input::End);
         };
         // Ordinary committed text can bypass key-sequence and editing-action dispatch.
         if search.is_none() && unbound_text(first, session) {
             edit.last_argument = None;
             recall.edited(session.history_lines().len());
             let start = cursor;
-            edit.appended = edit.insert(&mut keys, first, session, &mut text, &mut cursor)?;
+            edit.appended =
+                read_key!(edit.insert(&mut keys, first, session, &mut text, &mut cursor));
             blink = session.bindings.blink_matching_paren
                 && matches!(&text.as_bytes()[start..cursor], b")" | b"]" | b"}");
             last_tab = false;
             continue;
         }
-        let (binding, right_arrow) = keys.binding(first, session)?;
+        let (binding, right_arrow) = read_key!(keys.binding(first, session));
         let action = match binding {
             Binding::Removed => {
                 vi = vi::State::default();
@@ -720,7 +749,7 @@ pub fn line(
                 if let crate::Flow::Exit(_) = flow {
                     return Ok(Input::Control(flow));
                 }
-                term = Terminal::enter(session.bindings.paste())?;
+                term = Some(Terminal::enter(session.bindings.paste())?);
                 screen.row = 0;
                 screen.view.invalidate();
                 continue;
@@ -785,10 +814,15 @@ pub fn line(
                     cursor = text.len();
                 }
                 _ => {
-                    let shortest =
-                        state.edit_query(action, first, &mut keys, session, |bytes| {
-                            screen.paste_frame(visible_prompt, "", 0, bytes)
-                        })?;
+                    let mut partial = Vec::new();
+                    let shortest = read_key!(state.edit_query(
+                        action,
+                        first,
+                        &mut keys,
+                        session,
+                        &mut partial,
+                        |bytes| screen.paste_frame(visible_prompt, "", 0, bytes)
+                    ));
                     if state.wants_picker(action) {
                         let selected = picker::history(
                             std::mem::take(&mut state.query),
@@ -1002,8 +1036,8 @@ pub fn line(
                 cursor = edit.transpose(action, &mut text, cursor);
             }
             Action::Quote => {
-                if let Some(key) = keys.get()?
-                    && let Some(c) = keys.character(key)?
+                if let Some(key) = read_key!(keys.get())
+                    && let Some(c) = read_key!(keys.character(key))
                 {
                     edit.undo
                         .insert(&mut text, &mut cursor, c.encode_utf8(&mut [0; 4]));
@@ -1089,8 +1123,10 @@ pub fn line(
                 if cursor == text.len() {
                     edit.appended = Some(cursor);
                 }
-                let pasted =
-                    keys.paste(|bytes| screen.paste_frame(prompt, &text, cursor, bytes))?;
+                let mut partial = Vec::new();
+                let pasted = read_key!(keys.resume_paste(&mut partial, |bytes| {
+                    screen.paste_frame(prompt, &text, cursor, bytes)
+                }));
                 edit.undo
                     .record(&text, cursor..cursor, pasted.len(), cursor, false);
                 let end = cursor + pasted.len();
@@ -1102,7 +1138,8 @@ pub fn line(
                 cursor = end;
             }
             Action::Insert => {
-                edit.appended = edit.insert(&mut keys, first, session, &mut text, &mut cursor)?;
+                edit.appended =
+                    read_key!(edit.insert(&mut keys, first, session, &mut text, &mut cursor));
             }
             _ => {}
         }

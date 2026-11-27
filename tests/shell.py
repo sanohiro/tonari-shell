@@ -162,7 +162,7 @@ p='\360\237\230\200'; echo "${p@P}" """
             finally:
                 os.close(high)
 
-    def wait_for_empty_pipe(self, fd):
+    def wait_for_input_consumed(self, fd):
         pending = array.array("i", [0])
         limit = time.monotonic() + 3
         while time.monotonic() < limit:
@@ -185,7 +185,7 @@ p='\360\237\230\200'; echo "${p@P}" """
                     os.write(fd, f"a=old; exec 3<&{r}; echo input''READY; {command}; echo still''RUNNING\n".encode())
                     self.read_until(fd, b"inputREADY\r\n")
                     writer.write(data)
-                    self.wait_for_empty_pipe(reader.fileno())
+                    self.wait_for_input_consumed(reader.fileno())
                     os.write(fd, b"\x03")
                     reply = self.read_until(fd, PROMPT)
                     self.assertNotIn(b"stillRUNNING", reply)
@@ -207,6 +207,28 @@ p='\360\237\230\200'; echo "${p@P}" """
                     self.read_until(fd, b"caught=1\r\n")
                     os.write(fd, b"lo\n")
                     self.assertIn(b"status=0 value=hello\r\n", self.read_until(fd, PROMPT))
+
+    def test_edited_read_resumes_split_terminal_packets(self):
+        text = "日本🌱".encode()
+        end = b"\x1b[201~"
+        flower = "🌸".encode()
+        cases = [(b"\x1b[200~" + text + end[:i], end[i:], "日本🌱") for i in range(len(end))]
+        cases.extend((flower[:i], flower[i:], "🌸") for i in range(1, len(flower)))
+        cases.extend([(b"\x1b[8", b"q", "bound"), (b"\x16", b"Q", "Q")])
+        pid, fd = self.terminal_session(editing=True, with_pid=True)
+        os.write(fd, b"""tty >ttyname; bind 'set keyseq-timeout 5000'; bind '"\\e[8q":"bound"'; echo tty''READY\n""")
+        self.read_until(fd, b"ttyREADY\r\n")
+        with open((self.cwd / "ttyname").read_text().strip(), "rb", buffering=0) as terminal:
+            for prefix, suffix, expected in cases:
+                with self.subTest(expected=expected):
+                    os.write(fd, b"""trap 'echo caught=$?' USR1; false; read -e -p 'receiving'PACKET result; printf 'got=<%s>\\n' "$result"\n""")
+                    self.read_until(fd, b"receivingPACKET")
+                    os.write(fd, prefix)
+                    self.wait_for_input_consumed(terminal.fileno())
+                    os.kill(pid, signal.SIGUSR1)
+                    self.read_until(fd, b"caught=1\r\n")
+                    os.write(fd, suffix + b"\n")
+                    self.read_until(fd, ("got=<" + expected + ">\r\n").encode())
 
     def test_interrupting_edited_read_preserves_its_destination(self):
         for shell in self.shells_for(5):
@@ -230,7 +252,7 @@ mapfile -t {opts} a; echo continued"""
                     try:
                         self.assertEqual(child.stdout.readline(), b"ready\n")
                         writer.write(b"saved\npartial")
-                        self.wait_for_empty_pipe(reader.fileno())
+                        self.wait_for_input_consumed(reader.fileno())
                         child.terminate()
                         child.wait(timeout=3)
                         out, err = child.communicate()
@@ -258,7 +280,7 @@ mapfile -t {opts} a; echo continued"""
                     try:
                         self.assertEqual(child.stdout.readline(), b"ready\n")
                         writer.write(prefix)
-                        self.wait_for_empty_pipe(observe.fileno())
+                        self.wait_for_input_consumed(observe.fileno())
                         child.send_signal(signal.SIGUSR1)
                         self.assertTrue(select.select([child.stdout], [], [], 2)[0])
                         self.assertEqual(child.stdout.readline(), b"caught:" + last + b"\n")
