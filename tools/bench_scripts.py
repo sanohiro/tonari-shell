@@ -382,6 +382,21 @@ echo "$i"
         'for ((i=0; i<400; i++)); do base=${path##*/}; done\necho "${#base}"',
         "2048",
     ),
+    "substitute-fixed-class": (
+        "text='" + "ab-12:" * 128 + "'\n"
+        'for ((i=0; i<8; i++)); do value=${text//[a-z][a-z]-[0-9][0-9]/X}; done\necho "$value"',
+        "X:" * 128,
+    ),
+    "trim-fixed-width": (
+        "text='ab-12" + "Z" * 2048 + "cd-34'\n"
+        'for ((i=0; i<32; i++)); do a=${text##??-??}; b=${a%%[a-z][a-z]-??}; done\necho "${#b}"',
+        "2048",
+    ),
+    "substitute-fixed-width": (
+        "text='" + "ab-12:" * 128 + "'\n"
+        'for ((i=0; i<8; i++)); do value=${text//??-??/X}; done\necho "$value"',
+        "X:" * 128,
+    ),
     "external-wide-argv": (
         'set -- {1..4096} "" "日本語"\n'
         'for ((i=0; i<11; i++)); do /bin/echo "$@" >/dev/null || exit 1; done\n/bin/echo "$@"',

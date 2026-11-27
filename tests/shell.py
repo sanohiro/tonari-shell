@@ -1431,6 +1431,18 @@ unset private_7; /usr/bin/printenv private_7 || echo unset
         self.compare(code, 0, b"first\nsecond\nprivate\nchangedpromoted\nlocal\nsecond\n"
                               b"masked\nhidden\nprefix\nrestored\nunset\n")
 
+    def test_fixed_width_parameter_patterns(self):
+        code = r"""s=ab-12:cd-34
+p='??-??'; printf '%s\n' "${s/$p/X}" "${s//$p/(&)}" "${s/#$p/H}" "${s/%$p/T}"
+p='[a-z][a-z]-[[:digit:]][[:digit:]]'; printf '%s\n' "${s##$p}" "${s%%$p}"
+s='a?b?'; p='?\?'; printf '%s\n' "${s//$p/X}"
+"""
+        self.compare(code, 0, b"X:cd-34\n(ab-12):(cd-34)\nH:cd-34\nab-12:T\n:cd-34\nab-12:\nXX\n", minimum=5)
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        self.compare("""s='雪😀-ab:xy-12'; p='??-??'
+printf '%s\\n' "${s//$p/X}" "${s##$p}" "${s%%$p}"
+""", 0, "X:X\n:xy-12\n雪😀-ab:\n".encode(), minimum=5)
+
     def test_executable_text_without_shebang(self):
         script = self.cwd / "plain"
         script.write_text('args=("two words" "$1"); printf "<%s><%s>\\n" "$0" "${args[*]}"; exit 7\n')

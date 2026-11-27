@@ -142,20 +142,47 @@ pub(super) fn substitute(
     let basic = group
         .is_none()
         .then(|| crate::pattern::Matcher::new(pattern));
-    let starts = (group.is_none() && !escaped_end && mode != Suffix && pattern != "?")
+    let width = basic
+        .as_ref()
+        .filter(|_| pattern != "?")
+        .and_then(|_| crate::pattern::FixedWidth::parse(pattern));
+    let max_width = width.as_ref().map(|f| f.width);
+    let ascii = width.as_ref().filter(|_| text.is_ascii());
+    let starts = (max_width.is_none()
+        && group.is_none()
+        && !escaped_end
+        && mode != Suffix
+        && pattern != "?")
         .then(|| crate::pattern::Matcher::new(format!("{pattern}*")));
-    let accepts = |candidate| {
+    let accepts = |candidate: &str| {
+        if let Some(width) = ascii {
+            return width.matches_ascii(pattern, candidate, basic.as_ref().unwrap());
+        }
         group.as_ref().map_or_else(
             || basic.as_ref().unwrap().matches(candidate),
             |g| g.accepts(candidate, false),
         )
     };
+    if mode == Suffix
+        && let Some(width) = max_width
+    {
+        i = bounds.len().saturating_sub(width + 1);
+    }
     while i + 1 < bounds.len() {
         let start = bounds[i];
         let end = if pattern == "?" {
             (mode != Suffix || i + 2 == bounds.len()).then_some(i + 1)
         } else if mode == Suffix {
             accepts(&text[start..]).then_some(bounds.len() - 1)
+        } else if let Some(width) = max_width {
+            let last = i.saturating_add(width);
+            if ascii.is_some() {
+                (last < bounds.len() && accepts(&text[start..bounds[last]])).then_some(last)
+            } else {
+                (i + 1..=last.min(bounds.len() - 1))
+                    .rev()
+                    .find(|&j| accepts(&text[start..bounds[j]]))
+            }
         } else if starts
             .as_ref()
             .is_none_or(|matcher| matcher.matches(&text[start..]))
