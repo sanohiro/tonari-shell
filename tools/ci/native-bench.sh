@@ -204,6 +204,7 @@ case "$SUITE" in
   edit-actions)
     REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k last_arg -k test_undo
     run actions python3 tools/bench_edit_actions.py "$bin/baseline" "$current" "$ref" --runs 21
+    run binding-bursts python3 tools/bench_editing.py "$bin/baseline" "$current" "$ref" --binding-bursts --runs 31
     if [[ $RUNNER_OS == Linux ]]; then
       cpu=$(python3 -c 'import os;print(min(os.sched_getaffinity(0)))')
       run actions-one-cpu taskset -c "$cpu" python3 tools/bench_edit_actions.py "$bin/baseline" "$current" "$ref" --runs 15

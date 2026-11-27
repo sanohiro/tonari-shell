@@ -1,5 +1,8 @@
 use std::{collections::VecDeque, ops::Range};
 
+const MAX_UNDO_ENTRIES: usize = 128;
+const MAX_UNDO_BYTES: usize = 4 * 1024 * 1024;
+
 struct Change {
     inserted: Range<usize>,
     removed: String,
@@ -42,8 +45,8 @@ impl Undo {
         self.typing = append;
         let removed = &line[range.clone()];
         while !self.entries.is_empty()
-            && (self.entries.len() >= 128
-                || self.bytes.saturating_add(removed.len()) > 4 * 1024 * 1024)
+            && (self.entries.len() >= MAX_UNDO_ENTRIES
+                || self.bytes.saturating_add(removed.len()) > MAX_UNDO_BYTES)
         {
             self.bytes -= self.entries.pop_front().unwrap().removed.len();
         }
@@ -53,6 +56,12 @@ impl Undo {
             removed: removed.to_owned(),
             cursor,
         });
+    }
+
+    pub(super) fn insert(&mut self, line: &mut String, cursor: &mut usize, value: &str) {
+        self.record(line, *cursor..*cursor, value.len(), *cursor, false);
+        line.insert_str(*cursor, value);
+        *cursor += value.len();
     }
 
     /// Completion and bind -x can return an entire word or line for a small edit.

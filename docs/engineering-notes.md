@@ -1,5 +1,15 @@
 # Engineering notes / 開発知見
 
+## November 27 · Readline sequence starts and editing / 入力とキーバインド
+
+The editor only asks whether a byte starts a custom binding while it collects a burst of committed text. Keep that answer with the copy-on-write binding table, using 32 bytes per configured keymap. Removed bindings still mask defaults. The full sequence lookup handles exact bindings and longer matches. Normal editing and completion previews share the rules for ordinary bytes and for overwriting UTF-8 text. The shell keeps the first unconsumed control key for the foreground reader.
+
+256個の独自キーを登録し、通常入力と日本語入力の末尾が表示された時刻を PTY で測る。測定後は `READLINE_LINE` で全バッファも照合する。長い入力の書き込みと画面出力の読み出しは並行させる。macOS の PTY では両側が同時に書き込み待ちになる場合がある。実行は `tools/bench_editing.py --binding-bursts`。 [Measurements / 計測](benchmarks.md#editor-binding-starts)
+
+## November 27 · Forking a shell child / シェル子プロセスの初期状態
+
+A child that continues interpreting shell code must reset inherited trap bookkeeping and forget which process substitutions its parent can wait on. `Session::fork_shell` does both before returning in the child. Pipe endpoints, process groups and terminal ownership are specific to the launch site. A successful signal query may fill only the OS-supported portion of the mask, so initialize the entire saved action before querying libc. シェルコードを実行する7か所の fork と、直後に新しいインタプリタを exec する経路には異なる準備が必要になる。名前付き記述子、coproc、捕捉するシグナル、バックグラウンドの wait は `tests/shell.py` と `tests/compat/source_review.py` で検証する。 [Measurements / 計測](benchmarks.md#shell-child-state)
+
 ## November 27 · Shell words and source grammar / 語と構文の境界
 
 The lexer finishes one shell word before the surrounding grammar interprets operators or here-document boundaries. Numeric and named descriptor syntax shares one recognition point. Quoted regular expressions, shell patterns and scalar text each retain their own escaping rules when expanding into a caller-owned buffer. Run `cargo test --locked` and `tests/compat/source_review.py` to exercise those boundaries. 関数の先読みと構文解析は同じ関数ヘッダーを判定する。改行位置をスレッドローカルに再利用する案は、複合関数の差が小さく、内容が変化する eval に不利だったため採用しなかった。 [Measurements / 計測](benchmarks.md#word-grammar-readers)

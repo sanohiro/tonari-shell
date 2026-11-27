@@ -72,6 +72,8 @@ pub(super) struct Keys {
 }
 
 impl Keys {
+    // Bound one frame of committed text. Stop at control keys even within this budget.
+    pub(super) const BURST_BYTES: usize = 4096;
     pub(super) const MAX_QUEUED_BYTES: usize = 64 * 1024;
     const MAX_MACRO_EXPANSIONS: usize = 64;
 
@@ -91,7 +93,7 @@ impl Keys {
                     None => return false,
                 },
             };
-            self.queued.len() >= width && !session.bindings.custom_prefix(&[b])
+            self.queued.len() >= width && !session.bindings.custom_start(b)
         })
     }
 
@@ -154,7 +156,7 @@ impl Keys {
             let mut seq = [first, 0, 0];
             let mut len = 1;
             if first == 27
-                && !session.bindings.custom_prefix(&[first])
+                && !session.bindings.custom_start(first)
                 && let Some(b) = self.immediate()
             {
                 seq[1] = b;
@@ -167,8 +169,8 @@ impl Keys {
                 }
             }
             match &seq[..len] {
-                [2] if !session.bindings.custom_prefix(&[2]) => cursor = previous(text, cursor),
-                [6] if !session.bindings.custom_prefix(&[6]) => cursor = next(text, cursor),
+                [2] if !session.bindings.custom_start(2) => cursor = previous(text, cursor),
+                [6] if !session.bindings.custom_start(6) => cursor = next(text, cursor),
                 [27, b'[' | b'O', b'D'] => cursor = previous(text, cursor),
                 [27, b'[' | b'O', b'C'] if cursor < text.len() => cursor = next(text, cursor),
                 other => {
@@ -224,11 +226,11 @@ impl Keys {
         }
         // Gather an immediately available run without waiting for more keys.
         // A bound keeps long streams responsive to signals and screen updates.
-        let mut bytes = [0; 4096];
+        let mut bytes = [0; Self::BURST_BYTES];
         let mut n = 0;
         while n < bytes.len() {
             let Some(b) = self.immediate() else { break };
-            if b < 32 || b == 127 || session.bindings.custom_prefix(&[b]) {
+            if !session.bindings.literal_byte(b) {
                 self.queued.push_front(b);
                 break;
             }
@@ -405,8 +407,5 @@ fn multibyte_width(first: u8) -> Option<usize> {
 }
 
 pub(super) fn unbound_text(first: u8, session: &Session) -> bool {
-    session.bindings.map != Keymap::Command
-        && first >= 32
-        && first != 127
-        && !session.bindings.custom_prefix(&[first])
+    session.bindings.map != Keymap::Command && session.bindings.literal_byte(first)
 }

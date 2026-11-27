@@ -41,6 +41,82 @@ pub(super) fn edit_and_execute(
 }
 
 impl EditorState {
+    pub(super) fn insert_last_argument(
+        &mut self,
+        history: &[String],
+        position: usize,
+        text: &mut String,
+        cursor: &mut usize,
+        mark: &mut usize,
+    ) {
+        let (end, replace) = self.last_argument.unwrap_or((position, false));
+        if replace {
+            self.undo.apply(text, cursor);
+        }
+        let next = end.checked_sub(1);
+        let argument = next
+            .and_then(|i| history.get(i))
+            .and_then(|line| crate::parser::last_history_argument(line));
+        if let Some(argument) = argument {
+            *mark = if text[..*cursor].is_ascii() {
+                *cursor
+            } else {
+                text[..*cursor].chars().count()
+            };
+            self.appended = (!replace && *cursor == text.len()).then_some(*cursor);
+            self.undo.insert(text, cursor, argument);
+        }
+        self.last_argument = Some((next.unwrap_or(0), argument.is_some()));
+    }
+
+    pub(super) fn expand_history(
+        &mut self,
+        session: &mut Session,
+        text: &mut String,
+        cursor: &mut usize,
+        magic_space: bool,
+    ) {
+        let Ok(result) = crate::history::expand::expand(session, text) else {
+            return;
+        };
+        let at_start = *cursor == 0;
+        let suffix = text.len() - *cursor;
+        if let std::borrow::Cow::Owned(expanded) = result.text {
+            self.undo.replace(text, 0..text.len(), &expanded, *cursor);
+            *cursor = text.len();
+        }
+        if magic_space {
+            *cursor = if at_start {
+                0
+            } else {
+                text.len().saturating_sub(suffix)
+            };
+            while !text.is_char_boundary(*cursor) {
+                *cursor -= 1;
+            }
+            self.undo.insert(text, cursor, " ");
+        }
+    }
+
+    pub(super) fn accept_suggestion(
+        &mut self,
+        history: &mut super::History,
+        session: &Session,
+        view: &mut super::View,
+        text: &mut String,
+        cursor: &mut usize,
+    ) {
+        if text.is_empty() {
+            return;
+        }
+        history.ensure(session, view, false, &|| false);
+        if let Some(suffix) = history.suggestion(session.history_lines(), text, true, || true) {
+            self.undo.insert(text, cursor, suffix);
+        } else if let Some(suffix) = history.older_suggestion(session, view, text, &|| false) {
+            self.undo.insert(text, cursor, suffix);
+        }
+    }
+
     pub(super) fn kill(
         &mut self,
         action: Action,

@@ -17,7 +17,7 @@ FLAG = "🏁".encode()
 WORD = "日本語🌱".encode()
 
 
-def visible(fd, packet):
+def visible(fd, packet, marker=FLAG):
     """Drain redraws while feeding a large packet, stopping at the final visible scalar."""
     pending = memoryview(packet)
     tail = b""
@@ -37,9 +37,9 @@ def visible(fd, packet):
                 if not block:
                     raise EOFError("editor closed")
                 output = tail + block
-                if not pending and FLAG in output:
+                if not pending and marker in output:
                     return (time.perf_counter_ns() - start) / 1e6
-                tail = output[-len(FLAG):]
+                tail = output[-len(marker):]
     finally:
         os.set_blocking(fd, True)
     raise TimeoutError(f"final scalar missing, {len(pending)} input bytes pending")

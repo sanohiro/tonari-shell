@@ -218,7 +218,30 @@ impl Keymap {
         }
     }
 }
-type KeyTable = BTreeMap<Vec<u8>, Binding>;
+#[derive(Clone, Default)]
+struct KeyTable {
+    sequences: BTreeMap<Vec<u8>, Binding>,
+    // Removed bindings still override defaults and must reach the dispatcher.
+    first_bytes: [u64; 4],
+}
+
+impl KeyTable {
+    fn prefix_bit(byte: u8) -> (usize, u64) {
+        (usize::from(byte / 64), 1u64 << (byte % 64))
+    }
+    fn set(&mut self, key: Vec<u8>, binding: Binding) {
+        if let Some(&first) = key.first() {
+            let (word, bit) = Self::prefix_bit(first);
+            self.first_bytes[word] |= bit;
+        }
+        self.sequences.insert(key, binding);
+    }
+    fn starts_with(&self, first: u8) -> bool {
+        let (word, bit) = Self::prefix_bit(first);
+        self.first_bytes[word] & bit != 0
+    }
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct Bindings {
     keys: [Option<Rc<KeyTable>>; 3],
@@ -244,20 +267,22 @@ impl Bindings {
     }
     fn set(&mut self, key: Vec<u8>, binding: Binding) {
         Rc::make_mut(self.keys[self.map as usize].get_or_insert_with(Default::default))
-            .insert(key, binding);
+            .set(key, binding);
     }
-    pub(super) fn custom_prefix(&self, key: &[u8]) -> bool {
-        self.keys[self.map as usize].as_deref().is_some_and(|keys| {
-            keys.range::<[u8], _>((std::ops::Bound::Included(key), std::ops::Bound::Unbounded))
-                .next()
-                .is_some_and(|(k, _)| k.starts_with(key))
-        })
+    pub(super) fn literal_byte(&self, byte: u8) -> bool {
+        byte >= b' ' && byte != 0x7f && !self.custom_start(byte)
+    }
+
+    pub(super) fn custom_start(&self, byte: u8) -> bool {
+        self.keys[self.map as usize]
+            .as_deref()
+            .is_some_and(|keys| keys.starts_with(byte))
     }
     pub(super) fn lookup(&self, seq: &[u8]) -> (Option<Binding>, bool) {
         let (mut exact, mut longer) = (None, false);
         if let Some(keys) = self.keys[self.map as usize].as_deref() {
             use std::ops::Bound::{Included, Unbounded};
-            let mut items = keys.range::<[u8], _>((Included(seq), Unbounded));
+            let mut items = keys.sequences.range::<[u8], _>((Included(seq), Unbounded));
             if let Some((key, binding)) = items.next() {
                 if key.as_slice() == seq {
                     exact = Some(binding.clone());
@@ -302,9 +327,10 @@ impl Bindings {
             result.extend((32..127).map(|c| vec![c]));
         }
         if let Some(map) = self.keys[self.map as usize].as_deref() {
-            result.retain(|k| !map.contains_key(k));
+            result.retain(|k| !map.sequences.contains_key(k));
             result.extend(
-                map.iter()
+                map.sequences
+                    .iter()
                     .filter(|&(_k, v)| matches!(v, Binding::Edit(a) if *a==action))
                     .map(|(k, _v)| k.clone()),
             );
@@ -735,7 +761,7 @@ fn run(session: &mut Session, args: &[String]) -> Result<u8, String> {
             "-s" | "-S" | "-X" => {
                 for (key, value) in session.bindings.keys[session.bindings.map as usize]
                     .iter()
-                    .flat_map(|m| m.iter())
+                    .flat_map(|m| m.sequences.iter())
                 {
                     match value {
                         Binding::Shell(v) if arg == "-X" => {
@@ -824,6 +850,23 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn custom_starts_follow_the_keymap_and_its_snapshot() {
+        let mut bindings = Bindings::default();
+        for first in [0, 63, 64, 127, 128, 191, 192, 255] {
+            bindings.set(vec![first, b'x'], Binding::Removed);
+        }
+        let snapshot = bindings.clone();
+        bindings.set(vec![b'q'], Binding::Edit(Action::Home));
+        for byte in 0..=255 {
+            let expected = matches!(byte, 0 | 63 | 64 | 127 | 128 | 191 | 192 | 255);
+            assert_eq!(snapshot.custom_start(byte), expected);
+            assert_eq!(bindings.custom_start(byte), expected || byte == b'q');
+        }
+        bindings.map = Keymap::Command;
+        assert!(!bindings.custom_start(b'q'));
     }
 
     #[test]
