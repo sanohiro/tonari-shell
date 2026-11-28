@@ -197,6 +197,8 @@ fn command(mut cmd: PreparedCommand, session: &mut Session, status: u8) -> io::R
     let captured = Cell::new(None);
     let fatal = matches!(builtin::redirect_failure(&cmd, session), Flow::Exit(_));
     let compound = cmd.compound.is_some();
+    let isolated_null =
+        cmd.words.is_empty() && !compound && isolated_null_redirects(&cmd.deferred_redirects);
     with_redirects(
         std::mem::take(&mut cmd.deferred_redirects),
         session,
@@ -211,7 +213,13 @@ fn command(mut cmd: PreparedCommand, session: &mut Session, status: u8) -> io::R
             other => other,
         },
         |session| {
-            cmd.empty_status = captured.get().unwrap_or(cmd.empty_status);
+            // A null command that needs its own redirect environment returns
+            // the setup result. The operand substitutions ran inside it.
+            cmd.empty_status = if isolated_null {
+                0
+            } else {
+                captured.get().unwrap_or(cmd.empty_status)
+            };
             if let Some(b) = builtin(&cmd, status, session).or_else(|| {
                 cmd.prepare_missing_hook(session)
                     .then_some(Builtin::Function)
@@ -220,17 +228,17 @@ fn command(mut cmd: PreparedCommand, session: &mut Session, status: u8) -> io::R
                 let commit = matches!(b, Builtin::Exec) && matches!(flow, Flow::Continue(0));
                 Ok((flow, commit))
             } else {
-                Ok((
-                    Flow::Continue(External::new(&cmd, session)?.exec(session, false)),
-                    false,
-                ))
+                // The ignored-CHLD path enters this external branch only after fork.
+                let external = External::new(&cmd, session)?;
+                session.traps.export_child_dispositions();
+                Ok((Flow::Continue(external.exec(session, false)), false))
             }
         },
     )
 }
 
 pub(super) fn run(
-    cmd: PreparedCommand,
+    mut cmd: PreparedCommand,
     session: &mut Session,
     status: u8,
     replace: bool,
@@ -238,11 +246,15 @@ pub(super) fn run(
 ) -> io::Result<Flow> {
     let isolated_null = cmd.words.is_empty()
         && cmd.compound.is_none()
-        && cmd
-            .deferred_redirects
-            .iter()
-            .any(|r| r.variable.is_some() || r.fd == 0);
+        && isolated_null_redirects(&cmd.deferred_redirects);
     let local = !isolated_null && builtin(&cmd, status, session).is_some();
+    if !local && !isolated_null && !replace {
+        // Diagnostics and command_not_found_handle still run with the child's
+        // redirects. Only the command hash is an effect in the parent.
+        if let Ok(path) = hash::resolve_command(session, &cmd) {
+            cmd.resolved = path;
+        }
+    }
     if local || replace && launch.group.is_none() && !session.traps.child_ignores_chld() {
         return command(cmd, session, status);
     }
@@ -251,9 +263,6 @@ pub(super) fn run(
         launch.pipeline_child(&mut session.traps);
         session.jobs.forked(false);
         coprocess::after_fork(session);
-        if !isolated_null {
-            session.traps.export_child_dispositions();
-        }
         let code = match command(cmd, session, status) {
             Ok(flow) => flow.child_status(),
             Err(e) => {

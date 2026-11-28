@@ -49,6 +49,13 @@ impl Table {
         }
     }
 
+    fn record(&mut self, name: &str, mut entry: Entry) -> PathBuf {
+        entry.hits = 1;
+        let path = entry.path.clone();
+        self.entries.insert(name.into(), entry);
+        path
+    }
+
     pub(crate) fn clear(&mut self) {
         self.entries.clear();
     }
@@ -130,13 +137,29 @@ pub(super) fn resolve(session: &mut Session, name: &str) -> Result<Option<PathBu
         }
         session.hashes.entries.remove(name);
     }
-    let Some(mut entry) = search(name, session)? else {
+    Ok(search(name, session)?.map(|entry| session.hashes.record(name, entry)))
+}
+
+// Bash resolves a foreground external name in its parent before command
+// redirections, including redirections whose operands are evaluated in a child.
+pub(super) fn resolve_command(
+    session: &mut Session,
+    cmd: &super::PreparedCommand,
+) -> Result<Option<PathBuf>, Absent> {
+    if cmd.assignments.iter().any(|(key, _)| key == "PATH") {
+        session.hashes.clear();
         return Ok(None);
-    };
-    entry.hits = 1;
-    let path = entry.path.clone();
-    session.hashes.entries.insert(name.into(), entry);
-    Ok(Some(path))
+    }
+    let name = &cmd.words[0];
+    if !cmd.default_path {
+        return resolve(session, name);
+    }
+    if !session.hashes.enabled || name.is_empty() || name.contains('/') {
+        return Ok(None);
+    }
+    // command -p bypasses an old hash and records the standard-path result.
+    Ok(search_in(name, session, super::lookup::path(cmd, session))?
+        .map(|entry| session.hashes.record(name, entry)))
 }
 
 pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {

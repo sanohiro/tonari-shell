@@ -31,6 +31,20 @@ def main():
             assert (result.returncode, result.stdout) == expected, (shell, argv, result)
             return result
 
+        numeric = r"""
+n=' 1 '; zero=' 0 '
+mapfile -O "$n" -s "$n" -n "$n" -u ' 4 ' -c "$n" -t a 4<<<$'a\nb'
+echo "${a[1]}"
+f(){ caller "$zero" >/dev/null; }; g(){ f; }; g; echo "$?"
+kill -s "$zero" " $$ "; echo "$?"; kill -l ' 15 '
+trap : ' 15 '; trap -p TERM
+history -- "$n" >/dev/null; echo "$?"
+g(){ return "$1"; }; g '　3' 2>/dev/null; echo "$?"
+set -- x; shift '　1' 2>/dev/null; echo "$?/$#"
+"""
+        for shell in (reference, candidate):
+            checked(shell, ["-c", numeric], (0, b"b\n0\n0\nTERM\ntrap -- ':' SIGTERM\n0\n2\n2/1\n"))
+
         (root / "tonari-review-completion").mkdir()
         for prefix in ("~/", "~//"):
             for shell in (reference, candidate):

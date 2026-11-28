@@ -48,6 +48,111 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
+    def test_second_review_job_traps_and_exec(self):
+        source = """f(){ trap 'echo ERR' ERR; false; }; f; echo first:$?; false; echo last:$?
+trap - ERR; trap : USR1 CONT CHLD; trap '' KILL STOP; trap"""
+        signals = sorted((signal.SIGUSR1, signal.SIGCONT, signal.SIGCHLD, signal.SIGKILL, signal.SIGSTOP))
+        listed = b"".join(f"trap -- '{'' if sig in (signal.SIGKILL, signal.SIGSTOP) else ':'}' {sig.name}\n".encode()
+                          for sig in signals)
+        for shell in self.shells_for(5):
+            result = self.command(shell, source)
+            self.assertEqual((result.returncode, result.stdout, result.stderr),
+                             (0, b"ERR\nfirst:1\nERR\nlast:1\n" + listed, b""))
+            result = self.command(shell, """trap '' USR1; echo $$; /bin/sh -c 'echo $$'""")
+            first, final = result.stdout.splitlines()
+            self.assertEqual(first, final)
+            result = self.command(shell, """set -x; select k in q; do break; done </dev/null; :""")
+            self.assertEqual(result.stderr.count(b"+ select k in q\n"), 1)
+            result = self.command(shell, """trap '' CHLD; (exit 7) & p=$!
+"$1" -c 'import signal; print(signal.getsignal(signal.SIGCHLD) == signal.SIG_IGN)'
+wait "$p"; echo parent:$?""", "sh", sys.executable)
+            self.assertEqual((result.returncode, result.stdout, result.stderr),
+                             (0, b"True\nparent:7\n", b""))
+
+    def test_second_review_background_shell_foreground_handoff(self):
+        for shell in self.shells_for(5):
+            # A separate session owns this PTY. Its controller only addresses
+            # the child shell it forks and reaps here.
+            controller, master = pty.fork()
+            if controller == 0:
+                child = os.fork()
+                if child == 0:
+                    os.setpgid(0, 0)
+                    source = "case $- in *m*) echo monitor-on;; esac"
+                    os.execve(shell, [shell, "--noprofile", "--norc", "-i", "-c", source], self.env)
+                try:
+                    for _ in range(200):
+                        got, status = os.waitpid(child, os.WUNTRACED | os.WNOHANG)
+                        if got:
+                            break
+                        time.sleep(.01)
+                    if not got or not os.WIFSTOPPED(status) or os.WSTOPSIG(status) != signal.SIGTTIN:
+                        if got and not os.WIFSTOPPED(status):
+                            os._exit(2)
+                        raise RuntimeError("shell did not stop for the controlling terminal")
+                    os.tcsetpgrp(0, child)
+                    os.kill(child, signal.SIGCONT)
+                    for _ in range(200):
+                        got, status = os.waitpid(child, os.WNOHANG)
+                        if got:
+                            os._exit(os.waitstatus_to_exitcode(status))
+                        time.sleep(.01)
+                finally:
+                    try:
+                        os.kill(child, signal.SIGKILL)
+                        os.waitpid(child, 0)
+                    except (ProcessLookupError, ChildProcessError):
+                        pass
+                    os._exit(3)
+            try:
+                output = self.read_until(master, b"monitor-on")
+                self.assertIn(b"monitor-on", output)
+            finally:
+                _, status = os.waitpid(controller, 0)
+                os.close(master)
+            self.assertEqual(os.waitstatus_to_exitcode(status), 0)
+
+    def test_second_review_job_statuses_and_notices(self):
+        for shell in self.shells_for(5):
+            result = self.command(shell, """set -m; (exit 3) | (sleep .02; exit 5) &
+sleep .2; jobs -l; wait""")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rows = result.stdout.splitlines()
+            self.assertEqual(len(rows), 2, result.stdout)
+            self.assertRegex(rows[0], rb"^\[1\]\+ \d+ Exit 3 +")
+            self.assertRegex(rows[1], rb"^ +\d+ Exit 5 +\| ")
+            for wait in ("wait", "wait -n"):
+                result = self.command(shell, "/bin/sh -c 'kill -HUP $$' & " + wait + "; echo after >&2")
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(len(result.stderr.splitlines()), 2, result.stderr)
+                self.assertIn(b"Hangup", result.stderr.splitlines()[0])
+                self.assertEqual(result.stderr.splitlines()[1], b"after")
+            result = self.command(shell, "/bin/sh -c 'kill -TERM $$'; echo after >&2")
+            self.assertEqual(result.stderr.splitlines()[-1], b"after")
+            self.assertIn(b"Terminated", result.stderr.splitlines()[0])
+            result = self.command(shell, "set -o posix; wait 2147483647; kill -0 2147483647")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(b"pid 2147483647 is not a child", result.stderr)
+            self.assertIn(b"No such process", result.stderr)
+            self.assertNotIn(b"os error", result.stderr)
+
+    def test_second_review_pipe_cleanup_and_select_eof(self):
+        result = self.command(TONARI, "select item in a; do break; done </dev/null >&-")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b"select: write error", result.stderr)
+        for shell in self.shells_for(5):
+            for before, status in ((":", 0), ("false", 1)):
+                reader, writer = os.pipe()
+                os.close(reader)
+                with os.fdopen(writer, "wb") as output:
+                    result = subprocess.run([shell, "-c", "trap 'printf \"cleanup:%s\\n\" \"$?\" >&2' EXIT; "
+                                             + before + "; echo payload; echo extra >&2"], cwd=self.cwd,
+                                            env=self.env, stdout=output, stderr=subprocess.PIPE, timeout=5)
+                self.assertEqual(result.returncode, -signal.SIGPIPE)
+                self.assertIn(f"cleanup:{status}\n".encode(), result.stderr)
+                self.assertNotIn(b"write error", result.stderr)
+                self.assertNotIn(b"extra", result.stderr)
+
     def test_second_review_stored_subscripts_and_quoting(self):
         from review_r2_language import verify
 
@@ -89,6 +194,37 @@ test '7 ' -eq 7 2>/dev/null; echo "/$?"
         for shell in shells:
             result = self.command(shell, source)
             self.assertEqual((result.returncode, result.stdout), (0, b"<ab>" * 4 + b"/2\n"), result.stderr)
+
+    def test_null_redirect_status_uses_the_redirect_environment(self):
+        source = """set -e
+{fd}>"$(printf /dev/null; exit 5)"
+v=$(exit 8) <"$(printf /dev/null; exit 5)"
+echo "reached:${fd-unset}:${v+x}"
+set +e
+>"$(printf /dev/null; exit 5)"; echo output:$?
+v=$(exit 8) 3>/dev/null; echo saved:$?
+fd=1; 2>&"$fd" 3>"$(printf /dev/null; exit 6)"; echo ordered:$?
+{fd}<missing-file; echo failed:$?"""
+        for shell in self.shells_for(5):
+            result = self.command(shell, source)
+            self.assertEqual((result.returncode, result.stdout),
+                             (0, b"reached:unset:x\noutput:5\nsaved:8\nordered:6\nfailed:1\n"), result.stderr)
+
+    def test_deferred_descriptor_external_updates_parent_hash(self):
+        source = """hash -r; fd=1; uname >/dev/null 2>&$fd; hash -t uname
+hash -r; fd=no; uname >/dev/null 2>&$fd; hash -t uname
+hash -p /bin/false uname; fd=1; command -p uname >/dev/null 2>&$fd; hash -t uname
+PATH=/usr/bin:/bin uname >/dev/null 2>&$fd; hash -t uname 2>/dev/null; echo prefix:$?
+uname(){ :; }; uname >/dev/null 2>&$fd; hash -t uname 2>/dev/null; echo function:$?"""
+        result = self.command(TONARI, source)
+        expected = self.command(BASH, source)
+        if bash_version() >= (5, 3):
+            self.assertEqual((result.returncode, result.stdout), (expected.returncode, expected.stdout))
+        rows = result.stdout.splitlines()
+        self.assertEqual(rows[:2], [b"/usr/bin/uname"] * 2)
+        self.assertTrue(rows[2].endswith(b"/uname"))
+        self.assertEqual(rows[3:], [b"prefix:1", b"function:1"])
+        self.assertIn(b"ambiguous redirect", result.stderr)
 
     def test_second_review_redirection_expansion_context(self):
         script = """x=1; >"out$((x++))"; printf '%s/' "$x"; test -f out1 || exit 1
@@ -152,7 +288,11 @@ printf '%s\n' "${!a[@]}" """
         for shell in (BASH, TONARI):
             for setting, message in [('unset PATH', b'No such file or directory'), ('PATH=', b'command not found')]:
                 r = self.command(shell, setting + '; no_such_tonari_test_command')
-                self.assertEqual((r.returncode, r.stdout), (127, b'')); self.assertIn(message, r.stderr)
+                self.assertEqual((r.returncode, r.stdout), (127, b''))
+                # GNU 5.2 treats an empty PATH like unset for this diagnostic.
+                if shell == BASH and bash_version() < (5, 3):
+                    message = b'No such file or directory'
+                self.assertIn(message, r.stderr)
             r = self.command(shell, '[[ ${BASH_VERSINFO[-1]} == "${BASH_VERSINFO[5]}" && -n ${BASH_VERSINFO[-1]} ]]')
             self.assertEqual((r.returncode, r.stdout, r.stderr), (0, b'', b''))
 
@@ -168,6 +308,21 @@ printf '%s\n' "${!a[@]}" """
                 r = self.command(shell, 'printf "$1" "5x" 6 "1e3" 2>&1', 'shell', fmt)
                 output = re.sub(rb"[^\n]*?printf: [^\n]+: invalid number", b"ERR", r.stdout)
                 self.assertEqual((r.returncode, output, r.stderr), (1, expected, b""))
+
+    def test_second_review_shell_level_at_exec(self):
+        cases = [
+            ("/usr/bin/printenv SHLVL", b"0"),
+            ("/usr/bin/printenv SHLVL; :", b"1"),
+            ("SHLVL=3; exec /usr/bin/printenv SHLVL", b"2"),
+            ("SHLVL=3; SHLVL=9 /usr/bin/printenv SHLVL", b"2"),
+            ("/usr/bin/printenv SHLVL >/dev/stdout", b"1"),
+        ]
+        for shell in (TONARI, BASH):
+            for command, level in cases:
+                r = self.command(shell, command)
+                self.assertEqual((r.returncode, r.stdout.strip(), r.stderr), (0, level, b""), (shell, command))
+            r = self.command(shell, 'exec -c /usr/bin/printenv SHLVL')
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (1, b"", b""))
 
     def test_second_review_dynamic_stack_and_exported_locals(self):
         for shell in (BASH, TONARI):
@@ -4936,7 +5091,7 @@ wait "$p"; code=$?; kill -l "$code"; exit "$code" """
         self.assertEqual(proc.returncode, 127)
         proc = self.command(sh, "wait %missing")
         self.assertEqual(proc.returncode, 127)
-        self.assertIn(b"not a valid child or job", proc.stderr)
+        self.assertIn(b"%missing: no such job", proc.stderr)
 
     def test_wait_next_selected_ids_and_signals(self):
         version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"')
@@ -5134,11 +5289,25 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
         self.assertEqual((self.cwd / "login-seen").read_text().splitlines(), ["-bash 1"] * 2)
         self.assertEqual((self.cwd / "logged-out").read_text().splitlines(), ["end"] * 2)
 
+    def test_interactive_history_defaults_follow_input_mode(self):
+        source = 'printf "<%s/%s>" "$HISTSIZE" "$HISTFILESIZE"'
+        for shell in (BASH, TONARI):
+            for override, expected in [({}, b"500/500"), ({"HISTSIZE": "37"}, b"37/37"),
+                                       ({"HISTSIZE": "37", "HISTFILESIZE": "8"}, b"37/8")]:
+                env = dict(self.env, **override)
+                proc = subprocess.run([shell, "--norc", "-is"], env=env, cwd=self.cwd,
+                                      input=(source + "\n").encode(), capture_output=True, timeout=5)
+                self.assertEqual((proc.stdout, proc.returncode), (b"<" + expected + b">", 0))
+            proc = subprocess.run([shell, "--norc", "-ic", source], env=self.env, cwd=self.cwd,
+                                  capture_output=True, timeout=5)
+            self.assertEqual((proc.stdout, proc.returncode), (b"</>", 0))
+
     def test_secondary_prompt_eof_saves_history_and_runs_logout(self):
         (self.cwd / ".bash_profile").write_text(
             'PS1="tonari$ "; PS2="MORE> "; HISTFILE=$PWD/saved-history\n')
         (self.cwd / ".bash_logout").write_text("echo end >> logged-out\n")
-        for shell in (BASH, TONARI):
+        # Apple Bash 3.2 returns to input at this secondary-prompt EOF.
+        for shell in ((BASH, TONARI) if bash_version() >= (5, 0) else (TONARI,)):
             fd = self.terminal_session(shell=shell, login=True)
             os.write(fd, b"if true; then\r")
             self.read_until(fd, b"MORE> ")

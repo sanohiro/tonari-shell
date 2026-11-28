@@ -306,6 +306,10 @@ pub(crate) fn integer_operand(text: &str) -> Option<i64> {
         .ok()
 }
 
+pub(crate) fn integer_in_range<T: TryFrom<i64>>(text: &str) -> Option<T> {
+    T::try_from(integer_operand(text)?).ok()
+}
+
 pub(crate) fn binary(
     left: &str,
     op: &str,

@@ -29,11 +29,11 @@ fn kill(jobs: &Jobs, mut args: &[String], posix: bool) -> u8 {
             return u8::from(crate::traps::print_signal_table(&mut out).is_err());
         } else {
             for arg in &args[1..] {
-                let result = if let Ok(n) = arg.parse::<i32>() {
+                let result = if let Some(n) = crate::builtins::integer_operand(arg) {
                     // A shell wait status encodes the signal once as 128 + signal.
                     let number = if n > 128 { n - 128 } else { n };
                     crate::traps::signals()
-                        .find(|s| s.1 == number)
+                        .find(|s| i64::from(s.1) == number)
                         .map(|(name, _)| writeln!(out, "{name}"))
                 } else {
                     number(arg).map(|n| writeln!(out, "{n}"))
@@ -125,7 +125,7 @@ fn kill(jobs: &Jobs, mut args: &[String], posix: bool) -> u8 {
                 diagnostic!("kill: {spec}: could not signal target");
                 status = 1;
             }
-        } else if let Ok(pid) = spec.parse::<pid_t>() {
+        } else if let Some(pid) = crate::builtins::integer_in_range::<pid_t>(spec) {
             if !send(pid) {
                 diagnostic!(
                     "kill: ({pid}) - {}",
@@ -204,18 +204,19 @@ fn wait_next(session: &mut Session, ids: &[String], force: bool) -> (u8, Option<
     let mut selected = Vec::with_capacity(ids.len());
     let mut substitutions = Vec::new();
     for spec in ids {
-        if let Some(index) = jobs.select(spec) {
+        let pid = crate::builtins::integer_in_range::<pid_t>(spec);
+        if let Some(index) = jobs.select(spec, pid) {
             selected.push(jobs.table[index].id);
-        } else if let Ok(pid) = spec.parse::<pid_t>()
+        } else if let Some(pid) = pid
             && let Some(&(_, code)) = jobs.finished.iter().rev().find(|(p, _)| *p == pid)
         {
             return (code, Some(pid));
-        } else if let Ok(pid) = spec.parse::<pid_t>()
+        } else if let Some(pid) = pid
             && session.substitutions.knows(pid)
         {
             substitutions.push(pid);
         } else {
-            diagnostic!("wait: {spec}: no such job");
+            report_missing("wait", spec, jobs.table.iter());
         }
     }
     selected.sort_unstable();
@@ -341,8 +342,13 @@ fn wait_for_ids(session: &mut Session, ids: &[String], force: bool) -> (u8, Opti
     }
     let mut result = (0, None);
     for spec in ids {
-        let number = spec.parse::<pid_t>().ok().filter(|&pid| pid > 0);
-        if let Some(i) = jobs.select(spec) {
+        let number = spec
+            .as_bytes()
+            .first()
+            .filter(|c| c.is_ascii_digit())
+            .and_then(|_| crate::builtins::integer_in_range::<pid_t>(spec))
+            .filter(|&pid| pid > 0);
+        if let Some(i) = jobs.select(spec, number) {
             let job = &mut jobs.table[i];
             result = match job.wait(mask.as_ref(), force, false) {
                 Ok(Some(code)) => return (code, None),
@@ -656,7 +662,7 @@ pub fn builtin(words: &[String], session: &mut Session) -> u8 {
                 .chain(operands.is_empty().then_some("%+"))
             {
                 let Some(i) = jobs.select_job(spec) else {
-                    diagnostic!("bg: {spec}: no such job");
+                    report_missing("bg", spec, jobs.table.iter());
                     status = 1;
                     continue;
                 };

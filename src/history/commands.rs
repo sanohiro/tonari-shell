@@ -133,12 +133,17 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
             if args.len() > 1 {
                 return Err(error("too many arguments"));
             }
-            let count = args
-                .first()
-                .map(|x| x.parse::<usize>())
-                .transpose()
-                .map_err(|_| error("numeric argument required"))?
-                .unwrap_or(usize::MAX);
+            let count = match args.first() {
+                Some(value) => crate::builtins::integer_operand(value)
+                    .map(i64::unsigned_abs)
+                    .ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("{value}: numeric argument required"),
+                        )
+                    })? as usize,
+                None => usize::MAX,
+            };
             if let Some(h) = session.history.as_deref() {
                 let format = session.get("HISTTIMEFORMAT").filter(|s| !s.is_empty());
                 let mut out = io::BufWriter::new(crate::builtins::StdoutFd(None));
@@ -166,9 +171,8 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
 }
 
 fn position(h: &Entries, arg: &str, end: usize) -> io::Result<usize> {
-    let n = arg
-        .parse::<i64>()
-        .map_err(|_| error(&format!("{arg}: invalid number")))?;
+    let n = crate::builtins::integer_operand(arg)
+        .ok_or_else(|| error(&format!("{arg}: invalid number")))?;
     let i = if n < 0 {
         end as i64 + n
     } else {

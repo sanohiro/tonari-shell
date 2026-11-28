@@ -7,20 +7,23 @@ const SPECIAL: &[&str] = &[
 ];
 
 pub fn caller(session: &Session, args: &[String]) -> u8 {
-    let args = if args.first().is_some_and(|a| a == "--") {
-        &args[1..]
-    } else {
-        args
-    };
+    let mut args = args;
+    if let Some(flag) = crate::builtins::flags::next(&mut args) {
+        diagnostic!("caller: {flag}: invalid option");
+        return 2;
+    }
     let Some(first) = session.call_lines.last() else {
         return 1;
     };
     let mut sources = session.source_names.iter().rev().skip(1);
     let mut out = crate::builtins::stdout_for("caller");
     let line = if let Some(arg) = args.first() {
-        let Some(depth) = arg.parse::<usize>().ok() else {
+        let Some(depth) = crate::builtins::integer_operand(arg) else {
             diagnostic!("caller: {arg}: invalid number");
             return 2;
+        };
+        let Ok(depth) = usize::try_from(depth) else {
+            return 1;
         };
         let Some(((name, source), line)) = session
             .function_names

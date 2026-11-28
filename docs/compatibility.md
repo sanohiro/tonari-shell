@@ -66,6 +66,8 @@ With `LC_ALL=tr_TR.UTF-8`, `shopt -s nocasematch; p='+([i])'; [[ I == $p ]]` ret
 
 With job control disabled and default INT/QUIT dispositions at shell entry, `(trap -p INT QUIT; trap '' USR2; trap -p INT QUIT USR2) & wait` prints only `trap -- '' SIGUSR2`. The shell sets INT/QUIT to ignored for the background job. GNU Bash 5.3.20 and Tonari distinguish those internal settings from explicit traps and dispositions inherited when the shell started. The test also supplies each combination of inherited INT/QUIT ignores and resets the traps, in both ordinary and POSIX mode.
 
+If stdout is closed on the redirection of a `select` loop at EOF, Tonari reports failure to write its final newline and returns 1. GNU Bash 5.3.20 also returns 1 but omits the write diagnostic. Tonari reports failed output for shell builtins. `select` の EOF 改行も組み込みの出力として扱い、閉じた標準出力への書き込み失敗を診断する。[Regression test](../tests/shell.py)
+
 With stdout closed, writing a nonempty `complete -p` or `declare -f` listing returns 1 and reports a write error in Tonari. GNU Bash 5.3.20 can return 0 in these two cases. An empty completion listing succeeds. Named listings still preserve the order of successful output and diagnostics under `2>&1`. [Regression tests](../tests/shell.py)
 
 ジョブ制御が無効なとき、バックグラウンド用にシェル自身が無視した INT/QUIT は、ユーザーが設定したトラップとして表示しない。親から継承した無視と明示的な空トラップは表示する。閉じた標準出力に空でない一覧を書いた場合は書き込みエラーを返す。空の一覧は成功する。 [実機での速度比較](benchmarks.md#compound-listings-release)

@@ -34,7 +34,11 @@ fn run_statements<'a>(
         if session.noexec {
             return Flow::Continue(0);
         }
-        if session.notify && session.jobs.awaiting_notification() {
+        if session.notify
+            && session.jobs.monitor
+            && !session.jobs.is_empty()
+            && session.traps.notification_pending()
+        {
             session.jobs.poll();
             session.jobs.report_changes(session.posix);
         }
@@ -862,7 +866,12 @@ pub(crate) fn call_with_bindings(
     let mut arguments = argv.into_iter();
     let name = arguments.next().expect("function name");
     if session.function_nesting_full() {
-        diagnostic!("{name}: function nesting limit exceeded");
+        let bound = session.function_nesting_bound();
+        if bound > 0 && session.function_depth - session.substitution_scopes >= bound {
+            diagnostic!("{name}: maximum function nesting level exceeded ({bound})");
+        } else {
+            diagnostic!("{name}: function nesting limit exceeded");
+        }
         return Flow::Unwind(1);
     }
     let Some(function) = session.functions.get(&name).cloned() else {

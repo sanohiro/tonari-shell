@@ -547,7 +547,10 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
     {
         return traps::finish_shell(session, code, invocation.interactive);
     }
-    if invocation.interactive && session.history_lines().is_empty() {
+    if invocation.interactive
+        && !matches!(invocation.input, Input::Command(_))
+        && session.history_lines().is_empty()
+    {
         history::start_interactive(session);
     }
     if invocation.as_sh && !session.posix {

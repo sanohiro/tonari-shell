@@ -382,6 +382,7 @@ impl Job {
         0
     }
     fn update(&mut self, pid: pid_t, event: ChildEvent) {
+        crate::traps::job_changed();
         if let Some(p) = self.children.iter_mut().find(|p| p.pid == pid) {
             self.listed = false;
             p.state = match event {
@@ -792,6 +793,7 @@ impl Jobs {
             + 1;
         job.id = self.serial;
         self.table.push(job);
+        crate::traps::job_changed();
     }
     fn foreground(
         &self,
@@ -880,7 +882,7 @@ impl Jobs {
             .map(String::as_str)
             .chain(specs.is_empty().then_some("%+"))
         {
-            if let Some(i) = self.select(spec) {
+            if let Some(i) = self.select(spec, crate::builtins::integer_in_range(spec)) {
                 self.detach(i, nohup, true);
             } else {
                 diagnostic!("disown: {spec}: no such job");
@@ -977,10 +979,10 @@ impl Jobs {
         if let Ok(id) = spec.parse::<u32>() {
             self.table.iter().position(|j| j.id == id)
         } else {
-            self.select(spec)
+            self.select(spec, None)
         }
     }
-    fn select(&self, spec: &str) -> Option<usize> {
+    fn select(&self, spec: &str, pid: Option<pid_t>) -> Option<usize> {
         match spec {
             "%" | "%+" | "%%" | "%-" => {
                 let (current, previous) = marked_jobs(self.table.iter());
@@ -1000,8 +1002,8 @@ impl Jobs {
                 let (i, _) = hits.next()?;
                 hits.next().is_none().then_some(i)
             }
-            s => {
-                let pid = s.parse::<pid_t>().ok().filter(|&pid| pid > 0)?;
+            _ => {
+                let pid = pid.filter(|&pid| pid > 0)?;
                 self.table
                     .iter()
                     .position(|j| j.children.iter().any(|p| p.pid == pid))

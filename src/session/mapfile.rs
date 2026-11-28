@@ -43,35 +43,32 @@ impl<'a> Options<'a> {
                 }
                 let value = crate::builtins::flags::value(flags.as_str(), &mut args)
                     .ok_or_else(|| (2, format!("-{flag}: option requires an argument")))?;
+                let count = || crate::builtins::integer_in_range::<u32>(value);
                 match flag {
                     'd' => result.delimiter = super::read::Delimiter::first(value),
                     'O' => {
                         result.origin = Some(
-                            value
-                                .parse()
-                                .map_err(|_| (1, format!("{value}: invalid array origin")))?,
+                            count().ok_or_else(|| (1, format!("{value}: invalid array origin")))?,
                         )
                     }
                     'n' => {
-                        result.limit = value
-                            .parse()
-                            .map_err(|_| (1, format!("{value}: invalid line count")))?
+                        result.limit =
+                            count().ok_or_else(|| (1, format!("{value}: invalid line count")))?
                     }
                     's' => {
-                        result.skip = value
-                            .parse()
-                            .map_err(|_| (1, format!("{value}: invalid line count")))?
+                        result.skip =
+                            count().ok_or_else(|| (1, format!("{value}: invalid line count")))?
                     }
                     'u' => {
-                        result.fd = value
-                            .parse()
-                            .map_err(|_| (1, format!("{value}: invalid file descriptor")))?
+                        result.fd = crate::builtins::integer_in_range::<i32>(value)
+                            .filter(|&fd| fd >= 0)
+                            .ok_or_else(|| {
+                                (1, format!("{value}: invalid file descriptor specification"))
+                            })?
                     }
                     'C' => result.callback = Some(value),
                     'c' => {
-                        result.quantum = value
-                            .parse()
-                            .ok()
+                        result.quantum = count()
                             .filter(|&n| n > 0)
                             .ok_or_else(|| (1, format!("{value}: invalid callback quantum")))?
                     }

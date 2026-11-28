@@ -50,6 +50,12 @@ pub(super) fn path<'a>(cmd: &'a PreparedCommand, session: &'a Session) -> &'a Os
     }
 }
 
+pub(super) fn path_unset(cmd: &PreparedCommand, session: &Session) -> bool {
+    path(cmd, session).is_empty()
+        && !cmd.assignments.iter().any(|(key, _)| key == "PATH")
+        && session.get("PATH").is_none()
+}
+
 pub(super) fn command_prefix(cmd: &mut PreparedCommand, session: &Session) {
     let (passed, search, default_path) = scan_prefix(&cmd.words, cmd.search, session);
     cmd.search = search;

@@ -33,6 +33,16 @@ extern "C" fn record(sig: i32) {
 // A single kernel SIGCHLD can cover several waitable children. Count the
 // statuses consumed by the interpreter, including when wait blocks on a
 // different PID. A bare signal wakes the interpreter to check for statuses.
+static JOB_CHANGED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn job_changed() {
+    JOB_CHANGED.store(true, Relaxed);
+}
+
+extern "C" fn note_child(_: i32) {
+    job_changed();
+}
+
 static WATCH_CHILDREN: AtomicBool = AtomicBool::new(false);
 static CHILD_EVENTS: AtomicUsize = AtomicUsize::new(0);
 
@@ -118,6 +128,8 @@ pub(crate) struct Entry {
 pub struct Traps {
     entries: BTreeMap<i32, Entry>,
     inherited_listing: Option<std::rc::Rc<BTreeMap<i32, Entry>>>,
+    notification_watch: Option<bool>,
+    command_observer: bool,
     running: u64,
     handling_debug: bool,
     handling_error: bool,
@@ -290,11 +302,14 @@ impl Traps {
     // inert builtin. Termination and pending actions are dispatched at command
     // boundaries. Keep real children when SIGCHLD or tracing is observable.
     pub(crate) fn observes_commands(&self) -> bool {
-        self.in_action()
-            || self
-                .entries
-                .iter()
-                .any(|(&sig, action)| sig != 0 && !action.command.is_empty())
+        self.in_action() || self.command_observer
+    }
+
+    fn refresh_command_observer(&mut self) {
+        self.command_observer = self
+            .entries
+            .iter()
+            .any(|(&sig, action)| sig != 0 && !action.command.is_empty());
     }
 
     pub(crate) fn can_replace_shell(&self) -> bool {
@@ -333,6 +348,35 @@ impl Traps {
         self.entries
             .get(&signal)
             .is_some_and(|e| e.command.is_empty())
+    }
+
+    pub(crate) fn notification_pending(&mut self) -> bool {
+        let watched = *self.notification_watch.get_or_insert_with(|| {
+            // Leave explicit handlers and blocked or inherited ignores alone.
+            let mut mask = unsafe { std::mem::zeroed() };
+            if unsafe { libc::sigprocmask(libc::SIG_BLOCK, std::ptr::null(), &mut mask) } != 0
+                || unsafe { libc::sigismember(&mask, libc::SIGCHLD) } != 0
+                || INHERITED_CHLD_IGNORED.load(Relaxed)
+                || self.entries.contains_key(&libc::SIGCHLD)
+            {
+                return false;
+            }
+            let Ok(old) = disposition(libc::SIGCHLD) else {
+                return false;
+            };
+            if old.sa_sigaction == note_child as *const () as usize {
+                return true;
+            }
+            if old.sa_sigaction != libc::SIG_DFL {
+                return false;
+            }
+            let mut handler = action(note_child as *const () as usize);
+            handler.sa_flags = libc::SA_RESTART;
+            let installed = set_disposition(libc::SIGCHLD, &handler).is_ok();
+            job_changed(); // Reap a child that finished before installation.
+            installed
+        });
+        !watched || JOB_CHANGED.swap(false, Relaxed)
     }
 
     pub(crate) fn child_ignores_chld(&self) -> bool {
@@ -446,6 +490,8 @@ impl Traps {
             set_disposition(sig, &new)?;
         }
         if sig == libc::SIGCHLD {
+            self.notification_watch = None;
+            job_changed();
             let watch = command != "-" && !command.is_empty();
             if !watch {
                 CHILD_EVENTS.store(0, Relaxed);
@@ -463,6 +509,7 @@ impl Traps {
                 },
             );
         }
+        self.refresh_command_observer();
         Ok(())
     }
 
@@ -470,13 +517,18 @@ impl Traps {
         if inherit {
             None
         } else {
-            self.entries.remove(&sig)
+            let entry = self.entries.remove(&sig);
+            if entry.is_some() {
+                self.refresh_command_observer();
+            }
+            entry
         }
     }
 
     fn restore(&mut self, sig: i32, hidden: Option<Entry>) {
         if let Some(saved) = hidden {
             self.entries.entry(sig).or_insert(saved);
+            self.refresh_command_observer();
         }
     }
 
@@ -522,6 +574,7 @@ impl Traps {
     pub fn after_fork(&mut self, errtrace: bool, functrace: bool) {
         self.queried_dispositions.set(0);
         self.handling_exit = false;
+        self.notification_watch = None;
         self.current_action = None;
         // A still-running inherited handler must not re-enter itself.
         self.handling_debug &= functrace;
@@ -562,6 +615,7 @@ impl Traps {
                 unsafe { libc::signal(sig, libc::SIG_DFL) };
             }
         }
+        self.refresh_command_observer();
         if self.inherited_listing.is_none() {
             self.inherited_listing = Some(std::rc::Rc::new(old));
         }
@@ -720,7 +774,9 @@ impl Traps {
                 posix,
             );
         }
-        let (command, signals) = if args[0].parse::<u32>().is_ok()
+        let (command, signals) = if !args[0].is_empty()
+            && args[0].bytes().all(|c| c.is_ascii_digit())
+            && trap_number(&args[0]).is_some()
             || !posix && args.len() == 1 && trap_number(&args[0]).is_some()
         {
             ("-", args)

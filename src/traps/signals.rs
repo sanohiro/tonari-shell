@@ -101,7 +101,7 @@ pub(crate) fn print_signal_table(out: &mut dyn Write) -> io::Result<()> {
 }
 
 pub(crate) fn number(s: &str) -> Option<i32> {
-    let number = s.parse::<i32>().ok();
+    let number = crate::builtins::integer_in_range::<i32>(s);
     let s = s
         .get(..3)
         .filter(|prefix| prefix.eq_ignore_ascii_case("SIG"))
@@ -114,7 +114,7 @@ pub(crate) fn number(s: &str) -> Option<i32> {
         && let Some((prefix, offset)) = s.as_bytes().split_at_checked(6)
     {
         let (low, high) = (libc::SIGRTMIN(), libc::SIGRTMAX());
-        let delta = std::str::from_utf8(offset).ok()?.parse::<u32>().ok()?;
+        let delta = crate::builtins::integer_in_range::<u32>(std::str::from_utf8(offset).ok()?)?;
         if delta > (high - low) as u32 {
             return None;
         }

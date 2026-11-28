@@ -683,8 +683,10 @@ impl Session {
             diagnostic!("shift: too many arguments");
             return 1;
         }
-        let count = args.first().map_or(Ok(1), |s| s.trim().parse::<i64>());
-        let Ok(count) = count else {
+        let count = args
+            .first()
+            .map_or(Some(1), |s| crate::builtins::integer_operand(s));
+        let Some(count) = count else {
             diagnostic!("shift: {}: numeric argument required", args[0]);
             return 2;
         };

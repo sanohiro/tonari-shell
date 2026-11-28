@@ -191,10 +191,13 @@ impl PreparedCommand {
     }
 
     pub(super) fn cached_path<'a>(&'a self, session: &'a Session, name: &str) -> Option<&'a Path> {
-        if !self.cacheable() || name.contains('/') {
+        if name.contains('/') {
             return None;
         }
         self.resolved.as_deref().or_else(|| {
+            if !self.cacheable() {
+                return None;
+            }
             session.hashes.get(name).filter(|path| {
                 !(session.posix || session.shopt.checkhash) || lookup::executable(path)
             })
@@ -693,8 +696,9 @@ fn expand_prepared_redirects(
     } else if !redirects.is_empty() {
         // A standalone null command expands ordinary output redirects in the shell.
         // Bash isolates the whole redirect list if any redirect replaces stdin.
+        let isolated_null = assignment_only && super::isolated_null_redirects(&redirects);
         let child = if assignment_only {
-            !standalone || redirects.iter().any(|r| r.fd == 0)
+            !standalone || isolated_null
         } else {
             builtin(cmd, last_status, session).is_none()
         };
@@ -724,7 +728,11 @@ fn expand_prepared_redirects(
             }
             e
         })?;
-        cmd.empty_status = captured.get().unwrap_or(0);
+        cmd.empty_status = if isolated_null {
+            0
+        } else {
+            captured.get().unwrap_or(0)
+        };
     }
     Ok(())
 }

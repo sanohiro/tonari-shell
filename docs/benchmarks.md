@@ -4513,3 +4513,17 @@ Apple M1 macOS native release executables, GNU Bash 5.3.20, one discarded warm-u
 Run the four workloads in tests/review_r2_language.py with the benchmark switch. The development host also had other work running, so use interleaved medians to compare programs. POSIX alias definitions met the two-thirds upper target. The other three workloads also met the one-half target.
 
 Apple M1 上で 3 種の実行ファイルの実行順を毎回変え、出力と終了状況を照合しました。各値は 7 回の中央値と最小・最大値です。
+
+### Job notifications and trap dispatch (2026-11-29)
+
+Native Apple M1, Darwin 27.2.0 arm64, Rust release and GNU Bash 5.3.20, `LC_ALL=C`, `PATH=/usr/bin:/bin`. Median elapsed milliseconds from starting each shell with `--noprofile --norc -c` until its stdout printed the expected marker, one warm-up and seven rotating samples. The baseline predates the pattern and execution pass on PR #58. The revised build includes concurrent changes to other subsystems. Sizes were 2,412,064 / 2,445,296 / 873,872 bytes.
+
+| Workload, 20,000 iterations | Baseline | Revised | Bash |
+|---|---:|---:|---:|
+| `set -mb`, four background `sleep .4` children, loop body `:` | 38.425 | 23.792 | 59.349 |
+| Nonempty INT and TERM traps, loop body `: a b` | 8.913 | 9.101 | 40.102 |
+| Dynamic `case beta in $p1\|$p2) :;; esac`, patterns a* and b* | 15.187 | 14.910 | 44.678 |
+| `shopt -u globasciiranges`, loop body `:` | 8.306 | 8.217 | 35.989 |
+| `f(){ :; }`, loop body `f arg` | 11.850 | 12.054 | 63.356 |
+
+The notification sample's ranges were 23.394–95.738 / 10.239–26.093 / 49.676–91.147 ms. The runner read the output marker before waiting for all children to finish. Unconditional kernel polling previously visited each live child at every statement. The common signal-disposition path now polls on state changes. The trap-only samples measured 8.464–9.931 / 9.000–9.436 / 39.303–50.394 ms. Caching the trap-table predicate did not show an elapsed-time gain with two actions.

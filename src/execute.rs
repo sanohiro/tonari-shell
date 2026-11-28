@@ -269,6 +269,10 @@ fn redirection_observable(r: &Redirect<Word>, session: &Session) -> bool {
 
 // Install each redirection before expanding a later word that may consult the
 // filesystem, read an earlier descriptor or fail after an earlier open.
+fn isolated_null_redirects(redirects: &[Redirect<Word>]) -> bool {
+    redirects.iter().any(|r| r.variable.is_some() || r.fd == 0)
+}
+
 fn deferred_redirects(redirects: &[Redirect<Word>], session: &Session) -> bool {
     if redirects.iter().any(|r| r.variable.is_some()) {
         return true;
@@ -830,7 +834,10 @@ pub(crate) fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(
 }
 
 pub(crate) fn trace_descriptor(value: &str) -> Option<RawFd> {
-    let fd = value.trim_start().parse::<RawFd>().ok()?;
+    let fd = value
+        .trim_start_matches(|c: char| c.is_ascii_whitespace() || c == '\x0b')
+        .parse::<RawFd>()
+        .ok()?;
     (fd >= 0 && !fd::is_private(fd) && unsafe { libc::fcntl(fd, libc::F_GETFD) } >= 0).then_some(fd)
 }
 
@@ -1066,12 +1073,8 @@ fn run_external(
     // A foreground builtin runs in this shell. Snapshot terminal modes
     // only when preparing to hand the terminal to a child process.
     let mut launch = session.jobs.launch(false, true);
-    if !cmd.cacheable() {
-        if cmd.assignments.iter().any(|(k, _)| k == "PATH") {
-            session.hashes.clear();
-        }
-    } else if !replace {
-        match hash::resolve(session, &cmd.words[0]) {
+    if !replace {
+        match hash::resolve_command(session, cmd) {
             Ok(path) => cmd.resolved = path,
             Err(hash::Absent)
                 if session
@@ -1089,7 +1092,7 @@ fn run_external(
                 let code = external::report_exec_error(
                     session,
                     std::path::Path::new(name),
-                    true,
+                    !lookup::path_unset(cmd, session),
                     libc::ENOENT,
                 );
                 return Ok(Flow::Continue(code));
@@ -1104,7 +1107,12 @@ fn run_external(
         && !session.traps.child_ignores_chld()
         && !cmd.prepare_missing_hook(session)
     {
-        let executable = External::new(cmd, session)?;
+        let environment = if cmd.redirects.is_empty() && session.jobs.is_empty() {
+            external::ChildEnvironment::ReplaceShell
+        } else {
+            external::ChildEnvironment::Inherit
+        };
+        let executable = External::for_words(cmd, session, &cmd.words, None, environment)?;
         return Ok(Flow::Continue(
             if apply(&actions(cmd), here_input::PIPE_LIMIT, session) {
                 executable.exec(

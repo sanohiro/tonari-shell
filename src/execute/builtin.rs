@@ -207,7 +207,7 @@ fn status_operands(args: &[String]) -> &[String] {
 
 fn status_value(args: &[String], previous: u8) -> Option<u8> {
     args.first().map_or(Some(previous), |arg| {
-        arg.trim().parse::<i64>().ok().map(|n| n as u8)
+        crate::builtins::integer_operand(arg).map(|n| n as u8)
     })
 }
 
@@ -349,9 +349,11 @@ pub(super) fn eval_builtin(
                     Flow::Discard(1)
                 }
             } else {
-                let depth = args.first().map_or(Ok(1), |n| n.trim().parse::<i64>());
+                let depth = args
+                    .first()
+                    .map_or(Some(1), |n| crate::builtins::integer_operand(n));
                 match depth {
-                    Ok(n) if n > 0 => {
+                    Some(n) if n > 0 => {
                         let levels = (n as u64).min(u64::from(session.loop_depth)) as u32;
                         if cmd.words[0] == "break" {
                             Flow::Break(levels, 0)
@@ -359,11 +361,11 @@ pub(super) fn eval_builtin(
                             Flow::LoopContinue(levels)
                         }
                     }
-                    Err(_) => {
+                    None => {
                         diagnostic!("{}: {}: numeric argument required", cmd.words[0], args[0]);
                         Flow::Exit(2)
                     }
-                    Ok(_) => {
+                    Some(_) => {
                         diagnostic!("{}: {}: loop count out of range", cmd.words[0], args[0]);
                         Flow::Break(session.loop_depth, 1)
                     }
@@ -522,7 +524,12 @@ fn exec_builtin(cmd: &PreparedCommand, session: &Session, mut args: &[String]) -
     if login {
         arg0 = Some(format!("-{}", arg0.as_ref().unwrap_or(program)));
     }
-    let status = match External::for_words(cmd, session, args, arg0, clear) {
+    let environment = if clear {
+        external::ChildEnvironment::Empty
+    } else {
+        external::ChildEnvironment::ReplaceShell
+    };
+    let status = match External::for_words(cmd, session, args, arg0, environment) {
         Ok(external) => external.exec(session, false),
         Err(error) => {
             diagnostic!("exec: {error}");

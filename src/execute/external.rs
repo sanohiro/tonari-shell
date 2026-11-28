@@ -7,18 +7,25 @@ pub(crate) struct Environment {
     pub(super) changes: Vec<(String, Option<String>)>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ChildEnvironment {
+    Inherit,
+    Empty,
+    ReplaceShell,
+}
+
 impl Environment {
     pub(super) fn prepare(
         session: &Session,
         assignments: &[(String, String)],
+        replace: bool,
     ) -> io::Result<Option<Rc<Self>>> {
+        let cacheable = !replace && assignments.is_empty();
         let mut live = session.environment_changes(assignments).peekable();
-        if live.peek().is_none() {
+        if !replace && live.peek().is_none() {
             return Ok(None);
         }
-        if assignments.is_empty()
-            && let Some(cached) = &*session.external_env.borrow()
-        {
+        if cacheable && let Some(cached) = &*session.external_env.borrow() {
             let mut entries = cached.changes.iter();
             if live.by_ref().all(|(key, value)| {
                 entries
@@ -31,14 +38,25 @@ impl Environment {
             live = session.environment_changes(assignments).peekable();
         }
         let mut cached_changes = Vec::new();
-        let changes: std::collections::BTreeMap<_, _> = live
+        let mut changes: std::collections::BTreeMap<_, _> = live
             .map(|(k, v)| {
-                if assignments.is_empty() {
+                if cacheable {
                     cached_changes.push((k.to_owned(), v.as_deref().map(str::to_owned)));
                 }
                 (k, v)
             })
             .collect();
+        if replace {
+            // Bash adjusts its own binding even when the command prefixes SHLVL.
+            // Build the child environment separately so a failed exec leaves the shell intact.
+            let level = session
+                .get("SHLVL")
+                .and_then(|s| s.trim().parse::<i64>().ok())
+                .unwrap_or(0)
+                .saturating_sub(1)
+                .max(0);
+            changes.insert("SHLVL", Some(std::borrow::Cow::Owned(level.to_string())));
+        }
         // SAFETY: ordinary assignments live in Session. Script reentry replaces
         // process variables only after it has abandoned this environment and
         // never returns. Each inherited entry is a NUL-terminated C string.
@@ -73,7 +91,7 @@ impl Environment {
             pointers,
             changes: cached_changes,
         });
-        if assignments.is_empty() {
+        if cacheable {
             *session.external_env.borrow_mut() = Some(env.clone());
         }
         Ok(Some(env))
@@ -93,14 +111,14 @@ pub(super) struct External {
 
 impl External {
     pub(super) fn new(cmd: &PreparedCommand, session: &Session) -> io::Result<Self> {
-        Self::for_words(cmd, session, &cmd.words, None, false)
+        Self::for_words(cmd, session, &cmd.words, None, ChildEnvironment::Inherit)
     }
     pub(super) fn for_words(
         cmd: &PreparedCommand,
         session: &Session,
         arguments: &[String],
         arg0: Option<String>,
-        clear_env: bool,
+        environment: ChildEnvironment,
     ) -> io::Result<Self> {
         let program = CString::new(arguments[0].as_bytes())?;
         let arg0 = arg0.map(CString::new).transpose()?;
@@ -133,10 +151,7 @@ impl External {
             (!arguments[0].contains('/'))
                 .then(|| {
                     let path = lookup::path(cmd, session);
-                    if path.is_empty()
-                        && !cmd.assignments.iter().any(|(key, _)| key == "PATH")
-                        && session.get("PATH").is_none()
-                    {
+                    if lookup::path_unset(cmd, session) {
                         // Bash executes the unqualified name directly after unset PATH.
                         searching_path = false;
                         return Ok(vec![program.clone()]);
@@ -157,14 +172,18 @@ impl External {
             _arg0: arg0,
             search_paths,
             searching_path,
-            env: if clear_env {
+            env: if environment == ChildEnvironment::Empty {
                 Some(Rc::new(Environment {
                     changes: Vec::new(),
                     _strings: Vec::new(),
                     pointers: vec![std::ptr::null()],
                 }))
             } else {
-                Environment::prepare(session, &cmd.assignments)?
+                Environment::prepare(
+                    session,
+                    &cmd.assignments,
+                    environment == ChildEnvironment::ReplaceShell,
+                )?
             },
         })
     }
