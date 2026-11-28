@@ -82,6 +82,7 @@ struct Variable {
     letter_case: Option<LetterCase>,
     nameref: bool,
     readonly: bool,
+    traced: bool,
     integer: bool,
     array_assigned: bool,
     elements: Option<Rc<array::Elements>>,

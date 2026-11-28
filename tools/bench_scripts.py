@@ -54,6 +54,7 @@ CASES = {
        for n in (0, 256, 512, 1024)},
     **{f"witness-inherited-{cmd}-{n}": listing_loop("declare -p" if cmd == "declare" else "set", 40)
        for cmd in ("declare", "set") for n in (256, 512, 1024)},
+    "witness-combined-attributes": listing_loop("declare -prx", 256),
     "witness-set-exported-options": listing_loop("set", 256),
     "witness-declare-pairs": eval_loop("m=(first '[kept]=word' third value)",
                                        'echo "${m[first]}"', "[kept]=word", "declare -A m", 1000),

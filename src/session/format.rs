@@ -11,6 +11,7 @@ impl Variable {
             (self.integer, b'i'),
             (self.nameref, b'n'),
             (self.readonly, b'r'),
+            (self.traced, b't'),
             (self.exported, b'x'),
             (self.letter_case == Some(LetterCase::Lower), b'l'),
             (self.letter_case == Some(LetterCase::Upper), b'u'),
@@ -153,9 +154,7 @@ pub(super) fn print_declaration(out: &mut dyn Write, name: &str, var: &Variable)
 
 pub(super) fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Cow<'_, str> {
     let ascii = matches!(locale, CharacterLocale::Ascii);
-    if !posix
-        && crate::word::quote::needs_ansi(value.as_bytes(), ascii)
-    {
+    if !posix && crate::word::quote::needs_ansi(value.as_bytes(), ascii) {
         return String::from_utf8(crate::word::quote::ansi_quote(value.as_bytes(), ascii))
             .unwrap()
             .into();

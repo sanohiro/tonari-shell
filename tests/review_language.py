@@ -118,7 +118,7 @@ printf '<%s>' "$i" "${a[k]}" """,
         "flat pair process substitution": r"""declare -A a=(k [<(printf x)]=<(printf y))
 printf '<%s>' "${a[k]}"
 a=(k [<(printf x)]=<(printf y) [<(printf z)]=word done)
-case ${a[k]} in ('['/dev/fd/*']=/dev/fd/'*) printf '<direct>';; (*) printf '<unexpected>';; esac
+case ${a[k]} in ('['/dev/fd/*']=/dev/fd/'*) printf '<direct>';; ('[<(printf x)]=<(printf y)') printf '<literal>';; (*) printf '<unexpected>';; esac
 printf '<%s>' "${a['[<(printf z)]=word']}" """,
         "nameref array counts": r"""a=([2]=s [55]=last); declare -A m=([a]=first [b]=next)
 declare -n ref=a rr=ref mref=m none=absent elem='a[2]'
@@ -205,7 +205,15 @@ mapfile -t r <<< data; r+=("${src[@]}"); printf '<%s>' "${r[@]}" """,
                 for exe in (sh, bash)
             ]
             results = [(run.returncode, run.stdout) for run in observed]
-            if results[0] != results[1]:
+            if name == "flat pair process substitution":
+                # Ubuntu 24.04 Bash 5.2.21 preserves direct values literally.
+                # Debian 5.2.37 and GNU 5.3.20 expand both process substitutions.
+                expected = (0, b'<[<(printf x)]=<(printf y)><direct><done>')
+                allowed = [expected]
+                if version == "5.2":
+                    allowed.append((0, b'<[<(printf x)]=<(printf y)><literal><done>'))
+                assert results[0] == expected and results[1] in allowed, results
+            elif results[0] != results[1]:
                 raise AssertionError(f"{name}: {results!r}; {observed[0].stderr!r}")
             print(f"ok {name}")
 

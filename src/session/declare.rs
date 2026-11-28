@@ -25,6 +25,50 @@ struct Options {
     exported: Option<bool>,
 }
 
+#[derive(Clone, Copy, Default)]
+struct ListingFilter {
+    attributes: u32,
+    indexed: bool,
+    associative: bool,
+}
+
+impl ListingFilter {
+    const fn bit(flag: u8) -> u32 {
+        1 << (flag.to_ascii_lowercase() - b'a')
+    }
+
+    fn new(flags: &Options) -> Self {
+        let attributes = [
+            (flags.readonly, b'r'),
+            (flags.exported, b'x'),
+            (flags.integer, b'i'),
+            (flags.nameref, b'n'),
+            (flags.traced, b't'),
+            (flags.lower, b'l'),
+            (flags.upper, b'u'),
+            (flags.capitalize, b'c'),
+        ]
+        .into_iter()
+        .filter(|(on, _)| *on == Some(true))
+        .fold(0, |bits, (_, flag)| bits | Self::bit(flag));
+        Self {
+            attributes,
+            indexed: flags.array,
+            associative: flags.associative,
+        }
+    }
+
+    fn matches(self, var: &Variable, array: bool, assoc: bool) -> bool {
+        var.declared
+            && (!self.indexed || array && !assoc)
+            && (!self.associative || assoc)
+            && (self.attributes == 0
+                || var
+                    .attribute_flags()
+                    .any(|flag| self.attributes & Self::bit(flag) != 0))
+    }
+}
+
 fn declare_functions(
     session: &mut Session,
     command: &str,
@@ -156,6 +200,9 @@ impl Options {
         {
             var.letter_case = None;
         }
+        if let Some(traced) = self.traced {
+            var.traced = traced;
+        }
         if let Some(integer) = self.integer {
             var.integer = integer;
         }
@@ -256,6 +303,7 @@ fn print_variables(
         && !flags.associative
         && flags.nameref.is_none()
         && flags.integer.is_none()
+        && flags.traced.is_none()
         && flags.capitalize.is_none()
         && flags.lower.is_none()
         && flags.upper.is_none()
@@ -304,13 +352,18 @@ fn print_variables(
     {
         return crate::Flow::Continue(1);
     }
+    let filter = if local {
+        ListingFilter::default()
+    } else {
+        ListingFilter::new(flags)
+    };
     let names = if !operands.is_empty() {
         Vec::new()
     } else if let Some(scope) = local_scope {
         let mut names: Vec<_> = scope.variables.keys().map(String::as_str).collect();
         names.sort_unstable();
         names
-    } else if flags.readonly == Some(true) {
+    } else if filter.attributes == ListingFilter::bit(b'r') {
         // Inherited environment strings cannot carry a readonly attribute.
         let mut names: Vec<_> =
             Session::BUILTIN_READONLY
@@ -325,7 +378,7 @@ fn print_variables(
     } else {
         session.visible_names("", super::NameList::Declared)
     };
-    let all = operands.is_empty().then_some(flags);
+    let all = operands.is_empty().then_some(filter);
     for name in names.into_iter().chain(operands.iter().map(String::as_str)) {
         if name == "-"
             && session
@@ -661,6 +714,7 @@ impl Session {
                     && !self.shopt.localvar_inherit
                 {
                     var.readonly = false;
+                    var.traced = false;
                     var.integer = false;
                     var.letter_case = None;
                     *var.scalar_mut() = None;
@@ -905,7 +959,7 @@ impl Session {
         &self,
         name: &str,
         global: bool,
-        listing: Option<&Options>,
+        listing: Option<ListingFilter>,
     ) -> Option<Cow<'_, Variable>> {
         let entry = self.scoped_variable(name, global);
         if listing.is_none()
@@ -938,20 +992,6 @@ impl Session {
         {
             var.to_mut().integer = false;
         }
-        if let Some(flags) = listing
-            && (!var.declared
-                || flags.readonly == Some(true) && !var.readonly
-                || flags.array && (!array || assoc)
-                || flags.associative && !assoc
-                || flags.integer == Some(true) && !var.integer
-                || flags.nameref == Some(true) && !var.nameref
-                || flags.capitalize == Some(true)
-                    && var.letter_case != Some(LetterCase::Capitalize)
-                || flags.lower == Some(true) && var.letter_case != Some(LetterCase::Lower)
-                || flags.upper == Some(true) && var.letter_case != Some(LetterCase::Upper))
-        {
-            return None;
-        }
         if entry.is_none() && !array {
             var.to_mut().exported = matches!(name, "PWD" | "OLDPWD")
                 || if listing.is_some() {
@@ -961,7 +1001,7 @@ impl Session {
                     std::env::var_os(name).is_some()
                 };
         }
-        if listing.is_some_and(|flags| flags.exported.is_some()) && !var.exported {
+        if listing.is_some_and(|filter| !filter.matches(&var, array, assoc)) {
             return None;
         }
         if live_table {

@@ -109,11 +109,21 @@ f && echo "$x"'''
 zzF=""; zzG=(); declare -A zzH=(); declare -n zzI=zzA
 printf '<%s>' "${!zz@}"; echo; compgen -v zz
 declare -p zzA; zzA=now; compgen -v zzA'''
+        selectors = r'''export zz_env=1; readonly zz_ro=2; declare -rx zz_both=3
+declare -i zz_int=4; declare -ax zz_array=(five); declare -t zz_trace=6
+for selector in prx pri pxa pt; do
+    declare -"$selector" | sed -n 's/^declare -[a-zA-Z]* \(zz_[a-z]*\)=.*/\1/p'
+    echo .
+done
+f(){ local zz_env=v zz_local=v; local -r zz_const=v; local -rp | sed -n 's/^declare [-a-z]* \(zz_[a-z]*\)=.*/\1/p'; }
+f'''
         frames = """shopt -s extdebug
 outer() { inner x 'y z'; }
 inner() { declare -p BASH_ARGV BASH_ARGC; }
 outer a b"""
         for shell in (reference, candidate):
+            checked(shell, ["-c", selectors], (0, b"zz_array\nzz_both\nzz_env\nzz_ro\n.\nzz_both\nzz_int\nzz_ro\n.\n"
+                                                     b"zz_array\n.\nzz_trace\n.\nzz_const\nzz_env\nzz_local\n"))
             checked(shell, ["-c", frames], (0, b'declare -a BASH_ARGV=([0]="y z" [1]="x" [2]="b" [3]="a")\n'
                                                b'declare -a BASH_ARGC=([0]="2" [1]="2" [2]="0")\n'))
             checked(shell, ["-c", scope], (0, b'declare -- x="inner"\ndeclare -- local_only="v"\nupdated\n'))
