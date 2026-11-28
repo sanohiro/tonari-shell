@@ -586,12 +586,12 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
             match interactive(session, initial, !invocation.noediting) {
                 Ok(code) => Flow::Continue(code),
                 Err(e) => {
-                    diagnostic!("{e}");
+                    diagnostic!("{}", builtins::os_message(&e));
                     Flow::Continue(1)
                 }
             }
         }
-        Input::Stdin => input::stdin_script(session, invocation.options.check),
+        Input::Stdin => input::stdin_script(session, invocation.options.check, initial),
     };
     let code = match flow {
         Flow::Unwind(s)

@@ -21,7 +21,7 @@ pub(crate) fn run(session: &mut Session, words: &[String], status: u8) -> Flow {
         match fc(session, args, status) {
             Ok(flow) => flow,
             Err(e) => {
-                diagnostic!("fc: {e}");
+                diagnostic!("fc: {}", crate::builtins::os_message(&e));
                 Flow::Continue(1)
             }
         }
@@ -29,7 +29,7 @@ pub(crate) fn run(session: &mut Session, words: &[String], status: u8) -> Flow {
         match history(session, args) {
             Ok(status) => Flow::Continue(status),
             Err(e) => {
-                diagnostic!("history: {e}");
+                diagnostic!("history: {}", crate::builtins::os_message(&e));
                 Flow::Continue(if e.kind() == io::ErrorKind::InvalidInput {
                     2
                 } else {
@@ -121,7 +121,14 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
             }
             return Ok(status);
         }
-        Some(op) => history_file(session, op, args)?,
+        Some(op) => {
+            if let Err(e) = history_file(session, op, args) {
+                if matches!(op, 'r' | 'n') && e.raw_os_error().is_some() {
+                    return Ok(1);
+                }
+                return Err(e);
+            }
+        }
         None => {
             if args.len() > 1 {
                 return Err(error("too many arguments"));
@@ -783,6 +790,31 @@ fn write_history_file(
     Ok(())
 }
 
+fn event_number(value: &str) -> Option<i64> {
+    match value.parse::<i64>() {
+        Ok(n) => Some(n),
+        Err(e)
+            if value
+                .trim_start_matches(['-', '+'])
+                .bytes()
+                .all(|b| b.is_ascii_digit()) =>
+        {
+            match e.kind() {
+                std::num::IntErrorKind::PosOverflow => Some(i64::MAX),
+                std::num::IntErrorKind::NegOverflow => Some(i64::MIN),
+                _ => None,
+            }
+        }
+        Err(_) => None,
+    }
+}
+
+fn fc_usage(reason: &str) -> Flow {
+    diagnostic!("fc: {reason}");
+    stderr_line!("fc: usage: fc [-e ename] [-lnr] [first] [last] or fc -s [pat=rep] [command]");
+    Flow::Continue(2)
+}
+
 fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow> {
     let (mut list, mut reverse, mut numbers, mut substitute) = (false, false, true, false);
     let mut editor = None;
@@ -791,7 +823,7 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
             args = rest;
             break;
         }
-        if !arg.starts_with('-') || arg == "-" || arg.parse::<i64>().is_ok() {
+        if !arg.starts_with('-') || arg == "-" || event_number(arg).is_some() {
             break;
         }
         args = rest;
@@ -803,13 +835,14 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
                 'n' => numbers = false,
                 's' => substitute = true,
                 'e' => {
-                    editor = Some(
-                        crate::builtins::flags::value(flags.as_str(), &mut args)
-                            .ok_or_else(|| error("editor required"))?,
-                    );
+                    let Some(value) = crate::builtins::flags::value(flags.as_str(), &mut args)
+                    else {
+                        return Ok(fc_usage("-e: option requires an argument"));
+                    };
+                    editor = Some(value);
                     break;
                 }
-                _ => return Err(error("invalid option")),
+                _ => return Ok(fc_usage(&format!("-{flag}: invalid option"))),
             }
         }
     }
@@ -834,7 +867,7 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
     }
     let h = h.unwrap();
     let select = |arg: &String, first: bool| {
-        if let Ok(n) = arg.parse::<i64>() {
+        if let Some(n) = event_number(arg) {
             if n < 0 {
                 return Ok(end.saturating_sub(n.unsigned_abs() as usize));
             }

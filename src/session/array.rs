@@ -96,7 +96,9 @@ impl Elements {
                 .get(usize::try_from(*index).ok()?)
                 .map(String::as_str),
             Self::Sparse(values) => values.get(index).map(String::as_str),
-            Self::Associative(map) => map.get(&index.to_string()).map(String::as_str),
+            Self::Associative(map) => map
+                .get(itoa::Buffer::new().format(*index))
+                .map(String::as_str),
         }
     }
 
@@ -369,16 +371,22 @@ impl Session {
                 |elements| elements.indices(),
             );
         }
+        let len = self.implicit_indices_len(name);
+        (0..len as i64).collect()
+    }
+
+    fn implicit_indices_len(&self, name: &str) -> usize {
         match name {
-            "BASH_ARGV" => (0..self.debug_frames().map(Vec::len).sum::<usize>() as i64).collect(),
-            "BASH_ARGC" => (0..self.debug_frames().count() as i64).collect(),
-            "GROUPS" => (0..self.group_ids().len() as i64).collect(),
-            "BASH_VERSINFO" => (0..6).collect(),
-            "FUNCNAME" if self.function_depth == 0 => Vec::new(),
-            "FUNCNAME" => (0..self.function_names.len() as i64).collect(),
-            "BASH_LINENO" => (0..self.call_lines.len() as i64).collect(),
-            "BASH_SOURCE" => (0..self.source_names.len() as i64).collect(),
-            _ => self.inherited_value(name).map(|_| 0).into_iter().collect(),
+            "BASH_ARGV" => self.debug_frames().map(Vec::len).sum(),
+            "BASH_ARGC" => self.debug_frames().count(),
+            "GROUPS" => self.group_ids().len(),
+            // The last member is the native machine type.
+            "BASH_VERSINFO" => super::BASH_VERSINFO.len() + 1,
+            "FUNCNAME" if self.function_depth == 0 => 0,
+            "FUNCNAME" => self.function_names.len(),
+            "BASH_LINENO" => self.call_lines.len(),
+            "BASH_SOURCE" => self.source_names.len(),
+            _ => usize::from(self.inherited_value(name).is_some()),
         }
     }
 
@@ -542,6 +550,36 @@ impl Session {
             Elements::Records(records) => Some(records.ends.len()),
             Elements::Associative(map) => Some(map.len()),
         }
+    }
+
+    pub(crate) fn stored_associative_slice(
+        &self,
+        name: &str,
+        offset: i64,
+        count: usize,
+        keys: bool,
+    ) -> Option<Vec<String>> {
+        let name = self.reference_name(name).ok()?;
+        if self.live_table(&name) {
+            return None;
+        }
+        let map = self.variables.get(name.as_ref())?.associative()?;
+        let order = map.ordered_keys();
+        let start = if offset < 0 {
+            usize::try_from((order.len() as i64).saturating_add(offset)).unwrap_or(order.len())
+        } else {
+            offset.saturating_sub(1).max(0) as usize
+        }
+        .min(order.len());
+        let selected = &order[start..start.saturating_add(count).min(order.len())];
+        Some(if keys {
+            selected.to_vec()
+        } else {
+            selected
+                .iter()
+                .filter_map(|key| map.get(key).cloned())
+                .collect()
+        })
     }
 
     pub(crate) fn stored_indexed_slice(
@@ -1231,16 +1269,21 @@ impl Session {
     }
 
     pub fn last_index(&self, name: &str) -> Option<i64> {
+        if self.live_dirstack(name) {
+            return Some(self.dir_stack.len() as i64);
+        }
         if let Some(v) = self.variables.get(name) {
             return match &v.elements {
                 Some(map) => map.last_index(),
                 None => v.value.as_ref().map(|_| 0),
             };
         }
-        if name == "DIRSTACK" {
-            return Some(self.dir_stack.len() as i64);
-        }
-        self.indices(name).last().copied()
+        let count = if name == "PIPESTATUS" {
+            usize::from(self.pipe_status.first.is_some()) + self.pipe_status.rest.len()
+        } else {
+            self.implicit_indices_len(name)
+        };
+        count.checked_sub(1).map(|i| i as i64)
     }
 
     pub(crate) fn indexed_scalar_decimal(&self, name: &str, index: i64) -> Option<i64> {

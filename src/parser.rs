@@ -55,6 +55,28 @@ use lexer::{LexWord, Token, lex};
 pub(crate) use modifier::index_end;
 use std::rc::Rc;
 
+// Nested prompt readers receive decoded escapes as literal word segments.
+// Record their byte positions so an alias or another source read cannot inherit them.
+thread_local! {
+    static PROMPT_ESCAPES: std::cell::RefCell<std::collections::BTreeMap<usize, (usize, String)>> =
+        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+}
+
+fn prompt_literal(chars: &mut std::str::Chars, word: &mut crate::word::WordBuilder) -> bool {
+    PROMPT_ESCAPES.with_borrow(|entries| {
+        let rest = chars.as_str();
+        let Some((len, value)) = entries.get(&rest.as_ptr().addr()) else {
+            return false;
+        };
+        let Some(tail) = rest.get(*len..) else {
+            return false;
+        };
+        word.literal(value);
+        *chars = tail.chars();
+        true
+    })
+}
+
 // Keep text supplied by prompt escapes (including the working directory) in
 // literal word segments. It must never be parsed as shell code.
 pub(crate) fn prompt_word(
@@ -63,6 +85,36 @@ pub(crate) fn prompt_word(
     posix: bool,
     mut escape: impl FnMut(char, &mut std::str::Chars, &mut String),
 ) -> Result<Word, Error> {
+    let mut entries = std::collections::BTreeMap::new();
+    if expand
+        && source.contains('\\')
+        && (source.contains("$(") || source.contains("${") || source.contains('`'))
+    {
+        let mut pending = source.chars();
+        while let Some(c) = pending.next() {
+            if c != '\\' {
+                continue;
+            }
+            let rest = pending.as_str();
+            let Some(code) = pending.next() else { break };
+            if code == '\\' {
+                continue;
+            }
+            let mut value = String::new();
+            escape(code, &mut pending, &mut value);
+            let size = rest.len() - pending.as_str().len();
+            if value.strip_prefix('\\') != Some(&rest[..size]) {
+                entries.insert(rest.as_ptr().addr(), (size, value));
+            }
+        }
+    }
+    struct Restore(std::collections::BTreeMap<usize, (usize, String)>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PROMPT_ESCAPES.replace(std::mem::take(&mut self.0));
+        }
+    }
+    let _restore = (!entries.is_empty()).then(|| Restore(PROMPT_ESCAPES.replace(entries)));
     let mut builder = crate::word::WordBuilder::default();
     let mut chars = source.chars();
     let mut escaped = String::new();
@@ -210,14 +262,26 @@ pub fn parse_final(source: &str) -> Result<Vec<Statement>, Error> {
     parse_source(source, true)
 }
 
-#[derive(Clone, Copy)]
-struct ReadOptions {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReadOptions {
     comments: bool,
     posix: bool,
     time_options_external: bool,
     extquote: bool,
     extglob: bool,
 }
+impl From<&crate::Session> for ReadOptions {
+    fn from(session: &crate::Session) -> Self {
+        ReadOptions {
+            comments: session.read_comments(),
+            posix: session.posix,
+            time_options_external: session.posix && session.shopt.compat > 41,
+            extquote: session.shopt.extquote,
+            extglob: session.shopt.glob.extglob,
+        }
+    }
+}
+
 thread_local! {
     // Lexers invoked recursively by a substitution inherit the outer read's options.
     static FIRST_LINE: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
@@ -262,9 +326,8 @@ pub(crate) fn validate_tail(source: &str, session: &crate::Session, line: usize)
         let Ok((tokens, spans, _)) = lex(source, false, false) else {
             return false;
         };
-        Reader::new(tokens, spans, source)
-            .read_list(&[], true)
-            .is_ok()
+        let mut reader = Reader::new(tokens, spans, source);
+        reader.read_list(&[], true).is_ok() && !reader.invalid_array
     })
 }
 
@@ -352,16 +415,7 @@ pub(crate) fn with_subscript_aliases<T>(
 fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnce() -> T) -> T {
     let read = || {
         let _first_line = crate::ScopedCell::enter(&FIRST_LINE, line);
-        let _options = crate::ScopedCell::enter(
-            &READ_OPTIONS,
-            ReadOptions {
-                comments: session.read_comments(),
-                posix: session.posix,
-                time_options_external: session.posix && session.shopt.compat > 41,
-                extquote: session.shopt.extquote,
-                extglob: session.shopt.glob.extglob,
-            },
-        );
+        let _options = crate::ScopedCell::enter(&READ_OPTIONS, ReadOptions::from(session));
         parse()
     };
     if session.reads_aliases() {
@@ -543,6 +597,7 @@ fn with_source_lines<T>(source: &str, lex: impl FnOnce() -> T) -> T {
 
 struct Reader {
     here_extents: Vec<(usize, usize)>,
+    invalid_array: bool,
     depth: usize,
     first_line: usize,
     source: Rc<str>,
@@ -556,20 +611,24 @@ struct Reader {
     tokens: std::collections::VecDeque<Token>,
 }
 
+fn cache_token_buffers(mut tokens: Vec<Token>, mut spans: Vec<(usize, usize)>) {
+    if tokens.capacity().max(spans.capacity()) <= MAX_CACHED_TOKENS {
+        tokens.clear();
+        spans.clear();
+        TOKEN_BUFFERS.set((tokens, spans));
+    }
+}
+
 impl Drop for Reader {
     fn drop(&mut self) {
         if self.newlines.capacity() <= MAX_CACHED_TOKENS && self.newlines.capacity() != 0 {
             self.newlines.clear();
             READER_NEWLINES.set(std::mem::take(&mut self.newlines));
         }
-        if self.tokens.capacity().max(self.spans.capacity()) <= MAX_CACHED_TOKENS {
-            self.tokens.clear();
-            self.spans.clear();
-            TOKEN_BUFFERS.set((
-                std::mem::take(&mut self.tokens).into(),
-                std::mem::take(&mut self.spans),
-            ));
-        }
+        cache_token_buffers(
+            std::mem::take(&mut self.tokens).into(),
+            std::mem::take(&mut self.spans),
+        );
     }
 }
 
@@ -606,6 +665,7 @@ impl Reader {
             first_line: source_line(source),
             line_index: std::cell::Cell::new(0),
             here_extents: Vec::new(),
+            invalid_array: false,
             depth: 0,
             spans,
             alias_source: None,
@@ -739,14 +799,12 @@ impl Reader {
     }
 
     fn list(&mut self, stops: &[&str]) -> Result<Vec<Statement>, Error> {
-        self.nested(|r| r.read_list(stops, false)).map_err(|error| {
-            // Never resume in the body of an invalid loop, conditional or function.
-            if !stops.is_empty() && matches!(error, Error::ArrayToken) {
-                Error::Invalid(error.message())
-            } else {
-                error
-            }
-        })
+        let statements = self.nested(|r| r.read_list(stops, false))?;
+        if self.depth == 0 && self.invalid_array {
+            Err(Error::ArrayToken)
+        } else {
+            Ok(statements)
+        }
     }
 
     fn read_list(
@@ -841,21 +899,8 @@ impl Reader {
             }
             let mut location = self.location(start);
             if location.subscript_aliases.0.is_some()
-                && let Command::Pipeline(stages) = &command
-                && let [stage] = stages.as_slice()
-                && stage.compound.is_none()
-                && stage.redirects.is_empty()
-                && stage.assignments.is_empty()
-                && let Some((first, args)) = stage.words.split_first()
-                && first.as_literal() == Some("alias")
-                && args.iter().all(|arg| {
-                    arg.as_literal()
-                        .and_then(|value| value.split_once('='))
-                        .is_some_and(|(key, value)| is_identifier(key) && is_identifier(value))
-                })
+                && !aliases::may_read_nested_command(location.text())
             {
-                // Every operand is a literal name=value pair of identifiers.
-                // Such a command has no expansion that can parse a subscript.
                 location.subscript_aliases = Default::default();
             }
             statements.push(Statement {

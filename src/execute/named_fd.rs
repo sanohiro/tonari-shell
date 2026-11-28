@@ -243,7 +243,7 @@ pub(super) fn run(
             .iter()
             .any(|r| r.variable.is_some() || r.fd == 0);
     let local = !isolated_null && builtin(&cmd, status, session).is_some();
-    if local || replace && launch.group.is_none() {
+    if local || replace && launch.group.is_none() && !session.traps.child_ignores_chld() {
         return command(cmd, session, status);
     }
     let pid = session.fork_shell()?;
@@ -251,6 +251,9 @@ pub(super) fn run(
         launch.pipeline_child(&mut session.traps);
         session.jobs.forked(false);
         coprocess::after_fork(session);
+        if !isolated_null {
+            session.traps.export_child_dispositions();
+        }
         let code = match command(cmd, session, status) {
             Ok(flow) => flow.child_status(),
             Err(e) => {

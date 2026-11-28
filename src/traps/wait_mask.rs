@@ -181,7 +181,7 @@ impl WaitMask {
             libc::FD_SET(0, &mut fds);
             let mut mask = self.previous.0;
             libc::sigdelset(&mut mask, libc::SIGCHLD);
-            let result = libc::pselect(
+            let result = pselect_input(
                 1,
                 &mut fds,
                 std::ptr::null_mut(),

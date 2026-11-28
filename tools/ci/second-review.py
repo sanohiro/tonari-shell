@@ -16,6 +16,16 @@ def workloads(n):
     yield "nested-if-stdin", compound, str(n - 1), True
     cases = " ".join(f"case x in x) v={i};; esac;" for i in range(n))
     yield "case-substitution", f"x=$({cases} echo \"$v\"); printf '%s' \"$x\"\n", str(n - 1), False
+    # A warm listing separated by insert/remove, and a burst without a listing.
+    # Verify the complete restored key order inside each shell.
+    assoc = (f'declare -A m; for ((i=0;i<{n};i++)); do m[k$i]=v; done; '
+             'old="${!m[*]}"; for ((i=0;i<128;i++)); do m[new]=v; unset "m[new]"; '
+             's="${!m[*]}"; [[ "$s" == "$old" ]] || exit 1; done; '
+             f'for ((i=0;i<{n};i++)); do m[q$i]=v; done; echo -n "${{#m[@]}}"')
+    yield "assoc-edit-list", assoc, str(2*n), False
+    # Count successful assignments and check that creating a binding does not export it.
+    declarations = f'for ((i=0;i<{n};i++)); do printf -v value_$i %s ok; done; '
+    yield "variable-creation", declarations + 'p=( "${!value_@}" ); printf %s "${#p[@]}"', str(n), False
     value = "é" * n
     yield "utf8-substitution", f"s='{value}'; s=${{s//é?/}}; printf '<%s>' \"$s\"\n", f"<{value[:n % 2]}>", False
 

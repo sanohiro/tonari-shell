@@ -97,6 +97,7 @@ fn escapes(source: &str, braced_hex: bool) -> Result<String, Error> {
                     'u' => 4,
                     _ => 8,
                 };
+                let digits = chars.as_str();
                 let (n, taken) = crate::word::quote::char_escape_digits(&mut chars, 16, count, 0);
                 if taken == 0 {
                     bytes.extend_from_slice(&[b'\\', escape as u8]);
@@ -105,9 +106,12 @@ fn escapes(source: &str, braced_hex: bool) -> Result<String, Error> {
                 if escape == 'x' || n == 0 {
                     n as u8
                 } else {
-                    let character =
-                        char::from_u32(n).ok_or(Error::Invalid("invalid Unicode escape"))?;
-                    bytes.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
+                    if let Some(character) = char::from_u32(n) {
+                        bytes.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
+                    } else {
+                        bytes.extend_from_slice(&[b'\\', escape as u8]);
+                        bytes.extend_from_slice(&digits.as_bytes()[..taken]);
+                    }
                     continue;
                 }
             }

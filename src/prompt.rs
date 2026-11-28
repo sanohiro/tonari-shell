@@ -41,19 +41,22 @@ fn render_mode(session: &mut Session, mut prompt: String, status: u8, editing: b
         });
         return prompt;
     }
-    let parsed = crate::parser::prompt_word(
-        &prompt,
-        session.shopt.promptvars || session.posix,
-        session.posix,
-        |c, chars, output| match c {
+    let parse = |session: &Session, expand| {
+        crate::parser::prompt_word(&prompt, expand, session.posix, |c, chars, output| match c {
             '[' if editing => output.push('\x01'),
             ']' if editing => output.push('\x02'),
             _ => escape(session, c, chars, output),
-        },
-    );
-    parsed
+        })
+    };
+    let expand = session.shopt.promptvars || session.posix;
+    parse(session, expand)
         .ok()
         .and_then(|word| crate::eval::expand_case(session, word, status, false).ok())
+        .or_else(|| {
+            parse(session, false)
+                .ok()
+                .and_then(|word| word.as_literal().map(str::to_owned))
+        })
         .unwrap_or(prompt)
 }
 
@@ -123,19 +126,25 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
             }));
         }
         '0'..='7' => {
-            let octet = |c: char, chars: &mut std::str::Chars<'_>| {
-                crate::word::quote::char_escape_digits(chars, 8, 2, c.to_digit(8).unwrap()).0 as u8
+            let octet = |first: char, rest: &mut std::str::Chars<'_>| -> Option<u8> {
+                let mut probe = rest.clone();
+                let mut value = first.to_digit(8)?;
+                for _ in 0..2 {
+                    let Some(ch) = probe.next() else { break };
+                    value = value * 8 + ch.to_digit(8)?;
+                }
+                *rest = probe;
+                Some(value as u8)
             };
-            let rest = chars.as_str();
-            let first = octet(c, chars);
-            if first == 0 {
+            let Some(first) = octet(c, chars) else {
                 output.push('\\');
                 output.push(c);
-                output.push_str(&rest[..rest.len() - chars.as_str().len()]);
                 return;
-            }
+            };
             if first.is_ascii() {
-                output.push(first as char);
+                if first != 0 {
+                    output.push(first as char);
+                }
             } else {
                 let mut bytes = vec![first];
                 loop {
@@ -143,10 +152,12 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
                     if next.next() != Some('\\') {
                         break;
                     }
-                    let Some(octal @ '0'..='7') = next.next() else {
+                    let Some(byte) = next.next().and_then(|c| octet(c, &mut next)) else {
                         break;
                     };
-                    bytes.push(octet(octal, &mut next));
+                    if byte != 0 {
+                        bytes.push(byte);
+                    }
                     *chars = next;
                 }
                 output.push_str(&String::from_utf8_lossy(&bytes));

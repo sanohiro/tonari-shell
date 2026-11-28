@@ -431,6 +431,18 @@ fn start(
         cmd.prepare_missing_hook(session)
             .then_some(Builtin::Function)
     });
+    // posix_spawn has no portable attribute to install SIG_IGN in the child.
+    if builtin.is_none() && session.traps.child_ignores_chld() {
+        return fork_stage(
+            cmd,
+            None,
+            (input.as_ref(), output.as_ref(), next_reader),
+            None,
+            last_status,
+            session,
+            launch,
+        );
+    }
     // Numeric exit and constant status builtins do not inspect either pipe end.
     // Keep a real child for job control and observable child-signal traps.
     if !launch.background
@@ -648,6 +660,7 @@ fn fork_stage(
         let code = if !apply(&setup, here_pipe_limit(builtin, cmd), session) {
             1
         } else if let Some(external) = external.as_ref() {
+            session.traps.export_child_dispositions();
             external.exec(session, false)
         } else {
             coprocess::after_fork(session);
@@ -748,13 +761,30 @@ pub(super) fn capture_external(
 }
 
 pub(super) fn wait(pid: libc::pid_t) -> io::Result<u8> {
+    wait_child(pid, |_| {})
+}
+
+fn wait_child(pid: libc::pid_t, signaled: impl FnOnce(i32)) -> io::Result<u8> {
     loop {
-        if let Some(code) =
-            crate::traps::child_event(pid, 0)?.and_then(crate::traps::ChildEvent::exit_status)
+        if let Some(event) = crate::traps::child_event(pid, 0)?
+            && let Some(code) = event.exit_status()
         {
+            if let crate::traps::ChildEvent::Signaled(signal) = event {
+                signaled(signal);
+            }
             return Ok(code);
         }
     }
+}
+
+fn wait_foreground(pid: libc::pid_t, session: &Session) -> io::Result<u8> {
+    wait_child(pid, |signal| {
+        let command = session
+            .current_command
+            .as_ref()
+            .map_or("", |c| job_command(c.text()));
+        session.jobs.report_signal(signal, command);
+    })
 }
 
 pub(crate) fn parameter(session: &Session, last_status: u8, name: &str) -> Option<String> {
@@ -1069,7 +1099,11 @@ fn run_external(
             Err(hash::Absent) => {}
         }
     }
-    if replace && launch.group.is_none() && !cmd.prepare_missing_hook(session) {
+    if replace
+        && launch.group.is_none()
+        && !session.traps.child_ignores_chld()
+        && !cmd.prepare_missing_hook(session)
+    {
         let executable = External::new(cmd, session)?;
         return Ok(Flow::Continue(
             if apply(&actions(cmd), here_input::PIPE_LIMIT, session) {
@@ -1097,7 +1131,7 @@ fn run_external(
                 )?
                 .0
         }
-        Stage::Child(pid) | Stage::GroupedChild(pid) => wait(pid)?,
+        Stage::Child(pid) | Stage::GroupedChild(pid) => wait_foreground(pid, session)?,
         Stage::Status(code) => code,
     };
     Ok(Flow::Continue(status))
@@ -1430,8 +1464,14 @@ pub fn run_pipeline(
     let mut status = 0;
     let mut wait_error = None;
     session.pipe_status.clear();
-    for stage in stages {
+    let last_stage = stages.len().checked_sub(1);
+    for (index, stage) in stages.into_iter().enumerate() {
         let result = match stage {
+            Stage::Child(pid) | Stage::GroupedChild(pid)
+                if Some(index) == last_stage && last_flow.is_none() =>
+            {
+                wait_foreground(pid, session)
+            }
             Stage::Child(pid) | Stage::GroupedChild(pid) => wait(pid),
             Stage::Status(code) => Ok(code),
         };

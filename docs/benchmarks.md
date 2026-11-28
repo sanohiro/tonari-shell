@@ -4477,3 +4477,39 @@ A second interleaved run, including the subsequent parameter error-handling fixe
 Apple M1 実機で各ループを 12,000 回実行し、終了時の値と標準エラーを検査した。初回の正常実装は添字の `$key` を毎回パースしていた。単独の変数参照は直接読み出し、数値の添字では保存済み十進数を使う変更を採用した。複合式は従来どおりデータ用の評価器を通る。表はウォームアップ後に各シェルを交互に測った 15 回の中央値。
 
 After restoring length, case and pattern operations in stored subscripts, the same M1 driver measured 12,000 reads of a nameref to `a[${#args[@]}]`. Resolving the entire subscript as an array count reduced the median from 16.535 to 14.623 ms. GNU Bash 5.3.20 measured 40.502 ms. Each local Cargo release executable was 2,412,064 bytes. 初回実装は長さの展開ごとに単語を生成していた。添字全体が配列の長さであり、要素数が既知の場合は、数値を直接返す。[Reproduction driver](../tests/review_r2_language.py)
+
+### Static case arms and shell assignments (2026-11-29)
+
+Apple M1, Darwin 27.2.0 arm64, local temporary directory, native release, GNU Bash 5.3.20. The table gives median milliseconds from launch to verified output over seven rotating samples after one warm-up. Each command used `--noprofile --norc -c`, `LC_ALL=en_US.UTF-8` and `PATH=/usr/bin:/bin`. The baseline was rebuilt from the PR #58 working tree immediately before this pattern/exec pass. Changes by other reviewers were present, so the small differences outside the static-case row cannot be attributed to this cache.
+
+| Workload | Baseline | Revised | Bash |
+|---|---:|---:|---:|
+| 20 static extglob arms, last matches, 3,000 calls | 24.318 | 9.559 | 46.140 |
+| Delete `é?` from 256 copies of é, 40 times | 5.956 | 5.621 | 20.124 |
+| `x="$a$b"`, 12,000 assignments | 9.885 | 10.051 | 31.550 |
+| `a[2]=$i`, 12,000 assignments | 10.568 | 10.834 | 29.884 |
+| `a+=($i)`, 12,000 appends | 12.146 | 11.338 | 32.590 |
+
+To reproduce the case workload, generate a script with the following Python and run it with each shell. The expected output is 19. The min–max timings were 23.784–28.688 ms for baseline, 8.719–10.528 ms for revised, and 43.240–54.218 ms for Bash. The baseline executable was 2,412,064 bytes. A later combined-check build was 2,412,192 bytes, and Bash was 873,872 bytes.
+
+```python
+print("shopt -s extglob\nf() { case \"$1\" in")
+for i in range(20):
+    print(f"@(a{i}|b{i})) hit={i};;")
+print('esac; }\nfor ((i=0;i<3000;i++)); do f b19; done; echo "$hit"')
+```
+
+### R2 parser and expansion follow-up / パーサ・展開追試
+
+Apple M1 macOS native release executables, GNU Bash 5.3.20, one discarded warm-up and seven interleaved measured runs per program, deterministic shuffled order, process startup included. Every run checked stdout, stderr and exit status. The earlier and updated Tonari builds measured 2,412,064 and 2,428,768 bytes; the GNU executable measured 873,872 bytes. Values are median elapsed milliseconds with the observed range in parentheses.
+
+| Workload | Earlier Tonari | Updated Tonari | Bash |
+|---|---:|---:|---:|
+| POSIX multiword aliases, 1,200 definitions | 41.44 (38.24–47.77) | 8.15 (6.61–9.78) | 13.07 (11.47–15.61) |
+| Indexed array declaration, 4,000 operands | 19.79 (18.53–22.53) | 7.41 (6.66–13.10) | 17.98 (14.41–21.63) |
+| Array length in loop header, 12,000 iterations | 13.19 (12.35–17.28) | 7.92 (7.57–8.77) | 40.55 (37.49–45.05) |
+| Single-entry associative slices, 1,000 reads over 500 entries | 82.66 (73.21–119.97) | 8.25 (7.07–9.06) | 95.36 (84.61–135.14) |
+
+Run the four workloads in tests/review_r2_language.py with the benchmark switch. The development host also had other work running, so use interleaved medians to compare programs. POSIX alias definitions met the two-thirds upper target. The other three workloads also met the one-half target.
+
+Apple M1 上で 3 種の実行ファイルの実行順を毎回変え、出力と終了状況を照合しました。各値は 7 回の中央値と最小・最大値です。

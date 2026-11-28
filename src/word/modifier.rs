@@ -531,6 +531,13 @@ impl Modification {
                             return Ok(Part::Elements { values, at, quoted });
                         }
                         if env.session.is_associative(base) {
+                            if !env.shadows(base)
+                                && let Some(values) = env
+                                    .session
+                                    .stored_associative_slice(base, start, count, keys)
+                            {
+                                return Ok(Part::Elements { values, at, quoted });
+                            }
                             let values = super::array_elements(base, keys, &|k| env.lookup(k))
                                 .unwrap_or_default();
                             let offset = if start < 0 {

@@ -501,6 +501,14 @@ impl Spec {
         last: u8,
         context: Option<&complete::Context<'_>>,
     ) -> Result<(Vec<String>, bool), crate::expansion::Error> {
+        let callback_prefix = prefix;
+        let dequoted;
+        let prefix = if context.is_some() {
+            dequoted = complete::dequote(prefix);
+            dequoted.as_ref()
+        } else {
+            prefix
+        };
         let mut reload = false;
         let mut words = Vec::new();
         for &action in &self.actions {
@@ -619,7 +627,7 @@ impl Spec {
                 return Err("completion function not found".into());
             }
             let old_options = session.completions.active.replace(self.options);
-            let (reply, retry) = callback(session, func, prefix, last, context);
+            let (reply, retry) = callback(session, func, callback_prefix, last, context);
             reload = retry;
             words.extend(reply);
             if let Some(options) = std::mem::replace(&mut session.completions.active, old_options) {
@@ -627,7 +635,13 @@ impl Spec {
             }
         }
         if let Some(command) = &self.command {
-            words.extend(command_callback(session, command, prefix, last, context)?);
+            words.extend(command_callback(
+                session,
+                command,
+                callback_prefix,
+                last,
+                context,
+            )?);
         }
         if let Some(filter) = &self.filter {
             let (invert, filter) = filter
@@ -1139,7 +1153,12 @@ fn generate_for_tab(
     if spec.options.contains(CompOption::Plusdirs)
         || (words.is_empty() && spec.options.contains(CompOption::Dirnames))
     {
-        let extra = complete::file_names(prefix, true, !session.bindings.unmarked_dirs, session);
+        let extra = complete::file_names(
+            &complete::dequote(prefix),
+            true,
+            !session.bindings.unmarked_dirs,
+            session,
+        );
         if session.bindings.unmarked_dirs {
             unmarked_directories.extend(extra.iter().cloned());
         }

@@ -232,7 +232,10 @@ pub(super) fn eval_builtin(
 ) -> Flow {
     let persistent = !cmd.assignments.is_empty() && posix_special(cmd, session);
     let mut bindings = if persistent {
-        session.persist_prefix(&mut cmd.assignments);
+        session.persist_prefix(
+            &mut cmd.assignments,
+            matches!(builtin, Builtin::Eval | Builtin::Source),
+        );
         Default::default()
     } else {
         session.bind(&cmd.assignments)
@@ -730,6 +733,9 @@ fn silent_redirect(
 
 pub(super) fn output_status(name: &str, result: io::Result<()>, status: u8) -> u8 {
     if let Err(error) = result {
+        if error.kind() == io::ErrorKind::BrokenPipe && crate::traps::terminating_pipe() {
+            return 1;
+        }
         diagnostic!(
             "{name}: write error: {}",
             crate::builtins::os_message(&error)

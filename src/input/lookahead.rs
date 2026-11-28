@@ -134,7 +134,7 @@ fn inline_close(line: &[u8], close: &[u8]) -> bool {
 // A sourced profile often has a long compound command. Try whole units already
 // in the buffer, leaving following commands for the current alias/options state.
 // On a miss report the distance inspected, so string input can bound repeated scans.
-pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
+pub(crate) fn buffered_compound<P: AsRef<[parser::Statement]>>(
     first: &str,
     buffered: &[u8],
     at_eof: bool,

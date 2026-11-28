@@ -590,6 +590,23 @@ pub(super) fn backquote(
     quoted: bool,
 ) -> Result<(), Error> {
     super::check_expansion_stack()?;
+    if let Some((body, tail)) = chars.as_str().split_once('`')
+        && body.contains('\\')
+        && super::PROMPT_ESCAPES.with_borrow(|e| !e.is_empty())
+        && !body.ends_with('\\')
+        && !body
+            .as_bytes()
+            .windows(2)
+            .any(|p| p[0] == b'\\' && matches!(p[1], b'$' | b'\\' | b'\n' | b'"'))
+    {
+        let body = parse_final(body)?;
+        *chars = tail.chars();
+        word.part(Part::Substitution {
+            body: body.into(),
+            quoted,
+        });
+        return Ok(());
+    }
     let mut source = String::new();
     let mut rest = chars.as_str();
     while let Some(at) = memchr::memchr2(b'`', b'\\', rest.as_bytes()) {
@@ -717,6 +734,7 @@ fn parameter_word(
             '"' => double_quoted(chars, &mut word, outer_quoted)?,
             '\'' if !outer_quoted => quoted(chars, c, &mut word)?,
             '`' => backquote(chars, &mut word, outer_quoted)?,
+            '\\' if super::prompt_literal(chars, &mut word) => {}
             '\\' => {
                 let next = chars.next().ok_or(Error::incomplete_message(
                     "unterminated parameter expansion",
@@ -765,7 +783,20 @@ pub(super) fn quoted(
             .as_str()
             .split_once(quote)
             .ok_or(Error::Incomplete(Incomplete::SingleQuote))?;
-        word.literal(literal);
+        if literal.contains('\\') && super::PROMPT_ESCAPES.with_borrow(|e| !e.is_empty()) {
+            let mut rest = literal;
+            while let Some((before, after)) = rest.split_once('\\') {
+                word.literal(before);
+                let mut tail = after.chars();
+                if !super::prompt_literal(&mut tail, word) {
+                    word.push('\\');
+                }
+                rest = tail.as_str();
+            }
+            word.literal(rest);
+        } else {
+            word.literal(literal);
+        }
         *chars = rest.chars();
         return Ok(());
     }
@@ -788,6 +819,7 @@ fn double_quoted(
             return Ok(());
         }
         match c {
+            '\\' if super::prompt_literal(chars, word) => {}
             '\\' if inside_quoted_operand
                 || matches!(chars.peek(), Some('"' | '$' | '`' | '\\' | '\n')) =>
             {
@@ -849,6 +881,13 @@ pub(super) fn plain_byte(byte: u8) -> bool {
 
 pub(super) fn plain_prefix(source: &str) -> usize {
     source.bytes().take_while(|&b| plain_byte(b)).count()
+}
+
+fn plain_word_end(byte: &u8) -> bool {
+    matches!(
+        byte,
+        b' ' | b'\t' | b'\n' | b';' | b'|' | b'&' | b'(' | b')'
+    )
 }
 
 pub(super) fn separator(c: char) -> bool {
@@ -1225,9 +1264,29 @@ fn declaration_word(prefix: &str) -> bool {
     true
 }
 
-fn indexed_assignment_position(mut tokens: &[Token], prefix: &str) -> bool {
+#[derive(Clone, Copy)]
+enum AssignmentPosition {
+    Prefix,
+    Declaration,
+    Arguments,
+}
+
+fn indexed_assignment_position(
+    mut tokens: &[Token],
+    previous: Option<(usize, AssignmentPosition)>,
+) -> AssignmentPosition {
+    use AssignmentPosition::*;
+
     let mut operands = false;
     while let Some((last, before)) = tokens.split_last() {
+        if let Some((count, position)) = previous
+            && count == tokens.len()
+        {
+            return match position {
+                Prefix if operands => Arguments,
+                other => other,
+            };
+        }
         if matches!(
             last,
             Token::Word(_) | Token::Reserved(_) | Token::TimeUtility
@@ -1255,16 +1314,20 @@ fn indexed_assignment_position(mut tokens: &[Token], prefix: &str) -> bool {
                     _ => before,
                 };
                 if command_position(before) {
-                    return declaration_word(prefix);
+                    return Declaration;
                 }
             }
             operands = true;
             tokens = before;
             continue;
         }
-        return !operands && command_position(tokens);
+        return if !operands && command_position(tokens) {
+            Prefix
+        } else {
+            Arguments
+        };
     }
-    !operands
+    if operands { Arguments } else { Prefix }
 }
 
 type Lexed<'a> = (Vec<Token>, Vec<(usize, usize)>, &'a str);
@@ -1407,6 +1470,7 @@ fn scan_word(
     chars: &mut Chars<'_>,
     first: char,
     tokens: &[Token],
+    previous_assignment: &mut Option<(usize, AssignmentPosition)>,
     array_item: bool,
     final_input: bool,
     extended: bool,
@@ -1432,11 +1496,7 @@ fn scan_word(
     // to the ordinary word reader.
     if start.as_bytes().get(plain) == Some(&b'=') && is_identifier(&start[..plain]) {
         let end = plain + 1 + plain_prefix(&start[plain + 1..]);
-        if start
-            .as_bytes()
-            .get(end)
-            .is_none_or(|b| matches!(b, b' ' | b'\t' | b'\n' | b';' | b'|' | b'&' | b'(' | b')'))
-        {
+        if start.as_bytes().get(end).is_none_or(plain_word_end) {
             *chars = start[end..].chars();
             return Ok(Some(Token::Word(LexWord {
                 word: Word::Literal(start[..end].to_owned()),
@@ -1452,12 +1512,7 @@ fn scan_word(
         after_colon = start.as_bytes()[end - 1] == b':';
         started = true;
     }
-    if plain > 0
-        && start
-            .as_bytes()
-            .get(plain)
-            .is_none_or(|b| matches!(b, b' ' | b'\t' | b'\n' | b';' | b'|' | b'&' | b'(' | b')'))
-    {
+    if plain > 0 && start.as_bytes().get(plain).is_none_or(plain_word_end) {
         let literal = &start[..plain];
         if let Some(fixed) = super::reserved_spelling(literal) {
             let token = if fixed == "time"
@@ -1479,17 +1534,24 @@ fn scan_word(
             protected: false,
             assignment: None,
         })));
-    } else if start.as_bytes().get(plain) == Some(&b'[')
-        && let Some(prefix) = super::array::indexed_prefix(start)
+    } else if matches!(start.as_bytes().get(plain), Some(b'[' | b'\\'))
+        && let Some((prefix, consumed)) = super::array::assignment_prefix(start)
         && (if plain == 0 {
             array_item
         } else {
-            indexed_assignment_position(tokens, prefix)
+            let position = indexed_assignment_position(tokens, *previous_assignment);
+            *previous_assignment = Some((tokens.len(), position));
+            match position {
+                AssignmentPosition::Prefix => true,
+                AssignmentPosition::Declaration => declaration_word(&prefix),
+                AssignmentPosition::Arguments => false,
+            }
         })
     {
-        word.literal(&start[..prefix.len() + 1]);
+        word.literal(&prefix);
+        word.push('=');
         assignment = std::num::NonZeroUsize::new(prefix.len());
-        *chars = start[prefix.len() + 1..].chars();
+        *chars = start[consumed..].chars();
         started = true;
     }
     while let Some(c) = chars.peek() {
@@ -1507,6 +1569,9 @@ fn scan_word(
             '\'' | '"' => {
                 protected = true;
                 quoted(chars, c, &mut word)?;
+            }
+            '\\' if super::prompt_literal(chars, &mut word) => {
+                protected = true;
             }
             '\\' => {
                 let escaped = match chars.next() {
@@ -1706,6 +1771,12 @@ fn closes_case_pattern(tokens: &[Token], unparenthesized: bool) -> bool {
     false
 }
 
+fn probe_list(tokens: &[Token], spans: &[(usize, usize)], source: &str) -> Result<(), Error> {
+    Reader::new(tokens.to_vec(), spans.to_vec(), source)
+        .list(&[])
+        .map(drop)
+}
+
 fn scan(
     source: &str,
     substitution: bool,
@@ -1714,13 +1785,13 @@ fn scan(
     brace_substitution: bool,
     mut resume_aliases: Option<(usize, crate::alias::Aliases)>,
 ) -> Result<Lexed<'_>, Error> {
-    let _here_scan = here_doc::Scan::enter();
+    let _here_scan = here_doc::Scan::enter(source, final_input);
     let mut chars = source.chars();
     let mut parentheses = 0usize;
     let mut saw_case = false;
     let mut brace_groups = 0usize;
     let mut alias_opens_group = false;
-    let sub_aliases = if substitution && super::READ_OPTIONS.get().posix {
+    let sub_aliases = if (substitution || brace_substitution) && super::READ_OPTIONS.get().posix {
         super::aliases::current()
     } else {
         Default::default()
@@ -1747,6 +1818,7 @@ fn scan(
     tokens.reserve(capacity);
     spans.reserve(capacity);
     let mut token_start = 0;
+    let mut previous_assignment = None;
     while let Some(c) = chars.peek() {
         let offset = source.len() - chars.as_str().len();
         if resume_aliases
@@ -1776,9 +1848,12 @@ fn scan(
         if brace_substitution && c == '}' && command_position(&tokens) {
             if brace_groups > 0 && chars.as_str()[1..].chars().next().is_none_or(separator) {
                 brace_groups -= 1;
-            } else if Reader::new(tokens.clone(), spans.clone(), &source[..offset])
-                .list(&[])
-                .is_ok()
+            } else if !saw_case
+                && !alias_opens_group
+                && !in_test
+                && parentheses == 0
+                && brace_groups == 0
+                || probe_list(&tokens, &spans, &source[..offset]).is_ok()
             {
                 chars.next();
                 here_doc::after_closer(source, chars.as_str(), &mut tokens, &mut pending_docs)?;
@@ -1846,7 +1921,7 @@ fn scan(
                 // Ask the grammar only for substitutions containing a case word.
                 let inner_closer = (saw_case || alias_opens_group)
                     && matches!(
-                        Reader::new(tokens.clone(), spans.clone(), &source[..offset]).list(&[]),
+                        probe_list(&tokens, &spans, &source[..offset]),
                         Err(Error::Incomplete(
                             Incomplete::CasePattern | Incomplete::Subshell
                         ))
@@ -1911,11 +1986,17 @@ fn scan(
                 continue;
             }
         }
-        let ancestors = (!pending_docs.is_empty()).then(|| here_doc::remember(&pending_docs));
+        let ancestors = (!pending_docs.is_empty() && {
+            let plain = plain_prefix(chars.as_str());
+            !chars.as_str()[plain..].chars().next().is_none_or(separator)
+                || process_start(&chars.as_str()[plain..])
+        })
+        .then(|| here_doc::remember(&pending_docs));
         let token = scan_word(
             &mut chars,
             c,
             &tokens,
+            &mut previous_assignment,
             array_level == Some(parentheses),
             final_input,
             extended,
@@ -1976,14 +2057,16 @@ fn scan(
                 _ => {}
             }
         }
-        if substitution
+        if (substitution || brace_substitution)
             && !protected
             && let Some(name) = word.as_literal()
         {
             saw_case |= name == "case";
             if let Some(replacement) = sub_aliases.get(name) {
                 saw_case |= replacement.trim() == "case";
-                alias_opens_group |= replacement.contains('(') && command_position(&tokens);
+                alias_opens_group |= (replacement.contains('(')
+                    || brace_substitution && replacement.contains('{'))
+                    && command_position(&tokens);
             }
         }
         let begins_array = assignment.is_some_and(|length| {

@@ -1,7 +1,8 @@
 mod eval;
 mod lookahead;
 pub(crate) use eval::{EvalCache, builtin as eval_builtin, trap_text};
-use lookahead::{buffered_compound, file_group, whole_group};
+pub(crate) use lookahead::buffered_compound;
+use lookahead::{file_group, whole_group};
 
 use crate::execute::fd::PrivateFile;
 use std::fs::File;
@@ -32,11 +33,17 @@ pub(crate) fn read_spare(file: &File, output: &mut Vec<u8>, limit: usize) -> io:
 
 // External commands inherit fd 0. Any unread text buffered by the shell must
 // still be available to a child which reads stdin (for example, "cat\n...").
-pub fn stdin_script(session: &mut Session, check: bool) -> Flow {
+pub fn stdin_script(session: &mut Session, check: bool, status: u8) -> Flow {
     match stdin_reader() {
-        Ok((reader, shared_offset)) => {
-            run(session, reader, shared_offset, true, None, (0, 1), check)
-        }
+        Ok((reader, shared_offset)) => run(
+            session,
+            reader,
+            shared_offset,
+            true,
+            None,
+            (status, 1),
+            check,
+        ),
         Err(e) => error(e, 1),
     }
 }
@@ -201,6 +208,8 @@ fn syntax_error(session: &Session, problem: parser::Error, first_line: usize) ->
             "{path}: command starting at line {first_line}: {}",
             problem.message()
         );
+    } else if !session.command_string && !session.stdin_script && !session.interactive {
+        stderr_line!("{}: line {first_line}: {}", session.arg0, problem.message());
     } else {
         diagnostic!("{}", problem.message());
     }

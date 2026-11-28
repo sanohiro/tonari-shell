@@ -26,6 +26,7 @@ impl Write for StdoutFd<'_> {
         }
         let error = io::Error::last_os_error();
         if error.kind() != io::ErrorKind::Interrupted
+            && !(error.kind() == io::ErrorKind::BrokenPipe && crate::traps::terminating_pipe())
             && let Some(name) = self.0.take()
         {
             diagnostic!("{name}: write error: {}", os_message(&error));

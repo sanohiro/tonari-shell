@@ -51,14 +51,10 @@ impl Program {
                     continue;
                 }
                 Token::Op(op) if !operand => {
-                    let op = [
-                        "+", "-", "*", "/", "%", "**", "<<", ">>", "&", "|", "^", "<", ">", "<=",
-                        ">=", "==", "!=", "=", "+=", "-=", "*=", "/=", "%=", "^=", "&=", "|=",
-                        ">>=", "<<=",
-                    ]
-                    .into_iter()
-                    .find(|&s| s == op)?;
                     let (prec, right) = precedence(op)?;
+                    if matches!(op, "," | "?" | "||" | "&&") {
+                        return None;
+                    }
                     if prec == 2 {
                         if target.is_some() || ops.len() != 1 || !operators.is_empty() {
                             return None;

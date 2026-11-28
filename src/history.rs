@@ -92,11 +92,19 @@ pub(crate) fn load_script_history(session: &mut Session) {
 }
 
 pub(crate) fn start_interactive(session: &mut Session) {
+    let hist_size = session.get("HISTSIZE").unwrap_or_else(|| {
+        let value = DEFAULT_HISTSIZE.to_string();
+        session.assign("HISTSIZE", &value);
+        value
+    });
+    if session.get("HISTFILESIZE").is_none() {
+        session.assign("HISTFILESIZE", &hist_size);
+    }
     if let Some(path) = custom_history(session) {
         if fs::metadata(&path).is_ok_and(|m| m.is_file())
             && let Err(e) = commands::history_file(session, 'r', &[path])
         {
-            diagnostic!("history: {e}");
+            diagnostic!("history: {}", crate::builtins::os_message(&e));
         }
     } else {
         session.initial_history = InitialJournal::snapshot(session).map(std::rc::Rc::new);
@@ -135,7 +143,7 @@ pub(crate) fn finish_interactive(session: &mut Session) {
                 })
             })
         {
-            diagnostic!("history: {e}");
+            diagnostic!("history: {}", crate::builtins::os_message(&e));
         }
     }
 }

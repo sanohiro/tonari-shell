@@ -148,6 +148,10 @@ fn action(handler: usize) -> libc::sigaction {
     a
 }
 
+pub(crate) fn terminating_pipe() -> bool {
+    TERMINATING.load(Relaxed) == libc::SIGPIPE
+}
+
 pub(crate) fn disposition(sig: i32) -> io::Result<libc::sigaction> {
     // libc may write only the kernel-sized prefix of a signal mask. Start
     // with initialized storage because traps save and restore the whole action.
@@ -163,6 +167,19 @@ fn set_disposition(sig: i32, new: &libc::sigaction) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+pub(crate) fn stop_for_terminal() -> io::Result<()> {
+    let previous = disposition(libc::SIGTTIN)?;
+    set_disposition(libc::SIGTTIN, &action(libc::SIG_DFL))?;
+    // Only this shell needs to wait for its controlling shell's handoff.
+    let result = unsafe { libc::raise(libc::SIGTTIN) };
+    set_disposition(libc::SIGTTIN, &previous)?;
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::from_raw_os_error(result))
+    }
 }
 
 pub(crate) fn listen_for_interrupts() -> io::Result<()> {
@@ -280,6 +297,15 @@ impl Traps {
                 .any(|(&sig, action)| sig != 0 && !action.command.is_empty())
     }
 
+    pub(crate) fn can_replace_shell(&self) -> bool {
+        !self.interactive_hup
+            && !self.in_action()
+            && self.entries.iter().all(|(&sig, entry)| {
+                // SIGCHLD is kept waitable in the shell regardless of an empty trap.
+                sig != libc::SIGCHLD && entry.command.is_empty()
+            })
+    }
+
     pub fn active(&self) -> bool {
         self.has_explicit_traps() || self.interactive_hup
     }
@@ -307,6 +333,19 @@ impl Traps {
         self.entries
             .get(&signal)
             .is_some_and(|e| e.command.is_empty())
+    }
+
+    pub(crate) fn child_ignores_chld(&self) -> bool {
+        self.ignores(libc::SIGCHLD)
+            || INHERITED_CHLD_IGNORED.load(Relaxed) && !self.catches(libc::SIGCHLD)
+    }
+
+    pub(crate) fn export_child_dispositions(&self) {
+        if self.child_ignores_chld() {
+            // Only change the forked external process. SIG_IGN in its parent
+            // would let the kernel discard statuses from other live children.
+            unsafe { libc::signal(libc::SIGCHLD, libc::SIG_IGN) };
+        }
     }
 
     pub fn catches(&self, signal: i32) -> bool {
@@ -513,12 +552,14 @@ impl Traps {
         // Only ignored dispositions and inherited shell handlers remain active.
         let old = std::mem::take(&mut self.entries);
         for (&sig, e) in &old {
-            if self.keep_after_fork(sig, e, errtrace, functrace) {
+            if Self::keep_after_fork(sig, e, errtrace, functrace) {
                 let mut child = e.clone();
                 if is_os_signal(sig) && child.original.sa_sigaction != libc::SIG_IGN {
                     child.original = action(libc::SIG_DFL);
                 }
                 self.entries.insert(sig, child);
+            } else if is_os_signal(sig) && !matches!(sig, libc::SIGKILL | libc::SIGSTOP) {
+                unsafe { libc::signal(sig, libc::SIG_DFL) };
             }
         }
         if self.inherited_listing.is_none() {
@@ -526,20 +567,14 @@ impl Traps {
         }
     }
 
-    fn keep_after_fork(&self, sig: i32, e: &Entry, errtrace: bool, functrace: bool) -> bool {
+    fn keep_after_fork(sig: i32, e: &Entry, errtrace: bool, functrace: bool) -> bool {
         if sig == ERR {
             return errtrace;
         }
         if matches!(sig, RETURN | DEBUG) {
             return functrace;
         }
-        if sig > 0 && e.command.is_empty() {
-            return true;
-        }
-        if sig > 0 && sig != libc::SIGKILL && sig != libc::SIGSTOP {
-            unsafe { libc::signal(sig, libc::SIG_DFL) };
-        }
-        false
+        sig > 0 && e.command.is_empty()
     }
 
     fn lists_as_ignored(&self, sig: i32) -> bool {
@@ -620,7 +655,7 @@ impl Traps {
             }
             for (name, sig) in signals() {
                 if sig > 0
-                    && !matches!(sig, libc::SIGSTOP | libc::SIGKILL)
+                    && (entries.contains_key(&sig) || !matches!(sig, libc::SIGSTOP | libc::SIGKILL))
                     && show(sig, name).is_err()
                 {
                     return 1;

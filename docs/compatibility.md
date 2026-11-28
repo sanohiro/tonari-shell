@@ -24,6 +24,12 @@ Shell strings and argv are UTF-8. A Unicode `read -d` or `mapfile -d` delimiter 
 
 HOME 未設定時はアカウントのホームを参照し、空文字の場合は暗黙の個人設定ファイルを読みません。実 UID/GID と実効値が違う起動では権限を落とし、特権を保持する指定なら起動を拒否します。`wait -n` や数値の範囲外エラーなど、Bash 5.2 と 5.3 で違う結果は版ごとに照合しています。UTF-8 区切りの読み取り、関数定義内のヒアドキュメント、履歴保存前の EXIT トラップ、入力途中のシグナルを回帰試験に加えました。[対話・履歴試験](../tests/review_interactive.py)
 
+Listings such as `command -v`, `jobs`, `help`, `kill -l`, `caller`, `dirs`, `pushd`, `popd`, `local`, `declare -F`, `compgen` and `complete -p` report failed output with a nonzero status. A readonly destination for `printf %n` and a directory supplied as `mapfile` input likewise return status 1. Ordinary diagnostics use a Tonari prefix; source-location formatting is available in the paths that support `gnu_errfmt`. Privileged mode clears CDPATH and GLOBIGNORE even when process IDs match. The CLI accepts recognized long options after short options. Restricted-shell and gettext dump modes are outside its supported invocation forms. [Builtin checks](../tests/shell.py)
+
+`read -t` accepts nonnegative decimal seconds through the signed 64-bit seconds range, with microsecond precision. Tonari rejects exponential notation and integer overflow. GNU Bash 5.3 can wrap a very large decimal argument into a smaller timeout. If local calendar conversion fails, `printf '%(%Y)T'` retries the Unix epoch in the requested timezone. Time formats exceeding the cumulative 64 KiB padding limit return an error.
+
+一覧出力・読み取り・変数代入に失敗した組み込みは終了値で知らせる。`read -t` は巨大な整数を短い期限に折り返さず、範囲外として扱う。カレンダーに変換できない秒数は GNU Bash と同様にエポックで再計算する。
+
 ## Required glob suffixes and global array elements / glob の末尾とグローバル配列
 
 On GNU Bash 5.3.20, `s=aaa; [[ $s == !(z)*!(z)*y ]]` succeeds. The final literal `y` is required, so Tonari returns 1. Reaching the end of the subject at a nullable group still requires matching the remaining pattern. The same rule applies when the suffix requires one character, or when the negative group itself excludes empty input. Regression tests exercise conditional matching, replacement and trimming.
@@ -67,6 +73,8 @@ With stdout closed, writing a nonempty `complete -p` or `declare -f` listing ret
 <a id="builtin-output-and-acl"></a>
 
 ## Builtin output and executable lookup / 組み込みの書き込みとPATH探索
+
+The closed-output regression also checks nonempty output from `umask -p`, `hash`, `dirs`, `times`, `export -p`, `type -t` and `shopt -p`. Tonari returns 1 and emits a diagnostic for the failed write. 標準出力を閉じたテストでは、各組み込みの出力する経路と、空出力で成功する経路を別々に確認する。[Regression cases](../tests/shell.py)
 
 GNU Bash 5.3.20 and Tonari report an output error and return 1 for `printf '%s' hi >&-`, `pwd >&-`, and printing a defined alias or variable with stdout closed. Empty output and assignments such as `printf -v v '%s' hi >&-` succeed. On macOS, both shells skip an earlier mode-0600 regular file with an execute ACL when a later executable has the same name. Both `type -P` and actual execution select that later path. The regression also checks paths longer than the inline candidate buffer. In a separate function-source witness, Bash 5.3.20 and Tonari record the active script name for each definition when a script passed via `-c` changes `BASH_ARGV0`. Ubuntu 24.04 Bash 5.2 labels both definitions `environment`. [Executable witnesses](../tests/shell.py)
 
@@ -482,3 +490,11 @@ python3 tools/bench_completion.py target/release/tonari --bash "$reference_bash"
 The comparison exits nonzero if a name disappears, a matching observation or timing is lost, or a previously qualifying median crosses 2/3. The optional `--require-target` check reports the strict 2/3 ratio for every matching feature. For short operations and common OS waits, apply the parity criterion to the reported times. [Performance target](benchmarks.md#performance-target) The completeness check also fails on missing or unverified behavior. Review disputed timings with more runs on the same hardware before updating a snapshot. The `--output` operation writes a new matrix and platform TSVs.
 
 比較ゲートは、一覧から消えた項目、以前通った動作の不一致、計測の消失、以前達成していた上限の超過を終了コードで通知します。`--require-target` は 2/3 を超えた項目をすべて報告します。短い処理や共通の OS 待ちは、実測時間から同等かどうかを判断します。`--require-complete` は未確認・未実装・動作差をすべて検出します。更新時には結果を見比べ、境界付近では同じ機械で回数を増やして確認します。
+
+### R2 parser and expansion boundaries / パーサと展開の境界
+
+* A rejected arithmetic write returns failure. For an array of three elements, assigning 1 at index -4 leaves the array intact. Tonari returns 1 and Bash 5.3.20 returns 0. 3 個の要素に対する範囲外の負の添字への書き込みは失敗ステータスになります。
+* In `set -- a b; IFS=; printf '<%s>' "$@${IFS:=:}"`, Tonari prints `<a><b:>`. Bash 5.3.20 prints `<a b:>`. Tonari preserves the individual quoted positional arguments while a subsequent expansion changes IFS. 後続の展開が IFS を変更しても、引用した位置引数の境界を維持します。
+* Dollar-single-quoted surrogate and out-of-range Unicode escapes retain their spelling. For example, `$'\ud800'` passes the six ASCII characters to the command. Bash 5.3.20 emits bytes ED A0 80. Later commands execute in both shells. 有効な Unicode スカラー値でないエスケープは綴りを保って後続処理を続けます。
+* After a syntax error inside an array initializer, Tonari discards through the end of the enclosing compound command. If the array is invalid on one line of an `if` and the following line says `echo early`, Tonari skips that command and resumes after `fi`. Bash 5.3.20 can run `echo early` outside the conditional and stop at `fi`. 配列初期化子のエラーでは、閉じていない複合コマンドの本体を実行しません。
+* Pretty printing preserves top-level input boundaries and layout-sensitive constructs, including array initializers, case arms and here-documents. For simple conditions it joins `then` or `do` to the preceding line. シェルが読み込む単位とヒアドキュメントなどのレイアウトを優先する整形です。

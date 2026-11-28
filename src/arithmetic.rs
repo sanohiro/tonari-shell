@@ -88,6 +88,7 @@ pub(crate) trait Variables {
     fn set_indexed(&mut self, name: &str, index: i64, value: i64) -> Result<()> {
         self.set(&format!("{name}[{index}]"), value)
     }
+    fn set_key(&mut self, name: &str, key: String, value: i64) -> Result<()>;
     fn is_associative(&self, name: &str) -> bool;
     fn nounset(&self) -> bool {
         false
@@ -136,6 +137,9 @@ impl Variables for Session {
         }
         Ok(())
     }
+    fn set_key(&mut self, name: &str, key: String, value: i64) -> Result<()> {
+        self.assign_key(name, key, value.to_string())
+    }
     fn is_associative(&self, name: &str) -> bool {
         self.is_associative(name)
     }
@@ -161,6 +165,9 @@ impl Variables for ReadOnly<'_> {
     }
     fn scalar_text(&self, name: &str) -> Option<&str> {
         self.0.stored_scalar(name)
+    }
+    fn set_key(&mut self, _: &str, _: String, _: i64) -> Result<()> {
+        Err("assignment is unavailable in read-only arithmetic")
     }
     fn is_associative(&self, name: &str) -> bool {
         self.0.is_associative(name)
@@ -224,6 +231,7 @@ fn expanded_operand(source: &str, session: &mut Session, status: u8) -> ShellRes
 pub(crate) enum Repeated<'a> {
     Other(&'a str, std::cell::OnceCell<Option<plan::Program>>),
     Compare(&'a str, &'a str, i64, &'a str),
+    CompareArrayLength(&'a str, &'a str, &'a str, &'a str),
     CompareNames(&'a str, &'a str, &'a str, &'a str),
     Step(&'a str, i64, bool, &'a str),
 }
@@ -232,6 +240,32 @@ impl<'a> Repeated<'a> {
     pub(crate) fn new(source: &'a str) -> Self {
         let generic = Self::Other(source, Default::default());
         if source.contains(['$', '`', '"', '\\']) {
+            let text = source.trim();
+            let (name, rest) = text.split_at(crate::word::name_chars_len(text));
+            if crate::word::is_identifier(name) {
+                let rest = rest.trim_start();
+                if let Some(op) = ["<=", ">=", "==", "!=", "<", ">"]
+                    .into_iter()
+                    .find(|op| rest.starts_with(op))
+                {
+                    let rhs = rest[op.len()..].trim_start();
+                    if let Some(param) = rhs.strip_prefix('$') {
+                        let param = param
+                            .strip_prefix('{')
+                            .and_then(|s| s.strip_suffix('}'))
+                            .unwrap_or(param);
+                        if crate::word::is_identifier(param) {
+                            return Self::CompareNames(name, op, param, source);
+                        }
+                    }
+                    if let Some(operand) = rhs.strip_prefix("${#").and_then(|s| s.strip_suffix('}'))
+                        && let Some((base, _, false)) = crate::word::array_elements_name(operand)
+                        && crate::word::is_identifier(base)
+                    {
+                        return Self::CompareArrayLength(name, op, base, source);
+                    }
+                }
+            }
             return generic;
         }
         let mut parser = Parser::new(source);
@@ -305,6 +339,17 @@ impl<'a> Repeated<'a> {
                 Some(n) => binary(op, n, rhs).map_err(Into::into),
                 None => expanded_operand(source, session, status),
             },
+            Self::CompareArrayLength(name, op, array, source) => {
+                match (
+                    session.scalar_decimal(name),
+                    session.referenced_array_len(array),
+                ) {
+                    (Some(n), Some(len)) if !session.nounset || len != 0 => {
+                        binary(op, n, len as i64).map_err(Into::into)
+                    }
+                    _ => expanded_operand(source, session, status),
+                }
+            }
             Self::CompareNames(name, op, other, source) => {
                 match (session.scalar_decimal(name), session.scalar_decimal(other)) {
                     (Some(left), Some(right)) => binary(op, left, right).map_err(Into::into),
@@ -339,8 +384,13 @@ pub fn let_builtin(args: &[String], session: &mut Session) -> Flow {
         match with_variables(expr, session) {
             Ok(value) => last = value,
             Err(message) => {
+                let context = if matches!(message, Failure::Unbound(_) | Failure::Readonly(_)) {
+                    ""
+                } else {
+                    "let: "
+                };
                 let error = shell_error(message, expr, session);
-                error.report("let: ");
+                error.report(context);
                 return error.flow(session);
             }
         }
@@ -430,14 +480,13 @@ impl Expression {
         let mut out = Vec::new();
         loop {
             scanner.advance().ok()?;
-            let (text, kind) = match scanner.token {
-                Token::Number(t) => (t, Lexeme::Number as fn(u32, u32) -> Lexeme),
-                Token::Name(t) => (t, Lexeme::Name as fn(u32, u32) -> Lexeme),
-                Token::Op(t) => (t, Lexeme::Op as fn(u32, u32) -> Lexeme),
+            let end = (self.source.len() - scanner.source.len()) as u32;
+            out.push(match scanner.token {
+                Token::Number(t) => Lexeme::Number(end - t.len() as u32, end),
+                Token::Name(t) => Lexeme::Name(end - t.len() as u32, end),
+                Token::Op(t) => Lexeme::Op(end - t.len() as u32, end),
                 Token::End => return Some(out.into_boxed_slice()),
-            };
-            let end = self.source.len() - scanner.source.len();
-            out.push(kind((end - text.len()) as u32, end as u32));
+            });
         }
     }
 }
@@ -470,7 +519,7 @@ pub(crate) fn command(
     match result {
         Ok(n) => Flow::Continue(u8::from(n == 0)),
         Err(e) => {
-            e.report("");
+            e.report("((: ");
             e.flow(session)
         }
     }
@@ -595,7 +644,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if precedence == 2 && matches!(left, Value::Number(_)) {
-                return Err("arithmetic assignment requires a variable".into());
+                return Err("attempted assignment to non-variable".into());
             }
             let a = if op == "=" {
                 0
@@ -619,7 +668,7 @@ impl<'a> Parser<'a> {
                         element_name(base, index, variables, depth)?
                     }
                     Value::Number(_) => {
-                        return Err("arithmetic assignment requires a variable".into());
+                        return Err("attempted assignment to non-variable".into());
                     }
                 };
                 let result = if !active || op == "=" {
@@ -655,7 +704,7 @@ impl<'a> Parser<'a> {
                         Value::Variable(element_name(base, index, variables, depth)?)
                     }
                 } else {
-                    Value::Variable(Target::Name(std::borrow::Cow::Borrowed(n)))
+                    Value::Variable(Target::Name(n))
                 }
             }
             Token::Op("(") => {
@@ -714,7 +763,7 @@ fn element_name<'a>(
     }
     if variables.is_associative(base) {
         let key = data_key_at(index, variables, depth + 1)?;
-        return Ok(Target::Name(format!("{base}[{key}]").into()));
+        return Ok(Target::Key(base, key));
     }
     if matches!(index, "@" | "*") {
         diagnostic!("{base}: bad array subscript");
@@ -728,7 +777,8 @@ fn element_name<'a>(
 
 enum Target<'a> {
     Unavailable,
-    Name(std::borrow::Cow<'a, str>),
+    Name(&'a str),
+    Key(&'a str, String),
     Indexed(&'a str, i64),
 }
 
@@ -737,6 +787,9 @@ impl Target<'_> {
         match self {
             Self::Unavailable => Ok(()),
             Self::Name(name) => vars.set(name, value).map_err(|e| Failure::write(name, e)),
+            Self::Key(name, key) => vars
+                .set_key(name, key.clone(), value)
+                .map_err(|e| Failure::write(name, e)),
             Self::Indexed(name, index) => vars
                 .set_indexed(name, *index, value)
                 .map_err(|e| Failure::write(name, e)),
@@ -771,6 +824,13 @@ impl Value<'_> {
                             data::read_name(name, variables, depth + 1)?
                         }
                     }
+                    Target::Key(name, key) => {
+                        let text = variables.session().assoc_value(name, key);
+                        if let Some(n) = text.and_then(Session::plain_decimal) {
+                            return Ok(n);
+                        }
+                        text.map(str::to_owned)
+                    }
                     Target::Indexed(name, index) => {
                         if let Some(n) = variables.indexed_decimal(name, *index) {
                             return Ok(n);
@@ -784,6 +844,7 @@ impl Value<'_> {
                     None if variables.nounset() => Err(Failure::Unbound(match target {
                         Target::Indexed(name, index) => format!("{name}[{index}]"),
                         Target::Name(name) => name.to_string(),
+                        Target::Key(name, key) => format!("{name}[{key}]"),
                         Target::Unavailable => unreachable!(),
                     })),
                     None => Ok(0),
@@ -850,7 +911,7 @@ impl Parser<'_> {
             self.expression(variables, 1, true, depth + 1)?
                 .read(variables, true, depth + 1)?;
         if self.token != Token::End {
-            return Err("unexpected arithmetic token".into());
+            return Err("arithmetic syntax error in expression".into());
         }
         Ok(value)
     }
@@ -947,10 +1008,10 @@ impl Binary {
             Self::Add => a.wrapping_add(b),
             Self::Subtract => a.wrapping_sub(b),
             Self::Multiply => a.wrapping_mul(b),
-            Self::Divide | Self::Remainder if b == 0 => return Err("division by zero"),
+            Self::Divide | Self::Remainder if b == 0 => return Err("division by 0"),
             Self::Divide => a.wrapping_div(b),
             Self::Remainder => a.wrapping_rem(b),
-            Self::Power if b < 0 => return Err("negative arithmetic exponent"),
+            Self::Power if b < 0 => return Err("exponent less than 0"),
             Self::Power => {
                 let mut power = b as u64;
                 let mut base = a;
@@ -1005,10 +1066,10 @@ fn number(s: &str) -> Result<i64> {
             b'A'..=b'Z' => (if base <= 36 { 10 } else { 36 }) + u32::from(c - b'A'),
             b'@' => 62,
             b'_' => 63,
-            _ => return Err("invalid arithmetic digit"),
+            _ => return Err("value too great for base"),
         };
         if d >= base {
-            return Err("invalid arithmetic digit");
+            return Err("value too great for base");
         }
         value = value
             .wrapping_mul(i64::from(base))

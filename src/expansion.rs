@@ -181,6 +181,23 @@ impl<'a> Expansion<'a> {
             .or_else(|| execute::parameter(self.session, self.status(), name))
     }
 
+    pub(crate) fn ifs_separator(&self) -> std::borrow::Cow<'_, str> {
+        let ifs = self
+            .assignments
+            .iter()
+            .rev()
+            .find(|(key, _)| key == "IFS")
+            .map_or_else(|| self.session.ifs(), |(_, value)| value.as_str().into());
+        let end = ifs.chars().next().map_or(0, char::len_utf8);
+        match ifs {
+            std::borrow::Cow::Borrowed(value) => (&value[..end]).into(),
+            std::borrow::Cow::Owned(mut value) => {
+                value.truncate(end);
+                value.into()
+            }
+        }
+    }
+
     pub(crate) fn has_pending_assignments(&self) -> bool {
         !self.assignments.is_empty()
     }
@@ -674,6 +691,9 @@ impl Variables for Expansion<'_> {
         }
         self.assign(name, &value.to_string());
         Ok(())
+    }
+    fn set_key(&mut self, name: &str, key: String, value: i64) -> Result<(), &'static str> {
+        Variables::set_key(self.session, name, key, value)
     }
     fn is_associative(&self, name: &str) -> bool {
         self.session.is_associative(name)

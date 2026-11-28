@@ -1325,3 +1325,20 @@ An arithmetic read through `declare -n ref='a[i++]'` uses the caller’s arithme
 GNU Bash parses the trailing hyphen of a descriptor move before expanding its word. For `fd=3; exec 4>&$fd-` the source descriptor moves. For `path='3-'; printf x >&"$path"` the shell writes the file named `3-`. A subsequent redirection operand can also inspect a file or descriptor installed earlier in the same command. Tonari performs those expansions in order in the appropriate builtin, null-command or external scope. When a later open fails, it restores descriptors before running ERR traps. [Normal-entry regression tests](../tests/shell.py) · [Native timings](benchmarks.md#ordered-redirection-review)
 
 GNU Bash はリダイレクト語の展開前に末尾のハイフンを識別する。`fd=3; exec 4>&$fd-` は fd を移し、`path='3-'; printf x >&"$path"` はファイル `3-` に書く。また、後ろのリダイレクトの語を展開するときには、同じコマンドの先行するファイル作成や fd 複製が見える。Tonari は組み込み・空コマンド・外部コマンドそれぞれのスコープでこの順序を保ち、失敗時には ERR トラップを呼ぶ前に fd を復元する。
+
+
+## Startup status and input deadlines (2026-11-29)
+
+On Darwin arm64, GNU Bash 5.3.20 retained the previous command status after an inaccessible startup file or an explicit startup-file return. A profile containing `false; return 7` made the first command in BASH_ENV see 1. File selection and command status therefore travel separately. Forced interactive commands and named scripts save explicit history files, including when an rcfile adds an entry and exits before the old file loads. A nonempty unread history file needs an append on that path. For `read -t 99999999999` the decimal duration is valid although Darwin rejects a single pselect that long. Bounded waits rebuild their descriptor sets and recheck elapsed monotonic time.
+
+起動ファイルがディレクトリの場合は診断し、次のプロファイルには移らない。起動処理の `return` の数値と直前のコマンドの終了値を区別する。古い履歴を読み込む前に rcfile で終了した場合も既存の履歴を保存する。長時間の読み取り期限は単調時計で管理し、カーネルが受け付ける単位に分けて待つ。[Regression checks](../tests/shell.py)
+
+On 2026-11-29, twenty static extglob arms demonstrated repeated compilation when a twelve-entry dynamic cache filled. A static case arm and a static conditional now retain their own compiled matcher and check the shell options and locale handle before reuse. The M1 last-arm workload took 9.559 ms, down from 24.318 ms. PATH lookup skips directories, retains permission errors for regular files, and reports a stale hash using the saved pathname. The shell tests cover these lookup outcomes, numeric trace descriptors, nested POSIX bracket members, and changing case options between calls. [Timing](benchmarks.md#static-case-arms-and-shell-assignments-2026-11-29) · [Regressions](../tests/shell.py)
+
+2026-11-29、静的な拡張パターンが20個ある case で、12件の動的キャッシュからあふれた式の再コンパイルを確認した。case と条件式の構文ノードが照合器を保持し、再利用前にシェルの設定とロケールを確認する。最後のアームに一致する M1 実測は 24.318 ms から 9.559 ms に短縮した。PATH 上のディレクトリは実行候補から除外し、通常ファイルの権限エラーと古いハッシュのパスを区別する。回帰試験にはこの3例のほか、トレース先、角括弧内の範囲、関数呼出しの間に照合設定を変える例を含めた。
+
+### R2 parser, expansion and arithmetic follow-up / パーサ・展開・算術の再検証
+
+Physical here-document ranges follow their owning input through recursive scans. Relexing an alias also rebases the here-document extent used by function declaration output. Parser recovery now consumes the entire invalid outer compound before accepting a subsequent command. Arithmetic failures preserve the missing or readonly variable name through stored subscripts, and array slices clone only the requested portion of the associative array's ordered keys. The regression runner checks declaration round-trips, early EOF, continued indexed assignments, prompt escapes, long alias chains and dynamic loop operands. The four native workload measurements cover the parser and expansion changes. [Native results](benchmarks.md) · [Regression runner](../tests/review_r2_language.py)
+
+ヒアドキュメントの範囲を元の入力とともに管理し、別名展開後に関数を再定義しても本文が欠けないようにしました。配列構文エラーからの復帰では外側の複合コマンドを最後まで読み捨てます。算術のエラーは変数名を保持し、連想配列のスライスは必要な要素だけを複製します。関数定義の往復、未終端入力、添字代入の行継続、プロンプト、別名の連鎖、ループ上限の変更を通常の経路から照合しました。[実機計測](benchmarks.md) · [回帰テスト](../tests/review_r2_language.py)

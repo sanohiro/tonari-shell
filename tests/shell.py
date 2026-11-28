@@ -127,6 +127,48 @@ echo "$v"
             self.assertEqual((r.returncode, r.stdout, r.stderr),
                              (0, b"1\n2\n3\nfunction\nxycase z in word\n", b""))
 
+    def test_second_review_associative_edit_order(self):
+        script = """declare -A a
+for ((i=0;i<300;i++)); do a["prefix $i"]=v; done
+printf '%s\n' "${!a[@]}"
+for k in 'prefix 10' 'prefix 90' 新 🔎; do
+    unset 'a[$k]'; a["$k"]=x; printf '%s\n' "${!a[@]}"
+done
+for ((i=0;i<200;i++)); do unset 'a[prefix '$i']'; done
+printf '%s\n' "${!a[@]}" """
+        ref = self.command(BASH, script)
+        actual = self.command(TONARI, script)
+        self.assertEqual((ref.returncode, ref.stderr), (0, b""))
+        self.assertEqual((actual.returncode, actual.stdout, actual.stderr), (0, ref.stdout, b""))
+
+    def test_second_review_posix_function_prefix(self):
+        for shell in (BASH, TONARI):
+            for builtin, expected in [('eval :', 'g'), ('. /dev/null', 'g'), (':', 'p')]:
+                script = "set -o posix; x=g; f(){ x=p " + builtin + '; echo "$x"; }; x=pre f; echo "$x"'
+                r = self.command(shell, script)
+                self.assertEqual((r.returncode, r.stdout, r.stderr), (0, f"p\n{expected}\n".encode(), b""))
+
+    def test_second_review_path_and_implicit_indices(self):
+        for shell in (BASH, TONARI):
+            for setting, message in [('unset PATH', b'No such file or directory'), ('PATH=', b'command not found')]:
+                r = self.command(shell, setting + '; no_such_tonari_test_command')
+                self.assertEqual((r.returncode, r.stdout), (127, b'')); self.assertIn(message, r.stderr)
+            r = self.command(shell, '[[ ${BASH_VERSINFO[-1]} == "${BASH_VERSINFO[5]}" && -n ${BASH_VERSINFO[-1]} ]]')
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0, b'', b''))
+
+    def test_second_review_printf_merged_output(self):
+        cases = [
+            (r"%d\n", b"ERR\n5\n6\nERR\n1\n"),
+            ("%d,", b"ERR\nERR\n5,6,1,"),
+            (r"%d\n%d,", b"ERR\n5\nERR\n6,1\n0,"),
+        ]
+        import re
+        for shell in (BASH, TONARI):
+            for fmt, expected in cases:
+                r = self.command(shell, 'printf "$1" "5x" 6 "1e3" 2>&1', 'shell', fmt)
+                output = re.sub(rb"[^\n]*?printf: [^\n]+: invalid number", b"ERR", r.stdout)
+                self.assertEqual((r.returncode, output, r.stderr), (1, expected, b""))
+
     def test_second_review_dynamic_stack_and_exported_locals(self):
         for shell in (BASH, TONARI):
             script = """pushd / >/dev/null
@@ -156,8 +198,10 @@ GLOBIGNORE=a1; compgen -G '*1' | sort; printf '<%s>' *1
 HISTIGNORE='@(echo a|echo b)'; history -s 'echo a'; history -s 'echo A'; history -s 'echo c'
 history | sed -E 's/^ *[0-9]+ +//'"""
             r = self.command(shell, script)
+            # Bash 5.2 completion does not inherit dotglob from GLOBIGNORE.
+            dot = b".c1\n" if shell == TONARI or bash_version() >= (5, 3) else b""
             self.assertEqual((r.returncode, r.stdout, r.stderr),
-                             (0, b"<ABcABc><aBCaBC>.c1\na1\nb1\n<.c1><b1>echo A\necho c\n", b""))
+                             (0, b"<ABcABc><aBCaBC>" + dot + b"a1\nb1\n<.c1><b1>echo A\necho c\n", b""))
 
     def test_second_review_parameter_pattern_locale(self):
         self.env["LC_ALL"] = "C"
@@ -5089,6 +5133,30 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                 self.fail("login shell did not close its terminal")
         self.assertEqual((self.cwd / "login-seen").read_text().splitlines(), ["-bash 1"] * 2)
         self.assertEqual((self.cwd / "logged-out").read_text().splitlines(), ["end"] * 2)
+
+    def test_secondary_prompt_eof_saves_history_and_runs_logout(self):
+        (self.cwd / ".bash_profile").write_text(
+            'PS1="tonari$ "; PS2="MORE> "; HISTFILE=$PWD/saved-history\n')
+        (self.cwd / ".bash_logout").write_text("echo end >> logged-out\n")
+        for shell in (BASH, TONARI):
+            fd = self.terminal_session(shell=shell, login=True)
+            os.write(fd, b"if true; then\r")
+            self.read_until(fd, b"MORE> ")
+            os.write(fd, b"\x04")
+            while select.select([fd], [], [], 5)[0]:
+                try:
+                    if not os.read(fd, 4096):
+                        break
+                except OSError as error:
+                    if error.errno != errno.EIO:
+                        raise
+                    break
+            else:
+                self.fail("login shell did not close its terminal after PS2 EOF")
+            self.assertEqual((self.cwd / "logged-out").read_text(), "end\n")
+            self.assertIn("if true; then", (self.cwd / "saved-history").read_text().splitlines())
+            (self.cwd / "logged-out").unlink()
+            (self.cwd / "saved-history").unlink()
 
     def test_profile_version_gate_and_nested_shell_level(self):
         self.compare('test -n "$BASH_VERSION" && (( BASH_VERSINFO[0] >= 3 )) && '

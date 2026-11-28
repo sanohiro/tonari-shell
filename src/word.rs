@@ -328,6 +328,7 @@ impl Word {
         let literal = modifier::scalar_part;
         let mixed = parts.len() > 1;
         for part in parts.iter_mut() {
+            let mut indirect_name = None;
             if let Part::PrefixNames { prefix, at, quoted } = part {
                 *part = Part::Elements {
                     values: env.session.variable_names(prefix),
@@ -427,7 +428,11 @@ impl Word {
                             crate::expansion::Error::discard(message)
                         });
                     };
-                    *name = indirect_target(target, env)?.into();
+                    let target = indirect_target(target, env)?.into();
+                    let reference = std::mem::replace(name, target);
+                    if env.session.nounset {
+                        indirect_name = Some(reference);
+                    }
                 }
             }
             if let Part::Parameter { name, quoted } = part
@@ -549,7 +554,7 @@ impl Word {
                             else {
                                 unreachable!()
                             };
-                            let separator = ifs_separator(&|key| env.lookup(key));
+                            let separator = env.ifs_separator();
                             let nonempty = values.iter().any(|s| !s.is_empty())
                                 || values.len() > 1 && (at || !*quoted || !separator.is_empty());
                             let set = !values.is_empty() && (!*check_empty || nonempty);
@@ -614,17 +619,13 @@ impl Word {
                 }
                 Part::Parameter { name, quoted: true } if name == "*" => {
                     // A later expansion in this word can change IFS or the arguments.
-                    *part = Part::Text(
-                        env.session
-                            .positional
-                            .as_slice()
-                            .join(&ifs_separator(&|k| env.lookup(k))),
-                    );
+                    *part =
+                        Part::Text(env.session.positional.as_slice().join(&env.ifs_separator()));
                 }
                 Part::Parameter { name, quoted: true }
                     if name.ends_with("[*]") && array_elements_name(name).is_some() =>
                 {
-                    let separator = ifs_separator(&|k| env.lookup(k));
+                    let separator = env.ifs_separator();
                     if let Some((base, _, false)) = array_elements_name(name)
                         && !env.shadows(base)
                         && let Some(joined) = env.session.join_array(base, &separator)
@@ -632,6 +633,7 @@ impl Word {
                         *part = Part::Text(joined);
                         continue;
                     }
+                    let separator = separator.into_owned();
                     let modifier::Values::Elements(values, _) = modifier::Values::read(name, env)?
                     else {
                         unreachable!()
@@ -644,9 +646,12 @@ impl Word {
                 {
                     let value = modifier::value(name, env)?;
                     if env.session.nounset && value.is_none() {
-                        return Err(
-                            env.missing(name.strip_prefix('#').unwrap_or(name), "unbound variable")
-                        );
+                        return Err(env.missing(
+                            indirect_name
+                                .as_deref()
+                                .unwrap_or_else(|| name.strip_prefix('#').unwrap_or(name)),
+                            "unbound variable",
+                        ));
                     }
                     *part = literal(
                         value.unwrap_or_else(|| {
@@ -1062,7 +1067,7 @@ fn snapshot_array(
             if !at && quoted {
                 // The separator belongs to this expansion, even if a later
                 // parameter assignment in the same word changes IFS.
-                Part::Text(values.join(&ifs_separator(&|k| env.lookup(k))))
+                Part::Text(values.join(&env.ifs_separator()))
             } else {
                 Part::Elements { values, at, quoted }
             }

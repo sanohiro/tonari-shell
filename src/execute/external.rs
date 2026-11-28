@@ -126,13 +126,21 @@ impl External {
         argv.push(std::ptr::null());
         let name = std::ffi::OsStr::from_bytes(program.as_bytes());
         let cached = cmd.cached_path(session, &arguments[0]);
-        let searching_path = cached.is_none() && !arguments[0].contains('/');
+        let mut searching_path = cached.is_none() && !arguments[0].contains('/');
         let search_paths = if let Some(path) = cached {
             Some(vec![CString::new(path.as_os_str().as_bytes())?])
         } else {
             (!arguments[0].contains('/'))
                 .then(|| {
                     let path = lookup::path(cmd, session);
+                    if path.is_empty()
+                        && !cmd.assignments.iter().any(|(key, _)| key == "PATH")
+                        && session.get("PATH").is_none()
+                    {
+                        // Bash executes the unqualified name directly after unset PATH.
+                        searching_path = false;
+                        return Ok(vec![program.clone()]);
+                    }
                     let ignored = IgnoredExecutables::new(session);
                     lookup::search_directories(path)
                         .map(|dir| dir.join(name))

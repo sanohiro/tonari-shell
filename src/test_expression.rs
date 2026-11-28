@@ -571,9 +571,9 @@ impl Compiled {
         };
         let code = compile(regex.as_mut_ptr(), &encoded);
         if code != 0
-            && !portable_ere(&pattern)
+            && portable_ere(&pattern)
                 .and_then(|p| CString::new(p).ok())
-                .is_some_and(|p| compile(regex.as_mut_ptr(), &p) == 0)
+                .is_none_or(|p| compile(regex.as_mut_ptr(), &p) != 0)
         {
             return Ok(Self {
                 pattern,

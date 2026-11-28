@@ -1489,7 +1489,15 @@ impl Session {
 
     pub(crate) fn is_exported(&self, name: &str) -> bool {
         self.variables.get(name).map_or_else(
-            || matches!(name, "PWD" | "OLDPWD") || std::env::var_os(name).is_some(),
+            || {
+                matches!(name, "PWD" | "OLDPWD")
+                    || if self.variables.len() >= 32 || self.listed_environment.get().is_some() {
+                        self.listed_environment()
+                            .contains_key(std::ffi::OsStr::new(name))
+                    } else {
+                        std::env::var_os(name).is_some()
+                    }
+            },
             |var| var.exported,
         )
     }
@@ -1524,15 +1532,19 @@ impl Session {
 
     // Special builtins retain their exported prefix bindings in POSIX mode.
     // Move the prepared strings and avoid snapshotting variables for restoration.
-    pub fn persist_prefix(&mut self, assignments: &mut Vec<(String, String)>) {
+    pub fn persist_prefix(
+        &mut self,
+        assignments: &mut Vec<(String, String)>,
+        evaluated_input: bool,
+    ) {
         for (name, value) in assignments.drain(..) {
             // A special builtin's environment persists in the nearest real
             // binding. A function prefix can itself hide another prefix.
-            if self
+            let function_prefix = self
                 .variables
                 .get(&name)
-                .is_some_and(|v| v.origin == BindingOrigin::CommandPrefix)
-            {
+                .is_some_and(|v| v.origin == BindingOrigin::CommandPrefix);
+            if function_prefix && !evaluated_input {
                 for scope in self.locals.iter_mut().rev() {
                     if let Some(previous) = scope.variables.remove(&name)
                         && !previous
@@ -1549,7 +1561,9 @@ impl Session {
             let var = self.variables.entry(name).or_default();
             var.exported = true;
             var.declared = true;
-            var.origin = BindingOrigin::Ordinary;
+            if !evaluated_input || !function_prefix {
+                var.origin = BindingOrigin::Ordinary;
+            }
             if let Some(array) = var.elements.as_mut() {
                 Rc::make_mut(array).insert(0, value);
             } else {

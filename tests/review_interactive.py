@@ -68,6 +68,8 @@ snapshot() { printf '\\n<draft>%s</draft>\\n' "$READLINE_LINE"; READLINE_LINE=; 
 bind -x '"\\C-t":snapshot'
 choose() { printf '%s\\n' "$1|$2|$3|$COMP_CWORD|$COMP_LINE|$COMP_POINT|${COMP_WORDS[*]}" >ctx; COMPREPLY=(selected); }
 complete -F choose abc
+complete -f pick_file
+complete -W "blueberry red" pick_word
 literal_directory() { COMPREPLY=(localdir/); }
 no_replies() { COMPREPLY=(); }
 complete -o filenames -F literal_directory literal_cmd
@@ -98,6 +100,14 @@ complete -o dirnames -F no_replies fallback_cmd
             draft("{ abc hi", "{ abc selected ")
             draft("A=x abc hiTAIL", "A=x abc selectedTAIL", 4)
             assert (home / "ctx").read_text() == "abc|hi|abc|1|abc hiTAIL|6|abc hiTAIL\n"
+            draft("pick_file 'zzmidd", "pick_file 'zzmiddlelong' ")
+            draft('pick_word "blue', 'pick_word "blueberry" ')
+            draft(": --file=zzmidd", ": --file=zzmiddlelong ")
+            draft("VAR=one:zzmidd", "VAR=one:zzmiddlelong ")
+            draft(": >|zzmidd", ": >|zzmiddlelong ")
+            for group in ("$(a b)", "${x:-a b}"):
+                draft(f"abc {group} hi", f"abc {group} selected ")
+                assert (home / "ctx").read_text().split("|")[2:4] == [group, "2"]
             draft(": zzdir/sub", ": zzdir/subdir")
             draft(": zzd/sub", ": zzdir/subdir" if shell == tonari else ": zzd/sub")
             draft(": fold-", ": Fold-")
@@ -130,6 +140,10 @@ def main():
             "history -s 'echo before'; fc -e - before=after",
             "history -s ': a b.c'; history -p '!!:x:q' '!!:q:x' '!!:q:r' '!!:x:r' '!!:q:q' '!:%' '!!:s'",
             "history -s one; history -p '!!:-' '!!:0-'",
+            "history -s 'echo old'; history -s 'echo new'; fc -s 99999999999999999999",
+            "bind -@; echo $?; bind -m; echo $?; fc -@; echo $?; fc -e; echo $?",
+            """bind -mvi '"QQ": end-of-line'; bind -pmvi end-of-line | grep QQ""",
+            r"""for p in 'x\000y' 'x\400y' 'x\0y' '\303\251\000z'; do echo "${p@P}"; done""",
             "bind 'set keyseq-timeout 300ms'; bind -v | grep keyseq-timeout",
             "bind 'set completion-ignore-case yes'; bind 'set completion-ignore-case'; bind 'TAB: complete'; echo $?",
         ]

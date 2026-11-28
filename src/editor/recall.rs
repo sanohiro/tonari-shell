@@ -2,6 +2,7 @@ use super::Action;
 
 pub(super) struct Recall {
     index: usize,
+    end: usize,
     draft: String,
     cursor: usize,
     filter: Option<Matches>,
@@ -19,6 +20,7 @@ impl Recall {
     pub(super) fn new(end: usize) -> Self {
         Self {
             index: end,
+            end,
             draft: String::new(),
             cursor: 0,
             filter: None,
@@ -52,6 +54,11 @@ impl Recall {
             self.filter = None;
         }
         let end = lines.len();
+        if self.end != end {
+            self.end = end;
+            self.index = end;
+            self.filter = None;
+        }
         if self.index == end && self.filter.is_none() {
             if matches!(action, Down | LastHistory | PrefixDown) {
                 return;

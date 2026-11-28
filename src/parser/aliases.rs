@@ -158,7 +158,7 @@ impl Expanded {
 
 // Ordinary parameter expansions do not invoke another parser. A command
 // substitution must keep the outer alias disabled while its body is read.
-fn may_read_nested_command(value: &str) -> bool {
+pub(super) fn may_read_nested_command(value: &str) -> bool {
     if value.contains('`') {
         return true;
     }
@@ -197,24 +197,32 @@ impl Reader {
             }
             Aliases(Some(std::rc::Rc::new(table)))
         };
-        if !self.alias_frames.is_empty() {
-            return masked();
-        }
         type WeakTable = std::rc::Weak<std::collections::BTreeMap<String, String>>;
-        thread_local! { static LAST: RefCell<Option<(WeakTable,String,Aliases)>> =const {RefCell::new(None)}; }
+        struct Mask {
+            table: WeakTable,
+            name: String,
+            active: Vec<String>,
+            aliases: Aliases,
+        }
+        thread_local! { static LAST: RefCell<Option<Mask>> = const { RefCell::new(None) }; }
         LAST.with_borrow_mut(|cache| {
-            if let Some((table, key, replacement)) = cache
-                && table.as_ptr() == std::rc::Rc::as_ptr(original)
-                && key == name
+            if let Some(previous) = cache
+                && previous.table.as_ptr() == std::rc::Rc::as_ptr(original)
+                && previous.name == name
+                && previous
+                    .active
+                    .iter()
+                    .eq(self.alias_frames.iter().map(|f| &f.name))
             {
-                return replacement.clone();
+                return previous.aliases.clone();
             }
             let replacement = masked();
-            *cache = Some((
-                std::rc::Rc::downgrade(original),
-                name.into(),
-                replacement.clone(),
-            ));
+            *cache = Some(Mask {
+                table: std::rc::Rc::downgrade(original),
+                name: name.into(),
+                active: self.alias_frames.iter().map(|f| f.name.clone()).collect(),
+                aliases: replacement.clone(),
+            });
             replacement
         })
     }

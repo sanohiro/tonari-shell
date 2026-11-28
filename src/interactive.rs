@@ -154,7 +154,6 @@ pub(super) fn interactive_loop(
             return Ok(code);
         }
         session.jobs.poll();
-        session.jobs.report_foreground();
         if session.jobs.monitor {
             session.jobs.report_changes(session.posix);
         }
@@ -185,7 +184,7 @@ pub(super) fn interactive_loop(
             prompt::render(session, !source.is_empty(), status, line_editing)
         };
         let timeout = session
-            .get("TMOUT")
+            .scalar_setting("TMOUT")
             .and_then(|s| s.parse::<u64>().ok())
             .filter(|&n| n > 0);
         let deadline = input_deadline(timeout.map(std::time::Duration::from_secs));
@@ -228,7 +227,7 @@ pub(super) fn interactive_loop(
                     status = match result {
                         Ok(()) => 0,
                         Err(error) => {
-                            diagnostic!("cd: {error}");
+                            diagnostic!("cd: {}", builtins::os_message(&error));
                             1
                         }
                     };
@@ -364,7 +363,52 @@ pub(super) fn interactive_loop(
         }
         let text = std::str::from_utf8(&source);
         match text {
-            Ok(text) => match parser::session_source(text, !more, session) {
+            Ok(text) => match parser::session_source(text, !more, session).or_else(|problem| {
+                if !more
+                    || !problem.incomplete()
+                    || paste_offset == 0
+                    || paste_offset == paste.len()
+                    || start != 0
+                {
+                    return Err(problem);
+                }
+                let rest = &paste[paste_offset..];
+                // Keep history expansion on its physical-line path whenever the
+                // candidate unit contains a history or quick-substitution marker.
+                let chars = session.scalar_setting("histchars");
+                let parse = |size| {
+                    let extra = &rest[..size];
+                    if session.histexpand
+                        && chars
+                            .as_deref()
+                            .unwrap_or("!^#")
+                            .chars()
+                            .take(2)
+                            .any(|c| extra.contains(c))
+                    {
+                        return Err(parser::Error::Invalid(
+                            "requires line-by-line history expansion",
+                        ));
+                    }
+                    let mut unit = String::with_capacity(text.len() + size);
+                    unit.push_str(text);
+                    unit.push_str(extra);
+                    parser::session_source(&unit, false, session)
+                };
+                match input::buffered_compound(
+                    text,
+                    rest.as_bytes(),
+                    true,
+                    session.reads_aliases(),
+                    parse,
+                ) {
+                    Ok((program, used, _)) => {
+                        paste_offset += used;
+                        Ok(program)
+                    }
+                    Err(_) => Err(problem),
+                }
+            }) {
                 Ok(program) if program.is_empty() => {}
                 Ok(program) => {
                     if let Some(p) = session.get("PS0").filter(|p| !p.is_empty()) {
@@ -415,6 +459,14 @@ pub(super) fn interactive_loop(
                 Err(e) => {
                     diagnostic!("{}", e.message());
                     status = 2;
+                    if !more && !paste_recorded && session.begin_history_line(text) {
+                        session.persist_current_history(
+                            session.get("PWD").as_deref(),
+                            status,
+                            &mut history,
+                        );
+                        session.finish_history_line();
+                    }
                 }
             },
             Err(_) => {
@@ -422,8 +474,8 @@ pub(super) fn interactive_loop(
                 status = 2;
             }
         }
-        if !more {
-            return Ok(status);
+        if !more && !startup::defer_interactive_exit(session) {
+            return Ok(startup::logout(session, status, status));
         }
         source.clear();
     }

@@ -87,6 +87,9 @@ fn run_statements<'a>(
             | Command::Arithmetic(_) => true,
             _ => false,
         };
+        // Bash decides whether ERR applies before executing the simple command.
+        // A function can install the first handler while that command runs.
+        let error_trapped = reports_failure && !tested && session.traps.error_handler();
         let flow = if let Some(flow) = literal.and_then(|cmd| cmd.run_literal(session, status)) {
             single_status(session, &flow);
             flow
@@ -98,10 +101,18 @@ fn run_statements<'a>(
                     Cow::Borrowed(stmt) => Cow::Borrowed(&stmt.command),
                 },
                 status,
-                replace_last && statements.peek().is_none() && !negated && !session.traps.active(),
+                replace_last
+                    && statements.peek().is_none()
+                    && !negated
+                    && session.traps.can_replace_shell(),
             )
         };
         session.tested_depth -= u32::from(tested);
+        if session.traps.active() && crate::traps::terminating_pipe() {
+            // The interrupted write never completed. EXIT sees the status
+            // that was current before the producer's command began.
+            return Flow::Exit(status);
+        }
         if std::mem::take(&mut session.jobs.foreground_interrupted)
             && session.interactive
             && (!session.traps.catches(libc::SIGINT) || session.loop_depth > 0)
@@ -115,7 +126,7 @@ fn run_statements<'a>(
             }
             Flow::Continue(code) => {
                 if code != 0 && reports_failure && !tested && session.tested_depth == 0 {
-                    if session.traps.active() {
+                    if error_trapped {
                         let flow = crate::traps::error(session, code);
                         if !matches!(flow, Flow::Continue(_)) {
                             return flow;
@@ -389,6 +400,14 @@ fn run_for(
                 return flow;
             }
         }
+        if session.xtrace {
+            execute::trace_line(session, status, |line| {
+                line.push_str(header.text());
+                if implicit_words {
+                    line.push_str(" in \"$@\"");
+                }
+            });
+        }
         return select::run(session, name, &items, body, status);
     }
     let mut items = items.iter().map(String::as_str).chain(
@@ -501,7 +520,7 @@ fn run_arithmetic_loop(
         if !first && !s.traps.debug_handler() {
             s.current_command.clone_from(&header);
         }
-        if !first && (s.xtrace || !step.is_empty()) {
+        if !first && (s.xtrace || !step.trim().is_empty()) {
             arithmetic(s, step, &update, last)?;
         }
         first = false;
@@ -846,7 +865,10 @@ pub(crate) fn call_with_bindings(
         diagnostic!("{name}: function nesting limit exceeded");
         return Flow::Unwind(1);
     }
-    let function = session.functions[&name].clone();
+    let Some(function) = session.functions.get(&name).cloned() else {
+        diagnostic!("{name}: command not found");
+        return Flow::Continue(127);
+    };
     let traced = session.traced_functions.contains(&name);
     let callsite = session.current_command.clone();
     let caller_signal_line = session.signal_line;

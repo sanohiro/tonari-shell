@@ -11,7 +11,34 @@ use super::{Session, Variable};
 pub(crate) struct Associative {
     entries: HashMap<String, (String, usize)>,
     serial: usize,
-    order: std::cell::OnceCell<Vec<String>>,
+    order: std::cell::OnceCell<Order>,
+}
+
+#[derive(Clone)]
+struct Order {
+    keys: Vec<String>,
+    edits: std::cell::Cell<u8>,
+}
+
+impl Order {
+    fn editable(cache: &mut std::cell::OnceCell<Self>) -> Option<&mut Vec<String>> {
+        // Keep a short insert/remove sequence cheap between listings. Drop the
+        // index in a bulk update so repeated Vec::insert cannot become quadratic.
+        let edits = cache.get()?.edits.get();
+        if edits >= 2 {
+            cache.take();
+            return None;
+        }
+        let order = cache.get_mut()?;
+        order.edits.set(edits + 1);
+        Some(&mut order.keys)
+    }
+}
+
+fn bucket(key: &str) -> u32 {
+    key.bytes().fold(2166136261u32, |hash, c| {
+        hash.wrapping_mul(16777619) ^ (c as libc::c_char as u32)
+    }) & 1023
 }
 
 impl Associative {
@@ -32,7 +59,11 @@ impl Associative {
         match self.entries.entry(key) {
             Entry::Occupied(mut entry) => entry.get_mut().0 = value,
             Entry::Vacant(entry) => {
-                self.order.take();
+                if let Some(keys) = Order::editable(&mut self.order) {
+                    let group = bucket(entry.key());
+                    let at = keys.partition_point(|k| bucket(k) < group);
+                    keys.insert(at, entry.key().clone());
+                }
                 entry.insert((value, self.serial));
                 self.serial += 1;
             }
@@ -40,22 +71,30 @@ impl Associative {
     }
 
     pub(super) fn remove(&mut self, key: &str) {
-        if self.entries.remove(key).is_some() {
-            self.order.take();
+        if self.entries.remove(key).is_some()
+            && let Some(keys) = Order::editable(&mut self.order)
+        {
+            let group = bucket(key);
+            let start = keys.partition_point(|k| bucket(k) < group);
+            let offset = keys[start..]
+                .iter()
+                .position(|k| k == key)
+                .expect("ordered associative key");
+            keys.remove(start + offset);
         }
     }
 
     pub(super) fn ordered_keys(&self) -> &[String] {
-        self.order.get_or_init(|| {
+        let order = self.order.get_or_init(|| {
             let mut keys: Vec<_> = self.entries.iter().collect();
-            keys.sort_by_cached_key(|(key, (_, serial))| {
-                let hash = key.bytes().fold(2166136261u32, |hash, c| {
-                    hash.wrapping_mul(16777619) ^ (c as libc::c_char as u32)
-                });
-                (hash & 1023, std::cmp::Reverse(*serial))
-            });
-            keys.into_iter().map(|(k, _)| k.clone()).collect()
-        })
+            keys.sort_by_cached_key(|(key, (_, serial))| (bucket(key), std::cmp::Reverse(*serial)));
+            Order {
+                keys: keys.into_iter().map(|(k, _)| k.clone()).collect(),
+                edits: Default::default(),
+            }
+        });
+        order.edits.set(0);
+        &order.keys
     }
     pub(super) fn ordered(&self) -> impl ExactSizeIterator<Item = (&str, &str)> {
         self.ordered_keys()

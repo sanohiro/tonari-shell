@@ -1,13 +1,9 @@
 use super::*;
 
 fn with_tokens<T>(source: &str, read: impl FnOnce(&[Token], &[(usize, usize)]) -> T) -> Option<T> {
-    let (mut tokens, mut spans, _) = lex(source, false, false).ok()?;
+    let (tokens, spans, _) = lex(source, false, false).ok()?;
     let result = read(&tokens, &spans);
-    if tokens.capacity().max(spans.capacity()) <= MAX_CACHED_TOKENS {
-        tokens.clear();
-        spans.clear();
-        TOKEN_BUFFERS.set((tokens, spans));
-    }
+    cache_token_buffers(tokens, spans);
     Some(result)
 }
 
@@ -15,7 +11,7 @@ fn with_tokens<T>(source: &str, read: impl FnOnce(&[Token], &[(usize, usize)]) -
 // here-document boundaries must survive recall and execution.
 pub(crate) fn history_command(text: &str) -> std::borrow::Cow<'_, str> {
     use std::borrow::Cow;
-    if text.contains(['#', '\x60']) || text.contains("<<") {
+    if text.contains('\x60') || text.contains("<<") {
         return Cow::Borrowed(text);
     }
     with_tokens(text, |tokens, spans| {
@@ -24,6 +20,18 @@ pub(crate) fn history_command(text: &str) -> std::borrow::Cow<'_, str> {
             .any(|t| t.preserve_layout() || t.keyword() == Some("function"))
         {
             return Cow::Borrowed(text);
+        }
+        if text.contains('#') {
+            let mut end = 0;
+            for &(a, b) in spans {
+                if a > end && text[end..a].contains('#') {
+                    return Cow::Borrowed(text);
+                }
+                end = b.max(end);
+            }
+            if text[end..].contains('#') {
+                return Cow::Borrowed(text);
+            }
         }
         let mut result = String::new();
         let mut start = 0;
@@ -241,4 +249,17 @@ pub(crate) fn suggestion_end(line: &str, cursor: usize) -> usize {
             next_end(&line[..end])
         })
         .unwrap_or(cursor)
+}
+
+#[cfg(test)]
+mod folding_tests {
+    use super::history_command;
+
+    #[test]
+    fn a_hash_in_a_parameter_does_not_end_a_history_line() {
+        let text = "for i in 1\ndo echo ${#i}\ndone";
+        assert_eq!(history_command(text), "for i in 1; do echo ${#i}; done");
+        let comment = "for i in 1\ndo echo ok # first item\ndone";
+        assert_eq!(history_command(comment), comment);
+    }
 }

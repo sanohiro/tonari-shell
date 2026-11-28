@@ -192,24 +192,34 @@ fn delimiter(chars: &mut Chars<'_>) -> Result<(String, bool), Error> {
 // An early substitution closer can place a here-document body after its
 // surrounding word. Keep physical ranges only until the outer lexer returns.
 thread_local! {
-    static SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static RANGES: std::cell::RefCell<Vec<(usize,usize)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static INPUT: std::cell::Cell<Option<(usize, usize, bool)>> = const { std::cell::Cell::new(None) };
+    static RANGES: std::cell::RefCell<std::collections::BTreeMap<usize,usize>> = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
     static ANCESTORS: std::cell::RefCell<Vec<Pending>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-pub(super) struct Scan;
+pub(super) struct Scan {
+    previous: Option<(usize, usize, bool)>,
+    ranges: Option<std::collections::BTreeMap<usize, usize>>,
+}
 impl Scan {
-    pub(super) fn enter() -> Self {
-        SCANS.set(SCANS.get() + 1);
-        Self
+    pub(super) fn enter(source: &str, final_input: bool) -> Self {
+        let start = source.as_ptr().addr();
+        let end = start + source.len();
+        let previous = INPUT.get();
+        let ranges = if previous.is_some_and(|(a, b, _)| a <= start && end <= b) {
+            None
+        } else {
+            INPUT.set(Some((start, end, final_input)));
+            Some(RANGES.take())
+        };
+        Self { previous, ranges }
     }
 }
 impl Drop for Scan {
     fn drop(&mut self) {
-        let depth = SCANS.get() - 1;
-        SCANS.set(depth);
-        if depth == 0 {
-            RANGES.with_borrow_mut(Vec::clear);
+        if let Some(ranges) = self.ranges.take() {
+            INPUT.set(self.previous);
+            RANGES.replace(ranges);
         }
     }
 }
@@ -230,9 +240,8 @@ impl Drop for Ancestors {
 
 pub(super) fn skip(chars: &mut Chars<'_>) {
     RANGES.with_borrow(|ranges| {
-        while let Some(&(_, len)) = ranges
-            .iter()
-            .find(|&&(addr, n)| addr == chars.as_str().as_ptr().addr() && n <= chars.as_str().len())
+        while let Some(&len) = ranges.get(&chars.as_str().as_ptr().addr())
+            && len <= chars.as_str().len()
         {
             *chars = chars.as_str()[len..].chars();
         }
@@ -248,21 +257,24 @@ pub(super) fn after_closer(
     if pending.is_empty() {
         return Ok(());
     }
+    let final_input = INPUT.get().is_some_and(|(_, end, final_input)| {
+        final_input && end == source.as_ptr().addr() + source.len()
+    });
     let tail = after.split_once('\n').map_or("", |(_, tail)| tail);
     let mut cursor = tail.chars();
     ANCESTORS.with_borrow(|earlier| -> Result<(), Error> {
         for doc in earlier {
             skip(&mut cursor);
-            body(&mut cursor, doc, false, false)?;
+            body(&mut cursor, doc, final_input, false)?;
         }
         Ok(())
     })?;
     skip(&mut cursor);
     let start = cursor.as_str();
-    collect(source.len(), &mut cursor, tokens, pending, false)?;
+    collect(source.len(), &mut cursor, tokens, pending, final_input)?;
     let consumed = start.len() - cursor.as_str().len();
     if consumed > 0 {
-        RANGES.with_borrow_mut(|ranges| ranges.push((start.as_ptr().addr(), consumed)));
+        RANGES.with_borrow_mut(|ranges| ranges.insert(start.as_ptr().addr(), consumed));
     }
     Ok(())
 }
