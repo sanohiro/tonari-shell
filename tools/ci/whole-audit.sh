@@ -29,6 +29,7 @@ case "$SUITE" in
       rc="$RUNNER_TEMP/completion.rc"
       printf '%s\n' '. /usr/share/bash-completion/bash_completion' 'declare -F _init_completion >/dev/null || declare -F _comp_initialize >/dev/null || exit 1' > "$rc"
       sha256sum /usr/share/bash-completion/bash_completion > "$out/completion-source.txt"
+      python3 tools/ci/completion-startup.py /usr/share/bash-completion/bash_completion "main=$baseline" "candidate=$current" "bash=$ref" > "$out/completion-stages.jsonl"
       python3 tools/bench_login.py "$current" --previous "$baseline" --bash "$ref" --rcfile "$rc" --runs 21 > "$out/completion-rc.txt"
     fi
     if [[ $RUNNER_OS == Linux ]] && command -v strace >/dev/null; then

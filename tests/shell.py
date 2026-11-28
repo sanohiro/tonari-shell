@@ -1305,6 +1305,22 @@ compgen -c zzcmd- || echo none
                     [b"zzcmd-a", b"zzcmd-b", b"zzcmd-a", b"zzcmd-a"] * 2
                     + [b"zzcmd-b", b"zzcmd-a", b"zzcmd-b", b"zzcmd-b",
                        b"zzcmd-c", b"zzcmd-c", b"none"]))
+                if os.geteuid() != 0:
+                    parent = work / "restricted"
+                    parent.mkdir()
+                    (parent / "link").symlink_to("../first")
+                    try:
+                        access = """PATH=first:restricted/link
+compgen -c zzcmd-
+/bin/chmod 600 restricted
+compgen -c zzcmd-
+"""
+                        p = subprocess.run([shell, "-c", access], cwd=work, env=self.env,
+                                           capture_output=True, timeout=5)
+                        self.assertEqual((p.returncode, p.stderr, p.stdout),
+                                         (0, b"", b"zzcmd-a\n" * 3))
+                    finally:
+                        parent.chmod(0o700)
 
     def test_function_source_after_changing_arg0(self):
         source = "shopt -s extdebug\na() { :; }\nBASH_ARGV0=changed\nb() { :; }\ndeclare -F a b"

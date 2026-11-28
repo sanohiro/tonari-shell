@@ -75,6 +75,8 @@ The original short benchmark starts a shell, writes 32 lines with `echo abc >&7`
 
 For eligible echo and printf output of at most 512 bytes, Tonari now validates the source by reserving a duplicate, closes the duplicate, and writes to the source. The usual temporary redirect performs a backup, installs fd 1, writes, restores fd 1 and closes its backup. Removing the two dup2 calls also avoids allocating a tracked backup for each builtin. The reservation preserves a missing-source error even for zero-length output. A closed standard descriptor can provide the one spare slot GNU uses at a low limit. It is closed before rendering, so diagnostics and subsequent commands see the original descriptor state. Full tables with a live stdout, originally closed stdout, read-only destinations and EPIPE are covered. Larger output uses the ordinary builtin path.
 
+With the child’s descriptor table full, the Linux musl build reports `No file descriptors available (os error 24)` and GNU Bash on glibc reports `Too many open files`. The regression accepts both spellings of EMFILE and requires status 1 and an empty output file. Closing one standard descriptor must then allow the write to succeed and preserve its bytes. [Linux CI diagnostic](https://github.com/sanohiro/tonari-shell/actions/runs/46168594507/job/141051637162)
+
 GNU skips both the duplicate and the closing operation when the source and destination of a move are equal. Previously Tonari closed a live fd for `exec 7>&7-` and treated `printf '' >&1` with a closed stdout as a failed redirect. These operations now preserve the descriptor. Real references elsewhere in the same list still move a private shell descriptor out of the way. Malformed hexadecimal and Unicode escapes in printf now flush completed lines before their diagnostic on merged output, for format strings and %b arguments. The direct renderer accepts formats that can run without that diagnostic. [Regression checks](../tests/review_whole_process.py)
 
 Native M1 medians in milliseconds, one warmup and eleven checked shuffled samples. The pre-change executable, candidate and GNU Bash 5.3.20 measured 2,146,192, 2,146,192 and 873,872 bytes.
@@ -88,3 +90,5 @@ Native M1 medians in milliseconds, one warmup and eleven checked shuffled sample
 At 4,096 writes the candidate ranged from 16.191 to 21.578 ms. The baseline ranged from 17.448 to 19.644 ms. A separate nine-sample comparison of the initial direct-writer prototype measured 16.505 versus 18.961 ms.
 
 短い測定には外部 wc の起動も含まれるため、出力をドライバー側で照合し、反復回数を独立に変えた。512 バイト以下の対象形式では、記述子を一時複製して資源・有効性を確認した後、元の出力先に書き込む。標準出力の付け替え・復元は不要になる。M1 の 4,096 回で 18.482 ms から 16.565 ms になった。閉じた出力、一つだけ空いた記述子、読み取り専用、切断済みパイプ、失敗時の親の状態を確かめた。同じ番号への複製・移動、混在出力での printf エスケープ診断の順序も修正した。
+
+子プロセスが記述子の上限に達したとき、musl と glibc では EMFILE の診断文が異なる。回帰テストは両方の表記を認め、終了値が 1 で出力ファイルが空であることを確認する。標準記述子を一つ閉じた場合は書き込みが成功し、期待した内容が残ることも確認する。
