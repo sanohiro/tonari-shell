@@ -2,7 +2,7 @@
 // directly when its word boundaries are unambiguous. The full grammar handles
 // aliases, lists, redirections, assignments and compound or concatenated words.
 use super::{
-    Command, Condition, Location, SimpleCommand, Statement, Word, aliases, lexer, reserved,
+    Command, Condition, FunctionCall, Location, Statement, Word, aliases, lexer, reserved,
 };
 use crate::word::{WordBuilder, is_identifier};
 use std::rc::Rc;
@@ -145,10 +145,7 @@ fn simple_command(location: Location, words: Vec<Word>) -> Vec<Statement> {
         location,
         condition: Condition::Always,
         negated: false,
-        command: Command::Pipeline(vec![SimpleCommand {
-            words,
-            ..Default::default()
-        }]),
+        command: Command::Call(FunctionCall::new(words, 0)),
     }]
 }
 

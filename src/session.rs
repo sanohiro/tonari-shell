@@ -1164,25 +1164,16 @@ impl Session {
             // Copy the short resolved spelling before borrowing the destination
             // mutably. Longer and indexed references use normal assignment.
             let mut bytes = [0; 128];
-            let mut target = self.variables.get(name).and_then(|v| v.value.as_deref());
-            for _ in 0..32 {
-                let Some(next) = target.filter(|s| is_identifier(s) && s.len() <= bytes.len())
-                else {
-                    return false;
-                };
-                let Some(v) = self.variables.get(next) else {
-                    return false;
-                };
-                if v.nameref {
-                    target = v.value.as_deref();
-                    continue;
-                }
-                let len = next.len();
-                bytes[..len].copy_from_slice(next.as_bytes());
-                return self
-                    .assign_existing_literal(std::str::from_utf8(&bytes[..len]).unwrap(), value);
-            }
-            return false;
+            let Some(target) = self
+                .scalar_reference_target(name)
+                .filter(|s| s.len() <= bytes.len())
+            else {
+                return false;
+            };
+            let len = target.len();
+            bytes[..len].copy_from_slice(target.as_bytes());
+            return self
+                .assign_existing_literal(std::str::from_utf8(&bytes[..len]).unwrap(), value);
         }
         if var.dynamic || var.letter_case.is_some() || var.readonly || var.elements.is_some() {
             return false;
@@ -1255,18 +1246,26 @@ impl Session {
 
     // A scalar reference chain can be followed through borrowed table entries.
     // Indexed targets and virtual variables still use the general resolver.
-    pub(crate) fn referenced_scalar(&self, key: &str) -> Option<&str> {
-        let mut name = key;
-        if !self.has_namerefs {
-            return self.stored_scalar(name);
-        }
-        for _ in 0..32 {
-            let Some(var) = self.variables.get(name).filter(|v| v.nameref) else {
-                return self.stored_scalar(name);
+    fn scalar_reference_target(&self, name: &str) -> Option<&str> {
+        let mut target = self.variables.get(name)?.value.as_deref()?;
+        for _ in 1..32 {
+            if !is_identifier(target) {
+                return None;
+            }
+            let Some(var) = self.variables.get(target).filter(|v| v.nameref) else {
+                return Some(target);
             };
-            name = var.value.as_deref().filter(|s| is_identifier(s))?;
+            target = var.value.as_deref()?;
         }
         None
+    }
+
+    pub(crate) fn referenced_scalar(&self, name: &str) -> Option<&str> {
+        if self.is_nameref(name) {
+            self.stored_scalar(self.scalar_reference_target(name)?)
+        } else {
+            self.stored_scalar(name)
+        }
     }
 
     pub(crate) fn stored_char_count(&self, name: &str) -> Option<usize> {

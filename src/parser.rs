@@ -495,6 +495,7 @@ fn with_source_lines<T>(source: &str, lex: impl FnOnce() -> T) -> T {
 }
 
 struct Reader {
+    function_body: bool,
     depth: usize,
     first_line: usize,
     source: Rc<str>,
@@ -536,6 +537,7 @@ impl Reader {
         newlines.extend(memchr::memchr_iter(b'\n', source.as_bytes()));
         Self {
             first_line: source_line(source),
+            function_body: false,
             line_index: std::cell::Cell::new(0),
             depth: 0,
             spans,
@@ -796,10 +798,12 @@ impl Reader {
             else {
                 unreachable!()
             };
-            let name = word.assignment_name(name).to_owned();
+            if let Word::Literal(text) = word {
+                return Ok(Command::LiteralAssignment(text, name));
+            }
             let mut word = word;
-            word.remove_assignment_prefix(name.len() + 1);
-            return Ok(Command::Scalar(Box::new((name, word))));
+            let key = word.take_assignment_name(name);
+            return Ok(Command::Scalar(Box::new((key, word))));
         }
         let start = self.position();
         let mut first = match self.compound()? {
@@ -807,6 +811,15 @@ impl Reader {
             Some(compound) => self.compound_stage(compound)?,
             None => self.simple()?,
         };
+        if self.function_body
+            && !self.has_pipe()
+            && first.compound.is_none()
+            && first.redirects.is_empty()
+            && first.assignments.is_empty()
+            && let Some(keywords) = first.keyword_args.inline()
+        {
+            return Ok(Command::Call(FunctionCall::new(first.words, keywords)));
+        }
         if self.has_pipe() {
             first.location = Some(Box::new(self.location(start)));
         }
@@ -1177,7 +1190,10 @@ impl Reader {
         }
         self.alias_newlines(&["{", "if", "while", "until", "for", "case"])?;
         let start = self.position();
-        let compound = self.nested(Self::compound)?.ok_or_else(|| {
+        let outer = std::mem::replace(&mut self.function_body, true);
+        let compound = self.nested(Self::compound);
+        self.function_body = outer;
+        let compound = compound?.ok_or_else(|| {
             if self.peek().is_none() {
                 Error::Incomplete(Incomplete::Message("expected a function body"))
             } else {

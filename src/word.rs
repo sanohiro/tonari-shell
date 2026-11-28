@@ -204,6 +204,20 @@ impl Word {
         &text[..length.get()]
     }
 
+    pub(crate) fn take_assignment_name(&mut self, length: std::num::NonZeroUsize) -> String {
+        if let Self::Expanded(parts) = self
+            && let Some(Part::Text(prefix)) = parts.first_mut()
+            && prefix.len() == length.get() + 1
+        {
+            let mut name = std::mem::take(prefix);
+            name.truncate(length.get());
+            return name;
+        }
+        let name = self.assignment_name(length).to_owned();
+        self.remove_assignment_prefix(name.len() + 1);
+        name
+    }
+
     pub fn remove_assignment_prefix(&mut self, length: usize) {
         let text = match self {
             Self::Literal(s) => s,

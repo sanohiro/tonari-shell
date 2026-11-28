@@ -54,6 +54,17 @@ v=X; printf '<%s> ' {a,}${v} {,b} "q"{x,y}; echo
 a=(one two); for x in "${a[@]}"; do echo "$x"; a=(changed); done
 ''', 0, b"<pre_x_end> <pre_a_1_end> <pre_a_2_end> <pre_b_1_end> <pre_b_2_end> <pre_z_end> \n<aX> <X> <b> <qx> <qy> \none\ntwo\n")
 
+    def test_runtime_review_patterns_recheck_options_and_path_boundaries(self):
+        self.compare('''mkdir -p sub/nest
+touch sub/a1.txt sub/a2.txt sub/A3.txt sub/nest/a1.txt
+GLOBIGNORE='sub/a[13]*.txt'
+printf '<%s> ' sub/*.txt sub/nest/*.txt; echo
+shopt -s nocaseglob; printf '<%s> ' sub/*.txt sub/nest/*.txt; echo
+shopt -u nocaseglob; printf '<%s> ' sub/*.txt; echo
+for ((i=0;i<72;i++)); do p="^(ok|$i)$"; [[ ok =~ $p ]] || exit 1; done
+p='('; [[ ok =~ $p ]] 2>/dev/null; echo "$?"
+''', 0, b"<sub/A3.txt> <sub/a2.txt> <sub/nest/a1.txt> \n<sub/a2.txt> <sub/nest/a1.txt> \n<sub/A3.txt> <sub/a2.txt> \n2\n", minimum=5)
+
     def test_runtime_review_arithmetic_fallback(self):
         self.compare('''x=0; v=2; for i in 1 2 3; do ((x += (v*3+7)^(i>>1))); done; echo "$x"
 v='++calls'; calls=0; for i in 1 2; do n=$((v+1)); echo "$n $calls"; done

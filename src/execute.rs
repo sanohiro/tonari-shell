@@ -1012,6 +1012,31 @@ fn lastpipe(
     result
 }
 
+pub(crate) fn literal_assignment(
+    session: &mut Session,
+    text: &str,
+    end: usize,
+    status: u8,
+    tail: bool,
+) -> io::Result<Flow> {
+    if let Some(flow) = crate::traps::debug(session, status) {
+        return Ok(flow);
+    }
+    let key = &text[..end];
+    let value = &text[end + 1..];
+    if !session.xtrace && session.assign_existing_literal(key, value) {
+        session.last_argument = Some(String::new());
+        return Ok(Flow::Continue(0));
+    }
+    scalar_command(
+        key.to_owned(),
+        Word::Literal(value.into()),
+        status,
+        tail,
+        session,
+    )
+}
+
 pub(crate) fn run_scalar(
     pair: std::borrow::Cow<'_, (String, Word)>,
     last_status: u8,
@@ -1026,6 +1051,16 @@ pub(crate) fn run_scalar(
         return Ok(Flow::Continue(0));
     }
     let (key, word) = pair.into_owned();
+    scalar_command(key, word, last_status, replace, session)
+}
+
+fn scalar_command(
+    key: String,
+    word: Word,
+    last_status: u8,
+    replace: bool,
+    session: &mut Session,
+) -> io::Result<Flow> {
     let command = SimpleCommand {
         assignments: vec![(key, Assignment::Scalar(word))],
         ..Default::default()

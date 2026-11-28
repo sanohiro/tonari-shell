@@ -724,8 +724,7 @@ fn capture_simple(
     if let [statement] = body
         && !statement.negated
         && statement.condition == parser::Condition::Always
-        && let parser::Command::Pipeline(stages) = &statement.command
-        && let [writer, reader] = stages.as_slice()
+        && let Some([writer, reader]) = statement.command.stages()
         && writer.redirects.is_empty()
         && reader.redirects.is_empty()
         && matches!(
@@ -745,8 +744,9 @@ fn capture_simple(
         return crate::execute::capture_with_writer(writer, reader, session, last);
     }
     if !body.iter().all(|s| {
-        !s.negated && s.condition == parser::Condition::Always
-            && matches!(&s.command, parser::Command::Pipeline(stages) if matches!(stages.as_slice(), [cmd] if command(cmd).is_some()))
+        !s.negated
+            && s.condition == parser::Condition::Always
+            && s.single_stage().is_some_and(|cmd| command(cmd).is_some())
     }) {
         return wrapped_capture(session, body, last);
     }
@@ -754,10 +754,7 @@ fn capture_simple(
     let mut code = last;
     let mut fields = Vec::new();
     for statement in body {
-        let parser::Command::Pipeline(stages) = &statement.command else {
-            unreachable!()
-        };
-        let cmd = &stages[0];
+        let cmd = statement.single_stage().unwrap();
         let words = if matches!(cmd.words[0].as_literal(), Some("command" | "builtin")) {
             &cmd.words[1..]
         } else {

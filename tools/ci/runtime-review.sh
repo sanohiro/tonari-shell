@@ -16,5 +16,8 @@ python3 tools/bench_scripts.py "$current" --previous "$baseline" --bash "$refere
   --timing started --runs "$runs" "${args[@]}" > "$out/runtime.txt"
 python3 tools/bench_history_fields.py "$baseline" "$current" --entries 100000 \
   --deep-page --runs "$runs" > "$out/history-page.txt"
+python3 tools/bench_history_fields.py "$baseline" "$current" --entries 100000 --deep-page --mixed-records --runs "$runs" > "$out/history-mixed.txt"
 python3 tools/bench_history_fields.py "$baseline" "$current" --entries 100000 \
   --runs "$runs" > "$out/history-input.txt"
+
+python3 tools/bench_scripts.py "$current" --previous "$baseline" --bash "$reference" --timing sourced --runs "$runs" --case source-functions-mixed --case core-parse-functions > "$out/source-return.txt"

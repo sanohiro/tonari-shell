@@ -57,6 +57,9 @@ CASES = {
     **{f"runtime-regex-{n}": eval_loop('p=${patterns[i%n]}; [[ test == test && test =~ $p ]] || exit 1',
             'echo "${BASH_REMATCH[0]}"', "test", f"n={n}; patterns=(); for ((j=0;j<n;++j)); do patterns+=(\"^(test|item$j)$\"); done", 4000)
        for n in (4, 5, 20)},
+    "runtime-glob-prefix": eval_loop('a=(brackets/file_05*.txt)', 'echo "${#a[@]}"', "100", count=15),
+    "runtime-glob-nocase": eval_loop('a=(brackets/FILE_05*.TXT)', 'echo "${#a[@]}"', "100", "shopt -s nocaseglob", 15),
+    "runtime-glob-ext": eval_loop('a=(brackets/file_0@(5|6)*.txt)', 'echo "${#a[@]}"', "200", "shopt -s extglob", 15),
     "runtime-case-filter": eval_loop('x=${s^^[aeiou]}', 'echo "$x"', "hEllO_Utf8_AbcdE", "s=hello_utf8_abcde", 5000),
     "runtime-self-append": eval_loop('s="${s}x"', 'echo "${#s}"', "10000", "s=", 10000),
     "runtime-arithmetic-word": eval_loop('x=$((x+1))', 'echo "$x"', "10000", "x=0", 10000),
@@ -68,6 +71,9 @@ CASES = {
     "runtime-hash-path": eval_loop('hash -p /bin/ls ls', 'hash -t ls', "/bin/ls"),
     "runtime-echo-options": listing_loop('echo -ne "one\\ttwo" three', 5000),
     "runtime-file": eval_loop('x=$(<data)', 'echo "$x"', "contents", "echo contents >data", 500),
+    **{f"runtime-ifs-{len(chars)}": eval_loop('set -- $row', 'echo "$# ${#32}"', "32 128",
+        f"IFS='{chars}'; row='" + "".join("x"*128 + chars[j % len(chars)] for j in range(31)) + "x"*128 + "'", 400)
+       for chars in (":,", ":,/", ":,/|;")},
     "runtime-ifs": eval_loop('set -- $v', 'echo "$# $4"', "4 d", "v=a:b,c/d; IFS=,:/", 5000),
     "runtime-eval": eval_loop('eval "${code[i%6]}"', 'echo "$x"', "1", "code=('x=0' 'x=1' 'x=2' 'x=3' 'x=4' 'x=5')", 5000),
     "review-helper-case": eval_loop('x=$(f "$i")', 'echo "$x"', "v49",
@@ -643,27 +649,45 @@ CASES.update({
 })
 
 
-def sample(binary, script, expected, env, started, setup="", syntax=False):
+def sample(binary, script, expected, env, started, setup="", syntax=False, sourced=False):
     argv = [binary, "--noprofile", "--norc"]
     if syntax:
         argv.extend(["-n", script])
         expected = b""
     elif started:
-        argv.extend(["-c", setup + 'printf "ready\\n"; IFS= read -r gate && . "$1"', "bench", script])
+        trailer = '; rc=$?; echo SOURCE_DONE; IFS= read -r gate; exit "$rc"' if sourced else ""
+        argv.extend(["-c", setup + 'printf "ready\\n"; IFS= read -r gate && . "$1"' + trailer, "bench", script])
     elif setup:
         argv.extend(["-c", setup + '. "$1"', "bench", script])
     else:
         argv.append(script)
     start = time.perf_counter_ns()
     with subprocess.Popen(argv, env=env, cwd=script.parent, stdin=subprocess.PIPE,
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE) as child:
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0 if sourced else -1) as child:
         try:
             if started:
                 if not select.select([child.stdout], [], [], 10)[0] or child.stdout.readline() != b"ready\n":
                     raise RuntimeError(f"{binary} did not reach the startup marker")
                 start = time.perf_counter_ns()
-            out, err = child.communicate(b"\n" if started else None)
-            elapsed = (time.perf_counter_ns() - start) / 1e6
+            if sourced:
+                child.stdin.write(b"\n")
+                child.stdin.flush()
+                observed = bytearray()
+                while True:
+                    if not select.select([child.stdout], [], [], 10)[0]:
+                        raise RuntimeError(f"{binary} did not finish sourcing {script.name}")
+                    line = child.stdout.readline()
+                    if not line:
+                        raise RuntimeError(f"{binary} exited before the source-return marker")
+                    if line == b"SOURCE_DONE\n":
+                        break
+                    observed.extend(line)
+                elapsed = (time.perf_counter_ns() - start) / 1e6
+                tail, err = child.communicate(b"\n")
+                out = observed + tail
+            else:
+                out, err = child.communicate(b"\n" if started else None)
+                elapsed = (time.perf_counter_ns() - start) / 1e6
         finally:
             if child.poll() is None:
                 child.kill()
@@ -678,7 +702,7 @@ def main():
     cli.add_argument("--bash", type=Path, default=Path("/bin/bash"))
     cli.add_argument("--previous", type=Path, help="include a previous Tonari build")
     cli.add_argument("--spawn-control", type=Path, help="compiled tools/bench_spawn.c for native process and directory controls")
-    cli.add_argument("--timing", choices=["whole", "started", "both", "syntax"], default="both")
+    cli.add_argument("--timing", choices=["whole", "started", "both", "syntax", "sourced"], default="both")
     cli.add_argument("--utf8-locale", default="en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8",
                      help="LC_ALL for Unicode field-splitting and pathname workloads")
     cli.add_argument("--runs", type=int, default=30)
@@ -705,7 +729,7 @@ def main():
         (home / "rows").write_text("".join(f"record {i}\n" for i in range(2000)))
         if not args.case or "source-functions-repeat" in args.case:
             (home / "functions.sh").write_text(function_source())
-        if not args.case or {"glob-bracket-list", "glob-ignore-simple-class"}.intersection(args.case):
+        if not args.case or {"glob-bracket-list", "glob-ignore-simple-class", "runtime-glob-prefix", "runtime-glob-nocase", "runtime-glob-ext"}.intersection(args.case):
             directory = home / "brackets"
             directory.mkdir()
             for i in range(1000):
@@ -846,16 +870,16 @@ def main():
                     case_setup += 'declare -n ref=items; '
             elif case == "array-slice-sparse":
                 case_setup += 'for ((j=0; j<8192; j++)); do items[j*2]=$j; done; '
-            modes = (False, True) if args.timing == "both" else (args.timing == "started",)
+            modes = (False, True) if args.timing == "both" else (args.timing in ("started", "sourced"),)
             for started in modes:
                 samples = {name: [] for name, _ in participants}
                 for i in range(5 + args.runs):
                     offset = i % len(participants)
                     for name, binary in participants[offset:] + participants[:offset]:
-                        elapsed = sample(binary, script, (expected + "\n").encode(), case_env, started, case_setup, args.timing == "syntax")
+                        elapsed = sample(binary, script, (expected + "\n").encode(), case_env, started, case_setup, args.timing == "syntax", args.timing == "sourced")
                         if i >= 5:
                             samples[name].append(elapsed)
-                label = "syntax check" if args.timing == "syntax" else "already started" if started else "whole script"
+                label = "source returned" if args.timing == "sourced" else "syntax check" if args.timing == "syntax" else "already started" if started else "whole script"
                 print(f"{case} ({label})", flush=True)
                 within_target = report(samples) and within_target
 
