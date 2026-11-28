@@ -65,6 +65,12 @@ shopt -s nocasematch; match FOO_7; echo "$?"
 s=''; set -- "${s:+words}" "${s:-a b}"; printf '<%s>\n' "$@"
 ''', 0, b"<X-X>\n<X>\n<X>\n<\xe9\x9b\xaaX>\n<-ffoo>\n<>\n<>\n<\xe9\x9b\xaafo>\n0\n1\n0\n<>\n<a b>\n", minimum=4)
 
+    def test_utf8_scalar_length_at_block_boundaries(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        self.compare("""for w in 1022 1023 1024 1025 8192; do
+printf -v s '%*s' "$w" x; s+=🐟雪; echo "${#s}"
+done""", 0, b"1024\n1025\n1026\n1027\n8194\n")
+
     def test_query_prefers_executable_and_completion_rechecks_permissions(self):
         first = self.cwd / "first"
         second = self.cwd / "second"
