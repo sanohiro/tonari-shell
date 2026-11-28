@@ -1,5 +1,11 @@
 # Startup and execution / 起動と実行性能
 
+## Copying an existing scalar / 既存スカラーへの代入
+
+A plain assignment from another stored variable took an owned snapshot and then copied it again into the destination. The plain assignment now moves the snapshot. Literal and append operations still reuse the destination buffer. On a native Apple M1, UTF-8 text of 16,384 ASCII bytes assigned 1,024 / 2,048 / 4,096 times took 9.574 / 11.272 / 11.957 ms before and 8.619 / 9.641 / 11.027 ms after. GNU Bash 5.3.20 took 68.480 / 122.061 / 217.433 ms. Each sample launched a release shell in an isolated directory and verified the length. Nine interleaved timings followed three warmups per executable. Other processes were active. The absolute gains on short inputs were small.
+
+16 KiB の変数を別の既存変数へ代入する経路で、所有済みの文字列を移動して2回目のコピーを省いた。入力の長さと反復回数を分け、短い値、文字列の連結、配列要素への代入と追記も対照として調べた。配列の2経路では一貫した効果を確認できず、この変更の高速化実績には含めていない。
+
 ## Second external review, whole-input scaling (2026-11-29)
 
 The driver checks the exact output, exit status and stderr of each sample. It opens a new shell with a real file or seekable stdin, shuffles the executable order, drops one warmup and reports seven-run medians. The baseline is `80cce30`. At N = 1,024, wall times in milliseconds were as follows. The linked artifacts include N = 256 and 512, host details and the Bash versions. [Driver](../tools/ci/second-review.py) · [Native measurements](https://github.com/sanohiro/tonari-shell/actions/runs/46157814490)
@@ -4563,3 +4569,18 @@ Native Apple M1, Darwin 27.2.0 arm64, Rust release and GNU Bash 5.3.20, `LC_ALL=
 | `f(){ :; }`, loop body `f arg` | 11.850 | 12.054 | 63.356 |
 
 The notification sample's ranges were 23.394–95.738 / 10.239–26.093 / 49.676–91.147 ms. The runner read the output marker before waiting for all children to finish. Unconditional kernel polling previously visited each live child at every statement. The common signal-disposition path now polls on state changes. The trap-only samples measured 8.464–9.931 / 9.000–9.436 / 39.303–50.394 ms. Caching the trap-table predicate did not show an elapsed-time gain with two actions.
+
+### Shell level during command substitution
+
+On 2026-11-29, a MacBook Air M1 running macOS 27.2.1 compared native release executables with `LC_ALL=C`, `PATH=/usr/bin:/bin` and no inherited `SHLVL`. Each fresh shell ran `for ((i=0;i<32;i++)); do v=$(/usr/bin/printenv SHLVL); done; echo "$v"`. After one warmup, the driver shuffled each round's order, checked output and status, and measured nine runs.
+
+| 32 captures | Median wall time | Observed range | Printed level |
+|---|---:|---:|---:|
+| Previous local Tonari release | 81.892 ms | 77.708–118.194 ms | 1 |
+| Revised Tonari, direct capture | 86.269 ms | 78.490–350.127 ms | 0 |
+| Revised Tonari, `set -u` before the loop | 128.799 ms | 114.484–301.782 ms | 0 |
+| GNU Bash 5.3.20 | 147.430 ms | 131.401–167.971 ms | 0 |
+
+All variables in the loop were set before they were read. Enabling `nounset` selects the general command-substitution path in Tonari. The direct capture retained the same child environment and avoided starting a separate shell process for each substitution. Compiler activity on the host widened the timing ranges.
+
+macOS arm64 の実機で、同じシェル内のコマンド置換を 32 回計測した。修正版は高速経路でも通常経路でも参照 Bash と同じレベル 0 を返した。高速経路では置換ごとにシェルプロセスを起動する必要がなく、中央値は通常経路の 128.799 ms に対して 86.269 ms だった。並行してビルドが走っていたため、表には全サンプルの範囲も示した。

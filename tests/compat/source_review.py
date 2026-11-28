@@ -855,7 +855,7 @@ printf three >&7; exec {slot}>&7; : 6>&7- {slot}>&-; printf four >&7; exec 6>&7-
         # Preserve valid data and bindings when an operation cannot succeed.
         for code, output in [
             ('readonly fd=42; printf keep >protected; { : {fd}>protected; } 2>/dev/null; printf "%s/" "$?"; cat protected', b"1/keep"),
-            ('export local_env_probe=outer; f(){ local local_env_probe=inner; declare +x local_env_probe; printenv local_env_probe || echo hidden; }; f', b"hidden\n"),
+            ('export local_env_probe=outer; f(){ local local_env_probe=inner; declare +x local_env_probe; echo "$local_env_probe"; printenv local_env_probe; }; f', b"inner\nouter\n"),
             ('declare -n ref; declare ref=123 2>/dev/null; echo "$?"; declare -p ref', b"1\ndeclare -n ref\n"),
             ('declare -n job=ends; coproc job { :; }; echo "${job_PID:+named}/${ends_PID:+resolved}"; wait', b"named/\n"),
             ("declare -n job='ends[0]'; { coproc job { echo started >unexpected-job; }; } 2>/dev/null; echo \"$?\"; wait; test ! -e unexpected-job", b"1\n"),

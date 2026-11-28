@@ -330,6 +330,8 @@ pub struct Session {
     pub xtrace: bool,
     pub onecmd: bool,
     pub subshell_depth: u32,
+    // A command substitution inherits the enclosing parentheses or pipeline
+    // flag. A newly forked compound command establishes its own context.
     pub(crate) parenthesized_subshell: bool,
     pub(crate) pipeline_subshell: bool,
     pub histexpand: bool,

@@ -52,7 +52,8 @@ impl Environment {
             // Bash adjusts its own binding even when the command prefixes SHLVL.
             // Build the child environment separately so a failed exec leaves the shell intact.
             target = session.reference_name("SHLVL").unwrap_or("SHLVL".into());
-            let name = target.as_ref();
+            let element = crate::session::array::subscript(&target);
+            let name = element.map_or(target.as_ref(), |(base, _)| base);
             let value = if session.subshell_depth > 0 {
                 assignments
                     .iter()
@@ -76,7 +77,7 @@ impl Environment {
             } else {
                 Some(level.to_string())
             };
-            let value = value.filter(|_| !session.array_parameter(name));
+            let value = value.filter(|_| element.is_none() && !session.array_parameter(name));
             changes.insert(name, value.map(std::borrow::Cow::Owned));
             if assignments.is_empty() {
                 // ENOEXEC can start a fresh interpreter in the same process.

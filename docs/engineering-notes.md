@@ -1,5 +1,11 @@
 # Engineering notes / 開発知見
 
+## Shebangless replacement and comparison fixtures / インタプリタを指定しないコマンドの置換と比較試験
+
+An executable text file reached through a symbolic working directory must see the shell's exported logical PWD when it enters a fresh Tonari interpreter. We found that the replacement path prepared a correct exec environment, then lost its changes when running the interpreter in the same process. The ENOEXEC regression runs the file twice, first by PATH and finally by a relative pathname after unsetting OLDPWD.
+
+リダイレクトを伴わない最終コマンドでは、インタプリタを同じプロセスで起動する場合にも、変更後の PWD と削除された OLDPWD を引き継ぐ。ジョブ一覧の比較試験は、外部の sleep を待つと Bash が終了済みジョブを先に通知する場合があるため、パイプ終端と子の終了を確認してから PID と終了値を検査する。getopts で明示引数のリストを切り替える比較試験は OPTIND をリセットする。リセットしない場合の結果は GNU Bash 5.3.20 でもビルドにより異なった。[公開インターフェイスの試験](../tests/shell.py)
+
 ## 2026-11-29 · Second external review / 第2回外部レビュー
 
 The six review sections contain 429 distinct finding IDs. Comparing their headings with the seven subsystem ledgers found 429 unique entries in matching order and coverage. The sections cover parser/expansion (69), patterns/execution (73), jobs (43) and variables (33) in the shared third section, builtins/startup (75), editor/history (75) and cross-cutting/CI (61). Each entry identifies the implementation, a regression check, a measurement or a remaining limitation. Source inspection supplied the evidence for crash and excessive-nesting reports. [Review changes](https://github.com/sanohiro/tonari-shell/pull/58)
@@ -1366,3 +1372,9 @@ GNU Bash 5.3.20 の数値引数は前後の ASCII 空白を受け付ける。全
 On 2026-11-29, an isolated foreground handoff on a private PTY showed that an interactive shell initially in a background process group must wait for its controlling shell. Both Tonari and GNU Bash 5.3.20 stopped with SIGTTIN and resumed with monitor mode enabled. For `set -mb`, a child-state signal now wakes the job poll when the shell controls the disposition. Explicit handlers, inherited ignores and blocked signals retain synchronous polling. A foreground external command with deferred descriptor operands also updates the parent's command hash before those operands are evaluated, including when a redirect fails. A redirection-only command using a named descriptor or stdin returns the setup status, while the ordinary stdout-only form reports its last substitution status. [Job timing](benchmarks.md#job-notifications-and-trap-dispatch-2026-11-29) · [Regression tests](../tests/shell.py)
 
 2026-11-29、専用PTYでバックグラウンドから起動した対話シェルが SIGTTIN で停止し、端末を取得してから監視モードで再開することを GNU Bash と照合した。`set -mb` の通常経路は子の状態変化時に回収し、SIGCHLD の既存処理やマスクを維持する場合は同期的に確認する。前景の外部コマンドはリダイレクトが失敗しても親のコマンドハッシュに残る。名前付きFDや標準入力を扱う単独リダイレクトの終了値と、出力のみで最後のコマンド置換の終了値を返す場合を回帰試験で区別した。
+
+## Shell level at process replacement / プロセスを置き換えるときのシェルレベル
+
+GNU Bash 5.3.20 keeps the current `SHLVL` for an explicit `exec` inside parentheses and for the last external command in an `if`, `case` or brace-group body. A final simple command in a command substitution can replace that substitution's shell. Its child then receives the decremented level, including when programmable completion runs a `-C` callback. A pipe or command redirection can change which rule applies. The regression checks the exported value with `printenv`, plus readonly bindings, the level limit, and a nameref. [Process environment tests](../tests/shell.py) · [Native timings](benchmarks.md#shell-level-during-command-substitution)
+
+GNU Bash 5.3.20 は、丸括弧内の明示的な `exec` と、`if`、`case`、波括弧の本体末尾の外部コマンドで現在の `SHLVL` を保つ。一方、コマンド置換の末尾の単純コマンドがそのシェルを置き換える場合、子プロセスには 1 小さい値を渡す。補完の `-C` コールバックにも同じ規則を適用する。回帰試験では、パイプ、リダイレクト、読み取り専用変数、上限値、名前参照も確認する。

@@ -136,15 +136,16 @@ outer; echo "$r" """
             self.assertIn(b"circular name reference", r.stderr)
 
     def test_second_review_job_statuses_and_notices(self):
+        # A stopped job stays in both shells' job tables until it is resumed.
         for shell in self.shells_for(5):
-            result = self.command(shell, """set -m; (exit 3) | (read -r line; exit 5) & p=$!
-while kill -0 "$p" 2>/dev/null && (( SECONDS < 2 )); do :; done
-jobs -l; wait""")
-            self.assertEqual(result.returncode, 0, result.stderr)
+            result = self.command(shell, """set -m
+(exit 3) | /bin/sh -c 'read -r line; kill -STOP $$; exit 5' & p=$!
+wait "$p"; jobs -l; bg %+ >/dev/null; wait "$p"; echo finished:$?""")
             rows = result.stdout.splitlines()
-            self.assertEqual(len(rows), 2, result.stdout)
+            self.assertEqual((result.returncode, len(rows)), (0, 3), (shell, result))
             self.assertRegex(rows[0], rb"^\[1\]\+ +\d+ Exit 3 +")
-            self.assertRegex(rows[1], rb"^ +\d+ Exit 5 +\| ")
+            self.assertRegex(rows[1], rb"^ +\d+ (Stopped|Suspended).*\| ")
+            self.assertEqual(rows[2], b"finished:5")
             for wait in ("wait", "wait -n"):
                 result = self.command(shell, "/bin/sh -c 'kill -HUP $$' & " + wait + "; echo after >&2")
                 self.assertEqual(result.returncode, 0)
@@ -159,6 +160,17 @@ jobs -l; wait""")
             self.assertIn(b"pid 2147483647 is not a child", result.stderr)
             self.assertIn(b"No such process", result.stderr)
             self.assertNotIn(b"os error", result.stderr)
+
+        # Bash may already have reported and removed a completed job. Tonari
+        # retains the completed pipeline for this first explicit listing.
+        result = self.command(TONARI, """set -m
+(exit 3) | (read -r line; exit 5) & p=$!
+while kill -0 "$p" 2>/dev/null; do :; done
+jobs -l; wait""")
+        rows = result.stdout.splitlines()
+        self.assertEqual((result.returncode, len(rows)), (0, 2), result)
+        self.assertRegex(rows[0], rb"^\[1\]\+ +\d+ Exit 3 +")
+        self.assertRegex(rows[1], rb"^ +\d+ Exit 5 +\| ")
 
     def test_second_review_pipe_cleanup_and_select_eof(self):
         result = self.command(TONARI, "select item in a; do break; done </dev/null >&-")
@@ -355,8 +367,9 @@ printf '%s\n' "${!a[@]}" """
             ("f(){ /usr/bin/printenv SHLVL; }; echo $(f)", b"0"),
             ("level(){ /usr/bin/printenv SHLVL; }; compgen -C level 2>/dev/null", b"0"),
             ("SHLVL='3 '; exec /usr/bin/printenv SHLVL", b"0"),
+            ("unset SHLVL; level=4; declare -n SHLVL=level; exec /usr/bin/printenv level", b"3"),
         ]
-        for shell in (TONARI, BASH):
+        for shell in self.shells_for(5):
             for command, level in cases:
                 r = self.command(shell, command)
                 self.assertEqual((r.returncode, r.stdout.strip(), r.stderr), (0, level, b""), (shell, command))
@@ -367,6 +380,9 @@ printf '%s\n' "${!a[@]}" """
                 r = self.command(shell, command)
                 self.assertEqual((r.returncode, r.stdout.strip()), (0, level))
                 self.assertIn(error, r.stderr)
+            r = self.command(shell, "unset SHLVL; export levels=4; declare -n SHLVL='levels[0]'; "
+                                    "exec /usr/bin/printenv levels 'levels[0]'")
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (1, b"", b""))
             r = self.command(shell, 'exec -c /usr/bin/printenv SHLVL')
             self.assertEqual((r.returncode, r.stdout, r.stderr), (1, b"", b""))
 
