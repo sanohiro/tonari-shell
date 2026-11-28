@@ -554,10 +554,10 @@ fn exec_builtin(cmd: &PreparedCommand, session: &mut Session, mut args: &[String
     };
     let status = match External::for_words(cmd, session, args, arg0, environment) {
         Ok(external) => {
-            let released = session.jobs.leave_for_exec();
+            let released = session.jobs.restore_initial_group();
             let status = external.exec(session, false);
-            if released && !session.jobs.init(session.interactive) {
-                session.jobs.monitor = false;
+            if released {
+                session.jobs.resume_after_failed_exec();
             }
             status
         }

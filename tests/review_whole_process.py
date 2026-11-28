@@ -78,7 +78,8 @@ grep -q 'echo: write error: Bad file descriptor' err && echo reported >&8
 """, "kept\n0\n0\nempty:0\nclosed:1\nreported"
     yield "duplicate output at the descriptor limit", """
 ( exec 7>out 3>/dev/null; ulimit -n 4; echo dropped >&7; echo "full:$?" ) 2>err
-grep -q 'Too many open files' err && echo reported; [ ! -s out ] && echo empty
+grep -Eq '(Too many open files|No file descriptors available)( [(]os error 24[)])?$' err && echo reported
+[ ! -s out ] && echo empty
 ( exec 7>out 3>/dev/null 0<&-; ulimit -n 4; echo kept >&7; echo "spare:$?" ); cat out
 ( exec 7>out 3>/dev/null 1>&-; ulimit -n 4; echo kept >&7 ); echo "closed:$?"; cat out
 """, "full:1\nreported\nempty\nspare:0\nkept\nclosed:0\nkept"

@@ -1,4 +1,5 @@
 use std::ffi::{CStr, CString};
+use std::fs::File;
 use std::ops::ControlFlow;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -33,7 +34,7 @@ pub(super) fn visit_names(
     mut visit: impl FnMut(&CStr, u8),
 ) {
     let Ok(path) = CString::new(dir) else { return };
-    let _ = read_names::<false>(&path, false, prefix, &mut |name, kind| {
+    let _ = read_names::<false>(Source::Path(&path), false, prefix, &mut |name, kind| {
         let Some(name) = name else {
             return ControlFlow::Continue(());
         };
@@ -55,23 +56,28 @@ pub(crate) fn scan(
     let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
         return ControlFlow::Continue(());
     };
-    read_names::<false>(&path, true, Prefix::Exact(prefix), visitor)
+    read_names::<false>(Source::Path(&path), true, Prefix::Exact(prefix), visitor)
         .unwrap_or(ControlFlow::Continue(()))
 }
 
 // Only a complete, successful listing may populate a reusable directory cache.
 pub(crate) fn scan_checked(
-    path: &Path,
+    dir: File,
     prefix: &[u8],
     visitor: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
 ) -> Option<ControlFlow<()>> {
-    let path = CString::new(path.as_os_str().as_bytes()).ok()?;
-    read_names::<true>(&path, true, Prefix::Exact(prefix), visitor)
+    read_names::<true>(Source::Open(dir), true, Prefix::Exact(prefix), visitor)
+}
+
+// Completion indexes the descriptor it stamped. Glob scans can open by pathname.
+enum Source<'a> {
+    Path(&'a CStr),
+    Open(File),
 }
 
 #[cfg(not(target_os = "linux"))]
 fn read_names<const CHECK_END: bool>(
-    path: &CStr,
+    source: Source<'_>,
     _interruptible: bool,
     prefix: Prefix<'_>,
     visit: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
@@ -85,7 +91,16 @@ fn read_names<const CHECK_END: bool>(
         }
     }
 
-    let stream = NonNull::new(unsafe { libc::opendir(path.as_ptr()) })?;
+    let stream = match source {
+        Source::Path(path) => NonNull::new(unsafe { libc::opendir(path.as_ptr()) })?,
+        Source::Open(dir) => {
+            use std::os::fd::{AsRawFd, IntoRawFd};
+            let stream = NonNull::new(unsafe { libc::fdopendir(dir.as_raw_fd()) })?;
+            // fdopendir takes ownership only on success.
+            let _ = dir.into_raw_fd();
+            stream
+        }
+    };
     let stream = DirectoryStream(stream);
     let errno = CHECK_END.then(|| unsafe { libc::__error() });
     loop {
@@ -120,7 +135,7 @@ fn read_names<const CHECK_END: bool>(
 
 #[cfg(target_os = "linux")]
 fn read_names<const CHECK_END: bool>(
-    path: &CStr,
+    source: Source<'_>,
     interruptible: bool,
     prefix: Prefix<'_>,
     visit: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
@@ -128,16 +143,21 @@ fn read_names<const CHECK_END: bool>(
     use std::mem::offset_of;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
-    let fd = unsafe {
-        libc::open(
-            path.as_ptr(),
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
-        )
+    let dir: OwnedFd = match source {
+        Source::Path(path) => {
+            let fd = unsafe {
+                libc::open(
+                    path.as_ptr(),
+                    libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+                )
+            };
+            if fd < 0 {
+                return None;
+            }
+            unsafe { OwnedFd::from_raw_fd(fd) }
+        }
+        Source::Open(dir) => dir.into(),
     };
-    if fd < 0 {
-        return None;
-    }
-    let dir = unsafe { OwnedFd::from_raw_fd(fd) };
     let mut bytes = std::mem::MaybeUninit::<[u8; 32768]>::uninit();
     // A queued key can finish completion after a few entries. Fetch the first
     // 2 KiB promptly, then amortize syscalls over 32 KiB for a full traversal.

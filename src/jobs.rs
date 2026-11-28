@@ -643,12 +643,22 @@ impl Jobs {
         false
     }
 
-    pub(crate) fn leave_for_exec(&mut self) -> bool {
-        if !self.restore_initial_group() {
-            return false;
+    pub(crate) fn resume_after_failed_exec(&mut self) {
+        // exec can temporarily redirect stderr to a different terminal. The
+        // close-on-exec descriptor still identifies our controlling terminal.
+        if let Some(tty) = self.terminal() {
+            let fd = tty.fd.as_raw_fd();
+            if unsafe { libc::tcgetpgrp(fd) == tty.original_group }
+                && unsafe { libc::setpgid(0, tty.shell_group) } == 0
+            {
+                give_terminal(fd, tty.shell_group);
+                if unsafe { libc::tcgetpgrp(fd) == tty.shell_group } {
+                    return;
+                }
+            }
         }
         self.tty = None;
-        true
+        self.monitor = false;
     }
 
     pub(crate) fn detach_started(&mut self, pids: impl Iterator<Item = pid_t>) {

@@ -96,6 +96,21 @@ class ShellTests(unittest.TestCase):
                             if (result.returncode, result.stdout, os.tcgetpgrp(0)) != (
                                     0, expected, original):
                                 os._exit(1)
+                        if shell == TONARI:
+                            other_master, other_slave = pty.openpty()
+                            try:
+                                result = subprocess.run(
+                                    [shell, "--norc", "-ic",
+                                     'exec ./missing-program 2>"$1"; shopt -qo monitor; echo "$?"',
+                                     "sh", os.ttyname(other_slave)],
+                                    cwd=self.cwd, env=self.env, stdin=subprocess.DEVNULL,
+                                    capture_output=True, timeout=4)
+                                if (result.returncode, result.stdout, os.tcgetpgrp(0)) != (
+                                        0, b"0\n", original):
+                                    os._exit(3)
+                            finally:
+                                os.close(other_master)
+                                os.close(other_slave)
                         os._exit(0)
                     except BaseException:
                         os._exit(2)
@@ -1259,6 +1274,37 @@ printf '%s/%s/%s/%s' "${!a[*]}" "${a[7]}" "${a[9]}" "${#a[2000]}" """
         cmd.rename(directory / "probe-beta")
         complete(b"probe-al", b"probe-al")
         complete(b"probe-be", b"probe-beta ")
+
+    def test_command_completion_through_path_aliases(self):
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell), tempfile.TemporaryDirectory() as root:
+                work = Path(root)
+                for dirname, filename in (("first", "zzcmd-a"), ("other", "zzcmd-b")):
+                    directory = work / dirname
+                    directory.mkdir()
+                    (directory / filename).touch(mode=0o700)
+                # Same number and length of names, same mtime, different inodes.
+                mtime = (work / "first").stat().st_mtime_ns
+                os.utime(work / "other", ns=(mtime, mtime))
+                (work / "alias").symlink_to("first")
+                script = """PATH=first:other:alias:first
+compgen -c zzcmd-
+compgen -c zzcmd-
+EXECIGNORE='first/*'
+compgen -c zzcmd-
+/bin/rm alias && /bin/ln -s other alias
+compgen -c zzcmd-
+/bin/mv other/zzcmd-b other/zzcmd-c
+compgen -c zzcmd-
+/bin/chmod 600 other/zzcmd-c
+compgen -c zzcmd- || echo none
+"""
+                p = subprocess.run([shell, "-c", script], cwd=work, env=self.env,
+                                   capture_output=True, timeout=5)
+                self.assertEqual((p.returncode, p.stderr, p.stdout.splitlines()), (0, b"",
+                    [b"zzcmd-a", b"zzcmd-b", b"zzcmd-a", b"zzcmd-a"] * 2
+                    + [b"zzcmd-b", b"zzcmd-a", b"zzcmd-b", b"zzcmd-b",
+                       b"zzcmd-c", b"zzcmd-c", b"none"]))
 
     def test_function_source_after_changing_arg0(self):
         source = "shopt -s extdebug\na() { :; }\nBASH_ARGV0=changed\nb() { :; }\ndeclare -F a b"

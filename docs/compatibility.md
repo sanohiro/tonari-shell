@@ -516,3 +516,7 @@ The comparison exits nonzero if a name disappears, a matching observation or tim
 Tonari bounds name-reference chains at 32 lookup steps. At the limit it reports a proven cycle separately from a depth limit on a finite chain. Both cases leave the referenced binding unchanged.
 
 名前参照は最大 32 段で探索を打ち切る。循環を確認できた場合と、有限の長い参照で上限に達した場合で診断を分け、どちらも参照先を変更しない。
+
+When an interactive `exec ./missing-program 2>"$other_pty"` fails, the shell still owns its original controlling terminal. Tonari keeps job control active, so `shopt -qo monitor` returns 0. GNU Bash 5.3.20 disables it in this case. The regression uses two private pseudo-terminals and also checks the foreground group after the shell exits. [Terminal ownership regression](../tests/shell.py)
+
+対話中の `exec` が失敗し、そのコマンドの標準エラーを別の端末に向けていた場合でも、実際の制御端末は元のままである。Tonari はジョブ制御を維持する。GNU Bash 5.3.20 ではこの条件で無効になる。

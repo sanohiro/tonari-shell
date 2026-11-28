@@ -16,6 +16,10 @@ PR #58 のマージ直後の main を基準に、端末、言語処理、プロ�
 
 端末のない非対話起動でも、明示した `-m` でジョブのプロセスグループを作るのは Tonari の仕様である。親と同じフォアグラウンドグループから起動した対話シェルでは、`exec` に成功しても親に端末が戻り、失敗してもそのシェルでジョブ制御を続けられることを専用 PTY で確かめる。
 
+On Linux, Yash case 8116 was the first program in its sequence to leave the terminal pointing at the wrong group. That broke SIGINT expectations in later cases even though each passed on a fresh PTY. All 61 cases from 8116 to 8176 passed on one PTY after the repair. A second regression sends diagnostics to another PTY during a failed replacement. Recovery uses the original close-on-exec descriptor. In 31 interleaved trials on a physical M1, launching an interactive shell through successful `exec /usr/bin/true` took 6.80 / 6.69 / 13.05 ms on main / candidate / GNU Bash 5.3.20. Failed replacement followed by `:` took 5.85 / 5.98 / 12.31 ms. The driver restored the controller's foreground group between trials if needed.
+
+Linux の信号試験は、単独で通るケースでも前のケースが端末を返さないと失敗していた。同じ PTY を引き継ぐ 61 件で修正を確認した。`exec` 失敗時に標準エラーを別端末へ向けた場合も元の端末を保持する。[GNU Bash との差と回帰試験](compatibility.md)
+
 ## Terminal input / 対話入力
 
 The screen oracle records each PTY read before decoding it. It distinguishes the first output from the frame showing the expected text on both sides of the caret, then separately verifies the shell's entire edit buffer. A negative control feeds a plausible marker-only frame with missing text. For a scrolled line the observer requires a contiguous suffix of the expected input and visible context. Each timing distribution has 100 observations. [PTY driver](../tools/ci/whole-editor.py) · [Edit, resize, completion and foreground-input regressions](../tests/review_whole_editor.py)
@@ -29,3 +33,35 @@ On a physical M1, Time Profiler took 109 samples in an independent baseline run 
 The review also followed atomic signal notification into the interpreter, private descriptor relocation and close-on-exec, unnamed temporary files and their fallback, distinctions between arithmetic data and parsed source, directory ownership of physical paths, and Linux allocator registration before the first allocation. The ordinary regression suites exercise state restoration, interrupted waits, literal data, read boundaries and file contents. A short fallback expression flagged by Clippy in environment construction already borrows the default via `Cow`. The parser's static error messages also need no heap allocation. Neither finding justified a change.
 
 M1 の CPU プロファイルと逆アセンブルでは、最も時間のかかった走査に既にベクトル命令が出ていた。追記済み文字列の再走査そのものを省いた。プロセスの待機は別の System Trace で測定した。シグナル通知・一時ファイル・非継承 FD・算術展開・アロケータの fork 前提もソースを追った。ハードウェアカウンターはホストで取得できたものを記録した。全入力や全スケジュールを網羅する証明ではない。
+
+## Native results at fd906ad / fd906ad の実機測定
+
+All 11 jobs passed in the comparison of `1754509` and `fd906ad`. The macOS 15.8.2 runner used a three-vCPU Apple M1 VM and GNU Bash 5.3.20. Ubuntu 24.04 used four x86-64 vCPUs and GNU Bash 5.2.21. Its startup, terminal and process jobs ran on Intel Xeon 6975P-C hosts. Language and profiling ran on AMD EPYC 7763 and 9V74 hosts respectively. The arm64 Mach-O grew from 2,129,648 to 2,146,176 bytes and linked only libSystem. The stripped x86-64 static PIE grew from 2,808,216 to 2,819,448 bytes. [Run and artifacts](https://github.com/sanohiro/tonari-shell/actions/runs/46167162358)
+
+**Terminal latency in milliseconds.** Each cell gives p95 / p99 / maximum across 100 observations of the candidate. The first response and the frame containing the expected text and caret were measured independently. The IME case sends committed Japanese text. [PTY driver at fd906ad](https://github.com/sanohiro/tonari-shell/blob/fd906ad/tools/ci/whole-editor.py)
+
+| Input / 操作 | macOS first | macOS frame | Linux first | Linux frame |
+|---|---:|---:|---:|---:|
+| Single ASCII key | 0.224 / 1.045 / 2.514 | 0.224 / 1.045 / 2.514 | 0.066 / 0.174 / 0.288 | 0.066 / 0.174 / 0.288 |
+| Mid-line insertion | 0.319 / 0.624 / 0.676 | 0.319 / 0.624 / 0.796 | 0.102 / 0.291 / 0.373 | 0.102 / 0.291 / 0.373 |
+| Long ASCII insertion | 1.174 / 1.483 / 4.056 | 7.668 / 9.313 / 9.941 | 0.142 / 0.177 / 0.335 | 1.213 / 1.260 / 1.422 |
+| Committed Japanese text | 1.363 / 1.754 / 7.146 | 7.272 / 10.308 / 12.870 | 0.152 / 0.161 / 0.188 | 1.070 / 1.128 / 1.167 |
+| Tab completion | 2.795 / 2.884 / 2.889 | 2.795 / 2.884 / 2.889 | 1.136 / 1.205 / 1.285 | 1.136 / 1.205 / 1.285 |
+
+On macOS the Japanese frame p99 rose from 7.895 to 10.308 ms versus the baseline. Bash recorded 19.934 ms. Linux Bash completed the Tab frame sooner, with p99 1.005 ms. Pinning the Linux editor and observer to one allowed CPU raised ASCII first-response p95 / p99 / max to 1.360 / 1.402 / 1.502 ms and frame latency to 1.498 / 1.579 / 1.591 ms. Japanese frame latency on one CPU was 1.380 / 1.436 / 1.507 ms. The candidate passed the frame and edit-buffer checks. Bash failed the Linux multiline and split-Home oracles, and the baseline failed split-Home on both systems. Those trials have no comparable timing.
+
+**Startup and pathname expansion.** Values are candidate / Bash medians in milliseconds, with 15 measured runs per shell. The glob fixture contains 2,048 names and runs in the C locale. [Startup and glob driver at fd906ad](https://github.com/sanohiro/tonari-shell/blob/fd906ad/tools/ci/whole-startup.py)
+
+| Measurement / 項目 | macOS | Linux |
+|---|---:|---:|
+| Noninteractive `-c :`, launch through exit | 5.067 / 10.761 | 0.254 / 0.643 |
+| Clean interactive launch to prompt | 4.052 / 12.264 | 0.503 / 1.011 |
+| Clean first command after prompt | 0.189 / 0.278 | 0.077 / 0.089 |
+| Login prompt, system profile and 80-function user rc | 5.040 / 10.321 | 9.966 / 10.584 |
+| Login prompt with profiles disabled | 3.289 / 8.270 | 0.489 / 1.035 |
+| One glob | 8.337 / 234.183 | 1.143 / 1.768 |
+| Four globs in one shell | 9.873 / 574.604 | 2.861 / 4.617 |
+
+The Linux login miss against the two-thirds target included five profile utilities in a separate syscall trace. The clean trace recorded only the shell's exec. Linux three-stage pipelines at 32 repetitions also missed at 19.399 / 24.548 ms. The 1 MiB slow-reader test took 33.282 / 37.092 ms on Linux, with a direct OS pipeline at 32.001 ms. On macOS the three times were 204.498 / 205.249 / 209.444 ms. For a CPU-bound control, appending and measuring a growing Japanese string 24,000 times reduced Linux user task-clock from 24.47 to 4.80 ms. Hardware cycles, instructions and branch events were unavailable. Bash 5.2 lacked numeric GLOBSORT, so its Linux numeric-sort timings are omitted.
+
+両 OS のネイティブ実行で 11 ジョブが完走した。端末の表は各 100 回の先頭応答と、文字・カーソルを確認したフレームの p95 / p99 / 最大値。macOS の日本語入力は先頭描画後も処理が続き、フレーム p99 は旧版 7.895 ms から 10.308 ms に増えた。Linux の 1 CPU 制限では長い ASCII 入力のフレーム p99 が 1.579 ms になった。起動表ではプロンプトと最初のコマンドを分けている。Linux のログインではシステムプロファイルが外部コマンドを 5 本起動し、3 段パイプラインも Bash 比 2/3 の目標を超えた。遅い読み手には同じ読み手を用いた OS 直接実行、文字数計算には task-clock を対照として用いた。数値はすべて中間リビジョン `fd906ad` の結果である。

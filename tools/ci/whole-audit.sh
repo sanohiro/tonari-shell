@@ -16,7 +16,7 @@ fi
 wc -c "$baseline" "$current" > "$out/binary-sizes.txt"
 file "$current" "$ref" > "$out/format.txt"
 export REFERENCE_BASH="$ref" PYTHONPATH="$PWD/tools"
-if [[ $SUITE == whole-editor || $SUITE == whole-keys ]]; then
+if [[ $SUITE == whole-editor || $SUITE == whole-keys || $SUITE == whole-completion ]]; then
   python3 -m venv "$RUNNER_TEMP/editor-env"
   python="$RUNNER_TEMP/editor-env/bin/python"
   "$python" -m pip install pyte==0.8.2
@@ -53,6 +53,10 @@ case "$SUITE" in
     fi
     python3 tools/bench_editor_input.py "$baseline" "$current" "$ref" --entries 100000 --runs 11 --mixed-history --case Ctrl-R --case Miss --case Tab --samples "$out/large-history.jsonl" > "$out/large-history.txt"
     python3 tools/bench_completion.py "$baseline" "$current" --bash "$ref" --command-cache --runs 15 > "$out/command-cache.txt"
+    ;;
+  whole-completion)
+    python3 tests/shell.py "$current" -v -k command_completion_through_path_aliases
+    "$python" tools/ci/completion-alias.py "main=$baseline" "candidate=$current" "bash=$ref" --runs 50 > "$out/completion-alias.txt"
     ;;
   whole-keys)
     cases=(--case single-key --case single-emoji --case mid-insert --case mid-delete --case mid-backspace --case mid-left)
