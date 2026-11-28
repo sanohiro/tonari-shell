@@ -32,6 +32,12 @@ When reviewing a benchmark suite, inspect the implementation reached by every pu
 
 ベンチマークの見直しでは、目標を達成済みの項目も含め、公開した各ケースが通る実装を確認する。該当関数、入力が実際に行わせる処理、コピー・解析・探索・割り当て・システムコールを省けるかを記録する。変更は元のベンチと Bash の動作照合で検証し、実行できない試験やツールも明記する。
 
+## Independent review / 独立レビュー
+
+Before merging every PR, use the [Tonari review skill](.agents/skills/tonari-review/SKILL.md) and delegate the merge-base diff and its impact to a fresh OpenAI `review-agent`. For critical parser, expansion, process/FD/signal, input, history or completion changes, and before closing any subsystem audit, also delegate related **unchanged** source to a separate reviewer without inherited conversation. Obtain source-derived hypotheses before disclosing prior findings. Verify actionable findings and record their disposition and evidence before closing.
+
+各 PR のマージ前に差分と影響先を独立レビューする。構文解析・展開・プロセス・FD・シグナル・入力・履歴・補完の重要な変更時と、分野別監査を閉じる前には、未変更の関連コードも別のレビュアーに渡す。仮説を受け取ってから既知の所見と照合し、対応と検証結果を記録する。[日本語の運用手順](docs/review.ja.md)
+
 # Intentional differences from Bash
 
 Use Bash as the compatibility reference for supported scripts and tool interfaces. When a Bash behavior breaks a documented Tonari guarantee, keep the Tonari behavior. Record the input, observed Bash and Tonari outputs, and rationale in the compatibility guide and add a regression test. Validate Tonari extensions against their own documented result. Keep observed Bash version differences and outstanding implementation gaps identifiable in the audit.

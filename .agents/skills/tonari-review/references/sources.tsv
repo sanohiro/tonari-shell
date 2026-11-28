@@ -1,0 +1,10 @@
+name	repository	revision	path	license
+review-agent	openai/codex	ccf9be8cc458bd6b8336fe84d68d8893f2691a5e	codex-rs/skills/src/assets/samples/review-agent	Apache-2.0
+rust-performance	po4yka/rust-skills	0614934d8f6fb96a6a7cf43c8934af130cdbac0a	skills/rust-performance	BSD-3-Clause
+rust-hot-path	po4yka/rust-skills	0614934d8f6fb96a6a7cf43c8934af130cdbac0a	skills/rust-hot-path	BSD-3-Clause
+rust-best-practices	apollographql/apollo-mcp-server	efeeae43e2cde3fe25decff7192033c2f83c1bfd	.agents/skills/rust-best-practices	MIT
+linux-perf	intel/skills	a24b1d17aa1ad173265cb5e0bcc8dd0d6183bd61	skills/linux-perf	MIT
+instruments-profiling	steipete/agent-scripts	a72e300fa91790ede3c51eccf923658a7c8b6888	skills/instruments-profiling	MIT
+profiler-guide	robtaylor/apple-profiler	252aa0acafc477419566842527762a4b2f774c0f	skills/profiler-guide	MIT
+bash-ops	0xDarkMatter/claude-mods	25a03abe26f6c595243a81104e831ab8c597bdbf	skills/bash-ops	MIT
+posix-shell-pro	sickn33/agentic-awesome-skills	ee8ccaad5d3e1ffc7b31dd236e54e0aadf0bba3b	skills/posix-shell-pro	MIT
