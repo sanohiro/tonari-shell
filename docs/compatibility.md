@@ -1,5 +1,13 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## Independent review follow-up
+
+* `PWD` on startup must name the current directory. Tonari retains a valid absolute logical symlink spelling and supplies the corrected value to children when the inherited spelling is stale. A failed directory-stack rotation preserves the stack. In a removed cwd, `cd -P .` returns 0 and `cd -Pe .` returns 1. When no absolute name exists, Tonari leaves PWD unset until a successful change supplies one. GNU Bash 5.3.20 can retain a vanished path with an appended `/.`.
+* In `declare -A a=([k]=old); a=([k]=one [k]+=two)`, Tonari appends to the immediately preceding assignment and stores `onetwo`. GNU Bash 5.3.20 appends to the replaced table and stores `oldtwo`. In a flat list such as `a=(key [literal]=text)`, both shells store the complete value `[literal]=text`. For direct flat-pair values, Tonari expands process substitutions and a tilde after an unquoted colon, as in Debian Bash 5.2.37 and GNU Bash 5.3.20. Ubuntu 24.04 Bash 5.2.21 retains the literal spelling in the checked examples. Quoting and declaration operands have separate witnesses. [Array tests](../tests/review_language.py)
+* With case and separator folding enabled, Tonari preserves a typed hyphen if both hyphen and underscore spellings match. For `: case-` with files `case-word` and `case_file`, GNU Bash 5.3.20 shortens the draft to `: case`. Tonari also expands an unambiguous abbreviated parent directory. When completing a variable name immediately before its closing brace, Tonari preserves that brace. In a quoted word with `PROBEAA=correct`, Bash can insert a second brace and turn the result into `correct}`. [Terminal tests](../tests/review_interactive.py)
+
+失敗したディレクトリ移動では元のスタックを保つ。削除済みの作業ディレクトリには実在しない絶対パスを割り当てない。連想配列の同一キーへの追記は記述順に評価する。補完は入力済みの区切りや閉じ括弧を保ち、ディレクトリの省略入力にも対応する。[ディレクトリ試験](../tests/shell.py)
+
 ## Startup, expansion and persistent history / 起動・展開・履歴の保存
 
 Tonari supports both Debian's Bash 5.2 and Bash 5.3 startup files. With an unset HOME, the account database supplies the user's home. An explicitly empty HOME disables implicit per-user paths. An explicit rcfile still works. For filename completion, `~//name` stays under the home directory. With an empty HOME, `~/usr` expands to `/usr`. A noninteractive top-level command from SSH can read bashrc. Privileged startup suppresses environment-supplied functions and options. When real and effective IDs differ Tonari drops elevated IDs, or refuses startup if asked to retain them with `-p`. A normal login, sudo or su session with matching IDs can use `-p`. The shell retains the `mailwarn` and `noexpand_translation` option settings for rcfiles. Mail-spool polling and gettext catalogs are outside its supported integrations.

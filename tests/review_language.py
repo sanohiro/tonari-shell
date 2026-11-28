@@ -213,6 +213,13 @@ mapfile -t r <<< data; r+=("${src[@]}"); printf '<%s>' "${r[@]}" """,
                 literal = (0, b'<[<(printf x)]=<(printf y)><literal><done>')
                 reference = literal if release == "5.2.21" else expected
                 assert results == [expected, reference], (release, results)
+            elif name == "flat pair tilde contexts" and release == "5.2.21":
+                modern = (f'<path=bin:~/tools><{scratch}:~/b><path=bin:{scratch}/tools>'
+                          f'<path=~/bin:{scratch}/tools><bin:{scratch}/tools><literal:~><data>'
+                          f'<{scratch}:{scratch}/b><x:~/a><x:~/b><path=bin:{scratch}/tools>').encode()
+                old = (b'<path=bin:~/tools><~:~/b><path=bin:~/tools><path=~/bin:~/tools>'
+                       b'<bin:~/tools><literal:~><data><~:~/b><x:~/a><x:~/b><path=bin:~/tools>')
+                assert results == [(0, modern), (0, old)], (release, results)
             elif results[0] != results[1]:
                 raise AssertionError(f"{name}: {results!r}; {observed[0].stderr!r}")
             print(f"ok {name}")

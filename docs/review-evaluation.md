@@ -15,9 +15,9 @@ Initial result **2/3 full**, with one partial. The revised procedure requires an
 
 ### Findings beyond the answer key
 
-The coordinator replayed these independent witnesses against `c70e173` and the same GNU Bash. They are open shell findings for follow-up. The review integration changes development tooling.
+The coordinator replayed these independent witnesses against `c70e173` and the same GNU Bash. The table records the observed failures on that snapshot. [PR #57](https://github.com/sanohiro/tonari-shell/pull/57) fixes all four in the shell and adds regressions.
 
-| Witness | Observable result on the current release |
+| Witness | Observable result before the fix |
 | --- | --- |
 | `declare -A m=(first [bracket]=word)`, print `"${m[first]}"` | Tonari prints `word`; Bash prints `[bracket]=word`. Quoting the value makes the outputs agree. |
 | Start in directory `real` with inherited `PWD` naming a different, missing directory. Print `"$PWD"`, run `pwd` and `/usr/bin/printenv PWD`. | Tonari repairs the shell's view but passes the stale inherited path to the external command. Bash reports the actual directory for all three. |
@@ -40,6 +40,12 @@ The coordinator checked the release witnesses, raw sample series and correspondi
 **False positives.** No promoted diagnosis in this inventory was contradicted on its reported historical input. Two additional source-only array ideas (a temporary field vector per literal and conversion of packed mapfile records) lack performance witnesses and were kept out of the confirmed results. Rejected hypotheses included an OLDPWD difference on ordinary `pushd +0`, an empty-stack difference for `pushd -n`, parent-state pollution from POSIX `$(pwd)`, and attribute conversion by `compgen -V`. This evaluation cannot estimate a false-positive rate for unreviewed paths.
 
 The coordinator also checked GNU Bash 5.3 with patches through 020. The directory stack delegates its directory change to `cd_builtin` in `builtins/pushd.def`; startup rebinds the validated directory in `set_pwd` in `variables.c`. POSIX specifies how the shell initializes PWD from an inherited value. Arrays, shopt and pushd are Bash interfaces. [GNU Bash patches](https://ftp.gnu.org/gnu/bash/bash-5.3-patches/) · [POSIX shell variables](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html)
+
+### Runtime follow-up
+
+The release checks now assert the complete associative value, child-visible PWD, next seeded random value and option listings after enabling **and** disabling each option. An additional source pass found that printing with `declare -gp` selected a hidden outer binding, that completion exposed declared-but-unassigned variables, and that a later assignment could change earlier quoted fields from a live associative table. The witnesses compare argument counts, visible bindings, exit status and the subsequent shell state. The directory tests check that a failed change preserves the stack. The completion tests inspect the draft at the insertion point and distinguish characters supplied by the user or a callback from separators added by the editor. [Compatibility decisions](compatibility.md#independent-review-follow-up) · [Native measurements](benchmarks.md#independent-review-follow-up)
+
+当時の表に記録した4件をシェル本体で修正した。再レビューで見つけた変数の可視性、動的配列の展開順、カーソル途中の補完にも回帰試験を加えた。履歴上の指摘のうち、すでに修正された経路は再現入力で確認した。[修正 PR](https://github.com/sanohiro/tonari-shell/pull/57)
 
 ### Profiler and source checks
 
