@@ -202,7 +202,22 @@ pub enum CaseEnd {
     Retest,
 }
 
-pub type CaseArm = (Vec<CasePattern>, Vec<Statement>, CaseEnd);
+#[derive(Debug)]
+pub enum CasePatterns {
+    One(CasePattern),
+    Many(Vec<CasePattern>),
+}
+
+impl CasePatterns {
+    pub(crate) fn iter(&self) -> std::slice::Iter<'_, CasePattern> {
+        match self {
+            Self::One(p) => std::slice::from_ref(p).iter(),
+            Self::Many(p) => p.iter(),
+        }
+    }
+}
+
+pub type CaseArm = (CasePatterns, Vec<Statement>, CaseEnd);
 
 #[derive(Debug)]
 pub struct FunctionDefinition {

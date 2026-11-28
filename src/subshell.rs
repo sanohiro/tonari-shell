@@ -615,7 +615,7 @@ fn capture_query(
             },
             _ => return None,
         };
-        session.write_pwd(physical, &mut output).ok()?;
+        session.capture_pwd(physical, &mut output).ok()?;
         0
     } else {
         if name == "command"
@@ -625,6 +625,9 @@ fn capture_query(
                 })
             })
         {
+            return None;
+        }
+        if name == "command" && session.posix {
             return None;
         }
         let words = capture_arguments(&cmd.words, session, last)?;

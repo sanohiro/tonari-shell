@@ -799,6 +799,15 @@ fn paths(
             .split(|c: char| !c.is_ascii_alphanumeric() && !matches!(c, '_' | '.' | '-'))
             .next()
             .unwrap_or("");
+        let folded_suffix = options
+            .nocaseglob
+            .then(|| part.strip_prefix(literal_prefix)?.strip_prefix('*'))
+            .flatten()
+            .filter(|s| {
+                s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+                    && locale != CharacterLocale::Turkic
+            });
         // A final dot followed only by ASCII letters or digits is literal,
         // even if earlier characters require fnmatch. Check it once per name.
         let required_extension = if matches!(matcher, Some(Matcher::Native(_))) {
@@ -818,21 +827,23 @@ fn paths(
                 !rest.is_empty(),
                 options.globskipdots || options.ignore.is_some(),
                 if options.nocaseglob {
-                    b""
+                    directory::Prefix::Folded(literal_prefix.as_bytes())
                 } else {
-                    literal_prefix.as_bytes()
+                    directory::Prefix::Exact(literal_prefix.as_bytes())
                 },
                 |raw, _| {
-                    if options.nocaseglob
-                        && !possible_folded_prefix(raw.to_bytes(), literal_prefix.as_bytes())
-                    {
-                        return;
-                    }
                     if required_extension.is_some_and(|suffix| !raw.to_bytes().ends_with(suffix)) {
                         return;
                     }
                     let period = !options.dotglob || matches!(raw.to_bytes(), b"." | b"..");
                     let matches = match &extended {
+                        Some(_) if folded_suffix.is_some() && raw.to_bytes().is_ascii() => {
+                            let bytes = raw.to_bytes();
+                            let suffix = folded_suffix.unwrap().as_bytes();
+                            (!period || !bytes.starts_with(b".") || part.starts_with('.'))
+                                && bytes.len() >= literal_prefix.len() + suffix.len()
+                                && bytes[bytes.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+                        }
                         Some(group) => raw
                             .to_str()
                             .is_ok_and(|s| group.matches_in_locale::<false>(s, period)),
@@ -915,38 +926,45 @@ fn descendants(
     pending.push(prefix);
     while let Some(dir) = pending.pop() {
         let base = if dir.is_empty() { "." } else { &dir };
-        visit_names(base, !terminal || trailing, true, b"", |raw, kind| {
-            if !dotglob && raw.to_bytes().first() == Some(&b'.') {
-                return;
-            }
-            let Ok(name) = raw.to_str() else { return };
-            let mut path = String::with_capacity(dir.len() + name.len() + 1);
-            path.push_str(&dir);
-            path.push_str(name);
-            let (is_dir, is_link) = if kind == libc::DT_UNKNOWN {
-                let Ok(info) = fs::symlink_metadata(&path) else {
+        visit_names(
+            base,
+            !terminal || trailing,
+            true,
+            directory::Prefix::Exact(b""),
+            |raw, kind| {
+                if !dotglob && raw.to_bytes().first() == Some(&b'.') {
                     return;
-                };
-                (info.is_dir(), info.is_symlink())
-            } else {
-                (kind == libc::DT_DIR, kind == libc::DT_LNK)
-            };
-            if is_dir {
-                if terminal && !trailing {
-                    found.push(path.clone());
-                    path.push('/');
-                } else {
-                    path.push('/');
-                    found.push(path.clone());
                 }
-                pending.push(path);
-            } else if terminal && !trailing {
-                found.push(path);
-            } else if (terminal || prefixed) && is_link && std::path::Path::new(&path).is_dir() {
-                path.push('/');
-                found.push(path);
-            }
-        });
+                let Ok(name) = raw.to_str() else { return };
+                let mut path = String::with_capacity(dir.len() + name.len() + 1);
+                path.push_str(&dir);
+                path.push_str(name);
+                let (is_dir, is_link) = if kind == libc::DT_UNKNOWN {
+                    let Ok(info) = fs::symlink_metadata(&path) else {
+                        return;
+                    };
+                    (info.is_dir(), info.is_symlink())
+                } else {
+                    (kind == libc::DT_DIR, kind == libc::DT_LNK)
+                };
+                if is_dir {
+                    if terminal && !trailing {
+                        found.push(path.clone());
+                        path.push('/');
+                    } else {
+                        path.push('/');
+                        found.push(path.clone());
+                    }
+                    pending.push(path);
+                } else if terminal && !trailing {
+                    found.push(path);
+                } else if (terminal || prefixed) && is_link && std::path::Path::new(&path).is_dir()
+                {
+                    path.push('/');
+                    found.push(path);
+                }
+            },
+        );
     }
 }
 

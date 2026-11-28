@@ -93,7 +93,7 @@ fn output_arm<'a>(statement: &'a Statement, env: &mut Expansion<'_>) -> Option<&
                 if *end != CaseEnd::Stop {
                     return None;
                 }
-                for pattern in patterns {
+                for pattern in patterns.iter() {
                     let CasePattern::Fixed(matcher) = pattern else {
                         return None;
                     };

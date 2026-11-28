@@ -507,19 +507,56 @@ impl Spec {
             && self.flags & !(flag_bit(b'0') | flag_bit(b'+')) == 0
             && b"diuxXo".contains(&conversion)
         {
-            let width = self.width as usize;
+            let signed = matches!(conversion, b'd' | b'i');
+            let (value, sign) = if signed {
+                let value = args.signed();
+                (
+                    value.unsigned_abs(),
+                    if value < 0 {
+                        Some(b'-')
+                    } else if self.has(b'+') {
+                        Some(b'+')
+                    } else {
+                        None
+                    },
+                )
+            } else {
+                (args.unsigned(), None)
+            };
+            let mut decimal = itoa::Buffer::new();
+            let mut digits = [0; 22]; // ceil(64/3) octal digits
+            let number = if signed || conversion == b'u' {
+                decimal.format(value).as_bytes()
+            } else {
+                let alphabet = if conversion == b'X' {
+                    b"0123456789ABCDEF"
+                } else {
+                    b"0123456789abcdef"
+                };
+                let shift = if conversion == b'o' { 3 } else { 4 };
+                let mask = (1 << shift) - 1;
+                let mut n = value;
+                let mut i = digits.len();
+                loop {
+                    i -= 1;
+                    digits[i] = alphabet[(n & mask) as usize];
+                    n >>= shift;
+                    if n == 0 {
+                        break;
+                    }
+                }
+                &digits[i..]
+            };
+            let length = number.len() + usize::from(sign.is_some());
+            let padding = (self.width as usize).saturating_sub(length);
             output
-                .try_reserve(width.max(24))
+                .try_reserve(length + padding)
                 .map_err(|_| "field too large")?;
-            match conversion {
-                b'd' | b'i' if self.has(b'+') => write!(output, "{:+0width$}", args.signed()),
-                b'd' | b'i' => write!(output, "{:0width$}", args.signed()),
-                b'u' => write!(output, "{:0width$}", args.unsigned()),
-                b'x' => write!(output, "{:0width$x}", args.unsigned()),
-                b'X' => write!(output, "{:0width$X}", args.unsigned()),
-                _ => write!(output, "{:0width$o}", args.unsigned()),
+            if let Some(sign) = sign {
+                output.push(sign);
             }
-            .expect("writing to Vec cannot fail");
+            output.resize(output.len() + padding, b'0');
+            output.extend_from_slice(number);
             return Ok(());
         }
         // Only a validated numeric conversion reaches libc. Build its exact

@@ -290,18 +290,20 @@ fn print_variables(
         && !var.dynamic
         && var.elements.is_none()
     {
-        let mut bytes = Vec::with_capacity(64);
-        let result = print_attribute(
-            &mut bytes,
+        const INLINE_OUTPUT: usize = 256;
+        let mut buf = [0; INLINE_OUTPUT];
+        let mut dest = &mut buf[..];
+        if print_attribute(
+            &mut dest,
             name,
             var,
             (attribute && session.posix).then_some(command),
-        );
-        return crate::Flow::Continue(if result.is_err() {
-            1
-        } else {
-            crate::builtins::write_stdout_for(command, &bytes)
-        });
+        )
+        .is_ok()
+        {
+            let used = INLINE_OUTPUT - dest.len();
+            return crate::Flow::Continue(crate::builtins::write_stdout_for(command, &buf[..used]));
+        }
     }
     let mut out = crate::builtins::listing_stdout(command);
     let mut status = 0;

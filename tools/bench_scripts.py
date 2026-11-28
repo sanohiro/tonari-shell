@@ -63,6 +63,12 @@ CASES = {
            ("test", 'local a=$1; if [ "$a" = 49 ]; then echo yes; else echo no; fi', "yes"),
            ("glob", 'if [[ $1 == 4* ]]; then echo yes; else echo no; fi', "yes")]},
     "r7-source-case": ("".join(f"f{k}() {{\n case $1 in\n a) echo a;;\n b|c) echo bc;;\n esac\n}}\n" for k in range(400)) + "f399 c", "bc"),
+    "r7-control-source": eval_loop(". ./small.sh", 'echo "$v"', "ok", count=200),
+    "r7-control-files": ('cd brackets; for ((i=0;i<20;i++)); do compgen -f file_ >/dev/null || exit; done; echo "$i"', "20"),
+    "r7-control-process": ("for ((i=0;i<50;i++)); do exec 3< <(echo value; exit 7); p=$!; "
+                           'IFS= read -ru3 v; wait "$p"; rc=$?; exec 3<&-; done; echo "$v/$rc"', "value/7"),
+    "r7-control-names": eval_loop('a=("${!pvar_@}")', 'echo "${#a[@]}"', "1000",
+                                  'for ((i=0;i<1000;i++)); do printf -v "pvar_$i" %s x; done', 100),
     "r7-trim": eval_loop('x=${s##*tail}', 'echo "$x"', "ok", "printf -v s '%65536s' ''; s+=tailok", 500),
     "r7-replace": eval_loop('x=${s//0000/1111}', 'echo "${#x} ${x: -4}"', "65536 1111",
                             "printf -v s '%065536d' 0", 20),
@@ -754,12 +760,14 @@ def main():
     with tempfile.TemporaryDirectory() as temp:
         home = Path(temp)
         env = {"HOME": temp, "PATH": "/usr/bin:/bin", "LC_ALL": "C"}
+        if not args.case or "r7-control-source" in args.case:
+            (home / "small.sh").write_text("v=ok\n")
         if not args.case or "review-read-file" in args.case:
             (home / "short-records").write_bytes(b"0123456789" * 2000)
         (home / "rows").write_text("".join(f"record {i}\n" for i in range(2000)))
         if not args.case or "source-functions-repeat" in args.case:
             (home / "functions.sh").write_text(function_source())
-        if not args.case or {"glob-bracket-list", "glob-ignore-simple-class", "runtime-glob-prefix", "runtime-glob-nocase", "runtime-glob-ext"}.intersection(args.case):
+        if not args.case or {"r7-control-files", "glob-bracket-list", "glob-ignore-simple-class", "runtime-glob-prefix", "runtime-glob-nocase", "runtime-glob-ext"}.intersection(args.case):
             directory = home / "brackets"
             directory.mkdir()
             for i in range(1000):
@@ -842,6 +850,7 @@ def main():
                 print("cdable-vars: previous shell lacks the option", flush=True)
                 participants = [(name, shell) for name, shell in shells if name != "Previous"]
             if args.spawn_control and case in (
+                "null-builtin-out", "r7-control-source", "r7-control-files",
                 "external", "external-env", "redirect-stderr", "pipeline", "merged-pipeline",
                 "merged-pipeline-redirect", "builtin-merged-pipeline",
                 "background-subshell-wait", "descriptor-moves", "external-substitutions", "runtime-file",

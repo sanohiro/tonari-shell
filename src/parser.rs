@@ -974,25 +974,35 @@ impl Reader {
             if matches!(self.peek(), Some(Token::LeftParen)) {
                 self.tokens.pop_front();
             }
-            let mut patterns = Vec::with_capacity(1);
-            loop {
-                self.alias_at(false, Some(&[]))?;
-                match self.operand() {
-                    Some(Token::Word(word)) => patterns.push(CasePattern::new(word.word)),
+            let pattern = |reader: &mut Self| {
+                reader.alias_at(false, Some(&[]))?;
+                let word = match reader.operand() {
+                    Some(Token::Word(word)) => word,
                     None => {
                         return Err(Error::Incomplete(Incomplete::Message(
                             "unfinished case command",
                         )));
                     }
                     _ => return Err(Error::Invalid("expected a case pattern")),
+                };
+                reader.alias_at(false, Some(&[]))?;
+                Ok(CasePattern::new(word.word))
+            };
+            let first = pattern(self)?;
+            let patterns = if matches!(self.peek(), Some(Token::Pipe)) {
+                let mut many = vec![first];
+                while matches!(self.peek(), Some(Token::Pipe)) {
+                    self.tokens.pop_front();
+                    many.push(pattern(self)?);
                 }
-                self.alias_at(false, Some(&[]))?;
-                match self.tokens.pop_front() {
-                    Some(Token::RightParen) => break,
-                    Some(Token::Pipe) => {}
-                    None => return Err(Error::Incomplete(Incomplete::CasePattern)),
-                    _ => return Err(Error::Invalid("expected ')' after case pattern")),
-                }
+                CasePatterns::Many(many)
+            } else {
+                CasePatterns::One(first)
+            };
+            match self.tokens.pop_front() {
+                Some(Token::RightParen) => {}
+                None => return Err(Error::Incomplete(Incomplete::CasePattern)),
+                _ => return Err(Error::Invalid("expected ')' after case pattern")),
             }
             let body = self.list(&[";;", "esac"])?;
             let end = if let Some(Token::EndArm(end)) = self.peek() {
@@ -1691,7 +1701,7 @@ mod tests {
         let Command::Case(clause) = &program[1].command else {
             panic!()
         };
-        assert_eq!(clause.arms[0].0.len(), 2);
+        assert_eq!(clause.arms[0].0.iter().len(), 2);
         assert!(clause.arms[1].1.is_empty());
         assert!(parse(r#"echo "$(case a in a) echo ok;; esac)" "#).is_ok());
         assert!(matches!(parse("case x in name"), Err(Error::Incomplete(_))));

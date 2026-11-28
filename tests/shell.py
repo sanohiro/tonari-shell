@@ -70,6 +70,27 @@ shopt -s nocasematch; for v in a7X aX; do case $v in A*[0-9]*x) echo yes;; *) ec
 v=old; case "$v" in old) v=new; echo 1;;& old) echo 2;; esac
 """, 0, "🐟 🐟 🐟\nx雪雪z\nx雪z\n0 2 \n&&a aba aba\nXcd ab\nyes\nno\n1\n2\n".encode(), minimum=5)
 
+    def test_shell_paths_completions_and_wait(self):
+        (self.cwd / "bin").mkdir()
+        self.compare("""PATH=$PWD/bin:/usr/bin:/bin
+rm -f bin/r7cmd; touch bin/r7cmd; chmod +x bin/r7cmd
+compgen -c r7cmd
+chmod -x bin/r7cmd; compgen -c r7cmd; echo $?
+rm bin/r7cmd; mkdir bin/r7cmd; compgen -c r7cmd; echo $?
+rmdir bin/r7cmd; ln -s /bin/ls bin/r7cmd; compgen -c r7cmd
+exec 3< <(echo ready; exit 7); p=$!; read -ru3 v; wait "$p"; echo "$?:$v"
+""", 0, b"r7cmd\n1\n1\nr7cmd\n7:ready\n", minimum=5)
+
+    def test_shell_paths_folded_glob_and_prompt(self):
+        self.compare(r"""mkdir -p inner; cd inner
+touch a A.TXT .A.txt aZZtxt
+shopt -s nocaseglob
+printf '<%s>' a*.txt; echo
+shopt -s dotglob; printf '<%s>' *.TXT; echo
+p='\w'; HOME=$PWD; echo "${p@P}"
+HOME=/; PROMPT_DIRTRIM=1; [[ ${p@P} == */inner ]] && echo path
+""", 0, b"<A.TXT>\n<.A.txt><A.TXT>\n~\npath\n", minimum=5)
+
     def test_shell_paths_fields_and_formats(self):
         self.compare("""printf 'a:b::c:d:e:f:g:h:i:j:\\nsecond\\n' >records
 { IFS=: read -r a b c d e f g h; read -r next; } <records

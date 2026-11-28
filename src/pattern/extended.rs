@@ -696,10 +696,11 @@ pub(crate) fn insensitive_session(
     thread_local! {static LAST: std::cell::RefCell<Option<Entry>> = const {std::cell::RefCell::new(None)};}
     let fold = session.character_locale();
     insensitive_match_with(value, pattern, extended, fold, || {
+        let locale = super::session_locale(session);
+        let _guard = locale.as_ref().and_then(|l| l.enter());
         if !session.shopt.globasciiranges || pattern.len() > 4096 {
             return Pattern::insensitive(pattern, extended, fold).accepts(value, false);
         }
-        let locale = super::session_locale(session);
         LAST.with_borrow_mut(|last| {
             let matches = last.as_ref().is_some_and(|old| {
                 old.extended == extended
