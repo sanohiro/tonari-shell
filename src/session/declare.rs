@@ -310,6 +310,18 @@ fn print_variables(
         let mut names: Vec<_> = scope.variables.keys().map(String::as_str).collect();
         names.sort_unstable();
         names
+    } else if flags.readonly == Some(true) {
+        // Inherited environment strings cannot carry a readonly attribute.
+        let mut names: Vec<_> =
+            Session::BUILTIN_READONLY
+                .into_iter()
+                .filter(|name| !session.variables.contains_key(*name))
+                .chain(session.variables.iter().filter_map(|(key, var)| {
+                    (var.declared && var.readonly).then_some(key.as_str())
+                }))
+                .collect();
+        names.sort_unstable();
+        names
     } else {
         session.visible_names("", super::NameList::Declared)
     };

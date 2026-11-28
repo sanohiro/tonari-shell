@@ -1036,11 +1036,17 @@ impl Session {
         Self::builtin_readonly(base) || self.variables.get(base).is_some_and(|var| var.readonly)
     }
 
+    const BUILTIN_READONLY: [&str; 6] = [
+        "BASHOPTS",
+        "BASH_VERSINFO",
+        "EUID",
+        "PPID",
+        "SHELLOPTS",
+        "UID",
+    ];
+
     fn builtin_readonly(name: &str) -> bool {
-        matches!(
-            name,
-            "UID" | "EUID" | "PPID" | "BASHOPTS" | "SHELLOPTS" | "BASH_VERSINFO"
-        )
+        Self::BUILTIN_READONLY.contains(&name)
     }
 
     pub fn initialize_shell_level(&mut self, env: &crate::startup::Environment) {
