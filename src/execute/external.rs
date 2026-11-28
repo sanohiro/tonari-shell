@@ -13,6 +13,7 @@ pub(super) enum ChildEnvironment {
     Inherit,
     Empty,
     ReplaceShell,
+    AsyncCommand,
 }
 
 impl Environment {
@@ -213,7 +214,10 @@ impl External {
                 Environment::prepare(
                     session,
                     &cmd.assignments,
-                    environment == ChildEnvironment::ReplaceShell,
+                    matches!(
+                        environment,
+                        ChildEnvironment::ReplaceShell | ChildEnvironment::AsyncCommand
+                    ),
                 )?
             },
         })

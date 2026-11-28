@@ -285,8 +285,9 @@ pub(super) fn append_expansion(
             }
             match name.parse::<u64>() {
                 Ok(n) => Number::Small(n),
-                Err(e) if e.kind() == &std::num::IntErrorKind::PosOverflow
-                    && name.bytes().all(|b| b.is_ascii_digit()) =>
+                Err(e)
+                    if e.kind() == &std::num::IntErrorKind::PosOverflow
+                        && name.bytes().all(|b| b.is_ascii_digit()) =>
                 {
                     let digits = name.trim_start_matches('0');
                     Number::Large(digits.len(), digits.into())

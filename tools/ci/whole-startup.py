@@ -66,6 +66,7 @@ def main():
                                           runs=len(values))), flush=True)
         measure("agent-c", 1, lambda s: timed(s, ["-c", ":"], root, env, b""))
         measure("clean-interactive", 1, lambda s: ready(s, ["--noprofile","--norc","-i"], env, b"plain~ "))
+        measure("login-without-profiles", 1, lambda s: ready(s, ["--noprofile","--norc","--login","-i"], env, b"plain~ "))
         rc = root / ".bashrc"
         rc.write_text("shopt -s checkwinsize\nalias ll='ls -l'\n"
                       + "".join(f'cmd_{i}() {{ printf "%s" "$1"; }}\n' for i in range(80))

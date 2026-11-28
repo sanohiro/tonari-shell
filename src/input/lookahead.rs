@@ -209,31 +209,36 @@ pub(crate) fn buffered_compound<P: AsRef<[parser::Statement]>>(
     let mut probe = |size, lines| {
         // Only the final ordinary read may emit an unterminated here-doc warning.
         match parse(size) {
-            Ok(program) if matches!(program.as_ref(), [s] if aliases || s.location.end > first.len()) => {
+            // Alias expansion changes offsets. Its callers only speculate on
+            // private input and accept a single compound.
+            Ok(program) if aliases && program.as_ref().len() == 1 => {
                 Ok(Some((program, size, lines)))
             }
-            // Expanded alias locations describe shell text, not physical input.
             Ok(_) if aliases => Err(size),
             Ok(program) => {
-                // Quoted text and here-documents may look like nested headers.
-                // If the scan overshot, the parser already located the first
-                // command. Reparse its physical line boundary so option and
-                // alias changes still take effect before the following read.
+                // A quoted header and a later comment resembling its terminator
+                // can overshoot even when the parser returned just one statement.
+                // A command reading shared stdin must see those trailing bytes.
                 let end = program
                     .as_ref()
                     .first()
                     .and_then(|s| s.location.end.checked_sub(first.len()))
+                    .filter(|&end| end > 0 && end <= size)
                     .ok_or(size)?;
-                let newline =
-                    memchr::memchr(b'\n', buffered.get(end..size).ok_or(size)?).ok_or(size)?;
-                let boundary = end + newline + 1;
-                // The other statements were parsed on the same closing line.
-                // The ordinary line reader executes that entire unit together.
-                if boundary == size && end > 0 {
+                let boundary = memchr::memchr(b'\n', &buffered[end..size])
+                    .map_or(size, |newline| end + newline + 1);
+                if boundary == size {
                     return Ok(Some((program, size, lines)));
                 }
+                // Reparse the physical closing line, including any other
+                // commands on it. Here-docs or escaped newlines can require
+                // more input, in which case leave the reader untouched.
                 let unit = parse(boundary).map_err(|_| size)?;
-                if !matches!(unit.as_ref(), [s] if s.location.end > first.len()) {
+                if unit
+                    .as_ref()
+                    .first()
+                    .is_none_or(|s| s.location.end != first.len() + end)
+                {
                     return Err(size);
                 }
                 let lines = memchr::memchr_iter(b'\n', &buffered[..boundary]).count();

@@ -75,6 +75,17 @@ class ShellTests(unittest.TestCase):
                         else:
                             self.assertEqual(result.stderr, b"")
 
+    def test_whole_audit_job_control_without_controlling_terminal(self):
+        command = 'case $- in *m*) echo on;; *) echo off;; esac; set -m; shopt -qo monitor'
+        for shell in self.shells_for(5):
+            for opts in (["-ic"], ["+m", "-ic"], ["-m", "-c"], ["-c"]):
+                with self.subTest(shell=shell, opts=opts):
+                    p = subprocess.run([shell, "--noprofile", "--norc", *opts, command],
+                                       start_new_session=True, stdin=subprocess.DEVNULL,
+                                       env=self.env, cwd=self.cwd, capture_output=True, timeout=5)
+                    self.assertEqual((p.returncode, p.stdout), (0, b"off\n"))
+                    self.assertEqual(b"no job control in this shell" in p.stderr, opts != ["-c"])
+
     def test_whole_audit_shared_stdin_command_boundary(self):
         for shell in self.shells_for(5):
             for padding in (8, 800, 3600):
@@ -89,6 +100,21 @@ class ShellTests(unittest.TestCase):
                         result = subprocess.run([shell], stdin=script, env=self.env, cwd=self.cwd,
                                                 capture_output=True, timeout=5)
                         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, b""))
+
+    def test_whole_audit_shared_stdin_trailing_comment_is_data(self):
+        for shell in self.shells_for(5):
+            for padding in (0, 12000):
+                for extra in ("", "; echo closing-line"):
+                    command = ("if :; then\n: 'first\nif marker\n" + "x" * padding
+                               + "end'\nIFS= read -r data\nprintf '<%s>\\n' \"$data\"\nfi" + extra
+                               + "\n# payload fi\necho tail\n")
+                    source = self.cwd / "script"
+                    source.write_text(command)
+                    with self.subTest(shell=shell, padding=padding, extra=extra), source.open("rb") as script:
+                        p = subprocess.run([shell], stdin=script, env=self.env, cwd=self.cwd,
+                                           capture_output=True, timeout=5)
+                        expected = b"<# payload fi>\n" + (b"closing-line\n" if extra else b"") + b"tail\n"
+                        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, expected, b""))
 
     def test_second_review_job_traps_and_exec(self):
         source = """f(){ trap 'echo ERR' ERR; false; }; f; echo first:$?; false; echo last:$?
@@ -4225,15 +4251,17 @@ show @(entry-???-?.log|x?.t.xt)
     def test_numeric_glob_sorts_large_decimal_filenames(self):
         names = ["10", "8", "008", "90000000000000000000", "100000000000000000000",
                  "+7", "90000000000000000000z"]
-        for name in names:
+        siblings = [f"{i:02}x" for i in range(40)]
+        for name in names + siblings:
             (self.cwd / name).touch()
         # Equal numeric keys retain the filename collation order. A non-digit
         # anywhere in a filename makes it an ordinary string.
-        ascending = [names[i] for i in (2, 1, 0, 3, 4, 5, 6)]
-        script = 'for GLOBSORT in numeric -numeric; do printf "%s\\n" *; done'
+        ascending = [names[i] for i in (2, 1, 0, 3, 4)] + sorted(names[5:] + siblings)
+        script = ('for GLOBSORT in numeric -numeric; do printf "%s\\n" *; done; '
+                  ': > 7; GLOBSORT=numeric; a=(*); echo "${a[0]}/${a[1]}"')
         result = self.command(TONARI, script)
         self.assertEqual((result.returncode, result.stdout.decode().splitlines(), result.stderr),
-                         (0, ascending + ascending[::-1], b""))
+                         (0, ascending + ascending[::-1] + ["7/008"], b""))
 
     def test_glob_sort_order_after_directory_changes(self):
         for i in range(96):
@@ -5377,7 +5405,7 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                                   capture_output=True, timeout=5)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             if shell == TONARI:
-                self.assertEqual(proc.stderr, b"")
+                self.assertIn(proc.stderr, (b"", b"tonari: no job control in this shell\n"))
             profiles.append(proc.stdout)
         self.assertEqual(profiles[0], profiles[1])
         self.assertIn(b"ignoreboth", profiles[0])

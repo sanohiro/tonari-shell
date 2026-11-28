@@ -187,6 +187,7 @@ pub(crate) fn launch(
         }
         drop(child);
         session.enter_subshell();
+        session.substitution_shell = true;
         crate::execute::coprocess::after_fork(session);
         session.jobs.forked(false);
         session.interactive = false;

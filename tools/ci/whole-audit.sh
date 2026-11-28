@@ -26,11 +26,13 @@ case "$SUITE" in
     python="$RUNNER_TEMP/editor-env/bin/python"
     "$python" -m pip install pyte==0.8.2
     "$python" tests/review_whole_editor.py "$current" "$ref"
-    "$python" tools/ci/whole-editor.py --shell "main=$baseline" --shell "candidate=$current" --shell "bash=$ref" --runs 100 --output "$out/editor.jsonl" > "$out/editor.txt"
+    "$python" tools/ci/whole-editor.py --shell "main=$baseline" --shell "candidate=$current" --shell "bash=$ref" --require candidate --runs 100 --output "$out/editor.jsonl" > "$out/editor.txt"
+    "$python" tools/ci/whole-editor.py --shell "main=$baseline" --shell "candidate=$current" --require candidate --case picker-cancel --case picker-miss --case picker-match --runs 100 --output "$out/picker.jsonl" > "$out/picker.txt"
     if [[ $RUNNER_OS == Linux ]]; then
       cpu=$(python3 -c 'import os; print(min(os.sched_getaffinity(0)))')
-      taskset -c "$cpu" "$python" tools/ci/whole-editor.py --shell "candidate=$current" --runs 100 --output "$out/editor-cpu1.jsonl" > "$out/editor-cpu1.txt"
+      taskset -c "$cpu" "$python" tools/ci/whole-editor.py --shell "candidate=$current" --require candidate --runs 100 --output "$out/editor-cpu1.jsonl" > "$out/editor-cpu1.txt"
     fi
+    python3 tools/bench_editor_input.py "$baseline" "$current" "$ref" --entries 100000 --runs 11 --mixed-history --case Ctrl-R --case Miss --case Tab --samples "$out/large-history.jsonl" > "$out/large-history.txt"
     python3 tools/bench_completion.py "$baseline" "$current" --bash "$ref" --command-cache --runs 15 > "$out/command-cache.txt"
     ;;
   whole-language)
@@ -39,6 +41,7 @@ case "$SUITE" in
   whole-process)
     python3 tests/review_whole_process.py "$current" "$ref"
     python3 tools/ci/whole-process.py "$baseline" "$current" "$ref" > "$out/process.tsv"
+    python3 tools/bench_streams.py "$baseline" "$current" "$ref" --case redirect --case pipe --case 'quoted heredoc' --runs 7 --sizes 0 1 4096 262144 4194304 > "$out/streams.txt"
     ;;
   whole-profile)
     program='LC_ALL=C.UTF-8; for ((i=0;i<24000;i++)); do v+=あ; n=${#v}; done; test "$n" = "$i"'

@@ -402,7 +402,7 @@ fn start_raw(
                 match prepared {
                     Ok(mut cmd) => {
                         if launch.single && launch.background {
-                            cmd.environment = external::ChildEnvironment::ReplaceShell;
+                            cmd.environment = external::ChildEnvironment::AsyncCommand;
                         }
                         run_prepared(cmd, None, last_status, true, session)
                     }
@@ -457,7 +457,7 @@ fn start(
     launch: crate::jobs::Launch,
 ) -> io::Result<Stage> {
     if launch.single && launch.background {
-        cmd.environment = external::ChildEnvironment::ReplaceShell;
+        cmd.environment = external::ChildEnvironment::AsyncCommand;
     }
     let builtin = builtin(cmd, last_status, session).or_else(|| {
         cmd.prepare_missing_hook(session)
@@ -1070,6 +1070,9 @@ fn run_prepared(
     replace: bool,
     session: &mut Session,
 ) -> io::Result<Flow> {
+    if !replace {
+        cmd.environment = external::ChildEnvironment::Inherit;
+    }
     if cmd.search == lookup::Search::JobSpec {
         let flow = crate::jobs::dispatch(&cmd.words, session, last_status);
         session.last_argument = cmd.words.pop();

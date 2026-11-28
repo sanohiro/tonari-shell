@@ -1,7 +1,7 @@
 """Public shell checks for process ownership, descriptor restoration and I/O."""
 
-import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -40,6 +40,14 @@ SHLVL=9 /usr/bin/printenv SHLVL & wait
 : | /usr/bin/printenv SHLVL & wait
 set -m; /usr/bin/printenv SHLVL & wait; echo "$SHLVL"
 """, "1\n0\n8\n0\n1\n1\n0\n1"
+    yield "direct subshell redirection and list controls", """
+( /usr/bin/printenv SHLVL </dev/null )
+( SHLVL=8 /usr/bin/printenv SHLVL </dev/null )
+( :; /usr/bin/printenv SHLVL </dev/null )
+( /usr/bin/printenv SHLVL </dev/null ) | cat
+TIMEFORMAT=; time ( /usr/bin/printenv SHLVL </dev/null )
+f(){ /usr/bin/printenv SHLVL </dev/null; }; ( f )
+""", "0\n7\n1\n0\n1\n1"
     yield "temporary redirects and shared reader", """
 exec 7<input; exec 8<&7; { IFS= read -ru8 a; : <&9; } 2>errors
 printf '%s/%s\n' "$?" "$a"; cat <&7; echo 'outside'
@@ -56,6 +64,15 @@ coproc HELPER { read -r x; echo "ack:$x"; }; r=${HELPER[0]}; w=${HELPER[1]}; p=$
 disown "$p"; echo "${HELPER[0]+set}:${HELPER_PID+set}"
 echo hi >&"$w"; IFS= read -ru "$r" line; echo "$?:$line"
 """, "set:set\n0:ack:hi"
+    yield "direct coprocess redirection", """
+mkfifo gate
+coproc /usr/bin/printenv SHLVL <gate
+exec 8<&"${COPROC[0]}"; p=$COPROC_PID; : >gate
+IFS= read -ru8 level; wait "$p"; echo "$?:$level"
+TIMEFORMAT=; time coproc /usr/bin/printenv SHLVL <gate
+exec 8<&"${COPROC[0]}"; p=$COPROC_PID; : >gate
+IFS= read -ru8 level; wait "$p"; echo "$?:$level"
+""", "0:0\n0:1"
     yield "signal while waiting", """
 trap 'echo handled' USR1
 ( sleep .05; kill -USR1 "$$"; sleep .05; exit 7 ) & p=$!
@@ -76,7 +93,11 @@ def main():
                                    env=dict(PATH="/usr/bin:/bin", LC_ALL="C", HOME=tmp),
                                    capture_output=True, timeout=8)
                 want = (0, (expected + "\n").encode(), b"")
-                if (p.returncode, p.stdout, p.stderr) != want:
+                err = p.stderr
+                if label == "asynchronous external environment":
+                    # GNU can announce a completed monitored job before wait.
+                    err = re.sub(rb"(?m)^\[\d+\]\+ +Done +/usr/bin/printenv SHLVL\n", b"", err)
+                if (p.returncode, p.stdout, err) != want:
                     raise AssertionError(f"{shell} {label}: {p.returncode, p.stdout, p.stderr}; expected {want}")
                 print(f"ok {shell.name} {label}")
 

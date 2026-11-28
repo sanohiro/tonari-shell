@@ -636,7 +636,11 @@ pub(super) fn prepare_expanded(
         redirects: Vec::new(),
         assignments,
         empty_status: captured.get().unwrap_or(0),
-        environment: Default::default(),
+        environment: if raw.direct_exec {
+            external::ChildEnvironment::ReplaceShell
+        } else {
+            external::ChildEnvironment::Inherit
+        },
     };
     if session.xtrace && !cmd.words.is_empty() {
         trace_line(session, last_status, |out| {

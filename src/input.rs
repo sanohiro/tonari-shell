@@ -310,14 +310,15 @@ pub(crate) fn still_open(
         }
         Some(SingleQuote) => memchr::memchr2(b'\'', 0, line).is_none(),
         Some(DoubleQuote) => {
-            // Simple dollar parameters cannot close a double quote. Nested
-            // expansions, escapes and quote delimiters still need the lexer.
+            // Simple parameters cannot close a quote. For nested expansions,
+            // check this physical line before reparsing the growing prefix.
             let mut bytes = line.iter();
             while let Some(&byte) = bytes.next() {
-                if matches!(byte, b'"' | 0 | b'`' | b'\\')
-                    || byte == b'$' && matches!(bytes.as_slice().first(), Some(b'(' | b'{' | b'['))
-                {
+                if matches!(byte, b'"' | 0 | b'`' | b'\\') {
                     return false;
+                }
+                if byte == b'$' && matches!(bytes.as_slice().first(), Some(b'(' | b'{' | b'[')) {
+                    return parser::double_quote_line(text, session);
                 }
             }
             true
@@ -553,7 +554,11 @@ fn run(
             input.clear();
             continue;
         }
-        let buffered = line_start == 0 && n != 0 && !reader.buffer().is_empty() && !session.verbose;
+        let buffered = line_start == 0
+            && n != 0
+            && !reader.buffer().is_empty()
+            && !session.verbose
+            && (!shared_offset || !session.reads_aliases());
         let mut result = parse_prefix(session, text, buffered, |s| {
             parser::session_source_at(text, n == 0, s, base_line)
         });
@@ -681,6 +686,9 @@ pub fn text(
     if !session.verbose
         && let Some(program) = whole_group(session, source, first_line)
     {
+        if tail && session.command_string {
+            session.command_string_at_end = true;
+        }
         return if check {
             Flow::Continue(0)
         } else {
@@ -826,6 +834,9 @@ pub fn text(
                 let remember = tail
                     && (!session.interactive || session.command_history_expansion)
                     && session.begin_history_line(text);
+                if tail && session.command_string {
+                    session.command_string_at_end = last;
+                }
                 let flow = program.run(session, state.status, tail && last);
                 session.command_number += usize::from(tail && !session.interactive);
                 if remember {

@@ -342,6 +342,24 @@ pub(crate) fn word_line(source: &str, session: &crate::Session) -> bool {
     })
 }
 
+// A closing quote appended after the physical line must be the one consumed
+// by this call. A real closing quote leaves the sentinel unread; an unfinished
+// nested expansion fails. Keep aliases, here-doc diagnostics, and escapes
+// whose meaning depends on the enclosing operand in the full source reader.
+pub(crate) fn double_quote_line(source: &str, session: &crate::Session) -> bool {
+    if session.reads_aliases() || source.contains(['\0', '\\']) || source.contains("<<") {
+        return false;
+    }
+    with_read_options(session, 1, || {
+        let mut text = String::with_capacity(source.len() + 1);
+        text.push_str(source);
+        text.push('"');
+        let mut chars = text.chars();
+        lexer::quoted(&mut chars, '"', &mut crate::word::WordBuilder::default()).is_ok()
+            && chars.as_str().is_empty()
+    })
+}
+
 pub(crate) fn here_word(session: &crate::Session, source: &str) -> Result<Word, Error> {
     with_read_options(session, session.line(), || expansion_string(source))
 }
@@ -875,7 +893,7 @@ impl Reader {
                 self.expand_alias(true)?;
             }
             let start = self.position();
-            let command = if (inverted.is_some() || timing.is_some())
+            let mut command = if (inverted.is_some() || timing.is_some())
                 && matches!(
                     self.peek(),
                     None | Some(Token::End | Token::Newline | Token::Background)
@@ -885,6 +903,17 @@ impl Reader {
                 self.command()?
             };
             let command = if let Some(posix) = timing {
+                // A timed single command needs a process to collect its usage.
+                let timed = match &mut command {
+                    Command::Pipeline(stages) => match stages.as_mut_slice() {
+                        [stage] => stage.compound.as_mut().and_then(std::rc::Rc::get_mut),
+                        _ => None,
+                    },
+                    other => Some(other),
+                };
+                if let Some(command) = timed {
+                    Self::mark_direct_exec(command, false);
+                }
                 Command::Timed {
                     posix,
                     command: Box::new(command),
@@ -1032,6 +1061,23 @@ impl Reader {
         Ok(stage)
     }
 
+    fn mark_direct_exec(command: &mut Command, direct: bool) {
+        let inner = match command {
+            Command::Subshell(body) => match body.as_mut_slice() {
+                [statement] if !statement.negated => &mut statement.command,
+                _ => return,
+            },
+            Command::Coprocess { body, .. } => body.as_mut(),
+            _ => return,
+        };
+        if let Command::Pipeline(stages) = inner
+            && let [stage] = stages.as_mut_slice()
+            && stage.compound.is_none()
+        {
+            stage.direct_exec = direct;
+        }
+    }
+
     fn compound(&mut self) -> Result<Option<Command>, Error> {
         if matches!(self.peek(), Some(Token::Arithmetic(_))) {
             let Some(Token::Arithmetic(expr)) = self.tokens.pop_front() else {
@@ -1045,7 +1091,9 @@ impl Reader {
             if self.tokens.pop_front().is_none() {
                 return Err(Error::Incomplete(Incomplete::Subshell));
             }
-            return Ok(Some(Command::Subshell(body)));
+            let mut command = Command::Subshell(body);
+            Self::mark_direct_exec(&mut command, true);
+            return Ok(Some(command));
         }
         self.alias_after_name()?;
         match self.keyword() {
@@ -1105,10 +1153,12 @@ impl Reader {
         } else {
             Command::Pipeline(vec![self.simple()?])
         };
-        Ok(Command::Coprocess {
+        let mut command = Command::Coprocess {
             name,
             body: Box::new(command),
-        })
+        };
+        Self::mark_direct_exec(&mut command, true);
+        Ok(command)
     }
 
     fn case_clause(&mut self) -> Result<Command, Error> {

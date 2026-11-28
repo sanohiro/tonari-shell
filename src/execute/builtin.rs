@@ -261,13 +261,34 @@ pub(super) fn eval_builtin(
             in_stage_child,
         ),
         Builtin::Exec => exec_builtin(cmd, session, args),
-        Builtin::Function => crate::eval::call_with_bindings(
-            session,
-            std::mem::take(&mut cmd.words),
-            last_status,
-            false,
-            &mut bindings,
-        ),
+        Builtin::Function => {
+            // Bash only marks a final simple command in an asynchronous
+            // function. A -c reader must have consumed its last input line.
+            let replace = cmd.environment == external::ChildEnvironment::AsyncCommand
+                && !session.evaluating
+                && session.source_depth == 0
+                && (!session.command_string || session.command_string_at_end)
+                && session
+                    .functions
+                    .get(&cmd.words[0])
+                    .is_some_and(|function| {
+                        let body = function.definition.body.statements();
+                        (body.len() > 1 || session.command_string)
+                            && body.last().is_some_and(|s| {
+                                !s.negated
+                                    && s.single_stage().is_some_and(|stage| {
+                                        stage.compound.is_none() && stage.redirects.is_empty()
+                                    })
+                            })
+                    });
+            crate::eval::call_with_bindings(
+                session,
+                std::mem::take(&mut cmd.words),
+                last_status,
+                replace,
+                &mut bindings,
+            )
+        }
         Builtin::Trap => Flow::Continue(session.traps.builtin(
             args,
             session.interactive,
@@ -766,7 +787,7 @@ pub(super) fn run_builtin(
     // Keep the normal function scope and let each statement recheck active traps.
     if final_command
         && matches!(builtin, Builtin::Function)
-        && session.subshell_depth > 0
+        && session.substitution_shell
         && cmd.redirects.is_empty()
         && cmd.assignments.is_empty()
         && session.substitutions.scope() == 0

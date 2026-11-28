@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import random
+import re
 from statistics import median
 import subprocess
 import sys
@@ -17,6 +18,9 @@ def shell_cases(n, size):
     yield "assignment pipeline", loop("x=ok | :") + "; echo $i", str(n), None
     yield "integer pipeline", ("declare -i x=5; count=0; " + loop("x=count++ | :")
                                + '; echo "$count:$x"'), "0:5", f"{n}:5"
+    yield "serial external", loop('/usr/bin/true') + "; echo $i", str(n), None
+    yield "three-stage pipeline", (loop("printf 'ok\\n' | cat | cat >output")
+                                  + '; cat output; echo "$i"'), f"ok\n{n}", None
     yield "background external, monitor", ("set -m; " + loop('/usr/bin/true & wait "$!"')
                                           + "; echo $i"), str(n), None
     yield "job insertion and wait", loop(": & :") + "; wait; echo $i", str(n), None
@@ -82,14 +86,18 @@ else:
                     if label == "before" and earlier is not None:
                         valid.append(earlier)
                     output = r.stdout.decode().strip()
-                    if r.returncode or r.stderr or output not in valid:
+                    err = r.stderr
+                    if case == "background external, monitor":
+                        err = re.sub(rb"(?m)^\[\d+\]\+ +Done +/usr/bin/true\n", b"", err)
+                    if r.returncode or err or output not in valid:
                         raise RuntimeError(f"{case} N={n} {label}: {r.returncode, output, r.stderr} expected {valid}")
 
                 report(case, n, shells, shell_sample, runs, rng)
 
             def spawn_control(_label, _):
                 for _ in range(n):
-                    subprocess.run(["/usr/bin/true"], cwd=root, env=env, check=True, timeout=5)
+                    subprocess.run(["/usr/bin/true"], cwd=root, env=env, check=True,
+                                   capture_output=True, timeout=5)
 
             report("spawn/wait OS control", n, {"native": None}, spawn_control, runs, rng)
 

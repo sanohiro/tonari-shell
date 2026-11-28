@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check language state and time public shell entry points at two input sizes."""
+"""Check language state and time public entry points with three-point size sweeps."""
 
 import argparse
 from pathlib import Path
@@ -29,8 +29,13 @@ def state_checks(shells, env, root):
             'v=日本; w=abc; declare -n ref=v rr=ref; n=${#rr}; echo "$n"; '
             'v+=語; echo "${#v}/${#rr}"; '
             'f(){ local v=hello; echo "${#rr}"; v=; echo "${#rr}"; }; f; '
-            'declare -n ref=w; echo "${#rr}"; w=(雪); echo "${#rr}/${#ref[@]}"; '
-            'declare -n elt="w[0]"; n=${#elt}; echo "$n"', "2\n3/3\n5\n0\n3\n1/1\n1\n"),
+            'declare -n ref=w; echo "${#rr}"; w=(雪); echo "${#rr}/${#ref[@]}"',
+            "2\n3/3\n5\n0\n3\n1/1\n"),
+        "case pattern remains live": (
+            'subject=word; p=word; case "$subject" in "$p") :;; *) exit 1;; esac; '
+            'p="w*"; case $subject in "$p") exit 2;; $p) :;; *) exit 3;; esac; '
+            'p=WORD; shopt -s nocasematch; case $subject in $p) :;; *) exit 4;; esac; '
+            'p=none; case $subject in w*) p=word ;;& $p) echo live;; esac', "live\n"),
         "quoted comparison and side effects": (
             'set -- "a*b"; left=ab; right="a*b"; declare -n r=right; '
             '[[ $left == $r && $left != "$r" && $1 == "$r" ]] || exit 1; '
@@ -65,6 +70,13 @@ def state_checks(shells, env, root):
         for shell in shells:
             check(f"{label}/{shell}", launch(shell, ["-c", script], env, root), expected)
     for i, shell in enumerate(shells):
+        script = 'w=(雪); declare -n elt="w[0]"; n=${#elt}; echo "$n"'
+        result = launch(shell, ["-c", script], env, root)
+        if i == 2 and not have_numeric[i] and result.stdout == b"0\n":
+            check(f"legacy Bash element reference/{shell}", result, "0\n")
+            print("# reference reports zero for the length of a nameref to an array element")
+        else:
+            check(f"element reference length/{shell}", result, "1\n")
         if have_numeric[i]:
             # This changed along with GLOBSORT in Bash 5.3.
             check(f"local BASH_REMATCH/{shell}", launch(shell, ["-c", local_match], env, root),
@@ -90,31 +102,57 @@ def state_checks(shells, env, root):
 
 
 def workloads():
-    for n in (256, 768):
-        for token in ("$v", "word"):
+    for n in (192, 384, 768):
+        for token in ("$v", "${v:-none}", "word"):
             script = 'v=word\ns="start\n' + (token + ' ordinary line\n') * n + 'end"\necho "${#s}"'
             expected = str(9 + n * len("word ordinary line\n"))
             for mode in (("file", "pipe", "eval") if token == "$v" else ("file",)):
                 yield f"double quote {token}/{mode}", n, script, expected, mode
-    for n in (1024, 4096):
+    for n in (1024, 2048, 4096):
         for counter in ("n=${#s}", ":"):
             script = ("s=雪; for ((i=0;i<" + str(n) + ";i++)); do s+=日本語; "
                       + counter + '; done; echo "${#s}"')
             yield "grow plus " + counter, n, script, str(1 + n * 3), "file"
-    for n in (2048, 8192):
+    for n in (2048, 4096, 8192):
         for name in ("s", "ref"):
             script = ("s='" + "界" * n + "'; declare -n ref=s; for ((i=0;i<3000;i++)); "
                       "do n=${#" + name + '}; done; echo "$n"')
             yield "length of " + name, n, script, str(n), "file"
-    for n in (8192, 65536):
+    for n in (16384, 32768, 65536):
         for rhs in ('"$b"', "z"):
             script = (f"printf -v s '%0{n}d' 0; b=z; for ((i=0;i<3000;i++)); "
                       f'do [[ $s != {rhs} ]] || exit 1; done; echo "$i"')
             yield "equality " + rhs, n, script, "3000", "file"
-    for n in (128, 512):
+    for n in (128, 256, 512):
         setup = f"cd numeric-{n} || exit; GLOBSORT=numeric; "
         body = 'for ((i=0;i<60;i++)); do a=(*); done; echo "${#a[@]}/${a[0]}/${a[-1]}"'
         yield "numeric pathname sort", n, setup + body, f"{n}/0/{n-1}", "numeric"
+    for n in (32, 64, 128):
+        variables = "".join(f"p{i}=key{i}\n" for i in range(n))
+        for kind in ("static", "variable"):
+            patterns = [f"key{i}" if kind == "static" else f"$p{i}" for i in range(n)]
+            branches = "".join(f"{p}) chosen={i};;\n" for i, p in enumerate(patterns))
+            for position, target in (("first", 0), ("last", n - 1), ("miss", n)):
+                script = (variables + f"key=key{target}\nfor ((i=0;i<100;i++)); do\n"
+                          + "case $key in\n" + branches + "*) chosen=miss;; esac\ndone\necho \"$chosen\"")
+                yield f"case {kind} {position}", n, script, (str(target) if target < n else "miss"), "file"
+    for n in (512, 1024, 2048):
+        start = "s=" + "f" * n + "hix; wanted=" + "f" * n + "hit; "
+        for kind, expr in (("literal", '[[ $s == "$wanted" ]]'),
+                           ("glob", "[[ $s == f*hit ]]"),
+                           ("regex", "[[ $s =~ ^f+hit$ ]]")):
+            script = start + f"for ((i=0;i<150;i++)); do {expr} && exit 1; done; echo miss"
+            yield f"near-tail miss {kind}", n, script, "miss", "file"
+    for axis, sizes in (("matches", (128, 256, 512)), ("replacement bytes", (8, 16, 32))):
+        for n in sizes:
+            matches = n if axis == "matches" else 128
+            replacement = "!" + "X" * (1 if axis == "matches" else n - 1)
+            text = "AB" * matches + "a" * (4096 - 2 * matches)
+            output = text.replace("AB", replacement)
+            script = (f"s={text}; repl='{replacement}'; "
+                      'for ((i=0;i<16;i++)); do out=${s//AB/$repl}; done; '
+                      'marks=${out//[^!]/}; echo "${#marks}/${#out}/${out:0:8}/${out: -8}"')
+            yield f"replace {axis}", n, script, f"{matches}/{len(output)}/{output[:8]}/{output[-8:]}", "file"
 
 
 def main():
@@ -134,7 +172,7 @@ def main():
                   "huge": ["0", "00", "02", "2", "08", "alpha", "+4", "90000000000000000000",
                            "100000000000000000000", "090000000000000000000",
                            "100000000000000000000a"]}
-        for n in (128, 512):
+        for n in (128, 256, 512):
             groups[f"numeric-{n}"] = [str(i) for i in range(n)]
         for folder, names in groups.items():
             (root / folder).mkdir()

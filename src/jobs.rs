@@ -527,9 +527,9 @@ impl Jobs {
         self.table.is_empty() && self.inherited.is_empty()
     }
 
-    pub fn init(&mut self, interactive: bool) {
+    pub fn init(&mut self, interactive: bool) -> bool {
         if self.tty.is_some() {
-            return;
+            return true;
         }
         let old = unsafe { libc::getpgrp() };
         let fd = if unsafe { libc::isatty(libc::STDERR_FILENO) } == 1 {
@@ -541,7 +541,7 @@ impl Jobs {
                 .open("/dev/tty")
                 .and_then(PrivateFile::new)
         };
-        let Ok(fd) = fd else { return };
+        let Ok(fd) = fd else { return false };
         let mut stops = 0;
         loop {
             let foreground = unsafe { libc::tcgetpgrp(fd.as_raw_fd()) };
@@ -555,7 +555,7 @@ impl Jobs {
                 || stops == 16
                 || crate::traps::stop_for_terminal().is_err()
             {
-                return;
+                return false;
             }
             stops += 1;
         }
@@ -563,7 +563,7 @@ impl Jobs {
         let shell_group = if interactive { owner } else { old };
         if old != shell_group {
             if unsafe { libc::setpgid(0, 0) } < 0 {
-                return;
+                return false;
             }
             give_terminal(fd.as_raw_fd(), owner);
         }
@@ -583,6 +583,7 @@ impl Jobs {
             shell_group,
             original_group: old,
         });
+        true
     }
     fn terminal(&self) -> Option<&Terminal> {
         self.tty

@@ -433,9 +433,11 @@ fn apply_invocation_options(
         diagnostic!("SIGHUP: {e}");
         return Err(1);
     }
-    session.jobs.monitor = invocation.options.monitor.unwrap_or(session.interactive);
-    if session.jobs.monitor {
-        session.jobs.init(session.interactive);
+    if session.interactive || invocation.options.monitor == Some(true) {
+        session.jobs.monitor = session.jobs.init(session.interactive);
+        if !session.jobs.monitor {
+            diagnostic!("no job control in this shell");
+        }
     }
     session.command_string = matches!(invocation.input, Input::Command(_));
     if !invocation.pretty

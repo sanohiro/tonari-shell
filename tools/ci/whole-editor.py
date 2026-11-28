@@ -26,6 +26,7 @@ import pyte
 PROMPT = "ED> "
 RIGHT = "TAIL"
 CASES = ("ascii", "ime", "multiline", "cancel", "split-home", "tab", "recall", "search-cancel")
+PICKER_CASES = ("picker-miss", "picker-cancel", "picker-match")
 
 
 @contextmanager
@@ -55,6 +56,13 @@ class Display:
         self.screen = pyte.Screen(cols, rows)
         self.stream = pyte.ByteStream(self.screen)
 
+    @property
+    def lines(self):
+        # Read cell data directly. During redraw a partial frame may contain
+        # an isolated wide-character continuation cell with an empty string.
+        return ["".join(self.screen.buffer[row][x].data for x in range(self.screen.columns))
+                for row in range(self.screen.lines)]
+
     def caret_text(self):
         # pyte omits the second half of wide cells in display[]. Slice in terminal
         # cells first. The editor can leave an unused cell before wrapping.
@@ -64,7 +72,7 @@ class Display:
                          for row in range(y))
         before += "".join(s.buffer[y][i].data for i in range(x))
         after = "".join(s.buffer[y][i].data for i in range(x, s.columns)).rstrip()
-        after += "".join(line.rstrip() for line in s.display[y + 1:])
+        after += "".join(line.rstrip() for line in self.lines[y + 1:])
         return before, after
 
     def adjacent(self, left, right=""):
@@ -113,7 +121,7 @@ class Display:
                 events.clear()
                 if not packet and reached is not None:
                     return tuple((v - start) / 1e6 for v in (first, reached))
-        raise TimeoutError((self.screen.display, self.screen.cursor.x, self.screen.cursor.y))
+        raise TimeoutError((self.lines, self.screen.cursor.x, self.screen.cursor.y))
 
 
 def rc_file(home, extra=""):
@@ -128,7 +136,18 @@ def sample(path, home, case):
     dims = (6, 36) if case == "split-home" else (24, 80)
     with terminal(path, home, *dims) as d:
         d.observe(b"", lambda: d.adjacent(PROMPT))
-        if case == "tab":
+        if case in PICKER_CASES:
+            value = "pick unit"
+            d.observe(b"pick \t\t", lambda: any("filter>" in line for line in d.lines))
+            if case == "picker-cancel":
+                result = d.observe(b"ZZZZZ\x07", lambda: d.adjacent(PROMPT + value))
+            else:
+                if case == "picker-miss":
+                    result = d.observe(b"ZZZZZ", lambda: "(no matches)" in d.lines[1])
+                else:
+                    result = d.observe(b"unit0001", lambda: "> unit0001-" in d.lines[1])
+                d.observe(b"\x07", lambda: d.adjacent(PROMPT + value))
+        elif case == "tab":
             value = "zzuniquecmd "
             d.observe(b"zzuni", lambda: d.adjacent(PROMPT + "zzuni"))
             result = d.observe(b"\t", lambda: d.adjacent(PROMPT + value))
@@ -139,7 +158,7 @@ def sample(path, home, case):
             value = "DRAFT"
             d.observe(b"DRAFT\x02", lambda: d.adjacent(PROMPT + "DRAF", "T"))
             d.observe(b"\x12HISTMARK", lambda: any("search" in row and "HISTMARK" in row
-                                                    for row in d.screen.display))
+                                                    for row in d.lines))
             result = d.observe(b"\x07", lambda: d.adjacent(PROMPT + "DRAF", "T"))
         elif case in ("split-home", "cancel"):
             value = "HEAD" + "abcdefghij" * 32 + marker
@@ -164,7 +183,7 @@ def sample(path, home, case):
             value += RIGHT
         # Check all committed characters through the public bind -x interface.
         # This check is deliberately outside the timed interval.
-        d.observe(b"\x14", lambda: any("SNAP-DONE" in line for line in d.screen.display))
+        d.observe(b"\x14", lambda: any("SNAP-DONE" in line for line in d.lines))
         if (home / "draft").read_text() != value:
             raise AssertionError("submitted editor buffer differs from the input")
         return result
@@ -173,7 +192,10 @@ def sample(path, home, case):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--shell", action="append", required=True, metavar="LABEL=PATH")
-    parser.add_argument("--case", action="append", choices=CASES)
+    parser.add_argument("--case", action="append", choices=CASES + PICKER_CASES,
+                        help="picker cases apply to Tonari only")
+    parser.add_argument("--require", action="append", default=[], metavar="LABEL",
+                        help="exit unsuccessfully if a case for this shell fails")
     parser.add_argument("--runs", type=int, default=100)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -181,11 +203,18 @@ def main():
         parser.error("--runs must be positive")
     shells = [(label, str(Path(path).resolve())) for label, path in
               (item.split("=", 1) for item in args.shell)]
+    labels = {label for label, _ in shells}
+    if len(labels) != len(shells) or set(args.require) - labels:
+        parser.error("shell labels must be unique and include all required labels")
+    failures = []
     cases = args.case or CASES
     with tempfile.TemporaryDirectory() as root, args.output.open("w") as output:
         home = Path(root)
         for case in cases:
             setup = ""
+            if case in PICKER_CASES:
+                words = " ".join(f"unit{i:04d}-" + "alpha-beta-" * 5 for i in range(2048))
+                setup = f"bind 'set completion-ignore-case on'\ncomplete -W '{words}' pick\n"
             if case == "tab":
                 setup = "zzuniquecmd() { :; }\n"
             if case in ("recall", "search-cancel"):
@@ -210,6 +239,8 @@ def main():
                 record = dict(case=case, shell=label, samples=values, error=failed.get(label))
                 print(json.dumps(record, ensure_ascii=False), file=output, flush=True)
                 if label in failed:
+                    if label in args.require:
+                        failures.append(f"{label}/{case}")
                     print(case, label, "FAILED", failed[label], flush=True)
                 else:
                     for metric, data in zip(("first", "visible+caret"), zip(*values)):
@@ -217,6 +248,9 @@ def main():
                         row = [ordered[math.ceil(q * len(ordered)) - 1] for q in (0.5, .95, .99, 1)]
                         print(case, label, metric, "p50/p95/p99/max ms", *(f"{v:.3f}" for v in row),
                               flush=True)
+
+    if failures:
+        raise SystemExit("failed required cases: " + ", ".join(failures))
 
 
 if __name__ == "__main__":
