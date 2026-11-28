@@ -123,6 +123,12 @@ shopt -s nocasematch
 [[ cab == +([ab]) ]]; echo "$?"
 rm -r tree""", 0, b"tree/c\n0\n1\n")
 
+    def test_folded_class_distinguishes_turkish_dotted_i(self):
+        self.env["LC_ALL"] = "tr_TR.UTF-8"
+        proc = self.command(TONARI, """shopt -s nocasematch; p='+([i])'
+for ch in I i; do [[ $ch == $p ]]; echo "$?"; done""")
+        self.assertEqual((proc.stdout, proc.returncode), (b"1\n0\n", 0))
+
     def test_static_conditional_rechecks_locale_after_first_use(self):
         locales = subprocess.check_output(["locale", "-a"], text=True).splitlines()
         utf8 = next((name for name in locales if name.lower().replace("-", "") in

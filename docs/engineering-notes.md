@@ -1,5 +1,19 @@
 # Engineering notes / 開発知見
 
+## Compiling patterns, reading here strings and resolving physical paths / パターンの再利用・入力・物理パス
+
+A pattern applied to an array can share its compiled representation across elements. For a static right operand of `[[ == ]]`, the cache also needs the active character and collation locale and the setting of `globasciiranges`. Compare the same function with a freshly expanded pattern after changing `LC_ALL` twice. Extended matching must accept both simple ASCII member lists and general bracket expressions. The former crashed in `GLOBIGNORE='tree/[ab]'` and in case-insensitive extended patterns. A member mask avoids allocation for simple lists. Turkish case folding uses the general representation because ASCII I can fold to a non-ASCII character.
+
+An in-process command substitution can evaluate a helper that binds ordinary scalar locals, selects a branch using a fixed case pattern or a string test, and prints a result. Expand arguments in the caller and resolve builtin overrides in the callee. Use a child when traps, tracing, special variables or side effects can expose the difference. Time normal nvm initialization separately to include selection of an installed Node version.
+
+Short `read` and `mapfile` here inputs can use the expanded bytes directly. With three standard descriptors open, `ulimit -n 4` leaves one free slot and the redirection must fail. With a limit of five it succeeds. Callbacks, other input descriptors and complex assignment targets use the installed redirection. For counted reads from a file, validate a whole UTF-8 character before finishing and leave the next byte available to another reader.
+
+macOS physical `pwd` can ask the kernel for the path of the current directory using `ATTR_CMN_FULLPATH`. Validate the returned name against the current directory's device and inode and fall back to `getcwd` if lookup or validation fails. Probing an executable's access rights with the same attribute API was slower than the existing checks on M1. The appropriate query depends on the information the command needs. [Apple attribute API](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/getattrlist.2.html) · [Release measurements](benchmarks.md#expansion-command-review)
+
+配列全体でパターンを再利用し、`[[ ]]` ではロケールや範囲照合の設定が変わればコンパイルし直す。単純な `[ab]` も、パスの除外・大文字小文字を無視する照合の両方で試す。コマンド置換の子を省けるのは、引数・ローカル変数・選んだ分岐の出力まで、副作用とシェル状態を確認できた場合に限る。nvm の初期化時間は実物で測る。
+
+ヒアストリングのバイト列を直接読める場合でも、FD 上限に達したときの失敗は観測できる。短い入力ではパイプ作成を残し、書き込みと標準入力の差し替えを省く。macOS の物理パスはカーネルから取得し、デバイス番号・inode の一致を確認する。リネーム、元の名前の再利用、作業ディレクトリの削除を回帰試験に含めた。 [実測と再現方法](benchmarks.md#expansion-command-review)
+
 ## Read-only command substitutions and sourced functions / コマンド置換と関数定義の読み込み
 
 Before eliminating a substitution child, validate both the shell expansion and the values it will read. Arithmetic can recursively interpret a variable's contents, so a name in a read-only expression must resolve to a stored decimal scalar. Subscripts, namerefs, assignments and process-sensitive variables need the normal child. Expand a helper's arguments with the caller's positional parameters, install the callee's arguments for its single builtin, then restore the caller even if expansion fails. A validated list handles an expansion error in place so a diagnostic already written by an earlier builtin appears once.
