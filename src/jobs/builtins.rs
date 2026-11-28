@@ -262,7 +262,7 @@ fn wait_next(session: &mut Session, ids: &[String], force: bool) -> (u8, Option<
 }
 
 fn report_waited(job: &Job, pid: Option<pid_t>, interactive: bool, posix: bool, marker: char) {
-    if job.listed || job.stopped() || job.active() {
+    if job.foreground_notice || job.listed || job.stopped() || job.active() {
         return;
     }
     if interactive {

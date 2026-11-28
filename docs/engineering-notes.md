@@ -2,7 +2,7 @@
 
 ## Foreground signal notices at the prompt / フォアグラウンドのシグナル通知
 
-In an interactive POSIX shell with monitor mode enabled and asynchronous notices disabled, GNU Bash 5.3.20 reports a foreground command's terminating signal immediately before the next prompt. Subsequent commands on the same input line can print first. Tonari collects these notices in wait order and flushes them before the prompt. A forked shell drops inherited notices. With asynchronous notifications enabled or POSIX mode disabled, the notice appears immediately. The PTY check uses a byte marker between the signal and prompt to verify each ordering.
+In an interactive POSIX shell with monitor mode enabled and asynchronous notices disabled, GNU Bash 5.3.20 reports a foreground command's terminating signal immediately before the next prompt. Subsequent commands on the same input line can print first. Tonari retains each completed foreground job until a listing, an explicit wait or the next prompt consumes its status. A pre-prompt hook reports signals from its own commands while the hook runs. With asynchronous notifications enabled or POSIX mode disabled, the notice appears immediately. The PTY check uses a byte marker between the signal and prompt to verify each ordering.
 
 対話 POSIX モードで `set +b` のときは、前景プロセスの終了通知を次のプロンプト直前に表示する。同じ行で後続のコマンドが出力した印より後に通知が来ることと、`set -b` または通常モードでは印より先になることを端末上で検証する。[Terminal rule 26](../tests/compat/posix_rules.py)
 

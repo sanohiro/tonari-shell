@@ -138,6 +138,10 @@ def terminal_rule(shell, root, key):
                     return False
             elif not re.match(rb"\[\d+\]\s+Terminated", listed):
                 return False
+        t.send(command + b"; printf '\\036'; wait %1; printf '%s\\037' \"$?\"; :\n")
+        waited, marker, after = t.read(b"READY>").partition(b"\x1e")[2].partition(b"\x1f")
+        if not marker or waited != b"143" or report in after:
+            return False
         t.send(command + b"; " + command + b"; printf '\\036'; jobs -l; printf '\\037'; :\n")
         listed, marker, after = t.read(b"READY>").partition(b"\x1e")[2].partition(b"\x1f")
         if not marker or len(re.findall(rb"\[\d+\]\s+\d+\s+Terminated", listed)) != 2 or report in after:
