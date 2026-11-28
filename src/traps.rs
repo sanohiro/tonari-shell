@@ -205,12 +205,21 @@ mod entry_pipe {
     }
 }
 
+static INHERITED_CHLD_IGNORED: AtomicBool = AtomicBool::new(false);
+
 pub fn enter_process() {
     #[cfg(not(tonari_inherit_sigpipe))]
     entry_pipe::restore();
     // std installs its stack-overflow handlers only over SIG_DFL. An explicit
     // kill delivers just one signal, so returning from that handler loses it.
     reset_caught_signals(&[libc::SIGBUS, libc::SIGSEGV]);
+    // An inherited SIG_IGN automatically discards child exit status on Linux.
+    if disposition(libc::SIGCHLD).is_ok_and(|d| d.sa_sigaction == libc::SIG_IGN) {
+        INHERITED_CHLD_IGNORED.store(true, Relaxed);
+        unsafe {
+            libc::signal(libc::SIGCHLD, libc::SIG_DFL);
+        }
+    }
 }
 
 pub(crate) fn reset_caught_signals(signals: &[i32]) {
@@ -258,6 +267,17 @@ impl Traps {
 
     pub fn has_explicit_traps(&self) -> bool {
         !self.entries.is_empty()
+    }
+
+    // An ignored signal and an EXIT action cannot observe the middle of an
+    // inert builtin. Termination and pending actions are dispatched at command
+    // boundaries. Keep real children when SIGCHLD or tracing is observable.
+    pub(crate) fn observes_commands(&self) -> bool {
+        self.in_action()
+            || self
+                .entries
+                .iter()
+                .any(|(&sig, action)| sig != 0 && !action.command.is_empty())
     }
 
     pub fn active(&self) -> bool {
@@ -352,7 +372,9 @@ impl Traps {
             original = *old;
         } else if real {
             original = disposition(sig)?;
-            if original.sa_sigaction == libc::SIG_IGN {
+            if original.sa_sigaction == libc::SIG_IGN
+                || sig == libc::SIGCHLD && INHERITED_CHLD_IGNORED.load(Relaxed)
+            {
                 if !interactive
                     && !self.interactive_origin
                     && self.async_resettable & (signal_bit(sig)) == 0
@@ -521,6 +543,9 @@ impl Traps {
     }
 
     fn lists_as_ignored(&self, sig: i32) -> bool {
+        if sig == libc::SIGCHLD && INHERITED_CHLD_IGNORED.load(Relaxed) {
+            return true;
+        }
         let bit = signal_bit(sig);
         // Background commands ignore INT and QUIT internally. A signal already
         // ignored on entry is still visible, as is an explicit empty trap.
@@ -822,7 +847,7 @@ pub fn dispatch(session: &mut Session, status: u8) -> Flow {
             let mut flow = Flow::Continue(status);
             for _ in 0..count {
                 flow = with_trapsig(session, sig, status, |session| {
-                    crate::input::text(session, &command, status, false, false, Some(1))
+                    crate::input::trap_text(session, &command, status)
                 });
                 if !matches!(flow, Flow::Continue(_)) || count > 1 && !session.traps.catches(sig) {
                     break;
@@ -842,13 +867,20 @@ pub fn dispatch(session: &mut Session, status: u8) -> Flow {
     Flow::Continue(status)
 }
 
-// An explicit exit runs with its command redirections, positional parameters
-// and dynamically scoped locals still in effect. Natural EOF uses this too.
+// Unwind command redirections before EXIT, but run the action before the
+// innermost function or source frame loses its arguments and local variables.
+pub(crate) fn leaving_scope(session: &mut Session, flow: Flow) -> Flow {
+    match flow {
+        Flow::Exit(code) => Flow::Exit(exit_action(session, code)),
+        other => other,
+    }
+}
+
 pub(crate) fn exit_action(session: &mut Session, code: u8) -> u8 {
     if session.traps.handling_exit {
         return code;
     }
-    let Some(exit) = session.traps.entries.remove(&0) else {
+    let Some(exit) = session.traps.entries.get(&0).cloned() else {
         return code;
     };
     session.traps.handling_exit = true;
@@ -864,12 +896,20 @@ pub(crate) fn exit_action(session: &mut Session, code: u8) -> u8 {
 }
 
 pub fn finish(session: &mut Session, code: u8) -> u8 {
+    finish_shell(session, code, false)
+}
+
+pub(crate) fn finish_shell(session: &mut Session, code: u8, save_history: bool) -> u8 {
     if session.interactive
         && (TERMINATING.load(Relaxed) == libc::SIGHUP || session.login && session.shopt.huponexit)
     {
         session.jobs.hangup();
     }
     if !session.traps.active() && TERMINATING.load(Relaxed) == 0 {
+        if save_history {
+            crate::history::finish_interactive(session);
+        }
+        session.jobs.restore_initial_group();
         return code;
     }
     let mut code = match dispatch(session, code) {
@@ -878,6 +918,10 @@ pub fn finish(session: &mut Session, code: u8) -> u8 {
     };
     let sig = TERMINATING.swap(0, Relaxed);
     code = exit_action(session, code);
+    if save_history {
+        crate::history::finish_interactive(session);
+    }
+    session.jobs.restore_initial_group();
     if sig != 0 {
         unsafe {
             libc::signal(sig, libc::SIG_DFL);

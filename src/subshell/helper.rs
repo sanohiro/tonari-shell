@@ -178,7 +178,7 @@ pub(super) fn capture(
     last: u8,
 ) -> Option<Result<(String, u8), &'static str>> {
     if !super::can_elide_child(session)
-        || session.traps.has_explicit_traps()
+        || session.traps.observes_commands()
         || session.keyword
         || session.shopt.nocasematch
         || session.shopt.localvar_inherit
@@ -229,7 +229,7 @@ pub(super) fn capture(
                 Word::Declaration(parts) => Word::Expanded(parts.clone()),
                 _ => word.clone(),
             };
-            rhs.remove_assignment_prefix(key.len() + 1);
+            rhs.remove_assignment_prefix(key.len() + 1)?;
             let value = Expansion::with_assignments(session, last, &captured, &mut locals, false)
                 .scalar(rhs)
                 .ok()?;

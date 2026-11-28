@@ -7,7 +7,7 @@ use std::ffi::CString;
 pub(crate) struct Cached {
     ctype: String,
     characters: CharacterLocale,
-    collate: String,
+    pub(super) collate: String,
     pub(super) handle: libc::locale_t,
 }
 
@@ -65,7 +65,6 @@ pub(super) fn run<T>(
 }
 
 pub(crate) fn resolve(lookup: &dyn Fn(&str) -> Option<String>) -> Option<std::rc::Rc<Cached>> {
-    thread_local! { static LAST: RefCell<Option<std::rc::Rc<Cached>>> = const { RefCell::new(None) }; }
     let nonempty = |key| lookup(key).filter(|s| !s.is_empty());
     let (ctype, collate) = if let Some(all) = nonempty("LC_ALL") {
         (all.clone(), all)
@@ -76,12 +75,17 @@ pub(crate) fn resolve(lookup: &dyn Fn(&str) -> Option<String>) -> Option<std::rc
             nonempty("LC_COLLATE").unwrap_or(lang),
         )
     };
+    resolve_names(&ctype, &collate)
+}
+
+pub(super) fn resolve_names(ctype: &str, collate: &str) -> Option<std::rc::Rc<Cached>> {
+    thread_local! { static LAST: RefCell<Option<std::rc::Rc<Cached>>> = const { RefCell::new(None) }; }
     LAST.with_borrow_mut(|slot| {
         if slot
             .as_ref()
             .is_none_or(|c| c.ctype != ctype || c.collate != collate)
         {
-            *slot = Cached::new(ctype, collate)
+            *slot = Cached::new(ctype.into(), collate.into())
                 .or_else(|| Cached::new("C".into(), "C".into()))
                 .map(std::rc::Rc::new);
             if !cfg!(target_os = "linux") {

@@ -264,6 +264,12 @@ impl Session {
     }
 
     pub fn assign_builtin_target(&mut self, target: &str, value: &str) -> Result<(), &'static str> {
+        if super::is_identifier(target) && self.assign_existing_literal(target, value) {
+            return Ok(());
+        }
+        if !target.ends_with('+') && self.assign_existing_literal(target, value) {
+            return Ok(());
+        }
         self.assign_target_value(
             target,
             value,
@@ -612,6 +618,9 @@ impl Session {
         if let Some(map) = self.variables.get(name).and_then(Variable::associative) {
             return map.ordered().map(|(_, v)| v.to_owned()).collect();
         }
+        if let Some(elements) = self.variables.get(name).and_then(|v| v.elements.as_deref()) {
+            return elements.iter().map(|(_, value)| value.to_owned()).collect();
+        }
         self.indices(name)
             .into_iter()
             .filter_map(|index| self.element(name, index))
@@ -664,7 +673,7 @@ impl Session {
         {
             return false;
         }
-        let Some(v) = self.variables.get_mut(name) else {
+        let Some(v) = self.variables.value_mut(name, false) else {
             return false;
         };
         if v.dynamic || v.nameref || v.readonly || v.integer || v.letter_case.is_some() {
@@ -801,7 +810,8 @@ impl Session {
         if append
             && !global
             && let ArrayItems::Indexed(words) = items
-            && let Some(var) = self.variables.get_mut(name)
+            && let Some(var) = self.variables.value_mut(name, false)
+            && !var.dynamic
             && !var.readonly
             && !var.integer
             && !var.nameref
@@ -991,7 +1001,22 @@ impl Session {
                 .ok_or(crate::session::SUBSCRIPT_RANGE)?;
                 let value = if var.integer {
                     let old = if concat {
-                        map.get(&i).and_then(|s| s.parse::<i64>().ok()).unwrap_or(0)
+                        match map.get(&i) {
+                            None => 0,
+                            Some(text) => match Self::plain_decimal(text) {
+                                Some(n) => n,
+                                None => {
+                                    let expression = text.to_owned();
+                                    self.initializer_number(
+                                        name,
+                                        var,
+                                        &mut map,
+                                        visible,
+                                        &expression,
+                                    )?
+                                }
+                            },
+                        }
                     } else {
                         0
                     };
@@ -1175,14 +1200,14 @@ impl Session {
                 .insert(name.into(), Variable::scalar(inherited, exported));
         }
         let value = self.convert_case(value, self.variables[name].letter_case);
-        let var = self.variables.get_mut(name).unwrap();
+        let var = self.variables.value_mut(name, false).unwrap();
         var.declared = true;
         var.array_assigned = true;
         var.make_array().insert(index, value);
     }
 
     pub(super) fn unset_element(&mut self, name: &str, index: i64) {
-        if let Some(var) = self.variables.get_mut(name) {
+        if let Some(var) = self.variables.value_mut(name, false) {
             if let Some(array) = var.elements.as_mut().map(Rc::make_mut) {
                 array.remove(index);
             } else if index == 0 {

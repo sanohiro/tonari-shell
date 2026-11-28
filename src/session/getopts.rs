@@ -104,7 +104,7 @@ impl Session {
                     } else {
                         "illegal option"
                     };
-                    eprintln!("{}: {message} -- {c}", self.arg0);
+                    stderr_line!("{}: {message} -- {c}", self.arg0);
                 }
             }
         }

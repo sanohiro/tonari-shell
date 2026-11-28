@@ -72,35 +72,40 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
         return 0;
     }
     if remove && args.is_empty() {
+        diagnostic!("unalias: usage: unalias [-a] name [name ...]");
         return 2;
     }
     let mut out = crate::builtins::StdoutFd(Some(cmd));
     let command_prefix = !session.posix || print_all;
     let mut buffer = String::new();
-    let record = |buffer: &mut String, name: &str, value: &str| {
+    let record = |out: &mut crate::builtins::StdoutFd,
+                  buffer: &mut String,
+                  name: &str,
+                  value: &str|
+     -> std::io::Result<()> {
         buffer.push_str(prefix(name, command_prefix));
         buffer.push_str(name);
         buffer.push('=');
         crate::word::quote::push_single_quote(buffer, value);
         buffer.push('\n');
+        if buffer.len() >= 16 * 1024 {
+            out.write_all(buffer.as_bytes())?;
+            buffer.clear();
+        }
+        Ok(())
     };
-    if !remove && (print_all || args.is_empty()) {
-        if let Some(map) = &session.aliases.0 {
-            for (name, value) in map.iter() {
-                record(&mut buffer, name, value);
-                if buffer.len() >= 16384 {
-                    if out.write_all(buffer.as_bytes()).is_err() {
-                        return 1;
-                    }
-                    buffer.clear();
-                }
+    if !remove
+        && (print_all || args.is_empty())
+        && let Some(map) = &session.aliases.0
+    {
+        for (name, value) in map.iter() {
+            if record(&mut out, &mut buffer, name, value).is_err() {
+                return 1;
             }
         }
-        return u8::from(
-            out.write_all(buffer.as_bytes())
-                .and_then(|_| out.flush())
-                .is_err(),
-        );
+    }
+    if print_all && session.shopt.compat > 52 {
+        args = &[];
     }
     let mut status = 0;
     for arg in args {
@@ -118,18 +123,31 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
                 .as_mut()
                 .is_some_and(|map| Rc::make_mut(map).remove(arg).is_some())
         {
+            if session.aliases.0.as_ref().is_some_and(|map| map.is_empty()) {
+                session.aliases.0 = None;
+            }
             continue;
         }
         if let Some(value) = session.aliases.get(arg) {
-            record(&mut buffer, arg, value);
+            if record(&mut out, &mut buffer, arg, value).is_err() {
+                return 1;
+            }
+        } else {
             if out.write_all(buffer.as_bytes()).is_err() {
                 return 1;
             }
             buffer.clear();
-        } else {
             diagnostic!("{cmd}: {arg}: not found");
             status = 1;
         }
     }
-    if out.flush().is_err() { 1 } else { status }
+    if out
+        .write_all(buffer.as_bytes())
+        .and_then(|_| out.flush())
+        .is_err()
+    {
+        1
+    } else {
+        status
+    }
 }

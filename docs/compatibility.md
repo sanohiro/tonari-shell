@@ -1,5 +1,19 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## Startup, expansion and persistent history / 起動・展開・履歴の保存
+
+Tonari supports both Debian's Bash 5.2 and Bash 5.3 startup files. With an unset HOME, the account database supplies the user's home. An explicitly empty HOME disables implicit per-user paths. An explicit rcfile still works. For filename completion, `~//name` stays under the home directory. With an empty HOME, `~/usr` expands to `/usr`. A noninteractive top-level command from SSH can read bashrc. Privileged startup suppresses environment-supplied functions and options. When real and effective IDs differ Tonari drops elevated IDs, or refuses startup if asked to retain them with `-p`. A normal login, sudo or su session with matching IDs can use `-p`. The shell retains the `mailwarn` and `noexpand_translation` option settings for rcfiles. Mail-spool polling and gettext catalogs are outside its supported integrations.
+
+GNU Bash 5.3 diagnoses an empty directory name, reports an overflowing numeric printf conversion as a failure, and supports waiting for a saved process-substitution PID with `wait -n`. Some 5.2 versions give different results. Setting BASH_COMPAT does not revert every change between Bash releases. The public-entry tests check the relevant version's observable result. [Builtin tests](../tests/review_builtins.py) · [Job and scope tests](../tests/review_runtime.py)
+
+One-argument groups in the `test` builtin evaluate the string inside the group. An empty string gives false. In a matrix of 3,472 short expressions, the remaining 31 differences with Bash 5.3.20 all involved its use of an argument from outside the current group. Tonari keeps the local group's value. [Conditional regression cases](../tests/review_builtins.py)
+
+A bare job specification resumes the selected job in the foreground. Following the literal specification with an ampersand resumes it in the background. Process-control witnesses check the job and the status returned by its actual process. [Job-control tests](../tests/review_runtime.py)
+
+Shell strings and argv are UTF-8. A Unicode `read -d` or `mapfile -d` delimiter consumes an entire scalar, including on a shared descriptor. Byte-oriented stdout remains available. A floating printf conversion uses binary64. Time formatting accepts up to 64 KiB of cumulative field padding in one format. Arithmetic evaluation distinguishes literal expression syntax from expanded data; subscripts and other mutations within a pipeline stage stay with that stage. Here-documents keep their source text when printed as part of a function. When an array initializer contains a syntax error, Tonari skips the rest of that initializer through its closing parenthesis, preserving the old array and resuming at the following command. GNU Bash sometimes resumes at the very next physical line inside the invalid array. [Language tests](../tests/review_language.py)
+
+HOME 未設定時はアカウントのホームを参照し、空文字の場合は暗黙の個人設定ファイルを読みません。実 UID/GID と実効値が違う起動では権限を落とし、特権を保持する指定なら起動を拒否します。`wait -n` や数値の範囲外エラーなど、Bash 5.2 と 5.3 で違う結果は版ごとに照合しています。UTF-8 区切りの読み取り、関数定義内のヒアドキュメント、履歴保存前の EXIT トラップ、入力途中のシグナルを回帰試験に加えました。[対話・履歴試験](../tests/review_interactive.py)
+
 ## Required glob suffixes and global array elements / glob の末尾とグローバル配列
 
 On GNU Bash 5.3.20, `s=aaa; [[ $s == !(z)*!(z)*y ]]` succeeds. The final literal `y` is required, so Tonari returns 1. Reaching the end of the subject at a nullable group still requires matching the remaining pattern. The same rule applies when the suffix requires one character, or when the negative group itself excludes empty input. Regression tests exercise conditional matching, replacement and trimming.

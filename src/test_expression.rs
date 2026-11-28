@@ -24,8 +24,7 @@ pub struct StaticGlob {
 struct CompiledGlob {
     locale: Option<std::rc::Rc<pattern::PatternLocale>>,
     ascii_ranges: bool,
-    matcher: pattern::Matcher<String>,
-    group: Option<pattern::extended::Pattern>,
+    matcher: pattern::extended::Compiled,
 }
 
 impl StaticGlob {
@@ -49,17 +48,13 @@ impl StaticGlob {
             });
             if !current {
                 *entry = Some(Box::new(CompiledGlob {
-                    matcher: pattern::Matcher::new(source.to_owned()),
-                    group: pattern::extended::Pattern::new(source),
+                    matcher: pattern::extended::Compiled::new(source, true),
                     locale,
                     ascii_ranges,
                 }));
             }
             let compiled = entry.as_ref().unwrap();
-            compiled.group.as_ref().map_or_else(
-                || compiled.matcher.matches(left),
-                |group| group.accepts(left, false),
-            )
+            compiled.matcher.accepts(left)
         }
     }
 }
@@ -134,10 +129,10 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
         }
         crate::eval::expand_case(s, word.clone(), status, false).map(std::borrow::Cow::Owned)
     }
-    let error = |message: &'static str| {
+    fn error(message: impl std::fmt::Display) -> Flow {
         diagnostic!("[[: {message}");
         Flow::Continue(2)
-    };
+    }
     if !session.xtrace {
         match expr {
             Word(w) | Unary("-n" | "-z", w) if let Some(v) = w.stored_parameter(session) => {
@@ -148,6 +143,14 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                     && let Some(right) = right.as_literal()
                     && let Some(v) = w.stored_parameter(session) =>
             {
+                if matches!(*op, "<" | ">") {
+                    let order = pattern::text_order(v, right, session);
+                    return Ok(if *op == "<" {
+                        order.is_lt()
+                    } else {
+                        order.is_gt()
+                    });
+                }
                 return builtins::binary(v, op, right).map_err(error);
             }
             _ => {}
@@ -168,7 +171,9 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             Ok(true)
         }
         Or(terms) => {
-            let (last, prefix) = terms.split_last().expect("empty conditional disjunction");
+            let Some((last, prefix)) = terms.split_last() else {
+                return Ok(false);
+            };
             for term in prefix {
                 match condition(term, session, status) {
                     Ok(false) | Err(Flow::Continue(1..)) => {}
@@ -226,6 +231,17 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             let left = operand(session, left, status)?;
             match op {
                 "=" | "==" | "!=" => {
+                    if !session.xtrace
+                        && !session.shopt.nocasematch
+                        && let crate::word::Word::Expanded(parts) = right
+                        && matches!(
+                            parts.as_slice(),
+                            [crate::word::Part::Parameter { quoted: true, .. }]
+                        )
+                        && let Some(value) = right.stored_parameter(session)
+                    {
+                        return Ok((left == value) != (op == "!="));
+                    }
                     if !session.shopt.nocasematch
                         && let Some(text) = right.as_literal()
                     {
@@ -244,21 +260,8 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                         env.session.positional.as_slice(),
                     );
                     trace(env.session, status, &[&left, op, &right]);
-                    let locale = right
-                        .contains(['[', '?'])
-                        .then(|| pattern::session_locale(env.session))
-                        .flatten();
-                    let _guard = locale.as_ref().and_then(|l| l.enter());
-                    let matched = if env.session.shopt.nocasematch {
-                        pattern::extended::insensitive_match(
-                            &left,
-                            &right,
-                            true,
-                            env.session.character_locale(),
-                        )
-                    } else {
-                        pattern::extended::matches(&left, &right)
-                    };
+                    let matched =
+                        pattern::extended::session_match(&left, &right, true, env.session);
                     Ok(matched != (op == "!="))
                 }
                 "=~" => {
@@ -292,6 +295,16 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                         "-le" => a <= b,
                         "-gt" => a > b,
                         _ => a >= b,
+                    })
+                }
+                "<" | ">" => {
+                    let right = operand(session, right, status)?;
+                    trace(session, status, &[&left, op, &right]);
+                    let order = pattern::text_order(&left, &right, session);
+                    Ok(if op == "<" {
+                        order.is_lt()
+                    } else {
+                        order.is_gt()
                     })
                 }
                 _ => {
@@ -329,7 +342,11 @@ fn regex_search(
             && r.locale.as_ref().map(std::rc::Rc::as_ptr)
                 == locale.as_ref().map(std::rc::Rc::as_ptr)
     }) {
-        index
+        // Repeated expressions should survive a stream of one-off regexes.
+        if index + 1 < recent.len() {
+            recent[index..].rotate_left(1);
+        }
+        recent.len() - 1
     } else {
         let compiled = Compiled::new(expression.into_owned(), ignore_case, locale)
             .map_err(|()| Flow::Continue(2))?;
@@ -355,7 +372,7 @@ fn ere_list_end(body: &[u8]) -> Option<usize> {
             return Some(i);
         }
         if byte == b'['
-            && let Some((length, _)) = list_item(&body[i..])
+            && let Some((length, _)) = pattern::posix_list_item(&body[i..])
         {
             i += length;
         } else {
@@ -365,13 +382,7 @@ fn ere_list_end(body: &[u8]) -> Option<usize> {
     None
 }
 
-fn list_item(input: &[u8]) -> Option<(usize, u8)> {
-    let [b'[', mark @ (b'=' | b'.' | b':'), tail @ ..] = input else {
-        return None;
-    };
-    let end = tail.windows(2).position(|w| w == [*mark, b']'])?;
-    Some((end + 4, *mark))
-}
+
 
 fn open_list(pattern: &str) -> Option<usize> {
     let bytes = pattern.as_bytes();
@@ -452,7 +463,7 @@ fn portable_list(body: &str) -> Option<String> {
     use Member::*;
     let (negative, mut rest) = body.strip_prefix('^').map_or((false, body), |s| (true, s));
     if !negative
-        && let Some((n, mark)) = list_item(rest.as_bytes())
+        && let Some((n, mark)) = pattern::posix_list_item(rest.as_bytes())
         && n == rest.len()
         && matches!(mark, b'.' | b'=')
     {
@@ -475,7 +486,7 @@ fn portable_list(body: &str) -> Option<String> {
     }
     let mut members = Vec::new();
     while !rest.is_empty() {
-        if let Some((n, mark)) = list_item(rest.as_bytes()) {
+        if let Some((n, mark)) = pattern::posix_list_item(rest.as_bytes()) {
             let name = &rest[2..n - 2];
             let item = if mark == b':' {
                 Class(&rest[..n])
@@ -680,20 +691,7 @@ fn capture_count(expression: &str) -> usize {
             b'\\' => bytes = bytes.get(1..).unwrap_or_default(),
             b'(' => groups += 1,
             b'[' => {
-                bytes = bytes.strip_prefix(b"^").unwrap_or(bytes);
-                bytes = bytes.strip_prefix(b"]").unwrap_or(bytes);
-                while let Some((&c, after)) = bytes.split_first() {
-                    bytes = after;
-                    if c == b']' {
-                        break;
-                    }
-                    if c == b'['
-                        && let Some(&marker @ (b':' | b'=' | b'.')) = after.first()
-                        && let Some(end) = after[1..].windows(2).position(|s| s == [marker, b']'])
-                    {
-                        bytes = &after[end + 3..];
-                    }
-                }
+                bytes = ere_list_end(bytes).map_or(&[][..], |end| &bytes[end + 1..]);
             }
             _ => {}
         }

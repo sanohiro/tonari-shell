@@ -89,15 +89,7 @@ impl Session {
             }),
         };
         bound > 0 && self.function_depth - self.substitution_scopes >= bound
-            || self.function_depth >= 128 && self.deep_function_nesting_full()
-    }
-
-    #[cold]
-    fn deep_function_nesting_full(&self) -> bool {
-        // The evaluator runs on the process main stack. For calls beyond the
-        // original guard, keep at least half its soft limit for the environment,
-        // signal frames and nested evaluation. Honor changes made by ulimit.
-        self.function_depth >= 256 || crate::stack_budget_exceeded()
+            || crate::stack_budget_exceeded()
     }
 
     pub(crate) fn push_source_path(&mut self, path: &std::path::Path) {

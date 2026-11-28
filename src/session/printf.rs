@@ -12,6 +12,7 @@ use tonari_time_locales::numeric::{self, Numeric};
 struct Variables<'a> {
     shell: &'a mut Session,
     capture: bool,
+    has_target: bool,
     private: Option<Box<Session>>,
 }
 
@@ -100,12 +101,17 @@ pub(crate) fn run(
     let mut variables = Variables {
         shell: session,
         capture: capture.is_some(),
+        has_target: target.is_some(),
         private: None,
     };
     let mut args = Arguments {
         values,
         status: 0,
         locale: None,
+        byte_char_codes: values
+            .iter()
+            .any(|s| matches!(s.as_bytes().first(), Some(b'\'' | b'"')))
+            && variables.read().ascii_quoting(),
     };
     let mut output = Vec::new();
     if matches!(format.as_str(), "%s\\n" | "%s\n") {
@@ -130,6 +136,9 @@ pub(crate) fn run(
             diagnostic!("printf: expected UTF-8 variable value");
             return 1;
         };
+        if variables.capture && variables.read().capture_local(name) {
+            return args.status;
+        }
         if let Err(e) = variables.write().assign_builtin_target(name, value) {
             diagnostic!("printf: {e}");
             return 1;
@@ -160,6 +169,7 @@ struct Arguments<'a> {
     values: &'a [String],
     status: u8,
     locale: Option<Numeric>,
+    byte_char_codes: bool,
 }
 
 impl<'a> Arguments<'a> {
@@ -183,7 +193,11 @@ impl<'a> Arguments<'a> {
             return from_char(0);
         }
         if let Some(rest) = value.strip_prefix(['\'', '"']) {
-            return from_char(rest.chars().next().unwrap_or('\0') as u32);
+            return from_char(if self.byte_char_codes {
+                rest.as_bytes().first().copied().unwrap_or(0).into()
+            } else {
+                rest.chars().next().map_or(0, u32::from)
+            });
         }
         let translated;
         let input = if decimal == "." {
@@ -218,8 +232,12 @@ impl<'a> Arguments<'a> {
             *errno = 0;
         }
         let result = parse(input.as_ptr(), &mut end);
-        if unsafe { *errno != 0 || *end != 0 } {
-            diagnostic!("printf: {value}: invalid or out-of-range number");
+        let (error, remaining) = unsafe { (*errno, *end) };
+        if remaining != 0 || error != 0 && error != libc::ERANGE {
+            diagnostic!("printf: {value}: invalid number");
+            self.status = 1;
+        } else if error == libc::ERANGE {
+            diagnostic!("printf: {value}: value out of range");
             self.status = 1;
         }
         result
@@ -336,7 +354,7 @@ impl Spec {
             wide |= len == b'l';
             *input = rest;
         }
-        let (conversion, rest) = input.split_first().ok_or("missing format character")?;
+        let (conversion, rest) = input.split_first().ok_or("`%': missing format character")?;
         *input = rest;
         Ok((
             Self {
@@ -651,7 +669,8 @@ fn render(
     args: &mut Arguments<'_>,
     out: &mut Vec<u8>,
     variables: &mut Variables,
-) -> Result<bool, &'static str> {
+) -> Result<bool, std::borrow::Cow<'static, str>> {
+    let start = out.len();
     while let Some((&byte, rest)) = input.split_first() {
         input = rest;
         match byte {
@@ -694,11 +713,12 @@ fn render(
                                 -2 => variables.read().started_at,
                                 t => t,
                             };
-                            let stamp = crate::shell_time::format(
+                            let stamp = crate::shell_time::try_format(
                                 variables.read(),
                                 if format.is_empty() { "%X" } else { format },
                                 seconds,
-                            );
+                            )
+                            .ok_or("time or format out of range")?;
                             spec.bytes(stamp.as_bytes(), out)?;
                         } else {
                             diagnostic!("printf: warning: invalid time format specification");
@@ -742,13 +762,20 @@ fn render(
                         let name = args.next();
                         if !name.is_empty() {
                             if !is_identifier(name) {
-                                return Err("invalid identifier for %n");
+                                return Err("invalid identifier for %n".into());
                             }
                             if variables.read().readonly(name) {
                                 diagnostic!("printf: {name}: readonly variable");
                                 args.status = 1;
-                            } else {
-                                variables.write().assign(name, &out.len().to_string());
+                            } else if !(variables.capture
+                                && !variables.has_target
+                                && input.is_empty()
+                                && args.values.is_empty()
+                                && variables.read().capture_local(name))
+                            {
+                                variables
+                                    .write()
+                                    .assign(name, itoa::Buffer::new().format(out.len() - start));
                             }
                         }
                     }
@@ -757,11 +784,9 @@ fn render(
                         let mut locale = numeric::C;
                         if float || spec.has(b'\'') {
                             locale = *args.locale.get_or_insert_with(|| {
-                                ["LC_ALL", "LC_NUMERIC", "LANG"]
-                                    .into_iter()
-                                    .find_map(|key| {
-                                        variables.read().get(key).filter(|s| !s.is_empty())
-                                    })
+                                variables
+                                    .read()
+                                    .locale_category("LC_NUMERIC")
                                     .as_deref()
                                     .map(numeric::find)
                                     .unwrap_or(numeric::C)
@@ -777,7 +802,13 @@ fn render(
                             spec.numeric(k, ".", args, out)?;
                         }
                     }
-                    _ => return Err("unsupported conversion"),
+                    _ => {
+                        return Err(format!(
+                            "`{}': invalid format character",
+                            char::from(conversion)
+                        )
+                        .into());
+                    }
                 }
             }
             _ => {
@@ -806,7 +837,8 @@ fn quote(data: &[u8], session: &Session, single: bool) -> Vec<u8> {
     for (i, &b) in data.iter().enumerate() {
         if b.is_ascii_whitespace()
             || b"!\"$&'()*,;<>?[\\]^`{|}".contains(&b)
-            || i == 0 && matches!(b, b'#' | b'~')
+            || i == 0 && b == b'#'
+            || crate::word::quote::tilde_at(data, i)
         {
             out.push(b'\\');
         }

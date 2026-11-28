@@ -86,14 +86,9 @@ impl Range {
     }
 
     fn value(&self, index: u64) -> String {
-        let n = self.number(index);
-        if self.letters {
-            char::from(n as u8).to_string()
-        } else if self.width == 0 {
-            n.to_string()
-        } else {
-            format!("{n:0width$}", width = self.width)
-        }
+        let mut text = String::new();
+        self.append_value(index, &mut text);
+        text
     }
 }
 
@@ -554,10 +549,7 @@ fn resolve_tilde(parts: &mut Vec<Part>) {
     while let Some(part) = parts.get(end) {
         let Part::Pattern(raw) = part else { return };
         let login = raw.split('/').next().unwrap();
-        if !login
-            .chars()
-            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
-        {
+        if !super::valid_tilde_user(login) {
             return;
         }
         name.push_str(login);

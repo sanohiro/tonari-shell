@@ -5,7 +5,7 @@ use std::ops::ControlFlow;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
-const MAX_DIRECTORIES: usize = 32;
+pub(super) const MAX_DIRECTORIES: usize = 32;
 const MAX_ENTRIES: usize = 8192;
 const MAX_NAME_BYTES: usize = 256 * 1024;
 
@@ -17,6 +17,7 @@ struct Stamp {
 }
 
 struct Listing {
+    complete: bool,
     heads: [u16; 256],
     bytes: Vec<u8>,
     index: Vec<Entry>,
@@ -39,13 +40,26 @@ impl Listing {
     fn visit_prefix(
         &self,
         prefix: &[u8],
+        editing: bool,
         visit: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
     ) -> ControlFlow<()> {
-        let mut link = self.heads[usize::from(prefix[0])];
-        let editing = crate::editor::preview::active();
+        let mut all = 0;
+        let mut link = prefix
+            .first()
+            .map_or(0, |&first| self.heads[usize::from(first)]);
         let mut visited = 0usize;
-        while link != 0 {
-            let entry = &self.index[usize::from(link) - 1];
+        while if prefix.is_empty() {
+            all < self.index.len()
+        } else {
+            link != 0
+        } {
+            let entry = if prefix.is_empty() {
+                let index = all;
+                all += 1;
+                &self.index[index]
+            } else {
+                &self.index[usize::from(link) - 1]
+            };
             link = entry.next;
             if editing && visited.is_multiple_of(256) {
                 crate::editor::preview::scan_input();
@@ -104,6 +118,8 @@ pub(super) fn scan(
     path: &Path,
     prefix: &[u8],
     checked_fd: &mut bool,
+    common_only: bool,
+    editing: bool,
     visit: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
 ) -> ControlFlow<()> {
     let Ok(meta) = path.metadata() else {
@@ -135,7 +151,15 @@ pub(super) fn scan(
                     }
                     *checked_fd = true;
                 }
-                return listing.visit_prefix(prefix, visit);
+                if listing.complete {
+                    return listing.visit_prefix(prefix, editing, visit);
+                }
+                // Two previously seen, still executable names can settle a
+                // common prefix without another readdir. A miss still needs
+                // the full live scan: a partial index cannot prove uniqueness.
+                if common_only && listing.visit_prefix(prefix, editing, visit).is_break() {
+                    return ControlFlow::Break(());
+                }
             }
             cache.directories.swap_remove(i);
         }
@@ -143,6 +167,7 @@ pub(super) fn scan(
         // Directory sizes are filesystem-specific. Bound this initial capacity hint.
         let entries = (meta.len() / 32).min(256) as usize;
         let mut listing = Some(Listing {
+            complete: false,
             heads: [0; 256],
             bytes: Vec::with_capacity(entries * 16),
             index: Vec::with_capacity(entries),
@@ -154,10 +179,15 @@ pub(super) fn scan(
                 listing = None;
             }
             // Untouched entries still poll for typeahead. An ambiguous prefix
-            // can stop the live scan without publishing a partial index.
+            // can settle even a partial index as soon as its witnesses agree.
             visit(raw.filter(|s| s.to_bytes().starts_with(prefix)), kind)
         });
-        if result == Some(ControlFlow::Continue(())) {
+        if let Some(flow) = result
+            && (flow.is_continue() || listing.is_some())
+        {
+            if let Some(index) = &mut listing {
+                index.complete = flow.is_continue();
+            }
             // Remember an oversized directory so the next query can stream it.
             let entry = (path.to_owned(), stamp, listing);
             if cache.directories.len() < MAX_DIRECTORIES {

@@ -5,27 +5,27 @@ use crate::Flow;
 use std::io::{self, BufRead, Read};
 use std::os::fd::{AsRawFd, BorrowedFd};
 
-struct Options<'a> {
+pub(crate) struct Options<'a> {
     name: &'a str,
     fd: i32,
     origin: Option<u32>,
     skip: u32,
     limit: u32,
-    delimiter: u8,
+    delimiter: super::read::Delimiter<'a>,
     trim: bool,
     callback: Option<&'a str>,
     quantum: u32,
 }
 
 impl<'a> Options<'a> {
-    fn parse(args: &'a [String]) -> Result<Self, (u8, &'static str)> {
+    fn parse(args: &'a [String]) -> Result<Self, (u8, String)> {
         let mut result = Self {
             name: "MAPFILE",
             fd: 0,
             origin: None,
             skip: 0,
             limit: 0,
-            delimiter: b'\n',
+            delimiter: super::read::Delimiter::NEWLINE,
             trim: false,
             callback: None,
             quantum: 5000,
@@ -39,26 +39,41 @@ impl<'a> Options<'a> {
                     continue;
                 }
                 if !"dOnsucC".contains(flag) {
-                    return Err((2, "invalid option"));
+                    return Err((2, format!("-{flag}: invalid option")));
                 }
                 let value = crate::builtins::flags::value(flags.as_str(), &mut args)
-                    .ok_or((2, "option requires an argument"))?;
+                    .ok_or_else(|| (2, format!("-{flag}: option requires an argument")))?;
                 match flag {
-                    'd' => result.delimiter = value.as_bytes().first().copied().unwrap_or(0),
+                    'd' => result.delimiter = super::read::Delimiter::first(value),
                     'O' => {
-                        result.origin =
-                            Some(value.parse().map_err(|_| (1, "invalid array origin"))?)
+                        result.origin = Some(
+                            value
+                                .parse()
+                                .map_err(|_| (1, format!("{value}: invalid array origin")))?,
+                        )
                     }
-                    'n' => result.limit = value.parse().map_err(|_| (1, "invalid line count"))?,
-                    's' => result.skip = value.parse().map_err(|_| (1, "invalid line count"))?,
-                    'u' => result.fd = value.parse().map_err(|_| (1, "invalid file descriptor"))?,
+                    'n' => {
+                        result.limit = value
+                            .parse()
+                            .map_err(|_| (1, format!("{value}: invalid line count")))?
+                    }
+                    's' => {
+                        result.skip = value
+                            .parse()
+                            .map_err(|_| (1, format!("{value}: invalid line count")))?
+                    }
+                    'u' => {
+                        result.fd = value
+                            .parse()
+                            .map_err(|_| (1, format!("{value}: invalid file descriptor")))?
+                    }
                     'C' => result.callback = Some(value),
                     'c' => {
                         result.quantum = value
                             .parse()
                             .ok()
                             .filter(|&n| n > 0)
-                            .ok_or((1, "invalid callback quantum"))?
+                            .ok_or_else(|| (1, format!("{value}: invalid callback quantum")))?
                     }
                     _ => unreachable!(),
                 }
@@ -68,8 +83,9 @@ impl<'a> Options<'a> {
         if let Some(name) = args.first() {
             result.name = name;
         }
-        if !is_identifier(result.name) {
-            return Err((1, "invalid array name"));
+        let name = result.name;
+        if !is_identifier(name) {
+            return Err((1, format!("{name}: not a valid identifier")));
         }
         Ok(result)
     }
@@ -124,7 +140,15 @@ fn read_all(
             signals,
         },
     );
-    records(&mut reader, options, store)
+    let result = records(&mut reader, options, store);
+    if result.is_err() && !reader.buffer().is_empty() {
+        // Preserve the next record for another reader on the same seekable fd.
+        let unread = reader.buffer().len() as libc::off_t;
+        unsafe {
+            libc::lseek(options.fd, -unread, libc::SEEK_CUR);
+        }
+    }
+    result
 }
 
 fn records(
@@ -134,7 +158,8 @@ fn records(
 ) -> io::Result<()> {
     let mut pending = Vec::new();
     let mut skip = options.skip;
-    let delim = options.delimiter;
+    let delimiter = options.delimiter.bytes();
+    let delim = delimiter[0];
     let mut append = |bytes: &[u8], has_nul: bool| -> io::Result<()> {
         if skip > 0 {
             skip -= 1;
@@ -145,7 +170,7 @@ fn records(
         } else {
             bytes
         };
-        store(std::str::from_utf8(bytes).map_err(io::Error::other)?);
+        store(std::str::from_utf8(bytes).map_err(|_| io::Error::other("expected UTF-8 input"))?);
         Ok(())
     };
     loop {
@@ -160,16 +185,37 @@ fn records(
         let has_nul = delim != 0 && memchr::memchr(0, buf).is_some();
         // Only the unfinished record at the end of a buffer spans two reads.
         let mut start = 0;
-        for delimiter in memchr::memchr_iter(delim, buf) {
-            let record = &buf[start..=delimiter];
-            start = delimiter + 1;
-            let end = record.len() - usize::from(options.trim || delim == 0);
-            if pending.is_empty() {
-                append(&record[..end], has_nul)?;
+        let last = *delimiter.last().unwrap();
+        for i in memchr::memchr_iter(last, buf) {
+            let record = &buf[start..=i];
+            if delimiter.len() > 1 && !record.ends_with(delimiter) {
+                // A UTF-8 delimiter can begin in the previous buffer and end
+                // here. Check only its missing prefix across that boundary.
+                let missing = delimiter.len().saturating_sub(record.len());
+                if missing == 0
+                    || !pending.ends_with(&delimiter[..missing])
+                    || record != &delimiter[missing..]
+                {
+                    continue;
+                }
+            }
+            start = i + 1;
+            let remove = if options.trim || delim == 0 {
+                delimiter.len()
             } else {
-                pending.extend_from_slice(&record[..end]);
-                append(&pending, true)?;
+                0
+            };
+            let result = if pending.is_empty() {
+                append(&record[..record.len() - remove], has_nul)
+            } else {
+                pending.extend_from_slice(record);
+                let result = append(&pending[..pending.len() - remove], true);
                 pending.clear();
+                result
+            };
+            if let Err(e) = result {
+                reader.consume(start);
+                return Err(e);
             }
         }
         pending.extend_from_slice(&buf[start..]);
@@ -179,29 +225,43 @@ fn records(
 }
 
 #[inline(never)]
-pub(super) fn memory_eligible(session: &Session, args: &[String]) -> bool {
-    Options::parse(args).is_ok_and(|opts| {
-        opts.fd == 0
-            && opts.limit == 0
-            && opts.callback.is_none()
-            && session.memory_array_target(opts.name)
-    })
+pub(super) fn prepare_memory<'a>(
+    session: &Session,
+    args: &'a [String],
+    bytes: &'a [u8],
+) -> Option<super::MemoryInput<'a>> {
+    let opts = Options::parse(args).ok()?;
+    (opts.fd == 0
+        && opts.limit == 0
+        && opts.callback.is_none()
+        && session.memory_array_target(opts.name))
+    .then_some(super::MemoryInput::Mapfile(opts, bytes))
 }
 
 pub(crate) fn run(
     session: &mut Session,
     command: &str,
     args: &[String],
-    mut last: u8,
+    last: u8,
     here: Option<(i32, &[u8])>,
 ) -> Flow {
-    let mut options = match Options::parse(args) {
+    let options = match Options::parse(args) {
         Ok(options) => options,
         Err((code, message)) => {
             diagnostic!("{command}: {message}");
             return Flow::Continue(code);
         }
     };
+    run_parsed(session, command, options, last, here)
+}
+
+pub(super) fn run_parsed(
+    session: &mut Session,
+    command: &str,
+    options: Options<'_>,
+    mut last: u8,
+    here: Option<(i32, &[u8])>,
+) -> Flow {
     let fd = options.fd;
     if crate::execute::fd::is_private(fd) || unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
         diagnostic!("{command}: {fd}: invalid file descriptor");
@@ -217,7 +277,10 @@ pub(crate) fn run(
     let here = here
         .filter(|&(source, _)| source == fd && destination == options.name)
         .map(|(_, bytes)| bytes);
-    options.name = &destination;
+    let options = Options {
+        name: &destination,
+        ..options
+    };
     let origin = i64::from(options.origin.unwrap_or(0));
     let integer = session.integer(options.name);
     let letter_case = session
@@ -284,11 +347,13 @@ pub(crate) fn run(
     }
     let mut skip = options.skip;
     let mut count = 0u64;
+    let mut callback_command = String::new();
     let mut bytes = Vec::new();
     while options.limit == 0 || count < u64::from(options.limit) {
         bytes.clear();
         let mut any = false;
         let mut truncated = false;
+        let mut delimiter_prefix = 0;
         loop {
             if watch {
                 match input.wait(session, last, command, None, true) {
@@ -300,12 +365,47 @@ pub(crate) fn run(
                     Err(flow) => return flow,
                 }
             }
+            // A regular descriptor can return its unused suffix before a
+            // callback runs. Consume only one byte at a time on shared pipes.
+            if input.seekable && !watch && options.delimiter.bytes().len() == 1 {
+                match input.chunk(1, usize::MAX) {
+                    Ok([]) => break,
+                    Ok(chunk) => {
+                        any = true;
+                        let delim = options.delimiter.bytes()[0];
+                        let end = memchr::memchr(delim, chunk);
+                        let consumed = end.map_or(chunk.len(), |i| i + 1);
+                        let retained =
+                            consumed - usize::from(end.is_some() && (options.trim || delim == 0));
+                        if !truncated {
+                            let nul = memchr::memchr(0, &chunk[..retained]);
+                            bytes.extend_from_slice(&chunk[..nul.unwrap_or(retained)]);
+                            truncated = nul.is_some();
+                        }
+                        if end.is_some() {
+                            let unused = chunk.len() - consumed;
+                            input.unconsume(unused);
+                            break;
+                        }
+                        continue;
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(e) => {
+                        diagnostic!("{command}: {e}");
+                        return Flow::Continue(1);
+                    }
+                }
+            }
             match input.next() {
                 Ok(Some(b)) => {
                     any = true;
-                    if b == options.delimiter {
-                        if !options.trim && b != 0 && !truncated {
-                            bytes.push(b);
+                    if options.delimiter.advance(b, &mut delimiter_prefix) {
+                        if !truncated {
+                            if options.trim {
+                                bytes.truncate(bytes.len() - (options.delimiter.bytes().len() - 1));
+                            } else if b != 0 {
+                                bytes.push(b);
+                            }
                         }
                         break;
                     }
@@ -316,7 +416,7 @@ pub(crate) fn run(
                     }
                 }
                 Ok(None) => break,
-                Err(e) if e.kind() == io::ErrorKind::Interrupted && watch => continue,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 Err(e) => {
                     diagnostic!("{command}: {e}");
                     return Flow::Continue(1);
@@ -341,10 +441,12 @@ pub(crate) fn run(
         {
             // A callback can read the same descriptor or replace it.
             drop(input);
-            let callback_command = format!(
-                "{callback} {index} {}",
-                crate::word::quote::single_quote(line)
-            );
+            callback_command.clear();
+            callback_command.push_str(callback);
+            callback_command.push(' ');
+            callback_command.push_str(itoa::Buffer::new().format(index));
+            callback_command.push(' ');
+            crate::word::quote::push_single_quote(&mut callback_command, line);
             match crate::eval_text(session, &callback_command, last) {
                 Flow::Continue(code) => last = code,
                 flow => return flow,

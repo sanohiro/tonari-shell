@@ -1,5 +1,5 @@
 mod bracket;
-pub(crate) use bracket::portable_symbol;
+pub(crate) use bracket::{portable_symbol, posix_list_item};
 pub(crate) mod directory;
 pub(crate) mod extended;
 mod glob_locale;
@@ -8,13 +8,38 @@ pub(crate) use glob_locale::{Cached as PatternLocale, sync_ranges};
 pub(crate) fn session_locale(session: &crate::Session) -> Option<std::rc::Rc<PatternLocale>> {
     thread_local! { static INHERITED: std::cell::OnceCell<Option<std::rc::Rc<PatternLocale>>> = const { std::cell::OnceCell::new() }; }
     if session.pattern_locale_overridden() {
-        glob_locale::resolve(&|key| session.get(key))
+        if let Some(all) = session.scalar_setting("LC_ALL").filter(|s| !s.is_empty()) {
+            return glob_locale::resolve_names(&all, &all);
+        }
+        let ctype = session.locale_category("LC_CTYPE");
+        let collate = session.locale_category("LC_COLLATE");
+        glob_locale::resolve_names(
+            ctype.as_deref().unwrap_or("C"),
+            collate.as_deref().unwrap_or("C"),
+        )
     } else {
         INHERITED.with(|cell| {
             cell.get_or_init(|| glob_locale::resolve(&|key| std::env::var(key).ok()))
                 .clone()
         })
     }
+}
+
+pub(crate) fn text_order(left: &str, right: &str, session: &crate::Session) -> std::cmp::Ordering {
+    let locale = (session.shopt.compat > 40)
+        .then(|| session_locale(session))
+        .flatten();
+    if let Some(locale) = locale
+        && !matches!(
+            locale.collate.as_str(),
+            "C" | "POSIX" | "C.UTF-8" | "C.utf8"
+        )
+        && let (Ok(left), Ok(right)) = (std::ffi::CString::new(left), std::ffi::CString::new(right))
+        && let Some(_locale) = locale.enter()
+    {
+        return unsafe { libc::strcoll(left.as_ptr(), right.as_ptr()) }.cmp(&0);
+    }
+    left.cmp(right)
 }
 
 impl PatternLocale {
@@ -98,6 +123,19 @@ pub(crate) fn unfinished_star_escape(text: &str) -> bool {
         .is_some_and(|prefix| prefix.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 0)
 }
 
+pub(crate) fn trailing_escape(text: &str) -> bool {
+    text.ends_with('\\') && text.bytes().rev().take_while(|&b| b == b'\\').count() % 2 != 0
+}
+
+fn needs_pattern_matcher(text: &str) -> bool {
+    text.bytes()
+        .any(|byte| matches!(byte, b'?' | b'[' | b'\\' | 0))
+}
+
+fn plain_pattern_segment(text: &str) -> bool {
+    !text.contains('*') && !needs_pattern_matcher(text)
+}
+
 impl<T: AsRef<str>> Matcher<T> {
     pub(crate) fn new(pattern: T) -> Self {
         Self::compile(pattern, false)
@@ -105,7 +143,7 @@ impl<T: AsRef<str>> Matcher<T> {
 
     fn compile(pattern: T, pathname: bool) -> Self {
         let text = pattern.as_ref();
-        if !text.bytes().any(|b| matches!(b, b'?' | b'[' | b'\\' | 0)) {
+        if !needs_pattern_matcher(text) {
             match text.split_once('*') {
                 None => return Self::Literal(pattern),
                 Some((left, right)) => {
@@ -119,6 +157,14 @@ impl<T: AsRef<str>> Matcher<T> {
         }
         if unfinished_star_escape(text) {
             return Self::Invalid;
+        }
+        if !pathname && trailing_escape(text) {
+            if !text[..text.len() - 1].contains(['*', '?', '[', '\\']) {
+                return Self::Literal(pattern);
+            }
+            let mut quoted = text.to_owned();
+            quoted.push('\\');
+            return CString::new(quoted).map_or(Self::Invalid, Self::Native);
         }
         if let Some(list) = text.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
             && !list.is_empty()
@@ -192,6 +238,11 @@ impl<T: AsRef<str>> Matcher<T> {
                 };
                 match c_name {
                     Some(name) => test(name),
+                    None if value.len() < 256 => {
+                        let mut local = [0u8; 256];
+                        local[..value.len()].copy_from_slice(value);
+                        CStr::from_bytes_with_nul(&local[..=value.len()]).is_ok_and(test)
+                    }
                     None => CString::new(value).is_ok_and(|name| test(&name)),
                 }
             }
@@ -237,8 +288,7 @@ impl<T: AsRef<str>> Matcher<T> {
         if let Self::Bracket(compiled, source) = self
             && compiled.utf8 != bracket::BracketPattern::utf8_locale()
         {
-            return bracket::BracketPattern::new(source.as_ref().as_bytes())
-                .is_some_and(|p| p.accepts(value.as_bytes(), false));
+            return extended::session_match(value, source.as_ref(), false, session);
         }
         self.matches(value)
     }
@@ -365,7 +415,7 @@ pub(crate) struct ParameterPattern<'a> {
     starts: std::cell::OnceCell<Matcher<String>>,
     pub(crate) extended: bool,
     pub(crate) fold: Option<crate::session::CharacterLocale>,
-    pub(crate) group: Option<crate::pattern::extended::Pattern>,
+    pub(crate) group: Option<std::rc::Rc<extended::Pattern>>,
 }
 
 impl<'a> ParameterPattern<'a> {
@@ -374,17 +424,42 @@ impl<'a> ParameterPattern<'a> {
         extended: bool,
         fold: Option<crate::session::CharacterLocale>,
     ) -> Self {
-        use crate::pattern::extended::Pattern;
-        let group = match fold {
-            Some(locale)
-                if !text.is_empty()
-                    && (crate::pattern::has_magic(text, false)
-                        || extended && crate::pattern::extended::has_group(text)) =>
-            {
-                Some(Pattern::insensitive(text, extended, locale))
+        let group = if extended && extended::has_group(text)
+            || fold.is_some() && !text.is_empty() && has_magic(text, false)
+        {
+            let compile = || {
+                std::rc::Rc::new(match fold {
+                    Some(fold) => extended::Pattern::insensitive(text, extended, fold),
+                    None => extended::Pattern::parse(text, extended),
+                })
+            };
+            // Bracket atoms can retain locale-specific answers. Reuse only
+            // locale-independent operators across separate expansions.
+            if text.len() <= 4096 && !text.contains('[') {
+                type RecentGroup = (
+                    Box<str>,
+                    bool,
+                    Option<CharacterLocale>,
+                    std::rc::Rc<extended::Pattern>,
+                );
+                thread_local! {static RECENT: std::cell::RefCell<Option<RecentGroup>> = const {std::cell::RefCell::new(None)};}
+                Some(RECENT.with_borrow_mut(|slot| {
+                    if let Some((previous, was_extended, was_fold, pattern)) = slot
+                        && previous.as_ref() == text
+                        && *was_extended == extended
+                        && *was_fold == fold
+                    {
+                        return pattern.clone();
+                    }
+                    let pattern = compile();
+                    *slot = Some((text.into(), extended, fold, pattern.clone()));
+                    pattern
+                }))
+            } else {
+                Some(compile())
             }
-            _ if extended => Pattern::new(text),
-            _ => None,
+        } else {
+            None
         };
         Self {
             text,
@@ -460,9 +535,7 @@ pub(crate) fn trim_boundary(
     };
     let literal = star.unwrap_or(pattern);
     let plain = group.is_none()
-        && !literal
-            .bytes()
-            .any(|c| matches!(c, b'*' | b'?' | b'[' | b'\\' | 0))
+        && plain_pattern_segment(literal)
         && memchr::memchr(0, value.as_bytes()).is_none();
     if plain {
         if star.is_some() {
@@ -487,8 +560,8 @@ pub(crate) fn trim_boundary(
         && let Some((head, tail)) = pattern.split_once('*')
         && !head.is_empty()
         && !tail.is_empty()
-        && !head.contains(['?', '[', '\\', '\0'])
-        && !tail.contains(['*', '?', '[', '\\', '\0'])
+        && !needs_pattern_matcher(head)
+        && plain_pattern_segment(tail)
         && memchr::memchr(0, value.as_bytes()).is_none()
     {
         if prefix {
@@ -592,7 +665,9 @@ pub(crate) fn has_magic(text: &str, pathname: bool) -> bool {
     while let Some(c) = bytes.next() {
         match c {
             b'\\' => {
-                bytes.next();
+                if bytes.next() == Some(b'/') && pathname {
+                    bracket = false;
+                }
             }
             b'*' | b'?' => return true,
             b'[' => bracket = true,
@@ -681,7 +756,7 @@ impl GlobOptions {
                         }
                     }
                 }
-                '(' => depth += 1,
+                '(' if self.extglob => depth += 1,
                 ')' => depth = depth.saturating_sub(1),
                 ':' if depth == 0 => {
                     if begin != i {
@@ -720,17 +795,23 @@ pub(crate) fn pathnames(
 }
 
 pub(crate) fn unescape(component: &str) -> std::borrow::Cow<'_, str> {
+    unescape_component(component, false)
+}
+
+fn unescape_component(component: &str, before_slash: bool) -> std::borrow::Cow<'_, str> {
     if !component.as_bytes().contains(&b'\\') {
         return std::borrow::Cow::Borrowed(component);
     }
     let mut literal = String::with_capacity(component.len());
     let mut chars = component.chars();
     while let Some(c) = chars.next() {
-        literal.push(if c == '\\' {
-            chars.next().unwrap_or(c)
-        } else {
-            c
-        });
+        if c != '\\' {
+            literal.push(c);
+        } else if let Some(quoted) = chars.next() {
+            literal.push(quoted);
+        } else if !before_slash {
+            literal.push(c);
+        }
     }
     std::borrow::Cow::Owned(literal)
 }
@@ -811,12 +892,21 @@ fn paths(
         }
         let grouped = options.extglob && extended::has_group(part);
         if !grouped && !has_magic(part, true) {
-            let literal = unescape(part);
+            let literal = unescape_component(part, !rest.is_empty());
             for prefix in &mut paths {
                 prefix.push_str(&literal);
             }
             continue;
         }
+        // Bash matches a wildcard directory component against directory entries.
+        // A final backslash in that component denotes a literal backslash.
+        let quoted_component;
+        let part = if !rest.is_empty() && trailing_escape(part) {
+            quoted_component = [part, "\\"].concat();
+            quoted_component.as_str()
+        } else {
+            part
+        };
         let extended = (grouped || options.nocaseglob)
             .then(|| extended::Pattern::for_path(part, grouped, options.nocaseglob, locale));
         let matcher = extended.is_none().then(|| Matcher::compile(part, true));
@@ -845,6 +935,7 @@ fn paths(
             None
         };
         let mut matched = Vec::new();
+        let trailing = !rest.is_empty() && rest.bytes().all(|b| b == b'/');
         for prefix in paths {
             let dir = if prefix.is_empty() { "." } else { &prefix };
             visit_names(
@@ -856,7 +947,7 @@ fn paths(
                 } else {
                     directory::Prefix::Exact(literal_prefix.as_bytes())
                 },
-                |raw, _| {
+                |raw, kind| {
                     if required_extension.is_some_and(|suffix| !raw.to_bytes().ends_with(suffix)) {
                         return;
                     }
@@ -890,6 +981,12 @@ fn paths(
                     );
                     path.push_str(&prefix);
                     path.push_str(name);
+                    if trailing {
+                        if kind != libc::DT_DIR && !std::path::Path::new(&path).is_dir() {
+                            return;
+                        }
+                        path.push_str(rest);
+                    }
                     matched.push(path);
                 },
             );
@@ -899,13 +996,32 @@ fn paths(
         }
         expanded = true;
         paths = matched;
+        if trailing {
+            rest = "";
+        }
         known_existing = true;
     }
     // A literal suffix must exist. A trailing slash asks the OS for a directory.
     if !known_existing {
         paths.retain(|path| fs::symlink_metadata(path).is_ok());
     }
+    filter_ignored(&mut paths, options, locale, cached);
+    order::append_expansion(paths, fields, collation, sorting);
+}
+
+fn filter_ignored(
+    paths: &mut Vec<String>,
+    options: &GlobOptions,
+    locale: CharacterLocale,
+    cached: Option<&std::rc::Rc<PatternLocale>>,
+) {
     if let Some(patterns) = &options.ignore {
+        paths.retain(|path| {
+            !matches!(
+                path.trim_end_matches('/').rsplit('/').next(),
+                Some("." | "..")
+            )
+        });
         for pattern in patterns.iter() {
             // GLOBIGNORE tests the entire displayed pathname. An extended
             // alternative may contain a literal directory separator.
@@ -934,7 +1050,6 @@ fn paths(
             paths.retain(|path| !matcher.matches_in_locale::<true>(path, false));
         }
     }
-    order::append_expansion(paths, fields, collation, sorting);
 }
 
 // The recursive component consumes zero or more directories. A symlink to a

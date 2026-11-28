@@ -45,6 +45,7 @@ impl Recall {
         lines: &[String],
         text: &mut String,
         cursor: &mut usize,
+        anchor: bool,
     ) {
         use Action::*;
         if !matches!(action, PrefixUp | PrefixDown) {
@@ -97,7 +98,11 @@ impl Recall {
             self.index = next;
             if let Some(line) = lines.get(next) {
                 text.clone_from(line);
-                *cursor = text.len();
+                *cursor = if anchor && self.filter.is_some() {
+                    self.cursor
+                } else {
+                    text.len()
+                };
             } else {
                 text.clone_from(&self.draft);
                 *cursor = self.cursor;

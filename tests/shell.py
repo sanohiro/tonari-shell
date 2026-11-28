@@ -3,6 +3,7 @@
 import array
 import errno
 import fcntl
+import functools
 import os
 import pty
 import resource
@@ -23,6 +24,15 @@ from pathlib import Path
 TONARI = Path(sys.argv.pop(1)).resolve()
 BASH = Path(os.environ.get("REFERENCE_BASH", "/bin/bash"))
 PROMPT = b"tonari$ "
+
+
+@functools.cache
+def bash_version():
+    result = subprocess.check_output(
+        [BASH, "--noprofile", "--norc", "-c", 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"'],
+        env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+    )
+    return tuple(map(int, result.split(b".")))
 
 
 class ShellTests(unittest.TestCase):
@@ -1099,6 +1109,19 @@ select ref in 2+4; do echo "$a"; break; done 2>/dev/null <<< 1""",
         got = self.command(TONARI, r"""IFS=' '; read x <<< 'a \ '; printf '<%s>' "$x" """)
         self.assertEqual((got.returncode, got.stdout, got.stderr), (0, b"<a  >", b""))
 
+        record = self.cwd / "record"
+        for space in (b" ", b"\t"):
+            record.write_bytes(b" a  b\\" + space + b"  \n")
+            for opts, expected in [
+                ("x", b"<a  b" + space + b"><>"),
+                ("x y", b"<a><b" + space + b">"),
+                ("-r x", b"<a  b\\><>"),
+                ("-r x y", b"<a><b\\>"),
+            ]:
+                with self.subTest(space=space, opts=opts):
+                    got = self.command(TONARI, f'unset y; read {opts} <record && printf "<%s><%s>" "$x" "$y"')
+                    self.assertEqual((got.returncode, got.stdout, got.stderr), (0, expected, b""))
+
     def test_umask_permission_copies_see_preceding_clauses(self):
         got = self.command(TONARI, "umask 022; umask u=rw,go=u; umask; umask 077; umask g=u,o+g; umask")
         self.assertEqual((got.returncode, got.stdout, got.stderr), (0, b"0111\n0000\n", b""))
@@ -1132,15 +1155,12 @@ printf '<%s>' "${a[i++]:=2+3}" "$i" "${a[0]}" "${m[$(key)]:=one}" "${m[id]}"; ca
                          (0, b"<5><1><5><one><one>x", b""))
 
     def shells_for(self, minimum=0):
-        if minimum:
-            version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}"')
-            if int(version.stdout) < minimum:
-                return (TONARI,)
+        if minimum and bash_version()[0] < minimum:
+            return (TONARI,)
         return (BASH, TONARI)
 
     def bash_before_53(self):
-        version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"').stdout
-        return tuple(map(int, version.split(b"."))) < (5, 3)
+        return bash_version() < (5, 3)
 
     def compare(self, source, code, stdout=b"", minimum=0):
         for shell in self.shells_for(minimum):
@@ -1900,7 +1920,7 @@ test -t 5 5<&-; echo $?; test -t 5 5</dev/null; echo $?; test -t 5 5<&0; echo $?
         os.write(fd, b"set -b; (sleep 0.3; exit 7) &\n")
         self.read_until(fd, PROMPT)
         os.write(fd, b"wait $!; echo status=")
-        self.read_until(fd, b"Done")
+        self.read_until(fd, b"Exit 7")
         os.write(fd, b"$?\n")
         self.assertIn(b"status=7", self.read_until(fd, b"status=7"))
 
@@ -5723,8 +5743,8 @@ history -p '!!:1' '!!:2' '!!:3' '!!:4' '!!:5' '!!:6' '!!:7' '!!:8'""",
     def test_search_paste_is_literal(self):
         fd = self.terminal_session(editing=True)
         os.write(fd, b"\x12\x1b[200~" + "雪\t🌱".encode() + b"\r\ntouch should-not-exist\r\x1b[A\x1b[201~")
-        display = self.read_until(fd, b"should-not-exist\\n\\u{1b}[A': ")
-        self.assertIn("雪\\t🌱\\ntouch".encode(), display)
+        display = self.read_until(fd, b"should-not-exist^J^[[A': ")
+        self.assertIn("雪^I🌱^Jtouch".encode(), display)
         os.write(fd, b"\x07")
         self.read_until(fd, PROMPT)
         self.assertFalse((self.cwd / "should-not-exist").exists())

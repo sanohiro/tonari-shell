@@ -13,7 +13,7 @@ pub(crate) struct PreparedCommand {
     pub(super) named_redirects: Vec<Redirect<Word>>,
     pub(super) resolved: Option<PathBuf>,
     pub(super) array_declarations: Vec<ArrayDeclaration>,
-    pub(super) compound: Option<Box<crate::parser::Command>>,
+    pub(super) compound: Option<std::rc::Rc<crate::parser::Command>>,
     pub(super) search: lookup::Search,
     pub(super) default_path: bool,
     pub(super) words: Vec<String>,
@@ -101,7 +101,7 @@ impl PreparedCommand {
         if self.literal_has_braces && !session.shopt.braceexpand
             || session.keyword && self.literal_has_keywords
             || session.xtrace
-            || session.traps.active()
+            || session.traps.observes_commands()
             || session.jobs.monitor
         {
             return None;
@@ -176,7 +176,7 @@ impl PreparedCommand {
         {
             return false;
         }
-        match hash::search_in(name, session, &lookup::path(self, session)) {
+        match hash::search_in(name, session, lookup::path(self, session)) {
             Err(hash::Absent) => {
                 self.select_missing_hook();
                 true
@@ -234,20 +234,28 @@ pub(super) fn borrowed_arguments(
         words,
         session,
         status,
-        true,
+        CommandContext::Shell,
         &captured,
     )
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum CommandContext {
+    Shell,
+    BackgroundJobSpec,
+    Child,
+    Pipeline,
 }
 
 pub(super) fn prepare(
     mut raw: SimpleCommand<Word>,
     session: &mut Session,
     last_status: u8,
-    standalone: bool,
+    context: CommandContext,
 ) -> Result<PreparedCommand, crate::expansion::Error> {
     let captured = Cell::new(None);
     let words = expand_command_words(&mut raw, session, last_status, &captured)?;
-    prepare_expanded(raw, words, session, last_status, standalone, &captured)
+    prepare_expanded(raw, words, session, last_status, context, &captured)
 }
 
 // The option is evaluated at execution: a previously parsed function may
@@ -275,8 +283,10 @@ pub(super) fn separate_keyword_arguments(raw: &mut SimpleCommand<Word>) {
                 return false;
             }
             let key = key.to_owned();
-            let mut value = std::mem::take(word);
-            value.remove_assignment_prefix(key.len() + 1);
+            if word.remove_assignment_prefix(key.len() + 1).is_none() {
+                return true;
+            }
+            let value = std::mem::take(word);
             raw.assignments.push((key, Assignment::Scalar(value)));
             false
         } else if let Some((key, Assignment::Array(_, parts, source))) =
@@ -337,9 +347,10 @@ pub(super) fn prepare_expanded(
     words: Vec<String>,
     session: &mut Session,
     last_status: u8,
-    standalone: bool,
+    context: CommandContext,
     captured: &Cell<Option<u8>>,
 ) -> Result<PreparedCommand, crate::expansion::Error> {
+    let standalone = context != CommandContext::Pipeline;
     // A lone assignment has no following word, redirect or trace that needs a copy.
     let direct_assignment = standalone
         && words.is_empty()
@@ -356,6 +367,11 @@ pub(super) fn prepare_expanded(
     let mut traced_operands = Vec::new();
     // Each assignment sees its predecessors, while command arguments saw the
     // outer environment. Standalone assignments persist even on redirect failure.
+    let typed_assignment = words.is_empty()
+        || session.posix
+            && words
+                .first()
+                .is_some_and(|word| super::special_builtin(word));
     for (mut key, word) in raw.assignments {
         let mut exp = Expansion::with_assignments(
             session,
@@ -415,7 +431,7 @@ pub(super) fn prepare_expanded(
                     && words
                         .iter()
                         .skip(1)
-                        .take_while(|arg| arg.starts_with('-') && *arg != "--")
+                        .take_while(|arg| crate::builtins::flags::cluster(arg))
                         .any(|arg| arg.contains('A'));
                 let items =
                     exp.array_items(parts, declared_assoc || exp.session.is_associative(&key))?;
@@ -459,8 +475,19 @@ pub(super) fn prepare_expanded(
                         out.push_str(&trace_word(&value));
                     });
                 }
-                if let std::borrow::Cow::Owned(resolved) = exp.session.reference_name(&key)? {
-                    key = resolved;
+                match exp.session.reference_name(&key) {
+                    Ok(std::borrow::Cow::Owned(resolved)) => key = resolved,
+                    Ok(_) => {}
+                    Err(error) if exp.session.function_depth == 0 => {
+                        return Err(crate::expansion::Error::fatal(
+                            format!("warning: {key}: {error}"),
+                            1,
+                        ));
+                    }
+                    Err(error) => {
+                        diagnostic!("warning: {key}: {error}");
+                        continue;
+                    }
                 }
                 let target = crate::session::array::subscript(&key);
                 let base = target.map_or(key.as_str(), |(base, _)| base);
@@ -485,11 +512,18 @@ pub(super) fn prepare_expanded(
                     && exp.session.is_associative(base)
                 {
                     if standalone {
-                        let key = exp.key(subscript)?;
+                        let element = exp.expanded_key(subscript)?;
+                        if element.is_empty() {
+                            return Err(crate::expansion::Error::fatal(
+                                format!("{key}: bad array subscript"),
+                                1,
+                            ));
+                        }
+                        let key = element;
                         let old = append
                             .then(|| exp.session.assoc_value(base, &key).map(str::to_owned))
                             .flatten();
-                        let value = if exp.session.integer(base) {
+                        let value = if typed_assignment && exp.session.integer(base) {
                             exp.session.integer_value(old.as_deref(), &value, append)?
                         } else if append {
                             old.unwrap_or_default() + &value
@@ -509,11 +543,9 @@ pub(super) fn prepare_expanded(
                     } else {
                         exp.arithmetic(subscript)?
                     };
-                    Some(
-                        exp.session
-                            .relative_index(base, n)
-                            .map_err(crate::expansion::Error::discard)?,
-                    )
+                    Some(exp.session.relative_index(base, n).map_err(|_| {
+                        crate::expansion::Error::discard(format!("{key}: bad array subscript"))
+                    })?)
                 } else {
                     None
                 };
@@ -521,14 +553,14 @@ pub(super) fn prepare_expanded(
                     Some(i) => exp.session.element(base, i),
                     None => exp.lookup(&key),
                 };
-                let value = if exp.session.integer(base) {
+                let value = if typed_assignment && exp.session.integer(base) {
                     let old = if append {
                         let old = old(&exp).unwrap_or_default();
-                        exp.arithmetic(&old)?
+                        exp.arithmetic_value(&old)?
                     } else {
                         0
                     };
-                    old.wrapping_add(exp.arithmetic(&value)?).to_string()
+                    old.wrapping_add(exp.arithmetic_value(&value)?).to_string()
                 } else if append {
                     if direct_assignment && exp.session.append_plain_scalar(&key, &value) {
                         continue;
@@ -544,14 +576,14 @@ pub(super) fn prepare_expanded(
                 if session.is_nameref(&key) && !Session::valid_reference_target(&value) {
                     return Err(crate::expansion::Error::discard("invalid name reference"));
                 }
-                if direct_assignment {
-                    session.assign_value(&key, value.into());
-                    continue;
-                }
                 if standalone && words.is_empty() {
-                    session.assign(&key, &value);
+                    // The assignment is already visible in the shell. Retaining
+                    // it as a command prefix would incorrectly export it to
+                    // substitutions in subsequent operands.
+                    session.assign_value(&key, value.into());
+                } else {
+                    assignments.push((key, value));
                 }
-                assignments.push((key, value));
             }
         }
     }
@@ -587,6 +619,21 @@ pub(super) fn prepare_expanded(
         });
     }
     lookup::command_prefix(&mut cmd, session);
+    if matches!(
+        context,
+        CommandContext::Shell | CommandContext::BackgroundJobSpec
+    ) && cmd.search != lookup::Search::BuiltinsOnly
+        && cmd.words.first().is_some_and(|word| word.starts_with('%'))
+    {
+        let builtin = if context == CommandContext::BackgroundJobSpec {
+            "bg"
+        } else {
+            "fg"
+        };
+        cmd.words.insert(0, builtin.into());
+        cmd.search = lookup::Search::JobSpec;
+        return Ok(cmd);
+    }
     expand_prepared_redirects(
         &mut cmd,
         raw.redirects,
@@ -618,8 +665,8 @@ fn expand_prepared_redirects(
         // Clone only if an expansion can change a variable in that context.
         let child = assignment_only || builtin(cmd, last_status, session).is_none();
         let process_scope = session.substitutions.scope();
-        let mut isolated =
-            (child && redirects.iter().any(redirection_observable)).then(|| session.clone());
+        let mut isolated = (child && redirects.iter().any(|r| redirection_observable(r, session)))
+            .then(|| session.clone());
         let mut exp = Expansion::with_assignments(
             isolated.as_mut().unwrap_or(session),
             last_status,
@@ -658,9 +705,31 @@ pub(super) fn prepare_redirects(
         let word = match (r.target, r.word) {
             (Target::HereDoc { expand: true }, Word::Literal(body)) => {
                 if body.contains(['$', '`', '\\']) {
-                    exp.scalar(
-                        crate::parser::here_word(exp.session, &body).map_err(|e| e.message())?,
-                    )?
+                    let mut expanded = String::with_capacity(body.len());
+                    let plain = super::plain_here_parts(&body, |literal, name| {
+                        expanded.push_str(literal);
+                        if let Some(name) = name {
+                            if super::stage_parameter(name, exp.session) {
+                                return false;
+                            }
+                            if let Some(value) = exp.borrowed_scalar(name) {
+                                expanded.push_str(value);
+                            } else if let Some(value) = exp.lookup(name) {
+                                expanded.push_str(&value);
+                            } else if exp.session.nounset {
+                                return false;
+                            }
+                        }
+                        true
+                    });
+                    if plain {
+                        expanded
+                    } else {
+                        exp.scalar(
+                            crate::parser::here_word(exp.session, &body)
+                                .map_err(|e| e.message())?,
+                        )?
+                    }
                 } else {
                     body
                 }

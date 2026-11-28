@@ -20,6 +20,11 @@ pub struct Error {
 }
 
 impl Error {
+    pub(crate) fn in_expression(mut self, text: &str) -> Self {
+        self.message = format!("{text}: {}", self.message).into();
+        self
+    }
+
     pub fn fatal(message: impl Into<std::borrow::Cow<'static, str>>, status: u8) -> Self {
         Self {
             message: message.into(),
@@ -250,7 +255,7 @@ impl<'a> Expansion<'a> {
         }
         let (integer, changes_case) = self.session.assignment_attributes(base);
         if integer {
-            value = self.arithmetic(&value)?.to_string();
+            value = self.arithmetic_value(&value)?.to_string();
         }
         match &element {
             Some(AssignmentElement::Index(base, index)) => {
@@ -280,7 +285,7 @@ impl<'a> Expansion<'a> {
         )?)
     }
 
-    pub fn current_capture(&mut self, body: Vec<Statement>, reply: bool) -> Result<String, Error> {
+    pub fn current_capture(&mut self, body: &[Statement], reply: bool) -> Result<String, Error> {
         let last = self.status();
         let (text, status) =
             crate::subshell::current_substitution(self.session, body, last, reply)?;
@@ -288,21 +293,14 @@ impl<'a> Expansion<'a> {
         Ok(text)
     }
 
-    pub fn capture(&mut self, body: Vec<Statement>) -> Result<String, &'static str> {
-        let mut overridden;
-        let session = if !self.has_pending_assignments() {
-            &mut *self.session
-        } else {
-            let mut copy = self.session.clone();
-            copy.bind(self.assignments);
-            overridden = copy;
-            &mut overridden
-        };
-        let (value, status) = crate::capture_substitution(
-            session,
-            body,
-            self.captured.get().unwrap_or(self.initial),
-        )?;
+    pub fn capture(&mut self, body: &[Statement]) -> Result<String, &'static str> {
+        let status = self.captured.get().unwrap_or(self.initial);
+        let bindings = (!self.assignments.is_empty()).then(|| self.session.bind(self.assignments));
+        let result = crate::capture_substitution(self.session, body, status);
+        if let Some(bindings) = bindings {
+            self.session.restore(bindings);
+        }
+        let (value, status) = result?;
         self.captured.set(Some(status));
         Ok(value)
     }
@@ -384,7 +382,7 @@ impl<'a> Expansion<'a> {
         Ok(ArrayItems::Indexed(items))
     }
 
-    fn expanded_key(&mut self, source: &str) -> Result<String, Error> {
+    pub(crate) fn expanded_key(&mut self, source: &str) -> Result<String, Error> {
         if let Some(rest) = source.strip_prefix("~/")
             && !rest.contains(['$', '`', '"', '\'', '\\'])
             && let Some(mut home) = self.lookup("HOME")
@@ -423,8 +421,13 @@ impl<'a> Expansion<'a> {
 
     pub fn arithmetic(&mut self, expression: &str) -> Result<i64, Error> {
         let text = self.arithmetic_text(expression)?;
-        arithmetic::with_variables(&text, self).map_err(|message| match message {
-            "unbound arithmetic variable" => Error::fatal(message, 1),
+        self.arithmetic_value(&text)
+    }
+
+    /// Operands that already went through shell expansion must only be parsed as arithmetic.
+    pub(crate) fn arithmetic_value(&mut self, text: &str) -> Result<i64, Error> {
+        arithmetic::with_variables(text, self).map_err(|message| match message {
+            "unbound arithmetic variable" => arithmetic::shell_error(message, text, self.session),
             _ => Error::discard(message),
         })
     }
@@ -532,7 +535,6 @@ impl<'a> Expansion<'a> {
             use crate::word::Part;
             let parameter = match &*part {
                 Part::Parameter { name, quoted } => Some((name.as_ref(), *quoted)),
-                Part::BraceParameter(name) => Some((name.as_ref(), false)),
                 _ => None,
             };
             if let Some((name, quoted)) = parameter
@@ -553,6 +555,11 @@ impl<'a> Expansion<'a> {
         word.append_fields(
             &|name| self.lookup(name),
             self.session.positional.as_slice(),
+            || {
+                self.borrowed_scalar("IFS")
+                    .map(Into::into)
+                    .or_else(|| self.lookup("IFS").map(Into::into))
+            },
             glob.then_some(&self.session.shopt.glob),
             fields,
         )
@@ -591,8 +598,8 @@ impl<'a> Expansion<'a> {
 }
 
 impl Variables for Expansion<'_> {
-    fn decimal(&self, name: &str) -> Option<i64> {
-        self.borrowed_scalar(name).and_then(Session::plain_decimal)
+    fn scalar_text(&self, name: &str) -> Option<&str> {
+        self.borrowed_scalar(name)
     }
     fn get(&self, name: &str) -> Option<String> {
         self.lookup(name)
@@ -614,7 +621,7 @@ impl Variables for Expansion<'_> {
     ) -> Option<Result<String, &'static str>> {
         self.session
             .is_associative(name)
-            .then(|| self.key(source).map_err(|_| "bad array subscript"))
+            .then(|| arithmetic::data_key(source, |name| self.lookup(name)))
     }
     fn nounset(&self) -> bool {
         self.session.nounset

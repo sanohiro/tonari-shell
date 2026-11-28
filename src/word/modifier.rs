@@ -97,6 +97,9 @@ pub(crate) fn character_count(text: &str) -> usize {
 }
 
 pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String>, Error> {
+    if let Some(text) = env.borrowed_scalar(name) {
+        return Ok(Some(text.to_owned()));
+    }
     if let Some(key) = name.strip_prefix('#')
         && !env.shadows(key)
         && let Some(n) = env.session.stored_char_count(key)
@@ -183,10 +186,10 @@ fn as_number(word: &mut Word, env: &mut Expansion<'_>) -> Result<i64, Error> {
         return Ok(n);
     }
     let text = env.scalar(std::mem::take(word))?;
-    env.arithmetic(&text)
+    env.arithmetic_value(&text)
 }
 
-fn scalar_part(text: String, quoted: bool) -> Part {
+pub(super) fn scalar_part(text: String, quoted: bool) -> Part {
     if quoted {
         Part::Text(text)
     } else {
@@ -462,6 +465,25 @@ impl Modification {
                 }))
             }
             Self::Slice { offset, length } => {
+                // Nonconstant bounds can assign to the parameter being sliced.
+                // Snapshot ordinary scalars before either arithmetic expression.
+                let constant = |word: &Word| {
+                    word.as_literal()
+                        .is_some_and(|s| crate::Session::plain_decimal(s.trim_ascii()).is_some())
+                };
+                if !(constant(offset) && length.as_ref().is_none_or(constant))
+                    && super::is_identifier(name)
+                {
+                    let before = value(name, env)?;
+                    if env.session.nounset && before.is_none() {
+                        return Err(env.missing(name, "unbound variable"));
+                    }
+                    let start = as_number(offset, env)?;
+                    let len = length.as_mut().map(|w| as_number(w, env)).transpose()?;
+                    return Ok(scalar(
+                        substring(before.as_deref().unwrap_or(""), start, len)?.to_owned(),
+                    ));
+                }
                 let start = as_number(offset, env)?;
                 let len = length.as_mut().map(|w| as_number(w, env)).transpose()?;
                 if let Some((base, _, false)) = array_elements_name(name) {
@@ -568,73 +590,74 @@ impl Modification {
     }
 }
 
-fn substring(v: &str, start: i64, len: Option<i64>) -> Result<&str, Error> {
+fn character_boundary(s: &str, n: i64) -> Option<usize> {
     // Positive bounds only need the requested prefix. Negative bounds
     // count from the far end, independent of the UTF-8 byte width.
-    let boundary = |s: &str, n: i64| {
-        let magnitude = n.unsigned_abs() as usize;
-        if magnitude > s.len() {
-            return None;
-        }
-        let bytes = s.as_bytes();
-        let part = if n < 0 {
-            &bytes[s.len() - magnitude..]
-        } else {
-            &bytes[..magnitude]
-        };
-        if part.is_ascii() {
-            return Some(if n < 0 {
-                s.len() - magnitude
-            } else {
-                magnitude
-            });
-        }
-        let mut rest = s;
-        let mut left = magnitude;
-        // chars().count() counts UTF-8 lead bytes in machine words. Consume
-        // whole chunks before resolving the final character boundary.
-        const BLOCK: usize = 1024;
-        while left >= BLOCK && rest.len() >= BLOCK {
-            if n < 0 {
-                let mut cut = rest.len() - BLOCK;
-                while !rest.is_char_boundary(cut) {
-                    cut += 1;
-                }
-                left -= rest[cut..].chars().count();
-                rest = &rest[..cut];
-            } else {
-                let mut cut = BLOCK;
-                while !rest.is_char_boundary(cut) {
-                    cut -= 1;
-                }
-                left -= rest[..cut].chars().count();
-                rest = &rest[cut..];
-            }
-        }
-        if left == 0 {
-            return Some(if n < 0 {
-                rest.len()
-            } else {
-                s.len() - rest.len()
-            });
-        }
-        if n < 0 {
-            rest.char_indices().rev().nth(left - 1).map(|(i, _)| i)
-        } else {
-            rest.char_indices()
-                .nth(left - 1)
-                .map(|(i, c)| s.len() - rest.len() + i + c.len_utf8())
-        }
+    let magnitude = n.unsigned_abs() as usize;
+    if magnitude > s.len() {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    let part = if n < 0 {
+        &bytes[s.len() - magnitude..]
+    } else {
+        &bytes[..magnitude]
     };
-    let Some(start) = boundary(v, start) else {
+    if part.is_ascii() {
+        return Some(if n < 0 {
+            s.len() - magnitude
+        } else {
+            magnitude
+        });
+    }
+    let mut rest = s;
+    let mut left = magnitude;
+    // chars().count() counts UTF-8 lead bytes in machine words. Consume
+    // whole chunks before resolving the final character boundary.
+    const BLOCK: usize = 1024;
+    while left >= BLOCK && rest.len() >= BLOCK {
+        if n < 0 {
+            let mut cut = rest.len() - BLOCK;
+            while !rest.is_char_boundary(cut) {
+                cut += 1;
+            }
+            left -= rest[cut..].chars().count();
+            rest = &rest[..cut];
+        } else {
+            let mut cut = BLOCK;
+            while !rest.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            left -= rest[..cut].chars().count();
+            rest = &rest[cut..];
+        }
+    }
+    if left == 0 {
+        return Some(if n < 0 {
+            rest.len()
+        } else {
+            s.len() - rest.len()
+        });
+    }
+    if n < 0 {
+        rest.char_indices().rev().nth(left - 1).map(|(i, _)| i)
+    } else {
+        rest.char_indices()
+            .nth(left - 1)
+            .map(|(i, c)| s.len() - rest.len() + i + c.len_utf8())
+    }
+}
+
+fn substring(v: &str, start: i64, len: Option<i64>) -> Result<&str, Error> {
+    let Some(start) = character_boundary(v, start) else {
         return Ok("");
     };
     let end = match len {
         None => v.len(),
-        Some(n) if n < 0 => boundary(v, n)
+        Some(n) if n < 0 => character_boundary(v, n)
             .filter(|&end| end >= start)
             .ok_or_else(|| Error::discard_line("negative substring length"))?,
-        Some(n) => boundary(&v[start..], n).map_or(v.len(), |i| start + i),
+        Some(n) => character_boundary(&v[start..], n).map_or(v.len(), |i| start + i),
     };
     Ok(&v[start..end])
 }

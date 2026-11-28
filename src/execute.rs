@@ -18,6 +18,7 @@ pub(crate) mod process_substitution;
 use std::path::{Path, PathBuf};
 mod here_input;
 mod lookup;
+pub(crate) use lookup::search_directories;
 pub(crate) use lookup::{Candidate, IgnoredExecutables, check_candidate, describe_words};
 mod spawn;
 pub(crate) use spawn::inherited_env;
@@ -186,7 +187,14 @@ pub(crate) fn reset_child_signals() {
     crate::traps::reset_caught_signals(&[libc::SIGINT, libc::SIGQUIT, libc::SIGTERM]);
 }
 
-fn stage_expansion(word: &Word) -> bool {
+fn stage_parameter(name: &str, session: &Session) -> bool {
+    let name = name.trim_start_matches(['#', '!']);
+    matches!(name, "BASHPID" | "RANDOM" | "SRANDOM")
+        || name.contains('[')
+        || session.is_nameref(name)
+}
+
+fn stage_expansion(word: &Word, session: &Session) -> bool {
     use crate::word::Part;
     match word {
         Word::Literal(_) => false,
@@ -196,28 +204,58 @@ fn stage_expansion(word: &Word) -> bool {
             | Part::Process { .. }
             | Part::Arithmetic { .. } => true,
             Part::Modify { .. } => true,
-            Part::Nested(word) => stage_expansion(word),
-            Part::Parameter { name, .. } => name == "BASHPID",
+            Part::Nested(word) => stage_expansion(word, session),
+            Part::Parameter { name, .. } | Part::BraceParameter(name) => {
+                stage_parameter(name, session)
+            }
             Part::Alternative { name, op, word, .. } => {
                 *op == crate::word::Alternative::Assign
-                    || name == "BASHPID"
-                    || stage_expansion(word)
+                    || stage_parameter(name, session)
+                    || stage_expansion(word, session)
             }
-            Part::Trim { name, pattern, .. } => name == "BASHPID" || stage_expansion(pattern),
+            Part::Trim { name, pattern, .. } => {
+                stage_parameter(name, session) || stage_expansion(pattern, session)
+            }
             _ => false,
         }),
     }
 }
 
-fn redirection_observable(r: &Redirect<Word>) -> bool {
+// Plain here-documents need only parameter lookup and concatenation. Anything
+// with escapes, operators or nested shell syntax stays on the Bash parser.
+fn plain_here_parts(mut text: &str, mut part: impl FnMut(&str, Option<&str>) -> bool) -> bool {
+    while let Some(i) = memchr::memchr3(b'$', b'\\', b'`', text.as_bytes()) {
+        if text.as_bytes()[i] != b'$' {
+            return false;
+        }
+        let tail = &text[i + 1..];
+        let braced = tail.starts_with('{');
+        let name_and_rest = if braced { &tail[1..] } else { tail };
+        let len = name_and_rest
+            .bytes()
+            .take_while(|&b| crate::word::is_name_char(b))
+            .count();
+        let (name, rest) = name_and_rest.split_at(len);
+        if !crate::parser::is_identifier(name)
+            || braced && !rest.starts_with('}')
+            || !part(&text[..i], Some(name))
+        {
+            return false;
+        }
+        text = if braced { &rest[1..] } else { rest };
+    }
+    part(text, None)
+}
+
+fn redirection_observable(r: &Redirect<Word>, session: &Session) -> bool {
     if r.variable.is_some() {
         return true;
     }
-    stage_expansion(&r.word)
+    stage_expansion(&r.word, session)
         || matches!(r.target, Target::HereDoc { expand: true })
             && r.word
                 .as_literal()
-                .is_some_and(|text| text.contains(['$', '`']))
+                .is_some_and(|text| !plain_here_parts(text, |_, name| name.is_none_or(|name| !stage_parameter(name, session))))
 }
 
 // A parenthesized pipeline stage is already the subshell Bash exposes.
@@ -245,14 +283,22 @@ fn start_raw(
         separate_keyword_arguments(&mut raw);
     }
     let observable = needs_ordered_redirects(&raw, session)
-        || raw.redirects.iter().any(redirection_observable)
-        || raw.words.iter().any(stage_expansion)
-        || raw.assignments.iter().any(|(_, value)| match value {
-            Assignment::Scalar(word) => stage_expansion(word),
-            Assignment::Array(_, items, _) => items.iter().any(|(_, word)| stage_expansion(word)),
+        || raw
+            .redirects
+            .iter()
+            .any(|r| redirection_observable(r, session))
+        || raw.words.iter().any(|w| stage_expansion(w, session))
+        || raw.assignments.iter().any(|(name, value)| {
+            name.contains('[')
+                || match value {
+                    Assignment::Scalar(word) => stage_expansion(word, session),
+                    Assignment::Array(_, items, _) => items
+                        .iter()
+                        .any(|(index, word)| index.is_some() || stage_expansion(word, session)),
+                }
         });
     if !observable {
-        return match prepare(raw, session, last_status, false) {
+        return match prepare(raw, session, last_status, CommandContext::Pipeline) {
             Ok(mut cmd) => start(
                 &mut cmd,
                 input,
@@ -277,14 +323,33 @@ fn start_raw(
         launch.pipeline_child(&mut session.traps);
         enter_stage(session, raw.compound.as_deref(), launch.background);
         coprocess::after_fork(session);
-        if let Some(command) = raw.compound.as_deref_mut()
+        if matches!(
+            raw.compound.as_deref(),
+            Some(crate::parser::Command::Subshell(_))
+        ) && let Some(command) = raw.compound.as_mut().map(std::rc::Rc::make_mut)
             && let crate::parser::Command::Subshell(body) = command
         {
             *command = crate::parser::Command::Group(std::mem::take(body));
         }
         session.stdin_redirected |= input.is_some();
-        let code = if apply(&setup, libc::PIPE_BUF) {
-            match run(vec![raw], last_status, true, session) {
+        let code = if apply(&setup, libc::PIPE_BUF, session) {
+            // A simple stage expands words in the child process at the
+            // caller's BASH_SUBSHELL depth, then enters its execution frame.
+            let result = if raw.compound.is_none() && !needs_ordered_redirects(&raw, session) {
+                session.subshell_depth -= 1;
+                let prepared = prepare(raw, session, last_status, CommandContext::Child);
+                session.subshell_depth += 1;
+                match prepared {
+                    Ok(cmd) => run_prepared(cmd, None, last_status, true, session),
+                    Err(e) => {
+                        e.report("");
+                        Ok(e.flow(session))
+                    }
+                }
+            } else {
+                foreground(std::borrow::Cow::Owned(raw), last_status, true, session)
+            };
+            match result {
                 Ok(flow) => flow.child_status(),
                 Err(e) => {
                     diagnostic!("{e}");
@@ -297,6 +362,24 @@ fn start_raw(
         crate::subshell::exit_child(session, code)
     }
     Ok(Stage::Child(pid))
+}
+
+// A missing command commonly writes to a tty, log or /dev/null. Those
+// descriptors cannot send SIGPIPE. On a pipe/socket (or with observers) a
+// real child owns the diagnostic and signal exactly as for a failed exec.
+#[cold]
+fn parent_reports_exec_error(session: &Session) -> bool {
+    if session.traps.observes_commands() {
+        return false;
+    }
+    let mut stat = std::mem::MaybeUninit::uninit();
+    if unsafe { libc::fstat(libc::STDERR_FILENO, stat.as_mut_ptr()) } < 0 {
+        return errno() == libc::EBADF;
+    }
+    matches!(
+        unsafe { stat.assume_init() }.st_mode & libc::S_IFMT,
+        libc::S_IFREG | libc::S_IFCHR
+    )
 }
 
 fn start(
@@ -316,7 +399,7 @@ fn start(
     // Keep a real child for job control and observable child-signal traps.
     if !launch.background
         && launch.group.is_none()
-        && !session.traps.active()
+        && !session.traps.observes_commands()
         && cmd.redirects.is_empty()
         && (input.is_some() || output.is_some())
         && let Some(Builtin::Exit(status) | Builtin::Status(status)) = builtin
@@ -353,7 +436,7 @@ fn start(
         && input.is_none()
         && !launch.background
         && launch.group.is_none()
-        && !session.traps.active()
+        && !session.traps.observes_commands()
         && (cmd.redirects.is_empty() || merged_pipe.is_some())
         && let Some(plain) = PlainOutput::new(builtin, cmd, 512)
     {
@@ -364,7 +447,7 @@ fn start(
         let (bytes, status) = plain.render(session);
         debug_assert!(bytes.len() <= 512);
         let result = std::fs::File::from(output.unwrap()).write_all(&bytes);
-        return Ok(Stage::Status(if result.is_err() { 1 } else { status }));
+        return Ok(Stage::Status(output_status(&cmd.words[0], result, status)));
     }
     if builtin.is_none()
         && launch.group.is_none()
@@ -375,7 +458,7 @@ fn start(
         && matches!(r.target, Target::HereDoc { .. } | Target::HereString)
         && r.word.len() <= here_input::PIPE_LIMIT
         && let Ok(reader) =
-            here_input::open(r.word.as_bytes(), here_input::PIPE_LIMIT).and_then(private_fd)
+            here_input::open(r.word.as_bytes(), here_input::PIPE_LIMIT, session).and_then(private_fd)
         && let Ok(pid) =
             External::new(cmd, session)?.spawn_redirected(&[], None, Some(&reader), output.as_ref())
     {
@@ -441,9 +524,36 @@ fn start(
                     Stage::Child(pid)
                 });
             }
-            Err(_) if launch.group.is_some() => {}
-            Err(e) if e.raw_os_error() == Some(libc::ENOEXEC) => {}
-            Err(e) => return spawn_failure(&cmd.words[0], e),
+            Err(e)
+                if e.raw_os_error().is_some_and(|code| {
+                    matches!(
+                        code,
+                        libc::EAGAIN | libc::ENOMEM | libc::EMFILE | libc::ENFILE
+                    )
+                }) =>
+            {
+                return Err(e);
+            }
+            Err(e)
+                if launch.group.is_none()
+                    && e.raw_os_error() != Some(libc::ENOEXEC)
+                    && parent_reports_exec_error(session) =>
+            {
+                let name = &cmd.words[0];
+                let path = cmd
+                    .cached_path(session, name)
+                    .unwrap_or_else(|| std::path::Path::new(name));
+                let code = external::report_exec_error(
+                    session,
+                    name.as_bytes(),
+                    path,
+                    e.raw_os_error().unwrap_or(libc::EIO),
+                );
+                return Ok(Stage::Status(code));
+            }
+            // The child owns ENOEXEC script fallback and observable errors.
+            // Recheck the path there to match a racing unlink or replacement.
+            Err(_) => {}
         }
     }
     fork_stage(
@@ -499,10 +609,10 @@ fn fork_stage(
         }
         session.stdin_redirected |= cmd.redirects.iter().any(|r| r.fd == 0);
         session.stdin_redirected |= input.is_some();
-        let code = if !apply(&setup, here_pipe_limit(builtin, cmd)) {
+        let code = if !apply(&setup, here_pipe_limit(builtin, cmd), session) {
             1
         } else if let Some(external) = external.as_ref() {
-            external.exec(None)
+            external.exec(session, false)
         } else {
             coprocess::after_fork(session);
             let flow = if scoped {
@@ -536,7 +646,7 @@ pub(super) fn capture_with_writer(
     last: u8,
 ) -> Option<Result<(String, u8), &'static str>> {
     use std::io::Write;
-    let cmd = prepare(writer.clone(), session, last, true).ok()?;
+    let cmd = prepare(writer.clone(), session, last, CommandContext::Child).ok()?;
     let output = PlainOutput::new(builtin(&cmd, last, session)?, &cmd, 512)?;
     let (input, write) = pipe().ok()?;
     let (bytes, status) = output.render(session);
@@ -563,7 +673,7 @@ pub(super) fn capture_external(
     last: u8,
     input: Option<OwnedFd>,
 ) -> Result<(String, u8), &'static str> {
-    let mut cmd = match prepare(raw, session, last, true) {
+    let mut cmd = match prepare(raw, session, last, CommandContext::Child) {
         Ok(cmd) => cmd,
         Err(error) => {
             diagnostic!("{error}");
@@ -599,18 +709,6 @@ pub(super) fn capture_external(
         Stage::Status(code) => return Ok((String::new(), code)),
     };
     crate::subshell::read_output(std::fs::File::from(reader), pid)
-}
-
-fn spawn_failure(name: &str, error: io::Error) -> io::Result<Stage> {
-    let code = error.raw_os_error().unwrap_or(libc::EIO);
-    if matches!(
-        code,
-        libc::EAGAIN | libc::ENOMEM | libc::EMFILE | libc::ENFILE
-    ) {
-        return Err(error);
-    }
-    diagnostic!("{name}: {error}");
-    Ok(Stage::Status(exec_status(code)))
 }
 
 pub(super) fn wait(pid: libc::pid_t) -> io::Result<u8> {
@@ -652,7 +750,7 @@ pub(crate) fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(
     line.push('\n');
     let fd = session
         .scalar_setting("BASH_XTRACEFD")
-        .and_then(|v| v.parse().ok())
+        .and_then(|v| v.trim().parse().ok())
         .filter(|&fd| !fd::is_private(fd))
         .unwrap_or(2);
     let mut data = line.as_bytes();
@@ -694,6 +792,10 @@ pub fn run(
     run_pipeline(pipeline, last_status, replace, session, false)
 }
 
+pub(crate) fn job_command(source: &str) -> &str {
+    source.trim().trim_end_matches('&').trim_end()
+}
+
 fn job_label(
     pipeline: &[SimpleCommand<Word>],
     background: bool,
@@ -707,14 +809,7 @@ fn job_label(
     if pipeline.iter().any(|cmd| cmd.compound.is_some())
         && let Some(location) = &session.current_command
     {
-        return Some(
-            location
-                .text()
-                .trim()
-                .trim_end_matches('&')
-                .trim_end()
-                .to_owned(),
-        );
+        return Some(job_command(location.text()).to_owned());
     }
     if !background
         && let [cmd] = pipeline
@@ -801,6 +896,11 @@ fn run_ordered(
             return Ok(e.flow(session));
         }
     };
+    let (skip, search, _) = lookup::scan_prefix(&words, lookup::Search::Normal, session);
+    if search != lookup::Search::BuiltinsOnly && words.get(skip).is_some_and(|w| w.starts_with('%'))
+    {
+        raw.redirects.clear();
+    }
     let redirects = if words.first().is_some_and(|w| !special_builtin(w)) {
         std::mem::take(&mut raw.redirects)
     } else {
@@ -810,7 +910,7 @@ fn run_ordered(
     // environment. Only dynamic operands can expose that distinction.
     let child_redirects = redirects
         .iter()
-        .any(|r| r.word.as_literal().is_none() || redirection_observable(r))
+        .any(|r| r.word.as_literal().is_none() || redirection_observable(r, session))
         && {
             let (skip, search, _) = lookup::scan_prefix(&words, lookup::Search::Normal, session);
             builtin_words(&words[skip..], search, 0, status, session, || {
@@ -819,7 +919,14 @@ fn run_ordered(
             .is_none()
         };
     named_fd::with_redirects(redirects, session, status, child_redirects, |session| {
-        let cmd = match prepare_expanded(raw, words, session, status, true, &captured) {
+        let cmd = match prepare_expanded(
+            raw,
+            words,
+            session,
+            status,
+            CommandContext::Shell,
+            &captured,
+        ) {
             Ok(cmd) => cmd,
             Err(e) => {
                 e.report("");
@@ -840,6 +947,11 @@ fn run_prepared(
     replace: bool,
     session: &mut Session,
 ) -> io::Result<Flow> {
+    if cmd.search == lookup::Search::JobSpec {
+        let flow = crate::jobs::dispatch(&cmd.words, session, last_status);
+        session.last_argument = cmd.words.pop();
+        return Ok(flow);
+    }
     let simple = cmd.compound.is_none();
     if !cmd.named_redirects.is_empty() {
         let last = simple.then(|| cmd.words.last().cloned().unwrap_or_default());
@@ -893,25 +1005,29 @@ fn run_external(
             Err(hash::Absent)
                 if cmd.redirects.is_empty()
                     && launch.group.is_none()
-                    && !session.traps.active() =>
+                    && parent_reports_exec_error(session) =>
             {
-                let prefix = session.diagnostic_prefix(|| session.line());
-                eprintln!(
-                    "{}{}: command not found",
-                    prefix.as_deref().unwrap_or("tonari: "),
-                    cmd.words[0]
+                let name = &cmd.words[0];
+                let code = external::report_exec_error(
+                    session,
+                    name.as_bytes(),
+                    std::path::Path::new(name),
+                    libc::ENOENT,
                 );
-                return Ok(Flow::Continue(127));
+                return Ok(Flow::Continue(code));
             }
+            // Failed lookup diagnostics belong to a child. A closed pipeline
+            // on stderr must not deliver the command's SIGPIPE to this shell.
             Err(hash::Absent) => {}
         }
     }
     if replace && launch.group.is_none() && !cmd.prepare_missing_hook(session) {
         let executable = External::new(cmd, session)?;
         return Ok(Flow::Continue(
-            if apply(&actions(cmd), here_input::PIPE_LIMIT) {
+            if apply(&actions(cmd), here_input::PIPE_LIMIT, session) {
                 executable.exec(
-                    (cmd.assignments.is_empty() && cmd.redirects.is_empty()).then_some(session),
+                    session,
+                    cmd.assignments.is_empty() && cmd.redirects.is_empty(),
                 )
             } else {
                 1
@@ -982,7 +1098,12 @@ fn prepared_foreground(
         {
             prepare::borrowed_arguments(&stage.words, session, last_status)
         }
-        _ => prepare(raw.into_owned(), session, last_status, true),
+        _ => prepare(
+            raw.into_owned(),
+            session,
+            last_status,
+            CommandContext::Shell,
+        ),
     };
     let cmd = match prepared {
         Ok(cmd) => cmd,
@@ -1138,6 +1259,27 @@ pub fn run_pipeline(
             session,
         );
     }
+    // Only an unquoted percent at the start of the original command word can
+    // resume an existing job in the parent for an asynchronous command.
+    if background
+        && let [stage] = pipeline.as_slice()
+        && stage
+            .location
+            .as_ref()
+            .is_some_and(|loc| loc.text().starts_with('%'))
+    {
+        if let Some(flow) = crate::traps::debug(session, last_status) {
+            return Ok(flow);
+        }
+        let raw = pipeline.pop().unwrap();
+        return match prepare(raw, session, last_status, CommandContext::BackgroundJobSpec) {
+            Ok(cmd) => run_prepared(cmd, None, last_status, false, session),
+            Err(error) => {
+                error.report("");
+                Ok(error.flow(session))
+            }
+        };
+    }
     let mut launch = session.jobs.launch(background, pipeline.len() == 1);
     let managed = background || launch.group.is_some();
     let name = job_label(&pipeline, background, session);
@@ -1161,11 +1303,9 @@ pub fn run_pipeline(
         {
             drop(input);
             session.jobs.restore();
-            for stage in stages {
-                if let Some(pid) = stage.pid() {
-                    let _ = wait(pid);
-                }
-            }
+            session
+                .jobs
+                .detach_started(stages.iter().filter_map(|stage| stage.pid()));
             return Ok(flow);
         }
         let stage = (|| {
@@ -1208,16 +1348,9 @@ pub fn run_pipeline(
             }
             Err(e) => {
                 drop(input);
-                for stage in &stages {
-                    if let Some(pid) = stage.pid() {
-                        unsafe { libc::kill(pid, libc::SIGKILL) };
-                    }
-                }
-                for stage in stages {
-                    if let Some(pid) = stage.pid() {
-                        let _ = wait(pid);
-                    }
-                }
+                session
+                    .jobs
+                    .detach_started(stages.iter().filter_map(|stage| stage.pid()));
                 session.jobs.restore();
                 return Err(e);
             }

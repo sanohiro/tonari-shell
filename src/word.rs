@@ -1,7 +1,7 @@
 pub mod brace;
 mod tilde;
 use tilde::tilde;
-pub(crate) use tilde::{account_home, account_shell, effective_user};
+pub(crate) use tilde::{account_home, account_shell, effective_user, named_home};
 mod modifier;
 pub(crate) mod quote;
 mod replace;
@@ -59,6 +59,10 @@ impl Default for Word {
 
 pub(crate) const DEFAULT_IFS: &str = " \t\n";
 
+pub(crate) fn is_ifs_whitespace(sep: &str) -> bool {
+    matches!(sep, " " | "\t" | "\n" | "\r" | "\x0b" | "\x0c")
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Alternative {
     Default,
@@ -115,12 +119,12 @@ pub enum Part {
         input: bool,
     },
     CurrentSubstitution {
-        body: Vec<Statement>,
+        body: std::rc::Rc<[Statement]>,
         quoted: bool,
         reply: bool,
     },
     Substitution {
-        body: Vec<Statement>,
+        body: std::rc::Rc<[Statement]>,
         quoted: bool,
     },
     Alternative {
@@ -151,6 +155,11 @@ pub(crate) fn name_chars_len(source: &str) -> usize {
 pub fn is_identifier(name: &str) -> bool {
     let mut chars = name.bytes();
     chars.next().is_some_and(is_name_start) && chars.all(is_name_char)
+}
+
+pub(crate) fn valid_tilde_user(user: &str) -> bool {
+    user.chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '+' | '.' | '@'))
 }
 
 impl Word {
@@ -204,44 +213,50 @@ impl Word {
         }
     }
 
-    pub(crate) fn assignment_name(&self, length: std::num::NonZeroUsize) -> &str {
+    pub(crate) fn assignment_name(&self, length: std::num::NonZeroUsize) -> Option<&str> {
         let text = match self {
             Self::Literal(s) => s,
-            Self::Expanded(parts) | Self::Declaration(parts) => {
-                let Part::Text(s) = &parts[0] else {
-                    unreachable!()
-                };
-                s
-            }
+            Self::Expanded(parts) | Self::Declaration(parts) => match parts.first()? {
+                Part::Text(s) => s,
+                _ => return None,
+            },
         };
-        &text[..length.get()]
+        (text.as_bytes().get(length.get()) == Some(&b'='))
+            .then(|| text.get(..length.get()))
+            .flatten()
     }
 
-    pub(crate) fn take_assignment_name(&mut self, length: std::num::NonZeroUsize) -> String {
+    pub(crate) fn take_assignment_name(
+        &mut self,
+        length: std::num::NonZeroUsize,
+    ) -> Option<String> {
         if let Self::Expanded(parts) = self
             && let Some(Part::Text(prefix)) = parts.first_mut()
             && prefix.len() == length.get() + 1
+            && prefix.ends_with('=')
         {
             let mut name = std::mem::take(prefix);
-            name.truncate(length.get());
-            return name;
+            name.pop();
+            return Some(name);
         }
-        let name = self.assignment_name(length).to_owned();
-        self.remove_assignment_prefix(name.len() + 1);
-        name
+        let name = self.assignment_name(length)?.to_owned();
+        self.remove_assignment_prefix(name.len() + 1)?;
+        Some(name)
     }
 
-    pub fn remove_assignment_prefix(&mut self, length: usize) {
+    pub fn remove_assignment_prefix(&mut self, length: usize) -> Option<()> {
         let text = match self {
             Self::Literal(s) => s,
-            Self::Expanded(parts) | Self::Declaration(parts) => {
-                let Part::Text(s) = &mut parts[0] else {
-                    unreachable!()
-                };
-                s
-            }
+            Self::Expanded(parts) | Self::Declaration(parts) => match parts.first_mut()? {
+                Part::Text(s) => s,
+                _ => return None,
+            },
         };
+        if length == 0 || text.as_bytes().get(length - 1) != Some(&b'=') {
+            return None;
+        }
         text.drain(..length);
+        Some(())
     }
 
     pub(crate) fn literal_element_suffix(&self, key: &str) -> Option<&str> {
@@ -301,13 +316,10 @@ impl Word {
             Self::Literal(_) => return Ok(()),
             Self::Expanded(parts) | Self::Declaration(parts) => parts,
         };
-        let literal = |text, quoted| {
-            if quoted {
-                Part::Text(text)
-            } else {
-                Part::Unquoted(text)
-            }
-        };
+        let _nesting = crate::parser::enter_expansion()
+            .map_err(|error| crate::expansion::Error::discard(error.message()))?;
+        let literal = modifier::scalar_part;
+        let mixed = parts.len() > 1;
         for part in parts.iter_mut() {
             if let Part::PrefixNames { prefix, at, quoted } = part {
                 *part = Part::Elements {
@@ -340,14 +352,25 @@ impl Word {
                 && let Some(reference) = name.strip_prefix('!')
                 && env.session.is_nameref(reference)
             {
-                let target = env.session.reference_name(reference)?.into_owned();
+                let target = env
+                    .session
+                    .read_reference_name(reference)
+                    .unwrap_or_default()
+                    .into_owned();
                 *part = literal(target, *quoted);
                 continue;
             }
             if let Part::Parameter { name, .. } = part
                 && env.session.is_nameref(name)
             {
-                let target = env.session.reference_name(name)?;
+                let Some(target) = env.session.read_reference_name(name) else {
+                    if env.session.nounset {
+                        return Err(env.missing(name, "unbound variable"));
+                    }
+                    let quoted = matches!(part, Part::Parameter { quoted: true, .. });
+                    *part = literal(String::new(), quoted);
+                    continue;
+                };
                 if array_elements_name(&target).is_some() {
                     *name = target.into_owned().into();
                 }
@@ -398,6 +421,15 @@ impl Word {
                     *name = indirect_target(target, env)?.into();
                 }
             }
+            if let Part::Parameter { name, quoted } = part
+                && (mixed || !*quoted)
+                && let Some((base, at, keys)) = array_elements_name(name)
+                && !env.shadows(base)
+                && let Some(value) = snapshot_array(base, at, keys, *quoted, env)
+            {
+                *part = value;
+                continue;
+            }
             match part {
                 Part::Modify {
                     name,
@@ -443,6 +475,9 @@ impl Word {
                 Part::Arithmetic { expression, quoted } => {
                     let value = match expression.compiled(env, true) {
                         Some(Ok(n)) => n,
+                        Some(Err(e)) if e == "unbound arithmetic variable" => {
+                            return Err(crate::arithmetic::shell_error(e, expression, env.session));
+                        }
                         Some(Err(e)) => return Err(crate::expansion::Error::discard(e)),
                         None => env.arithmetic(expression)?,
                     };
@@ -456,10 +491,10 @@ impl Word {
                     quoted,
                     reply,
                 } => {
-                    *part = literal(env.current_capture(std::mem::take(body), *reply)?, *quoted);
+                    *part = literal(env.current_capture(body, *reply)?, *quoted);
                 }
                 Part::Substitution { body, quoted } => {
-                    *part = literal(env.capture(std::mem::take(body))?, *quoted);
+                    *part = literal(env.capture(body)?, *quoted);
                 }
                 Part::Alternative {
                     name,
@@ -648,15 +683,22 @@ impl Word {
         positional: &[String],
     ) -> Vec<String> {
         let mut words = Vec::new();
-        self.append_fields(lookup, positional, Some(&Default::default()), &mut words)
-            .unwrap();
+        self.append_fields(
+            lookup,
+            positional,
+            || lookup("IFS").map(Into::into),
+            Some(&Default::default()),
+            &mut words,
+        )
+        .unwrap();
         words
     }
 
-    pub fn append_fields(
+    pub fn append_fields<'s>(
         mut self,
         lookup: &dyn Fn(&str) -> Option<String>,
         positional: &[String],
+        get_ifs: impl FnOnce() -> Option<std::borrow::Cow<'s, str>>,
         globbing: Option<&crate::pattern::GlobOptions>,
         words: &mut Vec<String>,
     ) -> Result<(), crate::expansion::Error> {
@@ -677,7 +719,7 @@ impl Word {
             words.extend_from_slice(positional);
             return Ok(());
         }
-        let ifs = lookup("IFS");
+        let ifs = get_ifs();
         // A standalone, already-resolved expansion can write complete fields
         // directly when no field can be a pathname pattern. Keep small words
         // on the ordinary path and recognize only Bash's three IFS spaces.
@@ -991,6 +1033,27 @@ fn parameter(
     lookup(name)
 }
 
+fn snapshot_array(
+    base: &str,
+    at: bool,
+    keys: bool,
+    quoted: bool,
+    env: &crate::expansion::Expansion<'_>,
+) -> Option<Part> {
+    let mut values = Vec::new();
+    env.session
+        .append_array_fields(base, keys, &mut values)
+        .then(|| {
+            if !at && quoted {
+                // The separator belongs to this expansion, even if a later
+                // parameter assignment in the same word changes IFS.
+                Part::Text(values.join(&ifs_separator(&|k| env.lookup(k))))
+            } else {
+                Part::Elements { values, at, quoted }
+            }
+        })
+}
+
 fn ifs_separator(lookup: &dyn Fn(&str) -> Option<String>) -> std::borrow::Cow<'static, str> {
     let Some(mut ifs) = lookup("IFS") else {
         return " ".into();
@@ -1093,7 +1156,7 @@ impl Fields<'_> {
             if start < i {
                 self.literal(&text[start..i], true);
             }
-            if matches!(sep, " " | "\t" | "\n" | "\r" | "\x0b" | "\x0c") {
+            if is_ifs_whitespace(sep) {
                 self.whitespace = true;
             } else {
                 self.emit();

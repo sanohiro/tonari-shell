@@ -16,6 +16,7 @@ struct Terminal {
     fd: PrivateFile,
     // The owning shell and the process group to restore after a foreground job.
     shell_group: pid_t,
+    original_group: pid_t,
     owner: pid_t,
 }
 
@@ -66,17 +67,37 @@ impl Launch {
             // before its first instruction, including a read in an initializer.
             // Consume Darwin's synthetic stopped event before sending SIGCONT.
             // WSTOPPED leaves a real exit available to the normal job waiter.
-            let mut info = std::mem::MaybeUninit::uninit();
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
             loop {
                 let result = unsafe {
                     libc::waitid(
                         libc::P_PID,
                         pid as _,
-                        info.as_mut_ptr(),
+                        &mut info,
                         libc::WSTOPPED | libc::WNOHANG,
                     )
                 };
-                if result == 0 || io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                if result == 0 && info.si_pid == 0 {
+                    // The scheduler has not posted the synthetic stop yet. An
+                    // intervening exit must remain waitable by the job owner.
+                    if unsafe {
+                        libc::waitid(
+                            libc::P_PID,
+                            pid as _,
+                            &mut info,
+                            libc::WEXITED | libc::WSTOPPED | libc::WNOWAIT,
+                        )
+                    } == 0
+                    {
+                        if info.si_code == libc::CLD_STOPPED {
+                            continue;
+                        }
+                        return;
+                    }
+                } else if result == 0 {
+                    break;
+                }
+                if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
                     break;
                 }
             }
@@ -212,9 +233,15 @@ fn give_terminal_with_modes(fd: RawFd, pgid: pid_t, modes: Option<&libc::termios
         let Ok(_mask) = crate::traps::SignalMask::block(&block) else {
             return;
         };
-        libc::tcsetpgrp(fd, pgid);
+        while libc::tcsetpgrp(fd, pgid) < 0 {
+            if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                return;
+            }
+        }
         if let Some(modes) = modes {
-            libc::tcsetattr(fd, libc::TCSANOW, modes);
+            while libc::tcsetattr(fd, libc::TCSANOW, modes) < 0
+                && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted
+            {}
         }
     }
 }
@@ -247,14 +274,23 @@ struct Job {
 
 impl Job {
     fn hangup(&self) {
-        if !self.nohup
-            && (self.active() || self.stopped())
-            && let Some(group) = self.group
-        {
-            unsafe {
-                libc::kill(-group, libc::SIGHUP);
-                if self.stopped() {
-                    libc::kill(-group, libc::SIGCONT);
+        if self.nohup {
+            return;
+        }
+        let send = |target, stopped| unsafe {
+            libc::kill(target, libc::SIGHUP);
+            if stopped {
+                libc::kill(target, libc::SIGCONT);
+            }
+        };
+        if let Some(group) = self.group {
+            if self.active() || self.stopped() {
+                send(-group, self.stopped());
+            }
+        } else {
+            for child in &self.children {
+                if child.pid > 0 && !matches!(child.state, State::Done(_)) {
+                    send(child.pid, matches!(child.state, State::Stopped(_)));
                 }
             }
         }
@@ -282,6 +318,15 @@ impl Job {
                 return format!("Stopped(SIG{name})").into();
             }
             return "Stopped".into();
+        }
+        if let Some(signal) = self.children.last().and_then(|child| child.signal) {
+            let description = unsafe { libc::strsignal(signal) };
+            if !description.is_null() {
+                return unsafe { std::ffi::CStr::from_ptr(description) }
+                    .to_string_lossy()
+                    .into_owned()
+                    .into();
+            }
         }
         match self.status() {
             0 => "Done".into(),
@@ -414,9 +459,9 @@ impl Jobs {
         }
         self.poll();
         if self.table.iter().any(Job::stopped) {
-            eprintln!("There are stopped jobs.");
+            stderr_line!("There are stopped jobs.");
         } else if check_running && self.table.iter().any(Job::active) {
-            eprintln!("There are running jobs.");
+            stderr_line!("There are running jobs.");
         } else {
             return false;
         }
@@ -474,6 +519,7 @@ impl Jobs {
             fd,
             owner,
             shell_group,
+            original_group: old,
         });
     }
     fn terminal(&self) -> Option<&Terminal> {
@@ -506,6 +552,9 @@ impl Jobs {
         } else {
             self.inherited.clear();
         }
+        if self.tty.is_some() {
+            crate::traps::reset_caught_signals(&[libc::SIGTSTP]);
+        }
         self.tty = None;
         self.foreground_notices.clear();
         self.monitor = false;
@@ -513,6 +562,24 @@ impl Jobs {
         self.detached.clear();
         self.serial = 0;
         self.finished.clear();
+    }
+    pub(crate) fn restore_initial_group(&self) {
+        if let Some(tty) = self.terminal()
+            && tty.shell_group != tty.original_group
+            && unsafe {
+                libc::getpgrp() == tty.shell_group
+                    && libc::tcgetpgrp(tty.fd.as_raw_fd()) == tty.shell_group
+            }
+            && unsafe { libc::setpgid(0, tty.original_group) } == 0
+        {
+            give_terminal(tty.fd.as_raw_fd(), tty.original_group);
+        }
+    }
+
+    pub(crate) fn detach_started(&mut self, pids: impl Iterator<Item = pid_t>) {
+        // A later segment's setup can fail after earlier processes have begun.
+        // Keep reaping those children without waiting for a stopped process.
+        self.detached.extend(pids);
     }
     pub fn restore(&self) {
         if let Some(t) = self.terminal() {
@@ -564,7 +631,7 @@ impl Jobs {
         if launch.background {
             self.store(job);
             if !self.quiet && self.terminal().is_some() {
-                eprintln!("[{}] {}", self.serial, last.unwrap_or(0));
+                stderr_line!("[{}] {}", self.serial, last.unwrap_or(0));
             }
             Ok((0, last))
         } else {
@@ -600,11 +667,17 @@ impl Jobs {
             self.note_foreground_signal(&mut job);
             if job.stopped() {
                 self.store(job);
-                if !self.quiet {
-                    eprintln!("[{}]+ Stopped", self.serial);
-                }
+                self.report_stopped();
             }
             Ok((code, None))
+        }
+    }
+    fn report_stopped(&mut self) {
+        if !self.quiet
+            && let Some(job) = self.table.last_mut()
+        {
+            stderr_line!("[{}]+ Stopped  {}", job.id, job.name);
+            job.listed = true;
         }
     }
     fn note_foreground_signal(&mut self, job: &mut Job) {
@@ -625,7 +698,7 @@ impl Jobs {
             let reason = unsafe { libc::strsignal(signal) };
             if !reason.is_null() {
                 let text = unsafe { std::ffi::CStr::from_ptr(reason) }.to_string_lossy();
-                eprintln!("{text}  {command}");
+                stderr_line!("{text}  {command}");
             }
         }
     }
@@ -800,24 +873,11 @@ impl Jobs {
     pub(crate) fn report_changes(&mut self, posix: bool) {
         for job in &mut self.table {
             if !job.active() && !job.listed {
-                let state = if job.stopped() {
-                    "Stopped"
-                } else if job.signaled {
-                    "Terminated"
-                } else {
-                    "Done"
-                };
-                if posix && !job.signaled {
-                    eprintln!("[{}] {}  {}", job.id, job.display_state(true), job.name);
-                } else {
-                    eprintln!("[{}] {state}  {}", job.id, job.name);
-                }
+                stderr_line!("[{}] {}  {}", job.id, job.display_state(posix), job.name);
                 job.listed = true;
             }
         }
-        if posix {
-            self.remove_reported();
-        }
+        self.remove_reported();
     }
 
     pub fn poll(&mut self) {
@@ -840,8 +900,19 @@ impl Jobs {
                 );
                 if got > 0 {
                     job.update(got, ChildEvent::decode(status));
+                } else if got < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD)
+                {
+                    // No further status can arrive for an already reaped child.
+                    job.update(p.pid, ChildEvent::Exited(127));
                 }
             }
+        }
+    }
+    fn select_job(&self, spec: &str) -> Option<usize> {
+        if let Ok(id) = spec.parse::<u32>() {
+            self.table.iter().position(|j| j.id == id)
+        } else {
+            self.select(spec)
         }
     }
     fn select(&self, spec: &str) -> Option<usize> {
@@ -865,7 +936,7 @@ impl Jobs {
                 hits.next().is_none().then_some(i)
             }
             s => {
-                let pid = s.parse::<pid_t>().ok()?;
+                let pid = s.parse::<pid_t>().ok().filter(|&pid| pid > 0)?;
                 self.table
                     .iter()
                     .position(|j| j.children.iter().any(|p| p.pid == pid))

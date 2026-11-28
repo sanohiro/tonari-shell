@@ -88,13 +88,13 @@ pub(super) fn builtin(
     )
 }
 
-pub(super) fn builtin_words(
+pub(super) fn builtin_words<'a>(
     words: &[String],
     search: lookup::Search,
     empty_status: u8,
     last_status: u8,
     session: &Session,
-    path: impl FnOnce() -> std::ffi::OsString,
+    path: impl FnOnce() -> &'a std::ffi::OsStr,
 ) -> Option<Builtin> {
     let Some(name) = words.first() else {
         return Some(Builtin::Status(empty_status));
@@ -163,10 +163,7 @@ builtin_registry! { args, last_status;
     "printf" => Builtin::Printf,
     "pwd" => Builtin::Directory,
     "read" => Builtin::Read,
-    "return" => Builtin::Return(match status_operands(args).first() {
-            None => Some(last_status),
-            Some(s) => s.trim().parse::<i64>().ok().map(|n| n as u8),
-        }),
+    "return" => Builtin::Return(status_value(status_operands(args), last_status)),
     "set" => Builtin::Set,
     "shift" => Builtin::Shift,
     "source" => Builtin::Source,
@@ -208,14 +205,16 @@ fn status_operands(args: &[String]) -> &[String] {
     }
 }
 
+fn status_value(args: &[String], previous: u8) -> Option<u8> {
+    args.first().map_or(Some(previous), |arg| {
+        arg.trim().parse::<i64>().ok().map(|n| n as u8)
+    })
+}
+
 fn exit_builtin(args: &[String], last_status: u8) -> Builtin {
     let args = status_operands(args);
-    let status = match args.first() {
-        None => last_status,
-        Some(s) => match s.trim().parse::<i64>() {
-            Ok(n) => n as u8,
-            Err(_) => return Builtin::InvalidExit,
-        },
+    let Some(status) = status_value(args, last_status) else {
+        return Builtin::InvalidExit;
     };
     if args.len() > 1 {
         Builtin::ExtraExitArgs
@@ -252,12 +251,12 @@ pub(super) fn eval_builtin(
             write_error(b"logout", b": not login shell: use `exit'");
             Flow::Continue(1)
         }
-        Builtin::Compound => match *cmd.compound.take().unwrap() {
-            crate::parser::Command::Subshell(body) if in_stage_child => {
-                crate::execute_program(session, body, last_status, true)
-            }
-            command => crate::eval::command(session, command, last_status, false),
-        },
+        Builtin::Compound => crate::eval::compound(
+            session,
+            cmd.compound.take().unwrap(),
+            last_status,
+            in_stage_child,
+        ),
         Builtin::Exec => exec_builtin(cmd, session, args),
         Builtin::Function => crate::eval::call_with_bindings(
             session,
@@ -311,7 +310,7 @@ pub(super) fn eval_builtin(
         Builtin::Hash => Flow::Continue(hash::run(session, args)),
         Builtin::Shopt => Flow::Continue(session.shopt(args)),
         Builtin::Getopts => session.getopts(args),
-        Builtin::Let => Flow::Continue(crate::arithmetic::let_builtin(args, session)),
+        Builtin::Let => crate::arithmetic::let_builtin(args, session),
         Builtin::Shift => Flow::Continue(session.shift(args)),
         Builtin::Declare => session.declare(
             &cmd.words[0],
@@ -355,11 +354,11 @@ pub(super) fn eval_builtin(
                         }
                     }
                     Err(_) => {
-                        write_error(cmd.words[0].as_bytes(), b": numeric argument required");
+                        diagnostic!("{}: {}: numeric argument required", cmd.words[0], args[0]);
                         Flow::Exit(128)
                     }
                     Ok(_) => {
-                        write_error(cmd.words[0].as_bytes(), b": invalid loop count");
+                        diagnostic!("{}: {}: loop count out of range", cmd.words[0], args[0]);
                         Flow::Break(session.loop_depth, 1)
                     }
                 }
@@ -368,7 +367,7 @@ pub(super) fn eval_builtin(
         Builtin::Export => {
             if args
                 .iter()
-                .take_while(|s| s.len() > 1 && s.starts_with('-') && *s != "--")
+                .take_while(|s| crate::builtins::flags::cluster(s))
                 .any(|s| s.contains(['a', 'A']))
             {
                 session.declare(
@@ -383,14 +382,14 @@ pub(super) fn eval_builtin(
                 Flow::Continue(apply_array_declarations(cmd, status, session))
             }
         }
-        Builtin::Unset => Flow::Continue(session.unset(args)),
+        Builtin::Unset => session.unset(args),
         Builtin::DirectoryStack => Flow::Continue(session.directory_stack(
             &cmd.words[0],
             args,
             &mut crate::builtins::listing_stdout(&cmd.words[0]),
         )),
         Builtin::AutoCd => {
-            eprintln!("cd -- {}", cmd.words.join(" "));
+            stderr_line!("cd -- {}", cmd.words.join(" "));
             cmd.words.insert(0, "--".into());
             let status = session.directory_builtin("cd", &cmd.words);
             cmd.words.remove(0);
@@ -432,7 +431,10 @@ pub(super) fn eval_builtin(
                 };
                 Flow::Return(code)
             } else {
-                write_error(b"return", b": numeric argument required");
+                diagnostic!(
+                    "return: {}: numeric argument required",
+                    status_operands(args)[0]
+                );
                 Flow::Return(2)
             }
         }
@@ -450,7 +452,10 @@ pub(super) fn eval_builtin(
         }
         Builtin::Exit(code) => Flow::Exit(crate::startup::logout(session, code, last_status)),
         Builtin::InvalidExit => {
-            write_error(b"exit", b": numeric argument required");
+            diagnostic!(
+                "exit: {}: numeric argument required",
+                status_operands(args)[0]
+            );
             Flow::Exit(2)
         }
         Builtin::ExtraExitArgs => {
@@ -458,9 +463,12 @@ pub(super) fn eval_builtin(
             Flow::Continue(1)
         }
     };
-    let result = match result {
-        Flow::Exit(code) => Flow::Exit(crate::traps::exit_action(session, code)),
-        other => other,
+    // Bash exits a function in its dynamic execution environment, including
+    // the function's redirections and positional parameters.
+    let result = if session.function_depth != 0 || session.source_depth != 0 {
+        crate::traps::leaving_scope(session, result)
+    } else {
+        result
     };
     if !persistent {
         session.restore(bindings);
@@ -509,7 +517,7 @@ fn exec_builtin(cmd: &PreparedCommand, session: &Session, mut args: &[String]) -
         arg0 = Some(format!("-{}", arg0.as_ref().unwrap_or(program)));
     }
     let status = match External::for_words(cmd, session, args, arg0, clear) {
-        Ok(external) => external.exec(None),
+        Ok(external) => external.exec(session, false),
         Err(error) => {
             diagnostic!("exec: {error}");
             126
@@ -530,7 +538,7 @@ fn apply_array_declarations(cmd: &PreparedCommand, status: u8, session: &mut Ses
         .words
         .iter()
         .skip(1)
-        .take_while(|a| a.starts_with('-') && *a != "--")
+        .take_while(|a| crate::builtins::flags::cluster(a))
         .any(|a| a.contains('g'));
     for d in &cmd.array_declarations {
         if let Err(e) = session.assign_array(&d.name, d.append, &d.items, global) {
@@ -698,13 +706,26 @@ fn silent_redirect(
         if backup >= 0 {
             unsafe { libc::close(backup) };
         } else if errno() == libc::EBADF {
-            duplicate(fd.as_raw_fd(), dest)?;
+            if let Err(error) = duplicate(fd.as_raw_fd(), dest) {
+                diagnostic!("redirection: {dest}: {error}");
+                return Ok(redirect_failure(cmd, session));
+            }
             unsafe { libc::close(dest) };
         } else {
-            return Err(io::Error::last_os_error());
+            diagnostic!("redirection: {dest}: {}", io::Error::last_os_error());
+            return Ok(redirect_failure(cmd, session));
         }
     }
     Ok(Flow::Continue(code))
+}
+
+pub(super) fn output_status(name: &str, result: io::Result<()>, status: u8) -> u8 {
+    if let Err(error) = result {
+        diagnostic!("{name}: write error: {error}");
+        1
+    } else {
+        status
+    }
 }
 
 pub(super) fn run_builtin(
@@ -760,16 +781,20 @@ pub(super) fn run_builtin(
         && let [Action::HereInput(0, bytes)] = actions
         && !bytes.is_empty()
         && bytes.len() <= here_input::PIPE_LIMIT
-        && !session.traps.active()
+        && !session.traps.observes_commands()
         && (cmd.assignments.is_empty()
             || matches!(cmd.assignments.as_slice(), [(key, _)] if key == "IFS" && !session.is_nameref(key) && !session.integer(key)))
-        && session.memory_input(matches!(builtin, Builtin::Read), &cmd.words[1..], bytes)
+        && let Some(input) =
+            session.memory_input(matches!(builtin, Builtin::Read), &cmd.words[1..], bytes)
         && let Ok((reader, writer)) = io::pipe()
         && reader.as_raw_fd() > 2
         && writer.as_raw_fd() > 2
     {
         drop((reader, writer));
-        return Ok(eval_builtin(builtin, cmd, session, last_status, false));
+        let bindings = session.bind(&cmd.assignments);
+        let result = input.run(session, &cmd.words[0], last_status);
+        session.restore(bindings);
+        return Ok(result);
     }
     if !final_command
         && let [Action::Open(1, path, flags)] = actions
@@ -801,14 +826,16 @@ pub(super) fn run_builtin(
             if path.len() < line.len() {
                 line[..path.len()].copy_from_slice(path);
                 line[path.len()] = b'\n';
-                return Ok(Flow::Continue(u8::from(
-                    file.write_all(&line[..=path.len()]).is_err(),
+                return Ok(Flow::Continue(output_status(
+                    "pwd",
+                    file.write_all(&line[..=path.len()]),
+                    0,
                 )));
             }
         }
         let (data, status) = output.render(session);
         let result = file.write_all(&data);
-        return Ok(Flow::Continue(if result.is_err() { 1 } else { status }));
+        return Ok(Flow::Continue(output_status(&cmd.words[0], result, status)));
     }
     if cmd.assignments.is_empty()
         && let (Builtin::Status(code), [Action::Open(dest, path, flags)]) = (builtin, actions)
@@ -817,7 +844,7 @@ pub(super) fn run_builtin(
     }
     let mut saved = [const { SavedFd::Unchanged }; 3];
     let mut extra = Vec::new();
-    if !final_command || can_install_trap(builtin, cmd) {
+    if !final_command || can_install_trap(builtin, cmd) || session.traps.catches(0) {
         for action in actions {
             let fd = action.destination();
             if let Some(slot) = saved.get_mut(fd as usize) {
@@ -829,7 +856,7 @@ pub(super) fn run_builtin(
             }
         }
     }
-    let redirection = apply_protected(actions, here_pipe_limit(Some(builtin), cmd));
+    let redirection = apply_protected(actions, here_pipe_limit(Some(builtin), cmd), session);
     let applied = redirection.is_ok();
     let old_input = session.stdin_redirected;
     if applied && actions.iter().any(|a| a.destination() == 0) {
@@ -852,13 +879,18 @@ pub(super) fn run_builtin(
         }
         return Ok(flow);
     }
-    SavedFd::restore_all(
+    if let Err(error) = SavedFd::restore_all(
         saved
             .into_iter()
             .enumerate()
             .map(|(fd, v)| (fd as RawFd, v))
             .chain(extra),
-    )?;
+    ) {
+        diagnostic!("redirection: cannot restore file descriptor: {error}");
+        if matches!(flow, Flow::Continue(_)) {
+            return Ok(Flow::Continue(1));
+        }
+    }
     // Failures in a compound command's body are tested by its own statement
     // list. A redirect failure happens before that list can run.
     if let Err(index) = redirection

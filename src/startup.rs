@@ -5,9 +5,37 @@ use std::path::{Path, PathBuf};
 use crate::cli::Invocation;
 use crate::{Flow, Session, input};
 
+// A login shell spawned by a normal sudo/su login already has matching IDs.
+// When invoked with unequal IDs, drop them before reading shell-controlled
+// environment or files. Tonari does not provide a set-ID execution facility.
+pub(crate) fn settle_credentials(privileged: bool) -> io::Result<bool> {
+    unsafe {
+        let uid = libc::getuid();
+        let gid = libc::getgid();
+        if uid == libc::geteuid() && gid == libc::getegid() {
+            return Ok(false);
+        }
+        if privileged {
+            return Err(io::Error::other(
+                "retaining elevated effective credentials is unsupported",
+            ));
+        }
+        if libc::setregid(gid, gid) != 0
+            || libc::setreuid(uid, uid) != 0
+            || libc::geteuid() != uid
+            || libc::getegid() != gid
+        {
+            return Err(io::Error::other("cannot drop elevated credentials"));
+        }
+    }
+    Ok(true)
+}
+
 #[derive(Default)]
 pub(crate) struct Environment {
     pub pwd: bool,
+    ssh: bool,
+    skip_startup_files: bool,
     pub shell_level: i64,
     pub execution_string: bool,
     pub posix: bool,
@@ -18,14 +46,16 @@ pub(crate) struct Environment {
 }
 
 impl Environment {
-    pub fn read(session: &mut Session) -> Self {
+    pub fn read(session: &mut Session, changed_ids: bool) -> Self {
         use std::ffi::CStr;
-        let mut settings = Self::default();
+        let mut settings = Self {
+            skip_startup_files: changed_ids,
+            ..Self::default()
+        };
+        let import = !session.privileged && !changed_ids;
         let mut lower_eof = None;
         let mut entry = crate::execute::inherited_env();
-        let privileged = std::cell::LazyCell::new(|| unsafe {
-            libc::getuid() != libc::geteuid() || libc::getgid() != libc::getegid()
-        });
+
         // SAFETY: the single interpreter thread is still in initialization.
         // No shell code runs or changes environ, and no borrowed entry escapes.
         unsafe {
@@ -43,6 +73,7 @@ impl Environment {
                 let value = &bytes[i + 1..];
                 let utf8 = || std::str::from_utf8(value).ok();
                 match key {
+                    b"SSH_CLIENT" | b"SSH2_CLIENT" => settings.ssh = true,
                     b"PWD" => settings.pwd = true,
                     b"SHLVL" => {
                         settings.shell_level =
@@ -53,9 +84,9 @@ impl Environment {
                     b"IGNOREEOF" => settings.ignore_eof = Some(utf8().unwrap_or("").into()),
                     b"ignoreeof" => lower_eof = Some(utf8().unwrap_or("").into()),
                     b"BASH_COMPAT" => settings.compat = utf8().map(str::to_owned),
-                    b"SHELLOPTS" => settings.shellopts = utf8().map(str::to_owned),
-                    b"BASHOPTS" => settings.bashopts = utf8().map(str::to_owned),
-                    _ if key.starts_with(b"BASH_FUNC_") && !*privileged => {
+                    b"SHELLOPTS" if import => settings.shellopts = utf8().map(str::to_owned),
+                    b"BASHOPTS" if import => settings.bashopts = utf8().map(str::to_owned),
+                    _ if key.starts_with(b"BASH_FUNC_") && import => {
                         session.import_function(bytes)
                     }
                     _ => {}
@@ -70,6 +101,35 @@ impl Environment {
 struct Script {
     file: File,
     metadata: std::fs::Metadata,
+}
+
+pub(crate) fn open_main_script(
+    session: &Session,
+    path: &Path,
+) -> io::Result<(File, Option<PathBuf>)> {
+    match File::open(path) {
+        Ok(file) => Ok((file, None)),
+        Err(first)
+            if first.kind() == io::ErrorKind::NotFound
+                && !path.as_os_str().as_encoded_bytes().contains(&b'/') =>
+        {
+            if let Some(search) = session.scalar_setting("PATH") {
+                for dir in crate::execute::search_directories(search.as_ref().as_ref())
+                    .filter(|dir| dir != &Path::new("."))
+                {
+                    let candidate = dir.join(path);
+                    match File::open(&candidate) {
+                        Ok(file) => return Ok((file, Some(candidate))),
+                        Err(e)
+                            if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) => {}
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+            Err(first)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 fn open_script(path: &Path) -> io::Result<Script> {
@@ -89,7 +149,7 @@ fn sourced(
     status: u8,
 ) -> Flow {
     // Guard the interpreter stack if startup files source one another recursively.
-    if session.source_depth >= 128 {
+    if crate::stack_budget_exceeded() {
         diagnostic!("source nesting limit exceeded");
         return Flow::Continue(1);
     }
@@ -104,6 +164,7 @@ fn sourced(
     session.function_names.push("source".into());
     let saved_debug = session.traps.enter_source(session.functrace);
     let result = input::file_script(session, script.file, Some(script.metadata), status, false);
+    let result = crate::traps::leaving_scope(session, result);
     session.signal_line = caller_signal_line;
     session.function_names.pop();
     session.source_names.pop();
@@ -118,60 +179,79 @@ fn sourced(
         session.positional = old;
     }
     session.source_set_args = outer_set_args || args.is_empty() && session.source_set_args;
-    match result {
-        Flow::Return(code) => Flow::Continue(code),
-        other => other,
-    }
+    result
 }
 
 pub fn source_file(session: &mut Session, words: &[String], status: u8, fatal: bool) -> Flow {
+    let command = words[0].as_str();
+    let failure = if fatal {
+        Flow::Exit(1)
+    } else {
+        Flow::Continue(1)
+    };
+    let finish = |flow| match flow {
+        Flow::Return(n) => Flow::Continue(n),
+        other => other,
+    };
     let mut args = &words[1..];
     let mut search = None;
     while let Some(option) = crate::builtins::flags::next(&mut args) {
         let Some(path) = option.strip_prefix("-p") else {
-            diagnostic!("source: {option}: invalid option");
+            diagnostic!("{command}: {option}: invalid option");
             return Flow::Continue(2);
         };
         let Some(path) = crate::builtins::flags::value(path, &mut args) else {
-            diagnostic!("source: -p requires a path");
+            diagnostic!("{command}: -p requires a path");
             return Flow::Continue(2);
         };
         search = Some(path);
     }
     let Some(name) = args.first() else {
-        diagnostic!("source: filename required");
+        diagnostic!("{command}: filename required");
         return Flow::Continue(2);
     };
     let direct = name.contains('/');
     let inherited = (search.is_none() && !direct && session.shopt.sourcepath)
-        .then(|| session.get("PATH"))
+        .then(|| session.scalar_setting("PATH"))
         .flatten();
     if let Some(path) = search.or(inherited.as_deref()).filter(|_| !direct) {
-        for dir in path.split(':') {
-            let path = Path::new(dir).join(name);
-            if let Ok(file) = open_script(&path) {
-                return sourced(session, file, &path, &args[1..], status);
+        let mut selected = None;
+        for dir in crate::execute::search_directories(path.as_ref()) {
+            let path = dir.join(name);
+            match open_script(&path) {
+                Ok(file) => {
+                    selected = Some((file, path));
+                    break;
+                }
+                Err(e)
+                    if matches!(
+                        e.raw_os_error(),
+                        Some(libc::ENOENT | libc::ENOTDIR | libc::EISDIR)
+                    ) => {}
+                Err(e) => {
+                    diagnostic!(
+                        "{command}: {}: {}",
+                        path.display(),
+                        crate::builtins::os_message(&e)
+                    );
+                    return failure;
+                }
             }
+        }
+        if let Some((file, path)) = selected {
+            return finish(sourced(session, file, &path, &args[1..], status));
         }
     }
     if !direct && (search.is_some() || session.posix && words[0] == "." && session.shopt.sourcepath)
     {
-        diagnostic!(".: {name}: file not found");
-        return if fatal {
-            Flow::Exit(1)
-        } else {
-            Flow::Continue(1)
-        };
+        diagnostic!("{command}: {name}: file not found");
+        return failure;
     }
     match open_script(Path::new(name)) {
-        Ok(file) => sourced(session, file, Path::new(name), &args[1..], status),
+        Ok(file) => finish(sourced(session, file, Path::new(name), &args[1..], status)),
         Err(e) => {
-            diagnostic!("source: {name}: {e}");
-            if fatal {
-                Flow::Exit(1)
-            } else {
-                Flow::Continue(1)
-            }
+            diagnostic!("{command}: {name}: {}", crate::builtins::os_message(&e));
+            failure
         }
     }
 }
@@ -190,7 +270,10 @@ pub(crate) fn debugger(session: &mut Session) -> Flow {
         let errexit = std::mem::replace(&mut session.errexit, false);
         let result = sourced(session, script, path, &[], 0);
         session.errexit = errexit;
-        result
+        match result {
+            Flow::Return(n) => Flow::Continue(n),
+            other => other,
+        }
     } else {
         diagnostic!("{}: cannot start debugger", path.display());
         Flow::Continue(0)
@@ -202,7 +285,10 @@ pub(crate) fn debugger(session: &mut Session) -> Flow {
 
 fn optional(session: &mut Session, path: &Path) -> Option<Flow> {
     let file = open_script(path).ok()?;
-    Some(sourced(session, file, path, &[], 0))
+    Some(match sourced(session, file, path, &[], 0) {
+        Flow::Return(_) => Flow::Continue(0),
+        other => other,
+    })
 }
 
 pub fn defer_interactive_exit(session: &mut Session) -> bool {
@@ -221,8 +307,8 @@ pub fn logout(session: &mut Session, code: u8, previous: u8) -> u8 {
     }
     session.logout_started = true;
     let home = session
-        .get("HOME")
-        .map(|h| Path::new(&h).join(".bash_logout"));
+        .personal_home()
+        .map(|h| Path::new(h.as_ref()).join(".bash_logout"));
     let system = cfg!(target_os = "linux").then(|| PathBuf::from("/etc/bash.bash_logout"));
     for path in home.into_iter().chain(system) {
         if let Ok(file) = open_script(&path)
@@ -234,22 +320,56 @@ pub fn logout(session: &mut Session, code: u8, previous: u8) -> u8 {
     code
 }
 
-pub fn initialize(session: &mut Session, invocation: &Invocation) -> Flow {
-    if invocation.options.check {
+fn bashrc(session: &mut Session, invocation: &Invocation) -> Flow {
+    #[cfg(target_os = "linux")]
+    if let Some(exit @ Flow::Exit(_)) = optional(session, Path::new("/etc/bash.bashrc")) {
+        return exit;
+    }
+    invocation
+        .rcfile
+        .clone()
+        .or_else(|| {
+            session
+                .personal_home()
+                .map(|p| Path::new(p.as_ref()).join(".bashrc"))
+        })
+        .and_then(|path| optional(session, &path))
+        .unwrap_or(Flow::Continue(0))
+}
+
+fn remote_stdin() -> bool {
+    let mut address = std::mem::MaybeUninit::<libc::sockaddr_storage>::uninit();
+    let mut size = std::mem::size_of_val(&address) as libc::socklen_t;
+    unsafe { libc::getpeername(0, address.as_mut_ptr().cast(), &mut size) == 0 }
+}
+
+pub fn initialize(session: &mut Session, invocation: &Invocation, env: &Environment) -> Flow {
+    if invocation.options.check || env.skip_startup_files {
         return Flow::Continue(0);
+    }
+    if !invocation.login
+        && !invocation.norc
+        && !invocation.as_sh
+        && !session.privileged
+        && !invocation.interactive
+        && session.command_string
+        && env.shell_level <= 0
+        && (env.ssh || remote_stdin())
+    {
+        return bashrc(session, invocation);
     }
     if invocation.login && !invocation.noprofile && (invocation.as_sh || !session.posix) {
         if let Some(exit @ Flow::Exit(_)) = optional(session, Path::new("/etc/profile")) {
             return exit;
         }
-        if let Some(home) = session.get("HOME") {
+        if let Some(home) = session.personal_home().map(|s| PathBuf::from(s.as_ref())) {
             let profiles: &[&str] = if invocation.as_sh {
                 &[".profile"]
             } else {
                 &[".bash_profile", ".bash_login", ".profile"]
             };
             for name in profiles {
-                if let Some(flow) = optional(session, &Path::new(&home).join(name)) {
+                if let Some(flow) = optional(session, &home.join(name)) {
                     if let Flow::Exit(_) = flow {
                         return flow;
                     }
@@ -260,18 +380,7 @@ pub fn initialize(session: &mut Session, invocation: &Invocation) -> Flow {
     }
     if invocation.interactive && !invocation.as_sh && !session.posix {
         if !invocation.login && !invocation.norc {
-            #[cfg(target_os = "linux")]
-            if let Some(exit @ Flow::Exit(_)) = optional(session, Path::new("/etc/bash.bashrc")) {
-                return exit;
-            }
-            let rc = invocation.rcfile.clone().or_else(|| {
-                session
-                    .get("HOME")
-                    .map(|h| PathBuf::from(h).join(".bashrc"))
-            });
-            if let Some(path) = rc {
-                return optional(session, &path).unwrap_or(Flow::Continue(0));
-            }
+            return bashrc(session, invocation);
         }
     } else {
         let var = if invocation.interactive {
@@ -284,7 +393,7 @@ pub fn initialize(session: &mut Session, invocation: &Invocation) -> Flow {
         let Some(path) = session.get(var).filter(|p| !p.is_empty()) else {
             return Flow::Continue(0);
         };
-        if unsafe { libc::getuid() != libc::geteuid() || libc::getgid() != libc::getegid() } {
+        if session.privileged || invocation.as_su && invocation.login {
             return Flow::Continue(0);
         }
         let path = if path.contains(['$', '`', '\\']) {

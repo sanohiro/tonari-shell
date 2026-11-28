@@ -34,7 +34,9 @@ pub(crate) fn read_spare(file: &File, output: &mut Vec<u8>, limit: usize) -> io:
 // still be available to a child which reads stdin (for example, "cat\n...").
 pub fn stdin_script(session: &mut Session, check: bool) -> Flow {
     match stdin_reader() {
-        Ok((reader, shared_offset)) => run(session, reader, shared_offset, true, None, 0, check),
+        Ok((reader, shared_offset)) => {
+            run(session, reader, shared_offset, true, None, (0, 1), check)
+        }
         Err(e) => error(e, 1),
     }
 }
@@ -112,10 +114,10 @@ pub fn file_script(
         }
     }
     if let Some(meta) = &metadata
-        && let Some(program) = file_group(session, &file, meta)
+        && let Some((program, next_line)) = file_group(session, &file, meta)
     {
-        drop(file);
-        return if check {
+        let mut file = file;
+        let flow = if check {
             Flow::Continue(0)
         } else {
             match execute_program(session, program, status, false) {
@@ -123,6 +125,29 @@ pub fn file_script(
                 flow => flow,
             }
         };
+        if let Flow::Continue(code) = flow
+            && !session.onecmd
+            && file
+                .metadata()
+                .is_ok_and(|current| current.len() > meta.len())
+        {
+            if let Err(e) = file.seek(io::SeekFrom::Start(meta.len())) {
+                return error(e, 1);
+            }
+            return match PrivateFile::new(file) {
+                Ok(file) => run(
+                    session,
+                    BufReader::new(file),
+                    false,
+                    false,
+                    None,
+                    (code, next_line),
+                    check,
+                ),
+                Err(e) => error(e, 1),
+            };
+        }
+        return flow;
     }
     // Keep large compound commands in view across the usual 8 KiB boundary.
     // Verbose mode must still report each line as it is read.
@@ -135,7 +160,7 @@ pub fn file_script(
             if reader.fill_buf().is_ok_and(executable_header) {
                 return error("cannot execute binary file", 126);
             }
-            run(session, reader, false, false, file_len, status, check)
+            run(session, reader, false, false, file_len, (status, 1), check)
         }
         Err(e) => error(e, 1),
     }
@@ -166,7 +191,7 @@ fn syntax_error(session: &Session, problem: parser::Error, first_line: usize) ->
         Flow::Continue(2)
     };
     if let Some(prefix) = session.diagnostic_prefix(|| first_line) {
-        eprintln!("{prefix}{}", problem.message());
+        stderr_line!("{prefix}{}", problem.message());
     } else if session.source_depth > 0
         && let Some(path) = session.source_names.last()
     {
@@ -202,9 +227,9 @@ fn history_input<'a>(
         }
     };
     if matches!(event.text, std::borrow::Cow::Owned(_)) {
-        eprint!("{}", event.text);
+        stderr_text!("{}", event.text);
         if !event.text.ends_with('\n') {
-            eprintln!();
+            stderr_line!();
         }
     }
     if event.print {
@@ -236,10 +261,28 @@ fn assign_buffered_scalar(session: &mut Session, command: &str, scratch: &mut St
 
 // After the parser identifies an open delimiter, ordinary physical lines
 // cannot finish it. Retry on syntax, NUL, heredocs and history expansion.
-fn still_open(reason: Option<parser::Incomplete>, line: &[u8]) -> bool {
+pub(crate) fn still_open(
+    reason: Option<parser::Incomplete>,
+    text: &str,
+    session: &Session,
+) -> bool {
+    if session.reads_aliases() {
+        return false;
+    }
+    let line = text.as_bytes();
     use parser::Incomplete::*;
     let plain = |b: &u8| !b.is_ascii() || b.is_ascii_alphanumeric() || b" _-+:./=,\t\n".contains(b);
     match reason {
+        Some(CompoundEnd(close)) => {
+            // A complete, independent command with no outer terminator can only
+            // extend the pending body. Never defer quotes, here-docs or syntax errors.
+            !text.contains(close)
+                && !text.contains("<<")
+                && (parser::validate_tail(text, session, 1)
+                    || close == "esac"
+                        && text.trim_end().ends_with(";;")
+                        && parser::validate_tail(&format!("case x in\n{text}\nesac"), session, 1))
+        }
         Some(SingleQuote) => memchr::memchr2(b'\'', 0, line).is_none(),
         Some(DoubleQuote) => !line.iter().any(|b| b"\"\0$`\\".contains(b)),
         Some(Message("line continuation")) => line
@@ -356,18 +399,20 @@ fn run(
     mut shared_offset: bool,
     from_stdin: bool,
     file_len: Option<u64>,
-    status: u8,
+    start: (u8, usize),
     check: bool,
 ) -> Flow {
     let mut assignment_value = String::new();
-    let mut base_line = 1;
+    let (status, mut base_line) = start;
     let mut input = Vec::new();
     let mut state = ScriptState::new(status);
+    if base_line > 1 {
+        state.record(status);
+    }
     loop {
         let line_start = input.len();
         let n = match reader.read_until(b'\n', &mut input) {
             Ok(n) => n,
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => return error(e, 1),
         };
         if session.verbose && n != 0 {
@@ -400,13 +445,12 @@ fn run(
         }
         if let Some(incomplete) = state.incomplete
             && n != 0
-            && !(session.histexpand && session.history_enabled && session.source_depth == 0)
             && !session.reads_aliases()
         {
             let Ok(line) = std::str::from_utf8(&input[line_start..]) else {
                 return error("expected UTF-8 command text", 2);
             };
-            if still_open(Some(incomplete), line.as_bytes())
+            if still_open(Some(incomplete), line, session)
                 || matches!(incomplete, parser::Incomplete::Subshell)
                     && line.contains(')')
                     && parser::word_line(line, session)
@@ -450,12 +494,16 @@ fn run(
             && !session.onecmd
             && !session.xtrace
             && !session.history_enabled
-            && !session.traps.active()
-            && !session.traps.in_action()
+            && !session.traps.observes_commands()
+            && crate::traps::pending().is_none()
             && session.coprocesses.is_empty()
             && session.jobs.is_empty()
             && let Some(command) = text.strip_suffix('\n')
-            && assign_buffered_scalar(session, command, &mut assignment_value)
+            && (assign_buffered_scalar(session, command, &mut assignment_value)
+                || matches!(command.trim_ascii(), ":" | "true")
+                    && !session.reads_aliases()
+                    && !session.functions.contains_key(command.trim_ascii())
+                    && !session.disabled_builtins.contains(command.trim_ascii()))
         {
             session.current_command = Some(parser::Location::label(command.into(), base_line));
             session.pipe_status.single(0);
@@ -611,9 +659,9 @@ pub fn text(
         line_number += 1;
         if session.verbose {
             if line.ends_with('\n') {
-                eprint!("{line}");
+                stderr_text!("{line}");
             } else {
-                eprintln!("{line}");
+                stderr_line!("{line}");
             }
         }
         let new_command = start == end;
@@ -639,7 +687,7 @@ pub fn text(
         }
         if !last
             && !expand_history
-            && still_open(state.incomplete, line.as_bytes())
+            && still_open(state.incomplete, line, session)
             && !session.reads_aliases()
         {
             continue;

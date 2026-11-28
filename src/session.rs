@@ -64,13 +64,21 @@ enum LetterCase {
     Capitalize,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum BindingOrigin {
+    #[default]
+    Ordinary,
+    CommandPrefix,
+    LocalFromPrefix,
+}
+
 #[derive(Clone, Default)]
 struct Variable {
     // A binding keeps its name in saved scopes. The process environment is
     // immutable until exec or entry into a new shell session.
     inherited: std::cell::OnceCell<bool>,
     dynamic: bool,
-    temporary: bool,
+    origin: BindingOrigin,
     letter_case: Option<LetterCase>,
     nameref: bool,
     readonly: bool,
@@ -159,9 +167,13 @@ impl Variables {
                 .collect();
             *cache = Some((prefix.to_owned(), keys));
         }
-        for key in &cache.as_ref().unwrap().1 {
-            if key.starts_with(prefix)
-                && let Some((key, var)) = self.entries.get_key_value(key)
+        let (old, keys) = cache.as_mut().unwrap();
+        if old.len() < prefix.len() {
+            keys.retain(|key| key.starts_with(prefix));
+            prefix.clone_into(old);
+        }
+        for key in keys.iter() {
+            if let Some((key, var)) = self.entries.get_key_value(key)
                 && var.declared
             {
                 names.push(key.as_str());
@@ -272,6 +284,7 @@ pub struct Session {
     // original process environment without building a copy on startup.
     variables: Variables,
     inherited_names: std::cell::OnceCell<Rc<Vec<String>>>,
+    inherited_path: std::cell::OnceCell<OsString>,
     dynamic: dynamic::Dynamic,
     groups_unset: bool,
     funcname_unset: bool,
@@ -287,6 +300,7 @@ pub struct Session {
     pub interactive: bool,
     pub login: bool,
     pub posix: bool,
+    pub privileged: bool,
     pub physical: bool,
     pub keyword: bool,
     pub logout_started: bool,
@@ -353,7 +367,7 @@ pub struct Session {
     function_environment: HashMap<String, functions::Export>,
     pub loop_depth: u32,
     pub parent_loop_in_subshell: bool,
-    pub editor_kill: String,
+    pub editor_kill: crate::editor::KillRing,
     pub editor_queue: std::collections::VecDeque<u8>,
     pub bindings: crate::editor::bindings::Bindings,
     pub disabled_builtins: std::collections::BTreeSet<String>,
@@ -393,6 +407,24 @@ impl From<io::Error> for DirectoryError {
     }
 }
 
+pub(crate) enum MemoryInput<'a> {
+    Read(read::Options<'a>, &'a str, u8),
+    Mapfile(mapfile::Options<'a>, &'a [u8]),
+}
+
+impl MemoryInput<'_> {
+    pub(crate) fn run(self, session: &mut Session, name: &str, last: u8) -> crate::Flow {
+        match self {
+            Self::Read(opts, line, status) => {
+                read::assign_fields(session, &opts, line, &[], status)
+            }
+            Self::Mapfile(opts, bytes) => {
+                mapfile::run_parsed(session, name, opts, last, Some((0, bytes)))
+            }
+        }
+    }
+}
+
 impl Session {
     /// Fork a copy that can run shell code. Reset inherited traps and waitable
     /// process substitutions only in the child. The caller configures job control
@@ -427,6 +459,25 @@ impl Session {
         }
     }
 
+    pub(crate) fn tilde_home(&self) -> Option<Cow<'_, str>> {
+        self.scalar_setting("HOME")
+            .or_else(|| crate::word::account_home().map(Cow::Owned))
+    }
+
+    /// Preserve the slash from ~/ even when HOME is empty. Additional
+    /// slashes in the suffix are still relative to the expanded home.
+    pub(crate) fn tilde_path(&self, suffix: &str) -> Option<PathBuf> {
+        let home = self.tilde_home()?;
+        let parent = if home.is_empty() { "/" } else { home.as_ref() };
+        Some(Path::new(parent).join(suffix.trim_start_matches('/')))
+    }
+
+    /// A personal configuration path must never become relative through an
+    /// explicitly empty HOME. An unset HOME uses the account directory.
+    pub(crate) fn personal_home(&self) -> Option<Cow<'_, str>> {
+        self.tilde_home().filter(|h| !h.is_empty())
+    }
+
     pub(crate) fn locale_category(&self, category: &str) -> Option<Cow<'_, str>> {
         ["LC_ALL", category, "LANG"]
             .into_iter()
@@ -457,7 +508,7 @@ impl Session {
         }
         let name = NAMES
             .iter()
-            .find_map(|name| self.get(name).filter(|s| !s.is_empty()));
+            .find_map(|name| self.scalar_setting(name).filter(|s| !s.is_empty()));
         CharacterLocale::from_name(name.as_deref().unwrap_or(""))
     }
 
@@ -573,11 +624,16 @@ impl Session {
             })
     }
 
-    pub(crate) fn memory_input(&self, read: bool, args: &[String], bytes: &[u8]) -> bool {
+    pub(crate) fn memory_input<'a>(
+        &self,
+        read: bool,
+        args: &'a [String],
+        bytes: &'a [u8],
+    ) -> Option<MemoryInput<'a>> {
         if read {
-            read::memory_eligible(self, args, bytes)
+            read::prepare_memory(self, args, bytes)
         } else {
-            mapfile::memory_eligible(self, args)
+            mapfile::prepare_memory(self, args, bytes)
         }
     }
 
@@ -596,12 +652,12 @@ impl Session {
         }
         let count = args.first().map_or(Ok(1), |s| s.trim().parse::<i64>());
         let Ok(count) = count else {
-            diagnostic!("shift: numeric argument required");
+            diagnostic!("shift: {}: numeric argument required", args[0]);
             return 1;
         };
         if count < 0 || count as u64 > self.positional.len() as u64 {
-            if self.shopt.shift_verbose {
-                diagnostic!("shift: shift count out of range");
+            if count < 0 || self.shopt.shift_verbose {
+                diagnostic!("shift: {count}: shift count out of range");
             }
             return 1;
         }
@@ -669,6 +725,16 @@ impl Session {
         self.scoped_reference_name(name, false)
     }
 
+    pub(crate) fn read_reference_name<'a>(&self, name: &'a str) -> Option<Cow<'a, str>> {
+        match self.reference_name(name) {
+            Ok(target) => Some(target),
+            Err(error) => {
+                diagnostic!("warning: {name}: {error}");
+                None
+            }
+        }
+    }
+
     fn scoped_reference_name<'a>(
         &self,
         name: &'a str,
@@ -708,6 +774,11 @@ impl Session {
             base = next;
         }
         Err("circular name reference")
+    }
+
+    pub(crate) fn ifs(&self) -> Cow<'_, str> {
+        self.scalar_setting("IFS")
+            .unwrap_or(Cow::Borrowed(crate::word::DEFAULT_IFS))
     }
 
     // Ordinary shell-authored scalars can be inspected without copying their value.
@@ -1087,19 +1158,21 @@ impl Session {
         if self.protected_array(name) {
             return;
         }
+        let live = dynamic::is_dynamic(name) && self.variables.get(name).is_none_or(|v| v.dynamic);
+        if let Some(upper) = self.variables.get(name).and_then(|v| v.letter_case) {
+            value = Cow::Owned(self.convert_case(value.into_owned(), Some(upper)));
+        }
         self.apply_variable_effects(name, &value);
         if matches!(name, "HISTSIZE" | "HISTFILESIZE") {
             self.apply_history_limit(name, &value);
         }
-        if name == "BASH_ARGV0" {
+        if name == "BASH_ARGV0"
+            && !self
+                .locals
+                .iter()
+                .any(|scope| scope.variables.contains_key(name))
+        {
             self.arg0 = value.to_string();
-        }
-        if name == "OPTIND" {
-            value = Cow::Owned(value.trim().parse::<i64>().unwrap_or(0).to_string());
-        }
-        let live = dynamic::is_dynamic(name) && self.variables.get(name).is_none_or(|v| v.dynamic);
-        if let Some(upper) = self.variables.get(name).and_then(|v| v.letter_case) {
-            value = Cow::Owned(self.convert_case(value.into_owned(), Some(upper)));
         }
         if live {
             self.set_dynamic(name, &value);
@@ -1122,7 +1195,7 @@ impl Session {
             name.into(),
             Variable {
                 dynamic: live,
-                integer: live && dynamic::integer_attribute(name),
+                integer: dynamic::integer_attribute(name),
                 declared: true,
                 value: Some(value.into_owned()),
                 exported,
@@ -1393,20 +1466,28 @@ impl Session {
         for (name, value) in assignments.drain(..) {
             // A special builtin's environment persists in the nearest real
             // binding. A function prefix can itself hide another prefix.
-            if self.variables.get(&name).is_some_and(|v| v.temporary) {
+            if self
+                .variables
+                .get(&name)
+                .is_some_and(|v| v.origin == BindingOrigin::CommandPrefix)
+            {
                 for scope in self.locals.iter_mut().rev() {
                     if let Some(previous) = scope.variables.remove(&name)
-                        && !previous.as_ref().is_some_and(|v| v.temporary)
+                        && !previous
+                            .as_ref()
+                            .is_some_and(|v| v.origin == BindingOrigin::CommandPrefix)
                     {
                         break;
                     }
                 }
             }
+            let case = self.variables.get(&name).and_then(|v| v.letter_case);
+            let value = self.convert_case(value, case);
             self.apply_variable_effects(&name, &value);
             let var = self.variables.entry(name).or_default();
             var.exported = true;
             var.declared = true;
-            var.temporary = false;
+            var.origin = BindingOrigin::Ordinary;
             if let Some(array) = var.elements.as_mut() {
                 Rc::make_mut(array).insert(0, value);
             } else {
@@ -1434,20 +1515,17 @@ impl Session {
                 saved.opt_offset.get_or_insert(self.opt_offset);
             }
             self.apply_variable_effects(name, value);
-            saved
-                .variables
-                .entry(name.clone())
-                .or_insert_with(|| self.variables.get(name).cloned());
-            self.variables.insert(
+            let original = self.variables.insert(
                 name.clone(),
                 Variable {
-                    temporary: true,
+                    origin: BindingOrigin::CommandPrefix,
                     declared: true,
                     value: Some(value.clone()),
                     exported: true,
                     ..Variable::default()
                 },
             );
+            saved.variables.entry(name.clone()).or_insert(original);
         }
         saved
     }
@@ -1515,6 +1593,21 @@ impl Session {
                 };
                 self.shopt.glob.set_ignore(value);
             }
+            if matches!(name.as_str(), "HISTSIZE" | "HISTFILESIZE") {
+                let value = original
+                    .as_ref()
+                    .and_then(|v| v.value.as_deref())
+                    .map(Cow::Borrowed)
+                    .or_else(|| {
+                        original
+                            .is_none()
+                            .then(|| std::env::var(&name).ok().map(Cow::Owned))
+                            .flatten()
+                    });
+                if let Some(value) = value {
+                    self.apply_history_limit(&name, &value);
+                }
+            }
             if name == "PATH" {
                 self.hashes.clear();
             }
@@ -1566,14 +1659,19 @@ impl Session {
             )
     }
 
-    pub fn search_path(&self, assignments: &[(String, String)]) -> OsString {
+    pub fn search_path<'a>(&'a self, assignments: &'a [(String, String)]) -> &'a std::ffi::OsStr {
         if let Some((_, path)) = assignments.iter().rev().find(|(k, _)| k == "PATH") {
-            return path.into();
+            return path.as_ref();
         }
         if let Some(var) = self.variables.get("PATH") {
-            return var.value.as_deref().unwrap_or("").into();
+            return var.value.as_deref().unwrap_or("").as_ref();
         }
-        std::env::var_os("PATH").unwrap_or_else(|| self.get("PATH").unwrap().into())
+        self.inherited_path
+            .get_or_init(|| {
+                std::env::var_os("PATH")
+                    .unwrap_or_else(|| self.get("PATH").unwrap_or_default().into())
+            })
+            .as_os_str()
     }
 
     pub fn line(&self) -> usize {

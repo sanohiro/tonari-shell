@@ -39,7 +39,7 @@ pub(super) fn is_dynamic(name: &str) -> bool {
 }
 
 pub(super) fn integer_attribute(name: &str) -> bool {
-    matches!(name, "SECONDS" | "RANDOM" | "SRANDOM")
+    matches!(name, "SECONDS" | "RANDOM" | "SRANDOM" | "OPTIND")
 }
 
 fn entropy() -> Option<u32> {

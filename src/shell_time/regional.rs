@@ -51,6 +51,14 @@ fn expand_into(
         };
         rest = chars.as_str();
         let directive = &after[..after.len() - rest.len()];
+        if let Some(zone_code @ ('s' | 'z' | 'Z')) = spec {
+            // Epoch and zone directives are rendered from the shell timezone.
+            // GNU accepts both locale modifiers here without changing the value.
+            out.push('%');
+            out.push_str(&directive[..prefix_len]);
+            out.push(zone_code);
+            continue;
+        }
         let valid = match (modifier, spec) {
             (Some('E'), Some(c)) => "cCxXyY".contains(c),
             (Some('O'), Some(c)) => "bBhdeHIklmMSuUVwWy".contains(c),
@@ -125,30 +133,20 @@ fn expand_into(
             continue;
         }
         let nested = match (modifier, spec) {
-            (None | Some('E'), Some('c')) => Some(
-                if modifier.is_some() {
-                    locale.get(Field::EraDTFmt, 0).filter(|s| !s.is_empty())
-                } else {
-                    None
-                }
-                .unwrap_or_else(|| locale.get(Field::DTFmt, 0).unwrap_or("")),
-            ),
-            (None | Some('E'), Some('x')) => Some(
-                if modifier.is_some() {
-                    locale.get(Field::EraDFmt, 0).filter(|s| !s.is_empty())
-                } else {
-                    None
-                }
-                .unwrap_or_else(|| locale.get(Field::DFmt, 0).unwrap_or("")),
-            ),
-            (None | Some('E'), Some('X')) => Some(
-                if modifier.is_some() {
-                    locale.get(Field::EraTFmt, 0).filter(|s| !s.is_empty())
-                } else {
-                    None
-                }
-                .unwrap_or_else(|| locale.get(Field::TFmt, 0).unwrap_or("")),
-            ),
+            (None | Some('E'), Some(c @ ('c' | 'x' | 'X'))) => {
+                let (regular, era) = match c {
+                    'c' => (Field::DTFmt, Field::EraDTFmt),
+                    'x' => (Field::DFmt, Field::EraDFmt),
+                    _ => (Field::TFmt, Field::EraTFmt),
+                };
+                Some(
+                    modifier
+                        .and_then(|_| locale.get(era, 0))
+                        .filter(|s| !s.is_empty())
+                        .or_else(|| locale.get(regular, 0))
+                        .unwrap_or(""),
+                )
+            }
             (None, Some('r')) => {
                 let s = locale.get(Field::TFmtAmpm, 0).unwrap_or("");
                 Some(if s.is_empty() { "%I:%M:%S %p" } else { s })
@@ -295,7 +293,7 @@ fn date(s: &str) -> Option<(i32, i32, i32)> {
 
 fn era(locale: Locale, tm: &libc::tm) -> Option<(&'static str, i64, &'static str)> {
     let current = (tm.tm_year.checked_add(1900)?, tm.tm_mon + 1, tm.tm_mday);
-    for entry in locale.values(Field::Era) {
+    locale.values(Field::Era).find_map(|entry| {
         let mut fields = entry.splitn(6, ':');
         let direction = fields.next()?;
         let base: i64 = fields.next()?.parse().ok()?;
@@ -312,8 +310,9 @@ fn era(locale: Locale, tm: &libc::tm) -> Option<(&'static str, i64, &'static str
             } else {
                 base - delta
             };
-            return Some((fields.next()?, year, fields.next()?));
+            Some((fields.next()?, year, fields.next()?))
+        } else {
+            None
         }
-    }
-    None
+    })
 }

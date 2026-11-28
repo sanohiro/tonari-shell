@@ -1,5 +1,4 @@
 use super::Error;
-use super::Incomplete;
 use super::lexer::{backquote, dollar, quoted};
 use crate::word::{Part, Word, WordBuilder};
 
@@ -22,9 +21,9 @@ pub(crate) fn parse(text: &str, ifs: &str) -> Result<Vec<Word>, Error> {
             '$' => dollar(&mut chars, &mut word, false)?,
             '`' => backquote(&mut chars, &mut word, false)?,
             '\\' => {
-                let next = chars.next().ok_or(Error::Incomplete(Incomplete::Message(
-                    "unfinished completion escape",
-                )))?;
+                let next = chars
+                    .next()
+                    .ok_or(Error::incomplete_message("unfinished completion escape"))?;
                 if next == '\n' {
                     continue;
                 }

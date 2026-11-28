@@ -1,9 +1,10 @@
 // Keep the visible part of a large edit bounded even when the cursor jumps a
 // megabyte. Cursor indices and history entries always refer to the full text.
-use super::{Position, Screen, draw_prompt, draw_text};
+use super::{Position, Screen, draw_text};
 use std::fmt::Write as _;
 use std::io;
-use unicode_width::UnicodeWidthChar;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Default)]
 pub(super) struct Viewport {
@@ -17,28 +18,30 @@ impl Viewport {
     }
 }
 
-fn cost(c: char, width: usize) -> usize {
-    match c {
-        '\n' => width,
-        c if c.is_control() => 2,
-        c => c.width().unwrap_or(0).max(1),
-    }
-}
-
-fn extent(chars: impl Iterator<Item = char>, mut budget: usize, width: usize) -> (usize, usize) {
+fn extent<'a>(
+    clusters: impl Iterator<Item = &'a str>,
+    mut budget: usize,
+    width: usize,
+) -> (usize, usize) {
     let mut bytes = 0;
-    for c in chars {
-        let cells = cost(c, width);
+    for cluster in clusters {
+        let cells = if cluster.contains('\n') {
+            width
+        } else if cluster.starts_with(char::is_control) {
+            2
+        } else {
+            cluster.width().max(1)
+        };
         if cells > budget {
             break;
         }
-        bytes += c.len_utf8();
+        bytes += cluster.len();
         budget -= cells;
     }
     (bytes, budget)
 }
 
-fn move_to(out: &mut String, from: Position, to: Position) {
+pub(super) fn move_to(out: &mut String, from: Position, to: Position) {
     if from.row == to.row {
         if from.col > to.col {
             let _ = write!(out, "\x1b[{}D", from.col - to.col);
@@ -115,8 +118,7 @@ impl Screen {
     }
     pub(super) fn window_frame(&mut self, prompt: &str, text: &str, cursor: usize, hint: &str) {
         self.output.clear();
-        let mut pos = Position::default();
-        draw_prompt(prompt, self.width, &mut self.output, &mut pos);
+        let mut pos = self.prompt.draw(prompt, self.width, &mut self.output);
         let width = self.width;
         let rows = self.height.saturating_sub(pos.row + 3).clamp(1, 16);
         let budget = (width * rows).saturating_sub(pos.col + 2).max(width);
@@ -124,7 +126,7 @@ impl Screen {
         while !text.is_char_boundary(start) {
             start -= 1;
         }
-        let (span, mut spare) = extent(text[start..].chars(), budget, width);
+        let (span, mut spare) = extent(text[start..].graphemes(true), budget, width);
         let mut end = start + span;
         if (cursor <= start && start != 0) || cursor > end || cursor == end && end < text.len() {
             let before = if cursor == text.len() {
@@ -132,8 +134,8 @@ impl Screen {
             } else {
                 budget / 2
             };
-            start = cursor - extent(text[..cursor].chars().rev(), before, width).0;
-            let (span, left) = extent(text[start..].chars(), budget, width);
+            start = cursor - extent(text[..cursor].graphemes(true).rev(), before, width).0;
+            let (span, left) = extent(text[start..].graphemes(true), budget, width);
             end = start + span;
             spare = left;
         }
@@ -147,7 +149,7 @@ impl Screen {
         if end < text.len() {
             draw_text("…", width, &mut self.output, &mut pos);
         } else if !hint.is_empty() {
-            let n = extent(hint.chars(), spare, width).0;
+            let n = extent(hint.graphemes(true), spare, width).0;
             self.output.push_str("\x1b[2m");
             draw_text(&hint[..n], width, &mut self.output, &mut pos);
             if n < hint.len() {

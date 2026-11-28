@@ -1,5 +1,19 @@
 # Engineering notes / 開発知見
 
+## Streamed shell input, history and execution state / 入力・履歴・実行状態
+
+A function arriving through stdin can span thousands of lines. Re-parsing its full prefix at each physical newline can turn a linear read into seconds of work. Track lines that could end the open command and keep the real parser responsible for syntax and boundaries. A seekable stream can look ahead and restore its offset. A pipe is shared with commands such as `read`, so the shell needs a path that leaves the following input available. A here-document attached inside a substitution may finish on a later physical line; attach that extent to its original command, including when printing a function definition. [Native comparisons](benchmarks.md#review-2026-11-28)
+
+Check file and process effects at shell boundaries. Assignment-only commands update the shell without temporarily exporting each earlier assignment. An ordinary redirection unwinds before an EXIT trap, while a function or sourced file can supply a distinct execution context. Interactive history is saved after the top-level EXIT trap. Buffered `mapfile` restores unread bytes on a regular file before invoking a callback that might share the descriptor. A change to a timing shortcut needs a public-entry witness for both the result and the state left behind. [Execution and scope](../tests/review_runtime.py) · [Builtins](../tests/review_builtins.py)
+
+A function local derived from a temporary exported command prefix keeps its export provenance on the first unset. An ordinary local and an explicitly unexported binding need different restoration behavior. Check both the environment inside a child and the original variable after function return. 一時代入と同名のローカル変数では、関数内の再代入値が子に渡るか、関数を出た後に元の値が戻るかの両方を確認します。
+
+For editing and history, check both the text buffer and its display across a pasted UTF-8 sequence, undo, and suspension for a caught signal. Edit cursor positions use Unicode grapheme boundaries. Test persisted history using concurrent sessions and a pre-existing file, including a final line without a newline. A successful write to a new file alone cannot detect loss of earlier entries. [PTY and history tests](../tests/review_interactive.py)
+
+GNU Bash 5.3 では `test` の括弧内にある空文字列を誤って真とする場合があります。Tonari はそのグループの値を参照して偽を返します。
+
+標準入力から複合コマンドを読むときは、全体を再解析する箇所と、子コマンドが共有する入力の位置を別々に検証します。通常ファイルでは未消費分を戻せますが、パイプでは読んだバイトを戻せません。履歴は既存ファイルへの保存、複数セッション、末尾の改行、終了トラップが変更した保存先まで確認します。日本語・絵文字の編集では、バイト列の正しさに加えて、打鍵からエコーまでの p95 を計測します。
+
 ## Scaling of input, shell patterns and mutable state / 入力・パターン・状態更新の計算量
 
 A shell must finish the current parse unit before executing it, but a physical newline need not trigger another parse of everything buffered. Use the incomplete parser result to skip simple lines inside a known open construct. For buffered parenthesized input with inner closing parentheses, probe at geometrically increasing distances and verify the command boundary with the parser. For a streamed subshell, the lexer can identify a complete line of ordinary shell words, including a balanced expansion inside an assignment. Such a line cannot close the enclosing subshell. Keep history expansion, alias expansion, here-documents, syntax errors, EOF and shared stdin observable. A stack of open braces and direct commas identifies the leftmost valid choice even inside an unclosed outer brace.

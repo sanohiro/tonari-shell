@@ -65,7 +65,6 @@ pub mod numeric {
         };
         match name {
             "" | "C" => return None,
-            "POSIX" => return Some(super::POSIX.0),
             _ => {}
         }
         let mut lo = 0;

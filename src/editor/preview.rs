@@ -44,16 +44,7 @@ pub(super) fn during<T>(
         prompt: view.prompt.into(),
         line: view.text.into(),
         cursor: view.cursor,
-        screen: Screen {
-            output: String::new(),
-            row: screen.row,
-            width: screen.width,
-            height: screen.height,
-            view: Default::default(),
-            column: screen.column,
-            had_hint: false,
-            tail: screen.tail,
-        },
+        screen: screen.preview(),
         replay: VecDeque::new(),
         utf8: Vec::new(),
         bindings,
@@ -168,7 +159,7 @@ pub(crate) fn statement() {
         let step = STEPS.get().wrapping_add(1);
         STEPS.set(step);
         if step == 0 {
-            poll();
+            poll_typeahead();
         }
     }
 }
@@ -178,11 +169,11 @@ pub(crate) fn statement() {
 pub(crate) fn scan_input() {
     let mut queued: libc::c_int = 0;
     if unsafe { libc::ioctl(0, libc::FIONREAD, &mut queued) } < 0 || queued > 0 {
-        poll();
+        poll_typeahead();
     }
 }
 
-pub(crate) fn poll() {
+pub(crate) fn poll_typeahead() {
     if wants_keys() {
         let mut fd = libc::pollfd {
             fd: 0,
@@ -315,7 +306,7 @@ pub(crate) fn wait_child(pid: libc::pid_t) -> std::io::Result<i32> {
         }
         if wants_keys() && !signaled {
             if mask.input_or_child(None)? {
-                poll();
+                poll_typeahead();
             }
         } else {
             mask.suspend();

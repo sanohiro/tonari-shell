@@ -79,7 +79,7 @@ impl Table {
 pub(super) struct Absent;
 
 pub(super) fn search(name: &str, session: &Session) -> Result<Option<Entry>, Absent> {
-    search_in(name, session, &session.search_path(&[]))
+    search_in(name, session, session.search_path(&[]))
 }
 
 pub(super) fn search_in(

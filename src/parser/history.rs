@@ -1,7 +1,7 @@
 use super::*;
 
 fn with_tokens<T>(source: &str, read: impl FnOnce(&[Token], &[(usize, usize)]) -> T) -> Option<T> {
-    let (mut tokens, mut spans, _) = lex(source, false, true).ok()?;
+    let (mut tokens, mut spans, _) = lex(source, false, false).ok()?;
     let result = read(&tokens, &spans);
     if tokens.capacity().max(spans.capacity()) <= MAX_CACHED_TOKENS {
         tokens.clear();
@@ -19,10 +19,10 @@ pub(crate) fn history_command(text: &str) -> std::borrow::Cow<'_, str> {
         return Cow::Borrowed(text);
     }
     with_tokens(text, |tokens, spans| {
-        if tokens.iter().any(|t| {
-            matches!(t, Token::ArrayStart | Token::EndArm(_))
-                || matches!(t.keyword(), Some("case" | "[[" | "function"))
-        }) {
+        if tokens
+            .iter()
+            .any(|t| t.preserve_layout() || t.keyword() == Some("function"))
+        {
             return Cow::Borrowed(text);
         }
         let mut result = String::new();
@@ -129,7 +129,13 @@ pub(crate) fn history_designator_spans(line: &str, extglob: bool) -> Vec<(usize,
     }) {
         return history_word_spans(line);
     }
-    let _extglob = crate::ScopedCell::enter(&EXTGLOB, extglob);
+    let _extglob = crate::ScopedCell::enter(
+        &READ_OPTIONS,
+        ReadOptions {
+            extglob,
+            ..READ_OPTIONS.get()
+        },
+    );
     with_tokens(line, |tokens, spans| {
         let mut result: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
         for (i, (token, &(mut start, end))) in tokens.iter().zip(spans).enumerate() {

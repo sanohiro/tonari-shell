@@ -9,7 +9,11 @@ use std::os::unix::fs::MetadataExt;
 // be reduced by the kernel; never wait for a reader that has not started yet.
 pub(super) const PIPE_LIMIT: usize = 64 * 1024;
 
-pub(super) fn open(data: &[u8], pipe_limit: usize) -> io::Result<OwnedFd> {
+pub(super) fn open(
+    data: &[u8],
+    pipe_limit: usize,
+    session: &crate::Session,
+) -> io::Result<OwnedFd> {
     if data.is_empty() {
         return File::open("/dev/null").map(Into::into);
     }
@@ -33,17 +37,39 @@ pub(super) fn open(data: &[u8], pipe_limit: usize) -> io::Result<OwnedFd> {
             }
         }
     }
-    temporary(data)
+    if let Some(directory) = session
+        .scalar_setting("TMPDIR")
+        .filter(|s| !s.is_empty() && s != "/tmp")
+    {
+        let preferred = std::path::Path::new(directory.as_ref());
+        let attempted = temporary(data, preferred);
+        if attempted.is_ok()
+            || attempted.as_ref().is_err_and(|e| {
+                !matches!(
+                    e.raw_os_error(),
+                    Some(libc::ENOENT | libc::ENOTDIR | libc::EACCES | libc::EROFS)
+                )
+            })
+        {
+            return attempted;
+        }
+    }
+    temporary(data, std::path::Path::new("/tmp"))
 }
 
-fn temporary(data: &[u8]) -> io::Result<OwnedFd> {
-    let template = std::env::temp_dir().join("tonari-here-XXXXXX");
+fn temporary(data: &[u8], directory: &std::path::Path) -> io::Result<OwnedFd> {
+    let template = directory.join("tonari-here-XXXXXX");
     let mut path = CString::new(template.as_os_str().as_bytes())?.into_bytes_with_nul();
     let fd = unsafe { libc::mkstemp(path.as_mut_ptr().cast()) };
     if fd < 0 {
         return Err(io::Error::last_os_error());
     }
     let mut writer = unsafe { File::from_raw_fd(fd) };
+    if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
+        let error = io::Error::last_os_error();
+        unsafe { libc::unlink(path.as_ptr().cast()) };
+        return Err(error);
+    }
     // mkstemp honors the caller's umask. The shell still needs to reopen the
     // file for reading when even owner-read permission was masked off.
     if unsafe { libc::fchmod(fd, 0o600) } < 0 {
@@ -94,7 +120,7 @@ mod tests {
             PIPE_LIMIT * 2,
         ] {
             let data = (0..len).map(|i| i as u8).collect::<Vec<_>>();
-            let mut file = File::from(open(&data, PIPE_LIMIT).unwrap());
+            let mut file = File::from(open(&data, PIPE_LIMIT, &crate::Session::default()).unwrap());
             assert!(file.write(b"!").is_err());
             let mut copy = Vec::new();
             file.read_to_end(&mut copy).unwrap();

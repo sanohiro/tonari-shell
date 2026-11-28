@@ -254,62 +254,94 @@ impl Session {
     }
 
     pub fn directory_stack(&mut self, command: &str, args: &[String], out: &mut dyn Write) -> u8 {
+        #[derive(Clone, Copy, PartialEq)]
+        enum StackOp {
+            List,
+            Push,
+            Pop,
+        }
+        let op = match command {
+            "dirs" => StackOp::List,
+            "pushd" => StackOp::Push,
+            "popd" => StackOp::Pop,
+            _ => unreachable!("directory stack builtin dispatch"),
+        };
         let (mut long, mut vertical, mut numbered, mut clear, mut no_cd) =
             (false, false, false, false, false);
-        let mut args = args.iter().peekable();
-        while let Some(arg) =
-            args.next_if(|a| a.starts_with('-') && a.len() > 1 && !a.as_bytes()[1].is_ascii_digit())
-        {
-            if arg == "--" {
-                break;
-            }
-            for flag in arg[1..].chars() {
-                match (command, flag) {
-                    ("dirs", 'l') => long = true,
-                    ("dirs", 'p') => vertical = true,
-                    ("dirs", 'v') => numbered = true,
-                    ("dirs", 'c') => clear = true,
-                    ("pushd" | "popd", 'n') => no_cd = true,
-                    _ => {
-                        diagnostic!("{command}: invalid option -{flag}");
+        let usage = match op {
+            StackOp::List => "dirs [-clpv] [+N] [-N]",
+            StackOp::Pop => "popd [-n] [+N | -N]",
+            StackOp::Push => "pushd [-n] [+N | -N | dir]",
+        };
+        let mut args = args.iter();
+        let mut operand = None;
+        let mut index_word = None;
+        for arg in args.by_ref() {
+            let word = arg.as_str();
+            match word {
+                "--" => {
+                    if op == StackOp::Push {
+                        operand = args.next().map(String::as_str);
+                    }
+                    break;
+                }
+                "-n" if op != StackOp::List => no_cd = true,
+                "-l" if op == StackOp::List => long = true,
+                "-p" if op == StackOp::List => vertical = true,
+                "-v" if op == StackOp::List => numbered = true,
+                "-c" if op == StackOp::List => clear = true,
+                _ if word.starts_with(['-', '+']) && !(op == StackOp::Push && word == "-") => {
+                    if word.len() < 2 || !word.as_bytes()[1..].iter().all(u8::is_ascii_digit) {
+                        diagnostic!("{command}: {word}: invalid number");
+                        stderr_line!("{command}: usage: {usage}");
                         return 2;
                     }
+                    index_word = Some(word);
+                }
+                _ if op == StackOp::Push => {
+                    operand = Some(word);
+                    break;
+                }
+                _ => {
+                    let reason = if op == StackOp::List {
+                        "invalid option"
+                    } else {
+                        "invalid argument"
+                    };
+                    diagnostic!("{command}: {word}: {reason}");
+                    stderr_line!("{command}: usage: {usage}");
+                    return 2;
                 }
             }
-        }
-        let operand = args.next().map(String::as_str);
-        if args.next().is_some() {
-            diagnostic!("{command}: too many arguments");
-            return 2;
         }
         if clear {
             self.dir_stack.clear();
             return 0;
         }
         let len = 1 + self.dir_stack.len();
-        let slot = match operand {
-            Some(text)
-                if text.len() > 1
-                    && text.starts_with(['-', '+'])
-                    && text.as_bytes()[1..].iter().all(u8::is_ascii_digit) =>
-            {
-                let Some(i) = index(text, len) else {
-                    diagnostic!("{command}: {text}: directory stack index out of range");
+        let slot = match index_word {
+            Some(text) => match index(text, len) {
+                Some(i) => Some(i),
+                None => {
+                    if self.dir_stack.is_empty() {
+                        diagnostic!("{command}: directory stack empty");
+                    } else {
+                        diagnostic!("{command}: {text}: directory stack index out of range");
+                    }
                     return 1;
-                };
-                Some(i)
-            }
-            Some(_) if command != "pushd" => {
-                diagnostic!("{command}: invalid directory stack index");
-                return if command == "popd" { 2 } else { 1 };
-            }
-            _ => None,
+                }
+            },
+            None => None,
         };
-        if command == "dirs" {
+        if op == StackOp::Push && !no_cd && slot.is_none() && args.next().is_some() {
+            diagnostic!("{command}: too many arguments");
+            return 1;
+        }
+        if op == StackOp::List {
             return self.show_stack(out, slot, long, vertical, numbered);
         }
         let result = (|| -> io::Result<()> {
-            if command == "popd" {
+            if op == StackOp::Pop {
                 let i = slot.unwrap_or(0);
                 if self.dir_stack.is_empty() {
                     return Err(io::Error::other("directory stack empty"));
@@ -317,7 +349,7 @@ impl Session {
                 if i == 0 {
                     if !no_cd {
                         let target = self.dir_stack.last().unwrap().clone();
-                        self.change_directory(Path::new(&target), false, false, true)?;
+                        self.change_directory(Path::new(&target), self.physical, false, true)?;
                     }
                     self.dir_stack.pop();
                 } else {
@@ -334,7 +366,7 @@ impl Session {
                     .collect();
                 paths.rotate_left(i);
                 if !no_cd {
-                    self.change_directory(Path::new(&paths[0]), false, false, true)?;
+                    self.change_directory(Path::new(&paths[0]), self.physical, false, true)?;
                 }
                 self.dir_stack = paths.into_iter().skip(1).rev().collect();
             } else if let Some(dir) = operand {
@@ -344,7 +376,14 @@ impl Session {
                     let cwd = self
                         .stack_entry(0)
                         .ok_or_else(|| io::Error::other("cannot read current directory"))?;
-                    self.change_directory(Path::new(dir), false, false, true)?;
+                    if dir == "-" {
+                        let old = self
+                            .get("OLDPWD")
+                            .ok_or_else(|| io::Error::other("OLDPWD not set"))?;
+                        self.change_directory(Path::new(&old), self.physical, true, true)?;
+                    } else {
+                        self.change_directory(Path::new(dir), self.physical, false, true)?;
+                    }
                     self.dir_stack.push(cwd);
                 }
             } else if !no_cd {
@@ -356,7 +395,7 @@ impl Session {
                     .last()
                     .ok_or_else(|| io::Error::other("no other directory"))?
                     .clone();
-                self.change_directory(Path::new(&next), false, false, true)?;
+                self.change_directory(Path::new(&next), self.physical, false, true)?;
                 *self.dir_stack.last_mut().unwrap() = cwd;
             }
             Ok(())
@@ -365,7 +404,7 @@ impl Session {
             diagnostic!("{command}: {e}");
             return 1;
         }
-        if command == "pushd" && no_cd && (operand.is_none() || slot.is_some()) {
+        if op == StackOp::Push && no_cd && (operand.is_none() || slot.is_some()) {
             return 0;
         }
         self.show_stack(out, None, false, false, false)
@@ -468,6 +507,10 @@ impl Session {
                 diagnostic!("cd: {} not set", if previous { "OLDPWD" } else { "HOME" });
                 return 1;
             };
+            if target.is_empty() && arg == Some("") {
+                diagnostic!("cd: null directory");
+                return 1;
+            }
             if self.posix && physical {
                 match self.try_change_directory(
                     Path::new(&target),
@@ -553,6 +596,14 @@ impl Session {
         previous: bool,
         explicit: bool,
     ) -> Result<(), DirectoryError> {
+        let requested = target;
+        // Bash logical cd treats an explicitly empty HOME/OLDPWD as the
+        // current directory. An explicitly empty command operand is invalid.
+        let target = if !physical && target.as_os_str().is_empty() && (!explicit || previous) {
+            Path::new(".")
+        } else {
+            target
+        };
         let old_pwd = self.get("PWD");
         let base = self.logical_directory();
         let cdpath = if explicit
@@ -634,21 +685,50 @@ impl Session {
                 error = e;
                 continue;
             }
-            self.hashes.directory_changed();
-            self.logical_cwd.take();
             let cwd = match logical {
                 Some(cwd) => cwd,
-                None => physical_path().map_err(DirectoryError::NoPath)?,
+                None => match physical_path().and_then(|path| {
+                    path.to_str().map(|_| ()).ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidData, "non-UTF-8 directory")
+                    })?;
+                    Ok(path)
+                }) {
+                    Ok(path) => path,
+                    Err(e) => {
+                        // Physical names outside Tonari's text domain are rare.
+                        // Recover through the previous logical path on this branch
+                        // only. If an ancestor was also renamed, forget the stale
+                        // name and retain OLDPWD for explicit recovery.
+                        if e.kind() == io::ErrorKind::InvalidData
+                            && base
+                                .as_ref()
+                                .is_ok_and(|old| std::env::set_current_dir(old).is_ok())
+                        {
+                            self.hashes.directory_changed();
+                            return Err(DirectoryError::Other(e));
+                        }
+                        self.hashes.directory_changed();
+                        self.logical_cwd.take();
+                        if let Some(old) = &old_pwd {
+                            self.assign("OLDPWD", old);
+                        }
+                        self.unset_variable("PWD");
+                        return Err(DirectoryError::NoPath(e));
+                    }
+                },
             };
+            self.hashes.directory_changed();
+            self.logical_cwd.take();
             if self.interactive && base.as_deref().ok() != Some(cwd.as_path()) {
                 Rc::make_mut(self.visits.get_or_insert_with(Rc::default)).record(base.ok(), &cwd);
             }
-            if via_variable {
+            let result = self.finish_directory_change(cwd, old_pwd, print && !previous);
+            if previous {
+                print_path(requested)?;
+            } else if via_variable {
                 print_path(&candidate)?;
             }
-            return self
-                .finish_directory_change(cwd, old_pwd, print)
-                .map_err(DirectoryError::Other);
+            return result.map_err(DirectoryError::Other);
         }
         Err(DirectoryError::Other(io::Error::new(
             error.kind(),

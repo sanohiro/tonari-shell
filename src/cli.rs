@@ -11,6 +11,10 @@ pub enum Input {
 #[derive(Default)]
 pub struct StartupOptions {
     pub check: bool,
+    pub privileged: bool,
+    pub history: Option<bool>,
+    pub vi: Option<bool>,
+    pub emacs: Option<bool>,
     pub notify: bool,
     pub ignoreeof: Option<bool>,
     pub errexit: bool,
@@ -35,6 +39,54 @@ pub struct StartupOptions {
     pub posix: Option<bool>,
 }
 
+impl StartupOptions {
+    fn set(&mut self, name: &str, enabled: bool) -> Result<(), String> {
+        match name {
+            "privileged" => self.privileged = enabled,
+            "history" => self.history = Some(enabled),
+            "vi" => {
+                self.vi = Some(enabled);
+                if enabled {
+                    self.emacs = Some(false);
+                }
+            }
+            "emacs" => {
+                self.emacs = Some(enabled);
+                if enabled {
+                    self.vi = Some(false);
+                }
+            }
+            "braceexpand" => self.braceexpand = enabled,
+            "posix" => self.posix = Some(enabled),
+            "physical" => self.physical = enabled,
+            "nolog" => self.nolog = enabled,
+            "keyword" => self.keyword = enabled,
+            "interactive-comments" => self
+                .shopts
+                .push((enabled, Some("interactive_comments".into()))),
+            "pipefail" => self.pipefail = enabled,
+            "errexit" => self.errexit = enabled,
+            "verbose" => self.verbose = enabled,
+            "errtrace" => self.errtrace = enabled,
+            "functrace" => self.functrace = enabled,
+            "nounset" => self.nounset = enabled,
+            "allexport" => self.allexport = enabled,
+            "onecmd" => self.onecmd = enabled,
+            "xtrace" => self.xtrace = enabled,
+            "histexpand" => self.histexpand = Some(enabled),
+            "monitor" => self.monitor = Some(enabled),
+            "hashall" => self.hashall = enabled,
+            "noclobber" => self.noclobber = enabled,
+            "noexec" => self.check = enabled,
+            "notify" => self.notify = enabled,
+            "ignoreeof" => self.ignoreeof = Some(enabled),
+            "noglob" => self.noglob = enabled,
+            _ => return Err(format!("{name}: invalid option name")),
+        }
+        Ok(())
+    }
+}
+
 pub struct Invocation {
     pub options: StartupOptions,
     pub input: Input,
@@ -43,6 +95,7 @@ pub struct Invocation {
     pub interactive: bool,
     pub login: bool,
     pub as_sh: bool,
+    pub as_su: bool,
     pub norc: bool,
     pub noprofile: bool,
     pub noediting: bool,
@@ -69,6 +122,10 @@ pub fn parse(
 ) -> Result<Action, String> {
     let name = args.next().unwrap_or_else(|| "tonari".into());
     let mut login = name.as_bytes().starts_with(b"-");
+    let as_su = matches!(
+        name.as_bytes().rsplit(|b| *b == b'/').next(),
+        Some(b"su" | b"-su")
+    );
     let as_sh = matches!(
         name.as_bytes().rsplit(|b| *b == b'/').next(),
         Some(b"sh" | b"-sh")
@@ -120,57 +177,19 @@ pub fn parse(
                         'i' => interactive = enabled,
                         'l' => login = enabled,
                         's' => stdin = enabled,
-                        'n' => options.check = enabled,
-                        'b' => options.notify = enabled,
-                        'e' => options.errexit = enabled,
-                        'v' => options.verbose = enabled,
-                        'E' => options.errtrace = enabled,
-                        'T' => options.functrace = enabled,
-                        'C' => options.noclobber = enabled,
-                        'P' => options.physical = enabled,
-                        'k' => options.keyword = enabled,
-                        'a' => options.allexport = enabled,
-                        't' => options.onecmd = enabled,
-                        'x' => options.xtrace = enabled,
-                        'H' => options.histexpand = Some(enabled),
-                        'm' => options.monitor = Some(enabled),
-                        'h' => options.hashall = enabled,
-                        'B' => options.braceexpand = enabled,
-                        'f' => options.noglob = enabled,
-                        'u' => options.nounset = enabled,
                         'O' => options
                             .shopts
                             .push((enabled, args.next().map(utf8).transpose()?)),
-                        'o' => match args.next().as_deref().and_then(|a| a.to_str()) {
-                            Some("braceexpand") => options.braceexpand = enabled,
-                            Some("posix") => options.posix = Some(enabled),
-                            Some("physical") => options.physical = enabled,
-                            Some("nolog") => options.nolog = enabled,
-                            Some("keyword") => options.keyword = enabled,
-                            Some("interactive-comments") => options
-                                .shopts
-                                .push((enabled, Some("interactive_comments".into()))),
-                            Some("pipefail") => options.pipefail = enabled,
-                            Some("errexit") => options.errexit = enabled,
-                            Some("verbose") => options.verbose = enabled,
-                            Some("errtrace") => options.errtrace = enabled,
-                            Some("functrace") => options.functrace = enabled,
-                            Some("nounset") => options.nounset = enabled,
-                            Some("allexport") => options.allexport = enabled,
-                            Some("onecmd") => options.onecmd = enabled,
-                            Some("xtrace") => options.xtrace = enabled,
-                            Some("histexpand") => options.histexpand = Some(enabled),
-                            Some("monitor") => options.monitor = Some(enabled),
-                            Some("hashall") => options.hashall = enabled,
-                            Some("noclobber") => options.noclobber = enabled,
-                            Some("noexec") => options.check = enabled,
-                            Some("notify") => options.notify = enabled,
-                            Some("ignoreeof") => options.ignoreeof = Some(enabled),
-                            Some("noglob") => options.noglob = enabled,
-                            Some(name) => return Err(format!("{name}: invalid option name")),
-                            None => return Err("expected an option name after -o".into()),
-                        },
-                        _ => return Err(format!("unsupported option: {arg}")),
+                        'o' => {
+                            let name =
+                                utf8(args.next().ok_or("expected an option name after -o")?)?;
+                            options.set(&name, enabled)?;
+                        }
+                        c => {
+                            let name = crate::Session::short_option_name(c)
+                                .ok_or_else(|| format!("unsupported option: {arg}"))?;
+                            options.set(name, enabled)?;
+                        }
                     }
                 }
             }
@@ -200,6 +219,7 @@ pub fn parse(
         interactive,
         login,
         as_sh,
+        as_su,
         norc,
         noprofile,
         noediting,

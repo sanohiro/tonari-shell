@@ -17,10 +17,7 @@ pub(crate) fn format<'a>(source: &'a str, session: &crate::Session) -> Result<Co
         }
         let tokens = reader.tokens.make_contiguous();
         let spans = &reader.spans;
-        if tokens.iter().any(|t| {
-            matches!(t, Token::ArrayStart | Token::EndArm(_))
-                || matches!(t.keyword(), Some("case" | "[["))
-        }) {
+        if tokens.iter().any(Token::preserve_layout) {
             reader.list(&[])?;
             return Ok(Cow::Borrowed(source));
         }
@@ -34,9 +31,10 @@ pub(crate) fn format<'a>(source: &'a str, session: &crate::Session) -> Result<Co
                 after_separator = true;
                 continue;
             }
-            let word = token
-                .keyword()
-                .filter(|_| lexer::command_position(&tokens[..i]));
+            let word = token.keyword().filter(|word| {
+                lexer::command_position(&tokens[..i])
+                    || *word == "do" && i > 0 && matches!(tokens[i - 1], Token::Arithmetic(_))
+            });
             let closing = matches!(word, Some("fi" | "done" | "elif" | "else"));
             if closing {
                 depth = depth.saturating_sub(1);

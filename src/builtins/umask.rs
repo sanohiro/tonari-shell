@@ -100,7 +100,11 @@ pub fn run(args: &[String], posix: bool) -> u8 {
             symbolic(text, current())
         };
         let Some(mask) = mask else {
-            diagnostic!("umask: invalid mode: {text}");
+            if text.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+                diagnostic!("umask: {text}: octal number out of range");
+            } else {
+                diagnostic!("umask: {text}: invalid symbolic mode");
+            }
             return 1;
         };
         unsafe { libc::umask(mask) };

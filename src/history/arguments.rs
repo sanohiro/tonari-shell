@@ -37,21 +37,18 @@ fn successful_rows<'a>(bytes: &'a [u8], needle: &str) -> Vec<(&'a str, &'a str, 
     let mut positions = HashMap::new();
     for (i, row) in bytes.rsplit(|&b| b == b'\n').enumerate() {
         if i % 64 == 0 {
-            crate::editor::preview::poll();
+            crate::editor::preview::poll_typeahead();
         }
         let Ok(row) = std::str::from_utf8(row) else {
             continue;
         };
-        let Some((body, _)) = super::journal_fields(row) else {
+        let Some(record) = super::journal_record(row) else {
             continue;
         };
-        let mut fields = body.splitn(4, '\t');
-        if fields.nth(1) != Some("0") {
+        if record.status != "0" {
             continue;
         }
-        let (Some(raw_dir), Some(raw_line)) = (fields.next(), fields.next()) else {
-            continue;
-        };
+        let (raw_dir, raw_line) = (record.dir, record.command);
         // An ordinary literal can be rejected before allocation, path lookups
         // and parsing. Quotes or escapes can join pieces of a matching word.
         if !raw_line.contains(needle) && !raw_line.contains(['\\', '\'', '"']) {
@@ -103,7 +100,7 @@ pub(crate) fn candidates(
     let mut scores = HashMap::new();
     for (i, (raw_dir, raw_line, occurrences)) in groups.into_iter().enumerate() {
         if i % 64 == 0 {
-            crate::editor::preview::poll();
+            crate::editor::preview::poll_typeahead();
         }
         let Some(dir) = decode(raw_dir) else { continue };
         let dir = Path::new(&dir);

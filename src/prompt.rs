@@ -3,13 +3,9 @@ use std::ffi::CStr;
 use crate::Session;
 
 pub fn render(session: &mut Session, secondary: bool, status: u8, editing: bool) -> String {
-    let (name, fallback) = if secondary {
-        ("PS2", "> ")
-    } else {
-        ("PS1", "tonari$ ")
-    };
+    let name = if secondary { "PS2" } else { "PS1" };
     let Some(prompt) = session.get(name) else {
-        return fallback.to_string();
+        return String::new();
     };
     render_mode(session, prompt, status, editing)
 }
@@ -128,17 +124,16 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
         }
         '0'..='7' => {
             let octet = |c: char, chars: &mut std::str::Chars<'_>| {
-                let mut n = c.to_digit(8).unwrap();
-                for _ in 0..2 {
-                    let Some(d) = chars.clone().next().and_then(|ch| ch.to_digit(8)) else {
-                        break;
-                    };
-                    chars.next();
-                    n = n * 8 + d;
-                }
-                n as u8
+                crate::word::quote::char_escape_digits(chars, 8, 2, c.to_digit(8).unwrap()).0 as u8
             };
+            let rest = chars.as_str();
             let first = octet(c, chars);
+            if first == 0 {
+                output.push('\\');
+                output.push(c);
+                output.push_str(&rest[..rest.len() - chars.as_str().len()]);
+                return;
+            }
             if first.is_ascii() {
                 output.push(first as char);
             } else {
@@ -173,7 +168,16 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
         }
         c @ ('w' | 'W') => {
             let start = output.len();
-            let path = session.scalar_setting("PWD").unwrap_or_default();
+            let path = session
+                .scalar_setting("PWD")
+                .or_else(|| {
+                    session
+                        .logical_directory_ref()
+                        .ok()?
+                        .to_str()
+                        .map(std::borrow::Cow::Borrowed)
+                })
+                .unwrap_or_default();
             let home = session
                 .scalar_setting("HOME")
                 .filter(|h| !h.is_empty() && h.as_ref() != "/");
@@ -207,10 +211,9 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
                 let prefix = if pwd.starts_with("~/") { "~/" } else { "" };
                 let path = pwd
                     .strip_prefix("~/")
-                    .unwrap_or(pwd)
-                    .trim_start_matches('/');
+                    .unwrap_or(pwd);
                 if let Some((i, _)) = path.rmatch_indices('/').nth(limit - 1)
-                    && path[..i].chars().take(4).count() > 3
+                    && i > 3
                 {
                     let short = format!("{prefix}.../{}", &path[i + 1..]);
                     output.truncate(start);

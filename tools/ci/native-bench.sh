@@ -8,6 +8,31 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == correctness-review ]]; then
+  reference=$ref
+  if [[ $RUNNER_OS == macOS ]]; then
+    reference=$(brew --prefix bash)/bin/bash
+    [[ -x $reference ]] || brew install bash
+  fi
+  "$reference" --version > "$out/bash-version.txt"
+  wc -c "$bin/baseline" "$current" > "$out/binary-sizes.txt"
+  file "$current" > "$out/binary-format.txt"
+  if [[ $RUNNER_OS == Linux ]]; then
+    readelf -d "$current" > "$out/dynamic.txt"
+  else
+    otool -L "$current" > "$out/dynamic.txt"
+  fi
+  python3 tests/review_builtins.py "$current" "$reference" --previous "$bin/baseline" --runs 11 > "$out/builtins.tsv"
+  python3 tests/review_language.py "$current" "$reference" > "$out/language.txt"
+  python3 tests/review_language.py "$current" "$reference" --benchmark --before "$bin/baseline" > "$out/language-times.tsv"
+  python3 tests/review_runtime.py "$current" "$reference" > "$out/runtime.txt"
+  python3 tests/review_interactive.py "$current" "$reference" > "$out/interactive.txt"
+  python3 tools/bench_editor_input.py "$current" "$bin/baseline" "$reference" --runs 9 --entries 10000 --case commit --case paste --case Ctrl-R --case Tab > "$out/pty.txt"
+  if [[ $RUNNER_OS == Linux ]]; then
+    python3 tools/bench_heap.py "$bin/baseline" "$current" "$reference" --runs 5 > "$out/heap.txt"
+  fi
+  exit
+fi
 if [[ $SUITE == shell-scaling ]]; then
   REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k scaling
   PYTHONPATH=tools python3 tools/ci/shell-scaling.py "$bin/baseline" "$current" "$ref" > "$out/scaling.tsv"

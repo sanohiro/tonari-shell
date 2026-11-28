@@ -17,6 +17,20 @@ fn write_replacement(out: &mut String, template: &str, matched: &str, expand_amp
     }
 }
 
+fn literal_replacement<'a>(
+    template: &'a str,
+    needle: &str,
+    amp: bool,
+) -> std::borrow::Cow<'a, str> {
+    if amp && template.contains(['\\', '&']) {
+        let mut rendered = String::new();
+        write_replacement(&mut rendered, template, needle, true);
+        rendered.into()
+    } else {
+        template.into()
+    }
+}
+
 pub(super) fn literal(
     text: &str,
     needle: &str,
@@ -25,21 +39,17 @@ pub(super) fn literal(
     amp: bool,
 ) -> String {
     use ReplaceMode::*;
-    let mut rendered = String::new();
-    let replacement = if amp && template.contains(['\\', '&']) {
-        write_replacement(&mut rendered, template, needle, true);
-        &rendered
-    } else {
-        template
-    };
-    if needle == replacement {
+    let replacement = literal_replacement(template, needle, amp);
+    let replacement = replacement.as_ref();
+    if needle == replacement || needle.is_empty() && matches!(mode, First | All) {
         return text.to_owned();
     }
-    let finder = memchr::memmem::Finder::new(needle.as_bytes());
+    let finder =
+        matches!(mode, First | All).then(|| memchr::memmem::Finder::new(needle.as_bytes()));
     let first = match mode {
         Prefix => text.starts_with(needle).then_some(0),
         Suffix => text.strip_suffix(needle).map(str::len),
-        First | All => finder.find(text.as_bytes()),
+        First | All => finder.as_ref().and_then(|f| f.find(text.as_bytes())),
     };
     let Some(index) = first else {
         return text.to_owned();
@@ -53,7 +63,7 @@ pub(super) fn literal(
             let rest = &text[end..];
             let next = if rest.starts_with(needle) {
                 0
-            } else if let Some(i) = finder.find(rest.as_bytes()) {
+            } else if let Some(i) = finder.as_ref().and_then(|f| f.find(rest.as_bytes())) {
                 i
             } else {
                 break;
@@ -75,7 +85,7 @@ pub(super) fn substitute(
     expand_amp: bool,
 ) -> String {
     let pattern = compiled.text;
-    if crate::pattern::unfinished_star_escape(pattern) {
+    if crate::pattern::trailing_escape(pattern) {
         return text;
     }
     let fold = compiled.fold;
@@ -181,13 +191,11 @@ pub(super) fn substitute(
     if group.is_none() && !crate::pattern::has_magic(pattern, false) {
         let literal = crate::pattern::unescape(pattern);
         let needle = literal.as_ref();
-        let mut rendered = String::new();
-        let replacement = if expand_amp {
-            write_replacement(&mut rendered, template, needle, expand_amp);
-            rendered.as_str()
-        } else {
-            template
-        };
+        if mode == All && !needle.is_empty() {
+            return self::literal(&text, needle, template, mode, expand_amp);
+        }
+        let replacement = literal_replacement(template, needle, expand_amp);
+        let replacement = replacement.as_ref();
         if needle.is_empty() && !matches!(mode, Prefix | Suffix) {
             return text;
         }
@@ -198,7 +206,7 @@ pub(super) fn substitute(
                 }
                 text
             }
-            All => text.replace(needle, replacement),
+            All => text,
             Prefix if text.starts_with(needle) => {
                 text.replace_range(..needle.len(), replacement);
                 text
@@ -285,11 +293,19 @@ pub(super) fn substitute(
         }
         i = 0;
     }
-    let bounds: Vec<_> = text
-        .char_indices()
-        .map(|(i, _)| i)
-        .chain(std::iter::once(text.len()))
-        .collect();
+    let offsets = (!text.is_ascii()).then(|| {
+        text.char_indices()
+            .map(|(i, _)| i)
+            .chain(std::iter::once(text.len()))
+            .collect::<Vec<_>>()
+    });
+    let boundaries = offsets.as_ref().map_or(text.len() + 1, Vec::len);
+    let at = |n: usize| offsets.as_ref().map_or(n, |pos| pos[n]);
+    let index_of = |byte: usize| {
+        offsets
+            .as_ref()
+            .map_or(byte, |pos| pos.partition_point(|&i| i < byte))
+    };
     let starts = (max_width.is_none() && group.is_none() && !escaped_end && mode != Suffix)
         .then(|| compiled.starts());
     let accepts = |candidate: &str| {
@@ -304,37 +320,37 @@ pub(super) fn substitute(
     if mode == Suffix
         && let Some(width) = max_width
     {
-        i = bounds.len().saturating_sub(width + 1);
+        i = boundaries.saturating_sub(width + 1);
     }
-    while i + 1 < bounds.len() {
-        let start = bounds[i];
+    while i + 1 < boundaries {
+        let start = at(i);
         let end = if mode == Suffix {
-            accepts(&text[start..]).then_some(bounds.len() - 1)
+            accepts(&text[start..]).then_some(boundaries - 1)
         } else if let Some(end) = group.and_then(|g| g.run_prefix(&text[start..], true)) {
-            end.map(|length| i + bounds[i..].partition_point(|&offset| offset < start + length))
+            end.map(|length| index_of(start + length))
         } else if let Some(width) = max_width {
             let last = i.saturating_add(width);
             if ascii.is_some() {
-                (last < bounds.len() && accepts(&text[start..bounds[last]])).then_some(last)
+                (last < boundaries && accepts(&text[start..at(last)])).then_some(last)
             } else {
-                (i + 1..=last.min(bounds.len() - 1))
+                (i + 1..=last.min(boundaries - 1))
                     .rev()
-                    .find(|&j| accepts(&text[start..bounds[j]]))
+                    .find(|&j| accepts(&text[start..at(j)]))
             }
         } else if starts
             .as_ref()
             .is_none_or(|matcher| matcher.matches(&text[start..]))
         {
-            (i..bounds.len())
+            (i..boundaries)
                 .rev()
-                .find(|&j| accepts(&text[start..bounds[j]]))
+                .find(|&j| accepts(&text[start..at(j)]))
         } else {
             None
         };
         if let Some(j) = end {
             out.push_str(&text[copied..start]);
-            write_replacement(&mut out, template, &text[start..bounds[j]], expand_amp);
-            copied = bounds[j];
+            write_replacement(&mut out, template, &text[start..at(j)], expand_amp);
+            copied = at(j);
             i = if i == j { i + 1 } else { j };
             if mode != All {
                 break;

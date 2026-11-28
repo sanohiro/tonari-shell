@@ -1,4 +1,3 @@
-use super::Incomplete;
 use super::lexer::{LexWord, Token};
 use super::{Error, Reader, Word, is_identifier};
 use crate::word::name_chars_len;
@@ -71,10 +70,16 @@ impl Reader {
                         continue;
                     }
                     let index = assignment
-                        .map(|len| word.assignment_name(len).to_owned())
+                        .map(|len| {
+                            word.assignment_name(len)
+                                .map(str::to_owned)
+                                .ok_or(Error::Invalid("invalid assignment prefix"))
+                        })
+                        .transpose()?
                         .filter(|k| k.starts_with('[') && (k.ends_with(']') || k.ends_with("]+")));
                     if let Some(name) = &index {
-                        word.remove_assignment_prefix(name.len() + 1);
+                        word.remove_assignment_prefix(name.len() + 1)
+                            .ok_or(Error::Invalid("invalid assignment prefix"))?;
                     }
                     items.push((
                         index.map(|s| {
@@ -88,9 +93,7 @@ impl Reader {
                     ));
                 }
                 None => {
-                    return Err(Error::Incomplete(Incomplete::Message(
-                        "unfinished array assignment",
-                    )));
+                    return Err(Error::incomplete_message("unfinished array assignment"));
                 }
                 Some(unexpected) => {
                     // Resume only after the matching closing parenthesis. A later
@@ -111,7 +114,7 @@ impl Reader {
                     return Err(if self.final_input {
                         Error::Invalid("unfinished invalid array assignment")
                     } else {
-                        Error::Incomplete(Incomplete::Message("unfinished array assignment"))
+                        Error::incomplete_message("unfinished array assignment")
                     });
                 }
             }

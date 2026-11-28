@@ -1,5 +1,9 @@
 //! Consume one short-option cluster. Each builtin decides which letters take
 //! values and how to report invalid options. A lone dash remains an operand.
+pub(crate) fn cluster(word: &str) -> bool {
+    word.len() > 1 && word.starts_with('-') && word != "--"
+}
+
 pub(crate) fn next<'a>(args: &mut &'a [String]) -> Option<&'a str> {
     let (word, rest) = args.split_first()?;
     if word.len() < 2 || !word.starts_with('-') {

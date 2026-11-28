@@ -2,16 +2,18 @@
 // on backslashes in these lists and on how to resume after an unclosed '['.
 use std::ffi::{CStr, CString};
 
-fn posix_item_len(input: &[u8]) -> Option<usize> {
+pub(crate) fn posix_list_item(input: &[u8]) -> Option<(usize, u8)> {
     let [b'[', mark @ (b':' | b'=' | b'.'), rest @ ..] = input else {
         return None;
     };
     let end = rest.windows(2).position(|p| p == [*mark, b']'])?;
-    // A quoted equivalence operand is read as ordinary list members by Bash.
-    if *mark == b'=' && rest[..end].contains(&b'\\') {
-        return None;
-    }
-    Some(end + 4)
+    Some((end + 4, *mark))
+}
+
+fn posix_item_len(input: &[u8]) -> Option<usize> {
+    let (end, mark) = posix_list_item(input)?;
+    // Bash treats an escaped equivalence operand as ordinary list members.
+    (!(mark == b'=' && input[2..end - 2].contains(&b'\\'))).then_some(end)
 }
 
 // Input starts immediately after '['. The initial ']' is a literal member.
@@ -328,19 +330,7 @@ impl CharacterClass {
             b.encode_utf8(&mut right);
             return super::glob_locale::range_order(&left, &right);
         }
-        let order = a.cmp(&b);
-        if a == b
-            || (a as u32 <= 255 && b as u32 <= 255)
-            || matches!(self.fold, Some(super::CharacterLocale::Ascii))
-        {
-            return order;
-        }
-        let (mut left, mut right) = ([0u8; 5], [0u8; 5]);
-        a.encode_utf8(&mut left);
-        b.encode_utf8(&mut right);
-        unsafe { libc::strcoll(left.as_ptr().cast(), right.as_ptr().cast()) }
-            .cmp(&0)
-            .then(order)
+        a.cmp(&b)
     }
 
     pub(super) fn accepts(&self, c: char) -> bool {
@@ -397,13 +387,17 @@ impl BracketPattern {
         }
         let utf8 = Self::utf8_locale();
         let mut tokens = Vec::new();
+        let last_close = memchr::memrchr(b']', source).map(|i| source.len() - i);
         while !source.is_empty() {
             let (c, rest) = unit(source, utf8);
             source = rest;
             tokens.push(match c {
                 b"*" => Token::Star,
                 b"?" => Token::Any,
-                b"[" => match class_end(rest) {
+                b"[" => match last_close
+                    .filter(|&distance| distance <= rest.len())
+                    .and_then(|_| class_end(rest))
+                {
                     Some(end) => {
                         source = &rest[end + 1..];
                         Token::list(&rest[..end], utf8)

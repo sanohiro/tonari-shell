@@ -8,6 +8,10 @@ thread_local! {
     static CONTEXT: RefCell<Aliases> = const { RefCell::new(Aliases(None)) };
 }
 
+pub(super) fn resume(aliases: Aliases) {
+    CONTEXT.replace(aliases);
+}
+
 pub(super) fn current() -> Aliases {
     CONTEXT.with_borrow(Clone::clone)
 }
@@ -145,8 +149,8 @@ impl Expanded {
         super::Location {
             start: 0,
             end: text.len(),
-            source: text,
             subscript_aliases: reader.subscript_aliases(),
+            source: text,
             line: reader.first_line + lines,
         }
     }
@@ -177,15 +181,38 @@ impl Reader {
     }
 
     fn replacement_aliases(&self, name: &str, mask_active: bool) -> Aliases {
-        let mut nested = self.aliases.clone();
-        if mask_active {
-            let table = std::rc::Rc::make_mut(nested.0.as_mut().unwrap());
+        if !mask_active {
+            return self.aliases.clone();
+        }
+        let original = self.aliases.0.as_ref().expect("an alias was found");
+        let masked = || {
+            let mut table = original.as_ref().clone();
             table.remove(name);
             for frame in &self.alias_frames {
                 table.remove(&frame.name);
             }
+            Aliases(Some(std::rc::Rc::new(table)))
+        };
+        if !self.alias_frames.is_empty() {
+            return masked();
         }
-        nested
+        type WeakTable = std::rc::Weak<std::collections::BTreeMap<String, String>>;
+        thread_local! { static LAST: RefCell<Option<(WeakTable,String,Aliases)>> =const {RefCell::new(None)}; }
+        LAST.with_borrow_mut(|cache| {
+            if let Some((table, key, replacement)) = cache
+                && table.as_ptr() == std::rc::Rc::as_ptr(original)
+                && key == name
+            {
+                return replacement.clone();
+            }
+            let replacement = masked();
+            *cache = Some((
+                std::rc::Rc::downgrade(original),
+                name.into(),
+                replacement.clone(),
+            ));
+            replacement
+        })
     }
 
     // A replacement ending in shell syntax can take bytes from the following
@@ -209,12 +236,13 @@ impl Reader {
                 |s| s.span(i, self),
             )
         };
-        let mut physical = String::new();
+        let physical;
         if let Some(expanded) = &self.alias_source {
-            physical.push_str(&expanded.text);
-            physical.push_str(&self.source[expanded.original_byte..]);
+            let mut joined = expanded.text.clone();
+            joined.push_str(&self.source[expanded.original_byte..]);
+            physical = std::borrow::Cow::Owned(joined);
         } else {
-            physical.push_str(&self.source);
+            physical = std::borrow::Cow::Borrowed(self.source.as_ref());
         }
         let (start, end) = span(index);
         let mut suffix = &physical[end..];
@@ -236,7 +264,14 @@ impl Reader {
         let boundary = source.len();
         let old_boundary = physical.len() - suffix.len();
         source.push_str(suffix);
-        let (tokens, offsets, _) = with(nested, || lex(&source[start..], false, self.final_input))?;
+        let (tokens, offsets, _) = with(nested, || {
+            super::lexer::lex_joined(
+                &source[start..],
+                self.final_input,
+                boundary - start,
+                self.aliases.clone(),
+            )
+        })?;
         let mut spans: Vec<_> = (0..index).map(span).collect();
         let boundaries: Vec<_> = self
             .alias_frames
@@ -319,7 +354,7 @@ impl Reader {
             let Some(value) = self.aliases.get(name) else {
                 return Ok(());
             };
-            if ((!after_blank || super::POSIX.get())
+            if ((!after_blank || super::READ_OPTIONS.get().posix)
                 && !matches!(self.peek(), Some(Token::TimeUtility))
                 && protected.map_or_else(|| reserved(name), |words| words.contains(&name)))
                 || self.alias_frames.iter().any(|f| f.name == name)

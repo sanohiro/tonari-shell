@@ -1,8 +1,8 @@
 use super::{Entries, History, InitialJournal, Session};
 use crate::Flow;
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufRead, BufReader, Seek, SeekFrom, Write};
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::os::fd::FromRawFd;
 use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::{FileExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
@@ -47,7 +47,12 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
     while let Some(flag) = crate::builtins::flags::next(&mut args) {
         for c in flag[1..].chars() {
             if c == 'c' {
-                session.history = None;
+                let h = session.history_mut();
+                *h = Entries {
+                    imported: h.imported.take(),
+                    incomplete_files: std::mem::take(&mut h.incomplete_files),
+                    ..Entries::default()
+                };
             } else if "dspawrn".contains(c) && operation.is_none() {
                 operation = Some(c);
             } else if !"dspawrn".contains(c) {
@@ -71,8 +76,7 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
             if !args.is_empty() {
                 session.history_mut().discard_current();
                 let text = args.join(" ");
-                session.push_history(&text, false);
-                if session.interactive && !session.history_lines().is_empty() {
+                if session.record_replay(&text) && session.interactive {
                     History::persist(session, &text, session.get("PWD").as_deref(), 0);
                 }
             }
@@ -94,9 +98,7 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
             if first > last {
                 return Err(error("history position out of range"));
             }
-            for i in (first..=last).rev() {
-                h.remove(i);
-            }
+            h.remove_range(first, last + 1);
         }
         Some('p') => {
             session.history_mut().discard_current();
@@ -162,18 +164,13 @@ fn position(h: &Entries, arg: &str, end: usize) -> io::Result<usize> {
     usize::try_from(i)
         .ok()
         .filter(|i| *i < end)
-        .ok_or_else(|| error("history position out of range"))
+        .ok_or_else(|| error(&format!("{arg}: history position out of range")))
 }
 
 fn locked_history(path: &Path, options: &OpenOptions) -> io::Result<File> {
     loop {
         let file = options.open(path)?;
-        while unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } < 0 {
-            let error = io::Error::last_os_error();
-            if error.kind() != io::ErrorKind::Interrupted {
-                return Err(error);
-            }
-        }
+        super::lock_exclusive(&file)?;
         let opened = file.metadata()?;
         let current = std::fs::metadata(path)?;
         if (opened.dev(), opened.ino()) == (current.dev(), current.ino()) {
@@ -233,14 +230,42 @@ fn create_temp_file(path: PathBuf) -> io::Result<(File, PathBuf)> {
     if fd < 0 {
         return Err(io::Error::last_os_error());
     }
+    let file = unsafe { File::from_raw_fd(fd) };
+    if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+        let error = io::Error::last_os_error();
+        unsafe { libc::unlink(bytes.as_ptr().cast()) };
+        return Err(error);
+    }
     bytes.pop();
-    Ok((
-        unsafe { File::from_raw_fd(fd) },
-        std::ffi::OsString::from_vec(bytes).into(),
-    ))
+    Ok((file, std::ffi::OsString::from_vec(bytes).into()))
 }
 
-pub(super) fn limit_plain_file(path: &Path, limit: usize, timed: bool) -> io::Result<()> {
+// Replace the target only after writing and restoring its permissions.
+fn replace_history(
+    path: &Path,
+    mode: std::fs::Permissions,
+    write: impl FnOnce(&mut File) -> io::Result<()>,
+) -> io::Result<std::fs::Metadata> {
+    let (mut copy, temp) = create_temp_file(path.with_file_name(".tonari-history-XXXXXX"))?;
+    let result = (|| {
+        write(&mut copy)?;
+        copy.set_permissions(mode)?;
+        let meta = copy.metadata()?;
+        std::fs::rename(&temp, path)?;
+        Ok(meta)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(temp);
+    }
+    result
+}
+
+pub(super) fn limit_plain_file(
+    path: &Path,
+    limit: usize,
+    timed: bool,
+    seen: Option<&mut InitialJournal>,
+) -> io::Result<()> {
     let path = std::fs::canonicalize(path)?;
     let mut source = locked_history(
         &path,
@@ -265,22 +290,22 @@ pub(super) fn limit_plain_file(path: &Path, limit: usize, timed: bool) -> io::Re
             return Ok(());
         }
     } else if limit > 0 {
-        pos = super::tail_lines_offset(&source, pos, limit)?;
+        pos = super::tail_lines_offset(&source, pos, limit, true)?;
         if pos == 0 {
             return Ok(());
         }
     }
     source.seek(SeekFrom::Start(pos))?;
-    let (mut copy, temp) = create_temp_file(path.with_file_name(".tonari-history-XXXXXX"))?;
-    let result = (|| {
-        io::copy(&mut source, &mut copy)?;
-        copy.set_permissions(metadata.permissions())?;
-        std::fs::rename(&temp, path)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(temp);
+    let new = replace_history(&path, metadata.permissions(), |copy| {
+        io::copy(&mut source, copy).map(|_| ())
+    })?;
+    if let Some(seen) = seen
+        && seen.identity == (metadata.dev(), metadata.ino())
+    {
+        seen.identity = (new.dev(), new.ino());
+        seen.len = seen.len.saturating_sub(pos);
     }
-    result
+    Ok(())
 }
 
 // A history file may be copied and extended under another name. Only skip
@@ -328,8 +353,8 @@ fn imported_prefix(
     Ok(seen.len)
 }
 
-fn import_entry(h: &mut Entries, value: String, time: i64, erase: bool, limit: usize) {
-    h.append_line(value, erase);
+fn import_entry(h: &mut Entries, value: String, time: i64, limit: usize) {
+    h.append_line(value, false, false);
     h.timestamps.push(time);
     h.current = None;
     // Trim bounded batches while the intermediate window is unobservable.
@@ -388,8 +413,8 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
     let histfile = session.get("HISTFILE");
     let chosen = args.first().map(String::as_str).or(histfile.as_deref());
     let default = session
-        .get("HOME")
-        .map(|s| Path::new(&s).join(".bash_history"));
+        .personal_home()
+        .map(|s| Path::new(s.as_ref()).join(".bash_history"));
     let chosen = chosen
         .filter(|s| !s.is_empty())
         .ok_or_else(|| error("history file is not set"))?;
@@ -410,6 +435,36 @@ pub(super) fn history_file(session: &mut Session, op: char, args: &[String]) -> 
     }
 }
 
+// Only the final HISTSIZE valid records can survive an explicit private
+// import. Count the earlier events for Bash's numbering without allocating
+// or decoding their commands. Malformed tails use the ordinary reader.
+fn bounded_journal(file: &mut File, len: u64, limit: usize) -> io::Result<Option<(u64, usize)>> {
+    if len < 128 * 1024 || limit == 0 || limit as u64 > len / 8 {
+        return Ok(None);
+    }
+    let start = super::tail_lines_offset(file, len, limit, false)?;
+    if start == 0 {
+        return Ok(None);
+    }
+    let mut count = |start, bytes| -> io::Result<usize> {
+        file.seek(SeekFrom::Start(start))?;
+        let mut rows = 0usize;
+        let mut reader = BufReader::new((&*file).take(bytes));
+        read_history_lines(&mut reader, true, |line, _| {
+            if let Some(command) = super::command_field(line)
+                && (!command.contains('\\') || super::decode(command).is_some())
+            {
+                rows += 1;
+            }
+        })?;
+        Ok(rows)
+    };
+    if count(start, len - start)? < limit {
+        return Ok(None);
+    }
+    Ok(Some((start, count(0, start)?)))
+}
+
 fn read_history_file(
     session: &mut Session,
     path: PathBuf,
@@ -417,13 +472,36 @@ fn read_history_file(
     private: bool,
     timestamped: bool,
 ) -> io::Result<()> {
-    let file = match File::open(&path) {
+    let mut file = match File::open(&path) {
+        Ok(file) => file,
         Err(e) if private && e.kind() == io::ErrorKind::NotFound => return Ok(()),
-        other => other?,
+        Err(e) => {
+            // A write-only history file also has unread contents to preserve.
+            if let Ok(meta) = std::fs::metadata(&path)
+                && meta.is_file()
+            {
+                session
+                    .history_mut()
+                    .mark_incomplete((meta.dev(), meta.ino()));
+            }
+            return Err(e);
+        }
     };
     let meta = file.metadata()?;
     let identity = (meta.dev(), meta.ino());
-    let skip = if op == 'n' && meta.is_file() {
+    let limit = session.history_limit("HISTSIZE", super::DEFAULT_HISTSIZE);
+    let skip = if op == 'r' && private && meta.is_file() {
+        let retained = bounded_journal(&mut file, meta.len(), limit).ok().flatten();
+        file.seek(SeekFrom::Start(0))?;
+        if let Some((offset, skipped)) = retained {
+            let history = session.history_mut();
+            history.trim_to(0);
+            history.base += skipped;
+            offset
+        } else {
+            0
+        }
+    } else if op == 'n' && meta.is_file() {
         session
             .history
             .as_deref()
@@ -456,32 +534,29 @@ fn read_history_file(
     if skip > 0 {
         reader.seek(SeekFrom::Start(skip))?;
     }
-    let limit = session.history_limit("HISTSIZE", super::DEFAULT_HISTSIZE);
-    let erase = session
-        .get("HISTCONTROL")
-        .is_some_and(|v| v.split(':').any(|rule| rule == "erasedups"));
     let owner = session.shell_pid();
     let h = session.history_mut();
     let mut pending: Option<(String, i64)> = None;
     let mut previous = if skip > 0 {
-        h.written.checked_sub(1)
+        h.pending.iter().rposition(|pending| !pending)
     } else {
         None
     };
     let result = read_history_lines(&mut reader, private, |line, n| {
         offset += n as u64;
         let (value, seconds) = if private {
-            let Some((body, ts)) = super::journal_fields(line) else {
+            let Some(record) = super::journal_record(line) else {
                 return;
             };
-            let mut fields = body.splitn(4, '\t');
-            let pid = fields.next().and_then(|s| s.parse::<u32>().ok());
+            let pid = record.pid.parse::<u32>().ok();
             if op == 'n' && pid == Some(owner) {
                 return;
             }
             (
-                fields.nth(2).and_then(super::decode),
-                ts.and_then(|s| s.parse().ok())
+                super::decode(record.command),
+                record
+                    .time
+                    .and_then(|s| s.parse().ok())
                     .unwrap_or(super::UNKNOWN_TIME),
             )
         } else {
@@ -494,7 +569,7 @@ fn read_history_file(
             }
             if recognize && let Some(ts) = bash_timestamp(line) {
                 if let Some((value, time)) = pending.take() {
-                    import_entry(h, value, time, erase, limit);
+                    import_entry(h, value, time, limit);
                 }
                 previous = None;
                 timestamp = Some(ts);
@@ -534,20 +609,24 @@ fn read_history_file(
             if multiline && !private {
                 pending = Some((value, seconds));
             } else {
-                import_entry(h, value, seconds, erase, limit);
+                import_entry(h, value, seconds, limit);
             }
         }
     });
     if let Some((value, time)) = pending {
-        import_entry(h, value, time, erase, limit);
+        import_entry(h, value, time, limit);
     }
     h.trim_to(limit);
+    if result.is_err() {
+        h.mark_incomplete(identity);
+    } else if op == 'r' {
+        h.incomplete_files.retain(|id| *id != identity);
+    }
     h.imported = Some(InitialJournal {
         path,
         identity,
         len: marker_offset.unwrap_or(offset),
     });
-    h.written = h.lines.len();
     result
 }
 
@@ -563,26 +642,53 @@ fn write_history_file(
             .write(true)
             .create(true)
             .append(op == 'a')
-            .truncate(false)
             .mode(0o600),
     )?;
+    let meta = file.metadata()?;
     let h = session.history_mut();
-    let first = if op == 'a' {
-        h.written
-    } else {
-        if file.metadata()?.is_file() {
-            file.set_len(0)?;
-        }
-        0
-    };
-    let mut output = io::BufWriter::new(file);
-    for (line, &time) in h.lines[first..].iter().zip(&h.timestamps[first..]) {
-        if timestamped && time != super::UNKNOWN_TIME {
-            writeln!(output, "#{time}")?;
-        }
-        writeln!(output, "{line}")?;
+    if op == 'w' && h.incomplete_files.contains(&(meta.dev(), meta.ino())) {
+        return Err(error("refusing to overwrite incompletely read history"));
     }
-    output.flush()?;
+    let first = if op == 'a' { h.written } else { 0 };
+    let write = |target: &File| -> io::Result<()> {
+        let mut output = io::BufWriter::new(target);
+        if op == 'a' && meta.is_file() && meta.len() > 0 && h.pending[first..].contains(&true) {
+            // Retain write-only and FIFO semantics on the primary descriptor.
+            // Only a readable regular file needs this optional boundary check.
+            let input = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(path);
+            if let Ok(input) = input {
+                let original = input.metadata()?;
+                if (original.dev(), original.ino()) == (meta.dev(), meta.ino()) {
+                    let mut last = [0];
+                    input.read_exact_at(&mut last, meta.len() - 1)?;
+                    if last != [b'\n'] {
+                        output.write_all(b"\n")?;
+                    }
+                }
+            }
+        }
+        for i in first..h.lines.len() {
+            if op == 'a' && !h.pending[i] {
+                continue;
+            }
+            let time = h.timestamps[i];
+            if timestamped && time != super::UNKNOWN_TIME {
+                writeln!(output, "#{time}")?;
+            }
+            writeln!(output, "{}", h.lines[i])?;
+        }
+        output.flush()
+    };
+    if op == 'w' && meta.is_file() {
+        let path = std::fs::canonicalize(path)?;
+        replace_history(&path, meta.permissions(), |file| write(file))?;
+    } else {
+        write(&file)?;
+    }
+    h.pending[first..].fill(false);
     h.written = h.lines.len();
     Ok(())
 }
@@ -719,15 +825,19 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
         };
     }
     session.history_mut().discard_current();
-    if substitute {
+    if substitute || session.shopt.cmdhist {
         let entry = source.strip_suffix('\n').unwrap_or(&source);
-        session.record_replay(entry);
+        if !substitute && !session.shopt.lithist && entry.contains('\n') {
+            session.record_replay(&crate::parser::history_command(entry));
+        } else {
+            session.record_replay(entry);
+        }
     } else {
         for line in source.lines() {
             session.record_replay(line);
         }
     }
-    eprint!("{source}");
+    stderr_text!("{source}");
     Ok(crate::eval_text(session, &source, status))
 }
 

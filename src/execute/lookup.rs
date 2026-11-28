@@ -12,6 +12,7 @@ pub(super) enum Search {
     Normal,
     NoFunctions,
     BuiltinsOnly,
+    JobSpec,
 }
 
 fn default_system_path() -> &'static std::ffi::OsStr {
@@ -31,7 +32,7 @@ fn default_system_path() -> &'static std::ffi::OsStr {
 }
 
 // Unix PATH entries borrow the original byte string, including non-UTF-8 entries.
-pub(super) fn search_directories(path: &OsStr) -> impl Iterator<Item = &Path> {
+pub(crate) fn search_directories(path: &OsStr) -> impl Iterator<Item = &Path> {
     path.as_bytes().split(|&b| b == b':').map(|bytes| {
         if bytes.is_empty() {
             Path::new(".")
@@ -41,9 +42,9 @@ pub(super) fn search_directories(path: &OsStr) -> impl Iterator<Item = &Path> {
     })
 }
 
-pub(super) fn path(cmd: &PreparedCommand, session: &Session) -> OsString {
+pub(super) fn path<'a>(cmd: &'a PreparedCommand, session: &'a Session) -> &'a OsStr {
     if cmd.default_path {
-        default_system_path().to_owned()
+        default_system_path()
     } else {
         session.search_path(&cmd.assignments)
     }
@@ -169,12 +170,9 @@ pub(crate) fn describe_words(
     }
     let search = std::cell::LazyCell::new(|| {
         if default_path {
-            std::borrow::Cow::Borrowed(default_system_path())
+            default_system_path()
         } else {
-            session.stored_scalar("PATH").map_or_else(
-                || std::borrow::Cow::Owned(session.search_path(&[])),
-                |path| std::borrow::Cow::Borrowed(OsStr::new(path)),
-            )
+            session.search_path(&[])
         }
     });
     let ignored = std::cell::LazyCell::new(|| IgnoredExecutables::new(session));

@@ -54,6 +54,7 @@ fn main() {
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let mut tables = Tables::default();
     let mut records = Vec::new();
+    let mut record_ids = HashMap::new();
     let mut locale_rows = Vec::new();
     let mut fields = Vec::new();
     let mut numeric_names = String::new();
@@ -132,13 +133,11 @@ fn main() {
         field!(DTFmt, &[datetime]);
         field!(TFmt, &[locale_match!(locale => LC_TIME::T_FMT)]);
         field!(TFmtAmpm, &[locale_match!(locale => LC_TIME::T_FMT_AMPM)]);
-        let index = records
-            .iter()
-            .position(|old| *old == row)
-            .unwrap_or_else(|| {
-                records.push(row);
-                records.len() - 1
-            });
+        let index = *record_ids.entry(row).or_insert_with_key(|row| {
+            let index = records.len();
+            records.push(row.clone());
+            index
+        });
         locale_rows.push(u16::try_from(index).unwrap());
     }
     let (text, offsets, lengths) = tables.pack_text();
