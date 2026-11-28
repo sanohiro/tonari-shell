@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Collect available native counters for a previously verified workload.
+set -euo pipefail
+out=$1
+shift
+mkdir -p "$out"
+lscpu > "$out/cpu.txt"
+cat /proc/sys/kernel/perf_event_paranoid > "$out/perf-event-paranoid.txt"
+perf version > "$out/perf-version.txt"
+perf list > "$out/perf-list.txt"
+events=()
+for event in task-clock cycles:u instructions:u branches:u branch-misses:u cache-misses:u; do
+  probe="$out/probe-${event%:u}.txt"
+  if LC_ALL=C perf stat --no-big-num -x ';' -e "$event" -- true 2>"$probe" &&
+     awk -F';' '$1 ~ /^[0-9]+([.][0-9]+)?$/ && $3 != "" && $4 + 0 > 0 {found=1} END {exit !found}' "$probe"; then
+    events+=("$event")
+  fi
+done
+if (( ${#events[@]} == 0 )); then
+  echo "No usable perf events on this runner. See the per-event probes." | tee "$out/counters.txt"
+  exit 0
+fi
+selected=$(IFS=,; echo "${events[*]}")
+LC_ALL=C perf stat -e "$selected" -r 3 -o "$out/counters.txt" -- "$@"

@@ -1,5 +1,28 @@
 # Startup and execution / 起動と実行性能
 
+<a id="independent-review-trial"></a>
+
+## November 28 · Independent reviewer controls / 独立レビューの対照計測
+
+Native release medians in milliseconds for old Tonari, shell revision `c70e173` and Bash, interleaved on the same host. The M1 ran GNU Bash 5.3.20. The Ubuntu x86-64 array run used an EPYC 7763 and the system Bash. Times for appends and listings start after shell setup. Tab timing covers input through visible response in the same PTY session. The first Tab builds the command index. It is important to report that cost as well as later savings.
+
+| Operation | Old revision | M1 old / current / Bash | Linux old / current / Bash |
+| --- | --- | --- | --- |
+| 5,000 associative compound appends | `ff7e9b4` | 484.040 / 3.914 / 11.333 | 1,480.813 / 5.736 / 15.133 |
+| First command Tab | `06a998a` | 0.894 / 0.957 / 2.411 | [Previous native comparison](#priority-implementation) |
+| Second command Tab | `06a998a` | 0.843 / 0.079 / 1.598 | [Previous native comparison](#priority-implementation) |
+| 200 full shopt listings | `0bf6aa0` | 14.840 / 3.299 / 16.805 | [Previous native comparison](#listings-expansion-native) |
+
+Reproduce using the corresponding old release in each command. M1 used 9 array and listing samples and 19 PTY sessions. M1 p95 for the append case was 488.458 / 4.103 / 11.721 ms. Earlier samples concurrent with building the holdout showed substantial contention and were repeated after the build finished. See the [Linux run](https://github.com/sanohiro/tonari-shell/actions/runs/46143318949) and the [blind scores](review-evaluation.md).
+
+```sh
+python3 tools/bench_scripts.py "$current" --previous "$old" --bash "$bash" --timing started --runs 9 --case r8-append-assoc-5000
+python3 tools/bench_completion.py "$old" "$current" --bash "$bash" --command-cache --runs 19
+python3 tools/bench_scripts.py "$current" --previous "$old" --bash "$bash" --timing started --runs 9 --case shopt-list
+```
+
+別コンテキストの仮説を受け取った後に比較した。ビルドと同時に採った M1 の測定では分散が大きかったため、上の表にはビルド終了後の計測値を載せた。Linux の Tab と一覧表示へのリンク先は各修正当時の測定で、今回の再計測は配列追記である。
+
 ## Source-review workloads / ソース監査の実測
 
 <a id="review-2026-11-28"></a>

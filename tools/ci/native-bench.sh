@@ -7,6 +7,21 @@ ref=/bin/bash
 case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
+if [[ $SUITE == review-perf ]]; then
+  [[ $RUNNER_OS == Linux && $RUNNER_ARCH == X64 ]]
+  # Exercise one known CPU-bound workload with a checked observable result.
+  program='declare -A a; for ((i=0;i<50000;i++)); do a+=([k$i]=$i); done; [[ ${#a[@]} == 50000 && ${a[k49999]} == 49999 ]]'
+  "$current" --norc -c "$program"
+  # Hosted runners are disposable. Scope the optional user-mode profiling policy
+  # to this job and restore it before artifact upload. Run Tonari as the runner.
+  policy=$(cat /proc/sys/kernel/perf_event_paranoid)
+  echo "$policy" > "$out/initial-perf-event-paranoid.txt"
+  if (( policy > 2 )) && sudo -n sysctl -w kernel.perf_event_paranoid=2; then
+    trap 'sudo -n sysctl -w "kernel.perf_event_paranoid=$policy"' EXIT
+  fi
+  bash tools/ci/review-perf.sh "$out" "$current" --norc -c "$program"
+  exit
+fi
 source tools/ci/bash-source.sh
 if [[ $SUITE == correctness-review ]]; then
   reference=$ref
