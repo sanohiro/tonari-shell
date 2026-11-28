@@ -83,8 +83,12 @@ shopt -s nocasematch; s=${s}K; echo "${s//*k/ok}"
 
     def test_scaling_incomplete_escape_in_pattern(self):
         script = r"""p='*\'; printf -v s '%0300d' 0; s=${s//0/\\}
-v=${s//$p/X}; x=${s##$p}; echo "${#v} ${#x}" """
-        self.compare(script, 0, b"300 300\n")
+for option in -u -s; do
+    shopt "$option" nocasematch
+    v=${s//$p/X}; x=${s##$p}; [[ $s == $p ]]; echo "$? ${#v} ${#x}"
+done
+p='*\\'; v=${s//$p/X}; x=${s##$p}; echo "$v ${#x}" """
+        self.compare(script, 0, b"1 300 300\n1 300 300\nX 0\n")
 
     def test_scaling_erasedups_tracks_trim_delete_and_import(self):
         (self.cwd / "history-data").write_text("aa\nbb\naa\n")

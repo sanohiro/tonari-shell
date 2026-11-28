@@ -87,6 +87,10 @@ fn sequence<const PATHNAME: bool>(
             b'?' => (Atom::Any, 1),
             b'*' => (Atom::Star, 1),
             b'[' if depth != 0 => return None,
+            // An unfinished escape after a wildcard has no matching alternative.
+            b'\\' if bytes.len() == 1 && matches!(atoms.last(), Some(Atom::Star)) => {
+                (Atom::Choice(Vec::new()), 1)
+            }
             b'\\' if bytes.len() > 1 => {
                 let end = 1 + rest[1..].chars().next()?.len_utf8();
                 (Atom::Text(rest[1..end].into()), end)

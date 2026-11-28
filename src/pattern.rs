@@ -110,6 +110,13 @@ impl<T: AsRef<str>> Matcher<T> {
                 }
             }
         }
+        // A wildcard followed by an unfinished escape cannot match. Native
+        // fnmatch implementations disagree when the subject ends in a backslash.
+        if let Some(prefix) = text.strip_suffix("*\\")
+            && prefix.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 0
+        {
+            return Self::Invalid;
+        }
         if let Some(list) = text.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
             && !list.is_empty()
             && list.bytes().all(|b| b.is_ascii_alphanumeric())
