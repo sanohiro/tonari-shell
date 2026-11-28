@@ -856,7 +856,8 @@ fn apply(
         };
         let mut output = io::BufWriter::with_capacity(capacity, out);
         for word in &words {
-            writeln!(output, "{word}")?;
+            output.write_all(word.as_bytes())?;
+            output.write_all(b"\n")?;
         }
         output.flush()?;
         return Ok(u8::from(words.is_empty()));
@@ -930,6 +931,17 @@ pub fn run(name: &str, args: &[String], last: u8, session: &mut Session) -> u8 {
             return 2;
         }
     };
+    if builtin == CompBuiltin::Compgen {
+        // apply buffers the complete list and checks the final write.
+        return apply(
+            request,
+            builtin,
+            session,
+            last,
+            &mut crate::builtins::StdoutFd(Some(name)),
+        )
+        .unwrap_or(1);
+    }
     if builtin == CompBuiltin::Complete
         && request.operands.is_empty()
         && request.special.is_none()
