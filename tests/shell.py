@@ -5188,6 +5188,40 @@ declare -n ref=a; v=$(/usr/bin/printf '[%s]' "${ref[@]}"); echo "$v"
 jobs() { printf '%s' "shadow:$1"; }; v=$(jobs -p); echo "$v" """,
                      0, b"empty:0:<>\n<a b><><*.rs>\n[a b][][*.rs]\nshadow:-p\n", minimum=5)
 
+    def test_whole_audit_sourced_functions_with_parse_time_aliases(self):
+        defs = self.cwd / "alias-definitions"
+        defs.write_text("""alias ll='ls -l'
+alias renamed=physical
+alias show='echo from-alias'
+alias start='if true; then'
+alias finish=fi
+alias quiet=:
+renamed()
+{
+    start
+        show "$1"
+    finish
+    quiet
+} >out
+physical "two words"
+cat out
+alias say='echo first'
+configured()
+{
+    false || {
+        value='x
+}
+y'
+    }
+    say "$value"
+}
+alias say='echo second'
+configured
+say last
+""")
+        self.compare("shopt -s expand_aliases; . ./alias-definitions", 0,
+                     b"from-alias two words\nfirst x\n}\ny\nsecond last\n")
+
     def test_whole_audit_sourced_function_closing_boundaries(self):
         defs = self.cwd / "definitions"
         defs.write_text("""first()

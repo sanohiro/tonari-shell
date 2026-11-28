@@ -83,6 +83,11 @@ def main():
         prompt_case("empty-rc", 0, ":", env, ["start", "end"])
         load = '. "$TN_PACKAGE" || exit $?\n'
         prompt_case("source-ambient", 1, load, env, ["start", "end"])
+        prompt_case("source-unused-alias", 1, "alias ll='ls -l'\n" + load, env, ["start", "end"])
+        if digest == PACKAGE_211:
+            expanded = '[[ $(declare -f _upvars) == *"builtin echo"* ]] || exit 1'
+            prompt_case("source-used-alias", 1, "alias echo='builtin echo'\n" + load,
+                        env, ["start", "end"], CHECK + "\n" + expanded)
         core_env = env | {"BASH_COMPLETION_COMPAT_DIR": str(compat)}
         for n in (1, 2, 4):
             prompt_case("source-empty-compat", n, load * n, core_env, ["start", "end"])

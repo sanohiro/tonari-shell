@@ -206,15 +206,27 @@ pub(crate) fn buffered_compound<P: AsRef<[parser::Statement]>>(
     let mut needs_open_brace = close == b"}" && !header.contains('{');
     let mut deferred = None;
     let mut next_probe = 0;
-    let mut probe = |size, lines| {
+    let mut probe = |size, lines, function_close: Option<usize>| {
         // Only the final ordinary read may emit an unterminated here-doc warning.
         match parse(size) {
-            // Alias expansion changes offsets. Its callers only speculate on
-            // private input and accept a single compound.
-            Ok(program) if aliases && program.as_ref().len() == 1 => {
+            // Private input allows a single alias-expanded compound. The
+            // flush-left function hint additionally needs a physical boundary:
+            // rewritten source can have different offsets from the input.
+            Ok(program) if aliases => {
+                let [stmt] = program.as_ref() else {
+                    return Err(size);
+                };
+                if let Some(close) = function_close {
+                    let source = stmt.location.full_source().as_bytes();
+                    if !matches!(stmt.command, parser::Command::Function { .. })
+                        || source.strip_prefix(first.as_bytes()) != Some(&buffered[..size])
+                        || stmt.location.end <= first.len() + close
+                    {
+                        return Ok(None);
+                    }
+                }
                 Ok(Some((program, size, lines)))
             }
-            Ok(_) if aliases => Err(size),
             Ok(program) => {
                 // A quoted header and a later comment resembling its terminator
                 // can overshoot even when the parser returned just one statement.
@@ -254,14 +266,13 @@ pub(crate) fn buffered_compound<P: AsRef<[parser::Statement]>>(
     const FUNCTION_CLOSE_WINDOW: usize = 8192;
     let nearby = &buffered[..buffered.len().min(FUNCTION_CLOSE_WINDOW)];
     if close == b"}"
-        && !aliases
         && parser::opens_function(header)
         && let Some(at) = memchr::memmem::find(nearby, b"\n}")
         && let Some(len) = memchr::memchr(b'\n', &nearby[at + 2..])
     {
         let size = at + 3 + len;
         let lines = memchr::memchr_iter(b'\n', &buffered[..size]).count();
-        if let Some(unit) = probe(size, lines)? {
+        if let Some(unit) = probe(size, lines, Some(at + 1))? {
             return Ok(unit);
         }
     }
@@ -286,7 +297,7 @@ pub(crate) fn buffered_compound<P: AsRef<[parser::Statement]>>(
             deferred = None;
             let lines = memchr::memchr_iter(b'\n', &buffered[..end]).count()
                 + usize::from(!buffered[..end].ends_with(b"\n"));
-            if let Some(unit) = probe(end, lines)? {
+            if let Some(unit) = probe(end, lines, None)? {
                 return Ok(unit);
             }
             probe_after = end.saturating_mul(2);
@@ -294,7 +305,7 @@ pub(crate) fn buffered_compound<P: AsRef<[parser::Statement]>>(
         if let Some(end) = deferred {
             let lines = memchr::memchr_iter(b'\n', &buffered[..end]).count()
                 + usize::from(!buffered[..end].ends_with(b"\n"));
-            if let Some(unit) = probe(end, lines)? {
+            if let Some(unit) = probe(end, lines, None)? {
                 return Ok(unit);
             }
         }
@@ -317,7 +328,10 @@ pub(crate) fn buffered_compound<P: AsRef<[parser::Statement]>>(
             let bytes = &buffered[..size];
             let lines =
                 memchr::memchr_iter(b'\n', bytes).count() + usize::from(!bytes.ends_with(b"\n"));
-            return probe(size, lines).ok().flatten().ok_or(buffered.len());
+            return probe(size, lines, None)
+                .ok()
+                .flatten()
+                .ok_or(buffered.len());
         }
     }
     let final_line = at_eof && !buffered.is_empty() && !buffered.ends_with(b"\n");
@@ -369,7 +383,7 @@ pub(crate) fn buffered_compound<P: AsRef<[parser::Statement]>>(
             continue;
         }
         deferred = None;
-        if let Some(unit) = probe(size, i + 1)? {
+        if let Some(unit) = probe(size, i + 1, None)? {
             return Ok(unit);
         }
         // Quoted and here-document data can contain complete fake terminator
@@ -378,7 +392,7 @@ pub(crate) fn buffered_compound<P: AsRef<[parser::Statement]>>(
     }
     // A literal header inside a quote or here-document can hide the outer close.
     if let Some((size, lines)) = deferred
-        && let Some(unit) = probe(size, lines)?
+        && let Some(unit) = probe(size, lines, None)?
     {
         return Ok(unit);
     }
@@ -455,5 +469,27 @@ fn flush_left_braces_in_function_data_preserve_the_read_boundary() {
         })
         .unwrap();
         assert_eq!((consumed, lines), (unit.len(), unit.lines().count()));
+    }
+}
+
+#[test]
+fn function_hint_accepts_an_unused_alias_and_checks_rewritten_source() {
+    let first = "configured()\n";
+    let text = "{\n    say value\n}\n";
+    let mut session = crate::Session::default();
+    session.shopt.expand_aliases = true;
+    session.aliases.insert("ll", "ls -l").unwrap();
+    for rewritten in [false, true] {
+        if rewritten {
+            session.aliases.insert("say", "builtin echo").unwrap();
+        }
+        let mut calls = 0;
+        let (_, consumed, _) = buffered_compound(first, text.as_bytes(), true, true, |size| {
+            calls += 1;
+            parser::session_source(&format!("{first}{}", &text[..size]), false, &session)
+        })
+        .unwrap();
+        assert_eq!(consumed, text.len());
+        assert_eq!(calls, if rewritten { 2 } else { 1 });
     }
 }
