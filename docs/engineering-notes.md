@@ -4,6 +4,10 @@
 
 Filter variable attributes before requesting values. A bulk declaration can inspect a seeded random variable, an alias table or debug frames without taking the action associated with an explicit parameter read. An explicit `declare -p RANDOM` advances the generator. For bulk output, `declare -prx` selects readonly or exported variables, while `-a` limits the type. `local -rp` prints the current local scope. A minus flag in a listing still selects its attribute after a plus flag clears it on assignment. An unassigned declaration belongs in `declare -p`; a name completion becomes available on assignment. The inherited process environment stays fixed for the lifetime of the interpreter. Index it lazily for bulk listings and continue overlaying local variables, export attributes and unsets. [Builtin witnesses](../tests/review_builtins.py)
 
+一覧表示では属性で対象を絞ってから値を取得する。名前を指定した `declare -p RANDOM` は乱数を一つ読む。全変数の一覧表示は乱数列を進めない。`declare -prx` は readonly または export された変数を選び、`-a` は配列型に絞る。`local -rp` は現在のローカルスコープを表示する。未代入の宣言は `declare -p` で確認でき、名前補完は代入後に有効になる。継承した環境は一覧表示時に索引を作り、シェル内で上書き・解除した値を優先する。[組み込み試験](../tests/review_builtins.py)
+
+A Tab replaces text up to the cursor while a completion callback receives the entire command. Inspecting the resulting draft and the executed arguments catches duplicated braces and quotes. Interactive completion can scan a repeated PATH directory once. `compgen -c` exposes the original order and multiplicity. With folded filenames, a first Tab can stop early once later matches cannot change the typed prefix. [Terminal witnesses](../tests/review_interactive.py)
+
 補完が変更するのはカーソル位置までの入力で、コールバックに渡す行には後半も含まれる。補完前後のバッファと実行時の引数を調べると、閉じ引用符や閉じ括弧の重複を検出できる。また、通常の Tab では PATH の同じディレクトリを一度だけ調べればよいが、`compgen -c` の出力では同じ名前の出現順と件数もインターフェースに含まれる。大文字小文字を区別しない最初の Tab は、共通部分が入力済みの文字列に達した時点で走査を終了できる。[対話試験](../tests/review_interactive.py) · [実機計測](benchmarks.md#independent-review-follow-up)
 
 ## Independent review of existing shell behavior / 既存コードの独立レビュー
