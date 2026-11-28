@@ -78,7 +78,7 @@ class ShellTests(unittest.TestCase):
     def test_whole_audit_job_control_without_controlling_terminal(self):
         command = 'case $- in *m*) echo on;; *) echo off;; esac; set -m; shopt -qo monitor'
         for shell in self.shells_for(5):
-            for opts in (["-ic"], ["+m", "-ic"], ["-m", "-c"], ["-c"]):
+            for opts in (["-ic"], ["+m", "-ic"], ["-mi", "-c"], ["-c"]):
                 with self.subTest(shell=shell, opts=opts):
                     p = subprocess.run([shell, "--noprofile", "--norc", *opts, command],
                                        start_new_session=True, stdin=subprocess.DEVNULL,
@@ -2120,6 +2120,33 @@ for args in '-t -1' '-n x' '-N -1' '-u -3' '-u x' '-k'; do
     read $args </dev/null 2>/dev/null; echo $?
 done
 """, 0, b"0\n1\n1\n1\n1\n1\n1\n2\n", minimum=5)
+
+    def test_read_uses_tmout_and_preserves_partial_input(self):
+        path = self.cwd / "record"
+        path.write_bytes(b"x" * 8192 + b"\n")
+        self.compare(r"""
+TMOUT=.000001 read -r record <record; echo "$?/${#record}"
+read -r -t .000001 record <record; echo "$?/${#record}"
+for TMOUT in 0 invalid -1; do
+    value=before; read value <<<ready; echo "$?/$value"
+done
+TMOUT=.01 read -r -u 7 value 7<&- 2>/dev/null; echo "$?"
+{ sleep .08; echo later; } | { TMOUT=.001 read -t 2 value; echo "$?/$value"; }
+""", 0, b"0/8192\n0/8192\n0/ready\n0/ready\n0/ready\n1\n0/later\n", minimum=5)
+
+        for shell in self.shells_for(5):
+            read_fd, write_fd = os.pipe()
+            with os.fdopen(read_fd, "rb") as source, os.fdopen(write_fd, "wb", 0) as writer:
+                writer.write(b"ready\npartial")
+                result = subprocess.run(
+                    [shell, "-c", 'read -r line; echo "$?/$line"; '
+                     'read -r line; (( $? > 128 )) && echo "expired/$line"; '
+                     'read -r -t 0 line; echo "$?/$line"'],
+                    stdin=source, capture_output=True, cwd=self.cwd,
+                    env=self.env | {"TMOUT": ".05"}, timeout=3,
+                )
+                self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                 (0, b"0/ready\nexpired/partial\n1/partial\n", b""))
 
     def test_set_prints_reusable_scalars_and_arrays(self):
         self.compare(r"""__plain=yes

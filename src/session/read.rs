@@ -59,7 +59,7 @@ pub(crate) struct Options<'a> {
     array: Option<&'a str>,
 }
 
-fn options(args: &[String]) -> Result<Options<'_>, (u8, String)> {
+fn options<'a>(session: &Session, args: &'a [String]) -> Result<Options<'a>, (u8, String)> {
     let mut opts = Options {
         raw: false,
         silent: false,
@@ -135,6 +135,12 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, String)> {
         }
     }
     opts.names = args;
+    if opts.timeout.is_none() {
+        opts.timeout = session
+            .scalar_setting("TMOUT")
+            .and_then(|value| timeout(&value))
+            .filter(|duration| !duration.is_zero());
+    }
     Ok(opts)
 }
 
@@ -322,7 +328,7 @@ pub(super) fn prepare_memory<'a>(
     args: &'a [String],
     bytes: &'a [u8],
 ) -> Option<super::MemoryInput<'a>> {
-    let opts = options(args).ok()?;
+    let opts = options(session, args).ok()?;
     if opts.fd != 0 || opts.max_chars == Some(0) {
         return None;
     }
@@ -374,7 +380,7 @@ pub(super) fn run(
     here: Option<(i32, &[u8])>,
     last: u8,
 ) -> Flow {
-    let opts = match options(args) {
+    let mut opts = match options(session, args) {
         Ok(opts) => opts,
         Err((code, e)) => {
             diagnostic!("read: {e}");
@@ -411,6 +417,16 @@ pub(super) fn run(
                 Flow::Continue(1)
             }
         };
+    }
+    if opts.timeout.is_some() {
+        // A positive read deadline applies to a terminal or pipe. Regular
+        // files complete at filesystem speed even with a very short timeout.
+        let mut stat = std::mem::MaybeUninit::uninit();
+        if unsafe { libc::fstat(opts.fd, stat.as_mut_ptr()) } == 0
+            && unsafe { stat.assume_init() }.st_mode & libc::S_IFMT == libc::S_IFREG
+        {
+            opts.timeout = None;
+        }
     }
     // The normal redirect installed a fresh descriptor. A plain assignment
     // has no callback or subscript that could observe its file position.

@@ -16,15 +16,28 @@ fi
 wc -c "$baseline" "$current" > "$out/binary-sizes.txt"
 file "$current" "$ref" > "$out/format.txt"
 export REFERENCE_BASH="$ref" PYTHONPATH="$PWD/tools"
+if [[ $SUITE == whole-editor || $SUITE == whole-keys ]]; then
+  python3 -m venv "$RUNNER_TEMP/editor-env"
+  python="$RUNNER_TEMP/editor-env/bin/python"
+  "$python" -m pip install pyte==0.8.2
+fi
 case "$SUITE" in
   whole-startup)
     python3 tests/shell.py "$current" -v -k whole_audit
     python3 tools/ci/whole-startup.py "$baseline" "$current" "$ref" > "$out/startup.jsonl"
+    if [[ $RUNNER_OS == Linux ]] && command -v strace >/dev/null; then
+      # Attribute system-profile work on a real PTY. Keep traced runs out of
+      # the timing table because ptrace changes launch and wait costs.
+      study=$(mktemp -d)
+      export TONARI_TRACE_SHELL="$current" TONARI_TRACE_HOME="$study"
+      printf '%s\n' 'PS1="ready~ "' > "$study/.bash_profile"
+      for mode in login clean; do
+        export TONARI_TRACE_MODE="$mode" TONARI_TRACE_OUT="$out/profile-$mode"
+        script -qec 'set -- --login; if [ "$TONARI_TRACE_MODE" = clean ]; then set -- --noprofile --login; fi; exec env -i PATH=/usr/bin:/bin HOME="$TONARI_TRACE_HOME" TERM=xterm strace -f -qq -e trace=execve,wait4,openat -T -o "$TONARI_TRACE_OUT" "$TONARI_TRACE_SHELL" "$@" -ic ":"' /dev/null
+      done
+    fi
     ;;
   whole-editor)
-    python3 -m venv "$RUNNER_TEMP/editor-env"
-    python="$RUNNER_TEMP/editor-env/bin/python"
-    "$python" -m pip install pyte==0.8.2
     "$python" tests/review_whole_editor.py "$current" "$ref"
     "$python" tools/ci/whole-editor.py --shell "main=$baseline" --shell "candidate=$current" --shell "bash=$ref" --require candidate --runs 100 --output "$out/editor.jsonl" > "$out/editor.txt"
     "$python" tools/ci/whole-editor.py --shell "main=$baseline" --shell "candidate=$current" --require candidate --case picker-cancel --case picker-miss --case picker-match --runs 100 --output "$out/picker.jsonl" > "$out/picker.txt"
@@ -34,6 +47,10 @@ case "$SUITE" in
     fi
     python3 tools/bench_editor_input.py "$baseline" "$current" "$ref" --entries 100000 --runs 11 --mixed-history --case Ctrl-R --case Miss --case Tab --samples "$out/large-history.jsonl" > "$out/large-history.txt"
     python3 tools/bench_completion.py "$baseline" "$current" --bash "$ref" --command-cache --runs 15 > "$out/command-cache.txt"
+    ;;
+  whole-keys)
+    cases=(--case single-key --case single-emoji --case mid-insert --case mid-delete --case mid-backspace --case mid-left)
+    "$python" tools/ci/whole-editor.py --shell "main=$baseline" --shell "candidate=$current" --shell "bash=$ref" --require candidate "${cases[@]}" --runs 100 --output "$out/keys.jsonl" > "$out/keys.txt"
     ;;
   whole-language)
     python3 tools/ci/whole-language.py "$baseline" "$current" "$ref" > "$out/language.tsv"

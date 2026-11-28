@@ -26,6 +26,7 @@ import pyte
 PROMPT = "ED> "
 RIGHT = "TAIL"
 CASES = ("ascii", "ime", "multiline", "cancel", "split-home", "tab", "recall", "search-cancel")
+KEY_CASES = ("single-key", "single-emoji", "mid-insert", "mid-delete", "mid-backspace", "mid-left")
 PICKER_CASES = ("picker-miss", "picker-cancel", "picker-match")
 
 
@@ -79,14 +80,20 @@ class Display:
         before, after = self.caret_text()
         return before.endswith(left) and after.startswith(right)
 
-    def edit_complete(self, value, tail):
+    def edit_complete(self, value, tail, marker="EDITDONE"):
         # The head may have scrolled or been windowed. Every cell still on
         # screen must be a contiguous part of the expected text, on the correct
         # side of the caret. A terminal split inserts no character in the buffer.
         before, after = self.caret_text()
         visible = before.removeprefix(PROMPT).removeprefix("…")
         expected = value.replace("\n", "")
-        return visible.endswith("EDITDONE") and expected.endswith(visible) and after == tail
+        if not (visible.endswith(marker) and expected.endswith(visible) and after == tail):
+            return False
+        if before.startswith(PROMPT) and not before.startswith(PROMPT + "…"):
+            return visible == expected
+        # Scrolled or windowed input still fills multiple rows in these fixtures.
+        # A marker and caret alone can be correct while most input is missing.
+        return len(visible) >= min(len(expected), self.screen.columns)
 
     def observe(self, packet, ready, timeout=2.0):
         # Timestamp reads before interpreting ANSI. Drain the master and feed the
@@ -136,7 +143,22 @@ def sample(path, home, case):
     dims = (6, 36) if case == "split-home" else (24, 80)
     with terminal(path, home, *dims) as d:
         d.observe(b"", lambda: d.adjacent(PROMPT))
-        if case in PICKER_CASES:
+        if case in KEY_CASES:
+            left = "abc" if case.startswith("single") else "ab" * 2048 + "XYZ"
+            d.observe((left + RIGHT).encode(), lambda: d.adjacent(left[-3:] + RIGHT))
+            d.observe(b"\x02" * len(RIGHT), lambda: d.adjacent(left[-3:], RIGHT))
+            if case in ("single-key", "single-emoji", "mid-insert"):
+                char = "😀" if case == "single-emoji" else "@"
+                key, left, right = char.encode(), left + char, RIGHT
+            elif case == "mid-delete":
+                key, right = b"\x04", RIGHT[1:]
+            elif case == "mid-backspace":
+                key, left, right = b"\x7f", left[:-1], RIGHT
+            else:
+                key, left, right = b"\x02", left[:-1], left[-1] + RIGHT
+            result = d.observe(key, lambda: d.edit_complete(left, right, left[-3:]))
+            value = left + right
+        elif case in PICKER_CASES:
             value = "pick unit"
             d.observe(b"pick \t\t", lambda: any("filter>" in line for line in d.lines))
             if case == "picker-cancel":
@@ -192,7 +214,7 @@ def sample(path, home, case):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--shell", action="append", required=True, metavar="LABEL=PATH")
-    parser.add_argument("--case", action="append", choices=CASES + PICKER_CASES,
+    parser.add_argument("--case", action="append", choices=CASES + PICKER_CASES + KEY_CASES,
                         help="picker cases apply to Tonari only")
     parser.add_argument("--require", action="append", default=[], metavar="LABEL",
                         help="exit unsuccessfully if a case for this shell fails")

@@ -868,8 +868,8 @@ impl Session {
             None => {
                 // In-process script reentry changes only PATH and directory/level
                 // variables. These inherited settings stay constant.
-                static INHERITED: [std::sync::OnceLock<Option<String>>; 6] =
-                    [const { std::sync::OnceLock::new() }; 6];
+                static INHERITED: [std::sync::OnceLock<Option<String>>; 7] =
+                    [const { std::sync::OnceLock::new() }; 7];
                 let slot = match name {
                     "HISTSIZE" => Some(0),
                     "HISTCONTROL" => Some(1),
@@ -877,6 +877,7 @@ impl Session {
                     "histchars" => Some(3),
                     "HOME" => Some(4),
                     "PROMPT_DIRTRIM" => Some(5),
+                    "TMOUT" => Some(6),
                     "IFS" => return Some(Cow::Borrowed(crate::word::DEFAULT_IFS)),
                     _ => None,
                 };

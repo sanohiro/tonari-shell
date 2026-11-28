@@ -433,11 +433,15 @@ fn apply_invocation_options(
         diagnostic!("SIGHUP: {e}");
         return Err(1);
     }
-    if session.interactive || invocation.options.monitor == Some(true) {
-        session.jobs.monitor = session.jobs.init(session.interactive);
+    if session.interactive {
+        session.jobs.monitor = session.jobs.init(true);
         if !session.jobs.monitor {
             diagnostic!("no job control in this shell");
         }
+    } else if invocation.options.monitor == Some(true) {
+        // Scripts can explicitly request process groups without owning a tty.
+        session.jobs.monitor = true;
+        session.jobs.init(false);
     }
     session.command_string = matches!(invocation.input, Input::Command(_));
     if !invocation.pretty

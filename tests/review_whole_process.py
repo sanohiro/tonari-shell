@@ -48,6 +48,14 @@ set -m; /usr/bin/printenv SHLVL & wait; echo "$SHLVL"
 TIMEFORMAT=; time ( /usr/bin/printenv SHLVL </dev/null )
 f(){ /usr/bin/printenv SHLVL </dev/null; }; ( f )
 """, "0\n7\n1\n0\n1\n1"
+    yield "background function on final command string line", (
+        'f(){ /usr/bin/printenv SHLVL; }; f & wait'), "0"
+    yield "background function with more command string input", (
+        'f(){ /usr/bin/printenv SHLVL; }; f &\nwait'), "1"
+    yield "nested and parenthesized function contexts", """
+g(){ /usr/bin/printenv SHLVL; }; f(){ g; }
+( g ); ( echo "$(g)" ); f & wait
+""", "1\n0\n1"
     yield "temporary redirects and shared reader", """
 exec 7<input; exec 8<&7; { IFS= read -ru8 a; : <&9; } 2>errors
 printf '%s/%s\n' "$?" "$a"; cat <&7; echo 'outside'
@@ -81,15 +89,34 @@ wait "$p"; echo "final=$?"
 """, "handled\ninterrupted=0\nfinal=7"
 
 
+def file_cases():
+    yield "script-file function eligibility", """
+f(){ /usr/bin/printenv SHLVL; }; g(){ :; /usr/bin/printenv SHLVL; }
+f & wait; g & wait
+""", "1\n0"
+
+
 def main():
-    for shell in map(lambda arg: Path(arg).resolve(), sys.argv[1:]):
-        for label, script, expected in cases():
+    for arg in sys.argv[1:]:
+        shell = Path(arg).resolve()
+        bash52 = subprocess.check_output([shell, "--version"]).startswith(b"GNU bash, version 5.2.")
+        inputs = [(case, False) for case in cases()] + [(case, True) for case in file_cases()]
+        for (label, script, expected), file_input in inputs:
+            # GNU 5.3 added async function-tail optimization. Older Bash
+            # keeps the intermediate shell for both forms.
+            if bash52 and label == "background function on final command string line":
+                expected = "1"
+            if bash52 and label == "script-file function eligibility":
+                expected = "1\n1"
             with tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 (root / "input").write_bytes(b"first\nsecond\n")
                 (root / "large").write_bytes(b"x" * 1024 * 1024)
-                p = subprocess.run([shell, "--noprofile", "--norc", "-c", script,
-                                    "check", sys.executable], cwd=root,
+                command = ["-c", script, "check"]
+                if file_input:
+                    (root / "script").write_text(script)
+                    command = ["script"]
+                p = subprocess.run([shell, "--noprofile", "--norc", *command, sys.executable], cwd=root,
                                    env=dict(PATH="/usr/bin:/bin", LC_ALL="C", HOME=tmp),
                                    capture_output=True, timeout=8)
                 want = (0, (expected + "\n").encode(), b"")

@@ -130,6 +130,11 @@ def main():
     parser.add_argument("candidate", type=Path)
     parser.add_argument("bash", type=Path)
     args = parser.parse_args()
+    partial = observer["Display"](-1, 24, 80)
+    partial.stream.feed(b"ED> EDITDONETAIL\x1b[4D")
+    assert not partial.edit_complete("abcdef" * 500 + "EDITDONE", "TAIL")
+    partial.stream.feed(b"\r\x1b[2KED> abcEDITDONETAIL\x1b[4D")
+    assert partial.edit_complete("abcEDITDONE", "TAIL")
     checks = (substitutions, completion_fields, wide_edits, word_movement, cache_rename,
               split_pane, resize, erase_grapheme, enter_ownership)
     for shell, candidate in ((args.bash, False), (args.candidate, True)):
