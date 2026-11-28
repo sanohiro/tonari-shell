@@ -29,6 +29,7 @@ def completion_witnesses(tonari, bash, home):
     (home / "zzmiddlelong").touch()
     (home / "zzlink").symlink_to("zzfile")
     (home / "zzdir/subdir").mkdir(parents=True)
+    (home / "localdir").mkdir()
     for name in ("case-dir", "case_dir"):
         (home / name).mkdir()
     for name in ("Fold-first", "Fold-second", "case-word", "case_file", "ignore-old.bak", "ignore-only"):
@@ -64,8 +65,11 @@ snapshot() { printf '\\n<draft>%s</draft>\\n' "$READLINE_LINE"; READLINE_LINE=; 
 bind -x '"\\C-t":snapshot'
 choose() { printf '%s\\n' "$1|$2|$3|$COMP_CWORD|$COMP_LINE|$COMP_POINT|${COMP_WORDS[*]}" >ctx; COMPREPLY=(selected); }
 complete -F choose abc
-remote_dir() { COMPREPLY=(remote/); }
-complete -o filenames -F remote_dir remote_cmd
+literal_directory() { COMPREPLY=(localdir/); }
+no_replies() { COMPREPLY=(); }
+complete -o filenames -F literal_directory literal_cmd
+complete -o plusdirs -F no_replies extra_cmd
+complete -o dirnames -F no_replies fallback_cmd
 """)
     for shell in (bash, tonari):
         with terminal(shell, home, f"{bindir}:{bindir}", rc, prompt=PROMPT) as fd:
@@ -94,7 +98,9 @@ complete -o filenames -F remote_dir remote_cmd
             if shell == tonari:
                 draft(": case-d", ": case-dir")
                 draft(': "${PROBE}"', ': "${PROBEAA}"', 2)
-            draft("remote_cmd rem", "remote_cmd remote/")
+            draft("literal_cmd loc", "literal_cmd localdir/")
+            draft("extra_cmd loc", "extra_cmd localdir")
+            draft("fallback_cmd loc", "fallback_cmd localdir")
             draft(": igno", ": ignore-only ")
 
 

@@ -109,7 +109,13 @@ f && echo "$x"'''
 zzF=""; zzG=(); declare -A zzH=(); declare -n zzI=zzA
 printf '<%s>' "${!zz@}"; echo; compgen -v zz
 declare -p zzA; zzA=now; compgen -v zzA'''
+        frames = """shopt -s extdebug
+outer() { inner x 'y z'; }
+inner() { declare -p BASH_ARGV BASH_ARGC; }
+outer a b"""
         for shell in (reference, candidate):
+            checked(shell, ["-c", frames], (0, b'declare -a BASH_ARGV=([0]="y z" [1]="x" [2]="b" [3]="a")\n'
+                                               b'declare -a BASH_ARGC=([0]="2" [1]="2" [2]="0")\n'))
             checked(shell, ["-c", scope], (0, b'declare -- x="inner"\ndeclare -- local_only="v"\nupdated\n'))
             checked(shell, ["-c", names], (0, b'<zzF><zzG><zzH><zzI>\nzzF\nzzG\nzzH\nzzI\ndeclare -- zzA\nzzA\n'))
             checked(shell, ["-c", listings], (0, b""))

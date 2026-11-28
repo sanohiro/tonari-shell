@@ -1130,15 +1130,15 @@ fn generate_for_tab(
     };
     let allows_default = spec.options.contains(CompOption::Default)
         || spec.options.contains(CompOption::Bashdefault);
+    let mut unmarked_directories = foldhash::HashSet::default();
     if spec.options.contains(CompOption::Plusdirs)
         || (words.is_empty() && spec.options.contains(CompOption::Dirnames))
     {
-        words.extend(complete::file_names(
-            prefix,
-            true,
-            !session.bindings.unmarked_dirs,
-            session,
-        ));
+        let extra = complete::file_names(prefix, true, !session.bindings.unmarked_dirs, session);
+        if session.bindings.unmarked_dirs {
+            unmarked_directories.extend(extra.iter().cloned());
+        }
+        words.extend(extra);
     }
     if words.is_empty() && allows_default {
         return None;
@@ -1165,8 +1165,17 @@ fn generate_for_tab(
         words.dedup();
     }
     let mut unmarked = Vec::new();
-    if filenames && (list || words.len() == 1 || words.iter().any(|w| w.contains('/'))) {
+    let check_files =
+        filenames && (list || words.len() == 1 || words.iter().any(|w| w.contains('/')));
+    if check_files || !unmarked_directories.is_empty() {
         for (index, word) in words.iter_mut().enumerate() {
+            if unmarked_directories.contains(word) {
+                unmarked.push(index);
+                continue;
+            }
+            if !check_files {
+                continue;
+            }
             let directory = word
                 .strip_prefix("~/")
                 .and_then(|rest| session.tilde_path(rest));
