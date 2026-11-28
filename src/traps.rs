@@ -895,6 +895,7 @@ pub(crate) fn finish_shell(session: &mut Session, code: u8, save_history: bool) 
         if save_history {
             crate::history::finish_interactive(session);
         }
+        session.jobs.restore_initial_group();
         return code;
     }
     let mut code = match dispatch(session, code) {
@@ -906,6 +907,7 @@ pub(crate) fn finish_shell(session: &mut Session, code: u8, save_history: bool) 
     if save_history {
         crate::history::finish_interactive(session);
     }
+    session.jobs.restore_initial_group();
     if sig != 0 {
         unsafe {
             libc::signal(sig, libc::SIG_DFL);

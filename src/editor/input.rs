@@ -106,6 +106,7 @@ pub(super) fn key_ready(session: &Session, millis: i32) -> io::Result<bool> {
 pub(super) struct Keys {
     pub(super) queued: VecDeque<u8>,
     expansions: usize,
+    pub(super) anchor_history: bool,
     sequence: Vec<u8>,
 }
 
@@ -316,6 +317,7 @@ impl Keys {
         };
         let (exact, mut longer) = session.bindings.lookup(&[first]);
         if !longer {
+            self.anchor_history = matches!(exact, Some(Binding::Edit(Action::PrefixUp | Action::PrefixDown))) && session.bindings.explicit(&[first]);
             return Ok((exact.unwrap_or(fallback), false));
         }
         let mut seq = std::mem::take(&mut self.sequence);
@@ -346,6 +348,7 @@ impl Keys {
             longer = prefix;
         }
         let (len, action) = best.unwrap_or((1, fallback));
+        self.anchor_history = matches!(action, Binding::Edit(Action::PrefixUp | Action::PrefixDown)) && session.bindings.explicit(&seq[..len]);
         // Preserve unmatched bytes when a custom sequence shares a prefix with ordinary typing.
         self.unread(&seq[len..]);
         let right = matches!(&seq[..len], b"\x1b[C" | b"\x1bOC");

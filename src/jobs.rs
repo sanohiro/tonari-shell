@@ -16,6 +16,7 @@ struct Terminal {
     fd: PrivateFile,
     // The owning shell and the process group to restore after a foreground job.
     shell_group: pid_t,
+    original_group: pid_t,
     owner: pid_t,
 }
 
@@ -486,6 +487,7 @@ impl Jobs {
             fd,
             owner,
             shell_group,
+            original_group: old,
         });
     }
     fn terminal(&self) -> Option<&Terminal> {
@@ -518,6 +520,9 @@ impl Jobs {
         } else {
             self.inherited.clear();
         }
+        if self.tty.is_some() {
+            crate::traps::reset_caught_signals(&[libc::SIGTSTP]);
+        }
         self.tty = None;
         self.foreground_notices.clear();
         self.monitor = false;
@@ -525,6 +530,21 @@ impl Jobs {
         self.detached.clear();
         self.serial = 0;
         self.finished.clear();
+    }
+    pub(crate) fn restore_initial_group(&self) {
+        if let Some(tty) = self.terminal()
+            && tty.shell_group != tty.original_group
+            && unsafe { libc::getpgrp() == tty.shell_group && libc::tcgetpgrp(tty.fd.as_raw_fd()) == tty.shell_group }
+            && unsafe { libc::setpgid(0, tty.original_group) } == 0
+        {
+            give_terminal(tty.fd.as_raw_fd(), tty.original_group);
+        }
+    }
+
+    pub(crate) fn detach_started(&mut self, pids: impl Iterator<Item = pid_t>) {
+        // A later segment's setup can fail after earlier processes have begun.
+        // Keep reaping those children without waiting for a stopped process.
+        self.detached.extend(pids);
     }
     pub fn restore(&self) {
         if let Some(t) = self.terminal() {

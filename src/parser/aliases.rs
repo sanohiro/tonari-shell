@@ -8,6 +8,8 @@ thread_local! {
     static CONTEXT: RefCell<Aliases> = const { RefCell::new(Aliases(None)) };
 }
 
+pub(super) fn resume(aliases: Aliases) { CONTEXT.replace(aliases); }
+
 pub(super) fn current() -> Aliases {
     CONTEXT.with_borrow(Clone::clone)
 }
@@ -209,12 +211,13 @@ impl Reader {
                 |s| s.span(i, self),
             )
         };
-        let mut physical = String::new();
+        let physical;
         if let Some(expanded) = &self.alias_source {
-            physical.push_str(&expanded.text);
-            physical.push_str(&self.source[expanded.original_byte..]);
+            let mut joined = expanded.text.clone();
+            joined.push_str(&self.source[expanded.original_byte..]);
+            physical = std::borrow::Cow::Owned(joined);
         } else {
-            physical.push_str(&self.source);
+            physical = std::borrow::Cow::Borrowed(self.source.as_ref());
         }
         let (start, end) = span(index);
         let mut suffix = &physical[end..];
@@ -236,7 +239,9 @@ impl Reader {
         let boundary = source.len();
         let old_boundary = physical.len() - suffix.len();
         source.push_str(suffix);
-        let (tokens, offsets, _) = with(nested, || lex(&source[start..], false, self.final_input))?;
+        let (tokens, offsets, _) = with(nested, || {
+            super::lexer::lex_joined(&source[start..], self.final_input, boundary-start, self.aliases.clone())
+        })?;
         let mut spans: Vec<_> = (0..index).map(span).collect();
         let boundaries: Vec<_> = self
             .alias_frames

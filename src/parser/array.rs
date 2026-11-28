@@ -108,11 +108,7 @@ impl Reader {
                             _ => {}
                         }
                     }
-                    return Err(if self.final_input {
-                        Error::Invalid("unfinished invalid array assignment")
-                    } else {
-                        Error::Incomplete(Incomplete::Message("unfinished array assignment"))
-                    });
+                    return Err(Error::ArrayToken);
                 }
             }
         }

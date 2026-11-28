@@ -458,6 +458,25 @@ fn word_end(s: &str, mut i: usize) -> usize {
     }
     i
 }
+#[derive(Clone, Default)]
+pub(crate) struct KillRing {
+    entries: std::collections::VecDeque<String>,
+}
+impl KillRing {
+    fn entry(&mut self, continuing: bool) -> &mut String {
+        if self.entries.is_empty() || !continuing {
+            const MAX_ENTRIES: usize = 16;
+            const MAX_RETAINED_BYTES: usize = 4 * 1024 * 1024;
+            let mut bytes: usize = self.entries.iter().map(String::len).sum();
+            while self.entries.len() >= MAX_ENTRIES || bytes > MAX_RETAINED_BYTES {
+                bytes -= self.entries.pop_back().unwrap().len();
+            }
+            self.entries.push_front(String::new());
+        }
+        self.entries.front_mut().unwrap()
+    }
+}
+
 pub enum Start<'a> {
     Command(String),
     Read { initial: &'a str, files_only: bool },
@@ -476,6 +495,7 @@ struct EditorState {
     scratch: String,
     overwrite: bool,
     killing: bool,
+    yank: Option<(usize, usize)>,
     motion: bool,
     appended: Option<usize>,
     erased: Option<usize>,
@@ -538,7 +558,7 @@ impl EditorState {
         } else if let Some(start) = self.appended.take()
             && cursor == text.len() && !searching && screen.can_append(&text[start..])
             && (start == 0 || text[start..].is_ascii() || previous(text, next(text, start)) == start)
-            && text.len().saturating_add(hint.len()) < VIEWPORT_THRESHOLD
+            && (!screen.had_hint || text.len().saturating_add(hint.len()) < VIEWPORT_THRESHOLD)
             && (screen.had_hint || screen.tail.is_some() && hint.is_empty())
         {
             if screen.had_hint {
@@ -734,6 +754,7 @@ pub fn line(
             && let Some(found) =
                 search.update(&text, history, session, &mut view, &|| keys.input_pending())
         {
+            if !search.query.is_empty() { history.last_search.clone_from(&search.query); }
             text = found;
             cursor = text.len();
             screen.draw(visible_prompt, &text, cursor, "")?;
@@ -776,6 +797,7 @@ pub fn line(
         // Ordinary committed text can bypass key-sequence and editing-action dispatch.
         if search.is_none() && unbound_text(first, session) {
             edit.killing = false;
+            edit.yank = None;
             edit.last_argument = None;
             recall.edited(session.history_lines().len());
             let start = cursor;
@@ -788,6 +810,7 @@ pub fn line(
         }
         let (binding, right_arrow) = read_key!(keys.binding(first, session));
         let action = match binding {
+            Binding::Removed if first == 27 && search.is_some() => Action::End,
             Binding::Removed => {
                 vi = vi::State::default();
                 continue;
@@ -820,6 +843,7 @@ pub fn line(
             }
             Binding::Edit(a) => a,
         };
+        if !matches!(action, Action::Yank | Action::YankPop) { edit.yank = None; }
         if action != Action::LastArg {
             edit.last_argument = None;
         }
@@ -873,6 +897,7 @@ pub fn line(
                         && let Ok(Some(found)) =
                             history.find_command(session, &mut view, &state.pending, &|| false)
                     {
+                        if !state.query.is_empty() { history.last_search.clone_from(&state.query); }
                         text = found;
                     }
                     if text != state.original {
@@ -882,6 +907,11 @@ pub fn line(
                     cursor = text.len();
                 }
                 _ => {
+                    if action == Action::Search && state.query.is_empty() && !history.last_search.is_empty() {
+                        state.query.clone_from(&history.last_search);
+                        state.queue(None);
+                        continue;
+                    }
                     let mut partial = Vec::new();
                     let shortest = read_key!(state.edit_query(
                         action,
@@ -892,32 +922,23 @@ pub fn line(
                         |bytes| screen.paste_frame(visible_prompt, "", 0, bytes)
                     ));
                     if state.wants_picker(action) {
-                        let selected = picker::history(
-                            state.query.clone(),
+                        let selected = read_key!(picker::history(
+                            &mut state.query,
                             history,
                             session,
                             &mut keys,
                             &mut screen,
-                        );
+                        ));
                         match selected {
-                            Ok(Some(command)) => {
+                            Some(command) => {
                                 edit.undo = Undo::default();
                                 text = command;
                                 cursor = text.len();
                             }
-                            Ok(None) => {
+                            None => {
                                 text = std::mem::take(&mut state.original);
                                 cursor = state.original_cursor;
                             }
-                            Err(e) if e.kind() == io::ErrorKind::Interrupted => {
-                                if session.traps.read_pending() {
-                                    continue;
-                                }
-                                screen.draw(prompt, &state.original, state.original_cursor, "")?;
-                                io::stderr().write_all(b"\r\n")?;
-                                return Ok(Input::Cancel);
-                            }
-                            Err(e) => return Err(e),
                         }
                         search = None;
                         last_tab = false;
@@ -1063,9 +1084,21 @@ pub fn line(
                 &mut cursor,
                 &mut mark,
             ),
-            Action::Yank => edit
-                .undo
-                .insert(&mut text, &mut cursor, &session.editor_kill),
+            Action::Yank => {
+                if let Some(value) = session.editor_kill.entries.front() {
+                    edit.yank = Some((cursor, 0));
+                    edit.undo.insert(&mut text, &mut cursor, value);
+                }
+            }
+            Action::YankPop => {
+                if let Some((start, index)) = edit.yank && !session.editor_kill.entries.is_empty() {
+                    let next = (index + 1) % session.editor_kill.entries.len();
+                    let value = &session.editor_kill.entries[next];
+                    edit.undo.replace(&mut text, start..cursor, value, cursor);
+                    cursor = start + value.len();
+                    edit.yank = Some((start, next));
+                }
+            }
             Action::Mark => mark = text[..cursor].chars().count(),
             Action::SwapMark => {
                 let p = char_offset(&text, mark);
@@ -1176,7 +1209,7 @@ pub fn line(
             | Action::Down
             | Action::FirstHistory
             | Action::LastHistory => {
-                recall.navigate(action, session.history_lines(), &mut text, &mut cursor);
+                recall.navigate(action, session.history_lines(), &mut text, &mut cursor, keys.anchor_history);
                 if recall.position() != history_position {
                     edit.undo = Undo::default();
                 }

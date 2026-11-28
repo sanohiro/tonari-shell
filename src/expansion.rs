@@ -294,20 +294,13 @@ impl<'a> Expansion<'a> {
     }
 
     pub fn capture(&mut self, body: Vec<Statement>) -> Result<String, &'static str> {
-        let mut overridden;
-        let session = if !self.has_pending_assignments() {
-            &mut *self.session
-        } else {
-            let mut copy = self.session.clone();
-            copy.bind(self.assignments);
-            overridden = copy;
-            &mut overridden
-        };
-        let (value, status) = crate::capture_substitution(
-            session,
-            body,
-            self.captured.get().unwrap_or(self.initial),
-        )?;
+        let status = self.captured.get().unwrap_or(self.initial);
+        let bindings = (!self.assignments.is_empty()).then(|| self.session.bind(self.assignments));
+        let result = crate::capture_substitution(self.session, body, status);
+        if let Some(bindings) = bindings {
+            self.session.restore(bindings);
+        }
+        let (value, status) = result?;
         self.captured.set(Some(status));
         Ok(value)
     }
@@ -389,7 +382,7 @@ impl<'a> Expansion<'a> {
         Ok(ArrayItems::Indexed(items))
     }
 
-    fn expanded_key(&mut self, source: &str) -> Result<String, Error> {
+    pub(crate) fn expanded_key(&mut self, source: &str) -> Result<String, Error> {
         if let Some(rest) = source.strip_prefix("~/")
             && !rest.contains(['$', '`', '"', '\'', '\\'])
             && let Some(mut home) = self.lookup("HOME")

@@ -276,6 +276,7 @@ pub struct Session {
     // original process environment without building a copy on startup.
     variables: Variables,
     inherited_names: std::cell::OnceCell<Rc<Vec<String>>>,
+    inherited_path: std::cell::OnceCell<OsString>,
     dynamic: dynamic::Dynamic,
     groups_unset: bool,
     funcname_unset: bool,
@@ -358,7 +359,7 @@ pub struct Session {
     function_environment: HashMap<String, functions::Export>,
     pub loop_depth: u32,
     pub parent_loop_in_subshell: bool,
-    pub editor_kill: String,
+    pub editor_kill: crate::editor::KillRing,
     pub editor_queue: std::collections::VecDeque<u8>,
     pub bindings: crate::editor::bindings::Bindings,
     pub disabled_builtins: std::collections::BTreeSet<String>,
@@ -672,6 +673,16 @@ impl Session {
 
     pub fn reference_name<'a>(&self, name: &'a str) -> Result<Cow<'a, str>, &'static str> {
         self.scoped_reference_name(name, false)
+    }
+
+    pub(crate) fn read_reference_name<'a>(&self, name: &'a str) -> Option<Cow<'a, str>> {
+        match self.reference_name(name) {
+            Ok(target) => Some(target),
+            Err(error) => {
+                diagnostic!("warning: {name}: {error}");
+                None
+            }
+        }
     }
 
     fn scoped_reference_name<'a>(
@@ -1516,6 +1527,11 @@ impl Session {
                 };
                 self.shopt.glob.set_ignore(value);
             }
+            if matches!(name.as_str(), "HISTSIZE" | "HISTFILESIZE") {
+                let value = original.as_ref().and_then(|v| v.value.as_deref()).map(Cow::Borrowed)
+                    .or_else(|| original.is_none().then(|| std::env::var(&name).ok().map(Cow::Owned)).flatten());
+                if let Some(value) = value { self.apply_history_limit(&name, &value); }
+            }
             if name == "PATH" {
                 self.hashes.clear();
             }
@@ -1567,14 +1583,15 @@ impl Session {
             )
     }
 
-    pub fn search_path(&self, assignments: &[(String, String)]) -> OsString {
+    pub fn search_path<'a>(&'a self, assignments: &'a [(String, String)]) -> &'a std::ffi::OsStr {
         if let Some((_, path)) = assignments.iter().rev().find(|(k, _)| k == "PATH") {
-            return path.into();
+            return path.as_ref();
         }
         if let Some(var) = self.variables.get("PATH") {
-            return var.value.as_deref().unwrap_or("").into();
+            return var.value.as_deref().unwrap_or("").as_ref();
         }
-        std::env::var_os("PATH").unwrap_or_else(|| self.get("PATH").unwrap().into())
+        self.inherited_path.get_or_init(|| std::env::var_os("PATH")
+            .unwrap_or_else(|| self.get("PATH").unwrap_or_default().into())).as_os_str()
     }
 
     pub fn line(&self) -> usize {

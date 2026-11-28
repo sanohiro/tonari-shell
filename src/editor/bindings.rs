@@ -82,6 +82,7 @@ actions! {
     RubWord => "unix-word-rubout" [b"\x17"],
     Undo => "undo" [b"\x18\x15", b"\x1f"],
     LastArg => "yank-last-arg" [b"\x1b.", b"\x1b_"],
+    YankPop => "yank-pop" [b"\x1by"],
     Yank => "yank" [b"\x19"],
 }
 
@@ -277,6 +278,9 @@ impl Bindings {
         self.keys[self.map as usize]
             .as_deref()
             .is_some_and(|keys| keys.starts_with(byte))
+    }
+    pub(super) fn explicit(&self, seq: &[u8]) -> bool {
+        self.keys[self.map as usize].as_ref().is_some_and(|table| table.sequences.contains_key(seq))
     }
     pub(super) fn lookup(&self, seq: &[u8]) -> (Option<Binding>, bool) {
         let (mut exact, mut longer) = (None, false);

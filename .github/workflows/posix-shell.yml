@@ -47,6 +47,9 @@ jobs:
       - run: |
           chmod +x bin/tonari
           python3 tests/shell.py bin/tonari -q
+          for suite in tests/review_{builtins,interactive,language,runtime}.py; do
+            python3 "$suite" "$PWD/bin/tonari" /bin/bash
+          done
           python3 tests/compat/source_review.py /bin/bash bin/tonari --runs 0
 
   compare:

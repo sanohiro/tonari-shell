@@ -39,11 +39,11 @@ impl Listing {
     fn visit_prefix(
         &self,
         prefix: &[u8],
+        editing: bool,
         visit: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
     ) -> ControlFlow<()> {
         let mut all = 0;
         let mut link = prefix.first().map_or(0, |&first| self.heads[usize::from(first)]);
-        let editing = crate::editor::preview::active();
         let mut visited = 0usize;
         while link != 0 || prefix.is_empty() && all < self.index.len() {
             let entry = if prefix.is_empty() {
@@ -107,6 +107,7 @@ pub(super) fn scan(
     path: &Path,
     prefix: &[u8],
     checked_fd: &mut bool,
+    editing: bool,
     visit: &mut impl FnMut(Option<&CStr>, u8) -> ControlFlow<()>,
 ) -> ControlFlow<()> {
     let Ok(meta) = path.metadata() else {
@@ -138,7 +139,7 @@ pub(super) fn scan(
                     }
                     *checked_fd = true;
                 }
-                return listing.visit_prefix(prefix, visit);
+                return listing.visit_prefix(prefix, editing, visit);
             }
             cache.directories.swap_remove(i);
         }

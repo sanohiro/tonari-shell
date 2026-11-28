@@ -77,7 +77,12 @@ def main():
         if not args.runs:
             return
         (root / "lines").write_text(("abcdefgh " * 100 + "\n") * 1200)
+        (root / "child").mkdir()
+        (root / "many.sh").write_text("batch() {\n" + "  x=hello; [ -n \"$x\" ];\n" * 1500 + "}\nbatch\n")
         benchmarks = {
+            "physical cd between directories": 'for ((i=0;i<400;i++)); do cd -P child && cd -P .. || exit 1; done',
+            "parse and run function from stdin": None,
+            "growing shell strings": 'v=; for ((i=0;i<2000;i++)); do v+=abcdefghijklmnop; done; [[ ${#v} == 32000 ]]',
             "read 1 MiB lines": 'while IFS= read x; do :; done < lines',
             "mapfile 1200 lines with count": 'mapfile -t -n1200 a <lines; echo "${#a[@]}"',
             "format repeated integers": "for ((i=0;i<5000;i++)); do printf '%08d' 123; done >/dev/null",
@@ -91,8 +96,13 @@ def main():
                 for i in range(len(shells)):
                     idx = (trial+i) % len(shells)
                     start = time.perf_counter_ns()
-                    out = run(shells[idx], "--noprofile", "--norc", "-c", script,
-                              extra={"BASH_ENV": str(setup)} if label.startswith("startup") else None)
+                    if script is None:
+                        with (root / "many.sh").open("rb") as source:
+                            out = subprocess.run([shells[idx], "--noprofile", "--norc"], cwd=root, env=env,
+                                                 stdin=source, capture_output=True, timeout=15)
+                    else:
+                        out = run(shells[idx], "--noprofile", "--norc", "-c", script,
+                                  extra={"BASH_ENV": str(setup)} if label.startswith("startup") else None)
                     elapsed = (time.perf_counter_ns() - start) / 1e6
                     assert out.returncode == 0 and not out.stderr, out
                     if label.startswith("mapfile"):

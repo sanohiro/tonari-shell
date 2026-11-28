@@ -256,6 +256,7 @@ pub(super) fn interactive_loop(
             }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {
                 stderr_line!();
+                if session.traps.read_pending() { continue; }
                 source.clear();
                 if traps::pending().is_none() {
                     status = 130;

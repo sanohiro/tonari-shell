@@ -1170,11 +1170,7 @@ pub fn run_pipeline(
         {
             drop(input);
             session.jobs.restore();
-            for stage in stages {
-                if let Some(pid) = stage.pid() {
-                    let _ = wait(pid);
-                }
-            }
+            session.jobs.detach_started(stages.iter().filter_map(|stage| stage.pid()));
             return Ok(flow);
         }
         let stage = (|| {
@@ -1217,16 +1213,7 @@ pub fn run_pipeline(
             }
             Err(e) => {
                 drop(input);
-                for stage in &stages {
-                    if let Some(pid) = stage.pid() {
-                        unsafe { libc::kill(pid, libc::SIGKILL) };
-                    }
-                }
-                for stage in stages {
-                    if let Some(pid) = stage.pid() {
-                        let _ = wait(pid);
-                    }
-                }
+                session.jobs.detach_started(stages.iter().filter_map(|stage| stage.pid()));
                 session.jobs.restore();
                 return Err(e);
             }

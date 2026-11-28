@@ -85,8 +85,9 @@ impl Session {
                 text.push(b' ');
             }
         } else if let Some(array) = var.elements.as_deref() {
+            let mut buffer = itoa::Buffer::new();
             for (index, value) in array.iter() {
-                add(&index.to_string(), value);
+                add(buffer.format(index), value);
             }
         }
         if !text.is_empty() {

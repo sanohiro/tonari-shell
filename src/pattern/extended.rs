@@ -781,46 +781,67 @@ pub(crate) fn insensitive_match(
     })
 }
 
-pub(crate) fn insensitive_session(
-    value: &str,
-    pattern: &str,
-    extended: bool,
-    session: &crate::Session,
-) -> bool {
+#[derive(Debug)]
+pub(crate) enum Compiled {
+    Basic(Matcher<String>),
+    Extended(Pattern),
+}
+
+impl Compiled {
+    pub(crate) fn new(source: &str, extended: bool) -> Self {
+        if extended && has_group(source) { Self::Extended(Pattern::parse(source,true)) }
+        else { Self::Basic(Matcher::new(source.to_owned())) }
+    }
+
+    pub(crate) fn accepts(&self, value: &str) -> bool {
+        match self {
+            Self::Basic(p) => p.matches(value),
+            Self::Extended(p) => p.accepts(value,false),
+        }
+    }
+}
+
+pub(crate) fn session_match(value: &str, source: &str, extended: bool, session: &crate::Session) -> bool {
+    let fold = session.shopt.nocasematch.then(|| session.character_locale());
+    if let Some(fold) = fold {
+        return insensitive_match_with(value, source, extended, fold, || {
+            cached_match(value,source,extended,Some(fold),session)
+        });
+    }
+    cached_match(value,source,extended,None,session)
+}
+
+pub(crate) fn insensitive_session(value: &str, source: &str, extended: bool, session: &crate::Session) -> bool {
+    session_match(value,source,extended,session)
+}
+
+fn cached_match(value: &str, source: &str, extended: bool, fold: Option<super::CharacterLocale>, session: &crate::Session) -> bool {
     struct Entry {
         source: String,
         extended: bool,
-        fold: super::CharacterLocale,
+        fold: Option<super::CharacterLocale>,
         locale: Option<std::rc::Rc<super::PatternLocale>>,
-        matcher: Pattern,
+        ascii_ranges: bool,
+        matcher: Compiled,
     }
-    thread_local! {static LAST: std::cell::RefCell<Option<Entry>> = const {std::cell::RefCell::new(None)};}
-    let fold = session.character_locale();
-    insensitive_match_with(value, pattern, extended, fold, || {
-        let locale = super::session_locale(session);
-        let _guard = locale.as_ref().and_then(|l| l.enter());
-        if !session.shopt.globasciiranges || pattern.len() > 4096 {
-            return Pattern::insensitive(pattern, extended, fold).accepts(value, false);
+    const LIMIT: usize = 12;
+    thread_local! {static RECENT: std::cell::RefCell<Vec<Entry>> = const {std::cell::RefCell::new(Vec::new())};}
+    let locale = (source.contains(['[','?']) || fold.is_some()).then(|| super::session_locale(session)).flatten();
+    let _guard = locale.as_ref().and_then(|l| l.enter());
+    let compile = || if let Some(fold) = fold { Compiled::Extended(Pattern::insensitive(source,extended,fold)) } else { Compiled::new(source,extended) };
+    if source.len() > 4096 {
+        return compile().accepts(value);
+    }
+    RECENT.with_borrow_mut(|recent| {
+        if let Some(entry) = recent.iter().rev().find(|e| e.source == source && e.extended == extended && e.fold == fold && e.ascii_ranges == session.shopt.globasciiranges &&
+            e.locale.as_ref().map(std::rc::Rc::as_ptr) == locale.as_ref().map(std::rc::Rc::as_ptr)) {
+            return entry.matcher.accepts(value);
         }
-        LAST.with_borrow_mut(|last| {
-            let matches = last.as_ref().is_some_and(|old| {
-                old.extended == extended
-                    && old.source == pattern
-                    && old.fold == fold
-                    && old.locale.as_ref().map(std::rc::Rc::as_ptr)
-                        == locale.as_ref().map(std::rc::Rc::as_ptr)
-            });
-            if !matches {
-                *last = Some(Entry {
-                    source: pattern.into(),
-                    extended,
-                    fold,
-                    locale,
-                    matcher: Pattern::insensitive(pattern, extended, fold),
-                });
-            }
-            last.as_ref().unwrap().matcher.accepts(value, false)
-        })
+        let matcher=compile();
+        let yes=matcher.accepts(value);
+        if recent.len() == LIMIT { recent.remove(0); }
+        recent.push(Entry {source:source.into(),extended,fold,locale,ascii_ranges:session.shopt.globasciiranges,matcher});
+        yes
     })
 }
 

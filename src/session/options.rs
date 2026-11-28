@@ -108,11 +108,12 @@ pub(super) struct OptionEntry {
     pub name: &'static str,
     read: fn(&Session) -> bool,
     write: Option<fn(&mut Session) -> &mut bool>,
+    compat: Option<u8>,
 }
 
 macro_rules! option_entry {
     ($name:literal, $($field:ident).+) => {
-        OptionEntry { name: $name, read: |s| s.$($field).+, write: Some(|s| &mut s.$($field).+) }
+        OptionEntry { name: $name, read: |s| s.$($field).+, write: Some(|s| &mut s.$($field).+), compat: None }
     };
 }
 
@@ -122,6 +123,7 @@ macro_rules! compat_entry {
         OptionEntry {
             name: $name,
             read: |s| s.shopt.compat == $level,
+            compat: Some($level),
             write: None,
         }
     };
@@ -133,6 +135,23 @@ macro_rules! set_options {
     ($( $name:literal $( ( $short:literal ) )? => $($field:ident).+ ),+ $(,)?) => {
         const SET_OPTIONS: &[OptionEntry] = &[$(option_entry!($name, $($field).+)),+];
         const _: () = assert!(SET_OPTIONS.len() <= 31);
+        impl Session {
+            pub(crate) fn short_option_name(flag: char) -> Option<&'static str> {
+                match flag {
+                    $( $( $short => Some($name), )? )+
+                    _ => None,
+                }
+            }
+            fn short_enabled(&self, flag: char) -> bool {
+                $( set_options!(@read self, flag, $($field).+ $(, $short)?); )+
+                match flag {
+                    'i' => self.interactive,
+                    'c' => self.command_string,
+                    's' => self.stdin_script,
+                    _ => false,
+                }
+            }
+        }
         fn set_short_option(s: &mut Session, flag: char, enabled: bool) -> bool {
             $( set_options!(@apply s, flag, enabled, $($field).+ $(, $short)?); )+
             false
@@ -145,6 +164,10 @@ macro_rules! set_options {
             bits
         }
     };
+    (@read $s:ident, $flag:ident, $($field:ident).+, $short:literal) => {
+        if $flag == $short { return $s.$($field).+; }
+    };
+    (@read $s:ident, $flag:ident, $($field:ident).+) => {};
     (@apply $s:ident, $flag:ident, $enabled:ident, $($field:ident).+, $short:literal) => {
         if $flag == $short { $s.$($field).+ = $enabled; return true; }
     };
@@ -158,14 +181,14 @@ set_options! {
     "errtrace" ('E') => errtrace,
     "functrace" ('T') => functrace,
     "hashall" ('h') => hashes.enabled,
-    "histexpand" => histexpand,
+    "histexpand" ('H') => histexpand,
     "history" => history_enabled,
     "ignoreeof" => ignoreeof,
     "interactive-comments" => shopt.interactive_comments,
     "keyword" ('k') => keyword,
     "monitor" ('m') => jobs.monitor,
     "noclobber" ('C') => noclobber,
-    "noexec" => noexec,
+    "noexec" ('n') => noexec,
     "noglob" ('f') => noglob,
     "nolog" => shopt.nolog,
     "notify" ('b') => notify,
@@ -225,6 +248,7 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("localvar_unset", shopt.localvar_unset),
     OptionEntry {
         name: "login_shell",
+        compat: None,
         read: |s| s.login,
         write: None,
     },
@@ -236,7 +260,7 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("progcomp", shopt.progcomp),
     option_entry!("progcomp_alias", shopt.progcomp_alias),
     option_entry!("promptvars", shopt.promptvars),
-    OptionEntry { name: "restricted_shell", read: |_| false, write: None },
+    OptionEntry { name: "restricted_shell", compat: None, read: |_| false, write: None },
     option_entry!("shift_verbose", shopt.shift_verbose),
     option_entry!("sourcepath", shopt.sourcepath),
     option_entry!("varredir_close", shopt.varredir_close),
@@ -277,13 +301,11 @@ impl Session {
 
     // Only the seven registered shopt names are accepted; numeric levels also
     // exist for releases without a corresponding option.
-    fn toggle_compat(&mut self, name: &str, enable: bool) {
-        let digits = &name["compat".len()..];
+    fn toggle_compat(&mut self, level: u8, enable: bool) {
         if enable {
-            self.assign("BASH_COMPAT", digits);
+            self.assign("BASH_COMPAT", itoa::Buffer::new().format(level));
         } else {
             let active = self.shopt.compat;
-            let level = digits.parse::<u8>().unwrap();
             self.assign(
                 "BASH_COMPAT",
                 &if level == active {
@@ -442,10 +464,9 @@ impl Session {
             if let Some(list) = list {
                 for name in list.split(':') {
                     if !set
-                        && name.starts_with("compat")
-                        && SHOPT_OPTIONS.iter().any(|entry| entry.name == name)
+                        && let Some(level) = SHOPT_OPTIONS.iter().find(|entry| entry.name == name).and_then(|entry| entry.compat)
                     {
-                        self.toggle_compat(name, true);
+                        self.toggle_compat(level, true);
                     } else if let Some(value) = self.option_value(name, set) {
                         *value = true;
                         if set {
@@ -514,8 +535,8 @@ impl Session {
             };
             let name = entry.name;
             if !all && (enable || disable) {
-                if !set && name.starts_with("compat") {
-                    self.toggle_compat(name, enable);
+                if !set && let Some(level) = entry.compat {
+                    self.toggle_compat(level, enable);
                 } else if let Some(write) = entry.write {
                     if name == "hostcomplete" && !set && !self.word_breaks_unset {
                         let breaks = self.completion_breaks();
@@ -570,74 +591,7 @@ impl Session {
 
 impl Session {
     pub fn option_flags(&self) -> String {
-        let mut flags = String::new();
-        if self.allexport {
-            flags.push('a');
-        }
-        if self.notify {
-            flags.push('b');
-        }
-        if self.errexit {
-            flags.push('e');
-        }
-        if self.noglob {
-            flags.push('f');
-        }
-        if self.hashes.enabled {
-            flags.push('h');
-        }
-        if self.interactive {
-            flags.push('i');
-        }
-        if self.keyword {
-            flags.push('k');
-        }
-        if self.jobs.monitor {
-            flags.push('m');
-        }
-        if self.noexec {
-            flags.push('n');
-        }
-        if self.privileged {
-            flags.push('p');
-        }
-        if self.onecmd {
-            flags.push('t');
-        }
-        if self.nounset {
-            flags.push('u');
-        }
-        if self.verbose {
-            flags.push('v');
-        }
-        if self.xtrace {
-            flags.push('x');
-        }
-        if self.shopt.braceexpand {
-            flags.push('B');
-        }
-        if self.noclobber {
-            flags.push('C');
-        }
-        if self.errtrace {
-            flags.push('E');
-        }
-        if self.histexpand {
-            flags.push('H');
-        }
-        if self.physical {
-            flags.push('P');
-        }
-        if self.functrace {
-            flags.push('T');
-        }
-        if self.command_string {
-            flags.push('c');
-        }
-        if self.stdin_script {
-            flags.push('s');
-        }
-        flags
+        "abefhikmnptuvxBCEHPTcs".chars().filter(|&flag| self.short_enabled(flag)).collect()
     }
 
     pub fn set(&mut self, words: &mut Vec<String>) -> u8 {

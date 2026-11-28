@@ -787,7 +787,7 @@ fn visit_commands(
             ControlFlow::Continue(())
         };
         if position < command_cache::MAX_DIRECTORIES {
-            command_cache::scan(path, prefix.as_bytes(), &mut checked_fd, &mut candidate)?;
+            command_cache::scan(path, prefix.as_bytes(), &mut checked_fd, editing, &mut candidate)?;
         } else {
             scan(path, prefix.as_bytes(), &mut candidate)?;
         }

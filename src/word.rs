@@ -342,14 +342,19 @@ impl Word {
                 && let Some(reference) = name.strip_prefix('!')
                 && env.session.is_nameref(reference)
             {
-                let target = env.session.reference_name(reference)?.into_owned();
+                let target = env.session.read_reference_name(reference).unwrap_or_default().into_owned();
                 *part = literal(target, *quoted);
                 continue;
             }
             if let Part::Parameter { name, .. } = part
                 && env.session.is_nameref(name)
             {
-                let target = env.session.reference_name(name)?;
+                let Some(target) = env.session.read_reference_name(name) else {
+                    if env.session.nounset { return Err(env.missing(name, "unbound variable")); }
+                    let quoted = matches!(part, Part::Parameter { quoted: true, .. });
+                    *part = literal(String::new(), quoted);
+                    continue;
+                };
                 if array_elements_name(&target).is_some() {
                     *name = target.into_owned().into();
                 }

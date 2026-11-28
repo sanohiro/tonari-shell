@@ -1211,6 +1211,10 @@ pub(super) fn lex_initializer(source: &str) -> Result<Lexed<'_>, Error> {
     lex_words(source, false, true, Some(1), false)
 }
 
+pub(super) fn lex_joined(source: &str, final_input: bool, boundary: usize, aliases: crate::alias::Aliases) -> Result<Lexed<'_>, Error> {
+    super::with_source_lines(source, || scan(source, false, final_input, None, false, Some((boundary, aliases))))
+}
+
 fn lex_words(
     source: &str,
     substitution: bool,
@@ -1225,6 +1229,7 @@ fn lex_words(
             final_input,
             array_level,
             brace_substitution,
+            None,
         )
     })
 }
@@ -1463,11 +1468,12 @@ fn scan_word(
             '{' => {
                 pattern_context = true;
                 let tail = chars.as_str();
-                if let Some((inner, after)) = tail.split_once('}')
-                    && let Some(range) = crate::word::brace::Range::parse(inner)
+                if let Some(end) = tail.bytes().position(|b| !b.is_ascii_alphanumeric() && !matches!(b,b'+'|b'-'|b'.'))
+                    && tail.as_bytes()[end] == b'}'
+                    && let Some(range) = crate::word::brace::Range::parse(&tail[..end])
                 {
                     word.part(Part::Range(Box::new(range)));
-                    *chars = after.chars();
+                    *chars = tail[end+1..].chars();
                 } else {
                     word.part(Part::Brace("{"));
                     braces += 1;
@@ -1581,6 +1587,7 @@ fn scan(
     final_input: bool,
     mut array_level: Option<usize>,
     brace_substitution: bool,
+    mut resume_aliases: Option<(usize, crate::alias::Aliases)>,
 ) -> Result<Lexed<'_>, Error> {
     let mut chars = source.chars();
     let mut parentheses = 0usize;
@@ -1615,6 +1622,10 @@ fn scan(
     let mut token_start = 0;
     while let Some(c) = chars.peek() {
         let offset = source.len() - chars.as_str().len();
+        if resume_aliases.as_ref().is_some_and(|(boundary, _)| offset >= *boundary)
+            && let Some((_, live)) = resume_aliases.take() {
+            super::aliases::resume(live);
+        }
         spans.resize(tokens.len(), (token_start, offset));
         token_start = offset;
         if matches!(c, ' ' | '\t') {

@@ -250,7 +250,7 @@ pub(super) fn choose(
 }
 
 pub(super) fn history(
-    mut query: String,
+    query: &mut String,
     history: &crate::history::History,
     session: &Session,
     keys: &mut Keys,
@@ -269,7 +269,7 @@ pub(super) fn history(
                 "history> ",
                 std::iter::empty(),
                 0,
-                &query,
+                query,
                 "(searching)",
             );
             io::stderr().write_all(screen.output.as_bytes())?;
@@ -278,20 +278,20 @@ pub(super) fn history(
         let waiting = || keys.input_pending();
         if refresh {
             filter.rewind(session);
-            filter.fill(session, &query, 1, waiting);
+            filter.fill(session, query, 1, waiting);
             if let Some(first) = filter.hits.first() {
                 draw(
                     screen,
                     "history> ",
                     std::iter::once(first.as_ref()),
                     0,
-                    &query,
+                    query,
                     "",
                 );
                 io::stderr().write_all(screen.output.as_bytes())?;
             }
         }
-        filter.fill(session, &query, wanted, waiting);
+        filter.fill(session, query, wanted, waiting);
         if filter.exhausted() {
             selected = selected.min(filter.hits.len().saturating_sub(1));
         }
@@ -307,7 +307,7 @@ pub(super) fn history(
             "history> ",
             page,
             selected - offset,
-            &query,
+            query,
             if filter.exhausted() {
                 "(no matches)"
             } else {
@@ -322,12 +322,12 @@ pub(super) fn history(
         let key = if first == 18 {
             Key::Down
         } else {
-            read_key(first, keys, session, &mut query)?
+            read_key(first, keys, session, query)?
         };
         match key {
             Key::Cancel => return Ok(None),
             Key::Accept => {
-                filter.fill(session, &query, selected + 1, || {
+                filter.fill(session, query, selected + 1, || {
                     crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
                 });
                 selected = selected.min(filter.hits.len().saturating_sub(1));

@@ -60,9 +60,25 @@ fn connect_address(
         return Err(io::Error::last_os_error());
     }
     let socket = unsafe { OwnedFd::from_raw_fd(fd) };
-    if unsafe { libc::connect(fd, addr, size) } != 0 {
+    if unsafe { libc::connect(fd, addr, size) } == 0 {
+        return Ok(socket);
+    }
+    let error = io::Error::last_os_error();
+    if error.kind() != io::ErrorKind::Interrupted { return Err(error); }
+    // A blocking connect keeps running after EINTR. A second connect is not
+    // a retry: wait for the first and query its recorded result.
+    let mut event = libc::pollfd { fd, events: libc::POLLOUT, revents: 0 };
+    while unsafe { libc::poll(&mut event, 1, -1) } < 0 {
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted || crate::traps::hanging_up() ||
+            crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) { return Err(error); }
+    }
+    let mut result: libc::c_int = 0;
+    let mut len = std::mem::size_of_val(&result) as libc::socklen_t;
+    if unsafe { libc::getsockopt(fd, libc::SOL_SOCKET, libc::SO_ERROR, (&mut result as *mut libc::c_int).cast(), &mut len) } < 0 {
         return Err(io::Error::last_os_error());
     }
+    if result != 0 { return Err(io::Error::from_raw_os_error(result)); }
     Ok(socket)
 }
 
@@ -392,7 +408,10 @@ pub(crate) fn capture_stdout(run: impl FnOnce() -> Flow) -> io::Result<(Flow, Ve
     duplicate(file.as_raw_fd(), 1)?;
     let flow = run();
     let flushed = io::stdout().flush();
-    saved.restore(1)?;
+    if let Err(error) = saved.restore(1) {
+        unsafe { libc::close(1); }
+        return Err(error);
+    }
     flushed?;
     file.rewind()?;
     let mut output = Vec::new();

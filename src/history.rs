@@ -46,6 +46,7 @@ enum Hint {
 
 #[derive(Default)]
 pub struct History {
+    pub(crate) last_search: String,
     displayed: Option<Hint>,
     shared: JournalEntries,
     shared_query: String,

@@ -473,17 +473,8 @@ fn fixed_case(pattern: &CasePattern, value: &str, session: &Session) -> Option<b
         CasePattern::Fixed(matcher) if session.shopt.nocasematch => {
             matcher.insensitive(value, false, session)
         }
-        CasePattern::Extended(_, matcher) if session.shopt.nocasematch => {
-            matcher.insensitive(value, session.shopt.glob.extglob, session)
-        }
         CasePattern::Fixed(matcher) => matcher.matches_session(value, session),
-        CasePattern::Extended(group, basic) => {
-            if session.shopt.glob.extglob {
-                group.accepts(value, false)
-            } else {
-                basic.matches_session(value, session)
-            }
-        }
+        CasePattern::Extended(source) => crate::pattern::extended::session_match(value,source,session.shopt.glob.extglob,session),
         CasePattern::Dynamic(_) => return None,
     })
 }
@@ -546,18 +537,7 @@ fn run_case(
                 matched = match pattern {
                     CasePattern::Dynamic(word) => {
                         match expand_case(session, word.clone(), last, true) {
-                            Ok(glob) if session.shopt.nocasematch => {
-                                crate::pattern::extended::insensitive_match(
-                                    &value,
-                                    &glob,
-                                    session.shopt.glob.extglob,
-                                    session.character_locale(),
-                                )
-                            }
-                            Ok(glob) if session.shopt.glob.extglob => {
-                                crate::pattern::extended::matches(&value, &glob)
-                            }
-                            Ok(glob) => crate::pattern::matches(&value, &glob),
+                            Ok(glob) => crate::pattern::extended::session_match(&value,&glob,session.shopt.glob.extglob,session),
                             Err(f) => return f,
                         }
                     }

@@ -95,6 +95,13 @@ fn rounded(class: usize) -> Layout {
     unsafe { Layout::from_size_align_unchecked(SIZES[class], 16) }
 }
 
+// dlmalloc receives one alignment for ordinary allocations on either side of
+// the 512-byte cache boundary. Deallocation reconstructs that same layout.
+fn heap_layout(layout: Layout) -> Layout {
+    debug_assert!(layout.size() < LARGE);
+    unsafe { Layout::from_size_align_unchecked(layout.size(), layout.align().max(16)) }
+}
+
 // The allocation's layout determines ownership, including after a resize.
 unsafe impl GlobalAlloc for ShellHeap {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -112,7 +119,7 @@ unsafe impl GlobalAlloc for ShellHeap {
             return unsafe { GlobalDlmalloc.alloc(rounded(i)) };
         }
         prepare();
-        unsafe { GlobalDlmalloc.alloc(layout) }
+        unsafe { GlobalDlmalloc.alloc(heap_layout(layout)) }
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
@@ -127,7 +134,7 @@ unsafe impl GlobalAlloc for ShellHeap {
             return block;
         }
         prepare();
-        unsafe { GlobalDlmalloc.alloc_zeroed(layout) }
+        unsafe { GlobalDlmalloc.alloc_zeroed(heap_layout(layout)) }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
@@ -138,7 +145,7 @@ unsafe impl GlobalAlloc for ShellHeap {
                 unsafe { GlobalDlmalloc.dealloc(ptr, rounded(i)) };
             }
         } else {
-            unsafe { GlobalDlmalloc.dealloc(ptr, layout) }
+            unsafe { GlobalDlmalloc.dealloc(ptr, heap_layout(layout)) }
         }
     }
 
@@ -147,10 +154,13 @@ unsafe impl GlobalAlloc for ShellHeap {
             (true, true) => unsafe { System.realloc(ptr, layout, size) },
             (false, false) => {
                 let next = unsafe { Layout::from_size_align_unchecked(size, layout.align()) };
-                let from = class(layout).map_or(layout, rounded);
-                let to = class(next).map_or(next, rounded);
+                let from = class(layout).map_or_else(|| heap_layout(layout), rounded);
+                let to = class(next).map_or_else(|| heap_layout(next), rounded);
                 if from == to {
                     return ptr;
+                }
+                if class(layout).is_some() && class(next).is_some() {
+                    return unsafe { self.move_block(ptr, layout, next) };
                 }
                 if from.align() == to.align() {
                     return unsafe { GlobalDlmalloc.realloc(ptr, from, to.size()) };

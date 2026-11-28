@@ -123,7 +123,7 @@ impl EditorState {
         text: &mut String,
         mut cursor: usize,
         mark: usize,
-        killed: &mut String,
+        ring: &mut super::KillRing,
     ) -> usize {
         let (lo, hi) = match action {
             Action::Kill => (cursor, text.len()),
@@ -148,6 +148,8 @@ impl EditorState {
             }
             _ => (0, cursor),
         };
+        if lo == hi { return cursor; }
+        let killed = ring.entry(self.killing);
         if action != Action::Copy {
             self.undo.record(text, lo..hi, 0, cursor, false);
         }

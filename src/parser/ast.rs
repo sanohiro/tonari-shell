@@ -165,7 +165,7 @@ impl Statement {
 #[derive(Debug)]
 pub enum CasePattern {
     Fixed(Matcher<String>),
-    Extended(crate::pattern::extended::Pattern, Matcher<String>),
+    Extended(String),
     Dynamic(Word),
 }
 
@@ -181,12 +181,7 @@ impl CasePattern {
             {
                 if EXTGLOB.get() && parts.iter().any(|part| matches!(part, Part::Pattern(s) if crate::pattern::extended::has_group(s))) {
                     let text = word.extended_pattern(&|_| None, &[]);
-                    let extended = crate::pattern::extended::Pattern::new(&text);
-                    let basic = Matcher::new(text);
-                    return match extended {
-                        Some(group) => Self::Extended(group, basic),
-                        None => Self::Fixed(basic),
-                    };
+                    return Self::Extended(text);
                 }
                 Self::Fixed(Matcher::new(word.pattern(&|_| None, &[])))
             }

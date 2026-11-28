@@ -461,8 +461,16 @@ pub(super) fn prepare_expanded(
                         out.push_str(&trace_word(&value));
                     });
                 }
-                if let std::borrow::Cow::Owned(resolved) = exp.session.reference_name(&key)? {
-                    key = resolved;
+                match exp.session.reference_name(&key) {
+                    Ok(std::borrow::Cow::Owned(resolved)) => key = resolved,
+                    Ok(_) => {}
+                    Err(error) if exp.session.function_depth == 0 => {
+                        return Err(crate::expansion::Error::fatal(format!("warning: {key}: {error}"), 1));
+                    }
+                    Err(error) => {
+                        diagnostic!("warning: {key}: {error}");
+                        continue;
+                    }
                 }
                 let target = crate::session::array::subscript(&key);
                 let base = target.map_or(key.as_str(), |(base, _)| base);
@@ -487,7 +495,11 @@ pub(super) fn prepare_expanded(
                     && exp.session.is_associative(base)
                 {
                     if standalone {
-                        let key = exp.key(subscript)?;
+                        let element = exp.expanded_key(subscript)?;
+                        if element.is_empty() {
+                            return Err(crate::expansion::Error::fatal(format!("{key}: bad array subscript"), 1));
+                        }
+                        let key = element;
                         let old = append
                             .then(|| exp.session.assoc_value(base, &key).map(str::to_owned))
                             .flatten();

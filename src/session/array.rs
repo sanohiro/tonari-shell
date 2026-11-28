@@ -267,6 +267,9 @@ impl Session {
         if super::is_identifier(target) && self.assign_existing_literal(target, value) {
             return Ok(());
         }
+        if !target.ends_with('+') && self.assign_existing_literal(target, value) {
+            return Ok(());
+        }
         self.assign_target_value(
             target,
             value,
@@ -614,6 +617,9 @@ impl Session {
         }
         if let Some(map) = self.variables.get(name).and_then(Variable::associative) {
             return map.ordered().map(|(_, v)| v.to_owned()).collect();
+        }
+        if let Some(elements) = self.variables.get(name).and_then(|v| v.elements.as_deref()) {
+            return elements.iter().map(|(_, value)| value.to_owned()).collect();
         }
         self.indices(name)
             .into_iter()

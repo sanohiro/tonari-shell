@@ -24,8 +24,7 @@ pub struct StaticGlob {
 struct CompiledGlob {
     locale: Option<std::rc::Rc<pattern::PatternLocale>>,
     ascii_ranges: bool,
-    matcher: pattern::Matcher<String>,
-    group: Option<pattern::extended::Pattern>,
+    matcher: pattern::extended::Compiled,
 }
 
 impl StaticGlob {
@@ -49,17 +48,13 @@ impl StaticGlob {
             });
             if !current {
                 *entry = Some(Box::new(CompiledGlob {
-                    matcher: pattern::Matcher::new(source.to_owned()),
-                    group: pattern::extended::Pattern::new(source),
+                    matcher: pattern::extended::Compiled::new(source,true),
                     locale,
                     ascii_ranges,
                 }));
             }
             let compiled = entry.as_ref().unwrap();
-            compiled.group.as_ref().map_or_else(
-                || compiled.matcher.matches(left),
-                |group| group.accepts(left, false),
-            )
+            compiled.matcher.accepts(left)
         }
     }
 }
@@ -254,21 +249,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                         env.session.positional.as_slice(),
                     );
                     trace(env.session, status, &[&left, op, &right]);
-                    let locale = right
-                        .contains(['[', '?'])
-                        .then(|| pattern::session_locale(env.session))
-                        .flatten();
-                    let _guard = locale.as_ref().and_then(|l| l.enter());
-                    let matched = if env.session.shopt.nocasematch {
-                        pattern::extended::insensitive_match(
-                            &left,
-                            &right,
-                            true,
-                            env.session.character_locale(),
-                        )
-                    } else {
-                        pattern::extended::matches(&left, &right)
-                    };
+                    let matched = pattern::extended::session_match(&left, &right, true, env.session);
                     Ok(matched != (op == "!="))
                 }
                 "=~" => {

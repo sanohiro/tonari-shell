@@ -170,13 +170,23 @@ fn wait_builtin(args: &[String], session: &mut Session) -> u8 {
 fn wait_next(session: &mut Session, ids: &[String], force: bool) -> (u8, Option<pid_t>) {
     let jobs = &mut session.jobs;
     let mut selected = Vec::with_capacity(ids.len());
+    let mut substitutions = Vec::new();
     for spec in ids {
         if let Some(index) = jobs.select(spec) {
             selected.push(jobs.table[index].id);
+        } else if let Ok(pid) = spec.parse::<pid_t>()
+            && let Some(&(_, code)) = jobs.finished.iter().rev().find(|(p, _)| *p == pid)
+        {
+            return (code, Some(pid));
+        } else if let Ok(pid) = spec.parse::<pid_t>()
+            && session.substitutions.knows(pid)
+        {
+            substitutions.push(pid);
         } else {
             diagnostic!("wait: {spec}: no such job");
         }
     }
+    selected.sort_unstable();
     // Blocking SIGCHLD before polling closes the check/sleep race. Reap
     // only our job PIDs so an unrelated process substitution retains its status.
     let Ok(mask) = crate::traps::WaitMask::watch_children(&session.traps) else {
@@ -187,9 +197,10 @@ fn wait_next(session: &mut Session, ids: &[String], force: bool) -> (u8, Option<
             return (code, None);
         }
         jobs.poll();
-        let mut running = false;
+        let (ready, mut running) = session.substitutions.poll_next(&substitutions, ids.is_empty());
+        if let Some((code, pid)) = ready { return (code, Some(pid)); }
         for (i, job) in jobs.table.iter().enumerate() {
-            if !ids.is_empty() && !selected.contains(&job.id) {
+            if !ids.is_empty() && selected.binary_search(&job.id).is_err() {
                 continue;
             }
             if !job.active() && !job.stopped() {

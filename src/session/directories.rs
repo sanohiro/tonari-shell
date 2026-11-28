@@ -3,6 +3,16 @@ use super::{Component, DirectoryError, MetadataExt, OsStrExt, PathBuf, Rc};
 use std::io::{self, Write};
 use std::path::Path;
 
+fn cwd_handle() -> Option<std::os::fd::OwnedFd> {
+    use std::os::fd::FromRawFd;
+    #[cfg(target_os = "linux")]
+    let access = libc::O_PATH;
+    #[cfg(not(target_os = "linux"))]
+    let access = libc::O_RDONLY;
+    let fd = unsafe { libc::open(c".".as_ptr(), access | libc::O_CLOEXEC | libc::O_DIRECTORY) };
+    (fd >= 0).then(|| unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) })
+}
+
 pub(super) fn physical_path() -> io::Result<std::path::PathBuf> {
     with_physical_path(|path| Ok(path.to_owned()))
 }
@@ -614,6 +624,9 @@ impl Session {
             };
             // A renamed ancestor can invalidate the logical path while the
             // process still has a valid current directory for a relative chdir.
+            // Keep the old directory open only when a successful chdir still
+            // needs a physical name. A rename cannot invalidate this handle.
+            let rollback = if physical { crate::session::directories::cwd_handle() } else { None };
             let logical = match logical {
                 Some(path) => match std::env::set_current_dir(&path) {
                     Ok(()) => Some(path),
@@ -643,12 +656,29 @@ impl Session {
                 error = e;
                 continue;
             }
-            self.hashes.directory_changed();
-            self.logical_cwd.take();
             let cwd = match logical {
                 Some(cwd) => cwd,
-                None => physical_path().map_err(DirectoryError::NoPath)?,
+                None => match physical_path().and_then(|path| {
+                    path.to_str().map(|_| ()).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "non-UTF-8 directory"))?;
+                    Ok(path)
+                }) {
+                    Ok(path) => path,
+                    Err(e) => {
+                        if e.kind() == io::ErrorKind::InvalidData && rollback.as_ref()
+                            .is_some_and(|fd| unsafe { libc::fchdir(std::os::fd::AsRawFd::as_raw_fd(fd)) == 0 })
+                        {
+                            return Err(DirectoryError::Other(e));
+                        }
+                        self.hashes.directory_changed();
+                        self.logical_cwd.take();
+                        if let Some(old) = &old_pwd { self.assign("OLDPWD", old); }
+                        self.unset_variable("PWD");
+                        return Err(DirectoryError::NoPath(e));
+                    }
+                },
             };
+            self.hashes.directory_changed();
+            self.logical_cwd.take();
             if self.interactive && base.as_deref().ok() != Some(cwd.as_path()) {
                 Rc::make_mut(self.visits.get_or_insert_with(Rc::default)).record(base.ok(), &cwd);
             }

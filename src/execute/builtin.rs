@@ -88,13 +88,13 @@ pub(super) fn builtin(
     )
 }
 
-pub(super) fn builtin_words(
+pub(super) fn builtin_words<'a>(
     words: &[String],
     search: lookup::Search,
     empty_status: u8,
     last_status: u8,
     session: &Session,
-    path: impl FnOnce() -> std::ffi::OsString,
+    path: impl FnOnce() -> &'a std::ffi::OsStr,
 ) -> Option<Builtin> {
     let Some(name) = words.first() else {
         return Some(Builtin::Status(empty_status));
