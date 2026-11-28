@@ -24,9 +24,10 @@ impl Session {
             if args.is_empty() {
                 let mut out = crate::builtins::listing_stdout("export");
                 for name in self.functions.names("") {
-                    let flags = self.function_attributes(name);
-                    if flags.ends_with('x')
-                        && self.functions[name].print(&mut out, name, flags).is_err()
+                    if self.function_exported(name)
+                        && self.functions[name]
+                            .print(&mut out, name, self.function_attributes(name))
+                            .is_err()
                     {
                         return 1;
                     }
@@ -183,17 +184,24 @@ impl Session {
         }
         let mut out = crate::builtins::listing_stdout("export");
         let command = self.posix.then_some("export");
+        let locale = self.character_locale();
         for (name, value) in vars {
             if let Some(var) = self.variables.get(name.as_ref()) {
                 if matches!(name.as_ref(), "BASHOPTS" | "SHELLOPTS") {
                     let current = self.declared_variable(&name, false).unwrap();
-                    print_attribute(&mut out, &name, &current, command)?;
+                    print_attribute(&mut out, &name, &current, command, locale)?;
                 } else {
-                    print_attribute(&mut out, &name, var, command)?;
+                    print_attribute(&mut out, &name, var, command, locale)?;
                 }
                 continue;
             }
-            print_attribute(&mut out, &name, &Variable::scalar(value, true), command)?;
+            print_attribute(
+                &mut out,
+                &name,
+                &Variable::scalar(value, true),
+                command,
+                locale,
+            )?;
         }
         out.flush()
     }

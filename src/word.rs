@@ -7,8 +7,9 @@ pub(crate) mod quote;
 mod replace;
 use crate::parser::Statement;
 use crate::pattern::{Field, quote_into};
-pub(crate) use modifier::character_count;
 pub use modifier::{Modification, ReplaceMode};
+pub(crate) use modifier::{character_count, substring};
+pub(crate) use replace::substitute;
 
 pub(crate) const ARRAY_INDEXES_PREFIX: char = '\u{1}';
 fn array_indexes_key(base: &str) -> String {
@@ -403,7 +404,8 @@ impl Word {
                         || reference.as_bytes().first().is_some_and(u8::is_ascii_digit)
                             && reference
                                 .parse::<usize>()
-                                .is_ok_and(|i| i > env.session.positional.len()))
+                                .ok()
+                                .is_none_or(|i| i > env.session.positional.len()))
                 {
                     *name = "".into();
                 }
@@ -485,10 +487,7 @@ impl Word {
                 Part::Arithmetic { expression, quoted } => {
                     let value = match expression.compiled(env, true) {
                         Some(Ok(n)) => n,
-                        Some(Err(e)) if e == "unbound arithmetic variable" => {
-                            return Err(crate::arithmetic::shell_error(e, expression, env.session));
-                        }
-                        Some(Err(e)) => return Err(crate::expansion::Error::discard(e)),
+                        Some(Err(e)) => return Err(e.error(expression, env.session, true)),
                         None => env.arithmetic(expression)?,
                     };
                     *part = literal(value.to_string(), *quoted);
@@ -780,7 +779,11 @@ impl Word {
         self.expand_pattern(PatternKind::Extended, lookup, positional)
     }
 
-    fn replacement(self, lookup: &dyn Fn(&str) -> Option<String>, positional: &[String]) -> String {
+    pub(crate) fn replacement(
+        self,
+        lookup: &dyn Fn(&str) -> Option<String>,
+        positional: &[String],
+    ) -> String {
         self.expand_pattern(PatternKind::Replacement, lookup, positional)
     }
     pub fn regex(self, lookup: &dyn Fn(&str) -> Option<String>, positional: &[String]) -> String {

@@ -9,7 +9,13 @@ macro_rules! stderr_line {
 }
 
 fn write_stderr(args: std::fmt::Arguments<'_>) {
-    let _ = std::io::stderr().lock().write_fmt(args);
+    if let Some(text) = args.as_str() {
+        let _ = std::io::stderr().lock().write_all(text.as_bytes());
+    } else {
+        let _ = std::io::stderr()
+            .lock()
+            .write_all(args.to_string().as_bytes());
+    }
 }
 
 // Keep the prefix and stderr formatter in the cold path; each caller supplies its fields.
@@ -354,7 +360,7 @@ fn invoke(args: impl Iterator<Item = std::ffi::OsString>) -> u8 {
         }
         Ok(Action::Help) => {
             return u8::from(writeln!(io::stdout().lock(),
-                "Usage: tonari [--noprofile] [--norc | --rcfile FILE] [-efilnsu] [-o OPTION] [-O SHOPT] [-c COMMAND [NAME [ARG...]] | -s [ARG...] | FILE [ARG...]]"
+                "Usage: tonari [--login] [--noprofile] [--norc | --rcfile FILE | --init-file FILE] [--posix] [--noediting] [--verbose] [--debugger] [--pretty-print] [-abBCEefhHiklmnpPstTuvx] [-o OPTION] [-O SHOPT] [-c COMMAND [NAME [ARG...]] | -s [ARG...] | FILE [ARG...]]"
             ).is_err());
         }
         Err(e) => {
@@ -452,7 +458,6 @@ fn apply_invocation_options(
         session.apply_posix_mode(env.posix);
     }
     session.shopt.progcomp_alias = session.interactive;
-    session.inherit_options(env);
     for (enable, name) in std::mem::take(&mut invocation.options.shopts) {
         let options = match name {
             Some(name) => vec![if enable { "-s" } else { "-u" }.into(), name],
@@ -461,6 +466,14 @@ fn apply_invocation_options(
         };
         if session.shopt(&options) != 0 {
             return Err(2);
+        }
+    }
+    session.inherit_options(env);
+    if let Some(enabled) = invocation.options.list_options {
+        let mut args = vec!["set".into(), if enabled { "-o" } else { "+o" }.into()];
+        let status = session.set(&mut args);
+        if status != 0 {
+            return Err(status);
         }
     }
     Ok(())
@@ -521,16 +534,21 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
     let initial = match startup::initialize(session, &invocation, &env) {
         Flow::Unwind(status) | Flow::Discard(status) | Flow::Continue(status) => status,
         Flow::Return(status) | Flow::Exit(status) => {
-            return traps::finish(session, status);
+            return traps::finish_shell(session, status, invocation.interactive);
         }
-        Flow::Break(..) | Flow::LoopContinue(_) => return traps::finish(session, 1),
+        Flow::Break(..) | Flow::LoopContinue(_) => {
+            return traps::finish_shell(session, 1, invocation.interactive);
+        }
     };
     if invocation.debugger
         && !invocation.options.check
         && (!session.interactive || !matches!(invocation.input, Input::Stdin))
         && let Flow::Exit(code) = startup::debugger(session)
     {
-        return traps::finish(session, code);
+        return traps::finish_shell(session, code, invocation.interactive);
+    }
+    if invocation.interactive && session.history_lines().is_empty() {
+        history::start_interactive(session);
     }
     if invocation.as_sh && !session.posix {
         session.set_posix(true);
@@ -583,9 +601,5 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
         | Flow::Return(s) => s,
         Flow::Break(..) | Flow::LoopContinue(_) => 1,
     };
-    traps::finish_shell(
-        session,
-        code,
-        invocation.interactive && session.stdin_script,
-    )
+    traps::finish_shell(session, code, invocation.interactive)
 }

@@ -794,7 +794,20 @@ pub(super) fn prepare_redirects(
                 .parse::<RawFd>()
                 .ok()
                 .filter(|_| word.bytes().all(|b| b.is_ascii_digit()))
-                .ok_or("invalid file descriptor")?;
+                .ok_or_else(|| {
+                    let (label, reason) = if r.target == Target::MoveWord
+                        || !word.is_empty() && !word.bytes().all(|b| b.is_ascii_digit())
+                    {
+                        (word.clone(), "ambiguous redirect")
+                    } else if word.is_empty() {
+                        ("\"\"".into(), "Bad file descriptor")
+                    } else if r.target == Target::OutputWord {
+                        (word.clone(), "Bad file descriptor")
+                    } else {
+                        (r.fd.to_string(), "Bad file descriptor")
+                    };
+                    crate::expansion::Error::from(reason).in_expression(&label)
+                })?;
             if r.target == Target::MoveWord {
                 moved = Some(fd);
             }

@@ -191,7 +191,7 @@ mod tests {
                     bytes[i] = b;
                     assert_eq!(
                         needs_ansi(&bytes, ascii),
-                        b.is_ascii_control() || ascii && !b.is_ascii()
+                        b.is_ascii_control() || !b.is_ascii()
                     );
                 }
             }

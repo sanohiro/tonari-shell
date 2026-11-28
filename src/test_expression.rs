@@ -17,45 +17,12 @@ pub enum Expr {
 pub struct StaticGlob {
     word: Word,
     text: std::cell::OnceCell<String>,
-    compiled: std::cell::RefCell<Option<Box<CompiledGlob>>>,
-}
-
-#[derive(Debug)]
-struct CompiledGlob {
-    locale: Option<std::rc::Rc<pattern::PatternLocale>>,
-    ascii_ranges: bool,
-    matcher: pattern::extended::Compiled,
+    compiled: pattern::extended::StaticMatcher,
 }
 
 impl StaticGlob {
     fn matches(&self, left: &str, source: &str, session: &Session) -> bool {
-        if session.shopt.nocasematch {
-            pattern::extended::insensitive_session(left, source, true, session)
-        } else {
-            let locale = source
-                .contains(['[', '?'])
-                .then(|| pattern::session_locale(session))
-                .flatten();
-            let _guard = locale.as_ref().and_then(|l| l.enter());
-            let mut entry = self.compiled.borrow_mut();
-            // Bracket ranges and their per-character results belong to the
-            // active locale. Keep its handle alive until recompilation.
-            let ascii_ranges = session.shopt.globasciiranges;
-            let current = entry.as_ref().is_some_and(|cached| {
-                cached.ascii_ranges == ascii_ranges
-                    && cached.locale.as_ref().map(std::rc::Rc::as_ptr)
-                        == locale.as_ref().map(std::rc::Rc::as_ptr)
-            });
-            if !current {
-                *entry = Some(Box::new(CompiledGlob {
-                    matcher: pattern::extended::Compiled::new(source, true),
-                    locale,
-                    ascii_ranges,
-                }));
-            }
-            let compiled = entry.as_ref().unwrap();
-            compiled.matcher.accepts(left)
-        }
+        self.compiled.matches(left, source, true, session)
     }
 }
 
@@ -256,7 +223,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                     let mut env = crate::expansion::Expansion::new(session, status, &captured);
                     let mut right = right.clone();
                     right.resolve(&mut env).map_err(|e| {
-                        e.report("[[: ");
+                        e.report("");
                         e.flow(env.session)
                     })?;
                     let right = right.extended_pattern(
@@ -276,7 +243,7 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                         crate::expansion::Expansion::new(session, status, &captured)
                             .regex(right.clone())
                             .map_err(|e| {
-                                e.report("[[: ");
+                                e.report("");
                                 e.flow(session)
                             })?
                             .into()
@@ -582,7 +549,7 @@ fn portable_list(body: &str) -> Option<String> {
 pub struct Compiled {
     locale: Option<std::rc::Rc<pattern::PatternLocale>>,
     pattern: String,
-    regex: Option<Box<libc::regex_t>>,
+    regex: Result<Box<libc::regex_t>, String>,
     captures: usize,
 }
 
@@ -600,17 +567,26 @@ impl Compiled {
             libc::REG_EXTENDED
         };
         let compile = |compiled: *mut libc::regex_t, bytes: &CString| unsafe {
-            libc::regcomp(compiled, bytes.as_ptr(), flags) == 0
+            libc::regcomp(compiled, bytes.as_ptr(), flags)
         };
-        if !compile(regex.as_mut_ptr(), &encoded)
+        let code = compile(regex.as_mut_ptr(), &encoded);
+        if code != 0
             && !portable_ere(&pattern)
                 .and_then(|p| CString::new(p).ok())
-                .is_some_and(|p| compile(regex.as_mut_ptr(), &p))
+                .is_some_and(|p| compile(regex.as_mut_ptr(), &p) == 0)
         {
             return Ok(Self {
                 pattern,
                 locale,
-                regex: None,
+                regex: Err({
+                    let mut buffer = [0; 256];
+                    unsafe {
+                        libc::regerror(code, std::ptr::null(), buffer.as_mut_ptr(), buffer.len());
+                        std::ffi::CStr::from_ptr(buffer.as_ptr())
+                            .to_string_lossy()
+                            .into_owned()
+                    }
+                }),
                 captures: 0,
             });
         }
@@ -618,16 +594,18 @@ impl Compiled {
         Ok(Self {
             pattern,
             locale,
-            regex: Some(unsafe { regex.assume_init() }),
+            regex: Ok(unsafe { regex.assume_init() }),
             captures,
         })
     }
 
     fn search(&self, text: &str) -> Result<Option<Vec<String>>, ()> {
-        let Some(regex) = self.regex.as_deref() else {
-            diagnostic!("[[: invalid regular expression: {}", self.pattern);
-            return Err(());
-        };
+        let regex = self.regex.as_deref().map_err(|reason| {
+            diagnostic!(
+                "[[: invalid regular expression `{}': {reason}",
+                self.pattern
+            );
+        })?;
         let mut small_text = [0u8; 256];
         let allocated;
         let encoded = if text.len() < small_text.len() {
@@ -676,7 +654,7 @@ impl Compiled {
 
 impl Drop for Compiled {
     fn drop(&mut self) {
-        if let Some(regex) = self.regex.as_deref_mut() {
+        if let Ok(regex) = self.regex.as_deref_mut() {
             unsafe { libc::regfree(regex) };
         }
     }

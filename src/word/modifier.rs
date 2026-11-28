@@ -367,11 +367,10 @@ impl Modification {
                     word => env.pattern(word)?,
                 };
                 let _locale = crate::pattern::parameter_locale(env.session, &pattern);
-                let filter = if pattern.is_empty() || pattern == "?" {
-                    None
-                } else {
-                    Some(crate::pattern::Matcher::new(pattern.as_str()))
-                };
+                let filter = crate::pattern::extended::Compiled::case_filter(
+                    pattern,
+                    env.session.shopt.glob.extglob,
+                );
                 let locale = env.session.character_locale();
                 let direction = *direction;
                 let all = *all;
@@ -669,7 +668,7 @@ fn character_boundary(s: &str, n: i64) -> Option<usize> {
     }
 }
 
-fn substring(v: &str, start: i64, len: Option<i64>) -> Result<&str, Error> {
+pub(crate) fn substring(v: &str, start: i64, len: Option<i64>) -> Result<&str, Error> {
     let Some(start) = character_boundary(v, start) else {
         return Ok("");
     };

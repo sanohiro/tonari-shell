@@ -18,7 +18,7 @@ impl Aliases {
         if name.is_empty()
             || name
                 .chars()
-                .any(|c| c.is_whitespace() || "/$`=;&|()<>'\"\\".contains(c))
+                .any(|c| matches!(c, ' ' | '\t' | '\n') || "/$`=;&|()<>'\"\\".contains(c))
         {
             return Err("invalid alias name");
         }
@@ -55,6 +55,15 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
     let remove = cmd == "unalias";
     let mut print_all = false;
     let mut clear = false;
+    let usage = || {
+        let syntax = if remove {
+            "unalias [-a] name [name ...]"
+        } else {
+            "alias [-p] [name[=value] ... ]"
+        };
+        let _ = writeln!(std::io::stderr().lock(), "{cmd}: usage: {syntax}");
+        2
+    };
     while let Some(arg) = crate::builtins::flags::next(&mut args) {
         for flag in arg[1..].chars() {
             match (remove, flag) {
@@ -62,7 +71,7 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
                 (true, 'a') => clear = true,
                 _ => {
                     diagnostic!("{cmd}: -{flag}: invalid option");
-                    return 2;
+                    return usage();
                 }
             }
         }
@@ -72,8 +81,7 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
         return 0;
     }
     if remove && args.is_empty() {
-        diagnostic!("unalias: usage: unalias [-a] name [name ...]");
-        return 2;
+        return usage();
     }
     let mut out = crate::builtins::StdoutFd(Some(cmd));
     let command_prefix = !session.posix || print_all;
@@ -109,7 +117,10 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
     }
     let mut status = 0;
     for arg in args {
-        if !remove && let Some((name, value)) = arg.split_once('=') {
+        if !remove
+            && let Some((name, value)) = arg.split_once('=')
+            && !name.is_empty()
+        {
             if let Err(e) = session.aliases.insert(name, value) {
                 diagnostic!("alias: {name}: {e}");
                 status = 1;

@@ -192,7 +192,10 @@ pub(crate) fn reset_child_signals() {
 }
 
 fn stage_parameter(name: &str, session: &Session) -> bool {
-    let name = name.trim_start_matches(['#', '!']);
+    if name.starts_with('!') {
+        return true;
+    }
+    let name = name.trim_start_matches('#');
     matches!(name, "BASHPID" | "RANDOM" | "SRANDOM")
         || name.contains('[')
         || session.is_nameref(name)
@@ -578,8 +581,8 @@ fn start(
                     .unwrap_or_else(|| std::path::Path::new(name));
                 let code = external::report_exec_error(
                     session,
-                    name.as_bytes(),
                     path,
+                    false,
                     e.raw_os_error().unwrap_or(libc::EIO),
                 );
                 return Ok(Stage::Status(code));
@@ -783,8 +786,7 @@ pub(crate) fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(
     line.push('\n');
     let fd = session
         .scalar_setting("BASH_XTRACEFD")
-        .and_then(|v| v.trim().parse().ok())
-        .filter(|&fd| !fd::is_private(fd))
+        .and_then(|v| trace_descriptor(&v))
         .unwrap_or(2);
     let mut data = line.as_bytes();
     while !data.is_empty() {
@@ -795,6 +797,11 @@ pub(crate) fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(
             break;
         }
     }
+}
+
+pub(crate) fn trace_descriptor(value: &str) -> Option<RawFd> {
+    let fd = value.trim_start().parse::<RawFd>().ok()?;
+    (fd >= 0 && !fd::is_private(fd) && unsafe { libc::fcntl(fd, libc::F_GETFD) } >= 0).then_some(fd)
 }
 
 pub(crate) fn trace_word(word: &str) -> std::borrow::Cow<'_, str> {
@@ -1051,8 +1058,8 @@ fn run_external(
                 let name = &cmd.words[0];
                 let code = external::report_exec_error(
                     session,
-                    name.as_bytes(),
                     std::path::Path::new(name),
+                    true,
                     libc::ENOENT,
                 );
                 return Ok(Flow::Continue(code));

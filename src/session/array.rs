@@ -191,6 +191,10 @@ impl Variable {
 }
 
 impl Session {
+    pub(super) fn live_dirstack(&self, name: &str) -> bool {
+        name == "DIRSTACK" && self.variables.get(name).is_none_or(|var| var.dynamic)
+    }
+
     pub(super) fn active_groups(&self, name: &str) -> bool {
         name == "GROUPS" && !self.groups_unset
     }
@@ -217,6 +221,9 @@ impl Session {
     }
 
     pub(crate) fn array_parameter(&self, name: &str) -> bool {
+        if self.live_dirstack(name) {
+            return true;
+        }
         self.variables.get(name).map_or_else(
             || Self::builtin_array_parameter(name),
             |var| var.elements.is_some(),
@@ -272,9 +279,6 @@ impl Session {
     }
 
     pub fn assign_builtin_target(&mut self, target: &str, value: &str) -> Result<(), &'static str> {
-        if super::is_identifier(target) && self.assign_existing_literal(target, value) {
-            return Ok(());
-        }
         if !target.ends_with('+') && self.assign_existing_literal(target, value) {
             return Ok(());
         }
@@ -326,7 +330,12 @@ impl Session {
                 };
                 return self.assign_key(base, key, value.into());
             }
-            let index = self.resolve_index(base, expr)?;
+            let index = if stored {
+                let index = crate::arithmetic::data_index(expr, self)?;
+                self.relative_index(base, index)?
+            } else {
+                self.resolve_index(base, expr)?
+            };
             self.assign_element(base, index, value.into());
         } else {
             if !super::is_identifier(target) {
@@ -350,6 +359,10 @@ impl Session {
             let len = usize::from(self.pipe_status.first.is_some()) + self.pipe_status.rest.len();
             return (0..len as i64).collect();
         }
+        if self.live_dirstack(name) {
+            self.dynamic.stack_read.set(true);
+            return (0..=self.dir_stack.len() as i64).collect();
+        }
         if let Some(v) = self.variables.get(name) {
             return v.elements.as_ref().map_or_else(
                 || (v.value.is_some()).then_some(0).into_iter().collect(),
@@ -361,10 +374,6 @@ impl Session {
             "BASH_ARGC" => (0..self.debug_frames().count() as i64).collect(),
             "GROUPS" => (0..self.group_ids().len() as i64).collect(),
             "BASH_VERSINFO" => (0..6).collect(),
-            "DIRSTACK" => {
-                self.dynamic.stack_read.set(true);
-                (0..=self.dir_stack.len() as i64).collect()
-            }
             "FUNCNAME" if self.function_depth == 0 => Vec::new(),
             "FUNCNAME" => (0..self.function_names.len() as i64).collect(),
             "BASH_LINENO" => (0..self.call_lines.len() as i64).collect(),
@@ -382,6 +391,10 @@ impl Session {
                 .chain(&self.pipe_status.rest)
                 .nth(index as usize)
                 .map(u8::to_string);
+        }
+        if self.live_dirstack(name) {
+            self.dynamic.stack_read.set(true);
+            return self.stack_entry(index.try_into().ok()?);
         }
         if let Some(v) = self.variables.get(name) {
             if v.dynamic && index == 0 {
@@ -417,10 +430,6 @@ impl Session {
                     .get(usize::try_from(i).ok()?)
                     .map(|s| (*s).into()),
             },
-            "DIRSTACK" => {
-                self.dynamic.stack_read.set(true);
-                self.stack_entry(index.try_into().ok()?)
-            }
             "FUNCNAME" if self.function_depth == 0 => None,
             "FUNCNAME" => self
                 .function_names
@@ -460,7 +469,7 @@ impl Session {
             .filter(|(_, v)| v.elements.is_some() && v.array_assigned)
             .map(|(key, _)| key.clone())
             .collect();
-        if !self.variables.contains_key("DIRSTACK") {
+        if self.live_dirstack("DIRSTACK") {
             names.push("DIRSTACK".into());
         }
         for name in ["BASH_ALIASES", "BASH_CMDS"] {
@@ -468,6 +477,8 @@ impl Session {
                 names.push(name.into());
             }
         }
+        names.push("BASH_ARGC".into());
+        names.push("BASH_ARGV".into());
         names.push("BASH_SOURCE".into());
         names.push("BASH_LINENO".into());
         names.push("BASH_VERSINFO".into());
@@ -498,6 +509,9 @@ impl Session {
         let Ok(base) = self.reference_name(name) else {
             return false;
         };
+        if self.live_dirstack(&base) {
+            return true;
+        }
         self.variables.get(base.as_ref()).map_or_else(
             || Self::builtin_array_parameter(&base),
             |var| var.array_assigned || var.dynamic && var.elements.is_some(),
@@ -505,6 +519,10 @@ impl Session {
     }
 
     pub(crate) fn stored_array_len(&self, name: &str) -> Option<usize> {
+        if self.live_dirstack(name) {
+            self.dynamic.stack_read.set(true);
+            return Some(self.dir_stack.len() + 1);
+        }
         if self.active_groups(name) && !self.variables.contains_key(name) {
             return Some(self.group_ids().len());
         }
@@ -1269,7 +1287,7 @@ impl Session {
         if self.protected_array(name) || self.readonly(name) {
             return;
         }
-        if name == "DIRSTACK" && !self.variables.contains_key(name) {
+        if self.live_dirstack(name) {
             if index > 0
                 && let Some(i) = self.dir_stack.len().checked_sub(index as usize)
             {

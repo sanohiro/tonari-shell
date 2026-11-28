@@ -3,26 +3,77 @@ use crate::{Flow, Session};
 type Result<T> = std::result::Result<T, &'static str>;
 type ShellResult<T> = std::result::Result<T, crate::expansion::Error>;
 
-pub(crate) fn shell_error(
-    message: &'static str,
-    expression: &str,
-    session: &Session,
-) -> crate::expansion::Error {
-    if message == "unbound arithmetic variable" {
-        crate::expansion::Error::fatal(
-            format!("{expression}: unbound variable"),
-            if session.command_string && !session.interactive {
-                127
-            } else {
-                1
-            },
-        )
-    } else {
-        crate::expansion::Error::from(message).in_expression(expression)
+#[derive(Debug, PartialEq)]
+pub(crate) enum Failure {
+    Message(&'static str),
+    Unbound(String),
+    Readonly(String),
+}
+
+type Evaluation<T> = std::result::Result<T, Failure>;
+
+impl From<&'static str> for Failure {
+    fn from(text: &'static str) -> Self {
+        Self::Message(text)
     }
 }
 
+impl Failure {
+    fn write(name: &str, message: &'static str) -> Self {
+        if message == crate::session::READONLY {
+            Self::Readonly(name.to_owned())
+        } else {
+            Self::Message(message)
+        }
+    }
+
+    fn message(self) -> &'static str {
+        match self {
+            Self::Unbound(_) => "unbound arithmetic variable",
+            Self::Readonly(_) => crate::session::READONLY,
+            Self::Message(text) => text,
+        }
+    }
+
+    pub(crate) fn error(
+        self,
+        expression: &str,
+        session: &Session,
+        expansion: bool,
+    ) -> crate::expansion::Error {
+        use crate::expansion::Error;
+        match self {
+            Self::Unbound(name) => Error::fatal(
+                format!("{name}: unbound variable"),
+                if session.command_string && !session.interactive {
+                    127
+                } else {
+                    1
+                },
+            ),
+            Self::Readonly(name) if expansion => Error::readonly(&name),
+            Self::Readonly(name) => Error::from(crate::session::READONLY).in_expression(&name),
+            Self::Message(text) if expansion => {
+                Error::discard(text).in_expression(expression.trim())
+            }
+            Self::Message(text) => Error::from(text).in_expression(expression.trim()),
+        }
+    }
+}
+
+fn shell_error(
+    error: impl Into<Failure>,
+    expression: &str,
+    session: &Session,
+) -> crate::expansion::Error {
+    error.into().error(expression, session, false)
+}
+
 pub(crate) trait Variables {
+    fn session(&self) -> &Session;
+    fn visible_nameref(&self, name: &str) -> bool {
+        self.session().is_nameref(name)
+    }
     fn get(&self, name: &str) -> Result<Option<String>>;
     fn scalar_text(&self, _name: &str) -> Option<&str> {
         None
@@ -44,6 +95,9 @@ pub(crate) trait Variables {
 }
 
 impl Variables for Session {
+    fn session(&self) -> &Session {
+        self
+    }
     fn scalar_text(&self, name: &str) -> Option<&str> {
         self.stored_scalar(name)
     }
@@ -90,120 +144,18 @@ impl Variables for Session {
     }
 }
 
-fn data_parameter(vars: &dyn Variables, name: &str) -> Result<String> {
-    match vars.get(name)? {
-        Some(value) => Ok(value),
-        None if vars.nounset() => Err("unbound arithmetic variable"),
-        None => Ok(String::new()),
-    }
-}
-
-// A subscript obtained from a variable is data. Read parameter values and
-// arithmetic operands without passing any part of it to the shell evaluator.
-fn data_text(word: crate::word::Word, vars: &mut dyn Variables, depth: u16) -> Result<String> {
-    use crate::word::{Alternative, Part, Word, is_identifier};
-    check_depth(depth)?;
-    let parts = match word {
-        Word::Literal(value) => return Ok(value),
-        Word::Expanded(parts) => parts,
-        _ => return Err("invalid indirect array subscript"),
-    };
-    let mut output = String::new();
-    for part in parts {
-        match part {
-            Part::Text(s) | Part::Pattern(s) | Part::Unquoted(s) => output.push_str(&s),
-            Part::Parameter { name, .. } | Part::BraceParameter(name) if is_identifier(&name) => {
-                output.push_str(&data_parameter(vars, &name)?);
-            }
-            Part::Alternative {
-                name,
-                op: op @ (Alternative::Default | Alternative::Alternate),
-                check_empty,
-                word,
-                ..
-            } if is_identifier(&name) => {
-                let value = vars.get(&name)?.filter(|s| !check_empty || !s.is_empty());
-                if (op == Alternative::Default) == value.is_none() {
-                    output.push_str(&data_text(*word, vars, depth + 1)?);
-                } else if op == Alternative::Default {
-                    output.push_str(value.as_deref().unwrap_or(""));
-                }
-            }
-            Part::Arithmetic { expression, .. } => {
-                let n = data_index_at(&expression, vars, depth + 1)?;
-                output.push_str(itoa::Buffer::new().format(n));
-            }
-            _ => return Err("invalid indirect array subscript"),
-        }
-    }
-    Ok(output)
-}
-
-pub(crate) fn data_key(source: &str, vars: &mut dyn Variables) -> Result<String> {
-    data_key_at(source, vars, 0)
-}
-
-fn single_data_parameter(source: &str) -> Option<&str> {
-    let parameter = source.strip_prefix('$')?;
-    let name = parameter
-        .strip_prefix('{')
-        .and_then(|s| s.strip_suffix('}'))
-        .unwrap_or(parameter);
-    crate::word::is_identifier(name).then_some(name)
-}
-
-fn data_key_at(source: &str, vars: &mut dyn Variables, depth: u16) -> Result<String> {
-    if !source.is_empty() && !source.contains(['$', '`', '\'', '"', '\\']) {
-        return Ok(source.to_owned());
-    }
-    let key = if let Some(name) = single_data_parameter(source) {
-        data_parameter(vars, name)?
-    } else {
-        let word = crate::parser::subscript_word(source, true).map_err(|e| e.message())?;
-        data_text(word, vars, depth + 1)?
-    };
-    if key.is_empty() {
-        Err("bad array subscript")
-    } else {
-        Ok(key)
-    }
-}
-
-fn data_index_at(source: &str, vars: &mut dyn Variables, depth: u16) -> Result<i64> {
-    if !source.contains(['$', '`', '"', '\\']) {
-        return calculate(source, vars, depth);
-    }
-    if let Some(name) = single_data_parameter(source) {
-        if let Some(n) = vars.decimal(name) {
-            return Ok(n);
-        }
-        let value = data_parameter(vars, name)?;
-        return calculate(&value, vars, depth);
-    }
-    let (keys, tail) = if source.contains('[') {
-        crate::parser::arithmetic_segments(source, |name| vars.is_associative(name))
-    } else {
-        crate::parser::arithmetic_word(source).map(|word| (Vec::new(), word))
-    }
-    .map_err(|e| e.message())?;
-    if keys.is_empty() {
-        return calculate(&data_text(tail, vars, depth + 1)?, vars, depth);
-    }
-    let mut text = String::new();
-    for (prefix, key) in keys {
-        text.push_str(&data_text(prefix, vars, depth + 1)?);
-        crate::word::quote::push_single_quote(&mut text, &data_text(key, vars, depth + 1)?);
-    }
-    text.push_str(&data_text(tail, vars, depth + 1)?);
-    calculate(&text, vars, depth)
-}
-
-pub(crate) fn data_index(source: &str, vars: &mut dyn Variables) -> Result<i64> {
-    data_index_at(source, vars, 0)
-}
+mod data;
+pub(crate) use data::{data_index, data_key};
+use data::{data_index_at, data_key_at};
 
 pub(crate) struct ReadOnly<'a>(pub(crate) &'a Session);
 impl Variables for ReadOnly<'_> {
+    fn session(&self) -> &Session {
+        self.0
+    }
+    fn nounset(&self) -> bool {
+        self.0.nounset
+    }
     fn get(&self, name: &str) -> Result<Option<String>> {
         self.0.arithmetic_get(name)
     }
@@ -218,7 +170,7 @@ impl Variables for ReadOnly<'_> {
     }
 }
 
-pub(crate) fn with_variables(source: &str, vars: &mut dyn Variables) -> Result<i64> {
+pub(crate) fn with_variables(source: &str, vars: &mut dyn Variables) -> Evaluation<i64> {
     calculate(source, vars, 0)
 }
 
@@ -254,17 +206,17 @@ pub(crate) fn inert(source: &str, session: &Session) -> bool {
 }
 
 pub fn run(source: &str, session: &mut Session) -> Result<i64> {
-    calculate(source, session, 0)
+    calculate(source, session, 0).map_err(Failure::message)
 }
 
 fn expanded_operand(source: &str, session: &mut Session, status: u8) -> ShellResult<i64> {
     if !source.contains(['$', '`', '"', '\\']) {
-        return run(source, session).map_err(|e| shell_error(e, source, session));
+        return with_variables(source, session).map_err(|e| shell_error(e, source, session));
     }
     let captured = std::cell::Cell::new(None);
     crate::expansion::Expansion::new(session, status, &captured)
         .arithmetic_text(source)
-        .and_then(|text| run(&text, session).map_err(|e| shell_error(e, &text, session)))
+        .and_then(|text| with_variables(&text, session).map_err(|e| shell_error(e, &text, session)))
 }
 
 // Loop headers are immutable, but their operands can be reassigned on every
@@ -364,7 +316,8 @@ impl<'a> Repeated<'a> {
                     return expanded_operand(source, session, status);
                 };
                 let next = old.wrapping_add(delta);
-                Variables::set(session, name, next)?;
+                Variables::set(session, name, next)
+                    .map_err(|e| shell_error(Failure::write(name, e), source, session))?;
                 Ok(if postfix { old } else { next })
             }
         }
@@ -383,7 +336,7 @@ pub fn let_builtin(args: &[String], session: &mut Session) -> Flow {
     }
     let mut last = 0;
     for expr in args {
-        match run(expr, session) {
+        match with_variables(expr, session) {
             Ok(value) => last = value,
             Err(message) => {
                 let error = shell_error(message, expr, session);
@@ -412,7 +365,7 @@ pub(crate) fn traced(
         write_trace(source, session, status);
         return match compiled {
             Some(header) => header.run(session, status),
-            None => run(source, session).map_err(|e| shell_error(e, source, session)),
+            None => with_variables(source, session).map_err(|e| shell_error(e, source, session)),
         };
     }
     let captured = std::cell::Cell::new(None);
@@ -462,7 +415,7 @@ impl Expression {
         &self,
         vars: &mut dyn Variables,
         permit_store: bool,
-    ) -> Option<Result<i64>> {
+    ) -> Option<Evaluation<i64>> {
         self.plan
             .get_or_init(|| plan::Program::compile(&self.source))
             .as_ref()?
@@ -616,7 +569,7 @@ impl<'a> Parser<'a> {
         minimum: u8,
         active: bool,
         depth: u16,
-    ) -> Result<Value<'a>> {
+    ) -> Evaluation<Value<'a>> {
         check_depth(depth)?;
         let mut left = self.atom(variables, active, depth + 1)?;
         while let Token::Op(op) = self.token {
@@ -633,7 +586,7 @@ impl<'a> Parser<'a> {
                     .expression(variables, 1, active && test, depth + 1)?
                     .read(variables, active && test, depth + 1)?;
                 if self.advance()? != Token::Op(":") {
-                    return Err("missing colon in arithmetic conditional");
+                    return Err("missing colon in arithmetic conditional".into());
                 }
                 let no = self
                     .expression(variables, precedence, active && !test, depth + 1)?
@@ -642,7 +595,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if precedence == 2 && matches!(left, Value::Number(_)) {
-                return Err("arithmetic assignment requires a variable");
+                return Err("arithmetic assignment requires a variable".into());
             }
             let a = if op == "=" {
                 0
@@ -665,7 +618,9 @@ impl<'a> Parser<'a> {
                         let (base, index) = source;
                         element_name(base, index, variables, depth)?
                     }
-                    Value::Number(_) => return Err("arithmetic assignment requires a variable"),
+                    Value::Number(_) => {
+                        return Err("arithmetic assignment requires a variable".into());
+                    }
                 };
                 let result = if !active || op == "=" {
                     b
@@ -688,7 +643,7 @@ impl<'a> Parser<'a> {
         variables: &mut dyn Variables,
         active: bool,
         depth: u16,
-    ) -> Result<Value<'a>> {
+    ) -> Evaluation<Value<'a>> {
         check_depth(depth)?;
         let mut value = match self.advance()? {
             Token::Number(s) => Value::Number(number(s)?),
@@ -706,7 +661,7 @@ impl<'a> Parser<'a> {
             Token::Op("(") => {
                 let v = self.expression(variables, 1, active, depth + 1)?;
                 if self.advance()? != Token::Op(")") {
-                    return Err("missing arithmetic closing parenthesis");
+                    return Err("missing arithmetic closing parenthesis".into());
                 }
                 Value::Number(v.read(variables, active, depth + 1)?)
             }
@@ -720,7 +675,7 @@ impl<'a> Parser<'a> {
                     "~" => !n,
                     _ => {
                         let Value::Variable(name) = operand else {
-                            return Err("arithmetic increment requires a variable");
+                            return Err("arithmetic increment requires a variable".into());
                         };
                         let next = n.wrapping_add(if op == "++" { 1 } else { -1 });
                         if active {
@@ -731,12 +686,12 @@ impl<'a> Parser<'a> {
                 };
                 Value::Number(result)
             }
-            _ => return Err("expected an arithmetic operand"),
+            _ => return Err("expected an arithmetic operand".into()),
         };
         if let Token::Op(op @ ("++" | "--")) = self.token {
             self.advance()?;
             let Value::Variable(ref name) = value else {
-                return Err("arithmetic increment requires a variable");
+                return Err("arithmetic increment requires a variable".into());
             };
             let old = value.read(variables, active, depth + 1)?;
             if active {
@@ -753,9 +708,9 @@ fn element_name<'a>(
     index: &str,
     variables: &mut dyn Variables,
     depth: u16,
-) -> Result<Target<'a>> {
+) -> Evaluation<Target<'a>> {
     if index.is_empty() {
-        return Err("empty array subscript");
+        return Err("empty array subscript".into());
     }
     if variables.is_associative(base) {
         let key = data_key_at(index, variables, depth + 1)?;
@@ -778,11 +733,13 @@ enum Target<'a> {
 }
 
 impl Target<'_> {
-    fn set(&self, vars: &mut dyn Variables, value: i64) -> Result<()> {
+    fn set(&self, vars: &mut dyn Variables, value: i64) -> Evaluation<()> {
         match self {
             Self::Unavailable => Ok(()),
-            Self::Name(name) => vars.set(name, value),
-            Self::Indexed(name, index) => vars.set_indexed(name, *index, value),
+            Self::Name(name) => vars.set(name, value).map_err(|e| Failure::write(name, e)),
+            Self::Indexed(name, index) => vars
+                .set_indexed(name, *index, value)
+                .map_err(|e| Failure::write(name, e)),
         }
     }
 }
@@ -793,12 +750,12 @@ enum Value<'a> {
     Variable(Target<'a>),
 }
 impl Value<'_> {
-    fn read(&self, variables: &mut dyn Variables, active: bool, depth: u16) -> Result<i64> {
+    fn read(&self, variables: &mut dyn Variables, active: bool, depth: u16) -> Evaluation<i64> {
         if !active {
             return Ok(0);
         }
         match self {
-            Self::AssignmentTarget(_) => Err("expected arithmetic assignment"),
+            Self::AssignmentTarget(_) => Err("expected arithmetic assignment".into()),
             Self::Number(n) => Ok(*n),
             Self::Variable(target) => {
                 let text = match target {
@@ -811,7 +768,7 @@ impl Value<'_> {
                             // Recursive arithmetic evaluation can mutate this variable.
                             Some(raw.to_owned())
                         } else {
-                            variables.get(name)?
+                            data::read_name(name, variables, depth + 1)?
                         }
                     }
                     Target::Indexed(name, index) => {
@@ -824,7 +781,11 @@ impl Value<'_> {
                 match text {
                     Some(s) if s.is_empty() => Ok(0),
                     Some(s) => calculate(&s, variables, depth + 1),
-                    None if variables.nounset() => Err("unbound arithmetic variable"),
+                    None if variables.nounset() => Err(Failure::Unbound(match target {
+                        Target::Indexed(name, index) => format!("{name}[{index}]"),
+                        Target::Name(name) => name.to_string(),
+                        Target::Unavailable => unreachable!(),
+                    })),
                     None => Ok(0),
                 }
             }
@@ -854,7 +815,7 @@ fn deep_expression_full(depth: u16) -> bool {
     crate::stack_budget_exceeded()
 }
 
-fn calculate(source: &str, variables: &mut dyn Variables, depth: u16) -> Result<i64> {
+fn calculate(source: &str, variables: &mut dyn Variables, depth: u16) -> Evaluation<i64> {
     check_depth(depth)?;
     if let [digit @ b'0'..=b'9'] = source.as_bytes() {
         return Ok(i64::from(digit - b'0'));
@@ -871,14 +832,16 @@ fn calculate(source: &str, variables: &mut dyn Variables, depth: u16) -> Result<
         && let Some(old) = variables.decimal(name)
     {
         let delta = if source.ends_with("++") { 1 } else { -1 };
-        variables.set(name, old.wrapping_add(delta))?;
+        variables
+            .set(name, old.wrapping_add(delta))
+            .map_err(|e| Failure::write(name, e))?;
         return Ok(old);
     }
     Parser::new(source).evaluate(variables, depth)
 }
 
 impl Parser<'_> {
-    fn evaluate(&mut self, variables: &mut dyn Variables, depth: u16) -> Result<i64> {
+    fn evaluate(&mut self, variables: &mut dyn Variables, depth: u16) -> Evaluation<i64> {
         self.advance()?;
         if self.token == Token::End {
             return Ok(0);
@@ -887,7 +850,7 @@ impl Parser<'_> {
             self.expression(variables, 1, true, depth + 1)?
                 .read(variables, true, depth + 1)?;
         if self.token != Token::End {
-            return Err("unexpected arithmetic token");
+            return Err("unexpected arithmetic token".into());
         }
         Ok(value)
     }
@@ -1057,6 +1020,18 @@ fn number(s: &str) -> Result<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn read_only_subscript_observes_nounset() {
+        let mut session = Session::default();
+        assert_eq!(data_index("$missing", &mut ReadOnly(&session)), Ok(0));
+        session.nounset = true;
+        assert_eq!(
+            data_index("$missing", &mut ReadOnly(&session)),
+            Err("unbound arithmetic variable")
+        );
+        assert_eq!(data_index("${missing:-7}", &mut ReadOnly(&session)), Ok(7));
+    }
+
     #[test]
     fn precedence_numbers_and_lazy_branches() {
         let mut session = Session::default();

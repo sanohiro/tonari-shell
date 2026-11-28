@@ -686,7 +686,7 @@ impl Session {
         let count = args.first().map_or(Ok(1), |s| s.trim().parse::<i64>());
         let Ok(count) = count else {
             diagnostic!("shift: {}: numeric argument required", args[0]);
-            return 1;
+            return 2;
         };
         if count < 0 || count as u64 > self.positional.len() as u64 {
             if count < 0 || self.shopt.shift_verbose {
@@ -934,7 +934,7 @@ impl Session {
         if matches!(name, "BASHOPTS" | "SHELLOPTS") {
             return Some(self.option_list(name == "SHELLOPTS"));
         }
-        if name == "PIPESTATUS" {
+        if name == "PIPESTATUS" || self.live_dirstack(name) {
             return self.element(name, 0);
         }
         if let Some(var) = self.variables.get(name) {
@@ -1098,6 +1098,7 @@ impl Session {
         !matches!(
             name,
             "BASH_ARGV0"
+                | "BASH_XTRACEFD"
                 | "GLOBIGNORE"
                 | "IGNOREEOF"
                 | "ignoreeof"
@@ -1177,6 +1178,11 @@ impl Session {
             "POSIXLY_CORRECT" => self.apply_posix_mode(true),
             "OPTIND" => self.opt_offset = 0,
             "IGNOREEOF" | "ignoreeof" => self.set_eof_variable(Some(value)),
+            "BASH_XTRACEFD"
+                if !value.is_empty() && crate::execute::trace_descriptor(value).is_none() =>
+            {
+                diagnostic!("BASH_XTRACEFD: {value}: invalid value for trace file descriptor");
+            }
             "GLOBIGNORE" => self.shopt.glob.set_ignore(Some(value)),
             "PATH" => self.hashes.clear(),
             _ => {}
@@ -1685,23 +1691,38 @@ impl Session {
         &'a self,
         assignments: &'a [(String, String)],
     ) -> impl Iterator<Item = (&'a str, Option<Cow<'a, str>>)> {
-        self.variables
-            .environment_entries()
-            .filter_map(|(name, var)| {
-                if var.exported && var.elements.is_none() && var.value.is_some() {
-                    let value = match name.as_str() {
-                        "BASHOPTS" | "SHELLOPTS" => {
-                            Some(Cow::Owned(self.option_list(name == "SHELLOPTS")))
-                        }
-                        _ => var.value.as_deref().map(Cow::Borrowed),
-                    };
-                    Some((name.as_str(), value))
-                } else if var.inherited(name) {
-                    Some((name.as_str(), None))
-                } else {
-                    None
-                }
+        // Exported bindings from outer function scopes are still visible to a
+        // child when an inner local has no exported value. Apply the scopes in
+        // order so the nearest exported value (or command prefix) wins.
+        let change = |name: &'a str, var: &'a Variable, outer: &[Bindings]| {
+            if var.exported && var.elements.is_none() && var.value.is_some() {
+                let value = match name {
+                    "BASHOPTS" | "SHELLOPTS" => {
+                        Some(Cow::Owned(self.option_list(name == "SHELLOPTS")))
+                    }
+                    _ => var.value.as_deref().map(Cow::Borrowed),
+                };
+                Some((name, value))
+            } else if var.inherited(name) && !outer.iter().any(|s| s.variables.contains_key(name)) {
+                Some((name, None))
+            } else {
+                None
+            }
+        };
+        self.locals
+            .iter()
+            .enumerate()
+            .flat_map(move |(i, scope)| {
+                scope
+                    .variables
+                    .iter()
+                    .filter_map(move |(name, var)| change(name, var.as_ref()?, &self.locals[..i]))
             })
+            .chain(
+                self.variables
+                    .environment_entries()
+                    .filter_map(move |(name, var)| change(name, var, &self.locals)),
+            )
             .chain(self.function_environment.values().map(|export| {
                 (
                     export.key.as_str(),

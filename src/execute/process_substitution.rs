@@ -1,5 +1,5 @@
 use std::cell::Cell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::rc::Rc;
 
@@ -23,7 +23,31 @@ pub(crate) struct Substitutions {
     active: Vec<Rc<Endpoint>>,
     // A completed process may still be named by wait after its fd closes.
     pending: Vec<libc::pid_t>,
-    finished: BTreeMap<libc::pid_t, u8>,
+    finished: FinishedStatuses,
+}
+
+#[derive(Default, Clone)]
+struct FinishedStatuses {
+    codes: BTreeMap<libc::pid_t, u8>,
+    order: VecDeque<libc::pid_t>,
+}
+
+impl FinishedStatuses {
+    fn insert(&mut self, pid: libc::pid_t, code: u8) {
+        if self.codes.len() == crate::jobs::MAX_FINISHED_STATUSES
+            && let Some(oldest) = self.order.pop_front()
+        {
+            self.codes.remove(&oldest);
+        }
+        self.order.push_back(pid);
+        self.codes.insert(pid, code);
+    }
+
+    fn take(&mut self, pid: libc::pid_t) -> Option<u8> {
+        let code = self.codes.remove(&pid)?;
+        self.order.retain(|&p| p != pid);
+        Some(code)
+    }
 }
 
 fn status(pid: libc::pid_t, options: i32) -> Option<u8> {
@@ -36,10 +60,11 @@ impl Substitutions {
     pub(crate) fn after_fork(&mut self) {
         // Inherited endpoints can still be used. Only this shell's children can be waited on.
         self.pending.clear();
-        self.finished.clear();
+        self.finished = FinishedStatuses::default();
     }
     pub(super) fn adopt(&mut self, mut other: Self, from: usize) {
         for end in other.active.drain(from..) {
+            self.finished.take(end.pid);
             self.pending.push(end.pid);
             self.active.push(end);
         }
@@ -51,9 +76,6 @@ impl Substitutions {
         self.active.truncate(start);
         self.pending.retain(|&pid| {
             if let Some(code) = status(pid, libc::WNOHANG) {
-                if self.finished.len() >= crate::jobs::MAX_FINISHED_STATUSES {
-                    self.finished.pop_first();
-                }
                 self.finished.insert(pid, code);
                 false
             } else {
@@ -63,7 +85,7 @@ impl Substitutions {
     }
 
     pub(crate) fn knows(&self, pid: libc::pid_t) -> bool {
-        self.pending.contains(&pid) || self.finished.contains_key(&pid)
+        self.pending.contains(&pid) || self.finished.codes.contains_key(&pid)
     }
 
     pub(crate) fn poll_next(
@@ -73,7 +95,7 @@ impl Substitutions {
     ) -> (Option<(u8, libc::pid_t)>, bool) {
         if let Some((&pid, &code)) = selected
             .iter()
-            .find_map(|pid| self.finished.get_key_value(pid))
+            .find_map(|pid| self.finished.codes.get_key_value(pid))
         {
             return (Some((code, pid)), false);
         }
@@ -84,9 +106,6 @@ impl Substitutions {
             }
             if let Some(code) = status(pid, libc::WNOHANG) {
                 self.pending.swap_remove(i);
-                if self.finished.len() >= crate::jobs::MAX_FINISHED_STATUSES {
-                    self.finished.pop_first();
-                }
                 self.finished.insert(pid, code);
                 return (Some((code, pid)), false);
             }
@@ -100,7 +119,7 @@ impl Substitutions {
         pid: libc::pid_t,
         mask: Option<&crate::traps::WaitMask>,
     ) -> Option<u8> {
-        if let Some(code) = self.finished.remove(&pid) {
+        if let Some(code) = self.finished.take(pid) {
             return Some(code);
         }
         let i = self.pending.iter().position(|&child| child == pid)?;
@@ -183,6 +202,8 @@ pub(crate) fn launch(
         status(pid, 0);
         return Err("cannot inherit process substitution descriptor");
     }
+    // PID reuse supersedes the completed substitution before callers can wait.
+    session.substitutions.finished.take(pid);
     session.substitutions.active.push(Rc::new(Endpoint {
         fd: Cell::new(Some(keep.into_raw_fd())),
         pid,
@@ -190,4 +211,23 @@ pub(crate) fn launch(
     session.substitutions.pending.push(pid);
     session.last_background = Some(pid);
     Ok(format!("/dev/fd/{fd}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completion_history_evicts_by_age_across_pid_wrap() {
+        let mut history = FinishedStatuses::default();
+        for i in 0..crate::jobs::MAX_FINISHED_STATUSES as i32 {
+            history.insert(10000 + i, 2);
+        }
+        history.insert(5, 7);
+        history.insert(6, 8);
+        assert_eq!(history.take(10000), None);
+        assert_eq!(history.take(10001), None);
+        assert_eq!(history.take(5), Some(7));
+        assert_eq!(history.take(5), None);
+    }
 }

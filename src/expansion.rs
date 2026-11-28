@@ -467,10 +467,7 @@ impl<'a> Expansion<'a> {
 
     /// Operands that already went through shell expansion must only be parsed as arithmetic.
     pub(crate) fn arithmetic_value(&mut self, text: &str) -> Result<i64, Error> {
-        arithmetic::with_variables(text, self).map_err(|message| match message {
-            "unbound arithmetic variable" => arithmetic::shell_error(message, text, self.session),
-            _ => Error::discard(message),
-        })
+        arithmetic::with_variables(text, self).map_err(|e| e.error(text, self.session, true))
     }
 
     pub(crate) fn arithmetic_text<'s>(
@@ -639,6 +636,12 @@ impl<'a> Expansion<'a> {
 }
 
 impl Variables for Expansion<'_> {
+    fn session(&self) -> &Session {
+        self.session
+    }
+    fn visible_nameref(&self, name: &str) -> bool {
+        self.session.is_nameref(name) && !self.shadows(name)
+    }
     fn scalar_text(&self, name: &str) -> Option<&str> {
         self.borrowed_scalar(name)
     }
@@ -649,8 +652,21 @@ impl Variables for Expansion<'_> {
             Ok(self.lookup(name))
         }
     }
+    fn indexed_decimal(&self, name: &str, index: i64) -> Option<i64> {
+        if self.shadows(name) {
+            None
+        } else {
+            self.session.indexed_scalar_decimal(name, index)
+        }
+    }
+    fn set_indexed(&mut self, name: &str, index: i64, value: i64) -> Result<(), &'static str> {
+        Variables::set_indexed(self.session, name, index, value)
+    }
     fn set(&mut self, name: &str, value: i64) -> Result<(), &'static str> {
-        if crate::session::array::subscript(name).is_some() || self.session.is_nameref(name) {
+        if !self.shadows(name)
+            || crate::session::array::subscript(name).is_some()
+            || self.session.is_nameref(name)
+        {
             return Variables::set(self.session, name, value);
         }
         if self.session.readonly(name) {

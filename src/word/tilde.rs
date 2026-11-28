@@ -1,15 +1,17 @@
 pub(super) fn tilde(s: &str, env: &crate::expansion::Expansion<'_>) -> String {
     let prefix = s.strip_suffix('/').unwrap_or(s);
+    let Some(suffix) = prefix.strip_prefix('~') else {
+        return s.to_owned();
+    };
     let home = match prefix {
         "~" => env.lookup("HOME").or_else(account_home),
         "~+" => env.lookup("PWD"),
         "~-" => env.lookup("OLDPWD"),
-        numbered
-            if numbered[1..]
-                .trim_start_matches(['+', '-'])
-                .starts_with(|c: char| c.is_ascii_digit()) =>
+        _ if suffix
+            .trim_start_matches(['+', '-'])
+            .starts_with(|c: char| c.is_ascii_digit()) =>
         {
-            env.session.stack_index(&numbered[1..]).and_then(|i| {
+            env.session.stack_index(suffix).and_then(|i| {
                 if i == 0 {
                     env.lookup("PWD")
                 } else {
@@ -17,10 +19,7 @@ pub(super) fn tilde(s: &str, env: &crate::expansion::Expansion<'_>) -> String {
                 }
             })
         }
-        _ => account_field(
-            Some(prefix.strip_prefix('~').unwrap_or(prefix)),
-            Field::Home,
-        ),
+        _ => account_field(Some(suffix), Field::Home),
     };
     let Some(mut home) = home else {
         return s.to_owned();
@@ -38,16 +37,13 @@ pub(crate) fn named_home(name: &str) -> Option<String> {
 }
 
 pub(crate) fn account_home() -> Option<String> {
-    static HOME: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-    HOME.get_or_init(|| account_field(None, Field::Home))
-        .clone()
+    static HOME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    cached_field(&HOME, Field::Home).map(str::to_owned)
 }
 
 pub(crate) fn account_shell() -> Option<String> {
-    static SHELL: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-    SHELL
-        .get_or_init(|| account_field(None, Field::Shell))
-        .clone()
+    static SHELL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    cached_field(&SHELL, Field::Shell).map(str::to_owned)
 }
 
 enum Field {
@@ -57,9 +53,16 @@ enum Field {
 }
 
 pub(crate) fn effective_user() -> Option<&'static str> {
-    static USER: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-    USER.get_or_init(|| account_field(None, Field::User))
-        .as_deref()
+    static USER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    cached_field(&USER, Field::User)
+}
+
+fn cached_field(cell: &'static std::sync::OnceLock<String>, field: Field) -> Option<&'static str> {
+    if let Some(value) = cell.get() {
+        return Some(value);
+    }
+    let value = account_field(None, field)?;
+    Some(cell.get_or_init(|| value))
 }
 
 fn account_field(login: Option<&str>, field: Field) -> Option<String> {

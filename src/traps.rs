@@ -906,7 +906,7 @@ pub(crate) fn finish_shell(session: &mut Session, code: u8, save_history: bool) 
         session.jobs.hangup();
     }
     if !session.traps.active() && TERMINATING.load(Relaxed) == 0 {
-        if save_history {
+        if save_history && session.history_enabled {
             crate::history::finish_interactive(session);
         }
         session.jobs.restore_initial_group();
@@ -918,7 +918,7 @@ pub(crate) fn finish_shell(session: &mut Session, code: u8, save_history: bool) 
     };
     let sig = TERMINATING.swap(0, Relaxed);
     code = exit_action(session, code);
-    if save_history {
+    if save_history && session.history_enabled {
         crate::history::finish_interactive(session);
     }
     session.jobs.restore_initial_group();

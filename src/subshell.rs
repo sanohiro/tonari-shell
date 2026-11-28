@@ -245,8 +245,12 @@ pub fn capture_substitution(
                 };
                 #[cfg(not(target_os = "linux"))]
                 let file = std::fs::File::open(&filename);
-                let mut file =
-                    file.map_err(|e| io::Error::new(e.kind(), format!("{filename}: {e}")))?;
+                let mut file = file.map_err(|e| {
+                    io::Error::new(
+                        e.kind(),
+                        format!("{filename}: {}", crate::builtins::os_message(&e)),
+                    )
+                })?;
                 // Write straight to fd 1. Stdout's line buffer could retain the
                 // last bytes across _exit when the file has no final newline.
                 let mut stdout =

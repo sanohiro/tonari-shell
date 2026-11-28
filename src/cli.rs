@@ -35,6 +35,7 @@ pub struct StartupOptions {
     pub physical: bool,
     pub keyword: bool,
     pub nolog: bool,
+    pub list_options: Option<bool>,
     pub shopts: Vec<(bool, Option<String>)>,
     pub posix: Option<bool>,
 }
@@ -181,9 +182,11 @@ pub fn parse(
                             .shopts
                             .push((enabled, args.next().map(utf8).transpose()?)),
                         'o' => {
-                            let name =
-                                utf8(args.next().ok_or("expected an option name after -o")?)?;
-                            options.set(&name, enabled)?;
+                            if let Some(name) = args.next() {
+                                options.set(&utf8(name)?, enabled)?;
+                            } else {
+                                options.list_options = Some(enabled);
+                            }
                         }
                         c => {
                             let name = crate::Session::short_option_name(c)

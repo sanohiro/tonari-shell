@@ -119,7 +119,11 @@ pub(crate) fn finish_interactive(session: &mut Session) {
             .as_ref()
             .is_some_and(|h| h.incomplete(std::path::Path::new(&path)));
         let limit = limit.filter(|_| !incomplete);
-        let op = if session.shopt.histappend || incomplete {
+        // Startup code can add history and exit before this file is loaded.
+        // Preserve existing entries when saving to a different or unread file.
+        let imported = session.history.as_ref().and_then(|h| h.imported.as_ref());
+        let unread = imported.is_none_or(|h| h.path != std::path::Path::new(&path));
+        let op = if session.shopt.histappend || incomplete || unread {
             'a'
         } else {
             'w'
@@ -632,12 +636,7 @@ impl Session {
                     && (if p == "&" {
                         previous == Some(text)
                     } else {
-                        let _locale = crate::pattern::parameter_locale(session, p);
-                        if session.shopt.glob.extglob {
-                            crate::pattern::extended::matches(text, p)
-                        } else {
-                            crate::pattern::matches(text, p)
-                        }
+                        crate::pattern::extended::case_sensitive_session(text, p, session)
                     })
             })
         }) {

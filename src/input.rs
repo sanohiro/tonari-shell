@@ -52,7 +52,7 @@ fn stdin_reader() -> io::Result<(BufReader<PrivateFile>, bool)> {
     Ok((reader, seekable))
 }
 
-fn executable_header(bytes: &[u8]) -> bool {
+pub(crate) fn executable_header(bytes: &[u8]) -> bool {
     matches!(
         bytes.get(..4),
         Some(
@@ -114,6 +114,7 @@ pub fn file_script(
         }
     }
     if let Some(meta) = &metadata
+        && (session.source_depth != 0 || !session.history_enabled)
         && let Some((program, next_line)) = file_group(session, &file, meta)
     {
         let mut file = match PrivateFile::new(file) {
@@ -486,11 +487,7 @@ fn run(
         // At a new physical line these tokens cannot open a command. Keep
         // accumulated compound commands, history expansion and NUL diagnostics.
         if line_start == 0 && n != 0 && blank_or_comment(text, session) {
-            if !check
-                && !session.interactive
-                && session.source_depth == 0
-                && session.begin_history_line(text)
-            {
+            if !check && session.source_depth == 0 && session.begin_history_line(text) {
                 session.finish_history_line();
             }
             base_line += text.bytes().filter(|&b| b == b'\n').count();
@@ -604,9 +601,7 @@ fn run(
                         return error(e, 1);
                     }
                 }
-                let remember = session.source_depth == 0
-                    && !session.interactive
-                    && session.begin_history_line(text);
+                let remember = session.source_depth == 0 && session.begin_history_line(text);
                 let flow = execute_program(session, program, state.status, false);
                 // A permanent redirect can change fd 0 from a regular file to a
                 // pipe or the reverse. Named scripts keep their private reader.

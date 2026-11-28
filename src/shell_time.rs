@@ -10,7 +10,7 @@ mod regional;
 // literal formats, but a short prompt cannot request unbounded expansion.
 const MAX_TIME_PADDING: usize = 64 * 1024;
 
-fn valid_widths(format: &str) -> bool {
+fn total_padding(format: &str) -> Option<usize> {
     let mut rest = format;
     let mut total = 0usize;
     while let Some((_, next)) = rest.split_once('%') {
@@ -21,17 +21,15 @@ fn valid_widths(format: &str) -> bool {
         let width = next.trim_start_matches(['_', '-', '0', '^', '#']);
         let code = width.trim_start_matches(|c: char| c.is_ascii_digit());
         if code.len() != width.len() {
-            let Some(n) = width[..width.len() - code.len()].parse::<usize>().ok() else {
-                return false;
-            };
+            let n = width[..width.len() - code.len()].parse::<usize>().ok()?;
             total = total.saturating_add(n);
             if total > MAX_TIME_PADDING {
-                return false;
+                return None;
             }
         }
         rest = code;
     }
-    true
+    Some(total)
 }
 
 struct Clock {
@@ -129,9 +127,14 @@ fn using_clock<T>(
     if format == "%s" {
         return run(&|seconds| Some(seconds.to_string()));
     }
-    if format.as_bytes().iter().any(u8::is_ascii_digit) && !valid_widths(format) {
-        return run(&|_| None);
-    }
+    let padding = if format.as_bytes().iter().any(u8::is_ascii_digit) {
+        let Some(padding) = total_padding(format) else {
+            return run(&|_| None);
+        };
+        padding
+    } else {
+        0
+    };
     let name = session
         .is_exported("TZ")
         .then(|| session.get("TZ"))
@@ -146,19 +149,22 @@ fn using_clock<T>(
             *slot = Some(Clock::new(name, locale.into_owned()));
         }
         let clock = slot.as_ref().unwrap();
-        run(&|seconds| format_in_zone(clock, format, seconds))
+        run(&|seconds| format_in_zone(clock, format, seconds, padding))
     })
 }
 
-fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
-    let local = clock.zone.find_local_time_type(seconds).ok()?;
+fn format_in_zone(clock: &Clock, format: &str, seconds: i64, padding: usize) -> Option<String> {
+    let calendar = |secs: i64| {
+        let local = clock.zone.find_local_time_type(secs).ok()?;
+        let shifted = secs.checked_add(i64::from(local.ut_offset()))?;
+        let mut tm = std::mem::MaybeUninit::uninit();
+        if unsafe { libc::gmtime_r(&shifted, tm.as_mut_ptr()) }.is_null() {
+            return None;
+        }
+        Some((secs, local, unsafe { tm.assume_init() }))
+    };
+    let (seconds, local, mut tm) = calendar(seconds).or_else(|| calendar(0))?;
     let offset = local.ut_offset();
-    let shifted = seconds.checked_add(i64::from(offset))?;
-    let mut tm = std::mem::MaybeUninit::uninit();
-    if unsafe { libc::gmtime_r(&shifted, tm.as_mut_ptr()) }.is_null() {
-        return None;
-    }
-    let mut tm = unsafe { tm.assume_init() };
     tm.tm_isdst = i32::from(local.is_dst());
     tm.tm_gmtoff = offset.into();
 
@@ -176,7 +182,7 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
     #[cfg(target_env = "musl")]
     let format = {
         localized = regional::expand(clock.region, format, &tm, &|spec| {
-            format_in_zone(clock, spec, seconds)
+            format_in_zone(clock, spec, seconds, padding)
         });
         if !localized.contains('%') {
             return Some(localized);
@@ -206,6 +212,7 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
         let conversion = tail.strip_prefix(['E', 'O']).unwrap_or(tail);
         if conversion.len() != remaining.len()
             && let Some(spec @ ('s' | 'Z' | 'z')) = conversion.chars().next()
+            && !(cfg!(target_env = "gnu") && spec == 'z')
         {
             let mut value = match spec {
                 's' => seconds.to_string(),
@@ -255,7 +262,12 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
     // Some libc implementations also return zero on an invalid directive.
     // Bound retries by the input, so a rejected format cannot
     // keep doubling the buffer. Arbitrarily long ordinary formats still fit.
-    let max = fmt.as_bytes().len().saturating_mul(256).max(size);
+    let max = fmt
+        .as_bytes()
+        .len()
+        .saturating_mul(256)
+        .saturating_add(padding)
+        .max(size);
     loop {
         let mut bytes = Vec::<u8>::new();
         bytes.try_reserve_exact(size).ok()?;

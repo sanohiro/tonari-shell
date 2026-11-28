@@ -109,7 +109,11 @@ pub(super) fn search_in(
                     relative_search: relative,
                 }));
             }
-            Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) => {}
+            Err(e)
+                if matches!(
+                    e.raw_os_error(),
+                    Some(libc::ENOENT | libc::ENOTDIR | libc::EISDIR)
+                ) => {}
             _ => absent = false,
         }
     }
@@ -240,7 +244,7 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
             None
         } else if let Some(path) = supplied {
             if Path::new(path).is_dir() {
-                diagnostic!("hash: {path}: is a directory");
+                diagnostic!("hash: {path}: Is a directory");
                 status = 1;
                 continue;
             }

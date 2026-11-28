@@ -116,16 +116,10 @@ pub(crate) fn open_main_script(
                 && !path.as_os_str().as_encoded_bytes().contains(&b'/') =>
         {
             if let Some(search) = session.scalar_setting("PATH") {
-                for dir in crate::execute::search_directories(search.as_ref().as_ref())
-                    .filter(|dir| dir != &Path::new("."))
-                {
-                    let candidate = dir.join(path);
-                    match File::open(&candidate) {
-                        Ok(file) => return Ok((file, Some(candidate))),
-                        Err(e)
-                            if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR)) => {}
-                        Err(e) => return Err(e),
-                    }
+                let dirs = crate::execute::search_directories(search.as_ref().as_ref())
+                    .filter(|dir| dir != &Path::new("."));
+                if let Some((candidate, script)) = search_scripts(dirs, path).map_err(|(_, e)| e)? {
+                    return Ok((script.file, Some(candidate)));
                 }
             }
             Err(first)
@@ -141,6 +135,25 @@ fn open_script(path: &Path) -> io::Result<Script> {
         return Err(io::Error::from_raw_os_error(libc::EISDIR));
     }
     Ok(Script { file, metadata })
+}
+
+fn search_scripts<'a>(
+    dirs: impl Iterator<Item = &'a Path>,
+    name: &Path,
+) -> Result<Option<(PathBuf, Script)>, (PathBuf, io::Error)> {
+    for dir in dirs {
+        let candidate = dir.join(name);
+        match open_script(&candidate) {
+            Ok(script) => return Ok(Some((candidate, script))),
+            Err(e)
+                if matches!(
+                    e.raw_os_error(),
+                    Some(libc::ENOENT | libc::ENOTDIR | libc::EISDIR | libc::EACCES | libc::ELOOP)
+                ) => {}
+            Err(e) => return Err((candidate, e)),
+        }
+    }
+    Ok(None)
 }
 
 fn sourced(
@@ -217,37 +230,22 @@ pub fn source_file(session: &mut Session, words: &[String], status: u8, fatal: b
         .then(|| session.scalar_setting("PATH"))
         .flatten();
     if let Some(path) = search.or(inherited.as_deref()).filter(|_| !direct) {
-        let mut selected = None;
-        for dir in crate::execute::search_directories(path.as_ref()) {
-            let path = dir.join(name);
-            match open_script(&path) {
-                Ok(file) => {
-                    selected = Some((file, path));
-                    break;
-                }
-                Err(e)
-                    if matches!(
-                        e.raw_os_error(),
-                        Some(
-                            libc::ENOENT
-                                | libc::ENOTDIR
-                                | libc::EISDIR
-                                | libc::EACCES
-                                | libc::ELOOP
-                        )
-                    ) => {}
-                Err(e) => {
-                    diagnostic!(
-                        "{command}: {}: {}",
-                        path.display(),
-                        crate::builtins::os_message(&e)
-                    );
-                    return failure;
-                }
+        match search_scripts(
+            crate::execute::search_directories(path.as_ref()),
+            Path::new(name),
+        ) {
+            Ok(Some((path, file))) => {
+                return finish(sourced(session, file, &path, &args[1..], status));
             }
-        }
-        if let Some((file, path)) = selected {
-            return finish(sourced(session, file, &path, &args[1..], status));
+            Ok(None) => {}
+            Err((path, e)) => {
+                diagnostic!(
+                    "{command}: {}: {}",
+                    path.display(),
+                    crate::builtins::os_message(&e)
+                );
+                return failure;
+            }
         }
     }
     if !direct && (search.is_some() || session.posix && words[0] == "." && session.shopt.sourcepath)
@@ -291,12 +289,25 @@ pub(crate) fn debugger(session: &mut Session) -> Flow {
     result
 }
 
-fn optional(session: &mut Session, path: &Path) -> Option<Flow> {
-    let file = open_script(path).ok()?;
-    Some(match sourced(session, file, path, &[], 0) {
-        Flow::Return(_) => Flow::Continue(0),
-        other => other,
-    })
+fn optional(session: &mut Session, path: &Path, status: u8) -> Option<Flow> {
+    match open_script(path) {
+        Ok(file) if file.metadata.is_file() && file.metadata.len() == 0 => {
+            Some(Flow::Continue(status))
+        }
+        Ok(file) => Some(match sourced(session, file, path, &[], status) {
+            Flow::Return(_) => Flow::Continue(session.traps.before_return),
+            other => other,
+        }),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => {
+            if e.raw_os_error() == Some(libc::EISDIR) {
+                diagnostic!("{}: is a directory", path.display());
+            } else {
+                diagnostic!("{}: {}", path.display(), crate::builtins::os_message(&e));
+            }
+            Some(Flow::Continue(status))
+        }
+    }
 }
 
 pub fn defer_interactive_exit(session: &mut Session) -> bool {
@@ -319,9 +330,7 @@ pub fn logout(session: &mut Session, code: u8, previous: u8) -> u8 {
         .map(|h| Path::new(h.as_ref()).join(".bash_logout"));
     let system = cfg!(target_os = "linux").then(|| PathBuf::from("/etc/bash.bash_logout"));
     for path in home.into_iter().chain(system) {
-        if let Ok(file) = open_script(&path)
-            && let Flow::Exit(n) = sourced(session, file, &path, &[], previous)
-        {
+        if let Some(Flow::Exit(n)) = optional(session, &path, previous) {
             return n;
         }
     }
@@ -330,9 +339,13 @@ pub fn logout(session: &mut Session, code: u8, previous: u8) -> u8 {
 
 fn bashrc(session: &mut Session, invocation: &Invocation) -> Flow {
     #[cfg(target_os = "linux")]
-    if let Some(exit @ Flow::Exit(_)) = optional(session, Path::new("/etc/bash.bashrc")) {
-        return exit;
-    }
+    let status = match optional(session, Path::new("/etc/bash.bashrc"), 0) {
+        Some(Flow::Continue(n)) => n,
+        Some(flow) => return flow,
+        None => 0,
+    };
+    #[cfg(not(target_os = "linux"))]
+    let status = 0;
     invocation
         .rcfile
         .clone()
@@ -341,8 +354,8 @@ fn bashrc(session: &mut Session, invocation: &Invocation) -> Flow {
                 .personal_home()
                 .map(|p| Path::new(p.as_ref()).join(".bashrc"))
         })
-        .and_then(|path| optional(session, &path))
-        .unwrap_or(Flow::Continue(0))
+        .and_then(|path| optional(session, &path, status))
+        .unwrap_or(Flow::Continue(status))
 }
 
 fn remote_stdin() -> bool {
@@ -366,9 +379,13 @@ pub fn initialize(session: &mut Session, invocation: &Invocation, env: &Environm
     {
         return bashrc(session, invocation);
     }
+    let mut status = 0;
     if invocation.login && !invocation.noprofile && (invocation.as_sh || !session.posix) {
-        if let Some(exit @ Flow::Exit(_)) = optional(session, Path::new("/etc/profile")) {
-            return exit;
+        if let Some(flow) = optional(session, Path::new("/etc/profile"), status) {
+            match flow {
+                Flow::Continue(n) => status = n,
+                other => return other,
+            }
         }
         if let Some(home) = session.personal_home().map(|s| PathBuf::from(s.as_ref())) {
             let profiles: &[&str] = if invocation.as_sh {
@@ -377,9 +394,10 @@ pub fn initialize(session: &mut Session, invocation: &Invocation, env: &Environm
                 &[".bash_profile", ".bash_login", ".profile"]
             };
             for name in profiles {
-                if let Some(flow) = optional(session, &home.join(name)) {
-                    if let Flow::Exit(_) = flow {
-                        return flow;
+                if let Some(flow) = optional(session, &home.join(name), status) {
+                    match flow {
+                        Flow::Continue(n) => status = n,
+                        other => return other,
                     }
                     break;
                 }
@@ -394,15 +412,15 @@ pub fn initialize(session: &mut Session, invocation: &Invocation, env: &Environm
         let var = if invocation.interactive {
             "ENV"
         } else if invocation.as_sh || session.posix {
-            return Flow::Continue(0);
+            return Flow::Continue(status);
         } else {
             "BASH_ENV"
         };
         let Some(path) = session.get(var).filter(|p| !p.is_empty()) else {
-            return Flow::Continue(0);
+            return Flow::Continue(status);
         };
         if session.privileged || invocation.as_su && invocation.login {
-            return Flow::Continue(0);
+            return Flow::Continue(status);
         }
         let path = if path.contains(['$', '`', '\\']) {
             let word = match crate::parser::expansion_string(&path) {
@@ -412,14 +430,14 @@ pub fn initialize(session: &mut Session, invocation: &Invocation, env: &Environm
                     return Flow::Continue(1);
                 }
             };
-            match crate::eval::expand_case(session, word, 0, false) {
+            match crate::eval::expand_case(session, word, status, false) {
                 Ok(path) => path,
                 Err(flow) => return flow,
             }
         } else {
             path
         };
-        return optional(session, Path::new(&path)).unwrap_or(Flow::Continue(0));
+        return optional(session, Path::new(&path), status).unwrap_or(Flow::Continue(status));
     }
-    Flow::Continue(0)
+    Flow::Continue(status)
 }

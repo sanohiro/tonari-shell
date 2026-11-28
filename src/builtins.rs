@@ -327,10 +327,8 @@ pub(crate) fn binary(
             }
         }
         _ => {
-            let a = integer_operand(left)
-                .ok_or_else(|| format!("{left}: integer expression expected"))?;
-            let b = integer_operand(right)
-                .ok_or_else(|| format!("{right}: integer expression expected"))?;
+            let a = integer_operand(left).ok_or_else(|| format!("{left}: integer expected"))?;
+            let b = integer_operand(right).ok_or_else(|| format!("{right}: integer expected"))?;
             match op {
                 "-eq" => a == b,
                 "-ne" => a != b,

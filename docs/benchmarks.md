@@ -4475,3 +4475,5 @@ The first implementation built a word for every stored `$key`. The retained impl
 A second interleaved run, including the subsequent parameter error-handling fixes, measured 16.224 / 15.192 / 34.253 ms for the associative case, 15.896 / 14.487 / 35.725 ms for the indexed case, and 12.622 / 12.325 / 34.145 ms for the slice. Values follow the same column order as the table.
 
 Apple M1 実機で各ループを 12,000 回実行し、終了時の値と標準エラーを検査した。初回の正常実装は添字の `$key` を毎回パースしていた。単独の変数参照は直接読み出し、数値の添字では保存済み十進数を使う変更を採用した。複合式は従来どおりデータ用の評価器を通る。表はウォームアップ後に各シェルを交互に測った 15 回の中央値。
+
+After restoring length, case and pattern operations in stored subscripts, the same M1 driver measured 12,000 reads of a nameref to `a[${#args[@]}]`. Resolving the entire subscript as an array count reduced the median from 16.535 to 14.623 ms. GNU Bash 5.3.20 measured 40.502 ms. Each local Cargo release executable was 2,412,064 bytes. 初回実装は長さの展開ごとに単語を生成していた。添字全体が配列の長さであり、要素数が既知の場合は、数値を直接返す。[Reproduction driver](../tests/review_r2_language.py)

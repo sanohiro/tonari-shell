@@ -282,11 +282,12 @@ fn write_option_line(
     name: &str,
     value: bool,
     reusable: bool,
+    width: usize,
 ) -> io::Result<()> {
     if reusable {
         writeln!(out, "set {}o {name}", if value { '-' } else { '+' })
     } else {
-        writeln!(out, "{name:15}\t{}", if value { "on" } else { "off" })
+        writeln!(out, "{name:width$}\t{}", if value { "on" } else { "off" })
     }
 }
 
@@ -592,7 +593,13 @@ impl Session {
             let result = if reusable && !set {
                 writeln!(writer, "shopt -{} {name}", if value { 's' } else { 'u' })
             } else {
-                write_option_line(writer, name, value, reusable)
+                write_option_line(
+                    writer,
+                    name,
+                    value,
+                    reusable,
+                    if set && all { 15 } else { 20 },
+                )
             };
             if result.is_err() {
                 return 1;
@@ -646,7 +653,8 @@ impl Session {
                     out.write_all(VERSION.get_or_init(|| {
                         let mut bytes = name.as_bytes().to_vec();
                         let version = self.declared_variable(name, false).unwrap();
-                        print_variable_value(&mut bytes, &version).expect("in-memory write");
+                        print_variable_value(&mut bytes, &version, locale)
+                            .expect("in-memory write");
                         bytes
                     }))
                 } else if empty_snapshot {
@@ -663,7 +671,7 @@ impl Session {
                     {
                         continue;
                     }
-                    write!(out, "{name}").and_then(|_| print_variable_value(&mut out, var))
+                    write!(out, "{name}").and_then(|_| print_variable_value(&mut out, var, locale))
                 } else {
                     let value = self.listed_scalar(name, stored);
                     let Some(value) = value else { continue };
@@ -742,7 +750,7 @@ impl Session {
                                 crate::builtins::StdoutFd(Some("set")),
                             );
                             for (name, on) in self.options(true) {
-                                let result = write_option_line(&mut out, name, on, !enable);
+                                let result = write_option_line(&mut out, name, on, !enable, 15);
                                 if result.is_err() {
                                     return 1;
                                 }

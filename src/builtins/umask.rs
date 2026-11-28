@@ -108,7 +108,13 @@ pub fn run(args: &[String], posix: bool) -> u8 {
             return 1;
         };
         unsafe { libc::umask(mask) };
-        MASK.set(Some(mask & 0o777));
+        // Query the effective high bits only when the caller supplied them.
+        // Darwin retains them while Linux reports the low nine bits.
+        MASK.set(Some(if mask > 0o777 {
+            unsafe { libc::umask(mask) }
+        } else {
+            mask
+        }));
         if !symbols || posix {
             return 0;
         }

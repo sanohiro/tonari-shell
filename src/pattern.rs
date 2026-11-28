@@ -289,7 +289,7 @@ impl<T: AsRef<str>> Matcher<T> {
             return folded_prefix(value, text.as_ref(), session.character_locale())
                 == Some(value.len());
         }
-        extended::insensitive_session(value, self.source(), extended, session)
+        extended::session_match(value, self.source(), extended, session)
     }
 
     pub(crate) fn matches_session(&self, value: &str, session: &crate::Session) -> bool {
@@ -657,13 +657,9 @@ pub(crate) fn quote_pattern(output: &mut String, text: &str, extended: bool) {
     // The first literal segment cannot be inside a bracket expression.
     // Later segments can follow active syntax, for example [a"-"z].
     let may_be_in_bracket = !output.is_empty();
-    let symbol = output.rsplit_once('[').is_some_and(|(prefix, rest)| {
-        !prefix.is_empty() && rest.starts_with(['.', '=']) && !rest.contains(']')
-    });
     for c in text.chars() {
         if matches!(c, '\\' | '*' | '?' | '[')
             || extended && matches!(c, '@' | '+' | '!' | '(' | ')' | '|')
-            || symbol
             || (matches!(c, ':' | '.' | '=') && output.ends_with('['))
             || may_be_in_bracket && matches!(c, ']' | '-' | '!' | '^')
         {
@@ -743,6 +739,13 @@ impl Default for GlobOptions {
 }
 
 impl GlobOptions {
+    pub(crate) fn for_completion(&self) -> Self {
+        Self {
+            ignore: None,
+            ..self.clone()
+        }
+    }
+
     pub(crate) fn set_ignore(&mut self, value: Option<&str>) {
         self.ignore = None;
         let Some(value) = value else {

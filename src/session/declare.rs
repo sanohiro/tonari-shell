@@ -298,6 +298,7 @@ fn print_variables(
     operands: &[String],
     flags: &Options,
 ) -> crate::Flow {
+    let locale = session.character_locale();
     let local = command == "local";
     let attribute = matches!(command, "readonly" | "export");
     if operands.is_empty()
@@ -335,6 +336,7 @@ fn print_variables(
             name,
             var,
             (attribute && session.posix).then_some(command),
+            locale,
         )
         .is_ok()
         {
@@ -403,6 +405,7 @@ fn print_variables(
                 name,
                 &var,
                 (attribute && session.posix).then_some(command),
+                locale,
             )
             .is_err()
             {
@@ -447,7 +450,7 @@ fn assign_value(
     text: &str,
     append: bool,
     global: bool,
-) -> Result<(), String> {
+) -> Result<(), crate::expansion::Error> {
     let assoc_key = if var.associative().is_some() {
         Some(match subscript {
             Some(expr) => session.subscript_key(expr)?,
@@ -459,7 +462,16 @@ fn assign_value(
     let index = if let Some(expr) = subscript
         && assoc_key.is_none()
     {
-        session.declaration_index(name, expr, global, var)?
+        match session.declaration_index(name, expr, global, var) {
+            Ok(i) => i,
+            Err(crate::session::SUBSCRIPT_RANGE) => {
+                var.make_array();
+                var.array_assigned = true;
+                return Err(crate::expansion::Error::from("bad array subscript")
+                    .in_expression(&format!("{name}[{expr}]")));
+            }
+            Err(error) => return Err(crate::expansion::Error::discard(error).in_expression(expr)),
+        }
     } else {
         0
     };
@@ -474,7 +486,9 @@ fn assign_value(
             .or(var.value.as_deref())
     };
     let text = if var.integer {
-        session.integer_value(old, text, append)?
+        session
+            .integer_value(old, text, append)
+            .map_err(|error| crate::expansion::Error::discard(error).in_expression(text))?
     } else if append {
         old.unwrap_or_default().to_owned() + text
     } else {
@@ -482,7 +496,7 @@ fn assign_value(
     };
     let text = session.convert_case(text, var.letter_case);
     if var.nameref && !Session::valid_reference_target(&text) {
-        return Err(format!("{name}: invalid name reference"));
+        return Err(crate::expansion::Error::from("invalid name reference").in_expression(name));
     }
     if name == "OPTIND" {
         session.opt_offset = 0;
@@ -843,13 +857,25 @@ impl Session {
                     flags.global,
                 )
             {
-                if var.integer && var.nameref {
+                let flow = e.flow(self);
+                if !matches!(flow, crate::Flow::Continue(_)) {
+                    e.report(&format!("{command}: "));
+                    return flow;
+                }
+                if var.integer
+                    && var.nameref
+                    && flags.integer == Some(true)
+                    && flags.nameref == Some(true)
+                {
                     if fresh_local {
                         var.nameref = false;
                         self.store_variable(name, var, false);
                     }
                 } else {
                     diagnostic!("{command}: {e}");
+                    if target.is_some() && var.elements.is_some() {
+                        self.store_variable(name, var, flags.global);
+                    }
                 }
                 status = 1;
                 continue;
@@ -925,7 +951,19 @@ impl Session {
         crate::execute::Flow::Continue(status)
     }
 
-    pub(super) fn store_variable(&mut self, name: &str, var: Variable, global: bool) {
+    pub(super) fn store_variable(&mut self, name: &str, mut var: Variable, global: bool) {
+        // The directory stack is a live indexed array. Index zero is the
+        // current directory; assignments only replace existing stack slots.
+        if name == "DIRSTACK"
+            && var.dynamic
+            && let Some(values) = var.elements.take()
+        {
+            for (index, slot) in self.dir_stack.iter_mut().rev().enumerate() {
+                if let Some(value) = values.get(&(index as i64 + 1)) {
+                    value.clone_into(slot);
+                }
+            }
+        }
         if global
             && let Some(saved) = self
                 .locals
@@ -970,17 +1008,19 @@ impl Session {
         }
         let live_table =
             matches!(name, "BASH_ALIASES" | "BASH_CMDS") && entry.is_none_or(|v| v.dynamic);
-        let array = entry.map_or_else(
-            || Self::builtin_array_parameter(name),
-            |v| v.elements.is_some(),
-        );
+        let live_dirs = name == "DIRSTACK" && entry.is_none_or(|v| v.dynamic);
+        let array = live_dirs
+            || entry.map_or_else(
+                || Self::builtin_array_parameter(name),
+                |v| v.elements.is_some(),
+            );
         let assoc = live_table || entry.and_then(Variable::associative).is_some();
         let mut var = match entry {
             Some(var) => Cow::Borrowed(var),
             None => Cow::Owned(Variable {
                 declared: true,
                 readonly: Self::builtin_readonly(name),
-                dynamic: super::dynamic::is_dynamic(name) || live_table,
+                dynamic: super::dynamic::is_dynamic(name) || live_table || live_dirs,
                 integer: super::dynamic::integer_attribute(name)
                     || matches!(name, "PPID" | "EUID" | "UID" | "BASHPID" | "HISTCMD"),
                 ..Variable::default()
@@ -1011,7 +1051,7 @@ impl Session {
             var.elements = Some(Rc::new(super::array::Elements::Associative(
                 self.table_snapshot(name),
             )));
-        } else if array && entry.is_none() {
+        } else if array && (entry.is_none() || live_dirs) {
             let values = if listing.is_some() && self.empty_array_listing(name) {
                 Vec::new()
             } else {

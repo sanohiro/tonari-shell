@@ -127,6 +127,38 @@ echo "$v"
             self.assertEqual((r.returncode, r.stdout, r.stderr),
                              (0, b"1\n2\n3\nfunction\nxycase z in word\n", b""))
 
+    def test_second_review_dynamic_stack_and_exported_locals(self):
+        for shell in (BASH, TONARI):
+            script = """pushd / >/dev/null
+DIRSTACK=(ignored kept); printf '<%s>' "${DIRSTACK[@]}"
+DIRSTACK+=(extra); dirs +1
+declare -a DIRSTACK=([1]=replaced); dirs +1
+unset DIRSTACK; DIRSTACK=(ordinary value); printf '<%s>' "${DIRSTACK[@]}"; dirs +1
+export marker=outer; f(){ local marker; /usr/bin/printenv marker; marker=; /usr/bin/printenv marker; }
+f; echo "$marker"
+compgen -A arrayvar BASH_ARG"""
+            r = self.command(shell, script)
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0,
+                b"</><kept>kept\nreplaced\n<ordinary><value>replaced\nouter\n\nouter\nBASH_ARGC\nBASH_ARGV\n", b""))
+            for decl in ("declare -i n=1/0", "f(){ local -i n=1/0; }; f", "declare a[1/0]=x"):
+                r = self.command(shell, decl + "; printf unexpected")
+                self.assertEqual((r.returncode, r.stdout, bool(r.stderr)), (1, b"", True))
+            r = self.command(shell, 'declare a[-1]=v; echo $?; declare -p a')
+            self.assertEqual((r.returncode, r.stdout, bool(r.stderr)), (0, b"1\ndeclare -a a=()\n", True))
+
+    def test_second_review_pattern_options_by_context(self):
+        for name in ("a1", "b1", ".c1"):
+            (self.cwd / name).touch()
+        for shell in (BASH, TONARI):
+            script = """shopt -s extglob nocasematch
+x=abcabc; printf '<%s>' "${x^^@(a|b)}" "${x^^!(a)}"
+GLOBIGNORE=a1; compgen -G '*1' | sort; printf '<%s>' *1
+HISTIGNORE='@(echo a|echo b)'; history -s 'echo a'; history -s 'echo A'; history -s 'echo c'
+history | sed -E 's/^ *[0-9]+ +//'"""
+            r = self.command(shell, script)
+            self.assertEqual((r.returncode, r.stdout, r.stderr),
+                             (0, b"<ABcABc><aBCaBC>.c1\na1\nb1\n<.c1><b1>echo A\necho c\n", b""))
+
     def test_second_review_parameter_pattern_locale(self):
         self.env["LC_ALL"] = "C"
         utf8 = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
@@ -169,8 +201,6 @@ v='xa\'; p='[a]\'; printf '<%s>' "${v/%$p/Z}" "${v//$p/Z}" """
             ("f(){ :; }; unset -fn f; type -t f; echo $?", b"1\n"),
             ("set -- base; set -o '' -Z >/dev/null; echo \"$?/$1\"; "
              "set -o - -Z >/dev/null; echo \"$?/$1\"", b"2/base\n2/base\n"),
-            ("getopts abc o -abc; getopts abc o -abc; getopts xyz o -x; "
-             "echo \"$?/$o/$OPTIND\"", b"0/x/2\n"),
             ("cat <<$\"EOF\"\nline\nEOF\nprintf done\n", b"line\ndone"),
         ]:
             for shell in (TONARI, BASH):
@@ -178,6 +208,9 @@ v='xa\'; p='[a]\'; printf '<%s>' "${v/%$p/Z}" "${v//$p/Z}" """
                 self.assertEqual((r.returncode, r.stdout), (0, output), (shell, script, r.stderr))
         utf8 = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
         for shell in ((TONARI, BASH) if bash_version() >= (5, 3) else (TONARI,)):
+            # Bash 5.2 can retain a stale cursor after the explicit option argv changes.
+            r = self.command(shell, 'getopts abc o -abc; getopts abc o -abc; getopts xyz o -x; echo "$?/$o/$OPTIND"')
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0, b"0/x/2\n", b""))
             r = self.command(shell, """LC_ALL="$1"; printf '%.1Q/' é; printf '%d/' ''; echo $?
 printf '%d/'; echo $?""", "shell", utf8)
             self.assertEqual((r.returncode, r.stdout), (0, b"$'\\303'/0/1\n0/0\n"), r.stderr)
@@ -3703,6 +3736,64 @@ shopt -u cdable_vars; cd DEST 2>/dev/null; echo "off:$?"
                 for case, expected, actual in zip(batch, *records):
                     self.assertEqual(actual, expected, (ctype, case))
 
+    def test_review_static_case_and_conditional_patterns(self):
+        utf8 = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        source = r"""shopt -s extglob
+for v in 'b]' ':]' 'a]' 'l]' a b; do [[ $v == [a-[:alpha:]] ]]; printf %s $?; done
+[[ b == [[=a=]-c] ]]; echo "/$?"
+[[ y == @(x[|y) ]]; echo "$?"
+v='aaa\'; for p in 'a\' '?\' '??\' '[a]\'; do printf '<%s>' "${v/%$p/R}"; done; echo
+f() { case "$1" in @(foo|bar)) echo y;; *) echo n;; esac; }
+f FOO; shopt -s nocasematch; f FOO; shopt -u nocasematch; f FOO
+unset LC_ALL; LC_COLLATE=$locale; LC_CTYPE=C; shopt -u globasciiranges
+touch éb; [[ éb == ??[a-c] ]]; echo "$?"; echo ??[a-c]
+"""
+        self.env["locale"] = utf8
+        expected = b"100011/1\n1\n<aaR><aaa\\><aaa\\><aaR>\nn\ny\nn\n"
+        expected += "0\néb\n".encode()
+        for shell in (TONARI, BASH):
+            if shell == BASH and bash_version() < (5, 2):
+                continue
+            p = self.command(shell, source)
+            self.assertEqual((p.returncode, p.stdout, p.stderr), (0, expected, b""))
+
+    def test_review_command_lookup_and_redirect_diagnostics(self):
+        source = """hash -p /bin/echo cached-name; type -P cached-name; echo "$?"
+hash -p /no/such/program stale; stale; echo "$?"
+mkdir -p path/directory; touch path/locked; PATH=$PWD/path
+directory; echo "$?"; locked; echo "$?"; ./path/directory; echo "$?"
+echo x >& ""; echo x 3>&99999999999; echo x >&out-
+readonly v=5; exec {v}>file"""
+        for shell in (TONARI, BASH):
+            if shell == BASH and bash_version() < (5, 3):
+                continue
+            p = self.command(shell, source)
+            self.assertEqual((p.returncode, p.stdout), (1, b"/bin/echo\n0\n127\n127\n126\n126\n"))
+            for text in [b"/no/such/program: No such file", b"directory: command not found",
+                         b"/path/locked: Permission denied", b"./path/directory: Is a directory",
+                         b'"": Bad file descriptor', b"3: Bad file descriptor",
+                         b"out: ambiguous redirect", b"v: readonly variable", b"v: cannot assign fd"]:
+                self.assertIn(text, p.stderr)
+            self.assertNotIn(b"(os error", p.stderr)
+
+    def test_review_trace_and_control_operands(self):
+        for shell in (TONARI, BASH):
+            if shell == BASH and bash_version() < (5, 3):
+                continue
+            p = self.command(shell, "BASH_XTRACEFD='1 '; set -x; : one; BASH_XTRACEFD=-5; : two")
+            self.assertEqual((p.returncode, p.stdout), (0, b""))
+            for text in [b"1 : invalid value", b"-5: invalid value", b"+ : one", b"+ : two"]:
+                self.assertIn(text, p.stderr)
+            p = self.command(shell, 'exit invalid; echo $?; for i in 1; do continue invalid; done')
+            self.assertEqual((p.returncode, p.stdout), (2, b"2\n"))
+            self.assertIn(b"exit: invalid: numeric argument required", p.stderr)
+            self.assertIn(b"continue: invalid: numeric argument required", p.stderr)
+            p = self.command(shell, 'p="("; [[ a =~ $p ]]; echo $?; set -u; [[ a == "$missing" ]]')
+            self.assertEqual((p.returncode, p.stdout), (127, b"2\n"))
+            self.assertIn(b"invalid regular expression `(':", p.stderr)
+            self.assertIn(b"missing: unbound variable", p.stderr)
+            self.assertNotIn(b"[[: missing:", p.stderr)
+
     def test_quoted_lists_in_case_conditionals_and_parameter_expansion(self):
         values = ["*", "?", "[", "]", "!", "^", "-", "\\", "a", "m", "z", "2", "a]", "=]", ":]", "[]"]
         sets = [
@@ -3718,10 +3809,9 @@ shopt -u cdable_vars; cd DEST 2>/dev/null; echo "off:$?"
                       f'case "$v" in {pattern}) printf 1;; *) printf 0;; esac; '
                       f'if [[ $v == {pattern} ]]; then printf 1; else printf 0; fi; done')
             for shell in (BASH, TONARI):
-                # Bash 5.3 accepts the quoted operand of a POSIX collating or
-                # equivalence symbol. Tonari follows Debian's 5.2 semantics here.
+                # Tonari and Bash 5.3 dequote the collating or equivalence operand.
                 members = selected
-                if shell == BASH and tuple(map(int, version.split(b"."))) >= (5, 3) and pattern in (r'[[="a"=]]', r'[[."a".]]'):
+                if (shell == TONARI or tuple(map(int, version.split(b"."))) >= (5, 3)) and pattern in (r'[[="a"=]]', r'[[."a".]]'):
                     members = {"a"}
                 proc = self.command(shell, source)
                 expected = b"".join(b"11" if v in members else b"00" for v in values)
@@ -4292,6 +4382,81 @@ pushd -n link/.. >/dev/null; popd >/dev/null; [[ $PWD = "$start/real" ]] || exit
 cd "$start"; shopt -s cdable_vars; destination=real; cd destination >&- 2>/dev/null
 echo "$?"; [[ $PWD = "$start/real" && $OLDPWD = "$start" && $(pwd -P) = "$PWD" ]] && echo entered""",
                      0, b"1\nentered\n", minimum=5)
+
+    def test_second_review_startup_status_and_script_search(self):
+        first = self.cwd / "first"
+        second = self.cwd / "second"
+        first.mkdir()
+        second.mkdir()
+        (first / "sample").mkdir()
+        (second / "sample").write_text('echo selected\n')
+        self.env["PATH"] = f"{first}:{second}:/usr/bin:/bin"
+        self.env["BASH_ENV"] = str(self.cwd / "startup")
+        (self.cwd / "startup").write_text("false; return 7\n")
+        (self.cwd / "fallback").mkdir()
+        for shell in (BASH, TONARI):
+            proc = subprocess.run([shell, "sample"], cwd=self.cwd, env=self.env,
+                                  capture_output=True, timeout=5)
+            self.assertEqual((proc.returncode, proc.stdout), (0, b"selected\n"), proc.stderr)
+            self.assertEqual(self.command(shell, 'echo "$?"').stdout, b"1\n")
+            env = dict(self.env, BASH_ENV=str(self.cwd / "fallback"))
+            proc = subprocess.run([shell, "-c", 'echo "$?"'], env=env, cwd=self.cwd,
+                                  capture_output=True, timeout=5)
+            self.assertEqual((proc.returncode, proc.stdout), (0, b"0\n"))
+            self.assertIn(b"directory", proc.stderr.lower())
+
+    def test_second_review_forced_interactive_history(self):
+        hist = self.cwd / "entries"
+        self.env["HISTFILE"] = str(hist)
+        (self.cwd / "script").write_text("echo current\nhistory -s added\n")
+        (self.cwd / "rc").write_text("history -s startup\nexit 3\n")
+        for shell in ((BASH, TONARI) if bash_version() >= (5, 0) else (TONARI,)):
+            for args, status, expected in [
+                (["--norc", "-ic", "history -s added"], 0, "old\nadded\n"),
+                (["--norc", "-i", "script"], 0, "old\necho current\nadded\n"),
+                (["--rcfile", "rc", "-ic", ":"], 3, "old\nstartup\n"),
+                (["--norc", "-i", "+o", "history", "script"], 0, "old\n"),
+            ]:
+                hist.write_text("old\n")
+                proc = subprocess.run([shell, *args], cwd=self.cwd, env=self.env,
+                                      input=b"", capture_output=True, timeout=5)
+                self.assertEqual((proc.returncode, hist.read_text()), (status, expected), (shell, args, proc.stderr))
+
+    def test_second_review_read_directory_and_format_operands(self):
+        for shell in ((BASH, TONARI) if bash_version() >= (5, 0) else (TONARI,)):
+            proc = self.command(shell, 'printf "data\\n" | { read -t 99999999999 v; echo "$?/$v"; }; '
+                                'read -t 1e0 v <<<text; echo "$?"; '
+                                'mkdir gone; cd gone; rmdir ../gone; cd .; echo "$?"')
+            self.assertEqual((proc.returncode, proc.stdout), (0, b"0/data\n1\n0\n"), proc.stderr)
+            self.assertIn(b"invalid timeout", proc.stderr)
+            self.assertIn(b"retrieving current directory", proc.stderr)
+        proc = self.command(TONARI, 'printf "%2147483648d|" 1; echo "$?"; '
+                            'TZ=UTC0 printf "[%(%Y)T]/[%(%Y)T]" 9223372036854775807 0')
+        self.assertEqual((proc.returncode, proc.stdout), (0, b"1\n[1970]/[1970]"), proc.stderr)
+
+    def test_second_review_option_listing_and_directory_operands(self):
+        controls = (BASH, TONARI) if bash_version() >= (5, 3) else (TONARI,)
+        for shell in controls:
+            for switch, expected in [("-o", b"braceexpand    \ton\n"), ("+o", b"set -o braceexpand\n")]:
+                out = subprocess.run([shell, switch], cwd=self.cwd, env=self.env,
+                                     input=b"echo body\n", capture_output=True, timeout=5)
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn(expected, out.stdout)
+                self.assertTrue(out.stdout.endswith(b"body\n"))
+            result = subprocess.run([shell, "+O", "nullglob", "-c", "shopt -p nullglob"],
+                                    cwd=self.cwd, env=dict(self.env, BASHOPTS="nullglob"),
+                                    capture_output=True, timeout=5)
+            self.assertEqual((result.returncode, result.stdout), (0, b"shopt -s nullglob\n"))
+            result = self.command(shell, "shopt extglob; shopt -o vi; dirs +999999999999999999999; "
+                                  "echo $?; umask 7777; umask; umask u=r; umask")
+            mask = b"7777" if sys.platform == "darwin" else b"0777"
+            self.assertEqual(result.stdout, b"extglob             \toff\nvi                  \toff\n2\n"
+                             + mask + b"\n0377\n")
+            self.assertIn(b"invalid number", result.stderr)
+            result = self.command(shell, """declare -A a=([a~]=1); declare -p a
+unset a; declare -A a=([é]=2); declare -p a""")
+            self.assertEqual(result.stdout, b'declare -A a=([a~]="1" )\n'
+                             + b"declare -A a=([$'\\303\\251']=\"2\" )\n")
 
     def test_physical_cd_without_a_directory_name(self):
         for flags, status in (("-P", 0), ("-Pe", 1)):

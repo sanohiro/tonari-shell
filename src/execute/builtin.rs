@@ -330,7 +330,10 @@ pub(super) fn eval_builtin(
                 Flow::Exit(1)
             } else if session.loop_depth == 0 {
                 if !session.posix {
-                    write_error(cmd.words[0].as_bytes(), b": only meaningful in a loop");
+                    write_error(
+                        cmd.words[0].as_bytes(),
+                        b": only meaningful in a `for', `while', or `until' loop",
+                    );
                 }
                 Flow::Continue(0)
             } else if args.len() > 1 {
@@ -355,7 +358,7 @@ pub(super) fn eval_builtin(
                     }
                     Err(_) => {
                         diagnostic!("{}: {}: numeric argument required", cmd.words[0], args[0]);
-                        Flow::Exit(128)
+                        Flow::Exit(2)
                     }
                     Ok(_) => {
                         diagnostic!("{}: {}: loop count out of range", cmd.words[0], args[0]);
@@ -456,7 +459,7 @@ pub(super) fn eval_builtin(
                 "exit: {}: numeric argument required",
                 status_operands(args)[0]
             );
-            Flow::Exit(2)
+            Flow::Continue(2)
         }
         Builtin::ExtraExitArgs => {
             write_error(b"exit", b": too many arguments");
@@ -707,12 +710,18 @@ fn silent_redirect(
             unsafe { libc::close(backup) };
         } else if errno() == libc::EBADF {
             if let Err(error) = duplicate(fd.as_raw_fd(), dest) {
-                diagnostic!("redirection: {dest}: {error}");
+                diagnostic!(
+                    "redirection: {dest}: {}",
+                    crate::builtins::os_message(&error)
+                );
                 return Ok(redirect_failure(cmd, session));
             }
             unsafe { libc::close(dest) };
         } else {
-            diagnostic!("redirection: {dest}: {}", io::Error::last_os_error());
+            diagnostic!(
+                "redirection: {dest}: {}",
+                crate::builtins::os_message(&io::Error::last_os_error())
+            );
             return Ok(redirect_failure(cmd, session));
         }
     }
@@ -721,7 +730,10 @@ fn silent_redirect(
 
 pub(super) fn output_status(name: &str, result: io::Result<()>, status: u8) -> u8 {
     if let Err(error) = result {
-        diagnostic!("{name}: write error: {error}");
+        diagnostic!(
+            "{name}: write error: {}",
+            crate::builtins::os_message(&error)
+        );
         1
     } else {
         status

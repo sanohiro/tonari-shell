@@ -1220,9 +1220,9 @@ Bash treats a quoted character inside a bracket list as a literal member. On Lin
 
 Linux の musl 版では、`x["*"]*.txt` が `x` の直後にバックスラッシュのある名前にも一致していた。Mac では、閉じていない `[` に続く `*` を展開すると、一致するはずの名前を取りこぼしていた。Tonari は引用を含む角括弧と閉じていない角括弧を自分で解釈する。`nullglob` を有効にしても、パスの一区間に閉じていない角括弧だけがある場合は元の文字列を引数に残す。回帰テストは記号・空白・改行・バックスラッシュ・絵文字を含む実ファイルを作り、C と UTF-8 の各文字ロケールで839通りを Bash と照合する。表示の見た目に左右されないよう、引数の個数と NUL で区切ったバイト列を比較する。
 
-For a quoted operand in a POSIX collating or equivalence symbol, the references differ. In the C locale `case a in [[."a".]])` matches on Ubuntu Bash 5.3.9. Tonari follows Debian Bash 5.2.37 for this case.
+For a quoted operand in a POSIX collating or equivalence symbol, the references differ. In the C locale `case a in [[."a".]])` matches on Ubuntu Bash 5.3.9. The 2026-11-29 native M1 check also matched on Bash 5.3.20. Tonari now follows both 5.3 releases. Debian Bash 5.2.37 gives a different result.
 
-POSIX の照合要素や等価クラスの中身を引用した場合は参照版同士で結果が異なる。C ロケールで `case a in [[."a".]])` は Ubuntu の Bash 5.3.9 で一致する。Tonari はこの場合には Debian の Bash 5.2.37 に合わせている。
+POSIX の照合要素や等価クラスの中身を引用した場合は参照版同士で結果が異なる。C ロケールで `case a in [[."a".]])` は Ubuntu の Bash 5.3.9 で一致する。2026-11-29 の M1 実機でも Bash 5.3.20 は一致した。Tonari は両方の 5.3 に合わせた。Debian Bash 5.2.37 は異なる結果になる。
 
 ## 2026-11-22 · Signals and job exit status / シグナルとジョブの終了値
 
@@ -1317,6 +1317,10 @@ A nameref used as a `for` counter retargets the last reference in its chain for 
 GNU Bash 5.3.20 and Tonari retain combining accents, the emoji presentation selector, nonbreaking space and private-use characters in UTF-8 quoting. They octal-escape the UTF-8 encoding of the C1 NEXT LINE control. A stored indexed expression may use a parameter as its subscript, and source quotes around arithmetic slice operands are removed before evaluating their values. The tests run from the normal shell suite, including Tonari-only checks on a host with Bash 3.2. Debian Bash 5.2.37 reports length zero for the checked associative element nameref and terminates during a default assignment through that reference. The driver checks the former difference and omits the latter invocation in Bash 5.2. Tonari runs both cases on each host. Bash 5.2 reports status 1 for the length of an element of a declared but uninitialized associative array under nounset, while the tested 5.3 versions return 127 for `-c`. [Shell integration](../tests/shell.py)
 
 名前参照を `for` の変数に指定すると、反復ごとに参照先を付け替える。算術式や組み込みコマンドから配列を扱う場合は、読み出しと書き込みで同じキーを使う。添字配列の添字に連想配列の参照を含む場合も、配列の型情報を保持する。添字の算術エラーは呼び出し元へ返す。保存された添字の展開は、変数参照・デフォルト値・算術式などのデータ評価で処理する。UTF-8 の結合文字や異体字セレクタは表示可能な形で引用し、制御文字はエスケープする。Bash 5.2 系で異なる結果が得られる入力も回帰試験で区別した。
+
+An arithmetic read through `declare -n ref='a[i++]'` uses the caller’s arithmetic evaluator. With `a=(5 7)` and `i=0`, GNU Bash 5.3.20 and Tonari print `5 1` for `echo $((ref)) $i`. Target validation uses the read-only evaluator and still observes `set -u`. Stored subscripts also support ordinary case conversion, trimming, replacement, substring extraction and array lengths without running a shell command. The integration test checks these through a nameref and explicit `unset`. [Regression cases](../tests/review_r2_language.py)
+
+算術式から名前参照を読むときは呼び出し元の評価器を引き継ぐため、添字の `i++` は一回だけ反映される。検証用の読み取り専用評価器も `set -u` の設定を引き継ぐ。保存した添字に含まれる文字列変換や配列の要素数は、シェルコマンドを起動せずに求める。
 
 GNU Bash parses the trailing hyphen of a descriptor move before expanding its word. For `fd=3; exec 4>&$fd-` the source descriptor moves. For `path='3-'; printf x >&"$path"` the shell writes the file named `3-`. A subsequent redirection operand can also inspect a file or descriptor installed earlier in the same command. Tonari performs those expansions in order in the appropriate builtin, null-command or external scope. When a later open fails, it restores descriptors before running ERR traps. [Normal-entry regression tests](../tests/shell.py) · [Native timings](benchmarks.md#ordered-redirection-review)
 

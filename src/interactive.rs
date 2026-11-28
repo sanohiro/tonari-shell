@@ -123,7 +123,6 @@ pub(super) fn interactive(session: &mut Session, status: u8, editing: bool) -> i
         && session
             .scalar_setting("TERM")
             .is_some_and(|term| term != "dumb");
-    history::start_interactive(session);
     interactive_loop(session, status, editing, terminal_input)
 }
 

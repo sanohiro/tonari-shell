@@ -753,7 +753,8 @@ impl Pattern {
         let value = units.as_ref();
         let period = period && value.starts_with('.');
         // A nullable group cannot consume the literal required after it.
-        if let Some(tail @ (Atom::Text(_) | Atom::FoldedText(..))) = self.atoms.last()
+        if let Some(tail @ (Atom::Text(_) | Atom::FoldedText(..) | Atom::Choice(_))) =
+            self.atoms.last()
             && matches!(literal_edge(tail, value, false), Ok(None))
         {
             return false;
@@ -857,6 +858,16 @@ impl Compiled {
         }
     }
 
+    pub(crate) fn case_filter(source: String, extended: bool) -> Option<Self> {
+        if source.is_empty() || source == "?" {
+            None
+        } else if extended && has_group(&source) {
+            Some(Self::Extended(Pattern::parse(&source, true)))
+        } else {
+            Some(Self::Basic(Matcher::new(source)))
+        }
+    }
+
     pub(crate) fn accepts(&self, value: &str) -> bool {
         match self {
             Self::Basic(p) => p.matches(value),
@@ -883,13 +894,60 @@ pub(crate) fn session_match(
     cached_match(value, source, extended, None, session)
 }
 
-pub(crate) fn insensitive_session(
-    value: &str,
-    source: &str,
+#[derive(Default, Debug)]
+pub struct StaticMatcher(std::cell::RefCell<Option<Box<StaticEntry>>>);
+
+#[derive(Debug)]
+struct StaticEntry {
+    locale: Option<std::rc::Rc<super::PatternLocale>>,
+    ascii_ranges: bool,
     extended: bool,
-    session: &crate::Session,
-) -> bool {
-    session_match(value, source, extended, session)
+    fold: Option<super::CharacterLocale>,
+    matcher: Compiled,
+}
+
+impl StaticMatcher {
+    pub(crate) fn matches(
+        &self,
+        value: &str,
+        source: &str,
+        extended: bool,
+        session: &crate::Session,
+    ) -> bool {
+        let fold = session
+            .shopt
+            .nocasematch
+            .then(|| session.character_locale());
+        let locale = (source.contains(['[', '?']) || fold.is_some())
+            .then(|| super::session_locale(session))
+            .flatten();
+        let _guard = locale.as_ref().and_then(|l| l.enter());
+        let mut cached = self.0.borrow_mut();
+        if cached.as_ref().is_none_or(|e| {
+            e.ascii_ranges != session.shopt.globasciiranges
+                || e.fold != fold
+                || e.extended != extended
+                || e.locale.as_ref().map(std::rc::Rc::as_ptr)
+                    != locale.as_ref().map(std::rc::Rc::as_ptr)
+        }) {
+            let matcher = match fold {
+                Some(fold) => Compiled::Extended(Pattern::insensitive(source, extended, fold)),
+                None => Compiled::new(source, extended),
+            };
+            *cached = Some(Box::new(StaticEntry {
+                locale,
+                ascii_ranges: session.shopt.globasciiranges,
+                extended,
+                fold,
+                matcher,
+            }));
+        }
+        cached.as_ref().unwrap().matcher.accepts(value)
+    }
+}
+
+pub(crate) fn case_sensitive_session(value: &str, source: &str, session: &crate::Session) -> bool {
+    cached_match(value, source, session.shopt.glob.extglob, None, session)
 }
 
 fn cached_match(

@@ -12,6 +12,16 @@ import time
 
 
 CASES = {
+    "stored parameter transformations": (
+        """color=blue; args=(a b); a=(five seven nine); declare -A m=([BLUE]=31 [blu]=41 [blew]=51)
+declare -n upper='m[${color^^}]' trim='m[${color%e}]' replace='m[${color/ue/ew}]' n='a[${#args[@]}]'
+echo "$upper/$((upper))/$trim/$replace/$n"
+shopt -u assoc_expand_once; unset 'm[${color^^}]' 'a[${#args[@]}]'; echo "${#m[@]}/${a[*]}" """,
+        "31/31/41/51/nine\n2/five seven\n"),
+    "active arithmetic nameref index": (
+        """a=(5 7); i=0; declare -n ref='a[i++]'; echo "$((ref))/$i"
+i=0; ((n=ref)); echo "$n/$i"; i=0; ((ref+=3)); echo "${a[*]}/$i" """,
+        "5/1\n5/1\n5 8/2\n"),
     "quoted initializer index": (
         """j=1; a=(['1'+'2']=x ['$j']=y [$'4']=z); echo "${!a[@]}/${a[*]}" """, "1 3 4/y x z\n"),
     "missing array element lengths": (
@@ -51,6 +61,9 @@ a=(one two); i=0; declare -n e='a[i++]'; echo "$e/$i"; unset 'a[$i]'; echo "${a[
 }
 
 WORKLOADS = {
+    "stored array length subscript (12000)": (
+        """args=(a b); a=(5 7 9); declare -n ref='a[${#args[@]}]'
+for ((i=0;i<12000;i++)); do n=$((ref)); done; echo "$n" """, "9\n"),
     "stored associative arithmetic (12000)": (
         """declare -A m=([apple]=4); key=apple; declare -n ref='m[$key]';
 for ((i=0;i<12000;i++)); do n=$((ref)); done; echo "$n" """, "4\n"),
@@ -95,6 +108,7 @@ echo "${!r}/$n/$((n))/$((index))"; ((n+=2)); echo "${!r}" """
         assert result.returncode != 0 and not result.stdout and result.stderr, (shell, result)
 
     failure_cases = [
+        ("""set -u; a=(1); i='a[$missing]'; echo "$((i))" """, 127, "unbound variable"),
         ('x=word; echo "${x@Z}"\necho continued', 127, "bad substitution"),
         ('declare -n r; echo "${!r}"', 1, "invalid indirect expansion"),
         ('set -u; declare -A m; echo "${#m[key]}"', 127, "unbound variable"),

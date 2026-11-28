@@ -517,12 +517,9 @@ fn fixed_case(pattern: &CasePattern, value: &str, session: &Session) -> Option<b
             matcher.insensitive(value, false, session)
         }
         CasePattern::Fixed(matcher) => matcher.matches_session(value, session),
-        CasePattern::Extended(source) => crate::pattern::extended::session_match(
-            value,
-            source,
-            session.shopt.glob.extglob,
-            session,
-        ),
+        CasePattern::Extended(source, matcher) => {
+            matcher.matches(value, source, session.shopt.glob.extglob, session)
+        }
         CasePattern::Dynamic(_) => return None,
     })
 }

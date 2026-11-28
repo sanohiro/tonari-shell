@@ -1,7 +1,7 @@
 // Only ordinary decimal loads and eager binary operators are compiled. A
 // dynamic value, array or lazy branch goes through the full arithmetic parser.
 // No assignment occurs until every operand has been resolved successfully.
-use super::{Binary, Parser, Result, Token, Variables, number, precedence};
+use super::{Binary, Evaluation, Failure, Parser, Token, Variables, number, precedence};
 
 #[derive(Debug, Clone)]
 enum Op {
@@ -124,7 +124,11 @@ impl Program {
         })
     }
 
-    pub(super) fn run(&self, vars: &mut dyn Variables, permit_store: bool) -> Option<Result<i64>> {
+    pub(super) fn run(
+        &self,
+        vars: &mut dyn Variables,
+        permit_store: bool,
+    ) -> Option<Evaluation<i64>> {
         if !permit_store && self.target.is_some() {
             return None;
         }
@@ -145,7 +149,7 @@ impl Program {
                     top -= 2;
                     match op.apply(stack[top], stack[top + 1]) {
                         Ok(n) => n,
-                        Err(e) => return Some(Err(e)),
+                        Err(e) => return Some(Err(e.into())),
                     }
                 }
             };
@@ -157,10 +161,14 @@ impl Program {
             if let Some(op) = op {
                 value = match op.apply(lhs, value) {
                     Ok(n) => n,
-                    Err(e) => return Some(Err(e)),
+                    Err(e) => return Some(Err(e.into())),
                 };
             }
-            return Some(vars.set(name, value).map(|()| value));
+            return Some(
+                vars.set(name, value)
+                    .map(|()| value)
+                    .map_err(|e| Failure::write(name, e)),
+            );
         }
         Some(Ok(value))
     }

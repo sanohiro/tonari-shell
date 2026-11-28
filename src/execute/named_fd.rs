@@ -7,6 +7,7 @@ use std::os::fd::RawFd;
 struct Scope {
     restore: Vec<(RawFd, SavedFd)>,
     changed: Vec<RawFd>,
+    isolated: bool,
 }
 
 impl Scope {
@@ -38,7 +39,10 @@ impl Scope {
                         .ok_or_else(|| io::Error::other(format!("{name}: ambiguous redirect")))?;
                 } else {
                     if session.readonly(name) {
-                        return Err(io::Error::other(format!("{name}: readonly variable")));
+                        diagnostic!("{name}: readonly variable");
+                        return Err(io::Error::other(format!(
+                            "{name}: cannot assign fd to variable"
+                        )));
                     }
                     // Open first so /dev/fd and duplicate sources see the original table.
                     let source;
@@ -58,7 +62,7 @@ impl Scope {
                         }
                         Action::Dup(fd, _) => {
                             if fd::is_private(fd) {
-                                return Err(io::Error::from_raw_os_error(libc::EBADF));
+                                return Err(io::Error::other(format!("{fd}: Bad file descriptor")));
                             }
                             fd
                         }
@@ -67,7 +71,11 @@ impl Scope {
                     let allocated =
                         unsafe { libc::fcntl(fd, libc::F_DUPFD, crate::execute::fd::SHELL_FD_MIN) };
                     if allocated < 0 {
-                        return Err(io::Error::last_os_error());
+                        let error = io::Error::last_os_error();
+                        return Err(io::Error::other(format!(
+                            "{fd}: {}",
+                            crate::builtins::os_message(&error)
+                        )));
                     }
                     if let Err(error) = session.assign_target(name, &allocated.to_string()) {
                         unsafe {
@@ -75,7 +83,7 @@ impl Scope {
                         }
                         return Err(io::Error::other(error));
                     }
-                    if session.shopt.varredir_close {
+                    if self.isolated || session.shopt.varredir_close {
                         self.restore.push((allocated, SavedFd::Closed));
                     }
                     continue;
@@ -125,7 +133,7 @@ impl Scope {
                             expansion.flow(session)
                         }
                     } else {
-                        diagnostic!("{error}");
+                        diagnostic!("{}", crate::builtins::os_message(&error));
                         Flow::Continue(1)
                     }
                 }
@@ -157,7 +165,10 @@ pub(super) fn with_redirects(
     run: impl FnOnce(&mut Session) -> io::Result<(Flow, bool)>,
 ) -> io::Result<Flow> {
     let old_input = session.stdin_redirected;
-    let mut scope = Scope::default();
+    let mut scope = Scope {
+        isolated: child_redirects,
+        ..Scope::default()
+    };
     let saved_substitutions = session.substitutions.scope();
     let mut child = child_redirects.then(|| session.clone());
     let env = child.as_mut().unwrap_or(session);
@@ -241,14 +252,7 @@ pub(super) fn run(
         session.jobs.forked(false);
         coprocess::after_fork(session);
         let code = match command(cmd, session, status) {
-            Ok(
-                Flow::Continue(s)
-                | Flow::Discard(s)
-                | Flow::Unwind(s)
-                | Flow::Exit(s)
-                | Flow::Return(s),
-            ) => s,
-            Ok(_) => 1,
+            Ok(flow) => flow.child_status(),
             Err(e) => {
                 diagnostic!("{e}");
                 1

@@ -138,26 +138,34 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, String)> {
     Ok(opts)
 }
 
-// The process numeric locale remains C. Shell LC_NUMERIC is applied explicitly
-// by printf. Keep decimal/exponent syntax and the Duration range check.
+// read accepts an optional sign and decimal seconds, rounded to microseconds.
+// Reject integer overflow instead of wrapping a long delay into a short one.
 fn timeout(value: &str) -> Option<Duration> {
-    if let Ok(seconds) = value.parse::<u64>() {
-        return Some(Duration::from_secs(seconds));
-    }
-    if value.is_empty()
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || b"+-.eE".contains(&b))
+    let digits = value.strip_prefix(['+', '-']).unwrap_or(value);
+    let (whole, fraction) = digits.split_once('.').unwrap_or((digits, ""));
+    if !whole
+        .bytes()
+        .chain(fraction.bytes())
+        .all(|b| b.is_ascii_digit())
     {
         return None;
     }
-    let input = std::ffi::CString::new(value).ok()?;
-    let mut end = std::ptr::null_mut();
-    let seconds = unsafe { libc::strtod(input.as_ptr(), &mut end) };
-    if end.cast_const() != unsafe { input.as_ptr().add(value.len()) } {
-        return None;
+    let seconds = if whole.is_empty() {
+        0
+    } else {
+        whole.parse::<i64>().ok()? as u64
+    };
+    let mut micros = 0;
+    for i in 0..6 {
+        micros = micros * 10
+            + fraction
+                .as_bytes()
+                .get(i)
+                .map_or(0, |&b| u64::from(b - b'0'));
     }
-    Duration::try_from_secs_f64(seconds).ok()
+    micros += u64::from(fraction.as_bytes().get(6).is_some_and(|&b| b >= b'5'));
+    let duration = Duration::from_secs(seconds) + Duration::from_micros(micros);
+    (!value.starts_with('-') || duration.is_zero()).then_some(duration)
 }
 
 pub(super) struct Input {

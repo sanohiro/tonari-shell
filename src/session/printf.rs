@@ -338,7 +338,7 @@ impl Spec {
             flags |= bit;
             *input = rest;
         }
-        let mut width = amount(input, args, 0);
+        let mut width = amount(input, args, 0)?;
         if width < 0 {
             flags |= flag_bit(b'-');
             width = width.checked_abs().ok_or("field width too large")?;
@@ -346,7 +346,7 @@ impl Spec {
         let mut precision = None;
         if input.first() == Some(&b'.') {
             *input = &input[1..];
-            let p = amount(input, args, -1);
+            let p = amount(input, args, -1)?;
             if p >= 0 {
                 precision = Some(p);
             }
@@ -647,26 +647,27 @@ fn append_number(
     Ok(())
 }
 
-fn amount(input: &mut &[u8], args: &mut Arguments<'_>, overflow: i32) -> i32 {
-    let value = if input.first() == Some(&b'*') {
+fn amount(input: &mut &[u8], args: &mut Arguments<'_>, overflow: i32) -> Result<i32, &'static str> {
+    if input.first() == Some(&b'*') {
         *input = &input[1..];
-        i32::try_from(args.signed()).ok()
-    } else {
-        let mut amount = Some(0i32);
-        while let Some((&digit, rest)) = input.split_first() {
-            if !digit.is_ascii_digit() {
-                break;
-            }
-            amount = amount.and_then(|n| n.checked_mul(10)?.checked_add(i32::from(digit - b'0')));
-            *input = rest;
+        return Ok(i32::try_from(args.signed()).unwrap_or_else(|_| {
+            diagnostic!("printf: field width or precision out of range");
+            args.status = 1;
+            overflow
+        }));
+    }
+    let mut amount = 0i32;
+    while let Some((&digit, rest)) = input.split_first() {
+        if !digit.is_ascii_digit() {
+            break;
         }
-        amount
-    };
-    value.unwrap_or_else(|| {
-        diagnostic!("printf: field width or precision out of range");
-        args.status = 1;
-        overflow
-    })
+        amount = amount
+            .checked_mul(10)
+            .and_then(|n| n.checked_add(i32::from(digit - b'0')))
+            .ok_or("field width or precision out of range")?;
+        *input = rest;
+    }
+    Ok(amount)
 }
 
 fn render(

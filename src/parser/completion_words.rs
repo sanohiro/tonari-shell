@@ -34,9 +34,12 @@ pub(crate) fn parse(text: &str, ifs: &str) -> Result<Vec<Word>, Error> {
                 let len = suffix
                     .find(|c| c == '/' || ifs.contains(c))
                     .unwrap_or(suffix.len());
-                let tilde = format!("~{}", &suffix[..len]);
-                word.part(Part::Tilde(tilde));
-                chars = suffix[len..].chars();
+                if crate::word::valid_tilde_user(&suffix[..len]) {
+                    word.part(Part::Tilde(format!("~{}", &suffix[..len])));
+                    chars = suffix[len..].chars();
+                } else {
+                    word.push('~');
+                }
             }
             _ => word.push(c),
         }

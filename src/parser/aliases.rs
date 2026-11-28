@@ -268,7 +268,7 @@ impl Reader {
         let boundary = source.len();
         let old_boundary = physical.len() - suffix.len();
         source.push_str(suffix);
-        let (tokens, offsets, _) = with(nested, || {
+        let (mut tokens, offsets, _) = with(nested, || {
             super::lexer::lex_joined(
                 &source[start..],
                 self.final_input,
@@ -293,6 +293,12 @@ impl Reader {
             next_word: value.ends_with([' ', '\t']),
         });
         self.spans = spans;
+        for token in &mut tokens {
+            if let Token::HereBody(_, (begin, end)) = token {
+                *begin += start;
+                *end += start;
+            }
+        }
         self.tokens = tokens.into();
         self.alias_source = None;
         self.newlines = memchr::memchr_iter(b'\n', source.as_bytes()).collect();
@@ -364,9 +370,6 @@ impl Reader {
                 || self.alias_frames.iter().any(|f| f.name == name)
             {
                 return Ok(());
-            }
-            if self.alias_frames.len() >= 128 {
-                return Err(Error::Invalid("alias expansion nesting limit exceeded"));
             }
             let name = name.to_string();
             let next_word = value.ends_with([' ', '\t']);

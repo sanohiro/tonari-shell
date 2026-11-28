@@ -1034,6 +1034,11 @@ fn scan_subscript<'a>(
                     .next()
                     .ok_or(Error::incomplete_message("trailing arithmetic escape"))?;
                 if next != '\n' {
+                    if matches!(mode, SubscriptMode::Arithmetic)
+                        && !matches!(next, '$' | '`' | '"' | '\\')
+                    {
+                        word.push('\\');
+                    }
                     word.push(next);
                 }
             }
@@ -1108,15 +1113,6 @@ fn pattern_parts(
                 dollar(chars, word, false)?
             }
             '`' => backquote(chars, word, false)?,
-            '[' if group.is_some() => {
-                raw.push(c);
-                if let Some(end) = crate::pattern::bracket_end(chars.as_str())
-                    && !chars.as_str()[..=end].contains(['$', '\u{60}', '\u{27}', '"', '\\'])
-                {
-                    raw.push_str(&chars.as_str()[..=end]);
-                    *chars = chars.as_str()[end + 1..].chars();
-                }
-            }
             '(' => {
                 depth += 1;
                 raw.push(c);

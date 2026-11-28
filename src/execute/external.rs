@@ -87,6 +87,7 @@ pub(super) struct External {
     pub(super) argument_bytes: Vec<u8>,
     pub(super) argv: Vec<*const libc::c_char>,
     pub(super) search_paths: Option<Vec<CString>>,
+    searching_path: bool,
     pub(super) env: Option<Rc<Environment>>,
 }
 
@@ -125,6 +126,7 @@ impl External {
         argv.push(std::ptr::null());
         let name = std::ffi::OsStr::from_bytes(program.as_bytes());
         let cached = cmd.cached_path(session, &arguments[0]);
+        let searching_path = cached.is_none() && !arguments[0].contains('/');
         let search_paths = if let Some(path) = cached {
             Some(vec![CString::new(path.as_os_str().as_bytes())?])
         } else {
@@ -146,6 +148,7 @@ impl External {
             program,
             _arg0: arg0,
             search_paths,
+            searching_path,
             env: if clear_env {
                 Some(Rc::new(Environment {
                     changes: Vec::new(),
@@ -173,7 +176,10 @@ impl External {
             .open(path_os)?;
         let mut sample = [0u8; 128];
         let length = file.read(&mut sample)?;
-        if !file.metadata()?.is_file() || sample[..length].contains(&0) {
+        if !file.metadata()?.is_file()
+            || sample[..length].contains(&0)
+            || crate::input::executable_header(&sample[..length])
+        {
             return Err(io::Error::from_raw_os_error(libc::ENOEXEC));
         }
         drop(file);
@@ -228,48 +234,73 @@ impl External {
                     libc::execv(path.as_ptr(), self.argv.as_ptr());
                 }
             }
-            match errno() {
+            let failure = errno();
+            if !self.searching_path {
+                failed_path = path;
+            }
+            match failure {
                 libc::ENOENT | libc::ENOTDIR => continue,
                 libc::ENOEXEC => {
+                    failed_path = path;
                     error = self.script_fallback(path, fallback_in_session.then_some(session));
                     break;
                 }
-                libc::EACCES => {
-                    error = libc::EACCES;
-                    failed_path = path;
+                libc::EACCES | libc::EISDIR => {
+                    if self.searching_path
+                        && std::path::Path::new(std::ffi::OsStr::from_bytes(path.to_bytes()))
+                            .is_dir()
+                    {
+                        continue;
+                    }
+                    if error == libc::ENOENT {
+                        error = failure;
+                        failed_path = path;
+                    }
                 }
                 e => {
+                    failed_path = path;
                     error = e;
                     break;
                 }
             }
         }
         let path = std::path::Path::new(std::ffi::OsStr::from_bytes(failed_path.to_bytes()));
-        report_exec_error(session, program.as_bytes(), path, error)
+        report_exec_error(
+            session,
+            path,
+            self.searching_path && error == libc::ENOENT,
+            error,
+        )
     }
 }
 
 #[cold]
 pub(super) fn report_exec_error(
     session: &Session,
-    name: &[u8],
     path: &std::path::Path,
+    missing_command: bool,
     error: i32,
 ) -> u8 {
+    let mut buffer = [0 as libc::c_char; 128];
     let reason: &[u8] = match error {
-        libc::ENOENT | libc::ENOTDIR if !name.contains(&b'/') => b": command not found",
-        libc::ENOENT | libc::ENOTDIR => b": No such file or directory",
-        libc::EISDIR => b": Is a directory",
-        libc::EACCES if path.is_dir() => b": Is a directory",
-        libc::EACCES | libc::EPERM => b": Permission denied",
-        _ => b": cannot execute",
+        _ if missing_command => b"command not found",
+        libc::EISDIR => b"Is a directory",
+        libc::EACCES if path.is_dir() => b"Is a directory",
+        _ if unsafe { libc::strerror_r(error, buffer.as_mut_ptr(), buffer.len()) } == 0 => {
+            unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_bytes()
+        }
+        _ => b"cannot execute",
     };
     let prefix = session.diagnostic_prefix(|| session.line());
     write_diagnostic(
         prefix.as_deref().unwrap_or("tonari: ").as_bytes(),
-        name,
+        path.as_os_str().as_bytes(),
+        if error == libc::ENOEXEC {
+            b": cannot execute binary file: "
+        } else {
+            b": "
+        },
         reason,
-        b"",
     );
     exec_status(error)
 }
