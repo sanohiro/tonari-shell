@@ -149,7 +149,7 @@ int main(int argc, char **argv) {
             char contents[16];
             int fd = open("small.sh", O_RDONLY | O_CLOEXEC);
             if (fd < 0 || fstat(fd, &st) || read(fd, contents, sizeof(contents)) != 5 ||
-                memcmp(contents, "v=ok\\n", 5) || close(fd)) return 1;
+                memcmp(contents, "v=ok\n", 5) || close(fd)) return 1;
         }
         puts("ok");
         return 0;
@@ -157,7 +157,7 @@ int main(int argc, char **argv) {
     if (!strcmp(name, "null-builtin-out.sh")) {
         for (int i = 0; i < 2000; ++i) {
             int fd = open("/dev/null", O_CREAT | O_TRUNC | O_WRONLY, 0666);
-            if (fd < 0 || write(fd, "hi\\n", 3) != 3 || close(fd)) return 1;
+            if (fd < 0 || write(fd, "hi\n", 3) != 3 || close(fd)) return 1;
         }
         puts("2000");
         return 0;

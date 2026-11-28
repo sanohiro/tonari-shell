@@ -281,6 +281,7 @@ fn print_variables(
     } else {
         operands
     };
+    const INLINE_OUTPUT: usize = 256;
     if let [name] = operands
         && name != "-"
         && local_scope.is_none_or(|s| s.variables.contains_key(name))
@@ -289,8 +290,8 @@ fn print_variables(
         && var.declared
         && !var.dynamic
         && var.elements.is_none()
+        && name.len() + var.value.as_ref().map_or(0, String::len) < INLINE_OUTPUT
     {
-        const INLINE_OUTPUT: usize = 256;
         let mut buf = [0; INLINE_OUTPUT];
         let mut dest = &mut buf[..];
         if print_attribute(

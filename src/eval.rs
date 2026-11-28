@@ -502,7 +502,7 @@ fn run_case(
     for (patterns, body, end) in arms.iter() {
         let mut matched = fall_through;
         if !matched {
-            for pattern in patterns.iter() {
+            for pattern in patterns {
                 matched = match pattern {
                     CasePattern::Fixed(matcher) if session.shopt.nocasematch => {
                         matcher.insensitive(&value, false, session)

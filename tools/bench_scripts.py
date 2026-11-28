@@ -75,6 +75,8 @@ CASES = {
     "r7-replace-miss": eval_loop('x=${s//ZZZZ/1111}', 'echo "${#x}"', "65536", "printf -v s '%65536s' ''", 500),
     "r7-slice": eval_loop('x=${s:60000:10}', 'echo "${#x}"', "10", "export LC_ALL=C.UTF-8; printf -v s '%65536s' ''; s=雪$s", 500),
     "r7-array-join": eval_loop('x="${a[*]}"', 'echo "${#x}"', "1889", "a=({0..499})", 500),
+    "r7-array-sparse": eval_loop('x="${a[*]}"', 'echo "${#x}"', "1889", 'for ((i=0;i<500;i++)); do a[i*2]=$i; done', 500),
+    "r7-array-assoc": eval_loop('x="${a[*]}"', 'echo "${#x}"', "1889", 'declare -A a; for ((i=0;i<500;i++)); do a[k$i]=$i; done', 500),
     "r7-array-keys": eval_loop('set -- "${!a[@]}"', 'echo "$# ${500}"', "500 499", "a=({0..499})", 500),
     "r7-case-fold": eval_loop('case $s in foo*[0-9]*bar) x=y;; *) exit 1;; esac', 'echo "$x"', "y",
                               'shopt -s nocasematch; s=Foo_x7x_Bar', 5000),

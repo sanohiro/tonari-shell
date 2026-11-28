@@ -566,7 +566,7 @@ impl Word {
                     let separator = ifs_separator(&|k| env.lookup(k));
                     if let Some((base, _, false)) = array_elements_name(name)
                         && !env.shadows(base)
-                        && let Some(joined) = env.session.join_dense_array(base, &separator)
+                        && let Some(joined) = env.session.join_array(base, &separator)
                     {
                         *part = Part::Text(joined);
                         continue;

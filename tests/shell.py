@@ -91,6 +91,13 @@ p='\w'; HOME=$PWD; echo "${p@P}"
 HOME=/; PROMPT_DIRTRIM=1; [[ ${p@P} == */inner ]] && echo path
 """, 0, b"<A.TXT>\n<.A.txt><A.TXT>\n~\npath\n", minimum=5)
 
+    def test_shell_paths_read_restores_offset_before_assignment(self):
+        (self.cwd / "records").write_text("first\nkey\nlast\n")
+        self.compare("""shopt -u assoc_expand_once; declare -A a; exec 3<records
+IFS= read -ru3 'a[$(IFS= read -ru3 v; printf %s "$v")]'
+IFS= read -ru3 tail; printf '%s/%s' "${a[key]}" "$tail"
+""", 0, b"first/last", minimum=5)
+
     def test_shell_paths_fields_and_formats(self):
         self.compare("""printf 'a:b::c:d:e:f:g:h:i:j:\\nsecond\\n' >records
 { IFS=: read -r a b c d e f g h; read -r next; } <records
