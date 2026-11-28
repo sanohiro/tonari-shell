@@ -816,6 +816,7 @@ def main():
                 "merged-pipeline-redirect", "builtin-merged-pipeline",
                 "background-subshell-wait", "descriptor-moves", "external-substitutions", "runtime-file",
                 "glob-sparse", "glob-multi-star", "glob-utf8-once", "glob-utf8-large",
+                "glob-ignore-simple-class", "runtime-glob-prefix", "runtime-glob-nocase", "runtime-glob-ext",
             ):
                 participants = [*shells, ("Direct C", args.spawn_control.resolve())]
             case_setup = setup

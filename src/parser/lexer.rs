@@ -1676,7 +1676,9 @@ fn scan(
                 continue;
             }
             let token = if c == '\n' {
-                here_doc::collect(&mut chars, &mut tokens, &mut pending_docs, final_input)?;
+                if !pending_docs.is_empty() {
+                    here_doc::collect(&mut chars, &mut tokens, &mut pending_docs, final_input)?;
+                }
                 Token::Newline
             } else {
                 operator(c, &mut chars, in_test, &mut parentheses, &mut array_level)?

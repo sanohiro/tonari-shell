@@ -64,13 +64,29 @@ impl Range {
         1 + self.first.abs_diff(self.last) / self.stride
     }
 
-    fn value(&self, index: u64) -> String {
+    fn number(&self, index: u64) -> i64 {
         let delta = index * self.stride;
-        let n = if self.first <= self.last {
+        if self.first <= self.last {
             self.first.wrapping_add_unsigned(delta)
         } else {
             self.first.wrapping_sub_unsigned(delta)
-        };
+        }
+    }
+
+    fn append_value(&self, index: u64, word: &mut String) {
+        use std::fmt::Write;
+        let n = self.number(index);
+        if self.letters {
+            word.push(char::from(n as u8));
+        } else if self.width == 0 {
+            word.push_str(itoa::Buffer::new().format(n));
+        } else {
+            write!(word, "{n:0width$}", width = self.width).expect("in-memory write");
+        }
+    }
+
+    fn value(&self, index: u64) -> String {
+        let n = self.number(index);
         if self.letters {
             char::from(n as u8).to_string()
         } else if self.width == 0 {
@@ -308,7 +324,7 @@ fn append_range_product(parts: &[Part], count: usize, result: &mut Vec<String>) 
     let first_row = start..result.len();
     for n in 1..left.count() {
         head.truncate(prefix.len());
-        head.push_str(&left.value(n));
+        left.append_value(n, &mut head);
         head.push_str(middle);
         for index in first_row.clone() {
             let word = [head.as_str(), &result[index][head_len..]].concat();
@@ -382,7 +398,7 @@ fn literal_product(parts: &[Part], count: usize, result: &mut Vec<String>) -> Op
                 Part::Range(r) => {
                     let end = word.len();
                     for j in 0..r.count() {
-                        word.push_str(&r.value(j));
+                        r.append_value(j, word);
                         emit(parts, next, i + 1, word, out);
                         word.truncate(end);
                     }
@@ -418,6 +434,25 @@ fn literal_product(parts: &[Part], count: usize, result: &mut Vec<String>) -> Op
     Some(())
 }
 
+// Repeated commands own the resulting argument strings. An inert brace tree can
+// emit them directly from the borrowed syntax while the session has braceexpand on.
+pub(crate) fn append_borrowed_product(parts: &[Part], out: &mut Vec<String>, limit: usize) -> bool {
+    if parts.len() < 3
+        || !parts
+            .iter()
+            .any(|p| matches!(p, Part::Brace("{") | Part::Range(_)))
+    {
+        return false;
+    }
+    let count = word_count(parts);
+    count <= MAX_WORDS && count <= limit as u64 && append_product(parts, count as usize, out)
+}
+
+fn append_product(parts: &[Part], count: usize, out: &mut Vec<String>) -> bool {
+    append_range_product(parts, count, out).is_some()
+        || literal_product(parts, count, out).is_some()
+}
+
 pub fn append_fields(
     parts: Vec<Part>,
     env: &mut Expansion<'_>,
@@ -440,9 +475,7 @@ pub fn append_fields(
     if count > MAX_WORDS {
         return Err("brace expansion exceeds word limit".into());
     }
-    if append_range_product(&parts, count as usize, result).is_some()
-        || literal_product(&parts, count as usize, result).is_some()
-    {
+    if append_product(&parts, count as usize, result) {
         return Ok(());
     }
     let mut pending = Vec::new();

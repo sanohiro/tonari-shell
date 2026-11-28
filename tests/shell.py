@@ -54,6 +54,16 @@ v=X; printf '<%s> ' {a,}${v} {,b} "q"{x,y}; echo
 a=(one two); for x in "${a[@]}"; do echo "$x"; a=(changed); done
 ''', 0, b"<pre_x_end> <pre_a_1_end> <pre_a_2_end> <pre_b_1_end> <pre_b_2_end> <pre_z_end> \n<aX> <X> <b> <qx> <qy> \none\ntwo\n")
 
+    def test_runtime_review_loop_rechecks_braces_and_positional_arguments(self):
+        self.compare('''set -- starting; echo "$_"
+for i in 1 2 3 4 5 6; do
+    case "$i" in 4) set +B;; 5) set -B;; esac
+    set -- pre{a,b}_{1..2}; printf '<%s/%s/%s> ' "$#" "$1" "$_"; shift
+done
+echo; set --; echo "$_"
+''', 0, b"starting\n" + b"<4/prea_1/preb_2> " * 3
+             + b"<1/pre{a,b}_{1..2}/pre{a,b}_{1..2}> " + b"<4/prea_1/preb_2> " * 2 + b"\n--\n")
+
     def test_runtime_review_patterns_recheck_options_and_path_boundaries(self):
         self.compare('''mkdir -p sub/nest
 touch sub/a1.txt sub/a2.txt sub/A3.txt sub/nest/a1.txt

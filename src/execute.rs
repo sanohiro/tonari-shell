@@ -851,9 +851,8 @@ fn run_prepared(
         return result;
     }
     let selected = builtin(&cmd, last_status, session);
-    // Function calls take ownership of their argv. Other commands can move
-    // their final word into $_ after execution without copying its contents.
-    let saved = matches!(selected, Some(Builtin::Function))
+    // Functions and set can consume argv before $_ is updated.
+    let saved = matches!(selected, Some(Builtin::Function | Builtin::Set))
         .then(|| cmd.words.last().cloned())
         .flatten();
     let result = if let Some(builtin) = selected {

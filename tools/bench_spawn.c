@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -28,9 +29,15 @@ static int directory(const char *name) {
     int multi = strcmp(name, "glob-multi-star.sh") == 0;
     const char *path = sparse || multi ? "fixtures" :
                        strcmp(name, "glob-utf8-large.sh") == 0 ? "large" : "localized";
+    int prefix = !strcmp(name, "runtime-glob-prefix.sh");
+    int folded = !strcmp(name, "runtime-glob-nocase.sh");
+    int choice = !strcmp(name, "runtime-glob-ext.sh");
+    int ignore = !strcmp(name, "glob-ignore-simple-class.sh");
+    if (prefix || folded || choice || ignore) path = "brackets";
+    int passes = sparse || multi ? 30 : ignore ? 5 : prefix || folded || choice ? 15 : 1;
     int n = 0;
     char first[256] = "";
-    for (int i = 0; i < (sparse || multi ? 30 : 1); ++i) {
+    for (int i = 0; i < passes; ++i) {
         DIR *dir = opendir(path);
         if (!dir) return 1;
         struct dirent *entry;
@@ -40,6 +47,12 @@ static int directory(const char *name) {
             const char *s = entry->d_name;
             size_t len = strlen(s);
             if (len < 4 || strcmp(s + len - 4, ".txt") != 0) continue;
+            if (prefix && strncmp(s, "file_05", 7)) continue;
+            if (folded && strncasecmp(s, "FILE_05", 7)) continue;
+            if (choice || ignore) {
+                int matches = !strncmp(s, "file_0", 6) && (s[6] == '5' || s[6] == '6');
+                if (choice != matches) continue;
+            }
             if (sparse && strncmp(s, "item-000", 8) != 0) continue;
             if (multi && (len < 8 || strcmp(s + len - 6, "07.txt") != 0 ||
                           !strstr(s, "em") || strstr(s, "em") + 2 > s + len - 6)) continue;
@@ -186,7 +199,7 @@ int main(int argc, char **argv) {
         puts(captured);
         return 0;
     }
-    if (strncmp(name, "glob-", 5) == 0) return directory(name);
+    if (!strncmp(name, "glob-", 5) || !strncmp(name, "runtime-glob-", 13)) return directory(name);
     int env = strcmp(name, "external-env.sh") == 0;
     int redirect = strcmp(name, "redirect-stderr.sh") == 0;
     if (env) {
