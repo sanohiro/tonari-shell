@@ -91,3 +91,40 @@ On the M1, nine interleaved end-to-end measurements used the preceding language 
 The 768-line pipe case supplied 13,090 bytes. The same Linux runner measured 3.345 ms for Tonari and 3.794 ms for Bash. Tonari's `input::stdin_reader` and GNU's `fd_to_buffered_stream` both use one-byte reads on a nonseekable command input. An external command inheriting the pipe must be able to consume the bytes following its command line. The native job compares read counts under `strace` separately from wall timings when the tracer is available. [Native job](../tools/ci/whole-audit.sh)
 
 Linux x86-64 で長い文字列では当初の正規表現照合が Bash の時間を超えた。C の単体測定では、文字列のコピー以外の `regexec` 自体の時間が長さに応じて増えていた。コンパイルが成功した単純な式だけ、末尾のアンカーと必須リテラルを先に調べる。候補が通った場合や、選択・引用・文字クラス・キャプチャ・大小文字を無視する式では POSIX 実装が照合を行う。接尾辞が正しく途中だけ異なる例、キャプチャ内容、無効な式の終了値 2、直前の照合結果の保持、不一致後の配列クリアを個別に検証した。パイプ入力の1バイト読み取りは、子プロセスが後続入力を同じ記述子から読めるようにするためで、GNU Bash も同じ方式を使う。
+
+## Sourcing the installed completion library / 起動時の補完定義の読み込み
+
+Ubuntu's installed bash-completion 2.11 and the physical M1 fixture have identical SHA-256 hashes and contain 76,898 bytes. Before the parser change, Ubuntu x86-64 spent 5.077 ms loading lines 86–2,126, compared with 2.674 ms for GNU Bash 5.2.21. This section installs most of the functions and several completion rules. The final section, which checks the compatibility directory and the user file, took 0.557 ms in Tonari and 1.335 ms in Bash. The runner contained `azure-cli`, `gcloud` and `git-prompt` in its compatibility directory. Pointing the library at an empty directory left the first section's gap in place at 5.085 and 2.685 ms. The physical M1 had no system compatibility directory. [Phase benchmark](../tools/ci/completion-startup.py)
+
+A temporary counter at `parser::session_source_at` recorded the number and size of parse requests while an interactive shell sourced the original file. Including the 35-byte caller, Tonari submitted 227,123 bytes in 223 requests. For the 332-byte `_terms` definition, it submitted prefixes of 330, 15,897, 27,655 and finally 332 bytes. The indented inner brace in a command substitution generated an incomplete parse. Increasing the minimum distance to the next probe then skipped the actual closing brace and submitted later definitions along with it.
+
+For a recognized function header, the reader tries one flush-left closing brace in the next 8 KiB. The parser still verifies the physical boundary, including redirections on the closing line. A brace inside a quoted string or here-document goes through the existing fallback. The same input required 197 requests totaling 70,395 bytes, and `_terms` required one 332-byte request. The two local arm64 distribution builds were both 2,146,192 bytes. A public test compares output, status, redirection and alias handling against GNU Bash. Additional checks of the packaged library returned the same 137 extension rules, gunzip pattern, `cd` completion and function names. [Boundary checks](../src/input/lookahead.rs) · [Shell regressions](../tests/shell.py)
+
+Physical Apple M1 medians in milliseconds from 25 interleaved fresh-PTY trials with GNU Bash 5.3.20. The original library supplies the whole-file rows. The section timings use a copy with timestamps inserted between top-level commands. The syntax-only rows time process launch through exit with extglob enabled upfront. An earlier 21-trial run measured the definitions section at 3.612, 1.286 and 2.110 ms respectively.
+
+| Workload / 条件 | Tonari before | Tonari after | GNU Bash 5.3.20 |
+| --- | ---: | ---: | ---: |
+| Exec to empty rc prompt | 3.209 | 3.201 | 8.157 |
+| Exec through original rc to prompt | 7.659 | 5.251 | 11.599 |
+| Original file, source alone | 4.245 | 1.856 | 3.274 |
+| Function-definition section | 3.921 | 1.382 | 2.244 |
+| Extension-rule registration section | 0.278 | 0.295 | 0.859 |
+| Source with empty compat directory, 1 / 2 / 4 times | 4.410 / 8.889 / 16.092 | 1.965 / 3.902 / 6.894 | 3.801 / 7.317 / 13.135 |
+| Nested functions per source file, 16 / 32 / 64 | 0.170 / 0.256 / 0.421 | 0.087 / 0.116 / 0.164 | 0.104 / 0.160 / 0.273 |
+| Syntax only, empty / original file | 4.763 / 9.068 | 4.667 / 6.746 | 9.810 / 12.173 |
+
+Ubuntu の補完ライブラリでは、関数内の字下げされた閉じ波括弧を候補にした結果、後続の関数まで繰り返し解析していた。互換スクリプトのディレクトリを空にしても、関数定義区間の差は残った。関数の先頭から 8 KiB 以内にある行頭の閉じ波括弧を一度試し、構文解析器で実際の境界を確かめるようにした。引用符内やヒアドキュメント内の波括弧、リダイレクト、後続行のエイリアスも検証した。M1 実機では、元のファイル単独の読み込みが 4.245 ms から 1.856 ms に短縮された。GNU Bash 5.3.20 は 3.274 ms だった。
+
+On Ubuntu 24.04, the uninstrumented `.bashrc` sourcing the installed package reached its first prompt in 7.528 / 4.652 / 7.678 ms (original / revised / Bash 5.2.21; 21 interleaved trials on an AMD EPYC 9V74). The revised p95 was 4.748 ms. The system compatibility directory contained azure-cli, gcloud and git-prompt. Measuring inside the shell in a separate 15-trial run attributed 6.101 / 3.212 / 5.467 ms to sourcing. Instrumenting the definition section gave 4.999 / 1.975 / 2.909 ms. Sourcing four times with an empty compatibility directory took 20.550 / 8.916 / 14.858 ms. Ubuntu の実パッケージでもプロンプトまで GNU Bash の 60.6% となり、関数定義区間の短縮をシェル内部の時計で確認した。[Native comparison at e94d25f](https://github.com/sanohiro/tonari-shell/actions/runs/46169630470)
+
+A pre-existing alias in a startup file changes the parser's treatment of function boundaries. Its source positions can refer to rewritten text. On private input, the function hint requires a single function statement whose retained source exactly equals the physical input and whose end lies on the proposed closing line. Unused aliases satisfy this check. When a function contains an alias that rewrites its source, the existing alias-aware reader resolves its boundary. A test counts the actual parser calls for both paths. Public checks cover an aliased function name, aliases introducing `if` and `fi`, changed replacements, function redirection and quoted brace data. [Implementation and unit test](../src/input/lookahead.rs) · [Public regression](../tests/shell.py)
+
+Physical M1, 25 interleaved medians in milliseconds. The before column already includes the closing-brace optimization for sessions without aliases. The used-alias fixture also verified that the saved `_upvars` definition contains the expanded `builtin echo` command.
+
+| Aliases before sourcing 2.11 | Source before / after / GNU 5.3.20 | Exec to prompt before / after / GNU 5.3.20 |
+| --- | ---: | ---: |
+| None | 1.796 / 1.809 / 3.175 | 4.894 / 4.941 / 10.953 |
+| `alias ll='ls -l'` | 8.032 / 1.883 / 3.183 | 11.160 / 4.972 / 10.969 |
+| `alias echo='builtin echo'` | 8.433 / 4.089 / 3.187 | 12.491 / 8.135 / 11.906 |
+
+事前にエイリアスがある場合、構文木上の位置が展開後の文字列を指すことがある。候補を採用する条件は、単独の関数定義で、保持されたソースが入力とバイト単位で一致し、その終了位置が候補行にあること。実際にソースが書き換わった関数は従来の入力処理に戻す。M1 の例では未使用の `ll` がある場合、読み込みが 8.032 ms から 1.883 ms に短縮された。よく使われる `echo` を展開した場合は 4.089 ms で、GNU Bash の 3.187 ms を上回った。

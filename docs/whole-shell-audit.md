@@ -98,3 +98,9 @@ The following Linux medians include startup. All three programs ran on the same 
 | 32 pipelines with three stages | 19.942 | 19.894 | 24.664 |
 
 Linux で 4,096 回の書き込みをループの外で一度だけリダイレクトすると 2.331 ms、直接ファイルへ書く対照は 1.745 ms だった。共有パイプから標準入力を読む 768 行の別試験では、先読みで後続コマンドからデータを奪わないよう両シェルとも細かく読み、`strace` では Tonari 13,099 回、Bash 13,095 回の read を記録した。先頭からの構文再解析を省くことと、共有入力の境界を保つことは別々に検証した。[Stream attribution](https://github.com/sanohiro/tonari-shell/actions/runs/46168594507)
+
+### Final checks / 最終確認
+
+The full native matrix at `e94d25f` includes the packaged completion initializer, alias-directory comparisons, release linkage and a one-CPU editor run. On the AMD Linux editor host, the 4 KiB ASCII first-response p95 fell from 3.645 to 0.317 ms. Completing the visible text and placing the caret took 4.039 / 4.199 / 4.336 ms at p95 / p99 / maximum, versus 3.681 / 3.706 / 5.058 on the starting revision and 11.661 / 11.688 / 11.741 on Bash. On the separate Xeon key runner a single ASCII key completed in 0.050 / 0.059 / 0.064 ms. The first-paint gain has a measurable extra full-frame cost on some hosts. [Full matrix and raw observations](https://github.com/sanohiro/tonari-shell/actions/runs/46169630470)
+
+最後の差分は、起動スクリプトの関数を読むときのエイリアス処理である。ソースを置き換えた定義は従来経路で読む。独立確認では、引用・ヒアドキュメント・同じ長さの別の置換・閉じ行でのエイリアス再定義・後続の read を含む 105 条件について、終了値、標準出力、ファイル内容、診断の有無を比較した。長い ASCII 入力は先頭応答の改善が大きく、表示完了では旧版を上回る遅延も実測した。GUI 端末の描画や IME の変換操作は本試験の対象外である。[Final changed-path native comparisons](https://github.com/sanohiro/tonari-shell/actions/runs/46170221843) · [GNU and POSIX regression suites](https://github.com/sanohiro/tonari-shell/actions/runs/46170206814)
