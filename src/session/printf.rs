@@ -108,7 +108,9 @@ pub(crate) fn run(
         values,
         status: 0,
         locale: None,
-        byte_char_codes: values.iter().any(|s| matches!(s.as_bytes().first(), Some(b'\'' | b'"')))
+        byte_char_codes: values
+            .iter()
+            .any(|s| matches!(s.as_bytes().first(), Some(b'\'' | b'"')))
             && variables.read().ascii_quoting(),
     };
     let mut output = Vec::new();
@@ -715,7 +717,8 @@ fn render(
                                 variables.read(),
                                 if format.is_empty() { "%X" } else { format },
                                 seconds,
-                            ).ok_or("time or format out of range")?;
+                            )
+                            .ok_or("time or format out of range")?;
                             spec.bytes(stamp.as_bytes(), out)?;
                         } else {
                             diagnostic!("printf: warning: invalid time format specification");
@@ -764,9 +767,15 @@ fn render(
                             if variables.read().readonly(name) {
                                 diagnostic!("printf: {name}: readonly variable");
                                 args.status = 1;
-                            } else if !(variables.capture && !variables.has_target && input.is_empty()
-                                && args.values.is_empty() && variables.read().capture_local(name)) {
-                                variables.write().assign(name, itoa::Buffer::new().format(out.len() - start));
+                            } else if !(variables.capture
+                                && !variables.has_target
+                                && input.is_empty()
+                                && args.values.is_empty()
+                                && variables.read().capture_local(name))
+                            {
+                                variables
+                                    .write()
+                                    .assign(name, itoa::Buffer::new().format(out.len() - start));
                             }
                         }
                     }
@@ -775,7 +784,9 @@ fn render(
                         let mut locale = numeric::C;
                         if float || spec.has(b'\'') {
                             locale = *args.locale.get_or_insert_with(|| {
-                                variables.read().locale_category("LC_NUMERIC")
+                                variables
+                                    .read()
+                                    .locale_category("LC_NUMERIC")
                                     .as_deref()
                                     .map(numeric::find)
                                     .unwrap_or(numeric::C)
@@ -791,7 +802,13 @@ fn render(
                             spec.numeric(k, ".", args, out)?;
                         }
                     }
-                    _ => return Err(format!("`{}': invalid format character", char::from(conversion)).into()),
+                    _ => {
+                        return Err(format!(
+                            "`{}': invalid format character",
+                            char::from(conversion)
+                        )
+                        .into());
+                    }
                 }
             }
             _ => {

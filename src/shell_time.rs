@@ -14,13 +14,20 @@ fn valid_widths(format: &str) -> bool {
     let mut rest = format;
     let mut total = 0usize;
     while let Some((_, next)) = rest.split_once('%') {
-        if let Some(tail) = next.strip_prefix('%') { rest = tail; continue; }
+        if let Some(tail) = next.strip_prefix('%') {
+            rest = tail;
+            continue;
+        }
         let width = next.trim_start_matches(['_', '-', '0', '^', '#']);
         let code = width.trim_start_matches(|c: char| c.is_ascii_digit());
         if code.len() != width.len() {
-            let Some(n) = width[..width.len() - code.len()].parse::<usize>().ok() else { return false; };
+            let Some(n) = width[..width.len() - code.len()].parse::<usize>().ok() else {
+                return false;
+            };
             total = total.saturating_add(n);
-            if total > MAX_TIME_PADDING { return false; }
+            if total > MAX_TIME_PADDING {
+                return false;
+            }
         }
         rest = code;
     }
@@ -66,10 +73,16 @@ impl Clock {
             }),
         }
         .or_else(|error| {
-            if let Some(name) = name.as_deref().filter(|n| n.len() >= 3 && n.bytes().all(|c| c.is_ascii_alphabetic())) {
+            if let Some(name) = name
+                .as_deref()
+                .filter(|n| n.len() >= 3 && n.bytes().all(|c| c.is_ascii_alphabetic()))
+            {
                 tz::TimeZone::from_posix_tz(&format!("{name}0"))
-            } else { Err(error) }
-        }).unwrap_or_else(|_| tz::TimeZone::utc());
+            } else {
+                Err(error)
+            }
+        })
+        .unwrap_or_else(|_| tz::TimeZone::utc());
         #[cfg(not(target_env = "musl"))]
         let locale =
             CString::new(locale_name.as_str())
@@ -99,9 +112,13 @@ pub(crate) fn try_format(session: &Session, format: &str, seconds: i64) -> Optio
 }
 
 pub(crate) fn with_formatter<T>(
-    session: &Session, format: &str, run: impl FnOnce(&dyn Fn(i64) -> String) -> T,
+    session: &Session,
+    format: &str,
+    run: impl FnOnce(&dyn Fn(i64) -> String) -> T,
 ) -> T {
-    using_clock(session, format, |stamp| run(&|seconds| stamp(seconds).unwrap_or_default()))
+    using_clock(session, format, |stamp| {
+        run(&|seconds| stamp(seconds).unwrap_or_default())
+    })
 }
 
 fn using_clock<T>(
@@ -268,7 +285,10 @@ fn format_in_zone(clock: &Clock, format: &str, seconds: i64) -> Option<String> {
             unsafe { bytes.set_len(n) };
             bytes.copy_within(1.., 0);
             bytes.pop();
-            return Some(String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()));
+            return Some(
+                String::from_utf8(bytes)
+                    .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()),
+            );
         }
         if size >= max {
             return None;

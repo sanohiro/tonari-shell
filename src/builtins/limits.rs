@@ -82,7 +82,9 @@ const LIMITS: &[Limit] = &[
 
 impl Limit {
     fn in_mode(mut self, posix: bool) -> Self {
-        if posix && matches!(self.flag, 'f' | 'c') { self.unit = 512; }
+        if posix && matches!(self.flag, 'f' | 'c') {
+            self.unit = 512;
+        }
         self
     }
 
@@ -148,7 +150,10 @@ impl Limit {
                 .filter(|_| arg.bytes().all(|c| c.is_ascii_digit()))
                 .and_then(|n| n.checked_mul(self.unit))
                 .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidInput, format!("{arg}: invalid number"))
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("{arg}: invalid number"),
+                    )
                 })?,
         };
         let resource = self
@@ -237,7 +242,11 @@ pub fn run(args: &[String], out: &mut dyn Write, posix: bool) -> u8 {
                 None => limit.report(out, &values, hard && !soft, label),
             });
             if let Err(error) = result {
-                diagnostic!("ulimit: {}: {}", limit.name, crate::builtins::os_message(&error));
+                diagnostic!(
+                    "ulimit: {}: {}",
+                    limit.name,
+                    crate::builtins::os_message(&error)
+                );
                 return 1;
             }
         }

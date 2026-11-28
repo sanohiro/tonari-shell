@@ -3,10 +3,20 @@ use crate::{Flow, Session};
 type Result<T> = std::result::Result<T, &'static str>;
 type ShellResult<T> = std::result::Result<T, crate::expansion::Error>;
 
-pub(crate) fn shell_error(message: &'static str, expression: &str, session: &Session) -> crate::expansion::Error {
+pub(crate) fn shell_error(
+    message: &'static str,
+    expression: &str,
+    session: &Session,
+) -> crate::expansion::Error {
     if message == "unbound arithmetic variable" {
-        crate::expansion::Error::fatal(format!("{expression}: unbound variable"),
-            if session.command_string && !session.interactive { 127 } else { 1 })
+        crate::expansion::Error::fatal(
+            format!("{expression}: unbound variable"),
+            if session.command_string && !session.interactive {
+                127
+            } else {
+                1
+            },
+        )
     } else {
         crate::expansion::Error::from(message).in_expression(expression)
     }
@@ -92,7 +102,9 @@ pub(crate) fn data_key(source: &str, lookup: impl Fn(&str) -> Option<String>) ->
             for part in parts {
                 match part {
                     Part::Text(s) | Part::Pattern(s) => key.push_str(&s),
-                    Part::Parameter { name, .. } | Part::BraceParameter(name) if is_identifier(&name) => {
+                    Part::Parameter { name, .. } | Part::BraceParameter(name)
+                        if is_identifier(&name) =>
+                    {
                         if let Some(value) = lookup(&name) {
                             key.push_str(&value);
                         }
@@ -104,7 +116,11 @@ pub(crate) fn data_key(source: &str, lookup: impl Fn(&str) -> Option<String>) ->
         }
         Word::Declaration(_) => return Err("invalid arithmetic array subscript"),
     };
-    if key.is_empty() { Err("bad array subscript") } else { Ok(key) }
+    if key.is_empty() {
+        Err("bad array subscript")
+    } else {
+        Ok(key)
+    }
 }
 
 struct ReadOnly<'a, F>(&'a F);
@@ -230,11 +246,12 @@ pub fn expanded(source: &str, session: &mut Session, status: u8) -> Result<i64> 
 
 fn expanded_operand(source: &str, session: &mut Session, status: u8) -> ShellResult<i64> {
     if !source.contains(['$', '`', '"', '\\']) {
-        return run(source, session).map_err(|e| shell_error(e,source,session));
+        return run(source, session).map_err(|e| shell_error(e, source, session));
     }
     let captured = std::cell::Cell::new(None);
     crate::expansion::Expansion::new(session, status, &captured)
-        .arithmetic_text(source).and_then(|text| run(&text,session).map_err(|e|shell_error(e,&text,session)))
+        .arithmetic_text(source)
+        .and_then(|text| run(&text, session).map_err(|e| shell_error(e, &text, session)))
 }
 
 // Loop headers are immutable, but their operands can be reassigned on every
@@ -316,7 +333,8 @@ impl<'a> Repeated<'a> {
             Self::Other(source, ref plan) => plan
                 .get_or_init(|| plan::Program::compile(source))
                 .as_ref()
-                .and_then(|p| p.run(session, true)).map(|r| r.map_err(|e| shell_error(e, source, session)))
+                .and_then(|p| p.run(session, true))
+                .map(|r| r.map_err(|e| shell_error(e, source, session)))
                 .unwrap_or_else(|| expanded_operand(source, session, status)),
             Self::Compare(name, op, rhs, source) => match session.scalar_decimal(name) {
                 Some(n) => binary(op, n, rhs).map_err(Into::into),
@@ -381,14 +399,14 @@ pub(crate) fn traced(
         write_trace(source, session, status);
         return match compiled {
             Some(header) => header.run(session, status),
-            None => run(source, session).map_err(|e|shell_error(e,source,session)),
+            None => run(source, session).map_err(|e| shell_error(e, source, session)),
         };
     }
     let captured = std::cell::Cell::new(None);
     let mut env = crate::expansion::Expansion::new(session, status, &captured);
     let text = env.arithmetic_text(source)?;
     write_trace(&text, env.session, status);
-    with_variables(&text, &mut env).map_err(|e|shell_error(e,&text,env.session))
+    with_variables(&text, &mut env).map_err(|e| shell_error(e, &text, env.session))
 }
 
 #[derive(Debug, Clone)]
@@ -468,7 +486,7 @@ pub(crate) fn command(
     let result = if session.xtrace {
         traced(source, session, status, None)
     } else if repeated && let Some(result) = expr.compiled(session, true) {
-        result.map_err(|e|shell_error(e,source,session))
+        result.map_err(|e| shell_error(e, source, session))
     } else if repeated
         && !(source.ends_with("++") || source.ends_with("--"))
         && let Some(tokens) = expr.tokens.get_or_init(|| expr.lexemes())
@@ -478,7 +496,8 @@ pub(crate) fn command(
             tokens: Some(tokens),
             token: Token::End,
         }
-        .evaluate(session, 0).map_err(|e|shell_error(e,source,session))
+        .evaluate(session, 0)
+        .map_err(|e| shell_error(e, source, session))
     } else {
         expanded_operand(source, session, status)
     };
@@ -506,7 +525,13 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    fn new(source: &'a str) -> Self { Self { source, tokens: None, token: Token::End } }
+    fn new(source: &'a str) -> Self {
+        Self {
+            source,
+            tokens: None,
+            token: Token::End,
+        }
+    }
     fn advance(&mut self) -> Result<Token<'a>> {
         let old = self.token;
         if let Some(tokens) = self.tokens {
@@ -775,6 +800,7 @@ impl Value<'_> {
                     }
                 };
                 match text {
+                    Some(s) if s.is_empty() => Ok(0),
                     Some(s) => calculate(&s, variables, depth + 1),
                     None if variables.nounset() => Err("unbound arithmetic variable"),
                     None => Ok(0),
@@ -867,30 +893,60 @@ fn precedence(op: &str) -> Option<(u8, bool)> {
     Some((prec, matches!(prec, 2 | 3 | 14)))
 }
 
-fn binary(op: &str, a: i64, b: i64) -> Result<i64> {
-    Ok(match op {
-        "," => b,
-        "||" => i64::from(a != 0 || b != 0),
-        "&&" => i64::from(a != 0 && b != 0),
-        "|" => a | b,
-        "&" => a & b,
-        "^" => a ^ b,
-        "==" => i64::from(a == b),
-        "!=" => i64::from(a != b),
-        "<" => i64::from(a < b),
-        ">" => i64::from(a > b),
-        "<=" => i64::from(a <= b),
-        ">=" => i64::from(a >= b),
-        "<<" => a.wrapping_shl(b as u32),
-        ">>" => a.wrapping_shr(b as u32),
-        "+" => a.wrapping_add(b),
-        "-" => a.wrapping_sub(b),
-        "*" => a.wrapping_mul(b),
-        "/" | "%" if b == 0 => return Err("division by zero"),
-        "/" => a.wrapping_div(b),
-        "%" => a.wrapping_rem(b),
-        "**" if b < 0 => return Err("negative arithmetic exponent"),
-        "**" => {
+#[derive(Debug, Clone, Copy)]
+enum Binary { Comma, LogicalOr, LogicalAnd, Or, And, Xor, Equal, Unequal, Less, Greater, LessEqual, GreaterEqual, ShiftLeft, ShiftRight, Add, Subtract, Multiply, Divide, Remainder, Power }
+
+impl Binary {
+    fn parse(op: &str) -> Option<Self> {
+        Some(match op {
+            "," => Self::Comma,
+            "||" => Self::LogicalOr,
+            "&&" => Self::LogicalAnd,
+            "|" => Self::Or,
+            "&" => Self::And,
+            "^" => Self::Xor,
+            "==" => Self::Equal,
+            "!=" => Self::Unequal,
+            "<" => Self::Less,
+            ">" => Self::Greater,
+            "<=" => Self::LessEqual,
+            ">=" => Self::GreaterEqual,
+            "<<" => Self::ShiftLeft,
+            ">>" => Self::ShiftRight,
+            "+" => Self::Add,
+            "-" => Self::Subtract,
+            "*" => Self::Multiply,
+            "/" => Self::Divide,
+            "%" => Self::Remainder,
+            "**" => Self::Power,
+            _ => return None,
+        })
+    }
+
+    fn apply(self, a: i64, b: i64) -> Result<i64> {
+    Ok(match self {
+        Self::Comma => b,
+        Self::LogicalOr => i64::from(a != 0 || b != 0),
+        Self::LogicalAnd => i64::from(a != 0 && b != 0),
+        Self::Or => a | b,
+        Self::And => a & b,
+        Self::Xor => a ^ b,
+        Self::Equal => i64::from(a == b),
+        Self::Unequal => i64::from(a != b),
+        Self::Less => i64::from(a < b),
+        Self::Greater => i64::from(a > b),
+        Self::LessEqual => i64::from(a <= b),
+        Self::GreaterEqual => i64::from(a >= b),
+        Self::ShiftLeft => a.wrapping_shl(b as u32),
+        Self::ShiftRight => a.wrapping_shr(b as u32),
+        Self::Add => a.wrapping_add(b),
+        Self::Subtract => a.wrapping_sub(b),
+        Self::Multiply => a.wrapping_mul(b),
+        Self::Divide | Self::Remainder if b == 0 => return Err("division by zero"),
+        Self::Divide => a.wrapping_div(b),
+        Self::Remainder => a.wrapping_rem(b),
+        Self::Power if b < 0 => return Err("negative arithmetic exponent"),
+        Self::Power => {
             let mut power = b as u64;
             let mut base = a;
             let mut result = 1i64;
@@ -903,9 +959,11 @@ fn binary(op: &str, a: i64, b: i64) -> Result<i64> {
             }
             result
         }
-        _ => return Err("unknown arithmetic operator"),
     })
 }
+}
+
+fn binary(op: &str, a:i64,b:i64)->Result<i64> { Binary::parse(op).ok_or("unknown arithmetic operator")?.apply(a,b) }
 
 fn number(s: &str) -> Result<i64> {
     let (base, digits) = if let Some((base, digits)) = s.split_once('#') {
@@ -918,7 +976,9 @@ fn number(s: &str) -> Result<i64> {
         }
         (base, digits)
     } else if let Some(digits) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        if digits.is_empty() { return Ok(0); }
+        if digits.is_empty() {
+            return Ok(0);
+        }
         (16, digits)
     } else if s.starts_with('0') {
         (8, s)

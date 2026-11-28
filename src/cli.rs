@@ -42,41 +42,45 @@ pub struct StartupOptions {
 impl StartupOptions {
     fn set(&mut self, name: &str, enabled: bool) -> Result<(), String> {
         match name {
-                            "privileged" => self.privileged = enabled,
-                            "history" => self.history = Some(enabled),
-                            "vi" => {
-                                self.vi = Some(enabled);
-                                if enabled { self.emacs = Some(false); }
-                            }
-                            "emacs" => {
-                                self.emacs = Some(enabled);
-                                if enabled { self.vi = Some(false); }
-                            }
-                            "braceexpand" => self.braceexpand = enabled,
-                            "posix" => self.posix = Some(enabled),
-                            "physical" => self.physical = enabled,
-                            "nolog" => self.nolog = enabled,
-                            "keyword" => self.keyword = enabled,
-                            "interactive-comments" => self
-                                .shopts
-                                .push((enabled, Some("interactive_comments".into()))),
-                            "pipefail" => self.pipefail = enabled,
-                            "errexit" => self.errexit = enabled,
-                            "verbose" => self.verbose = enabled,
-                            "errtrace" => self.errtrace = enabled,
-                            "functrace" => self.functrace = enabled,
-                            "nounset" => self.nounset = enabled,
-                            "allexport" => self.allexport = enabled,
-                            "onecmd" => self.onecmd = enabled,
-                            "xtrace" => self.xtrace = enabled,
-                            "histexpand" => self.histexpand = Some(enabled),
-                            "monitor" => self.monitor = Some(enabled),
-                            "hashall" => self.hashall = enabled,
-                            "noclobber" => self.noclobber = enabled,
-                            "noexec" => self.check = enabled,
-                            "notify" => self.notify = enabled,
-                            "ignoreeof" => self.ignoreeof = Some(enabled),
-                            "noglob" => self.noglob = enabled,
+            "privileged" => self.privileged = enabled,
+            "history" => self.history = Some(enabled),
+            "vi" => {
+                self.vi = Some(enabled);
+                if enabled {
+                    self.emacs = Some(false);
+                }
+            }
+            "emacs" => {
+                self.emacs = Some(enabled);
+                if enabled {
+                    self.vi = Some(false);
+                }
+            }
+            "braceexpand" => self.braceexpand = enabled,
+            "posix" => self.posix = Some(enabled),
+            "physical" => self.physical = enabled,
+            "nolog" => self.nolog = enabled,
+            "keyword" => self.keyword = enabled,
+            "interactive-comments" => self
+                .shopts
+                .push((enabled, Some("interactive_comments".into()))),
+            "pipefail" => self.pipefail = enabled,
+            "errexit" => self.errexit = enabled,
+            "verbose" => self.verbose = enabled,
+            "errtrace" => self.errtrace = enabled,
+            "functrace" => self.functrace = enabled,
+            "nounset" => self.nounset = enabled,
+            "allexport" => self.allexport = enabled,
+            "onecmd" => self.onecmd = enabled,
+            "xtrace" => self.xtrace = enabled,
+            "histexpand" => self.histexpand = Some(enabled),
+            "monitor" => self.monitor = Some(enabled),
+            "hashall" => self.hashall = enabled,
+            "noclobber" => self.noclobber = enabled,
+            "noexec" => self.check = enabled,
+            "notify" => self.notify = enabled,
+            "ignoreeof" => self.ignoreeof = Some(enabled),
+            "noglob" => self.noglob = enabled,
             _ => return Err(format!("{name}: invalid option name")),
         }
         Ok(())
@@ -118,7 +122,10 @@ pub fn parse(
 ) -> Result<Action, String> {
     let name = args.next().unwrap_or_else(|| "tonari".into());
     let mut login = name.as_bytes().starts_with(b"-");
-    let as_su = matches!(name.as_bytes().rsplit(|b| *b == b'/').next(), Some(b"su" | b"-su"));
+    let as_su = matches!(
+        name.as_bytes().rsplit(|b| *b == b'/').next(),
+        Some(b"su" | b"-su")
+    );
     let as_sh = matches!(
         name.as_bytes().rsplit(|b| *b == b'/').next(),
         Some(b"sh" | b"-sh")
@@ -174,11 +181,13 @@ pub fn parse(
                             .shopts
                             .push((enabled, args.next().map(utf8).transpose()?)),
                         'o' => {
-                            let name = utf8(args.next().ok_or("expected an option name after -o")?)?;
+                            let name =
+                                utf8(args.next().ok_or("expected an option name after -o")?)?;
                             options.set(&name, enabled)?;
                         }
                         c => {
-                            let name = crate::Session::short_option_name(c).ok_or_else(|| format!("unsupported option: {arg}"))?;
+                            let name = crate::Session::short_option_name(c)
+                                .ok_or_else(|| format!("unsupported option: {arg}"))?;
                             options.set(name, enabled)?;
                         }
                     }

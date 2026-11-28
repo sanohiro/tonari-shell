@@ -44,7 +44,9 @@ impl Reader {
         }
         match self.operand() {
             Some(Token::Word(word)) => Ok(word.word),
-            None => Err(Error::incomplete_message("unfinished conditional expression")),
+            None => Err(Error::incomplete_message(
+                "unfinished conditional expression",
+            )),
             _ => Err(Error::Invalid("expected a conditional operand")),
         }
     }

@@ -1,6 +1,7 @@
 """Exercise shell startup and builtin contracts through the public executable."""
 import argparse
 import os
+import pwd
 import statistics
 import subprocess
 import tempfile
@@ -21,7 +22,8 @@ def main():
         env = dict(HOME=work, PATH="/usr/bin:/bin", LC_ALL="C", HISTFILE="/dev/null")
 
         def run(shell, *argv, extra=None, stdin=None):
-            return subprocess.run([shell, *argv], cwd=root, env=env | (extra or {}),
+            merged = {k: v for k, v in (env | (extra or {})).items() if v is not None}
+            return subprocess.run([shell, *argv], cwd=root, env=merged,
                                   capture_output=True, input=stdin, timeout=25)
 
         def checked(shell, argv, expected, extra=None):
@@ -77,6 +79,51 @@ def main():
             'mapfile -n2 -t -d雪 a <words; printf "%s/%s" "${a[0]}" "${a[1]}"',
         ]:
             checked(candidate, ["-c", cmd], (0, b"one/two"))
+        # Exercise delimiter candidates with matching last bytes on either
+        # side of both the scalar reader's and bulk reader's I/O boundaries.
+        sep = "雪".encode()
+        collision = "ª".encode()  # Same final byte as 雪.
+        for size in (4094, 4095, 65534, 65535):
+            first = b"x" * (size - len(collision)) + collision
+            (root / "words").write_bytes(first + sep + b"two" + sep + b"tail")
+            for flags, end in (("-t", b""), ("", sep)):
+                cmd = f'exec 3<words; mapfile {flags} -u3 -d雪 a; printf "%s|" "${{a[@]}}"; cat <&3'
+                checked(candidate, ["-c", cmd], (0, first + end + b"|two" + end + b"|tail|"))
+            for source in (["words", "<(cat words)"] if size == 4095 else ["words"]):
+                cmd = f'exec 3< {source}; IFS= read -ru3 -d雪 a; s=$?; mapfile -n1 -tu3 -d雪 b; printf "%s/%s|%s|%s|" "$s" "$?" "$a" "$b"; cat <&3'
+                checked(candidate, ["-c", cmd], (0, b"0/0|" + first + b"|two|tail"))
+
+        (root / "words").write_bytes(b"one\\two\\three")
+        for shell in (candidate, reference):
+            for raw, expected in [("", b"1:onetwothree/"), ("-r", b"0:one/two\\three")]:
+                cmd = f"""exec 3<words; IFS= read {raw} -u3 -d '\\' value; printf '%s:%s/' "$?" "$value"; cat <&3"""
+                checked(shell, ["-c", cmd], (0, expected))
+
+        # Invalid UTF-8 fails one record while preserving completed array
+        # entries and the following shared regular-file position.
+        for delim in (b"\n", sep):
+            (root / "words").write_bytes(delim.join((b"good", b"\xff", b"next")) + delim)
+            sep_arg = "-d雪" if delim == sep else ""
+            checked(candidate, ["-c", f'exec 3<words; mapfile -tu3 {sep_arg} a; printf "%s/%s/" "$?" "$a"; cat <&3'],
+                    (0, b"1/good/next" + delim))
+
+        # Isolate startup from the user's rc files and journal. HOME unset
+        # uses the actual account directory for the default path; HOME="" has
+        # no personal configuration path. Explicit BASH_ENV/--rcfile still work.
+        account = Path(pwd.getpwuid(os.getuid()).pw_dir)
+        for supplied, expected in [(None, os.fsencode(account / ".bash_history")), ("", b"unset")]:
+            checked(candidate, ["--noprofile", "--norc", "-ic", 'printf %s "${HISTFILE-unset}"'],
+                    (0, expected), {"HOME": supplied, "HISTFILE": None, "XDG_STATE_HOME": work})
+        (root / "+0").mkdir()
+        for shell in (candidate, reference):
+            checked(shell, ["-c", 'HOME=; OLDPWD=sentinel; cd && [[ $OLDPWD == "$PWD" ]]'], (0, b""))
+            checked(shell, ["-c", 'unset HOME; cd; printf %s "$?"'], (0,b"1"))
+            checked(shell, ["-c", 'OLDPWD=; cd -; printf %s "$?"'], (0,b"\n0"))
+            checked(shell, ["-c", 'cd scripts; OLDPWD=..; cd -; printf %s "$?"'], (0,b"..\n0"))
+            checked(shell, ["-c", 'pushd -n scripts >/dev/null; dirs -c extra; s=$?; printf "%s/%s" "$s" "${#DIRSTACK[@]}"'], (0,b"2/2"))
+            checked(shell, ["-c", 'pushd -- +0 >/dev/null && [[ $PWD == */+0 ]]'], (0, b""))
+            checked(shell, ["-c", 'pushd / scripts'], (1, b""))
+            checked(shell, ["-c", 'pushd +not-a-number'], (2, b""))
         for argv in (["--noprofile", "--norc", "-ic", "printf ok"], ["--rcfile", str(setup), "-ic", 'printf %s "$loaded"']):
             checked(candidate, argv, (0, b"yes" if "--rcfile" in argv else b"ok"), {"HOME": ""})
 
@@ -94,7 +141,7 @@ def main():
                 assert result.returncode and operand in result.stderr, (cmd, result)
         checked(candidate, ["-c", "printf '%(%8s)T' 42"], (0, b"      42"), {"TZ": "UTC0"})
         checked(candidate, ["-c", "printf '%(%Es|%Os)T' 42"], (0, b"42|42"), {"TZ": "JST-9"})
-        print(f"{len(cases) + 9} Bash comparisons and 7 Tonari contracts passed", flush=True)
+        print("Startup, directory, shared-descriptor and builtin contracts passed", flush=True)
         if not args.runs:
             return
         (root / "lines").write_text(("abcdefgh " * 100 + "\n") * 1200)

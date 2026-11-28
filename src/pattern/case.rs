@@ -145,9 +145,9 @@ pub(crate) fn convert_chars(
     locale: CharacterLocale,
 ) -> String {
     if pattern.is_some() {
-        return super::localized(|| convert(text,direction,all,pattern,locale));
+        return super::localized(|| convert(text, direction, all, pattern, locale));
     }
-    convert(text,direction,all,pattern,locale)
+    convert(text, direction, all, pattern, locale)
 }
 
 fn convert(

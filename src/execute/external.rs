@@ -132,7 +132,7 @@ impl External {
                 .then(|| {
                     let path = lookup::path(cmd, session);
                     let ignored = IgnoredExecutables::new(session);
-                    lookup::search_directories(&path)
+                    lookup::search_directories(path)
                         .map(|dir| dir.join(name))
                         .filter(|path| !ignored.contains(path))
                         .map(|path| CString::new(path.into_os_string().into_encoded_bytes()))
@@ -234,29 +234,42 @@ impl External {
                     error = self.script_fallback(path, fallback_in_session.then_some(session));
                     break;
                 }
-                libc::EACCES => { error = libc::EACCES; failed_path = path; },
+                libc::EACCES => {
+                    error = libc::EACCES;
+                    failed_path = path;
+                }
                 e => {
                     error = e;
                     break;
                 }
             }
         }
-        report_exec_error(session, program.as_bytes(), std::path::Path::new(std::ffi::OsStr::from_bytes(failed_path.to_bytes())), error)
-
+        let path = std::path::Path::new(std::ffi::OsStr::from_bytes(failed_path.to_bytes()));
+        report_exec_error(session, program.as_bytes(), path, error)
     }
 }
 
 #[cold]
-pub(super) fn report_exec_error(session: &Session, name: &[u8], path: &std::path::Path, error: i32) -> u8 {
-        let reason: &[u8] = match error {
-            libc::ENOENT | libc::ENOTDIR if !name.contains(&b'/') => b": command not found",
-            libc::ENOENT | libc::ENOTDIR => b": No such file or directory",
-            libc::EISDIR => b": Is a directory",
-            libc::EACCES if path.is_dir() => b": Is a directory",
-            libc::EACCES | libc::EPERM => b": Permission denied",
-            _ => b": cannot execute",
-        };
+pub(super) fn report_exec_error(
+    session: &Session,
+    name: &[u8],
+    path: &std::path::Path,
+    error: i32,
+) -> u8 {
+    let reason: &[u8] = match error {
+        libc::ENOENT | libc::ENOTDIR if !name.contains(&b'/') => b": command not found",
+        libc::ENOENT | libc::ENOTDIR => b": No such file or directory",
+        libc::EISDIR => b": Is a directory",
+        libc::EACCES if path.is_dir() => b": Is a directory",
+        libc::EACCES | libc::EPERM => b": Permission denied",
+        _ => b": cannot execute",
+    };
     let prefix = session.diagnostic_prefix(|| session.line());
-    write_diagnostic(prefix.as_deref().unwrap_or("tonari: ").as_bytes(), name, reason, b"");
+    write_diagnostic(
+        prefix.as_deref().unwrap_or("tonari: ").as_bytes(),
+        name,
+        reason,
+        b"",
+    );
     exec_status(error)
 }

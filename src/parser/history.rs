@@ -128,7 +128,13 @@ pub(crate) fn history_designator_spans(line: &str, extglob: bool) -> Vec<(usize,
     }) {
         return history_word_spans(line);
     }
-    let _extglob = crate::ScopedCell::enter(&READ_OPTIONS, ReadOptions {extglob, ..READ_OPTIONS.get()});
+    let _extglob = crate::ScopedCell::enter(
+        &READ_OPTIONS,
+        ReadOptions {
+            extglob,
+            ..READ_OPTIONS.get()
+        },
+    );
     with_tokens(line, |tokens, spans| {
         let mut result: Vec<(usize, usize)> = Vec::with_capacity(spans.len());
         for (i, (token, &(mut start, end))) in tokens.iter().zip(spans).enumerate() {

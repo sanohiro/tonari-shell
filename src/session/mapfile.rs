@@ -49,9 +49,21 @@ impl<'a> Options<'a> {
                         result.origin =
                             Some(value.parse().map_err(|_| (1, format!("{value}: invalid array origin")))?)
                     }
-                    'n' => result.limit = value.parse().map_err(|_| (1, format!("{value}: invalid line count")))?,
-                    's' => result.skip = value.parse().map_err(|_| (1, format!("{value}: invalid line count")))?,
-                    'u' => result.fd = value.parse().map_err(|_| (1, format!("{value}: invalid file descriptor")))?,
+                    'n' => {
+                        result.limit = value
+                            .parse()
+                            .map_err(|_| (1, format!("{value}: invalid line count")))?
+                    }
+                    's' => {
+                        result.skip = value
+                            .parse()
+                            .map_err(|_| (1, format!("{value}: invalid line count")))?
+                    }
+                    'u' => {
+                        result.fd = value
+                            .parse()
+                            .map_err(|_| (1, format!("{value}: invalid file descriptor")))?
+                    }
                     'C' => result.callback = Some(value),
                     'c' => {
                         result.quantum = value
@@ -125,7 +137,15 @@ fn read_all(
             signals,
         },
     );
-    records(&mut reader, options, store)
+    let result = records(&mut reader, options, store);
+    if result.is_err() && !reader.buffer().is_empty() {
+        // Preserve the next record for another reader on the same seekable fd.
+        let unread = reader.buffer().len() as libc::off_t;
+        unsafe {
+            libc::lseek(options.fd, -unread, libc::SEEK_CUR);
+        }
+    }
+    result
 }
 
 fn records(
@@ -150,21 +170,6 @@ fn records(
         store(std::str::from_utf8(bytes).map_err(|_| io::Error::other("expected UTF-8 input"))?);
         Ok(())
     };
-    if delimiter.len() > 1 {
-        let last = *delimiter.last().unwrap();
-        loop {
-            let consumed = reader.read_until(last, &mut pending)?;
-            let complete = pending.ends_with(delimiter);
-            if complete || consumed == 0 {
-                if !pending.is_empty() {
-                    let end = pending.len() - if complete && options.trim { delimiter.len() } else { 0 };
-                    append(&pending[..end], true)?;
-                    pending.clear();
-                }
-                if consumed == 0 { return Ok(()); }
-            }
-        }
-    }
     loop {
         let buf = reader.fill_buf()?;
         if buf.is_empty() {
@@ -177,16 +182,37 @@ fn records(
         let has_nul = delim != 0 && memchr::memchr(0, buf).is_some();
         // Only the unfinished record at the end of a buffer spans two reads.
         let mut start = 0;
-        for delimiter in memchr::memchr_iter(delim, buf) {
-            let record = &buf[start..=delimiter];
-            start = delimiter + 1;
-            let end = record.len() - usize::from(options.trim || delim == 0);
-            if pending.is_empty() {
-                append(&record[..end], has_nul)?;
+        let last = *delimiter.last().unwrap();
+        for i in memchr::memchr_iter(last, buf) {
+            let record = &buf[start..=i];
+            if delimiter.len() > 1 && !record.ends_with(delimiter) {
+                // A UTF-8 delimiter can begin in the previous buffer and end
+                // here. Check only its missing prefix across that boundary.
+                let missing = delimiter.len().saturating_sub(record.len());
+                if missing == 0
+                    || !pending.ends_with(&delimiter[..missing])
+                    || record != &delimiter[missing..]
+                {
+                    continue;
+                }
+            }
+            start = i + 1;
+            let remove = if options.trim || delim == 0 {
+                delimiter.len()
             } else {
-                pending.extend_from_slice(&record[..end]);
-                append(&pending, true)?;
+                0
+            };
+            let result = if pending.is_empty() {
+                append(&record[..record.len() - remove], has_nul)
+            } else {
+                pending.extend_from_slice(record);
+                let result = append(&pending[..pending.len() - remove], true);
                 pending.clear();
+                result
+            };
+            if let Err(e) = result {
+                reader.consume(start);
+                return Err(e);
             }
         }
         pending.extend_from_slice(&buf[start..]);
@@ -196,10 +222,17 @@ fn records(
 }
 
 #[inline(never)]
-pub(super) fn prepare_memory<'a>(session: &Session, args: &'a [String], bytes: &'a [u8]) -> Option<super::MemoryInput<'a>> {
+pub(super) fn prepare_memory<'a>(
+    session: &Session,
+    args: &'a [String],
+    bytes: &'a [u8],
+) -> Option<super::MemoryInput<'a>> {
     let opts = Options::parse(args).ok()?;
-    (opts.fd == 0 && opts.limit == 0 && opts.callback.is_none()
-        && session.memory_array_target(opts.name)).then_some(super::MemoryInput::Mapfile(opts, bytes))
+    (opts.fd == 0
+        && opts.limit == 0
+        && opts.callback.is_none()
+        && session.memory_array_target(opts.name))
+    .then_some(super::MemoryInput::Mapfile(opts, bytes))
 }
 
 pub(crate) fn run(
@@ -219,7 +252,13 @@ pub(crate) fn run(
     run_parsed(session, command, options, last, here)
 }
 
-pub(super) fn run_parsed(session: &mut Session, command: &str, options: Options<'_>, mut last: u8, here: Option<(i32, &[u8])>) -> Flow {
+pub(super) fn run_parsed(
+    session: &mut Session,
+    command: &str,
+    options: Options<'_>,
+    mut last: u8,
+    here: Option<(i32, &[u8])>,
+) -> Flow {
     let fd = options.fd;
     if crate::execute::fd::is_private(fd) || unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
         diagnostic!("{command}: {fd}: invalid file descriptor");
@@ -235,7 +274,10 @@ pub(super) fn run_parsed(session: &mut Session, command: &str, options: Options<
     let here = here
         .filter(|&(source, _)| source == fd && destination == options.name)
         .map(|(_, bytes)| bytes);
-    let options = Options { name: &destination, ..options };
+    let options = Options {
+        name: &destination,
+        ..options
+    };
     let origin = i64::from(options.origin.unwrap_or(0));
     let integer = session.integer(options.name);
     let letter_case = session
@@ -330,7 +372,8 @@ pub(super) fn run_parsed(session: &mut Session, command: &str, options: Options<
                         let delim = options.delimiter.bytes()[0];
                         let end = memchr::memchr(delim, chunk);
                         let consumed = end.map_or(chunk.len(), |i| i + 1);
-                        let retained = consumed - usize::from(end.is_some() && (options.trim || delim == 0));
+                        let retained =
+                            consumed - usize::from(end.is_some() && (options.trim || delim == 0));
                         if !truncated {
                             let nul = memchr::memchr(0, &chunk[..retained]);
                             bytes.extend_from_slice(&chunk[..nul.unwrap_or(retained)]);
@@ -344,7 +387,10 @@ pub(super) fn run_parsed(session: &mut Session, command: &str, options: Options<
                         continue;
                     }
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                    Err(e) => { diagnostic!("{command}: {e}"); return Flow::Continue(1); }
+                    Err(e) => {
+                        diagnostic!("{command}: {e}");
+                        return Flow::Continue(1);
+                    }
                 }
             }
             match input.next() {

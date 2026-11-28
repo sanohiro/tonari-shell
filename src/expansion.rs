@@ -285,7 +285,7 @@ impl<'a> Expansion<'a> {
         )?)
     }
 
-    pub fn current_capture(&mut self, body: Vec<Statement>, reply: bool) -> Result<String, Error> {
+    pub fn current_capture(&mut self, body: &[Statement], reply: bool) -> Result<String, Error> {
         let last = self.status();
         let (text, status) =
             crate::subshell::current_substitution(self.session, body, last, reply)?;
@@ -293,7 +293,7 @@ impl<'a> Expansion<'a> {
         Ok(text)
     }
 
-    pub fn capture(&mut self, body: Vec<Statement>) -> Result<String, &'static str> {
+    pub fn capture(&mut self, body: &[Statement]) -> Result<String, &'static str> {
         let status = self.captured.get().unwrap_or(self.initial);
         let bindings = (!self.assignments.is_empty()).then(|| self.session.bind(self.assignments));
         let result = crate::capture_substitution(self.session, body, status);
@@ -535,7 +535,6 @@ impl<'a> Expansion<'a> {
             use crate::word::Part;
             let parameter = match &*part {
                 Part::Parameter { name, quoted } => Some((name.as_ref(), *quoted)),
-                Part::BraceParameter(name) => Some((name.as_ref(), false)),
                 _ => None,
             };
             if let Some((name, quoted)) = parameter
@@ -556,7 +555,11 @@ impl<'a> Expansion<'a> {
         word.append_fields(
             &|name| self.lookup(name),
             self.session.positional.as_slice(),
-            || self.borrowed_scalar("IFS").map(Into::into).or_else(||self.lookup("IFS").map(Into::into)),
+            || {
+                self.borrowed_scalar("IFS")
+                    .map(Into::into)
+                    .or_else(|| self.lookup("IFS").map(Into::into))
+            },
             glob.then_some(&self.session.shopt.glob),
             fields,
         )

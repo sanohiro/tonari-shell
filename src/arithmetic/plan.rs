@@ -1,19 +1,19 @@
 // Only ordinary decimal loads and eager binary operators are compiled. A
 // dynamic value, array or lazy branch goes through the full arithmetic parser.
 // No assignment occurs until every operand has been resolved successfully.
-use super::{Parser, Result, Token, Variables, binary, number, precedence};
+use super::{Binary, Parser, Result, Token, Variables, number, precedence};
 
 #[derive(Debug, Clone)]
 enum Op {
     Number(i64),
     Load(Box<str>),
-    Binary(&'static str),
+    Binary(Binary),
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct Program {
     ops: Box<[Op]>,
-    target: Option<(Box<str>, &'static str)>,
+    target: Option<(Box<str>, Option<Binary>)>,
 }
 
 impl Program {
@@ -45,7 +45,7 @@ impl Program {
                         if op == "(" {
                             break;
                         }
-                        ops.push(Op::Binary(op));
+                        ops.push(Op::Binary(Binary::parse(op)?));
                         stack = stack.checked_sub(1)?;
                     }
                     continue;
@@ -74,7 +74,7 @@ impl Program {
                         {
                             return None;
                         }
-                        target = Some((name, op.strip_suffix('=')?));
+                        target = Some((name, if op == "=" { None } else { Some(Binary::parse(op.strip_suffix('=')?)?) }));
                         stack = 0;
                     } else {
                         while let Some(&top) = operators.last() {
@@ -85,7 +85,7 @@ impl Program {
                             if prev < prec || right && prev == prec {
                                 break;
                             }
-                            ops.push(Op::Binary(operators.pop()?));
+                            ops.push(Op::Binary(Binary::parse(operators.pop()?)?));
                             stack = stack.checked_sub(1)?;
                         }
                         operators.push(op);
@@ -108,7 +108,7 @@ impl Program {
             if op == "(" {
                 return None;
             }
-            ops.push(Op::Binary(op));
+            ops.push(Op::Binary(Binary::parse(op)?));
             stack = stack.checked_sub(1)?;
         }
         (stack == 1).then(|| Self {
@@ -122,7 +122,7 @@ impl Program {
             return None;
         }
         let lhs = if let Some((name, op)) = &self.target
-            && !op.is_empty()
+            && op.is_some()
         {
             vars.decimal(name)?
         } else {
@@ -136,7 +136,7 @@ impl Program {
                 Op::Load(name) => vars.decimal(name)?,
                 Op::Binary(op) => {
                     top -= 2;
-                    match binary(op, stack[top], stack[top + 1]) {
+                    match op.apply(stack[top], stack[top + 1]) {
                         Ok(n) => n,
                         Err(e) => return Some(Err(e)),
                     }
@@ -147,8 +147,8 @@ impl Program {
         }
         let mut value = stack[0];
         if let Some((name, op)) = &self.target {
-            if !op.is_empty() {
-                value = match binary(op, lhs, value) {
+            if let Some(op) = op {
+                value = match op.apply(lhs, value) {
                     Ok(n) => n,
                     Err(e) => return Some(Err(e)),
                 };

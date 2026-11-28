@@ -216,7 +216,9 @@ pub fn enter_process() {
     // An inherited SIG_IGN automatically discards child exit status on Linux.
     if disposition(libc::SIGCHLD).is_ok_and(|d| d.sa_sigaction == libc::SIG_IGN) {
         INHERITED_CHLD_IGNORED.store(true, Relaxed);
-        unsafe { libc::signal(libc::SIGCHLD, libc::SIG_DFL); }
+        unsafe {
+            libc::signal(libc::SIGCHLD, libc::SIG_DFL);
+        }
     }
 }
 
@@ -271,7 +273,11 @@ impl Traps {
     // inert builtin. Termination and pending actions are dispatched at command
     // boundaries. Keep real children when SIGCHLD or tracing is observable.
     pub(crate) fn observes_commands(&self) -> bool {
-        self.in_action() || self.entries.iter().any(|(&sig, action)| sig != 0 && !action.command.is_empty())
+        self.in_action()
+            || self
+                .entries
+                .iter()
+                .any(|(&sig, action)| sig != 0 && !action.command.is_empty())
     }
 
     pub fn active(&self) -> bool {
@@ -537,7 +543,9 @@ impl Traps {
     }
 
     fn lists_as_ignored(&self, sig: i32) -> bool {
-        if sig == libc::SIGCHLD && INHERITED_CHLD_IGNORED.load(Relaxed) { return true; }
+        if sig == libc::SIGCHLD && INHERITED_CHLD_IGNORED.load(Relaxed) {
+            return true;
+        }
         let bit = signal_bit(sig);
         // Background commands ignore INT and QUIT internally. A signal already
         // ignored on entry is still visible, as is an explicit empty trap.

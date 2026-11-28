@@ -1,6 +1,6 @@
 use super::Incomplete;
 use super::{CaseEnd, Error, Reader, Target, ansi, here_doc, parse_final};
-use crate::word::{valid_tilde_user, Part, Word, WordBuilder, is_identifier, name_chars_len};
+use crate::word::{Part, Word, WordBuilder, is_identifier, name_chars_len, valid_tilde_user};
 use std::str::Chars;
 
 #[derive(Debug, Clone)]
@@ -35,7 +35,8 @@ pub(super) enum Token {
 
 impl Token {
     pub(super) fn preserve_layout(&self) -> bool {
-        matches!(self,Token::ArrayStart | Token::EndArm(_)) || matches!(self.keyword(), Some("case" | "[["))
+        matches!(self, Token::ArrayStart | Token::EndArm(_))
+            || matches!(self.keyword(), Some("case" | "[["))
     }
 
     pub(super) fn keyword(&self) -> Option<&str> {
@@ -251,7 +252,10 @@ fn dollar_word(
             // Arithmetic lookahead may already have advanced the cursor.
             *chars = rest[1..].chars();
             let body = nested_program(chars)?;
-            word.part(Part::Substitution { body, quoted });
+            word.part(Part::Substitution {
+                body: body.into(),
+                quoted,
+            });
             return Ok(());
         }
         Some('\'') if !quoted => {
@@ -293,9 +297,9 @@ fn braced_parameter<'a>(
     if starts_braced_command(content) {
         let reply = content.starts_with('|');
         let nested = if reply { &content[1..] } else { content };
-        let (body, after) = substitution_body(nested,true)?;
+        let (body, after) = substitution_body(nested, true)?;
         word.part(Part::CurrentSubstitution {
-            body,
+            body: body.into(),
             quoted,
             reply,
         });
@@ -307,11 +311,14 @@ fn braced_parameter<'a>(
         Some(b'0'..=b'9') => content.bytes().take_while(|b| b.is_ascii_digit()).count(),
         Some(b'@' | b'*' | b'?' | b'$' | b'#' | b'!' | b'-') => 1,
         None => {
-            return Err(Error::incomplete_message("unterminated parameter expansion"));
+            return Err(Error::incomplete_message(
+                "unterminated parameter expansion",
+            ));
         }
         _ => return bad_substitution(content, chars, word, quoted),
     };
-    if !super::READ_OPTIONS.get().posix && content.starts_with("!#") && !content.starts_with("!#}") {
+    if !super::READ_OPTIONS.get().posix && content.starts_with("!#") && !content.starts_with("!#}")
+    {
         return bad_substitution(content, chars, word, quoted);
     }
     let prefixed = content.starts_with(['#', '!'])
@@ -327,7 +334,8 @@ fn braced_parameter<'a>(
     } else if (content.starts_with('#')
         || content.starts_with('!')
             && (matches!(content.as_bytes().get(1), Some(b'*' | b'@'))
-                || !super::READ_OPTIONS.get().posix && matches!(content.as_bytes().get(1), Some(b'?' | b'#'))))
+                || !super::READ_OPTIONS.get().posix
+                    && matches!(content.as_bytes().get(1), Some(b'?' | b'#'))))
         && (content.as_bytes().get(2) == Some(&b'}')
             || content.starts_with("!*")
             || content.starts_with("!@"))
@@ -544,7 +552,9 @@ fn braced_parameter<'a>(
             Some('=') => crate::word::Alternative::Assign,
             Some('?') => crate::word::Alternative::Error,
             None => {
-                return Err(Error::incomplete_message("unterminated parameter expansion"));
+                return Err(Error::incomplete_message(
+                    "unterminated parameter expansion",
+                ));
             }
             _ => return bad_substitution(content, chars, word, quoted),
         };
@@ -583,12 +593,17 @@ pub(super) fn backquote(
                 parse_final(&source)?
             };
             *chars = tail.chars();
-            word.part(Part::Substitution { body, quoted });
+            word.part(Part::Substitution {
+                body: body.into(),
+                quoted,
+            });
             return Ok(());
         }
         source.push_str(literal);
         let mut escaped = after[1..].chars();
-        let next = escaped.next().ok_or(Error::incomplete_message("unterminated backquote"))?;
+        let next = escaped
+            .next()
+            .ok_or(Error::incomplete_message("unterminated backquote"))?;
         if next != '\n' {
             if !(matches!(next, '$' | '`' | '\\') || quoted && next == '"') {
                 source.push('\\');
@@ -632,7 +647,9 @@ fn parameter_word(
                 let end = rest.find(['/', ':', '}']).unwrap_or(rest.len());
                 let user = &rest[..end];
                 if valid_tilde_user(user) {
-                    let slash = !stop_slash && super::READ_OPTIONS.get().posix && rest[end..].starts_with('/');
+                    let slash = !stop_slash
+                        && super::READ_OPTIONS.get().posix
+                        && rest[end..].starts_with('/');
                     let end = end + usize::from(slash);
                     word.part(Part::Tilde(format!("~{}", &rest[..end])));
                     *chars = rest[end..].chars();
@@ -688,7 +705,9 @@ fn parameter_word(
             '\'' if !outer_quoted => quoted(chars, c, &mut word)?,
             '`' => backquote(chars, &mut word, outer_quoted)?,
             '\\' => {
-                let next = chars.next().ok_or(Error::incomplete_message("unterminated parameter expansion"))?;
+                let next = chars.next().ok_or(Error::incomplete_message(
+                    "unterminated parameter expansion",
+                ))?;
                 if next == '\n' {
                     continue;
                 }
@@ -718,7 +737,9 @@ fn parameter_word(
         }
         empty = false;
     }
-    Err(Error::incomplete_message("unterminated parameter expansion"))
+    Err(Error::incomplete_message(
+        "unterminated parameter expansion",
+    ))
 }
 
 pub(super) fn quoted(
@@ -782,17 +803,17 @@ fn double_quoted(
     Err(Error::Incomplete(Incomplete::DoubleQuote))
 }
 
-fn substitution_body(nested: &str, brace: bool) -> Result<(Vec<super::Statement>,&str),Error> {
-    let (tokens,spans,after)=lex_words(nested,!brace,false,None,brace)?;
-    let source=&nested[..nested.len()-after.len()-1];
-    let body=Reader::new(tokens,spans,source).list(&[])?;
-    Ok((body,after))
+fn substitution_body(nested: &str, brace: bool) -> Result<(Vec<super::Statement>, &str), Error> {
+    let (tokens, spans, after) = lex_words(nested, !brace, false, None, brace)?;
+    let source = &nested[..nested.len() - after.len() - 1];
+    let body = Reader::new(tokens, spans, source).list(&[])?;
+    Ok((body, after))
 }
 
 fn nested_program(chars: &mut Chars<'_>) -> Result<Vec<super::Statement>, Error> {
     let _nesting = super::enter_expansion()?;
     let nested = chars.as_str();
-    let (body,after)=substitution_body(nested,false)?;
+    let (body, after) = substitution_body(nested, false)?;
     *chars = after.chars();
     Ok(body)
 }
@@ -948,7 +969,9 @@ fn scan_subscript<'a>(
             '$' => dollar(&mut chars, &mut word, !associative)?,
             '`' => backquote(&mut chars, &mut word, true)?,
             '\\' => {
-                let next = chars.next().ok_or(Error::incomplete_message("trailing arithmetic escape"))?;
+                let next = chars
+                    .next()
+                    .ok_or(Error::incomplete_message("trailing arithmetic escape"))?;
                 if next != '\n' {
                     word.push(next);
                 }
@@ -980,7 +1003,9 @@ fn arithmetic_source(chars: &mut Chars<'_>) -> Result<String, Error> {
             _ => {}
         }
     }
-    Err(Error::incomplete_message("unterminated arithmetic expression"))
+    Err(Error::incomplete_message(
+        "unterminated arithmetic expression",
+    ))
 }
 
 fn pattern_parts(
@@ -1004,7 +1029,9 @@ fn pattern_parts(
         match c {
             '\'' | '"' => quoted(chars, c, word)?,
             '\\' => {
-                let escaped = chars.next().ok_or(Error::incomplete_message("trailing regular expression escape"))?;
+                let escaped = chars.next().ok_or(Error::incomplete_message(
+                    "trailing regular expression escape",
+                ))?;
                 if escaped != '\n' {
                     word.push(escaped);
                 }
@@ -1193,8 +1220,22 @@ pub(super) fn lex_initializer(source: &str) -> Result<Lexed<'_>, Error> {
     lex_words(source, false, true, Some(1), false)
 }
 
-pub(super) fn lex_joined(source: &str, final_input: bool, boundary: usize, aliases: crate::alias::Aliases) -> Result<Lexed<'_>, Error> {
-    super::with_source_lines(source, || scan(source, false, final_input, None, false, Some((boundary, aliases))))
+pub(super) fn lex_joined(
+    source: &str,
+    final_input: bool,
+    boundary: usize,
+    aliases: crate::alias::Aliases,
+) -> Result<Lexed<'_>, Error> {
+    super::with_source_lines(source, || {
+        scan(
+            source,
+            false,
+            final_input,
+            None,
+            false,
+            Some((boundary, aliases)),
+        )
+    })
 }
 
 fn lex_words(
@@ -1284,6 +1325,20 @@ fn parameter_name(name: &str) -> std::borrow::Cow<'static, str> {
         [byte @ b'!'..=b'~'] => {
             let i = usize::from(*byte - b'!');
             std::borrow::Cow::Borrowed(&GRAPHIC[i..=i])
+        }
+        _ if let Some(special) = match name {
+            "HOME" => Some("HOME"),
+            "PATH" => Some("PATH"),
+            "IFS" => Some("IFS"),
+            "PWD" => Some("PWD"),
+            "LINENO" => Some("LINENO"),
+            "BASH_SOURCE" => Some("BASH_SOURCE"),
+            "FUNCNAME" => Some("FUNCNAME"),
+            "REPLY" => Some("REPLY"),
+            _ => None,
+        } =>
+        {
+            std::borrow::Cow::Borrowed(special)
         }
         _ => std::borrow::Cow::Owned(name.to_owned()),
     }
@@ -1450,12 +1505,14 @@ fn scan_word(
             '{' => {
                 pattern_context = true;
                 let tail = chars.as_str();
-                if let Some(end) = tail.bytes().position(|b| !b.is_ascii_alphanumeric() && !matches!(b,b'+'|b'-'|b'.'))
+                if let Some(end) = tail
+                    .bytes()
+                    .position(|b| !b.is_ascii_alphanumeric() && !matches!(b, b'+' | b'-' | b'.'))
                     && tail.as_bytes()[end] == b'}'
                     && let Some(range) = crate::word::brace::Range::parse(&tail[..end])
                 {
                     word.part(Part::Range(Box::new(range)));
-                    *chars = tail[end+1..].chars();
+                    *chars = tail[end + 1..].chars();
                 } else {
                     word.part(Part::Brace("{"));
                     braces += 1;
@@ -1488,8 +1545,16 @@ fn scan_word(
                 }
                 word.push(c);
             }
-            '~' if braces != 0 || !started && chars.as_str().find(|c: char| c == '{' || c == '/' || separator(c))
-                .is_some_and(|i| chars.as_str()[i..].starts_with('{') && valid_tilde_user(&chars.as_str()[..i])) => {
+            '~' if braces != 0
+                || !started
+                    && chars
+                        .as_str()
+                        .find(|c: char| c == '{' || c == '/' || separator(c))
+                        .is_some_and(|i| {
+                            chars.as_str()[i..].starts_with('{')
+                                && valid_tilde_user(&chars.as_str()[..i])
+                        }) =>
+            {
                 pattern_context = true;
                 let tilde = if chars.as_str().starts_with('+') {
                     chars.next();
@@ -1552,15 +1617,20 @@ fn scan_word(
 fn follows_case_terminator(tokens: &[Token]) -> bool {
     let mut rest = tokens;
     while let Some((pattern, before)) = rest.split_last() {
-        if !matches!(pattern, Token::Word(_) | Token::Reserved(_) | Token::TimeUtility) {
+        if !matches!(
+            pattern,
+            Token::Word(_) | Token::Reserved(_) | Token::TimeUtility
+        ) {
             return false;
         }
         if let Some((Token::Pipe, earlier)) = before.split_last() {
             rest = earlier;
             continue;
         }
-        return matches!(before.iter().rev().find(|t| !matches!(t, Token::Newline)), Some(Token::EndArm(_)))
-            && pattern.keyword() != Some("esac");
+        return matches!(
+            before.iter().rev().find(|t| !matches!(t, Token::Newline)),
+            Some(Token::EndArm(_))
+        ) && pattern.keyword() != Some("esac");
     }
     false
 }
@@ -1573,7 +1643,7 @@ fn scan(
     brace_substitution: bool,
     mut resume_aliases: Option<(usize, crate::alias::Aliases)>,
 ) -> Result<Lexed<'_>, Error> {
-    let _here_scan=here_doc::Scan::enter();
+    let _here_scan = here_doc::Scan::enter();
     let mut chars = source.chars();
     let mut parentheses = 0usize;
     let mut saw_case = false;
@@ -1608,8 +1678,11 @@ fn scan(
     let mut token_start = 0;
     while let Some(c) = chars.peek() {
         let offset = source.len() - chars.as_str().len();
-        if resume_aliases.as_ref().is_some_and(|(boundary, _)| offset >= *boundary)
-            && let Some((_, live)) = resume_aliases.take() {
+        if resume_aliases
+            .as_ref()
+            .is_some_and(|(boundary, _)| offset >= *boundary)
+            && let Some((_, live)) = resume_aliases.take()
+        {
             super::aliases::resume(live);
         }
         spans.resize(tokens.len(), (token_start, offset));
@@ -1632,15 +1705,27 @@ fn scan(
         if brace_substitution && c == '}' && command_position(&tokens) {
             if brace_groups > 0 && chars.as_str()[1..].chars().next().is_none_or(separator) {
                 brace_groups -= 1;
-            } else if Reader::new(tokens.clone(), spans.clone(), &source[..offset]).list(&[]).is_ok() {
+            } else if Reader::new(tokens.clone(), spans.clone(), &source[..offset])
+                .list(&[])
+                .is_ok()
+            {
                 chars.next();
                 here_doc::after_closer(source, chars.as_str(), &mut tokens, &mut pending_docs)?;
                 return Ok((tokens, spans, chars.as_str()));
             }
         }
-        if c == '-' && matches!(tokens.last(), Some(Token::Redirect(_, Target::Duplicate | Target::OutputWord))) {
+        if c == '-'
+            && matches!(
+                tokens.last(),
+                Some(Token::Redirect(_, Target::Duplicate | Target::OutputWord))
+            )
+        {
             chars.next();
-            tokens.push(Token::Word(LexWord { word: Word::Literal("-".to_owned()), protected: false, assignment: None }));
+            tokens.push(Token::Word(LexWord {
+                word: Word::Literal("-".to_owned()),
+                protected: false,
+                assignment: None,
+            }));
             continue;
         }
         let pattern = pattern_next.take();
@@ -1706,7 +1791,13 @@ fn scan(
             let token = if c == '\n' {
                 here_doc::skip(&mut chars);
                 if !pending_docs.is_empty() {
-                    here_doc::collect(source.len(), &mut chars, &mut tokens, &mut pending_docs, final_input)?;
+                    here_doc::collect(
+                        source.len(),
+                        &mut chars,
+                        &mut tokens,
+                        &mut pending_docs,
+                        final_input,
+                    )?;
                 }
                 Token::Newline
             } else {
@@ -1764,8 +1855,14 @@ fn scan(
             assignment,
         }) = token
         else {
-            if brace_substitution && matches!(token,Token::Reserved("{"))
-                && command_position(&tokens) && !chars.as_str().trim_start_matches([' ','\t']).starts_with([')','|']) {
+            if brace_substitution
+                && matches!(token, Token::Reserved("{"))
+                && command_position(&tokens)
+                && !chars
+                    .as_str()
+                    .trim_start_matches([' ', '\t'])
+                    .starts_with([')', '|'])
+            {
                 brace_groups += 1;
             }
             saw_case |= substitution && matches!(token, Token::Reserved("case"));
@@ -1835,15 +1932,26 @@ fn scan(
             tokens.push(Token::ArrayStart);
         }
     }
-    here_doc::collect(source.len(), &mut chars, &mut tokens, &mut pending_docs, final_input)?;
-    if substitution && saw_case && matches!(
-        tokens.iter().rev().find(|t| !matches!(t, Token::Newline)),
-        Some(Token::EndArm(_))
-    ) {
+    here_doc::collect(
+        source.len(),
+        &mut chars,
+        &mut tokens,
+        &mut pending_docs,
+        final_input,
+    )?;
+    if substitution
+        && saw_case
+        && matches!(
+            tokens.iter().rev().find(|t| !matches!(t, Token::Newline)),
+            Some(Token::EndArm(_))
+        )
+    {
         return Err(Error::Incomplete(Incomplete::CompoundEnd("esac")));
     }
     if substitution || brace_substitution {
-        return Err(Error::incomplete_message("unterminated command substitution"));
+        return Err(Error::incomplete_message(
+            "unterminated command substitution",
+        ));
     }
     spans.resize(tokens.len(), (token_start, source.len()));
     Ok((tokens, spans, ""))

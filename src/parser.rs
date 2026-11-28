@@ -136,7 +136,9 @@ pub enum Error {
 }
 
 impl Error {
-    fn incomplete_message(message: &'static str) -> Self { Self::Incomplete(Incomplete::Message(message)) }
+    fn incomplete_message(message: &'static str) -> Self {
+        Self::Incomplete(Incomplete::Message(message))
+    }
 
     pub(crate) fn unfinished_function() -> Self {
         Self::Incomplete(Incomplete::Message("unfinished function definition"))
@@ -194,7 +196,10 @@ fn reserved_spelling(word: &str) -> Option<&'static str> {
     macro_rules! keywords {
         ($($key:literal),+) => { match word { $($key => Some($key),)+ _ => None } };
     }
-    keywords!("if", "then", "else", "elif", "fi", "case", "esac", "while", "until", "for", "do", "done", "in", "select", "function", "coproc", "time", "!", "{", "[[", "}")
+    keywords!(
+        "if", "then", "else", "elif", "fi", "case", "esac", "while", "until", "for", "do", "done",
+        "in", "select", "function", "coproc", "time", "!", "{", "[[", "}"
+    )
 }
 
 pub fn parse(source: &str) -> Result<Vec<Statement>, Error> {
@@ -205,8 +210,14 @@ pub fn parse_final(source: &str) -> Result<Vec<Statement>, Error> {
     parse_source(source, true)
 }
 
-#[derive(Clone,Copy)]
-struct ReadOptions {comments:bool,posix:bool,time_options_external:bool,extquote:bool,extglob:bool}
+#[derive(Clone, Copy)]
+struct ReadOptions {
+    comments: bool,
+    posix: bool,
+    time_options_external: bool,
+    extquote: bool,
+    extglob: bool,
+}
 thread_local! {
     // Lexers invoked recursively by a substitution inherit the outer read's options.
     static FIRST_LINE: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
@@ -304,17 +315,32 @@ pub(crate) fn with_subscript_aliases<T>(
     // Names resolved by the earlier read take precedence over later aliases.
     let table = match (frozen, live) {
         (Some(first), Some(second)) if !Rc::ptr_eq(first, second) => {
-            type Table = std::collections::BTreeMap<String,String>;
-            struct Entry { frozen: std::rc::Weak<Table>, live: std::rc::Weak<Table>, merged: Rc<Table> }
+            type Table = std::collections::BTreeMap<String, String>;
+            struct Entry {
+                frozen: std::rc::Weak<Table>,
+                live: std::rc::Weak<Table>,
+                merged: Rc<Table>,
+            }
             thread_local! { static LAST: std::cell::RefCell<Option<Entry>>=const {std::cell::RefCell::new(None)};}
             LAST.with_borrow_mut(|cache| {
-                if let Some(entry)=cache && entry.frozen.as_ptr()==Rc::as_ptr(first) && entry.live.as_ptr()==Rc::as_ptr(second) {
+                if let Some(entry) = cache
+                    && entry.frozen.as_ptr() == Rc::as_ptr(first)
+                    && entry.live.as_ptr() == Rc::as_ptr(second)
+                {
                     return entry.merged.clone();
                 }
-                let mut merged=second.as_ref().clone();
-                merged.extend(first.iter().map(|(key,value)|(key.clone(),value.clone())));
-                let merged=Rc::new(merged);
-                *cache=Some(Entry{frozen:Rc::downgrade(first),live:Rc::downgrade(second),merged:merged.clone()});
+                let mut merged = second.as_ref().clone();
+                merged.extend(
+                    first
+                        .iter()
+                        .map(|(key, value)| (key.clone(), value.clone())),
+                );
+                let merged = Rc::new(merged);
+                *cache = Some(Entry {
+                    frozen: Rc::downgrade(first),
+                    live: Rc::downgrade(second),
+                    merged: merged.clone(),
+                });
                 merged
             })
         }
@@ -326,11 +352,16 @@ pub(crate) fn with_subscript_aliases<T>(
 fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnce() -> T) -> T {
     let read = || {
         let _first_line = crate::ScopedCell::enter(&FIRST_LINE, line);
-        let _options=crate::ScopedCell::enter(&READ_OPTIONS,ReadOptions{
-            comments:session.read_comments(), posix:session.posix,
-            time_options_external:session.posix && session.shopt.compat>41,
-            extquote:session.shopt.extquote,extglob:session.shopt.glob.extglob
-        });
+        let _options = crate::ScopedCell::enter(
+            &READ_OPTIONS,
+            ReadOptions {
+                comments: session.read_comments(),
+                posix: session.posix,
+                time_options_external: session.posix && session.shopt.compat > 41,
+                extquote: session.shopt.extquote,
+                extglob: session.shopt.glob.extglob,
+            },
+        );
         parse()
     };
     if session.reads_aliases() {
@@ -399,7 +430,7 @@ fn parse_source(source: &str, final_input: bool) -> Result<Vec<Statement>, Error
     }
     let (tokens, spans, _) = match lex(source, false, final_input) {
         Ok(tokens) => tokens,
-        Err(error @ Error::Incomplete(_)) => return retry_alias_quote(source,final_input,error),
+        Err(error @ Error::Incomplete(_)) => return retry_alias_quote(source, final_input, error),
         Err(error) => return Err(error),
     };
     let mut reader = Reader::new(tokens, spans, source);
@@ -538,19 +569,34 @@ impl Drop for Reader {
     }
 }
 
-fn scalar_assignment(name: String, mut word: Word) -> (String, Assignment<Word>) {
-    word.remove_assignment_prefix(name.len() + 1);
-    (name, Assignment::Scalar(word))
+fn scalar_assignment(name: String, mut word: Word) -> Result<(String, Assignment<Word>), Error> {
+    word.remove_assignment_prefix(name.len() + 1).ok_or(Error::Invalid("invalid assignment prefix"))?;
+    Ok((name, Assignment::Scalar(word)))
 }
 
 fn duplicate_stdout(line: usize) -> Redirect<Word> {
-    Redirect {line, variable: None, fd: 2, target: Target::Duplicate, word: Word::Literal("1".into())}
+    Redirect {
+        line,
+        variable: None,
+        fd: 2,
+        target: Target::Duplicate,
+        word: Word::Literal("1".into()),
+    }
 }
 
 impl Reader {
     fn new(tokens: Vec<Token>, spans: Vec<(usize, usize)>, source: &str) -> Self {
         let mut newlines = READER_NEWLINES.take();
-        newlines.extend(memchr::memchr_iter(b'\n', source.as_bytes()));
+        SOURCE_LINES.with_borrow(|map| {
+            if let Some(map) = map.as_ref().filter(|map| map.contains(source)) {
+                let shift = source.as_ptr() as usize - map.start;
+                let start = map.newlines.partition_point(|&n| n < shift);
+                let end = map.newlines.partition_point(|&n| n < shift + source.len());
+                newlines.extend(map.newlines[start..end].iter().map(|n| n - shift));
+            } else {
+                newlines.extend(memchr::memchr_iter(b'\n', source.as_bytes()));
+            }
+        });
         Self {
             first_line: source_line(source),
             line_index: std::cell::Cell::new(0),
@@ -587,8 +633,13 @@ impl Reader {
             .map_or(self.spans.len(), |s| s.token_count(self.spans.len()));
         count - self.tokens.len()
     }
-    fn subscript_aliases(&self) -> crate::alias::Aliases {
-        if READ_OPTIONS.get().posix {
+    fn subscript_aliases(&self, source: &str) -> crate::alias::Aliases {
+        // A literal alias definition cannot evaluate a deferred subscript.
+        // Keeping its old alias map would force a copy on the next insertion.
+        if READ_OPTIONS.get().posix
+            && !(source.starts_with("alias ")
+                && !source.contains(['$', '`', '[', ';', '|', '&', '(', '\n']))
+        {
             self.aliases.clone()
         } else {
             Default::default()
@@ -618,7 +669,7 @@ impl Reader {
         self.line_index.set(line);
         Location {
             source: self.source.clone(),
-            subscript_aliases: self.subscript_aliases(),
+            subscript_aliases: self.subscript_aliases(&self.source[start..end]),
             start,
             end,
             line: self.first_line + line,
@@ -626,10 +677,12 @@ impl Reader {
     }
 
     fn previous_line(&self) -> usize {
-        let i=self.position().saturating_sub(1);
-        if self.alias_source.is_some() { return self.location(i).line; }
-        let start=self.spans.get(i).map_or(self.source.len(), |span| span.0);
-        self.first_line + self.newlines.partition_point(|&n| n<start)
+        let i = self.position().saturating_sub(1);
+        if self.alias_source.is_some() {
+            return self.location(i).line;
+        }
+        let start = self.spans.get(i).map_or(self.source.len(), |span| span.0);
+        self.first_line + self.newlines.partition_point(|&n| n < start)
     }
 
     fn peek(&self) -> Option<&Token> {
@@ -644,7 +697,11 @@ impl Reader {
         Some(match self.tokens.pop_front()? {
             Token::HereBody(body, extent) => {
                 self.here_extents.push(extent);
-                Token::Word(LexWord { word: Word::Literal(body), protected: true, assignment: None })
+                Token::Word(LexWord {
+                    word: Word::Literal(body),
+                    protected: true,
+                    assignment: None,
+                })
             }
             token => token.into_operand(),
         })
@@ -655,11 +712,13 @@ impl Reader {
             self.tokens.pop_front();
             Ok(())
         } else if self.peek().is_none() {
-            Err(Error::Incomplete(if matches!(keyword, "}" | "fi" | "done" | "esac") {
-                Incomplete::CompoundEnd(keyword)
-            } else {
-                Incomplete::Message("unfinished compound command")
-            }))
+            Err(Error::Incomplete(
+                if matches!(keyword, "}" | "fi" | "done" | "esac") {
+                    Incomplete::CompoundEnd(keyword)
+                } else {
+                    Incomplete::Message("unfinished compound command")
+                },
+            ))
         } else {
             Err(Error::Invalid("unexpected token in compound command"))
         }
@@ -708,7 +767,9 @@ impl Reader {
             self.newlines();
             if self.peek().is_none() {
                 if condition != Condition::Always {
-                    return Err(Error::incomplete_message("expected a command after operator"));
+                    return Err(Error::incomplete_message(
+                        "expected a command after operator",
+                    ));
                 }
                 return Ok(statements);
             }
@@ -816,7 +877,7 @@ impl Reader {
     fn command(&mut self) -> Result<Command, Error> {
         // The lexer already identified the assignment. A following separator
         // rules out a command, redirection or compound array initializer.
-        if matches!(self.peek(), Some(Token::Word(w)) if w.assignment.is_some_and(|len| !w.word.assignment_name(len).starts_with('[')))
+        if matches!(self.peek(), Some(Token::Word(w)) if w.assignment.is_some_and(|len| w.word.assignment_name(len).is_some_and(|n| !n.starts_with('['))))
             && matches!(self.tokens.get(1), None | Some(Token::Newline | Token::End))
         {
             let Some(Token::Word(LexWord {
@@ -831,7 +892,7 @@ impl Reader {
                 return Ok(Command::LiteralAssignment(text, name));
             }
             let mut word = word;
-            let key = word.take_assignment_name(name);
+            let key = word.take_assignment_name(name).ok_or(Error::Invalid("invalid assignment prefix"))?;
             return Ok(Command::Scalar(Box::new((key, word))));
         }
         let start = self.position();
@@ -846,7 +907,11 @@ impl Reader {
         let mut pipeline = vec![first];
         while self.has_pipe() {
             if matches!(self.tokens.pop_front(), Some(Token::PipeBoth)) {
-                pipeline.last_mut().unwrap().redirects.push(duplicate_stdout(self.previous_line()));
+                pipeline
+                    .last_mut()
+                    .unwrap()
+                    .redirects
+                    .push(duplicate_stdout(self.previous_line()));
             }
             loop {
                 self.newlines();
@@ -1234,7 +1299,9 @@ impl Reader {
         let mut location = location;
         let mut rendered = None;
         for &(start, end) in &self.here_extents[first_here..] {
-            if start >= location.end && let Some(raw) = self.source.get(start..end) {
+            if start >= location.end
+                && let Some(raw) = self.source.get(start..end)
+            {
                 let text = rendered.get_or_insert_with(|| {
                     let mut text = location.text().to_owned();
                     text.push('\n');
@@ -1358,7 +1425,7 @@ impl Reader {
                     protected,
                     assignment,
                 }) => {
-                    let assignment = assignment.map(|length| word.assignment_name(length));
+                    let assignment = assignment.map(|len| word.assignment_name(len).ok_or(Error::Invalid("invalid assignment prefix"))).transpose()?;
                     let declaration = assignment.is_some()
                         && matches!(
                             cmd.words
@@ -1403,9 +1470,23 @@ impl Reader {
                             } else {
                                 // The assignment name is logical text and may have crossed
                                 // a physical line continuation before the equals sign.
-                                let value = &expr.text()[expr.text().find('(').ok_or(
-                                    Error::Invalid("invalid array initializer"),
-                                )?..];
+                                let mut raw = expr.text();
+                                let mut logical = name.len() + 1;
+                                while logical > 0 {
+                                    if let Some(rest) = raw.strip_prefix("\\\n") {
+                                        raw = rest;
+                                    } else {
+                                        let c = raw
+                                            .chars()
+                                            .next()
+                                            .ok_or(Error::Invalid("invalid array initializer"))?;
+                                        raw = &raw[c.len_utf8()..];
+                                        logical = logical
+                                            .checked_sub(c.len_utf8())
+                                            .ok_or(Error::Invalid("invalid array initializer"))?;
+                                    }
+                                }
+                                let value = raw;
                                 cmd.assignments.push((
                                     name,
                                     Assignment::Scalar(lexer::subscript_word(value, true)?),
@@ -1430,7 +1511,7 @@ impl Reader {
                                 cmd.assignments.reserve_exact(1);
                             }
                             cmd.assignments
-                                .push(scalar_assignment(name.to_owned(), word));
+                                .push(scalar_assignment(name.to_owned(), word)?);
                             continue;
                         }
                         if cmd.assignments.is_empty()

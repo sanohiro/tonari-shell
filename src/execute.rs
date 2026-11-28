@@ -205,13 +205,17 @@ fn stage_expansion(word: &Word, session: &Session) -> bool {
             | Part::Arithmetic { .. } => true,
             Part::Modify { .. } => true,
             Part::Nested(word) => stage_expansion(word, session),
-            Part::Parameter { name, .. } | Part::BraceParameter(name) => stage_parameter(name, session),
+            Part::Parameter { name, .. } | Part::BraceParameter(name) => {
+                stage_parameter(name, session)
+            }
             Part::Alternative { name, op, word, .. } => {
                 *op == crate::word::Alternative::Assign
                     || stage_parameter(name, session)
                     || stage_expansion(word, session)
             }
-            Part::Trim { name, pattern, .. } => stage_parameter(name, session) || stage_expansion(pattern, session),
+            Part::Trim { name, pattern, .. } => {
+                stage_parameter(name, session) || stage_expansion(pattern, session)
+            }
             _ => false,
         }),
     }
@@ -221,14 +225,23 @@ fn stage_expansion(word: &Word, session: &Session) -> bool {
 // with escapes, operators or nested shell syntax stays on the Bash parser.
 fn plain_here_parts(mut text: &str, mut part: impl FnMut(&str, Option<&str>) -> bool) -> bool {
     while let Some(i) = memchr::memchr3(b'$', b'\\', b'`', text.as_bytes()) {
-        if text.as_bytes()[i] != b'$' { return false; }
-        let tail = &text[i+1..];
+        if text.as_bytes()[i] != b'$' {
+            return false;
+        }
+        let tail = &text[i + 1..];
         let braced = tail.starts_with('{');
         let name_and_rest = if braced { &tail[1..] } else { tail };
-        let len = name_and_rest.bytes().take_while(|&b| crate::word::is_name_char(b)).count();
+        let len = name_and_rest
+            .bytes()
+            .take_while(|&b| crate::word::is_name_char(b))
+            .count();
         let (name, rest) = name_and_rest.split_at(len);
-        if !crate::parser::is_identifier(name) || braced && !rest.starts_with('}') ||
-            !part(&text[..i], Some(name)) { return false; }
+        if !crate::parser::is_identifier(name)
+            || braced && !rest.starts_with('}')
+            || !part(&text[..i], Some(name))
+        {
+            return false;
+        }
         text = if braced { &rest[1..] } else { rest };
     }
     part(text, None)
@@ -270,11 +283,19 @@ fn start_raw(
         separate_keyword_arguments(&mut raw);
     }
     let observable = needs_ordered_redirects(&raw, session)
-        || raw.redirects.iter().any(|r| redirection_observable(r, session))
+        || raw
+            .redirects
+            .iter()
+            .any(|r| redirection_observable(r, session))
         || raw.words.iter().any(|w| stage_expansion(w, session))
-        || raw.assignments.iter().any(|(name, value)| name.contains('[') || match value {
-            Assignment::Scalar(word) => stage_expansion(word, session),
-            Assignment::Array(_, items, _) => items.iter().any(|(index, word)| index.is_some() || stage_expansion(word, session)),
+        || raw.assignments.iter().any(|(name, value)| {
+            name.contains('[')
+                || match value {
+                    Assignment::Scalar(word) => stage_expansion(word, session),
+                    Assignment::Array(_, items, _) => items
+                        .iter()
+                        .any(|(index, word)| index.is_some() || stage_expansion(word, session)),
+                }
         });
     if !observable {
         return match prepare(raw, session, last_status, false) {
@@ -302,8 +323,10 @@ fn start_raw(
         launch.pipeline_child(&mut session.traps);
         enter_stage(session, raw.compound.as_deref(), launch.background);
         coprocess::after_fork(session);
-        if matches!(raw.compound.as_deref(), Some(crate::parser::Command::Subshell(_)))
-            && let Some(command) = raw.compound.as_mut().map(std::rc::Rc::make_mut)
+        if matches!(
+            raw.compound.as_deref(),
+            Some(crate::parser::Command::Subshell(_))
+        ) && let Some(command) = raw.compound.as_mut().map(std::rc::Rc::make_mut)
             && let crate::parser::Command::Subshell(body) = command
         {
             *command = crate::parser::Command::Group(std::mem::take(body));
@@ -318,7 +341,10 @@ fn start_raw(
                 session.subshell_depth += 1;
                 match prepared {
                     Ok(cmd) => run_prepared(cmd, None, last_status, true, session),
-                    Err(e) => { e.report(""); Ok(e.flow(session)) }
+                    Err(e) => {
+                        e.report("");
+                        Ok(e.flow(session))
+                    }
                 }
             } else {
                 foreground(std::borrow::Cow::Owned(raw), last_status, true, session)
@@ -343,10 +369,17 @@ fn start_raw(
 // real child owns the diagnostic and signal exactly as for a failed exec.
 #[cold]
 fn parent_reports_exec_error(session: &Session) -> bool {
-    if session.traps.observes_commands() { return false; }
+    if session.traps.observes_commands() {
+        return false;
+    }
     let mut stat = std::mem::MaybeUninit::uninit();
-    if unsafe { libc::fstat(2, stat.as_mut_ptr()) } < 0 { return errno() == libc::EBADF; }
-    matches!(unsafe { stat.assume_init() }.st_mode & libc::S_IFMT, libc::S_IFREG | libc::S_IFCHR)
+    if unsafe { libc::fstat(libc::STDERR_FILENO, stat.as_mut_ptr()) } < 0 {
+        return errno() == libc::EBADF;
+    }
+    matches!(
+        unsafe { stat.assume_init() }.st_mode & libc::S_IFMT,
+        libc::S_IFREG | libc::S_IFCHR
+    )
 }
 
 fn start(
@@ -491,14 +524,34 @@ fn start(
                     Stage::Child(pid)
                 });
             }
-            Err(e) if e.raw_os_error().is_some_and(|code| matches!(code, libc::EAGAIN | libc::ENOMEM | libc::EMFILE | libc::ENFILE)) => return Err(e),
-            Err(e) if launch.group.is_none() && e.raw_os_error() != Some(libc::ENOEXEC) && parent_reports_exec_error(session) => {
+            Err(e)
+                if e.raw_os_error().is_some_and(|code| {
+                    matches!(
+                        code,
+                        libc::EAGAIN | libc::ENOMEM | libc::EMFILE | libc::ENFILE
+                    )
+                }) =>
+            {
+                return Err(e);
+            }
+            Err(e)
+                if launch.group.is_none()
+                    && e.raw_os_error() != Some(libc::ENOEXEC)
+                    && parent_reports_exec_error(session) =>
+            {
                 let name = &cmd.words[0];
-                let path = cmd.cached_path(session, name).unwrap_or_else(|| std::path::Path::new(name));
-                let code = external::report_exec_error(session, name.as_bytes(), path, e.raw_os_error().unwrap_or(libc::EIO));
+                let path = cmd
+                    .cached_path(session, name)
+                    .unwrap_or_else(|| std::path::Path::new(name));
+                let code = external::report_exec_error(
+                    session,
+                    name.as_bytes(),
+                    path,
+                    e.raw_os_error().unwrap_or(libc::EIO),
+                );
                 return Ok(Stage::Status(code));
             }
-            // A child owns both ENOEXEC script fallback and execution errors.
+            // The child owns ENOEXEC script fallback and observable errors.
             // Recheck the path there to match a racing unlink or replacement.
             Err(_) => {}
         }
@@ -932,9 +985,18 @@ fn run_external(
             {
                 cmd.select_missing_hook();
             }
-            Err(hash::Absent) if cmd.redirects.is_empty() && launch.group.is_none() && parent_reports_exec_error(session) => {
+            Err(hash::Absent)
+                if cmd.redirects.is_empty()
+                    && launch.group.is_none()
+                    && parent_reports_exec_error(session) =>
+            {
                 let name = &cmd.words[0];
-                let code = external::report_exec_error(session, name.as_bytes(), std::path::Path::new(name), libc::ENOENT);
+                let code = external::report_exec_error(
+                    session,
+                    name.as_bytes(),
+                    std::path::Path::new(name),
+                    libc::ENOENT,
+                );
                 return Ok(Flow::Continue(code));
             }
             // Failed lookup diagnostics belong to a child. A closed pipeline
@@ -947,7 +1009,8 @@ fn run_external(
         return Ok(Flow::Continue(
             if apply(&actions(cmd), here_input::PIPE_LIMIT, session) {
                 executable.exec(
-                    session, cmd.assignments.is_empty() && cmd.redirects.is_empty(),
+                    session,
+                    cmd.assignments.is_empty() && cmd.redirects.is_empty(),
                 )
             } else {
                 1
@@ -1197,7 +1260,9 @@ pub fn run_pipeline(
         {
             drop(input);
             session.jobs.restore();
-            session.jobs.detach_started(stages.iter().filter_map(|stage| stage.pid()));
+            session
+                .jobs
+                .detach_started(stages.iter().filter_map(|stage| stage.pid()));
             return Ok(flow);
         }
         let stage = (|| {
@@ -1240,7 +1305,9 @@ pub fn run_pipeline(
             }
             Err(e) => {
                 drop(input);
-                session.jobs.detach_started(stages.iter().filter_map(|stage| stage.pid()));
+                session
+                    .jobs
+                    .detach_started(stages.iter().filter_map(|stage| stage.pid()));
                 session.jobs.restore();
                 return Err(e);
             }

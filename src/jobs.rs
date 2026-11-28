@@ -70,20 +70,36 @@ impl Launch {
             let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
             loop {
                 let result = unsafe {
-                    libc::waitid(libc::P_PID, pid as _, &mut info, libc::WSTOPPED | libc::WNOHANG)
+                    libc::waitid(
+                        libc::P_PID,
+                        pid as _,
+                        &mut info,
+                        libc::WSTOPPED | libc::WNOHANG,
+                    )
                 };
                 if result == 0 && info.si_pid == 0 {
                     // The scheduler has not posted the synthetic stop yet. An
                     // intervening exit must remain waitable by the job owner.
-                    if unsafe { libc::waitid(libc::P_PID, pid as _, &mut info,
-                        libc::WEXITED | libc::WSTOPPED | libc::WNOWAIT) } == 0 {
-                        if info.si_code == libc::CLD_STOPPED { continue; }
+                    if unsafe {
+                        libc::waitid(
+                            libc::P_PID,
+                            pid as _,
+                            &mut info,
+                            libc::WEXITED | libc::WSTOPPED | libc::WNOWAIT,
+                        )
+                    } == 0
+                    {
+                        if info.si_code == libc::CLD_STOPPED {
+                            continue;
+                        }
                         return;
                     }
                 } else if result == 0 {
                     break;
                 }
-                if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted { break; }
+                if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                    break;
+                }
             }
             give_terminal(fd, self.group.filter(|&g| g != 0).unwrap_or(pid));
             unsafe { libc::kill(pid, libc::SIGCONT) };
@@ -218,11 +234,14 @@ fn give_terminal_with_modes(fd: RawFd, pgid: pid_t, modes: Option<&libc::termios
             return;
         };
         while libc::tcsetpgrp(fd, pgid) < 0 {
-            if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted { return; }
+            if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                return;
+            }
         }
         if let Some(modes) = modes {
             while libc::tcsetattr(fd, libc::TCSANOW, modes) < 0
-                && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {}
+                && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted
+            {}
         }
     }
 }
@@ -255,13 +274,19 @@ struct Job {
 
 impl Job {
     fn hangup(&self) {
-        if self.nohup { return; }
+        if self.nohup {
+            return;
+        }
         let send = |target, stopped| unsafe {
             libc::kill(target, libc::SIGHUP);
-            if stopped { libc::kill(target, libc::SIGCONT); }
+            if stopped {
+                libc::kill(target, libc::SIGCONT);
+            }
         };
         if let Some(group) = self.group {
-            if self.active() || self.stopped() { send(-group, self.stopped()); }
+            if self.active() || self.stopped() {
+                send(-group, self.stopped());
+            }
         } else {
             for child in &self.children {
                 if child.pid > 0 && !matches!(child.state, State::Done(_)) {
@@ -297,7 +322,10 @@ impl Job {
         if let Some(signal) = self.children.last().and_then(|child| child.signal) {
             let description = unsafe { libc::strsignal(signal) };
             if !description.is_null() {
-                return unsafe { std::ffi::CStr::from_ptr(description) }.to_string_lossy().into_owned().into();
+                return unsafe { std::ffi::CStr::from_ptr(description) }
+                    .to_string_lossy()
+                    .into_owned()
+                    .into();
             }
         }
         match self.status() {
@@ -538,7 +566,10 @@ impl Jobs {
     pub(crate) fn restore_initial_group(&self) {
         if let Some(tty) = self.terminal()
             && tty.shell_group != tty.original_group
-            && unsafe { libc::getpgrp() == tty.shell_group && libc::tcgetpgrp(tty.fd.as_raw_fd()) == tty.shell_group }
+            && unsafe {
+                libc::getpgrp() == tty.shell_group
+                    && libc::tcgetpgrp(tty.fd.as_raw_fd()) == tty.shell_group
+            }
             && unsafe { libc::setpgid(0, tty.original_group) } == 0
         {
             give_terminal(tty.fd.as_raw_fd(), tty.original_group);
@@ -642,7 +673,9 @@ impl Jobs {
         }
     }
     fn report_stopped(&mut self) {
-        if !self.quiet && let Some(job) = self.table.last_mut() {
+        if !self.quiet
+            && let Some(job) = self.table.last_mut()
+        {
             stderr_line!("[{}]+ Stopped  {}", job.id, job.name);
             job.listed = true;
         }
@@ -867,7 +900,8 @@ impl Jobs {
                 );
                 if got > 0 {
                     job.update(got, ChildEvent::decode(status));
-                } else if got < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD) {
+                } else if got < 0 && io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD)
+                {
                     // No further status can arrive for an already reaped child.
                     job.update(p.pid, ChildEvent::Exited(127));
                 }

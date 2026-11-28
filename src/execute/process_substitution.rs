@@ -66,16 +66,27 @@ impl Substitutions {
         self.pending.contains(&pid) || self.finished.contains_key(&pid)
     }
 
-    pub(crate) fn poll_next(&mut self, selected: &[libc::pid_t], all: bool) -> (Option<(u8, libc::pid_t)>, bool) {
-        if let Some((&pid, &code)) = selected.iter().find_map(|pid| self.finished.get_key_value(pid)) {
+    pub(crate) fn poll_next(
+        &mut self,
+        selected: &[libc::pid_t],
+        all: bool,
+    ) -> (Option<(u8, libc::pid_t)>, bool) {
+        if let Some((&pid, &code)) = selected
+            .iter()
+            .find_map(|pid| self.finished.get_key_value(pid))
+        {
             return (Some((code, pid)), false);
         }
         let mut running = false;
         for (i, &pid) in self.pending.iter().enumerate() {
-            if !all && !selected.contains(&pid) { continue; }
+            if !all && !selected.contains(&pid) {
+                continue;
+            }
             if let Some(code) = status(pid, libc::WNOHANG) {
                 self.pending.swap_remove(i);
-                if self.finished.len() >= crate::jobs::MAX_FINISHED_STATUSES { self.finished.pop_first(); }
+                if self.finished.len() >= crate::jobs::MAX_FINISHED_STATUSES {
+                    self.finished.pop_first();
+                }
                 self.finished.insert(pid, code);
                 return (Some((code, pid)), false);
             }

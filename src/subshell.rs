@@ -71,7 +71,7 @@ fn capture_arguments(
 
 pub(crate) fn current_substitution(
     session: &mut Session,
-    body: Vec<parser::Statement>,
+    body: &[parser::Statement],
     last: u8,
     reply: bool,
 ) -> Result<(String, u8), crate::expansion::Error> {
@@ -83,7 +83,7 @@ pub(crate) fn current_substitution(
     if !reply
         && !session.traps.observes_commands()
         && !session.xtrace
-        && let Some(cmd) = sole_plain_command(&body)
+        && let Some(cmd) = sole_plain_command(body)
         && (!session.keyword || cmd.keyword_args.is_empty())
         && let Some(name @ ("echo" | "printf")) =
             cmd.words.first().and_then(parser::Word::as_literal)
@@ -127,7 +127,7 @@ pub(crate) fn current_substitution(
     if reply {
         session.local_reply(last);
     }
-    let run = || execute_program(session, body, last, false);
+    let mut run = || crate::eval::borrowed_program(session, body, last, false);
     let captured = if reply {
         let flow = run();
         Ok((flow, Vec::new()))
@@ -156,7 +156,7 @@ pub(crate) fn current_substitution(
 
 pub fn capture_substitution(
     session: &mut Session,
-    body: Vec<parser::Statement>,
+    body: &[parser::Statement],
     last: u8,
 ) -> Result<(String, u8), &'static str> {
     #[cfg(target_os = "linux")]
@@ -165,7 +165,7 @@ pub fn capture_substitution(
     // Keep streams, virtual files, error reporting and trap execution in the child.
     if !session.traps.observes_commands()
         && !session.xtrace
-        && let Some(path) = input_only(&body)
+        && let Some(path) = input_only(body)
             .and_then(|word| stored_path(word, session, session.posix && !session.interactive))
         && let Ok(before) = std::fs::metadata(path)
         && before.is_file()
@@ -202,7 +202,7 @@ pub fn capture_substitution(
             return captured_output(output, 0);
         }
     }
-    if let Some(result) = capture_simple(session, &body, last) {
+    if let Some(result) = capture_simple(session, body, last) {
         return result;
     }
     session.jobs.refresh_snapshot();
@@ -231,7 +231,7 @@ pub fn capture_substitution(
         session.interactive = false;
         session.command_string = false;
         session.errexit &= session.shopt.inherit_errexit;
-        if let Some(path) = input_only(&body) {
+        if let Some(path) = input_only(body) {
             let code = (|| {
                 let captured = std::cell::Cell::new(None);
                 let filename = crate::expansion::Expansion::new(session, last, &captured)
@@ -259,7 +259,7 @@ pub fn capture_substitution(
             }
             unsafe { libc::_exit(i32::from(code.is_err())) }
         }
-        let code = execute_program(session, body, last, true).child_status();
+        let code = crate::eval::borrowed_program(session, body, last, true).child_status();
         crate::subshell::exit_child(session, code)
     }
     // A writer can fill the pipe before it exits. Drain first, then reap even

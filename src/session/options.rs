@@ -266,7 +266,12 @@ const SHOPT_OPTIONS: &[OptionEntry] = &[
     option_entry!("progcomp", shopt.progcomp),
     option_entry!("progcomp_alias", shopt.progcomp_alias),
     option_entry!("promptvars", shopt.promptvars),
-    OptionEntry { name: "restricted_shell", compat: None, read: |_| false, write: None },
+    OptionEntry {
+        name: "restricted_shell",
+        compat: None,
+        read: |_| false,
+        write: None,
+    },
     option_entry!("shift_verbose", shopt.shift_verbose),
     option_entry!("sourcepath", shopt.sourcepath),
     option_entry!("varredir_close", shopt.varredir_close),
@@ -470,7 +475,10 @@ impl Session {
             if let Some(list) = list {
                 for name in list.split(':') {
                     if !set
-                        && let Some(level) = SHOPT_OPTIONS.iter().find(|entry| entry.name == name).and_then(|entry| entry.compat)
+                        && let Some(level) = SHOPT_OPTIONS
+                            .iter()
+                            .find(|entry| entry.name == name)
+                            .and_then(|entry| entry.compat)
                     {
                         self.toggle_compat(level, true);
                     } else if let Some(value) = self.option_value(name, set) {
@@ -597,7 +605,10 @@ impl Session {
 
 impl Session {
     pub fn option_flags(&self) -> String {
-        "abefhikmnptuvxBCEHPTcs".chars().filter(|&flag| self.short_enabled(flag)).collect()
+        "abefhikmnptuvxBCEHPTcs"
+            .chars()
+            .filter(|&flag| self.short_enabled(flag))
+            .collect()
     }
 
     pub fn set(&mut self, words: &mut Vec<String>) -> u8 {

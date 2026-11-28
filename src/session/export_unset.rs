@@ -91,7 +91,11 @@ impl Session {
             }
             let value = if element.is_some() {
                 if let Some(value) = value {
-                    let value = if append { Cow::Owned(self.get(target).unwrap_or_default() + value) } else { Cow::Borrowed(value) };
+                    let value = if append {
+                        Cow::Owned(self.get(target).unwrap_or_default() + value)
+                    } else {
+                        Cow::Borrowed(value)
+                    };
                     if let Err(e) = self.assign_builtin_target(target, &value) {
                         diagnostic!("export: {target}: {e}");
                         status = 1;
@@ -99,7 +103,9 @@ impl Session {
                     }
                 }
                 None
-            } else { value };
+            } else {
+                value
+            };
             let integer = self.integer(name);
             let normalized;
             let (value, append) = if integer && let Some(value) = value {
@@ -253,7 +259,11 @@ impl Session {
                     .locals
                     .iter()
                     .rev()
-                    .take(if self.shopt.localvar_unset { usize::MAX } else { 1 })
+                    .take(if self.shopt.localvar_unset {
+                        usize::MAX
+                    } else {
+                        1
+                    })
                     .any(|scope| scope.variables.contains_key(name)),
                 ..Variable::default()
             },
@@ -291,7 +301,8 @@ impl Session {
     }
 
     pub(crate) fn unset_builtin_target(&mut self, name: &str) -> u8 {
-        self.unset_operands(std::iter::once(name), false, false, true).child_status()
+        self.unset_operands(std::iter::once(name), false, false, true)
+            .child_status()
     }
 
     fn unset_operands<'a>(
@@ -342,7 +353,10 @@ impl Session {
                 || !variables_only
                     && (subscript.is_none() || self.readonly_functions.contains(name))
                     && self.variables.get(name).map_or_else(
-                        || self.declared_variable(name, false).is_none_or(|v| !v.declared),
+                        || {
+                            self.declared_variable(name, false)
+                                .is_none_or(|v| !v.declared)
+                        },
                         |var| !var.declared,
                     );
             if resolve_function && self.readonly_functions.contains(name) {

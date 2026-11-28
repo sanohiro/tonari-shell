@@ -48,7 +48,7 @@ impl StaticGlob {
             });
             if !current {
                 *entry = Some(Box::new(CompiledGlob {
-                    matcher: pattern::extended::Compiled::new(source,true),
+                    matcher: pattern::extended::Compiled::new(source, true),
                     locale,
                     ascii_ranges,
                 }));
@@ -144,8 +144,12 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                     && let Some(v) = w.stored_parameter(session) =>
             {
                 if matches!(*op, "<" | ">") {
-                    let order = pattern::text_order(v,right,session);
-                    return Ok(if *op == "<" { order.is_lt() } else { order.is_gt() });
+                    let order = pattern::text_order(v, right, session);
+                    return Ok(if *op == "<" {
+                        order.is_lt()
+                    } else {
+                        order.is_gt()
+                    });
                 }
                 return builtins::binary(v, op, right).map_err(error);
             }
@@ -167,7 +171,9 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             Ok(true)
         }
         Or(terms) => {
-            let Some((last, prefix)) = terms.split_last() else { return Ok(false); };
+            let Some((last, prefix)) = terms.split_last() else {
+                return Ok(false);
+            };
             for term in prefix {
                 match condition(term, session, status) {
                     Ok(false) | Err(Flow::Continue(1..)) => {}
@@ -225,10 +231,15 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
             let left = operand(session, left, status)?;
             match op {
                 "=" | "==" | "!=" => {
-                    if !session.xtrace && !session.shopt.nocasematch
+                    if !session.xtrace
+                        && !session.shopt.nocasematch
                         && let crate::word::Word::Expanded(parts) = right
-                        && matches!(parts.as_slice(), [crate::word::Part::Parameter {quoted: true, ..}])
-                        && let Some(value) = right.stored_parameter(session) {
+                        && matches!(
+                            parts.as_slice(),
+                            [crate::word::Part::Parameter { quoted: true, .. }]
+                        )
+                        && let Some(value) = right.stored_parameter(session)
+                    {
                         return Ok((left == value) != (op == "!="));
                     }
                     if !session.shopt.nocasematch
@@ -249,7 +260,8 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                         env.session.positional.as_slice(),
                     );
                     trace(env.session, status, &[&left, op, &right]);
-                    let matched = pattern::extended::session_match(&left, &right, true, env.session);
+                    let matched =
+                        pattern::extended::session_match(&left, &right, true, env.session);
                     Ok(matched != (op == "!="))
                 }
                 "=~" => {
@@ -289,7 +301,11 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                     let right = operand(session, right, status)?;
                     trace(session, status, &[&left, op, &right]);
                     let order = pattern::text_order(&left, &right, session);
-                    Ok(if op == "<" { order.is_lt() } else { order.is_gt() })
+                    Ok(if op == "<" {
+                        order.is_lt()
+                    } else {
+                        order.is_gt()
+                    })
                 }
                 _ => {
                     let right = operand(session, right, status)?;
@@ -327,7 +343,9 @@ fn regex_search(
                 == locale.as_ref().map(std::rc::Rc::as_ptr)
     }) {
         // Repeated expressions should survive a stream of one-off regexes.
-        if index + 1 < recent.len() { recent[index..].rotate_left(1); }
+        if index + 1 < recent.len() {
+            recent[index..].rotate_left(1);
+        }
         recent.len() - 1
     } else {
         let compiled = Compiled::new(expression.into_owned(), ignore_case, locale)
@@ -672,7 +690,9 @@ fn capture_count(expression: &str) -> usize {
         match byte {
             b'\\' => bytes = bytes.get(1..).unwrap_or_default(),
             b'(' => groups += 1,
-            b'[' => {bytes=ere_list_end(bytes).map_or(&[][..], |end|&bytes[end+1..]);}
+            b'[' => {
+                bytes = ere_list_end(bytes).map_or(&[][..], |end| &bytes[end + 1..]);
+            }
             _ => {}
         }
     }

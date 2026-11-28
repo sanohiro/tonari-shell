@@ -15,6 +15,13 @@ if [[ $SUITE == correctness-review ]]; then
     [[ -x $reference ]] || brew install bash
   fi
   "$reference" --version > "$out/bash-version.txt"
+  wc -c "$bin/baseline" "$current" > "$out/binary-sizes.txt"
+  file "$current" > "$out/binary-format.txt"
+  if [[ $RUNNER_OS == Linux ]]; then
+    readelf -d "$current" > "$out/dynamic.txt"
+  else
+    otool -L "$current" > "$out/dynamic.txt"
+  fi
   python3 tests/review_builtins.py "$current" "$reference" --previous "$bin/baseline" --runs 11 > "$out/builtins.tsv"
   python3 tests/review_language.py "$current" "$reference" > "$out/language.txt"
   python3 tests/review_language.py "$current" "$reference" --benchmark --before "$bin/baseline" > "$out/language-times.tsv"

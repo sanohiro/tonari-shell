@@ -13,13 +13,24 @@ impl<'a> Delimiter<'a> {
     pub(super) const NEWLINE: Self = Self(b"\n");
 
     pub(super) fn first(value: &'a str) -> Self {
-        Self(value.chars().next().map_or(b"\0", |c| &value.as_bytes()[..c.len_utf8()]))
+        Self(
+            value
+                .chars()
+                .next()
+                .map_or(b"\0", |c| &value.as_bytes()[..c.len_utf8()]),
+        )
     }
 
-    pub(super) fn bytes(self) -> &'a [u8] { self.0 }
+    pub(super) fn bytes(self) -> &'a [u8] {
+        self.0
+    }
 
     fn find(self, bytes: &[u8]) -> Option<usize> {
-        if let [b] = self.0 { memchr::memchr(*b, bytes) } else { memchr::memmem::find(bytes, self.0) }
+        if let [b] = self.0 {
+            memchr::memchr(*b, bytes)
+        } else {
+            memchr::memmem::find(bytes, self.0)
+        }
     }
 
     // UTF-8 continuation bytes can never begin another occurrence.
@@ -98,7 +109,9 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, String)> {
                     opts.exact = flag == 'N';
                 }
                 'u' => {
-                    opts.fd = value.parse().map_err(|_| (1, format!("{value}: invalid file descriptor")))?;
+                    opts.fd = value
+                        .parse()
+                        .map_err(|_| (1, format!("{value}: invalid file descriptor")))?;
                     if opts.fd < 0 {
                         return Err((1, format!("{value}: invalid file descriptor")));
                     }
@@ -106,7 +119,10 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, String)> {
                 'i' => opts.initial = Some(value),
                 'p' => opts.prompt = Some(value),
                 't' => {
-                    opts.timeout = Some(timeout(value).ok_or_else(|| (1, format!("{value}: invalid timeout specification")))?);
+                    opts.timeout =
+                        Some(timeout(value).ok_or_else(|| {
+                            (1, format!("{value}: invalid timeout specification"))
+                        })?);
                 }
                 _ => unreachable!(),
             }
@@ -215,7 +231,9 @@ impl Input {
         Ok(self.chunk(1, 1)?.first().copied())
     }
 
-    pub(super) fn unconsume(&mut self, count: usize) { self.position -= count; }
+    pub(super) fn unconsume(&mut self, count: usize) {
+        self.position -= count;
+    }
 
     pub(super) fn chunk(&mut self, read_ahead: usize, take: usize) -> io::Result<&[u8]> {
         if self.position == self.end {
@@ -286,9 +304,15 @@ impl Drop for EchoGuard {
     }
 }
 
-pub(super) fn prepare_memory<'a>(session: &Session, args: &'a [String], bytes: &'a [u8]) -> Option<super::MemoryInput<'a>> {
+pub(super) fn prepare_memory<'a>(
+    session: &Session,
+    args: &'a [String],
+    bytes: &'a [u8],
+) -> Option<super::MemoryInput<'a>> {
     let opts = options(args).ok()?;
-    if opts.fd != 0 || opts.max_chars == Some(0) { return None; }
+    if opts.fd != 0 || opts.max_chars == Some(0) {
+        return None;
+    }
     let (line, status) = memory_record(session, &opts, bytes)?;
     Some(super::MemoryInput::Read(opts, line, status))
 }
@@ -306,7 +330,7 @@ fn memory_record<'a>(
         && opts.names.iter().all(|s| session.plain_read_target(s))
         && (!opts.names.is_empty() || session.plain_read_target("REPLY"))
     {
-        let delimiter = (!opts.exact)
+        let delimiter = (!opts.exact && (opts.raw || opts.delimiter.bytes() != b"\\"))
             .then(|| opts.delimiter.find(bytes))
             .flatten();
         let end = delimiter.unwrap_or(bytes.len());
@@ -348,7 +372,11 @@ pub(super) fn run(
         || (opts.max_chars == Some(0) || opts.timeout.is_some())
             && unsafe { libc::fcntl(opts.fd, libc::F_GETFD) } < 0
     {
-        diagnostic!("read: {}: invalid file descriptor: {}", opts.fd, crate::builtins::os_message(&io::Error::from_raw_os_error(libc::EBADF)));
+        diagnostic!(
+            "read: {}: invalid file descriptor: {}",
+            opts.fd,
+            crate::builtins::os_message(&io::Error::from_raw_os_error(libc::EBADF))
+        );
         return Flow::Continue(1);
     }
     if let Some(invalid) = opts
@@ -451,7 +479,9 @@ pub(super) fn run(
                 && opts.names.iter().all(|s| is_identifier(s))
         })
         .map_or(0, |(_, data)| {
-            opts.delimiter.find(data).map_or(data.len(), |n| n + opts.delimiter.bytes().len())
+            opts.delimiter
+                .find(data)
+                .map_or(data.len(), |n| n + opts.delimiter.bytes().len())
         });
     let mut watch = session.interactive || session.traps.active();
     let status = loop {
@@ -478,8 +508,12 @@ pub(super) fn run(
         }
         let input_byte = if let Some(bytes) = &mut edited {
             Ok(bytes.next())
-        } else if !opts.raw && !slash && !opts.exact && opts.max_chars.is_none()
-            && opts.delimiter.bytes().len() == 1 && input.seekable
+        } else if !opts.raw
+            && !slash
+            && !opts.exact
+            && opts.max_chars.is_none()
+            && opts.delimiter.bytes().len() == 1
+            && input.seekable
         {
             match input.chunk(1, usize::MAX) {
                 Ok([]) => Ok(None),
@@ -572,7 +606,11 @@ pub(super) fn run(
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => {
                 if e.raw_os_error() == Some(libc::EBADF) {
-                    diagnostic!("read: {}: invalid file descriptor: {}", opts.fd, crate::builtins::os_message(&e));
+                    diagnostic!(
+                        "read: {}: invalid file descriptor: {}",
+                        opts.fd,
+                        crate::builtins::os_message(&e)
+                    );
                 } else {
                     diagnostic!("read: {}", crate::builtins::os_message(&e));
                 }
@@ -586,12 +624,13 @@ pub(super) fn run(
                 continue;
             }
             escaped.push(line.len());
+        } else if b == b'\\' && !opts.raw {
+            delimiter_prefix = 0;
+            slash = true;
+            continue;
         } else if !opts.exact && opts.delimiter.advance(b, &mut delimiter_prefix) {
             line.truncate(line.len() - (opts.delimiter.bytes().len() - 1));
             break 0;
-        } else if b == b'\\' && !opts.raw {
-            slash = true;
-            continue;
         }
         if b == 0 {
             continue;

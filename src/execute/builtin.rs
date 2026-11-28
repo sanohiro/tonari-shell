@@ -206,12 +206,16 @@ fn status_operands(args: &[String]) -> &[String] {
 }
 
 fn status_value(args: &[String], previous: u8) -> Option<u8> {
-    args.first().map_or(Some(previous), |arg| arg.trim().parse::<i64>().ok().map(|n| n as u8))
+    args.first().map_or(Some(previous), |arg| {
+        arg.trim().parse::<i64>().ok().map(|n| n as u8)
+    })
 }
 
 fn exit_builtin(args: &[String], last_status: u8) -> Builtin {
     let args = status_operands(args);
-    let Some(status) = status_value(args, last_status) else { return Builtin::InvalidExit; };
+    let Some(status) = status_value(args, last_status) else {
+        return Builtin::InvalidExit;
+    };
     if args.len() > 1 {
         Builtin::ExtraExitArgs
     } else {
@@ -247,7 +251,12 @@ pub(super) fn eval_builtin(
             write_error(b"logout", b": not login shell: use `exit'");
             Flow::Continue(1)
         }
-        Builtin::Compound => crate::eval::compound(session, cmd.compound.take().unwrap(), last_status, in_stage_child),
+        Builtin::Compound => crate::eval::compound(
+            session,
+            cmd.compound.take().unwrap(),
+            last_status,
+            in_stage_child,
+        ),
         Builtin::Exec => exec_builtin(cmd, session, args),
         Builtin::Function => crate::eval::call_with_bindings(
             session,
@@ -422,7 +431,10 @@ pub(super) fn eval_builtin(
                 };
                 Flow::Return(code)
             } else {
-                diagnostic!("return: {}: numeric argument required", status_operands(args)[0]);
+                diagnostic!(
+                    "return: {}: numeric argument required",
+                    status_operands(args)[0]
+                );
                 Flow::Return(2)
             }
         }
@@ -440,7 +452,10 @@ pub(super) fn eval_builtin(
         }
         Builtin::Exit(code) => Flow::Exit(crate::startup::logout(session, code, last_status)),
         Builtin::InvalidExit => {
-            diagnostic!("exit: {}: numeric argument required", status_operands(args)[0]);
+            diagnostic!(
+                "exit: {}: numeric argument required",
+                status_operands(args)[0]
+            );
             Flow::Exit(2)
         }
         Builtin::ExtraExitArgs => {
@@ -452,7 +467,9 @@ pub(super) fn eval_builtin(
     // the function's redirections and positional parameters.
     let result = if session.function_depth != 0 || session.source_depth != 0 {
         crate::traps::leaving_scope(session, result)
-    } else { result };
+    } else {
+        result
+    };
     if !persistent {
         session.restore(bindings);
     }
@@ -706,7 +723,9 @@ pub(super) fn output_status(name: &str, result: io::Result<()>, status: u8) -> u
     if let Err(error) = result {
         diagnostic!("{name}: write error: {error}");
         1
-    } else { status }
+    } else {
+        status
+    }
 }
 
 pub(super) fn run_builtin(
@@ -765,7 +784,8 @@ pub(super) fn run_builtin(
         && !session.traps.observes_commands()
         && (cmd.assignments.is_empty()
             || matches!(cmd.assignments.as_slice(), [(key, _)] if key == "IFS" && !session.is_nameref(key) && !session.integer(key)))
-        && let Some(input) = session.memory_input(matches!(builtin, Builtin::Read), &cmd.words[1..], bytes)
+        && let Some(input) =
+            session.memory_input(matches!(builtin, Builtin::Read), &cmd.words[1..], bytes)
         && let Ok((reader, writer)) = io::pipe()
         && reader.as_raw_fd() > 2
         && writer.as_raw_fd() > 2
@@ -806,7 +826,11 @@ pub(super) fn run_builtin(
             if path.len() < line.len() {
                 line[..path.len()].copy_from_slice(path);
                 line[path.len()] = b'\n';
-                return Ok(Flow::Continue(output_status("pwd", file.write_all(&line[..=path.len()]), 0)));
+                return Ok(Flow::Continue(output_status(
+                    "pwd",
+                    file.write_all(&line[..=path.len()]),
+                    0,
+                )));
             }
         }
         let (data, status) = output.render(session);
@@ -863,7 +887,9 @@ pub(super) fn run_builtin(
             .chain(extra),
     ) {
         diagnostic!("redirection: cannot restore file descriptor: {error}");
-        if matches!(flow, Flow::Continue(_)) { return Ok(Flow::Continue(1)); }
+        if matches!(flow, Flow::Continue(_)) {
+            return Ok(Flow::Continue(1));
+        }
     }
     // Failures in a compound command's body are tested by its own statement
     // list. A redirect failure happens before that list can run.

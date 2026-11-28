@@ -56,7 +56,8 @@ pub(crate) fn one(input: &mut &[u8], out: &mut Vec<u8>, mode: Mode) -> bool {
             let (value, count) = digits(input, 16, limit, 0);
             if count == 0 {
                 if mode != Mode::Echo {
-                    diagnostic!("printf: missing hexadecimal digit for \\{}", escape as char);
+                    let kind = if escape == b'x' { "hex" } else { "unicode" };
+                    diagnostic!("printf: missing {kind} digit for \\{}", escape as char);
                 }
                 out.extend_from_slice(&[b'\\', escape]);
             } else if escape == b'x' {

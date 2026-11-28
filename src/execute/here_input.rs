@@ -9,7 +9,11 @@ use std::os::unix::fs::MetadataExt;
 // be reduced by the kernel; never wait for a reader that has not started yet.
 pub(super) const PIPE_LIMIT: usize = 64 * 1024;
 
-pub(super) fn open(data: &[u8], pipe_limit: usize, session: &crate::Session) -> io::Result<OwnedFd> {
+pub(super) fn open(
+    data: &[u8],
+    pipe_limit: usize,
+    session: &crate::Session,
+) -> io::Result<OwnedFd> {
     if data.is_empty() {
         return File::open("/dev/null").map(Into::into);
     }
@@ -33,10 +37,20 @@ pub(super) fn open(data: &[u8], pipe_limit: usize, session: &crate::Session) -> 
             }
         }
     }
-    if let Some(directory) = session.scalar_setting("TMPDIR").filter(|s| !s.is_empty() && s != "/tmp") {
+    if let Some(directory) = session
+        .scalar_setting("TMPDIR")
+        .filter(|s| !s.is_empty() && s != "/tmp")
+    {
         let preferred = std::path::Path::new(directory.as_ref());
         let attempted = temporary(data, preferred);
-        if attempted.is_ok() || attempted.as_ref().is_err_and(|e| !matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR | libc::EACCES | libc::EROFS))) {
+        if attempted.is_ok()
+            || attempted.as_ref().is_err_and(|e| {
+                !matches!(
+                    e.raw_os_error(),
+                    Some(libc::ENOENT | libc::ENOTDIR | libc::EACCES | libc::EROFS)
+                )
+            })
+        {
             return attempted;
         }
     }

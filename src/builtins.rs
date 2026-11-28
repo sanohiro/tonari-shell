@@ -270,7 +270,9 @@ fn binary_op(op: &str) -> bool {
 
 pub(crate) fn integer_operand(text: &str) -> Option<i64> {
     text.trim_start_matches(|c: char| c.is_ascii_whitespace())
-        .trim_end_matches([' ', '\t']).parse().ok()
+        .trim_end_matches([' ', '\t'])
+        .parse()
+        .ok()
 }
 
 pub(crate) fn binary(left: &str, op: &str, right: &str) -> Result<bool, &'static str> {

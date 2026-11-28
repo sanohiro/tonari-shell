@@ -35,11 +35,12 @@ pub(super) fn literal(
     if needle == replacement {
         return text.to_owned();
     }
-    let finder = matches!(mode, First | All).then(|| memchr::memmem::Finder::new(needle.as_bytes()));
+    let finder =
+        matches!(mode, First | All).then(|| memchr::memmem::Finder::new(needle.as_bytes()));
     let first = match mode {
         Prefix => text.starts_with(needle).then_some(0),
         Suffix => text.strip_suffix(needle).map(str::len),
-        First | All => finder.as_ref().and_then(|f|f.find(text.as_bytes())),
+        First | All => finder.as_ref().and_then(|f| f.find(text.as_bytes())),
     };
     let Some(index) = first else {
         return text.to_owned();
@@ -53,7 +54,7 @@ pub(super) fn literal(
             let rest = &text[end..];
             let next = if rest.starts_with(needle) {
                 0
-            } else if let Some(i) = finder.as_ref().and_then(|f|f.find(rest.as_bytes())) {
+            } else if let Some(i) = finder.as_ref().and_then(|f| f.find(rest.as_bytes())) {
                 i
             } else {
                 break;
@@ -285,10 +286,19 @@ pub(super) fn substitute(
         }
         i = 0;
     }
-    let offsets = (!text.is_ascii()).then(|| text.char_indices().map(|(i,_)|i).chain(std::iter::once(text.len())).collect::<Vec<_>>());
-    let boundaries=offsets.as_ref().map_or(text.len()+1,Vec::len);
-    let at=|n:usize|offsets.as_ref().map_or(n,|pos|pos[n]);
-    let index_of=|byte:usize|offsets.as_ref().map_or(byte,|pos|pos.partition_point(|&i| i<byte));
+    let offsets = (!text.is_ascii()).then(|| {
+        text.char_indices()
+            .map(|(i, _)| i)
+            .chain(std::iter::once(text.len()))
+            .collect::<Vec<_>>()
+    });
+    let boundaries = offsets.as_ref().map_or(text.len() + 1, Vec::len);
+    let at = |n: usize| offsets.as_ref().map_or(n, |pos| pos[n]);
+    let index_of = |byte: usize| {
+        offsets
+            .as_ref()
+            .map_or(byte, |pos| pos.partition_point(|&i| i < byte))
+    };
     let starts = (max_width.is_none() && group.is_none() && !escaped_end && mode != Suffix)
         .then(|| compiled.starts());
     let accepts = |candidate: &str| {

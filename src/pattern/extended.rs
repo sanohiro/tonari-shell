@@ -44,25 +44,41 @@ fn sequence<const PATHNAME: bool>(
             }
             let mut alternatives = Vec::new();
             let closed = loop {
-                let Some(sequence) = sequence::<PATHNAME>(source, depth + 1, extended) else { break false; };
+                let Some(sequence) = sequence::<PATHNAME>(source, depth + 1, extended) else {
+                    break false;
+                };
                 alternatives.push(sequence);
-                let Some(&sep) = source.as_bytes().first() else { break false; };
+                let Some(&sep) = source.as_bytes().first() else {
+                    break false;
+                };
                 *source = &source[1..];
-                if sep == b')' { break true; }
+                if sep == b')' {
+                    break true;
+                }
             };
             if !closed {
                 atoms.push(Atom::Text(rest.into()));
                 *source = "";
                 break;
             }
-            if !PATHNAME && matches!(bytes[0],b'*'|b'+'|b'@')
+            if !PATHNAME
+                && matches!(bytes[0], b'*' | b'+' | b'@')
                 && let [only] = alternatives.as_mut_slice()
                 && let [Atom::Group(inner, _)] = only.as_slice()
-                && (bytes[0]==b'@' || matches!(*inner,b'*'|b'+')) {
-                let Atom::Group(inner,options)=only.pop().unwrap() else { unreachable!() };
-                let outer=bytes[0];
-                let kind=if outer==b'@' {inner} else if inner==b'*'||outer==b'*' {b'*'} else {b'+'};
-                atoms.push(Atom::Group(kind,options));
+                && (bytes[0] == b'@' || matches!(*inner, b'*' | b'+'))
+            {
+                let Atom::Group(inner, options) = only.pop().unwrap() else {
+                    unreachable!()
+                };
+                let outer = bytes[0];
+                let kind = if outer == b'@' {
+                    inner
+                } else if inner == b'*' || outer == b'*' {
+                    b'*'
+                } else {
+                    b'+'
+                };
+                atoms.push(Atom::Group(kind, options));
                 continue;
             }
             if bytes[0] == b'@'
@@ -87,7 +103,9 @@ fn sequence<const PATHNAME: bool>(
         }
         let class = &bytes[1..];
         if bytes[0] == b'['
-            && last_close.get_or_init(|| memchr::memrchr(b']',bytes).map(|i|bytes.len()-i)).is_some_and(|distance|distance <= class.len())
+            && last_close
+                .get_or_init(|| memchr::memrchr(b']', bytes).map(|i| bytes.len() - i))
+                .is_some_and(|distance| distance <= class.len())
             && let Some(end) = bracket::class_end(class)
             && !(PATHNAME && class[..=end].contains(&b'/'))
         {
@@ -536,12 +554,23 @@ impl Pattern {
 
     fn parse_mode<const PATHNAME: bool>(mut text: &str, extended: bool) -> Self {
         if extended && text.starts_with("@(@(") {
-            let wrappers = text.as_bytes().chunks_exact(2).take_while(|s| *s == b"@(").count();
-            let closing = text.as_bytes().iter().rev().take_while(|&&b| b == b')').count();
-            if closing == wrappers && 3*wrappers <= text.len()
-                && !text[2*wrappers..text.len()-wrappers].contains(['(',')','\\']) {
+            let wrappers = text
+                .as_bytes()
+                .chunks_exact(2)
+                .take_while(|s| *s == b"@(")
+                .count();
+            let closing = text
+                .as_bytes()
+                .iter()
+                .rev()
+                .take_while(|&&b| b == b')')
+                .count();
+            if closing == wrappers
+                && 3 * wrappers <= text.len()
+                && !text[2 * wrappers..text.len() - wrappers].contains(['(', ')', '\\'])
+            {
                 // One outermost @ group suffices even when the inner text has alternatives.
-                text = &text[2*(wrappers-1)..text.len()-(wrappers-1)];
+                text = &text[2 * (wrappers - 1)..text.len() - (wrappers - 1)];
             }
         }
         let original = text;
@@ -810,33 +839,55 @@ pub(crate) enum Compiled {
 
 impl Compiled {
     pub(crate) fn new(source: &str, extended: bool) -> Self {
-        if extended && has_group(source) { Self::Extended(Pattern::parse(source,true)) }
-        else { Self::Basic(Matcher::new(source.to_owned())) }
+        if extended && has_group(source) {
+            Self::Extended(Pattern::parse(source, true))
+        } else {
+            Self::Basic(Matcher::new(source.to_owned()))
+        }
     }
 
     pub(crate) fn accepts(&self, value: &str) -> bool {
         match self {
             Self::Basic(p) => p.matches(value),
-            Self::Extended(p) => p.accepts(value,false),
+            Self::Extended(p) => p.accepts(value, false),
         }
     }
 }
 
-pub(crate) fn session_match(value: &str, source: &str, extended: bool, session: &crate::Session) -> bool {
-    let fold = session.shopt.nocasematch.then(|| session.character_locale());
+pub(crate) fn session_match(
+    value: &str,
+    source: &str,
+    extended: bool,
+    session: &crate::Session,
+) -> bool {
+    let fold = session
+        .shopt
+        .nocasematch
+        .then(|| session.character_locale());
     if let Some(fold) = fold {
         return insensitive_match_with(value, source, extended, fold, || {
-            cached_match(value,source,extended,Some(fold),session)
+            cached_match(value, source, extended, Some(fold), session)
         });
     }
-    cached_match(value,source,extended,None,session)
+    cached_match(value, source, extended, None, session)
 }
 
-pub(crate) fn insensitive_session(value: &str, source: &str, extended: bool, session: &crate::Session) -> bool {
-    session_match(value,source,extended,session)
+pub(crate) fn insensitive_session(
+    value: &str,
+    source: &str,
+    extended: bool,
+    session: &crate::Session,
+) -> bool {
+    session_match(value, source, extended, session)
 }
 
-fn cached_match(value: &str, source: &str, extended: bool, fold: Option<super::CharacterLocale>, session: &crate::Session) -> bool {
+fn cached_match(
+    value: &str,
+    source: &str,
+    extended: bool,
+    fold: Option<super::CharacterLocale>,
+    session: &crate::Session,
+) -> bool {
     struct Entry {
         source: String,
         extended: bool,
@@ -847,21 +898,44 @@ fn cached_match(value: &str, source: &str, extended: bool, fold: Option<super::C
     }
     const LIMIT: usize = 12;
     thread_local! {static RECENT: std::cell::RefCell<Vec<Entry>> = const {std::cell::RefCell::new(Vec::new())};}
-    let locale = (source.contains(['[','?']) || fold.is_some()).then(|| super::session_locale(session)).flatten();
+    let locale = (source.contains(['[', '?']) || fold.is_some())
+        .then(|| super::session_locale(session))
+        .flatten();
     let _guard = locale.as_ref().and_then(|l| l.enter());
-    let compile = || if let Some(fold) = fold { Compiled::Extended(Pattern::insensitive(source,extended,fold)) } else { Compiled::new(source,extended) };
+    let compile = || {
+        if let Some(fold) = fold {
+            Compiled::Extended(Pattern::insensitive(source, extended, fold))
+        } else {
+            Compiled::new(source, extended)
+        }
+    };
     if source.len() > 4096 {
         return compile().accepts(value);
     }
     RECENT.with_borrow_mut(|recent| {
-        if let Some(entry) = recent.iter().rev().find(|e| e.source == source && e.extended == extended && e.fold == fold && e.ascii_ranges == session.shopt.globasciiranges &&
-            e.locale.as_ref().map(std::rc::Rc::as_ptr) == locale.as_ref().map(std::rc::Rc::as_ptr)) {
+        if let Some(entry) = recent.iter().rev().find(|e| {
+            e.source == source
+                && e.extended == extended
+                && e.fold == fold
+                && e.ascii_ranges == session.shopt.globasciiranges
+                && e.locale.as_ref().map(std::rc::Rc::as_ptr)
+                    == locale.as_ref().map(std::rc::Rc::as_ptr)
+        }) {
             return entry.matcher.accepts(value);
         }
-        let matcher=compile();
-        let yes=matcher.accepts(value);
-        if recent.len() == LIMIT { recent.remove(0); }
-        recent.push(Entry {source:source.into(),extended,fold,locale,ascii_ranges:session.shopt.globasciiranges,matcher});
+        let matcher = compile();
+        let yes = matcher.accepts(value);
+        if recent.len() == LIMIT {
+            recent.remove(0);
+        }
+        recent.push(Entry {
+            source: source.into(),
+            extended,
+            fold,
+            locale,
+            ascii_ranges: session.shopt.globasciiranges,
+            matcher,
+        });
         yes
     })
 }

@@ -70,10 +70,10 @@ impl Reader {
                         continue;
                     }
                     let index = assignment
-                        .map(|len| word.assignment_name(len).to_owned())
+                        .map(|len| word.assignment_name(len).map(str::to_owned).ok_or(Error::Invalid("invalid assignment prefix"))).transpose()?
                         .filter(|k| k.starts_with('[') && (k.ends_with(']') || k.ends_with("]+")));
                     if let Some(name) = &index {
-                        word.remove_assignment_prefix(name.len() + 1);
+                        word.remove_assignment_prefix(name.len() + 1).ok_or(Error::Invalid("invalid assignment prefix"))?;
                     }
                     items.push((
                         index.map(|s| {

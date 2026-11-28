@@ -8,7 +8,9 @@ thread_local! {
     static CONTEXT: RefCell<Aliases> = const { RefCell::new(Aliases(None)) };
 }
 
-pub(super) fn resume(aliases: Aliases) { CONTEXT.replace(aliases); }
+pub(super) fn resume(aliases: Aliases) {
+    CONTEXT.replace(aliases);
+}
 
 pub(super) fn current() -> Aliases {
     CONTEXT.with_borrow(Clone::clone)
@@ -147,8 +149,8 @@ impl Expanded {
         super::Location {
             start: 0,
             end: text.len(),
+            subscript_aliases: reader.subscript_aliases(&text),
             source: text,
-            subscript_aliases: reader.subscript_aliases(),
             line: reader.first_line + lines,
         }
     }
@@ -179,23 +181,36 @@ impl Reader {
     }
 
     fn replacement_aliases(&self, name: &str, mask_active: bool) -> Aliases {
-        if !mask_active { return self.aliases.clone(); }
-        let original=self.aliases.0.as_ref().expect("an alias was found");
+        if !mask_active {
+            return self.aliases.clone();
+        }
+        let original = self.aliases.0.as_ref().expect("an alias was found");
         let masked = || {
-            let mut table=original.as_ref().clone();
+            let mut table = original.as_ref().clone();
             table.remove(name);
-            for frame in &self.alias_frames { table.remove(&frame.name); }
+            for frame in &self.alias_frames {
+                table.remove(&frame.name);
+            }
             Aliases(Some(std::rc::Rc::new(table)))
         };
-        if !self.alias_frames.is_empty() { return masked(); }
-        type WeakTable=std::rc::Weak<std::collections::BTreeMap<String,String>>;
+        if !self.alias_frames.is_empty() {
+            return masked();
+        }
+        type WeakTable = std::rc::Weak<std::collections::BTreeMap<String, String>>;
         thread_local! { static LAST: RefCell<Option<(WeakTable,String,Aliases)>> =const {RefCell::new(None)}; }
         LAST.with_borrow_mut(|cache| {
-            if let Some((table,key,replacement))=cache && table.as_ptr()==std::rc::Rc::as_ptr(original) && key==name {
+            if let Some((table, key, replacement)) = cache
+                && table.as_ptr() == std::rc::Rc::as_ptr(original)
+                && key == name
+            {
                 return replacement.clone();
             }
-            let replacement=masked();
-            *cache=Some((std::rc::Rc::downgrade(original),name.into(),replacement.clone()));
+            let replacement = masked();
+            *cache = Some((
+                std::rc::Rc::downgrade(original),
+                name.into(),
+                replacement.clone(),
+            ));
             replacement
         })
     }
@@ -250,7 +265,12 @@ impl Reader {
         let old_boundary = physical.len() - suffix.len();
         source.push_str(suffix);
         let (tokens, offsets, _) = with(nested, || {
-            super::lexer::lex_joined(&source[start..], self.final_input, boundary-start, self.aliases.clone())
+            super::lexer::lex_joined(
+                &source[start..],
+                self.final_input,
+                boundary - start,
+                self.aliases.clone(),
+            )
         })?;
         let mut spans: Vec<_> = (0..index).map(span).collect();
         let boundaries: Vec<_> = self

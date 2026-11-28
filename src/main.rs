@@ -202,18 +202,27 @@ fn thread_stack_floor() -> usize {
     let (low, size) = unsafe {
         let thread = libc::pthread_self();
         let size = libc::pthread_get_stacksize_np(thread);
-        (libc::pthread_get_stackaddr_np(thread).addr().saturating_sub(size), size)
+        (
+            libc::pthread_get_stackaddr_np(thread)
+                .addr()
+                .saturating_sub(size),
+            size,
+        )
     };
     #[cfg(target_os = "linux")]
     let (low, size) = unsafe {
         let mut attr = std::mem::MaybeUninit::uninit();
-        if libc::pthread_getattr_np(libc::pthread_self(), attr.as_mut_ptr()) != 0 { return usize::MAX; }
+        if libc::pthread_getattr_np(libc::pthread_self(), attr.as_mut_ptr()) != 0 {
+            return usize::MAX;
+        }
         let mut attr = attr.assume_init();
         let mut low = std::ptr::null_mut();
         let mut size = 0;
         let result = libc::pthread_attr_getstack(&attr, &mut low, &mut size);
         libc::pthread_attr_destroy(&mut attr);
-        if result != 0 { return usize::MAX; }
+        if result != 0 {
+            return usize::MAX;
+        }
         (low.addr(), size)
     };
     low.saturating_add((size / 2).min(256 * 1024))
@@ -227,7 +236,11 @@ fn stack_budget_exceeded() -> bool {
         return WORKER_STACK_FLOOR.with(|floor| here <= *floor.get_or_init(thread_stack_floor));
     }
     let budget = STACK_BUDGET.load(std::sync::atomic::Ordering::Relaxed);
-    let budget = if budget == 0 { initial_stack_budget() } else { budget };
+    let budget = if budget == 0 {
+        initial_stack_budget()
+    } else {
+        budget
+    };
     origin.saturating_sub(here) >= budget
 }
 
@@ -260,7 +273,9 @@ fn invoke(args: impl Iterator<Item = std::ffi::OsString>) -> u8 {
     let invocation = match cli::parse(args, shell_terminal) {
         Ok(Action::Run(invocation)) => invocation,
         Ok(Action::Version) => {
-            return u8::from(writeln!(io::stdout().lock(), "tonari {}", env!("CARGO_PKG_VERSION")).is_err());
+            return u8::from(
+                writeln!(io::stdout().lock(), "tonari {}", env!("CARGO_PKG_VERSION")).is_err(),
+            );
         }
         Ok(Action::Help) => {
             return u8::from(writeln!(io::stdout().lock(),
@@ -281,7 +296,11 @@ fn invoke(args: impl Iterator<Item = std::ffi::OsString>) -> u8 {
     code
 }
 
-fn apply_invocation_options(session: &mut Session, invocation: &mut cli::Invocation, env: &startup::Environment) -> Result<(), u8> {
+fn apply_invocation_options(
+    session: &mut Session,
+    invocation: &mut cli::Invocation,
+    env: &startup::Environment,
+) -> Result<(), u8> {
     use cli::Input;
     session.initialize_shell_level(env);
     session.arg0 = std::mem::take(&mut invocation.arg0);
@@ -320,8 +339,10 @@ fn apply_invocation_options(session: &mut Session, invocation: &mut cli::Invocat
     session.histexpand = invocation.options.histexpand.unwrap_or(session.interactive);
     // The selected keymap is also observable in a forced interactive script.
     // Terminal capabilities are checked separately when opening the editor.
-    session.vi = session.interactive && !invocation.noediting && invocation.options.vi.unwrap_or(false);
-    session.emacs = session.interactive && !invocation.noediting && invocation.options.emacs.unwrap_or(true);
+    session.vi =
+        session.interactive && !invocation.noediting && invocation.options.vi.unwrap_or(false);
+    session.emacs =
+        session.interactive && !invocation.noediting && invocation.options.emacs.unwrap_or(true);
     if session.interactive
         && let Err(e) = session.traps.init_hangup()
     {
@@ -383,7 +404,12 @@ fn initialize_interactive_defaults(session: &mut Session) {
             } else {
                 ".bash_history"
             };
-            session.assign("HISTFILE", &std::path::Path::new(home.as_ref()).join(file).to_string_lossy());
+            session.assign(
+                "HISTFILE",
+                &std::path::Path::new(home.as_ref())
+                    .join(file)
+                    .to_string_lossy(),
+            );
         }
     }
 }
@@ -394,14 +420,19 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
     session.privileged = invocation.options.privileged;
     let changed_ids = match startup::settle_credentials(session.privileged) {
         Ok(changed) => changed,
-        Err(e) => { diagnostic!("{e}"); return 126; }
+        Err(e) => {
+            diagnostic!("{e}");
+            return 126;
+        }
     };
     let env = startup::Environment::read(session, changed_ids);
     if session.privileged || changed_ids {
         session.unset_variable("CDPATH");
         session.unset_variable("GLOBIGNORE");
     }
-    if let Err(code) = apply_invocation_options(session, &mut invocation, &env) { return code; }
+    if let Err(code) = apply_invocation_options(session, &mut invocation, &env) {
+        return code;
+    }
     if invocation.pretty {
         return input::print_script(session, invocation.input);
     }
@@ -470,5 +501,9 @@ fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 
         Flow::Discard(s) | Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s) => s,
         Flow::Break(..) | Flow::LoopContinue(_) => 1,
     };
-    traps::finish_shell(session, code, invocation.interactive && session.stdin_script)
+    traps::finish_shell(
+        session,
+        code,
+        invocation.interactive && session.stdin_script,
+    )
 }

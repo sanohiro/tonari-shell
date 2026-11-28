@@ -64,21 +64,42 @@ fn connect_address(
         return Ok(socket);
     }
     let error = io::Error::last_os_error();
-    if error.kind() != io::ErrorKind::Interrupted { return Err(error); }
+    if error.kind() != io::ErrorKind::Interrupted {
+        return Err(error);
+    }
     // A blocking connect keeps running after EINTR. A second connect is not
     // a retry: wait for the first and query its recorded result.
-    let mut event = libc::pollfd { fd, events: libc::POLLOUT, revents: 0 };
+    let mut event = libc::pollfd {
+        fd,
+        events: libc::POLLOUT,
+        revents: 0,
+    };
     while unsafe { libc::poll(&mut event, 1, -1) } < 0 {
         let error = io::Error::last_os_error();
-        if error.kind() != io::ErrorKind::Interrupted || crate::traps::hanging_up() ||
-            crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) { return Err(error); }
+        if error.kind() != io::ErrorKind::Interrupted
+            || crate::traps::hanging_up()
+            || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Err(error);
+        }
     }
     let mut result: libc::c_int = 0;
     let mut len = std::mem::size_of_val(&result) as libc::socklen_t;
-    if unsafe { libc::getsockopt(fd, libc::SOL_SOCKET, libc::SO_ERROR, (&mut result as *mut libc::c_int).cast(), &mut len) } < 0 {
+    if unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_ERROR,
+            (&mut result as *mut libc::c_int).cast(),
+            &mut len,
+        )
+    } < 0
+    {
         return Err(io::Error::last_os_error());
     }
-    if result != 0 { return Err(io::Error::from_raw_os_error(result)); }
+    if result != 0 {
+        return Err(io::Error::from_raw_os_error(result));
+    }
     Ok(socket)
 }
 
@@ -238,7 +259,11 @@ pub(super) fn open_redirect(path: &str, flags: i32) -> Option<OwnedFd> {
     }
     let open = |flags| loop {
         let fd = unsafe { libc::open(path.as_ptr(), flags, 0o666 as libc::c_int) };
-        if fd >= 0 || errno() != libc::EINTR || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed) || crate::traps::hanging_up() {
+        if fd >= 0
+            || errno() != libc::EINTR
+            || crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+            || crate::traps::hanging_up()
+        {
             break fd;
         }
     };
@@ -323,7 +348,11 @@ pub(super) fn apply(actions: &[Action<'_>], pipe_limit: usize, session: &Session
     apply_protected(actions, pipe_limit, session).is_ok()
 }
 
-pub(super) fn apply_protected(actions: &[Action<'_>], pipe_limit: usize, session: &Session) -> Result<(), usize> {
+pub(super) fn apply_protected(
+    actions: &[Action<'_>],
+    pipe_limit: usize,
+    session: &Session,
+) -> Result<(), usize> {
     for (index, a) in actions.iter().enumerate() {
         match a {
             Action::HereInput(dest, body) => {
@@ -409,7 +438,9 @@ pub(crate) fn capture_stdout(run: impl FnOnce() -> Flow) -> io::Result<(Flow, Ve
     let flow = run();
     let flushed = io::stdout().flush();
     if let Err(error) = saved.restore(1) {
-        unsafe { libc::close(1); }
+        unsafe {
+            libc::close(1);
+        }
         return Err(error);
     }
     flushed?;

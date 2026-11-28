@@ -732,7 +732,7 @@ fn command_callback(
         ("COMP_TYPE".into(), key.into()),
         ("COMP_KEY".into(), key.into()),
     ]);
-    let result = crate::capture_substitution(session, program, last);
+    let result = crate::capture_substitution(session, &program, last);
     session.restore(old);
     let (text, _) = result?;
     let mut values = Vec::new();

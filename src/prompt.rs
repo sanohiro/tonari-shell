@@ -4,7 +4,9 @@ use crate::Session;
 
 pub fn render(session: &mut Session, secondary: bool, status: u8, editing: bool) -> String {
     let name = if secondary { "PS2" } else { "PS1" };
-    let Some(prompt) = session.get(name) else { return String::new() };
+    let Some(prompt) = session.get(name) else {
+        return String::new();
+    };
     render_mode(session, prompt, status, editing)
 }
 
@@ -166,9 +168,16 @@ fn escape(session: &Session, c: char, chars: &mut std::str::Chars, output: &mut 
         }
         c @ ('w' | 'W') => {
             let start = output.len();
-            let path = session.scalar_setting("PWD").or_else(|| {
-                session.logical_directory_ref().ok()?.to_str().map(std::borrow::Cow::Borrowed)
-            }).unwrap_or_default();
+            let path = session
+                .scalar_setting("PWD")
+                .or_else(|| {
+                    session
+                        .logical_directory_ref()
+                        .ok()?
+                        .to_str()
+                        .map(std::borrow::Cow::Borrowed)
+                })
+                .unwrap_or_default();
             let home = session
                 .scalar_setting("HOME")
                 .filter(|h| !h.is_empty() && h.as_ref() != "/");

@@ -176,7 +176,7 @@ impl PreparedCommand {
         {
             return false;
         }
-        match hash::search_in(name, session, &lookup::path(self, session)) {
+        match hash::search_in(name, session, lookup::path(self, session)) {
             Err(hash::Absent) => {
                 self.select_missing_hook();
                 true
@@ -275,8 +275,8 @@ pub(super) fn separate_keyword_arguments(raw: &mut SimpleCommand<Word>) {
                 return false;
             }
             let key = key.to_owned();
-            let mut value = std::mem::take(word);
-            value.remove_assignment_prefix(key.len() + 1);
+            if word.remove_assignment_prefix(key.len() + 1).is_none() { return true; }
+            let value = std::mem::take(word);
             raw.assignments.push((key, Assignment::Scalar(value)));
             false
         } else if let Some((key, Assignment::Array(_, parts, source))) =
@@ -357,7 +357,10 @@ pub(super) fn prepare_expanded(
     // Each assignment sees its predecessors, while command arguments saw the
     // outer environment. Standalone assignments persist even on redirect failure.
     let typed_assignment = words.is_empty()
-        || session.posix && words.first().is_some_and(|word| super::special_builtin(word));
+        || session.posix
+            && words
+                .first()
+                .is_some_and(|word| super::special_builtin(word));
     for (mut key, word) in raw.assignments {
         let mut exp = Expansion::with_assignments(
             session,
@@ -465,7 +468,10 @@ pub(super) fn prepare_expanded(
                     Ok(std::borrow::Cow::Owned(resolved)) => key = resolved,
                     Ok(_) => {}
                     Err(error) if exp.session.function_depth == 0 => {
-                        return Err(crate::expansion::Error::fatal(format!("warning: {key}: {error}"), 1));
+                        return Err(crate::expansion::Error::fatal(
+                            format!("warning: {key}: {error}"),
+                            1,
+                        ));
                     }
                     Err(error) => {
                         diagnostic!("warning: {key}: {error}");
@@ -497,7 +503,10 @@ pub(super) fn prepare_expanded(
                     if standalone {
                         let element = exp.expanded_key(subscript)?;
                         if element.is_empty() {
-                            return Err(crate::expansion::Error::fatal(format!("{key}: bad array subscript"), 1));
+                            return Err(crate::expansion::Error::fatal(
+                                format!("{key}: bad array subscript"),
+                                1,
+                            ));
                         }
                         let key = element;
                         let old = append
@@ -676,17 +685,26 @@ pub(super) fn prepare_redirects(
                     let plain = super::plain_here_parts(&body, |literal, name| {
                         expanded.push_str(literal);
                         if let Some(name) = name {
-                            if super::stage_parameter(name, exp.session) { return false; }
+                            if super::stage_parameter(name, exp.session) {
+                                return false;
+                            }
                             if let Some(value) = exp.borrowed_scalar(name) {
                                 expanded.push_str(value);
                             } else if let Some(value) = exp.lookup(name) {
                                 expanded.push_str(&value);
-                            } else if exp.session.nounset { return false; }
+                            } else if exp.session.nounset {
+                                return false;
+                            }
                         }
                         true
                     });
-                    if plain { expanded } else {
-                        exp.scalar(crate::parser::here_word(exp.session, &body).map_err(|e| e.message())?)?
+                    if plain {
+                        expanded
+                    } else {
+                        exp.scalar(
+                            crate::parser::here_word(exp.session, &body)
+                                .map_err(|e| e.message())?,
+                        )?
                     }
                 } else {
                     body

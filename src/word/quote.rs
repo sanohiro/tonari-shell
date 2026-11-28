@@ -1,5 +1,10 @@
 // Escape digits are ASCII in shell words, prompt strings, echo and printf.
-pub(crate) fn escape_digits(input: &[u8], radix: u32, limit: usize, mut value: u32) -> (u32, usize) {
+pub(crate) fn escape_digits(
+    input: &[u8],
+    radix: u32,
+    limit: usize,
+    mut value: u32,
+) -> (u32, usize) {
     let mut count = 0;
     for &b in input.iter().take(limit) {
         let Some(digit) = (b as char).to_digit(radix) else {
@@ -11,7 +16,12 @@ pub(crate) fn escape_digits(input: &[u8], radix: u32, limit: usize, mut value: u
     (value, count)
 }
 
-pub(crate) fn char_escape_digits(chars: &mut std::str::Chars<'_>, radix: u32, limit: usize, initial: u32) -> (u32, usize) {
+pub(crate) fn char_escape_digits(
+    chars: &mut std::str::Chars<'_>,
+    radix: u32,
+    limit: usize,
+    initial: u32,
+) -> (u32, usize) {
     let rest = chars.as_str();
     let (value, count) = escape_digits(rest.as_bytes(), radix, limit, initial);
     *chars = rest[count..].chars();
@@ -99,7 +109,8 @@ pub(crate) fn needs_ansi(data: &[u8], ascii: bool) -> bool {
             || has_zero(word ^ (ones * 0x7f))
     }) || tail
         .iter()
-        .any(|b| b.is_ascii_control() || ascii && !b.is_ascii()) || !ascii && contains_nonprinting(data)
+        .any(|b| b.is_ascii_control() || ascii && !b.is_ascii())
+        || !ascii && contains_nonprinting(data)
 }
 
 pub(crate) fn ansi_quote(data: &[u8], ascii_locale: bool) -> Vec<u8> {
@@ -111,12 +122,20 @@ pub(crate) fn ansi_quote(data: &[u8], ascii_locale: bool) -> Vec<u8> {
         if !ascii_locale && b >= 0xc2 {
             // Inspect a single scalar; validating the remaining string for
             // every character would turn a Unicode listing into quadratic work.
-            let width = if b < 0xe0 { 2 } else if b < 0xf0 { 3 } else { 4 };
+            let width = if b < 0xe0 {
+                2
+            } else if b < 0xf0 {
+                3
+            } else {
+                4
+            };
             if let Some(scalar) = bytes.get(..width).and_then(|v| std::str::from_utf8(v).ok())
                 && let Some(c) = scalar.chars().next()
             {
                 if escaped_scalar(c) {
-                    for &byte in scalar.as_bytes() { push_octal(&mut out, byte); }
+                    for &byte in scalar.as_bytes() {
+                        push_octal(&mut out, byte);
+                    }
                 } else {
                     out.extend_from_slice(scalar.as_bytes());
                 }
@@ -148,11 +167,11 @@ pub(crate) fn ansi_quote(data: &[u8], ascii_locale: bool) -> Vec<u8> {
 
 fn push_octal(out: &mut Vec<u8>, b: u8) {
     out.extend_from_slice(&[
-                    b'\\',
-                    b'0' + (b >> 6),
-                    b'0' + ((b >> 3) & 7),
-                    b'0' + (b & 7),
-                ]);
+        b'\\',
+        b'0' + (b >> 6),
+        b'0' + ((b >> 3) & 7),
+        b'0' + (b & 7),
+    ]);
 }
 
 #[cfg(test)]

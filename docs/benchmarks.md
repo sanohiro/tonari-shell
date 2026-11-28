@@ -1,5 +1,24 @@
 # Startup and execution / 起動と実行性能
 
+## Source-review workloads / ソース監査の実測
+
+<a id="review-2026-11-28"></a>
+
+Release executables were timed in interleaved order on a native Apple M1 and a native Ubuntu 24.04 x86-64 runner. Each cell shows previous Tonari (#54), the review build and the local GNU Bash in milliseconds. These measurements include process startup, execution and exit. The Linux control was Bash 5.2 and the M1 control was GNU Bash 5.3.20. The builtin driver takes 11 measured samples after warmup. [Measurement driver](../tests/review_builtins.py)
+
+| Workload | Apple M1 (ms) | Linux x86-64 (ms) |
+| --- | ---: | ---: |
+| 1,500-line function via redirected stdin | 511.563 / 6.792 / 14.880 | 917.246 / 3.586 / 8.140 |
+| 800 physical directory changes | 7.157 / 6.703 / 18.539 | 1.136 / 1.124 / 3.252 |
+| Read about 1 MiB line by line | 10.716 / 6.967 / 28.158 | 4.777 / 1.771 / 14.801 |
+| Count-limited mapfile, 1,200 lines | 5.862 / 4.526 / 12.007 | 2.297 / 0.971 / 3.226 |
+| 5,000 formatted integers | 10.068 / 10.083 / 23.621 | 2.070 / 2.101 / 9.133 |
+| Startup with BASH_ENV | 4.180 / 4.153 / 9.046 | 0.263 / 0.248 / 0.629 |
+
+PTY latency uses an already running shell and measures from input to the corresponding visible response. With 10,000 records or directory entries on M1, median / p95 for the review build were 0.107 / 0.111 ms for Ctrl-R and 3.651 / 3.724 ms for Tab. GNU Bash measured 0.281 / 0.299 and 7.360 / 7.768 ms. A 16 KiB bracketed paste measured 2.409 / 2.435 ms for Tonari and 17.080 / 17.480 ms for Bash across interleaved trials. [Input harness](../tools/bench_editor_input.py)
+
+4,000 行の関数では、M1 のファイル起動は 14.19 ms、リダイレクトは 14.27 ms、共有パイプ経由は 65.28 ms でした。Bash は同順に 30.47、30.70、81.30 ms です。パイプ入力では子が次に読む文字を残す必要があり、この条件では 2/3 目標に届いていません。シェル操作・ジョブ制御を測る別の23ケースでは、M1 の Tonari は Bash より全件速く、21件が 2/3 以内でした。残る2件はリダイレクト付き PATH 探索（51.962 → 39.118 ms）と EXIT トラップ付きサブシェル（38.263 → 29.082 ms）です。
+
 <a id="shell-scaling"></a>
 
 ## November 28 · Scaling of shell input, matching, arrays and history / 入力・照合・配列・履歴の計算量

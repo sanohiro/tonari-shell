@@ -1,5 +1,5 @@
 mod bracket;
-pub(crate) use bracket::{portable_symbol,posix_list_item};
+pub(crate) use bracket::{portable_symbol, posix_list_item};
 pub(crate) mod directory;
 pub(crate) mod extended;
 mod glob_locale;
@@ -13,7 +13,10 @@ pub(crate) fn session_locale(session: &crate::Session) -> Option<std::rc::Rc<Pat
         }
         let ctype = session.locale_category("LC_CTYPE");
         let collate = session.locale_category("LC_COLLATE");
-        glob_locale::resolve_names(ctype.as_deref().unwrap_or("C"), collate.as_deref().unwrap_or("C"))
+        glob_locale::resolve_names(
+            ctype.as_deref().unwrap_or("C"),
+            collate.as_deref().unwrap_or("C"),
+        )
     } else {
         INHERITED.with(|cell| {
             cell.get_or_init(|| glob_locale::resolve(&|key| std::env::var(key).ok()))
@@ -23,10 +26,17 @@ pub(crate) fn session_locale(session: &crate::Session) -> Option<std::rc::Rc<Pat
 }
 
 pub(crate) fn text_order(left: &str, right: &str, session: &crate::Session) -> std::cmp::Ordering {
-    let locale = (session.shopt.compat > 40).then(|| session_locale(session)).flatten();
-    if let Some(locale) = locale && !matches!(locale.collate.as_str(), "C" | "POSIX" | "C.UTF-8" | "C.utf8")
+    let locale = (session.shopt.compat > 40)
+        .then(|| session_locale(session))
+        .flatten();
+    if let Some(locale) = locale
+        && !matches!(
+            locale.collate.as_str(),
+            "C" | "POSIX" | "C.UTF-8" | "C.utf8"
+        )
         && let (Ok(left), Ok(right)) = (std::ffi::CString::new(left), std::ffi::CString::new(right))
-        && let Some(_locale) = locale.enter() {
+        && let Some(_locale) = locale.enter()
+    {
         return unsafe { libc::strcoll(left.as_ptr(), right.as_ptr()) }.cmp(&0);
     }
     left.cmp(right)
@@ -140,7 +150,9 @@ impl<T: AsRef<str>> Matcher<T> {
             return Self::Invalid;
         }
         if !pathname && trailing_escape(text) {
-            if !text[..text.len()-1].contains(['*','?','[','\\']) { return Self::Literal(pattern); }
+            if !text[..text.len() - 1].contains(['*', '?', '[', '\\']) {
+                return Self::Literal(pattern);
+            }
             let mut quoted = text.to_owned();
             quoted.push('\\');
             return CString::new(quoted).map_or(Self::Invalid, Self::Native);
@@ -218,7 +230,7 @@ impl<T: AsRef<str>> Matcher<T> {
                 match c_name {
                     Some(name) => test(name),
                     None if value.len() < 256 => {
-                        let mut local=[0u8;256];
+                        let mut local = [0u8; 256];
                         local[..value.len()].copy_from_slice(value);
                         CStr::from_bytes_with_nul(&local[..=value.len()]).is_ok_and(test)
                     }
@@ -267,7 +279,7 @@ impl<T: AsRef<str>> Matcher<T> {
         if let Self::Bracket(compiled, source) = self
             && compiled.utf8 != bracket::BracketPattern::utf8_locale()
         {
-            return extended::session_match(value,source.as_ref(),false,session);
+            return extended::session_match(value, source.as_ref(), false, session);
         }
         self.matches(value)
     }
@@ -874,7 +886,7 @@ fn paths(
             None
         };
         let mut matched = Vec::new();
-        let trailing = !rest.is_empty() && rest.bytes().all(|b|b==b'/');
+        let trailing = !rest.is_empty() && rest.bytes().all(|b| b == b'/');
         for prefix in paths {
             let dir = if prefix.is_empty() { "." } else { &prefix };
             visit_names(
@@ -921,7 +933,9 @@ fn paths(
                     path.push_str(&prefix);
                     path.push_str(name);
                     if trailing {
-                        if kind != libc::DT_DIR && !std::path::Path::new(&path).is_dir() { return; }
+                        if kind != libc::DT_DIR && !std::path::Path::new(&path).is_dir() {
+                            return;
+                        }
                         path.push_str(rest);
                     }
                     matched.push(path);
@@ -933,15 +947,32 @@ fn paths(
         }
         expanded = true;
         paths = matched;
-        if trailing { rest=""; }
+        if trailing {
+            rest = "";
+        }
         known_existing = true;
     }
     // A literal suffix must exist. A trailing slash asks the OS for a directory.
     if !known_existing {
         paths.retain(|path| fs::symlink_metadata(path).is_ok());
     }
+    filter_ignored(&mut paths, options, locale, cached);
+    order::append_expansion(paths, fields, collation, sorting);
+}
+
+fn filter_ignored(
+    paths: &mut Vec<String>,
+    options: &GlobOptions,
+    locale: CharacterLocale,
+    cached: Option<&std::rc::Rc<PatternLocale>>,
+) {
     if let Some(patterns) = &options.ignore {
-        paths.retain(|path| !matches!(path.trim_end_matches('/').rsplit('/').next(), Some("." | "..")));
+        paths.retain(|path| {
+            !matches!(
+                path.trim_end_matches('/').rsplit('/').next(),
+                Some("." | "..")
+            )
+        });
         for pattern in patterns.iter() {
             // GLOBIGNORE tests the entire displayed pathname. An extended
             // alternative may contain a literal directory separator.
@@ -970,7 +1001,6 @@ fn paths(
             paths.retain(|path| !matcher.matches_in_locale::<true>(path, false));
         }
     }
-    order::append_expansion(paths, fields, collation, sorting);
 }
 
 // The recursive component consumes zero or more directories. A symlink to a

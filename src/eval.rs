@@ -150,7 +150,10 @@ pub(crate) fn command(session: &mut Session, command: Command, status: u8, tail:
 }
 
 pub(crate) fn compound(
-    session: &mut Session, command: std::rc::Rc<Command>, status: u8, stage: bool,
+    session: &mut Session,
+    command: std::rc::Rc<Command>,
+    status: u8,
+    stage: bool,
 ) -> Flow {
     if stage && let Command::Subshell(body) = command.as_ref() {
         return borrowed_program(session, body, status, true);
@@ -489,7 +492,12 @@ fn fixed_case(pattern: &CasePattern, value: &str, session: &Session) -> Option<b
             matcher.insensitive(value, false, session)
         }
         CasePattern::Fixed(matcher) => matcher.matches_session(value, session),
-        CasePattern::Extended(source) => crate::pattern::extended::session_match(value,source,session.shopt.glob.extglob,session),
+        CasePattern::Extended(source) => crate::pattern::extended::session_match(
+            value,
+            source,
+            session.shopt.glob.extglob,
+            session,
+        ),
         CasePattern::Dynamic(_) => return None,
     })
 }
@@ -552,7 +560,12 @@ fn run_case(
                 matched = match pattern {
                     CasePattern::Dynamic(word) => {
                         match expand_case(session, word.clone(), last, true) {
-                            Ok(glob) => crate::pattern::extended::session_match(&value,&glob,session.shopt.glob.extglob,session),
+                            Ok(glob) => crate::pattern::extended::session_match(
+                                &value,
+                                &glob,
+                                session.shopt.glob.extglob,
+                                session,
+                            ),
                             Err(f) => return f,
                         }
                     }
@@ -732,12 +745,19 @@ impl LoopProgram {
     fn run(&mut self, session: &mut Session, statements: &[Statement], status: u8) -> Flow {
         if self.visits == 2 {
             // Shell lookup stays live. Only immutable argument strings are reused.
-            self.commands = statements.iter()
+            self.commands = statements
+                .iter()
                 .map(|stmt| execute::PreparedCommand::literal_builtin(stmt, session))
                 .collect();
         }
         self.visits = self.visits.saturating_add(1);
-        run_statements(session, statements.iter().map(Cow::Borrowed), status, false, &mut self.commands)
+        run_statements(
+            session,
+            statements.iter().map(Cow::Borrowed),
+            status,
+            false,
+            &mut self.commands,
+        )
     }
 }
 

@@ -620,11 +620,17 @@ impl Session {
             {
                 // Only these attributes survive shadowing. Keep the outer
                 // value in its binding until the declaration is accepted.
-                Variable { readonly: outer.readonly, exported: outer.exported, ..Variable::default() }
+                Variable {
+                    readonly: outer.readonly,
+                    exported: outer.exported,
+                    ..Variable::default()
+                }
             } else {
-                self.declared_variable(name, flags.global).unwrap_or_default()
+                self.declared_variable(name, flags.global)
+                    .unwrap_or_default()
             };
-            let outer_local = var.readonly && fresh_local
+            let outer_local = var.readonly
+                && fresh_local
                 && self.locals[..scope_index.unwrap()]
                     .iter()
                     .any(|scope| scope.variables.contains_key(name));
@@ -686,9 +692,13 @@ impl Session {
                         || dest == name)
                 {
                     if dest == name {
-                        diagnostic!("{command}: {name}: nameref variable self references not allowed");
+                        diagnostic!(
+                            "{command}: {name}: nameref variable self references not allowed"
+                        );
                     } else {
-                        diagnostic!("{command}: `{dest}': invalid variable name for name reference");
+                        diagnostic!(
+                            "{command}: `{dest}': invalid variable name for name reference"
+                        );
                     }
                     status = 1;
                     continue;
@@ -807,11 +817,16 @@ impl Session {
             {
                 self.set_eof_variable(var.value.as_deref());
             }
-            if name == "BASH_ARGV0" && value.is_some() &&
-                (flags.global || !self.locals.iter().any(|scope| scope.variables.contains_key(name))) {
-                if let Some(text) = var.value.as_deref() {
-                    self.arg0 = text.to_owned();
-                }
+            if name == "BASH_ARGV0"
+                && value.is_some()
+                && (flags.global
+                    || !self
+                        .locals
+                        .iter()
+                        .any(|scope| scope.variables.contains_key(name)))
+                && let Some(text) = var.value.as_deref()
+            {
+                self.arg0 = text.to_owned();
             }
             if name == "GLOBIGNORE" && value.is_some() {
                 self.shopt.glob.set_ignore(var.value.as_deref());

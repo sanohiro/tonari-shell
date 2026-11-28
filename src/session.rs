@@ -407,8 +407,12 @@ pub(crate) enum MemoryInput<'a> {
 impl MemoryInput<'_> {
     pub(crate) fn run(self, session: &mut Session, name: &str, last: u8) -> crate::Flow {
         match self {
-            Self::Read(opts, line, status) => read::assign_fields(session, &opts, line, &[], status),
-            Self::Mapfile(opts, bytes) => mapfile::run_parsed(session, name, opts, last, Some((0, bytes))),
+            Self::Read(opts, line, status) => {
+                read::assign_fields(session, &opts, line, &[], status)
+            }
+            Self::Mapfile(opts, bytes) => {
+                mapfile::run_parsed(session, name, opts, last, Some((0, bytes)))
+            }
         }
     }
 }
@@ -601,8 +605,17 @@ impl Session {
             })
     }
 
-    pub(crate) fn memory_input<'a>(&self, read: bool, args: &'a [String], bytes: &'a [u8]) -> Option<MemoryInput<'a>> {
-        if read { read::prepare_memory(self, args, bytes) } else { mapfile::prepare_memory(self, args, bytes) }
+    pub(crate) fn memory_input<'a>(
+        &self,
+        read: bool,
+        args: &'a [String],
+        bytes: &'a [u8],
+    ) -> Option<MemoryInput<'a>> {
+        if read {
+            read::prepare_memory(self, args, bytes)
+        } else {
+            mapfile::prepare_memory(self, args, bytes)
+        }
     }
 
     pub fn read(&mut self, args: &[String], here: Option<(i32, &[u8])>, status: u8) -> crate::Flow {
@@ -745,7 +758,8 @@ impl Session {
     }
 
     pub(crate) fn ifs(&self) -> Cow<'_, str> {
-        self.scalar_setting("IFS").unwrap_or(Cow::Borrowed(crate::word::DEFAULT_IFS))
+        self.scalar_setting("IFS")
+            .unwrap_or(Cow::Borrowed(crate::word::DEFAULT_IFS))
     }
 
     // Ordinary shell-authored scalars can be inspected without copying their value.
@@ -1133,7 +1147,12 @@ impl Session {
         if matches!(name, "HISTSIZE" | "HISTFILESIZE") {
             self.apply_history_limit(name, &value);
         }
-        if name == "BASH_ARGV0" && !self.locals.iter().any(|scope| scope.variables.contains_key(name)) {
+        if name == "BASH_ARGV0"
+            && !self
+                .locals
+                .iter()
+                .any(|scope| scope.variables.contains_key(name))
+        {
             self.arg0 = value.to_string();
         }
         if live {
@@ -1550,9 +1569,19 @@ impl Session {
                 self.shopt.glob.set_ignore(value);
             }
             if matches!(name.as_str(), "HISTSIZE" | "HISTFILESIZE") {
-                let value = original.as_ref().and_then(|v| v.value.as_deref()).map(Cow::Borrowed)
-                    .or_else(|| original.is_none().then(|| std::env::var(&name).ok().map(Cow::Owned)).flatten());
-                if let Some(value) = value { self.apply_history_limit(&name, &value); }
+                let value = original
+                    .as_ref()
+                    .and_then(|v| v.value.as_deref())
+                    .map(Cow::Borrowed)
+                    .or_else(|| {
+                        original
+                            .is_none()
+                            .then(|| std::env::var(&name).ok().map(Cow::Owned))
+                            .flatten()
+                    });
+                if let Some(value) = value {
+                    self.apply_history_limit(&name, &value);
+                }
             }
             if name == "PATH" {
                 self.hashes.clear();
@@ -1612,8 +1641,12 @@ impl Session {
         if let Some(var) = self.variables.get("PATH") {
             return var.value.as_deref().unwrap_or("").as_ref();
         }
-        self.inherited_path.get_or_init(|| std::env::var_os("PATH")
-            .unwrap_or_else(|| self.get("PATH").unwrap_or_default().into())).as_os_str()
+        self.inherited_path
+            .get_or_init(|| {
+                std::env::var_os("PATH")
+                    .unwrap_or_else(|| self.get("PATH").unwrap_or_default().into())
+            })
+            .as_os_str()
     }
 
     pub fn line(&self) -> usize {

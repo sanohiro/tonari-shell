@@ -78,7 +78,11 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
     let mut out = crate::builtins::StdoutFd(Some(cmd));
     let command_prefix = !session.posix || print_all;
     let mut buffer = String::new();
-    let record = |out: &mut crate::builtins::StdoutFd, buffer: &mut String, name: &str, value: &str| -> std::io::Result<()> {
+    let record = |out: &mut crate::builtins::StdoutFd,
+                  buffer: &mut String,
+                  name: &str,
+                  value: &str|
+     -> std::io::Result<()> {
         buffer.push_str(prefix(name, command_prefix));
         buffer.push_str(name);
         buffer.push('=');
@@ -90,13 +94,15 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
         }
         Ok(())
     };
-    if !remove && (print_all || args.is_empty()) {
-        if let Some(map) = &session.aliases.0 {
-            for (name, value) in map.iter() {
-                if record(&mut out, &mut buffer, name, value).is_err() { return 1; }
+    if !remove
+        && (print_all || args.is_empty())
+        && let Some(map) = &session.aliases.0
+    {
+        for (name, value) in map.iter() {
+            if record(&mut out, &mut buffer, name, value).is_err() {
+                return 1;
             }
         }
-
     }
     if print_all && session.shopt.compat > 52 {
         args = &[];
@@ -123,13 +129,25 @@ pub fn builtin(cmd: &str, mut args: &[String], session: &mut Session) -> u8 {
             continue;
         }
         if let Some(value) = session.aliases.get(arg) {
-            if record(&mut out, &mut buffer, arg, value).is_err() { return 1; }
+            if record(&mut out, &mut buffer, arg, value).is_err() {
+                return 1;
+            }
         } else {
-            if out.write_all(buffer.as_bytes()).is_err() { return 1; }
+            if out.write_all(buffer.as_bytes()).is_err() {
+                return 1;
+            }
             buffer.clear();
             diagnostic!("{cmd}: {arg}: not found");
             status = 1;
         }
     }
-    if out.write_all(buffer.as_bytes()).and_then(|_| out.flush()).is_err() { 1 } else { status }
+    if out
+        .write_all(buffer.as_bytes())
+        .and_then(|_| out.flush())
+        .is_err()
+    {
+        1
+    } else {
+        status
+    }
 }

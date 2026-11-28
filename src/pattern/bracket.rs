@@ -2,16 +2,18 @@
 // on backslashes in these lists and on how to resume after an unclosed '['.
 use std::ffi::{CStr, CString};
 
-pub(crate) fn posix_list_item(input: &[u8]) -> Option<(usize,u8)> {
-    let [b'[', mark @ (b':' | b'=' | b'.'), rest @ ..] = input else { return None; };
-    let end=rest.windows(2).position(|p|p==[*mark,b']'])?;
-    Some((end+4,*mark))
+pub(crate) fn posix_list_item(input: &[u8]) -> Option<(usize, u8)> {
+    let [b'[', mark @ (b':' | b'=' | b'.'), rest @ ..] = input else {
+        return None;
+    };
+    let end = rest.windows(2).position(|p| p == [*mark, b']'])?;
+    Some((end + 4, *mark))
 }
 
 fn posix_item_len(input: &[u8]) -> Option<usize> {
-    let (end,mark)=posix_list_item(input)?;
+    let (end, mark) = posix_list_item(input)?;
     // Bash treats an escaped equivalence operand as ordinary list members.
-    (!(mark==b'=' && input[2..end-2].contains(&b'\\'))).then_some(end)
+    (!(mark == b'=' && input[2..end - 2].contains(&b'\\'))).then_some(end)
 }
 
 // Input starts immediately after '['. The initial ']' is a literal member.
@@ -392,7 +394,10 @@ impl BracketPattern {
             tokens.push(match c {
                 b"*" => Token::Star,
                 b"?" => Token::Any,
-                b"[" => match last_close.filter(|&distance| distance <= rest.len()).and_then(|_|class_end(rest)) {
+                b"[" => match last_close
+                    .filter(|&distance| distance <= rest.len())
+                    .and_then(|_| class_end(rest))
+                {
                     Some(end) => {
                         source = &rest[end + 1..];
                         Token::list(&rest[..end], utf8)

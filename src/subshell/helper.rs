@@ -229,7 +229,7 @@ pub(super) fn capture(
                 Word::Declaration(parts) => Word::Expanded(parts.clone()),
                 _ => word.clone(),
             };
-            rhs.remove_assignment_prefix(key.len() + 1);
+            rhs.remove_assignment_prefix(key.len() + 1)?;
             let value = Expansion::with_assignments(session, last, &captured, &mut locals, false)
                 .scalar(rhs)
                 .ok()?;

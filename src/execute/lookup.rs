@@ -168,7 +168,11 @@ pub(crate) fn describe_words(
         }
     }
     let search = std::cell::LazyCell::new(|| {
-        if default_path { default_system_path() } else { session.search_path(&[]) }
+        if default_path {
+            default_system_path()
+        } else {
+            session.search_path(&[])
+        }
     });
     let ignored = std::cell::LazyCell::new(|| IgnoredExecutables::new(session));
     let mut out = Vec::new();

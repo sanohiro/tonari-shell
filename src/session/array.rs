@@ -1007,9 +1007,15 @@ impl Session {
                                 Some(n) => n,
                                 None => {
                                     let expression = text.to_owned();
-                                    self.initializer_number(name, var, &mut map, visible, &expression)?
+                                    self.initializer_number(
+                                        name,
+                                        var,
+                                        &mut map,
+                                        visible,
+                                        &expression,
+                                    )?
                                 }
-                            }
+                            },
                         }
                     } else {
                         0

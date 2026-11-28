@@ -163,7 +163,9 @@ pub(super) fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Co
     if value == "'" {
         return Cow::Borrowed("\\'");
     }
-    if value.starts_with('#') || memchr::memchr_iter(b'~', value.as_bytes()).any(|i| crate::word::quote::tilde_at(value.as_bytes(), i))
+    if value.starts_with('#')
+        || memchr::memchr_iter(b'~', value.as_bytes())
+            .any(|i| crate::word::quote::tilde_at(value.as_bytes(), i))
         || value.bytes().any(|c| {
             c.is_ascii_whitespace()
                 || matches!(
