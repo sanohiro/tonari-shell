@@ -69,25 +69,29 @@ impl Function {
 }
 
 impl Session {
-    pub fn function_nesting_full(&self) -> bool {
+    pub(crate) fn function_nesting_bound(&self) -> u32 {
         static INHERITED: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
-        let bound = match self.variables.get("FUNCNEST") {
+        match self.variables.get("FUNCNEST") {
             Some(var) if var.nameref || var.elements.is_some() => self
                 .get("FUNCNEST")
-                .and_then(|v| v.trim().parse().ok())
+                .and_then(|v| crate::builtins::integer_in_range(&v))
                 .unwrap_or(0),
             Some(var) => var
                 .value
                 .as_deref()
-                .and_then(|v| v.trim().parse().ok())
+                .and_then(crate::builtins::integer_in_range)
                 .unwrap_or(0),
             None => *INHERITED.get_or_init(|| {
                 std::env::var("FUNCNEST")
                     .ok()
-                    .and_then(|v| v.trim().parse().ok())
+                    .and_then(|v| crate::builtins::integer_in_range(&v))
                     .unwrap_or(0)
             }),
-        };
+        }
+    }
+
+    pub fn function_nesting_full(&self) -> bool {
+        let bound = self.function_nesting_bound();
         bound > 0 && self.function_depth - self.substitution_scopes >= bound
             || crate::stack_budget_exceeded()
     }

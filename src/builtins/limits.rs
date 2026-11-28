@@ -237,16 +237,31 @@ pub fn run(args: &[String], out: &mut dyn Write, posix: bool) -> u8 {
         let label = requests.len() > 1;
         for (limit, arg) in requests {
             let limit = limit.in_mode(posix);
-            let result = limit.current().and_then(|values| match arg {
-                Some(arg) => limit.set(values, arg, soft || !hard, hard || !soft),
-                None => limit.report(out, &values, hard && !soft, label),
-            });
-            if let Err(error) = result {
-                diagnostic!(
-                    "ulimit: {}: {}",
-                    limit.name,
-                    crate::builtins::os_message(&error)
-                );
+            let values = match limit.current() {
+                Ok(values) => values,
+                Err(e) => {
+                    diagnostic!(
+                        "ulimit: {}: {}",
+                        limit.name,
+                        crate::builtins::os_message(&e)
+                    );
+                    return 1;
+                }
+            };
+            if let Some(arg) = arg {
+                if let Err(e) = limit.set(values, arg, soft || !hard, hard || !soft) {
+                    if e.raw_os_error().is_none() {
+                        diagnostic!("ulimit: {e}");
+                    } else {
+                        diagnostic!(
+                            "ulimit: {}: cannot modify limit: {}",
+                            limit.name,
+                            crate::builtins::os_message(&e)
+                        );
+                    }
+                    return 1;
+                }
+            } else if limit.report(out, &values, hard && !soft, label).is_err() {
                 return 1;
             }
         }

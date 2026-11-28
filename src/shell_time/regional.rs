@@ -175,6 +175,12 @@ fn expand_into(
             expand_into(out, locale, nested, tm, depth + 1, single);
             continue;
         }
+        if modifier == Some('O')
+            && let Some(c @ ('k' | 'l')) = spec
+        {
+            short_number(out, tm, b'_', c);
+            continue;
+        }
         out.push('%');
         // The ordinary numeric conversion is the fallback if this locale has
         // no era or alternative digit for the requested value.
@@ -220,7 +226,7 @@ fn short_number(out: &mut String, tm: &libc::tm, flag: u8, spec: char) -> bool {
 // Text widths in strftime count bytes, including multibyte month names.
 fn decorated(out: &mut String, value: &str, spec: char, flags: &str, width: &str) {
     let upper = flags.contains('^') || flags.contains('#') && "aAbBh".contains(spec);
-    let lower = flags.contains('#') && "pZ".contains(spec);
+    let lower = flags.contains('#') && spec == 'p';
     let changed;
     let value = if lower {
         changed = value.to_lowercase();
@@ -274,6 +280,12 @@ fn decorated(out: &mut String, value: &str, spec: char, flags: &str, width: &str
 }
 
 fn numeric_value(tm: &libc::tm, spec: char) -> Option<usize> {
+    if spec == 'k' {
+        return Some(tm.tm_hour as usize);
+    }
+    if spec == 'l' {
+        return Some(((tm.tm_hour + 11) % 12 + 1) as usize);
+    }
     let fmt = [b'%', spec as u8, 0];
     let mut buf = [0u8; 8];
     let n = unsafe { libc::strftime(buf.as_mut_ptr().cast(), buf.len(), fmt.as_ptr().cast(), tm) };

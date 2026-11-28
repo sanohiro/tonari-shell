@@ -38,6 +38,8 @@ use crate::session::Session;
 pub enum Flow {
     Continue(u8),
     Discard(u8),
+    // Abort nested shell input through to the outer reader.
+    Unwind(u8),
     Exit(u8),
     Return(u8),
     Break(u32, u8),
@@ -47,9 +49,11 @@ pub enum Flow {
 impl Flow {
     pub(crate) fn child_status(self) -> u8 {
         match self {
-            Self::Continue(code) | Self::Exit(code) | Self::Return(code) | Self::Discard(code) => {
-                code
-            }
+            Self::Continue(code)
+            | Self::Exit(code)
+            | Self::Return(code)
+            | Self::Discard(code)
+            | Self::Unwind(code) => code,
             Self::Break(_, code) => code,
             Self::LoopContinue(_) => 0,
         }
@@ -188,7 +192,10 @@ pub(crate) fn reset_child_signals() {
 }
 
 fn stage_parameter(name: &str, session: &Session) -> bool {
-    let name = name.trim_start_matches(['#', '!']);
+    if name.starts_with('!') {
+        return true;
+    }
+    let name = name.trim_start_matches('#');
     matches!(name, "BASHPID" | "RANDOM" | "SRANDOM")
         || name.contains('[')
         || session.is_nameref(name)
@@ -253,15 +260,53 @@ fn redirection_observable(r: &Redirect<Word>, session: &Session) -> bool {
     }
     stage_expansion(&r.word, session)
         || matches!(r.target, Target::HereDoc { expand: true })
-            && r.word
-                .as_literal()
-                .is_some_and(|text| !plain_here_parts(text, |_, name| name.is_none_or(|name| !stage_parameter(name, session))))
+            && r.word.as_literal().is_some_and(|text| {
+                !plain_here_parts(text, |_, name| {
+                    name.is_none_or(|name| !stage_parameter(name, session))
+                })
+            })
+}
+
+// Install each redirection before expanding a later word that may consult the
+// filesystem, read an earlier descriptor or fail after an earlier open.
+fn isolated_null_redirects(redirects: &[Redirect<Word>]) -> bool {
+    redirects.iter().any(|r| r.variable.is_some() || r.fd == 0)
+}
+
+fn deferred_redirects(redirects: &[Redirect<Word>], session: &Session) -> bool {
+    if redirects.iter().any(|r| r.variable.is_some()) {
+        return true;
+    }
+    let later_expands = redirects
+        .iter()
+        .skip(1)
+        .any(|r| r.word.as_literal().is_none() || redirection_observable(r, session));
+    // A list of ordinary paths can use the existing descriptor actions. Opens
+    // cannot change a stored scalar, and quotes keep its value in one field.
+    later_expands && !redirects.iter().all(|r| {
+        if !matches!(r.target, Target::Read | Target::Write | Target::ReadWrite | Target::Clobber | Target::Append) {
+            return false;
+        }
+        match &r.word {
+            Word::Literal(_) => true,
+            Word::Expanded(parts) => matches!(parts.as_slice(),
+                [crate::word::Part::Parameter { name, quoted: true }] if session.stored_scalar(name).is_some()),
+            _ => false,
+        }
+    })
 }
 
 // A parenthesized pipeline stage is already the subshell Bash exposes.
-fn enter_stage(session: &mut Session, compound: Option<&crate::parser::Command>, background: bool) {
+fn enter_stage(
+    session: &mut Session,
+    compound: Option<&crate::parser::Command>,
+    background: bool,
+    piped: bool,
+) {
     let explicit = matches!(compound, Some(crate::parser::Command::Subshell(_)));
     session.enter_subshell();
+    session.parenthesized_subshell = explicit;
+    session.pipeline_subshell = !explicit && piped;
     session.jobs.forked(!explicit && !background);
     if explicit {
         session.command_string = false;
@@ -283,6 +328,7 @@ fn start_raw(
         separate_keyword_arguments(&mut raw);
     }
     let observable = needs_ordered_redirects(&raw, session)
+        || deferred_redirects(&raw.redirects, session)
         || raw
             .redirects
             .iter()
@@ -322,7 +368,12 @@ fn start_raw(
     let pid = session.fork_shell()?;
     if pid == 0 {
         launch.pipeline_child(&mut session.traps);
-        enter_stage(session, raw.compound.as_deref(), launch.background);
+        enter_stage(
+            session,
+            raw.compound.as_deref(),
+            launch.background,
+            input.is_some() || output.is_some(),
+        );
         coprocess::after_fork(session);
         if matches!(
             raw.compound.as_deref(),
@@ -396,6 +447,18 @@ fn start(
         cmd.prepare_missing_hook(session)
             .then_some(Builtin::Function)
     });
+    // posix_spawn has no portable attribute to install SIG_IGN in the child.
+    if builtin.is_none() && session.traps.child_ignores_chld() {
+        return fork_stage(
+            cmd,
+            None,
+            (input.as_ref(), output.as_ref(), next_reader),
+            None,
+            last_status,
+            session,
+            launch,
+        );
+    }
     // Numeric exit and constant status builtins do not inspect either pipe end.
     // Keep a real child for job control and observable child-signal traps.
     if !launch.background
@@ -458,8 +521,8 @@ fn start(
         && r.fd == 0
         && matches!(r.target, Target::HereDoc { .. } | Target::HereString)
         && r.word.len() <= here_input::PIPE_LIMIT
-        && let Ok(reader) =
-            here_input::open(r.word.as_bytes(), here_input::PIPE_LIMIT, session).and_then(private_fd)
+        && let Ok(reader) = here_input::open(r.word.as_bytes(), here_input::PIPE_LIMIT, session)
+            .and_then(private_fd)
         && let Ok(pid) =
             External::new(cmd, session)?.spawn_redirected(&[], None, Some(&reader), output.as_ref())
     {
@@ -546,8 +609,8 @@ fn start(
                     .unwrap_or_else(|| std::path::Path::new(name));
                 let code = external::report_exec_error(
                     session,
-                    name.as_bytes(),
                     path,
+                    false,
                     e.raw_os_error().unwrap_or(libc::EIO),
                 );
                 return Ok(Stage::Status(code));
@@ -602,7 +665,12 @@ fn fork_stage(
         // runs in a child copy of the single-threaded interpreter and may reenter it.
         // Restore signals caught by the interactive shell before blocking on a file.
         launch.pipeline_child(&mut session.traps);
-        enter_stage(session, cmd.compound.as_deref(), launch.background);
+        enter_stage(
+            session,
+            cmd.compound.as_deref(),
+            launch.background,
+            input.is_some() || output.is_some(),
+        );
         if cmd.missing_hook && !launch.background {
             // The hook has a private execution environment. A normal command
             // search itself does not add a shell-language subshell level.
@@ -613,6 +681,7 @@ fn fork_stage(
         let code = if !apply(&setup, here_pipe_limit(builtin, cmd), session) {
             1
         } else if let Some(external) = external.as_ref() {
+            session.traps.export_child_dispositions();
             external.exec(session, false)
         } else {
             coprocess::after_fork(session);
@@ -691,6 +760,11 @@ pub(super) fn capture_external(
     {
         cmd.resolved = Some(entry.path);
     }
+    // The sole command can replace its substitution shell. A pipeline reader
+    // or a command with its own redirections keeps the ordinary child level.
+    if input.is_none() && cmd.redirects.is_empty() && !session.pipeline_subshell {
+        cmd.environment = external::ChildEnvironment::ReplaceShell;
+    }
     let (reader, writer) = pipe().map_err(|_| "cannot open command substitution pipe")?;
     // An external-only capture uses its command process as the substitution
     // scope. The command-not-found function must observe that same level.
@@ -713,13 +787,30 @@ pub(super) fn capture_external(
 }
 
 pub(super) fn wait(pid: libc::pid_t) -> io::Result<u8> {
+    wait_child(pid, |_| {})
+}
+
+fn wait_child(pid: libc::pid_t, signaled: impl FnOnce(i32)) -> io::Result<u8> {
     loop {
-        if let Some(code) =
-            crate::traps::child_event(pid, 0)?.and_then(crate::traps::ChildEvent::exit_status)
+        if let Some(event) = crate::traps::child_event(pid, 0)?
+            && let Some(code) = event.exit_status()
         {
+            if let crate::traps::ChildEvent::Signaled(signal) = event {
+                signaled(signal);
+            }
             return Ok(code);
         }
     }
+}
+
+fn wait_foreground(pid: libc::pid_t, session: &Session) -> io::Result<u8> {
+    wait_child(pid, |signal| {
+        let command = session
+            .current_command
+            .as_ref()
+            .map_or("", |c| job_command(c.text()));
+        session.jobs.report_signal(signal, command);
+    })
 }
 
 pub(crate) fn parameter(session: &Session, last_status: u8, name: &str) -> Option<String> {
@@ -751,8 +842,7 @@ pub(crate) fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(
     line.push('\n');
     let fd = session
         .scalar_setting("BASH_XTRACEFD")
-        .and_then(|v| v.trim().parse().ok())
-        .filter(|&fd| !fd::is_private(fd))
+        .and_then(|v| trace_descriptor(&v))
         .unwrap_or(2);
     let mut data = line.as_bytes();
     while !data.is_empty() {
@@ -763,6 +853,14 @@ pub(crate) fn trace_line(session: &mut Session, status: u8, append: impl FnOnce(
             break;
         }
     }
+}
+
+pub(crate) fn trace_descriptor(value: &str) -> Option<RawFd> {
+    let fd = value
+        .trim_start_matches(|c: char| c.is_ascii_whitespace() || c == '\x0b')
+        .parse::<RawFd>()
+        .ok()?;
+    (fd >= 0 && !fd::is_private(fd) && unsafe { libc::fcntl(fd, libc::F_GETFD) } >= 0).then_some(fd)
 }
 
 pub(crate) fn trace_word(word: &str) -> std::borrow::Cow<'_, str> {
@@ -919,26 +1017,34 @@ fn run_ordered(
             })
             .is_none()
         };
-    named_fd::with_redirects(redirects, session, status, child_redirects, |session| {
-        let cmd = match prepare_expanded(
-            raw,
-            words,
-            session,
-            status,
-            CommandContext::Shell,
-            &captured,
-        ) {
-            Ok(cmd) => cmd,
-            Err(e) => {
-                e.report("");
-                return Ok((e.flow(session), false));
-            }
-        };
-        let exec = matches!(builtin(&cmd, status, session), Some(Builtin::Exec));
-        let flow = run_prepared(cmd, name, status, replace, session)?;
-        let commit = exec && matches!(flow, Flow::Continue(0));
-        Ok((flow, commit))
-    })
+    named_fd::with_redirects(
+        redirects,
+        session,
+        status,
+        child_redirects,
+        &captured,
+        |_, flow, _| flow,
+        |session| {
+            let cmd = match prepare_expanded(
+                raw,
+                words,
+                session,
+                status,
+                CommandContext::Shell,
+                &captured,
+            ) {
+                Ok(cmd) => cmd,
+                Err(e) => {
+                    e.report("");
+                    return Ok((e.flow(session), false));
+                }
+            };
+            let exec = matches!(builtin(&cmd, status, session), Some(Builtin::Exec));
+            let flow = run_prepared(cmd, name, status, replace, session)?;
+            let commit = exec && matches!(flow, Flow::Continue(0));
+            Ok((flow, commit))
+        },
+    )
 }
 
 fn run_prepared(
@@ -954,7 +1060,7 @@ fn run_prepared(
         return Ok(flow);
     }
     let simple = cmd.compound.is_none();
-    if !cmd.named_redirects.is_empty() {
+    if !cmd.deferred_redirects.is_empty() {
         let last = simple.then(|| cmd.words.last().cloned().unwrap_or_default());
         let launch = session.jobs.launch(false, true);
         let result = named_fd::run(cmd, session, last_status, replace, launch);
@@ -989,12 +1095,8 @@ fn run_external(
     // A foreground builtin runs in this shell. Snapshot terminal modes
     // only when preparing to hand the terminal to a child process.
     let mut launch = session.jobs.launch(false, true);
-    if !cmd.cacheable() {
-        if cmd.assignments.iter().any(|(k, _)| k == "PATH") {
-            session.hashes.clear();
-        }
-    } else if !replace {
-        match hash::resolve(session, &cmd.words[0]) {
+    if !replace {
+        match hash::resolve_command(session, cmd) {
             Ok(path) => cmd.resolved = path,
             Err(hash::Absent)
                 if session
@@ -1011,8 +1113,8 @@ fn run_external(
                 let name = &cmd.words[0];
                 let code = external::report_exec_error(
                     session,
-                    name.as_bytes(),
                     std::path::Path::new(name),
+                    !lookup::path_unset(lookup::path(cmd, session), cmd, session),
                     libc::ENOENT,
                 );
                 return Ok(Flow::Continue(code));
@@ -1022,8 +1124,18 @@ fn run_external(
             Err(hash::Absent) => {}
         }
     }
-    if replace && launch.group.is_none() && !cmd.prepare_missing_hook(session) {
-        let executable = External::new(cmd, session)?;
+    if replace
+        && launch.group.is_none()
+        && !session.traps.child_ignores_chld()
+        && !cmd.prepare_missing_hook(session)
+    {
+        let environment =
+            if cmd.redirects.is_empty() && session.jobs.is_empty() && !session.pipeline_subshell {
+                external::ChildEnvironment::ReplaceShell
+            } else {
+                external::ChildEnvironment::Inherit
+            };
+        let executable = External::for_words(cmd, session, &cmd.words, None, environment)?;
         return Ok(Flow::Continue(
             if apply(&actions(cmd), here_input::PIPE_LIMIT, session) {
                 executable.exec(
@@ -1050,7 +1162,7 @@ fn run_external(
                 )?
                 .0
         }
-        Stage::Child(pid) | Stage::GroupedChild(pid) => wait(pid)?,
+        Stage::Child(pid) | Stage::GroupedChild(pid) => wait_foreground(pid, session)?,
         Stage::Status(code) => code,
     };
     Ok(Flow::Continue(status))
@@ -1228,7 +1340,7 @@ fn assign_existing_word(session: &mut Session, key: &str, word: &Word) -> bool {
     }
     word.stored_parameter(session)
         .map(str::to_owned)
-        .is_some_and(|value| session.assign_existing_literal(key, &value))
+        .is_some_and(|value| session.assign_existing_text(key, value.into()))
 }
 
 pub(crate) fn run_single(
@@ -1319,7 +1431,10 @@ pub fn run_pipeline(
                 let flow = lastpipe(raw, reader, last_status, session)?;
                 let code = match flow {
                     Flow::Continue(code) => return Ok(Stage::Status(code)),
-                    Flow::Exit(code) | Flow::Discard(code) | Flow::Return(code) => code,
+                    Flow::Exit(code)
+                    | Flow::Discard(code)
+                    | Flow::Unwind(code)
+                    | Flow::Return(code) => code,
                     Flow::Break(..) | Flow::LoopContinue(_) => 0,
                 };
                 last_flow = Some(flow);
@@ -1380,8 +1495,14 @@ pub fn run_pipeline(
     let mut status = 0;
     let mut wait_error = None;
     session.pipe_status.clear();
-    for stage in stages {
+    let last_stage = stages.len().checked_sub(1);
+    for (index, stage) in stages.into_iter().enumerate() {
         let result = match stage {
+            Stage::Child(pid) | Stage::GroupedChild(pid)
+                if Some(index) == last_stage && last_flow.is_none() =>
+            {
+                wait_foreground(pid, session)
+            }
             Stage::Child(pid) | Stage::GroupedChild(pid) => wait(pid),
             Stage::Status(code) => Ok(code),
         };

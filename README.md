@@ -40,7 +40,7 @@ sudo ./tools/stage.sh target/release/tonari /usr/local
 This installs one executable at `/usr/local/libexec/tonari/bash` and a `/usr/local/bin/tonari` symlink to it. Add the full `/usr/local/libexec/tonari/bash` path on its own line in `/etc/shells`, then select it as your login shell.
 
 ```sh
-chsh -s /usr/local/libexec/tonari/bash
+/usr/local/libexec/tonari/bash --noprofile --norc -c : && chsh -s /usr/local/libexec/tonari/bash
 ```
 
 Log out and back in. Tools that check the basename of `$SHELL` now see `bash`, and scripts can use `BASH_VERSION` to select their Bash integration. You can load `nvm.sh` in your usual Bash rc and run `nvm use`. With GitHub CLI’s Bash completion loaded, Tab after `gh iss` completes `gh issue`. Scripts with a `#!/bin/bash` shebang still run the system Bash. Starting `tonari` inside another shell inherits that session’s `$SHELL`. To switch your login shell back, pass its original path to `chsh -s` and log in again. [Tested tool integrations](docs/benchmarks.md#tool-hooks)

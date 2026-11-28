@@ -7,7 +7,7 @@ bind [-m keymap] [options] [binding ...]|Inspect or change editor key bindings.
 break [n]|Leave one or more enclosing loops.
 builtin [shell-builtin [arg ...]]|Invoke a shell builtin directly.
 caller [expr]|Print the source location of a call frame.
-cd [-LP] [dir]|Change the current directory.
+cd [-L] [-P [-e]] [dir]|Change the current directory.
 command [-pVv] command [arg ...]|Look up a command or run it without function lookup.
 compgen [option ...] [word]|Generate matching completion candidates.
 complete [option ...] [name ...]|Register, list or remove completion definitions.

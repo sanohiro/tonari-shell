@@ -8,8 +8,8 @@ struct ShellHeap;
 #[global_allocator]
 static HEAP: ShellHeap = ShellHeap;
 
-// Keep a history search block in the reusable heap. Larger, transient buffers
-// go to musl, which can release their mappings independently after a command.
+// Send allocations of 256 KiB and above to musl so it can release their
+// mappings after a command. Smaller history search blocks stay reusable.
 const LARGE: usize = 256 * 1024;
 
 fn prepare() {

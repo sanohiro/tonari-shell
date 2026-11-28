@@ -89,18 +89,16 @@ pub(crate) fn launch(
     if session.readonly(&pid_name) {
         return Err(io::Error::other("readonly coprocess variable"));
     }
-    if let Some(active) = session.coprocesses.last() {
-        diagnostic!(
-            "warning: coproc [{}:{}] still exists",
-            active.pid,
-            active.name
-        );
-    }
     let (input, writer) = super::pipe()?;
     let (reader, output) = super::pipe()?;
     let high = |fd: OwnedFd| -> io::Result<OwnedFd> {
-        super::fd::duplicate_except(fd.as_raw_fd(), super::fd::SHELL_FD_MIN, |_| false)
-            .map(Into::into)
+        super::fd::duplicate_except(fd.as_raw_fd(), super::fd::PROCESS_SUBSTITUTION_MIN, |_| {
+            false
+        })
+        .or_else(|_| {
+            super::fd::duplicate_except(fd.as_raw_fd(), super::fd::SHELL_FD_MIN, |_| false)
+        })
+        .map(Into::into)
     };
     let reader = high(reader)?;
     let writer = high(writer)?;

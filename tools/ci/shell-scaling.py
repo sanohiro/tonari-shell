@@ -77,7 +77,7 @@ def main():
         # group. Probe the two references so a future fix can be compared too.
         miss_status = [
             subprocess.run([shell, "--noprofile", "--norc", "-c", "[[ aaa == !(z)*!(z)*y ]]"],
-                           env=env, cwd=root, check=False).returncode
+                           env=env, cwd=root, timeout=12, check=False).returncode
             for shell in shells
         ]
         if miss_status[1] != 1 or any(code not in (0, 1) for code in miss_status):

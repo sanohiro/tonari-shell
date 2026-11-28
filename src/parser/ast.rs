@@ -11,6 +11,7 @@ pub enum Target {
     Append,
     Duplicate,
     OutputWord,
+    MoveWord,
     HereDoc { expand: bool },
     HereString,
 }
@@ -165,7 +166,7 @@ impl Statement {
 #[derive(Debug)]
 pub enum CasePattern {
     Fixed(Matcher<String>),
-    Extended(String),
+    Extended(String, crate::pattern::extended::StaticMatcher),
     Dynamic(Word),
 }
 
@@ -181,7 +182,7 @@ impl CasePattern {
             {
                 if READ_OPTIONS.get().extglob && parts.iter().any(|part| matches!(part, Part::Pattern(s) if crate::pattern::extended::has_group(s))) {
                     let text = word.extended_pattern(&|_| None, &[]);
-                    return Self::Extended(text);
+                    return Self::Extended(text, Default::default());
                 }
                 Self::Fixed(Matcher::new(word.pattern(&|_| None, &[])))
             }

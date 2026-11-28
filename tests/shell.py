@@ -48,6 +48,449 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
+    def test_second_review_job_traps_and_exec(self):
+        source = """f(){ trap 'echo ERR' ERR; false; }; f; echo first:$?; false; echo last:$?
+trap - ERR; trap : USR1 CONT CHLD; trap '' KILL STOP; trap"""
+        signals = sorted((signal.SIGUSR1, signal.SIGCONT, signal.SIGCHLD, signal.SIGKILL, signal.SIGSTOP))
+        listed = b"".join(f"trap -- '{'' if sig in (signal.SIGKILL, signal.SIGSTOP) else ':'}' {sig.name}\n".encode()
+                          for sig in signals)
+        for shell in self.shells_for(5):
+            result = self.command(shell, source)
+            self.assertEqual((result.returncode, result.stdout, result.stderr),
+                             (0, b"ERR\nfirst:1\nERR\nlast:1\n" + listed, b""))
+            result = self.command(shell, """trap '' USR1; echo $$; /bin/sh -c 'echo $$'""")
+            first, final = result.stdout.splitlines()
+            self.assertEqual(first, final)
+            result = self.command(shell, """set -x; select k in q; do break; done </dev/null; :""")
+            self.assertEqual(result.stderr.count(b"+ select k in q\n"), 1)
+            result = self.command(shell, """trap '' CHLD; (exit 7) & p=$!
+"$1" -c 'import signal; print(signal.getsignal(signal.SIGCHLD) == signal.SIG_IGN)'
+wait "$p"; echo parent:$?""", "sh", sys.executable)
+            self.assertEqual((result.returncode, result.stdout, result.stderr),
+                             (0, b"True\nparent:7\n", b""))
+
+    def test_second_review_background_shell_foreground_handoff(self):
+        for shell in self.shells_for(5):
+            # A separate session owns this PTY. Its controller only addresses
+            # the child shell it forks and reaps here.
+            controller, master = pty.fork()
+            if controller == 0:
+                child = os.fork()
+                if child == 0:
+                    os.setpgid(0, 0)
+                    source = "case $- in *m*) echo monitor-on;; esac"
+                    os.execve(shell, [shell, "--noprofile", "--norc", "-i", "-c", source], self.env)
+                try:
+                    for _ in range(200):
+                        got, status = os.waitpid(child, os.WUNTRACED | os.WNOHANG)
+                        if got:
+                            break
+                        time.sleep(.01)
+                    if not got or not os.WIFSTOPPED(status) or os.WSTOPSIG(status) != signal.SIGTTIN:
+                        if got and not os.WIFSTOPPED(status):
+                            os._exit(2)
+                        raise RuntimeError("shell did not stop for the controlling terminal")
+                    os.tcsetpgrp(0, child)
+                    os.kill(child, signal.SIGCONT)
+                    for _ in range(200):
+                        got, status = os.waitpid(child, os.WNOHANG)
+                        if got:
+                            os._exit(os.waitstatus_to_exitcode(status))
+                        time.sleep(.01)
+                finally:
+                    try:
+                        os.kill(child, signal.SIGKILL)
+                        os.waitpid(child, 0)
+                    except (ProcessLookupError, ChildProcessError):
+                        pass
+                    os._exit(3)
+            try:
+                output = self.read_until(master, b"monitor-on")
+                self.assertIn(b"monitor-on", output)
+            finally:
+                _, status = os.waitpid(controller, 0)
+                os.close(master)
+            self.assertEqual(os.waitstatus_to_exitcode(status), 0)
+
+    def test_finite_nameref_chain_has_a_depth_diagnostic(self):
+        finite = "; ".join(f"declare -n ref{i}=ref{i+1}" for i in range(40))
+        cases = [(finite, "ref0", b"name reference depth limit exceeded"),
+                 ("declare -n first=second second=first", "first", b"circular name reference")]
+        for setup, name, diagnostic in cases:
+            with self.subTest(name=name):
+                p = self.command(TONARI, setup + '; echo "<$' + name + '>"; echo done')
+                self.assertEqual((p.returncode, p.stdout), (0, b"<>\ndone\n"))
+                self.assertIn(diagnostic, p.stderr)
+
+    def test_local_nameref_self_reference_preserves_other_scopes(self):
+        source = """r=global
+inner(){ local -n r=r || return; r=changed; }
+outer(){ local r=outer; inner; echo "$?/$r"; }
+outer; echo "$r" """
+        r = self.command(TONARI, source)
+        self.assertEqual((r.returncode, r.stdout), (0, b"1/outer\nglobal\n"))
+        self.assertIn(b"nameref variable self references not allowed", r.stderr)
+        if bash_version() >= (5, 2):
+            r = self.command(BASH, source)
+            self.assertEqual((r.returncode, r.stdout), (0, b"0/outer\nchanged\n"))
+            self.assertIn(b"circular name reference", r.stderr)
+
+    def test_second_review_job_statuses_and_notices(self):
+        # A stopped job stays in both shells' job tables until it is resumed.
+        for shell in self.shells_for(5):
+            result = self.command(shell, """set -m
+(exit 3) | /bin/sh -c 'read -r line; kill -STOP $$; exit 5' & p=$!
+wait "$p"; jobs -l; bg %+ >/dev/null; wait "$p"; echo finished:$?""")
+            rows = result.stdout.splitlines()
+            self.assertEqual((result.returncode, len(rows)), (0, 3), (shell, result))
+            self.assertRegex(rows[0], rb"^\[1\]\+ +\d+ Exit 3 +")
+            self.assertRegex(rows[1], rb"^ +\d+ (Stopped|Suspended).*\| ")
+            self.assertEqual(rows[2], b"finished:5")
+            for wait in ("wait", "wait -n"):
+                result = self.command(shell, "/bin/sh -c 'kill -HUP $$' & " + wait + "; echo after >&2")
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(len(result.stderr.splitlines()), 2, result.stderr)
+                self.assertIn(b"Hangup", result.stderr.splitlines()[0])
+                self.assertEqual(result.stderr.splitlines()[1], b"after")
+            result = self.command(shell, "/bin/sh -c 'kill -TERM $$'; echo after >&2")
+            self.assertEqual(result.stderr.splitlines()[-1], b"after")
+            self.assertIn(b"Terminated", result.stderr.splitlines()[0])
+            result = self.command(shell, "set -o posix; wait 2147483647; kill -0 2147483647")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(b"pid 2147483647 is not a child", result.stderr)
+            self.assertIn(b"No such process", result.stderr)
+            self.assertNotIn(b"os error", result.stderr)
+
+        # Bash may already have reported and removed a completed job. Tonari
+        # retains the completed pipeline for this first explicit listing.
+        result = self.command(TONARI, """set -m
+(exit 3) | (read -r line; exit 5) & p=$!
+while kill -0 "$p" 2>/dev/null; do :; done
+jobs -l; wait""")
+        rows = result.stdout.splitlines()
+        self.assertEqual((result.returncode, len(rows)), (0, 2), result)
+        self.assertRegex(rows[0], rb"^\[1\]\+ +\d+ Exit 3 +")
+        self.assertRegex(rows[1], rb"^ +\d+ Exit 5 +\| ")
+
+    def test_second_review_pipe_cleanup_and_select_eof(self):
+        result = self.command(TONARI, "select item in a; do break; done </dev/null >&-")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b"select: write error", result.stderr)
+        for shell in self.shells_for(5):
+            for producer, status in ((":; echo payload", 0), ("false; echo payload", 1),
+                                     ("f(){ false; echo payload; }; f", 1)):
+                reader, writer = os.pipe()
+                os.close(reader)
+                with os.fdopen(writer, "wb") as output:
+                    result = subprocess.run([shell, "-c", "trap 'printf \"cleanup:%s\\n\" \"$?\" >&2' EXIT; "
+                                             + producer + "; echo extra >&2"], cwd=self.cwd,
+                                            env=self.env, stdout=output, stderr=subprocess.PIPE, timeout=5)
+                self.assertEqual(result.returncode, -signal.SIGPIPE)
+                self.assertIn(f"cleanup:{status}\n".encode(), result.stderr)
+                self.assertNotIn(b"write error", result.stderr)
+                self.assertNotIn(b"extra", result.stderr)
+
+    def test_second_review_stored_subscripts_and_quoting(self):
+        from review_r2_language import verify
+
+        env = dict(self.env, LC_ALL="en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8")
+        programs = {"tonari": TONARI}
+        version = subprocess.check_output([BASH, "-c", 'printf "%s.%s.%s" "${BASH_VERSINFO[@]:0:3}"'],
+                                          text=True, env=env)
+        if int(version.split(".")[0]) >= 5:
+            programs["bash"] = BASH
+        verify(programs, env, version)
+
+    def test_second_review_option_and_variable_state(self):
+        cases = [
+            ("a=(one two); more=yes; unset 'a[-5]' more; echo \"$?/${a[*]}/${more-unset}\"",
+             b"1/one two/unset\n"),
+            ("s=ok; unset 's[-1]'; echo \"$?/$s\"; unset 's[0]'; echo \"$?/${s-unset}\"",
+             b"1/ok\n0/unset\n"),
+            ("export -n missing; declare -p missing 2>/dev/null; echo $?; "
+             "export -n PATH; command -v cat >/dev/null; echo \"$?/${PATH+present}\"",
+             b"1\n0/present\n"),
+            ("set -eo pipefail -Z; printf '%s/' \"$?\"; shopt -qo pipefail; echo \"$?\"; "
+             "set -u -o nonoption; echo \"$?/${absent-fallback}\"; shopt -qo nounset; echo $?",
+             b"2/1\n2/fallback\n0\n"),
+        ]
+        for source, expected in cases:
+            for shell in (TONARI, BASH):
+                result = self.command(shell, source)
+                self.assertEqual((result.returncode, result.stdout), (0, expected), result.stderr)
+
+    def test_second_review_integer_whitespace(self):
+        source = r"""set -- word
+for whitespace in $'\v' $'\r' $'\f' $'\n'; do
+  test "${whitespace}7${whitespace}" -eq 7 && test -v "${whitespace}1${whitespace}" || exit 9
+  read -n "2$whitespace" v <<<abcd; printf '<%s>' "$v"
+done
+test '7 ' -eq 7 2>/dev/null; echo "/$?"
+"""
+        shells = (TONARI, BASH) if bash_version() >= (5, 3) else (TONARI,)
+        for shell in shells:
+            result = self.command(shell, source)
+            self.assertEqual((result.returncode, result.stdout), (0, b"<ab>" * 4 + b"/2\n"), result.stderr)
+
+    def test_null_redirect_status_uses_the_redirect_environment(self):
+        source = """set -e
+{fd}>"$(printf /dev/null; exit 5)"
+v=$(exit 8) <"$(printf /dev/null; exit 5)"
+echo "reached:${fd-unset}:${v+x}"
+set +e
+>"$(printf /dev/null; exit 5)"; echo output:$?
+v=$(exit 8) 3>/dev/null; echo saved:$?
+fd=1; 2>&"$fd" 3>"$(printf /dev/null; exit 6)"; echo ordered:$?
+{fd}<missing-file; echo failed:$?"""
+        for shell in self.shells_for(5):
+            result = self.command(shell, source)
+            self.assertEqual((result.returncode, result.stdout),
+                             (0, b"reached:unset:x\noutput:5\nsaved:8\nordered:6\nfailed:1\n"), result.stderr)
+
+    def test_deferred_descriptor_external_updates_parent_hash(self):
+        source = """hash -r; fd=1; uname >/dev/null 2>&$fd; hash -t uname
+hash -r; fd=no; uname >/dev/null 2>&$fd; hash -t uname
+hash -p /bin/false uname; fd=1; command -p uname >/dev/null 2>&$fd; hash -t uname
+PATH=/usr/bin:/bin uname >/dev/null 2>&$fd; hash -t uname 2>/dev/null; echo prefix:$?
+uname(){ :; }; uname >/dev/null 2>&$fd; hash -t uname 2>/dev/null; echo function:$?"""
+        result = self.command(TONARI, source)
+        expected = self.command(BASH, source)
+        if bash_version() >= (5, 3):
+            self.assertEqual((result.returncode, result.stdout), (expected.returncode, expected.stdout))
+        rows = result.stdout.splitlines()
+        self.assertEqual(rows[:2], [b"/usr/bin/uname"] * 2)
+        self.assertTrue(rows[2].endswith(b"/uname"))
+        self.assertEqual(rows[3:], [b"prefix:1", b"function:1"])
+        self.assertIn(b"ambiguous redirect", result.stderr)
+
+    def test_second_review_redirection_expansion_context(self):
+        script = """x=1; >"out$((x++))"; printf '%s/' "$x"; test -f out1 || exit 1
+>file <"out$((x=1))"; printf '%s/' "$x"
+>file 3<"out$((x=1))"; echo "$x"
+"""
+        for shell in (BASH, TONARI):
+            result = self.command(shell, script)
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"2/2/1\n", b""))
+
+    def test_second_review_source_skips_unreadable_path(self):
+        for name in ("first", "second"):
+            (self.cwd / name).mkdir()
+            (self.cwd / name / "library").write_text(f"marker={name}\n")
+        bad = self.cwd / "first" / "library"
+        bad.chmod(0)
+        if os.access(bad, os.R_OK):
+            self.skipTest("current user can read mode 000")
+        for shell in (BASH, TONARI):
+            result = self.command(shell, 'PATH=first:second; . library && echo "$marker"')
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"second\n", b""))
+
+    def test_second_review_case_patterns_and_read_boundaries(self):
+        script = """shopt -s expand_aliases
+alias D=do
+alias B='{ echo function;'
+for n in 1 2; D echo "$n"; done
+for ((n=3; n<4; n++)); D echo "$n"; done
+f() B }; f
+v=$(case x in a|x) printf x;; esac; case y in
+y) printf y;; esac; echo case z in word)
+echo "$v"
+"""
+        for shell in (BASH, TONARI):
+            r = self.command(shell, script)
+            self.assertEqual((r.returncode, r.stdout, r.stderr),
+                             (0, b"1\n2\n3\nfunction\nxycase z in word\n", b""))
+
+    def test_second_review_associative_edit_order(self):
+        script = """declare -A a
+for ((i=0;i<300;i++)); do a["prefix $i"]=v; done
+printf '%s\n' "${!a[@]}"
+for k in 'prefix 10' 'prefix 90' 新 🔎; do
+    unset 'a[$k]'; a["$k"]=x; printf '%s\n' "${!a[@]}"
+done
+for ((i=0;i<200;i++)); do unset 'a[prefix '$i']'; done
+printf '%s\n' "${!a[@]}" """
+        ref = self.command(BASH, script)
+        actual = self.command(TONARI, script)
+        self.assertEqual((ref.returncode, ref.stderr), (0, b""))
+        self.assertEqual((actual.returncode, actual.stdout, actual.stderr), (0, ref.stdout, b""))
+
+    def test_second_review_posix_function_prefix(self):
+        for shell in (BASH, TONARI):
+            for builtin, expected in [('eval :', 'g'), ('. /dev/null', 'g'), (':', 'p')]:
+                script = "set -o posix; x=g; f(){ x=p " + builtin + '; echo "$x"; }; x=pre f; echo "$x"'
+                r = self.command(shell, script)
+                self.assertEqual((r.returncode, r.stdout, r.stderr), (0, f"p\n{expected}\n".encode(), b""))
+
+    def test_second_review_path_and_implicit_indices(self):
+        for shell in (BASH, TONARI):
+            for setting, message in [('unset PATH', b'No such file or directory'), ('PATH=', b'command not found')]:
+                r = self.command(shell, setting + '; no_such_tonari_test_command')
+                self.assertEqual((r.returncode, r.stdout), (127, b''))
+                # GNU 5.2 treats an empty PATH like unset for this diagnostic.
+                if shell == BASH and bash_version() < (5, 3):
+                    message = b'No such file or directory'
+                self.assertIn(message, r.stderr)
+            r = self.command(shell, '[[ ${BASH_VERSINFO[-1]} == "${BASH_VERSINFO[5]}" && -n ${BASH_VERSINFO[-1]} ]]')
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0, b'', b''))
+
+    def test_printf_overflowing_literal_quote_fields(self):
+        source = r"""printf 'head\n[%.9223372036854775825Q]/[%s]\n' 'a b' next
+echo "status:$?"
+printf -v out '[%9223372036854775825q][%.9223372036854775825b]' 'a b' text
+echo "status:$?/$out" """
+        for shell in (TONARI, BASH) if bash_version() >= (5, 3) else (TONARI,):
+            result = self.command(shell, source)
+            self.assertEqual((result.returncode, result.stdout),
+                             (0, b"head\n[a\\ b]/[next]\nstatus:1\nstatus:1/[a\\ b][]\n"), result.stderr)
+            self.assertEqual(result.stderr.count(b"9223372036854775825"), 3, result.stderr)
+
+    def test_second_review_printf_merged_output(self):
+        cases = [
+            (r"%d\n", b"ERR\n5\n6\nERR\n1\n"),
+            ("%d,", b"ERR\nERR\n5,6,1,"),
+            (r"%d\n%d,", b"ERR\n5\nERR\n6,1\n0,"),
+        ]
+        import re
+        for shell in (BASH, TONARI):
+            for fmt, expected in cases:
+                r = self.command(shell, 'printf "$1" "5x" 6 "1e3" 2>&1', 'shell', fmt)
+                output = re.sub(rb"[^\n]*?printf: [^\n]+: invalid number", b"ERR", r.stdout)
+                self.assertEqual((r.returncode, output, r.stderr), (1, expected, b""))
+
+    def test_second_review_shell_level_at_exec(self):
+        cases = [
+            ("/usr/bin/printenv SHLVL", b"0"),
+            ("/usr/bin/printenv SHLVL; :", b"1"),
+            ("SHLVL=3; exec /usr/bin/printenv SHLVL", b"2"),
+            ("SHLVL=3; SHLVL=9 /usr/bin/printenv SHLVL", b"2"),
+            ("/usr/bin/printenv SHLVL >/dev/stdout", b"1"),
+            ("(SHLVL=4; exec /usr/bin/printenv SHLVL)", b"4"),
+            ("(echo $(exec /usr/bin/printenv SHLVL))", b"1"),
+            ("(exec /usr/bin/printenv SHLVL) | cat", b"1"),
+            ("{ exec /usr/bin/printenv SHLVL; } & wait", b"0"),
+            ("{ /usr/bin/printenv SHLVL; }", b"1"),
+            ("if :; then /usr/bin/printenv SHLVL; fi", b"1"),
+            ("case x in x) /usr/bin/printenv SHLVL;; esac", b"1"),
+            ("true && /usr/bin/printenv SHLVL", b"0"),
+            ("echo $(/usr/bin/printenv SHLVL)", b"0"),
+            ("echo $(SHLVL=9 /usr/bin/printenv SHLVL)", b"8"),
+            ("echo $(echo ok | /usr/bin/printenv SHLVL)", b"1"),
+            ("f(){ /usr/bin/printenv SHLVL; }; echo $(f)", b"0"),
+            ("level(){ /usr/bin/printenv SHLVL; }; compgen -C level 2>/dev/null", b"0"),
+            ("SHLVL='3 '; exec /usr/bin/printenv SHLVL", b"0"),
+            ("unset SHLVL; level=4; declare -n SHLVL=level; exec /usr/bin/printenv level", b"3"),
+        ]
+        for shell in self.shells_for(5):
+            for command, level in cases:
+                r = self.command(shell, command)
+                self.assertEqual((r.returncode, r.stdout.strip(), r.stderr), (0, level, b""), (shell, command))
+            for command, level, error in [
+                ("readonly SHLVL; exec /usr/bin/printenv SHLVL", b"1", b"SHLVL: readonly variable"),
+                ("SHLVL=1001; exec /usr/bin/printenv SHLVL", b"1", b"shell level (1000) too high"),
+            ]:
+                r = self.command(shell, command)
+                self.assertEqual((r.returncode, r.stdout.strip()), (0, level))
+                self.assertIn(error, r.stderr)
+            r = self.command(shell, "unset SHLVL; export levels=4; declare -n SHLVL='levels[0]'; "
+                                    "exec /usr/bin/printenv levels 'levels[0]'")
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (1, b"", b""))
+            r = self.command(shell, 'exec -c /usr/bin/printenv SHLVL')
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (1, b"", b""))
+
+    def test_second_review_dynamic_stack_and_exported_locals(self):
+        for shell in (BASH, TONARI):
+            script = """pushd / >/dev/null
+DIRSTACK=(ignored kept); printf '<%s>' "${DIRSTACK[@]}"
+DIRSTACK+=(extra); dirs +1
+declare -a DIRSTACK=([1]=replaced); dirs +1
+unset DIRSTACK; DIRSTACK=(ordinary value); printf '<%s>' "${DIRSTACK[@]}"; dirs +1
+export marker=outer; f(){ local marker; /usr/bin/printenv marker; marker=; /usr/bin/printenv marker; }
+f; echo "$marker"
+compgen -A arrayvar BASH_ARG"""
+            r = self.command(shell, script)
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0,
+                b"</><kept>kept\nreplaced\n<ordinary><value>replaced\nouter\n\nouter\nBASH_ARGC\nBASH_ARGV\n", b""))
+            for decl in ("declare -i n=1/0", "f(){ local -i n=1/0; }; f", "declare a[1/0]=x"):
+                r = self.command(shell, decl + "; printf unexpected")
+                self.assertEqual((r.returncode, r.stdout, bool(r.stderr)), (1, b"", True))
+            r = self.command(shell, 'declare a[-1]=v; echo $?; declare -p a')
+            self.assertEqual((r.returncode, r.stdout, bool(r.stderr)), (0, b"1\ndeclare -a a=()\n", True))
+
+    def test_second_review_pattern_options_by_context(self):
+        for name in ("a1", "b1", ".c1"):
+            (self.cwd / name).touch()
+        for shell in (BASH, TONARI):
+            script = """shopt -s extglob nocasematch
+x=abcabc; printf '<%s>' "${x^^@(a|b)}" "${x^^!(a)}"
+GLOBIGNORE=a1; compgen -G '*1' | sort; printf '<%s>' *1
+HISTIGNORE='@(echo a|echo b)'; history -s 'echo a'; history -s 'echo A'; history -s 'echo c'
+history | sed -E 's/^ *[0-9]+ +//'"""
+            r = self.command(shell, script)
+            # Bash 5.2 completion does not inherit dotglob from GLOBIGNORE.
+            dot = b".c1\n" if shell == TONARI or bash_version() >= (5, 3) else b""
+            self.assertEqual((r.returncode, r.stdout, r.stderr),
+                             (0, b"<ABcABc><aBCaBC>" + dot + b"a1\nb1\n<.c1><b1>echo A\necho c\n", b""))
+
+    def test_second_review_parameter_pattern_locale(self):
+        self.env["LC_ALL"] = "C"
+        utf8 = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        script = r"""LC_ALL="$1"; v=éa; printf '<%s>' "${v#?}" "${v#[[:alpha:]]}" "${v//[[:alpha:]]/X}" "${v^^[[:alpha:]]}"
+LC_ALL=C; printf '<%s>' "${v#[[:alpha:]]}"
+v='xa\'; p='[a]\'; printf '<%s>' "${v/%$p/Z}" "${v//$p/Z}" """
+        for shell in (BASH, TONARI):
+            r = self.command(shell, script, "shell", utf8)
+            self.assertEqual((r.returncode, r.stdout, r.stderr),
+                             (0, "<a><a><XX><ÉA><éa><xZ><xa\\>".encode(), b""))
+
+    def test_second_review_seekable_stdin_last_argument(self):
+        script = self.cwd / "script"
+        script.write_bytes(b"echo old\n:\nprintf '<%s>' \"$_\"\ntrue\nprintf '<%s>' \"$_\"\nx=1\nx=2\nprintf '<%s>' \"$_\"\n")
+        for shell in (BASH, TONARI):
+            with script.open("rb") as fd:
+                result = subprocess.run([shell], cwd=self.cwd, env=self.env, stdin=fd,
+                                        capture_output=True, timeout=5)
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"old\n<:><true><>", b""))
+
+    def test_second_review_inherited_closed_standard_descriptors(self):
+        for fd in range(3):
+            source = f"exec 9>&{fd}"
+            for shell in (TONARI, BASH):
+                with self.subTest(fd=fd, shell=shell):
+                    r = subprocess.run([shell, "-c", source], env=self.env, cwd=self.cwd,
+                                       capture_output=True, preexec_fn=lambda: os.close(fd), timeout=5)
+                    self.assertNotEqual(r.returncode, 0)
+                    control = self.command(shell, f"exec {fd}<>/dev/null; {source}")
+                    self.assertEqual(control.returncode, 0, control.stderr)
+        path = self.cwd / "large-group"
+        path.write_text("{\n#" + "x" * 32768 + "\n: 4<&0; echo status=$?\n}\n")
+        for shell in (BASH, TONARI):
+            r = subprocess.run([shell, path], env=self.env, cwd=self.cwd, capture_output=True,
+                               preexec_fn=lambda: os.close(0), timeout=5)
+            self.assertEqual((r.returncode, r.stdout), (0, b"status=1\n"), r.stderr)
+
+    def test_second_review_builtin_operands(self):
+        for script, output in [
+            ("f(){ :; }; unset -fn f; type -t f; echo $?", b"1\n"),
+            ("set -- base; set -o '' -Z >/dev/null; echo \"$?/$1\"; "
+             "set -o - -Z >/dev/null; echo \"$?/$1\"", b"2/base\n2/base\n"),
+            ("cat <<$\"EOF\"\nline\nEOF\nprintf done\n", b"line\ndone"),
+        ]:
+            for shell in (TONARI, BASH):
+                r = self.command(shell, script)
+                self.assertEqual((r.returncode, r.stdout), (0, output), (shell, script, r.stderr))
+        utf8 = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        for shell in ((TONARI, BASH) if bash_version() >= (5, 3) else (TONARI,)):
+            # Reset OPTIND when switching explicit option lists in the differential check.
+            # Without a reset, results vary between GNU Bash builds.
+            r = self.command(shell, 'getopts abc o -abc; getopts abc o -abc; OPTIND=1; getopts xyz o -x; echo "$?/$o/$OPTIND"')
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0, b"0/x/2\n", b""))
+            r = self.command(shell, """LC_ALL="$1"; printf '%.1Q/' é; printf '%d/' ''; echo $?
+printf '%d/'; echo $?""", "shell", utf8)
+            self.assertEqual((r.returncode, r.stdout), (0, b"$'\\303'/0/1\n0/0\n"), r.stderr)
+
+        r = self.command(TONARI, 'getopts abc o -abc; getopts abc o -abc; getopts xyz o -x; echo "$?/$o/$OPTIND"')
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, b"0/x/2\n", b""))
+
     def test_scaling_multiline_readers_leave_following_input(self):
         source = ("a=(\n" + "entry\n" * 300 +
                   ")\nx=$(\n:\necho one\n); y=\"first\nsecond\"\n" +
@@ -871,6 +1314,80 @@ p='\360\237\230\200'; echo "${p@P}" """
                 return
             time.sleep(0.005)
         self.fail("reader did not consume the queued input")
+
+    def test_function_limit_unwinds_nested_inputs(self):
+        (self.cwd / "included").write_text("leaf; echo source-tail\necho another-line\n")
+        for shell in self.shells_for(5):
+            for nested in ("eval leaf", "source ./included", "mapfile -tc1 -C leaf a <<<'item'",
+                           "trap 'leaf; echo trap-tail' USR1; kill -USR1 $$"):
+                script = ("FUNCNEST=1; leaf(){ :; }; parent(){ " + nested +
+                          "; echo inner-tail; }; parent; echo outer-tail\necho next:$?\n")
+                for mode in ("-c", "file", "stdin"):
+                    with self.subTest(shell=shell, command=nested, mode=mode):
+                        path = self.cwd / "main"
+                        path.write_text(script)
+                        args = ["-c", script] if mode == "-c" else [path] if mode == "file" else []
+                        result = subprocess.run([shell, *args], cwd=self.cwd, env=self.env,
+                                                input=script.encode() if mode == "stdin" else b"",
+                                                capture_output=True, timeout=3)
+                        expected = (1, b"") if mode == "-c" else (0, b"next:1\n")
+                        if shell == BASH and bash_version() < (5, 3):
+                            prefix = b"another-line\n" if nested.startswith("source ") else b""
+                            expected = (0, prefix + b"inner-tail\nouter-tail\nnext:0\n")
+                        self.assertEqual((result.returncode, result.stdout), expected)
+                        self.assertEqual(result.stderr.count(b"nesting"), 1)
+
+    def test_terminal_interrupt_unwinds_loops_and_foreground_jobs(self):
+        child = """/bin/sh -c 'echo run""READY; exec sleep 2'"""
+        # Emit READY from inside the finite loop or the foreground child.
+        cases = (
+            ("for ((i=0;i<20000;i++)); do ((i)) || echo run''READY; :; done", False),
+            (child, False),
+            ("for i in one; do " + child + "; echo loop''TAIL; done", False),
+            ("trap 'echo caught' INT; " + child, True),
+        )
+        for shell in self.shells_for(5):
+            for command, continues in cases:
+                with self.subTest(shell=shell, command=command):
+                    fd = self.terminal_session(shell=shell)
+                    os.write(fd, (command + "; echo line''TAIL\n").encode())
+                    self.read_until(fd, b"runREADY\r\n")
+                    os.write(fd, b"\x03")
+                    reply = self.read_until(fd, PROMPT)
+                    self.assertEqual(b"lineTAIL" in reply, continues)
+                    self.assertNotIn(b"loopTAIL", reply)
+                    os.write(fd, b"echo code=$?\n")
+                    self.assertIn(b"code=" + (b"0" if continues else b"130") + b"\r\n",
+                                  self.read_until(fd, PROMPT))
+                    os.write(fd, b"/bin/sh -c 'exit 130'; echo normal=$?\n")
+                    self.assertIn(b"normal=130\r\n", self.read_until(fd, PROMPT))
+
+    def test_foreground_restop_keeps_job_order_and_listing_format(self):
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(shell=shell)
+                os.write(fd, b"""/bin/sh -c 'kill -STOP $$; kill -STOP $$; exit 0' & p=$!; wait %1
+""")
+                self.read_until(fd, PROMPT)
+                os.write(fd, b"sleep .8 & q=$!; fg %1; jobs > job-list\n")
+                reply = self.read_until(fd, PROMPT)
+                rows = (self.cwd / "job-list").read_bytes().splitlines()
+                self.assertEqual([row[:3] for row in rows], [b"[1]", b"[2]"])
+                self.assertIn(rows[0] + b"\r\n", reply)
+                self.assertIn(b"Stopped", rows[0])
+                os.write(fd, b'kill -CONT %1; wait "$p"; wait "$q"\n')
+                self.read_until(fd, PROMPT)
+
+    def test_interactive_wait_interrupt_with_inherited_hangup_ignore(self):
+        for shell in self.shells_for(5):
+            with self.subTest(shell=shell):
+                fd = self.terminal_session(shell=shell, ignored=(signal.SIGHUP,))
+                os.write(fd, b"sleep 1 & p=$!; echo wait''READY; wait; echo wait''TAIL\n")
+                self.read_until(fd, b"waitREADY\r\n")
+                os.write(fd, b"\x03")
+                self.assertNotIn(b"waitTAIL", self.read_until(fd, PROMPT))
+                os.write(fd, b'echo code=$?; wait "$p"\n')
+                self.assertIn(b"code=130\r\n", self.read_until(fd, PROMPT))
 
     def test_terminal_interrupt_discards_input_command_list(self):
         cases = (("read -ru3 a", b"partial", b"old"),
@@ -2262,6 +2779,56 @@ v=''; printf '<%s>' "${v//$p/x}" "${v/%$p/x}" """,
                      '[[ "É😃" == é? ]] && [[ "Σ" == σ ]] && [ A != a ] && printf yes',
                      0, b"fi* yes", minimum=5)
 
+    def test_redirect_expansion_observes_each_previous_open(self):
+        for shell in self.shells_for(5):
+            for command in ("printf hi", "/usr/bin/printf hi", "v=assigned", ":", ""):
+                for suffix in ("", " | /bin/cat"):
+                    with self.subTest(shell=shell, command=command, suffix=suffix):
+                        for name in ("first", "after", "before"):
+                            (self.cwd / name).unlink(missing_ok=True)
+                        line = command + ' >first >"$(test -f first && printf after || printf before)"' + suffix
+                        result = self.command(shell, line + '; echo "end:$?"')
+                        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                         (0, b"end:0\n", b""))
+                        self.assertEqual((self.cwd / "first").read_bytes(), b"")
+                        self.assertFalse((self.cwd / "before").exists())
+                        data = b"hi" if "printf" in command else b""
+                        self.assertEqual((self.cwd / "after").read_bytes(), data)
+            script = """unset copied; >first >"${copied:=after}"; echo "$copied"
+unset copied; >first <first >"${copied:=after}"; echo "${copied-unset}"
+unset copied; /usr/bin/true >first >"${copied:=after}"; echo "${copied-unset}"
+x=$(exit 3) >first >"$(printf after; exit 2)"; echo "$?"
+exec 4>four; printf 'ok' 3>&4 >"$(printf 'on-fd' >&3; printf after)"; cat four
+"""
+            result = self.command(shell, script)
+            self.assertEqual((result.returncode, result.stdout, result.stderr),
+                             (0, b"after\nunset\nunset\n2\non-fd", b""))
+
+            for setup, command, expected in (
+                    ("set -o posix", ":", (1, b"")),
+                    ("set -e", "{ :; }", (1, b"")),
+                    ("trap 'echo ERR' ERR", "{ :; }", (0, b"ERR\nnext\n"))):
+                script = setup + "; " + command + ' >absent/file >"$(echo later)"; echo next'
+                result = self.command(shell, script)
+                self.assertEqual((result.returncode, result.stdout), expected)
+                self.assertTrue(result.stderr)
+                self.assertFalse((self.cwd / "later").exists())
+
+    def test_descriptor_move_uses_the_shell_spelling(self):
+        script = """name='メモ-'; printf o >&"$name"
+name='3-'; printf a >&"$name"; printf b >&'3-'
+exec 6>six; fd=6; exec 4>&$fd-; printf m >&4; exec 4>&-
+test -e /dev/fd/6; echo $?
+exec 6<six; fd=6; exec 5<&"$fd"-; read -r -n1 -u5 got; echo "$got"
+test -e /dev/fd/6; echo $?; exec 5<&-
+fd='5-'; : 4<&"$fd" 2>/dev/null; echo $?
+cat メモ- 3- six
+"""
+        for shell in self.shells_for(5):
+            result = self.command(shell, script)
+            self.assertEqual((result.returncode, result.stdout), (0, b"1\nm\n1\n1\nobm"))
+            self.assertTrue(result.stderr)
+
     def test_named_descriptors_and_ordered_expansion(self):
         self.compare('exec {out}>file 5>&$out; printf "雪" >&5; exec {out}>&-; '
                      'test -e /dev/fd/$out; printf "%d\\n" "$?"; cat file; '
@@ -3445,6 +4012,64 @@ shopt -u cdable_vars; cd DEST 2>/dev/null; echo "off:$?"
                 for case, expected, actual in zip(batch, *records):
                     self.assertEqual(actual, expected, (ctype, case))
 
+    def test_review_static_case_and_conditional_patterns(self):
+        utf8 = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        source = r"""shopt -s extglob
+for v in 'b]' ':]' 'a]' 'l]' a b; do [[ $v == [a-[:alpha:]] ]]; printf %s $?; done
+[[ b == [[=a=]-c] ]]; echo "/$?"
+[[ y == @(x[|y) ]]; echo "$?"
+v='aaa\'; for p in 'a\' '?\' '??\' '[a]\'; do printf '<%s>' "${v/%$p/R}"; done; echo
+f() { case "$1" in @(foo|bar)) echo y;; *) echo n;; esac; }
+f FOO; shopt -s nocasematch; f FOO; shopt -u nocasematch; f FOO
+unset LC_ALL; LC_COLLATE=$locale; LC_CTYPE=C; shopt -u globasciiranges
+touch éb; [[ éb == ??[a-c] ]]; echo "$?"; echo ??[a-c]
+"""
+        self.env["locale"] = utf8
+        expected = b"100011/1\n1\n<aaR><aaa\\><aaa\\><aaR>\nn\ny\nn\n"
+        expected += "0\néb\n".encode()
+        for shell in (TONARI, BASH):
+            if shell == BASH and bash_version() < (5, 2):
+                continue
+            p = self.command(shell, source)
+            self.assertEqual((p.returncode, p.stdout, p.stderr), (0, expected, b""))
+
+    def test_review_command_lookup_and_redirect_diagnostics(self):
+        source = """hash -p /bin/echo cached-name; type -P cached-name; echo "$?"
+hash -p /no/such/program stale; stale; echo "$?"
+mkdir -p path/directory; touch path/locked; PATH=$PWD/path
+directory; echo "$?"; locked; echo "$?"; ./path/directory; echo "$?"
+echo x >& ""; echo x 3>&99999999999; echo x >&out-
+readonly v=5; exec {v}>file"""
+        for shell in (TONARI, BASH):
+            if shell == BASH and bash_version() < (5, 3):
+                continue
+            p = self.command(shell, source)
+            self.assertEqual((p.returncode, p.stdout), (1, b"/bin/echo\n0\n127\n127\n126\n126\n"))
+            for text in [b"/no/such/program: No such file", b"directory: command not found",
+                         b"/path/locked: Permission denied", b"./path/directory: Is a directory",
+                         b'"": Bad file descriptor', b"3: Bad file descriptor",
+                         b"out: ambiguous redirect", b"v: readonly variable", b"v: cannot assign fd"]:
+                self.assertIn(text, p.stderr)
+            self.assertNotIn(b"(os error", p.stderr)
+
+    def test_review_trace_and_control_operands(self):
+        for shell in (TONARI, BASH):
+            if shell == BASH and bash_version() < (5, 3):
+                continue
+            p = self.command(shell, "BASH_XTRACEFD='1 '; set -x; : one; BASH_XTRACEFD=-5; : two")
+            self.assertEqual((p.returncode, p.stdout), (0, b""))
+            for text in [b"1 : invalid value", b"-5: invalid value", b"+ : one", b"+ : two"]:
+                self.assertIn(text, p.stderr)
+            p = self.command(shell, 'exit invalid; echo $?; for i in 1; do continue invalid; done')
+            self.assertEqual((p.returncode, p.stdout), (2, b"2\n"))
+            self.assertIn(b"exit: invalid: numeric argument required", p.stderr)
+            self.assertIn(b"continue: invalid: numeric argument required", p.stderr)
+            p = self.command(shell, 'p="("; [[ a =~ $p ]]; echo $?; set -u; [[ a == "$missing" ]]')
+            self.assertEqual((p.returncode, p.stdout), (127, b"2\n"))
+            self.assertIn(b"invalid regular expression `(':", p.stderr)
+            self.assertIn(b"missing: unbound variable", p.stderr)
+            self.assertNotIn(b"[[: missing:", p.stderr)
+
     def test_quoted_lists_in_case_conditionals_and_parameter_expansion(self):
         values = ["*", "?", "[", "]", "!", "^", "-", "\\", "a", "m", "z", "2", "a]", "=]", ":]", "[]"]
         sets = [
@@ -3460,10 +4085,9 @@ shopt -u cdable_vars; cd DEST 2>/dev/null; echo "off:$?"
                       f'case "$v" in {pattern}) printf 1;; *) printf 0;; esac; '
                       f'if [[ $v == {pattern} ]]; then printf 1; else printf 0; fi; done')
             for shell in (BASH, TONARI):
-                # Bash 5.3 accepts the quoted operand of a POSIX collating or
-                # equivalence symbol. Tonari follows Debian's 5.2 semantics here.
+                # Tonari and Bash 5.3 dequote the collating or equivalence operand.
                 members = selected
-                if shell == BASH and tuple(map(int, version.split(b"."))) >= (5, 3) and pattern in (r'[[="a"=]]', r'[[."a".]]'):
+                if (shell == TONARI or tuple(map(int, version.split(b"."))) >= (5, 3)) and pattern in (r'[[="a"=]]', r'[[."a".]]'):
                     members = {"a"}
                 proc = self.command(shell, source)
                 expected = b"".join(b"11" if v in members else b"00" for v in values)
@@ -4035,6 +4659,81 @@ cd "$start"; shopt -s cdable_vars; destination=real; cd destination >&- 2>/dev/n
 echo "$?"; [[ $PWD = "$start/real" && $OLDPWD = "$start" && $(pwd -P) = "$PWD" ]] && echo entered""",
                      0, b"1\nentered\n", minimum=5)
 
+    def test_second_review_startup_status_and_script_search(self):
+        first = self.cwd / "first"
+        second = self.cwd / "second"
+        first.mkdir()
+        second.mkdir()
+        (first / "sample").mkdir()
+        (second / "sample").write_text('echo selected\n')
+        self.env["PATH"] = f"{first}:{second}:/usr/bin:/bin"
+        self.env["BASH_ENV"] = str(self.cwd / "startup")
+        (self.cwd / "startup").write_text("false; return 7\n")
+        (self.cwd / "fallback").mkdir()
+        for shell in (BASH, TONARI):
+            proc = subprocess.run([shell, "sample"], cwd=self.cwd, env=self.env,
+                                  capture_output=True, timeout=5)
+            self.assertEqual((proc.returncode, proc.stdout), (0, b"selected\n"), proc.stderr)
+            self.assertEqual(self.command(shell, 'echo "$?"').stdout, b"1\n")
+            env = dict(self.env, BASH_ENV=str(self.cwd / "fallback"))
+            proc = subprocess.run([shell, "-c", 'echo "$?"'], env=env, cwd=self.cwd,
+                                  capture_output=True, timeout=5)
+            self.assertEqual((proc.returncode, proc.stdout), (0, b"0\n"))
+            self.assertIn(b"directory", proc.stderr.lower())
+
+    def test_second_review_forced_interactive_history(self):
+        hist = self.cwd / "entries"
+        self.env["HISTFILE"] = str(hist)
+        (self.cwd / "script").write_text("echo current\nhistory -s added\n")
+        (self.cwd / "rc").write_text("history -s startup\nexit 3\n")
+        for shell in ((BASH, TONARI) if bash_version() >= (5, 0) else (TONARI,)):
+            for args, status, expected in [
+                (["--norc", "-ic", "history -s added"], 0, "old\nadded\n"),
+                (["--norc", "-i", "script"], 0, "old\necho current\nadded\n"),
+                (["--rcfile", "rc", "-ic", ":"], 3, "old\nstartup\n"),
+                (["--norc", "-i", "+o", "history", "script"], 0, "old\n"),
+            ]:
+                hist.write_text("old\n")
+                proc = subprocess.run([shell, *args], cwd=self.cwd, env=self.env,
+                                      input=b"", capture_output=True, timeout=5)
+                self.assertEqual((proc.returncode, hist.read_text()), (status, expected), (shell, args, proc.stderr))
+
+    def test_second_review_read_directory_and_format_operands(self):
+        for shell in ((BASH, TONARI) if bash_version() >= (5, 0) else (TONARI,)):
+            proc = self.command(shell, 'printf "data\\n" | { read -t 99999999999 v; echo "$?/$v"; }; '
+                                'read -t 1e0 v <<<text; echo "$?"; '
+                                'mkdir gone; cd gone; rmdir ../gone; cd .; echo "$?"')
+            self.assertEqual((proc.returncode, proc.stdout), (0, b"0/data\n1\n0\n"), proc.stderr)
+            self.assertIn(b"invalid timeout", proc.stderr)
+            self.assertIn(b"retrieving current directory", proc.stderr)
+        proc = self.command(TONARI, 'printf "%2147483648d|" 1; echo "$?"; '
+                            'TZ=UTC0 printf "[%(%Y)T]/[%(%Y)T]" 9223372036854775807 0')
+        self.assertEqual((proc.returncode, proc.stdout), (0, b"1\n[1970]/[1970]"), proc.stderr)
+
+    def test_second_review_option_listing_and_directory_operands(self):
+        controls = (BASH, TONARI) if bash_version() >= (5, 3) else (TONARI,)
+        for shell in controls:
+            for switch, expected in [("-o", b"braceexpand    \ton\n"), ("+o", b"set -o braceexpand\n")]:
+                out = subprocess.run([shell, switch], cwd=self.cwd, env=self.env,
+                                     input=b"echo body\n", capture_output=True, timeout=5)
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn(expected, out.stdout)
+                self.assertTrue(out.stdout.endswith(b"body\n"))
+            result = subprocess.run([shell, "+O", "nullglob", "-c", "shopt -p nullglob"],
+                                    cwd=self.cwd, env=dict(self.env, BASHOPTS="nullglob"),
+                                    capture_output=True, timeout=5)
+            self.assertEqual((result.returncode, result.stdout), (0, b"shopt -s nullglob\n"))
+            result = self.command(shell, "shopt extglob; shopt -o vi; dirs +999999999999999999999; "
+                                  "echo $?; umask 7777; umask; umask u=r; umask")
+            mask = b"7777" if sys.platform == "darwin" else b"0777"
+            self.assertEqual(result.stdout, b"extglob             \toff\nvi                  \toff\n2\n"
+                             + mask + b"\n0377\n")
+            self.assertIn(b"invalid number", result.stderr)
+            result = self.command(shell, """declare -A a=([a~]=1); declare -p a
+unset a; declare -A a=([é]=2); declare -p a""")
+            self.assertEqual(result.stdout, b'declare -A a=([a~]="1" )\n'
+                             + b"declare -A a=([$'\\303\\251']=\"2\" )\n")
+
     def test_physical_cd_without_a_directory_name(self):
         for flags, status in (("-P", 0), ("-Pe", 1)):
             for mode in ("", "set -o posix; "):
@@ -4469,7 +5168,7 @@ wait "$p"; code=$?; kill -l "$code"; exit "$code" """
         self.assertEqual(proc.returncode, 127)
         proc = self.command(sh, "wait %missing")
         self.assertEqual(proc.returncode, 127)
-        self.assertIn(b"not a valid child or job", proc.stderr)
+        self.assertIn(b"%missing: no such job", proc.stderr)
 
     def test_wait_next_selected_ids_and_signals(self):
         version = self.command(BASH, 'echo "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"')
@@ -4667,6 +5366,44 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
         self.assertEqual((self.cwd / "login-seen").read_text().splitlines(), ["-bash 1"] * 2)
         self.assertEqual((self.cwd / "logged-out").read_text().splitlines(), ["end"] * 2)
 
+    def test_interactive_history_defaults_follow_input_mode(self):
+        source = 'printf "<%s/%s>" "$HISTSIZE" "$HISTFILESIZE"'
+        for shell in (BASH, TONARI):
+            for override, expected in [({}, b"500/500"), ({"HISTSIZE": "37"}, b"37/37"),
+                                       ({"HISTSIZE": "37", "HISTFILESIZE": "8"}, b"37/8")]:
+                env = dict(self.env, **override)
+                proc = subprocess.run([shell, "--norc", "-is"], env=env, cwd=self.cwd,
+                                      input=(source + "\n").encode(), capture_output=True, timeout=5)
+                self.assertEqual((proc.stdout, proc.returncode), (b"<" + expected + b">", 0))
+            proc = subprocess.run([shell, "--norc", "-ic", source], env=self.env, cwd=self.cwd,
+                                  capture_output=True, timeout=5)
+            self.assertEqual((proc.stdout, proc.returncode), (b"</>", 0))
+
+    def test_secondary_prompt_eof_saves_history_and_runs_logout(self):
+        (self.cwd / ".bash_profile").write_text(
+            'PS1="tonari$ "; PS2="MORE> "; HISTFILE=$PWD/saved-history\n')
+        (self.cwd / ".bash_logout").write_text("echo end >> logged-out\n")
+        # Apple Bash 3.2 returns to input at this secondary-prompt EOF.
+        for shell in ((BASH, TONARI) if bash_version() >= (5, 0) else (TONARI,)):
+            fd = self.terminal_session(shell=shell, login=True)
+            os.write(fd, b"if true; then\r")
+            self.read_until(fd, b"MORE> ")
+            os.write(fd, b"\x04")
+            while select.select([fd], [], [], 5)[0]:
+                try:
+                    if not os.read(fd, 4096):
+                        break
+                except OSError as error:
+                    if error.errno != errno.EIO:
+                        raise
+                    break
+            else:
+                self.fail("login shell did not close its terminal after PS2 EOF")
+            self.assertEqual((self.cwd / "logged-out").read_text(), "end\n")
+            self.assertIn("if true; then", (self.cwd / "saved-history").read_text().splitlines())
+            (self.cwd / "logged-out").unlink()
+            (self.cwd / "saved-history").unlink()
+
     def test_profile_version_gate_and_nested_shell_level(self):
         self.compare('test -n "$BASH_VERSION" && (( BASH_VERSINFO[0] >= 3 )) && '
                      'test "${#BASH_VERSINFO[@]}" = 6 && '
@@ -4711,7 +5448,7 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                      'history 1 | sed "s/^ *[0-9]* *//"', 0,
                      b"second\n\t echo first\n\t echo second\nchanged\necho changed\n")
 
-    def terminal_session(self, editing=False, shell=TONARI, login=False, blocked=(), with_pid=False):
+    def terminal_session(self, editing=False, shell=TONARI, login=False, blocked=(), with_pid=False, ignored=()):
         pid, fd = pty.fork()
         if pid == 0:
             try:
@@ -4719,6 +5456,8 @@ complete -p name""", 0, b"complete -o nospace -d -v -W 'one' -P 'pre' name\n")
                 # inherit SIG_IGN. Model a terminal emulator starting a new shell.
                 signal.signal(signal.SIGINT, signal.SIG_DFL)
                 signal.signal(signal.SIGQUIT, signal.SIG_DFL)
+                for sig in ignored:
+                    signal.signal(sig, signal.SIG_IGN)
                 if blocked:
                     signal.pthread_sigmask(signal.SIG_BLOCK, blocked)
                 os.chdir(self.cwd)

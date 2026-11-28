@@ -7,18 +7,26 @@ pub(crate) struct Environment {
     pub(super) changes: Vec<(String, Option<String>)>,
 }
 
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ChildEnvironment {
+    #[default]
+    Inherit,
+    Empty,
+    ReplaceShell,
+}
+
 impl Environment {
     pub(super) fn prepare(
         session: &Session,
         assignments: &[(String, String)],
+        replace: bool,
     ) -> io::Result<Option<Rc<Self>>> {
+        let cacheable = !replace && assignments.is_empty();
         let mut live = session.environment_changes(assignments).peekable();
-        if live.peek().is_none() {
+        if !replace && live.peek().is_none() {
             return Ok(None);
         }
-        if assignments.is_empty()
-            && let Some(cached) = &*session.external_env.borrow()
-        {
+        if cacheable && let Some(cached) = &*session.external_env.borrow() {
             let mut entries = cached.changes.iter();
             if live.by_ref().all(|(key, value)| {
                 entries
@@ -31,14 +39,55 @@ impl Environment {
             live = session.environment_changes(assignments).peekable();
         }
         let mut cached_changes = Vec::new();
-        let changes: std::collections::BTreeMap<_, _> = live
+        let mut changes: std::collections::BTreeMap<_, _> = live
             .map(|(k, v)| {
-                if assignments.is_empty() {
+                if cacheable {
                     cached_changes.push((k.to_owned(), v.as_deref().map(str::to_owned)));
                 }
                 (k, v)
             })
             .collect();
+        let target;
+        if replace {
+            // Bash adjusts its own binding even when the command prefixes SHLVL.
+            // Build the child environment separately so a failed exec leaves the shell intact.
+            target = session.reference_name("SHLVL").unwrap_or("SHLVL".into());
+            let element = crate::session::array::subscript(&target);
+            let name = element.map_or(target.as_ref(), |(base, _)| base);
+            let value = if session.subshell_depth > 0 {
+                assignments
+                    .iter()
+                    .rev()
+                    .find(|(key, _)| key == name)
+                    .map(|(_, value)| value.clone())
+            } else {
+                None
+            }
+            .or_else(|| session.get("SHLVL"));
+            let level = Session::adjusted_shell_level(
+                value
+                    .as_deref()
+                    .and_then(crate::builtins::integer_operand)
+                    .unwrap_or(0),
+                -1,
+            );
+            let value = if session.readonly(name) {
+                diagnostic!("{name}: readonly variable");
+                value
+            } else {
+                Some(level.to_string())
+            };
+            let value = value.filter(|_| element.is_none() && !session.array_parameter(name));
+            changes.insert(name, value.map(std::borrow::Cow::Owned));
+            if assignments.is_empty() {
+                // ENOEXEC can start a fresh interpreter in the same process.
+                // Its replayed environment must include all changes, including SHLVL.
+                cached_changes = changes
+                    .iter()
+                    .map(|(&key, value)| (key.to_owned(), value.as_deref().map(str::to_owned)))
+                    .collect();
+            }
+        }
         // SAFETY: ordinary assignments live in Session. Script reentry replaces
         // process variables only after it has abandoned this environment and
         // never returns. Each inherited entry is a NUL-terminated C string.
@@ -73,7 +122,7 @@ impl Environment {
             pointers,
             changes: cached_changes,
         });
-        if assignments.is_empty() {
+        if cacheable {
             *session.external_env.borrow_mut() = Some(env.clone());
         }
         Ok(Some(env))
@@ -87,19 +136,20 @@ pub(super) struct External {
     pub(super) argument_bytes: Vec<u8>,
     pub(super) argv: Vec<*const libc::c_char>,
     pub(super) search_paths: Option<Vec<CString>>,
+    searching_path: bool,
     pub(super) env: Option<Rc<Environment>>,
 }
 
 impl External {
     pub(super) fn new(cmd: &PreparedCommand, session: &Session) -> io::Result<Self> {
-        Self::for_words(cmd, session, &cmd.words, None, false)
+        Self::for_words(cmd, session, &cmd.words, None, cmd.environment)
     }
     pub(super) fn for_words(
         cmd: &PreparedCommand,
         session: &Session,
         arguments: &[String],
         arg0: Option<String>,
-        clear_env: bool,
+        environment: ChildEnvironment,
     ) -> io::Result<Self> {
         let program = CString::new(arguments[0].as_bytes())?;
         let arg0 = arg0.map(CString::new).transpose()?;
@@ -125,12 +175,18 @@ impl External {
         argv.push(std::ptr::null());
         let name = std::ffi::OsStr::from_bytes(program.as_bytes());
         let cached = cmd.cached_path(session, &arguments[0]);
+        let mut searching_path = cached.is_none() && !arguments[0].contains('/');
         let search_paths = if let Some(path) = cached {
             Some(vec![CString::new(path.as_os_str().as_bytes())?])
         } else {
             (!arguments[0].contains('/'))
                 .then(|| {
                     let path = lookup::path(cmd, session);
+                    if lookup::path_unset(path, cmd, session) {
+                        // Bash executes the unqualified name directly after unset PATH.
+                        searching_path = false;
+                        return Ok(vec![program.clone()]);
+                    }
                     let ignored = IgnoredExecutables::new(session);
                     lookup::search_directories(path)
                         .map(|dir| dir.join(name))
@@ -146,14 +202,19 @@ impl External {
             program,
             _arg0: arg0,
             search_paths,
-            env: if clear_env {
+            searching_path,
+            env: if environment == ChildEnvironment::Empty {
                 Some(Rc::new(Environment {
                     changes: Vec::new(),
                     _strings: Vec::new(),
                     pointers: vec![std::ptr::null()],
                 }))
             } else {
-                Environment::prepare(session, &cmd.assignments)?
+                Environment::prepare(
+                    session,
+                    &cmd.assignments,
+                    environment == ChildEnvironment::ReplaceShell,
+                )?
             },
         })
     }
@@ -173,7 +234,10 @@ impl External {
             .open(path_os)?;
         let mut sample = [0u8; 128];
         let length = file.read(&mut sample)?;
-        if !file.metadata()?.is_file() || sample[..length].contains(&0) {
+        if !file.metadata()?.is_file()
+            || sample[..length].contains(&0)
+            || crate::input::executable_header(&sample[..length])
+        {
             return Err(io::Error::from_raw_os_error(libc::ENOEXEC));
         }
         drop(file);
@@ -228,48 +292,73 @@ impl External {
                     libc::execv(path.as_ptr(), self.argv.as_ptr());
                 }
             }
-            match errno() {
+            let failure = errno();
+            if !self.searching_path {
+                failed_path = path;
+            }
+            match failure {
                 libc::ENOENT | libc::ENOTDIR => continue,
                 libc::ENOEXEC => {
+                    failed_path = path;
                     error = self.script_fallback(path, fallback_in_session.then_some(session));
                     break;
                 }
-                libc::EACCES => {
-                    error = libc::EACCES;
-                    failed_path = path;
+                libc::EACCES | libc::EISDIR => {
+                    if self.searching_path
+                        && std::path::Path::new(std::ffi::OsStr::from_bytes(path.to_bytes()))
+                            .is_dir()
+                    {
+                        continue;
+                    }
+                    if error == libc::ENOENT {
+                        error = failure;
+                        failed_path = path;
+                    }
                 }
                 e => {
+                    failed_path = path;
                     error = e;
                     break;
                 }
             }
         }
         let path = std::path::Path::new(std::ffi::OsStr::from_bytes(failed_path.to_bytes()));
-        report_exec_error(session, program.as_bytes(), path, error)
+        report_exec_error(
+            session,
+            path,
+            self.searching_path && error == libc::ENOENT,
+            error,
+        )
     }
 }
 
 #[cold]
 pub(super) fn report_exec_error(
     session: &Session,
-    name: &[u8],
     path: &std::path::Path,
+    missing_command: bool,
     error: i32,
 ) -> u8 {
+    let mut buffer = [0 as libc::c_char; 128];
     let reason: &[u8] = match error {
-        libc::ENOENT | libc::ENOTDIR if !name.contains(&b'/') => b": command not found",
-        libc::ENOENT | libc::ENOTDIR => b": No such file or directory",
-        libc::EISDIR => b": Is a directory",
-        libc::EACCES if path.is_dir() => b": Is a directory",
-        libc::EACCES | libc::EPERM => b": Permission denied",
-        _ => b": cannot execute",
+        _ if missing_command => b"command not found",
+        libc::EISDIR => b"Is a directory",
+        libc::EACCES if path.is_dir() => b"Is a directory",
+        _ if unsafe { libc::strerror_r(error, buffer.as_mut_ptr(), buffer.len()) } == 0 => {
+            unsafe { CStr::from_ptr(buffer.as_ptr()) }.to_bytes()
+        }
+        _ => b"cannot execute",
     };
     let prefix = session.diagnostic_prefix(|| session.line());
     write_diagnostic(
         prefix.as_deref().unwrap_or("tonari: ").as_bytes(),
-        name,
+        path.as_os_str().as_bytes(),
+        if error == libc::ENOEXEC {
+            b": cannot execute binary file: "
+        } else {
+            b": "
+        },
         reason,
-        b"",
     );
     exec_status(error)
 }

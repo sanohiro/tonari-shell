@@ -96,7 +96,9 @@ impl Elements {
                 .get(usize::try_from(*index).ok()?)
                 .map(String::as_str),
             Self::Sparse(values) => values.get(index).map(String::as_str),
-            Self::Associative(map) => map.get(&index.to_string()).map(String::as_str),
+            Self::Associative(map) => map
+                .get(itoa::Buffer::new().format(*index))
+                .map(String::as_str),
         }
     }
 
@@ -191,6 +193,10 @@ impl Variable {
 }
 
 impl Session {
+    pub(super) fn live_dirstack(&self, name: &str) -> bool {
+        name == "DIRSTACK" && self.variables.get(name).is_none_or(|var| var.dynamic)
+    }
+
     pub(super) fn active_groups(&self, name: &str) -> bool {
         name == "GROUPS" && !self.groups_unset
     }
@@ -217,6 +223,9 @@ impl Session {
     }
 
     pub(crate) fn array_parameter(&self, name: &str) -> bool {
+        if self.live_dirstack(name) {
+            return true;
+        }
         self.variables.get(name).map_or_else(
             || Self::builtin_array_parameter(name),
             |var| var.elements.is_some(),
@@ -272,9 +281,6 @@ impl Session {
     }
 
     pub fn assign_builtin_target(&mut self, target: &str, value: &str) -> Result<(), &'static str> {
-        if super::is_identifier(target) && self.assign_existing_literal(target, value) {
-            return Ok(());
-        }
         if !target.ends_with('+') && self.assign_existing_literal(target, value) {
             return Ok(());
         }
@@ -292,6 +298,7 @@ impl Session {
         literal_key: bool,
     ) -> Result<(), &'static str> {
         let resolved = self.reference_name(target)?;
+        let stored = resolved != target && !target.contains('[');
         let target = resolved.as_ref();
         let element = subscript(target);
         let base = element.map_or(target, |(base, _)| base);
@@ -318,12 +325,19 @@ impl Session {
                         return Err("bad array subscript");
                     }
                     expr.to_owned()
+                } else if stored {
+                    crate::arithmetic::data_key(expr, self)?
                 } else {
                     self.subscript_key(expr)?
                 };
                 return self.assign_key(base, key, value.into());
             }
-            let index = self.resolve_index(base, expr)?;
+            let index = if stored {
+                let index = crate::arithmetic::data_index(expr, self)?;
+                self.relative_index(base, index)?
+            } else {
+                self.resolve_index(base, expr)?
+            };
             self.assign_element(base, index, value.into());
         } else {
             if !super::is_identifier(target) {
@@ -347,26 +361,32 @@ impl Session {
             let len = usize::from(self.pipe_status.first.is_some()) + self.pipe_status.rest.len();
             return (0..len as i64).collect();
         }
+        if self.live_dirstack(name) {
+            self.dynamic.stack_read.set(true);
+            return (0..=self.dir_stack.len() as i64).collect();
+        }
         if let Some(v) = self.variables.get(name) {
             return v.elements.as_ref().map_or_else(
                 || (v.value.is_some()).then_some(0).into_iter().collect(),
                 |elements| elements.indices(),
             );
         }
+        let len = self.implicit_indices_len(name);
+        (0..len as i64).collect()
+    }
+
+    fn implicit_indices_len(&self, name: &str) -> usize {
         match name {
-            "BASH_ARGV" => (0..self.debug_frames().map(Vec::len).sum::<usize>() as i64).collect(),
-            "BASH_ARGC" => (0..self.debug_frames().count() as i64).collect(),
-            "GROUPS" => (0..self.group_ids().len() as i64).collect(),
-            "BASH_VERSINFO" => (0..6).collect(),
-            "DIRSTACK" => {
-                self.dynamic.stack_read.set(true);
-                (0..=self.dir_stack.len() as i64).collect()
-            }
-            "FUNCNAME" if self.function_depth == 0 => Vec::new(),
-            "FUNCNAME" => (0..self.function_names.len() as i64).collect(),
-            "BASH_LINENO" => (0..self.call_lines.len() as i64).collect(),
-            "BASH_SOURCE" => (0..self.source_names.len() as i64).collect(),
-            _ => self.inherited_value(name).map(|_| 0).into_iter().collect(),
+            "BASH_ARGV" => self.debug_frames().map(Vec::len).sum(),
+            "BASH_ARGC" => self.debug_frames().count(),
+            "GROUPS" => self.group_ids().len(),
+            // The last member is the native machine type.
+            "BASH_VERSINFO" => super::BASH_VERSINFO.len() + 1,
+            "FUNCNAME" if self.function_depth == 0 => 0,
+            "FUNCNAME" => self.function_names.len(),
+            "BASH_LINENO" => self.call_lines.len(),
+            "BASH_SOURCE" => self.source_names.len(),
+            _ => usize::from(self.inherited_value(name).is_some()),
         }
     }
 
@@ -379,6 +399,10 @@ impl Session {
                 .chain(&self.pipe_status.rest)
                 .nth(index as usize)
                 .map(u8::to_string);
+        }
+        if self.live_dirstack(name) {
+            self.dynamic.stack_read.set(true);
+            return self.stack_entry(index.try_into().ok()?);
         }
         if let Some(v) = self.variables.get(name) {
             if v.dynamic && index == 0 {
@@ -414,10 +438,6 @@ impl Session {
                     .get(usize::try_from(i).ok()?)
                     .map(|s| (*s).into()),
             },
-            "DIRSTACK" => {
-                self.dynamic.stack_read.set(true);
-                self.stack_entry(index.try_into().ok()?)
-            }
             "FUNCNAME" if self.function_depth == 0 => None,
             "FUNCNAME" => self
                 .function_names
@@ -457,7 +477,7 @@ impl Session {
             .filter(|(_, v)| v.elements.is_some() && v.array_assigned)
             .map(|(key, _)| key.clone())
             .collect();
-        if !self.variables.contains_key("DIRSTACK") {
+        if self.live_dirstack("DIRSTACK") {
             names.push("DIRSTACK".into());
         }
         for name in ["BASH_ALIASES", "BASH_CMDS"] {
@@ -465,6 +485,8 @@ impl Session {
                 names.push(name.into());
             }
         }
+        names.push("BASH_ARGC".into());
+        names.push("BASH_ARGV".into());
         names.push("BASH_SOURCE".into());
         names.push("BASH_LINENO".into());
         names.push("BASH_VERSINFO".into());
@@ -491,7 +513,24 @@ impl Session {
         self.stored_array_len(target)
     }
 
+    pub(crate) fn initialized_array(&self, name: &str) -> bool {
+        let Ok(base) = self.reference_name(name) else {
+            return false;
+        };
+        if self.live_dirstack(&base) {
+            return true;
+        }
+        self.variables.get(base.as_ref()).map_or_else(
+            || Self::builtin_array_parameter(&base),
+            |var| var.array_assigned || var.dynamic && var.elements.is_some(),
+        )
+    }
+
     pub(crate) fn stored_array_len(&self, name: &str) -> Option<usize> {
+        if self.live_dirstack(name) {
+            self.dynamic.stack_read.set(true);
+            return Some(self.dir_stack.len() + 1);
+        }
         if self.active_groups(name) && !self.variables.contains_key(name) {
             return Some(self.group_ids().len());
         }
@@ -511,6 +550,36 @@ impl Session {
             Elements::Records(records) => Some(records.ends.len()),
             Elements::Associative(map) => Some(map.len()),
         }
+    }
+
+    pub(crate) fn stored_associative_slice(
+        &self,
+        name: &str,
+        offset: i64,
+        count: usize,
+        keys: bool,
+    ) -> Option<Vec<String>> {
+        let name = self.reference_name(name).ok()?;
+        if self.live_table(&name) {
+            return None;
+        }
+        let map = self.variables.get(name.as_ref())?.associative()?;
+        let order = map.ordered_keys();
+        let start = if offset < 0 {
+            usize::try_from((order.len() as i64).saturating_add(offset)).unwrap_or(order.len())
+        } else {
+            offset.saturating_sub(1).max(0) as usize
+        }
+        .min(order.len());
+        let selected = &order[start..start.saturating_add(count).min(order.len())];
+        Some(if keys {
+            selected.to_vec()
+        } else {
+            selected
+                .iter()
+                .filter_map(|key| map.get(key).cloned())
+                .collect()
+        })
     }
 
     pub(crate) fn stored_indexed_slice(
@@ -589,7 +658,8 @@ impl Session {
         let elements = if self.live_table(name) {
             snapshot = Elements::Associative(self.table_snapshot(name));
             &snapshot
-        } else if let Some(elements) = self.variables.get(name).and_then(|v| v.elements.as_deref()) {
+        } else if let Some(elements) = self.variables.get(name).and_then(|v| v.elements.as_deref())
+        {
             elements
         } else {
             return false;
@@ -908,12 +978,13 @@ impl Session {
         map: &mut Elements,
         visible: bool,
         expression: &str,
+        evaluate: impl FnOnce(&str, &mut Session) -> Result<i64, &'static str>,
     ) -> Result<i64, &'static str> {
         if let Some(number) = Self::plain_decimal(expression) {
             return Ok(number);
         }
         if !visible {
-            return crate::arithmetic::run(expression, self);
+            return evaluate(expression, self);
         }
         if let Some((base, index)) = subscript(expression)
             && base == name
@@ -926,7 +997,7 @@ impl Session {
         *current.scalar_mut() = None;
         current.elements = Some(Rc::new(std::mem::replace(map, Elements::Dense(Vec::new()))));
         let previous = self.variables.insert(name.into(), current);
-        let result = crate::arithmetic::run(expression, self);
+        let result = evaluate(expression, self);
         let mut current = self.variables.remove(name).expect("active initializer");
         if let Some(previous) = previous {
             self.variables.insert(name.into(), previous);
@@ -1040,9 +1111,14 @@ impl Session {
                     Some(Index::Expression(expr)) if matches!(expr.as_str(), "*" | "@") => {
                         return Err("cannot assign to non-numeric index");
                     }
-                    Some(Index::Expression(expr)) => {
-                        Some(self.initializer_number(name, var, &mut map, visible, expr)?)
-                    }
+                    Some(Index::Expression(expr)) => Some(self.initializer_number(
+                        name,
+                        var,
+                        &mut map,
+                        visible,
+                        expr,
+                        |s, vars| crate::arithmetic::data_index(s, vars),
+                    )?),
                     None => None,
                 };
                 let i = match index {
@@ -1068,6 +1144,7 @@ impl Session {
                                         &mut map,
                                         visible,
                                         &expression,
+                                        crate::arithmetic::run,
                                     )?
                                 }
                             },
@@ -1075,8 +1152,15 @@ impl Session {
                     } else {
                         0
                     };
-                    old.wrapping_add(self.initializer_number(name, var, &mut map, visible, value)?)
-                        .to_string()
+                    old.wrapping_add(self.initializer_number(
+                        name,
+                        var,
+                        &mut map,
+                        visible,
+                        value,
+                        crate::arithmetic::run,
+                    )?)
+                    .to_string()
                 } else if concat {
                     map.get(&i).unwrap_or_default().to_owned() + value
                 } else {
@@ -1150,6 +1234,7 @@ impl Session {
                 &mut elements,
                 visible,
                 crate::arithmetic::numeric_subscript(expr),
+                |s, vars| crate::arithmetic::data_index(s, vars),
             )
             .and_then(|n| {
                 if n >= 0 {
@@ -1175,7 +1260,7 @@ impl Session {
         {
             return Ok(value);
         }
-        let n = crate::arithmetic::index(expr, &|k| self.get(k))?;
+        let n = crate::arithmetic::data_index(expr, &mut crate::arithmetic::ReadOnly(self))?;
         self.relative_index(name, n)
     }
 
@@ -1184,16 +1269,21 @@ impl Session {
     }
 
     pub fn last_index(&self, name: &str) -> Option<i64> {
+        if self.live_dirstack(name) {
+            return Some(self.dir_stack.len() as i64);
+        }
         if let Some(v) = self.variables.get(name) {
             return match &v.elements {
                 Some(map) => map.last_index(),
                 None => v.value.as_ref().map(|_| 0),
             };
         }
-        if name == "DIRSTACK" {
-            return Some(self.dir_stack.len() as i64);
-        }
-        self.indices(name).last().copied()
+        let count = if name == "PIPESTATUS" {
+            usize::from(self.pipe_status.first.is_some()) + self.pipe_status.rest.len()
+        } else {
+            self.implicit_indices_len(name)
+        };
+        count.checked_sub(1).map(|i| i as i64)
     }
 
     pub(crate) fn indexed_scalar_decimal(&self, name: &str, index: i64) -> Option<i64> {
@@ -1240,7 +1330,7 @@ impl Session {
         if self.protected_array(name) || self.readonly(name) {
             return;
         }
-        if name == "DIRSTACK" && !self.variables.contains_key(name) {
+        if self.live_dirstack(name) {
             if index > 0
                 && let Some(i) = self.dir_stack.len().checked_sub(index as usize)
             {

@@ -23,12 +23,13 @@ pub(super) fn edit_and_execute(
     if !text.ends_with('\n') {
         text.push('\n');
     }
-    match crate::history::commands::edit_text(session, editor, &text, status) {
+    let result = crate::history::commands::edit_text(session, editor, &text, status);
+    session.editor_queue = queued;
+    match result {
         Ok(Ok(mut edited)) => {
             if !edited.ends_with('\n') {
                 edited.push('\n');
             }
-            session.editor_queue = queued;
             Input::Line(edited)
         }
         Ok(Err(flow @ crate::Flow::Exit(_))) => Input::Control(flow),

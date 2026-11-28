@@ -34,7 +34,11 @@ fn run_statements<'a>(
         if session.noexec {
             return Flow::Continue(0);
         }
-        if session.notify && session.jobs.awaiting_notification() {
+        if session.jobs.notify
+            && session.jobs.monitor
+            && !session.jobs.is_empty()
+            && session.traps.notification_pending()
+        {
             session.jobs.poll();
             session.jobs.report_changes(session.posix);
         }
@@ -87,6 +91,9 @@ fn run_statements<'a>(
             | Command::Arithmetic(_) => true,
             _ => false,
         };
+        // Bash decides whether ERR applies before executing the simple command.
+        // A function can install the first handler while that command runs.
+        let error_trapped = reports_failure && !tested && session.traps.error_handler();
         let flow = if let Some(flow) = literal.and_then(|cmd| cmd.run_literal(session, status)) {
             single_status(session, &flow);
             flow
@@ -98,17 +105,32 @@ fn run_statements<'a>(
                     Cow::Borrowed(stmt) => Cow::Borrowed(&stmt.command),
                 },
                 status,
-                replace_last && statements.peek().is_none() && !negated && !session.traps.active(),
+                replace_last
+                    && statements.peek().is_none()
+                    && !negated
+                    && session.traps.can_replace_shell(),
             )
         };
         session.tested_depth -= u32::from(tested);
+        if session.traps.active() && crate::traps::terminating_pipe() {
+            // The interrupted write never completed. EXIT sees the status
+            // that was current before the producer's command began.
+            return Flow::Exit(status);
+        }
+        if std::mem::take(&mut session.jobs.foreground_interrupted)
+            && session.interactive
+            && (!session.traps.catches(libc::SIGINT) || session.loop_depth > 0)
+            && !session.traps.ignores(libc::SIGINT)
+        {
+            return Flow::Unwind(crate::traps::signal_status(libc::SIGINT));
+        }
         match flow {
             Flow::Discard(code) if session.errexit && !tested && session.tested_depth == 0 => {
                 return Flow::Exit(code);
             }
             Flow::Continue(code) => {
                 if code != 0 && reports_failure && !tested && session.tested_depth == 0 {
-                    if session.traps.active() {
+                    if error_trapped {
                         let flow = crate::traps::error(session, code);
                         if !matches!(flow, Flow::Continue(_)) {
                             return flow;
@@ -165,6 +187,21 @@ pub(crate) fn compound(
 }
 
 fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: bool) -> Flow {
+    // A pipeline stage may hold a redirected compound. Check before entering
+    // its redirection frame, including when the body will run in a child.
+    let recursive = match command.as_ref() {
+        Command::Pipeline(stages) => stages.len() != 1 || stages[0].compound.is_some(),
+        Command::LiteralAssignment(..)
+        | Command::Scalar(_)
+        | Command::Arithmetic(_)
+        | Command::Test(_)
+        | Command::Function { .. } => false,
+        _ => true,
+    };
+    if recursive && crate::stack_budget_exceeded() {
+        diagnostic!("command nesting limit exceeded");
+        return Flow::Unwind(1);
+    }
     if matches!(command.as_ref(), Command::Arithmetic(_) | Command::Test(_))
         && let Some(flow) = crate::traps::debug(session, status)
     {
@@ -180,6 +217,13 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
         | Command::Arithmetic(_) => true,
         _ => false,
     };
+    // Bash marks final simple commands for implicit exec, including the last
+    // arm of an AND/OR list, but keeps a shell for compound command bodies.
+    let tail = tail
+        && !matches!(
+            command.as_ref(),
+            Command::Group(_) | Command::Case(_) | Command::If { .. }
+        );
     let result = match command {
         Cow::Borrowed(Command::LiteralAssignment(text, end)) => {
             execute::literal_assignment(session, text, end.get(), status, tail)
@@ -274,7 +318,11 @@ fn execution_error(error: std::io::Error) -> Flow {
 }
 
 fn single_status(session: &mut Session, flow: &Flow) {
-    if let Flow::Discard(code) | Flow::Continue(code) | Flow::Exit(code) | Flow::Return(code) = flow
+    if let Flow::Discard(code)
+    | Flow::Unwind(code)
+    | Flow::Continue(code)
+    | Flow::Exit(code)
+    | Flow::Return(code) = flow
     {
         session.pipe_status.single(*code);
     }
@@ -363,6 +411,14 @@ fn run_for(
                 return flow;
             }
         }
+        if session.xtrace {
+            execute::trace_line(session, status, |line| {
+                line.push_str(header.text());
+                if implicit_words {
+                    line.push_str(" in \"$@\"");
+                }
+            });
+        }
         return select::run(session, name, &items, body, status);
     }
     let mut items = items.iter().map(String::as_str).chain(
@@ -389,11 +445,10 @@ fn run_for(
                 }
             });
         }
-        if s.assign_existing_literal(name, value) {
-            return Ok(Some(last));
-        }
         let error = if s.is_nameref(name) {
             s.assign_for_reference(name, value.to_owned()).err()
+        } else if s.assign_existing_literal(name, value) {
+            return Ok(Some(last));
         } else if s.readonly(name) {
             Some(crate::session::READONLY)
         } else if s.integer(name) {
@@ -476,7 +531,7 @@ fn run_arithmetic_loop(
         if !first && !s.traps.debug_handler() {
             s.current_command.clone_from(&header);
         }
-        if !first && (s.xtrace || !step.is_empty()) {
+        if !first && (s.xtrace || !step.trim().is_empty()) {
             arithmetic(s, step, &update, last)?;
         }
         first = false;
@@ -492,12 +547,9 @@ fn fixed_case(pattern: &CasePattern, value: &str, session: &Session) -> Option<b
             matcher.insensitive(value, false, session)
         }
         CasePattern::Fixed(matcher) => matcher.matches_session(value, session),
-        CasePattern::Extended(source) => crate::pattern::extended::session_match(
-            value,
-            source,
-            session.shopt.glob.extglob,
-            session,
-        ),
+        CasePattern::Extended(source, matcher) => {
+            matcher.matches(value, source, session.shopt.glob.extglob, session)
+        }
         CasePattern::Dynamic(_) => return None,
     })
 }
@@ -660,20 +712,22 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             } else {
                 // The background child itself is the explicit subshell. Its PID
                 // is exposed as $! and BASH_SUBSHELL increases only once.
-                if body.len() == 1
+                let parenthesized = body.len() == 1
                     && !body[0].negated
-                    && matches!(body[0].command, Command::Subshell(_))
-                {
+                    && matches!(body[0].command, Command::Subshell(_));
+                if parenthesized {
                     let Command::Subshell(group) = body.pop().unwrap().command else {
                         unreachable!()
                     };
                     body = group;
                 }
-                crate::subshell::launch_group(session, body, status, true)
+                crate::subshell::launch_group(session, body, status, true, parenthesized)
             }
         }
         Command::Group(body) => execute_program(session, body, status, tail),
-        Command::Subshell(body) => crate::subshell::launch_group(session, body, status, false),
+        Command::Subshell(body) => {
+            crate::subshell::launch_group(session, body, status, false, true)
+        }
         Command::Case(c) => run_case(
             session,
             &c.header,
@@ -775,7 +829,7 @@ fn repeat(
             break Flow::Continue(0);
         }
         if crate::interrupted() {
-            break Flow::Continue(130);
+            break Flow::Unwind(crate::traps::signal_status(libc::SIGINT));
         }
         let step = match next(session, last) {
             Ok(None) => break Flow::Continue(result),
@@ -821,10 +875,18 @@ pub(crate) fn call_with_bindings(
     let mut arguments = argv.into_iter();
     let name = arguments.next().expect("function name");
     if session.function_nesting_full() {
-        diagnostic!("{name}: function nesting limit exceeded");
-        return Flow::Discard(1);
+        let bound = session.function_nesting_bound();
+        if bound > 0 && session.function_depth - session.substitution_scopes >= bound {
+            diagnostic!("{name}: maximum function nesting level exceeded ({bound})");
+        } else {
+            diagnostic!("{name}: function nesting limit exceeded");
+        }
+        return Flow::Unwind(1);
     }
-    let function = session.functions[&name].clone();
+    let Some(function) = session.functions.get(&name).cloned() else {
+        diagnostic!("{name}: command not found");
+        return Flow::Continue(127);
+    };
     let traced = session.traced_functions.contains(&name);
     let callsite = session.current_command.clone();
     let caller_signal_line = session.signal_line;

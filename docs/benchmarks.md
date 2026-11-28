@@ -1,5 +1,90 @@
 # Startup and execution / 起動と実行性能
 
+## Copying an existing scalar / 既存スカラーへの代入
+
+A plain assignment from another stored variable took an owned snapshot and then copied it again into the destination. The plain assignment now moves the snapshot. Literal and append operations still reuse the destination buffer. On a native Apple M1, UTF-8 text of 16,384 ASCII bytes assigned 1,024 / 2,048 / 4,096 times took 9.574 / 11.272 / 11.957 ms before and 8.619 / 9.641 / 11.027 ms after. GNU Bash 5.3.20 took 68.480 / 122.061 / 217.433 ms. Each sample launched a release shell in an isolated directory and verified the length. Nine interleaved timings followed three warmups per executable. Other processes were active. The absolute gains on short inputs were small.
+
+16 KiB の変数を別の既存変数へ代入する経路で、所有済みの文字列を移動して2回目のコピーを省いた。入力の長さと反復回数を分け、短い値、文字列の連結、配列要素への代入と追記も対照として調べた。配列の2経路では一貫した効果を確認できず、この変更の高速化実績には含めていない。
+
+## Second external review, whole-input scaling (2026-11-29)
+
+The driver checks the exact output, exit status and stderr of each sample. It opens a new shell with a real file or seekable stdin, shuffles the executable order, drops one warmup and reports seven-run medians. The baseline is `80cce30`. At N = 1,024, wall times in milliseconds were as follows. The linked artifacts include N = 256 and 512, host details and the Bash versions. [Driver](../tools/ci/second-review.py) · [Native measurements](https://github.com/sanohiro/tonari-shell/actions/runs/46157814490)
+
+| Workload | Apple arm64 previous / candidate / Bash | Linux x86-64 previous / candidate / Bash |
+|---|---:|---:|
+| Nested `if` statements, regular file | 465.48 / 5.51 / 11.61 | 618.98 / 2.81 / 5.68 |
+| Same script on seekable stdin | 483.93 / 7.55 / 13.63 | 611.84 / 3.89 / 5.59 |
+| Separate `case` statements in one substitution | 243.88 / 6.16 / 17.80 | 375.02 / 3.91 / 8.47 |
+| Replace a two-character pattern in UTF-8 text | 40.20 / 3.74 / 10.19 | 26.78 / 0.73 / 5.70 |
+
+計測対象は各シェルの起動から結果の取得まで。実行順を入れ替え、毎回終了値・標準出力・標準エラーを検査した。Linux の標準入力経由では候補版は Bash の約 70% で、目標の 2/3 にわずかに届かなかった。数値は上記の CI が計測した候補コミット `524fabe` のもの。
+
+<a id="r2-hosted-2026-11-29"></a>
+
+### Six-workload follow-up / 6項目の追加計測
+
+Hosted native run 46161126355 compared the distribution build at `bd4370b` with `80cce30`. The macOS 15.8.2 runner used a virtual Apple M1, arm64 Bash 5.3.20 and `en_US.UTF-8`. Ubuntu 24.04 used an Intel Xeon 6975P-C, x86-64 Bash 5.2.21 and `C.UTF-8`. Both used Rust nightly 1.102.0 (6905905bb). The driver launched each shell in a fresh process, checked output, stderr and status, shuffled shell order, discarded one warm-up and took the median of seven runs. [Workload definitions](../tools/ci/second-review.py) · [Native run and downloadable artifacts](https://github.com/sanohiro/tonari-shell/actions/runs/46161126355)
+
+| Workload | N | Apple arm64 baseline / revised / Bash (ms) | Linux x86-64 baseline / revised / Bash (ms) |
+|---|---:|---:|---:|
+| Nested if, regular file | 256 | 33.436 / 4.159 / 9.221 | 34.714 / 0.945 / 2.210 |
+| Nested if, regular file | 512 | 125.411 / 5.033 / 11.721 | 145.589 / 1.551 / 3.163 |
+| Nested if, regular file | 1,024 | 501.794 / 5.987 / 13.345 | 615.606 / 2.592 / 4.880 |
+| Nested if, seekable stdin | 256 | 32.191 / 4.472 / 9.294 | 34.055 / 1.207 / 2.001 |
+| Nested if, seekable stdin | 512 | 122.007 / 5.154 / 10.770 | 144.183 / 2.015 / 3.119 |
+| Nested if, seekable stdin | 1,024 | 491.293 / 6.180 / 12.292 | 603.686 / 3.646 / 4.718 |
+| Case statements in one substitution | 256 | 20.706 / 5.124 / 11.647 | 24.527 / 1.496 / 3.086 |
+| Case statements in one substitution | 512 | 75.291 / 5.754 / 16.157 | 92.418 / 2.470 / 4.691 |
+| Case statements in one substitution | 1,024 | 273.253 / 5.983 / 16.442 | 401.679 / 4.010 / 7.590 |
+| Associative insert, delete and ordered listing | 256 | 6.050 / 6.178 / 18.362 | 6.356 / 4.139 / 9.611 |
+| Associative insert, delete and ordered listing | 512 | 9.016 / 6.430 / 27.505 | 12.294 / 7.761 / 18.515 |
+| Associative insert, delete and ordered listing | 1,024 | 13.487 / 8.362 / 46.167 | 24.163 / 14.790 / 35.662 |
+| Create named variables with printf -v | 256 | 3.634 / 3.446 / 8.253 | 0.754 / 0.747 / 1.877 |
+| Create named variables with printf -v | 512 | 4.627 / 4.717 / 12.063 | 1.059 / 1.107 / 3.100 |
+| Create named variables with printf -v | 1,024 | 4.336 / 4.612 / 13.474 | 1.859 / 1.902 / 6.578 |
+| Replace a two-character UTF-8 pattern | 256 | 5.106 / 3.807 / 8.710 | 1.512 / 0.403 / 1.195 |
+| Replace a two-character UTF-8 pattern | 512 | 13.552 / 5.580 / 11.470 | 6.161 / 0.440 / 1.996 |
+| Replace a two-character UTF-8 pattern | 1,024 | 47.430 / 4.019 / 13.165 | 31.171 / 0.588 / 5.169 |
+
+| Distribution executable | Baseline (bytes) | Revised (bytes) | Increase |
+|---|---:|---:|---:|
+| macOS arm64 Mach-O | 2,063,232 | 2,129,632 | 66,400 (3.2%) |
+| Linux x86-64 static PIE | 2,712,728 | 2,804,056 | 91,328 (3.4%) |
+
+At N = 1,024 the candidate took 77.3% of Bash time on Linux seekable stdin, above the two-thirds target. The other eleven candidate/host combinations at that size met the target. Variable creation took 6.4% longer than baseline on macOS and 2.3% longer on Linux. The artifact records medians for these six workloads. It provides no individual trials or uncertainty estimates, and the two runners used different Bash versions. Later corrections to process replacement, signal handling and deferred redirection postdate this measured revision.
+
+両機種で配布版を比較し、256・512・1,024の各サイズで起動から終了までの7回の中央値を記録した。表の値は順に基準版・候補版・各機種の Bash、単位は ms。N = 1,024 では Linux の seekable stdin が Bash の 77.3% で目標の 2/3 を超え、ほかの11組は目標内だった。変数作成は基準版より macOS で 6.4%、Linux で 2.3% 遅い。配布物はそれぞれ66,400バイト、91,328バイト増えた。計測コミットより後の修正や、端末入力・共有パイプの待ち時間はこの表の対象外。[実機計測](https://github.com/sanohiro/tonari-shell/actions/runs/46161126355)
+
+<a id="ordered-redirection-review"></a>
+
+## Ordered redirection operands / リダイレクト語の評価順
+
+Native macOS arm64 on Apple M1, Rust 1.96.1 release, Bash 5.3.20, local APFS temporary directory. Two warmups preceded 15 rotating samples per executable with `LC_ALL=C`, `PATH=/usr/bin:/bin`, and `--noprofile --norc -c`. Times cover launch through verified output. The first implementation installed each redirection separately when a later word required expansion. The second reused the normal descriptor actions for plain paths and quoted, stored scalars. Both Tonari executables were 2,395,520 bytes. Bash was 873,872 bytes.
+
+| Script | First median (ms) | Optimized median (ms) | Bash median (ms) |
+| --- | ---: | ---: | ---: |
+| `f=/dev/null; for ((i=0;i<700;i++)); do : >/dev/null >"$f"; done; echo "$i"` | 19.541 | 18.801 | 27.900 |
+| `for ((i=0;i<65;i++)); do printf hi >first >"$(test -f first && echo after)"; done; cat after` | 66.390 | 66.608 | 86.706 |
+| `f=3-; for ((i=0;i<500;i++)); do printf x >&"$f"; done; cat 3-` | 35.785 | 35.241 | 43.395 |
+
+A second 15-sample run of the quoted path measured 22.815, 22.305 and 33.248 ms respectively. Its first run ranged from 18.360–57.468 ms before to 18.513–26.746 ms after. Reusing descriptor actions gave a small repeated improvement on the quoted path. File truncation and child waits remained above the two-thirds time target in the first run. The tests use fresh paths to check creation order, visible fd state and scope. [Witnesses](../tests/shell.py)
+
+<a id="evaluation-stack-interrupt"></a>
+
+## November 28 · Evaluation stack and interrupt handling / 評価スタックと割り込み
+
+On an Apple M1 MacBook Air, Darwin 27.2.0 arm64, Rust 1.96.1 release, two warmups preceded 15 measured launches per executable in rotating order. Each command ran with `--noprofile --norc -c`, `LC_ALL=C` and `PATH=/usr/bin:/bin`. The first version checked the native stack floor while maintaining an expansion depth counter. The second checked the floor directly and moved builtin redirection handling into a separate frame. The binaries were 2,395,504 and 2,378,992 bytes respectively. The Bash 5.3.20 reference was 873,872 bytes.
+
+| Script | First median (ms) | Second median (ms) | Bash median (ms) |
+| --- | ---: | ---: | ---: |
+| `f(){ if (( $1 )); then f $(( $1 - 1 )); fi; }; for ((i=0;i<300;i++)); do f 8; done; echo "$i"` | 8.819 | 8.904 | 20.889 |
+| `x=abc; for ((i=0;i<3000;i++)); do : "$x" "$x" "$x" "$x"; done; echo "$i"` | 6.397 | 6.571 | 20.777 |
+| `f(){ { { :; } 3>&1; } 3>&1; }; for ((i=0;i<300;i++)); do f; done; echo "$i"` | 5.793 | 5.840 | 12.605 |
+
+The output was 300, 3000 and 300. In a separate interleaved run the first/second function times were 12.065/11.786 ms and the redirected group times were 7.959/7.404 ms. The timing differences varied across runs. A native stack sample gave a repeatable reduction from 10,960 to 9,872 bytes per function level. Bash used 1,010 bytes per level in the same script. To measure, run `f(){ if (( $1 )); then f $(( $1 - 1 )); else kill -0 "$$"; fi; }; f 0; f 8; :` and record the stack address at both calls to libc `kill` using a debugger or interposer. Divide the address difference by eight. Signal zero checks the PID without sending a signal. The saved stack space and smaller executable justified the change. [Bounded native and terminal regressions](../tests/shell.py)
+
+Apple M1 の同一環境で各シェルの実行順を入れ替え、出力と時間を確認した。通常の関数呼び出しでは、リダイレクト専用フレームを分離した結果、1 段のスタック使用量が 10,960 バイトから 9,872 バイトになった。実行時間の差は試行間で変動した。Bash はこの例で 1 段 1,010 バイトだった。時間・スタックの値はこの入力とビルドに対する実測である。
+
 <a id="independent-review-follow-up"></a>
 
 ## November 28 · Fixes from the independent review / 独立レビューで見つけた不具合の修正
@@ -4414,3 +4499,88 @@ The first macOS started sample set for `set -o monitor` stopped when the Bash re
 The three full timing runs overlapped on one arm64 host and its Linux VM. A subsequent serial Linux check ran 51 samples for 12 selected workloads. On Debian, the started `${v##a*}` probe took 0.736 ms against 0.735 ms previously and 0.982 ms on Bash. The complete interactive `COMP_TYPE` callback probe took 3.177 ms against 2.955 ms previously and 2.920 ms on Bash. On Ubuntu those callback medians were 2.880, 2.806 and 2.394 ms. The latter includes PTY startup and command dispatch. The key-to-display measurements above exercise a running editor.
 
 Linux の再計測では、短い変数展開や記述子操作の一部で並列計測時と異なる比率が出ました。入力への応答と、シェル起動を含む補完コールバックは別々に測定しており、コールバックの起動込み所要時間には改善余地が残ります。
+
+<a id="second-review-stored-subscripts"></a>
+
+## Stored subscripts and quoted slice bounds / 保存された添字と引用付きスライス
+
+Apple M1, arm64 macOS 27.2. The shell was built with `cargo build --release`. Each measurement starts a shell, executes 12,000 expansions in a loop, verifies the final value and includes process exit. The driver warms up once and takes the median of 15 further shuffled trials per shell. Each Tonari executable was 2,395,504 bytes, and the native GNU Bash 5.3.20 executable was 873,872 bytes. These are local Cargo release builds.
+
+| Workload | First correct Tonari (ms) | Tuned Tonari (ms) | Bash (ms) |
+| --- | ---: | ---: | ---: |
+| Arithmetic through an associative element nameref | 15.955 | 15.114 | 34.073 |
+| Arithmetic through a stored indexed array expression | 15.671 | 14.056 | 35.207 |
+| String slice with a quoted variable offset and literal length | 12.762 | 12.265 | 33.943 |
+
+The first implementation built a word for every stored `$key`. The retained implementation reads a lone parameter directly and consumes a stored decimal directly for a numeric index. Compound forms still use the data evaluator. The slice loop measures the normal parser and expansion path for an independent operation. Reproduce with `python3 tests/review_r2_language.py target/release/tonari /path/to/bash --benchmark --first /path/to/first-tonari`. [Workloads and output checks](../tests/review_r2_language.py)
+
+A second interleaved run, including the subsequent parameter error-handling fixes, measured 16.224 / 15.192 / 34.253 ms for the associative case, 15.896 / 14.487 / 35.725 ms for the indexed case, and 12.622 / 12.325 / 34.145 ms for the slice. Values follow the same column order as the table.
+
+Apple M1 実機で各ループを 12,000 回実行し、終了時の値と標準エラーを検査した。初回の正常実装は添字の `$key` を毎回パースしていた。単独の変数参照は直接読み出し、数値の添字では保存済み十進数を使う変更を採用した。複合式は従来どおりデータ用の評価器を通る。表はウォームアップ後に各シェルを交互に測った 15 回の中央値。
+
+After restoring length, case and pattern operations in stored subscripts, the same M1 driver measured 12,000 reads of a nameref to `a[${#args[@]}]`. Resolving the entire subscript as an array count reduced the median from 16.535 to 14.623 ms. GNU Bash 5.3.20 measured 40.502 ms. Each local Cargo release executable was 2,412,064 bytes. 初回実装は長さの展開ごとに単語を生成していた。添字全体が配列の長さであり、要素数が既知の場合は、数値を直接返す。[Reproduction driver](../tests/review_r2_language.py)
+
+### Static case arms and shell assignments (2026-11-29)
+
+Apple M1, Darwin 27.2.0 arm64, local temporary directory, native release, GNU Bash 5.3.20. The table gives median milliseconds from launch to verified output over seven rotating samples after one warm-up. Each command used `--noprofile --norc -c`, `LC_ALL=en_US.UTF-8` and `PATH=/usr/bin:/bin`. The baseline was rebuilt from the PR #58 working tree immediately before this pattern/exec pass. Changes by other reviewers were present, so the small differences outside the static-case row cannot be attributed to this cache.
+
+| Workload | Baseline | Revised | Bash |
+|---|---:|---:|---:|
+| 20 static extglob arms, last matches, 3,000 calls | 24.318 | 9.559 | 46.140 |
+| Delete `é?` from 256 copies of é, 40 times | 5.956 | 5.621 | 20.124 |
+| `x="$a$b"`, 12,000 assignments | 9.885 | 10.051 | 31.550 |
+| `a[2]=$i`, 12,000 assignments | 10.568 | 10.834 | 29.884 |
+| `a+=($i)`, 12,000 appends | 12.146 | 11.338 | 32.590 |
+
+To reproduce the case workload, generate a script with the following Python and run it with each shell. The expected output is 19. The min–max timings were 23.784–28.688 ms for baseline, 8.719–10.528 ms for revised, and 43.240–54.218 ms for Bash. The baseline executable was 2,412,064 bytes. A later combined-check build was 2,412,192 bytes, and Bash was 873,872 bytes.
+
+```python
+print("shopt -s extglob\nf() { case \"$1\" in")
+for i in range(20):
+    print(f"@(a{i}|b{i})) hit={i};;")
+print('esac; }\nfor ((i=0;i<3000;i++)); do f b19; done; echo "$hit"')
+```
+
+### R2 parser and expansion follow-up / パーサ・展開追試
+
+Apple M1 macOS native release executables, GNU Bash 5.3.20, one discarded warm-up and seven interleaved measured runs per program, deterministic shuffled order, process startup included. Every run checked stdout, stderr and exit status. The earlier and updated Tonari builds measured 2,412,064 and 2,428,768 bytes; the GNU executable measured 873,872 bytes. Values are median elapsed milliseconds with the observed range in parentheses.
+
+| Workload | Earlier Tonari | Updated Tonari | Bash |
+|---|---:|---:|---:|
+| POSIX multiword aliases, 1,200 definitions | 41.44 (38.24–47.77) | 8.15 (6.61–9.78) | 13.07 (11.47–15.61) |
+| Indexed array declaration, 4,000 operands | 19.79 (18.53–22.53) | 7.41 (6.66–13.10) | 17.98 (14.41–21.63) |
+| Array length in loop header, 12,000 iterations | 13.19 (12.35–17.28) | 7.92 (7.57–8.77) | 40.55 (37.49–45.05) |
+| Single-entry associative slices, 1,000 reads over 500 entries | 82.66 (73.21–119.97) | 8.25 (7.07–9.06) | 95.36 (84.61–135.14) |
+
+Run the four workloads in tests/review_r2_language.py with the benchmark switch. The development host also had other work running, so use interleaved medians to compare programs. POSIX alias definitions met the two-thirds upper target. The other three workloads also met the one-half target.
+
+Apple M1 上で 3 種の実行ファイルの実行順を毎回変え、出力と終了状況を照合しました。各値は 7 回の中央値と最小・最大値です。
+
+### Job notifications and trap dispatch (2026-11-29)
+
+Native Apple M1, Darwin 27.2.0 arm64, Rust release and GNU Bash 5.3.20, `LC_ALL=C`, `PATH=/usr/bin:/bin`. Median elapsed milliseconds from starting each shell with `--noprofile --norc -c` until its stdout printed the expected marker, one warm-up and seven rotating samples. The baseline predates the pattern and execution pass on PR #58. The revised build includes concurrent changes to other subsystems. Sizes were 2,412,064 / 2,445,296 / 873,872 bytes.
+
+| Workload, 20,000 iterations | Baseline | Revised | Bash |
+|---|---:|---:|---:|
+| `set -mb`, four background `sleep .4` children, loop body `:` | 38.425 | 23.792 | 59.349 |
+| Nonempty INT and TERM traps, loop body `: a b` | 8.913 | 9.101 | 40.102 |
+| Dynamic `case beta in $p1\|$p2) :;; esac`, patterns a* and b* | 15.187 | 14.910 | 44.678 |
+| `shopt -u globasciiranges`, loop body `:` | 8.306 | 8.217 | 35.989 |
+| `f(){ :; }`, loop body `f arg` | 11.850 | 12.054 | 63.356 |
+
+The notification sample's ranges were 23.394–95.738 / 10.239–26.093 / 49.676–91.147 ms. The runner read the output marker before waiting for all children to finish. Unconditional kernel polling previously visited each live child at every statement. The common signal-disposition path now polls on state changes. The trap-only samples measured 8.464–9.931 / 9.000–9.436 / 39.303–50.394 ms. Caching the trap-table predicate did not show an elapsed-time gain with two actions.
+
+### Shell level during command substitution
+
+On 2026-11-29, a MacBook Air M1 running macOS 27.2.1 compared native release executables with `LC_ALL=C`, `PATH=/usr/bin:/bin` and no inherited `SHLVL`. Each fresh shell ran `for ((i=0;i<32;i++)); do v=$(/usr/bin/printenv SHLVL); done; echo "$v"`. After one warmup, the driver shuffled each round's order, checked output and status, and measured nine runs.
+
+| 32 captures | Median wall time | Observed range | Printed level |
+|---|---:|---:|---:|
+| Previous local Tonari release | 81.892 ms | 77.708–118.194 ms | 1 |
+| Revised Tonari, direct capture | 86.269 ms | 78.490–350.127 ms | 0 |
+| Revised Tonari, `set -u` before the loop | 128.799 ms | 114.484–301.782 ms | 0 |
+| GNU Bash 5.3.20 | 147.430 ms | 131.401–167.971 ms | 0 |
+
+All variables in the loop were set before they were read. Enabling `nounset` selects the general command-substitution path in Tonari. The direct capture retained the same child environment and avoided starting a separate shell process for each substitution. Compiler activity on the host widened the timing ranges.
+
+macOS arm64 の実機で、同じシェル内のコマンド置換を 32 回計測した。修正版は高速経路でも通常経路でも参照 Bash と同じレベル 0 を返した。高速経路では置換ごとにシェルプロセスを起動する必要がなく、中央値は通常経路の 128.799 ms に対して 86.269 ms だった。並行してビルドが走っていたため、表には全サンプルの範囲も示した。

@@ -17,7 +17,10 @@ mod ansi;
 pub(crate) use ansi::decode as ansi_string;
 pub(crate) mod completion_words;
 mod here_doc;
-pub(crate) use lexer::{arithmetic_segments, arithmetic_word, associative_pair_word, subscript_word};
+pub(crate) use lexer::{
+    arithmetic_segments, arithmetic_word, associative_pair_word, initializer_index_word,
+    subscript_word,
+};
 mod lexer;
 mod modifier;
 mod wrapper;
@@ -52,6 +55,28 @@ use lexer::{LexWord, Token, lex};
 pub(crate) use modifier::index_end;
 use std::rc::Rc;
 
+// Nested prompt readers receive decoded escapes as literal word segments.
+// Record their byte positions so an alias or another source read cannot inherit them.
+thread_local! {
+    static PROMPT_ESCAPES: std::cell::RefCell<std::collections::BTreeMap<usize, (usize, String)>> =
+        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+}
+
+fn prompt_literal(chars: &mut std::str::Chars, word: &mut crate::word::WordBuilder) -> bool {
+    PROMPT_ESCAPES.with_borrow(|entries| {
+        let rest = chars.as_str();
+        let Some((len, value)) = entries.get(&rest.as_ptr().addr()) else {
+            return false;
+        };
+        let Some(tail) = rest.get(*len..) else {
+            return false;
+        };
+        word.literal(value);
+        *chars = tail.chars();
+        true
+    })
+}
+
 // Keep text supplied by prompt escapes (including the working directory) in
 // literal word segments. It must never be parsed as shell code.
 pub(crate) fn prompt_word(
@@ -60,6 +85,36 @@ pub(crate) fn prompt_word(
     posix: bool,
     mut escape: impl FnMut(char, &mut std::str::Chars, &mut String),
 ) -> Result<Word, Error> {
+    let mut entries = std::collections::BTreeMap::new();
+    if expand
+        && source.contains('\\')
+        && (source.contains("$(") || source.contains("${") || source.contains('`'))
+    {
+        let mut pending = source.chars();
+        while let Some(c) = pending.next() {
+            if c != '\\' {
+                continue;
+            }
+            let rest = pending.as_str();
+            let Some(code) = pending.next() else { break };
+            if code == '\\' {
+                continue;
+            }
+            let mut value = String::new();
+            escape(code, &mut pending, &mut value);
+            let size = rest.len() - pending.as_str().len();
+            if value.strip_prefix('\\') != Some(&rest[..size]) {
+                entries.insert(rest.as_ptr().addr(), (size, value));
+            }
+        }
+    }
+    struct Restore(std::collections::BTreeMap<usize, (usize, String)>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PROMPT_ESCAPES.replace(std::mem::take(&mut self.0));
+        }
+    }
+    let _restore = (!entries.is_empty()).then(|| Restore(PROMPT_ESCAPES.replace(entries)));
     let mut builder = crate::word::WordBuilder::default();
     let mut chars = source.chars();
     let mut escaped = String::new();
@@ -133,7 +188,7 @@ pub enum Error {
     ArithmeticClose,
     HereDoc(HereDocHint),
     Invalid(&'static str),
-    ArrayToken,
+    ArrayToken(u8),
 }
 
 impl Error {
@@ -170,23 +225,19 @@ impl Error {
             Self::NulByte => "NUL in command text",
             Self::ArithmeticClose => "invalid closing parenthesis in arithmetic expression",
             Self::HereDoc(_) => "unterminated here-document",
-            Self::ArrayToken => "unexpected token in array assignment",
+            Self::ArrayToken(_) => "unexpected token in array assignment",
         }
     }
 }
 
-thread_local! {
-    static EXPANSION_DEPTH: std::cell::Cell<u16> = const { std::cell::Cell::new(0) };
-}
-
-// A nested lexer starts a new Reader. Charge the parent even across that
-// boundary, including expansion of a word originally obtained from a file.
-pub(crate) fn enter_expansion() -> Result<crate::ScopedCell<u16>, Error> {
-    let depth = EXPANSION_DEPTH.get();
-    if depth >= 128 || depth >= 8 && depth.is_multiple_of(8) && crate::stack_budget_exceeded() {
-        return Err(Error::Invalid("shell expansion nesting limit exceeded"));
+// Lexing nested syntax and resolving a stored word share the current native
+// stack, including in a forked substitution child.
+pub(crate) fn check_expansion_stack() -> Result<(), Error> {
+    if crate::stack_budget_exceeded() {
+        Err(Error::Invalid("shell expansion nesting limit exceeded"))
+    } else {
+        Ok(())
     }
-    Ok(crate::ScopedCell::enter(&EXPANSION_DEPTH, depth + 1))
 }
 
 pub(crate) fn reserved(word: &str) -> bool {
@@ -211,14 +262,26 @@ pub fn parse_final(source: &str) -> Result<Vec<Statement>, Error> {
     parse_source(source, true)
 }
 
-#[derive(Clone, Copy)]
-struct ReadOptions {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReadOptions {
     comments: bool,
     posix: bool,
     time_options_external: bool,
     extquote: bool,
     extglob: bool,
 }
+impl From<&crate::Session> for ReadOptions {
+    fn from(session: &crate::Session) -> Self {
+        ReadOptions {
+            comments: session.read_comments(),
+            posix: session.posix,
+            time_options_external: session.posix && session.shopt.compat > 41,
+            extquote: session.shopt.extquote,
+            extglob: session.shopt.glob.extglob,
+        }
+    }
+}
+
 thread_local! {
     // Lexers invoked recursively by a substitution inherit the outer read's options.
     static FIRST_LINE: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
@@ -263,9 +326,8 @@ pub(crate) fn validate_tail(source: &str, session: &crate::Session, line: usize)
         let Ok((tokens, spans, _)) = lex(source, false, false) else {
             return false;
         };
-        Reader::new(tokens, spans, source)
-            .read_list(&[], true)
-            .is_ok()
+        let mut reader = Reader::new(tokens, spans, source);
+        reader.read_list(&[], true).is_ok() && reader.invalid_array_end.is_none()
     })
 }
 
@@ -353,16 +415,7 @@ pub(crate) fn with_subscript_aliases<T>(
 fn with_read_options<T>(session: &crate::Session, line: usize, parse: impl FnOnce() -> T) -> T {
     let read = || {
         let _first_line = crate::ScopedCell::enter(&FIRST_LINE, line);
-        let _options = crate::ScopedCell::enter(
-            &READ_OPTIONS,
-            ReadOptions {
-                comments: session.read_comments(),
-                posix: session.posix,
-                time_options_external: session.posix && session.shopt.compat > 41,
-                extquote: session.shopt.extquote,
-                extglob: session.shopt.glob.extglob,
-            },
-        );
+        let _options = crate::ScopedCell::enter(&READ_OPTIONS, ReadOptions::from(session));
         parse()
     };
     if session.reads_aliases() {
@@ -544,6 +597,7 @@ fn with_source_lines<T>(source: &str, lex: impl FnOnce() -> T) -> T {
 
 struct Reader {
     here_extents: Vec<(usize, usize)>,
+    invalid_array_end: Option<usize>,
     depth: usize,
     first_line: usize,
     source: Rc<str>,
@@ -557,20 +611,24 @@ struct Reader {
     tokens: std::collections::VecDeque<Token>,
 }
 
+fn cache_token_buffers(mut tokens: Vec<Token>, mut spans: Vec<(usize, usize)>) {
+    if tokens.capacity().max(spans.capacity()) <= MAX_CACHED_TOKENS {
+        tokens.clear();
+        spans.clear();
+        TOKEN_BUFFERS.set((tokens, spans));
+    }
+}
+
 impl Drop for Reader {
     fn drop(&mut self) {
         if self.newlines.capacity() <= MAX_CACHED_TOKENS && self.newlines.capacity() != 0 {
             self.newlines.clear();
             READER_NEWLINES.set(std::mem::take(&mut self.newlines));
         }
-        if self.tokens.capacity().max(self.spans.capacity()) <= MAX_CACHED_TOKENS {
-            self.tokens.clear();
-            self.spans.clear();
-            TOKEN_BUFFERS.set((
-                std::mem::take(&mut self.tokens).into(),
-                std::mem::take(&mut self.spans),
-            ));
-        }
+        cache_token_buffers(
+            std::mem::take(&mut self.tokens).into(),
+            std::mem::take(&mut self.spans),
+        );
     }
 }
 
@@ -607,6 +665,7 @@ impl Reader {
             first_line: source_line(source),
             line_index: std::cell::Cell::new(0),
             here_extents: Vec::new(),
+            invalid_array_end: None,
             depth: 0,
             spans,
             alias_source: None,
@@ -740,14 +799,21 @@ impl Reader {
     }
 
     fn list(&mut self, stops: &[&str]) -> Result<Vec<Statement>, Error> {
-        self.nested(|r| r.read_list(stops, false)).map_err(|error| {
-            // Never resume in the body of an invalid loop, conditional or function.
-            if !stops.is_empty() && matches!(error, Error::ArrayToken) {
-                Error::Invalid(error.message())
-            } else {
-                error
-            }
-        })
+        let statements = self.nested(|r| r.read_list(stops, false))?;
+        if self.depth == 0
+            && let Some(end) = self.invalid_array_end
+        {
+            // A closing fi, brace or parenthesis on a later physical line
+            // gives a compound syntax error. Same-line recovery returns 1.
+            let multiline = statements
+                .iter()
+                .find(|s| s.location.start < end && end <= s.location.end)
+                .and_then(|s| s.location.source.get(end..s.location.end))
+                .is_some_and(|rest| rest.as_bytes().contains(&b'\n'));
+            Err(Error::ArrayToken(if multiline { 2 } else { 1 }))
+        } else {
+            Ok(statements)
+        }
     }
 
     fn read_list(
@@ -842,21 +908,8 @@ impl Reader {
             }
             let mut location = self.location(start);
             if location.subscript_aliases.0.is_some()
-                && let Command::Pipeline(stages) = &command
-                && let [stage] = stages.as_slice()
-                && stage.compound.is_none()
-                && stage.redirects.is_empty()
-                && stage.assignments.is_empty()
-                && let Some((first, args)) = stage.words.split_first()
-                && first.as_literal() == Some("alias")
-                && args.iter().all(|arg| {
-                    arg.as_literal()
-                        .and_then(|value| value.split_once('='))
-                        .is_some_and(|(key, value)| is_identifier(key) && is_identifier(value))
-                })
+                && !aliases::may_read_nested_command(location.text())
             {
-                // Every operand is a literal name=value pair of identifiers.
-                // Such a command has no expansion that can parse a subscript.
                 location.subscript_aliases = Default::default();
             }
             statements.push(Statement {
@@ -1069,13 +1122,13 @@ impl Reader {
             }
             _ => return Err(Error::Invalid("expected a case word")),
         };
-        self.alias_newlines(&["in"])?;
+        self.alias_newlines(false, &["in"])?;
         self.expect("in")?;
         let header = self.location(start);
         self.newlines();
         let mut arms = Vec::with_capacity(2);
         loop {
-            self.alias_newlines(&["esac"])?;
+            self.alias_newlines(false, &["esac"])?;
             if self.keyword() == Some("esac") {
                 break;
             }
@@ -1180,7 +1233,7 @@ impl Reader {
             if matches!(self.peek(), Some(Token::End)) {
                 self.tokens.pop_front();
             }
-            self.newlines();
+            self.alias_newlines(true, &["do", "{"])?;
             let (open, close) = if self.keyword() == Some("{") {
                 ("{", "}")
             } else {
@@ -1202,7 +1255,7 @@ impl Reader {
             "expected a loop variable",
             "expected a loop variable",
         )?;
-        self.alias_newlines(&["in", "do"])?;
+        self.alias_newlines(false, &["in", "do"])?;
         let words = if self.keyword() == Some("in") {
             self.tokens.pop_front();
             let mut words = Vec::new();
@@ -1226,7 +1279,7 @@ impl Reader {
         if matches!(self.peek(), Some(Token::End)) {
             self.tokens.pop_front();
         }
-        self.alias_newlines(&["do"])?;
+        self.alias_newlines(true, &["do"])?;
         self.expect("do")?;
         let body = self.list(&["done"])?;
         self.expect("done")?;
@@ -1281,7 +1334,7 @@ impl Reader {
                 _ => return Err(Error::Invalid("expected empty function parentheses")),
             }
         }
-        self.alias_newlines(&["{", "if", "while", "until", "for", "case"])?;
+        self.alias_newlines(true, &["{", "if", "while", "until", "for", "case"])?;
         let start = self.position();
         let compound = self.nested(Self::compound)?.ok_or_else(|| {
             if self.peek().is_none() {
@@ -1365,6 +1418,9 @@ impl Reader {
                     .pop_front()
                     .ok_or(Error::Invalid("expected a redirection"))?;
                 self.redirection(token, redirects)?;
+                if redirects[first].target == Target::OutputWord {
+                    redirects[first].target = Target::Duplicate;
+                }
                 redirects[first].variable = Some(name.into());
             }
             Token::BothRedirect(target) => {
@@ -1381,13 +1437,47 @@ impl Reader {
                 redirects.push(duplicate_stdout(line));
             }
             Token::Redirect(fd, target) => {
-                let Some(Token::Word(LexWord { word, .. })) = self.operand() else {
+                let start = self.position();
+                let Some(Token::Word(LexWord { mut word, .. })) = self.operand() else {
                     return Err(Error::Invalid("expected a redirection target"));
                 };
-                let target = if target == Target::OutputWord
-                    && word.as_literal().is_some_and(|v| {
-                        v == "-" || lexer::descriptor(v.strip_suffix('-').unwrap_or(v)).is_ok()
-                    }) {
+                let target = if matches!(target, Target::Duplicate | Target::OutputWord)
+                    && word
+                        .as_literal()
+                        .is_none_or(|value| value.ends_with('-') && value != "-")
+                    && self
+                        .location(start)
+                        .text()
+                        .trim_end_matches("\\\n")
+                        .ends_with('-')
+                {
+                    // Bash recognizes the move operator in the shell spelling,
+                    // before expanding the operand or removing its quotes.
+                    use crate::word::Part;
+                    match &mut word {
+                        Word::Literal(text) => {
+                            text.pop();
+                        }
+                        Word::Expanded(parts) | Word::Declaration(parts) => {
+                            match parts.last_mut() {
+                                Some(
+                                    Part::Text(text) | Part::Pattern(text) | Part::Tilde(text),
+                                ) => {
+                                    text.pop();
+                                }
+                                Some(part @ Part::Parameter { .. }) => {
+                                    *part = Part::Text("$".into())
+                                }
+                                _ => return Err(Error::Invalid("invalid descriptor move")),
+                            }
+                        }
+                    }
+                    Target::MoveWord
+                } else if target == Target::OutputWord
+                    && word
+                        .as_literal()
+                        .is_some_and(|v| v == "-" || lexer::descriptor(v).is_ok())
+                {
                     Target::Duplicate
                 } else {
                     target

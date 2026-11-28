@@ -10,7 +10,7 @@ pub(crate) struct ArrayDeclaration {
 #[derive(Default)]
 pub(crate) struct PreparedCommand {
     pub(super) missing_hook: bool,
-    pub(super) named_redirects: Vec<Redirect<Word>>,
+    pub(super) deferred_redirects: Vec<Redirect<Word>>,
     pub(super) resolved: Option<PathBuf>,
     pub(super) array_declarations: Vec<ArrayDeclaration>,
     pub(super) compound: Option<std::rc::Rc<crate::parser::Command>>,
@@ -20,6 +20,7 @@ pub(crate) struct PreparedCommand {
     pub(super) redirects: Vec<Redirect>,
     pub(super) assignments: Vec<(String, String)>,
     pub(super) empty_status: u8,
+    pub(super) environment: external::ChildEnvironment,
     pub(super) literal_has_keywords: bool,
     pub(super) literal_has_braces: bool,
 }
@@ -191,10 +192,13 @@ impl PreparedCommand {
     }
 
     pub(super) fn cached_path<'a>(&'a self, session: &'a Session, name: &str) -> Option<&'a Path> {
-        if !self.cacheable() || name.contains('/') {
+        if name.contains('/') {
             return None;
         }
         self.resolved.as_deref().or_else(|| {
+            if !self.cacheable() {
+                return None;
+            }
             session.hashes.get(name).filter(|path| {
                 !(session.posix || session.shopt.checkhash) || lookup::executable(path)
             })
@@ -478,8 +482,12 @@ pub(super) fn prepare_expanded(
                         out.push_str(&trace_word(&value));
                     });
                 }
+                let mut stored_index = false;
                 match exp.session.reference_name(&key) {
-                    Ok(std::borrow::Cow::Owned(resolved)) => key = resolved,
+                    Ok(std::borrow::Cow::Owned(resolved)) => {
+                        stored_index = !key.contains('[');
+                        key = resolved;
+                    }
                     Ok(_) => {}
                     Err(error) if exp.session.function_depth == 0 => {
                         return Err(crate::expansion::Error::fatal(
@@ -515,7 +523,11 @@ pub(super) fn prepare_expanded(
                     && exp.session.is_associative(base)
                 {
                     if standalone {
-                        let element = exp.expanded_key(subscript)?;
+                        let element = if stored_index {
+                            crate::arithmetic::data_key(subscript, &mut exp)?
+                        } else {
+                            exp.expanded_key(subscript)?
+                        };
                         if element.is_empty() {
                             return Err(crate::expansion::Error::fatal(
                                 format!("{key}: bad array subscript"),
@@ -552,6 +564,8 @@ pub(super) fn prepare_expanded(
                     }
                     let n = if let Some(n) = Session::plain_decimal(subscript) {
                         n
+                    } else if stored_index {
+                        crate::arithmetic::data_index(subscript, &mut exp)?
                     } else {
                         exp.arithmetic(subscript)?
                     };
@@ -612,7 +626,7 @@ pub(super) fn prepare_expanded(
         missing_hook: false,
         literal_has_keywords: false,
         literal_has_braces: false,
-        named_redirects: Vec::new(),
+        deferred_redirects: Vec::new(),
         resolved: None,
         array_declarations,
         compound: raw.compound,
@@ -622,6 +636,7 @@ pub(super) fn prepare_expanded(
         redirects: Vec::new(),
         assignments,
         empty_status: captured.get().unwrap_or(0),
+        environment: Default::default(),
     };
     if session.xtrace && !cmd.words.is_empty() {
         trace_line(session, last_status, |out| {
@@ -678,12 +693,17 @@ fn expand_prepared_redirects(
     assignment_only: bool,
     standalone: bool,
 ) -> Result<(), crate::expansion::Error> {
-    if redirects.iter().any(|r| r.variable.is_some()) {
-        cmd.named_redirects = redirects;
+    if super::deferred_redirects(&redirects, session) {
+        cmd.deferred_redirects = redirects;
     } else if !redirects.is_empty() {
-        // Bash expands external/redirect-only redirections in a child context.
-        // Clone only if an expansion can change a variable in that context.
-        let child = assignment_only || builtin(cmd, last_status, session).is_none();
+        // A standalone null command expands ordinary output redirects in the shell.
+        // Bash isolates the whole redirect list if any redirect replaces stdin.
+        let isolated_null = assignment_only && super::isolated_null_redirects(&redirects);
+        let child = if assignment_only {
+            !standalone || isolated_null
+        } else {
+            builtin(cmd, last_status, session).is_none()
+        };
         let process_scope = session.substitutions.scope();
         let mut isolated = (child && redirects.iter().any(|r| redirection_observable(r, session)))
             .then(|| session.clone());
@@ -710,7 +730,11 @@ fn expand_prepared_redirects(
             }
             e
         })?;
-        cmd.empty_status = captured.get().unwrap_or(0);
+        cmd.empty_status = if isolated_null {
+            0
+        } else {
+            captured.get().unwrap_or(0)
+        };
     }
     Ok(())
 }
@@ -763,25 +787,39 @@ pub(super) fn prepare_redirects(
             (_, word) => exp.redirect_path(word)?,
         };
         let mut word = word;
-        let mut moved = None;
         let both = r.target == Target::OutputWord
-            && !word.ends_with('-')
+            && word != "-"
             && !word.bytes().all(|b| b.is_ascii_digit());
         let mut target = match r.target {
             Target::OutputWord if both => Target::Write,
-            Target::OutputWord => Target::Duplicate,
+            Target::MoveWord | Target::OutputWord => Target::Duplicate,
             target => target,
         };
+        if r.target == Target::MoveWord && word.is_empty() {
+            word.push('-');
+        }
+        let mut moved = None;
         if target == Target::Duplicate && word != "-" {
-            let source = word.strip_suffix('-').unwrap_or(&word);
-            let fd = source
+            let fd = word
                 .parse::<RawFd>()
                 .ok()
-                .filter(|_| source.bytes().all(|b| b.is_ascii_digit()))
-                .ok_or("invalid file descriptor")?;
-            if source.len() != word.len() {
+                .filter(|_| word.bytes().all(|b| b.is_ascii_digit()))
+                .ok_or_else(|| {
+                    let (label, reason) = if r.target == Target::MoveWord
+                        || !word.is_empty() && !word.bytes().all(|b| b.is_ascii_digit())
+                    {
+                        (word.clone(), "ambiguous redirect")
+                    } else if word.is_empty() {
+                        ("\"\"".into(), "Bad file descriptor")
+                    } else if r.target == Target::OutputWord {
+                        (word.clone(), "Bad file descriptor")
+                    } else {
+                        (r.fd.to_string(), "Bad file descriptor")
+                    };
+                    crate::expansion::Error::from(reason).in_expression(&label)
+                })?;
+            if r.target == Target::MoveWord {
                 moved = Some(fd);
-                word.pop();
             }
         }
         if target == Target::Write && exp.session.noclobber {

@@ -40,7 +40,7 @@ def main():
         env = dict(PATH=os.environ["PATH"], TEST_TMPDIR=str(setup), RECORDS=str(records),
                    HOME=str(scratch), BASH_REF=str(bash), FORCE_JOB_TESTS="1", FORCE_COPROC_TESTS="1")
         subprocess.run(["/bin/sh", path], env=env, cwd=setup, stdin=subprocess.DEVNULL,
-                       stdout=sys.stderr, check=True)
+                       stdout=sys.stderr, check=True, timeout=300)
         values = records.read_bytes().split(b"\0")
         assert values.pop() == b"" and len(values) % 4 == 0
         for i in range(0, len(values), 4):

@@ -7,8 +7,9 @@ pub(crate) mod quote;
 mod replace;
 use crate::parser::Statement;
 use crate::pattern::{Field, quote_into};
-pub(crate) use modifier::character_count;
 pub use modifier::{Modification, ReplaceMode};
+pub(crate) use modifier::{character_count, substring};
+pub(crate) use replace::substitute;
 
 pub(crate) const ARRAY_INDEXES_PREFIX: char = '\u{1}';
 fn array_indexes_key(base: &str) -> String {
@@ -26,18 +27,24 @@ fn indirect_target(
     mut target: String,
     env: &mut crate::expansion::Expansion<'_>,
 ) -> Result<String, crate::expansion::Error> {
-    // Resolve a computed numeric index once. Later parameter
-    // operations consume the index without reinterpreting its source.
+    // Indirection supplies a stored subscript. Resolve it once before
+    // evaluating the parameter operation that follows the indirection.
     if let Some((base, expr)) = crate::session::array::subscript(&target)
         && is_identifier(base)
+        && !expr.is_empty()
         && !matches!(expr, "@" | "*")
-        && !env.session.is_associative(base)
-        && !expr.bytes().all(|b| b.is_ascii_digit())
     {
-        let index = env.session.resolve_index(base, expr).map_err(|_| {
-            crate::expansion::Error::discard(format!("{target}: invalid variable name"))
-        })?;
-        target = format!("{base}[{index}]");
+        if env.session.is_associative(base) {
+            // Later modifiers parse source subscripts. Quote the resolved key
+            // so its characters survive that stage literally.
+            let key = crate::arithmetic::data_key(expr, env)?;
+            target = format!("{base}[{}]", quote::single_quote(&key));
+        } else if !expr.bytes().all(|b| b.is_ascii_digit()) {
+            let index = env.session.resolve_index(base, expr).map_err(|_| {
+                crate::expansion::Error::discard(format!("{target}: invalid variable name"))
+            })?;
+            target = format!("{base}[{index}]");
+        }
     } else if !(is_identifier(&target)
         || array_elements_name(&target).is_some()
         || (!target.is_empty() && target.bytes().all(|b| b.is_ascii_digit()))
@@ -316,11 +323,12 @@ impl Word {
             Self::Literal(_) => return Ok(()),
             Self::Expanded(parts) | Self::Declaration(parts) => parts,
         };
-        let _nesting = crate::parser::enter_expansion()
+        crate::parser::check_expansion_stack()
             .map_err(|error| crate::expansion::Error::discard(error.message()))?;
         let literal = modifier::scalar_part;
         let mixed = parts.len() > 1;
         for part in parts.iter_mut() {
+            let mut indirect_name = None;
             if let Part::PrefixNames { prefix, at, quoted } = part {
                 *part = Part::Elements {
                     values: env.session.variable_names(prefix),
@@ -352,12 +360,13 @@ impl Word {
                 && let Some(reference) = name.strip_prefix('!')
                 && env.session.is_nameref(reference)
             {
-                let target = env
-                    .session
-                    .read_reference_name(reference)
-                    .unwrap_or_default()
-                    .into_owned();
-                *part = literal(target, *quoted);
+                let target = env.session.read_reference_name(reference);
+                if matches!(target, Some(std::borrow::Cow::Borrowed(_))) {
+                    return Err(crate::expansion::Error::discard(format!(
+                        "{reference}: invalid indirect expansion"
+                    )));
+                }
+                *part = literal(target.unwrap_or_default().into_owned(), *quoted);
                 continue;
             }
             if let Part::Parameter { name, .. } = part
@@ -396,7 +405,8 @@ impl Word {
                         || reference.as_bytes().first().is_some_and(u8::is_ascii_digit)
                             && reference
                                 .parse::<usize>()
-                                .is_ok_and(|i| i > env.session.positional.len()))
+                                .ok()
+                                .is_none_or(|i| i > env.session.positional.len()))
                 {
                     *name = "".into();
                 }
@@ -418,7 +428,11 @@ impl Word {
                             crate::expansion::Error::discard(message)
                         });
                     };
-                    *name = indirect_target(target, env)?.into();
+                    let target = indirect_target(target, env)?.into();
+                    let reference = std::mem::replace(name, target);
+                    if env.session.nounset {
+                        indirect_name = Some(reference);
+                    }
                 }
             }
             if let Part::Parameter { name, quoted } = part
@@ -451,6 +465,7 @@ impl Word {
                     {
                         let extended = env.session.shopt.glob.extglob;
                         let source = std::mem::take(pattern.as_mut()).fixed_pattern(extended);
+                        let _locale = crate::pattern::parameter_locale(env.session, &source);
                         let compiled =
                             crate::pattern::ParameterPattern::new(&source, extended, None);
                         let cut = crate::pattern::trim_boundary(text, &compiled, *prefix, *longest);
@@ -464,6 +479,7 @@ impl Word {
                     }
                     let values = modifier::Values::read(name, env)?;
                     let pattern = env.pattern(std::mem::take(pattern.as_mut()))?;
+                    let _locale = crate::pattern::parameter_locale(env.session, &pattern);
                     let compiled = crate::pattern::ParameterPattern::new(
                         &pattern,
                         env.session.shopt.glob.extglob,
@@ -476,10 +492,7 @@ impl Word {
                 Part::Arithmetic { expression, quoted } => {
                     let value = match expression.compiled(env, true) {
                         Some(Ok(n)) => n,
-                        Some(Err(e)) if e == "unbound arithmetic variable" => {
-                            return Err(crate::arithmetic::shell_error(e, expression, env.session));
-                        }
-                        Some(Err(e)) => return Err(crate::expansion::Error::discard(e)),
+                        Some(Err(e)) => return Err(e.error(expression, env.session, true)),
                         None => env.arithmetic(expression)?,
                     };
                     *part = literal(value.to_string(), *quoted);
@@ -541,7 +554,7 @@ impl Word {
                             else {
                                 unreachable!()
                             };
-                            let separator = ifs_separator(&|key| env.lookup(key));
+                            let separator = env.ifs_separator();
                             let nonempty = values.iter().any(|s| !s.is_empty())
                                 || values.len() > 1 && (at || !*quoted || !separator.is_empty());
                             let set = !values.is_empty() && (!*check_empty || nonempty);
@@ -606,17 +619,13 @@ impl Word {
                 }
                 Part::Parameter { name, quoted: true } if name == "*" => {
                     // A later expansion in this word can change IFS or the arguments.
-                    *part = Part::Text(
-                        env.session
-                            .positional
-                            .as_slice()
-                            .join(&ifs_separator(&|k| env.lookup(k))),
-                    );
+                    *part =
+                        Part::Text(env.session.positional.as_slice().join(&env.ifs_separator()));
                 }
                 Part::Parameter { name, quoted: true }
                     if name.ends_with("[*]") && array_elements_name(name).is_some() =>
                 {
-                    let separator = ifs_separator(&|k| env.lookup(k));
+                    let separator = env.ifs_separator();
                     if let Some((base, _, false)) = array_elements_name(name)
                         && !env.shadows(base)
                         && let Some(joined) = env.session.join_array(base, &separator)
@@ -624,6 +633,7 @@ impl Word {
                         *part = Part::Text(joined);
                         continue;
                     }
+                    let separator = separator.into_owned();
                     let modifier::Values::Elements(values, _) = modifier::Values::read(name, env)?
                     else {
                         unreachable!()
@@ -636,7 +646,12 @@ impl Word {
                 {
                     let value = modifier::value(name, env)?;
                     if env.session.nounset && value.is_none() {
-                        return Err(env.missing(name, "unbound variable"));
+                        return Err(env.missing(
+                            indirect_name
+                                .as_deref()
+                                .unwrap_or_else(|| name.strip_prefix('#').unwrap_or(name)),
+                            "unbound variable",
+                        ));
                     }
                     *part = literal(
                         value.unwrap_or_else(|| {
@@ -769,7 +784,11 @@ impl Word {
         self.expand_pattern(PatternKind::Extended, lookup, positional)
     }
 
-    fn replacement(self, lookup: &dyn Fn(&str) -> Option<String>, positional: &[String]) -> String {
+    pub(crate) fn replacement(
+        self,
+        lookup: &dyn Fn(&str) -> Option<String>,
+        positional: &[String],
+    ) -> String {
         self.expand_pattern(PatternKind::Replacement, lookup, positional)
     }
     pub fn regex(self, lookup: &dyn Fn(&str) -> Option<String>, positional: &[String]) -> String {
@@ -1048,7 +1067,7 @@ fn snapshot_array(
             if !at && quoted {
                 // The separator belongs to this expansion, even if a later
                 // parameter assignment in the same word changes IFS.
-                Part::Text(values.join(&ifs_separator(&|k| env.lookup(k))))
+                Part::Text(values.join(&env.ifs_separator()))
             } else {
                 Part::Elements { values, at, quoted }
             }

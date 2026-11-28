@@ -48,11 +48,19 @@ pub(crate) fn format<'a>(source: &'a str, session: &crate::Session) -> Result<Co
                     result.push_str("    ");
                 }
                 copied = start;
-            } else if after_separator && attach && i > 0 && matches!(tokens[i - 1], Token::End) {
-                let previous = spans[i - 1].1;
-                result.push_str(&source[copied..previous]);
-                result.push(' ');
-                copied = start;
+            } else if after_separator && attach && i > 0 {
+                let last = (0..i)
+                    .rev()
+                    .find(|&index| !matches!(tokens[index], Token::Newline));
+                if let Some(last) = last {
+                    result.push_str(&source[copied..spans[last].1]);
+                    if matches!(tokens[last], Token::End) {
+                        result.push(' ');
+                    } else {
+                        result.push_str("; ");
+                    }
+                    copied = start;
+                }
             }
             after_body_start = matches!(word, Some("then" | "do" | "else"));
             if after_body_start {

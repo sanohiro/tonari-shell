@@ -47,7 +47,15 @@ pub(super) fn open(
             || attempted.as_ref().is_err_and(|e| {
                 !matches!(
                     e.raw_os_error(),
-                    Some(libc::ENOENT | libc::ENOTDIR | libc::EACCES | libc::EROFS)
+                    Some(
+                        libc::ENOENT
+                            | libc::ENOTDIR
+                            | libc::EACCES
+                            | libc::EROFS
+                            | libc::ENAMETOOLONG
+                            | libc::ELOOP
+                            | libc::EPERM
+                    )
                 )
             })
         {
@@ -60,17 +68,16 @@ pub(super) fn open(
 fn temporary(data: &[u8], directory: &std::path::Path) -> io::Result<OwnedFd> {
     let template = directory.join("tonari-here-XXXXXX");
     let mut path = CString::new(template.as_os_str().as_bytes())?.into_bytes_with_nul();
-    let fd = unsafe { libc::mkstemp(path.as_mut_ptr().cast()) };
+    // macOS 10.12+ and both Linux libc targets expose mkostemp.
+    unsafe extern "C" {
+        fn mkostemp(template: *mut libc::c_char, flags: libc::c_int) -> libc::c_int;
+    }
+    let fd = unsafe { mkostemp(path.as_mut_ptr().cast(), libc::O_CLOEXEC) };
     if fd < 0 {
         return Err(io::Error::last_os_error());
     }
     let mut writer = unsafe { File::from_raw_fd(fd) };
-    if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
-        let error = io::Error::last_os_error();
-        unsafe { libc::unlink(path.as_ptr().cast()) };
-        return Err(error);
-    }
-    // mkstemp honors the caller's umask. The shell still needs to reopen the
+    // mkostemp honors the caller's umask. The shell still needs to reopen the
     // file for reading when even owner-read permission was masked off.
     if unsafe { libc::fchmod(fd, 0o600) } < 0 {
         let error = io::Error::last_os_error();

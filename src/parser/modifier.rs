@@ -1,5 +1,5 @@
 use super::Error;
-use super::lexer::{backquote, dollar};
+use super::lexer::{backquote, dollar, quoted};
 use crate::word::{Word, WordBuilder};
 use std::str::Chars;
 
@@ -12,6 +12,7 @@ pub(super) fn slice(chars: &mut Chars<'_>) -> Result<(Word, Option<Word>), Error
     let mut conditional = 0usize;
     while let Some(c) = chars.next() {
         match c {
+            '"' => quoted(chars, c, &mut word)?,
             '$' => dollar(chars, &mut word, true)?,
             '`' => backquote(chars, &mut word, true)?,
             '}' => {
@@ -40,10 +41,12 @@ pub(super) fn slice(chars: &mut Chars<'_>) -> Result<(Word, Option<Word>), Error
 }
 
 pub(crate) fn index_end(s: &str) -> Result<usize, Error> {
-    if let Some(body) = s.strip_prefix('[')
-        && let Some(end) = body
-            .bytes()
-            .position(|b| matches!(b, b']' | b'[' | b'$' | b'`' | b'\'' | b'"' | b'\\'))
+    let body = s
+        .strip_prefix('[')
+        .ok_or(Error::Invalid("expected array subscript"))?;
+    if let Some(end) = body
+        .bytes()
+        .position(|b| matches!(b, b']' | b'[' | b'$' | b'`' | b'\'' | b'"' | b'\\'))
         && body.as_bytes()[end] == b']'
     {
         return Ok(end + 2);

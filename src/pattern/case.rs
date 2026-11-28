@@ -28,6 +28,17 @@ fn utf8_locale() -> libc::locale_t {
     }) as libc::locale_t
 }
 
+pub(crate) fn printable_utf8(c: char) -> bool {
+    unsafe extern "C" {
+        fn iswprint_l(c: u32, locale: libc::locale_t) -> libc::c_int;
+    }
+    let locale = utf8_locale();
+    if locale.is_null() {
+        return !c.is_control();
+    }
+    unsafe { iswprint_l(c as u32, locale) != 0 }
+}
+
 fn mapped_in(c: char, upper: bool, locale: CharacterLocale, utf8: libc::locale_t) -> char {
     unsafe extern "C" {
         fn towupper_l(c: u32, locale: libc::locale_t) -> u32;
@@ -126,7 +137,7 @@ pub(crate) fn case_chars(
     text: String,
     upper: bool,
     all: bool,
-    pattern: Option<&Matcher<&str>>,
+    pattern: Option<&extended::Compiled>,
     locale: CharacterLocale,
 ) -> String {
     let direction = if upper {
@@ -141,7 +152,7 @@ pub(crate) fn convert_chars(
     text: std::borrow::Cow<'_, str>,
     direction: CaseDirection,
     all: bool,
-    pattern: Option<&Matcher<&str>>,
+    pattern: Option<&extended::Compiled>,
     locale: CharacterLocale,
 ) -> String {
     if pattern.is_some() {
@@ -154,7 +165,7 @@ fn convert(
     mut text: std::borrow::Cow<'_, str>,
     direction: CaseDirection,
     all: bool,
-    pattern: Option<&Matcher<&str>>,
+    pattern: Option<&extended::Compiled>,
     locale: CharacterLocale,
 ) -> String {
     if pattern.is_none()
@@ -188,7 +199,7 @@ fn convert(
     let mut chars = text.chars();
     for c in chars.by_ref() {
         let mut buf = [0; 4];
-        let eligible = pattern.is_none_or(|p| p.matches(c.encode_utf8(&mut buf)));
+        let eligible = pattern.is_none_or(|p| p.accepts(c.encode_utf8(&mut buf)));
         let upper = match direction {
             CaseDirection::Upper => true,
             CaseDirection::Lower => false,

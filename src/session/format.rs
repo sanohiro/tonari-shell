@@ -42,7 +42,8 @@ impl Session {
     pub(crate) fn array_declaration_fields(&self, name: &str) -> Option<Vec<String>> {
         let v = self.transform_array(name)?;
         let mut assignment = name.as_bytes().to_vec();
-        print_variable_value(&mut assignment, &v).expect("in-memory write");
+        print_variable_value(&mut assignment, &v, self.character_locale())
+            .expect("in-memory write");
         assignment.pop();
         Some(vec![
             "declare".into(),
@@ -58,6 +59,7 @@ impl Session {
         let var = self.transform_array(name)?;
         let mut fields = Vec::new();
         let mut text = Vec::new();
+        let locale = self.character_locale();
         let mut add = |key: &str, value: &str| {
             if separate {
                 fields.extend([key.to_owned(), value.to_owned()]);
@@ -65,15 +67,7 @@ impl Session {
                 if !text.is_empty() {
                     text.push(b' ');
                 }
-                if key
-                    .chars()
-                    .all(|c| c.is_alphanumeric() || "_-./".contains(c))
-                    && !key.is_empty()
-                {
-                    text.extend_from_slice(key.as_bytes());
-                } else {
-                    print_value(&mut text, key).expect("in-memory write");
-                }
+                print_key(&mut text, key, locale).expect("in-memory write");
                 text.push(b' ');
                 print_value(&mut text, value).expect("in-memory write");
             }
@@ -125,6 +119,7 @@ pub(super) fn print_attribute(
     name: &str,
     var: &Variable,
     command: Option<&str>,
+    locale: CharacterLocale,
 ) -> io::Result<()> {
     if let Some(command) = command {
         out.write_all(command.as_bytes())?;
@@ -134,12 +129,17 @@ pub(super) fn print_attribute(
             out.write_all(b" -a")?;
         }
         write!(out, " {name}")?;
-        return print_variable_value(out, var);
+        return print_variable_value(out, var, locale);
     }
-    print_declaration(out, name, var)
+    print_declaration(out, name, var, locale)
 }
 
-pub(super) fn print_declaration(out: &mut dyn Write, name: &str, var: &Variable) -> io::Result<()> {
+pub(super) fn print_declaration(
+    out: &mut dyn Write,
+    name: &str,
+    var: &Variable,
+    locale: CharacterLocale,
+) -> io::Result<()> {
     write!(out, "declare -")?;
     let mut flags = var.attribute_flags().peekable();
     if flags.peek().is_none() {
@@ -149,7 +149,7 @@ pub(super) fn print_declaration(out: &mut dyn Write, name: &str, var: &Variable)
         out.write_all(&[flag])?;
     }
     write!(out, " {name}")?;
-    print_variable_value(out, var)
+    print_variable_value(out, var, locale)
 }
 
 pub(super) fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Cow<'_, str> {
@@ -162,14 +162,23 @@ pub(super) fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Co
     if value == "'" {
         return Cow::Borrowed("\\'");
     }
-    if value.starts_with('#')
+    if contains_shell_syntax(value) {
+        crate::word::quote::single_quote(value).into()
+    } else {
+        Cow::Borrowed(value)
+    }
+}
+
+fn contains_shell_syntax(value: &str) -> bool {
+    value.starts_with('#')
         || memchr::memchr_iter(b'~', value.as_bytes())
             .any(|i| crate::word::quote::tilde_at(value.as_bytes(), i))
         || value.bytes().any(|c| {
             c.is_ascii_whitespace()
                 || matches!(
                     c,
-                    b'!' | b'$'
+                    b'^' | b'!'
+                        | b'$'
                         | b'&'
                         | b'*'
                         | b'('
@@ -189,10 +198,16 @@ pub(super) fn set_value(value: &str, posix: bool, locale: CharacterLocale) -> Co
                         | 0x60
                 )
         })
-    {
-        crate::word::quote::single_quote(value).into()
+}
+
+fn print_key(out: &mut dyn Write, key: &str, locale: CharacterLocale) -> io::Result<()> {
+    let ascii = matches!(locale, CharacterLocale::Ascii);
+    if crate::word::quote::needs_ansi(key.as_bytes(), ascii) {
+        out.write_all(&crate::word::quote::ansi_quote(key.as_bytes(), ascii))
+    } else if key.is_empty() || key == "@" || contains_shell_syntax(key) {
+        print_value(out, key)
     } else {
-        Cow::Borrowed(value)
+        out.write_all(key.as_bytes())
     }
 }
 
@@ -208,20 +223,17 @@ fn append_listing_bytes(chunk: &mut Vec<u8>, bytes: &[u8]) {
     }
 }
 
-pub(super) fn print_variable_value(out: &mut dyn Write, var: &Variable) -> io::Result<()> {
+pub(super) fn print_variable_value(
+    out: &mut dyn Write,
+    var: &Variable,
+    locale: CharacterLocale,
+) -> io::Result<()> {
     if let Some(map) = var.associative() {
         if var.array_assigned {
             write!(out, "=(")?;
             for (key, value) in map.ordered() {
                 write!(out, "[")?;
-                if key
-                    .chars()
-                    .all(|c| c.is_alphanumeric() || "_-./".contains(c))
-                {
-                    write!(out, "{key}")?;
-                } else {
-                    print_value(out, key)?;
-                }
+                print_key(out, key, locale)?;
                 write!(out, "]=")?;
                 print_value(out, value)?;
                 write!(out, " ")?;

@@ -116,7 +116,40 @@ def terminal_rule(shell, root, key):
             t.send(b'jobs; wait "$p"; printf "\\036%s\\037" "$?"\n')
             data = t.read(b"\x1f")
             return b"Done(17)" not in data and b"\x1e17\x1f" in data
-        return True
+        for settings in (b"set -b", b"set +o posix; set +b"):
+            t.send(settings + b"; " + command + b"; printf '\\036'; :\n")
+            before, marker, after = t.read(b"READY>").partition(b"\x1e")
+            if not marker or report not in before or report in after:
+                return False
+        for listing in (b"jobs", b"jobs -n", b"jobs -p", b"jobs -r"):
+            t.send(b"set -o posix; set +b; " + command + b"; printf '\\036'; " +
+                   listing + b"; printf '\\037'; :\n")
+            data = t.read(b"READY>").partition(b"\x1e")[2]
+            listed, marker, after = data.partition(b"\x1f")
+            if not marker:
+                return False
+            if listing == b"jobs -r":
+                if report in listed or after.count(report) != 1:
+                    return False
+            elif listed.count(report) != 1 or report in after:
+                return False
+            elif listing == b"jobs -p":
+                if not re.match(rb"\d+\r?\n", listed):
+                    return False
+            elif not re.match(rb"\[\d+\]\s+Terminated", listed):
+                return False
+        t.send(command + b"; printf '\\036'; wait %1; printf '%s\\037' \"$?\"; :\n")
+        waited, marker, after = t.read(b"READY>").partition(b"\x1e")[2].partition(b"\x1f")
+        if not marker or waited != b"143" or report in after:
+            return False
+        t.send(command + b"; " + command + b"; printf '\\036'; jobs -l; printf '\\037'; :\n")
+        listed, marker, after = t.read(b"READY>").partition(b"\x1e")[2].partition(b"\x1f")
+        if not marker or len(re.findall(rb"\[\d+\]\s+\d+\s+Terminated", listed)) != 2 or report in after:
+            return False
+        t.send(b"hook(){ unset PROMPT_COMMAND; printf '\\036'; " + command +
+               b"; printf '\\037'; }; PROMPT_COMMAND=hook\n")
+        during, marker, after = t.read(b"READY>").partition(b"\x1e")[2].partition(b"\x1f")
+        return marker and during.count(report) == 1 and report not in after
     finally:
         t.close()
 

@@ -19,13 +19,24 @@ fn posix_item_len(input: &[u8]) -> Option<usize> {
 // Input starts immediately after '['. The initial ']' is a literal member.
 pub(super) fn class_end(body: &[u8]) -> Option<usize> {
     let mut i = usize::from(matches!(body.first(), Some(b'!' | b'^')));
-    i += usize::from(body.get(i) == Some(&b']'));
+    let first = i;
     while i < body.len() {
-        match body[i] {
-            b']' => return Some(i),
-            b'\\' => i += 2,
-            b'[' => i += posix_item_len(&body[i..]).unwrap_or(1),
-            _ => i += 1,
+        if body[i] == b']' && i != first {
+            return Some(i);
+        }
+        let item = posix_item_len(&body[i..]);
+        let range_start = item.is_none() || body[i + 1] == b'.';
+        i += item.unwrap_or_else(|| if body[i] == b'\\' { 2 } else { 1 });
+        if range_start && body.get(i) == Some(&b'-') && body.get(i + 1).is_some_and(|&c| c != b']')
+        {
+            i += 1;
+            i += if body[i] == b'\\' {
+                2
+            } else if body[i..].starts_with(b"[.") {
+                posix_item_len(&body[i..]).unwrap_or(1)
+            } else {
+                1
+            };
         }
     }
     None
@@ -178,6 +189,7 @@ pub(crate) fn portable_symbol(name: &[u8]) -> Option<u8> {
 #[derive(Debug)]
 enum Member {
     Literal([u8; 4]),
+    Equivalence([u8; 4]),
     Range([u8; 4], [u8; 4]),
     Native(CString),
     Ascii,
@@ -198,7 +210,12 @@ impl Member {
                 b'.' | b'=' if len > 4 => {
                     let (first, rest) = unit(&item[2..len - 2], utf8);
                     if rest.is_empty() {
-                        return (Self::Literal(packed(first)), &input[len..]);
+                        let member = if item[1] == b'=' {
+                            Self::Equivalence(packed(first))
+                        } else {
+                            Self::Literal(packed(first))
+                        };
+                        return (member, &input[len..]);
                     }
                     pattern.extend_from_slice(item);
                 }
@@ -214,7 +231,7 @@ impl Member {
 
     fn accepts(&self, value: &[u8; 4]) -> bool {
         match self {
-            Self::Literal(v) => v == value,
+            Self::Literal(v) | Self::Equivalence(v) => v == value,
             Self::Range(lo, hi) => super::glob_locale::in_range(lo, value, hi),
             Self::Never => false,
             Self::Ascii => value[0].is_ascii(),
@@ -352,7 +369,9 @@ impl CharacterClass {
         let lower = |c| super::mapped_char(c, false, locale);
         let folded = lower(c);
         members.iter().any(|m| match m {
-            Member::Literal(bytes) => scalar(bytes).is_some_and(|v| lower(v) == folded),
+            Member::Literal(bytes) | Member::Equivalence(bytes) => {
+                scalar(bytes).is_some_and(|v| lower(v) == folded)
+            }
             Member::Range(lo, hi) => scalar(lo).zip(scalar(hi)).is_some_and(|(lo, hi)| {
                 !self.compare(lower(lo), folded).is_gt() && !self.compare(folded, lower(hi)).is_gt()
             }),
@@ -474,7 +493,7 @@ impl BracketPattern {
         else {
             return false;
         };
-        let utf8 = self.utf8 || super::glob_locale::collated_ranges();
+        let utf8 = self.utf8;
         if utf8 && std::str::from_utf8(text).is_err() {
             return false;
         }

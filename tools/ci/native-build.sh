@@ -45,7 +45,8 @@ if [[ $SUITE == external-shared-input ]]; then
   git worktree add -q --detach "$source_dir" HEAD
   for config in small:512 large:32768; do
     size=${config#*:}
-    sed "s/BufReader::new(file)/BufReader::with_capacity($size, file)/" src/input.rs > "$source_dir/src/input.rs"
+    [[ $(sed -n '/^fn stdin_reader()/,/^}/p' src/input.rs | grep -Fc 'BufReader::new(file)') == 1 ]]
+    sed "/^fn stdin_reader()/,/^}/s/BufReader::new(file)/BufReader::with_capacity($size, file)/" src/input.rs > "$source_dir/src/input.rs"
     (cd "$source_dir"; cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/${config%:*}")
   done
 fi
@@ -76,11 +77,18 @@ if [[ $SUITE == release-diagnostics ]]; then
    cp "$(tools/build-release.sh)" "$RUNNER_TEMP/bin/full")
   cp "$(RUSTFLAGS='-Zunstable-options -Cpanic=immediate-abort' tools/build-release.sh)" "$RUNNER_TEMP/bin/immediate"
 fi
-if [[ $SUITE == review-findings || $SUITE == correctness-review || $SUITE == shell-scaling || $SUITE == array-evaluation || $SUITE == shell-paths || $SUITE == runtime-review || $SUITE == expansion-review || $SUITE == capture-parser || $SUITE == function-tables || $SUITE == core-engine || $SUITE == compound-listings || $SUITE == listings-expansion || $SUITE == priority-review || $SUITE == startup-review || $SUITE == audit-hot-paths || $SUITE == source-review || $SUITE == spec-hot || $SUITE == external-yash-* || $SUITE == external-review-* || $SUITE == external-gnu-profile || $SUITE == parity* || $SUITE == probe || $SUITE == locale-storage || $SUITE == functions || $SUITE == throughput || $SUITE == history || $SUITE == history-fields || $SUITE == navigation || $SUITE == edit-actions || $SUITE == starship || $SUITE == rcfiles || $SUITE == tool-hooks || $SUITE == picker || $SUITE == budget* || $SUITE == inventory* ]]; then
-  previous=$(git rev-parse --verify --end-of-options "${PREVIOUS_REVISION:-HEAD^}^{commit}")
-  git worktree add -q --detach "$RUNNER_TEMP/base" "$previous"
-  (cd "$RUNNER_TEMP/base"; cp "$(CARGO_TARGET_DIR="$RUNNER_TEMP/build-baseline" tools/build-release.sh)" "$RUNNER_TEMP/bin/baseline")
-fi
+case "$SUITE" in
+  second-review|review-findings|correctness-review|shell-scaling|array-evaluation|\
+  shell-paths|runtime-review|expansion-review|capture-parser|function-tables|\
+  core-engine|compound-listings|listings-expansion|priority-review|startup-review|\
+  audit-hot-paths|source-review|spec-hot|external-yash-*|external-review-*|\
+  external-gnu-profile|parity*|probe|locale-storage|functions|throughput|history|\
+  history-fields|navigation|edit-actions|starship|rcfiles|tool-hooks|picker|budget*|inventory*)
+    previous=$(git rev-parse --verify --end-of-options "${PREVIOUS_REVISION:-HEAD^}^{commit}")
+    git worktree add -q --detach "$RUNNER_TEMP/base" "$previous"
+    (cd "$RUNNER_TEMP/base"; cp "$(CARGO_TARGET_DIR="$RUNNER_TEMP/build-baseline" tools/build-release.sh)" "$RUNNER_TEMP/bin/baseline")
+    ;;
+esac
 if [[ $SUITE == external-review-* || $SUITE == oils-profile-* || $SUITE == spec-profile-builtins ]]; then
   cp "$(CARGO_PROFILE_RELEASE_OPT_LEVEL=3 tools/build-release.sh)" "$RUNNER_TEMP/bin/opt-3"
 fi

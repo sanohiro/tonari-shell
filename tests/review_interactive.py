@@ -1,11 +1,14 @@
 """History persistence, editor transaction and physical input boundary regressions."""
 import argparse
+import fcntl
 import os
 from pathlib import Path
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
+import termios
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from bench_history import PROMPT, read_until, terminal
@@ -65,6 +68,8 @@ snapshot() { printf '\\n<draft>%s</draft>\\n' "$READLINE_LINE"; READLINE_LINE=; 
 bind -x '"\\C-t":snapshot'
 choose() { printf '%s\\n' "$1|$2|$3|$COMP_CWORD|$COMP_LINE|$COMP_POINT|${COMP_WORDS[*]}" >ctx; COMPREPLY=(selected); }
 complete -F choose abc
+complete -f pick_file
+complete -W "blueberry red" pick_word
 literal_directory() { COMPREPLY=(localdir/); }
 no_replies() { COMPREPLY=(); }
 complete -o filenames -F literal_directory literal_cmd
@@ -88,8 +93,21 @@ complete -o dirnames -F no_replies fallback_cmd
             draft(": zzmidTAIL", ": zzmiddlelongTAIL", 4)
             draft(': "zzmidTAIL"', ': "zzmiddlelongTAIL"', 5)
             draft(": 'zzmidTAIL'", ": 'zzmiddlelongTAIL'", 5)
+            draft("(zzallo", "(zzallowed ")
+            draft(": $(zzallo", ": $(zzallowed ")
+            draft(": `zzallo", ": `zzallowed")
+            draft(': "$(zzallo', ': "$(zzallowed')
+            draft("{ abc hi", "{ abc selected ")
             draft("A=x abc hiTAIL", "A=x abc selectedTAIL", 4)
             assert (home / "ctx").read_text() == "abc|hi|abc|1|abc hiTAIL|6|abc hiTAIL\n"
+            draft("pick_file 'zzmidd", "pick_file 'zzmiddlelong' ")
+            draft('pick_word "blue', 'pick_word "blueberry" ')
+            draft(": --file=zzmidd", ": --file=zzmiddlelong ")
+            draft("VAR=one:zzmidd", "VAR=one:zzmiddlelong ")
+            draft(": >|zzmidd", ": >|zzmiddlelong ")
+            for group in ("$(a b)", "${x:-a b}"):
+                draft(f"abc {group} hi", f"abc {group} selected ")
+                assert (home / "ctx").read_text().split("|")[2:4] == [group, "2"]
             draft(": zzdir/sub", ": zzdir/subdir")
             draft(": zzd/sub", ": zzdir/subdir" if shell == tonari else ": zzd/sub")
             draft(": fold-", ": Fold-")
@@ -118,6 +136,15 @@ def main():
             "history -s 'echo aa aa'; history -p '!!:Gs/a/x/' '!!:as/a/x/'",
             "history -r seed; history -c; echo new >>seed; history -n seed; history",
             "HISTFILE=seed; history -r seed; HISTFILESIZE=2; echo new >>seed; history -n seed; history",
+            "HISTFILE=h; : >h; history -s one; history -a; history -n; history -s two; history -a; history -n; history",
+            "history -s 'echo before'; fc -e - before=after",
+            "history -s ': a b.c'; history -p '!!:x:q' '!!:q:x' '!!:q:r' '!!:x:r' '!!:q:q' '!:%' '!!:s'",
+            "history -s one; history -p '!!:-' '!!:0-'",
+            "history -s 'echo old'; history -s 'echo new'; fc -s 99999999999999999999",
+            "bind -@; echo $?; bind -m; echo $?; fc -@; echo $?; fc -e; echo $?",
+            """bind -mvi '"QQ": end-of-line'; bind -pmvi end-of-line | grep QQ""",
+            r"""for p in 'x\000y' 'x\400y' 'x\0y' '\303\251\000z'; do echo "${p@P}"; done""",
+            "bind 'set keyseq-timeout 300ms'; bind -v | grep keyseq-timeout",
             "bind 'set completion-ignore-case yes'; bind 'set completion-ignore-case'; bind 'TAB: complete'; echo $?",
         ]
         for script in scripts:
@@ -127,14 +154,31 @@ def main():
                 outputs.append(run(shell, home, script))
             assert outputs[0] == outputs[1], (script, outputs)
 
+        # Bash 5.3 reimports its own full rewrite; Tonari already holds those entries.
+        rewritten = run(tonari, home, "HISTFILE=h; : >h; history -s one; history -w; history -n; "
+                        "history -s two; history -w; history -n; history")
+        assert [row.split()[-1] for row in rewritten.splitlines()] == [b"one", b"two"]
+
         seed = home / "seed"
         seed.write_text("imported\n")
         run(tonari, home, "history -s local; history -r seed; history -a journal; history -a journal")
         assert (home / "journal").read_text() == "local\n"
 
-        seed.write_bytes(b"one\ntwo\nthree")
-        run(tonari, home, "HISTFILE=seed; HISTFILESIZE=2")
-        assert seed.read_bytes() == b"two\nthree"
+        for shell in (bash, tonari):
+            seed.write_bytes(b"one\ntwo\nthree\nfour")
+            run(shell, home, "HISTFILE=seed; HISTFILESIZE=2")
+            assert seed.read_bytes() == b"two\nthree\nfour"
+
+        # The following -n must see each foreign entry even when other writers
+        # appended between our last read and two separate local appends.
+        seed.write_text("start\n")
+        rows = run(tonari, home, """HISTFILE=seed; history -r
+printf 'foreign1\n' >>seed; history -s local1; history -a
+printf 'foreign2\n' >>seed; history -s local2; history -a
+history -n; history -n; history""")
+        assert [row.split()[-1] for row in rows.splitlines()] == [
+            b"start", b"local1", b"local2", b"foreign1", b"foreign2",
+        ], rows
 
         original = b"old\n\xff\nkept"
         seed.write_bytes(original)
@@ -162,7 +206,8 @@ def main():
         initial = "{\n" + "# long physical line\n" * 1800 + "printf 'echo $LINENO\\n' >> \"$0\"\n}\n"
         for executable in (bash, tonari):
             growing.write_text(initial)
-            result = subprocess.check_output([executable, growing], cwd=home)
+            result = subprocess.check_output([executable, growing], cwd=home, timeout=10,
+                                             env={"HOME": tmp, "PATH": os.defpath, "LC_ALL": "C"})
             assert result == f"{initial.count(chr(10)) + 1}\n".encode(), result
 
         completion_witnesses(tonari, bash, home)
@@ -212,6 +257,35 @@ def main():
             enter(b"packet'\x1b[201~")
             enter(b'printf %s "$v" >paste-handler-result')
             assert (home / "paste-handler-result").read_bytes() == b"splitpacket"
+        rc = home / "search-rc"
+        rc.write_text("""PS1='tonari$ '
+unset HISTFILE
+history -s ': navy blue navy'
+snapshot() { printf '\n<point>%s|%s</point>\n' "$READLINE_LINE" "$READLINE_POINT"; READLINE_LINE=; }
+bind -x '"\\C-t":snapshot'
+""")
+        for shell in (bash, tonari):
+            with terminal(shell, home, "/usr/bin:/bin", rc, prompt=PROMPT) as fd:
+                os.write(fd, b"\x12navy\x06\x14")
+                result = read_until(fd, b"</point>")
+                assert b"<point>: navy blue navy|13</point>" in result, result
+            with terminal(shell, home, "/usr/bin:/bin", rc, prompt=PROMPT) as fd:
+                os.write(fd, b"\x12blue\x0b\x14")
+                result = read_until(fd, b"</point>")
+                assert b"<point>: navy |7</point>" in result, result
+        (home / "palette-red").touch()
+        (home / "palette-blue").touch()
+        with terminal(tonari, home, "/usr/bin:/bin", rc, prompt=PROMPT) as fd:
+            os.write(fd, b": palette-\t\t")
+            read_until(fd, b"filter> ")
+            os.write(fd, b"red")
+            read_until(fd, b"filter> red")
+            fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 18, 74, 0, 0))
+            read_until(fd, b"filter> red")
+            os.write(fd, b"\r\x14")
+            result = read_until(fd, b"</point>")
+            assert b"<point>: palette-red |14</point>" in result, result
+
         print("History and interactive review witnesses passed")
 
 

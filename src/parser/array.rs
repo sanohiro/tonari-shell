@@ -50,6 +50,37 @@ pub(super) fn indexed_prefix(source: &str) -> Option<&str> {
         .then(|| &source[..end + plus])
 }
 
+pub(super) fn assignment_prefix(source: &str) -> Option<(std::borrow::Cow<'_, str>, usize)> {
+    if let Some(prefix) = indexed_prefix(source) {
+        return Some((prefix.into(), prefix.len() + 1));
+    }
+    let mut cursor = source;
+    loop {
+        cursor = &cursor[name_chars_len(cursor)..];
+        let rest = super::lexer::joined(cursor);
+        if rest.len() == cursor.len() {
+            break;
+        }
+        cursor = rest;
+    }
+    let name = &source[..source.len() - cursor.len()];
+    let end = super::modifier::index_end(cursor).ok()?;
+    let subscript = &cursor[..end];
+    let rest = super::lexer::joined(&cursor[end..]);
+    let plus = rest.starts_with('+');
+    let rest = super::lexer::joined(&rest[usize::from(plus)..]);
+    let tail = rest.strip_prefix('=')?;
+    let mut prefix = name.replace("\\\n", "");
+    if !prefix.is_empty() && !is_identifier(&prefix) {
+        return None;
+    }
+    prefix.push_str(subscript);
+    if plus {
+        prefix.push('+');
+    }
+    Some((prefix.into(), source.len() - tail.len()))
+}
+
 pub(crate) fn quoted_initializer(source: &str) -> Result<ArrayItems<Word>, Error> {
     if let Some(body) = source.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
         && body.bytes().all(|b| {
@@ -149,20 +180,24 @@ impl Reader {
                     // Resume only after the matching closing parenthesis. A later
                     // physical line is still array text until that delimiter.
                     let mut depth = 1;
-                    for token in std::iter::once(&unexpected).chain(&self.tokens) {
-                        match token {
+                    let mut token = Some(unexpected);
+                    while let Some(current) = token {
+                        match current {
                             Token::LeftParen | Token::ArrayStart => depth += 1,
                             Token::RightParen => {
                                 depth -= 1;
                                 if depth == 0 {
-                                    return Err(Error::ArrayToken);
+                                    self.invalid_array_end =
+                                        Some(self.location(self.position() - 1).end);
+                                    return Ok(items);
                                 }
                             }
                             _ => {}
                         }
+                        token = self.tokens.pop_front();
                     }
                     return Err(if self.final_input {
-                        Error::Invalid("unfinished invalid array assignment")
+                        Error::ArrayToken(if self.depth > 1 { 2 } else { 1 })
                     } else {
                         Error::incomplete_message("unfinished array assignment")
                     });

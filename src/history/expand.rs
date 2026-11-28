@@ -56,8 +56,12 @@ fn select(s: &str, designator: &str, words: &[(usize, usize)]) -> io::Result<Str
     } else if let Some(prefix) = designator.strip_suffix('*') {
         (index(prefix)?, last)
     } else if let Some((lo, hi)) = designator.split_once('-') {
+        let lo = if lo.is_empty() { 0 } else { index(lo)? };
+        if hi.is_empty() && lo == last {
+            return Ok(String::new());
+        }
         (
-            if lo.is_empty() { 0 } else { index(lo)? },
+            lo,
             if hi.is_empty() {
                 last.saturating_sub(1)
             } else {
@@ -253,7 +257,7 @@ fn expand_event(
             memory
                 .as_deref()
                 .and_then(|m| m.matched_word.clone())
-                .ok_or_else(|| error("no matching word"))?
+                .unwrap_or_default()
         } else {
             select(
                 value,
@@ -266,6 +270,7 @@ fn expand_event(
     } else {
         value.to_owned()
     };
+    let mut quote = None;
     while input.starts_with(':') {
         pop(&mut input);
         let global = input.starts_with(['g', 'G', 'a']);
@@ -279,12 +284,10 @@ fn expand_event(
                 *print = true;
                 value
             }
-            'q' => shell_quote(&value),
-            'x' => value
-                .split_whitespace()
-                .map(shell_quote)
-                .collect::<Vec<_>>()
-                .join(" "),
+            'q' | 'x' => {
+                quote = Some(code);
+                value
+            }
             't' => value.rsplit('/').next().unwrap_or("").into(),
             'h' => value
                 .rsplit_once('/')
@@ -301,7 +304,7 @@ fn expand_event(
                 value
             }
             's' => {
-                let d = pop(&mut input).ok_or_else(|| error("missing substitution delimiter"))?;
+                let Some(d) = pop(&mut input) else { break };
                 let old = field(&mut input, d);
                 let new = field(&mut input, d);
                 let memory = memory.get_or_insert_with(Default::default);
@@ -321,7 +324,15 @@ fn expand_event(
         };
     }
     *rest = input;
-    Ok(value)
+    Ok(match quote {
+        Some('q') => shell_quote(&value),
+        Some('x') => value
+            .split_whitespace()
+            .map(shell_quote)
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => value,
+    })
 }
 
 pub(crate) fn expand_line<'a>(

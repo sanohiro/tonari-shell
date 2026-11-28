@@ -32,6 +32,7 @@ pub struct Context<'a> {
     pub start: usize,
     pub command_start: usize,
     pub command_end: usize,
+    quoted_command: bool,
 }
 
 #[derive(Default)]
@@ -70,6 +71,108 @@ impl Quoting {
     }
 }
 
+// Completion needs lexical word boundaries even when an expansion is retained
+// as source text. Never execute substitutions to discover those boundaries.
+#[derive(Default)]
+struct WordSyntax {
+    quote: Quoting,
+    groups: Vec<(char, Quoting)>,
+    dollar: bool,
+    redirect: bool,
+}
+
+impl WordSyntax {
+    fn consume(&mut self, c: char) -> WordChar {
+        let unquoted = matches!(self.quote, Quoting::Unquoted);
+        let expandable = unquoted || matches!(self.quote, Quoting::Double);
+        let in_group = !self.groups.is_empty();
+        let kind = if self.groups.last().is_some_and(|(close, _)| c == *close)
+            && (unquoted || c == '`' && expandable)
+        {
+            self.quote = self.groups.pop().unwrap().1;
+            WordChar::Quoted
+        } else if c == '`' && expandable
+            || self.dollar && matches!(c, '(' | '{')
+            || in_group && unquoted && c == '('
+        {
+            let close = match c {
+                '(' => ')',
+                '{' => '}',
+                _ => '`',
+            };
+            self.groups.push((close, std::mem::take(&mut self.quote)));
+            WordChar::Quoted
+        } else {
+            let kind = self.quote.consume(c);
+            if in_group || self.redirect && c == '|' {
+                WordChar::Quoted
+            } else {
+                kind
+            }
+        };
+        self.dollar = c == '$' && expandable;
+        self.redirect = c == '>' && kind == WordChar::Unquoted;
+        kind
+    }
+}
+
+// A Tab inside a group or command substitution completes its own command.
+// Keep closed substitutions outside the caret in their surrounding command.
+fn command_span(line: &str, cursor: usize) -> (std::ops::Range<usize>, bool) {
+    let mut span = 0..line.len();
+    let mut quoted = false;
+    if memchr::memchr2(b'(', b'`', line.as_bytes()).is_none() {
+        return (span, quoted);
+    }
+    struct Group {
+        start: usize,
+        close: char,
+        command: bool,
+        quoted: bool,
+        outer: Quoting,
+    }
+
+    let mut groups: Vec<Group> = Vec::new();
+    let mut quoting = Quoting::default();
+    let mut dollar = false;
+    for (i, c) in line.char_indices() {
+        let unquoted = matches!(quoting, Quoting::Unquoted);
+        let expandable = unquoted || matches!(quoting, Quoting::Double);
+        let close = groups.last().is_some_and(|g| g.close == c);
+        if close && (unquoted || c == '`' && expandable) {
+            let group = groups.pop().unwrap();
+            if group.command && group.start <= cursor && cursor <= i && group.start > span.start {
+                span = group.start..i;
+                quoted = group.quoted;
+            }
+            quoting = group.outer;
+        } else if c == '`' && expandable || c == '(' && (unquoted || dollar) {
+            let previous = i.checked_sub(1).map(|p| line.as_bytes()[p]);
+            let at_boundary =
+                previous.is_none_or(|b| b.is_ascii_whitespace() || b";|&".contains(&b));
+            let command =
+                c == '`' || line.as_bytes().get(i + 1) != Some(&b'(') && (dollar || at_boundary);
+            groups.push(Group {
+                start: i + 1,
+                close: if c == '`' { '`' } else { ')' },
+                command,
+                quoted: c == '`' || !unquoted,
+                outer: std::mem::take(&mut quoting),
+            });
+        } else {
+            quoting.consume(c);
+        }
+        dollar = c == '$' && expandable;
+    }
+    for group in groups {
+        if group.command && group.start <= cursor && group.start > span.start {
+            span = group.start..line.len();
+            quoted = group.quoted;
+        }
+    }
+    (span, quoted)
+}
+
 impl<'a> Context<'a> {
     // The callback receives source spelling, including quotes and backslashes.
     // Readline keeps a run of punctuation as one COMP_WORDS entry, while the
@@ -78,8 +181,8 @@ impl<'a> Context<'a> {
         let mut words = Vec::new();
         let mut token = self.command_start;
         let mut punctuation = false;
-        let mut quoting = Quoting::default();
-        let mut end = self.line.len();
+        let mut quoting = WordSyntax::default();
+        let mut end = self.command_end;
         let mut current = None;
         let mut start = self.cursor;
         let mut emit = |a: usize, b: usize, punct: bool| {
@@ -101,7 +204,7 @@ impl<'a> Context<'a> {
             }
             words.push(self.line[a..b].to_owned());
         };
-        for (off, c) in self.line[self.command_start..].char_indices() {
+        for (off, c) in self.line[self.command_start..self.command_end].char_indices() {
             let i = self.command_start + off;
             let protected = quoting.consume(c) != WordChar::Unquoted;
             if !protected && matches!(c, ';' | '|' | '&' | '\n') {
@@ -133,6 +236,7 @@ impl<'a> Context<'a> {
             start,
             command_start: self.command_start,
             command_end: end,
+            quoted_command: self.quoted_command,
         }
     }
 
@@ -141,13 +245,15 @@ impl<'a> Context<'a> {
         line.get(..cursor)?;
         let mut words = Vec::new();
         let mut word = String::new();
-        let mut quoting = Quoting::default();
+        let mut quoting = WordSyntax::default();
         let mut in_word = false;
-        let mut start = 0;
-        let mut command_start = 0;
-        let mut command_end = line.len();
+        let (span, quoted_command) = command_span(line, cursor);
+        let mut start = span.start;
+        let mut command_start = start;
+        let mut command_end = span.end;
         let mut current = None;
-        for (i, c) in line.char_indices() {
+        for (offset, c) in line[span.clone()].char_indices() {
+            let i = span.start + offset;
             let kind = quoting.consume(c);
             let separator = kind == WordChar::Unquoted && (c.is_whitespace() || "|;&".contains(c));
             if i == cursor {
@@ -160,7 +266,7 @@ impl<'a> Context<'a> {
                 if in_word {
                     if i < cursor
                         && words.is_empty()
-                        && assignment_prefix(&line[start..i]).is_some()
+                        && (assignment_prefix(&line[start..i]).is_some() || &line[start..i] == "{")
                     {
                         word.clear();
                     } else {
@@ -207,6 +313,7 @@ impl<'a> Context<'a> {
             start,
             command_start,
             command_end,
+            quoted_command,
         })
     }
 }
@@ -240,7 +347,7 @@ fn assignment_prefix(word: &str) -> Option<usize> {
     Some(word.len() - value.len())
 }
 
-fn dequote(raw: &str) -> std::borrow::Cow<'_, str> {
+pub(crate) fn dequote(raw: &str) -> std::borrow::Cow<'_, str> {
     if !raw.contains(['\\', '\'', '"']) {
         return raw.into();
     }
@@ -499,14 +606,15 @@ pub fn at(
         None
     };
     if let Some(generated) = generated {
+        let match_prefix = dequote(callback_prefix);
         let paths = matches!(generated.source, Source::Directories | Source::Files);
         let dirs = matches!(generated.source, Source::Directories);
         let matches = generated
             .source
-            .matches(callback_prefix, session, list)
+            .matches(&match_prefix, session, list)
             .or_else(|| {
                 paths
-                    .then(|| abbreviated(callback_prefix, dirs, false, session))
+                    .then(|| abbreviated(&match_prefix, dirs, false, session))
                     .flatten()
             });
         if matches.is_some() || !generated.fallback {
@@ -529,8 +637,17 @@ pub fn at(
         let raw = &line[start..cursor];
         let mut quoting = Quoting::default();
         let mut file_start = assignment_prefix(raw);
+        let breaks = raw
+            .contains(['=', ':'])
+            .then(|| session.completion_breaks());
         for (offset, c) in raw.char_indices() {
-            if quoting.consume(c) == WordChar::Unquoted && matches!(c, '>' | '<') {
+            if quoting.consume(c) != WordChar::Unquoted {
+                continue;
+            }
+            if matches!(c, '>' | '<') {
+                let clobber = c == '>' && raw.as_bytes().get(offset + 1) == Some(&b'|');
+                file_start = Some(offset + 1 + usize::from(clobber));
+            } else if matches!(c, '=' | ':') && breaks.as_ref().is_some_and(|b| b.contains(c)) {
                 file_start = Some(offset + 1);
             }
         }
@@ -809,10 +926,12 @@ impl Context<'_> {
         append_space: bool,
         source_prefix: usize,
     ) -> Completion {
+        let append_space = append_space && !self.quoted_command;
         let mut continued = None;
-        if self.cursor < self.line.len() {
+        let typed = &self.line[start..self.cursor];
+        if typed.contains(['\'', '"']) {
             let mut quoting = Quoting::default();
-            for c in self.line[start..self.cursor].chars() {
+            for c in typed.chars() {
                 quoting.consume(c);
             }
             continued = match quoting {
@@ -881,6 +1000,10 @@ impl ChoiceQuoting {
                     }
                     replacement.push(c);
                 }
+            }
+            if append_space && !common.ends_with('/') {
+                replacement.push(q);
+                replacement.push(' ');
             }
             return replacement;
         }

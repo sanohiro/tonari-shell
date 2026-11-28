@@ -134,9 +134,16 @@ impl Screen {
             } else {
                 budget / 2
             };
-            start = cursor - extent(text[..cursor].graphemes(true).rev(), before, width).0;
-            let (span, left) = extent(text[start..].graphemes(true), budget, width);
-            end = start + span;
+            // Bindings expose character offsets, including positions inside a
+            // grapheme. Measure both halves from the same caret used for drawing.
+            let (prefix, unused) = extent(text[..cursor].graphemes(true).rev(), before, width);
+            start = cursor - prefix;
+            let (span, left) = extent(
+                text[cursor..].graphemes(true),
+                budget - before + unused,
+                width,
+            );
+            end = cursor + span;
             spare = left;
         }
         self.view.start = start;
@@ -177,5 +184,19 @@ impl Screen {
         self.column = caret.col;
         self.had_hint = !hint.is_empty();
         self.tail = (cursor == text.len() && hint.is_empty()).then_some(caret);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn binding_carets_render_both_halves_of_a_grapheme() {
+        let text = "left e\u{301} right";
+        let mut screen = Screen::new(Some((3, 8)));
+        screen.window_frame("", text, 6, "");
+        assert!(screen.view.image.contains("e\u{301}"));
+        assert!(screen.column <= screen.width);
     }
 }

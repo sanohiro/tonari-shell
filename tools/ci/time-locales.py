@@ -33,12 +33,16 @@ def main():
     parser.add_argument("--require-match", action="store_true",
                         help="fail if a paired locale differs from the reference")
     args = parser.parse_args()
-    candidates = subprocess.check_output(["locale", "-a"], text=True).splitlines()
+    candidates = subprocess.check_output(["locale", "-a"], text=True, timeout=10).splitlines()
     installed = {}
     for candidate in candidates:
-        encoding = subprocess.check_output(["locale", "charmap"], env={"LC_ALL": candidate,
-                                           "PATH": "/usr/bin:/bin"}, text=True).strip()
-        if candidate == "C" or encoding.upper().replace("-", "") == "UTF8":
+        encoding = candidate.partition("@")[0].partition(".")[2].upper().replace("-", "")
+        if not encoding and candidate != "C":
+            encoding = subprocess.check_output(
+                ["locale", "charmap"], env={"LC_ALL": candidate, "PATH": "/usr/bin:/bin"},
+                text=True, timeout=10,
+            ).strip().upper().replace("-", "")
+        if candidate == "C" or encoding == "UTF8":
             installed[key(candidate)] = candidate
     mismatches = Counter()
     paired = 0

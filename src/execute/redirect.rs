@@ -23,6 +23,7 @@ pub(super) fn action(r: &Redirect) -> Action<'_> {
                 Target::Append => libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND,
                 Target::CloseMoved
                 | Target::Duplicate
+                | Target::MoveWord
                 | Target::OutputWord
                 | Target::HereDoc { .. }
                 | Target::HereString => unreachable!(),

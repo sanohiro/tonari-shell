@@ -81,6 +81,19 @@ pub(crate) fn localized<T>(work: impl FnOnce() -> T) -> T {
 thread_local! {
     static EXPLICIT_LOCALE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
+// Keep the handle alive until the previous thread locale has been restored.
+// Literal-only parameter patterns use byte comparisons and need no locale.
+pub(crate) fn parameter_locale(
+    session: &crate::Session,
+    pattern: &str,
+) -> Option<(LocaleGuard, std::rc::Rc<PatternLocale>)> {
+    if !pattern.contains(['[', '?']) || !session.pattern_locale_overridden() {
+        return None;
+    }
+    let locale = session_locale(session)?;
+    Some((locale.enter()?, locale))
+}
+
 pub(crate) struct LocaleGuard(libc::locale_t, bool);
 
 impl LocaleGuard {
@@ -276,7 +289,7 @@ impl<T: AsRef<str>> Matcher<T> {
             return folded_prefix(value, text.as_ref(), session.character_locale())
                 == Some(value.len());
         }
-        extended::insensitive_session(value, self.source(), extended, session)
+        extended::session_match(value, self.source(), extended, session)
     }
 
     pub(crate) fn matches_session(&self, value: &str, session: &crate::Session) -> bool {
@@ -335,12 +348,12 @@ pub(crate) struct FixedWidth {
 
 impl FixedWidth {
     pub(crate) fn parse(pattern: &str) -> Option<Self> {
-        if !pattern.is_ascii() || pattern.contains('\0') {
+        if pattern.contains('\0') {
             return None;
         }
         let mut rest = pattern.as_bytes();
         let mut width = 0;
-        let mut literals_and_questions = true;
+        let mut literals_and_questions = pattern.is_ascii();
         while let Some((&atom, tail)) = rest.split_first() {
             rest = match atom {
                 b'*' => return None,
@@ -404,6 +417,7 @@ pub fn matches(value: &str, pattern: &str) -> bool {
 
 mod case;
 use case::mapped_char;
+pub(crate) use case::printable_utf8;
 pub(crate) use case::{
     CaseDirection, capitalize, case_chars, convert_chars, folded_prefix, same_letter,
 };
@@ -643,13 +657,9 @@ pub(crate) fn quote_pattern(output: &mut String, text: &str, extended: bool) {
     // The first literal segment cannot be inside a bracket expression.
     // Later segments can follow active syntax, for example [a"-"z].
     let may_be_in_bracket = !output.is_empty();
-    let symbol = output.rsplit_once('[').is_some_and(|(prefix, rest)| {
-        !prefix.is_empty() && rest.starts_with(['.', '=']) && !rest.contains(']')
-    });
     for c in text.chars() {
         if matches!(c, '\\' | '*' | '?' | '[')
             || extended && matches!(c, '@' | '+' | '!' | '(' | ')' | '|')
-            || symbol
             || (matches!(c, ':' | '.' | '=') && output.ends_with('['))
             || may_be_in_bracket && matches!(c, ']' | '-' | '!' | '^')
         {
@@ -729,6 +739,13 @@ impl Default for GlobOptions {
 }
 
 impl GlobOptions {
+    pub(crate) fn for_completion(&self) -> Self {
+        Self {
+            ignore: None,
+            ..self.clone()
+        }
+    }
+
     pub(crate) fn set_ignore(&mut self, value: Option<&str>) {
         self.ignore = None;
         let Some(value) = value else {

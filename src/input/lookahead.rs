@@ -134,7 +134,7 @@ fn inline_close(line: &[u8], close: &[u8]) -> bool {
 // A sourced profile often has a long compound command. Try whole units already
 // in the buffer, leaving following commands for the current alias/options state.
 // On a miss report the distance inspected, so string input can bound repeated scans.
-pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
+pub(crate) fn buffered_compound<P: AsRef<[parser::Statement]>>(
     first: &str,
     buffered: &[u8],
     at_eof: bool,
@@ -160,7 +160,7 @@ pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
     let mut nested = 0usize;
     let mut needs_open_brace = close == b"}" && !header.contains('{');
     let mut deferred = None;
-    let mut next_inline_probe = 0;
+    let mut next_probe = 0;
     let mut probe = |size, lines| {
         // Only the final ordinary read may emit an unterminated here-doc warning.
         match parse(size) {
@@ -182,8 +182,10 @@ pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
                 let newline =
                     memchr::memchr(b'\n', buffered.get(end..size).ok_or(size)?).ok_or(size)?;
                 let boundary = end + newline + 1;
-                if boundary >= size {
-                    return Err(size);
+                // The other statements were parsed on the same closing line.
+                // The ordinary line reader executes that entire unit together.
+                if boundary == size && end > 0 {
+                    return Ok(Some((program, size, lines)));
                 }
                 let unit = parse(boundary).map_err(|_| size)?;
                 if !matches!(unit.as_ref(), [s] if s.location.end > first.len()) {
@@ -295,7 +297,7 @@ pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
             deferred = Some((size, i + 1));
             continue;
         }
-        if inline && size < next_inline_probe {
+        if size < next_probe {
             deferred = Some((size, i + 1));
             continue;
         }
@@ -303,10 +305,9 @@ pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
         if let Some(unit) = probe(size, i + 1)? {
             return Ok(unit);
         }
-        // Text in quotes and heredocs can repeatedly resemble an inline close.
-        if inline {
-            next_inline_probe = size.saturating_mul(2);
-        }
+        // Quoted and here-document data can contain complete fake terminator
+        // lines as well as inline ones. Bound the sum of reparsed prefixes.
+        next_probe = size.saturating_mul(2);
     }
     // A literal header inside a quote or here-document can hide the outer close.
     if let Some((size, lines)) = deferred
@@ -341,7 +342,7 @@ fn inline_terminators_inside_heredocs_have_bounded_parse_attempts() {
     let first = "if :; then\n";
     let text = format!(
         ": <<'END'\n{}END\n:; fi 2>log",
-        ":; fi 2>fake\n".repeat(256)
+        "fi\n:; fi 2>fake\n".repeat(128)
     );
     let mut attempts = 0;
     let (_, consumed, lines) = buffered_compound(first, text.as_bytes(), true, false, |size| {

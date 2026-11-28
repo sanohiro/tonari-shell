@@ -50,6 +50,12 @@ pub(super) fn path<'a>(cmd: &'a PreparedCommand, session: &'a Session) -> &'a Os
     }
 }
 
+pub(super) fn path_unset(path: &OsStr, cmd: &PreparedCommand, session: &Session) -> bool {
+    path.is_empty()
+        && !cmd.assignments.iter().any(|(key, _)| key == "PATH")
+        && session.get("PATH").is_none()
+}
+
 pub(super) fn command_prefix(cmd: &mut PreparedCommand, session: &Session) {
     let (passed, search, default_path) = scan_prefix(&cmd.words, cmd.search, session);
     cmd.search = search;
@@ -239,8 +245,7 @@ pub(crate) fn describe_words(
             }
         }
         if !found
-            && !search_all
-            && !force_path
+            && (!search_all || force_path)
             && !default_path
             && let Some(path) = session.hashes.get(name)
         {
@@ -252,7 +257,7 @@ pub(crate) fn describe_words(
             if result.is_err() {
                 return 1;
             }
-            found = true;
+            found = !search_all;
         }
         if !found || search_all {
             let mut report = |path: &Path| {
@@ -457,8 +462,11 @@ impl Candidate {
 }
 
 pub(crate) fn check_candidate(path: &CStr) -> std::io::Result<bool> {
-    candidate_mode(path)
-        .map(|mode| mode & libc::S_IFMT == libc::S_IFREG && executable_mode(path, mode))
+    let mode = candidate_mode(path)?;
+    if mode & libc::S_IFMT == libc::S_IFDIR {
+        return Err(std::io::Error::from_raw_os_error(libc::EISDIR));
+    }
+    Ok(mode & libc::S_IFMT == libc::S_IFREG && executable_mode(path, mode))
 }
 
 fn candidate_mode(path: &CStr) -> std::io::Result<libc::mode_t> {

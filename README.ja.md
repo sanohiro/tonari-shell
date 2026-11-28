@@ -40,7 +40,7 @@ sudo ./tools/stage.sh target/release/tonari /usr/local
 実体は `/usr/local/libexec/tonari/bash` に入り、`/usr/local/bin/tonari` はそこへのシンボリックリンクになります。`/etc/shells` に `/usr/local/libexec/tonari/bash` を1行追加してから、ログインシェルを変更します。
 
 ```sh
-chsh -s /usr/local/libexec/tonari/bash
+/usr/local/libexec/tonari/bash --noprofile --norc -c : && chsh -s /usr/local/libexec/tonari/bash
 ```
 
 ログインし直すと、`$SHELL` の末尾で判定するツールには `bash` と見えます。スクリプトは `BASH_VERSION` も参照できます。いつもの Bash 設定から `nvm.sh` を読み込めば `nvm use` が使えます。GitHub CLI の Bash 用補完を読み込むと、`gh iss` で Tab を押して `gh issue` を補完できます。先頭が `#!/bin/bash` のスクリプトは従来どおりシステムの Bash が実行します。別のシェルで `tonari` と打って起動した場合、`$SHELL` は親の設定を引き継ぎます。ログインシェルを元に戻すには、元のパスを `chsh -s` に指定してログインし直してください。[ツール連携の検証結果](docs/benchmarks.md#tool-hooks)

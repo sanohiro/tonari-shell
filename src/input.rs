@@ -1,7 +1,8 @@
 mod eval;
 mod lookahead;
 pub(crate) use eval::{EvalCache, builtin as eval_builtin, trap_text};
-use lookahead::{buffered_compound, file_group, whole_group};
+pub(crate) use lookahead::buffered_compound;
+use lookahead::{file_group, whole_group};
 
 use crate::execute::fd::PrivateFile;
 use std::fs::File;
@@ -32,11 +33,17 @@ pub(crate) fn read_spare(file: &File, output: &mut Vec<u8>, limit: usize) -> io:
 
 // External commands inherit fd 0. Any unread text buffered by the shell must
 // still be available to a child which reads stdin (for example, "cat\n...").
-pub fn stdin_script(session: &mut Session, check: bool) -> Flow {
+pub fn stdin_script(session: &mut Session, check: bool, status: u8) -> Flow {
     match stdin_reader() {
-        Ok((reader, shared_offset)) => {
-            run(session, reader, shared_offset, true, None, (0, 1), check)
-        }
+        Ok((reader, shared_offset)) => run(
+            session,
+            reader,
+            shared_offset,
+            true,
+            None,
+            (status, 1),
+            check,
+        ),
         Err(e) => error(e, 1),
     }
 }
@@ -52,7 +59,7 @@ fn stdin_reader() -> io::Result<(BufReader<PrivateFile>, bool)> {
     Ok((reader, seekable))
 }
 
-fn executable_header(bytes: &[u8]) -> bool {
+pub(crate) fn executable_header(bytes: &[u8]) -> bool {
     matches!(
         bytes.get(..4),
         Some(
@@ -114,13 +121,18 @@ pub fn file_script(
         }
     }
     if let Some(meta) = &metadata
+        && (session.source_depth != 0 || !session.history_enabled)
         && let Some((program, next_line)) = file_group(session, &file, meta)
     {
-        let mut file = file;
+        let mut file = match PrivateFile::new(file) {
+            Ok(file) => file,
+            Err(e) => return error(e, 1),
+        };
         let flow = if check {
             Flow::Continue(0)
         } else {
             match execute_program(session, program, status, false) {
+                Flow::Unwind(code) if session.source_depth == 0 => Flow::Continue(code),
                 Flow::Discard(code) => Flow::Continue(code),
                 flow => flow,
             }
@@ -134,18 +146,15 @@ pub fn file_script(
             if let Err(e) = file.seek(io::SeekFrom::Start(meta.len())) {
                 return error(e, 1);
             }
-            return match PrivateFile::new(file) {
-                Ok(file) => run(
-                    session,
-                    BufReader::new(file),
-                    false,
-                    false,
-                    None,
-                    (code, next_line),
-                    check,
-                ),
-                Err(e) => error(e, 1),
-            };
+            return run(
+                session,
+                BufReader::new(file),
+                false,
+                false,
+                None,
+                (code, next_line),
+                check,
+            );
         }
         return flow;
     }
@@ -179,11 +188,13 @@ fn syntax_error(session: &Session, problem: parser::Error, first_line: usize) ->
         && matches!(problem, parser::Error::NulByte)
     {
         Flow::Exit(126)
-    } else if matches!(problem, parser::Error::ArrayToken) && !session.errexit {
+    } else if let parser::Error::ArrayToken(status) = problem
+        && !session.errexit
+    {
         if session.posix && !session.interactive {
-            Flow::Exit(1)
+            Flow::Exit(status)
         } else {
-            Flow::Continue(1)
+            Flow::Continue(status)
         }
     } else if session.posix && !session.interactive {
         Flow::Exit(2)
@@ -199,6 +210,8 @@ fn syntax_error(session: &Session, problem: parser::Error, first_line: usize) ->
             "{path}: command starting at line {first_line}: {}",
             problem.message()
         );
+    } else if !session.command_string && !session.stdin_script && !session.interactive {
+        stderr_line!("{}: line {first_line}: {}", session.arg0, problem.message());
     } else {
         diagnostic!("{}", problem.message());
     }
@@ -266,17 +279,29 @@ pub(crate) fn still_open(
     text: &str,
     session: &Session,
 ) -> bool {
-    if session.reads_aliases() {
+    use parser::Incomplete::*;
+    if !matches!(reason, Some(SingleQuote | DoubleQuote)) && session.reads_aliases() {
         return false;
     }
     let line = text.as_bytes();
-    use parser::Incomplete::*;
     let plain = |b: &u8| !b.is_ascii() || b.is_ascii_alphanumeric() || b" _-+:./=,\t\n".contains(b);
     match reason {
         Some(CompoundEnd(close)) => {
             // A complete, independent command with no outer terminator can only
             // extend the pending body. Never defer quotes, here-docs or syntax errors.
-            !text.contains(close)
+            (!text.contains(close)
+                || text
+                    .trim_ascii_start()
+                    .split_ascii_whitespace()
+                    .next()
+                    .is_some_and(|keyword| {
+                        matches!(
+                            (keyword, close),
+                            ("if", "fi")
+                                | ("case", "esac")
+                                | ("while" | "until" | "select" | "for", "done")
+                        )
+                    }))
                 && !text.contains("<<")
                 && (parser::validate_tail(text, session, 1)
                     || close == "esac"
@@ -380,12 +405,12 @@ impl ScriptState {
                 Parsed::ReadMore
             }
             Err(parser::Error::Incomplete(_)) if more => Parsed::ReadMore,
-            Err(e @ parser::Error::ArrayToken)
+            Err(e @ parser::Error::ArrayToken(status))
                 if !check && !session.posix && !session.errexit && !session.noexec =>
             {
                 syntax_error(session, e, line);
-                self.record(1);
-                session.pipe_status.single(1);
+                self.record(status);
+                session.pipe_status.single(status);
                 Parsed::Skip
             }
             Err(e) => Parsed::Failed(syntax_error(session, e, line)),
@@ -445,7 +470,6 @@ fn run(
         }
         if let Some(incomplete) = state.incomplete
             && n != 0
-            && !session.reads_aliases()
         {
             let Ok(line) = std::str::from_utf8(&input[line_start..]) else {
                 return error("expected UTF-8 command text", 2);
@@ -453,6 +477,7 @@ fn run(
             if still_open(Some(incomplete), line, session)
                 || matches!(incomplete, parser::Incomplete::Subshell)
                     && line.contains(')')
+                    && !session.reads_aliases()
                     && parser::word_line(line, session)
             {
                 continue;
@@ -473,11 +498,7 @@ fn run(
         // At a new physical line these tokens cannot open a command. Keep
         // accumulated compound commands, history expansion and NUL diagnostics.
         if line_start == 0 && n != 0 && blank_or_comment(text, session) {
-            if !check
-                && !session.interactive
-                && session.source_depth == 0
-                && session.begin_history_line(text)
-            {
+            if !check && session.source_depth == 0 && session.begin_history_line(text) {
                 session.finish_history_line();
             }
             base_line += text.bytes().filter(|&b| b == b'\n').count();
@@ -505,6 +526,12 @@ fn run(
                     && !session.functions.contains_key(command.trim_ascii())
                     && !session.disabled_builtins.contains(command.trim_ascii()))
         {
+            let command_name = command.trim_ascii();
+            session.remember_argument(if matches!(command_name, ":" | "true") {
+                command_name
+            } else {
+                ""
+            });
             session.current_command = Some(parser::Location::label(command.into(), base_line));
             session.pipe_status.single(0);
             session.command_number += usize::from(session.source_depth == 0);
@@ -585,9 +612,7 @@ fn run(
                         return error(e, 1);
                     }
                 }
-                let remember = session.source_depth == 0
-                    && !session.interactive
-                    && session.begin_history_line(text);
+                let remember = session.source_depth == 0 && session.begin_history_line(text);
                 let flow = execute_program(session, program, state.status, false);
                 // A permanent redirect can change fd 0 from a regular file to a
                 // pipe or the reverse. Named scripts keep their private reader.
@@ -606,6 +631,7 @@ fn run(
                     return flow;
                 }
                 match flow {
+                    Flow::Unwind(code) if session.source_depth == 0 => state.record(code),
                     Flow::Discard(code) | Flow::Continue(code) => state.record(code),
                     other => return other,
                 }
@@ -685,11 +711,7 @@ pub fn text(
         } else if let Some(edited) = &mut edited {
             edited.push_str(line);
         }
-        if !last
-            && !expand_history
-            && still_open(state.incomplete, line, session)
-            && !session.reads_aliases()
-        {
+        if !last && !expand_history && still_open(state.incomplete, line, session) {
             continue;
         }
         if !last

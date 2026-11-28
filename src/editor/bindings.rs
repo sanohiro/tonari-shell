@@ -587,7 +587,16 @@ fn configure(bindings: &mut Bindings, spec: &str, shell: bool) -> Result<(), Str
             }
             "enable-bracketed-paste" => bindings.bracketed_paste = Some(on()),
             "keyseq-timeout" => {
-                bindings.timeout = Some(value.parse::<i32>().unwrap_or(0).max(0));
+                let value = value
+                    .trim_start()
+                    .strip_prefix('+')
+                    .unwrap_or(value.trim_start());
+                let digits = value.bytes().take_while(u8::is_ascii_digit).count();
+                bindings.timeout = Some(if digits == 0 {
+                    0
+                } else {
+                    value[..digits].parse().unwrap_or(i32::MAX)
+                });
             }
             "keymap" => bindings.map = Keymap::parse(value)?,
             "editing-mode" if matches!(value, "emacs" | "vi") => {
@@ -650,7 +659,13 @@ fn load_file(session: &mut Session, path: &Path, depth: usize) -> Result<(), Str
     if depth > 16 {
         return Err("inputrc include nesting limit".into());
     }
-    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let text = std::fs::read_to_string(path).map_err(|e| {
+        format!(
+            "{}: cannot read: {}",
+            path.display(),
+            crate::builtins::os_message(&e)
+        )
+    })?;
     let mut levels = Vec::new();
     let mut active = true;
     let mut error = None;
@@ -754,56 +769,67 @@ fn run(session: &mut Session, args: &[String], temporary_map: &mut bool) -> Resu
     );
     let dumb = session.get("TERM").as_deref() == Some("dumb");
     let encode = |s: &[u8]| encode(s, meta);
-    let mut args = args.iter();
-    let mut out = io::LineWriter::new(crate::builtins::StdoutFd(None));
-    let ioerr = |e: io::Error| e.to_string();
-    while let Some(arg) = args.next() {
-        let mut operand = || {
-            args.next()
-                .map(String::as_str)
-                .ok_or_else(|| format!("{arg}: missing argument"))
-        };
-        match arg.as_str() {
-            "--" => {
-                for s in args.by_ref() {
-                    configure(&mut session.bindings, s, false)?;
-                }
+    // Readline selects the keymap before acting on any dump or binding.
+    const ORDER: &str = "mlpPsSvVfqurxX";
+    const USAGE: &str = "bind: usage: bind [-lpsvPSVX] [-m keymap] [-f filename] [-q name] [-u name] [-r keyseq] [-x keyseq:shell-command] [keyseq:readline-function or readline-command]";
+    let mut specs = args;
+    let mut options = [None; ORDER.len()];
+    while let Some(word) = crate::builtins::flags::next(&mut specs) {
+        let mut flags = word[1..].chars();
+        while let Some(flag) = flags.next() {
+            let Some(index) = ORDER.find(flag) else {
+                diagnostic!("bind: -{flag}: invalid option");
+                stderr_line!("{USAGE}");
+                return Ok(2);
+            };
+            if "mfqurx".contains(flag) {
+                let Some(value) = crate::builtins::flags::value(flags.as_str(), &mut specs) else {
+                    diagnostic!("bind: -{flag}: option requires an argument");
+                    stderr_line!("{USAGE}");
+                    return Ok(2);
+                };
+                options[index] = Some(value);
+                break;
             }
-            "-m" => {
-                let m = operand()?;
-                session.bindings.map = Keymap::parse(m)?;
+            options[index] = Some("");
+        }
+    }
+    let mut out = io::LineWriter::new(crate::builtins::StdoutFd(None));
+    let ioerr = |e: io::Error| format!("write error: {}", crate::builtins::os_message(&e));
+    let mut consumed = false;
+    let mut status = 0;
+    for (flag, value) in ORDER.chars().zip(options) {
+        let Some(value) = value else { continue };
+        match flag {
+            'm' => {
+                session.bindings.map = Keymap::parse(value)?;
                 *temporary_map = true;
             }
-            "-l" => {
+            'l' => {
                 for name in names() {
                     writeln!(out, "{name}").map_err(ioerr)?;
                 }
             }
-            "-f" => load_file(session, Path::new(operand()?), 0)?,
-            "-x" => configure(&mut session.bindings, operand()?, true)?,
-            "-r" => session.bindings.set(decode(operand()?)?, Binding::Removed),
-            "-q" | "-u" | "-p" | "-P" => {
-                let target = matches!(arg.as_str(), "-q" | "-u")
-                    .then(&mut operand)
-                    .transpose()?;
-                let dump = matches!(arg.as_str(), "-p" | "-P");
-                let filtered =
-                    dump && !args.as_slice().is_empty() && !args.as_slice()[0].starts_with('-');
-                let specs = if filtered {
-                    std::mem::take(&mut args).as_slice()
-                } else {
-                    &[]
-                };
+            'f' => load_file(session, Path::new(value), 0)?,
+            'x' => configure(&mut session.bindings, value, true)?,
+            'r' => {
+                session.bindings.set(decode(value)?, Binding::Removed);
+                return Ok(0);
+            }
+            'q' | 'u' | 'p' | 'P' => {
+                let target = matches!(flag, 'q' | 'u').then_some(value);
                 let modern = session.shopt.compat > 52;
+                let filtered = matches!(flag, 'p' | 'P') && modern && !specs.is_empty();
+                consumed |= filtered;
                 if let Some(name) = target
                     && !names().any(|n| n == name)
                 {
                     return Err(format!("`{name}': unknown function name"));
                 }
                 let selected = named_actions()
-                    .filter(|(_, n, _)| target.is_none_or(|s| s == *n) && !(filtered && modern))
+                    .filter(|(_, n, _)| target.is_none_or(|s| s == *n) && !filtered)
                     .map(|(a, n, d)| (Some((a, d)), n));
-                let requested = specs.iter().filter(|_| modern).map(|name| {
+                let requested = specs.iter().filter(|_| filtered).map(|name| {
                     let action = named_actions()
                         .find(|(_, n, _)| *n == name)
                         .map(|(a, _, d)| (a, d));
@@ -811,7 +837,7 @@ fn run(session: &mut Session, args: &[String], temporary_map: &mut bool) -> Resu
                 });
                 for (definition, name) in selected.chain(requested) {
                     let Some((action, defaults)) = definition else {
-                        if arg == "-p" {
+                        if flag == 'p' {
                             writeln!(out, "# {name} (not bound)").map_err(ioerr)?;
                         } else {
                             writeln!(out, "{name} is not bound to any keys").map_err(ioerr)?;
@@ -822,13 +848,13 @@ fn run(session: &mut Session, args: &[String], temporary_map: &mut bool) -> Resu
                     if dumb && action == Action::Delete {
                         keys.retain(|k| k != b"\x1b[3~");
                     }
-                    if arg == "-u" {
+                    if flag == 'u' {
                         for key in keys {
                             session.bindings.set(key, Binding::Removed);
                         }
                         continue;
                     }
-                    if arg == "-p" {
+                    if flag == 'p' {
                         if keys.is_empty() {
                             writeln!(out, "# {name} (not bound)").map_err(ioerr)?;
                         }
@@ -836,11 +862,11 @@ fn run(session: &mut Session, args: &[String], temporary_map: &mut bool) -> Resu
                             writeln!(out, "{}: {name}", encode(&k)).map_err(ioerr)?;
                         }
                     } else if keys.is_empty() {
-                        let punctuation = if arg == "-q" { "." } else { "" };
+                        let punctuation = if flag == 'q' { "." } else { "" };
                         writeln!(out, "{name} is not bound to any keys{punctuation}")
                             .map_err(ioerr)?;
-                        if arg == "-q" {
-                            return Ok(1);
+                        if flag == 'q' {
+                            status = 1;
                         }
                     } else {
                         let mut names = String::new();
@@ -853,7 +879,7 @@ fn run(session: &mut Session, args: &[String], temporary_map: &mut bool) -> Resu
                         writeln!(
                             out,
                             "{name} {} {names}{}",
-                            if arg == "-P" {
+                            if flag == 'P' {
                                 "can be found on"
                             } else {
                                 "can be invoked via"
@@ -863,35 +889,28 @@ fn run(session: &mut Session, args: &[String], temporary_map: &mut bool) -> Resu
                         .map_err(ioerr)?;
                     }
                 }
-                if !modern {
-                    for spec in specs {
-                        if let Err(err) = configure(&mut session.bindings, spec, false) {
-                            diagnostic!("bind: {err}");
-                        }
-                    }
-                }
             }
-            "-s" | "-S" | "-X" => {
+            's' | 'S' | 'X' => {
                 for (key, value) in session.bindings.keys[session.bindings.map as usize]
                     .iter()
                     .flat_map(|m| m.sequences.iter())
                 {
                     match value {
-                        Binding::Shell(v) if arg == "-X" => {
+                        Binding::Shell(v) if flag == 'X' => {
                             writeln!(out, "{}: {}", encode(key), encode(v.as_bytes()))
                                 .map_err(ioerr)?
                         }
-                        Binding::Macro(v) if arg == "-s" => {
+                        Binding::Macro(v) if flag == 's' => {
                             writeln!(out, "{}: {}", encode(key), encode(v)).map_err(ioerr)?
                         }
-                        Binding::Macro(v) if arg == "-S" => {
+                        Binding::Macro(v) if flag == 'S' => {
                             writeln!(out, "{} outputs {}", encode(key), encode(v)).map_err(ioerr)?
                         }
                         _ => {}
                     }
                 }
             }
-            "-v" | "-V" => {
+            'v' | 'V' => {
                 let yes = |on| if on { "on" } else { "off" };
                 let b = &session.bindings;
                 for (name, value) in
@@ -906,10 +925,7 @@ fn run(session: &mut Session, args: &[String], temporary_map: &mut bool) -> Resu
                                 "editing-mode",
                                 if session.vi { "vi" } else { "emacs" }.into(),
                             ),
-                            (
-                                "enable-bracketed-paste",
-                                yes(b.bracketed_paste.unwrap_or(session.interactive)).into(),
-                            ),
+                            ("enable-bracketed-paste", yes(b.paste()).into()),
                             (
                                 "keymap",
                                 match b.map {
@@ -925,7 +941,7 @@ fn run(session: &mut Session, args: &[String], temporary_map: &mut bool) -> Resu
                             settings.iter().map(|(n, v)| (n.as_str(), v.clone()))
                         }))
                 {
-                    if arg == "-V" {
+                    if flag == 'V' {
                         writeln!(out, "{name} is set to \u{60}{value}'")
                     } else {
                         writeln!(out, "set {name} {value}")
@@ -933,11 +949,18 @@ fn run(session: &mut Session, args: &[String], temporary_map: &mut bool) -> Resu
                     .map_err(ioerr)?;
                 }
             }
-            s if s.starts_with('-') => return Err(format!("{s}: unsupported option")),
-            spec => configure(&mut session.bindings, spec, false)?,
+            _ => unreachable!(),
         }
     }
-    Ok(0)
+    if !consumed {
+        for spec in specs {
+            if let Err(err) = configure(&mut session.bindings, spec, false) {
+                diagnostic!("bind: {err}");
+            }
+        }
+    }
+    out.flush().map_err(ioerr)?;
+    Ok(status)
 }
 
 #[cfg(test)]

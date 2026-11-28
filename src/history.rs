@@ -8,12 +8,7 @@ use crate::Session;
 
 pub(super) const DEFAULT_HISTSIZE: usize = 500;
 
-fn tail_lines_offset(
-    file: &fs::File,
-    len: u64,
-    mut lines: usize,
-    unterminated: bool,
-) -> std::io::Result<u64> {
+fn tail_lines_offset(file: &fs::File, len: u64, mut lines: usize) -> std::io::Result<u64> {
     if lines == 0 {
         return Ok(len);
     }
@@ -23,9 +18,6 @@ fn tail_lines_offset(
         let n = pos.min(block.len() as u64) as usize;
         pos -= n as u64;
         file.read_exact_at(&mut block[..n], pos)?;
-        if unterminated && pos + n as u64 == len && block[n - 1] != b'\n' {
-            lines -= 1;
-        }
         for i in memchr::memrchr_iter(b'\n', &block[..n]) {
             if lines == 0 {
                 return Ok(pos + i as u64 + 1);
@@ -100,11 +92,19 @@ pub(crate) fn load_script_history(session: &mut Session) {
 }
 
 pub(crate) fn start_interactive(session: &mut Session) {
+    let hist_size = session.get("HISTSIZE").unwrap_or_else(|| {
+        let value = DEFAULT_HISTSIZE.to_string();
+        session.assign("HISTSIZE", &value);
+        value
+    });
+    if session.get("HISTFILESIZE").is_none() {
+        session.assign("HISTFILESIZE", &hist_size);
+    }
     if let Some(path) = custom_history(session) {
         if fs::metadata(&path).is_ok_and(|m| m.is_file())
             && let Err(e) = commands::history_file(session, 'r', &[path])
         {
-            diagnostic!("history: {e}");
+            diagnostic!("history: {}", crate::builtins::os_message(&e));
         }
     } else {
         session.initial_history = InitialJournal::snapshot(session).map(std::rc::Rc::new);
@@ -127,7 +127,11 @@ pub(crate) fn finish_interactive(session: &mut Session) {
             .as_ref()
             .is_some_and(|h| h.incomplete(std::path::Path::new(&path)));
         let limit = limit.filter(|_| !incomplete);
-        let op = if session.shopt.histappend || incomplete {
+        // Startup code can add history and exit before this file is loaded.
+        // Preserve existing entries when saving to a different or unread file.
+        let imported = session.history.as_ref().and_then(|h| h.imported.as_ref());
+        let unread = imported.is_none_or(|h| h.path != std::path::Path::new(&path));
+        let op = if session.shopt.histappend || incomplete || unread {
             'a'
         } else {
             'w'
@@ -139,7 +143,7 @@ pub(crate) fn finish_interactive(session: &mut Session) {
                 })
             })
         {
-            diagnostic!("history: {e}");
+            diagnostic!("history: {}", crate::builtins::os_message(&e));
         }
     }
 }
@@ -368,6 +372,8 @@ pub(crate) struct Entries {
     written: usize,
     incomplete_files: Vec<(u64, u64)>,
     imported: Option<InitialJournal>,
+    // Local appends beyond an unread prefix must be skipped by history -n.
+    local_writes: Vec<((u64, u64), std::ops::Range<u64>)>,
 }
 
 #[derive(Clone)]
@@ -406,7 +412,7 @@ impl InitialJournal {
         let available = session
             .history_limit("HISTSIZE", DEFAULT_HISTSIZE)
             .saturating_sub(session.history_lines().len());
-        let pos = tail_lines_offset(&journal, self.len, available, false)?;
+        let pos = tail_lines_offset(&journal, self.len, available)?;
         journal.seek(SeekFrom::Start(pos))?;
         let mut older = Vec::new();
         let mut timestamps = Vec::new();
@@ -489,12 +495,8 @@ impl Session {
             if history.as_ref().is_some_and(|h| h.incomplete(path)) {
                 return;
             }
-            if let Err(e) = commands::limit_plain_file(
-                path,
-                limit,
-                timed,
-                history.and_then(|h| h.imported.as_mut()),
-            ) && e.kind() != std::io::ErrorKind::NotFound
+            if let Err(e) = commands::limit_plain_file(path, limit, timed, history)
+                && e.kind() != std::io::ErrorKind::NotFound
             {
                 diagnostic!("{}: {e}", path.display());
             }
@@ -593,8 +595,6 @@ impl Session {
         let line = &h.lines[index];
         if self.history_enabled && self.accept_history(line, h.lines[..index].last()) {
             History::append(self, line, cwd, status, Some(&mut history.window));
-        } else {
-            self.history_mut().discard_current();
         }
     }
 
@@ -644,7 +644,7 @@ impl Session {
                     && (if p == "&" {
                         previous == Some(text)
                     } else {
-                        crate::pattern::matches(text, p)
+                        crate::pattern::extended::case_sensitive_session(text, p, session)
                     })
             })
         }) {

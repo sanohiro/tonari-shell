@@ -37,7 +37,10 @@ v=outer; v=temp f; v=temp g; f; echo "$v" """,
         "EXIT state and scope": """trap 'echo "$localname/$1"; trap -p EXIT' EXIT; f(){ local localname=child; exit 6 >/dev/null; }; f arg;""",
         "EXIT listing": """trap 'echo "$localname/$1"; trap -p EXIT' EXIT; f(){ local localname=child; exit 6; }; f arg;""",
         "time trailing percent": """TIMEFORMAT='percent%'; { time :; } 2>timing; cat timing;""",
-        "wait stopped job without monitor": """set +m; "$BASH" -c 'kill -STOP "$$"; exit 7' & pid=$!; (sleep .1; kill -CONT "$pid") & wait "$pid"; echo "$?"; wait;""".replace('"$BASH"', '/bin/sh'),
+        "wait stopped job without monitor": """set +m; "$BASH" -c 'kill -STOP "$$"; exit 7' & pid=$!; (for ((i=0; i<100; i++)); do
+  case $(ps -o stat= -p "$pid") in *T*) kill -CONT "$pid"; exit;; esac
+  sleep .01
+done; kill -KILL "$pid") & wait "$pid"; echo "$?"; wait;""".replace('"$BASH"', '/bin/sh'),
     }
     scripts.update({
         "circular nameref read": """declare -n a=b b=a; echo "[$a]"; echo "status=$?" """,
@@ -64,19 +67,43 @@ echo "$?:$_:$((p==$!))" >&3; wait "$p"; echo $? >&3
         "quoted asynchronous job name": """set -m; sleep .05 & p=$!; '%1' 2>/dev/null &
 child=$!; echo $((child!=p)); wait "$child"; echo "$?"; wait "$p"
 """,
+        "empty job operands": """sleep .15 & p=$!
+for op in 'jobs' 'disown' 'wait' 'wait -n'; do $op "" >/dev/null 2>&1; echo $?; done
+wait "$p"; echo $?
+""",
+        "completed last job after bare wait": """(exit 3) & old=$!; (exit 5) & last=$!
+sleep .15; wait; wait "$old" 2>/dev/null; echo $?; wait "$last"; echo $?
+""",
+        "stopped job TERM resumes its handler": """set -m
+/bin/sh -c 'trap "exit 7" TERM; kill -STOP "$$"; sleep .1' & child=$!
+wait "$child"; kill -TERM %1; sleep .15; jobs -s >stopped
+test -s stopped; echo $?; kill -CONT "$child" 2>/dev/null; wait "$child"; echo $?
+""",
+        "attached signal options": """for opt in -s9 -nTERM; do
+kill "$opt" invalid 2>err; s=$?; case $(<err) in *'invalid signal specification'*) echo invalid:$s;; esac
+done""",
+        "extdebug skip status": """shopt -s extdebug
+trap 'case $BASH_COMMAND in "echo skip") false;; esac' DEBUG
+false; echo skip; echo "status=$?"
+""",
         "pipeline context": """a=(one); i=0; f(){ echo "$1/$2/$BASH_SUBSHELL"; }; f "$BASH_SUBSHELL" "${a[i++]}" | cat; echo "$i" """,
     })
     # Bash 5.3 retains background statuses for repeated wait -n and accepts a
     # process substitution PID. Bash 5.2 differs in these two cases.
     wait_results = {
+        # Ubuntu 5.2.21 also drops the most recent background status after a bare wait.
+        "completed last job after bare wait": (b"127\n5\n", b"127\n127\n"),
         "wait -n saved process": (b"7:1\n7\n7\n", b"7:1\n127\n7\n"),
         "wait -n process substitution": (b"7:1\n7\n", b"127:0\n7\n"),
     }
     for label, script in scripts.items():
         with tempfile.TemporaryDirectory() as tmp:
-            work = Path(tmp)
-            ref = check(args.bash.resolve(), script, work)
-            got = check(args.tonari.resolve(), script, work)
+            reference = Path(tmp) / "reference"
+            candidate = Path(tmp) / "candidate"
+            reference.mkdir()
+            candidate.mkdir()
+            ref = check(args.bash.resolve(), script, reference)
+            got = check(args.tonari.resolve(), script, candidate)
             if label in wait_results:
                 latest, previous = wait_results[label]
                 assert got == (0, latest), (label, got)

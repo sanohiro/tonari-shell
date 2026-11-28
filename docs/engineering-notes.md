@@ -1,5 +1,35 @@
 # Engineering notes / 開発知見
 
+## Foreground signal notices at the prompt / フォアグラウンドのシグナル通知
+
+In an interactive POSIX shell with monitor mode enabled and asynchronous notices disabled, GNU Bash 5.3.20 reports a foreground command's terminating signal immediately before the next prompt. Subsequent commands on the same input line can print first. Tonari retains each completed foreground job until a listing, an explicit wait or the next prompt consumes its status. A pre-prompt hook reports signals from its own commands while the hook runs. With asynchronous notifications enabled or POSIX mode disabled, the notice appears immediately. The PTY check uses a byte marker between the signal and prompt to verify each ordering.
+
+対話 POSIX モードで `set +b` のときは、前景プロセスの終了通知を次のプロンプト直前に表示する。同じ行で後続のコマンドが出力した印より後に通知が来ることと、`set -b` または通常モードでは印より先になることを端末上で検証する。[Terminal rule 26](../tests/compat/posix_rules.py)
+
+## Shebangless replacement and comparison fixtures / インタプリタを指定しないコマンドの置換と比較試験
+
+An executable text file reached through a symbolic working directory must see the shell's exported logical PWD when it enters a fresh Tonari interpreter. We found that the replacement path prepared a correct exec environment, then lost its changes when running the interpreter in the same process. The ENOEXEC regression runs the file twice, first by PATH and finally by a relative pathname after unsetting OLDPWD.
+
+リダイレクトを伴わない最終コマンドでは、インタプリタを同じプロセスで起動する場合にも、変更後の PWD と削除された OLDPWD を引き継ぐ。ジョブ一覧の比較試験は、外部の sleep を待つと Bash が終了済みジョブを先に通知する場合があるため、パイプ終端と子の終了を確認してから PID と終了値を検査する。getopts で明示引数のリストを切り替える比較試験は OPTIND をリセットする。リセットしない場合の結果は GNU Bash 5.3.20 でもビルドにより異なった。[公開インターフェイスの試験](../tests/shell.py)
+
+## 2026-11-29 · Second external review / 第2回外部レビュー
+
+The six review sections contain 429 distinct finding IDs. Comparing their headings with the seven subsystem ledgers found 429 unique entries in matching order and coverage. The sections cover parser/expansion (69), patterns/execution (73), jobs (43) and variables (33) in the shared third section, builtins/startup (75), editor/history (75) and cross-cutting/CI (61). Each entry identifies the implementation, a regression check, a measurement or a remaining limitation. Source inspection supplied the evidence for crash and excessive-nesting reports. [Review changes](https://github.com/sanohiro/tonari-shell/pull/58)
+
+GNU Bash 5.3.20 and Tonari flushed completed lines before `printf` numeric warnings when stdout and stderr shared a descriptor. Unterminated text remained buffered. A final direct external command in a clean `-c` invocation saw `SHLVL=0`, while one followed by another command saw 1. In POSIX mode, `wait %missing` and a positive PID outside the shell’s children both returned 127 and diagnosed the appropriate operand. The native benchmark at `bd4370b` covered six workloads and two distribution binaries. Remaining limits include recursive matching for some nested extglobs, incomplete counts on certain vi editing actions, and diagnostic-prefix differences in job and history operations. [Regression checks](../tests/shell.py) · [Native timings and sizes](benchmarks.md#r2-hosted-2026-11-29)
+
+六分冊の見出しと7台帳の行を機械照合し、429個のIDにそれぞれ1件の判定があることを確認した。内訳は構文・展開69、パターン・実行73、ジョブ43、変数33、組み込み・起動75、エディタ・履歴75、横断・CI 61。実装の確認、Bash との動作比較、計測結果、残存条件を記録した。クラッシュや過大な入れ子の指摘はソースで確認した。
+
+GNU Bash 5.3.20 と照合した実行例では、stdout と stderr をまとめた `printf` の行境界、最終コマンドへ渡す `SHLVL`、POSIX モードの `wait` における不存在ジョブと未所有 PID の区別を確認した。任意の多重 extglob の計算量、一部 vi 操作の回数指定、ジョブ・履歴の診断接頭辞には差が残る。実機の6項目と配布物サイズは計測コミットを明記した表で確認できる。[回帰試験](../tests/shell.py) · [実機計測](benchmarks.md#r2-hosted-2026-11-29)
+
+## 2026-11-29 — Whole compounds, redirect state and history files
+
+An inner `if …; fi` on one physical line is a valid complete command inside an unfinished outer conditional. Validate that line once before reading the next line. In command substitution a standalone `case word in pattern)` header can be recognized from the last few tokens. A quoted here-document may contain many lines consisting solely of a closing reserved word. Bound repeated parser probes even when the apparent terminator begins a line. Keep the actual parser responsible for boundaries so commands on the same closing line execute together and a following physical line can observe changed aliases. [Lookahead tests](../src/input/lookahead.rs) · [Native scaling measurements](benchmarks.md#second-external-review-whole-input-scaling-2026-11-29)
+
+For a standalone command with no executable name, an ordinary output redirection can update variables during operand expansion. A redirection replacing stdin changes the execution context of the entire list. Test both the created file and a later read of the parent variable. When comparing shells, give each a fresh working directory so that a file created by one cannot make the other pass. [Shell regression tests](../tests/shell.py) · [GNU Bash execution source](https://git.savannah.gnu.org/cgit/bash.git/tree/execute_cmd.c?h=bash-5.3)
+
+外側の `if` の途中に、同じ行で閉じる内側の `if` が多数あると、毎行それまでの入力を再解析するだけで秒単位になった。各行が独立したコマンドとして成立するかを確認し、ヒアドキュメント本文などにある偽の終端での再解析回数も制限した。リダイレクトに関しては、生成されたファイルと実行後に親に残る変数の両方を検証する。Bash と Tonari の比較用ディレクトリも分離した。
+
 ## Shell state observed by listings and completions / 一覧表示・補完とシェル状態
 
 Filter variable attributes before requesting values. A bulk declaration can inspect a seeded random variable, an alias table or debug frames without taking the action associated with an explicit parameter read. An explicit `declare -p RANDOM` advances the generator. For bulk output, `declare -prx` selects readonly or exported variables, while `-a` limits the type. `local -rp` prints the current local scope. A minus flag in a listing still selects its attribute after a plus flag clears it on assignment. An unassigned declaration belongs in `declare -p`; a name completion becomes available on assignment. The inherited process environment stays fixed for the lifetime of the interpreter. Index it lazily for bulk listings and continue overlaying local variables, export attributes and unsets. [Builtin witnesses](../tests/review_builtins.py)
@@ -595,9 +625,9 @@ A repeated `shift` used to move every remaining positional argument. The session
 
 `shift` は残りの引数を移動せず、先頭を一つ進めます。配列の末尾追加も全要素をコピーせず、連続した添字の配列をそのまま伸ばします。単独の `"${a[@]}"` は、空文字・空白・ワイルドカードを含む各要素を一つの引数として渡せます。ソート・素数のふるい・キューをまとめて使うスクリプトでも出力を照合しました。[実測](benchmarks.md#external-suites)
 
-When every PATH candidate is missing, an ordinary foreground command can return the lookup result immediately. The next invocation searches PATH again. Permission errors, redirections and active traps retain the execution path needed for their effects. Past 128 nested function calls the evaluator also checks stack usage against its soft limit before admitting deeper calls, up to 256. This lets the Ackermann workload finish with the expected value. [Regression tests](../tests/shell.py)
+When every PATH candidate is missing, an ordinary foreground command can return the lookup result immediately. The next invocation searches PATH again. Permission errors, redirections and active traps retain the execution path needed for their effects. The implementation measured here checked stack usage after 128 levels and capped functions at 256. The November 28 evaluation-stack update below supersedes those limits. This lets the Ackermann workload finish with the expected value. [Regression tests](../tests/shell.py)
 
-コマンド検索では、PATH の全候補が存在しないと確認できた場合、その一回の結果を引き継ぎます。次の実行では再検索するので、直前に作られた実行ファイルを発見できます。権限エラー、リダイレクト、シグナルのトラップなどは従来の実行経路で処理します。再帰関数は通常の呼び出しのコストを保ちつつ、128 段を越えた時点でスタックの使用量とソフト上限を確認し、最大 256 段まで進めます。これで外部ベンチの Ackermann 関数も Bash と同じ結果を返しました。[回帰テスト](../tests/shell.py)
+コマンド検索では、PATH の全候補が存在しないと確認できた場合、その一回の結果を引き継ぎます。次の実行では再検索するので、直前に作られた実行ファイルを発見できます。権限エラー、リダイレクト、シグナルのトラップなどは従来の実行経路で処理します。当時は再帰関数が 128 段を越えるとスタックを確認し、上限を 256 段としていました。11 月 28 日の評価スタック更新でこの制限を変更しました。これで外部ベンチの Ackermann 関数も Bash と同じ結果を返しました。[回帰テスト](../tests/shell.py)
 
 GNU Hello's generated configure script is 834,518 bytes. Ordinary noninteractive script files can now look ahead for a complete compound command in their input buffer. Execution still advances one parsed command at a time so that an earlier command can affect how the next one parses. Syntax-only mode streams short complete statements. When an incomplete compound grows beyond 2 KiB in a bounded in-memory script, one parse can finish the remaining source. An unsuccessful attempt uses incremental diagnostics. [Configure timings and release checks](benchmarks.md#external-suites)
 
@@ -1212,9 +1242,9 @@ Bash treats a quoted character inside a bracket list as a literal member. On Lin
 
 Linux の musl 版では、`x["*"]*.txt` が `x` の直後にバックスラッシュのある名前にも一致していた。Mac では、閉じていない `[` に続く `*` を展開すると、一致するはずの名前を取りこぼしていた。Tonari は引用を含む角括弧と閉じていない角括弧を自分で解釈する。`nullglob` を有効にしても、パスの一区間に閉じていない角括弧だけがある場合は元の文字列を引数に残す。回帰テストは記号・空白・改行・バックスラッシュ・絵文字を含む実ファイルを作り、C と UTF-8 の各文字ロケールで839通りを Bash と照合する。表示の見た目に左右されないよう、引数の個数と NUL で区切ったバイト列を比較する。
 
-For a quoted operand in a POSIX collating or equivalence symbol, the references differ. In the C locale `case a in [[."a".]])` matches on Ubuntu Bash 5.3.9. Tonari follows Debian Bash 5.2.37 for this case.
+For a quoted operand in a POSIX collating or equivalence symbol, the references differ. In the C locale `case a in [[."a".]])` matches on Ubuntu Bash 5.3.9. The 2026-11-29 native M1 check also matched on Bash 5.3.20. Tonari now follows both 5.3 releases. Debian Bash 5.2.37 gives a different result.
 
-POSIX の照合要素や等価クラスの中身を引用した場合は参照版同士で結果が異なる。C ロケールで `case a in [[."a".]])` は Ubuntu の Bash 5.3.9 で一致する。Tonari はこの場合には Debian の Bash 5.2.37 に合わせている。
+POSIX の照合要素や等価クラスの中身を引用した場合は参照版同士で結果が異なる。C ロケールで `case a in [[."a".]])` は Ubuntu の Bash 5.3.9 で一致する。2026-11-29 の M1 実機でも Bash 5.3.20 は一致した。Tonari は両方の 5.3 に合わせた。Debian Bash 5.2.37 は異なる結果になる。
 
 ## 2026-11-22 · Signals and job exit status / シグナルとジョブの終了値
 
@@ -1294,3 +1324,63 @@ UTF-8 の IFS と C ロケールでの切り出しを検証器に登録しまし
 The Ubuntu `wait -n` probe waits for a child running `sleep .02`. Its whole-run median is 25.80 ms in Tonari and 26.23 ms in Bash. The requested 20 ms sleep alone exceeds two-thirds of the Bash median, so parity is acceptable for this workload. Startup, interactive response and repeated shell work still have their own measurements. [Ubuntu timings and witnesses](compatibility-2026-11-23/Ubuntu.tsv) · [Performance target](benchmarks.md#performance-target)
 
 Ubuntu の `wait -n` の検証は、子で `sleep .02` を実行します。起動込みの中央値は Tonari が25.80 ms、Bash が26.23 ms で、指定した20 ms の待機だけで Bash の所要時間の 2/3 を超えます。このケースは同等の速さとして許容します。ごく短い単発処理も同じ考え方です。起動や入力応答、反復で積み上がるコストはそれぞれ測定します。[Ubuntu の実測値とスクリプト](compatibility-2026-11-23/Ubuntu.tsv)
+
+
+## November 28 · Evaluation stack and input boundaries / 評価スタックと入力境界
+
+On macOS arm64 the pthread API reported 1 MiB of allocated main stack both before and after raising the soft limit to 8 MiB. Tonari intersects the soft limit with the thread's actual allocation. On Linux musl the main stack can grow. The runtime reads its mapping and the preceding mapping, and uses pthread bounds for worker threads. The parser and evaluator share the cached guard address. A compound command parsed at the prompt checks space again when a function later executes it. Inputs limited by `FUNCNEST=1` exercise the unwind across eval, source, traps and mapfile without exhausting any stack. The outer script reader can proceed to the next complete command, and `-c` ends its argument. [Stack measurements](benchmarks.md#evaluation-stack-interrupt) · [Regression tests](../tests/shell.py)
+
+macOS arm64 では、開始時に 1 MiB だったスタックのソフト上限を 8 MiB に上げても、pthread が返す確保量は 1 MiB のままだった。Tonari は現在の上限と領域の両方に収まる位置で確認する。Linux の musl ビルドでは伸長可能なメインスタックと直前のマッピングを読み、ワーカースレッドでは pthread の境界を使う。プロンプトで解析した複合コマンドも、関数内で実行するときに残量を確認する。`FUNCNEST=1` で別の関数を呼ぶ試験により、eval、source、trap、mapfile をまたいで外側の入力単位に戻ることを確認した。スクリプトは次の完全なコマンドを読み、`-c` はそこで終了する。
+
+## Stored subscripts, loop namerefs and parameter lengths / 保存済み添字・ループの名前参照・要素長
+
+A nameref used as a `for` counter retargets the last reference in its chain for each word. An existing scalar destination must preserve its value. When the reference names an array element, arithmetic reads, compound assignments, indirect expansions and builtin destinations must also agree on its key. With `m[apple]=4` and a reference to `m[$key]`, reading 4 and doubling it leaves 8 at the same key. The read-only evaluator needs the array's type even when an associative lookup occurs inside an indexed subscript. A malformed numeric index must propagate its error to the arithmetic caller. The data evaluator accepts parameter references, default and alternate operands, and nested arithmetic. Only the original source expression may dispatch shell commands. [Regression cases](../tests/review_r2_language.py) · [Native timing](benchmarks.md#second-review-stored-subscripts)
+
+GNU Bash 5.3.20 and Tonari retain combining accents, the emoji presentation selector, nonbreaking space and private-use characters in UTF-8 quoting. They octal-escape the UTF-8 encoding of the C1 NEXT LINE control. A stored indexed expression may use a parameter as its subscript, and source quotes around arithmetic slice operands are removed before evaluating their values. The tests run from the normal shell suite, including Tonari-only checks on a host with Bash 3.2. Debian Bash 5.2.37 reports length zero for the checked associative element nameref and terminates during a default assignment through that reference. The driver checks the former difference and omits the latter invocation in Bash 5.2. Tonari runs both cases on each host. Bash 5.2 reports status 1 for the length of an element of a declared but uninitialized associative array under nounset, while the tested 5.3 versions return 127 for `-c`. [Shell integration](../tests/shell.py)
+
+名前参照を `for` の変数に指定すると、反復ごとに参照先を付け替える。算術式や組み込みコマンドから配列を扱う場合は、読み出しと書き込みで同じキーを使う。添字配列の添字に連想配列の参照を含む場合も、配列の型情報を保持する。添字の算術エラーは呼び出し元へ返す。保存された添字の展開は、変数参照・デフォルト値・算術式などのデータ評価で処理する。UTF-8 の結合文字や異体字セレクタは表示可能な形で引用し、制御文字はエスケープする。Bash 5.2 系で異なる結果が得られる入力も回帰試験で区別した。
+
+An arithmetic read through `declare -n ref='a[i++]'` uses the caller’s arithmetic evaluator. With `a=(5 7)` and `i=0`, GNU Bash 5.3.20 and Tonari print `5 1` for `echo $((ref)) $i`. Target validation uses the read-only evaluator and still observes `set -u`. Stored subscripts also support ordinary case conversion, trimming, replacement, substring extraction and array lengths without running a shell command. The integration test checks these through a nameref and explicit `unset`. [Regression cases](../tests/review_r2_language.py)
+
+算術式から名前参照を読むときは呼び出し元の評価器を引き継ぐため、添字の `i++` は一回だけ反映される。検証用の読み取り専用評価器も `set -u` の設定を引き継ぐ。保存した添字に含まれる文字列変換や配列の要素数は、シェルコマンドを起動せずに求める。
+
+GNU Bash parses the trailing hyphen of a descriptor move before expanding its word. For `fd=3; exec 4>&$fd-` the source descriptor moves. For `path='3-'; printf x >&"$path"` the shell writes the file named `3-`. A subsequent redirection operand can also inspect a file or descriptor installed earlier in the same command. Tonari performs those expansions in order in the appropriate builtin, null-command or external scope. When a later open fails, it restores descriptors before running ERR traps. [Normal-entry regression tests](../tests/shell.py) · [Native timings](benchmarks.md#ordered-redirection-review)
+
+GNU Bash はリダイレクト語の展開前に末尾のハイフンを識別する。`fd=3; exec 4>&$fd-` は fd を移し、`path='3-'; printf x >&"$path"` はファイル `3-` に書く。また、後ろのリダイレクトの語を展開するときには、同じコマンドの先行するファイル作成や fd 複製が見える。Tonari は組み込み・空コマンド・外部コマンドそれぞれのスコープでこの順序を保ち、失敗時には ERR トラップを呼ぶ前に fd を復元する。
+
+
+## Startup status and input deadlines (2026-11-29)
+
+On Darwin arm64, GNU Bash 5.3.20 retained the previous command status after an inaccessible startup file or an explicit startup-file return. A profile containing `false; return 7` made the first command in BASH_ENV see 1. File selection and command status therefore travel separately. Forced interactive commands and named scripts save explicit history files, including when an rcfile adds an entry and exits before the old file loads. A nonempty unread history file needs an append on that path. For `read -t 99999999999` the decimal duration is valid although Darwin rejects a single pselect that long. Bounded waits rebuild their descriptor sets and recheck elapsed monotonic time.
+
+起動ファイルがディレクトリの場合は診断し、次のプロファイルには移らない。起動処理の `return` の数値と直前のコマンドの終了値を区別する。古い履歴を読み込む前に rcfile で終了した場合も既存の履歴を保存する。長時間の読み取り期限は単調時計で管理し、カーネルが受け付ける単位に分けて待つ。[Regression checks](../tests/shell.py)
+
+On 2026-11-29, twenty static extglob arms demonstrated repeated compilation when a twelve-entry dynamic cache filled. A static case arm and a static conditional now retain their own compiled matcher and check the shell options and locale handle before reuse. The M1 last-arm workload took 9.559 ms, down from 24.318 ms. PATH lookup skips directories, retains permission errors for regular files, and reports a stale hash using the saved pathname. The shell tests cover these lookup outcomes, numeric trace descriptors, nested POSIX bracket members, and changing case options between calls. [Timing](benchmarks.md#static-case-arms-and-shell-assignments-2026-11-29) · [Regressions](../tests/shell.py)
+
+2026-11-29、静的な拡張パターンが20個ある case で、12件の動的キャッシュからあふれた式の再コンパイルを確認した。case と条件式の構文ノードが照合器を保持し、再利用前にシェルの設定とロケールを確認する。最後のアームに一致する M1 実測は 24.318 ms から 9.559 ms に短縮した。PATH 上のディレクトリは実行候補から除外し、通常ファイルの権限エラーと古いハッシュのパスを区別する。回帰試験にはこの3例のほか、トレース先、角括弧内の範囲、関数呼出しの間に照合設定を変える例を含めた。
+
+### R2 parser, expansion and arithmetic follow-up / パーサ・展開・算術の再検証
+
+Physical here-document ranges follow their owning input through recursive scans. Relexing an alias also rebases the here-document extent used by function declaration output. Parser recovery now consumes the entire invalid outer compound before accepting a subsequent command. Arithmetic failures preserve the missing or readonly variable name through stored subscripts, and array slices clone only the requested portion of the associative array's ordered keys. The regression runner checks declaration round-trips, early EOF, continued indexed assignments, prompt escapes, long alias chains and dynamic loop operands. The four native workload measurements cover the parser and expansion changes. [Native results](benchmarks.md) · [Regression runner](../tests/review_r2_language.py)
+
+ヒアドキュメントの範囲を元の入力とともに管理し、別名展開後に関数を再定義しても本文が欠けないようにしました。配列構文エラーからの復帰では外側の複合コマンドを最後まで読み捨てます。算術のエラーは変数名を保持し、連想配列のスライスは必要な要素だけを複製します。関数定義の往復、未終端入力、添字代入の行継続、プロンプト、別名の連鎖、ループ上限の変更を通常の経路から照合しました。[実機計測](benchmarks.md) · [回帰テスト](../tests/review_r2_language.py)
+
+Bracketed pastes can contain several commands with different alias and history settings. The interactive reader now uses the regular compound-command lookahead to consume one parsed unit from the paste. It returns to physical-line processing when that unit contains a possible history-expansion marker. On the native arm64 terminal, five timed pastes of a function containing 48 and 192 three-line conditionals took median 0.38 ms and 1.12 ms. Bash 5.3.20 took 2.03 ms and 8.21 ms. Each run called the function and checked its final counter.
+
+括弧付きペーストには、別々の別名・履歴設定で実行される複数のコマンドが含まれる。対話入力では通常の複合コマンドの先読みを再利用し、構文解析済みの単位を一つずつ消費する。履歴展開の可能性があれば物理行ごとの処理に戻す。arm64 実機の端末で、3 行の条件分岐を 48 個・192 個含む関数を貼り付けて実行し、最終カウンタを検証した。各 5 回の中央値は Tonari が 0.38 ms・1.12 ms、Bash 5.3.20 が 2.03 ms・8.21 ms だった。
+
+## Numeric builtin operands / 組み込みの数値引数
+
+GNU Bash 5.3.20 accepts signed decimal integers surrounded by ASCII whitespace, including a trailing newline, in `mapfile`, `caller`, signal operands, and `return`. GNU's `general.c` function `valid_number` checks the whole operand and rejects signed overflow. Tonari shares this parse before applying each operand's range. A trace descriptor allows leading ASCII whitespace only. Plain `wait PID` requires the first byte to be a digit, while `wait -n` also accepts a padded PID. The checks in `tests/review_builtins.py` exercise the public entry points against GNU Bash.
+
+GNU Bash 5.3.20 の数値引数は前後の ASCII 空白を受け付ける。全角空白は数値にならず、符号付き整数の範囲外も失敗する。Tonari では整数を読んでから各組み込みの範囲を確認する。トレースの FD は末尾の空白を許さず、通常の `wait PID` は先頭が数字の引数を受け付ける。[比較試験](../tests/review_builtins.py)
+
+On 2026-11-29, an isolated foreground handoff on a private PTY showed that an interactive shell initially in a background process group must wait for its controlling shell. Both Tonari and GNU Bash 5.3.20 stopped with SIGTTIN and resumed with monitor mode enabled. For `set -mb`, a child-state signal now wakes the job poll when the shell controls the disposition. Explicit handlers, inherited ignores and blocked signals retain synchronous polling. A foreground external command with deferred descriptor operands also updates the parent's command hash before those operands are evaluated, including when a redirect fails. A redirection-only command using a named descriptor or stdin returns the setup status, while the ordinary stdout-only form reports its last substitution status. [Job timing](benchmarks.md#job-notifications-and-trap-dispatch-2026-11-29) · [Regression tests](../tests/shell.py)
+
+2026-11-29、専用PTYでバックグラウンドから起動した対話シェルが SIGTTIN で停止し、端末を取得してから監視モードで再開することを GNU Bash と照合した。`set -mb` の通常経路は子の状態変化時に回収し、SIGCHLD の既存処理やマスクを維持する場合は同期的に確認する。前景の外部コマンドはリダイレクトが失敗しても親のコマンドハッシュに残る。名前付きFDや標準入力を扱う単独リダイレクトの終了値と、出力のみで最後のコマンド置換の終了値を返す場合を回帰試験で区別した。
+
+## Shell level at process replacement / プロセスを置き換えるときのシェルレベル
+
+GNU Bash 5.3.20 keeps the current `SHLVL` for an explicit `exec` inside parentheses and for the last external command in an `if`, `case` or brace-group body. A final simple command in a command substitution can replace that substitution's shell. Its child then receives the decremented level, including when programmable completion runs a `-C` callback. A pipe or command redirection can change which rule applies. The regression checks the exported value with `printenv`, plus readonly bindings, the level limit, and a nameref. [Process environment tests](../tests/shell.py) · [Native timings](benchmarks.md#shell-level-during-command-substitution)
+
+GNU Bash 5.3.20 は、丸括弧内の明示的な `exec` と、`if`、`case`、波括弧の本体末尾の外部コマンドで現在の `SHLVL` を保つ。一方、コマンド置換の末尾の単純コマンドがそのシェルを置き換える場合、子プロセスには 1 小さい値を渡す。補完の `-C` コールバックにも同じ規則を適用する。回帰試験では、パイプ、リダイレクト、読み取り専用変数、上限値、名前参照も確認する。

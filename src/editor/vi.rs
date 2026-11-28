@@ -6,7 +6,8 @@ pub(super) struct State {
     operator: Option<(Action, usize)>,
 }
 
-fn class(c: char, big: bool) -> u8 {
+fn class(cluster: &str, big: bool) -> u8 {
+    let c = cluster.chars().next().unwrap();
     if c.is_whitespace() {
         0
     } else if big || c.is_alphanumeric() || c == '_' {
@@ -16,17 +17,19 @@ fn class(c: char, big: bool) -> u8 {
     }
 }
 
+use unicode_segmentation::UnicodeSegmentation;
+
 fn word(text: &str, at: usize, action: Action, big: bool) -> usize {
     if action == Action::ViPrevWord {
         let mut iter = text[..at]
-            .char_indices()
+            .grapheme_indices(true)
             .rev()
-            .skip_while(|(_, c)| c.is_whitespace());
+            .skip_while(|(_, c)| c.starts_with(char::is_whitespace));
         let Some((mut start, c)) = iter.next() else {
             return 0;
         };
         let kind = class(c, big);
-        for (i, _) in iter.take_while(|(_, c)| class(*c, big) == kind) {
+        for (i, _) in iter.take_while(|(_, c)| class(c, big) == kind) {
             start = i;
         }
         return start;
@@ -34,26 +37,29 @@ fn word(text: &str, at: usize, action: Action, big: bool) -> usize {
     if action == Action::ViEndWord {
         let after = next(text, at);
         let mut iter = text[after..]
-            .char_indices()
-            .skip_while(|(_, c)| c.is_whitespace());
+            .grapheme_indices(true)
+            .skip_while(|(_, c)| c.starts_with(char::is_whitespace));
         let Some((mut last, c)) = iter.next() else {
             return previous(text, text.len());
         };
         let kind = class(c, big);
-        for (i, _) in iter.take_while(|(_, c)| class(*c, big) == kind) {
+        for (i, _) in iter.take_while(|(_, c)| class(c, big) == kind) {
             last = i;
         }
         return after + last;
     }
-    let mut iter = text[at..].chars().peekable();
+    let mut iter = text[at..].graphemes(true).peekable();
     let Some(&first) = iter.peek() else { return at };
     let kind = class(first, big);
     let mut end = at;
     while iter.peek().is_some_and(|&c| class(c, big) == kind) {
-        end += iter.next().unwrap().len_utf8();
+        end += iter.next().unwrap().len();
     }
-    while iter.peek().is_some_and(|c| c.is_whitespace()) {
-        end += iter.next().unwrap().len_utf8();
+    while iter
+        .peek()
+        .is_some_and(|c| c.starts_with(char::is_whitespace))
+    {
+        end += iter.next().unwrap().len();
     }
     end
 }

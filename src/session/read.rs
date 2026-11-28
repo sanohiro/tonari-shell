@@ -138,26 +138,34 @@ fn options(args: &[String]) -> Result<Options<'_>, (u8, String)> {
     Ok(opts)
 }
 
-// The process numeric locale remains C. Shell LC_NUMERIC is applied explicitly
-// by printf. Keep decimal/exponent syntax and the Duration range check.
+// read accepts an optional sign and decimal seconds, rounded to microseconds.
+// Reject integer overflow instead of wrapping a long delay into a short one.
 fn timeout(value: &str) -> Option<Duration> {
-    if let Ok(seconds) = value.parse::<u64>() {
-        return Some(Duration::from_secs(seconds));
-    }
-    if value.is_empty()
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_digit() || b"+-.eE".contains(&b))
+    let digits = value.strip_prefix(['+', '-']).unwrap_or(value);
+    let (whole, fraction) = digits.split_once('.').unwrap_or((digits, ""));
+    if !whole
+        .bytes()
+        .chain(fraction.bytes())
+        .all(|b| b.is_ascii_digit())
     {
         return None;
     }
-    let input = std::ffi::CString::new(value).ok()?;
-    let mut end = std::ptr::null_mut();
-    let seconds = unsafe { libc::strtod(input.as_ptr(), &mut end) };
-    if end.cast_const() != unsafe { input.as_ptr().add(value.len()) } {
-        return None;
+    let seconds = if whole.is_empty() {
+        0
+    } else {
+        whole.parse::<i64>().ok()? as u64
+    };
+    let mut micros = 0;
+    for i in 0..6 {
+        micros = micros * 10
+            + fraction
+                .as_bytes()
+                .get(i)
+                .map_or(0, |&b| u64::from(b - b'0'));
     }
-    Duration::try_from_secs_f64(seconds).ok()
+    micros += u64::from(fraction.as_bytes().get(6).is_some_and(|&b| b >= b'5'));
+    let duration = Duration::from_secs(seconds) + Duration::from_micros(micros);
+    (!value.starts_with('-') || duration.is_zero()).then_some(duration)
 }
 
 pub(super) struct Input {
@@ -205,7 +213,7 @@ impl Input {
             && crate::INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
             && crate::interrupted()
         {
-            return Err(Flow::Discard(crate::traps::signal_status(libc::SIGINT)));
+            return Err(Flow::Unwind(crate::traps::signal_status(libc::SIGINT)));
         }
         if remaining == Some(Duration::ZERO) {
             return Err(Flow::Continue(crate::traps::signal_status(libc::SIGALRM)));
@@ -374,7 +382,10 @@ pub(super) fn run(
         }
     };
     if crate::execute::fd::is_private(opts.fd)
-        || (opts.max_chars == Some(0) || opts.timeout.is_some())
+        || (opts.max_chars == Some(0)
+            || opts.timeout.is_some()
+            || session.interactive
+            || session.traps.active())
             && unsafe { libc::fcntl(opts.fd, libc::F_GETFD) } < 0
     {
         diagnostic!(
@@ -442,7 +453,9 @@ pub(super) fn run(
             Ok(crate::editor::Input::Line(text)) => edited = Some(text.into_bytes().into_iter()),
             Ok(crate::editor::Input::Directory(_)) => unreachable!(),
             Ok(crate::editor::Input::End) => edited = Some(Vec::new().into_iter()),
-            Ok(crate::editor::Input::Cancel) => return Flow::Discard(130),
+            Ok(crate::editor::Input::Cancel) => {
+                return Flow::Unwind(crate::traps::signal_status(libc::SIGINT));
+            }
             Ok(crate::editor::Input::Control(flow)) => return flow,
             Err(e) if e.kind() == io::ErrorKind::TimedOut => {
                 return Flow::Continue(crate::traps::signal_status(libc::SIGALRM));

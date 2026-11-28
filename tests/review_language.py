@@ -200,11 +200,14 @@ mapfile -t r <<< data; r+=("${src[@]}"); printf '<%s>' "${r[@]}" """,
 
             if name in ("brace groups in current substitution", "whole-array target length") and tuple(map(int,version.split("."))) < (5,3):
                 continue
-            observed = [
-                subprocess.run([exe, "--noprofile", "--norc", "-c", script],
-                               env=options, cwd=scratch, capture_output=True, timeout=10)
-                for exe in (sh, bash)
-            ]
+            observed = []
+            for exe in (sh, bash):
+                with tempfile.TemporaryDirectory(dir=scratch) as work:
+                    observed.append(subprocess.run(
+                        [exe, "--noprofile", "--norc", "-c", script],
+                        env=options, cwd=scratch if name == "brace tilde after alternatives" else work,
+                        capture_output=True, timeout=10,
+                    ))
             results = [(run.returncode, run.stdout) for run in observed]
             if name == "flat pair process substitution":
                 # Ubuntu 24.04 Bash 5.2.21 preserves direct values literally.

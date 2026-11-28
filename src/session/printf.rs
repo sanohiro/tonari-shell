@@ -105,6 +105,7 @@ pub(crate) fn run(
         private: None,
     };
     let mut args = Arguments {
+        stdout: (capture.is_none() && target.is_none()).then(StdoutProgress::default),
         values,
         status: 0,
         locale: None,
@@ -122,6 +123,7 @@ pub(crate) fn run(
             match render(format.as_bytes(), &mut args, &mut output, &mut variables) {
                 Ok(true) if !args.values.is_empty() && count != args.values.len() => continue,
                 Err(message) => {
+                    args.flush_lines(&output);
                     diagnostic!("printf: {message}");
                     args.status = 1;
                 }
@@ -149,7 +151,11 @@ pub(crate) fn run(
         } else {
             capture.extend_from_slice(&output);
         }
-    } else if crate::builtins::write_stdout_for("printf", &output) != 0 {
+    } else if crate::builtins::write_stdout_for(
+        "printf",
+        &output[args.stdout.as_ref().map_or(0, |s| s.written)..],
+    ) != 0
+    {
         return 1;
     }
     args.status
@@ -165,7 +171,14 @@ fn string_lines(out: &mut Vec<u8>, values: &[String]) {
     }
 }
 
+#[derive(Default)]
+struct StdoutProgress {
+    scanned: usize,
+    written: usize,
+}
+
 struct Arguments<'a> {
+    stdout: Option<StdoutProgress>,
     values: &'a [String],
     status: u8,
     locale: Option<Numeric>,
@@ -173,6 +186,44 @@ struct Arguments<'a> {
 }
 
 impl<'a> Arguments<'a> {
+    // Bash flushes completed lines before a diagnostic on merged stdout/stderr.
+    // Track both offsets so repeated errors on one long line only scan new bytes.
+    #[cold]
+    fn flush_lines(&mut self, output: &[u8]) {
+        if let Some(state) = &mut self.stdout {
+            if let Some(offset) = memchr::memrchr(b'\n', &output[state.scanned..]) {
+                let end = state.scanned + offset + 1;
+                self.status |=
+                    crate::builtins::write_stdout_for("printf", &output[state.written..end]);
+                state.written = end;
+            }
+            state.scanned = output.len();
+        }
+    }
+
+    #[cold]
+    fn literal_field_overflow(
+        &mut self,
+        digits: &[u8],
+        conversion: u8,
+        fallback: i32,
+        output: &[u8],
+    ) -> Result<i32, &'static str> {
+        // %n stores the number already written and ignores the field format.
+        if conversion == b'n' {
+            return Ok(fallback);
+        }
+        if !matches!(conversion, b'b' | b'q' | b'Q' | b'(') {
+            return Err("field width or precision out of range");
+        }
+        self.flush_lines(output);
+        let value = std::str::from_utf8(digits).expect("decimal field digits");
+        let error = std::io::Error::from_raw_os_error(libc::ERANGE);
+        diagnostic!("printf: {value}: {}", crate::builtins::os_message(&error));
+        self.status = 1;
+        Ok(fallback)
+    }
+
     fn next(&mut self) -> &'a str {
         if let Some((first, rest)) = self.values.split_first() {
             self.values = rest;
@@ -187,9 +238,16 @@ impl<'a> Arguments<'a> {
         parse: impl FnOnce(*const libc::c_char, *mut *mut libc::c_char) -> T,
         from_char: impl Fn(u32) -> T,
         decimal: &str,
+        output: &[u8],
     ) -> T {
+        if self.values.is_empty() {
+            return from_char(0);
+        }
         let value = self.next();
         if value.is_empty() {
+            self.flush_lines(output);
+            diagnostic!("printf: : invalid number");
+            self.status = 1;
             return from_char(0);
         }
         if let Some(rest) = value.strip_prefix(['\'', '"']) {
@@ -213,6 +271,7 @@ impl<'a> Arguments<'a> {
             value
         };
         let Ok(input) = CString::new(input) else {
+            self.flush_lines(output);
             diagnostic!("printf: invalid number");
             self.status = 1;
             return from_char(0);
@@ -234,16 +293,18 @@ impl<'a> Arguments<'a> {
         let result = parse(input.as_ptr(), &mut end);
         let (error, remaining) = unsafe { (*errno, *end) };
         if remaining != 0 || error != 0 && error != libc::ERANGE {
+            self.flush_lines(output);
             diagnostic!("printf: {value}: invalid number");
             self.status = 1;
         } else if error == libc::ERANGE {
+            self.flush_lines(output);
             diagnostic!("printf: {value}: value out of range");
             self.status = 1;
         }
         result
     }
 
-    fn signed(&mut self) -> i64 {
+    fn signed(&mut self, output: &[u8]) -> i64 {
         // Common decimal widths and operands need neither a C string nor errno.
         if let Some((word, rest)) = self.values.split_first()
             && (word == "0"
@@ -258,9 +319,14 @@ impl<'a> Arguments<'a> {
             self.values = rest;
             return value;
         }
-        self.number(|p, end| unsafe { libc::strtoll(p, end, 0) }, i64::from, ".")
+        self.number(
+            |p, end| unsafe { libc::strtoll(p, end, 0) },
+            i64::from,
+            ".",
+            output,
+        )
     }
-    fn unsigned(&mut self) -> u64 {
+    fn unsigned(&mut self, output: &[u8]) -> u64 {
         if let Some((word, rest)) = self.values.split_first()
             && (word == "0"
                 || word
@@ -276,10 +342,16 @@ impl<'a> Arguments<'a> {
             |p, end| unsafe { libc::strtoull(p, end, 0) },
             u64::from,
             ".",
+            output,
         )
     }
-    fn float(&mut self, decimal: &str) -> f64 {
-        self.number(|p, end| unsafe { libc::strtod(p, end) }, f64::from, decimal)
+    fn float(&mut self, decimal: &str, output: &[u8]) -> f64 {
+        self.number(
+            |p, end| unsafe { libc::strtod(p, end) },
+            f64::from,
+            decimal,
+            output,
+        )
     }
 }
 
@@ -323,7 +395,11 @@ impl Spec {
         self.flags & flag_bit(flag) != 0
     }
 
-    fn parse(input: &mut &[u8], args: &mut Arguments<'_>) -> Result<(Self, u8), &'static str> {
+    fn parse(
+        input: &mut &[u8],
+        args: &mut Arguments<'_>,
+        output: &[u8],
+    ) -> Result<(Self, u8), &'static str> {
         let mut flags = 0;
         while let Some((&flag, rest)) = input.split_first() {
             let bit = flag_bit(flag);
@@ -333,19 +409,11 @@ impl Spec {
             flags |= bit;
             *input = rest;
         }
-        let mut width = amount(input, args, 0);
-        if width < 0 {
-            flags |= flag_bit(b'-');
-            width = width.checked_abs().ok_or("field width too large")?;
-        }
-        let mut precision = None;
-        if input.first() == Some(&b'.') {
-            *input = &input[1..];
-            let p = amount(input, args, -1);
-            if p >= 0 {
-                precision = Some(p);
-            }
-        }
+        let width = amount(input, args, 0, output);
+        let precision = input.strip_prefix(b".").map(|rest| {
+            *input = rest;
+            amount(input, args, -1, output)
+        });
         let mut wide = false;
         while let Some((&len, rest)) = input.split_first() {
             if !LENGTH_MODIFIERS.contains(&len) {
@@ -356,17 +424,33 @@ impl Spec {
         }
         let (conversion, rest) = input.split_first().ok_or("`%': missing format character")?;
         *input = rest;
+        let conversion = if wide && matches!(conversion, b'c' | b's') {
+            conversion.to_ascii_uppercase()
+        } else {
+            *conversion
+        };
+        let mut field = |amount, fallback| match amount {
+            Ok(n) => Ok(n),
+            Err(digits) => args.literal_field_overflow(digits, conversion, fallback, output),
+        };
+        let mut width = field(width, 0)?;
+        if width < 0 {
+            flags |= flag_bit(b'-');
+            width = width.checked_abs().ok_or("field width too large")?;
+        }
+        // Bash's %Q applies precision before quoting. An overflowing literal
+        // leaves its input intact. The other shell string conversions use zero.
+        let precision = precision
+            .map(|p| field(p, if conversion == b'Q' { -1 } else { 0 }))
+            .transpose()?
+            .filter(|&p| p >= 0);
         Ok((
             Self {
                 flags,
                 width,
                 precision,
             },
-            if wide && matches!(conversion, b'c' | b's') {
-                conversion.to_ascii_uppercase()
-            } else {
-                *conversion
-            },
+            conversion,
         ))
     }
 
@@ -503,14 +587,14 @@ impl Spec {
             // The default integer conversions have no padding, grouping or
             // alternate prefixes. Write directly into the existing byte buffer.
             match conversion {
-                b'd' | b'i' => write!(output, "{}", args.signed()),
-                b'u' => write!(output, "{}", args.unsigned()),
-                b'x' => write!(output, "{:x}", args.unsigned()),
-                b'X' => write!(output, "{:X}", args.unsigned()),
-                b'o' => write!(output, "{:o}", args.unsigned()),
+                b'd' | b'i' => write!(output, "{}", args.signed(output)),
+                b'u' => write!(output, "{}", args.unsigned(output)),
+                b'x' => write!(output, "{:x}", args.unsigned(output)),
+                b'X' => write!(output, "{:X}", args.unsigned(output)),
+                b'o' => write!(output, "{:o}", args.unsigned(output)),
                 _ => {
                     let fmt = [b'%', conversion, 0];
-                    let n = args.float(decimal);
+                    let n = args.float(decimal, output);
                     return append_number(output, |dst, cap| unsafe {
                         libc::snprintf(dst, cap, fmt.as_ptr().cast(), n)
                     });
@@ -527,7 +611,7 @@ impl Spec {
         {
             let signed = matches!(conversion, b'd' | b'i');
             let (value, sign) = if signed {
-                let value = args.signed();
+                let value = args.signed(output);
                 (
                     value.unsigned_abs(),
                     if value < 0 {
@@ -539,7 +623,7 @@ impl Spec {
                     },
                 )
             } else {
-                (args.unsigned(), None)
+                (args.unsigned(output), None)
             };
             let mut decimal = itoa::Buffer::new();
             let mut digits = [0; 22]; // ceil(64/3) octal digits
@@ -602,19 +686,19 @@ impl Spec {
         let fmt = format.as_ptr().cast::<libc::c_char>();
         match conversion {
             b'd' | b'i' => {
-                let n = args.signed();
+                let n = args.signed(output);
                 append_number(output, |dst, cap| unsafe {
                     libc::snprintf(dst, cap, fmt, n)
                 })
             }
             b'o' | b'u' | b'x' | b'X' => {
-                let n = args.unsigned();
+                let n = args.unsigned(output);
                 append_number(output, |dst, cap| unsafe {
                     libc::snprintf(dst, cap, fmt, n)
                 })
             }
             _ => {
-                let n = args.float(decimal);
+                let n = args.float(decimal, output);
                 append_number(output, |dst, cap| unsafe {
                     libc::snprintf(dst, cap, fmt, n)
                 })
@@ -642,26 +726,39 @@ fn append_number(
     Ok(())
 }
 
-fn amount(input: &mut &[u8], args: &mut Arguments<'_>, overflow: i32) -> i32 {
-    let value = if input.first() == Some(&b'*') {
+fn amount<'a>(
+    input: &mut &'a [u8],
+    args: &mut Arguments<'_>,
+    overflow: i32,
+    output: &[u8],
+) -> Result<i32, &'a [u8]> {
+    if input.first() == Some(&b'*') {
         *input = &input[1..];
-        i32::try_from(args.signed()).ok()
-    } else {
-        let mut amount = Some(0i32);
-        while let Some((&digit, rest)) = input.split_first() {
-            if !digit.is_ascii_digit() {
-                break;
-            }
-            amount = amount.and_then(|n| n.checked_mul(10)?.checked_add(i32::from(digit - b'0')));
-            *input = rest;
+        return Ok(i32::try_from(args.signed(output)).unwrap_or_else(|_| {
+            args.flush_lines(output);
+            diagnostic!("printf: field width or precision out of range");
+            args.status = 1;
+            overflow
+        }));
+    }
+    let digits = *input;
+    let mut amount = 0i32;
+    while let Some((&digit, rest)) = input.split_first() {
+        if !digit.is_ascii_digit() {
+            break;
         }
-        amount
-    };
-    value.unwrap_or_else(|| {
-        diagnostic!("printf: field width or precision out of range");
-        args.status = 1;
-        overflow
-    })
+        *input = rest;
+        let Some(next) = amount
+            .checked_mul(10)
+            .and_then(|n| n.checked_add(i32::from(digit - b'0')))
+        else {
+            let tail = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+            *input = &rest[tail..];
+            return Err(&digits[..digits.len() - input.len()]);
+        };
+        amount = next;
+    }
+    Ok(amount)
 }
 
 fn render(
@@ -687,7 +784,7 @@ fn render(
             }
             b'%' => {
                 let original = input;
-                let (mut spec, conversion) = Spec::parse(&mut input, args)?;
+                let (mut spec, conversion) = Spec::parse(&mut input, args, out)?;
                 match conversion {
                     b's' => spec.bytes(args.next().as_bytes(), out)?,
                     b'(' => {
@@ -706,7 +803,7 @@ fn render(
                             let timestamp = if args.values.is_empty() {
                                 -1
                             } else {
-                                args.signed()
+                                args.signed(out)
                             };
                             let seconds = match timestamp {
                                 -1 => unsafe { libc::time(std::ptr::null_mut()) },
@@ -721,6 +818,7 @@ fn render(
                             .ok_or("time or format out of range")?;
                             spec.bytes(stamp.as_bytes(), out)?;
                         } else {
+                            args.flush_lines(out);
                             diagnostic!("printf: warning: invalid time format specification");
                             out.push(b'%');
                             out.extend_from_slice(&original[..original.len() - input.len()]);
@@ -765,6 +863,7 @@ fn render(
                                 return Err("invalid identifier for %n".into());
                             }
                             if variables.read().readonly(name) {
+                                args.flush_lines(out);
                                 diagnostic!("printf: {name}: readonly variable");
                                 args.status = 1;
                             } else if !(variables.capture

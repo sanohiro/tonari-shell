@@ -261,6 +261,7 @@ struct Process {
 #[derive(Clone)]
 struct Job {
     id: u32,
+    foreground_notice: bool,
     stopped_at: u64,
     group: Option<pid_t>,
     children: Vec<Process>,
@@ -270,6 +271,35 @@ struct Job {
     signaled: bool,
     listed: bool,
     nohup: bool,
+}
+
+fn signal_description(signal: i32) -> Option<String> {
+    let description = unsafe { libc::strsignal(signal) };
+    (!description.is_null()).then(|| {
+        unsafe { std::ffi::CStr::from_ptr(description) }
+            .to_string_lossy()
+            .into_owned()
+    })
+}
+
+impl Process {
+    fn long_state(&self, posix: bool) -> String {
+        match self.state {
+            State::Running => "Running".into(),
+            State::Stopped(code) => {
+                signal_description(i32::from(code) - 128).unwrap_or_else(|| "Stopped".into())
+            }
+            State::Done(code) => {
+                self.signal
+                    .and_then(signal_description)
+                    .unwrap_or_else(|| match code {
+                        0 => "Done".into(),
+                        _ if posix => format!("Done({code})"),
+                        _ => format!("Exit {code}"),
+                    })
+            }
+        }
+    }
 }
 
 impl Job {
@@ -319,20 +349,27 @@ impl Job {
             }
             return "Stopped".into();
         }
-        if let Some(signal) = self.children.last().and_then(|child| child.signal) {
-            let description = unsafe { libc::strsignal(signal) };
-            if !description.is_null() {
-                return unsafe { std::ffi::CStr::from_ptr(description) }
-                    .to_string_lossy()
-                    .into_owned()
-                    .into();
-            }
+        if let Some(reason) = self
+            .children
+            .last()
+            .and_then(|child| child.signal)
+            .and_then(signal_description)
+        {
+            return reason.into();
         }
         match self.status() {
             0 => "Done".into(),
             code if posix => format!("Done({code})").into(),
             code => format!("Exit {code}").into(),
         }
+    }
+
+    fn last_pid(&self) -> Option<pid_t> {
+        self.children
+            .iter()
+            .rev()
+            .find(|p| p.pid > 0)
+            .map(|p| p.pid)
     }
 
     fn status(&self) -> u8 {
@@ -346,6 +383,7 @@ impl Job {
         0
     }
     fn update(&mut self, pid: pid_t, event: ChildEvent) {
+        crate::traps::job_changed();
         if let Some(p) = self.children.iter_mut().find(|p| p.pid == pid) {
             self.listed = false;
             p.state = match event {
@@ -377,6 +415,7 @@ impl Job {
         force: bool,
         foreground_tty: bool,
     ) -> io::Result<Option<u8>> {
+        let mut group = self.group;
         while self.active() || (force && self.stopped()) {
             if foreground_tty && crate::traps::hanging_up() {
                 self.hangup();
@@ -385,7 +424,7 @@ impl Job {
             if let Some(code) = mask.and_then(crate::traps::WaitMask::interrupt_status) {
                 return Ok(Some(code));
             }
-            let pid = self.group.map(|g| -g).unwrap_or_else(|| {
+            let pid = group.map(|g| -g).unwrap_or_else(|| {
                 self.children
                     .iter()
                     .find(|p| {
@@ -405,6 +444,12 @@ impl Job {
             if got < 0 {
                 let e = io::Error::last_os_error();
                 if e.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                if e.raw_os_error() == Some(libc::ECHILD) {
+                    if group.take().is_none() {
+                        self.update(pid, ChildEvent::Exited(127));
+                    }
                     continue;
                 }
                 return Err(e);
@@ -432,8 +477,11 @@ impl Job {
 #[derive(Clone, Default)]
 pub struct Jobs {
     pub monitor: bool,
+    pub notify: bool,
+    pub(crate) posix_interactive: bool,
+    pub(crate) running_prompt_hook: bool,
     exit_warning: Option<usize>,
-    foreground_notices: Vec<(i32, String)>,
+    pub(crate) foreground_interrupted: bool,
     pub(crate) quiet: bool,
     tty: Option<Terminal>,
     table: Vec<Job>,
@@ -494,8 +542,22 @@ impl Jobs {
                 .and_then(PrivateFile::new)
         };
         let Ok(fd) = fd else { return };
-        if unsafe { libc::tcgetpgrp(fd.as_raw_fd()) } != old {
-            return;
+        let mut stops = 0;
+        loop {
+            let foreground = unsafe { libc::tcgetpgrp(fd.as_raw_fd()) };
+            if foreground == old {
+                break;
+            }
+            // Noninteractive callers keep running without controlling a tty.
+            // Bound retries for an orphaned group or a blocked SIGTTIN.
+            if !interactive
+                || foreground < 0
+                || stops == 16
+                || crate::traps::stop_for_terminal().is_err()
+            {
+                return;
+            }
+            stops += 1;
         }
         let owner = unsafe { libc::getpid() };
         let shell_group = if interactive { owner } else { old };
@@ -556,7 +618,9 @@ impl Jobs {
             crate::traps::reset_caught_signals(&[libc::SIGTSTP]);
         }
         self.tty = None;
-        self.foreground_notices.clear();
+        self.running_prompt_hook = false;
+        self.posix_interactive = false;
+        self.foreground_interrupted = false;
         self.monitor = false;
         self.table.clear();
         self.detached.clear();
@@ -612,6 +676,7 @@ impl Jobs {
             .collect();
         let mut job = Job {
             id: 0,
+            foreground_notice: false,
             stopped_at: 0,
             group: launch.group.filter(|g| *g != 0),
             children,
@@ -622,12 +687,7 @@ impl Jobs {
             listed: false,
             nohup: false,
         };
-        let last = job
-            .children
-            .iter()
-            .rev()
-            .find(|p| p.pid != 0)
-            .map(|p| p.pid);
+        let last = job.last_pid();
         if launch.background {
             self.store(job);
             if !self.quiet && self.terminal().is_some() {
@@ -667,39 +727,57 @@ impl Jobs {
             self.note_foreground_signal(&mut job);
             if job.stopped() {
                 self.store(job);
-                self.report_stopped();
+                self.report_stopped(self.table.len() - 1);
+            } else if job.foreground_notice {
+                self.store(job);
             }
             Ok((code, None))
         }
     }
-    fn report_stopped(&mut self) {
-        if !self.quiet
-            && let Some(job) = self.table.last_mut()
-        {
-            stderr_line!("[{}]+ Stopped  {}", job.id, job.name);
+    fn report_stopped(&mut self, index: usize) {
+        if !self.quiet {
+            let markers = marked_jobs(self.table.iter());
+            let job = &mut self.table[index];
+            let mut out = io::stderr().lock();
+            if self.tty.is_some() {
+                let _ = writeln!(out);
+            }
+            let _ = job_line(&mut out, job, job_marker(job.id, markers), "Stopped");
             job.listed = true;
         }
     }
     fn note_foreground_signal(&mut self, job: &mut Job) {
-        if job.signaled
-            && self.tty.is_some()
-            && !self.quiet
-            && !job.stopped()
-            && let Some(sig) = job.children.last().and_then(|c| c.signal)
-            && !matches!(sig, libc::SIGINT | libc::SIGPIPE)
+        if !job.signaled || job.stopped() {
+            return;
+        }
+        // A foreground process group owns the terminal during the wait. The
+        // shell does not receive the keystroke itself. Use waitpid's signal
+        // information so an explicit exit status of 130 remains an ordinary exit.
+        if self.tty.is_some()
+            && job.children.iter().find_map(|child| child.signal) == Some(libc::SIGINT)
         {
-            self.foreground_notices
-                .push((sig, std::mem::take(&mut job.name)));
+            self.foreground_interrupted = true;
+        }
+        if let Some(sig) = job.children.last().and_then(|c| c.signal) {
+            if self.posix_interactive
+                && self.monitor
+                && !self.notify
+                && !self.running_prompt_hook
+                && !matches!(sig, libc::SIGINT | libc::SIGPIPE)
+            {
+                job.foreground_notice = true;
+            } else {
+                self.report_signal(sig, &job.name);
+            }
         }
     }
 
-    pub(crate) fn report_foreground(&mut self) {
-        for (signal, command) in self.foreground_notices.drain(..) {
-            let reason = unsafe { libc::strsignal(signal) };
-            if !reason.is_null() {
-                let text = unsafe { std::ffi::CStr::from_ptr(reason) }.to_string_lossy();
-                stderr_line!("{text}  {command}");
-            }
+    pub(crate) fn report_signal(&self, signal: i32, command: &str) {
+        if !self.quiet
+            && !matches!(signal, libc::SIGINT | libc::SIGPIPE)
+            && let Some(reason) = signal_description(signal)
+        {
+            stderr_line!("{reason:<26} {command}");
         }
     }
 
@@ -708,13 +786,15 @@ impl Jobs {
             let job = &self.table[i];
             if job.listed && !job.active() && !job.stopped() {
                 let done = self.table.remove(i);
-                self.remember(&done);
+                if !done.foreground_notice {
+                    self.remember(&done);
+                }
             }
         }
     }
 
     fn remember(&mut self, job: &Job) {
-        if let Some(pid) = job.children.last().map(|p| p.pid).filter(|&p| p > 0) {
+        if let Some(pid) = job.last_pid() {
             if self.finished.len() == MAX_FINISHED_STATUSES {
                 self.finished.pop_front();
             }
@@ -733,6 +813,7 @@ impl Jobs {
             + 1;
         job.id = self.serial;
         self.table.push(job);
+        crate::traps::job_changed();
     }
     fn foreground(
         &self,
@@ -821,7 +902,7 @@ impl Jobs {
             .map(String::as_str)
             .chain(specs.is_empty().then_some("%+"))
         {
-            if let Some(i) = self.select(spec) {
+            if let Some(i) = self.select(spec, crate::builtins::integer_in_range(spec)) {
                 self.detach(i, nohup, true);
             } else {
                 diagnostic!("disown: {spec}: no such job");
@@ -871,9 +952,20 @@ impl Jobs {
     }
 
     pub(crate) fn report_changes(&mut self, posix: bool) {
+        let markers = marked_jobs(self.table.iter());
         for job in &mut self.table {
             if !job.active() && !job.listed {
-                stderr_line!("[{}] {}  {}", job.id, job.display_state(posix), job.name);
+                let state = job.display_state(posix);
+                if job.foreground_notice {
+                    stderr_line!("{state:<26} {}", job.name);
+                } else {
+                    let _ = job_line(
+                        &mut io::stderr().lock(),
+                        job,
+                        job_marker(job.id, markers),
+                        &state,
+                    );
+                }
                 job.listed = true;
             }
         }
@@ -912,12 +1004,12 @@ impl Jobs {
         if let Ok(id) = spec.parse::<u32>() {
             self.table.iter().position(|j| j.id == id)
         } else {
-            self.select(spec)
+            self.select(spec, None)
         }
     }
-    fn select(&self, spec: &str) -> Option<usize> {
+    fn select(&self, spec: &str, pid: Option<pid_t>) -> Option<usize> {
         match spec {
-            "" | "%" | "%+" | "%%" | "%-" => {
+            "%" | "%+" | "%%" | "%-" => {
                 let (current, previous) = marked_jobs(self.table.iter());
                 let id = if spec == "%-" { previous } else { current }?;
                 self.table.iter().position(|job| job.id == id)
@@ -935,8 +1027,8 @@ impl Jobs {
                 let (i, _) = hits.next()?;
                 hits.next().is_none().then_some(i)
             }
-            s => {
-                let pid = s.parse::<pid_t>().ok().filter(|&pid| pid > 0)?;
+            _ => {
+                let pid = pid.filter(|&pid| pid > 0)?;
                 self.table
                     .iter()
                     .position(|j| j.children.iter().any(|p| p.pid == pid))

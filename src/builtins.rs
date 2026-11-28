@@ -26,6 +26,7 @@ impl Write for StdoutFd<'_> {
         }
         let error = io::Error::last_os_error();
         if error.kind() != io::ErrorKind::Interrupted
+            && !(error.kind() == io::ErrorKind::BrokenPipe && crate::traps::terminating_pipe())
             && let Some(name) = self.0.take()
         {
             diagnostic!("{name}: write error: {}", os_message(&error));
@@ -241,14 +242,18 @@ fn primary_operand(
         let mut level = 1;
         let close = (session.shopt.compat > 52)
             .then(|| {
-                rest.iter().skip(1).take(4).position(|word| {
-                    match word.as_str() {
-                        "(" => level += 1,
-                        ")" => level -= 1,
-                        _ => (),
-                    }
-                    level == 0
-                }).map(|n| n + 1)
+                rest.iter()
+                    .skip(1)
+                    .take(4)
+                    .position(|word| {
+                        match word.as_str() {
+                            "(" => level += 1,
+                            ")" => level -= 1,
+                            _ => (),
+                        }
+                        level == 0
+                    })
+                    .map(|n| n + 1)
             })
             .flatten();
         let value = if let Some(n @ 1..=4) = close {
@@ -296,10 +301,13 @@ fn binary_op(op: &str) -> bool {
 }
 
 pub(crate) fn integer_operand(text: &str) -> Option<i64> {
-    text.trim_start_matches(|c: char| c.is_ascii_whitespace())
-        .trim_end_matches([' ', '\t'])
+    text.trim_matches(|c: char| c.is_ascii_whitespace() || c == '\x0b')
         .parse()
         .ok()
+}
+
+pub(crate) fn integer_in_range<T: TryFrom<i64>>(text: &str) -> Option<T> {
+    T::try_from(integer_operand(text)?).ok()
 }
 
 pub(crate) fn binary(
@@ -324,10 +332,8 @@ pub(crate) fn binary(
             }
         }
         _ => {
-            let a = integer_operand(left)
-                .ok_or_else(|| format!("{left}: integer expression expected"))?;
-            let b = integer_operand(right)
-                .ok_or_else(|| format!("{right}: integer expression expected"))?;
+            let a = integer_operand(left).ok_or_else(|| format!("{left}: integer expected"))?;
+            let b = integer_operand(right).ok_or_else(|| format!("{right}: integer expected"))?;
             match op {
                 "-eq" => a == b,
                 "-ne" => a != b,
@@ -345,10 +351,8 @@ pub(crate) fn variable_set(
     arg: &str,
     literal_key: bool,
 ) -> Result<bool, &'static str> {
-    if arg.bytes().next().is_some_and(|c| c.is_ascii_digit())
-        && let Ok(n) = arg.parse::<usize>()
-    {
-        return Ok(n <= session.positional.len());
+    if let Some(n) = integer_operand(arg) {
+        return Ok(usize::try_from(n).is_ok_and(|n| n <= session.positional.len()));
     }
     if let Some((name, expr)) = crate::session::array::subscript(arg) {
         let associative = session.is_associative(name);

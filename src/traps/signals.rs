@@ -42,7 +42,12 @@ const SIGNALS: &[(&str, i32)] = &[
 ];
 
 pub(crate) fn signals() -> impl Iterator<Item = (&'static str, i32)> {
-    let signals = SIGNALS.iter().copied();
+    static ORDERED: std::sync::LazyLock<Vec<(&str, i32)>> = std::sync::LazyLock::new(|| {
+        let mut signals = SIGNALS.to_vec();
+        signals.sort_unstable_by_key(|s| s.1);
+        signals
+    });
+    let signals = ORDERED.iter().copied();
     #[cfg(target_os = "linux")]
     {
         static REALTIME: std::sync::LazyLock<Vec<(String, i32)>> = std::sync::LazyLock::new(|| {
@@ -79,8 +84,7 @@ pub(crate) fn signals() -> impl Iterator<Item = (&'static str, i32)> {
 pub(crate) fn print_signal_table(out: &mut dyn Write) -> io::Result<()> {
     static TABLE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
         use std::fmt::Write;
-        let mut signals = signals().filter(|s| s.1 != 0).collect::<Vec<_>>();
-        signals.sort_unstable_by_key(|s| s.1);
+        let signals = signals().filter(|s| s.1 != 0).collect::<Vec<_>>();
         let mut table = String::new();
         for row in signals.chunks(5) {
             for (i, (name, n)) in row.iter().enumerate() {
@@ -97,7 +101,7 @@ pub(crate) fn print_signal_table(out: &mut dyn Write) -> io::Result<()> {
 }
 
 pub(crate) fn number(s: &str) -> Option<i32> {
-    let number = s.parse::<i32>().ok();
+    let number = crate::builtins::integer_in_range::<i32>(s);
     let s = s
         .get(..3)
         .filter(|prefix| prefix.eq_ignore_ascii_case("SIG"))
@@ -110,7 +114,7 @@ pub(crate) fn number(s: &str) -> Option<i32> {
         && let Some((prefix, offset)) = s.as_bytes().split_at_checked(6)
     {
         let (low, high) = (libc::SIGRTMIN(), libc::SIGRTMAX());
-        let delta = std::str::from_utf8(offset).ok()?.parse::<u32>().ok()?;
+        let delta = crate::builtins::integer_in_range::<u32>(std::str::from_utf8(offset).ok()?)?;
         if delta > (high - low) as u32 {
             return None;
         }

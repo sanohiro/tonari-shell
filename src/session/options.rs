@@ -195,7 +195,7 @@ set_options! {
     "noexec" ('n') => noexec,
     "noglob" ('f') => noglob,
     "nolog" => shopt.nolog,
-    "notify" ('b') => notify,
+    "notify" ('b') => jobs.notify,
     "nounset" ('u') => nounset,
     "onecmd" ('t') => onecmd,
     "physical" ('P') => physical,
@@ -282,11 +282,12 @@ fn write_option_line(
     name: &str,
     value: bool,
     reusable: bool,
+    width: usize,
 ) -> io::Result<()> {
     if reusable {
         writeln!(out, "set {}o {name}", if value { '-' } else { '+' })
     } else {
-        writeln!(out, "{name:15}\t{}", if value { "on" } else { "off" })
+        writeln!(out, "{name:width$}\t{}", if value { "on" } else { "off" })
     }
 }
 
@@ -342,6 +343,7 @@ impl Session {
         self.posix = enabled;
         self.shopt.shift_verbose = enabled;
         self.jobs.quiet = enabled && !self.interactive;
+        self.jobs.posix_interactive = enabled && self.interactive;
         self.shopt.expand_aliases = enabled || self.interactive;
         if enabled {
             self.shopt.interactive_comments = true;
@@ -592,7 +594,13 @@ impl Session {
             let result = if reusable && !set {
                 writeln!(writer, "shopt -{} {name}", if value { 's' } else { 'u' })
             } else {
-                write_option_line(writer, name, value, reusable)
+                write_option_line(
+                    writer,
+                    name,
+                    value,
+                    reusable,
+                    if set && all { 15 } else { 20 },
+                )
             };
             if result.is_err() {
                 return 1;
@@ -646,7 +654,8 @@ impl Session {
                     out.write_all(VERSION.get_or_init(|| {
                         let mut bytes = name.as_bytes().to_vec();
                         let version = self.declared_variable(name, false).unwrap();
-                        print_variable_value(&mut bytes, &version).expect("in-memory write");
+                        print_variable_value(&mut bytes, &version, locale)
+                            .expect("in-memory write");
                         bytes
                     }))
                 } else if empty_snapshot {
@@ -663,7 +672,7 @@ impl Session {
                     {
                         continue;
                     }
-                    write!(out, "{name}").and_then(|_| print_variable_value(&mut out, var))
+                    write!(out, "{name}").and_then(|_| print_variable_value(&mut out, var, locale))
                 } else {
                     let value = self.listed_scalar(name, stored);
                     let Some(value) = value else { continue };
@@ -683,6 +692,26 @@ impl Session {
             return out.flush().map_or(1, |()| 0);
         }
         let mut i = 0;
+        // GNU set validates short flags before applying any. A bad name after
+        // -o is diagnosed during application and preserves preceding changes.
+        let has_option_name = |name: &String| !name.is_empty() && !name.starts_with(['-', '+']);
+        let mut flags = args.iter().peekable();
+        while let Some(opt) = flags.next() {
+            let Some((prefix @ ("-" | "+"), rest)) = opt.split_at_checked(1) else {
+                break;
+            };
+            if matches!(opt.as_str(), "--" | "-") {
+                break;
+            }
+            for flag in rest.chars() {
+                if flag == 'o' {
+                    flags.next_if(|name| !name.starts_with(['-', '+']) || name.len() == 1);
+                } else if Self::short_option_name(flag).is_none() {
+                    diagnostic!("set: {prefix}{flag}: invalid option");
+                    return 2;
+                }
+            }
+        }
         let mut replace_positionals = false;
         while let Some(opt) = args.get(i) {
             if opt == "--" {
@@ -716,18 +745,21 @@ impl Session {
                         self.command_history_expansion = enable;
                     }
                     'o' => {
-                        let Some(name) = args.get(i) else {
+                        let Some(name) = args.get(i).filter(|name| has_option_name(name)) else {
                             let mut out = io::BufWriter::with_capacity(
                                 512,
                                 crate::builtins::StdoutFd(Some("set")),
                             );
                             for (name, on) in self.options(true) {
-                                let result = write_option_line(&mut out, name, on, !enable);
+                                let result = write_option_line(&mut out, name, on, !enable, 15);
                                 if result.is_err() {
                                     return 1;
                                 }
                             }
-                            return out.flush().map_or(1, |()| 0);
+                            if out.flush().is_err() {
+                                return 1;
+                            }
+                            continue;
                         };
                         i += 1;
                         if let Some(value) = self.option_value(name, true) {

@@ -45,6 +45,21 @@ pub(crate) fn wait_readable(
     timeout: Option<Duration>,
     watch: Option<&Traps>,
 ) -> io::Result<bool> {
+    // Darwin rejects sufficiently large tv_sec values. Each bounded call
+    // rebuilds its descriptor set, which pselect can modify on timeout.
+    const MAX_WAIT: Duration = Duration::from_secs(i32::MAX as u64);
+    if let Some(total) = timeout.filter(|&t| t > MAX_WAIT) {
+        let start = std::time::Instant::now();
+        loop {
+            let remaining = total.saturating_sub(start.elapsed());
+            if remaining.is_zero() {
+                return Ok(false);
+            }
+            if wait_readable(fd, Some(remaining.min(MAX_WAIT)), watch)? {
+                return Ok(true);
+            }
+        }
+    }
     // A single ordinary fd_set covers the common case. Both supported kernels
     // read ceil(nfds / word_bits) words, including for EOF on character devices.
     let index = fd as usize / libc::FD_SETSIZE;
@@ -116,7 +131,7 @@ fn shell_traps_alone_do_not_install_a_wait_mask() {
 
 impl WaitMask {
     pub fn new(traps: &Traps) -> io::Result<Option<Self>> {
-        if !traps.interactive_hup
+        if !traps.interactive_handlers
             && traps.implicit.is_empty()
             && !traps
                 .entries
@@ -166,7 +181,7 @@ impl WaitMask {
             libc::FD_SET(0, &mut fds);
             let mut mask = self.previous.0;
             libc::sigdelset(&mut mask, libc::SIGCHLD);
-            let result = libc::pselect(
+            let result = pselect_input(
                 1,
                 &mut fds,
                 std::ptr::null_mut(),

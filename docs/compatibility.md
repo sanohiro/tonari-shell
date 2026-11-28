@@ -1,5 +1,11 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## Local namerefs that name themselves / 自分を指すローカル名前参照
+
+In GNU Bash 5.3.20, a function declaring `local -n r=r` succeeds with a warning. If its caller has a local `r` and a global `r` also exists, assigning through the reference changes the global while the caller still sees its local value. Tonari rejects the self-reference with status 1. A caller can detect the failed declaration before an assignment writes outside the enclosing scope. The regression uses global and local sentinels to check both outcomes in each shell. [Regression test](../tests/shell.py)
+
+GNU Bash 5.3.20 では、同名の外側ローカル変数があっても、自己参照するローカル名前参照への代入はグローバル変数を変更する。Tonari は宣言時に終了値 1 を返し、呼び出し元がこの誤代入を防げるようにしている。
+
 ## Independent review follow-up
 
 * `PWD` on startup must name the current directory. Tonari retains a valid absolute logical symlink spelling and supplies the corrected value to children when the inherited spelling is stale. A failed directory-stack rotation preserves the stack. In a removed cwd, `cd -P .` returns 0 and `cd -Pe .` returns 1. When no absolute name exists, Tonari leaves PWD unset until a successful change supplies one. GNU Bash 5.3.20 can retain a vanished path with an appended `/.`.
@@ -16,11 +22,19 @@ GNU Bash 5.3 diagnoses an empty directory name, reports an overflowing numeric p
 
 One-argument groups in the `test` builtin evaluate the string inside the group. An empty string gives false. In a matrix of 3,472 short expressions, the remaining 31 differences with Bash 5.3.20 all involved its use of an argument from outside the current group. Tonari keeps the local group's value. [Conditional regression cases](../tests/review_builtins.py)
 
+Tonari checks native stack space when evaluating nested commands, functions, sourced files and expansions. The available depth depends on the platform, current soft stack limit and the commands in each frame. Bash and Tonari use different amounts of stack for the same function. On macOS raising the soft limit inside an existing shell can use only the stack allocated at startup. An explicit `FUNCNEST` failure unwinds the active input unit, including nested eval, source, traps and mapfile callbacks. A file or stdin script can execute its next complete command. With `-c` the remainder of the string is discarded. [Native measurements](benchmarks.md#evaluation-stack-interrupt) · [Input tests](../tests/shell.py)
+
 A bare job specification resumes the selected job in the foreground. Following the literal specification with an ampersand resumes it in the background. Process-control witnesses check the job and the status returned by its actual process. [Job-control tests](../tests/review_runtime.py)
 
 Shell strings and argv are UTF-8. A Unicode `read -d` or `mapfile -d` delimiter consumes an entire scalar, including on a shared descriptor. Byte-oriented stdout remains available. A floating printf conversion uses binary64. Time formatting accepts up to 64 KiB of cumulative field padding in one format. Arithmetic evaluation distinguishes literal expression syntax from expanded data; subscripts and other mutations within a pipeline stage stay with that stage. Here-documents keep their source text when printed as part of a function. When an array initializer contains a syntax error, Tonari skips the rest of that initializer through its closing parenthesis, preserving the old array and resuming at the following command. GNU Bash sometimes resumes at the very next physical line inside the invalid array. [Language tests](../tests/review_language.py)
 
 HOME 未設定時はアカウントのホームを参照し、空文字の場合は暗黙の個人設定ファイルを読みません。実 UID/GID と実効値が違う起動では権限を落とし、特権を保持する指定なら起動を拒否します。`wait -n` や数値の範囲外エラーなど、Bash 5.2 と 5.3 で違う結果は版ごとに照合しています。UTF-8 区切りの読み取り、関数定義内のヒアドキュメント、履歴保存前の EXIT トラップ、入力途中のシグナルを回帰試験に加えました。[対話・履歴試験](../tests/review_interactive.py)
+
+Listings such as `command -v`, `jobs`, `help`, `kill -l`, `caller`, `dirs`, `pushd`, `popd`, `local`, `declare -F`, `compgen` and `complete -p` report failed output with a nonzero status. A readonly destination for `printf %n` and a directory supplied as `mapfile` input likewise return status 1. Ordinary diagnostics use a Tonari prefix; source-location formatting is available in the paths that support `gnu_errfmt`. Privileged mode clears CDPATH and GLOBIGNORE even when process IDs match. The CLI accepts recognized long options after short options. Restricted-shell and gettext dump modes are outside its supported invocation forms. [Builtin checks](../tests/shell.py)
+
+`read -t` accepts nonnegative decimal seconds through the signed 64-bit seconds range, with microsecond precision. Tonari rejects exponential notation and integer overflow. GNU Bash 5.3 can wrap a very large decimal argument into a smaller timeout. If local calendar conversion fails, `printf '%(%Y)T'` retries the Unix epoch in the requested timezone. Time formats exceeding the cumulative 64 KiB padding limit return an error.
+
+一覧出力・読み取り・変数代入に失敗した組み込みは終了値で知らせる。`read -t` は巨大な整数を短い期限に折り返さず、範囲外として扱う。カレンダーに変換できない秒数は GNU Bash と同様にエポックで再計算する。
 
 ## Required glob suffixes and global array elements / glob の末尾とグローバル配列
 
@@ -38,7 +52,7 @@ With `a=(old); a+=([1]=first [-99]=invalid)`, the second subscript lies outside 
 
 ## File offsets during read and process substitution status / read のファイル位置とプロセス置換の終了値
 
-When `read -r` assigns to an associative-array key that reads the next record from the same descriptor, GNU Bash and Tonari both consume the records in order. The regression test verifies the value, the key and the third record left for the caller. For an indexed array, a command substitution supplied inside a destination **string** is outside Tonari's arithmetic subscript support. This distinction concerns the evaluation of an indirect destination. [Read comparison](../tests/shell.py)
+When `read -r` assigns to an associative-array key that reads the next record from the same descriptor, GNU Bash and Tonari both consume the records in order. The regression test verifies the value, the key and the third record left for the caller. For an indexed array, a command substitution supplied inside a destination **string** is outside Tonari's arithmetic subscript support. An indexed nameref follows the same rule when read. A reference to `a[k]` with k=1 yields the element and its string length, and `a[@]` yields the element count. A command substitution written into the stored index produces an arithmetic error. [Read comparison](../tests/shell.py)
 
 With file matches available and standard output closed, `compgen -f` diagnoses the failed write and returns 1 in Tonari. GNU Bash 5.3.20 returns 0 on the same fixture. Tonari keeps the output error visible. The completion comparison also checks candidate order at 511, 512, 1,000, 1,023, 1,024 and 1,025 names. 標準出力を閉じた状態で補完候補を出力すると、Tonariは書き込み失敗を診断し、終了値1を返す。
 
@@ -58,6 +72,8 @@ With `LC_ALL=tr_TR.UTF-8`, `shopt -s nocasematch; p='+([i])'; [[ I == $p ]]` ret
 
 With job control disabled and default INT/QUIT dispositions at shell entry, `(trap -p INT QUIT; trap '' USR2; trap -p INT QUIT USR2) & wait` prints only `trap -- '' SIGUSR2`. The shell sets INT/QUIT to ignored for the background job. GNU Bash 5.3.20 and Tonari distinguish those internal settings from explicit traps and dispositions inherited when the shell started. The test also supplies each combination of inherited INT/QUIT ignores and resets the traps, in both ordinary and POSIX mode.
 
+If stdout is closed on the redirection of a `select` loop at EOF, Tonari reports failure to write its final newline and returns 1. GNU Bash 5.3.20 also returns 1 but omits the write diagnostic. Tonari reports failed output for shell builtins. `select` の EOF 改行も組み込みの出力として扱い、閉じた標準出力への書き込み失敗を診断する。[Regression test](../tests/shell.py)
+
 With stdout closed, writing a nonempty `complete -p` or `declare -f` listing returns 1 and reports a write error in Tonari. GNU Bash 5.3.20 can return 0 in these two cases. An empty completion listing succeeds. Named listings still preserve the order of successful output and diagnostics under `2>&1`. [Regression tests](../tests/shell.py)
 
 ジョブ制御が無効なとき、バックグラウンド用にシェル自身が無視した INT/QUIT は、ユーザーが設定したトラップとして表示しない。親から継承した無視と明示的な空トラップは表示する。閉じた標準出力に空でない一覧を書いた場合は書き込みエラーを返す。空の一覧は成功する。 [実機での速度比較](benchmarks.md#compound-listings-release)
@@ -65,6 +81,8 @@ With stdout closed, writing a nonempty `complete -p` or `declare -f` listing ret
 <a id="builtin-output-and-acl"></a>
 
 ## Builtin output and executable lookup / 組み込みの書き込みとPATH探索
+
+The closed-output regression also checks nonempty output from `umask -p`, `hash`, `dirs`, `times`, `export -p`, `type -t` and `shopt -p`. Tonari returns 1 and emits a diagnostic for the failed write. 標準出力を閉じたテストでは、各組み込みの出力する経路と、空出力で成功する経路を別々に確認する。[Regression cases](../tests/shell.py)
 
 GNU Bash 5.3.20 and Tonari report an output error and return 1 for `printf '%s' hi >&-`, `pwd >&-`, and printing a defined alias or variable with stdout closed. Empty output and assignments such as `printf -v v '%s' hi >&-` succeed. On macOS, both shells skip an earlier mode-0600 regular file with an execute ACL when a later executable has the same name. Both `type -P` and actual execution select that later path. The regression also checks paths longer than the inline candidate buffer. In a separate function-source witness, Bash 5.3.20 and Tonari record the active script name for each definition when a script passed via `-c` changes `BASH_ARGV0`. Ubuntu 24.04 Bash 5.2 labels both definitions `environment`. [Executable witnesses](../tests/shell.py)
 
@@ -480,3 +498,15 @@ python3 tools/bench_completion.py target/release/tonari --bash "$reference_bash"
 The comparison exits nonzero if a name disappears, a matching observation or timing is lost, or a previously qualifying median crosses 2/3. The optional `--require-target` check reports the strict 2/3 ratio for every matching feature. For short operations and common OS waits, apply the parity criterion to the reported times. [Performance target](benchmarks.md#performance-target) The completeness check also fails on missing or unverified behavior. Review disputed timings with more runs on the same hardware before updating a snapshot. The `--output` operation writes a new matrix and platform TSVs.
 
 比較ゲートは、一覧から消えた項目、以前通った動作の不一致、計測の消失、以前達成していた上限の超過を終了コードで通知します。`--require-target` は 2/3 を超えた項目をすべて報告します。短い処理や共通の OS 待ちは、実測時間から同等かどうかを判断します。`--require-complete` は未確認・未実装・動作差をすべて検出します。更新時には結果を見比べ、境界付近では同じ機械で回数を増やして確認します。
+
+### R2 parser and expansion boundaries / パーサと展開の境界
+
+* A rejected arithmetic write returns failure. For an array of three elements, assigning 1 at index -4 leaves the array intact. Tonari returns 1 and Bash 5.3.20 returns 0. 3 個の要素に対する範囲外の負の添字への書き込みは失敗ステータスになります。
+* In `set -- a b; IFS=; printf '<%s>' "$@${IFS:=:}"`, Tonari prints `<a><b:>`. Bash 5.3.20 prints `<a b:>`. Tonari preserves the individual quoted positional arguments while a subsequent expansion changes IFS. 後続の展開が IFS を変更しても、引用した位置引数の境界を維持します。
+* Dollar-single-quoted surrogate and out-of-range Unicode escapes retain their spelling. For example, `$'\ud800'` passes the six ASCII characters to the command. Bash 5.3.20 emits bytes ED A0 80. Later commands execute in both shells. 有効な Unicode スカラー値でないエスケープは綴りを保って後続処理を続けます。
+* After a syntax error inside an array initializer, Tonari discards through the end of the enclosing compound command. If the array is invalid on one line of an `if` and the following line says `echo early`, Tonari skips that command and resumes after `fi`. Bash 5.3.20 can run `echo early` outside the conditional and stop at `fi`. 配列初期化子のエラーでは、閉じていない複合コマンドの本体を実行しません。
+* Pretty printing preserves top-level input boundaries and layout-sensitive constructs, including array initializers, case arms and here-documents. For simple conditions it joins `then` or `do` to the preceding line. シェルが読み込む単位とヒアドキュメントなどのレイアウトを優先する整形です。
+
+Tonari bounds name-reference chains at 32 lookup steps. At the limit it reports a proven cycle separately from a depth limit on a finite chain. Both cases leave the referenced binding unchanged.
+
+名前参照は最大 32 段で探索を打ち切る。循環を確認できた場合と、有限の長い参照で上限に達した場合で診断を分け、どちらも参照先を変更しない。

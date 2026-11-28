@@ -57,7 +57,10 @@ impl Error {
         Self {
             message: "".into(),
             status: match flow {
-                crate::Flow::Discard(n) | crate::Flow::Exit(n) | crate::Flow::Break(_, n) => n,
+                crate::Flow::Unwind(n)
+                | crate::Flow::Discard(n)
+                | crate::Flow::Exit(n)
+                | crate::Flow::Break(_, n) => n,
                 _ => 0,
             },
             recovery: Recovery::Control(flow),
@@ -178,6 +181,23 @@ impl<'a> Expansion<'a> {
             .or_else(|| execute::parameter(self.session, self.status(), name))
     }
 
+    pub(crate) fn ifs_separator(&self) -> std::borrow::Cow<'_, str> {
+        let ifs = self
+            .assignments
+            .iter()
+            .rev()
+            .find(|(key, _)| key == "IFS")
+            .map_or_else(|| self.session.ifs(), |(_, value)| value.as_str().into());
+        let end = ifs.chars().next().map_or(0, char::len_utf8);
+        match ifs {
+            std::borrow::Cow::Borrowed(value) => (&value[..end]).into(),
+            std::borrow::Cow::Owned(mut value) => {
+                value.truncate(end);
+                value.into()
+            }
+        }
+    }
+
     pub(crate) fn has_pending_assignments(&self) -> bool {
         !self.assignments.is_empty()
     }
@@ -219,11 +239,21 @@ impl<'a> Expansion<'a> {
         if matches!(expr, "@" | "*") {
             return Ok(None);
         }
+        let stored = name != resolved && !name.contains('[');
         let base = base.to_owned();
         Ok(Some(if self.session.is_associative(&base) {
-            AssignmentElement::Key(base, self.key(expr)?)
+            let key = if stored {
+                arithmetic::data_key(expr, self)?
+            } else {
+                self.key(expr)?
+            };
+            AssignmentElement::Key(base, key)
         } else {
-            let n = self.arithmetic(expr)?;
+            let n = if stored {
+                arithmetic::data_index(expr, self)?
+            } else {
+                self.arithmetic(expr)?
+            };
             let index = self.session.relative_index(&base, n)?;
             AssignmentElement::Index(base, index)
         }))
@@ -389,9 +419,9 @@ impl<'a> Expansion<'a> {
             if let Some(crate::parser::Subscript { index, append }) = index {
                 // Shell expansions in a subscript precede its RHS, but arithmetic
                 // in the resulting text runs when the initialized array is written.
-                let index = if index.contains(['$', '`', '"', '\\']) {
+                let index = if index.contains(['$', '`', '"', '\'', '\\']) {
                     let word = crate::parser::with_subscript_aliases(self.session, &index, || {
-                        crate::parser::arithmetic_word(&index)
+                        crate::parser::initializer_index_word(&index)
                     })
                     .map_err(|e| e.message())?;
                     self.scalar(word)?
@@ -454,10 +484,7 @@ impl<'a> Expansion<'a> {
 
     /// Operands that already went through shell expansion must only be parsed as arithmetic.
     pub(crate) fn arithmetic_value(&mut self, text: &str) -> Result<i64, Error> {
-        arithmetic::with_variables(text, self).map_err(|message| match message {
-            "unbound arithmetic variable" => arithmetic::shell_error(message, text, self.session),
-            _ => Error::discard(message),
-        })
+        arithmetic::with_variables(text, self).map_err(|e| e.error(text, self.session, true))
     }
 
     pub(crate) fn arithmetic_text<'s>(
@@ -626,14 +653,37 @@ impl<'a> Expansion<'a> {
 }
 
 impl Variables for Expansion<'_> {
+    fn session(&self) -> &Session {
+        self.session
+    }
+    fn visible_nameref(&self, name: &str) -> bool {
+        self.session.is_nameref(name) && !self.shadows(name)
+    }
     fn scalar_text(&self, name: &str) -> Option<&str> {
         self.borrowed_scalar(name)
     }
-    fn get(&self, name: &str) -> Option<String> {
-        self.lookup(name)
+    fn get(&self, name: &str) -> Result<Option<String>, &'static str> {
+        if self.session.is_nameref(name) && !self.shadows(name) {
+            self.session.arithmetic_get(name)
+        } else {
+            Ok(self.lookup(name))
+        }
+    }
+    fn indexed_decimal(&self, name: &str, index: i64) -> Option<i64> {
+        if self.shadows(name) {
+            None
+        } else {
+            self.session.indexed_scalar_decimal(name, index)
+        }
+    }
+    fn set_indexed(&mut self, name: &str, index: i64, value: i64) -> Result<(), &'static str> {
+        Variables::set_indexed(self.session, name, index, value)
     }
     fn set(&mut self, name: &str, value: i64) -> Result<(), &'static str> {
-        if crate::session::array::subscript(name).is_some() || self.session.is_nameref(name) {
+        if !self.shadows(name)
+            || crate::session::array::subscript(name).is_some()
+            || self.session.is_nameref(name)
+        {
             return Variables::set(self.session, name, value);
         }
         if self.session.readonly(name) {
@@ -642,14 +692,11 @@ impl Variables for Expansion<'_> {
         self.assign(name, &value.to_string());
         Ok(())
     }
-    fn associative_key(
-        &mut self,
-        name: &str,
-        source: &str,
-    ) -> Option<Result<String, &'static str>> {
-        self.session
-            .is_associative(name)
-            .then(|| arithmetic::data_key(source, |name| self.lookup(name)))
+    fn set_key(&mut self, name: &str, key: String, value: i64) -> Result<(), &'static str> {
+        Variables::set_key(self.session, name, key, value)
+    }
+    fn is_associative(&self, name: &str) -> bool {
+        self.session.is_associative(name)
     }
     fn nounset(&self) -> bool {
         self.session.nounset

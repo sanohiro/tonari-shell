@@ -2,7 +2,7 @@ use super::{Entries, History, InitialJournal, Session};
 use crate::Flow;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::os::fd::FromRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::{FileExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
@@ -10,16 +10,18 @@ use std::path::{Path, PathBuf};
 #[inline(never)]
 pub(crate) fn run(session: &mut Session, words: &[String], status: u8) -> Flow {
     let args = &words[1..];
-    if let Some(snapshot) = session.initial_history.take()
-        && !(words[0] == "history" && args.first().is_some_and(|s| s == "-c"))
-    {
-        let _ = snapshot.load(session);
+    if let Some(snapshot) = session.initial_history.take() {
+        if words[0] == "history" && args.first().is_some_and(|s| s == "-c") {
+            session.history_mut().imported = Some(std::rc::Rc::unwrap_or_clone(snapshot));
+        } else {
+            let _ = snapshot.load(session);
+        }
     }
     if words[0] == "fc" {
         match fc(session, args, status) {
             Ok(flow) => flow,
             Err(e) => {
-                diagnostic!("fc: {e}");
+                diagnostic!("fc: {}", crate::builtins::os_message(&e));
                 Flow::Continue(1)
             }
         }
@@ -27,7 +29,7 @@ pub(crate) fn run(session: &mut Session, words: &[String], status: u8) -> Flow {
         match history(session, args) {
             Ok(status) => Flow::Continue(status),
             Err(e) => {
-                diagnostic!("history: {e}");
+                diagnostic!("history: {}", crate::builtins::os_message(&e));
                 Flow::Continue(if e.kind() == io::ErrorKind::InvalidInput {
                     2
                 } else {
@@ -50,6 +52,7 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
                 let h = session.history_mut();
                 *h = Entries {
                     imported: h.imported.take(),
+                    local_writes: std::mem::take(&mut h.local_writes),
                     incomplete_files: std::mem::take(&mut h.incomplete_files),
                     ..Entries::default()
                 };
@@ -101,6 +104,9 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
             h.remove_range(first, last + 1);
         }
         Some('p') => {
+            if args.is_empty() {
+                return Ok(0);
+            }
             session.history_mut().discard_current();
             let mut out = io::LineWriter::new(crate::builtins::StdoutFd(None));
             let mut status = 0;
@@ -115,17 +121,29 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
             }
             return Ok(status);
         }
-        Some(op) => history_file(session, op, args)?,
+        Some(op) => {
+            if let Err(e) = history_file(session, op, args) {
+                if matches!(op, 'r' | 'n') && e.raw_os_error().is_some() {
+                    return Ok(1);
+                }
+                return Err(e);
+            }
+        }
         None => {
             if args.len() > 1 {
                 return Err(error("too many arguments"));
             }
-            let count = args
-                .first()
-                .map(|x| x.parse::<usize>())
-                .transpose()
-                .map_err(|_| error("numeric argument required"))?
-                .unwrap_or(usize::MAX);
+            let count = match args.first() {
+                Some(value) => crate::builtins::integer_operand(value)
+                    .map(i64::unsigned_abs)
+                    .ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("{value}: numeric argument required"),
+                        )
+                    })? as usize,
+                None => usize::MAX,
+            };
             if let Some(h) = session.history.as_deref() {
                 let format = session.get("HISTTIMEFORMAT").filter(|s| !s.is_empty());
                 let mut out = io::BufWriter::new(crate::builtins::StdoutFd(None));
@@ -153,9 +171,8 @@ fn history(session: &mut Session, mut args: &[String]) -> io::Result<u8> {
 }
 
 fn position(h: &Entries, arg: &str, end: usize) -> io::Result<usize> {
-    let n = arg
-        .parse::<i64>()
-        .map_err(|_| error("invalid history position"))?;
+    let n = crate::builtins::integer_operand(arg)
+        .ok_or_else(|| error(&format!("{arg}: invalid number")))?;
     let i = if n < 0 {
         end as i64 + n
     } else {
@@ -243,14 +260,19 @@ fn create_temp_file(path: PathBuf) -> io::Result<(File, PathBuf)> {
 // Replace the target only after writing and restoring its permissions.
 fn replace_history(
     path: &Path,
-    mode: std::fs::Permissions,
+    original: &std::fs::Metadata,
     write: impl FnOnce(&mut File) -> io::Result<()>,
 ) -> io::Result<std::fs::Metadata> {
     let (mut copy, temp) = create_temp_file(path.with_file_name(".tonari-history-XXXXXX"))?;
     let result = (|| {
         write(&mut copy)?;
-        copy.set_permissions(mode)?;
         let meta = copy.metadata()?;
+        if (meta.uid(), meta.gid()) != (original.uid(), original.gid())
+            && unsafe { libc::fchown(copy.as_raw_fd(), original.uid(), original.gid()) } < 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        copy.set_permissions(original.permissions())?;
         std::fs::rename(&temp, path)?;
         Ok(meta)
     })();
@@ -264,7 +286,7 @@ pub(super) fn limit_plain_file(
     path: &Path,
     limit: usize,
     timed: bool,
-    seen: Option<&mut InitialJournal>,
+    history: Option<&mut Entries>,
 ) -> io::Result<()> {
     let path = std::fs::canonicalize(path)?;
     let mut source = locked_history(
@@ -290,20 +312,31 @@ pub(super) fn limit_plain_file(
             return Ok(());
         }
     } else if limit > 0 {
-        pos = super::tail_lines_offset(&source, pos, limit, true)?;
+        pos = super::tail_lines_offset(&source, pos, limit)?;
         if pos == 0 {
             return Ok(());
         }
     }
     source.seek(SeekFrom::Start(pos))?;
-    let new = replace_history(&path, metadata.permissions(), |copy| {
+    let new = replace_history(&path, &metadata, |copy| {
         io::copy(&mut source, copy).map(|_| ())
     })?;
-    if let Some(seen) = seen
-        && seen.identity == (metadata.dev(), metadata.ino())
-    {
-        seen.identity = (new.dev(), new.ino());
-        seen.len = seen.len.saturating_sub(pos);
+    if let Some(history) = history {
+        let identity = (metadata.dev(), metadata.ino());
+        let new_identity = (new.dev(), new.ino());
+        if let Some(seen) = history.imported.as_mut()
+            && seen.identity == identity
+        {
+            seen.identity = new_identity;
+            seen.len = seen.len.saturating_sub(pos);
+        }
+        history.local_writes.retain_mut(|(id, span)| {
+            if *id == identity {
+                *id = new_identity;
+                *span = span.start.saturating_sub(pos)..span.end.saturating_sub(pos);
+            }
+            !span.is_empty()
+        });
     }
     Ok(())
 }
@@ -356,7 +389,6 @@ fn imported_prefix(
 fn import_entry(h: &mut Entries, value: String, time: i64, limit: usize) {
     h.append_line(value, false, false);
     h.timestamps.push(time);
-    h.current = None;
     // Trim bounded batches while the intermediate window is unobservable.
     if h.lines.len().saturating_sub(limit) >= 1024 {
         h.trim_to(limit);
@@ -442,7 +474,7 @@ fn bounded_journal(file: &mut File, len: u64, limit: usize) -> io::Result<Option
     if len < 128 * 1024 || limit == 0 || limit as u64 > len / 8 {
         return Ok(None);
     }
-    let start = super::tail_lines_offset(file, len, limit, false)?;
+    let start = super::tail_lines_offset(file, len, limit)?;
     if start == 0 {
         return Ok(None);
     }
@@ -489,6 +521,16 @@ fn read_history_file(
     };
     let meta = file.metadata()?;
     let identity = (meta.dev(), meta.ino());
+    if op == 'n'
+        && meta.is_file()
+        && session
+            .history
+            .as_deref()
+            .and_then(|h| h.imported.as_ref())
+            .is_some_and(|seen| seen.identity == identity && seen.len == meta.len())
+    {
+        return Ok(());
+    }
     let limit = session.history_limit("HISTSIZE", super::DEFAULT_HISTSIZE);
     let skip = if op == 'r' && private && meta.is_file() {
         let retained = bounded_journal(&mut file, meta.len(), limit).ok().flatten();
@@ -510,6 +552,22 @@ fn read_history_file(
     } else {
         0
     };
+    let mut skip = skip;
+    let mut local = Vec::new();
+    if op == 'n'
+        && !private
+        && let Some(h) = &session.history
+    {
+        for (_, span) in h.local_writes.iter().filter(|(id, _)| *id == identity) {
+            if span.end <= meta.len() {
+                if span.start <= skip {
+                    skip = skip.max(span.end);
+                } else {
+                    local.push(span.clone());
+                }
+            }
+        }
+    }
     let mut reader = BufReader::new(file);
     let marked = if private || !meta.is_file() {
         false
@@ -543,7 +601,20 @@ fn read_history_file(
         None
     };
     let result = read_history_lines(&mut reader, private, |line, n| {
+        let start = offset;
         offset += n as u64;
+        if !local.is_empty() {
+            let i = local.partition_point(|span| span.end <= start);
+            if local.get(i).is_some_and(|span| span.contains(&start)) {
+                if let Some((value, time)) = pending.take() {
+                    import_entry(h, value, time, limit);
+                }
+                previous = None;
+                timestamp = None;
+                marker_offset = None;
+                return;
+            }
+        }
         let (value, seconds) = if private {
             let Some(record) = super::journal_record(line) else {
                 return;
@@ -622,6 +693,8 @@ fn read_history_file(
     } else if op == 'r' {
         h.incomplete_files.retain(|id| *id != identity);
     }
+    h.local_writes
+        .retain(|(id, span)| *id != identity || span.end > offset && span.end <= meta.len());
     h.imported = Some(InitialJournal {
         path,
         identity,
@@ -682,15 +755,68 @@ fn write_history_file(
         }
         output.flush()
     };
-    if op == 'w' && meta.is_file() {
-        let path = std::fs::canonicalize(path)?;
-        replace_history(&path, meta.permissions(), |file| write(file))?;
+    let completed = if op == 'w' && meta.is_file() {
+        let target = std::fs::canonicalize(path)?;
+        let new = replace_history(&target, &meta, |file| write(file))?;
+        h.local_writes
+            .retain(|(id, _)| *id != (meta.dev(), meta.ino()));
+        Some((new, 0))
     } else {
         write(&file)?;
+        if meta.is_file() && h.pending[first..].contains(&true) {
+            Some((file.metadata()?, meta.len()))
+        } else {
+            None
+        }
+    };
+    if let Some((new, start)) = completed {
+        let identity = (new.dev(), new.ino());
+        let previous = (meta.dev(), meta.ino());
+        if h.imported.as_ref().map_or(start == 0, |seen| {
+            seen.identity == previous && (start == 0 || seen.len == start)
+        }) {
+            h.imported = Some(InitialJournal {
+                path: path.to_owned(),
+                identity,
+                len: new.len(),
+            });
+        } else if let Some((id, last)) = h.local_writes.last_mut()
+            && *id == identity
+            && last.end == start
+        {
+            last.end = new.len();
+        } else if start < new.len() {
+            h.local_writes.push((identity, start..new.len()));
+        }
     }
     h.pending[first..].fill(false);
     h.written = h.lines.len();
     Ok(())
+}
+
+fn event_number(value: &str) -> Option<i64> {
+    match value.parse::<i64>() {
+        Ok(n) => Some(n),
+        Err(e)
+            if value
+                .trim_start_matches(['-', '+'])
+                .bytes()
+                .all(|b| b.is_ascii_digit()) =>
+        {
+            match e.kind() {
+                std::num::IntErrorKind::PosOverflow => Some(i64::MAX),
+                std::num::IntErrorKind::NegOverflow => Some(i64::MIN),
+                _ => None,
+            }
+        }
+        Err(_) => None,
+    }
+}
+
+fn fc_usage(reason: &str) -> Flow {
+    diagnostic!("fc: {reason}");
+    stderr_line!("fc: usage: fc [-e ename] [-lnr] [first] [last] or fc -s [pat=rep] [command]");
+    Flow::Continue(2)
 }
 
 fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow> {
@@ -701,7 +827,7 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
             args = rest;
             break;
         }
-        if !arg.starts_with('-') || arg == "-" || arg.parse::<i64>().is_ok() {
+        if !arg.starts_with('-') || arg == "-" || event_number(arg).is_some() {
             break;
         }
         args = rest;
@@ -713,16 +839,18 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
                 'n' => numbers = false,
                 's' => substitute = true,
                 'e' => {
-                    editor = Some(
-                        crate::builtins::flags::value(flags.as_str(), &mut args)
-                            .ok_or_else(|| error("editor required"))?,
-                    );
+                    let Some(value) = crate::builtins::flags::value(flags.as_str(), &mut args)
+                    else {
+                        return Ok(fc_usage("-e: option requires an argument"));
+                    };
+                    editor = Some(value);
                     break;
                 }
-                _ => return Err(error("invalid option")),
+                _ => return Ok(fc_usage(&format!("-{flag}: invalid option"))),
             }
         }
     }
+    substitute |= editor == Some("-");
     let replacements = if substitute {
         args.iter().take_while(|word| word.contains('=')).count()
     } else {
@@ -743,7 +871,7 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
     }
     let h = h.unwrap();
     let select = |arg: &String, first: bool| {
-        if let Ok(n) = arg.parse::<i64>() {
+        if let Some(n) = event_number(arg) {
             if n < 0 {
                 return Ok(end.saturating_sub(n.unsigned_abs() as usize));
             }
@@ -812,7 +940,7 @@ fn fc(session: &mut Session, mut args: &[String], status: u8) -> io::Result<Flow
             source = source.replace(before, after);
         }
     }
-    if !substitute && editor != Some("-") {
+    if !substitute {
         let program = editor
             .map(str::to_owned)
             .filter(|s| !s.is_empty())

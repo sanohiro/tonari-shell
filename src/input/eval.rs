@@ -19,7 +19,7 @@ pub(crate) fn builtin(session: &mut Session, args: &[String], status: u8) -> Flo
     };
     if crate::stack_budget_exceeded() {
         diagnostic!("eval: nesting limit exceeded");
-        return Flow::Discard(1);
+        return Flow::Unwind(1);
     }
     let joined;
     let source = match args {
@@ -54,11 +54,7 @@ pub(super) struct Entry {
     program: Vec<Statement>,
     line: usize,
     eof: bool,
-    extglob: bool,
-    extquote: bool,
-    posix: bool,
-    legacy_time: bool,
-    comments: bool,
+    options: parser::ReadOptions,
 }
 
 pub(super) enum Program {
@@ -119,7 +115,7 @@ pub(super) fn parse(
     }
     let program = parser::session_source_at(source, eof, session, line)?;
     if let Some(statement) = program.first() {
-        let comments = session.read_comments();
+        let options = parser::ReadOptions::from(&*session);
         let cache = &mut session.eval_cache;
         let text = statement.location.full_source();
         if cache.seen.iter().rev().any(|seen| &**seen == source) {
@@ -128,11 +124,7 @@ pub(super) fn parse(
                 program,
                 line,
                 eof,
-                extglob: session.shopt.glob.extglob,
-                extquote: session.shopt.extquote,
-                posix: session.posix,
-                legacy_time: session.posix && session.shopt.compat <= 41,
-                comments,
+                options,
             });
             remember(&mut cache.parsed, entry.clone());
             return Ok(Program::Cached(entry));
@@ -146,8 +138,7 @@ pub(super) fn parse(
 }
 
 fn cached(session: &Session, source: &str, eof: bool, line: usize) -> Option<Program> {
-    let extglob = session.shopt.glob.extglob;
-    let comments = session.read_comments();
+    let options = parser::ReadOptions::from(session);
     session
         .eval_cache
         .parsed
@@ -156,11 +147,7 @@ fn cached(session: &Session, source: &str, eof: bool, line: usize) -> Option<Pro
         .find(|entry| {
             entry.line == line
                 && entry.eof == eof
-                && entry.extglob == extglob
-                && entry.extquote == session.shopt.extquote
-                && entry.posix == session.posix
-                && entry.legacy_time == (session.posix && session.shopt.compat <= 41)
-                && entry.comments == comments
+                && entry.options == options
                 && &*entry.source == source
         })
         .cloned()

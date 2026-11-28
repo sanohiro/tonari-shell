@@ -33,6 +33,16 @@ extern "C" fn record(sig: i32) {
 // A single kernel SIGCHLD can cover several waitable children. Count the
 // statuses consumed by the interpreter, including when wait blocks on a
 // different PID. A bare signal wakes the interpreter to check for statuses.
+static JOB_CHANGED: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn job_changed() {
+    JOB_CHANGED.store(true, Relaxed);
+}
+
+extern "C" fn note_child(_: i32) {
+    job_changed();
+}
+
 static WATCH_CHILDREN: AtomicBool = AtomicBool::new(false);
 static CHILD_EVENTS: AtomicUsize = AtomicUsize::new(0);
 
@@ -118,6 +128,8 @@ pub(crate) struct Entry {
 pub struct Traps {
     entries: BTreeMap<i32, Entry>,
     inherited_listing: Option<std::rc::Rc<BTreeMap<i32, Entry>>>,
+    notification_watch: Option<bool>,
+    command_observer: bool,
     running: u64,
     handling_debug: bool,
     handling_error: bool,
@@ -148,6 +160,10 @@ fn action(handler: usize) -> libc::sigaction {
     a
 }
 
+pub(crate) fn terminating_pipe() -> bool {
+    TERMINATING.load(Relaxed) == libc::SIGPIPE
+}
+
 pub(crate) fn disposition(sig: i32) -> io::Result<libc::sigaction> {
     // libc may write only the kernel-sized prefix of a signal mask. Start
     // with initialized storage because traps save and restore the whole action.
@@ -163,6 +179,19 @@ fn set_disposition(sig: i32, new: &libc::sigaction) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+pub(crate) fn stop_for_terminal() -> io::Result<()> {
+    let previous = disposition(libc::SIGTTIN)?;
+    set_disposition(libc::SIGTTIN, &action(libc::SIG_DFL))?;
+    // Only this shell needs to wait for its controlling shell's handoff.
+    let result = unsafe { libc::raise(libc::SIGTTIN) };
+    set_disposition(libc::SIGTTIN, &previous)?;
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::from_raw_os_error(result))
+    }
 }
 
 pub(crate) fn listen_for_interrupts() -> io::Result<()> {
@@ -273,11 +302,23 @@ impl Traps {
     // inert builtin. Termination and pending actions are dispatched at command
     // boundaries. Keep real children when SIGCHLD or tracing is observable.
     pub(crate) fn observes_commands(&self) -> bool {
-        self.in_action()
-            || self
-                .entries
-                .iter()
-                .any(|(&sig, action)| sig != 0 && !action.command.is_empty())
+        self.in_action() || self.command_observer
+    }
+
+    fn refresh_command_observer(&mut self) {
+        self.command_observer = self
+            .entries
+            .iter()
+            .any(|(&sig, action)| sig != 0 && !action.command.is_empty());
+    }
+
+    pub(crate) fn can_replace_shell(&self) -> bool {
+        !self.interactive_hup
+            && !self.in_action()
+            && self.entries.iter().all(|(&sig, entry)| {
+                // SIGCHLD is kept waitable in the shell regardless of an empty trap.
+                sig != libc::SIGCHLD && entry.command.is_empty()
+            })
     }
 
     pub fn active(&self) -> bool {
@@ -307,6 +348,48 @@ impl Traps {
         self.entries
             .get(&signal)
             .is_some_and(|e| e.command.is_empty())
+    }
+
+    pub(crate) fn notification_pending(&mut self) -> bool {
+        let watched = *self.notification_watch.get_or_insert_with(|| {
+            // Leave explicit handlers and blocked or inherited ignores alone.
+            let mut mask = unsafe { std::mem::zeroed() };
+            if unsafe { libc::sigprocmask(libc::SIG_BLOCK, std::ptr::null(), &mut mask) } != 0
+                || unsafe { libc::sigismember(&mask, libc::SIGCHLD) } != 0
+                || INHERITED_CHLD_IGNORED.load(Relaxed)
+                || self.entries.contains_key(&libc::SIGCHLD)
+            {
+                return false;
+            }
+            let Ok(old) = disposition(libc::SIGCHLD) else {
+                return false;
+            };
+            if old.sa_sigaction == note_child as *const () as usize {
+                return true;
+            }
+            if old.sa_sigaction != libc::SIG_DFL {
+                return false;
+            }
+            let mut handler = action(note_child as *const () as usize);
+            handler.sa_flags = libc::SA_RESTART;
+            let installed = set_disposition(libc::SIGCHLD, &handler).is_ok();
+            job_changed(); // Reap a child that finished before installation.
+            installed
+        });
+        !watched || JOB_CHANGED.swap(false, Relaxed)
+    }
+
+    pub(crate) fn child_ignores_chld(&self) -> bool {
+        self.ignores(libc::SIGCHLD)
+            || INHERITED_CHLD_IGNORED.load(Relaxed) && !self.catches(libc::SIGCHLD)
+    }
+
+    pub(crate) fn export_child_dispositions(&self) {
+        if self.child_ignores_chld() {
+            // Only change the forked external process. SIG_IGN in its parent
+            // would let the kernel discard statuses from other live children.
+            unsafe { libc::signal(libc::SIGCHLD, libc::SIG_IGN) };
+        }
     }
 
     pub fn catches(&self, signal: i32) -> bool {
@@ -407,6 +490,8 @@ impl Traps {
             set_disposition(sig, &new)?;
         }
         if sig == libc::SIGCHLD {
+            self.notification_watch = None;
+            job_changed();
             let watch = command != "-" && !command.is_empty();
             if !watch {
                 CHILD_EVENTS.store(0, Relaxed);
@@ -424,6 +509,7 @@ impl Traps {
                 },
             );
         }
+        self.refresh_command_observer();
         Ok(())
     }
 
@@ -431,13 +517,18 @@ impl Traps {
         if inherit {
             None
         } else {
-            self.entries.remove(&sig)
+            let entry = self.entries.remove(&sig);
+            if entry.is_some() {
+                self.refresh_command_observer();
+            }
+            entry
         }
     }
 
     fn restore(&mut self, sig: i32, hidden: Option<Entry>) {
         if let Some(saved) = hidden {
             self.entries.entry(sig).or_insert(saved);
+            self.refresh_command_observer();
         }
     }
 
@@ -483,6 +574,7 @@ impl Traps {
     pub fn after_fork(&mut self, errtrace: bool, functrace: bool) {
         self.queried_dispositions.set(0);
         self.handling_exit = false;
+        self.notification_watch = None;
         self.current_action = None;
         // A still-running inherited handler must not re-enter itself.
         self.handling_debug &= functrace;
@@ -513,33 +605,30 @@ impl Traps {
         // Only ignored dispositions and inherited shell handlers remain active.
         let old = std::mem::take(&mut self.entries);
         for (&sig, e) in &old {
-            if self.keep_after_fork(sig, e, errtrace, functrace) {
+            if Self::keep_after_fork(sig, e, errtrace, functrace) {
                 let mut child = e.clone();
                 if is_os_signal(sig) && child.original.sa_sigaction != libc::SIG_IGN {
                     child.original = action(libc::SIG_DFL);
                 }
                 self.entries.insert(sig, child);
+            } else if is_os_signal(sig) && !matches!(sig, libc::SIGKILL | libc::SIGSTOP) {
+                unsafe { libc::signal(sig, libc::SIG_DFL) };
             }
         }
+        self.refresh_command_observer();
         if self.inherited_listing.is_none() {
             self.inherited_listing = Some(std::rc::Rc::new(old));
         }
     }
 
-    fn keep_after_fork(&self, sig: i32, e: &Entry, errtrace: bool, functrace: bool) -> bool {
+    fn keep_after_fork(sig: i32, e: &Entry, errtrace: bool, functrace: bool) -> bool {
         if sig == ERR {
             return errtrace;
         }
         if matches!(sig, RETURN | DEBUG) {
             return functrace;
         }
-        if sig > 0 && e.command.is_empty() {
-            return true;
-        }
-        if sig > 0 && sig != libc::SIGKILL && sig != libc::SIGSTOP {
-            unsafe { libc::signal(sig, libc::SIG_DFL) };
-        }
-        false
+        sig > 0 && e.command.is_empty()
     }
 
     fn lists_as_ignored(&self, sig: i32) -> bool {
@@ -620,7 +709,7 @@ impl Traps {
             }
             for (name, sig) in signals() {
                 if sig > 0
-                    && !matches!(sig, libc::SIGSTOP | libc::SIGKILL)
+                    && (entries.contains_key(&sig) || !matches!(sig, libc::SIGSTOP | libc::SIGKILL))
                     && show(sig, name).is_err()
                 {
                     return 1;
@@ -685,7 +774,9 @@ impl Traps {
                 posix,
             );
         }
-        let (command, signals) = if args[0].parse::<u32>().is_ok()
+        let (command, signals) = if !args[0].is_empty()
+            && args[0].bytes().all(|c| c.is_ascii_digit())
+            && trap_number(&args[0]).is_some()
             || !posix && args.len() == 1 && trap_number(&args[0]).is_some()
         {
             ("-", args)
@@ -740,7 +831,7 @@ pub fn debug(session: &mut Session, status: u8) -> Option<Flow> {
         Flow::Continue(2) if session.shopt.extdebug && session.function_depth > 0 => {
             Some(Flow::Return(2))
         }
-        Flow::Continue(n) if session.shopt.extdebug && n != 0 => Some(Flow::Continue(n)),
+        Flow::Continue(n) if session.shopt.extdebug && n != 0 => Some(Flow::Continue(0)),
         Flow::Continue(_) => None,
         other => Some(other),
     }
@@ -884,10 +975,16 @@ pub(crate) fn exit_action(session: &mut Session, code: u8) -> u8 {
         return code;
     };
     session.traps.handling_exit = true;
+    // A function or source can unwind before finish_shell takes the signal.
+    // Let the whole EXIT action run in that scope, then re-deliver the signal.
+    let terminating = TERMINATING.swap(0, Relaxed);
     let _ = session.traps.watch_exit(false);
     let outcome = with_trapsig(session, 0, code, |session| {
         crate::eval_text(session, &exit.command, code)
     });
+    if terminating != 0 {
+        let _ = TERMINATING.compare_exchange(0, terminating, Relaxed, Relaxed);
+    }
     session.traps.handling_exit = false;
     if session.traps.entries.remove(&0).is_some() {
         let _ = session.traps.watch_exit(false);
@@ -906,7 +1003,7 @@ pub(crate) fn finish_shell(session: &mut Session, code: u8, save_history: bool) 
         session.jobs.hangup();
     }
     if !session.traps.active() && TERMINATING.load(Relaxed) == 0 {
-        if save_history {
+        if save_history && session.history_enabled {
             crate::history::finish_interactive(session);
         }
         session.jobs.restore_initial_group();
@@ -918,7 +1015,7 @@ pub(crate) fn finish_shell(session: &mut Session, code: u8, save_history: bool) 
     };
     let sig = TERMINATING.swap(0, Relaxed);
     code = exit_action(session, code);
-    if save_history {
+    if save_history && session.history_enabled {
         crate::history::finish_interactive(session);
     }
     session.jobs.restore_initial_group();

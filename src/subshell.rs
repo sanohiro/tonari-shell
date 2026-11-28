@@ -245,8 +245,12 @@ pub fn capture_substitution(
                 };
                 #[cfg(not(target_os = "linux"))]
                 let file = std::fs::File::open(&filename);
-                let mut file =
-                    file.map_err(|e| io::Error::new(e.kind(), format!("{filename}: {e}")))?;
+                let mut file = file.map_err(|e| {
+                    io::Error::new(
+                        e.kind(),
+                        format!("{filename}: {}", crate::builtins::os_message(&e)),
+                    )
+                })?;
                 // Write straight to fd 1. Stdout's line buffer could retain the
                 // last bytes across _exit when the file has no final newline.
                 let mut stdout =
@@ -1024,11 +1028,12 @@ pub fn launch_group(
     body: Vec<parser::Statement>,
     status: u8,
     background: bool,
+    parenthesized: bool,
 ) -> Flow {
     if !background && let Some(flow) = foreground_builtin(session, &body, status) {
         return flow;
     }
-    launch_list(session, background, |s| {
+    launch_list(session, background, parenthesized, |s| {
         execute_program(s, body, status, true)
     })
 }
@@ -1041,7 +1046,7 @@ pub(crate) fn launch_borrowed(
     if let Some(flow) = foreground_builtin(session, body, status) {
         return flow;
     }
-    launch_list(session, false, |s| {
+    launch_list(session, false, true, |s| {
         crate::eval::borrowed_program(s, body, status, true)
     })
 }
@@ -1049,6 +1054,7 @@ pub(crate) fn launch_borrowed(
 fn launch_list(
     session: &mut Session,
     background: bool,
+    parenthesized: bool,
     run: impl FnOnce(&mut Session) -> Flow,
 ) -> Flow {
     let mut launch = session.jobs.launch(background, false);
@@ -1073,6 +1079,8 @@ fn launch_list(
             }
         }
         session.enter_subshell();
+        session.parenthesized_subshell = parenthesized;
+        session.pipeline_subshell = false;
         crate::execute::coprocess::after_fork(session);
         session.jobs.forked(false);
         session.command_string = false;

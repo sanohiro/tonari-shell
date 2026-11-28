@@ -8,6 +8,42 @@ pub(crate) const FIRST_NONSTANDARD: RawFd = 3;
 pub(crate) const SHELL_FD_MIN: RawFd = 10;
 pub(crate) const PROCESS_SUBSTITUTION_MIN: RawFd = 64;
 
+// Rust opens /dev/null on missing standard descriptors before calling main.
+// A shell must preserve an inherited close for both builtins and children.
+mod standard_at_exec {
+    use std::sync::atomic::{AtomicU8, Ordering};
+
+    static CLOSED: AtomicU8 = AtomicU8::new(0);
+
+    #[used]
+    #[cfg_attr(target_os = "linux", unsafe(link_section = ".init_array"))]
+    #[cfg_attr(target_os = "macos", unsafe(link_section = "__DATA,__mod_init_func"))]
+    static SAVE: extern "C" fn() = {
+        extern "C" fn save() {
+            let mut mask = 0;
+            for fd in 0..3 {
+                if unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0
+                    && std::io::Error::last_os_error().raw_os_error() == Some(libc::EBADF)
+                {
+                    mask |= 1 << fd;
+                }
+            }
+            CLOSED.store(mask, Ordering::Relaxed);
+        }
+        save
+    };
+
+    pub(crate) fn restore() {
+        let mut mask = CLOSED.load(Ordering::Relaxed);
+        while mask != 0 {
+            unsafe { libc::close(mask.trailing_zeros() as libc::c_int) };
+            mask &= mask - 1;
+        }
+    }
+}
+
+pub(crate) use standard_at_exec::restore as restore_standard_at_exec;
+
 // Only the abandoned stack of a forked script interpreter holds an empty slot.
 type FileSlot = RefCell<Option<File>>;
 
@@ -21,6 +57,10 @@ thread_local! {
 pub(crate) struct PrivateFile(Rc<FileSlot>);
 
 impl PrivateFile {
+    pub(crate) fn metadata(&self) -> io::Result<std::fs::Metadata> {
+        self.0.borrow().as_ref().unwrap().metadata()
+    }
+
     pub(crate) fn duplicate(fd: BorrowedFd<'_>) -> io::Result<Self> {
         let raw = fd.as_raw_fd();
         let copy = duplicate_except(raw, SHELL_FD_MIN, |_| false)

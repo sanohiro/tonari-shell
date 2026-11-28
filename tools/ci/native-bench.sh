@@ -23,6 +23,16 @@ if [[ $SUITE == review-perf ]]; then
   exit
 fi
 source tools/ci/bash-source.sh
+if [[ $SUITE == second-review ]]; then
+  if [[ $RUNNER_OS == macOS ]]; then
+    ref=$(brew --prefix bash)/bin/bash
+    [[ -x $ref ]] || brew install bash
+  fi
+  "$ref" --version > "$out/bash-version.txt"
+  wc -c "$bin/baseline" "$current" > "$out/binary-sizes.txt"
+  python3 tools/ci/second-review.py "$bin/baseline" "$current" "$ref" > "$out/scaling.txt"
+  exit
+fi
 if [[ $SUITE == review-findings ]]; then
   reference=$ref
   if [[ $RUNNER_OS == macOS ]]; then

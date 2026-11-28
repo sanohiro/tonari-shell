@@ -292,7 +292,9 @@ impl Session {
                 "-v" if op == StackOp::List => numbered = true,
                 "-c" if op == StackOp::List => clear = true,
                 _ if word.starts_with(['-', '+']) && !(op == StackOp::Push && word == "-") => {
-                    if word.len() < 2 || !word.as_bytes()[1..].iter().all(u8::is_ascii_digit) {
+                    if word[1..].parse::<i64>().is_err()
+                        || !word.as_bytes()[1..].iter().all(u8::is_ascii_digit)
+                    {
                         diagnostic!("{command}: {word}: invalid number");
                         stderr_line!("{command}: usage: {usage}");
                         return 2;
@@ -327,7 +329,10 @@ impl Session {
                     if self.dir_stack.is_empty() {
                         diagnostic!("{command}: directory stack empty");
                     } else {
-                        diagnostic!("{command}: {text}: directory stack index out of range");
+                        diagnostic!(
+                            "{command}: {}: directory stack index out of range",
+                            &text[1..]
+                        );
                     }
                     return 1;
                 }
@@ -533,27 +538,26 @@ impl Session {
                 diagnostic!("cd: null directory");
                 return 1;
             }
-            if physical {
-                match self.try_change_directory(
-                    Path::new(&target),
-                    physical,
-                    previous,
-                    arg.is_some(),
-                ) {
-                    Ok(()) => return 0,
-                    Err(DirectoryError::NoPath(e)) => {
-                        if require_pwd || !self.posix {
-                            diagnostic!("cd: {e}");
-                        }
-                        return u8::from(require_pwd);
+            match self.try_change_directory(Path::new(&target), physical, previous, arg.is_some()) {
+                Ok(()) => return 0,
+                Err(DirectoryError::NoPath(e)) => {
+                    if require_pwd || !self.posix {
+                        diagnostic!(
+                            "cd: error retrieving current directory: getcwd: cannot access parent directories: {}",
+                            crate::builtins::os_message(&e)
+                        );
                     }
-                    Err(DirectoryError::Other(e)) => {
-                        diagnostic!("cd: {e}");
-                        return if self.posix && require_pwd { 2 } else { 1 };
-                    }
+                    return u8::from(physical && require_pwd);
+                }
+                Err(DirectoryError::Other(e)) => {
+                    diagnostic!("cd: {e}");
+                    return if physical && self.posix && require_pwd {
+                        2
+                    } else {
+                        1
+                    };
                 }
             }
-            self.change_directory(Path::new(&target), physical, previous, arg.is_some())
         };
         result.map_or_else(
             |e| {
@@ -591,7 +595,12 @@ impl Session {
                 {
                     index = next
                 }
-                Err(e) => return Err(io::Error::new(e.kind(), format!("{}: {e}", path.display()))),
+                Err(e) => {
+                    return Err(io::Error::new(
+                        e.kind(),
+                        format!("{}: {}", path.display(), crate::builtins::os_message(&e)),
+                    ));
+                }
             }
         }
         Ok(false)
@@ -757,7 +766,11 @@ impl Session {
         }
         Err(DirectoryError::Other(io::Error::new(
             error.kind(),
-            format!("{}: {error}", target.display()),
+            format!(
+                "{}: {}",
+                target.display(),
+                crate::builtins::os_message(&error)
+            ),
         )))
     }
 

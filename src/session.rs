@@ -24,6 +24,8 @@ macro_rules! bash_version {
 }
 bash_version!("5", "2", "0", "1", "tonari");
 
+const NAMEREF_LIMIT: usize = 32;
+
 pub(crate) const READONLY: &str = "readonly variable";
 pub(crate) const SUBSCRIPT_RANGE: &str = "array subscript out of range";
 
@@ -321,13 +323,16 @@ pub struct Session {
     pub keyword: bool,
     pub logout_started: bool,
     pub allexport: bool,
-    pub notify: bool,
     pub noexec: bool,
     pub ignoreeof: bool,
     pub ignoreeof_limit: usize,
     pub xtrace: bool,
     pub onecmd: bool,
     pub subshell_depth: u32,
+    // A command substitution inherits the enclosing parentheses or pipeline
+    // flag. A newly forked compound command establishes its own context.
+    pub(crate) parenthesized_subshell: bool,
+    pub(crate) pipeline_subshell: bool,
     pub histexpand: bool,
     pub emacs: bool,
     pub vi: bool,
@@ -683,10 +688,12 @@ impl Session {
             diagnostic!("shift: too many arguments");
             return 1;
         }
-        let count = args.first().map_or(Ok(1), |s| s.trim().parse::<i64>());
-        let Ok(count) = count else {
+        let count = args
+            .first()
+            .map_or(Some(1), |s| crate::builtins::integer_operand(s));
+        let Some(count) = count else {
             diagnostic!("shift: {}: numeric argument required", args[0]);
-            return 1;
+            return 2;
         };
         if count < 0 || count as u64 > self.positional.len() as u64 {
             if count < 0 || self.shopt.shift_verbose {
@@ -725,7 +732,7 @@ impl Session {
         }
         // A for-loop retargets the last reference, even if its target is readonly.
         let mut current = name;
-        for _ in 0..32 {
+        for _ in 0..NAMEREF_LIMIT {
             if let Some(next) = self
                 .variables
                 .get(current)
@@ -751,7 +758,7 @@ impl Session {
             var.declared = true;
             return Ok(());
         }
-        Err("circular name reference")
+        Err(self.reference_limit_error(current, false))
     }
 
     pub fn reference_name<'a>(&self, name: &'a str) -> Result<Cow<'a, str>, &'static str> {
@@ -782,7 +789,7 @@ impl Session {
                 .unwrap_or(s.len())
         };
         let (mut base, mut suffix) = name.split_at(split(name));
-        for depth in 0..32 {
+        for depth in 0..NAMEREF_LIMIT {
             let target = self
                 .scoped_variable(base, global)
                 .filter(|v| v.nameref)
@@ -806,7 +813,26 @@ impl Session {
             }
             base = next;
         }
-        Err("circular name reference")
+        Err(self.reference_limit_error(base, global))
+    }
+
+    #[cold]
+    fn reference_limit_error(&self, last: &str, global: bool) -> &'static str {
+        let mut current = last;
+        for _ in 0..NAMEREF_LIMIT {
+            let Some(target) = self
+                .scoped_variable(current, global)
+                .filter(|var| var.nameref)
+                .and_then(|var| var.value.as_deref())
+            else {
+                break;
+            };
+            current = array::subscript(target).map_or(target, |(base, _)| base);
+            if current == last {
+                return "circular name reference";
+            }
+        }
+        "name reference depth limit exceeded"
     }
 
     pub(crate) fn ifs(&self) -> Cow<'_, str> {
@@ -847,6 +873,39 @@ impl Session {
         self.get(name).map(Cow::Owned)
     }
 
+    pub(crate) fn arithmetic_get(&self, name: &str) -> Result<Option<String>, &'static str> {
+        if self.is_nameref(name)
+            && let Cow::Owned(target) = self.reference_name(name)?
+        {
+            self.reference_value(name, &target)
+        } else {
+            Ok(self.get(name))
+        }
+    }
+
+    fn reference_value(&self, name: &str, target: &str) -> Result<Option<String>, &'static str> {
+        let depth = self.reference_depth.get();
+        if depth >= 32 {
+            return Err("array subscript nested too deeply");
+        }
+        self.reference_depth.set(depth + 1);
+        let value = if !name.contains('[')
+            && let Some((base, expr)) = array::subscript(target)
+        {
+            if self.is_associative(base) {
+                crate::arithmetic::data_key(expr, &mut crate::arithmetic::ReadOnly(self))
+                    .map(|key| self.assoc_value(base, &key).map(str::to_owned))
+            } else {
+                self.resolve_index(base, expr)
+                    .map(|index| self.element(base, index))
+            }
+        } else {
+            Ok(self.get(target))
+        };
+        self.reference_depth.set(depth);
+        value
+    }
+
     pub fn get(&self, name: &str) -> Option<String> {
         if name == "_" {
             return self
@@ -879,14 +938,7 @@ impl Session {
             return Some(text);
         }
         if let Cow::Owned(target) = self.reference_name(name).ok()? {
-            let depth = self.reference_depth.get();
-            if depth >= 32 {
-                return None;
-            }
-            self.reference_depth.set(depth + 1);
-            let value = self.get(&target);
-            self.reference_depth.set(depth);
-            return value;
+            return self.reference_value(name, &target).ok().flatten();
         }
         if let Some((base, index)) = array::subscript(name) {
             if self.is_associative(base) {
@@ -908,7 +960,7 @@ impl Session {
         if matches!(name, "BASHOPTS" | "SHELLOPTS") {
             return Some(self.option_list(name == "SHELLOPTS"));
         }
-        if name == "PIPESTATUS" {
+        if name == "PIPESTATUS" || self.live_dirstack(name) {
             return self.element(name, 0);
         }
         if let Some(var) = self.variables.get(name) {
@@ -1050,14 +1102,18 @@ impl Session {
         Self::BUILTIN_READONLY.contains(&name)
     }
 
-    pub fn initialize_shell_level(&mut self, env: &crate::startup::Environment) {
-        let level = env.shell_level.saturating_add(1);
-        let level = if level >= 1000 {
+    pub(crate) fn adjusted_shell_level(level: i64, change: i64) -> i64 {
+        let level = level.saturating_add(change);
+        if level >= 1000 {
             diagnostic!("warning: shell level ({level}) too high, resetting to 1");
             1
         } else {
             level.max(0)
-        };
+        }
+    }
+
+    pub fn initialize_shell_level(&mut self, env: &crate::startup::Environment) {
+        let level = Self::adjusted_shell_level(env.shell_level, 1);
         self.variables.insert(
             "SHLVL".into(),
             Variable::scalar(Some(level.to_string()), true),
@@ -1072,6 +1128,7 @@ impl Session {
         !matches!(
             name,
             "BASH_ARGV0"
+                | "BASH_XTRACEFD"
                 | "GLOBIGNORE"
                 | "IGNOREEOF"
                 | "ignoreeof"
@@ -1151,6 +1208,11 @@ impl Session {
             "POSIXLY_CORRECT" => self.apply_posix_mode(true),
             "OPTIND" => self.opt_offset = 0,
             "IGNOREEOF" | "ignoreeof" => self.set_eof_variable(Some(value)),
+            "BASH_XTRACEFD"
+                if !value.is_empty() && crate::execute::trace_descriptor(value).is_none() =>
+            {
+                diagnostic!("BASH_XTRACEFD: {value}: invalid value for trace file descriptor");
+            }
             "GLOBIGNORE" => self.shopt.glob.set_ignore(Some(value)),
             "PATH" => self.hashes.clear(),
             _ => {}
@@ -1159,8 +1221,8 @@ impl Session {
 
     pub(crate) fn assign_value(&mut self, name: &str, mut value: Cow<'_, str>) {
         match self.reference_name(name) {
-            Ok(Cow::Owned(target)) => {
-                if let Err(e) = self.assign_target(&target, &value) {
+            Ok(Cow::Owned(_)) => {
+                if let Err(e) = self.assign_target(name, &value) {
                     diagnostic!("{name}: {e}");
                 }
                 return;
@@ -1258,6 +1320,10 @@ impl Session {
     // Only an existing scalar with ordinary assignment semantics can be
     // updated in place. A changed attribute takes effect on the very next write.
     pub(crate) fn assign_existing_literal(&mut self, key: &str, value: &str) -> bool {
+        self.assign_existing_text(key, Cow::Borrowed(value))
+    }
+
+    pub(crate) fn assign_existing_text(&mut self, key: &str, value: Cow<'_, str>) -> bool {
         let (name, append) = key
             .strip_suffix('+')
             .map_or((key, false), |name| (name, true));
@@ -1282,8 +1348,7 @@ impl Session {
             };
             let len = target.len();
             bytes[..len].copy_from_slice(target.as_bytes());
-            return self
-                .assign_existing_literal(std::str::from_utf8(&bytes[..len]).unwrap(), value);
+            return self.assign_existing_text(std::str::from_utf8(&bytes[..len]).unwrap(), value);
         }
         if var.dynamic || var.letter_case.is_some() || var.readonly || var.elements.is_some() {
             return false;
@@ -1293,7 +1358,7 @@ impl Session {
             return false;
         };
         if integer {
-            let Some(rhs) = Self::plain_decimal(value) else {
+            let Some(rhs) = Self::plain_decimal(&value) else {
                 return false;
             };
             let result = if append {
@@ -1306,9 +1371,12 @@ impl Session {
             };
             itoa::Buffer::new().format(result).clone_into(current);
         } else if append {
-            current.push_str(value);
+            current.push_str(&value);
         } else {
-            value.clone_into(current);
+            match value {
+                Cow::Borrowed(s) => s.clone_into(current),
+                Cow::Owned(s) => *current = s,
+            }
         }
         var.exported |= self.allexport;
         var.declared = true;
@@ -1316,7 +1384,10 @@ impl Session {
     }
 
     pub(crate) fn remember_literal_argument(&mut self, words: &[String]) {
-        let arg = words.last().map_or("", String::as_str);
+        self.remember_argument(words.last().map_or("", String::as_str));
+    }
+
+    pub(crate) fn remember_argument(&mut self, arg: &str) {
         if self.last_argument.as_deref() != Some(arg) {
             let slot = self.last_argument.get_or_insert_with(String::new);
             slot.clear();
@@ -1358,7 +1429,7 @@ impl Session {
     // Indexed targets and virtual variables still use the general resolver.
     fn scalar_reference_target(&self, name: &str) -> Option<&str> {
         let mut target = self.variables.get(name)?.value.as_deref()?;
-        for _ in 1..32 {
+        for _ in 1..NAMEREF_LIMIT {
             if !is_identifier(target) {
                 return None;
             }
@@ -1454,7 +1525,15 @@ impl Session {
 
     pub(crate) fn is_exported(&self, name: &str) -> bool {
         self.variables.get(name).map_or_else(
-            || matches!(name, "PWD" | "OLDPWD") || std::env::var_os(name).is_some(),
+            || {
+                matches!(name, "PWD" | "OLDPWD")
+                    || if self.variables.len() >= 32 || self.listed_environment.get().is_some() {
+                        self.listed_environment()
+                            .contains_key(std::ffi::OsStr::new(name))
+                    } else {
+                        std::env::var_os(name).is_some()
+                    }
+            },
             |var| var.exported,
         )
     }
@@ -1489,15 +1568,19 @@ impl Session {
 
     // Special builtins retain their exported prefix bindings in POSIX mode.
     // Move the prepared strings and avoid snapshotting variables for restoration.
-    pub fn persist_prefix(&mut self, assignments: &mut Vec<(String, String)>) {
+    pub fn persist_prefix(
+        &mut self,
+        assignments: &mut Vec<(String, String)>,
+        evaluated_input: bool,
+    ) {
         for (name, value) in assignments.drain(..) {
             // A special builtin's environment persists in the nearest real
             // binding. A function prefix can itself hide another prefix.
-            if self
+            let function_prefix = self
                 .variables
                 .get(&name)
-                .is_some_and(|v| v.origin == BindingOrigin::CommandPrefix)
-            {
+                .is_some_and(|v| v.origin == BindingOrigin::CommandPrefix);
+            if function_prefix && !evaluated_input {
                 for scope in self.locals.iter_mut().rev() {
                     if let Some(previous) = scope.variables.remove(&name)
                         && !previous
@@ -1514,7 +1597,9 @@ impl Session {
             let var = self.variables.entry(name).or_default();
             var.exported = true;
             var.declared = true;
-            var.origin = BindingOrigin::Ordinary;
+            if !evaluated_input || !function_prefix {
+                var.origin = BindingOrigin::Ordinary;
+            }
             if let Some(array) = var.elements.as_mut() {
                 Rc::make_mut(array).insert(0, value);
             } else {
@@ -1656,23 +1741,38 @@ impl Session {
         &'a self,
         assignments: &'a [(String, String)],
     ) -> impl Iterator<Item = (&'a str, Option<Cow<'a, str>>)> {
-        self.variables
-            .environment_entries()
-            .filter_map(|(name, var)| {
-                if var.exported && var.elements.is_none() && var.value.is_some() {
-                    let value = match name.as_str() {
-                        "BASHOPTS" | "SHELLOPTS" => {
-                            Some(Cow::Owned(self.option_list(name == "SHELLOPTS")))
-                        }
-                        _ => var.value.as_deref().map(Cow::Borrowed),
-                    };
-                    Some((name.as_str(), value))
-                } else if var.inherited(name) {
-                    Some((name.as_str(), None))
-                } else {
-                    None
-                }
+        // Exported bindings from outer function scopes are still visible to a
+        // child when an inner local has no exported value. Apply the scopes in
+        // order so the nearest exported value (or command prefix) wins.
+        let change = |name: &'a str, var: &'a Variable, outer: &[Bindings]| {
+            if var.exported && var.elements.is_none() && var.value.is_some() {
+                let value = match name {
+                    "BASHOPTS" | "SHELLOPTS" => {
+                        Some(Cow::Owned(self.option_list(name == "SHELLOPTS")))
+                    }
+                    _ => var.value.as_deref().map(Cow::Borrowed),
+                };
+                Some((name, value))
+            } else if var.inherited(name) && !outer.iter().any(|s| s.variables.contains_key(name)) {
+                Some((name, None))
+            } else {
+                None
+            }
+        };
+        self.locals
+            .iter()
+            .enumerate()
+            .flat_map(move |(i, scope)| {
+                scope
+                    .variables
+                    .iter()
+                    .filter_map(move |(name, var)| change(name, var.as_ref()?, &self.locals[..i]))
             })
+            .chain(
+                self.variables
+                    .environment_entries()
+                    .filter_map(move |(name, var)| change(name, var, &self.locals)),
+            )
             .chain(self.function_environment.values().map(|export| {
                 (
                     export.key.as_str(),

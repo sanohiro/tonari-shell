@@ -24,9 +24,10 @@ impl Session {
             if args.is_empty() {
                 let mut out = crate::builtins::listing_stdout("export");
                 for name in self.functions.names("") {
-                    let flags = self.function_attributes(name);
-                    if flags.ends_with('x')
-                        && self.functions[name].print(&mut out, name, flags).is_err()
+                    if self.function_exported(name)
+                        && self.functions[name]
+                            .print(&mut out, name, self.function_attributes(name))
+                            .is_err()
                     {
                         return 1;
                     }
@@ -146,7 +147,11 @@ impl Session {
                 var.exported = !remove;
                 var.declared = true;
             } else {
-                let mut var = self.declared_variable(name, false).unwrap_or_default();
+                let mut var = match self.declared_variable(name, false) {
+                    Some(var) => var,
+                    None if remove => continue,
+                    None => Default::default(),
+                };
                 var.exported = !remove;
                 var.declared = true;
                 self.variables.insert(name.into(), var);
@@ -179,17 +184,24 @@ impl Session {
         }
         let mut out = crate::builtins::listing_stdout("export");
         let command = self.posix.then_some("export");
+        let locale = self.character_locale();
         for (name, value) in vars {
             if let Some(var) = self.variables.get(name.as_ref()) {
                 if matches!(name.as_ref(), "BASHOPTS" | "SHELLOPTS") {
                     let current = self.declared_variable(&name, false).unwrap();
-                    print_attribute(&mut out, &name, &current, command)?;
+                    print_attribute(&mut out, &name, &current, command, locale)?;
                 } else {
-                    print_attribute(&mut out, &name, var, command)?;
+                    print_attribute(&mut out, &name, var, command, locale)?;
                 }
                 continue;
             }
-            print_attribute(&mut out, &name, &Variable::scalar(value, true), command)?;
+            print_attribute(
+                &mut out,
+                &name,
+                &Variable::scalar(value, true),
+                command,
+                locale,
+            )?;
         }
         out.flush()
     }
@@ -316,7 +328,7 @@ impl Session {
     ) -> crate::Flow {
         let mut status = 0;
         for original in args {
-            if literal_ref && !self.is_nameref(original) {
+            if literal_ref && !functions_only && !self.is_nameref(original) {
                 continue;
             }
             let resolved;
@@ -382,7 +394,7 @@ impl Session {
                         self.remove_key(base, index);
                         continue;
                     }
-                    match self.subscript_key(index) {
+                    match crate::arithmetic::data_key(index, self) {
                         Ok(key) => self.remove_key(base, &key),
                         Err(e) => {
                             diagnostic!("unset: {e}");
@@ -403,18 +415,21 @@ impl Session {
                 {
                     continue;
                 }
-                let resolved = crate::arithmetic::expanded(index, self, 0)
-                    .and_then(|n| self.relative_index(base, n));
-                match resolved {
-                    Ok(i) if !array && i != 0 => {
-                        diagnostic!("unset: {base}: not an array variable");
-                        status = 1;
-                    }
-                    Ok(i) => self.unset_element(base, i),
+                let i = match crate::arithmetic::data_index(index, self) {
+                    Ok(i) => i,
                     Err(e) => {
                         diagnostic!("unset: {e}");
                         return crate::Flow::Discard(1);
                     }
+                };
+                if !array && i != 0 {
+                    diagnostic!("unset: {base}: not an array variable");
+                    status = 1;
+                } else if let Ok(element) = self.relative_index(base, i) {
+                    self.unset_element(base, element);
+                } else {
+                    diagnostic!("unset: [{index}]: bad array subscript");
+                    status = 1;
                 }
                 continue;
             }

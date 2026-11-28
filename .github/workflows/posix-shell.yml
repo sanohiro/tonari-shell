@@ -14,11 +14,14 @@ jobs:
         with:
           ref: ${{ matrix.revision == 'previous' && github.event.pull_request.base.sha || github.sha }}
           persist-credentials: false
-      - run: cargo build --locked --release
+      - name: Build the Linux distribution executable
+        run: |
+          rustup toolchain install "$(sed -n 's/^ *toolchain=//p' tools/build-release.sh)" --profile minimal --component rust-src --target x86_64-unknown-linux-musl
+          cp "$(tools/build-release.sh)" "$RUNNER_TEMP/tonari"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: shell-${{ matrix.revision }}
-          path: target/release/tonari
+          path: ${{ runner.temp }}/tonari
           if-no-files-found: error
           retention-days: 1
 
@@ -34,6 +37,10 @@ jobs:
       - run: python3 -m unittest discover -s tests/compat -p test_benchmark_helpers.py
 
   integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        reference: [system, gnu-5.3.20]
     needs: build
     runs-on: ubuntu-24.04
     steps:
@@ -44,13 +51,50 @@ jobs:
         with:
           name: shell-current
           path: bin
+      - name: Build pinned GNU Bash
+        if: matrix.reference == 'gnu-5.3.20'
+        run: |
+          source tools/ci/bash-source.sh
+          manifest="$PWD/tools/ci/bash53-patches.sha256"
+          cd "$RUNNER_TEMP"
+          download_bash 5.3 0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba bash.tar.gz
+          tar xzf bash.tar.gz
+          curl -fsSL --parallel --retry 3 --max-time 120 \
+            'https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-[001-020]' -o 'bash53-#1'
+          sha256sum -c "$manifest"
+          for patch in bash53-???; do patch -s -d bash-5.3 -p0 < "$patch"; done
+          cd bash-5.3
+          ./configure --without-bash-malloc --disable-nls > "$RUNNER_TEMP/bash-configure.log"
+          make -s -j"$(nproc)" > "$RUNNER_TEMP/bash-build.log"
+          echo "REFERENCE_BASH=$PWD/bash" >> "$GITHUB_ENV"
       - run: |
+          reference=${REFERENCE_BASH:-/bin/bash}
+          "$reference" --version
           chmod +x bin/tonari
-          python3 tests/shell.py bin/tonari -q
+          REFERENCE_BASH="$reference" python3 tests/shell.py bin/tonari -q
           for suite in tests/review_{builtins,interactive,language,runtime}.py; do
-            python3 "$suite" "$PWD/bin/tonari" /bin/bash
+            python3 "$suite" "$PWD/bin/tonari" "$reference"
           done
-          python3 tests/compat/source_review.py /bin/bash bin/tonari --runs 0
+          python3 tests/compat/source_review.py "$reference" bin/tonari --runs 0
+
+  macos-integration:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Check the arm64 release against GNU Bash
+        run: |
+          rustup toolchain install "$(sed -n 's/^ *toolchain=//p' tools/build-release.sh)" --profile minimal --component rust-src --target aarch64-apple-darwin
+          shell=$(tools/build-release.sh)
+          reference=$(brew --prefix bash)/bin/bash
+          [[ -x $reference ]] || brew install bash
+          "$reference" --version
+          REFERENCE_BASH="$reference" python3 tests/shell.py "$shell" -q
+          for suite in tests/review_{builtins,interactive,language,runtime}.py; do
+            python3 "$suite" "$PWD/$shell" "$reference"
+          done
 
   compare:
     needs: build

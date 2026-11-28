@@ -158,7 +158,7 @@ impl Expanded {
 
 // Ordinary parameter expansions do not invoke another parser. A command
 // substitution must keep the outer alias disabled while its body is read.
-fn may_read_nested_command(value: &str) -> bool {
+pub(super) fn may_read_nested_command(value: &str) -> bool {
     if value.contains('`') {
         return true;
     }
@@ -170,10 +170,14 @@ fn may_read_nested_command(value: &str) -> bool {
 }
 
 impl Reader {
-    pub(super) fn alias_newlines(&mut self, protected: &[&str]) -> Result<(), Error> {
+    pub(super) fn alias_newlines(
+        &mut self,
+        command_word: bool,
+        protected: &[&str],
+    ) -> Result<(), Error> {
         loop {
             self.newlines();
-            self.alias_at(false, Some(protected))?;
+            self.alias_at(command_word, Some(protected))?;
             if !matches!(self.peek(), Some(Token::Newline)) {
                 return Ok(());
             }
@@ -193,24 +197,32 @@ impl Reader {
             }
             Aliases(Some(std::rc::Rc::new(table)))
         };
-        if !self.alias_frames.is_empty() {
-            return masked();
-        }
         type WeakTable = std::rc::Weak<std::collections::BTreeMap<String, String>>;
-        thread_local! { static LAST: RefCell<Option<(WeakTable,String,Aliases)>> =const {RefCell::new(None)}; }
+        struct Mask {
+            table: WeakTable,
+            name: String,
+            active: Vec<String>,
+            aliases: Aliases,
+        }
+        thread_local! { static LAST: RefCell<Option<Mask>> = const { RefCell::new(None) }; }
         LAST.with_borrow_mut(|cache| {
-            if let Some((table, key, replacement)) = cache
-                && table.as_ptr() == std::rc::Rc::as_ptr(original)
-                && key == name
+            if let Some(previous) = cache
+                && previous.table.as_ptr() == std::rc::Rc::as_ptr(original)
+                && previous.name == name
+                && previous
+                    .active
+                    .iter()
+                    .eq(self.alias_frames.iter().map(|f| &f.name))
             {
-                return replacement.clone();
+                return previous.aliases.clone();
             }
             let replacement = masked();
-            *cache = Some((
-                std::rc::Rc::downgrade(original),
-                name.into(),
-                replacement.clone(),
-            ));
+            *cache = Some(Mask {
+                table: std::rc::Rc::downgrade(original),
+                name: name.into(),
+                active: self.alias_frames.iter().map(|f| f.name.clone()).collect(),
+                aliases: replacement.clone(),
+            });
             replacement
         })
     }
@@ -264,7 +276,7 @@ impl Reader {
         let boundary = source.len();
         let old_boundary = physical.len() - suffix.len();
         source.push_str(suffix);
-        let (tokens, offsets, _) = with(nested, || {
+        let (mut tokens, offsets, _) = with(nested, || {
             super::lexer::lex_joined(
                 &source[start..],
                 self.final_input,
@@ -289,6 +301,12 @@ impl Reader {
             next_word: value.ends_with([' ', '\t']),
         });
         self.spans = spans;
+        for token in &mut tokens {
+            if let Token::HereBody(_, (begin, end)) = token {
+                *begin += start;
+                *end += start;
+            }
+        }
         self.tokens = tokens.into();
         self.alias_source = None;
         self.newlines = memchr::memchr_iter(b'\n', source.as_bytes()).collect();
@@ -360,9 +378,6 @@ impl Reader {
                 || self.alias_frames.iter().any(|f| f.name == name)
             {
                 return Ok(());
-            }
-            if self.alias_frames.len() >= 128 {
-                return Err(Error::Invalid("alias expansion nesting limit exceeded"));
             }
             let name = name.to_string();
             let next_word = value.ends_with([' ', '\t']);
