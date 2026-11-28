@@ -82,7 +82,7 @@ def components(script, shells):
             for trial in range(8):
                 for name, shell in (reversed(shells) if trial % 2 else shells):
                     start = time.monotonic_ns()
-                    p = subprocess.run([shell, *command], env=env, cwd=work, check=True, capture_output=True)
+                    p = subprocess.run([shell, *command], env=env, cwd=work, check=True, capture_output=True, timeout=180)
                     elapsed = (time.monotonic_ns() - start) / 1e6
                     if p.stderr or (expected is not None and p.stdout != expected):
                         raise ValueError(f"{name} changed {label} output")

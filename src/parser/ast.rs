@@ -11,6 +11,7 @@ pub enum Target {
     Append,
     Duplicate,
     OutputWord,
+    MoveWord,
     HereDoc { expand: bool },
     HereString,
 }

@@ -141,6 +141,9 @@ fn delimiter(chars: &mut Chars<'_>) -> Result<(String, bool), Error> {
                 text.push_str(&super::ansi::quoted(chars)?);
                 quoted = true;
             }
+            '$' if quote.is_none() && chars.as_str().starts_with('"') => {
+                // The following quote delimits the localized string.
+            }
             '$' if quote.is_none() && chars.as_str().starts_with('(') => {
                 chars.next();
                 text.push_str("$(");

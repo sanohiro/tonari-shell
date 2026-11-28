@@ -665,7 +665,7 @@ pub(super) fn here_pipe_limit(builtin: Option<Builtin>, cmd: &PreparedCommand) -
     }
 }
 
-fn redirect_failure(cmd: &PreparedCommand, session: &Session) -> Flow {
+pub(super) fn redirect_failure(cmd: &PreparedCommand, session: &Session) -> Flow {
     if !session.interactive && posix_special(cmd, session) {
         Flow::Exit(1)
     } else {
@@ -908,20 +908,30 @@ fn run_redirected_builtin(
     // list. A redirect failure happens before that list can run.
     if let Err(index) = redirection
         && matches!(builtin, Builtin::Compound)
-        && session.tested_depth == 0
     {
+        return Ok(compound_redirect_failure(
+            session,
+            1,
+            cmd.redirects[index].line,
+        ));
+    }
+    Ok(flow)
+}
+
+pub(super) fn compound_redirect_failure(session: &mut Session, status: u8, line: usize) -> Flow {
+    if session.tested_depth == 0 {
         if session.traps.active() {
             if let Some(location) = &mut session.current_command {
-                location.line = cmd.redirects[index].line;
+                location.line = line;
             }
-            let trap = crate::traps::error(session, 1);
+            let trap = crate::traps::error(session, status);
             if !matches!(trap, Flow::Continue(_)) {
-                return Ok(trap);
+                return trap;
             }
         }
         if session.errexit {
-            return Ok(Flow::Exit(1));
+            return Flow::Exit(status);
         }
     }
-    Ok(flow)
+    Flow::Continue(status)
 }

@@ -36,6 +36,9 @@ impl Session {
         let mut value = None;
         let mut problem = None;
         if let Some(word) = inputs.get(pos) {
+            if offset >= word.len() || !word.is_char_boundary(offset) {
+                offset = 1;
+            }
             if word == "--" {
                 pos += 1;
             } else if word.starts_with('-')

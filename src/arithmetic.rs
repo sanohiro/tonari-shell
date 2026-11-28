@@ -90,6 +90,14 @@ impl Variables for Session {
     }
 }
 
+fn data_parameter(vars: &dyn Variables, name: &str) -> Result<String> {
+    match vars.get(name)? {
+        Some(value) => Ok(value),
+        None if vars.nounset() => Err("unbound arithmetic variable"),
+        None => Ok(String::new()),
+    }
+}
+
 // A subscript obtained from a variable is data. Read parameter values and
 // arithmetic operands without passing any part of it to the shell evaluator.
 fn data_text(word: crate::word::Word, vars: &mut dyn Variables, depth: u16) -> Result<String> {
@@ -105,9 +113,7 @@ fn data_text(word: crate::word::Word, vars: &mut dyn Variables, depth: u16) -> R
         match part {
             Part::Text(s) | Part::Pattern(s) | Part::Unquoted(s) => output.push_str(&s),
             Part::Parameter { name, .. } | Part::BraceParameter(name) if is_identifier(&name) => {
-                if let Some(value) = vars.get(&name)? {
-                    output.push_str(&value);
-                }
+                output.push_str(&data_parameter(vars, &name)?);
             }
             Part::Alternative {
                 name,
@@ -151,7 +157,7 @@ fn data_key_at(source: &str, vars: &mut dyn Variables, depth: u16) -> Result<Str
         return Ok(source.to_owned());
     }
     let key = if let Some(name) = single_data_parameter(source) {
-        vars.get(name)?.unwrap_or_default()
+        data_parameter(vars, name)?
     } else {
         let word = crate::parser::subscript_word(source, true).map_err(|e| e.message())?;
         data_text(word, vars, depth + 1)?
@@ -171,7 +177,7 @@ fn data_index_at(source: &str, vars: &mut dyn Variables, depth: u16) -> Result<i
         if let Some(n) = vars.decimal(name) {
             return Ok(n);
         }
-        let value = vars.get(name)?.unwrap_or_default();
+        let value = data_parameter(vars, name)?;
         return calculate(&value, vars, depth);
     }
     let (keys, tail) = if source.contains('[') {

@@ -133,6 +133,10 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
         diagnostic!("[[: {message}");
         Flow::Continue(2)
     }
+    if matches!(expr, Not(_) | And(_) | Or(_)) && crate::stack_budget_exceeded() {
+        diagnostic!("conditional expression nested too deeply");
+        return Err(Flow::Unwind(1));
+    }
     if !session.xtrace {
         match expr {
             Word(w) | Unary("-n" | "-z", w) if let Some(v) = w.stored_parameter(session) => {

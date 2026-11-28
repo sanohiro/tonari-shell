@@ -93,7 +93,11 @@ fn escaped_scalar(c: char) -> bool {
 }
 
 fn contains_nonprinting(data: &[u8]) -> bool {
-    !data.is_ascii() && std::str::from_utf8(data).is_ok_and(|s| s.chars().any(escaped_scalar))
+    !data.is_ascii()
+        && match std::str::from_utf8(data) {
+            Ok(s) => s.chars().any(escaped_scalar),
+            Err(_) => true,
+        }
 }
 
 pub(crate) fn needs_ansi(data: &[u8], ascii: bool) -> bool {
@@ -154,7 +158,7 @@ pub(crate) fn ansi_quote(data: &[u8], ascii_locale: bool) -> Vec<u8> {
             13 => out.extend_from_slice(b"\\r"),
             27 => out.extend_from_slice(b"\\E"),
             b'\'' | b'\\' => out.extend_from_slice(&[b'\\', b]),
-            b if b.is_ascii_control() || (ascii_locale && !b.is_ascii()) => {
+            b if b.is_ascii_control() || !b.is_ascii() => {
                 push_octal(&mut out, b);
             }
             _ => out.push(b),

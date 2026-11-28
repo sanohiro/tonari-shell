@@ -62,6 +62,10 @@ use execute::Flow;
 use eval::{call_function, execute_program};
 
 fn eval_text(session: &mut Session, source: &str, status: u8) -> Flow {
+    if stack_budget_exceeded() {
+        diagnostic!("command nesting limit exceeded");
+        return Flow::Unwind(1);
+    }
     input::text(session, source, status, false, false, None)
 }
 
@@ -332,6 +336,7 @@ fn recursion_guard_uses_the_worker_stack_bounds() {
 }
 
 fn main() -> ExitCode {
+    execute::fd::restore_standard_at_exec();
     traps::enter_process();
     let marker = 0u8;
     MAIN_STACK_ORIGIN.set(std::ptr::from_ref(&marker).addr());

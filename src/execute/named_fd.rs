@@ -15,17 +15,17 @@ impl Scope {
         session: &mut Session,
         mut raw: Redirect<Word>,
         status: u8,
+        captured: &Cell<Option<u8>>,
     ) -> io::Result<bool> {
         let variable = raw.variable.take();
-        let captured = Cell::new(None);
-        let mut exp = Expansion::new(session, status, &captured);
+        let mut exp = Expansion::new(session, status, captured);
         let expanded = prepare_redirects([raw], &mut exp).map_err(io::Error::other)?;
         for (i, mut r) in expanded.into_iter().enumerate() {
             let name = variable.as_deref().filter(|_| i == 0);
             let close = r.target == Target::Duplicate && r.word == "-";
             if let Some(name) = name {
                 if close {
-                    let element = Expansion::new(session, status, &captured)
+                    let element = Expansion::new(session, status, captured)
                         .assignment_element(name)
                         .map_err(io::Error::other)?;
                     let value = match element {
@@ -106,28 +106,33 @@ impl Scope {
         session: &mut Session,
         status: u8,
         child_redirects: bool,
-    ) -> io::Result<Option<Flow>> {
+        captured: &Cell<Option<u8>>,
+    ) -> Option<(Flow, usize)> {
         for raw in redirects {
-            match self.redirect(session, raw, status) {
-                Ok(true) => {}
-                Ok(false) => return Ok(Some(Flow::Continue(1))),
+            let line = raw.line;
+            let flow = match self.redirect(session, raw, status, captured) {
+                Ok(true) => continue,
+                Ok(false) => Flow::Continue(1),
                 Err(error) => {
-                    let Some(expansion) = error
+                    if let Some(expansion) = error
                         .get_ref()
                         .and_then(|e| e.downcast_ref::<crate::expansion::Error>())
-                    else {
-                        return Err(error);
-                    };
-                    expansion.report("");
-                    return Ok(Some(if child_redirects {
-                        Flow::Continue(expansion.status)
+                    {
+                        expansion.report("");
+                        if child_redirects {
+                            Flow::Continue(expansion.status)
+                        } else {
+                            expansion.flow(session)
+                        }
                     } else {
-                        expansion.flow(session)
-                    }));
+                        diagnostic!("{error}");
+                        Flow::Continue(1)
+                    }
                 }
-            }
+            };
+            return Some((flow, line));
         }
-        Ok(None)
+        None
     }
 
     fn finish(self, session: &mut Session, committed: bool) -> io::Result<()> {
@@ -147,6 +152,8 @@ pub(super) fn with_redirects(
     session: &mut Session,
     status: u8,
     child_redirects: bool,
+    captured: &Cell<Option<u8>>,
+    on_failure: impl FnOnce(&mut Session, Flow, usize) -> Flow,
     run: impl FnOnce(&mut Session) -> io::Result<(Flow, bool)>,
 ) -> io::Result<Flow> {
     let old_input = session.stdin_redirected;
@@ -154,18 +161,19 @@ pub(super) fn with_redirects(
     let saved_substitutions = session.substitutions.scope();
     let mut child = child_redirects.then(|| session.clone());
     let env = child.as_mut().unwrap_or(session);
-    let applied = scope.install(redirects, env, status, child_redirects);
+    let applied = scope.install(redirects, env, status, child_redirects, captured);
     if let Some(child) = child {
         session.stdin_redirected = child.stdin_redirected;
         session
             .substitutions
             .adopt(child.substitutions, saved_substitutions);
     }
-    let result = match applied {
-        Ok(None) => run(session),
-        Ok(Some(flow)) => Ok((flow, false)),
-        Err(error) => Err(error),
-    };
+    if let Some((flow, line)) = applied {
+        session.stdin_redirected = old_input;
+        scope.finish(session, false)?;
+        return Ok(on_failure(session, flow, line));
+    }
+    let result = run(session);
     let committed = matches!(result, Ok((_, true)));
     if !committed {
         session.stdin_redirected = old_input;
@@ -175,12 +183,24 @@ pub(super) fn with_redirects(
 }
 
 fn command(mut cmd: PreparedCommand, session: &mut Session, status: u8) -> io::Result<Flow> {
+    let captured = Cell::new(None);
+    let fatal = matches!(builtin::redirect_failure(&cmd, session), Flow::Exit(_));
+    let compound = cmd.compound.is_some();
     with_redirects(
-        std::mem::take(&mut cmd.named_redirects),
+        std::mem::take(&mut cmd.deferred_redirects),
         session,
         status,
         false,
+        &captured,
+        |session, flow, line| match flow {
+            Flow::Continue(code) if fatal => Flow::Exit(code),
+            Flow::Continue(code) if compound => {
+                builtin::compound_redirect_failure(session, code, line)
+            }
+            other => other,
+        },
         |session| {
+            cmd.empty_status = captured.get().unwrap_or(cmd.empty_status);
             if let Some(b) = builtin(&cmd, status, session).or_else(|| {
                 cmd.prepare_missing_hook(session)
                     .then_some(Builtin::Function)
@@ -205,8 +225,13 @@ pub(super) fn run(
     replace: bool,
     mut launch: crate::jobs::Launch,
 ) -> io::Result<Flow> {
-    let local = (!cmd.words.is_empty() || cmd.compound.is_some())
-        && builtin(&cmd, status, session).is_some();
+    let isolated_null = cmd.words.is_empty()
+        && cmd.compound.is_none()
+        && cmd
+            .deferred_redirects
+            .iter()
+            .any(|r| r.variable.is_some() || r.fd == 0);
+    let local = !isolated_null && builtin(&cmd, status, session).is_some();
     if local || replace && launch.group.is_none() {
         return command(cmd, session, status);
     }

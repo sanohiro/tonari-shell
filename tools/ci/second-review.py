@@ -17,7 +17,7 @@ def workloads(n):
     cases = " ".join(f"case x in x) v={i};; esac;" for i in range(n))
     yield "case-substitution", f"x=$({cases} echo \"$v\"); printf '%s' \"$x\"\n", str(n - 1), False
     value = "é" * n
-    yield "utf8-substitution", f"s='{value}'; s=${{s//é?/}}; printf '<%s>' \"$s\"\n", "<>", False
+    yield "utf8-substitution", f"s='{value}'; s=${{s//é?/}}; printf '<%s>' \"$s\"\n", f"<{value[:n % 2]}>", False
 
 
 def main():
@@ -27,6 +27,8 @@ def main():
     parser.add_argument("--runs", type=int, default=7)
     parser.add_argument("--sizes", type=int, nargs="+", default=(256, 512, 1024))
     args = parser.parse_args()
+    if args.runs < 1 or min(args.sizes) < 1:
+        parser.error("runs and sizes must be positive")
     programs = {k: getattr(args, k).resolve() for k in ("before", "after", "bash")}
     order = random.Random(20261128)
     print("workload N " + " ".join(programs) + " (median wall ms)")

@@ -116,7 +116,10 @@ pub fn file_script(
     if let Some(meta) = &metadata
         && let Some((program, next_line)) = file_group(session, &file, meta)
     {
-        let mut file = file;
+        let mut file = match PrivateFile::new(file) {
+            Ok(file) => file,
+            Err(e) => return error(e, 1),
+        };
         let flow = if check {
             Flow::Continue(0)
         } else {
@@ -135,18 +138,15 @@ pub fn file_script(
             if let Err(e) = file.seek(io::SeekFrom::Start(meta.len())) {
                 return error(e, 1);
             }
-            return match PrivateFile::new(file) {
-                Ok(file) => run(
-                    session,
-                    BufReader::new(file),
-                    false,
-                    false,
-                    None,
-                    (code, next_line),
-                    check,
-                ),
-                Err(e) => error(e, 1),
-            };
+            return run(
+                session,
+                BufReader::new(file),
+                false,
+                false,
+                None,
+                (code, next_line),
+                check,
+            );
         }
         return flow;
     }
@@ -267,11 +267,11 @@ pub(crate) fn still_open(
     text: &str,
     session: &Session,
 ) -> bool {
-    if session.reads_aliases() {
+    use parser::Incomplete::*;
+    if !matches!(reason, Some(SingleQuote | DoubleQuote)) && session.reads_aliases() {
         return false;
     }
     let line = text.as_bytes();
-    use parser::Incomplete::*;
     let plain = |b: &u8| !b.is_ascii() || b.is_ascii_alphanumeric() || b" _-+:./=,\t\n".contains(b);
     match reason {
         Some(CompoundEnd(close)) => {
@@ -458,7 +458,6 @@ fn run(
         }
         if let Some(incomplete) = state.incomplete
             && n != 0
-            && !session.reads_aliases()
         {
             let Ok(line) = std::str::from_utf8(&input[line_start..]) else {
                 return error("expected UTF-8 command text", 2);
@@ -466,6 +465,7 @@ fn run(
             if still_open(Some(incomplete), line, session)
                 || matches!(incomplete, parser::Incomplete::Subshell)
                     && line.contains(')')
+                    && !session.reads_aliases()
                     && parser::word_line(line, session)
             {
                 continue;
@@ -705,11 +705,7 @@ pub fn text(
         } else if let Some(edited) = &mut edited {
             edited.push_str(line);
         }
-        if !last
-            && !expand_history
-            && still_open(state.incomplete, line, session)
-            && !session.reads_aliases()
-        {
+        if !last && !expand_history && still_open(state.incomplete, line, session) {
             continue;
         }
         if !last

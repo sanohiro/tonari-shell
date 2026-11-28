@@ -205,7 +205,8 @@ mapfile -t r <<< data; r+=("${src[@]}"); printf '<%s>' "${r[@]}" """,
                 with tempfile.TemporaryDirectory(dir=scratch) as work:
                     observed.append(subprocess.run(
                         [exe, "--noprofile", "--norc", "-c", script],
-                        env=options, cwd=work, capture_output=True, timeout=10,
+                        env=options, cwd=scratch if name == "brace tilde after alternatives" else work,
+                        capture_output=True, timeout=10,
                     ))
             results = [(run.returncode, run.stdout) for run in observed]
             if name == "flat pair process substitution":

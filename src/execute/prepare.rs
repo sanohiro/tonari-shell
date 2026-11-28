@@ -10,7 +10,7 @@ pub(crate) struct ArrayDeclaration {
 #[derive(Default)]
 pub(crate) struct PreparedCommand {
     pub(super) missing_hook: bool,
-    pub(super) named_redirects: Vec<Redirect<Word>>,
+    pub(super) deferred_redirects: Vec<Redirect<Word>>,
     pub(super) resolved: Option<PathBuf>,
     pub(super) array_declarations: Vec<ArrayDeclaration>,
     pub(super) compound: Option<std::rc::Rc<crate::parser::Command>>,
@@ -622,7 +622,7 @@ pub(super) fn prepare_expanded(
         missing_hook: false,
         literal_has_keywords: false,
         literal_has_braces: false,
-        named_redirects: Vec::new(),
+        deferred_redirects: Vec::new(),
         resolved: None,
         array_declarations,
         compound: raw.compound,
@@ -688,8 +688,8 @@ fn expand_prepared_redirects(
     assignment_only: bool,
     standalone: bool,
 ) -> Result<(), crate::expansion::Error> {
-    if redirects.iter().any(|r| r.variable.is_some()) {
-        cmd.named_redirects = redirects;
+    if super::deferred_redirects(&redirects, session) {
+        cmd.deferred_redirects = redirects;
     } else if !redirects.is_empty() {
         // A standalone null command expands ordinary output redirects in the shell.
         // Bash isolates the whole redirect list if any redirect replaces stdin.
@@ -777,25 +777,26 @@ pub(super) fn prepare_redirects(
             (_, word) => exp.redirect_path(word)?,
         };
         let mut word = word;
-        let mut moved = None;
         let both = r.target == Target::OutputWord
-            && !word.ends_with('-')
+            && word != "-"
             && !word.bytes().all(|b| b.is_ascii_digit());
         let mut target = match r.target {
             Target::OutputWord if both => Target::Write,
-            Target::OutputWord => Target::Duplicate,
+            Target::MoveWord | Target::OutputWord => Target::Duplicate,
             target => target,
         };
+        if r.target == Target::MoveWord && word.is_empty() {
+            word.push('-');
+        }
+        let mut moved = None;
         if target == Target::Duplicate && word != "-" {
-            let source = word.strip_suffix('-').unwrap_or(&word);
-            let fd = source
+            let fd = word
                 .parse::<RawFd>()
                 .ok()
-                .filter(|_| source.bytes().all(|b| b.is_ascii_digit()))
+                .filter(|_| word.bytes().all(|b| b.is_ascii_digit()))
                 .ok_or("invalid file descriptor")?;
-            if source.len() != word.len() {
+            if r.target == Target::MoveWord {
                 moved = Some(fd);
-                word.pop();
             }
         }
         if target == Target::Write && exp.session.noclobber {

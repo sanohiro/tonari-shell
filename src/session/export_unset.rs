@@ -320,7 +320,7 @@ impl Session {
     ) -> crate::Flow {
         let mut status = 0;
         for original in args {
-            if literal_ref && !self.is_nameref(original) {
+            if literal_ref && !functions_only && !self.is_nameref(original) {
                 continue;
             }
             let resolved;

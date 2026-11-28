@@ -147,6 +147,41 @@ v='xa\'; p='[a]\'; printf '<%s>' "${v/%$p/Z}" "${v//$p/Z}" """
                                         capture_output=True, timeout=5)
             self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"old\n<:><true><>", b""))
 
+    def test_second_review_inherited_closed_standard_descriptors(self):
+        for fd in range(3):
+            source = f"exec 9>&{fd}"
+            for shell in (TONARI, BASH):
+                with self.subTest(fd=fd, shell=shell):
+                    r = subprocess.run([shell, "-c", source], env=self.env, cwd=self.cwd,
+                                       capture_output=True, preexec_fn=lambda: os.close(fd), timeout=5)
+                    self.assertNotEqual(r.returncode, 0)
+                    control = self.command(shell, f"exec {fd}<>/dev/null; {source}")
+                    self.assertEqual(control.returncode, 0, control.stderr)
+        path = self.cwd / "large-group"
+        path.write_text("{\n#" + "x" * 32768 + "\n: 4<&0; echo status=$?\n}\n")
+        for shell in (BASH, TONARI):
+            r = subprocess.run([shell, path], env=self.env, cwd=self.cwd, capture_output=True,
+                               preexec_fn=lambda: os.close(0), timeout=5)
+            self.assertEqual((r.returncode, r.stdout), (0, b"status=1\n"), r.stderr)
+
+    def test_second_review_builtin_operands(self):
+        for script, output in [
+            ("f(){ :; }; unset -fn f; type -t f; echo $?", b"1\n"),
+            ("set -- base; set -o '' -Z >/dev/null; echo \"$?/$1\"; "
+             "set -o - -Z >/dev/null; echo \"$?/$1\"", b"2/base\n2/base\n"),
+            ("getopts abc o -abc; getopts abc o -abc; getopts xyz o -x; "
+             "echo \"$?/$o/$OPTIND\"", b"0/x/2\n"),
+            ("cat <<$\"EOF\"\nline\nEOF\nprintf done\n", b"line\ndone"),
+        ]:
+            for shell in (TONARI, BASH):
+                r = self.command(shell, script)
+                self.assertEqual((r.returncode, r.stdout), (0, output), (shell, script, r.stderr))
+        utf8 = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        for shell in ((TONARI, BASH) if bash_version() >= (5, 3) else (TONARI,)):
+            r = self.command(shell, """LC_ALL="$1"; printf '%.1Q/' é; printf '%d/' ''; echo $?
+printf '%d/'; echo $?""", "shell", utf8)
+            self.assertEqual((r.returncode, r.stdout), (0, b"$'\\303'/0/1\n0/0\n"), r.stderr)
+
     def test_scaling_multiline_readers_leave_following_input(self):
         source = ("a=(\n" + "entry\n" * 300 +
                   ")\nx=$(\n:\necho one\n); y=\"first\nsecond\"\n" +
@@ -987,6 +1022,9 @@ p='\360\237\230\200'; echo "${p@P}" """
                                                 input=script.encode() if mode == "stdin" else b"",
                                                 capture_output=True, timeout=3)
                         expected = (1, b"") if mode == "-c" else (0, b"next:1\n")
+                        if shell == BASH and bash_version() < (5, 3):
+                            prefix = b"another-line\n" if nested.startswith("source ") else b""
+                            expected = (0, prefix + b"inner-tail\nouter-tail\nnext:0\n")
                         self.assertEqual((result.returncode, result.stdout), expected)
                         self.assertEqual(result.stderr.count(b"nesting"), 1)
 
@@ -2431,6 +2469,56 @@ v=''; printf '<%s>' "${v//$p/x}" "${v/%$p/x}" """,
         self.compare('shopt -s nocasematch; touch FILE; printf "%s " fi*; '
                      '[[ "É😃" == é? ]] && [[ "Σ" == σ ]] && [ A != a ] && printf yes',
                      0, b"fi* yes", minimum=5)
+
+    def test_redirect_expansion_observes_each_previous_open(self):
+        for shell in self.shells_for(5):
+            for command in ("printf hi", "/usr/bin/printf hi", "v=assigned", ":", ""):
+                for suffix in ("", " | /bin/cat"):
+                    with self.subTest(shell=shell, command=command, suffix=suffix):
+                        for name in ("first", "after", "before"):
+                            (self.cwd / name).unlink(missing_ok=True)
+                        line = command + ' >first >"$(test -f first && printf after || printf before)"' + suffix
+                        result = self.command(shell, line + '; echo "end:$?"')
+                        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                         (0, b"end:0\n", b""))
+                        self.assertEqual((self.cwd / "first").read_bytes(), b"")
+                        self.assertFalse((self.cwd / "before").exists())
+                        data = b"hi" if "printf" in command else b""
+                        self.assertEqual((self.cwd / "after").read_bytes(), data)
+            script = """unset copied; >first >"${copied:=after}"; echo "$copied"
+unset copied; >first <first >"${copied:=after}"; echo "${copied-unset}"
+unset copied; /usr/bin/true >first >"${copied:=after}"; echo "${copied-unset}"
+x=$(exit 3) >first >"$(printf after; exit 2)"; echo "$?"
+exec 4>four; printf 'ok' 3>&4 >"$(printf 'on-fd' >&3; printf after)"; cat four
+"""
+            result = self.command(shell, script)
+            self.assertEqual((result.returncode, result.stdout, result.stderr),
+                             (0, b"after\nunset\nunset\n2\non-fd", b""))
+
+            for setup, command, expected in (
+                    ("set -o posix", ":", (1, b"")),
+                    ("set -e", "{ :; }", (1, b"")),
+                    ("trap 'echo ERR' ERR", "{ :; }", (0, b"ERR\nnext\n"))):
+                script = setup + "; " + command + ' >absent/file >"$(echo later)"; echo next'
+                result = self.command(shell, script)
+                self.assertEqual((result.returncode, result.stdout), expected)
+                self.assertTrue(result.stderr)
+                self.assertFalse((self.cwd / "later").exists())
+
+    def test_descriptor_move_uses_the_shell_spelling(self):
+        script = """name='メモ-'; printf o >&"$name"
+name='3-'; printf a >&"$name"; printf b >&'3-'
+exec 6>six; fd=6; exec 4>&$fd-; printf m >&4; exec 4>&-
+test -e /dev/fd/6; echo $?
+exec 6<six; fd=6; exec 5<&"$fd"-; read -r -n1 -u5 got; echo "$got"
+test -e /dev/fd/6; echo $?; exec 5<&-
+fd='5-'; : 4<&"$fd" 2>/dev/null; echo $?
+cat メモ- 3- six
+"""
+        for shell in self.shells_for(5):
+            result = self.command(shell, script)
+            self.assertEqual((result.returncode, result.stdout), (0, b"1\nm\n1\n1\nobm"))
+            self.assertTrue(result.stderr)
 
     def test_named_descriptors_and_ordered_expansion(self):
         self.compare('exec {out}>file 5>&$out; printf "雪" >&5; exec {out}>&-; '

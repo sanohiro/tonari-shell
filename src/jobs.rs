@@ -886,7 +886,12 @@ impl Jobs {
         let markers = marked_jobs(self.table.iter());
         for job in &mut self.table {
             if !job.active() && !job.listed {
-                let _ = job_line(&mut io::stderr().lock(), job, job_marker(job.id, markers), &job.display_state(posix));
+                let _ = job_line(
+                    &mut io::stderr().lock(),
+                    job,
+                    job_marker(job.id, markers),
+                    &job.display_state(posix),
+                );
                 job.listed = true;
             }
         }

@@ -632,7 +632,12 @@ impl Session {
                     && (if p == "&" {
                         previous == Some(text)
                     } else {
-                        crate::pattern::matches(text, p)
+                        let _locale = crate::pattern::parameter_locale(session, p);
+                        if session.shopt.glob.extglob {
+                            crate::pattern::extended::matches(text, p)
+                        } else {
+                            crate::pattern::matches(text, p)
+                        }
                     })
             })
         }) {

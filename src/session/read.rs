@@ -374,7 +374,10 @@ pub(super) fn run(
         }
     };
     if crate::execute::fd::is_private(opts.fd)
-        || (opts.max_chars == Some(0) || opts.timeout.is_some())
+        || (opts.max_chars == Some(0)
+            || opts.timeout.is_some()
+            || session.interactive
+            || session.traps.active())
             && unsafe { libc::fcntl(opts.fd, libc::F_GETFD) } < 0
     {
         diagnostic!(

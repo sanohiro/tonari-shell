@@ -172,18 +172,18 @@ pub(crate) fn compound(
 }
 
 fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: bool) -> Flow {
-    // Simple stages re-enter here for their compound body; functions and
-    // eval check their own entry. Defer the OS stack query for plain commands.
-    if !matches!(
-        command.as_ref(),
-        Command::Pipeline(_)
-            | Command::LiteralAssignment(..)
-            | Command::Scalar(_)
-            | Command::Arithmetic(_)
-            | Command::Test(_)
-            | Command::Function { .. }
-    ) && crate::stack_budget_exceeded()
-    {
+    // A pipeline stage may hold a redirected compound. Check before entering
+    // its redirection frame, including when the body will run in a child.
+    let recursive = match command.as_ref() {
+        Command::Pipeline(stages) => stages.len() != 1 || stages[0].compound.is_some(),
+        Command::LiteralAssignment(..)
+        | Command::Scalar(_)
+        | Command::Arithmetic(_)
+        | Command::Test(_)
+        | Command::Function { .. } => false,
+        _ => true,
+    };
+    if recursive && crate::stack_budget_exceeded() {
         diagnostic!("command nesting limit exceeded");
         return Flow::Unwind(1);
     }

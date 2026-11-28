@@ -1364,6 +1364,9 @@ impl Reader {
                     .pop_front()
                     .ok_or(Error::Invalid("expected a redirection"))?;
                 self.redirection(token, redirects)?;
+                if redirects[first].target == Target::OutputWord {
+                    redirects[first].target = Target::Duplicate;
+                }
                 redirects[first].variable = Some(name.into());
             }
             Token::BothRedirect(target) => {
@@ -1380,13 +1383,47 @@ impl Reader {
                 redirects.push(duplicate_stdout(line));
             }
             Token::Redirect(fd, target) => {
-                let Some(Token::Word(LexWord { word, .. })) = self.operand() else {
+                let start = self.position();
+                let Some(Token::Word(LexWord { mut word, .. })) = self.operand() else {
                     return Err(Error::Invalid("expected a redirection target"));
                 };
-                let target = if target == Target::OutputWord
-                    && word.as_literal().is_some_and(|v| {
-                        v == "-" || lexer::descriptor(v.strip_suffix('-').unwrap_or(v)).is_ok()
-                    }) {
+                let target = if matches!(target, Target::Duplicate | Target::OutputWord)
+                    && word
+                        .as_literal()
+                        .is_none_or(|value| value.ends_with('-') && value != "-")
+                    && self
+                        .location(start)
+                        .text()
+                        .trim_end_matches("\\\n")
+                        .ends_with('-')
+                {
+                    // Bash recognizes the move operator in the shell spelling,
+                    // before expanding the operand or removing its quotes.
+                    use crate::word::Part;
+                    match &mut word {
+                        Word::Literal(text) => {
+                            text.pop();
+                        }
+                        Word::Expanded(parts) | Word::Declaration(parts) => {
+                            match parts.last_mut() {
+                                Some(
+                                    Part::Text(text) | Part::Pattern(text) | Part::Tilde(text),
+                                ) => {
+                                    text.pop();
+                                }
+                                Some(part @ Part::Parameter { .. }) => {
+                                    *part = Part::Text("$".into())
+                                }
+                                _ => return Err(Error::Invalid("invalid descriptor move")),
+                            }
+                        }
+                    }
+                    Target::MoveWord
+                } else if target == Target::OutputWord
+                    && word
+                        .as_literal()
+                        .is_some_and(|v| v == "-" || lexer::descriptor(v).is_ok())
+                {
                     Target::Duplicate
                 } else {
                     target

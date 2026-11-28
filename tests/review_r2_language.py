@@ -74,7 +74,7 @@ def verify(programs, env, reference_version):
     for name, (source, wanted) in CASES.items():
         for label, shell in programs.items():
             expected = wanted
-            if label == "bash" and reference_version == "5.2.37":
+            if label == "bash" and reference_version.startswith("5.2."):
                 if name == "nameref defaults and indirect keys":
                     continue  # Debian Bash terminates on this valid expression.
                 if name == "arithmetic and ordinary references resolve the same key":
@@ -100,8 +100,10 @@ echo "${!r}/$n/$((n))/$((index))"; ((n+=2)); echo "${!r}" """
         ('set -u; declare -A m; echo "${#m[key]}"', 127, "unbound variable"),
         ('set -u; echo "${#missing}"', 127, "missing: unbound variable"),
     ]
-    for shell in programs.values():
+    for label, shell in programs.items():
         for source, status, message in failure_cases:
+            if label == "bash" and reference_version.startswith("5.2.") and "declare -A m;" in source:
+                status = 1
             result = subprocess.run([shell, "--noprofile", "--norc", "-c", source], env=env,
                                     capture_output=True, timeout=30)
             assert (result.returncode, result.stdout) == (status, b""), (shell, source, result)

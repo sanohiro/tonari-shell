@@ -188,8 +188,13 @@ impl<'a> Arguments<'a> {
         from_char: impl Fn(u32) -> T,
         decimal: &str,
     ) -> T {
+        if self.values.is_empty() {
+            return from_char(0);
+        }
         let value = self.next();
         if value.is_empty() {
+            diagnostic!("printf: : invalid number");
+            self.status = 1;
             return from_char(0);
         }
         if let Some(rest) = value.strip_prefix(['\'', '"']) {

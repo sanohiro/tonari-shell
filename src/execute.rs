@@ -264,6 +264,31 @@ fn redirection_observable(r: &Redirect<Word>, session: &Session) -> bool {
             })
 }
 
+// Install each redirection before expanding a later word that may consult the
+// filesystem, read an earlier descriptor or fail after an earlier open.
+fn deferred_redirects(redirects: &[Redirect<Word>], session: &Session) -> bool {
+    if redirects.iter().any(|r| r.variable.is_some()) {
+        return true;
+    }
+    let later_expands = redirects
+        .iter()
+        .skip(1)
+        .any(|r| r.word.as_literal().is_none() || redirection_observable(r, session));
+    // A list of ordinary paths can use the existing descriptor actions. Opens
+    // cannot change a stored scalar, and quotes keep its value in one field.
+    later_expands && !redirects.iter().all(|r| {
+        if !matches!(r.target, Target::Read | Target::Write | Target::ReadWrite | Target::Clobber | Target::Append) {
+            return false;
+        }
+        match &r.word {
+            Word::Literal(_) => true,
+            Word::Expanded(parts) => matches!(parts.as_slice(),
+                [crate::word::Part::Parameter { name, quoted: true }] if session.stored_scalar(name).is_some()),
+            _ => false,
+        }
+    })
+}
+
 // A parenthesized pipeline stage is already the subshell Bash exposes.
 fn enter_stage(session: &mut Session, compound: Option<&crate::parser::Command>, background: bool) {
     let explicit = matches!(compound, Some(crate::parser::Command::Subshell(_)));
@@ -289,6 +314,7 @@ fn start_raw(
         separate_keyword_arguments(&mut raw);
     }
     let observable = needs_ordered_redirects(&raw, session)
+        || deferred_redirects(&raw.redirects, session)
         || raw
             .redirects
             .iter()
@@ -925,26 +951,34 @@ fn run_ordered(
             })
             .is_none()
         };
-    named_fd::with_redirects(redirects, session, status, child_redirects, |session| {
-        let cmd = match prepare_expanded(
-            raw,
-            words,
-            session,
-            status,
-            CommandContext::Shell,
-            &captured,
-        ) {
-            Ok(cmd) => cmd,
-            Err(e) => {
-                e.report("");
-                return Ok((e.flow(session), false));
-            }
-        };
-        let exec = matches!(builtin(&cmd, status, session), Some(Builtin::Exec));
-        let flow = run_prepared(cmd, name, status, replace, session)?;
-        let commit = exec && matches!(flow, Flow::Continue(0));
-        Ok((flow, commit))
-    })
+    named_fd::with_redirects(
+        redirects,
+        session,
+        status,
+        child_redirects,
+        &captured,
+        |_, flow, _| flow,
+        |session| {
+            let cmd = match prepare_expanded(
+                raw,
+                words,
+                session,
+                status,
+                CommandContext::Shell,
+                &captured,
+            ) {
+                Ok(cmd) => cmd,
+                Err(e) => {
+                    e.report("");
+                    return Ok((e.flow(session), false));
+                }
+            };
+            let exec = matches!(builtin(&cmd, status, session), Some(Builtin::Exec));
+            let flow = run_prepared(cmd, name, status, replace, session)?;
+            let commit = exec && matches!(flow, Flow::Continue(0));
+            Ok((flow, commit))
+        },
+    )
 }
 
 fn run_prepared(
@@ -960,7 +994,7 @@ fn run_prepared(
         return Ok(flow);
     }
     let simple = cmd.compound.is_none();
-    if !cmd.named_redirects.is_empty() {
+    if !cmd.deferred_redirects.is_empty() {
         let last = simple.then(|| cmd.words.last().cloned().unwrap_or_default());
         let launch = session.jobs.launch(false, true);
         let result = named_fd::run(cmd, session, last_status, replace, launch);

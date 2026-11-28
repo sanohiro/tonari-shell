@@ -38,9 +38,9 @@ v=outer; v=temp f; v=temp g; f; echo "$v" """,
         "EXIT listing": """trap 'echo "$localname/$1"; trap -p EXIT' EXIT; f(){ local localname=child; exit 6; }; f arg;""",
         "time trailing percent": """TIMEFORMAT='percent%'; { time :; } 2>timing; cat timing;""",
         "wait stopped job without monitor": """set +m; "$BASH" -c 'kill -STOP "$$"; exit 7' & pid=$!; (for ((i=0; i<100; i++)); do
-  case $(ps -o stat= -p "$pid") in *T*) break;; esac
+  case $(ps -o stat= -p "$pid") in *T*) kill -CONT "$pid"; exit;; esac
   sleep .01
-done; kill -CONT "$pid") & wait "$pid"; echo "$?"; wait;""".replace('"$BASH"', '/bin/sh'),
+done; kill -KILL "$pid") & wait "$pid"; echo "$?"; wait;""".replace('"$BASH"', '/bin/sh'),
     }
     scripts.update({
         "circular nameref read": """declare -n a=b b=a; echo "[$a]"; echo "status=$?" """,

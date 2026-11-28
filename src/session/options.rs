@@ -696,7 +696,7 @@ impl Session {
             }
             for flag in rest.chars() {
                 if flag == 'o' {
-                    flags.next_if(|name| has_option_name(name));
+                    flags.next_if(|name| !name.starts_with(['-', '+']) || name.len() == 1);
                 } else if Self::short_option_name(flag).is_none() {
                     diagnostic!("set: {prefix}{flag}: invalid option");
                     return 2;

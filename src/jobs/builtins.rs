@@ -396,7 +396,12 @@ pub(super) fn job_marker(id: u32, (current, previous): (Option<u32>, Option<u32>
     }
 }
 
-pub(super) fn job_line(out: &mut dyn Write, job: &Job, marker: char, state: &str) -> io::Result<()> {
+pub(super) fn job_line(
+    out: &mut dyn Write,
+    job: &Job,
+    marker: char,
+    state: &str,
+) -> io::Result<()> {
     let bg = if job.active() { " &" } else { "" };
     writeln!(out, "[{}]{marker}  {state:<26} {}{bg}", job.id, job.name)
 }
