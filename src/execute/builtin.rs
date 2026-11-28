@@ -752,6 +752,25 @@ pub(super) fn run_builtin(
         }
     };
     protect_fds(actions)?;
+    // A short here input normally needs an empty pipe. Keep that resource
+    // check, including EMFILE. An inert reader can consume the bytes without
+    // writing the pipe or replacing stdin. Callbacks and alternate fds use the
+    // normal installation, as do closed standard streams.
+    if matches!(builtin, Builtin::Read | Builtin::Mapfile)
+        && let [Action::HereInput(0, bytes)] = actions
+        && !bytes.is_empty()
+        && bytes.len() <= libc::PIPE_BUF
+        && !session.traps.active()
+        && (cmd.assignments.is_empty()
+            || matches!(cmd.assignments.as_slice(), [(key, _)] if key == "IFS" && !session.is_nameref(key) && !session.integer(key)))
+        && session.memory_input(matches!(builtin, Builtin::Read), &cmd.words[1..], bytes)
+        && let Ok((reader, writer)) = io::pipe()
+        && reader.as_raw_fd() > 2
+        && writer.as_raw_fd() > 2
+    {
+        drop((reader, writer));
+        return Ok(eval_builtin(builtin, cmd, session, last_status, false));
+    }
     if !final_command
         && let [Action::Open(1, path, flags)] = actions
         && let Some(output) = PlainOutput::for_redirect(builtin, cmd)

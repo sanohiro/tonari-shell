@@ -515,9 +515,9 @@ impl<'a> Expansion<'a> {
             && let [part] = parts.as_mut_slice()
         {
             use crate::word::Part;
-            let parameter = match part {
-                Part::Parameter { name, quoted } => Some((name.as_str(), *quoted)),
-                Part::BraceParameter(name) => Some((name.as_str(), false)),
+            let parameter = match &*part {
+                Part::Parameter { name, quoted } => Some((name.as_ref(), *quoted)),
+                Part::BraceParameter(name) => Some((name.as_ref(), false)),
                 _ => None,
             };
             if let Some((name, quoted)) = parameter

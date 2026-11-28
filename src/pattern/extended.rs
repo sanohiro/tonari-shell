@@ -377,6 +377,7 @@ pub(crate) struct Pattern {
     atoms: Vec<Atom>,
     single_run: Option<usize>,
     bytewise_path: bool,
+    independent_prefix: bool,
 }
 
 fn pathname_units(text: &str, bytewise: bool) -> std::borrow::Cow<'_, str> {
@@ -438,8 +439,17 @@ impl Pattern {
             .next()
             .and_then(|(i, atom)| unit_run(atom).map(|_| i))
             .filter(|_| variable.next().is_none());
+        fn independent(atoms: &[Atom]) -> bool {
+            atoms.iter().all(|atom| match atom {
+                Atom::Star | Atom::Group(b'!', _) => false,
+                Atom::Group(_, alternatives) => alternatives.iter().all(|seq| independent(seq)),
+                _ => true,
+            })
+        }
+        let independent_prefix = !PATHNAME && independent(&atoms);
         Self {
             atoms,
+            independent_prefix,
             single_run,
             bytewise_path: false,
         }
@@ -475,6 +485,73 @@ impl Pattern {
             pos = end;
         }
         Some(true)
+    }
+
+    // With no plain star or negation, a reachable prefix end is independent of
+    // the bytes following it. Query all ends once for ambiguous alternatives.
+    pub(crate) fn run_prefix(&self, value: &str, longest: bool) -> Option<Option<usize>> {
+        if let Some(result) = self.repeated_prefix(value, longest) {
+            return Some(result);
+        }
+        self.independent_prefix.then(|| {
+            super::localized(|| {
+                let points = endings::<false>(&self.atoms, value, 0, false);
+                if longest {
+                    points.last().copied()
+                } else {
+                    points.first().copied()
+                }
+            })
+        })
+    }
+
+    fn repeated_prefix(&self, value: &str, longest: bool) -> Option<Option<usize>> {
+        let [atom] = self.atoms.as_slice() else {
+            return None;
+        };
+        let Atom::Group(op @ (b'+' | b'*'), alternatives) = atom else {
+            return None;
+        };
+        let empty = *op == b'*';
+        let unit = unit_run(atom).map(|(unit, _)| unit);
+        // Equal-width literal alternatives cannot overlap at different end
+        // offsets. A greedy run is therefore also the longest possible one.
+        let literal_width = |seq: &Vec<Atom>| match seq.as_slice() {
+            [Atom::Text(s)] if !s.is_empty() => Some(s.len()),
+            _ => None,
+        };
+        if unit.is_none() {
+            let width = literal_width(alternatives.first()?)?;
+            if !alternatives
+                .iter()
+                .all(|seq| literal_width(seq) == Some(width))
+            {
+                return None;
+            }
+        }
+        let advance = |pos| {
+            if let Some(unit) = unit {
+                one_character::<false>(unit, value, pos)
+            } else {
+                alternatives.iter().find_map(|seq| match &seq[0] {
+                    Atom::Text(s) if value[pos..].starts_with(&**s) => Some(pos + s.len()),
+                    _ => None,
+                })
+            }
+        };
+        Some(super::localized(|| {
+            if !longest && empty {
+                return Some(0);
+            }
+            let mut end = 0;
+            while let Some(next) = advance(end) {
+                end = next;
+                if !longest {
+                    break;
+                }
+            }
+            (empty || end != 0).then_some(end)
+        }))
     }
 
     pub(crate) fn accepts(&self, value: &str, period: bool) -> bool {

@@ -50,6 +50,52 @@ def listing_loop(command, count):
 
 
 CASES = {
+    "review-helper-case": eval_loop('x=$(f "$i")', 'echo "$x"', "v49",
+        'f() { local v="$1"; case "$v" in v*) echo "$v";; *) echo "v$v";; esac; }', 50),
+    "review-helper-if": eval_loop('x=$(f "/$i")', 'echo "$x"', "49",
+        '''f() { local p="$1"; if [ -n "$p" ]; then printf '%s\\n' "${p#/}"; else echo empty; fi; }''', 50),
+    "review-repeated-words": eval_loop('b=("${a[@]//+(foo|bar)/X}")', 'echo "${#b[@]} ${b[499]}"',
+        "500 preX499X", 'shopt -s extglob; for ((j=0;j<500;j++)); do a[j]=prefoobar${j}bar; done', 20),
+    "review-overlapping-words": eval_loop('b="${s//+(f|fo|foo)/X}"', 'echo "$b"', "X-X",
+        "shopt -s extglob; s=foofof-ffoo", 500),
+    "review-array-extglob": eval_loop('b=("${a[@]//+([0-9])/X}")', 'echo "${#b[@]} ${b[499]}"',
+        "500 preX-post", 'shopt -s extglob; for ((j=0;j<500;j++)); do a[j]=pre$j-post; done', 20),
+    "review-array-trim": eval_loop('b=("${a[@]##+([0-9])}")', 'echo "${#b[@]} ${b[499]}"',
+        "500 -post", 'shopt -s extglob; for ((j=0;j<500;j++)); do a[j]=$j-post; done', 20),
+    "review-compgen": ('for ((i=0;i<20;i++)); do compgen -c l || exit; done >/dev/null\n'
+                       'compgen -c ls | grep -x ls | head -1', "ls"),
+    "review-command": listing_loop("command -v ls", 2000),
+    "review-type": listing_loop("type -t ls", 2000),
+    "review-static-glob": eval_loop('[[ $s == hello_*_123 ]] || exit 1', 'echo "$i"', "10000",
+                                     "s=hello_X_123", 10000),
+    "review-static-extglob": eval_loop('[[ $s == @(foo|baz)_+([0-9])_bar ]] || exit 1', 'echo "$i"',
+                                     "5000", "s=foo_123_bar", 5000),
+    "review-read-file": ('exec 3<short-records\nfor ((i=0;i<2000;i++)); do IFS= read -ru3 -n10 x || exit 1; done\necho "$x"', "0123456789"),
+    "review-read": eval_loop('IFS= read -r x <<<"$s"', 'echo "$x"', "a b", "s='a b'"),
+    "review-mapfile": eval_loop('mapfile -t a <<<"$s"', 'echo "${a[0]}"', "a b", "s='a b'"),
+    "review-read-n": eval_loop('read -r -n 5 x <<<"$s"', 'echo "$x"', "abcde", "s=abcdefg"),
+    "review-read-d": eval_loop('read -r -d : x <<<"$s"', 'echo "$x"', "abc", "s=abc:def"),
+    "review-read-a": eval_loop('read -r -a a <<<"$s"', 'echo "${a[1]}"', "b", "s='a b'"),
+    "review-alternate": eval_loop('x="${s:+yes}"', 'echo "$x"', "yes", "printf -v s '%65536s' x", 5000),
+    "review-default": eval_loop('x="${s:-default}"', 'echo "$x"', "default", "unset s", 20000),
+    "review-array-copy": eval_loop('b=("${a[@]}")', 'echo "${#b[@]} ${b[999]}"', "1000 999",
+                                       "a=({0..999})", 500),
+    "review-array-slice": eval_loop('b=("${a[@]:50:20}")', 'echo "${#b[@]} ${b[19]}"', "20 69",
+                                       "a=({0..99})", 5000),
+    "review-negative-index": eval_loop('x=${a[-1]}', 'echo "$x"', "99", "a=({0..99})", 10000),
+    "review-length": eval_loop('x=${#s}', 'echo "$x"', "256", "printf -v s '%256s' x", 20000),
+    "glob-ignore-simple-class": eval_loop('a=(brackets/*.txt)', 'echo "${#a[@]}"', "800",
+                                         "GLOBIGNORE='brackets/file_0[56]*.txt'", 5),
+    "conditional-simple-folded-class": eval_loop('[[ $s == +([aBbC]) ]] || exit 1',
+        'echo "$i"', "10000", "shopt -s nocasematch; s=CbABcACBa", 10000),
+    "review-length-ascii-wide": eval_loop('x=${#s}', 'echo "$x"', "65536",
+                                        "printf -v s '%65536s' x", 250),
+    "review-length-mixed-wide": eval_loop('x=${#s}', 'echo "$x"', "65537",
+        "export LC_ALL=C.UTF-8; printf -v s '%65536s' x; s+=雪", 250),
+    "review-pwd-physical": listing_loop("pwd -P", 5000),
+    "review-pwd": ("for ((i=0;i<5000;i++)); do pwd || exit; done >/dev/null\n"
+                   '[[ $(pwd) == "$PWD" ]] && echo ok', "ok"),
+
     "source-functions-repeat": eval_loop(". ./functions.sh", 'echo "$v"', "199", count=25),
     "source-literal-wrappers": ("".join(f"fn{k}() {{\n echo ok\n}}\n" for k in range(400))
                                 + "fn399", "ok"),
@@ -634,10 +680,12 @@ def main():
     with tempfile.TemporaryDirectory() as temp:
         home = Path(temp)
         env = {"HOME": temp, "PATH": "/usr/bin:/bin", "LC_ALL": "C"}
+        if not args.case or "review-read-file" in args.case:
+            (home / "short-records").write_bytes(b"0123456789" * 2000)
         (home / "rows").write_text("".join(f"record {i}\n" for i in range(2000)))
         if not args.case or "source-functions-repeat" in args.case:
             (home / "functions.sh").write_text(function_source())
-        if not args.case or "glob-bracket-list" in args.case:
+        if not args.case or {"glob-bracket-list", "glob-ignore-simple-class"}.intersection(args.case):
             directory = home / "brackets"
             directory.mkdir()
             for i in range(1000):

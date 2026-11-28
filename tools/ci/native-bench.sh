@@ -8,6 +8,29 @@ case "$SUITE" in
   bensch-*|oils-*|spec-builtins|spec-previous-builtins|spec-profile-builtins|spec-hot|spec-tty|spec-response|spec-fixes) exec bash tools/ci/external-spec.sh ;;
 esac
 source tools/ci/bash-source.sh
+if [[ $SUITE == expansion-review ]]; then
+  REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -v \
+    -k readonly_helper -k compiled_parameter_patterns -k utf8_scalar_length \
+    -k query_prefers_executable -k keyword_operands_beyond -k memory_here_inputs \
+    -k simple_lists_in_path_filters -k static_conditional_rechecks -k short_here_input \
+    -k counted_read_rewinds -k physical_pwd_rechecks > "$out/compatibility.txt" 2>&1 || {
+      cat "$out/compatibility.txt"
+      exit 1
+    }
+  args=(--case source-functions-mixed --case core-parse-functions)
+  while read -r name; do args+=(--case "$name"); done < <(
+    PYTHONPATH=tools python3 -c 'from bench_scripts import CASES; print("\n".join(k for k in CASES if k.startswith("review-")))'
+  )
+  python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing started --runs 15 "${args[@]}" > "$out/scripts.txt"
+  # The previous snapshot aborts on simple lists in these two contexts.
+  python3 tools/bench_scripts.py "$current" --bash "$ref" --timing started --runs 15 \
+    --case glob-ignore-simple-class --case conditional-simple-folded-class > "$out/class-lists.txt"
+  for timing in whole syntax; do
+    python3 tools/bench_scripts.py "$current" --previous "$bin/baseline" --bash "$ref" --timing "$timing" --runs 19 --case source-functions-mixed --case core-parse-functions > "$out/parser-$timing.txt"
+  done
+  python3 tools/bench_completion.py "$bin/baseline" "$current" --bash "$ref" --command-cache --runs 15 > "$out/command-tab.txt"
+  exit
+fi
 if [[ $SUITE == capture-parser ]]; then
   args=()
   for name in capture-{position,trim,default,math,helper,helper-lines,helper-stderr} null-builtin-{out,err} source-functions-{repeat,mixed} source-literal-wrappers core-parse-functions redirected-group core-{case,test,arithmetic} pipeline; do

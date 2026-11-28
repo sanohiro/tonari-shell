@@ -32,7 +32,13 @@ impl PreparedCommand {
             return None;
         }
         let name = cmd.words.first()?.as_literal()?;
-        if matches!(name, "builtin" | "command" | "set")
+        let command_query = cmd
+            .words
+            .get(1)
+            .and_then(Word::as_literal)
+            .is_some_and(|flag| matches!(flag, "-v" | "-V"));
+        if matches!(name, "builtin" | "set")
+            || name == "command" && !command_query
             || !(builtin_names().contains(&name)
                 || name.starts_with('/') && cmd.redirects.is_empty())
         {
@@ -65,7 +71,7 @@ impl PreparedCommand {
             .ok()?
         };
         Some(Box::new(Self {
-            literal_has_keywords: cmd.keyword_args.is_some(),
+            literal_has_keywords: !cmd.keyword_args.is_empty(),
             words,
             redirects,
             ..Self::default()
@@ -210,7 +216,7 @@ pub(super) fn separate_keyword_arguments(raw: &mut SimpleCommand<Word>) {
         .assignments
         .iter()
         .position(|(_, a)| matches!(a, Assignment::Array(Some(_), ..)));
-    if raw.keyword_args.is_none() && first_array.is_none() {
+    if raw.keyword_args.is_empty() && first_array.is_none() {
         return;
     }
     let mut arrays = first_array
@@ -218,21 +224,16 @@ pub(super) fn separate_keyword_arguments(raw: &mut SimpleCommand<Word>) {
         .unwrap_or_default()
         .into_iter()
         .peekable();
-    let keywords = raw
-        .keyword_args
-        .take()
-        .map(Rc::unwrap_or_clone)
-        .unwrap_or_default();
-    let mut keywords = keywords.into_iter().peekable();
-    raw.assignments.reserve(keywords.len() + arrays.len());
+    let keywords = std::mem::take(&mut raw.keyword_args);
     let mut indices = 0..;
     raw.words.retain_mut(|word| {
         let index = indices.next().unwrap();
-        if let Some((_, key)) = keywords.next_if(|(pos, _)| *pos == index) {
+        if let Some(key) = keywords.key(index, word) {
             if key.contains('[') {
                 diagnostic!("{key}: not a valid identifier");
                 return false;
             }
+            let key = key.to_owned();
             let mut value = std::mem::take(word);
             value.remove_assignment_prefix(key.len() + 1);
             raw.assignments.push((key, Assignment::Scalar(value)));
@@ -256,11 +257,11 @@ pub(super) fn expand_command_words(
     captured: &Cell<Option<u8>>,
 ) -> Result<Vec<String>, crate::expansion::Error> {
     let mut words = Vec::with_capacity(raw.words.len());
-    if session.posix
-        && let Some(operands) = raw.keyword_args.as_ref()
-    {
-        for (index, _) in operands.iter() {
-            if let Word::Expanded(parts) = &mut raw.words[*index] {
+    if session.posix && !raw.keyword_args.is_empty() {
+        for (index, word) in raw.words.iter_mut().enumerate() {
+            if raw.keyword_args.key(index, word).is_some()
+                && let Word::Expanded(parts) = word
+            {
                 for part in parts {
                     if let crate::word::Part::Tilde(tilde) = part {
                         *part = crate::word::Part::Text(std::mem::take(tilde));
@@ -379,10 +380,11 @@ pub(super) fn prepare_expanded(
                     exp.array_items(parts, declared_assoc || exp.session.is_associative(&key))?;
                 if words.is_empty() {
                     if standalone {
+                        let error = items.initializer_error();
                         session
-                            .assign_array(&key, append, &items, false)
+                            .assign_expanded_array(&key, append, items)
                             .map_err(crate::expansion::Error::discard_line)?;
-                        if let Some(error) = items.initializer_error() {
+                        if let Some(error) = error {
                             return Err(crate::expansion::Error::discard(error));
                         }
                     }

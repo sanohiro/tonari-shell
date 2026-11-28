@@ -208,7 +208,10 @@ fn dollar_word(
                     tail = &next[size..];
                 }
                 *chars = tail.chars();
-                word.part(Part::Parameter { name, quoted });
+                word.part(Part::Parameter {
+                    name: name.into(),
+                    quoted,
+                });
                 return Ok(());
             }
             *chars = tail.chars();
@@ -259,7 +262,7 @@ fn dollar_word(
         }
     };
     word.part(Part::Parameter {
-        name: name.into(),
+        name: parameter_name(name),
         quoted,
     });
     Ok(())
@@ -374,7 +377,7 @@ fn braced_parameter<'a>(
     };
     if chars.consume("}") {
         word.part(Part::Parameter {
-            name: name.into(),
+            name: parameter_name(name),
             quoted,
         });
         return Ok(());
@@ -419,7 +422,7 @@ fn braced_parameter<'a>(
                 Word::Literal(String::new())
             };
             word.part(Part::Modify {
-                name: name.into(),
+                name: parameter_name(name),
                 operation: Box::new(crate::word::Modification::Replace {
                     pattern,
                     replacement,
@@ -457,7 +460,7 @@ fn braced_parameter<'a>(
                 },
             };
             word.part(Part::Modify {
-                name: name.into(),
+                name: parameter_name(name),
                 operation: Box::new(operation),
                 quoted,
             });
@@ -466,7 +469,7 @@ fn braced_parameter<'a>(
         if chars.as_str().starts_with("@P}") {
             chars.advance_bytes(3);
             word.part(Part::Modify {
-                name: name.into(),
+                name: parameter_name(name),
                 operation: Box::new(crate::word::Modification::Prompt),
                 quoted,
             });
@@ -482,7 +485,7 @@ fn braced_parameter<'a>(
             }
             let (offset, length) = super::modifier::slice(chars)?;
             word.part(Part::Modify {
-                name: name.into(),
+                name: parameter_name(name),
                 operation: Box::new(crate::word::Modification::Slice { offset, length }),
                 quoted,
             });
@@ -496,7 +499,7 @@ fn braced_parameter<'a>(
             }
             let pattern = parameter_word(chars, false, false, false, false, quoted_name)?.0;
             word.part(Part::Modify {
-                name: name.into(),
+                name: parameter_name(name),
                 operation: Box::new(crate::word::Modification::Case {
                     direction: match op {
                         '^' => crate::pattern::CaseDirection::Upper,
@@ -518,7 +521,7 @@ fn braced_parameter<'a>(
             }
             let pattern = parameter_word(chars, false, false, false, false, quoted_name)?.0;
             word.part(Part::Trim {
-                name: name.into(),
+                name: parameter_name(name),
                 pattern: Box::new(pattern),
                 prefix: op == '#',
                 longest,
@@ -545,7 +548,7 @@ fn braced_parameter<'a>(
         let (alternative, _) =
             parameter_word(chars, quoted, false, assignment, false, quoted_name)?;
         word.part(Part::Alternative {
-            name: name.into(),
+            name: parameter_name(name),
             check_empty,
             op,
             word: Box::new(alternative),
@@ -1279,6 +1282,19 @@ fn operator(
     })
 }
 
+fn parameter_name(name: &str) -> std::borrow::Cow<'static, str> {
+    // The lexer already validated the name. Borrow the one-byte spelling of
+    // positional parameters, common variables and special parameters.
+    const GRAPHIC: &str = r##"!"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~"##;
+    match name.as_bytes() {
+        [byte @ b'!'..=b'~'] => {
+            let i = usize::from(*byte - b'!');
+            std::borrow::Cow::Borrowed(&GRAPHIC[i..=i])
+        }
+        _ => std::borrow::Cow::Owned(name.to_owned()),
+    }
+}
+
 // Read one word or reserved spelling. The outer scanner owns command position,
 // pending here-documents and the nesting of compound commands.
 fn scan_word(
@@ -1554,7 +1570,11 @@ fn scan(
         // Probe a bounded prefix so one long quoted argument does not reserve a token per byte.
         let sample = &source.as_bytes()[..1024];
         let lines = memchr::memchr_iter(b'\n', sample).count();
-        capacity.max((source.len() / 1024).saturating_mul(lines * 2).min(2048))
+        capacity.max(
+            (source.len() / 1024)
+                .saturating_mul(lines * 4)
+                .min(super::MAX_CACHED_TOKENS),
+        )
     } else {
         capacity
     };
@@ -1655,6 +1675,35 @@ fn scan(
             continue;
         }
         let start = chars.as_str();
+        if in_test
+            && !substitution
+            && let Some(raw) = start.get(..2)
+            && start
+                .as_bytes()
+                .get(2)
+                .is_none_or(|&b| matches!(b, b' ' | b'\t' | b'\n' | b';' | b')' | b'&' | b'|'))
+        {
+            let op = match raw {
+                "==" => Some("=="),
+                "!=" => Some("!="),
+                "=~" => Some("=~"),
+                "]]" => Some("]]"),
+                "-n" => Some("-n"),
+                "-z" => Some("-z"),
+                _ => None,
+            };
+            if let Some(op) = op {
+                match op {
+                    "==" | "!=" => pattern_next = Some(true),
+                    "=~" => pattern_next = Some(false),
+                    "]]" => in_test = false,
+                    _ => {}
+                }
+                tokens.push(Token::Reserved(op));
+                chars = start[2..].chars();
+                continue;
+            }
+        }
         let Some(token) = scan_word(
             &mut chars,
             c,

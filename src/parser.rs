@@ -423,7 +423,7 @@ fn parse_source(source: &str, final_input: bool) -> Result<Vec<Statement>, Error
 
 // Most shell reads are a few lines. Reuse their token and span allocations;
 // nested parses take another pair while the outer reader owns its buffers.
-const MAX_CACHED_TOKENS: usize = 256;
+const MAX_CACHED_TOKENS: usize = 4096;
 type TokenBuffers = (Vec<Token>, Vec<(usize, usize)>);
 thread_local! {
     static TOKEN_BUFFERS: std::cell::Cell<TokenBuffers> = const {
@@ -786,13 +786,10 @@ impl Reader {
             else {
                 unreachable!()
             };
-            return Ok(Command::Pipeline(vec![SimpleCommand {
-                assignments: vec![scalar_assignment(
-                    word.assignment_name(name).to_owned(),
-                    word,
-                )],
-                ..Default::default()
-            }]));
+            let name = word.assignment_name(name).to_owned();
+            let mut word = word;
+            word.remove_assignment_prefix(name.len() + 1);
+            return Ok(Command::Scalar(Box::new((name, word))));
         }
         let start = self.position();
         let mut first = match self.compound()? {
@@ -1325,8 +1322,7 @@ impl Reader {
                     protected,
                     assignment,
                 }) => {
-                    let assignment =
-                        assignment.map(|length| word.assignment_name(length).to_owned());
+                    let assignment = assignment.map(|length| word.assignment_name(length));
                     let declaration = assignment.is_some()
                         && matches!(
                             cmd.words
@@ -1337,7 +1333,9 @@ impl Reader {
                             Some("export" | "local" | "declare" | "typeset" | "readonly")
                         );
                     if matches!(self.peek(), Some(Token::ArrayStart)) {
-                        let name = assignment.ok_or(Error::Invalid("invalid array assignment"))?;
+                        let name = assignment
+                            .ok_or(Error::Invalid("invalid array assignment"))?
+                            .to_owned();
                         let base = name.trim_end_matches('+');
                         if let Some(builtin @ ("let" | "eval")) =
                             cmd.words.first().and_then(Word::as_literal)
@@ -1391,7 +1389,8 @@ impl Reader {
                             if cmd.assignments.is_empty() {
                                 cmd.assignments.reserve_exact(1);
                             }
-                            cmd.assignments.push(scalar_assignment(name, word));
+                            cmd.assignments
+                                .push(scalar_assignment(name.to_owned(), word));
                             continue;
                         }
                         if cmd.assignments.is_empty()
@@ -1403,8 +1402,7 @@ impl Reader {
                         // Most simple commands have only the name and one operand.
                         cmd.words.reserve_exact(2);
                     } else if let Some(name) = assignment {
-                        Rc::make_mut(cmd.keyword_args.get_or_insert_with(Default::default))
-                            .push((cmd.words.len(), name));
+                        cmd.keyword_args.record(cmd.words.len(), name);
                         if declaration {
                             word = word.declaration();
                         }
@@ -1414,8 +1412,7 @@ impl Reader {
                         && let Some(name) =
                             array::indexed_prefix(self.location(self.position() - 1).text())
                     {
-                        Rc::make_mut(cmd.keyword_args.get_or_insert_with(Default::default))
-                            .push((cmd.words.len(), name.to_owned()));
+                        cmd.keyword_args.record(cmd.words.len(), name);
                     }
                     cmd.words.push(word);
                 }

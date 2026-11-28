@@ -137,7 +137,7 @@ fn parameter_names(parts: Vec<Part>) -> Vec<Part> {
                 if len == 0 {
                     break;
                 }
-                name.push_str(&raw[..len]);
+                name.to_mut().push_str(&raw[..len]);
                 if len != raw.len() {
                     raw.drain(..len);
                     break;

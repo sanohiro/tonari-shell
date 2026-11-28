@@ -38,6 +38,134 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
+    def test_readonly_helper_uses_callee_arguments_and_restores_locals(self):
+        self.compare(r'''set -- outside
+v=parent; p=parent
+normalize() { local v="$1"; case "$v" in v*) echo "$v";; *) echo "v$v";; esac; }
+strip() { local p="$1"; if [ -n "$p" ]; then printf '%s\n' "${p#/}"; else echo empty; fi; }
+printf '<%s>\n' "$(normalize 'a b')" "$(normalize v)" "$(strip /ok)" "$(strip '')"
+echo "$1 $v $p"
+function [ { return 1; }
+echo "$(strip /ok)"
+unset -f '['
+shopt -s nocasematch
+echo "$(normalize Vyes)"
+observe() { local v="$1"; case "$v" in *) echo "$BASH_SUBSHELL";; esac; }
+echo "$(observe ok)"
+''', 0, b"<va b>\n<v>\n<ok>\n<empty>\noutside parent parent\nempty\nVyes\n1\n")
+
+    def test_compiled_parameter_patterns_and_conditional_options(self):
+        self.compare(r'''shopt -s extglob
+a=(foofoo-ffoo foo fo '雪fo')
+printf '<%s>\n' "${a[@]//+(f|fo|foo)/X}"
+printf '<%s>\n' "${a[@]##+(foo|fo)}"
+match() { [[ $1 == @(foo|bar)_+([0-9]) ]]; }
+match foo_71; echo "$?"; match FOO_7; echo "$?"
+shopt -s nocasematch; match FOO_7; echo "$?"
+s=''; set -- "${s:+words}" "${s:-a b}"; printf '<%s>\n' "$@"
+''', 0, b"<X-X>\n<X>\n<X>\n<\xe9\x9b\xaaX>\n<-ffoo>\n<>\n<>\n<\xe9\x9b\xaafo>\n0\n1\n0\n<>\n<a b>\n", minimum=4)
+
+    def test_utf8_scalar_length_at_block_boundaries(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        self.compare("""for w in 1022 1023 1024 1025 8192; do
+printf -v s '%*s' "$w" x; s+=🐟雪; echo "${#s}"
+done""", 0, b"1024\n1025\n1026\n1027\n8194\n")
+
+    def test_query_prefers_executable_and_completion_rechecks_permissions(self):
+        first = self.cwd / "first"
+        second = self.cwd / "second"
+        for directory in (first, second):
+            directory.mkdir()
+            (directory / "probe").touch()
+        (second / "probe").chmod(0o700)
+        self.env["PATH"] = f"{first}:{second}:/bin:/usr/bin"
+        script = '''command -v probe; type -t probe; compgen -c pr | /usr/bin/grep -x probe | /usr/bin/head -1
+/bin/chmod 600 "$1/probe"
+command -v probe; type -t probe
+type -aP probe >/dev/null; echo all=$?
+compgen -c pr | /usr/bin/grep -x probe; echo completion=$?
+/bin/chmod 700 "$1/probe"
+command -v probe'''
+        expected = f"{second}/probe\nfile\nprobe\n{first}/probe\nfile\nall=1\ncompletion=1\n{second}/probe\n".encode()
+        for shell in self.shells_for():
+            (second / "probe").chmod(0o700)
+            proc = self.command(shell, script, "bench", str(second))
+            self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, expected, b""))
+
+    def test_keyword_operands_beyond_bitset_and_quoted_spelling(self):
+        filler = " ".join(["x"] * 70)
+        self.compare("f() { printf '<%s:%s:%s>\\n' \"$one\" \"$two\" \"$#\"; }\n"
+                     "set -k\nf one=1 " + filler + " two=2 'quoted=yes'\n"
+                     "set +k\nf one=1 two=2", 0, b"<1:2:71>\n<::2>\n")
+
+    def test_memory_here_inputs_preserve_fd_observers(self):
+        self.compare(r'''IFS=: read -ra a <<< 'a:b'
+printf '<%s>\n' "${a[@]}"
+read -rd : x <<< 'ab:cd'; echo "$?:$x"
+read -rN 4 x <<< 'a b:c'; echo "$?:$x"
+read -rn 8 x <<< 'ab'; echo "$?:$x"
+exec 3<<<outer
+read -ru3 x <<< inner; echo "$x"
+cb() { IFS= read -r x; echo "callback:$x"; }
+mapfile -C cb -c 1 a <<'END'
+one
+two
+END
+echo "first=${a[0]}"
+''', 0, b"<a>\n<b>\n0:ab\n0:a b:\n0:ab\nouter\ncallback:two\nfirst=one\n\n", minimum=4)
+
+    def test_simple_lists_in_path_filters_and_folded_extglob(self):
+        self.env["LC_ALL"] = "C"
+        self.compare("""mkdir -p tree; touch tree/a tree/b tree/c
+GLOBIGNORE='tree/[ab]'; printf '%s\n' tree/*
+shopt -s nocasematch
+[[ Abba == +([ab]) ]]; echo "$?"
+[[ cab == +([ab]) ]]; echo "$?"
+rm -r tree""", 0, b"tree/c\n0\n1\n")
+
+    def test_folded_class_distinguishes_turkish_dotted_i(self):
+        self.env["LC_ALL"] = "tr_TR.UTF-8"
+        proc = self.command(TONARI, """shopt -s nocasematch; p='+([i])'
+for ch in I i; do [[ $ch == $p ]]; echo "$?"; done""")
+        self.assertEqual((proc.stdout, proc.returncode), (b"1\n0\n", 0))
+
+    def test_static_conditional_rechecks_locale_after_first_use(self):
+        locales = subprocess.check_output(["locale", "-a"], text=True).splitlines()
+        utf8 = next((name for name in locales if name.lower().replace("-", "") in
+                     ("en_us.utf8", "c.utf8")), None)
+        if utf8 is None:
+            self.skipTest("requires an installed UTF-8 locale")
+        script = """f() { [[ $1 == +([a-ú]) ]]; }
+pattern='+([a-ú])'
+for LC_ALL in C "$1" C "$1"; do
+    f é; cached=$?
+    [[ é == $pattern ]]; direct=$?
+    [[ $cached == "$direct" ]] || exit 1
+done"""
+        for shell in self.shells_for():
+            tested = self.command(shell, script, "bench", utf8)
+            self.assertEqual((tested.stdout, tested.stderr, tested.returncode), (b"", b"", 0))
+
+    def test_short_here_input_reports_descriptor_exhaustion(self):
+        for name in ("read -r x", "mapfile -t x"):
+            for limit, expected in [(4, b"1:\n"), (5, b"0:ok\n")]:
+                source = f'ulimit -n {limit}; {name} <<<ok; echo "$?:$x"'
+                with self.subTest(builtin=name, limit=limit):
+                    tested = self.command(TONARI, source)
+                    self.assertEqual((tested.returncode, tested.stdout), (0, expected))
+                    self.assertEqual(bool(tested.stderr), limit == 4)
+
+    def test_counted_read_rewinds_to_next_utf8_character(self):
+        (self.cwd / "words").write_text("雪a\n🐟b\nxyz", encoding="utf-8")
+        proc = self.command(TONARI, """exec 3<words
+IFS= read -ru3 -n1 x; echo "$?:$x"
+IFS= read -ru3 -n4 x; echo "$?:$x"
+IFS= read -ru3 -n1 x; echo "$?:$x"
+IFS= read -ru3 x; echo "$?:$x"
+IFS= read -ru3 -n8 x; echo "$?:$x" """)
+        self.assertEqual((proc.returncode, proc.stdout.decode(), proc.stderr),
+                         (0, "0:雪\n0:a\n0:🐟\n0:b\n1:xyz\n", b""))
+
     def test_closed_builtin_stdout_reports_only_attempted_writes(self):
         shells = (TONARI,) if self.bash_before_53() else (BASH, TONARI)
         for shell in shells:
@@ -3403,6 +3531,13 @@ shopt -qo monitor; echo "disabled:$?" """,
         self.compare("""mkdir -p outer; cd outer; pwd -L >/dev/null; mv ../outer ../renamed
 a=$(pwd -L); b=$(pwd -P); echo "${a##*/}/${b##*/}"; cd .. && mv renamed outer""",
                      0, b"outer/renamed\n")
+
+    def test_physical_pwd_rechecks_replaced_and_unlinked_directory(self):
+        proc = self.command(TONARI, """mkdir old; cd old; mv ../old ../new; mkdir ../old
+actual=$(pwd -P); echo "${actual##*/}"; rmdir ../new
+pwd -P >/dev/null 2>&1 && exit 1
+echo unlinked""")
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (0, b"new\nunlinked\n", b""))
 
     def test_extended_patterns_in_conditionals_files_and_parameters(self):
         self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"

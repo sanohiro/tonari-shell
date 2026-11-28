@@ -256,6 +256,50 @@ impl Drop for EchoGuard {
     }
 }
 
+pub(super) fn memory_eligible(session: &Session, args: &[String], bytes: &[u8]) -> bool {
+    options(args).is_ok_and(|opts| {
+        opts.fd == 0 && opts.max_chars != Some(0) && memory_record(session, &opts, bytes).is_some()
+    })
+}
+
+fn memory_record<'a>(
+    session: &Session,
+    opts: &Options<'_>,
+    bytes: &'a [u8],
+) -> Option<(&'a str, u8)> {
+    if opts.timeout.is_none()
+        && opts.edit.is_none()
+        && opts
+            .array
+            .is_none_or(|name| session.memory_array_target(name))
+        && opts.names.iter().all(|s| session.plain_read_target(s))
+        && (!opts.names.is_empty() || session.plain_read_target("REPLY"))
+    {
+        let delimiter = (!opts.exact)
+            .then(|| memchr::memchr(opts.delimiter, bytes))
+            .flatten();
+        let end = delimiter.unwrap_or(bytes.len());
+        let line = &bytes[..end];
+        if (opts.raw || !line.contains(&b'\\'))
+            && !line.contains(&0)
+            && let Ok(text) = std::str::from_utf8(line)
+        {
+            if let Some(limit) = opts.max_chars {
+                let mut chars = text.char_indices();
+                if limit == 0 {
+                    return Some(("", 0));
+                }
+                if chars.nth(limit - 1).is_some() {
+                    let end = chars.next().map_or(text.len(), |(end, _)| end);
+                    return Some((&text[..end], 0));
+                }
+            }
+            return Some((text, u8::from(delimiter.is_none())));
+        }
+    }
+    None
+}
+
 pub(super) fn run(
     session: &mut Session,
     args: &[String],
@@ -297,22 +341,9 @@ pub(super) fn run(
     // has no callback or subscript that could observe its file position.
     if let Some((source, bytes)) = here
         && source == opts.fd
-        && opts.timeout.is_none()
-        && opts.edit.is_none()
-        && opts.max_chars.is_none()
-        && opts.array.is_none()
-        && opts.delimiter == b'\n'
-        && opts.names.iter().all(|s| session.plain_read_target(s))
-        && (!opts.names.is_empty() || session.plain_read_target("REPLY"))
+        && let Some((line, status)) = memory_record(session, &opts, bytes)
     {
-        let end = memchr::memchr(b'\n', bytes).unwrap_or(bytes.len());
-        let line = &bytes[..end];
-        if (opts.raw || !line.contains(&b'\\'))
-            && !line.contains(&0)
-            && let Ok(text) = std::str::from_utf8(line)
-        {
-            return assign_fields(session, &opts, text, &[], u8::from(end == bytes.len()));
-        }
+        return assign_fields(session, &opts, line, &[], status);
     }
     let _echo = if opts.silent {
         EchoGuard::disable(opts.fd)
@@ -411,17 +442,29 @@ pub(super) fn run(
         let input_byte = if let Some(bytes) = &mut edited {
             Ok(bytes.next())
         } else if opts.raw
-            && opts.max_chars.is_none()
+            && !opts.exact
             && opts.timeout.is_none()
             && (input.seekable || known_prefix != 0)
         {
-            match input.chunk(known_prefix.max(1), usize::MAX) {
+            // For -n, at most the remaining character count in bytes is always
+            // safe. Seekable input can rewind bytes past an earlier delimiter.
+            let take = opts
+                .max_chars
+                .map_or(usize::MAX, |limit| limit.saturating_sub(chars).max(1));
+            match input.chunk(known_prefix.max(1), take) {
                 Ok([]) => Ok(None),
                 Ok(bytes) => {
                     known_prefix = known_prefix.saturating_sub(bytes.len());
                     let end = memchr::memchr(opts.delimiter, bytes);
                     let data = &bytes[..end.unwrap_or(bytes.len())];
                     let unused = bytes.len() - data.len();
+                    if opts.max_chars.is_some() {
+                        chars += if data.is_ascii() {
+                            data.len() - memchr::memchr_iter(0, data).count()
+                        } else {
+                            data.iter().filter(|&&b| b != 0 && b & 0xc0 != 0x80).count()
+                        };
+                    }
                     if memchr::memchr(0, data).is_none() {
                         line.extend_from_slice(data);
                     } else {

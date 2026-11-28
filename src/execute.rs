@@ -18,7 +18,7 @@ pub(crate) mod process_substitution;
 use std::path::{Path, PathBuf};
 mod here_input;
 mod lookup;
-pub(crate) use lookup::IgnoredExecutables;
+pub(crate) use lookup::{Candidate, IgnoredExecutables, check_candidate};
 mod spawn;
 pub(crate) use spawn::inherited_env;
 
@@ -953,15 +953,7 @@ fn foreground(
     {
         let assigned = match raw.assignments.as_slice() {
             [] => true,
-            [(key, Assignment::Scalar(word))] => {
-                if let Some(value) = word.as_literal() {
-                    session.assign_existing_literal(key, value)
-                } else if let Some(value) = word.stored_parameter(session).map(str::to_owned) {
-                    session.assign_existing_literal(key, &value)
-                } else {
-                    false
-                }
-            }
+            [(key, Assignment::Scalar(word))] => assign_existing_word(session, key, word),
             _ => false,
         };
         if assigned {
@@ -969,6 +961,15 @@ fn foreground(
             return Ok(Flow::Continue(0));
         }
     }
+    prepared_foreground(raw, last_status, replace, session)
+}
+
+fn prepared_foreground(
+    raw: std::borrow::Cow<'_, SimpleCommand<Word>>,
+    last_status: u8,
+    replace: bool,
+    session: &mut Session,
+) -> io::Result<Flow> {
     let name = job_label(std::slice::from_ref(raw.as_ref()), false, session);
     if needs_ordered_redirects(&raw, session) {
         return run_ordered(raw.into_owned(), name, last_status, replace, session);
@@ -978,7 +979,7 @@ fn foreground(
             if stage.compound.is_none()
                 && stage.assignments.is_empty()
                 && stage.redirects.is_empty()
-                && !(session.posix && stage.keyword_args.is_some()) =>
+                && (!session.posix || stage.keyword_args.is_empty()) =>
         {
             prepare::borrowed_arguments(&stage.words, session, last_status)
         }
@@ -1009,6 +1010,41 @@ fn lastpipe(
     session.stdin_redirected = was_redirected;
     saved.restore(0)?;
     result
+}
+
+pub(crate) fn run_scalar(
+    pair: std::borrow::Cow<'_, (String, Word)>,
+    last_status: u8,
+    replace: bool,
+    session: &mut Session,
+) -> io::Result<Flow> {
+    if let Some(flow) = crate::traps::debug(session, last_status) {
+        return Ok(flow);
+    }
+    if !session.xtrace && assign_existing_word(session, &pair.0, &pair.1) {
+        session.last_argument = Some(String::new());
+        return Ok(Flow::Continue(0));
+    }
+    let (key, word) = pair.into_owned();
+    let command = SimpleCommand {
+        assignments: vec![(key, Assignment::Scalar(word))],
+        ..Default::default()
+    };
+    prepared_foreground(
+        std::borrow::Cow::Owned(command),
+        last_status,
+        replace,
+        session,
+    )
+}
+
+fn assign_existing_word(session: &mut Session, key: &str, word: &Word) -> bool {
+    if let Some(value) = word.as_literal() {
+        return session.assign_existing_literal(key, value);
+    }
+    word.stored_parameter(session)
+        .map(str::to_owned)
+        .is_some_and(|value| session.assign_existing_literal(key, &value))
 }
 
 pub(crate) fn run_single(

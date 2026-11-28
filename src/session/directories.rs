@@ -4,12 +4,16 @@ use std::io::{self, Write};
 use std::path::Path;
 
 pub(super) fn physical_path() -> io::Result<std::path::PathBuf> {
+    with_physical_path(|path| Ok(path.to_owned()))
+}
+
+fn with_physical_path<T>(use_path: impl FnOnce(&Path) -> io::Result<T>) -> io::Result<T> {
     // Avoid getcwd(NULL, 0)'s growing allocation for ordinary paths.
     let mut path = [std::mem::MaybeUninit::<libc::c_char>::uninit(); 512];
     let result = unsafe { libc::getcwd(path.as_mut_ptr().cast(), path.len()) };
     if !result.is_null() {
         let bytes = unsafe { std::ffi::CStr::from_ptr(result) }.to_bytes();
-        return Ok(std::ffi::OsStr::from_bytes(bytes).into());
+        return use_path(Path::new(std::ffi::OsStr::from_bytes(bytes)));
     }
     let error = io::Error::last_os_error();
     if !matches!(
@@ -18,10 +22,46 @@ pub(super) fn physical_path() -> io::Result<std::path::PathBuf> {
     ) {
         return Err(error);
     }
-    match std::env::current_dir() {
+    let path = match std::env::current_dir() {
         Err(e) if e.raw_os_error() == Some(libc::ENAMETOOLONG) => long_physical_path(),
         result => result,
+    }?;
+    use_path(&path)
+}
+
+// Darwin can resolve the current vnode's physical path in one attribute query.
+// Validate the returned name before printing it: the cwd may be unlinked or
+// replaced, and volumes can truncate or omit the variable-length attribute.
+#[cfg(target_os = "macos")]
+fn vnode_cwd(buf: &mut [u8]) -> Option<&Path> {
+    let mut attrs = unsafe { std::mem::zeroed::<libc::attrlist>() };
+    attrs.bitmapcount = libc::ATTR_BIT_MAP_COUNT as _;
+    attrs.commonattr = libc::ATTR_CMN_FULLPATH;
+    let status = unsafe {
+        libc::getattrlist(
+            c".".as_ptr(),
+            (&raw mut attrs).cast(),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            libc::FSOPT_REPORT_FULLSIZE,
+        )
+    };
+    if status != 0 {
+        return None;
     }
+    // The packed result is a u32 length followed by an attrreference_t.
+    let word = |offset| {
+        buf.get(offset..offset + 4)?
+            .try_into()
+            .ok()
+            .map(u32::from_ne_bytes)
+    };
+    let returned = word(0)? as usize;
+    let start = 4usize.checked_add(word(4)? as usize)?;
+    let end = start.checked_add(word(8)? as usize)?;
+    let bytes = buf.get(..returned)?.get(start..end)?.strip_suffix(&[0])?;
+    let path = Path::new(std::ffi::OsStr::from_bytes(bytes));
+    (path.is_absolute() && same_directory(path, Path::new("."))).then_some(path)
 }
 
 // Validate a cached absolute name component by component when it will not fit
@@ -354,16 +394,20 @@ impl Session {
         if !physical && !self.posix {
             return write_path(self.logical_directory_ref()?, out);
         }
-        let path = if physical {
+        if physical {
             if let Some(path) = self.logical_cwd.get()
                 && path.as_os_str().len() >= libc::PATH_MAX as usize
                 && long_cwd_matches(path, true)
             {
-                Ok(path.clone())
-            } else {
-                physical_path()
+                return write_path(path, out);
             }
-        } else {
+            #[cfg(target_os = "macos")]
+            if let Some(path) = vnode_cwd(&mut [0; 12 + libc::PATH_MAX as usize]) {
+                return write_path(path, out);
+            }
+            return with_physical_path(|path| write_path(path, out));
+        }
+        let path = {
             self.logical_directory().and_then(|path| {
                 if same_directory(&path, Path::new("."))
                     || path.as_os_str().len() >= libc::PATH_MAX as usize
@@ -398,10 +442,7 @@ impl Session {
             }
         }
         let result = if name == "pwd" {
-            self.write_pwd(
-                physical,
-                &mut io::LineWriter::new(crate::builtins::StdoutFd(None)),
-            )
+            self.write_pwd(physical, &mut crate::builtins::StdoutFd(None))
         } else {
             if args.len() > 1 {
                 diagnostic!("cd: too many arguments");
@@ -672,7 +713,15 @@ fn print_path(path: &Path) -> io::Result<()> {
 }
 
 fn write_path(path: &Path, out: &mut dyn Write) -> io::Result<()> {
-    out.write_all(path.as_os_str().as_bytes())?;
-    out.write_all(b"\n")?;
+    let bytes = path.as_os_str().as_bytes();
+    let mut line = [0; 512];
+    if bytes.len() < line.len() {
+        line[..bytes.len()].copy_from_slice(bytes);
+        line[bytes.len()] = b'\n';
+        out.write_all(&line[..=bytes.len()])?;
+    } else {
+        out.write_all(bytes)?;
+        out.write_all(b"\n")?;
+    }
     out.flush()
 }

@@ -83,12 +83,26 @@ impl Values {
     }
 }
 
+// Only ASCII blocks precede the first mixed block, so its start is a UTF-8
+// boundary. A non-ASCII character near the end never forces a second full scan.
+fn character_count(text: &str) -> usize {
+    const BLOCK: usize = 1024;
+    for (i, bytes) in text.as_bytes().chunks(BLOCK).enumerate() {
+        if !bytes.is_ascii() {
+            let ascii = i * BLOCK;
+            return ascii + text[ascii..].chars().count();
+        }
+    }
+    text.len()
+}
+
 pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String>, Error> {
     if let Some(text) = name
         .strip_prefix('#')
         .and_then(|key| env.borrowed_scalar(key))
     {
-        return Ok(Some(text.chars().count().to_string()));
+        let length = character_count(text);
+        return Ok(Some(itoa::Buffer::new().format(length).to_owned()));
     }
     if let Some(reference) = name.strip_prefix('#')
         && env.session.is_nameref(reference)
@@ -134,6 +148,13 @@ pub(super) fn value(name: &str, env: &mut Expansion<'_>) -> Result<Option<String
         }
         if !matches!(index, "@" | "*") && !index.bytes().all(|b| b.is_ascii_digit()) {
             let i = env.arithmetic(index)?;
+            if !env.shadows(base)
+                && crate::word::is_identifier(base)
+                && !env.session.is_nameref(base)
+                && let Ok(index) = env.session.relative_index(base, i)
+            {
+                return Ok(env.session.element(base, index));
+            }
             expanded = format!("{base}[{i}]");
             &expanded
         } else {
@@ -262,18 +283,21 @@ impl Modification {
                 } else {
                     replacement.scalar(&lookup, positional)
                 };
+                let compiled = crate::pattern::ParameterPattern::new(
+                    &pattern,
+                    env.session.shopt.glob.extglob,
+                    env.session
+                        .shopt
+                        .nocasematch
+                        .then(|| env.session.character_locale()),
+                );
                 Ok(values.map(quoted, |v| {
                     super::replace::substitute(
                         v,
-                        &pattern,
+                        &compiled,
                         &replacement,
                         *mode,
                         env.session.shopt.patsub_replacement,
-                        env.session.shopt.glob.extglob,
-                        env.session
-                            .shopt
-                            .nocasematch
-                            .then(|| env.session.character_locale()),
                     )
                 }))
             }

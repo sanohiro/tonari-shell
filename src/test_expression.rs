@@ -6,24 +6,50 @@ pub enum Expr {
     Word(Word),
     Unary(&'static str, Word),
     Binary(Word, &'static str, Word),
+    StaticGlob(Word, &'static str, std::rc::Rc<StaticGlob>),
     StaticRegex(Word, String, Option<String>),
     Not(Box<Expr>),
     And(Vec<Expr>),
     Or(Vec<Expr>),
 }
 
+#[derive(Debug)]
+pub struct StaticGlob {
+    word: Word,
+    text: std::cell::OnceCell<String>,
+    compiled: std::cell::RefCell<Option<CompiledGlob>>,
+}
+
+#[derive(Debug)]
+struct CompiledGlob {
+    locale: Option<std::rc::Rc<pattern::PatternLocale>>,
+    ascii_ranges: bool,
+    matcher: pattern::Matcher<String>,
+    group: Option<pattern::extended::Pattern>,
+}
+
 impl Expr {
     pub(crate) fn binary(left: Word, operator: &'static str, right: Word) -> Self {
         use crate::word::Part;
-        if operator == "=~"
-            && match &right {
-                Word::Literal(_) => true,
-                Word::Expanded(parts) => parts
-                    .iter()
-                    .all(|p| matches!(p, Part::Pattern(_) | Part::Unquoted(_) | Part::Text(_))),
-                Word::Declaration(_) => false,
-            }
-        {
+        let fixed = match &right {
+            Word::Literal(_) => true,
+            Word::Expanded(parts) => parts
+                .iter()
+                .all(|p| matches!(p, Part::Pattern(_) | Part::Unquoted(_) | Part::Text(_))),
+            Word::Declaration(_) => false,
+        };
+        if matches!(operator, "=" | "==" | "!=") && fixed && right.as_literal().is_none() {
+            return Self::StaticGlob(
+                left,
+                operator,
+                std::rc::Rc::new(StaticGlob {
+                    word: right,
+                    text: Default::default(),
+                    compiled: Default::default(),
+                }),
+            );
+        }
+        if operator == "=~" && fixed {
             let quoted = right.clone().regex(&|_| None, &[]);
             let plain = right.scalar(&|_| None, &[]);
             let plain = (plain != quoted).then_some(plain);
@@ -114,6 +140,50 @@ fn condition(expr: &Expr, session: &mut Session, status: u8) -> Result<bool, Flo
                     .map_err(error);
             }
             builtins::unary(op, &value, session).map_err(error)
+        }
+        StaticGlob(left, op, glob) => {
+            let left = operand(session, left, status)?;
+            let source = glob
+                .text
+                .get_or_init(|| glob.word.clone().extended_pattern(&|_| None, &[]));
+            trace(session, status, &[&left, op, source]);
+            let locale = source
+                .contains(['[', '?'])
+                .then(|| pattern::session_locale(session))
+                .flatten();
+            let _guard = locale.as_ref().and_then(|l| l.enter());
+            let matched = if session.shopt.nocasematch {
+                pattern::extended::insensitive_match(
+                    &left,
+                    source,
+                    true,
+                    session.character_locale(),
+                )
+            } else {
+                let mut entry = glob.compiled.borrow_mut();
+                // Bracket ranges and their per-character results belong to the
+                // active locale. Keep its handle alive until recompilation.
+                let ascii_ranges = session.shopt.globasciiranges;
+                let current = entry.as_ref().is_some_and(|cached| {
+                    cached.ascii_ranges == ascii_ranges
+                        && cached.locale.as_ref().map(std::rc::Rc::as_ptr)
+                            == locale.as_ref().map(std::rc::Rc::as_ptr)
+                });
+                if !current {
+                    *entry = Some(CompiledGlob {
+                        matcher: pattern::Matcher::new(source.clone()),
+                        group: pattern::extended::Pattern::new(source),
+                        locale,
+                        ascii_ranges,
+                    });
+                }
+                let compiled = entry.as_ref().unwrap();
+                compiled.group.as_ref().map_or_else(
+                    || compiled.matcher.matches(&left),
+                    |group| group.accepts(&left, false),
+                )
+            };
+            Ok(matched != (*op == "!="))
         }
         StaticRegex(left, quoted, plain) => {
             let left = operand(session, left, status)?;

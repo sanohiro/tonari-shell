@@ -3,7 +3,6 @@ mod command_cache;
 use crate::pattern::directory::scan;
 use std::fs;
 use std::ops::ControlFlow;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::Session;
@@ -724,7 +723,6 @@ type CommandVisitor<'a> = dyn FnMut(&str, Option<(&Path, u8)>) -> ControlFlow<()
 fn visit_commands(
     prefix: &str,
     session: &Session,
-    cache_names: bool,
     visit: &mut CommandVisitor<'_>,
 ) -> ControlFlow<()> {
     for name in crate::execute::builtin_names()
@@ -763,7 +761,7 @@ fn visit_commands(
             }
             ControlFlow::Continue(())
         };
-        if cache_names && prefix.len() >= 2 {
+        if !prefix.is_empty() {
             command_cache::scan(path, prefix.as_bytes(), &mut checked_fd, &mut candidate)?;
         } else {
             scan(path, prefix.as_bytes(), &mut candidate)?;
@@ -772,24 +770,30 @@ fn visit_commands(
     ControlFlow::Continue(())
 }
 
-fn executable(name: &str, entry: Option<(&Path, u8)>) -> bool {
+fn executable(
+    candidate: &mut crate::execute::Candidate,
+    name: &str,
+    entry: Option<(&Path, u8)>,
+) -> bool {
     entry.is_none_or(|(path, kind)| {
         matches!(kind, libc::DT_REG | libc::DT_LNK | libc::DT_UNKNOWN)
-            && fs::metadata(path.join(name))
-                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+            && candidate
+                .join(path, name)
+                .is_some_and(|path| crate::execute::check_candidate(path).unwrap_or(false))
     })
 }
 
 fn common_command(prefix: &str, session: &Session) -> Option<Common> {
     let mut common: Option<Common> = None;
-    let _ = visit_commands(prefix, session, true, &mut |name, entry| {
+    let mut candidate = crate::execute::Candidate::new();
+    let _ = visit_commands(prefix, session, &mut |name, entry| {
         if let Some(known) = &mut common {
             // Only a name that could shorten the prefix or change uniqueness
             // needs a filesystem permission check.
-            if known.could_change(name) && executable(name, entry) {
+            if known.could_change(name) && executable(&mut candidate, name, entry) {
                 return known.narrow(name, prefix);
             }
-        } else if executable(name, entry) {
+        } else if executable(&mut candidate, name, entry) {
             common = Some(Common::new(name.to_owned()));
         }
         ControlFlow::Continue(())
@@ -931,8 +935,9 @@ pub(crate) fn host_names(prefix: &str, session: &Session) -> Vec<String> {
 
 pub fn command_names(prefix: &str, session: &Session) -> Vec<String> {
     let mut names = Vec::new();
-    let _ = visit_commands(prefix, session, false, &mut |name, entry| {
-        if executable(name, entry) {
+    let mut candidate = crate::execute::Candidate::new();
+    let _ = visit_commands(prefix, session, &mut |name, entry| {
+        if executable(&mut candidate, name, entry) {
             names.push(name.to_owned());
         }
         ControlFlow::Continue(())

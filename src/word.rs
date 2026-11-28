@@ -76,7 +76,7 @@ pub enum Part {
         quoted: bool,
     },
     Brace(&'static str),
-    BraceParameter(String),
+    BraceParameter(std::borrow::Cow<'static, str>),
     BraceTilde(&'static str),
     Range(Box<brace::Range>),
     Text(String),
@@ -88,12 +88,12 @@ pub enum Part {
         quoted: bool,
     },
     Modify {
-        name: String,
+        name: std::borrow::Cow<'static, str>,
         operation: Box<Modification>,
         quoted: bool,
     },
     Trim {
-        name: String,
+        name: std::borrow::Cow<'static, str>,
         pattern: Box<Word>,
         prefix: bool,
         longest: bool,
@@ -104,7 +104,7 @@ pub enum Part {
         quoted: bool,
     },
     Parameter {
-        name: String,
+        name: std::borrow::Cow<'static, str>,
         quoted: bool,
     },
     Tilde(String),
@@ -123,7 +123,7 @@ pub enum Part {
         quoted: bool,
     },
     Alternative {
-        name: String,
+        name: std::borrow::Cow<'static, str>,
         check_empty: bool,
         op: Alternative,
         word: Box<Word>,
@@ -304,7 +304,7 @@ impl Word {
             {
                 let target = env.session.reference_name(name)?;
                 if array_elements_name(&target).is_some() {
-                    *name = target.into_owned();
+                    *name = target.into_owned().into();
                 }
             }
             let plain_quote = match part {
@@ -330,7 +330,7 @@ impl Word {
                                 .parse::<usize>()
                                 .is_ok_and(|i| i > env.session.positional.len()))
                 {
-                    name.clear();
+                    *name = "".into();
                 }
                 if let Some(reference) = name.strip_prefix('!').filter(|s| {
                     !s.is_empty() && (plain_quote.is_none() || array_elements_name(name).is_none())
@@ -350,7 +350,7 @@ impl Word {
                             crate::expansion::Error::discard(message)
                         });
                     };
-                    *name = indirect_target(target, env)?;
+                    *name = indirect_target(target, env)?.into();
                 }
             }
             match part {
@@ -370,14 +370,13 @@ impl Word {
                 } => {
                     let values = modifier::Values::read(name, env)?;
                     let pattern = env.pattern(std::mem::take(pattern.as_mut()))?;
+                    let compiled = crate::pattern::ParameterPattern::new(
+                        &pattern,
+                        env.session.shopt.glob.extglob,
+                        None,
+                    );
                     *part = values.map(*quoted, |v| {
-                        crate::pattern::trim(
-                            v,
-                            &pattern,
-                            *prefix,
-                            *longest,
-                            env.session.shopt.glob.extglob,
-                        )
+                        crate::pattern::trim(v, &compiled, *prefix, *longest)
                     });
                 }
                 Part::Arithmetic { expression, quoted } => {
@@ -408,6 +407,17 @@ impl Word {
                     } else {
                         None
                     };
+                    if *op == Alternative::Alternate
+                        && let Some(value) = env.borrowed_scalar(name)
+                    {
+                        if !*check_empty || !value.is_empty() {
+                            word.resolve(env)?;
+                            *part = resolved_operand(word);
+                        } else {
+                            *part = literal(String::new(), *quoted);
+                        }
+                        continue;
+                    }
                     let elements = array_elements_name(name);
                     // A successful + alternative never reads the elements.
                     // Multiple quoted @ fields stay distinct even if all are empty.
@@ -419,11 +429,11 @@ impl Word {
                         && (!*check_empty || len > 1 && (at || !*quoted))
                     {
                         word.resolve(env)?;
-                        *part = Part::Nested(std::mem::take(word.as_mut()));
+                        *part = resolved_operand(word);
                         continue;
                     }
                     let (set, original) =
-                        if matches!(name.as_str(), "@" | "*") || elements.is_some() {
+                        if matches!(name.as_ref(), "@" | "*") || elements.is_some() {
                             let modifier::Values::Elements(values, at) =
                                 modifier::Values::read(name, env)?
                             else {
@@ -476,7 +486,7 @@ impl Word {
                             *part = literal(value, *quoted);
                             continue;
                         }
-                        *part = Part::Nested(std::mem::take(word.as_mut()));
+                        *part = resolved_operand(word);
                     } else {
                         *part = if use_word_if_set {
                             match original {
@@ -511,7 +521,7 @@ impl Word {
                     *part = Part::Text(values.join(&ifs_separator(&|k| env.lookup(k))));
                 }
                 Part::Parameter { name, quoted }
-                    if !matches!(name.as_str(), "@" | "*")
+                    if !matches!(name.as_ref(), "@" | "*")
                         && array_elements_name(name).is_none() =>
                 {
                     let value = modifier::value(name, env)?;
@@ -1054,5 +1064,12 @@ impl WordBuilder {
             self.flush();
             Word::Expanded(self.parts)
         }
+    }
+}
+
+fn resolved_operand(word: &mut Word) -> Part {
+    match std::mem::take(word) {
+        Word::Literal(text) => Part::Text(text),
+        other => Part::Nested(other),
     }
 }

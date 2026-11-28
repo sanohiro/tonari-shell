@@ -80,7 +80,10 @@ fn run_statements<'a>(
         };
         let reports_failure = match subject {
             Command::Pipeline(stages) => stages.len() != 1 || stages[0].compound.is_none(),
-            Command::Subshell(_) | Command::Test(_) | Command::Arithmetic(_) => true,
+            Command::Scalar(_)
+            | Command::Subshell(_)
+            | Command::Test(_)
+            | Command::Arithmetic(_) => true,
             _ => false,
         };
         let flow = if let Some(flow) = literal.and_then(|cmd| cmd.run_literal(session, status)) {
@@ -161,10 +164,16 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
     let scope = session.substitutions.scope();
     let single = match command.as_ref() {
         Command::Pipeline(stages) => stages.len() == 1,
-        Command::Subshell(_) | Command::Test(_) | Command::Arithmetic(_) => true,
+        Command::Scalar(_) | Command::Subshell(_) | Command::Test(_) | Command::Arithmetic(_) => {
+            true
+        }
         _ => false,
     };
     let result = match command {
+        Cow::Borrowed(Command::Scalar(pair)) => {
+            execute::run_scalar(Cow::Borrowed(pair.as_ref()), status, tail, session)
+                .unwrap_or_else(execution_error)
+        }
         Cow::Borrowed(Command::Pipeline(stages)) if stages.len() == 1 => {
             execute::run_single(Cow::Borrowed(&stages[0]), status, tail, session)
                 .unwrap_or_else(execution_error)
@@ -543,6 +552,8 @@ fn run_case(
 
 fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) -> Flow {
     match command {
+        Command::Scalar(pair) => execute::run_scalar(Cow::Owned(*pair), status, tail, session)
+            .unwrap_or_else(execution_error),
         Command::Timed {
             posix,
             command: inner,

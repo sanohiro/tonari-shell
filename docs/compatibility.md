@@ -1,5 +1,13 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## Physical working directory and case-insensitive classes / 物理パスと大小文字を無視する文字クラス
+
+From an empty directory, run `mkdir a; cd a; mv ../a ../b; mkdir ../a; pwd -P`. The process remains in `b`, so Tonari prints a path ending in `/b`. Apple Bash 3.2.57 and GNU Bash 5.3.20 on macOS print `/a`, the path of a different directory. If the old name remains absent, all three print `/b`. Tonari also reports failure if the current directory itself has been removed. [Regression test](../tests/shell.py)
+
+カレントディレクトリを改名し、元の名前に別のディレクトリを作っても、`pwd -P` はプロセスが実際にいる場所を表示する。Apple Bash と GNU Bash が古い名前を表示する場合も、この物理パスの保証を優先する。 [計測結果](benchmarks.md#expansion-command-review)
+
+With `LC_ALL=tr_TR.UTF-8`, `shopt -s nocasematch; p='+([i])'; [[ I == $p ]]` returns 1 in Tonari and 0 in GNU Bash 5.3.20 on macOS. Tonari preserves the Turkish distinction between dotted i and dotless ı. トルコ語では大文字の I が小文字の ı に対応するため、このパターンは ASCII の I に一致しない。 [Unicode case mappings](https://www.unicode.org/Public/UCD/latest/ucd/SpecialCasing.txt)
+
 ## Background signal dispositions and buffered listings / バックグラウンド実行と一覧出力
 
 With job control disabled and default INT/QUIT dispositions at shell entry, `(trap -p INT QUIT; trap '' USR2; trap -p INT QUIT USR2) & wait` prints only `trap -- '' SIGUSR2`. The shell sets INT/QUIT to ignored for the background job. GNU Bash 5.3.20 and Tonari distinguish those internal settings from explicit traps and dispositions inherited when the shell started. The test also supplies each combination of inherited INT/QUIT ignores and resets the traps, in both ordinary and POSIX mode.

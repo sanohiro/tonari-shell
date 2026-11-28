@@ -455,20 +455,33 @@ fn run(
             {
                 return error(e, 1);
             }
-            if let Ok((program, consumed, lines)) = buffered_compound(
-                text,
-                reader.buffer(),
-                false,
-                session.reads_aliases(),
-                |size| {
-                    let rest = std::str::from_utf8(&reader.buffer()[..size])
-                        .map_err(|_| parser::Error::Invalid("expected UTF-8 command text"))?;
-                    let mut unit = String::with_capacity(text.len() + size);
-                    unit.push_str(text);
-                    unit.push_str(rest);
-                    parser::session_source_at(&unit, false, session, base_line)
-                },
-            ) {
+            let parse = |size| {
+                let rest = std::str::from_utf8(&reader.buffer()[..size])
+                    .map_err(|_| parser::Error::Invalid("expected UTF-8 command text"))?;
+                let mut unit = String::with_capacity(text.len() + size);
+                unit.push_str(text);
+                unit.push_str(rest);
+                parser::session_source_at(&unit, false, session, base_line)
+            };
+            let batch = if !from_stdin
+                && !session.onecmd
+                && !session.history_enabled
+                && session.readonly_functions.is_empty()
+                && !session.posix
+            {
+                lookahead::function_run(text, reader.buffer(), session, parse)
+            } else {
+                None
+            };
+            let extra_commands = batch
+                .as_ref()
+                .map_or(0, |(program, _, _)| program.len() - 1);
+            if let Ok((program, consumed, lines)) = batch.map(Ok).unwrap_or_else(|| {
+                buffered_compound(text, reader.buffer(), false, session.reads_aliases(), parse)
+            }) {
+                if !check && session.source_depth == 0 {
+                    session.command_number += extra_commands;
+                }
                 reader.consume(consumed);
                 base_line += lines;
                 result = Ok(program);
@@ -646,9 +659,11 @@ pub fn text(
                 .min(end.saturating_add(WINDOW).saturating_add(scan_budget));
             // A sourced file has no per-input history or command-number
             // update. Preserve those boundaries for command strings and eval.
-            let batch = if !tail && eval_line.is_none() && session.source_depth > 0 {
-                lookahead::function_run(&source[start..], text, session, base_line)
-                    .map(|(p, n, lines)| (eval::Program::Fresh(p), n, lines))
+            let batch = if !tail && eval_line.is_none() && (check || session.source_depth > 0) {
+                lookahead::function_run(text, &source.as_bytes()[end..], session, |size| {
+                    parser::session_source_at(&source[start..end + size], false, session, base_line)
+                })
+                .map(|(p, n, lines)| (eval::Program::Fresh(p), n, lines))
             } else {
                 None
             };

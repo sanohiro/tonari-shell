@@ -1,5 +1,64 @@
 # Startup and execution / 起動と実行性能
 
+<a id="expansion-command-review"></a>
+
+## November 28 · Function parsing, shell expansion and command lookup / 関数の解析・展開・コマンド探索
+
+Each cell gives **previous Tonari / current Tonari / GNU Bash** in milliseconds. The baseline is `a0dae14` and the runtime is `11cde87`. Apple M1 ran macOS 27.2.1 and GNU Bash 5.3.20. Native Ubuntu 24.04 x86-64 ran on Intel(R) Xeon(R) 6975P-C with Bash 5.2.21. The script driver ran 15 interleaved sessions per workload, started the clock after each ready marker and checked the result on every sample. The PATH was `/usr/bin:/bin`. These tables time the complete workload including setup, sourcing and shell exit. [Native Linux release, regression tests and timings](https://github.com/sanohiro/tonari-shell/actions/runs/46086008308)
+
+| Workload | Apple M1 | Linux x86-64 |
+|---|---:|---:|
+| Source 400 functions with local defaults and conditional commands | 1.857 / 1.656 / 2.654 | 2.316 / 1.943 / 2.232 |
+| Source 200 functions with a conditional assignment | 0.725 / 0.686 / 1.068 | 0.491 / 0.485 / 0.600 |
+| 50 captures of a helper with a local and `case` | 31.608 / 0.558 / 36.397 | 7.652 / 0.202 / 12.863 |
+| 50 captures of a helper with a local, `if` and `printf` | 30.336 / 0.547 / 36.654 | 7.716 / 0.216 / 13.257 |
+| Replace `+(foo\|bar)` in 500 array elements × 20 | 81.499 / 6.202 / 143.053 | 51.778 / 5.412 / 96.212 |
+| Replace overlapping repeated alternatives × 500 | 4.377 / 2.047 / 6.812 | 2.706 / 1.191 / 4.718 |
+| Replace repeated digit classes in 500 elements × 20 | 24.203 / 5.601 / 75.718 | 18.832 / 4.566 / 60.580 |
+| Trim repeated digit classes in 500 elements × 20 | 7.586 / 1.785 / 28.618 | 7.962 / 2.319 / 24.385 |
+| List commands with `compgen -c l` × 20 | 17.574 / 15.629 / 1446.101 | 26.607 / 17.623 / 76.423 |
+| Find an external command with `command -v` × 2,000 | 19.093 / 11.721 / 17.996 | 3.218 / 2.923 / 9.541 |
+| Classify an external command with `type -t` × 2,000 | 18.373 / 11.738 / 18.209 | 2.650 / 2.690 / 9.550 |
+| Conditional with a static wildcard × 10,000 | 3.916 / 1.930 / 15.273 | 3.855 / 1.726 / 12.606 |
+| Conditional with a static extended pattern × 5,000 | 6.412 / 1.688 / 9.958 | 6.243 / 1.188 / 7.625 |
+| Counted 10-character reads from a seekable file × 2,000 | 4.547 / 4.647 / 11.185 | 2.728 / 2.662 / 6.617 |
+| Plain `read -r` from a here string × 2,000 | 7.309 / 5.146 / 17.886 | 6.761 / 4.624 / 13.502 |
+| `mapfile -t` from a here string × 2,000 | 7.641 / 5.025 / 16.503 | 6.582 / 4.404 / 12.138 |
+| Count-limited here-string reads × 2,000 | 10.236 / 4.658 / 18.020 | 8.587 / 4.453 / 13.597 |
+| Delimiter-limited here-string reads × 2,000 | 8.086 / 4.889 / 17.501 | 7.210 / 4.412 / 13.181 |
+| Read here strings into an array × 2,000 | 8.015 / 4.740 / 17.189 | 7.399 / 4.597 / 13.109 |
+| Set, nonempty 64 KiB scalar with `${s:+yes}` × 5,000 | 7.494 / 2.662 / 338.062 | 9.581 / 2.255 / 126.265 |
+| Unset scalar with a literal default × 20,000 | 10.005 / 9.226 / 37.343 | 9.994 / 9.158 / 33.656 |
+| Copy 1,000 array elements × 500 | 18.487 / 10.950 / 201.192 | 58.975 / 30.949 / 214.055 |
+| Copy a 20-element slice × 5,000 | 12.411 / 10.506 / 73.052 | 19.520 / 15.835 / 58.795 |
+| Expand the last array index × 10,000 | 6.754 / 5.464 / 17.187 | 7.972 / 5.352 / 15.750 |
+| Count 256 ASCII characters × 20,000 | 8.911 / 8.153 / 27.005 | 9.878 / 9.309 / 25.048 |
+| Count 64 KiB of ASCII × 250 | 1.314 / 0.746 / 1.424 | 0.699 / 0.475 / 0.623 |
+| Count 64 KiB of ASCII followed by 雪 × 250 | 1.306 / 0.757 / 11.957 | 0.703 / 0.483 / 11.303 |
+| Physical working directory × 5,000 | 70.361 / 18.880 / 33.799 | 3.431 / 2.631 / 10.473 |
+| Logical working directory × 5,000 | 7.152 / 6.822 / 14.454 | 2.383 / 1.721 / 7.085 |
+
+**Parser controls.** The file-mode comparisons below include process startup, over 19 interleaved samples. Direct script execution batches adjacent function definitions with the same checks as sourcing. Keyword operand positions use an inline mask, common short parameter names and conditional tokens borrow their spelling, and eligible parse buffers are reused. The 400-function fixture uses conditional parsing, variable defaults and command bodies in every definition.
+
+| Workload | Apple M1 | Linux x86-64 |
+|---|---:|---:|
+| Whole script, 400 functions | 5.574 / 5.222 / 10.825 | 2.787 / 2.151 / 2.803 |
+| Whole script, 200 functions | 4.248 / 4.100 / 9.162 | 0.715 / 0.640 / 1.111 |
+| Syntax check (-n), 400 functions | 5.456 / 4.931 / 10.577 | 1.799 / 1.693 / 1.993 |
+| Syntax check (-n), 200 functions | 4.205 / 4.109 / 9.125 | 0.510 / 0.589 / 0.914 |
+
+**Target coverage.** All 29 M1 workloads in the first table met the two-thirds target. On Linux, 26 of 29 met it. Sourcing 400 and 200 functions took 87.1% and 80.8% of Bash time. Counting 64 KiB of ASCII 250 times took 76.2%. The real integration and parser-launch controls have their own timing boundaries. Apple system Bash 3.2.57 was also measured on M1. With that reference, 20 single-letter `compgen` requests took 17.150 / 15.032 / 19.404 ms. GNU Bash 5.3.20 spent much longer listing commands on the same PATH. Repeated Tab in a real PTY used a separate readiness check. Second Tab median / p95 in old Tonari → current Tonari → Bash was 0.064 / 0.084 → 0.081 / 0.092 → 1.557 / 1.640 ms on M1 and 0.058 / 0.076 → 0.053 / 0.062 → 0.383 / 0.412 ms on Linux.
+
+**Real startup scripts.** On M1, sourcing the unmodified Ubuntu bash-completion script through the first visible prompt took 5.587 / 5.461 / 11.519 ms (19 sessions). With nvm 0.40.3 and installed Node v24.1.0 and v18.13.0, the first prompt took 188.020/311.324 → 186.716/268.422 → 241.196/289.027 ms and launch through the first verified `node --version` and next prompt took 205.270/340.991 → 204.254/288.153 → 259.228/309.085 ms (old Tonari → current Tonari → GNU Bash, each median/p95 over 15 sessions). These measurements include nvm’s Node selection and external commands. Isolated helper gains do not carry over proportionally to normal nvm startup.
+
+**Boundary cases.** A 64 KiB ASCII prefix followed by one Japanese character exposed a second scan in the first length optimization. Checking complete ASCII blocks before counting the remaining UTF-8 reduced that fixture from 1.660 to 0.860 ms on M1. For physical `pwd`, a separate M1 comparison of 5,000 calls using the verified Darwin attribute path took 18.639 ms vs 67.910 ms using the stack-based `getcwd` implementation and 34.084 ms with GNU Bash. Both Tonari implementations report the correct directory after rename and replacement. A separate trial of the attribute API for executable permissions cost more than the existing permission checks. Short here inputs keep pipe allocation for FD exhaustion and skip installation only for reads that cannot observe the descriptor.
+
+**Bracket class regression.** The previous release aborted while filtering simple member lists in `GLOBIGNORE`. On M1, filtering 1,000 files five times took 3.073 / 3.118 / 350.238 ms and 10,000 case-insensitive extended matches took 11.914 / 10.216 / 21.010 ms (first working fix / final / Bash). Linux measured 1.864 / 2.630 and 8.309 / 18.843 ms respectively (final / Bash). The Linux file-filter case reached 70.9% of Bash time. The M1 source audit now matches GNU Bash 5.3.20 on all 198 witnesses. A separate differential covered 352 pattern/input/option combinations across six parameter operations, comparing the previous release, current release and Bash.
+
+The M1 distribution executable went from 1,798,096 to 1,814,752 bytes and links only libSystem. The stripped Linux static PIE went from 2,403,256 to 2,429,976 bytes. Reproduce the script runs with `python3 tools/bench_scripts.py TONARI --previous OLD --bash BASH --timing started --runs 15 --case review-helper-case`, selecting another case from the table as desired. The native workflow's `expansion-review` suite runs all of them and the PTY and parser controls. The two previously crashing bracket cases can be run with the new binary and Bash.
+
+M1 では起動済みシェルの29項目すべてが Bash の2/3以内、Linux では26項目が達成した。Linux の未達は200・400関数の読み込みと64 KiBのASCII文字数取得。修正前は異常終了していた別枠の2項目では、Linux のファイル名除外が Bash 比70.9%だった。各回の出力も確認した。400関数を読み込む場合は、起動済みのシェルに読み込む時間、プロセス起動込みの実行時間、構文検査を個別に記録した。補完についても `compgen` の一覧作成と端末で Tab を押してから表示されるまでを分けた。nvm 型の小さな関数は大幅に改善したが、実際の nvm は Node の選択や外部コマンドに時間を使う。FD 不足時の失敗と、作業中のディレクトリを改名したときの `pwd -P` の結果も回帰試験に含めた。
+
 <a id="capture-parser-review"></a>
 
 ## November 28 · Command substitution, null redirection and function parsing / コマンド置換・リダイレクト・関数定義

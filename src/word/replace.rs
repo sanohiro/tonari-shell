@@ -19,13 +19,14 @@ fn write_replacement(out: &mut String, template: &str, matched: &str, expand_amp
 
 pub(super) fn substitute(
     mut text: String,
-    pattern: &str,
+    compiled: &crate::pattern::ParameterPattern<'_>,
     template: &str,
     mode: ReplaceMode,
     expand_amp: bool,
-    extglob: bool,
-    fold: Option<crate::session::CharacterLocale>,
 ) -> String {
+    let pattern = compiled.text;
+    let fold = compiled.fold;
+    let extglob = compiled.extended;
     use ReplaceMode::*;
     let expand_amp = expand_amp && template.contains(['\\', '&']);
     if expand_amp && template == "&" {
@@ -74,7 +75,7 @@ pub(super) fn substitute(
         && !body.contains("[.")
         && !body.contains("[=")
     {
-        let matcher = crate::pattern::Matcher::new(pattern);
+        let matcher = compiled.basic();
         let mut bytes = [0; 4];
         if template.is_empty() {
             text.retain(|c| !matcher.matches(c.encode_utf8(&mut bytes)));
@@ -123,13 +124,7 @@ pub(super) fn substitute(
         out.push_str(&text[copied..]);
         return out;
     }
-    let group = match fold {
-        Some(locale) if !pattern.is_empty() => Some(
-            crate::pattern::extended::Pattern::insensitive(pattern, extglob, locale),
-        ),
-        _ if extglob => crate::pattern::extended::Pattern::new(pattern),
-        _ => None,
-    };
+    let group = compiled.group.as_ref();
     if group.is_none() && !crate::pattern::has_magic(pattern, false) {
         let literal = crate::pattern::unescape(pattern);
         let needle = literal.as_ref();
@@ -170,12 +165,8 @@ pub(super) fn substitute(
     let mut copied = 0;
     let mut i = 0;
     let escaped_end = pattern.bytes().rev().take_while(|&b| b == b'\\').count() % 2 != 0;
-    let basic = group
-        .is_none()
-        .then(|| crate::pattern::Matcher::new(pattern));
-    let width = basic
-        .as_ref()
-        .and_then(|_| crate::pattern::FixedWidth::parse(pattern));
+    let basic = group.is_none().then(|| compiled.basic());
+    let width = basic.as_ref().and_then(|_| compiled.width());
     let max_width = width.as_ref().map(|f| f.width);
     let ascii = width.as_ref().filter(|_| text.is_ascii());
     let mut out = String::new();
@@ -212,7 +203,7 @@ pub(super) fn substitute(
         .chain(std::iter::once(text.len()))
         .collect();
     let starts = (max_width.is_none() && group.is_none() && !escaped_end && mode != Suffix)
-        .then(|| crate::pattern::Matcher::new(format!("{pattern}*")));
+        .then(|| compiled.starts());
     let accepts = |candidate: &str| {
         if let Some(width) = ascii {
             return width.matches_ascii(pattern, candidate, basic.as_ref().unwrap());
@@ -231,6 +222,8 @@ pub(super) fn substitute(
         let start = bounds[i];
         let end = if mode == Suffix {
             accepts(&text[start..]).then_some(bounds.len() - 1)
+        } else if let Some(end) = group.and_then(|g| g.run_prefix(&text[start..], true)) {
+            end.map(|length| i + bounds[i..].partition_point(|&offset| offset < start + length))
         } else if let Some(width) = max_width {
             let last = i.saturating_add(width);
             if ascii.is_some() {
