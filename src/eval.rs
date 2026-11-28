@@ -217,6 +217,13 @@ fn dispatch(session: &mut Session, command: Cow<'_, Command>, status: u8, tail: 
         | Command::Arithmetic(_) => true,
         _ => false,
     };
+    // Bash marks final simple commands for implicit exec, including the last
+    // arm of an AND/OR list, but keeps a shell for compound command bodies.
+    let tail = tail
+        && !matches!(
+            command.as_ref(),
+            Command::Group(_) | Command::Case(_) | Command::If { .. }
+        );
     let result = match command {
         Cow::Borrowed(Command::LiteralAssignment(text, end)) => {
             execute::literal_assignment(session, text, end.get(), status, tail)
@@ -705,20 +712,22 @@ fn run_command(session: &mut Session, command: Command, status: u8, tail: bool) 
             } else {
                 // The background child itself is the explicit subshell. Its PID
                 // is exposed as $! and BASH_SUBSHELL increases only once.
-                if body.len() == 1
+                let parenthesized = body.len() == 1
                     && !body[0].negated
-                    && matches!(body[0].command, Command::Subshell(_))
-                {
+                    && matches!(body[0].command, Command::Subshell(_));
+                if parenthesized {
                     let Command::Subshell(group) = body.pop().unwrap().command else {
                         unreachable!()
                     };
                     body = group;
                 }
-                crate::subshell::launch_group(session, body, status, true)
+                crate::subshell::launch_group(session, body, status, true, parenthesized)
             }
         }
         Command::Group(body) => execute_program(session, body, status, tail),
-        Command::Subshell(body) => crate::subshell::launch_group(session, body, status, false),
+        Command::Subshell(body) => {
+            crate::subshell::launch_group(session, body, status, false, true)
+        }
         Command::Case(c) => run_case(
             session,
             &c.header,

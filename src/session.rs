@@ -24,6 +24,8 @@ macro_rules! bash_version {
 }
 bash_version!("5", "2", "0", "1", "tonari");
 
+const NAMEREF_LIMIT: usize = 32;
+
 pub(crate) const READONLY: &str = "readonly variable";
 pub(crate) const SUBSCRIPT_RANGE: &str = "array subscript out of range";
 
@@ -328,6 +330,8 @@ pub struct Session {
     pub xtrace: bool,
     pub onecmd: bool,
     pub subshell_depth: u32,
+    pub(crate) parenthesized_subshell: bool,
+    pub(crate) pipeline_subshell: bool,
     pub histexpand: bool,
     pub emacs: bool,
     pub vi: bool,
@@ -727,7 +731,7 @@ impl Session {
         }
         // A for-loop retargets the last reference, even if its target is readonly.
         let mut current = name;
-        for _ in 0..32 {
+        for _ in 0..NAMEREF_LIMIT {
             if let Some(next) = self
                 .variables
                 .get(current)
@@ -753,7 +757,7 @@ impl Session {
             var.declared = true;
             return Ok(());
         }
-        Err("circular name reference")
+        Err(self.reference_limit_error(current, false))
     }
 
     pub fn reference_name<'a>(&self, name: &'a str) -> Result<Cow<'a, str>, &'static str> {
@@ -784,7 +788,7 @@ impl Session {
                 .unwrap_or(s.len())
         };
         let (mut base, mut suffix) = name.split_at(split(name));
-        for depth in 0..32 {
+        for depth in 0..NAMEREF_LIMIT {
             let target = self
                 .scoped_variable(base, global)
                 .filter(|v| v.nameref)
@@ -808,7 +812,26 @@ impl Session {
             }
             base = next;
         }
-        Err("circular name reference")
+        Err(self.reference_limit_error(base, global))
+    }
+
+    #[cold]
+    fn reference_limit_error(&self, last: &str, global: bool) -> &'static str {
+        let mut current = last;
+        for _ in 0..NAMEREF_LIMIT {
+            let Some(target) = self
+                .scoped_variable(current, global)
+                .filter(|var| var.nameref)
+                .and_then(|var| var.value.as_deref())
+            else {
+                break;
+            };
+            current = array::subscript(target).map_or(target, |(base, _)| base);
+            if current == last {
+                return "circular name reference";
+            }
+        }
+        "name reference depth limit exceeded"
     }
 
     pub(crate) fn ifs(&self) -> Cow<'_, str> {
@@ -1078,14 +1101,18 @@ impl Session {
         Self::BUILTIN_READONLY.contains(&name)
     }
 
-    pub fn initialize_shell_level(&mut self, env: &crate::startup::Environment) {
-        let level = env.shell_level.saturating_add(1);
-        let level = if level >= 1000 {
+    pub(crate) fn adjusted_shell_level(level: i64, change: i64) -> i64 {
+        let level = level.saturating_add(change);
+        if level >= 1000 {
             diagnostic!("warning: shell level ({level}) too high, resetting to 1");
             1
         } else {
             level.max(0)
-        };
+        }
+    }
+
+    pub fn initialize_shell_level(&mut self, env: &crate::startup::Environment) {
+        let level = Self::adjusted_shell_level(env.shell_level, 1);
         self.variables.insert(
             "SHLVL".into(),
             Variable::scalar(Some(level.to_string()), true),
@@ -1292,6 +1319,10 @@ impl Session {
     // Only an existing scalar with ordinary assignment semantics can be
     // updated in place. A changed attribute takes effect on the very next write.
     pub(crate) fn assign_existing_literal(&mut self, key: &str, value: &str) -> bool {
+        self.assign_existing_text(key, Cow::Borrowed(value))
+    }
+
+    pub(crate) fn assign_existing_text(&mut self, key: &str, value: Cow<'_, str>) -> bool {
         let (name, append) = key
             .strip_suffix('+')
             .map_or((key, false), |name| (name, true));
@@ -1316,8 +1347,7 @@ impl Session {
             };
             let len = target.len();
             bytes[..len].copy_from_slice(target.as_bytes());
-            return self
-                .assign_existing_literal(std::str::from_utf8(&bytes[..len]).unwrap(), value);
+            return self.assign_existing_text(std::str::from_utf8(&bytes[..len]).unwrap(), value);
         }
         if var.dynamic || var.letter_case.is_some() || var.readonly || var.elements.is_some() {
             return false;
@@ -1327,7 +1357,7 @@ impl Session {
             return false;
         };
         if integer {
-            let Some(rhs) = Self::plain_decimal(value) else {
+            let Some(rhs) = Self::plain_decimal(&value) else {
                 return false;
             };
             let result = if append {
@@ -1340,9 +1370,12 @@ impl Session {
             };
             itoa::Buffer::new().format(result).clone_into(current);
         } else if append {
-            current.push_str(value);
+            current.push_str(&value);
         } else {
-            value.clone_into(current);
+            match value {
+                Cow::Borrowed(s) => s.clone_into(current),
+                Cow::Owned(s) => *current = s,
+            }
         }
         var.exported |= self.allexport;
         var.declared = true;
@@ -1395,7 +1428,7 @@ impl Session {
     // Indexed targets and virtual variables still use the general resolver.
     fn scalar_reference_target(&self, name: &str) -> Option<&str> {
         let mut target = self.variables.get(name)?.value.as_deref()?;
-        for _ in 1..32 {
+        for _ in 1..NAMEREF_LIMIT {
             if !is_identifier(target) {
                 return None;
             }

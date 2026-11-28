@@ -13,6 +13,42 @@ The driver checks the exact output, exit status and stderr of each sample. It op
 
 計測対象は各シェルの起動から結果の取得まで。実行順を入れ替え、毎回終了値・標準出力・標準エラーを検査した。Linux の標準入力経由では候補版は Bash の約 70% で、目標の 2/3 にわずかに届かなかった。数値は上記の CI が計測した候補コミット `524fabe` のもの。
 
+<a id="r2-hosted-2026-11-29"></a>
+
+### Six-workload follow-up / 6項目の追加計測
+
+Hosted native run 46161126355 compared the distribution build at `bd4370b` with `80cce30`. The macOS 15.8.2 runner used a virtual Apple M1, arm64 Bash 5.3.20 and `en_US.UTF-8`. Ubuntu 24.04 used an Intel Xeon 6975P-C, x86-64 Bash 5.2.21 and `C.UTF-8`. Both used Rust nightly 1.102.0 (6905905bb). The driver launched each shell in a fresh process, checked output, stderr and status, shuffled shell order, discarded one warm-up and took the median of seven runs. [Workload definitions](../tools/ci/second-review.py) · [Native run and downloadable artifacts](https://github.com/sanohiro/tonari-shell/actions/runs/46161126355)
+
+| Workload | N | Apple arm64 baseline / revised / Bash (ms) | Linux x86-64 baseline / revised / Bash (ms) |
+|---|---:|---:|---:|
+| Nested if, regular file | 256 | 33.436 / 4.159 / 9.221 | 34.714 / 0.945 / 2.210 |
+| Nested if, regular file | 512 | 125.411 / 5.033 / 11.721 | 145.589 / 1.551 / 3.163 |
+| Nested if, regular file | 1,024 | 501.794 / 5.987 / 13.345 | 615.606 / 2.592 / 4.880 |
+| Nested if, seekable stdin | 256 | 32.191 / 4.472 / 9.294 | 34.055 / 1.207 / 2.001 |
+| Nested if, seekable stdin | 512 | 122.007 / 5.154 / 10.770 | 144.183 / 2.015 / 3.119 |
+| Nested if, seekable stdin | 1,024 | 491.293 / 6.180 / 12.292 | 603.686 / 3.646 / 4.718 |
+| Case statements in one substitution | 256 | 20.706 / 5.124 / 11.647 | 24.527 / 1.496 / 3.086 |
+| Case statements in one substitution | 512 | 75.291 / 5.754 / 16.157 | 92.418 / 2.470 / 4.691 |
+| Case statements in one substitution | 1,024 | 273.253 / 5.983 / 16.442 | 401.679 / 4.010 / 7.590 |
+| Associative insert, delete and ordered listing | 256 | 6.050 / 6.178 / 18.362 | 6.356 / 4.139 / 9.611 |
+| Associative insert, delete and ordered listing | 512 | 9.016 / 6.430 / 27.505 | 12.294 / 7.761 / 18.515 |
+| Associative insert, delete and ordered listing | 1,024 | 13.487 / 8.362 / 46.167 | 24.163 / 14.790 / 35.662 |
+| Create named variables with printf -v | 256 | 3.634 / 3.446 / 8.253 | 0.754 / 0.747 / 1.877 |
+| Create named variables with printf -v | 512 | 4.627 / 4.717 / 12.063 | 1.059 / 1.107 / 3.100 |
+| Create named variables with printf -v | 1,024 | 4.336 / 4.612 / 13.474 | 1.859 / 1.902 / 6.578 |
+| Replace a two-character UTF-8 pattern | 256 | 5.106 / 3.807 / 8.710 | 1.512 / 0.403 / 1.195 |
+| Replace a two-character UTF-8 pattern | 512 | 13.552 / 5.580 / 11.470 | 6.161 / 0.440 / 1.996 |
+| Replace a two-character UTF-8 pattern | 1,024 | 47.430 / 4.019 / 13.165 | 31.171 / 0.588 / 5.169 |
+
+| Distribution executable | Baseline (bytes) | Revised (bytes) | Increase |
+|---|---:|---:|---:|
+| macOS arm64 Mach-O | 2,063,232 | 2,129,632 | 66,400 (3.2%) |
+| Linux x86-64 static PIE | 2,712,728 | 2,804,056 | 91,328 (3.4%) |
+
+At N = 1,024 the candidate took 77.3% of Bash time on Linux seekable stdin, above the two-thirds target. The other eleven candidate/host combinations at that size met the target. Variable creation took 6.4% longer than baseline on macOS and 2.3% longer on Linux. The artifact records medians for these six workloads. It provides no individual trials or uncertainty estimates, and the two runners used different Bash versions. Later corrections to process replacement, signal handling and deferred redirection postdate this measured revision.
+
+両機種で配布版を比較し、256・512・1,024の各サイズで起動から終了までの7回の中央値を記録した。表の値は順に基準版・候補版・各機種の Bash、単位は ms。N = 1,024 では Linux の seekable stdin が Bash の 77.3% で目標の 2/3 を超え、ほかの11組は目標内だった。変数作成は基準版より macOS で 6.4%、Linux で 2.3% 遅い。配布物はそれぞれ66,400バイト、91,328バイト増えた。計測コミットより後の修正や、端末入力・共有パイプの待ち時間はこの表の対象外。[実機計測](https://github.com/sanohiro/tonari-shell/actions/runs/46161126355)
+
 <a id="ordered-redirection-review"></a>
 
 ## Ordered redirection operands / リダイレクト語の評価順

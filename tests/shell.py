@@ -112,14 +112,38 @@ wait "$p"; echo parent:$?""", "sh", sys.executable)
                 os.close(master)
             self.assertEqual(os.waitstatus_to_exitcode(status), 0)
 
+    def test_finite_nameref_chain_has_a_depth_diagnostic(self):
+        finite = "; ".join(f"declare -n ref{i}=ref{i+1}" for i in range(40))
+        cases = [(finite, "ref0", b"name reference depth limit exceeded"),
+                 ("declare -n first=second second=first", "first", b"circular name reference")]
+        for setup, name, diagnostic in cases:
+            with self.subTest(name=name):
+                p = self.command(TONARI, setup + '; echo "<$' + name + '>"; echo done')
+                self.assertEqual((p.returncode, p.stdout), (0, b"<>\ndone\n"))
+                self.assertIn(diagnostic, p.stderr)
+
+    def test_local_nameref_self_reference_preserves_other_scopes(self):
+        source = """r=global
+inner(){ local -n r=r || return; r=changed; }
+outer(){ local r=outer; inner; echo "$?/$r"; }
+outer; echo "$r" """
+        r = self.command(TONARI, source)
+        self.assertEqual((r.returncode, r.stdout), (0, b"1/outer\nglobal\n"))
+        self.assertIn(b"nameref variable self references not allowed", r.stderr)
+        if bash_version() >= (5, 2):
+            r = self.command(BASH, source)
+            self.assertEqual((r.returncode, r.stdout), (0, b"0/outer\nchanged\n"))
+            self.assertIn(b"circular name reference", r.stderr)
+
     def test_second_review_job_statuses_and_notices(self):
         for shell in self.shells_for(5):
-            result = self.command(shell, """set -m; (exit 3) | (sleep .02; exit 5) &
-sleep .2; jobs -l; wait""")
+            result = self.command(shell, """set -m; (exit 3) | (read -r line; exit 5) & p=$!
+while kill -0 "$p" 2>/dev/null && (( SECONDS < 2 )); do :; done
+jobs -l; wait""")
             self.assertEqual(result.returncode, 0, result.stderr)
             rows = result.stdout.splitlines()
             self.assertEqual(len(rows), 2, result.stdout)
-            self.assertRegex(rows[0], rb"^\[1\]\+ \d+ Exit 3 +")
+            self.assertRegex(rows[0], rb"^\[1\]\+ +\d+ Exit 3 +")
             self.assertRegex(rows[1], rb"^ +\d+ Exit 5 +\| ")
             for wait in ("wait", "wait -n"):
                 result = self.command(shell, "/bin/sh -c 'kill -HUP $$' & " + wait + "; echo after >&2")
@@ -317,11 +341,32 @@ printf '%s\n' "${!a[@]}" """
             ("SHLVL=3; exec /usr/bin/printenv SHLVL", b"2"),
             ("SHLVL=3; SHLVL=9 /usr/bin/printenv SHLVL", b"2"),
             ("/usr/bin/printenv SHLVL >/dev/stdout", b"1"),
+            ("(SHLVL=4; exec /usr/bin/printenv SHLVL)", b"4"),
+            ("(echo $(exec /usr/bin/printenv SHLVL))", b"1"),
+            ("(exec /usr/bin/printenv SHLVL) | cat", b"1"),
+            ("{ exec /usr/bin/printenv SHLVL; } & wait", b"0"),
+            ("{ /usr/bin/printenv SHLVL; }", b"1"),
+            ("if :; then /usr/bin/printenv SHLVL; fi", b"1"),
+            ("case x in x) /usr/bin/printenv SHLVL;; esac", b"1"),
+            ("true && /usr/bin/printenv SHLVL", b"0"),
+            ("echo $(/usr/bin/printenv SHLVL)", b"0"),
+            ("echo $(SHLVL=9 /usr/bin/printenv SHLVL)", b"8"),
+            ("echo $(echo ok | /usr/bin/printenv SHLVL)", b"1"),
+            ("f(){ /usr/bin/printenv SHLVL; }; echo $(f)", b"0"),
+            ("level(){ /usr/bin/printenv SHLVL; }; compgen -C level 2>/dev/null", b"0"),
+            ("SHLVL='3 '; exec /usr/bin/printenv SHLVL", b"0"),
         ]
         for shell in (TONARI, BASH):
             for command, level in cases:
                 r = self.command(shell, command)
                 self.assertEqual((r.returncode, r.stdout.strip(), r.stderr), (0, level, b""), (shell, command))
+            for command, level, error in [
+                ("readonly SHLVL; exec /usr/bin/printenv SHLVL", b"1", b"SHLVL: readonly variable"),
+                ("SHLVL=1001; exec /usr/bin/printenv SHLVL", b"1", b"shell level (1000) too high"),
+            ]:
+                r = self.command(shell, command)
+                self.assertEqual((r.returncode, r.stdout.strip()), (0, level))
+                self.assertIn(error, r.stderr)
             r = self.command(shell, 'exec -c /usr/bin/printenv SHLVL')
             self.assertEqual((r.returncode, r.stdout, r.stderr), (1, b"", b""))
 
@@ -408,12 +453,16 @@ v='xa\'; p='[a]\'; printf '<%s>' "${v/%$p/Z}" "${v//$p/Z}" """
                 self.assertEqual((r.returncode, r.stdout), (0, output), (shell, script, r.stderr))
         utf8 = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
         for shell in ((TONARI, BASH) if bash_version() >= (5, 3) else (TONARI,)):
-            # Bash 5.2 can retain a stale cursor after the explicit option argv changes.
-            r = self.command(shell, 'getopts abc o -abc; getopts abc o -abc; getopts xyz o -x; echo "$?/$o/$OPTIND"')
+            # Reset OPTIND when switching explicit option lists in the differential check.
+            # Without a reset, results vary between GNU Bash builds.
+            r = self.command(shell, 'getopts abc o -abc; getopts abc o -abc; OPTIND=1; getopts xyz o -x; echo "$?/$o/$OPTIND"')
             self.assertEqual((r.returncode, r.stdout, r.stderr), (0, b"0/x/2\n", b""))
             r = self.command(shell, """LC_ALL="$1"; printf '%.1Q/' é; printf '%d/' ''; echo $?
 printf '%d/'; echo $?""", "shell", utf8)
             self.assertEqual((r.returncode, r.stdout), (0, b"$'\\303'/0/1\n0/0\n"), r.stderr)
+
+        r = self.command(TONARI, 'getopts abc o -abc; getopts abc o -abc; getopts xyz o -x; echo "$?/$o/$OPTIND"')
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, b"0/x/2\n", b""))
 
     def test_scaling_multiline_readers_leave_following_input(self):
         source = ("a=(\n" + "entry\n" * 300 +

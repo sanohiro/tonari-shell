@@ -79,8 +79,9 @@ impl Environment {
                     }
                     b"SSH_CLIENT" | b"SSH2_CLIENT" => settings.ssh = true,
                     b"SHLVL" => {
-                        settings.shell_level =
-                            utf8().and_then(|s| s.trim().parse().ok()).unwrap_or(0)
+                        settings.shell_level = utf8()
+                            .and_then(crate::builtins::integer_operand)
+                            .unwrap_or(0)
                     }
                     b"POSIXLY_CORRECT" => settings.posix = true,
                     b"BASH_EXECUTION_STRING" => settings.execution_string = true,

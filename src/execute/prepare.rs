@@ -20,6 +20,7 @@ pub(crate) struct PreparedCommand {
     pub(super) redirects: Vec<Redirect>,
     pub(super) assignments: Vec<(String, String)>,
     pub(super) empty_status: u8,
+    pub(super) environment: external::ChildEnvironment,
     pub(super) literal_has_keywords: bool,
     pub(super) literal_has_braces: bool,
 }
@@ -635,6 +636,7 @@ pub(super) fn prepare_expanded(
         redirects: Vec::new(),
         assignments,
         empty_status: captured.get().unwrap_or(0),
+        environment: Default::default(),
     };
     if session.xtrace && !cmd.words.is_empty() {
         trace_line(session, last_status, |out| {

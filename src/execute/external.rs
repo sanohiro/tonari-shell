@@ -7,8 +7,9 @@ pub(crate) struct Environment {
     pub(super) changes: Vec<(String, Option<String>)>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ChildEnvironment {
+    #[default]
     Inherit,
     Empty,
     ReplaceShell,
@@ -46,16 +47,45 @@ impl Environment {
                 (k, v)
             })
             .collect();
+        let target;
         if replace {
             // Bash adjusts its own binding even when the command prefixes SHLVL.
             // Build the child environment separately so a failed exec leaves the shell intact.
-            let level = session
-                .get("SHLVL")
-                .and_then(|s| s.trim().parse::<i64>().ok())
-                .unwrap_or(0)
-                .saturating_sub(1)
-                .max(0);
-            changes.insert("SHLVL", Some(std::borrow::Cow::Owned(level.to_string())));
+            target = session.reference_name("SHLVL").unwrap_or("SHLVL".into());
+            let name = target.as_ref();
+            let value = if session.subshell_depth > 0 {
+                assignments
+                    .iter()
+                    .rev()
+                    .find(|(key, _)| key == name)
+                    .map(|(_, value)| value.clone())
+            } else {
+                None
+            }
+            .or_else(|| session.get("SHLVL"));
+            let level = Session::adjusted_shell_level(
+                value
+                    .as_deref()
+                    .and_then(crate::builtins::integer_operand)
+                    .unwrap_or(0),
+                -1,
+            );
+            let value = if session.readonly(name) {
+                diagnostic!("{name}: readonly variable");
+                value
+            } else {
+                Some(level.to_string())
+            };
+            let value = value.filter(|_| !session.array_parameter(name));
+            changes.insert(name, value.map(std::borrow::Cow::Owned));
+            if assignments.is_empty() {
+                // ENOEXEC can start a fresh interpreter in the same process.
+                // Its replayed environment must include all changes, including SHLVL.
+                cached_changes = changes
+                    .iter()
+                    .map(|(&key, value)| (key.to_owned(), value.as_deref().map(str::to_owned)))
+                    .collect();
+            }
         }
         // SAFETY: ordinary assignments live in Session. Script reentry replaces
         // process variables only after it has abandoned this environment and
@@ -111,7 +141,7 @@ pub(super) struct External {
 
 impl External {
     pub(super) fn new(cmd: &PreparedCommand, session: &Session) -> io::Result<Self> {
-        Self::for_words(cmd, session, &cmd.words, None, ChildEnvironment::Inherit)
+        Self::for_words(cmd, session, &cmd.words, None, cmd.environment)
     }
     pub(super) fn for_words(
         cmd: &PreparedCommand,

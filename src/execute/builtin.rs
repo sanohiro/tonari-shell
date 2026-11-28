@@ -526,6 +526,8 @@ fn exec_builtin(cmd: &PreparedCommand, session: &Session, mut args: &[String]) -
     }
     let environment = if clear {
         external::ChildEnvironment::Empty
+    } else if session.parenthesized_subshell {
+        external::ChildEnvironment::Inherit
     } else {
         external::ChildEnvironment::ReplaceShell
     };

@@ -1,5 +1,11 @@
 # Bash compatibility audit / Bash 互換性の検証
 
+## Local namerefs that name themselves / 自分を指すローカル名前参照
+
+In GNU Bash 5.3.20, a function declaring `local -n r=r` succeeds with a warning. If its caller has a local `r` and a global `r` also exists, assigning through the reference changes the global while the caller still sees its local value. Tonari rejects the self-reference with status 1. A caller can detect the failed declaration before an assignment writes outside the enclosing scope. The regression uses global and local sentinels to check both outcomes in each shell. [Regression test](../tests/shell.py)
+
+GNU Bash 5.3.20 では、同名の外側ローカル変数があっても、自己参照するローカル名前参照への代入はグローバル変数を変更する。Tonari は宣言時に終了値 1 を返し、呼び出し元がこの誤代入を防げるようにしている。
+
 ## Independent review follow-up
 
 * `PWD` on startup must name the current directory. Tonari retains a valid absolute logical symlink spelling and supplies the corrected value to children when the inherited spelling is stale. A failed directory-stack rotation preserves the stack. In a removed cwd, `cd -P .` returns 0 and `cd -Pe .` returns 1. When no absolute name exists, Tonari leaves PWD unset until a successful change supplies one. GNU Bash 5.3.20 can retain a vanished path with an appended `/.`.
@@ -500,3 +506,7 @@ The comparison exits nonzero if a name disappears, a matching observation or tim
 * Dollar-single-quoted surrogate and out-of-range Unicode escapes retain their spelling. For example, `$'\ud800'` passes the six ASCII characters to the command. Bash 5.3.20 emits bytes ED A0 80. Later commands execute in both shells. 有効な Unicode スカラー値でないエスケープは綴りを保って後続処理を続けます。
 * After a syntax error inside an array initializer, Tonari discards through the end of the enclosing compound command. If the array is invalid on one line of an `if` and the following line says `echo early`, Tonari skips that command and resumes after `fi`. Bash 5.3.20 can run `echo early` outside the conditional and stop at `fi`. 配列初期化子のエラーでは、閉じていない複合コマンドの本体を実行しません。
 * Pretty printing preserves top-level input boundaries and layout-sensitive constructs, including array initializers, case arms and here-documents. For simple conditions it joins `then` or `do` to the preceding line. シェルが読み込む単位とヒアドキュメントなどのレイアウトを優先する整形です。
+
+Tonari bounds name-reference chains at 32 lookup steps. At the limit it reports a proven cycle separately from a depth limit on a finite chain. Both cases leave the referenced binding unchanged.
+
+名前参照は最大 32 段で探索を打ち切る。循環を確認できた場合と、有限の長い参照で上限に達した場合で診断を分け、どちらも参照先を変更しない。

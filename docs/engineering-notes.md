@@ -1,5 +1,15 @@
 # Engineering notes / 開発知見
 
+## 2026-11-29 · Second external review / 第2回外部レビュー
+
+The six review sections contain 429 distinct finding IDs. Comparing their headings with the seven subsystem ledgers found 429 unique entries in matching order and coverage. The sections cover parser/expansion (69), patterns/execution (73), jobs (43) and variables (33) in the shared third section, builtins/startup (75), editor/history (75) and cross-cutting/CI (61). Each entry identifies the implementation, a regression check, a measurement or a remaining limitation. Source inspection supplied the evidence for crash and excessive-nesting reports. [Review changes](https://github.com/sanohiro/tonari-shell/pull/58)
+
+GNU Bash 5.3.20 and Tonari flushed completed lines before `printf` numeric warnings when stdout and stderr shared a descriptor. Unterminated text remained buffered. A final direct external command in a clean `-c` invocation saw `SHLVL=0`, while one followed by another command saw 1. In POSIX mode, `wait %missing` and a positive PID outside the shell’s children both returned 127 and diagnosed the appropriate operand. The native benchmark at `bd4370b` covered six workloads and two distribution binaries. Remaining limits include recursive matching for some nested extglobs, incomplete counts on certain vi editing actions, and diagnostic-prefix differences in job and history operations. [Regression checks](../tests/shell.py) · [Native timings and sizes](benchmarks.md#r2-hosted-2026-11-29)
+
+六分冊の見出しと7台帳の行を機械照合し、429個のIDにそれぞれ1件の判定があることを確認した。内訳は構文・展開69、パターン・実行73、ジョブ43、変数33、組み込み・起動75、エディタ・履歴75、横断・CI 61。実装の確認、Bash との動作比較、計測結果、残存条件を記録した。クラッシュや過大な入れ子の指摘はソースで確認した。
+
+GNU Bash 5.3.20 と照合した実行例では、stdout と stderr をまとめた `printf` の行境界、最終コマンドへ渡す `SHLVL`、POSIX モードの `wait` における不存在ジョブと未所有 PID の区別を確認した。任意の多重 extglob の計算量、一部 vi 操作の回数指定、ジョブ・履歴の診断接頭辞には差が残る。実機の6項目と配布物サイズは計測コミットを明記した表で確認できる。[回帰試験](../tests/shell.py) · [実機計測](benchmarks.md#r2-hosted-2026-11-29)
+
 ## 2026-11-29 — Whole compounds, redirect state and history files
 
 An inner `if …; fi` on one physical line is a valid complete command inside an unfinished outer conditional. Validate that line once before reading the next line. In command substitution a standalone `case word in pattern)` header can be recognized from the last few tokens. A quoted here-document may contain many lines consisting solely of a closing reserved word. Bound repeated parser probes even when the apparent terminator begins a line. Keep the actual parser responsible for boundaries so commands on the same closing line execute together and a following physical line can observe changed aliases. [Lookahead tests](../src/input/lookahead.rs) · [Native scaling measurements](benchmarks.md#second-external-review-whole-input-scaling-2026-11-29)

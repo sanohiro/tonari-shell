@@ -297,9 +297,16 @@ fn deferred_redirects(redirects: &[Redirect<Word>], session: &Session) -> bool {
 }
 
 // A parenthesized pipeline stage is already the subshell Bash exposes.
-fn enter_stage(session: &mut Session, compound: Option<&crate::parser::Command>, background: bool) {
+fn enter_stage(
+    session: &mut Session,
+    compound: Option<&crate::parser::Command>,
+    background: bool,
+    piped: bool,
+) {
     let explicit = matches!(compound, Some(crate::parser::Command::Subshell(_)));
     session.enter_subshell();
+    session.parenthesized_subshell = explicit;
+    session.pipeline_subshell = !explicit && piped;
     session.jobs.forked(!explicit && !background);
     if explicit {
         session.command_string = false;
@@ -361,7 +368,12 @@ fn start_raw(
     let pid = session.fork_shell()?;
     if pid == 0 {
         launch.pipeline_child(&mut session.traps);
-        enter_stage(session, raw.compound.as_deref(), launch.background);
+        enter_stage(
+            session,
+            raw.compound.as_deref(),
+            launch.background,
+            input.is_some() || output.is_some(),
+        );
         coprocess::after_fork(session);
         if matches!(
             raw.compound.as_deref(),
@@ -653,7 +665,12 @@ fn fork_stage(
         // runs in a child copy of the single-threaded interpreter and may reenter it.
         // Restore signals caught by the interactive shell before blocking on a file.
         launch.pipeline_child(&mut session.traps);
-        enter_stage(session, cmd.compound.as_deref(), launch.background);
+        enter_stage(
+            session,
+            cmd.compound.as_deref(),
+            launch.background,
+            input.is_some() || output.is_some(),
+        );
         if cmd.missing_hook && !launch.background {
             // The hook has a private execution environment. A normal command
             // search itself does not add a shell-language subshell level.
@@ -742,6 +759,11 @@ pub(super) fn capture_external(
         && let Ok(Some(entry)) = hash::search(name, session)
     {
         cmd.resolved = Some(entry.path);
+    }
+    // The sole command can replace its substitution shell. A pipeline reader
+    // or a command with its own redirections keeps the ordinary child level.
+    if input.is_none() && cmd.redirects.is_empty() && !session.pipeline_subshell {
+        cmd.environment = external::ChildEnvironment::ReplaceShell;
     }
     let (reader, writer) = pipe().map_err(|_| "cannot open command substitution pipe")?;
     // An external-only capture uses its command process as the substitution
@@ -1107,11 +1129,12 @@ fn run_external(
         && !session.traps.child_ignores_chld()
         && !cmd.prepare_missing_hook(session)
     {
-        let environment = if cmd.redirects.is_empty() && session.jobs.is_empty() {
-            external::ChildEnvironment::ReplaceShell
-        } else {
-            external::ChildEnvironment::Inherit
-        };
+        let environment =
+            if cmd.redirects.is_empty() && session.jobs.is_empty() && !session.pipeline_subshell {
+                external::ChildEnvironment::ReplaceShell
+            } else {
+                external::ChildEnvironment::Inherit
+            };
         let executable = External::for_words(cmd, session, &cmd.words, None, environment)?;
         return Ok(Flow::Continue(
             if apply(&actions(cmd), here_input::PIPE_LIMIT, session) {
@@ -1317,7 +1340,7 @@ fn assign_existing_word(session: &mut Session, key: &str, word: &Word) -> bool {
     }
     word.stored_parameter(session)
         .map(str::to_owned)
-        .is_some_and(|value| session.assign_existing_literal(key, &value))
+        .is_some_and(|value| session.assign_existing_text(key, value.into()))
 }
 
 pub(crate) fn run_single(
