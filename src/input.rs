@@ -238,10 +238,10 @@ fn assign_buffered_scalar(session: &mut Session, command: &str, scratch: &mut St
 // cannot finish it. Retry on syntax, NUL, heredocs and history expansion.
 fn still_open(reason: Option<parser::Incomplete>, line: &[u8]) -> bool {
     use parser::Incomplete::*;
-    let plain = |b: &u8| b.is_ascii_alphanumeric() || b" _-+:./=,\t\n".contains(b);
+    let plain = |b: &u8| !b.is_ascii() || b.is_ascii_alphanumeric() || b" _-+:./=,\t\n".contains(b);
     match reason {
         Some(SingleQuote) => memchr::memchr2(b'\'', 0, line).is_none(),
-        Some(DoubleQuote) => !line.iter().any(|b| b"\"\x00\x24`\\".contains(b)),
+        Some(DoubleQuote) => !line.iter().any(|b| b"\"\0$`\\".contains(b)),
         Some(Message("line continuation")) => line
             .strip_suffix(b"\\\n")
             .is_some_and(|s| s.iter().all(plain)),

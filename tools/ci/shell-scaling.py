@@ -14,11 +14,13 @@ def workloads(n):
     yield "array literal", "a=(\n" + "entry\n" * n + ')\necho ${#a[@]}', str(n)
     yield "subshell", "(\n" + ":\n" * n + "echo ok\n)", "ok"
     yield "substitution", "x=$(\n" + ":\n" * n + 'echo ok\n); echo "$x"', "ok"
+    yield "subshell with inner closers", "(\n" + "x=$((1))\n" * n + "echo ok\n)", "ok"
+    yield "UTF-8 array", "a=(\n" + "日本語\n" * n + ')\necho ${#a[@]}', str(n)
     yield "continued word", "x=" + "a\\\n" * n + 'b; echo ${#x}', str(n + 1)
     yield "double quote", 'x="' + "a\n" * n + '"; echo ${#x}', str(2 * n)
     yield "arithmetic", "((x=\n" + "1+\n" * n + "0)); echo $x", str(n)
-    yield "braces", "x=" + "{a," * n + "; echo ${#x}", str(3 * n)
-    yield "braces with a close", "x=" + "{a" * n + "}; echo ${#x}", str(2 * n + 1)
+    yield "braces", "set -- " + "{a," * n + "; echo ${#1}", str(3 * n)
+    yield "braces with a close", "set -- " + "{a" * n + "}; echo ${#1}", str(2 * n + 1)
     for label, expr, seed, expected, setup in [
         ("repeated extglob miss", "${s//+(a)z/X}", "a" * n, n, ""),
         ("extglob alternatives hit", "${s//+(a|b)z/X}", "ab" * (n//2) + "z", 1, ""),
@@ -32,6 +34,8 @@ def workloads(n):
         ("class suffix replace", "${s/%*[0-9]/X}", "a" * n, n, ""),
     ]:
         yield label, f'shopt -s extglob\n{setup}\ns={seed}\nfor i in 1 2 3; do x={expr}; done; echo ${{#x}}', str(expected)
+    yield "UTF-8 repeat", "export LC_ALL=C.UTF-8; shopt -s extglob\ns=" + "雪桜"*(n//2) + 'z; x=${s//+(雪|桜)z/ok}; echo "$x"', "ok"
+    yield "UTF-8 class trim", "export LC_ALL=C.UTF-8; s=" + "雪"*n + '1a; x=${s##*[0-9]}; echo "$x"', "a"
     yield "negated extglob", "s=" + "a"*n + '\n[[ $s == !(z)*!(z)*y ]]; echo $?', "1"
     yield "negation with match", "s=" + "a"*n + 'y\n[[ $s == !(z)*!(z)*y ]]; echo $?', "0"
     yield "indexed declaration", f'a=({{1..{n}}}); for ((i=0;i<200;i++)); do declare a[0]=x; done; echo "${{a[0]}} ${{#a[@]}}"', f"x {n}"

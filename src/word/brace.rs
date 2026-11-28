@@ -107,6 +107,12 @@ enum Choice {
 }
 
 fn choice(parts: &[Part]) -> Option<Choice> {
+    if !parts.iter().any(|p| matches!(p, Part::Brace("}"))) {
+        return parts
+            .iter()
+            .position(|p| matches!(p, Part::Range(_)))
+            .map(Choice::Range);
+    }
     let mut stack = Vec::<(usize, Vec<usize>)>::new();
     let mut first = None;
     let mut best = usize::MAX;

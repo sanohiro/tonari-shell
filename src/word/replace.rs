@@ -247,7 +247,41 @@ pub(super) fn substitute(
         out.push_str(&text[copied..]);
         return out;
     }
-    let spans = crate::pattern::extended::spans::ascii_ends(compiled, &text, mode == Suffix, true);
+    if let Some(ends) =
+        crate::pattern::extended::spans::match_ends(compiled, &text, mode == Suffix, true)
+    {
+        if ends.is_empty() {
+            return text;
+        }
+        // Offsets inside a multibyte character are marked as misses.
+        while i < text.len() {
+            let end = ends[i];
+            if end != crate::pattern::extended::spans::MISS {
+                out.push_str(&text[copied..i]);
+                write_replacement(&mut out, template, &text[i..end], expand_amp);
+                copied = end;
+                if mode != All {
+                    break;
+                }
+                i = end.max(i + 1);
+            } else {
+                if mode == Prefix {
+                    break;
+                }
+                i += 1;
+            }
+        }
+        if copied == 0 && out.is_empty() {
+            // Nullable tail matches have additional shell-specific rules.
+            if mode != Suffix || ends[text.len()] == crate::pattern::extended::spans::MISS {
+                return text;
+            }
+        } else {
+            out.push_str(&text[copied..]);
+            return out;
+        }
+        i = 0;
+    }
     let bounds: Vec<_> = text
         .char_indices()
         .map(|(i, _)| i)
@@ -271,9 +305,7 @@ pub(super) fn substitute(
     }
     while i + 1 < bounds.len() {
         let start = bounds[i];
-        let end = if let Some(ends) = &spans {
-            (ends[i] != crate::pattern::extended::spans::MISS).then_some(ends[i])
-        } else if mode == Suffix {
+        let end = if mode == Suffix {
             accepts(&text[start..]).then_some(bounds.len() - 1)
         } else if let Some(end) = group.and_then(|g| g.run_prefix(&text[start..], true)) {
             end.map(|length| i + bounds[i..].partition_point(|&offset| offset < start + length))

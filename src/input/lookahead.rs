@@ -150,6 +150,8 @@ pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
         "case" => b"esac",
         "while" | "until" | "for" | "select" => b"done",
         "function" | "{" => b"}",
+        _ if parser::opens_function(header) => b"}",
+        _ if header.starts_with('(') || header.contains("=(") || header.contains("$(") => b")",
         _ if header.contains("()") => b"}",
         _ => return Err(0),
     };
@@ -193,6 +195,41 @@ pub(super) fn buffered_compound<P: AsRef<[parser::Statement]>>(
             _ => Err(size),
         }
     };
+    if close == b")" {
+        // Inner substitutions, arithmetic and quoted parentheses can resemble
+        // a terminator. Probe candidate physical lines at doubling distances.
+        let mut probe_after = 0;
+        let mut deferred = None;
+        let mut offset = 0;
+        while let Some(hit) = memchr::memchr(b')', &buffered[offset..]) {
+            let at = offset + hit;
+            let end = match memchr::memchr(b'\n', &buffered[at..]) {
+                Some(n) => at + n + 1,
+                None if at_eof => buffered.len(),
+                None => break,
+            };
+            offset = end;
+            if end < probe_after {
+                deferred = Some(end);
+                continue;
+            }
+            deferred = None;
+            let lines = memchr::memchr_iter(b'\n', &buffered[..end]).count()
+                + usize::from(!buffered[..end].ends_with(b"\n"));
+            if let Some(unit) = probe(end, lines)? {
+                return Ok(unit);
+            }
+            probe_after = end.saturating_mul(2);
+        }
+        if let Some(end) = deferred {
+            let lines = memchr::memchr_iter(b'\n', &buffered[..end]).count()
+                + usize::from(!buffered[..end].ends_with(b"\n"));
+            if let Some(unit) = probe(end, lines)? {
+                return Ok(unit);
+            }
+        }
+        return Err(buffered.len());
+    }
     // Large, flat compounds often have only one possible terminator. Locate
     // its line in bulk; nested or ambiguous text uses the line scan below.
     if !aliases && buffered.len() >= BULK_CLOSE_MIN_BYTES {

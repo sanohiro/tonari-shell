@@ -281,12 +281,16 @@ impl<T: Default> HistoryWindow<T> {
     }
 
     fn remove(&mut self, index: usize) {
-        self.values.remove(self.head + index);
+        if index == 0 {
+            self.discard(1);
+        } else {
+            self.values.remove(self.head + index);
+        }
     }
 
     fn discard(&mut self, count: usize) {
         self.head += count;
-        if self.head >= 256 || self.head >= self.len() {
+        if self.head >= self.len() || self.head >= 256 && self.head >= self.len() / 4 {
             self.values.drain(..self.head);
             self.head = 0;
         } else {
@@ -563,6 +567,10 @@ impl Entries {
             });
             let hash = counts.hasher().hash_one(&line);
             let mut remaining = counts.get(&hash).copied().unwrap_or(0);
+            if remaining == 1 && self.lines.first() == Some(&line) {
+                self.remove(0);
+                remaining = 0;
+            }
             let mut i = self.lines.len();
             while remaining != 0 && i != 0 {
                 i -= 1;

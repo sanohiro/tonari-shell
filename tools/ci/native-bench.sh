@@ -11,6 +11,7 @@ source tools/ci/bash-source.sh
 if [[ $SUITE == shell-scaling ]]; then
   REFERENCE_BASH="$ref" python3 tests/shell.py "$current" -q -k scaling
   PYTHONPATH=tools python3 tools/ci/shell-scaling.py "$bin/baseline" "$current" "$ref" > "$out/scaling.tsv"
+  PYTHONPATH=tools python3 tools/ci/scaling-history.py "$bin/baseline" "$current" "$ref" > "$out/history-pty.txt"
   exit
 fi
 if [[ $SUITE == array-evaluation ]]; then

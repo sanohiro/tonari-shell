@@ -66,6 +66,21 @@ declare -A h=([k]=x); for i in 1 2 3; do h[k]="${h[k]}y"; done; echo "${h[k]}"
             self.assertEqual((proc.returncode, proc.stdout, proc.stderr),
                              (0, scopes + b"\nchanged 2 third next last\n23\nxyyy\n", b""))
 
+    def test_scaling_unicode_spans_and_required_suffix(self):
+        self.env["LC_ALL"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+        script = r"""shopt -s extglob; s=; for ((i=0;i<130;i++)); do s+=雪桜; done
+for p in '+(雪|桜)z' '*[[:digit:]]' '雪*1' '*ァ' '+(雪)桜'; do
+v=${s}1z; printf '<%s>\n' "${v//$p/R}" "${v/%$p/R}" "${v##$p}" "${v%%$p}"
+done
+shopt -s nocasematch; s=${s}K; echo "${s//*k/ok}"
+"""
+        ref = self.command(BASH, script)
+        result = self.command(TONARI, script)
+        self.assertEqual((ref.returncode, ref.stderr), (0, b""))
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, ref.stdout, b""))
+        mismatch = self.command(TONARI, "s=aaa; [[ $s == !(z)*!(z)*[y] ]]")
+        self.assertEqual(mismatch.returncode, 1)
+
     def test_scaling_erasedups_tracks_trim_delete_and_import(self):
         (self.cwd / "history-data").write_text("aa\nbb\naa\n")
         script = r"""HISTSIZE=6; HISTCONTROL=erasedups
@@ -3860,8 +3875,10 @@ for v in '' a b x aa; do [[ $v == $p ]] && printf 1 || printf 0; done; echo; don
         self.assertEqual((proc.returncode, proc.stderr, ref.returncode, ref.stderr), (0, b"", 0, b""))
         self.assertEqual(len(proc.stdout.splitlines()), len(patterns))
         for p, expected, actual in zip(patterns, ref.stdout.splitlines(), proc.stdout.splitlines(), strict=True):
-            if p == "*!(*)b":
-                expected = b"0000000000"
+            # None can accept empty: b and ? require input, and the middle
+            # negation in the second pattern explicitly excludes empty.
+            if p in ("*!(*)b", "*!(|@(|b)[ab][[:digit:]])*", "*!(b[ab])?"):
+                expected = b"0" + expected[1:]
             self.assertEqual(actual, expected, p)
 
     def test_extglob_at_parse_time_and_invocation(self):

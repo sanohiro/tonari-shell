@@ -1040,8 +1040,18 @@ impl Session {
         global: bool,
         var: &mut Variable,
     ) -> Result<i64, &'static str> {
-        if let Some(n) = Self::plain_decimal(expr) {
-            return self.relative_index(name, n);
+        if let Some(n) = Self::plain_decimal(expr).or_else(|| {
+            crate::word::is_identifier(expr)
+                .then(|| self.scalar_decimal(expr))
+                .flatten()
+        }) {
+            return absolute_index(n, || {
+                var.elements
+                    .as_ref()
+                    .and_then(|a| a.last_index())
+                    .or_else(|| var.value.as_ref().map(|_| 0))
+            })
+            .ok_or(crate::session::SUBSCRIPT_RANGE);
         }
         if expr.trim().is_empty() {
             return Err("empty array subscript");

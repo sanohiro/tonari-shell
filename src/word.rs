@@ -244,9 +244,6 @@ impl Word {
         text.drain(..length);
     }
 
-    /// A plain scalar can keep its allocation for a self-prefixed assignment.
-    /// Evaluate the suffix normally. Expressions capable of changing the old
-    /// value (including indexed name references) require the original snapshot.
     pub(crate) fn literal_element_suffix(&self, key: &str) -> Option<&str> {
         let Self::Expanded(parts) = self else {
             return None;
@@ -264,6 +261,9 @@ impl Word {
         }
     }
 
+    /// A plain scalar can keep its allocation for a self-prefixed assignment.
+    /// Evaluate the suffix normally. Expressions capable of changing the old
+    /// value (including indexed name references) require the original snapshot.
     pub(crate) fn take_append_suffix(&mut self, target: &str, session: &crate::Session) -> bool {
         let Self::Expanded(parts) = self else {
             return false;

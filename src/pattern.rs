@@ -499,7 +499,10 @@ pub(crate) fn trim_boundary(
         .char_indices()
         .map(|(i, _)| i)
         .chain(std::iter::once(value.len()));
-    if let Some(ends) = extended::spans::ascii_ends(compiled, value, !prefix, longest) {
+    if let Some(ends) = extended::spans::match_ends(compiled, value, !prefix, longest) {
+        if ends.is_empty() {
+            return None;
+        }
         let miss = extended::spans::MISS;
         return if prefix {
             (ends[0] != miss).then_some(ends[0])
