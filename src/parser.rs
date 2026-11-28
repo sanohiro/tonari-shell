@@ -336,17 +336,17 @@ pub(crate) fn plain_assignment(command: &str) -> Option<(&str, &str)> {
 }
 
 // Generated eval assignments often change just the value. Construct the same
-// simple-command AST; assignment attributes, traps and exit status stay live.
+// literal assignment as the full parser. Attributes, traps and status stay live.
 pub(crate) fn literal_assignment(source: &str, line: usize) -> Option<Statement> {
     let command = source.strip_suffix('\n').unwrap_or(source);
     let (name, raw) = command.split_once('=')?;
     if !is_identifier(name) {
         return None;
     }
-    let value = if raw.bytes().all(lexer::plain_byte) {
-        raw.to_owned()
+    let spelling = if raw.bytes().all(lexer::plain_byte) {
+        command.to_owned()
     } else if !raw.contains(['\n', '\0']) {
-        if let Some(rest) = raw.strip_prefix("$'") {
+        let value = if let Some(rest) = raw.strip_prefix("$'") {
             let mut chars = rest.chars();
             let decoded = ansi::quoted(&mut chars).ok()?;
             if !chars.as_str().is_empty() {
@@ -359,7 +359,8 @@ pub(crate) fn literal_assignment(source: &str, line: usize) -> Option<Statement>
                 return None;
             }
             quoted.to_owned()
-        }
+        };
+        [name, "=", &value].concat()
     } else {
         return None;
     };
@@ -374,10 +375,7 @@ pub(crate) fn literal_assignment(source: &str, line: usize) -> Option<Statement>
         location,
         condition: Condition::Always,
         negated: false,
-        command: Command::Pipeline(vec![SimpleCommand {
-            assignments: vec![(name.to_owned(), Assignment::Scalar(Word::Literal(value)))],
-            ..Default::default()
-        }]),
+        command: Command::LiteralAssignment(spelling, std::num::NonZeroUsize::new(name.len())?),
     })
 }
 
@@ -733,9 +731,19 @@ impl Reader {
             } else {
                 command
             };
-            // Nested lists often contain one statement. Its enum is large.
             if statements.is_empty() {
-                statements.reserve_exact(1);
+                // Size a multi-command body once. Do not allocate several large
+                // statements for the usual one-command condition or case arm.
+                let mut rest = self.tokens.iter();
+                let mut token = rest.next();
+                while matches!(token, Some(Token::End | Token::Newline)) {
+                    token = rest.next();
+                }
+                let more = token.is_some_and(|t| {
+                    !matches!(t, Token::RightParen | Token::EndArm(_))
+                        && !t.keyword().is_some_and(|s| stops.contains(&s))
+                });
+                statements.reserve_exact(if more { 3 } else { 1 });
             }
             statements.push(Statement {
                 location: self.location(start),
@@ -786,10 +794,12 @@ impl Reader {
             else {
                 unreachable!()
             };
-            let name = word.assignment_name(name).to_owned();
+            if let Word::Literal(text) = word {
+                return Ok(Command::LiteralAssignment(text, name));
+            }
             let mut word = word;
-            word.remove_assignment_prefix(name.len() + 1);
-            return Ok(Command::Scalar(Box::new((name, word))));
+            let key = word.take_assignment_name(name);
+            return Ok(Command::Scalar(Box::new((key, word))));
         }
         let start = self.position();
         let mut first = match self.compound()? {
@@ -862,7 +872,7 @@ impl Reader {
             let Some(Token::Arithmetic(expr)) = self.tokens.pop_front() else {
                 unreachable!()
             };
-            return Ok(Some(Command::Arithmetic(expr.into())));
+            return Ok(Some(Command::Arithmetic(Box::new(expr.into()))));
         }
         if matches!(self.peek(), Some(Token::LeftParen)) {
             self.tokens.pop_front();
@@ -996,11 +1006,7 @@ impl Reader {
             self.newlines();
         }
         self.expect("esac")?;
-        Ok(Command::Case(Box::new(CaseClause {
-            header,
-            word,
-            arms: Rc::new(arms),
-        })))
+        Ok(Command::Case(Rc::new(CaseClause { header, word, arms })))
     }
 
     fn if_clause(&mut self) -> Result<Command, Error> {
@@ -1199,20 +1205,20 @@ impl Reader {
                 command: compound,
             }]
         };
+        let location = self.location(start);
+        let declaration_line = if self.alias_source.is_none() {
+            let header = &self.source.as_bytes()[self.spans[start_name].0..location.start];
+            location.line - memchr::memchr_iter(b'\n', header).count()
+        } else {
+            self.location(start_name).line
+        };
         Ok(Command::Function {
             name,
             definition: Rc::new(FunctionDefinition {
                 rendered_body: Default::default(),
-                declaration_line: if self.alias_source.is_none() {
-                    self.first_line
-                        + self
-                            .newlines
-                            .partition_point(|&n| n < self.spans[start_name].0)
-                } else {
-                    self.location(start_name).line
-                },
+                declaration_line,
                 body: wrapper::FunctionBody::Parsed(body),
-                location: self.location(start),
+                location,
             }),
         })
     }
@@ -1399,8 +1405,14 @@ impl Reader {
                         {
                             return Err(Error::Invalid("unexpected reserved word"));
                         }
-                        // Most simple commands have only the name and one operand.
-                        cmd.words.reserve_exact(2);
+                        // A bounded lookahead sizes the argument vector for short commands.
+                        let args = self
+                            .tokens
+                            .iter()
+                            .take(8)
+                            .take_while(|t| matches!(t, Token::Word(_)))
+                            .count();
+                        cmd.words.reserve_exact(1 + args);
                     } else if let Some(name) = assignment {
                         cmd.keyword_args.record(cmd.words.len(), name);
                         if declaration {

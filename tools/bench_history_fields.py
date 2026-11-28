@@ -94,7 +94,11 @@ def main():
     p.add_argument("--entries", type=int, default=1000000)
     p.add_argument("--deep-page", action="store_true",
                    help="select the first new match beyond a long run of duplicate history")
+    p.add_argument("--mixed-records", action="store_true",
+                   help="vary journal version, timestamp, process and directory across duplicate commands")
     args = p.parse_args()
+    if args.mixed_records and not args.deep_page:
+        p.error("--mixed-records requires --deep-page")
     shells = [s.resolve() for s in args.shell]
     if args.entries < 20 or args.runs < 1:
         p.error("need at least 20 entries and a positive number of trials")
@@ -109,8 +113,13 @@ def main():
             if args.deep_page:
                 out.write(head + deep_command(DEEP_ROW) + b"\n")
                 duplicate = head + deep_command(DEEP_ROW - 1) + b"\n"
-                for _ in range(args.entries):
-                    out.write(duplicate)
+                for i in range(args.entries):
+                    if args.mixed_records:
+                        version = f"2\t{1800000000+i}\t" if i % 2 else "1\t"
+                        prefix = f"{version}{i % 13}\t{i % 3}\t/dir{i % 5}\t".encode()
+                        out.write(prefix + deep_command(DEEP_ROW - 1) + b"\n")
+                    else:
+                        out.write(duplicate)
                 for index in reversed(range(DEEP_ROW)):
                     out.write(head + deep_command(index) + b"\n")
             else:

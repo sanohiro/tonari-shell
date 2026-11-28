@@ -7,6 +7,7 @@ pub(crate) mod quote;
 mod replace;
 use crate::parser::Statement;
 use crate::pattern::{Field, quote_into};
+pub(crate) use modifier::character_count;
 pub use modifier::{Modification, ReplaceMode};
 
 pub(crate) const ARRAY_INDEXES_PREFIX: char = '\u{1}';
@@ -100,7 +101,7 @@ pub enum Part {
         quoted: bool,
     },
     Arithmetic {
-        expression: String,
+        expression: std::rc::Rc<crate::arithmetic::Expression>,
         quoted: bool,
     },
     Parameter {
@@ -178,7 +179,7 @@ impl Word {
                 .as_slice()
                 .get(usize::from(digit - b'1'))
                 .map(String::as_str),
-            _ if is_identifier(name) => session.stored_scalar(name),
+            _ if is_identifier(name) => session.referenced_scalar(name),
             _ => None,
         }
     }
@@ -201,6 +202,20 @@ impl Word {
             }
         };
         &text[..length.get()]
+    }
+
+    pub(crate) fn take_assignment_name(&mut self, length: std::num::NonZeroUsize) -> String {
+        if let Self::Expanded(parts) = self
+            && let Some(Part::Text(prefix)) = parts.first_mut()
+            && prefix.len() == length.get() + 1
+        {
+            let mut name = std::mem::take(prefix);
+            name.truncate(length.get());
+            return name;
+        }
+        let name = self.assignment_name(length).to_owned();
+        self.remove_assignment_prefix(name.len() + 1);
+        name
     }
 
     pub fn remove_assignment_prefix(&mut self, length: usize) {
@@ -380,7 +395,12 @@ impl Word {
                     });
                 }
                 Part::Arithmetic { expression, quoted } => {
-                    *part = literal(env.arithmetic(expression)?.to_string(), *quoted);
+                    let value = match expression.compiled(env, true) {
+                        Some(Ok(n)) => n,
+                        Some(Err(e)) => return Err(crate::expansion::Error::discard(e)),
+                        None => env.arithmetic(expression)?,
+                    };
+                    *part = literal(value.to_string(), *quoted);
                 }
                 Part::Process { body, input } => {
                     *part = Part::Text(env.process(std::mem::take(body), *input)?);
@@ -948,6 +968,25 @@ pub(crate) fn separators(text: &str, ifs: &str, mut visit: impl FnMut(usize, &st
     } else if ifs == crate::word::DEFAULT_IFS {
         for i in memchr::memchr3_iter(b' ', b'\t', b'\n', text.as_bytes()) {
             visit(i, &text[i..i + 1]);
+        }
+    } else if let [a, b] = ifs.as_bytes()
+        && ifs.is_ascii()
+    {
+        for i in memchr::memchr2_iter(*a, *b, text.as_bytes()) {
+            visit(i, &text[i..i + 1]);
+        }
+    } else if let [a, b, c] = ifs.as_bytes()
+        && ifs.is_ascii()
+    {
+        for i in memchr::memchr3_iter(*a, *b, *c, text.as_bytes()) {
+            visit(i, &text[i..i + 1]);
+        }
+    } else if ifs.is_ascii() {
+        let mask = ifs.bytes().fold(0u128, |mask, b| mask | (1u128 << b));
+        for (i, b) in text.bytes().enumerate() {
+            if b.is_ascii() && mask & (1u128 << b) != 0 {
+                visit(i, &text[i..i + 1]);
+            }
         }
     } else {
         for (i, sep) in text.match_indices(|c| ifs.contains(c)) {

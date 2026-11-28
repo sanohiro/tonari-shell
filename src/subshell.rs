@@ -43,6 +43,30 @@ fn read_regular_file(file: &std::fs::File, size: u64, output: &mut Vec<u8>) -> i
     }
 }
 
+fn capture_arguments(
+    words: &[parser::Word],
+    session: &mut Session,
+    last: u8,
+) -> Option<Vec<String>> {
+    if !words
+        .iter()
+        .all(|w| w.as_literal().is_some() || !session.nounset && inert_operand(w, session, false))
+    {
+        return None;
+    }
+    let captured = std::cell::Cell::new(None);
+    let mut env = crate::expansion::Expansion::new(session, last, &captured);
+    let mut args = Vec::with_capacity(words.len());
+    for word in words {
+        if let Some(text) = word.as_literal() {
+            args.push(text.into());
+        } else {
+            env.append_fields(word.clone(), &mut args).ok()?;
+        }
+    }
+    Some(args)
+}
+
 pub(crate) fn current_substitution(
     session: &mut Session,
     body: Vec<parser::Statement>,
@@ -52,7 +76,7 @@ pub(crate) fn current_substitution(
     if body.is_empty() {
         return Ok((String::new(), 0));
     }
-    // A single literal output builtin can write to memory directly. Everything
+    // A single output builtin with inert operands can write to memory directly. Everything
     // that can redirect stdout or observe traps still executes in a real fd scope.
     if !reply
         && !session.traps.active()
@@ -63,15 +87,16 @@ pub(crate) fn current_substitution(
             cmd.words.first().and_then(parser::Word::as_literal)
         && !session.functions.contains_key(name)
         && !session.disabled_builtins.contains(name)
-        && let Some(words) = cmd
-            .words
-            .iter()
-            .map(|w| w.as_literal().map(str::to_owned))
-            .collect::<Option<Vec<_>>>()
+        && !session.noexec
         && (name == "echo"
-            || words.get(1).is_some_and(|format| {
-                !format.starts_with('-') && !crate::session::printf::may_assign_count(format)
-            }))
+            || cmd
+                .words
+                .get(1)
+                .and_then(parser::Word::as_literal)
+                .is_some_and(|format| {
+                    !format.starts_with('-') && !crate::session::printf::may_assign_count(format)
+                }))
+        && let Some(words) = capture_arguments(&cmd.words, session, last)
     {
         let mut output = Vec::new();
         let code = if name == "echo" {

@@ -191,14 +191,19 @@ fn invoke(args: impl Iterator<Item = std::ffi::OsString>) -> u8 {
             return 2;
         }
     };
-    run_invocation(invocation)
+    let mut session = Session::default();
+    let code = run_invocation(&mut session, invocation);
+    // Both callers exit the process after this invocation. The function table
+    // owns parsed shell text, which the kernel reclaims in bulk. Coprocesses,
+    // substitution endpoints and other session fields still drop normally.
+    std::mem::forget(session.functions);
+    code
 }
 
-fn run_invocation(mut invocation: cli::Invocation) -> u8 {
+fn run_invocation(session: &mut Session, mut invocation: cli::Invocation) -> u8 {
     use cli::Input;
-    let mut session = Session::default();
     session.started_at = unsafe { libc::time(std::ptr::null_mut()) };
-    let env = startup::Environment::read(&mut session);
+    let env = startup::Environment::read(session);
     session.initialize_shell_level(&env);
     session.arg0 = std::mem::take(&mut invocation.arg0);
     session.positional = std::mem::take(&mut invocation.positional).into_iter();
@@ -280,7 +285,7 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
         }
     }
     if invocation.pretty {
-        return input::print_script(&session, invocation.input);
+        return input::print_script(session, invocation.input);
     }
     if session.interactive {
         if session.get("PS1").is_none() {
@@ -300,19 +305,19 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
     if session.interactive && traps::listen_for_interrupts().is_err() {
         return 1;
     }
-    let initial = match startup::initialize(&mut session, &invocation) {
+    let initial = match startup::initialize(session, &invocation) {
         Flow::Discard(status) | Flow::Continue(status) => status,
         Flow::Return(status) | Flow::Exit(status) => {
-            return traps::finish(&mut session, status);
+            return traps::finish(session, status);
         }
         Flow::Break(..) | Flow::LoopContinue(_) => return 1,
     };
     if invocation.debugger
         && !invocation.options.check
         && (!session.interactive || !matches!(invocation.input, Input::Stdin))
-        && let Flow::Exit(code) = startup::debugger(&mut session)
+        && let Flow::Exit(code) = startup::debugger(session)
     {
-        return traps::finish(&mut session, code);
+        return traps::finish(session, code);
     }
     if invocation.as_sh && !session.posix {
         session.set_posix(true);
@@ -321,7 +326,7 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
         Input::Command(_) => {
             let text = session.execution_string.clone().unwrap();
             input::text(
-                &mut session,
+                session,
                 &text,
                 initial,
                 true,
@@ -334,7 +339,7 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
                 session.push_source_path(&path);
                 session.function_names.push("main".into());
                 session.call_lines.push(0);
-                input::file_script(&mut session, file, None, initial, invocation.options.check)
+                input::file_script(session, file, None, initial, invocation.options.check)
             }
             Err(e) => {
                 diagnostic!("{}: {e}", path.display());
@@ -346,7 +351,7 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
             }
         },
         Input::Stdin if invocation.interactive => {
-            match interactive(&mut session, initial, !invocation.noediting) {
+            match interactive(session, initial, !invocation.noediting) {
                 Ok(code) => Flow::Continue(code),
                 Err(e) => {
                     diagnostic!("{e}");
@@ -354,11 +359,11 @@ fn run_invocation(mut invocation: cli::Invocation) -> u8 {
                 }
             }
         }
-        Input::Stdin => input::stdin_script(&mut session, invocation.options.check),
+        Input::Stdin => input::stdin_script(session, invocation.options.check),
     };
     let code = match flow {
         Flow::Discard(s) | Flow::Continue(s) | Flow::Exit(s) | Flow::Return(s) => s,
         Flow::Break(..) | Flow::LoopContinue(_) => 1,
     };
-    traps::finish(&mut session, code)
+    traps::finish(session, code)
 }

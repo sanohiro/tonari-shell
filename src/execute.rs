@@ -851,9 +851,8 @@ fn run_prepared(
         return result;
     }
     let selected = builtin(&cmd, last_status, session);
-    // Function calls take ownership of their argv. Other commands can move
-    // their final word into $_ after execution without copying its contents.
-    let saved = matches!(selected, Some(Builtin::Function))
+    // Functions and set can consume argv before $_ is updated.
+    let saved = matches!(selected, Some(Builtin::Function | Builtin::Set))
         .then(|| cmd.words.last().cloned())
         .flatten();
     let result = if let Some(builtin) = selected {
@@ -1012,6 +1011,31 @@ fn lastpipe(
     result
 }
 
+pub(crate) fn literal_assignment(
+    session: &mut Session,
+    text: &str,
+    end: usize,
+    status: u8,
+    tail: bool,
+) -> io::Result<Flow> {
+    if let Some(flow) = crate::traps::debug(session, status) {
+        return Ok(flow);
+    }
+    let key = &text[..end];
+    let value = &text[end + 1..];
+    if !session.xtrace && session.assign_existing_literal(key, value) {
+        session.last_argument = Some(String::new());
+        return Ok(Flow::Continue(0));
+    }
+    scalar_command(
+        key.to_owned(),
+        Word::Literal(value.into()),
+        status,
+        tail,
+        session,
+    )
+}
+
 pub(crate) fn run_scalar(
     pair: std::borrow::Cow<'_, (String, Word)>,
     last_status: u8,
@@ -1026,6 +1050,16 @@ pub(crate) fn run_scalar(
         return Ok(Flow::Continue(0));
     }
     let (key, word) = pair.into_owned();
+    scalar_command(key, word, last_status, replace, session)
+}
+
+fn scalar_command(
+    key: String,
+    word: Word,
+    last_status: u8,
+    replace: bool,
+    session: &mut Session,
+) -> io::Result<Flow> {
     let command = SimpleCommand {
         assignments: vec![(key, Assignment::Scalar(word))],
         ..Default::default()
@@ -1041,6 +1075,34 @@ pub(crate) fn run_scalar(
 fn assign_existing_word(session: &mut Session, key: &str, word: &Word) -> bool {
     if let Some(value) = word.as_literal() {
         return session.assign_existing_literal(key, value);
+    }
+    if let Word::Expanded(parts) = word {
+        use crate::word::Part;
+        let parts = match parts.as_slice() {
+            [Part::Text(empty), rest @ ..] if empty.is_empty() => rest,
+            other => other,
+        };
+        match parts {
+            [Part::Arithmetic { expression, .. }] => {
+                if let Some(Ok(n)) = expression.compiled(session, false) {
+                    return session.assign_existing_literal(key, itoa::Buffer::new().format(n));
+                }
+            }
+            [Part::Parameter { name, .. } | Part::BraceParameter(name)]
+                if name.starts_with('#') =>
+            {
+                if let Some(n) = session.stored_char_count(&name[1..]) {
+                    return session.assign_existing_literal(key, itoa::Buffer::new().format(n));
+                }
+            }
+            [
+                Part::Parameter { name, .. } | Part::BraceParameter(name),
+                Part::Text(suffix) | Part::Pattern(suffix),
+            ] if name == key && session.can_append_scalar(key) => {
+                return session.append_plain_scalar(key, suffix);
+            }
+            _ => {}
+        }
     }
     word.stored_parameter(session)
         .map(str::to_owned)

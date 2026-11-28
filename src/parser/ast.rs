@@ -229,16 +229,17 @@ pub struct ArithmeticForClause {
     pub body: Vec<Statement>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct CaseClause {
     pub header: Location,
     pub word: Word,
-    pub arms: Rc<Vec<CaseArm>>,
+    pub arms: Vec<CaseArm>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Command {
     Scalar(Box<(String, Word)>),
+    LiteralAssignment(String, std::num::NonZeroUsize),
     Pipeline(Pipeline<Word>),
     Group(Vec<Statement>),
     Timed {
@@ -246,7 +247,7 @@ pub enum Command {
         command: Box<Command>,
     },
     Test(Box<Expr>),
-    Arithmetic(crate::arithmetic::Expression),
+    Arithmetic(Box<crate::arithmetic::Expression>),
     ForArithmetic(Box<ArithmeticForClause>),
     Subshell(Vec<Statement>),
     Coprocess {
@@ -254,7 +255,7 @@ pub enum Command {
         body: Box<Command>,
     },
     Background(Vec<Statement>),
-    Case(Box<CaseClause>),
+    Case(Rc<CaseClause>),
     If {
         branches: Vec<(Vec<Statement>, Vec<Statement>)>,
         otherwise: Vec<Statement>,

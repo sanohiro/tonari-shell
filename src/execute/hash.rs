@@ -214,13 +214,14 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
         }
         return out.flush().map_or(1, |()| 0);
     }
-    let mut out = crate::builtins::stdout_for("hash");
+    let mut output = None;
     let mut status = 0;
     for name in args {
         let entry = if print {
             if let Some(path) = session.hashes.hit(name) {
+                let out = output.get_or_insert_with(|| crate::builtins::stdout_for("hash"));
                 let result = if list {
-                    print_entry(&mut out, name, path)
+                    print_entry(out, name, path)
                 } else if args.len() > 1 {
                     writeln!(out, "{name}\t{}", path.display())
                 } else {
@@ -241,6 +242,13 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
             if Path::new(path).is_dir() {
                 diagnostic!("hash: {path}: is a directory");
                 status = 1;
+                continue;
+            }
+            if let Some(entry) = session.hashes.entries.get_mut(name) {
+                entry.path.clear();
+                entry.path.push(path);
+                entry.hits = 0;
+                entry.relative_search = false;
                 continue;
             }
             Some(Entry {
@@ -265,5 +273,5 @@ pub(super) fn run(session: &mut Session, mut args: &[String]) -> u8 {
             status = 1;
         }
     }
-    out.flush().map_or(1, |()| status)
+    output.map_or(status, |mut out| out.flush().map_or(1, |()| status))
 }

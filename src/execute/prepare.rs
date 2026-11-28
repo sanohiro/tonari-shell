@@ -21,6 +21,7 @@ pub(crate) struct PreparedCommand {
     pub(super) assignments: Vec<(String, String)>,
     pub(super) empty_status: u8,
     pub(super) literal_has_keywords: bool,
+    pub(super) literal_has_braces: bool,
 }
 impl PreparedCommand {
     pub(crate) fn literal_builtin(
@@ -37,18 +38,35 @@ impl PreparedCommand {
             .get(1)
             .and_then(Word::as_literal)
             .is_some_and(|flag| matches!(flag, "-v" | "-V"));
-        if matches!(name, "builtin" | "set")
+        let set_args = name == "set"
+            && cmd.words.get(1).and_then(Word::as_literal) == Some("--")
+            && cmd.redirects.is_empty();
+        if name == "builtin"
+            || name == "set" && !set_args
             || name == "command" && !command_query
             || !(builtin_names().contains(&name)
                 || name.starts_with('/') && cmd.redirects.is_empty())
         {
             return None;
         }
-        let words = cmd
-            .words
-            .iter()
-            .map(|word| word.as_literal().map(str::to_owned))
-            .collect::<Option<Vec<_>>>()?;
+        let mut words = Vec::with_capacity(cmd.words.len());
+        let mut literal_has_braces = false;
+        for word in &cmd.words {
+            if let Some(text) = word.as_literal() {
+                words.push(text.to_owned());
+            } else if session.shopt.braceexpand
+                && statement.location.text().len() <= 1024
+                && let Word::Expanded(parts) = word
+                && {
+                    let room = 256usize.saturating_sub(words.len());
+                    crate::word::brace::append_borrowed_product(parts, &mut words, room)
+                }
+            {
+                literal_has_braces = true;
+            } else {
+                return None;
+            }
+        }
         let redirects = if cmd.redirects.is_empty() {
             Vec::new()
         } else {
@@ -72,6 +90,7 @@ impl PreparedCommand {
         };
         Some(Box::new(Self {
             literal_has_keywords: !cmd.keyword_args.is_empty(),
+            literal_has_braces,
             words,
             redirects,
             ..Self::default()
@@ -79,7 +98,8 @@ impl PreparedCommand {
     }
 
     pub(crate) fn run_literal(&mut self, session: &mut Session, status: u8) -> Option<Flow> {
-        if session.keyword && self.literal_has_keywords
+        if self.literal_has_braces && !session.shopt.braceexpand
+            || session.keyword && self.literal_has_keywords
             || session.xtrace
             || session.traps.active()
             || session.jobs.monitor
@@ -105,7 +125,22 @@ impl PreparedCommand {
             })));
         }
         let selected = selected?;
-        if matches!(selected, Builtin::Function | Builtin::Set) {
+        if matches!(selected, Builtin::Set) {
+            // set -- consumes its argv. Keep the loop template immutable and
+            // reuse the storage of the live positional arguments on replacement.
+            let args = &self.words[2..];
+            if session.positional.len() == args.len() {
+                session.positional.as_mut_slice().clone_from_slice(args);
+            } else {
+                let mut values = std::mem::take(&mut session.positional).collect();
+                args.clone_into(&mut values);
+                session.positional = values.into_iter();
+            }
+            session.source_set_args = true;
+            session.remember_literal_argument(&self.words);
+            return Some(Flow::Continue(0));
+        }
+        if matches!(selected, Builtin::Function) {
             return None;
         }
         let scope = session.substitutions.scope();
@@ -185,6 +220,12 @@ pub(super) fn borrowed_arguments(
         {
             words.push(s.to_owned());
         } else {
+            if exp.session.shopt.braceexpand
+                && let Word::Expanded(parts) = word
+                && crate::word::brace::append_borrowed_product(parts, &mut words, usize::MAX)
+            {
+                continue;
+            }
             exp.append_fields(word.clone(), &mut words)?;
         }
     }
@@ -508,6 +549,7 @@ pub(super) fn prepare_expanded(
     let mut cmd = PreparedCommand {
         missing_hook: false,
         literal_has_keywords: false,
+        literal_has_braces: false,
         named_redirects: Vec::new(),
         resolved: None,
         array_declarations,

@@ -49,11 +49,11 @@ impl Cached {
 // Construct a locale only on the first actual pathname pattern for a setting.
 pub(super) fn run<T>(
     lookup: &dyn Fn(&str) -> Option<String>,
-    work: impl FnOnce(Collation, CharacterLocale) -> T,
+    work: impl FnOnce(Collation, CharacterLocale, Option<&std::rc::Rc<Cached>>) -> T,
 ) -> T {
     let locale = resolve(lookup);
     let Some(locale) = locale else {
-        return work(Collation::Bytes, CharacterLocale::Ascii);
+        return work(Collation::Bytes, CharacterLocale::Ascii, None);
     };
     let _guard = super::LocaleGuard::enter(locale.handle);
     let order = if matches!(locale.collate.as_str(), "C" | "POSIX") {
@@ -61,7 +61,7 @@ pub(super) fn run<T>(
     } else {
         Collation::FixedLocale
     };
-    work(order, locale.characters)
+    work(order, locale.characters, Some(&locale))
 }
 
 pub(crate) fn resolve(lookup: &dyn Fn(&str) -> Option<String>) -> Option<std::rc::Rc<Cached>> {

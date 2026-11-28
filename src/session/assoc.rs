@@ -71,7 +71,7 @@ impl Variable {
     pub(super) fn make_associative(&mut self) -> Result<&mut Associative, &'static str> {
         if self.elements.is_none() {
             let mut map = Associative::default();
-            if let Some(value) = self.value.take() {
+            if let Some(value) = self.scalar_mut().take() {
                 map.insert("0".into(), value);
                 self.array_assigned = true;
             }

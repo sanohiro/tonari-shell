@@ -85,6 +85,7 @@ pub(crate) enum Matcher<T> {
     Literal(T),
     Star(T, usize),
     Stars(T, usize, usize),
+    AsciiList(T, [u64; 2]),
     Native(CString),
     Bracket(Box<bracket::BracketPattern>, T),
     Invalid,
@@ -108,6 +109,16 @@ impl<T: AsRef<str>> Matcher<T> {
                     return Self::Star(pattern, star);
                 }
             }
+        }
+        if let Some(list) = text.strip_prefix('[').and_then(|s| s.strip_suffix(']'))
+            && !list.is_empty()
+            && list.bytes().all(|b| b.is_ascii_alphanumeric())
+        {
+            let mut mask = [0; 2];
+            for b in list.bytes() {
+                mask[(b / 64) as usize] |= 1 << (b % 64);
+            }
+            return Self::AsciiList(pattern, mask);
         }
         if text.contains('[')
             && (bracket::needs_parser(text.as_bytes()) || pathname && bracket::simple_list(text))
@@ -158,6 +169,9 @@ impl<T: AsRef<str>> Matcher<T> {
                 }
                 true
             }
+            Self::AsciiList(_, mask) => {
+                matches!(value, &[b] if b.is_ascii() && mask[(b / 64) as usize] & (1 << (b % 64)) != 0)
+            }
             Self::Native(pattern) => {
                 let test = |name: &CStr| unsafe {
                     libc::fnmatch(
@@ -178,9 +192,11 @@ impl<T: AsRef<str>> Matcher<T> {
 
     pub(crate) fn source(&self) -> &str {
         match self {
-            Self::Literal(s) | Self::Star(s, _) | Self::Stars(s, ..) | Self::Bracket(_, s) => {
-                s.as_ref()
-            }
+            Self::AsciiList(s, _)
+            | Self::Literal(s)
+            | Self::Star(s, _)
+            | Self::Stars(s, ..)
+            | Self::Bracket(_, s) => s.as_ref(),
             Self::Native(s) => s.to_str().unwrap(),
             Self::Invalid => "",
         }
@@ -554,14 +570,22 @@ pub struct GlobOptions {
 
 struct IgnorePattern {
     text: String,
-    simple: std::cell::OnceCell<extended::Pattern>,
+    compiled: std::cell::RefCell<Option<IgnoreMatcher>>,
+}
+
+struct IgnoreMatcher {
+    locale: Option<std::rc::Rc<PatternLocale>>,
+    extglob: bool,
+    nocase: bool,
+    ranges: bool,
+    pattern: extended::Pattern,
 }
 
 impl From<&str> for IgnorePattern {
     fn from(text: &str) -> Self {
         Self {
             text: text.into(),
-            simple: Default::default(),
+            compiled: Default::default(),
         }
     }
 }
@@ -633,13 +657,14 @@ pub(crate) fn pathnames(
     lookup: &dyn Fn(&str) -> Option<String>,
 ) -> Vec<String> {
     let mut names = Vec::new();
-    glob_locale::run(lookup, |order, locale| {
+    glob_locale::run(lookup, |order, locale, cached| {
         paths(
             pattern,
             options,
             &mut names,
             order,
             locale,
+            cached,
             lookup("GLOBSORT").as_deref(),
         )
     });
@@ -670,6 +695,7 @@ fn paths(
     fields: &mut Vec<String>,
     collation: Collation,
     locale: CharacterLocale,
+    cached: Option<&std::rc::Rc<PatternLocale>>,
     sorting: Option<&str>,
 ) {
     // Linux pathname order is the UTF-8 byte order even when matching uses a named locale.
@@ -745,10 +771,17 @@ fn paths(
         }
         let extended = (grouped || options.nocaseglob)
             .then(|| extended::Pattern::for_path(part, grouped, options.nocaseglob, locale));
-        let matcher = Matcher::compile(part, extended.is_none());
+        let matcher = extended.is_none().then(|| Matcher::compile(part, true));
+        let literal_prefix = if options.nocaseglob {
+            ""
+        } else {
+            part.split(|c: char| !c.is_ascii_alphanumeric() && !matches!(c, '_' | '.' | '-'))
+                .next()
+                .unwrap_or("")
+        };
         // A final dot followed only by ASCII letters or digits is literal,
         // even if earlier characters require fnmatch. Check it once per name.
-        let required_extension = if extended.is_none() && matches!(matcher, Matcher::Native(_)) {
+        let required_extension = if matches!(matcher, Some(Matcher::Native(_))) {
             part.rfind('.')
                 .map(|i| &part.as_bytes()[i..])
                 .filter(|suffix| {
@@ -764,6 +797,7 @@ fn paths(
                 dir,
                 !rest.is_empty(),
                 options.globskipdots || options.ignore.is_some(),
+                literal_prefix.as_bytes(),
                 |raw, _| {
                     if required_extension.is_some_and(|suffix| !raw.to_bytes().ends_with(suffix)) {
                         return;
@@ -773,7 +807,12 @@ fn paths(
                         Some(group) => raw
                             .to_str()
                             .is_ok_and(|s| group.matches_in_locale::<false>(s, period)),
-                        None => matcher.accepts(raw.to_bytes(), period, Some(raw)),
+                        None => {
+                            matcher
+                                .as_ref()
+                                .unwrap()
+                                .accepts(raw.to_bytes(), period, Some(raw))
+                        }
                     };
                     if !matches {
                         return;
@@ -805,20 +844,28 @@ fn paths(
         for pattern in patterns.iter() {
             // GLOBIGNORE tests the entire displayed pathname. An extended
             // alternative may contain a literal directory separator.
-            let compiled;
-            let matcher = if !options.nocaseglob && !pattern.text.contains(['[', '(', '?']) {
-                pattern.simple.get_or_init(|| {
-                    extended::Pattern::for_path(&pattern.text, false, false, locale)
-                })
-            } else {
-                compiled = extended::Pattern::for_path(
-                    &pattern.text,
-                    options.extglob,
-                    options.nocaseglob,
-                    locale,
-                );
-                &compiled
-            };
+            let mut slot = pattern.compiled.borrow_mut();
+            let ranges = glob_locale::collated_ranges();
+            if !slot.as_ref().is_some_and(|m| {
+                m.extglob == options.extglob
+                    && m.nocase == options.nocaseglob
+                    && m.ranges == ranges
+                    && m.locale.as_ref().map(std::rc::Rc::as_ptr) == cached.map(std::rc::Rc::as_ptr)
+            }) {
+                *slot = Some(IgnoreMatcher {
+                    locale: cached.cloned(),
+                    extglob: options.extglob,
+                    nocase: options.nocaseglob,
+                    ranges,
+                    pattern: extended::Pattern::for_path(
+                        &pattern.text,
+                        options.extglob,
+                        options.nocaseglob,
+                        locale,
+                    ),
+                });
+            }
+            let matcher = &slot.as_ref().unwrap().pattern;
             paths.retain(|path| !matcher.matches_in_locale::<true>(path, false));
         }
     }
@@ -839,7 +886,7 @@ fn descendants(
     pending.push(prefix);
     while let Some(dir) = pending.pop() {
         let base = if dir.is_empty() { "." } else { &dir };
-        visit_names(base, !terminal || trailing, true, |raw, kind| {
+        visit_names(base, !terminal || trailing, true, b"", |raw, kind| {
             if !dotglob && raw.to_bytes().first() == Some(&b'.') {
                 return;
             }
@@ -915,13 +962,14 @@ impl Field {
             .filter(|(options, p)| has_magic(p, true) || options.extglob && extended::has_group(p))
         {
             let count = fields.len();
-            glob_locale::run(lookup, |order, locale| {
+            glob_locale::run(lookup, |order, locale, cached| {
                 paths(
                     &pattern,
                     options,
                     fields,
                     order,
                     locale,
+                    cached,
                     lookup("GLOBSORT").as_deref(),
                 )
             });

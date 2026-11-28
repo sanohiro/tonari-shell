@@ -606,12 +606,43 @@ impl Pattern {
         }
         let mut atoms = self.atoms.as_slice();
         let mut pos = 0;
-        while let [Atom::Text(text), remaining @ ..] = atoms {
-            if !value[pos..].starts_with(text.as_ref()) {
+        while let [
+            edge @ (Atom::Text(_) | Atom::FoldedText(..) | Atom::Choice(_)),
+            remaining @ ..,
+        ] = atoms
+        {
+            match literal_edge(edge, &value[pos..], true) {
+                Ok(Some(rest)) => pos = value.len() - rest.len(),
+                Ok(None) => return false,
+                Err(()) => break, // overlapping alternatives need backtracking
+            }
+            atoms = remaining;
+        }
+        while let [
+            unit @ (Atom::CharacterClass(_) | Atom::Class(..) | Atom::Any),
+            rest @ ..,
+        ] = atoms
+        {
+            if period && pos == 0 {
                 return false;
             }
-            pos += text.len();
-            atoms = remaining;
+            let Some(end) = one_character::<PATHNAME>(unit, value, pos) else {
+                return false;
+            };
+            pos = end;
+            atoms = rest;
+        }
+        match atoms {
+            [Atom::Star] => return !period || pos != 0,
+            [Atom::Star, tail @ (Atom::Text(_) | Atom::FoldedText(..))] => {
+                if period && pos == 0 {
+                    return false;
+                }
+                if let Ok(rest) = literal_edge(tail, &value[pos..], false) {
+                    return rest.is_some_and(|s| !PATHNAME || !s.contains('/'));
+                }
+            }
+            _ => {}
         }
         if atoms.is_empty() {
             return pos == value.len();

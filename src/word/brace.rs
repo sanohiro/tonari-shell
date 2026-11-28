@@ -64,13 +64,29 @@ impl Range {
         1 + self.first.abs_diff(self.last) / self.stride
     }
 
-    fn value(&self, index: u64) -> String {
+    fn number(&self, index: u64) -> i64 {
         let delta = index * self.stride;
-        let n = if self.first <= self.last {
+        if self.first <= self.last {
             self.first.wrapping_add_unsigned(delta)
         } else {
             self.first.wrapping_sub_unsigned(delta)
-        };
+        }
+    }
+
+    fn append_value(&self, index: u64, word: &mut String) {
+        use std::fmt::Write;
+        let n = self.number(index);
+        if self.letters {
+            word.push(char::from(n as u8));
+        } else if self.width == 0 {
+            word.push_str(itoa::Buffer::new().format(n));
+        } else {
+            write!(word, "{n:0width$}", width = self.width).expect("in-memory write");
+        }
+    }
+
+    fn value(&self, index: u64) -> String {
+        let n = self.number(index);
         if self.letters {
             char::from(n as u8).to_string()
         } else if self.width == 0 {
@@ -308,7 +324,7 @@ fn append_range_product(parts: &[Part], count: usize, result: &mut Vec<String>) 
     let first_row = start..result.len();
     for n in 1..left.count() {
         head.truncate(prefix.len());
-        head.push_str(&left.value(n));
+        left.append_value(n, &mut head);
         head.push_str(middle);
         for index in first_row.clone() {
             let word = [head.as_str(), &result[index][head_len..]].concat();
@@ -316,6 +332,125 @@ fn append_range_product(parts: &[Part], count: usize, result: &mut Vec<String>) 
         }
     }
     Some(())
+}
+
+// Link the alternatives before emitting any fields. An unquoted empty branch,
+// a mixed-case letter range or a fragment needing expansion takes the general path.
+fn literal_product(parts: &[Part], count: usize, result: &mut Vec<String>) -> Option<()> {
+    if parts.len() > 128 || count < 2 {
+        return None;
+    }
+    let mut next = vec![0; parts.len()];
+    let mut groups = Vec::new();
+    let mut limit = 0usize;
+    for (i, part) in parts.iter().enumerate() {
+        limit = limit.saturating_add(match part {
+            Part::Text(s) | Part::Pattern(s)
+                if !s.is_empty() && literal_fragment(std::slice::from_ref(part)).is_some() =>
+            {
+                s.len()
+            }
+            Part::Range(r)
+                if !r.letters
+                    || (r.first as u8).is_ascii_uppercase()
+                        == (r.last as u8).is_ascii_uppercase() =>
+            {
+                r.width.max(20)
+            }
+            Part::Brace("{") => {
+                groups.push((i, i));
+                0
+            }
+            Part::Brace(",") => {
+                let (_, prev) = groups.last_mut()?;
+                if *prev + 1 == i {
+                    return None;
+                }
+                next[*prev] = i;
+                *prev = i;
+                0
+            }
+            Part::Brace("}") => {
+                let (open, prev) = groups.pop()?;
+                if open == prev || prev + 1 == i {
+                    return None;
+                }
+                next[prev] = i;
+                0
+            }
+            _ => return None,
+        });
+    }
+    if !groups.is_empty() || limit.saturating_mul(count) > MAX_BYTES {
+        return None;
+    }
+    fn emit(
+        parts: &[Part],
+        next: &[usize],
+        mut i: usize,
+        word: &mut String,
+        out: &mut Vec<String>,
+    ) {
+        let start = word.len();
+        while let Some(part) = parts.get(i) {
+            match part {
+                Part::Pattern(s) | Part::Text(s) => word.push_str(s),
+                Part::Range(r) => {
+                    let end = word.len();
+                    for j in 0..r.count() {
+                        r.append_value(j, word);
+                        emit(parts, next, i + 1, word, out);
+                        word.truncate(end);
+                    }
+                    break;
+                }
+                Part::Brace("{") => {
+                    loop {
+                        emit(parts, next, i + 1, word, out);
+                        i = next[i];
+                        if matches!(parts[i], Part::Brace("}")) {
+                            break;
+                        }
+                    }
+                    break;
+                }
+                Part::Brace(",") => {
+                    while matches!(parts[i], Part::Brace(",")) {
+                        i = next[i];
+                    }
+                }
+                Part::Brace("}") => {}
+                _ => unreachable!(),
+            }
+            i += 1;
+        }
+        if i == parts.len() {
+            out.push(word.clone());
+        }
+        word.truncate(start);
+    }
+    result.reserve(count);
+    emit(parts, &next, 0, &mut String::with_capacity(limit), result);
+    Some(())
+}
+
+// Repeated commands own the resulting argument strings. An inert brace tree can
+// emit them directly from the borrowed syntax while the session has braceexpand on.
+pub(crate) fn append_borrowed_product(parts: &[Part], out: &mut Vec<String>, limit: usize) -> bool {
+    if parts.len() < 3
+        || !parts
+            .iter()
+            .any(|p| matches!(p, Part::Brace("{") | Part::Range(_)))
+    {
+        return false;
+    }
+    let count = word_count(parts);
+    count <= MAX_WORDS && count <= limit as u64 && append_product(parts, count as usize, out)
+}
+
+fn append_product(parts: &[Part], count: usize, out: &mut Vec<String>) -> bool {
+    append_range_product(parts, count, out).is_some()
+        || literal_product(parts, count, out).is_some()
 }
 
 pub fn append_fields(
@@ -340,7 +475,7 @@ pub fn append_fields(
     if count > MAX_WORDS {
         return Err("brace expansion exceeds word limit".into());
     }
-    if append_range_product(&parts, count as usize, result).is_some() {
+    if append_product(&parts, count as usize, result) {
         return Ok(());
     }
     let mut pending = Vec::new();

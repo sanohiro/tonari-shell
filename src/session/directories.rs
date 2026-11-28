@@ -660,7 +660,7 @@ impl Session {
             } else {
                 let old = self.variables.entry("OLDPWD".into()).or_default();
                 old.declared = true;
-                old.value = None;
+                *old.scalar_mut() = None;
             }
         }
         let pwd_readonly = self.readonly("PWD");

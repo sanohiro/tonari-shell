@@ -79,10 +79,16 @@ struct Variable {
     elements: Option<Rc<array::Elements>>,
     declared: bool,
     value: Option<String>,
+    char_count: std::cell::Cell<u32>,
     exported: bool,
 }
 
 impl Variable {
+    fn scalar_mut(&mut self) -> &mut Option<String> {
+        self.char_count.set(0);
+        &mut self.value
+    }
+
     fn inherited(&self, name: &str) -> bool {
         *self
             .inherited
@@ -323,7 +329,7 @@ pub struct Session {
     pub shopt: options::ShellOptions,
     pub(crate) external_env: std::cell::RefCell<Option<Rc<crate::execute::Environment>>>,
     pub(crate) eval_cache: crate::input::EvalCache,
-    pub regex: [[Option<Rc<crate::test_expression::Compiled>>; 4]; 2],
+    pub regex: [Vec<Rc<crate::test_expression::Compiled>>; 2],
     pub(crate) coprocesses: Vec<Rc<crate::execute::coprocess::Coprocess>>,
     pub substitutions: crate::execute::process_substitution::Substitutions,
     pub jobs: crate::jobs::Jobs,
@@ -652,7 +658,7 @@ impl Session {
             if var.readonly {
                 return Err(crate::session::READONLY);
             }
-            var.value = Some(value);
+            *var.scalar_mut() = Some(value);
             var.declared = true;
             return Ok(());
         }
@@ -1022,7 +1028,7 @@ impl Session {
         if var.elements.is_some() || var.nameref || var.letter_case.is_some() || var.dynamic {
             return false;
         }
-        let Some(value) = &mut var.value else {
+        let Some(value) = var.scalar_mut() else {
             return false;
         };
         value.push_str(suffix);
@@ -1092,10 +1098,10 @@ impl Session {
             if let Some(elements) = var.elements.as_mut().map(Rc::make_mut) {
                 elements.insert(0, value.into_owned());
                 var.array_assigned = true;
-            } else if let (Some(current), Cow::Borrowed(text)) = (&mut var.value, &value) {
+            } else if let (Some(current), Cow::Borrowed(text)) = (var.scalar_mut(), &value) {
                 (*text).clone_into(current);
             } else {
-                var.value = Some(value.into_owned());
+                *var.scalar_mut() = Some(value.into_owned());
             }
             var.declared = true;
             var.exported |= self.allexport;
@@ -1132,7 +1138,7 @@ impl Session {
         if var.readonly {
             return Some(Err(crate::session::READONLY));
         }
-        let text = var.value.as_mut()?;
+        let text = var.scalar_mut().as_mut()?;
         itoa::Buffer::new().format(value).clone_into(text);
         var.declared = true;
         var.exported |= self.allexport;
@@ -1151,18 +1157,32 @@ impl Session {
         let Some(var) = self.variables.value_mut(name, self.allexport) else {
             return false;
         };
-        if var.dynamic
-            || var.letter_case.is_some()
-            || var.readonly
-            || var.nameref
-            || var.elements.is_some()
-        {
+        if var.nameref {
+            if append {
+                return false;
+            }
+            // Copy the short resolved spelling before borrowing the destination
+            // mutably. Longer and indexed references use normal assignment.
+            let mut bytes = [0; 128];
+            let Some(target) = self
+                .scalar_reference_target(name)
+                .filter(|s| s.len() <= bytes.len())
+            else {
+                return false;
+            };
+            let len = target.len();
+            bytes[..len].copy_from_slice(target.as_bytes());
+            return self
+                .assign_existing_literal(std::str::from_utf8(&bytes[..len]).unwrap(), value);
+        }
+        if var.dynamic || var.letter_case.is_some() || var.readonly || var.elements.is_some() {
             return false;
         }
-        let Some(current) = var.value.as_mut() else {
+        let integer = var.integer;
+        let Some(current) = var.scalar_mut().as_mut() else {
             return false;
         };
-        if var.integer {
+        if integer {
             let Some(rhs) = Self::plain_decimal(value) else {
                 return false;
             };
@@ -1222,6 +1242,54 @@ impl Session {
             return None;
         }
         var.value.as_deref()
+    }
+
+    // A scalar reference chain can be followed through borrowed table entries.
+    // Indexed targets and virtual variables still use the general resolver.
+    fn scalar_reference_target(&self, name: &str) -> Option<&str> {
+        let mut target = self.variables.get(name)?.value.as_deref()?;
+        for _ in 1..32 {
+            if !is_identifier(target) {
+                return None;
+            }
+            let Some(var) = self.variables.get(target).filter(|v| v.nameref) else {
+                return Some(target);
+            };
+            target = var.value.as_deref()?;
+        }
+        None
+    }
+
+    pub(crate) fn referenced_scalar(&self, name: &str) -> Option<&str> {
+        if self.is_nameref(name) {
+            self.stored_scalar(self.scalar_reference_target(name)?)
+        } else {
+            self.stored_scalar(name)
+        }
+    }
+
+    pub(crate) fn stored_char_count(&self, name: &str) -> Option<usize> {
+        if !is_identifier(name)
+            || matches!(
+                name,
+                "_" | "BASHPID" | "BASHOPTS" | "SHELLOPTS" | "PIPESTATUS"
+            )
+        {
+            return None;
+        }
+        let var = self.variables.get(name)?;
+        if var.nameref || var.dynamic || var.elements.is_some() {
+            return None;
+        }
+        let cached = var.char_count.get();
+        if cached != 0 {
+            return Some((cached - 1) as usize);
+        }
+        let length = crate::word::character_count(var.value.as_deref()?);
+        if let Ok(n) = u32::try_from(length + 1) {
+            var.char_count.set(n);
+        }
+        Some(length)
     }
 
     pub(crate) fn scalar_decimal(&self, name: &str) -> Option<i64> {
@@ -1332,7 +1400,7 @@ impl Session {
             if let Some(array) = var.elements.as_mut() {
                 Rc::make_mut(array).insert(0, value);
             } else {
-                var.value = Some(value);
+                *var.scalar_mut() = Some(value);
             }
         }
     }

@@ -195,7 +195,7 @@ pub fn expanded(source: &str, session: &mut Session, status: u8) -> Result<i64> 
 // Loop headers are immutable, but their operands can be reassigned on every
 // iteration. Decode frequent forms once and consult the live shell values.
 pub(crate) enum Repeated<'a> {
-    Other(&'a str),
+    Other(&'a str, std::cell::OnceCell<Option<plan::Program>>),
     Compare(&'a str, &'a str, i64, &'a str),
     CompareNames(&'a str, &'a str, &'a str, &'a str),
     Step(&'a str, i64, bool, &'a str),
@@ -203,7 +203,7 @@ pub(crate) enum Repeated<'a> {
 
 impl<'a> Repeated<'a> {
     pub(crate) fn new(source: &'a str) -> Self {
-        let generic = Self::Other(source);
+        let generic = Self::Other(source, Default::default());
         if source.contains(['$', '`', '"', '\\']) {
             return generic;
         }
@@ -272,7 +272,11 @@ impl<'a> Repeated<'a> {
 
     pub(crate) fn run(&self, session: &mut Session, status: u8) -> Result<i64> {
         match *self {
-            Self::Other(source) => expanded(source, session, status),
+            Self::Other(source, ref plan) => plan
+                .get_or_init(|| plan::Program::compile(source))
+                .as_ref()
+                .and_then(|p| p.run(session, true))
+                .unwrap_or_else(|| expanded(source, session, status)),
             Self::Compare(name, op, rhs, source) => match session.scalar_decimal(name) {
                 Some(n) => binary(op, n, rhs),
                 None => expanded(source, session, status),
@@ -350,6 +354,7 @@ pub(crate) fn traced(
 #[derive(Debug, Clone)]
 pub(crate) struct Expression {
     source: String,
+    plan: std::cell::OnceCell<Option<plan::Program>>,
     tokens: std::cell::OnceCell<Option<Box<[Lexeme]>>>,
 }
 
@@ -357,6 +362,7 @@ impl From<String> for Expression {
     fn from(source: String) -> Self {
         Self {
             source,
+            plan: Default::default(),
             tokens: Default::default(),
         }
     }
@@ -371,7 +377,27 @@ enum Lexeme {
     Op(u32, u32),
 }
 
+mod plan;
+
+impl std::ops::Deref for Expression {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.source
+    }
+}
+
 impl Expression {
+    pub(crate) fn compiled(
+        &self,
+        vars: &mut dyn Variables,
+        permit_store: bool,
+    ) -> Option<Result<i64>> {
+        self.plan
+            .get_or_init(|| plan::Program::compile(&self.source))
+            .as_ref()?
+            .run(vars, permit_store)
+    }
+
     fn lexemes(&self) -> Option<Box<[Lexeme]>> {
         if self.source.len() > 64 * 1024 || self.source.contains(['$', '`', '"', '\\']) {
             return None;
@@ -405,6 +431,8 @@ pub(crate) fn command(
     let source = expr.source.as_str();
     let result = if session.xtrace {
         traced(source, session, status, None)
+    } else if repeated && let Some(result) = expr.compiled(session, true) {
+        result
     } else if repeated
         && !(source.ends_with("++") || source.ends_with("--"))
         && let Some(tokens) = expr.tokens.get_or_init(|| expr.lexemes())

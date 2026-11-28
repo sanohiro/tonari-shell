@@ -192,12 +192,32 @@ impl<'a> Filter<'a> {
             }
             let base = self.end;
             let mut checked = 0usize;
+            let mut recent = ["", ""];
             while !rows.is_empty() {
                 if checked.is_multiple_of(256) && waiting() {
                     self.end = base + rows.len() as u64 + 1;
                     return;
                 }
                 checked += 1;
+                // Duplicate commands also occur with different timestamps, PIDs and
+                // directories. Verify the delimiter count so a suffix of a command
+                // containing literal tabs cannot hide a distinct entry.
+                if !recent[0].is_empty()
+                    && let Some(metadata) = rows.strip_suffix(recent[0].as_bytes())
+                    && metadata.last() == Some(&b'\t')
+                {
+                    let start = memrchr(b'\n', metadata).map_or(0, |i| i + 1);
+                    let header = &metadata[start..];
+                    let fields = match header.first() {
+                        Some(b'1') => 4,
+                        Some(b'2') => 5,
+                        _ => 0,
+                    };
+                    if header.iter().filter(|&&c| c == b'\t').count() == fields {
+                        rows = &rows[..start.saturating_sub(1)];
+                        continue;
+                    }
+                }
                 let pos = if anchor.is_empty() {
                     rows.len()
                 } else {
@@ -213,6 +233,26 @@ impl<'a> Filter<'a> {
                 let Some(field) = std::str::from_utf8(row).ok().and_then(command_field) else {
                     continue;
                 };
+                // Consecutive identical records are common after journal imports.
+                // Compare complete records, doubling verified spans within this block.
+                let mut span = row.len() + 1;
+                let repeated = |end: usize, n: usize| {
+                    end >= n && block.get(end..end + n) == Some(&block[end - n..end])
+                };
+                while repeated(rows.len(), span) {
+                    rows = &rows[..rows.len() - span];
+                    span *= 2;
+                }
+                while span > row.len() + 1 {
+                    span /= 2;
+                    if repeated(rows.len(), span) {
+                        rows = &rows[..rows.len() - span];
+                    }
+                }
+                if recent.contains(&field) {
+                    continue;
+                }
+                recent = [field, recent[0]];
                 let decoded;
                 let line = if field.contains('\\') {
                     let Some(value) = decode(field) else { continue };
