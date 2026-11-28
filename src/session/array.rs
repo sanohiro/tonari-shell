@@ -849,6 +849,35 @@ impl Session {
             }
             return Ok(());
         }
+        // The declaration is committed on both success and initializer errors.
+        // Release the table's old reference only when this working copy is its
+        // sole other owner. Saved locals and integer expressions may need it.
+        if !var.dynamic
+            && !var.integer
+            && var.letter_case.is_none()
+            && let Some(elements) = &var.elements
+            && Rc::strong_count(elements) == 2
+        {
+            let saved = global
+                .then(|| {
+                    self.locals
+                        .iter_mut()
+                        .find_map(|scope| scope.variables.get_mut(name))
+                })
+                .flatten();
+            let active = match saved {
+                Some(v) => v.as_mut(),
+                None => self.variables.get_mut(name),
+            };
+            if let Some(active) = active
+                && active
+                    .elements
+                    .as_ref()
+                    .is_some_and(|old| Rc::ptr_eq(old, elements))
+            {
+                active.elements.take();
+            }
+        }
         let items = match items {
             ArrayItems::Associative(items, _) => {
                 var.array_assigned = true;

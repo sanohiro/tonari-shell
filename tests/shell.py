@@ -38,6 +38,85 @@ class ShellTests(unittest.TestCase):
             capture_output=True, timeout=5,
         )
 
+    def test_array_evaluation_append_keeps_scope_and_partial_writes(self):
+        self.compare("""declare -A m=([old]=one); m+=([new]=two [old]+=!)
+a=(2 4); a+=([a[0]]=six [-1]+=!); declare -n ref=a; ref+=([4]=eight)
+f() { local -A m=([inner]=x); m+=([new]=y); echo "${m[inner]}${m[new]}"; }
+f; printf '%s/%s/%s/%s/%s\\n' "${m[old]}" "${m[new]}" "${a[0]}" "${a[2]}" "${a[4]}"
+declare -ia nums=(2); nums+=([1]='nums[0]+3'); echo "${nums[*]}"
+""", 0, b"xy\none!/two/2/six!/eight\n2 5\n", minimum=5)
+
+    def test_array_evaluation_declare_global_append_with_local_shadow(self):
+        self.compare("""declare -A m=([outer]=old)
+f() { local -A m=([inner]=here); declare -gA m+=([new]=yes); echo "${m[inner]}/${m[new]-absent}"; }
+f; echo "${m[outer]}/${m[new]}"
+""", 0, b"here/absent\nold/yes\n", minimum=5)
+
+    def test_array_evaluation_partial_append_before_error(self):
+        script = """a=(old); trap 'echo "${a[*]}"' EXIT
+a+=([1]=first [-99]=invalid)"""
+        for shell in self.shells_for(minimum=5):
+            with self.subTest(shell=shell):
+                proc = self.command(shell, script)
+                expected_status = 0 if shell == BASH and self.bash_before_53() else 1
+                self.assertEqual(proc.returncode, expected_status)
+                self.assertEqual(proc.stdout, b"old first\n")
+                self.assertTrue(proc.stderr.strip())
+
+    def test_array_evaluation_completion_observes_child_state(self):
+        self.compare("""v=parent; wl='${v:=wrong}'; unset side
+out=$(compgen -W '${side:=child} literal' -- ch); echo "$out/${side-unset}"
+cur=ab; words='ab abc space'; COMPREPLY=( $(compgen -W "$words" -- "$cur") ); echo "${COMPREPLY[*]}"
+out=$(compgen -W x -- unavailable); echo "$?:$out"
+compgen() { v=local; echo from-function; }; out=$(compgen -W a); echo "$v/$out"
+""", 0, b"child/unset\nab abc\n1:\nparent/from-function\n", minimum=5)
+
+    def test_array_evaluation_group_isolation(self):
+        self.compare("""x=parent; ( x=child; :; exit 17 ); printf '%s/%s\\n' "$?" "$x"
+( false; exit ); echo "$?"
+echo() { printf '[%s]' "$1"; }; ( echo child ); printf '\\n'
+unset -f echo; ( printf '%s\\n' hi ) >file; cat file
+( printf -v x %s changed ); printf '%s\\n' "$x"
+( printf '%s' "$BASH_SUBSHELL" ); echo
+""", 0, b"17/parent\n1\n[child]\nhi\nparent\n1\n", minimum=5)
+
+    def test_array_evaluation_output_signal_stays_in_child(self):
+        reader, writer = os.pipe()
+        os.close(reader)
+        self.addCleanup(os.close, writer)
+        for shell in (BASH, TONARI):
+            with (self.cwd / "output").open("wb") as file:
+                for fd, setup, payload, sig in (
+                    (writer, "", "hi", signal.SIGPIPE),
+                    (file, "ulimit -f 1; ", "a" * 8192, signal.SIGXFSZ),
+                ):
+                    with self.subTest(shell=shell, signal=sig):
+                        script = setup + f"( echo {payload} ); echo survived_$? >&2"
+                        proc = subprocess.run([shell, "-c", script], stdout=fd, stderr=subprocess.PIPE,
+                                              cwd=self.cwd, env=self.env, timeout=5)
+                        self.assertEqual(proc.returncode, 0)
+                        self.assertEqual(proc.stderr.splitlines()[-1], f"survived_{128 + sig}".encode())
+
+    def test_array_evaluation_medium_here_input(self):
+        self.compare("""printf -v s '%16384s' ''; s+=end
+cb() { IFS= read -r extra; echo "$1/${#2}/$extra"; }
+mapfile -t -c 1 -C cb a <<EOF
+$s
+second
+EOF
+mapfile -t -n1 a <<<"$s"; echo "${#a[0]}"
+readarray -t -u 3 a 3<<<other <<<"$s"; echo "${a[0]}"
+""", 0, b"0/16387/second\n16387\nother\n", minimum=4)
+
+    def test_array_evaluation_case_snapshot_and_quotes(self):
+        self.env["LC_ALL"] = "C.UTF-8"
+        self.compare(r"""s=abc; case $s in a*) s=zzz ;;& abc) echo old;; esac
+s=abc; case $s in z|${x:=abc}) echo "$x";; esac
+s="a'b"; eval "v=${s@Q}"; echo "$v"; eval "${s@A}"; echo "$s"
+s='line\nend'; printf '%s\n' "${s@E}"
+s=éΑİ; echo "${s^^}/${s,,}"
+""", 0, "old\nabc\na'b\na'b\nline\nend\nÉΑİ/éαi\n".encode(), minimum=5)
+
     def test_shell_paths_capture_queries(self):
         self.compare("""mkdir -p real; ln -s real link; cd link
 a=$(pwd); b=$(pwd -P); echo "${a##*/} ${b##*/}"

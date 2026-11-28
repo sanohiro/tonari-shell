@@ -48,10 +48,12 @@ fn capture_arguments(
     session: &mut Session,
     last: u8,
 ) -> Option<Vec<String>> {
-    if !words
-        .iter()
-        .all(|w| w.as_literal().is_some() || !session.nounset && inert_operand(w, session, false))
-    {
+    if !words.iter().all(|w| {
+        w.as_literal().is_some() || !session.nounset && (inert_operand(w, session, false) ||
+            matches!(w, parser::Word::Expanded(parts) if matches!(parts.as_slice(),
+                [crate::word::Part::Parameter {name, quoted: true}]
+                if name.strip_suffix("[@]").is_some_and(|base| inert_parameter(base, session) && session.stored_array(base)))))
+    }) {
         return None;
     }
     let captured = std::cell::Cell::new(None);
@@ -590,7 +592,7 @@ fn capture_query(
 ) -> Option<Result<(String, u8), &'static str>> {
     let (name, operands) = cmd.words.split_first()?;
     let name = name.as_literal()?;
-    if !matches!(name, "pwd" | "type" | "command")
+    if !matches!(name, "pwd" | "type" | "command" | "compgen")
         || session.functions.contains_key(name)
         || session.disabled_builtins.contains(name)
         || session.keyword && !cmd.keyword_args.is_empty()
@@ -601,7 +603,10 @@ fn capture_query(
         return None;
     }
     let mut output = Vec::new();
-    let status = if name == "pwd" {
+    let status = if name == "compgen" {
+        let args = capture_arguments(operands, session, last)?;
+        crate::completion_spec::capture_candidates(session, &args, last, &mut output)?
+    } else if name == "pwd" {
         // POSIX logical pwd can repair the shell's directory cache after a rename.
         if session.posix {
             return None;
@@ -900,12 +905,128 @@ fn input_only(body: &[parser::Statement]) -> Option<&parser::Word> {
         .then_some(&redirect.word)
 }
 
+// Only the final command may write. Until it is validated, the prefix has no
+// observable effects, so a fallback cannot duplicate any output.
+fn foreground_builtin(
+    session: &mut Session,
+    body: &[parser::Statement],
+    mut status: u8,
+) -> Option<Flow> {
+    if session.jobs.monitor
+        || session.xtrace
+        || session.errexit
+        || session.noexec
+        || session.traps.has_explicit_traps()
+        || !can_elide_child(session)
+    {
+        return None;
+    }
+    for (i, statement) in body.iter().enumerate() {
+        if statement.negated || statement.condition != parser::Condition::Always {
+            return None;
+        }
+        if let parser::Command::LiteralAssignment(text, len) = &statement.command
+            && session.capture_local(&text[..len.get()])
+        {
+            status = 0;
+            continue;
+        }
+        if let Some(cmd) = statement.single_stage()
+            && cmd.compound.is_none()
+            && cmd.words.is_empty()
+            && cmd.redirects.is_empty()
+            && !cmd.assignments.is_empty()
+            && cmd.assignments.iter().all(|(k, v)| {
+                session.capture_local(k)
+                    && matches!(v, parser::Assignment::Scalar(w) if w.as_literal().is_some())
+            })
+        {
+            status = 0;
+            continue;
+        }
+        let cmd = sole_plain_command(std::slice::from_ref(statement))?;
+        let (program, operands) = cmd.words.split_first()?;
+        let name = program.as_literal()?;
+        if session.functions.contains_key(name)
+            || session.disabled_builtins.contains(name)
+            || session.keyword && !cmd.keyword_args.is_empty()
+            || !operands.iter().all(|w| w.as_literal().is_some())
+        {
+            return None;
+        }
+        let last = i + 1 == body.len();
+        status = match name {
+            ":" | "true" => 0,
+            "false" => 1,
+            "exit" if last => match operands {
+                [] => status,
+                [n] => n.as_literal()?.parse::<u8>().ok()?,
+                _ => return None,
+            },
+            "echo" | "printf" if last => {
+                if name == "printf"
+                    && !matches!(operands.first()?.as_literal()?, "%s" | "%s\n" | "%s\\n")
+                {
+                    return None;
+                }
+                if !foreground_output() {
+                    return None;
+                }
+                let args: Vec<_> = operands
+                    .iter()
+                    .map(|w| w.as_literal().unwrap().to_owned())
+                    .collect();
+                if name == "echo" {
+                    crate::builtins::echo(&args, session)
+                } else {
+                    session.printf(&args)
+                }
+            }
+            _ => return None,
+        };
+    }
+    Some(Flow::Continue(status))
+}
+
+// A broken pipe or a file-size limit can terminate a real child by signal.
+// Do not expose the parent shell to those signals on an output shortcut.
+fn foreground_output() -> bool {
+    let mut st = unsafe { std::mem::zeroed::<libc::stat>() };
+    if unsafe { libc::fstat(1, &mut st) } != 0 {
+        return false;
+    }
+    match st.st_mode & libc::S_IFMT {
+        libc::S_IFREG => {
+            let mut limit = unsafe { std::mem::zeroed::<libc::rlimit>() };
+            unsafe {
+                libc::getrlimit(libc::RLIMIT_FSIZE, &mut limit) == 0
+                    && limit.rlim_cur == libc::RLIM_INFINITY
+            }
+        }
+        libc::S_IFCHR => {
+            if unsafe { libc::tcgetpgrp(1) == libc::getpgrp() } {
+                return true;
+            }
+            let mut null = unsafe { std::mem::zeroed::<libc::stat>() };
+            unsafe {
+                libc::stat(c"/dev/null".as_ptr(), &mut null) == 0
+                    && null.st_mode & libc::S_IFMT == libc::S_IFCHR
+                    && st.st_rdev == null.st_rdev
+            }
+        }
+        _ => false,
+    }
+}
+
 pub fn launch_group(
     session: &mut Session,
     body: Vec<parser::Statement>,
     status: u8,
     background: bool,
 ) -> Flow {
+    if !background && let Some(flow) = foreground_builtin(session, &body, status) {
+        return flow;
+    }
     launch_list(session, background, |s| {
         execute_program(s, body, status, true)
     })
@@ -916,6 +1037,9 @@ pub(crate) fn launch_borrowed(
     body: &[parser::Statement],
     status: u8,
 ) -> Flow {
+    if let Some(flow) = foreground_builtin(session, body, status) {
+        return flow;
+    }
     launch_list(session, false, |s| {
         crate::eval::borrowed_program(s, body, status, true)
     })

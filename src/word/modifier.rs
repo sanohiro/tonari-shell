@@ -233,16 +233,18 @@ fn assignment(name: &str, quoted: bool, env: &mut Expansion<'_>) -> Result<Part,
         {
             fields
         } else if let Some((flags, _)) = env.session.attributes(base) {
-            let text = value(if elements.is_some() { base } else { name }, env)?;
+            let key = if elements.is_some() { base } else { name };
+            let quoted_value = if let Some(s) = env.borrowed_scalar(key) {
+                Some(super::quote::parameter_quote(s, env.session))
+            } else {
+                value(key, env)?.map(|s| super::quote::parameter_quote(&s, env.session))
+            };
             let mut fields = Vec::new();
             if !flags.is_empty() {
                 fields.extend(["declare".to_owned(), format!("-{flags}")]);
             }
-            if let Some(text) = text {
-                fields.push(format!(
-                    "{base}={}",
-                    super::quote::parameter_quote(&text, env.session)
-                ));
+            if let Some(text) = quoted_value {
+                fields.push(format!("{base}={text}"));
             } else if !fields.is_empty() {
                 fields.push(base.to_owned());
             }
@@ -334,7 +336,9 @@ impl Modification {
                 all,
                 pattern,
             } => {
-                let values = Values::read(name, env)?;
+                let snapshot = (!pattern.fixed_parts())
+                    .then(|| Values::read(name, env))
+                    .transpose()?;
                 let pattern = match std::mem::take(pattern) {
                     Word::Literal(text) if text.is_empty() => text,
                     word => env.pattern(word)?,
@@ -349,17 +353,23 @@ impl Modification {
                 let all = *all;
                 // Bash applies the locale's single-character case conversion.
                 // In particular an uppercase expansion never grows into two letters.
-                Ok(values.map(quoted, |text| match direction {
-                    crate::pattern::CaseDirection::Toggle => {
-                        crate::pattern::toggle_case(text, all, filter.as_ref(), locale)
-                    }
-                    other => crate::pattern::case_chars(
-                        text,
-                        matches!(other, crate::pattern::CaseDirection::Upper),
+                if snapshot.is_none()
+                    && let Some(text) = env.borrowed_scalar(name)
+                {
+                    return Ok(scalar(crate::pattern::convert_chars(
+                        text.into(),
+                        direction,
                         all,
                         filter.as_ref(),
                         locale,
-                    ),
+                    )));
+                }
+                let values = match snapshot {
+                    Some(v) => v,
+                    None => Values::read(name, env)?,
+                };
+                Ok(values.map(quoted, |s| {
+                    crate::pattern::convert_chars(s.into(), direction, all, filter.as_ref(), locale)
                 }))
             }
             Self::Assignment => assignment(name, quoted, env),
@@ -372,6 +382,16 @@ impl Modification {
                         return Ok(Part::Elements { values, at, quoted });
                     }
                 }
+                let transform = |text: &str, session: &crate::Session| -> Result<String, Error> {
+                    if !matches!(self, Self::Escapes) {
+                        Ok(super::quote::parameter_quote(text, session))
+                    } else {
+                        crate::parser::ansi_string(text).map_err(|e| Error::from(e.message()))
+                    }
+                };
+                if let Some(text) = env.borrowed_scalar(name) {
+                    return Ok(scalar(transform(text, env.session)?));
+                }
                 let values = if array_elements_name(name).is_some() || matches!(name, "@" | "*") {
                     Values::read(name, env)?
                 } else if let Some(text) = value(name, env)? {
@@ -381,19 +401,12 @@ impl Modification {
                 } else {
                     return Ok(scalar(String::new()));
                 };
-                let transform = |text: String| -> Result<String, Error> {
-                    if !matches!(self, Self::Escapes) {
-                        Ok(super::quote::parameter_quote(&text, env.session))
-                    } else {
-                        crate::parser::ansi_string(&text).map_err(|e| Error::from(e.message()))
-                    }
-                };
                 match values {
-                    Values::Scalar(text) => Ok(scalar(transform(text)?)),
+                    Values::Scalar(text) => Ok(scalar(transform(&text, env.session)?)),
                     Values::Elements(values, at) => Ok(Part::Elements {
                         values: values
                             .into_iter()
-                            .map(transform)
+                            .map(|s| transform(&s, env.session))
                             .collect::<Result<_, _>>()?,
                         at,
                         quoted,

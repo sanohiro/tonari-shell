@@ -468,6 +468,26 @@ fn run_arithmetic_loop(
     })
 }
 
+fn fixed_case(pattern: &CasePattern, value: &str, session: &Session) -> Option<bool> {
+    Some(match pattern {
+        CasePattern::Fixed(matcher) if session.shopt.nocasematch => {
+            matcher.insensitive(value, false, session)
+        }
+        CasePattern::Extended(_, matcher) if session.shopt.nocasematch => {
+            matcher.insensitive(value, session.shopt.glob.extglob, session)
+        }
+        CasePattern::Fixed(matcher) => matcher.matches_session(value, session),
+        CasePattern::Extended(group, basic) => {
+            if session.shopt.glob.extglob {
+                group.accepts(value, false)
+            } else {
+                basic.matches_session(value, session)
+            }
+        }
+        CasePattern::Dynamic(_) => return None,
+    })
+}
+
 fn run_case(
     session: &mut Session,
     header: &crate::parser::Location,
@@ -488,6 +508,26 @@ fn run_case(
     if session.xtrace {
         execute::trace_line(session, status, |line| line.push_str(header.text()));
     }
+    // A terminating arm can borrow the subject until execution starts.
+    // Dynamic patterns and fall-through can modify it; snapshot it there.
+    if let Some(value) = word.stored_parameter(session) {
+        let selected = (|| {
+            for (patterns, body, end) in arms {
+                for pattern in patterns {
+                    if fixed_case(pattern, value, session)? {
+                        return (*end == crate::parser::CaseEnd::Stop).then_some(Some(body));
+                    }
+                }
+            }
+            Some(None)
+        })();
+        if let Some(body) = selected {
+            return match body {
+                Some(body) if !body.is_empty() => borrowed_program(session, body, status, tail),
+                _ => Flow::Continue(0),
+            };
+        }
+    }
     let value = match word
         .stored_parameter(session)
         .map(|s| Ok(s.to_owned()))
@@ -504,20 +544,6 @@ fn run_case(
         if !matched {
             for pattern in patterns {
                 matched = match pattern {
-                    CasePattern::Fixed(matcher) if session.shopt.nocasematch => {
-                        matcher.insensitive(&value, false, session)
-                    }
-                    CasePattern::Extended(_, matcher) if session.shopt.nocasematch => {
-                        matcher.insensitive(&value, session.shopt.glob.extglob, session)
-                    }
-                    CasePattern::Fixed(matcher) => matcher.matches_session(&value, session),
-                    CasePattern::Extended(group, basic) => {
-                        if session.shopt.glob.extglob {
-                            group.accepts(&value, false)
-                        } else {
-                            basic.matches_session(&value, session)
-                        }
-                    }
                     CasePattern::Dynamic(word) => {
                         match expand_case(session, word.clone(), last, true) {
                             Ok(glob) if session.shopt.nocasematch => {
@@ -535,6 +561,7 @@ fn run_case(
                             Err(f) => return f,
                         }
                     }
+                    fixed => fixed_case(fixed, &value, session).unwrap(),
                 };
                 if matched {
                     break;

@@ -759,7 +759,7 @@ pub(super) fn run_builtin(
     if matches!(builtin, Builtin::Read | Builtin::Mapfile)
         && let [Action::HereInput(0, bytes)] = actions
         && !bytes.is_empty()
-        && bytes.len() <= libc::PIPE_BUF
+        && bytes.len() <= here_input::PIPE_LIMIT
         && !session.traps.active()
         && (cmd.assignments.is_empty()
             || matches!(cmd.assignments.as_slice(), [(key, _)] if key == "IFS" && !session.is_nameref(key) && !session.integer(key)))

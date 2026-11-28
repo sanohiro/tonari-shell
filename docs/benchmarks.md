@@ -1,5 +1,85 @@
 # Startup and execution / 起動と実行性能
 
+<a id="round-eight-array-evaluation"></a>
+
+## November 28 · Array growth, completion and shell evaluation / 配列追記・補完・シェル評価
+
+Cells give the median in milliseconds for **previous Tonari / current Tonari / Bash**. Both Tonari builds used the same release settings. The previous revision was `ff7e9b4` and the measured Rust source was `eda9f82`. Each script had five warmups and 15 interleaved measurements, from an already-running shell through exit, with output and status verified. The source-return row ends when the caller resumes. Hosts were an Apple M1 on macOS 27.2.1 with native GNU Bash 5.3.20, and an Intel Xeon 6975P-C on Ubuntu 24.04 (ext4) with distribution Bash 5.2.21. [Native Linux run](https://github.com/sanohiro/tonari-shell/actions/runs/46121795574) · [Reproduction driver](../tools/ci/array-evaluation.sh)
+
+各欄は旧 Tonari・今回の Tonari・同一実機の Bash の順で、単位は ms。配列サイズと格納値、補完候補、終了値などを照合してから比較した。`here-N` の N は行の内容のバイト数で、実際の入力は末尾改行を含む N+1 バイト。`group-echo` の出力先は /dev/null。対話入力の表では中央値と p95 を併記した。
+
+| Workload | Apple M1 (ms) | Linux x86-64 (ms) |
+|---|---:|---:|
+| `append-assoc-500` | 5.305 / 0.855 / 1.858 | 14.653 / 0.578 / 1.077 |
+| `append-assoc-2000` | 76.408 / 1.920 / 5.043 | 229.500 / 1.963 / 3.870 |
+| `append-assoc-5000` | 482.108 / 4.029 / 11.195 | 1598.309 / 4.527 / 9.423 |
+| `append-indexed-500` | 2.995 / 0.975 / 1.962 | 7.191 / 0.512 / 1.094 |
+| `append-indexed-2000` | 36.077 / 2.128 / 5.249 | 109.641 / 1.727 / 3.951 |
+| `append-indexed-5000` | 224.048 / 4.561 / 11.548 | 684.487 / 4.064 / 9.654 |
+| `declare-append-assoc` | 84.350 / 2.518 / 11.071 | 230.889 / 2.285 / 7.555 |
+| `declare-append-indexed` | 36.847 / 2.577 / 10.214 | 110.159 / 2.053 / 7.506 |
+| `physical-cd` | 18.534 / 6.740 / 17.060 | 1.670 / 1.680 / 4.275 |
+| `compgen-words` | 41.557 / 0.815 / 48.783 | 7.264 / 0.229 / 12.681 |
+| `compgen-variables` | 41.343 / 0.760 / 49.088 | 7.472 / 0.211 / 12.803 |
+| `compgen-commands` | 28.804 / 1.617 / 1633.730 | 22.180 / 1.357 / 19.469 |
+| `compgen-files` | 17.499 / 2.983 / 64.580 | 3.669 / 0.690 / 5.960 |
+| `mapfile-here-256` | 1.148 / 1.195 / 19.173 | 0.646 / 0.645 / 9.816 |
+| `read-here-256` | 1.177 / 1.153 / 19.028 | 0.656 / 0.667 / 10.379 |
+| `mapfile-here-512` | 37.939 / 1.135 / 33.079 | 0.651 / 0.653 / 18.147 |
+| `read-here-512` | 1.431 / 1.149 / 34.072 | 0.674 / 0.690 / 19.188 |
+| `mapfile-here-4096` | 48.440 / 1.270 / 258.819 | 3.242 / 0.767 / 136.711 |
+| `read-here-4096` | 1.591 / 1.442 / 278.735 | 1.078 / 0.838 / 143.175 |
+| `mapfile-here-16384` | 42.550 / 1.906 / 1002.627 | 3.821 / 1.099 / 539.407 |
+| `read-here-16384` | 4.273 / 1.934 / 1041.761 | 1.591 / 1.333 / 569.154 |
+| `mapfile-here-65536` | 45.618 / 43.123 / 138.037 | 5.765 / 5.874 / 61.240 |
+| `read-here-65536` | 49.548 / 47.843 / 272.936 | 6.210 / 6.352 / 150.581 |
+| `test-empty` | 2.968 / 0.862 / 211.782 | 3.286 / 0.578 / 217.246 |
+| `test-less` | 2.829 / 0.795 / 202.784 | 3.310 / 0.598 / 217.169 |
+| `test-hit` | 9.374 / 2.670 / 226.716 | 7.457 / 1.731 / 215.587 |
+| `test-miss` | 8.862 / 0.853 / 208.421 | 7.486 / 0.625 / 217.721 |
+| `test-case` | 8.938 / 2.483 / 955.050 | 7.545 / 1.781 / 398.658 |
+| `group-status` | 28.646 / 0.474 / 35.101 | 6.032 / 0.119 / 10.819 |
+| `group-echo` | 31.661 / 1.288 / 39.646 | 6.570 / 0.274 / 11.322 |
+| `group-assign` | 29.827 / 0.467 / 37.315 | 6.211 / 0.121 / 10.764 |
+| `group-cwd` | 32.334 / 31.505 / 37.468 | 6.946 / 6.881 / 11.266 |
+| `quote-spaces` | 13.609 / 3.507 / 67.151 | 11.939 / 2.502 / 49.647 |
+| `quote-ticks` | 41.197 / 10.977 / 179.282 | 251.396 / 12.056 / 94.429 |
+| `quote-escapes` | 40.116 / 1.901 / 58.396 | 430.753 / 0.985 / 49.549 |
+| `quote-assignment` | 15.229 / 5.688 / 67.774 | 12.784 / 3.279 / 51.126 |
+| `case-upper` | 8.087 / 1.926 / 41.965 | 3.088 / 1.301 / 41.627 |
+| `case-lower` | 6.542 / 1.958 / 44.522 | 2.980 / 2.118 / 41.642 |
+| `case-toggle` | 7.643 / 2.338 / 45.212 | 3.505 / 2.227 / 36.566 |
+| `test-regex` | 2.395 / 1.493 / 22.317 | 1.271 / 1.000 / 17.537 |
+| `case-varied` | 14.135 / 14.042 / 52.149 | 3.295 / 3.288 / 35.995 |
+| `control-shift` | 1.579 / 1.597 / 7.173 | 1.565 / 1.561 / 5.407 |
+| `control-stat` | 14.072 / 14.082 / 19.725 | 2.320 / 2.338 / 5.794 |
+| `control-pipe` | 0.617 / 0.612 / 35.626 | 0.262 / 0.263 / 10.765 |
+| `control-glob` | 7.881 / 7.776 / 537.743 | 2.443 / 2.434 / 3.496 |
+| `while-arithmetic` | 0.663 / 0.645 / 2.750 | 0.421 / 0.424 / 1.758 |
+| `source-functions-mixed` (return) | 1.048 / 1.059 / 2.124 | 1.424 / 1.441 / 2.153 |
+| _filedir, source and first filename completion | 4.514 / 3.751 / 7.333 | 3.524 / 3.301 / 4.574 |
+| _filedir, filename completion after source | 79.345 / 41.308 / 131.605 | 22.225 / 12.048 / 38.776 |
+| _filedir, directory completion after source | 75.963 / 40.932 / 130.502 | 20.574 / 11.422 / 37.305 |
+
+**Interactive latency.** Each cell gives previous Tonari · current Tonari · Bash in milliseconds, each as median/p95. The paste fixture contains 16 KiB and waits for the final marker on the terminal.
+
+| PTY action | Apple M1 | Linux x86-64 |
+|---|---:|---:|
+| commit (scalars: 1) | 0.038/0.052 · 0.041/0.072 · 0.053/0.398 | 0.059/0.087 · 0.061/0.094 · 0.084/0.088 |
+| commit (scalars: 17) | 0.067/0.098 · 0.067/0.098 · 0.140/0.149 | 0.074/0.085 · 0.074/0.084 · 0.125/0.140 |
+| commit (scalars: 257) | 0.438/1.900 · 0.442/0.458 · 1.309/2.798 | 0.285/0.316 · 0.288/0.314 · 0.936/0.965 |
+| paste 16384 B + marker | 2.427/10.826 · 2.398/2.466 · 17.566/19.296 | 1.374/1.497 · 1.370/1.496 · 17.147/17.577 |
+
+With the distributed bash-completion script loaded on M1, an actual Tab completed `r8-` to `r8-target` in **2.110 / 1.095 / 3.245 ms**. The PTY driver then executed the line and checked the argument on disk. The [interactive driver](../tools/ci/array-completion.py) also runs on [native Linux](https://github.com/sanohiro/tonari-shell/actions/runs/46122172237). The `_filedir` rows above include the first use with sourcing, then 50 file or directory completions after sourcing. The actual M1 login prompt appeared in **5.359 / 5.337 / 11.596 ms** across 61 interleaved trials.
+
+The final Apple arm64 executable stayed at 1,880,896 bytes and links to libSystem. The stripped Linux x86-64 static PIE measured **2,499,832 → 2,505,560 bytes**. No dependencies were added. A separate M1 comparison against Apple's bundled Bash 3.2.57 measured physical cd at **16.117 / 5.705 / 14.829 ms** and 50 word completions at **32.771 / 0.693 / 35.158 ms**. These comparisons use the same script for all three binaries.
+
+**Limits and controls.** Of the 46 ready-shell scripts, medians above two-thirds of Bash time were group-cwd (0.84×), control-stat (0.71×) on M1 and control-glob (0.70×) on Linux. Loading 400 functions on Linux reached 66.9% of Bash time. Loading bash-completion and producing its first filename candidates reached 72.2% on Linux, compared with 31.1% for 50 completions in a running shell. A native C loop performing the same 4,000 file checks on M1 took 13.00 ms. Groups that change the current directory still execute in a child. On M1, 50 foreground echo groups writing to a pipe measured 29.910 / 28.407 / 37.887 ms. The child isolates a possible SIGPIPE from the parent. A 65,535-byte line plus newline fit exactly in the 64 KiB memory limit (46.617 / 3.022 / 3973.398 ms for 200 here-strings). A 65,536-byte line plus newline crossed that boundary. Pure 50,000-iteration for and while controls measured 5.639 / 5.623 / 64.325 ms and 5.450 / 5.286 / 47.220 ms, respectively.
+
+An initial quote-escaping prototype that searched for each single quote took 60.10 ms on dense input. Counting the required output bytes and copying sequentially reduced that workload to 11.34 ms in the interleaved prototype comparison. Diverse Unicode text and repeated characters are both represented above. The existing M1 source profile attributes much of function parsing to object allocation and destruction. This change leaves the AST representation in place. The existing bracketed paste reader bounds read-ahead so a subsequent command can consume its own terminal input. [Engineering notes](engineering-notes.md)
+
+M1 では、配布版 bash-completion を読み込んだ状態で Tab から候補の描画までを測り、Enter 後に実際に渡された引数も確認した。前景グループは、カレントディレクトリを変更する場合やパイプに書き込む場合に子を起動する。64 KiB 境界の前後、異なる文字を含む UTF-8、ファイル検査の C 対照を使い、どの部分にシェルの処理時間が残るかを記録した。
+
 <a id="round-seven-paths"></a>
 
 ## November 28 · Command substitution, expansion and interactive history / コマンド置換・展開・対話履歴

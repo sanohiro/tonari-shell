@@ -8,6 +8,10 @@ pub(super) fn physical_path() -> io::Result<std::path::PathBuf> {
 }
 
 fn with_physical_path<T>(use_path: impl FnOnce(&Path) -> io::Result<T>) -> io::Result<T> {
+    #[cfg(target_os = "macos")]
+    if let Some(path) = vnode_cwd(&mut [0; 12 + libc::PATH_MAX as usize]) {
+        return use_path(path);
+    }
     // Avoid getcwd(NULL, 0)'s growing allocation for ordinary paths.
     let mut path = [std::mem::MaybeUninit::<libc::c_char>::uninit(); 512];
     let result = unsafe { libc::getcwd(path.as_mut_ptr().cast(), path.len()) };
@@ -409,10 +413,6 @@ impl Session {
                 && path.as_os_str().len() >= libc::PATH_MAX as usize
                 && long_cwd_matches(path, true)
             {
-                return write_path(path, out);
-            }
-            #[cfg(target_os = "macos")]
-            if let Some(path) = vnode_cwd(&mut [0; 12 + libc::PATH_MAX as usize]) {
                 return write_path(path, out);
             }
             return with_physical_path(|path| write_path(path, out));

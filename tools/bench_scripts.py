@@ -50,6 +50,52 @@ def listing_loop(command, count):
 
 
 CASES = {
+    **{f"r8-append-{kind}-{n}": eval_loop(
+        'm+=([k$i]=$i)' if kind == "assoc" else 'm+=([$i]=$i)',
+        'echo "${#m[@]} ${m[k$((i-1))]}"' if kind == "assoc" else 'echo "${#m[@]} ${m[i-1]}"',
+        f"{n} {n-1}", "declare -A m" if kind == "assoc" else "m=()", n)
+        for kind in ("assoc", "indexed") for n in (500, 2000, 5000)},
+    **{f"r8-declare-append-{kind}": eval_loop(
+        'declare -A m+=([k$i]=$i)' if kind == "assoc" else 'declare -a m+=([$i]=$i)',
+        'echo "${#m[@]}"', "2000", "declare -A m" if kind == "assoc" else "m=()", 2000)
+        for kind in ("assoc", "indexed")},
+    "r8-physical-cd": eval_loop('cd -P inside && cd -P .. || exit',
+        '[[ $PWD == "$orig" && $OLDPWD == "$orig/inside" ]] && echo yes', "yes",
+        'mkdir -p inside; cd -P .; orig=$PWD', 500),
+    **{f"r8-compgen-{kind}": eval_loop(f'COMPREPLY=( $(compgen {opts}) )', check, "yes", setup, count)
+       for kind, opts, check, setup, count in [
+           ("words", '-W "$words" -- abc', '[[ ${COMPREPLY[*]} == "abc abcd" ]] && echo yes', "words='abc abcd banana'", 50),
+           ("variables", "-v -- tonari_variable", '[[ ${COMPREPLY[*]} == tonari_variable ]] && echo yes', "tonari_variable=1", 50),
+           ("commands", "-c -- printf", '[[ " ${COMPREPLY[*]} " == *" printf "* ]] && echo yes', "", 20),
+           ("files", "-f -- small.sh", '[[ ${COMPREPLY[*]} == small.sh ]] && echo yes', "touch small.sh", 20)]},
+    **{f"r8-{builtin}-here-{n}": eval_loop(
+        ('mapfile -t a' if builtin == "mapfile" else 'IFS= read -r v')+' <<EOF\n$s\nEOF\n:',
+        'echo "${#a[0]}"' if builtin == "mapfile" else 'echo "${#v}"', str(n),
+        f"printf -v s '%{n}s' ''", 200) for n in (256, 512, 4096, 16384, 65536)
+        for builtin in ("mapfile","read")},
+    **{f"r8-test-{label}": eval_loop(body, 'echo "$x"', "y", "printf -v s '%065536d' 0")
+       for label,body in [("empty",'[[ -n $s ]] && x=y'), ("less",'[[ $s < a ]] && x=y'),
+          ("hit",'[[ $s == 0* ]] && x=y'), ("miss",'[[ $s == z* ]] || x=y'),
+          ("case",'case "$s" in 0*) x=y;; esac')]},
+    **{f"r8-group-{label}": eval_loop(body, 'echo "$i"', "50", count=50)
+       for label,body in [("status","( : )"), ("echo","( echo hi ) >/dev/null"),
+           ("assign","( x=1; y=2 )"), ("cwd","( cd / && pwd ) >/dev/null")]},
+    **{f"r8-quote-{label}": eval_loop('x=${s@'+kind+'}', check, result, setup, 200)
+       for label,kind,setup,check,result in [
+           ("spaces","Q","printf -v s '%65536s' ''",'echo "${#x}"',"65538"),
+           ("ticks","Q","printf -v s '%32768s' ''; s=${s// /a}; s=${s//a/\"a'\"}",'echo "${#x}"',"163842"),
+           ("escapes","E","printf -v s '%65536s' ''",'echo "${#x}"',"65536"),
+           ("assignment","A","printf -v s '%65536s' ''",'echo "${#x}"',"65540")]},
+    **{f"r8-case-{label}": eval_loop('x=${s'+op+'}', 'echo "${x:0:4} ${#x}"', out+" 2000",
+        'export LC_ALL=C.UTF-8; s=; for ((i=0;i<500;i++)); do s+=' + word + '; done', 200)
+       for label,op,word,out in [("upper","^^","éüαβ","ÉÜΑΒ"), ("lower",",,","ÉÜΑΒ","éüαβ"), ("toggle","~~","ÉüΑβ","éÜαΒ")]},
+    "r8-test-regex": eval_loop('[[ $s =~ ^(0) ]] || exit', 'echo "${BASH_REMATCH[*]}"', "0 0", "printf -v s '%065536d' 0", 200),
+    "r8-case-varied": eval_loop('x=${s^^}', 'echo "${#x}"', "2048",
+        'export LC_ALL=C.UTF-8; s=' + ''.join(chr(0x4e00 + n) for n in range(2048)), 200),
+    "r8-control-shift": ("set -- {1..5000}; while (($#)); do shift; done; echo $#", "0"),
+    "r8-control-stat": eval_loop('[[ -f /bin/ls ]] && [ -f /bin/ls ] || exit', 'echo $i', "2000"),
+    "r8-control-pipe": eval_loop('true | true', 'echo $i', "50", "shopt -s lastpipe", 50),
+    "r8-control-glob": eval_loop('compgen -G "*.txt" >/dev/null || exit', 'echo $i', "50", "touch f{1..100}.txt", 50),
     **{f"r7-query-{label}": eval_loop(f'x=$({command})', check, expected, count=50)
        for label, command, check, expected in [
            ("pwd", "pwd", '[[ $x == "$PWD" ]] && echo yes', "yes"),
